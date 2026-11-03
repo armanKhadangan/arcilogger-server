@@ -237,6 +237,16 @@ RULES: Final[Mapping[str, RuleText]] = {
         "kart 7).",
         "Check that the firewall sends its web and DNS filter records (Uyum Durumu, card 7).",
     ),
+    # The database window (Wave 5 contract G3, worker job db.window): a failed run, or an
+    # archive reload without progress since the previous run (its days hold the cutoff).
+    "R20-db-window": RuleText(
+        "Veritabanı penceresi işi sorunu",
+        "Database window job problem",
+        "logs\\worker.log ve state\\worker-status.json dosyalarına bakın; ilerlemeyen bir "
+        "yeniden yüklemede ArciIngest'i denetleyin: Get-Service ArciIngest.",
+        "Look at logs\\worker.log and state\\worker-status.json; for a reload without progress "
+        "check ArciIngest: Get-Service ArciIngest.",
+    ),
     "new-log-source": RuleText(
         "Yeni log kaynağı",
         "New log source",
@@ -619,6 +629,28 @@ _STEPS: Final[dict[str, tuple[str, str]]] = {
         "3. If the organisation does not work on these days, correct the expected days and the "
         "holiday setting in Settings → Application settings → Alerts and e-mail.\n"
         "4. The alert closes by itself when a new content filter record arrives.",
+    ),
+    "R20-db-window": (
+        "1. Ayrıntılarda hangisi olduğunu görün: işin bir çalıştırması başarısız oldu ya da bir "
+        "arşivden yeniden yükleme (numarası ve günleriyle) önceki çalıştırmadan beri ilerlemedi.\n"
+        "2. Başarısız çalıştırmada D:\\ARCILOGGER\\logs\\worker.log dosyasına ve veritabanı "
+        "bağlantısına bakın; worker işi kendisi yeniden dener, pencereden eski günler o zamana "
+        "kadar silinmez.\n"
+        "3. İlerlemeyen yeniden yüklemede ArciIngest hizmetinin çalıştığını (Get-Service "
+        "ArciIngest) ve D:\\ARCILOGGER\\state\\ingest-status.json dosyasını denetleyin; yüklenen "
+        "günler hiçbir zaman silinmez, veritabanı bu sürede pencereden büyük kalır.\n"
+        "4. Sonraki başarılı çalıştırma ya da ilerleyen (veya biten) yeniden yükleme, ya da "
+        "önündeki sıranın ilerlemesi uyarıyı kendiliğinden kapatır.",
+        "1. See in the details which it is: a run of the job failed, or an archive reload (with "
+        "its number and days) has made no progress since the previous run.\n"
+        "2. For a failed run look at D:\\ARCILOGGER\\logs\\worker.log and the database "
+        "connection; the worker retries the job by itself, and days older than the window are "
+        "not dropped until then.\n"
+        "3. For a reload without progress check that the ArciIngest service runs (Get-Service "
+        "ArciIngest) and D:\\ARCILOGGER\\state\\ingest-status.json; days being loaded are never "
+        "dropped, so the database stays larger than the window meanwhile.\n"
+        "4. The next successful run, or the reload moving on (or ending), or the queue before "
+        "it moving, closes the alert by itself.",
     ),
     "new-log-source": (
         "1. Göndericinin adresini ayrıntılarda görün ve hangi cihaz olduğunu belirleyin.\n"
@@ -1594,6 +1626,27 @@ def _filter(d: Mapping[str, Any]) -> Facts | None:
     )
 
 
+def _db_window(d: Mapping[str, Any]) -> Facts | None:
+    """``R20-db-window``: the reload's number and days, or the day of the failed run."""
+    reload_id = _int(d, "reload_id")
+    first, last = _day(d.get("first_day")), _day(d.get("last_day"))
+    if reload_id is not None and first is not None and last is not None:
+        days = first if first == last else f"{first} - {last}"
+        return (
+            f"Arşivden yeniden yükleme #{reload_id} ({days}) önceki çalıştırmadan beri ilerlemedi; "
+            "o günden itibaren hiçbir kayıt silinmiyor.",
+            f"Archive reload #{reload_id} ({days}) has made no progress since the previous run; "
+            "nothing from that day on is dropped.",
+        )
+    day = _day(d.get("day"))
+    if reload_id is not None or day is None:
+        return None
+    return (
+        f"Veritabanı penceresi işi {day} günü çalışamadı; pencereden eski günler silinmedi.",
+        f"The database window job failed on {day}; days older than the window were not dropped.",
+    )
+
+
 DESCRIBERS: Final[Mapping[str, Callable[[Mapping[str, Any]], Facts | None]]] = {
     "R15": _r15,
     "R20-seal": _seal,
@@ -1615,6 +1668,7 @@ DESCRIBERS: Final[Mapping[str, Callable[[Mapping[str, Any]], Facts | None]]] = {
     "R20-lease": _lease,
     "R20-nat": _nat,
     "R20-filter": _filter,
+    "R20-db-window": _db_window,
     "new-log-source": _sender,
     "new_source": _sender,
     "wrong-transport": _sender,

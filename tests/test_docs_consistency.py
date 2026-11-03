@@ -884,7 +884,13 @@ def test_retention_draft_states_what_the_system_really_keeps() -> None:
     text = _doc("legal/saklama-imha-politikasi-taslak.md")
     for fact in ("730", "760", "`[retention] enabled = false`", "30 gün", "exports\\reports\\"):
         assert fact in text, fact
-    assert "veritabanı imha işi yoktur" in _flat(text)
+    flat = _flat(text)
+    # Wave 5 G1-G4: the database keeps the window, the job drops the rest, reloads stay a while.
+    assert f"**Son {DEFAULT_SETTINGS['db.retention_days']} gün** (`db.retention_days`" in flat
+    assert f"**{DEFAULT_SETTINGS['db.reload_keep_days']} gün** (`db.reload_keep_days`" in flat
+    assert "`db.window`" in text
+    assert "imha tutanağı tutulmaz" in flat
+    assert "veritabanı imha işi yoktur" not in flat
 
 
 def test_legal_drafts_are_linked_where_people_look() -> None:

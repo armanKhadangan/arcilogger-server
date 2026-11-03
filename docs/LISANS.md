@@ -113,6 +113,7 @@ vermez.
 | `/compliance` | Uyum Durumu: on denetim kartı, Uyum Durumu Raporu (PDF), yapılandırma yedeği onayı | 5651 Temel |
 | `/legal-status` | Yasal geçerlilik durumu: her sayfadaki uyarı bandı (oturum açmış her kullanıcı) | 5651 Temel |
 | `/system` | Sistem sayfası: kaynak kullanımı, disk tahmini, veritabanı boyutu, hizmetler, zamanlanmış görevler, saat | 5651 Temel |
+| `/archive-reloads` | Arşivden yeniden yükleme: veritabanı penceresinden eski günlerin mühürlü kasadan geri istenmesi ve ilerlemesi | 5651 Temel |
 | `/usage` | Kullanım sayfasının verileri, dışa aktarma, yeniden hesaplama | Kullanım analizi |
 | `/reports` | Zamanlanmış raporlar, çalıştırmalar, önizleme | Zamanlanmış kullanım raporları |
 | `/imports` | CSV içe aktarma ve şablonları | Toplu içe aktarma (CSV) |
@@ -143,6 +144,7 @@ uyarısı açmaz. Kapalı modülün verileri silinmez.
 | `usage.today` | Kullanım analizi | atlanır |
 | `usage.reattribute` | Kullanım analizi | atlanır |
 | `usage.retention` | — (kişisel verilerin silinmesi) | her zaman çalışır |
+| `db.window` | 5651 Temel (veritabanı penceresi: pencereden eski log satırlarının düşürülmesi) | her zaman çalışır |
 | `reports.run_due` | Zamanlanmış kullanım raporları | atlanır |
 | `reports.purge` | — (rapor dosyalarının silinmesi) | her zaman çalışır |
 | `system.sample` | 5651 Temel | her zaman çalışır |

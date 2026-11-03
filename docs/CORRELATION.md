@@ -626,7 +626,11 @@ session id, row id — deterministic. At most `lookup.max_candidates` (100) matc
 has rows, whether its sealed manifest exists. Explanations: `not_in_database` /
 `only_in_vault` / `no_data_for_day`, `older_than_db_retention` (`db.retention_days`),
 `future_time`, and `lease_timeline_behind` when the requested window is after the lease
-watermark. Re-ingesting a sealed day ("arşivden yeniden yükle") is a later feature.
+watermark. A day the database window dropped comes back from the vault on request ("arşivden
+yeniden yükle", 409 `archive_reload_required`; docs/DATA-MODEL.md "Retention"). A lookup reads no
+log row outside its days (`lookup.days.lookup_days`, the days that 409 checks): a lease check
+cut at them adds `lookback_clamped_to_window` (`day`, `last`; section 2, "Windows of the
+FortiGate DHCP checks").
 
 **FortiGate DHCP lines that did not become lease evidence** (D8). When no lease chain could be
 built (an internal lookup with `no_lease` or `no_lease_for_mac`; a match with `chain_missing`, or
@@ -670,6 +674,7 @@ All explanation texts (Turkish and English, no legal claims) are in `lookup/text
 | `usage.today` | every 5 minutes — today's usage rollup from the logs loaded so far (`partial`) |
 | `usage.reattribute` | every 10 minutes — any of the last `usage.auto_rebuild_days` days whose device owners or leases (who an address belonged to when), late logs, `usage.*` settings or engine changed, or that is missing or still partial, is rebuilt; uses the attribution chain of section 2 at every moment the owner can change |
 | `usage.retention` | daily after 03:30 — usage rollups older than `usage.retention_days` (400) |
+| `db.window` | daily after 04:00 — the database window (Wave 5 contract G3, `arcilogger_worker.db_window`, docs/DATA-MODEL.md "Retention"): log rows older than the cutoff dropped as whole partitions or chunks, in steps of 16 days; the cutoff is the earliest of today − `db.retention_days` (30), the oldest day not sealed yet less 2 days, and the oldest day of an active archive reload; expired archive reloads marked `expired`; a failed run raises `R20-db-window` |
 | `reports.run_due` | every minute — scheduled usage reports: due schedules queued (one run for the newest occurrence after downtime, `reports.catch_up`), queued runs rendered (HTML, PDF, Excel into `exports/usage-reports/`) and e-mailed one per recipient (`report_runs`; ADR-0012, docs/USAGE-REPORTS.md) |
 | `reports.purge` | daily after 03:20 — deletes the files of report runs older than `reports.keep_days` (400 days); the run rows and the hashes stay |
 | `system.sample` | daily after 00:30 — one sample of the data and system drive (total and used bytes) into `state\system-history.json` (the newest 120 days) for the disk forecast of the Sistem page and the Panel; details `{"day", "drives"}` |
@@ -716,12 +721,13 @@ Shipped (`arcilogger_db.settings.DEFAULT_SETTINGS`): `lookup.tolerance_seconds` 
 `lease.server_seconds` (`{}`), `lease.timeout_percent` (`110`), `dhcp.server_vlan_regex`,
 `arp.interval_seconds` (`3600`), `arp.ignore_after_release_seconds` (`300`; 0 switches the rule
 off; at most `arp.interval_seconds`), `devices.infrastructure_macs`, `devices.oui_file` (`""`),
-`worker.leases_lag_seconds` (`120`), `db.retention_days` (`400`), and the keys of ADR-0016 in the
-table below. Internal, written by the worker (author `:system`; not settings, not for editing):
+`worker.leases_lag_seconds` (`120`), `db.retention_days` (`30`, the database window; at least
+7), `db.reload_keep_days` (`7`, how long an archive reload's days stay), and the keys of
+ADR-0016 in the table below. Internal, written by the worker (author `:system`; not settings, not for editing):
 `worker.leases_watermark`, `worker.leases_ingest_seen`. Status rows (not settings, never listed):
 `nat.egresses_migration` (the upgrade's conversion of the old NAT settings), `nat.egresses_changes`
-(the last content change of each exit, section 3) and `leases.rollback_lowered` (the rollback
-step, section 7).
+(the last content change of each exit, section 3), `leases.rollback_lowered` (the rollback
+step, section 7) and `db.window_dropped_before` (the newest cutoff the database window applied).
 
 **Changing a setting:** on **Ayarlar → Uygulama ayarları** (Settings → Application settings,
 [SETTINGS.md](SETTINGS.md) section 1), or on the server console with
@@ -918,7 +924,15 @@ WHERE duration >= 300` and split the scan into "logged within 5 minutes of the w
     lease's last DHCP record as well, at most 100 days (8,640,000 s) back for a MikroTik lease;
   - the residual of the 7-day fallback: an old MikroTik lease kept open by another device's
     traffic can be named, at its own confidence and without a warning, more than 7 days after an
-    unconverted line that moved its client.
+    unconverted line that moved its client;
+  - none of them, nor the lease's newest record read from its row or the two-origin check (D27,
+    also its read past the moment), reads a log row outside the lookup's days
+    (`lookup.days.reads_from` to `reads_until`; with the defaults `T`'s day − 12 to + 1, as many
+    days as one archive reload holds): a window cut there gives `lookback_clamped_to_window`, so
+    the answer is the same before the database window drops those days and after their reload
+    (Wave 5 contract G7, W5-G-17). With the defaults the converted-row check reads about 12 days
+    back, not 100, and the post-lease check of a FortiGate lease starts no earlier than the
+    first day.
 - **Rows loaded before the upgrade.** FortiGate DHCP lines loaded before the upgrade are not
   converted (D8; the lookup names them, sections 2 and 3), and for each client no chain is built
   until its first Ack under the new version, up to half its lease (3.5 days with the FortiOS

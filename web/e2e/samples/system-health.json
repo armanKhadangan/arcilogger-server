@@ -14,15 +14,15 @@
   },
   "health": {
     "agent": {
-      "heartbeat_at": "2026-10-13T07:01:06.754969+03:00",
+      "heartbeat_at": "2026-10-13T07:01:25.603967+03:00",
       "state": "ok"
     },
     "apply_system": {
-      "at": "2026-10-13T06:57:06.754362+03:00",
+      "at": "2026-10-13T06:57:25.603079+03:00",
       "code": null,
       "state": "ok"
     },
-    "checked_at": "2026-10-13T07:01:06.943236+03:00",
+    "checked_at": "2026-10-13T07:01:25.945830+03:00",
     "jobs": [
       {
         "duration_ms": 180,
@@ -41,11 +41,11 @@
         "duration_ms": 217,
         "failures": 0,
         "job": "license.check",
-        "last_finished": "2026-10-13T06:58:36.971362+03:00",
-        "last_started": "2026-10-13T06:58:36.754362+03:00",
+        "last_finished": "2026-10-13T06:58:55.820079+03:00",
+        "last_started": "2026-10-13T06:58:55.603079+03:00",
         "last_status": "ok",
         "module": null,
-        "next_due": "2026-10-13T07:03:36.754362+03:00",
+        "next_due": "2026-10-13T07:03:55.603079+03:00",
         "schedule_en": "Every 5 minutes",
         "schedule_tr": "Her 5 dakikada bir",
         "state": "ok"
@@ -54,11 +54,11 @@
         "duration_ms": 254,
         "failures": 0,
         "job": "leases.incremental",
-        "last_finished": "2026-10-13T07:00:37.008362+03:00",
-        "last_started": "2026-10-13T07:01:01.754362+03:00",
+        "last_finished": "2026-10-13T07:00:55.857079+03:00",
+        "last_started": "2026-10-13T07:01:20.603079+03:00",
         "last_status": "ok",
         "module": null,
-        "next_due": "2026-10-13T07:01:36.754362+03:00",
+        "next_due": "2026-10-13T07:01:55.603079+03:00",
         "schedule_en": "Every 1 minute",
         "schedule_tr": "Her 1 dakikada bir",
         "state": "running"
@@ -80,11 +80,11 @@
         "duration_ms": 328,
         "failures": 0,
         "job": "leases.recheck_today",
-        "last_finished": "2026-10-13T06:31:07.082362+03:00",
-        "last_started": "2026-10-13T06:31:06.754362+03:00",
+        "last_finished": "2026-10-13T06:31:25.931079+03:00",
+        "last_started": "2026-10-13T06:31:25.603079+03:00",
         "last_status": "ok",
         "module": null,
-        "next_due": "2026-10-13T07:31:06.754362+03:00",
+        "next_due": "2026-10-13T07:31:25.603079+03:00",
         "schedule_en": "Every 1 hour",
         "schedule_tr": "Her 1 saatte bir",
         "state": "ok"
@@ -93,11 +93,11 @@
         "duration_ms": 365,
         "failures": 0,
         "job": "leases.late_evidence",
-        "last_finished": "2026-10-13T06:56:07.119362+03:00",
-        "last_started": "2026-10-13T06:56:06.754362+03:00",
+        "last_finished": "2026-10-13T06:56:25.968079+03:00",
+        "last_started": "2026-10-13T06:56:25.603079+03:00",
         "last_status": "ok",
         "module": null,
-        "next_due": "2026-10-13T07:06:06.754362+03:00",
+        "next_due": "2026-10-13T07:06:25.603079+03:00",
         "schedule_en": "Every 10 minutes",
         "schedule_tr": "Her 10 dakikada bir",
         "state": "ok"
@@ -119,11 +119,11 @@
         "duration_ms": 439,
         "failures": 0,
         "job": "audit.import",
-        "last_finished": "2026-10-13T06:53:37.193362+03:00",
-        "last_started": "2026-10-13T06:53:36.754362+03:00",
+        "last_finished": "2026-10-13T06:53:56.042079+03:00",
+        "last_started": "2026-10-13T06:53:55.603079+03:00",
         "last_status": "ok",
         "module": null,
-        "next_due": "2026-10-13T07:08:36.754362+03:00",
+        "next_due": "2026-10-13T07:08:55.603079+03:00",
         "schedule_en": "Every 15 minutes",
         "schedule_tr": "Her 15 dakikada bir",
         "state": "ok"
@@ -132,11 +132,11 @@
         "duration_ms": 476,
         "failures": 0,
         "job": "admin.requests",
-        "last_finished": "2026-10-13T07:00:59.730362+03:00",
-        "last_started": "2026-10-13T07:00:59.254362+03:00",
+        "last_finished": "2026-10-13T07:01:18.579079+03:00",
+        "last_started": "2026-10-13T07:01:18.103079+03:00",
         "last_status": "ok",
         "module": null,
-        "next_due": "2026-10-13T07:01:14.254362+03:00",
+        "next_due": "2026-10-13T07:01:33.103079+03:00",
         "schedule_en": "Every 15 seconds",
         "schedule_tr": "Her 15 saniyede bir",
         "state": "ok"
@@ -145,11 +145,11 @@
         "duration_ms": 513,
         "failures": 0,
         "job": "alerts.import",
-        "last_finished": "2026-10-13T07:00:37.267362+03:00",
-        "last_started": "2026-10-13T07:00:36.754362+03:00",
+        "last_finished": "2026-10-13T07:00:56.116079+03:00",
+        "last_started": "2026-10-13T07:00:55.603079+03:00",
         "last_status": "ok",
         "module": null,
-        "next_due": "2026-10-13T07:01:36.754362+03:00",
+        "next_due": "2026-10-13T07:01:55.603079+03:00",
         "schedule_en": "Every 1 minute",
         "schedule_tr": "Her 1 dakikada bir",
         "state": "ok"
@@ -158,11 +158,11 @@
         "duration_ms": 550,
         "failures": 0,
         "job": "alerts.r15",
-        "last_finished": "2026-10-13T07:00:37.304362+03:00",
-        "last_started": "2026-10-13T07:00:36.754362+03:00",
+        "last_finished": "2026-10-13T07:00:56.153079+03:00",
+        "last_started": "2026-10-13T07:00:55.603079+03:00",
         "last_status": "ok",
         "module": null,
-        "next_due": "2026-10-13T07:01:36.754362+03:00",
+        "next_due": "2026-10-13T07:01:55.603079+03:00",
         "schedule_en": "Every 1 minute",
         "schedule_tr": "Her 1 dakikada bir",
         "state": "ok"
@@ -171,11 +171,11 @@
         "duration_ms": 587,
         "failures": 2,
         "job": "alerts.system",
-        "last_finished": "2026-10-13T06:58:37.341362+03:00",
-        "last_started": "2026-10-13T06:58:36.754362+03:00",
+        "last_finished": "2026-10-13T06:58:56.190079+03:00",
+        "last_started": "2026-10-13T06:58:55.603079+03:00",
         "last_status": "failed",
         "module": null,
-        "next_due": "2026-10-13T07:03:36.754362+03:00",
+        "next_due": "2026-10-13T07:03:55.603079+03:00",
         "schedule_en": "Every 5 minutes",
         "schedule_tr": "Her 5 dakikada bir",
         "state": "failing"
@@ -184,11 +184,11 @@
         "duration_ms": 624,
         "failures": 0,
         "job": "alerts.notify",
-        "last_finished": "2026-10-13T07:00:37.378362+03:00",
-        "last_started": "2026-10-13T07:00:36.754362+03:00",
+        "last_finished": "2026-10-13T07:00:56.227079+03:00",
+        "last_started": "2026-10-13T07:00:55.603079+03:00",
         "last_status": "skipped",
         "module": null,
-        "next_due": "2026-10-13T07:01:36.754362+03:00",
+        "next_due": "2026-10-13T07:01:55.603079+03:00",
         "schedule_en": "Every 1 minute",
         "schedule_tr": "Her 1 dakikada bir",
         "state": "skipped"
@@ -197,11 +197,11 @@
         "duration_ms": 661,
         "failures": 0,
         "job": "usage.requests",
-        "last_finished": "2026-10-13T07:00:52.415362+03:00",
-        "last_started": "2026-10-13T07:00:51.754362+03:00",
+        "last_finished": "2026-10-13T07:01:11.264079+03:00",
+        "last_started": "2026-10-13T07:01:10.603079+03:00",
         "last_status": "ok",
         "module": "usage_analytics",
-        "next_due": "2026-10-13T07:01:21.754362+03:00",
+        "next_due": "2026-10-13T07:01:40.603079+03:00",
         "schedule_en": "Every 30 seconds",
         "schedule_tr": "Her 30 saniyede bir",
         "state": "ok"
@@ -223,11 +223,11 @@
         "duration_ms": 735,
         "failures": 0,
         "job": "usage.today",
-        "last_finished": "2026-10-13T06:58:37.489362+03:00",
-        "last_started": "2026-10-13T06:58:36.754362+03:00",
+        "last_finished": "2026-10-13T06:58:56.338079+03:00",
+        "last_started": "2026-10-13T06:58:55.603079+03:00",
         "last_status": "ok",
         "module": "usage_analytics",
-        "next_due": "2026-10-13T07:03:36.754362+03:00",
+        "next_due": "2026-10-13T07:03:55.603079+03:00",
         "schedule_en": "Every 5 minutes",
         "schedule_tr": "Her 5 dakikada bir",
         "state": "ok"
@@ -236,11 +236,11 @@
         "duration_ms": 772,
         "failures": 0,
         "job": "usage.reattribute",
-        "last_finished": "2026-10-13T06:56:07.526362+03:00",
-        "last_started": "2026-10-13T06:56:06.754362+03:00",
+        "last_finished": "2026-10-13T06:56:26.375079+03:00",
+        "last_started": "2026-10-13T06:56:25.603079+03:00",
         "last_status": "ok",
         "module": "usage_analytics",
-        "next_due": "2026-10-13T07:06:06.754362+03:00",
+        "next_due": "2026-10-13T07:06:25.603079+03:00",
         "schedule_en": "Every 10 minutes",
         "schedule_tr": "Her 10 dakikada bir",
         "state": "ok"
@@ -261,12 +261,25 @@
       {
         "duration_ms": 846,
         "failures": 0,
+        "job": "db.window",
+        "last_finished": "2026-10-13T04:00:07.846000+03:00",
+        "last_started": "2026-10-13T04:00:07+03:00",
+        "last_status": "ok",
+        "module": null,
+        "next_due": "2026-10-14T04:00:00+03:00",
+        "schedule_en": "Daily after 04:00",
+        "schedule_tr": "Her gün 04:00'ten sonra",
+        "state": "ok"
+      },
+      {
+        "duration_ms": 883,
+        "failures": 0,
         "job": "reports.run_due",
-        "last_finished": "2026-10-13T07:00:37.600362+03:00",
-        "last_started": "2026-10-13T07:00:36.754362+03:00",
+        "last_finished": "2026-10-13T07:00:56.486079+03:00",
+        "last_started": "2026-10-13T07:00:55.603079+03:00",
         "last_status": "ok",
         "module": "usage_reports",
-        "next_due": "2026-10-13T07:01:36.754362+03:00",
+        "next_due": "2026-10-13T07:01:55.603079+03:00",
         "schedule_en": "Every 1 minute",
         "schedule_tr": "Her 1 dakikada bir",
         "state": "ok"
@@ -285,10 +298,10 @@
         "state": "never"
       },
       {
-        "duration_ms": 920,
+        "duration_ms": 957,
         "failures": 0,
         "job": "system.sample",
-        "last_finished": "2026-10-13T00:30:07.920000+03:00",
+        "last_finished": "2026-10-13T00:30:07.957000+03:00",
         "last_started": "2026-10-13T00:30:07+03:00",
         "last_status": "ok",
         "module": null,
@@ -298,14 +311,14 @@
         "state": "ok"
       },
       {
-        "duration_ms": 957,
+        "duration_ms": 994,
         "failures": 0,
         "job": "search.counts_backfill",
-        "last_finished": "2026-10-13T06:56:07.711362+03:00",
-        "last_started": "2026-10-13T06:56:06.754362+03:00",
+        "last_finished": "2026-10-13T06:56:26.597079+03:00",
+        "last_started": "2026-10-13T06:56:25.603079+03:00",
         "last_status": "ok",
         "module": null,
-        "next_due": "2026-10-13T07:06:06.754362+03:00",
+        "next_due": "2026-10-13T07:06:25.603079+03:00",
         "schedule_en": "Every 10 minutes",
         "schedule_tr": "Her 10 dakikada bir",
         "state": "ok"
@@ -315,28 +328,28 @@
       {
         "name": "ArciCollector",
         "state": "running",
-        "updated_at": "2026-10-13T07:00:46+03:00"
+        "updated_at": "2026-10-13T07:01:05+03:00"
       },
       {
         "name": "ArciIngest",
         "state": "running",
-        "updated_at": "2026-10-13T07:01:03+03:00"
+        "updated_at": "2026-10-13T07:01:22+03:00"
       },
       {
         "name": "ArciWorker",
         "state": "running",
-        "updated_at": "2026-10-13T07:00:56.754362+03:00"
+        "updated_at": "2026-10-13T07:01:15.603079+03:00"
       },
       {
         "name": "ArciApi",
         "state": "running",
-        "updated_at": "2026-10-13T07:01:06.943236+03:00"
+        "updated_at": "2026-10-13T07:01:25.945830+03:00"
       }
     ],
     "tasks": [
       {
         "evidence": "state\\seal\\<YYYY-MM-DD>.json",
-        "last_evidence_at": "2026-10-13T06:58:06.754362+03:00",
+        "last_evidence_at": "2026-10-13T06:58:25.603079+03:00",
         "schedule_en": "Every 5 minutes from 00:10",
         "schedule_tr": "Her gün 00:10'dan sonra 5 dakikada bir",
         "state": "ok",
@@ -392,7 +405,7 @@
       },
       {
         "evidence": "state\\clock\\<YYYY-MM-DD>.jsonl",
-        "last_evidence_at": "2026-10-13T06:06:06+03:00",
+        "last_evidence_at": "2026-10-13T06:06:25+03:00",
         "schedule_en": "Hourly from 00:05",
         "schedule_tr": "Saatte bir, 00:05'ten",
         "state": "ok",
@@ -416,7 +429,7 @@
       },
       {
         "evidence": "admin\\system\\status.json",
-        "last_evidence_at": "2026-10-13T06:57:06.754362+03:00",
+        "last_evidence_at": "2026-10-13T06:57:25.603079+03:00",
         "schedule_en": "On event and every 5 minutes",
         "schedule_tr": "Olayla ve 5 dakikada bir",
         "state": "ok",
@@ -436,7 +449,7 @@
           "ok": true,
           "server": "time.ume.tubitak.gov.tr",
           "stratum": 2,
-          "time": "2026-10-13T06:06:06+03:00"
+          "time": "2026-10-13T06:06:25+03:00"
         },
         {
           "delay_ms": 1.046,
@@ -444,7 +457,7 @@
           "ok": true,
           "server": "time.ume.tubitak.gov.tr",
           "stratum": 2,
-          "time": "2026-10-13T05:06:06+03:00"
+          "time": "2026-10-13T05:06:25+03:00"
         },
         {
           "delay_ms": null,
@@ -452,7 +465,7 @@
           "ok": false,
           "server": null,
           "stratum": null,
-          "time": "2026-10-13T04:06:06+03:00"
+          "time": "2026-10-13T04:06:25+03:00"
         },
         {
           "delay_ms": 0.887,
@@ -460,7 +473,7 @@
           "ok": true,
           "server": "time.ume.tubitak.gov.tr",
           "stratum": 2,
-          "time": "2026-10-13T03:06:06+03:00"
+          "time": "2026-10-13T03:06:25+03:00"
         },
         {
           "delay_ms": 0.903,
@@ -468,7 +481,7 @@
           "ok": true,
           "server": "time.ume.tubitak.gov.tr",
           "stratum": 2,
-          "time": "2026-10-13T02:06:06+03:00"
+          "time": "2026-10-13T02:06:25+03:00"
         },
         {
           "delay_ms": 0.921,
@@ -476,13 +489,13 @@
           "ok": true,
           "server": "time.ume.tubitak.gov.tr",
           "stratum": 2,
-          "time": "2026-10-13T01:06:06+03:00"
+          "time": "2026-10-13T01:06:25+03:00"
         }
       ]
     }
   },
   "meta": {
-    "captured_at": "2026-10-13T04:01:21.707320+00:00",
+    "captured_at": "2026-10-13T04:01:52.894782+00:00",
     "clock": "2026-10-13T07:00:00+03:00",
     "info": "captured by web/scripts/capture_api_samples.py; do not edit",
     "site_day": "2026-10-09",

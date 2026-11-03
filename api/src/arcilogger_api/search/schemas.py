@@ -13,6 +13,7 @@ from typing import Annotated, Any, Final, Literal
 
 from pydantic import AfterValidator, AwareDatetime, BaseModel, ConfigDict, Field, StringConstraints
 
+from arcilogger_api.archive.models import ArchivedRange
 from arcilogger_db.models import SAVED_SEARCH_NAME_MAX, SAVED_SEARCH_QUERY_MAX
 
 #: The page size when a search names none (the web app's default).
@@ -218,6 +219,11 @@ class SearchPage(Answer):
     next_cursor: str | None
     scan: SearchScan
     notices: list[Notice]
+    #: The part of the range whose days are gone from the database and in the sealed vault
+    #: (Wave 5 contract G8: "arşivden yeniden yükle"); ``null`` when every day was searched.
+    #: Always sent; optional in the schema, so the web app's own pages of an older shape (test
+    #: data, mocks) stay valid.
+    archived: ArchivedRange | None = None
 
 
 class SearchTotal(Answer):

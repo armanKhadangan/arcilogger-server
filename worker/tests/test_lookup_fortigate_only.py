@@ -699,8 +699,10 @@ def test_the_moment_of_the_missed_close_itself(db_session: Session, evidence: Ev
         (False, 6, True, True),
         (False, 6, True, False),
         (True, 101, False, True),
-        (True, 99, True, True),
-        (True, 99, True, False),
+        (True, 99, False, True),
+        (True, 13, False, True),
+        (True, 11, True, True),
+        (True, 11, True, False),
         (True, 8, True, True),
     ],
     ids=[
@@ -708,6 +710,8 @@ def test_the_moment_of_the_missed_close_itself(db_session: Session, evidence: Ev
         "line-inside",
         "line-inside-without-a-record",
         "converted-beyond-the-window",
+        "converted-inside-the-window-before-the-lookup-days",
+        "converted-before-the-lookup-days",
         "converted-inside",
         "converted-inside-without-a-record",
         "converted-beyond-the-line-window",
@@ -724,8 +728,10 @@ def test_a_mikrotik_lease_kept_open_reads_back_one_probe_window(
     """Round 7: a MikroTik lease that traffic keeps open has its last DHCP record far back; the
     post-lease check reads no further back than the D8 probe window before the moment: for an
     ``fg_event`` line the 3.8 fallback, 604,800 s (7 days; deviation c2), for a converted row
-    the 8,640,000 s (100 days) of 2.7; from the lease start when the lease has no DHCP record
-    (printed as ``{last}``)."""
+    the 8,640,000 s (100 days) of 2.7, and never before the first of the lookup's days (12 days
+    back with the defaults: a converted row 99 days back is not read, and the answer says so,
+    ``lookback_clamped_to_window``; W5-G deviations); from the lease start when the lease has no
+    DHCP record (printed as ``{last}``)."""
     moment = AT
     ack = moment - timedelta(days=120)
     evidence.dhcp(ack, "assigned", PC, PC_MAC, server="dhcp42")
@@ -741,7 +747,11 @@ def test_a_mikrotik_lease_kept_open_reads_back_one_probe_window(
     else:
         unconverted_line(evidence, moment - timedelta(days=days), "172.20.42.121", PC_MAC)
     db_session.commit()
-    chain = internal(db_session, PC, moment).attribution
+    outcome = internal(db_session, PC, moment)
+    # The converted-row window (100 days) of a chain the line check left ``high`` always
+    # reaches before the lookup's first day; the line window (7 days) never does.
+    assert ("lookback_clamped_to_window" in keys(outcome)) is (converted or not lowered)
+    chain = outcome.attribution
     assert chain is not None
     assert chain.lease is not None
     assert chain.lease.source_table == "mt_dhcp"
@@ -2947,6 +2957,10 @@ EMITTED_BY: dict[str, tuple[str, str]] = {
     ),
     "lease_renewal_not_seen": ("test_lookup_fortigate_only.py", "test_no_renewal_and_traffic_only"),
     "lease_timeline_behind": ("test_lookup_engine.py", "test_lease_timeline_behind_is_reported"),
+    "lookback_clamped_to_window": (
+        "test_lookup_lookback.py",
+        "test_the_missed_move_check_reads_from_the_first_day_and_says_so",
+    ),
     "mac_multiple_ips": (
         "test_lookup_srcmac.py",
         "test_a_mac_only_lookup_finds_the_address_by_its_srcmac",

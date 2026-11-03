@@ -308,6 +308,7 @@ def test_reauth_and_locked_keys() -> None:
     assert {key for key in DEFAULT_SETTINGS if key.startswith(("auth.", "privacy."))} <= REAUTH_KEYS
     assert {
         "db.retention_days",
+        "db.reload_keep_days",
         "usage.retention_days",
         "reports.keep_days",
         "evidence.keep_days",

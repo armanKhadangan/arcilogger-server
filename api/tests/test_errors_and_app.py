@@ -56,6 +56,8 @@ EXPECTED_ROUTERS = {
     "/compliance": "compliance",
     "/system": "system",
     "/system/health": "system",
+    # Arşivden yeniden yükleme (Wave 5 contract G9; mounted by W5-G, C1).
+    "/archive-reloads": "archive",
     # The legal-validity status, the banner on every page (Wave 5 contract 2.3.1; C1).
     "/legal-status": "legal-status",
 }

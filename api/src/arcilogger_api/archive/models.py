@@ -20,6 +20,11 @@ ArchiveReloadErrorCode = Literal[
     "archive_day_not_in_vault",  # a day with no sealed manifest (not sealed, or removed)
     "archive_reload_disk_low",  # the load would leave less than 15 % free on the database drive
 ]
+#: ``error_code`` of a ``failed`` reload, set by ArciIngest while it loads.
+ArchiveReloadFailureCode = Literal[
+    "archive_day_not_in_vault",  # vault retention removed a day after the request was queued
+    "archive_file_unreadable",  # a sealed file kept failing to read or no longer matched
+]
 
 
 class ArchiveReloadRequest(BaseModel):
@@ -49,7 +54,7 @@ class ArchiveReload(BaseModel):
     bytes_total: int
     #: Σ committed ingest offset; progress is ``bytes_done / bytes_total``.
     bytes_done: int
-    #: Set when ``status`` is ``failed``.
+    #: Set when ``status`` is ``failed``: one of :data:`ArchiveReloadFailureCode`.
     error_code: str | None
     ready_at: datetime | None
     #: ``ready_at`` + ``db.reload_keep_days``; then the window job drops the days again.
@@ -71,6 +76,9 @@ class ArchiveReloadRequired(BaseModel):
     bytes_total: int
     #: The estimated database growth: ``bytes_total`` times the measured factor (G5).
     estimated_bytes: int
+    #: ``db.reload_keep_days`` at the time of the answer: the days a reload keeps them (C23; a
+    #: lookup or search user cannot read ``/settings``).
+    keep_days: int
 
 
 class ArchivedRange(BaseModel):

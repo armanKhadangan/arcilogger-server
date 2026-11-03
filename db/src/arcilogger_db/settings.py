@@ -139,8 +139,13 @@ DEFAULT_SETTINGS: Final[Mapping[str, Any]] = {
     "evidence.min_free_gb": 20,
     # Largest total size of exports\ (GiB).
     "evidence.exports_max_gb": 100,
-    # 7.3 the database keeps less than the vault (default 400 days).
-    "db.retention_days": 400,
+    # 7.3 the database keeps less than the vault: the last 30 days of log rows (owner decision
+    # 2026-11-02, Wave 5 contract G1; was 400). The worker job db.window drops older days; an
+    # older day comes back from the sealed vault on request (archive reload, G4).
+    "db.retention_days": 30,
+    # G4: days reloaded from the vault stay this many days after their reload is ready, then
+    # the window job drops them again (they bring personal data back into the database, KVKK).
+    "db.reload_keep_days": 7,
     # --- Area E: alerts (spec 11 R15/R20) and their e-mail (docs/ALERTS.md, ADR-0010) ---------
     # Who gets alert e-mails and which; the SMTP connection itself is [smtp] in arcilogger.toml
     # (password: secret smtp.password). Starting values, not measured facts (ASSUMPTIONS E1-E6).
@@ -546,6 +551,7 @@ REAUTH_KEYS: Final[frozenset[str]] = frozenset(
     {key for key in DEFAULT_SETTINGS if key.startswith(("auth.", "privacy."))}
     | {
         "db.retention_days",
+        "db.reload_keep_days",
         "usage.retention_days",
         "reports.keep_days",
         "evidence.keep_days",
@@ -587,7 +593,9 @@ INTEGER_RANGES: Final[Mapping[str, tuple[int, int | None]]] = {
     "evidence.max_requests_per_hour": (1, None),
     "evidence.min_free_percent": (0, 99),
     "evidence.exports_max_gb": (1, None),
-    "db.retention_days": (1, None),
+    # G1: at least a week; the window job never drops a day that is not sealed yet anyway.
+    "db.retention_days": (7, None),
+    "db.reload_keep_days": (1, 30),
     # Area E (alerts): a value that would switch a check or the e-mail off is not accepted.
     "alerts.email_max_per_hour": (1, 1000),
     "alerts.email_digest_seconds": (0, 3600),

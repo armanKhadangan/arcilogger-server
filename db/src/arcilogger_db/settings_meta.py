@@ -1000,10 +1000,23 @@ _DATABASE = _group(
         "db.retention_days",
         "Veritabanında saklama süresi (gün)",
         "Database retention (days)",
-        "Veritabanının sorgular için tuttuğu log günleri (varsayılan 400). Mühürlü kasadaki ham "
-        "loglar bundan etkilenmez.",
-        "How many days of logs the database keeps for lookups (default 400). The raw logs in "
-        "the sealed vault are not affected.",
+        "Veritabanının sorgular için tuttuğu log günleri (varsayılan 30, en az 7); daha eski "
+        "günler her gece silinir ve istendiğinde mühürlü kasadan yeniden yüklenir. Mühürlü "
+        "kasadaki ham loglar bundan etkilenmez.",
+        "How many days of logs the database keeps for lookups (default 30, at least 7); older "
+        "days are dropped every night and reloaded from the sealed vault on request. The raw "
+        "logs in the sealed vault are not affected.",
+    ),
+    (
+        "db.reload_keep_days",
+        "Arşivden yüklenen günlerin saklama süresi (gün)",
+        "Retention of days reloaded from the archive (days)",
+        "Mühürlü kasadan yeniden yüklenen günler, yükleme bittikten sonra bu kadar gün "
+        "veritabanında kalır, sonra yine silinir (1-30, varsayılan 7). Bu günler kişisel veri "
+        "içerir.",
+        "Days reloaded from the sealed vault stay in the database this many days after the "
+        "reload finished, then they are dropped again (1-30, default 7). These days contain "
+        "personal data.",
     ),
 )
 

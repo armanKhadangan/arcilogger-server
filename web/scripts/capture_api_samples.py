@@ -71,6 +71,8 @@ file whose data is empty is not written. The Uyum Durumu and Sistem samples (``c
 ``system.json``, ``system-disk.json``, ``system-health.json``; Wave 4 contract 2.3, 2.5, 2.6)
 come from ``samples_compliance.py`` and ``samples_system.py``, run on the main site after the
 others (the cards read the whole site; the Sistem samples fix what the host would say). The
+archive reload samples (``archive.json``; Wave 5 contract §5) come from ``samples_archive.py``,
+run last on the main site with the database window narrowed for their time. The
 Wave 3 lookups (FortiGate DHCP alone, srcmac, the internet exits' cases, a source clock, an
 unconverted DHCP line, an unconfigured sender; ``samples_lookups.py``) run last, on a second
 lookup site with a database and data directory of its own, and are merged into ``lookups.json``
@@ -205,6 +207,7 @@ from arcilogger_worker.vaulttesting import SealedVault, at_site, make_vault
 _SCRIPTS = str(Path(__file__).resolve().parent)
 if _SCRIPTS not in sys.path:
     sys.path.insert(0, _SCRIPTS)
+import samples_archive  # noqa: E402
 import samples_compliance  # noqa: E402
 import samples_legal_status  # noqa: E402
 import samples_live_sources  # noqa: E402
@@ -216,7 +219,9 @@ import samples_system  # noqa: E402
 #: The pages whose samples a module of their own captures (module text), in this order:
 #: ``samples_network`` writes sessions of the day before "now", after the pages before it
 #: captured; the Wave 4 pages (``samples_compliance``, ``samples_system``) read the whole site as
-#: every other page left it, so they come last and change no earlier sample.
+#: every other page left it, so they come last and change no earlier sample, then the
+#: legal-validity status reads the whole site; ``samples_archive`` narrows the database window for
+#: its own capture, after all of them.
 SAMPLE_MODULES = (
     samples_search,
     samples_live_sources,
@@ -224,6 +229,7 @@ SAMPLE_MODULES = (
     samples_compliance,
     samples_system,
     samples_legal_status,
+    samples_archive,
 )
 
 OUT_DIR = Path(__file__).resolve().parent.parent / "e2e" / "samples"
