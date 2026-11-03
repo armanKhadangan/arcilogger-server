@@ -203,6 +203,20 @@ administrator enters the dates of the religious holidays every year. Details:
 | `alerts.filter_skip_holidays` | on | — | on: no record is expected on the days of `usage.holidays`; off: public holidays count as expected days |
 | `alerts.filter_quiet_hours` | 24 | 6–168 | the longest time without a record on expected days (hours) |
 
+The **Database** group says how long the parsed records stay in the database. The raw records in
+the sealed vault are not affected. The worker job `db.window` drops the days older than the
+window every night after 04:00; a day not sealed yet and the days of an active archive reload are
+never dropped. When an older day is needed, the 5651 lookup and Search ask for it with "arşivden
+yeniden yükle" (reload from the archive). Both settings are retention periods of personal data:
+a change needs the password again and is audited as `settings.change`. Details:
+[DATA-MODEL.md](DATA-MODEL.md) "Retention",
+[legal/saklama-imha-politikasi-taslak.md](legal/saklama-imha-politikasi-taslak.md).
+
+| Setting | Default | Bounds | Meaning |
+|---|---|---|---|
+| `db.retention_days` | 30 (400 in earlier versions; the upgrade changes a 400 to 30 and a value below 7 to 7, and keeps any other value) | at least 7 | the days of logs the database keeps; older days are dropped every night and reloaded from the sealed vault on request |
+| `db.reload_keep_days` | 7 | 1–30 | how many days the days reloaded from the archive stay in the database after their reload finished; then they are dropped again. These days contain personal data |
+
 ## 2. How it works
 
 1. The page first shows the change for review (the changes, their effects, warnings: a dry run

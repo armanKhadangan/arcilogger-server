@@ -201,6 +201,19 @@ yıl yönetici girer. Ayrıntılar: [UYUM-DURUMU.md](UYUM-DURUMU.md) bölüm 2.7
 | `alerts.filter_skip_holidays` | açık | — | açıkken `usage.holidays` listesindeki günlerde kayıt beklenmez; kapalıyken resmî tatiller de beklenen gün sayılır |
 | `alerts.filter_quiet_hours` | 24 | 6–168 | beklenen günlerde kayıtsız geçebilecek en uzun süre (saat) |
 
+**Veritabanı** grubu, ayrıştırılmış kayıtların veritabanında ne kadar kaldığını söyler. Mühürlü
+kasadaki ham kayıtlar bu ayarlardan etkilenmez. Worker işi `db.window` her gece 04:00'ten sonra
+pencereden eski günleri siler; henüz mühürlenmemiş bir gün ve etkin bir arşiv yüklemesinin günleri
+silinmez. Daha eski bir gün gerektiğinde 5651 sorgusu ve Arama onu "arşivden yeniden yükle" ile
+ister. Her iki ayar da kişisel verinin saklama süresidir: değiştirmek parolanın yeniden girilmesini
+ister ve denetim kaydına `settings.change` olarak yazılır. Ayrıntı: [DATA-MODEL.md](DATA-MODEL.md)
+"Retention", [legal/saklama-imha-politikasi-taslak.md](legal/saklama-imha-politikasi-taslak.md).
+
+| Ayar | Varsayılan | Sınırlar | Anlamı |
+|---|---|---|---|
+| `db.retention_days` | 30 (önceki sürümlerde 400; yükseltme 400'ü 30'a, 7'nin altındaki bir değeri 7'ye çevirir, başka değerleri korur) | en az 7 | veritabanının tuttuğu log günleri; daha eski günler her gece silinir ve istendiğinde mühürlü kasadan yeniden yüklenir |
+| `db.reload_keep_days` | 7 | 1–30 | arşivden yeniden yüklenen günlerin, yükleme bittikten sonra veritabanında kaldığı gün sayısı; sonra yine silinir. Bu günler kişisel veri içerir |
+
 ## 2. Nasıl çalışır?
 
 1. Sayfa önce değişikliği gözden geçirmek için gösterir (değişiklikler, etkileri, uyarılar;

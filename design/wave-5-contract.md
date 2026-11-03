@@ -929,3 +929,40 @@ All Wave 5 questions are answered (2026-11-02).
   separate `verify-token` command) verifies its stamp with the stored lists, and an unreadable
   CRL folder leaves it unchecked with a warning (C19). A known list whose file is gone is stored
   again and recorded as `stored_file_changed`, exit 1 (C20).
+
+## Deviations — W5-G (2026-11-03)
+
+- **W5-G-1: reload days are device-time days.** Partitions and chunks are by device `time`, and
+  one raw day's rows lie within ±1 day 1 h of it, so ArciIngest loads the raw days ±2
+  (`RAW_DAY_MARGIN`) of a request; `bytes_total` covers those files.
+- **W5-G-2: margins on the cutoff (G3).** The `db.window` cutoff uses the oldest unsealed day
+  minus 2, and a sealed day whose manifest or files cannot be read counts as unsealed
+  (`limited_by` `manifest`). A reload's first day needs no margin: its margin files are loaded
+  with it.
+- **W5-G-3: the API's "gone" rule.** The applied cutoff is kept in the status row
+  `db.window_dropped_before` (written by `drop_before`). A day before it, or before the window
+  with no rows, is gone; a `loading` reload makes its days ±4 gone even inside the window, a
+  `queued` one does not. The 409 is given only when the vault holds a gone day; a day without a
+  manifest keeps the existing notices.
+- **W5-G-4: `POST /archive-reloads` behaviour.** Complete in-window days are refused with 422
+  `validation_error`; when nothing needs a new load, the user's own active request is returned
+  (audited as `existing`); a skipped (empty) day passes with nothing to load.
+- **W5-G-5: failure codes of a reload** (`error_code`): `archive_day_not_in_vault` (retention
+  removed a day after queueing) and the new `archive_file_unreadable` (a sealed file is checked by
+  size and SHA-256 when the request is claimed, and kept failing to read). Their TR/EN texts are
+  `archive.service.FAILURE_MESSAGES`.
+- **W5-G-6: the reset deletes more than G4 names:** also the file's `parse_failures` and clock
+  samples, and on plain PostgreSQL its out-of-window rows in the default partitions.
+- **W5-G-7: bounded steps (G2, G3).** At most 16 days of partitions are created per call (about
+  600 partitions exhaust the default lock table); the job drops in bounded steps of 16 created
+  plus dropped days per transaction, up to 64 steps a run; `maintain_window` refuses a cutoff
+  less than 7 days before today.
+- **W5-G-8: the ingest horizon** after a database loss is the window plus the 2 raw days before
+  it.
+- **W5-G-9: `SearchPage.archived` is optional** in the schema (`archived?:` in the web type); the
+  API always sends it.
+- **W5-G-10: G1 conversion.** A stored 400 becomes 30 whoever wrote it; an administrator's row
+  then carries `:migration`, with no audit entry.
+- **W5-G-11: the factor (G5)** is `DB_BYTES_PER_RAW_BYTE = 2.6`, rounded up from 2.40 to 2.51
+  measured on plain PostgreSQL 16 with daily partitions through the real ingest
+  (`docs/DATA-MODEL.md`).
