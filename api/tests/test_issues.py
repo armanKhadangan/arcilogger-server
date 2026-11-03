@@ -57,6 +57,11 @@ def test_every_message_of_the_day_check_has_a_turkish_text(vault: SealedVault) -
     assert issue_tr("2026/09/11/fortigate.log.gz: SHA-256 mismatch (file changed)") == (
         "2026/09/11/fortigate.log.gz: SHA-256 özeti tutmuyor (dosya değişmiş)"
     )
+    damaged = "2026/09/11/fortigate.log.xz: cannot be decompressed (fortigate.log.xz: damaged)"
+    assert (
+        issue_tr(damaged)
+        == "2026/09/11/fortigate.log.xz: sıkıştırılmış veri açılamıyor (dosya bozuk)"
+    )
     assert issue_tr("2026/09/11/fortigate.log.gz: not read-only") == (
         "2026/09/11/fortigate.log.gz: salt okunur değil"
     )

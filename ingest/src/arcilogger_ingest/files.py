@@ -1,8 +1,9 @@
 """Reading spool and vault files without getting in the sealer's way.
 
 The collector appends to ``spool/<source>/<day>.log``; the nightly sealer compresses a closed
-day into ``vault/<Y>/<M>/<D>/<source>.log.gz`` and then **deletes** the spool file. Two rules
-follow for the ingest service, which tails those files:
+day into ``vault/<Y>/<M>/<D>/<source>.log`` plus the suffix of its format (seekable xz from
+Wave 5 on, gzip before; :mod:`arcilogger_core.sealedfile`) and then **deletes** the spool file.
+Two rules follow for the ingest service, which tails those files:
 
 * **Never keep a spool file open between polls.** :func:`read_complete` opens the file, reads
   the new bytes and closes it again. A file that is closed cannot block the sealer.
@@ -25,19 +26,19 @@ complete-line offset.
 
 from __future__ import annotations
 
-import gzip
 import os
 import sys
-import zlib
 from pathlib import Path
 from typing import BinaryIO, Final
+
+from arcilogger_core import sealedfile
 
 #: Growth step when one line is longer than the requested size; smallest vault read.
 MIN_READ: Final = 64 * 1024
 
 
 class VaultReadError(OSError):
-    """A sealed file is shorter than the resume offset or its gzip data is damaged."""
+    """A sealed file is shorter than the resume offset or its compressed data is damaged."""
 
 
 if sys.platform == "win32":
@@ -121,32 +122,49 @@ def read_complete(path: Path, offset: int, max_bytes: int) -> bytes:
 
 
 class VaultReader:
-    """Sequential reader of a sealed ``<source>.log.gz`` from an uncompressed offset.
+    """Sequential reader of a sealed file of either format from an uncompressed offset: the one
+    reader of sealed files in ingest (the vault catch-up and the archive reload).
 
     Kept open while a stream is read from the vault (decompressing from the start for every poll
-    would be quadratic). The vault file is never deleted by the sealer and only by the retention
-    job years later; it is opened with delete sharing all the same. :attr:`position` is the
-    uncompressed offset of the next byte :meth:`read` returns.
+    would be quadratic). An xz file starts at the stream that holds the offset; a gzip file is
+    decompressed from its start up to it. The vault file is never deleted by the sealer and only
+    by the retention job years later; it is opened with delete sharing all the same.
+    :attr:`position` is the uncompressed offset of the next byte :meth:`read` returns.
     """
 
     def __init__(self, path: Path, offset: int) -> None:
         self.path = path
         self._raw = open_shared(path)
         try:
-            self._gzip = gzip.GzipFile(fileobj=self._raw, mode="rb")
-            self.position = 0
             self._buffer = b""
             self._eof = False
-            self._skip(offset)
+            if sealedfile.format_of(path) == "xz":
+                self._kind = "xz"
+                try:
+                    streams = sealedfile.xz_streams(path, self._raw)
+                except sealedfile.SealedFileError as exc:
+                    raise VaultReadError(f"{path.name}: damaged xz data ({exc})") from exc
+                size = sum(stream.uncompressed_size for stream in streams)
+                if offset > size:
+                    raise VaultReadError(
+                        f"{path.name}: has {size} bytes, resume offset is {offset}"
+                    )
+                self._stream = sealedfile.open_sequential(path, self._raw, offset)
+                self.position = offset
+            else:
+                self._kind = "gzip"
+                self._stream = sealedfile.open_sequential(path, self._raw)
+                self.position = 0
+                self._skip(offset)
         except BaseException:
             self._raw.close()
             raise
 
     def _read_raw(self, size: int) -> bytes:
         try:
-            return self._gzip.read(size)
-        except (EOFError, zlib.error, gzip.BadGzipFile) as exc:
-            raise VaultReadError(f"{self.path.name}: damaged gzip data ({exc})") from exc
+            return self._stream.read(size)
+        except (sealedfile.SealedFileError, *sealedfile.DAMAGE_ERRORS) as exc:
+            raise VaultReadError(f"{self.path.name}: damaged {self._kind} data ({exc})") from exc
 
     def _skip(self, count: int) -> None:
         remaining = count
@@ -187,5 +205,5 @@ class VaultReader:
         self.position -= len(data)
 
     def close(self) -> None:
-        self._gzip.close()
+        self._stream.close()
         self._raw.close()

@@ -7,9 +7,9 @@ report and the permissions."""
 
 from __future__ import annotations
 
-import gzip
 import hashlib
 import json
+import lzma
 import os
 import re
 from collections.abc import Callable, Iterator
@@ -52,6 +52,7 @@ from arcilogger_api.reports.inputs import _day_facts as day_facts
 from arcilogger_api.reports.inputs import chain_first_day
 from arcilogger_api.reports.render import provider_line
 from arcilogger_api.testing import EXAMPLE_SITE_NAME, LoggedIn
+from arcilogger_core import sealedfile
 from arcilogger_core.config import Config
 from arcilogger_core.immutability import is_locked, unlock
 from arcilogger_core.layout import Layout
@@ -396,7 +397,7 @@ def test_report_of_a_sealed_day_reads_the_vault_and_verifies_the_seal(
     files = {(f["source"], f["day"]): f for f in inputs["files"]}
     fortigate = files[("fortigate", DAY.isoformat())]
     assert (fortigate["status"], fortigate["matches_manifest"]) == ("sealed", True)
-    assert fortigate["file"] == "vault/2026/10/12/fortigate.log.gz"
+    assert fortigate["file"] == "vault/2026/10/12/" + sealedfile.log_name("fortigate", "xz")
     assert fortigate["manifest"]["sha256_uncompressed"] == hashlib.sha256(spool_before).hexdigest()
     (day,) = inputs["days"]
     verification = day["verification"]
@@ -451,7 +452,7 @@ def test_report_of_a_sealed_day_reads_the_vault_and_verifies_the_seal(
     assert first_traffic["line"]["text"] == expected.decode()
 
 
-@pytest.mark.parametrize("damage", ["content", "gzip"])
+@pytest.mark.parametrize("damage", ["content", "xz"])
 def test_report_of_a_day_whose_vault_file_was_changed(
     client: TestClient,
     login_as: Login,
@@ -462,11 +463,11 @@ def test_report_of_a_day_whose_vault_file_was_changed(
     damage: str,
 ) -> None:
     seal_day(api_config, layout, DAY)
-    sealed = layout.vault_day(DAY) / "core-r1.log.gz"
+    sealed = layout.vault_day(DAY) / sealedfile.log_name("core-r1", "xz")  # the default format
     unlock(sealed)
-    original = gzip.decompress(sealed.read_bytes())
-    if damage == "content":  # a valid gzip file with other content
-        sealed.write_bytes(gzip.compress(original.replace(b"PLN-PC14", b"PLN-PC15")))
+    original = lzma.decompress(sealed.read_bytes())
+    if damage == "content":  # a valid xz file with other content
+        sealed.write_bytes(lzma.compress(original.replace(b"PLN-PC14", b"PLN-PC15")))
     else:  # the compressed data itself is damaged
         data = bytearray(sealed.read_bytes())
         data[len(data) // 2] ^= 0xFF
@@ -485,7 +486,7 @@ def test_report_of_a_day_whose_vault_file_was_changed(
         assert all(line["status"] == "ok" for line in lines)
         assert "PLN-PC15" in text  # the report shows what the file says now, flagged above
     else:
-        assert files["core-r1"]["error"].startswith("core-r1.log.gz: damaged gzip data")
+        assert files["core-r1"]["error"].startswith(f"{sealed.name}: damaged xz data")
         assert {line["status"] for line in lines} <= {"ok", "unreadable"}
 
 
@@ -1194,7 +1195,7 @@ def test_header_and_footer_lines_fit_the_page() -> None:
     assert stringWidth(cut, SANS, 7.5) <= width
 
 
-@pytest.mark.parametrize("suffix", [".log.gz", ".zd", ".json"])
+@pytest.mark.parametrize("suffix", [sealedfile.SUFFIXES["xz"], ".zd", ".json"])
 def test_no_report_while_a_sealed_file_cannot_be_opened(
     client: TestClient,
     login_as: Login,

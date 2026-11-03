@@ -4,10 +4,13 @@ from __future__ import annotations
 
 import gzip
 import sys
+from collections.abc import Iterator
 from pathlib import Path
+from typing import Any
 
 import pytest
 
+from arcilogger_core import sealedfile
 from arcilogger_ingest.files import (
     MIN_READ,
     VaultReader,
@@ -25,7 +28,21 @@ def spool(tmp_path: Path, data: bytes) -> Path:
     return path
 
 
-def vault(tmp_path: Path, data: bytes) -> Path:
+@pytest.fixture(params=["gzip", "xz"])
+def kind(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> str:
+    """The sealed format of :func:`vault` files; xz with 7-byte streams, so lines cross them."""
+    monkeypatch.setattr(sealedfile, "STREAM_BYTES", 7)
+    value: str = request.param
+    return value
+
+
+def vault(tmp_path: Path, data: bytes, kind: str = "gzip") -> Path:
+    if kind == "xz":
+        plain = tmp_path / "plain"
+        plain.write_bytes(data)
+        path = tmp_path / sealedfile.log_name("fortigate", "xz")
+        sealedfile.write(plain, path)
+        return path
     path = tmp_path / "fortigate.log.gz"
     with path.open("wb") as raw, gzip.GzipFile(filename="", mode="wb", fileobj=raw, mtime=0) as gz:
         gz.write(data)
@@ -114,9 +131,9 @@ def test_open_shared_missing_file(tmp_path: Path) -> None:
         open_shared(tmp_path / "missing.log")
 
 
-def test_vault_reader_resumes_at_an_uncompressed_offset(tmp_path: Path) -> None:
+def test_vault_reader_resumes_at_an_uncompressed_offset(tmp_path: Path, kind: str) -> None:
     data = b"".join(LINES)
-    path = vault(tmp_path, data)
+    path = vault(tmp_path, data, kind)
     reader = VaultReader(path, len(LINES[0]))
     try:
         assert reader.position == len(LINES[0])
@@ -127,9 +144,9 @@ def test_vault_reader_resumes_at_an_uncompressed_offset(tmp_path: Path) -> None:
         reader.close()
 
 
-def test_vault_reader_returns_the_final_line_without_newline(tmp_path: Path) -> None:
+def test_vault_reader_returns_the_final_line_without_newline(tmp_path: Path, kind: str) -> None:
     """A sealed file is final: its last line counts even without '\\n' (cut by a power loss)."""
-    path = vault(tmp_path, b"".join(LINES) + b"cut off")
+    path = vault(tmp_path, b"".join(LINES) + b"cut off", kind)
     reader = VaultReader(path, 0)
     try:
         assert reader.read(10**6) == b"".join(LINES) + b"cut off"
@@ -138,10 +155,13 @@ def test_vault_reader_returns_the_final_line_without_newline(tmp_path: Path) -> 
         reader.close()
 
 
-def test_vault_reader_reads_in_chunks_of_complete_lines(tmp_path: Path) -> None:
+def test_vault_reader_reads_in_chunks_of_complete_lines(
+    tmp_path: Path, kind: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(sealedfile, "STREAM_BYTES", 4096)  # xz: still many streams
     line = b"0123456789" * 30 + b"\n"
     data = line * 1000
-    path = vault(tmp_path, data)
+    path = vault(tmp_path, data, kind)
     reader = VaultReader(path, 0)
     parts = []
     try:
@@ -155,8 +175,8 @@ def test_vault_reader_reads_in_chunks_of_complete_lines(tmp_path: Path) -> None:
     assert len(parts) > 2
 
 
-def test_vault_reader_refuses_an_offset_beyond_the_file(tmp_path: Path) -> None:
-    path = vault(tmp_path, b"".join(LINES))
+def test_vault_reader_refuses_an_offset_beyond_the_file(tmp_path: Path, kind: str) -> None:
+    path = vault(tmp_path, b"".join(LINES), kind)
     with pytest.raises(VaultReadError, match="resume offset"):
         VaultReader(path, 10_000)
 
@@ -176,3 +196,60 @@ def test_vault_reader_reports_damaged_gzip_data(tmp_path: Path) -> None:
             read_all()
     finally:
         reader.close()
+
+
+@pytest.mark.parametrize("how", ["truncated", "flipped"])
+def test_vault_reader_reports_damaged_xz_data(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, how: str
+) -> None:
+    """A cut file has no stream index: refused when opened. A flipped byte in a later stream:
+    refused when that stream is read, never a shorter file."""
+    monkeypatch.setattr(sealedfile, "STREAM_BYTES", 500)
+    path = vault(tmp_path, b"".join(LINES) * 200, "xz")
+    data = bytearray(path.read_bytes())
+    if how == "truncated":
+        del data[len(data) // 2 :]
+    else:
+        streams = sealedfile.xz_streams(path)
+        data[streams[-2].compressed_start + 20] ^= 0x55
+    path.write_bytes(bytes(data))
+
+    def read_all() -> None:
+        reader = VaultReader(path, 0)
+        try:
+            while reader.read(MIN_READ):
+                pass
+        finally:
+            reader.close()
+
+    with pytest.raises(VaultReadError, match="damaged xz data"):
+        read_all()
+
+
+def test_vault_reader_resumes_xz_at_every_offset_from_its_stream(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Resuming after a crash: every uncompressed offset gives exactly the rest of the file,
+    decompressed from the stream that holds the offset (not from the first one)."""
+    monkeypatch.setattr(sealedfile, "STREAM_BYTES", 7)
+    data = b"".join(LINES) + b"cut off"
+    path = vault(tmp_path, data, "xz")
+    streams = sealedfile.xz_streams(path)
+    first: list[int] = []
+    real = sealedfile.xz_stream_chunks
+
+    def recording(raw: Any, stream: sealedfile.XzStream) -> Iterator[bytes]:
+        first.append(streams.index(stream))
+        return real(raw, stream)
+
+    monkeypatch.setattr(sealedfile, "xz_stream_chunks", recording)
+    for offset in range(len(data) + 1):
+        first.clear()
+        reader = VaultReader(path, offset)
+        try:
+            assert reader.position == offset
+            assert reader.read(10**6) == data[offset:]
+        finally:
+            reader.close()
+        if offset < len(data):
+            assert first[0] == sealedfile.stream_of(streams, offset), offset

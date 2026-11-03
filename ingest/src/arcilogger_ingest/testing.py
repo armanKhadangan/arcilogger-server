@@ -120,7 +120,7 @@ def make_config(root: Path, **overrides: Any) -> Config:
         "data_dir": str(root / "data"),
         "secrets_dir": str(root / "secrets"),
         "sources": SOURCES,
-        "seal": {"quiet_seconds": 0, "gzip_level": 6},
+        "seal": {"quiet_seconds": 0, "compression": "gzip", "gzip_level": 6},
         "tsa": {"provider": "mock"},
         "ingest": {"batch_rows": 500, "batch_seconds": 0.05, "poll_seconds": 0.02},
     }

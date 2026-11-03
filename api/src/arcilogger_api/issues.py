@@ -192,6 +192,10 @@ _RULES: Final[list[_Rule]] = [
         r"^(?P<path>.+): content differs from the manifest$",
         "{path}: açılmış içerik manifestle uyuşmuyor",
     ),
+    _rule(
+        r"^(?P<path>.+?): cannot be decompressed \(.*\)$",
+        "{path}: sıkıştırılmış veri açılamıyor (dosya bozuk)",
+    ),
     _rule(r"^(?P<path>.+): not read-only$", "{path}: salt okunur değil"),
     _rule(
         r"^chain broken: no link to the previous day$",

@@ -75,7 +75,9 @@ from arcilogger_api.lookup_testing import (
     iso,
     seal_day,
 )
+from arcilogger_api.rawlines import read_line
 from arcilogger_api.testing import LoggedIn
+from arcilogger_core import sealedfile
 from arcilogger_core.config import Config
 from arcilogger_core.immutability import is_locked, unlock
 from arcilogger_core.layout import Layout
@@ -1234,6 +1236,50 @@ def test_g7_a_lookup_over_reloaded_days_equals_the_lookup_before_the_drop(
         refs = _raw_refs(now["outcome"])
         assert refs == _raw_refs(earlier["outcome"])
         assert refs, query
+
+
+def test_an_xz_sealed_day_dropped_and_reloaded_has_the_same_rows(
+    client: TestClient,
+    login_as: Login,
+    app_session_factory: sessionmaker[Session],
+    db_engine: Engine,
+    api_config: Config,
+    layout: Layout,
+    sealed: Site,
+) -> None:
+    """W5-H with W5-G: a day sealed as xz (the default) is dropped by the window and comes back
+    through ``POST /archive-reloads`` with the rows it had, and its raw lines still show."""
+    manifest = json.loads(layout.manifest(DAY).read_bytes())
+    paths = [entry["path"] for entry in manifest["files"]] + [manifest["audit_log"]["path"]]
+    assert {sealedfile.format_of(path) for path in paths} == {"xz"}
+    signed_in(client, login_as, app_session_factory)
+    first = client.post(API, json=reload_body())
+    assert first.status_code == 202, first.text
+    run_ingest(api_config, db_engine)
+    loaded = day_rows(db_engine)
+    assert loaded["messages"] > 0
+    with db_engine.connect() as connection:
+        before = connection.execute(
+            text("SELECT source, raw_line, raw_offset FROM messages ORDER BY 1, 2")
+        ).all()
+
+    drop(db_engine)
+    assert set(day_rows(db_engine).values()) == {0}
+    second = client.post(API, json=reload_body())
+    assert second.status_code == 202, second.text
+    run_ingest(api_config, db_engine)
+    reloaded = client.get(f"{API}/{second.json()['id']}").json()
+    assert reloaded["status"] == "ready", reloaded
+    assert reloaded["bytes_done"] == reloaded["bytes_total"] == sealed_bytes(layout, DAY)
+    assert day_rows(db_engine) == loaded
+    with db_engine.connect() as connection:
+        after = connection.execute(
+            text("SELECT source, raw_line, raw_offset FROM messages ORDER BY 1, 2")
+        ).all()
+    assert after == before
+    source, line, offset = before[-1]
+    shown = read_line(layout, source, DAY, line, offset)
+    assert (shown.origin, sealedfile.format_of(shown.file)) == ("vault", "xz")
 
 
 def test_a_file_unreadable_mid_load_keeps_the_lookup_at_409(

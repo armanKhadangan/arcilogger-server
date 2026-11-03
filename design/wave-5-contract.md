@@ -1306,3 +1306,21 @@ All Wave 5 questions are answered (2026-11-02).
   15 days and not at 14), `db/tests/test_settings_reach.py`,
   `api/tests/test_archive_api.py` (the 503, and the 409 and the answer with the same stored
   value).
+
+## Deviations — W5-H (2026-11-03)
+
+- **W5-H-1: the first line view of an xz file decompresses more than one stream.** §5.4 says
+  "showing one line decompresses one stream". The manager's rule on #111 (2026-11-03) is that a
+  cited raw line is never shown unchecked: both its offset and its line number are checked. The
+  line number needs the line feeds before the line's stream, so the first view of a file counts
+  the streams before the line once and keeps the counts in memory (option b of that comment;
+  never written to `vault/`); every later view of the file decompresses only the line's stream,
+  read to its end so its CRC64 is checked. Measured on a 5 M line day (docs/DATA-MODEL.md): first
+  view 7.0 s for the middle line and 14.1 s for the last one, later views 0.06 s; gzip takes
+  3.4 s, 6.4 s and 0.12 s. A reference whose offset does not hold its line is looked up by its
+  line number, as on a `.gz` day, so both formats give the same error.
+- **W5-H-2: `chain.py` (not W5-H's) has one hunk**, granted on #111 (2026-11-03): a sealed file
+  that cannot be decompressed is a `verify_day` error, `<path>: cannot be decompressed (…)`,
+  instead of an exception. Its Turkish text is one rule in `api/src/arcilogger_api/issues.py`
+  (W5-C's), granted on #111 (2026-11-03 19:08): "{path}: sıkıştırılmış veri açılamıyor (dosya
+  bozuk)"; the English text is the core's message itself.

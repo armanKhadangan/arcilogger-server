@@ -50,7 +50,7 @@ from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
 from uvicorn.middleware.proxy_headers import _TrustedHosts  # what ArciApi trusts (cli.py)
 
-from arcilogger_core import cli, timeutil
+from arcilogger_core import cli, sealedfile, timeutil
 from arcilogger_core.admin.contract import (
     AdminPolicy,
     DocumentError,
@@ -7234,7 +7234,7 @@ def _e2e_database_checks(
     quiet = received.replace(hour=23, minute=59)
     os.utime(day_file, (quiet.timestamp(), quiet.timestamp()))
     vault_day = data / "vault" / f"{yesterday:%Y}" / f"{yesterday:%m}" / f"{yesterday:%d}"
-    sealed = vault_day / "local.log.gz"
+    sealed = vault_day / sealedfile.log_name("local", "xz")  # the installed default (W5-H)
     _e2e_wait_for_agent(cafile, cookie, log)
     status, body = _https_send("POST", f"/api/v1/seals/{yesterday}/seal", cafile, cookie)
     assert status == 202, ("seal now", status, body, log())
