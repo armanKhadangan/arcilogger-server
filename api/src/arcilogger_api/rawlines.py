@@ -21,12 +21,13 @@ Costs:
   few MiB. Spool files only grow while their day is open, so checkpoints stay valid; a file that
   was replaced (other device/inode) or shrank starts a new index.
 * **vault, xz** (Wave 5): a reference with its ``offset`` is shown from the one 16 MiB stream that
-  holds the offset (the xz index in the stream footers says which), so a view costs one stream
-  (~0.2 s) wherever the line is. The offset must start a line. The line number is checked
-  against the line feeds before that stream when an earlier view of the file counted them
-  (:attr:`_GzEntry.xz_lines`); before that, a reference with an offset is checked by its offset
-  only (counting the line feeds before it would mean decompressing the whole file). A reference
-  without an offset is found by counting from the start, which also fills the counts.
+  holds the offset (the xz index in the stream footers says which). A cited line is never shown
+  unchecked: the offset must start a line, and that line's number must be the reference's. The
+  number needs the line feeds before the stream; they are counted once per file and kept in
+  :data:`VAULT_INDEX` (:attr:`_GzEntry.xz_lines`, a few bytes per stream, never written to
+  disk). The first view of a file decompresses the streams before the line to count them (cost
+  as for gzip); every later view costs one stream (~0.2 s) wherever the line is. A reference
+  without an offset is found by counting from the start, which fills the same counts.
 * **vault, gzip** (days sealed before Wave 5): gzip cannot seek, so the first view in a file
   decompresses it from its start up to the line (measured: about 2 s per 500 MB of uncompressed
   log, so up to ~20 s for a late line of a 5 GB day) and leaves a copy of the decompressor state
@@ -407,8 +408,9 @@ class _GzEntry:
     #: Held while the file is scanned: views of one file wait for each other (and then resume
     #: from the checkpoints the first one left) instead of all decompressing from the start.
     lock: threading.Lock = field(default_factory=threading.Lock)
-    #: xz only: line feeds before each stream (by stream number), as far as a view counted them.
-    xz_lines: dict[int, int] = field(default_factory=dict)
+    #: xz only: line feeds before each stream (by stream number), counted from the first stream
+    #: on, as far as a view needed them (:func:`_lines_before`).
+    xz_lines: dict[int, int] = field(default_factory=lambda: {0: 0})
 
     def floor(self, line: int) -> GzPoint | None:
         index = bisect.bisect_right(self.points, line, key=lambda point: point.line) - 1
@@ -585,8 +587,8 @@ def _find_in_xz(
     """Line ``line`` of a sealed xz file (``(found, damage)`` as :func:`_find_in_vault`).
 
     With ``offset``: decompress from the stream that holds it, take the line that starts there
-    and check its number when the line feeds before that stream are known. Without: count from
-    the first stream, noting the line feeds before each stream on the way."""
+    and check its number against the line feeds before that stream (counted on the first view).
+    Without: count from the first stream, noting the line feeds before each stream on the way."""
     stat = path.stat()
     entry = VAULT_INDEX.entry(path, (stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns))
     with VAULT_INDEX.scans, entry.lock, open_shared(path) as handle:
@@ -610,6 +612,20 @@ def _scan_xz(
             if finder.done:
                 return finder.found.get(line)
     return finder.found.get(line)
+
+
+def _lines_before(
+    handle: BinaryIO, streams: list[sealedfile.XzStream], entry: _GzEntry, number: int
+) -> int:
+    """The line feeds before stream ``number``: counted from the last stream already counted
+    (each stream once per file), and noted for every stream on the way."""
+    known = max(n for n in entry.xz_lines if n <= number)
+    for counted in range(known, number):
+        feeds = sum(
+            data.count(b"\n") for data in sealedfile.xz_stream_chunks(handle, streams[counted])
+        )
+        entry.xz_lines[counted + 1] = entry.xz_lines[counted] + feeds
+    return entry.xz_lines[number]
 
 
 def _line_at(
@@ -660,11 +676,10 @@ def _line_at(
         )
     if not complete:
         return None  # a torn last line is not a line here, as in a spool file
-    base = entry.xz_lines.get(first)
-    if base is not None and base + feeds + 1 != line:
+    if _lines_before(handle, streams, entry, first) + feeds + 1 != line:
         raise RawReferenceError(
             "raw_reference_mismatch",
-            f"byte {offset} starts line {base + feeds + 1}, not line {line}",
+            f"byte {offset} starts line {entry.xz_lines[first] + feeds + 1}, not line {line}",
         )
     return offset, bytes(collected)
 
