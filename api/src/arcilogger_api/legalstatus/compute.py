@@ -33,6 +33,7 @@ from arcilogger_worker.alerts.system import (
     NoStamps,
     crl_status,
     pinned_roots,
+    read_crl_index,
     read_stamp_renewals,
     revoked_certificates,
     shifted,
@@ -124,8 +125,9 @@ def _renewal_reasons(layout: Layout, options: LegalOptions) -> list[LegalReason]
 
 
 def _crl_reasons(status: CrlStatus, options: LegalOptions) -> list[LegalReason]:
-    """``crl_stale``: an issuer of the newest sealed day's chain without a stored list newer
-    than ``tsa.crl_max_age_days`` (all of them when ``state/crl`` cannot be read)."""
+    """``crl_stale``: an issuer of the newest sealed day's chain without a fresh stored list
+    (C22: fetched in the last ``tsa.crl_max_age_days`` days and not past its ``nextUpdate``;
+    all of them when ``state/crl`` cannot be read)."""
     if not status.stale:
         return []
     return [_reason("crl_stale", "settings-tsa", since=status.since, days=options.crl_max_age_days)]
@@ -166,7 +168,8 @@ def compute_legal_status(layout: Layout, config: Config, now: datetime) -> Legal
                 name=certificate_name(first.name),
             )
         )
-    reasons += _crl_reasons(crl_status(lists, stamp, now, options.crl_max_age_days), options)
+    status = crl_status(lists, read_crl_index(layout), stamp, now, options.crl_max_age_days)
+    reasons += _crl_reasons(status, options)
     ordered = _sorted(reasons)
     level: LegalLevel = ordered[0].level if ordered else "ok"
     return LegalStatus(

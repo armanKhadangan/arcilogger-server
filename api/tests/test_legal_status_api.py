@@ -136,18 +136,22 @@ class Site:
         *issued: datetime,
         revoked_at: datetime | None = None,
         failures: tuple[dict[str, str], ...] = (),
+        fetched_at: datetime = NOW - timedelta(hours=6),
+        valid_days: int = 7,
     ) -> list[str]:
-        """Lists of the stamps' root issued at ``issued`` (the TSA certificate revoked at
-        ``revoked_at`` on each), stored as ``crl fetch`` stores them (2.2); a sealed vault and
-        its pinned root first, when there are none yet."""
+        """Lists of the stamps' root issued at ``issued`` and valid for ``valid_days`` (the TSA
+        certificate revoked at ``revoked_at`` on each), fetched at ``fetched_at`` and stored as
+        ``crl fetch`` stores them (2.2); a sealed vault and its pinned root first, when there
+        are none yet."""
         if not self.vaults:
             self.sealed()
         self.pin_roots()
         tsa = self.vaults[-1].tsa
-        made = [(tsa, root_list(tsa, moment, revoked_at=revoked_at)) for moment in issued]
-        return store_lists(
-            self.layout, made, fetched_at=NOW - timedelta(hours=6), failures=failures
-        )
+        made = [
+            (tsa, root_list(tsa, moment, revoked_at=revoked_at, valid_days=valid_days))
+            for moment in issued
+        ]
+        return store_lists(self.layout, made, fetched_at=fetched_at, failures=failures)
 
 
 #: A URL the latest ``crl fetch`` could not store a list from.
@@ -256,7 +260,13 @@ def _certificate_revoked(site: Site) -> None:
 
 def _crl_stale(site: Site) -> None:
     site.use(legal(site.config))
-    site.lists(NOW - timedelta(days=8), failures=(FAILURE,))
+    # a root's list, valid for months, last fetched eight days ago (C22)
+    site.lists(
+        NOW - timedelta(days=90),
+        valid_days=120,
+        fetched_at=NOW - timedelta(days=8),
+        failures=(FAILURE,),
+    )
 
 
 REASONS: dict[str, tuple[Callable[[Site], None], dict[str, Any]]] = {
@@ -356,7 +366,7 @@ REASONS: dict[str, tuple[Callable[[Site], None], dict[str, Any]]] = {
             "level": "warning",
             "message_tr": "7 günden yeni doğrulanmış bir iptal listesi (SİL) yok.",
             "message_en": "No verified revocation list newer than 7 days.",
-            # the list's thisUpdate plus seven days
+            # the list's last fetch plus seven days
             "since": isoformat_site(NOW - timedelta(days=1), "seconds"),
             "count": None,
             "link": "settings-tsa",
@@ -482,7 +492,8 @@ def test_legal_options_read_the_wave_5_keys_with_their_defaults(api_config: Conf
 def test_legal_status_reads_the_configured_ages(site: Site, admin: TestClient) -> None:
     site.use(legal(site.config, renew_before_days=90, crl_max_age_days=30))
     site.renewals(token("2026-10-01", "due", datetime(2027, 1, 1, tzinfo=UTC)))
-    site.lists(NOW - timedelta(days=8))  # fresh for 30 days
+    # fetched eight days ago: fresh for 30 days
+    site.lists(NOW - timedelta(days=8), valid_days=60, fetched_at=NOW - timedelta(days=8))
     (reason,) = get(admin)["reasons"]
     assert (
         reason["message_en"] == "1 stamp certificate(s) expire within 90 days; re-stamping is due."
@@ -579,7 +590,7 @@ def test_crl_stale_counts_only_the_lists_that_match_their_index_entry(
     site: Site, admin: TestClient
 ) -> None:
     """C14/C20: a newest list whose file was changed or deleted is no verified list; the
-    older one decides."""
+    older one decides (it expired three days ago, its nextUpdate)."""
     site.use(legal(site.config))
     older, newest = site.lists(NOW - timedelta(days=10), NOW - timedelta(days=1))
     assert crl_reasons(admin) == []
@@ -592,6 +603,46 @@ def test_crl_stale_counts_only_the_lists_that_match_their_index_entry(
     site.app.state.arci_legal_status.invalidate()
     assert len(crl_reasons(admin)) == 1
     assert (site.layout.crl_dir / older).is_file()
+
+
+@pytest.mark.parametrize(
+    ("issued_days_ago", "valid_days", "fetched_days_ago", "stale_since"),
+    [
+        # a root CA publishes every few months: its list, 90 days old and valid for another
+        # 30, fetched yesterday, is fresh
+        (90, 120, 1, None),
+        (90, 120, 6.9, None),
+        (90, 120, 7, NOW),  # "newer than": a fetch exactly seven days old is stale
+        (90, 120, 9, NOW - timedelta(days=2)),
+        # a list past its nextUpdate is stale, however recently it was fetched
+        (8, 7, 0, NOW - timedelta(days=1)),
+        (7, 7, 0, NOW),  # its nextUpdate is now
+        (6, 7, 0, None),
+    ],
+)
+def test_crl_stale_by_the_last_fetch_and_the_lists_own_validity(
+    site: Site,
+    admin: TestClient,
+    issued_days_ago: int,
+    valid_days: int,
+    fetched_days_ago: float,
+    stale_since: datetime | None,
+) -> None:
+    """C22: an issuer is fresh while it has an accepted list fetched in the last
+    ``tsa.crl_max_age_days`` days and not past its ``nextUpdate``; ``thisUpdate`` is no
+    measure. ``since`` is when the best list stopped counting."""
+    site.use(legal(site.config))
+    site.lists(
+        NOW - timedelta(days=issued_days_ago),
+        valid_days=valid_days,
+        fetched_at=NOW - timedelta(days=fetched_days_ago),
+    )
+    found = crl_reasons(admin)
+    if stale_since is None:
+        assert found == []
+        return
+    (reason,) = found
+    assert reason["since"] == isoformat_site(stale_since, "seconds")
 
 
 def test_crl_stale_when_the_lists_cannot_be_read_while_in_use(

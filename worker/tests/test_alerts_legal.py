@@ -147,16 +147,18 @@ def sealed(layout: Layout) -> Iterator[SealedVault]:
     vault.unlock_all()
 
 
-def root_list(tsa: MockTsa, this_update: datetime, revoked_at: datetime | None = None) -> bytes:
-    """A list of the mock root issued at ``this_update``, with the TSA certificate revoked at
-    ``revoked_at`` (none: no entry)."""
+def root_list(
+    tsa: MockTsa, this_update: datetime, revoked_at: datetime | None = None, valid_days: int = 7
+) -> bytes:
+    """A list of the mock root issued at ``this_update`` and valid for ``valid_days``, with the
+    TSA certificate revoked at ``revoked_at`` (none: no entry)."""
     key = load_pem_private_key((tsa.state_dir / "root.key").read_bytes(), None)
     assert isinstance(key, ec.EllipticCurvePrivateKey)
     builder = (
         x509.CertificateRevocationListBuilder()
         .issuer_name(tsa.root_certificate.subject)
         .last_update(this_update)
-        .next_update(this_update + timedelta(days=7))
+        .next_update(this_update + timedelta(days=valid_days))
     )
     if revoked_at is not None:
         builder = builder.add_revoked_certificate(
@@ -175,14 +177,16 @@ def crl_lists(
     fetched_days_ago: int = 0,
     failures: tuple[dict[str, Any], ...] = (),
     revoked_at: datetime | None = None,
+    valid_days: int = 7,
 ) -> str | None:
     """``state/crl`` as ``crl fetch`` leaves it (Wave 5 contract 2.2): the root's list issued
-    ``issued_days_ago`` days before ``NOW`` (none: no list) and ``failures``; its stored name."""
+    ``issued_days_ago`` days before ``NOW`` (none: no list), valid for ``valid_days`` and last
+    fetched ``fetched_days_ago`` days before ``NOW``, and ``failures``; its stored name."""
     layout, tsa = vault.layout, vault.tsa
     layout.crl_dir.mkdir(parents=True, exist_ok=True)
     entries, name = [], None
     if issued_days_ago is not None:
-        der = root_list(tsa, NOW - timedelta(days=issued_days_ago), revoked_at)
+        der = root_list(tsa, NOW - timedelta(days=issued_days_ago), revoked_at, valid_days)
         crl = replace(parse_crl(der), issuer_sha256=fingerprint(tsa.root_certificate))
         name = crl.file_name
         (layout.crl_dir / name).write_bytes(der)
@@ -192,7 +196,7 @@ def crl_lists(
                 "issuer": crl.issuer,
                 "issuer_sha256": crl.issuer_sha256,
                 "this_update": crl.this_update.isoformat(),
-                "next_update": None,
+                "next_update": crl.next_update.isoformat() if crl.next_update else None,
                 "sha256": crl.sha256,
                 "url": "http://192.0.2.10/crl/root.crl",
                 "fetched_at": isoformat_site(NOW - timedelta(days=fetched_days_ago), "seconds"),
@@ -344,9 +348,11 @@ def test_stamp_cert_cleared(check: Any, layout: Layout, db_session: Session) -> 
 def test_stamp_crl_raised_when_stale_and_cleared_after_a_fresh_list(
     check: Any, layout: Layout, config: Config, db_session: Session, sealed: SealedVault
 ) -> None:
-    crl_lists(sealed, 6)
+    # C22: a root's list, 90 days old and valid for months, fetched yesterday is fresh
+    crl_lists(sealed, 90, valid_days=120, fetched_days_ago=1)
     assert CRL_KEY not in check()
-    crl_lists(sealed, 7)  # exactly seven days old is not "newer than seven days"
+    # a fetch exactly seven days old is not "newer than seven days"
+    crl_lists(sealed, 90, valid_days=120, fetched_days_ago=7)
     alert = check()[CRL_KEY]
     assert (alert.rule, alert.severity) == ("R20-crl", "medium")
     assert alert.title == "7 günden yeni doğrulanmış bir iptal listesi (SİL) yok"
@@ -354,7 +360,7 @@ def test_stamp_crl_raised_when_stale_and_cleared_after_a_fresh_list(
         "stale_issuers": 1,
         "failures": 0,
         "changed_files": 0,
-        "newest_fetched_at": isoformat_site(NOW, "seconds"),
+        "newest_fetched_at": isoformat_site(NOW - timedelta(days=7), "seconds"),
         "max_age_days": 7,
         "title_en": "No verified revocation list newer than 7 days",
     }
@@ -363,8 +369,13 @@ def test_stamp_crl_raised_when_stale_and_cleared_after_a_fresh_list(
     crl_lists(sealed, 1)
     assert CRL_KEY not in check()
     assert resolved(db_session, CRL_KEY).details["auto_resolved"]["reason"] == "crl_fresh"
+    # a list past its own nextUpdate is stale, though it was fetched just now
+    crl_lists(sealed, 8, fetched_days_ago=0)
+    assert CRL_KEY in check()
+    crl_lists(sealed, 1, fetched_days_ago=2)
+    assert CRL_KEY not in check()
 
-    # tsa.crl_max_age_days (Wave 5 contract 2.5) sets the age.
+    # tsa.crl_max_age_days (Wave 5 contract 2.5) sets the age of the last fetch.
     strict = config.model_copy(
         update={"tsa": config.tsa.model_copy(update={"crl_max_age_days": 1})}
     )
@@ -391,9 +402,9 @@ def test_stamp_crl_raised_for_an_issuer_in_use_without_any_list(
 
 
 def test_stamp_crl_judged_from_the_index_not_an_exit_code(check: Any, sealed: SealedVault) -> None:
-    """C12: the fetch is judged from ``state/crl``. Failed fetches and an old ``fetched_at``
-    alone raise nothing while the stored list is recent; once the list is old the alert counts
-    them from the index."""
+    """C12: the fetch is judged from ``state/crl``. Failed fetches raise nothing while the
+    stored list's last fetch is recent (C22); once it is old the alert counts them from the
+    index."""
     crl_lists(sealed, 4, fetched_days_ago=4, failures=(FAILURE, FAILURE))
     assert CRL_KEY not in check()
     crl_lists(sealed, 9, fetched_days_ago=8, failures=(FAILURE,))

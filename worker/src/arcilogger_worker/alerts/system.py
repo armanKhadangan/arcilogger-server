@@ -2154,26 +2154,50 @@ def stored_lists(layout: Layout) -> StoredLists | None:
         return None
 
 
+def crl_fetch_times(index: CrlIndexState) -> dict[str, datetime]:
+    """The last successful fetch of each stored list (its index ``fetched_at``), by its stored
+    name."""
+    fetched: dict[str, datetime] = {}
+    for entry in index.lists:
+        if entry.file not in fetched or fetched[entry.file] < entry.fetched_at:
+            fetched[entry.file] = entry.fetched_at
+    return fetched
+
+
 def crl_stale_issuers(
-    lists: Sequence[Crl], in_use: Iterable[str], now: datetime, max_age_days: int
+    lists: Sequence[Crl],
+    fetched: Mapping[str, datetime],
+    in_use: Iterable[str],
+    now: datetime,
+    max_age_days: int,
 ) -> list[str]:
-    """The issuers in use without a stored list issued in the last ``max_age_days`` days (by
-    its ``thisUpdate``), an issuer without any list included."""
-    oldest = now - timedelta(days=max_age_days)
-    newest = _newest_lists(lists)
-    return [
-        issuer for issuer in sorted(set(in_use)) if issuer not in newest or newest[issuer] <= oldest
-    ]
+    """The issuers in use without a fresh stored list (C22), an issuer without any list
+    included. ``fetched`` holds the lists' fetch times by stored name (:func:`crl_fetch_times`)."""
+    fresh = _fresh_until(lists, fetched, max_age_days)
+    return [issuer for issuer in sorted(set(in_use)) if issuer not in fresh or fresh[issuer] <= now]
 
 
-def _newest_lists(lists: Sequence[Crl]) -> dict[str, datetime]:
-    """The newest ``thisUpdate`` of each issuer's stored lists, by the issuer's fingerprint."""
-    newest: dict[str, datetime] = {}
+def _fresh_until(
+    lists: Sequence[Crl], fetched: Mapping[str, datetime], max_age_days: int
+) -> dict[str, datetime]:
+    """Until when each issuer's stored lists keep it fresh, by the issuer's fingerprint (C22): a
+    list until its last fetch is ``max_age_days`` old or its own ``nextUpdate``, whichever comes
+    first, and the issuer's best list counts. ``thisUpdate`` is not a measure: a root CA may
+    publish only every few months. A list the index gives no fetch time counts for nothing."""
+    until: dict[str, datetime] = {}
     for found in lists:
+        fetched_at = fetched.get(found.path.name if found.path is not None else found.file_name)
+        if fetched_at is None:
+            continue
+        fresh = shifted(fetched_at, timedelta(days=max_age_days))
+        if fresh is None:
+            continue
+        if found.next_update is not None:
+            fresh = min(fresh, found.next_update)
         issuer = found.issuer_sha256.lower()
-        if issuer not in newest or newest[issuer] < found.this_update:
-            newest[issuer] = found.this_update
-    return newest
+        if issuer not in until or until[issuer] < fresh:
+            until[issuer] = fresh
+    return until
 
 
 @dataclass(frozen=True)
@@ -2181,8 +2205,8 @@ class CrlStatus:
     """The revocation lists of the issuers in use (``crl_stale``, ``R20-crl``)."""
 
     in_use: frozenset[str] = frozenset()
-    #: The issuers in use without a list newer than the maximum age: all of them when the
-    #: stored lists cannot be read.
+    #: The issuers in use without a fresh list (C22): all of them when the stored lists cannot
+    #: be read.
     stale: tuple[str, ...] = ()
     #: When the first stale issuer that has a list went stale; ``None`` when none has one.
     since: datetime | None = None
@@ -2193,23 +2217,24 @@ class CrlStatus:
 
 
 def crl_status(
-    lists: StoredLists | None, stamp: StampInUse | None, now: datetime, max_age_days: int
+    lists: StoredLists | None,
+    index: CrlIndexState,
+    stamp: StampInUse | None,
+    now: datetime,
+    max_age_days: int,
 ) -> CrlStatus:
     """Whether the issuers of the stamp in use have a fresh verified list (Wave 5 contract
-    2.3.1): judged from the stored lists only, never from the CrlFetch task's exit code (C12)."""
+    2.3.1, C22): judged from the stored lists and their fetch times in ``index``
+    (:func:`read_crl_index`) only, never from the CrlFetch task's exit code (C12)."""
     in_use = issuers_in_use(stamp)
     usable: Sequence[Crl] = lists if lists is not None else ()
-    stale = crl_stale_issuers(usable, in_use, now, max_age_days)
-    newest = _newest_lists(usable)
-    went_stale = [
-        shifted(newest[issuer], timedelta(days=max_age_days))
-        for issuer in stale
-        if issuer in newest
-    ]
+    fetched = crl_fetch_times(index)
+    stale = crl_stale_issuers(usable, fetched, in_use, now, max_age_days)
+    until = _fresh_until(usable, fetched, max_age_days)
     return CrlStatus(
         in_use=in_use,
         stale=tuple(stale),
-        since=min((moment for moment in went_stale if moment is not None), default=None),
+        since=min((until[issuer] for issuer in stale if issuer in until), default=None),
         readable=lists is not None,
         mismatched=lists.mismatched if lists is not None else (),
     )
@@ -2399,15 +2424,15 @@ def check_stamp_cert(ctx: CheckContext) -> Outcome:
 
 
 def check_stamp_crl(ctx: CheckContext) -> Outcome:
-    """``R20-crl:none``: an issuer of the newest sealed day's chain has no stored revocation
-    list issued in the last ``tsa.crl_max_age_days`` days that still matches its index entry,
-    or ``state/crl`` cannot be read while one is in use. Judged from the stored lists and
-    ``state/crl/index.json``, never from the CrlFetch task's exit code (C12); lists that cannot
-    be read resolve nothing."""
+    """``R20-crl:none``: an issuer of the newest sealed day's chain has no fresh stored
+    revocation list (C22: fetched in the last ``tsa.crl_max_age_days`` days, not past its
+    ``nextUpdate``, still matching its index entry), or ``state/crl`` cannot be read while one
+    is in use. Judged from the stored lists and ``state/crl/index.json``, never from the
+    CrlFetch task's exit code (C12); lists that cannot be read resolve nothing."""
     max_age = crl_max_age_days(ctx.config)
     stamp = stamp_in_use(ctx.layout, pinned_roots(ctx.config, ctx.layout))
-    status = crl_status(stored_lists(ctx.layout), stamp, ctx.now, max_age)
     index = read_crl_index(ctx.layout)
+    status = crl_status(stored_lists(ctx.layout), index, stamp, ctx.now, max_age)
     findings = []
     if status.stale:
         newest = index.newest_fetched_at

@@ -36,6 +36,7 @@ from arcilogger_worker.alerts.system import (
     CrlStatus,
     RevokedCertificate,
     StampRenewal,
+    crl_fetch_times,
     crl_index_path,
     crl_stale_issuers,
     crl_status,
@@ -286,24 +287,64 @@ def test_crl_index_wrong_schema_is_unreadable_not_an_error(layout: Layout, conte
     assert stored_lists(layout) is None  # W5-B's reader refuses it too: nothing counts
 
 
-def stored(issuer: str, days_ago: int) -> Crl:
-    """A stored list of ``issuer`` (a fingerprint) issued ``days_ago`` days before ``NOW``."""
-    this_update = NOW - timedelta(days=days_ago)
-    return Crl(b"", "CN=Örnek", x509.Name([]), this_update, None, {}, {}, issuer_sha256=issuer)
+def stored(
+    issuer: str, fetched_days_ago: float | None, issued_days_ago: int = 90, **times: float
+) -> tuple[Crl, dict[str, datetime]]:
+    """A stored list of ``issuer`` (a fingerprint) issued ``issued_days_ago`` days before
+    ``NOW``, with its next update ``next_in_days`` from ``NOW`` (absent: none), and its index
+    fetch time by stored name (none without ``fetched_days_ago``)."""
+    this_update = NOW - timedelta(days=issued_days_ago)
+    next_update = NOW + timedelta(days=times["next_in_days"]) if "next_in_days" in times else None
+    crl = Crl(
+        b"", "CN=Örnek", x509.Name([]), this_update, next_update, {}, {}, issuer_sha256=issuer
+    )
+    if fetched_days_ago is None:
+        return crl, {}
+    return crl, {crl.file_name: NOW - timedelta(days=fetched_days_ago)}
 
 
-def test_crl_stale_issuers_by_this_update() -> None:
-    def stale(*lists: Crl, in_use: tuple[str, ...] = (ROOT_SHA,)) -> list[str]:
-        return crl_stale_issuers(lists, in_use, NOW, 7)
+def test_crl_stale_issuers_by_the_last_fetch_and_the_next_update() -> None:
+    """C22: fresh while an accepted list was fetched in the last ``max_age_days`` days and is
+    not past its own ``nextUpdate``; its ``thisUpdate`` is no measure."""
 
-    assert stale(stored(ROOT_SHA, 6)) == []
-    assert stale(stored(ROOT_SHA, 7)) == [ROOT_SHA]  # "newer than" seven days
+    def stale(
+        *found: tuple[Crl, dict[str, datetime]], in_use: tuple[str, ...] = (ROOT_SHA,)
+    ) -> list[str]:
+        fetched = {name: at for _, times in found for name, at in times.items()}
+        return crl_stale_issuers([crl for crl, _ in found], fetched, in_use, NOW, 7)
+
+    # a root CA's list, 90 days old and valid for another 30, fetched yesterday: fresh
+    assert stale(stored(ROOT_SHA, 1, next_in_days=30)) == []
+    assert stale(stored(ROOT_SHA, 1)) == []  # no nextUpdate: the fetch alone decides
+    assert stale(stored(ROOT_SHA, 6.99, next_in_days=30)) == []
+    assert stale(stored(ROOT_SHA, 7, next_in_days=30)) == [ROOT_SHA]  # "newer than" seven days
     assert stale(stored(ROOT_SHA, 8)) == [ROOT_SHA]
-    assert stale(stored(ROOT_SHA, 8), stored(ROOT_SHA, 2)) == []  # the issuer's newest counts
+    # past its nextUpdate (or at it) it is stale, however recently it was fetched
+    assert stale(stored(ROOT_SHA, 0, issued_days_ago=8, next_in_days=-1)) == [ROOT_SHA]
+    assert stale(stored(ROOT_SHA, 0, issued_days_ago=7, next_in_days=0)) == [ROOT_SHA]
+    assert stale(stored(ROOT_SHA, 0, issued_days_ago=6, next_in_days=1)) == []
+    assert stale(stored(ROOT_SHA, None, issued_days_ago=1)) == [ROOT_SHA]  # no fetch indexed
+    # the issuer's best list counts
+    assert stale(stored(ROOT_SHA, 8), stored(ROOT_SHA, 2, issued_days_ago=2)) == []
     assert stale(stored(SUB_SHA, 2)) == [ROOT_SHA]  # an issuer in use with no list at all
     assert stale(stored(ROOT_SHA, 9), stored(SUB_SHA, 1), in_use=(SUB_SHA, ROOT_SHA)) == [ROOT_SHA]
     assert stale(stored(ROOT_SHA, 9), in_use=()) == []  # nothing in use, nothing stale
     assert stale(stored(ROOT_SHA.upper(), 1)) == []  # a fingerprint is matched in any case
+    # a fetch time whose end of freshness site time cannot show counts for nothing
+    edge, _ = stored(ROOT_SHA, 1)
+    last = datetime(9999, 12, 31, 20, tzinfo=UTC)
+    assert crl_stale_issuers([edge], {edge.file_name: last}, (ROOT_SHA,), NOW, 7) == [ROOT_SHA]
+
+
+def test_crl_fetch_times_by_stored_name() -> None:
+    entry = CrlListEntry("CN=Örnek", ROOT_SHA, NOW, None, "a.crl", NOW - timedelta(days=2))
+    newer = replace(entry, fetched_at=NOW - timedelta(hours=1))
+    other = replace(entry, file="b.crl")
+    state = CrlIndexState(lists=(entry, newer, other))
+    assert crl_fetch_times(state) == {
+        "a.crl": NOW - timedelta(hours=1),
+        "b.crl": NOW - timedelta(days=2),
+    }
 
 
 # -- the stamp in use and its lists ---------------------------------------------------------------
@@ -390,29 +431,32 @@ def test_crl_status_judges_the_lists_that_count(layout: Layout, vault: SealedVau
     vault.seal_days([date(2026, 10, 30)])
     stamp = stamp_in_use(layout, [vault.tsa.root_certificate])
     root = fingerprint(vault.tsa.root_certificate)
-    assert crl_status(stored_lists(layout), stamp, NOW, 7) == CrlStatus(
-        in_use=frozenset({root}), stale=(root,)
-    )  # no list at all
+
+    def status() -> CrlStatus:
+        return crl_status(stored_lists(layout), read_crl_index(layout), stamp, NOW, 7)
+
+    assert status() == CrlStatus(in_use=frozenset({root}), stale=(root,))  # no list at all
     older, newest = store(
         layout,
         vault.tsa,
         root_list(vault.tsa, NOW - timedelta(days=10)),
         root_list(vault.tsa, NOW - timedelta(days=1)),
     )
-    assert crl_status(stored_lists(layout), stamp, NOW, 7).stale == ()
+    assert status().stale == ()
     path = layout.crl_dir / newest
     path.write_bytes(path.read_bytes() + b"\x00")  # test: the stored file is changed
-    status = crl_status(stored_lists(layout), stamp, NOW, 7)
-    assert (status.stale, status.since, status.mismatched) == (
+    found = status()
+    # the older list was fetched six hours ago, but it is past its nextUpdate (three days ago)
+    assert (found.stale, found.since, found.mismatched) == (
         (root,),
         NOW - timedelta(days=3),
         (newest,),
     )
-    assert crl_status(stored_lists(layout), None, NOW, 7) == CrlStatus(mismatched=(newest,))
-    write(crl_index_path(layout), {"schema": CRL_INDEX_SCHEMA, "lists": 3, "failures": []})
-    assert crl_status(stored_lists(layout), stamp, NOW, 7) == CrlStatus(
-        in_use=frozenset({root}), stale=(root,), readable=False
+    assert crl_status(stored_lists(layout), read_crl_index(layout), None, NOW, 7) == CrlStatus(
+        mismatched=(newest,)
     )
+    write(crl_index_path(layout), {"schema": CRL_INDEX_SCHEMA, "lists": 3, "failures": []})
+    assert status() == CrlStatus(in_use=frozenset({root}), stale=(root,), readable=False)
     assert (layout.crl_dir / older).is_file()
 
 

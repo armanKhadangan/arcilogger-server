@@ -19,9 +19,10 @@ waiting) with a ``[tsa]`` configuration and the state files of a running site:
   exist yet): the sealed days' tokens, ``not_due`` with the mock certificate's real expiry, or
   ``due`` for a provider certificate that ends on 01.03.2027 (within ``tsa.renew_before_days``);
 * stored revocation lists of the mock root as ``crl fetch`` stores them
-  (:mod:`arcilogger_api.legalstatus.testing`): one issued yesterday, one issued nine days ago
-  (older than ``tsa.crl_max_age_days``), or one issued yesterday that revokes the TSA
-  certificate the day before the stamps.
+  (:mod:`arcilogger_api.legalstatus.testing`): one issued yesterday and fetched an hour ago, a
+  root's list issued 90 days ago and valid for months whose last fetch is nine days old (older
+  than ``tsa.crl_max_age_days``, C22), or one issued yesterday that revokes the TSA certificate
+  the day before the stamps.
 
 What ``legal-status.json`` holds (the names of the W5-D fixtures, ``web/src/test/w5-fixtures.ts``):
 ``ok`` (Kamu SM, nothing to report), ``provider_not_legal`` (the site as it is, a fresh list:
@@ -80,9 +81,12 @@ API = "/api/v1/legal-status"
 
 #: The provider certificate's end in a report with tokens due for re-stamping.
 DUE_NOT_AFTER = datetime(2027, 3, 1, 9, 0, tzinfo=UTC)
-#: A list issued this long ago is fresh; the stale one is older than ``tsa.crl_max_age_days`` (7).
+#: The fresh list is issued this long ago; the stale one was last fetched this long ago, longer
+#: than ``tsa.crl_max_age_days`` (7, C22).
 FRESH = timedelta(days=1)
 STALE = timedelta(days=9)
+#: The stale one is a root's list, valid for months (C22): only its last fetch makes it stale.
+ROOT_LIST_DAYS = 120
 
 
 @dataclass(frozen=True)
@@ -213,10 +217,17 @@ def _capture(
     if stamp is None:
         raise SystemExit("legal-status: the newest sealed day's stamp reaches no pinned root")
     lists = {
-        "fresh": root_list(tsa, now - FRESH),
-        "stale": root_list(tsa, now - STALE),
+        "fresh": (root_list(tsa, now - FRESH), now - timedelta(hours=1)),
+        # issued 90 days ago and valid for months, last fetched nine days ago (C22)
+        "stale": (
+            root_list(tsa, now - timedelta(days=90), valid_days=ROOT_LIST_DAYS),
+            now - STALE,
+        ),
         # revoked the day before the stamps: crl-revoked for every stamp of the site
-        "revoked": root_list(tsa, now - FRESH, revoked_at=stamp.gen_time - timedelta(days=1)),
+        "revoked": (
+            root_list(tsa, now - FRESH, revoked_at=stamp.gen_time - timedelta(days=1)),
+            now - timedelta(hours=1),
+        ),
     }
     out: dict[str, Any] = {}
     for case in CASES:
@@ -226,7 +237,8 @@ def _capture(
             stamp_renewal_path(layout), renewal_report(capture, tsa, case.renewal), now
         )
         shutil.rmtree(layout.crl_dir, ignore_errors=True)
-        store_lists(layout, [(tsa, lists[case.crl])], fetched_at=now - timedelta(hours=1))
+        der, fetched_at = lists[case.crl]
+        store_lists(layout, [(tsa, der)], fetched_at=fetched_at)
         _clear_cache(capture)
         answer = capture.json(auditor.get(API), 200)
         # D11: the same answer for every signed-in user, before the KVKK notice too

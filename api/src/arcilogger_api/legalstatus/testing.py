@@ -34,9 +34,11 @@ def root_list(
     *,
     revoked_at: datetime | None = None,
     hold: bool = False,
+    valid_days: int = 7,
 ) -> bytes:
-    """A DER list of the mock TSA's root issued at ``this_update``: its TSA certificate revoked
-    (on hold with ``hold``) at ``revoked_at``, or no entry."""
+    """A DER list of the mock TSA's root issued at ``this_update`` with its next update
+    ``valid_days`` later: its TSA certificate revoked (on hold with ``hold``) at ``revoked_at``,
+    or no entry."""
     key = load_pem_private_key((tsa.state_dir / "root.key").read_bytes(), None)
     if not isinstance(key, ec.EllipticCurvePrivateKey | rsa.RSAPrivateKey):
         raise TypeError(f"the mock root key is a {type(key).__name__}")
@@ -44,7 +46,7 @@ def root_list(
         x509.CertificateRevocationListBuilder()
         .issuer_name(tsa.root_certificate.subject)
         .last_update(this_update)
-        .next_update(this_update + timedelta(days=7))
+        .next_update(this_update + timedelta(days=valid_days))
     )
     if revoked_at is not None:
         entry = (
