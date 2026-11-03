@@ -1,0 +1,35 @@
+{
+  "archive": {
+    "card": {
+      "title": "Günler mühürlü arşivde",
+      "search": "Bu aramanın {{first}} – {{last}} günleri veritabanında değil; bu günlerin kayıtları mühürlü arşivde. Arşivden yüklerseniz arama bu günleri de kapsar.",
+      "clipped": "Bir yüklemede en çok {{max}} gün istenebilir: pencereye en yakın {{max}} gün ({{first}} – {{last}}) yüklenir. Daha eski günler için aralığı daraltın.",
+      "reload": "Arşivden yükle",
+      "retry": "Yeniden dene"
+    },
+    "dialog": {
+      "title": "Günler arşivden yüklensin mi?",
+      "body": "{{first}} – {{last}} günlerinin kayıtları mühürlü arşivden veritabanına yüklenir ve db.reload_keep_days ayarının süresi boyunca (varsayılan 7 gün) orada kalır; sonra yeniden kaldırılır. Bu, o günlerin kişisel verilerini de veritabanına geri getirir. İstek denetim kaydına yazılır.",
+      "confirm": "Yükle"
+    },
+    "progress": {
+      "label": "Arşivden yükleme ilerlemesi",
+      "of": "{{done}} / {{total}} yüklendi (%{{percent}})"
+    },
+    "status": {
+      "queued": "Sırada: başka bir yükleme bitince başlar.",
+      "loading": "Yükleniyor…",
+      "ready": "Günler yüklendi; {{expires}} tarihine kadar veritabanında kalır.",
+      "rerun": {
+        "lookup": "Sorgu yeniden çalıştırılıyor…",
+        "search": "Arama yeniden çalıştırılıyor…"
+      },
+      "expired": "Yüklenen günlerin süresi doldu; veritabanından yeniden kaldırıldılar."
+    },
+    "failure": {
+      "archive_day_not_in_vault": "Yükleme yapılamadı: günlerden biri artık mühürlü arşivde yok (istek beklerken saklama süresi doldu). Bu gün yeniden yüklenemez.",
+      "archive_file_unreadable": "Yükleme yapılamadı: bir günün mühürlü dosyası okunamadı veya mühür kaydıyla eşleşmiyor. Sistem yöneticisine bildirin; arşiv doğrulamasını çalıştırın.",
+      "unknown": "Yükleme yapılamadı ({{code}})."
+    }
+  }
+}
