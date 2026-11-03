@@ -375,11 +375,19 @@ def last_spooled_id(layout: Layout, today: date) -> int | None:
         if last is not None:
             return last
         try:
-            sealed = sealedfile.find_audit(layout, day)
-        except sealedfile.SealedFileError:
-            sealed = None  # both formats: neither is trusted as the last word
-        if sealed is not None and (last := last_gz_line_id(sealed)) is not None:
-            return last
+            found = sealedfile.find_audit(layout, day)
+            sealed = [] if found is None else [found]
+        except sealedfile.SealedFileError as exc:
+            if exc.code != "sealed_file_ambiguous":
+                raise
+            # Both formats (a failed retry left both): an id in either file is spooled already,
+            # so the higher one is the guard; skipping the day would append its lines again.
+            sealed = [
+                layout.vault_day(day) / sealedfile.audit_name(kind) for kind in ("gzip", "xz")
+            ]
+        ids = [last for path in sealed if (last := last_gz_line_id(path)) is not None]
+        if ids:
+            return max(ids)
     return None
 
 

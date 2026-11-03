@@ -548,14 +548,16 @@ def test_lines_go_to_the_day_they_are_written_never_to_a_closed_day(
     assert verify_audit_lines(lines, prev_hash=GENESIS_HASH).ok  # one chain across the files
 
 
-@pytest.mark.parametrize("compression", ["gzip", "xz"])
+@pytest.mark.parametrize("compression", ["gzip", "xz", "both"])
 def test_duplicate_guard_looks_into_the_sealed_file(
     app_session_factory: sessionmaker[Session],
     db_engine: Engine,
     layout: Layout,
     monkeypatch: pytest.MonkeyPatch,
-    compression: Literal["gzip", "xz"],
+    compression: Literal["gzip", "xz", "both"],
 ) -> None:
+    """``both``: a failed retry left the day in both formats, the newer one empty; the higher
+    id of the two still guards (skipping the day would append its line again)."""
     day, next_day = date(2026, 10, 12), date(2026, 10, 13)
     monkeypatch.setattr(audit, "utc_now", _at(day, 22))
     with app_session_factory() as session:
@@ -565,9 +567,18 @@ def test_duplicate_guard_looks_into_the_sealed_file(
     with app_session_factory() as session:
         session.execute(delete(Setting).where(Setting.key == audit.WATERMARK_KEY))
         session.commit()
-    sealed = layout.vault_day(day) / sealedfile.audit_name(compression)
+    sealed = layout.vault_day(day) / sealedfile.audit_name(
+        "gzip" if compression == "both" else compression
+    )
     sealed.parent.mkdir(parents=True)
     sealedfile.write(layout.audit_spool(day), sealed)
+    if compression == "both":
+        empty = layout.vault_day(day) / "empty"
+        empty.write_bytes(b"")
+        sealedfile.write(empty, layout.vault_day(day) / sealedfile.audit_name("xz"))
+        empty.unlink()
+        with pytest.raises(sealedfile.SealedFileError):
+            sealedfile.find_audit(layout, day)
     layout.audit_spool(day).unlink()
     monkeypatch.setattr(audit, "utc_now", _at(next_day, 1))
     assert flush_audit_spool(db_engine, layout) == 0
