@@ -197,6 +197,34 @@ can be cited in an evidence package.
   the line feeds before that stream, counted once per file (in memory, never in `vault/`): the
   first view of a file decompresses the streams before the line, later views one stream. gzip
   cannot seek: the first view decompresses up to the line and leaves checkpoints every 64 MiB.
+- **Measurements (H5)** with `tools/bench/seal_compression.py` on load-generator days of 1 M lines
+  (645 MB) and 5 M lines (3.23 GB), cloud container with 4 vCPUs and 16 GB (some 5 M runs shared
+  the machine with test runs, so their times are on the slow side). "5 GB day" is the sealing
+  time extrapolated from the measured speed, against half of the Seal task's limit (PT2H: 3 600 s).
+
+  | Format (5 M lines) | Size of raw | Sealing | Peak memory | 5 GB day |
+  |---|---|---|---|---|
+  | gzip -9 | 6.06 % (196 MB) | 47 s | 24 MB | 72 s |
+  | xz 6, 1 thread | 4.44 % (143 MB) | 750 s | 154 MB | 1 162 s |
+  | **xz 6, 2 threads (default)** | 4.44 % (143 MB) | 473 s | 269 MB | 733 s |
+  | xz 9, 1 thread | 4.45 % (144 MB) | 860 s | 288 MB | 1 332 s |
+  | xz 9, 2 threads | 4.45 % (144 MB) | 478 s | 511 MB | 741 s |
+
+  On 1 M lines the ratios are the same; xz 6 on 2 threads seals at 8.3 MB/s (5 GB day: 603 s).
+  Preset 9 gains nothing on logs (4.45 % against 4.44 %) for twice the memory, so the defaults
+  stay preset 6 on 2 threads: a 5 GB day takes about 12 minutes, a fifth of the limit.
+
+  Showing one cited line (`/raw`, the code the API runs) on the 5 M line day:
+
+  | Format | First view, middle line | First view, last line | Later views of the file |
+  |---|---|---|---|
+  | gzip -9 | 3.4 s | 6.4 s | 0.12 s (checkpoints) |
+  | xz 6 | 7.0 s | 14.1 s | 0.06 s (one stream) |
+
+  The first xz view of a file counts the line feeds of the streams before the line (the line
+  number is always checked); xz decompresses about half as fast as gzip, so that first view
+  costs about twice as much. Counting on every view instead of keeping the counts would cost the
+  first-view time each time.
 
 ## Time-series tables
 
