@@ -1291,6 +1291,28 @@ All Wave 5 questions are answered (2026-11-02).
   report token's path is data-dir relative (`exports/reports/<name>.pdf.zd`), as §2.1.1 says;
   every other path is vault-relative, and a day's is its token's (`…/manifest-<day>.json.zd`),
   the key W5-C's day page looks it up by.
+- **W5-A-5: the standalone verifier's rule and window.** The package carries neither
+  `tsa.legal_root_fingerprints` nor `tsa.renew_before_days`, and §2.1.4 computes "from the
+  package alone". So in `verify.py` a renewal record counts when its token verifies against the
+  package's roots, the record is `arcilogger.renewal/1` with `tsa.legal_grade: true` and
+  `reason: "due"`, the stamp is not one of ARCILOGGER's test TSA (a policy under 2.999 or a root
+  of "ARCILOGGER TEST - NOT VALID", as `legal-claim-mismatch` judges a day) and the package's
+  CRLs do not show its certificate revoked at or before the stamp; and its own stamp is
+  `not_due` or `covered` (the chain of §2.1.2, the same rules as the core's, copied in the
+  standard library as `RenewalRules`). The window is the default 180 days (`RENEW_BEFORE`). A
+  production-like stamp whose root the site has not listed therefore counts in the standalone
+  verifier and not in the core: that case is the core's only. Only a day whose token verified
+  gets a finding (its certificate's `notAfter` comes from the verified signer); a day whose
+  token fails has failed already. `{date}` is `_format_time` in the Turkish text and ISO 8601
+  in the English one, as the other findings of the file write times; for `renewal-late` it is
+  the time of the re-stamping (the counting renewal's genTime), for the other codes the
+  certificate's expiry. `VERIFIER_VERSION` is "5" by addendum H4: W5-H (#130) had not merged
+  when W5-A set it; whichever of the two merges second makes it "6".
+- **W5-A-6: what stays in section 5.** The existing `renewal-ok` (each record's stamp) and
+  `renewal-covers` (which packaged days a record names) stay beside the five new codes, and the
+  section "5. Yenileme damgaları" now appears whenever the package has a day whose token
+  verified, with one finding per such day, also when the package has no renewal record. None of
+  the five codes is `fail` (D6): the verdict of a package does not change.
 - **W5-A-7: a test record's own token is not renewable.** A renewal record written with
   `reason: "test"` is read as a renewal (it never counts, D5), but its own token is not listed
   as a token to renew: otherwise each test renewal would be renewed again, with nothing to

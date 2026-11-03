@@ -31,7 +31,9 @@ explained again where it is implemented):
    (including days missing from the package, and runs of empty days a manifest lists as
    ``unsealed_empty_days`` instead of stamping them one by one). ARCILOGGER's own audit log is
    left out of packages by default (``scope.audit_log``): its absence is reported, not failed.
-4. Deletion records, the chain anchor and renewal stamps when the package contains them.
+4. Deletion records, the chain anchor and renewal stamps when the package contains them, and
+   the long-term status of every day's stamp: whether a renewal stamp that counts re-stamped it
+   before its TSA certificate expired (180 days ahead, from the package alone).
 5. The extract: every extracted line equals, byte for byte, that line of the sealed file.
 6. Nothing else: a file in a sealed day folder that no manifest lists was never sealed and is a
    failure; in an evidence package any file that is not a known part is a failure too.
@@ -73,7 +75,7 @@ from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import IO, Any
 
-VERIFIER_VERSION = "4"
+VERIFIER_VERSION = "5"
 INDEX_NAME = "paket.json"
 INDEX_SCHEMA = "arcilogger.evidence/1"
 #: The guides. The Turkish one has an ASCII name: ZIP tools that ignore the UTF-8 name flag
@@ -373,6 +375,11 @@ EC_PUBLIC_KEY = "1.2.840.10045.2.1"
 TEST_POLICY_PREFIX = "2.999."
 #: Organization (O) in every certificate of ARCILOGGER's mock TSA.
 TEST_ORGANIZATION = "ARCILOGGER TEST - NOT VALID"
+#: How long before its TSA certificate expires a stamp is due for re-stamping: the default of
+#: ARCILOGGER's ``tsa.renew_before_days``. The package does not carry the site's setting, so the
+#: verdict here uses the default (contract W5-A-5).
+RENEW_BEFORE = timedelta(days=180)
+RENEWAL_SCHEMA = "arcilogger.renewal/1"
 #: A ``gaps`` entry of a manifest that stands for a run of empty days that were not stamped
 #: one by one (ARCILOGGER ``seal.max_consecutive_empty_days``).
 UNSEALED_DAYS = "unsealed_empty_days"
@@ -2074,6 +2081,7 @@ class DayState:
     token_sha256: str = ""
     verified_files: set[str] = field(default_factory=set)
     gen_time: datetime | None = None  # only when the token verified
+    cert_not_after: datetime | None = None  # the TSA certificate's, only when the token verified
 
 
 def _entries(value: Any) -> list[dict[str, Any]]:
@@ -2084,6 +2092,117 @@ def _entries(value: Any) -> list[dict[str, Any]]:
 def _object(value: Any) -> dict[str, Any]:
     """A JSON object, or an empty one for anything else."""
     return value if isinstance(value, dict) else {}
+
+
+#: The long-term status of a day's stamp: (level, code, TR, EN), the texts of contract 2.6.
+#: ``{renewal}`` is the record that counts (``renewals/<name>.json``); ``{date}`` the
+#: certificate's expiry, for ``late`` the time of the re-stamping.
+RENEWAL_FINDINGS = {
+    "not_due": (
+        "info",
+        "renewal-not-due",
+        "Yeniden damgalama henüz gerekmiyor (sertifika {date} tarihine kadar geçerli).",
+        "Re-stamping is not due yet (certificate valid until {date}).",
+    ),
+    "covered": (
+        "ok",
+        "renewal-covered",
+        "Bu damga, sertifikası sona ermeden yeniden damgalanmış: {renewal}.",
+        "Re-stamped before its certificate expired: {renewal}.",
+    ),
+    "due": (
+        "warn",
+        "renewal-due",
+        "Damga sertifikası {date} tarihinde sona eriyor; yeniden damgalama bekleniyor.",
+        "The stamp certificate expires on {date}; re-stamping is due.",
+    ),
+    "late": (
+        "warn",
+        "renewal-late",
+        "Yeniden damgalama, eski sertifikanın süresi dolduktan sonra yapılmış ({date}).",
+        "Re-stamped after the old certificate had expired ({date}).",
+    ),
+    "uncovered": (
+        "warn",
+        "renewal-uncovered",
+        "Damga sertifikasının süresi {date} tarihinde doldu ve yeniden damgalama yok; damga, "
+        "alındığı an için geçerlidir.",
+        "The stamp certificate expired on {date} with no re-stamping; the stamp is valid for the "
+        "moment it was made.",
+    ),
+}
+
+
+@dataclass(frozen=True)
+class Renewal:
+    """A verified renewal record of the package: its path (``renewals/<name>.json``), its own
+    token, the stamp time, whether it can count and the token hashes it lists."""
+
+    record: str
+    token_sha256: str
+    cert_not_after: datetime
+    gen_time: datetime
+    eligible: bool
+    lists: frozenset[str] = frozenset()
+
+
+class RenewalRules:
+    """The status rules of ARCILOGGER's re-stamping (contract 2.1.2), the same as the server's.
+
+    A stamp is ``not_due`` while its certificate has more than :data:`RENEW_BEFORE` left.
+    Otherwise the renewals that count for it are the eligible ones that list its SHA-256 and
+    whose own stamp is ``not_due`` or ``covered`` (the chain of renewals is followed); of those
+    the earliest stamp time decides: ``covered`` when it is before the certificate expired, else
+    ``late``. With none, ``uncovered`` once the certificate has expired, else ``due``.
+    """
+
+    def __init__(
+        self, renewals: Sequence[Renewal], *, now: datetime, renew_before: timedelta = RENEW_BEFORE
+    ) -> None:
+        self.now = now
+        self.renew_before = renew_before
+        self.listing: dict[str, list[Renewal]] = {}
+        for renewal in renewals:
+            for token_sha256 in renewal.lists:
+                self.listing.setdefault(token_sha256, []).append(renewal)
+        self.known: dict[tuple[str, datetime], tuple[str, Renewal | None]] = {}
+        self.open: set[tuple[str, datetime]] = set()
+
+    def status(self, token_sha256: str, cert_not_after: datetime) -> tuple[str, Renewal | None]:
+        key = (token_sha256, cert_not_after)
+        if key not in self.known:
+            self.open.add(key)
+            try:
+                self.known[key] = self._decide(token_sha256, cert_not_after)
+            finally:
+                self.open.discard(key)
+        return self.known[key]
+
+    def _decide(self, token_sha256: str, expires: datetime) -> tuple[str, Renewal | None]:
+        if expires - self.now > self.renew_before:
+            return "not_due", None
+        counting = sorted(
+            (r for r in self.listing.get(token_sha256, ()) if self._counts(r)),
+            key=lambda renewal: (renewal.gen_time, renewal.record),
+        )
+        in_time = [renewal for renewal in counting if renewal.gen_time < expires]
+        if in_time:
+            return "covered", in_time[0]
+        if counting:
+            return "late", counting[0]
+        if expires <= self.now:
+            return "uncovered", None
+        return "due", None
+
+    def _counts(self, renewal: Renewal) -> bool:
+        # A renewal on the path being decided (a cycle) does not count; nor does one whose own
+        # stamp is due, late or uncovered.
+        if not renewal.eligible or (renewal.token_sha256, renewal.cert_not_after) in self.open:
+            return False
+        return self.status(renewal.token_sha256, renewal.cert_not_after)[0] in (
+            "not_due",
+            "covered",
+        )
 
 
 class Verifier:
@@ -2601,6 +2720,7 @@ class Verifier:
             summary["tsa"] = signer.subject_text
         if result.ok and result.gen_time is not None and signer is not None and root is not None:
             state.gen_time = result.gen_time
+            state.cert_not_after = signer.not_after
             summary["root_sha256"] = root.fingerprint()
             report.ok(
                 "token-ok",
@@ -3075,16 +3195,27 @@ class Verifier:
     # -- 5. renewals ---------------------------------------------------------------------------
 
     def check_renewals(self) -> None:
-        """Renewal records re-stamp older tokens before the TSA certificate expires."""
+        """Renewal records re-stamp older tokens before the TSA certificate expires.
+
+        Each record and its token are verified; then every day whose token verified gets one
+        finding with the long-term status of its stamp at the verification time (contract
+        2.1.4), from the renewals in the package (:class:`RenewalRules`).
+        """
         folder = self.prefix + "renewals/"
         names = [n for n in self.names if n.startswith(folder) and n.endswith(".json")]
-        if not names:
+        days = [
+            (state, state.cert_not_after)
+            for _, state in sorted(self.days.items())
+            if state.cert_not_after is not None
+        ]
+        if not names and not days:
             return
         self.report.section("5. Yenileme damgaları", "renewal stamps")
         known = {}
         for state in self.days.values():
             known[state.manifest_sha256] = f"{state.day} manifest"
             known[state.token_sha256] = f"{state.day} damga"
+        renewals = []
         for name in names:
             self.covered.update((name, name + ".zd"))
             record = self._read(name, "yenileme")
@@ -3101,6 +3232,71 @@ class Verifier:
                     f"{', '.join(covered) or '(bu paketteki hiçbir gün)'}",
                     "what the renewal stamp covers",
                 )
+                renewal = self._renewal(name, record, result)
+                if renewal is not None:
+                    renewals.append(renewal)
+        rules = RenewalRules(renewals, now=self.now)
+        for state, expires in days:
+            status, renewal = rules.status(state.token_sha256, expires)
+            level, code, tr, en = RENEWAL_FINDINGS[status]
+            # late: when the stamp was renewed; otherwise when its certificate expires
+            moment = renewal.gen_time if status == "late" and renewal is not None else expires
+            counted = renewal.record if renewal is not None else ""
+            self.report.add(
+                level,
+                code,
+                state.day,
+                tr.format(renewal=counted, date=_format_time(moment)),
+                en.format(renewal=counted, date=moment.isoformat()),
+            )
+
+    def _renewal(self, name: str, record: bytes, result: TimestampResult) -> Renewal | None:
+        """What a verified renewal record says for the status rules; None when it is not an
+        ``arcilogger.renewal/1`` record. It counts (``eligible``) only when the record claims a
+        legal-grade provider and was not written as a test (``reason: "test"``), the stamp is
+        not one of ARCILOGGER's test TSA (policy under 2.999, test root) and the package's CRLs
+        do not show its certificate revoked at or before the stamp (D5, C15, contract W5-A-5:
+        the site's list of legal root fingerprints is not in the package)."""
+        try:
+            data = load_json(record)
+        except (ValueError, RecursionError):
+            return None
+        data = _object(data)
+        if data.get("schema") != RENEWAL_SCHEMA or result.gen_time is None:
+            return None
+        signer = result.signer
+        if signer is None:
+            return None
+        test_stamp = result.policy.startswith(TEST_POLICY_PREFIX) or any(
+            TEST_ORGANIZATION in cert.subject_text for cert in result.chain
+        )
+        revoked = any(
+            level == "fail"
+            for level, *_ in check_revocation(result.chain, self.crls, result.gen_time)
+        )
+        eligible = (
+            _object(data.get("tsa")).get("legal_grade") is True
+            and data.get("reason") == "due"
+            and not test_stamp
+            and not revoked
+        )
+        try:
+            token = self.package.read(name + ".zd")
+        except READ_ERRORS:  # it was read a moment ago; gone now, it cannot count
+            return None
+        lists = {
+            str(entry.get("token_sha256"))
+            for entry in _entries(data.get("tokens"))
+            if isinstance(entry.get("token_sha256"), str)
+        }
+        return Renewal(
+            record=name[len(self.prefix) :],
+            token_sha256=hashlib.sha256(token).hexdigest(),
+            cert_not_after=signer.not_after,
+            gen_time=result.gen_time,
+            eligible=eligible,
+            lists=frozenset(lists),
+        )
 
     # -- 5b. the official report ---------------------------------------------------------------
 
