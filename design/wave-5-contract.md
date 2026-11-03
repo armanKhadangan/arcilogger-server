@@ -1149,31 +1149,53 @@ All Wave 5 questions are answered (2026-11-02).
   queued, or answered with the user's active request (`existing`, W5-G-4). A refusal (422:
   `archive_reload_too_large`, `archive_day_not_in_vault`, `archive_reload_disk_low`, or
   `validation_error`) queues nothing and brings no data back, so it writes none.
-- **W5-G-14: the job's audit entries and the stuck-reload alert (G3; manager answers 4 and 5).**
-  Answer 4 asks for one audit entry per run that drops something; it is one per *step* that
-  drops something, written in that step's transaction, so that no drop is ever committed
-  without its entry (an entry per run would be written after steps already committed). A daily
-  run is one step, so one entry; a run that works off a backlog (the first run after the
-  upgrade: about 24 steps) writes one per step. Every step of `db.window` that drops something
+- **W5-G-14: the job's audit entries and the stuck-reload alert (G3; manager answers 2, 4 and
+  5).** Answer 4 asks for one audit entry per run that drops something; it is one per *step*
+  that drops something, written in that step's transaction, so that no drop is ever committed
+  without its entry (an entry per run would be written after steps already committed); the
+  manager accepted one entry per step on #121. A daily run is one step, so one entry; a run
+  that works off a backlog (the first run after the upgrade: about 24 steps) writes one per
+  step. Every step of `db.window` that drops something
   writes one `db.window` audit entry (actor `system`, target `database`, in the step's
   transaction): its cutoff, the partitions or chunks dropped (names, at
   most 100, and their count) and the exact counts of the rows deleted row by row (default
   partitions, `search_counts`, clock samples; a dropped partition's or chunk's rows are not
   counted). It is the record of the deletion; whether a deletion record ("imha tutanağı") is
-  needed as well is left to legal review (the retention policy draft). A reload in `queued` or
-  `loading` without progress since the previous successful run (the same status and
-  `bytes_done`) raises `R20-db-window` (medium) with the key `R20-db-window:reload-<id>` beside
-  G3's failure key, naming the reload and its days; nothing fails it, and the cutoff keeps
-  waiting. A `queued` reload waiting behind a `loading` one that progresses also counts as
-  without progress (answer 5 read as written; asked on #121). A failure after the steps (the
+  needed as well is left to legal review (the retention policy draft). A reload without
+  progress since the previous successful run (the same status and `bytes_done`) raises
+  `R20-db-window` (medium) with the key `R20-db-window:reload-<id>` beside G3's failure key,
+  naming the reload and its days; nothing fails it, and the cutoff keeps waiting. A `loading`
+  reload without progress raises it; a `queued` one only while nothing is `loading` and no
+  reload progressed or ended since that run (manager answer 2 on #121: a queue that moves is not
+  an incident). A reload queued behind a progressing load raises nothing, and an alert already
+  open for it resolves (`reload_progressed`). A failure after the steps (the
   stuck-reload report, resolving the failure alert) fails the run, which the worker retries,
   but opens no alert: the steps' drops are done and audited.
-- **W5-G-15: the downgrade of `0021` checks its locks first** (manager answer 8). It merges the
-  daily partitions in one transaction and holds a lock on every object of them until its commit
-  (each partition with its indexes, TOAST table, row types, constraints and defaults): the
-  whole window and the days ahead need about 6,700 lock-table entries, more than PostgreSQL's
-  default 6,400 (`max_locks_per_transaction` 64 × `max_connections` 100). It estimates them first
-  and refuses with a TR/EN message, changing nothing, when they can never fit; `-Rollback`
-  (#122) has to raise `max_locks_per_transaction` (and restart PostgreSQL) before it, or the
-  downgrade has to be split across transactions (asked on #121). It does not write an audit
-  entry for `db.retention_days` going back from 30 to 400 (no revision writes audit entries).
+- **W5-G-15: the downgrade of `0021` merges in steps and goes on after an interruption**
+  (manager answers 3 and 8 on #121). In one transaction the whole window and the days ahead
+  need about 6,700 or more lock-table entries (each partition with its indexes, TOAST table, row
+  types, constraints and defaults), beyond PostgreSQL's default 6,400
+  (`max_locks_per_transaction` 64 × `max_connections` 100). So the downgrade merges one local
+  month of one table per transaction (about 500 entries on the full window) and commits each
+  step itself, on the driver's connection; PostgreSQL's configuration is never changed. It first
+  estimates its largest step and refuses with a TR/EN message, changing nothing, only when even
+  that one cannot fit. A month's last UTC day stays as the next month's change-over slice until
+  that month's step, so every committed step leaves a valid `0021` layout. The steps are planned
+  from the partitions there are: a run interrupted part way leaves the merged months monthly and
+  alembic's version at `0021_db_window`, and running the downgrade again goes on from there.
+  Each step takes the partitions' advisory lock (`ARCIPART`), and the version moves only when,
+  under that lock, no daily partition is left: one made between two steps (a service still
+  running) makes the run refuse with a TR/EN message, and the next run merges it.
+  `archive_reloads`, the settings rows and `db.retention_days` 30 → 400 go last, in the caller's
+  transaction, together with alembic's version move. Whatever the caller's transaction held
+  before the downgrade, including a transaction-level advisory lock, is committed or released
+  with the first step: a caller that serialises downgrades (#122) takes a session-level lock.
+  The downgrade writes no audit entry for `db.retention_days` going back from 30 to 400 (no
+  revision writes audit entries); by manager answer 4, #122's rollback step audits it. On
+  TimescaleDB nothing is merged and the downgrade stays one transaction.
+- **W5-G-16: audit labels and alert rows outside W5-G's files** (granted by the manager on
+  #121). The audit labels of `db.window` and `archive.reload` (TR/EN, in `KNOWN_ACTIONS`; the
+  action filter's prefixes `archive.` and `db.`) live in a new locale area
+  `web/src/locales/areas/dbWindow/{tr,en}.json` beside `web/src/pages/audit/audit-labels.ts`;
+  the grant named `db.window`, and `archive.reload` (written by W5-G's API, G6) had no label
+  either. The `R20-db-window` rows of `docs/UYARILAR.md` / `docs/ALERTS.md` §2 are added.
