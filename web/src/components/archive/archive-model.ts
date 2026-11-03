@@ -100,6 +100,17 @@ export function failureKey(code: string | null): string {
     : 'archive.failure.unknown';
 }
 
+/**
+ * How many days reloaded days stay in the database (`db.reload_keep_days`), from the 409's
+ * `details.keep_days` (C23); `null` when the answer does not say. Interim until W5-G (#121) adds
+ * `keep_days` to `ArchiveReloadRequired`: read through a cast, and the dialog names the setting
+ * with its default when it is absent.
+ */
+export function keepDaysOf(required: ArchiveReloadRequired | null): number | null {
+  const days = (required as { keep_days?: unknown } | null)?.keep_days;
+  return typeof days === 'number' && Number.isInteger(days) && days >= 1 ? days : null;
+}
+
 /** The days of a 409 `archive_reload_required` (G7, G8), `null` for any other error. */
 export function requiredOf(error: unknown): ArchiveReloadRequired | null {
   if (!isApiError(error, 'archive_reload_required')) return null;

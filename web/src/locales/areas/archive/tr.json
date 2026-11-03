@@ -10,6 +10,8 @@
     "dialog": {
       "title": "Günler arşivden yüklensin mi?",
       "body": "{{first}} – {{last}} günlerinin kayıtları mühürlü arşivden veritabanına yüklenir ve db.reload_keep_days ayarının süresi boyunca (varsayılan 7 gün) orada kalır; sonra yeniden kaldırılır. Bu, o günlerin kişisel verilerini de veritabanına geri getirir. İstek denetim kaydına yazılır.",
+      "bodyDays_one": "{{first}} – {{last}} günlerinin kayıtları mühürlü arşivden veritabanına yüklenir ve {{count}} gün boyunca veritabanında kalır; sonra yeniden kaldırılır. Bu, o günlerin kişisel verilerini de veritabanına geri getirir. İstek denetim kaydına yazılır.",
+      "bodyDays_other": "{{first}} – {{last}} günlerinin kayıtları mühürlü arşivden veritabanına yüklenir ve {{count}} gün boyunca veritabanında kalır; sonra yeniden kaldırılır. Bu, o günlerin kişisel verilerini de veritabanına geri getirir. İstek denetim kaydına yazılır.",
       "confirm": "Yükle"
     },
     "progress": {

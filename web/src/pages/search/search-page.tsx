@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 
-import { archivedOf, requiredOf } from '@/components/archive/archive-model';
+import { archivedOf, keepDaysOf, requiredOf } from '@/components/archive/archive-model';
 import { ArchiveReloadCard } from '@/components/archive/archive-reload-card';
 import { Histogram } from '@/components/charts/histogram';
 import { clipSpan } from '@/components/charts/histogram-data';
@@ -380,21 +380,25 @@ export function SearchPage() {
           ) : null}
         </Alert>
       ) : null}
-      {notices.map((notice) => (
-        <Alert key={notice.code} tone="info" assertive={false}>
-          {lang === 'en' ? notice.message_en : notice.message_tr}
-        </Alert>
-      ))}
-      {/* A 409 has no answer, so no notices: the card is where the run's refusal would be. */}
+      {/*
+        The card before the notices: the action first (#112). A 409 has no answer, so no notices:
+        the card is where the run's refusal would be.
+      */}
       {archived && archivedKey ? (
         <ArchiveReloadCard
           key={archivedKey}
           reason="search"
           range={archived}
           message={required ? errorMessage(state.error) : null}
+          keepDays={keepDaysOf(required)}
           onReady={rerun}
         />
       ) : null}
+      {notices.map((notice) => (
+        <Alert key={notice.code} tone="info" assertive={false}>
+          {lang === 'en' ? notice.message_en : notice.message_tr}
+        </Alert>
+      ))}
 
       {privacyPending ? (
         <EmptyState

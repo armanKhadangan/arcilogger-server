@@ -3,7 +3,7 @@ import { useId, useState } from 'react';
 import type { FormEvent, ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { requiredOf } from '@/components/archive/archive-model';
+import { keepDaysOf, requiredOf } from '@/components/archive/archive-model';
 import { ArchiveReloadCard } from '@/components/archive/archive-reload-card';
 import { Alert } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
@@ -383,6 +383,7 @@ export function LookupForm({
             reason="lookup"
             range={reload.required}
             message={errorMessage(reload.error)}
+            keepDays={keepDaysOf(reload.required)}
             onReady={() => {
               send(reload.body);
             }}

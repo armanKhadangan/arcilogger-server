@@ -10,6 +10,8 @@
     "dialog": {
       "title": "Reload the days from the archive?",
       "body": "The records of {{first}} – {{last}} are loaded from the sealed archive into the database and stay there for the db.reload_keep_days setting (7 days by default); then they are removed again. This also brings the personal data of those days back into the database. The request is written to the audit log.",
+      "bodyDays_one": "The records of {{first}} – {{last}} are loaded from the sealed archive into the database and stay in the database for {{count}} day; then they are removed again. This also brings the personal data of those days back into the database. The request is written to the audit log.",
+      "bodyDays_other": "The records of {{first}} – {{last}} are loaded from the sealed archive into the database and stay in the database for {{count}} days; then they are removed again. This also brings the personal data of those days back into the database. The request is written to the audit log.",
       "confirm": "Reload"
     },
     "progress": {

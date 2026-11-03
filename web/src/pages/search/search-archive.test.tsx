@@ -190,7 +190,20 @@ describe('Arama — days in the sealed archive', () => {
   it('a page with archived days shows the card with the search text; on ready it runs again', async () => {
     const calls = serve({
       searches: [
-        () => jsonResponse(200, archivedPage()),
+        () =>
+          jsonResponse(
+            200,
+            archivedPage({
+              notices: [
+                {
+                  code: 'vault_only_before',
+                  message_tr: 'Eski kayıtlar mühürlü arşivde.',
+                  message_en: 'Older records are in the sealed vault.',
+                  params: {},
+                },
+              ],
+            }),
+          ),
         () => jsonResponse(200, page({ items: [row()] })),
       ],
       reloads: [ARCHIVE_LOADING, ARCHIVE_READY],
@@ -200,6 +213,9 @@ describe('Arama — days in the sealed archive', () => {
 
     const shown = await card();
     expect(within(shown).getByRole('status')).toHaveTextContent(ARCHIVED_TR);
+    // Both stay; the card first, the notice (the evidence-package route) after it (#112).
+    const notice = screen.getByText('Eski kayıtlar mühürlü arşivde.');
+    expect(shown.compareDocumentPosition(notice) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(shown).not.toHaveTextContent(REQUIRED_TR);
     // The answer's rows (none here) are shown beside it.
     expect(await screen.findByRole('table', { name: 'Arama sonuçları' })).toBeInTheDocument();

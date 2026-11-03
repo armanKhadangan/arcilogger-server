@@ -21,6 +21,8 @@ export interface ArchiveReloadCardProps {
   range: { first_day: DateString; last_day: DateString };
   /** The API's sentence of 409 archive_reload_required (localized), when the card comes from a 409. */
   message?: string | null;
+  /** `db.reload_keep_days` from the 409 (C23), `null` when unknown: the dialog names the setting. */
+  keepDays?: number | null;
   /** Called once when the reload is ready: the page runs the lookup or search again. */
   onReady: () => void;
 }
@@ -94,6 +96,7 @@ export function ArchiveReloadCard({
   reason,
   range,
   message = null,
+  keepDays = null,
   onReady,
 }: ArchiveReloadCardProps) {
   const { t } = useTranslation();
@@ -203,7 +206,14 @@ export function ArchiveReloadCard({
           if (!start.isPending) setOpen(next);
         }}
         title={t('archive.dialog.title')}
-        description={t('archive.dialog.body', days(span.first_day, span.last_day))}
+        description={
+          keepDays === null
+            ? t('archive.dialog.body', days(span.first_day, span.last_day))
+            : t('archive.dialog.bodyDays', {
+                ...days(span.first_day, span.last_day),
+                count: keepDays,
+              })
+        }
         confirmLabel={t('archive.dialog.confirm')}
         onConfirm={confirm}
         busy={start.isPending}

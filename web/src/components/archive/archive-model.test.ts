@@ -21,6 +21,7 @@ import {
   isFinished,
   progressOf,
   reloadSpan,
+  keepDaysOf,
   requiredOf,
 } from './archive-model';
 
@@ -140,6 +141,21 @@ describe('archive model', () => {
     expect(requiredOf(broken({ first_day: '2026-10-04' }))).toBeNull();
     expect(requiredOf(new Error('archive_reload_required'))).toBeNull();
     expect(requiredOf(null)).toBeNull();
+  });
+
+  it('keepDaysOf: db.reload_keep_days of the 409 (C23), null while W5-G does not send it', () => {
+    const required = {
+      first_day: '2026-10-04',
+      last_day: '2026-10-05',
+      bytes_total: 64992,
+      estimated_bytes: 168980,
+    };
+    expect(keepDaysOf(required)).toBeNull();
+    expect(keepDaysOf(null)).toBeNull();
+    expect(keepDaysOf({ ...required, keep_days: 7 } as typeof required)).toBe(7);
+    expect(keepDaysOf({ ...required, keep_days: 1 } as typeof required)).toBe(1);
+    for (const keep_days of [0, -3, 1.5, '7', null])
+      expect(keepDaysOf({ ...required, keep_days } as typeof required)).toBeNull();
   });
 
   it('archivedOf: the archived days of a search answer, null without them', () => {

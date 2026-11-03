@@ -236,6 +236,28 @@ describe('ArchiveReloadCard — the confirmation', () => {
     expect(posts(calls)).toEqual([]);
   });
 
+  it('names the real number of days when the 409 gives it (C23), in both languages', async () => {
+    serve(() => jsonResponse(202, ARCHIVE_CREATED));
+    const { unmount } = renderCard({ keepDays: 7 });
+    await user.click(screen.getByRole('button', { name: 'Arşivden yükle' }));
+    expect(
+      await screen.findByRole('dialog', { name: 'Günler arşivden yüklensin mi?' }),
+    ).toHaveAccessibleDescription(
+      '04.10.2026 – 05.10.2026 günlerinin kayıtları mühürlü arşivden veritabanına yüklenir ve 7 gün boyunca veritabanında kalır; sonra yeniden kaldırılır. Bu, o günlerin kişisel verilerini de veritabanına geri getirir. İstek denetim kaydına yazılır.',
+    );
+    unmount();
+    act(() => {
+      setLanguage('en');
+    });
+    renderCard({ keepDays: 1, message: LOOKUP_409_EN });
+    await user.click(screen.getByRole('button', { name: 'Reload from the archive' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Reload the days from the archive?' });
+    expect(dialog).toHaveAccessibleDescription(
+      'The records of 04.10.2026 – 05.10.2026 are loaded from the sealed archive into the database and stay in the database for 1 day; then they are removed again. This also brings the personal data of those days back into the database. The request is written to the audit log.',
+    );
+    expect(dialog).not.toHaveTextContent('db.reload_keep_days');
+  });
+
   it('POSTs the days with the reason and no lookup id; the button gives way to the progress', async () => {
     let answer: (response: Response) => void = () => undefined;
     const calls = serve(
