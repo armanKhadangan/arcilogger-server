@@ -322,14 +322,16 @@ sonuç, manifestteki `sha256_uncompressed` özetine sahip tek dosyadır. `.gz` d
 günlerindir ve aynı şekilde açılır.
 
 - **Windows, 7-Zip:** dosyaya sağ tıklayıp "7-Zip → Buraya çıkar", ya da komut satırında
-  `7z e -so <kaynak>.log.xz > <kaynak>.log`. 7-Zip'in çok akışlı bir dosyanın tamamını açtığı
+  `7z e <kaynak>.log.xz` (açılmış `<kaynak>.log` dosyasını bulunduğunuz klasöre yazar).
+  Çıktıyı `>` ile bir dosyaya yönlendirmeyin: Windows PowerShell 5.1 yönlendirilen baytları
+  metne çevirir (UTF-16, CRLF) ve özet tutmaz. 7-Zip'in çok akışlı bir dosyanın tamamını açtığı
   ARCILOGGER'ın Windows testlerinde sınanır; kurumdaki 7-Zip sürümüyle bir kez denenmesi önerilir
   (sahada doğrula X1): açılan dosyanın SHA-256 özeti manifestteki `sha256_uncompressed` ile aynı
   olmalıdır.
 - **Linux/macOS, xz:** `xz -dc <kaynak>.log.xz > <kaynak>.log` (dosyayı yerinde bırakır);
   `xz -t <dosya>` yalnızca bütünlüğü sınar. Eski günler için `gzip -dc <kaynak>.log.gz`.
-- **Python:** `python -I -c "import lzma,sys; sys.stdout.buffer.write(lzma.open(sys.argv[1]).read())"
-  <kaynak>.log.xz > <kaynak>.log` (`.gz` için `lzma` yerine `gzip`).
+- **Python:** `python -I -c "import lzma,shutil,sys; shutil.copyfileobj(lzma.open(sys.argv[1]),
+  open(sys.argv[2], 'wb'))" <kaynak>.log.xz <kaynak>.log` (`.gz` için `lzma` yerine `gzip`).
 
 `verify.py` iki biçimi de yalnızca Python'un standart kitaplığıyla okur; Python `lzma` modülü
 olmadan derlenmişse `.xz` dosyaları için hata verir, `.gz` günleri yine doğrulanır.
@@ -677,10 +679,11 @@ one line by decompressing only its stream. Days sealed before this format stay `
 and are never re-encoded (raw logs are evidence); one vault can hold both. The `path` suffix in
 the manifest tells the format. Every xz tool decompresses all streams in order into the file whose
 SHA-256 is the manifest's `sha256_uncompressed`: on Windows 7-Zip ("7-Zip → Extract here", or
-`7z e -so <source>.log.xz > <source>.log`; ARCILOGGER's Windows tests check that 7-Zip reads the
+`7z e <source>.log.xz`, which writes `<source>.log` itself; do not redirect output with `>`:
+Windows PowerShell 5.1 turns the bytes into UTF-16 text; ARCILOGGER's Windows tests check that 7-Zip reads the
 whole multi-stream file, and a one-time check with the site's 7-Zip version is recommended: field
 check X1), on Linux/macOS `xz -dc <source>.log.xz > <source>.log` (`xz -t` tests only), in Python
-`lzma.open(path).read()`; old days with `gzip -dc` / `gzip.open`. `verify.py` reads both formats
+`lzma.open(path).read()`; days sealed as gzip (`.gz`) with `gzip -dc` / `gzip.open`. `verify.py` reads both formats
 with the standard library; a Python built without `lzma` fails on `.xz` files and still verifies
 `.gz` days. In the manual checks of section 5 use `*.xz` (old days `*.gz`) for C2 and
 `xz -dc … | sed -n 'Np'` (old days `gzip -dc`) for C4.

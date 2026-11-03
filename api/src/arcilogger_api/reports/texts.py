@@ -11,7 +11,7 @@ from typing import Final
 
 from arcilogger_core.sealedfile import SUFFIXES
 
-#: Suffixes of the two sealed formats (xz from Wave 5 on, gzip before).
+#: Suffixes of the two sealed formats (``seal.compression``; the suffix tells a file's format).
 _XZ: Final = SUFFIXES["xz"]
 _GZ: Final = SUFFIXES["gzip"]
 
@@ -490,8 +490,8 @@ SCORE_EN: Final = (
 EVIDENCE_INTRO_TR: Final = (
     "Her kanıt (K1, K2 …) bir veritabanı satırını ve dayandığı ham kayıt satırını gösterir. Ham "
     "satır, rapor oluşturulurken kaynak dosyadan (henüz mühürlenmemiş günler için spool dosyası, "
-    f"mühürlü günler için kasa/vault içindeki .log{_XZ} dosyası, Wave 5 öncesi günlerde "
-    f".log{_GZ}) bayt bayt okunmuştur; satır "
+    f"mühürlü günler için kasa/vault içindeki .log{_XZ} ya da .log{_GZ} dosyası; uzantı "
+    "sıkıştırma biçimini gösterir) bayt bayt okunmuştur; satır "
     "numarası dosyanın başından sayılarak doğrulanmıştır. #012 gibi diziler, toplayıcının "
     "kontrol karakterleri ve # işareti için yazdığı kaçışlardır (# ve üç sekizlik basamak); "
     "UTF-8 olmayan baytlar \\xNN biçiminde gösterilir."
@@ -499,7 +499,8 @@ EVIDENCE_INTRO_TR: Final = (
 EVIDENCE_INTRO_EN: Final = (
     "Each evidence item (K1, K2 …) shows a database row and the raw log line it came from, read "
     "byte for byte when the report was made (spool file for days not sealed yet, the "
-    f".log{_XZ} in the vault for sealed days, .log{_GZ} for days sealed before Wave 5); the line "
+    f".log{_XZ} or .log{_GZ} file in the vault for sealed days; the suffix tells the "
+    "compression); the line "
     "number was verified by counting from the start of the "
     "file. Sequences such as #012 are the collector's escapes for control characters and '#' "
     "(# and three octal digits); bytes that are not UTF-8 are shown as \\xNN."

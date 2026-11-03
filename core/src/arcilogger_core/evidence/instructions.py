@@ -22,7 +22,7 @@ from datetime import date, datetime
 from arcilogger_core.fmt import format_date, format_datetime
 from arcilogger_core.sealedfile import SUFFIXES
 
-#: Suffixes of the two sealed formats: xz (Wave 5 on), gzip (every day sealed before).
+#: Suffixes of the two sealed formats (``seal.compression``; the suffix tells a file's format).
 XZ = SUFFIXES["xz"]
 GZ = SUFFIXES["gzip"]
 
@@ -124,7 +124,7 @@ def hash_commands(day: DayFacts) -> tuple[str, str]:
     """``sha256sum`` (Linux) and ``Get-FileHash`` (PowerShell) for the sealed files of a day.
 
     The pattern follows the day's files: ``*.xz`` for a day sealed as xz, ``*.gz`` for one sealed
-    before Wave 5 (a day is sealed in one format; both patterns only if a package mixes them).
+    as gzip (a day is sealed in one format; both patterns only if a package mixes them).
     """
     suffixes = sorted({suffix for suffix in (XZ, GZ) for f in day.files if f.endswith(suffix)})
     suffixes = suffixes or [GZ]
@@ -148,7 +148,7 @@ def chain_commands(days: Sequence[DayFacts]) -> list[tuple[DayFacts, str]]:
 
 
 def extract_command(extract_file: str, line: str = "N", sealed_files: Sequence[str] = ()) -> str:
-    """``xz -dc <sealed file> | sed -n 'Np'`` (``gzip -dc`` for a day sealed before Wave 5) for an
+    """``xz -dc <sealed file> | sed -n 'Np'`` (``gzip -dc`` for a day sealed as gzip) for an
     extract file ``extract/DAY/SOURCE.txt``; ``sealed_files`` tells which format the day has."""
     day, source = extract_file.split("/")[1:3]
     base = f"vault/{day[:4]}/{day[5:7]}/{day[8:10]}/{source.removesuffix('.txt')}.log"
@@ -206,7 +206,7 @@ def render_turkish(facts: GuideFacts) -> bytes:
         "ARCILOGGER, ağ cihazlarından (FortiGate, MikroTik vb.) gelen her syslog mesajını alındığı",
         "anda, değiştirmeden, alınma zamanı ve gönderen IP adresiyle birlikte ham kayıt dosyasına",
         "yazar. Her gün bittikten sonra:",
-        "  a) o günün ham dosyaları sıkıştırılır (xz; Wave 5 öncesi günler gzip) ve her dosyanın",
+        "  a) o günün ham dosyaları sıkıştırılır (xz ya da gzip: uzantı .xz/.gz) ve her dosyanın",
         "     SHA-256 özeti hesaplanır;",
         "  b) özetler, bir önceki günün manifest ve zaman damgası özetleriyle birlikte günlük",
         "     manifest dosyasına yazılır; böylece günler birbirine zincirlenir;",
@@ -278,7 +278,7 @@ def render_turkish(facts: GuideFacts) -> bytes:
         "  verify.ps1, verify.sh      verify.py'yi Windows / Linux'ta çalıştıran kısa betikler.",
         "  vault/YYYY/MM/DD/          Mühürlü günler (sunucudaki klasör yapısıyla aynı):",
         f"    <kaynak>.log{XZ}          günün ham kayıt dosyası (xz; içerik değiştirilmemiş;",
-        f"                             eski günlerde <kaynak>.log{GZ}, gzip),",
+        f"                             gzip ile mühürlenmiş günlerde <kaynak>.log{GZ}),",
     ]
     if facts.audit_log_included:
         lines.append(f"    audit.jsonl{XZ}/{GZ}       ARCILOGGER'ın o günkü denetim kaydı,")
@@ -433,8 +433,8 @@ def render_turkish(facts: GuideFacts) -> bytes:
         lines += [
             "  C4) Alıntı: extract dosyasındaki <N><TAB><satır> satırı, mühürlü dosyanın",
             "      açılmış halindeki N. satırla bayt bayt aynı olmalıdır (Linux, macOS ya da",
-            "      Windows'ta Git Bash / WSL ile; N yerine satır numarasını yazın; xz dosyasını",
-            '      Windows\'ta 7-Zip de açar: "7z e -so DOSYA"):',
+            "      Windows'ta Git Bash / WSL ile; N yerine satır numarasını yazın; Windows'ta",
+            '      7-Zip de açar: "7z e DOSYA" açılmış dosyayı aynı klasöre yazar):',
         ]
         lines += [
             f"    {extract_command(name, sealed_files=_sealed_files(facts))}"
@@ -548,7 +548,8 @@ def render_english(facts: GuideFacts) -> bytes:
         "   its \"sha256\" in that day's manifest. C3: the SHA-256 of the previous day's manifest",
         '   and .zd must equal "previous" in the next manifest. C4: line N of an extract file',
         "   must equal line N of the decompressed sealed file (xz -dc FILE | sed -n 'Np'; a day",
-        "   sealed before Wave 5 is gzip: gzip -dc; on Windows 7-Zip opens both: 7z e -so FILE).",
+        "   sealed as gzip (.gz): gzip -dc; on Windows 7-Zip opens both: 7z e FILE writes the",
+        "   decompressed file next to it).",
     ]
     if not facts.audit_log_included:
         lines += [
