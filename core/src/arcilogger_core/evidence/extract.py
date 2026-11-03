@@ -12,29 +12,33 @@ Nothing is decoded or re-encoded: non-UTF-8 bytes stay as they arrived.
 
 from __future__ import annotations
 
-import gzip
 from collections.abc import Iterable
 from pathlib import Path
 
+from arcilogger_core import sealedfile
 from arcilogger_core.evidence.model import EvidenceError
 
 
 def read_lines(sealed: Path, numbers: Iterable[int]) -> dict[int, bytes]:
-    """Lines ``numbers`` (1-based) of a sealed ``.log.gz`` file, without their ``\\n``.
+    """Lines ``numbers`` (1-based) of a sealed file (either format), without their ``\\n``.
 
-    The file is streamed and reading stops after the highest wanted line.
+    The file is streamed and reading stops after the highest wanted line. Damaged data raises
+    :class:`EvidenceError`: a package is never built from a file that cannot be read.
     """
     wanted = set(numbers)
     if not wanted:
         return {}
     last = max(wanted)
     found: dict[int, bytes] = {}
-    with gzip.open(sealed, "rb") as handle:
-        for number, line in enumerate(handle, start=1):
-            if number in wanted:
-                found[number] = line[:-1] if line.endswith(b"\n") else line
-            if number >= last:
-                break
+    try:
+        with sealedfile.open_sequential(sealed) as handle:
+            for number, line in enumerate(handle, start=1):
+                if number in wanted:
+                    found[number] = line[:-1] if line.endswith(b"\n") else line
+                if number >= last:
+                    break
+    except (sealedfile.SealedFileError, *sealedfile.DAMAGE_ERRORS) as exc:
+        raise EvidenceError(f"{sealed.name}: cannot be decompressed ({exc})") from exc
     missing = sorted(wanted - set(found))
     if missing:
         raise EvidenceError(

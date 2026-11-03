@@ -194,7 +194,7 @@ def make_vault(data_dir: Path, *, root: Path | None = None, tsa_now: datetime) -
             "data_dir": str(data_dir),
             "secrets_dir": str(base),
             "sources": list(SOURCES),
-            "seal": {"quiet_seconds": 0, "gzip_level": 6},
+            "seal": {"quiet_seconds": 0, "compression": "gzip", "gzip_level": 6},
             "tsa": {"provider": "mock"},
         }
     )

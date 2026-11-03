@@ -21,6 +21,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from arcilogger_api.lookup_testing import DAY, Site, accept_privacy, build_site, seal_day
 from arcilogger_api.routers.raw import known_source
 from arcilogger_api.testing import LoggedIn
+from arcilogger_core import sealedfile
 from arcilogger_core.config import Config
 from arcilogger_core.immutability import is_locked, unlock
 from arcilogger_core.layout import Layout
@@ -131,14 +132,46 @@ def test_raw_line_from_a_sealed_day_is_byte_identical(
     after = get(client, source=source, line=line, offset=offset)
     assert after.status_code == 200, after.text
     data = after.json()
-    assert (data["origin"], data["file"]) == ("vault", f"vault/2026/10/12/{source}.log.gz")
+    sealed = f"vault/2026/10/12/{source}.log{sealedfile.SUFFIXES['xz']}"  # the default format
+    assert (data["origin"], data["file"]) == ("vault", sealed)
     for key in ("raw_base64", "sha256", "offset", "text", "received", "sender"):
         assert data[key] == before[key]
     beyond = get(client, source=source, line=1000)
     assert (beyond.status_code, beyond.json()["error"]["code"]) == (404, "raw_not_found")
 
 
+@pytest.mark.parametrize("compression", ["gzip", "xz"])
 def test_damaged_sealed_file(
+    client: TestClient,
+    login_as: Login,
+    app_session_factory: sessionmaker[Session],
+    api_config: Config,
+    layout: Layout,
+    site: Site,
+    tmp_path: Path,
+    compression: str,
+) -> None:
+    """Damaged compressed data is ``raw_unreadable`` (409), never "not found", in both formats."""
+    reader(client, login_as, app_session_factory)
+    seal_day(api_config, layout, DAY)
+    sealed = sealedfile.find_log(layout, DAY, "fortigate")
+    assert sealed is not None
+    unlock(sealed)
+    if compression == "gzip":  # a day sealed before W5-H: the same content as gzip
+        plain = tmp_path / "fortigate.log"
+        with sealedfile.open_sequential(sealed) as handle:
+            plain.write_bytes(handle.read())
+        sealed.unlink()
+        sealed = sealed.with_name(sealedfile.log_name("fortigate", "gzip"))
+        sealedfile.write(plain, sealed)
+    assert sealedfile.format_of(sealed) == compression
+    good = sealed.read_bytes()
+    sealed.write_bytes(good[:20] + bytes(b ^ 0x55 for b in good[20:]))
+    response = get(client, source="fortigate", line=3)
+    assert (response.status_code, response.json()["error"]["code"]) == (409, "raw_unreadable")
+
+
+def test_a_source_sealed_in_both_formats_is_refused(
     client: TestClient,
     login_as: Login,
     app_session_factory: sessionmaker[Session],
@@ -148,11 +181,15 @@ def test_damaged_sealed_file(
 ) -> None:
     reader(client, login_as, app_session_factory)
     seal_day(api_config, layout, DAY)
-    sealed = layout.vault_day(DAY) / "fortigate.log.gz"
-    unlock(sealed)
-    sealed.write_bytes(b"\x1f\x8b\x08\x00garbage-not-deflate" * 10)
+    sealed = sealedfile.find_log(layout, DAY, "fortigate")
+    assert sealed is not None
+    twin = sealed.with_name(sealedfile.log_name("fortigate", "gzip"))
+    twin.write_bytes(sealed.read_bytes())
     response = get(client, source="fortigate", line=3)
-    assert (response.status_code, response.json()["error"]["code"]) == (409, "raw_unreadable")
+    body = response.json()["error"]
+    assert (response.status_code, body["code"]) == (409, "sealed_file_ambiguous")
+    assert body["message_tr"]
+    assert body["message_en"]
 
 
 @pytest.mark.parametrize(

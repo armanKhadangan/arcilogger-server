@@ -14,14 +14,17 @@ from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
 
 from arcilogger_core import seal as seal_module
+from arcilogger_core import sealedfile
 from arcilogger_core.alerts import read_alerts
 from arcilogger_core.canonical import is_canonical
 from arcilogger_core.chain import sealed_days, verify_day, verify_range
+from arcilogger_core.config import SealConfig
 from arcilogger_core.evidence import RawRef, build_package
 from arcilogger_core.evidence.archive import ArchivePackage
 from arcilogger_core.evidence.standalone import verify as sv
 from arcilogger_core.immutability import is_locked, unlock
 from arcilogger_core.seal import Sealer, sha256_file, summarize_spool
+from arcilogger_core.sealedfile import Compression
 from arcilogger_core.timeutil import day_window
 from arcilogger_core.tsa.mock import MockFailure
 from arcilogger_core.tsa.verify import verify_token
@@ -395,17 +398,25 @@ def test_a_day_stuck_on_a_torn_line_is_finished_without_a_new_stamp(
     assert verify_day(world.layout, days[0], [world.tsa.root_certificate], deep=True).ok
 
 
-def test_line_counts_agree_for_torn_and_empty_files(tmp_path: Any) -> None:
+@pytest.mark.parametrize("compression", ["gzip", "xz"])
+def test_line_counts_agree_for_torn_and_empty_files(
+    tmp_path: Any, monkeypatch: pytest.MonkeyPatch, compression: Compression
+) -> None:
+    monkeypatch.setattr(sealedfile, "STREAM_BYTES", 2)  # xz: a line torn across streams too
     window = day_window(date(2026, 10, 10))
-    for content, lines in ((b"", 0), (b"a\n", 1), (b"a\nb", 2), (b"\n\n", 2)):
+    for content, lines in ((b"", 0), (b"a\n", 1), (b"a\nb", 2), (b"\n\n", 2), (b"ab\ncde", 2)):
         spool = tmp_path / "spool.log"
         spool.write_bytes(content)
-        target = tmp_path / "spool.log.gz"
-        seal_module.compress_deterministic(spool, target, 6)
+        target = tmp_path / sealedfile.log_name("spool", compression)
+        config = SealConfig(compression=compression, gzip_level=6)
+        seal_module.compress_deterministic(spool, target, config)
         assert summarize_spool(spool, timedelta(minutes=60), window)["lines"] == lines
         assert seal_module.gunzip_sha256(target)[1] == lines
         with target.open("rb") as handle:
-            assert sv.gunzip_digest(handle)[1] == lines
+            assert sv.sealed_digest(handle, target.name)[1] == lines
+        if compression == "gzip":
+            with target.open("rb") as handle:
+                assert sv.gunzip_digest(handle)[1] == lines
 
 
 # -- one verdict with the standalone verifier; the EKU rule of the site (K6) ---------------------
@@ -596,7 +607,14 @@ def test_a_request_never_seals_out_of_order(world: Any, days: list[date]) -> Non
 
 
 def test_a_request_never_stamps_a_day_of_a_long_empty_run(world: Any) -> None:
-    world.reconfigure(seal={"quiet_seconds": 0, "gzip_level": 6, "max_consecutive_empty_days": 0})
+    world.reconfigure(
+        seal={
+            "quiet_seconds": 0,
+            "compression": "gzip",
+            "gzip_level": 6,
+            "max_consecutive_empty_days": 0,
+        }
+    )
     first, empty = date(2026, 10, 1), date(2026, 10, 2)
     world.busy_day(first)
     world.set_now(empty + timedelta(days=1))

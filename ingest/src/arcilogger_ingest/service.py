@@ -16,7 +16,7 @@ One loop in one thread (plus optional parse worker processes, :mod:`arcilogger_i
 2. **Read** new complete lines, newest day first (live data before backlog); the sources of
    one day share each batch in equal parts, so one source's backlog does not hold the others
    back. From the spool file (opened and closed for every read, :mod:`arcilogger_ingest.files`)
-   or, once the sealer has deleted it, from the sealed ``.log.gz`` at the same offset.
+   or, once the sealer has deleted it, from the sealed file (xz or gzip) at the same offset.
 3. **Prepare** every line (:mod:`arcilogger_ingest.prepare`), in this process or in the pool.
 4. **Load** the batch when it has ``[ingest] batch_rows`` lines or is ``batch_seconds`` old:
    rows, parse failures, sources and the new offsets in one transaction
@@ -98,6 +98,7 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
 
+from arcilogger_core import sealedfile
 from arcilogger_core.config import Config
 from arcilogger_core.configwatch import INGEST_HOT, INGEST_RESTART, ConfigWatch, ConfigWatcher
 from arcilogger_core.layout import AUDIT_SOURCE, SPOOL_SUFFIX, Layout
@@ -1422,10 +1423,15 @@ class IngestService:
         else:
             # Between the sealer's spool deletion and its "sealed" state (or after a crash
             # there): the vault file was verified before the spool was deleted.
-            path = self.layout.vault_day(day) / f"{source}.log.gz"
-            if not path.is_file():
+            try:
+                found = sealedfile.find_log(self.layout, day, source)
+            except sealedfile.SealedFileError as exc:
+                self._report(stream, f"sealed file not readable: {exc}")
+                return b""
+            if found is None:
                 self._report(stream, "spool file missing and the day is not sealed yet")
                 return b""
+            path = found
         try:
             if stream.vault is None:
                 stream.vault = VaultReader(path, stream.read_offset)
