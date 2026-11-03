@@ -156,6 +156,17 @@ def test_every_damaged_byte_of_an_xz_file_is_found(tmp_path: Path, small_streams
         sealedfile.digest(victim)
 
 
+def test_an_empty_xz_file_is_damage(tmp_path: Path) -> None:
+    """The writer never leaves a zero-byte file, so one is damage, not an empty day."""
+    empty = tmp_path / "fw.log.xz"
+    empty.write_bytes(b"")
+    with pytest.raises(SealedFileError) as raised:
+        sealedfile.digest(empty)
+    assert raised.value.code == "damaged"
+    with pytest.raises(SealedFileError):
+        sealedfile.xz_streams(empty)
+
+
 def test_a_damaged_gzip_file_is_reported_as_damage(tmp_path: Path) -> None:
     victim = tmp_path / "bad.log.gz"
     victim.write_bytes(b"\x1f\x8b\x08\x00garbage-not-deflate" * 10)

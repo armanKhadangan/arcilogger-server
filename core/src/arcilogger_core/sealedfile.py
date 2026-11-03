@@ -302,6 +302,8 @@ def xz_streams(path: Path, handle: BinaryIO | None = None) -> list[XzStream]:
     try:
         raw.seek(0, io.SEEK_END)
         end = raw.tell()
+        if end == 0:  # the writer never leaves an empty file: even an empty day is one stream
+            raise SealedFileError("damaged", f"{path.name}: empty file, not an xz file")
         found: list[tuple[int, int, int]] = []  # (compressed start, compressed size, uncompressed)
         while end > 0:
             if end < 2 * _XZ_HEADER_SIZE:

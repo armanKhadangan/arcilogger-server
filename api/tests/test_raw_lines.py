@@ -528,6 +528,39 @@ def test_xz_torn_last_line_and_damage(tmp_path: Path, monkeypatch: pytest.Monkey
     assert raised.value.code == "raw_unreadable"
 
 
+def test_xz_damage_before_the_line_in_its_own_stream_is_found(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The view decompresses the rest of the line's stream, so the stream's CRC64 is checked:
+    a corrupted check value (the data still decompresses) refuses the line, with and without
+    its offset, instead of showing it unchecked. An empty file is damage, not an empty day.
+    (Small output pieces, as a 16 MiB stream has in 1 MiB pieces: a line is found long before
+    the stream's end.)"""
+    monkeypatch.setattr(sealedfile, "CHUNK", 64)
+    monkeypatch.setattr(rawlines, "VAULT_INDEX", rawlines.VaultIndex())
+    layout = Layout(tmp_path)
+    lines = [b"line %04d" % n for n in range(1, 401)]
+    path = _xz_vault(layout, lines)
+    assert len(sealedfile.xz_streams(path)) == 1
+    data = bytearray(path.read_bytes())
+    index_size = (int.from_bytes(data[-8:-4], "little") + 1) * 4  # the footer's backward size
+    data[len(data) - 12 - index_size - 8] ^= 0x01  # the last byte of the block's CRC64
+    replacement = path.with_name("damaged.xz")
+    replacement.write_bytes(bytes(data))
+    replacement.replace(path)
+    for offset in (0, None):
+        rawlines.VAULT_INDEX.clear()
+        with pytest.raises(RawReferenceError) as raised:
+            read_line(layout, "fortigate", DAY, 1, offset)
+        assert raised.value.code == "raw_unreadable"
+
+    path.write_bytes(b"")
+    rawlines.VAULT_INDEX.clear()
+    with pytest.raises(RawReferenceError) as raised:
+        read_line(layout, "fortigate", DAY, 1, 0)
+    assert raised.value.code == "raw_unreadable"
+
+
 # -- files that exist but cannot be read ----------------------------------------------------------
 
 

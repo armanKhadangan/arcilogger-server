@@ -246,6 +246,8 @@ def _file_facts(
     except sealedfile.SealedFileError as exc:  # both formats: the sealed one is unclear
         facts.update(status="unreadable", error=str(exc))
         return facts, None
+    except OSError as exc:  # the day folder cannot be listed (access denied): as _exists
+        raise EvidenceReadError(layout, layout.vault_day(day), exc) from exc
     origin: Origin
     if sealed and vault is not None and _exists(layout, vault):
         origin, path = "vault", vault

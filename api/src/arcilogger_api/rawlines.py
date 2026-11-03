@@ -607,11 +607,21 @@ def _scan_xz(
     finder = LineFinder([line])
     for number, stream in enumerate(streams):
         entry.xz_lines.setdefault(number, finder.lines)
-        for data in sealedfile.xz_stream_chunks(handle, stream):
+        chunks = sealedfile.xz_stream_chunks(handle, stream)
+        for data in chunks:
             finder.feed(data)
             if finder.done:
+                _drain(chunks)
                 return finder.found.get(line)
     return finder.found.get(line)
+
+
+def _drain(chunks: Iterator[bytes]) -> None:
+    """Decompress the rest of a stream whose line was found: only at its end are the block's
+    CRC64 and the stream's index checked, so damage before the line in the same stream is
+    an error, never a wrong line shown. The cost stays one stream per view."""
+    for _ in chunks:
+        pass
 
 
 def _lines_before(
@@ -649,7 +659,8 @@ def _line_at(
     complete = False
     for number in range(first, len(streams)):
         position = 0
-        for data in sealedfile.xz_stream_chunks(handle, streams[number]):
+        chunks = sealedfile.xz_stream_chunks(handle, streams[number])
+        for data in chunks:
             if number == first and position < local:
                 head = data[: local - position]
                 feeds += head.count(b"\n")
@@ -669,6 +680,7 @@ def _line_at(
                 complete = True
                 break
         if complete:
+            _drain(chunks)
             break
     if before != b"\n":
         raise RawReferenceError(
