@@ -1799,6 +1799,103 @@ Issue #71, follow-up of #40 item 13 and Q-C3-1. It is a Wave 3 matter (contract 
   from SQLAlchemy cursor events, a wrapped `do_commit` and a wrapped `os.fsync` inside the test
   (no timing hook in product code).
 
+## Deviations — #125 (live-tail per-line check, 2026-11-03)
+
+Test-only (`api/tests/test_live_perf.py`); granted by the manager on #125, 2026-11-03 15:08Z.
+The CPU-a-second budget (0.4 s/s), the gauge, `REFERENCE_GAUGE` (17.76 µs windows, 15.90 µs
+otherwise), `LOOP_FLOOR` and the cycles are unchanged.
+
+- **#125-1: the per-line check is strict on CI only.** The bound `LOOP_GAUGE_LINES ×
+  speed ** LOOP_EXPONENT`, `speed = min(max(gauge / REFERENCE_GAUGE, 0.5), 1)`, applies when
+  `GITHUB_ACTIONS == "true"` or `ARCILOGGER_PERF_STRICT == "1"`; elsewhere a flat
+  `OFF_CI_GAUGE_LINES` = 9.4 gauge lines applies, without a speed factor (1.10 × the costliest
+  cloud-session reading, 8.52 at 11.90 µs). The output names the branch that ran
+  (`per-line check: strict (CI's bound)` or `per-line check: off CI`); off CI it also prints the
+  strict limit and the margin to it, not asserted. The reason: at the same gauge CI's
+  ubuntu-latest read 11.71 µs and 4.80 gauge lines (run 41455124190), so a path 1.4× costlier
+  reads 6.72 there, while the cloud sessions' fast-gauge class read 11.70 µs and 7.47 for
+  unchanged code; no bound from the gauge alone can be at least 7.47 and below 6.72. On that
+  class the gauge (the fastest of 16 back-to-back rounds, two thirds C library code) runs warm
+  and the SSE path (short runs of interpreted code after the loop idled 0.5 s) cold: on a
+  13.6–15.9 µs cloud host the same gauge code in 200-line rounds on the loop costs 1.15–1.21×
+  the guard's gauge (the fast class itself was not reproduced; #125 has the figures). This is
+  not a fix of the root cause: CI is the gate. Off CI a path 40 % costlier fails only on the
+  fast-gauge class (11–13 µs); on the median runs a path must cost about 26 % more there, 44 %
+  more on a 13.6–15.9 µs cloud host and 57 % more on #88's slow class (21.5–23.4 µs) before
+  the check fails, and #88's +39 µs probe passes on the last two. #31's +400 µs fails everywhere.
+  Not covered, a note in the test's docstring: a starved hub (8 busy neighbours on 4 CPUs) runs
+  fewer, larger cycles, its figure a line falls and a path 39 µs a line costlier can pass
+  (6.95–7.56 gauge lines on a 13.6–15.9 µs cloud host, 6.60 and 7.00 on #88's slow class); CI's
+  runners are not loaded so. `ci.yml` is unchanged (`ARCILOGGER_PERF_STRICT=1` there is
+  proposed in the pull request, the manager's decision when the perf jobs move).
+- **#125-2: the strict bound is refitted with #88's rules on 26 readings:** `LOOP_EXPONENT`
+  0.3 → **0.20**, `LOOP_GAUGE_LINES` 7.0 → **6.8** on Linux, **5.6** on Windows (unchanged).
+  The rules (#88): L ≥ 1.10 × the costliest reading brought to the reference
+  (gl ÷ speed^exponent) and L < 1.4 × the cheapest ÷ 1.05, the exponent the mean log-log slope
+  of the loop's µs a line on the gauge less 1, to 0.05. The measured slopes are **1.25 on
+  ubuntu-latest and 1.20 on windows-latest**: 1.2497 and 1.2034 on #88's 22 readings, whose
+  mean less 1, 0.2265, the rule takes to 0.25; 1.2459 and 1.1980 on all 26 (0.2219). The value
+  sits at the tie, and 0.20 is taken, not 0.25, for the windows of allowed L on the 26:
+
+  | exponent | ubuntu-latest | windows-latest |
+  |---|---|---|
+  | 0.30 (#88) | [7.117, 7.015): empty | [5.802, 6.053) |
+  | 0.25 (the rule) | [6.904, 6.909): no value with one decimal | [5.617, 6.032) |
+  | **0.20** | **[6.759, 6.804) → 6.8** | **[5.511, 5.988) → 5.6** |
+  | 0.15 | [6.758, 6.700): empty | [5.502, 5.937) |
+
+  Today's 7.0 / 0.3 already broke #88's own rule since run 41477960420 (ubuntu-latest 8.65 µs,
+  5.39 gauge lines): the Linux window at 0.3 is empty, and that run's fast runners kept only
+  8.2 % (ubuntu-latest) and 6.2 % (windows-latest) headroom, the least of all 26: exponent 0.3
+  tightens the bound faster than the path falls with the gauge. Windows stays at
+  5.6, not 5.7 (inside its window too), which would loosen it at every speed (+1.8 % at speed 1,
+  +9.1 % at the floor). Against #88's limits the bound is 2.9 % tighter on Linux at speed 1 and
+  the same on Windows; it is **looser only towards the floor**, at most +4.1 % on Linux and
+  +7.2 % on Windows at speed 0.5 (gauge ≤ 7.95 µs ubuntu-latest, ≤ 8.88 µs windows-latest:
+  the fastest runners only). There a path 1.4× costlier still fails, by at least 7.4 %
+  (ubuntu-latest, 7.88 µs) and 15.1 % (windows-latest, 9.13 µs; the 13.1 % on #125 was the
+  figure for 5.7). Over all 26 readings unchanged code keeps at least 10.7 % (ubuntu-latest,
+  median 21.1 %) and 11.8 % (windows-latest, median 19.6 %) headroom; 1.4× fails all 26, by at
+  least 5.1 % and 12.3 %; +400 µs by at least 348 % and 383 %. The Linux window is narrow: one
+  new ubuntu-latest reading above 6.18 or below 5.10 brought to the reference (today's extremes
+  6.14, run 41438160162, and 5.10, run 41455124190) empties it for 6.8.
+
+  The 26 readings (the throughput guards' `gauge:` and `event loop:` lines, the median of the
+  busy cycles; recomputed with both sets of constants; the 4 new ones are from runs 41617780788,
+  da9ead8, and 41633136399, f198c9d; "1.4× over" is 1.4 × the reading over the new limit):
+
+  | system | run | gauge µs | gauge lines | speed | #88 limit | headroom | new limit | headroom | 1.4× over |
+  |---|---|---|---|---|---|---|---|---|---|
+  | ubuntu | 41414800703 | 7.88 | 4.54 | 0.50 | 5.69 | +25.2 % | 5.92 | +30.4 % | +7.4 % |
+  | ubuntu | 41478486887 | 8.28 | 4.93 | 0.52 | 5.76 | +16.7 % | 5.97 | +21.1 % | +15.6 % |
+  | ubuntu | 41477960420 | 8.65 | 5.39 | 0.54 | 5.83 | +8.2 % | 6.02 | +11.7 % | +25.3 % |
+  | ubuntu | 41455124190 | 11.71 | 4.80 | 0.74 | 6.39 | +33.0 % | 6.40 | +33.3 % | +5.1 % |
+  | ubuntu | 41368179019 | 11.81 | 5.24 | 0.74 | 6.40 | +22.2 % | 6.41 | +22.3 % | +14.5 % |
+  | ubuntu | 41430160072 | 13.88 | 5.07 | 0.87 | 6.72 | +32.6 % | 6.62 | +30.5 % | +7.3 % |
+  | ubuntu | 41617780788 (new) | 15.09 | 5.53 | 0.95 | 6.89 | +24.6 % | 6.73 | +21.7 % | +15.0 % |
+  | ubuntu | 41407611313 | 15.50 | 5.96 | 0.97 | 6.95 | +16.6 % | 6.77 | +13.5 % | +23.3 % |
+  | ubuntu | 41422165382 | 15.57 | 5.68 | 0.98 | 6.96 | +22.5 % | 6.77 | +19.2 % | +17.4 % |
+  | ubuntu | 41633136399 (new) | 15.63 | 5.63 | 0.98 | 6.96 | +23.7 % | 6.78 | +20.4 % | +16.3 % |
+  | ubuntu | 41438160162 | 15.84 | 6.14 | 1.00 | 6.99 | +13.9 % | 6.79 | +10.7 % | +26.5 % |
+  | ubuntu | 41446215228 | 15.90 | 5.64 | 1.00 | 7.00 | +24.1 % | 6.80 | +20.6 % | +16.1 % |
+  | ubuntu | 41465153350 | 16.04 | 5.58 | 1.00 | 7.00 | +25.4 % | 6.80 | +21.9 % | +14.9 % |
+  | windows | 41407611313 | 9.13 | 4.03 | 0.51 | 4.59 | +13.8 % | 4.90 | +21.6 % | +15.1 % |
+  | windows | 41477960420 | 9.27 | 4.34 | 0.52 | 4.61 | +6.2 % | 4.92 | +13.3 % | +23.6 % |
+  | windows | 41633136399 (new) | 12.50 | 4.57 | 0.70 | 5.04 | +10.3 % | 5.22 | +14.2 % | +22.6 % |
+  | windows | 41617780788 (new) | 12.51 | 4.36 | 0.70 | 5.04 | +15.6 % | 5.22 | +19.7 % | +16.9 % |
+  | windows | 41478486887 | 12.70 | 4.34 | 0.72 | 5.06 | +16.7 % | 5.24 | +20.7 % | +16.0 % |
+  | windows | 41438160162 | 14.01 | 4.44 | 0.79 | 5.22 | +17.5 % | 5.34 | +20.3 % | +16.4 % |
+  | windows | 41455124190 | 15.32 | 4.36 | 0.86 | 5.36 | +22.9 % | 5.44 | +24.7 % | +12.3 % |
+  | windows | 41368179019 | 16.60 | 4.62 | 0.93 | 5.49 | +18.8 % | 5.52 | +19.6 % | +17.1 % |
+  | windows | 41465153350 | 17.24 | 4.98 | 0.97 | 5.55 | +11.5 % | 5.57 | +11.8 % | +25.2 % |
+  | windows | 41414800703 | 17.26 | 4.79 | 0.97 | 5.55 | +15.9 % | 5.57 | +16.2 % | +20.4 % |
+  | windows | 41422165382 | 17.26 | 4.83 | 0.97 | 5.55 | +15.0 % | 5.57 | +15.3 % | +21.4 % |
+  | windows | 41446215228 | 17.31 | 4.73 | 0.97 | 5.56 | +17.5 % | 5.57 | +17.8 % | +18.9 % |
+  | windows | 41430160072 | 17.76 | 4.54 | 1.00 | 5.60 | +23.3 % | 5.60 | +23.3 % | +13.5 % |
+
+  Detection on CI rests on this arithmetic: no CI run has yet injected +40 % or +400 µs (the
+  diagnostic draft pull request after this one does, on both perf jobs).
+
 ---
 
 ## Owner questions
