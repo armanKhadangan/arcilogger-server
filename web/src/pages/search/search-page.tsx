@@ -3,6 +3,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 
+import { keepDaysOf, requiredOf } from '@/components/archive/archive-model';
+import { ArchiveReloadCard } from '@/components/archive/archive-reload-card';
 import { Histogram } from '@/components/charts/histogram';
 import { clipSpan } from '@/components/charts/histogram-data';
 import { RawLineSheet, type RawLineTarget } from '@/components/evidence/raw-line-sheet';
@@ -22,6 +24,7 @@ import {
   useSearchFields,
   useSearchSession,
   useSearchStats,
+  type SearchInput,
 } from '@/lib/search-hooks';
 import type { Notice, SavedSearch, SearchFacets, SearchRow } from '@/lib/search-types';
 import {
@@ -259,10 +262,53 @@ export function SearchPage() {
 
   const first = state.first;
   const last = state.last;
-  // A refusal of the run itself (rows cleared), unless the query bar or the KVKK notice shows it.
+  // Days outside the database window (G7, G8): the whole range (409) or a part of it (`archived`).
+  const required = requiredOf(state.error);
+  // The search the first page answered: `run` sets both at once; while a newer search runs, the
+  // old page stays on screen and `state.input` is already the new one.
+  const [answered, setAnswered] = useState<{ page: typeof first; input: SearchInput | null }>({
+    page: null,
+    input: null,
+  });
+  if (answered.page !== first) setAnswered({ page: first, input: state.input });
+  // The card is there only for the search in `state.input`: a 409 is its answer (a new run clears
+  // it), a page's `archived` days only until another search is started.
+  const archived =
+    required ?? (first && answered.input === state.input ? (first.archived ?? null) : null);
+  // A new search of the user is a new card; running the same search again (its id expired, or the
+  // card's own re-run) keeps the card and a reload in progress.
+  const [searches, setSearches] = useState<{ input: SearchInput | null; count: number }>({
+    input: null,
+    count: 0,
+  });
+  if (searches.input !== state.input)
+    setSearches({ input: state.input, count: searches.count + 1 });
+  const archivedKey = archived
+    ? `${archived.first_day}/${archived.last_day}/${String(searches.count)}`
+    : null;
+  /** The card goes when the search has run again: the focus in it goes to the results. */
+  const results = useRef<HTMLElement>(null);
+  const focusResults = useRef(false);
+  // The days are loaded: the same search runs again.
+  const rerun = useCallback(() => {
+    const input = state.input;
+    if (input === null) return;
+    focusResults.current = true;
+    void run(input);
+  }, [state.input, run]);
+  useEffect(() => {
+    if (state.running || !focusResults.current) return;
+    focusResults.current = false;
+    // Only when the focus fell to the page with the card (the user may have moved it meanwhile).
+    const lost = document.activeElement === null || document.activeElement === document.body;
+    if (first && lost) results.current?.focus();
+  }, [first, state.error, state.running]);
+  // A refusal of the run itself (rows cleared), unless the query bar, the KVKK notice or the
+  // archive card shows it.
   const runError =
     state.error !== null &&
     first === null &&
+    required === null &&
     problemOf(state.error) === null &&
     !isApiError(state.error, 'privacy_notice_required');
   // A failed page: the rows stay, and an incomplete scan waits for "Devam et".
@@ -335,6 +381,20 @@ export function SearchPage() {
           ) : null}
         </Alert>
       ) : null}
+      {/*
+        The card before the notices: the action first (#112). A 409 has no answer, so no notices:
+        the card is where the run's refusal would be.
+      */}
+      {archived && archivedKey ? (
+        <ArchiveReloadCard
+          key={archivedKey}
+          reason="search"
+          range={archived}
+          message={required ? errorMessage(state.error) : null}
+          keepDays={keepDaysOf(required)}
+          onReady={rerun}
+        />
+      ) : null}
       {notices.map((notice) => (
         <Alert key={notice.code} tone="info" assertive={false}>
           {lang === 'en' ? notice.message_en : notice.message_tr}
@@ -353,7 +413,7 @@ export function SearchPage() {
             <Skeleton className="h-40" />
             <Skeleton className="h-96" />
           </div>
-        ) : runError ? null : (
+        ) : runError || required ? null : (
           <EmptyState
             icon={Search}
             title={t('search.empty.title')}
@@ -383,7 +443,12 @@ export function SearchPage() {
       ) : (
         <div className="grid items-start gap-4 lg:grid-cols-[17rem_minmax(0,1fr)]">
           <FacetPanel stats={stats.data} loading={stats.isPending} onAdd={addFacet} />
-          <div className="flex min-w-0 flex-col gap-4">
+          <section
+            ref={results}
+            tabIndex={-1}
+            aria-label={t('search.results.caption')}
+            className="flex min-w-0 flex-col gap-4 outline-none"
+          >
             {stats.data ? (
               <Histogram
                 buckets={stats.data.histogram.buckets}
@@ -433,7 +498,7 @@ export function SearchPage() {
               />
             ) : null}
             {pageError ? <Alert tone="danger">{errorMessage(state.error)}</Alert> : null}
-          </div>
+          </section>
         </div>
       )}
 
