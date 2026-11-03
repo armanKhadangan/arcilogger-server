@@ -34,6 +34,13 @@ of every deletion record under its final name, of every stored official report
 skipped. Each renewal token is verified against the pinned roots and the stored revocation
 lists. :func:`renewal_status` only reads; ``state/renewal.json`` is written by the ``Renew``
 task's command line (contract W5-A-2).
+
+**A run** (:func:`renew`, D4) writes at most one record, covering every token that is ``due``
+or ``uncovered``, under ``state/renewal.lock`` (never inside ``vault/renewals``). As a deletion
+record is (``retention``), the record is written as ``<name>.json.part``, stamped and verified;
+only then is the token renamed to its final name, then the record, and both are locked like
+sealed files. A failed stamp removes both, so a record never exists under its final name without
+its token; leftovers of an interrupted run are tidied by the next one (contract W5-A-3).
 """
 
 from __future__ import annotations
@@ -43,7 +50,9 @@ import json
 import logging
 import os
 import re
-from collections.abc import Iterable, Mapping, Sequence
+import sys
+from collections.abc import Iterable, Iterator, Mapping, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from pathlib import Path
@@ -52,16 +61,24 @@ from typing import Any, Final, Literal
 from cryptography import x509
 
 from arcilogger_core import PRODUCT_NAME, __version__
+from arcilogger_core.canonical import canonical_json
 from arcilogger_core.chain import sealed_days
 from arcilogger_core.config import Config
 from arcilogger_core.crl import Crl, CrlError, load_stored
+from arcilogger_core.fsutil import atomic_write_bytes, fsync_dir
+from arcilogger_core.immutability import is_locked, lock, unlock
 from arcilogger_core.layout import Layout
 from arcilogger_core.retention import records as deletion_records
 from arcilogger_core.seal import sha256_file
-from arcilogger_core.timeutil import isoformat_site, require_aware, to_utc, utc_now
-from arcilogger_core.tsa.base import TimestampProvider, TokenInfo, TsaError
+from arcilogger_core.timeutil import isoformat_site, require_aware, site_day, to_utc, utc_now
+from arcilogger_core.tsa.base import TimestampProvider, TokenInfo, TsaError, TsaResponseError
 from arcilogger_core.tsa.client import token_path_for
 from arcilogger_core.tsa.verify import confirmed_legal_grade, inspect_token, verify_token
+
+if sys.platform == "win32":
+    import msvcrt
+else:
+    import fcntl
 
 log = logging.getLogger("arcilogger.renewal")
 
@@ -81,6 +98,10 @@ DEFAULT_RENEW_BEFORE_DAYS: Final = 180
 #: The stored official reports and their tokens, under ``exports`` (the API's report store).
 REPORTS_FOLDER: Final = "reports"
 REPORT_TOKEN_SUFFIX: Final = ".pdf.zd"  # noqa: S105 - a file suffix
+#: ``state/renewal.lock``: one run at a time (the ``Renew`` task and a run started by hand).
+LOCK_NAME: Final = "renewal.lock"
+#: Suffix of a record (and its token) that is not complete yet.
+PART_SUFFIX: Final = ".part"
 
 _HEX64 = re.compile(r"[0-9a-f]{64}")
 #: A Windows drive (``C:``); with an empty segment (a leading ``/``, a ``//`` UNC prefix) it
@@ -676,3 +697,301 @@ def renewal_status(
     ``config``. Writes nothing.
     """
     return _Reader(layout, config, roots, now or utc_now()).read().report()
+
+
+# -- a run ----------------------------------------------------------------------------------------
+
+
+class RenewalError(Exception):
+    """A run that did not write a record, Turkish first with English beside it."""
+
+    code = "renewal_error"
+
+    def __init__(self, message_tr: str, message_en: str) -> None:
+        super().__init__(f"{message_tr} [{message_en}]")
+        self.message_tr = message_tr
+        self.message_en = message_en
+
+
+class RenewalBusyError(RenewalError):
+    """Another run holds ``state/renewal.lock``."""
+
+    code = "renewal_busy"
+
+    def __init__(self) -> None:
+        super().__init__(
+            "Başka bir yeniden damgalama çalışıyor (state/renewal.lock kilitli); daha sonra "
+            "yeniden deneyin.",
+            "Another re-stamping run is in progress (state/renewal.lock is locked); try again "
+            "later.",
+        )
+
+
+class RenewalNotNeeded(RenewalError):  # noqa: N818 - the contract's name (§2.1.2)
+    """No token is due or uncovered; ``report`` is the status that says so."""
+
+    code = "renewal_not_needed"
+
+    def __init__(self, report: RenewalReport) -> None:
+        super().__init__(
+            "Yeniden damgalanması gereken damga yok.", "No time stamp is due for re-stamping."
+        )
+        self.report = report
+
+
+class RenewalStampInvalidError(TsaResponseError):
+    """The renewal record's new token does not verify against the pinned roots."""
+
+    code = "renewal_stamp_invalid"
+
+    def __init__(self, errors: Sequence[str]) -> None:
+        self.errors = tuple(errors)
+        detail = "; ".join(self.errors)
+        self.message_tr = (
+            f"Yenileme kaydının zaman damgası doğrulanamadı; kayıt yazılmadı: {detail}"
+        )
+        self.message_en = (
+            f"The renewal record's time stamp did not verify; no record was written: {detail}"
+        )
+        super().__init__(f"{self.message_tr} [{self.message_en}]")
+
+
+@dataclass(frozen=True)
+class RenewalRun:
+    """What one run wrote: the record and its token (vault-relative), the paths of the tokens
+    it lists, the status before and after, and the leftovers of an interrupted run it removed."""
+
+    record_path: str
+    token_path: str
+    reason: Reason
+    renewed: tuple[str, ...]
+    report_before: RenewalReport
+    report_after: RenewalReport
+    discarded: tuple[str, ...] = ()
+
+
+@contextmanager
+def one_run(layout: Layout) -> Iterator[None]:
+    """Hold ``state/renewal.lock`` (:data:`LOCK_NAME`), or raise :class:`RenewalBusyError`."""
+    layout.state.mkdir(parents=True, exist_ok=True)
+    handle = os.open(layout.state / LOCK_NAME, os.O_RDWR | os.O_CREAT, 0o644)
+    try:
+        try:
+            _lock(handle)
+        except OSError as exc:
+            raise RenewalBusyError from exc
+        try:
+            yield
+        finally:
+            _unlock(handle)
+    finally:
+        os.close(handle)
+
+
+if sys.platform == "win32":
+
+    def _lock(handle: int) -> None:
+        os.lseek(handle, 0, os.SEEK_SET)
+        msvcrt.locking(handle, msvcrt.LK_NBLCK, 1)
+
+    def _unlock(handle: int) -> None:
+        os.lseek(handle, 0, os.SEEK_SET)
+        msvcrt.locking(handle, msvcrt.LK_UNLCK, 1)
+
+else:
+
+    def _lock(handle: int) -> None:
+        fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+    def _unlock(handle: int) -> None:
+        fcntl.flock(handle, fcntl.LOCK_UN)
+
+
+def _part(path: Path) -> Path:
+    return path.with_name(path.name + PART_SUFFIX)
+
+
+def _remove(path: Path, removed: list[str]) -> None:
+    if not path.exists():
+        return
+    if is_locked(path):
+        unlock(path)
+    path.unlink()
+    removed.append(path.name)
+
+
+def _replace(source: Path, target: Path) -> None:
+    source.replace(target)
+    fsync_dir(target.parent)
+
+
+def _promote(part: Path, token: Path, final: Path) -> None:
+    """Token first, then the record, then both locked: a record under its final name always
+    has its token."""
+    final_token = token_path_for(final)
+    if token != final_token:
+        _replace(token, final_token)
+    _replace(part, final)
+    for path in (final, final_token):
+        if not is_locked(path):
+            lock(path)
+
+
+def recover(
+    layout: Layout,
+    roots: Sequence[x509.Certificate],
+    *,
+    require_critical_eku: bool = True,
+    now: datetime | None = None,
+) -> list[str]:
+    """Tidy up what an interrupted run left in ``vault/renewals``; returns the removed names.
+
+    * ``X.json.part`` with a token (``X.json.part.zd``, or ``X.json.zd`` when the run stopped
+      between the two renames) that verifies against it: promoted (W5-A-3);
+    * any other ``….part`` and ``….part.zd``, a final token without its record and a temporary
+      file of an interrupted write (``.….tmp``): removed. None of them is evidence: a record
+      without a verified token protects nothing.
+    """
+    folder = layout.renewals_dir
+    removed: list[str] = []
+    if not folder.is_dir():
+        return removed
+    moment = max(now or utc_now(), utc_now())
+    for part in sorted(folder.glob(f"*.json{PART_SUFFIX}")):
+        final = part.with_name(part.name.removesuffix(PART_SUFFIX))
+        tokens = [
+            token for token in (token_path_for(part), token_path_for(final)) if token.is_file()
+        ]
+        if not final.exists() and len(tokens) == 1:
+            check = verify_token(
+                tokens[0].read_bytes(),
+                roots=roots,
+                file_path=part,
+                now=moment,
+                require_critical_eku=require_critical_eku,
+            )
+            if check.ok:
+                _promote(part, tokens[0], final)
+                log.warning("renewal: completed %s of an interrupted run", final.name)
+                continue
+            _remove(tokens[0], removed)
+        _remove(part, removed)
+    for token in sorted(folder.glob(f"*.json{PART_SUFFIX}.zd")):
+        _remove(token, removed)
+    for token in sorted(folder.glob("*.json.zd")):
+        if not token.with_name(token.name.removesuffix(".zd")).exists():
+            _remove(token, removed)
+    for temporary in sorted(folder.glob(".*.tmp")):
+        _remove(temporary, removed)
+    if removed:
+        log.warning("renewal: removed leftovers of an interrupted run: %s", ", ".join(removed))
+    return removed
+
+
+def _record_path(layout: Layout, today: date) -> Path:
+    """``renewals/<today>-<seq>.json``: the first number from 1 that no file of a record (or
+    of one in progress) uses yet."""
+    number = 1
+    while True:
+        path = layout.renewals_dir / f"{today.isoformat()}-{number}.json"
+        names = (path, token_path_for(path), _part(path), token_path_for(_part(path)))
+        if not any(name.exists() for name in names):
+            return path
+        number += 1
+
+
+def _write(
+    final: Path,
+    record: dict[str, Any],
+    provider: TimestampProvider,
+    roots: Sequence[x509.Certificate],
+    *,
+    crls: Sequence[Crl] | None,
+    require_critical_eku: bool,
+    now: datetime,
+) -> None:
+    """Write, stamp and verify ``record`` as ``<final>.part``, then promote it; on any failure
+    remove both files and raise (§2.1.1: a record without its token is not evidence)."""
+    part = _part(final)
+    atomic_write_bytes(part, canonical_json(record))
+    removed: list[str] = []
+    try:
+        stamp = provider.stamp(part)
+        check = verify_token(
+            stamp.token_path.read_bytes(),
+            roots=roots,
+            file_path=part,
+            now=max(now, utc_now()),
+            require_critical_eku=require_critical_eku,
+            crls=crls,
+        )
+        if not check.ok:
+            raise RenewalStampInvalidError(check.errors)
+    except (TsaError, OSError):
+        _remove(token_path_for(part), removed)
+        _remove(part, removed)
+        raise
+    _promote(part, stamp.token_path, final)
+
+
+def renew(
+    layout: Layout,
+    config: Config,
+    provider: TimestampProvider,
+    roots: Sequence[x509.Certificate],
+    now: datetime | None = None,
+) -> RenewalRun:
+    """Re-stamp every token that is ``due`` or ``uncovered`` at ``now`` with one record (D4).
+
+    An expired token is renewed too; it then becomes ``late``. The record's ``reason`` follows
+    the provider's claim: ``due`` for a legal-grade provider, else ``test``, and a test record
+    never counts (D5). Raises :class:`RenewalBusyError` while another run holds the lock,
+    :class:`RenewalNotNeeded` when nothing is due, and the provider's :class:`TsaError` (or
+    :class:`RenewalStampInvalidError`) when the stamp fails, leaving no record.
+    """
+    moment = require_aware(now or utc_now())
+    eku = config.tsa.require_critical_eku
+    with one_run(layout):
+        discarded = recover(layout, roots, require_critical_eku=eku, now=moment)
+        reader = _Reader(layout, config, roots, moment).read()
+        before = reader.report()
+        due = {token.path for token in before.tokens if token.status in ("due", "uncovered")}
+        if not due:
+            raise RenewalNotNeeded(before)
+        entries = [renewable.entry for renewable in reader.renewables if renewable.fact.path in due]
+        reason: Reason = "due" if provider.legal_grade is True else "test"
+        record = build_record(
+            entries,
+            created_at=moment,
+            system=system_block(config),
+            tsa=tsa_block(provider, config),
+            reason=reason,
+        )
+        final = _record_path(layout, site_day(moment))
+        final.parent.mkdir(parents=True, exist_ok=True)
+        _write(
+            final,
+            record,
+            provider,
+            roots,
+            crls=reader.crls(),
+            require_critical_eku=eku,
+            now=moment,
+        )
+        record_path = f"renewals/{final.name}"
+        log.info(
+            "renewal: %s stamped by %s (reason %s), %d token(s)",
+            record_path,
+            provider.name,
+            reason,
+            len(entries),
+        )
+        return RenewalRun(
+            record_path=record_path,
+            token_path=f"{record_path}.zd",
+            reason=reason,
+            renewed=tuple(entry["path"] for entry in record["tokens"]),
+            report_before=before,
+            report_after=renewal_status(layout, config, roots, moment),
+            discarded=tuple(discarded),
+        )

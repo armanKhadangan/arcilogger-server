@@ -1264,3 +1264,17 @@ All Wave 5 questions are answered (2026-11-02).
   cannot be read (the `Renew` task may lack the right; the run goes on without report tokens).
   A token that disappears during the scan (the retention job) is skipped. The certificate's
   `notAfter` is read from each token, never from `state/seal`.
+- **W5-A-3: the crash-safe write order.** §2.1.1 says the record "is written with
+  `atomic_write_bytes`, stamped", and a failed run deletes it. `renew` writes it as
+  `<name>.json.part` (with `atomic_write_bytes`), stamps it to `<name>.json.part.zd` and
+  verifies that token against the pinned roots; only then is the token renamed to its final name,
+  then the record, and both are locked with `immutability.lock`, as `retention` does for a
+  deletion record. A failed stamp (`TsaError`, `OSError`) or a token that does not verify
+  (`RenewalStampInvalidError`, a `TsaResponseError`) removes both files and is raised. So a
+  record never exists under its final name without its token, and the builder (which ships
+  `renewals/*.json`) never ships one. Leftovers of an interrupted run are tidied by the next run
+  (`renewal.recover`): a part whose token (`.part.zd`, or the final `.zd` when the run stopped
+  between the renames) verifies against it is promoted; any other part, a token without its
+  record and an interrupted write's temporary file are removed. One run at a time:
+  `state/renewal.lock` (never inside `vault/renewals`, where the standalone verifier's vault mode
+  would report an unknown file); a second run raises `RenewalBusyError`.

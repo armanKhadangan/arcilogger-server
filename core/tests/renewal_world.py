@@ -13,7 +13,6 @@ real server is called.
 
 from __future__ import annotations
 
-import hashlib
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time, timedelta
 from pathlib import Path
@@ -264,10 +263,6 @@ class RenewalWorld:
 
 def day_token_path(day: date = DAY) -> str:
     return f"{day:%Y/%m/%d}/manifest-{day.isoformat()}.json.zd"
-
-
-def sha256_of(path: Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 def make_world(tmp_path: Path, *, legal_listed: bool = True) -> RenewalWorld:
