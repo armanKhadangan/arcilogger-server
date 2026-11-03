@@ -89,10 +89,11 @@ Key                              Problem (setting)
                                  expires within 30 days (:data:`CERT_EXPIRY_WARNING`), or one
                                  whose certificate expired uncovered — high (prepared,
                                  :data:`LEGAL_CHECKS`)
-``R20-crl:none``                 no stored revocation list issued in the last
-                                 ``tsa.crl_max_age_days`` (7) days for an issuer of the newest
-                                 sealed day's chain, judged from ``state/crl`` only — medium
-                                 (prepared, :data:`LEGAL_CHECKS`)
+``R20-crl:none``                 no stored revocation list fetched in the last
+                                 ``tsa.crl_max_age_days`` (7) days and not past its own
+                                 ``nextUpdate`` (C22) for an issuer of the newest sealed day's
+                                 chain, judged from ``state/crl`` only — medium (prepared,
+                                 :data:`LEGAL_CHECKS`)
 ===============================  ==============================================================
 
 A check that fails (an unreadable folder, a database error) is reported in the job's details and
@@ -507,16 +508,25 @@ class ScheduledCheck:
 
 def scheduled_verifications(layout: Layout) -> dict[date, ScheduledCheck]:
     """Newest scheduled verification per day (``state/verify/last-*.json``, files only)."""
+    return read_scheduled_verifications(layout)[0]
+
+
+def read_scheduled_verifications(layout: Layout) -> tuple[dict[date, ScheduledCheck], bool]:
+    """:func:`scheduled_verifications`, and whether every ``last-*.json`` could be read: a file
+    that cannot be read, or holds no verification, is left out and makes it ``False``."""
     newest: dict[date, ScheduledCheck] = {}
+    readable = True
     folder = layout.state / "verify"
     for path in sorted(folder.glob("last-*.json")) if folder.is_dir() else []:
         try:
             data = _read_json(path)
         except (OSError, ValueError):
+            readable = False
             continue
         at = _time(data.get("at")) if isinstance(data, dict) else None
         checks = data.get("checks") if isinstance(data, dict) else None
         if at is None or not isinstance(checks, list):
+            readable = False
             continue
         for check in checks:
             try:
@@ -530,7 +540,7 @@ def scheduled_verifications(layout: Layout) -> dict[date, ScheduledCheck]:
                     ok=bool(check.get("ok")),
                     errors=tuple(str(e) for e in errors) if isinstance(errors, list) else (),
                 )
-    return newest
+    return newest, readable
 
 
 def _newest_verifications(ctx: CheckContext) -> dict[date, tuple[datetime, bool]]:
@@ -1953,7 +1963,8 @@ _LAST_SITE_MOMENT: Final = datetime.max.replace(tzinfo=SITE_TZ).astimezone(UTC)
 
 def _calendar_time(value: Any) -> datetime | None:
     """:func:`_time`, ``None`` for a time at the edge of the calendar that cannot be shown in
-    UTC or in site time (no certificate's or fetch's: the readers never fail on it)."""
+    UTC or in site time (from 9999-12-31T21:00Z on, RFC 5280's "no well-defined expiration"
+    ``99991231235959Z`` included): the readers leave it out and never fail on it."""
     moment = _time(value)
     try:
         return moment if moment is None or moment.astimezone(UTC) <= _LAST_SITE_MOMENT else None
@@ -2259,15 +2270,21 @@ class RevokedCertificate:
 
 
 def revoked_certificates(
-    layout: Layout, stamp: StampInUse | None = None, lists: Sequence[Crl] | None = None
+    layout: Layout,
+    stamp: StampInUse | None = None,
+    lists: Sequence[Crl] | None = None,
+    verifications: Mapping[date, ScheduledCheck] | None = None,
 ) -> list[RevokedCertificate]:
     """The time-stamp certificates revoked at or before a stamp (``crl-revoked``), each once:
     those of the newest scheduled verification of each day that is not deleted, oldest day
-    first, then those of the newest sealed day's chain against the stored lists (``stamp`` and
-    ``lists``), which also sees a revocation before the next verification runs."""
+    first (``verifications``, read from ``state/verify`` when not given), then those of the
+    newest sealed day's chain against the stored lists (``stamp`` and ``lists``), which also
+    sees a revocation before the next verification runs."""
     states = _seal_states(layout)
     found: dict[str, RevokedCertificate] = {}
-    for day, check in sorted(scheduled_verifications(layout).items()):
+    if verifications is None:
+        verifications = scheduled_verifications(layout)
+    for day, check in sorted(verifications.items()):
         if states.get(day, {}).get("status") == "deleted":
             continue
         for error in check.errors:
@@ -2359,12 +2376,14 @@ def check_stamp_cert(ctx: CheckContext) -> Outcome:
     """``R20-cert:none``: a time-stamp certificate is on a revocation list at or before a stamp
     (``critical``); or a token due for re-stamping, not covered yet, has a certificate that
     expires within :data:`CERT_EXPIRY_WARNING`, or a token's certificate expired with no renewal
-    that counts (``uncovered``) (``high``). Resolved when none holds and the re-stamping report,
-    the stored lists and the newest sealed day's stamp can be read: an unreadable one decides
-    nothing (a revocation found from the lists stays open)."""
+    that counts (``uncovered``) (``high``). Resolved when none holds and every input can be
+    read: the re-stamping report, the scheduled verifications, the newest sealed day's stamp
+    (reaching a pinned root) and, once a day is sealed, every stored list (none changed or
+    gone, C14). An unreadable one decides nothing: a revocation it raised stays open."""
     stamp, stamp_known = _newest_stamp(ctx.layout, pinned_roots(ctx.config, ctx.layout))
     lists = stored_lists(ctx.layout)
-    revoked = revoked_certificates(ctx.layout, stamp, lists)
+    verifications, verifications_known = read_scheduled_verifications(ctx.layout)
+    revoked = revoked_certificates(ctx.layout, stamp, lists, verifications)
     renewals = read_stamp_renewals(ctx.layout)
     expiring = sum(
         1
@@ -2415,7 +2434,8 @@ def check_stamp_cert(ctx: CheckContext) -> Outcome:
         )
 
     # nothing sealed yet: no chain to check the lists against, and no list is needed
-    readable = renewals is not None and stamp_known and (stamp is None or lists is not None)
+    lists_known = stamp is None or (lists is not None and not lists.mismatched)
+    readable = renewals is not None and verifications_known and stamp_known and lists_known
 
     def clear(alert: Alert) -> str | None:
         return "certificate_ok" if readable else None

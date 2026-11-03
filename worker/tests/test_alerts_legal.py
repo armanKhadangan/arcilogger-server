@@ -439,10 +439,11 @@ def test_stamp_cert_from_the_lists_stays_open_while_they_cannot_be_read(
     check: Any, layout: Layout, sealed: SealedVault, db_session: Session
 ) -> None:
     """W5-C-7: an input that cannot be read decides nothing. A revocation found from the stored
-    lists (before a scheduled verification records it) is not resolved while the index, or the
-    newest sealed day's token it was checked against, cannot be read."""
+    lists (before a scheduled verification records it) is not resolved while the index, the
+    list's own file (changed or gone) or the newest sealed day's token it was checked against
+    cannot be read."""
     renewals(layout, ("not_due", NOW + timedelta(days=400)))  # a readable report
-    crl_lists(sealed, 0, revoked_at=at_site(date(2026, 10, 30), 12, 0))
+    name = crl_lists(sealed, 0, revoked_at=at_site(date(2026, 10, 30), 12, 0))
     assert check()[CERT_KEY].severity == "critical"
     index = crl_index_path(layout)
     saved_index = index.read_bytes()
@@ -455,8 +456,38 @@ def test_stamp_cert_from_the_lists_stays_open_while_they_cannot_be_read(
     assert check()[CERT_KEY].severity == "critical"
     token.write_bytes(saved_token)
     assert check()[CERT_KEY].severity == "critical"  # readable again: still revoked
+    stored = layout.crl_dir / str(name)
+    saved_list = stored.read_bytes()
+    stored.write_bytes(saved_list + b"\x00")  # changed (C14): left out, a person has to look
+    assert check()[CERT_KEY].severity == "critical"
+    stored.unlink()  # gone
+    assert check()[CERT_KEY].severity == "critical"
+    stored.write_bytes(saved_list)
+    assert check()[CERT_KEY].severity == "critical"
     crl_lists(sealed, 0)  # a list without the revocation
     assert CERT_KEY not in check()
+    reason = resolved(db_session, CERT_KEY).details["auto_resolved"]["reason"]
+    assert reason == "certificate_ok"
+
+
+def test_stamp_cert_from_a_verification_stays_open_while_it_cannot_be_read(
+    check: Any, layout: Layout, sealed: SealedVault, db_session: Session
+) -> None:
+    """W5-C-7: a revocation that only a scheduled verification recorded is not resolved while
+    that ``last-*.json`` cannot be read or holds no verification."""
+    renewals(layout, ("not_due", NOW + timedelta(days=400)))
+    crl_lists(sealed, 0)  # the stored lists do not have it yet
+    revoked_day(layout)
+    assert check()[CERT_KEY].severity == "critical"
+    report = layout.state / "verify" / "last-day.json"
+    saved = report.read_bytes()
+    for damaged in ("{", "[]", '{"at": null, "checks": []}', '{"at": "2026-11-01T00:00:00Z"}'):
+        report.write_text(damaged, encoding="utf-8")
+        assert check()[CERT_KEY].severity == "critical", damaged
+    report.write_bytes(saved)
+    assert check()[CERT_KEY].severity == "critical"
+    write(report, {"at": isoformat_site(NOW, "seconds"), "deep": False, "checks": []})
+    assert CERT_KEY not in check()  # a readable verification without it
     reason = resolved(db_session, CERT_KEY).details["auto_resolved"]["reason"]
     assert reason == "certificate_ok"
 
