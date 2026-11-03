@@ -1251,3 +1251,10 @@ All Wave 5 questions are answered (2026-11-02).
   pool holding the lock. The wait is part of `search.request_budget_ms`: the scan gets what is
   left, and a wait that uses the budget up answers 504 `search_timeout` (audited `outcome:
   timeout`). The lookup (READ COMMITTED) keeps the lock in its transaction as before.
+
+## Deviations — W5-A (2026-11-03)
+
+- **W5-A-1: the config adapter.** `renewal.renew_before_days` reads `tsa.renew_before_days`
+  with `getattr` and the §2.5 default (180) until W5-T's day-1 pull request lands; then it
+  becomes plain attribute access (as W5-B-8 for `crl.crl_options`). It is the one place that
+  reads the key. Until then the 30–730 bounds are not enforced: they are W5-T's validation.
