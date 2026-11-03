@@ -1779,6 +1779,26 @@ Issue #71, follow-up of #40 item 13 and Q-C3-1. It is a Wave 3 matter (contract 
   only; Wave 4 skips the step for such a rollback. `docs/CORRELATION.md` ("The step is
   unconditional: …", owner W4-F) says the same and is listed in the pull request.
 
+## Deviations — #90 (search perf fixture, 2026-11-02)
+
+- **#90-1: the search performance data ends with a `CHECKPOINT`** (`docs/MVP-CONTRACTS.md` 17.10,
+  granted by the manager on #90, 2026-11-02 23:07Z). Since #60 shortened the fixture by about
+  1,300 s, Windows CI timed Q1 2–4 minutes after the 7 GB load and `VACUUM ANALYZE`, while its
+  write-back still ran: 33 of 91 runs failed against 0 of 106 before #60, the plan the same
+  backward primary-key scan in every state (PostgreSQL 16 and 17.11), the slow mode a fixed
+  +500 ms a request. `api/tests/test_search_perf.py` now runs a synchronous `CHECKPOINT` after
+  `VACUUM ANALYZE` (and the compression), prints its duration on the setup line, and skips it
+  with a note for a role without superuser or `pg_checkpoint` (cloud sessions; both CI jobs
+  connect as a superuser). Every budget is unchanged (`BROWSE` 0.5 s). A test-setup deviation
+  only: a live server under ingest is not settled, and its browse latency under write load is
+  the manager's follow-up (a browse guard under concurrent ingest). The audit spool's `os.fsync`
+  stays.
+- **#90-2: the guard prints its figures on a pass, with a per-call split.** The setup line and
+  every Q and S line print past pytest's capture (`capsys.disabled()`), and each Q/S line ends
+  with the best call's SQL, commit and fsync time (with their counts) and the rest ("other"),
+  from SQLAlchemy cursor events, a wrapped `do_commit` and a wrapped `os.fsync` inside the test
+  (no timing hook in product code).
+
 ---
 
 ## Owner questions
