@@ -3,6 +3,8 @@ import { useId, useState } from 'react';
 import type { FormEvent, ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import { requiredOf } from '@/components/archive/archive-model';
+import { ArchiveReloadCard } from '@/components/archive/archive-reload-card';
 import { Alert } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -18,7 +20,8 @@ import {
 import { Textarea } from '@/components/ui/textarea';
 import { errorMessage } from '@/lib/api';
 import { useRunLookup } from '@/lib/api-hooks';
-import type { LookupOut } from '@/lib/api-types';
+import type { LookupIn, LookupOut } from '@/lib/api-types';
+import type { ArchiveReloadRequired } from '@/lib/archive-reload-types';
 import { siteToday } from '@/lib/display';
 import { hasErrors, type FieldErrors } from '@/lib/validation';
 
@@ -36,6 +39,18 @@ import {
 
 /** Radix Select needs a non-empty value for "not given". */
 const ANY = 'any';
+
+/**
+ * A lookup that needs days outside the database window (409 `archive_reload_required`): the body
+ * that got it (run again once the days are reloaded), the days and the API's text. `answer`
+ * counts the 409s: each one is a new card.
+ */
+interface ReloadNeeded {
+  body: LookupIn;
+  required: ArchiveReloadRequired;
+  message: string;
+  answer: number;
+}
 
 function Section({ title, hint, children }: { title: string; hint?: string; children: ReactNode }) {
   return (
@@ -66,6 +81,7 @@ export function LookupForm({
   const [errors, setErrors] = useState<FieldErrors<LookupField>>({});
   const [server, setServer] = useState<Partial<Record<LookupField, string>>>({});
   const [failure, setFailure] = useState<string | null>(null);
+  const [reload, setReload] = useState<ReloadNeeded | null>(null);
 
   function set<K extends keyof LookupDraft>(field: K, value: LookupDraft[K]) {
     setDraft((current) => ({ ...current, [field]: value }));
@@ -77,6 +93,7 @@ export function LookupForm({
     setErrors(found);
     setServer({});
     setFailure(null);
+    setReload(null);
     if (hasErrors(found)) {
       // Focus the first field with a problem (or the summary for "nothing to look for").
       const first = (Object.keys(found) as LookupField[])[0];
@@ -85,9 +102,26 @@ export function LookupForm({
       });
       return;
     }
-    run.mutate(toLookupBody(draft), {
+    send(toLookupBody(draft));
+  }
+
+  /** Runs `body`: from the form, or again once the archive card's reload is ready. */
+  function send(body: LookupIn) {
+    run.mutate(body, {
       onSuccess: onDone,
       onError: (error) => {
+        // The days are in the sealed archive: the card offers to reload them (G7), not a failure.
+        const required = requiredOf(error);
+        if (required) {
+          setReload((current) => ({
+            body,
+            required,
+            message: errorMessage(error),
+            answer: (current?.answer ?? 0) + 1,
+          }));
+          return;
+        }
+        setReload(null);
         const fields = serverFieldErrors(error);
         setServer(fields);
         if (Object.keys(fields).length === 0) setFailure(errorMessage(error));
@@ -343,6 +377,17 @@ export function LookupForm({
           </div>
         </Section>
 
+        {reload ? (
+          <ArchiveReloadCard
+            key={reload.answer}
+            reason="lookup"
+            range={reload.required}
+            message={reload.message}
+            onReady={() => {
+              send(reload.body);
+            }}
+          />
+        ) : null}
         {failure ? <Alert tone="danger">{failure}</Alert> : null}
         <div className="flex flex-col gap-2">
           <Button type="submit" size="lg" busy={run.isPending}>

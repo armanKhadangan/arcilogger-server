@@ -3,6 +3,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 
+import { archivedOf, requiredOf } from '@/components/archive/archive-model';
+import { ArchiveReloadCard } from '@/components/archive/archive-reload-card';
 import { Histogram } from '@/components/charts/histogram';
 import { clipSpan } from '@/components/charts/histogram-data';
 import { RawLineSheet, type RawLineTarget } from '@/components/evidence/raw-line-sheet';
@@ -22,6 +24,7 @@ import {
   useSearchFields,
   useSearchSession,
   useSearchStats,
+  type SearchInput,
 } from '@/lib/search-hooks';
 import type { Notice, SavedSearch, SearchFacets, SearchRow } from '@/lib/search-types';
 import {
@@ -259,10 +262,30 @@ export function SearchPage() {
 
   const first = state.first;
   const last = state.last;
-  // A refusal of the run itself (rows cleared), unless the query bar or the KVKK notice shows it.
+  // Days outside the database window (G7, G8): the whole range (409) or a part of it (`archived`).
+  const required = requiredOf(state.error);
+  const archived = required ?? (first ? archivedOf(first) : null);
+  // A new answer is a new card (a reload asked for an older search does not follow it).
+  const archivedKey = archived
+    ? `${archived.first_day}/${archived.last_day}/${first?.search_id ?? ''}`
+    : null;
+  // The search the card appeared for; while another one runs, the old answer is still shown.
+  const [archivedFor, setArchivedFor] = useState<{
+    key: string | null;
+    input: SearchInput | null;
+  }>({ key: null, input: null });
+  if (archivedFor.key !== archivedKey) setArchivedFor({ key: archivedKey, input: state.input });
+  // The days are loaded: the same search runs again — unless the user has started another.
+  const rerun = useCallback(() => {
+    const input = archivedFor.input;
+    if (input !== null && state.input === input) void run(input);
+  }, [archivedFor.input, state.input, run]);
+  // A refusal of the run itself (rows cleared), unless the query bar, the KVKK notice or the
+  // archive card shows it.
   const runError =
     state.error !== null &&
     first === null &&
+    required === null &&
     problemOf(state.error) === null &&
     !isApiError(state.error, 'privacy_notice_required');
   // A failed page: the rows stay, and an incomplete scan waits for "Devam et".
@@ -340,6 +363,16 @@ export function SearchPage() {
           {lang === 'en' ? notice.message_en : notice.message_tr}
         </Alert>
       ))}
+      {/* A 409 has no answer, so no notices: the card is where the run's refusal would be. */}
+      {archived && archivedKey ? (
+        <ArchiveReloadCard
+          key={archivedKey}
+          reason="search"
+          range={archived}
+          message={required ? errorMessage(state.error) : null}
+          onReady={rerun}
+        />
+      ) : null}
 
       {privacyPending ? (
         <EmptyState
@@ -353,7 +386,7 @@ export function SearchPage() {
             <Skeleton className="h-40" />
             <Skeleton className="h-96" />
           </div>
-        ) : runError ? null : (
+        ) : runError || required ? null : (
           <EmptyState
             icon={Search}
             title={t('search.empty.title')}
