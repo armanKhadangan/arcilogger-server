@@ -48,8 +48,10 @@ import pytest
 from fastapi import FastAPI
 from sqlalchemy.orm import Session, sessionmaker
 
+from arcilogger_api.live.events import Entry
 from arcilogger_api.live.hub import Hub
 from arcilogger_api.live.testing import LiveServer, sign_in
+from arcilogger_api.rawlines import display_text
 from arcilogger_api.testing import EXAMPLE_SITE_NAME
 from arcilogger_core.config import Config
 from arcilogger_core.layout import Layout
@@ -193,7 +195,10 @@ def test_three_streams_under_ten_thousand_lines_a_second(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     hub: Hub = app.state.arci_live
+    diag = I125(hub, monkeypatch) if I125_PROBE else None  # #125's diagnostic, never merged
     loop = LoopCpu(hub, monkeypatch)
+    if diag is not None:
+        diag.loop = loop
     today = site_day(datetime.now(UTC))
     paths = [layout.spool_file(folder, today) for folder in ("fortigate", "fortigate2")]
     for path in paths:
@@ -212,6 +217,8 @@ def test_three_streams_under_ten_thousand_lines_a_second(
         for reader in readers:
             reader.wait(lambda r: bool(r.of("hello")))
         rounds = _gauge(GAUGE_ROUNDS)
+        if diag is not None:
+            diag.start(rounds)
         cpu, wall, (served, sent) = time.process_time(), time.monotonic(), loop.now()
         writer = subprocess.run(
             [
@@ -280,6 +287,22 @@ def test_three_streams_under_ten_thousand_lines_a_second(
                 else f"  per-line check: off CI, limit {limit:.2f}; strict limit {ci_limit:.2f}, "
                 f"{margin} (not asserted)"
             )
+            if diag is not None:
+                block = diag.report(
+                    gauge=gauge,
+                    before=Gauge.of(rounds),
+                    after=Gauge.of(later),
+                    span=(wall, wall + elapsed),
+                    cycles=cycles,
+                    line=line,
+                    figures={
+                        "cpu_s": used / elapsed,
+                        "budget": CPU_PER_SECOND * scale,
+                        "limit": limit,
+                        "ci_limit": ci_limit,
+                    },
+                )
+                print("\n".join(block))
         for stream_id in streams:
             stream = hub.streams[stream_id]
             assert stream.delivered + sum(stream.dropped.values()) == written, stream.query
@@ -308,6 +331,9 @@ def test_three_streams_under_ten_thousand_lines_a_second(
         for client, stream_id in zip(clients, streams, strict=True):
             client.delete(f"/api/v1/live/streams/{stream_id}", headers=STREAM_HEADERS)
             client.close()
+        if diag is not None:
+            with capsys.disabled():
+                print(diag.burst())
 
 
 def _settled(hub: Hub, stream_id: str, written: int) -> bool:
@@ -440,3 +466,232 @@ def _gauge(rounds: int) -> list[Round]:
         )
         assert size > GAUGE_LINES
     return figures
+
+
+# --- #125's diagnostic dispatch (a draft pull request that is never merged) -------------------
+#: ``none``, ``plus40`` or ``plus400``: the in-loop gauge, the round distribution, the cold/hot
+#: burst and that probe, printed as an ``I125:`` block; unset, the guard runs as it is.
+I125_PROBE = os.environ.get("I125_PROBE")
+#: ``none`` writes its loop CPU a delivered line here; ``plus40`` spins 0.4 times that.
+I125_CALIBRATION = os.environ.get("I125_CALIBRATION")
+#: Lines in a round of the in-loop gauge (one at each cycle start, about 0.7 % of the loop).
+I125_ROUND_LINES = 200
+#: The cold/hot burst: trials of each mode, and the pause before a cold one.
+I125_TRIALS = 10
+I125_PAUSE = 0.5
+#: plus40: a probe calibrated from the first cycles (no calibration run) waits for this many.
+I125_FIRST_CYCLES = 3
+
+
+class I125:
+    """The diagnostic's probes: an in-loop gauge round at each cycle start, counted as the
+    cycle's own CPU (``LoopCpu`` wraps this), and a CPU spin before each delivered line's frame,
+    as #31's probe did in ``events``."""
+
+    def __init__(self, hub: Hub, monkeypatch: pytest.MonkeyPatch) -> None:
+        assert I125_PROBE in ("none", "plus40", "plus400"), I125_PROBE
+        self.probe = I125_PROBE
+        #: ``_thread_cpu`` a second (1 off Windows) and the spin a delivered line, in its units.
+        self.per_second = 1.0
+        self.spin = 0.0
+        self.calibrated = "no probe"
+        self.started = False
+        self.loop: LoopCpu | None = None
+        #: The in-loop rounds: (monotonic, a line, a line of the first 20, a line of the rest).
+        self.rounds: list[tuple[float, float, float, float]] = []
+        stamp = datetime(2026, 10, 26, 7, 0, tzinfo=UTC)
+        self.line = format_line(stamp, "172.31.255.1", traffic().encode()).rstrip(b"\n")
+        cycle, frame = hub._cycle, Entry.frame
+
+        async def probed_cycle() -> None:
+            self.rounds.append((time.monotonic(), *self._round()))
+            if self.started and self.probe == "plus40" and not self.spin:
+                self._from_first_cycles()
+            await cycle()
+
+        def spun(entry: Entry, epoch: str, site: Any) -> bytes:
+            if self.spin:
+                began = _thread_cpu()
+                while _thread_cpu() - began < self.spin:
+                    pass
+            return frame(entry, epoch, site)
+
+        monkeypatch.setattr(hub, "_cycle", probed_cycle)
+        monkeypatch.setattr(Entry, "frame", spun)
+
+    def start(self, rounds: list[Round]) -> None:
+        """Sets the probe before the burst, from the gauge's first rounds."""
+        if sys.platform == "win32":
+            self.per_second = sum(r.cpu for r in rounds) / sum(r.wall for r in rounds)
+        if self.probe == "plus400":
+            self.spin, self.calibrated = 400e-6 * self.per_second, "#31's +400 us"
+        elif self.probe == "plus40":
+            if I125_CALIBRATION and Path(I125_CALIBRATION).is_file():
+                path = json.loads(Path(I125_CALIBRATION).read_text())["path_cpu"]
+                self.spin, self.calibrated = 0.4 * path, "0.4 x the calibration run's path"
+            else:
+                self.calibrated = f"0.4 x the first {I125_FIRST_CYCLES} cycles' path"
+        self.started = True
+
+    def _from_first_cycles(self) -> None:
+        assert self.loop is not None
+        marks = self.loop.marks
+        cycles = [
+            (cpu - began) / (lines - before)
+            for (began, before), (cpu, lines) in itertools.pairwise(marks)
+            if lines - before >= CYCLE_LINES
+        ]
+        if len(cycles) >= I125_FIRST_CYCLES:
+            self.spin = 0.4 * statistics.median(cycles)
+
+    def _round(self) -> tuple[float, float, float]:
+        """A round of the gauge's own work on the loop thread: a line, the first 20, the rest."""
+        began, size = _thread_cpu(), 0
+        first = began
+        for index in range(I125_ROUND_LINES):
+            if index == 20:
+                first = _thread_cpu()
+            stamp_text, sender, message = self.line.split(b" ", 2)
+            datetime.fromisoformat(stamp_text.decode("ascii"))
+            sender.decode("ascii")
+            if b'type="traffic"' in message.lower():
+                fields = {
+                    key.decode("ascii"): value.strip(b'"').decode()
+                    for key, value in PAIR.findall(message)
+                }
+                size += len(json.dumps(fields, ensure_ascii=False, separators=(",", ":")))
+        end = _thread_cpu()
+        assert size > I125_ROUND_LINES
+        return (
+            (end - began) / I125_ROUND_LINES,
+            (first - began) / 20,
+            (end - first) / (I125_ROUND_LINES - 20),
+        )
+
+    def burst(self) -> str:
+        """measure.md 3.3 on this thread, once the streams are closed (a reader's read times out
+        after 10 s without a byte): W (``display_text`` and ``json.dumps`` of 20 delivered lines'
+        data) and G (20 gauge lines), back to back and after a sleep of ``I125_PAUSE``."""
+        items = []
+        for index in range(20):
+            message = traffic(srcip=f"172.20.41.{index + 10}").encode()
+            data: dict[str, Any] = {
+                "seq": 1000 + index,
+                "received": f"2026-10-26T07:00:{index:02d}.123456+00:00",
+                "source": "fortigate",
+                "sender": "172.31.255.1",
+                "day": "2026-10-26",
+                "line": 41234 + index,
+                "offset": 9876543 + index,
+                "kind": "fortigate",
+                "type": "traffic",
+                "subtype": "forward",
+                "summary": {
+                    "srcip": f"172.20.41.{index + 10}",
+                    "srcport": 51544 + index,
+                    "dstip": "203.0.113.10",
+                    "dstport": 443,
+                    "proto": "tcp",
+                    "action": "accept",
+                },
+                "text": None,
+                "parsed": True,
+            }
+            items.append((message, data))
+
+        def work() -> float:
+            began = _thread_cpu()
+            for message, data in items:
+                data["text"] = display_text(message)
+                json.dumps(data, ensure_ascii=False, separators=(",", ":"), default=str)
+            return (_thread_cpu() - began) / len(items)
+
+        def gauge() -> float:
+            began = _thread_cpu()
+            for _ in range(20):
+                stamp_text, sender, message = self.line.split(b" ", 2)
+                datetime.fromisoformat(stamp_text.decode("ascii"))
+                sender.decode("ascii")
+                if b'type="traffic"' in message.lower():
+                    fields = {
+                        key.decode("ascii"): value.strip(b'"').decode()
+                        for key, value in PAIR.findall(message)
+                    }
+                    json.dumps(fields, ensure_ascii=False, separators=(",", ":"))
+            return (_thread_cpu() - began) / 20
+
+        for _ in range(3):
+            work(), gauge()
+        figures: dict[str, dict[str, list[float]]] = {}
+        for mode in ("hot", "sleep"):
+            w, g = [], []
+            for _ in range(I125_TRIALS):
+                if mode == "sleep":
+                    time.sleep(I125_PAUSE)
+                w.append(work())
+                if mode == "sleep":
+                    time.sleep(I125_PAUSE)
+                g.append(gauge())
+            figures[mode] = {"W": w, "G": g}
+        us = 1e6 / self.per_second
+        return (
+            f"I125: cold/hot burst (after a sleep of {I125_PAUSE} s against back to back, "
+            f"{I125_TRIALS} trials, streams closed): "
+            + "; ".join(
+                f"{name} {statistics.median(hot) * us:.1f} -> {statistics.median(cold) * us:.1f} "
+                f"us, median {statistics.median(cold) / statistics.median(hot):.3f}, min "
+                f"{min(cold) / min(hot):.3f}"
+                for name, (hot, cold) in (
+                    (name, (figures["hot"][name], figures["sleep"][name])) for name in ("W", "G")
+                )
+            )
+        )
+
+    def report(
+        self,
+        *,
+        gauge: Gauge,
+        before: Gauge,
+        after: Gauge,
+        span: tuple[float, float],
+        cycles: list[float],
+        line: float,
+        figures: dict[str, float],
+    ) -> list[str]:
+        """The ``I125:`` block; also writes the calibration of a ``none`` run."""
+        us = 1e6 / self.per_second
+        path = statistics.median(cycles) if cycles else float("nan")
+        if self.probe == "none" and I125_CALIBRATION and cycles:
+            Path(I125_CALIBRATION).write_text(json.dumps({"path_cpu": path}))
+        per_round = sorted(r.cpu / GAUGE_LINES for r in gauge.rounds)
+        inside = [r for r in self.rounds if span[0] <= r[0] <= span[1]]
+        rounds = inside or self.rounds
+        in_loop = statistics.median(r[1] for r in rounds)
+        cold = statistics.median(r[2] / r[3] for r in rounds)
+        today = (
+            f"s/s {figures['cpu_s']:.2f} (budget {figures['budget']:.2f}), gauge "
+            f"{gauge.seconds * 1e6:.2f} us, {line:.2f} gl, {line * gauge.seconds * 1e6:.1f} us a "
+            f"line, limit {figures['limit']:.2f} ({'strict' if STRICT else 'off CI'}; CI's "
+            f"{figures['ci_limit']:.2f}, margin {(figures['ci_limit'] / line - 1) * 100:+.1f} %)"
+        )
+        per_line = line <= figures["limit"]
+        budget = figures["cpu_s"] <= figures["budget"]
+        return [
+            f"I125: probe {self.probe}: spin {self.spin * us:.1f} us a delivered line "
+            f"({self.calibrated}); _thread_cpu {self.per_second:.4g} a second",
+            f"I125: today: {today}",
+            f"I125: guard gauge rounds ({len(per_round)}): min {per_round[0] * us:.2f} / median "
+            f"{statistics.median(per_round) * us:.2f} / max {per_round[-1] * us:.2f} us; median / "
+            f"min {statistics.median(per_round) / per_round[0]:.3f}; fastest before "
+            f"{before.cpu * us:.2f}, after {after.cpu * us:.2f}",
+            f"I125: in-loop gauge ({I125_ROUND_LINES}-line rounds at each cycle start, "
+            f"{len(inside)} in the span of {len(self.rounds)}): median {in_loop * us:.2f} / min "
+            f"{min(r[1] for r in rounds) * us:.2f} us; in-loop median / guard gauge "
+            f"{in_loop / gauge.cpu:.3f}; first 20 / other {I125_ROUND_LINES - 20} {cold:.3f}",
+            f"I125: path {path * us:.1f} us a delivered line = {path / gauge.cpu:.2f} guard gauge "
+            f"lines = {path / in_loop:.2f} in-loop gauge lines",
+            f"I125 RESULT probe={self.probe}: per-line {'PASS' if per_line else 'FAIL'} "
+            f"({line:.2f} {'<=' if per_line else '>'} {figures['limit']:.2f}), budget "
+            f"{'PASS' if budget else 'FAIL'} ({figures['cpu_s']:.2f} "
+            f"{'<=' if budget else '>'} {figures['budget']:.2f} s/s)",
+        ]
