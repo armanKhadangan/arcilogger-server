@@ -34,7 +34,8 @@ of every deletion record under its final name, of every stored official report
 ``mismatched``, so no renewal ever lists the hash of a changed file; one that disappears
 during the scan (the retention job deleting its day) is skipped. Each renewal token is verified
 against the pinned roots and the stored revocation lists. :func:`renewal_status` only reads;
-``state/renewal.json`` is written by the ``Renew`` task's command line (``arcilogger-core renew``).
+``state/renewal.json`` is written by the ``Renew`` task's command line (``arcilogger-core renew``)
+with :func:`write_state`.
 
 **A run** (:func:`renew`, D4) writes at most one record, covering every token that is ``due``
 or ``uncovered``, under ``state/renewal.lock`` (never inside ``vault/renewals``). As a deletion
@@ -328,6 +329,17 @@ class TokenStatus:
     covered_by: str | None = None
     renewed_at: datetime | None = None
 
+    def as_json(self) -> dict[str, Any]:
+        """The entry of ``state/renewal.json`` (the shape W5-C's reader takes, W5-C-1)."""
+        return {
+            "path": self.path,
+            "kind": self.kind,
+            "cert_not_after": utc_text(self.cert_not_after),
+            "status": self.status,
+            "covered_by": self.covered_by,
+            "renewed_at": utc_text(self.renewed_at) if self.renewed_at is not None else None,
+        }
+
 
 @dataclass(frozen=True)
 class RenewalNote:
@@ -336,6 +348,9 @@ class RenewalNote:
     code: str
     message_tr: str
     message_en: str
+
+    def as_json(self) -> dict[str, str]:
+        return {"code": self.code, "message_tr": self.message_tr, "message_en": self.message_en}
 
 
 #: code -> (message_tr, message_en) of :class:`RenewalNote`.
@@ -401,6 +416,15 @@ class RenewalReport:
             tuple(notes),
             tuple(sorted(set(mismatched))),
         )
+
+    def as_json(self) -> dict[str, Any]:
+        return {
+            "tokens": [token.as_json() for token in self.tokens],
+            "totals": dict(self.totals),
+            "unreadable": list(self.unreadable),
+            "mismatched": list(self.mismatched),
+            "notes": [note.as_json() for note in self.notes],
+        }
 
 
 class _Statuses:
@@ -1128,3 +1152,93 @@ def renew(
             report_after=renewal_status(layout, config, roots, moment),
             discarded=tuple(discarded),
         )
+
+
+# -- state/renewal.json ---------------------------------------------------------------------------
+
+STATE_SCHEMA: Final = "arcilogger.renewal-status/1"
+#: ``state/renewal.json``, the path of W5-C's reader (``alerts.system.stamp_renewal_path``).
+STATE_NAME: Final = "renewal.json"
+#: How a run of ``arcilogger-core renew`` ended (``last_run.outcome``): a record written,
+#: nothing due, the time-stamp server or the run failed (exit 3), the configuration refused
+#: (exit 2).
+Outcome = Literal["renewed", "not_needed", "failed", "refused"]
+#: The outcomes that count towards ``failures_in_a_row`` (W5-E: "Renew failed twice in a row").
+FAILED_OUTCOMES: Final[frozenset[str]] = frozenset({"failed", "refused"})
+
+
+@dataclass(frozen=True)
+class LastRun:
+    """A run of the ``Renew`` task as ``state/renewal.json`` keeps it: when it started, how it
+    ended, its exit code, the record it wrote (vault-relative) and a code for its error."""
+
+    at: datetime
+    outcome: Outcome
+    exit_code: int
+    record: str | None = None
+    error: str | None = None
+
+    def as_json(self) -> dict[str, Any]:
+        return {
+            "at": utc_text(self.at),
+            "outcome": self.outcome,
+            "exit_code": self.exit_code,
+            "record": self.record,
+            "error": self.error,
+        }
+
+
+def state_path(layout: Layout) -> Path:
+    return layout.state / STATE_NAME
+
+
+def read_state(layout: Layout) -> dict[str, Any] | None:
+    """The last ``state/renewal.json``; None when there is none or it cannot be read."""
+    try:
+        data = json.loads(state_path(layout).read_bytes().decode("utf-8"))
+    except FileNotFoundError:
+        return None
+    except (OSError, ValueError, RecursionError) as exc:
+        log.warning("renewal: %s cannot be read (%s); it is written anew", state_path(layout), exc)
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def write_state(
+    layout: Layout,
+    report: RenewalReport | None,
+    *,
+    at: datetime,
+    renew_before: int,
+    last_run: LastRun | None,
+) -> dict[str, Any]:
+    """Write ``state/renewal.json`` atomically and return what was written (W5-A-2).
+
+    Only the ``Renew`` task's command line calls this; the API and the alerts only read the
+    file (§2.1.2). ``renew_before`` is the window the statuses were computed with (days).
+    ``report`` is None when the statuses could not be computed (no pinned
+    root): the last known ``tokens`` are kept with their ``at``, and without them the file has
+    no token list, which W5-C's reader takes as unknown (never as "nothing due"). ``last_run``
+    is None for a dry run, which keeps the last run and ``failures_in_a_row``; a failed or
+    refused run adds one to ``failures_in_a_row``, any other run sets it to 0.
+    """
+    previous = read_state(layout) or {}
+    state: dict[str, Any] = {"schema": STATE_SCHEMA}
+    if report is not None:
+        state.update(at=utc_text(at), renew_before_days=renew_before, **report.as_json())
+    else:
+        kept = ("at", "renew_before_days", "tokens", "totals", "unreadable", "mismatched", "notes")
+        state.update({key: previous[key] for key in kept if key in previous})
+    failures = previous.get("failures_in_a_row")
+    failures = failures if isinstance(failures, int) and failures >= 0 else 0
+    if last_run is None:
+        if "last_run" in previous:
+            state["last_run"] = previous["last_run"]
+    else:
+        state["last_run"] = last_run.as_json()
+        failures = failures + 1 if last_run.outcome in FAILED_OUTCOMES else 0
+    state["failures_in_a_row"] = failures
+    atomic_write_bytes(
+        state_path(layout), (json.dumps(state, ensure_ascii=False, indent=2) + "\n").encode()
+    )
+    return state

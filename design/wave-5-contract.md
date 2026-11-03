@@ -1245,6 +1245,25 @@ All Wave 5 questions are answered (2026-11-02).
   for `crl.crl_options`). It is the one place in `arcilogger_core` that reads the key; W5-C's
   `legalstatus/options.py` has its own reader. Both become plain attribute access when W5-T
   lands. Until then the 30–730 bounds are not enforced: they are W5-T's validation.
+- **W5-A-2: who writes `state/renewal.json`, and what it holds.** §2.1.2 says the status function
+  "also writes `state/renewal.json`" and "only the task writes it". `renewal_status` only
+  computes; the `Renew` task's command line (`arcilogger-core renew`, also `--dry-run`) writes the
+  file with `renewal.write_state` (`atomic_write_bytes`), so `verify_day`, the builder and the API
+  never write it. Each entry of `tokens` is W5-C's shape (`path`, `kind`, `cert_not_after`,
+  `status`, `covered_by`) plus `renewed_at` (UTC `…Z`, the counting renewal's genTime, else null),
+  taken from the status **after** the run. Top-level keys beside `tokens`, ignored by W5-C's
+  reader: `schema` (`arcilogger.renewal-status/1`), `at` (when the statuses were computed),
+  `renew_before_days`, `totals` (all five keys), `unreadable`, `mismatched`, `notes` (TR/EN),
+  `last_run {at, outcome, exit_code, record, error}` (`outcome`: `renewed`, `not_needed`,
+  `failed` or `refused`; `error`: a code such as `tsa_unavailable`, `renewal_stamp_invalid`,
+  `credentials`, `roots`) and `failures_in_a_row` (a failed or refused run adds one, any other
+  run sets 0) for W5-E's "Renew failed twice in a row" (C12); the names wait for W5-E's
+  confirmation. The file is written after a failed (exit 3) or refused (exit 2) run too: the
+  statuses are computed afresh when the pinned roots are known (time passes while the server
+  fails, and a token turns `uncovered`), else the last known `tokens` stay with their `at`; with
+  none known the file has no `tokens`, which W5-C's reader takes as unknown, never as "nothing
+  due". A dry run writes the statuses and keeps `last_run` and `failures_in_a_row`. A run refused
+  because another holds `state/renewal.lock` writes nothing (the holder writes the file).
 - **W5-A-3: the crash-safe write order.** §2.1.1 says the record "is written with
   `atomic_write_bytes`, stamped", and a failed run deletes it. `renew` writes it as
   `<name>.json.part` (with `atomic_write_bytes`), stamps it to `<name>.json.part.zd` and verifies
@@ -1277,6 +1296,19 @@ All Wave 5 questions are answered (2026-11-02).
   as a token to renew: otherwise each test renewal would be renewed again, with nothing to
   protect. A record with `reason: "due"` that does not count (its root is not listed, its token
   does not verify, it was revoked) is still renewable.
+- **W5-A-9: exit codes beyond §2.1.3's wording.** `renew` catches its own errors (`main` maps
+  every `TsaError` to 1). Exit 3 also covers a new stamp that does not verify or is revoked
+  (`renewal_stamp_invalid`), another run holding `state/renewal.lock` (`renewal_busy`), a lock
+  file that cannot be used (`renewal_lock_failed`), a file error during the run (`io_error`) and a
+  `state/renewal.json` that cannot be written: each is retried by the next run. Exit 2 is a
+  provider that cannot be made (credentials, the Zamane client, the secret store) or no pinned
+  root; a dry run needs only the roots. Exit 1 is any token still `uncovered` after the run, so a
+  test provider (whose records never count, D5) leaves an expired token `uncovered` and exits 1;
+  "nothing due" with an `uncovered` token cannot happen, as an uncovered token is due for
+  renewal. A dry run exits 1 when a token is `uncovered` now, else 0. The text output is Turkish
+  with English in brackets, errors on stderr; `--json` prints `outcome`, `exit_code`, `dry_run`,
+  `record`, `reason`, `due`, `renewed`, `discarded`, `error {code, message_tr, message_en}`,
+  `state_written` and `report`.
 - **W5-A-10: what the report adds.** `RenewalReport` also names the tokens and records it could
   not read (`unreadable`: a token that cannot be parsed or whose stamped file is missing, a record
   that is not `arcilogger.renewal/1` or has no token, a token whose imprint algorithm is not
