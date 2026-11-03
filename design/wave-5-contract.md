@@ -1241,6 +1241,7 @@ All Wave 5 questions are answered (2026-11-02).
 ## Deviations — W5-A (2026-11-03)
 
 - **W5-A-1: the config adapter.** `renewal.renew_before_days` reads `tsa.renew_before_days`
-  with `getattr` and the §2.5 default (180) until W5-T's day-1 pull request lands; then it
-  becomes plain attribute access (as W5-B-8 for `crl.crl_options`). It is the one place that
-  reads the key. Until then the 30–730 bounds are not enforced: they are W5-T's validation.
+  with `getattr` and the §2.5 default (180) until W5-T's day-1 pull request lands (as W5-B-8
+  for `crl.crl_options`). It is the one place in `arcilogger_core` that reads the key; W5-C's
+  `legalstatus/options.py` has its own reader. Both become plain attribute access when W5-T
+  lands. Until then the 30–730 bounds are not enforced: they are W5-T's validation.

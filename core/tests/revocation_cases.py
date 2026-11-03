@@ -4,7 +4,7 @@ Each case is a set of revocation lists around one time stamp, written as offsets
 genTime, and the code and level both verifiers must give for the TSA certificate. The lists are
 signed with the key of the certificate's issuer unless a case says otherwise. A case is run
 through :func:`core_verdict` (``verify_token(crls=)``) and :func:`standalone_verdict` (the
-standalone verifier's ``check_revocation``, read as it is, never changed);
+standalone verifier's ``check_revocation``, called as it is: the table never patches it);
 ``test_revocation.py`` asserts that both give the case's code and level.
 """
 
