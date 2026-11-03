@@ -7,16 +7,14 @@ import {
   ARCHIVE_LOADING,
   ARCHIVE_LOOKUP_REQUIRED,
   ARCHIVE_READY,
-  ARCHIVE_SEARCH_ARCHIVED,
+  ARCHIVE_SEARCH_REQUIRED,
   ARCHIVE_ERRORS,
   type ArchiveErrorSample,
 } from '@/test/archive-fixtures';
-import { SEARCH } from '@/test/samples';
 
 import {
   ARCHIVE_RELOAD_POLL_MS,
   MAX_RELOAD_DAYS,
-  archivedOf,
   failureKey,
   isFinished,
   progressOf,
@@ -127,8 +125,12 @@ describe('archive model', () => {
       bytes_total: 64992,
       estimated_bytes: 168980,
       first_day: '2026-10-04',
+      keep_days: 7,
       last_day: '2026-10-05',
     });
+    expect(requiredOf(apiError(ARCHIVE_SEARCH_REQUIRED))).toEqual(
+      ARCHIVE_SEARCH_REQUIRED.body.error.details,
+    );
     expect(requiredOf(apiError(ARCHIVE_ERRORS.too_large))).toBeNull();
     expect(requiredOf(apiError(ARCHIVE_ERRORS.not_in_vault))).toBeNull();
     const broken = (details: unknown) =>
@@ -143,29 +145,19 @@ describe('archive model', () => {
     expect(requiredOf(null)).toBeNull();
   });
 
-  it('keepDaysOf: db.reload_keep_days of the 409 (C23), null while W5-G does not send it', () => {
-    const required = {
-      first_day: '2026-10-04',
-      last_day: '2026-10-05',
-      bytes_total: 64992,
-      estimated_bytes: 168980,
-    };
-    expect(keepDaysOf(required)).toBeNull();
+  it('keepDaysOf: db.reload_keep_days of the 409 (C23), null when it is missing or not days', () => {
+    const required = ARCHIVE_LOOKUP_REQUIRED.body.error.details;
+    expect(keepDaysOf(required)).toBe(7);
+    expect(keepDaysOf(ARCHIVE_SEARCH_REQUIRED.body.error.details)).toBe(7);
+    expect(keepDaysOf({ ...required, keep_days: 1 })).toBe(1);
+    expect(keepDaysOf({ ...required, keep_days: 30 })).toBe(30);
     expect(keepDaysOf(null)).toBeNull();
-    expect(keepDaysOf({ ...required, keep_days: 7 } as typeof required)).toBe(7);
-    expect(keepDaysOf({ ...required, keep_days: 1 } as typeof required)).toBe(1);
+    // An older API without `keep_days`, or a value that is no number of days.
+    const without: Partial<typeof required> = { ...required };
+    delete without.keep_days;
+    expect(keepDaysOf(without as typeof required)).toBeNull();
     for (const keep_days of [0, -3, 1.5, '7', null])
-      expect(keepDaysOf({ ...required, keep_days } as typeof required)).toBeNull();
-  });
-
-  it('archivedOf: the archived days of a search answer, null without them', () => {
-    const page = SEARCH.search.typed;
-    expect(archivedOf(page)).toBeNull();
-    expect(archivedOf({ ...page, archived: null } as typeof page)).toBeNull();
-    expect(archivedOf({ ...page, ...ARCHIVE_SEARCH_ARCHIVED })).toEqual({
-      first_day: '2026-10-04',
-      last_day: '2026-10-05',
-    });
+      expect(keepDaysOf({ ...required, keep_days } as unknown as typeof required)).toBeNull();
   });
 
   it('the fixtures keep the captured reload statuses', () => {

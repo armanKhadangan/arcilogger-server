@@ -28,7 +28,13 @@ const SAMPLE_NOW = new Date(`${SAMPLE_TODAY}T15:00:00+03:00`);
 
 /** The days of the captured 409 and `archived` range, as the card shows them. */
 const DAYS = '04.10.2026 – 05.10.2026';
+/** The confirmation after a 409: it names the captured `keep_days` (7, C23). */
 const DIALOG_TEXT =
+  `${DAYS} günlerinin kayıtları mühürlü arşivden veritabanına yüklenir ve 7 gün boyunca ` +
+  'veritabanında kalır; sonra yeniden kaldırılır. Bu, o günlerin kişisel verilerini de ' +
+  'veritabanına geri getirir. İstek denetim kaydına yazılır.';
+/** The confirmation for a search page's `archived` days, which give no keep time: the setting. */
+const DIALOG_SETTING_TEXT =
   `${DAYS} günlerinin kayıtları mühürlü arşivden veritabanına yüklenir ve db.reload_keep_days ` +
   'ayarının süresi boyunca (varsayılan 7 gün) orada kalır; sonra yeniden kaldırılır. Bu, o ' +
   'günlerin kişisel verilerini de veritabanına geri getirir. İstek denetim kaydına yazılır.';
@@ -60,10 +66,10 @@ async function openLookup(page: Page, options: ArchiveOptions = {}) {
   return { api, archive };
 }
 
-/** "Arşivden yükle" (or "Yeniden dene") and "Yükle" in the confirmation. */
-async function reload(page: Page, button = 'Arşivden yükle') {
+/** "Arşivden yükle" (or "Yeniden dene") and "Yükle" in the confirmation, which says `text`. */
+async function reload(page: Page, button = 'Arşivden yükle', text = DIALOG_TEXT) {
   await card(page).getByRole('button', { name: button }).click();
-  await expect(dialog(page)).toContainText(DIALOG_TEXT);
+  await expect(dialog(page)).toContainText(text);
   await dialog(page).getByRole('button', { name: 'Yükle', exact: true }).click();
 }
 
@@ -95,6 +101,7 @@ test.describe('archive reload', () => {
     page,
   }) => {
     // The reload stays loading until the test lets it be ready.
+    expect(ARCHIVE_LOOKUP_REQUIRED.body.error.details.keep_days).toBe(7);
     const { api, archive } = await openLookup(page, { steps: ['loading'] });
     await expect(card(page)).toContainText(ARCHIVE_LOOKUP_REQUIRED.body.error.message_tr);
     // The 409 is the card, not a failure: its sentence shows once, nothing else is red.
@@ -149,6 +156,7 @@ test.describe('archive reload', () => {
     page,
   }) => {
     const range = { from: '2026-10-04T00:00:00+03:00', to: '2026-10-06T00:00:00+03:00' };
+    expect(ARCHIVE_SEARCH_REQUIRED.body.error.details.keep_days).toBe(7);
     const { api } = await runSearch(page, range, 'required');
     const message = ARCHIVE_SEARCH_REQUIRED.body.error.message_tr;
     await expect(card(page)).toContainText(message);
@@ -177,7 +185,7 @@ test.describe('archive reload', () => {
     // The rows inside the window are shown beside the card.
     await expect(page.getByRole('heading', { name: 'Zaman dağılımı' })).toBeVisible();
 
-    await reload(page);
+    await reload(page, 'Arşivden yükle', DIALOG_SETTING_TEXT);
     expect(bodies(api, '/archive-reloads')).toEqual([{ reason: 'search', ...RELOAD_DAYS }]);
     await expect.poll(() => api.callsTo('POST', '/search').length).toBe(2);
     const runs = bodies(api, '/search');

@@ -2,8 +2,8 @@
  * The mocked archive reload of the E2E tests (Wave 5 contract §5, G4 to G10): `POST
  * /archive-reloads` and `GET /archive-reloads/{id}`, and the 409 `archive_reload_required` of
  * `POST /lookup/5651` and `POST /search` for days outside the database window. The answers are
- * the captured cases of W5-G through the fixtures of the unit tests (`src/test/archive-fixtures.ts`,
- * hand-built from W5-G's `archive.json` until #121 merges), re-exported here.
+ * the captured cases of W5-G (`e2e/samples/archive.json`) through the fixtures of the unit tests
+ * (`src/test/archive-fixtures.ts`), re-exported here.
  *
  * Installed after `mockApi` and `mockSearch` (`page.route`: the newest route wins), it shares the
  * main mock's session and recorded calls (`background` is the `X-Arci-Background: 1` of a poll).

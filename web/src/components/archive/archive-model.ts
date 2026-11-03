@@ -6,40 +6,22 @@
 import { isApiError } from '@/lib/api';
 import type { DateString } from '@/lib/api-types';
 import type {
-  ArchivedRange,
   ArchiveReload,
+  ArchiveReloadFailureCode,
   ArchiveReloadRequired,
   ArchiveReloadStatus,
 } from '@/lib/archive-reload-types';
-import type { SearchPage } from '@/lib/search-types';
 
 /** At most this many days in one reload (G5, `archive_reload_too_large` above it). */
 export const MAX_RELOAD_DAYS = 14;
 /** A reload in progress is read again every 2 s (G10). */
 export const ARCHIVE_RELOAD_POLL_MS = 2_000;
 
-/**
- * `error_code` of a `failed` reload, set by ArciIngest while it loads.
- *
- * Interim until W5-G (#121) adds it to lib/archive-reload-types.ts.
- */
-export type ArchiveReloadFailureCode =
-  | 'archive_day_not_in_vault' // vault retention removed a day after the request was queued
-  | 'archive_file_unreadable'; // a sealed file kept failing to read or no longer matched
-
+/** The `error_code`s of a `failed` reload the web has a text for (the API sends none). */
 const FAILURE_CODES: readonly string[] = [
   'archive_day_not_in_vault',
   'archive_file_unreadable',
 ] satisfies readonly ArchiveReloadFailureCode[];
-
-/**
- * The `archived` days of a search answer (G8): the part of its range outside the window.
- *
- * Interim until W5-G (#121) adds `archived` to `SearchPage` in lib/search-types.ts.
- */
-export function archivedOf(page: SearchPage): ArchivedRange | null {
-  return (page as { archived?: ArchivedRange | null }).archived ?? null;
-}
 
 /** The days one reload asks for: the whole range, or its newest {@link MAX_RELOAD_DAYS} days. */
 export interface ReloadSpan {
@@ -102,12 +84,11 @@ export function failureKey(code: string | null): string {
 
 /**
  * How many days reloaded days stay in the database (`db.reload_keep_days`), from the 409's
- * `details.keep_days` (C23); `null` when the answer does not say. Interim until W5-G (#121) adds
- * `keep_days` to `ArchiveReloadRequired`: read through a cast, and the dialog names the setting
- * with its default when it is absent.
+ * `details.keep_days` (C23); `null` when the answer does not say it or says no whole number of
+ * days: the dialog then names the setting with its default.
  */
 export function keepDaysOf(required: ArchiveReloadRequired | null): number | null {
-  const days = (required as { keep_days?: unknown } | null)?.keep_days;
+  const days: unknown = required?.keep_days;
   return typeof days === 'number' && Number.isInteger(days) && days >= 1 ? days : null;
 }
 

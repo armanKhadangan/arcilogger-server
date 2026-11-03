@@ -238,7 +238,9 @@ describe('ArchiveReloadCard — the confirmation', () => {
 
   it('names the real number of days when the 409 gives it (C23), in both languages', async () => {
     serve(() => jsonResponse(202, ARCHIVE_CREATED));
-    const { unmount } = renderCard({ keepDays: 7 });
+    const { unmount } = renderCard({
+      keepDays: ARCHIVE_LOOKUP_REQUIRED.body.error.details.keep_days,
+    });
     await user.click(screen.getByRole('button', { name: 'Arşivden yükle' }));
     expect(
       await screen.findByRole('dialog', { name: 'Günler arşivden yüklensin mi?' }),
@@ -421,7 +423,7 @@ describe('ArchiveReloadCard — progress and the re-run', () => {
     expect(bar).toHaveAttribute('aria-valuenow', '100');
     const status = screen.getByTestId('archive-reload-status');
     expect(status).toHaveTextContent(
-      'Günler yüklendi; 20.10.2026 07:01:26 tarihine kadar veritabanında kalır.',
+      'Günler yüklendi; 20.10.2026 07:01:19 tarihine kadar veritabanında kalır.',
     );
     expect(status).toHaveTextContent('Sorgu yeniden çalıştırılıyor…');
     expect(status).not.toHaveTextContent('63,5 KB');
@@ -648,7 +650,7 @@ describe('ArchiveReloadCard — English', () => {
     expect(onReady).toHaveBeenCalledTimes(1);
     const status = screen.getByTestId('archive-reload-status');
     expect(status).toHaveTextContent(
-      'The days are loaded; they stay in the database until 20.10.2026 07:01:26.',
+      'The days are loaded; they stay in the database until 20.10.2026 07:01:19.',
     );
     expect(status).toHaveTextContent('Running the search again…');
   });

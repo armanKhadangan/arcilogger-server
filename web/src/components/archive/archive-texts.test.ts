@@ -1,3 +1,6 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+
 import { LOCALE_AREAS } from '@/lib/i18n';
 import i18n from '@/lib/i18n';
 import { ARCHIVE_FAILURE_CODES } from '@/test/archive-fixtures';
@@ -8,6 +11,35 @@ import { ARCHIVE_FAILURE_CODES } from '@/test/archive-fixtures';
  * and the failure texts word for word as W5-G words them (`FAILURE_MESSAGES` of the API; the API
  * sends only the code of a failed reload, the web keeps the text).
  */
+
+/**
+ * `FAILURE_MESSAGES` of `api/src/arcilogger_api/archive/service.py` (the tests run from `web/`):
+ * each code with its Turkish and English text, the adjacent string literals joined.
+ */
+function apiFailures(): Record<string, { tr: string; en: string }> {
+  const source = readFileSync(
+    join(process.cwd(), '..', 'api', 'src', 'arcilogger_api', 'archive', 'service.py'),
+    'utf8',
+  );
+  const block = /^FAILURE_MESSAGES[^=]*= \{\n([\s\S]*?)^\}/m.exec(source)?.[1] ?? '';
+  const entries = [...block.matchAll(/^ {4}"([a-z_]+)": \(\n([\s\S]*?)^ {4}\),/gm)];
+  return Object.fromEntries(
+    entries.map(([, code = '', body = '']) => {
+      // A text is one or more literals; a comma after a literal ends it.
+      const parts: string[] = [];
+      let text = '';
+      for (const [, literal = '', comma] of body.matchAll(/"((?:[^"\\]|\\.)*)"\s*(,)?/g)) {
+        text += literal;
+        if (comma) {
+          parts.push(text);
+          text = '';
+        }
+      }
+      if (text) parts.push(text);
+      return [code, { tr: parts[0] ?? '', en: parts[1] ?? '' }];
+    }),
+  );
+}
 
 type Tree = { [key: string]: string | Tree };
 
@@ -84,6 +116,7 @@ describe('archive locale area', () => {
   });
 
   it('keeps the failure texts of W5-G word for word, one per failure code', () => {
+    expect(apiFailures()).toEqual(FAILURES);
     expect([...ARCHIVE_FAILURE_CODES].sort()).toEqual(Object.keys(FAILURES).sort());
     for (const code of ARCHIVE_FAILURE_CODES) {
       expect(tr.get(`archive.failure.${code}`), code).toBe(FAILURES[code].tr);

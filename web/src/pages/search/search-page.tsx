@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 
-import { archivedOf, keepDaysOf, requiredOf } from '@/components/archive/archive-model';
+import { keepDaysOf, requiredOf } from '@/components/archive/archive-model';
 import { ArchiveReloadCard } from '@/components/archive/archive-reload-card';
 import { Histogram } from '@/components/charts/histogram';
 import { clipSpan } from '@/components/charts/histogram-data';
@@ -273,7 +273,8 @@ export function SearchPage() {
   if (answered.page !== first) setAnswered({ page: first, input: state.input });
   // The card is there only for the search in `state.input`: a 409 is its answer (a new run clears
   // it), a page's `archived` days only until another search is started.
-  const archived = required ?? (first && answered.input === state.input ? archivedOf(first) : null);
+  const archived =
+    required ?? (first && answered.input === state.input ? (first.archived ?? null) : null);
   // A new search of the user is a new card; running the same search again (its id expired, or the
   // card's own re-run) keeps the card and a reload in progress.
   const [searches, setSearches] = useState<{ input: SearchInput | null; count: number }>({

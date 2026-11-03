@@ -31,13 +31,17 @@ const REQUIRED_TR = ARCHIVE_SEARCH_REQUIRED.body.error.message_tr;
 const ARCHIVED_TR =
   'Bu aramanın 04.10.2026 – 05.10.2026 günleri veritabanında değil; bu günlerin kayıtları mühürlü arşivde. Arşivden yüklerseniz arama bu günleri de kapsar.';
 
-/** A search answer whose range reaches before the window (`archived` is not on wave-5's type). */
+/**
+ * A search answer whose range reaches before the window: the captured one's range, scan, notice
+ * and `archived` days, with this file's own search id (the statistics mock answers by it).
+ */
 function archivedPage(overrides: Partial<SearchPage> = {}): SearchPage {
+  const { range, scan, notices, archived } = structuredClone(ARCHIVE_SEARCH_ARCHIVED);
   return {
-    ...page({ search_id: 'ornek-arama-arsiv', range: ARCHIVE_SEARCH_ARCHIVED.range, items: [] }),
-    archived: ARCHIVE_SEARCH_ARCHIVED.archived,
+    ...page({ search_id: 'ornek-arama-arsiv', range, scan, notices, items: [] }),
+    archived,
     ...overrides,
-  } as SearchPage;
+  };
 }
 
 interface Server {
@@ -121,10 +125,11 @@ function results(): HTMLElement {
   return screen.getByRole('region', { name: 'Arama sonuçları' });
 }
 
-/** "Arşivden yükle", then "Yükle" in the confirmation. */
-async function confirmReload(): Promise<void> {
+/** "Arşivden yükle", then "Yükle" in the confirmation, whose text says `keep` (when given). */
+async function confirmReload(keep?: string): Promise<void> {
   await user.click(within(await card()).getByRole('button', { name: 'Arşivden yükle' }));
   const dialog = await screen.findByRole('dialog', { name: 'Günler arşivden yüklensin mi?' });
+  if (keep !== undefined) expect(dialog).toHaveTextContent(keep);
   await user.click(within(dialog).getByRole('button', { name: 'Yükle' }));
   await settle();
 }
@@ -160,7 +165,9 @@ describe('Arama — days in the sealed archive', () => {
     expect(within(shown).getByRole('status')).toHaveTextContent(REQUIRED_TR);
     expect(screen.queryByText('Bir sorgu yazıp “Ara”ya basın')).not.toBeInTheDocument();
 
-    await confirmReload();
+    // The dialog names the keep time the 409 gives (C23).
+    expect(ARCHIVE_SEARCH_REQUIRED.body.error.details.keep_days).toBe(7);
+    await confirmReload('ve 7 gün boyunca veritabanında kalır');
     expect(reloadPosts(calls)).toEqual([
       { reason: 'search', first_day: '2026-10-04', last_day: '2026-10-05' },
     ]);
@@ -220,7 +227,8 @@ describe('Arama — days in the sealed archive', () => {
     // The answer's rows (none here) are shown beside it.
     expect(await screen.findByRole('table', { name: 'Arama sonuçları' })).toBeInTheDocument();
 
-    await confirmReload();
+    // A page gives no keep time: the dialog names the setting with its default.
+    await confirmReload('db.reload_keep_days ayarının süresi boyunca (varsayılan 7 gün)');
     expect(reloadPosts(calls)).toEqual([
       { reason: 'search', first_day: '2026-10-04', last_day: '2026-10-05' },
     ]);

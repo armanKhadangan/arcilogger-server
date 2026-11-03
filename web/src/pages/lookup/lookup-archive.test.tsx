@@ -163,6 +163,10 @@ describe('5651 Sorgu — days in the sealed archive (409 archive_reload_required
     await user.click(within(region).getByRole('button', { name: 'Arşivden yükle' }));
     const dialog = await screen.findByRole('dialog', { name: 'Günler arşivden yüklensin mi?' });
     expect(dialog).toHaveTextContent('04.10.2026 – 05.10.2026 günlerinin kayıtları');
+    // The keep time the 409 gives (C23), not the setting's default.
+    expect(ARCHIVE_LOOKUP_REQUIRED.body.error.details.keep_days).toBe(7);
+    expect(dialog).toHaveTextContent('ve 7 gün boyunca veritabanında kalır');
+    expect(dialog).not.toHaveTextContent('db.reload_keep_days');
     await user.click(within(dialog).getByRole('button', { name: 'Yükle' }));
     await settle();
 
@@ -200,6 +204,31 @@ describe('5651 Sorgu — days in the sealed archive (409 archive_reload_required
     expect(lookupPosts(calls)).toHaveLength(2);
     expect(polls(calls).map((call) => call.headers.get(BACKGROUND_HEADER))).toEqual([null, '1']);
     expect(reloadPosts(calls)).toHaveLength(1);
+  });
+
+  it('a 409 for the 14 days one reload holds (W5-G-17) is asked for whole, without the note', async () => {
+    // The capture's lookup needs only 04.–05.10.2026; a moment about 18 days old needs all 14 days
+    // of the lookup, the most one reload may ask for: its 409, with the captured texts' days moved.
+    const { details, message_tr, message_en } = ARCHIVE_LOOKUP_REQUIRED.body.error;
+    const fourteen = () =>
+      errorResponse(409, 'archive_reload_required', {
+        tr: message_tr.replace('04.10.2026 - 05.10.2026', '22.09.2026 - 05.10.2026'),
+        en: message_en.replace('2026-10-04 - 2026-10-05', '2026-09-22 - 2026-10-05'),
+        details: { ...details, first_day: '2026-09-22', last_day: '2026-10-05' },
+      });
+    const calls = serve([fourteen, stored]);
+    await runLookup();
+    expect(card()).toHaveTextContent('(22.09.2026 - 05.10.2026) veritabanında değil');
+    expect(screen.queryByTestId('archive-reload-clipped')).not.toBeInTheDocument();
+
+    await user.click(within(card()).getByRole('button', { name: 'Arşivden yükle' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Günler arşivden yüklensin mi?' });
+    expect(dialog).toHaveTextContent('22.09.2026 – 05.10.2026 günlerinin kayıtları');
+    await user.click(within(dialog).getByRole('button', { name: 'Yükle' }));
+    await settle();
+    expect(reloadPosts(calls).map((call) => call.body)).toEqual([
+      { reason: 'lookup', first_day: '2026-09-22', last_day: '2026-10-05' },
+    ]);
   });
 
   it('the card’s 409 text follows a switch to English', async () => {
