@@ -266,7 +266,9 @@ def test_lease_times_an_earlier_version_seeded_survive_the_new_empty_default(
     empty_engine: Engine, author: str, kept_by: str
 ) -> None:
     """0013: a guest server's lease time seeded by an earlier version is not reset to ``{}``."""
-    upgrade(empty_engine, revision="0012_alert_events")
+    # One month back, not the 400-day window's: the downgrade through 0021_db_window holds a
+    # lock on every object of the partitions it merges until its commit.
+    upgrade(empty_engine, revision="0012_alert_events", months_back=1)
     with empty_engine.begin() as connection:
         connection.execute(
             text(

@@ -7,6 +7,7 @@ on TimescaleDB."""
 
 from __future__ import annotations
 
+import importlib
 import os
 from collections.abc import Iterator
 from datetime import UTC, date, datetime, timedelta
@@ -27,8 +28,10 @@ from arcilogger_db.partitions import (
     DROPPED_KEY,
     add_months,
     day_bounds,
+    day_partition_name,
     drop_before,
     dropped_before,
+    ensure_days,
     ensure_partitions,
     list_partitions,
     month_bounds,
@@ -38,8 +41,17 @@ from arcilogger_db.partitions import (
 from arcilogger_db.testing import TestServer
 
 BEFORE = "0020_fg_traffic_transip_time"
+MIGRATION = importlib.import_module("arcilogger_db.migrations.versions.v0021_db_window")
 REVISION = "0021_db_window"
+#: The status row of the G1 change (``arcilogger_worker.db_window.CHANGE_KEY`` audits it).
+CHANGE_KEY = "db.retention_days_migration"
 TABLE = "archive_reloads"
+#: The objects this session holds a lock on in PostgreSQL's shared lock table (one entry each,
+#: whatever the modes; fast-path locks are not in it).
+HELD_LOCKS = (
+    "SELECT count(*) FROM (SELECT DISTINCT locktype, database, relation, classid, objid, "
+    "objsubid, transactionid FROM pg_locks WHERE pid = pg_backend_pid() AND NOT fastpath) AS held"
+)
 CHECKS = ("reason", "status", "range", "requested_by", "lookup", "bytes", "error_code", "ready")
 COLUMNS = (
     "id",
@@ -126,22 +138,36 @@ def _as_before(engine: Engine, value: Any, author: str) -> None:
 def test_the_window_setting_is_converted(
     empty_engine: Engine, value: int, author: str, converted: tuple[int, str]
 ) -> None:
-    """G1: 400 → 30, below 7 → 7, every other value kept; the downgrade takes back only the
-    30 it or the seed wrote."""
-    upgrade(empty_engine, revision=BEFORE, timescale="off")
+    """G1: 400 → 30, below 7 → 7, every other value kept, and a change leaves the status row
+    the window job audits (``settings.change``; no revision writes audit entries); the
+    downgrade takes back only the 30 it or the seed wrote, and the status row."""
+    upgrade(empty_engine, revision=BEFORE, timescale="off", months_back=1)  # few locks to merge
     _as_before(empty_engine, value, author)
     _migrate(empty_engine, REVISION)
     assert _setting(empty_engine, "db.retention_days") == converted
     assert _setting(empty_engine, "db.reload_keep_days") is None  # the seed inserts it
+    change = {
+        "old": value,
+        "new": converted[0],
+        "was_set_by": author,
+        "migration": REVISION,
+        "audited": False,
+    }
+    expected = (change, ":migration") if converted[0] != value else None
+    assert _setting(empty_engine, CHANGE_KEY) == expected
     result = upgrade(empty_engine)
     assert _setting(empty_engine, "db.retention_days") == converted
     assert _setting(empty_engine, "db.reload_keep_days") == (7, ":seed")
+    assert _setting(empty_engine, CHANGE_KEY) == expected  # the seed leaves it to the job
     assert result.seed.settings_inserted == ["db.reload_keep_days"]
     assert "db.retention_days" not in result.seed.settings_refreshed
+    changes = "SELECT count(*) FROM audit_log WHERE action = 'settings.change'"
+    assert _scalar(empty_engine, changes) == 0
     _migrate(empty_engine, BEFORE)
     back = (400, converted[1]) if converted[0] == 30 else converted
     assert _setting(empty_engine, "db.retention_days") == back
     assert _setting(empty_engine, "db.reload_keep_days") is None
+    assert _setting(empty_engine, CHANGE_KEY) is None
 
 
 def test_a_new_database_gets_both_keys_and_the_table(empty_engine: Engine) -> None:
@@ -351,15 +377,17 @@ def test_down_merges_the_daily_partitions_into_monthly_ones(empty_engine: Engine
     month) in it — the rows of the UTC day a month ends in split between the two months —, the
     indexes of the parent on it; up again."""
     assert upgrade(empty_engine, timescale="off").after == (REVISION,)
-    for _ in range(5):
-        with empty_engine.begin() as connection:
-            if ensure_partitions(connection).remaining == 0:
-                break
+    # The first run's days (today - 8 … today + 7) and the next month's 1st, not the whole
+    # window: the downgrade holds a lock on every object of every daily partition until its
+    # commit (test_the_downgrade_checks_its_locks_first).
+    following = add_months(month_of(site_day(utc_now())), 1)
+    with empty_engine.begin() as connection:
+        ensure_days(connection, following, following)
     days = _daily(empty_engine, "mt_dhcp")
     first, last = days[0], days[-1]
     outside = first - timedelta(days=1)  # no partition: waits in the default partition
-    # The local midnight of the last month's 1st lies in the window (39 UTC days) and in the UTC
-    # day before: that daily partition holds both months' rows.
+    # The local midnight of the last month's 1st lies in the UTC day before it: that daily
+    # partition holds both months' rows.
     boundary = month_bounds(month_of(last))[0]
     at = [day_window(day)[0] + timedelta(hours=12) for day in (first, last, outside)]
     at += [boundary - timedelta(microseconds=1), boundary]
@@ -398,6 +426,104 @@ def test_down_merges_the_daily_partitions_into_monthly_ones(empty_engine: Engine
     assert len(_where(empty_engine, "mt_dhcp")) == 5
 
 
+def test_down_merges_the_change_over_into_monthly_ones(empty_engine: Engine) -> None:
+    """An installation upgraded with its monthly partitions, down again after a month and more
+    of daily partitions (W5-G-12): the change-over slice after the last monthly partition (the
+    three hours of its UTC day after local midnight) goes to the next month, a UTC day with a
+    local month's midnight in it is split between the two months, and the month that kept its
+    monthly partition gets none of the daily partitions' rows; every row stays, once; up again."""
+    with empty_engine.begin() as connection:
+        command.upgrade(alembic_config(connection, timescale="off"), BEFORE)
+        ensure_partitions(connection, today=site_day(utc_now()), months_back=1)
+    _migrate(empty_engine, REVISION)
+    assert upgrade(empty_engine, timescale="off").after == (REVISION,)
+    current = month_of(site_day(utc_now()))  # a site midnight on a 1st may pass in between
+    following, after_that = add_months(current, 1), add_months(current, 2)
+    # Only the daily partitions the rows need (the downgrade holds every lock until its commit):
+    # the change-over slice, a day of the next month, the UTC day across its end, a day ahead.
+    last = after_that - timedelta(days=1)
+    for site in (following, following + timedelta(days=14), last, after_that + timedelta(days=2)):
+        with empty_engine.begin() as connection:
+            ensure_days(connection, site, site)
+    month_end, slice_end = month_bounds(current)[1], day_bounds(following)[0]
+    slice_name = day_partition_name("mt_dhcp", following - timedelta(days=1))
+    with empty_engine.connect() as connection:
+        partitions = {p.name: p for p in list_partitions(connection, "mt_dhcp")}
+    assert (partitions[slice_name].start, partitions[slice_name].end) == (month_end, slice_end)
+    across = month_bounds(after_that)[0]  # the local midnight inside the UTC day of ``last``
+    assert day_bounds(last)[0] < across < day_bounds(last)[1]
+    tiny = timedelta(microseconds=1)
+    # Each row's moment and the monthly partition it belongs in after the downgrade.
+    rows = {
+        # the last UTC day of the monthly partition, before its end: it stays where it is
+        month_end - tiny: partition_name("mt_dhcp", current),
+        # the slice, its first and its last instant: the next month's
+        month_end: partition_name("mt_dhcp", following),
+        slice_end - tiny: partition_name("mt_dhcp", following),
+        # a whole daily partition of the next month
+        day_window(following + timedelta(days=14))[0] + timedelta(hours=12): partition_name(
+            "mt_dhcp", following
+        ),
+        # the UTC day across the next month's end: split at the local midnight
+        across - tiny: partition_name("mt_dhcp", following),
+        across: partition_name("mt_dhcp", after_that),
+        # a day ahead, in the month after
+        day_window(after_that + timedelta(days=2))[0] + timedelta(hours=12): partition_name(
+            "mt_dhcp", after_that
+        ),
+    }
+    with empty_engine.begin() as connection:
+        for number, when in enumerate(rows, 1):
+            _insert_dhcp(connection, when, number)
+    across_name = day_partition_name("mt_dhcp", last)
+    assert _where(empty_engine, "mt_dhcp") == [
+        partition_name("mt_dhcp", current),
+        slice_name,
+        slice_name,
+        day_partition_name("mt_dhcp", following + timedelta(days=14)),
+        across_name,
+        across_name,
+        day_partition_name("mt_dhcp", after_that + timedelta(days=2)),
+    ]
+    _migrate(empty_engine, BEFORE)
+    for table in TIME_SERIES_TABLES:
+        assert _daily(empty_engine, table) == [], table
+        assert _months(empty_engine, table)[-3:] == [current, following, after_that], table
+    with empty_engine.connect() as connection:
+        bounds = {p.month: (p.start, p.end) for p in list_partitions(connection, "mt_dhcp")}
+        times = connection.execute(text("SELECT time FROM mt_dhcp ORDER BY id")).scalars().all()
+    assert bounds[following] == month_bounds(following)
+    assert bounds[after_that] == month_bounds(after_that)
+    assert _where(empty_engine, "mt_dhcp") == list(rows.values())
+    assert times == list(rows)
+    assert upgrade(empty_engine, timescale="off").after == (REVISION,)  # and up again
+    assert _where(empty_engine, "mt_dhcp") == list(rows.values())
+
+
+def test_the_downgrade_checks_its_locks_first(empty_engine: Engine) -> None:
+    """The downgrade merges in one transaction and holds every lock until its commit: it first
+    estimates them (:func:`locks_needed`, never fewer than it takes) and refuses, before it
+    changes anything, when PostgreSQL's lock table has no room left for them
+    (``Install-Arcilogger.ps1 -Rollback``, #122, runs it on an installation)."""
+    with empty_engine.begin() as connection:  # the revision and a few daily partitions only
+        command.upgrade(alembic_config(connection, timescale="off"), REVISION)
+        today = site_day(utc_now())
+        ensure_days(connection, today, today + timedelta(days=2))
+    with empty_engine.connect() as connection:
+        needed = MIGRATION.locks_needed(connection)
+        with pytest.raises(RuntimeError, match=r"geri alınamadı: .* was not downgraded: "):
+            MIGRATION.check_lock_table(connection, 10**9)
+        MIGRATION.check_lock_table(connection, needed)
+    assert _daily(empty_engine, "messages")
+    with empty_engine.begin() as connection:
+        command.downgrade(alembic_config(connection), BEFORE)
+        held = connection.execute(text(HELD_LOCKS)).scalar_one()
+    assert _daily(empty_engine, "messages") == []
+    assert held <= needed < 2 * held
+    with empty_engine.connect() as connection:
+        assert MIGRATION.locks_needed(connection) == 0  # nothing left to merge
+
+
 def test_up_and_down_on_timescaledb(empty_engine: Engine) -> None:
     """The setting and the table on TimescaleDB; the hypertables are not touched. On the Linux
     CI job (``ARCILOGGER_EXPECT_TIMESCALE=1``) it fails instead of skipping."""
@@ -412,10 +538,13 @@ def test_up_and_down_on_timescaledb(empty_engine: Engine) -> None:
     assert count == len(TIME_SERIES_TABLES)
     _migrate(empty_engine, REVISION)
     assert _setting(empty_engine, "db.retention_days") == (30, ":seed")
+    change = {"old": 400, "new": 30, "was_set_by": ":seed", "migration": REVISION, "audited": False}
+    assert _setting(empty_engine, CHANGE_KEY) == (change, ":migration")
     assert TABLE in inspect(empty_engine).get_table_names()
     assert _scalar(empty_engine, hypertables) == count
     assert _scalar(empty_engine, "SELECT count(*) FROM pg_partitioned_table") == 0
     _migrate(empty_engine, BEFORE)
     assert TABLE not in inspect(empty_engine).get_table_names()
     assert _setting(empty_engine, "db.retention_days") == (400, ":seed")
+    assert _setting(empty_engine, CHANGE_KEY) is None
     assert upgrade(empty_engine).after == (REVISION,)

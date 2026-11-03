@@ -10,7 +10,11 @@ Wave 5 contract §5, owner decision "son 30 olsun" (G1, G2, G4; issue #110):
   400 (the untouched old default) becomes 30, a stored value below 7 becomes 7, every other
   value is kept. A row of the seed stays the seed's (it follows the shipped default from then
   on); an administrator's changed row is written with ``updated_by = ':migration'``, and the log
-  names the old and the new value. No revision writes audit entries (the audit chain is
+  names the old and the new value. A change, of either row, also leaves the status row
+  ``db.retention_days_migration`` (author ``:migration``, not in ``DEFAULT_SETTINGS``: the old
+  and the new value, who had set the old one, ``audited: false``); the window job ``db.window``
+  turns it into the one ``settings.change`` audit entry (actor ``system``) on its first run,
+  before it drops anything, because no revision writes audit entries (the audit chain is
   application code). The new key ``db.reload_keep_days`` (7) is inserted by the seed, as every
   new key.
 * ``archive_reloads``: the requests to bring sealed days older than the window back from the
@@ -28,17 +32,24 @@ Wave 5 contract §5, owner decision "son 30 olsun" (G1, G2, G4; issue #110):
   cutoff. Nothing changes on TimescaleDB (1-day chunks already).
 
 The downgrade (developers and the migration tests; ``Install-Arcilogger.ps1 -Rollback`` runs
-none): the daily partitions are merged back into monthly ones (local months; a daily partition's
-rows split by local month, since a UTC day holds the first three hours of the next site day;
-the default partition's rows of those months moved too, then attached), since the previous
+none yet, #122): the daily partitions are merged back into monthly ones (local months; a daily
+partition's rows split by local month, since a UTC day holds the first three hours of the next
+site day; the default partition's rows of those months moved too, then attached), since the previous
 version knows monthly partitions only; ``archive_reloads``, ``db.reload_keep_days`` and the
-window job's status row ``db.window_dropped_before`` are dropped; a ``db.retention_days`` of 30
+status rows ``db.window_dropped_before`` and ``db.retention_days_migration`` are dropped (an
+audit entry already written from the latter stays); a ``db.retention_days`` of 30
 written by the seed or by this revision goes back to 400 (lossy: a value raised to 7 stays 7,
-which the previous version accepts).
+which the previous version accepts). The merge is one transaction and holds a lock on every
+object of the daily partitions until its commit, so it first estimates them
+(:func:`locks_needed`) and refuses, changing nothing, when PostgreSQL's lock table can never hold
+them (:func:`check_lock_table`): the whole window and the days ahead (46 UTC days) need about
+6,700, more than the 6,400 of the defaults (``max_locks_per_transaction`` 64,
+``max_connections`` 100).
 """
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 from collections.abc import Sequence
@@ -62,6 +73,9 @@ KEY = "db.retention_days"
 KEEP_KEY = "db.reload_keep_days"
 #: The status row of the window job's applied cutoff (``arcilogger_db.partitions.DROPPED_KEY``).
 DROPPED_KEY = "db.window_dropped_before"
+#: The status row of the G1 change, audited by the window job (frozen copy of
+#: ``arcilogger_worker.db_window.CHANGE_KEY``; a test keeps them equal).
+CHANGE_KEY = "db.retention_days_migration"
 SEED = ":seed"
 MIGRATION = ":migration"
 AUTHORS = [SEED, MIGRATION]
@@ -93,6 +107,9 @@ TIME_SERIES_TABLES = (
     "fg_dhcp",
 )
 SITE_TZ = ZoneInfo("Europe/Istanbul")
+#: Locks of the downgrade besides the time-series tables' objects (the settings, the
+#: ``archive_reloads`` table and its indexes, alembic's version table, the system catalogs).
+LOCK_ALLOWANCE = 100
 ONE_DAY = timedelta(days=1)
 MONTHLY = re.compile(r"^(?P<table>[a-z_]+)_p(?P<year>\d{4})(?P<month>\d{2})$")
 DAILY = re.compile(r"^(?P<table>[a-z_]+)_p(?P<year>\d{4})(?P<month>\d{2})(?P<day>\d{2})$")
@@ -217,6 +234,22 @@ def _window_setting(bind: sa.Connection) -> None:
         ),
         {"value": str(new), "by": by, "key": KEY},
     )
+    change = {
+        "old": value,
+        "new": new,
+        "was_set_by": author,
+        "migration": revision,
+        "audited": False,
+    }
+    bind.execute(
+        sa.text(
+            "INSERT INTO settings (key, value, updated_by, updated_at) "
+            "VALUES (:key, CAST(:value AS jsonb), :by, now()) "
+            "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, "
+            "updated_by = EXCLUDED.updated_by, updated_at = EXCLUDED.updated_at"
+        ),
+        {"key": CHANGE_KEY, "value": json.dumps(change), "by": MIGRATION},
+    )
     log.info("%s: %s -> %s (was set by %s)", KEY, value, new, author)
 
 
@@ -249,7 +282,8 @@ def downgrade() -> None:
     op.drop_index("ix_archive_reloads_status_id", table_name=TABLE)
     op.drop_table(TABLE)
     bind.execute(
-        sa.text("DELETE FROM settings WHERE key = ANY(:keys)"), {"keys": [KEEP_KEY, DROPPED_KEY]}
+        sa.text("DELETE FROM settings WHERE key = ANY(:keys)"),
+        {"keys": [KEEP_KEY, DROPPED_KEY, CHANGE_KEY]},
     )
     bind.execute(
         sa.text(
@@ -260,14 +294,11 @@ def downgrade() -> None:
     )
 
 
-def _merge_daily_partitions(bind: sa.Connection) -> None:
-    """The local months the daily partitions hold device times of become one monthly partition
-    each, as the previous version creates them: the rows of every daily partition go to the
-    month they belong to (a daily partition is a UTC day, ``[D 00:00 UTC, D+1 00:00 UTC)``, or
-    the part of it beside a monthly partition, so it holds rows of the months of ``D`` and ``D +
-    1``), then the daily partitions are dropped and the default partition's rows of each month
-    moved in too. A month that still has its monthly partition gets none (the daily partitions
-    beside it hold no row of it)."""
+def _merge_plan(
+    bind: sa.Connection,
+) -> tuple[dict[str, list[tuple[str, date]]], dict[str, list[date]], set[str]]:
+    """Per table its daily partitions (name, UTC day) and the local months that get a monthly
+    partition (:func:`_merge_daily_partitions`), and the tables with a default partition."""
     daily: dict[str, list[tuple[str, date]]] = {}
     monthly: dict[str, set[date]] = {}
     partitions = _partitions(bind)
@@ -279,9 +310,92 @@ def _merge_daily_partitions(bind: sa.Connection) -> None:
         elif (match := MONTHLY.match(name)) is not None and match.group("table") == parent:
             month = date(int(match.group("year")), int(match.group("month")), 1)
             monthly.setdefault(parent, set()).add(month)
+    months = {
+        parent: sorted(
+            {month for _name, day in names for month in (_month(day), _month(day + ONE_DAY))}
+            - monthly.get(parent, set())
+        )
+        for parent, names in daily.items()
+    }
+    return daily, months, defaults
+
+
+def locks_needed(bind: sa.Connection) -> int:
+    """About how many objects the downgrade holds a lock on until its commit. Dropping a daily
+    partition locks everything that goes with it (what depends on it in ``pg_depend``: its
+    indexes, TOAST table, row types, constraints, column defaults), creating a monthly one as
+    much again (a daily partition's average); ``LOCK TABLE`` takes every other partition of the
+    table, and the default partition's indexes take its rows' moves. Plus
+    :data:`LOCK_ALLOWANCE`."""
+    daily, months, _defaults = _merge_plan(bind)
+    needed = LOCK_ALLOWANCE if daily else 0
+    for table, names in sorted(daily.items()):
+        objects, others = bind.execute(
+            sa.text(
+                "WITH RECURSIVE o(classid, objid) AS ("
+                "SELECT CAST('pg_class' AS regclass), CAST(name AS regclass) "
+                "FROM unnest(CAST(:names AS text[])) AS name "
+                "UNION SELECT d.classid, d.objid FROM pg_depend d JOIN o "
+                "ON d.refclassid = o.classid AND d.refobjid = o.objid "
+                "WHERE d.deptype IN ('a', 'i')) "
+                "SELECT (SELECT count(*) FROM o), "
+                "(SELECT count(*) FROM pg_class c WHERE c.oid = CAST(:table AS regclass) "
+                "OR c.oid IN (SELECT inhrelid FROM pg_inherits "
+                "WHERE inhparent = CAST(:table AS regclass)) "
+                "OR c.oid IN (SELECT indexrelid FROM pg_index "
+                "WHERE indrelid = CAST(:default AS regclass))) "
+                "- cardinality(CAST(:names AS text[]))"
+            ),
+            {
+                "table": table,
+                "names": [name for name, _day in names],
+                "default": f"{table}_default",
+            },
+        ).one()
+        per_partition = -(-int(objects) // len(names))
+        needed += int(objects) + int(others) + len(months[table]) * per_partition
+    return needed
+
+
+def check_lock_table(bind: sa.Connection, needed: int) -> None:
+    """Refuse the downgrade before it changes anything when its locks can never fit into
+    PostgreSQL's shared lock table (room for ``max_locks_per_transaction`` times
+    (``max_connections`` + ``max_prepared_transactions``) objects, shared by every session): it
+    would fail with "out of shared memory" part way and be rolled back. With the ARCILOGGER
+    services stopped (``-Rollback``) the table is the downgrade's."""
+    per, connections, prepared = bind.execute(
+        sa.text(
+            "SELECT CAST(current_setting('max_locks_per_transaction') AS integer), "
+            "CAST(current_setting('max_connections') AS integer), "
+            "CAST(current_setting('max_prepared_transactions') AS integer)"
+        )
+    ).one()
+    room = per * (connections + prepared)
+    if needed > room:
+        raise RuntimeError(
+            f"0021_db_window geri alınamadı: yaklaşık {needed} kilit gerekiyor, PostgreSQL'in "
+            f"kilit tablosunda {room} yer var (max_locks_per_transaction {per}). Hiçbir şey "
+            "değiştirilmedi. max_locks_per_transaction değerini artırıp PostgreSQL'i yeniden "
+            "başlatın (YEDEKLEME.md). / "
+            f"0021_db_window was not downgraded: it needs about {needed} locks, PostgreSQL's "
+            f"lock table has room for {room} (max_locks_per_transaction {per}). Nothing was "
+            "changed. Raise max_locks_per_transaction and restart PostgreSQL (BACKUP.md)."
+        )
+
+
+def _merge_daily_partitions(bind: sa.Connection) -> None:
+    """The local months the daily partitions hold device times of become one monthly partition
+    each, as the previous version creates them: the rows of every daily partition go to the
+    month they belong to (a daily partition is a UTC day, ``[D 00:00 UTC, D+1 00:00 UTC)``, or
+    the part of it beside a monthly partition, so it holds rows of the months of ``D`` and ``D +
+    1``), then the daily partitions are dropped and the default partition's rows of each month
+    moved in too. A month that still has its monthly partition gets none (the daily partitions
+    beside it hold no row of it). All of it is one transaction, so it first checks that its
+    locks fit (:func:`locks_needed`, :func:`check_lock_table`)."""
+    check_lock_table(bind, locks_needed(bind))
+    daily, planned, defaults = _merge_plan(bind)
     for parent, names in sorted(daily.items()):
-        touched = {month for _name, day in names for month in (_month(day), _month(day + ONE_DAY))}
-        months = sorted(touched - monthly.get(parent, set()))
+        months = planned[parent]
         bind.execute(sa.text(f'LOCK TABLE "{parent}" IN ACCESS EXCLUSIVE MODE'))
         for month in months:
             bind.execute(

@@ -34,8 +34,26 @@ While nothing is sealed yet and ``seal.first_day`` is not set (a new installatio
 seal), no day can come back from the vault: nothing is dropped, only the partitions are made
 (``limited_by`` ``nothing_sealed``). A day that stays unsealed (sealing stopped) holds the cutoff
 until it is sealed: the database then grows beyond the window, which ``R20-seal`` reports. A
-reload that stays ``queued`` or ``loading`` for more than a day holds it too; the run names it in
-``details.reloads_waiting`` (nothing is dropped because of its age).
+reload that stays ``queued`` or ``loading`` holds it too, however long (a day being loaded is
+never dropped, and nothing fails it because of its age): the run names one waiting for more than
+a day in ``details.reloads_waiting``, and one that made no progress since the previous successful
+run (the same status and ``bytes_done`` as that run's ``details.reload_progress``) opens the
+alert ``R20-db-window`` (medium, key ``R20-db-window:reload-<id>``, naming the reload and its
+days), resolved by the first run that sees it move on or end.
+
+**Audit** (actor ``system``; the record of the deletion, manager answer 4 on #121):
+
+* Every step that dropped something (a partition or chunk, rows of a default partition, summary
+  counts or clock samples) writes one ``db.window`` entry in its own transaction, so no drop is
+  ever committed without it: the step's cutoff, the names of the partitions and chunks dropped
+  (at most :data:`LIST_MAX`, the count complete) and the exact row counts the drop returns (the
+  rows of the default partitions, ``search_counts``, clock samples). The rows of a dropped
+  partition or chunk are not counted (a count would read the whole day). A run is one step
+  unless it works off a backlog (the first run after the upgrade: one entry per step).
+* The status row :data:`CHANGE_KEY` that revision ``0021_db_window`` leaves when it changed a
+  stored ``db.retention_days`` (400 → 30, below 7 → 7; G1) becomes one ``settings.change`` entry
+  with the old and the new value, in a transaction before the first step (no revision writes
+  audit entries).
 
 Every step first takes the partition maintenance lock
 (:data:`~arcilogger_db.partitions.PARTITION_LOCK_KEY`) and only then reads the reloads: ArciIngest
@@ -46,7 +64,11 @@ loaded. The API's lookups and searches take it shared while they check and read 
 A failed step (the database, a sealing state that cannot be read) drops nothing — its
 transaction is rolled back; earlier steps of the run stay, each complete with its recorded
 cutoff — and opens the alert ``R20-db-window`` (medium, key :data:`WINDOW_KEY`); the worker
-retries the job (15 min, 30 min, … at most 4 h). The next successful run resolves it.
+retries the job (15 min, 30 min, … at most 4 h). The next successful run resolves it. A failure
+after the steps (resolving that alert, the report of the reloads without progress) fails the run
+too, and the worker retries it the same way, but opens no alert: the steps' drops are done and
+audited, and the failure shows in the job's run (``job_runs``); the next run compares the
+reloads' progress with the last successful run's.
 
 The vault, the spool and every sealed file are only read (``state/seal``, the manifests). The job
 belongs to 5651 Temel and never asks the licence.
@@ -63,6 +85,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Final
 
 from sqlalchemy import Connection, func, select, text, update
+from sqlalchemy.orm import Session
 
 from arcilogger_core.config import Config
 from arcilogger_core.fmt import format_date
@@ -70,28 +93,46 @@ from arcilogger_core.layout import Layout
 from arcilogger_core.seal import Sealer
 from arcilogger_core.timeutil import site_day
 from arcilogger_core.tsa.base import StampResult, TsaError
-from arcilogger_db.models import ARCHIVE_RELOAD_ACTIVE, ArchiveReload
+from arcilogger_db.audit import append_audit
+from arcilogger_db.models import ARCHIVE_RELOAD_ACTIVE, ArchiveReload, JobRun, Setting
 from arcilogger_db.partitions import (
     PARTITION_LOCK_KEY,
     RAW_DAY_MARGIN,
+    PartitionReport,
     dropped_before,
     ensure_partitions,
     maintain_window,
     retention_days,
 )
-from arcilogger_worker.alerts.store import active_alert, open_alert, resolve
+from arcilogger_worker.alerts.store import active_alert, active_alerts, open_alert, resolve
 
 if TYPE_CHECKING:
     from arcilogger_worker.service import JobContext
 
 log = logging.getLogger("arcilogger_worker.db_window")
 
-#: Dedup key of the alert of a failed run (Wave 5 D14 form ``<code>:none``). The rule is the part
-#: before the colon: only the switch-on package adds the whole-string constant (D14, Wave 4 D7).
-WINDOW_KEY: Final = "R20-db-window:none"
+#: The job's name (worker service) and the audit action of a step that dropped something.
+JOB: Final = "db.window"
+#: The rule of the job's alerts (``alerts.texts.RULES``; ILK-ADIMLAR / FIRST-STEPS section 9).
+WINDOW_RULE: Final = "R20-db-window"
+#: Dedup key of the alert of a failed run (Wave 5 D14 form ``<code>:none``).
+WINDOW_KEY: Final = f"{WINDOW_RULE}:none"
 WINDOW_SEVERITY: Final = "medium"
 #: ``details.auto_resolved.reason`` once a run succeeds again.
 RESOLVED_REASON: Final = "window_maintained"
+#: Dedup key prefix of the alert of a reload without progress (``R20-db-window:reload-<id>``).
+STUCK_KEY: Final = f"{WINDOW_RULE}:reload-"
+#: ``details.auto_resolved.reason`` once the reload moved on or ended.
+PROGRESSED_REASON: Final = "reload_progressed"
+#: ``details`` key of the progress of the reloads ``queued`` or ``loading`` (the next run reads it).
+PROGRESS: Final = "reload_progress"
+#: Longest list of partition or chunk names put into one audit entry (the count is complete).
+LIST_MAX: Final = 100
+#: The status row of revision ``0021_db_window``'s change of ``db.retention_days`` (G1; its
+#: frozen copy is the revision's ``CHANGE_KEY``).
+CHANGE_KEY: Final = "db.retention_days_migration"
+#: Audit target of that change (as ``settings.change`` names a setting).
+CHANGE_TARGET: Final = "setting:db.retention_days"
 #: Steps one run takes at most (64 x 16 days: a first run after the upgrade from 400 days ends
 #: in one run; the next run goes on otherwise).
 MAX_STEPS: Final = 64
@@ -298,6 +339,8 @@ def maintain(
     else:
         report = maintain_window(connection, cutoff.day, today=today)
         done = report.remaining == 0 and report.applied == cutoff.day
+        if dropped_anything(report):
+            details["audit_id"] = audit_drop(connection, cutoff, report, expired=expired)
     details.update(
         applied=None if report.applied is None else report.applied.isoformat(),
         done=done,
@@ -309,6 +352,35 @@ def maintain(
         clock_samples_deleted=report.clock_samples_deleted,
     )
     return details
+
+
+def dropped_anything(report: PartitionReport) -> bool:
+    """Whether a step dropped a partition or chunk, or deleted any row."""
+    return bool(
+        report.dropped or report.purged or report.counts_deleted or report.clock_samples_deleted
+    )
+
+
+def audit_drop(
+    connection: Connection, cutoff: Cutoff, report: PartitionReport, *, expired: int
+) -> int:
+    """The ``db.window`` audit entry of a step that dropped something (module text), in the
+    step's transaction; its id."""
+    details = {
+        "cutoff": None if report.applied is None else report.applied.isoformat(),
+        "target_cutoff": None if cutoff.day is None else cutoff.day.isoformat(),
+        "limited_by": cutoff.limited_by,
+        "storage": "hypertables" if report.hypertables else "partitions",
+        "dropped": report.dropped[:LIST_MAX],
+        "dropped_count": len(report.dropped),
+        "default_rows_deleted": report.purged,
+        "counts_deleted": report.counts_deleted,
+        "clock_samples_deleted": report.clock_samples_deleted,
+        "reloads_expired": expired,
+    }
+    with Session(bind=connection) as session:
+        entry = append_audit(session, action=JOB, target="database", details=details)
+        return entry.id
 
 
 #: Counts of the steps that the run's details add up.
@@ -327,31 +399,138 @@ def run_steps(ctx: JobContext, config: Config) -> dict[str, Any]:
     or :data:`MAX_STEPS`; the details of the last step with the counts of all of them."""
     total = dict.fromkeys(_COUNTS, 0)
     steps = 0
+    audited: list[int] = []
     while True:
         with ctx.engine.begin() as connection:
             details = maintain(connection, config, now=ctx.now, layout=ctx.layout)
         steps += 1
         for key in _COUNTS:
             total[key] += int(details[key])
+        if "audit_id" in details:
+            audited.append(int(details.pop("audit_id")))
         if details["done"] or steps >= MAX_STEPS:
             break
-    details.update(total, steps=steps)
+    details.update(total, steps=steps, audit_ids=audited)
     return details
+
+
+def audit_window_change(session: Session) -> int | None:
+    """The one ``settings.change`` entry of revision ``0021_db_window``'s change of
+    ``db.retention_days`` from its status row :data:`CHANGE_KEY` (module text), which is then
+    marked ``audited``; the entry's id, ``None`` when there is nothing to audit."""
+    row = session.get(Setting, CHANGE_KEY, with_for_update=True)
+    if row is None or not isinstance(row.value, dict) or row.value.get("audited") is not False:
+        return None
+    change = row.value
+    entry = append_audit(
+        session,
+        action="settings.change",
+        target=CHANGE_TARGET,
+        details={
+            "old": change.get("old"),
+            "new": change.get("new"),
+            "was_set_by": change.get("was_set_by"),
+            "migration": change.get("migration"),
+            "changed_at": row.updated_at,
+        },
+    )
+    row.value = {**change, "audited": True}
+    session.flush()
+    return entry.id
+
+
+def reload_progress(session: Session) -> dict[str, dict[str, Any]]:
+    """The reloads ``queued`` or ``loading`` now: id (text, as JSON keeps it) → status and
+    ``bytes_done``."""
+    rows = session.execute(
+        select(ArchiveReload.id, ArchiveReload.status, ArchiveReload.bytes_done)
+        .where(ArchiveReload.status.in_(("queued", "loading")))
+        .order_by(ArchiveReload.id)
+    ).all()
+    return {str(id_): {"status": status, "bytes_done": int(done)} for id_, status, done in rows}
+
+
+def previous_progress(session: Session) -> dict[str, Any]:
+    """``details.reload_progress`` of the previous successful run (empty when there is none)."""
+    details = session.scalars(
+        select(JobRun.details)
+        .where(JobRun.job == JOB, JobRun.status == "ok")
+        .order_by(JobRun.started_at.desc(), JobRun.id.desc())
+        .limit(1)
+    ).first()
+    progress = details.get(PROGRESS) if isinstance(details, dict) else None
+    return progress if isinstance(progress, dict) else {}
+
+
+def report_stuck_reloads(session: Session, now: datetime) -> tuple[dict[str, Any], list[int]]:
+    """The progress of this run (kept in its details), and the reloads without progress since
+    the previous successful run: one ``R20-db-window`` alert each (module text); the alerts of
+    reloads that moved on or ended are resolved."""
+    progress = reload_progress(session)
+    before = previous_progress(session)
+    stuck = sorted(int(key) for key, seen in progress.items() if before.get(key) == seen)
+    keys = {f"{STUCK_KEY}{reload_id}" for reload_id in stuck}
+    for reload_id in stuck:
+        reload = session.get(ArchiveReload, reload_id)
+        if reload is not None:
+            _open_stuck(session, reload, now)
+    for alert in active_alerts(session):
+        key = alert.dedup_key or ""
+        if key.startswith(STUCK_KEY) and key not in keys:
+            resolve(alert, reason=PROGRESSED_REASON, now=now)
+    return progress, stuck
+
+
+def _open_stuck(session: Session, reload: ArchiveReload, now: datetime) -> None:
+    first, last = reload.first_day, reload.last_day
+    days_tr = format_date(first) if first == last else f"{format_date(first)} - {format_date(last)}"
+    days_en = first.isoformat() if first == last else f"{first.isoformat()} - {last.isoformat()}"
+    open_alert(
+        session,
+        rule=WINDOW_RULE,
+        severity=WINDOW_SEVERITY,
+        title=(
+            f"Arşivden yeniden yükleme #{reload.id} ({days_tr}) önceki veritabanı penceresi "
+            "çalıştırmasından beri ilerlemedi: o günden itibaren hiçbir kayıt silinmiyor"
+        ),
+        details={
+            "reload_id": reload.id,
+            "first_day": first.isoformat(),
+            "last_day": last.isoformat(),
+            "status": reload.status,
+            "bytes_done": reload.bytes_done,
+            "bytes_total": reload.bytes_total,
+            "job": JOB,
+            "title_en": (
+                f"Archive reload #{reload.id} ({days_en}) has made no progress since the "
+                "previous database window run: nothing from that day on is dropped"
+            ),
+        },
+        key=f"{STUCK_KEY}{reload.id}",
+        time=now,
+        now=now,
+    )
 
 
 def job_db_window(ctx: JobContext) -> Mapping[str, Any]:
     """The database window (module text); a failure opens ``R20-db-window`` and fails the run."""
     config = ctx.config or Config(data_dir=ctx.layout.root, secrets_dir=ctx.layout.root)
     try:
+        with ctx.sessions() as session:
+            changed = audit_window_change(session)
+            session.commit()
         details = run_steps(ctx, config)
     except Exception as exc:
         _report_failure(ctx, exc)
         raise
+    if changed is not None:
+        details["window_change_audited"] = changed
     with ctx.sessions() as session:
         existing = active_alert(session, WINDOW_KEY)
         if existing is not None:
             resolve(existing, reason=RESOLVED_REASON, now=ctx.now)
             details["resolved"] = existing.id
+        details[PROGRESS], details["reloads_stuck"] = report_stuck_reloads(session, ctx.now)
         session.commit()
     return details
 
@@ -364,7 +543,7 @@ def _report_failure(ctx: JobContext, exc: Exception) -> None:
         with ctx.sessions() as session:
             open_alert(
                 session,
-                rule=WINDOW_KEY.partition(":")[0],
+                rule=WINDOW_RULE,
                 severity=WINDOW_SEVERITY,
                 title=(
                     f"Veritabanı penceresi işi (db.window) {format_date(today)} günü çalışamadı: "
@@ -372,7 +551,7 @@ def _report_failure(ctx: JobContext, exc: Exception) -> None:
                 ),
                 details={
                     "day": today.isoformat(),
-                    "job": "db.window",
+                    "job": JOB,
                     "error": type(exc).__name__,
                     "title_en": (
                         f"Database window job (db.window) failed on {today.isoformat()}: days "
