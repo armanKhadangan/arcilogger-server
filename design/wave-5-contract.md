@@ -1222,19 +1222,27 @@ All Wave 5 questions are answered (2026-11-02).
   the FortiOS maximum, never less than the configured rules reach. With the defaults the days
   are `T`'s day − 12 to + 1 (− 11 to + 2 in the last two minutes before a midnight; without the
   setting − 8 to + 1), so a moment more than about 18 days old needs a reload, of 14 days.
-  (b) No log row outside those days is read (`lookup.days.reads_from` to `reads_until`): a
+  (b) No log row outside those days is read (`lookup.days.reads_from` to `reads_until`). A
   look-back reaching before the first day (the 100-day cap of the missed-move check, round 7; a
   logged lease longer than 14 days, through the lease's newest record, the post-lease checks
-  and D27) reads from it, and D27's read past the moment (`T + W`, W up to a logged lease time)
-  ends with the last day. The answer then carries the explanation
-  `lookback_clamped_to_window` (TR/EN, `warning`, naming the first and the last day), and a
-  lease whose newest record lies before the first day is read from its stored record. The bound
+  and D27's `T − W`; the ARP interval after a RELEASE) reads from it, and the answer then
+  carries the explanation `lookback_clamped_to_window` (TR/EN, `warning`, naming the first and
+  the last day; its text speaks of looking back before the first day), and a lease whose newest
+  record lies before the first day is read from its stored record. D27's read past the moment
+  (`T + W`, W up to a logged lease time) ends with the last day **without** that explanation
+  (#126, manager answer Q2 on #121): "D27 reads up to the end of the lookup's last day" is a
+  method rule, documented in `docs/CORRELATION.md` (section 3 "Data window", sections 2 and 7,
+  Özet). That cut fires on nearly every FortiGate lookup (FortiOS's 7-day lease) and on MikroTik
+  lookups after about 21:36 (1 day × 110 %); a warning on almost every report, printed in the PDF
+  under "Sorgu motorunun açıklamaları", would say nothing about the case. The bound
   is the lookup's own days, not the window start: those depend only on the request and the
-  settings, so the answer is the same before a drop and after the reload, while a bound at the
-  window start would move with "now". So in a lookup the 100-day cap of the missed-move check
+  settings, so the cut is deterministic and the answer is the same before a drop and after the
+  reload (it never changes silently), while a bound at the window start would move with "now".
+  So in a lookup the 100-day cap of the missed-move check
   is never reached any more (about 12 days are read with the defaults), and the ARP interval
   after a RELEASE is cut too (not reachable today: a late-mapped RELEASE is read from its row,
-  inside the days). The 3.8 guards of `worker/tests/test_lookup_performance.py` (not W5-G's
+  inside the days). The cost: the missed-move check reads only the lookup's days, about 12 days
+  instead of round 7's 100, for every lookup; accepted by the manager on #121. The 3.8 guards of `worker/tests/test_lookup_performance.py` (not W5-G's
   file) measure the converted-row query and the 30-day post-lease query from the first day,
   with the explanation asserted and their row counts recomputed for that range; the event
   site's 30-day leases now store their newest ACK among their refs, as the lease build keeps it
@@ -1250,4 +1258,51 @@ All Wave 5 questions are answered (2026-11-02).
   aborted transaction, a lost connection) the connection is invalidated, never returned to the
   pool holding the lock. The wait is part of `search.request_budget_ms`: the scan gets what is
   left, and a wait that uses the budget up answers 504 `search_timeout` (audited `outcome:
-  timeout`). The lookup (READ COMMITTED) keeps the lock in its transaction as before.
+  timeout`). The lookup (READ COMMITTED) keeps the lock in its transaction as before. On any
+  failure of the statement that takes the lock other than its timeout (`lock_not_available`) —
+  a failure after the lock was granted, a cancelled statement, an interrupt or a cancelled task
+  (`BaseException`), a lost connection — `hold_window` invalidates the connection too (#126 item
+  4): whether the session lock was granted is not known, and the connection must not go back to
+  the pool holding it. The error itself goes on unchanged (a failure of the invalidation is
+  added to it as a note); the timeout keeps the connection, as before.
+- **W5-G-19: a lookup's days never exceed one reload: bounds on the settings that widen them
+  (#126 item 3, option (b)).** Before, a long configured lease (for example a 14-day
+  `lease.server_seconds`) or a large `lookup.max_session_seconds` (no upper bound) made
+  `lookup.days.lookup_days` longer than 14 days; once those days were dropped, the 409
+  `archive_reload_required` asked for a reload that `POST /archive-reloads` refuses (422
+  `archive_reload_too_large`). The settings that widen the days get upper bounds
+  (`arcilogger_db.settings.INTEGER_RANGES`): `lookup.max_session_seconds` 60–172800 (2 days),
+  `lookup.dns_lookback_seconds` 0–604800, `lease.default_seconds` 60–604800 and each server of
+  `lease.server_seconds` the same (`LEASE_SERVER_SECONDS`), `lease.timeout_percent` 100–125
+  (was 100–1000), `arp.interval_seconds` 60–604800; `lookup.tolerance_seconds` and the request's
+  tolerance were already at most 3600. With every value at its bound, 2 × (3600 + 172800 + 60) +
+  604800 × 125 % = 1,108,920 s stays under 13 days, so a lookup touches at most 14 site days
+  (`RELOAD_DAYS`, the API's `MAX_DAYS`), also on the 23-hour days of before 2016; the logged
+  FortiGate lease was already capped at the 14 days (W5-G-17 (a)). 604800 s is FortiOS's
+  default `lease-time` (DEVICE-SETUP.md section 2.4; `UNCONVERTED_WINDOW`), so the bound equals
+  that default, not above it; the bounds lie above the shipped values (a 1-day lease, the hourly
+  ARP-LOG). MikroTik's own default lease time is not stated in the repository (**sahada
+  doğrula**), and the 2-day session bound is to be verified on site with the session cap itself
+  (`docs/MVP-CONTRACTS.md`, open items). A value above a bound is refused as
+  `setting_out_of_range` ("{low} ile {high} arasında olmalı." / "Must be between {low} and
+  {high}."), for a server of `lease.server_seconds` as `setting_lease_seconds` ("Her DHCP
+  sunucusu için 60 ile 604800 saniye (7 gün) arasında bir süre gerekir." / "Each DHCP server
+  needs a time between 60 and 604800 seconds (7 days)."); the browser checks the integer
+  settings' `max`, the API each server. **Values stored before the bounds** are not migrated
+  and are read as they are: a lookup whose days are in the database answers, and one whose days
+  to bring back (the 409's days) fit one reload answers the 409. Only when the days to bring
+  back are more than 14 (`lookup.days.check_reload`, `LookupReachError`) is the lookup refused,
+  before the 409, as 503 `lookup_settings_invalid` (no new error code) with a third text that
+  names the settings above their bounds (`lookup.days.above_bounds`) and the days: "5651 sorgu
+  ayarları geçersiz: sınırının üstünde kayıtlı bir değer var ({settings}). Bu sorgunun
+  veritabanında olmayan günleri ({first_day} - {last_day}, {days} gün) tek bir arşivden yeniden
+  yüklemeye (en çok {max_days} gün) sığmaz. Sistem yöneticisi değeri sınırların içine
+  çekmelidir (Ayarlar → Uygulama ayarları)." / "The 5651 lookup settings are invalid: a value is
+  stored above its bound ({settings}). The days of this lookup that are not in the database
+  ({first_day_en} - {last_day_en}, {days} days) do not fit one archive reload (at most
+  {max_days} days). An administrator must bring the value within its bounds (Settings →
+  Application settings)." Like the other two texts of that code it is not audited. Tests:
+  `worker/tests/test_lookup_reach.py` (the bounds, a grid of the accepted values, the refusal at
+  15 days and not at 14), `db/tests/test_settings_reach.py`,
+  `api/tests/test_archive_api.py` (the 503, and the 409 and the answer with the same stored
+  value).
