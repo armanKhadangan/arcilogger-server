@@ -12,8 +12,12 @@
 - PostgreSQL 16; TimescaleDB kuruluysa zaman serisi tabloları hypertable olur (1 günlük parçalar,
   7 günden eski parçalar sıkıştırılır). TimescaleDB yoksa aynı tablolar PostgreSQL'in kendi
   **bölümlemesiyle** (`PARTITION BY RANGE (time)`) oluşturulur: revizyon `0021_db_window`'dan
-  sonraki aydan başlayarak **günlük** bölümler (önceki sürümlerin aylık bölümleri bölünmez);
-  eski veriler satır satır silinmez, bölüm bölüm düşürülür.
+  sonra, içinde bulunulan ayın aylık bölümünün bittiği andan başlayarak **günlük** bölümler;
+  her biri TimescaleDB'nin parçaları gibi bir **UTC günüdür** (UTC gece yarısından UTC gece
+  yarısına; yerel saatle 03:00'ten 03:00'e). Önceki sürümlerin aylık bölümleri (sınırları yerel
+  gece yarısında) bölünmez: ayın son UTC gününün aylık bölümden sonra kalan üç saati, o günün
+  adıyla kısa bir günlük bölüm olur, böylece hiçbir satır varsayılan bölüme düşmez. Eski
+  veriler satır satır silinmez, bölüm bölüm düşürülür.
 - Her ayrıştırılmış satır, ham satırına geri götüren bir **ham referans** taşır:
   `(source, raw_day, raw_line, raw_offset)`.
 - Veritabanı arşivden **daha kısa** süre tutar: log kayıtlarının **son 30 gününü** (ayar
@@ -75,9 +79,9 @@
 Everything in the database is derived and rebuildable from the raw spool and the sealed vault;
 the legal evidence is the sealed raw files. PostgreSQL 16, with optional TimescaleDB
 (hypertables for the time-series tables); without it the time-series tables are natively
-partitioned by day (by month before revision `0021_db_window`; those monthly partitions are never
-split). Every parsed row carries a raw reference to its line. The database keeps less than the
-vault: the **last 30 days** of log rows (`db.retention_days`, default 30, at least 7; 400 before
+partitioned by UTC day, as TimescaleDB's chunks (by month, at local midnight, before revision
+`0021_db_window`; those monthly partitions are never split). Every parsed row carries a raw
+reference to its line. The database keeps less than the vault: the **last 30 days** of log rows (`db.retention_days`, default 30, at least 7; 400 before
 revision `0021_db_window`), against at least 730 days (default 760) in the vault. The worker job
 `db.window` drops older days daily after 04:00, whole partitions (TimescaleDB: chunks) at a time;
 a day not sealed yet (with the two days before it, which its rows reach into) and the days of an
@@ -293,33 +297,48 @@ tables:
 **Native partitions** (plain PostgreSQL, the likely Windows production mode until TimescaleDB on
 Windows is verified): every time-series table is `PARTITION BY RANGE (time)` with a
 `<table>_default` partition; `arcilogger_db.partitions.ensure_partitions` creates **daily**
-partitions `<table>_pYYYYMMDD` (bounds at local midnight Europe/Istanbul) for the
-`db.retention_days` window (today − 30 days by default) up to 7 days ahead (Wave 5 contract
-G2). One call creates at most 16 days (today and the days ahead first, then the past days newest
+partitions `<table>_pYYYYMMDD`, one per **UTC day** (`[D 00:00 UTC, D+1 00:00 UTC)`, 03:00 to
+03:00 site time, as TimescaleDB's 1-day chunks), for the device times of the `db.retention_days`
+window (today − 30 days by default; its first local midnight is 21:00 UTC the day before, so the
+window takes 31 UTC days) up to 7 days ahead (Wave 5 contract G2). UTC days, not site days: the
+5651 lookup asks a range of a day or more one UTC day at a time (`lookup.engine.CHUNK`, written
+for the chunks), and each such step then reads one partition; with partitions cut at site
+midnight a step read two, and an ordered `LIMIT 1` over two partitions walked the second one's
+rows of the address before it answered (the D15 check's 3.8 guards: 125,000 index entries and
+33 ms for a busy address instead of a few). One call creates at most 16 days (today and the days ahead first, then the past days newest
 first): 256 partitions with their indexes take about 2,700 locks until the commit, within
 PostgreSQL's default lock table (`max_locks_per_transaction` 64 per connection, measured
 2026-11-02 on PostgreSQL 16), as the 17 monthly partitions of every table an earlier version's
 first upgrade created did; a new database gets the rest of the window from the next runs
 (`arcilogger-db partitions`, the worker at its start-up and daily). `ensure_days` creates the
-partitions of the days an archive reload brings back. A day already covered by a partition gets
-none: the monthly partitions `<table>_pYYYYMM` of earlier versions are never split; revision
-`0021_db_window` drops the empty ones of the months after the migration (one holding rows, a
-device clock in the future, stays), so the daily partitions start on the 1st of the next month,
-and the monthly ones of the past go once they end on or before the window's cutoff — up to one
-extra month during the change-over. It runs in `arcilogger-db upgrade`, in `arcilogger-db
+partitions of the site days an archive reload brings back (two UTC days a site day). The monthly
+partitions `<table>_pYYYYMM` of earlier versions (bounds at local midnight Europe/Istanbul) are
+never split; revision `0021_db_window` drops the empty ones of the months after the migration
+(one holding rows, a device clock in the future, stays). **The change-over rule:** a daily
+partition is its UTC day less every partition that overlaps it. After the current month, which
+ends at local midnight (21:00 UTC on its last day), comes a 3-hour daily partition named for
+that UTC day (e.g. `messages_p20261130`, `[30.11. 21:00 UTC, 01.12. 00:00 UTC)`), then whole UTC
+days; before a monthly partition kept ahead, the daily partition of its UTC day ends at its
+start (21 hours). No device time between them falls into the default partition. The monthly
+ones of the past go together with the daily partition after them (the drop rule below) — up to
+one extra month during the change-over. It runs in `arcilogger-db upgrade`, in `arcilogger-db
 partitions` and daily in the worker. Rows of a day without a partition wait in the default
 partition and are moved when the partition is created; afterwards the default partition only
 holds outliers (e.g. a device clock in 2001). `arcilogger-db check` warns when fewer than the
-next 3 days have partitions. `partitions.drop_before` drops everything older than a cutoff day:
-the partitions that end on or before it, the older rows of the default partitions, on TimescaleDB
-the chunks that end on or before its local midnight (`drop_chunks`; the chunk holding that
-instant, a UTC day, is kept whole), and the `search_counts` and `source_clock_samples` of the
-rows that went, and records the cutoff in the status row `db.window_dropped_before` (`{"cutoff",
+next 3 days have partitions (the last site day covered whole). `partitions.drop_before` drops
+everything older than a cutoff day: the partitions whose UTC day (the one they end in) has
+ended by its local midnight (**the drop rule**), the older rows of the default partitions, on
+TimescaleDB the chunks that end on or before that instant (`drop_chunks`) — the same rule: the
+daily partition or chunk holding that instant, a UTC day, is kept whole, with up to 21 hours of
+the day before; a monthly partition, ending at 21:00 UTC, goes with the daily partition of the
+rest of that UTC day, so an archive reload of its days later gets whole UTC days and none of
+their rows waits in the default partition —, and the `search_counts` and `source_clock_samples`
+of the rows that went, and records the cutoff in the status row `db.window_dropped_before` (`{"cutoff",
 "at"}`, never in the defaults and never editable, like `db.timescale`; the newest cutoff ever
 applied, written in the drop's transaction). `partitions.maintain_window` is one step of the
 window: the missing partitions (never a day before the cutoff), then a drop up to the next step
-towards the cutoff (`next_drop_cutoff`: the oldest partition or chunk to go plus 16 days, at
-least that partition whole), created and dropped days together at most 16 a transaction, for the
+towards the cutoff (`next_drop_cutoff`: what ends within 16 days of the start of the oldest
+partition or chunk to go, at least that partition whole), created and dropped days together at most 16 a transaction, for the
 same lock table; it refuses a cutoff less than 7 days before today.
 
 The outcome is stored in the setting `db.timescale` (`storage`: `hypertables` or `partitions`)
@@ -359,7 +378,8 @@ PostgreSQL 16.
     **minus 2 days** (the margin: its rows before its midnight stay too), and the oldest
     `first_day` of an active archive reload (`queued`, `loading` or `ready`; a reload's days are
     device-time days and its files' rows around them are loaded with it). The database then holds
-    the cutoff day up to today (31 site days with the default), and a day that could not come
+    the cutoff day up to today (31 site days with the default, and up to 21 hours of the day
+    before in the UTC day that holds the cutoff's midnight), and a day that could not come
     back from the vault is never dropped, not even in part. A day whose `state\seal` file says
     `sealed` but whose manifest, or a file it names, is missing or unreadable counts as not
     sealed (`limited_by` `manifest`, `details.unreadable_manifest`): only the days whose rows the
@@ -386,11 +406,15 @@ PostgreSQL 16.
     alert.
   - **The change-over** from monthly partitions: the monthly partitions of earlier versions are
     never split. Revision `0021_db_window` drops the empty ones of the months after the upgrade,
-    so the daily partitions start on the 1st of the next month; a monthly partition goes once it
-    ends on or before the cutoff. The first run after the upgrade drops every month that ends on
-    or before the cutoff (in steps of at least one month); the month of the cutoff stays whole,
-    so up to one extra month of rows remains during the change-over (an upgrade in November 2026: the November partition goes
-    on the run of 31 December, when the cutoff reaches 1 December).
+    so the daily partitions start where the current month ends (its last UTC day's three hours
+    after local midnight, then the UTC days of the next month; above); a monthly partition goes
+    with those three hours once the UTC day it ends in has ended by the cutoff (the drop rule).
+    The first run after the upgrade drops every such month (in steps of at least one month); the
+    month of the cutoff stays whole, so up to one extra month of rows remains during the
+    change-over (an upgrade in November 2026: the November partition goes on the run of
+    1 January, when the cutoff reaches 2 December). While a monthly partition is in the window,
+    a lookup's step over the UTC day it ends in still reads two partitions (it and the three
+    hours after it), the only steps that do; this passes with the month.
   - **Archive reload** ("arşivden yeniden yükle", `archive_reloads`, Wave 5 contract G4–G9):
     a lookup or search that needs a day the database no longer holds asks for it instead of
     answering without it. A 5651 lookup reads the asked day − 1 to + 1 plus the widest look-back

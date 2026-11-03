@@ -970,3 +970,27 @@ All Wave 5 questions are answered (2026-11-02).
 - **W5-G-11: the factor (G5)** is `DB_BYTES_PER_RAW_BYTE = 2.6`, rounded up from 2.40 to 2.51
   measured on plain PostgreSQL 16 with daily partitions through the real ingest
   (`docs/DATA-MODEL.md`).
+- **W5-G-12: daily partitions are UTC days, and the change-over slice (G2).** On plain
+  PostgreSQL `<table>_pYYYYMMDD` is `[D 00:00 UTC, D+1 00:00 UTC)`, as TimescaleDB's 1-day
+  chunks, not a site day: the lookup engine asks its D15 and probe steps one UTC day at a time
+  (`lookup.engine.CHUNK`), and over a site-day partition such a step read two partitions under
+  an ordered `LIMIT 1`, walking the second one's rows of a busy address (125,000 index entries,
+  33 ms; the 3.8 guards failed). G2's "from the first day of the next month" becomes: a daily
+  partition is its UTC day less every partition that overlaps it, so after the current month
+  (ending at local midnight, 21:00 UTC) comes a 3-hour daily partition named for that UTC day,
+  and before a monthly partition kept ahead a 21-hour one; no device time falls into the
+  default partition. The window's site days take one more UTC day (31 with the default), and
+  the downgrade of `0021` splits a daily partition's rows by local month. G2's "a monthly
+  partition goes once it ends on or before the cutoff" becomes the drop rule: a partition goes
+  once the UTC day it ends in has ended by the cutoff's local midnight. A daily partition then
+  goes as a chunk does (the one holding that midnight keeps up to 21 hours of the day before),
+  and a monthly partition (ending at 21:00 UTC) goes together with the daily partition of the
+  rest of that UTC day, one day later than G2's wording: a month going alone would leave that
+  daily partition's name keeping an archive reload of its last day from the rest of the UTC
+  day, and those rows in the default partition. While a monthly partition is in the window, a
+  lookup step over the UTC day it ends in still reads two partitions (up to one month after the
+  upgrade). The cutoff, the margins (W5-G-1, W5-G-2) and the "gone" rule (W5-G-3) are
+  unchanged: they are by site day and instant. The D15 test of
+  `worker/tests/test_lookup_performance.py` (not W5-G's file, for the manager) accepts a
+  sequential scan of an empty partition (0 bytes: a future day's, on TimescaleDB no chunk at
+  all) where it accepted none.

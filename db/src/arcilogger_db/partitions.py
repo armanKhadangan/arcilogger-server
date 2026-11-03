@@ -7,22 +7,37 @@ unpartitioned heaps with DELETE-based retention would not be workable on the 4-c
 server). The database keeps the last ``db.retention_days`` days (default 30, Wave 5 contract G1);
 older days come back from the sealed vault on request (archive reload, G4). This module
 
-* creates the **daily** partitions ``<table>_pYYYYMMDD`` — boundaries at local midnight
-  (Europe/Istanbul) — for the window (``today - db.retention_days``) up to :data:`DAYS_AHEAD`
-  days ahead (:func:`ensure_partitions`), and those of the days an archive reload brings back
-  (:func:`ensure_days`). A day already covered by a partition gets none: the **monthly**
-  partitions ``<table>_pYYYYMM`` of earlier versions are never split (G2). Revision
-  ``0021_db_window`` drops the empty ones of the months after the migration, so daily
-  partitions start on the first day of the next month; the monthly ones of the past go once they
-  end on or before the cutoff, up to one extra month during the change-over. An explicit
-  ``months_back`` still asks for a fixed range of monthly partitions (the test template, the
-  performance tests);
+* creates the **daily** partitions ``<table>_pYYYYMMDD`` — one per **UTC day**, ``[D 00:00 UTC,
+  D+1 00:00 UTC)``, as TimescaleDB's 1-day chunks are — for the window (the device times of the
+  site days ``today - db.retention_days`` up to :data:`DAYS_AHEAD` days ahead,
+  :func:`ensure_partitions`), and those of the site days an archive reload brings back
+  (:func:`ensure_days`). UTC days, not site days: the lookup engine asks a range of a day or
+  more one UTC day at a time (``lookup.engine.CHUNK``), and each such step then reads one
+  partition; a site day (+03:00) would be two, and an ordered ``LIMIT 1`` over two partitions
+  walks the second one's rows of the address before it answers. A site day's device times lie
+  in two daily partitions (:func:`utc_days`). The **monthly** partitions ``<table>_pYYYYMM`` of
+  earlier versions (bounds at local midnight, Europe/Istanbul) are never split (G2): revision
+  ``0021_db_window`` drops the empty ones of the months after the migration, and the daily
+  partition of the UTC day a monthly one ends in (or begins in) covers only the part of that day
+  outside it (**change-over rule**: a daily partition is its UTC day less every partition that
+  overlaps it, :func:`_free_part`). After the current month (ending at 21:00 UTC the day before
+  the 1st) comes a 3-hour daily partition named for that UTC day (e.g. ``_p20261130``, ``[30.11.
+  21:00 UTC, 01.12. 00:00 UTC)``), then whole UTC days; before a monthly partition kept ahead
+  (it held rows) a 21-hour one. No device time between them falls into the default partition.
+  The monthly ones of the past go with the daily partition after them (the drop rule below), up
+  to one extra month during the change-over. An explicit ``months_back`` still asks for a fixed
+  range of monthly partitions (the test template, the performance tests);
 * moves rows that landed in the default partition before their day existed into the new
   partition (the default partition otherwise only holds outliers, e.g. a device clock in 2001);
 * drops everything older than a cutoff day (:func:`drop_before`; :func:`maintain_window` for
-  the worker job ``db.window``, G3): whole partitions — no DELETE of hundreds of millions of rows,
-  no vacuum storm —, the older rows of the default partitions, on TimescaleDB the chunks that end
-  on or before the cutoff (``drop_chunks``), and the search summary counts (``search_counts``)
+  the worker job ``db.window``, G3): whole partitions — no DELETE of hundreds of millions of
+  rows, no vacuum storm — once the UTC day they end in has ended by the cutoff's local midnight
+  (**drop rule**, :func:`_drop_end`), the older rows of the default partitions, on TimescaleDB the
+  chunks that end by that midnight (``drop_chunks``): the same rule on both, a daily partition or
+  chunk holding that midnight keeps the 21 hours of the day before it, and a monthly partition
+  (ending at 21:00 UTC) goes together with the change-over daily partition after it, so an
+  archive reload of its days finds their UTC days free and none of their device times falls into
+  the default partition. And the search summary counts (``search_counts``)
   and clock samples (``source_clock_samples``) of what went. The newest cutoff ever applied is
   kept in the status row :data:`DROPPED_KEY` in the same transaction (:func:`dropped_before`):
   the API reads it to know which days are gone. :func:`maintain_window` drops a backlog in
@@ -32,9 +47,10 @@ older days come back from the sealed vault on request (archive reload, G4). This
 
 Partitions and chunks are by device time (``time``); a raw day's file (``raw_day``) has rows
 up to :data:`~arcilogger_db.searchcounts.COUNTS_TIME_MARGIN` either side of its day
-(:func:`~arcilogger_db.searchcounts.stream_window`), so its rows lie in the partitions of
+(:func:`~arcilogger_db.searchcounts.stream_window`), so its rows lie in the site days of
 :data:`RAW_DAY_MARGIN` days either side. Callers that keep a raw day whole (the unsealed days of
-``db.window``) or load one again (archive reload) widen their days by it.
+``db.window``) or load one again (archive reload) widen their site days by it; the functions
+here take site days and find the partitions of their device times.
 
 Callers: ``arcilogger-db upgrade`` and ``arcilogger-db partitions`` (both run
 :func:`ensure_partitions`), the worker (``partitions.ensure`` daily, ``db.window``), ArciIngest
@@ -57,7 +73,8 @@ from __future__ import annotations
 import math
 import re
 from dataclasses import dataclass, field
-from datetime import date, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
+from datetime import time as dt_time
 from typing import Final
 
 from alembic.runtime.environment import NameFilterParentNames, NameFilterType
@@ -93,9 +110,11 @@ PARTITION_LOCK_KEY: Final = int.from_bytes(b"ARCIPART", "big") - 2**63
 #: day of a device time 25 hours before the raw day's midnight.
 RAW_DAY_MARGIN: Final = math.ceil(COUNTS_TIME_MARGIN / timedelta(days=1))
 #: The status row of the newest cutoff :func:`drop_before` applied, ``{"cutoff": "YYYY-MM-DD",
-#: "at": <ISO time>}``: every device time before that day's local midnight has been dropped
-#: (archive reloads bring days back). Never in ``DEFAULT_SETTINGS`` and never editable (like
-#: ``db.timescale``); written with the drop, in its transaction.
+#: "at": <ISO time>}``: the site days before it have been dropped, whole or in part (every
+#: partition or chunk the drop rule let go at its local midnight; the one holding that midnight
+#: keeps up to 21 hours of the day before), the days from it on are complete (archive reloads
+#: bring days back). Never in ``DEFAULT_SETTINGS`` and never editable (like ``db.timescale``);
+#: written with the drop, in its transaction.
 DROPPED_KEY: Final = "db.window_dropped_before"
 
 _MONTHLY = re.compile(r"^(?P<table>[a-z_]+)_p(?P<year>\d{4})(?P<month>\d{2})$")
@@ -119,6 +138,22 @@ def add_months(month: date, count: int) -> date:
 def month_bounds(month: date) -> tuple[datetime, datetime]:
     """``[start, end)`` of a month: local midnight of its 1st day and of the next month's."""
     return day_window(month_of(month))[0], day_window(add_months(month_of(month), 1))[0]
+
+
+def day_bounds(day: date) -> tuple[datetime, datetime]:
+    """``[start, end)`` of the daily partition of the UTC day ``day``: its UTC midnight and the
+    next one (less what a monthly partition covers, module text)."""
+    start = datetime.combine(day, dt_time.min, UTC)
+    return start, start + timedelta(days=1)
+
+
+def utc_days(first_day: date, last_day: date) -> list[date]:
+    """The UTC days whose daily partitions hold the device times of the site days ``first_day``
+    … ``last_day``: from the UTC day of ``first_day``'s local midnight (the day before, at
+    +03:00) to that of ``last_day``'s last instant."""
+    first = day_window(first_day)[0].astimezone(UTC).date()
+    last = (day_window(last_day)[1] - timedelta(microseconds=1)).astimezone(UTC).date()
+    return [first + timedelta(days=n) for n in range((last - first).days + 1)]
 
 
 def months_back_for(today: date, retention_days: int) -> int:
@@ -147,7 +182,7 @@ def partition_name(table: str, month: date) -> str:
 
 
 def day_partition_name(table: str, day: date) -> str:
-    """Name of a daily partition (``<table>_pYYYYMMDD``)."""
+    """Name of the daily partition of a UTC day (``<table>_pYYYYMMDD``)."""
     return f"{table}_p{day:%Y%m%d}"
 
 
@@ -189,17 +224,18 @@ class Partition:
     #: First day of the month of a monthly partition, else ``None``.
     month: date | None
     is_default: bool
-    #: The day of a daily partition, else ``None``.
+    #: The UTC day of a daily partition, else ``None``.
     day: date | None = None
+    #: ``[start, end)`` of device times, as the catalog has them (a daily partition of the
+    #: change-over covers part of its UTC day only); ``None`` for the default partition or an
+    #: unbounded one (``MINVALUE``, ``MAXVALUE``).
+    start: datetime | None = None
+    end: datetime | None = None
 
     @property
-    def days(self) -> tuple[date, date] | None:
-        """``[first, end)`` site days covered; ``None`` for the default or a foreign partition."""
-        if self.month is not None:
-            return self.month, add_months(self.month, 1)
-        if self.day is not None:
-            return self.day, self.day + timedelta(days=1)
-        return None
+    def named(self) -> bool:
+        """A monthly or daily partition made here (only these are dropped)."""
+        return self.month is not None or self.day is not None
 
 
 def partitioned_tables(connection: Connection) -> list[str]:
@@ -235,39 +271,84 @@ def hypertables(connection: Connection) -> list[str]:
     return [table for table in TIME_SERIES_TABLES if table in found]
 
 
+#: The bounds of a range partition as the catalog prints them (``MINVALUE`` and ``MAXVALUE``
+#: give ``NULL``), read by :func:`_bound`.
+_BOUNDS_SQL: Final = (
+    "SELECT c.relname, b.expr = 'DEFAULT', m[1], m[2] "
+    "FROM pg_inherits i JOIN pg_class c ON c.oid = i.inhrelid "
+    "CROSS JOIN LATERAL (SELECT pg_get_expr(c.relpartbound, c.oid) AS expr) b "
+    "LEFT JOIN LATERAL regexp_match(b.expr, "
+    "'^FOR VALUES FROM \\(''([^'']*)''\\) TO \\(''([^'']*)''\\)$') m ON true "
+    "WHERE i.inhparent = CAST(:table AS regclass)"
+)
+
+
+def _bound(value: str | None) -> datetime | None:
+    """A bound printed in PostgreSQL's default ``DateStyle`` ISO (``2026-11-30 21:00:00+00``,
+    always with its offset, whatever the session's ``TimeZone``). A session with another
+    ``DateStyle`` fails here (``ValueError``) instead of reading a wrong bound: its time zone
+    abbreviations are ambiguous ("IST")."""
+    return None if value is None else datetime.fromisoformat(value)
+
+
 def list_partitions(connection: Connection, table: str) -> list[Partition]:
     """Partitions of ``table`` in time order (monthly and daily ones), then the default
     partition."""
-    rows = connection.execute(
-        text(
-            "SELECT c.relname, pg_get_expr(c.relpartbound, c.oid) FROM pg_inherits i "
-            "JOIN pg_class c ON c.oid = i.inhrelid WHERE i.inhparent = CAST(:table AS regclass)"
-        ),
-        {"table": table},
-    ).all()
+    rows = connection.execute(text(_BOUNDS_SQL), {"table": table}).all()
     found: list[Partition] = []
-    for name, bound in rows:
+    for name, is_default, start, end in rows:
         month = day = None
         if (match := _MONTHLY.match(name)) and match.group("table") == table:
             month = date(int(match.group("year")), int(match.group("month")), 1)
         elif (match := _DAILY.match(name)) and match.group("table") == table:
             day = date(int(match.group("year")), int(match.group("month")), int(match.group("day")))
-        found.append(Partition(table, name, month, bound == "DEFAULT", day))
+        found.append(
+            Partition(table, name, month, bool(is_default), day, _bound(start), _bound(end))
+        )
 
-    def order(partition: Partition) -> tuple[bool, date, str]:
-        span = partition.days
-        return partition.is_default, span[0] if span else date.max, partition.name
+    def order(partition: Partition) -> tuple[bool, datetime, str]:
+        start = partition.start or datetime.max.replace(tzinfo=UTC)
+        return partition.is_default, start, partition.name
 
     return sorted(found, key=order)
 
 
-def _covered(partitions: list[Partition], first: date, end: date) -> bool:
-    """Whether a partition overlaps the site days ``[first, end)`` (bounds are whole days)."""
-    for partition in partitions:
-        span = partition.days
-        if span is not None and span[0] < end and first < span[1]:
-            return True
-    return False
+def _overlaps(partitions: list[Partition], start: datetime, end: datetime) -> bool:
+    """Whether a partition overlaps the device times ``[start, end)``."""
+    return any(
+        p.start is not None and p.end is not None and p.start < end and start < p.end
+        for p in partitions
+    )
+
+
+def _drop_end(end: datetime) -> datetime:
+    """The instant from which a partition or chunk ending at ``end`` may go (module text, the drop
+    rule): the end of the UTC day it ends in. ``end`` itself for a daily partition or a chunk; the
+    UTC midnight after a monthly partition's 21:00 UTC, so that it goes with the daily partition
+    after it, which the name of that UTC day would otherwise keep from covering the rest of it
+    (:func:`_needed`)."""
+    return day_bounds((end - timedelta(microseconds=1)).astimezone(UTC).date())[1]
+
+
+def _free_part(
+    partitions: list[Partition], start: datetime, end: datetime
+) -> tuple[datetime, datetime] | None:
+    """The part of ``[start, end)`` that no partition covers, from its first free instant to the
+    next partition (module text, the change-over rule); ``None`` when it is covered whole. A UTC
+    day overlaps at most a monthly partition that ends in it or one that begins in it (a month
+    is longer than a day), so the free part is one range."""
+    bounded = sorted(
+        (p.start, p.end) for p in partitions if p.start is not None and p.end is not None
+    )
+    for low, high in bounded:
+        if high <= start or end <= low:
+            continue
+        if low <= start:
+            start = high  # covers the beginning: the free part starts after it
+        else:
+            end = low  # begins inside: the free part ends there
+            break
+    return (start, end) if start < end else None
 
 
 # -- maintenance ----------------------------------------------------------------------------------
@@ -311,10 +392,12 @@ def ensure_partitions(
     """Create the missing partitions around ``today`` (site day); idempotent.
 
     Without ``months_back`` (``arcilogger-db upgrade``, ``arcilogger-db partitions``, the worker):
-    the daily partitions of the window, ``today - db.retention_days`` up to :data:`DAYS_AHEAD`
-    days ahead, at most ``limit`` (:data:`DAYS_PER_RUN`) days a call (today and ahead first, then
-    the past newest first; ``remaining`` counts the rest), none before ``since`` (a cutoff about
-    to drop them); ``months_ahead`` does not apply. With
+    the daily partitions of the window, the UTC days of the site days ``today -
+    db.retention_days`` up to :data:`DAYS_AHEAD` days ahead (:func:`utc_days`: one more than
+    site days, the first one for the window's first three hours), at most ``limit``
+    (:data:`DAYS_PER_RUN`) days a call (today and ahead first, then the past newest first;
+    ``remaining`` counts the rest), none that a cutoff ``since`` is about to drop (the drop rule:
+    a UTC day that ends by its local midnight); ``months_ahead`` does not apply. With
     ``months_back``: the monthly partitions of ``months_back`` months before ``today``'s up to
     ``months_ahead`` after it, as earlier versions made them; a month that already has a
     partition (a daily one) is left as it is.
@@ -326,9 +409,11 @@ def ensure_partitions(
     day = today or site_day(utc_now())
     if months_back is None:
         # Today and the days ahead first, then the window's past days newest first.
-        window = [day + timedelta(days=n) for n in range(DAYS_AHEAD + 1)]
-        window += [day - timedelta(days=n) for n in range(1, retention_days(connection) + 1)]
-        window = [d for d in window if since is None or d >= since]
+        oldest = day - timedelta(days=retention_days(connection))
+        days = utc_days(oldest, day + timedelta(days=DAYS_AHEAD))
+        window = [d for d in days if d >= day] + [d for d in reversed(days) if d < day]
+        if since is not None:
+            window = [d for d in window if day_bounds(d)[1] > day_window(since)[0]]
         missing = _missing(connection, report.tables, window)
         report.remaining = max(0, len(missing) - max(0, limit))
         report.days_created = len(missing[: max(0, limit)])
@@ -340,33 +425,45 @@ def ensure_partitions(
         existing = list_partitions(connection, table)
         default = next((p.name for p in existing if p.is_default), None)
         for month in months:
-            if not _covered(existing, month, add_months(month, 1)):
+            if not _overlaps(existing, *month_bounds(month)):
                 name = partition_name(table, month)
                 _create(connection, report, table, name, month_bounds(month), default)
     return report
 
 
 def ensure_days(connection: Connection, first_day: date, last_day: date) -> PartitionReport:
-    """Create the daily partitions of the site days ``first_day`` … ``last_day`` (both included)
-    that no partition covers yet, e.g. before an archive reload loads them; idempotent."""
+    """Create the daily partitions that hold the device times of the site days ``first_day`` …
+    ``last_day`` (both included; :func:`utc_days`) where no partition covers them yet, e.g.
+    before an archive reload loads them; idempotent."""
     report = PartitionReport(tables=partitioned_tables(connection))
     if not report.tables or last_day < first_day:
         return report
     connection.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": PARTITION_LOCK_KEY})
-    days = [first_day + timedelta(days=n) for n in range((last_day - first_day).days + 1)]
+    days = utc_days(first_day, last_day)
     report.days_created = len(_missing(connection, report.tables, days))
     _ensure_days(connection, report, days)
     return report
 
 
 def _missing(connection: Connection, tables: list[str], days: list[date]) -> list[date]:
-    """The days of ``days`` (in their order) that some table has no partition for."""
-    existing = [list_partitions(connection, table) for table in tables]
+    """The UTC days of ``days`` (in their order) that some table still needs a partition for."""
+    existing = {table: list_partitions(connection, table) for table in tables}
     return [
         day
         for day in days
-        if any(not _covered(partitions, day, day + timedelta(days=1)) for partitions in existing)
+        if any(_needed(partitions, table, day) for table, partitions in existing.items())
     ]
+
+
+def _needed(existing: list[Partition], table: str, day: date) -> tuple[datetime, datetime] | None:
+    """The bounds of the UTC day's daily partition when it has none yet: the part of the day no
+    partition covers (module text, the change-over rule); ``None`` when it is covered whole or
+    its name is taken (a part a partition leaves free in the middle of the day, not made here:
+    its rows wait in the default partition)."""
+    name = day_partition_name(table, day)
+    if any(p.name == name for p in existing):
+        return None
+    return _free_part(existing, *day_bounds(day))
 
 
 def _ensure_days(connection: Connection, report: PartitionReport, days: list[date]) -> None:
@@ -385,12 +482,12 @@ def _ensure_day(
     default: str | None,
     day: date,
 ) -> None:
-    if _covered(existing, day, day + timedelta(days=1)):
+    bounds = _needed(existing, table, day)
+    if bounds is None:
         return
     name = day_partition_name(table, day)
-    bounds = day_window(day)[0], day_window(day + timedelta(days=1))[0]
     _create(connection, report, table, name, bounds, default)
-    existing.append(Partition(table, name, None, False, day))
+    existing.append(Partition(table, name, None, False, day, *bounds))
 
 
 def _create(
@@ -454,19 +551,21 @@ def _create_partition(
 
 
 def drop_before(connection: Connection, cutoff: date) -> PartitionReport:
-    """Drop everything older than the site day ``cutoff``: every partition that ends on or
-    before it, the older rows of the default partitions, on TimescaleDB every chunk that ends on
-    or before its first instant (``drop_chunks``), and the search summary counts
-    (``search_counts``, ADR-0015) and clock samples (``source_clock_samples``, ADR-0016 D28) of
-    the rows that went.
+    """Drop everything older than the site day ``cutoff``: every partition the drop rule lets go
+    at its first instant (local midnight; :func:`_drop_end`), the older rows of the default
+    partitions, on TimescaleDB every chunk that ends on or before that instant (``drop_chunks``),
+    and the search
+    summary counts (``search_counts``, ADR-0015) and clock samples (``source_clock_samples``,
+    ADR-0016 D28) of the rows that went.
 
     A partition or chunk holding the cutoff is kept whole (no DELETE): a monthly partition of the
-    change-over keeps up to one month more, a TimescaleDB chunk (a UTC day) up to 21 hours of the
-    day before. The counts stay with their rows: a count goes only when its hour lies before the
-    first kept partition or chunk of ``messages`` (or before the cutoff when that starts later),
-    so the summary table keeps counting exactly the rows that are left. The status row
-    :data:`DROPPED_KEY` keeps the newest cutoff applied (a cutoff before it changes nothing
-    there: those days went earlier).
+    change-over keeps up to one month more (and the 3 hours after it, until the daily partition
+    of its last UTC day goes with it), a daily partition or a TimescaleDB chunk (a UTC day) up to
+    21 hours of the day before. The counts stay with their rows: a count goes only when its
+    hour lies before the first kept partition or chunk of ``messages`` (or before the cutoff
+    when that starts later), so the summary table keeps counting exactly the rows that are
+    left. The status row :data:`DROPPED_KEY` keeps the newest cutoff applied (a cutoff before it
+    changes nothing there: those days went earlier).
 
     Unbounded: one call drops the whole backlog in the caller's transaction (tests, small
     ranges); :func:`maintain_window` steps through a long one.
@@ -479,7 +578,7 @@ def drop_before(connection: Connection, cutoff: date) -> PartitionReport:
     connection.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": PARTITION_LOCK_KEY})
     for table in report.tables:
         for partition in list_partitions(connection, table):
-            span = partition.days
+            start, end = partition.start, partition.end
             if partition.is_default:
                 deleted = connection.execute(
                     text(
@@ -488,12 +587,14 @@ def drop_before(connection: Connection, cutoff: date) -> PartitionReport:
                     )
                 )
                 report.purged += int(deleted.rowcount or 0)
-            elif span is not None and span[1] <= cutoff:
+            elif not partition.named or start is None or end is None:
+                continue  # not made here: left alone
+            elif _drop_end(end) <= limit:
                 connection.execute(text(f"LOCK TABLE {_quoted(table)} IN ACCESS EXCLUSIVE MODE"))
                 connection.execute(text(f"DROP TABLE {_quoted(partition.name)}"))
                 report.dropped.append(partition.name)
-            elif span is not None and span[0] < cutoff and table == "messages":
-                kept_from = min(kept_from, day_window(span[0])[0])
+            elif start < limit and table == "messages":
+                kept_from = min(kept_from, start)
     for table in report.hypertables:
         chunks = connection.execute(
             text(
@@ -512,8 +613,9 @@ def drop_before(connection: Connection, cutoff: date) -> PartitionReport:
         ).scalar_one_or_none()
         if first_chunk is not None:
             kept_from = min(kept_from, first_chunk)
-    # Hours are UTC, partition bounds local midnights (+03:00) and chunk bounds UTC midnights:
-    # whole hours, no hour is split.
+    # Hours are UTC, the bounds of daily partitions and chunks UTC midnights, those of monthly
+    # partitions (and the daily ones beside them) local midnights (+03:00): whole hours, no hour
+    # is split.
     counted = connection.execute(delete(SearchCount).where(SearchCount.hour < kept_from))
     report.counts_deleted = int(counted.rowcount or 0)
     # The clock samples by receive time: a row is received within a day of its device time, so
@@ -557,19 +659,23 @@ def _record_dropped(connection: Connection, cutoff: date) -> None:
 
 def next_drop_cutoff(connection: Connection, cutoff: date, *, days: int = DAYS_PER_RUN) -> date:
     """The cutoff of the next bounded step towards ``cutoff``: the oldest partition or chunk that
-    ends on or before it starts on day ``F``; the step drops up to ``F + days`` (at least that
-    oldest partition or chunk whole, e.g. a monthly one of the change-over), never beyond
-    ``cutoff``. ``cutoff`` itself when nothing that old is left (the default partitions' rows
-    are a DELETE, not a lock per day)."""
+    the drop rule lets go at its local midnight (:func:`_drop_end`) starts at ``S``; the step
+    drops what ends by ``S + days`` (the first local midnight at or after it: ``days`` daily
+    partitions or chunks), at least that oldest partition or chunk whole (e.g. a monthly one of
+    the change-over, with the daily partition after it), never beyond ``cutoff``. ``cutoff``
+    itself when nothing that old is left (the default partitions' rows are a DELETE, not a lock
+    per day)."""
     limit = day_window(cutoff)[0]
     starts: list[datetime] = []
     ends: list[datetime] = []
     for table in partitioned_tables(connection):
         for partition in list_partitions(connection, table):
-            span = partition.days
-            if span is not None and span[1] <= cutoff:
-                starts.append(day_window(span[0])[0])
-                ends.append(day_window(span[1])[0])
+            start, end = partition.start, partition.end
+            if partition.named and start is not None and end is not None:
+                gone = _drop_end(end)
+                if gone <= limit:
+                    starts.append(start)
+                    ends.append(gone)
     tables = hypertables(connection)
     if tables:
         first = connection.execute(
@@ -585,10 +691,16 @@ def next_drop_cutoff(connection: Connection, cutoff: date, *, days: int = DAYS_P
             ends.append(first[1])
     if not starts:
         return cutoff
-    # A chunk ends at a UTC midnight: the step's local midnight must not be before it.
-    first_end = site_day(min(ends) - timedelta(microseconds=1)) + timedelta(days=1)
-    step = max(site_day(min(starts)) + timedelta(days=max(1, days)), first_end)
+    # Drop ends and chunk ends are UTC midnights: a step's local midnight is not before.
+    step = max(
+        _day_at_or_after(min(starts) + timedelta(days=max(1, days))), _day_at_or_after(min(ends))
+    )
     return min(cutoff, step)
+
+
+def _day_at_or_after(instant: datetime) -> date:
+    """The site day whose local midnight is the first at or after ``instant``."""
+    return site_day(instant - timedelta(microseconds=1)) + timedelta(days=1)
 
 
 def maintain_window(
@@ -632,7 +744,9 @@ def maintain_window(
 @dataclass(frozen=True)
 class PartitionStatus:
     tables: int
-    #: Earliest last day covered by any table (``None`` without native partitions).
+    #: Earliest last site day covered whole by any table (``None`` without native partitions):
+    #: the day before the one its newest partition ends in (a daily partition ends at 03:00
+    #: site time).
     covered_until: date | None
     #: Tables whose default partition holds rows (times outside every partition).
     default_rows: dict[str, bool]
@@ -645,8 +759,8 @@ def partition_status(connection: Connection) -> PartitionStatus:
     default_rows: dict[str, bool] = {}
     for table in tables:
         partitions = list_partitions(connection, table)
-        ends = [span[1] for p in partitions if (span := p.days) is not None]
-        last.append(max(ends) - timedelta(days=1) if ends else date.min)
+        ends = [p.end for p in partitions if p.named and p.end is not None]
+        last.append(site_day(max(ends)) - timedelta(days=1) if ends else date.min)
         for p in partitions:
             if p.is_default:
                 default_rows[table] = bool(

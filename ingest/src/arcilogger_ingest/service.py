@@ -713,10 +713,11 @@ class IngestService:
                 self._add_stream(source, day)
 
     def _ensure_days(self, first_day: date, last_day: date) -> bool:
-        """The daily partitions of ``first_day`` … ``last_day`` (plain PostgreSQL; nothing to do
-        with TimescaleDB), one transaction a day (a day is 16 partitions: the lock table of
-        PostgreSQL's defaults holds about 256). ``False`` when a table lock was not free within
-        :data:`PARTITION_LOCK_TIMEOUT` (tried again later); other database errors are raised."""
+        """The daily partitions of the site days ``first_day`` … ``last_day`` (plain PostgreSQL;
+        nothing to do with TimescaleDB), one transaction a day (its device times lie in two UTC
+        days, at most 32 partitions: the lock table of PostgreSQL's defaults holds about 256).
+        ``False`` when a table lock was not free within :data:`PARTITION_LOCK_TIMEOUT` (tried
+        again later); other database errors are raised."""
         day = first_day
         while day <= last_day:
             if day not in self._partitioned:

@@ -20,7 +20,6 @@ from sqlalchemy import Engine, event, inspect, text
 from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.pool import NullPool
 
-from arcilogger_core.timeutil import site_day
 from arcilogger_db.engine import engine_from_url
 from arcilogger_db.migrate import alembic_config, current_revisions, upgrade
 from arcilogger_db.models import TIME_SERIES_TABLES, Base
@@ -318,12 +317,13 @@ def test_up_and_down_on_native_partitions(empty_engine: Engine) -> None:
         reference = list_partitions(connection, "mt_dhcp")
     assert partitions[-1].is_default
     assert partitions[-1].name == "fg_dhcp_default"
-    spans = [partition.days for partition in partitions if partition.days is not None]
-    assert spans == [partition.days for partition in reference if partition.days is not None]
+    spans = [(partition.start, partition.end) for partition in partitions if partition.named]
+    assert spans == [(partition.start, partition.end) for partition in reference if partition.named]
     assert _scalar(empty_engine, "SELECT count(*) FROM fg_traffic WHERE srcmac IS NULL") == 2
     _check_rules(empty_engine, at)
     holder = _scalar(empty_engine, "SELECT CAST(CAST(tableoid AS regclass) AS text) FROM fg_dhcp")
-    assert holder == day_partition_name(TABLE, site_day(at))  # not the default partition
+    # Not the default partition: the daily partition of its UTC day.
+    assert holder == day_partition_name(TABLE, at.astimezone(UTC).date())
     _check_downgraded(empty_engine, before, traffic=2)
 
 

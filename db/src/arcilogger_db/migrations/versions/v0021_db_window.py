@@ -16,19 +16,23 @@ Wave 5 contract §5, owner decision "son 30 olsun" (G1, G2, G4; issue #110):
 * ``archive_reloads``: the requests to bring sealed days older than the window back from the
   vault ("arşivden yeniden yükle", G4), loaded by ArciIngest one at a time (the partial unique
   index allows one ``loading`` row).
-* Plain PostgreSQL: the time-series tables get **daily** partitions from the first day of the
-  month after the migration (``arcilogger_db.partitions``, run by ``arcilogger-db upgrade`` right
-  after this revision). The monthly partitions ``<table>_pYYYYMM`` created ahead by earlier
-  versions for the months after the current one are dropped when they are empty; one that holds
-  rows (a device clock in the future) is kept, never split, and the daily partitions start after
-  it. Monthly partitions of the current and earlier months stay until the window job drops them
-  (they end on or before its cutoff). Nothing changes on TimescaleDB (1-day chunks already).
+* Plain PostgreSQL: the time-series tables get **daily** partitions after the current month's
+  monthly partition (``arcilogger_db.partitions``, run by ``arcilogger-db upgrade`` right after
+  this revision): one per UTC day, as TimescaleDB's chunks; the first one covers only the three
+  hours from the month's end (local midnight, 21:00 UTC) to the next UTC midnight. The monthly
+  partitions ``<table>_pYYYYMM`` created ahead by earlier versions for the months after the
+  current one are dropped when they are empty; one that holds rows (a device clock in the
+  future) is kept, never split, and the daily partitions beside it cover only the rest of their
+  UTC day. Monthly partitions of the current and earlier months stay until the window job drops
+  them, each with the daily partition after it, once the UTC day it ends in has ended by its
+  cutoff. Nothing changes on TimescaleDB (1-day chunks already).
 
 The downgrade (developers and the migration tests; ``Install-Arcilogger.ps1 -Rollback`` runs
-none): the daily partitions are merged back into monthly ones (rows and the default partition's
-rows of those months moved, then attached), since the previous version knows monthly partitions
-only; ``archive_reloads``, ``db.reload_keep_days`` and the window job's status row
-``db.window_dropped_before`` are dropped; a ``db.retention_days`` of 30
+none): the daily partitions are merged back into monthly ones (local months; a daily partition's
+rows split by local month, since a UTC day holds the first three hours of the next site day;
+the default partition's rows of those months moved too, then attached), since the previous
+version knows monthly partitions only; ``archive_reloads``, ``db.reload_keep_days`` and the
+window job's status row ``db.window_dropped_before`` are dropped; a ``db.retention_days`` of 30
 written by the seed or by this revision goes back to 400 (lossy: a value raised to 7 stays 7,
 which the previous version accepts).
 """
@@ -38,7 +42,7 @@ from __future__ import annotations
 import logging
 import re
 from collections.abc import Sequence
-from datetime import UTC, date, datetime, time
+from datetime import UTC, date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
 import sqlalchemy as sa
@@ -89,6 +93,7 @@ TIME_SERIES_TABLES = (
     "fg_dhcp",
 )
 SITE_TZ = ZoneInfo("Europe/Istanbul")
+ONE_DAY = timedelta(days=1)
 MONTHLY = re.compile(r"^(?P<table>[a-z_]+)_p(?P<year>\d{4})(?P<month>\d{2})$")
 DAILY = re.compile(r"^(?P<table>[a-z_]+)_p(?P<year>\d{4})(?P<month>\d{2})(?P<day>\d{2})$")
 
@@ -96,6 +101,10 @@ DAILY = re.compile(r"^(?P<table>[a-z_]+)_p(?P<year>\d{4})(?P<month>\d{2})(?P<day
 def _in(column: str, values: tuple[str, ...]) -> str:
     quoted = ", ".join(f"'{value}'" for value in values)
     return f"{column} IN ({quoted})"
+
+
+def _month(day: date) -> date:
+    return day.replace(day=1)
 
 
 def _next_month(day: date) -> date:
@@ -252,39 +261,71 @@ def downgrade() -> None:
 
 
 def _merge_daily_partitions(bind: sa.Connection) -> None:
-    """Every month's daily partitions become one monthly partition, as the previous version
-    creates them (the default partition's rows of that month moved into it too)."""
-    months: dict[tuple[str, date], list[str]] = {}
+    """The local months the daily partitions hold device times of become one monthly partition
+    each, as the previous version creates them: the rows of every daily partition go to the
+    month they belong to (a daily partition is a UTC day, ``[D 00:00 UTC, D+1 00:00 UTC)``, or
+    the part of it beside a monthly partition, so it holds rows of the months of ``D`` and ``D +
+    1``), then the daily partitions are dropped and the default partition's rows of each month
+    moved in too. A month that still has its monthly partition gets none (the daily partitions
+    beside it hold no row of it)."""
+    daily: dict[str, list[tuple[str, date]]] = {}
+    monthly: dict[str, set[date]] = {}
     partitions = _partitions(bind)
     defaults = {parent for parent, name in partitions if name == f"{parent}_default"}
     for parent, name in partitions:
-        match = DAILY.match(name)
-        if match is not None and match.group("table") == parent:
+        if (match := DAILY.match(name)) is not None and match.group("table") == parent:
+            day = date(int(match.group("year")), int(match.group("month")), int(match.group("day")))
+            daily.setdefault(parent, []).append((name, day))
+        elif (match := MONTHLY.match(name)) is not None and match.group("table") == parent:
             month = date(int(match.group("year")), int(match.group("month")), 1)
-            months.setdefault((parent, month), []).append(name)
-    for (parent, month), names in sorted(months.items()):
-        monthly = f"{parent}_p{month:%Y%m}"
-        values = f"FROM ({_midnight(month)}) TO ({_midnight(_next_month(month))})"
-        in_range = f"time >= {_midnight(month)} AND time < {_midnight(_next_month(month))}"
+            monthly.setdefault(parent, set()).add(month)
+    for parent, names in sorted(daily.items()):
+        touched = {month for _name, day in names for month in (_month(day), _month(day + ONE_DAY))}
+        months = sorted(touched - monthly.get(parent, set()))
         bind.execute(sa.text(f'LOCK TABLE "{parent}" IN ACCESS EXCLUSIVE MODE'))
-        bind.execute(
-            sa.text(
-                f'CREATE TABLE "{monthly}" (LIKE "{parent}" INCLUDING DEFAULTS '
-                "INCLUDING CONSTRAINTS INCLUDING STORAGE)"
-            )
-        )
-        for name in names:
-            bind.execute(sa.text(f'INSERT INTO "{monthly}" SELECT * FROM "{name}"'))  # noqa: S608
-            bind.execute(sa.text(f'DROP TABLE "{name}"'))
-        if parent in defaults:
-            default = f"{parent}_default"
+        for month in months:
             bind.execute(
                 sa.text(
-                    f'INSERT INTO "{monthly}" SELECT * FROM "{default}" '  # noqa: S608
-                    f"WHERE {in_range}"
+                    f'CREATE TABLE "{parent}_p{month:%Y%m}" (LIKE "{parent}" INCLUDING DEFAULTS '
+                    "INCLUDING CONSTRAINTS INCLUDING STORAGE)"
                 )
             )
-            bind.execute(sa.text(f'DELETE FROM "{default}" WHERE {in_range}'))  # noqa: S608
-        bind.execute(
-            sa.text(f'ALTER TABLE "{parent}" ATTACH PARTITION "{monthly}" FOR VALUES {values}')
-        )
+        for name, _day in names:
+            for month in months:
+                bind.execute(
+                    sa.text(
+                        f'INSERT INTO "{parent}_p{month:%Y%m}" SELECT * FROM "{name}" '  # noqa: S608
+                        f"WHERE {_in_month(month)}"
+                    )
+                )
+            # Every row went to its month (the partition holds rows of these months only): a row
+            # left over would go with the drop.
+            moved = " OR ".join(_in_month(month) for month in months) or "false"
+            left = sa.text(f'SELECT EXISTS (SELECT 1 FROM "{name}" WHERE NOT ({moved}))')  # noqa: S608
+            if bind.execute(left).scalar_one():  # pragma: no cover - see the comment above
+                raise RuntimeError(f"{name}: rows outside the months it is merged into")
+            bind.execute(sa.text(f'DROP TABLE "{name}"'))
+        for month in months:
+            monthly_name = f"{parent}_p{month:%Y%m}"
+            if parent in defaults:
+                default = f"{parent}_default"
+                bind.execute(
+                    sa.text(
+                        f'INSERT INTO "{monthly_name}" SELECT * FROM "{default}" '  # noqa: S608
+                        f"WHERE {_in_month(month)}"
+                    )
+                )
+                bind.execute(
+                    sa.text(f'DELETE FROM "{default}" WHERE {_in_month(month)}')  # noqa: S608
+                )
+            values = f"FROM ({_midnight(month)}) TO ({_midnight(_next_month(month))})"
+            bind.execute(
+                sa.text(
+                    f'ALTER TABLE "{parent}" ATTACH PARTITION "{monthly_name}" FOR VALUES {values}'
+                )
+            )
+
+
+def _in_month(month: date) -> str:
+    """The device times of a local month (DDL literals, computed here)."""
+    return f"(time >= {_midnight(month)} AND time < {_midnight(_next_month(month))})"

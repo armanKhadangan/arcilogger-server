@@ -372,8 +372,11 @@ _SEQ_SCAN = re.compile(r"Seq Scan on (?P<table>[a-z_0-9]+)")
 SMALL_PAGES = 10
 
 
-def _seq_scans_of_data(session: Session, plan: Sequence[str]) -> list[str]:
-    """The plan's sequential scans of tables larger than :data:`SMALL_PAGES`."""
+def _seq_scans_of_data(
+    session: Session, plan: Sequence[str], *, pages: int = SMALL_PAGES
+) -> list[str]:
+    """The plan's sequential scans of tables larger than ``pages`` (:data:`SMALL_PAGES`; 0: of
+    any table that is not empty)."""
     found = []
     for line in plan:
         match = _SEQ_SCAN.search(line)
@@ -383,7 +386,7 @@ def _seq_scans_of_data(session: Session, plan: Sequence[str]) -> list[str]:
             text("SELECT pg_relation_size(CAST(:table AS regclass))"),
             {"table": match.group("table")},
         )
-        if int(size or 0) > SMALL_PAGES * 8192:
+        if int(size or 0) > pages * 8192:
             found.append(line.strip())
     return found
 
@@ -1714,14 +1717,18 @@ def test_the_d15_carried_check_is_fast(
                 .all()
             )
         print("\n".join(plan))
-        # The plans first (the one ``EXISTS`` fails here): no step scans a partition, and the
-        # first one, the window in time order, reads its rows of every address at most (two
-        # minutes of the site's rows), whichever index the planner takes.
-        assert not any("Seq Scan" in line for line in plan), case
+        # The plans first (the one ``EXISTS`` fails here): no step scans a partition, but for
+        # the empty daily partition of a day ahead (0 bytes, plain PostgreSQL; read whole, as
+        # the planner rightly does with nothing to read), and the first one, the window in time
+        # order, reads its rows of every address at most (two minutes of the site's rows),
+        # whichever index the planner takes.
+        with Session(traffic_site) as session:
+            assert _seq_scans_of_data(session, plan, pages=0) == [], case
         scans, removed = _plan_reads(plan)
         # A day no chunk holds (TimescaleDB creates chunks for written rows only) is answered
-        # without reading anything.
-        assert scans or any("One-Time Filter: false" in line for line in plan), case
+        # without reading anything, and so is a day whose daily partition is empty.
+        empty = any(_SEQ_SCAN.search(line) for line in plan) and not _buffers(plan)
+        assert scans or any("One-Time Filter: false" in line for line in plan) or empty, case
         if index == 0:
             every, _kept = _rows_of(traffic_site, window.low, window.high, window.high, "true")
             assert sum(n for _name, n in scans) <= every, (case, scans, every)

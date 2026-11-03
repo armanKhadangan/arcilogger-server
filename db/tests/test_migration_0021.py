@@ -1,8 +1,9 @@
 """Revision ``0021_db_window`` (Wave 5 contract G1, G2, G4; issue #110): the stored
 ``db.retention_days`` converted (400 → 30, below 7 → 7, other values kept), both keys after an
 upgrade, the table ``archive_reloads`` and its checks, the empty monthly partitions ahead dropped
-(daily partitions from the next month on), and the downgrade that merges daily partitions back
-into monthly ones; on native partitions and on TimescaleDB."""
+(daily partitions, UTC days, from the end of the current month on), and the downgrade that
+merges daily partitions back into monthly ones (split by local month); on native partitions and
+on TimescaleDB."""
 
 from __future__ import annotations
 
@@ -25,10 +26,12 @@ from arcilogger_db.models import TIME_SERIES_TABLES, ArchiveReload
 from arcilogger_db.partitions import (
     DROPPED_KEY,
     add_months,
+    day_bounds,
     drop_before,
     dropped_before,
     ensure_partitions,
     list_partitions,
+    month_bounds,
     month_of,
     partition_name,
 )
@@ -264,7 +267,9 @@ def test_the_empty_months_ahead_are_dropped_and_daily_partitions_follow(
 ) -> None:
     """G2: an earlier version made monthly partitions three months ahead; the empty ones after
     the current month go, one holding rows (a device clock in the future) stays whole, and the
-    daily partitions start on the 1st of the next month."""
+    daily partitions start where the current month ends (its last UTC day's three hours after
+    local midnight, then the UTC days of the next month); down again, the daily partitions are
+    the next month's monthly one, with their rows."""
     with empty_engine.begin() as connection:
         command.upgrade(alembic_config(connection, timescale="off"), BEFORE)
         before = month_of(site_day(utc_now()))
@@ -292,7 +297,8 @@ def test_the_empty_months_ahead_are_dropped_and_daily_partitions_follow(
         with empty_engine.begin() as connection:
             if ensure_partitions(connection).remaining == 0:
                 break
-    first_daily = add_months(after, 1)
+    next_month = add_months(after, 1)
+    first_daily = next_month - timedelta(days=1)  # the UTC day the current month ends in
     for table in TIME_SERIES_TABLES:
         days = _daily(empty_engine, table)
         assert all(day >= first_daily for day in days), table
@@ -300,6 +306,33 @@ def test_the_empty_months_ahead_are_dropped_and_daily_partitions_follow(
             assert days[0] == first_daily, table
         else:
             assert days == [], table  # the current month's partition covers the days ahead
+    # The change-over slice, made now (the last day of the month as today).
+    with empty_engine.begin() as connection:
+        ensure_partitions(connection, today=first_daily)
+        (slice_,) = [p for p in list_partitions(connection, "mt_dhcp") if p.day == first_daily]
+    month_end = month_bounds(after)[1]
+    assert (slice_.start, slice_.end) == (month_end, day_bounds(next_month)[0])
+    with empty_engine.begin() as connection:
+        _insert_dhcp(connection, month_end, 2)  # the next month's first instant
+    assert _where(empty_engine, "mt_dhcp")[-1] == slice_.name
+    _migrate(empty_engine, BEFORE)
+    assert _daily(empty_engine, "mt_dhcp") == []
+    assert next_month in _months(empty_engine, "mt_dhcp")
+    assert _where(empty_engine, "mt_dhcp") == [
+        partition_name("mt_dhcp", future),
+        partition_name("mt_dhcp", next_month),
+    ]
+
+
+def _insert_dhcp(connection: Connection, when: datetime, line: int) -> None:
+    connection.execute(
+        text(
+            "INSERT INTO mt_dhcp (time, time_received, source, sender, raw_day, raw_line, "
+            "raw_offset, server, action, ip, mac) VALUES (:at, :at, 'core-r1', '172.20.10.1', "
+            ":day, :line, 0, 'dhcp60', 'assigned', '172.20.60.183', '00:00:5e:00:53:46')"
+        ),
+        {"at": when, "day": site_day(when), "line": line},
+    )
 
 
 def _where(engine: Engine, table: str) -> list[str]:
@@ -314,8 +347,9 @@ def _index_count(engine: Engine, table: str) -> int:
 
 def test_down_merges_the_daily_partitions_into_monthly_ones(empty_engine: Engine) -> None:
     """The previous version knows monthly partitions only: the downgrade gives it one for every
-    month with daily partitions, the rows (and the default partition's rows of that month) in
-    it, the indexes of the parent on it; up again."""
+    local month with daily partitions, the rows (and the default partition's rows of that
+    month) in it — the rows of the UTC day a month ends in split between the two months —, the
+    indexes of the parent on it; up again."""
     assert upgrade(empty_engine, timescale="off").after == (REVISION,)
     for _ in range(5):
         with empty_engine.begin() as connection:
@@ -324,24 +358,22 @@ def test_down_merges_the_daily_partitions_into_monthly_ones(empty_engine: Engine
     days = _daily(empty_engine, "mt_dhcp")
     first, last = days[0], days[-1]
     outside = first - timedelta(days=1)  # no partition: waits in the default partition
+    # The local midnight of the last month's 1st lies in the window (39 UTC days) and in the UTC
+    # day before: that daily partition holds both months' rows.
+    boundary = month_bounds(month_of(last))[0]
     at = [day_window(day)[0] + timedelta(hours=12) for day in (first, last, outside)]
+    at += [boundary - timedelta(microseconds=1), boundary]
     with empty_engine.begin() as connection:
         for number, when in enumerate(at, 1):
-            connection.execute(
-                text(
-                    "INSERT INTO mt_dhcp (time, time_received, source, sender, raw_day, "
-                    "raw_line, raw_offset, server, action, ip, mac) VALUES (:at, :at, 'core-r1', "
-                    "'172.20.10.1', :day, :line, 0, 'dhcp60', 'assigned', '172.20.60.183', "
-                    "'00:00:5e:00:53:46')"
-                ),
-                {"at": when, "day": site_day(when), "line": number},
-            )
-    assert _where(empty_engine, "mt_dhcp")[2] == "mt_dhcp_default"
+            _insert_dhcp(connection, when, number)
+    where = _where(empty_engine, "mt_dhcp")
+    assert where[2] == "mt_dhcp_default"
+    assert where[3] == where[4] == f"mt_dhcp_p{boundary.astimezone(UTC).date():%Y%m%d}"
     with empty_engine.begin() as connection:  # the window job's status row goes with it
         drop_before(connection, outside - timedelta(days=40))
         assert dropped_before(connection) is not None
     daily_indexes = _index_count(empty_engine, f"mt_dhcp_p{first:%Y%m%d}")
-    months = sorted({month_of(day) for day in days})
+    months = sorted({month_of(site_day(start)) for start, _ in map(day_bounds, days)})
     _migrate(empty_engine, BEFORE)
     with empty_engine.connect() as connection:
         assert current_revisions(connection) == (BEFORE,)
@@ -354,6 +386,8 @@ def test_down_merges_the_daily_partitions_into_monthly_ones(empty_engine: Engine
         partition_name("mt_dhcp", month_of(first)),
         partition_name("mt_dhcp", month_of(last)),
         partition_name("mt_dhcp", month_of(outside)) if merged else "mt_dhcp_default",
+        partition_name("mt_dhcp", month_of(site_day(boundary - timedelta(microseconds=1)))),
+        partition_name("mt_dhcp", month_of(last)),
     ]
     assert _index_count(empty_engine, partition_name("mt_dhcp", months[0])) == daily_indexes
     assert _setting(empty_engine, "db.retention_days") == (400, ":seed")
@@ -361,7 +395,7 @@ def test_down_merges_the_daily_partitions_into_monthly_ones(empty_engine: Engine
     assert _setting(empty_engine, DROPPED_KEY) is None
     assert upgrade(empty_engine, timescale="off").after == (REVISION,)  # and up again
     assert _setting(empty_engine, "db.retention_days") == (30, ":seed")
-    assert len(_where(empty_engine, "mt_dhcp")) == 3
+    assert len(_where(empty_engine, "mt_dhcp")) == 5
 
 
 def test_up_and_down_on_timescaledb(empty_engine: Engine) -> None:

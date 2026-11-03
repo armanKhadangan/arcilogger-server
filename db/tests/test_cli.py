@@ -139,7 +139,8 @@ def test_partitions_command_and_missing_horizon_warning(
         return
     # Today, the days ahead and the newest past days of the window, then the rest of it.
     assert f"16 tablo, {16 * DAYS_PER_RUN} yeni bölüm" in out
-    window = int(DEFAULT_SETTINGS["db.retention_days"]) + DAYS_AHEAD + 1
+    # UTC days: the window's site days and the UTC day of its first local midnight.
+    window = int(DEFAULT_SETTINGS["db.retention_days"]) + DAYS_AHEAD + 2
     assert main(["partitions", "--config", config]) == 0
     assert f"16 tablo, {16 * DAYS_PER_RUN} yeni bölüm" in capsys.readouterr().out
     assert main(["partitions", "--config", config]) == 0
