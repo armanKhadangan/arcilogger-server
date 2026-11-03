@@ -1238,6 +1238,24 @@ All Wave 5 questions are answered (2026-11-02).
   left, and a wait that uses the budget up answers 504 `search_timeout` (audited `outcome:
   timeout`). The lookup (READ COMMITTED) keeps the lock in its transaction as before.
 
+## Deviations — W5-H (2026-11-03)
+
+- **W5-H-1: the first line view of an xz file decompresses more than one stream.** §5.4 says
+  "showing one line decompresses one stream". The manager's rule on #111 (2026-11-03) is that a
+  cited raw line is never shown unchecked: both its offset and its line number are checked. The
+  line number needs the line feeds before the line's stream, so the first view of a file counts
+  the streams before the line once and keeps the counts in memory (option b of that comment;
+  never written to `vault/`); every later view of the file decompresses only the line's stream,
+  read to its end so its CRC64 is checked. Measured on a 5 M line day (docs/DATA-MODEL.md): first
+  view 7.0 s for the middle line and 14.1 s for the last one, later views 0.06 s; gzip takes
+  3.4 s, 6.4 s and 0.12 s. A reference whose offset does not hold its line is looked up by its
+  line number, as on a `.gz` day, so both formats give the same error.
+- **W5-H-2: `chain.py` (not W5-H's) has one hunk**, granted on #111 (2026-11-03): a sealed file
+  that cannot be decompressed is a `verify_day` error, `<path>: cannot be decompressed (…)`,
+  instead of an exception. Its Turkish text is one rule in `api/src/arcilogger_api/issues.py`
+  (W5-C's), granted on #111 (2026-11-03 19:08): "{path}: sıkıştırılmış veri açılamıyor (dosya
+  bozuk)"; the English text is the core's message itself.
+
 ## Deviations — W5-A (2026-11-03)
 
 - **W5-A-1: the config adapter.** `renewal.renew_before_days` reads `tsa.renew_before_days`
@@ -1308,17 +1326,16 @@ All Wave 5 questions are answered (2026-11-02).
   token fails has failed already. `{date}` is `_format_time` in the Turkish text and ISO 8601
   in the English one, as the other findings of the file write times; for `renewal-late` it is
   the time of the re-stamping (the counting renewal's genTime), for the other codes the
-  certificate's expiry. `VERIFIER_VERSION` is "5" by addendum H4: W5-H (#130) had not merged
-  when W5-A set it; whichever of the two merges second makes it "6". At the edges both verifiers
-  follow §2.1.2 literally (owner answer Q16): a renewal stamped at the certificate's notAfter
-  itself is `late`, and a certificate counts as expired from its notAfter on (`cert_not_after <=
-  now`), although `tsa/verify.py:_valid_at` (and the standalone `Certificate.valid_at`) treats a
-  stamp made at notAfter as valid; `test_the_expiry_boundaries_are_pinned` pins both, and so do
-  the shared case table's three notAfter cases (`renewal_cases.py`) and
+  certificate's expiry. `VERIFIER_VERSION` is "6" by addendum H4 (W5-A-8). At the edges both
+  verifiers follow §2.1.2 literally (owner answer Q16): a renewal stamped at the certificate's
+  notAfter itself is `late`, and a certificate counts as expired from its notAfter on
+  (`cert_not_after <= now`), although `tsa/verify.py:_valid_at` (and the standalone
+  `Certificate.valid_at`) treats a stamp made at notAfter as valid;
+  `test_the_expiry_boundaries_are_pinned` pins both, and so do the shared case table's three
+  notAfter cases (`renewal_cases.py`) and
   `test_a_renewal_stamped_at_its_own_not_after_verifies_but_does_not_count` (the stamp verifies
   in both verifiers, and the renewal does not count), so neither is "fixed" into the other
-  unnoticed. `test_verifier_version_is_5` pins the version on purpose:
-  whoever merges second sets "6" and renames and updates that test with it.
+  unnoticed.
 - **W5-A-6: what stays in section 5.** The existing `renewal-ok` (each record's stamp) and
   `renewal-covers` (which packaged days a record names) stay beside the five new codes, and the
   section "5. Yenileme damgaları" now appears whenever the package has a day whose token
@@ -1329,6 +1346,10 @@ All Wave 5 questions are answered (2026-11-02).
   as a token to renew: otherwise each test renewal would be renewed again, with nothing to
   protect. A record with `reason: "due"` that does not count (its root is not listed, its token
   does not verify, it was revoked) is still renewable.
+- **W5-A-8: `VERIFIER_VERSION` is "6", not §2.1.4's "5".** Addendum H4: W5-H (#130) merged into
+  `wave-5` first (84e71e1) and set "5", so W5-A, merging second, sets "6" (manager on #132,
+  2026-11-03 20:51). `test_renewal_standalone.py::test_verifier_version_is_6` pins it. If #136
+  (`xz-unsupported`) merges after W5-A, it takes "7" and updates that test.
 - **W5-A-9: exit codes beyond §2.1.3's wording.** `renew` catches its own errors (`main` maps
   every `TsaError` to 1). Exit 3 also covers a new stamp that does not verify or is revoked
   (`renewal_stamp_invalid`), another run holding `state/renewal.lock` (`renewal_busy`), a lock

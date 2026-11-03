@@ -2,8 +2,9 @@
 "Raw line view always available").
 
 ``GET /raw?source=fortigate&day=2026-10-12&line=17[&offset=2345]`` returns the line exactly as
-stored — from ``spool/<source>/<day>.log`` while the day is not sealed, else from the sealed
-``vault/<Y>/<M>/<D>/<source>.log.gz`` — as base64 (byte-exact) and as display text (the spool's
+stored — from ``spool/<source>/<day>.log`` while the day is not sealed, else from the day's
+sealed file in the vault (``vault/<Y>/<M>/<D>/<source>.log`` plus ``.xz``, or ``.gz`` for days
+sealed before Wave 5) — as base64 (byte-exact) and as display text (the spool's
 ``#ooo`` escapes visible, undecodable bytes as ``\\xNN``, control and bidi characters as
 ``\\uXXXX``), with its SHA-256, receive time and sender.
 
@@ -17,12 +18,15 @@ stored — from ``spool/<source>/<day>.log`` while the day is not sealed, else f
   sender's lines before ingest has loaded a batch of them and added its ``sources`` row); the
   file must lie inside ``spool/`` or ``vault/``.
 * **Errors:** ``raw_unreadable`` (409) — the sealed file's compressed data is damaged before the
-  line; ``raw_access_denied`` (503) — the API service has no read right on the file (Windows
-  folder permissions; the file itself is fine); ``raw_io_error`` (503) — any other read error.
+  line; ``sealed_file_ambiguous`` (409) — the day folder holds the source's file in both formats
+  (the sealer never leaves that; a file was put there by hand); ``raw_access_denied`` (503) —
+  the API service has no read right on the file (Windows folder permissions; the file itself is
+  fine); ``raw_io_error`` (503) — any other read error.
 * **Cost:** the line number is always verified by counting line feeds and a given ``offset``
   must match. Spool files keep line-start checkpoints in memory (the first view in a file reads
-  up to the line, later views a few MiB); a sealed day is decompressed up to the line on every
-  view. See :mod:`arcilogger_api.rawlines`.
+  up to the line, later views a few MiB); an xz day is read from the one stream that holds the
+  offset; a gzip day is decompressed up to the line, resuming at in-memory checkpoints. See
+  :mod:`arcilogger_api.rawlines`.
 """
 
 from __future__ import annotations
@@ -82,6 +86,13 @@ MESSAGES: Final = {
         "The compressed data of the sealed raw log file is damaged before this line; the line "
         "cannot be read. Tell the administrator (restore it from the replica).",
     ),
+    "sealed_file_ambiguous": (
+        "Bu kaynağın o günkü mühürlü dosyası kasada iki biçimde (.gz ve .xz) var; hangisinin "
+        "mühürlendiği belirsiz olduğu için satır gösterilmedi. Sistem yöneticisine bildirin.",
+        "The source's sealed file of that day is in the vault in both formats (.gz and .xz); "
+        "the line is not shown because it is unclear which one was sealed. Tell the "
+        "administrator.",
+    ),
     "raw_access_denied": (
         "ARCILOGGER API hizmetinin bu ham kayıt dosyasını okuma izni yok (kurulumdaki klasör "
         "izinleri). Dosya bozuk değildir; sistem yöneticisine bildirin.",
@@ -101,6 +112,7 @@ _STATUS: Final = {
     "raw_not_found": 404,
     "raw_reference_mismatch": 409,
     "raw_unreadable": 409,
+    "sealed_file_ambiguous": 409,
     "raw_access_denied": 503,
     "raw_io_error": 503,
 }
@@ -198,7 +210,12 @@ def raw_line(
     try:
         found = read_line(layout, source, day, line, offset)
     except RawReferenceError as exc:
-        if exc.code in ("raw_access_denied", "raw_io_error", "raw_unreadable"):
+        if exc.code in (
+            "raw_access_denied",
+            "raw_io_error",
+            "raw_unreadable",
+            "sealed_file_ambiguous",
+        ):
             log.error("raw line %s/%s/%s: %s", source, day, line, exc)
         raise _error(exc.code) from None
     record = found.record()

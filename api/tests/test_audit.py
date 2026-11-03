@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import gzip
 import hashlib
 import itertools
 import json
@@ -12,7 +11,7 @@ from collections.abc import Callable, Iterator
 from datetime import UTC, date, datetime, time, timedelta
 from pathlib import Path
 from time import monotonic, sleep
-from typing import Any
+from typing import Any, Literal
 
 import pytest
 from fastapi import APIRouter, FastAPI, Request
@@ -42,6 +41,7 @@ from arcilogger_api.audit import (
 from arcilogger_api.deps import AppState, DbSession
 from arcilogger_api.security import CurrentUserDep, client_ip
 from arcilogger_api.testing import LoggedIn
+from arcilogger_core import sealedfile
 from arcilogger_core.canonical import canonical_json
 from arcilogger_core.chain import verify_day
 from arcilogger_core.config import Config
@@ -55,6 +55,14 @@ from arcilogger_db.models import AuditLog, Setting
 from arcilogger_db.settings import DEFAULT_SETTINGS
 
 TOLGA = SystemActor(username="tolga", id=7)
+
+
+def _sealed_audit(layout: Layout, day: date) -> bytes:
+    """The day's sealed audit log, decompressed, in whichever format it was sealed."""
+    sealed = sealedfile.find_audit(layout, day)
+    assert sealed is not None
+    with sealedfile.open_sequential(sealed) as handle:
+        return handle.read()
 
 
 @pytest.fixture(autouse=True)
@@ -407,7 +415,7 @@ def test_torn_tail_of_a_closed_day_is_repaired_and_then_sealed(
     monkeypatch.setattr(audit, "utc_now", _at(next_day, 1))
     assert flush_audit_spool(db_engine, layout) == 1
     assert sealer(2).seal_day(day).status == "sealed"
-    vault = gzip.decompress((layout.vault_day(day) / "audit.jsonl.gz").read_bytes()).splitlines()
+    vault = _sealed_audit(layout, day).splitlines()
     moved = layout.audit_spool(next_day).read_bytes().splitlines()
     assert [json.loads(x)["action"] for x in vault] == ["evening"]
     assert [json.loads(x)["action"] for x in moved] == ["crash"]
@@ -540,12 +548,16 @@ def test_lines_go_to_the_day_they_are_written_never_to_a_closed_day(
     assert verify_audit_lines(lines, prev_hash=GENESIS_HASH).ok  # one chain across the files
 
 
+@pytest.mark.parametrize("compression", ["gzip", "xz", "both"])
 def test_duplicate_guard_looks_into_the_sealed_file(
     app_session_factory: sessionmaker[Session],
     db_engine: Engine,
     layout: Layout,
     monkeypatch: pytest.MonkeyPatch,
+    compression: Literal["gzip", "xz", "both"],
 ) -> None:
+    """``both``: a failed retry left the day in both formats, the newer one empty; the higher
+    id of the two still guards (skipping the day would append its line again)."""
     day, next_day = date(2026, 10, 12), date(2026, 10, 13)
     monkeypatch.setattr(audit, "utc_now", _at(day, 22))
     with app_session_factory() as session:
@@ -555,9 +567,18 @@ def test_duplicate_guard_looks_into_the_sealed_file(
     with app_session_factory() as session:
         session.execute(delete(Setting).where(Setting.key == audit.WATERMARK_KEY))
         session.commit()
-    sealed = layout.vault_day(day) / "audit.jsonl.gz"
+    sealed = layout.vault_day(day) / sealedfile.audit_name(
+        "gzip" if compression == "both" else compression
+    )
     sealed.parent.mkdir(parents=True)
-    sealed.write_bytes(gzip.compress(layout.audit_spool(day).read_bytes()))
+    sealedfile.write(layout.audit_spool(day), sealed)
+    if compression == "both":
+        empty = layout.vault_day(day) / "empty"
+        empty.write_bytes(b"")
+        sealedfile.write(empty, layout.vault_day(day) / sealedfile.audit_name("xz"))
+        empty.unlink()
+        with pytest.raises(sealedfile.SealedFileError):
+            sealedfile.find_audit(layout, day)
     layout.audit_spool(day).unlink()
     monkeypatch.setattr(audit, "utc_now", _at(next_day, 1))
     assert flush_audit_spool(db_engine, layout) == 0
@@ -595,7 +616,7 @@ def test_sealer_seals_the_audit_spool(
     assert manifest["audit_log"]["entries"] == 3
     assert manifest["audit_log"]["last_entry_hash"] == rows[-1].hash
     assert not layout.audit_spool(day).exists()  # the sealer took it over
-    vault_lines = gzip.decompress((layout.vault_day(day) / "audit.jsonl.gz").read_bytes())
+    vault_lines = _sealed_audit(layout, day)
     check = verify_audit_lines(vault_lines.splitlines(), prev_hash=GENESIS_HASH)
     assert (check.ok, check.last_hash) == (True, rows[-1].hash)
     assert verify_day(layout, day, [tsa.root_certificate], deep=True).ok

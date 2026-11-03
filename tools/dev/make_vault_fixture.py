@@ -25,6 +25,9 @@ them worthless for anything but this fixture. No key is written to the fixture.
 ``SHA256SUMS`` pins every file, and ``tests/test_vault_w5_fixture.py`` fails when today's code
 reads the fixture differently. The tests never run this script: the fixture is regenerated only
 on purpose (a format that changes for a reason), with the reason in the commit message.
+The days are sealed with ``seal.compression = "gzip"``, not today's ``xz`` default: the fixture
+pins the format of the days sealed before Wave 5's xz sealing (W5-H), which every later release
+must still read.
 
 Usage: ``uv run --frozen python tools/dev/make_vault_fixture.py [--out DIR] [--check]``.
 ``--check`` writes into a temporary folder and compares it with the committed ``SHA256SUMS``.
@@ -195,7 +198,11 @@ def _config(root: Path) -> Config:
             "secrets_dir": str(root),
             "site_name": SITE,
             "sources": [{"name": "fortigate", "type": "fortigate", "address": SENDER}],
-            "seal": {"quiet_seconds": 0, "first_day": DAYS[0].isoformat()},
+            "seal": {
+                "quiet_seconds": 0,
+                "first_day": DAYS[0].isoformat(),
+                "compression": "gzip",  # the days sealed before W5-H (xz), on purpose
+            },
             "tsa": {"provider": "mock"},
             "retention": {"enabled": True, "days": 730},
         }

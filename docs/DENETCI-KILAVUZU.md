@@ -30,7 +30,7 @@
 FortiGate / MikroTik ── syslog ──► ArciCollector ──► spool\<kaynak>\<gün>.log      (1) ham kayıt
                                                           │  gün bitince (00:10)
                                                           ▼
-                     vault\YYYY\MM\DD\<kaynak>.log.gz  + SHA-256                    (2) mühürlü dosya
+                     vault\YYYY\MM\DD\<kaynak>.log.xz  + SHA-256                    (2) mühürlü dosya
                                                           │
                      manifest-YYYY-MM-DD.json  (dosya özetleri + önceki günün özeti) (3) manifest, zincir
                                                           │  yalnızca SHA-256 özeti
@@ -46,8 +46,14 @@ FortiGate / MikroTik ── syslog ──► ArciCollector ──► spool\<kayn
    diğer bütün baytlar — UTF-8 olmayanlar dahil — cihazdan geldiği gibidir. Böylece bir mesaj asla
    iki satıra bölünmez ve orijinal baytlar birebir geri elde edilebilir.
 2. **Mühürleme.** Gün (Türkiye saatiyle 00:00–24:00, alınma zamanına göre) kapandıktan sonra her
-   kaynak dosyası belirlenimci olarak sıkıştırılır (`gzip -n`: dosya adı ve zaman yok), sıkıştırılmış
-   ve açılmış halinin SHA-256 özetleri ve satır sayısı hesaplanır.
+   kaynak dosyası belirlenimci olarak sıkıştırılır, sıkıştırılmış ve açılmış halinin SHA-256
+   özetleri ve satır sayısı hesaplanır. Biçim `xz`'dir (`<kaynak>.log.xz`, `audit.jsonl.xz`):
+   dosya, her biri 16 MiB açılmış veri taşıyan bağımsız xz akışlarının art arda eklenmesidir;
+   ARCILOGGER tek bir satırı göstermek için yalnızca o satırın akışını açar. Bu biçimden önce
+   mühürlenmiş günler `gzip -n` (dosya adı ve zaman yok) ile `.gz` olarak kalır ve hiçbir zaman
+   yeniden sıkıştırılmaz (ham kayıt delildir); bir kasada iki biçim yan yana bulunabilir.
+   Manifestteki `path` uzantısı biçimi söyler. Dosyaları açmak için bölüm 5'teki "Mühürlü
+   dosyaları açmak" başlığına bakın.
 3. **Manifest.** Günün bütün dosyaları, ARCILOGGER denetim kaydı, kesintiler (bir kaynaktan uzun
    süre kayıt gelmemesi), saat eşitleme bilgisi ve **bir önceki günün manifest ve zaman damgası
    özetleri** kanonik JSON (RFC 8785) olarak `manifest-YYYY-MM-DD.json` dosyasına yazılır. Her gün
@@ -90,7 +96,7 @@ Manifestin alanları:
 | Kanıt paketleri | `D:\ARCILOGGER\exports\` | **30 gün** (`evidence.keep_days`; worker her gece siler, elle: `arcilogger-core evidence purge`) |
 | Resmi 5651 raporları (PDF ve `.zd` damgası) | `D:\ARCILOGGER\exports\reports\` | Sorguyla birlikte kalır; **henüz süre sınırı ve silme işi yok** |
 | 5651 sorguları (talep bilgileri, sorgu, sonuç) | PostgreSQL `lookups` | **Henüz süre sınırı yok** |
-| ARCILOGGER denetim kaydı | PostgreSQL `audit_log` + günlük dosyası kasada (`audit.jsonl.gz`) | Veritabanındaki kayıt süresiz (silinmesi tetikleyiciyle engellenir); kasadaki günlük dosyası günüyle birlikte saklanır ve imha edilir |
+| ARCILOGGER denetim kaydı | PostgreSQL `audit_log` + günlük dosyası kasada (`audit.jsonl.xz`; eski günlerde `.gz`) | Veritabanındaki kayıt süresiz (silinmesi tetikleyiciyle engellenir); kasadaki günlük dosyası günüyle birlikte saklanır ve imha edilir |
 | Ayrıştırılmış kayıtlar (arama, sorgu) | PostgreSQL | Türetilmiş veridir; ham kayıtlardan yeniden üretilebilir. Hedef 400 gün (`db.retention_days`), ancak bu sürümde bu tabloların **imha işi yoktur**: ayrıştırılmış kayıtlardan hiçbir şey silinmez |
 | Kullanım özetleri (kişi, cihaz ve departman bazında, adlarla: siteler, URL'ler, engellenen denemeler, saatlik satırlar) | PostgreSQL `usage_*` tabloları, `domain_categories` | **400 gün** (`usage.retention_days`): worker işi `usage.retention` her gece 03:30'dan sonra daha eski günleri siler; biten yeniden hesaplama istekleri (`usage_rebuilds`) 90 gün sonra silinir. İmha tutanağı tutulmaz, silinen satır sayıları işin çalışma kaydına (`job_runs`) yazılır. Ayrıştırılmış kayıtlar veritabanında durdukça yeniden hesaplanabilir |
 | Kayıtlı aramalar (ad, sorgu, zaman aralığı; yalnızca sahibine görünür) | PostgreSQL `saved_searches` | Sahibi silene ya da kullanıcı silinene kadar |
@@ -140,7 +146,7 @@ $core = "C:\Program Files\ARCILOGGER\venv\Scripts\arcilogger-core.exe"
 | Paket içeriği | Açıklama |
 |---|---|
 | `paket.json` | Paket dizini (kanonik JSON): her dosyanın boyutu ve SHA-256 özeti, kapsam (günler, kaynaklar, alıntılanan satırlar, sorgu no, oluşturan, zaman), kök sertifika parmak izleri, ARCILOGGER sürümü |
-| `vault/YYYY/MM/DD/…` | Mühürlü günler, sunucudaki yapıyla aynı: kaynak dosyaları (**her zaman dosyanın tamamı**: 5651 sorgusundan oluşturulan pakette varsayılan olarak alıntılanan günlerin **bütün** kaynakları — bölüm 4.1; aksi hâlde seçilen kaynaklar), manifest, `.zd` damga; günün ARCILOGGER denetim kaydı (`audit.jsonl.gz`) yalnızca yönetici açıkça istediyse (`--include-audit-log`; web arayüzünde yalnızca yöneticinin işaretleyebildiği, varsayılan olarak boş kutu) — yoksa `paket.json`'da `excluded` altında nedeni ve SHA-256 değeriyle listelenir |
+| `vault/YYYY/MM/DD/…` | Mühürlü günler, sunucudaki yapıyla aynı: kaynak dosyaları (**her zaman dosyanın tamamı**: 5651 sorgusundan oluşturulan pakette varsayılan olarak alıntılanan günlerin **bütün** kaynakları — bölüm 4.1; aksi hâlde seçilen kaynaklar), manifest, `.zd` damga; günün ARCILOGGER denetim kaydı (`audit.jsonl.xz`, eski günlerde `.gz`) yalnızca yönetici açıkça istediyse (`--include-audit-log`; web arayüzünde yalnızca yöneticinin işaretleyebildiği, varsayılan olarak boş kutu) — yoksa `paket.json`'da `excluded` altında nedeni ve SHA-256 değeriyle listelenir |
 | `vault/deletions/`, `vault/renewals/` | Gerektiğinde imha tutanakları, zincir çapası, yenileme damgaları |
 | `extract/GÜN/<kaynak>.txt` | İsteğe bağlı: sorguyla ilgili ham satırlar, her biri `<satır no><TAB><ham satır>` biçiminde, bayt bayt aynı |
 | `sertifikalar/kokler/`, `sertifikalar/kokler.pem` | Paketteki damgaların gerçekten bağlandığı kök sertifikalar (yalnızca onlar; `tsa.roots_dir`'dan) |
@@ -242,7 +248,7 @@ en az ikisinin kullanılması önerilir.
 yalnızca `verify.py` dosyasındaki koda dayanır. `verify.py` ağa bağlanmaz ve dosya yazmaz.
 
 Seçenekler: `--kokler KLASÖR` (yalnızca bu klasördeki köklere güven — örneğin Kamu SM'den kendi
-indirdikleriniz; paketteki kökler kullanılmaz), `--hizli` (gzip dosyalarını açmadan yalnızca
+indirdikleriniz; paketteki kökler kullanılmaz), `--hizli` (sıkıştırılmış dosyaları açmadan yalnızca
 özetler), `--json` (makine tarafından okunabilir çıktı). `verify.py`, paket olmadan **kasanın bir
 kopyasını** (örneğin bir NAS'taki replika) da doğrulayabilir:
 `python -I -S verify.py \\<NAS>\arcilogger-worm --kokler KLASÖR`. Klasörde `paket.json`, `verify.py` ya da `vault/` yoksa
@@ -296,16 +302,39 @@ yalnızca damgayı kontrol eder (dosyalar, zincir ve alıntı için Yöntem C'ni
    Beklenen çıktı `Verification: OK`. `-attime` sertifikaları damga anında kontrol ettirir (TSA
    sertifikasının süresi sonradan dolsa da çalışır). `.zd` dosyası yalın belirteçse `-token_in`
    eklenir. Bu adım manifestin damga anından beri değişmediğini gösterir.
-2. **C2 — dosyalar:** `sha256sum vault/2026/10/12/*.gz` (PowerShell: `Get-FileHash -Algorithm SHA256
-   vault\2026\10\12\*.gz`, cmd: `certutil -hashfile <dosya> SHA256`); her değer, aynı günün
+2. **C2 — dosyalar:** `sha256sum vault/2026/10/12/*.xz` (eski günlerde `*.gz`; PowerShell:
+   `Get-FileHash -Algorithm SHA256 vault\2026\10\12\*.xz`, cmd: `certutil -hashfile <dosya>
+   SHA256`); her değer, aynı günün
    manifestindeki `files[].sha256` ya da `audit_log.sha256` ile aynı olmalı. Manifestte olup klasörde
    olmayan ya da klasörde olup manifestte olmayan dosya, paketin eksik ya da eklenmiş olduğunu gösterir
    — ARCILOGGER denetim kaydı (`audit_log`) hariç: varsayılan olarak pakete alınmaz ve `paket.json`
    `excluded` altında listelenir.
 3. **C3 — zincir:** önceki günün `manifest-…json` ve `.zd` dosyalarının SHA-256 özetleri, sonraki
    günün manifestindeki `previous.manifest_sha256` ve `previous.token_sha256` ile aynı olmalı.
-4. **C4 — alıntı:** `gzip -dc vault/2026/10/12/<kaynak>.log.gz | sed -n 'Np'` çıktısı, alıntı
-   dosyasındaki `N<TAB>…` satırıyla bayt bayt aynı olmalı (Windows'ta Git Bash ya da WSL ile).
+4. **C4 — alıntı:** `xz -dc vault/2026/10/12/<kaynak>.log.xz | sed -n 'Np'` (eski günlerde
+   `gzip -dc vault/2026/10/12/<kaynak>.log.gz | sed -n 'Np'`) çıktısı, alıntı dosyasındaki
+   `N<TAB>…` satırıyla bayt bayt aynı olmalı (Windows'ta Git Bash ya da WSL ile).
+
+### Mühürlü dosyaları açmak
+
+`.xz` dosyaları art arda eklenmiş bağımsız akışlardır; her xz aracı bütün akışları sırayla açar ve
+sonuç, manifestteki `sha256_uncompressed` özetine sahip tek dosyadır. `.gz` dosyaları eski
+günlerindir ve aynı şekilde açılır.
+
+- **Windows, 7-Zip:** dosyaya sağ tıklayıp "7-Zip → Buraya çıkar", ya da komut satırında
+  `7z e <kaynak>.log.xz` (açılmış `<kaynak>.log` dosyasını bulunduğunuz klasöre yazar).
+  Çıktıyı `>` ile bir dosyaya yönlendirmeyin: Windows PowerShell 5.1 yönlendirilen baytları
+  metne çevirir (UTF-16, CRLF) ve özet tutmaz. 7-Zip'in çok akışlı bir dosyanın tamamını açtığı
+  ARCILOGGER'ın Windows testlerinde sınanır; kurumdaki 7-Zip sürümüyle bir kez denenmesi önerilir
+  (sahada doğrula X1): açılan dosyanın SHA-256 özeti manifestteki `sha256_uncompressed` ile aynı
+  olmalıdır.
+- **Linux/macOS, xz:** `xz -dc <kaynak>.log.xz > <kaynak>.log` (dosyayı yerinde bırakır);
+  `xz -t <dosya>` yalnızca bütünlüğü sınar. Eski günler için `gzip -dc <kaynak>.log.gz`.
+- **Python:** `python -I -c "import lzma,shutil,sys; shutil.copyfileobj(lzma.open(sys.argv[1]),
+  open(sys.argv[2], 'wb'))" <kaynak>.log.xz <kaynak>.log` (`.gz` için `lzma` yerine `gzip`).
+
+`verify.py` iki biçimi de yalnızca Python'un standart kitaplığıyla okur; Python `lzma` modülü
+olmadan derlenmişse `.xz` dosyaları için hata verir, `.gz` günleri yine doğrulanır.
 
 ### Kök sertifikalar
 
@@ -476,16 +505,17 @@ gösterilir). Bir satırın tamamı üç sayfada da `GET /raw` ile açılır ve 
 **Bir `raw.tail` girdisini yeniden hesaplamak.** `range_sha256`, kaynağın o günkü dosyasının
 `[from_offset, to_offset)` bayt aralığının (gösterilen satırlar, satır sonlarıyla birlikte) SHA-256
 özetidir. Gün mühürlenmeden önce bu baytlar `D:\ARCILOGGER\spool\<kaynak>\<gün>.log`
-dosyasında, mühürlendikten sonra kasadaki `vault\YYYY\MM\DD\<kaynak>.log.gz` dosyasının açılmış
+dosyasında, mühürlendikten sonra kasadaki `vault\YYYY\MM\DD\<kaynak>.log.xz` (eski günlerde `.log.gz`) dosyasının açılmış
 içeriğinde ve o günün o kaynağını içeren her kanıt paketindedir (dosyalar mühürlenirken
 değiştirilmez). Python ile (örnekte `from_offset` 0, `to_offset` 498):
 
 ```powershell
-python -I -c "import gzip,hashlib,sys; d=gzip.open(sys.argv[1]).read(); print(hashlib.sha256(d[int(sys.argv[2]):int(sys.argv[3])]).hexdigest())" core-r1.log.gz 0 498
+python -I -c "import lzma,hashlib,sys; d=lzma.open(sys.argv[1]).read(); print(hashlib.sha256(d[int(sys.argv[2]):int(sys.argv[3])]).hexdigest())" core-r1.log.xz 0 498
 ```
 
 Çıkan değer girdideki `range_sha256` ile aynı olmalıdır; satır sayısı `to_line - from_line + 1`,
-yani `count` olmalıdır. Spool dosyası için `gzip.open` yerine `open(sys.argv[1], 'rb')` kullanın.
+yani `count` olmalıdır. Eski bir `.gz` gün için `lzma` yerine `gzip`, spool dosyası için
+`lzma.open` yerine `open(sys.argv[1], 'rb')` kullanın.
 
 **Dışa aktarma ve aramadan kanıt paketi.** `search.export` girdisindeki `sha256`, indirilen
 dosyanın özetidir (`Get-FileHash -Algorithm SHA256 <dosya>` aynı değeri verir; yanıt da
@@ -648,6 +678,21 @@ manifest's SHA-256 is sent to TÜBİTAK BİLGEM Kamu SM, which returns an RFC 31
 (`.zd`). ARCILOGGER verifies the token and all hashes before it marks a day sealed, makes the files
 read-only and copies them to the WORM share of the replica (e.g. on a NAS).
 
+**Sealed file formats.** Days are sealed as xz (`<source>.log.xz`, `audit.jsonl.xz`): a
+concatenation of independent xz streams of 16 MiB of uncompressed data each, so ARCILOGGER shows
+one line by decompressing only its stream. Days sealed before this format stay `.gz` (`gzip -n`)
+and are never re-encoded (raw logs are evidence); one vault can hold both. The `path` suffix in
+the manifest tells the format. Every xz tool decompresses all streams in order into the file whose
+SHA-256 is the manifest's `sha256_uncompressed`: on Windows 7-Zip ("7-Zip → Extract here", or
+`7z e <source>.log.xz`, which writes `<source>.log` itself; do not redirect output with `>`:
+Windows PowerShell 5.1 turns the bytes into UTF-16 text; ARCILOGGER's Windows tests check that 7-Zip reads the
+whole multi-stream file, and a one-time check with the site's 7-Zip version is recommended: field
+check X1), on Linux/macOS `xz -dc <source>.log.xz > <source>.log` (`xz -t` tests only), in Python
+`lzma.open(path).read()`; days sealed as gzip (`.gz`) with `gzip -dc` / `gzip.open`. `verify.py` reads both formats
+with the standard library; a Python built without `lzma` fails on `.xz` files and still verifies
+`.gz` days. In the manual checks of section 5 use `*.xz` (old days `*.gz`) for C2 and
+`xz -dc … | sed -n 'Np'` (old days `gzip -dc`) for C4.
+
 **Retention.** Spool: until the day is sealed. Vault: 760 days by default, never below 730; the
 retention job is off by default. Vault days are deleted only by the retention job, with a
 time-stamped deletion record and a chain anchor. Evidence packages in `exports/`: 30 days. Stored
@@ -676,7 +721,7 @@ Building twice from the same inputs gives the same bytes except the creation tim
 only read; a day whose token or hashes do not verify, or a broken chain link between included
 days, is refused, and the finished ZIP is checked with the standalone verifier's own code before
 it is handed out. The build also prints the SHA-256 of `verify.py`: give it to the recipient
-through a channel separate from the package. ARCILOGGER's own audit log (`audit.jsonl.gz`) is left
+through a channel separate from the package. ARCILOGGER's own audit log (`audit.jsonl.xz`, `.gz` for old days) is left
 out unless asked for (it holds other requests and staff data); `paket.json` lists it under
 `excluded` with its sealed SHA-256 and `verify.py` reports `audit-log-excluded` (information, not a
 failure; `audit-log-absent` when the package has no readable `paket.json`). A torn last line
@@ -762,11 +807,11 @@ opens through `GET /raw` on all three pages and is audited as `raw.view`.
 
 `range_sha256` is the SHA-256 of the bytes `[from_offset, to_offset)` of the source's file of that
 day (the lines shown, with their line feeds): before sealing in `D:\ARCILOGGER\spool\<source>\<day>.log`,
-after sealing in the decompressed `vault\YYYY\MM\DD\<source>.log.gz` and in every evidence
+after sealing in the decompressed `vault\YYYY\MM\DD\<source>.log.xz` (`.log.gz` for old days) and in every evidence
 package holding that day of that source (sealing does not change the bytes). Recompute it with
-`python -I -c "import gzip,hashlib,sys; d=gzip.open(sys.argv[1]).read();
-print(hashlib.sha256(d[int(sys.argv[2]):int(sys.argv[3])]).hexdigest())" <source>.log.gz <from_offset>
-<to_offset>` (`open(path, 'rb')` for the spool file); `count` is `to_line - from_line + 1`. The
+`python -I -c "import lzma,hashlib,sys; d=lzma.open(sys.argv[1]).read();
+print(hashlib.sha256(d[int(sys.argv[2]):int(sys.argv[3])]).hexdigest())" <source>.log.xz <from_offset>
+<to_offset>` (`gzip` instead of `lzma` for an old `.gz` day, `open(path, 'rb')` for the spool file); `count` is `to_line - from_line + 1`. The
 `sha256` of `search.export` is the downloaded file's (`Get-FileHash -Algorithm SHA256`; the answer
 carries it as `Repr-Digest`); an export is not sealed, as its "Bilgi" sheet says: the evidence
 package is the integrity proof. A package built from a search shows `search.refs`, then the same

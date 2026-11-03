@@ -20,6 +20,11 @@
   veriler satır satır silinmez, bölüm bölüm düşürülür.
 - Her ayrıştırılmış satır, ham satırına geri götüren bir **ham referans** taşır:
   `(source, raw_day, raw_line, raw_offset)`.
+- Kasadaki mühürlü dosyalar `xz` biçimindedir (`<kaynak>.log.xz`, `audit.jsonl.xz`; ayar
+  `seal.compression`, varsayılan `xz`): her biri 16 MiB açılmış veri taşıyan bağımsız xz
+  akışları, bu yüzden tek bir satır yalnızca kendi akışı açılarak gösterilir. Bu biçimden önce
+  mühürlenen günler `.gz` olarak kalır ve hiçbir zaman yeniden sıkıştırılmaz; iki biçim de her
+  zaman okunur. Ölçümler aşağıda, "Sealed files" bölümündedir.
 - Veritabanı arşivden **daha kısa** süre tutar: log kayıtlarının **son 30 gününü** (ayar
   `db.retention_days`, varsayılan 30, en az 7; revizyon `0021_db_window`'dan önce 400). Worker
   işi `db.window` her gün 04:00'ten sonra daha eski günleri bölüm bölüm (TimescaleDB'de parça
@@ -171,9 +176,55 @@ Every time-series row has:
 | `time` | Device/event time in UTC (FortiGate `eventtime` preferred); equals `time_received` when the message has no usable device time (a time without offset is never guessed; it stays in `extra.device_time`) |
 
 Sealing compresses `spool/<source>/<day>.log` byte for byte into
-`vault/<YYYY>/<MM>/<DD>/<source>.log.gz`, so **line `raw_line` of the decompressed file is the
-same line** and `raw_offset` is still its byte offset. Today's lines are read from the spool,
-older ones from the sealed file; either way the reference can be cited in an evidence package.
+`vault/<YYYY>/<MM>/<DD>/<source>.log.xz` (`.log.gz` for days sealed before Wave 5), so **line
+`raw_line` of the decompressed file is the same line** and `raw_offset` is still its byte offset.
+Today's lines are read from the spool, older ones from the sealed file; either way the reference
+can be cited in an evidence package.
+
+### Sealed files
+
+- **Formats.** `seal.compression` (`"xz"` default, or `"gzip"`) applies to every file sealed from
+  then on: `<source>.log.xz` and `audit.jsonl.xz`. A sealed day is never re-encoded, so days sealed
+  as `.gz` (`gzip -n`, `seal.gzip_level`) stay as they are and both formats are read forever. The
+  manifest's `path` suffix tells the format (schema `arcilogger.manifest/1` unchanged); a day
+  folder holding one source in both formats is the error `sealed_file_ambiguous`.
+- **Seekable xz.** The file is a concatenation of independent xz streams of 16 MiB (16,777,216
+  bytes) of uncompressed input each, the last one less (`FORMAT_XZ`, `CHECK_CRC64`, preset
+  `seal.xz_preset`, no stream padding), compressed on `seal.xz_threads` threads and written in
+  order: the bytes do not depend on the thread count. Readers find a stream from the xz index in
+  the stream footers (no sidecar file); every xz tool and 7-Zip decompress the whole concatenation.
+- **Line view.** A cited xz line is shown from its own stream. Its line number is checked against
+  the line feeds before that stream, counted once per file (in memory, never in `vault/`): the
+  first view of a file decompresses the streams before the line, later views one stream. gzip
+  cannot seek: the first view decompresses up to the line and leaves checkpoints every 64 MiB.
+- **Measurements (H5)** with `tools/bench/seal_compression.py` on load-generator days of 1 M lines
+  (645 MB) and 5 M lines (3.23 GB), cloud container with 4 vCPUs and 16 GB (some 5 M runs shared
+  the machine with test runs, so their times are on the slow side). "5 GB day" is the sealing
+  time extrapolated from the measured speed, against half of the Seal task's limit (PT2H: 3 600 s).
+
+  | Format (5 M lines) | Size of raw | Sealing | Peak memory | 5 GB day |
+  |---|---|---|---|---|
+  | gzip -9 | 6.06 % (196 MB) | 47 s | 24 MB | 72 s |
+  | xz 6, 1 thread | 4.44 % (143 MB) | 750 s | 154 MB | 1 162 s |
+  | **xz 6, 2 threads (default)** | 4.44 % (143 MB) | 473 s | 269 MB | 733 s |
+  | xz 9, 1 thread | 4.45 % (144 MB) | 860 s | 288 MB | 1 332 s |
+  | xz 9, 2 threads | 4.45 % (144 MB) | 478 s | 511 MB | 741 s |
+
+  On 1 M lines the ratios are the same; xz 6 on 2 threads seals at 8.3 MB/s (5 GB day: 603 s).
+  Preset 9 gains nothing on logs (4.45 % against 4.44 %) for twice the memory, so the defaults
+  stay preset 6 on 2 threads: a 5 GB day takes about 12 minutes, a fifth of the limit.
+
+  Showing one cited line (`/raw`, the code the API runs) on the 5 M line day:
+
+  | Format | First view, middle line | First view, last line | Later views of the file |
+  |---|---|---|---|
+  | gzip -9 | 3.4 s | 6.4 s | 0.12 s (checkpoints) |
+  | xz 6 | 7.0 s | 14.1 s | 0.06 s (one stream) |
+
+  The first xz view of a file counts the line feeds of the streams before the line (the line
+  number is always checked); xz decompresses about half as fast as gzip, so that first view
+  costs about twice as much. Counting on every view instead of keeping the counts would cost the
+  first-view time each time.
 
 ## Time-series tables
 
@@ -374,7 +425,7 @@ PostgreSQL 16.
 ## Retention
 
 - Vault (legal store): ≥ 730 days, default 760 (`arcilogger-core retention`; off by default,
-  `[retention] enabled = false`).
+  `[retention] enabled = false`). Sealed files are `.xz` (older days `.gz`; see "Sealed files").
 - **Database: the last 30 days of log rows** (setting `db.retention_days`, default 30, at least
   7; owner decision 2026-11-02, "son 30 olsun", Wave 5 contract G1–G3). Revision `0021_db_window`
   changes a stored 400 (the old default) to 30, raises a value below 7 to 7 and keeps every other

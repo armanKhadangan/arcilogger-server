@@ -28,6 +28,7 @@ from arcilogger_core.crl import Crl, CrlError, StoredLists, load_stored
 from arcilogger_core.immutability import is_locked
 from arcilogger_core.layout import Layout
 from arcilogger_core.seal import gunzip_sha256, sha256_file, unsealed_days
+from arcilogger_core.sealedfile import SealedFileError
 from arcilogger_core.timeutil import isoformat_site
 from arcilogger_core.tsa.verify import (
     CRL_LEVELS,
@@ -251,9 +252,13 @@ def verify_day(
         if sha256_file(path) != entry["sha256"]:
             check.errors.append(f"{entry['path']}: SHA-256 mismatch (file changed)")
         elif deep and "sha256_uncompressed" in entry:
-            digest, lines = gunzip_sha256(path)
-            if digest != entry["sha256_uncompressed"] or lines != entry["lines"]:
-                check.errors.append(f"{entry['path']}: content differs from the manifest")
+            try:
+                digest, lines = gunzip_sha256(path)
+            except SealedFileError as exc:
+                check.errors.append(f"{entry['path']}: cannot be decompressed ({exc})")
+            else:
+                if digest != entry["sha256_uncompressed"] or lines != entry["lines"]:
+                    check.errors.append(f"{entry['path']}: content differs from the manifest")
         if not is_locked(path):
             check.warnings.append(f"{entry['path']}: not read-only")
 

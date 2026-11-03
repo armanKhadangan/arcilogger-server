@@ -80,6 +80,7 @@ from arcilogger_api.routers.usage import sees_pseudonyms
 from arcilogger_api.sealcheck import read_roots
 from arcilogger_api.sealinfo import skipped_day_cover
 from arcilogger_api.security import CurrentUser, client_ip, require, require_recent_auth
+from arcilogger_core import sealedfile
 from arcilogger_core.canonical import canonical_json
 from arcilogger_core.config import Config
 from arcilogger_core.evidence import EvidenceError, RawRef, generate_password, package_days
@@ -355,7 +356,10 @@ def lookup_refs(outcome: LookupOutcome) -> set[RawRef]:
 
 
 def _sealed_file(layout: Layout, day: date, source: str) -> bool:
-    return (layout.vault_day(day) / f"{source}.log.gz").is_file()
+    try:
+        return sealedfile.find_log(layout, day, source) is not None
+    except sealedfile.SealedFileError:
+        return True  # sealed (twice); the builder names the problem
 
 
 class _Plan:

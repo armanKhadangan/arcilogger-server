@@ -88,9 +88,9 @@ def _renewal(rw: RenewalWorld, name: str, at: datetime, day: date, *, legal: boo
     return f"renewals/{name}.json"
 
 
-def test_verifier_version_is_5() -> None:
-    """Contract 2.1.4 and addendum H4: one up from wave-5's "4"; "6" if W5-H merges first."""
-    assert sv.VERIFIER_VERSION == "5"
+def test_verifier_version_is_6() -> None:
+    """Addendum H4 (W5-A-8): W5-H merged first and set "5", so W5-A sets "6"."""
+    assert sv.VERIFIER_VERSION == "6"
 
 
 def test_texts_are_the_contract_texts() -> None:
