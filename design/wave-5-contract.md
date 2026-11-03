@@ -795,6 +795,14 @@ These change the contract text above. Where a section says otherwise, the clarif
   - `false` for every provider without a credit query: `rfc3161` (`Rfc3161Client.credits()` returns `None`, `core/src/arcilogger_core/tsa/client.py:58-59`) and `turktrust`.
   - `true` for `zamane` and `mock` (its simulated balance).
   - C3's "today `turktrust`" missed `rfc3161`.
+- **C22 – What makes an issuer's revocation list fresh** (`crl_stale`, `R20-crl`; review of #117). It replaces W5-C-3's measure on `this_update`: a root CA may publish its list only every few months, so that measure would never clear.
+  - An issuer in use is fresh when it has an accepted stored list (C14/C20) that meets both conditions:
+    - its index `fetched_at` (the last successful fetch and verification of that list) is newer than `tsa.crl_max_age_days`;
+    - its `next_update`, when present, has not passed.
+  - A list past its `next_update` is stale, however recently it was fetched.
+  - A fetch exactly `tsa.crl_max_age_days` old is stale.
+  - An issuer in use without an accepted list stays stale.
+  - Kamu SM's and TÜRKTRUST's real publication intervals are still to be confirmed (K10/T4, sahada doğrula).
 
 ## Owner questions
 
