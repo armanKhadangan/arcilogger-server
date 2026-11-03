@@ -307,6 +307,8 @@ Copy-Tree (Join-Path $Windows 'installer') (Join-Path $stage 'installer') '*.ps*
 Copy-Item -LiteralPath $ComponentsFile -Destination (Join-Path $stage 'components.json') -Force
 Copy-Tree (Join-Path $Windows 'scripts') (Join-Path $stage 'scripts') '*.ps1'
 Copy-Tree (Join-Path $Windows 'tasks') (Join-Path $stage 'tasks') '*.xml'
+# The logon task of the read-only status window (\ARCILOGGER\Desktop\, Register-ArciTasks.ps1).
+Copy-Tree (Join-Path $Windows 'desktop') (Join-Path $stage 'desktop') '*.xml'
 Copy-Tree (Join-Path $Windows 'services') (Join-Path $stage 'services') '*.xml'
 Copy-Tree (Join-Path $Windows 'caddy') (Join-Path $stage 'caddy') 'Caddyfile'
 [void](New-Item -ItemType Directory -Path (Join-Path $stage 'config') -Force)
