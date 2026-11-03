@@ -86,4 +86,25 @@ describe('useLegalStatus — refresh', () => {
     await act(() => vi.advanceTimersByTimeAsync(3 * LEGAL_STATUS_POLL_MS));
     expect(calls).toHaveLength(2);
   });
+
+  it('only the banner polls: another reader (`poll: false`) adds no timer, only shares the answers', async () => {
+    const calls = installFetch(() => jsonResponse(200, LEGAL_PROVIDER_NOT_LEGAL));
+    const { result } = renderHook(
+      () => [useLegalStatus(), useLegalStatus({ poll: false })] as const,
+      { wrapper },
+    );
+    await act(() => vi.advanceTimersByTimeAsync(10));
+    expect(calls).toHaveLength(1);
+    await act(() => vi.advanceTimersByTimeAsync(3 * LEGAL_STATUS_POLL_MS));
+    expect(calls).toHaveLength(4);
+    expect(result.current[1].dataUpdatedAt).toBe(result.current[0].dataUpdatedAt);
+  });
+
+  it('a reader alone with `poll: false` asks once', async () => {
+    const calls = installFetch(() => jsonResponse(200, LEGAL_PROVIDER_NOT_LEGAL));
+    renderHook(() => useLegalStatus({ poll: false }), { wrapper });
+    await act(() => vi.advanceTimersByTimeAsync(10));
+    await act(() => vi.advanceTimersByTimeAsync(3 * LEGAL_STATUS_POLL_MS));
+    expect(calls).toHaveLength(1);
+  });
 });

@@ -6,8 +6,8 @@ import { LEGAL_REASONS } from '@/test/w5-fixtures';
 /*
  * Wave 5 contract 2.6: "No text says 'uyumlu', 'garanti' or 'compliant'" (and no "guarantee"):
  * the product supports 5651 obligations, it does not promise compliance. Scanned here are the
- * texts of the Wave 5 web package (W5-D): its locale areas, the base texts of Ayarlar → Zaman
- * damgası it renames, and the reason sentences of the API (`w5-fixtures.ts`, §2.6 verbatim). It
+ * texts of the Wave 5 web package (W5-D): its locale areas, the base texts it rewrites (Ayarlar →
+ * Zaman damgası, the texts naming the legal production servers), and the reason sentences of the API (`w5-fixtures.ts`, §2.6 verbatim). It
  * is limited to them on purpose: older texts name the "Uyum Durumu" page ("compliance") and are
  * checked for claims by `locales/locales.test.ts`.
  */
@@ -16,8 +16,18 @@ type Tree = { [key: string]: string | Tree };
 
 /** The locale areas of W5-D (each `areas/<area>/{tr,en}.json`). */
 const AREAS = ['legalStatus', 'sealRenewal', 'dashboardBlocking', 'tsaProvider'];
-/** The base groups W5-D rewrites (the Kamu SM page becomes "Zaman damgası"). */
-const BASE_GROUPS = ['settings.kamusm', 'settings.sections.kamusm'];
+/**
+ * The base groups and keys W5-D rewrites: the Kamu SM page becomes "Zaman damgası", and the texts
+ * that name the legal production servers (granted exceptions on #107).
+ */
+const BASE_GROUPS = [
+  'settings.kamusm',
+  'settings.sections.kamusm',
+  'settings.hints.kamusm',
+  'admin.sections.tsa',
+  'sealing.description',
+  'lookup.report.timestamp.notLegal',
+];
 
 const FORBIDDEN = /uyumlu|uyumu|garanti|complian|guarantee/;
 

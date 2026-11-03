@@ -20,7 +20,8 @@ if (!DETAIL?.token || !DETAIL.manifest || !FAILED?.message_tr)
  * certificate (`tsa_cert_not_after` of the sample) expired on 31.08.2031 and the counting renewal
  * was stamped three days later, so the answer is one of a server after that date, not of the
  * samples' clock. A revocation list names the certificate after the day's stamp (04.10.2026
- * 21:30Z): the verifier's `crl-revoked-later`, level `warn` (the certificate name is made up).
+ * 21:30Z): `crl-revoked-later`, level `warn`, worded as W5-C's API words it
+ * (`legalstatus/texts.py` `REVOCATION`; the certificate name is made up).
  */
 const RENEWAL: SealRenewal = {
   status: 'late',
@@ -32,8 +33,9 @@ const REVOCATION: SealRevocation = {
   code: 'crl-revoked-later',
   level: 'warn',
   message_tr:
-    'Deneme TSA Sertifikası 1: sertifika zaman damgasından sonra iptal edilmiş (12.10.2026 09:00); iptal nedeninin incelenmesi gerekir',
-  message_en: 'Deneme TSA Sertifikası 1: revoked after the time stamp (2026-10-12T06:00:00+00:00)',
+    'Sertifika zaman damgasından sonra iptal edilmiş (12.10.2026): Deneme TSA Sertifikası 1; iptal nedeninin incelenmesi gerekir.',
+  message_en:
+    'The certificate was revoked after the stamp (12.10.2026): Deneme TSA Sertifikası 1; the reason for the revocation should be reviewed.',
 };
 
 async function withRenewal(page: Page) {

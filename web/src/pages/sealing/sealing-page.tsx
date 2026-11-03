@@ -50,7 +50,8 @@ export function SealingPage() {
   const dayParam = params.get('day');
   const calendar = useSealCalendar(month);
   const credits = useCredits();
-  const legal = useLegalStatus();
+  // The banner above the page polls; this reader shares its answers.
+  const legal = useLegalStatus({ poll: false });
   const { can } = useAuth();
   const data = calendar.data;
   const selected = dayParam && DAY.test(dayParam) ? dayParam : data ? defaultDay(data) : null;
