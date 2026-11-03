@@ -22,8 +22,12 @@ D2), so the raw-text match of the evidence builder picks up a whole chain for on
 * ``uncovered`` when the certificate has expired and no renewal counts; otherwise ``due``.
 
 A renewal counts when it is *eligible* (its token verifies, the claim is legal grade, its root
-is one the site listed and it is not revoked: rule 4, D5, C15) and its own token is ``not_due``
-or ``covered`` itself: the check follows the chain of renewals.
+is one the site listed, it is not a stamp of the test TSA and it is not revoked: rule 4, D5, C15)
+and its own token is ``not_due`` or ``covered`` itself: the check follows the chain of renewals.
+
+**The status of one day** (:func:`day_renewal`) is what ``chain.verify_day(..., renewals=True)``
+reports: the day token's status with the code, level and TR/EN text the standalone verifier
+gives the same day (§2.1.4, rule 5). It never adds an error or a warning to the day (D6).
 
 **The tokens of a data directory** (:func:`renewal_status`, D3): the token of every sealed day,
 of every deletion record under its final name, of every stored official report
@@ -55,7 +59,7 @@ import os
 import re
 import subprocess
 import sys
-from collections.abc import Iterable, Iterator, Mapping, Sequence
+from collections.abc import Collection, Iterable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
@@ -73,11 +77,23 @@ from arcilogger_core.fsutil import atomic_write_bytes, fsync_dir
 from arcilogger_core.immutability import is_locked, lock
 from arcilogger_core.layout import Layout
 from arcilogger_core.retention import records as deletion_records
-from arcilogger_core.timeutil import isoformat_site, require_aware, site_day, to_utc, utc_now
+from arcilogger_core.timeutil import (
+    isoformat_site,
+    require_aware,
+    site_day,
+    to_site,
+    to_utc,
+    utc_now,
+)
 from arcilogger_core.tsa.asn1 import READABLE_DIGESTS
 from arcilogger_core.tsa.base import TimestampProvider, TokenInfo, TsaError, TsaResponseError
 from arcilogger_core.tsa.client import token_path_for
-from arcilogger_core.tsa.verify import confirmed_legal_grade, inspect_token, verify_token
+from arcilogger_core.tsa.verify import (
+    confirmed_legal_grade,
+    inspect_token,
+    is_test_stamp,
+    verify_token,
+)
 
 if sys.platform == "win32":
     import msvcrt
@@ -302,9 +318,10 @@ class RenewalFact:
 
     ``record_path`` is vault-relative (``renewals/<date>-<seq>.json``); ``token`` is the
     renewal's own token; ``gen_time`` its genTime. ``eligible``: the token verifies, its claim is
-    legal grade, its root is listed and it is not revoked (rule 4, D5, C15); a ``reason: "test"``
-    record is never eligible. ``lists`` holds the ``token_sha256`` of each of its ``tokens`` (the
-    ``protects`` lists do not count: they serve the builder's match only).
+    legal grade, its root is listed, it is not a stamp of the test TSA and it is not revoked
+    (rule 4, D5, C15); a ``reason: "test"`` record is never eligible. ``lists`` holds the
+    ``token_sha256`` of each of its ``tokens`` (the ``protects`` lists do not count: they serve
+    the builder's match only).
     """
 
     record_path: str
@@ -547,33 +564,67 @@ def _parse_record(raw: bytes) -> dict[str, Any] | None:
 
 
 class _Reader:
-    """One scan of a data directory: the renewable tokens and the renewal records (D3)."""
+    """One scan of a data directory: the renewable tokens and the renewal records (D3).
+
+    ``legal_roots`` (``tsa.legal_root_fingerprints``) and ``require_critical_eku`` judge the
+    renewal tokens; ``crls``, when given, are the stored revocation lists already read.
+    """
 
     def __init__(
-        self, layout: Layout, config: Config, roots: Sequence[x509.Certificate], now: datetime
+        self,
+        layout: Layout,
+        roots: Sequence[x509.Certificate],
+        now: datetime,
+        *,
+        legal_roots: Collection[str],
+        require_critical_eku: bool,
+        renew_before: timedelta,
+        crls: Sequence[Crl] | None = None,
     ) -> None:
         self.layout = layout
-        self.config = config
         self.roots = roots
         self.now = require_aware(now)
+        self.legal_roots = legal_roots
+        self.require_critical_eku = require_critical_eku
+        self.renew_before = renew_before
         self.renewables: list[Renewable] = []
         self.renewals: list[RenewalFact] = []
         self.unreadable: list[str] = []
         self.mismatched: list[str] = []
         self.notes: list[RenewalNote] = []
-        self._crls: Sequence[Crl] | None = None
-        self._crls_read = False
+        self._crls = crls
+        self._crls_read = crls is not None
+
+    @classmethod
+    def of(
+        cls, layout: Layout, config: Config, roots: Sequence[x509.Certificate], now: datetime
+    ) -> _Reader:
+        """A reader with the site's rules (``config``)."""
+        return cls(
+            layout,
+            roots,
+            now,
+            legal_roots=config.tsa.legal_root_fingerprints,
+            require_critical_eku=config.tsa.require_critical_eku,
+            renew_before=timedelta(days=renew_before_days(config)),
+        )
 
     def read(self) -> _Reader:
         layout = self.layout
         for day in sealed_days(layout):
-            self._token(layout.token(day), layout.manifest(day), "day", day=day)
+            self.read_day(day)
         for record in deletion_records(layout):
             self._token(token_path_for(record), record, "deletion")
         for token in self._report_tokens():
             self._token(token, token.with_name(token.name.removesuffix(".zd")), "report")
-        if layout.renewals_dir.is_dir():
-            for record in sorted(layout.renewals_dir.glob("*.json")):
+        return self.read_renewals()
+
+    def read_day(self, day: date) -> None:
+        self._token(self.layout.token(day), self.layout.manifest(day), "day", day=day)
+
+    def read_renewals(self) -> _Reader:
+        if self.layout.renewals_dir.is_dir():
+            for record in sorted(self.layout.renewals_dir.glob("*.json")):
                 self._renewal(record)
         return self
 
@@ -582,7 +633,7 @@ class _Reader:
             [renewable.fact for renewable in self.renewables],
             self.renewals,
             now=self.now,
-            renew_before=timedelta(days=renew_before_days(self.config)),
+            renew_before=self.renew_before,
         )
         return RenewalReport.of(
             computed.tokens,
@@ -730,12 +781,15 @@ class _Reader:
             roots=self.roots,
             file_path=record,
             now=max(self.now, utc_now()),
-            require_critical_eku=self.config.tsa.require_critical_eku,
+            require_critical_eku=self.require_critical_eku,
             crls=self.crls(),
         )
-        # D5: a test record never counts; a legal claim counts only when rule 4 confirms it.
-        eligible = parsed["reason"] == "due" and confirmed_legal_grade(
-            parsed["tsa"]["legal_grade"], result, self.config.tsa.legal_root_fingerprints
+        # D5: a test record or a test stamp never counts; a legal claim counts only when rule 4
+        # confirms it.
+        eligible = (
+            parsed["reason"] == "due"
+            and confirmed_legal_grade(parsed["tsa"]["legal_grade"], result, self.legal_roots)
+            and not is_test_stamp(info.policy, result.details.get("root") or "")
         )
         token_sha256 = hashlib.sha256(data).hexdigest()
         fact = TokenFact(token_path, "renewal", token_sha256, cert_not_after)
@@ -793,7 +847,146 @@ def renewal_status(
     revocation lists); ``tsa.legal_root_fingerprints`` and ``tsa.renew_before_days`` come from
     ``config``. Writes nothing.
     """
-    return _Reader(layout, config, roots, now or utc_now()).read().report()
+    return _Reader.of(layout, config, roots, now or utc_now()).read().report()
+
+
+# -- the status of one day, for the core verifier --------------------------------------------------
+
+#: The finding of a day's status: (level, code, TR, EN), the texts of contract §2.6 and the
+#: levels of §2.1.4, as the standalone verifier's ``RENEWAL_FINDINGS``. ``{renewal}`` is the
+#: record that counts; ``{date}`` the certificate's expiry, for ``late`` the re-stamping's time.
+DAY_FINDINGS: Final[dict[Status, tuple[str, str, str, str]]] = {
+    "not_due": (
+        "info",
+        "renewal-not-due",
+        "Yeniden damgalama henüz gerekmiyor (sertifika {date} tarihine kadar geçerli).",
+        "Re-stamping is not due yet (certificate valid until {date}).",
+    ),
+    "covered": (
+        "ok",
+        "renewal-covered",
+        "Bu damga, sertifikası sona ermeden yeniden damgalanmış: {renewal}.",
+        "Re-stamped before its certificate expired: {renewal}.",
+    ),
+    "due": (
+        "warn",
+        "renewal-due",
+        "Damga sertifikası {date} tarihinde sona eriyor; yeniden damgalama bekleniyor.",
+        "The stamp certificate expires on {date}; re-stamping is due.",
+    ),
+    "late": (
+        "warn",
+        "renewal-late",
+        "Yeniden damgalama, eski sertifikanın süresi dolduktan sonra yapılmış ({date}).",
+        "Re-stamped after the old certificate had expired ({date}).",
+    ),
+    "uncovered": (
+        "warn",
+        "renewal-uncovered",
+        "Damga sertifikasının süresi {date} tarihinde doldu ve yeniden damgalama yok; damga, "
+        "alındığı an için geçerlidir.",
+        "The stamp certificate expired on {date} with no re-stamping; the stamp is valid for the "
+        "moment it was made.",
+    ),
+}
+
+
+def finding_time(moment: datetime) -> str:
+    """A time in a Turkish finding text, as the standalone verifier writes it:
+    ``2031-10-01 00:00:00 UTC (01.10.2031 03:00:00 TSİ)``."""
+    return (
+        f"{to_utc(moment).strftime('%Y-%m-%d %H:%M:%S UTC')} "
+        f"({to_site(moment).strftime('%d.%m.%Y %H:%M:%S')} TSİ)"
+    )
+
+
+@dataclass(frozen=True)
+class DayRenewal:
+    """The long-term status of a day's stamp as the core verifier reports it (§2.1.4): the
+    status of :func:`compute_statuses` with the standalone verifier's code, level and texts."""
+
+    status: Status
+    code: str
+    level: str
+    cert_not_after: datetime
+    covered_by: str | None
+    renewed_at: datetime | None
+    message_tr: str
+    message_en: str
+
+    @classmethod
+    def of(cls, token: TokenStatus) -> DayRenewal:
+        level, code, tr, en = DAY_FINDINGS[token.status]
+        # late: when the stamp was renewed; otherwise when its certificate expires
+        moment = token.cert_not_after
+        if token.status == "late" and token.renewed_at is not None:
+            moment = token.renewed_at
+        moment = to_utc(moment)
+        renewal = token.covered_by or ""
+        return cls(
+            status=token.status,
+            code=code,
+            level=level,
+            cert_not_after=token.cert_not_after,
+            covered_by=token.covered_by,
+            renewed_at=token.renewed_at,
+            message_tr=tr.format(renewal=renewal, date=finding_time(moment)),
+            message_en=en.format(renewal=renewal, date=moment.isoformat()),
+        )
+
+    def as_json(self) -> dict[str, Any]:
+        return {
+            "status": self.status,
+            "code": self.code,
+            "level": self.level,
+            "cert_not_after": utc_text(self.cert_not_after),
+            "covered_by": self.covered_by,
+            "renewed_at": utc_text(self.renewed_at) if self.renewed_at is not None else None,
+            "message_tr": self.message_tr,
+            "message_en": self.message_en,
+        }
+
+
+def day_renewal(
+    layout: Layout,
+    day: date,
+    roots: Sequence[x509.Certificate],
+    *,
+    legal_roots: Collection[str] = (),
+    now: datetime | None = None,
+    crls: Sequence[Crl] | None = None,
+    require_critical_eku: bool = True,
+    renew_before_days: int = DEFAULT_RENEW_BEFORE_DAYS,
+) -> DayRenewal | None:
+    """The long-term status of ``day``'s stamp at ``now`` (default: the system clock), from the
+    renewal records of ``layout``; None when the day's token cannot be read or does not match
+    its manifest (it has no status). Writes nothing.
+
+    ``legal_roots`` (``tsa.legal_root_fingerprints``) and ``crls`` (the stored lists, read from
+    ``state/crl`` when None) judge the renewals as :func:`renewal_status` does;
+    ``require_critical_eku`` is the rule the renewal tokens are verified with. The window is
+    the §2.5 default, as the standalone verifier's (contract W5-A-5), unless the caller passes
+    the site's ``tsa.renew_before_days``.
+    """
+    renew_before = timedelta(days=renew_before_days)
+    reader = _Reader(
+        layout,
+        roots,
+        now or utc_now(),
+        legal_roots=legal_roots,
+        require_critical_eku=require_critical_eku,
+        renew_before=renew_before,
+        crls=crls,
+    )
+    reader.read_day(day)
+    facts = [renewable.fact for renewable in reader.renewables]
+    if not facts:
+        return None
+    reader.read_renewals()
+    (token,) = compute_statuses(
+        facts, reader.renewals, now=reader.now, renew_before=renew_before
+    ).tokens
+    return DayRenewal.of(token)
 
 
 # -- a run ----------------------------------------------------------------------------------------
@@ -1122,7 +1315,7 @@ def renew_held(
     moment = require_aware(now or utc_now())
     eku = config.tsa.require_critical_eku
     discarded = recover(layout, roots, require_critical_eku=eku, now=moment)
-    reader = _Reader(layout, config, roots, moment).read()
+    reader = _Reader.of(layout, config, roots, moment).read()
     before = reader.report()
     due = {token.path for token in before.tokens if token.status in ("due", "uncovered")}
     if not due:

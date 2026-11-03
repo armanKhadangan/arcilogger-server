@@ -1313,8 +1313,11 @@ All Wave 5 questions are answered (2026-11-02).
   follow §2.1.2 literally (owner answer Q16): a renewal stamped at the certificate's notAfter
   itself is `late`, and a certificate counts as expired from its notAfter on (`cert_not_after <=
   now`), although `tsa/verify.py:_valid_at` (and the standalone `Certificate.valid_at`) treats a
-  stamp made at notAfter as valid; `test_the_expiry_boundaries_are_pinned` pins both, so neither is
-  "fixed" into the other unnoticed. `test_verifier_version_is_5` pins the version on purpose:
+  stamp made at notAfter as valid; `test_the_expiry_boundaries_are_pinned` pins both, and so do
+  the shared case table's three notAfter cases (`renewal_cases.py`) and
+  `test_a_renewal_stamped_at_its_own_not_after_verifies_but_does_not_count` (the stamp verifies
+  in both verifiers, and the renewal does not count), so neither is "fixed" into the other
+  unnoticed. `test_verifier_version_is_5` pins the version on purpose:
   whoever merges second sets "6" and renames and updates that test with it.
 - **W5-A-6: what stays in section 5.** The existing `renewal-ok` (each record's stamp) and
   `renewal-covers` (which packaged days a record names) stay beside the five new codes, and the
@@ -1358,3 +1361,20 @@ All Wave 5 questions are answered (2026-11-02).
   right; the run goes on without report tokens). A token that disappears during the scan (the
   retention job) is skipped. The certificate's `notAfter` is read from each token, never from
   `state/seal`.
+- **W5-A-11: the core verifier's day status (A2 on #132).** `chain.verify_day(...,
+  renewals=True)` puts the day's long-term status in `DayCheck.renewal`
+  (`renewal.day_renewal`: `status`, `code`, `level`, `cert_not_after`, `covered_by`,
+  `renewed_at` and the §2.6 TR/EN texts, the standalone verifier's codes, levels and texts) and
+  `as_json` adds the key `renewal`; it never adds an error or a warning (D6). With the default
+  `renewals=False` nothing reads the renewals and the output of every caller is byte for byte
+  what it was (`test_without_renewals_every_caller_sees_the_same_bytes`); no caller passes
+  `True` yet. As in the standalone verifier, only a day whose token verified gets a status, the
+  renewal tokens are checked with the day manifest's EKU rule, and the window is the §2.5
+  default of 180 days: `verify_day` has no configuration, and `day_renewal` takes the site's
+  `tsa.renew_before_days` from a caller that has one. The renewals are judged with the
+  `legal_roots` and the revocation lists `verify_day` already has. In the core too, a renewal
+  whose stamp is from ARCILOGGER's test TSA (policy under 2.999 or the test root,
+  `is_test_stamp`) never counts, even under a listed root (D5), as in the standalone verifier
+  (W5-A-5). The two verifiers agree on the shared case table `core/tests/renewal_cases.py`
+  (rule 5); its one exception, a production-like stamp under a root the site has not listed, is
+  W5-A-5's.
