@@ -15,8 +15,10 @@ later real date; the renewal results that depend on the date are judged at pinne
 from __future__ import annotations
 
 import hashlib
+import importlib.util
 import ipaddress
 import json
+import re
 import shutil
 import subprocess
 import zipfile
@@ -28,7 +30,7 @@ import pytest
 from cryptography import x509
 
 import arcilogger_core.evidence.standalone.verify as sv
-from arcilogger_core import PRODUCT_NAME
+from arcilogger_core import PRODUCT_NAME, sealedfile
 from arcilogger_core.canonical import canonical_json
 from arcilogger_core.chain import verify_day, verify_range
 from arcilogger_core.config import Config
@@ -36,12 +38,14 @@ from arcilogger_core.crl import load_stored, read_index
 from arcilogger_core.evidence.builder import build_package
 from arcilogger_core.evidence.runner import run_verifier
 from arcilogger_core.layout import Layout
-from arcilogger_core.renewal import RecordEntry, build_record, renewal_status
+from arcilogger_core.rawlog import parse_line
+from arcilogger_core.renewal import RecordEntry, build_record, protects, renewal_status
 from arcilogger_core.retention import records
-from arcilogger_core.timeutil import utc_now
+from arcilogger_core.timeutil import SITE_TZ, utc_now
 from arcilogger_core.tsa.verify import inspect_token, verify_token
 
 FIXTURE = Path(__file__).parent / "fixtures" / "vault-w5"
+GENERATOR = Path(__file__).resolve().parents[1] / "tools" / "dev" / "make_vault_fixture.py"
 ROOTS = FIXTURE / "kokler"
 SITE = "Örnek A.Ş. Merkez"
 DAYS = [date(2021, 10, 10), date(2021, 10, 11), date(2021, 10, 12)]
@@ -62,6 +66,16 @@ TOKENS = [
     *(f"{day:%Y/%m/%d}/manifest-{day}.json.zd" for day in DAYS),
     f"{DELETION}.zd",
 ]
+#: The example addresses the fixture may carry: the site's 172.20.x, RFC 5737, and the
+#: FortiGate's private WAN address of the project's examples (RFC 6598, ASSUMPTIONS O12).
+EXAMPLE_NETWORKS = [
+    ipaddress.ip_network(network)
+    for network in (
+        "172.20.0.0/16", "192.0.2.0/24", "198.51.100.0/24", "203.0.113.0/24", "100.64.0.0/10",
+    )
+]  # fmt: skip
+_IPV4 = re.compile(rb"(?<![\d.])(?:\d{1,3}\.){3}\d{1,3}(?![\d.])")
+_MAC = re.compile(rb"(?i)\b(?:[0-9a-f]{2}[:-]){5}[0-9a-f]{2}\b")
 
 
 def _pinned() -> list[tuple[str, str]]:
@@ -133,16 +147,57 @@ def test_every_pinned_file_is_in_the_repository() -> None:
 
 def test_the_fixture_is_small_and_fictional() -> None:
     assert sum(path.stat().st_size for path in FIXTURE.rglob("*") if path.is_file()) < 64 * 1024
+    layout = Layout(FIXTURE)
     for day in DAYS:
         manifest = _json(FIXTURE / "vault" / f"{day:%Y/%m/%d}" / f"manifest-{day}.json")
         assert manifest["system"]["site"] == SITE
         for entry in manifest["files"]:
             for sender in entry["sender_ips"]:
                 assert ipaddress.ip_address(sender) in ipaddress.ip_network("172.20.0.0/16")
+        log = sealedfile.find_log(layout, day, "fortigate")
+        assert log is not None
+        with sealedfile.open_sequential(log) as handle:
+            content = handle.read()
+        addresses = {ipaddress.ip_address(found.decode()) for found in _IPV4.findall(content)}
+        assert addresses, "the lines carry addresses"
+        for address in addresses:
+            assert any(address in network for network in EXAMPLE_NETWORKS), address
+        for mac in _MAC.findall(content):
+            assert mac.upper().replace(b"-", b":").startswith(b"00:00:5E:00:53:"), mac
     (root,) = _roots()
     assert "TEST ONLY" in root.subject.rfc4514_string()
     (listed,) = _json(FIXTURE / "state" / "crl" / "index.json")["lists"]
     assert listed["url"].startswith("http://crl.example.com/")
+
+
+def _generator() -> Any:
+    spec = importlib.util.spec_from_file_location("make_vault_fixture", GENERATOR)
+    assert spec is not None
+    assert spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_the_generator_still_describes_this_fixture(tmp_path: Path) -> None:
+    """The generator is never run here (the fixture changes only on purpose), but its settings
+    must stay valid and keep the pinned format: the gzip days sealed before W5-H's xz default,
+    the 730-day retention and the mock provider."""
+    generator = _generator()
+    config = generator._config(tmp_path)
+    assert (config.seal.compression, config.retention.days, config.tsa.provider) == (
+        "gzip",
+        730,
+        "mock",
+    )
+    assert FIXTURE.resolve() == generator.FIXTURE
+    assert [*generator.DAYS[1:]] == DAYS
+    assert generator.DAYS[0] == DELETED
+    (tmp_path / "work").mkdir()
+    (tmp_path / "work" / "keep.txt").write_text("not a fixture", encoding="ascii")
+    with pytest.raises(SystemExit, match="refused"):
+        generator.write(tmp_path / "work")
+    assert (tmp_path / "work" / "keep.txt").is_file()
 
 
 # -- the formats ------------------------------------------------------------------------------
@@ -288,6 +343,35 @@ def test_the_core_verifier_reads_the_fixture(layout: Layout) -> None:
         assert (check.legal_grade_claimed, check.legal_grade) == (False, False)
 
 
+def test_the_sealed_files_read_through_the_shared_reader(layout: Layout) -> None:
+    """The days sealed before W5-H (gzip) are found, digested and read by ``sealedfile``, the one
+    reader of both formats (H3), as the manifest describes them."""
+    for day in DAYS:
+        manifest = _json(layout.manifest(day))
+        (entry,) = manifest["files"]
+        log = sealedfile.find_log(layout, day, "fortigate")
+        audit = sealedfile.find_audit(layout, day)
+        assert log is not None
+        assert audit is not None
+        assert log == layout.vault / entry["path"]
+        assert audit == layout.vault / manifest["audit_log"]["path"]
+        assert (sealedfile.format_of(log), sealedfile.format_of(audit)) == ("gzip", "gzip")
+        assert sealedfile.digest(log) == (entry["sha256_uncompressed"], entry["lines"])
+        assert sealedfile.digest(audit) == (hashlib.sha256(b"").hexdigest(), 0)
+        with sealedfile.open_sequential(log) as handle:
+            content = handle.read()
+        assert len(content) == entry["bytes_uncompressed"]
+        lines = content.splitlines(keepends=True)
+        parsed = [parse_line(line) for line in lines]
+        assert [record.sender for record in parsed] == ["172.20.0.1"] * 24
+        assert [record.received.astimezone(SITE_TZ) for record in parsed] == [
+            datetime(day.year, day.month, day.day, hour, 0, 30, tzinfo=SITE_TZ)
+            for hour in range(24)
+        ]
+        assert parsed[0].received.isoformat(timespec="milliseconds") == (entry["first_received"])
+        assert parsed[-1].received.isoformat(timespec="milliseconds") == entry["last_received"]
+
+
 def test_the_retention_and_revocation_readers_read_the_fixture(layout: Layout) -> None:
     assert records(layout) == [layout.vault / DELETION]
     token = (layout.vault / f"{DELETION}.zd").read_bytes()
@@ -346,6 +430,30 @@ def test_the_renewal_statuses_of_the_fixture(
         assert (renewal.status, renewal.code, renewal.covered_by) == (status, code, None)
 
 
+def test_the_core_reads_the_renewal_record(layout: Layout) -> None:
+    """The record is read, not skipped: what it protects, and how a changed or an unknown record
+    is reported (it never counts either way, so the statuses alone would not show it)."""
+    record = _json(layout.vault / RENEWAL)
+    stamped = [
+        _sha256(layout.vault / path.removesuffix(".zd")) for path in TOKENS
+    ]  # 3 manifests and the deletion record
+    assert protects(record) == sorted(
+        [*(_sha256(layout.vault / path) for path in TOKENS), *stamped]
+    )
+    raw = (layout.vault / RENEWAL).read_bytes()
+    assert raw.count(SITE.encode()) == 1
+    config = _config(layout)
+    (layout.vault / RENEWAL).write_bytes(raw.replace(SITE.encode(), b"Ornek A.S. Merkez"))
+    changed = renewal_status(layout, config, _roots(), DUE_AT)
+    assert (changed.mismatched, changed.unreadable) == ((f"{RENEWAL}.zd",), ())
+    unknown = raw.replace(b'"arcilogger.renewal/1"', b'"arcilogger.renewal/9"')
+    (layout.vault / RENEWAL).write_bytes(unknown)
+    read = renewal_status(layout, config, _roots(), DUE_AT)
+    assert (read.mismatched, read.unreadable) == ((), (RENEWAL,))
+    for report in (changed, read):
+        assert [token.status for token in report.tokens] == ["due"] * 4
+
+
 # -- the standalone verifier on a package built from it ---------------------------------------
 
 #: What the standalone verifier finds in the package, but the renewal codes of the days.
@@ -380,6 +488,195 @@ FINDINGS = [
     ("info", "summary-root", "özet"),
     ("warn", "summary-test-days", "özet"),
 ]
+
+
+#: The pinned facts of each day's stamp, as the standalone verifier writes them.
+STAMPS = {
+    DAYS[0]: ("7FF3F79E694BCA5F", "2021-10-10 21:30:00 UTC (11.10.2021 00:30:00 TSİ)", 1767),
+    DAYS[1]: ("74C2EDB86A8A5E32", "2021-10-11 21:30:00 UTC (12.10.2021 00:30:00 TSİ)", 1768),
+    DAYS[2]: ("D8250AC1AF823F", "2021-10-12 21:30:00 UTC (13.10.2021 00:30:00 TSİ)", 1768),
+}
+MOCK_ROOT = "CN=ARCILOGGER Mock Root CA (TEST ONLY), O=ARCILOGGER TEST - NOT VALID, C=TR"
+MOCK_TSA = "CN=ARCILOGGER Mock TSA (TEST ONLY) tsa, O=ARCILOGGER TEST - NOT VALID, C=TR"
+ROOT_SHA256 = "573F811115A0B22225BBCECD44716042CCB35678E17314D694CD6B9597DDF02E"
+ROOT_SHA1 = "6682327010A401D15F9219F2F19650D5EABE6308"
+
+
+def _colons(fingerprint: str) -> str:
+    return ":".join(fingerprint[i : i + 2] for i in range(0, len(fingerprint), 2))
+
+
+def _texts(mode: str, folder: Path) -> list[dict[str, str]]:
+    """Every finding of an isolated ``--json`` run at the real date (after NOT_AFTER), with its
+    texts: on a package built from the fixture (``mode="package"``, where ``folder`` is the
+    unpacked package) or on a copy of its vault (``mode="vault"``)."""
+    packaged = mode == "package"
+    vault = "vault/" if packaged else ""  # how a vault file is named in a finding
+    found: list[tuple[str, str, str, str, str]] = []
+    if packaged:
+        index = _json(folder / "paket.json")
+        files = len(index["files"])
+        found += [
+            ("info", "index-hash", "paket",
+             f"paket.json SHA-256: {_sha256(folder / 'paket.json')} (ARCILOGGER denetim "
+             "kaydındaki değerle karşılaştırılabilir)",
+             "compare with the value in ARCILOGGER's audit log"),
+            ("ok", "index-files", "paket",
+             f"{files} dosyanın boyutu ve SHA-256 değeri paket dizinindekiyle aynı",
+             f"size and SHA-256 of {files} files match the index"),
+            ("info", "index-scope", "paket",
+             f"Paket {index['package_id']}: oluşturan -, zaman 2026-06-02T12:00:00+03:00, günler "
+             "2021-10-10, 2021-10-11, 2021-10-12, kaynaklar tümü, sorgu -",
+             "package scope as recorded by ARCILOGGER"),
+        ]  # fmt: skip
+    else:
+        found += [
+            ("info", "vault-copy", "paket",
+             "Paket dizini yok: bu bir kasa kopyası olarak doğrulanıyor; yalnızca mühürlü günler "
+             "ve kayıtlar kontrol edilir",
+             "no index: verified as a copy of the vault (sealed days and records only)"),
+            ("warn", "index-missing", "paket",
+             "paket.json yok: dosya listesi kontrol edilemiyor; yalnızca mühürlü günler "
+             "doğrulanıyor",
+             "paket.json missing: only the sealed days are verified"),
+        ]  # fmt: skip
+    found += [
+        ("info", "roots-external", "kökler",
+         f"Yalnızca komut satırında verilen klasördeki köklere güveniliyor: {ROOTS} (paketteki "
+         "kökler kullanılmıyor)",
+         "trusting only the roots from the given folder, not the package's"),
+        ("info", "root", "kökler",
+         f"{ROOTS / 'mock-root.crt'}: {MOCK_ROOT}; geçerlilik 2020-08-27 06:00:00 UTC "
+         "(27.08.2020 09:00:00 TSİ) - 2031-09-29 06:00:00 UTC (29.09.2031 09:00:00 TSİ); SHA-256 "
+         f"parmak izi {_colons(ROOT_SHA256)}; SHA-1 parmak izi {_colons(ROOT_SHA1)}",
+         "root certificate and its fingerprints"),
+        ("info", "root-trust", "kökler",
+         "Bu program bir kökün gerçekten Kamu SM'ye ait olduğunu kanıtlayamaz: yukarıdaki parmak "
+         "izlerini Kamu SM'nin yayımladığı değerlerle (sertifikalar.kamusm.gov.tr) karşılaştırın "
+         "ya da kendi indirdiğiniz kökleri --kokler ile verin",
+         "compare these fingerprints with Kamu SM's published values"),
+        ("info", "crl-loaded", "kökler", "1 SİL yüklendi", "CRLs loaded")
+        if packaged
+        else ("info", "crl-absent", "kökler",
+              "Pakette SİL (sertifika iptal listesi) yok; iptal durumu kontrol edilmeyecek.",
+              "no CRLs in the package; revocation is not checked"),
+    ]  # fmt: skip
+    for day in DAYS:
+        serial, at, size = STAMPS[day]
+        folder_name = f"{day:%Y/%m/%d}"
+        manifest = f"{folder_name}/manifest-{day}.json"
+        log = f"{folder_name}/{sealedfile.log_name('fortigate', 'gzip')}"
+        audit = f"{folder_name}/{sealedfile.audit_name('gzip')}"
+        audit_sha = _json(FIXTURE / "vault" / manifest)["audit_log"]["sha256"]
+        found += [
+            ("info", "manifest", f"{day}",
+             f"Manifest {vault}{manifest}, SHA-256 {_sha256(FIXTURE / 'vault' / manifest)}",
+             "manifest file and hash"),
+            ("ok", "token-ok", f"{day}",
+             f"Zaman damgası geçerli: zaman {at}, seri no {serial}, TSA {MOCK_TSA}, imza RSA 2048 "
+             f"bit PKCS#1 v1.5 / sha256, kök {MOCK_ROOT} (SHA-256 {_colons(ROOT_SHA256)}), "
+             "politika 2.999.5651.1, biçim TimeStampResp",
+             "time-stamp token valid: imprint, signature, ESSCertID, EKU and chain"),
+        ]  # fmt: skip
+        if packaged:
+            found.append(
+                ("ok", "crl-ok", f"{day}",
+                 f"{MOCK_TSA}: SİL'de iptal kaydı yok (SİL tarihi 2026-06-01 04:00:00 UTC "
+                 "(01.06.2026 07:00:00 TSİ))",
+                 f"{MOCK_TSA}: not revoked according to the CRL of 2026-06-01T04:00:00+00:00")
+            )  # fmt: skip
+        found.append(
+            ("ok", "file-ok", f"{day}",
+             f"{log}: {size} bayt, SHA-256 manifestteki değerle aynı; açılmış hali 24 satır, "
+             "SHA-256 aynı",
+             f"{log}: matches the manifest")
+        )  # fmt: skip
+        found.append(
+            ("info", "audit-log-excluded", f"{day}",
+             f"{audit}: ARCILOGGER'ın denetim kaydı bu pakete alınmadı (varsayılan; başka "
+             "sorguları ve personel bilgilerini içerir). Bu bir hata değildir; dosyanın "
+             f"manifestteki SHA-256 değeri {audit_sha}",
+             f"{audit}: ARCILOGGER's audit log is not included in this package (the default: it "
+             "holds other requests and staff data); not a failure")
+            if packaged
+            else ("ok", "file-ok", f"{day}",
+                  f"{audit}: 20 bayt, SHA-256 manifestteki değerle aynı",
+                  f"{audit}: matches the manifest")
+        )  # fmt: skip
+        found.append(
+            ("warn", "legal-test-stamp", f"{day}",
+             "Bu gün yasal geçerliliği olmayan bir test/deneme zaman damgasıyla (sağlayıcı: mock) "
+             "mühürlenmiş",
+             "sealed with a test time stamp that has no legal validity")
+        )  # fmt: skip
+    first, second, third = (f"{day}" for day in DAYS)
+    expired = "2026-09-30 06:00:00 UTC (30.09.2026 09:00:00 TSİ)"
+    found += [
+        ("ok", "deletion-ok", first,
+         f"{vault}{DELETION}: zaman damgası geçerli (2023-10-10 00:00:00 UTC (10.10.2023 "
+         "03:00:00 TSİ), seri no 23CB35DB6519E9D2)",
+         f"{vault}{DELETION}: time stamp valid"),
+        ("ok", "chain-anchor", first,
+         f"{first}: önceki gün ({DELETED}) saklama süresi dolduğu için imha edilmiş; bağlantı "
+         "zincir çapası ve zaman damgalı imha tutanağıyla eşleşiyor",
+         "previous day deleted by retention; the link matches the chain anchor and the "
+         "time-stamped deletion record"),
+        *(
+            ("ok", "chain-ok", day,
+             f"{day} → {previous}: zincir bağlantısı doğru (önceki günün manifest ve damga "
+             "özetleri aynı)",
+             "chain link matches the previous day's manifest and token")
+            for day, previous in ((second, first), (third, second))
+        ),
+        ("ok", "renewal-ok", "yenileme",
+         f"{vault}{RENEWAL}: zaman damgası geçerli (2026-06-01 06:00:00 UTC (01.06.2026 09:00:00 "
+         "TSİ), seri no 532769A878642F65)",
+         f"{vault}{RENEWAL}: time stamp valid"),
+        ("info", "renewal-covers", "yenileme",
+         f"{vault}{RENEWAL} şunları yeniden damgalıyor: "
+         + ", ".join(f"{day} damga, {day} manifest" for day in (first, second, third)),
+         "what the renewal stamp covers"),
+        *(
+            ("warn", "renewal-uncovered", day,
+             f"Damga sertifikasının süresi {expired} tarihinde doldu ve yeniden damgalama yok; "
+             "damga, alındığı an için geçerlidir.",
+             "The stamp certificate expired on 2026-09-30T06:00:00+00:00 with no re-stamping; "
+             "the stamp is valid for the moment it was made.")
+            for day in (first, second, third)
+        ),
+        ("ok", "contents-ok", "içerik",
+         "Paketteki her dosya mühürlü bir güne, bir kayda ya da paketin bilinen bir parçasına ait",
+         "every file belongs to a sealed day, a record or a known part of the package"),
+        ("info", "summary-days", "özet", f"İncelenen gün: 3 ({first} … {third})",
+         "3 days examined"),
+        ("info", "summary-root", "özet",
+         f"Damgalar şu köke bağlanıyor: SHA-256 {_colons(ROOT_SHA256)} — Kamu SM'nin yayımladığı "
+         "parmak iziyle karşılaştırın",
+         "the time stamps chain to this root: compare it with Kamu SM's published value"),
+        ("warn", "summary-test-days", "özet",
+         f"3 gün yasal geçerliliği olmayan test damgası taşıyor: {first}, {second}, {third}",
+         "some days carry test time stamps without legal validity"),
+    ]  # fmt: skip
+    keys = ("level", "code", "where", "tr", "en")
+    return [dict(zip(keys, finding, strict=True)) for finding in found]
+
+
+def _days_block() -> list[dict[str, Any]]:
+    """The ``days`` block of a ``--json`` run: each day's stamp, as the fixture pins it."""
+    return [
+        {
+            "day": f"{day}",
+            "ok": True,
+            "gen_time": f"{day}T21:30:00+00:00",
+            "serial": STAMPS[day][0],
+            "tsa": MOCK_TSA,
+            "root_sha256": ROOT_SHA256,
+            "stamp_delay_hours": 0.5,
+            "legal_grade": False,
+            "provider": "mock",
+        }
+        for day in DAYS
+    ]
 
 
 def _package(layout: Layout, folder: Path) -> Path:
@@ -432,3 +729,26 @@ def test_the_standalone_verifier_reads_a_package_built_from_the_fixture(
         FINDINGS[:-4] + uncovered + FINDINGS[-4:]
     )
     assert isolated["verifier"] == f"ARCILOGGER verify.py {sv.VERIFIER_VERSION}"
+    assert (isolated["mode"], isolated["passed"]) == ("package", True)
+    assert isolated["findings"] == _texts("package", folder)
+    assert isolated["days"] == _days_block()
+    assert isolated["roots"] == [
+        {
+            "path": str(ROOTS / "mock-root.crt"),
+            "subject": MOCK_ROOT,
+            "sha256": ROOT_SHA256,
+            "sha1": ROOT_SHA1,
+        }
+    ]
+
+
+def test_the_standalone_verifier_reads_a_copy_of_the_vault(layout: Layout) -> None:
+    """Vault mode (no ``paket.json``): every sealed day with its audit log, the deletion record
+    and the renewal record are read where the vault keeps them, nothing is unknown."""
+    result = run_verifier(layout.vault, "--json", "--kokler", str(ROOTS), timeout=300)
+    assert result.returncode == 0, result.stderr
+    isolated = json.loads(result.stdout)
+    assert (isolated["mode"], isolated["passed"]) == ("vault", True)
+    assert isolated["findings"] == _texts("vault", layout.vault)
+    assert isolated["days"] == _days_block()
+    assert isolated["counts"] == {"ok": 15, "info": 11, "warn": 8, "fail": 0}
