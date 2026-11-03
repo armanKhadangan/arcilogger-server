@@ -113,7 +113,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, time, timedelta
 from ipaddress import IPv4Network, IPv6Network, ip_address, ip_network
 from pathlib import Path
-from typing import Any, Final, Literal, get_args
+from typing import Any, Final, Literal, TypeGuard, get_args
 
 from cryptography import x509
 from sqlalchemy import (
@@ -1942,6 +1942,11 @@ def read_stamp_renewals(layout: Layout) -> tuple[StampRenewal, ...] | None:
     return tuple(found)
 
 
+def _renewal_status(value: Any) -> TypeGuard[StampRenewalStatus]:
+    # a list or an object is no status (and cannot be looked up in a set)
+    return isinstance(value, str) and value in STAMP_RENEWAL_STATUSES
+
+
 def _stamp_renewal(entry: Any) -> StampRenewal | None:
     if not isinstance(entry, dict):
         return None
@@ -1950,7 +1955,7 @@ def _stamp_renewal(entry: Any) -> StampRenewal | None:
         entry.get("status"),
         _time(entry.get("cert_not_after")),
     )
-    if not isinstance(path, str) or not path or status not in STAMP_RENEWAL_STATUSES:
+    if not isinstance(path, str) or not path or not _renewal_status(status):
         return None
     try:
         not_after = not_after.astimezone(UTC) if not_after is not None else None

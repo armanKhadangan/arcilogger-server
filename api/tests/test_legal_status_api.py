@@ -695,6 +695,26 @@ NESTED = "[" * 100_000 + "]" * 100_000
             for offset in ("+00:00", "+03:00")
             for status in ("due", "uncovered")
         ),
+        *(
+            (
+                "renewal.json",
+                json.dumps(
+                    {
+                        "tokens": [
+                            {
+                                "path": "2026/10/29/manifest-2026-10-29.json.zd",
+                                "kind": "day",
+                                "cert_not_after": "2030-01-01T00:00:00Z",
+                                "status": status,
+                                "covered_by": None,
+                            }
+                        ]
+                    }
+                ),
+            )
+            # a status that is no text cannot be looked up: the entry is left out
+            for status in (["due"], {"code": "due"})
+        ),
     ],
     ids=lambda value: str(value)[:40],
 )

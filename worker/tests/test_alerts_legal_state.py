@@ -163,6 +163,9 @@ def test_stamp_renewals_skip_unknown_status_and_bad_times(layout: Layout) -> Non
             token("2026-10-02", "due", "next spring"),
             token("2026-10-03", "due", "2027-03-01T00:00:00"),  # no time zone
             {**token("2026-10-04", "due", "2027-03-01T00:00:00Z"), "path": None},
+            {**token("2026-10-06", "due", "2027-03-01T00:00:00Z"), "status": ["due"]},
+            {**token("2026-10-07", "due", "2027-03-01T00:00:00Z"), "status": {"code": "due"}},
+            {**token("2026-10-08", "due", "2027-03-01T00:00:00Z"), "path": ["2026/10/08"]},
             "not an entry",
             {**token("2026-10-05", "uncovered", "2026-10-30T00:00:00Z"), "seq": 7},
         ),
