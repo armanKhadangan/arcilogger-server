@@ -1,6 +1,7 @@
 import {
   CircleCheck,
   CircleDashed,
+  CircleMinus,
   CircleX,
   Clock,
   Stamp,
@@ -10,17 +11,20 @@ import {
 import { useId, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import { ChangeReviewDialog } from '@/components/admin/change-review';
 import { TextField } from '@/components/admin/form-fields';
 import { LockedList } from '@/components/admin/locked-field';
 import { RequestProgress } from '@/components/admin/request-progress';
 import { SecretField } from '@/components/admin/secret-field';
-import { SECRET_KEPT } from '@/components/admin/secret-edit';
+import { SECRET_KEPT, type SecretEdit } from '@/components/admin/secret-edit';
 import { Alert } from '@/components/ui/alert';
 import { Badge, type BadgeProps } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
-import { Label } from '@/components/ui/label';
+import { Input } from '@/components/ui/input';
+import { Field, Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
 import { errorMessage, isApiError } from '@/lib/api';
 import { useTsaTest } from '@/lib/api-hooks';
 import { formatDateTime } from '@/lib/format';
@@ -29,12 +33,29 @@ import type {
   AdminRequestOut,
   ReadinessItem,
   TsaSection,
-  TsaServer,
   TsaTestResult,
 } from '@/lib/settings-types';
 import { cn } from '@/lib/utils';
 
-import { causeKey, type Credentials, type StepStatus, type TsaForm } from './kamusm-model';
+import {
+  CRL_MAX_AGE_DAYS,
+  CRL_URLS_MAX,
+  PLAIN_HTTP_PHRASE,
+  RENEW_BEFORE_DAYS,
+  causeKey,
+  choiceProvider,
+  currentChoice,
+  plainHttpConfirmed,
+  providerText,
+  secretMeta,
+  serverChoices,
+  TURKTRUST_KEPT,
+  type Credentials,
+  type EvidenceForm,
+  type ServerChoice,
+  type StepStatus,
+  type TsaForm,
+} from './kamusm-model';
 
 const STATUS: Record<StepStatus, { tone: NonNullable<BadgeProps['tone']>; icon: LucideIcon }> = {
   ok: { tone: 'success', icon: CircleCheck },
@@ -42,6 +63,7 @@ const STATUS: Record<StepStatus, { tone: NonNullable<BadgeProps['tone']>; icon: 
   error: { tone: 'danger', icon: CircleX },
   pending: { tone: 'info', icon: Clock },
   optional: { tone: 'neutral', icon: CircleDashed },
+  unused: { tone: 'neutral', icon: CircleMinus },
 };
 
 /** A step's state: ok, missing, error (stops sealing), waiting, optional. */
@@ -115,9 +137,87 @@ export function JavaStep({
   );
 }
 
+/** The errors of the credential fields (the browser's check or the API's refusal). */
+export interface CredentialErrors {
+  customer?: string | undefined;
+  password?: string | undefined;
+  turktrustUsername?: string | undefined;
+  turktrustPassword?: string | undefined;
+}
+
 /**
- * Step 4 "Müşteri bilgileri": the customer number and the password, write-only. Saving tries
- * them first with a credit query on the server (unless the box is cleared).
+ * "Sahada doğrula" (Wave 5 contract 0.4, T1, T2, T5): what this installation does not confirm of
+ * TÜRKTRUST, shown wherever its credentials are entered.
+ */
+function TurktrustNote() {
+  const { t } = useTranslation();
+  return (
+    <Alert
+      tone="info"
+      assertive={false}
+      title={t('settings.kamusm.turktrust.note.title')}
+      data-testid="turktrust-note"
+    >
+      {t('settings.kamusm.turktrust.note.body')}
+    </Alert>
+  );
+}
+
+/**
+ * TÜRKTRUST's username and password (Wave 5 contract 2.4), write-only like every credential:
+ * a stored value is shown as "Kayıtlı" and never sent to the browser.
+ */
+export function TurktrustFields({
+  tsa,
+  credentials,
+  onChange,
+  disabled,
+  errors,
+}: {
+  tsa: TsaSection;
+  credentials: Credentials;
+  onChange: (credentials: Credentials) => void;
+  disabled: boolean;
+  errors: CredentialErrors;
+}) {
+  const { t } = useTranslation();
+  const id = useId();
+  const turktrust = credentials.turktrust ?? TURKTRUST_KEPT;
+  return (
+    <div className="flex flex-col gap-4" data-testid="turktrust-credentials">
+      <SecretField
+        id={`${id}-username`}
+        label={t('settings.kamusm.turktrust.credentials.username')}
+        meta={secretMeta(tsa, 'turktrust.username')}
+        edit={turktrust.username}
+        onChange={(username) => {
+          onChange({ ...credentials, turktrust: { ...turktrust, username } });
+        }}
+        disabled={disabled}
+        error={errors.turktrustUsername}
+        hint={t('settings.kamusm.turktrust.credentials.usernameHint')}
+      />
+      <SecretField
+        id={`${id}-password`}
+        label={t('settings.kamusm.turktrust.credentials.password')}
+        meta={secretMeta(tsa, 'turktrust.password')}
+        edit={turktrust.password}
+        onChange={(password) => {
+          onChange({ ...credentials, turktrust: { ...turktrust, password } });
+        }}
+        disabled={disabled}
+        error={errors.turktrustPassword}
+        hint={t('settings.kamusm.turktrust.credentials.passwordHint')}
+      />
+      <TurktrustNote />
+    </div>
+  );
+}
+
+/**
+ * Step 4 "Müşteri bilgileri": the customer number and the password, write-only (with TÜRKTRUST in
+ * use, its username and password). Saving tries them first on the server, with a credit query for
+ * Kamu SM (unless the box is cleared).
  */
 export function CredentialsStep({
   tsa,
@@ -132,14 +232,67 @@ export function CredentialsStep({
   credentials: Credentials;
   onChange: (credentials: Credentials) => void;
   disabled: boolean;
-  errors: { customer?: string | undefined; password?: string | undefined };
+  errors: CredentialErrors;
   probe: boolean;
   onProbe: (probe: boolean) => void;
 }) {
   const { t } = useTranslation();
   const id = useId();
+  const turktrust = tsa.provider === 'turktrust';
   return (
     <div className="flex flex-col gap-4">
+      {turktrust ? (
+        <TurktrustFields
+          tsa={tsa}
+          credentials={credentials}
+          onChange={onChange}
+          disabled={disabled}
+          errors={errors}
+        />
+      ) : (
+        <KamusmFields
+          tsa={tsa}
+          credentials={credentials}
+          onChange={onChange}
+          disabled={disabled}
+          errors={errors}
+        />
+      )}
+      <div className="flex items-center gap-2">
+        <Checkbox
+          id={`${id}-probe`}
+          checked={probe}
+          disabled={disabled}
+          onCheckedChange={(checked) => {
+            onProbe(checked === true);
+          }}
+        />
+        <Label htmlFor={`${id}-probe`} className="font-normal">
+          {t(providerText(tsa.provider, 'credentials.probe'))}
+        </Label>
+      </div>
+    </div>
+  );
+}
+
+/** The Kamu SM customer number and password; "Sil" deletes both. */
+function KamusmFields({
+  tsa,
+  credentials,
+  onChange,
+  disabled,
+  errors,
+}: {
+  tsa: TsaSection;
+  credentials: Credentials;
+  onChange: (credentials: Credentials) => void;
+  disabled: boolean;
+  errors: CredentialErrors;
+}) {
+  const { t } = useTranslation();
+  const id = useId();
+  return (
+    <>
       <SecretField
         id={`${id}-customer`}
         label={t('settings.kamusm.credentials.customer')}
@@ -170,20 +323,7 @@ export function CredentialsStep({
           {t('settings.kamusm.credentials.clear')}
         </Alert>
       ) : null}
-      <div className="flex items-center gap-2">
-        <Checkbox
-          id={`${id}-probe`}
-          checked={probe}
-          disabled={disabled}
-          onCheckedChange={(checked) => {
-            onProbe(checked === true);
-          }}
-        />
-        <Label htmlFor={`${id}-probe`} className="font-normal">
-          {t('settings.kamusm.credentials.probe')}
-        </Label>
-      </div>
-    </div>
+    </>
   );
 }
 
@@ -268,7 +408,9 @@ export function TestStep({
         {t(
           tsa.provider === 'zamane'
             ? `settings.kamusm.test.server.${tsa.server ?? 'test'}`
-            : 'settings.kamusm.test.server.other',
+            : tsa.provider === 'turktrust'
+              ? 'settings.kamusm.test.server.turktrust'
+              : 'settings.kamusm.test.server.other',
           { provider: tsa.provider },
         )}
       </p>
@@ -309,51 +451,198 @@ export function TestStep({
 
 const READINESS: ReadinessItem[] = ['credentials', 'zamane_jar', 'java', 'roots'];
 
+/** The text keys of a server choice (`settings.kamusm.servers.*`, `….production.current.*`). */
+const CHOICE_KEYS: Record<ServerChoice, string> = {
+  test: 'test',
+  production: 'production',
+  turktrust: 'turktrustHttps',
+  'turktrust-http': 'turktrustHttp',
+};
+
+/** The server in use in words: a choice, TÜRKTRUST at a server not named yet, or another provider. */
+function currentText(tsa: TsaSection, current: ServerChoice | null): string {
+  if (current) return `settings.kamusm.production.current.${CHOICE_KEYS[current]}`;
+  return tsa.provider === 'turktrust'
+    ? 'settings.kamusm.production.current.turktrust'
+    : 'settings.kamusm.production.current.other';
+}
+
+/** A new value was typed for a credential (sent with the switch). */
+function typedValue(edit: SecretEdit): boolean {
+  return edit.editing && edit.value !== '';
+}
+
 /**
- * Step 6 "Üretime geç": the checklist of `readiness` (and the warnings that do not block), the
- * switch to the production server after a confirmation, and back to the test server, which
- * stops production stamps and asks again.
+ * Step 6 "Üretime geç": the server to switch to (Kamu SM test or production, TÜRKTRUST over HTTPS
+ * or over plain HTTP, Wave 5 contract 2.4), the checklist of what it needs (`readiness` for
+ * Kamu SM, the username and password for TÜRKTRUST) with the warnings that do not block, and the
+ * switch after a confirmation. TÜRKTRUST's servers are offered only where the server knows
+ * TÜRKTRUST (`serverChoices`); a switch to them waits for both credentials, stored or typed here,
+ * and choosing another server drops what was typed for TÜRKTRUST. Back to the test server stops production stamps and asks again;
+ * plain HTTP says that the password then travels unencrypted and asks for a typed confirmation
+ * before anything is sent, because the server's dry run applies the same rule.
  */
 export function ProductionStep({
   tsa,
   tested,
   disabled,
-  blockedHint,
+  unsaved,
+  turktrustUnsaved,
+  picked,
+  onPick,
+  credentials,
+  onCredentials,
+  errors,
   onSwitch,
 }: {
   tsa: TsaSection;
   tested: boolean;
   disabled: boolean;
-  /** Why the switch waits (e.g. other changes are not saved yet). */
-  blockedHint?: string | undefined;
-  onSwitch: (server: TsaServer) => void;
+  /** Changes of the other steps are not saved yet: a switch waits for them. */
+  unsaved: boolean;
+  /**
+   * TÜRKTRUST credentials are typed: they go with a switch to TÜRKTRUST, so they hold back only a
+   * switch to another server (which would not send them).
+   */
+  turktrustUnsaved: boolean;
+  /** The server chosen and not switched to yet (the page keeps it while another step is open). */
+  picked: ServerChoice | null;
+  onPick: (choice: ServerChoice) => void;
+  credentials: Credentials;
+  onCredentials: (credentials: Credentials) => void;
+  errors: CredentialErrors;
+  onSwitch: (server: ServerChoice) => void;
 }) {
   const { t } = useTranslation();
-  const [asking, setAsking] = useState<TsaServer | null>(null);
-  const production = tsa.provider === 'zamane' && tsa.server === 'production';
+  const id = useId();
+  const [asking, setAsking] = useState<ServerChoice | null>(null);
+  const [typed, setTyped] = useState('');
+  const current = currentChoice(tsa);
+  const choices = serverChoices(tsa);
+  // The server in use cannot be chosen; the next one is preselected (production, or back to test).
+  const target: ServerChoice =
+    picked !== null && picked !== current && choices.includes(picked)
+      ? picked
+      : current === 'production'
+        ? 'test'
+        : 'production';
+  const turktrust = choiceProvider(target) === 'turktrust';
   const missing = new Set<string>(tsa.readiness.missing);
   const legal = tsa.roots.some((root) => root.legal);
+  const entered = credentials.turktrust ?? TURKTRUST_KEPT;
+  // A TÜRKTRUST credential is stored, or typed and not saved yet (it goes with the switch).
+  const credential = (name: 'username' | 'password') => {
+    const typedHere = typedValue(entered[name]);
+    return {
+      key: `turktrust.${name}${typedHere ? 'Typed' : ''}`,
+      ok: typedHere || (secretMeta(tsa, `turktrust.${name}`)?.set ?? false),
+    };
+  };
+  const checklist: { key: string; ok: boolean }[] = turktrust
+    ? [credential('username'), credential('password')]
+    : READINESS.map((item) => ({ key: item, ok: !missing.has(item) }));
+  // Kamu SM production needs its readiness; TÜRKTRUST both credentials (the server decides again).
+  const ready = turktrust
+    ? checklist.every((item) => item.ok)
+    : target !== 'production' || tsa.readiness.production;
+  const waiting = unsaved || (!turktrust && turktrustUnsaved);
+  const stopsProduction = current === 'production' || tsa.provider === 'turktrust';
+  const phrase = PLAIN_HTTP_PHRASE;
+  const switchLabel =
+    target === 'production'
+      ? t('settings.kamusm.production.toProduction')
+      : target === 'test'
+        ? t(
+            current === 'production'
+              ? 'settings.kamusm.production.toTest'
+              : 'settings.kamusm.production.to.test',
+          )
+        : t(`settings.kamusm.production.to.${CHOICE_KEYS[target]}`);
+
+  function confirmed() {
+    if (asking) onSwitch(asking);
+    setAsking(null);
+    setTyped('');
+  }
+
   return (
     <div className="flex flex-col gap-4">
       <p className="text-13 text-foreground" data-testid="tsa-server">
-        {tsa.provider === 'zamane'
-          ? t(`settings.kamusm.production.current.${tsa.server ?? 'test'}`)
-          : t('settings.kamusm.production.current.other', { provider: tsa.provider })}
+        {t(currentText(tsa, current), { provider: tsa.provider })}
       </p>
+      <fieldset className="flex flex-col gap-2" data-testid="tsa-servers">
+        <legend className="mb-1 text-13 font-medium text-foreground">
+          {t('settings.kamusm.servers.legend')}
+        </legend>
+        {choices.map((choice) => {
+          const inUse = choice === current;
+          const key = CHOICE_KEYS[choice];
+          return (
+            <div
+              key={choice}
+              className={cn(
+                'flex items-start gap-3 rounded-lg border p-3 text-13',
+                target === choice ? 'border-primary bg-primary-soft' : 'border-border',
+              )}
+            >
+              <input
+                type="radio"
+                id={`${id}-${choice}`}
+                name={`${id}-server`}
+                className="mt-0.5 size-4 accent-primary"
+                checked={target === choice}
+                disabled={disabled || inUse}
+                aria-describedby={`${id}-${choice}-hint`}
+                onChange={() => {
+                  onPick(choice);
+                  // Leaving TÜRKTRUST drops what was typed for it: it would not be sent.
+                  if (choiceProvider(choice) !== 'turktrust' && turktrustUnsaved)
+                    onCredentials({ ...credentials, turktrust: TURKTRUST_KEPT });
+                }}
+              />
+              <div className="flex flex-col gap-0.5">
+                <label
+                  htmlFor={`${id}-${choice}`}
+                  className={cn('font-medium text-foreground', inUse ? null : 'cursor-pointer')}
+                >
+                  {t(`settings.kamusm.servers.${key}`)}
+                  {inUse ? ` (${t('settings.kamusm.servers.inUse')})` : null}
+                </label>
+                <p id={`${id}-${choice}-hint`} className="text-xs text-muted-strong">
+                  {t(`settings.kamusm.servers.${key}Hint`)}
+                </p>
+              </div>
+            </div>
+          );
+        })}
+      </fieldset>
+      {target === 'turktrust-http' ? (
+        <Alert tone="warning" assertive={false} data-testid="tsa-plain-http">
+          {t('settings.kamusm.turktrust.plainHttp')}
+        </Alert>
+      ) : null}
+      {turktrust ? (
+        <TurktrustFields
+          tsa={tsa}
+          credentials={credentials}
+          onChange={onCredentials}
+          disabled={disabled}
+          errors={errors}
+        />
+      ) : null}
       <ul
         className="flex flex-col gap-1.5 text-13"
         aria-label={t('settings.kamusm.production.checklist')}
       >
-        {READINESS.map((item) => {
-          const ok = !missing.has(item);
+        {checklist.map(({ key, ok }) => {
           const Icon = ok ? CircleCheck : CircleX;
           return (
-            <li key={item} className="flex items-center gap-2">
+            <li key={key} className="flex items-center gap-2">
               <Icon
                 aria-hidden="true"
                 className={cn('size-4', ok ? 'text-success' : 'text-danger')}
               />
-              {t(`settings.kamusm.production.items.${item}`)}
+              {t(`settings.kamusm.production.items.${key}`)}
               <span className="sr-only">
                 : {ok ? t('settings.kamusm.status.ok') : t('settings.kamusm.status.missing')}
               </span>
@@ -378,57 +667,79 @@ export function ProductionStep({
         </li>
       </ul>
       <div className="flex flex-wrap gap-2">
-        {production ? (
-          <Button
-            variant="secondary"
-            disabled={disabled}
-            onClick={() => {
-              setAsking('test');
-            }}
-          >
-            {t('settings.kamusm.production.toTest')}
-          </Button>
-        ) : (
-          <Button
-            disabled={disabled || !tsa.readiness.production}
-            onClick={() => {
-              setAsking('production');
-            }}
-          >
-            {t('settings.kamusm.production.toProduction')}
-          </Button>
-        )}
+        <Button
+          variant={target === 'test' ? 'secondary' : 'primary'}
+          disabled={disabled || waiting || !ready}
+          onClick={() => {
+            setTyped('');
+            setAsking(target);
+          }}
+        >
+          {switchLabel}
+        </Button>
       </div>
-      {!production && !tsa.readiness.production ? (
+      {!ready ? (
         <p className="text-xs text-muted">{t('settings.kamusm.production.notReady')}</p>
       ) : null}
-      {blockedHint ? <p className="text-xs text-muted">{blockedHint}</p> : null}
+      {waiting ? (
+        <p className="text-xs text-muted">{t('settings.kamusm.production.saveFirst')}</p>
+      ) : null}
       <ConfirmDialog
-        open={asking !== null}
+        open={asking !== null && asking !== 'turktrust-http'}
         onOpenChange={(open) => {
           if (!open) setAsking(null);
         }}
         title={t(
           asking === 'test'
-            ? 'settings.kamusm.production.testTitle'
-            : 'settings.kamusm.production.confirmTitle',
+            ? stopsProduction
+              ? 'settings.kamusm.production.testTitle'
+              : 'settings.kamusm.production.testOtherTitle'
+            : asking === 'turktrust'
+              ? 'settings.kamusm.production.turktrustTitle'
+              : 'settings.kamusm.production.confirmTitle',
         )}
         description={t(
           asking === 'test'
-            ? 'settings.kamusm.production.testBody'
-            : 'settings.kamusm.production.confirmBody',
+            ? stopsProduction
+              ? 'settings.kamusm.production.testBody'
+              : 'settings.kamusm.production.testOtherBody'
+            : asking === 'turktrust'
+              ? 'settings.kamusm.production.turktrustBody'
+              : 'settings.kamusm.production.confirmBody',
         )}
-        confirmLabel={t(
-          asking === 'test'
-            ? 'settings.kamusm.production.toTest'
-            : 'settings.kamusm.production.toProduction',
-        )}
-        danger={asking === 'test'}
-        onConfirm={() => {
-          if (asking) onSwitch(asking);
-          setAsking(null);
-        }}
+        confirmLabel={switchLabel}
+        danger={asking === 'test' && stopsProduction}
+        onConfirm={confirmed}
       />
+      <ChangeReviewDialog
+        open={asking === 'turktrust-http'}
+        onOpenChange={(open) => {
+          if (!open) setAsking(null);
+        }}
+        check={null}
+        title={t('settings.kamusm.production.httpTitle')}
+        description={t('settings.kamusm.turktrust.plainHttp')}
+        confirmLabel={switchLabel}
+        danger
+        confirmDisabled={!plainHttpConfirmed(typed)}
+        onConfirm={confirmed}
+      >
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor={`${id}-phrase`}>
+            {t('settings.kamusm.production.httpType', { phrase })}
+          </Label>
+          <Input
+            id={`${id}-phrase`}
+            value={typed}
+            autoComplete="off"
+            spellCheck={false}
+            className="max-w-xs"
+            onChange={(event) => {
+              setTyped(event.target.value);
+            }}
+          />
+        </div>
+      </ChangeReviewDialog>
     </div>
   );
 }
@@ -479,8 +790,114 @@ export function CreditStep({
   );
 }
 
+/**
+ * Step 7, below the credit threshold: the re-stamping window and the revocation lists (Wave 5
+ * contract 2.5, D4, D7; `tsa.renew_before_days`, `tsa.crl_urls`, `tsa.crl_max_age_days`), saved
+ * with "Kaydet" and a password confirmation. They apply to both providers. The revocation-list
+ * addresses of Kamu SM and TÜRKTRUST are not confirmed (T4, K10), so the field says "sahada
+ * doğrula" and the code builds none in: left empty, the certificates' own distribution points
+ * are used.
+ */
+export function EvidenceFields({
+  id,
+  form,
+  onChange,
+  disabled,
+  changed,
+  errors,
+}: {
+  /** The page's id: the controls are `<id>-<field>`, so the page can focus the first error. */
+  id: string;
+  form: EvidenceForm;
+  onChange: (form: Partial<EvidenceForm>) => void;
+  disabled: boolean;
+  /** A key differs from the server's: the change asks for the password. */
+  changed: boolean;
+  errors: {
+    renewBeforeDays?: string | undefined;
+    crlUrls?: string | undefined;
+    crlMaxAgeDays?: string | undefined;
+  };
+}) {
+  const { t } = useTranslation();
+  const urlsHint = `${id}-crlUrls-hint`;
+  return (
+    <section
+      className="flex flex-col gap-4 border-t border-border pt-4"
+      aria-labelledby={`${id}-evidence-title`}
+      data-testid="tsa-evidence"
+    >
+      <div className="flex flex-col gap-1">
+        <h3 id={`${id}-evidence-title`} className="text-sm font-semibold text-foreground">
+          {t('settings.kamusm.evidence.title')}
+        </h3>
+        <p className="text-13 text-muted-strong">{t('settings.kamusm.evidence.description')}</p>
+      </div>
+      <div className="grid gap-4 md:grid-cols-2">
+        <TextField
+          id={`${id}-renewBeforeDays`}
+          label={t('settings.kamusm.evidence.renewBeforeDays')}
+          hint={t('settings.kamusm.evidence.renewBeforeDaysHint', RENEW_BEFORE_DAYS)}
+          value={form.renewBeforeDays}
+          inputMode="numeric"
+          inputClassName="w-40"
+          disabled={disabled}
+          error={errors.renewBeforeDays}
+          onChange={(renewBeforeDays) => {
+            onChange({ renewBeforeDays });
+          }}
+        />
+        <TextField
+          id={`${id}-crlMaxAgeDays`}
+          label={t('settings.kamusm.evidence.crlMaxAgeDays')}
+          hint={t('settings.kamusm.evidence.crlMaxAgeDaysHint', CRL_MAX_AGE_DAYS)}
+          value={form.crlMaxAgeDays}
+          inputMode="numeric"
+          inputClassName="w-40"
+          disabled={disabled}
+          error={errors.crlMaxAgeDays}
+          onChange={(crlMaxAgeDays) => {
+            onChange({ crlMaxAgeDays });
+          }}
+        />
+      </div>
+      <Field
+        id={`${id}-crlUrls`}
+        label={t('settings.kamusm.evidence.crlUrls')}
+        hint={t('settings.kamusm.evidence.crlUrlsHint', { max: CRL_URLS_MAX })}
+        error={errors.crlUrls}
+      >
+        <Textarea
+          id={`${id}-crlUrls`}
+          rows={4}
+          className="font-mono text-13"
+          value={form.crlUrls}
+          disabled={disabled}
+          spellCheck={false}
+          aria-invalid={errors.crlUrls ? true : undefined}
+          aria-describedby={errors.crlUrls ? `${id}-crlUrls-error` : urlsHint}
+          onChange={(event) => {
+            onChange({ crlUrls: event.target.value });
+          }}
+        />
+      </Field>
+      <Alert
+        tone="info"
+        assertive={false}
+        title={t('settings.kamusm.evidence.crlNoteTitle')}
+        data-testid="tsa-crl-note"
+      >
+        {t('settings.kamusm.evidence.crlNote')}
+      </Alert>
+      {changed ? (
+        <p className="text-xs text-muted-strong">{t('settings.kamusm.evidence.reauth')}</p>
+      ) : null}
+    </section>
+  );
+}
+
 /** Why a `PUT /admin/config/tsa` was refused: what production still needs, what would stop sealing. */
-export function TsaRefusal({ error }: { error: unknown }) {
+export function TsaRefusal({ error, provider }: { error: unknown; provider?: string }) {
   const { t } = useTranslation();
   if (!isApiError(error, 'tsa_not_ready', 'tsa_would_break')) return null;
   const details = (error.details ?? {}) as { missing?: unknown; causes?: unknown };
@@ -495,7 +912,7 @@ export function TsaRefusal({ error }: { error: unknown }) {
         <li key={item}>
           {error.code === 'tsa_not_ready'
             ? t(`settings.kamusm.production.items.${item}`, { defaultValue: item })
-            : t(causeKey(item), { defaultValue: item })}
+            : t(causeKey(item, provider), { defaultValue: item })}
         </li>
       ))}
     </ul>
@@ -522,7 +939,9 @@ export function SealView({ config }: { config: AdminConfig }) {
         <Alert tone="danger" title={t('settings.kamusm.seal.notReady')}>
           <ul className="list-disc pl-5">
             {ready.causes.map((cause) => (
-              <li key={cause}>{t(causeKey(cause), { defaultValue: cause })}</li>
+              <li key={cause}>
+                {t(causeKey(cause, config.sections.tsa.provider), { defaultValue: cause })}
+              </li>
             ))}
           </ul>
         </Alert>

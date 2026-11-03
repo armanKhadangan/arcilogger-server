@@ -803,6 +803,11 @@ These change the contract text above. Where a section says otherwise, the clarif
   - A fetch exactly `tsa.crl_max_age_days` old is stale.
   - An issuer in use without an accepted list stays stale.
   - Kamu SM's and TÜRKTRUST's real publication intervals are still to be confirmed (K10/T4, sahada doğrula).
+- **C23 – The reload's keep time in the 409** (G7, G10; questions on #112 and #121). The `details` of `409 archive_reload_required` also carry `keep_days`: the current value of `db.reload_keep_days`.
+  - Reason: a lookup or search user cannot read `/settings`, and the confirm dialog must name the real number of days the data comes back for (KVKK).
+  - W5-G adds the field to the Pydantic model, to `web/src/lib/archive-reload-types.ts` and to the captured samples.
+  - W5-J shows it in the dialog, and shows `expires_at` once the reload is `ready`.
+  - Until W5-G has the field, W5-J names the setting with its default (7 days).
 
 ## Owner questions
 

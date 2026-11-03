@@ -34,6 +34,7 @@ export const USAGE_PERMISSIONS: readonly string[] = [
 export const DISK_PERMISSIONS: readonly string[] = ['system.read'];
 
 export type DashboardBlock =
+  | 'blocking'
   | 'ingest'
   | 'parseFailures'
   | 'seal'
@@ -87,6 +88,8 @@ export function visibleBlocks(
     if (summary.seal) {
       blocks.add('seal');
       blocks.add('calendar');
+      // A closed day stamped late (`blocking`, Wave 5 contract 2.3.1, decision 11).
+      if (summary.seal.blocking) blocks.add('blocking');
     }
     if (summary.credit) blocks.add('credit');
     if (summary.clock) blocks.add('clock');

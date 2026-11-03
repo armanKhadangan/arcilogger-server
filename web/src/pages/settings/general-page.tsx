@@ -27,6 +27,12 @@ import { currentLang } from '@/lib/i18n';
 import type { GeneralSection } from '@/lib/settings-types';
 import { focusFirstError, hasErrors, type FieldErrors } from '@/lib/validation';
 
+import {
+  httpsProxy,
+  networkBody,
+  validateHttpsProxy,
+  type GeneralRequest,
+} from './general-network';
 import { parseInteger, validateClock, validateSiteName } from './settings-validation';
 
 /** The form of the section: numbers as typed. */
@@ -35,6 +41,8 @@ interface GeneralForm {
   ntp_server: string;
   fallback_server: string;
   alert_offset_ms: string;
+  /** Left out while the server does not report `network.https_proxy` (`general-network.ts`). */
+  https_proxy?: string;
 }
 
 type GeneralField = keyof GeneralForm;
@@ -50,16 +58,19 @@ const PATHS: Record<GeneralField, string[]> = {
   ntp_server: ['clock.ntp_server'],
   fallback_server: ['clock.fallback_server'],
   alert_offset_ms: ['clock.alert_offset_ms'],
+  https_proxy: ['network.https_proxy'],
 };
 const SHOWN = Object.values(PATHS).flat();
 
 function toForm(general: GeneralSection | undefined): GeneralForm | undefined {
   if (!general) return undefined;
+  const proxy = httpsProxy(general);
   return {
     site_name: general.site_name,
     ntp_server: general.clock.ntp_server,
     fallback_server: general.clock.fallback_server,
     alert_offset_ms: String(general.clock.alert_offset_ms),
+    ...(proxy === undefined ? {} : { https_proxy: proxy }),
   };
 }
 
@@ -89,7 +100,8 @@ function MeasuredOffset() {
  * evidence packages) and the time sources with the clock alert threshold. The administration
  * service writes `arcilogger.toml`; the API and the worker take the name without a restart,
  * the system task updates the Windows Time service. A changed time server is tried first (unless
- * the box is cleared) and needs a password confirmation.
+ * the box is cleared) and needs a password confirmation. The outbound proxy (Wave 5 contract
+ * 2.5) is shown once the server reports it, and a change of it needs a password confirmation too.
  */
 export function GeneralPage() {
   const { t } = useTranslation();
@@ -97,6 +109,7 @@ export function GeneralPage() {
   const section = useMachineSection('general', { fields: SHOWN });
   const { config, flow, status } = section;
   const server = useMemo(() => toForm(config.data?.sections.general), [config.data]);
+  const general = config.data?.sections.general;
   const form = useServerValues(server, EMPTY);
   const [errors, setErrors] = useState<FieldErrors<GeneralField>>({});
   const [probe, setProbe] = useState(true);
@@ -115,6 +128,8 @@ export function GeneralPage() {
     (values.ntp_server !== server.ntp_server ||
       values.fallback_server !== server.fallback_server ||
       values.alert_offset_ms !== server.alert_offset_ms);
+  const proxyChanged =
+    general !== undefined && networkBody(general, values.https_proxy).network !== undefined;
   const systemTask = status.data?.agent.system_task;
 
   function change(next: Partial<GeneralForm>) {
@@ -127,12 +142,16 @@ export function GeneralPage() {
     const found: FieldErrors<GeneralField> = { ...validateClock(values) };
     const name = validateSiteName(values.site_name);
     if (name) found.site_name = name;
+    const proxy =
+      values.https_proxy === undefined ? undefined : validateHttpsProxy(values.https_proxy);
+    if (proxy) found.https_proxy = proxy;
     setErrors(found);
-    if (hasErrors(found)) {
+    if (hasErrors(found) || !general) {
       focusFirstError(found, (field) => `${id}-${field}`);
       return;
     }
-    void flow.start({
+    // The proxy only when it was changed: an API before W5-T refuses a body that names it.
+    const body: GeneralRequest = {
       etag: section.etag,
       site_name: values.site_name.trim(),
       clock: {
@@ -140,15 +159,17 @@ export function GeneralPage() {
         fallback_server: values.fallback_server.trim(),
         alert_offset_ms: parseInteger(values.alert_offset_ms) ?? 0,
       },
+      ...networkBody(general, values.https_proxy),
       probe,
-    });
+    };
+    void flow.start(body);
   }
 
   const message = (field: GeneralField) =>
     fieldMessage(t, flow.problems, errors[field], PATHS[field], { min: 1, max: 60_000 });
   const field = (name: GeneralField) => ({
     id: `${id}-${name}`,
-    value: values[name],
+    value: values[name] ?? '',
     error: message(name),
     disabled: locked,
     onChange: (value: string) => {
@@ -246,6 +267,34 @@ export function GeneralPage() {
               <p className="text-xs text-muted-strong">{t('settings.general.clockReauth')}</p>
             ) : null}
           </SettingsCard>
+          {values.https_proxy !== undefined ? (
+            <SettingsCard
+              title={t('settings.general.network.title')}
+              description={t('settings.general.network.description')}
+              testId="settings-network"
+            >
+              <TextField
+                {...field('https_proxy')}
+                label={t('settings.general.network.proxy')}
+                hint={t('settings.general.network.proxyHint')}
+                placeholder={t('settings.general.network.proxyPlaceholder')}
+                inputClassName="max-w-md"
+                mono
+                spellCheck={false}
+              />
+              <Alert
+                tone="info"
+                assertive={false}
+                title={t('settings.general.network.zamaneNoteTitle')}
+                data-testid="network-zamane-note"
+              >
+                {t('settings.general.network.zamaneNote')}
+              </Alert>
+              {proxyChanged ? (
+                <p className="text-xs text-muted-strong">{t('settings.general.network.reauth')}</p>
+              ) : null}
+            </SettingsCard>
+          ) : null}
           <SectionActions
             state={state}
             flow={flow}

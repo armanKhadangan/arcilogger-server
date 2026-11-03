@@ -97,7 +97,10 @@ export function CreditQuery() {
  * "Kontör" (spec 6.1, 12.3 page 9): the Kamu SM credit history the scheduled Credit task records
  * once a day, the last known number, the alert threshold and a trend line, and "Kontör sorgula".
  * The web service never asks Kamu SM itself (it has no access to the credentials, ADR-0007): a
- * query runs as a task on the server.
+ * query runs as a task on the server. A provider without a credit query (`supported: false`,
+ * Wave 5 contract 2.4, C3, C21; today `rfc3161` and TÜRKTRUST) gets a plain "Kontör" title and
+ * the neutral sentence of 2.6 instead of numbers, and no "Kontör sorgula": the Kamu SM texts stay
+ * Kamu SM's (C13).
  */
 export function CreditsCard({
   credits,
@@ -116,14 +119,16 @@ export function CreditsCard({
     .filter((value): value is number => value !== null);
   const latest = credits?.latest;
   const first = credits?.history[0];
+  // Only the flag decides, never the provider name (C3, C21).
+  const noQuery = credits ? !credits.supported : false;
   return (
     <Card>
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
           <Coins aria-hidden="true" className="size-4 text-muted-strong" />
-          {t('sealing.credits.title')}
+          {t(noQuery ? 'sealing.credits.titleNoQuery' : 'sealing.credits.title')}
         </CardTitle>
-        {credits?.below_threshold ? (
+        {credits?.below_threshold && !noQuery ? (
           <Badge tone="danger" icon={TriangleAlert}>
             {t('sealing.credits.low')}
           </Badge>
@@ -134,6 +139,15 @@ export function CreditsCard({
           <Skeleton className="h-24" />
         ) : error ? (
           <Alert tone="danger">{errorMessage(error)}</Alert>
+        ) : credits && noQuery ? (
+          <>
+            <p className="text-13 text-foreground" data-testid="credits-no-query">
+              {t('sealing.credits.noQuery')}
+            </p>
+            <p className="text-xs text-muted-strong">
+              {t('sealing.credits.provider', { provider: credits.provider })}
+            </p>
+          </>
         ) : credits ? (
           <>
             <div className="flex items-end justify-between gap-3">
@@ -221,7 +235,7 @@ export function CreditsCard({
             <p className="text-xs text-muted">{t('sealing.credits.note')}</p>
           </>
         ) : null}
-        {can('seal.manage') && !pending ? <CreditQuery /> : null}
+        {can('seal.manage') && !pending && !noQuery ? <CreditQuery /> : null}
       </CardContent>
     </Card>
   );
