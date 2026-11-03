@@ -639,8 +639,8 @@ _STEPS: Final[dict[str, tuple[str, str]]] = {
         "3. İlerlemeyen yeniden yüklemede ArciIngest hizmetinin çalıştığını (Get-Service "
         "ArciIngest) ve D:\\ARCILOGGER\\state\\ingest-status.json dosyasını denetleyin; yüklenen "
         "günler hiçbir zaman silinmez, veritabanı bu sürede pencereden büyük kalır.\n"
-        "4. Sonraki başarılı çalıştırma ya da ilerleyen (veya biten) yeniden yükleme uyarıyı "
-        "kendiliğinden kapatır.",
+        "4. Sonraki başarılı çalıştırma ya da ilerleyen (veya biten) yeniden yükleme, ya da "
+        "önündeki sıranın ilerlemesi uyarıyı kendiliğinden kapatır.",
         "1. See in the details which it is: a run of the job failed, or an archive reload (with "
         "its number and days) has made no progress since the previous run.\n"
         "2. For a failed run look at D:\\ARCILOGGER\\logs\\worker.log and the database "
@@ -649,8 +649,8 @@ _STEPS: Final[dict[str, tuple[str, str]]] = {
         "3. For a reload without progress check that the ArciIngest service runs (Get-Service "
         "ArciIngest) and D:\\ARCILOGGER\\state\\ingest-status.json; days being loaded are never "
         "dropped, so the database stays larger than the window meanwhile.\n"
-        "4. The next successful run, or the reload moving on (or ending), closes the alert by "
-        "itself.",
+        "4. The next successful run, or the reload moving on (or ending), or the queue before "
+        "it moving, closes the alert by itself.",
     ),
     "new-log-source": (
         "1. Göndericinin adresini ayrıntılarda görün ve hangi cihaz olduğunu belirleyin.\n"

@@ -36,10 +36,13 @@ seal), no day can come back from the vault: nothing is dropped, only the partiti
 until it is sealed: the database then grows beyond the window, which ``R20-seal`` reports. A
 reload that stays ``queued`` or ``loading`` holds it too, however long (a day being loaded is
 never dropped, and nothing fails it because of its age): the run names one waiting for more than
-a day in ``details.reloads_waiting``, and one that made no progress since the previous successful
-run (the same status and ``bytes_done`` as that run's ``details.reload_progress``) opens the
-alert ``R20-db-window`` (medium, key ``R20-db-window:reload-<id>``, naming the reload and its
-days), resolved by the first run that sees it move on or end.
+a day in ``details.reloads_waiting``. A reload makes no progress when it has the same status and
+``bytes_done`` as the previous successful run's ``details.reload_progress``; a ``loading`` one
+without progress opens the alert ``R20-db-window`` (medium, key ``R20-db-window:reload-<id>``,
+naming the reload and its days), and so does a ``queued`` one, but only while nothing is
+``loading`` and no reload moved on or ended since that run (a queue that moves is no incident;
+manager answer 2 on #121). The alert is resolved by the first run that no longer finds the
+reload so (it moved on or ended, or the queue before it moves).
 
 **Audit** (actor ``system``; the record of the deletion, manager answer 4 on #121):
 
@@ -464,11 +467,19 @@ def previous_progress(session: Session) -> dict[str, Any]:
 
 def report_stuck_reloads(session: Session, now: datetime) -> tuple[dict[str, Any], list[int]]:
     """The progress of this run (kept in its details), and the reloads without progress since
-    the previous successful run: one ``R20-db-window`` alert each (module text); the alerts of
-    reloads that moved on or ended are resolved."""
+    the previous successful run: one ``R20-db-window`` alert each (module text); the other
+    alerts of reloads (moved on, ended, or queued behind a queue that moves) are resolved."""
     progress = reload_progress(session)
     before = previous_progress(session)
-    stuck = sorted(int(key) for key, seen in progress.items() if before.get(key) == seen)
+    # A queue that moves is no incident (manager answer 2 on #121): a queued reload counts only
+    # when nothing loads and no reload moved on or ended since the previous run.
+    moved = any(progress.get(key) != seen for key, seen in before.items())
+    loading = any(seen["status"] == "loading" for seen in progress.values())
+    stuck = sorted(
+        int(key)
+        for key, seen in progress.items()
+        if before.get(key) == seen and (seen["status"] == "loading" or not (moved or loading))
+    )
     keys = {f"{STUCK_KEY}{reload_id}" for reload_id in stuck}
     for reload_id in stuck:
         reload = session.get(ArchiveReload, reload_id)

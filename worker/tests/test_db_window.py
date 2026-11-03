@@ -526,12 +526,39 @@ def test_a_failure_after_the_steps_fails_the_run_and_keeps_the_drop(
 # -- a reload without progress ------------------------------------------------------------------
 
 
+def _run_window(worker: Worker, db_session: Session) -> dict[str, Any]:
+    """One successful run of the job; its details."""
+    assert worker.tick() == [("db.window", "ok")]
+    db_session.expire_all()
+    last = db_session.scalars(
+        select(JobRun).where(JobRun.job == "db.window").order_by(JobRun.id.desc())
+    ).first()
+    assert last is not None
+    return last.details
+
+
+def _window_alerts(db_session: Session) -> dict[str, Alert]:
+    db_session.expire_all()
+    return {
+        str(alert.dedup_key): alert
+        for alert in db_session.scalars(select(Alert).where(Alert.rule == WINDOW_RULE))
+    }
+
+
+def _set_reload(engine: Engine, reload_id: int, **values: Any) -> None:
+    with engine.begin() as connection:
+        connection.execute(
+            update(ArchiveReload).where(ArchiveReload.id == reload_id).values(**values)
+        )
+
+
 def test_a_reload_without_progress_raises_r20_db_window_and_keeps_its_days(
     engine: Engine, db_session: Session, layout: Layout
 ) -> None:
-    """A reload ``queued`` or ``loading`` whose status and ``bytes_done`` are the ones the
-    previous successful run recorded opens one medium alert, naming it and its days; the cutoff
-    keeps waiting at its first day; the alert resolves once the reload moves on or ends."""
+    """A ``loading`` reload whose status and ``bytes_done`` are the ones the previous successful
+    run recorded opens one medium alert, naming it and its days; the reload queued behind it is
+    not named (manager answer 2 on #121); the cutoff keeps waiting at its first day; the alert
+    resolves once the reload moves on or ends."""
     _sealed(layout, date(2026, 1, 1), TODAY + timedelta(days=5))
     loading = _reload(
         db_session, date(2026, 4, 10), date(2026, 4, 12), "loading", bytes_total=900, bytes_done=100
@@ -541,89 +568,176 @@ def test_a_reload_without_progress_raises_r20_db_window_and_keeps_its_days(
     clock = Clock(NOW)
     worker = _window_worker(engine, layout, clock)
 
-    def run() -> dict[str, Any]:
-        assert worker.tick() == [("db.window", "ok")]
-        db_session.expire_all()
-        last = db_session.scalars(
-            select(JobRun).where(JobRun.job == "db.window").order_by(JobRun.id.desc())
-        ).first()
-        assert last is not None
-        return last.details
-
-    def alerts() -> dict[str, Alert]:
-        db_session.expire_all()
-        return {
-            str(alert.dedup_key): alert
-            for alert in db_session.scalars(select(Alert).where(Alert.rule == WINDOW_RULE))
-        }
-
-    details = run()  # the first run: nothing to compare with
+    details = _run_window(worker, db_session)  # the first run: nothing to compare with
     assert details["reload_progress"] == {
         str(queued): {"status": "queued", "bytes_done": 0},
         str(loading): {"status": "loading", "bytes_done": 100},
     }
     assert details["reloads_stuck"] == []
-    assert alerts() == {}
+    assert _window_alerts(db_session) == {}
 
-    # A day later the loading reload moved on, the queued one did not.
+    # A day later neither moved: the loading one is named, the queued one waits behind it.
     clock.now = NOW + timedelta(days=1)
-    with engine.begin() as connection:
-        connection.execute(
-            update(ArchiveReload).where(ArchiveReload.id == loading).values(bytes_done=400)
-        )
-    details = run()
-    assert details["reloads_stuck"] == [queued]
+    details = _run_window(worker, db_session)
+    assert details["reloads_stuck"] == [loading]
     assert (details["cutoff"], details["limited_by"]) == ("2026-03-01", "reload")
-    (alert,) = alerts().values()
-    assert alert.dedup_key == f"{STUCK_KEY}{queued}" == f"R20-db-window:reload-{queued}"
+    (alert,) = _window_alerts(db_session).values()
+    assert alert.dedup_key == f"{STUCK_KEY}{loading}" == f"R20-db-window:reload-{loading}"
     assert (alert.rule, alert.severity, alert.state) == ("R20-db-window", "medium", "open")
     assert {key: alert.details[key] for key in ("reload_id", "first_day", "last_day")} == {
-        "reload_id": queued,
-        "first_day": "2026-03-01",
-        "last_day": "2026-03-02",
+        "reload_id": loading,
+        "first_day": "2026-04-10",
+        "last_day": "2026-04-12",
     }
-    assert alert.details["status"] == "queued"
+    assert (alert.details["status"], alert.details["bytes_done"]) == ("loading", 100)
     assert "operator" not in json.dumps(alert.details) + alert.title  # never who asked
-    assert alert.title.startswith(f"Arşivden yeniden yükleme #{queued} (01.03.2026 - 02.03.2026)")
+    assert alert.title.startswith(f"Arşivden yeniden yükleme #{loading} (10.04.2026 - 12.04.2026)")
     assert alert.details["title_en"].startswith(
-        f"Archive reload #{queued} (2026-03-01 - 2026-03-02) has made no progress"
+        f"Archive reload #{loading} (2026-04-10 - 2026-04-12) has made no progress"
     )
+    assert _days_left(engine) == [date(2026, 3, 1), date(2026, 4, 11), TODAY]
 
-    # The next day neither moved: both named, the cutoff still waits, nothing of theirs goes.
+    # The next day still nothing moved: the same one alert, the cutoff still waits.
     clock.now = NOW + timedelta(days=2)
-    details = run()
-    assert details["reloads_stuck"] == sorted([queued, loading])
-    assert set(alerts()) == {f"{STUCK_KEY}{queued}", f"{STUCK_KEY}{loading}"}
-    assert all(alert.state == "open" for alert in alerts().values())
+    details = _run_window(worker, db_session)
+    assert details["reloads_stuck"] == [loading]
+    assert set(_window_alerts(db_session)) == {f"{STUCK_KEY}{loading}"}
     assert details["cutoff"] == "2026-03-01"
     assert _days_left(engine) == [date(2026, 3, 1), date(2026, 4, 11), TODAY]
 
-    # The loading one is ready, the queued one starts loading: both alerts resolve.
+    # The loading one is ready, the queued one starts loading: the alert resolves.
     clock.now = NOW + timedelta(days=3)
-    with engine.begin() as connection:
-        connection.execute(
-            update(ArchiveReload)
-            .where(ArchiveReload.id == loading)
-            .values(
-                status="ready",
-                bytes_done=900,
-                ready_at=clock.now,
-                expires_at=clock.now + timedelta(days=KEEP),
-            )
-        )
-        connection.execute(
-            update(ArchiveReload).where(ArchiveReload.id == queued).values(status="loading")
-        )
-    details = run()
+    _set_reload(
+        engine,
+        loading,
+        status="ready",
+        bytes_done=900,
+        ready_at=clock.now,
+        expires_at=clock.now + timedelta(days=KEEP),
+    )
+    _set_reload(engine, queued, status="loading")
+    details = _run_window(worker, db_session)
     assert details["reloads_stuck"] == []
     assert details["reload_progress"] == {str(queued): {"status": "loading", "bytes_done": 0}}
-    found = alerts()
+    (alert,) = _window_alerts(db_session).values()
+    assert alert.state == "resolved"
+    assert alert.details["auto_resolved"]["reason"] == PROGRESSED_REASON
+    assert details["cutoff"] == "2026-03-01"  # the reload, now loading, still holds it
+    assert _days_left(engine) == [date(2026, 3, 1), date(2026, 4, 11), TODAY]
+
+
+def test_a_reload_queued_behind_a_progressing_load_raises_no_alert(
+    engine: Engine, db_session: Session, layout: Layout
+) -> None:
+    """A queue that moves is no incident (manager answer 2 on #121): a ``queued`` reload
+    unchanged since the previous run raises nothing while the ``loading`` one before it makes
+    progress, nor in the run that sees that one end, nor while one made since that run loads;
+    the cutoff keeps waiting at its first day."""
+    _sealed(layout, date(2026, 1, 1), TODAY + timedelta(days=5))
+    loading = _reload(
+        db_session, date(2026, 4, 10), date(2026, 4, 12), "loading", bytes_total=900, bytes_done=100
+    )
+    queued = _reload(db_session, date(2026, 3, 1), date(2026, 3, 2), "queued", bytes_total=50)
+    clock = Clock(NOW)
+    worker = _window_worker(engine, layout, clock)
+    assert _run_window(worker, db_session)["reloads_stuck"] == []
+
+    clock.now = NOW + timedelta(days=1)
+    _set_reload(engine, loading, bytes_done=400)
+    details = _run_window(worker, db_session)
+    assert details["reload_progress"] == {
+        str(queued): {"status": "queued", "bytes_done": 0},
+        str(loading): {"status": "loading", "bytes_done": 400},
+    }
+    assert details["reloads_stuck"] == []
+    assert (details["cutoff"], details["limited_by"]) == ("2026-03-01", "reload")
+    assert _window_alerts(db_session) == {}
+
+    # The loading one is ready: the queue moved, the queued one has not waited a run yet.
+    clock.now = NOW + timedelta(days=2)
+    _set_reload(
+        engine,
+        loading,
+        status="ready",
+        bytes_done=900,
+        ready_at=clock.now,
+        expires_at=clock.now + timedelta(days=KEEP),
+    )
+    details = _run_window(worker, db_session)
+    assert details["reload_progress"] == {str(queued): {"status": "queued", "bytes_done": 0}}
+    assert details["reloads_stuck"] == []
+    assert _window_alerts(db_session) == {}
+
+    # A run later nothing loads and the queued one has not moved: now it is named.
+    clock.now = NOW + timedelta(days=3)
+    details = _run_window(worker, db_session)
+    assert details["reloads_stuck"] == [queued]
+    assert set(_window_alerts(db_session)) == {f"{STUCK_KEY}{queued}"}
+    assert details["cutoff"] == "2026-03-01"
+
+    # A reload made since that run is loading already: something loads, the queue moves, the
+    # alert resolves (and the new one has no previous run to stand still since).
+    clock.now = NOW + timedelta(days=4)
+    newer = _reload(
+        db_session, date(2026, 4, 20), date(2026, 4, 20), "loading", bytes_total=80, bytes_done=5
+    )
+    details = _run_window(worker, db_session)
+    assert details["reload_progress"] == {
+        str(queued): {"status": "queued", "bytes_done": 0},
+        str(newer): {"status": "loading", "bytes_done": 5},
+    }
+    assert details["reloads_stuck"] == []
+    (alert,) = _window_alerts(db_session).values()
+    assert (alert.state, alert.details["auto_resolved"]["reason"]) == (
+        "resolved",
+        PROGRESSED_REASON,
+    )
+
+
+def test_queued_reloads_with_nothing_loading_raise_r20_db_window(
+    engine: Engine, db_session: Session, layout: Layout
+) -> None:
+    """``queued`` reloads unchanged since the previous run while nothing is ``loading`` are each
+    named; once one of them starts loading the alert of the other resolves (it waits behind a
+    queue that moves), and when the loading one then stands still only that one is named."""
+    _sealed(layout, date(2026, 1, 1), TODAY + timedelta(days=5))
+    first = _reload(db_session, date(2026, 3, 1), date(2026, 3, 2), "queued", bytes_total=50)
+    second = _reload(db_session, date(2026, 4, 10), date(2026, 4, 10), "queued", bytes_total=70)
+    clock = Clock(NOW)
+    worker = _window_worker(engine, layout, clock)
+    assert _run_window(worker, db_session)["reloads_stuck"] == []
+
+    clock.now = NOW + timedelta(days=1)
+    details = _run_window(worker, db_session)
+    assert details["reloads_stuck"] == sorted([first, second])
+    found = _window_alerts(db_session)
+    assert set(found) == {f"{STUCK_KEY}{first}", f"{STUCK_KEY}{second}"}
+    assert {alert.state for alert in found.values()} == {"open"}
+    assert found[f"{STUCK_KEY}{second}"].details["status"] == "queued"
+    assert (details["cutoff"], details["limited_by"]) == ("2026-03-01", "reload")
+
+    # The second starts loading: it moved on, and the first now waits behind a moving queue.
+    clock.now = NOW + timedelta(days=2)
+    _set_reload(engine, second, status="loading", bytes_done=10)
+    details = _run_window(worker, db_session)
+    assert details["reloads_stuck"] == []
+    found = _window_alerts(db_session)
     assert {alert.state for alert in found.values()} == {"resolved"}
     assert {alert.details["auto_resolved"]["reason"] for alert in found.values()} == {
         PROGRESSED_REASON
     }
-    assert details["cutoff"] == "2026-03-01"  # the reload, now loading, still holds it
-    assert _days_left(engine) == [date(2026, 3, 1), date(2026, 4, 11), TODAY]
+    assert details["cutoff"] == "2026-03-01"
+
+    # The loading one stands still: it is named, the queued one behind it is not.
+    clock.now = NOW + timedelta(days=3)
+    details = _run_window(worker, db_session)
+    assert details["reloads_stuck"] == [second]
+    db_session.expire_all()
+    open_keys = db_session.scalars(
+        select(Alert.dedup_key).where(Alert.rule == WINDOW_RULE, Alert.state == "open")
+    ).all()
+    assert open_keys == [f"{STUCK_KEY}{second}"]  # a new alert: the one before was resolved
+    assert details["cutoff"] == "2026-03-01"
 
 
 def test_r20_db_window_has_its_texts_and_describer() -> None:
