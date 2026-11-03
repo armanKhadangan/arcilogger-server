@@ -1,7 +1,8 @@
 """The renewal record format and the long-term status of a token (Wave 5 §2.1.1-§2.1.2, D2, D5).
 
-Pure facts on a fixed clock: no time-stamp authority and no disk. The day's TSA certificate
-expires at ``CNA``; each test moves ``now`` (and the renewals' genTimes and certificates)
+Pure facts on a fixed clock: no time-stamp authority, and the code under test reads no disk
+(two tests take a configuration from the ``world`` fixture). The day's TSA certificate expires
+at ``CNA``; each test moves ``now`` (and the renewals' genTimes and certificates)
 relative to it, so the window and expiry boundaries are exact to the second.
 """
 
@@ -12,7 +13,7 @@ import json
 import re
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
@@ -33,6 +34,7 @@ from arcilogger_core.renewal import (
     system_block,
     tsa_block,
 )
+from arcilogger_core.tsa.base import TimestampProvider
 from arcilogger_core.tsa.mock import MockTsaProvider
 
 T0 = datetime(2026, 10, 12, 21, 10, 5, tzinfo=UTC)
@@ -178,6 +180,8 @@ def test_a_three_deep_chain_covers_the_day_through_each_link() -> None:
         r2.token.path: ("covered", r3.record_path, r3.gen_time),
         r3.token.path: ("not_due", None, None),
     }
+    # The order the facts are read in decides nothing.
+    assert statuses(tokens[::-1], (r3, r2, r1), now) == found
     # Without the last link the second renewal is due, so it no longer counts for the first,
     # and the first no longer counts for the day.
     found = statuses(tokens[:3], (r1, r2), now)
@@ -238,6 +242,17 @@ def test_the_earliest_counting_renewal_decides() -> None:
     assert found[DAY.path] == ("covered", same.record_path, same.gen_time)
 
 
+def test_the_earliest_of_two_late_renewals_decides() -> None:
+    first = renewal(
+        "2031-10-22-1", gen_time=CNA + timedelta(days=10), cert_not_after=CNA + 5 * WINDOW
+    )
+    second = renewal(
+        "2031-10-27-1", gen_time=CNA + timedelta(days=15), cert_not_after=CNA + 5 * WINDOW
+    )
+    found = statuses((DAY,), (second, first), CNA + timedelta(days=20))
+    assert found[DAY.path] == ("late", first.record_path, first.gen_time)
+
+
 def test_a_cycle_of_renewals_does_not_count() -> None:
     # Real hashes cannot form one; the guard keeps the recursion finite all the same.
     now = CNA - timedelta(days=50)
@@ -253,6 +268,11 @@ def test_a_cycle_of_renewals_does_not_count() -> None:
     )
     found = statuses((first, second), renewals, now)
     assert {status for status, _, _ in found.values()} == {"due"}
+    # Nor does a renewal that lists its own token.
+    selfish = RenewalFact(
+        "renewals/2030-01-01-1.json", first, T0, True, frozenset({first.token_sha256})
+    )
+    assert statuses((first,), (selfish,), now)[first.path] == ("due", None, None)
 
 
 # -- the record -----------------------------------------------------------------------------------
@@ -285,6 +305,7 @@ DELETION = RecordEntry(
 )
 SYSTEM = {"name": PRODUCT_NAME, "version": __version__, "site": "Örnek A.Ş."}
 TSA = {"provider": "zamane", "legal_grade": True, "digest": "sha256"}
+MOCK_TSA = {"provider": "mock", "legal_grade": False, "digest": "sha256"}
 CREATED = datetime(2031, 5, 4, 0, 10, tzinfo=UTC)
 
 
@@ -331,14 +352,18 @@ def test_protects_repeats_the_original_hashes() -> None:
 def test_record_shape_is_the_contract_shape(world: Any) -> None:
     r1 = record(day_entry("r1"))
     entries = (renewal_entry("2029-01-03-1", r1), REPORT, day_entry(), DELETION)
-    built = build_record(entries, created_at=CREATED, system=SYSTEM, tsa=TSA, reason="test")
+    built = build_record(entries, created_at=CREATED, system=SYSTEM, tsa=TSA, reason="due")
     assert set(built) == {"schema", "created_at", "system", "tsa", "reason", "tokens"}
     assert built["schema"] == RENEWAL_SCHEMA == "arcilogger.renewal/1"
     # Site time with milliseconds, like a manifest's.
     assert built["created_at"] == "2031-05-04T03:10:00.000+03:00"
     assert built["system"] == SYSTEM
     assert built["tsa"] == TSA
-    assert built["reason"] == "test"
+    assert built["reason"] == "due"
+    # A provider whose claim is not legal grade writes "test" (D5), relaxed or not.
+    for tsa in (MOCK_TSA, {**MOCK_TSA, "require_critical_eku": False}):
+        test = build_record(entries, created_at=CREATED, system=SYSTEM, tsa=tsa, reason="test")
+        assert (test["tsa"], test["reason"], test["tokens"]) == (tsa, "test", built["tokens"])
     paths = [entry["path"] for entry in built["tokens"]]
     assert (
         paths
@@ -378,13 +403,18 @@ def test_record_shape_is_the_contract_shape(world: Any) -> None:
     world.reconfigure(site_name="Örnek A.Ş.")
     provider = MockTsaProvider(world.tsa)
     assert system_block(world.config) == SYSTEM
-    assert tsa_block(provider, world.config) == {
-        "provider": "mock",
-        "legal_grade": False,
-        "digest": "sha256",
-    }
+    assert tsa_block(provider, world.config) == MOCK_TSA
+    # The claim is the provider's, whatever the configuration says.
+    assert tsa_block(cast(TimestampProvider, LegalProvider()), world.config) == TSA
     world.reconfigure(tsa={"provider": "mock", "require_critical_eku": False})
-    assert tsa_block(provider, world.config)["require_critical_eku"] is False
+    assert tsa_block(provider, world.config) == {**MOCK_TSA, "require_critical_eku": False}
+
+
+class LegalProvider:
+    """A provider that claims legal grade; only its name and claim are read."""
+
+    name = "zamane"
+    legal_grade = True
 
 
 def broken(kind: str, path: str, **fields: Any) -> tuple[RecordEntry, ...]:
@@ -398,16 +428,35 @@ REFUSED = {
     "upper-case hex": (RecordEntry("day", DAY.path, sha("t").upper(), CNA, DAY_DATE, sha("m")),),
     "a day without its manifest": broken("day", DAY.path, day=DAY_DATE),
     "a day without its date": broken("day", DAY.path, manifest_sha256=sha("m")),
-    "a deletion with a manifest": broken("deletion", DELETION.path, manifest_sha256=sha("m")),
+    "a deletion with a manifest": broken(
+        "deletion", DELETION.path, record_sha256=sha("r"), manifest_sha256=sha("m")
+    ),
+    "a deletion with a day": broken(
+        "deletion", DELETION.path, record_sha256=sha("r"), day=DAY_DATE
+    ),
+    "a deletion without its record": broken("deletion", DELETION.path),
+    "a day with a record_sha256": broken(
+        "day", DAY.path, day=DAY_DATE, manifest_sha256=sha("m"), record_sha256=sha("r")
+    ),
     "a report outside exports": broken(
         "report", "reports/ARCILOGGER-5651-rapor-7.pdf.zd", record_sha256=sha("p")
     ),
     "a vault token under exports": broken(
         "deletion", "exports/deletions/x-imha.json.zd", record_sha256=sha("r")
     ),
-    "a path out of the vault": broken(
-        "deletion", "../deletions/x-imha.json.zd", record_sha256=sha("r")
-    ),
+    **{
+        f"the path {path!r}": broken("deletion", path, record_sha256=sha("r"))
+        for path in (
+            "",
+            "../deletions/x-imha.json.zd",
+            "/deletions/x-imha.json.zd",
+            "deletions\\x-imha.json.zd",
+            "C:/deletions/x-imha.json.zd",
+            "//server/deletions/x-imha.json.zd",
+            "deletions//x-imha.json.zd",
+            "./deletions/x-imha.json.zd",
+        )
+    },
     "a record, not its token": broken("deletion", "deletions/x-imha.json", record_sha256=sha("r")),
     "a report that protects": broken(
         "report", REPORT.path, record_sha256=sha("p"), protects=(sha("x"),)
@@ -430,8 +479,20 @@ def test_a_record_that_breaks_the_format_is_refused(entries: tuple[RecordEntry, 
         (SYSTEM, TSA, "later"),
         ({**SYSTEM, "host": "example"}, TSA, "due"),
         (SYSTEM, {"provider": "mock"}, "due"),
+        (SYSTEM, {**TSA, "require_critical_eku": True}, "due"),
+        (SYSTEM, TSA, "test"),
+        (SYSTEM, MOCK_TSA, "due"),
+        (SYSTEM, {**MOCK_TSA, "legal_grade": "yes"}, "due"),
     ],
-    ids=["an unknown reason", "a system with the host", "a tsa block without its claim"],
+    ids=[
+        "an unknown reason",
+        "a system with the host",
+        "a tsa block without its claim",
+        "a tsa block with the default EKU rule",
+        "a test record of a legal-grade claim",
+        "a due record of a test claim",
+        "a claim that is not a boolean",
+    ],
 )
 def test_the_blocks_and_the_reason_are_checked(
     system: dict[str, str], tsa: dict[str, Any], reason: Any

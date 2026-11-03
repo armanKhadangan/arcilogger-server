@@ -54,6 +54,9 @@ REASONS: Final[tuple[Reason, ...]] = ("due", "test")
 DEFAULT_RENEW_BEFORE_DAYS: Final = 180
 
 _HEX64 = re.compile(r"[0-9a-f]{64}")
+#: A Windows drive (``C:``); with an empty segment (a leading ``/``, a ``//`` UNC prefix) it
+#: marks a path that is not relative.
+_DRIVE = re.compile(r"[A-Za-z]:")
 _SYSTEM_KEYS = frozenset({"name", "version", "site"})
 _TSA_KEYS = frozenset({"provider", "legal_grade", "digest"})
 
@@ -63,7 +66,8 @@ class RenewalRecordError(ValueError):
 
 
 def renew_before_days(config: Config) -> int:
-    """``tsa.renew_before_days`` of ``config``: the one place that reads it.
+    """``tsa.renew_before_days`` of ``config``: the one place in ``arcilogger_core`` that reads
+    it (W5-C's ``legalstatus/options.py`` has its own reader).
 
     The key is added to :class:`~arcilogger_core.config.Config` by W5-T's day-1 configuration
     pull request (issue #98), which has not landed on this branch yet. Until it has, it is read
@@ -109,11 +113,11 @@ class RecordEntry:
         if self.kind not in KINDS:
             raise RenewalRecordError(f"unknown kind: {self.kind!r}")
         path = self.path
+        parts = path.split("/")
         if (
-            not path
-            or path.startswith("/")
-            or "\\" in path
-            or ".." in path.split("/")
+            "\\" in path
+            or _DRIVE.match(path)
+            or any(part in ("", ".", "..") for part in parts)
             or not path.endswith(".zd")
         ):
             raise RenewalRecordError(f"not a relative token path: {path!r}")
@@ -174,7 +178,8 @@ def build_record(
     """The renewal record (§2.1.1) for ``entries``, ready for ``canonical_json``.
 
     ``created_at`` is written in site time with milliseconds, like a manifest's; ``tokens`` are
-    sorted by ``path``, and a path may appear once.
+    sorted by ``path``, and a path may appear once. ``reason`` follows the claim of the ``tsa``
+    block: ``due`` exactly when it is legal grade, else ``test`` (§2.1.2, D5).
     """
     if reason not in REASONS:
         raise RenewalRecordError(f"unknown reason: {reason!r}")
@@ -182,6 +187,12 @@ def build_record(
         raise RenewalRecordError(f"system needs exactly {sorted(_SYSTEM_KEYS)}")
     if not _TSA_KEYS <= set(tsa) <= _TSA_KEYS | {"require_critical_eku"}:
         raise RenewalRecordError(f"tsa needs {sorted(_TSA_KEYS)}")
+    if tsa.get("require_critical_eku", False) is not False:
+        raise RenewalRecordError("tsa carries require_critical_eku only when relaxed (false)")
+    if reason != ("due" if tsa["legal_grade"] is True else "test"):
+        raise RenewalRecordError(
+            f"reason {reason!r} does not match the claim {tsa['legal_grade']!r}"
+        )
     tokens = sorted((entry.as_json() for entry in entries), key=lambda entry: entry["path"])
     paths = [entry["path"] for entry in tokens]
     if not tokens or len(set(paths)) != len(paths):
