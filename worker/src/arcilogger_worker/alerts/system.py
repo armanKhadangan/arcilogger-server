@@ -1947,30 +1947,38 @@ def _renewal_status(value: Any) -> TypeGuard[StampRenewalStatus]:
     return isinstance(value, str) and value in STAMP_RENEWAL_STATUSES
 
 
+#: The last moment the site calendar can show (+03:00): a later UTC time cannot be converted.
+_LAST_SITE_MOMENT: Final = datetime.max.replace(tzinfo=SITE_TZ).astimezone(UTC)
+
+
+def _calendar_time(value: Any) -> datetime | None:
+    """:func:`_time`, ``None`` for a time at the edge of the calendar that cannot be shown in
+    UTC or in site time (no certificate's or fetch's: the readers never fail on it)."""
+    moment = _time(value)
+    try:
+        return moment if moment is None or moment.astimezone(UTC) <= _LAST_SITE_MOMENT else None
+    except OverflowError:
+        return None
+
+
 def _stamp_renewal(entry: Any) -> StampRenewal | None:
     if not isinstance(entry, dict):
         return None
     path, status, not_after = (
         entry.get("path"),
         entry.get("status"),
-        _time(entry.get("cert_not_after")),
+        _calendar_time(entry.get("cert_not_after")),
     )
-    if not isinstance(path, str) or not path or not _renewal_status(status):
-        return None
-    try:
-        not_after = not_after.astimezone(UTC) if not_after is not None else None
-    except OverflowError:  # a time at the edge of the calendar: not a certificate's
-        not_after = None
-    if not_after is None:
+    if not isinstance(path, str) or not path or not _renewal_status(status) or not_after is None:
         return None
     covered_by = entry.get("covered_by")
     return StampRenewal(
         path=path,
         kind=str(entry.get("kind") or ""),
-        cert_not_after=not_after,
+        cert_not_after=not_after.astimezone(UTC),
         status=status,
         covered_by=covered_by if isinstance(covered_by, str) and covered_by else None,
-        renewed_at=_time(entry.get("renewed_at")),
+        renewed_at=_calendar_time(entry.get("renewed_at")),
     )
 
 
@@ -2045,7 +2053,8 @@ def read_crl_index(layout: Layout) -> CrlIndexState:
 def _crl_list(item: Any) -> CrlListEntry | None:
     if not isinstance(item, dict):
         return None
-    this_update, fetched_at = _time(item.get("this_update")), _time(item.get("fetched_at"))
+    # fetched_at is shown in site time; the list's own times are only compared
+    this_update, fetched_at = _time(item.get("this_update")), _calendar_time(item.get("fetched_at"))
     next_update = _time(item.get("next_update"))
     issuer_sha256 = item.get("issuer_sha256")
     if this_update is None or fetched_at is None or not isinstance(issuer_sha256, str):
@@ -2063,7 +2072,7 @@ def _crl_list(item: Any) -> CrlListEntry | None:
 
 
 def _crl_failure(item: Any) -> CrlFailureEntry | None:
-    at = _time(item.get("at")) if isinstance(item, dict) else None
+    at = _calendar_time(item.get("at")) if isinstance(item, dict) else None
     if at is None:
         return None
     return CrlFailureEntry(
@@ -2207,9 +2216,11 @@ def crl_status(
 
 
 def shifted(moment: datetime, delta: timedelta) -> datetime | None:
-    """``moment + delta``, ``None`` beyond the calendar (a time no reader should fail on)."""
+    """``moment + delta``, ``None`` beyond the calendar or the last moment site time can show
+    (a time no reader should fail on)."""
     try:
-        return moment + delta
+        moved = moment + delta
+        return moved if moved.astimezone(UTC) <= _LAST_SITE_MOMENT else None
     except OverflowError:
         return None
 

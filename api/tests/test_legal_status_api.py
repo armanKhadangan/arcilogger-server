@@ -684,7 +684,7 @@ NESTED = "[" * 100_000 + "]" * 100_000
                             {
                                 "path": "2026/10/29/manifest-2026-10-29.json.zd",
                                 "kind": "day",
-                                "cert_not_after": f"0001-01-01T00:00:00{offset}",
+                                "cert_not_after": not_after,
                                 "status": status,
                                 "covered_by": None,
                             }
@@ -692,7 +692,13 @@ NESTED = "[" * 100_000 + "]" * 100_000
                     }
                 ),
             )
-            for offset in ("+00:00", "+03:00")
+            # +03:00 in UTC, or the last UTC times in site time, is beyond the calendar
+            for not_after in (
+                "0001-01-01T00:00:00+00:00",
+                "0001-01-01T00:00:00+03:00",
+                "9999-12-31T21:00:00+00:00",
+                "9999-12-31T23:59:59-05:00",
+            )
             for status in ("due", "uncovered")
         ),
         *(

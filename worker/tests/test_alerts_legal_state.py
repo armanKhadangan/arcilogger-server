@@ -45,6 +45,7 @@ from arcilogger_worker.alerts.system import (
     read_stamp_renewals,
     revoked_certificates,
     scheduled_verifications,
+    shifted,
     stamp_in_use,
     stamp_renewal_path,
     stored_lists,
@@ -245,15 +246,26 @@ def test_crl_index_missing_is_empty_and_bad_entries_are_left_out(layout: Layout)
             {**good, "this_update": "yesterday"},
             {**good, "next_update": "soon"},
             {**good, "fetched_at": "2026-11-02T03:10:00"},  # no time zone
+            # a fetch time beyond what site time can show is no fetch's
+            {**good, "fetched_at": "9999-12-31T21:00:00+00:00"},
+            {**good, "fetched_at": "0001-01-01T00:00:00+03:00"},
             {**good, "issuer_sha256": None},
+            {**good, "issuer_sha256": ["a1"]},
             ["not", "an", "entry"],
-            failures=({"url": "http://198.51.100.7/ca.crl", "error": "unreachable"},),
+            failures=(
+                {"url": "http://198.51.100.7/ca.crl", "error": "unreachable"},
+                {"url": "http://198.51.100.7/ca.crl", "at": "9999-12-31T21:30:00Z"},
+            ),
         ),
     )
     state = read_crl_index(layout)
     assert state.readable
     assert len(state.lists) == 1
     assert state.failures == ()
+    # the list's own times are only compared: a next update at the calendar's end is kept
+    write(crl_index_path(layout), index({**good, "next_update": "9999-12-31T23:59:59Z"}))
+    (kept,) = read_crl_index(layout).lists
+    assert kept.next_update == datetime(9999, 12, 31, 23, 59, 59, tzinfo=UTC)
 
 
 @pytest.mark.parametrize(
@@ -513,8 +525,19 @@ def test_stamp_renewals_leave_out_a_time_at_the_edge_of_the_calendar(layout: Lay
         report(
             token("2026-10-01", "due", "0001-01-01T00:00:00+03:00"),
             token("2026-10-02", "due", "2031-08-30T21:30:00Z"),
+            token("2026-10-03", "uncovered", "9999-12-31T21:00:00+00:00"),  # 10000 in site time
+            token("2026-10-04", "uncovered", "9999-12-31T23:59:59-05:00"),
+            token("2026-10-05", "due", "9999-12-31T20:59:59+00:00"),  # the last one shown
+            {
+                **token("2026-10-06", "covered", "2031-08-30T21:30:00Z"),
+                "renewed_at": "9999-12-31T22:00:00Z",
+            },
         ),
     )
-    assert [renewal.path for renewal in read_stamp_renewals(layout) or ()] == [
-        "2026/10/02/manifest-2026-10-02.json.zd"
-    ]
+    found = read_stamp_renewals(layout) or ()
+    assert [renewal.path[:10] for renewal in found] == ["2026/10/02", "2026/10/05", "2026/10/06"]
+    assert found[1].cert_not_after == datetime(9999, 12, 31, 20, 59, 59, tzinfo=UTC)
+    assert found[2].renewed_at is None  # an edge renewal time is not known
+    assert shifted(found[1].cert_not_after, timedelta(seconds=1)) is None
+    assert shifted(datetime(1, 1, 1, tzinfo=UTC), -timedelta(days=30)) is None
+    assert shifted(NOW, timedelta(days=7)) == NOW + timedelta(days=7)
