@@ -202,7 +202,9 @@ def test_no_pinned_root_exits_2_and_keeps_the_last_statuses(
     before = cli.state()
     empty = cli.config.parent / "empty-roots"
     empty.mkdir()
-    cli.configure(f'provider = "rfc3161"\nurl = "http://192.0.2.10"\nroots_dir = "{empty}"')
+    cli.configure(
+        f'provider = "rfc3161"\nurl = "http://192.0.2.10"\nroots_dir = "{empty.as_posix()}"'
+    )
     assert cli.run("--json", now=CNA - timedelta(days=100)) == 2
     data = _json(capsys)
     assert (data["error"]["code"], data["report"]) == ("roots", None)
@@ -219,7 +221,9 @@ def test_no_root_and_no_earlier_state_leaves_the_statuses_unknown(
     """Without a token list W5-C's reader says "unknown", never "nothing is due"."""
     empty = cli.config.parent / "empty-roots"
     empty.mkdir()
-    cli.configure(f'provider = "rfc3161"\nurl = "http://192.0.2.10"\nroots_dir = "{empty}"')
+    cli.configure(
+        f'provider = "rfc3161"\nurl = "http://192.0.2.10"\nroots_dir = "{empty.as_posix()}"'
+    )
     assert cli.run(now=CNA) == 2
     assert "(roots)" in capsys.readouterr().err
     state = cli.state()
@@ -553,7 +557,9 @@ def test_an_unreadable_pinned_root_is_refused(cli: Cli, capsys: pytest.CaptureFi
     (cli.roots / "damaged.pem").write_text(
         "-----BEGIN CERTIFICATE-----\nAAAA\n-----END CERTIFICATE-----\n", encoding="ascii"
     )
-    cli.configure(f'provider = "rfc3161"\nurl = "http://192.0.2.10"\nroots_dir = "{cli.roots}"')
+    cli.configure(
+        f'provider = "rfc3161"\nurl = "http://192.0.2.10"\nroots_dir = "{cli.roots.as_posix()}"'
+    )
     assert cli.run("--json", now=CNA - timedelta(days=100)) == 2
     data = _json(capsys)
     assert (data["outcome"], data["error"]["code"], data["report"]) == ("refused", "roots", None)
@@ -565,7 +571,9 @@ def test_a_dry_run_without_roots_exits_2_and_writes_nothing(
 ) -> None:
     empty = cli.config.parent / "empty-roots"
     empty.mkdir()
-    cli.configure(f'provider = "rfc3161"\nurl = "http://192.0.2.10"\nroots_dir = "{empty}"')
+    cli.configure(
+        f'provider = "rfc3161"\nurl = "http://192.0.2.10"\nroots_dir = "{empty.as_posix()}"'
+    )
     assert cli.run("--dry-run", "--json", now=CNA) == 2
     data = _json(capsys)
     assert (data["outcome"], data["dry_run"], data["state_written"]) == ("refused", True, False)
