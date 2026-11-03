@@ -53,11 +53,12 @@ REFUSALS: list[tuple[str, Any, str, str]] = [
         "setting usage.background_ports: value cannot be audited exactly: floating-point numbers "
         "are not allowed in canonical documents",
     ),
+    ("evidence.keep_days", 0, "setting_below_minimum", "evidence.keep_days: en az 1 olmalı"),
     (
         "lookup.max_session_seconds",
         59,
-        "setting_below_minimum",
-        "lookup.max_session_seconds: en az 60 olmalı",
+        "setting_out_of_range",
+        "lookup.max_session_seconds: en az 60, en çok 172800 olmalı",
     ),
     (
         "lookup.max_candidates",
@@ -108,6 +109,12 @@ REFUSALS: list[tuple[str, Any, str, str]] = [
         {"dhcp61": 5},
         "setting_lease_seconds",
         "lease.server_seconds: 'dhcp61' için en az 60 saniye gerekir",
+    ),
+    (
+        "lease.server_seconds",
+        {"dhcp61": 1_209_600},
+        "setting_lease_seconds",
+        "lease.server_seconds: 'dhcp61' için en çok 604800 saniye girilebilir",
     ),
     ("privacy.notice_version", " ", "setting_empty", "privacy.notice_version: boş olamaz"),
     (
@@ -287,9 +294,13 @@ def test_the_bounds_are_named_in_both_languages() -> None:
     assert caught.value.message_tr == "1 ile 20 arasında olmalı."
     assert caught.value.message_en == "Must be between 1 and 20."
     with pytest.raises(SettingValueError) as caught:
+        validate_setting("evidence.keep_days", 0)
+    assert caught.value.message_tr == "En az 1 olmalı."
+    assert caught.value.message_en == "Must be at least 1."
+    with pytest.raises(SettingValueError) as caught:
         validate_setting("lease.default_seconds", 30)
-    assert caught.value.message_tr == "En az 60 olmalı."
-    assert caught.value.message_en == "Must be at least 60."
+    assert caught.value.message_tr == "60 ile 604800 arasında olmalı."
+    assert caught.value.message_en == "Must be between 60 and 604800."
     with pytest.raises(SettingValueError) as caught:
         validate_setting("lookup.report_timestamp", "yes")
     assert caught.value.message_en == "Wrong type of value: true/false expected."
