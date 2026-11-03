@@ -327,9 +327,8 @@ test.describe('Mühürleme', () => {
     page,
   }) => {
     await mockApi(page, { signedInAs: 'tolga' });
-    // Hand-built until W5-C's samples carry a TÜRKTRUST credit status; `supported` is cast in
-    // until W5-C adds it to `Credits` (C2, C3).
-    const credits = {
+    // Hand-built: the captured credit samples are of providers with a query (`zamane`, `mock`).
+    const credits: Credits = {
       provider: 'turktrust',
       supported: false,
       legal_grade: true,
@@ -339,7 +338,7 @@ test.describe('Mühürleme', () => {
       below_threshold: false,
       history: [],
       unreadable_lines: 0,
-    } as Credits;
+    };
     await page.route('**/api/v1/credits', (route) => route.fulfill({ json: credits }));
     await page.goto('/sealing');
     await expect(page.getByRole('heading', { name: 'Kontör', exact: true })).toBeVisible();

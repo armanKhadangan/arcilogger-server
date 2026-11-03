@@ -15,8 +15,8 @@ import { mockW4 } from './mock-w4';
 import { SAMPLE_TODAY } from './samples';
 
 /**
- * The legal-validity banner (Wave 5 contract 2.3.2, 3 W5-D) on the hand-built answers of
- * `mock-legal.ts`: the danger banner of the mock provider on every page the auditor opens (also
+ * The legal-validity banner (Wave 5 contract 2.3.2, 3 W5-D) on the answers of `mock-legal.ts`
+ * (the captured `samples/legal-status.json` cases, and combinations of their reasons): the danger banner of the mock provider on every page the auditor opens (also
  * a refused page and an unknown path, which are drawn in the same shell), the 24-hour pause of a
  * warning across a reload, "ve N uyarı daha", the 5-minute refresh in the background, and axe in
  * light and dark on a danger and a warning banner with the list open.
@@ -237,7 +237,15 @@ for (const theme of ['light', 'dark'] as Theme[]) {
       const shown = banner(page).getByTestId('legal-banner-legal_root_missing');
       await shown.getByRole('button', { name: 've 3 uyarı daha' }).click();
       await expect(shown.getByRole('listitem')).toHaveCount(3);
-      await expect(shown.getByRole('link')).toHaveCount(3);
+      // Every reason has its link, the stale revocation list too (C5).
+      const links = shown.getByRole('link');
+      await expect(links).toHaveText([
+        'Ayarlar → Zaman damgası',
+        'Mühürleme sayfası',
+        'Ayarlar → Zaman damgası',
+        'Mühürleme sayfası',
+      ]);
+      await expect(links.nth(2)).toHaveAttribute('href', '/settings/kamusm');
       await expectNoA11yViolations(page);
     });
 

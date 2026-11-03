@@ -323,9 +323,9 @@ async function titlesFit(page: Page): Promise<string[]> {
 }
 
 /**
- * The Panel's blocking day (Wave 5 contract 2.3.1 `DashboardSeal.blocking`), hand-built until W5-C's
- * captured summary carries the field (the capture's own is expected to be `null`): the capture's
- * failed 11.10.2026, 51 hours late.
+ * The Panel's blocking day (Wave 5 contract 2.3.1 `DashboardSeal.blocking`): the captured
+ * summaries have none (`blocking: null`), so it is hand-built: the capture's failed 11.10.2026,
+ * 51 hours late.
  */
 const BLOCKING = { oldest_unstamped_day: '2026-10-11', hours_late: 51 };
 
