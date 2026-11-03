@@ -4,7 +4,6 @@ import { ROLES } from '@/lib/permissions';
 import { DASHBOARD, USAGE } from '@/test/samples';
 
 import {
-  blockingOf,
   categorySlices,
   clockVerdict,
   creditDuration,
@@ -133,7 +132,7 @@ describe('visible blocks', () => {
 
   it('a blocking day adds the blocking card, only beside the seal box', () => {
     const admin = withBlocking(summaryFor('admin'));
-    expect(blockingOf(admin.seal)).toEqual(BLOCKING);
+    expect(admin.seal?.blocking).toEqual(BLOCKING);
     expect(visibleBlocks(granted('admin'), admin, usage).has('blocking')).toBe(true);
     expect(
       visibleBlocks(granted('auditor'), withBlocking(summaryFor('auditor')), usage).has('blocking'),
@@ -152,14 +151,11 @@ describe('visible blocks', () => {
 
   it('no blocking card for `null`, nor from an API without the field', () => {
     const none = withBlocking(summaryFor('admin'), null);
-    expect(blockingOf(none.seal)).toBeNull();
+    expect(none.seal?.blocking).toBeNull();
     expect(visibleBlocks(granted('admin'), none, usage).has('blocking')).toBe(false);
     const older = summaryFor('admin');
     if (older.seal) delete (older.seal as { blocking?: unknown }).blocking;
-    expect(blockingOf(older.seal)).toBeNull();
     expect(visibleBlocks(granted('admin'), older, usage).has('blocking')).toBe(false);
-    expect(blockingOf(null)).toBeNull();
-    expect(blockingOf(undefined)).toBeNull();
   });
 
   it('links only to pages the user may open', () => {

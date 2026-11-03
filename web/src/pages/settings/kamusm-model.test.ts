@@ -664,6 +664,8 @@ describe('Ayarlar → Zaman damgası: re-stamping and revocation lists (Wave 5 c
       expect(text(locale, 'settings.kamusm.evidence.crlMaxAgeDaysHint')).toMatch(
         /\{\{min\}\}–\{\{max\}\}.*\b7\b/,
       );
+      // C22: fresh by the last fetch and the list's own nextUpdate, not by its thisUpdate.
+      expect(text(locale, 'settings.kamusm.evidence.crlMaxAgeDaysHint')).toContain('nextUpdate');
       expect(text(locale, 'settings.kamusm.evidence.crlUrlsHint')).toMatch(/\{\{max\}\}/);
       expect(text(locale, 'settings.kamusm.errors.crlUrlsCount')).toMatch(/\{\{max\}\}/);
       // No provider address is written into a text either (K10, T4).

@@ -1,34 +1,76 @@
 /**
- * Fixtures of the Wave 5 web tests: answers of `GET /legal-status`, hand-built from contract
- * §2.3.1/§2.6 until W5-E captures `samples/legal-status.json`. The sentences are the §2.6 texts
- * verbatim with their fields filled (`{count}`, `{hours}`, `{days}`, `{name}`), as W5-C's API words
- * them; the levels, the order (danger first, then by code) and the links follow §2.3.1. They tell
- * the story of one site at the captured samples' clock (13.10.2026 07:00): the mock provider since
- * installation, or Kamu SM (`zamane`) with two closed days late, 14 tokens due for re-stamping
- * within the 180-day window and no revocation list newer than 7 days.
+ * Fixtures of the Wave 5 web tests: answers of `GET /legal-status` (contract §2.3.1/§2.6). The
+ * named statuses are the captured samples (`e2e/samples/legal-status.json`, written by
+ * `web/scripts/capture_api_samples.py` from W5-C's API): {@link LEGAL_OK},
+ * {@link LEGAL_PROVIDER_NOT_LEGAL}, {@link LEGAL_WARNING_ONLY}, {@link LEGAL_MIXED} and
+ * {@link LEGAL_REVOKED}. {@link LEGAL_REASONS} holds one reason of each code, the captured one
+ * where a sample has it; the two codes no captured case reaches (`credentials_in_clear`,
+ * `renewal_uncovered`) are hand-built from the §2.6 texts, worded as the API words them.
  *
  * Shared by the unit tests and the E2E mock (`e2e/mock-legal.ts`), so it imports nothing with the
- * `@/` alias and reads no file. Copy a value before changing it.
+ * `@/` alias; both run in `web/`, where it reads the file as `src/test/samples.ts` does. Copy a
+ * value before changing it.
  */
+
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 
 import type { LegalReason, LegalReasonCode, LegalStatus } from '../lib/legal-status-types';
 
-/** When the API computed the status (07:00 at the site, +03:00). */
-export const LEGAL_CHECKED_AT = '2026-10-13T04:00:00Z';
+/** The captured cases of `samples_legal_status.py` and the refusal without a session. */
+interface LegalSamples {
+  ok: LegalStatus;
+  provider_not_legal: LegalStatus;
+  warning_only: LegalStatus;
+  mixed: LegalStatus;
+  revoked: LegalStatus;
+  errors: {
+    not_authenticated: {
+      status: number;
+      headers: Record<string, string>;
+      body: { error: { code: string; message_tr: string; message_en: string } };
+    };
+  };
+}
+
+export const LEGAL_SAMPLES = JSON.parse(
+  readFileSync(join(process.cwd(), 'e2e', 'samples', 'legal-status.json'), 'utf8'),
+) as LegalSamples;
+
+/** Kamu SM production, nothing to report: no banner. */
+export const LEGAL_OK: LegalStatus = LEGAL_SAMPLES.ok;
+
+/** The mock provider: one danger reason, the banner on every page. */
+export const LEGAL_PROVIDER_NOT_LEGAL: LegalStatus = LEGAL_SAMPLES.provider_not_legal;
+
+/** Warnings only (can be hidden for 24 h): no current revocation list and re-stamping due. */
+export const LEGAL_WARNING_ONLY: LegalStatus = LEGAL_SAMPLES.warning_only;
+
+/** Two danger and two warning reasons: the worst one shown, "ve 3 uyarı daha" opens the rest. */
+export const LEGAL_MIXED: LegalStatus = LEGAL_SAMPLES.mixed;
+
+/** A TSA certificate in use is on a revocation list (danger). */
+export const LEGAL_REVOKED: LegalStatus = LEGAL_SAMPLES.revoked;
+
+/** When the API computed the status. */
+export const LEGAL_CHECKED_AT = LEGAL_OK.checked_at;
+
+/** The first captured reason of each code. */
+const CAPTURED = new Map<LegalReasonCode, LegalReason>();
+for (const status of [LEGAL_PROVIDER_NOT_LEGAL, LEGAL_WARNING_ONLY, LEGAL_MIXED, LEGAL_REVOKED])
+  for (const reason of status.reasons)
+    if (!CAPTURED.has(reason.code)) CAPTURED.set(reason.code, reason);
+
+function captured(code: LegalReasonCode): LegalReason {
+  const reason = CAPTURED.get(code);
+  if (!reason) throw new Error(`legal-status.json has no ${code} reason`);
+  return reason;
+}
 
 /** One reason of each code, worded as §2.6. */
 export const LEGAL_REASONS: Record<LegalReasonCode, LegalReason> = {
-  provider_not_legal: {
-    code: 'provider_not_legal',
-    level: 'danger',
-    message_tr:
-      "Zaman damgaları deneme ya da test sağlayıcısından alınıyor; bu damgaların yasal geçerliliği yoktur. Ayarlar → Zaman damgası'ndan Kamu SM üretim sunucusunu seçin.",
-    message_en:
-      'Time stamps come from a trial or test provider and have no legal validity. Choose the Kamu SM production server under Settings → Time stamping.',
-    since: '2026-10-05T00:12:00Z',
-    count: null,
-    link: 'settings-tsa',
-  },
+  provider_not_legal: captured('provider_not_legal'),
+  // Hand-built: no captured case runs TÜRKTRUST over plain HTTP.
   credentials_in_clear: {
     code: 'credentials_in_clear',
     level: 'warning',
@@ -40,33 +82,10 @@ export const LEGAL_REASONS: Record<LegalReasonCode, LegalReason> = {
     count: null,
     link: 'settings-tsa',
   },
-  legal_root_missing: {
-    code: 'legal_root_missing',
-    level: 'danger',
-    message_tr: 'Kök sertifika parmak izi tanımlı değil; hiçbir gün yasal nitelikli gösterilemez.',
-    message_en: 'No legal root fingerprint is set; no day can be shown as legal grade.',
-    since: '2026-10-05T00:12:00Z',
-    count: null,
-    link: 'settings-tsa',
-  },
-  unstamped_days: {
-    code: 'unstamped_days',
-    level: 'danger',
-    message_tr: '2 kapanmış gün 48 saatten uzun süredir damgalanmadı.',
-    message_en: '2 closed day(s) have not been time-stamped for more than 48 hours.',
-    since: '2026-10-12T21:00:00Z',
-    count: 2,
-    link: 'sealing',
-  },
-  renewal_due: {
-    code: 'renewal_due',
-    level: 'warning',
-    message_tr: '14 damganın sertifikası 180 gün içinde sona eriyor; yeniden damgalama bekleniyor.',
-    message_en: '14 stamp certificate(s) expire within 180 days; re-stamping is due.',
-    since: '2026-10-11T23:30:00Z',
-    count: 14,
-    link: 'sealing',
-  },
+  legal_root_missing: captured('legal_root_missing'),
+  unstamped_days: captured('unstamped_days'),
+  renewal_due: captured('renewal_due'),
+  // Hand-built: no captured case has a certificate that expired without a counting renewal.
   renewal_uncovered: {
     code: 'renewal_uncovered',
     level: 'warning',
@@ -78,26 +97,8 @@ export const LEGAL_REASONS: Record<LegalReasonCode, LegalReason> = {
     count: 3,
     link: 'sealing',
   },
-  certificate_revoked: {
-    code: 'certificate_revoked',
-    level: 'danger',
-    message_tr:
-      'Zaman damgası sertifikası iptal listesinde: Deneme TSA Sertifikası 1. Zaman damgası sağlayıcısıyla görüşün; hukuki inceleme önerilir.',
-    message_en:
-      'A time-stamp certificate is on a revocation list: Deneme TSA Sertifikası 1. Contact the provider; legal review is recommended.',
-    since: '2026-10-13T03:10:12Z',
-    count: null,
-    link: 'sealing',
-  },
-  crl_stale: {
-    code: 'crl_stale',
-    level: 'warning',
-    message_tr: '7 günden yeni doğrulanmış bir iptal listesi (SİL) yok.',
-    message_en: 'No verified revocation list newer than 7 days.',
-    since: '2026-10-13T03:10:12Z',
-    count: null,
-    link: null,
-  },
+  certificate_revoked: captured('certificate_revoked'),
+  crl_stale: captured('crl_stale'),
 };
 
 /** The production provider of the captured site (`tsa.provider = "zamane"`). */
@@ -121,23 +122,3 @@ export function legalStatusWith(
   const level = reasons[0]?.level ?? 'ok';
   return { level, ...provider, reasons, checked_at: LEGAL_CHECKED_AT };
 }
-
-/** Kamu SM production, nothing to report: no banner. */
-export const LEGAL_OK: LegalStatus = legalStatusWith([]);
-
-/** The mock provider (the captured samples' site): one danger reason, the banner on every page. */
-export const LEGAL_PROVIDER_NOT_LEGAL: LegalStatus = legalStatusWith(['provider_not_legal'], {
-  provider: 'mock',
-  provider_label: 'Deneme (mock)',
-});
-
-/** Warnings only (can be hidden for 24 h): re-stamping due and no current revocation list. */
-export const LEGAL_WARNING_ONLY: LegalStatus = legalStatusWith(['renewal_due', 'crl_stale']);
-
-/** Two danger and two warning reasons: the worst one shown, "ve 3 uyarı daha" opens the rest. */
-export const LEGAL_MIXED: LegalStatus = legalStatusWith([
-  'renewal_due',
-  'unstamped_days',
-  'crl_stale',
-  'legal_root_missing',
-]);

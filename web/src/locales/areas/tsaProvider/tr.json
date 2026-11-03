@@ -101,7 +101,7 @@
         "renewBeforeDays": "Yeniden damgalama süresi (gün)",
         "renewBeforeDaysHint": "{{min}}–{{max}} gün, varsayılan 180. Sertifikasının sona ermesine bundan az gün kalan damgalar yeniden damgalanır; günde en çok bir damga kullanılır.",
         "crlMaxAgeDays": "İptal listesinin en büyük yaşı (gün)",
-        "crlMaxAgeDaysHint": "{{min}}–{{max}} gün, varsayılan 7. Bu süreden yeni doğrulanmış bir iptal listesi yoksa uyarı oluşur.",
+        "crlMaxAgeDaysHint": "{{min}}–{{max}} gün, varsayılan 7. Bir iptal listesi, son başarılı indirilip doğrulanması bu süreden yeniyse ve listenin kendi sonraki güncelleme zamanı (nextUpdate) geçmemişse güncel sayılır; değilse uyarı oluşur.",
         "crlUrls": "İptal listesi adresleri",
         "crlUrlsHint": "Her satıra bir adres, http:// ya da https:// ile; en çok {{max}} adres. Boş bırakılırsa kök sertifikaların ve en yeni damgaların sertifikalarındaki iptal listesi dağıtım noktaları kullanılır.",
         "crlNoteTitle": "Sahada doğrula",

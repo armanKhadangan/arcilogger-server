@@ -163,7 +163,7 @@ describe('LegalBanner — "ve N uyarı daha"', () => {
       'legal-reason-renewal_due',
     ]);
     expect(within(open).getByTestId('legal-reason-unstamped_days')).toHaveTextContent(
-      '2 kapanmış gün 48 saatten uzun süredir damgalanmadı. (ZAMAN-DAMGASI.md bölüm 5.5)',
+      '1 kapanmış gün 24 saatten uzun süredir damgalanmadı. (ZAMAN-DAMGASI.md bölüm 5.5)',
     );
     expect(within(open).getByTestId('legal-reason-renewal_due')).toHaveTextContent(
       'ZAMAN-DAMGASI.md bölüm 5.6',
@@ -198,7 +198,15 @@ describe('LegalBanner — "ve N uyarı daha"', () => {
 
 describe('LegalBanner — links by role', () => {
   it.each([
-    ['admin', ['Ayarlar → Zaman damgası', 'Mühürleme sayfası', 'Mühürleme sayfası']],
+    [
+      'admin',
+      [
+        'Ayarlar → Zaman damgası',
+        'Mühürleme sayfası',
+        'Ayarlar → Zaman damgası',
+        'Mühürleme sayfası',
+      ],
+    ],
     ['auditor', ['Mühürleme sayfası', 'Mühürleme sayfası']],
     ['hr', []],
     ['viewer', []],

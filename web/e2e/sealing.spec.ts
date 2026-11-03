@@ -1,7 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 
 import type { Credits } from '../src/lib/api-types';
-import type { SealRenewal, SealRevocation } from '../src/pages/sealing/seal-renewal';
+import type { SealRenewal, SealRevocation } from '../src/lib/seal-types';
 
 import { expectNoA11yViolations, usePreferences, useSampleClock, type Theme } from './fixtures';
 import { CSRF_TOKEN, mockApi } from './mock-api';
@@ -14,8 +14,9 @@ if (!DETAIL?.token || !DETAIL.manifest || !FAILED?.message_tr)
   throw new Error('seal samples missing');
 
 /**
- * The sealed day with re-stamping and revocation (Wave 5 contract 2.3.1 "Day detail", C4),
- * hand-built until W5-C's samples carry the fields. The renewal is late: the day token's TSA
+ * The sealed day with re-stamping and revocation (Wave 5 contract 2.3.1 "Day detail", C4). The
+ * captured day has no `renewal` and a `crl-none` finding, so both are hand-built over it. The
+ * renewal is late: the day token's TSA
  * certificate (`tsa_cert_not_after` of the sample) expired on 31.08.2031 and the counting renewal
  * was stamped three days later, so the answer is one of a server after that date, not of the
  * samples' clock. A revocation list names the certificate after the day's stamp (04.10.2026

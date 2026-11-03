@@ -21,6 +21,8 @@ const CALENDAR = need(SEALS.calendars['2026-10'], 'October calendar');
 const MOCK_CREDITS: Credits = {
   provider: 'mock',
   legal_grade: false,
+  // The mock provider simulates a balance (C21).
+  supported: true,
   threshold: 10_000,
   latest: null,
   remaining: null,

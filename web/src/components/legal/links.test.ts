@@ -29,8 +29,13 @@ describe('legal-status links', () => {
     expect(linkFor(LEGAL_REASONS.provider_not_legal, as(role))?.to ?? null).toBe(settings);
   });
 
+  it('send a stale revocation list to the time-stamp settings (C5)', () => {
+    expect(linkFor(LEGAL_REASONS.crl_stale, as('admin'))?.to).toBe('/settings/kamusm');
+    expect(linkFor(LEGAL_REASONS.crl_stale, as('auditor'))).toBeNull();
+  });
+
   it('show nothing for a reason without a link or with a key this version does not know', () => {
-    expect(linkFor(LEGAL_REASONS.crl_stale, () => true)).toBeNull();
+    expect(linkFor({ ...LEGAL_REASONS.crl_stale, link: null }, () => true)).toBeNull();
     expect(linkFor({ link: 'reports' as 'sealing' }, () => true)).toBeNull();
   });
 });

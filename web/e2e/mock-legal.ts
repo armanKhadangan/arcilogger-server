@@ -1,8 +1,8 @@
 /**
  * The mocked legal-validity status of the E2E tests: `GET /legal-status` (Wave 5 contract 2.3.1),
- * open to any signed-in user, not audited, the same answer for every role. The answers are
- * hand-built from contract §2.3.1/§2.6 until W5-E captures `samples/legal-status.json`: the
- * fixtures of the unit tests (`src/test/w5-fixtures.ts`), re-exported here.
+ * open to any signed-in user, not audited, the same answer for every role. The answers are the
+ * captured `samples/legal-status.json` through the fixtures of the unit tests
+ * (`src/test/w5-fixtures.ts`), re-exported here.
  *
  * Installed after `mockApi` (`page.route`: the newest route wins), it shares the main mock's
  * session and recorded calls (`background` is the `X-Arci-Background: 1` of a refresh). The
@@ -19,6 +19,7 @@ import {
   LEGAL_OK,
   LEGAL_PROVIDER_NOT_LEGAL,
   LEGAL_REASONS,
+  LEGAL_REVOKED,
   LEGAL_WARNING_ONLY,
   legalStatusWith,
 } from '../src/test/w5-fixtures';
@@ -31,6 +32,7 @@ export {
   LEGAL_OK,
   LEGAL_PROVIDER_NOT_LEGAL,
   LEGAL_REASONS,
+  LEGAL_REVOKED,
   LEGAL_WARNING_ONLY,
   legalStatusWith,
 };

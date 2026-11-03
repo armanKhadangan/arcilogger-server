@@ -1,59 +1,25 @@
 import en from '@/locales/areas/sealRenewal/en.json';
 import tr from '@/locales/areas/sealRenewal/tr.json';
-import type { Credits } from '@/lib/api-types';
-import type { SealDayDetail } from '@/lib/seal-types';
-import { SEALS, need } from '@/test/samples';
+import { SEALS } from '@/test/samples';
 
-import {
-  noCreditQuery,
-  RENEWAL_KEY,
-  RENEWAL_STATUSES,
-  RENEWAL_TONE,
-  renewalOf,
-  revocationOf,
-  revocationTone,
-} from './seal-renewal';
+import { RENEWAL_KEY, RENEWAL_STATUSES, RENEWAL_TONE, revocationTone } from './seal-renewal';
 
 /*
- * Re-stamping and revocation on the day page (Wave 5 contract 2.3.1 "Day detail", 2.6, C4), read
- * from the day detail until W5-C adds the fields to `SealDayDetail`; the texts of 2.6 verbatim.
+ * Re-stamping and revocation on the day page (Wave 5 contract 2.3.1 "Day detail", 2.6, C4): the
+ * tones of W5-C's `renewal` and `revocation` (`lib/seal-types.ts`) and the texts of 2.6 verbatim.
  */
 
-const SEALED = need(SEALS.days['2026-10-04'], 'sealed day sample');
-
-function withFields(fields: Record<string, unknown>): SealDayDetail {
-  return { ...SEALED, ...fields };
-}
-
 describe('the day detail’s re-stamping and revocation fields', () => {
-  it('are absent from answers without them (older servers, the captured samples)', () => {
-    expect(renewalOf(SEALED)).toBeNull();
-    expect(revocationOf(SEALED)).toBeNull();
-    expect(renewalOf(withFields({ renewal: null, revocation: null }))).toBeNull();
-    expect(revocationOf(withFields({ renewal: null, revocation: null }))).toBeNull();
-  });
-
-  it('are read as the API sends them; a status this version does not know shows nothing', () => {
-    const renewal = {
-      status: 'covered',
-      cert_not_after: '2031-10-01T00:00:00Z',
-      covered_by: 'renewals/2031-05-04-1.json',
-      renewed_at: '2031-05-04T00:40:12Z',
-    };
-    const revocation = {
-      code: 'crl-revoked',
-      level: 'fail',
-      message_tr: 'Sertifika iptal edilmiş.',
-      message_en: 'The certificate is revoked.',
-    };
-    expect(renewalOf(withFields({ renewal, revocation }))).toEqual(renewal);
-    expect(revocationOf(withFields({ renewal, revocation }))).toEqual(revocation);
-    expect(renewalOf(withFields({ renewal: { ...renewal, status: 'renewed' } }))).toBeNull();
-  });
-
-  it('reads a renewal without renewed_at (a server before C4) as null there', () => {
-    const renewal = { status: 'late', cert_not_after: '2031-08-30T21:30:00Z', covered_by: null };
-    expect(renewalOf(withFields({ renewal }))).toEqual({ ...renewal, renewed_at: null });
+  it('shows the captured days’ finding as neutral information', () => {
+    // The mock provider's sealed days: no stored list covers its certificate (`crl-none`, info).
+    const found = Object.values(SEALS.days).flatMap((day) =>
+      day.revocation ? [day.revocation] : [],
+    );
+    expect(found.length).toBeGreaterThan(0);
+    for (const revocation of found) {
+      expect(revocation).toMatchObject({ code: 'crl-none', level: 'info' });
+      expect(revocationTone(revocation.level)).toBe('info');
+    }
   });
 
   it.each([
@@ -131,34 +97,7 @@ describe('the re-stamping texts (contract 2.6)', () => {
   });
 });
 
-describe('a provider without a credit query (contract 2.4, C3)', () => {
-  const credits: Credits = {
-    provider: 'zamane',
-    legal_grade: true,
-    threshold: 10_000,
-    latest: null,
-    remaining: null,
-    below_threshold: false,
-    history: [],
-    unreadable_lines: 0,
-  };
-
-  it('is a credit status the Credit task recorded as not supported', () => {
-    expect(noCreditQuery({ ...credits, provider: 'turktrust', supported: false } as Credits)).toBe(
-      true,
-    );
-    expect(noCreditQuery({ ...credits, supported: false } as Credits)).toBe(true);
-    expect(noCreditQuery({ ...credits, supported: true } as Credits)).toBe(false);
-    expect(noCreditQuery(credits)).toBe(false);
-  });
-
-  it('is never decided by the provider name', () => {
-    expect(noCreditQuery({ ...credits, provider: 'turktrust' })).toBe(false);
-    expect(noCreditQuery({ ...credits, provider: 'turktrust', supported: true } as Credits)).toBe(
-      false,
-    );
-  });
-
+describe('a provider without a credit query (contract 2.4, C3, C21)', () => {
   it('has a plain title, without a provider name', () => {
     expect(tr.sealing.credits.titleNoQuery).toBe('Kontör');
     expect(en.sealing.credits.titleNoQuery).toBe('Credit');

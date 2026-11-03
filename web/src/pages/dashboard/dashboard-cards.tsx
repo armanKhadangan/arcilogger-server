@@ -24,6 +24,7 @@ import type {
   DashboardCredit,
   DashboardIngest,
   DashboardParseFailures,
+  SealBlocking,
   SealYesterday,
 } from '@/lib/api-types';
 import { formatDay, visibleText } from '@/lib/display';
@@ -32,13 +33,7 @@ import { handoff } from '@/lib/handoff';
 import { currentLang } from '@/lib/i18n';
 import { failureSearch } from '@/pages/sources/sources-model';
 
-import {
-  clockVerdict,
-  creditDuration,
-  failureLevel,
-  sealStatus,
-  type SealBlocking,
-} from './dashboard-model';
+import { clockVerdict, creditDuration, failureLevel, sealStatus } from './dashboard-model';
 import { BigValue, DashCard } from './dashboard-parts';
 
 interface LinkProps {

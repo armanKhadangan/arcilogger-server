@@ -18,7 +18,6 @@ import { formatDate, formatDateTime, formatNumber } from '@/lib/format';
 import { currentLang } from '@/lib/i18n';
 import type { AdminRequestOut, CreditActionResult } from '@/lib/settings-types';
 
-import { noCreditQuery } from './seal-renewal';
 import { AGENT_CODES } from './seal-states';
 
 function CreditOutcome({ request }: { request: AdminRequestOut }) {
@@ -120,7 +119,8 @@ export function CreditsCard({
     .filter((value): value is number => value !== null);
   const latest = credits?.latest;
   const first = credits?.history[0];
-  const noQuery = credits ? noCreditQuery(credits) : false;
+  // Only the flag decides, never the provider name (C3, C21).
+  const noQuery = credits ? !credits.supported : false;
   return (
     <Card>
       <CardHeader>

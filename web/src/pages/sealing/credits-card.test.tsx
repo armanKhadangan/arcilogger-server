@@ -10,8 +10,8 @@ import { SEALS, need } from '@/test/samples';
  * The credit card for a provider without a credit query (Wave 5 contract 2.4, 2.6, C3): the
  * Credit task records `supported: false` (C21: today `rfc3161` and TÜRKTRUST), so the card says
  * so in neutral words under a plain "Kontör" title instead of numbers, offers no "Kontör sorgula"
- * and never warns about a threshold. Only the flag decides, never the provider name. Hand-built answers
- * until W5-C's samples carry one; `supported` is cast in until W5-C adds it to `Credits` (C2).
+ * and never warns about a threshold. Only the flag decides, never the provider name. The captured
+ * credit samples are of providers with a query (`zamane`, `mock`), so these answers are hand-built.
  */
 
 const CALENDAR = need(SEALS.calendars['2026-10'], 'October calendar');
@@ -19,6 +19,7 @@ const CALENDAR = need(SEALS.calendars['2026-10'], 'October calendar');
 const KAMUSM: Credits = {
   provider: 'zamane',
   legal_grade: true,
+  supported: true,
   threshold: 10_000,
   latest: { time: '2026-10-13T06:30:00+03:00', provider: 'zamane', credits: 9_612, error: null },
   remaining: 9_612,
@@ -28,7 +29,7 @@ const KAMUSM: Credits = {
 };
 
 /** TÜRKTRUST: the Credit task records `{"supported": false}`; nothing is ever counted. */
-const TURKTRUST = {
+const TURKTRUST: Credits = {
   ...KAMUSM,
   provider: 'turktrust',
   supported: false,
@@ -36,7 +37,7 @@ const TURKTRUST = {
   remaining: null,
   below_threshold: false,
   history: [],
-} as Credits;
+};
 
 function serve(role: Role, credits: Credits) {
   return installFetch((request) => {
@@ -77,7 +78,7 @@ describe('the credit card without a credit query', () => {
   });
 
   it('any provider the Credit task recorded as not supported', async () => {
-    serve('admin', { ...KAMUSM, supported: false } as Credits);
+    serve('admin', { ...KAMUSM, supported: false });
     renderApp('/sealing');
     expect(await screen.findByTestId('credits-no-query')).toBeInTheDocument();
     expect(screen.queryByText('9.612', { exact: true })).not.toBeInTheDocument();
@@ -116,7 +117,7 @@ describe('the credit card without a credit query', () => {
   });
 
   it('Kamu SM keeps its numbers, its title and "Kontör sorgula" (supported: true)', async () => {
-    serve('admin', { ...KAMUSM, supported: true } as Credits);
+    serve('admin', { ...KAMUSM, supported: true });
     renderApp('/sealing');
     const credits = await card('Kontör (Kamu SM)');
     await waitFor(() => {

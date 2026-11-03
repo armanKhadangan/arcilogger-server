@@ -28,7 +28,6 @@ import {
   SealCard,
 } from './dashboard-cards';
 import {
-  blockingOf,
   dashboardRequests,
   diskRequested,
   isRefusal,
@@ -91,7 +90,7 @@ export function DashboardPage() {
     to: linkTarget('usage', permissions),
   };
   const sealing = linkTarget('sealing', permissions);
-  const blocking = blocks.has('blocking') ? blockingOf(data?.seal) : null;
+  const blocking = blocks.has('blocking') ? (data?.seal?.blocking ?? null) : null;
   const security = linkTarget('security', permissions);
   const summaryLoading = asked.summary && summary.isPending;
   const usageLoading =

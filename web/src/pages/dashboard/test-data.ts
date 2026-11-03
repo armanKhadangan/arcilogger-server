@@ -5,9 +5,7 @@
  * Its example lines are captured raw lines (`e2e/samples/raw.json`).
  */
 
-import type { DashboardParseFailures, DashboardSummary } from '@/lib/api-types';
-
-import type { SealBlocking } from './dashboard-model';
+import type { DashboardParseFailures, DashboardSummary, SealBlocking } from '@/lib/api-types';
 
 export const PARSE_FAILURES: DashboardParseFailures = {
   day: '2026-10-13',
@@ -55,9 +53,9 @@ export function withParseFailures(
 }
 
 /**
- * The Panel's blocking day for the unit tests (Wave 5 contract 2.3.1 `DashboardSeal.blocking`),
- * hand-built until W5-C's captured summary carries the field: 10.10.2026, 49 hours late (W5-C's
- * own test point above the 48 h of `seal.late_after_hours`).
+ * The Panel's blocking day for the unit tests (Wave 5 contract 2.3.1 `DashboardSeal.blocking`):
+ * the captured summaries have none (`blocking: null`), so it is hand-built: 10.10.2026, 49 hours
+ * late (W5-C's own test point above the 48 h of `seal.late_after_hours`).
  */
 export const BLOCKING: SealBlocking = { oldest_unstamped_day: '2026-10-10', hours_late: 49 };
 
@@ -72,6 +70,6 @@ export function withBlocking(
   if (!summary.seal) return summary;
   return {
     ...summary,
-    seal: { ...summary.seal, blocking: structuredClone(blocking) } as typeof summary.seal,
+    seal: { ...summary.seal, blocking: structuredClone(blocking) },
   };
 }

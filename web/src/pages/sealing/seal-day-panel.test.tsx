@@ -1,12 +1,10 @@
 import { act, screen, within } from '@testing-library/react';
 
 import { setLanguage } from '@/lib/i18n';
-import type { SealDayDetail } from '@/lib/seal-types';
+import type { SealDayDetail, SealRenewal, SealRevocation } from '@/lib/seal-types';
 import { errorResponse, installFetch, jsonResponse, makeMe } from '@/test/api-mock';
 import { renderApp } from '@/test/render';
 import { SEALS, need } from '@/test/samples';
-
-import type { SealRenewal, SealRevocation } from './seal-renewal';
 
 const DAY = '2026-10-04';
 const SEALED = need(SEALS.days[DAY], `${DAY} sample`);
@@ -149,8 +147,8 @@ describe('"Şimdi mühürle" (contract 2.9)', () => {
 });
 
 /*
- * Re-stamping and revocation (Wave 5 contract 2.3.1 "Day detail", 2.6, C4): hand-built additions
- * to the captured day until W5-C's samples carry them.
+ * Re-stamping and revocation (Wave 5 contract 2.3.1 "Day detail", 2.6, C4): the captured day
+ * carries no `renewal` and a `crl-none` finding; the other states are hand-built on top of it.
  */
 describe('re-stamping and revocation on the day page (Wave 5)', () => {
   afterEach(() => {
@@ -164,7 +162,7 @@ describe('re-stamping and revocation on the day page (Wave 5)', () => {
     renewal: SealRenewal | null,
     revocation: SealRevocation | null = null,
   ): SealDayDetail {
-    return { ...SEALED, renewal, revocation } as SealDayDetail;
+    return { ...SEALED, renewal, revocation };
   }
 
   const REVOKED: SealRevocation = {
@@ -177,13 +175,24 @@ describe('re-stamping and revocation on the day page (Wave 5)', () => {
       'Deneme TSA Sertifikası 1: revoked before the time stamp (2026-10-03T06:00:00+00:00)',
   };
 
-  it('shows neither for an answer without them (the captured samples)', async () => {
+  it('the captured day: no re-stamping row, the revocation finding as information', async () => {
+    const revocation = need(SEALED.revocation, 'revocation of the captured day');
+    expect(SEALED.renewal).toBeNull();
     serve(SEALED);
+    renderApp(`/sealing?day=${DAY}`);
+    const alert = await screen.findByTestId('seal-revocation');
+    expect(alert).toHaveClass('bg-info-soft');
+    expect(alert).toHaveTextContent(revocation.message_tr);
+    expect(screen.queryByTestId('seal-renewal')).not.toBeInTheDocument();
+    expect(screen.queryByText('Yeniden damgalama')).not.toBeInTheDocument();
+  });
+
+  it('shows neither when the day has none', async () => {
+    serve(withRenewal(null, null));
     renderApp(`/sealing?day=${DAY}`);
     expect(await screen.findByText('Zaman damgası')).toBeInTheDocument();
     expect(screen.queryByTestId('seal-renewal')).not.toBeInTheDocument();
     expect(screen.queryByTestId('seal-revocation')).not.toBeInTheDocument();
-    expect(screen.queryByText('Yeniden damgalama')).not.toBeInTheDocument();
   });
 
   it.each([

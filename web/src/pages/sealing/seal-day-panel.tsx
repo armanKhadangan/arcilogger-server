@@ -38,17 +38,10 @@ import {
   formatNumber,
 } from '@/lib/format';
 import { currentLang } from '@/lib/i18n';
-import type { SealDayDetail, SealVerification, TokenInfo } from '@/lib/seal-types';
+import type { SealDayDetail, SealRenewal, SealVerification, TokenInfo } from '@/lib/seal-types';
 import type { AdminRequestOut, SealActionResult } from '@/lib/settings-types';
 
-import {
-  RENEWAL_KEY,
-  RENEWAL_TONE,
-  renewalOf,
-  revocationOf,
-  revocationTone,
-  type SealRenewal,
-} from './seal-renewal';
+import { RENEWAL_KEY, RENEWAL_TONE, revocationTone } from './seal-renewal';
 import { AGENT_CODES, gapReason, legalGrade, toneOf } from './seal-states';
 
 const LEGAL_TONE = { legal: 'success', claimed: 'info', test: 'danger' } as const;
@@ -193,8 +186,8 @@ function ManifestTokenFacts({ detail }: { detail: SealDayDetail }) {
   const lang = currentLang();
   const manifest = detail.manifest;
   const token = detail.token;
-  const renewal = renewalOf(detail);
-  const revocation = revocationOf(detail);
+  const renewal = detail.renewal ?? null;
+  const revocation = detail.revocation ?? null;
   return (
     <>
       {manifest ? (

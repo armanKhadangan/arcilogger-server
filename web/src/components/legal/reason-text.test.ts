@@ -30,7 +30,7 @@ describe('legal-status reason text', () => {
     expect(reasonText(reason, 'tr')).toBe(`${reason.message_tr} (ZAMAN-DAMGASI.md bölüm 5.2)`);
     expect(reasonText(reason, 'en')).toBe(`${reason.message_en} (TIME-STAMPING.md section 5.2)`);
     expect(reasonText(LEGAL_REASONS.unstamped_days, 'tr')).toBe(
-      '2 kapanmış gün 48 saatten uzun süredir damgalanmadı. (ZAMAN-DAMGASI.md bölüm 5.5)',
+      '1 kapanmış gün 24 saatten uzun süredir damgalanmadı. (ZAMAN-DAMGASI.md bölüm 5.5)',
     );
   });
 

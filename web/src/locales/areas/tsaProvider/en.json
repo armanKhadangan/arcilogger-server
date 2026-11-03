@@ -101,7 +101,7 @@
         "renewBeforeDays": "Re-stamping window (days)",
         "renewBeforeDaysHint": "{{min}}–{{max}} days, default 180. Stamps whose certificate expires in fewer days are re-stamped; at most one stamp a day is used.",
         "crlMaxAgeDays": "Maximum revocation list age (days)",
-        "crlMaxAgeDaysHint": "{{min}}–{{max}} days, default 7. Without a verified revocation list newer than this, an alert is raised.",
+        "crlMaxAgeDaysHint": "{{min}}–{{max}} days, default 7. A revocation list counts as current while its last successful fetch and verification is newer than this and the list's own next update (nextUpdate) has not passed; otherwise a warning is raised.",
         "crlUrls": "Revocation list addresses",
         "crlUrlsHint": "One address per line, with http:// or https://; at most {{max}} addresses. Left empty, the CRL distribution points in the certificates of the root certificates and of the newest stamps are used.",
         "crlNoteTitle": "Verify on site",
