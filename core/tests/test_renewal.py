@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -21,7 +22,7 @@ from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.serialization import Encoding
 
 from arcilogger_core.canonical import canonical_json
-from arcilogger_core.immutability import is_locked, unlock
+from arcilogger_core.immutability import is_locked, lock, unlock
 from arcilogger_core.renewal import (
     NOTES,
     RENEWAL_SCHEMA,
@@ -31,6 +32,7 @@ from arcilogger_core.renewal import (
     RenewalStampInvalidError,
     build_record,
     one_run,
+    recover,
     renew,
     renewal_status,
     system_block,
@@ -501,8 +503,14 @@ def test_a_crash_between_stamp_and_rename_is_recovered(rw: RenewalWorld) -> None
     (folder / "2031-06-22-4.json.zd").write_bytes(b"token")
     (folder / ".2031-06-22-5.json.part.tmp").write_bytes(record)
 
-    with pytest.raises(RenewalNotNeeded):  # the promoted records cover the day
-        _renew(rw, provider)
+    assert recover(rw.layout, rw.roots, now=rw.clock.now) == [
+        "2031-06-22-1.json.part",
+        "2031-06-22-2.json.part.zd",
+        "2031-06-22-2.json.part",
+        "2031-06-22-3.json.part.zd",
+        "2031-06-22-4.json.zd",
+        ".2031-06-22-5.json.part.tmp",
+    ]
     assert _renewal_files(rw) == [
         "2031-06-20-1.json",
         "2031-06-20-1.json.zd",
@@ -510,7 +518,49 @@ def test_a_crash_between_stamp_and_rename_is_recovered(rw: RenewalWorld) -> None
         "2031-06-21-1.json.zd",
     ]
     assert all(is_locked(folder / name) for name in _renewal_files(rw))
+    assert recover(rw.layout, rw.roots, now=rw.clock.now) == []
+    with pytest.raises(RenewalNotNeeded):  # the promoted records cover the day
+        _renew(rw, provider)
     assert rw.of(rw.status(), DAY_TOKEN).covered_by == "renewals/2031-06-20-1.json"
+
+
+def test_recover_never_removes_a_locked_file(rw: RenewalWorld) -> None:
+    """A locked token without its record is what is left when someone removed a completed
+    record: evidence of that, so it stays (rule 2; only the retention job deletes)."""
+    rw.set_now(CNA - timedelta(days=100))
+    run = _renew(rw, rw.legal_provider(FAR))
+    record, token = rw.layout.vault / run.record_path, rw.layout.vault / run.token_path
+    unlock(record)
+    record.unlink()
+    leftover = rw.layout.renewals_dir / "2031-06-22-1.json.part"
+    leftover.write_bytes(b"{}")
+    lock(leftover)
+    assert recover(rw.layout, rw.roots, now=rw.clock.now) == []
+    assert (token.exists(), is_locked(token), leftover.exists()) == (True, True, True)
+
+
+def test_a_renewal_left_unlocked_is_locked_by_the_next_run(
+    rw: RenewalWorld, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``lock`` failing after both renames (icacls on Windows) leaves a complete pair unlocked:
+    the next run locks it, as the seal locks every file of its day; a lock that fails again is
+    logged and tried by the run after."""
+    rw.set_now(CNA - timedelta(days=100))
+
+    def refuse(path: Path) -> None:
+        raise subprocess.CalledProcessError(5, ["icacls", str(path)])
+
+    monkeypatch.setattr("arcilogger_core.renewal.lock", refuse)
+    with pytest.raises(subprocess.CalledProcessError):
+        _renew(rw, rw.legal_provider(FAR))
+    names = ["2031-06-23-1.json", "2031-06-23-1.json.zd"]
+    assert _renewal_files(rw) == names
+    assert recover(rw.layout, rw.roots, now=rw.clock.now) == []
+    assert not any(is_locked(rw.layout.renewals_dir / name) for name in names)
+    monkeypatch.undo()
+    with pytest.raises(RenewalNotNeeded):  # the record counts, unlocked or not
+        _renew(rw, rw.legal_provider(FAR))
+    assert all(is_locked(rw.layout.renewals_dir / name) for name in names)
 
 
 def test_a_renewal_of_a_renewal_three_deep(rw: RenewalWorld) -> None:

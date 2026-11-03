@@ -50,6 +50,7 @@ import json
 import logging
 import os
 import re
+import subprocess
 import sys
 from collections.abc import Iterable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
@@ -66,7 +67,7 @@ from arcilogger_core.chain import sealed_days
 from arcilogger_core.config import Config
 from arcilogger_core.crl import Crl, CrlError, load_stored
 from arcilogger_core.fsutil import atomic_write_bytes, fsync_dir
-from arcilogger_core.immutability import is_locked, lock, unlock
+from arcilogger_core.immutability import is_locked, lock
 from arcilogger_core.layout import Layout
 from arcilogger_core.retention import records as deletion_records
 from arcilogger_core.seal import sha256_file
@@ -812,10 +813,13 @@ def _part(path: Path) -> Path:
 
 
 def _remove(path: Path, removed: list[str]) -> None:
+    """Remove a leftover of a run; a locked file is never unlocked or removed here (only the
+    retention job deletes evidence): it is left for a person, with a warning in the log."""
     if not path.exists():
         return
     if is_locked(path):
-        unlock(path)
+        log.warning("renewal: %s is locked; it is left as it is for a person to look at", path.name)
+        return
     path.unlink()
     removed.append(path.name)
 
@@ -837,6 +841,20 @@ def _promote(part: Path, token: Path, final: Path) -> None:
             lock(path)
 
 
+def _lock_unlocked(paths: Iterable[Path]) -> None:
+    """Lock each of ``paths`` that is not locked yet; a failure is logged and left for the next
+    run, which tries again (the record is a valid renewal either way)."""
+    for path in paths:
+        if is_locked(path):
+            continue
+        try:
+            lock(path)
+        except (OSError, subprocess.SubprocessError) as exc:
+            log.warning("renewal: %s cannot be locked (%s); the next run tries again", path, exc)
+        else:
+            log.warning("renewal: locked %s, left unlocked by an interrupted run", path.name)
+
+
 def recover(
     layout: Layout,
     roots: Sequence[x509.Certificate],
@@ -850,7 +868,11 @@ def recover(
       between the two renames) that verifies against it: promoted (W5-A-3);
     * any other ``….part`` and ``….part.zd``, a final token without its record and a temporary
       file of an interrupted write (``.….tmp``): removed. None of them is evidence: a record
-      without a verified token protects nothing.
+      without a verified token protects nothing. A locked file is never removed: a locked token
+      without its record means a completed record was removed, and the token is left for a
+      person (with a warning in the log);
+    * a record and its token under their final names that are not both locked (a run stopped,
+      or ``lock`` failed, after the renames): locked, as the seal locks every file of a day.
     """
     folder = layout.renewals_dir
     removed: list[str] = []
@@ -883,6 +905,10 @@ def recover(
             _remove(token, removed)
     for temporary in sorted(folder.glob(".*.tmp")):
         _remove(temporary, removed)
+    for record in sorted(folder.glob("*.json")):
+        token = token_path_for(record)
+        if token.is_file():
+            _lock_unlocked((record, token))
     if removed:
         log.warning("renewal: removed leftovers of an interrupted run: %s", ", ".join(removed))
     return removed

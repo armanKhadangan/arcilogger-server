@@ -1275,6 +1275,10 @@ All Wave 5 questions are answered (2026-11-02).
   `renewals/*.json`) never ships one. Leftovers of an interrupted run are tidied by the next run
   (`renewal.recover`): a part whose token (`.part.zd`, or the final `.zd` when the run stopped
   between the renames) verifies against it is promoted; any other part, a token without its
-  record and an interrupted write's temporary file are removed. One run at a time:
+  record and an interrupted write's temporary file are removed, but never a locked file (a
+  locked token without its record means a completed record was removed: it stays for a person,
+  with a warning in the log; `recover` never unlocks). A record and its token under their final
+  names that are not both locked (`lock` failed after the renames) are locked by the next run,
+  as the seal locks every file of its day. One run at a time:
   `state/renewal.lock` (never inside `vault/renewals`, where the standalone verifier's vault mode
   would report an unknown file); a second run raises `RenewalBusyError`.
