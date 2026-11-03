@@ -21,7 +21,10 @@ export interface ArchiveReloadCardProps {
   range: { first_day: DateString; last_day: DateString };
   /** The API's sentence of 409 archive_reload_required (localized), when the card comes from a 409. */
   message?: string | null;
-  /** `db.reload_keep_days` from the 409 (C23), `null` when unknown: the dialog names the setting. */
+  /**
+   * `db.reload_keep_days` from the 409 (C23), `null` when unknown: the dialog then says "the time
+   * the administrator set" with its default, never the setting's key.
+   */
   keepDays?: number | null;
   /** Called once when the reload is ready: the page runs the lookup or search again. */
   onReady: () => void;
@@ -87,10 +90,12 @@ function Progress({
  * confirmation that says how long they stay and that the request is audited; the card follows the
  * reload every 2 s and, once it is ready, lets the page run the lookup or search again — once per
  * reload. A range longer than one reload may ask for is not split: the days nearest the window are
- * offered, and the card says that the older ones need a narrower range. Refusals (G5) are the API's
- * texts, shown in the dialog; a failure has the web's text per `error_code`. The card shows the
- * reload only: who asked for it (`requested_by`, another user's for an administrator) is never
- * shown (#112).
+ * offered, and the card says so — on a search that the older ones need a narrower range, on a
+ * lookup (which has no range) that it cannot use them (#134). Refusals (G5) are the API's texts,
+ * shown in the dialog; a failure has the web's text per `error_code`. A poll that is refused (403,
+ * 404) stops with its error and "Yeniden dene", which asks once more. The card shows the reload
+ * only: who asked for it (`requested_by`, another user's for an administrator) is never shown
+ * (#112).
  */
 export function ArchiveReloadCard({
   reason,
@@ -113,6 +118,9 @@ export function ArchiveReloadCard({
   const offered = reloadId === null || status === 'failed' || status === 'expired';
   /** After "Yükle" the button is gone: the focus goes to the progress. */
   const progress = useRef<HTMLDivElement>(null);
+  const offer = useRef<HTMLButtonElement>(null);
+  // "Yeniden dene" of a stopped poll was answered: the focus moves once the answer is shown.
+  const [refocus, setRefocus] = useState(false);
   const reported = useRef<number | null>(null);
 
   useEffect(() => {
@@ -120,6 +128,14 @@ export function ArchiveReloadCard({
     reported.current = reload.id;
     onReady();
   }, [reload, onReady]);
+
+  useEffect(() => {
+    if (!refocus) return;
+    setRefocus(false);
+    // The progress when the reload goes on; the offered "Yeniden dene" when it failed or expired.
+    if (status === 'failed' || status === 'expired') offer.current?.focus();
+    else progress.current?.focus();
+  }, [refocus, status]);
 
   const days = (first: DateString, last: DateString) => ({
     first: formatDay(first),
@@ -161,7 +177,7 @@ export function ArchiveReloadCard({
             </p>
             {span.clipped ? (
               <p data-testid="archive-reload-clipped">
-                {t('archive.card.clipped', {
+                {t(`archive.card.clipped.${reason}`, {
                   max: span.days,
                   ...days(span.first_day, span.last_day),
                 })}
@@ -183,10 +199,27 @@ export function ArchiveReloadCard({
       ) : null}
       {status === 'expired' ? <p role="status">{t('archive.status.expired')}</p> : null}
       {poll.isError ? <Alert tone="danger">{errorMessage(poll.error)}</Alert> : null}
+      {poll.stopped ? (
+        <div>
+          {/* One poll; when it answers, the card follows the reload again (#134). */}
+          <Button
+            size="sm"
+            busy={poll.isFetching}
+            onClick={() => {
+              void poll.refresh().then((answer) => {
+                if (!answer.isError) setRefocus(true);
+              });
+            }}
+          >
+            {t('archive.card.retry')}
+          </Button>
+        </div>
+      ) : null}
 
       {offered ? (
         <div>
           <Button
+            ref={offer}
             size="sm"
             onClick={() => {
               start.reset();

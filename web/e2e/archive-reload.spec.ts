@@ -33,10 +33,13 @@ const DIALOG_TEXT =
   `${DAYS} günlerinin kayıtları mühürlü arşivden veritabanına yüklenir ve 7 gün boyunca ` +
   'veritabanında kalır; sonra yeniden kaldırılır. Bu, o günlerin kişisel verilerini de ' +
   'veritabanına geri getirir. İstek denetim kaydına yazılır.';
-/** The confirmation for a search page's `archived` days, which give no keep time: the setting. */
+/**
+ * The confirmation for a search page's `archived` days, which give no keep time: the time the
+ * administrator set, with its default (never the setting's key, #134).
+ */
 const DIALOG_SETTING_TEXT =
-  `${DAYS} günlerinin kayıtları mühürlü arşivden veritabanına yüklenir ve db.reload_keep_days ` +
-  'ayarının süresi boyunca (varsayılan 7 gün) orada kalır; sonra yeniden kaldırılır. Bu, o ' +
+  `${DAYS} günlerinin kayıtları mühürlü arşivden veritabanına yüklenir ve yöneticinin ` +
+  'ayarladığı süre (varsayılan 7 gün) boyunca orada kalır; sonra yeniden kaldırılır. Bu, o ' +
   'günlerin kişisel verilerini de veritabanına geri getirir. İstek denetim kaydına yazılır.';
 /** `archive_file_unreadable` of a failed reload: the web's text (the API sends none). */
 const UNREADABLE =

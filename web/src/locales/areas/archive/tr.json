@@ -3,13 +3,16 @@
     "card": {
       "title": "Günler mühürlü arşivde",
       "search": "Bu aramanın {{first}} – {{last}} günleri veritabanında değil; bu günlerin kayıtları mühürlü arşivde. Arşivden yüklerseniz arama bu günleri de kapsar.",
-      "clipped": "Bir yüklemede en çok {{max}} gün istenebilir: pencereye en yakın {{max}} gün ({{first}} – {{last}}) yüklenir. Daha eski günler için aralığı daraltın.",
+      "clipped": {
+        "search": "Bir yüklemede en çok {{max}} gün istenebilir: pencereye en yakın {{max}} gün ({{first}} – {{last}}) yüklenir. Daha eski günler için aralığı daraltın.",
+        "lookup": "Bir yüklemede en çok {{max}} gün istenebilir: önce pencereye en yakın {{max}} gün ({{first}} – {{last}}) yüklenir. Sorgu daha eski günleri de gerektirirse, yeniden çalıştığında onlar için yeni bir yükleme önerilir."
+      },
       "reload": "Arşivden yükle",
       "retry": "Yeniden dene"
     },
     "dialog": {
       "title": "Günler arşivden yüklensin mi?",
-      "body": "{{first}} – {{last}} günlerinin kayıtları mühürlü arşivden veritabanına yüklenir ve db.reload_keep_days ayarının süresi boyunca (varsayılan 7 gün) orada kalır; sonra yeniden kaldırılır. Bu, o günlerin kişisel verilerini de veritabanına geri getirir. İstek denetim kaydına yazılır.",
+      "body": "{{first}} – {{last}} günlerinin kayıtları mühürlü arşivden veritabanına yüklenir ve yöneticinin ayarladığı süre (varsayılan 7 gün) boyunca orada kalır; sonra yeniden kaldırılır. Bu, o günlerin kişisel verilerini de veritabanına geri getirir. İstek denetim kaydına yazılır.",
       "bodyDays_one": "{{first}} – {{last}} günlerinin kayıtları mühürlü arşivden veritabanına yüklenir ve {{count}} gün boyunca veritabanında kalır; sonra yeniden kaldırılır. Bu, o günlerin kişisel verilerini de veritabanına geri getirir. İstek denetim kaydına yazılır.",
       "bodyDays_other": "{{first}} – {{last}} günlerinin kayıtları mühürlü arşivden veritabanına yüklenir ve {{count}} gün boyunca veritabanında kalır; sonra yeniden kaldırılır. Bu, o günlerin kişisel verilerini de veritabanına geri getirir. İstek denetim kaydına yazılır.",
       "confirm": "Yükle"
@@ -19,7 +22,7 @@
       "of": "{{done}} / {{total}} yüklendi (%{{percent}})"
     },
     "status": {
-      "queued": "Sırada: başka bir yükleme bitince başlar.",
+      "queued": "Sırada: yükleme kısa süre içinde başlar.",
       "loading": "Yükleniyor…",
       "ready": "Günler yüklendi; {{expires}} tarihine kadar veritabanında kalır.",
       "rerun": {

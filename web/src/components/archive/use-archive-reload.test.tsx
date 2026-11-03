@@ -23,7 +23,8 @@ import {
 /*
  * Following a reload (Wave 5 contract §5, G10): `GET /archive-reloads/{id}` every 2 s while it is
  * queued or loading, no more requests once it is ready, failed or expired. The first read is the
- * user's (they just asked for the reload); every poll after it is sent in the background.
+ * user's (they just asked for the reload); every poll after it is sent in the background. A 5xx or
+ * a network error is polled through; a 403 or 404 stops the poll until `refresh()` (#134).
  */
 
 const PATH = '/api/v1/archive-reloads/1';
@@ -129,6 +130,76 @@ describe('useArchiveReload', () => {
     await act(() => vi.advanceTimersByTimeAsync(5 * ARCHIVE_RELOAD_POLL_MS));
     expect(calls).toHaveLength(2);
   });
+
+  it('keeps polling after a network error', async () => {
+    let failing = true;
+    const calls = installFetch(() =>
+      failing
+        ? Promise.reject(new TypeError('Failed to fetch'))
+        : jsonResponse(200, ARCHIVE_LOADING),
+    );
+    const { result } = renderHook(() => useArchiveReload(1), { wrapper });
+    await act(() => vi.advanceTimersByTimeAsync(10));
+    expect(result.current.error).toMatchObject({ status: 0, code: 'network_error' });
+    expect(result.current.stopped).toBe(false);
+    await act(() => vi.advanceTimersByTimeAsync(ARCHIVE_RELOAD_POLL_MS));
+    expect(calls).toHaveLength(2);
+    failing = false;
+    await act(() => vi.advanceTimersByTimeAsync(ARCHIVE_RELOAD_POLL_MS));
+    expect(calls).toHaveLength(3);
+    expect(result.current.data?.status).toBe('loading');
+  });
+
+  it.each([
+    [403, 'forbidden'],
+    [404, 'not_found'],
+  ] as const)(
+    'stops after a %i (the reload is not the user’s); refresh() asks once, then polling resumes',
+    async (status, code) => {
+      let answer: () => Response = () => jsonResponse(200, ARCHIVE_LOADING);
+      const calls = installFetch(() => answer());
+      const { result } = renderHook(() => useArchiveReload(1), { wrapper });
+      await act(() => vi.advanceTimersByTimeAsync(10));
+      expect(result.current.data?.status).toBe('loading');
+      expect(result.current.stopped).toBe(false);
+
+      answer = () => errorResponse(status, code);
+      await act(() => vi.advanceTimersByTimeAsync(ARCHIVE_RELOAD_POLL_MS));
+      expect(calls).toHaveLength(2);
+      expect(result.current.error).toMatchObject({ status, code });
+      expect(result.current.stopped).toBe(true);
+      await act(() => vi.advanceTimersByTimeAsync(10 * ARCHIVE_RELOAD_POLL_MS));
+      expect(calls).toHaveLength(2);
+
+      // Asked again and refused again: one request, and still stopped.
+      await act(async () => {
+        await result.current.refresh();
+        await vi.advanceTimersByTimeAsync(10);
+      });
+      expect(calls).toHaveLength(3);
+      expect(calls[2]?.headers.get(BACKGROUND_HEADER)).toBeNull();
+      expect(result.current.stopped).toBe(true);
+      await act(() => vi.advanceTimersByTimeAsync(10 * ARCHIVE_RELOAD_POLL_MS));
+      expect(calls).toHaveLength(3);
+
+      // Asked again and answered: polling resumes until the reload is ready.
+      answer = () => jsonResponse(200, ARCHIVE_LOADING);
+      await act(async () => {
+        await result.current.refresh();
+        await vi.advanceTimersByTimeAsync(10);
+      });
+      expect(calls).toHaveLength(4);
+      expect(result.current.isError).toBe(false);
+      expect(result.current.stopped).toBe(false);
+      answer = () => jsonResponse(200, ARCHIVE_READY);
+      await act(() => vi.advanceTimersByTimeAsync(ARCHIVE_RELOAD_POLL_MS));
+      expect(calls).toHaveLength(5);
+      expect(calls[4]?.headers.get(BACKGROUND_HEADER)).toBe('1');
+      expect(result.current.data?.status).toBe('ready');
+      await act(() => vi.advanceTimersByTimeAsync(10 * ARCHIVE_RELOAD_POLL_MS));
+      expect(calls).toHaveLength(5);
+    },
+  );
 });
 
 describe('useRequestArchiveReload', () => {

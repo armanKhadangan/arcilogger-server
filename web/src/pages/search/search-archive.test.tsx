@@ -227,8 +227,8 @@ describe('Arama — days in the sealed archive', () => {
     // The answer's rows (none here) are shown beside it.
     expect(await screen.findByRole('table', { name: 'Arama sonuçları' })).toBeInTheDocument();
 
-    // A page gives no keep time: the dialog names the setting with its default.
-    await confirmReload('db.reload_keep_days ayarının süresi boyunca (varsayılan 7 gün)');
+    // A page gives no keep time: the dialog says the administrator's time with its default.
+    await confirmReload('yöneticinin ayarladığı süre (varsayılan 7 gün) boyunca orada kalır');
     expect(reloadPosts(calls)).toEqual([
       { reason: 'search', first_day: '2026-10-04', last_day: '2026-10-05' },
     ]);
