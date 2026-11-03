@@ -218,6 +218,9 @@
     "/api/v1/imports/{kind}/template.csv": [
       "get"
     ],
+    "/api/v1/legal-status": [
+      "get"
+    ],
     "/api/v1/license": [
       "delete",
       "get",
@@ -3876,6 +3879,10 @@
           ],
           "title": "Remaining"
         },
+        "supported": {
+          "title": "Supported",
+          "type": "boolean"
+        },
         "threshold": {
           "title": "Threshold",
           "type": "integer"
@@ -3888,6 +3895,7 @@
       "required": [
         "provider",
         "legal_grade",
+        "supported",
         "threshold",
         "latest",
         "remaining",
@@ -4121,6 +4129,16 @@
     },
     "DashboardSeal": {
       "properties": {
+        "blocking": {
+          "anyOf": [
+            {
+              "$ref": "#/components/schemas/SealBlocking"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "calendar": {
           "items": {
             "$ref": "#/components/schemas/SealCalendarDay"
@@ -4134,7 +4152,8 @@
       },
       "required": [
         "yesterday",
-        "calendar"
+        "calendar",
+        "blocking"
       ],
       "title": "DashboardSeal",
       "type": "object"
@@ -6870,6 +6889,88 @@
       "title": "LeaseTableCounts",
       "type": "object"
     },
+    "LegalReason": {
+      "properties": {
+        "code": {
+          "enum": [
+            "provider_not_legal",
+            "credentials_in_clear",
+            "legal_root_missing",
+            "unstamped_days",
+            "renewal_due",
+            "renewal_uncovered",
+            "certificate_revoked",
+            "crl_stale"
+          ],
+          "title": "Code",
+          "type": "string"
+        },
+        "count": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Count"
+        },
+        "level": {
+          "enum": [
+            "warning",
+            "danger"
+          ],
+          "title": "Level",
+          "type": "string"
+        },
+        "link": {
+          "anyOf": [
+            {
+              "enum": [
+                "sealing",
+                "settings-tsa"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Link"
+        },
+        "message_en": {
+          "title": "Message En",
+          "type": "string"
+        },
+        "message_tr": {
+          "title": "Message Tr",
+          "type": "string"
+        },
+        "since": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Since"
+        }
+      },
+      "required": [
+        "code",
+        "level",
+        "message_tr",
+        "message_en",
+        "since",
+        "count",
+        "link"
+      ],
+      "title": "LegalReason",
+      "type": "object"
+    },
     "LegalRootBody": {
       "additionalProperties": false,
       "properties": {
@@ -6892,6 +6993,47 @@
         "sha256"
       ],
       "title": "LegalRootBody",
+      "type": "object"
+    },
+    "LegalStatus": {
+      "properties": {
+        "checked_at": {
+          "title": "Checked At",
+          "type": "string"
+        },
+        "level": {
+          "enum": [
+            "ok",
+            "warning",
+            "danger"
+          ],
+          "title": "Level",
+          "type": "string"
+        },
+        "provider": {
+          "title": "Provider",
+          "type": "string"
+        },
+        "provider_label": {
+          "title": "Provider Label",
+          "type": "string"
+        },
+        "reasons": {
+          "items": {
+            "$ref": "#/components/schemas/LegalReason"
+          },
+          "title": "Reasons",
+          "type": "array"
+        }
+      },
+      "required": [
+        "level",
+        "provider",
+        "provider_label",
+        "reasons",
+        "checked_at"
+      ],
+      "title": "LegalStatus",
       "type": "object"
     },
     "LicenseDetailsOut": {
@@ -11305,6 +11447,26 @@
         "reference"
       ],
       "title": "Scope",
+      "type": "object"
+    },
+    "SealBlocking": {
+      "description": "A closed day without a time stamp longer than ``seal.late_after_hours`` after its end\n(D11): the Panel's blocking card.",
+      "properties": {
+        "hours_late": {
+          "title": "Hours Late",
+          "type": "integer"
+        },
+        "oldest_unstamped_day": {
+          "format": "date",
+          "title": "Oldest Unstamped Day",
+          "type": "string"
+        }
+      },
+      "required": [
+        "oldest_unstamped_day",
+        "hours_late"
+      ],
+      "title": "SealBlocking",
       "type": "object"
     },
     "SealCalendarDay": {

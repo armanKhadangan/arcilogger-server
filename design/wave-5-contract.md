@@ -942,6 +942,116 @@ All Wave 5 questions are answered (2026-11-02).
   CRL folder leaves it unchecked with a warning (C19). A known list whose file is gone is stored
   again and recorded as `stored_file_changed`, exit 1 (C20).
 
+## Deviations — W5-C (2026-11-02)
+
+- **W5-C-1: the reader of `state/renewal.json`.** §2.1.2 fixes the per-token fields, not the
+  top level. The reader (`alerts.system.read_stamp_renewals`, shared by `/legal-status`, the
+  day page and the alerts) takes `tokens` of an object or a plain list, ignores unknown keys,
+  leaves out an entry with an unknown `status` (a list or an object included) or an unreadable
+  `cert_not_after`, and counts from each token's `status`, never from a totals object. A
+  missing file is "no report yet"; an unreadable one is unknown and decides nothing (no reason,
+  no alert raised or resolved, `renewal: null` and a page problem on the day page). An entry's
+  `renewed_at` is taken when the writer gives one; otherwise the day page reads the genTime of
+  the renewal token beside the `covered_by` record (`<record>.zd`). A record with a drive, a
+  root (a UNC path included) or a `..` step is refused as written, before anything on the disk
+  is opened; the token itself, a link followed, must resolve inside `vault/renewals`. Else
+  `renewed_at` is `null`. `path` is vault-relative; a leading `vault/` and a `.zd` suffix of
+  `covered_by` are tolerated.
+- **W5-C-2: the day page's `revocation` texts** for the codes that §2.6 does not word
+  (`crl-revoked-later`, `crl-hold`, `crl-none`, `crl-stale`, `crl-ok`) are W5-C's, after the
+  standalone verifier's (`legalstatus/texts.py` `REVOCATION`); `crl-revoked` uses
+  `certificate_revoked`. `level` is the verifier's own `crl_level`, else the D10 level of the
+  code. The day page checks the token with the stored lists (`crl.load_stored`, read once
+  per request, C19), so `revocation` is `crl-none` before the first `crl fetch`. It is `null`
+  only when `state/crl` cannot be read, and the page's `problems` then say "revocation not
+  checked"; a list whose file no longer matches its index entry is named there too (C14).
+- **W5-C-3: `crl_stale`** follows C22 (review of #117; it replaces the first measure on
+  `this_update`). An issuer in use is fresh while it has an accepted stored list whose index
+  `fetched_at` is newer than `tsa.crl_max_age_days` and whose own `nextUpdate`, when it has one,
+  is later than now. A fetch exactly `tsa.crl_max_age_days` old is stale, and so is a list at
+  or past its `nextUpdate`, however recently it was fetched; an issuer without an accepted list
+  stays stale. A list's fetch time is its index entry's (the entry of its stored name), and its
+  `nextUpdate` is the list's own; an accepted list whose entry gives no readable `fetched_at`
+  counts for nothing, and so does one whose `fetched_at` is later than now: a skewed clock never
+  keeps a list fresh, and the clock check reports the skew (manager's re-review of #117). The
+  issuer's best list counts. "Issuer in use" is a CA certificate of the
+  newest sealed day's verified chain (`token_chain` against the pinned roots, the TSA
+  certificate left out), by its SHA-256 fingerprint. So an old provider's lists stop mattering,
+  and before the first sealed day, or when the newest token reaches no pinned root, nothing is
+  in use. Only the lists that `crl.load_stored` accepts count: a list whose file was changed or
+  deleted is no verified list (C14, C20). When `state/crl` cannot be read, every issuer in use
+  is stale; that is never a server error. `since` is the earliest moment a stale issuer that has
+  a list stopped being fresh (its best list's `fetched_at + max_age`, or its `nextUpdate` when
+  that comes first), else `null`; `link` is `settings-tsa` (C5). `R20-crl` uses the same rule
+  (`alerts.system.crl_status`, D11); its details add `changed_files` (the lists left out under
+  C14). Kamu SM's and TÜRKTRUST's real publication intervals are still to be confirmed (K10/T4,
+  sahada doğrula). `certificate_revoked` and `R20-cert` also check the newest sealed day's chain
+  against the stored lists at its genTime (`crl-revoked` only; `since` is the revocation date),
+  beside the scheduled verifications' day errors.
+- **W5-C-4: `credentials_in_clear`** holds for `turktrust` when the `tsa.url` scheme is `http`
+  (§2.4 "with plain HTTP"). `tsa.allow_plain_http` with an `https://` URL raises nothing: the
+  §2.6 text states that the connection is unencrypted. Until W5-T's configuration lands,
+  `turktrust` is never a legal-grade claim, so it also gives `provider_not_legal` and the label
+  "Test sunucusu".
+- **W5-C-5: `DashboardSeal.blocking`** names the oldest closed day without a token more than
+  `seal.late_after_hours` after its end; `hours_late` is the whole hours since that day's end
+  (49 at 49 h 30 min). It uses the same rule as `unstamped_days` (D11); a spool that cannot be
+  listed gives `null`, and a stamped day whose Seal task has not finished does not block.
+- **W5-C-6: the API texts carry no ZAMAN-DAMGASI reference.** C13 has the web append "ZAMAN-
+  DAMGASI.md bölüm N"; the `message_tr`/`message_en` of `/legal-status` are the §2.6 texts
+  alone. `certificate_revoked`'s `{name}` is the certificate subject's CN, else its whole
+  RFC 4514 text.
+- **W5-C-7: the three alerts are prepared, not switched on.** `check_stamp_renewal`,
+  `check_stamp_cert` and `check_stamp_crl` are in `alerts.system.LEGAL_CHECKS`, not in
+  `CHECKS`: W5-E appends them with their texts and first-steps guide rows (§2.3.1). Each code
+  is written only inside its dedup key (`R20-renewal:none` and so on) and the rule is taken from
+  the key (D14); `worker/tests/test_alerts_legal.py::test_no_whole_string_constant_for_the_wave5_alert_codes`
+  fails on a whole-string constant, and W5-E deletes or inverts it. The findings carry counts
+  only. R20-cert's "expires within 30 days and is uncovered" is read as in W5-C-12. R20-cert
+  is resolved only when every input can be read: the re-stamping report, every scheduled
+  verification (`state/verify/last-*.json`; one that cannot be read or holds no verification
+  counts as unreadable), the newest sealed day's token, reaching a pinned root, and `state/crl`
+  (before the first sealed day no list is needed). A stored list that was changed or deleted
+  (C14/C20) keeps its index entry for good, so it holds open only an alert that carries a
+  revocation (its `revoked` count, or the critical severity the store keeps): an expiry alert
+  resolves once `state/renewal.json` says the tokens are covered (manager's re-review of #117).
+  The damaged list is reported where C14/C20 put it, CrlFetch's `stored_file_changed` and the
+  day page's problems. A revocation stays open while the input that found it cannot be read. The
+  rule is one for both severities: a "high" raised from `state/renewal.json` alone also stays
+  open while the newest token reaches no pinned root (for example a provider whose roots are
+  not pinned yet), the safe side. "The `Renew` task failed twice
+  in a row" is left to W5-E: no state file records Renew runs yet (C12). `R20-crl` is judged
+  from `state/crl` only (the stored lists and `index.json`, never an exit code; C22, W5-C-3);
+  its details give the stale issuers, the failures, the changed files and the newest
+  `fetched_at`.
+- **W5-C-8: `Exclude<A, B>` in the web type tests.** `LegalReason.level` is
+  `Exclude<LegalLevel, 'ok'>` (§2.3.1, verbatim), so `tsType()` of `api-types.test.ts` and
+  `check()` of `api-samples.test.ts` learned that form.
+- **W5-C-9: `SealDayDetail.renewal` and `revocation` are optional** in `seal-types.ts`, as
+  W5-D asked and like `tsa_cert_not_after?`; the API always sends both keys (`null` when there
+  is nothing). `Credits.supported` is required in `api-types.ts`, because the schema requires
+  it and `api-types.test.ts` compares requiredness. It is false for a provider without a credit
+  query (`rfc3161` and `turktrust`, C21; `NO_CREDIT_PROVIDERS` of `routers/credits.py`) and also
+  when the newest `state/credit.jsonl` line of the configured provider says `"supported": false`.
+- **W5-C-10: day-check Turkish texts beyond #106's four** in `issues.py`: C14's "revocation
+  list {file} does not match its index entry" and the builder's "CRL file {file} changed while
+  the package was built". `{when}` is shown in site time (`format_datetime`).
+- **W5-C-11: damaged state files are read as unknown**, never a server error of the banner (the
+  60 s cache keeps no failed answer). A scheduled verification whose `checks` is not a list is
+  skipped. A re-stamping entry whose time is at the edge of the calendar (one that UTC or site
+  time cannot show, at either end) is left out; so is such an index `fetched_at` or failure
+  `at`, and a moment shifted past the edge is unknown. The high edge is 9999-12-31T21:00Z, so a
+  certificate with RFC 5280's "no well-defined expiration" (`99991231235959Z`) has its entry
+  left out: its day page shows `renewal: null`. JSON nested too deeply to parse counts as
+  unreadable. A seal state that cannot be parsed makes the unstamped days unknown.
+- **W5-C-12: R20-cert "high"** (manager answer on #117, 2026-11-02 21:07Z, Q6) is a token of
+  `state/renewal.json` that is `uncovered` (its certificate expired with no renewal that counts),
+  or one that is `due` with at most 30 days left before its certificate's `cert_not_after`
+  (exactly 30 days is high, 30 days and a second is not). The 30 days are
+  `alerts.system.CERT_EXPIRY_WARNING` (`timedelta(days=30)`), not a setting. A revocation still
+  makes it `critical`. The findings count both (`expiring`, `uncovered`, beside `revoked`).
+  "The `Renew` task failed twice in a row" stays W5-E's (W5-C-7).
+
 ## Deviations — W5-G (2026-11-03)
 
 - **W5-G-1: reload days are device-time days.** Partitions and chunks are by device `time`, and

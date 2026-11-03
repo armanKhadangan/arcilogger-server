@@ -548,6 +548,11 @@ export interface CreditCheck {
 export interface Credits {
   provider: string;
   legal_grade: boolean;
+  /**
+   * `false`: the provider offers no credit query (`rfc3161`, `turktrust`; Wave 5 contract 2.4,
+   * C3, C21). The card then shows the neutral text of 2.6 instead of a number.
+   */
+  supported: boolean;
   threshold: number;
   latest: CreditCheck | null;
   /** The last known number (the newest check that returned one). */
@@ -1028,10 +1033,23 @@ export interface SealCalendarDay {
   status: SealDayState;
 }
 
+/**
+ * A closed day without a time stamp longer than `seal.late_after_hours` after its end (Wave 5
+ * contract 2.3.1, decision 11): the Panel's blocking card.
+ */
+export interface SealBlocking {
+  /** The oldest such day (it can be older than the calendar's 30 days). */
+  oldest_unstamped_day: DateString;
+  /** Whole hours since the end of that day. */
+  hours_late: number;
+}
+
 /** "Dünkü mühür" and the 30 days ending yesterday (`seal.read`). */
 export interface DashboardSeal {
   yesterday: SealYesterday;
   calendar: SealCalendarDay[];
+  /** `null` when no closed day is late, or when the spool cannot be listed (unknown). */
+  blocking: SealBlocking | null;
 }
 
 /** "Kontör" (`seal.read`). */

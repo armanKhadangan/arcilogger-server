@@ -68,9 +68,9 @@ ROUTES: dict[tuple[str, str], str | None] = {
     # Module bulk_import: 2 routes
     ("POST", f"{V}/imports/{{kind}}"): BI,
     ("GET", f"{V}/imports/{{kind}}/template.csv"): BI,
-    # 5651 Temel, never gated: 132 routes, among them the 3 of the licence, the browser
-    # administration (ADR-0014), Canlı Akış, Kaynaklar, Arama (ADR-0015), Uyum Durumu, Sistem and
-    # the archive reloads (Wave 5 G9)
+    # 5651 Temel, never gated: 133 routes, among them the 3 of the licence, the browser
+    # administration (ADR-0014), Canlı Akış, Kaynaklar, Arama (ADR-0015), Uyum Durumu, Sistem,
+    # the legal-validity status (Wave 5 contract 0.1 item 6) and the archive reloads (Wave 5 G9)
     ("GET", f"{V}/health"): None,
     ("GET", f"{V}/alerts"): None,
     ("GET", f"{V}/alerts/summary"): None,
@@ -202,6 +202,7 @@ ROUTES: dict[tuple[str, str], str | None] = {
     ("GET", f"{V}/compliance"): None,
     ("GET", f"{V}/compliance/report.pdf"): None,
     ("POST", f"{V}/compliance/config-backup"): None,
+    ("GET", f"{V}/legal-status"): None,
     ("GET", f"{V}/system"): None,
     ("GET", f"{V}/system/disk"): None,
     ("GET", f"{V}/system/health"): None,
@@ -270,7 +271,7 @@ def test_every_route_is_classified(app: FastAPI) -> None:
     assert found == sorted(ROUTES)
     gated = [key for key, module in ROUTES.items() if module is not None]
     assert len(gated) == 23
-    assert len(ROUTES) - len(gated) == 132
+    assert len(ROUTES) - len(gated) == 133
 
 
 def test_the_module_markers_equal_the_table() -> None:

@@ -209,6 +209,7 @@ if _SCRIPTS not in sys.path:
     sys.path.insert(0, _SCRIPTS)
 import samples_archive  # noqa: E402
 import samples_compliance  # noqa: E402
+import samples_legal_status  # noqa: E402
 import samples_live_sources  # noqa: E402
 import samples_lookups  # noqa: E402
 import samples_network  # noqa: E402
@@ -218,14 +219,16 @@ import samples_system  # noqa: E402
 #: The pages whose samples a module of their own captures (module text), in this order:
 #: ``samples_network`` writes sessions of the day before "now", after the pages before it
 #: captured; the Wave 4 pages (``samples_compliance``, ``samples_system``) read the whole site as
-#: every other page left it, so they come last and change no earlier sample; ``samples_archive``
-#: narrows the database window for its own capture, after all of them.
+#: every other page left it, so they come last and change no earlier sample, then the
+#: legal-validity status reads the whole site; ``samples_archive`` narrows the database window for
+#: its own capture, after all of them.
 SAMPLE_MODULES = (
     samples_search,
     samples_live_sources,
     samples_network,
     samples_compliance,
     samples_system,
+    samples_legal_status,
     samples_archive,
 )
 

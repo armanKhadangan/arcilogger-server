@@ -1,14 +1,21 @@
-"""``GET /api/v1/credits``: the Kamu SM credit history written by the Credit task."""
+"""``GET /api/v1/credits``: the Kamu SM credit history written by the Credit task, and
+``supported`` for a provider without a credit query (Wave 5 contract 2.4, C3, C21)."""
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
+import pytest
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from arcilogger_api import deps
 from arcilogger_api.testing import LoggedIn
+from arcilogger_core.config import KAMUSM_PRODUCTION_HOST, Config
 from arcilogger_core.credit import check_credit
 from arcilogger_core.layout import Layout
 from arcilogger_core.tsa.base import StampResult, TsaUnavailableError
@@ -39,6 +46,7 @@ def test_credit_history_and_threshold(client: TestClient, login_as: Login, layou
     assert empty["threshold"] == 500
     assert empty["provider"] == "mock"
     assert empty["legal_grade"] is False
+    assert empty["supported"] is True
 
     tsa = MockTsa(layout.state / "mock-tsa", key_type="ec")
     provider = MockTsaProvider(tsa)
@@ -65,3 +73,95 @@ def test_only_seal_readers_see_the_credit(client: TestClient, login_as: Login) -
     response = client.get(API)
     assert response.status_code == 403
     assert response.json()["error"]["code"] == "forbidden"
+
+
+def use_tsa(app: FastAPI, config: Config, **tsa: Any) -> None:
+    """Serve ``config`` with other ``[tsa]`` values (not validated: ``turktrust`` reads as W5-T
+    will give it)."""
+    changed = config.model_copy(update={"tsa": config.tsa.model_copy(update=tsa)})
+    app.dependency_overrides[deps.get_config] = lambda: changed
+
+
+def write_lines(layout: Layout, *lines: dict[str, Any]) -> None:
+    layout.credit_log.parent.mkdir(parents=True, exist_ok=True)
+    with layout.credit_log.open("a", encoding="utf-8") as handle:
+        for line in lines:
+            handle.write(json.dumps(line) + "\n")
+
+
+@pytest.mark.parametrize(
+    "tsa",
+    [{}, {"provider": "zamane", "url": f"https://{KAMUSM_PRODUCTION_HOST}"}],
+    ids=["mock", "zamane"],
+)
+def test_credits_supported_for_a_provider_with_a_credit_query(
+    app: FastAPI,
+    api_config: Config,
+    client: TestClient,
+    login_as: Login,
+    layout: Layout,
+    tsa: dict[str, Any],
+) -> None:
+    use_tsa(app, api_config, **tsa)
+    write_lines(
+        layout, {"time": "2026-10-10T09:00:00+03:00", "provider": "zamane", "credits": 9634}
+    )
+    login_as(client, "auditor")
+    body = client.get(API).json()
+    assert body["supported"] is True
+    assert body["remaining"] == 9634
+
+
+def test_credits_for_turktrust_are_not_supported(
+    app: FastAPI, api_config: Config, client: TestClient, login_as: Login
+) -> None:
+    """The credit card for ``turktrust`` (contract 3): no number and no threshold warning."""
+    use_tsa(app, api_config, provider="turktrust", url="https://198.51.100.20/")
+    login_as(client, "auditor")
+    body = client.get(API).json()
+    assert body["provider"] == "turktrust"
+    assert body["supported"] is False
+    assert body["remaining"] is None
+    assert body["below_threshold"] is False
+
+
+def test_credits_for_rfc3161_are_not_supported(
+    app: FastAPI, api_config: Config, client: TestClient, login_as: Login, layout: Layout
+) -> None:
+    """C21: an RFC 3161 server has no credit query (``Rfc3161Client.credits()`` is ``None``), so
+    its card is the neutral one too, although the Credit task's line names no ``supported``."""
+    use_tsa(app, api_config, provider="rfc3161", url="https://198.51.100.30/tsa")
+    write_lines(
+        layout, {"time": "2026-10-10T09:00:00+03:00", "provider": "rfc3161", "credits": None}
+    )
+    login_as(client, "auditor")
+    body = client.get(API).json()
+    assert body["provider"] == "rfc3161"
+    assert body["supported"] is False
+    assert body["remaining"] is None
+    assert body["below_threshold"] is False
+    assert body["history"][-1]["credits"] is None
+
+
+def test_credits_unsupported_line_from_the_credit_task(
+    client: TestClient, login_as: Login, layout: Layout
+) -> None:
+    """The Credit task records ``{"supported": false}`` (2.4); a later check that returns a
+    number, or a check of another provider, does not keep it."""
+    unsupported = {"time": "2026-10-11T09:00:00+03:00", "provider": "mock", "supported": False}
+    write_lines(layout, unsupported)
+    login_as(client, "auditor")
+    body = client.get(API).json()
+    assert body["supported"] is False
+    assert body["remaining"] is None
+    assert body["below_threshold"] is False
+    assert body["history"][-1]["credits"] is None
+    assert "supported" not in body["history"][-1]  # CreditCheck keeps its shape
+
+    write_lines(layout, {**unsupported, "time": "2026-10-12T09:00:00+03:00", "provider": "zamane"})
+    assert client.get(API).json()["supported"] is True  # written before a provider change
+    write_lines(layout, {"time": "2026-10-13T09:00:00+03:00", "provider": "mock", "credits": 12})
+    assert client.get(API).json()["supported"] is True
+    # a line that names no provider is the configured provider's
+    write_lines(layout, {"time": "2026-10-14T09:00:00+03:00", "supported": False})
+    assert client.get(API).json()["supported"] is False

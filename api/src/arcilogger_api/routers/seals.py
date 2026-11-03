@@ -10,8 +10,9 @@ Permission ``seal.read`` (administrators, auditors) unless noted:
 * ``GET /seals/{day}`` — the day: files, sizes, lines and hashes exactly as in the manifest,
   the manifest's own hash, the link to the previous day (and whether it still matches the
   vault), gaps, clock data, time-stamp token (genTime, serial, TSA, policy, certificate
-  validity, provider, ``legal_grade``, a fresh token check), the newest verification and the
-  replica status.
+  validity, provider, ``legal_grade``, a fresh token check), the newest verification, the
+  replica status, the token's re-stamping state (``renewal``, from ``state/renewal.json``) and
+  its revocation result (``revocation``; Wave 5 contract 2.3.1), each ``null`` when unknown.
 * ``GET /seals/{day}/manifest`` and ``/token`` — the sealed files (audited ``seal.download``).
 * ``POST /seals/{day}/verify?deep=true`` (``seal.verify``) — the core day check in a child
   process with a time limit (:mod:`arcilogger_api.sealcheck`); the result is stored in
@@ -31,7 +32,6 @@ from __future__ import annotations
 import logging
 import threading
 from datetime import date, datetime, timedelta
-from pathlib import Path as FsPath
 from typing import Annotated, Any, Final
 
 from fastapi import APIRouter, Depends, Path, Query, Request, status
@@ -58,8 +58,8 @@ from arcilogger_core.config import Config
 from arcilogger_core.layout import Layout
 from arcilogger_core.seal import Sealer, sha256_file
 from arcilogger_core.timeutil import day_window, site_day, utc_now
-from arcilogger_core.tsa.base import StampResult, TsaError
 from arcilogger_db.models import SealVerification
+from arcilogger_worker.alerts.system import NoStamps
 
 log = logging.getLogger("arcilogger.api.seals")
 
@@ -332,19 +332,6 @@ def verify_day(
     )
 
 
-class _NoStamps:
-    """The sealer only answers which day is due here; it never stamps."""
-
-    name = "none"
-    legal_grade = False
-
-    def stamp(self, file_path: FsPath) -> StampResult:  # pragma: no cover - never called
-        raise TsaError("the API does not stamp")
-
-    def credits(self) -> int | None:  # pragma: no cover - never called
-        return None
-
-
 #: Calendar states of a day that is sealed (a failed verification still is).
 _SEALED_STATES: Final = ("verified", "sealed", "late")
 
@@ -360,7 +347,7 @@ def _check_seal_now(
         raise admin_error("seal_day_sealed")
     if status in ("skipped", "deleted") or shown in ("no_data", "deleted"):
         raise admin_error("seal_not_applicable")
-    due = Sealer(config, provider=_NoStamps(), roots=[]).closed_unsealed_days()
+    due = Sealer(config, provider=NoStamps(), roots=[]).closed_unsealed_days()
     quiet = timedelta(seconds=config.seal.quiet_seconds)
     if (
         not due
