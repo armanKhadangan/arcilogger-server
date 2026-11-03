@@ -63,6 +63,18 @@ def test_every_fixture_file_is_pinned() -> None:
     assert present == {name for name, _ in _pinned()}
 
 
+def test_every_pinned_file_is_in_the_repository() -> None:
+    """A pinned file git ignores (``*.pem`` is) would pass here and be missing in CI."""
+    try:
+        listed = subprocess.run(
+            ["git", "ls-files", "-z", "--", "."], cwd=FIXTURE, capture_output=True, check=True
+        ).stdout
+    except (OSError, subprocess.CalledProcessError):
+        pytest.skip("git is not available")
+    tracked = {name.decode() for name in listed.split(b"\0") if name}
+    assert {name for name, _ in _pinned()} <= tracked
+
+
 def test_the_file_has_many_streams_and_every_reader_gives_the_manifest_content() -> None:
     assert len(sealedfile.xz_streams(SEALED)) > 5
     entry = _entry()
@@ -72,7 +84,7 @@ def test_the_file_has_many_streams_and_every_reader_gives_the_manifest_content()
 
 
 def test_the_core_verifier_verifies_the_day(tmp_path: Path) -> None:
-    roots = x509.load_pem_x509_certificates((ROOTS / "mock-root.pem").read_bytes())
+    roots = x509.load_pem_x509_certificates((ROOTS / "mock-root.crt").read_bytes())
     check = verify_day(_vault(tmp_path), DAY, roots, deep=True)
     assert check.errors == []
 

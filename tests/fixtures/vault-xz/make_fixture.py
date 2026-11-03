@@ -81,8 +81,8 @@ def main() -> int:
         for path in root.rglob("*"):  # the sealer locks what it seals
             if path.is_file() and is_locked(path):
                 unlock(path)
-        (HERE / "kokler").mkdir()
-        (HERE / "kokler" / "mock-root.pem").write_bytes(
+        (HERE / "kokler").mkdir()  # .crt, not .pem: the repository ignores *.pem (keys)
+        (HERE / "kokler" / "mock-root.crt").write_bytes(
             tsa.root_certificate.public_bytes(Encoding.PEM)
         )
     names = sorted(
