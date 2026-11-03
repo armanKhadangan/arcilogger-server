@@ -4,7 +4,7 @@ import { expectNoA11yViolations, usePreferences, useSampleClock, type Theme } fr
 import { mockApi, type MockOptions } from './mock-api';
 import { mockSources } from './mock-sources';
 import { mockW4 } from './mock-w4';
-import { DASHBOARD, RAW, SAMPLE_TODAY, SOURCES, SYSTEM_DISK } from './samples';
+import { copy, DASHBOARD, RAW, SAMPLE_TODAY, SOURCES, SYSTEM_DISK } from './samples';
 
 /** The Panel's blocks (spec 12.3 item 2) by their test ids, in page order. */
 const ALL = [
@@ -319,6 +319,117 @@ async function titlesFit(page: Page): Promise<string[]> {
       });
       return cut || title.scrollWidth > title.clientWidth ? [title.textContent] : [];
     });
+  });
+}
+
+/**
+ * The Panel's blocking day (Wave 5 contract 2.3.1 `DashboardSeal.blocking`): the captured
+ * summaries have none (`blocking: null`), so it is hand-built: the capture's failed 11.10.2026,
+ * 51 hours late.
+ */
+const BLOCKING = { oldest_unstamped_day: '2026-10-11', hours_late: 51 };
+
+/** `GET /dashboard/summary` as the API answered `role`, with {@link BLOCKING} in its seal box. */
+async function blockingSummary(page: Page, role: 'admin' | 'auditor' | 'viewer') {
+  const summary = copy(DASHBOARD[role]);
+  const json = summary.seal
+    ? { ...summary, seal: { ...summary.seal, blocking: BLOCKING } }
+    : summary;
+  await page.route('**/api/v1/dashboard/summary', (route) => route.fulfill({ json }));
+}
+
+const BLOCKING_TEXT =
+  'En eski damgalanmamış gün 11.10.2026; damgası 51 saat gecikti. (ZAMAN-DAMGASI.md bölüm 5.5)';
+
+test.describe('Panel — blocking card', () => {
+  test.beforeEach(async ({ page }) => {
+    await useSampleClock(page, SAMPLE_TODAY);
+  });
+
+  test('administrator: red at the top, the health cards unchanged, opens that day', async ({
+    page,
+  }) => {
+    await panel(page, { signedInAs: 'tolga' });
+    await blockingSummary(page, 'admin');
+    await page.goto('/');
+    const card = page.getByTestId('dashboard-blocking');
+    await expect(card).toContainText('Kapanmış günler zaman damgası bekliyor');
+    await expect(card).toContainText(BLOCKING_TEXT);
+    await expect(card).toHaveAttribute('role', 'status');
+    await expect(card.locator('svg').first()).toBeVisible();
+    await expect(card.locator('h3')).toHaveCount(0);
+    await expect(page.getByTestId('card-disk')).toBeVisible();
+    expect(await pageOrder(page)).toEqual(ALL);
+    // Full width, above the first health card.
+    const [cardBox, ingestBox, calendarBox] = await Promise.all([
+      card.boundingBox(),
+      page.getByTestId('card-ingest').boundingBox(),
+      page.getByTestId('card-calendar').boundingBox(),
+    ]);
+    expect((cardBox?.y ?? 0) + (cardBox?.height ?? 0)).toBeLessThanOrEqual(ingestBox?.y ?? 0);
+    expect(cardBox?.width ?? 0).toBeGreaterThan((calendarBox?.width ?? 0) * 2);
+
+    await card.getByRole('link', { name: 'Günü Mühürleme sayfasında aç' }).click();
+    await expect(page).toHaveURL(/\/sealing\?month=2026-10&day=2026-10-11$/);
+    await expect(page.getByRole('heading', { level: 1, name: 'Mühürleme' })).toBeVisible();
+  });
+
+  test('English: the same card in English', async ({ page }) => {
+    await usePreferences(page, { lang: 'en' });
+    await panel(page, { signedInAs: 'tolga' });
+    await blockingSummary(page, 'admin');
+    await page.goto('/');
+    const card = page.getByTestId('dashboard-blocking');
+    await expect(card).toContainText('Closed days are waiting for a time stamp');
+    await expect(card).toContainText(
+      'The oldest unstamped day is 11.10.2026; its time stamp is 51 hours late. (TIME-STAMPING.md section 5.5)',
+    );
+    await expect(
+      card.getByRole('link', { name: 'Open the day on the sealing page' }),
+    ).toBeVisible();
+  });
+
+  test('auditor: the card and its link (seal.read)', async ({ page }) => {
+    await panel(page, { signedInAs: 'ayse.yilmaz' });
+    await blockingSummary(page, 'auditor');
+    await page.goto('/');
+    const card = page.getByTestId('dashboard-blocking');
+    await expect(card).toContainText(BLOCKING_TEXT);
+    await expect(card.getByRole('link')).toHaveAttribute(
+      'href',
+      '/sealing?month=2026-10&day=2026-10-11',
+    );
+  });
+
+  test('report viewer: no seal box, no card', async ({ page }) => {
+    await panel(page, { signedInAs: 'zeynep' });
+    await blockingSummary(page, 'viewer');
+    await page.goto('/');
+    await expect(page.getByTestId('card-ingest')).toBeVisible();
+    await expect(page.getByTestId('card-usage')).toBeVisible();
+    await expect(page.getByTestId('dashboard-blocking')).toHaveCount(0);
+  });
+
+  test('no card from the captured summary (nothing blocking)', async ({ page }) => {
+    await panel(page, { signedInAs: 'tolga' });
+    await page.goto('/');
+    await expect(page.getByTestId('card-seal')).toBeVisible();
+    await expect(page.getByTestId('card-disk')).toBeVisible();
+    await expect(page.getByTestId('dashboard-blocking')).toHaveCount(0);
+  });
+});
+
+for (const theme of ['light', 'dark'] as Theme[]) {
+  test(`Panel with the blocking card: accessibility — ${theme}`, async ({ page }) => {
+    await usePreferences(page, { theme });
+    await useSampleClock(page, SAMPLE_TODAY);
+    await panel(page, { signedInAs: 'tolga' });
+    await blockingSummary(page, 'admin');
+    await page.goto('/');
+    await expect(page.getByTestId('dashboard-blocking')).toContainText(BLOCKING_TEXT);
+    await expect(page.getByTestId('card-usage')).toContainText('Aktif kullanıcı');
+    await expect(page.getByTestId('card-disk')).toBeVisible();
+    await expectNoA11yViolations(page);
   });
 }
 

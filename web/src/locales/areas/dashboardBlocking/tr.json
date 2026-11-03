@@ -1,0 +1,10 @@
+{
+  "dashboard": {
+    "blocking": {
+      "title": "Kapanmış günler zaman damgası bekliyor",
+      "body_one": "En eski damgalanmamış gün {{day}}; damgası {{hours}} saat gecikti.",
+      "body_other": "En eski damgalanmamış gün {{day}}; damgası {{hours}} saat gecikti.",
+      "open": "Günü Mühürleme sayfasında aç"
+    }
+  }
+}

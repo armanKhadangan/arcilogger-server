@@ -19,7 +19,14 @@ import { useSystemDisk } from '@/lib/system-hooks';
 import { cn } from '@/lib/utils';
 
 import { AlertsCard, SealStripCard } from './dashboard-alerts';
-import { ClockCard, CreditCard, IngestCard, ParseFailuresCard, SealCard } from './dashboard-cards';
+import {
+  BlockingCard,
+  ClockCard,
+  CreditCard,
+  IngestCard,
+  ParseFailuresCard,
+  SealCard,
+} from './dashboard-cards';
 import {
   dashboardRequests,
   diskRequested,
@@ -36,12 +43,14 @@ import { DiskCard } from './disk-card';
 const USAGE_MODULE: ModuleKey = 'usage_analytics';
 
 /**
- * Panel (spec 12.3 item 2; `dashboard.view` or `dashboard.usage`): log intake and today's parse
- * failures, yesterday's seal, Kamu SM credit and clock offset, the disks (`system.read`), today's
- * company usage, open security alerts, the most visited sites, categories and the last 30 days of
- * sealing. Each block appears only for those who may see it (the API leaves the others out); each
- * links to its page when the user may open that. The disk card shows only with an answer: not
- * while it loads and not on an error (the Sistem page shows that).
+ * Panel (spec 12.3 item 2; `dashboard.view` or `dashboard.usage`): a blocking card at the top
+ * while a closed day is unstamped for too long (Wave 5 contract 2.3.1, `seal.read`), log intake
+ * and today's parse failures, yesterday's seal, Kamu SM credit and clock offset, the disks
+ * (`system.read`), today's company usage, open security alerts, the most visited sites,
+ * categories and the last 30 days of sealing. Each block appears only for those who may see it
+ * (the API leaves the others out); each links to its page when the user may open that. The disk
+ * card shows only with an answer: not while it loads and not on an error (the Sistem page shows
+ * that).
  *
  * The live blocks refresh every 30 s, the usage figures every 5 minutes, both in the background
  * (`X-Arci-Background`: an unattended Panel does not keep the session alive) and only while the
@@ -81,6 +90,7 @@ export function DashboardPage() {
     to: linkTarget('usage', permissions),
   };
   const sealing = linkTarget('sealing', permissions);
+  const blocking = blocks.has('blocking') ? (data?.seal?.blocking ?? null) : null;
   const security = linkTarget('security', permissions);
   const summaryLoading = asked.summary && summary.isPending;
   const usageLoading =
@@ -171,6 +181,13 @@ export function DashboardPage() {
           </>
         }
       />
+
+      {blocking ? (
+        <BlockingCard
+          blocking={blocking}
+          to={sealing ? sealDayHref(sealing, blocking.oldest_unstamped_day) : null}
+        />
+      ) : null}
 
       {summaryFailed ? (
         <Alert tone="danger" title={t('dashboard.loadFailed')}>
