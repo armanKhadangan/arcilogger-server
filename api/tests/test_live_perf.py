@@ -5,8 +5,18 @@ a typed filter.
 * The hub's CPU — the whole test process's ``process_time``, which also holds the server and the
   three readers — stays at or below 0.4 s per wall second on a core as fast as CI's runners.
 * The event loop's CPU a delivered line (the SSE side: each stream's events, Starlette's and
-  Uvicorn's writes), counted in lines of the gauge, stays at or below its bound, tighter on a
-  faster core: a costlier write path fails on a fast core and on a slow one alike.
+  Uvicorn's writes), counted in lines of the gauge, stays at or below its bound. On CI (and with
+  ``ARCILOGGER_PERF_STRICT=1``) the bound is tighter on a faster core: a costlier write path
+  fails on a fast runner and on a slow one alike. Elsewhere it is a flat ``OFF_CI_GAUGE_LINES``,
+  and CI's bound and the margin to it are shown, not asserted.
+* That split is not a fix of the root cause (#125). On some cloud-session hosts the gauge runs
+  warm (the fastest of back-to-back rounds, mostly C library code) and the SSE path cold (short
+  runs of interpreted code after the loop idled): at the same gauge CI's ubuntu-latest read 11.71
+  us and 4.80 gauge lines, such a host 11.70 us and 7.47, so no bound from the gauge alone passes
+  unchanged code there and fails a 40 % costlier path on CI. CI is the gate. Off CI a path 40 %
+  costlier fails only on that fast-gauge class (11 to 13 us); #31's +400 us fails everywhere.
+* Not covered: a starved hub (8 busy neighbours on 4 CPUs) runs fewer, larger cycles and its
+  figure a line falls, so a path 39 us a line costlier can pass. CI's runners are not loaded so.
 * A gauge — a fixed piece of the hub's per-line work, run outside the hub, the fastest of
   several rounds by this thread's CPU — tells how fast this core is. Up to ``TOLERANCE`` times
   the reference the CPU a second stays at 0.4 s; on a slower core it grows with the excess beyond
@@ -21,6 +31,7 @@ from __future__ import annotations
 import asyncio
 import itertools
 import json
+import os
 import re
 import statistics
 import subprocess
@@ -64,18 +75,29 @@ REFERENCE_GAUGE = 17.76e-6 if sys.platform == "win32" else 15.90e-6
 #: noise); beyond it the bound grows with the excess only, so a gauge that reads high never
 #: loosens it by more than its excess over the tolerance.
 TOLERANCE = 1.2
+#: The per-line bound is CI's (``LOOP_GAUGE_LINES``, tighter on a faster core) on GitHub's
+#: runners or with ``ARCILOGGER_PERF_STRICT=1``, else the flat ``OFF_CI_GAUGE_LINES``.
+STRICT = (
+    os.environ.get("GITHUB_ACTIONS") == "true" or os.environ.get("ARCILOGGER_PERF_STRICT") == "1"
+)
 #: The event loop's CPU a delivered line on a core as fast as the reference, in gauge lines (the
 #: gauge's fastest round, on the same clock), so the bound follows the core's speed: a write path
-#: 40 % costlier fails on a fast runner as on a slow one. From the same runs, each brought to the
-#: reference by ``LOOP_EXPONENT``: at least 1.10 times the costliest and below 1.4 times the
-#: cheapest / 1.05. ubuntu-latest read 5.28 to 6.15 there (6.76 to 7.04 allowed), windows-latest
-#: 4.54 to 4.92 (5.41 to 6.05).
-LOOP_GAUGE_LINES = 5.6 if sys.platform == "win32" else 7.0
+#: 40 % costlier fails on a fast runner as on a slow one. From the ten runs above, 41477960420,
+#: 41617780788 and 41633136399 (13 on each system), each brought to the reference by
+#: ``LOOP_EXPONENT``: at least 1.10 times the costliest and below 1.4 times the cheapest / 1.05.
+#: ubuntu-latest read 5.10 to 6.14 there (6.76 to 6.80 allowed), windows-latest 4.49 to 5.01
+#: (5.51 to 5.99); a path 40 % costlier is over the limit by at least 5.1 % and 12.3 %.
+LOOP_GAUGE_LINES = 5.6 if sys.platform == "win32" else 6.8
 #: A faster core gets a tighter limit, in gauge lines: the limit goes with the gauge, relative to
 #: the reference, to this power. On those runs the loop's CPU a line went with the gauge to the
-#: power 1.36 on ubuntu-latest and 1.24 on windows-latest (log-log slopes); their mean less 1, to
-#: 0.05.
-LOOP_EXPONENT = 0.3
+#: power 1.25 on ubuntu-latest and 1.20 on windows-latest (log-log slopes); their mean less 1 is
+#: 0.22 (0.23 on the 22 without the last two runs), taken to 0.20, not 0.25: at 0.25 the rule
+#: above leaves ubuntu-latest 6.904 to 6.909, at 0.3 nothing since 41477960420 (8.65 us, 5.39).
+LOOP_EXPONENT = 0.20
+#: The per-line bound off CI, in gauge lines, the same on every core: 1.10 times the costliest
+#: cloud-session reading (8.52, gauge 11.90 us; that class read 7.04 to 8.52 at 11.27 to 12.60
+#: us, #88's slow class 5.74 to 6.41 at 21.47 to 23.42 us).
+OFF_CI_GAUGE_LINES = 9.4
 #: Below this fraction of the reference the limit no longer falls, in gauge lines. CI's gauges ran
 #: from about 0.5 to 1 times the reference (the fastest at the floor); the bound is shown to hold
 #: over that range.
@@ -218,7 +240,8 @@ def test_three_streams_under_ten_thousand_lines_a_second(
         scale = max(1.0, gauge.seconds / (TOLERANCE * REFERENCE_GAUGE))
         # a core faster than the reference gets a tighter limit a line, in gauge lines
         speed = min(max(gauge.seconds / REFERENCE_GAUGE, LOOP_FLOOR), 1.0)
-        limit = LOOP_GAUGE_LINES * speed**LOOP_EXPONENT
+        strict = LOOP_GAUGE_LINES * speed**LOOP_EXPONENT
+        limit = strict if STRICT else OFF_CI_GAUGE_LINES
         # In gauge lines, the median of the busy cycles: a pause in one of them (a garbage
         # collection, a neighbour) does not move it. A run that delivered nothing fails below,
         # after the first assertions.
@@ -246,6 +269,13 @@ def test_three_streams_under_ten_thousand_lines_a_second(
                 f"  event loop: {line:.2f} gauge lines a delivered line (median of {len(cycles)} "
                 f"cycles; {whole:.2f} over the whole span), about {line * gauge.seconds * 1e6:.1f} "
                 f"us (limit {limit:.2f}, speed factor {speed:.2f})"
+            )
+            margin = f"margin {(strict / line - 1) * 100:+.1f} %"
+            print(
+                f"  per-line check: strict (CI's bound), limit {strict:.2f}, {margin}"
+                if STRICT
+                else f"  per-line check: off CI, limit {limit:.2f}; strict limit {strict:.2f}, "
+                f"{margin} (not asserted)"
             )
         for stream_id in streams:
             stream = hub.streams[stream_id]
