@@ -67,6 +67,11 @@ export const KNOWN_ACTIONS = [
   // Uyum Durumu (Wave 4 contract 2.7): the report's SHA-256, the configuration's SHA-256.
   'compliance.report_export',
   'compliance.config_backup_confirm',
+  // The database window (Wave 5 contract G3, G6): a request to bring sealed days back from the
+  // vault, and a step of the worker job that dropped database rows older than the window (the
+  // sealed originals stay in the vault).
+  'archive.reload',
+  'db.window',
 ] as const;
 
 /** Prefixes offered in the action filter (the API filters by prefix). */
@@ -85,6 +90,8 @@ export const ACTION_PREFIXES = [
   'retention.',
   'license.',
   'compliance.',
+  'archive.',
+  'db.',
 ] as const;
 
 /** i18n key of an action's label (`auth.login` → `auditActions.auth_login`). */

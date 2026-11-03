@@ -1,0 +1,6 @@
+{
+  "auditActions": {
+    "archive_reload": "Arşivden yeniden yükleme istendi",
+    "db_window": "Veritabanı penceresi: eski günler veritabanından kaldırıldı"
+  }
+}
