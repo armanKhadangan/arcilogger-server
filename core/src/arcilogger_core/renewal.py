@@ -1106,52 +1106,64 @@ def renew(
     nothing is due, and the provider's :class:`TsaError` (or
     :class:`RenewalStampInvalidError`) when the stamp fails, leaving no record.
     """
+    with one_run(layout):
+        return renew_held(layout, config, provider, roots, now)
+
+
+def renew_held(
+    layout: Layout,
+    config: Config,
+    provider: TimestampProvider,
+    roots: Sequence[x509.Certificate],
+    now: datetime | None = None,
+) -> RenewalRun:
+    """:func:`renew` for a caller that already holds :func:`one_run` (the ``renew`` command,
+    which writes ``state/renewal.json`` under the same lock)."""
     moment = require_aware(now or utc_now())
     eku = config.tsa.require_critical_eku
-    with one_run(layout):
-        discarded = recover(layout, roots, require_critical_eku=eku, now=moment)
-        reader = _Reader(layout, config, roots, moment).read()
-        before = reader.report()
-        due = {token.path for token in before.tokens if token.status in ("due", "uncovered")}
-        if not due:
-            raise RenewalNotNeeded(before)
-        entries = [renewable.entry for renewable in reader.renewables if renewable.fact.path in due]
-        reason: Reason = "due" if provider.legal_grade is True else "test"
-        record = build_record(
-            entries,
-            created_at=moment,
-            system=system_block(config),
-            tsa=tsa_block(provider, config),
-            reason=reason,
-        )
-        final = _record_path(layout, site_day(moment))
-        final.parent.mkdir(parents=True, exist_ok=True)
-        _write(
-            final,
-            record,
-            provider,
-            roots,
-            crls=reader.crls(),
-            require_critical_eku=eku,
-            now=moment,
-        )
-        record_path = f"renewals/{final.name}"
-        log.info(
-            "renewal: %s stamped by %s (reason %s), %d token(s)",
-            record_path,
-            provider.name,
-            reason,
-            len(entries),
-        )
-        return RenewalRun(
-            record_path=record_path,
-            token_path=f"{record_path}.zd",
-            reason=reason,
-            renewed=tuple(entry["path"] for entry in record["tokens"]),
-            report_before=before,
-            report_after=renewal_status(layout, config, roots, moment),
-            discarded=tuple(discarded),
-        )
+    discarded = recover(layout, roots, require_critical_eku=eku, now=moment)
+    reader = _Reader(layout, config, roots, moment).read()
+    before = reader.report()
+    due = {token.path for token in before.tokens if token.status in ("due", "uncovered")}
+    if not due:
+        raise RenewalNotNeeded(before)
+    entries = [renewable.entry for renewable in reader.renewables if renewable.fact.path in due]
+    reason: Reason = "due" if provider.legal_grade is True else "test"
+    record = build_record(
+        entries,
+        created_at=moment,
+        system=system_block(config),
+        tsa=tsa_block(provider, config),
+        reason=reason,
+    )
+    final = _record_path(layout, site_day(moment))
+    final.parent.mkdir(parents=True, exist_ok=True)
+    _write(
+        final,
+        record,
+        provider,
+        roots,
+        crls=reader.crls(),
+        require_critical_eku=eku,
+        now=moment,
+    )
+    record_path = f"renewals/{final.name}"
+    log.info(
+        "renewal: %s stamped by %s (reason %s), %d token(s)",
+        record_path,
+        provider.name,
+        reason,
+        len(entries),
+    )
+    return RenewalRun(
+        record_path=record_path,
+        token_path=f"{record_path}.zd",
+        reason=reason,
+        renewed=tuple(entry["path"] for entry in record["tokens"]),
+        report_before=before,
+        report_after=renewal_status(layout, config, roots, moment),
+        discarded=tuple(discarded),
+    )
 
 
 # -- state/renewal.json ---------------------------------------------------------------------------
@@ -1214,13 +1226,14 @@ def write_state(
 ) -> dict[str, Any]:
     """Write ``state/renewal.json`` atomically and return what was written (W5-A-2).
 
-    Only the ``Renew`` task's command line calls this; the API and the alerts only read the
-    file (§2.1.2). ``renew_before`` is the window the statuses were computed with (days).
-    ``report`` is None when the statuses could not be computed (no pinned
-    root): the last known ``tokens`` are kept with their ``at``, and without them the file has
-    no token list, which W5-C's reader takes as unknown (never as "nothing due"). ``last_run``
-    is None for a dry run, which keeps the last run and ``failures_in_a_row``; a failed or
-    refused run adds one to ``failures_in_a_row``, any other run sets it to 0.
+    Only the ``Renew`` task's command line calls this, holding :func:`one_run` around the read
+    of the previous file and the write; the API and the alerts only read the file (§2.1.2).
+    ``renew_before`` is the window the statuses were computed with (days). ``report`` is None
+    when the statuses could not be computed (no pinned root): the last known ``tokens`` are
+    kept with their ``at``, and without them the file has no token list, which W5-C's reader
+    takes as unknown (never as "nothing due"). ``last_run`` is None for a dry run, which keeps
+    the last run and ``failures_in_a_row``; a failed or refused run adds one to
+    ``failures_in_a_row``, any other run sets it to 0.
     """
     previous = read_state(layout) or {}
     state: dict[str, Any] = {"schema": STATE_SCHEMA}

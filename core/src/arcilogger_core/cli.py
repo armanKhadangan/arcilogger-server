@@ -111,12 +111,14 @@ from arcilogger_core.renewal import (
     Outcome,
     RenewalBusyError,
     RenewalError,
+    RenewalLockError,
     RenewalNotNeeded,
     RenewalReport,
     RenewalRun,
     RenewalStampInvalidError,
-    renew,
+    one_run,
     renew_before_days,
+    renew_held,
     renewal_status,
     write_state,
 )
@@ -946,36 +948,35 @@ def _due(report: RenewalReport | None) -> list[str]:
 def cmd_renew(args: argparse.Namespace, app: App) -> int:
     """``renew``: re-stamp every time stamp that is due with one renewal record (the ``Renew``
     task, contract 2.1.3). Exit 0: renewed, or nothing was due; 1: renewed, but some token is
-    still ``uncovered``; 2: the configuration refused (no provider credentials, no pinned root);
-    3: the time-stamp server failed, or the run did (retryable; also when another run holds
-    ``state/renewal.lock``). ``--dry-run`` takes no stamp and writes no record: it computes the
-    statuses and exits 0 or 1 by the same rule.
+    still ``uncovered``; 2: the configuration refused (no provider credentials, no usable pinned
+    root, a provider that cannot run); 3: the time-stamp server failed, or the run did
+    (retryable; also when another run holds ``state/renewal.lock``). ``--dry-run`` takes no
+    stamp and writes no record: it computes the statuses and exits 0 or 1 by the same rule.
 
     Every run but a busy one writes ``state/renewal.json`` (W5-A-2), also after a failure:
     ``last_run`` and ``failures_in_a_row`` are what W5-E's "Renew failed twice in a row" reads.
-    A dry run writes the statuses and keeps ``last_run``. The errors are caught here: ``main``
-    would turn every :class:`TsaError` into exit 1.
+    A dry run writes the statuses and keeps ``last_run``. The whole run, the state write
+    included, holds ``state/renewal.lock``, so two runs never write the file over each other; a
+    run that finds the lock held writes nothing. The errors are caught here: ``main`` would
+    turn every :class:`TsaError` into exit 1.
     """
     now = utc_now()
-    roots: Sequence[Any] | None = None
-    provider: Any = None
+    try:
+        with one_run(app.layout):
+            return _renew_held(args, app, now)
+    except RenewalBusyError as exc:
+        return _renew_done(args, app, "busy", 3, now=now, error=_RenewError.of(exc))
+    except RenewalLockError as exc:
+        # No run can hold the lock: the failure is still recorded for the alerts.
+        return _renew_done(args, app, "failed", 3, now=now, error=_RenewError.of(exc))
+
+
+def _renew_held(args: argparse.Namespace, app: App, now: datetime) -> int:
+    """:func:`cmd_renew` while it holds ``state/renewal.lock``."""
     try:
         roots = app.roots()
-        if not args.dry_run:
-            provider = app.provider()
-    except (SecretStoreError, TsaConfigurationError) as exc:
-        cause = "roots" if roots is None else _renew_cause(app, exc)
-        report = _fresh_status(app, roots, now)
-        return _renew_done(
-            args,
-            app,
-            "refused",
-            2,
-            now=now,
-            report=report,
-            due=_due(report),
-            error=_RenewError.refused(cause, exc),
-        )
+    except (TsaConfigurationError, ValueError, OSError) as exc:  # none pinned, or unreadable
+        return _renew_refused(args, app, now, None, "roots", exc)
     if args.dry_run:
         try:
             report = renewal_status(app.layout, app.config, roots, now)
@@ -984,22 +985,26 @@ def cmd_renew(args: argparse.Namespace, app: App) -> int:
         code = 1 if report.totals["uncovered"] else 0
         return _renew_done(args, app, "dry_run", code, now=now, report=report, due=_due(report))
     try:
-        run = renew(app.layout, app.config, provider, roots, now)
+        provider = app.provider()
+    except (SecretStoreError, TsaConfigurationError) as exc:
+        return _renew_refused(args, app, now, roots, _renew_cause(app, exc), exc)
+    try:
+        run = renew_held(app.layout, app.config, provider, roots, now)
     except RenewalNotNeeded as exc:
         return _renew_done(args, app, "not_needed", 0, now=now, report=exc.report)
-    except RenewalBusyError as exc:
-        return _renew_done(args, app, "busy", 3, now=now, error=_RenewError.of(exc))
+    except TsaConfigurationError as exc:  # found only at stamp time (no Java, no client)
+        return _renew_refused(args, app, now, roots, _renew_cause(app, exc), exc)
     except (TsaError, RenewalError, OSError, subprocess.SubprocessError) as exc:
         log.error("renew failed: %s", exc)
-        report = _fresh_status(app, roots, now)
+        fresh = _fresh_status(app, roots, now)
         return _renew_done(
             args,
             app,
             "failed",
             3,
             now=now,
-            report=report,
-            due=_due(report),
+            report=fresh,
+            due=_due(fresh),
             error=_RenewError.of(exc),
         )
     code = 1 if run.report_after.totals["uncovered"] else 0
@@ -1012,6 +1017,27 @@ def cmd_renew(args: argparse.Namespace, app: App) -> int:
         report=run.report_after,
         due=_due(run.report_before),
         run=run,
+    )
+
+
+def _renew_refused(
+    args: argparse.Namespace,
+    app: App,
+    now: datetime,
+    roots: Sequence[Any] | None,
+    cause: str,
+    exc: BaseException,
+) -> int:
+    report = _fresh_status(app, roots, now)
+    return _renew_done(
+        args,
+        app,
+        "refused",
+        2,
+        now=now,
+        report=report,
+        due=_due(report),
+        error=_RenewError.refused(cause, exc),
     )
 
 
@@ -1030,8 +1056,9 @@ def _renew_done(
     """Write ``state/renewal.json``, print the outcome and return the exit code.
 
     A busy run writes nothing (the run holding the lock writes the file), nor does a dry run
-    without statuses. A state file that cannot be written fails the run (exit 3): the alerts and
-    the Sistem page judge from it."""
+    without statuses; every other call holds ``state/renewal.lock`` (or found it unusable). A
+    state file that cannot be written fails the run (exit 3): the alerts and the Sistem page
+    judge from it."""
     written = False
     dry_run = bool(args.dry_run)
     if outcome != "busy" and (report is not None or not dry_run):

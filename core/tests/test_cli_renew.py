@@ -15,9 +15,20 @@ from typing import Any
 import pytest
 from cryptography.hazmat.primitives import serialization
 
+from arcilogger_core import cli as cli_module
 from arcilogger_core.cli import App, main
-from arcilogger_core.renewal import STATE_SCHEMA, renewal_status
-from arcilogger_core.tsa.base import TimestampProvider
+from arcilogger_core.execpolicy import ExecutableRefusedError
+from arcilogger_core.renewal import (
+    STATE_SCHEMA,
+    RenewalBusyError,
+    one_run,
+    renew,
+    renewal_status,
+    write_state,
+)
+from arcilogger_core.secretstore import SecretStoreError
+from arcilogger_core.tsa import TsaExecutableError
+from arcilogger_core.tsa.base import TimestampProvider, TsaConfigurationError
 from arcilogger_core.tsa.mock import MockFailure
 
 from .renewal_world import CNA, RenewalWorld, day_token_path, make_world
@@ -281,8 +292,6 @@ def test_a_file_error_exits_3(
 def test_another_run_holding_the_lock_exits_3_and_writes_no_state(
     cli: Cli, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    from arcilogger_core.renewal import one_run
-
     now = CNA - timedelta(days=100)
     cli.rw.set_now(now)
     with one_run(cli.rw.layout):
@@ -435,3 +444,217 @@ def test_the_state_file_shape(cli: Cli, capsys: pytest.CaptureFixture[str]) -> N
     report = renewal_status(cli.rw.layout, cli.rw.world.config, cli.rw.roots, now)
     assert state["tokens"] == report.as_json()["tokens"]
     assert not list(cli.rw.layout.state.glob(".renewal.json*.tmp"))
+
+
+# -- the lock, the refusals and the state write ---------------------------------------------------
+
+
+def test_the_exit_code_follows_the_status_after_the_run(
+    cli: Cli, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """An expired day renewed by a legal provider is ``uncovered`` before the run and ``late``
+    after it: the run exits 0, judged from the status after the run (fixed34)."""
+    now = CNA + timedelta(days=1)
+    cli.rw.set_now(now)
+    assert cli.run("--json", now=now, provider=cli.rw.legal_provider(FAR)) == 0
+    data = _json(capsys)
+    assert (data["outcome"], data["exit_code"], data["due"]) == ("renewed", 0, [DAY_TOKEN])
+    state = cli.state()
+    assert _statuses(state)[DAY_TOKEN] == "late"
+    assert state["totals"]["uncovered"] == 0
+    assert state["last_run"]["exit_code"] == 0
+
+
+def test_a_state_file_that_cannot_be_written_alone_exits_3(
+    cli: Cli, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The record is written, only ``state/renewal.json`` fails: still exit 3."""
+
+    def full(*args: Any, **kwargs: Any) -> None:
+        raise OSError(28, "No space left on device")
+
+    monkeypatch.setattr(cli_module, "write_state", full)
+    now = CNA - timedelta(days=100)
+    cli.rw.set_now(now)
+    assert cli.run("--json", now=now, provider=cli.rw.legal_provider(FAR)) == 3
+    captured = capsys.readouterr()
+    data = json.loads(captured.out)
+    assert (data["outcome"], data["exit_code"], data["error"]) == ("renewed", 3, None)
+    assert data["state_written"] is False
+    assert "state/renewal.json yazılamadı [cannot be written]" in captured.err
+    assert cli.renewal_files() == ["2031-06-23-1.json", "2031-06-23-1.json.zd"]
+
+
+@pytest.mark.parametrize(
+    ("error", "cause"),
+    [
+        (TsaConfigurationError("Java not found"), "provider"),
+        (TsaExecutableError(ExecutableRefusedError("tsa.zamane_jar", "not found")), "executable"),
+    ],
+)
+def test_a_provider_that_cannot_run_at_stamp_time_is_refused(
+    cli: Cli, capsys: pytest.CaptureFixture[str], error: TsaConfigurationError, cause: str
+) -> None:
+    """A configuration error found only while stamping (no Java, no client) needs an
+    administrator, not a retry: exit 2, as when the provider cannot be made."""
+
+    class CannotRun:
+        name = "zamane"
+        legal_grade = True
+
+        def stamp(self, file_path: Path) -> Any:
+            raise error
+
+    now = CNA - timedelta(days=100)
+    assert cli.run("--json", now=now, provider=CannotRun()) == 2  # type: ignore[arg-type]
+    data = _json(capsys)
+    assert (data["outcome"], data["exit_code"], data["error"]["code"]) == ("refused", 2, cause)
+    assert cli.renewal_files() == []
+    state = cli.state()
+    assert _statuses(state) == {DAY_TOKEN: "due"}
+    assert (state["last_run"]["outcome"], state["last_run"]["exit_code"]) == ("refused", 2)
+    assert (state["last_run"]["error"], state["failures_in_a_row"]) == (cause, 1)
+
+
+@pytest.mark.parametrize(
+    ("error", "cause"),
+    [
+        (SecretStoreError("the secret store cannot be read"), "secret-store"),
+        (TsaExecutableError(ExecutableRefusedError("tsa.java", "not allowed")), "executable"),
+        (TsaConfigurationError("unknown provider"), "provider"),
+    ],
+)
+def test_each_refusal_names_its_cause(
+    cli: Cli,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    error: Exception,
+    cause: str,
+) -> None:
+    def refuse(app: App) -> Any:
+        raise error
+
+    monkeypatch.setattr(App, "provider", refuse)
+    assert cli.run("--json", now=CNA - timedelta(days=100)) == 2
+    data = _json(capsys)
+    assert (data["outcome"], data["error"]["code"]) == ("refused", cause)
+    assert cli.state()["last_run"]["error"] == cause
+
+
+def test_no_zamane_jar_is_refused(cli: Cli, capsys: pytest.CaptureFixture[str]) -> None:
+    cli.configure(f'provider = "zamane"\nroots_dir = "{cli.roots.as_posix()}"')
+    assert cli.run("--json", now=CNA - timedelta(days=100)) == 2
+    assert _json(capsys)["error"]["code"] == "zamane-jar"
+
+
+def test_an_unreadable_pinned_root_is_refused(cli: Cli, capsys: pytest.CaptureFixture[str]) -> None:
+    """A damaged certificate in ``tsa.roots_dir`` is a configuration refusal, recorded in the
+    state file, never a traceback."""
+    (cli.roots / "damaged.pem").write_text(
+        "-----BEGIN CERTIFICATE-----\nAAAA\n-----END CERTIFICATE-----\n", encoding="ascii"
+    )
+    cli.configure(f'provider = "rfc3161"\nurl = "http://192.0.2.10"\nroots_dir = "{cli.roots}"')
+    assert cli.run("--json", now=CNA - timedelta(days=100)) == 2
+    data = _json(capsys)
+    assert (data["outcome"], data["error"]["code"], data["report"]) == ("refused", "roots", None)
+    assert cli.state()["last_run"]["error"] == "roots"
+
+
+def test_a_dry_run_without_roots_exits_2_and_writes_nothing(
+    cli: Cli, capsys: pytest.CaptureFixture[str]
+) -> None:
+    empty = cli.config.parent / "empty-roots"
+    empty.mkdir()
+    cli.configure(f'provider = "rfc3161"\nurl = "http://192.0.2.10"\nroots_dir = "{empty}"')
+    assert cli.run("--dry-run", "--json", now=CNA) == 2
+    data = _json(capsys)
+    assert (data["outcome"], data["dry_run"], data["state_written"]) == ("refused", True, False)
+    assert not (cli.rw.layout.state / "renewal.json").exists()
+
+
+def test_a_dry_run_while_another_run_holds_the_lock_writes_nothing(
+    cli: Cli, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A dry run never writes over the file of a run in progress (busy, exit 3)."""
+    now = CNA - timedelta(days=100)
+    cli.rw.set_now(now)
+    cli.rw.legal_tsa.failure = MockFailure.UNREACHABLE
+    assert cli.run(now=now, provider=cli.rw.legal_provider(FAR)) == 3
+    capsys.readouterr()
+    before = (cli.rw.layout.state / "renewal.json").read_bytes()
+    with one_run(cli.rw.layout):
+        assert cli.run("--dry-run", "--json", now=now + timedelta(hours=1)) == 3
+    data = _json(capsys)
+    assert (data["outcome"], data["error"]["code"], data["state_written"]) == (
+        "busy",
+        "renewal_busy",
+        False,
+    )
+    assert (cli.rw.layout.state / "renewal.json").read_bytes() == before
+
+
+@pytest.mark.parametrize("kind", ["renewed", "not_needed", "failed", "refused", "dry_run"])
+def test_the_state_file_is_written_under_the_lock(
+    cli: Cli, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch, kind: str
+) -> None:
+    """Every outcome reads and writes ``state/renewal.json`` while it holds
+    ``state/renewal.lock``."""
+    held: list[bool] = []
+
+    def no_secrets(app: App) -> Any:
+        raise SecretStoreError("the secret store cannot be read")
+
+    def checked(layout: Any, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        try:
+            with one_run(layout):
+                held.append(False)
+        except RenewalBusyError:
+            held.append(True)
+        return write_state(layout, *args, **kwargs)
+
+    monkeypatch.setattr(cli_module, "write_state", checked)
+    now = CNA - timedelta(days=100) if kind != "not_needed" else CNA - timedelta(days=181)
+    cli.rw.set_now(now)
+    provider: TimestampProvider | None = cli.rw.legal_provider(FAR)
+    if kind == "failed":
+        cli.rw.legal_tsa.failure = MockFailure.UNREACHABLE
+    if kind == "refused":
+        monkeypatch.setattr(App, "provider", no_secrets)
+        provider = None
+    args = ["--dry-run"] if kind == "dry_run" else []
+    cli.run(*args, "--json", now=now, provider=provider)
+    assert _json(capsys)["outcome"] == kind
+    assert held == [True]
+
+
+def test_the_state_file_is_replaced_atomically(
+    cli: Cli, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A write that fails before the rename leaves the previous file as it was."""
+    now = CNA - timedelta(days=181)
+    assert cli.run(now=now) == 0
+    capsys.readouterr()
+    path = cli.rw.layout.state / "renewal.json"
+    before = path.read_bytes()
+
+    def broken(self: Path, target: Any) -> Path:
+        raise OSError(5, "Input/output error")
+
+    monkeypatch.setattr(Path, "replace", broken)
+    with pytest.raises(OSError, match="Input/output error"):
+        write_state(
+            cli.rw.layout, None, at=now + timedelta(days=1), renew_before=180, last_run=None
+        )
+    monkeypatch.undo()
+    assert path.read_bytes() == before
+
+
+def test_only_the_command_writes_the_state_file(cli: Cli) -> None:
+    """``renewal_status`` and ``renew`` themselves never write ``state/renewal.json``: only
+    the ``Renew`` task's command does (§2.1.2, W5-A-2)."""
+    now = CNA - timedelta(days=100)
+    cli.rw.set_now(now)
+    renewal_status(cli.rw.layout, cli.rw.world.config, cli.rw.roots, now)
+    renew(cli.rw.layout, cli.rw.world.config, cli.rw.legal_provider(FAR), cli.rw.roots, now)
+    assert cli.renewal_files() == ["2031-06-23-1.json", "2031-06-23-1.json.zd"]
+    assert not (cli.rw.layout.state / "renewal.json").exists()
