@@ -396,6 +396,18 @@ describe('Ayarlar → Zaman damgası: the server choice and TÜRKTRUST (Wave 5 c
       turktrust_username: 'ornek-as',
       turktrust_password: 'deneme-parola',
     });
+    // "Kaydet" while TÜRKTRUST is chosen in step 6, before the switch: they go, with no server.
+    const stored = tsaBody(site, 'tsa:1', form, typed, { chosen: 'turktrust', probe: true });
+    expect(stored).toMatchObject({
+      turktrust_username: 'ornek-as',
+      turktrust_password: 'deneme-parola',
+    });
+    expect(stored).not.toHaveProperty('server');
+    expect(stored).not.toHaveProperty('allow_plain_http');
+    // A TÜRKTRUST site with Kamu SM chosen: not theirs.
+    expect(
+      tsaBody(turktrustSite(), 'tsa:1', form, typed, { chosen: 'production', probe: true }),
+    ).not.toHaveProperty('turktrust_username');
     // A server without TÜRKTRUST never gets them, whatever is chosen.
     expect(
       tsaBody(tsa(), 'tsa:1', form, typed, { server: 'turktrust', probe: true }),

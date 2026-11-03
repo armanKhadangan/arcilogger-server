@@ -214,6 +214,8 @@ export function KamusmPage() {
   const lastSend = useRef<SendOptions>({});
   // The provider the last change went to (the server it switched to, else the one in use).
   const [sentTo, setSentTo] = useState('');
+  // The server chosen in step 6 and not switched to yet: kept while another step is open.
+  const [chosen, setChosen] = useState<ServerChoice | null>(null);
   const tested = useTested();
   // "Kontör sorgula" only for a provider with a credit query (C3, C21: the flag decides).
   const credits = useCredits();
@@ -253,6 +255,7 @@ export function KamusmPage() {
   function restore() {
     form.restore();
     setCredentials(KEPT);
+    setChosen(null);
     setErrors({});
   }
 
@@ -263,19 +266,29 @@ export function KamusmPage() {
     const found: FieldErrors<TsaField> = {
       ...validateNumbers(values),
       ...(values.evidence ? validateEvidence(values.evidence) : {}),
-      ...credentialErrors(credentials, toTurktrust(tsa, options.server)),
+      ...credentialErrors(credentials, toTurktrust(tsa, options.server ?? chosen ?? undefined)),
     };
     setErrors(found);
     if (hasErrors(found)) {
       focusFirstError(found, (field) => `${id}-${field}`);
       return;
     }
-    void flow.start(tsaBody(tsa, section.etag, values, credentials, { ...options, probe }));
+    void flow.start(
+      tsaBody(tsa, section.etag, values, credentials, {
+        ...options,
+        chosen: chosen ?? undefined,
+        probe,
+      }),
+    );
   }
 
   function settled(request: AdminRequestOut) {
-    // The new credentials are stored (or deleted): the fields go back to "Kayıtlı ✓".
-    if (request.state === 'active' || request.state === 'partially_active') setCredentials(KEPT);
+    // The new credentials are stored (or deleted): the fields go back to "Kayıtlı ✓"; after a
+    // switch the server in use is the one chosen.
+    if (request.state === 'active' || request.state === 'partially_active') {
+      setCredentials(KEPT);
+      if (lastSend.current.server) setChosen(null);
+    }
   }
 
   const message = (field: TsaField) =>
@@ -349,6 +362,9 @@ export function KamusmPage() {
             onProbe={setProbe}
             onChange={(next) => {
               setCredentials(next);
+              // TÜRKTRUST's credentials edited for the provider in use: no other server is chosen.
+              if (tsaSection.provider === 'turktrust' && chosen && !toTurktrust(tsaSection, chosen))
+                setChosen(null);
               setErrors({});
               flow.edit();
             }}
@@ -370,6 +386,8 @@ export function KamusmPage() {
             disabled={locked}
             unsaved={form.dirty || kamusmDirty}
             turktrustUnsaved={turktrustDirty}
+            picked={chosen}
+            onPick={setChosen}
             credentials={credentials}
             onCredentials={(next) => {
               setCredentials(next);

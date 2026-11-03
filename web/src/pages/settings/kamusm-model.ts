@@ -361,7 +361,8 @@ function bodyServer(tsa: TsaSection, chosen: ServerChoice | undefined): string |
  * The body of `PUT /admin/config/tsa`: everything the wizard edits at once (the Java chosen in
  * the first step is saved with the credentials, so a first setup from the mock provider can
  * switch to Zamane in one change that leaves sealing working). Kamu SM's typed credentials are
- * sent with any change; TÜRKTRUST's only with a change that goes to TÜRKTRUST (`toTurktrust`). A
+ * sent with any change; TÜRKTRUST's only while TÜRKTRUST is the server switched to or chosen in
+ * step 6 (`chosen`, "Kaydet" stores them before the switch), or in use (`toTurktrust`). A
  * switch to TÜRKTRUST says whether plain HTTP is allowed, and the re-stamping and revocation-list
  * keys are sent when they were changed (`evidenceChanges`).
  */
@@ -370,12 +371,14 @@ export function tsaBody(
   etag: string,
   form: TsaForm,
   credentials: Credentials,
-  options: { server?: ServerChoice; confirm?: boolean; probe: boolean },
+  options: { server?: ServerChoice; chosen?: ServerChoice; confirm?: boolean; probe: boolean },
 ): TsaRequest {
   const customer = credentials.customer;
   const password = credentials.password;
   const server = bodyServer(tsa, options.server);
-  const turktrust = toTurktrust(tsa, options.server) ? credentials.turktrust : undefined;
+  const turktrust = toTurktrust(tsa, options.server ?? options.chosen)
+    ? credentials.turktrust
+    : undefined;
   const username = turktrust?.username;
   const secret = turktrust?.password;
   return {

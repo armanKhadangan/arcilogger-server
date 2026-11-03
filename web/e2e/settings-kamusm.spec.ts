@@ -489,6 +489,45 @@ test.describe('Ayarlar → Kamu SM', () => {
     }
   });
 
+  test('TÜRKTRUST chosen in step 6 stays chosen across steps, and "Kaydet" stores its typed credentials', async ({
+    page,
+  }) => {
+    const api = await mockApi(page, { signedInAs: 'tolga' });
+    // As W5-T's API reports it. Interim: `mock-admin.ts` (W5-T's) ignores the TÜRKTRUST fields,
+    // so only what the page sends is checked here.
+    Object.assign(api.admin.sections.tsa.secrets, {
+      'turktrust.username': { set: false, changed_at: null, changed_by: null },
+      'turktrust.password': { set: false, changed_at: null, changed_by: null },
+    });
+    await page.goto('/settings/kamusm?step=production');
+    await page.getByRole('radio', { name: 'TÜRKTRUST (HTTPS)' }).check();
+    const fields = page.getByTestId('turktrust-credentials');
+    await fields.getByRole('button', { name: 'Gir' }).first().click();
+    await page.getByLabel('TÜRKTRUST kullanıcı adı').fill('ornek-as');
+    await fields.getByRole('button', { name: 'Gir' }).click();
+    await page.getByLabel('TÜRKTRUST parolası').fill('deneme-parola'); // gitleaks:allow — fake test value
+
+    // Another step and back: the choice and the typed values are still there.
+    await openStep(page, /^7\. Kontör uyarı eşiği/);
+    await openStep(page, /^6\. /);
+    await expect(page.getByRole('radio', { name: 'TÜRKTRUST (HTTPS)' })).toBeChecked();
+    await expect(page.getByLabel('TÜRKTRUST kullanıcı adı')).toHaveValue('ornek-as');
+    await expect(page.getByRole('button', { name: 'TÜRKTRUST sunucusuna geç' })).toBeEnabled();
+
+    // "Kaydet" before the switch stores them; it switches nothing.
+    await page.getByRole('button', { name: 'Kaydet' }).click();
+    await expect
+      .poll(() => api.callsTo('POST', '/admin/config/tsa/check').length)
+      .toBeGreaterThan(0);
+    const check = api.callsTo('POST', '/admin/config/tsa/check').at(0)?.body;
+    expect(check).toMatchObject({
+      turktrust_username: 'ornek-as',
+      turktrust_password: 'deneme-parola',
+    });
+    expect(check).not.toHaveProperty('server');
+    expect(check).not.toHaveProperty('allow_plain_http');
+  });
+
   test('"Kontör sorgula" only for a provider with a credit query (C21)', async ({ page }) => {
     await mockApi(page, { signedInAs: 'tolga' });
     await page.route('**/api/v1/credits', (route) =>

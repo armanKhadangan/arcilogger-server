@@ -106,6 +106,7 @@ function Production({
   initial?: Credentials;
 }) {
   const [credentials, setCredentials] = useState<Credentials>(initial);
+  const [picked, setPicked] = useState<ServerChoice | null>(null);
   return (
     <ProductionStep
       tsa={section}
@@ -113,6 +114,8 @@ function Production({
       disabled={false}
       unsaved={unsaved}
       turktrustUnsaved={turktrustChanged(credentials)}
+      picked={picked}
+      onPick={setPicked}
       credentials={credentials}
       onCredentials={(next) => {
         seen.push(next);

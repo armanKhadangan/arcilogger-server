@@ -87,16 +87,26 @@ describe('useLegalStatus — refresh', () => {
     expect(calls).toHaveLength(2);
   });
 
-  it('only the banner polls: another reader (`poll: false`) adds no timer, only shares the answers', async () => {
+  it('only the banner polls: another reader (`poll: false`) keeps no timer and shares its answers', async () => {
     const calls = installFetch(() => jsonResponse(200, LEGAL_PROVIDER_NOT_LEGAL));
+    const client = testQueryClient();
     const { result } = renderHook(
       () => [useLegalStatus(), useLegalStatus({ poll: false })] as const,
-      { wrapper },
+      {
+        wrapper: ({ children }: { children: ReactNode }) => (
+          <QueryClientProvider client={client}>{children}</QueryClientProvider>
+        ),
+      },
     );
     await act(() => vi.advanceTimersByTimeAsync(10));
-    expect(calls).toHaveLength(1);
-    await act(() => vi.advanceTimersByTimeAsync(3 * LEGAL_STATUS_POLL_MS));
-    expect(calls).toHaveLength(4);
+    // One observer with the 5-minute interval, the other without (TanStack: one timer each).
+    const observers = client.getQueryCache().find({ queryKey: LEGAL_STATUS_KEY })?.observers ?? [];
+    expect(observers.map((observer) => observer.options.refetchInterval)).toEqual([
+      LEGAL_STATUS_POLL_MS,
+      false,
+    ]);
+    await act(() => vi.advanceTimersByTimeAsync(LEGAL_STATUS_POLL_MS));
+    expect(calls).toHaveLength(2);
     expect(result.current[1].dataUpdatedAt).toBe(result.current[0].dataUpdatedAt);
   });
 

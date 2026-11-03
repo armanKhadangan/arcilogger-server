@@ -488,6 +488,8 @@ export function ProductionStep({
   disabled,
   unsaved,
   turktrustUnsaved,
+  picked,
+  onPick,
   credentials,
   onCredentials,
   errors,
@@ -503,6 +505,9 @@ export function ProductionStep({
    * switch to another server (which would not send them).
    */
   turktrustUnsaved: boolean;
+  /** The server chosen and not switched to yet (the page keeps it while another step is open). */
+  picked: ServerChoice | null;
+  onPick: (choice: ServerChoice) => void;
   credentials: Credentials;
   onCredentials: (credentials: Credentials) => void;
   errors: CredentialErrors;
@@ -510,7 +515,6 @@ export function ProductionStep({
 }) {
   const { t } = useTranslation();
   const id = useId();
-  const [picked, setPicked] = useState<ServerChoice | null>(null);
   const [asking, setAsking] = useState<ServerChoice | null>(null);
   const [typed, setTyped] = useState('');
   const current = currentChoice(tsa);
@@ -590,7 +594,7 @@ export function ProductionStep({
                 disabled={disabled || inUse}
                 aria-describedby={`${id}-${choice}-hint`}
                 onChange={() => {
-                  setPicked(choice);
+                  onPick(choice);
                   // Leaving TÜRKTRUST drops what was typed for it: it would not be sent.
                   if (choiceProvider(choice) !== 'turktrust' && turktrustUnsaved)
                     onCredentials({ ...credentials, turktrust: TURKTRUST_KEPT });
