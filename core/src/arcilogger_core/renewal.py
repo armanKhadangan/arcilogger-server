@@ -30,10 +30,11 @@ of every deletion record under its final name, of every stored official report
 (``exports/reports/*.pdf.zd``) and of every renewal record, except one written with
 ``reason: "test"``. Each certificate's ``notAfter`` is read from the token itself, never from
 ``state/seal``. A token that cannot be read is left out and named in the report's
-``unreadable``; one that disappears during the scan (the retention job deleting its day) is
-skipped. Each renewal token is verified against the pinned roots and the stored revocation
-lists. :func:`renewal_status` only reads; ``state/renewal.json`` is written by the ``Renew``
-task's command line (contract W5-A-2).
+``unreadable``, one whose imprint is not the file it stamps as it is today (a changed file) in
+``mismatched``, so no renewal ever lists the hash of a changed file; one that disappears
+during the scan (the retention job deleting its day) is skipped. Each renewal token is verified
+against the pinned roots and the stored revocation lists. :func:`renewal_status` only reads;
+``state/renewal.json`` is written by the ``Renew`` task's command line (contract W5-A-2).
 
 **A run** (:func:`renew`, D4) writes at most one record, covering every token that is ``due``
 or ``uncovered``, under ``state/renewal.lock`` (never inside ``vault/renewals``). As a deletion
@@ -70,8 +71,8 @@ from arcilogger_core.fsutil import atomic_write_bytes, fsync_dir
 from arcilogger_core.immutability import is_locked, lock
 from arcilogger_core.layout import Layout
 from arcilogger_core.retention import records as deletion_records
-from arcilogger_core.seal import sha256_file
 from arcilogger_core.timeutil import isoformat_site, require_aware, site_day, to_utc, utc_now
+from arcilogger_core.tsa.asn1 import READABLE_DIGESTS
 from arcilogger_core.tsa.base import TimestampProvider, TokenInfo, TsaError, TsaResponseError
 from arcilogger_core.tsa.client import token_path_for
 from arcilogger_core.tsa.verify import confirmed_legal_grade, inspect_token, verify_token
@@ -361,13 +362,17 @@ class RenewalReport:
     """The status of every renewable token, sorted by path, and the count of each status.
 
     ``unreadable`` names the tokens (and renewal records) that could not be read, which have no
-    status; ``notes`` what could not be checked.
+    status; ``mismatched`` the tokens whose imprint is not the file they stamp as it is today (a
+    changed manifest, deletion record, report or renewal record): they have no status either and
+    are never renewed, so no renewal vouches for a changed file. ``notes`` says what could not
+    be checked.
     """
 
     tokens: tuple[TokenStatus, ...]
     totals: dict[Status, int]
     unreadable: tuple[str, ...] = ()
     notes: tuple[RenewalNote, ...] = ()
+    mismatched: tuple[str, ...] = ()
 
     @classmethod
     def of(
@@ -376,12 +381,19 @@ class RenewalReport:
         *,
         unreadable: Iterable[str] = (),
         notes: Iterable[RenewalNote] = (),
+        mismatched: Iterable[str] = (),
     ) -> RenewalReport:
         ordered = tuple(sorted(tokens, key=lambda token: token.path))
         totals: dict[Status, int] = dict.fromkeys(STATUSES, 0)
         for token in ordered:
             totals[token.status] += 1
-        return cls(ordered, totals, tuple(sorted(set(unreadable))), tuple(notes))
+        return cls(
+            ordered,
+            totals,
+            tuple(sorted(set(unreadable))),
+            tuple(notes),
+            tuple(sorted(set(mismatched))),
+        )
 
 
 class _Statuses:
@@ -516,6 +528,7 @@ class _Reader:
         self.renewables: list[Renewable] = []
         self.renewals: list[RenewalFact] = []
         self.unreadable: list[str] = []
+        self.mismatched: list[str] = []
         self.notes: list[RenewalNote] = []
         self._crls: Sequence[Crl] | None = None
         self._crls_read = False
@@ -540,7 +553,12 @@ class _Reader:
             now=self.now,
             renew_before=timedelta(days=renew_before_days(self.config)),
         )
-        return RenewalReport.of(computed.tokens, unreadable=self.unreadable, notes=self.notes)
+        return RenewalReport.of(
+            computed.tokens,
+            unreadable=self.unreadable,
+            notes=self.notes,
+            mismatched=self.mismatched,
+        )
 
     def crls(self) -> Sequence[Crl] | None:
         """The stored revocation lists, read once; None (with a note) when they cannot be read:
@@ -585,20 +603,37 @@ class _Reader:
             return None
         return data, info, info.tsa_cert_not_after
 
+    def _matches(self, path: str, info: TokenInfo, imprint: str | None) -> bool:
+        """Whether the token's imprint is the stamped file as it is today; a mismatch is named in
+        ``mismatched`` (and logged): the file changed, or the token is not its own."""
+        if imprint is None:
+            self._unreadable(path, f"its imprint algorithm {info.digest_alg} is not supported")
+            return False
+        if imprint != info.message_imprint_hex:
+            log.warning(
+                "renewal: %s does not match the file it stamps (changed?); it is not renewed",
+                path,
+            )
+            self.mismatched.append(path)
+            return False
+        return True
+
     def _token(self, token: Path, stamped: Path, kind: Kind, *, day: date | None = None) -> None:
         path = self._relative(token)
         read = self._read_token(token, path)
         if read is None:
             return  # not stamped (yet), or deleted during the scan by the retention job
-        data, _, cert_not_after = read
+        data, info, cert_not_after = read
         try:
-            stamped_sha256 = sha256_file(stamped)
+            stamped_sha256, imprint = _file_hashes(stamped, info.digest_alg)
         except FileNotFoundError:
             if token.exists():
                 self._unreadable(path, f"{stamped.name} is missing")
             return
         except OSError as exc:
             self._unreadable(path, exc)
+            return
+        if not self._matches(path, info, imprint):
             return
         token_sha256 = hashlib.sha256(data).hexdigest()
         entry = RecordEntry(
@@ -652,6 +687,8 @@ class _Reader:
                 self._unreadable(record_path, "the record has no token")
             return
         data, info, cert_not_after = read
+        if not self._matches(token_path, info, _imprint(raw, info.digest_alg)):
+            return  # a changed record (or a token not its own) protects nothing
         result = verify_token(
             data,
             roots=self.roots,
@@ -683,6 +720,29 @@ class _Reader:
             protects=tuple(protects(parsed)),
         )
         self.renewables.append(Renewable(fact, entry))
+
+
+def _imprint(data: bytes, alg: str) -> str | None:
+    """The hex digest of ``data`` with a token's imprint algorithm; None when not supported."""
+    name = READABLE_DIGESTS.get(alg)
+    return hashlib.new(name, data).hexdigest() if name else None
+
+
+def _file_hashes(path: Path, alg: str) -> tuple[str, str | None]:
+    """The SHA-256 of ``path`` (what a record lists) and its digest with a token's imprint
+    algorithm (None when not supported), read once."""
+    sha256 = hashlib.sha256()
+    name = READABLE_DIGESTS.get(alg)
+    other = hashlib.new(name) if name and name != "sha256" else None
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            sha256.update(chunk)
+            if other is not None:
+                other.update(chunk)
+    digest = sha256.hexdigest()
+    if name is None:
+        return digest, None
+    return digest, other.hexdigest() if other is not None else digest
 
 
 def renewal_status(

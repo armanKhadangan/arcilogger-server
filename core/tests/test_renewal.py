@@ -11,7 +11,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -42,13 +42,14 @@ from arcilogger_core.seal import sha256_file
 from arcilogger_core.timeutil import site_day
 from arcilogger_core.tsa.base import (
     TimestampProvider,
+    TokenInfo,
     TsaError,
     TsaNoCreditError,
     TsaRejectedError,
     TsaResponseError,
     TsaUnavailableError,
 )
-from arcilogger_core.tsa.mock import MockFailure
+from arcilogger_core.tsa.mock import MockFailure, MockTsaProvider
 from arcilogger_core.tsa.verify import inspect_token
 
 from .renewal_world import (
@@ -177,6 +178,61 @@ def test_a_changed_record_does_not_count(rw: RenewalWorld) -> None:
     path = rw.layout.vault / record
     path.write_bytes(path.read_bytes().replace(b'"due"', b'"due" '))
     assert rw.of(rw.status(CNA - timedelta(days=90)), DAY_TOKEN).status == "due"
+
+
+def test_a_changed_file_is_never_renewed(rw: RenewalWorld) -> None:
+    """A token whose imprint is not the file it stamps as it is today (a changed manifest,
+    deletion record, report or renewal record) has no status and is not renewed: no renewal
+    lists the hash of a changed file, which the builder would then ship beside it."""
+    deletion, _ = rw.add_deletion()
+    pdf, _ = rw.add_report()
+    renewal = _renew_by_hand(rw, CNA - timedelta(days=100))
+    record = rw.layout.vault / renewal
+    manifest = rw.layout.manifest(DAY)
+    unlock(manifest)
+    for path in (manifest, deletion, pdf, record):
+        path.write_bytes(path.read_bytes() + b" ")
+    rw.set_now(CNA - timedelta(days=90))
+    report = rw.status()
+    assert report.mismatched == (
+        DAY_TOKEN,
+        "deletions/2026-10-20-imha.json.zd",
+        f"exports/reports/{REPORT_NAME}.zd",
+        f"{renewal}.zd",
+    )
+    assert (report.tokens, report.unreadable) == ((), ())
+    before = _renewal_files(rw)
+    with pytest.raises(RenewalNotNeeded):
+        _renew(rw, rw.legal_provider(FAR))
+    assert _renewal_files(rw) == before
+
+
+def test_an_imprint_is_compared_with_its_own_algorithm(
+    rw: RenewalWorld, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A SHA-384 stamp matches its file by SHA-384, while the record lists the file's SHA-256;
+    an imprint algorithm the reader does not know leaves the token without a status."""
+    pdf = rw.layout.exports / "reports" / REPORT_NAME
+    pdf.parent.mkdir(parents=True)
+    pdf.write_bytes(b"%PDF-1.7\n%Ornek A.S. stored report\n%%EOF\n")
+    rw.mock_signer(CNA)
+    token = MockTsaProvider(rw.tsa, digest="sha384").stamp(pdf).token_path
+    assert inspect_token(token.read_bytes()).digest_alg == "sha384"
+    rw.set_now(CNA - timedelta(days=100))
+    run = _renew(rw, rw.legal_provider(FAR))
+    (entry,) = [e for e in _record(rw, run)["tokens"] if e["kind"] == "report"]
+    assert entry["record_sha256"] == sha256_file(pdf)
+
+    real = inspect_token
+
+    def unknown(data: bytes) -> TokenInfo:
+        info = real(data)
+        return replace(info, digest_alg="md5") if data == token.read_bytes() else info
+
+    monkeypatch.setattr("arcilogger_core.renewal.inspect_token", unknown)
+    report = rw.status()
+    assert report.unreadable == (f"exports/reports/{REPORT_NAME}.zd",)
+    assert report.mismatched == ()
 
 
 def _revoking(rw: RenewalWorld, certificate: x509.Certificate, revoked_at: datetime) -> bytes:

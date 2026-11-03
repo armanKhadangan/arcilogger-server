@@ -1258,8 +1258,11 @@ All Wave 5 questions are answered (2026-11-02).
   does not verify, it was revoked) is still renewable.
 - **W5-A-10: what the report adds.** `RenewalReport` also names the tokens and records it
   could not read (`unreadable`: a token that cannot be parsed or whose stamped file is missing, a
-  record that is not `arcilogger.renewal/1` or has no token; none of them has a status), and
-  carries notes with TR/EN texts for what it could not check: unreadable stored revocation lists
+  record that is not `arcilogger.renewal/1` or has no token, a token whose imprint algorithm is
+  not supported; none of them has a status), names in `mismatched` the tokens whose imprint is
+  not the file they stamp as it is today (a changed manifest, deletion record, report or renewal
+  record: no status, never renewed, so no renewal record ever lists the hash of a changed file
+  for the builder to ship beside it), and carries notes with TR/EN texts for what it could not check: unreadable stored revocation lists
   (the renewal tokens are then verified without lists, Q12) and an `exports/reports` folder that
   cannot be read (the `Renew` task may lack the right; the run goes on without report tokens).
   A token that disappears during the scan (the retention job) is skipped. The certificate's
