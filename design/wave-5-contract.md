@@ -950,10 +950,12 @@ All Wave 5 questions are answered (2026-11-02).
   leaves out an entry with an unknown `status` (a list or an object included) or an unreadable
   `cert_not_after`, and counts from each token's `status`, never from a totals object. A
   missing file is "no report yet"; an unreadable one is unknown and decides nothing (no reason,
-  no alert raised or resolved, `renewal: null` and a page problem on the day page). An entry's `renewed_at` is taken when
-  the writer gives one; otherwise the day page reads the genTime of the renewal token beside
-  the `covered_by` record, only when that record resolves inside `vault/renewals` (else
-  `renewed_at` is `null`). `path` is vault-relative; a leading `vault/` and a `.zd` suffix of
+  no alert raised or resolved, `renewal: null` and a page problem on the day page). An entry's
+  `renewed_at` is taken when the writer gives one; otherwise the day page reads the genTime of
+  the renewal token beside the `covered_by` record (`<record>.zd`). A record with a drive, a
+  root (a UNC path included) or a `..` step is refused as written, before anything on the disk
+  is opened; the token itself, a link followed, must resolve inside `vault/renewals`. Else
+  `renewed_at` is `null`. `path` is vault-relative; a leading `vault/` and a `.zd` suffix of
   `covered_by` are tolerated.
 - **W5-C-2: the day page's `revocation` texts** for the codes that §2.6 does not word
   (`crl-revoked-later`, `crl-hold`, `crl-none`, `crl-stale`, `crl-ok`) are W5-C's, after the
@@ -1004,9 +1006,14 @@ All Wave 5 questions are answered (2026-11-02).
   the key (D14); `worker/tests/test_alerts_legal.py::test_no_whole_string_constant_for_the_wave5_alert_codes`
   fails on a whole-string constant, and W5-E deletes or inverts it. The findings carry counts
   only. R20-cert's "expires within 30 days and is uncovered" is read as in W5-C-12. R20-cert
-  is resolved only when the re-stamping report, the stored lists and the newest sealed day's
-  token can all be read (before the first sealed day no list is needed): a revocation found
-  from the lists stays open while one of them cannot be read. "The `Renew` task failed twice
+  is resolved only when every input can be read: the re-stamping report, every scheduled
+  verification (`state/verify/last-*.json`; one that cannot be read or holds no verification
+  counts as unreadable), the newest sealed day's token, reaching a pinned root, and every stored
+  list (`state/crl` readable and no list changed or gone, C14; before the first sealed day no
+  list is needed). A revocation stays open while the input that found it cannot be read. The
+  rule is one for both severities: a "high" raised from `state/renewal.json` alone also stays
+  open while the newest token reaches no pinned root (for example a provider whose roots are
+  not pinned yet), the safe side. "The `Renew` task failed twice
   in a row" is left to W5-E: no state file records Renew runs yet (C12). `R20-crl` is judged
   from `state/crl` only (the stored lists and `index.json`, never an exit code; C22, W5-C-3);
   its details give the stale issuers, the failures, the changed files and the newest
@@ -1027,7 +1034,9 @@ All Wave 5 questions are answered (2026-11-02).
   60 s cache keeps no failed answer). A scheduled verification whose `checks` is not a list is
   skipped. A re-stamping entry whose time is at the edge of the calendar (one that UTC or site
   time cannot show, at either end) is left out; so is such an index `fetched_at` or failure
-  `at`, and a moment shifted past the edge is unknown. JSON nested too deeply to parse counts as
+  `at`, and a moment shifted past the edge is unknown. The high edge is 9999-12-31T21:00Z, so a
+  certificate with RFC 5280's "no well-defined expiration" (`99991231235959Z`) has its entry
+  left out: its day page shows `renewal: null`. JSON nested too deeply to parse counts as
   unreadable. A seal state that cannot be parsed makes the unstamped days unknown.
 - **W5-C-12: R20-cert "high"** (manager answer on #117, 2026-11-02 21:07Z, Q6) is a token of
   `state/renewal.json` that is `uncovered` (its certificate expired with no renewal that counts),
