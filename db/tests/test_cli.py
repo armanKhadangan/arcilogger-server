@@ -25,7 +25,7 @@ from arcilogger_db.cli import main
 from arcilogger_db.engine import make_engine
 from arcilogger_db.migrate import head_revisions
 from arcilogger_db.models import AuditLog, IngestOffset, Message, Setting
-from arcilogger_db.partitions import add_months, month_of, months_back_for, partition_name
+from arcilogger_db.partitions import DAYS_AHEAD, DAYS_PER_RUN, day_partition_name
 from arcilogger_db.searchcounts import count_key, hour_of, upsert_counts
 from arcilogger_db.settings import DEFAULT_SETTINGS
 from arcilogger_db.testing import TestServer
@@ -125,34 +125,45 @@ def test_partitions_command_and_missing_horizon_warning(
     setup: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     # One mid-month moment for the CLI (upgrade, partitions, check) and this test: on the real
-    # clock a site midnight on a 1st (or on a day whose today-400 is a 1st) passing between
-    # `upgrade` and the recomputation below changed the expected count and the months dropped.
+    # clock a site midnight passing between `upgrade` and the recomputation below moved the
+    # window by a day.
     now = datetime(2026, 10, 15, 9, tzinfo=UTC)
     monkeypatch.setattr("arcilogger_db.partitions.utc_now", lambda: now)
     monkeypatch.setattr("arcilogger_db.cli.utc_now", lambda: now)
     config = str(setup)
     assert main(["upgrade", "--config", config]) == 0
     out = capsys.readouterr().out
-    assert main(["partitions", "--config", config]) == 0
-    second = capsys.readouterr().out
-    if "Aylık bölümler" not in out:  # TimescaleDB: hypertables, nothing to partition
-        assert "TimescaleDB hypertable" in second
+    if "Bölümler" not in out:  # TimescaleDB: hypertables, nothing to partition
+        assert main(["partitions", "--config", config]) == 0
+        assert "TimescaleDB hypertable" in capsys.readouterr().out
         return
-    back = months_back_for(site_day(now), 400)  # the db.retention_days window
-    assert f"16 tablo, {16 * (back + 1 + 3)} yeni bölüm" in out  # … + current + 3 ahead
-    assert "16 tablo, 0 yeni bölüm" in second  # idempotent
-    # Without next month's partitions `check` asks for attention.
+    # Today, the days ahead and the newest past days of the window, then the rest of it.
+    assert f"16 tablo, {16 * DAYS_PER_RUN} yeni bölüm" in out
+    window = int(DEFAULT_SETTINGS["db.retention_days"]) + DAYS_AHEAD + 1
+    assert main(["partitions", "--config", config]) == 0
+    assert f"16 tablo, {16 * DAYS_PER_RUN} yeni bölüm" in capsys.readouterr().out
+    assert main(["partitions", "--config", config]) == 0
+    third = capsys.readouterr().out
+    assert f"16 tablo, {16 * (window - 2 * DAYS_PER_RUN)} yeni bölüm" in third
+    today = site_day(now)
+    assert f"Kapsanan son gün: {today + timedelta(days=DAYS_AHEAD):%Y-%m-%d}" in third
+    assert main(["partitions", "--config", config]) == 0
+    assert "16 tablo, 0 yeni bölüm" in capsys.readouterr().out  # idempotent
+    assert main(["check", "--config", config]) == 0
+    capsys.readouterr()
+    # Without the partitions of the next days `check` asks for attention.
     engine = make_engine(load_config(setup))
-    future = [add_months(month_of(site_day(now)), n) for n in (1, 2, 3)]
     with engine.begin() as connection:
-        for month in future:
-            connection.execute(text(f'DROP TABLE "{partition_name("mt_dhcp", month)}"'))
+        for days in range(1, DAYS_AHEAD + 1):
+            name = day_partition_name("mt_dhcp", today + timedelta(days=days))
+            connection.execute(text(f'DROP TABLE "{name}"'))
     engine.dispose()
     assert main(["check", "--config", config]) == 1
     report = json.loads(capsys.readouterr().out)
+    assert report["partitions"]["covered_until"] == f"{today:%Y-%m-%d}"
     assert any("arcilogger-db partitions" in w for w in report["warnings"])
     assert main(["partitions", "--config", config]) == 0
-    assert "16 tablo, 3 yeni bölüm" in capsys.readouterr().out
+    assert f"16 tablo, {DAYS_AHEAD} yeni bölüm" in capsys.readouterr().out
 
 
 def test_check_warns_when_timescaledb_is_installed_but_unused(

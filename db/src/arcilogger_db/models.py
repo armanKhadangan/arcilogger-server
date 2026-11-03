@@ -145,6 +145,12 @@ SAVED_SEARCH_PRESETS: Final = ("15m", "1h", "24h", "today", "yesterday", "7d", "
 SAVED_SEARCH_NAME_MAX: Final = 80
 #: The longest query text (the search request's ``q`` has the same limit).
 SAVED_SEARCH_QUERY_MAX: Final = 1000
+#: Archive reload (Wave 5 contract G4, revision ``0021_db_window``): the function that asked and
+#: the states of a request. ``ARCHIVE_RELOAD_ACTIVE`` are the requests whose days the window job
+#: keeps (G3).
+ARCHIVE_RELOAD_REASONS: Final = ("lookup", "search")
+ARCHIVE_RELOAD_STATUSES: Final = ("queued", "loading", "ready", "failed", "expired")
+ARCHIVE_RELOAD_ACTIVE: Final = ("queued", "loading", "ready")
 
 
 def _in(column: str, values: tuple[str, ...]) -> str:
@@ -2158,6 +2164,70 @@ class LicenseEvent(Base):
 
 #: The append-only licence tables (migration 0014_license).
 LICENSE_TABLES: Final = ("license_installation", "license_files", "license_events")
+
+
+# =================================================================================================
+# Archive reload (Wave 5 contract G4; revision 0021_db_window)
+# =================================================================================================
+
+
+class ArchiveReload(Base):
+    """A request to bring sealed days older than the database window (``db.retention_days``)
+    back from the vault ("arşivden yeniden yükle").
+
+    The API inserts the row as ``queued`` after it wrote ``archive.reload`` to the audit log (G6);
+    ArciIngest, the only writer of log rows, loads one request at a time (``loading``; the
+    partial unique index allows one) through its sealed-file reader and sets ``ready`` when
+    every stream has finished. ``bytes_total`` is Σ ``bytes_uncompressed`` of the days' sealed
+    files, ``bytes_done`` Σ their committed ingest offsets. ``expires_at`` = ``ready_at`` +
+    ``db.reload_keep_days``; afterwards the window job (``db.window``) drops the days again and
+    the request becomes ``expired``. ``error_code`` is set exactly when ``status`` is ``failed``
+    (a code, never log content).
+    """
+
+    __tablename__ = "archive_reloads"
+    __table_args__ = (
+        CheckConstraint(_in("reason", ARCHIVE_RELOAD_REASONS), name="reason"),
+        CheckConstraint(_in("status", ARCHIVE_RELOAD_STATUSES), name="status"),
+        CheckConstraint("last_day >= first_day", name="range"),
+        CheckConstraint("btrim(requested_by) <> ''", name="requested_by"),
+        CheckConstraint("lookup_id IS NULL OR reason = 'lookup'", name="lookup"),
+        CheckConstraint("bytes_total >= 0 AND bytes_done >= 0", name="bytes"),
+        CheckConstraint("(status = 'failed') = (error_code IS NOT NULL)", name="error_code"),
+        CheckConstraint(
+            "status NOT IN ('ready', 'expired') "
+            "OR (ready_at IS NOT NULL AND expires_at IS NOT NULL)",
+            name="ready",
+        ),
+        Index("ix_archive_reloads_status_id", "status", "id"),
+        Index(
+            "uq_archive_reloads_loading",
+            "status",
+            unique=True,
+            postgresql_where=text("status = 'loading'"),
+        ),
+        {"comment": "Archive reloads: sealed days loaded back into the database on request."},
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    #: User name of the person who asked.
+    requested_by: Mapped[str] = mapped_column(Text, nullable=False)
+    requested_at: Mapped[datetime] = mapped_column(TZ, nullable=False, server_default=func.now())
+    #: ``lookup`` or ``search``: whose permission the request needed (G6).
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    #: The lookup that asked (``reason`` ``lookup``).
+    lookup_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("lookups.id", ondelete="SET NULL")
+    )
+    #: Site days, both included.
+    first_day: Mapped[date] = mapped_column(Date, nullable=False)
+    last_day: Mapped[date] = mapped_column(Date, nullable=False)
+    status: Mapped[str] = mapped_column(Text, nullable=False, server_default="queued")
+    bytes_total: Mapped[int] = mapped_column(BigInteger, nullable=False, server_default="0")
+    bytes_done: Mapped[int] = mapped_column(BigInteger, nullable=False, server_default="0")
+    error_code: Mapped[str | None] = mapped_column(Text)
+    ready_at: Mapped[datetime | None] = mapped_column(TZ)
+    expires_at: Mapped[datetime | None] = mapped_column(TZ)
 
 
 #: Time-series tables (hypertables when TimescaleDB is available), in creation order.

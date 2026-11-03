@@ -30,7 +30,7 @@ from arcilogger_db.testing import TestServer
 
 BASELINE = "0001_baseline"
 #: Newest revision (re-chained by the orchestrator when parallel revisions are merged).
-HEAD = "0020_fg_traffic_transip_time"
+HEAD = "0021_db_window"
 
 
 @pytest.fixture

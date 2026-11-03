@@ -91,7 +91,8 @@ def test_default_settings_are_seeded(db_session: Session) -> None:
     assert rows["lookup.max_session_seconds"].value == 86400
     assert rows["auth.idle_minutes"].value == 15
     assert rows["auth.absolute_hours"].value == 12
-    assert rows["db.retention_days"].value == 400
+    assert rows["db.retention_days"].value == 30  # Wave 5 G1 (was 400)
+    assert rows["db.reload_keep_days"].value == 7
     # The FortiGate's transit/WAN address is never assumed to be public.
     assert all("100.64.12.9" not in str(row.value) for row in rows.values())
 

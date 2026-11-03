@@ -4,7 +4,7 @@
     arcilogger-db current    [--config PATH]   current and newest revision
     arcilogger-db check      [--config PATH]   connectivity, encoding, schema, TimescaleDB,
                                                partitions
-    arcilogger-db partitions [--config PATH]   create missing monthly partitions (plain
+    arcilogger-db partitions [--config PATH]   create missing daily partitions (plain
                                                PostgreSQL; the worker also does it daily)
     arcilogger-db settings list              [--config PATH]
     arcilogger-db settings get KEY           [--config PATH]
@@ -82,7 +82,7 @@ import json
 import logging
 import sys
 from collections.abc import Sequence
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -125,12 +125,7 @@ from arcilogger_db.engine import make_engine
 from arcilogger_db.lease_rollback import prepare_rollback
 from arcilogger_db.migrate import current_revisions, head_revisions, upgrade
 from arcilogger_db.models import IngestOffset, SearchCount
-from arcilogger_db.partitions import (
-    add_months,
-    ensure_partitions,
-    month_of,
-    partition_status,
-)
+from arcilogger_db.partitions import DAYS_AHEAD_WARNING, ensure_partitions, partition_status
 from arcilogger_db.searchcounts import rebuild_stream, verify
 from arcilogger_db.seed import SeedReport
 from arcilogger_db.settings import DEFAULT_SETTINGS
@@ -191,7 +186,7 @@ def cmd_upgrade(config: Config) -> int:
     print(f"TimescaleDB: {_timescale_text(timescale)}")
     if result.partitions.tables:
         print(
-            f"Aylık bölümler: {len(result.partitions.tables)} tablo, "
+            f"Bölümler: {len(result.partitions.tables)} tablo, "
             f"{len(result.partitions.created)} yeni bölüm"
         )
     if seed.rollback_restored is not None:
@@ -227,11 +222,11 @@ def cmd_partitions(config: Config) -> int:
     if not report.tables:
         print("Bölümlenmiş tablo yok (TimescaleDB hypertable kullanılıyor).")
         return EXIT_OK
-    print(f"Aylık bölümler: {len(report.tables)} tablo, {len(report.created)} yeni bölüm")
+    print(f"Bölümler: {len(report.tables)} tablo, {len(report.created)} yeni bölüm")
     for name, rows in sorted(report.moved.items()):
         print(f"  {name}: varsayılan bölümden {rows} satır taşındı")
     if status.covered_until is not None:
-        print(f"Kapsanan son ay: {status.covered_until:%Y-%m}")
+        print(f"Kapsanan son gün: {status.covered_until:%Y-%m-%d}")
     return EXIT_OK
 
 
@@ -241,7 +236,7 @@ def _timescale_text(status: Any) -> str:
     if status.get("enabled"):
         compression = "sıkıştırma açık" if status.get("compression") else "sıkıştırma yok"
         return f"açık (sürüm {status.get('version')}, {compression})"
-    storage = "aylık bölümler" if status.get("storage") == "partitions" else "düz tablolar"
+    storage = "bölümler" if status.get("storage") == "partitions" else "düz tablolar"
     return f"kapalı ({status.get('reason') or '-'}; {storage})"
 
 
@@ -317,7 +312,7 @@ def cmd_check(config: Config) -> int:
                     report["partitions"] = {
                         "tables": partitions.tables,
                         "covered_until": (
-                            f"{partitions.covered_until:%Y-%m}"
+                            f"{partitions.covered_until:%Y-%m-%d}"
                             if partitions.covered_until
                             else None
                         ),
@@ -325,11 +320,11 @@ def cmd_check(config: Config) -> int:
                             t for t, rows in partitions.default_rows.items() if rows
                         ),
                     }
-                    next_month = add_months(month_of(site_day(utc_now())), 1)
-                    if partitions.covered_until is None or partitions.covered_until < next_month:
+                    horizon = site_day(utc_now()) + timedelta(days=DAYS_AHEAD_WARNING)
+                    if partitions.covered_until is None or partitions.covered_until < horizon:
                         warnings.append(
-                            "gelecek ayın bölümleri yok: arcilogger-db partitions çalıştırın "
-                            "(worker bunu her gün yapar)"
+                            "önümüzdeki günlerin bölümleri yok: arcilogger-db partitions "
+                            "çalıştırın (worker bunu her gün yapar)"
                         )
     except OperationalError as exc:
         raise _UnreachableError(_describe(exc)) from exc
@@ -1217,7 +1212,7 @@ def _build_parser() -> argparse.ArgumentParser:
         ("upgrade", "migrate to the newest schema and seed the defaults"),
         ("current", "show the current and the newest schema revision"),
         ("check", "connectivity, encoding, schema state, TimescaleDB and partitions"),
-        ("partitions", "create the missing monthly partitions (plain PostgreSQL)"),
+        ("partitions", "create the missing daily partitions (plain PostgreSQL)"),
     ):
         sub = commands.add_parser(name, help=help_text)
         # Accepted after the command too: `arcilogger-db upgrade --config X`.
