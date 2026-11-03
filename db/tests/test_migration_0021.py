@@ -2,8 +2,8 @@
 ``db.retention_days`` converted (400 → 30, below 7 → 7, other values kept), both keys after an
 upgrade, the table ``archive_reloads`` and its checks, the empty monthly partitions ahead dropped
 (daily partitions, UTC days, from the end of the current month on), and the downgrade that
-merges daily partitions back into monthly ones (split by local month); on native partitions and
-on TimescaleDB."""
+merges daily partitions back into monthly ones (split by local month), one table's month per
+transaction, and goes on after an interruption; on native partitions and on TimescaleDB."""
 
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ from typing import Any
 
 import pytest
 from alembic import command
-from sqlalchemy import Connection, Engine, func, inspect, select, text
+from sqlalchemy import Connection, Engine, event, func, inspect, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import NullPool
@@ -378,8 +378,7 @@ def test_down_merges_the_daily_partitions_into_monthly_ones(empty_engine: Engine
     indexes of the parent on it; up again."""
     assert upgrade(empty_engine, timescale="off").after == (REVISION,)
     # The first run's days (today - 8 … today + 7) and the next month's 1st, not the whole
-    # window: the downgrade holds a lock on every object of every daily partition until its
-    # commit (test_the_downgrade_checks_its_locks_first).
+    # window (test_the_downgrade_merges_in_steps_that_fit_the_default_lock_table): fewer steps.
     following = add_months(month_of(site_day(utc_now())), 1)
     with empty_engine.begin() as connection:
         ensure_days(connection, following, following)
@@ -439,8 +438,8 @@ def test_down_merges_the_change_over_into_monthly_ones(empty_engine: Engine) -> 
     assert upgrade(empty_engine, timescale="off").after == (REVISION,)
     current = month_of(site_day(utc_now()))  # a site midnight on a 1st may pass in between
     following, after_that = add_months(current, 1), add_months(current, 2)
-    # Only the daily partitions the rows need (the downgrade holds every lock until its commit):
-    # the change-over slice, a day of the next month, the UTC day across its end, a day ahead.
+    # Only the daily partitions the rows need: the change-over slice, a day of the next month,
+    # the UTC day across its end, a day ahead.
     last = after_that - timedelta(days=1)
     for site in (following, following + timedelta(days=14), last, after_that + timedelta(days=2)):
         with empty_engine.begin() as connection:
@@ -500,28 +499,231 @@ def test_down_merges_the_change_over_into_monthly_ones(empty_engine: Engine) -> 
     assert _where(empty_engine, "mt_dhcp") == list(rows.values())
 
 
-def test_the_downgrade_checks_its_locks_first(empty_engine: Engine) -> None:
-    """The downgrade merges in one transaction and holds every lock until its commit: it first
-    estimates them (:func:`locks_needed`, never fewer than it takes) and refuses, before it
-    changes anything, when PostgreSQL's lock table has no room left for them
-    (``Install-Arcilogger.ps1 -Rollback``, #122, runs it on an installation)."""
-    with empty_engine.begin() as connection:  # the revision and a few daily partitions only
-        command.upgrade(alembic_config(connection, timescale="off"), REVISION)
-        today = site_day(utc_now())
-        ensure_days(connection, today, today + timedelta(days=2))
+def _full_window(engine: Engine) -> None:
+    """The window's daily partitions, the days ahead and a week before the window (days the
+    window job keeps while they are not sealed): 46 UTC days and more."""
+    assert upgrade(engine, timescale="off").after == (REVISION,)
+    for _ in range(10):
+        with engine.begin() as connection:
+            if ensure_partitions(connection).remaining == 0:
+                break
+    first = _daily(engine, "messages")[0]
+    with engine.begin() as connection:
+        ensure_days(connection, first - timedelta(days=7), first - timedelta(days=1))
+
+
+def test_the_downgrade_merges_in_steps_that_fit_the_default_lock_table(
+    empty_engine: Engine,
+) -> None:
+    """The whole window and the days ahead (in one transaction more locks than the 6,400 of
+    PostgreSQL's defaults) go down in steps of one table's month, each committed: the
+    largest step is estimated first (:func:`locks_needed`, never fewer than a step takes), far
+    below the defaults, and the downgrade refuses, before it changes anything, only when even
+    that one cannot fit (manager answer 3 on #121: PostgreSQL's configuration is not changed)."""
+    _full_window(empty_engine)
+    assert len(_daily(empty_engine, "messages")) >= 46
+    held: list[int] = []
+
+    def measure(conn: Any, cursor: Any, statement: str, *_args: Any) -> None:
+        if "ATTACH PARTITION" in statement:  # a step's last statements: every lock is taken
+            held.append(cursor.connection.execute(HELD_LOCKS).fetchone()[0])
+
     with empty_engine.connect() as connection:
         needed = MIGRATION.locks_needed(connection)
         with pytest.raises(RuntimeError, match=r"geri alınamadı: .* was not downgraded: "):
             MIGRATION.check_lock_table(connection, 10**9)
         MIGRATION.check_lock_table(connection, needed)
-    assert _daily(empty_engine, "messages")
-    with empty_engine.begin() as connection:
-        command.downgrade(alembic_config(connection), BEFORE)
-        held = connection.execute(text(HELD_LOCKS)).scalar_one()
-    assert _daily(empty_engine, "messages") == []
-    assert held <= needed < 2 * held
+    event.listen(empty_engine, "after_cursor_execute", measure)
+    try:
+        _migrate(empty_engine, BEFORE)
+    finally:
+        event.remove(empty_engine, "after_cursor_execute", measure)
     with empty_engine.connect() as connection:
+        assert current_revisions(connection) == (BEFORE,)
         assert MIGRATION.locks_needed(connection) == 0  # nothing left to merge
+    for table in TIME_SERIES_TABLES:
+        assert _daily(empty_engine, table) == [], table
+    assert len(held) >= 2 * len(TIME_SERIES_TABLES)  # at least two months each
+    assert max(held) <= needed < 1_000  # the defaults hold 6,400
+    assert needed < 2 * max(held) + MIGRATION.LOCK_ALLOWANCE
+
+
+def _rows(engine: Engine) -> list[tuple[Any, ...]]:
+    with engine.connect() as connection:
+        return [tuple(row) for row in connection.execute(text("SELECT * FROM mt_dhcp ORDER BY id"))]
+
+
+def test_an_interrupted_downgrade_goes_on_where_it_stopped(empty_engine: Engine) -> None:
+    """Each step (one month of one table) is one transaction, and alembic's version moves only
+    after the last one: a downgrade interrupted in the second month of ``mt_dhcp`` (after it
+    dropped that month's daily partitions) leaves the tables before it and ``mt_dhcp``'s first
+    month merged, the rest as they were, every row once, the version, the table and the settings
+    at ``0021_db_window``; a second run goes on from there to the end."""
+    assert upgrade(empty_engine, timescale="off").after == (REVISION,)
+    following = add_months(month_of(site_day(utc_now())), 1)
+    with empty_engine.begin() as connection:  # a UTC day across a month's end in every table
+        ensure_days(connection, following, following)
+    days = _daily(empty_engine, "mt_dhcp")
+    months = sorted({month_of(site_day(start)) for start, _ in map(day_bounds, days)})
+    assert len(months) >= 2
+    second = months[1]
+    across = month_bounds(second)[0]  # the second month's first instant, in a UTC day of the first
+    tiny = timedelta(microseconds=1)
+    outside = days[0] - timedelta(days=1)  # no partition: waits in the default partition
+    at = [day_window(day)[0] + timedelta(hours=12) for day in (days[0], days[-1], outside)]
+    at[2:2] = [across - tiny, across]
+    with empty_engine.begin() as connection:
+        for number, when in enumerate(at, 1):
+            _insert_dhcp(connection, when, number)
+    rows = _rows(empty_engine)
+    assert _where(empty_engine, "mt_dhcp")[-1] == "mt_dhcp_default"
+    daily = {table: _daily(empty_engine, table) for table in TIME_SERIES_TABLES}
+    stop = f'ALTER TABLE "mt_dhcp" ATTACH PARTITION "{partition_name("mt_dhcp", second)}"'
+
+    def interrupt(conn: Any, cursor: Any, statement: str, *_args: Any) -> None:
+        if statement.startswith(stop):
+            raise RuntimeError("interrupted")
+
+    event.listen(empty_engine, "before_cursor_execute", interrupt)
+    try:
+        with pytest.raises(RuntimeError, match="interrupted"):
+            _migrate(empty_engine, BEFORE)
+    finally:
+        event.remove(empty_engine, "before_cursor_execute", interrupt)
+    with empty_engine.connect() as connection:
+        assert current_revisions(connection) == (REVISION,)
+    assert TABLE in inspect(empty_engine).get_table_names()
+    assert _setting(empty_engine, "db.retention_days") == (30, ":seed")
+    assert _setting(empty_engine, "db.reload_keep_days") == (7, ":seed")
+    for table in TIME_SERIES_TABLES:
+        if table < "mt_dhcp":  # merged, in name order
+            assert _daily(empty_engine, table) == [], table
+            assert _months(empty_engine, table) == months, table
+        elif table > "mt_dhcp":
+            assert _daily(empty_engine, table) == daily[table], table
+            assert _months(empty_engine, table) == [], table
+    # mt_dhcp: the first month merged, the UTC day it ends in left as the second month's
+    # change-over slice (its last three hours), the rest of the step rolled back.
+    assert _months(empty_engine, "mt_dhcp") == months[:1]
+    last_of_first = second - timedelta(days=1)
+    assert _daily(empty_engine, "mt_dhcp") == [day for day in days if day >= last_of_first]
+    with empty_engine.connect() as connection:
+        bounds = {p.name: (p.start, p.end) for p in list_partitions(connection, "mt_dhcp")}
+    assert bounds[day_partition_name("mt_dhcp", last_of_first)] == (
+        across,
+        day_bounds(last_of_first)[1],
+    )
+    first_name = partition_name("mt_dhcp", months[0])
+    assert _where(empty_engine, "mt_dhcp") == [
+        first_name,
+        day_partition_name("mt_dhcp", days[-1]),
+        first_name,
+        day_partition_name("mt_dhcp", last_of_first),
+        first_name if month_of(site_day(at[4])) == months[0] else "mt_dhcp_default",
+    ]
+    assert _rows(empty_engine) == rows
+    _migrate(empty_engine, BEFORE)  # the second run
+    with empty_engine.connect() as connection:
+        assert current_revisions(connection) == (BEFORE,)
+        assert MIGRATION.locks_needed(connection) == 0
+    for table in TIME_SERIES_TABLES:
+        assert _daily(empty_engine, table) == [], table
+        assert _months(empty_engine, table) == months, table
+    assert _where(empty_engine, "mt_dhcp") == [
+        first_name,
+        partition_name("mt_dhcp", months[-1]),
+        first_name,
+        partition_name("mt_dhcp", second),
+        first_name if month_of(site_day(at[4])) == months[0] else "mt_dhcp_default",
+    ]
+    assert _rows(empty_engine) == rows
+    assert TABLE not in inspect(empty_engine).get_table_names()
+    assert _setting(empty_engine, "db.retention_days") == (400, ":seed")
+    assert _setting(empty_engine, "db.reload_keep_days") is None
+    assert upgrade(empty_engine, timescale="off").after == (REVISION,)  # and up again
+    assert _rows(empty_engine) == rows
+
+
+def test_the_rest_of_the_downgrade_goes_with_alembics_version(empty_engine: Engine) -> None:
+    """``archive_reloads``, the settings rows and ``db.retention_days`` 30 → 400 are changed in
+    the transaction in which alembic moves its version: a downgrade interrupted at that move
+    has every month merged (committed step by step) and the rest as ``0021_db_window`` has it,
+    so the next run finds nothing to merge and ends at the previous version."""
+    assert upgrade(empty_engine, timescale="off").after == (REVISION,)
+    months = _months(empty_engine, "mt_dhcp")
+
+    def interrupt(conn: Any, cursor: Any, statement: str, *_args: Any) -> None:
+        if statement.startswith("UPDATE alembic_version"):
+            raise RuntimeError("interrupted")
+
+    event.listen(empty_engine, "before_cursor_execute", interrupt)
+    try:
+        with pytest.raises(RuntimeError, match="interrupted"):
+            _migrate(empty_engine, BEFORE)
+    finally:
+        event.remove(empty_engine, "before_cursor_execute", interrupt)
+    with empty_engine.connect() as connection:
+        assert current_revisions(connection) == (REVISION,)
+        assert MIGRATION.locks_needed(connection) == 0
+    for table in TIME_SERIES_TABLES:
+        assert _daily(empty_engine, table) == [], table
+    assert len(_months(empty_engine, "mt_dhcp")) > len(months)
+    assert TABLE in inspect(empty_engine).get_table_names()
+    assert _setting(empty_engine, "db.retention_days") == (30, ":seed")
+    assert _setting(empty_engine, "db.reload_keep_days") == (7, ":seed")
+    _migrate(empty_engine, BEFORE)  # the second run
+    with empty_engine.connect() as connection:
+        assert current_revisions(connection) == (BEFORE,)
+    assert TABLE not in inspect(empty_engine).get_table_names()
+    assert _setting(empty_engine, "db.retention_days") == (400, ":seed")
+    assert _setting(empty_engine, "db.reload_keep_days") is None
+
+
+def test_a_daily_partition_made_between_two_steps_stops_the_version(empty_engine: Engine) -> None:
+    """The steps are planned once and each commits: a daily partition another session makes
+    between two of them (a service still running) is found under the partitions' advisory lock
+    before alembic's version moves, and the downgrade refuses (TR/EN), the version and the rest
+    at ``0021_db_window``; the next run merges it too."""
+    assert upgrade(empty_engine, timescale="off").after == (REVISION,)
+    first = sorted(TIME_SERIES_TABLES)[0]  # its steps are done before mt_dhcp's
+    later = add_months(_daily(empty_engine, first)[-1], 3) + timedelta(days=9)
+    stray = day_partition_name(first, later)
+    start = datetime(later.year, later.month, later.day, tzinfo=UTC)
+    create = (
+        f'CREATE TABLE "{stray}" PARTITION OF "{first}" '
+        f"FOR VALUES FROM ('{start.isoformat()}') TO ('{(start + timedelta(days=1)).isoformat()}')"
+    )
+    made: list[str] = []
+
+    def make(conn: Any, cursor: Any, statement: str, *_args: Any) -> None:
+        if not made and statement.startswith('ALTER TABLE "mt_dhcp" ATTACH PARTITION'):
+            made.append(stray)
+            with empty_engine.begin() as other:  # another session; it takes no lock of ours
+                other.exec_driver_sql(create)
+
+    event.listen(empty_engine, "before_cursor_execute", make)
+    try:
+        with pytest.raises(
+            RuntimeError, match=rf"geri alınamadı: geri alma sürerken .*{stray}.* was not "
+        ):
+            _migrate(empty_engine, BEFORE)
+    finally:
+        event.remove(empty_engine, "before_cursor_execute", make)
+    assert made == [stray]
+    with empty_engine.connect() as connection:
+        assert current_revisions(connection) == (REVISION,)
+    assert TABLE in inspect(empty_engine).get_table_names()
+    assert _setting(empty_engine, "db.retention_days") == (30, ":seed")
+    assert _daily(empty_engine, first) == [later]
+    for table in TIME_SERIES_TABLES:
+        if table != first:
+            assert _daily(empty_engine, table) == [], table
+    _migrate(empty_engine, BEFORE)  # the second run merges the stray day as well
+    with empty_engine.connect() as connection:
+        assert current_revisions(connection) == (BEFORE,)
+    assert _daily(empty_engine, first) == []
+    assert _months(empty_engine, first)[-1] == month_of(later)
+    assert TABLE not in inspect(empty_engine).get_table_names()
 
 
 def test_up_and_down_on_timescaledb(empty_engine: Engine) -> None:
