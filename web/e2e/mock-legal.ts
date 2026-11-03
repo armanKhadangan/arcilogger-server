@@ -20,6 +20,7 @@ import {
   LEGAL_PROVIDER_NOT_LEGAL,
   LEGAL_REASONS,
   LEGAL_REVOKED,
+  LEGAL_SAMPLES,
   LEGAL_WARNING_ONLY,
   legalStatusWith,
 } from '../src/test/w5-fixtures';
@@ -33,6 +34,7 @@ export {
   LEGAL_PROVIDER_NOT_LEGAL,
   LEGAL_REASONS,
   LEGAL_REVOKED,
+  LEGAL_SAMPLES,
   LEGAL_WARNING_ONLY,
   legalStatusWith,
 };
@@ -87,7 +89,15 @@ export class LegalMock {
     if (call.path !== '/legal-status') return this.api.error(404, 'not_found');
     if (call.method !== 'GET') return this.api.error(405, 'method_not_allowed');
     const account = this.api.signedIn(call);
-    if (Array.isArray(account)) return account;
+    if (Array.isArray(account)) {
+      // Without a session: the captured refusal of `GET /legal-status`.
+      const refusal = LEGAL_SAMPLES.errors.not_authenticated;
+      const [status, body] = account;
+      const code = (body as { error?: { code?: string } }).error?.code;
+      return status === refusal.status && code === refusal.body.error.code
+        ? [refusal.status, copy(refusal.body)]
+        : account;
+    }
     return [200, copy(this.status)];
   }
 }

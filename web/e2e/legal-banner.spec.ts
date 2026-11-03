@@ -7,6 +7,7 @@ import {
   LEGAL_OK,
   LEGAL_PROVIDER_NOT_LEGAL,
   LEGAL_REASONS,
+  LEGAL_SAMPLES,
   LEGAL_WARNING_ONLY,
   legalStatusWith,
   mockLegal,
@@ -52,6 +53,23 @@ async function preloadHide(page: Page, hide: { until: number; codes: string[] })
     [HIDE_KEY, JSON.stringify(hide)] as const,
   );
 }
+
+test('signed out: no banner on the login page, and the API refuses with its captured 401', async ({
+  page,
+}) => {
+  const api = await mockApi(page);
+  await mockLegal(page, api, { status: LEGAL_PROVIDER_NOT_LEGAL });
+  await page.goto('/login');
+  await expect(page.getByLabel('Kullanıcı adı')).toBeVisible();
+  await expect(banner(page)).toHaveCount(0);
+  expect(api.calls.filter((call) => call.path === '/legal-status')).toHaveLength(0);
+  const answer = await page.evaluate(async () => {
+    const response = await fetch('/api/v1/legal-status');
+    return { status: response.status, body: (await response.json()) as unknown };
+  });
+  const refusal = LEGAL_SAMPLES.errors.not_authenticated;
+  expect(answer).toEqual({ status: refusal.status, body: refusal.body });
+});
 
 test.describe('legal-validity banner: the mock provider on every page', () => {
   async function asAuditor(page: Page) {
