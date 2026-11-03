@@ -91,22 +91,7 @@ def test_both_verifiers_give_the_code_and_level_of_the_case(
     roots = [tsa.root_certificate]
     expected = (case.code, case.level)
     assert core_verdict(token, DATA, roots, lists, NOW) == expected
-    if case.standalone_before_c6 is None:
-        assert standalone_verdict(token, DATA, roots, lists, NOW) == [expected]
-        return
-    # Interim (C6, see revocation_cases): exactly what the standalone verifier gives today.
-    today: list[tuple[str, str]] | str
-    try:
-        today = standalone_verdict(token, DATA, roots, lists, NOW)
-    except TypeError as exc:
-        today = type(exc).__name__
-    before = case.standalone_before_c6
-    assert today == (before if isinstance(before, str) else [before]), (
-        f"The standalone verifier now gives {today!r} for {case.name!r}. Once W5-A applies C6 "
-        f"to the standalone verifier, this case must agree with the core ({expected!r}): "
-        "remove standalone_before_c6 from the case in core/tests/revocation_cases.py; when no "
-        "case has it, remove the field, the module-docstring paragraph and this branch (W5-B-9)."
-    )
+    assert standalone_verdict(token, DATA, roots, lists, NOW) == [expected]
 
 
 def test_the_table_covers_every_code_with_its_level() -> None:

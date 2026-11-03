@@ -889,20 +889,6 @@ All Wave 5 questions are answered (2026-11-02).
 - **W5-B-8: the config adapter.** `crl.crl_options` reads `tsa.crl_urls`,
   `tsa.crl_max_age_days` and `network.https_proxy` with `getattr` and the §2.5 defaults until
   W5-T's day-1 pull request lands; then it becomes plain attribute access.
-- **W5-B-9: an interim field of the shared revocation table (C6), for W5-A to clear.** The core
-  applies C6 now; the standalone verifier follows with W5-A (merge order W5-B, then W5-A). The
-  C6 cases are already in `core/tests/revocation_cases.py` (W5-A does not add them again). Five
-  cases expect `crl-revoked` and carry `standalone_before_c6`, what the standalone verifier
-  gives today:
-  - `crl-hold`: a hold, then a revocation before the stamp; the same at the stamp time; a hold
-    and a privilegeWithdrawn revocation of the same date;
-  - `TypeError`: a hold and a revocation without a reason of the same date; two revocations of
-    the same date, one without a reason and one for key compromise.
-
-  `test_revocation.py` asserts exactly that, so it fails once W5-A changes `check_revocation`.
-  W5-A then removes the value from each case and, with the last one, the dataclass field, the
-  module-docstring paragraph and the interim branch of `test_revocation.py`, and this entry:
-  both verifiers must agree on every case.
 - **W5-B-10: C8's "packaged chain certificate"** is a certificate of a packaged day token's
   verified chain below its root (the TSA certificate and its intermediates; the chain
   `verify_token` checks, `tsa.verify.token_chain`). "Has an entry" means any entry for its

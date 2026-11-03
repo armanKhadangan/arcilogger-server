@@ -6,15 +6,6 @@ signed with the key of the certificate's issuer unless a case says otherwise. A 
 through :func:`core_verdict` (``verify_token(crls=)``) and :func:`standalone_verdict` (the
 standalone verifier's ``check_revocation``, read as it is, never changed);
 ``test_revocation.py`` asserts that both give the case's code and level.
-
-Interim (C6, contract W5-B-9): the core already ranks a revocation at or before the stamp time
-above an earlier hold and orders two entries of one date without failing; the standalone verifier
-follows when W5-A changes it (merge order W5-B, then W5-A). Until then a case where they differ
-carries ``standalone_before_c6``: what the standalone verifier gives today (a code and level, or
-``TypeError``). The test asserts exactly that, so it fails the moment W5-A changes the standalone
-verifier. W5-A then removes the value from each case, and with the last one the field itself,
-this paragraph and the interim branch of ``test_revocation.py``: both verifiers must agree on
-every case.
 """
 
 from __future__ import annotations
@@ -74,10 +65,6 @@ class RevocationCase:
     lists: tuple[CrlSpec, ...]
     code: str
     level: str
-    #: Interim, for W5-A to remove (C6): the standalone verifier's ``(code, level)`` today, or
-    #: the name of the exception it raises today, where it does not apply C6 yet. None: it gives
-    #: ``code`` and ``level`` like the core.
-    standalone_before_c6: tuple[str, str] | str | None = None
 
 
 CASES: tuple[RevocationCase, ...] = (
@@ -171,7 +158,6 @@ CASES: tuple[RevocationCase, ...] = (
         ),
         "crl-revoked",
         "fail",
-        standalone_before_c6=("crl-hold", "warn"),
     ),
     RevocationCase(
         "on hold and revoked on the same date, on two lists (C6)",
@@ -181,10 +167,9 @@ CASES: tuple[RevocationCase, ...] = (
         ),
         "crl-revoked",
         "fail",
-        # This case guards the order of two entries of one date (a missing reason first) and the
-        # standalone TypeError (it sorts (date, None) against (date, 6)), not the C6 ranking:
-        # the core gave crl-revoked here before C6 as well.
-        standalone_before_c6="TypeError",
+        # This case guards the order of two entries of one date (a missing reason first; the
+        # standalone verifier raised TypeError sorting (date, None) against (date, 6) before C6),
+        # not the C6 ranking: the core gave crl-revoked here before C6 as well.
     ),
     RevocationCase(
         "on hold, then revoked at the stamp time (C6)",
@@ -194,7 +179,6 @@ CASES: tuple[RevocationCase, ...] = (
         ),
         "crl-revoked",
         "fail",
-        standalone_before_c6=("crl-hold", "warn"),
     ),
     RevocationCase(
         # privilegeWithdrawn (9) sorts after certificateHold (6): the C6 ranking decides, not
@@ -206,7 +190,6 @@ CASES: tuple[RevocationCase, ...] = (
         ),
         "crl-revoked",
         "fail",
-        standalone_before_c6=("crl-hold", "warn"),
     ),
     RevocationCase(
         "revoked on the same date on two lists, once without a reason, once for key compromise",
@@ -216,9 +199,7 @@ CASES: tuple[RevocationCase, ...] = (
         ),
         "crl-revoked",
         "fail",
-        # The same standalone TypeError, with no hold involved (W5-A: a missing reason sorts
-        # first).
-        standalone_before_c6="TypeError",
+        # The same order of one date, with no hold involved (a missing reason sorts first).
     ),
     RevocationCase(
         "the earliest entry decides: on hold, then revoked after the stamp",

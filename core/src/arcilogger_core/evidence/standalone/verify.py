@@ -1552,11 +1552,12 @@ def check_revocation(
 
     Returns ``(level, code, tr, en)`` tuples. A CRL is used only if its signature verifies with
     the key of the certificate's issuer from the chain. Every usable CRL is consulted (a CA may
-    drop an expired certificate from later lists): an entry dated at or before the stamp time
-    (``moment``) is a failure, a later one a warning, an entry on hold (certificateHold) a
-    warning. "Not revoked" is only reported when a usable CRL was issued after the stamp time;
-    an older one cannot know about revocations between its date and the stamp. Online checking
-    is not done.
+    drop an expired certificate from later lists): a revocation dated at or before the stamp
+    time (``moment``) is a failure, also when an earlier hold precedes it (C6); otherwise the
+    earliest entry decides: a hold (certificateHold) is a warning, a revocation after the stamp
+    time a warning. "Not revoked" is only reported when a usable CRL was issued after the stamp
+    time; an older one cannot know about revocations between its date and the stamp. Online
+    checking is not done.
     """
     findings = []
     for position, certificate in enumerate(chain[:-1]):
@@ -1582,14 +1583,21 @@ def check_revocation(
             )
             continue
         entries = sorted(
-            (crl.revoked[certificate.serial], crl.reasons.get(certificate.serial))
-            for crl in usable
-            if certificate.serial in crl.revoked
-            and crl.reasons.get(certificate.serial) != CRL_REASON_REMOVE
+            (
+                (crl.revoked[certificate.serial], crl.reasons.get(certificate.serial))
+                for crl in usable
+                if certificate.serial in crl.revoked
+                and crl.reasons.get(certificate.serial) != CRL_REASON_REMOVE
+            ),
+            # Of two entries of the same date, one without a reason comes first, then by reason
+            # code (as in the core).
+            key=lambda entry: (entry[0], -1 if entry[1] is None else entry[1]),
         )
         latest = max(usable, key=lambda crl: crl.this_update)
+        # C6: a revocation at or before the stamp time outranks an earlier hold.
+        before = [entry for entry in entries if entry[1] != CRL_REASON_HOLD and entry[0] <= moment]
         if entries:
-            findings.append(_revocation_finding(name, *entries[0], moment))
+            findings.append(_revocation_finding(name, *(before or entries)[0], moment))
         elif latest.this_update >= moment:
             findings.append(
                 (
