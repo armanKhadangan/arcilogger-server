@@ -321,6 +321,8 @@ def test_crl_stale_issuers_by_the_last_fetch_and_the_next_update() -> None:
     assert stale(stored(ROOT_SHA, 8)) == [ROOT_SHA]
     # past its nextUpdate (or at it) it is stale, however recently it was fetched
     assert stale(stored(ROOT_SHA, 0, issued_days_ago=8, next_in_days=-1)) == [ROOT_SHA]
+    # issued two days ago: stale by its nextUpdate alone
+    assert stale(stored(ROOT_SHA, 0, issued_days_ago=2, next_in_days=-1)) == [ROOT_SHA]
     assert stale(stored(ROOT_SHA, 0, issued_days_ago=7, next_in_days=0)) == [ROOT_SHA]
     assert stale(stored(ROOT_SHA, 0, issued_days_ago=6, next_in_days=1)) == []
     assert stale(stored(ROOT_SHA, None, issued_days_ago=1)) == [ROOT_SHA]  # no fetch indexed
@@ -332,7 +334,8 @@ def test_crl_stale_issuers_by_the_last_fetch_and_the_next_update() -> None:
     assert stale(stored(ROOT_SHA.upper(), 1)) == []  # a fingerprint is matched in any case
     # a fetch time whose end of freshness site time cannot show counts for nothing
     edge, _ = stored(ROOT_SHA, 1)
-    last = datetime(9999, 12, 31, 20, tzinfo=UTC)
+    # seven days later is 9999-12-31T21:30Z: a datetime, but past the last site moment
+    last = datetime(9999, 12, 24, 21, 30, tzinfo=UTC)
     assert crl_stale_issuers([edge], {edge.file_name: last}, (ROOT_SHA,), NOW, 7) == [ROOT_SHA]
 
 

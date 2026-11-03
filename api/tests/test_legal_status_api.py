@@ -616,6 +616,7 @@ def test_crl_stale_counts_only_the_lists_that_match_their_index_entry(
         (90, 120, 9, NOW - timedelta(days=2)),
         # a list past its nextUpdate is stale, however recently it was fetched
         (8, 7, 0, NOW - timedelta(days=1)),
+        (2, 1, 0, NOW - timedelta(days=1)),  # issued two days ago: its nextUpdate alone
         (7, 7, 0, NOW),  # its nextUpdate is now
         (6, 7, 0, None),
     ],

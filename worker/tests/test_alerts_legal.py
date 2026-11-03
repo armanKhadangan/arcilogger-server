@@ -374,6 +374,10 @@ def test_stamp_crl_raised_when_stale_and_cleared_after_a_fresh_list(
     assert CRL_KEY in check()
     crl_lists(sealed, 1, fetched_days_ago=2)
     assert CRL_KEY not in check()
+    crl_lists(sealed, 2, valid_days=1, fetched_days_ago=0)  # issued two days ago: nextUpdate alone
+    assert CRL_KEY in check()
+    crl_lists(sealed, 1, fetched_days_ago=2)
+    assert CRL_KEY not in check()
 
     # tsa.crl_max_age_days (Wave 5 contract 2.5) sets the age of the last fetch.
     strict = config.model_copy(
