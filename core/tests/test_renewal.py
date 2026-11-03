@@ -8,6 +8,7 @@ is moved relative to ``CNA``; no real time-stamp server is called.
 
 from __future__ import annotations
 
+import errno
 import json
 import os
 import subprocess
@@ -27,6 +28,7 @@ from arcilogger_core.renewal import (
     NOTES,
     RENEWAL_SCHEMA,
     RenewalBusyError,
+    RenewalLockError,
     RenewalNotNeeded,
     RenewalRun,
     RenewalStampInvalidError,
@@ -49,6 +51,7 @@ from arcilogger_core.tsa.base import (
     TsaResponseError,
     TsaUnavailableError,
 )
+from arcilogger_core.tsa.client import token_path_for
 from arcilogger_core.tsa.mock import MockFailure, MockTsaProvider
 from arcilogger_core.tsa.verify import inspect_token
 
@@ -275,6 +278,23 @@ def test_unreadable_revocation_lists_leave_a_note(rw: RenewalWorld) -> None:
     assert [note.code for note in report.notes] == ["crl_unreadable"]
     note = report.notes[0]
     assert (note.message_tr, note.message_en) == NOTES["crl_unreadable"]
+
+
+def test_a_changed_revocation_list_leaves_a_note(rw: RenewalWorld) -> None:
+    """C14: a stored list that is not its index entry's file is left out, and the report names
+    it rather than dropping it silently."""
+    stamped = CNA - timedelta(days=100)
+    record = _renew_by_hand(rw, stamped)
+    assert rw.legal_tsa.signer is not None
+    _store(rw.layout, [_revoking(rw, rw.legal_tsa.signer[0], stamped)], rw.legal.root)
+    (stored,) = [path for path in rw.layout.crl_dir.iterdir() if path.name != "index.json"]
+    stored.write_bytes(stored.read_bytes() + b"\0")
+    report = rw.status(CNA - timedelta(days=90))
+    assert rw.of(report, DAY_TOKEN).covered_by == record
+    (note,) = report.notes
+    assert note.code == "crl_mismatched"
+    assert stored.name in note.message_tr
+    assert note.message_en.startswith("Some stored revocation lists do not match")
 
 
 # -- which tokens are renewable (D3) ---------------------------------------------------------------
@@ -523,6 +543,57 @@ def test_a_failed_stamp_leaves_no_record(
         assert raised.value.message_en.startswith("The renewal record's time stamp")
     rw.legal_tsa.failure = MockFailure.NONE
     assert _renew(rw, provider).record_path == "renewals/2031-06-23-1.json"
+
+
+def test_any_failure_of_the_provider_leaves_no_part(
+    rw: RenewalWorld, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Not only a TsaError: whatever the provider raises after writing its token, both parts
+    are removed, so a vault copy never holds a file the standalone verifier does not know."""
+    rw.set_now(CNA - timedelta(days=100))
+    provider = rw.legal_provider(FAR)
+    real = provider.stamp
+
+    def stamp_then_fail(path: Path) -> Any:
+        real(path)
+        assert token_path_for(path).exists()
+        raise ValueError("a provider bug")
+
+    monkeypatch.setattr(provider, "stamp", stamp_then_fail)
+    with pytest.raises(ValueError, match="a provider bug"):
+        _renew(rw, provider)
+    assert _renewal_files(rw) == []
+
+
+def test_a_lock_that_cannot_be_taken_is_not_called_busy(
+    rw: RenewalWorld, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Only a lock another run holds is ``renewal_busy``; any other failure of the lock file is
+    ``renewal_lock_failed``, with TR/EN texts."""
+
+    def no_locks(handle: int) -> None:
+        raise OSError(errno.ENOLCK, "No locks available")
+
+    monkeypatch.setattr("arcilogger_core.renewal._lock", no_locks)
+    with pytest.raises(RenewalLockError) as failed, one_run(rw.layout):
+        pass
+    assert not isinstance(failed.value, RenewalBusyError)
+    assert failed.value.code == "renewal_lock_failed"
+    assert failed.value.message_tr.startswith("state/renewal.lock açılamadı")
+    assert failed.value.message_en.startswith("state/renewal.lock cannot be opened")
+    monkeypatch.undo()
+
+    real_open = os.open
+    lock_file = rw.layout.state / "renewal.lock"
+
+    def refuse(path: Any, *args: Any, **kwargs: Any) -> int:
+        if Path(path) == lock_file:
+            raise PermissionError(errno.EACCES, "Permission denied", str(path))
+        return real_open(path, *args, **kwargs)
+
+    monkeypatch.setattr("arcilogger_core.renewal.os.open", refuse)
+    with pytest.raises(RenewalLockError, match="Permission denied"):
+        _renew(rw, rw.legal_provider(FAR))
 
 
 def test_a_crash_between_stamp_and_rename_is_recovered(rw: RenewalWorld) -> None:

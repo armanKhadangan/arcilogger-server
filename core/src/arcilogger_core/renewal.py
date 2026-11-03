@@ -46,6 +46,7 @@ its token; leftovers of an interrupted run are tidied by the next one (contract 
 
 from __future__ import annotations
 
+import errno
 import hashlib
 import json
 import logging
@@ -344,6 +345,12 @@ NOTES: Final[dict[str, tuple[str, str]]] = {
         "The stored revocation lists cannot be read; the renewal stamps were verified without "
         "a revocation check.",
     ),
+    "crl_mismatched": (
+        "Saklanan iptal listelerinden bazıları dizindeki kayıtlarıyla eşleşmiyor ve kullanılmadı; "
+        "bir kişinin bakması gerekir: {files}",
+        "Some stored revocation lists do not match their index entries and were not used; a "
+        "person has to look: {files}",
+    ),
     "reports_unreadable": (
         "exports/reports klasörü okunamadı; saklanan raporların damgaları listelenmedi.",
         "The folder exports/reports cannot be read; the stamps of the stored reports are not "
@@ -352,9 +359,9 @@ NOTES: Final[dict[str, tuple[str, str]]] = {
 }
 
 
-def _note(code: str) -> RenewalNote:
+def _note(code: str, **values: str) -> RenewalNote:
     message_tr, message_en = NOTES[code]
-    return RenewalNote(code, message_tr, message_en)
+    return RenewalNote(code, message_tr.format(**values), message_en.format(**values))
 
 
 @dataclass(frozen=True)
@@ -562,14 +569,19 @@ class _Reader:
 
     def crls(self) -> Sequence[Crl] | None:
         """The stored revocation lists, read once; None (with a note) when they cannot be read:
-        the renewal tokens are then verified without them (contract question Q12)."""
+        the renewal tokens are then verified without them (contract question Q12). A list left
+        out because it does not match its index entry gets a note too (C14)."""
         if not self._crls_read:
             self._crls_read = True
             try:
-                self._crls = load_stored(self.layout)
+                stored = load_stored(self.layout)
             except CrlError as exc:
                 log.warning("renewal: revocation lists not checked: %s", exc)
                 self.notes.append(_note("crl_unreadable"))
+            else:
+                self._crls = stored
+                if stored.mismatched:  # C14: reported, not dropped silently
+                    self.notes.append(_note("crl_mismatched", files=", ".join(stored.mismatched)))
         return self._crls
 
     # -- reading ----------------------------------------------------------------------------------
@@ -817,6 +829,24 @@ class RenewalStampInvalidError(TsaResponseError):
         super().__init__(f"{self.message_tr} [{self.message_en}]")
 
 
+class RenewalLockError(RenewalError):
+    """``state/renewal.lock`` cannot be opened or locked for another reason than a run holding
+    it (no write right on ``state``, no lock support)."""
+
+    code = "renewal_lock_failed"
+
+    def __init__(self, exc: OSError) -> None:
+        super().__init__(
+            f"state/renewal.lock açılamadı veya kilitlenemedi: {exc}",
+            f"state/renewal.lock cannot be opened or locked: {exc}",
+        )
+
+
+#: What a lock held by another process raises (``flock``: EWOULDBLOCK/EAGAIN; ``msvcrt``:
+#: EACCES).
+_BUSY = frozenset({errno.EWOULDBLOCK, errno.EAGAIN, errno.EACCES})
+
+
 @dataclass(frozen=True)
 class RenewalRun:
     """What one run wrote: the record and its token (vault-relative), the paths of the tokens
@@ -833,14 +863,20 @@ class RenewalRun:
 
 @contextmanager
 def one_run(layout: Layout) -> Iterator[None]:
-    """Hold ``state/renewal.lock`` (:data:`LOCK_NAME`), or raise :class:`RenewalBusyError`."""
-    layout.state.mkdir(parents=True, exist_ok=True)
-    handle = os.open(layout.state / LOCK_NAME, os.O_RDWR | os.O_CREAT, 0o644)
+    """Hold ``state/renewal.lock`` (:data:`LOCK_NAME`); raise :class:`RenewalBusyError` while
+    another run holds it, :class:`RenewalLockError` when it cannot be opened or locked."""
+    try:
+        layout.state.mkdir(parents=True, exist_ok=True)
+        handle = os.open(layout.state / LOCK_NAME, os.O_RDWR | os.O_CREAT, 0o644)
+    except OSError as exc:
+        raise RenewalLockError(exc) from exc
     try:
         try:
             _lock(handle)
         except OSError as exc:
-            raise RenewalBusyError from exc
+            if exc.errno in _BUSY:
+                raise RenewalBusyError from exc
+            raise RenewalLockError(exc) from exc
         try:
             yield
         finally:
@@ -1013,7 +1049,7 @@ def _write(
         )
         if not check.ok:
             raise RenewalStampInvalidError(check.errors)
-    except (TsaError, OSError):
+    except BaseException:  # a provider's own error or an interrupt too: never a part left
         _remove(token_path_for(part), removed)
         _remove(part, removed)
         raise
@@ -1032,7 +1068,8 @@ def renew(
     An expired token is renewed too; it then becomes ``late``. The record's ``reason`` follows
     the provider's claim: ``due`` for a legal-grade provider, else ``test``, and a test record
     never counts (D5). Raises :class:`RenewalBusyError` while another run holds the lock,
-    :class:`RenewalNotNeeded` when nothing is due, and the provider's :class:`TsaError` (or
+    :class:`RenewalLockError` when the lock file cannot be used, :class:`RenewalNotNeeded` when
+    nothing is due, and the provider's :class:`TsaError` (or
     :class:`RenewalStampInvalidError`) when the stamp fails, leaving no record.
     """
     moment = require_aware(now or utc_now())

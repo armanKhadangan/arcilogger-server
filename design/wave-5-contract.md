@@ -1256,32 +1256,35 @@ All Wave 5 questions are answered (2026-11-02).
   as a token to renew: otherwise each test renewal would be renewed again, with nothing to
   protect. A record with `reason: "due"` that does not count (its root is not listed, its token
   does not verify, it was revoked) is still renewable.
-- **W5-A-10: what the report adds.** `RenewalReport` also names the tokens and records it
-  could not read (`unreadable`: a token that cannot be parsed or whose stamped file is missing, a
-  record that is not `arcilogger.renewal/1` or has no token, a token whose imprint algorithm is
-  not supported; none of them has a status), names in `mismatched` the tokens whose imprint is
-  not the file they stamp as it is today (a changed manifest, deletion record, report or renewal
-  record: no status, never renewed, so no renewal record ever lists the hash of a changed file
-  for the builder to ship beside it), and carries notes with TR/EN texts for what it could not check: unreadable stored revocation lists
-  (the renewal tokens are then verified without lists, Q12) and an `exports/reports` folder that
-  cannot be read (the `Renew` task may lack the right; the run goes on without report tokens).
-  A token that disappears during the scan (the retention job) is skipped. The certificate's
-  `notAfter` is read from each token, never from `state/seal`.
+- **W5-A-10: what the report adds.** `RenewalReport` also names the tokens and records it could
+  not read (`unreadable`: a token that cannot be parsed or whose stamped file is missing, a record
+  that is not `arcilogger.renewal/1` or has no token, a token whose imprint algorithm is not
+  supported; none of them has a status), names in `mismatched` the tokens whose imprint is not the
+  file they stamp as it is today (a changed manifest, deletion record, report or renewal record:
+  no status, never renewed, so no renewal record ever lists the hash of a changed file for the
+  builder to ship beside it), and carries notes with TR/EN texts for what it could not check:
+  unreadable stored revocation lists (the renewal tokens are then verified without lists, Q12),
+  stored lists left out because they do not match their index entry (`crl_mismatched`, naming the
+  files, C14) and an `exports/reports` folder that cannot be read (the `Renew` task may lack the
+  right; the run goes on without report tokens). A token that disappears during the scan (the
+  retention job) is skipped. The certificate's `notAfter` is read from each token, never from
+  `state/seal`.
 - **W5-A-3: the crash-safe write order.** §2.1.1 says the record "is written with
   `atomic_write_bytes`, stamped", and a failed run deletes it. `renew` writes it as
-  `<name>.json.part` (with `atomic_write_bytes`), stamps it to `<name>.json.part.zd` and
-  verifies that token against the pinned roots; only then is the token renamed to its final name,
-  then the record, and both are locked with `immutability.lock`, as `retention` does for a
-  deletion record. A failed stamp (`TsaError`, `OSError`) or a token that does not verify
-  (`RenewalStampInvalidError`, a `TsaResponseError`) removes both files and is raised. So a
-  record never exists under its final name without its token, and the builder (which ships
-  `renewals/*.json`) never ships one. Leftovers of an interrupted run are tidied by the next run
-  (`renewal.recover`): a part whose token (`.part.zd`, or the final `.zd` when the run stopped
-  between the renames) verifies against it is promoted; any other part, a token without its
-  record and an interrupted write's temporary file are removed, but never a locked file (a
-  locked token without its record means a completed record was removed: it stays for a person,
-  with a warning in the log; `recover` never unlocks). A record and its token under their final
-  names that are not both locked (`lock` failed after the renames) are locked by the next run,
-  as the seal locks every file of its day. One run at a time:
-  `state/renewal.lock` (never inside `vault/renewals`, where the standalone verifier's vault mode
-  would report an unknown file); a second run raises `RenewalBusyError`.
+  `<name>.json.part` (with `atomic_write_bytes`), stamps it to `<name>.json.part.zd` and verifies
+  that token against the pinned roots; only then is the token renamed to its final name, then the
+  record, and both are locked with `immutability.lock`, as `retention` does for a deletion record.
+  A failed stamp (`TsaError`, `OSError`, or anything else the provider raises) or a token that
+  does not verify (`RenewalStampInvalidError`, a `TsaResponseError`) removes both files and is
+  raised. So a record never exists under its final name without its token, and the builder (which
+  ships `renewals/*.json`) never ships one. Leftovers of an interrupted run are tidied by the next
+  run (`renewal.recover`): a part whose token (`.part.zd`, or the final `.zd` when the run stopped
+  between the renames) verifies against it is promoted; any other part, a token without its record
+  and an interrupted write's temporary file are removed, but never a locked file (a locked token
+  without its record means a completed record was removed: it stays for a person, with a warning
+  in the log; `recover` never unlocks). A record and its token under their final names that are
+  not both locked (`lock` failed after the renames) are locked by the next run, as the seal locks
+  every file of its day. One run at a time: `state/renewal.lock` (never inside `vault/renewals`,
+  where the standalone verifier's vault mode would report an unknown file); a second run raises
+  `RenewalBusyError` (`renewal_busy`), and a lock file that cannot be opened or locked for another
+  reason `RenewalLockError` (`renewal_lock_failed`), both with TR/EN texts.
