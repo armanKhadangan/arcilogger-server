@@ -24,10 +24,17 @@
   `db.retention_days`, varsayılan 30, en az 7; revizyon `0021_db_window`'dan önce 400). Worker
   işi `db.window` her gün 04:00'ten sonra daha eski günleri bölüm bölüm (TimescaleDB'de parça
   parça) düşürür; henüz mühürlenmemiş bir gün (satırlarının uzandığı önceki iki günle birlikte)
-  ve etkin bir arşiv yüklemesinin günleri hiçbir zaman düşürülmez. Daha eski bir gün
+  ve etkin bir arşiv yüklemesinin günleri hiçbir zaman düşürülmez. Bir şey düşüren her adım
+  denetim kaydına bir `db.window` girdisi yazar: silmenin kaydı budur (veritabanındaki satırlar
+  çalışma kopyasıdır, mühürlü asılları kasada kalır). Daha eski bir gün
   gerektiğinde mühürlü arşivden **yeniden yüklenir** ("arşivden yeniden yükle", tablo
   `archive_reloads`; satırları yalnızca ArciIngest yazar) ve `db.reload_keep_days` (varsayılan
-  7) gün veritabanında kalır. Kullanım özetleri (`usage_*` tabloları, `domain_categories`) ise
+  7) gün veritabanında kalır. Bir 5651 sorgusu sorulan andan **8 gün** geriye okur (varsayılan
+  ayarlarla: 7 günlük DHCP kira geriye bakışı, en uzun oturum 1 gün, tolerans ve log payı birer
+  dakika; `lookup_days`), bu yüzden 30 günlük pencereyle yaklaşık **22 günden eski** bir anın
+  sorgusu yeniden yükleme ister. Sorguların 30 gün geriye yeniden yüklemesiz çalışmasını isteyen
+  yönetici `db.retention_days` değerini **38** yapabilir (30 + 8; veritabanı da o kadar büyür).
+  Kullanım özetleri (`usage_*` tabloları, `domain_categories`) ise
   her gün 03:30'dan sonra worker işi `usage.retention` ile silinir:
   `usage.retention_days` (varsayılan 400) günden eski olanlar; biten yeniden hesaplama istekleri
   (`usage_rebuilds`) 90 gün sonra. Arşiv en az 730 gün (varsayılan 760 gün) tutar; arşiv imhası
@@ -87,7 +94,14 @@ revision `0021_db_window`), against at least 730 days (default 760) in the vault
 a day not sealed yet (with the two days before it, which its rows reach into) and the days of an
 active archive reload are never dropped. An older day
 comes back from the sealed vault on request ("arşivden yeniden yükle", `archive_reloads`; only
-ArciIngest writes its rows) and stays `db.reload_keep_days` (default 7) days. The usage rollups
+ArciIngest writes its rows) and stays `db.reload_keep_days` (default 7) days. Every step of the job
+that drops something writes a `db.window` audit entry, the record of the deletion (the rows are
+working copies; their sealed originals stay in the vault). A 5651 lookup reads **8 days** back
+from the asked moment (with the default settings: the 7-day DHCP lease look-back, the 1-day
+longest session, a minute each of tolerance and log slack; `lookup_days`), so with the 30-day
+window a lookup of a moment more than about **22 days** old needs a reload; an administrator who
+wants 30 days of lookups without a reload can set `db.retention_days` to **38** (30 + 8; the
+database grows accordingly). The usage rollups
 (`usage_*` tables, `domain_categories`) are deleted daily after 03:30 by the worker job `usage.retention` once older than
 `usage.retention_days` (default 400), finished rebuild requests (`usage_rebuilds`) after 90 days
 (see "Retention"). The licence tables (`license_*`, revision `0014_license`) are append-only and
@@ -391,19 +405,35 @@ PostgreSQL 16.
     first seal), nothing is dropped. A day that stays unsealed (sealing stopped) holds the cutoff,
     and the database grows past the window until it is sealed (`R20-seal` reports that). So does
     a reload that stays `queued` or `loading` (nothing is dropped because of its age; the run
-    names those older than a day in `details.reloads_waiting`). `maintain_window` refuses a
-    cutoff less than 7 days before today.
+    names those older than a day in `details.reloads_waiting`). One that made no progress since
+    the previous successful run (the same status and `bytes_done` as in that run's
+    `details.reload_progress`) raises `R20-db-window` (medium, key `R20-db-window:reload-<id>`,
+    naming the reload and its days); the first run that sees it move on or end resolves the
+    alert. `maintain_window` refuses a cutoff less than 7 days before today.
   - **The run** records `today`, `cutoff`, `applied` (the cutoff the last step reached), `done`,
     `steps`, `limited_by` (`window`, also on a tie, `unsealed`, `manifest`, `reload` or
     `nothing_sealed`), each limit (`window_from`, `unsealed_from`, `reload_from`,
-    `unreadable_manifest`), `reloads_waiting` and the counts of all steps (`expired`, `created`,
-    `remaining`, `dropped`, `purged`, `counts_deleted`, `clock_samples_deleted`) in
-    `job_runs.details`; the applied cutoff itself is in the status row `db.window_dropped_before`,
-    written with each drop. No audit entry and no deletion record ("imha tutanağı") are written. A
-    failed step drops nothing (its transaction is rolled back, expired reloads included; earlier
-    steps of the run stay, each complete and recorded), opens `R20-db-window` (medium, key
-    `R20-db-window:none`) and the worker retries the run; the next successful run resolves the
-    alert.
+    `unreadable_manifest`), `reloads_waiting`, `reload_progress`, `reloads_stuck`, the counts of
+    all steps (`expired`, `created`, `remaining`, `dropped`, `purged`, `counts_deleted`,
+    `clock_samples_deleted`) and `audit_ids` in `job_runs.details`; the applied cutoff itself is
+    in the status row `db.window_dropped_before`, written with each drop.
+  - **The record of the deletion** is the audit log (actor `system`): every step that dropped
+    something writes one `db.window` entry (target `database`) in its own transaction, so no drop
+    is committed without it: the step's cutoff, the names of the partitions or chunks it dropped
+    (at most 100, their count complete) and the exact counts of the rows that went row by row
+    (the default partitions' rows, `search_counts`, clock samples); the rows of a dropped
+    partition or chunk are not counted (that would read the whole day). The rows in the database
+    are working copies: the sealed original stays in the vault for at least 730 days and comes
+    back on request. No separate deletion record ("imha tutanağı") is written; whether one is
+    needed is left to legal review ([retention policy draft](legal/saklama-imha-politikasi-taslak.md)).
+    The first run after revision `0021_db_window` also turns the revision's change of a stored
+    `db.retention_days` (400 → 30, below 7 → 7; the status row `db.retention_days_migration`)
+    into one `settings.change` entry with the old and the new value, before its first step: no
+    revision writes audit entries.
+  - **A failed step** drops nothing (its transaction is rolled back, expired reloads included;
+    earlier steps of the run stay, each complete and recorded), opens `R20-db-window`
+    (medium, key `R20-db-window:none`) and the worker retries the run; the next successful run
+    resolves the alert.
   - **The change-over** from monthly partitions: the monthly partitions of earlier versions are
     never split. Revision `0021_db_window` drops the empty ones of the months after the upgrade,
     so the daily partitions start where the current month ends (its last UTC day's three hours
@@ -419,8 +449,7 @@ PostgreSQL 16.
     a lookup or search that needs a day the database no longer holds asks for it instead of
     answering without it. A 5651 lookup reads the asked day − 1 to + 1 plus the widest look-back
     of its steps (`arcilogger_worker.lookup.days.lookup_days`; with the default settings the day
-    − 8 to the day + 1; so with the 30-day window a lookup of a moment more than about 22 days
-    old needs a reload once the job has run); when any of those days is gone, `POST
+    − 8 to the day + 1: the effective reach below); when any of those days is gone, `POST
     /lookup/5651` answers **409 `archive_reload_required`** (`details`: `first_day`,
     `last_day`, `bytes_total`, `estimated_bytes`) and stores no lookup: it never answers "not
     found" for a day it could not see. A search whose range starts before the window answers
@@ -434,6 +463,24 @@ PostgreSQL 16.
     holding the partition maintenance lock shared, so neither the job's drop nor a reload's
     start comes between. Evidence packages and official reports read the vault and are
     unchanged.
+    - **Effective reach of a lookup without a reload.** The earliest instant a lookup reads is
+      `T − t − S − LOG_SLACK − L` (`lookup.days.lookup_range`): the tolerance `t`
+      (`lookup.tolerance_seconds`, 60 s), the longest session `S` (`lookup.max_session_seconds`,
+      1 day), the slack of the web/app/DNS logs (60 s) and the DHCP look-back `L`
+      (`dhcp_lookback`: the longest configured lease timeout or ARP grace, at least FortiOS's
+      default lease of 604,800 s, 7 days). With the defaults that is 8 days and 2 minutes, so the
+      first day read is `T`'s day − 8 (− 9 for a moment in the first two minutes after midnight).
+      The window holds the site days from today − `db.retention_days` to today, so a lookup needs
+      no reload while `T`'s day − 8 ≥ today − `db.retention_days`: with the default 30, for a
+      moment at most **22 days** old (21 in the first two minutes after a midnight). A lookup
+      older than about 22 days needs a reload. An administrator who wants **30 days** of lookups
+      without a reload sets `db.retention_days` to **38** (30 + 8): the database then holds
+      39 site days, about 62 GB at 1 M lines a day instead of 49.6 GB ("Size" below). A longer
+      lease time in the DHCP settings or a longer `lookup.max_session_seconds` takes as much off
+      the reach. Both stay as they are (manager answer 3 on #121): the 30-day window is the
+      owner's decision, and the look-back is needed for correct answers. Until the day's run of
+      the job (after 04:00) the database holds one day more; a cutoff held by an unsealed day or
+      a reload keeps more, never less.
     - `POST /archive-reloads` (`{reason, first_day, last_day, lookup_id?}`, 202) queues a request;
       `GET /archive-reloads/{id}` and `GET /archive-reloads` show it (administrators see every
       request, other users their own). A request of days the window holds whole is refused (422
@@ -452,21 +499,30 @@ PostgreSQL 16.
       licence gate (5651 Temel).
     - **Audit first:** the audit entry `archive.reload` (target `archive_reload:<id>`; who, the
       days, the reason, the lookup id, `bytes_total` and the estimate) is written **before** the
-      `queued` row, in the same transaction; a refused request is not queued. Reading the
+      `queued` row, in the same transaction. A refused request (any 422: the refusals above or
+      `validation_error`) is not queued and writes no audit entry: nothing is loaded and no data
+      comes back (W5-G-13). Reading the
       reloaded rows is audited like every lookup and search.
     - **Loading:** ArciIngest, the only writer of log rows, takes one request at a time (the
       others stay `queued`; after a restart the `loading` one is resumed), in a transaction that
       holds the partition maintenance lock, so the job either sees it as active or has finished
       its drop first. It loads the raw days `first_day − 2` … `last_day + 2` (the margin: a line
       received after midnight with a device time before it), every day of the request sealed or
-      skipped, a margin day when it is sealed. For each `(source, day)` it first checks the sealed
-      file against its manifest (size and SHA-256, read afresh): a missing or changed file fails
-      the request before anything of it is deleted. Then it deletes that file's rows (all 16
-      tables; on plain PostgreSQL also its rows outside its time window in the default
-      partitions), parse failures, `search_counts` and clock samples and resets its
-      `ingest_offsets` row in one transaction, then loads the sealed file with the normal
+      skipped, a margin day when it is sealed. A file whose rows of the request's days are in the
+      database already (its offset finished at `bytes_uncompressed`, nothing dropped from those
+      days since: `db.window_dropped_before`, or another `ready` reload holding them) is left
+      alone, so a second user's request of loaded days becomes `ready` with its own record and
+      no load. For each other `(source, day)` it first checks the sealed file against its
+      manifest (size and SHA-256, read afresh): a missing or changed file fails the request
+      before anything of it is deleted. Then it deletes that file's rows by `(source, raw_day)`
+      wherever their device times lie (all 16 tables): within its time window, and around every
+      minute in which a line of the file was received outside its day (a damaged or
+      hand-restored spool line; ± 1 day 1 h, read from the sealed file before the reset), on plain
+      PostgreSQL also in the default partitions; its parse failures, `search_counts` and clock
+      samples (the file's part of the samples of those other minutes); and resets its
+      `ingest_offsets` row, in one transaction; then it loads the sealed file with the normal
       reader, after every newer day (live data first). A reload run twice gives the same rows and
-      counts. `bytes_done` is Σ committed offset of `bytes_total` (Σ `bytes_uncompressed` of
+      counts, on both back ends. `bytes_done` is Σ committed offset of `bytes_total` (Σ `bytes_uncompressed` of
       those files). `ready` sets `ready_at` and `expires_at` = `ready_at` +
       `db.reload_keep_days` (default 7, 1–30); `failed` carries `error_code`
       `archive_day_not_in_vault` (a day no longer sealed) or `archive_file_unreadable` (a sealed
@@ -474,8 +530,10 @@ PostgreSQL 16.
       next `db.window` run marks the request `expired` and drops its days again. Row ids change
       on a reload; the raw-line references stay.
     - **KVKK:** a reload brings personal data (addresses, MACs, user names in the logs) back into
-      the database for `db.reload_keep_days` days after it is ready. The period and whether the
-      drop needs a deletion record are open decisions of the [retention policy draft](legal/saklama-imha-politikasi-taslak.md); legal review is
+      the database for `db.reload_keep_days` days after it is ready; the drop that follows is
+      recorded like every other (`db.window` audit entry). The period, and whether the drops need
+      a deletion record ("imha tutanağı") as well, are open decisions of the
+      [retention policy draft](legal/saklama-imha-politikasi-taslak.md); legal review is
       recommended.
   - **Size** (G5). The estimate of a reload is Σ `bytes_uncompressed` × **2.6 database bytes per
     raw byte** (`arcilogger_api.archive.service.DB_BYTES_PER_RAW_BYTE`). Measured 2026-11-02 on

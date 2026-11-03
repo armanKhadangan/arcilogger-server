@@ -356,10 +356,12 @@ def test_lookup_is_fast_on_continuous_data(db_engine: Engine, db_session: Sessio
     _check_answers_and_budget(timings, lookups)
     # Every plan reads through an index with the bounded time range (no sequential scan of a
     # partition that holds data: the daily partitions beside the loaded days, Wave 5 G2, hold
-    # none or a few rows in one page, which the planner rightly reads whole).
+    # none or a few rows in a page or two, which the planner rightly reads whole), and reads a
+    # partition with data that way, so the first check cannot pass on empty partitions alone.
     for name, plan in plans.items():
         joined = "\n".join(plan)
         assert _seq_scans_of_data(db_session, plan) == [], name
+        assert _partitions_read_by_index(db_session, plan), name
         assert "Index" in joined, name
         assert '"time" >=' in joined, name
         assert '"time" <=' in joined, name
@@ -368,26 +370,62 @@ def test_lookup_is_fast_on_continuous_data(db_engine: Engine, db_session: Sessio
 
 
 _SEQ_SCAN = re.compile(r"Seq Scan on (?P<table>[a-z_0-9]+)")
-#: A partition this small (8 kB pages) is read whole by any plan: no data to speak of.
+#: A read through an index: an index scan, or the heap scan of a bitmap index scan.
+_INDEX_READ = re.compile(
+    r"(?:Index (?:Only )?Scan(?: Backward)? using \S+|Bitmap Heap Scan) on (?P<table>[a-z_0-9]+)"
+)
+#: A partition this small (8 kB pages, ``pg_class.relpages``) is read whole by any plan: no data
+#: to speak of.
 SMALL_PAGES = 10
+
+
+def _pages(session: Session, table: str) -> int:
+    """``table``'s pages as the planner knows them (``pg_class.relpages``), which must be current:
+    the fixtures write their rows, then run ``VACUUM (ANALYZE)``, so the pages it recorded are the
+    relation's pages now. A relation written since, or holding rows never analyzed (its
+    ``relpages`` 0), fails here instead of passing for an empty one."""
+    relpages, now = session.execute(
+        text(
+            "SELECT relpages, pg_relation_size(oid) / current_setting('block_size')::integer "
+            "FROM pg_class WHERE relname = :table"
+        ),
+        {"table": table},
+    ).one()
+    assert relpages == now, (table, relpages, now)
+    return int(relpages)
 
 
 def _seq_scans_of_data(
     session: Session, plan: Sequence[str], *, pages: int = SMALL_PAGES
 ) -> list[str]:
-    """The plan's sequential scans of tables larger than ``pages`` (:data:`SMALL_PAGES`; 0: of
-    any table that is not empty)."""
+    """The plan's sequential scans of tables larger than ``pages`` (:func:`_pages`;
+    :data:`SMALL_PAGES`; 0: of any table that is not empty)."""
     found = []
     for line in plan:
         match = _SEQ_SCAN.search(line)
+        if match is not None and _pages(session, match.group("table")) > pages:
+            found.append(line.strip())
+    return found
+
+
+def _partitions_read_by_index(session: Session, plan: Sequence[str]) -> list[str]:
+    """The partitions or chunks (children of a partitioned table or a hypertable) larger than
+    :data:`SMALL_PAGES` (:func:`_pages`) that the plan reads through an index."""
+    found = []
+    for line in plan:
+        match = _INDEX_READ.search(line)
         if match is None:
             continue
-        size = session.scalar(
-            text("SELECT pg_relation_size(CAST(:table AS regclass))"),
-            {"table": match.group("table")},
+        table = match.group("table")
+        child = session.scalar(
+            text(
+                "SELECT EXISTS (SELECT 1 FROM pg_inherits AS i JOIN pg_class AS c "
+                "ON c.oid = i.inhrelid WHERE c.relname = :table)"
+            ),
+            {"table": table},
         )
-        if int(size or 0) > pages * 8192:
-            found.append(line.strip())
+        if child and _pages(session, table) > SMALL_PAGES:
+            found.append(table)
     return found
 
 
@@ -1707,6 +1745,7 @@ def test_the_d15_carried_check_is_fast(
     if not carried:
         assert len(statements) == len(steps), case
     condition = "transip = CAST(:address AS inet)"
+    by_index: list[str] = []
     for index, (sql, parameters) in enumerate(statements):
         moments, (first, last, start_bound), step_port = steps[index]
         with traffic_site.connect() as connection:
@@ -1718,12 +1757,13 @@ def test_the_d15_carried_check_is_fast(
             )
         print("\n".join(plan))
         # The plans first (the one ``EXISTS`` fails here): no step scans a partition, but for
-        # the empty daily partition of a day ahead (0 bytes, plain PostgreSQL; read whole, as
+        # the empty daily partition of a day ahead (0 pages, plain PostgreSQL; read whole, as
         # the planner rightly does with nothing to read), and the first one, the window in time
         # order, reads its rows of every address at most (two minutes of the site's rows),
         # whichever index the planner takes.
         with Session(traffic_site) as session:
             assert _seq_scans_of_data(session, plan, pages=0) == [], case
+            by_index += _partitions_read_by_index(session, plan)
         scans, removed = _plan_reads(plan)
         # A day no chunk holds (TimescaleDB creates chunks for written rows only) is answered
         # without reading anything, and so is a day whose daily partition is empty.
@@ -1752,6 +1792,8 @@ def test_the_d15_carried_check_is_fast(
             assert removed <= max(rows // 10, 100), (case, index, removed, rows)
         else:
             assert removed == rows, (case, index, removed, rows)
+    # The steps read a partition with data through an index: not only empty ones whole.
+    assert by_index, case
     assert timed.seconds < 0.2, f"{case}: the D15 carried check took {timed.seconds:.3f} s"
     assert seconds < LIMIT_SECONDS, f"{case}: the lookup took {seconds:.3f} s"
 

@@ -958,13 +958,33 @@ All Wave 5 questions are answered (2026-11-02).
   manifest keeps the existing notices.
 - **W5-G-4: `POST /archive-reloads` behaviour.** Complete in-window days are refused with 422
   `validation_error`; when nothing needs a new load, the user's own active request is returned
-  (audited as `existing`); a skipped (empty) day passes with nothing to load.
+  (audited as `existing`); a skipped (empty) day passes with nothing to load. At claim time a
+  file whose rows of the request's days are in the database already (its offset finished at
+  `bytes_uncompressed`, nothing dropped from those days since) is neither reset nor loaded
+  again: another user's request of loaded days becomes `ready` with its own record and its own
+  audit entry, and one load serves both (manager answer 6 on #121).
 - **W5-G-5: failure codes of a reload** (`error_code`): `archive_day_not_in_vault` (retention
   removed a day after queueing) and the new `archive_file_unreadable` (a sealed file is checked by
   size and SHA-256 when the request is claimed, and kept failing to read). Their TR/EN texts are
-  `archive.service.FAILURE_MESSAGES`.
+  `archive.service.FAILURE_MESSAGES`. A file that changes or becomes unreadable while it loads
+  fails the request with `archive_file_unreadable`; its offset stays short of
+  `bytes_uncompressed`, so its day never counts as loaded and the lookup keeps answering 409 for
+  it, never a partial answer (manager answer 9).
 - **W5-G-6: the reset deletes more than G4 names:** also the file's `parse_failures` and clock
-  samples, and on plain PostgreSQL its out-of-window rows in the default partitions.
+  samples; and it deletes the file's rows by `(source, raw_day)` wherever their device times lie
+  (manager answer 10). No index leads with `raw_day`, so each delete is bounded in device time
+  for partition and chunk pruning, only where ingest guarantees the rows: the file's time window
+  (`stream_window`: every line received on its day), and around each minute in which a line of
+  the file was received outside its day (± 1 day 1 h, a device time further than a day from the
+  receive time not being used). Those minutes are read from the sealed file at its reset (the
+  bytes that were loaded, checked against the manifest at the claim), not from `search_counts`,
+  so a file recounted from its rows (`search-counts rebuild`, `search.counts_backfill`: the rows
+  within its window only) or loaded before the counts existed is reset as completely; on plain
+  PostgreSQL the default partitions are swept as well. The clock samples of those lines (at
+  minutes of other days, shared with those days' own lines) lose the file's part instead of
+  being deleted; a sample of another file's line received in the reset file's day goes with
+  that day's minutes (derived data, `clocksamples.rebuild`). A reload run twice leaves every row
+  and every sample of its files once, on both back ends.
 - **W5-G-7: bounded steps (G2, G3).** At most 16 days of partitions are created per call (about
   600 partitions exhaust the default lock table); the job drops in bounded steps of 16 created
   plus dropped days per transaction, up to 64 steps a run; `maintain_window` refuses a cutoff
@@ -974,7 +994,10 @@ All Wave 5 questions are answered (2026-11-02).
 - **W5-G-9: `SearchPage.archived` is optional** in the schema (`archived?:` in the web type); the
   API always sends it.
 - **W5-G-10: G1 conversion.** A stored 400 becomes 30 whoever wrote it; an administrator's row
-  then carries `:migration`, with no audit entry.
+  then carries `:migration`. The revision writes no audit entry itself (no revision does): a
+  change leaves the status row `db.retention_days_migration` (the old and the new value, who had
+  set the old one), which the first `db.window` run turns into one `settings.change` audit entry
+  (actor `system`) before it drops anything (manager answer 4).
 - **W5-G-11: the factor (G5)** is `DB_BYTES_PER_RAW_BYTE = 2.6`, rounded up from 2.40 to 2.51
   measured on plain PostgreSQL 16 with daily partitions through the real ingest
   (`docs/DATA-MODEL.md`).
@@ -998,7 +1021,44 @@ All Wave 5 questions are answered (2026-11-02).
   day, and those rows in the default partition. While a monthly partition is in the window, a
   lookup step over the UTC day it ends in still reads two partitions (up to one month after the
   upgrade). The cutoff, the margins (W5-G-1, W5-G-2) and the "gone" rule (W5-G-3) are
-  unchanged: they are by site day and instant. The D15 test of
-  `worker/tests/test_lookup_performance.py` (not W5-G's file, for the manager) accepts a
-  sequential scan of an empty partition (0 bytes: a future day's, on TimescaleDB no chunk at
-  all) where it accepted none.
+  unchanged: they are by site day and instant. The two plan checks of
+  `worker/tests/test_lookup_performance.py` (not W5-G's file; accepted by the manager on #121)
+  accept a sequential scan of a small partition where they accepted none: the continuous-data
+  test one of at most 10 pages, the D15 test an empty one (0 pages: a future day's; on
+  TimescaleDB no chunk at all), by the relation's `pg_class.relpages`, checked to be current
+  (equal to its size after the fixture's `VACUUM (ANALYZE)`). Each also requires a partition or
+  chunk of more than 10 pages read through an index (every plan of the continuous-data test, at
+  least one step of each D15 case), so neither check can pass on empty partitions alone.
+- **W5-G-13: a refused reload writes no audit entry** (manager answer 4 on #121). G6's "every
+  request is written to the audit log before it is queued" applies to the accepted requests:
+  queued, or answered with the user's active request (`existing`, W5-G-4). A refusal (422:
+  `archive_reload_too_large`, `archive_day_not_in_vault`, `archive_reload_disk_low`, or
+  `validation_error`) queues nothing and brings no data back, so it writes none.
+- **W5-G-14: the job's audit entries and the stuck-reload alert (G3; manager answers 4 and 5).**
+  Answer 4 asks for one audit entry per run that drops something; it is one per *step* that
+  drops something, written in that step's transaction, so that no drop is ever committed
+  without its entry (an entry per run would be written after steps already committed). A daily
+  run is one step, so one entry; a run that works off a backlog (the first run after the
+  upgrade: about 24 steps) writes one per step. Every step of `db.window` that drops something
+  writes one `db.window` audit entry (actor `system`, target `database`, in the step's
+  transaction): its cutoff, the partitions or chunks dropped (names, at
+  most 100, and their count) and the exact counts of the rows deleted row by row (default
+  partitions, `search_counts`, clock samples; a dropped partition's or chunk's rows are not
+  counted). It is the record of the deletion; whether a deletion record ("imha tutanağı") is
+  needed as well is left to legal review (the retention policy draft). A reload in `queued` or
+  `loading` without progress since the previous successful run (the same status and
+  `bytes_done`) raises `R20-db-window` (medium) with the key `R20-db-window:reload-<id>` beside
+  G3's failure key, naming the reload and its days; nothing fails it, and the cutoff keeps
+  waiting. A `queued` reload waiting behind a `loading` one that progresses also counts as
+  without progress (answer 5 read as written; asked on #121). A failure after the steps (the
+  stuck-reload report, resolving the failure alert) fails the run, which the worker retries,
+  but opens no alert: the steps' drops are done and audited.
+- **W5-G-15: the downgrade of `0021` checks its locks first** (manager answer 8). It merges the
+  daily partitions in one transaction and holds a lock on every object of them until its commit
+  (each partition with its indexes, TOAST table, row types, constraints and defaults): the
+  whole window and the days ahead need about 6,700 lock-table entries, more than PostgreSQL's
+  default 6,400 (`max_locks_per_transaction` 64 × `max_connections` 100). It estimates them first
+  and refuses with a TR/EN message, changing nothing, when they can never fit; `-Rollback`
+  (#122) has to raise `max_locks_per_transaction` (and restart PostgreSQL) before it, or the
+  downgrade has to be split across transactions (asked on #121). It does not write an audit
+  entry for `db.retention_days` going back from 30 to 400 (no revision writes audit entries).
