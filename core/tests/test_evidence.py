@@ -617,8 +617,8 @@ def test_guides_name_the_files_and_make_no_compliance_claim(ec_built: Built) -> 
     assert "Yöntem C verify.py'ye dayanmaz" in text
     assert ec_built.info.verifier_sha256 in english.decode("utf-8-sig")
     # the audit log is left out on purpose, and both guides say so
-    assert "denetim kaydı (audit.jsonl.gz) bilinçli olarak pakete" in text
-    assert "audit.jsonl.gz) is left out on purpose" in english.decode("utf-8-sig")
+    assert "denetim kaydı (audit.jsonl) bilinçli olarak pakete" in text
+    assert "audit log (audit.jsonl) is left out on purpose" in english.decode("utf-8-sig")
 
     for day in DAYS:
         assert f"sha256sum vault/{day:%Y/%m/%d}/*.gz" in text  # C2
@@ -701,7 +701,7 @@ def test_the_audit_log_goes_in_only_when_asked_for(ec_built: Built, tmp_path: Pa
     assert index["days"][0]["excluded"] == []
     assert {e["role"] for e in index["files"] if e["path"].endswith("audit.jsonl.gz")} == {"audit"}
     text = (folder / "DOGRULAMA.txt").read_text(encoding="utf-8-sig")
-    assert "audit.jsonl.gz           ARCILOGGER'ın o günkü denetim kaydı" in text
+    assert "audit.jsonl.xz/.gz       ARCILOGGER'ın o günkü denetim kaydı" in text
     assert "bilinçli olarak pakete" not in text
     code, report = isolated(folder)
     assert code == 0, codes(report)

@@ -5,7 +5,9 @@ A reference ``(source, day, line[, offset])`` names line ``line`` (1-based) of t
 
 * ``spool/<source>/<day>.log`` while the day is not sealed (today, and yesterday until the
   nightly seal), then
-* ``vault/<Y>/<M>/<D>/<source>.log.gz`` — the same bytes, gzip-compressed by the sealer.
+* ``vault/<Y>/<M>/<D>/<source>.log`` plus the suffix of the sealed format — the same bytes,
+  compressed by the sealer: seekable xz from Wave 5 on, gzip for every day sealed before
+  (:mod:`arcilogger_core.sealedfile`).
 
 **The line number is always verified**: the line feeds before the line are counted (C-speed
 ``bytes.count`` on 1 MiB chunks); a given ``offset`` must match the offset found, otherwise the
@@ -18,13 +20,20 @@ Costs:
   dropped); every later lookup in that file seeks to the nearest checkpoint and reads at most a
   few MiB. Spool files only grow while their day is open, so checkpoints stay valid; a file that
   was replaced (other device/inode) or shrank starts a new index.
-* **vault** (sealed ``.log.gz``): gzip cannot seek, so the first view in a file decompresses it
-  from its start up to the line (measured: about 2 s per 500 MB of uncompressed log, so up to
-  ~20 s for a late line of a 5 GB day) and leaves a copy of the decompressor state about every
-  64 MiB in :data:`VAULT_INDEX` (8 files, least recently used dropped, ~40 KB per checkpoint);
-  every later view in that file resumes at the nearest checkpoint and decompresses at most
-  64 MiB (~0.3 s). Views of one file wait for each other (so the index is built once), and at
-  most :data:`VAULT_SCANS` sealed files are decompressed at the same time.
+* **vault, xz** (Wave 5): a reference with its ``offset`` is shown from the one 16 MiB stream that
+  holds the offset (the xz index in the stream footers says which), so a view costs one stream
+  (~0.2 s) wherever the line is. The offset must start a line. The line number is checked
+  against the line feeds before that stream when an earlier view of the file counted them
+  (:attr:`_GzEntry.xz_lines`); before that, a reference with an offset is checked by its offset
+  only (counting the line feeds before it would mean decompressing the whole file). A reference
+  without an offset is found by counting from the start, which also fills the counts.
+* **vault, gzip** (days sealed before Wave 5): gzip cannot seek, so the first view in a file
+  decompresses it from its start up to the line (measured: about 2 s per 500 MB of uncompressed
+  log, so up to ~20 s for a late line of a 5 GB day) and leaves a copy of the decompressor state
+  about every 64 MiB in :data:`VAULT_INDEX` (8 files, least recently used dropped, ~40 KB per
+  checkpoint); every later view in that file resumes at the nearest checkpoint and decompresses
+  at most 64 MiB (~0.3 s). Views of one file wait for each other (so the index is built once),
+  and at most :data:`VAULT_SCANS` sealed files are decompressed at the same time.
 
 Several lines of one file are found in one pass (:func:`scan_file`), so a report that cites
 hundreds of lines reads each file once.
@@ -49,6 +58,7 @@ from __future__ import annotations
 
 import bisect
 import hashlib
+import lzma
 import stat
 import threading
 import unicodedata
@@ -60,6 +70,7 @@ from datetime import date
 from pathlib import Path
 from typing import Any, BinaryIO, Final, Literal
 
+from arcilogger_core import sealedfile
 from arcilogger_core.evidence.model import SOURCE_NAME
 from arcilogger_core.layout import Layout
 from arcilogger_core.rawlog import RawLineError, RawRecord, parse_line
@@ -197,12 +208,18 @@ def locate(layout: Layout, source: str, day: date) -> tuple[Origin, Path] | None
             return "spool", spool
     except OSError as exc:
         failure = os_error(spool, exc)
-    vault = layout.vault_day(day) / f"{source}.log.gz"
     try:
-        if regular_file(vault) and _inside(vault, layout.vault):
+        vault = sealedfile.find_log(layout, day, source)
+    except sealedfile.SealedFileError as exc:
+        raise RawReferenceError(exc.code, str(exc)) from exc
+    except OSError as exc:
+        vault = None
+        failure = failure or os_error(layout.vault_day(day) / f"{source}.log", exc)
+    try:
+        if vault is not None and regular_file(vault) and _inside(vault, layout.vault):
             return "vault", vault
     except OSError as exc:
-        failure = failure or os_error(vault, exc)
+        failure = failure or os_error(vault or layout.vault_day(day), exc)
     if failure is not None:
         raise failure
     return None
@@ -390,6 +407,8 @@ class _GzEntry:
     #: Held while the file is scanned: views of one file wait for each other (and then resume
     #: from the checkpoints the first one left) instead of all decompressing from the start.
     lock: threading.Lock = field(default_factory=threading.Lock)
+    #: xz only: line feeds before each stream (by stream number), as far as a view counted them.
+    xz_lines: dict[int, int] = field(default_factory=dict)
 
     def floor(self, line: int) -> GzPoint | None:
         index = bisect.bisect_right(self.points, line, key=lambda point: point.line) - 1
@@ -513,13 +532,14 @@ def scan_file(
                     yield chunk
 
             raw = compressed()
+            xz = sealedfile.format_of(path) == "xz"
             try:
-                for data in gzip_chunks(raw):
+                for data in sealedfile.xz_decompress(raw) if xz else gzip_chunks(raw):
                     finder.feed(data)
                     if finder.done:
                         break
-            except zlib.error as exc:
-                error = f"{path.name}: damaged gzip data ({exc})"
+            except (zlib.error, lzma.LZMAError, EOFError) as exc:
+                error = f"{path.name}: damaged {'xz' if xz else 'gzip'} data ({exc})"
             if hasher is not None:
                 for _ in raw:  # hash the rest without decompressing it
                     pass
@@ -553,6 +573,100 @@ def _find_in_spool(path: Path, line: int) -> tuple[int, bytes] | None:
                 break
     SPOOL_INDEX.record(path, identity, finder.checkpoints)
     return finder.found.get(line)
+
+
+def _xz_damage(path: Path, exc: Exception) -> str:
+    return f"{path.name}: damaged xz data ({exc})"
+
+
+def _find_in_xz(
+    path: Path, line: int, offset: int | None
+) -> tuple[tuple[int, bytes] | None, str | None]:
+    """Line ``line`` of a sealed xz file (``(found, damage)`` as :func:`_find_in_vault`).
+
+    With ``offset``: decompress from the stream that holds it, take the line that starts there
+    and check its number when the line feeds before that stream are known. Without: count from
+    the first stream, noting the line feeds before each stream on the way."""
+    stat = path.stat()
+    entry = VAULT_INDEX.entry(path, (stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns))
+    with VAULT_INDEX.scans, entry.lock, open_shared(path) as handle:
+        try:
+            streams = sealedfile.xz_streams(path, handle)
+            if offset is None:
+                return _scan_xz(handle, streams, entry, line), None
+            return _line_at(path, handle, streams, entry, line, offset), None
+        except (sealedfile.SealedFileError, lzma.LZMAError, EOFError) as exc:
+            return None, _xz_damage(path, exc)
+
+
+def _scan_xz(
+    handle: BinaryIO, streams: list[sealedfile.XzStream], entry: _GzEntry, line: int
+) -> tuple[int, bytes] | None:
+    finder = LineFinder([line])
+    for number, stream in enumerate(streams):
+        entry.xz_lines.setdefault(number, finder.lines)
+        for data in sealedfile.xz_stream_chunks(handle, stream):
+            finder.feed(data)
+            if finder.done:
+                return finder.found.get(line)
+    return finder.found.get(line)
+
+
+def _line_at(
+    path: Path,
+    handle: BinaryIO,
+    streams: list[sealedfile.XzStream],
+    entry: _GzEntry,
+    line: int,
+    offset: int,
+) -> tuple[int, bytes] | None:
+    if not streams or offset >= streams[-1].uncompressed_start + streams[-1].uncompressed_size:
+        return None
+    first = sealedfile.stream_of(streams, offset)
+    local = offset - streams[first].uncompressed_start
+    before = b"\n" if offset == 0 else b""
+    if local == 0 and offset > 0:  # the byte before is the last one of the previous stream
+        for data in sealedfile.xz_stream_chunks(handle, streams[first - 1]):
+            before = data[-1:]
+    feeds = 0  # line feeds of the stream before the offset
+    collected = bytearray()
+    complete = False
+    for number in range(first, len(streams)):
+        position = 0
+        for data in sealedfile.xz_stream_chunks(handle, streams[number]):
+            if number == first and position < local:
+                head = data[: local - position]
+                feeds += head.count(b"\n")
+                if position + len(data) >= local and head:
+                    before = head[-1:]
+                data = data[local - position :]
+                position += len(head)
+                if not data:
+                    continue
+            end = data.find(b"\n")
+            collected += data if end < 0 else data[:end]
+            if len(collected) > MAX_LINE_BYTES:
+                raise RawReferenceError(
+                    "raw_not_found", f"line {line} is longer than a raw line can be"
+                )
+            if end >= 0:
+                complete = True
+                break
+        if complete:
+            break
+    if before != b"\n":
+        raise RawReferenceError(
+            "raw_reference_mismatch", f"byte {offset} of {path.name} does not start a line"
+        )
+    if not complete:
+        return None  # a torn last line is not a line here, as in a spool file
+    base = entry.xz_lines.get(first)
+    if base is not None and base + feeds + 1 != line:
+        raise RawReferenceError(
+            "raw_reference_mismatch",
+            f"byte {offset} starts line {base + feeds + 1}, not line {line}",
+        )
+    return offset, bytes(collected)
 
 
 def _find_in_vault(path: Path, line: int) -> tuple[tuple[int, bytes] | None, str | None]:
@@ -635,7 +749,10 @@ def read_line(
             if origin == "spool":
                 found = _find_in_spool(path, line)
             else:
-                found, damage = _find_in_vault(path, line)
+                if sealedfile.format_of(path) == "xz":
+                    found, damage = _find_in_xz(path, line, offset)
+                else:
+                    found, damage = _find_in_vault(path, line)
                 if found is None and damage is not None:
                     raise RawReferenceError("raw_unreadable", damage)
         except FileNotFoundError as exc:

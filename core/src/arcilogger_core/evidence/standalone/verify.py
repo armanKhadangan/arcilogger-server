@@ -67,13 +67,29 @@ import sys
 import unicodedata
 import zipfile
 import zlib
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import IO, Any
 
-VERIFIER_VERSION = "4"
+
+class _NoLzmaError(Exception):
+    """Never raised: stands in for ``lzma.LZMAError`` in :data:`READ_ERRORS` without lzma."""
+
+
+lzma: Any
+try:  # xz-sealed days (Wave 5); a Python built without _lzma still verifies gzip days
+    import lzma as _lzma
+
+    lzma = _lzma
+    _LZMA_ERROR: type[Exception] = _lzma.LZMAError
+except ImportError:  # pragma: no cover - every supported CPython build has it
+    lzma = None
+    _LZMA_ERROR = _NoLzmaError
+
+
+VERIFIER_VERSION = "5"
 INDEX_NAME = "paket.json"
 INDEX_SCHEMA = "arcilogger.evidence/1"
 #: The guides. The Turkish one has an ASCII name: ZIP tools that ignore the UTF-8 name flag
@@ -1709,9 +1725,11 @@ class TooLargeError(Exception):
     """A file (or a raw line) is larger than this program is willing to hold in memory."""
 
 
-#: What reading a file can raise: OS errors, a bad ZIP entry (CRC), a corrupt gzip stream, a
-#: file above the size limits.
-READ_ERRORS = (OSError, EOFError, zipfile.BadZipFile, zlib.error, TooLargeError)
+#: What reading a file can raise: OS errors, a bad ZIP entry (CRC), a corrupt gzip or xz stream,
+#: a file above the size limits.
+READ_ERRORS = (OSError, EOFError, zipfile.BadZipFile, zlib.error, _LZMA_ERROR, TooLargeError)
+#: The suffixes of a sealed day's files: gzip (every day sealed before Wave 5) and seekable xz.
+SEALED_SUFFIXES = (".gz", ".xz")
 
 
 class PackageError(Exception):
@@ -1913,8 +1931,55 @@ def hash_stream(handle: IO[bytes]) -> tuple[str, int]:
     return hasher.hexdigest(), size
 
 
-def gunzip_digest(handle: IO[bytes]) -> tuple[str, int]:
-    """SHA-256 and line count of the uncompressed content of a gzip stream.
+def _xz_chunks(handle: IO[bytes]) -> Iterator[bytes]:
+    """The content of a seekable xz file: every stream, one after the other, strictly.
+
+    Unlike ``lzma.LZMAFile``, which stops quietly at a damaged later stream, anything after a
+    stream that is not a complete next stream is an error, so a damaged file never reads as a
+    shorter one.
+    """
+    if lzma is None:  # pragma: no cover - see the import
+        raise OSError("this Python has no lzma module; xz files cannot be opened")
+    decompressor: Any = None
+    pending = b""
+    while True:
+        if decompressor is None or decompressor.eof:
+            if decompressor is not None:
+                pending = decompressor.unused_data + pending
+            if not pending:
+                pending = handle.read(CHUNK)
+            if not pending:
+                if decompressor is None:
+                    raise EOFError("empty xz file")
+                return
+            decompressor = lzma.LZMADecompressor(format=lzma.FORMAT_XZ)
+        if not pending:
+            pending = handle.read(CHUNK)
+            if not pending:
+                raise EOFError("xz stream ends early")
+        out = decompressor.decompress(pending, CHUNK)
+        pending = b""
+        if out:
+            yield out
+        while not decompressor.eof and not decompressor.needs_input:
+            out = decompressor.decompress(b"", CHUNK)
+            if not out:
+                break
+            yield out
+
+
+def _gzip_chunks(handle: IO[bytes]) -> Iterator[bytes]:
+    with gzip.GzipFile(fileobj=handle, mode="rb") as unzipped:
+        yield from iter(lambda: unzipped.read(CHUNK), b"")
+
+
+def decompressed_chunks(handle: IO[bytes], name: str) -> Iterator[bytes]:
+    """The uncompressed content of a sealed file, by the suffix of its name (.gz or .xz)."""
+    return _xz_chunks(handle) if name.endswith(SEALED_SUFFIXES[1]) else _gzip_chunks(handle)
+
+
+def sealed_digest(handle: IO[bytes], name: str) -> tuple[str, int]:
+    """SHA-256 and line count of the uncompressed content of a sealed file of either format.
 
     Every ``\\n`` ends a line; a non-empty last line without ``\\n`` (a write torn by a crash
     or a full disk, sealed as it was and marked ``unterminated_last_line`` in the manifest)
@@ -1923,14 +1988,18 @@ def gunzip_digest(handle: IO[bytes]) -> tuple[str, int]:
     hasher = hashlib.sha256()
     lines = 0
     last = b""
-    with gzip.GzipFile(fileobj=handle, mode="rb") as unzipped:
-        for chunk in iter(lambda: unzipped.read(CHUNK), b""):
-            hasher.update(chunk)
-            lines += chunk.count(b"\n")
-            last = chunk[-1:]
+    for chunk in decompressed_chunks(handle, name):
+        hasher.update(chunk)
+        lines += chunk.count(b"\n")
+        last = chunk[-1:]
     if last not in (b"", b"\n"):
         lines += 1
     return hasher.hexdigest(), lines
+
+
+def gunzip_digest(handle: IO[bytes]) -> tuple[str, int]:
+    """:func:`sealed_digest` of a gzip file (the days sealed before Wave 5)."""
+    return sealed_digest(handle, SEALED_SUFFIXES[0])
 
 
 # =================================================================================================
@@ -2784,10 +2853,13 @@ class Verifier:
         if self.deep and "sha256_uncompressed" in entry:
             try:
                 with self.package.open(name) as handle:
-                    raw_sha256, lines = gunzip_digest(handle)
+                    raw_sha256, lines = sealed_digest(handle, name)
             except READ_ERRORS as exc:
                 report.fail(
-                    "file-content-mismatch", day, f"{path}: açılamadı ({exc})", f"{path}: bad gzip"
+                    "file-content-mismatch",
+                    day,
+                    f"{path}: açılamadı ({exc})",
+                    f"{path}: cannot be decompressed ({exc})",
                 )
                 return False
             if raw_sha256 != entry["sha256_uncompressed"] or lines != entry.get("lines"):
@@ -3210,7 +3282,7 @@ class Verifier:
             if match is None:
                 continue
             day, source = match.group("day"), match.group("source")
-            sealed = f"{self.prefix}{day[:4]}/{day[5:7]}/{day[8:10]}/{source}.log.gz"
+            sealed = self._extract_source(day, source)
             data = self._read(name, "alıntı")
             if data is None:
                 continue
@@ -3250,23 +3322,48 @@ class Verifier:
                 continue  # an unverified file is not read any further
             self._compare_extract(name, sealed, wanted)
 
+    def _extract_source(self, day: str, source: str) -> str:
+        """The sealed file an extract was taken from, in whichever format the day was sealed.
+
+        The one the day check verified wins; a name that is in neither format is returned as
+        the gzip name, which the caller then reports as missing.
+        """
+        base = f"{self.prefix}{day[:4]}/{day[5:7]}/{day[8:10]}/{source}.log"
+        present = [base + suffix for suffix in SEALED_SUFFIXES if base + suffix in self.name_set]
+        state = self.days.get(day)
+        verified = [name for name in present if state is not None and name in state.verified_files]
+        return (verified or present or [base + SEALED_SUFFIXES[0]])[0]
+
     def _compare_extract(self, name: str, sealed: str, wanted: dict[int, bytes]) -> None:
         report = self.report
         found: dict[int, bytes] = {}
         last = max(wanted) if wanted else 0
         try:
-            with self.package.open(sealed) as handle, gzip.GzipFile(fileobj=handle) as raw:
-                for number in range(1, last + 1):
-                    line = raw.readline(MAX_LINE + 1)
-                    if not line:
+            with self.package.open(sealed) as handle:
+                number = 0
+                rest = b""
+                for chunk in decompressed_chunks(handle, sealed):
+                    lines = (rest + chunk).split(b"\n")
+                    rest = lines.pop()
+                    if len(rest) > MAX_LINE:
+                        raise TooLargeError(f"line {number + 1} is longer than {MAX_LINE} bytes")
+                    for line in lines:
+                        number += 1
+                        if len(line) >= MAX_LINE:  # with its line end, as readline counted
+                            raise TooLargeError(f"line {number} is longer than {MAX_LINE} bytes")
+                        if number in wanted:
+                            found[number] = line
+                    if number >= last:
                         break
-                    if len(line) > MAX_LINE:
-                        raise TooLargeError(f"line {number} is longer than {MAX_LINE} bytes")
-                    if number in wanted:
-                        found[number] = line[:-1] if line.endswith(b"\n") else line
+                else:
+                    if rest and number + 1 in wanted:
+                        found[number + 1] = rest  # a torn last line is a line too
         except READ_ERRORS as exc:
             report.fail(
-                "extract-mismatch", "alıntı", f"{sealed}: açılamadı ({exc})", f"{sealed}: bad gzip"
+                "extract-mismatch",
+                "alıntı",
+                f"{sealed}: açılamadı ({exc})",
+                f"{sealed}: cannot be decompressed ({exc})",
             )
             return
         bad = sorted(number for number, line in wanted.items() if found.get(number) != line)

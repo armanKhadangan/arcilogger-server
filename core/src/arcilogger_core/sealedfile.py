@@ -30,7 +30,7 @@ import shutil
 import struct
 import zlib
 from collections import deque
-from collections.abc import Generator, Iterator
+from collections.abc import Generator, Iterable, Iterator
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import date
@@ -372,6 +372,40 @@ def xz_stream_chunks(raw: BinaryIO, stream: XzStream) -> Iterator[bytes]:
                 yield out
     if not decompressor.eof:
         raise SealedFileError("damaged", "xz: stream ends early")
+
+
+def xz_decompress(raw_chunks: Iterable[bytes]) -> Iterator[bytes]:
+    """Decompress an xz file read in order (every stream, one after the other, strictly), in
+    pieces of at most :data:`CHUNK` bytes: for callers that also hash the compressed bytes.
+
+    Anything after a stream that is not a complete next stream (a damaged later stream, stream
+    padding, trailing bytes) raises ``lzma.LZMAError`` or ``EOFError``; ``lzma.LZMAFile`` would
+    stop quietly there instead.
+    """
+    decompressor: lzma.LZMADecompressor | None = None
+    for raw in raw_chunks:
+        data = raw
+        while data:
+            if decompressor is None or decompressor.eof:
+                if decompressor is not None:
+                    data = decompressor.unused_data + data
+                decompressor = lzma.LZMADecompressor(format=lzma.FORMAT_XZ)
+            out = decompressor.decompress(data, CHUNK)
+            data = b""
+            if out:
+                yield out
+            while not decompressor.eof and not decompressor.needs_input:
+                out = decompressor.decompress(b"", CHUNK)
+                if not out:
+                    break
+                yield out
+            if decompressor.eof and decompressor.unused_data:
+                data = decompressor.unused_data
+                decompressor = lzma.LZMADecompressor(format=lzma.FORMAT_XZ)
+    if decompressor is None:
+        raise EOFError("empty xz file")
+    if not decompressor.eof:
+        raise EOFError("xz stream ends early")
 
 
 def chunks_from(

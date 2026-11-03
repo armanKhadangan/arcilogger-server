@@ -447,7 +447,7 @@ def test_other_read_errors_are_io_errors(tmp_path: Path, monkeypatch: pytest.Mon
         read_line(layout, "fortigate", DAY, 1)
     assert (raised.value.code, str(raised.value)) == (
         "raw_io_error",
-        "fortigate.log.gz: Input/output error",
+        "fortigate.log: Input/output error",  # the format is not known before the file is
     )
     assert regular_file(tmp_path / "nothing" / "here") is False
 

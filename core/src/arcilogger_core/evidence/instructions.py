@@ -20,6 +20,11 @@ from dataclasses import dataclass
 from datetime import date, datetime
 
 from arcilogger_core.fmt import format_date, format_datetime
+from arcilogger_core.sealedfile import SUFFIXES
+
+#: Suffixes of the two sealed formats: xz (Wave 5 on), gzip (every day sealed before).
+XZ = SUFFIXES["xz"]
+GZ = SUFFIXES["gzip"]
 
 ZAMANE_PAGE = (
     "https://kamusm.bilgem.tubitak.gov.tr/urunler/zaman_damgasi/"
@@ -116,10 +121,17 @@ def _windows(path: str) -> str:
 
 
 def hash_commands(day: DayFacts) -> tuple[str, str]:
-    """``sha256sum`` (Linux) and ``Get-FileHash`` (PowerShell) for the sealed files of a day."""
+    """``sha256sum`` (Linux) and ``Get-FileHash`` (PowerShell) for the sealed files of a day.
+
+    The pattern follows the day's files: ``*.xz`` for a day sealed as xz, ``*.gz`` for one sealed
+    before Wave 5 (a day is sealed in one format; both patterns only if a package mixes them).
+    """
+    suffixes = sorted({suffix for suffix in (XZ, GZ) for f in day.files if f.endswith(suffix)})
+    suffixes = suffixes or [GZ]
     return (
-        f"sha256sum {day.folder}/*.gz",
-        f"Get-FileHash -Algorithm SHA256 {_windows(day.folder)}\\*.gz",
+        "sha256sum " + " ".join(f"{day.folder}/*{suffix}" for suffix in suffixes),
+        "Get-FileHash -Algorithm SHA256 "
+        + ",".join(f"{_windows(day.folder)}\\*{suffix}" for suffix in suffixes),
     )
 
 
@@ -135,11 +147,18 @@ def chain_commands(days: Sequence[DayFacts]) -> list[tuple[DayFacts, str]]:
     return pairs
 
 
-def extract_command(extract_file: str, line: str = "N") -> str:
-    """``gzip -dc <sealed file> | sed -n 'Np'`` for an extract file ``extract/DAY/SOURCE.txt``."""
+def extract_command(extract_file: str, line: str = "N", sealed_files: Sequence[str] = ()) -> str:
+    """``xz -dc <sealed file> | sed -n 'Np'`` (``gzip -dc`` for a day sealed before Wave 5) for an
+    extract file ``extract/DAY/SOURCE.txt``; ``sealed_files`` tells which format the day has."""
     day, source = extract_file.split("/")[1:3]
-    sealed = f"vault/{day[:4]}/{day[5:7]}/{day[8:10]}/{source.removesuffix('.txt')}.log.gz"
-    return f"gzip -dc {sealed} | sed -n '{line}p'"
+    base = f"vault/{day[:4]}/{day[5:7]}/{day[8:10]}/{source.removesuffix('.txt')}.log"
+    sealed = next((base + s for s in (XZ, GZ) if base + s in sealed_files), base + GZ)
+    tool = "xz" if sealed.endswith(XZ) else "gzip"
+    return f"{tool} -dc {sealed} | sed -n '{line}p'"
+
+
+def _sealed_files(facts: GuideFacts) -> list[str]:
+    return [name for day in facts.days for name in day.files]
 
 
 def zamane_commands(day: DayFacts) -> list[str]:
@@ -187,7 +206,8 @@ def render_turkish(facts: GuideFacts) -> bytes:
         "ARCILOGGER, ağ cihazlarından (FortiGate, MikroTik vb.) gelen her syslog mesajını alındığı",
         "anda, değiştirmeden, alınma zamanı ve gönderen IP adresiyle birlikte ham kayıt dosyasına",
         "yazar. Her gün bittikten sonra:",
-        "  a) o günün ham dosyaları sıkıştırılır (gzip) ve her dosyanın SHA-256 özeti hesaplanır;",
+        "  a) o günün ham dosyaları sıkıştırılır (xz; Wave 5 öncesi günler gzip) ve her dosyanın",
+        "     SHA-256 özeti hesaplanır;",
         "  b) özetler, bir önceki günün manifest ve zaman damgası özetleriyle birlikte günlük",
         "     manifest dosyasına yazılır; böylece günler birbirine zincirlenir;",
         "  c) manifestin SHA-256 özeti TÜBİTAK BİLGEM Kamu SM zaman damgası sunucusuna gönderilir",
@@ -257,17 +277,18 @@ def render_turkish(facts: GuideFacts) -> bytes:
         "                             kütüphanesini kullanır.",
         "  verify.ps1, verify.sh      verify.py'yi Windows / Linux'ta çalıştıran kısa betikler.",
         "  vault/YYYY/MM/DD/          Mühürlü günler (sunucudaki klasör yapısıyla aynı):",
-        "    <kaynak>.log.gz          günün ham kayıt dosyası (gzip; içerik değiştirilmemiş),",
+        f"    <kaynak>.log{XZ}          günün ham kayıt dosyası (xz; içerik değiştirilmemiş;",
+        f"                             eski günlerde <kaynak>.log{GZ}, gzip),",
     ]
     if facts.audit_log_included:
-        lines.append("    audit.jsonl.gz           ARCILOGGER'ın o günkü denetim kaydı,")
+        lines.append(f"    audit.jsonl{XZ}/{GZ}       ARCILOGGER'ın o günkü denetim kaydı,")
     lines += [
         "    manifest-YYYY-MM-DD.json         günlük manifest,",
         "    manifest-YYYY-MM-DD.json.zd      manifestin zaman damgası (RFC 3161).",
     ]
     if not facts.audit_log_included:
         lines += [
-            "  ARCILOGGER'ın günlük denetim kaydı (audit.jsonl.gz) bilinçli olarak pakete",
+            "  ARCILOGGER'ın günlük denetim kaydı (audit.jsonl) bilinçli olarak pakete",
             "  alınmamıştır: başka sorguları ve personel bilgilerini içerir (KVKK veri en aza",
             "  indirme). Manifestte listelenir; SHA-256 değeri paket.json'da (excluded) yer alır.",
         ]
@@ -340,8 +361,8 @@ def render_turkish(facts: GuideFacts) -> bytes:
         "     0 doğrulandı, 1 hata var, 2 paket okunamadı (güvenli olmayan ya da büyük/küçük",
         "     harf farkıyla çakışan dosya adları dahil).",
         "  Seçenekler: --kokler KLASÖR (yalnızca bu klasördeki köklere güven, örneğin Kamu SM'den",
-        "  kendi indirdikleriniz), --hizli (gzip dosyalarını açmadan yalnızca özetleri kontrol",
-        "  et), --json (makine tarafından okunabilir çıktı).",
+        "  kendi indirdikleriniz), --hizli (sıkıştırılmış dosyaları açmadan yalnızca özetleri",
+        "  kontrol et), --json (makine tarafından okunabilir çıktı).",
         "  ÖNEMLİ: verify.py bu paketle birlikte gelir; paketi değiştirebilen biri verify.py'yi de",
         "  değiştirip her zaman DOĞRULANDI yazdırabilir. Sonuca ancak şu durumlarda güvenin:",
         "    - verify.py'nin SHA-256 özetini paketi size teslim edenden AYRI bir kanaldan (ör.",
@@ -412,9 +433,13 @@ def render_turkish(facts: GuideFacts) -> bytes:
         lines += [
             "  C4) Alıntı: extract dosyasındaki <N><TAB><satır> satırı, mühürlü dosyanın",
             "      açılmış halindeki N. satırla bayt bayt aynı olmalıdır (Linux, macOS ya da",
-            "      Windows'ta Git Bash / WSL ile; N yerine satır numarasını yazın):",
+            "      Windows'ta Git Bash / WSL ile; N yerine satır numarasını yazın; xz dosyasını",
+            '      Windows\'ta 7-Zip de açar: "7z e -so DOSYA"):',
         ]
-        lines += [f"    {extract_command(name)}" for name in facts.extract_files]
+        lines += [
+            f"    {extract_command(name, sealed_files=_sealed_files(facts))}"
+            for name in facts.extract_files
+        ]
     lines += [
         "",
         "7. KÖK SERTİFİKALAR VE PARMAK İZLERİ",
@@ -522,11 +547,12 @@ def render_english(facts: GuideFacts) -> bytes:
         "   C2: the SHA-256 of every file of a day folder (sha256sum / Get-FileHash) must equal",
         "   its \"sha256\" in that day's manifest. C3: the SHA-256 of the previous day's manifest",
         '   and .zd must equal "previous" in the next manifest. C4: line N of an extract file',
-        "   must equal line N of the decompressed sealed file (gzip -dc FILE | sed -n 'Np').",
+        "   must equal line N of the decompressed sealed file (xz -dc FILE | sed -n 'Np'; a day",
+        "   sealed before Wave 5 is gzip: gzip -dc; on Windows 7-Zip opens both: 7z e -so FILE).",
     ]
     if not facts.audit_log_included:
         lines += [
-            "   ARCILOGGER's own daily audit log (audit.jsonl.gz) is left out on purpose: it holds",
+            "   ARCILOGGER's own daily audit log (audit.jsonl) is left out on purpose: it holds",
             "   other requests and staff data (KVKK data minimisation). The manifest lists it; its",
             '   SHA-256 is in paket.json ("excluded"). That is not a missing file.',
         ]

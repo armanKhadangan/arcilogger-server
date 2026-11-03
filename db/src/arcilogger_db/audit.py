@@ -38,7 +38,6 @@ before anything else happens (:func:`repair_torn_tail`).
 
 from __future__ import annotations
 
-import gzip
 import hashlib
 import ipaddress
 import json
@@ -55,6 +54,7 @@ from sqlalchemy import Engine, func, select, text
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
+from arcilogger_core import sealedfile
 from arcilogger_core.canonical import CanonicalJsonError, canonical_json
 from arcilogger_core.iputil import canonical_ip
 from arcilogger_core.layout import Layout
@@ -357,8 +357,11 @@ def last_line_id(path: Path) -> int | None:
 
 
 def last_gz_line_id(path: Path) -> int | None:
-    """``id`` of the last valid line of a sealed ``audit.jsonl.gz`` (small files: read whole)."""
-    for line in reversed(gzip.decompress(path.read_bytes()).split(b"\n")):
+    """``id`` of the last valid line of a day's sealed audit log, in either format (xz from
+    Wave 5 on, gzip before; the name stays from the gzip-only days). Small files: read whole."""
+    with sealedfile.open_sequential(path) as handle:
+        content = handle.read()
+    for line in reversed(content.split(b"\n")):
         if (entry_id := _line_id(line)) is not None:
             return entry_id
     return None
@@ -371,8 +374,11 @@ def last_spooled_id(layout: Layout, today: date) -> int | None:
         last = last_line_id(layout.audit_spool(day))
         if last is not None:
             return last
-        sealed = layout.vault_day(day) / "audit.jsonl.gz"
-        if sealed.exists() and (last := last_gz_line_id(sealed)) is not None:
+        try:
+            sealed = sealedfile.find_audit(layout, day)
+        except sealedfile.SealedFileError:
+            sealed = None  # both formats: neither is trusted as the last word
+        if sealed is not None and (last := last_gz_line_id(sealed)) is not None:
             return last
     return None
 

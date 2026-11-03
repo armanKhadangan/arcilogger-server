@@ -58,6 +58,7 @@ from arcilogger_api.rawlines import (
 )
 from arcilogger_api.reports.consistency import check_line, outcome_claims, ref_key
 from arcilogger_api.reports.fonts import font_fingerprints
+from arcilogger_core import sealedfile
 from arcilogger_core.chain import sealed_days, verify_day
 from arcilogger_core.config import Config
 from arcilogger_core.layout import Layout
@@ -240,13 +241,17 @@ def _file_facts(
         facts["status"] = "invalid"
         return facts, None
     spool = layout.spool_file(source, day)
-    vault = layout.vault_day(day) / f"{source}.log.gz"
+    try:
+        vault = sealedfile.find_log(layout, day, source)
+    except sealedfile.SealedFileError as exc:  # both formats: the sealed one is unclear
+        facts.update(status="unreadable", error=str(exc))
+        return facts, None
     origin: Origin
-    if sealed and _exists(layout, vault):
+    if sealed and vault is not None and _exists(layout, vault):
         origin, path = "vault", vault
     elif _exists(layout, spool):
         origin, path = "spool", spool
-    elif _exists(layout, vault):
+    elif vault is not None and _exists(layout, vault):
         origin, path = "vault", vault
     else:
         return facts, None
