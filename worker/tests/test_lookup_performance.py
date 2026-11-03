@@ -354,15 +354,38 @@ def test_lookup_is_fast_on_continuous_data(db_engine: Engine, db_session: Sessio
         print("\n".join(plan))
 
     _check_answers_and_budget(timings, lookups)
-    # Every plan reads through an index with the bounded time range (no sequential scan).
+    # Every plan reads through an index with the bounded time range (no sequential scan of a
+    # partition that holds data: the daily partitions beside the loaded days, Wave 5 G2, hold
+    # none or a few rows in one page, which the planner rightly reads whole).
     for name, plan in plans.items():
         joined = "\n".join(plan)
-        assert "Seq Scan" not in joined, name
+        assert _seq_scans_of_data(db_session, plan) == [], name
         assert "Index" in joined, name
         assert '"time" >=' in joined, name
         assert '"time" <=' in joined, name
     assert "transip_transport_time" in "\n".join(plans["exact"])
     assert "dstip_dstport_time" in "\n".join(plans["candidates_destination"])
+
+
+_SEQ_SCAN = re.compile(r"Seq Scan on (?P<table>[a-z_0-9]+)")
+#: A partition this small (8 kB pages) is read whole by any plan: no data to speak of.
+SMALL_PAGES = 10
+
+
+def _seq_scans_of_data(session: Session, plan: Sequence[str]) -> list[str]:
+    """The plan's sequential scans of tables larger than :data:`SMALL_PAGES`."""
+    found = []
+    for line in plan:
+        match = _SEQ_SCAN.search(line)
+        if match is None:
+            continue
+        size = session.scalar(
+            text("SELECT pg_relation_size(CAST(:table AS regclass))"),
+            {"table": match.group("table")},
+        )
+        if int(size or 0) > SMALL_PAGES * 8192:
+            found.append(line.strip())
+    return found
 
 
 def test_lookup_is_fast_on_compressed_chunks(db_engine: Engine, db_session: Session) -> None:
