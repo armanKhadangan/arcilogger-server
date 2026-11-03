@@ -1275,16 +1275,18 @@ All Wave 5 questions are answered (2026-11-02).
   that token against the pinned roots; only then is the token renamed to its final name, then the
   record, and both are locked with `immutability.lock`, as `retention` does for a deletion record.
   A failed stamp (`TsaError`, `OSError`, or anything else the provider raises) or a token that
-  does not verify (`RenewalStampInvalidError`, a `TsaResponseError`) removes both files and is
-  raised. So a record never exists under its final name without its token, and the builder (which
-  ships `renewals/*.json`) never ships one. Leftovers of an interrupted run are tidied by the next
-  run (`renewal.recover`): a part whose token (`.part.zd`, or the final `.zd` when the run stopped
-  between the renames) verifies against it is promoted; any other part, a token without its record
-  and an interrupted write's temporary file are removed, but never a locked file (a locked token
-  without its record means a completed record was removed: it stays for a person, with a warning
-  in the log; `recover` never unlocks). A record and its token under their final names that are
-  not both locked (`lock` failed after the renames) are locked by the next run, as the seal locks
-  every file of its day. One run at a time: `state/renewal.lock` (never inside `vault/renewals`,
-  where the standalone verifier's vault mode would report an unknown file); a second run raises
-  `RenewalBusyError` (`renewal_busy`), and a lock file that cannot be opened or locked for another
-  reason `RenewalLockError` (`renewal_lock_failed`), both with TR/EN texts.
+  does not verify, or whose certificate the stored revocation lists show revoked at or before its
+  genTime (it would never count, C15: `RenewalStampInvalidError`, a `TsaResponseError`), removes
+  both files and is raised. So a record never exists under its final name without its token, and
+  the builder (which ships `renewals/*.json`) never ships one. Leftovers of an interrupted run are
+  tidied by the next run (`renewal.recover`): a part whose token (`.part.zd`, or the final `.zd`
+  when the run stopped between the renames) verifies against it is promoted; any other part, a
+  token without its record and an interrupted write's temporary file are removed, but never a
+  locked file (a locked token without its record means a completed record was removed: it stays
+  for a person, with a warning in the log; `recover` never unlocks). A record and its token under
+  their final names that are not both locked (`lock` failed after the renames) are locked by the
+  next run, as the seal locks every file of its day. One run at a time: `state/renewal.lock`
+  (never inside `vault/renewals`, where the standalone verifier's vault mode would report an
+  unknown file); a second run raises `RenewalBusyError` (`renewal_busy`), and a lock file that
+  cannot be opened or locked for another reason `RenewalLockError` (`renewal_lock_failed`), both
+  with TR/EN texts.

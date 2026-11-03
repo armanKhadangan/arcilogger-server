@@ -9,6 +9,11 @@ The legal CA is made up (``Örnek Simulated CA (test)``, a policy outside the te
 its stamps count once its root is listed in ``tsa.legal_root_fingerprints``, as a production
 stamp does (rule 4). Nothing about a real Kamu SM or TÜRKTRUST certificate is assumed, and no
 real server is called.
+
+A renewal token is verified at ``max(clock, real now)`` (as the seal verifies): the assertions
+rely on the test clock (2031 and later) being after the real date, and on the mock root, which
+:class:`~arcilogger_core.tsa.mock.MockTsa` issues for ten years from its clock's start, still
+being valid then.
 """
 
 from __future__ import annotations

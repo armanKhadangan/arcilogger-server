@@ -22,6 +22,7 @@ from cryptography import x509
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.serialization import Encoding
 
+from arcilogger_core import renewal as renewal_module
 from arcilogger_core.canonical import canonical_json
 from arcilogger_core.immutability import is_locked, lock, unlock
 from arcilogger_core.renewal import (
@@ -159,6 +160,31 @@ def test_a_test_provider_renewal_never_counts(rw: RenewalWorld) -> None:
             DAY_TOKEN,
             "renewals/2031-06-23-2.json.zd",
         ]
+
+
+def test_a_test_record_never_counts_even_with_a_legal_stamp(rw: RenewalWorld) -> None:
+    """D5 by the reason alone: a record that says ``reason: "test"`` does not count even when
+    its claim is legal grade, its root is listed and its token verifies; nor is its own token
+    renewed (W5-A-7)."""
+    rw.set_now(CNA - timedelta(days=100))
+    provider = rw.legal_provider(FAR)
+    record = build_record(
+        [rw.day_entry()],
+        created_at=rw.clock.now,
+        system=system_block(rw.world.config),
+        tsa=tsa_block(provider, rw.world.config),
+        reason="due",
+    )
+    record["reason"] = "test"  # build_record ties the reason to the claim; a hand edit does not
+    path = rw.layout.renewals_dir / "2031-06-23-1.json"
+    path.parent.mkdir(parents=True)
+    path.write_bytes(canonical_json(record))
+    provider.stamp(path)
+    for now, status in ((CNA - timedelta(days=90), "due"), (CNA + timedelta(days=1), "uncovered")):
+        report = rw.status(now)
+        day = rw.of(report, DAY_TOKEN)
+        assert (day.status, day.covered_by) == (status, None)
+        assert [token.path for token in report.tokens] == [DAY_TOKEN]
 
 
 def test_a_renewal_counts_with_its_root_listed_only(tmp_path: Path) -> None:
@@ -460,7 +486,7 @@ def _renewal_files(rw: RenewalWorld) -> list[str]:
 def test_at_most_one_record_per_run(rw: RenewalWorld) -> None:
     """Due tokens of every kind go into one record; a second run with nothing due writes no
     file; something newly due on the same date gets the next number."""
-    rw.add_deletion()
+    deletion, deletion_token = rw.add_deletion()
     rw.add_report()
     # an earlier renewal whose own certificate comes due before the day's
     rw.set_now(CNA - timedelta(days=300))
@@ -483,6 +509,13 @@ def test_at_most_one_record_per_run(rw: RenewalWorld) -> None:
         f"exports/reports/{REPORT_NAME}.zd",
         "renewals/2030-12-05-1.json.zd",
     )
+    assert record["tokens"][1] == {
+        "kind": "deletion",
+        "path": "deletions/2026-10-20-imha.json.zd",
+        "token_sha256": sha256_file(deletion_token),
+        "record_sha256": sha256_file(deletion),
+        "cert_not_after": "2031-10-01T00:00:00Z",
+    }
     assert {token.status for token in run.report_before.tokens} == {"due"}
     after = {token.path: token for token in run.report_after.tokens}
     # the older renewal counts again now that it is covered, and it is the earlier stamp
@@ -594,6 +627,64 @@ def test_a_lock_that_cannot_be_taken_is_not_called_busy(
     monkeypatch.setattr("arcilogger_core.renewal.os.open", refuse)
     with pytest.raises(RenewalLockError, match="Permission denied"):
         _renew(rw, rw.legal_provider(FAR))
+
+
+def _unverifiable(rw: RenewalWorld, case: str) -> TimestampProvider:
+    """A legal provider whose stamp does not verify: its certificate revoked before now (in the
+    stored lists, C15), or expired before the stamp."""
+    now = rw.clock.now
+    if case == "expired":
+        return rw.legal_provider(now - timedelta(days=2), not_before=now - timedelta(days=30))
+    provider = rw.legal_provider(FAR, not_before=now - timedelta(days=30))
+    assert rw.legal_tsa.signer is not None
+    _store(
+        rw.layout, [_revoking(rw, rw.legal_tsa.signer[0], now - timedelta(days=5))], rw.legal.root
+    )
+    return provider
+
+
+@pytest.mark.parametrize("case", ["revoked", "expired"])
+def test_a_stamp_that_does_not_verify_leaves_no_record(rw: RenewalWorld, case: str) -> None:
+    """The new token is verified with the stored revocation lists and at its genTime before
+    anything is renamed: a revoked or expired certificate leaves no record."""
+    rw.set_now(CNA - timedelta(days=100))
+    provider = _unverifiable(rw, case)
+    before = rw.status()
+    with pytest.raises(RenewalStampInvalidError) as raised:
+        _renew(rw, provider)
+    expected = "revoked at or before the stamp" if case == "revoked" else "not valid at genTime"
+    assert any(expected in error for error in raised.value.errors), raised.value.errors
+    assert _renewal_files(rw) == []
+    assert rw.status() == before
+
+
+def test_the_token_is_renamed_before_the_record(
+    rw: RenewalWorld, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """W5-A-3: a run stopped between the two renames leaves the final token beside the part,
+    never a record without its token; the next run completes it."""
+    rw.set_now(CNA - timedelta(days=100))
+    real = renewal_module._replace
+    calls: list[Path] = []
+
+    def stop_at_second(source: Path, target: Path) -> None:
+        calls.append(target)
+        if len(calls) == 2:
+            raise OSError("stopped between the renames")
+        real(source, target)
+
+    monkeypatch.setattr(renewal_module, "_replace", stop_at_second)
+    with pytest.raises(OSError, match="between the renames"):
+        _renew(rw, rw.legal_provider(FAR))
+    assert [target.name for target in calls] == ["2031-06-23-1.json.zd", "2031-06-23-1.json"]
+    assert _renewal_files(rw) == ["2031-06-23-1.json.part", "2031-06-23-1.json.zd"]
+    monkeypatch.undo()
+    with pytest.raises(RenewalNotNeeded):  # completed by the next run, and it covers the day
+        _renew(rw, rw.legal_provider(FAR))
+    names = ["2031-06-23-1.json", "2031-06-23-1.json.zd"]
+    assert _renewal_files(rw) == names
+    assert all(is_locked(rw.layout.renewals_dir / name) for name in names)
+    assert rw.of(rw.status(), DAY_TOKEN).covered_by == "renewals/2031-06-23-1.json"
 
 
 def test_a_crash_between_stamp_and_rename_is_recovered(rw: RenewalWorld) -> None:

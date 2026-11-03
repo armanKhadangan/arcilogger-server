@@ -813,7 +813,8 @@ class RenewalNotNeeded(RenewalError):  # noqa: N818 - the contract's name (§2.1
 
 
 class RenewalStampInvalidError(TsaResponseError):
-    """The renewal record's new token does not verify against the pinned roots."""
+    """The renewal record's new token does not verify against the pinned roots, or its
+    certificate was revoked at or before the stamp (the stored lists)."""
 
     code = "renewal_stamp_invalid"
 
@@ -1033,7 +1034,9 @@ def _write(
     now: datetime,
 ) -> None:
     """Write, stamp and verify ``record`` as ``<final>.part``, then promote it; on any failure
-    remove both files and raise (§2.1.1: a record without its token is not evidence)."""
+    remove both files and raise (§2.1.1: a record without its token is not evidence). A token
+    that verifies but whose certificate the stored lists show revoked at or before its genTime
+    is refused too: such a renewal would never count (C15)."""
     part = _part(final)
     atomic_write_bytes(part, canonical_json(record))
     removed: list[str] = []
@@ -1049,6 +1052,13 @@ def _write(
         )
         if not check.ok:
             raise RenewalStampInvalidError(check.errors)
+        if check.details.get("crl") == "crl-revoked":  # C15: it would never count
+            raise RenewalStampInvalidError(
+                (
+                    "the TSA certificate was revoked at or before the stamp "
+                    f"({check.details.get('crl_subject', '')}, {check.details.get('crl_at', '')})",
+                )
+            )
     except BaseException:  # a provider's own error or an interrupt too: never a part left
         _remove(token_path_for(part), removed)
         _remove(part, removed)
