@@ -1266,5 +1266,6 @@ All Wave 5 questions are answered (2026-11-02).
   line number, as on a `.gz` day, so both formats give the same error.
 - **W5-H-2: `chain.py` (not W5-H's) has one hunk**, granted on #111 (2026-11-03): a sealed file
   that cannot be decompressed is a `verify_day` error, `<path>: cannot be decompressed (…)`,
-  instead of an exception. Its Turkish text needs a rule in `api/src/arcilogger_api/issues.py`
-  (W5-C's), requested in the pull request.
+  instead of an exception. Its Turkish text is one rule in `api/src/arcilogger_api/issues.py`
+  (W5-C's), granted on #111 (2026-11-03 19:08): "{path}: sıkıştırılmış veri açılamıyor (dosya
+  bozuk)"; the English text is the core's message itself.
