@@ -1257,13 +1257,15 @@ All Wave 5 questions are answered (2026-11-02).
   `last_run {at, outcome, exit_code, record, error}` (`outcome`: `renewed`, `not_needed`,
   `failed` or `refused`; `error`: a code such as `tsa_unavailable`, `renewal_stamp_invalid`,
   `credentials`, `roots`) and `failures_in_a_row` (a failed or refused run adds one, any other
-  run sets 0) for W5-E's "Renew failed twice in a row" (C12); the names wait for W5-E's
-  confirmation. The file is written after a failed (exit 3) or refused (exit 2) run too: the
+  run sets 0) for W5-E's "Renew failed twice in a row" (C12); the names were accepted on #132
+  (A4), and W5-E follows them. The file is written after a failed (exit 3) or refused (exit 2) run too: the
   statuses are computed afresh when the pinned roots are known (time passes while the server
   fails, and a token turns `uncovered`), else the last known `tokens` stay with their `at`; with
   none known the file has no `tokens`, which W5-C's reader takes as unknown, never as "nothing
-  due". A dry run writes the statuses and keeps `last_run` and `failures_in_a_row`. A run refused
-  because another holds `state/renewal.lock` writes nothing (the holder writes the file).
+  due". A dry run writes the statuses and keeps `last_run` and `failures_in_a_row`. Every run
+  holds `state/renewal.lock` from before it computes the statuses until it has written the file,
+  so a dry run never writes over a run in progress; a run (dry or not) that finds the lock held
+  writes nothing (the holder writes the file).
 - **W5-A-3: the crash-safe write order.** §2.1.1 says the record "is written with
   `atomic_write_bytes`, stamped", and a failed run deletes it. `renew` writes it as
   `<name>.json.part` (with `atomic_write_bytes`), stamps it to `<name>.json.part.zd` and verifies
@@ -1312,7 +1314,8 @@ All Wave 5 questions are answered (2026-11-02).
   itself is `late`, and a certificate counts as expired from its notAfter on (`cert_not_after <=
   now`), although `tsa/verify.py:_valid_at` (and the standalone `Certificate.valid_at`) treats a
   stamp made at notAfter as valid; `test_the_expiry_boundaries_are_pinned` pins both, so neither is
-  "fixed" into the other unnoticed.
+  "fixed" into the other unnoticed. `test_verifier_version_is_5` pins the version on purpose:
+  whoever merges second sets "6" and renames and updates that test with it.
 - **W5-A-6: what stays in section 5.** The existing `renewal-ok` (each record's stamp) and
   `renewal-covers` (which packaged days a record names) stay beside the five new codes, and the
   section "5. Yenileme damgaları" now appears whenever the package has a day whose token
@@ -1328,14 +1331,20 @@ All Wave 5 questions are answered (2026-11-02).
   (`renewal_stamp_invalid`), another run holding `state/renewal.lock` (`renewal_busy`), a lock
   file that cannot be used (`renewal_lock_failed`), a file error during the run (`io_error`) and a
   `state/renewal.json` that cannot be written: each is retried by the next run. Exit 2 is a
-  provider that cannot be made (credentials, the Zamane client, the secret store) or no pinned
-  root; a dry run needs only the roots. Exit 1 is any token still `uncovered` after the run, so a
+  provider that cannot be made (`credentials`, `zamane-jar`, `executable`, `secret-store`,
+  `provider`), a provider configuration error found only while stamping (a
+  `TsaConfigurationError` such as no Java or no Zamane client: `executable` or `provider`, it
+  needs an administrator, not a retry), or no usable pinned root (`roots`: none, or one that
+  cannot be read); a dry run needs only the roots. Another run holding the lock gives 3 before
+  any of these is checked. Exit 1 is any token still `uncovered` after the run, so a
   test provider (whose records never count, D5) leaves an expired token `uncovered` and exits 1;
   "nothing due" with an `uncovered` token cannot happen, as an uncovered token is due for
   renewal. A dry run exits 1 when a token is `uncovered` now, else 0. The text output is Turkish
   with English in brackets, errors on stderr; `--json` prints `outcome`, `exit_code`, `dry_run`,
   `record`, `reason`, `due`, `renewed`, `discarded`, `error {code, message_tr, message_en}`,
-  `state_written` and `report`.
+  `state_written` and `report`. Its `outcome` is one of the four of `last_run` or `dry_run` (a
+  dry run that ran) or `busy` (another run holds the lock); neither of the last two is ever a
+  `last_run.outcome`.
 - **W5-A-10: what the report adds.** `RenewalReport` also names the tokens and records it could
   not read (`unreadable`: a token that cannot be parsed or whose stamped file is missing, a record
   that is not `arcilogger.renewal/1` or has no token, a token whose imprint algorithm is not
