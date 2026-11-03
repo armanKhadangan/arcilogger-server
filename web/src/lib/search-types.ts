@@ -11,6 +11,7 @@
  */
 
 import type { DateString, DateTimeString } from './api-types';
+import type { ArchivedRange } from './archive-reload-types';
 
 // -- names ------------------------------------------------------------------------------------------
 
@@ -187,6 +188,12 @@ export interface SearchPage {
   next_cursor: string | null;
   scan: SearchScan;
   notices: Notice[];
+  /**
+   * The part of the range whose days are gone from the database and in the sealed vault (Wave 5
+   * contract G8, "arşivden yeniden yükle"); `null` when every day was searched. The API always
+   * sends it (optional only in the schema).
+   */
+  archived?: ArchivedRange | null;
 }
 
 // -- statistics -------------------------------------------------------------------------------------

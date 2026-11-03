@@ -29,6 +29,7 @@ const TYPES_FILES = [
   'compliance-types.ts',
   'system-types.ts',
   'system-health-types.ts',
+  'archive-reload-types.ts',
   'legal-status-types.ts',
 ].map((name) => join(SRC, 'lib', name));
 
@@ -63,6 +64,8 @@ const NOT_SCHEMAS = new Set([
   'SettingProblem',
   'SettingConflict',
   'SourceConfig',
+  // archive-reload-types.ts: the `details` of 409 `archive_reload_required`.
+  'ArchiveReloadRequired',
 ]);
 /** OpenAPI schemas the web app does not use. */
 const UNUSED_SCHEMAS = new Set(['HTTPValidationError', 'ValidationError', 'Health']);

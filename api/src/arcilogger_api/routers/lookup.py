@@ -20,6 +20,14 @@
   ``lookup_settings_invalid``: for ``nat.egresses`` (public-IP lookups only) with the text that
   names it, for any other lookup or lease setting (``LookupSettings.from_settings``,
   ``lookup.timeout_seconds``) with a second text that names no key, logged at WARNING.
+  **The database window** (Wave 5 contract §5, G7): the engine names the days it reads
+  (:func:`arcilogger_worker.lookup.days.lookup_days`); when one of them is gone from the database
+  (dropped by the window job and not loaded by a ready archive reload, or being loaded again:
+  :func:`arcilogger_api.archive.service.check_window`, which holds the partition lock shared for
+  the rest of the lookup's transaction) and the sealed vault has it, the answer is 409
+  ``archive_reload_required`` with the days, their raw bytes and the estimated load as
+  ``details`` (audited as ``lookup.run_failed``) — never a "not found" for a day the lookup
+  could not see. ``POST /archive-reloads`` brings the days back.
 * ``GET /lookup/{id}`` — one lookup with its outcome (audited ``lookup.view``).
 * ``GET /lookup/{id}/report.pdf`` — the official report: rendered and stored on the first call
   (``lookup.report``), the same bytes on every call (``lookup.report_download``);
@@ -68,6 +76,7 @@ from sqlalchemy import Connection, event, select, text
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
 
+from arcilogger_api.archive.service import check_window, required_error
 from arcilogger_api.audit import record_audit
 from arcilogger_api.auth.privacy import require_privacy_notice
 from arcilogger_api.deps import ConfigDep, DbSession, LayoutDep
@@ -89,6 +98,8 @@ from arcilogger_worker.lookup import (
     protocol_number,
     run_lookup,
 )
+from arcilogger_worker.lookup.days import lookup_days
+from arcilogger_worker.lookup.engine import DEFAULT_DNS_LOOKBACK_SECONDS
 from arcilogger_worker.lookup.types import MAX_TOLERANCE_SECONDS
 
 router = APIRouter(prefix="/lookup", tags=["lookup"])
@@ -97,6 +108,7 @@ log = logging.getLogger("arcilogger.api.lookup")
 RunnerDep = Annotated[CurrentUser, Depends(require_privacy_notice("lookup.run"))]
 
 TIMEOUT_SETTING: Final = "lookup.timeout_seconds"
+DNS_LOOKBACK_SETTING: Final = "lookup.dns_lookback_seconds"
 DEFAULT_TIMEOUT_SECONDS: Final = 5
 #: PostgreSQL ``query_canceled`` (statement timeout).
 QUERY_CANCELED: Final = "57014"
@@ -697,6 +709,13 @@ def run_5651(
     try:
         settings = LookupSettings.from_settings(values)
         limit = min(max(int(values.get(TIMEOUT_SETTING, DEFAULT_TIMEOUT_SECONDS)), 1), 300)
+        first_day, last_day = lookup_days(
+            lookup_request,
+            settings,
+            dns_lookback_seconds=int(
+                values.get(DNS_LOOKBACK_SETTING, DEFAULT_DNS_LOOKBACK_SECONDS)
+            ),
+        )
     except (AttributeError, TypeError, ValueError) as exc:  # AttributeError: a non-object lease.*
         log.warning("lookup settings cannot be read: %s", exc)
         raise ApiError(503, "lookup_settings_invalid", *SETTINGS_UNREADABLE) from exc
@@ -705,6 +724,28 @@ def run_5651(
             settings.egresses()
     except (TypeError, ValueError) as exc:
         raise _error(503, "lookup_settings_invalid") from exc
+    window = check_window(db, layout, first_day, last_day)
+    required = window.required()
+    if required is not None:
+        # Days the lookup must read are gone from the database (G7): no answer without them.
+        record_audit(
+            db,
+            actor=user,
+            action="lookup.run_failed",
+            details={
+                "reason": "archive_reload_required",
+                "days": {"first": first_day.isoformat(), "last": last_day.isoformat()},
+                "missing": {
+                    "first": required.first_day.isoformat(),
+                    "last": required.last_day.isoformat(),
+                },
+                "query": query,
+                "request": _request_details(details),
+            },
+            ip=client_ip(request),
+        )
+        db.commit()
+        raise required_error(db, window)
     started = monotonic()
     try:
         with statement_deadline(db, limit):

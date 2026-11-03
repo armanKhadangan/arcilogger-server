@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session
 from arcilogger_core.rawlog import RawRecord
 from arcilogger_core.rawlog import parse_line as parse_raw
 from arcilogger_core.timeutil import to_utc
+from arcilogger_db.partitions import RAW_DAY_MARGIN
 from arcilogger_db.settings import SYSTEM_AUTHOR, set_setting
 from arcilogger_ingest import prepare
 from arcilogger_ingest.parsers import LinePosition, ParsedRow, ParseOutcome, get_parser
@@ -187,15 +188,16 @@ def test_a_day_sealed_before_ingest_ever_saw_it_is_loaded_from_the_vault(
 def test_sealed_days_older_than_the_database_retention_are_not_loaded(
     world: World, db_engine: Engine, db_session: Session
 ) -> None:
-    """The vault keeps 2 years, the database less (db.retention_days)."""
+    """The vault keeps 2 years, the database less (db.retention_days, and the two raw days
+    before the window whose rows reach into its first day: RAW_DAY_MARGIN)."""
     set_setting(db_session, "db.retention_days", 2, updated_by=SYSTEM_AUTHOR)
     db_session.commit()
     fill(world, fortigate=3, mikrotik=0)
     world.seal(DAY)
-    world.set_today(DAY + timedelta(days=3))
+    world.set_today(DAY + timedelta(days=2 + RAW_DAY_MARGIN + 1))
     run_once(world, db_engine)
     assert loaded(db_engine) == []
-    world.set_today(DAY + timedelta(days=2))
+    world.set_today(DAY + timedelta(days=2 + RAW_DAY_MARGIN))
     run_once(world, db_engine)
     assert len(loaded(db_engine)) == 3
 

@@ -4,9 +4,9 @@
  * (`web/scripts/capture_api_samples.py`, whose `--check` compares them with the API again); here
  * every sample is checked field by field against the interfaces of `api-types.ts`,
  * `lookup-types.ts`, `seal-types.ts`, `settings-types.ts`, `search-types.ts`, `live-types.ts`,
- * `sources-types.ts`, `compliance-types.ts`, `system-types.ts`, `system-health-types.ts` and
- * `legal-status-types.ts` — required fields present, no unknown fields, value types and string
- * literal unions as declared.
+ * `sources-types.ts`, `compliance-types.ts`, `system-types.ts`, `system-health-types.ts`,
+ * `legal-status-types.ts` and `archive-reload-types.ts` — required fields present, no unknown
+ * fields, value types and string literal unions as declared.
  * The untyped parts of the OpenAPI document (`outcome`, `query`, the seal day detail, the
  * `result` of an administration request, the events of a live stream) are covered only here.
  */
@@ -40,6 +40,7 @@ for (const file of [
   'system-types.ts',
   'system-health-types.ts',
   'legal-status-types.ts',
+  'archive-reload-types.ts',
 ]) {
   const path = join(LIB, file);
   const source = ts.createSourceFile(
@@ -288,6 +289,13 @@ function adminErrors(value: unknown, path: string): string[] {
     if (type) problems.push(...list(type)(error?.details, `${path}.${key}.body.error.details`));
   }
   return problems;
+}
+
+/** 409 `archive_reload_required`: an error answer whose `details` say what a reload brings back. */
+function reloadRequired(value: unknown, path: string): string[] {
+  const problems = conforms(value, 'ErrorSample', path);
+  const details = (value as { body?: { error?: { details?: unknown } } }).body?.error?.details;
+  return [...problems, ...conforms(details, 'ArchiveReloadRequired', `${path}.body.error.details`)];
 }
 
 /** A group of samples, each key with its own rule (like the files of {@link RULES}). */
@@ -710,6 +718,21 @@ const RULES: Record<string, Record<string, Rule>> = {
         'LegalStatus',
       ]),
     ),
+    errors,
+  },
+  // Arşivden yeniden yükleme (Wave 5 contract §5): the lookup's and the search's 409 with what a
+  // reload brings back, the search's `archived`, a request in each state (and the same days asked
+  // again: the request already there), the list, the refusals.
+  archive: {
+    lookup_required: reloadRequired,
+    search_archived: 'SearchPage',
+    search_required: reloadRequired,
+    created: 'ArchiveReload',
+    loading: 'ArchiveReload',
+    ready: 'ArchiveReload',
+    existing: 'ArchiveReload',
+    failed: 'ArchiveReload',
+    list: 'ArchiveReloadList',
     errors,
   },
   // Every licence document is `GET /license` (also the answer of `POST /license`), every other

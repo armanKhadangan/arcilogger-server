@@ -112,6 +112,13 @@
     "/api/v1/alerts/{alert_id}/state": [
       "post"
     ],
+    "/api/v1/archive-reloads": [
+      "get",
+      "post"
+    ],
+    "/api/v1/archive-reloads/{reload_id}": [
+      "get"
+    ],
     "/api/v1/audit": [
       "get"
     ],
@@ -1666,6 +1673,203 @@
         "code"
       ],
       "title": "ApplySystemHealth",
+      "type": "object"
+    },
+    "ArchiveReload": {
+      "description": "One reload (G4): the 202 answer of ``POST /archive-reloads`` and of ``GET …/{id}``.",
+      "properties": {
+        "bytes_done": {
+          "title": "Bytes Done",
+          "type": "integer"
+        },
+        "bytes_total": {
+          "title": "Bytes Total",
+          "type": "integer"
+        },
+        "error_code": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Error Code"
+        },
+        "expires_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Expires At"
+        },
+        "first_day": {
+          "format": "date",
+          "title": "First Day",
+          "type": "string"
+        },
+        "id": {
+          "title": "Id",
+          "type": "integer"
+        },
+        "last_day": {
+          "format": "date",
+          "title": "Last Day",
+          "type": "string"
+        },
+        "lookup_id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Lookup Id"
+        },
+        "ready_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Ready At"
+        },
+        "reason": {
+          "enum": [
+            "lookup",
+            "search"
+          ],
+          "title": "Reason",
+          "type": "string"
+        },
+        "requested_at": {
+          "format": "date-time",
+          "title": "Requested At",
+          "type": "string"
+        },
+        "requested_by": {
+          "title": "Requested By",
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "queued",
+            "loading",
+            "ready",
+            "failed",
+            "expired"
+          ],
+          "title": "Status",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "requested_by",
+        "requested_at",
+        "reason",
+        "lookup_id",
+        "first_day",
+        "last_day",
+        "status",
+        "bytes_total",
+        "bytes_done",
+        "error_code",
+        "ready_at",
+        "expires_at"
+      ],
+      "title": "ArchiveReload",
+      "type": "object"
+    },
+    "ArchiveReloadList": {
+      "description": "``GET /archive-reloads``: the active reloads first, then the recent ones.",
+      "properties": {
+        "items": {
+          "items": {
+            "$ref": "#/components/schemas/ArchiveReload"
+          },
+          "title": "Items",
+          "type": "array"
+        }
+      },
+      "required": [
+        "items"
+      ],
+      "title": "ArchiveReloadList",
+      "type": "object"
+    },
+    "ArchiveReloadRequest": {
+      "description": "Body of ``POST /archive-reloads`` (G9).",
+      "properties": {
+        "first_day": {
+          "format": "date",
+          "title": "First Day",
+          "type": "string"
+        },
+        "last_day": {
+          "format": "date",
+          "title": "Last Day",
+          "type": "string"
+        },
+        "lookup_id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Lookup Id"
+        },
+        "reason": {
+          "enum": [
+            "lookup",
+            "search"
+          ],
+          "title": "Reason",
+          "type": "string"
+        }
+      },
+      "required": [
+        "reason",
+        "first_day",
+        "last_day"
+      ],
+      "title": "ArchiveReloadRequest",
+      "type": "object"
+    },
+    "ArchivedRange": {
+      "description": "The search answer's ``archived`` field (G8): the part of the range outside the window.",
+      "properties": {
+        "first_day": {
+          "format": "date",
+          "title": "First Day",
+          "type": "string"
+        },
+        "last_day": {
+          "format": "date",
+          "title": "Last Day",
+          "type": "string"
+        }
+      },
+      "required": [
+        "first_day",
+        "last_day"
+      ],
+      "title": "ArchivedRange",
       "type": "object"
     },
     "AssignRequest": {
@@ -11667,6 +11871,16 @@
     },
     "SearchPage": {
       "properties": {
+        "archived": {
+          "anyOf": [
+            {
+              "$ref": "#/components/schemas/ArchivedRange"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "expires_at": {
           "format": "date-time",
           "title": "Expires At",

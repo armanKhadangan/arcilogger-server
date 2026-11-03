@@ -391,16 +391,25 @@ class StatusRows:
         )
 
     def attributor(
-        self, session: Session, settings: LookupSettings, untrusted: frozenset[str]
+        self,
+        session: Session,
+        settings: LookupSettings,
+        untrusted: frozenset[str],
+        *,
+        reads_from: datetime | None = None,
+        reads_until: datetime | None = None,
     ) -> Attributor:
         """The attributor of a lookup: lease facts read for the moment (2.7), the format note
-        with this row's time and author (D29)."""
+        with this row's time and author (D29), no log row before ``reads_from`` or after
+        ``reads_until`` (G7)."""
         return Attributor(
             session,
             settings,
             untrusted,
             lookup=True,
             format_verified=(self.format_verified_at, self.format_verified_by),
+            reads_from=reads_from,
+            reads_until=reads_until,
         )
 
     def last_change(self, name: str) -> tuple[datetime, str, bool] | None:
@@ -884,7 +893,14 @@ class _Lookup:
         # takes longer (~0.8 s) than the query itself. Off for this transaction only.
         self.session.execute(text("SET LOCAL jit = off"))
         self.status = StatusRows.load(self.session)
-        self.attributor = self.status.attributor(self.session, self.settings, self.untrusted)
+        reads_from, reads_until = self._reads()
+        self.attributor = self.status.attributor(
+            self.session,
+            self.settings,
+            self.untrusted,
+            reads_from=reads_from,
+            reads_until=reads_until,
+        )
         window, notes = data_window(self.session, self.request.at, layout=self.layout, now=self.now)
         self.explanations.extend(notes)
         self._watermark_note()
@@ -907,8 +923,31 @@ class _Lookup:
         if missing:
             self.explanations.append(explain("chain_missing", count=missing))
         unconverted = self._unconverted(matches)
+        if self.attributor.clamped:
+            self.explanations.append(
+                explain(
+                    "lookback_clamped_to_window",
+                    day=site_day(reads_from).isoformat(),
+                    last=site_day(reads_until).isoformat(),
+                )
+            )
         attribution, matches = self._source_clocks(attribution, matches, plan)
         return self._outcome(mode, matches, attribution, window, plan, unconverted)
+
+    def _reads(self) -> tuple[datetime, datetime]:
+        """The start of the first day and the end of the last day the lookup reads (G7,
+        :func:`.days.reads_from`, :func:`.days.reads_until`): the days the API checked (409
+        ``archive_reload_required``) with the same settings."""
+        # The days module imports this one (its DNS default), so it is imported here.
+        from arcilogger_worker.lookup.days import reads_from, reads_until
+
+        lookback = int(
+            get_setting(self.session, "lookup.dns_lookback_seconds", DEFAULT_DNS_LOOKBACK_SECONDS)
+        )
+        return (
+            reads_from(self.request, self.settings, dns_lookback_seconds=lookback),
+            reads_until(self.request, self.settings, dns_lookback_seconds=lookback),
+        )
 
     def _across_chains(
         self, attribution: AttributionChain | None, matches: list[NatMatch]

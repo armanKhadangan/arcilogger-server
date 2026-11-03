@@ -20,6 +20,11 @@ export type ArchiveReloadErrorCode =
   | 'archive_day_not_in_vault' // a day with no sealed manifest (not sealed, or removed)
   | 'archive_reload_disk_low'; // the load would leave less than 15 % free on the database drive
 
+/** `error_code` of a `failed` reload, set by ArciIngest while it loads. */
+export type ArchiveReloadFailureCode =
+  | 'archive_day_not_in_vault' // vault retention removed a day after the request was queued
+  | 'archive_file_unreadable'; // a sealed file kept failing to read or no longer matched
+
 /** Body of `POST /archive-reloads` (G9). */
 export interface ArchiveReloadRequest {
   reason: ArchiveReloadReason;
@@ -45,7 +50,7 @@ export interface ArchiveReload {
   bytes_total: number;
   /** Σ committed ingest offset; progress is `bytes_done / bytes_total`. */
   bytes_done: number;
-  /** Set when `status` is `failed`. */
+  /** Set when `status` is `failed`: one of `ArchiveReloadFailureCode`. */
   error_code: string | null;
   ready_at: DateTimeString | null;
   /** `ready_at` + `db.reload_keep_days`; then the window job drops the days again. */
@@ -65,6 +70,11 @@ export interface ArchiveReloadRequired {
   bytes_total: number;
   /** The estimated database growth: `bytes_total` times the measured factor (G5). */
   estimated_bytes: number;
+  /**
+   * `db.reload_keep_days` at the time of the answer: the days a reload keeps them (C23; a lookup
+   * or search user cannot read `/settings`).
+   */
+  keep_days: number;
 }
 
 /** The search answer's `archived` field (G8): the part of the range outside the window. */

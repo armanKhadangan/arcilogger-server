@@ -314,6 +314,9 @@ class Attributor:
     each ``fg_dhcp`` chain's record at the moment from the rows (one query per chain); the usage
     rollups leave it off and use the stored refs. ``format_verified``: the time and author of
     the ``dhcp.fortigate_format_verified`` settings row, which :func:`.engine.run_lookup` reads.
+    ``reads_from`` and ``reads_until``: the earliest and the latest device time of a log row a
+    lookup reads (:func:`.days.reads_from`, :func:`.days.reads_until`); a read reaching past
+    either reads up to it, and :attr:`clamped` says so (``lookback_clamped_to_window``).
     """
 
     def __init__(
@@ -324,12 +327,18 @@ class Attributor:
         *,
         lookup: bool = False,
         format_verified: tuple[datetime | None, str | None] = (None, None),
+        reads_from: datetime | None = None,
+        reads_until: datetime | None = None,
     ) -> None:
         self.session = session
         self.settings = settings
         self.untrusted = frozenset(untrusted)
         self.lookup = lookup
         self.format_verified = format_verified
+        self.reads_from = reads_from
+        self.reads_until = reads_until
+        #: A read cut at :attr:`reads_from` or :attr:`reads_until` (the rows beyond were not read).
+        self.clamped = False
         self._kept: ColumnElement[bool] | None = None
         #: Per ``(lease id, moment)`` the lease's own newest DHCP record (``None``: none).
         self._records: dict[tuple[int, datetime], _Record | None] = {}
@@ -489,12 +498,13 @@ class Attributor:
     def _row_record(self, lease: StoredLease, at: datetime) -> _Record | None:
         if self._kept is None:
             self._kept = kept(self.settings, self.untrusted)
+        since = self._from(lease.start)
         row = self.session.execute(
             select(FgDhcp.time, FgDhcp.logid, FgDhcp.lease, FgDhcp.extra["vd"].astext)
             .where(
                 FgDhcp.ip == lease.ip,
                 FgDhcp.mac == lease.mac,
-                FgDhcp.time >= lease.start,
+                FgDhcp.time >= since,
                 FgDhcp.time <= at,
                 self._kept,
             )
@@ -502,6 +512,8 @@ class Attributor:
             .limit(1)
         ).first()
         if row is None:
+            # A newest row before the lookup's days is not read: the stored refs decide.
+            self.clamped |= since > lease.start
             return None
         action = self.settings.fortigate_logids.get(str(row.logid))
         return _Record(
@@ -534,6 +546,22 @@ class Attributor:
             usable_lease(self.settings, int(logged.group(1)) if logged else None),
         )
 
+    def _from(self, low: datetime, *, mark: bool = False) -> datetime:
+        """``low``, no earlier than :attr:`reads_from` (a lookup reads no log row before its
+        days, G7); with ``mark``, :attr:`clamped` when it was earlier."""
+        if self.reads_from is None or low >= self.reads_from:
+            return low
+        self.clamped |= mark
+        return self.reads_from
+
+    def _until(self, high: datetime) -> datetime:
+        """``high``, no later than :attr:`reads_until` (a lookup reads no log row after its
+        days, G7); :attr:`clamped` when it was later."""
+        if self.reads_until is None or high <= self.reads_until:
+            return high
+        self.clamped = True
+        return self.reads_until
+
     def _released(self, lease: StoredLease, at: datetime) -> datetime | None:
         """The time of the RELEASE that is the lease's own record at ``at`` (lookups of an
         ``fg_dhcp`` lease only), else ``None``."""
@@ -560,6 +588,10 @@ class Attributor:
         self, lease: StoredLease, released: datetime, at: datetime
     ) -> StoredLease | None:
         grace = timedelta(seconds=self.settings.arp_release_grace_seconds)
+        # A late-mapped RELEASE is known from its row only (:meth:`_row_record`, never before
+        # :attr:`reads_from`; one the build mapped ended the lease and opened the ARP interval
+        # itself), so no test reaches this bound; it keeps every read inside the days anyway.
+        since = self._from(released + grace, mark=True)
         rows = self.session.execute(
             select(
                 MtArp.id,
@@ -575,7 +607,7 @@ class Attributor:
             .where(
                 MtArp.ip == lease.ip,
                 MtArp.mac == lease.mac,
-                MtArp.time > released + grace,
+                MtArp.time > since,
                 MtArp.time <= at,
             )
             .order_by(MtArp.time.desc(), MtArp.id.desc())
@@ -1005,8 +1037,8 @@ class Attributor:
             self.settings,
             self.untrusted,
             sorted({subnet for subnet, _ in scopes.values()}),
-            min(moments) - width,
-            max(moments) + width,
+            self._from(min(moments) - width, mark=True),
+            self._until(max(moments) + width),
         )
         for group in groups:
             for index, chain in enumerate(group):
@@ -1041,7 +1073,7 @@ class Attributor:
         """The chains the post-lease check looks at: a DHCP lease, still ``high`` or ``medium``;
         each with its group and the lower end of its window: the lease's last DHCP record at
         or before the moment (its start without one), for a MikroTik lease no earlier than
-        ``cap`` before the moment."""
+        ``cap`` before the moment, and never before :attr:`reads_from` (the lookup's days)."""
         targets = []
         for group in groups:
             for chain in group:
@@ -1053,7 +1085,7 @@ class Attributor:
                 since = self._last_record(lease, chain.at)
                 if lease.source_table != FG_DHCP_TABLE:
                     since = max(since, chain.at - cap)
-                targets.append((group, chain, lease, since))
+                targets.append((group, chain, lease, self._from(since, mark=True)))
         return targets
 
     def _last_record(self, lease: StoredLease, at: datetime) -> datetime:
@@ -1065,9 +1097,9 @@ class Attributor:
         mapped FortiGate DHCP lines of trusted senders that name a target's IP or MAC and that
         D25 and D28 do not refuse (:func:`event_kept`), matched to each target's own window
         ``(since, at]`` in memory."""
-        targets = self._targets(groups, UNCONVERTED_WINDOW)
         logids = sorted(self.settings.fortigate_logids)
-        if not targets or not logids:
+        targets = self._targets(groups, UNCONVERTED_WINDOW) if logids else []
+        if not targets:
             return
         ip = FgEvent.extra["ip"].astext
         mac = func.lower(func.replace(FgEvent.extra["mac"].astext, "-", ":"))
@@ -1121,13 +1153,13 @@ class Attributor:
         its constant list, which tests each row by a hash: it reads every row of the MACs, and
         in the same form it was slower on monthly partitions (3.8, measured with daily ones).
         """
-        targets = self._targets(groups, MISSED_MOVE_WINDOW)
         assigned = sorted(
             logid
             for logid, meaning in self.settings.fortigate_logids.items()
             if meaning == "assigned"
         )
-        if not targets or not assigned:
+        targets = self._targets(groups, MISSED_MOVE_WINDOW) if assigned else []
+        if not targets:
             return
         if self._kept is None:
             self._kept = kept(self.settings, self.untrusted)
