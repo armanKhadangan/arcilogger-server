@@ -22,6 +22,13 @@ POST (no personal data in access logs, decision 10).
   the response. No row leaves the API without its audit entry.
 * **Saved searches** (``/search/saved``): personal (:mod:`~.search.saved`).
 
+**The database window** (Wave 5 contract §5, G8): a range that starts before the window
+(``db.retention_days``) answers with the rows the database holds plus ``archived``, the days of
+the range that are gone from the database and in the sealed vault, or being loaded again
+(:func:`arcilogger_api.archive.service.check_window`, in the snapshot the rows are read from);
+when every day of the range is gone, the answer is 409 ``archive_reload_required`` with what a
+reload would bring back as ``details``. ``POST /archive-reloads`` brings the days back.
+
 Errors are ``search.messages`` (Turkish first, with the span of a refused query in
 ``details``); the event drawer (``GET /search/event``) reads one row by its key and is audited
 (``search.event``): a row that is not there is 404 ``search_event_not_found``, a read that ran out
@@ -34,7 +41,7 @@ import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from time import monotonic
 from typing import Annotated, Any, Final
 
@@ -45,6 +52,8 @@ from sqlalchemy import func, select, text, update
 from sqlalchemy.orm import Session
 from starlette.background import BackgroundTask
 
+from arcilogger_api.archive.models import ArchivedRange
+from arcilogger_api.archive.service import check_window, required_error
 from arcilogger_api.audit import record_audit
 from arcilogger_api.auth.privacy import require_privacy_notice
 from arcilogger_api.deps import ConfigDep, DbSession, LayoutDep, TtlCache
@@ -114,6 +123,7 @@ from arcilogger_api.search.windows import (
 )
 from arcilogger_api.security import CurrentUser, client_ip, require
 from arcilogger_core.config import Config
+from arcilogger_core.layout import Layout
 from arcilogger_core.timeutil import site_day, utc_now
 from arcilogger_db.kinds import kind_of, kind_of_row
 from arcilogger_db.models import TIME_SERIES_TABLES, Base, Message, SavedSearch, Source, Vlan
@@ -287,7 +297,22 @@ def _oldest_notice(db: Session, state: SearchState, start: datetime) -> list[dic
     return [notice("vault_only_before", date=site_day(oldest.time).isoformat())]
 
 
-def _page_answer(entry: Entry, items: list[dict[str, Any]], page: Page) -> SearchPage:
+def _archived(
+    db: Session, layout: Layout, start: datetime, end: datetime, *, refuse: bool
+) -> ArchivedRange | None:
+    """The part of ``[start, end)`` gone from the database (G8); with ``refuse`` 409
+    ``archive_reload_required`` when that is the whole range. Called in the read snapshot of the
+    search: :func:`~arcilogger_api.archive.service.check_window` holds the partition lock shared
+    until its end, so no reload or drop starts between the check and the rows."""
+    check = check_window(db, layout, site_day(start), site_day(end - timedelta(microseconds=1)))
+    if refuse and check.all_gone and check.reloadable():
+        raise required_error(db, check)
+    return check.archived()
+
+
+def _page_answer(
+    entry: Entry, items: list[dict[str, Any]], page: Page, archived: ArchivedRange | None
+) -> SearchPage:
     return SearchPage.model_validate(
         {
             "search_id": entry.search_id,
@@ -299,6 +324,7 @@ def _page_answer(entry: Entry, items: list[dict[str, Any]], page: Page) -> Searc
             "next_cursor": None if page.next_cursor is None else encode(page.next_cursor),
             "scan": page.scan.to_dict(),
             "notices": [*entry.plan.notices, *entry.notices],
+            "archived": archived,
         }
     )
 
@@ -312,6 +338,7 @@ def run_search(
     request: Request,
     db: DbSession,
     config: ConfigDep,
+    layout: LayoutDep,
     user: ReaderDep,
     state: StateDep,
 ) -> SearchPage:
@@ -347,6 +374,8 @@ def run_search(
     }
     try:
         with reading(db, state, user, settings) as storage:
+            # In the snapshot the rows are read from, under the shared partition lock (G8).
+            archived = _archived(db, layout, start, end, refuse=True)
             page = run_page(
                 db,
                 plan,
@@ -404,7 +433,7 @@ def run_search(
         )
     db.commit()  # audited before the rows leave the API
     state.registry.add(entry)
-    return _page_answer(entry, items, page)
+    return _page_answer(entry, items, page, archived)
 
 
 @router.post("/page")
@@ -412,6 +441,7 @@ def next_page(
     body: SearchPageRequest,
     db: DbSession,
     config: ConfigDep,
+    layout: LayoutDep,
     user: ReaderDep,
     state: StateDep,
 ) -> SearchPage:
@@ -425,6 +455,7 @@ def next_page(
     budget = _seconds(settings, "search.request_budget_ms")
     try:
         with reading(db, state, user, settings) as storage:
+            archived = _archived(db, layout, entry.start, entry.end, refuse=False)
             page = run_page(
                 db,
                 entry.plan,
@@ -440,7 +471,7 @@ def next_page(
             items = page_rows(db, entry.plan, page.rows, site)
     except SearchTimeoutError:
         raise _timeout(settings) from None
-    return _page_answer(entry, items, page)
+    return _page_answer(entry, items, page, archived)
 
 
 @router.post("/stats")
