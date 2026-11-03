@@ -23,8 +23,9 @@ zlib build may compress the sealed files differently. The keys are **test-only m
 them worthless for anything but this fixture. No key is written to the fixture.
 
 ``SHA256SUMS`` pins every file, and ``tests/test_vault_w5_fixture.py`` fails when today's code
-reads the fixture differently. The tests never run this script: the fixture is regenerated only
-on purpose (a format that changes for a reason), with the reason in the commit message.
+reads the fixture differently. The tests never run this script (one checks only its settings):
+the fixture is regenerated only on purpose (a format that changes for a reason), with the
+reason in the commit message.
 The days are sealed with ``seal.compression = "gzip"``, not today's ``xz`` default: the fixture
 pins the format of the days sealed before Wave 5's xz sealing (W5-H), which every later release
 must still read.
@@ -284,7 +285,12 @@ def sums(folder: Path) -> str:
 
 
 def write(target: Path) -> None:
-    shutil.rmtree(target, ignore_errors=True)
+    """Write the fixture into ``target``, replacing an earlier fixture there. Any other folder
+    that is not empty (a mistyped ``--out``) is refused, never deleted."""
+    if target.exists():
+        if any(target.iterdir()) and not (target / "SHA256SUMS").is_file():
+            raise SystemExit(f"{target}: not empty and not a fixture (no SHA256SUMS); refused")
+        shutil.rmtree(target)
     target.mkdir(parents=True)
     with tempfile.TemporaryDirectory() as folder:
         layout, root = _make(Path(folder))
