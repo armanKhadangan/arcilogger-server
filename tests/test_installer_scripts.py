@@ -345,7 +345,7 @@ def test_bundled_components_carry_verified_licence_texts() -> None:
     assert "licence_sha256" in build
     assert "'licenses/' + $licence.FileName" in build
     script = INSTALL_SCRIPT.read_text(encoding="utf-8-sig")
-    assert "'installer', 'scripts', 'tasks', 'config', 'docs', 'licenses'" in script
+    assert "'installer', 'scripts', 'tasks', 'desktop', 'config', 'docs', 'licenses'" in script
     assert "THIRD-PARTY-NOTICES.txt" in script
 
 

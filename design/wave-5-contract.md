@@ -791,6 +791,10 @@ These change the contract text above. Where a section says otherwise, the clarif
   - `api/src/arcilogger_api/sealinfo.py` passes them too (W5-C).
   - The legal grade written at seal time (`seal.py`) stays without lists: no list issued after a fresh stamp exists yet, and the day check later re-judges it with lists.
 - **C20 – A stored list whose file is gone** counts like a changed one (C14). The run records `stored_file_changed` for that URL and exits 1, even when it stores the same bytes again. A deletion is something a person must see.
+- **C21 – `supported` follows the provider's credit query, not its name** (answer on #117).
+  - `false` for every provider without a credit query: `rfc3161` (`Rfc3161Client.credits()` returns `None`, `core/src/arcilogger_core/tsa/client.py:58-59`) and `turktrust`.
+  - `true` for `zamane` and `mock` (its simulated balance).
+  - C3's "today `turktrust`" missed `rfc3161`.
 
 ## Owner questions
 
