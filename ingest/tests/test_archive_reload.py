@@ -39,8 +39,10 @@ import pytest
 from sqlalchemy import Engine, event, select, text
 from sqlalchemy.orm import Session
 
+from arcilogger_core import sealedfile
 from arcilogger_core.immutability import unlock
 from arcilogger_core.rawlog import format_line
+from arcilogger_core.sealedfile import Compression
 from arcilogger_core.timeutil import SITE_TZ, day_window
 from arcilogger_db.models import TIME_SERIES_TABLES, Base
 from arcilogger_db.partitions import PARTITION_LOCK_KEY, drop_before, ensure_days
@@ -261,8 +263,15 @@ def drop(engine: Engine, cutoff: date) -> None:
         drop_before(connection, cutoff)
 
 
-def test_a_dropped_day_comes_back_identically(world: World, db_engine: Engine) -> None:
+@pytest.mark.parametrize("compression", ["gzip", "xz"])
+def test_a_dropped_day_comes_back_identically(
+    world: World, db_engine: Engine, compression: Compression
+) -> None:
+    """Days sealed before W5-H (gzip) and after it (xz) come back alike."""
+    world.reconfigure(seal={"compression": compression})
     load_day(world, db_engine)
+    manifest = json.loads(world.layout.manifest(DAY).read_bytes())
+    assert {sealedfile.format_of(entry["path"]) for entry in manifest["files"]} == {compression}
     before = snapshot(db_engine)
     assert len(before["messages"]) == 40 + 30 + 5
     assert before["mt_dhcp"]
