@@ -96,12 +96,14 @@ describe('archive locale area', () => {
         expect(lang.replace(/\{\{[^}]+\}\}/g, ''), key).not.toMatch(/[{}]|%\(|\$\{/);
       }
     }
-    expect(placeholders(tr.get('archive.card.clipped') ?? '')).toEqual([
-      'first',
-      'last',
-      'max',
-      'max',
-    ]);
+    for (const reason of ['lookup', 'search']) {
+      expect(placeholders(tr.get(`archive.card.clipped.${reason}`) ?? ''), reason).toEqual([
+        'first',
+        'last',
+        'max',
+        'max',
+      ]);
+    }
     expect(placeholders(tr.get('archive.progress.of') ?? '')).toEqual(['done', 'percent', 'total']);
     expect(placeholders(tr.get('archive.failure.unknown') ?? '')).toEqual(['code']);
   });
@@ -126,12 +128,40 @@ describe('archive locale area', () => {
     expect(en.get('archive.failure.unknown')).toBe('The reload failed ({{code}}).');
   });
 
-  it('names db.reload_keep_days with its default and the audit in the dialog', () => {
-    expect(tr.get('archive.dialog.body')).toContain('db.reload_keep_days');
-    expect(tr.get('archive.dialog.body')).toContain('(varsayılan 7 gün)');
+  it('says the keep time in plain words with its default, and the audit, in the dialog', () => {
+    // Read by users who are no administrators: the setting's key is never shown (#134).
+    expect(tr.get('archive.dialog.body')).toContain(
+      'yöneticinin ayarladığı süre (varsayılan 7 gün)',
+    );
+    expect(en.get('archive.dialog.body')).toContain(
+      'the time the administrator set (7 days by default)',
+    );
+    for (const [key, text] of [...tr, ...en]) {
+      expect(text, key).not.toMatch(/reload_keep_days|\b[a-z]+\.[a-z_]+_[a-z_]+\b/);
+    }
     expect(tr.get('archive.dialog.body')).toContain('denetim kaydına yazılır');
     expect(en.get('archive.dialog.body')).toContain('(7 days by default)');
     expect(en.get('archive.dialog.body')).toContain('written to the audit log');
+  });
+
+  it('the queued text claims no other reload ahead of this one (#134)', () => {
+    expect(tr.get('archive.status.queued')).toBe('Sırada: yükleme kısa süre içinde başlar.');
+    expect(en.get('archive.status.queued')).toBe('Queued: loading starts shortly.');
+    expect(fold(tr.get('archive.status.queued') ?? '')).not.toMatch(/başka|bitince/);
+    expect(en.get('archive.status.queued')).not.toMatch(/another|finished/i);
+  });
+
+  it('the clipped note of a lookup asks for no range: a lookup has none (#134)', () => {
+    expect(tr.get('archive.card.clipped.search')).toContain('aralığı daraltın');
+    expect(en.get('archive.card.clipped.search')).toContain('narrow the range');
+    expect(fold(tr.get('archive.card.clipped.lookup') ?? '')).not.toMatch(/aralı/);
+    expect(en.get('archive.card.clipped.lookup')).not.toMatch(/range/i);
+    expect(tr.get('archive.card.clipped.lookup')).toContain(
+      'yeniden çalıştığında onlar için yeni bir yükleme önerilir',
+    );
+    expect(en.get('archive.card.clipped.lookup')).toContain(
+      'its re-run offers another reload for them',
+    );
   });
 
   it('every key reaches its own text through i18next', () => {

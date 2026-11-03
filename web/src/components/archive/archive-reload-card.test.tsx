@@ -38,9 +38,9 @@ const LOOKUP_409_EN = ARCHIVE_LOOKUP_REQUIRED.body.error.message_en;
 const RANGE = { first_day: '2026-10-04', last_day: '2026-10-05' };
 
 const DIALOG_TR =
-  '04.10.2026 – 05.10.2026 günlerinin kayıtları mühürlü arşivden veritabanına yüklenir ve db.reload_keep_days ayarının süresi boyunca (varsayılan 7 gün) orada kalır; sonra yeniden kaldırılır. Bu, o günlerin kişisel verilerini de veritabanına geri getirir. İstek denetim kaydına yazılır.';
+  '04.10.2026 – 05.10.2026 günlerinin kayıtları mühürlü arşivden veritabanına yüklenir ve yöneticinin ayarladığı süre (varsayılan 7 gün) boyunca orada kalır; sonra yeniden kaldırılır. Bu, o günlerin kişisel verilerini de veritabanına geri getirir. İstek denetim kaydına yazılır.';
 const DIALOG_EN =
-  'The records of 04.10.2026 – 05.10.2026 are loaded from the sealed archive into the database and stay there for the db.reload_keep_days setting (7 days by default); then they are removed again. This also brings the personal data of those days back into the database. The request is written to the audit log.';
+  'The records of 04.10.2026 – 05.10.2026 are loaded from the sealed archive into the database and stay there for the time the administrator set (7 days by default); then they are removed again. This also brings the personal data of those days back into the database. The request is written to the audit log.';
 const NOT_IN_VAULT_TR =
   'Yükleme yapılamadı: günlerden biri artık mühürlü arşivde yok (istek beklerken saklama süresi doldu). Bu gün yeniden yüklenemez.';
 const UNREADABLE_TR =
@@ -203,6 +203,21 @@ describe('ArchiveReloadCard — the card', () => {
     await settle();
     expect(posts(calls).map((call) => call.body)).toEqual([
       { reason: 'search', first_day: '2026-09-22', last_day: '2026-10-05' },
+    ]);
+  });
+
+  it('a lookup of more than 14 days: its own note, no range to narrow (#134)', async () => {
+    const calls = serve(() => jsonResponse(202, ARCHIVE_CREATED), ARCHIVE_LOADING);
+    renderCard({ range: { first_day: '2026-09-05', last_day: '2026-10-05' } });
+    const note = screen.getByTestId('archive-reload-clipped');
+    expect(note.textContent).toBe(
+      'Bir yüklemede en çok 14 gün istenebilir: önce pencereye en yakın 14 gün (22.09.2026 – 05.10.2026) yüklenir. Sorgu daha eski günleri de gerektirirse, yeniden çalıştığında onlar için yeni bir yükleme önerilir.',
+    );
+    expect(note).not.toHaveTextContent('aralı');
+    await confirmReload();
+    await settle();
+    expect(posts(calls).map((call) => call.body)).toEqual([
+      { reason: 'lookup', first_day: '2026-09-22', last_day: '2026-10-05' },
     ]);
   });
 
@@ -388,7 +403,8 @@ describe('ArchiveReloadCard — progress and the re-run', () => {
     expect(bar).toHaveAttribute('aria-valuenow', '0');
     const status = screen.getByTestId('archive-reload-status');
     expect(status).toHaveAttribute('role', 'status');
-    expect(status).toHaveTextContent('Sırada: başka bir yükleme bitince başlar.');
+    expect(status).toHaveTextContent('Sırada: yükleme kısa süre içinde başlar.');
+    expect(status).not.toHaveTextContent('başka');
     // The bytes change with every poll: beside the live region, not in it.
     const bytes = screen.getByTestId('archive-reload-bytes');
     expect(bytes).toHaveTextContent('0 B / 63,5 KB yüklendi (%0)');
@@ -536,6 +552,83 @@ describe('ArchiveReloadCard — progress and the re-run', () => {
     expect(within(card()).queryByRole('alert')).not.toBeInTheDocument();
     expect(onReady).toHaveBeenCalledTimes(1);
   });
+
+  it.each([
+    [403, 'forbidden', 'Bu işlem için yetkiniz yok.'],
+    [404, 'not_found', 'Kayıt bulunamadı.'],
+  ] as const)(
+    'a poll refused with %i stops with its error; “Yeniden dene” asks once, then the card follows again',
+    async (status, code, text) => {
+      const refused = errorResponse(status, code, { tr: text, en: text });
+      // The first read, the poll, the first "Yeniden dene", the second one, the poll after it.
+      const calls = serve(
+        () => jsonResponse(202, ARCHIVE_CREATED),
+        ARCHIVE_LOADING,
+        refused,
+        refused,
+        ARCHIVE_LOADING,
+        ARCHIVE_READY,
+      );
+      const { onReady } = renderCard();
+      await confirmReload();
+      await settle();
+      expect(screen.getByTestId('archive-reload-status')).toHaveTextContent('Yükleniyor…');
+      // The poll before the refusal has no button of its own.
+      expect(within(card()).queryByRole('button')).not.toBeInTheDocument();
+      await nextPoll();
+      expect(within(card()).getByRole('alert')).toHaveTextContent(text);
+      const retry = within(card()).getByRole('button', { name: 'Yeniden dene' });
+      expect(retry).toBeVisible();
+      expect(polls(calls)).toHaveLength(2);
+      await act(() => vi.advanceTimersByTimeAsync(10 * ARCHIVE_RELOAD_POLL_MS));
+      expect(polls(calls)).toHaveLength(2);
+
+      // Refused again: one request (the user's), the error and the button stay, no more polls.
+      await user.click(retry);
+      await settle();
+      expect(polls(calls)).toHaveLength(3);
+      expect(polls(calls)[2]?.headers.get(BACKGROUND_HEADER)).toBeNull();
+      expect(posts(calls)).toHaveLength(1);
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+      expect(within(card()).getByRole('alert')).toHaveTextContent(text);
+      expect(within(card()).getByRole('button', { name: 'Yeniden dene' })).toHaveFocus();
+      await act(() => vi.advanceTimersByTimeAsync(10 * ARCHIVE_RELOAD_POLL_MS));
+      expect(polls(calls)).toHaveLength(3);
+
+      // Answered: the error goes, polling resumes until the reload is ready.
+      await user.click(within(card()).getByRole('button', { name: 'Yeniden dene' }));
+      await settle();
+      expect(polls(calls)).toHaveLength(4);
+      expect(within(card()).queryByRole('alert')).not.toBeInTheDocument();
+      expect(within(card()).queryByRole('button')).not.toBeInTheDocument();
+      // The button is gone: the focus is on the progress, not lost to the page.
+      expect(document.activeElement).not.toBe(document.body);
+      expect(document.activeElement).toContainElement(screen.getByRole('progressbar'));
+      expect(onReady).not.toHaveBeenCalled();
+      await nextPoll();
+      expect(polls(calls)).toHaveLength(5);
+      expect(polls(calls)[4]?.headers.get(BACKGROUND_HEADER)).toBe('1');
+      expect(onReady).toHaveBeenCalledTimes(1);
+      await act(() => vi.advanceTimersByTimeAsync(10 * ARCHIVE_RELOAD_POLL_MS));
+      expect(polls(calls)).toHaveLength(5);
+    },
+  );
+
+  it('“Yeniden dene” of a stopped poll answered with a failed reload: the focus goes to the offered retry', async () => {
+    const refused = errorResponse(404, 'not_found', { tr: 'Kayıt bulunamadı.', en: 'Not found.' });
+    serve(() => jsonResponse(202, ARCHIVE_CREATED), ARCHIVE_LOADING, refused, ARCHIVE_FAILED);
+    renderCard();
+    await confirmReload();
+    await settle();
+    await nextPoll();
+    await user.click(within(card()).getByRole('button', { name: 'Yeniden dene' }));
+    await settle();
+    // No progress any more (the reload failed): the focus is on the reload offered again.
+    expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();
+    const offered = within(card()).getByRole('button', { name: 'Yeniden dene' });
+    expect(offered).toHaveFocus();
+    expect(document.activeElement).not.toBe(document.body);
+  });
 });
 
 describe('ArchiveReloadCard — failed and expired', () => {
@@ -653,6 +746,35 @@ describe('ArchiveReloadCard — English', () => {
       'The days are loaded; they stay in the database until 20.10.2026 07:01:19.',
     );
     expect(status).toHaveTextContent('Running the search again…');
+  });
+
+  it('the lookup’s clipped note, the queued text and a stopped poll in English', async () => {
+    setLanguage('en');
+    serve(
+      () => jsonResponse(202, ARCHIVE_CREATED),
+      ARCHIVE_CREATED,
+      errorResponse(404, 'not_found', { tr: 'Bulunamadı.', en: 'Not found.' }),
+    );
+    renderCard({
+      message: LOOKUP_409_EN,
+      range: { first_day: '2026-09-01', last_day: '2026-10-05' },
+    });
+    const note = screen.getByTestId('archive-reload-clipped');
+    expect(note.textContent).toBe(
+      'One reload may ask for at most 14 days: the 14 days nearest the window (22.09.2026 – 05.10.2026) are reloaded first. If the lookup also needs older days, its re-run offers another reload for them.',
+    );
+    expect(note).not.toHaveTextContent('narrow');
+    await user.click(screen.getByRole('button', { name: 'Reload from the archive' }));
+    await user.click(
+      within(await screen.findByRole('dialog')).getByRole('button', { name: 'Reload' }),
+    );
+    await settle();
+    expect(screen.getByTestId('archive-reload-status')).toHaveTextContent(
+      'Queued: loading starts shortly.',
+    );
+    await nextPoll();
+    expect(within(card()).getByRole('alert')).toHaveTextContent('Not found.');
+    expect(within(card()).getByRole('button', { name: 'Try again' })).toBeVisible();
   });
 
   it('an unknown failure and expired in English', async () => {
