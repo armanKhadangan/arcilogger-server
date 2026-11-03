@@ -94,7 +94,14 @@ class CollectorConfig(_Model):
 
 
 class SealConfig(_Model):
+    #: Format of every file sealed from now on (Wave 5 H1): ``xz`` (seekable xz, the default) or
+    #: ``gzip``. A sealed day is never re-encoded, so days sealed before keep their format.
+    compression: Literal["gzip", "xz"] = "xz"
     gzip_level: int = Field(default=9, ge=1, le=9)
+    #: xz preset (H2): 0 (fast) to 9 (small).
+    xz_preset: int = Field(default=6, ge=0, le=9)
+    #: Threads that compress the independent 16 MiB xz streams; the bytes do not depend on it.
+    xz_threads: int = Field(default=2, ge=1, le=8)
     #: A closed day is sealed only when its spool files were not written for this long.
     quiet_seconds: int = Field(default=30, ge=0)
     #: No message from an expected source for longer than this is recorded as a gap.

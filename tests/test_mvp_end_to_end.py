@@ -172,7 +172,12 @@ def make_config(root: Path, first_day: date, aliases: bool) -> Config:
                 "tcp_port": 0,
                 "fsync_interval_seconds": 0.02,
             },
-            "seal": {"quiet_seconds": 0, "gzip_level": 6, "first_day": first_day.isoformat()},
+            "seal": {
+                "quiet_seconds": 0,
+                "compression": "gzip",
+                "gzip_level": 6,
+                "first_day": first_day.isoformat(),
+            },
             "tsa": {"provider": "mock"},
             "api": {"secure_cookies": False},
             "ingest": {"batch_rows": 5000, "batch_seconds": 0.05, "poll_seconds": 0.02},

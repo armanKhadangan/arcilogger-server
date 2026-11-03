@@ -3,7 +3,8 @@
 For every **closed** receive day D, oldest first, without gaps in the chain:
 
 1. wait until the day's spool files are quiet (the collector closes them after midnight);
-2. for each source: ``gzip -n -9`` equivalent (no name, mtime 0) into the vault, SHA-256 of the
+2. for each source: compression into the vault in the ``[seal] compression`` format (seekable xz
+   by default, or ``gzip -n``; :mod:`arcilogger_core.sealedfile`), SHA-256 of the
    compressed and the uncompressed bytes, line count, first/last receive time, gaps;
 3. compress the day's ARCILOGGER audit log the same way;
 4. build the manifest (RFC 8785 canonical JSON) with the previous day's manifest and token hashes,
@@ -46,7 +47,6 @@ The server clock is not trusted blindly (spec 8.2 "closed day"):
 
 from __future__ import annotations
 
-import gzip
 import hashlib
 import json
 import logging
@@ -64,11 +64,11 @@ from typing import Any
 
 from cryptography import x509
 
-from arcilogger_core import PRODUCT_NAME, __version__
+from arcilogger_core import PRODUCT_NAME, __version__, sealedfile
 from arcilogger_core.alerts import Severity, raise_alert
 from arcilogger_core.canonical import canonical_json
-from arcilogger_core.config import Config
-from arcilogger_core.fsutil import atomic_write_bytes, atomic_write_text, fsync_dir
+from arcilogger_core.config import Config, SealConfig
+from arcilogger_core.fsutil import atomic_write_bytes, atomic_write_text
 from arcilogger_core.immutability import is_locked, lock
 from arcilogger_core.layout import AUDIT_SOURCE, SPOOL_SUFFIX, Layout
 from arcilogger_core.rawlog import RawLineError, received_at
@@ -312,35 +312,33 @@ def audit_summary(name: str, data: bytes) -> tuple[str | None, int]:
 
 
 def gunzip_sha256(path: Path) -> tuple[str, int]:
-    """SHA-256 and line count of the uncompressed content of a ``.gz`` file.
+    """SHA-256 and line count of the uncompressed content of a sealed file of either format.
 
-    Lines are counted by the one rule ARCILOGGER uses everywhere (sealing, ingest, extracts,
-    the standalone verifier): every ``\\n`` ends a line, and a non-empty last line without
-    ``\\n`` (a write torn by a crash or a full disk) counts as a line too.
+    The name stays from the gzip-only days (``chain.py`` imports it); the work is
+    :func:`arcilogger_core.sealedfile.digest`, which counts lines by the one rule ARCILOGGER uses
+    everywhere and raises :class:`~arcilogger_core.sealedfile.SealedFileError` on damaged data.
     """
-    hasher = hashlib.sha256()
-    lines = 0
-    last = b""
-    with gzip.open(path, "rb") as handle:
-        for chunk in iter(lambda: handle.read(CHUNK), b""):
-            hasher.update(chunk)
-            lines += chunk.count(b"\n")
-            last = chunk[-1:]
-    if last not in (b"", b"\n"):
-        lines += 1
-    return hasher.hexdigest(), lines
+    return sealedfile.digest(path)
 
 
-def compress_deterministic(source: Path, target: Path, level: int) -> None:
-    """``gzip -n``: no file name, mtime 0 — the same input gives the same output."""
-    part = target.with_name(target.name + ".part")
-    with source.open("rb") as raw, part.open("wb") as out:
-        with gzip.GzipFile(filename="", mode="wb", compresslevel=level, fileobj=out, mtime=0) as gz:
-            shutil.copyfileobj(raw, gz, CHUNK)
-        out.flush()
-        os.fsync(out.fileno())
-    part.replace(target)
-    fsync_dir(target.parent)
+def compress_deterministic(source: Path, target: Path, config: SealConfig) -> None:
+    """Seal ``source`` into ``target`` in the format of its suffix: the same input gives the same
+    output (gzip without a name and with mtime 0; xz as independent streams in order).
+
+    The same file in the other format (an attempt made before ``[seal] compression`` changed) is
+    removed first, with its ``.part``, so a vault day never holds both: readers would refuse the
+    pair as ``sealed_file_ambiguous``.
+    """
+    for other in sealedfile.other_formats(target):
+        other.unlink(missing_ok=True)
+        other.with_name(other.name + ".part").unlink(missing_ok=True)
+    sealedfile.write(
+        source,
+        target,
+        gzip_level=config.gzip_level,
+        xz_preset=config.xz_preset,
+        xz_threads=config.xz_threads,
+    )
 
 
 def summarize_spool(
@@ -451,7 +449,8 @@ class Sealer:
             try:
                 day = date.fromisoformat(file.stem)
                 state = json.loads(file.read_text(encoding="utf-8"))
-            except (OSError, ValueError):
+            except (OSError, ValueError, RecursionError):
+                # A damaged file (a deeply nested one makes the parser recurse) is read as missing.
                 continue
             if isinstance(state, dict):
                 states[day] = state
@@ -1065,8 +1064,8 @@ class Sealer:
             stats = summarize_spool(path, gap, window)
             if stats["unterminated_last_line"]:
                 log.warning("%s: the last line has no line end (torn write); sealed as it is", path)
-            target = vault_day / f"{source}.log.gz"
-            compress_deterministic(path, target, self.config.seal.gzip_level)
+            target = vault_day / sealedfile.log_name(source, self.config.seal.compression)
+            compress_deterministic(path, target, self.config.seal)
             files.append(
                 FileSummary(
                     source=source,
@@ -1317,18 +1316,18 @@ class Sealer:
 
     def _audit(self, day: date, vault_day: Path) -> dict[str, Any]:
         source = self.layout.audit_spool(day)
-        target = vault_day / "audit.jsonl.gz"
+        target = vault_day / sealedfile.audit_name(self.config.seal.compression)
         if source.exists():
             data = source.read_bytes()
             last_hash, entries = audit_summary(source.name, data)
-            compress_deterministic(source, target, self.config.seal.gzip_level)
+            compress_deterministic(source, target, self.config.seal)
             # The manifest describes exactly the bytes that were checked.
-            if gunzip_sha256(target)[0] != hashlib.sha256(data).hexdigest():
+            if self._digest(target)[0] != hashlib.sha256(data).hexdigest():
                 raise SealError(f"{source.name} changed while it was being sealed")
         else:
             empty = vault_day / ".audit-empty"
             empty.write_bytes(b"")
-            compress_deterministic(empty, target, self.config.seal.gzip_level)
+            compress_deterministic(empty, target, self.config.seal)
             empty.unlink()
             last_hash, entries = None, 0
         return {
@@ -1383,12 +1382,20 @@ class Sealer:
             path = self.layout.vault / entry["path"]
             if sha256_file(path) != entry["sha256"]:
                 raise SealError(f"{entry['path']}: compressed hash mismatch")
-            digest, lines = gunzip_sha256(path)
+            digest, lines = self._digest(path)
             if digest != entry["sha256_uncompressed"] or lines != entry["lines"]:
                 raise SealError(f"{entry['path']}: content does not match the spool")
         audit = manifest["audit_log"]
         if sha256_file(self.layout.vault / audit["path"]) != audit["sha256"]:
             raise SealError("audit log hash mismatch")
+
+    @staticmethod
+    def _digest(path: Path) -> tuple[str, int]:
+        """:func:`gunzip_sha256`, with damaged data reported as a seal failure."""
+        try:
+            return gunzip_sha256(path)
+        except sealedfile.SealedFileError as exc:
+            raise SealError(str(exc)) from exc
 
     def _pending_deletions(self) -> list[dict[str, str]]:
         folder = self.layout.deletions

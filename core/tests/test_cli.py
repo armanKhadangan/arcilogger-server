@@ -34,6 +34,7 @@ address = "172.31.255.1"
 
 [seal]
 quiet_seconds = 0
+compression = "gzip"
 
 [tsa]
 provider = "mock"

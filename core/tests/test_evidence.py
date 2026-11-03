@@ -164,7 +164,7 @@ def seal_vault(root: Path, key_type: KeyType, days: list[date] = DAYS) -> Vault:
             "secrets_dir": str(root),
             "site_name": SITE_NAME,
             "sources": SOURCES,
-            "seal": {"quiet_seconds": 0, "gzip_level": 6},
+            "seal": {"quiet_seconds": 0, "compression": "gzip", "gzip_level": 6},
             "tsa": {"provider": "mock"},
         }
     )
