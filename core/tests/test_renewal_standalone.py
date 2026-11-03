@@ -19,7 +19,7 @@ from typing import Any
 
 import pytest
 from cryptography import x509
-from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives import hashes, serialization
 
 from arcilogger_core.canonical import canonical_json
 from arcilogger_core.evidence.standalone import verify as sv
@@ -38,8 +38,9 @@ from arcilogger_core.tsa.verify import inspect_token
 
 from .renewal_world import CNA, DAY, RenewalWorld, day_token_path, make_world
 from .test_evidence import findings, in_process, isolated
-from .test_legal_grade import ProductionLikeProvider
+from .test_legal_grade import SIMULATED_POLICY, ProductionLikeProvider
 from .test_renewal import _revoking
+from .test_revocation import _store
 
 CONTRACT = Path(__file__).resolve().parents[2] / "design" / "wave-5-contract.md"
 FAR = CNA + timedelta(days=1825)
@@ -200,20 +201,28 @@ def _entry_of(rw: RenewalWorld, record: str) -> RecordEntry:
 # -- what never counts -----------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("kind", ["mock", "claim_on_mock_root", "test_reason"])
+@pytest.mark.parametrize(
+    "kind",
+    ["mock", "claim_on_mock_root", "real_policy_on_mock_root", "test_policy", "test_reason"],
+)
 def test_a_mock_renewal_record_in_a_package_never_counts(
     rw: RenewalWorld, tmp_path: Path, kind: str
 ) -> None:
     """D5: a record of the mock provider (``reason: "test"``), a record that claims legal grade
-    but carries a test stamp (2.999 policy, test root) and a legal stamp of a record written as
-    a test: the day stays due."""
+    but carries a test stamp (2.999 policy and test root, or either one alone) and a legal stamp
+    of a record written as a test: the day stays due."""
     at = CNA - timedelta(days=100)
     rw.set_now(at)
     if kind == "mock":
         rw.write_renewal("2031-06-23-1", [rw.day_entry()], rw.mock_provider(FAR))
-    elif kind == "claim_on_mock_root":
+    elif kind in ("claim_on_mock_root", "real_policy_on_mock_root"):
         rw.mock_signer(FAR)
+        if kind == "real_policy_on_mock_root":
+            rw.tsa.policy = SIMULATED_POLICY
         rw.write_renewal("2031-06-23-1", [rw.day_entry()], ProductionLikeProvider(rw.tsa))
+    elif kind == "test_policy":  # the legal CA's certificate, a policy under 2.999
+        rw.legal_tsa.policy = sv.TEST_POLICY_PREFIX + "5651.1"
+        rw.write_renewal("2031-06-23-1", [rw.day_entry()], rw.legal_provider(FAR))
     else:  # build_record ties the reason to the claim; a hand edit does not
         path = rw.write_renewal("2031-06-23-1", [rw.day_entry()], rw.legal_provider(FAR))
         record = json.loads(path.read_bytes())
@@ -252,6 +261,65 @@ def test_a_revoked_renewal_never_counts(rw: RenewalWorld, tmp_path: Path) -> Non
     assert code == "renewal-covered"
 
 
+def _listing(
+    rw: RenewalWorld, certificate: x509.Certificate, at: datetime, hold: bool
+) -> x509.CertificateRevocationList:
+    """A list of the legal CA naming ``certificate`` at ``at``: revoked, or on hold."""
+    entry = x509.RevokedCertificateBuilder().serial_number(certificate.serial_number)
+    entry = entry.revocation_date(at)
+    if hold:
+        entry = entry.add_extension(x509.CRLReason(x509.ReasonFlags.certificate_hold), False)
+    builder = (
+        x509.CertificateRevocationListBuilder()
+        .issuer_name(rw.legal.root.subject)
+        .last_update(at + timedelta(days=1))
+        .next_update(at + timedelta(days=8))
+        .add_revoked_certificate(entry.build())
+    )
+    return builder.sign(rw.legal.key, hashes.SHA256())
+
+
+@pytest.mark.parametrize(
+    ("offset", "hold", "revocation"),
+    [(5, False, "crl-revoked-later"), (-5, True, "crl-hold")],
+    ids=["revoked_after_the_stamp", "on_hold_before_the_stamp"],
+)
+def test_a_warning_of_the_lists_does_not_stop_a_renewal_counting(
+    rw: RenewalWorld, tmp_path: Path, offset: int, hold: bool, revocation: str
+) -> None:
+    """C15: only a revocation at or before the stamp makes a renewal not count. A revocation
+    after it, or a hold, is a warning of the lists: the renewal covers the day in both
+    verifiers."""
+    at = CNA - timedelta(days=100)
+    rw.set_now(at)
+    provider = rw.legal_provider(FAR, not_before=at - timedelta(days=30))
+    assert rw.legal_tsa.signer is not None
+    record = rw.write_renewal("2031-06-23-1", [rw.day_entry()], provider)
+    crl = _listing(rw, rw.legal_tsa.signer[0], at + timedelta(days=offset), hold)
+    copy = tmp_path / "kopya"
+    shutil.copytree(rw.layout.vault, copy)
+    (copy / "sil").mkdir()
+    (copy / "sil" / "legal.crl").write_bytes(crl.public_bytes(serialization.Encoding.PEM))
+    now = at + timedelta(days=10)
+    # the lists give the renewal's certificate a warning, never a failure
+    roots = [
+        sv.parse_certificate(root.public_bytes(serialization.Encoding.DER)) for root in rw.roots
+    ]
+    token = record.with_name(record.name + ".zd").read_bytes()
+    result = sv.verify_timestamp(token, record.read_bytes(), roots, now=now)
+    assert result.ok
+    assert result.gen_time is not None
+    der = crl.public_bytes(serialization.Encoding.DER)
+    found = sv.check_revocation(result.chain, [sv.parse_crl(der)], result.gen_time)
+    assert [(level, code) for level, code, *_ in found] == [("warn", revocation)]
+    report = in_process(copy, roots_dir=_roots(rw, tmp_path / "kokler"), now=now)
+    ((level, code, _, _),) = _day_findings(report, DAY)
+    assert (level, code) == ("ok", "renewal-covered")
+    _store(rw.layout, [der], rw.legal.root)
+    day = rw.of(rw.status(now), day_token_path())
+    assert (day.status, day.covered_by) == ("covered", f"renewals/{record.name}")
+
+
 # -- isolated, at the real time --------------------------------------------------------------------
 
 
@@ -266,7 +334,7 @@ def test_each_status_isolated(rw: RenewalWorld, tmp_path: Path, status: str) -> 
     past = datetime.combine(date(2026, 10, 20), time(12, 0), tzinfo=SITE_TZ).astimezone(UTC)
     assert today > past + timedelta(days=10), "the test assumes its October 2026 dates are past"
     expires = {
-        "not_due": CNA,
+        "not_due": today + timedelta(days=1825),
         "due": today + timedelta(days=100),
         "covered": today + timedelta(days=100),
         "late": past - timedelta(days=2),
@@ -281,23 +349,29 @@ def test_each_status_isolated(rw: RenewalWorld, tmp_path: Path, status: str) -> 
     assert found == f"renewal-{status.replace('_', '-')}"
     assert level == LEVELS[found]
     ((_, first, _, _),) = _day_findings(report, DAY)
-    assert first == "renewal-not-due"
+    assert first == _code(rw.of(rw.status(utc_now()), day_token_path()).status)
     path = f"{OTHER:%Y/%m/%d}/manifest-{OTHER.isoformat()}.json.zd"
     assert rw.of(rw.status(utc_now()), path).status == status
 
 
+def _code(status: str) -> str:
+    """The standalone code of a core status (DAY's certificate expires at the fixed CNA, so
+    its status at the real time is the core's, whatever today is)."""
+    return f"renewal-{status.replace('_', '-')}"
+
+
 def test_a_package_without_renewals_reports_not_due(rw: RenewalWorld, tmp_path: Path) -> None:
-    """A vault copy with no renewal at all still gets section 5, one finding per day."""
+    """A vault copy with no renewal at all still gets section 5, one finding per day: the
+    core's status at the real time (``renewal-not-due`` until 180 days before CNA)."""
     code, report = isolated(rw.layout.vault, "--kokler", str(_roots(rw, tmp_path / "kokler")))
     assert code == 0
+    status = rw.of(rw.status(utc_now()), day_token_path()).status
     assert [f["code"] for f in report["findings"] if f["code"].startswith("renewal-")] == [
-        "renewal-not-due"
+        _code(status)
     ]
-    (finding,) = findings(report, "renewal-not-due")
+    (finding,) = findings(report, _code(status))
     assert finding["where"] == DAY.isoformat()
-    assert (
-        finding["en"] == f"Re-stamping is not due yet (certificate valid until {CNA.isoformat()})."
-    )
+    assert finding["en"] == sv.RENEWAL_FINDINGS[status][3].format(date=CNA.isoformat(), renewal="")
 
 
 # -- the rules are the core's ----------------------------------------------------------------------
