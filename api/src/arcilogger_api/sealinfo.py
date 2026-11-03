@@ -692,8 +692,17 @@ class VaultView:
         }
 
     def _renewal_time(self, record: str) -> datetime | None:
-        """The genTime of a renewal record's token (``<record>.zd`` beside it)."""
-        path = self.layout.vault / record
+        """The genTime of a renewal record's token (``<record>.zd`` beside it). Only a token in
+        ``vault/renewals`` is read: the path comes from a state file, not from the vault."""
+        try:
+            path = (self.layout.vault / record).resolve()
+            folder = self.layout.renewals_dir.resolve()
+        except (OSError, RuntimeError, ValueError) as exc:  # a link loop, a NUL character
+            log.info("renewal token of %s unreadable: %s", record, exc)
+            return None
+        if folder not in path.parents:
+            log.info("renewal record %s is not in %s: its token is not read", record, folder)
+            return None
         try:
             return inspect_token(path.with_name(path.name + ".zd").read_bytes()).gen_time
         except (OSError, TsaError, ValueError, TypeError, KeyError) as exc:

@@ -509,6 +509,43 @@ def test_day_detail_renewal_without_its_token_has_no_time(
     assert (renewal["covered_by"], renewal["renewed_at"]) == ("renewals/2031-05-04-1.json", None)
 
 
+@pytest.mark.parametrize(
+    "record", ["renewals/../../../outside.json", "renewals/../outside.json", "ABS"]
+)
+def test_day_detail_renewal_token_is_read_only_from_the_renewals_folder(
+    client: TestClient,
+    login_as: Login,
+    vault: SealedVault,
+    layout: Layout,
+    tmp_path: Path,
+    record: str,
+) -> None:
+    """``covered_by`` comes from a state file: a record outside ``vault/renewals`` (a ``..``
+    step, an absolute path) is not followed, though a valid token lies there."""
+    renewal_record(vault, "2031-05-04-1.json", at_site(date(2031, 5, 4), 2, 0))
+    token = (layout.renewals_dir / "2031-05-04-1.json.zd").read_bytes()
+    if record == "ABS":
+        record = (tmp_path / "outside.json").as_posix()
+    target = (layout.vault / record).resolve()
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.with_name(target.name + ".zd").write_bytes(token)
+    write_renewals(
+        layout,
+        {
+            "path": D11_TOKEN,
+            "kind": "day",
+            "cert_not_after": "2031-08-30T21:30:00Z",
+            "status": "covered",
+            "covered_by": record,
+        },
+    )
+    login_as(client, "auditor")
+    response = client.get(f"{API}/{D11.isoformat()}")
+    assert response.status_code == 200
+    renewal = response.json()["renewal"]
+    assert (renewal["covered_by"], renewal["renewed_at"]) == (record, None)
+
+
 def test_day_detail_renewal_null_without_a_report(
     client: TestClient, login_as: Login, vault: SealedVault, layout: Layout
 ) -> None:
