@@ -17,15 +17,20 @@ window comes back from the vault, exactly once.
   be read; a sealed file that does not match its manifest fails the request before anything of
   it is deleted; one that becomes unreadable while it loads stays short of its size.
 * A request starts loading only when the window job does not hold the partition lock.
+* On TimescaleDB with compression, a reload resets and loads raw days whose chunks are
+  compressed (the margin days of a day near the window's start are older than
+  ``COMPRESS_AFTER``): the same rows come back, also from a reload run twice.
 
 On TimescaleDB the compression policies are paused (``DAY`` is a fixed past day: a policy would
-compress chunks under a reload or a drop at a moment no test chose).
+compress chunks under a reload or a drop at a moment no test chose); a test that needs
+compressed chunks compresses them itself.
 """
 
 from __future__ import annotations
 
 import gzip
 import json
+import os
 from datetime import UTC, date, datetime, time, timedelta
 from pathlib import Path
 from typing import Any
@@ -198,15 +203,27 @@ def sealed_file(world: World, day: date, source: str) -> tuple[Path, int]:
 
 
 def unreadable_mid_load(monkeypatch: pytest.MonkeyPatch, path: Path) -> None:
-    """``path`` becomes unreadable while it is loaded: at the second read of it the file is
-    damaged in place, and that read and every later one fail. (A reader meets such damage where
-    its buffer ends; a test file fits in the buffer, so the reader is told.)"""
+    """``path`` becomes unreadable while it is loaded: at the loader's second read of it the
+    file is damaged in place, and that read and every later one fail (the reset's reading of
+    its receive times, :func:`received_outside`, comes before the load and is not counted). (A
+    reader meets such damage where its buffer ends; a test file fits in the buffer, so the
+    reader is told.)"""
     reads = 0
+    resetting = False
+    outside = service_module.received_outside
+
+    def reset_read(file: Path, day: date) -> list[datetime]:
+        nonlocal resetting
+        resetting = True
+        try:
+            return outside(file, day)
+        finally:
+            resetting = False
 
     class Damaged(VaultReader):
         def read(self, max_bytes: int) -> bytes:
             nonlocal reads
-            if self.path.name == path.name:
+            if self.path.name == path.name and not resetting:
                 reads += 1
                 if reads == 2:
                     unlock(path)
@@ -216,6 +233,7 @@ def unreadable_mid_load(monkeypatch: pytest.MonkeyPatch, path: Path) -> None:
             return super().read(max_bytes)
 
     monkeypatch.setattr(service_module, "VaultReader", Damaged)
+    monkeypatch.setattr(service_module, "received_outside", reset_read)
 
 
 def with_device_time(message: bytes, device: datetime) -> bytes:
@@ -814,3 +832,109 @@ def test_a_reload_leaves_the_raw_days_beyond_its_margin_alone(
     run_once(world, db_engine)
     assert reload_row(db_engine, reload_id)["status"] == "ready"
     assert beyond() == kept
+
+
+def compress_all(engine: Engine) -> list[str]:
+    """Compress every chunk of the time-series hypertables (what the policy does to the chunks
+    older than ``COMPRESS_AFTER``, at a moment the test chooses); the compressed chunks."""
+    with engine.begin() as connection:
+        for name in TIME_SERIES_TABLES:
+            connection.execute(
+                text(
+                    "SELECT compress_chunk(c, if_not_compressed => true) "
+                    "FROM show_chunks(CAST(:table AS regclass)) AS c"
+                ),
+                {"table": name},
+            )
+        return list(
+            connection.execute(
+                text(
+                    "SELECT format('%I.%I', chunk_schema, chunk_name) "
+                    "FROM timescaledb_information.chunks WHERE is_compressed ORDER BY 1"
+                )
+            ).scalars()
+        )
+
+
+def test_a_reload_resets_and_loads_its_raw_days_in_compressed_chunks(
+    world: World, db_engine: Engine
+) -> None:
+    """TimescaleDB with compression: the margin raw days of a day near the window's start are
+    older than ``COMPRESS_AFTER``, so their chunks are compressed when the reload resets them.
+    The reset deletes their rows from the compressed chunks and the load writes them in again:
+    the same rows with the same raw-line references, counts, clock samples and failures as
+    before the drop — also a line of ``DAY + 1``'s file whose device time lies on ``DAY`` (its
+    chunk was dropped) — and a reload run twice, over chunks compressed again, gives them once
+    more."""
+    with db_engine.connect() as connection:
+        status = connection.execute(
+            text("SELECT value FROM settings WHERE key = 'db.timescale'")
+        ).scalar_one()
+    if status["storage"] != "hypertables" or not status.get("compression"):
+        if os.environ.get("ARCILOGGER_EXPECT_TIMESCALE") == "1":
+            pytest.fail(f"TimescaleDB compression expected but the template has {status}")
+        pytest.skip("TimescaleDB with compression is not installed (the Linux CI job runs this)")
+    margin = [DAY + timedelta(days=1), DAY + timedelta(days=2)]
+    world.append("core-r1", DAY, (dhcp_message(i) for i in range(20)))
+    world.append_raw("core-r1", DAY, DAMAGED)
+    world.append("fortigate", DAY, (fortigate_message(i) for i in range(10)))
+    world.seal(DAY)
+    for n, day in enumerate(margin, start=1):
+        device = datetime.combine(day, time(8), tzinfo=SITE_TZ)
+        lines = [with_device_time(dhcp_message(i), device) for i in range(10 * n)]
+        if n == 1:
+            lines.append(dhcp_message(99))  # device time DAY 09:38: within a day, on DAY
+        world.append("core-r1", day, lines)
+        world.seal(day)
+    world.set_today(DAY + timedelta(days=3))
+    run_once(world, db_engine)
+    world.set_today(TODAY)
+    before = snapshot(db_engine)
+    assert {name: len(rows) for name, rows in before.items() if rows} == {
+        "messages": 20 + 10 + 11 + 20,
+        "mt_dhcp": 20 + 11 + 20,
+        "fg_traffic": 5,
+        "fg_event": 2,
+        "fg_app": 3,
+        "search_counts": 14,
+        "source_clock_samples": 12,
+        "parse_failures": 1,
+    }
+    on_margin = [row for row in before["messages"] if row[-3] in margin]
+    late = [row for row in on_margin if row[0] < day_window(margin[0])[0]]
+    assert len(on_margin) == 31
+    assert len(late) == 1
+    total = sum(sealed_bytes(world, day) for day in [DAY, *margin])
+
+    def margin_chunks() -> set[str]:
+        """The chunks holding the time-series rows of the margin raw days."""
+        with db_engine.connect() as connection:
+            return {
+                str(chunk)
+                for name in TIME_SERIES_TABLES
+                for chunk in connection.execute(
+                    text(
+                        f"SELECT DISTINCT CAST(tableoid AS regclass)::text FROM {name} "  # noqa: S608 - fixed names
+                        "WHERE raw_day = ANY(:days)"
+                    ),
+                    {"days": margin},
+                ).scalars()
+            }
+
+    for _ in range(2):
+        expire(db_engine)
+        drop(db_engine, DAY + timedelta(days=2))  # the chunks of DAY go, the margin's stay
+        dropped = snapshot(db_engine)
+        assert [row for row in dropped["messages"] if row[-3] == DAY] == []
+        kept = [row for row in dropped["messages"] if row[-3] in margin]
+        assert kept == [row for row in on_margin if row not in late]  # the late line went
+        compressed = compress_all(db_engine)
+        assert margin_chunks() <= set(compressed)
+        assert margin_chunks()
+        reload_id = queue(db_engine, DAY)
+        run_once(world, db_engine)
+        row = reload_row(db_engine, reload_id)
+        assert (row["status"], row["error_code"]) == ("ready", None)
+        assert row["bytes_total"] == row["bytes_done"] == total  # every file reset and loaded
+        assert snapshot(db_engine) == before
+        counts_agree(db_engine)

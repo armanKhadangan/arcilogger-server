@@ -79,7 +79,6 @@ one waits — and writes no status file — until the first stops (``--once``: e
 
 from __future__ import annotations
 
-import gzip
 import hashlib
 import json
 import logging
@@ -87,7 +86,6 @@ import os
 import re
 import threading
 import time
-import zlib
 from collections import Counter
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
@@ -234,9 +232,10 @@ def received_outside(path: Path, day: date) -> list[datetime]:
     ``day`` were received outside that day: a damaged or hand-restored spool line can carry a
     receive time of any other day, and its rows then lie within
     :data:`~arcilogger_db.searchcounts.COUNTS_TIME_MARGIN` of it instead of in
-    ``stream_window`` (:meth:`IngestService._reset_file`). The file is read whole (decompressed;
-    a receive time as the collector writes it is parsed once a minute, by :data:`STAMP_KEY`, any
-    other line on its own); a line without a usable receive time has no row and is left out.
+    ``stream_window`` (:meth:`IngestService._reset_file`). The file is read whole, decompressed
+    by :class:`VaultReader` like every sealed file (a receive time as the collector writes it is
+    parsed once a minute, by :data:`STAMP_KEY`, any other line on its own); a line without a
+    usable receive time has no row and is left out.
     Raises :class:`VaultReadError` or ``OSError`` when it cannot be read."""
     start, end = day_window(day)
     known: dict[bytes, datetime | None] = {}
@@ -258,19 +257,12 @@ def received_outside(path: Path, day: date) -> list[datetime]:
                 if line[:17] + line[19:20] + line[26:33] in odd
             )
 
+    reader = VaultReader(path, 0)  # the one reader of sealed files, whatever their format
     try:
-        with open_shared(path) as raw, gzip.GzipFile(fileobj=raw, mode="rb") as data:
-            rest = b""
-            while chunk := data.read(HASH_CHUNK):
-                block = rest + chunk
-                cut = block.rfind(b"\n")
-                if cut >= 0:
-                    take(block[:cut].split(b"\n"))
-                rest = block[cut + 1 :]
-            if rest:
-                take([rest])
-    except (EOFError, zlib.error, gzip.BadGzipFile) as exc:
-        raise VaultReadError(f"{path.name}: damaged gzip data ({exc})") from exc
+        while data := reader.read(HASH_CHUNK):
+            take(data.removesuffix(b"\n").split(b"\n"))
+    finally:
+        reader.close()
     return sorted(m for m in minutes if m is not None and not start <= m < end)
 
 
@@ -875,7 +867,7 @@ class IngestService:
         loaded already is reset again, which loads the same rows) or else the oldest ``queued``
         one, now ``loading``.
 
-        The files that count as loaded already (:meth:`_loaded_files`) are left alone; every
+        The files that count as loaded already (:meth:`loaded_files`) are left alone; every
         other file it would load is checked against its manifest first
         (:meth:`_sealed_file_intact`, outside any transaction: it reads them whole): a day of the
         request that is not sealed (``archive_day_not_in_vault``) or a file missing or changed
@@ -907,7 +899,7 @@ class IngestService:
             error = ARCHIVE_NOT_IN_VAULT
         else:
             with self.engine.connect() as connection:
-                done = self._loaded_files(connection, reload_id, first_day, files)
+                done = self.loaded_files(connection, reload_id, first_day, files)
             if not all(self._sealed_file_intact(*key) for key in sorted(files.keys() - done)):
                 error = ARCHIVE_UNREADABLE
         try:
@@ -929,7 +921,7 @@ class IngestService:
                         values["bytes_total"] = sum(files.values())
                     connection.execute(update(r).where(r.id == reload_id).values(**values))
                     return None
-                if self._loaded_files(connection, reload_id, first_day, files) != done:
+                if self.loaded_files(connection, reload_id, first_day, files) != done:
                     return None  # a drop or a load since the check: looked at again next poll
                 job = ArchiveJob(
                     reload_id,
@@ -967,7 +959,7 @@ class IngestService:
         return job
 
     @staticmethod
-    def _loaded_files(
+    def loaded_files(
         connection: Connection, reload_id: int, first_day: date, files: dict[Key, int]
     ) -> frozenset[Key]:
         """The files of a request (``reload_id``, from ``first_day``) that count as loaded:
@@ -984,7 +976,9 @@ class IngestService:
         is one of its raw days: that reload loaded it (or found it loaded) and kept every day
         from its first day on since, as the window job keeps the days of an active reload
         (``expired`` is set by the job before it drops). A row of the file far outside its days
-        (a spool line with a stray receive time) is not looked at here."""
+        (a spool line with a stray receive time) is not looked at here. The API's disk estimate
+        of a new request calls it too, read-only, with ``reload_id`` 0 (no request has it, so no
+        ``ready`` reload is left out; ``arcilogger_api.archive.service.bytes_to_load``)."""
         r, o = ArchiveReload, IngestOffset
         days = sorted({day for _, day in files})
         finished = [
@@ -1064,7 +1058,7 @@ class IngestService:
             if not digest:
                 return True
             sha256 = hashlib.sha256()
-            with path.open("rb") as handle:
+            with open_shared(path) as handle:  # the file as stored: compressed bytes
                 while chunk := handle.read(HASH_CHUNK):
                     sha256.update(chunk)
             return sha256.hexdigest() == str(entry["sha256"])
