@@ -34,7 +34,9 @@
         "items": {
           "turktrust": {
             "username": "TÜRKTRUST kullanıcı adı kayıtlı",
-            "password": "TÜRKTRUST parolası kayıtlı"
+            "password": "TÜRKTRUST parolası kayıtlı",
+            "usernameTyped": "TÜRKTRUST kullanıcı adı girildi, kaydedilmedi",
+            "passwordTyped": "TÜRKTRUST parolası girildi, kaydedilmedi"
           }
         },
         "to": {

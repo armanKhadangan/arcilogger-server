@@ -123,9 +123,9 @@ test.describe('Ayarlar → Kamu SM', () => {
     await applied(page);
 
     const put = api.callsTo('PUT', '/admin/config/tsa');
+    // No server chosen: none is sent, the test server in use stays.
     expect(put.at(-1)?.body).toEqual({
       etag: expect.stringMatching(/^tsa:[0-9a-f]{64}$/) as unknown,
-      server: 'test',
       credit_alert_threshold: 500,
       timeout_seconds: 60,
       java: 'C:/Program Files/Eclipse Adoptium/jre-8.0.432.6-hotspot/bin/java.exe',
@@ -442,6 +442,73 @@ test.describe('Ayarlar → Kamu SM', () => {
     const put = api.callsTo('PUT', '/admin/config/tsa');
     expect(put.at(0)?.body).toMatchObject({ server: 'production' });
     expect(put.at(-1)?.body).toMatchObject({ server: 'test', confirm: true });
+  });
+
+  test('a TÜRKTRUST username left behind is neither checked nor sent with a switch to Kamu SM production', async ({
+    page,
+  }) => {
+    const api = await mockApi(page, { signedInAs: 'tolga', staleReauth: true });
+    // The section as W5-T's API reports it: TÜRKTRUST known, its credentials not stored.
+    // Interim: `mock-admin.ts` (W5-T's) does not report them yet.
+    Object.assign(api.admin.sections.tsa.secrets, {
+      'turktrust.username': { set: false, changed_at: null, changed_by: null },
+      'turktrust.password': { set: false, changed_at: null, changed_by: null },
+    });
+    await page.goto('/settings/kamusm?step=production');
+    await page.getByRole('radio', { name: 'TÜRKTRUST (HTTPS)' }).check();
+    const fields = page.getByTestId('turktrust-credentials');
+    await fields.getByRole('button', { name: 'Gir' }).first().click();
+    await page.getByLabel('TÜRKTRUST kullanıcı adı').fill('ornek-as');
+    // Without the password the switch to TÜRKTRUST waits.
+    await expect(page.getByRole('button', { name: 'TÜRKTRUST sunucusuna geç' })).toBeDisabled();
+
+    await page.getByRole('radio', { name: 'Kamu SM üretim sunucusu' }).check();
+    await expect(fields).toHaveCount(0);
+    await page.getByRole('button', { name: 'Üretim sunucusuna geç' }).click();
+    await page
+      .getByRole('dialog', { name: 'Üretim sunucusuna geçilsin mi?' })
+      .getByRole('button', { name: 'Üretim sunucusuna geç' })
+      .click();
+    const review = page.getByRole('dialog', { name: 'Değişiklikleri onaylayın' });
+    await review.getByRole('button', { name: 'Onayla ve kaydet' }).click();
+    await confirmReauth(page);
+    await applied(page);
+    await expect(page.getByTestId('tsa-server')).toHaveText(
+      'Şu an Kamu SM üretim sunucusu kullanılıyor.',
+    );
+    // The check and the change (sent again after the password confirmation): Kamu SM only.
+    const sent = [
+      ...api.callsTo('POST', '/admin/config/tsa/check'),
+      ...api.callsTo('PUT', '/admin/config/tsa'),
+    ];
+    expect(sent.length).toBeGreaterThan(1);
+    for (const call of sent) {
+      expect(call.body).toMatchObject({ server: 'production' });
+      expect(call.body).not.toHaveProperty('turktrust_username');
+      expect(call.body).not.toHaveProperty('allow_plain_http');
+    }
+  });
+
+  test('"Kontör sorgula" only for a provider with a credit query (C21)', async ({ page }) => {
+    await mockApi(page, { signedInAs: 'tolga' });
+    await page.route('**/api/v1/credits', (route) =>
+      route.fulfill({
+        json: {
+          provider: 'rfc3161',
+          legal_grade: false,
+          supported: false,
+          threshold: 500,
+          latest: null,
+          remaining: null,
+          below_threshold: false,
+          history: [],
+          unreadable_lines: 0,
+        },
+      }),
+    );
+    await page.goto('/settings/kamusm?step=credit');
+    await expect(page.getByLabel('Kontör uyarı eşiği', { exact: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Kontör sorgula' })).toHaveCount(0);
   });
 
   test('the threshold and the time limit: checked, saved without re-authentication', async ({

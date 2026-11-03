@@ -28,10 +28,13 @@ import {
   normalizeSha256,
   plainHttpConfirmed,
   providerText,
+  serverChoices,
   stepStatus,
+  toTurktrust,
   tsaBody,
   tsaForm,
   turktrustChanged,
+  turktrustSupported,
   unplacedCauses,
   validateCustomer,
   validateEvidence,
@@ -99,6 +102,19 @@ function turktrustSite(overrides: Partial<TsaSection> = {}): TsaSection {
     readiness: { production: false, missing: ['zamane_jar', 'java'] },
     ...overrides,
   });
+}
+
+/** A Kamu SM site on a server that knows TÜRKTRUST (W5-T): its credentials reported, not stored. */
+function withTurktrust(overrides: Partial<TsaSection> = {}): TsaSection {
+  const section = tsa(overrides);
+  return {
+    ...section,
+    secrets: {
+      ...section.secrets,
+      'turktrust.username': { set: false, changed_at: null, changed_by: null },
+      'turktrust.password': { set: false, changed_at: null, changed_by: null },
+    } as TsaSection['secrets'],
+  };
 }
 
 /** The texts of the app (the locale files with every area, `tsaProvider` among them). */
@@ -204,11 +220,11 @@ describe('the Kamu SM wizard (contract 2.17)', () => {
     const form = tsaForm(section);
     expect(form).toEqual({ java: JAVA, threshold: '500', timeout: '60' });
     if (!form) return;
+    // No server chosen: none is sent, the one in use stays.
     expect(
       tsaBody(section, 'tsa:1', { ...form, threshold: ' 300 ' }, KEPT, { probe: true }),
     ).toEqual({
       etag: 'tsa:1',
-      server: 'test',
       credit_alert_threshold: 300,
       timeout_seconds: 60,
       java: JAVA,
@@ -344,8 +360,64 @@ describe('Ayarlar → Zaman damgası: the server choice and TÜRKTRUST (Wave 5 c
     ).toBe('test');
   });
 
+  it('offers TÜRKTRUST only where the server reports it (W5-T), so an API before it is never sent it', () => {
+    // Before W5-T: no `turktrust.*` in `secrets`, Kamu SM's two servers only.
+    expect(turktrustSupported(tsa())).toBe(false);
+    expect(serverChoices(tsa())).toEqual(['test', 'production']);
+    expect(toTurktrust(tsa(), 'turktrust')).toBe(false);
+    // Reported (stored or not): all four.
+    expect(turktrustSupported(withTurktrust())).toBe(true);
+    expect(serverChoices(withTurktrust())).toEqual(SERVER_CHOICES);
+    expect(serverChoices(turktrustSite())).toEqual(SERVER_CHOICES);
+  });
+
+  it('sends TÜRKTRUST credentials only with a change that goes to TÜRKTRUST', () => {
+    const form = { java: JAVA, threshold: '500', timeout: '60' };
+    const typed: Credentials = {
+      ...KEPT,
+      turktrust: {
+        username: { value: 'ornek-as', editing: true, clear: false },
+        password: { value: 'deneme-parola', editing: true, clear: false }, // gitleaks:allow — fake test value
+      },
+    };
+    const site = withTurktrust();
+    // Typed for TÜRKTRUST, then Kamu SM production chosen, or "Kaydet" on the Kamu SM site.
+    expect(toTurktrust(site, 'production')).toBe(false);
+    expect(toTurktrust(site, undefined)).toBe(false);
+    for (const server of ['production', undefined] as const) {
+      const body = tsaBody(site, 'tsa:1', form, typed, { server, probe: true });
+      expect(body).not.toHaveProperty('turktrust_username');
+      expect(body).not.toHaveProperty('turktrust_password');
+      expect(body).not.toHaveProperty('allow_plain_http');
+    }
+    // "Kaydet" with TÜRKTRUST in use and no other server chosen: they go.
+    expect(toTurktrust(turktrustSite(), undefined)).toBe(true);
+    expect(tsaBody(turktrustSite(), 'tsa:1', form, typed, { probe: true })).toMatchObject({
+      turktrust_username: 'ornek-as',
+      turktrust_password: 'deneme-parola',
+    });
+    // A server without TÜRKTRUST never gets them, whatever is chosen.
+    expect(
+      tsaBody(tsa(), 'tsa:1', form, typed, { server: 'turktrust', probe: true }),
+    ).not.toHaveProperty('turktrust_username');
+  });
+
+  it('"Kaydet" on a plain-HTTP TÜRKTRUST site sends no server, so no unconfirmed turktrust-http', () => {
+    const form = { java: null, threshold: '400', timeout: '60' };
+    const site = turktrustSite({ server: 'turktrust-http' as never });
+    expect(currentChoice(site)).toBe('turktrust-http');
+    const body = tsaBody(site, 'tsa:1', form, KEPT, { probe: true });
+    expect(body).not.toHaveProperty('server');
+    expect(body).not.toHaveProperty('allow_plain_http');
+    expect(body).not.toHaveProperty('confirm');
+    // Kamu SM production in use: "Kaydet" does not send it back either.
+    expect(
+      tsaBody(tsa({ server: 'production' }), 'tsa:1', form, KEPT, { probe: true }),
+    ).not.toHaveProperty('server');
+  });
+
   it('a switch to TÜRKTRUST carries the typed credentials and whether plain HTTP is allowed', () => {
-    const section = tsa();
+    const section = withTurktrust();
     const form = tsaForm(section);
     if (!form) throw new Error('no form');
     const typed: Credentials = {
@@ -616,7 +688,6 @@ describe('Ayarlar → Zaman damgası: re-stamping and revocation lists (Wave 5 c
     ).toEqual({});
     expect(tsaBody(section, 'tsa:1', form, KEPT, { probe: true })).toEqual({
       etag: 'tsa:1',
-      server: 'test',
       credit_alert_threshold: 500,
       timeout_seconds: 60,
       java: JAVA,
@@ -639,7 +710,6 @@ describe('Ayarlar → Zaman damgası: re-stamping and revocation lists (Wave 5 c
       ),
     ).toEqual({
       etag: 'tsa:1',
-      server: 'test',
       credit_alert_threshold: 500,
       timeout_seconds: 60,
       java: JAVA,

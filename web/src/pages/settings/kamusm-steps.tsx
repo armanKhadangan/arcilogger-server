@@ -42,13 +42,13 @@ import {
   CRL_URLS_MAX,
   PLAIN_HTTP_PHRASE,
   RENEW_BEFORE_DAYS,
-  SERVER_CHOICES,
   causeKey,
   choiceProvider,
   currentChoice,
   plainHttpConfirmed,
   providerText,
   secretMeta,
+  serverChoices,
   TURKTRUST_KEPT,
   type Credentials,
   type EvidenceForm,
@@ -476,7 +476,9 @@ function typedValue(edit: SecretEdit): boolean {
  * Step 6 "Üretime geç": the server to switch to (Kamu SM test or production, TÜRKTRUST over HTTPS
  * or over plain HTTP, Wave 5 contract 2.4), the checklist of what it needs (`readiness` for
  * Kamu SM, the username and password for TÜRKTRUST) with the warnings that do not block, and the
- * switch after a confirmation. Back to the test server stops production stamps and asks again;
+ * switch after a confirmation. TÜRKTRUST's servers are offered only where the server knows
+ * TÜRKTRUST (`serverChoices`); a switch to them waits for both credentials, stored or typed here,
+ * and choosing another server drops what was typed for TÜRKTRUST. Back to the test server stops production stamps and asks again;
  * plain HTTP says that the password then travels unencrypted and asks for a typed confirmation
  * before anything is sent, because the server's dry run applies the same rule.
  */
@@ -485,6 +487,7 @@ export function ProductionStep({
   tested,
   disabled,
   unsaved,
+  turktrustUnsaved,
   credentials,
   onCredentials,
   errors,
@@ -495,6 +498,11 @@ export function ProductionStep({
   disabled: boolean;
   /** Changes of the other steps are not saved yet: a switch waits for them. */
   unsaved: boolean;
+  /**
+   * TÜRKTRUST credentials are typed: they go with a switch to TÜRKTRUST, so they hold back only a
+   * switch to another server (which would not send them).
+   */
+  turktrustUnsaved: boolean;
   credentials: Credentials;
   onCredentials: (credentials: Credentials) => void;
   errors: CredentialErrors;
@@ -506,9 +514,10 @@ export function ProductionStep({
   const [asking, setAsking] = useState<ServerChoice | null>(null);
   const [typed, setTyped] = useState('');
   const current = currentChoice(tsa);
+  const choices = serverChoices(tsa);
   // The server in use cannot be chosen; the next one is preselected (production, or back to test).
   const target: ServerChoice =
-    picked !== null && picked !== current
+    picked !== null && picked !== current && choices.includes(picked)
       ? picked
       : current === 'production'
         ? 'test'
@@ -517,19 +526,22 @@ export function ProductionStep({
   const missing = new Set<string>(tsa.readiness.missing);
   const legal = tsa.roots.some((root) => root.legal);
   const entered = credentials.turktrust ?? TURKTRUST_KEPT;
+  // A TÜRKTRUST credential is stored, or typed and not saved yet (it goes with the switch).
+  const credential = (name: 'username' | 'password') => {
+    const typedHere = typedValue(entered[name]);
+    return {
+      key: `turktrust.${name}${typedHere ? 'Typed' : ''}`,
+      ok: typedHere || (secretMeta(tsa, `turktrust.${name}`)?.set ?? false),
+    };
+  };
   const checklist: { key: string; ok: boolean }[] = turktrust
-    ? [
-        {
-          key: 'turktrust.username',
-          ok: (secretMeta(tsa, 'turktrust.username')?.set ?? false) || typedValue(entered.username),
-        },
-        {
-          key: 'turktrust.password',
-          ok: (secretMeta(tsa, 'turktrust.password')?.set ?? false) || typedValue(entered.password),
-        },
-      ]
+    ? [credential('username'), credential('password')]
     : READINESS.map((item) => ({ key: item, ok: !missing.has(item) }));
-  const ready = target !== 'production' || tsa.readiness.production;
+  // Kamu SM production needs its readiness; TÜRKTRUST both credentials (the server decides again).
+  const ready = turktrust
+    ? checklist.every((item) => item.ok)
+    : target !== 'production' || tsa.readiness.production;
+  const waiting = unsaved || (!turktrust && turktrustUnsaved);
   const stopsProduction = current === 'production' || tsa.provider === 'turktrust';
   const phrase = PLAIN_HTTP_PHRASE;
   const switchLabel =
@@ -558,7 +570,7 @@ export function ProductionStep({
         <legend className="mb-1 text-13 font-medium text-foreground">
           {t('settings.kamusm.servers.legend')}
         </legend>
-        {SERVER_CHOICES.map((choice) => {
+        {choices.map((choice) => {
           const inUse = choice === current;
           const key = CHOICE_KEYS[choice];
           return (
@@ -579,6 +591,9 @@ export function ProductionStep({
                 aria-describedby={`${id}-${choice}-hint`}
                 onChange={() => {
                   setPicked(choice);
+                  // Leaving TÜRKTRUST drops what was typed for it: it would not be sent.
+                  if (choiceProvider(choice) !== 'turktrust' && turktrustUnsaved)
+                    onCredentials({ ...credentials, turktrust: TURKTRUST_KEPT });
                 }}
               />
               <div className="flex flex-col gap-0.5">
@@ -650,7 +665,7 @@ export function ProductionStep({
       <div className="flex flex-wrap gap-2">
         <Button
           variant={target === 'test' ? 'secondary' : 'primary'}
-          disabled={disabled || unsaved || !ready}
+          disabled={disabled || waiting || !ready}
           onClick={() => {
             setTyped('');
             setAsking(target);
@@ -662,7 +677,7 @@ export function ProductionStep({
       {!ready ? (
         <p className="text-xs text-muted">{t('settings.kamusm.production.notReady')}</p>
       ) : null}
-      {unsaved ? (
+      {waiting ? (
         <p className="text-xs text-muted">{t('settings.kamusm.production.saveFirst')}</p>
       ) : null}
       <ConfirmDialog

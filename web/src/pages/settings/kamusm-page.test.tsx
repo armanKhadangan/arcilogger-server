@@ -9,6 +9,7 @@ import type { TsaSection } from '@/lib/settings-types';
 
 import {
   TURKTRUST_KEPT,
+  turktrustChanged,
   type Credentials,
   type EvidenceForm,
   type ServerChoice,
@@ -41,10 +42,13 @@ function tsa(overrides: Partial<TsaSection> = {}): TsaSection {
       staged: [],
     },
     roots: [],
+    // As W5-T's API reports it: TÜRKTRUST known, its credentials not stored.
     secrets: {
       'kamusm.customer': { set: true, changed_at: null, changed_by: null },
       'kamusm.password': { set: true, changed_at: null, changed_by: null },
-    },
+      'turktrust.username': { set: false, changed_at: null, changed_by: null },
+      'turktrust.password': { set: false, changed_at: null, changed_by: null },
+    } as TsaSection['secrets'],
     readiness: { production: true, missing: [] },
     seal_ready: { ok: true, causes: [] },
     ...overrides,
@@ -62,6 +66,23 @@ const TURKTRUST_SITE = tsa({
   readiness: { production: false, missing: ['zamane_jar', 'java'] },
 });
 
+/** A Kamu SM site whose TÜRKTRUST credentials are stored (a later switch needs nothing typed). */
+const STORED = tsa({
+  secrets: {
+    ...tsa().secrets,
+    'turktrust.username': { set: true, changed_at: null, changed_by: 'web:tolga' },
+    'turktrust.password': { set: true, changed_at: null, changed_by: 'web:tolga' },
+  } as TsaSection['secrets'],
+});
+
+/** A server before W5-T: no `turktrust.*` in `secrets`. */
+const BEFORE_W5T = tsa({
+  secrets: {
+    'kamusm.customer': { set: true, changed_at: null, changed_by: null },
+    'kamusm.password': { set: true, changed_at: null, changed_by: null },
+  },
+});
+
 const KEPT: Credentials = {
   customer: SECRET_KEPT,
   password: SECRET_KEPT,
@@ -75,19 +96,23 @@ function Production({
   unsaved = false,
   switched,
   seen = [],
+  initial = KEPT,
 }: {
   section: TsaSection;
   unsaved?: boolean;
   switched: ServerChoice[];
   seen?: Credentials[];
+  /** The credentials as the page holds them (typed in step 4, for instance). */
+  initial?: Credentials;
 }) {
-  const [credentials, setCredentials] = useState<Credentials>(KEPT);
+  const [credentials, setCredentials] = useState<Credentials>(initial);
   return (
     <ProductionStep
       tsa={section}
       tested={false}
       disabled={false}
       unsaved={unsaved}
+      turktrustUnsaved={turktrustChanged(credentials)}
       credentials={credentials}
       onCredentials={(next) => {
         seen.push(next);
@@ -164,6 +189,11 @@ describe('Ayarlar → Zaman damgası: the server to switch to', () => {
       ': Eksik',
     );
     expect(screen.queryByTestId('tsa-plain-http')).not.toBeInTheDocument();
+    // Neither credential is stored or typed: the switch waits (the server decides again).
+    expect(screen.getByRole('button', { name: 'TÜRKTRUST sunucusuna geç' })).toBeDisabled();
+    expect(
+      screen.getByText('Üretime geçmek için yukarıdaki eksikleri tamamlayın.'),
+    ).toBeInTheDocument();
 
     const [username, password] = within(fields).getAllByRole('button', { name: 'Gir' });
     if (!username || !password) throw new Error('no fields');
@@ -178,9 +208,14 @@ describe('Ayarlar → Zaman damgası: the server to switch to', () => {
       username: { value: 'ornek-as', editing: true, clear: false },
       password: { value: 'deneme-parola', editing: true, clear: false },
     });
-    expect(
-      within(checklist()).getByText('TÜRKTRUST parolası kayıtlı').parentElement,
-    ).toHaveTextContent(': Tamam');
+    // Typed, not stored: said so, and enough for the switch, which sends them.
+    for (const item of [
+      'TÜRKTRUST kullanıcı adı girildi, kaydedilmedi',
+      'TÜRKTRUST parolası girildi, kaydedilmedi',
+    ])
+      expect(within(checklist()).getByText(item).parentElement).toHaveTextContent(': Tamam');
+    expect(within(checklist()).queryByText('TÜRKTRUST parolası kayıtlı')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'TÜRKTRUST sunucusuna geç' })).toBeEnabled();
 
     await userEvent.click(screen.getByRole('button', { name: 'TÜRKTRUST sunucusuna geç' }));
     const ask = screen.getByRole('dialog', { name: 'TÜRKTRUST sunucusuna geçilsin mi?' });
@@ -191,7 +226,7 @@ describe('Ayarlar → Zaman damgası: the server to switch to', () => {
 
   it('plain HTTP: says the password travels unencrypted and waits for the typed phrase', async () => {
     const switched: ServerChoice[] = [];
-    render(<Production section={tsa()} switched={switched} />);
+    render(<Production section={STORED} switched={switched} />);
     await userEvent.click(screen.getByRole('radio', { name: 'TÜRKTRUST (düz HTTP)' }));
     expect(screen.getByTestId('tsa-plain-http')).toHaveTextContent(
       'kullanıcı adı ve parolası ağda şifrelenmeden, açık metin olarak gider',
@@ -255,11 +290,12 @@ describe('Ayarlar → Zaman damgası: the server to switch to', () => {
     const switched: ServerChoice[] = [];
     render(
       <Production
-        section={tsa({
+        section={{
+          ...STORED,
           provider: 'mock',
           server: null,
           readiness: { production: false, missing: ['zamane_jar', 'java'] },
-        })}
+        }}
         switched={switched}
       />,
     );
@@ -292,11 +328,56 @@ describe('Ayarlar → Zaman damgası: the server to switch to', () => {
     );
   });
 
+  it("before W5-T the server knows no TÜRKTRUST: only Kamu SM's two servers", () => {
+    render(<Production section={BEFORE_W5T} switched={[]} />);
+    const group = screen.getByRole('group', { name: 'Geçilecek sunucu' });
+    expect(within(group).getAllByRole('radio')).toHaveLength(2);
+    expect(
+      within(group).getByRole('radio', { name: 'Kamu SM test sunucusu (şu an kullanılıyor)' }),
+    ).toBeDisabled();
+    expect(within(group).getByRole('radio', { name: 'Kamu SM üretim sunucusu' })).toBeChecked();
+    expect(within(group).queryByRole('radio', { name: /TÜRKTRUST/ })).not.toBeInTheDocument();
+    expect(screen.queryByTestId('turktrust-credentials')).not.toBeInTheDocument();
+  });
+
+  it('values typed for TÜRKTRUST hold back a switch elsewhere; choosing another server drops them', async () => {
+    const switched: ServerChoice[] = [];
+    const seen: Credentials[] = [];
+    // A TÜRKTRUST site whose new username was typed in step 4 and not saved.
+    const initial: Credentials = {
+      ...KEPT,
+      turktrust: {
+        ...TURKTRUST_KEPT,
+        username: { value: 'ornek-as', editing: true, clear: false },
+      },
+    };
+    render(
+      <Production section={TURKTRUST_SITE} switched={switched} seen={seen} initial={initial} />,
+    );
+    // Preselected: Kamu SM production, which would not send the username.
+    expect(screen.getByRole('radio', { name: 'Kamu SM üretim sunucusu' })).toBeChecked();
+    expect(
+      screen.getByText('Önce diğer adımlardaki değişiklikleri kaydedin ya da bırakın.'),
+    ).toBeInTheDocument();
+    // To TÜRKTRUST, the typed username goes with the switch: nothing waits.
+    await userEvent.click(screen.getByRole('radio', { name: 'TÜRKTRUST (HTTPS)' }));
+    expect(screen.getByRole('button', { name: 'TÜRKTRUST sunucusuna geç' })).toBeEnabled();
+    expect(
+      screen.queryByText('Önce diğer adımlardaki değişiklikleri kaydedin ya da bırakın.'),
+    ).not.toBeInTheDocument();
+    expect(seen).toEqual([]);
+    // Another server: what was typed for TÜRKTRUST is dropped.
+    await userEvent.click(screen.getByRole('radio', { name: 'Kamu SM test sunucusu' }));
+    expect(seen.at(-1)?.turktrust).toEqual(TURKTRUST_KEPT);
+    expect(screen.queryByTestId('turktrust-credentials')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Kamu SM test sunucusuna geç' })).toBeEnabled();
+  });
+
   it('in English', async () => {
     act(() => {
       setLanguage('en');
     });
-    render(<Production section={tsa()} switched={[]} />);
+    render(<Production section={STORED} switched={[]} />);
     await userEvent.click(screen.getByRole('radio', { name: 'TÜRKTRUST (plain HTTP)' }));
     expect(screen.getByTestId('tsa-plain-http')).toHaveTextContent('cross the network unencrypted');
     expect(screen.getByTestId('turktrust-note')).toHaveTextContent('Verify on site');

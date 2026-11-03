@@ -18,7 +18,7 @@ import { PageSkeleton } from '@/components/layout/route-frames';
 import { Alert } from '@/components/ui/alert';
 import { editable } from '@/lib/admin-requests';
 import { errorMessage } from '@/lib/api';
-import { useAdminRequests } from '@/lib/api-hooks';
+import { useAdminRequests, useCredits } from '@/lib/api-hooks';
 import { useAuth } from '@/lib/auth';
 import type { AdminRequestOut, TsaSection, TsaTestResult } from '@/lib/settings-types';
 import { cn } from '@/lib/utils';
@@ -41,6 +41,7 @@ import {
   providerText,
   stepStatus,
   tsaBody,
+  toTurktrust,
   tsaForm,
   turktrustChanged,
   unplacedCauses,
@@ -147,15 +148,24 @@ function useTested(): boolean {
 
 type CredentialField = 'customer' | 'password' | 'turktrustUsername' | 'turktrustPassword';
 
-function credentialErrors(credentials: Credentials): FieldErrors<CredentialField> {
+/**
+ * The errors of the credentials a change sends. TÜRKTRUST's are checked only when the change goes
+ * to TÜRKTRUST (`toTurktrust`): a field left behind on another server is neither checked nor sent.
+ */
+function credentialErrors(
+  credentials: Credentials,
+  turktrustToo: boolean,
+): FieldErrors<CredentialField> {
   const errors: FieldErrors<CredentialField> = {};
   const check = (edit: SecretEdit, validate: (value: string) => string | undefined) =>
     edit.editing ? validate(edit.value) : undefined;
-  const turktrust = credentials.turktrust ?? TURKTRUST_KEPT;
-  const username = check(turktrust.username, validateTurktrustUsername);
-  if (username) errors.turktrustUsername = username;
-  const secret = check(turktrust.password, validateTurktrustPassword);
-  if (secret) errors.turktrustPassword = secret;
+  if (turktrustToo) {
+    const turktrust = credentials.turktrust ?? TURKTRUST_KEPT;
+    const username = check(turktrust.username, validateTurktrustUsername);
+    if (username) errors.turktrustUsername = username;
+    const secret = check(turktrust.password, validateTurktrustPassword);
+    if (secret) errors.turktrustPassword = secret;
+  }
   if (credentials.clear) return errors;
   const customer = check(credentials.customer, validateCustomer);
   if (customer) errors.customer = customer;
@@ -205,6 +215,8 @@ export function KamusmPage() {
   // The provider the last change went to (the server it switched to, else the one in use).
   const [sentTo, setSentTo] = useState('');
   const tested = useTested();
+  // "Kontör sorgula" only for a provider with a credit query (C3, C21: the flag decides).
+  const credits = useCredits();
   const kamusmDirty =
     credentials.clear ||
     secretChanged(credentials.customer) ||
@@ -251,7 +263,7 @@ export function KamusmPage() {
     const found: FieldErrors<TsaField> = {
       ...validateNumbers(values),
       ...(values.evidence ? validateEvidence(values.evidence) : {}),
-      ...credentialErrors(credentials),
+      ...credentialErrors(credentials, toTurktrust(tsa, options.server)),
     };
     setErrors(found);
     if (hasErrors(found)) {
@@ -357,6 +369,7 @@ export function KamusmPage() {
             tested={tested}
             disabled={locked}
             unsaved={form.dirty || kamusmDirty}
+            turktrustUnsaved={turktrustDirty}
             credentials={credentials}
             onCredentials={(next) => {
               setCredentials(next);
@@ -398,7 +411,7 @@ export function KamusmPage() {
                 }}
               />
             ) : null}
-            {can('seal.manage') ? <CreditQuery /> : null}
+            {can('seal.manage') && credits.data?.supported !== false ? <CreditQuery /> : null}
           </div>
         );
     }

@@ -86,6 +86,35 @@ export function secretMeta(
   return (tsa.secrets as Partial<Record<string, SecretMeta>>)[name];
 }
 
+/**
+ * The server knows TÜRKTRUST: it reports `turktrust.*` in the section's `secrets` (Wave 5
+ * contract 2.4, as W5-T has it report). An API before W5-T does not, and refuses the TÜRKTRUST
+ * choices (`tsa_server_invalid`) and fields, so the browser offers neither there.
+ */
+export function turktrustSupported(tsa: TsaSection): boolean {
+  return (
+    secretMeta(tsa, 'turktrust.username') !== undefined ||
+    secretMeta(tsa, 'turktrust.password') !== undefined
+  );
+}
+
+/** The servers the browser offers: TÜRKTRUST's only where the server knows TÜRKTRUST. */
+export function serverChoices(tsa: TsaSection): readonly ServerChoice[] {
+  return turktrustSupported(tsa)
+    ? SERVER_CHOICES
+    : SERVER_CHOICES.filter((choice) => choiceProvider(choice) === 'zamane');
+}
+
+/**
+ * A change goes to TÜRKTRUST: one of its servers is chosen, or none is and TÜRKTRUST is in use.
+ * Only then are its username and password checked and sent; a value typed for a TÜRKTRUST
+ * server the administrator then left is neither.
+ */
+export function toTurktrust(tsa: TsaSection, chosen: ServerChoice | undefined): boolean {
+  if (!turktrustSupported(tsa)) return false;
+  return chosen ? choiceProvider(chosen) === 'turktrust' : tsa.provider === 'turktrust';
+}
+
 /** What a step shows (contract 2.17: "each step shows ok / missing / error"). */
 export function stepStatus(step: StepId, tsa: TsaSection, tested: boolean): StepStatus {
   const missing = new Set<string>(tsa.readiness.missing);
@@ -318,24 +347,23 @@ export interface TurktrustFields {
 export type TsaRequest = TsaBody & TurktrustFields & EvidenceFields;
 
 /**
- * The server a change sends: the one chosen, else the one in use. A site on another provider
- * (the mock, an RFC 3161 server) goes to the Kamu SM test server, as the page says; a site on a
- * provider the browser chooses whose server has no name here (TÜRKTRUST until W5-T, Zamane at
- * another address) sends none and keeps it, so a "Kaydet" never moves it to Kamu SM.
+ * The server a change sends: only the one chosen. Without a choice no `server` is sent and the
+ * one in use stays (`PUT /admin/config/tsa` keeps it), so a "Kaydet" of a plain-HTTP TÜRKTRUST
+ * site never sends `turktrust-http` without its confirmation. A site on another provider (the
+ * mock, an RFC 3161 server) goes to the Kamu SM test server, as the page says.
  */
 function bodyServer(tsa: TsaSection, chosen: ServerChoice | undefined): string | undefined {
   if (chosen) return chosen;
-  if (tsa.server) return tsa.server;
   return CHOSEN_PROVIDERS.has(tsa.provider) ? undefined : 'test';
 }
 
 /**
  * The body of `PUT /admin/config/tsa`: everything the wizard edits at once (the Java chosen in
  * the first step is saved with the credentials, so a first setup from the mock provider can
- * switch to Zamane in one change that leaves sealing working). Typed credentials are sent with
- * any change, as Kamu SM's are (TÜRKTRUST's can be stored before the switch to it), a switch to
- * TÜRKTRUST says whether plain HTTP is allowed, and the re-stamping and revocation-list keys are
- * sent when they were changed (`evidenceChanges`).
+ * switch to Zamane in one change that leaves sealing working). Kamu SM's typed credentials are
+ * sent with any change; TÜRKTRUST's only with a change that goes to TÜRKTRUST (`toTurktrust`). A
+ * switch to TÜRKTRUST says whether plain HTTP is allowed, and the re-stamping and revocation-list
+ * keys are sent when they were changed (`evidenceChanges`).
  */
 export function tsaBody(
   tsa: TsaSection,
@@ -347,8 +375,9 @@ export function tsaBody(
   const customer = credentials.customer;
   const password = credentials.password;
   const server = bodyServer(tsa, options.server);
-  const username = credentials.turktrust?.username;
-  const secret = credentials.turktrust?.password;
+  const turktrust = toTurktrust(tsa, options.server) ? credentials.turktrust : undefined;
+  const username = turktrust?.username;
+  const secret = turktrust?.password;
   return {
     etag,
     ...(server ? { server } : {}),
