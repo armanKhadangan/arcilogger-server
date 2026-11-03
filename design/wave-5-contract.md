@@ -1307,7 +1307,12 @@ All Wave 5 questions are answered (2026-11-02).
   in the English one, as the other findings of the file write times; for `renewal-late` it is
   the time of the re-stamping (the counting renewal's genTime), for the other codes the
   certificate's expiry. `VERIFIER_VERSION` is "5" by addendum H4: W5-H (#130) had not merged
-  when W5-A set it; whichever of the two merges second makes it "6".
+  when W5-A set it; whichever of the two merges second makes it "6". At the edges both verifiers
+  follow §2.1.2 literally (owner answer Q16): a renewal stamped at the certificate's notAfter
+  itself is `late`, and a certificate counts as expired from its notAfter on (`cert_not_after <=
+  now`), although `tsa/verify.py:_valid_at` (and the standalone `Certificate.valid_at`) treats a
+  stamp made at notAfter as valid; `test_the_expiry_boundaries_are_pinned` pins both, so neither is
+  "fixed" into the other unnoticed.
 - **W5-A-6: what stays in section 5.** The existing `renewal-ok` (each record's stamp) and
   `renewal-covers` (which packaged days a record names) stay beside the five new codes, and the
   section "5. Yenileme damgaları" now appears whenever the package has a day whose token

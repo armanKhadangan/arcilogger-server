@@ -33,6 +33,7 @@ from arcilogger_core.renewal import (
 from arcilogger_core.seal import sha256_file
 from arcilogger_core.timeutil import SITE_TZ, utc_now
 from arcilogger_core.tsa.client import token_path_for
+from arcilogger_core.tsa.verify import _valid_at as core_valid_at
 from arcilogger_core.tsa.verify import inspect_token
 
 from .renewal_world import CNA, DAY, RenewalWorld, day_token_path, make_world
@@ -364,3 +365,33 @@ def test_the_rules_are_the_core_rules(name: str) -> None:
             expected.status,
             expected.covered_by,
         ), token.path
+
+
+def test_the_expiry_boundaries_are_pinned(rw: RenewalWorld) -> None:
+    """Owner answer Q16: the renewal rules take §2.1.2 literally (stamped *before* notAfter;
+    expired from notAfter on), while certificate validity includes notAfter itself. Both are
+    pinned here; changing either one is a decision, not a fix."""
+    rw.mock_signer(CNA)
+    assert rw.tsa.signer is not None
+    certificate = rw.tsa.signer[0]
+    assert certificate.not_valid_after_utc == CNA
+    assert core_valid_at(certificate, CNA)
+    assert not core_valid_at(certificate, CNA + timedelta(seconds=1))
+    standalone = sv.parse_certificate(certificate.public_bytes(serialization.Encoding.DER))
+    assert standalone.not_after == CNA
+    assert standalone.valid_at(CNA)
+    assert not standalone.valid_at(CNA + timedelta(seconds=1))
+    second = timedelta(seconds=1)
+    token = TokenFact("1", "day", _hash(1), NOW)
+    later = NOW + timedelta(days=1)
+    for offset, status in ((timedelta(0), "late"), (-second, "covered")):
+        core_renewals, standalone_renewals = _facts(
+            [("renewals/a.json", 10, 3 * WINDOW, offset, True, {1})]
+        )
+        core = compute_statuses([token], core_renewals, now=later, renew_before=WINDOW)
+        rules = sv.RenewalRules(standalone_renewals, now=later)
+        assert core.tokens[0].status == rules.status(_hash(1), NOW)[0] == status
+    for now, status in ((NOW, "uncovered"), (NOW - second, "due")):
+        core = compute_statuses([token], [], now=now, renew_before=WINDOW)
+        rules = sv.RenewalRules([], now=now)
+        assert core.tokens[0].status == rules.status(_hash(1), NOW)[0] == status
