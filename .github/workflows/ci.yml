@@ -67,6 +67,7 @@ jobs:
       - name: "I125 run 1 of 3 - unchanged code (I125_PROBE=none)"
         id: none
         continue-on-error: true
+        timeout-minutes: 10
         env:
           I125_PROBE: none
         run: >-
@@ -75,6 +76,7 @@ jobs:
       - name: "I125 run 2 of 3 - +40 % of run 1's path (I125_PROBE=plus40)"
         id: plus40
         continue-on-error: true
+        timeout-minutes: 10
         env:
           I125_PROBE: plus40
         run: >-
@@ -83,6 +85,7 @@ jobs:
       - name: "I125 run 3 of 3 - #31's +400 us (I125_PROBE=plus400)"
         id: plus400
         continue-on-error: true
+        timeout-minutes: 10
         env:
           I125_PROBE: plus400
         run: >-
@@ -141,6 +144,7 @@ jobs:
       - name: "I125 run 1 of 3 - unchanged code (I125_PROBE=none)"
         id: none
         continue-on-error: true
+        timeout-minutes: 10
         env:
           I125_PROBE: none
         run: >-
@@ -149,6 +153,7 @@ jobs:
       - name: "I125 run 2 of 3 - +40 % of run 1's path (I125_PROBE=plus40)"
         id: plus40
         continue-on-error: true
+        timeout-minutes: 10
         env:
           I125_PROBE: plus40
         run: >-
@@ -157,6 +162,7 @@ jobs:
       - name: "I125 run 3 of 3 - #31's +400 us (I125_PROBE=plus400)"
         id: plus400
         continue-on-error: true
+        timeout-minutes: 10
         env:
           I125_PROBE: plus400
         run: >-
