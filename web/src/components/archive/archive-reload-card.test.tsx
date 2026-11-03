@@ -91,11 +91,11 @@ function renderCard(props: Partial<ArchiveReloadCardProps> = {}) {
       <ArchiveReloadCard {...all} />
     </QueryClientProvider>,
   );
-  /** The same card with other props; another `key` (as the pages give it) is a new card. */
-  const rerender = (next: Partial<ArchiveReloadCardProps> = {}, key?: string) => {
+  /** The same card with other props. */
+  const rerender = (next: Partial<ArchiveReloadCardProps> = {}) => {
     view.rerender(
       <QueryClientProvider client={client}>
-        <ArchiveReloadCard key={key} {...all} {...next} />
+        <ArchiveReloadCard {...all} {...next} />
       </QueryClientProvider>,
     );
   };
@@ -164,6 +164,10 @@ describe('ArchiveReloadCard — the card', () => {
     expect(region).toBe(card());
     expect(within(region).getByRole('heading', { name: 'Günler mühürlü arşivde' })).toBeVisible();
     expect(region).toHaveTextContent(LOOKUP_409_TR);
+    // It takes the place of the refusal's alert: a screen reader hears it when it appears.
+    const message = within(region).getByRole('status');
+    expect(message).toBe(screen.getByTestId('archive-reload-message'));
+    expect(message).toHaveTextContent(LOOKUP_409_TR);
     expect(within(region).getByRole('button', { name: 'Arşivden yükle' })).toBeVisible();
     expect(within(region).queryByRole('progressbar')).not.toBeInTheDocument();
     expect(screen.queryByTestId('archive-reload-clipped')).not.toBeInTheDocument();
@@ -173,7 +177,7 @@ describe('ArchiveReloadCard — the card', () => {
   it('without a 409 text (the archived days of a search) it says what the search misses', () => {
     serve(() => jsonResponse(202, ARCHIVE_CREATED));
     renderCard({ reason: 'search', message: null, range: ARCHIVE_SEARCH_ARCHIVED.archived });
-    expect(card()).toHaveTextContent(
+    expect(within(card()).getByRole('status')).toHaveTextContent(
       'Bu aramanın 04.10.2026 – 05.10.2026 günleri veritabanında değil; bu günlerin kayıtları mühürlü arşivde. Arşivden yüklerseniz arama bu günleri de kapsar.',
     );
     expect(card()).not.toHaveTextContent(LOOKUP_409_TR);
@@ -213,18 +217,6 @@ describe('ArchiveReloadCard — the card', () => {
       first_day: '2026-09-22',
       last_day: '2026-10-05',
     });
-  });
-
-  it('the card starts again when the page gives it other days (key)', async () => {
-    serve(() => jsonResponse(202, ARCHIVE_CREATED), ARCHIVE_LOADING);
-    const view = renderCard();
-    await confirmReload();
-    await settle();
-    expect(screen.getByRole('progressbar')).toBeInTheDocument();
-    const other = { first_day: '2026-10-01', last_day: '2026-10-02' };
-    view.rerender({ range: other }, `${other.first_day}${other.last_day}`);
-    expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Arşivden yükle' })).toBeVisible();
   });
 });
 
@@ -287,6 +279,7 @@ describe('ArchiveReloadCard — the confirmation', () => {
     ['archive_reload_too_large', ARCHIVE_ERRORS.too_large],
     ['archive_day_not_in_vault', ARCHIVE_ERRORS.not_in_vault],
     ['archive_reload_disk_low', ARCHIVE_ERRORS.disk_low],
+    ['validation_error', ARCHIVE_ERRORS.in_window],
   ] as const)('a refusal %s stays in the dialog with the API’s text', async (code, sample) => {
     expect(sample.body.error.code).toBe(code);
     const calls = serve(() => refusal(sample));
@@ -307,6 +300,34 @@ describe('ArchiveReloadCard — the confirmation', () => {
     await user.click(screen.getByRole('button', { name: 'Arşivden yükle' }));
     const again = await screen.findByRole('dialog');
     expect(within(again).queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it('Esc and İptal do not close the dialog while “Yükle” waits: a late refusal is seen', async () => {
+    let answer: (response: Response) => void = () => undefined;
+    const calls = serve(
+      () =>
+        new Promise<Response>((resolve) => {
+          answer = resolve;
+        }),
+    );
+    renderCard();
+    const dialog = await confirmReload();
+    await within(dialog).findByRole('button', { name: 'İşleniyor…' });
+    await user.keyboard('{Escape}');
+    await user.click(within(dialog).getByRole('button', { name: 'İptal' }));
+    expect(screen.getByRole('dialog')).toBe(dialog);
+
+    await act(async () => {
+      answer(refusal(ARCHIVE_ERRORS.too_large));
+      await vi.advanceTimersByTimeAsync(20);
+    });
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent(
+      ARCHIVE_ERRORS.too_large.body.error.message_tr,
+    );
+    expect(posts(calls)).toHaveLength(1);
+    // Answered: the dialog closes again.
+    await user.keyboard('{Escape}');
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
 
   it('the KVKK notice (403 privacy_notice_required) closes the dialog: the app shows the notice', async () => {
@@ -344,12 +365,18 @@ describe('ArchiveReloadCard — progress and the re-run', () => {
     const status = screen.getByTestId('archive-reload-status');
     expect(status).toHaveAttribute('role', 'status');
     expect(status).toHaveTextContent('Sırada: başka bir yükleme bitince başlar.');
-    expect(status).toHaveTextContent('0 B / 63,5 KB yüklendi (%0)');
+    // The bytes change with every poll: beside the live region, not in it.
+    const bytes = screen.getByTestId('archive-reload-bytes');
+    expect(bytes).toHaveTextContent('0 B / 63,5 KB yüklendi (%0)');
+    expect(status).not.toContainElement(bytes);
+    expect(bytes.closest('[role="status"]')).toBeNull();
+    expect(status).not.toHaveTextContent('63,5 KB');
 
     await nextPoll();
     expect(bar).toHaveAttribute('aria-valuenow', '50');
     expect(status).toHaveTextContent('Yükleniyor…');
-    expect(status).toHaveTextContent('31,7 KB / 63,5 KB yüklendi (%50)');
+    expect(status.textContent).toBe('Yükleniyor…');
+    expect(bytes).toHaveTextContent('31,7 KB / 63,5 KB yüklendi (%50)');
     expect(onReady).not.toHaveBeenCalled();
 
     const gets = polls(calls);
@@ -374,8 +401,11 @@ describe('ArchiveReloadCard — progress and the re-run', () => {
     expect(status).toHaveTextContent(
       'Günler yüklendi; 20.10.2026 07:01:26 tarihine kadar veritabanında kalır.',
     );
-    expect(status).toHaveTextContent('63,5 KB / 63,5 KB yüklendi (%100)');
     expect(status).toHaveTextContent('Sorgu yeniden çalıştırılıyor…');
+    expect(status).not.toHaveTextContent('63,5 KB');
+    expect(screen.getByTestId('archive-reload-bytes')).toHaveTextContent(
+      '63,5 KB / 63,5 KB yüklendi (%100)',
+    );
     expect(within(card()).queryByRole('button')).not.toBeInTheDocument();
 
     // No more polls, and neither re-renders nor a new callback run the page again.
@@ -412,6 +442,35 @@ describe('ArchiveReloadCard — progress and the re-run', () => {
     await nextPoll();
     expect(onReady).toHaveBeenCalledTimes(1);
     expect(polls(calls).length).toBeLessThanOrEqual(1);
+  });
+
+  it('never shows who asked for the reload (an administrator’s POST may answer another user’s)', async () => {
+    // Manager on #112: "Never show who else asked for a reload."
+    const other = { requested_by: 'tolga' };
+    const shown = () => {
+      expect(document.body).not.toHaveTextContent('tolga');
+      expect(document.body).not.toHaveTextContent(ARCHIVE_CREATED.requested_by);
+    };
+    serve(
+      () => jsonResponse(202, { ...ARCHIVE_CREATED, ...other }),
+      { ...ARCHIVE_LOADING, ...other },
+      { ...ARCHIVE_FAILED, id: 1, ...other },
+    );
+    renderCard();
+    await confirmReload();
+    await settle();
+    expect(screen.getByTestId('archive-reload-status')).toHaveTextContent('Yükleniyor…');
+    shown();
+    await nextPoll();
+    expect(within(card()).getByRole('alert')).toHaveTextContent(UNREADABLE_TR);
+    shown();
+
+    server.post = () => jsonResponse(202, { ...ARCHIVE_READY, id: 4, ...other });
+    server.reloads = [{ ...ARCHIVE_READY, id: 4, ...other }];
+    await confirmReload('Yeniden dene');
+    await settle();
+    expect(screen.getByTestId('archive-reload-status')).toHaveTextContent('Günler yüklendi;');
+    shown();
   });
 
   it('in StrictMode (effects run twice) the page runs again once as well', async () => {
@@ -532,7 +591,9 @@ describe('ArchiveReloadCard — English', () => {
     );
     const status = screen.getByTestId('archive-reload-status');
     expect(status).toHaveTextContent('Loading…');
-    expect(status).toHaveTextContent('31.7 KB of 63.5 KB loaded (50%)');
+    expect(screen.getByTestId('archive-reload-bytes')).toHaveTextContent(
+      '31.7 KB of 63.5 KB loaded (50%)',
+    );
 
     await nextPoll();
     expect(within(region).getByRole('alert')).toHaveTextContent(

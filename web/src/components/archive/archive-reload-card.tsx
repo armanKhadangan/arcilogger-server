@@ -25,7 +25,10 @@ export interface ArchiveReloadCardProps {
   onReady: () => void;
 }
 
-/** The bar and the status line of a reload that is queued, loading or ready. */
+/**
+ * The bar, the status line and the bytes of a reload that is queued, loading or ready. Only the
+ * status line is a live region: the bytes change with every poll and are read on demand.
+ */
 function Progress({
   reload,
   reason,
@@ -58,20 +61,20 @@ function Progress({
                   expires: reload.expires_at ? formatDateTime(reload.expires_at) : '—',
                 })}
         </p>
-        {reload ? (
-          <p className="text-xs">
-            {t('archive.progress.of', {
-              done: formatBytes(
-                reload.status === 'ready' ? reload.bytes_total : reload.bytes_done,
-                lang,
-              ),
-              total: formatBytes(reload.bytes_total, lang),
-              percent: formatNumber(value, 0, lang),
-            })}
-          </p>
-        ) : null}
         {reload?.status === 'ready' ? <p>{t(`archive.status.rerun.${reason}`)}</p> : null}
       </div>
+      {reload ? (
+        <p className="text-xs" data-testid="archive-reload-bytes">
+          {t('archive.progress.of', {
+            done: formatBytes(
+              reload.status === 'ready' ? reload.bytes_total : reload.bytes_done,
+              lang,
+            ),
+            total: formatBytes(reload.bytes_total, lang),
+            percent: formatNumber(value, 0, lang),
+          })}
+        </p>
+      ) : null}
     </div>
   );
 }
@@ -83,7 +86,9 @@ function Progress({
  * reload every 2 s and, once it is ready, lets the page run the lookup or search again — once per
  * reload. A range longer than one reload may ask for is not split: the days nearest the window are
  * offered, and the card says that the older ones need a narrower range. Refusals (G5) are the API's
- * texts, shown in the dialog; a failure has the web's text per `error_code`.
+ * texts, shown in the dialog; a failure has the web's text per `error_code`. The card shows the
+ * reload only: who asked for it (`requested_by`, another user's for an administrator) is never
+ * shown (#112).
  */
 export function ArchiveReloadCard({
   reason,
@@ -146,17 +151,20 @@ export function ArchiveReloadCard({
           <h3 id={titleId} className="font-medium">
             {t('archive.card.title')}
           </h3>
-          <p>
-            {message ? message : t('archive.card.search', days(range.first_day, range.last_day))}
-          </p>
-          {span.clipped ? (
-            <p data-testid="archive-reload-clipped">
-              {t('archive.card.clipped', {
-                max: span.days,
-                ...days(span.first_day, span.last_day),
-              })}
+          {/* Announced when the card appears: in place of a refusal's alert, or beside the rows. */}
+          <div role="status" className="flex flex-col gap-1" data-testid="archive-reload-message">
+            <p>
+              {message ? message : t('archive.card.search', days(range.first_day, range.last_day))}
             </p>
-          ) : null}
+            {span.clipped ? (
+              <p data-testid="archive-reload-clipped">
+                {t('archive.card.clipped', {
+                  max: span.days,
+                  ...days(span.first_day, span.last_day),
+                })}
+              </p>
+            ) : null}
+          </div>
         </div>
       </div>
 
@@ -190,7 +198,10 @@ export function ArchiveReloadCard({
 
       <ConfirmDialog
         open={open}
-        onOpenChange={setOpen}
+        onOpenChange={(next) => {
+          // Not while "Yükle" waits for its answer: a refusal is shown in the dialog.
+          if (!start.isPending) setOpen(next);
+        }}
         title={t('archive.dialog.title')}
         description={t('archive.dialog.body', days(span.first_day, span.last_day))}
         confirmLabel={t('archive.dialog.confirm')}

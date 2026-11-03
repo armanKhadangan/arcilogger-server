@@ -110,9 +110,21 @@ interface Reload {
   status: ArchiveReloadStatus;
 }
 
-/** The search mock's own answer to a call: its `answer` is private to it, read through this view. */
-interface Answering {
-  answer(call: RecordedCall): Answer;
+/**
+ * What `searchMock` itself answers to `call` (`POST /search`), for the `archived` option to add
+ * the captured days to.
+ *
+ * The one dependency on `SearchMock`'s inside (`e2e/mock-search.ts`, not this package's file): its
+ * `answer(call)` is private, so it is reached through a cast here and nowhere else. When `SearchMock`
+ * renames it or changes its signature, update this helper; the check below fails loudly until then.
+ */
+function searchMockAnswer(searchMock: SearchMock, call: RecordedCall): Answer {
+  const inside = searchMock as unknown as { answer?: (call: RecordedCall) => Answer };
+  if (typeof inside.answer !== 'function')
+    throw new Error(
+      'mockArchive: SearchMock has no answer(call) any more; update searchMockAnswer',
+    );
+  return inside.answer.call(searchMock, call);
 }
 
 export class ArchiveMock {
@@ -229,7 +241,8 @@ export class ArchiveMock {
     const account = this.person(call, 'search.read');
     if (Array.isArray(account)) return null;
     if (this.search === 'required') return this.refusal(ARCHIVE_SEARCH_REQUIRED);
-    const answer = (this.searchMock as unknown as Answering).answer(call);
+    if (!this.searchMock) return null;
+    const answer = searchMockAnswer(this.searchMock, call);
     const [status, page] = answer;
     if (status !== 200) return answer;
     return [status, { ...(page as object), archived: copy(ARCHIVE_SEARCH_ARCHIVED.archived) }];

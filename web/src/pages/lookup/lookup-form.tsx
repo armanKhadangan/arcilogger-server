@@ -42,13 +42,13 @@ const ANY = 'any';
 
 /**
  * A lookup that needs days outside the database window (409 `archive_reload_required`): the body
- * that got it (run again once the days are reloaded), the days and the API's text. `answer`
- * counts the 409s: each one is a new card.
+ * that got it (run again once the days are reloaded), the days and the 409 itself (its text is
+ * shown in the current language). `answer` counts the 409s: each one is a new card.
  */
 interface ReloadNeeded {
   body: LookupIn;
   required: ArchiveReloadRequired;
-  message: string;
+  error: unknown;
   answer: number;
 }
 
@@ -116,7 +116,7 @@ export function LookupForm({
           setReload((current) => ({
             body,
             required,
-            message: errorMessage(error),
+            error,
             answer: (current?.answer ?? 0) + 1,
           }));
           return;
@@ -382,7 +382,7 @@ export function LookupForm({
             key={reload.answer}
             reason="lookup"
             range={reload.required}
-            message={reload.message}
+            message={errorMessage(reload.error)}
             onReady={() => {
               send(reload.body);
             }}

@@ -100,6 +100,9 @@ test.describe('archive reload', () => {
     // The 409 is the card, not a failure: its sentence shows once, nothing else is red.
     await expect(page.getByText(ARCHIVE_LOOKUP_REQUIRED.body.error.message_tr)).toHaveCount(1);
     await expect(page.getByRole('alert')).toHaveCount(0);
+    await expect(card(page).getByRole('status')).toContainText(
+      ARCHIVE_LOOKUP_REQUIRED.body.error.message_tr,
+    );
 
     // Nothing is asked for before the confirmation; "İptal" asks for nothing either.
     await card(page).getByRole('button', { name: 'Arşivden yükle' }).click();
@@ -115,8 +118,11 @@ test.describe('archive reload', () => {
     const bar = card(page).getByRole('progressbar', { name: 'Arşivden yükleme ilerlemesi' });
     await expect(bar).toHaveAttribute('aria-valuenow', '50');
     const status = card(page).getByTestId('archive-reload-status');
-    await expect(status).toContainText('Yükleniyor…');
-    await expect(status).toContainText('31,7 KB / 63,5 KB yüklendi (%50)');
+    await expect(status).toHaveText('Yükleniyor…');
+    // The bytes beside the live region: they change with every poll.
+    await expect(card(page).getByTestId('archive-reload-bytes')).toHaveText(
+      '31,7 KB / 63,5 KB yüklendi (%50)',
+    );
     // Polled every 2 s: the first read is the user's request, the polls background ones.
     await expect.poll(() => archive.reads(1).length).toBeGreaterThan(1);
     expect(api.callsTo('POST', '/lookup/5651')).toHaveLength(1);

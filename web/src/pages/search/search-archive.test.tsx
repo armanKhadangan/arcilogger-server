@@ -45,20 +45,21 @@ interface Server {
   searches: (() => Response | Promise<Response>)[];
   /** The answers of `GET /archive-reloads/{id}` in turn, the last one again and again. */
   reloads: ArchiveReload[];
+  /** The answer of `POST /search/stats` for a search id, when not the usual statistics. */
+  statsOf?: (searchId: string) => Response | Promise<Response> | null;
 }
 
-function serve({ searches, reloads }: Server): RecordedRequest[] {
+function serve({ searches, reloads, statsOf }: Server): RecordedRequest[] {
   let search = 0;
   let poll = 0;
   return installFetch((request) => {
     const { method, path } = request;
     if (path === '/api/v1/auth/me') return jsonResponse(200, makeMe('auditor'));
     if (path === '/api/v1/search/fields') return jsonResponse(200, CATALOGUE);
-    if (method === 'POST' && path === '/api/v1/search/stats')
-      return jsonResponse(
-        200,
-        stats({ search_id: (request.body as { search_id: string }).search_id }),
-      );
+    if (method === 'POST' && path === '/api/v1/search/stats') {
+      const searchId = (request.body as { search_id: string }).search_id;
+      return statsOf?.(searchId) ?? jsonResponse(200, stats({ search_id: searchId }));
+    }
     if (method === 'POST' && path === SEARCH_PATH) {
       const answer = searches[Math.min(search, searches.length - 1)];
       search += 1;
@@ -115,6 +116,11 @@ async function card(): Promise<HTMLElement> {
   return screen.findByTestId('archive-reload-card');
 }
 
+/** The rows (histogram, table) the focus goes to when the card goes with the re-run. */
+function results(): HTMLElement {
+  return screen.getByRole('region', { name: 'Arama sonuçları' });
+}
+
 /** "Arşivden yükle", then "Yükle" in the confirmation. */
 async function confirmReload(): Promise<void> {
   await user.click(within(await card()).getByRole('button', { name: 'Arşivden yükle' }));
@@ -148,8 +154,10 @@ describe('Arama — days in the sealed archive', () => {
 
     const shown = await card();
     expect(shown).toHaveTextContent(REQUIRED_TR);
-    // Not the red refusal of the run, and not the empty page's invitation either.
+    // Not the red refusal of the run, and not the empty page's invitation either; it is announced
+    // in its place.
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(within(shown).getByRole('status')).toHaveTextContent(REQUIRED_TR);
     expect(screen.queryByText('Bir sorgu yazıp “Ara”ya basın')).not.toBeInTheDocument();
 
     await confirmReload();
@@ -166,9 +174,13 @@ describe('Arama — days in the sealed archive', () => {
     const [ran, again] = searches(calls);
     expect(again).toEqual(ran);
     expect(ran).toMatchObject({ q: 'srcip:172.20.42.57' });
-    // The rows of the second answer; the card is gone with the 409.
+    // The rows of the second answer; the card is gone with the 409, and the focus that was in it
+    // is on the results, not lost to the page.
     expect(await screen.findByRole('table', { name: 'Arama sonuçları' })).toBeInTheDocument();
     expect(screen.queryByTestId('archive-reload-card')).not.toBeInTheDocument();
+    await waitFor(() => {
+      expect(results()).toHaveFocus();
+    });
 
     await nextPoll();
     await nextPoll();
@@ -187,7 +199,7 @@ describe('Arama — days in the sealed archive', () => {
     await searchFor('srcip:172.20.42.57');
 
     const shown = await card();
-    expect(shown).toHaveTextContent(ARCHIVED_TR);
+    expect(within(shown).getByRole('status')).toHaveTextContent(ARCHIVED_TR);
     expect(shown).not.toHaveTextContent(REQUIRED_TR);
     // The answer's rows (none here) are shown beside it.
     expect(await screen.findByRole('table', { name: 'Arama sonuçları' })).toBeInTheDocument();
@@ -202,16 +214,17 @@ describe('Arama — days in the sealed archive', () => {
     });
     const [ran, again] = searches(calls);
     expect(again).toEqual(ran);
-    // The new answer has no archived days: no card.
+    // The new answer has no archived days: no card; the focus goes to its rows.
     await waitFor(() => {
       expect(screen.queryByTestId('archive-reload-card')).not.toBeInTheDocument();
     });
+    expect(results()).toHaveFocus();
 
     await nextPoll();
     expect(searches(calls)).toHaveLength(2);
   });
 
-  it('a new search meanwhile: the reload getting ready runs nothing again', async () => {
+  it('a new search meanwhile: its card goes, nothing runs again; its answer has a new card', async () => {
     let answer: (response: Response) => void = () => undefined;
     const pending = new Promise<Response>((resolve) => {
       answer = resolve;
@@ -225,21 +238,69 @@ describe('Arama — days in the sealed archive', () => {
     await confirmReload();
     expect(await screen.findByRole('progressbar')).toHaveAttribute('aria-valuenow', '50');
 
-    // Another search starts; while it runs, the old answer and its card stay on screen.
+    // Another search starts; while it runs, the old answer stays on screen, but not its card:
+    // its reload getting ready would run nothing again.
     await searchFor('srcip:172.20.42.58');
     await waitFor(() => {
       expect(searches(calls)).toHaveLength(2);
     });
+    expect(screen.getByRole('table', { name: 'Arama sonuçları' })).toBeInTheDocument();
+    expect(screen.queryByTestId('archive-reload-card')).not.toBeInTheDocument();
     await nextPoll();
-    expect(await card()).toHaveTextContent('Günler yüklendi;');
+    expect(screen.queryByText('Arama yeniden çalıştırılıyor…')).not.toBeInTheDocument();
     expect(searches(calls)).toHaveLength(2);
 
-    answer(jsonResponse(200, page({ search_id: 'ornek-arama-02' })));
-    await settle();
+    // Its answer has the same archived days: a new card, from the start.
+    answer(jsonResponse(200, archivedPage({ search_id: 'ornek-arama-02' })));
+    const again = await card();
+    expect(within(again).getByRole('button', { name: 'Arşivden yükle' })).toBeVisible();
+    expect(within(again).queryByRole('progressbar')).not.toBeInTheDocument();
     await nextPoll();
     expect(searches(calls)).toEqual([
       expect.objectContaining({ q: 'srcip:172.20.42.57' }),
       expect.objectContaining({ q: 'srcip:172.20.42.58' }),
     ]);
+  });
+
+  it('the expired search id is renewed meanwhile: the card keeps its reload and runs again once', async () => {
+    let expire: (response: Response) => void = () => undefined;
+    const expired = new Promise<Response>((resolve) => {
+      expire = resolve;
+    });
+    const calls = serve({
+      searches: [
+        () => jsonResponse(200, archivedPage()),
+        () => jsonResponse(200, archivedPage({ search_id: 'ornek-arama-arsiv-2' })),
+        () => jsonResponse(200, page({ items: [row()] })),
+      ],
+      reloads: [ARCHIVE_LOADING, ARCHIVE_READY],
+      // The statistics of the first id find it expired: the page runs the same search again.
+      statsOf: (searchId) => (searchId === 'ornek-arama-arsiv' ? expired : null),
+    });
+    renderApp('/search');
+    await searchFor('srcip:172.20.42.57');
+    await confirmReload();
+    expect(await screen.findByRole('progressbar')).toHaveAttribute('aria-valuenow', '50');
+
+    expire(errorResponse(409, 'search_expired'));
+    await waitFor(() => {
+      expect(searches(calls)).toHaveLength(2);
+    });
+    await settle();
+    // The same search under a new id: the same card, still following its reload.
+    expect(within(await card()).getByRole('progressbar')).toHaveAttribute('aria-valuenow', '50');
+    expect(within(await card()).queryByRole('button')).not.toBeInTheDocument();
+
+    await nextPoll();
+    await waitFor(() => {
+      expect(searches(calls)).toHaveLength(3);
+    });
+    const [ran, renewed, again] = searches(calls);
+    expect(renewed).toEqual(ran);
+    expect(again).toEqual(ran);
+    await nextPoll();
+    await nextPoll();
+    expect(searches(calls)).toHaveLength(3);
+    expect(reloadPosts(calls)).toHaveLength(1);
   });
 });

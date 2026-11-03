@@ -32,6 +32,7 @@ import { LOOKUPS } from '@/test/samples';
 const LOOKUP_PATH = '/api/v1/lookup/5651';
 const RELOADS_PATH = '/api/v1/archive-reloads';
 const LOOKUP_409_TR = ARCHIVE_LOOKUP_REQUIRED.body.error.message_tr;
+const LOOKUP_409_EN = ARCHIVE_LOOKUP_REQUIRED.body.error.message_en;
 /** The lookup of the capture: an internal IP on 09.10.2026, its days 04.–05.10.2026 archived. */
 const RESULT = LOOKUPS.internal;
 
@@ -40,7 +41,7 @@ type Answer = () => Response | Promise<Response>;
 const required: Answer = () =>
   errorResponse(409, 'archive_reload_required', {
     tr: LOOKUP_409_TR,
-    en: ARCHIVE_LOOKUP_REQUIRED.body.error.message_en,
+    en: LOOKUP_409_EN,
     details: ARCHIVE_LOOKUP_REQUIRED.body.error.details,
   });
 const stored: Answer = () => jsonResponse(201, RESULT);
@@ -112,6 +113,9 @@ beforeEach(() => {
 afterEach(() => {
   vi.useRealTimers();
   vi.unstubAllGlobals();
+  act(() => {
+    setLanguage('tr');
+  });
 });
 
 /** `/lookup` with the request details and the captured query filled in, then "Sorgula". */
@@ -147,7 +151,9 @@ describe('5651 Sorgu — days in the sealed archive (409 archive_reload_required
     const region = screen.getByRole('region', { name: 'Günler mühürlü arşivde' });
     expect(region).toBe(card());
     expect(region).toHaveTextContent(LOOKUP_409_TR);
+    // In place of the failure's alert: announced when it appears.
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(within(region).getByRole('status')).toHaveTextContent(LOOKUP_409_TR);
     expect(router.state.location.pathname).toBe('/lookup');
     const [first] = lookupPosts(calls);
     expect(first?.body).toMatchObject({
@@ -194,6 +200,19 @@ describe('5651 Sorgu — days in the sealed archive (409 archive_reload_required
     expect(lookupPosts(calls)).toHaveLength(2);
     expect(polls(calls).map((call) => call.headers.get(BACKGROUND_HEADER))).toEqual([null, '1']);
     expect(reloadPosts(calls)).toHaveLength(1);
+  });
+
+  it('the card’s 409 text follows a switch to English', async () => {
+    serve([required]);
+    await runLookup();
+    expect(card()).toHaveTextContent(LOOKUP_409_TR);
+    act(() => {
+      setLanguage('en');
+    });
+    const region = screen.getByRole('region', { name: 'Days in the sealed archive' });
+    expect(within(region).getByRole('status')).toHaveTextContent(LOOKUP_409_EN);
+    expect(region).not.toHaveTextContent(LOOKUP_409_TR);
+    expect(within(region).getByRole('button', { name: 'Reload from the archive' })).toBeVisible();
   });
 
   it('a 409 again on the re-run is a new card, not a loop', async () => {
