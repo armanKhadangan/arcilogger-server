@@ -50,7 +50,8 @@ run goes on with the rest (the way on after an interruption is to run the downgr
 upgrade instead keeps the merged months monthly). Each step takes the partitions' advisory lock,
 as every other change to them does (:func:`_lock_partitions`), and the version moves only when,
 under that lock, no daily partition is left (:func:`_check_merged`: one made between two steps
-by a service still running makes the run refuse, the next one merges it). Only after the last
+by a service still running makes the run refuse, the next one merges it; a step that finds one
+made since in its own month refuses the same way, :func:`_check_planned`). Only after the last
 step, in the transaction in which alembic moves its version (the caller's), ``archive_reloads``,
 ``db.reload_keep_days`` and the status rows ``db.window_dropped_before`` and
 ``db.retention_days_migration`` are dropped (an audit entry already written from the latter
@@ -452,6 +453,7 @@ def _merge_month(
     following = _next_month(month)
     _lock_partitions(bind)
     bind.execute(sa.text(f'LOCK TABLE "{parent}" IN ACCESS EXCLUSIVE MODE'))
+    _check_planned(bind, parent, month, names)
     bind.execute(
         sa.text(
             f'CREATE TABLE "{monthly_name}" (LIKE "{parent}" INCLUDING DEFAULTS '
@@ -506,6 +508,23 @@ def _lock_partitions(bind: sa.Connection) -> None:
     bind.execute(sa.text("SELECT pg_advisory_xact_lock(:key)"), {"key": PARTITION_LOCK_KEY})
 
 
+def _check_planned(
+    bind: sa.Connection, parent: str, month: date, names: list[tuple[str, date]]
+) -> None:
+    """Refuse a step (before it changes anything) when, under its locks, the table has a daily
+    partition that can hold rows of the month and that the plan does not name: made since the
+    plan by a service still running. The month's monthly partition would overlap it."""
+    daily, _planned, _defaults = _merge_plan(bind)
+    known = {name for name, _day in names}
+    made = sorted(
+        name
+        for name, day in daily.get(parent, [])
+        if month in (_month(day), _month(day + ONE_DAY)) and name not in known
+    )
+    if made:
+        _refuse(made)
+
+
 def _check_merged(bind: sa.Connection) -> None:
     """Refuse to move alembic's version while a daily partition is left: the steps are planned
     once, and between two of them (each commits and releases its locks) a service still running
@@ -516,17 +535,22 @@ def _check_merged(bind: sa.Connection) -> None:
     daily, _planned, _defaults = _merge_plan(bind)
     left = sorted(name for names in daily.values() for name, _day in names)
     if left:
-        shown = ", ".join(left[:5]) + (" …" if len(left) > 5 else "")
-        raise RuntimeError(
-            f"0021_db_window geri alınamadı: geri alma sürerken günlük bölümler oluştu ({shown}); "
-            "ArciIngest ve ArciWorker hizmetleri çalışıyor olabilir. Hizmetleri durdurup geri "
-            "almayı yeniden çalıştırın: birleştirilen aylar birleştirilmiş kalır, sürüm "
-            "0021_db_window olarak kalır. / "
-            f"0021_db_window was not downgraded: daily partitions were made while the downgrade "
-            f"ran ({shown}); ArciIngest and ArciWorker may be running. Stop the services and run "
-            "the downgrade again: the merged months stay merged, the version stays "
-            "0021_db_window."
-        )
+        _refuse(left)
+
+
+def _refuse(made: list[str]) -> None:
+    """The refusal of a run that found daily partitions made while it ran (TR/EN)."""
+    shown = ", ".join(made[:5]) + (" …" if len(made) > 5 else "")
+    raise RuntimeError(
+        f"0021_db_window geri alınamadı: geri alma sürerken günlük bölümler oluştu ({shown}); "
+        "ArciIngest ve ArciWorker hizmetleri çalışıyor olabilir. Hizmetleri durdurup geri "
+        "almayı yeniden çalıştırın: birleştirilen aylar birleştirilmiş kalır, sürüm "
+        "0021_db_window olarak kalır. / "
+        f"0021_db_window was not downgraded: daily partitions were made while the downgrade "
+        f"ran ({shown}); ArciIngest and ArciWorker may be running. Stop the services and run "
+        "the downgrade again: the merged months stay merged, the version stays "
+        "0021_db_window."
+    )
 
 
 def _commit(bind: sa.Connection) -> None:

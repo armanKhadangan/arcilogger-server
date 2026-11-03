@@ -726,6 +726,58 @@ def test_a_daily_partition_made_between_two_steps_stops_the_version(empty_engine
     assert TABLE not in inspect(empty_engine).get_table_names()
 
 
+def test_a_daily_partition_made_in_a_planned_month_stops_its_step(empty_engine: Engine) -> None:
+    """A daily partition another session makes between two steps in a month the plan merges
+    later (the day after ``mt_dhcp``'s last one) would overlap that month's monthly partition:
+    the step finds it under its locks and refuses with the same TR/EN text before it changes
+    anything, the steps before it merged, the version at ``0021_db_window``; the next run merges
+    it, with its row."""
+    assert upgrade(empty_engine, timescale="off").after == (REVISION,)
+    first = sorted(TIME_SERIES_TABLES)[0]  # its steps are done before mt_dhcp's
+    later = _daily(empty_engine, "mt_dhcp")[-1] + timedelta(days=1)
+    with empty_engine.connect() as connection:
+        _daily_names, planned, _defaults = MIGRATION._merge_plan(connection)
+    assert month_of(later) in planned["mt_dhcp"]
+    stray = day_partition_name("mt_dhcp", later)
+    start, end = day_bounds(later)
+    create = (
+        f'CREATE TABLE "{stray}" PARTITION OF "mt_dhcp" '
+        f"FOR VALUES FROM ('{start.isoformat()}') TO ('{end.isoformat()}')"
+    )
+    made: list[str] = []
+
+    def make(conn: Any, cursor: Any, statement: str, *_args: Any) -> None:
+        if not made and statement.startswith(f'ALTER TABLE "{first}" ATTACH PARTITION'):
+            made.append(stray)
+            with empty_engine.begin() as other:  # another session; it takes no lock of ours
+                other.exec_driver_sql(create)
+                _insert_dhcp(other, start + timedelta(hours=12), 1)
+
+    event.listen(empty_engine, "before_cursor_execute", make)
+    try:
+        with pytest.raises(
+            RuntimeError, match=rf"geri alınamadı: geri alma sürerken .*{stray}.* was not "
+        ):
+            _migrate(empty_engine, BEFORE)
+    finally:
+        event.remove(empty_engine, "before_cursor_execute", make)
+    assert made == [stray]
+    rows = _rows(empty_engine)
+    assert _where(empty_engine, "mt_dhcp") == [stray]
+    with empty_engine.connect() as connection:
+        assert current_revisions(connection) == (REVISION,)
+    assert TABLE in inspect(empty_engine).get_table_names()
+    assert _daily(empty_engine, first) == []
+    assert later in _daily(empty_engine, "mt_dhcp")
+    _migrate(empty_engine, BEFORE)  # the second run merges the stray day as well
+    with empty_engine.connect() as connection:
+        assert current_revisions(connection) == (BEFORE,)
+    assert _daily(empty_engine, "mt_dhcp") == []
+    assert _where(empty_engine, "mt_dhcp") == [partition_name("mt_dhcp", month_of(later))]
+    assert _rows(empty_engine) == rows
+    assert TABLE not in inspect(empty_engine).get_table_names()
+
+
 def test_up_and_down_on_timescaledb(empty_engine: Engine) -> None:
     """The setting and the table on TimescaleDB; the hypertables are not touched. On the Linux
     CI job (``ARCILOGGER_EXPECT_TIMESCALE=1``) it fails instead of skipping."""
