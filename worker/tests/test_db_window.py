@@ -35,6 +35,7 @@ from arcilogger_db.audit import verify_audit_chain
 from arcilogger_db.engine import engine_from_url, session_factory
 from arcilogger_db.migrate import upgrade
 from arcilogger_db.models import Alert, ArchiveReload, AuditLog, JobRun, MtDhcp, Setting
+from arcilogger_db.partitions import DAYS_PER_RUN
 from arcilogger_db.settings import DEFAULT_SETTINGS
 from arcilogger_db.testing import TestServer, pause_compression_jobs
 from arcilogger_worker import db_window
@@ -741,11 +742,15 @@ def test_a_step_that_drops_writes_one_audit_entry(
             "dropped_count": 0,
             "default_rows_deleted": 1,
         }
-    else:  # its UTC day's chunk
+    else:  # its UTC day's chunk, in a bounded step (W5-G-7): the step ends DAYS_PER_RUN days
+        # after the chunk's start, at the next local midnight (UTC 10 April + 16 days, 27 April
+        # 00:00 site time); the steps after it drop nothing and write no entry.
         (chunk,) = entry.details["dropped"]
         assert chunk.startswith("_timescaledb_internal.")
+        assert DAYS_PER_RUN == 16
         assert entry.details == {
             **common,
+            "cutoff": "2026-04-27",
             "dropped": [chunk],
             "dropped_count": 1,
             "default_rows_deleted": 0,
