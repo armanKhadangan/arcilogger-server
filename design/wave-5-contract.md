@@ -1245,6 +1245,27 @@ All Wave 5 questions are answered (2026-11-02).
   for `crl.crl_options`). It is the one place in `arcilogger_core` that reads the key; W5-C's
   `legalstatus/options.py` has its own reader. Both become plain attribute access when W5-T
   lands. Until then the 30–730 bounds are not enforced: they are W5-T's validation.
+- **W5-A-3: the crash-safe write order.** §2.1.1 says the record "is written with
+  `atomic_write_bytes`, stamped", and a failed run deletes it. `renew` writes it as
+  `<name>.json.part` (with `atomic_write_bytes`), stamps it to `<name>.json.part.zd` and verifies
+  that token against the pinned roots; only then is the token renamed to its final name, then the
+  record, and both are locked with `immutability.lock`, as `retention` does for a deletion record.
+  A failed stamp (`TsaError`, `OSError`, or anything else the provider raises) or a token that
+  does not verify, or whose certificate the stored revocation lists show revoked at or before its
+  genTime (it would never count, C15: `RenewalStampInvalidError`, a `TsaResponseError`), removes
+  both files and is raised. So a record never exists under its final name without its token, and
+  the builder (which ships `renewals/*.json`) never ships one. Leftovers of an interrupted run are
+  tidied by the next run (`renewal.recover`): a part whose token (`.part.zd`, or the final `.zd`
+  when the run stopped between the renames) verifies against it is promoted; any other part, a
+  token without its record and an interrupted write's temporary file are removed, but never a
+  locked file (a locked token without its record means a completed record was removed: it stays
+  for a person, with a warning in the log; `recover` never unlocks). A record and its token under
+  their final names that are not both locked (`lock` failed after the renames) are locked by the
+  next run, as the seal locks every file of its day. One run at a time: `state/renewal.lock`
+  (never inside `vault/renewals`, where the standalone verifier's vault mode would report an
+  unknown file); a second run raises `RenewalBusyError` (`renewal_busy`), and a lock file that
+  cannot be opened or locked for another reason `RenewalLockError` (`renewal_lock_failed`), both
+  with TR/EN texts.
 - **W5-A-4: token paths.** A deletion token's path is the real
   `deletions/<YYYY-MM-DD>[-N]-imha.json.zd` (`retention.records`, final names only, so no
   `.part` file and no `chain-anchor.json`); §2.1.1's `…-retention.json.zd` is illustrative. A
@@ -1269,24 +1290,3 @@ All Wave 5 questions are answered (2026-11-02).
   right; the run goes on without report tokens). A token that disappears during the scan (the
   retention job) is skipped. The certificate's `notAfter` is read from each token, never from
   `state/seal`.
-- **W5-A-3: the crash-safe write order.** §2.1.1 says the record "is written with
-  `atomic_write_bytes`, stamped", and a failed run deletes it. `renew` writes it as
-  `<name>.json.part` (with `atomic_write_bytes`), stamps it to `<name>.json.part.zd` and verifies
-  that token against the pinned roots; only then is the token renamed to its final name, then the
-  record, and both are locked with `immutability.lock`, as `retention` does for a deletion record.
-  A failed stamp (`TsaError`, `OSError`, or anything else the provider raises) or a token that
-  does not verify, or whose certificate the stored revocation lists show revoked at or before its
-  genTime (it would never count, C15: `RenewalStampInvalidError`, a `TsaResponseError`), removes
-  both files and is raised. So a record never exists under its final name without its token, and
-  the builder (which ships `renewals/*.json`) never ships one. Leftovers of an interrupted run are
-  tidied by the next run (`renewal.recover`): a part whose token (`.part.zd`, or the final `.zd`
-  when the run stopped between the renames) verifies against it is promoted; any other part, a
-  token without its record and an interrupted write's temporary file are removed, but never a
-  locked file (a locked token without its record means a completed record was removed: it stays
-  for a person, with a warning in the log; `recover` never unlocks). A record and its token under
-  their final names that are not both locked (`lock` failed after the renames) are locked by the
-  next run, as the seal locks every file of its day. One run at a time: `state/renewal.lock`
-  (never inside `vault/renewals`, where the standalone verifier's vault mode would report an
-  unknown file); a second run raises `RenewalBusyError` (`renewal_busy`), and a lock file that
-  cannot be opened or locked for another reason `RenewalLockError` (`renewal_lock_failed`), both
-  with TR/EN texts.

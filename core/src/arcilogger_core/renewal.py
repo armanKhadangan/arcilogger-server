@@ -34,7 +34,7 @@ of every deletion record under its final name, of every stored official report
 ``mismatched``, so no renewal ever lists the hash of a changed file; one that disappears
 during the scan (the retention job deleting its day) is skipped. Each renewal token is verified
 against the pinned roots and the stored revocation lists. :func:`renewal_status` only reads;
-``state/renewal.json`` is written by the ``Renew`` task's command line (contract W5-A-2).
+``state/renewal.json`` is written by the ``Renew`` task's command line (``arcilogger-core renew``).
 
 **A run** (:func:`renew`, D4) writes at most one record, covering every token that is ``due``
 or ``uncovered``, under ``state/renewal.lock`` (never inside ``vault/renewals``). As a deletion
