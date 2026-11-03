@@ -4,12 +4,15 @@ The builder is not changed for renewals (D1): it ships every ``vault/renewals/*.
 raw text holds a packaged day's manifest or token hash, or the packaged report's token hash.
 A renewal of a renewal repeats the hashes the older one protected (``protects``, D2), so a
 package of one day picks up the whole chain. The stamps here are made in October 2026, before
-the real date: the builder's self-check verifies the finished package at the real time.
+the real date: the builder's self-check verifies the finished package at the real time. R3's
+certificate runs to 2069, so the chain covers the day at any real date the mock root (ten years
+from October 2026) is still valid; the fixture says when that is no longer so.
 """
 
 from __future__ import annotations
 
 import json
+import zipfile
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -31,10 +34,11 @@ from .test_evidence import findings, in_process, isolated, unlock_tree, unpack
 OTHER = DAY + timedelta(days=1)
 OTHER_EXPIRES = datetime(2027, 3, 1, tzinfo=UTC)
 #: The chain: R1 renews the day's token, R2 R1's, R3 R2's; each before the certificate it
-#: renews expires, and each certificate but R3's within 180 days of December 2026.
+#: renews expires, and each certificate but R3's within 180 days of December 2026. R3's runs
+#: to 2069 (inside the legal root), so it is not due at any real date the tests run at.
 R1 = ("2026-10-15-1", datetime(2026, 10, 15, 9, tzinfo=UTC), datetime(2027, 1, 1, tzinfo=UTC))
 R2 = ("2026-10-16-1", datetime(2026, 10, 16, 9, tzinfo=UTC), datetime(2027, 2, 1, tzinfo=UTC))
-R3 = ("2026-10-17-1", datetime(2026, 10, 17, 9, tzinfo=UTC), datetime(2036, 1, 1, tzinfo=UTC))
+R3 = ("2026-10-17-1", datetime(2026, 10, 17, 9, tzinfo=UTC), datetime(2069, 1, 1, tzinfo=UTC))
 #: When the whole chain is needed for the day to be covered.
 JUDGED = datetime(2026, 12, 1, tzinfo=UTC)
 
@@ -44,6 +48,11 @@ def rw(tmp_path: Path) -> RenewalWorld:
     world = make_world(tmp_path / "site")
     assert utc_now() > R3[1] + timedelta(days=1), (
         "the test assumes its October 2026 stamps are past"
+    )
+    # the package is verified at the real time, and the days' tokens chain to the mock root
+    expires = world.tsa.root_certificate.not_valid_after_utc
+    assert utc_now() < expires, (
+        f"the test assumes the mock root (until {expires:%Y-%m-%d}) is valid"
     )
     return world
 
@@ -68,9 +77,14 @@ def _roots(rw: RenewalWorld, folder: Path) -> Path:
 
 
 def _records(info: PackageInfo, folder: Path) -> list[str]:
+    """The renewal files in the package's ZIP (unpacked to ``folder`` for the verifiers); the
+    builder's ``paket.json`` lists the same."""
+    with zipfile.ZipFile(info.path) as archive:
+        names = sorted(n for n in archive.namelist() if n.startswith("vault/renewals/"))
     folder = unpack(info, folder)
-    records: list[str] = json.loads((folder / "paket.json").read_bytes())["records"]
-    return records
+    listed = json.loads((folder / "paket.json").read_bytes())["records"]
+    assert sorted(n for n in listed if n.startswith("vault/renewals/")) == names
+    return names
 
 
 def _chain(rw: RenewalWorld) -> list[str]:
