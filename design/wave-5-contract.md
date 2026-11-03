@@ -1073,11 +1073,21 @@ All Wave 5 questions are answered (2026-11-02).
   manifest keeps the existing notices.
 - **W5-G-4: `POST /archive-reloads` behaviour.** Complete in-window days are refused with 422
   `validation_error`; when nothing needs a new load, the user's own active request is returned
-  (audited as `existing`); a skipped (empty) day passes with nothing to load. At claim time a
-  file whose rows of the request's days are in the database already (its offset finished at
-  `bytes_uncompressed`, nothing dropped from those days since) is neither reset nor loaded
-  again: another user's request of loaded days becomes `ready` with its own record and its own
-  audit entry, and one load serves both (manager answer 6 on #121).
+  (audited as `existing`); another user's request never is, for an administrator either: each
+  user's request, an administrator's included, keeps its own record and audit entry (review
+  point 4 on #121; an administrator still sees every request in `GET /archive-reloads`). A
+  skipped (empty) day passes with nothing to load. At claim time a file whose rows of the
+  request's days are in the database already (its offset finished at `bytes_uncompressed`,
+  nothing dropped from those days since) is neither reset nor loaded again: another user's
+  request of loaded days becomes `ready` with its own record and its own audit entry, and one
+  load serves both (manager answer 6 on #121). The disk check (G5) estimates only the files not
+  loaded yet by that same rule (`IngestService.loaded_files`, called read-only by the API), so a
+  request of days another user's `ready` reload holds is not refused with
+  `archive_reload_disk_low` (review point 5 on #121); the audit entry's `estimated_bytes` is
+  that estimate. `bytes_total` stays the sum of every file (the progress denominator: ingest
+  counts the loaded files as done), and the 409's `details` keep G5's full estimate. The
+  estimate is made when the request is made: a file dropped between the request and its claim
+  is loaded without a second check.
 - **W5-G-5: failure codes of a reload** (`error_code`): `archive_day_not_in_vault` (retention
   removed a day after queueing) and the new `archive_file_unreadable` (a sealed file is checked by
   size and SHA-256 when the request is claimed, and kept failing to read). Their TR/EN texts are
@@ -1112,7 +1122,9 @@ All Wave 5 questions are answered (2026-11-02).
   then carries `:migration`. The revision writes no audit entry itself (no revision does): a
   change leaves the status row `db.retention_days_migration` (the old and the new value, who had
   set the old one), which the first `db.window` run turns into one `settings.change` audit entry
-  (actor `system`) before it drops anything (manager answer 4).
+  (actor `system`) before it drops anything (manager answer 4). An administrator can set the
+  value again afterwards (`PATCH /settings`, bounds 7 and up as G1 says; the database then grows
+  accordingly). Accepted by the manager on #121.
 - **W5-G-11: the factor (G5)** is `DB_BYTES_PER_RAW_BYTE = 2.6`, rounded up from 2.40 to 2.51
   measured on plain PostgreSQL 16 with daily partitions through the real ingest
   (`docs/DATA-MODEL.md`).
@@ -1144,6 +1156,7 @@ All Wave 5 questions are answered (2026-11-02).
   (equal to its size after the fixture's `VACUUM (ANALYZE)`). Each also requires a partition or
   chunk of more than 10 pages read through an index (every plan of the continuous-data test, at
   least one step of each D15 case), so neither check can pass on empty partitions alone.
+  Accepted by the manager on #121, for the lookup engine's per-UTC-day steps and the 3.8 guards.
 - **W5-G-13: a refused reload writes no audit entry** (manager answer 4 on #121). G6's "every
   request is written to the audit log before it is queued" applies to the accepted requests:
   queued, or answered with the user's active request (`existing`, W5-G-4). A refusal (422:
@@ -1185,7 +1198,10 @@ All Wave 5 questions are answered (2026-11-02).
   alembic's version at `0021_db_window`, and running the downgrade again goes on from there.
   Each step takes the partitions' advisory lock (`ARCIPART`), and the version moves only when,
   under that lock, no daily partition is left: one made between two steps (a service still
-  running) makes the run refuse with a TR/EN message, and the next run merges it.
+  running) makes the run refuse with a TR/EN message, and the next run merges it. A step that
+  finds, under its locks, a daily partition in its own month that its plan does not name (one
+  made since the plan) refuses with the same text before it changes anything, never with
+  PostgreSQL's partition overlap error (review nit on #121).
   `archive_reloads`, the settings rows and `db.retention_days` 30 → 400 go last, in the caller's
   transaction, together with alembic's version move. Whatever the caller's transaction held
   before the downgrade, including a transaction-level advisory lock, is committed or released
@@ -1199,3 +1215,39 @@ All Wave 5 questions are answered (2026-11-02).
   `web/src/locales/areas/dbWindow/{tr,en}.json` beside `web/src/pages/audit/audit-labels.ts`;
   the grant named `db.window`, and `archive.reload` (written by W5-G's API, G6) had no label
   either. The `R20-db-window` rows of `docs/UYARILAR.md` / `docs/ALERTS.md` §2 are added.
+- **W5-G-17: the lookup reads only its days (G7; review point 3 on #121).** (a) With
+  `dhcp.fortigate_use_logged_lease` (the default) `lookup_days` reaches back as far as one
+  reload holds, for the logged lease time of a FortiGate lease (D6), which is known only once
+  the lease is read: `RELOAD_DAYS` = 14 days with the last one (the API's `MAX_DAYS`), at most
+  the FortiOS maximum, never less than the configured rules reach. With the defaults the days
+  are `T`'s day − 12 to + 1 (− 11 to + 2 in the last two minutes before a midnight; without the
+  setting − 8 to + 1), so a moment more than about 18 days old needs a reload, of 14 days.
+  (b) No log row outside those days is read (`lookup.days.reads_from` to `reads_until`): a
+  look-back reaching before the first day (the 100-day cap of the missed-move check, round 7; a
+  logged lease longer than 14 days, through the lease's newest record, the post-lease checks
+  and D27) reads from it, and D27's read past the moment (`T + W`, W up to a logged lease time)
+  ends with the last day. The answer then carries the explanation
+  `lookback_clamped_to_window` (TR/EN, `warning`, naming the first and the last day), and a
+  lease whose newest record lies before the first day is read from its stored record. The bound
+  is the lookup's own days, not the window start: those depend only on the request and the
+  settings, so the answer is the same before a drop and after the reload, while a bound at the
+  window start would move with "now". So in a lookup the 100-day cap of the missed-move check
+  is never reached any more (about 12 days are read with the defaults), and the ARP interval
+  after a RELEASE is cut too (not reachable today: a late-mapped RELEASE is read from its row,
+  inside the days). The 3.8 guards of `worker/tests/test_lookup_performance.py` (not W5-G's
+  file) measure the converted-row query and the 30-day post-lease query from the first day,
+  with the explanation asserted and their row counts recomputed for that range; the event
+  site's 30-day leases now store their newest ACK among their refs, as the lease build keeps it
+  (the opening and the latest continuations).
+- **W5-G-18: the search holds the partition lock from before its snapshot (G8; review point 2
+  on #121).** A clarification of G8's "under the shared partition lock": a search and its next
+  pages read in one REPEATABLE READ snapshot, taken by the transaction's first statement, and a
+  lock taken in that transaction is granted after it (a step of `db.window` the search waited
+  for would leave it the old cutoff and the dropped partitions gone: a partial day with
+  `archived: null`). So the search takes `ARCIPART` shared at session level, in an autocommit
+  statement of its own before that transaction (`archive.service.hold_window`;
+  `check_window(held=True)`), and releases it before the rollback; when the release fails (an
+  aborted transaction, a lost connection) the connection is invalidated, never returned to the
+  pool holding the lock. The wait is part of `search.request_budget_ms`: the scan gets what is
+  left, and a wait that uses the budget up answers 504 `search_timeout` (audited `outcome:
+  timeout`). The lookup (READ COMMITTED) keeps the lock in its transaction as before.
