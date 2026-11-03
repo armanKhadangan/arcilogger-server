@@ -1,0 +1,37 @@
+{
+  "archive": {
+    "card": {
+      "title": "Days in the sealed archive",
+      "search": "The days {{first}} – {{last}} of this search are not in the database; their records are in the sealed archive. Reload them from the archive and the search covers them too.",
+      "clipped": "One reload may ask for at most {{max}} days: the {{max}} days nearest the window ({{first}} – {{last}}) are reloaded. For older days, narrow the range.",
+      "reload": "Reload from the archive",
+      "retry": "Try again"
+    },
+    "dialog": {
+      "title": "Reload the days from the archive?",
+      "body": "The records of {{first}} – {{last}} are loaded from the sealed archive into the database and stay there for the db.reload_keep_days setting (7 days by default); then they are removed again. This also brings the personal data of those days back into the database. The request is written to the audit log.",
+      "bodyDays_one": "The records of {{first}} – {{last}} are loaded from the sealed archive into the database and stay in the database for {{count}} day; then they are removed again. This also brings the personal data of those days back into the database. The request is written to the audit log.",
+      "bodyDays_other": "The records of {{first}} – {{last}} are loaded from the sealed archive into the database and stay in the database for {{count}} days; then they are removed again. This also brings the personal data of those days back into the database. The request is written to the audit log.",
+      "confirm": "Reload"
+    },
+    "progress": {
+      "label": "Archive reload progress",
+      "of": "{{done}} of {{total}} loaded ({{percent}}%)"
+    },
+    "status": {
+      "queued": "Queued: starts when another reload has finished.",
+      "loading": "Loading…",
+      "ready": "The days are loaded; they stay in the database until {{expires}}.",
+      "rerun": {
+        "lookup": "Running the lookup again…",
+        "search": "Running the search again…"
+      },
+      "expired": "The reloaded days have expired and were removed from the database again."
+    },
+    "failure": {
+      "archive_day_not_in_vault": "The reload failed: one of the days is no longer in the sealed archive (removed by retention while the request waited). That day cannot be reloaded.",
+      "archive_file_unreadable": "The reload failed: a sealed file of one of the days could not be read or does not match its seal record. Tell the administrator and run the archive verification.",
+      "unknown": "The reload failed ({{code}})."
+    }
+  }
+}
