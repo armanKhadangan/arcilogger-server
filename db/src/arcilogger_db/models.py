@@ -246,6 +246,7 @@ class FgTraffic(TimeSeries, Base):
         "fg_traffic",
         Index("ix_fg_traffic_srcip_time", "srcip", "time"),
         Index("ix_fg_traffic_transip_transport_time", "transip", "transport", "time"),
+        Index("ix_fg_traffic_transip_time", "transip", "time"),
         Index("ix_fg_traffic_sessionid", "sessionid"),
         Index("ix_fg_traffic_dstip_dstport_time", "dstip", "dstport", "time"),
         comment="FortiGate traffic logs (forward/local), incl. interim updates and source NAT.",
@@ -1989,6 +1990,37 @@ class SearchCount(Base):
     action: Mapped[str | None] = mapped_column(Text)
     #: The /24 of the typed row's client address when it is a private IPv4 address.
     net: Mapped[str | None] = mapped_column(CIDR)
+    n: Mapped[int] = mapped_column(BigInteger, nullable=False)
+
+
+class SourceClockSample(Base):
+    """How far each source's device clock was from the receive time, per received minute
+    (``arcilogger_db.clocksamples``; revision 0019_source_clock_samples, ADR-0016 D28).
+
+    One row per ``(source, minute, seconds)`` with its number of ``messages`` rows ``n``: the
+    minute the lines were received (UTC) and ``time - time_received`` in whole seconds, ``0`` for
+    an offset under a minute (no clock limit is that small, so a source on time has one row a
+    minute). Rows whose ``time`` is the receive time are not counted. The ingest loader adds a
+    batch's samples in the transaction that loads its rows, like ``search_counts``; the
+    ``source-clock`` alert reads the newest received minutes and a lookup the minutes received
+    around its moment (and, #82, the minutes received within a day of it whose clock put their
+    device times around it), so a clock that jumps by hours is measured where its rows arrived, not
+    where their device times put them. Derived data: ``clocksamples.rebuild`` counts a source's
+    received range again from its rows.
+    """
+
+    __tablename__ = "source_clock_samples"
+    __table_args__ = (
+        CheckConstraint("n > 0", name="n"),
+        {"comment": "Device clock offsets per source and received minute (whole seconds)."},
+    )
+
+    source: Mapped[str] = mapped_column(Text, primary_key=True)
+    #: ``date_trunc('minute', messages.time_received)`` (UTC).
+    minute: Mapped[datetime] = mapped_column(TZ, primary_key=True)
+    #: The offset ``time - time_received`` rounded to whole seconds; ``0`` when under a minute
+    #: either way.
+    seconds: Mapped[int] = mapped_column(Integer, primary_key=True)
     n: Mapped[int] = mapped_column(BigInteger, nullable=False)
 
 

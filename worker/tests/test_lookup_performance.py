@@ -584,6 +584,15 @@ TRAFFIC_SITE = (
     "generate_series(1, :rows_4h) AS g, "
     "LATERAL (SELECT CAST(:at AS timestamptz) - interval '2 hours' "
     "+ g * CAST(:step AS interval) AS t) AS x",
+    # The clock samples of both FortiGates' messages, as ingest writes them: one key a received
+    # minute (a second behind: offset 0) for 30 days around T, and in every tenth minute a few
+    # lines 10 minutes late (a minority of their minute, which no clock sample takes as shifted).
+    "INSERT INTO source_clock_samples (source, minute, seconds, n) "
+    "SELECT s.name, CAST(:at AS timestamptz) - interval '15 days' + g * interval '1 minute', "
+    "o.seconds, o.n FROM (VALUES ('fortigate'), ('fortigate-2')) AS s(name), "
+    "generate_series(0, 30 * 1440 - 1) AS g, "
+    "LATERAL (VALUES (0, 694), (-600, CASE WHEN g % 10 = 0 THEN 5 END)) AS o(seconds, n) "
+    "WHERE o.n IS NOT NULL",
     # The search counts of 400 days (the clock check picks the sources of an empty search
     # from them).
     "INSERT INTO search_counts (hour, source, raw_day, kind, tbl, action, net, n) "
@@ -716,6 +725,30 @@ EVENT_SITE = (
 )
 
 
+#: The second line of :data:`LINES_SITE`.
+SECOND_LINE = "100.64.13.9"
+#: Two load-balanced lines (#71): the site's NAT address and :data:`SECOND_LINE` take turns, a
+#: session each, at 1 M sessions a day for the two days before the guards' moment; the first line
+#: is down from then on and the second carries every session for a day. ``transip`` is then far
+#: from the table's order, unlike the traffic site's single line: a probe step on the first line
+#: after its last row, ordered by ``transip, time`` with ``transip = :address``, was planned on
+#: the primary key and read every row of the second line in its range.
+LINES_SITE = (
+    "INSERT INTO fg_traffic (time, time_received, source, sender, raw_day, raw_line, raw_offset, "
+    "logid, subtype, action, sessionid, proto, srcip, srcport, srcintf, dstip, dstport, dstintf, "
+    "transip, transport, trandisp, duration, is_interim) "
+    "SELECT t, t, 'fortigate', '172.31.255.1', :day, g, g::bigint * 900, '0000000013', "
+    "'forward', 'accept', 1000000 + g, 6, ('172.20.41.' || (100 + g % 100))::inet, "
+    "1024 + (g % 60000), 'vlan41', ('198.51.100.' || (g % 200 + 1))::inet, 443, "
+    "CASE WHEN t < :at AND g % 2 = 0 THEN 'wan1' ELSE 'wan2' END, "
+    "CASE WHEN t < :at AND g % 2 = 0 THEN CAST(:wan AS inet) ELSE CAST(:second AS inet) END, "
+    "1024 + (g % 60000), 'snat', g % 97, false "
+    "FROM generate_series(1, 3000000) AS g, "
+    "LATERAL (SELECT CAST(:at AS timestamptz) - interval '2 days' "
+    "+ g * interval '86.4 milliseconds' AS t) AS x",
+)
+
+
 def _site(server: TestServer, template: str, statements: Sequence[str]) -> Iterator[Engine]:
     """A database of the module with ``statements`` written into it (see the comment above)."""
     with server.database(template) as name:
@@ -738,6 +771,7 @@ def _site(server: TestServer, template: str, statements: Sequence[str]) -> Itera
                 "day": DAY,
                 "wan": WAN,
                 "line": LATER_LINE,
+                "second": SECOND_LINE,
                 "beside": BESIDE,
                 "beside_trandisp": BESIDE_TRANDISP,
                 "rows": 1_000_000 * 27 // 24,
@@ -773,6 +807,11 @@ def traffic_site(pg_server: TestServer, pg_template: str) -> Iterator[Engine]:
 @pytest.fixture(scope="module")
 def event_site(pg_server: TestServer, pg_template: str) -> Iterator[Engine]:
     yield from _site(pg_server, pg_template, EVENT_SITE)
+
+
+@pytest.fixture(scope="module")
+def lines_site(pg_server: TestServer, pg_template: str) -> Iterator[Engine]:
+    yield from _site(pg_server, pg_template, LINES_SITE)
 
 
 @dataclass
@@ -972,7 +1011,9 @@ def test_internal_srcmac_sightings_are_fast(traffic_site: Engine, timer: _Timer,
 
 
 @pytest.mark.perf
-def test_the_source_clock_of_an_empty_search_is_fast(traffic_site: Engine, timer: _Timer) -> None:
+def test_the_source_clock_of_an_empty_search_is_fast(
+    traffic_site: Engine, timer: _Timer, executed: _Executed
+) -> None:
     """3.8: the per-lookup clock measurement (2.7) for two sources over [T - 1 h, T + 1 h] of
     ``messages`` at 1 M lines a day each, under 0.2 s, with the ``search_counts`` choice of the
     searched sources of an empty result (a destination no session went to)."""
@@ -981,9 +1022,11 @@ def test_the_source_clock_of_an_empty_search_is_fast(traffic_site: Engine, timer
     def measure() -> None:
         parts.append(timer.time(lookup_engine._Lookup, "_searched_sources"))
         parts.append(timer.time(lookup_engine._Lookup, "_clock"))
+        executed.record(traffic_site)
 
     request = LookupRequest(at=GUARD_AT, public_ip=PUBLIC, dest_ip="203.0.113.250", dest_port=443)
     outcome = _guard_lookup(traffic_site, request, measure)
+    executed.stop()
     timer.report("source clock, empty search")
     assert (outcome.mode, outcome.matches) == ("none", ())
     assert "destination_not_found" in _keys(outcome)
@@ -991,6 +1034,26 @@ def test_the_source_clock_of_an_empty_search_is_fast(traffic_site: Engine, timer
     assert len(searched.calls) == 1
     assert sorted(call[1] for call in clock.calls) == ["fortigate", "fortigate-2"]
     assert "source_clock_offset" not in _keys(outcome)  # 1 s behind: measured, within the limit
+    # Each source by device time (messages), by receive time (its samples of two hours) and by
+    # the minutes that put their device times around T (#82): each of the last on the table's
+    # key, its minutes within a day and an hour of T, not the 30 days of samples.
+    sampled = [(sql, p) for sql, p in executed.statements if "source_clock_samples" in sql]
+    assert len(sampled) == 4
+    shifted = [(sql, p) for sql, p in sampled if "OVER (PARTITION BY" in sql]
+    assert len(shifted) == 2
+    span = 2 * (lookup_engine.CLOCK_SPAN + timedelta(days=1)) // timedelta(minutes=1)
+    for sql, parameters in shifted:
+        with traffic_site.connect() as connection:
+            plan = (
+                connection.exec_driver_sql(f"EXPLAIN (ANALYZE, BUFFERS) {sql}", parameters)
+                .scalars()
+                .all()
+            )
+        print("\n".join(plan))
+        assert not any("Seq Scan" in line for line in plan)
+        scans, _removed = _plan_reads(plan)
+        assert [name for name, _n in scans] == ["pk_source_clock_samples"], scans
+        assert scans[0][1] <= span * 11 // 10 + 10, (scans, span)  # 1.1 keys a minute
     seconds = searched.seconds + clock.seconds
     assert seconds < 0.2, f"the clock measurement took {seconds:.3f} s"
 
@@ -1310,7 +1373,9 @@ def test_a_direct_exit_with_a_29_public_network_is_fast(
 
 #: The overlap probe's cases (D31 (a), no exit configured): an unclaimed address with no row at
 #: all; the site's busy NAT address (its sessions overlap the moment) at the guards' moment and 20
-#: hours later, when the partition holds 22 hours of the address's rows before the probe's range;
+#: hours later, when the partition holds 22 hours of the address's rows before the probe's range,
+#: and 30 minutes after its last row (a line switched away: no row of it in the probe's range, the
+#: partition full of its rows before it; #71);
 #: the busy address 5 hours before the guards' moment, before its first row (its rows fill the
 #: range's 24-hour tail, none of them overlaps the window); and the second line
 #: (:data:`LATER_LINE`, about 1 % of the rows of the range, none overlapping the moment). The busy
@@ -1320,6 +1385,7 @@ OVERLAP = {
     "no_rows": (PUBLIC, GUARD_AT),
     "busy": (WAN, GUARD_AT),
     "busy_late": (WAN, GUARD_AT + timedelta(hours=20)),
+    "busy_after": (WAN, GUARD_AT + timedelta(hours=25, minutes=30)),
     "busy_before": (WAN, GUARD_AT - timedelta(hours=5)),
     "later_line": (LATER_LINE, GUARD_AT),
 }
@@ -1354,6 +1420,31 @@ def _plan_reads(plan: Sequence[str]) -> tuple[list[tuple[str, int]], int]:
     return scans, removed
 
 
+def _binds(parameters: dict[str, Any], address: str) -> bool:
+    """``address`` is bound to the statement, alone or as a one-element array."""
+    return any(value in (address, [address]) for value in parameters.values())
+
+
+def _buffers(plan: Sequence[str]) -> int:
+    """The shared buffers an ``EXPLAIN (ANALYZE, BUFFERS)`` plan's execution touched (its top
+    node's, hit and read; 0 when no node touched any, e.g. a plan answered by ``One-Time Filter:
+    false``, not the planning's that follow the tree): index entries a scan walks and filters by
+    its index condition show here, not as rows."""
+    for line in plan:
+        if line.strip().startswith("Planning"):
+            break
+        if line.strip().startswith("Buffers:"):
+            return sum(int(n) for n in re.findall(r"(?:hit|read)=(\d+)", line))
+    return 0
+
+
+#: The buffers a probe step may touch beyond one per row of its range: the index's upper pages
+#: and the pages of the range's first and last entries. Walking every index entry of a busy
+#: address in the partition, as a port-less step on ``ix_fg_traffic_transip_transport_time`` did,
+#: touches thousands (#71).
+STEP_BUFFERS = 100
+
+
 @pytest.mark.perf
 @pytest.mark.parametrize("case", sorted(OVERLAP))
 def test_the_overlap_probe_of_an_unclaimed_address_is_fast(
@@ -1363,8 +1454,9 @@ def test_the_overlap_probe_of_an_unclaimed_address_is_fast(
     no rows and for a busy unclaimed P (:data:`OVERLAP`), under 0.2 s (:data:`OVERLAP_SECONDS`);
     through the lookup's own probe (``_Probe.seen_overlap``), which asks the probe window first
     and the tail after it only when the window has no overlapping session. Each statement's plan
-    reads the address's own rows of its range only (``ix_fg_traffic_transip_transport_time``)
-    and stops at the first overlapping session, over partitions and over chunks."""
+    reads the address's own rows of its range only (``ix_fg_traffic_transip_time``, no other
+    index entry of the address: :data:`STEP_BUFFERS`) and stops at the first overlapping
+    session, over partitions and over chunks."""
     address, at = OVERLAP[case]
     probes: list[_Timed] = []
 
@@ -1382,7 +1474,7 @@ def test_the_overlap_probe_of_an_unclaimed_address_is_fast(
     statements = [
         (sql, parameters)
         for sql, parameters in executed.statements
-        if "make_interval" in sql and SEARCH not in sql and address in parameters.values()
+        if "make_interval" in sql and SEARCH not in sql and _binds(parameters, address)
     ]
     probe = timedelta(seconds=lookup_engine.TRANSIP_PROBE_SECONDS)
     low, high = at - probe, at + probe
@@ -1392,7 +1484,7 @@ def test_the_overlap_probe_of_an_unclaimed_address_is_fast(
     condition = "transip = CAST(:address AS inet)"
     read, kept = _rows_of(traffic_site, low, end, high, condition, address=address)
     in_window, kept_in_window = _rows_of(traffic_site, low, high, high, condition, address=address)
-    if case == "no_rows":
+    if case in ("no_rows", "busy_after"):
         assert (read, kept) == (0, 0)
     elif case in ("busy", "busy_late"):
         assert kept_in_window > 0
@@ -1423,7 +1515,9 @@ def test_the_overlap_probe_of_an_unclaimed_address_is_fast(
     for (sql, parameters), (_first, _last, rows) in zip(statements, ranges, strict=True):
         with traffic_site.connect() as connection:
             plan = (
-                connection.exec_driver_sql(f"EXPLAIN (ANALYZE) {sql}", parameters).scalars().all()
+                connection.exec_driver_sql(f"EXPLAIN (ANALYZE, BUFFERS) {sql}", parameters)
+                .scalars()
+                .all()
             )
         print("\n".join(plan))
         assert not any("Seq Scan" in line for line in plan), case
@@ -1436,7 +1530,8 @@ def test_the_overlap_probe_of_an_unclaimed_address_is_fast(
         # (``busy_before``'s, before the site's first row), a scan that fetched nothing.
         scans, removed = _plan_reads(plan)
         assert scans, case
-        assert all("transip_transport_time" in index or not n for index, n in scans), scans
+        assert all("transip_time" in index or not n for index, n in scans), scans
+        assert _buffers(plan) <= rows + STEP_BUFFERS, (case, _buffers(plan), rows)
         if kept_in_window:
             assert removed < in_window // 10, (case, removed, in_window)
         else:
@@ -1466,9 +1561,16 @@ CARRIED_EXITS: dict[str, dict[str, Any]] = {
     WAN: {"hat-1": {"mode": "isp_nat", "transips": [WAN]}},
     LATER_LINE: {"hat-1": {"mode": "direct", "public": [LATER_LINE]}},
 }
-#: The order of ``ix_fg_traffic_transip_transport_time`` in which ``_carried`` asks its steps after
-#: the window.
-CARRIED_ORDER = "ORDER BY fg_traffic.transip, fg_traffic.transport, fg_traffic.time"
+#: The orders in which ``_carried`` asks its steps after the window: with a port, that of
+#: ``ix_fg_traffic_transip_transport_time``; without one, that of ``ix_fg_traffic_transip_time``
+#: (#71), with the index each one reads.
+CARRIED_ORDER = {
+    True: (
+        "ORDER BY fg_traffic.transip, fg_traffic.transport, fg_traffic.time",
+        "transip_transport_time",
+    ),
+    False: ("ORDER BY fg_traffic.transip, fg_traffic.time", "transip_time"),
+}
 
 
 def _utc_days(start: datetime, end: datetime) -> list[tuple[datetime, datetime]]:
@@ -1493,12 +1595,15 @@ def test_the_d15_carried_check_is_fast(
     :data:`CARRIED`) under 0.2 s, the probe's bound, through the real lookup: the exit's check
     sees the address and :data:`BESIDE` beside it, so the search on the address keeps its answer
     only when a session through it spans the moment or would be found in the window. Asked in
-    steps (the window's rows in time order, then on ``ix_fg_traffic_transip_transport_time`` and
+    steps (the window's rows in time order, then on an index on the address, with a port
+    ``ix_fg_traffic_transip_transport_time``, without one ``ix_fg_traffic_transip_time``, and
     one UTC day, a TimescaleDB chunk, at a time the scan's tail and, with a port, the sessions
     spanning the moment on any port), the window's plan reads at most its rows of every address,
-    every other plan the address's own rows of its day only, stopping at the first that
-    answers. As one ``EXISTS`` the busy address was a sequential scan of the partition and the
-    address after its last row a time-ordered scan of every address's rows of the range."""
+    every other plan the address's own rows of its day only (no other index entry of the
+    address: :data:`STEP_BUFFERS`), stopping at the first that answers. As one ``EXISTS`` the
+    busy address was a sequential scan of the partition and the address after its last row a
+    time-ordered scan of every address's rows of the range; on the first index a port-less step
+    walked every index entry of the address in the partition (#71)."""
     address, at, port, carried = CARRIED[case]
     checks: list[_Timed] = []
 
@@ -1551,14 +1656,23 @@ def test_the_d15_carried_check_is_fast(
     # The steps, each (its bound moments, the range of rows it reads, its port): the window in
     # time order, then the scan's tail after it (its lower bound exclusive) and, with a port, the
     # sessions spanning the moment on any port, these two one UTC day (a chunk) at a time.
+    # The day pieces are half-open at the midnights between them (``time < midnight``, then
+    # ``time >= midnight``), as TimescaleDB's chunks are.
     tiny = timedelta(microseconds=1)
     steps = [([window.low, window.high, window.high], (window.low, window.high, window.high), port)]
-    for first, last in _utc_days(window.high, window.scan_end):
-        steps.append(([first, last, window.high], (first + tiny, last, window.high), port))
+    days = _utc_days(window.high, window.scan_end)
+    for index, (first, last) in enumerate(days):
+        low, high = (
+            first + tiny if index == 0 else first,
+            last if index == len(days) - 1 else last - tiny,
+        )
+        steps.append(([first, last, window.high], (low, high, window.high), port))
     if port is not None:
         spans_end = at + timedelta(seconds=window.max_session)
-        for index, (first, last) in enumerate(_utc_days(at, spans_end)):
-            steps.append(([first, last, at], (first + tiny if index else first, last, at), None))
+        days = _utc_days(at, spans_end)
+        for index, (first, last) in enumerate(days):
+            high = last if index == len(days) - 1 else last - tiny
+            steps.append(([first, last, at], (first, high, at), None))
     # The statements the check sent, whatever their shape: in order, each of them a step, the
     # last one the first that finds a row (a carried address) or the last step (the fallback).
     ((start, end),) = sent
@@ -1572,7 +1686,9 @@ def test_the_d15_carried_check_is_fast(
         with traffic_site.connect() as connection:
             found = connection.exec_driver_sql(sql, parameters).scalar() is not None
             plan = (
-                connection.exec_driver_sql(f"EXPLAIN (ANALYZE) {sql}", parameters).scalars().all()
+                connection.exec_driver_sql(f"EXPLAIN (ANALYZE, BUFFERS) {sql}", parameters)
+                .scalars()
+                .all()
             )
         print("\n".join(plan))
         # The plans first (the one ``EXISTS`` fails here): no step scans a partition, and the
@@ -1592,18 +1708,85 @@ def test_the_d15_carried_check_is_fast(
             continue
         # The address's own rows of the step's day only, along its index entries: a step that
         # finds nothing reads and filters out every one of them, a step that answers stops early.
-        assert CARRIED_ORDER in sql, case
-        assert all("transip_transport_time" in name or not n for name, n in scans), scans
+        order, index_name = CARRIED_ORDER[step_port is not None]
+        assert order in sql, case
+        assert all(index_name in name or not n for name, n in scans), scans
         own = condition if step_port is None else f"{condition} AND transport = :port"
         rows, _kept = _rows_of(
             traffic_site, first, last, start_bound, own, address=address, port=step_port
         )
+        # No other index entry of the address than its rows of the step's range: on
+        # ``ix_fg_traffic_transip_transport_time`` a port-less step walked them all (#71).
+        assert _buffers(plan) <= rows + STEP_BUFFERS, (case, index, _buffers(plan), rows)
         if found:
             assert removed <= max(rows // 10, 100), (case, index, removed, rows)
         else:
             assert removed == rows, (case, index, removed, rows)
     assert timed.seconds < 0.2, f"{case}: the D15 carried check took {timed.seconds:.3f} s"
     assert seconds < LIMIT_SECONDS, f"{case}: the lookup took {seconds:.3f} s"
+
+
+#: The probe steps on :data:`LINES_SITE`: the first line 30 minutes after its last row with no
+#: exit (the overlap probe, then ``unconfigured``), and 10 minutes after it as an ``isp_nat`` exit's
+#: address (seen, the second line beside it: the D15 check, then the fallback).
+LINES = {
+    "overlap": (timedelta(minutes=30), {}, "unconfigured"),
+    "carried": (
+        timedelta(minutes=10),
+        {"hat-1": {"mode": "isp_nat", "transips": [WAN]}},
+        "fallback",
+    ),
+}
+
+
+@pytest.mark.perf
+@pytest.mark.parametrize("case", sorted(LINES))
+def test_the_probe_steps_of_a_line_that_took_turns_read_its_own_rows(
+    lines_site: Engine, executed: _Executed, case: str
+) -> None:
+    """3.8 (#71): with two lines taking turns (:data:`LINES_SITE`), each step of the overlap probe
+    and of the D15 check ordered by the address (``ORDER BY transip, time``) is planned on
+    ``ix_fg_traffic_transip_time`` and touches no more buffers than its own rows of the range
+    (none: the first line is down) plus :data:`STEP_BUFFERS`. With ``transip = :address`` the
+    sort lost ``transip`` and the planner took the primary key, reading every row of the second
+    line in the range (``_address_is``)."""
+    after, exits, resolution = LINES[case]
+    request = LookupRequest(at=GUARD_AT + after, public_ip=WAN)
+    outcome = None
+    for warm in (True, False):
+        if not warm:
+            executed.record(lines_site)
+        with Session(lines_site) as session:
+            values = {**get_settings(session), "nat.egresses": exits}
+            settings = LookupSettings.from_settings(values)
+            outcome = run_lookup(session, request, settings, now=GUARD_AT + timedelta(days=2))
+            session.rollback()
+    executed.stop()
+    assert outcome is not None
+    assert outcome.egress is not None
+    assert outcome.egress.resolution == resolution, case
+    steps = [
+        (sql, parameters)
+        for sql, parameters in executed.statements
+        if "make_interval" in sql
+        and "ORDER BY fg_traffic.transip" in sql
+        and _binds(parameters, WAN)
+    ]
+    assert len(steps) >= 2, case  # the probe's window and tail; the check's tail, a day at a time
+    for sql, parameters in steps:
+        with lines_site.connect() as connection:
+            plan = (
+                connection.exec_driver_sql(f"EXPLAIN (ANALYZE, BUFFERS) {sql}", parameters)
+                .scalars()
+                .all()
+            )
+        print("\n".join(plan))
+        assert not any("Seq Scan" in line for line in plan), case
+        scans, removed = _plan_reads(plan)
+        assert scans or any("One-Time Filter: false" in line for line in plan), case
+        assert all("transip_time" in name for name, _n in scans), (case, scans)
+        assert removed == 0, (case, removed)
+        assert _buffers(plan) <= STEP_BUFFERS, (case, _buffers(plan))
 
 
 # -- the event site -----------------------------------------------------------------------------

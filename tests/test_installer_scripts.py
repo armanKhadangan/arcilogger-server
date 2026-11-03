@@ -4057,16 +4057,64 @@ def test_dry_run_rollback_lowers_the_fortigate_leases_before_the_swap(
     _before(ids, "services.stop", "leases.prepare-rollback", "program.swap")
     assert ids.count("leases.prepare-rollback") == 1
     detail = {item["id"]: item for item in plan["items"]}["leases.prepare-rollback"]["detail"]
-    assert detail == {"command": "arcilogger-db leases prepare-rollback", "lowered": None}
+    module = Path(f"{program}.previous", "venv/Lib/site-packages/arcilogger_db/lease_rollback.py")
+    assert _windows_path(detail.pop("previous_module")) == _windows_path(str(module))
+    # No arcilogger_db package in the previous program: undecided, so the step runs, and the
+    # plan keeps why.
+    _, found, folder = detail.pop("previous_check").partition(PACKAGE_NOT_FOUND)
+    assert found
+    assert _windows_path(folder) == _windows_path(str(module.parent))
+    assert detail == {
+        "command": "arcilogger-db leases prepare-rollback",
+        "lowered": None,
+        "previous_has_module": None,
+    }
     # -SkipDatabase: no database work, also not this step (recorded as skipped), and the leases
     # stay as they are: the warning of a failed step says what that means for the lookups.
     result, plan = dry_run(engine, tmp_path, bundle, "-Rollback", "-SkipDatabase")
     assert_dry_run_exit(result, plan)
     items = {item["id"]: item for item in plan["items"]}
     assert items["leases.prepare-rollback"]["status"] == "skipped"
+    assert PACKAGE_NOT_FOUND in items["leases.prepare-rollback"]["detail"]["previous_check"]
     (warning,) = [w for w in plan["warnings"] if w.startswith("FortiGate")]
     assert "[FortiGate leases not lowered] (-SkipDatabase)" in warning
     assert LEASES_NOT_LOWERED in warning
+
+
+def test_dry_run_rollback_skips_the_lease_step_for_a_version_that_reads_fortigate_dhcp(
+    engine: str, tmp_path: Path
+) -> None:
+    """Review note round 7 (a), issue #81: the previous program's arcilogger_db (in its venv, as
+    pip installs the wheel) has lease_rollback.py, so it reads FortiGate DHCP itself: the step
+    is recorded as skipped with its reason, also with -SkipDatabase and then without that
+    warning. Without the module the step is planned as before."""
+    bundle = make_fake_bundle(tmp_path)
+    program = write_version(tmp_path / "program" / "ARCILOGGER", "9.9.10", "1" * 64)
+    previous = write_version(Path(f"{program}.previous"), "9.9.9", "2" * 64)
+    package = previous / "venv" / "Lib" / "site-packages" / "arcilogger_db"
+    package.mkdir(parents=True)
+    (package / "__init__.py").write_text("", encoding="utf-8")
+    module = package / "lease_rollback.py"
+    module.write_text("", encoding="utf-8")
+    for extra in ([], ["-SkipDatabase"]):
+        result, plan = dry_run(engine, tmp_path, bundle, "-Rollback", *extra)
+        assert_dry_run_exit(result, plan)
+        ids = _ids(plan)
+        _before(ids, "services.stop", "leases.prepare-rollback", "program.swap")
+        step = {item["id"]: item for item in plan["items"]}["leases.prepare-rollback"]
+        assert step["status"] == "skipped", extra
+        assert step["text"].startswith(LEASES_NOT_NEEDED), step["text"]
+        assert step["detail"]["previous_has_module"] is True
+        assert step["detail"]["previous_check"] is None
+        assert _windows_path(step["detail"]["previous_module"]) == _windows_path(str(module))
+        assert not [w for w in plan["warnings"] if w.startswith("FortiGate")], extra
+    module.unlink()
+    result, plan = dry_run(engine, tmp_path, bundle, "-Rollback")
+    assert_dry_run_exit(result, plan)
+    step = {item["id"]: item for item in plan["items"]}["leases.prepare-rollback"]
+    assert step["status"] == "planned"
+    assert step["detail"]["previous_has_module"] is False
+    assert step["detail"]["previous_check"] is None
 
 
 def test_dry_run_rollback_sets_firewall_and_time_from_the_restored_configuration(
@@ -5234,6 +5282,23 @@ if ($rollback -or $uninstall) {
     New-FakeProgram -Folder $previous -Version '0.9.0' -Fingerprint ('c' * 64) `
         -Services $oldServices -InstallPath $program
 }
+# The previous version's arcilogger_db as pip installed it (issue #81): with the rollback step's
+# module (a version that reads FortiGate DHCP; also with a swap that fails), without it (one from
+# before), or the module without the package's __init__.py (undecidable). The other scenarios
+# have no such folder.
+$previousModules = @{
+    'rollback-reads-fortigate-dhcp'      = @('__init__.py', 'lease_rollback.py')
+    'rollback-swap-reads-fortigate-dhcp' = @('__init__.py', 'lease_rollback.py')
+    'rollback-before-fortigate-dhcp'     = @('__init__.py', 'cli.py')
+    'rollback-module-no-package'         = @('lease_rollback.py')
+}
+if ($previousModules.ContainsKey($Scenario)) {
+    $package = Join-Path $previous 'venv/Lib/site-packages/arcilogger_db'
+    [void](New-Item -ItemType Directory -Path $package -Force)
+    foreach ($name in $previousModules[$Scenario]) {
+        Write-Text (Join-Path $package $name) '# stub'
+    }
+}
 if ($uninstall) {
     $failed = "$program.failed-20261012000000"
     New-FakeProgram -Folder $failed -Version '1.1.0' -Fingerprint ('d' * 64) -Partial
@@ -6013,6 +6078,95 @@ def test_rollback_goes_on_when_the_leases_cannot_be_lowered(engine: str, tmp_pat
     assert "önceki sahibini gösterebilir" in warning
     assert LEASES_NOT_LOWERED in warning
     assert report["state"].get("last_failure") is None
+
+
+#: What the rollback step prints instead when the previous program has the module (issue #81).
+LEASES_NOT_NEEDED = (
+    "FortiGate kiraları düşük güvene indirilmiyor: geri alınan sürüm FortiGate DHCP kayıtlarını "
+    "zaten okuyor [FortiGate leases not lowered: the restored version already reads FortiGate DHCP]"
+)
+#: ... and before it runs the command when the check could not decide.
+LEASES_UNDECIDED = (
+    "[could not tell whether the restored version reads FortiGate DHCP: the leases are lowered "
+    "anyway]"
+)
+#: How the check says it could not decide, before the package folder (also in the plan's detail).
+PACKAGE_NOT_FOUND = "[package not found or not readable]: "
+
+
+def test_rollback_to_a_version_that_reads_fortigate_dhcp_keeps_the_leases(
+    engine: str, tmp_path: Path
+) -> None:
+    """Review note round 7 (a), issue #81: the program the rollback returns to has
+    arcilogger_db\\lease_rollback.py, so it reads FortiGate DHCP itself. The step is skipped with
+    its reason, ``arcilogger-db leases prepare-rollback`` is not run and no warning is given; the
+    rollback goes on as before."""
+    report = simulate(engine, tmp_path, "rollback-reads-fortigate-dhcp")
+    assert report["exit"] is None, report["message"]
+    assert not [c for c in report["calls"] if "prepare-rollback" in c]
+    assert _unwrapped(LEASES_NOT_NEEDED) in _unwrapped(report["stdout"])
+    assert _unwrapped(LEASES_LOWERED) not in _unwrapped(report["stdout"])
+    # PowerShell 7 on Linux joins the path with "/"
+    stdout = _windows_path(_unwrapped(report["stdout"]))
+    assert stdout is not None
+    assert "arcilogger_db\\lease_rollback.py)" in stdout
+    assert not [w for w in report["health"]["warnings"] if "FortiGate" in w]
+    assert _folders(report)["ARCILOGGER"] == "0.9.0"
+    assert _running(report) == ALL_SERVICES
+
+
+def test_rollback_to_a_version_before_fortigate_dhcp_lowers_the_leases(
+    engine: str, tmp_path: Path
+) -> None:
+    """The previous program's arcilogger_db has no lease_rollback.py: the step runs as before
+    the check (once, before the services are removed), with no doubt to report."""
+    report = simulate(engine, tmp_path, "rollback-before-fortigate-dhcp")
+    assert report["exit"] is None, report["message"]
+    calls = report["calls"]
+    step = calls.index("process arcilogger-db.exe leases prepare-rollback")
+    assert calls.count(calls[step]) == 1
+    assert step < calls.index("exe sc.exe delete ArciAdmin")
+    assert _unwrapped(LEASES_LOWERED) in _unwrapped(report["stdout"])
+    assert _unwrapped(LEASES_UNDECIDED) not in _unwrapped(report["stdout"])
+    assert _unwrapped(LEASES_NOT_NEEDED) not in _unwrapped(report["stdout"])
+    assert _folders(report)["ARCILOGGER"] == "0.9.0"
+
+
+def test_rollback_that_skipped_the_lease_step_and_cannot_swap_restores_no_leases(
+    engine: str, tmp_path: Path
+) -> None:
+    """Point (b) of the review note round 7 with issue #81's skip: the step did not lower the
+    leases, so the failed swap that keeps this version runs no ``arcilogger-db upgrade`` for them
+    and names no FortiGate manual step."""
+    report = simulate(engine, tmp_path, "rollback-swap-reads-fortigate-dhcp")
+    assert report["exit"] == 3
+    assert _folders(report) == {"ARCILOGGER": "1.0.0", "ARCILOGGER.previous": "0.9.0"}
+    assert _running(report) == NEW_SERVICES
+    calls = report["calls"]
+    assert "process arcilogger-db.exe upgrade --config" not in calls
+    assert not [c for c in calls if "prepare-rollback" in c]
+    assert _unwrapped(LEASES_NOT_NEEDED) in _unwrapped(report["stdout"])
+    assert _unwrapped(LEASES_RESTORED) not in _unwrapped(report["stdout"])
+    manual = report["state"]["last_failure"]["manual_steps"] or []
+    assert not [s for s in manual if "FortiGate" in s]
+
+
+@pytest.mark.parametrize("scenario", ["rollback", "rollback-module-no-package"])
+def test_rollback_lowers_the_leases_when_the_previous_program_cannot_be_checked(
+    engine: str, tmp_path: Path, scenario: str
+) -> None:
+    """No arcilogger_db package folder in the previous program (the harness's other rollbacks),
+    or lease_rollback.py without the package's __init__.py: the check cannot decide, so the step
+    runs (lowering is the safe side) and the installer says why it ran."""
+    report = simulate(engine, tmp_path, scenario)
+    assert report["exit"] is None, report["message"]
+    calls = report["calls"]
+    assert calls.count("process arcilogger-db.exe leases prepare-rollback") == 1
+    stdout = _unwrapped(report["stdout"])
+    assert _unwrapped(LEASES_UNDECIDED) in stdout
+    assert _unwrapped(PACKAGE_NOT_FOUND) in stdout
+    assert stdout.index(_unwrapped(LEASES_UNDECIDED)) < stdout.index(_unwrapped(LEASES_LOWERED))
+    assert _unwrapped(LEASES_NOT_NEEDED) not in stdout
 
 
 #: arcilogger.toml as the harness writes it before an upgrade (no key a version before the
@@ -7705,16 +7859,32 @@ def test_real_install_upgrade_rollback_and_uninstall(tmp_path: Path) -> None:
             "tasks/ApplySystem.xml", "scripts/Sync-ArciSystem.ps1",
         ):  # fmt: skip
             (kept / part).unlink()
+        # Issue #81: the lease step is skipped for a previous program whose arcilogger_db has
+        # lease_rollback.py where pip installed the wheel, as this one has. As a version from
+        # before FortiGate DHCP, the kept program loses that file; a compiled copy beside it (a
+        # sourceless module, compiled with the kept venv's python.exe: the same Python version
+        # in both bundles) keeps its own imports of the module working.
+        module = kept / "venv" / "Lib" / "site-packages" / "arcilogger_db" / "lease_rollback.py"
+        assert module.is_file(), last()
+        code = "import py_compile, sys; py_compile.compile(*sys.argv[1:], doraise=True)"
+        python = kept / "venv" / "Scripts" / "python.exe"
+        arguments = [str(python), "-I", "-c", code, str(module), str(module.with_suffix(".pyc"))]
+        compiled = subprocess.run(
+            arguments, capture_output=True, text=True, timeout=120, check=False
+        )
+        assert compiled.returncode == 0, compiled.stdout + compiled.stderr
+        module.unlink()
         result = run(second, "Rollback")
         assert result.returncode in (0, 1), last()
         assert fingerprint() == first_fingerprint, last()
         assert siblings("rolled-back-"), last()
         warnings = [str(warning) for warning in plans[-1].get("warnings", [])]
         assert any(warning.startswith("ArciAdmin:") for warning in warnings), last()
+        items = {item["id"]: item for item in plans[-1].get("items", [])}
+        assert items["leases.prepare-rollback"]["detail"]["previous_has_module"] is False, last()
         if E2E_DB:
             # Contract 2.2.1: before the swap, this version lowered its FortiGate leases (this
             # site has none) and printed the count.
-            items = {item["id"]: item for item in plans[-1].get("items", [])}
             assert items["leases.prepare-rollback"]["status"] == "done", last()
             assert items["leases.prepare-rollback"]["detail"]["lowered"] == 0, last()
             lowered = _unwrapped("[FortiGate leases lowered to low confidence]: 0")
@@ -7722,7 +7892,6 @@ def test_real_install_upgrade_rollback_and_uninstall(tmp_path: Path) -> None:
         else:
             # -SkipDatabase (the wrapper's runs without a database): skipped, with the warning
             # that the FortiGate leases were not lowered.
-            items = {item["id"]: item for item in plans[-1].get("items", [])}
             assert items["leases.prepare-rollback"]["status"] == "skipped", last()
             (warning,) = [w for w in warnings if w.startswith("FortiGate")]
             assert "(-SkipDatabase)" in warning, last()

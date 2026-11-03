@@ -1452,6 +1452,7 @@ TONES_2_11 = {
     "egress_public_dynamic": "warning",
     "egress_internal": "warning",
     "source_clock_offset": "warning",
+    "source_clock_shared": "warning",
 }
 #: The keys of earlier waves and the retired ones, with the tone the web interface gives them
 #: today; ``info`` is information by design.

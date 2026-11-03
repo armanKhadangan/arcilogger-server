@@ -30,6 +30,15 @@
   Gerçekçi yük üreteci günlerinde (varsayılan seçenekler ve `--dhcp-server fortigate --srcmac`;
   her gün bir kez yazılıp iki sürüme de yüklendi, sırayla 16'şar çalıştırma) fark tek süreçte
   −%3,1 / −%2,4, 2 worker ile −%2,8 / −%3,2'dir: %5 sınırının içinde, ama sıfır değil.
+- Kaynak saati örnekleri (`source_clock_samples`, #73) satırlarla aynı işlemde yazılır: aynı
+  satırlar iki sürüme de yüklendi (`bench_throughput.py --repeat 3`, sırayla 12'şer çalıştırma);
+  fark varsayılan karışımda tek süreçte +%2,4, 2 worker ile +%0,4, yalnızca FortiGate'ten gelen
+  karışımda −%0,9 / −%3,6'dır: %5 sınırının içinde (aşağıda "Measured throughput").
+- `fg_traffic (transip, time)` dizini (#71), 5651 sorgusunun yoğun bir adresin son satırından
+  sonraki portsuz adımlarını yaklaşık 1,1 sn'den 1 ms'nin altına, `busy_before` kuyruğunu 1,4
+  sn'den 0,25 sn'ye indirir. Aynı satırlar dizinli ve dizinsiz yüklendi: fark −%1,5 ile +%1,9
+  arasındadır, çalıştırmaların kendi dağılımı içinde ve %5 sınırının altında (aşağıda "Measured
+  throughput"). Dizin milyon satır başına yaklaşık 31,5 MB yer tutar.
 - Veritabanı kapalıysa servis bekler ve artan aralıklarla (en çok 30 sn) yeniden dener; ham
   dosyalar kuyruk olduğu için **hiçbir şey kaybolmaz**. Veritabanı dönünce kendiliğinden devam
   eder.
@@ -67,7 +76,8 @@ spool/<source>/<day>.log ──► read complete lines ──► prepare (rawlog
     once the sealer deleted the spool file)             ▼
                                          one transaction: offsets (compare-and-set) → COPY rows
                                          → parse_failures upsert → sources (+ new_source alert)
-                                         → search_counts upsert → COMMIT → in-memory offsets move
+                                         → search_counts and source_clock_samples upserts → COMMIT
+                                         → in-memory offsets move
 ```
 
 | Module | Role |
@@ -75,7 +85,7 @@ spool/<source>/<day>.log ──► read complete lines ──► prepare (rawlog
 | `service.py` | the loop: discover streams, read, batch, load, finish, back off, status |
 | `files.py` | `read_complete` (spool, opened and closed per read), `VaultReader` (sealed `.log.gz`), `open_shared` (Windows delete sharing) |
 | `prepare.py` | one raw line → rows (pure function; runs in a worker process unchanged) |
-| `loader.py` | the load transaction (rows, failures, sources, search counts), compare-and-set offsets, bisecting a batch `COPY` refuses |
+| `loader.py` | the load transaction (rows, failures, sources, search counts, clock samples), compare-and-set offsets, bisecting a batch `COPY` refuses |
 | `instance.py` | single-instance lock (PostgreSQL session-level advisory lock) |
 | `sealed.py` | which days the sealer finished (`state/seal/<day>.json` + manifest) |
 | `sources.py` | spool folder → configured type (`fortigate`, `ap-<ip>` → network entry, `unknown-<ip>` → content detection) |
@@ -151,7 +161,8 @@ the middle of the other's load, the real process killed three times with
 finds the offsets already moved and continues from the database) — every time each line is in
 `messages` exactly once and rows and offsets agree; after the interruptions, the second instance,
 the races and the kills the search counts agree with them too (`searchcounts.verify` in the
-same snapshot).
+same snapshot), and so do the clock samples (their sum equals the rows with a device time of
+their own).
 
 ## Search counts
 
@@ -194,6 +205,28 @@ transaction, from exactly the lines whose rows loaded in it:
 Tests: `ingest/tests/test_loader_counts.py` (shared batches over three sources and two days, a
 damaged line, a dropped typed row, the `COPY` salvage, vault continuation, a file half loaded
 before the upgrade, a device clock almost a day behind) and the exactly-once matrix above.
+
+## Clock samples
+
+The same step `counts` writes `source_clock_samples` (`arcilogger_db.clocksamples`, ADR-0016 D28,
+issue #73) from the same lines: per source, received minute (`time_received`, UTC) and device
+clock offset `time - time_received` in whole seconds rounded away from zero (`0` under a minute
+either way), the number of lines whose `messages` row loaded with a device time of its own (a line
+stamped with its receive time, also one whose device time was beyond `max_clock_skew`, is not
+counted). `offset_of` and `minute_of` define a key; `clock_key` applies them to a row and
+`clocksamples.rebuild` uses it; the loader groups a batch's lines by source, minute and offset
+with the same two functions and makes each key once per group (a test pins it to `clock_key`
+line by line). A source on time has one key a minute, so a batch adds a few keys per
+source, written with one fixed `INSERT … SELECT FROM unnest(…) ON CONFLICT … DO UPDATE SET n =
+source_clock_samples.n + EXCLUDED.n` per 500 keys. `R20-lease:source-clock` and a lookup's clock
+check read it by receive time: a device clock set hours back writes rows whose device times lie
+hours before their arrival, which a sample of `messages` by device time does not reach (contract,
+"Deviations — clock (2026-11)"). The upgrade to revision `0019_source_clock_samples` counts the
+rows received in its last two hours; older lines have no samples. Like `search_counts`, the
+samples follow the log tables once database retention runs (`partitions.drop_before` deletes the
+minutes before the first kept month; no job calls it yet, [DATA-MODEL.md](DATA-MODEL.md)). Tests:
+`ingest/tests/test_loader_clocks.py`, `db/tests/test_clocksamples.py` and the exactly-once
+matrix above.
 
 ## One instance per database
 
@@ -464,6 +497,89 @@ than in the first, Wave 2 by 12 %, Wave 3 by 7 %). As on the Wave 2 day, one 8-r
 tell 5 % apart on this VM; the 16-run medians are the measurement. The lowest runs with 2 workers on
 the default day (5,503 and 6,234 lines/s, one per tree) fell into that loaded time (machine CPU
 91–93 %). Re-measure on site with the site's own day (below).
+
+**Wave 3: the clock samples (2026-11-01, issue #73).** The gate of issue #73: the ingest
+throughput with `source_clock_samples` (the `counts` step's second upsert, above) at most 5 %
+slower than `wave-3` without it. Method of gates 1–2: each mix written **once**
+(`bench_throughput.py --write-spool DIR --lines 200000 --mix default`, and `--mix
+fortigate-only`), loaded by both trees with `--spool DIR --batch-rows 5000 --workers 0 2 --repeat
+3`; the `wave-3` tree (`1cd3588`) in a worktree with `PYTHONPATH` set to its `core/src`,
+`db/src` and `ingest/src`, each tree migrating its own throwaway database. Order: `wave-3`,
+branch, branch, `wave-3`, twice per mix (ABBA ×2, 12 runs per tree and worker count), the
+default mix first, nothing else running (load average 2.1–2.7, the benchmark itself; 4-vCPU Xeon
+2.10 GHz, 16 GB, PostgreSQL 16 without TimescaleDB). In both mixes every line has a device time
+of its own, fixed per sample line, while the receive times advance 7 ms a line, so the offset
+changes every second: tens of keys per batch and source, more than a source on time writes (one
+a minute). The first two branch invocations of the default mix ran the previous rounding of
+`offset_of` (half a second up instead of away from zero; the same cost). Min–max (median)
+lines/s, the difference of the medians to `wave-3`:
+
+| `bench_throughput.py --repeat 3`, 12 runs each | in-process | `--workers 2` |
+|---|---|---|
+| Default mix: `wave-3` | 4,184–5,388 (4,989) | 7,687–9,134 (8,404) |
+| Default mix: **the clock samples** | **4,690–5,345 (5,110), +2.4 %** | **7,339–8,746 (8,438), +0.4 %** |
+| FortiGate-only spool: `wave-3` | 4,656–4,911 (4,754) | 7,843–8,660 (8,389) |
+| FortiGate-only spool: **the clock samples** | **4,559–4,777 (4,712), −0.9 %** | **7,221–8,604 (8,088), −3.6 %** |
+
+The gate holds. Ingest process CPU, median: 36.3 / 35.7 s (default) and 38.6 / 39.1 s
+(FortiGate-only, +1.3 %) in-process; with 2 workers, where the service process does little more
+than load, 12.6 / 12.9 s and 12.5 / 13.2 s (+5.6 % of that process). The per-campaign medians
+(one ABBA round each, 6 runs per tree): default +5.1 % / +1.6 % in-process and −1.1 % / −0.1 %
+with 2 workers; FortiGate-only −0.4 % / −1.5 % in-process and −1.6 % / −3.0 % with 2 workers. As
+before, this VM cannot tell a few per cent apart; the 12-run medians are the measurement.
+
+**Wave 4: an index on `fg_traffic (transip, time)` (2026-11-02, issue #71).** The lookup's port-less
+probe steps (`_Probe.seen_overlap`, the D15 check `_Lookup._carried`) asked
+`ix_fg_traffic_transip_transport_time` for the first row of one address in a time range. With no
+port, `time` is its third column and PostgreSQL 16 has no skip scan, so such a step walked every
+index entry of the address in the partition. Those entries show in no row count, only in the
+buffers. Measured first, on a scratch site: plain PostgreSQL, the real schema, the November
+partition filled to day 28 at 1 M `fg_traffic` rows a day through one NAT address (28.25 M rows,
+5.8 GB of rows), then the line switch to a second address at 1 M a day. The figures are each
+statement's `EXPLAIN (ANALYZE, BUFFERS)` execution time, warm, median of 5:
+
+| step | today (`transip, transport, time`) | `(transip, time)` | `(transip, time) INCLUDE (duration)` |
+|---|---|---|---|
+| overlap probe, the old address 30 min after its last row: window / tail | 1,164 / 1,114 ms | 0.0 / 0.0 ms | 0.0 / 0.0 ms |
+| D15 check, 10 min after its last row: window (time order) / tail day 1 / tail day 2 | 0.3 / 1,138 / 1,169 ms | 0.0 / 0.0 / 0.0 ms | 0.0 / 0.0 / 0.0 ms |
+| overlap probe `busy_before` (Q-C3-1, 5 h before the new line's first row): window / tail (802,084 rows read and filtered) | 49 / 1,388 ms | 0.0 / 249 ms | 0.0 / 118 ms (all-visible pages); 227 ms with 609,584 heap fetches (pages not yet vacuumed) |
+
+Index size per million rows: 31.5 MB for `(transip, time)` and 40.6 MB with `INCLUDE (duration)`,
+the same as `(transip, transport, time)`. The five indexes of today total 4.5 GB on the
+partition. Building the index on that partition takes 18 s at the default `maintenance_work_mem`.
+
+Then the ingest gate, the method of the gates above: each mix was written once and loaded by three
+trees. The trees are `wave-4` (`f697b02`) and the same tree with a migration adding each
+candidate, each in its own worktree with `PYTHONPATH` set. The order was ABC CBA twice per mix,
+12 runs per tree and worker count, nothing else running (load average 2.1–2.8). Min–max
+(median) lines/s, the difference of the medians to `wave-4`:
+
+| `bench_throughput.py --repeat 3`, 12 runs each | in-process | `--workers 2` |
+|---|---|---|
+| Default mix: `wave-4` | 5,201–5,475 (5,328) | 8,602–9,809 (9,459) |
+| Default mix: **`(transip, time)`** | **4,982–5,549 (5,376), +0.9 %** | **7,678–9,772 (9,314), −1.5 %** |
+| Default mix: `INCLUDE (duration)` | 5,172–5,467 (5,370), +0.8 % | 8,901–9,685 (9,415), −0.5 % |
+| FortiGate-only spool: `wave-4` | 4,723–4,985 (4,876) | 5,113–8,869 (8,216) |
+| FortiGate-only spool: **`(transip, time)`** | **4,747–5,041 (4,901), +0.5 %** | **8,005–9,082 (8,373), +1.9 %** |
+| FortiGate-only spool: `INCLUDE (duration)` | 4,669–4,911 (4,850), −0.5 % | 7,848–8,486 (8,232), +0.2 % |
+
+Both candidates keep the gate. Every difference lies inside the spread of the runs (ingest
+process CPU, median, in-process: 34.6 / 34.7 / 34.6 s and 38.0 / 37.8 / 38.0 s). A new entry
+goes to the right end of its address's range (time grows), so the index stays cheap on a full
+table too. **`(transip, time)` was added** (revision `0020_fg_traffic_transip_time`). Its port-less
+steps now read the address's rows of their range only, and the guards bound each step's buffers
+to its rows (`STEP_BUFFERS` in `worker/tests/test_lookup_performance.py`). A step names its
+address as `transip = ANY(inet[])` with one element. With `transip = :address` PostgreSQL drops
+the constant column from `ORDER BY transip, time`, and the primary key `(time, id)` gives the
+order that is left. With two lines taking turns (`transip` far from the table's order) the
+planner took the primary key and read every row of the other line in the range: 45 ms for a day
+of a 2-day site, 292 ms for a day of a 10-day one, against 0.02–0.07 ms on the index. A guard
+site with two such lines (`LINES_SITE`) checks the plan. `INCLUDE (duration)`
+was not taken: it is 29 % larger, and it answers `busy_before` from the index only on all-visible
+pages. A month's partition is vacuumed for inserts at about every 20 % growth, so its newest
+days often are not all-visible, and the step then costs what it costs without the column.
+`busy_before` keeps its own bound of 1 s (0.30 s in the guard, 0.25 s on the scratch site,
+1.4 s before).
 
 Default `[ingest] workers = 2`: about 1.7× the in-process speed; a third worker adds 10–13 %
 on 4 vCPU but competes with PostgreSQL, the API and the collector on the same cores. **Spec 14

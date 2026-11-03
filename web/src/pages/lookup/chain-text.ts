@@ -61,6 +61,7 @@ const EXPLANATION_TONE: Record<string, AlertTone> = {
   egress_public_dynamic: 'warning',
   egress_internal: 'warning',
   source_clock_offset: 'warning',
+  source_clock_shared: 'warning',
 };
 
 /**

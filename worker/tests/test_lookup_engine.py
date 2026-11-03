@@ -10,8 +10,9 @@ contract 3.4 E-j). Where the answer differs on purpose, the test names the excep
 from __future__ import annotations
 
 import json
+import operator
 from dataclasses import dataclass
-from datetime import UTC, date, timedelta
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
 import pytest
@@ -32,6 +33,7 @@ from arcilogger_worker.lookup import (
     attribute,
     run_lookup,
 )
+from arcilogger_worker.lookup.engine import _by_chunk
 from arcilogger_worker.testing import Evidence, tr
 
 DAY = date(2026, 10, 12)
@@ -902,3 +904,35 @@ def test_domain_by_address_only_counts_less(
         "domain_address",
         80,
     )
+
+
+# -- the day pieces of the probes (#71) -----------------------------------------------------------
+
+
+def _holds(piece: list[Any], moment: datetime) -> bool:
+    """Whether ``moment`` satisfies both bounds of one ``_by_chunk`` piece."""
+    tests = {operator.gt: moment.__gt__, operator.ge: moment.__ge__}
+    tests |= {operator.lt: moment.__lt__, operator.le: moment.__le__}
+    return all(tests[bound.operator](bound.right.value) for bound in piece)
+
+
+@pytest.mark.parametrize("open_start", [True, False])
+def test_the_day_pieces_hold_every_moment_once(open_start: bool) -> None:
+    """The pieces of ``_by_chunk`` are half-open at the UTC midnights, as TimescaleDB's daily
+    chunks are: a row at exactly a midnight lies in one piece, the next day's (a piece closed at
+    the midnight read that instant from the next chunk, #71 review); the start is in the first
+    piece unless it is open, the end in the last."""
+    start = datetime(2026, 10, 12, 21, 30, tzinfo=UTC)
+    end = start + timedelta(days=1, hours=4)  # through two midnights
+    pieces = _by_chunk(start, end, open_start=open_start)
+    assert len(pieces) == 3
+    midnights = [datetime(2026, 10, 13, tzinfo=UTC), datetime(2026, 10, 14, tzinfo=UTC)]
+    tiny = timedelta(microseconds=1)
+    for moment in [start + tiny, *midnights, *(m - tiny for m in midnights), end, end - tiny]:
+        assert [_holds(piece, moment) for piece in pieces].count(True) == 1, moment
+    assert [_holds(piece, midnights[0]) for piece in pieces] == [False, True, False]
+    assert [_holds(piece, midnights[1]) for piece in pieces] == [False, False, True]
+    assert sum(_holds(piece, start) for piece in pieces) == (0 if open_start else 1)
+    assert not any(_holds(piece, end + tiny) for piece in pieces)
+    (only,) = _by_chunk(start, start + timedelta(hours=1), open_start=open_start)
+    assert _holds(only, start + timedelta(hours=1))

@@ -1634,6 +1634,171 @@ UYUM-DURUMU/COMPLIANCE-STATUS (W4-G merges last, §4.5).
   X-Arci-Sha256 beside its button", `web/e2e/compliance.spec.ts` "a report whose bytes differ
   from its X-Arci-Sha256: the mismatch beside the button". Fold into 2.8.1.
 
+## Deviations — W4-G (2026-11-01)
+
+Docs only; the docs tests (`tests/test_docs_consistency.py`, `tests/test_search_docs.py`) show
+each entry. Every `## Deviations — <package>` section above is folded as §4.4 W4-G asks: into
+`docs/MVP-CONTRACTS.md` §19.8 (each package by name, with the API facts), `docs/ASSUMPTIONS.md`
+(the Wave 4 rows and "Decided while building (Wave 4)") and, where an operator sees it,
+`docs/UYUM-DURUMU.md` / `docs/COMPLIANCE-STATUS.md` (§2.10, §3, §4 intro, §4.1, §4.2, §4.7,
+§4.8, §5) and ADR-0017.
+
+- **Section headings stay as they are** (2.9 "§9 first sign-in → the wizard"). `docs/KURULUM.md`
+  keeps "## 9. İlk giriş" and `docs/INSTALL.md` "## 9. First login"; the wizard (Ayarlar → İlk
+  kurulum sihirbazı, `/settings/setup`, its steps and states, no redirect, Q18) is a new part of
+  that section, and the overview rows 9 and 12 name it. §12 and §13 keep their headings and add
+  Uyum Durumu and Sistem beside the console commands, and version and maintenance on Sistem. The
+  docs tests cut these sections by number (`_section(text, "## 13.", "## 14.")` in
+  `test_install_guides_describe_the_licence`) and other documents link them by number
+  ("KURULUM.md bölüm 9" in ILK-ADIMLAR and SECURITY). Nothing to fold.
+- **The wizard's e-mail step is written as W4-C's deviation, not as 2.8.4.** AYARLAR/SETTINGS (the
+  wizard entry), ASSUMPTIONS Q18 and UYUM-DURUMU/COMPLIANCE-STATUS §5 say the step is done only
+  while sending is switched on (`[smtp] enabled`) and a server and a sender are set; switched off,
+  it lists "E-posta gönderimi kapalı." / "Sending e-mail is switched off.". This is the merged
+  view (manager decision on #37).
+- **ADR-0017 adds two sections to ADR-0016's format:** "Owner decisions (2026-10-28)" (Q1 and Q10
+  with their answers) and "Deviations recorded during implementation" (the deviations that refine
+  one of D1-D15, by package; the full list with texts points to MVP-CONTRACTS §19.8 and
+  ASSUMPTIONS). The open questions with their defaults are under "Open points (owner decision)",
+  as in ADR-0016. Its status keeps the date of this contract and of the owner decisions,
+  "accepted (2026-10-28)" (the ADR-date question on #62).
+- **DENETCI-KILAVUZU's Uyum Durumu section is §11** ("## 11. Uyum Durumu Raporu'nu okumak"), after
+  WP-F2's reading table (§10, Wave 3), with the paragraph "Reading the Uyum Durumu Raporu (section
+  11)" in the file's English part (one file, no pair). It says technical checks, not a legal
+  assessment, recommends the lawyer review, and has the auditor open the page and download the
+  report (D15).
+- **ASSUMPTIONS keeps the Wave 4 part under one heading** ("## Uyum Durumu, Sistem, ilk kurulum
+  sihirbazı: Wave 4 (2026-10-28)"), after the integrator's Wave 3 part, with `###` subsections:
+  the owner decisions (Q1, Q10), the defaults of the open questions, "Decided while building
+  (Wave 4)", the lawyer review (Q20), "Verify on site (Wave 4)" and "Deviations from the
+  specification (Wave 4)". Its rows keep this contract's numbers Q1-Q21 (no other row of the file
+  uses a `Q` prefix) instead of a new letter series, and the verify-on-site list and the
+  specification deviations stay in that part rather than in the file's general sections, so the
+  Wave 4 part reads and merges as one (manager's note on #28).
+- **MVP-CONTRACTS §19 uses the file's compact notation** (`Name {field, field: type, …}`), not
+  2.3.1/2.5.1/2.6.1 verbatim: §19.1 endpoints, §19.2-§19.5 the JSON, §19.6 the settings,
+  `R20-filter` and the job `system.sample`, §19.7 the error code, the audit actions and the
+  permissions, §19.8 the deviations. Besides §19 and the §6 `compliance.read` row, the router
+  map names the three Wave 4 routers, the alerts section names `check_filter` (`R20-filter:none`,
+  high), and §15's stale route count is corrected: "5651 Temel: 103 routes" now reads 129 routes
+  at Wave 4, as `api/tests/test_license_routes.py` counts them (the route-count question on #62).
+- **UYUM-DURUMU/COMPLIANCE-STATUS §1: the auditor sees the count of open alerts, not the alerts.**
+  The sentence written by W4-E said the auditor sees each alert's rule, severity and opening time
+  on the card; the merged view shows only "Açık uyarı: {n}" / "Open alerts: {n}" (2.8.1), and the
+  rule, severity and opening time are in the Uyum Durumu Raporu (PDF). §1 and its evaluation rule
+  now say so. A correction of W4-E's text to the code rather than a fold (listed on #62 under
+  "Files outside my ownership").
+- **Beyond the literal 2.9 text:** `docs/roles.md` gets its own section "Uyum Durumu ve Sistem /
+  Compliance status and system pages" besides the table rows and "Kararlar / Decisions";
+  `docs/ARCHITECTURE.md` a section "Uyum Durumu and Sistem"; AYARLAR/SETTINGS the wizard's
+  read-only requests in the table of pages and their endpoints and, on the manager's note on #28,
+  the srcmac interface list's labels as the web names them ("srcmac görülen arayüzler (son 1 saat)" /
+  "Interfaces with srcmac (last hour)", the IPv4 rule without quotes).
+
+## Deviations — transip index (#71, 2026-11-02)
+
+Issue #71, follow-up of #40 item 13 and Q-C3-1. It is a Wave 3 matter (contract 1.2, 2.8.3, D15,
+3.8) recorded here because `wave-4` carries it.
+
+- **A sixth index on `fg_traffic`: `ix_fg_traffic_transip_time (transip, time)`** (revision
+  `0020_fg_traffic_transip_time`, on top of #79's `0019_source_clock_samples`; model `FgTraffic`).
+  The overlap probe (`_Probe.seen_overlap`, both steps) and the D15 check (`_Lookup._carried`,
+  its tail steps without a port and its spanning-sessions steps) now ask in the order
+  `transip, time`, the address written `transip = ANY(inet[])` with one element
+  (`_address_is`): with `transip = :address` PostgreSQL drops the constant from the sort, and
+  with two lines taking turns the planner took the primary key `(time, id)` instead (0.3 s for a
+  day of a 10-day partition). The steps with a port and the exact search keep
+  `ix_fg_traffic_transip_transport_time`; a port-less search on one address may now take the new
+  index (the same rows, in the same order). Before, a port-less step walked every index entry of the address in the
+  partition (`time` was the third column). That cost about 1.1 s per step for a busy address
+  after its last row on day 28 of a monthly partition at 1 M rows a day: 2.3 s for the overlap
+  probe and 2.3 s for the D15 check of one lookup. Now it is under 1 ms. `busy_before`'s tail
+  (Q-C3-1) went from 1.4 s to 0.25 s; its guard keeps its bound of 1 s (0.30 s measured). The
+  ingest gate holds (−1.5 % to +1.9 %, inside the spread of the runs). The index takes 31.5 MB
+  per million rows and builds in 18 s on a 28 M-row partition. `INCLUDE (duration)` was measured
+  and not taken: it is 29 % larger and answers `busy_before` from the index only on all-visible
+  pages. The numbers are in docs/INGEST.md "Measured throughput". The guards now bound each
+  step's shared buffers to the rows of its range plus 100 (`STEP_BUFFERS`); a walk over the
+  address's other entries showed only there (7,982 buffers for a step with no row on the guard
+  site). There is a new overlap case, `busy_after` (the site's NAT address 30 minutes after its
+  last row), and a new guard site with two lines taking turns (`LINES_SITE`,
+  `test_the_probe_steps_of_a_line_that_took_turns_read_its_own_rows`, which fails with
+  `transip = :address`: the primary key read 968,750 and 534,028 rows). Tests: `db/tests/test_migration_0020.py` (native, and TimescaleDB with a
+  compressed chunk), `db/tests/test_migrations.py`,
+  `worker/tests/test_lookup_performance.py`
+  (`test_the_overlap_probe_of_an_unclaimed_address_is_fast[busy_after]` and
+  `test_the_d15_carried_check_is_fast[busy_after]` fail on the old statements by their buffers).
+  **W4-G folds:**
+  - DATA-MODEL's `fg_traffic` index list gains `(transip, time)`.
+  - MVP-CONTRACTS' c3 bullet ("asks for the first row in the order of
+    `ix_fg_traffic_transip_transport_time`") names `ix_fg_traffic_transip_time`.
+  - ASSUMPTIONS Q-C3-1's follow-up ("measure `INCLUDE (duration)` on the `transip` index") is
+    answered: measured, not taken, and `(transip, time)` was added.
+
+## Deviations — #89 (loadgen, 2026-11-02)
+
+- **A MikroTik DHCP address stays held until its lease ends in the load generator** (Wave 3
+  contract 2.14, "the default output stays byte-identical"; #40 item 1). The default plan handed
+  an address to a second device while the earlier holder's truth lease still ran, when that lease
+  had outlived its activity; the truth then named two devices for one address at one moment.
+  `Simulation._free_ip` now holds an address until its lease ends on every VLAN, as it already
+  did for FortiGate DHCP. Runs that met the case change their bytes (line count unchanged); the
+  pinned `DEFAULT_DIGEST` of `tests/test_loadgen.py` and the single days of `docs/INGEST.md`
+  (2026-09-23, 2026-10-27) are unchanged. The staff Wi-Fi now fills up at about 125 users with
+  MikroTik DHCP (was 160). Tests: `test_loadgen.py`
+  "test_the_default_plan_never_gives_one_address_two_leases_at_once",
+  "test_too_many_users_for_the_wifi_pool_is_a_clear_error". `tools/loadgen/README.md` carries a
+  dated note for users who compare outputs. Fold into the loadgen part of Wave 3 2.14 (W4-G has
+  merged before this entry).
+
+## Deviations — #81 (2026-11-02)
+
+- **#81-1: the rollback's lease step runs only when the restored program may not read FortiGate
+  DHCP** (manager's issue #81, item 4 of #40). `design/wave-3-contract.md` 2.2.1 ("A site
+  rollback runs no downgrade, and one lease step") runs `arcilogger-db leases prepare-rollback`
+  on every `-Rollback` without `-RestoreDatabase`. `Invoke-LeaseRollbackStep` now first looks
+  for `<InstallDir>.previous\venv\Lib\site-packages\arcilogger_db\lease_rollback.py`: with it,
+  the plan item `leases.prepare-rollback` is `skipped` with its reason (also with
+  `-SkipDatabase`, then without that warning); without it, or when the check cannot decide (no
+  readable `__init__.py` in that package folder, any error), the step runs as in 2.2.1. The
+  item's detail gains `previous_module`, `previous_has_module` (`true`, `false`, or `null` when
+  undecided) and `previous_check` (why it could not decide, else `null`). This test replaces the
+  one the round-7 implementation note (a) proposed (no `leases` command, or a `VERSION.json`
+  older than the first Wave 3 version), as the issue asks: the module came after the
+  `fg_dhcp` table, so no build has it without reading FortiGate DHCP. Points (b) and (c) are
+  unchanged. Tests (`tests/test_installer_scripts.py`):
+  `test_dry_run_rollback_skips_the_lease_step_for_a_version_that_reads_fortigate_dhcp`,
+  `test_rollback_to_a_version_that_reads_fortigate_dhcp_keeps_the_leases`,
+  `test_rollback_to_a_version_before_fortigate_dhcp_lowers_the_leases`,
+  `test_rollback_lowers_the_leases_when_the_previous_program_cannot_be_checked`,
+  `test_rollback_that_skipped_the_lease_step_and_cannot_swap_restores_no_leases`, and step 3 of
+  `test_real_install_upgrade_rollback_and_uninstall`. Already updated in the same pull request:
+  ASSUMPTIONS RB1 and the rollback paragraph of KURULUM/INSTALL §13. Fold into `CHANGELOG.md`
+  (W4-G): the Wave 3 entry "The step runs on every such rollback, so a rollback between two
+  versions that both read FortiGate DHCP shows FortiGate-DHCP chains `low` …" holds for Wave 3
+  only; Wave 4 skips the step for such a rollback. `docs/CORRELATION.md` ("The step is
+  unconditional: …", owner W4-F) says the same and is listed in the pull request.
+
+## Deviations — #90 (search perf fixture, 2026-11-02)
+
+- **#90-1: the search performance data ends with a `CHECKPOINT`** (`docs/MVP-CONTRACTS.md` 17.10,
+  granted by the manager on #90, 2026-11-02 23:07Z). Since #60 shortened the fixture by about
+  1,300 s, Windows CI timed Q1 2–4 minutes after the 7 GB load and `VACUUM ANALYZE`, while its
+  write-back still ran: 33 of 91 runs failed against 0 of 106 before #60, the plan the same
+  backward primary-key scan in every state (PostgreSQL 16 and 17.11), the slow mode a fixed
+  +500 ms a request. `api/tests/test_search_perf.py` now runs a synchronous `CHECKPOINT` after
+  `VACUUM ANALYZE` (and the compression), prints its duration on the setup line, and skips it
+  with a note for a role without superuser or `pg_checkpoint` (cloud sessions; both CI jobs
+  connect as a superuser). Every budget is unchanged (`BROWSE` 0.5 s). A test-setup deviation
+  only: a live server under ingest is not settled, and its browse latency under write load is
+  the manager's follow-up (a browse guard under concurrent ingest). The audit spool's `os.fsync`
+  stays.
+- **#90-2: the guard prints its figures on a pass, with a per-call split.** The setup line and
+  every Q and S line print past pytest's capture (`capsys.disabled()`), and each Q/S line ends
+  with the best call's SQL, commit and fsync time (with their counts) and the rest ("other"),
+  from SQLAlchemy cursor events, a wrapped `do_commit` and a wrapped `os.fsync` inside the test
+  (no timing hook in product code).
+
 ---
 
 ## Owner questions

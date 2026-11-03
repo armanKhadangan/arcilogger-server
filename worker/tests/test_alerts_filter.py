@@ -237,7 +237,7 @@ def test_r20_filter_mail_names_no_address(check: Any, db_session: Session) -> No
         srcip="172.20.10.23",
         dstip="198.51.100.20",
         hostname="ornek-sunucu.example.com",
-        url="/giris?kullanici=ali",
+        url="/giris?kullanici=ornek",
         profile="ornek-profil",
     )
     alert = check()[KEY]
