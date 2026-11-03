@@ -104,12 +104,12 @@ jobs:
             esac
             verdict=EXPECTED
             if [ "$outcome" != "$want" ]; then verdict=UNEXPECTED; status=1; fi
-            result=$(grep -a '^I125 RESULT' "i125-$run.log" 2>/dev/null | tail -n 1 | tr -d '\r')
+            result=$(grep -a '^I125 RESULT' "i125-$run.log" 2>/dev/null | tail -n 1 | tr -d '\r' || true)
             echo "I125 SUMMARY $run: test $outcome (expected $want), $verdict; ${result:-no I125 RESULT line}"
           done
           {
             echo '```'
-            grep -ah '^I125' i125-none.log i125-plus40.log i125-plus400.log | tr -d '\r'
+            grep -ah '^I125' i125-none.log i125-plus40.log i125-plus400.log 2>/dev/null | tr -d '\r' || true
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
           exit $status
@@ -178,12 +178,12 @@ jobs:
             esac
             verdict=EXPECTED
             if [ "$outcome" != "$want" ]; then verdict=UNEXPECTED; status=1; fi
-            result=$(grep -a '^I125 RESULT' "i125-$run.log" 2>/dev/null | tail -n 1 | tr -d '\r')
+            result=$(grep -a '^I125 RESULT' "i125-$run.log" 2>/dev/null | tail -n 1 | tr -d '\r' || true)
             echo "I125 SUMMARY $run: test $outcome (expected $want), $verdict; ${result:-no I125 RESULT line}"
           done
           {
             echo '```'
-            grep -ah '^I125' i125-none.log i125-plus40.log i125-plus400.log | tr -d '\r'
+            grep -ah '^I125' i125-none.log i125-plus40.log i125-plus400.log 2>/dev/null | tr -d '\r' || true
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
           exit $status
