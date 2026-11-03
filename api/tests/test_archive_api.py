@@ -4,7 +4,8 @@ G4 to G9).
 * ``POST /archive-reloads``: 202 and the ``queued`` request; the audit entry ``archive.reload``
   (who, the days, the reason, the lookup) is written **before** the row (statement order), and
   no request is queued without it; the refusals of G5 (more than 14 days, a day not sealed in the
-  vault, too little room on the database drive — no disk sample, no refusal) and the validation;
+  vault, too little room on the database drive — no disk sample, no refusal; only the files not
+  loaded yet count) and the validation;
   the permission of the asking function per reason (G6), the KVKK notice, another user's lookup;
   no licence gate (5651 Temel).
 * ``GET /archive-reloads/{id}`` and ``GET /archive-reloads``: active first, own requests only for
@@ -19,7 +20,8 @@ G4 to G9).
 * A request of complete days of the window is refused; a second request of the same days is
   answered with the first (one load); a day the sealer skipped has nothing to load. Another
   user's request of days already loaded is a record and an audit entry of its own, and ingest
-  makes it ``ready`` without a second load (W5-G answer 6).
+  makes it ``ready`` without a second load (W5-G answer 6); an administrator's request of
+  another user's days as well.
 * A sealed file that becomes unreadable while a reload loads it fails the reload and leaves its
   days gone — also under another user's ``ready`` reload: the lookup answers 409, never a
   partial answer (W5-G answer 9).
@@ -38,7 +40,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable, Iterator
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any, get_args
 
@@ -269,15 +271,27 @@ def sealed_file(layout: Layout, day: date, source: str) -> tuple[Path, int]:
 
 
 def unreadable_mid_load(monkeypatch: pytest.MonkeyPatch, path: Path) -> None:
-    """``path`` becomes unreadable while ArciIngest loads it: at the second read of it the file
-    is damaged in place, and that read and every later one fail. (A reader meets such damage
-    where its buffer ends; a test file fits in the buffer, so the reader is told.)"""
+    """``path`` becomes unreadable while ArciIngest loads it: at the loader's second read of it
+    the file is damaged in place, and that read and every later one fail (the reset's reading of
+    its receive times, :func:`~arcilogger_ingest.service.received_outside`, comes before the load
+    and is not counted). (A reader meets such damage where its buffer ends; a test file fits in
+    the buffer, so the reader is told.)"""
     reads = 0
+    resetting = False
+    outside = ingest_service.received_outside
+
+    def reset_read(file: Path, day: date) -> list[datetime]:
+        nonlocal resetting
+        resetting = True
+        try:
+            return outside(file, day)
+        finally:
+            resetting = False
 
     class Damaged(VaultReader):
         def read(self, max_bytes: int) -> bytes:
             nonlocal reads
-            if self.path.name == path.name:
+            if self.path.name == path.name and not resetting:
                 reads += 1
                 if reads == 2:
                     unlock(path)
@@ -287,6 +301,7 @@ def unreadable_mid_load(monkeypatch: pytest.MonkeyPatch, path: Path) -> None:
             return super().read(max_bytes)
 
     monkeypatch.setattr(ingest_service, "VaultReader", Damaged)
+    monkeypatch.setattr(ingest_service, "received_outside", reset_read)
 
 
 # -- POST /archive-reloads ------------------------------------------------------------------------
@@ -834,6 +849,112 @@ def test_another_users_request_of_loaded_days_is_its_own_record_and_no_second_lo
     assert [entry.details.get("existing") for entry in entries] == [None, None]
 
 
+def test_an_administrators_request_of_another_users_days_is_its_own_record(
+    client: TestClient,
+    login_as: Login,
+    app_session_factory: sessionmaker[Session],
+    db_engine: Engine,
+    layout: Layout,
+    sealed: Site,
+) -> None:
+    """W5-G answer 6 holds for an administrator too: another user's active request of the days
+    is not the answer (no ``existing`` entry pointing at it), the administrator's request is a
+    record and an audit entry of its own, and the other user's record stays as it was. The
+    administrator still sees both (``GET /archive-reloads``: everyone's)."""
+    other = signed_in(client, login_as, app_session_factory, "auditor")
+    drop(db_engine)
+    first = client.post(API, json=reload_body(reason="lookup"))
+    assert first.status_code == 202, first.text
+    manager = signed_in(client, login_as, app_session_factory)
+    second = client.post(API, json=reload_body())
+    assert second.status_code == 202, second.text
+    assert second.json()["id"] != first.json()["id"]
+    assert (second.json()["requested_by"], second.json()["status"], second.json()["reason"]) == (
+        manager.username,
+        "queued",
+        "search",
+    )
+    assert second.json()["bytes_total"] == sealed_bytes(layout, DAY)
+    assert client.get(f"{API}/{first.json()['id']}").json() == first.json()  # unchanged
+    assert [item["id"] for item in client.get(API).json()["items"]] == [
+        first.json()["id"],
+        second.json()["id"],
+    ]
+    rows = reload_rows(app_session_factory)
+    assert [(row.id, row.requested_by) for row in rows] == [
+        (first.json()["id"], other.username),
+        (second.json()["id"], manager.username),
+    ]
+    entries = audits(app_session_factory, "archive.reload")
+    assert [(entry.actor_id, entry.target, entry.details.get("existing")) for entry in entries] == [
+        (other.user_id, f"archive_reload:{first.json()['id']}", None),
+        (manager.user_id, f"archive_reload:{second.json()['id']}", None),
+    ]
+    # A second click of the administrator is answered with the administrator's own request.
+    again = client.post(API, json=reload_body())
+    assert again.status_code == 202, again.text
+    assert again.json()["id"] == second.json()["id"]
+    last = audits(app_session_factory, "archive.reload")[-1]
+    assert (last.actor_id, last.target, last.details.get("existing")) == (
+        manager.user_id,
+        f"archive_reload:{second.json()['id']}",
+        True,
+    )
+
+
+def test_the_disk_check_counts_only_the_files_not_loaded_yet(
+    client: TestClient,
+    login_as: Login,
+    app_session_factory: sessionmaker[Session],
+    db_engine: Engine,
+    api_config: Config,
+    layout: Layout,
+    sealed: Site,
+) -> None:
+    """A file ArciIngest would find loaded (another user's ``ready`` reload holds its days) is
+    neither reset nor loaded again, so it takes no room: a request of such days is accepted
+    on a drive too full for a full load, and becomes ``ready`` without a load. While the files
+    are not loaded yet (the other request still ``queued``), the full load counts."""
+    signed_in(client, login_as, app_session_factory)
+    drop(db_engine)
+    first = client.post(API, json=reload_body())  # no disk sample yet
+    assert first.status_code == 202, first.text
+    full = estimate(sealed_bytes(layout, DAY))
+    total = 100 * full
+    # 15 % free: 14 % after a full load (refused), 15 % after none.
+    disk_sample(layout, api_config.data_dir, total=total, used=total * 85 // 100)
+    second_user = signed_in(client, login_as, app_session_factory, "auditor")
+    refused = client.post(API, json=reload_body(reason="lookup"))
+    assert refused.status_code == 422, refused.text
+    error = refused.json()["error"]
+    assert (error["code"], error["details"]["estimated_bytes"]) == ("archive_reload_disk_low", full)
+    assert len(reload_rows(app_session_factory)) == 1
+
+    run_ingest(api_config, db_engine)
+    assert [row.status for row in reload_rows(app_session_factory)] == ["ready"]
+    loaded = message_ids(db_engine)
+    assert loaded
+    accepted = client.post(API, json=reload_body(reason="lookup"))
+    assert accepted.status_code == 202, accepted.text
+    assert (accepted.json()["requested_by"], accepted.json()["status"]) == (
+        second_user.username,
+        "queued",
+    )
+    # The progress runs over every file: ArciIngest counts the loaded ones as done.
+    assert accepted.json()["bytes_total"] == sealed_bytes(layout, DAY)
+    entry = audits(app_session_factory, "archive.reload")[-1]
+    assert entry.target == f"archive_reload:{accepted.json()['id']}"
+    assert (entry.details["bytes_total"], entry.details["estimated_bytes"]) == (
+        sealed_bytes(layout, DAY),
+        0,
+    )
+    run_ingest(api_config, db_engine)
+    ready = client.get(f"{API}/{accepted.json()['id']}").json()
+    assert ready["status"] == "ready", ready
+    assert ready["bytes_done"] == ready["bytes_total"] == sealed_bytes(layout, DAY)
+    assert message_ids(db_engine) == loaded  # nothing deleted, nothing loaded again
+
+
 def test_a_day_the_sealer_skipped_has_nothing_to_load(
     client: TestClient,
     login_as: Login,
@@ -888,7 +1009,7 @@ def test_a_lookup_over_gone_days_answers_409(
     assert entry.actor_id == who.user_id
     assert entry.details["reason"] == "archive_reload_required"
     assert entry.details["days"] == {
-        "first": (DAY - timedelta(days=8)).isoformat(),
+        "first": (DAY - timedelta(days=12)).isoformat(),
         "last": (DAY + timedelta(days=1)).isoformat(),
     }
     assert entry.details["missing"] == {"first": DAY.isoformat(), "last": DAY.isoformat()}

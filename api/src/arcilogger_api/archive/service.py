@@ -29,8 +29,11 @@ dropped yet (the job's run of today is to come, the day is unsealed, a monthly p
 change-over holds it) and is read as it is. A ``queued`` reload changes nothing yet: its load
 starts in a transaction that takes the partition maintenance lock
 (:data:`~arcilogger_db.partitions.PARTITION_LOCK_KEY`) exclusively, while :func:`check_window`
-takes it shared for the rest of the caller's transaction — the lookup's or the search's reads
-included —, so neither a load nor the window job's drop starts between the check and the reads.
+takes it shared for the rest of the caller's transaction — the lookup's reads included —, so
+neither a load nor the window job's drop starts between the check and the reads. The search,
+whose REPEATABLE READ snapshot is taken by its transaction's first statement, holds the lock
+shared at session level from before that transaction instead (:func:`hold_window`,
+``check_window(held=True)``), so its snapshot has every drop it waited for.
 
 A gone day comes back when the vault has it: a day with a sealed manifest (``state/seal`` says
 ``sealed``, :class:`arcilogger_ingest.sealed.SealIndex`). A gone day a ``queued`` or ``loading``
@@ -43,11 +46,15 @@ who cannot read ``/settings``).
 
 **Requests** (``POST /archive-reloads``, :func:`create_reload`): at most :data:`MAX_DAYS` days;
 days of the window that are complete are refused (422 ``validation_error``: nothing to reload);
-when no day of the request is missing and an active request of the same user (an administrator:
-anyone's) covers it, that request is the answer (a second click, the web's re-run) instead of a
-second load; every day sealed (a day the sealer skipped as empty has nothing to load), the margin
-days loaded when they are sealed; and the estimated growth of the database must leave
-:data:`MIN_FREE_PERCENT` of the PostgreSQL data drive free. Each refusal is a 422 with ``code``,
+when no day of the request is missing and an active request of the same user covers it, that
+request is the answer (a second click, the web's re-run) instead of a second load — another
+user's request never is, for an administrator either (W5-G answer 6: each person's request keeps
+its own record); every day sealed (a day the sealer skipped as empty has nothing to load),
+the margin days loaded when they are sealed; and the estimated growth of the database must leave
+:data:`MIN_FREE_PERCENT` of the PostgreSQL data drive free. The estimate counts only the files
+ArciIngest would load (:func:`bytes_to_load`): a file that counts as loaded already (finished,
+and nothing of the request's days dropped since: another user's ``ready`` reload holds them) is
+neither reset nor loaded again, so it takes no room. Each refusal is a 422 with ``code``,
 ``message_tr`` and ``message_en``. The audit entry ``archive.reload`` is written first, the
 ``queued`` row after it in the same transaction (G6); an answered existing request is audited as
 well (``existing``). ArciIngest loads the request (:mod:`arcilogger_ingest.service`).
@@ -65,7 +72,7 @@ from datetime import date, timedelta
 from pathlib import Path
 from typing import Any, Final
 
-from sqlalchemy import case, exists, func, select, text
+from sqlalchemy import Connection, case, exists, func, select, text
 from sqlalchemy.orm import Session
 
 from arcilogger_api.archive.models import ArchivedRange, ArchiveReloadRequest, ArchiveReloadRequired
@@ -94,6 +101,7 @@ from arcilogger_db.partitions import (
 )
 from arcilogger_db.settings import DEFAULT_SETTINGS, get_setting
 from arcilogger_ingest.sealed import SealIndex
+from arcilogger_ingest.service import IngestService
 from arcilogger_worker.alerts.system import drives
 from arcilogger_worker.system_jobs import read_history
 
@@ -277,7 +285,20 @@ def vault_sizes(layout: Layout, first_day: date, last_day: date) -> dict[date, i
 def reload_bytes(layout: Layout, first_day: date, last_day: date) -> int:
     """Σ ``bytes_uncompressed`` of the files a reload of ``first_day`` … ``last_day`` loads:
     the sealed raw days of the request and its margin (module text)."""
-    return sum(vault_sizes(layout, first_day - MARGIN, last_day + MARGIN).values())
+    return sum(reload_files(layout, first_day, last_day).values())
+
+
+def reload_files(layout: Layout, first_day: date, last_day: date) -> dict[tuple[str, date], int]:
+    """``bytes_uncompressed`` by ``(source, raw day)`` of the files a reload of ``first_day`` …
+    ``last_day`` loads, as ArciIngest lists them (``IngestService._request_files``): every file
+    of the sealed raw days of the request and its margin."""
+    seals = SealIndex(layout)
+    files: dict[tuple[str, date], int] = {}
+    for day in days_of(first_day - MARGIN, last_day + MARGIN):
+        sealed = seals.files(day)
+        if sealed is not None:
+            files.update({(source, day): f.bytes_uncompressed for source, f in sealed.items()})
+    return files
 
 
 @dataclass(frozen=True)
@@ -326,12 +347,70 @@ class WindowCheck:
         return ArchivedRange(first_day=days[0], last_day=days[-1])
 
 
-def check_window(db: Session, layout: Layout, first_day: date, last_day: date) -> WindowCheck:
+#: :func:`hold_window`'s statement: the lock, waited for at most ``lock_timeout`` (the subquery
+#: sets it first, for this statement's own transaction only).
+_HOLD: Final = (
+    "SELECT pg_advisory_lock_shared(%s) "
+    "FROM (SELECT set_config('lock_timeout', %s, true)) AS deadline"
+)
+_RELEASE: Final = "SELECT pg_advisory_unlock_shared(%s)"
+#: PostgreSQL ``lock_not_available``: ``lock_timeout`` ran out.
+_LOCK_NOT_AVAILABLE: Final = "55P03"
+
+
+def hold_window(db: Session, seconds: float) -> Connection:
+    """Hold the partition maintenance lock shared for the session, before the caller's next
+    transaction begins (the search, G8), waiting at most ``seconds`` (:class:`TimeoutError`).
+
+    A REPEATABLE READ transaction takes its snapshot with its first statement: a lock taken in
+    that transaction is granted after the snapshot, which then still has the cutoff and the
+    reloads of before a drop the lock waited for, while the dropped partitions are gone (a partly
+    dropped day read without ``archived``). So the lock is taken at session level, in a statement
+    of its own (autocommit), on the connection of ``db``'s transaction, which the session keeps
+    until its commit or rollback. :func:`release_window` must follow on every path, before the
+    session gives the connection back to the pool."""
+    connection = db.connection()
+    raw = connection.connection.driver_connection
+    if raw is None:  # pragma: no cover - a pooled connection always has one
+        raise RuntimeError("no DBAPI connection")
+    raw.autocommit = True
+    try:
+        raw.execute(_HOLD, (PARTITION_LOCK_KEY, str(max(1, int(seconds * 1000)))))
+    except Exception as exc:
+        if getattr(exc, "sqlstate", None) == _LOCK_NOT_AVAILABLE:
+            raise TimeoutError(f"partition lock not granted within {seconds} s") from exc
+        raise
+    finally:
+        if not raw.closed:  # a lost connection keeps the original error
+            raw.autocommit = False
+    return connection
+
+
+def release_window(connection: Connection) -> None:
+    """Release :func:`hold_window`'s lock, in the caller's transaction on ``connection`` before
+    its rollback (a lock of the session is no part of a transaction; the session's rollback then
+    ends the transaction and its savepoints as it knows them). When that fails — the transaction
+    is aborted, the connection lost — the connection is invalidated: closing it releases the
+    lock, and it never goes back to the pool holding it."""
+    try:
+        raw = connection.connection.driver_connection
+        if raw is None:  # pragma: no cover - a pooled connection always has one
+            raise RuntimeError("no DBAPI connection")
+        raw.execute(_RELEASE, (PARTITION_LOCK_KEY,))
+    except Exception:
+        connection.invalidate()
+
+
+def check_window(
+    db: Session, layout: Layout, first_day: date, last_day: date, *, held: bool = False
+) -> WindowCheck:
     """Which days of ``first_day`` … ``last_day`` are gone, and which of those the vault has.
 
     Takes the partition maintenance lock shared for the caller's transaction first (module text):
-    the caller reads the days in the same transaction."""
-    db.execute(text("SELECT pg_advisory_xact_lock_shared(:key)"), {"key": PARTITION_LOCK_KEY})
+    the caller reads the days in the same transaction. ``held``: the caller holds it already,
+    from before its transaction (:func:`hold_window`)."""
+    if not held:
+        db.execute(text("SELECT pg_advisory_xact_lock_shared(:key)"), {"key": PARTITION_LOCK_KEY})
     start = window_start(db, site_day(utc_now()))
     cutoff = dropped_before(db.connection())
     ready = _spans(_reloads(db, ("ready",)), timedelta(0))
@@ -504,23 +583,37 @@ def _invalid(field: str, message: str) -> ApiError:
     )
 
 
+def bytes_to_load(db: Session, first_day: date, files: dict[tuple[str, date], int]) -> int:
+    """Σ ``bytes_uncompressed`` of the ``files`` of a new request (from ``first_day``) that
+    ArciIngest would load: the files that do not count as loaded yet, by ingest's own rule
+    (:meth:`arcilogger_ingest.service.IngestService.loaded_files`, read-only: a finished offset
+    and no drop of the request's days since). It is checked again when the request is claimed;
+    one loaded now and dropped by then is loaded after all, as with any estimate."""
+    # No request has the number 0 (the serial starts at 1): no ``ready`` reload is left out.
+    loaded = IngestService.loaded_files(db.connection(), 0, first_day, files)
+    return sum(size for key, size in files.items() if key not in loaded)
+
+
 def _existing(
     db: Session, user: CurrentUser, first_day: date, last_day: date
 ) -> ArchiveReload | None:
     """The active request (``loading``, then ``queued``, then ``ready``; the newest) of the user
-    (an administrator: of anyone) whose days overlap ``first_day`` … ``last_day``."""
-    query = select(ArchiveReload).where(
-        ArchiveReload.status.in_(ARCHIVE_RELOAD_ACTIVE),
-        ArchiveReload.first_day <= last_day,
-        ArchiveReload.last_day >= first_day,
-    )
-    if user.role != "admin":
-        query = query.where(ArchiveReload.requested_by == user.username)
+    whose days overlap ``first_day`` … ``last_day``. Of an administrator as well: another user's
+    request is never the answer (each person's request keeps its own record and audit entry,
+    W5-G answer 6), although an administrator sees it (:func:`visible_reloads`)."""
     return db.scalars(
-        query.order_by(
+        select(ArchiveReload)
+        .where(
+            ArchiveReload.status.in_(ARCHIVE_RELOAD_ACTIVE),
+            ArchiveReload.requested_by == user.username,
+            ArchiveReload.first_day <= last_day,
+            ArchiveReload.last_day >= first_day,
+        )
+        .order_by(
             case({"loading": 0, "queued": 1}, value=ArchiveReload.status, else_=2),
             ArchiveReload.id.desc(),
-        ).limit(1)
+        )
+        .limit(1)
     ).first()
 
 
@@ -560,16 +653,28 @@ def create_reload(
         )
     existing = None if check.missing else _existing(db, user, body.first_day, body.last_day)
     if existing is not None:
-        _audit(db, user, body, existing.id, existing.bytes_total, ip=ip, existing=True)
+        _audit(
+            db,
+            user,
+            body,
+            existing.id,
+            existing.bytes_total,
+            estimate(existing.bytes_total),
+            ip=ip,
+            existing=True,
+        )
         return existing
     check_in_vault(layout, body.first_day, body.last_day)
-    bytes_total = reload_bytes(layout, body.first_day, body.last_day)
-    estimated = estimate(bytes_total)
+    files = reload_files(layout, body.first_day, body.last_day)
+    # ``bytes_total`` stays every file: ArciIngest counts the loaded ones as done at the claim
+    # (``bytes_done`` from their sizes), so the progress runs from them to the whole.
+    bytes_total = sum(files.values())
+    estimated = estimate(bytes_to_load(db, body.first_day, files))
     check_disk(layout, data_dir, estimated)
     # The number first, so the audit entry names the request it precedes (G6).
     sequence = func.pg_get_serial_sequence(ArchiveReload.__tablename__, "id")
     reload_id = int(db.execute(select(func.nextval(sequence))).scalar_one())
-    _audit(db, user, body, reload_id, bytes_total, ip=ip)
+    _audit(db, user, body, reload_id, bytes_total, estimated, ip=ip)
     db.flush()
     row = ArchiveReload(
         id=reload_id,
@@ -594,11 +699,13 @@ def _audit(
     body: ArchiveReloadRequest,
     reload_id: int,
     bytes_total: int,
+    estimated: int,
     *,
     ip: str | None,
     existing: bool = False,
 ) -> None:
-    """The audit entry ``archive.reload`` of a request (G6)."""
+    """The audit entry ``archive.reload`` of a request (G6); ``estimated``: the database growth
+    the disk check counted (:func:`bytes_to_load`)."""
     details: dict[str, Any] = {
         "archive_reload_id": reload_id,
         "reason": body.reason,
@@ -607,7 +714,7 @@ def _audit(
         "last_day": body.last_day.isoformat(),
         "days": (body.last_day - body.first_day).days + 1,
         "bytes_total": bytes_total,
-        "estimated_bytes": estimate(bytes_total),
+        "estimated_bytes": estimated,
     }
     if existing:
         details["existing"] = True  # answered with the active request, nothing queued

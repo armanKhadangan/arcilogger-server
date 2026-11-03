@@ -25,7 +25,8 @@ POST (no personal data in access logs, decision 10).
 **The database window** (Wave 5 contract §5, G8): a range that starts before the window
 (``db.retention_days``) answers with the rows the database holds plus ``archived``, the days of
 the range that are gone from the database and in the sealed vault, or being loaded again
-(:func:`arcilogger_api.archive.service.check_window`, in the snapshot the rows are read from);
+(:func:`arcilogger_api.archive.service.check_window`, in the snapshot the rows are read from,
+under the partition lock held shared from before that snapshot);
 when every day of the range is gone, the answer is 409 ``archive_reload_required`` with what a
 reload would bring back as ``details``. ``POST /archive-reloads`` brings the days back.
 
@@ -53,7 +54,12 @@ from sqlalchemy.orm import Session
 from starlette.background import BackgroundTask
 
 from arcilogger_api.archive.models import ArchivedRange
-from arcilogger_api.archive.service import check_window, required_error
+from arcilogger_api.archive.service import (
+    check_window,
+    hold_window,
+    release_window,
+    required_error,
+)
 from arcilogger_api.audit import record_audit
 from arcilogger_api.auth.privacy import require_privacy_notice
 from arcilogger_api.deps import ConfigDep, DbSession, LayoutDep, TtlCache
@@ -210,6 +216,11 @@ def _seconds(settings: dict[str, Any], key: str) -> float:
     return int(settings[key]) / 1000
 
 
+#: ``Session.info`` key of :func:`reading` with ``window``: the seconds the partition lock was
+#: waited for, set while the lock is held (:func:`_archived` and :func:`_budget_left` read it).
+WINDOW_WAIT: Final = "arcilogger.search.window_wait"
+
+
 def _storage(db: Session, state: SearchState) -> Storage:
     """How the time-series tables are stored (``windows.read_storage``), kept a minute; when
     TimescaleDB's catalogue does not answer in time nothing is split."""
@@ -221,20 +232,51 @@ def _storage(db: Session, state: SearchState) -> Storage:
 
 @contextmanager
 def reading(
-    db: Session, state: SearchState, user: CurrentUser, settings: dict[str, Any]
+    db: Session,
+    state: SearchState,
+    user: CurrentUser,
+    settings: dict[str, Any],
+    *,
+    window: bool = False,
 ) -> Iterator[Storage]:
     """A slot of the gate and one read-only snapshot (see the module text), on TimescaleDB with
     every statement planned with its values (``windows.plan_with_values``); rolled back, which
-    also ends that setting."""
+    also ends that setting. ``window`` (the reads that check the database window, G8): the
+    partition lock is held shared from before the snapshot to its end
+    (:func:`~arcilogger_api.archive.service.hold_window`), waited for at most
+    ``search.request_budget_ms`` (:class:`SearchTimeoutError`); the wait is part of the
+    request's budget (:func:`_budget_left`) and :data:`WINDOW_WAIT` says the lock is held."""
     db.commit()  # the authentication's transaction; a waiting request holds no connection
     with state.gate.slot(user.id, int(settings["search.max_concurrent"])):
-        db.execute(text(READ_ONLY))
+        held = None
+        if window:
+            seconds = _seconds(settings, "search.request_budget_ms")
+            asked = state.clock()
+            try:
+                held = hold_window(db, seconds)
+            except TimeoutError:
+                raise SearchTimeoutError(seconds) from None
+            db.info[WINDOW_WAIT] = max(0.0, state.clock() - asked)
         try:
+            db.execute(text(READ_ONLY))
             storage = _storage(db, state)
             plan_with_values(db, storage)
             yield storage
         finally:
+            db.info.pop(WINDOW_WAIT, None)
+            if held is not None:
+                release_window(held)  # before the rollback gives the connection back
             db.rollback()
+
+
+def _budget_left(db: Session, budget: float) -> float:
+    """``budget`` less the wait for the partition lock (:func:`reading`): a request takes at
+    most ``search.request_budget_ms`` in all, the gate's queue aside; nothing left is a
+    timeout."""
+    left = budget - float(db.info.get(WINDOW_WAIT, 0.0))
+    if left <= 0:
+        raise SearchTimeoutError(budget)
+    return left
 
 
 def _parse(text_: str) -> ParsedQuery:
@@ -302,9 +344,13 @@ def _archived(
 ) -> ArchivedRange | None:
     """The part of ``[start, end)`` gone from the database (G8); with ``refuse`` 409
     ``archive_reload_required`` when that is the whole range. Called in the read snapshot of the
-    search: :func:`~arcilogger_api.archive.service.check_window` holds the partition lock shared
-    until its end, so no reload or drop starts between the check and the rows."""
-    check = check_window(db, layout, site_day(start), site_day(end - timedelta(microseconds=1)))
+    search (:func:`reading` with ``window``): the partition lock is held shared from before that
+    snapshot to its end, so the snapshot has every drop and reload that finished, and none starts
+    between the check and the rows. A read without it (no :data:`WINDOW_WAIT`) takes the lock in
+    its transaction, as :func:`~arcilogger_api.archive.service.check_window` does for a
+    lookup."""
+    first, last = site_day(start), site_day(end - timedelta(microseconds=1))
+    check = check_window(db, layout, first, last, held=WINDOW_WAIT in db.info)
     if refuse and check.all_gone and check.reloadable():
         raise required_error(db, check)
     return check.archived()
@@ -373,7 +419,7 @@ def run_search(
         "saved_id": body.saved_id,
     }
     try:
-        with reading(db, state, user, settings) as storage:
+        with reading(db, state, user, settings, window=True) as storage:
             # In the snapshot the rows are read from, under the shared partition lock (G8).
             archived = _archived(db, layout, start, end, refuse=True)
             page = run_page(
@@ -383,7 +429,7 @@ def run_search(
                 end,
                 None,
                 limit,
-                budget,
+                _budget_left(db, budget),
                 clock=state.clock,
                 hook=state.hook,
                 horizons=storage.horizons,
@@ -454,7 +500,7 @@ def next_page(
     site = SiteNetwork.load(db, config)
     budget = _seconds(settings, "search.request_budget_ms")
     try:
-        with reading(db, state, user, settings) as storage:
+        with reading(db, state, user, settings, window=True) as storage:
             archived = _archived(db, layout, entry.start, entry.end, refuse=False)
             page = run_page(
                 db,
@@ -463,7 +509,7 @@ def next_page(
                 entry.end,
                 cursor,
                 limit,
-                budget,
+                _budget_left(db, budget),
                 clock=state.clock,
                 hook=state.hook,
                 horizons=storage.horizons,
