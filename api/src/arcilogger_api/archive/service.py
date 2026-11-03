@@ -37,7 +37,9 @@ A gone day comes back when the vault has it: a day with a sealed manifest (``sta
 reload brings back is **waiting**; one that needs a new reload is **missing**; a gone day without
 a manifest (removed by the vault's retention, before the chain's first day) cannot be reloaded,
 and the lookup's and the search's own notices name it (``older_than_db_retention``,
-``vault_only_before``). The 409 ``archive_reload_required`` names the missing and waiting days.
+``vault_only_before``). The 409 ``archive_reload_required`` names the missing and waiting days,
+and ``db.reload_keep_days`` at the time of the answer (C23: the confirm dialog names it to a user
+who cannot read ``/settings``).
 
 **Requests** (``POST /archive-reloads``, :func:`create_reload`): at most :data:`MAX_DAYS` days;
 days of the window that are complete are refused (422 ``validation_error``: nothing to reload);
@@ -90,6 +92,7 @@ from arcilogger_db.partitions import (
     dropped_before,
     retention_days,
 )
+from arcilogger_db.settings import DEFAULT_SETTINGS, get_setting
 from arcilogger_ingest.sealed import SealIndex
 from arcilogger_worker.alerts.system import drives
 from arcilogger_worker.system_jobs import read_history
@@ -198,6 +201,16 @@ def window_start(db: Session, today: date) -> date:
     return today - timedelta(days=retention_days(db.connection()))
 
 
+def reload_keep_days(db: Session) -> int:
+    """Setting ``db.reload_keep_days`` (G4): how long a ``ready`` reload holds its days; the
+    shipped default when unset or not a positive number, as ArciIngest reads it for
+    ``expires_at``."""
+    keep = get_setting(db, "db.reload_keep_days")
+    if isinstance(keep, int) and not isinstance(keep, bool) and keep >= 1:
+        return keep
+    return int(DEFAULT_SETTINGS["db.reload_keep_days"])
+
+
 def _reloads(db: Session, statuses: Iterable[str]) -> list[tuple[date, date]]:
     rows = db.execute(
         select(ArchiveReload.first_day, ArchiveReload.last_day).where(
@@ -284,6 +297,8 @@ class WindowCheck:
     all_gone: bool
     #: The reload's raw bytes (:func:`reload_bytes`) of :meth:`reloadable`'s range.
     bytes_total: int = 0
+    #: ``db.reload_keep_days`` (:func:`reload_keep_days`), read with ``bytes_total`` (C23).
+    keep_days: int = int(DEFAULT_SETTINGS["db.reload_keep_days"])
 
     def reloadable(self) -> tuple[date, ...]:
         """The missing and waiting days, oldest first."""
@@ -300,6 +315,7 @@ class WindowCheck:
             last_day=days[-1],
             bytes_total=self.bytes_total,
             estimated_bytes=estimate(self.bytes_total),
+            keep_days=self.keep_days,
         )
 
     def archived(self) -> ArchivedRange | None:
@@ -345,7 +361,13 @@ def check_window(db: Session, layout: Layout, first_day: date, last_day: date) -
         return check
     total = reload_bytes(layout, reloadable[0], reloadable[-1])
     return WindowCheck(
-        start, check.gone, check.missing, check.waiting, check.all_gone, bytes_total=total
+        start,
+        check.gone,
+        check.missing,
+        check.waiting,
+        check.all_gone,
+        bytes_total=total,
+        keep_days=reload_keep_days(db),
     )
 
 

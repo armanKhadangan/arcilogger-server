@@ -76,6 +76,9 @@ class ArchiveReloadRequired(BaseModel):
     bytes_total: int
     #: The estimated database growth: ``bytes_total`` times the measured factor (G5).
     estimated_bytes: int
+    #: ``db.reload_keep_days`` at the time of the answer: the days a reload keeps them (C23; a
+    #: lookup or search user cannot read ``/settings``).
+    keep_days: int
 
 
 class ArchivedRange(BaseModel):

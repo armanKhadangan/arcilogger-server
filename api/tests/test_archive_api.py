@@ -24,7 +24,7 @@ G4 to G9).
   days gone — also under another user's ``ready`` reload: the lookup answers 409, never a
   partial answer (W5-G answer 9).
 * ``POST /lookup/5651`` answers 409 ``archive_reload_required`` (audited ``lookup.run_failed``);
-  the search answers ``archived`` or 409.
+  the search answers ``archived`` or 409. Both name the current ``db.reload_keep_days`` (C23).
 * **The G7 equality test**: a lookup over days that were dropped and then reloaded from the vault
   by the real ingest gives the same answer and the same raw-line references as before the drop;
   the same for a search over a day with a line of the next raw day in it (a session logged
@@ -638,6 +638,7 @@ def test_a_day_before_the_applied_cutoff_is_gone(
         "last_day": DAY.isoformat(),
         "bytes_total": total,
         "estimated_bytes": estimate(total),
+        "keep_days": 7,
     }
     # A larger window since (the day is inside it again): what the job dropped is still gone.
     clock.now = SOON
@@ -876,6 +877,7 @@ def test_a_lookup_over_gone_days_answers_409(
         "last_day": DAY.isoformat(),
         "bytes_total": total,
         "estimated_bytes": estimate(total),
+        "keep_days": 7,
     }
     assert "12.10.2026 - 12.10.2026" in error["message_tr"]
     assert "2026-10-12 - 2026-10-12" in error["message_en"]
@@ -1166,6 +1168,7 @@ def test_the_search_answers_archived_or_409(
         "last_day": DAY.isoformat(),
         "bytes_total": total,
         "estimated_bytes": estimate(total),
+        "keep_days": 7,
     }
     assert audits(app_session_factory, "search.run")[-1].details["search_id"] == page["search_id"]
 
@@ -1174,6 +1177,45 @@ def test_the_search_answers_archived_or_409(
     assert partly.status_code == 200, partly.text
     assert partly.json()["archived"] == {"first_day": DAY.isoformat(), "last_day": DAY.isoformat()}
     assert partly.json()["items"] == []
+
+
+def test_the_409_names_the_keep_days_of_the_setting(
+    client: TestClient,
+    login_as: Login,
+    app_session_factory: sessionmaker[Session],
+    db_engine: Engine,
+    clock: Clock,
+    sealed: Site,
+) -> None:
+    # C23: the current db.reload_keep_days, not the default, for users who cannot read /settings.
+    signed_in(client, login_as, app_session_factory, "auditor")
+    with app_session_factory() as session:
+        set_setting(session, "db.reload_keep_days", 12, updated_by="admin")
+        session.commit()
+    drop(db_engine)
+    looked_up = client.post(LOOKUP, json=lookup_body(internal_ip=PC))
+    assert looked_up.status_code == 409, looked_up.text
+    searched = search(client, DAY - timedelta(days=1), DAY + timedelta(days=2))
+    assert searched.status_code == 409, searched.text
+    for response in (looked_up, searched):
+        error = response.json()["error"]
+        assert error["code"] == "archive_reload_required"
+        assert error["details"]["keep_days"] == 12
+
+
+@pytest.mark.parametrize("stored", ["0", "-3", "true", '"12"', "null"])
+def test_keep_days_falls_back_to_the_shipped_default(
+    app_session_factory: sessionmaker[Session], stored: str
+) -> None:
+    # A stored value ArciIngest would not use for expires_at: the dialog names the default too.
+    with app_session_factory() as session:
+        changed = session.execute(
+            text("UPDATE settings SET value = CAST(:value AS jsonb) WHERE key = :key"),
+            {"value": stored, "key": "db.reload_keep_days"},
+        )
+        assert changed.rowcount == 1  # type: ignore[attr-defined]
+        assert archive_service.reload_keep_days(session) == 7
+        session.rollback()
 
 
 def test_the_texts_are_turkish_first_with_english_beside() -> None:

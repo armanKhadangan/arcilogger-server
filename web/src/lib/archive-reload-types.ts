@@ -70,6 +70,11 @@ export interface ArchiveReloadRequired {
   bytes_total: number;
   /** The estimated database growth: `bytes_total` times the measured factor (G5). */
   estimated_bytes: number;
+  /**
+   * `db.reload_keep_days` at the time of the answer: the days a reload keeps them (C23; a lookup
+   * or search user cannot read `/settings`).
+   */
+  keep_days: number;
 }
 
 /** The search answer's `archived` field (G8): the part of the range outside the window. */
