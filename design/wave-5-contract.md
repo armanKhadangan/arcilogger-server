@@ -1409,3 +1409,11 @@ All Wave 5 questions are answered (2026-11-02).
   intermediate under a root that is not the test root. The two verifiers agree on the shared
   case table `core/tests/renewal_cases.py` (rule 5); its one exception, a production-like stamp
   under a root the site has not listed, is W5-A-5's.
+- **W5-A-12: a root `.gitleaks.toml` (granted on #132, 2026-11-03T22:08Z).** The frozen fixture
+  (D15) holds the product's own JSON, and gitleaks' default `generic-api-key` rule reads its
+  `"token_sha256":"<64 hex>"` fields (the manifests, the deletion record and its anchor, the
+  renewal record: 9 matches) as secrets; they are SHA-256 digests of token files. JSON carries no
+  `# gitleaks:allow`, and the fixture's bytes are pinned, so the file keeps every default rule
+  (`useDefault`) and allows only a `token_sha256` field with exactly 64 lower-case hex digits; it
+  clears those 9 matches and nothing else in the repository. No path allowlist, no rule turned
+  off, `ci.yml` unchanged. Every new allowlist entry needs the manager's review.
