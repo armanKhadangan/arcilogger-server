@@ -1245,3 +1245,22 @@ All Wave 5 questions are answered (2026-11-02).
   for `crl.crl_options`). It is the one place in `arcilogger_core` that reads the key; W5-C's
   `legalstatus/options.py` has its own reader. Both become plain attribute access when W5-T
   lands. Until then the 30–730 bounds are not enforced: they are W5-T's validation.
+- **W5-A-4: token paths.** A deletion token's path is the real
+  `deletions/<YYYY-MM-DD>[-N]-imha.json.zd` (`retention.records`, final names only, so no
+  `.part` file and no `chain-anchor.json`); §2.1.1's `…-retention.json.zd` is illustrative. A
+  report token's path is data-dir relative (`exports/reports/<name>.pdf.zd`), as §2.1.1 says;
+  every other path is vault-relative, and a day's is its token's (`…/manifest-<day>.json.zd`),
+  the key W5-C's day page looks it up by.
+- **W5-A-7: a test record's own token is not renewable.** A renewal record written with
+  `reason: "test"` is read as a renewal (it never counts, D5), but its own token is not listed
+  as a token to renew: otherwise each test renewal would be renewed again, with nothing to
+  protect. A record with `reason: "due"` that does not count (its root is not listed, its token
+  does not verify, it was revoked) is still renewable.
+- **W5-A-10: what the report adds.** `RenewalReport` also names the tokens and records it
+  could not read (`unreadable`: a token that cannot be parsed or whose stamped file is missing, a
+  record that is not `arcilogger.renewal/1` or has no token; none of them has a status), and
+  carries notes with TR/EN texts for what it could not check: unreadable stored revocation lists
+  (the renewal tokens are then verified without lists, Q12) and an `exports/reports` folder that
+  cannot be read (the `Renew` task may lack the right; the run goes on without report tokens).
+  A token that disappears during the scan (the retention job) is skipped. The certificate's
+  `notAfter` is read from each token, never from `state/seal`.

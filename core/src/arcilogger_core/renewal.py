@@ -24,20 +24,46 @@ D2), so the raw-text match of the evidence builder picks up a whole chain for on
 A renewal counts when it is *eligible* (its token verifies, the claim is legal grade, its root
 is one the site listed and it is not revoked: rule 4, D5, C15) and its own token is ``not_due``
 or ``covered`` itself: the check follows the chain of renewals.
+
+**The tokens of a data directory** (:func:`renewal_status`, D3): the token of every sealed day,
+of every deletion record under its final name, of every stored official report
+(``exports/reports/*.pdf.zd``) and of every renewal record, except one written with
+``reason: "test"``. Each certificate's ``notAfter`` is read from the token itself, never from
+``state/seal``. A token that cannot be read is left out and named in the report's
+``unreadable``; one that disappears during the scan (the retention job deleting its day) is
+skipped. Each renewal token is verified against the pinned roots and the stored revocation
+lists. :func:`renewal_status` only reads; ``state/renewal.json`` is written by the ``Renew``
+task's command line (contract W5-A-2).
 """
 
 from __future__ import annotations
 
+import hashlib
+import json
+import logging
+import os
 import re
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
+from pathlib import Path
 from typing import Any, Final, Literal
 
+from cryptography import x509
+
 from arcilogger_core import PRODUCT_NAME, __version__
+from arcilogger_core.chain import sealed_days
 from arcilogger_core.config import Config
-from arcilogger_core.timeutil import isoformat_site, require_aware, to_utc
-from arcilogger_core.tsa.base import TimestampProvider
+from arcilogger_core.crl import Crl, CrlError, load_stored
+from arcilogger_core.layout import Layout
+from arcilogger_core.retention import records as deletion_records
+from arcilogger_core.seal import sha256_file
+from arcilogger_core.timeutil import isoformat_site, require_aware, to_utc, utc_now
+from arcilogger_core.tsa.base import TimestampProvider, TokenInfo, TsaError
+from arcilogger_core.tsa.client import token_path_for
+from arcilogger_core.tsa.verify import confirmed_legal_grade, inspect_token, verify_token
+
+log = logging.getLogger("arcilogger.renewal")
 
 RENEWAL_SCHEMA: Final = "arcilogger.renewal/1"
 #: What a renewal record lists: the token of a sealed day, of a deletion record, of a stored
@@ -52,6 +78,9 @@ Reason = Literal["due", "test"]
 REASONS: Final[tuple[Reason, ...]] = ("due", "test")
 #: ``tsa.renew_before_days`` when the configuration has no such key (§2.5, owner question Q5).
 DEFAULT_RENEW_BEFORE_DAYS: Final = 180
+#: The stored official reports and their tokens, under ``exports`` (the API's report store).
+REPORTS_FOLDER: Final = "reports"
+REPORT_TOKEN_SUFFIX: Final = ".pdf.zd"  # noqa: S105 - a file suffix
 
 _HEX64 = re.compile(r"[0-9a-f]{64}")
 #: A Windows drive (``C:``); with an empty segment (a leading ``/``, a ``//`` UNC prefix) it
@@ -277,19 +306,60 @@ class TokenStatus:
 
 
 @dataclass(frozen=True)
+class RenewalNote:
+    """Something the report could not check, Turkish first with English beside it."""
+
+    code: str
+    message_tr: str
+    message_en: str
+
+
+#: code -> (message_tr, message_en) of :class:`RenewalNote`.
+NOTES: Final[dict[str, tuple[str, str]]] = {
+    "crl_unreadable": (
+        "Saklanan iptal listeleri okunamadı; yenileme damgaları iptal denetimi olmadan doğrulandı.",
+        "The stored revocation lists cannot be read; the renewal stamps were verified without "
+        "a revocation check.",
+    ),
+    "reports_unreadable": (
+        "exports/reports klasörü okunamadı; saklanan raporların damgaları listelenmedi.",
+        "The folder exports/reports cannot be read; the stamps of the stored reports are not "
+        "listed.",
+    ),
+}
+
+
+def _note(code: str) -> RenewalNote:
+    message_tr, message_en = NOTES[code]
+    return RenewalNote(code, message_tr, message_en)
+
+
+@dataclass(frozen=True)
 class RenewalReport:
-    """The status of every renewable token, sorted by path, and the count of each status."""
+    """The status of every renewable token, sorted by path, and the count of each status.
+
+    ``unreadable`` names the tokens (and renewal records) that could not be read, which have no
+    status; ``notes`` what could not be checked.
+    """
 
     tokens: tuple[TokenStatus, ...]
     totals: dict[Status, int]
+    unreadable: tuple[str, ...] = ()
+    notes: tuple[RenewalNote, ...] = ()
 
     @classmethod
-    def of(cls, tokens: Iterable[TokenStatus]) -> RenewalReport:
+    def of(
+        cls,
+        tokens: Iterable[TokenStatus],
+        *,
+        unreadable: Iterable[str] = (),
+        notes: Iterable[RenewalNote] = (),
+    ) -> RenewalReport:
         ordered = tuple(sorted(tokens, key=lambda token: token.path))
         totals: dict[Status, int] = dict.fromkeys(STATUSES, 0)
         for token in ordered:
             totals[token.status] += 1
-        return cls(ordered, totals)
+        return cls(ordered, totals, tuple(sorted(set(unreadable))), tuple(notes))
 
 
 class _Statuses:
@@ -379,3 +449,230 @@ def compute_statuses(
             )
         )
     return RenewalReport.of(statuses)
+
+
+# -- the tokens of a data directory ---------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class Renewable:
+    """A renewable token as read from the data directory: its facts for the status rules and the
+    entry a renewal record lists for it."""
+
+    fact: TokenFact
+    entry: RecordEntry
+
+
+def _parse_record(raw: bytes) -> dict[str, Any] | None:
+    """A renewal record (:data:`RENEWAL_SCHEMA`) with what the status needs, or None."""
+    try:
+        record = json.loads(raw.decode("utf-8"))
+    except (ValueError, RecursionError):
+        return None
+    if (
+        not isinstance(record, dict)
+        or record.get("schema") != RENEWAL_SCHEMA
+        or record.get("reason") not in REASONS
+        or not isinstance(record.get("tsa"), dict)
+        or not isinstance(record["tsa"].get("legal_grade"), bool)
+        or not isinstance(record.get("tokens"), list)
+    ):
+        return None
+    return record
+
+
+class _Reader:
+    """One scan of a data directory: the renewable tokens and the renewal records (D3)."""
+
+    def __init__(
+        self, layout: Layout, config: Config, roots: Sequence[x509.Certificate], now: datetime
+    ) -> None:
+        self.layout = layout
+        self.config = config
+        self.roots = roots
+        self.now = require_aware(now)
+        self.renewables: list[Renewable] = []
+        self.renewals: list[RenewalFact] = []
+        self.unreadable: list[str] = []
+        self.notes: list[RenewalNote] = []
+        self._crls: Sequence[Crl] | None = None
+        self._crls_read = False
+
+    def read(self) -> _Reader:
+        layout = self.layout
+        for day in sealed_days(layout):
+            self._token(layout.token(day), layout.manifest(day), "day", day=day)
+        for record in deletion_records(layout):
+            self._token(token_path_for(record), record, "deletion")
+        for token in self._report_tokens():
+            self._token(token, token.with_name(token.name.removesuffix(".zd")), "report")
+        if layout.renewals_dir.is_dir():
+            for record in sorted(layout.renewals_dir.glob("*.json")):
+                self._renewal(record)
+        return self
+
+    def report(self) -> RenewalReport:
+        computed = compute_statuses(
+            [renewable.fact for renewable in self.renewables],
+            self.renewals,
+            now=self.now,
+            renew_before=timedelta(days=renew_before_days(self.config)),
+        )
+        return RenewalReport.of(computed.tokens, unreadable=self.unreadable, notes=self.notes)
+
+    def crls(self) -> Sequence[Crl] | None:
+        """The stored revocation lists, read once; None (with a note) when they cannot be read:
+        the renewal tokens are then verified without them (contract question Q12)."""
+        if not self._crls_read:
+            self._crls_read = True
+            try:
+                self._crls = load_stored(self.layout)
+            except CrlError as exc:
+                log.warning("renewal: revocation lists not checked: %s", exc)
+                self.notes.append(_note("crl_unreadable"))
+        return self._crls
+
+    # -- reading ----------------------------------------------------------------------------------
+
+    def _relative(self, path: Path) -> str:
+        """Vault-relative; a report's token data-dir relative, under ``exports/`` (§2.1.1)."""
+        base = self.layout.vault if path.is_relative_to(self.layout.vault) else self.layout.root
+        return path.relative_to(base).as_posix()
+
+    def _unreadable(self, path: str, why: object) -> None:
+        log.warning("renewal: %s cannot be read (%s); it has no status", path, why)
+        self.unreadable.append(path)
+
+    def _read_token(self, token: Path, path: str) -> tuple[bytes, TokenInfo, datetime] | None:
+        """The token's bytes, what it says and its certificate's ``notAfter``; None when it is
+        not there (the caller decides) or cannot be read (named in ``unreadable``)."""
+        try:
+            data = token.read_bytes()
+        except FileNotFoundError:
+            return None
+        except OSError as exc:
+            self._unreadable(path, exc)
+            return None
+        try:
+            info = inspect_token(data)
+        except (TsaError, ValueError, TypeError, KeyError) as exc:
+            self._unreadable(path, exc)
+            return None
+        if info.tsa_cert_not_after is None:
+            self._unreadable(path, "the token carries no TSA certificate")
+            return None
+        return data, info, info.tsa_cert_not_after
+
+    def _token(self, token: Path, stamped: Path, kind: Kind, *, day: date | None = None) -> None:
+        path = self._relative(token)
+        read = self._read_token(token, path)
+        if read is None:
+            return  # not stamped (yet), or deleted during the scan by the retention job
+        data, _, cert_not_after = read
+        try:
+            stamped_sha256 = sha256_file(stamped)
+        except FileNotFoundError:
+            if token.exists():
+                self._unreadable(path, f"{stamped.name} is missing")
+            return
+        except OSError as exc:
+            self._unreadable(path, exc)
+            return
+        token_sha256 = hashlib.sha256(data).hexdigest()
+        entry = RecordEntry(
+            kind,
+            path,
+            token_sha256,
+            cert_not_after,
+            day=day,
+            manifest_sha256=stamped_sha256 if kind == "day" else None,
+            record_sha256=None if kind == "day" else stamped_sha256,
+        )
+        self.renewables.append(
+            Renewable(TokenFact(path, kind, token_sha256, cert_not_after), entry)
+        )
+
+    def _report_tokens(self) -> list[Path]:
+        """The stored reports' tokens. A missing folder has none; one that cannot be read (the
+        ``Renew`` task's account may lack the right) has none too, with a note: never a crash."""
+        folder = self.layout.exports / REPORTS_FOLDER
+        try:
+            with os.scandir(folder) as entries:
+                names = sorted(
+                    entry.name for entry in entries if entry.name.endswith(REPORT_TOKEN_SUFFIX)
+                )
+        except FileNotFoundError:
+            return []
+        except OSError as exc:
+            log.warning(
+                "renewal: %s cannot be read (%s); report tokens are not listed", folder, exc
+            )
+            self.notes.append(_note("reports_unreadable"))
+            return []
+        return [folder / name for name in names]
+
+    def _renewal(self, record: Path) -> None:
+        record_path = f"renewals/{record.name}"
+        token = token_path_for(record)
+        try:
+            raw = record.read_bytes()
+        except OSError as exc:
+            self._unreadable(record_path, exc)
+            return
+        parsed = _parse_record(raw)
+        if parsed is None:
+            self._unreadable(record_path, f"not an {RENEWAL_SCHEMA} record")
+            return
+        token_path = f"{record_path}.zd"
+        read = self._read_token(token, token_path)
+        if read is None:
+            if not token.exists():
+                self._unreadable(record_path, "the record has no token")
+            return
+        data, info, cert_not_after = read
+        result = verify_token(
+            data,
+            roots=self.roots,
+            file_path=record,
+            now=max(self.now, utc_now()),
+            require_critical_eku=self.config.tsa.require_critical_eku,
+            crls=self.crls(),
+        )
+        # D5: a test record never counts; a legal claim counts only when rule 4 confirms it.
+        eligible = parsed["reason"] == "due" and confirmed_legal_grade(
+            parsed["tsa"]["legal_grade"], result, self.config.tsa.legal_root_fingerprints
+        )
+        token_sha256 = hashlib.sha256(data).hexdigest()
+        fact = TokenFact(token_path, "renewal", token_sha256, cert_not_after)
+        lists = frozenset(
+            entry["token_sha256"]
+            for entry in parsed["tokens"]
+            if isinstance(entry, dict) and isinstance(entry.get("token_sha256"), str)
+        )
+        self.renewals.append(RenewalFact(record_path, fact, info.gen_time, eligible, lists))
+        if parsed["reason"] == "test":
+            return  # its own token is not renewed (contract W5-A-7)
+        entry = RecordEntry(
+            "renewal",
+            token_path,
+            token_sha256,
+            cert_not_after,
+            record_sha256=hashlib.sha256(raw).hexdigest(),
+            protects=tuple(protects(parsed)),
+        )
+        self.renewables.append(Renewable(fact, entry))
+
+
+def renewal_status(
+    layout: Layout,
+    config: Config,
+    roots: Sequence[x509.Certificate],
+    now: datetime | None = None,
+) -> RenewalReport:
+    """The long-term status of every renewable token of ``layout`` at ``now`` (§2.1.2, D3).
+
+    ``roots`` are the pinned roots the renewal tokens are verified against (with the stored
+    revocation lists); ``tsa.legal_root_fingerprints`` and ``tsa.renew_before_days`` come from
+    ``config``. Writes nothing.
+    """
+    return _Reader(layout, config, roots, now or utc_now()).read().report()
