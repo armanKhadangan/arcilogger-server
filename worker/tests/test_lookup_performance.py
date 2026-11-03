@@ -80,6 +80,7 @@ from arcilogger_worker.lookup import (
 )
 from arcilogger_worker.lookup import engine as lookup_engine
 from arcilogger_worker.lookup.attribution import Attributor
+from arcilogger_worker.lookup.days import reads_from
 from arcilogger_worker.lookup.sessions import Window, explain_rows
 from arcilogger_worker.lookup.trust import untrusted_sources
 from arcilogger_worker.testing import tr
@@ -520,7 +521,9 @@ def test_lookup_is_fast_on_compressed_chunks(db_engine: Engine, db_session: Sess
 # the 2.8.3 fallback, the last 604,800 s (``attribution.UNCONVERTED_WINDOW``; deviation c2), except
 # for an ``fg_dhcp`` chain, whose post-lease window starts at its last ACK uncapped (half a lease:
 # the 30-day guard). The converted-row query reads ``fg_dhcp`` on its MAC and address indexes and
-# keeps the 100 days of 2.7.
+# keeps the 100 days of 2.7. Since W5-G no window starts before the first of the lookup's days
+# (12 days before the moment's day with the defaults, ``lookup.days.reads_from``): the 30-day
+# guard and the converted-row query read from that day.
 
 #: Moments of the guards: the traffic site's and the event site's lookups.
 GUARD_AT = tr(DAY, 14)
@@ -754,7 +757,9 @@ EVENT_SITE = (
     "- interval '302340 seconds' - 8 * interval '302400 seconds' AS s) AS x, "
     "LATERAL (SELECT ('172.20.42.' || (100 + i))::inet AS ip, "
     "('00:00:5e:00:53:' || to_hex(100 + i))::macaddr AS mac) AS k",
-    # The long-lease chains' leases, open since their first ACK.
+    # The long-lease chains' leases, open since their first ACK, with the refs the lease build
+    # keeps (the opening and the newest continuation): their last ACK lies before the lookup's
+    # days, so the stored record stands in for the row (W5-G deviations).
     "INSERT INTO leases (ip, mac, vlan, server, start, end_reason, confidence, source_table, "
     "last_evidence, lease_seconds, evidence) "
     "SELECT ip, mac, 42, 'vlan42', s, 'open', 'high', 'fg_dhcp', "
@@ -762,6 +767,11 @@ EVENT_SITE = (
     "jsonb_build_array(jsonb_build_object('table', 'fg_dhcp', 'row_id', 500 + i * 10 + 2, "
     "'time', s, 'raw', jsonb_build_object('source', 'fortigate', 'day', :day, "
     "'line', 500 + i * 10 + 2, 'offset', 0), 'summary', 'vlan42 assigned ' || host(ip) "
+    "|| ' for ' || mac || ' (FortiGate DHCP, logid 0100026001, lease ' || :long_lease || ')'), "
+    "jsonb_build_object('table', 'fg_dhcp', 'row_id', 500 + i * 10, "
+    "'time', CAST(:long_at AS timestamptz) - make_interval(secs => :long_lease / 2 - 60), "
+    "'raw', jsonb_build_object('source', 'fortigate', 'day', :day, "
+    "'line', 500 + i * 10, 'offset', 0), 'summary', 'vlan42 assigned ' || host(ip) "
     "|| ' for ' || mac || ' (FortiGate DHCP, logid 0100026001, lease ' || :long_lease || ')')) "
     "FROM generate_series(0, 19) AS i, LATERAL (SELECT CAST(:long_at AS timestamptz) "
     "- make_interval(secs => :long_lease / 2 - 60) "
@@ -985,6 +995,17 @@ def _guard_lookup(site: Engine, request: LookupRequest, measure: Any) -> LookupO
 
 def _keys(outcome: LookupOutcome) -> list[str]:
     return [e.key for e in outcome.explanations]
+
+
+def _first_read(site: Engine, at: datetime) -> datetime:
+    """The earliest device time a guard lookup of ``PUBLIC`` at ``at`` reads (the start of the
+    first of its days, :func:`.days.reads_from`: 12 days before ``at``'s day with the
+    defaults); a look-back reaching further reads from it (``lookback_clamped_to_window``)."""
+    with Session(site) as session:
+        settings = LookupSettings.from_settings(get_settings(session))
+    first = reads_from(LookupRequest(at=at, public_ip=PUBLIC), settings)
+    assert at - first > timedelta(days=12)
+    return first
 
 
 # -- the traffic site ---------------------------------------------------------------------------
@@ -1942,8 +1963,10 @@ def test_the_post_lease_query_of_long_fortigate_leases_is_fast(
 ) -> None:
     """3.8 and the manager's review of PR #30, item 4: the ``fg_event`` post-lease query of 20
     ``fg_dhcp`` chains with a 30-day lease, half a lease after their last ACK. An ``fg_dhcp``
-    chain's window starts at its last record and has no 7-day fallback (deviation c2), so the
-    query reads about 15 days of the site's ``system`` lines; under 0.5 s."""
+    chain's window starts at its last record and has no 7-day fallback (deviation c2); that
+    record lies 15 days back, before the lookup's days, so the window starts at the first of
+    them (W5-G deviations; the lease's stored record is its last record) and the query reads
+    more than 12 days of the site's ``system`` lines; under 0.5 s."""
     lines: list[_Timed] = []
 
     def measure() -> None:
@@ -1955,18 +1978,21 @@ def test_the_post_lease_query_of_long_fortigate_leases_is_fast(
     chains = [m.chain for m in outcome.matches]
     assert len(chains) == 20
     half = timedelta(seconds=LONG_LEASE // 2 - 60)
+    first = _first_read(event_site, LONG_AT)
+    assert LONG_AT - half < first
     for chain in chains:
         assert chain is not None
         assert chain.lease is not None
         assert chain.lease.source_table == "fg_dhcp"
         assert chain.lease.last_dhcp_evidence == LONG_AT - half
         assert chain.confidence in ("high", "medium")
+    assert "lookback_clamped_to_window" in _keys(outcome)
     (timed,) = lines
     assert len(timed.calls) == 1
     _sql, parameters = executed.one("FROM fg_event", "extra ->> ")
     moments = _moments(parameters)
     low, high = min(moments), max(moments)
-    assert (low, high) == (LONG_AT - half, max(chain.at for chain in chains if chain))
+    assert (low, high) == (first, max(chain.at for chain in chains if chain))
     with event_site.connect() as connection:
         read = connection.execute(
             text(
@@ -1975,7 +2001,7 @@ def test_the_post_lease_query_of_long_fortigate_leases_is_fast(
             ),
             {"low": low, "high": high},
         ).scalar_one()
-    assert read >= 14 * EVENT_ROWS
+    assert read >= 12 * EVENT_ROWS
     assert timed.seconds < 0.5, f"the post-lease query took {timed.seconds:.3f} s"
 
 
@@ -2029,12 +2055,14 @@ def test_the_converted_row_query_of_a_hundred_chains_is_fast(
     event_site: Engine, timer: _Timer, executed: _Executed
 ) -> None:
     """3.8: the round-7 converted-row query of 2.7 for the MACs of 100 chains on
-    ``ix_fg_dhcp_mac_time`` over the 100-day cap (no fallback), at the load generator's
-    FortiGate DHCP rate over 400 days (the chains' MACs on the staff Wi-Fi: read, every chain's
-    rows returned, and no move under D33's key), with its branch for the chains' addresses on
-    ``ix_fg_dhcp_ip_time`` (deviation c2) in the same statement, under 0.2 s. The addresses are
-    no planning constant (``ARRAY(SELECT unnest(…))``): on TimescaleDB the 100 days are 100
-    one-day chunks, each planned with the statement's lists."""
+    ``ix_fg_dhcp_mac_time``, at the load generator's FortiGate DHCP rate over 400 days (the
+    chains' MACs on the staff Wi-Fi: read, every chain's rows returned, and no move under D33's
+    key), with its branch for the chains' addresses on ``ix_fg_dhcp_ip_time`` (deviation c2) in
+    the same statement, under 0.2 s. The 100-day cap (no fallback) reaches before the lookup's
+    days, so the query reads from the first of them, more than 12 days (W5-G deviations; a
+    lookup never reads the whole cap any more). The addresses are no planning constant
+    (``ARRAY(SELECT unnest(…))``): on TimescaleDB each day is a one-day chunk, planned with the
+    statement's lists."""
     moves: list[_Timed] = []
 
     def measure() -> None:
@@ -2058,7 +2086,10 @@ def test_the_converted_row_query_of_a_hundred_chains_is_fast(
     assert sql.count("JOIN fg_dhcp") == 2
     assert "fg_dhcp.ip = ANY (array((SELECT unnest(" in sql
     moments = _moments(parameters)
-    assert min(moments) == MT_AT - attribution.MISSED_MOVE_WINDOW
+    first = _first_read(event_site, MT_AT)
+    assert first > MT_AT - attribution.MISSED_MOVE_WINDOW
+    assert min(moments) == first
+    assert "lookback_clamped_to_window" in _keys(outcome)
     with event_site.connect() as connection:
         rows = connection.exec_driver_sql(sql, parameters).all()
     # The MAC branch reads every chain's rows; the address branch (deviation c2) reads the
@@ -2074,7 +2105,8 @@ def test_the_converted_row_query_of_a_hundred_chains_is_fast(
 #
 # On TimescaleDB every chunk older than 7 days is compressed, and a compressed chunk's btree
 # indexes hold only its rows that are not compressed: the D8 probe, the post-lease queries and
-# the converted-row query, which read up to 100 days back, read such chunks for most requests.
+# the converted-row query, which read up to 12 days back (the lookup's days), read such chunks for
+# most requests.
 # Measured once on the Linux CI job, not a guard with its own bound: one follows only if a query
 # takes more than 1 s. The job log's line ``C3-compressed: d8_probe=…s lease_checks=…s
 # post_lease=…s post_lease_long=…s converted_row=…s`` gives the numbers.
@@ -2192,8 +2224,9 @@ def test_the_fortigate_dhcp_checks_on_compressed_chunks(
         assert _system_lines(site, min(moments), PROBE_AT, after=False) >= 7 * EVENT_ROWS
 
         # The round-5 lease checks of 20 fg_dhcp chains half a 7-day lease after their last ACK:
-        # each chain's fg_dhcp row of the moment, read from its lease's start (about 28 days, nine
-        # ACKs), and the post-lease query from that ACK.
+        # each chain's fg_dhcp row of the moment, read from its lease's start (about 31 days,
+        # nine ACKs) but no earlier than the first of the lookup's days (three ACKs; W5-G
+        # deviations), and the post-lease query from that ACK.
         outcome, (records, fg_lines), recorded = _measured_lookup(
             site, FG_AT, "_row_record", "_unconverted_lines"
         )
@@ -2209,22 +2242,25 @@ def test_the_fortigate_dhcp_checks_on_compressed_chunks(
         assert (len(records.calls), len(fg_lines.calls)) == (20, 1)
         starts = {lease.start for _attributor, lease, _at in records.calls}
         assert starts == {acked - 8 * timedelta(seconds=302_400)}
+        first = _first_read(site, FG_AT)
+        assert min(starts) < first
         with site.connect() as connection:
             acks = connection.execute(
                 text(
                     "SELECT count(*) FROM fg_dhcp WHERE ip <<= CAST('172.20.42.96/27' AS cidr) "
                     "AND time >= :start AND time <= :at"
                 ),
-                {"start": min(starts), "at": FG_AT},
+                {"start": first, "at": FG_AT},
             ).scalar_one()
-        assert acks == 20 * 9
+        assert acks == 20 * 3
         _sql, parameters = recorded.one("FROM fg_event", "extra ->> ")
         low = min(_moments(parameters))
         assert low == acked
         assert _system_lines(site, low, max(_moments(parameters)), after=True) >= 3 * EVENT_ROWS
 
         # The post-lease query of 100 mt_dhcp chains (the 7-day cap) and the converted-row query
-        # of their MACs and addresses over 100 days, in one lookup.
+        # of their MACs and addresses from the first of the lookup's days (the 100-day cap
+        # reaches before it), in one lookup.
         outcome, (lines, moves), recorded = _measured_lookup(
             site, MT_AT, "_unconverted_lines", "_missed_moves"
         )
@@ -2238,12 +2274,13 @@ def test_the_fortigate_dhcp_checks_on_compressed_chunks(
         assert low == MT_AT - attribution.UNCONVERTED_WINDOW
         assert _system_lines(site, low, max(_moments(parameters)), after=True) >= 7 * EVENT_ROWS
         sql, parameters = recorded.one("WITH ORDINALITY", "JOIN fg_dhcp")
-        assert min(_moments(parameters)) == MT_AT - attribution.MISSED_MOVE_WINDOW
+        assert min(_moments(parameters)) == _first_read(site, MT_AT)
         with site.connect() as connection:
             rows = connection.exec_driver_sql(sql, parameters).all()
         assert {n for n, _ip, _interface, _vd, _held in rows} == set(range(1, 101))
 
-        # The post-lease query of 20 fg_dhcp chains half a 30-day lease after their last ACK.
+        # The post-lease query of 20 fg_dhcp chains half a 30-day lease after their last ACK,
+        # which lies before the lookup's days: from the first of them.
         outcome, (long_lines,), recorded = _measured_lookup(site, LONG_AT, "_unconverted_lines")
         half = timedelta(seconds=LONG_LEASE // 2 - 60)
         chains = [m.chain for m in outcome.matches]
@@ -2253,9 +2290,9 @@ def test_the_fortigate_dhcp_checks_on_compressed_chunks(
         assert len(long_lines.calls) == 1
         _sql, parameters = recorded.one("FROM fg_event", "extra ->> ")
         low = min(_moments(parameters))
-        assert low == LONG_AT - half
+        assert low == _first_read(site, LONG_AT)
         high = max(_moments(parameters))
-        assert _system_lines(site, low, high, after=True) >= 14 * EVENT_ROWS
+        assert _system_lines(site, low, high, after=True) >= 12 * EVENT_ROWS
 
         seconds = {
             "d8_probe": probe.seconds,

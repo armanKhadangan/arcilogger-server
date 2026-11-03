@@ -29,11 +29,16 @@
   çalışma kopyasıdır, mühürlü asılları kasada kalır). Daha eski bir gün
   gerektiğinde mühürlü arşivden **yeniden yüklenir** ("arşivden yeniden yükle", tablo
   `archive_reloads`; satırları yalnızca ArciIngest yazar) ve `db.reload_keep_days` (varsayılan
-  7) gün veritabanında kalır. Bir 5651 sorgusu sorulan andan **8 gün** geriye okur (varsayılan
-  ayarlarla: 7 günlük DHCP kira geriye bakışı, en uzun oturum 1 gün, tolerans ve log payı birer
-  dakika; `lookup_days`), bu yüzden 30 günlük pencereyle yaklaşık **22 günden eski** bir anın
-  sorgusu yeniden yükleme ister. Sorguların 30 gün geriye yeniden yüklemesiz çalışmasını isteyen
-  yönetici `db.retention_days` değerini **38** yapabilir (30 + 8; veritabanı da o kadar büyür).
+  7) gün veritabanında kalır. Bir 5651 sorgusu sorulan andan **12 gün** geriye okur (varsayılan
+  ayarlarla: FortiGate kirasının günlüğe yazılan süresi için, `dhcp.fortigate_use_logged_lease`,
+  günleri bir yeniden yüklemenin tuttuğu kadar, sonraki günle 14 gün; bu ayar kapalıyken 8 gün:
+  7 günlük DHCP kira geriye bakışı, en uzun oturum 1 gün, tolerans ve log payı birer dakika;
+  `lookup_days`), bu yüzden 30 günlük pencereyle yaklaşık **18 günden eski** bir anın sorgusu
+  yeniden yükleme ister. Sorgu kendi günlerinin dışındaki hiçbir log satırını okumaz: daha
+  uzağa bakacak bir denetim (100 günlük kaçırılmış taşınma sınırı, daha uzun bir kira) yalnızca
+  sorgunun günlerini okur ve yanıt bunu söyler (`lookback_clamped_to_window`). Sorguların 30 gün
+  geriye yeniden yüklemesiz çalışmasını isteyen yönetici `db.retention_days` değerini **42**
+  yapabilir (30 + 12; veritabanı da o kadar büyür).
   Kullanım özetleri (`usage_*` tabloları, `domain_categories`) ise
   her gün 03:30'dan sonra worker işi `usage.retention` ile silinir:
   `usage.retention_days` (varsayılan 400) günden eski olanlar; biten yeniden hesaplama istekleri
@@ -96,12 +101,16 @@ active archive reload are never dropped. An older day
 comes back from the sealed vault on request ("arşivden yeniden yükle", `archive_reloads`; only
 ArciIngest writes its rows) and stays `db.reload_keep_days` (default 7) days. Every step of the job
 that drops something writes a `db.window` audit entry, the record of the deletion (the rows are
-working copies; their sealed originals stay in the vault). A 5651 lookup reads **8 days** back
-from the asked moment (with the default settings: the 7-day DHCP lease look-back, the 1-day
-longest session, a minute each of tolerance and log slack; `lookup_days`), so with the 30-day
-window a lookup of a moment more than about **22 days** old needs a reload; an administrator who
-wants 30 days of lookups without a reload can set `db.retention_days` to **38** (30 + 8; the
-database grows accordingly). The usage rollups
+working copies; their sealed originals stay in the vault). A 5651 lookup reads **12 days** back
+from the asked moment (with the default settings: for the logged lease time of a FortiGate lease,
+`dhcp.fortigate_use_logged_lease`, its days reach as far back as one reload holds, 14 days with
+the day after; without that setting 8 days: the 7-day DHCP lease look-back, the 1-day longest
+session, a minute each of tolerance and log slack; `lookup_days`), so with the 30-day window a
+lookup of a moment more than about **18 days** old needs a reload. A lookup reads no log row
+outside its days: a check that would look further (the 100-day missed-move cap, a longer logged
+lease) reads only the lookup's days, and the answer says so (`lookback_clamped_to_window`). An
+administrator who wants 30 days of lookups without a reload can set `db.retention_days` to **42**
+(30 + 12; the database grows accordingly). The usage rollups
 (`usage_*` tables, `domain_categories`) are deleted daily after 03:30 by the worker job `usage.retention` once older than
 `usage.retention_days` (default 400), finished rebuild requests (`usage_rebuilds`) after 90 days
 (see "Retention"). The licence tables (`license_*`, revision `0014_license`) are append-only and
@@ -468,31 +477,43 @@ PostgreSQL 16.
       (`lookup.tolerance_seconds`, 60 s), the longest session `S` (`lookup.max_session_seconds`,
       1 day), the slack of the web/app/DNS logs (60 s) and the DHCP look-back `L`
       (`dhcp_lookback`: the longest configured lease timeout or ARP grace, at least FortiOS's
-      default lease of 604,800 s, 7 days). With the defaults that is 8 days and 2 minutes, so the
-      first day read is `T`'s day − 8 (− 9 for a moment in the first two minutes after midnight).
-      The window holds the site days from today − `db.retention_days` to today, so a lookup needs
-      no reload while `T`'s day − 8 ≥ today − `db.retention_days`: with the default 30, for a
-      moment at most **22 days** old (21 in the first two minutes after a midnight). A lookup
-      older than about 22 days needs a reload. An administrator who wants **30 days** of lookups
-      without a reload sets `db.retention_days` to **38** (30 + 8): the database then holds
-      39 site days, about 62 GB at 1 M lines a day instead of 49.6 GB ("Size" below). A longer
-      lease time in the DHCP settings or a longer `lookup.max_session_seconds` takes as much off
-      the reach. Both stay as they are (manager answer 3 on #121): the 30-day window is the
-      owner's decision, and the look-back is needed for correct answers. Until the day's run of
+      default lease of 604,800 s, 7 days). With the defaults that is 8 days and 2 minutes. With
+      `dhcp.fortigate_use_logged_lease` (the default) the days reach back as far as one reload
+      holds (`RELOAD_DAYS`, 14 days with the last one), because the logged lease time of a
+      FortiGate lease (up to FortiOS's 100 days) is known only once the lease is read: the first
+      day read is `T`'s day − 12 (− 11 for a moment in the last two minutes before a midnight,
+      whose last day is `T`'s day + 2; without the setting `T`'s day − 8). The window holds the
+      site days from today − `db.retention_days` to today, so a lookup needs no reload while its
+      first day ≥ today − `db.retention_days`: with the default 30, for a moment at most **18
+      days** old (19 in the last two minutes before a midnight). An older lookup needs a reload
+      of its 14 days. A look-back of the engine that reaches before the first day (the 100-day
+      cap of the missed-move check, a logged lease longer than 14 days: the lease's newest
+      record, the post-lease checks, the two-origin check) and the two-origin check's read past
+      the last day read only the lookup's days (`lookup.days.reads_from` to `reads_until`), and
+      the answer says so (`lookback_clamped_to_window`, TR/EN, naming the days; W5-G-17), so it
+      is the same before a drop and after the reload. An administrator who wants **30 days** of
+      lookups without a reload sets `db.retention_days` to **42** (30 + 12): the database then
+      holds 43 site days, about 69 GB at 1 M lines a day instead of 49.6 GB ("Size" below). A
+      longer `lookup.max_session_seconds`, or a lease time in the DHCP settings that reaches
+      further than those 12 days, takes as much off the reach. Both stay as they are (manager
+      answer 3 on #121): the 30-day window is the owner's decision, and the look-back is needed
+      for correct answers. Until the day's run of
       the job (after 04:00) the database holds one day more; a cutoff held by an unsealed day or
       a reload keeps more, never less.
     - `POST /archive-reloads` (`{reason, first_day, last_day, lookup_id?}`, 202) queues a request;
       `GET /archive-reloads/{id}` and `GET /archive-reloads` show it (administrators see every
       request, other users their own). A request of days the window holds whole is refused (422
       `validation_error`: nothing to reload); when none of its days needs a new load and an
-      active request of the same user (an administrator: anyone's) covers it, that request is
-      the answer (one load for two clicks; audited with `existing`). A day the sealer skipped (no
+      active request of the same user covers it, that request is the answer (one load for two
+      clicks; audited with `existing`); another user's request never is, for an administrator
+      either: each person's request keeps its own record. A day the sealer skipped (no
       line) has nothing to load. Refusals are 422 with `code`, `message_tr` and
       `message_en`: `archive_reload_too_large` (more than 14 days), `archive_day_not_in_vault`
       (a day without a sealed manifest: not sealed yet, before the chain's start, or removed by
       the vault's retention), `archive_reload_disk_low` (the newest disk sample of the data drive
-      in `state\system-history.json`, minus the estimate, would leave less than 15 % free; no
-      sample, no refusal).
+      in `state\system-history.json`, minus the estimate of the files not loaded yet, would leave
+      less than 15 % free; a file another user's `ready` reload holds takes no room; no sample,
+      no refusal).
     - **Who:** the permission of the function that asks — `lookup.run` for `reason = "lookup"`
       (with a `lookup_id`, one the user may see), `search.read` for `"search"`; today both are
       the Yönetici and Denetçi roles ([roles.md](roles.md)) — and the accepted KVKK notice. No

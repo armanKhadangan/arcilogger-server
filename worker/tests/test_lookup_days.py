@@ -3,8 +3,11 @@
 The days follow the time ranges of the engine's steps: the sessions (± tolerance, the longest
 session, the log slack), the domain's DNS look-back and the lease look-back of the DHCP rules (the
 D8 probe's window: the longest lease timeout, at least FortiOS's default lease), never fewer than
-the asked day ± 1. A test pins each part to the constant of the step it mirrors, so a wider step
-fails here instead of letting a lookup read a day the API did not check.
+the asked day ± 1. With ``dhcp.fortigate_use_logged_lease`` (the default) a FortiGate lease's
+logged lease time reaches back as far as one reload holds (14 days, G5; W5-G deviations). A test
+pins each part to the constant of the step it mirrors, so a wider step fails here instead of
+letting a lookup read a day the API did not check. The engine's side (a look-back reaching before
+the days) is ``test_lookup_lookback.py``.
 """
 
 from __future__ import annotations
@@ -14,15 +17,26 @@ from datetime import date, timedelta
 import pytest
 
 from arcilogger_core.timeutil import day_window, site_day
+from arcilogger_db.models import LEASE_SECONDS_RANGE
 from arcilogger_worker.correlation.timeline import TimelineRules
-from arcilogger_worker.lookup.attribution import UNCONVERTED_WINDOW
-from arcilogger_worker.lookup.days import DAYS_AROUND, dhcp_lookback, lookup_days, lookup_range
+from arcilogger_worker.lookup.attribution import MISSED_MOVE_WINDOW, UNCONVERTED_WINDOW
+from arcilogger_worker.lookup.days import (
+    DAYS_AROUND,
+    LOGGED_LEASE_MAX,
+    RELOAD_DAYS,
+    dhcp_lookback,
+    lookup_days,
+    lookup_range,
+    reads_from,
+)
 from arcilogger_worker.lookup.engine import DEFAULT_DNS_LOOKBACK_SECONDS
 from arcilogger_worker.lookup.sessions import LOG_SLACK
 from arcilogger_worker.lookup.types import LookupRequest, LookupSettings
 from arcilogger_worker.testing import tr
 
 DAY = date(2026, 10, 12)
+#: The configured rules alone (``dhcp.fortigate_use_logged_lease`` off).
+RULES = LookupSettings(use_logged_lease=False)
 
 
 def request(
@@ -36,9 +50,35 @@ def request(
     )
 
 
-def test_the_defaults_read_eight_days_back_and_one_ahead() -> None:
-    settings = LookupSettings()
-    assert lookup_days(request(), settings) == (DAY - timedelta(days=8), DAY + timedelta(days=1))
+def test_the_defaults_read_twelve_days_back_and_one_ahead() -> None:
+    """The logged lease time of a FortiGate lease (D6) is not known before the lease is read:
+    the days reach back as far as one reload holds; the configured rules alone, eight days."""
+    first, last = lookup_days(request(), LookupSettings())
+    assert (first, last) == (DAY - timedelta(days=12), DAY + timedelta(days=1))
+    assert (last - first).days + 1 == RELOAD_DAYS
+    assert lookup_days(request(), RULES) == (DAY - timedelta(days=8), DAY + timedelta(days=1))
+
+
+def test_the_logged_lease_reach_is_the_largest_reload_and_the_fortios_maximum() -> None:
+    assert RELOAD_DAYS == 14  # G5: archive_reload_too_large
+    assert LOGGED_LEASE_MAX == timedelta(seconds=LEASE_SECONDS_RANGE[1]) == MISSED_MOVE_WINDOW
+    # The reach never shortens what the configured rules or the request reach already.
+    longer = LookupSettings(lease_server_seconds={"dhcp42": 1_209_600})
+    off = LookupSettings(lease_server_seconds={"dhcp42": 1_209_600}, use_logged_lease=False)
+    assert lookup_days(request(), longer) == lookup_days(request(), off)
+    assert lookup_days(request(), longer)[0] < DAY - timedelta(days=12)
+
+
+def test_reads_from_is_the_start_of_the_first_day() -> None:
+    first, _ = lookup_days(request(), LookupSettings())
+    assert reads_from(request(), LookupSettings()) == day_window(first)[0]
+    weeks = 21 * 86_400
+    assert (
+        reads_from(
+            request(dest_domain="ornek.example"), LookupSettings(), dns_lookback_seconds=weeks
+        )
+        == day_window(DAY - timedelta(days=21))[0]
+    )
 
 
 def test_the_dhcp_look_back_is_the_d8_window_at_least() -> None:
@@ -85,19 +125,22 @@ def test_a_long_dns_look_back_widens_the_first_day() -> None:
 
 
 @pytest.mark.parametrize(
-    ("hour", "minute", "expected"),
+    ("hour", "minute", "rules", "expected"),
     [
-        (
-            0,
-            0,
-            (DAY - timedelta(days=9), DAY + timedelta(days=1)),
-        ),  # the look-back crosses midnight
-        (23, 59, (DAY - timedelta(days=8), DAY + timedelta(days=2))),  # the sessions after it too
+        (0, 0, (9, 1), (12, 1)),  # the look-back crosses midnight
+        (23, 59, (8, 2), (11, 2)),  # the sessions after it too; one reload still holds them
     ],
 )
-def test_a_moment_near_midnight(hour: int, minute: int, expected: tuple[date, date]) -> None:
+def test_a_moment_near_midnight(
+    hour: int, minute: int, rules: tuple[int, int], expected: tuple[int, int]
+) -> None:
     asked = LookupRequest(at=tr(DAY, hour, minute, 0), public_ip="198.51.100.20")
-    assert lookup_days(asked, LookupSettings()) == expected
+    back, ahead = rules
+    assert lookup_days(asked, RULES) == (DAY - timedelta(days=back), DAY + timedelta(days=ahead))
+    back, ahead = expected
+    first, last = lookup_days(asked, LookupSettings())
+    assert (first, last) == (DAY - timedelta(days=back), DAY + timedelta(days=ahead))
+    assert (last - first).days + 1 == RELOAD_DAYS
 
 
 def test_never_fewer_than_the_day_and_one_either_side() -> None:

@@ -627,7 +627,10 @@ has rows, whether its sealed manifest exists. Explanations: `not_in_database` /
 `only_in_vault` / `no_data_for_day`, `older_than_db_retention` (`db.retention_days`),
 `future_time`, and `lease_timeline_behind` when the requested window is after the lease
 watermark. A day the database window dropped comes back from the vault on request ("arşivden
-yeniden yükle", 409 `archive_reload_required`; docs/DATA-MODEL.md "Retention").
+yeniden yükle", 409 `archive_reload_required`; docs/DATA-MODEL.md "Retention"). A lookup reads no
+log row outside its days (`lookup.days.lookup_days`, the days that 409 checks): a lease check
+cut at them adds `lookback_clamped_to_window` (`day`, `last`; section 2, "Windows of the
+FortiGate DHCP checks").
 
 **FortiGate DHCP lines that did not become lease evidence** (D8). When no lease chain could be
 built (an internal lookup with `no_lease` or `no_lease_for_mac`; a match with `chain_missing`, or
@@ -921,7 +924,15 @@ WHERE duration >= 300` and split the scan into "logged within 5 minutes of the w
     lease's last DHCP record as well, at most 100 days (8,640,000 s) back for a MikroTik lease;
   - the residual of the 7-day fallback: an old MikroTik lease kept open by another device's
     traffic can be named, at its own confidence and without a warning, more than 7 days after an
-    unconverted line that moved its client.
+    unconverted line that moved its client;
+  - none of them, nor the lease's newest record read from its row or the two-origin check (D27,
+    also its read past the moment), reads a log row outside the lookup's days
+    (`lookup.days.reads_from` to `reads_until`; with the defaults `T`'s day − 12 to + 1, as many
+    days as one archive reload holds): a window cut there gives `lookback_clamped_to_window`, so
+    the answer is the same before the database window drops those days and after their reload
+    (Wave 5 contract G7, W5-G-17). With the defaults the converted-row check reads about 12 days
+    back, not 100, and the post-lease check of a FortiGate lease starts no earlier than the
+    first day.
 - **Rows loaded before the upgrade.** FortiGate DHCP lines loaded before the upgrade are not
   converted (D8; the lookup names them, sections 2 and 3), and for each client no chain is built
   until its first Ack under the new version, up to half its lease (3.5 days with the FortiOS
