@@ -546,6 +546,66 @@ def test_day_detail_renewal_token_is_read_only_from_the_renewals_folder(
     assert (renewal["covered_by"], renewal["renewed_at"]) == (record, None)
 
 
+@pytest.mark.parametrize(
+    "record",
+    [
+        "renewals/../renewals/2031-05-04-1.json",  # a valid token, reached through ``..``
+        "C:/outside.json",
+        "//192.0.2.1/share/outside.json",
+        "\\\\192.0.2.1\\share\\outside.json",
+        "renewals\\..\\outside.json",
+    ],
+)
+def test_day_detail_renewal_record_with_a_drive_a_root_or_a_parent_step_is_refused(
+    client: TestClient, login_as: Login, vault: SealedVault, layout: Layout, record: str
+) -> None:
+    """A record path with ``..``, a drive or a root (a UNC path on Windows) is refused as
+    written, before anything on the disk is opened: ``renewed_at`` stays null."""
+    renewal_record(vault, "2031-05-04-1.json", at_site(date(2031, 5, 4), 2, 0))
+    write_renewals(
+        layout,
+        {
+            "path": D11_TOKEN,
+            "kind": "day",
+            "cert_not_after": "2031-08-30T21:30:00Z",
+            "status": "covered",
+            "covered_by": record,
+        },
+    )
+    login_as(client, "auditor")
+    response = client.get(f"{API}/{D11.isoformat()}")
+    assert response.status_code == 200
+    renewal = response.json()["renewal"]
+    assert (renewal["covered_by"], renewal["renewed_at"]) == (record, None)
+
+
+def test_day_detail_renewal_token_linked_out_of_the_renewals_folder_is_not_read(
+    client: TestClient, login_as: Login, vault: SealedVault, layout: Layout, tmp_path: Path
+) -> None:
+    """The token that is read is checked, not only the record: a ``<record>.zd`` in
+    ``vault/renewals`` that links to a token outside it is not followed."""
+    renewal_record(vault, "2031-05-04-1.json", at_site(date(2031, 5, 4), 2, 0))
+    outside = tmp_path / "outside.json.zd"
+    outside.write_bytes((layout.renewals_dir / "2031-05-04-1.json.zd").read_bytes())
+    try:
+        (layout.renewals_dir / "linked.json.zd").symlink_to(outside)
+    except OSError as exc:  # Windows creates one only with the privilege for it
+        pytest.skip(f"no symbolic links here: {exc}")
+    write_renewals(
+        layout,
+        {
+            "path": D11_TOKEN,
+            "kind": "day",
+            "cert_not_after": "2031-08-30T21:30:00Z",
+            "status": "covered",
+            "covered_by": "renewals/linked.json",
+        },
+    )
+    login_as(client, "auditor")
+    renewal = client.get(f"{API}/{D11.isoformat()}").json()["renewal"]
+    assert (renewal["covered_by"], renewal["renewed_at"]) == ("renewals/linked.json", None)
+
+
 def test_day_detail_renewal_null_without_a_report(
     client: TestClient, login_as: Login, vault: SealedVault, layout: Layout
 ) -> None:

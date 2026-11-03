@@ -45,7 +45,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from functools import cached_property
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any, Final
 
 from cryptography import x509
@@ -693,18 +693,27 @@ class VaultView:
 
     def _renewal_time(self, record: str) -> datetime | None:
         """The genTime of a renewal record's token (``<record>.zd`` beside it). Only a token in
-        ``vault/renewals`` is read: the path comes from a state file, not from the vault."""
+        ``vault/renewals`` is read: the path comes from a state file, not from the vault. A path
+        with a drive, a root or ``..`` is refused before anything on the disk is opened (on
+        Windows a UNC path would reach the network); the token itself, a link followed, must
+        then lie in that folder."""
+        if any(
+            path.anchor or ".." in path.parts
+            for path in (PurePosixPath(record), PureWindowsPath(record))
+        ):
+            log.info("renewal record %s is not a path in the vault: its token is not read", record)
+            return None
         try:
-            path = (self.layout.vault / record).resolve()
+            token = (self.layout.vault / (record + ".zd")).resolve()
             folder = self.layout.renewals_dir.resolve()
         except (OSError, RuntimeError, ValueError) as exc:  # a link loop, a NUL character
             log.info("renewal token of %s unreadable: %s", record, exc)
             return None
-        if folder not in path.parents:
-            log.info("renewal record %s is not in %s: its token is not read", record, folder)
+        if folder not in token.parents:
+            log.info("renewal token of %s is not in %s: it is not read", record, folder)
             return None
         try:
-            return inspect_token(path.with_name(path.name + ".zd").read_bytes()).gen_time
+            return inspect_token(token.read_bytes()).gen_time
         except (OSError, TsaError, ValueError, TypeError, KeyError) as exc:
             log.info("renewal token of %s unreadable: %s", record, exc)
             return None
