@@ -192,6 +192,17 @@ CASES: tuple[RevocationCase, ...] = (
         "fail",
     ),
     RevocationCase(
+        # Neither entry is at or before the stamp, so no revocation outranks the hold (C6); of
+        # one date the entry without a reason sorts first, and it is a revocation.
+        "on hold and revoked without a reason on the same date, after the stamp",
+        (
+            CrlSpec(2 * DAY, (Entry(DAY, x509.ReasonFlags.certificate_hold),)),
+            CrlSpec(3 * DAY, (Entry(DAY),)),
+        ),
+        "crl-revoked-later",
+        "warn",
+    ),
+    RevocationCase(
         "revoked on the same date on two lists, once without a reason, once for key compromise",
         (
             CrlSpec(-HOUR, (Entry(-DAY),)),
