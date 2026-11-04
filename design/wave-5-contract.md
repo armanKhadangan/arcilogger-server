@@ -1326,6 +1326,40 @@ All Wave 5 questions are answered (2026-11-02).
   arrival order: the compression fails with `55P03`, "chunk deleted by other transaction"),
   `test_the_drop_locks_the_chunks_in_the_order_a_reader_does` (12 chunks; fails in name order).
 
+- **W5-G-22: a reload's file checks run beside the ingest loop (#124, G4 live data first).** The
+  claim's SHA-256 of every file it would reset, and a file's size check and `received_outside`
+  read before its reset, run in a daemon thread per check (`IngestService._beside`) that only
+  reads files; every decision and every transaction stays on the loop, which goes on loading live
+  batches and acts on the result in a later round, in W5-G's order: the claim transaction only
+  after every file passed (W5-G-4), a file's reset transaction only after its scan, then a fresh
+  stream at offset 0. A failed check fails the request with `archive_file_unreadable` before
+  anything of the file is deleted, and the size check is made again on the loop right before the
+  file's transaction, so a file gone during the rounds since its scan is not reset (W5-G-5). A
+  stop ends a check within one 1 MiB step (`CheckStoppedError`); nothing is decided and the next
+  start claims the request again. A scan of a request that ends meanwhile gives up the same way.
+  A reload's partitions are made one day a round (`_ensure_days`), also while the scan runs.
+  Measured once each (4 vCPU, plain PostgreSQL 16, live feed 160 lines/s, a one-day reload of a
+  5 M line `.xz` day with its claim hashing the file 18 times, as a 14-day request of one source;
+  latency of a live line from its append to its commit; no reload: median 0.36 s, max 0.75–1.30
+  s): with the day's rows already dropped, the worst delay went from 31.2 s to 0.82 s while the
+  claim hashed and 2.54 s while the file was scanned (the reload's own batches, 3.95 s at most
+  while it loads, are as before); with the day's rows still in the database (the window's first
+  days), from 79.5 s (scan and reset transaction in one round) to 41.7 s. Bound: while a check
+  runs, a live line waits for the normal batch cycle plus about one check step (≤ 50 ms) and the
+  loop's share of the interpreter lock; the test bound is 5 s (`LIVE_BOUND`). Not covered by the
+  bound, still on the loop: the reset transaction (38.7 s for a 5 M line file whose rows are
+  present; up to three such files per source when a request reaches the window's first day),
+  one day's partitions per round (up to 0.4 s) and the waits of up to `PARTITION_LOCK_TIMEOUT`
+  (5 s) for the partition lock in `_ensure_days` and the claim. Moving the reset transaction off
+  the loop (a second database connection for ingest) is an open owner question of #124. Tests
+  (`ingest/tests/test_archive_reload.py`):
+  `test_live_data_is_loaded_while_a_reload_checks_its_files`,
+  `test_a_stop_during_a_reloads_check_is_prompt`,
+  `test_a_check_that_fails_beside_the_loop_fails_the_request_and_deletes_nothing` (each for the
+  claim and the reset), `test_the_scan_of_a_reload_that_ended_gives_up`,
+  `test_a_sealed_file_gone_after_its_scan_is_not_reset`,
+  `test_a_reloads_partitions_are_made_a_day_a_round`.
+
 ## Deviations — W5-H (2026-11-03)
 
 - **W5-H-1: the first line view of an xz file decompresses more than one stream.** §5.4 says

@@ -597,7 +597,14 @@ PostgreSQL 16.
       PostgreSQL also in the default partitions; its parse failures, `search_counts` and clock
       samples (the file's part of the samples of those other minutes); and resets its
       `ingest_offsets` row, in one transaction; then it loads the sealed file with the normal
-      reader, after every newer day (live data first). A reload run twice gives the same rows and
+      reader, after every newer day (live data first). The checks that read whole files (the
+      SHA-256 at the claim, a file's receive times before its reset: about 0.5 s and 25 s for a
+      5 M line day) run in a thread beside ingest's loop, which goes on loading live data and
+      acts on each result in a later round, in the same order (the size is checked again on the
+      loop right before the file's transaction); the reload's partitions are made a day a round
+      (#124, W5-G-22). The reset's transaction still runs on the loop: for a file whose rows are
+      still there (the window's first days) it holds live data up for about 8 s per 1 M lines.
+      A reload run twice gives the same rows and
       counts, on both back ends. `bytes_done` is Σ committed offset of `bytes_total` (Σ `bytes_uncompressed` of
       those files). `ready` sets `ready_at` and `expires_at` = `ready_at` +
       `db.reload_keep_days` (default 7, 1–30); `failed` carries `error_code`
