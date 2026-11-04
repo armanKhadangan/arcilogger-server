@@ -929,15 +929,18 @@ class Lease(Base):
         JSONB, nullable=False, server_default=text("'[]'::jsonb")
     )
     #: The kept FortiGate ACKs of the lease's MAC for another address that the build saw and did
-    #: not apply (the missed moves of ADR-0016 D33, round 7 of the lookup; issue #127): a list of
-    #: ``{"ip", "interface", "vd", "source", "logid", "dhcp_msg", "times": [epoch µs, …]}``
-    #: (``arcilogger_worker.lookup.refs.moves_json``). Positive evidence only: the check applies
-    #: today's rules to them again and a hit only lowers a chain, so a list that lacks a move
-    #: misses it, nothing more. NULL: not recorded (a lease written before revision
-    #: ``0022_lease_moves``, an ARP interval); ``[]``: recorded, none. Deferred, and loading it by
-    #: accident raises: only the lease job and the missed-move check read it, by
+    #: not apply (the missed moves of ADR-0016 D33, round 7 of the lookup; issue #127):
+    #: ``{"truncated": bool, "groups": [{"ip", "interface", "vd", "source", "logid", "dhcp_msg",
+    #: "times": [epoch µs, …]}, …]}`` (``arcilogger_worker.lookup.refs.moves_json``). Bounded
+    #: (rows are never dropped): only the times in the 100 days before the lease's end (its
+    #: newest move while it is open), at most 1,000, the newest; ``truncated`` says the job
+    #: dropped one. Positive evidence only: the check applies today's rules to them again and a
+    #: hit only lowers a chain, so a value that lacks a move, truncated or not, misses it,
+    #: nothing more. NULL: not recorded (a lease written before revision ``0022_lease_moves``,
+    #: an ARP interval); ``"groups": []``: recorded, none. Deferred, and loading it by accident
+    #: raises: only the lease job and the missed-move check read it, by
     #: ``select(Lease.id, Lease.moves)``.
-    moves: Mapped[list[Any] | None] = mapped_column(
+    moves: Mapped[dict[str, Any] | None] = mapped_column(
         JSONB(none_as_null=True), deferred=True, deferred_raiseload=True
     )
     created_at: Mapped[datetime] = _created()

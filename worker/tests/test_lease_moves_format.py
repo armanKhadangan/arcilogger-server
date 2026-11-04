@@ -1,7 +1,8 @@
 """The two things the lease job stores beside a lease's refs for the missed-move check (issue
 #127): the format of ``leases.moves`` (groups, epoch-microsecond times, one order whatever the
-input order, a damaged stored value read without raising) and the ``"vd"`` key of a stored
-FortiGate ref (written only when known, read back per ref, ignored by ``EvidenceRef``)."""
+input order, the bound and its ``truncated`` mark, a damaged stored value read without raising)
+and the ``"vd"`` key of a stored FortiGate ref (written only when known, read back per ref,
+ignored by ``EvidenceRef``)."""
 
 from __future__ import annotations
 
@@ -15,8 +16,11 @@ from typing import Any
 import pytest
 
 from arcilogger_worker.lookup.refs import (
+    MOVE_TIMES_CAP,
     REF_VD,
     MoveGroup,
+    Moves,
+    bound_moves,
     cut_moves,
     dhcp_ref,
     epoch_us,
@@ -127,7 +131,8 @@ def test_one_order_whatever_the_input_order() -> None:
 
 def test_the_stored_value() -> None:
     stored = moves_json([_group(20, 10), _group(5, vd=None, dhcp_msg=None)])
-    assert stored == [
+    assert stored["truncated"] is False
+    assert stored["groups"] == [
         {
             "ip": "172.20.44.58",
             "interface": "vlan44",
@@ -147,10 +152,14 @@ def test_the_stored_value() -> None:
             "times": [US + 5 * SECOND],
         },
     ]
-    assert moves_json([]) == moves_json([_group()]) == []  # recorded, none
-    assert parse_moves(json.loads(json.dumps(stored))) == merge_moves(
-        [_group(10, 20), _group(5, vd=None, dhcp_msg=None)]
+    none = {"truncated": False, "groups": []}
+    assert moves_json([]) == moves_json([_group()]) == none  # recorded, none
+    assert parse_moves(json.loads(json.dumps(stored))) == Moves(
+        merge_moves([_group(10, 20), _group(5, vd=None, dhcp_msg=None)])
     )
+    truncated = json.loads(json.dumps(moves_json([_group(10)], truncated=True)))
+    assert truncated == {"truncated": True, "groups": moves_json([_group(10)])["groups"]}
+    assert parse_moves(truncated) == Moves((_group(10),), truncated=True)
 
 
 def test_cutting_keeps_the_times_of_an_open_range() -> None:
@@ -174,16 +183,76 @@ def test_seen_in_reads_a_half_open_range() -> None:
     assert not _group().seen_in(0, US)
 
 
+# -- the bound ------------------------------------------------------------------------------------
+
+
+def test_the_bound_keeps_the_times_after_the_window_start() -> None:
+    groups = merge_moves([_group(0, 10, 20), _group(15, vd="misafir")])
+    assert bound_moves(groups, US - 1) == (groups, False)  # nothing dropped
+    assert bound_moves(groups, US + 10 * SECOND) == ((_group(15, vd="misafir"), _group(20)), True)
+    assert bound_moves(groups, US + 20 * SECOND) == ((), True)
+    assert bound_moves((), US) == ((), False)
+
+
+def test_the_bound_keeps_the_newest_times_up_to_the_cap() -> None:
+    """At most :data:`MOVE_TIMES_CAP` times a lease, over all its groups, the newest kept; of
+    equal times at the cut, those of the earlier group."""
+    every = _group(*(2 * k for k in range(MOVE_TIMES_CAP - 1)))  # 0 s, 2 s, …
+    after = US - 10 * SECOND
+    at_cap = merge_moves([every, _group(-1, vd="misafir")])
+    assert [group.vd for group in at_cap] == ["misafir", "root"]
+    assert bound_moves(at_cap, after) == (at_cap, False)
+    assert bound_moves(merge_moves([every, _group(-1, -2, vd="misafir")]), after) == (at_cap, True)
+    # One more time equal to the oldest kept, in a later group: that group's is dropped.
+    tie = merge_moves([*at_cap, _group(-1, vd=None)])
+    assert [group.vd for group in tie] == ["misafir", "root", None]
+    assert bound_moves(tie, after) == (at_cap, True)
+
+
+def test_bounding_again_with_the_same_times_gives_the_same_value() -> None:
+    """A run bounds the stored value with its range's times added (the window from the newest
+    time, as for an open lease); a rebuild of every day bounds all the times once. Both cuts
+    keep the newest, so they store the same, and the job's ``truncated`` (dropped now or
+    before) is the same too."""
+
+    def bounded(groups: tuple[MoveGroup, ...]) -> tuple[tuple[MoveGroup, ...], bool]:
+        newest = max(group.times[-1] for group in groups)
+        return bound_moves(groups, newest - 2900 * SECOND)
+
+    every = merge_moves(
+        [_group(*range(0, 3 * MOVE_TIMES_CAP, 3)), _group(*range(1, 900, 7), vd="misafir")]
+    )
+    whole, dropped = bounded(every)
+    assert dropped
+    assert sum(len(group.times) for group in whole) == MOVE_TIMES_CAP
+    assert min(time for group in whole for time in group.times) > US + 99 * SECOND
+    for cut in (US + 50 * SECOND, US + 1500 * SECOND, US + 2999 * SECOND):
+        stored, before = bounded(cut_moves(every, None, cut))
+        kept = cut_moves(stored, None, cut)
+        again, now = bounded(merge_moves(kept, cut_moves(every, cut - 1, None)))
+        assert (again, before or now) == (whole, dropped), cut
+
+
 # -- a damaged stored value -----------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("value", [None, {}, {"list": []}, "[]", b"[]", 0, True])
-def test_null_or_no_list_is_not_recorded(value: Any) -> None:
+@pytest.mark.parametrize(
+    "value", [None, {}, {"list": []}, {"groups": {}}, {"groups": "[]"}, "[]", b"[]", [], 0, True]
+)
+def test_null_or_no_object_with_groups_is_not_recorded(value: Any) -> None:
     assert parse_moves(value) is None
 
 
+@pytest.mark.parametrize("truncated", [None, "false", 0, "x"])
+def test_a_damaged_mark_reads_as_truncated(truncated: Any) -> None:
+    """A value that may lack moves is never read as complete."""
+    value = {**moves_json([_group(10)]), "truncated": truncated}
+    assert parse_moves(value) == Moves((_group(10),), truncated=True)
+    assert parse_moves({"groups": []}) == Moves(truncated=True)
+
+
 def test_a_damaged_value_only_lacks_moves() -> None:
-    good = moves_json([_group(10)])[0]
+    good = moves_json([_group(10)])["groups"][0]
     stored: list[Any] = [
         None,
         "172.20.44.58",
@@ -199,11 +268,13 @@ def test_a_damaged_value_only_lacks_moves() -> None:
         {key: value for key, value in good.items() if key != "dhcp_msg"} | {"note": 1},
         good,
     ]
-    assert parse_moves(stored) == (
-        _group(10, 30, 40),
-        _group(10, dhcp_msg=None),  # a missing optional field reads as null
+    assert parse_moves({"truncated": False, "groups": stored}) == Moves(
+        (
+            _group(10, 30, 40),
+            _group(10, dhcp_msg=None),  # a missing optional field reads as null
+        )
     )
-    assert parse_moves([]) == ()
+    assert parse_moves({"truncated": False, "groups": []}) == Moves()
 
 
 # -- the VDOM of a stored FortiGate ref -----------------------------------------------------------

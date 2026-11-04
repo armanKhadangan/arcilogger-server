@@ -41,7 +41,11 @@ from arcilogger_db.partitions import (
 from arcilogger_db.testing import TestServer
 
 BEFORE = "0020_fg_traffic_transip_time"
+#: The revision whose downgrade merges the partitions: the version a run that fails in or after
+#: its steps leaves (they commit one by one, a later revision's downgrade with the first).
 REVISION = "0021_db_window"
+#: The head, where every downgrade here starts.
+HEAD = "0022_lease_moves"
 CONFIG = """
 data_dir = "{data}"
 
@@ -118,7 +122,7 @@ def _upgraded(site: Site, capsys: pytest.CaptureFixture[str]) -> list[tuple[Any,
     ``mt_dhcp`` rows in the first and the last daily partition, across that month's end and in
     the default partition, and an administrator's audited change; the rows."""
     assert main(["upgrade", "--config", str(site.config)]) == 0
-    assert head_revisions() == (REVISION,)
+    assert head_revisions() == (HEAD,)
     following = add_months(month_of(site_day(utc_now())), 1)
     with site.engine.begin() as connection:
         ensure_days(connection, following, following)
@@ -208,7 +212,7 @@ def test_the_downgrade_merges_the_daily_partitions_and_audits_the_window_once(
     document = _json_out(capsys)
     (entry,) = _entries(site.engine)[len(before) :]
     assert document == {
-        "from": REVISION,
+        "from": HEAD,
         "to": BEFORE,
         "downgraded": True,
         "audit_id": entry.id,
@@ -235,7 +239,7 @@ def test_the_downgrade_merges_the_daily_partitions_and_audits_the_window_once(
     assert entry.details["old"] == 30
     assert entry.details["new"] == 400
     assert entry.details["was_set_by"] == ":seed"
-    assert entry.details["downgrade"] == {"from": REVISION, "to": BEFORE}
+    assert entry.details["downgrade"] == {"from": HEAD, "to": BEFORE}
     assert entry.details["via"] == "arcilogger-db"
     assert _chain_ok(site.engine) == len(before) + 1
 
@@ -266,7 +270,7 @@ def test_the_text_output_names_the_versions_and_the_entry(
     assert site.run("--to", BEFORE) == 0
     out = capsys.readouterr().out
     entry = _entries(site.engine)[-1]
-    assert f"Şema geri alındı [schema downgraded]: {REVISION} → {BEFORE}" in out
+    assert f"Şema geri alındı [schema downgraded]: {HEAD} → {BEFORE}" in out
     assert f"db.retention_days: 30 → 400 (denetim kaydı [audit entry] #{entry.id}" in out
 
 
@@ -283,7 +287,7 @@ def test_an_administrators_window_is_kept_and_not_audited(
     before = len(_entries(site.engine))
     assert site.run("--to", BEFORE, "--json") == 0
     assert _json_out(capsys) == {
-        "from": REVISION,
+        "from": HEAD,
         "to": BEFORE,
         "downgraded": True,
         "audit_id": None,
@@ -346,7 +350,7 @@ def test_an_upgrade_change_not_audited_yet_is_written_before_the_downgrades(
     assert upgrade_entry.details["was_set_by"] == ":seed"
     assert upgrade_entry.details["migration"] == REVISION
     assert upgrade_entry.details["changed_at"]
-    assert upgrade_entry.details["audited_at_downgrade"] == {"from": REVISION, "to": BEFORE}
+    assert upgrade_entry.details["audited_at_downgrade"] == {"from": HEAD, "to": BEFORE}
     assert (entry.details["old"], entry.details["new"]) == (30, 400)
     assert _window(site.engine) == (400, ":seed")
     assert _change_row(site.engine) is None

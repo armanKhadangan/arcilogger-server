@@ -702,7 +702,8 @@ def record_moves(session: Session, lease: Lease) -> None:
     the job's own constructor). For an open MikroTik lease a test opens by hand, which the job
     never saw open (so no end and no interface bound); the tests that call it only move a MAC
     to an address in no configured network (``172.20.44.x``), so the job would have recorded
-    each of those ACKs, not applied it (D33 closes nothing without a network)."""
+    each of those ACKs, not applied it (D33 closes nothing without a network), and so few that
+    its bound drops none."""
     assert lease.end is None
     assert lease.source_table == "mt_dhcp"
     assigned = sorted(

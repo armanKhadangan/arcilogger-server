@@ -8,10 +8,12 @@ Issue #127 (Wave 5 contract, deviations #127-1 and #127-2):
 
 * ``leases.moves`` (``JSONB``, nullable, no default, no index): the kept FortiGate ACKs of the
   lease's MAC for another address that the lease job saw and did not apply, so the missed-move
-  check (round 7, ADR-0016 D33) reaches before the database window again. A list of groups
-  ``{"ip", "interface", "vd", "source", "logid", "dhcp_msg", "times"}``, the times as integer
-  epoch microseconds (UTC), sorted, once each (``arcilogger_worker.lookup.refs``). NULL: not
-  recorded (every lease before this revision, an ARP interval); ``[]``: recorded, none. On
+  check (round 7, ADR-0016 D33) reaches before the database window again.
+  ``{"truncated": bool, "groups": [...]}``, a group ``{"ip", "interface", "vd", "source",
+  "logid", "dhcp_msg", "times"}``, the times as integer epoch microseconds (UTC), sorted, once
+  each (``arcilogger_worker.lookup.refs``); the job keeps at most 1,000 times in the 100 days
+  before the lease's end and sets ``truncated`` when it drops one. NULL: not recorded (every
+  lease before this revision, an ARP interval); ``"groups": []``: recorded, none. On
   PostgreSQL 16 a nullable column without a default changes only the catalog: instant at any
   table size, and ``leases`` is a plain table on both storages (not a time-series table), so
   TimescaleDB changes nothing.

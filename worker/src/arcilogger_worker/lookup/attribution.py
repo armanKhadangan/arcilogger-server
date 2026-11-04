@@ -68,7 +68,8 @@ MAC (to any MAC for a MikroTik lease, D5) that the build refused and today's set
 address counts unless both addresses lie in configured networks and those differ (D33's key).
 Before the lookup's days, where no row is read, the MAC moves the lease job recorded with the
 lease (``leases.moves``, issue #127) stand in for the rows, tested again with today's settings
-and networks; they only ever add a move, so the look-back still says it was cut. Nothing of
+and networks; they only ever add a move (the job keeps them bounded and drops the oldest), so
+the look-back still says it was cut. Nothing of
 those rows or moves is cited or copied into the outcome: they may be another client's (KVKK).
 """
 
@@ -165,7 +166,8 @@ UNCONVERTED_WINDOW: Final = timedelta(seconds=604_800)
 #: The cap of the converted-row check of a MikroTik lease (2.7, round 7): the 100 days of 2.7,
 #: not the fallback above; it reads ``fg_dhcp`` on ``ix_fg_dhcp_mac_time`` inside the lookup's
 #: days and the moves recorded with the lease before them (issue #127), so a lease without
-#: recorded moves reads only its part inside the days.
+#: recorded moves reads only its part inside the days. The lease job keeps a lease's moves for
+#: as long before its newest moment (``correlation.leases``).
 MISSED_MOVE_WINDOW: Final = timedelta(seconds=8_640_000)
 #: The chains the post-lease check looks at (a ``low`` chain is warned already).
 _CHECKED: Final = ("high", "medium")
@@ -1241,9 +1243,10 @@ class Attributor:
         with today's settings (:func:`stored_refusal`, the mapping to ``assigned``), the same
         interface and VDOM rule and D33's key, a recorded move lowers the chain as a row does.
         They are positive evidence only: a lease without them (written before the upgrade, a
-        move the build never saw) reads only its rows, and the cut look-back is still noted
-        (``lookback_clamped_to_window``). The c2 branch has no recorded counterpart (the build
-        never keeps the rows it refused) and reads the lookup's days only.
+        move the build never saw, a time the job dropped to keep the value bounded) reads only
+        its rows, and the cut look-back is still noted (``lookback_clamped_to_window``). The c2
+        branch has no recorded counterpart (the build never keeps the rows it refused) and reads
+        the lookup's days only.
         """
         assigned = sorted(
             logid
@@ -1352,7 +1355,9 @@ class Attributor:
     ) -> dict[int, tuple[MoveGroup, ...]]:
         """The moves recorded with each lease whose window starts before :attr:`reads_from`, by
         lease id, in one query (``leases.moves`` only: the column is never loaded with a
-        lease); a lease without any (NULL: not recorded; none recorded) is left out."""
+        lease); a lease without any (NULL: not recorded; none recorded) is left out. A value the
+        job truncated (``truncated``: older times dropped to keep it bounded) is read as any
+        other: it lacks moves and never holds a wrong one, and a miss was never evidence."""
         if self.reads_from is None:
             return {}
         reads_from = self.reads_from
@@ -1363,8 +1368,8 @@ class Attributor:
         recorded = {}
         for lease_id, value in self.session.execute(query):
             moved = parse_moves(value)
-            if moved:
-                recorded[lease_id] = moved
+            if moved is not None and moved.groups:
+                recorded[lease_id] = moved.groups
         return recorded
 
     def _recorded_move(

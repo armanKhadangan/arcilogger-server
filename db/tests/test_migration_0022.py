@@ -67,13 +67,18 @@ def _fg_ref(line: int, **vd: str | None) -> dict[str, Any]:
 
 #: The refs of a FortiGate lease: a VDOM, a site without VDOMs, one written before 0022.
 FG_REFS = json.dumps([_fg_ref(9, vd="root"), _fg_ref(10, vd=None), _fg_ref(11)])
-#: A move group as the lease job writes it (``arcilogger_worker.lookup.refs.moves_json``).
+#: Moves as the lease job writes them (``arcilogger_worker.lookup.refs.moves_json``).
 MOVES = json.dumps(
-    [
-        {"ip": "172.20.44.58", "interface": "vlan42", "vd": "root", "source": "fortigate",
-         "logid": "0100026001", "dhcp_msg": "Ack", "times": [1790000000000000]}
-    ]
+    {
+        "truncated": False,
+        "groups": [
+            {"ip": "172.20.44.58", "interface": "vlan42", "vd": "root", "source": "fortigate",
+             "logid": "0100026001", "dhcp_msg": "Ack", "times": [1790000000000000]}
+        ],
+    }
 )  # fmt: skip
+#: Recorded, none.
+NONE = {"truncated": False, "groups": []}
 
 
 @pytest.fixture
@@ -214,11 +219,11 @@ def test_up_and_down_on_timescaledb(empty_engine: Engine) -> None:
 def test_a_lease_without_moves_is_stored_as_null_and_moves_load_only_when_named(
     db_engine: Engine,
 ) -> None:
-    """``None`` is SQL NULL (not recorded), not the JSON ``null``; ``[]`` is recorded, none. A
+    """``None`` is SQL NULL (not recorded), not the JSON ``null``; no group is recorded, none. A
     ``select(Lease)`` leaves the column out and raises when it is read by accident."""
     at = datetime(2026, 10, 28, 9, 12, 4, tzinfo=UTC)
     with Session(db_engine) as session:
-        for ip, moves in (("172.20.42.57", None), ("172.20.42.58", [])):
+        for ip, moves in (("172.20.42.57", None), ("172.20.42.58", NONE)):
             session.add(
                 Lease(
                     ip=ip,
@@ -239,7 +244,7 @@ def test_a_lease_without_moves_is_stored_as_null_and_moves_load_only_when_named(
         ).all()
         assert [tuple(row) for row in stored] == [
             ("172.20.42.57", True, None),
-            ("172.20.42.58", False, "array"),
+            ("172.20.42.58", False, "object"),
             ("172.20.42.59", True, None),
         ]
     with Session(db_engine) as session:
@@ -249,6 +254,6 @@ def test_a_lease_without_moves_is_stored_as_null_and_moves_load_only_when_named(
         named = session.execute(select(Lease.ip, Lease.moves).order_by(Lease.ip)).all()
         assert [(str(ip), moves) for ip, moves in named] == [
             ("172.20.42.57", None),
-            ("172.20.42.58", []),
+            ("172.20.42.58", NONE),
             ("172.20.42.59", None),
         ]

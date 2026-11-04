@@ -38,15 +38,16 @@ missed-move check, round 7; a logged lease longer than what a reload holds, thro
 newest record, the post-lease checks, D27 and the ARP interval after a RELEASE) reads log rows
 only from the start of that day, :func:`reads_from`, and the answer says so
 (``lookback_clamped_to_window``, W5-G deviations). Before that day the missed-move check reads the
-moves the lease job recorded with the lease instead (``leases.moves``, issue #127); a lease
-without them (written before revision ``0022_lease_moves``) reads only the days. The one read
-that reaches forward past the moment, D27 (``T + W``, W up to a logged lease time), reads only up
-to the end of the last day, :func:`reads_until`: a method rule (docs/CORRELATION.md), not a note
-on the answer. Either way the answer's confidence and notes rest only on rows a reload brings
-back and on the stored leases, so a lookup gives the same answer before a drop and after the
-reload (G7) and never changes silently. The ``leases`` (their recorded moves and the VDOMs of
-their refs included), devices and assignments the chains rest on are not log rows: the window
-job never drops them.
+moves the lease job recorded with the lease instead (``leases.moves``, issue #127; at most 1,000
+times in the 100 days before the lease's end or newest move, so a long lease can lack older
+ones); a lease without them (written before revision ``0022_lease_moves``) reads only the days.
+The one read that reaches forward past the moment, D27 (``T + W``, W up to a logged lease time),
+reads only up to the end of the last day, :func:`reads_until`: a method rule
+(docs/CORRELATION.md), not a note on the answer. Either way the answer's confidence and notes
+rest only on rows a reload brings back and on the stored leases, so a lookup gives the same
+answer before a drop and after the reload (G7) and never changes silently. The ``leases`` (their
+recorded moves and the VDOMs of their refs included), devices and assignments the chains rest on
+are not log rows: the window job never drops them.
 
 The days of every lookup fit one reload (#126): the settings that widen them have upper bounds
 (``arcilogger_db.settings.INTEGER_RANGES``: ``lookup.max_session_seconds`` 2 days,

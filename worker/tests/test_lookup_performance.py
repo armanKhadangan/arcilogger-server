@@ -81,7 +81,7 @@ from arcilogger_worker.lookup import (
 from arcilogger_worker.lookup import engine as lookup_engine
 from arcilogger_worker.lookup.attribution import Attributor
 from arcilogger_worker.lookup.days import reads_from
-from arcilogger_worker.lookup.refs import MoveGroup, epoch_us, moves_json
+from arcilogger_worker.lookup.refs import MOVE_TIMES_CAP, MoveGroup, epoch_us, moves_json
 from arcilogger_worker.lookup.sessions import Window, explain_rows
 from arcilogger_worker.lookup.trust import untrusted_sources
 from arcilogger_worker.testing import tr
@@ -819,11 +819,13 @@ EVENT_SITE = (
 #: The moves site (issue #127): the event site's FortiGate DHCP of the staff Wi-Fi, its 100
 #: ``mt_dhcp`` chains with their leases, and the sessions; no ``fg_event`` lines. Each lease
 #: holds the moves the lease job records for a MAC that also took an address in no configured
-#: network: :data:`RECORDED_TIMES` ACKs an hour apart from the lease's start on (``moves_site``).
+#: network: :data:`RECORDED_TIMES` ACKs an hour apart from the lease's start on (``moves_site``),
+#: marked truncated (a MAC that moved more often).
 MOVES_SITE = (_STAFF_WIFI_DHCP, _MT_DHCP_CHAINS, _MT_DHCP_LEASES, _GUARD_SESSIONS)
-#: The recorded ACKs of each of the moves site's leases: 1,000 hours, about 42 days, all more than
-#: the 100 days of the converted-row check before the moment.
-RECORDED_TIMES = 1000
+#: The recorded ACKs of each of the moves site's leases: the most the lease job keeps
+#: (``refs.MOVE_TIMES_CAP``), 1,000 hours, about 42 days, all more than the 100 days of the
+#: converted-row check before the moment.
+RECORDED_TIMES = MOVE_TIMES_CAP
 
 #: The second line of :data:`LINES_SITE`.
 SECOND_LINE = "100.64.13.9"
@@ -930,7 +932,7 @@ def moves_site(pg_server: TestServer, pg_template: str) -> Iterator[Engine]:
             times=tuple(epoch_us(start + timedelta(hours=k)) for k in range(1, RECORDED_TIMES + 1)),
         )
         with Session(site) as session:
-            session.execute(update(Lease).values(moves=moves_json([moved])))
+            session.execute(update(Lease).values(moves=moves_json([moved], truncated=True)))
             session.commit()
         with site.connect().execution_options(isolation_level="AUTOCOMMIT") as connection:
             connection.execute(text("VACUUM (ANALYZE) leases"))
@@ -2159,9 +2161,8 @@ def test_the_recorded_moves_of_a_hundred_chains_are_fast(
     starts before the lookup's days (all 100: their last DHCP record is 150 days old), returns
     each lease's :data:`RECORDED_TIMES` times, decoded and tested in memory. None lies in a
     window, so every chain stays as it was, and the look-back is still noted (the recorded
-    moves only ever add one). A lease's recorded moves have no bound but its life (contract
-    deviation #127-1): 1,000 a lease is more than a lease of 400 days records at two ACKs a
-    day in an unconfigured network."""
+    moves only ever add one). Every lease is at the bound the lease job keeps (contract
+    deviation #127-1: 1,000 times, ``refs.MOVE_TIMES_CAP``), so no lease decodes more."""
     moves: list[_Timed] = []
     recorded: list[_Timed] = []
     returned: list[dict[int, tuple[MoveGroup, ...]]] = []
@@ -2203,12 +2204,15 @@ def test_the_recorded_moves_of_a_hundred_chains_are_fast(
         rows = connection.exec_driver_sql(sql, parameters).all()
     # The query read every chain's moves: 100 leases, each with all its times.
     assert len(rows) == 100
-    assert {len(group["times"]) for _id, value in rows for group in value} == {RECORDED_TIMES}
+    assert {len(group["times"]) for _id, value in rows for group in value["groups"]} == {
+        RECORDED_TIMES
+    }
+    assert {value["truncated"] for _id, value in rows} == {True}
     first = _first_read(moves_site, MT_AT)
     assert all(
         time < epoch_us(MT_AT - attribution.MISSED_MOVE_WINDOW) < epoch_us(first)
         for _id, value in rows
-        for group in value
+        for group in value["groups"]
         for time in group["times"]
     )
     assert timed.seconds < 0.2, f"the converted-row check took {timed.seconds:.3f} s"

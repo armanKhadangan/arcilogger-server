@@ -17,9 +17,11 @@ Two things the lease job stores beside a lease's refs, read by the missed-move c
 * ``leases.moves``: the kept FortiGate ACKs of the lease's MAC for another address that the build
   saw and did not apply, one :class:`MoveGroup` per ``(ip, interface, vd, source, logid,
   dhcp_msg)`` with its times as integer epoch microseconds (UTC; :func:`epoch_us`), sorted, once
-  each. :func:`moves_json` writes them in one order (:func:`merge_moves` and :func:`cut_moves`
-  keep it), :func:`parse_moves` reads them back and never raises on what it finds stored. No row
-  id: ids change when a day is reloaded from the archive, the raw line and the times do not.
+  each, and whether the job dropped any of them to keep the value bounded (:class:`Moves`,
+  :func:`bound_moves`). :func:`moves_json` writes them in one order (:func:`merge_moves` and
+  :func:`cut_moves` keep it), :func:`parse_moves` reads them back and never raises on what it
+  finds stored. No row id: ids change when a day is reloaded from the archive, the raw line and
+  the times do not.
 * the ``"vd"`` key of a stored ``fg_dhcp`` ref (the VDOM of its row, ``null`` without one;
   :func:`ref_dict`, :func:`ref_vds`). It is not part of :class:`EvidenceRef` (the API and the
   stored outcomes never carry it), and the summary stays as :func:`fg_dhcp_ref` writes it.
@@ -61,6 +63,12 @@ MoveKey = tuple[str, str | None, str | None, str, str | None, str | None]
 
 _EPOCH: Final = datetime(1970, 1, 1, tzinfo=UTC)
 _MICROSECOND: Final = timedelta(microseconds=1)
+#: The most times ``leases.moves`` keeps for one lease (:func:`bound_moves`), the newest. 1,000
+#: hold 100 days of ACKs of one other address renewed every 2.4 hours (T1 of a 4.8-hour lease),
+#: about 20 KB of JSON; 3.8's guard of the missed-move check decodes and tests 100 leases at the
+#: cap, under its 0.2 s (``test_the_recorded_moves_of_a_hundred_chains_are_fast``). A MAC that
+#: moves more often keeps its newest 1,000, marked truncated.
+MOVE_TIMES_CAP: Final = 1000
 #: The keys of a stored move group besides ``times``, in their sort order.
 _MOVE_FIELDS: Final = ("ip", "interface", "vd", "source", "logid", "dhcp_msg")
 #: The ones that can be ``null``, in the order of :class:`MoveGroup`'s fields.
@@ -336,15 +344,54 @@ def cut_moves(
     return merge_moves(kept)
 
 
-def moves_json(groups: Iterable[MoveGroup]) -> list[dict[str, Any]]:
-    """``leases.moves`` of ``groups``: ``[{"ip", "interface", "vd", "source", "logid",
-    "dhcp_msg", "times": [epoch µs, …]}, …]``, merged (:func:`merge_moves`) and sorted by the
-    six fields (``None`` after every text), so every job mode writes the same value; no group
-    gives ``[]`` (recorded, none; NULL, not recorded, is the caller's ``None``)."""
-    return [
-        {**dict(zip(_MOVE_FIELDS, group.key, strict=True)), "times": list(group.times)}
-        for group in merge_moves(groups)
-    ]
+def bound_moves(groups: Sequence[MoveGroup], after: int) -> tuple[tuple[MoveGroup, ...], bool]:
+    """``groups`` (in :func:`moves_json`'s order) within the bound of ``leases.moves``: only the
+    times after ``after`` (epoch microseconds), and of those at most :data:`MOVE_TIMES_CAP`, the
+    newest (of equal times, those of the earlier group); and whether any time was dropped.
+
+    Both cuts keep the newest times, so bounding a value that holds the bounded value of the
+    same times gives that value again: a run that adds its range's moves to the stored ones
+    stores what a rebuild of every day stores.
+    """
+    kept = cut_moves(groups, after, None)
+    count = sum(len(group.times) for group in kept)
+    if count > MOVE_TIMES_CAP:
+        newest = sorted(
+            ((-time, index) for index, group in enumerate(kept) for time in group.times)
+        )[:MOVE_TIMES_CAP]
+        times: dict[int, list[int]] = {}
+        for time, index in newest:
+            times.setdefault(index, []).append(-time)
+        kept = merge_moves(
+            MoveGroup(*group.key, times=tuple(sorted(times.get(index, ()))))
+            for index, group in enumerate(kept)
+        )
+    return kept, count > MOVE_TIMES_CAP or count < sum(len(group.times) for group in groups)
+
+
+@dataclass(frozen=True, slots=True)
+class Moves:
+    """A lease's ``leases.moves``: its groups and whether the lease job dropped any time of them
+    to keep the value bounded (:func:`bound_moves`). A truncated value lacks moves, it never
+    holds a wrong one: the missed-move check reads it as any other (positive evidence only)."""
+
+    groups: tuple[MoveGroup, ...] = ()
+    truncated: bool = False
+
+
+def moves_json(groups: Iterable[MoveGroup], *, truncated: bool = False) -> dict[str, Any]:
+    """``leases.moves`` of ``groups``: ``{"truncated": bool, "groups": [{"ip", "interface", "vd",
+    "source", "logid", "dhcp_msg", "times": [epoch µs, …]}, …]}``, the groups merged
+    (:func:`merge_moves`) and sorted by the six fields (``None`` after every text), so every job
+    mode writes the same value; no group gives ``"groups": []`` (recorded, none; NULL, not
+    recorded, is the caller's ``None``)."""
+    return {
+        "truncated": truncated,
+        "groups": [
+            {**dict(zip(_MOVE_FIELDS, group.key, strict=True)), "times": list(group.times)}
+            for group in merge_moves(groups)
+        ],
+    }
 
 
 def _move_group(item: Any) -> MoveGroup | None:
@@ -381,13 +428,20 @@ def _canonical(groups: Sequence[MoveGroup]) -> bool:
     )
 
 
-def parse_moves(value: Any) -> tuple[MoveGroup, ...] | None:
-    """The groups of a stored ``leases.moves`` in :func:`moves_json`'s order; ``None`` for NULL
-    (not recorded) or a value that is no list. Never raises on what it finds: a group without
-    its fields, a time that is no integer, a time twice or out of order are left out or put
-    right, so a damaged value can only lack moves. A value as the job writes it is only
-    checked, not merged again (the lookup decodes every recorded move it reads)."""
-    if not isinstance(value, Sequence) or isinstance(value, str | bytes):
+def parse_moves(value: Any) -> Moves | None:
+    """A stored ``leases.moves``, its groups in :func:`moves_json`'s order; ``None`` for NULL
+    (not recorded) or a value that is no object with a list of groups. Never raises on what it
+    finds: a group without its fields, a time that is no integer, a time twice or out of order
+    are left out or put right, so a damaged value can only lack moves; a ``"truncated"`` that is
+    not ``false`` reads as truncated. A value as the job writes it is only checked, not merged
+    again (the lookup decodes every recorded move it reads)."""
+    if not isinstance(value, Mapping):
         return None
-    groups = tuple(group for item in value if (group := _move_group(item)) is not None)
-    return groups if _canonical(groups) else merge_moves(groups)
+    items = value.get("groups")
+    if not isinstance(items, Sequence) or isinstance(items, str | bytes):
+        return None
+    groups = tuple(group for item in items if (group := _move_group(item)) is not None)
+    return Moves(
+        groups=groups if _canonical(groups) else merge_moves(groups),
+        truncated=value.get("truncated") is not False,
+    )

@@ -46,7 +46,9 @@ of the DHCP intervals. The job report counts the FortiGate rows read and refused
 did not apply, which the lookup's missed-move check reads where the rows are gone; and every
 ``fg_dhcp`` ref the job writes carries the VDOM of its row (``"vd"``), which the job itself reads
 back for a seed (:func:`_annotated`) and the lookup for a stored record. Neither holds a row id,
-and every mode computes them from the same rows (:class:`_Recorded`).
+and every mode computes them from the same rows (:class:`_Recorded`). The moves are bounded: the
+100 days before the lease's end (its newest move while it is open), at most 1,000 times, the
+newest, and marked when the job dropped one.
 """
 
 from __future__ import annotations
@@ -106,6 +108,7 @@ from arcilogger_worker.correlation.watermark import (
     rebuild_horizon,
     set_watermark,
 )
+from arcilogger_worker.lookup.attribution import MISSED_MOVE_WINDOW
 from arcilogger_worker.lookup.refs import (
     ARP_TABLE,
     DHCP_TABLES,
@@ -113,8 +116,10 @@ from arcilogger_worker.lookup.refs import (
     TABLE_RANK,
     TRAFFIC_TABLE,
     MoveGroup,
+    Moves,
     RefKey,
     arp_ref,
+    bound_moves,
     cut_moves,
     dhcp_action,
     epoch_us,
@@ -506,7 +511,9 @@ def _write(
     for interval, moves in zip(attached, recorded.moves(ctx, attached), strict=True):
         values = _values(interval, recorded.vds)
         if moves is not _Keep.STORED:
-            values["moves"] = None if moves is None else moves_json(moves)
+            values["moves"] = (
+                None if moves is None else moves_json(moves.groups, truncated=moves.truncated)
+            )
         if interval.row_id is None:
             inserts.append(values)
         elif interval.row_id not in stored or _changed(stored[interval.row_id], values, recorded):
@@ -546,15 +553,15 @@ def _match_stored(
 # -- what a lease stores beside its interval (issue #127) -----------------------------------------
 
 
-Moves = tuple[MoveGroup, ...]
-
-
 class _Keep(Enum):
     """The moves of a stored row that the run neither read nor changes (not written)."""
 
     STORED = "stored"
 
 
+#: How far back from a lease's newest moment its moves are kept (:meth:`_Recorded.moves`): the
+#: look-back of the missed-move check, which reads no move further back from a moment.
+_MOVES_KEPT_US: Final = MISSED_MOVE_WINDOW // timedelta(microseconds=1)
 #: What a move records of its ``fg_dhcp`` row (:func:`.refs.fg_dhcp_move`).
 _MOVE_COLUMNS: Final = (
     FgDhcp.time,
@@ -587,6 +594,14 @@ class _Recorded:
     moves after its new end. A single-day rebuild, a range and the live job store the same
     value. A stored NULL (written before revision ``0022_lease_moves``) stays NULL for a lease
     that ended before the range; one the run follows is recorded from then on.
+
+    The value is bounded (lease rows are never dropped; a MAC can move for months): only the
+    times within the check's look-back (:data:`_MOVES_KEPT_US`) before the lease's newest moment,
+    its end, or for an open lease its newest move (the live job does not rewrite an open lease
+    without a new move, so the run's end would make the modes differ), and of those at most
+    :data:`.refs.MOVE_TIMES_CAP`, the newest (:func:`.refs.bound_moves`). A value that lost a
+    time says so (``truncated``) until a run recomputes the whole lease (a closed lease inside
+    its range). Both cuts keep the newest times, so the modes still store the same value.
 
     The VDOMs are those of the rows the run read, else those the stored refs carry: the same
     value while the row exists, and still there when it is gone.
@@ -633,12 +648,12 @@ class _Recorded:
             if window and isinstance(event, DhcpEvent) and event.action == "assigned":
                 self.seen.setdefault(event.mac, []).append(event)
 
-    def stored_json(self, row_id: int | None) -> list[Any] | None:
+    def stored_json(self, row_id: int | None) -> dict[str, Any] | None:
         """The stored moves of a row as :func:`.refs.moves_json` writes them (read or NULL)."""
         if row_id is None:
             return None
         moves = self.stored_moves.get(row_id)
-        return None if moves is None else moves_json(moves)
+        return None if moves is None else moves_json(moves.groups, truncated=moves.truncated)
 
     def moves(self, ctx: Context, intervals: Sequence[LeaseInterval]) -> list[Moves | _Keep | None]:
         """The moves to write for each of ``intervals``, in their order (two intervals can share
@@ -672,10 +687,17 @@ class _Recorded:
             if known and stored is None and interval.end is not None and interval.end <= self.lo:
                 result.append(None)  # not recorded, and not followed by this run
                 continue
-            kept = (*cut_moves(stored or (), None, lo), *cut_moves(stored or (), hi - 1, None))
+            old = stored or Moves()
+            kept = (*cut_moves(old.groups, None, lo), *cut_moves(old.groups, hi - 1, None))
             computed = [groups[key] for key in map(_event_key, events) if key in groups]
+            start = epoch_us(interval.start)
             end = None if interval.end is None else epoch_us(interval.end)
-            result.append(cut_moves(merge_moves(kept, computed), epoch_us(interval.start), end))
+            inside = cut_moves(merge_moves(kept, computed), start, end)
+            newest = end if end is not None else max((g.times[-1] for g in inside), default=start)
+            bounded, dropped = bound_moves(inside, newest - _MOVES_KEPT_US)
+            # A time dropped before stays missing unless the run recomputes the whole lease.
+            whole = end is not None and lo <= start and end <= hi
+            result.append(Moves(bounded, dropped or (old.truncated and not whole)))
         return result
 
     def _candidates(self, ctx: Context, interval: LeaseInterval) -> list[DhcpEvent]:

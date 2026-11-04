@@ -165,8 +165,9 @@ def record_moves(session: Session, lease: Lease) -> None:
     (:func:`.refs.fg_dhcp_move`, the job's own constructor). Only for a lease a test opens by
     hand, which the job never followed; the tests move the MAC to :data:`ELSEWHERE` only, in no
     configured network, so the job would have recorded each of those ACKs, not applied it
-    (D33). :func:`test_a_recorded_move_of_a_fortigate_lease_needs_its_interface_and_vdom`
-    keeps it equal to what a job run writes."""
+    (D33), and so few that its bound drops none.
+    :func:`test_a_recorded_move_of_a_fortigate_lease_needs_its_interface_and_vdom` keeps it
+    equal to what a job run writes."""
     assigned = sorted(
         logid
         for logid, meaning in settings_for(session).fortigate_logids.items()
@@ -298,7 +299,9 @@ def test_a_recorded_move_is_tested_again_with_todays_settings(
     evidence.fortigate_dhcp(moved, ELSEWHERE, PC_MAC, interface="vlan44", source=sender)
     record_moves(db_session, lease)
     db_session.commit()
-    assert db_session.scalar(select(Lease.moves)) != []
+    stored = db_session.scalar(select(Lease.moves))
+    assert stored is not None
+    assert stored["groups"] != []
     if case == "sender-untrusted":
         db_session.add(Source(name=sender, type="fortigate", address="192.0.2.7", unknown=True))
     elif case == "network-entered":
@@ -383,7 +386,8 @@ def test_a_recorded_move_of_a_fortigate_lease_needs_its_interface_and_vdom(
     lease = db_session.scalars(select(Lease).where(Lease.ip == PC)).one()
     assert [item.get(REF_VD) for item in lease.evidence if item["table"] == "fg_dhcp"] == ["root"]
     recorded = db_session.scalar(select(Lease.moves).where(Lease.id == lease.id))
-    assert (recorded != []) is (interface == "vlan42")
+    assert recorded is not None
+    assert (recorded["groups"] != []) is (interface == "vlan42")
     # The tests' copy of the job's filter writes what the job wrote.
     record_moves(db_session, lease)
     assert db_session.scalar(select(Lease.moves).where(Lease.id == lease.id)) == recorded
@@ -428,7 +432,7 @@ def test_the_lookup_reads_the_moves_the_lease_job_recorded(
     row = db_session.execute(select(*MOVE_ROW).where(FgDhcp.id == moved)).one()
     stored = db_session.scalar(select(Lease.moves).where(Lease.ip == PC))
     assert stored == moves_json([fg_dhcp_move(row)])
-    assert stored != []
+    assert stored["groups"] != []
 
     before = internal(db_session)
     chain = before.attribution
