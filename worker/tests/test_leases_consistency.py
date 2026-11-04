@@ -14,14 +14,17 @@ from __future__ import annotations
 from datetime import date, datetime, timedelta
 from typing import Any
 
-from sqlalchemy import select, update
+import pytest
+from sqlalchemy import delete, select, update
 from sqlalchemy.orm import Session
 
 from arcilogger_db.models import Alert, Lease
 from arcilogger_db.settings import set_setting
+from arcilogger_worker.correlation import leases
 from arcilogger_worker.correlation.leases import rebuild_day, rebuild_days, run_incremental
 from arcilogger_worker.correlation.watermark import get_watermark, set_watermark
-from arcilogger_worker.lookup import attribute
+from arcilogger_worker.lookup import attribute, refs
+from arcilogger_worker.lookup.refs import epoch_us
 from arcilogger_worker.testing import Evidence, tr
 
 D0 = date(2026, 10, 11)
@@ -129,9 +132,16 @@ def summary(session: Session) -> list[tuple[Any, ...]]:
     return sorted((r.ip, r.mac, r.start, r.end, r.end_reason) for r in rows)
 
 
+#: The VDOM of a ref without a ``"vd"`` key (a FortiGate ref has one, ``null`` included).
+NO_VD = "-"
+
+
 def snapshot(session: Session) -> dict[int, tuple[Any, ...]]:
-    """Every column a rebuild computes, by lease id (ids must stay stable)."""
+    """Every column a rebuild computes, by lease id (ids must stay stable): with the VDOM each
+    ref carries and the moves recorded with the lease (issue #127, read the only way they can
+    be read)."""
     session.expire_all()
+    moves: dict[int, Any] = dict(session.execute(select(Lease.id, Lease.moves)).all())
     return {
         r.id: (
             r.ip,
@@ -146,7 +156,8 @@ def snapshot(session: Session) -> dict[int, tuple[Any, ...]]:
             r.source_table,
             r.last_evidence,
             r.lease_seconds,
-            tuple((e["table"], e["row_id"]) for e in r.evidence),
+            tuple((e["table"], e["row_id"], e.get("vd", NO_VD)) for e in r.evidence),
+            moves[r.id],
         )
         for r in session.scalars(select(Lease))
     }
@@ -528,3 +539,116 @@ def test_a_mixed_site_agrees_in_every_build(db_session: Session, evidence: Evide
     tables = {(r.ip, r.start): r.source_table for r in db_session.scalars(select(Lease))}
     assert tables[("172.20.41.57", tr(D0, 9, 20))] == "mt_dhcp"
     assert tables[("172.20.41.57", tr(D, 9, 20))] == "fg_dhcp"
+
+
+# -- the moves recorded with a lease and the VDOMs of its refs (issue #127) ------------------------
+
+PC, MAC = "172.20.42.57", "00:00:5e:00:53:57"  # PLANLAMA 172.20.42.0/24
+NOWHERE = "172.20.44.58"  # in no configured network
+
+
+def moves_scenario(ev: Evidence) -> None:
+    """ACKs of a lease's MAC that the build does not apply (an address in no configured
+    network, another VDOM), on both sides of a midnight; ones it leaves out (refused, another
+    configured network, another interface); then an ACK that ends the lease."""
+    mt_ip, mt_mac = "172.20.43.120", "00:00:5e:00:53:20"
+    ev.fortigate_dhcp(tr(D, 20), PC, MAC, hostname="PLN-PC14")
+    ev.fortigate_dhcp(tr(D, 22), NOWHERE, MAC)
+    ev.fortigate_dhcp(tr(D1, 1), NOWHERE, MAC, dhcp_msg="Nak")
+    ev.fortigate_dhcp(tr(D1, 3), NOWHERE, MAC)
+    ev.fortigate_dhcp(tr(D1, 5), "172.20.42.60", MAC, vd="misafir")
+    ev.fortigate_dhcp(tr(D1, 7), "172.20.60.20", MAC)  # Wi-Fi Personel
+    ev.fortigate_dhcp(tr(D1, 12), "172.20.42.61", MAC)
+    ev.fortigate_dhcp(tr(D1, 13), NOWHERE, MAC)
+    ev.fortigate_dhcp(tr(D1, 14), "172.20.44.59", MAC, interface="vlan44")
+    # A MikroTik lease across midnight with a FortiGate ACK of its MAC on each side.
+    ev.dhcp(tr(D, 21), "assigned", mt_ip, mt_mac)
+    ev.fortigate_dhcp(tr(D, 23), "172.20.44.70", mt_mac, interface="vlan44")
+    ev.fortigate_dhcp(tr(D1, 4), "172.20.44.71", mt_mac, interface="vlan44", vd=None)
+    for hour in range(8, 12):
+        ev.arp(tr(D, hour), "172.20.43.15", "00:00:5e:00:53:15")
+    # A week's lease still open at the end, its one move long before the last run's end.
+    ev.fortigate_dhcp(tr(D, 9), "172.20.42.58", "00:00:5e:00:53:58", lease=604800)
+    ev.fortigate_dhcp(tr(D, 10), "172.20.44.60", "00:00:5e:00:53:58")
+
+
+MOVES_EXPECTED = sorted(
+    [
+        (PC, MAC, tr(D, 20), tr(D1, 12), "superseded"),
+        ("172.20.42.60", MAC, tr(D1, 5), tr(D2, 5), "timeout"),
+        ("172.20.42.58", "00:00:5e:00:53:58", tr(D, 9), None, "open"),
+        ("172.20.42.61", MAC, tr(D1, 12), tr(D2, 12), "timeout"),
+        ("172.20.43.120", "00:00:5e:00:53:20", tr(D, 21), tr(D1, 23, 24), "timeout"),
+        ("172.20.43.15", "00:00:5e:00:53:15", tr(D, 8), tr(D, 12), "arp"),
+        (NOWHERE, MAC, tr(D, 22), tr(D2, 13), "timeout"),
+        ("172.20.44.59", MAC, tr(D1, 14), tr(D2, 14), "timeout"),
+        ("172.20.44.60", "00:00:5e:00:53:58", tr(D, 10), tr(D1, 10), "timeout"),
+        ("172.20.44.70", "00:00:5e:00:53:20", tr(D, 23), tr(D1, 23), "timeout"),
+        ("172.20.44.71", "00:00:5e:00:53:20", tr(D1, 4), tr(D2, 4), "timeout"),
+        ("172.20.60.20", MAC, tr(D1, 7), tr(D2, 7), "timeout"),
+    ]
+)
+
+
+def _moves(*groups: tuple[str, str, str | None, datetime], truncated: bool = False) -> Any:
+    """``leases.moves`` of FortiGate ACKs ``(ip, interface, vd, time)``, one time a group."""
+    return {
+        "truncated": truncated,
+        "groups": [
+            {"ip": ip, "interface": interface, "vd": vd, "source": "fortigate",
+             "logid": "0100026001", "dhcp_msg": "Ack", "times": [epoch_us(time)]}
+            for ip, interface, vd, time in groups
+        ],
+    }  # fmt: skip
+
+
+@pytest.mark.parametrize("bounded", [False, True], ids=["recorded", "truncated"])
+def test_the_recorded_moves_agree_in_every_build(
+    db_session: Session, evidence: Evidence, monkeypatch: pytest.MonkeyPatch, bounded: bool
+) -> None:
+    """The moves and the refs' VDOMs are in the snapshot: live, a range rebuild, single days in
+    any order and a rebuild from scratch store the same. ``truncated``: the bound scaled down to
+    the scenario (one time a lease, 12 hours before its end or newest move, instead of 1,000
+    and 100 days) drops moves in every mode; the modes still agree, ``truncated`` included."""
+    if bounded:
+        monkeypatch.setattr(refs, "MOVE_TIMES_CAP", 1)
+        monkeypatch.setattr(leases, "_MOVES_KEPT_US", 12 * 3600 * 1_000_000)
+    moves_scenario(evidence)
+    db_session.commit()
+    _agree(db_session, MOVES_EXPECTED)
+    reference = snapshot(db_session)
+    stored = {(row[0], row[5]): row[13] for row in reference.values()}
+    misafir = ("172.20.42.60", "vlan42", "misafir", tr(D1, 5))
+    if bounded:
+        assert stored[(PC, tr(D, 20))] == _moves(misafir, truncated=True)
+        assert stored[("172.20.43.120", tr(D, 21))] == _moves(truncated=True)
+    else:
+        assert stored[(PC, tr(D, 20))] == {
+            **_moves(misafir),
+            "groups": [
+                _moves(misafir)["groups"][0],
+                {**_moves((NOWHERE, "vlan42", "root", tr(D, 22)))["groups"][0],
+                 "times": [epoch_us(tr(D, 22)), epoch_us(tr(D1, 3))]},
+            ],
+        }  # fmt: skip
+        assert stored[("172.20.43.120", tr(D, 21))] == _moves(
+            ("172.20.44.70", "vlan44", "root", tr(D, 23)),
+            ("172.20.44.71", "vlan44", None, tr(D1, 4)),
+        )
+    # Open: the window ends at its newest move, not at the run's end (it would differ between
+    # the live job, which does not rewrite the lease, and a rebuild).
+    assert stored[("172.20.42.58", tr(D, 9))] == _moves(
+        ("172.20.44.60", "vlan42", "root", tr(D, 10))
+    )
+    assert stored[("172.20.43.15", tr(D, 8))] is None  # an ARP interval: not recorded
+    vds = {vd for row in reference.values() for table, _, vd in row[12] if table == "fg_dhcp"}
+    assert vds == {"root", "misafir", None}
+
+    db_session.execute(delete(Lease))
+    db_session.commit()
+    rebuild_days(db_session, D0, D2)
+
+    def by_pair(rows: dict[int, tuple[Any, ...]]) -> dict[tuple[Any, ...], tuple[Any, ...]]:
+        return {(r[0], r[1], r[5]): r[6:] for r in rows.values()}
+
+    assert by_pair(snapshot(db_session)) == by_pair(reference), "from scratch"

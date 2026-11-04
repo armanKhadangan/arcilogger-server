@@ -1967,3 +1967,181 @@ issue fixed is kept (command, flags, exit codes 0/1/2, JSON fields); what differ
   installer's own SQL and arguments; the restore of a site's real chunk count, the free-space
   margin and a TimescaleDB updated between the dump and the rollback stay "sahada doğrula"
   (INSTALL/KURULUM section 16).
+
+## Deviations — #127 (2026-11-04)
+
+- **#127-1: the lease records its missed moves; the missed-move check reads them before the
+  first day.** W5-G-17 (b) cut the missed-move check (round 7, D33) to the lookup's days. The
+  lease job now stores, with each DHCP lease, the moves the build saw and did not apply, and the
+  check reads them where the rows are gone.
+  - **Definition (at write time; `correlation/leases.py:579-745`, `_Recorded`):** a kept
+    FortiGate ACK (logid mapped to `assigned`) of the lease's MAC for another address, strictly
+    inside the lease (`start < t < end`, or the run's end while it is open); for an `fg_dhcp`
+    lease on its own interface; not in another configured network than the lease's (the
+    networks of the run). The build applies every other ACK of the MAC: it ends the lease at
+    that time, which the strict bounds leave out. Every mode (live incremental, range rebuild,
+    single days in any order) computes the same value from the same rows (except the bound's
+    case below): the run's range `[lo, hi)`, the look-ahead's rows of each followed MAC, and
+    the stored moves outside the range, all cut to the lease (a lease that late evidence ends
+    earlier loses the moves after its new end), then bounded (below).
+  - **Format (`leases.moves`, JSONB, nullable, no default, no index; revision
+    `0022_lease_moves`, `models.py:931-945`):** `{"truncated": bool, "groups": [...]}`, a group
+    `{"ip", "interface", "vd", "source", "logid", "dhcp_msg", "times"}`, one per those six
+    values, `times` as integer epoch microseconds (UTC), sorted, once each; the groups sorted by
+    the six fields, `null` after every text (`lookup/refs.py:382`, `moves_json`). No row id (a
+    reload changes ids) and no `"from"` field. NULL: not recorded (a lease written before the
+    revision, an ARP interval); `"groups": []`: recorded, none. `parse_moves` (`refs.py:431`)
+    never raises on a stored value: a damaged value can only lack moves, and a `"truncated"`
+    that is not `false` reads as truncated. The column is deferred and raises when loaded by
+    accident; only the lease job and the check read it, by `select(Lease.id, Lease.moves)`.
+  - **Bound (manager decision 1 on #127, 2026-11-04): lease rows are never dropped, so the
+    value must not grow with the lease's life.** After the cut to the lease the job keeps only
+    the times after the lease's newest moment minus `MISSED_MOVE_WINDOW` (100 days, the
+    check's look-back from a moment; `leases.py:564`, `_MOVES_KEPT_US`), and of those at most
+    `MOVE_TIMES_CAP` = 1,000 a lease over all its groups, the newest (of equal times, the
+    earlier group's; `refs.py:71`, `bound_moves` at `refs.py:347`). 1,000 holds 100 days of
+    ACKs of one other address renewed every 2.4 hours (T1 of a 4.8-hour lease), about 20 KB
+    of JSON, and is what the perf guard below decodes for each of its 100 leases.
+    - The newest moment is the lease's end; for an **open** lease its newest move, not the
+      run's end (refined from the brief): the live job does not rewrite an open lease without
+      a new move (`_Keep.STORED`), so an anchor at the run's end would store different values
+      in the live job and a rebuild at the same horizon. The newest move changes only when a
+      move is added, which every mode writes. Both cuts keep the newest times, so bounding the
+      stored, bounded value together with the run's new times gives what bounding all the
+      times once gives: live, range and single days still store the same value
+      (`test_bounding_again_with_the_same_times_gives_the_same_value`, and the `truncated`
+      variant of the consistency test below, which scales the bound down to one time and 12
+      hours), except a lease that late evidence ends earlier after the bound dropped times
+      from it: the times dropped against moves after its new end do not come back, so it
+      keeps fewer times than a rebuild from scratch, marked `truncated` (positive evidence
+      only: the check misses them). A rebuild from scratch (leases deleted) stores the full
+      value (`test_a_late_end_keeps_fewer_times_of_a_truncated_lease`).
+    - **`truncated`** becomes `true` when the bound drops a time, and stays `true` while a
+      run takes part of the lease from the stored value (a dropped time cannot come back from
+      it); a run that recomputes the whole lease from rows (a closed lease inside its range
+      `[lo, hi)`) sets it from what it drops itself (`leases.py:699-705`). It records that
+      the list may lack older moves; nothing is ever added that was not seen.
+    - **How the check reads a truncated value:** as any other (`attribution.py:1353-1374`,
+      `_recorded_moves`; `_recorded_move`, `_bears` and `_move_counts` are unchanged). The
+      recorded moves are positive evidence only: each one is tested again and can only lower
+      a chain; an absent move, whether never seen, before the upgrade or dropped by the bound,
+      was never evidence of anything, so a truncated list is never read as "no move": the
+      chain keeps the confidence its rows give, and the cut look-back keeps its
+      `lookback_clamped_to_window` note, which every lookup reaching before its first day
+      carries anyway. The flag is therefore not read by the check; it is stored so that a
+      reader of the column (support, a later owner decision on the note) can tell a complete
+      list from a truncated one.
+  - **Read (`lookup/attribution.py:1353-1407`):** for a chain whose window starts before
+    `reads_from`, one more query reads the moves of those leases; a move counts in
+    `(since, min(reads_from, T − 1 µs)]` and is tested again with today's settings and networks:
+    rules 1, 2, 4 and 5 of `trust.refusal` (`stored_refusal`, `attribution.py:232`; rule 5 lowers
+    the message ASCII-only, as PostgreSQL's `lower()` does under the installer's C locale), the
+    logid still mapped to `assigned`, `_bears` (interface, VDOM, D33's key) and an address other
+    than the chain's. Inside the days nothing changes: the rows decide.
+  - **Positive evidence only; the clamp note is unchanged (W5-G-17 (b)).** A recorded move can
+    only lower a chain. `_targets` keeps `_from(since, mark=True)`
+    (`attribution.py:1165-1171`), so a look-back that reaches before the first day still carries
+    `lookback_clamped_to_window` with its text (`texts.py:247-257`), whether or not moves are
+    recorded or truncated. Dropping the note for a fully recorded lease would need a texts
+    change and is an owner question.
+  - **Gaps that stay (Q1 and Q2: the defaults, accepted by the manager on #127):** (a) Q1: the
+    held branch (c2, `attribution.py:1247`) keeps the days-only reach: it finds rows the build
+    refused, which the job never keeps; (b) Q2: the network filter is applied at write time: a
+    move between two networks configured differently at build time and merged or unconfigured
+    since is recorded nowhere; it is on the field checklist as **V18** ("sahada doğrula",
+    `docs/KURULUM.md` bölüm 16 / `docs/INSTALL.md` section 16: before merging two networks or
+    deleting one, look for MACs that took an address in both, and record the change and its
+    date); (c) rows refused at build time and later trusted, and rows loaded but never
+    rebuilt, are not recorded; (d) a lease written before the upgrade (NULL) reads the days
+    only, as under W5-G-17, until a run follows it; (e) a lease that outlives the bound lacks
+    its older moves (`truncated`).
+  - **No backfill and no recommended rebuild.** The revision cannot run D33 and the trust rules
+    (revisions never import application code), and only the window's rows are in the database.
+    Reloads do not trigger lease rebuilds: `leases.late_evidence` ignores days older than
+    `db.retention_days` (`correlation/late.py:17-20`, `:72-75`), and an archive reload restores
+    the same line counts per raw day (`IngestService._reset_file`), so nothing re-records old
+    moves from reloaded rows. Every existing lease keeps NULL; the job records from its next run
+    on.
+  - **One-off write on the first incremental run after the upgrade:** every open DHCP lease of
+    the older program (moves NULL) is followed by the run and written once with its moves
+    (`{"truncated": false, "groups": []}` for most), with a new `updated_at`
+    (`leases.py:663-706`). Nothing reads NULL and "none recorded" differently in a lookup;
+    later runs read an open lease's moves only when they change (`run_incremental` tests them
+    for NULL only, `leases.py:1382`). A lease that ended before a run's range stays NULL.
+  - **Performance:** the new guard `test_the_recorded_moves_of_a_hundred_chains_are_fast` (100
+    `mt_dhcp` chains, each lease at the cap: `RECORDED_TIMES = MOVE_TIMES_CAP`, 1,000 recorded
+    times, marked truncated, decoded and tested in memory) stays under the 0.2 s of 3.8
+    (0.098 s for the whole check, of which 0.032 s `_recorded_moves`, in the 2026-11-04 run with
+    the bound; 0.10–0.14 s and 0.03–0.06 s in the runs before it; the guard asserts the
+    decoded result, 100 leases with all their times, and `parse_moves` only checks a value
+    already in the job's form, `refs.py:422-428`); the existing
+    `test_the_converted_row_query_of_a_hundred_chains_is_fast` is unchanged (0.067 s). With
+    the bound no lease decodes more than the guard's. `_seed_candidates` reads the moves of every
+    seed on every rebuild (`leases.py:869`), so each same-day rebuild of the service
+    (`worker/service.py:246`) reads all open leases' moves (at most 1,000 times each): their
+    part outside `[lo, hi)` must be recomputed, so the incremental job's shortcut does not
+    apply.
+  - **Rollback (manager decision 4 on #127):** per #122-4, `-Rollback` to a previous version
+    from `0021_db_window` on runs **no** downgrade, so after a rollback to a `0021` program the
+    `leases.moves` column stays: the `0021` program inserts leases with `moves` NULL (it does
+    not know the column) and leaves the moves of the rows it updates. Stale moves are harmless:
+    moves only ever add evidence (a move the `0021` program saw is simply missing), and the
+    `0022` program cuts them to the lease, and bounds them, on its next write of that lease.
+    When a downgrade below `0022_lease_moves` does run (#122's command to an older target), it
+    drops `leases.moves` only (`v0022_lease_moves.py:55-56`): no raw log, log row or other lease
+    column changes. The `"vd"` keys of #127-2 stay in `leases.evidence` either way; the previous
+    program ignores them (`EvidenceRef.from_dict` reads its own keys) and writes elements
+    without them when it rewrites a lease. Nothing 5651-relevant is lost: the moves are derived
+    data.
+  - **Tests:** renamed `test_the_missed_move_check_reads_from_the_first_day_and_says_so` →
+    `test_the_missed_move_check_reads_the_recorded_moves_before_the_first_day` (and its
+    `EMITTED_BY` entry in `test_lookup_fortigate_only.py`); new in `test_lookup_lookback.py`:
+    `test_the_lookup_reads_the_moves_the_lease_job_recorded` (job to lookup, nothing stored by
+    hand), `test_a_recorded_move_is_tested_again_with_todays_settings`,
+    `test_the_recorded_moves_reach_up_to_the_first_day`,
+    `test_a_recorded_move_of_a_fortigate_lease_needs_its_interface_and_vdom` (also keeps the
+    tests' `record_moves` equal to what a job run writes); `worker/tests/test_lease_moves.py`
+    (with the bound: `test_a_flapping_mac_stays_at_the_cap_and_keeps_the_newest`, 1,200 hourly
+    moves over seven weeks: under the cap after a first rebuild, then the newest 1,000 and
+    `truncated` after the catch-up and after a rebuild from scratch;
+    `test_moves_older_than_the_window_before_the_end_are_dropped`: the 100-day cut of a closed
+    lease and the newest-move anchor of an open one),
+    `worker/tests/test_lease_moves_format.py` (the bound, its tie order, bounding again, a
+    damaged `truncated`), `worker/tests/test_lookup_stored_refusal.py`,
+    `db/tests/test_migration_0022.py`; the `recorded` variants of
+    `test_a_mikrotik_lease_kept_open_reads_back_one_probe_window`; the guard above. Live ==
+    range == single days for the moves and the refs' VDOMs is checked in
+    `worker/tests/test_leases_consistency.py` only (manager decision 2(d)): its `snapshot` now
+    holds both, for every scenario there, and `test_the_recorded_moves_agree_in_every_build`
+    (`recorded` and `truncated`, the latter with an open lease whose only move lies long before
+    the last run's end) took over the scenario of `test_lease_moves.py`, whose own copy of the
+    check is removed.
+- **#127-2: a stored FortiGate ref keeps the VDOM of its row.** Every `fg_dhcp` ref the lease job
+  writes into `leases.evidence` carries `"vd"` (the row's `extra.vd`, `null` without one;
+  `refs.py:208`, `ref_dict`). It is not part of `EvidenceRef`, the API or the stored outcomes
+  (`to_dict` is unchanged). A lease's newest record read from its stored ref (W5-G-17 (b)) now
+  has its VDOM, so D33's VDOM rule applies to it as to the row:
+  `test_a_newest_record_before_the_days_is_the_stored_one[ref-with-vdom]` goes from `low` to
+  `high` (an ACK of the MAC in another VDOM is skipped). `_annotated` (`leases.py:888`) takes a
+  seed's VDOM from its stored ref first, so D33 still closes it once the row of its newest ACK is
+  gone. A ref written before the upgrade has no `"vd"` and keeps today's rule (any VDOM counts);
+  it gains the key when a rebuild reads its row again, so an answer for an old moment can change
+  once, when that happens.
+- **Files outside #127's own, edited with the manager's grant (decisions 2 and 3 on #127):**
+  `db/tests/test_migrations.py` (`HEAD`); `db/tests/test_cli_downgrade.py` (#147, merged): its
+  `REVISION = "0021_db_window"` meant two things, so the pins that mean "the head" (the head
+  assertion, the downgrade's `from` in the JSON, the audit entries and the text) use a new
+  `HEAD = "0022_lease_moves"`, and `REVISION` stays for what is 0021's own (the version a run
+  that fails in 0021's steps leaves, the upgrade change's `migration`, a target above the
+  database); `docs/DATA-MODEL.md` (the revision list, the summaries TR/EN and the `leases` row:
+  `moves` with its bound and `truncated`, the `"vd"` key of an evidence element);
+  `docs/CORRELATION.md` (TR and EN: the recorded moves before the first day and their bound);
+  `docs/KURULUM.md` bölüm 16 / `docs/INSTALL.md` section 16 (V18, above);
+  `worker/tests/test_leases_consistency.py` (above); `db/tests/test_migration_0021.py` (its
+  `upgrade(...)` calls pinned to `revision=REVISION`, as `test_migration_0020.py` does, so they
+  stop at `0021_db_window` under head `0022_lease_moves`; granted on #127).
+- **Pins outside #127's files still open, follow-ups for their owners:**
+  `lookup/types.py:330-332` (`EvidenceRef.to_dict` says it is also the element
+  format of `leases.evidence`; an `fg_dhcp` element now also carries `"vd"`);
+  `docs/ASSUMPTIONS.md` (:226 and :479 name the checks V1–V17 of the Wave 3 contract; V18 is
+  §16's own, as the list's introduction says, and not a Wave 3 number).

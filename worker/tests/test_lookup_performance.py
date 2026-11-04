@@ -60,13 +60,13 @@ from ipaddress import IPv4Network
 from typing import Any
 
 import pytest
-from sqlalchemy import Engine, event, text
+from sqlalchemy import Engine, event, text, update
 from sqlalchemy.orm import Session
 
 from arcilogger_core.timeutil import day_window
 from arcilogger_db.egress import legacy_egresses
 from arcilogger_db.engine import engine_from_url
-from arcilogger_db.models import Source
+from arcilogger_db.models import Lease, Source
 from arcilogger_db.partitions import ensure_partitions
 from arcilogger_db.settings import get_settings, set_setting
 from arcilogger_db.testing import TestServer, pause_compression_jobs
@@ -81,6 +81,7 @@ from arcilogger_worker.lookup import (
 from arcilogger_worker.lookup import engine as lookup_engine
 from arcilogger_worker.lookup.attribution import Attributor
 from arcilogger_worker.lookup.days import reads_from
+from arcilogger_worker.lookup.refs import MOVE_TIMES_CAP, MoveGroup, epoch_us, moves_json
 from arcilogger_worker.lookup.sessions import Window, explain_rows
 from arcilogger_worker.lookup.trust import untrusted_sources
 from arcilogger_worker.testing import tr
@@ -673,6 +674,66 @@ TRAFFIC_SITE = (
     "generate_series(41, 43) AS v",
 )
 
+#: FortiGate DHCP of 400 days on the staff Wi-Fi (VLAN 60, another configured network than
+#: the chains' own), the chains' MACs among them.
+_STAFF_WIFI_DHCP = (
+    "INSERT INTO fg_dhcp (time, time_received, source, sender, extra, raw_day, raw_line, "
+    "raw_offset, logid, subtype, dhcp_msg, interface, ip, mac, lease, device_time) "
+    "SELECT t, t, 'fortigate', '172.31.255.1', '{\"vd\": \"root\"}'::jsonb, :day, g, g * 300, "
+    "'0100026001', 'system', 'Ack', 'vlan60', ('172.20.60.' || (10 + g % 200))::inet, "
+    "('00:00:5e:00:53:' || lpad(to_hex(g % 256), 2, '0'))::macaddr, 86400, true "
+    "FROM generate_series(1, 400 * 86400 / :dhcp_step) AS g, "
+    "LATERAL (SELECT CAST(:at AS timestamptz) - g * make_interval(secs => :dhcp_step) AS t) AS x"
+)
+
+#: The 100 mt_dhcp chains (VLANs 41 and 43, MACs :00-:63): assigned 150 days ago.
+_MT_DHCP_CHAINS = (
+    "INSERT INTO mt_dhcp (time, time_received, source, sender, raw_day, raw_line, raw_offset, "
+    "server, vlan, action, ip, mac) "
+    "SELECT CAST(:at AS timestamptz) - interval '150 days', "
+    "CAST(:at AS timestamptz) - interval '150 days', 'core-r1', '172.20.10.1', :day, j, 0, "
+    "'dhcp' || v, v, 'assigned', ('172.20.' || v || '.' || (100 + j % 50))::inet, "
+    "('00:00:5e:00:53:' || lpad(to_hex(j), 2, '0'))::macaddr "
+    "FROM generate_series(0, 99) AS j, LATERAL (SELECT CASE WHEN j < 50 THEN 41 ELSE 43 END "
+    "AS v) AS x"
+)
+
+#: Their leases, open: traffic kept them alive (last evidence an hour ago).
+_MT_DHCP_LEASES = (
+    "INSERT INTO leases (ip, mac, vlan, server, start, end_reason, confidence, source_table, "
+    "last_evidence, evidence) "
+    "SELECT ip, mac, v, 'dhcp' || v, s, 'open', 'high', 'mt_dhcp', "
+    "CAST(:at AS timestamptz) - interval '1 hour', "
+    "jsonb_build_array(jsonb_build_object('table', 'mt_dhcp', 'row_id', j + 1, 'time', s, "
+    "'raw', jsonb_build_object('source', 'core-r1', 'day', :day, 'line', j, 'offset', 0), "
+    "'summary', 'dhcp' || v || ' assigned ' || host(ip) || ' for ' || mac)) "
+    "FROM generate_series(0, 99) AS j, LATERAL (SELECT CASE WHEN j < 50 THEN 41 ELSE 43 END "
+    "AS v, CAST(:at AS timestamptz) - interval '150 days' AS s) AS x, "
+    "LATERAL (SELECT ('172.20.' || v || '.' || (100 + j % 50))::inet AS ip, "
+    "('00:00:5e:00:53:' || lpad(to_hex(j), 2, '0'))::macaddr AS mac) AS k"
+)
+
+#: The sessions: 20 addresses without any DHCP row (172.20.42.200-219), the 20 fg_dhcp
+#: chains, the 100 mt_dhcp chains and the 20 long-lease chains, each group at its moment.
+_GUARD_SESSIONS = (
+    "INSERT INTO fg_traffic (time, time_received, source, sender, raw_day, raw_line, raw_offset, "
+    "logid, subtype, action, sessionid, proto, srcip, srcport, srcintf, dstip, dstport, dstintf, "
+    "transip, transport, trandisp, duration, is_interim) "
+    "SELECT t, t, 'fortigate', '172.31.255.1', :day, n, n::bigint * 900, '0000000013', "
+    "'forward', 'accept', 2000000 + n, 6, ip, 40000 + n, "
+    "'vlan' || split_part(host(ip), '.', 3), ('198.51.100.' || (n % 200 + 1))::inet, 443, "
+    "'wan1', CAST(:wan AS inet), 50000 + n, 'snat', 5, false "
+    "FROM (SELECT n, CAST(:at AS timestamptz) + (n % 20) * interval '1 second' AS t, "
+    "('172.20.42.' || (200 + n))::inet AS ip FROM generate_series(0, 19) AS n "
+    "UNION ALL SELECT 100 + i, CAST(:fg_at AS timestamptz) + i * interval '1 second', "
+    "('172.20.42.' || (100 + i))::inet FROM generate_series(0, 19) AS i "
+    "UNION ALL SELECT 200 + j, CAST(:mt_at AS timestamptz) + (j % 30) * interval '1 second', "
+    "('172.20.' || CASE WHEN j < 50 THEN 41 ELSE 43 END || '.' || (100 + j % 50))::inet "
+    "FROM generate_series(0, 99) AS j "
+    "UNION ALL SELECT 300 + i, CAST(:long_at AS timestamptz) + i * interval '1 second', "
+    "('172.20.42.' || (140 + i))::inet FROM generate_series(0, 19) AS i) AS s"
+)
+
 EVENT_SITE = (
     # The probe's 100-day window (and a day before it): half FortiGate DHCP lines of other
     # clients on the staff Wi-Fi (MACs :a0-:ff, none of a chain's), half other system events.
@@ -693,15 +754,7 @@ EVENT_SITE = (
     "FROM generate_series(1, 299 * 288) AS g, "
     "LATERAL (SELECT CAST(:at AS timestamptz) - interval '101 days' "
     "- g * interval '5 minutes' AS t) AS x",
-    # FortiGate DHCP of 400 days on the staff Wi-Fi (VLAN 60, another configured network than
-    # the chains' own), the chains' MACs among them.
-    "INSERT INTO fg_dhcp (time, time_received, source, sender, extra, raw_day, raw_line, "
-    "raw_offset, logid, subtype, dhcp_msg, interface, ip, mac, lease, device_time) "
-    "SELECT t, t, 'fortigate', '172.31.255.1', '{\"vd\": \"root\"}'::jsonb, :day, g, g * 300, "
-    "'0100026001', 'system', 'Ack', 'vlan60', ('172.20.60.' || (10 + g % 200))::inet, "
-    "('00:00:5e:00:53:' || lpad(to_hex(g % 256), 2, '0'))::macaddr, 86400, true "
-    "FROM generate_series(1, 400 * 86400 / :dhcp_step) AS g, "
-    "LATERAL (SELECT CAST(:at AS timestamptz) - g * make_interval(secs => :dhcp_step) AS t) AS x",
+    _STAFF_WIFI_DHCP,
     # The 20 fg_dhcp chains (VLAN 42, MACs :64-:77): an ACK every half lease of 7 days, the last
     # one half a lease (less a minute) before their moment.
     "INSERT INTO fg_dhcp (time, time_received, source, sender, extra, raw_day, raw_line, "
@@ -723,27 +776,8 @@ EVENT_SITE = (
     "FROM generate_series(0, 19) AS i, generate_series(0, 2) AS k, "
     "LATERAL (SELECT CAST(:long_at AS timestamptz) - make_interval(secs => :long_lease / 2 - 60) "
     "- k * make_interval(secs => :long_lease / 2) AS t) AS x",
-    # The 100 mt_dhcp chains (VLANs 41 and 43, MACs :00-:63): assigned 150 days ago.
-    "INSERT INTO mt_dhcp (time, time_received, source, sender, raw_day, raw_line, raw_offset, "
-    "server, vlan, action, ip, mac) "
-    "SELECT CAST(:at AS timestamptz) - interval '150 days', "
-    "CAST(:at AS timestamptz) - interval '150 days', 'core-r1', '172.20.10.1', :day, j, 0, "
-    "'dhcp' || v, v, 'assigned', ('172.20.' || v || '.' || (100 + j % 50))::inet, "
-    "('00:00:5e:00:53:' || lpad(to_hex(j), 2, '0'))::macaddr "
-    "FROM generate_series(0, 99) AS j, LATERAL (SELECT CASE WHEN j < 50 THEN 41 ELSE 43 END "
-    "AS v) AS x",
-    # Their leases, open: traffic kept them alive (last evidence an hour ago).
-    "INSERT INTO leases (ip, mac, vlan, server, start, end_reason, confidence, source_table, "
-    "last_evidence, evidence) "
-    "SELECT ip, mac, v, 'dhcp' || v, s, 'open', 'high', 'mt_dhcp', "
-    "CAST(:at AS timestamptz) - interval '1 hour', "
-    "jsonb_build_array(jsonb_build_object('table', 'mt_dhcp', 'row_id', j + 1, 'time', s, "
-    "'raw', jsonb_build_object('source', 'core-r1', 'day', :day, 'line', j, 'offset', 0), "
-    "'summary', 'dhcp' || v || ' assigned ' || host(ip) || ' for ' || mac)) "
-    "FROM generate_series(0, 99) AS j, LATERAL (SELECT CASE WHEN j < 50 THEN 41 ELSE 43 END "
-    "AS v, CAST(:at AS timestamptz) - interval '150 days' AS s) AS x, "
-    "LATERAL (SELECT ('172.20.' || v || '.' || (100 + j % 50))::inet AS ip, "
-    "('00:00:5e:00:53:' || lpad(to_hex(j), 2, '0'))::macaddr AS mac) AS k",
+    _MT_DHCP_CHAINS,
+    _MT_DHCP_LEASES,
     # The fg_dhcp chains' leases, open since their first ACK of the 30 days.
     "INSERT INTO leases (ip, mac, vlan, server, start, end_reason, confidence, source_table, "
     "last_evidence, lease_seconds, evidence) "
@@ -778,26 +812,20 @@ EVENT_SITE = (
     "- 2 * make_interval(secs => :long_lease / 2) AS s) AS x, "
     "LATERAL (SELECT ('172.20.42.' || (140 + i))::inet AS ip, "
     "('00:00:5e:00:53:' || to_hex(120 + i))::macaddr AS mac) AS k",
-    # The sessions: 20 addresses without any DHCP row (172.20.42.200-219), the 20 fg_dhcp
-    # chains, the 100 mt_dhcp chains and the 20 long-lease chains, each group at its moment.
-    "INSERT INTO fg_traffic (time, time_received, source, sender, raw_day, raw_line, raw_offset, "
-    "logid, subtype, action, sessionid, proto, srcip, srcport, srcintf, dstip, dstport, dstintf, "
-    "transip, transport, trandisp, duration, is_interim) "
-    "SELECT t, t, 'fortigate', '172.31.255.1', :day, n, n::bigint * 900, '0000000013', "
-    "'forward', 'accept', 2000000 + n, 6, ip, 40000 + n, "
-    "'vlan' || split_part(host(ip), '.', 3), ('198.51.100.' || (n % 200 + 1))::inet, 443, "
-    "'wan1', CAST(:wan AS inet), 50000 + n, 'snat', 5, false "
-    "FROM (SELECT n, CAST(:at AS timestamptz) + (n % 20) * interval '1 second' AS t, "
-    "('172.20.42.' || (200 + n))::inet AS ip FROM generate_series(0, 19) AS n "
-    "UNION ALL SELECT 100 + i, CAST(:fg_at AS timestamptz) + i * interval '1 second', "
-    "('172.20.42.' || (100 + i))::inet FROM generate_series(0, 19) AS i "
-    "UNION ALL SELECT 200 + j, CAST(:mt_at AS timestamptz) + (j % 30) * interval '1 second', "
-    "('172.20.' || CASE WHEN j < 50 THEN 41 ELSE 43 END || '.' || (100 + j % 50))::inet "
-    "FROM generate_series(0, 99) AS j "
-    "UNION ALL SELECT 300 + i, CAST(:long_at AS timestamptz) + i * interval '1 second', "
-    "('172.20.42.' || (140 + i))::inet FROM generate_series(0, 19) AS i) AS s",
+    _GUARD_SESSIONS,
 )
 
+
+#: The moves site (issue #127): the event site's FortiGate DHCP of the staff Wi-Fi, its 100
+#: ``mt_dhcp`` chains with their leases, and the sessions; no ``fg_event`` lines. Each lease
+#: holds the moves the lease job records for a MAC that also took an address in no configured
+#: network: :data:`RECORDED_TIMES` ACKs an hour apart from the lease's start on (``moves_site``),
+#: marked truncated (a MAC that moved more often).
+MOVES_SITE = (_STAFF_WIFI_DHCP, _MT_DHCP_CHAINS, _MT_DHCP_LEASES, _GUARD_SESSIONS)
+#: The recorded ACKs of each of the moves site's leases: the most the lease job keeps
+#: (``refs.MOVE_TIMES_CAP``), 1,000 hours, about 42 days, all more than the 100 days of the
+#: converted-row check before the moment.
+RECORDED_TIMES = MOVE_TIMES_CAP
 
 #: The second line of :data:`LINES_SITE`.
 SECOND_LINE = "100.64.13.9"
@@ -886,6 +914,29 @@ def event_site(pg_server: TestServer, pg_template: str) -> Iterator[Engine]:
 @pytest.fixture(scope="module")
 def lines_site(pg_server: TestServer, pg_template: str) -> Iterator[Engine]:
     yield from _site(pg_server, pg_template, LINES_SITE)
+
+
+@pytest.fixture(scope="module")
+def moves_site(pg_server: TestServer, pg_template: str) -> Iterator[Engine]:
+    """:data:`MOVES_SITE` in its own database, the moves committed: the guard's lookups read
+    with their own sessions (:func:`_guard_lookup`)."""
+    for site in _site(pg_server, pg_template, MOVES_SITE):
+        start = GUARD_AT - timedelta(days=150)  # the leases' start (_MT_DHCP_LEASES)
+        moved = MoveGroup(
+            ip="172.20.44.58",
+            interface="vlan44",
+            vd="root",
+            source="fortigate",
+            logid="0100026001",
+            dhcp_msg="Ack",
+            times=tuple(epoch_us(start + timedelta(hours=k)) for k in range(1, RECORDED_TIMES + 1)),
+        )
+        with Session(site) as session:
+            session.execute(update(Lease).values(moves=moves_json([moved], truncated=True)))
+            session.commit()
+        with site.connect().execution_options(isolation_level="AUTOCOMMIT") as connection:
+            connection.execute(text("VACUUM (ANALYZE) leases"))
+        yield site
 
 
 @dataclass
@@ -2099,6 +2150,72 @@ def test_the_converted_row_query_of_a_hundred_chains_is_fast(
         (str(ip).startswith("172.20.60."), interface, held) for _n, ip, interface, _vd, held in rows
     } == {(True, "vlan60", False)}
     assert timed.seconds < 0.2, f"the converted-row query took {timed.seconds:.3f} s"
+
+
+@pytest.mark.perf
+def test_the_recorded_moves_of_a_hundred_chains_are_fast(
+    moves_site: Engine, timer: _Timer, executed: _Executed
+) -> None:
+    """3.8 and issue #127: the converted-row check of the 100 ``mt_dhcp`` chains with the moves
+    their lease job recorded, under 0.2 s together: one more query, for the leases whose window
+    starts before the lookup's days (all 100: their last DHCP record is 150 days old), returns
+    each lease's :data:`RECORDED_TIMES` times, decoded and tested in memory. None lies in a
+    window, so every chain stays as it was, and the look-back is still noted (the recorded
+    moves only ever add one). Every lease is at the bound the lease job keeps (contract
+    deviation #127-1: 1,000 times, ``refs.MOVE_TIMES_CAP``), so no lease decodes more."""
+    moves: list[_Timed] = []
+    recorded: list[_Timed] = []
+    returned: list[dict[int, tuple[MoveGroup, ...]]] = []
+
+    def measure() -> None:
+        moves.append(timer.time(Attributor, "_missed_moves"))
+        recorded.append(timer.time(Attributor, "_recorded_moves"))
+        read = Attributor._recorded_moves
+
+        def kept(self: Attributor, *args: Any) -> dict[int, tuple[MoveGroup, ...]]:
+            found = read(self, *args)
+            returned.append(found)
+            return found
+
+        timer.monkeypatch.setattr(Attributor, "_recorded_moves", kept)
+        executed.record(moves_site)
+
+    outcome = _guard_lookup(moves_site, LookupRequest(at=MT_AT, public_ip=PUBLIC), measure)
+    timer.report(f"recorded moves, {RECORDED_TIMES} times a lease")
+    assert len(outcome.matches) == 100
+    for match in outcome.matches:
+        chain = match.chain
+        assert chain is not None
+        assert chain.lease is not None
+        assert chain.lease.source_table == "mt_dhcp"
+        assert chain.confidence in ("high", "medium")
+    assert "lookback_clamped_to_window" in _keys(outcome)
+    (timed,) = moves
+    (read,) = recorded
+    assert len(timed.calls) == len(read.calls) == 1
+    # The check decoded every chain's moves (one that decodes nothing would be fast too).
+    (found,) = returned
+    assert len(found) == 100
+    assert {len(group.times) for groups in found.values() for group in groups} == {RECORDED_TIMES}
+    sql, parameters = executed.one("leases.moves")
+    executed.stop()
+    assert "leases.moves IS NOT NULL" in sql
+    with moves_site.connect() as connection:
+        rows = connection.exec_driver_sql(sql, parameters).all()
+    # The query read every chain's moves: 100 leases, each with all its times.
+    assert len(rows) == 100
+    assert {len(group["times"]) for _id, value in rows for group in value["groups"]} == {
+        RECORDED_TIMES
+    }
+    assert {value["truncated"] for _id, value in rows} == {True}
+    first = _first_read(moves_site, MT_AT)
+    assert all(
+        time < epoch_us(MT_AT - attribution.MISSED_MOVE_WINDOW) < epoch_us(first)
+        for _id, value in rows
+        for group in value["groups"]
+        for time in group["times"]
+    )
+    assert timed.seconds < 0.2, f"the converted-row check took {timed.seconds:.3f} s"
 
 
 # -- the event site on compressed chunks (WP-C3; the manager's answer to Q1 of PR #30) ------------

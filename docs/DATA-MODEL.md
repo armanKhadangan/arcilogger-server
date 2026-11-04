@@ -2,7 +2,7 @@
 
 > Durum: MVP (sürüm 0.1.0). Kaynak: `db/src/arcilogger_db/models.py` ve
 > `db/src/arcilogger_db/migrations/versions/` (`v0001_baseline`, `v0006_lookup_reports` …
-> `v0021_db_window`). Bir test, modellerle migrasyonların birebir aynı olduğunu
+> `v0022_lease_moves`). Bir test, modellerle migrasyonların birebir aynı olduğunu
 > her çalıştırmada doğrular.
 
 ## Özet (TR)
@@ -90,6 +90,18 @@
   satırlarını okutur; `(transip, transport, time)` indeksinde `time` üçüncü sütun olduğundan
   böyle bir adım adresin bölümdeki bütün indeks girdilerini yürüyordu. Milyon satır başına
   yaklaşık 31,5 MB yer tutar.
+- Kira hareketleri (revizyon `0022_lease_moves`, issue #127): `leases.moves` (JSONB, NULL
+  olabilir), kira işinin gördüğü ama uygulamadığı FortiGate ACK'lerini (kiranın MAC adresinin
+  başka bir adres alması) kirayla birlikte saklar; 5651 sorgusunun kaçırılmış taşınma denetimi
+  veritabanı penceresinden önceki kısmı bunlardan okur. Değer sınırlıdır (kira satırları hiç
+  silinmez): yalnızca kiranın bitişinden (açık bir kirada en yeni hareketinden) önceki 100
+  günün en çok 1.000 zamanı, en yeniler tutulur; iş bir zamanı attığında `truncated` `true`
+  olur. Hareketler yalnızca olumlu kanıttır: eksik ya da kesilmiş bir liste bir hareketi
+  kaçırır, yanlış bir şey söylemez. NULL kaydedilmemiş demektir (revizyondan önce yazılmış
+  kiralar, ARP aralıkları); geriye dönük doldurma yoktur. Ayrıca kira işinin `leases.evidence`
+  içine yazdığı her `fg_dhcp` öğesi satırının VDOM'unu `"vd"` anahtarında taşır (şema
+  değişikliği yok). Geri alma (downgrade) yalnızca `leases.moves` sütununu kaldırır; ikisi de
+  türetilmiş veridir, 5651 verisi kaybolmaz.
 
 ## Summary (EN)
 
@@ -147,7 +159,17 @@ address (the overlap probe, and the D15 check's tail after its window and its st
 spanning the moment; its window step stays in time order; a port-less session search on one
 address may take it too, the same rows in the same order) read that address's rows of their range
 only, where on `(transip, transport, time)` they walked every index entry of the address in the
-partition; it takes about 31.5 MB per million rows.
+partition; it takes about 31.5 MB per million rows. Lease moves (revision `0022_lease_moves`,
+issue #127) add `leases.moves` (JSONB, nullable): the FortiGate ACKs of the lease's MAC for
+another address that the lease job saw and did not apply, which a lookup's missed-move check
+reads for the part before the database window. The value is bounded (lease rows are never
+dropped): at most 1,000 times in the 100 days before the lease's end (its newest move while it
+is open), the newest kept; `truncated` is `true` once the job dropped one. Moves are positive
+evidence only: a value that lacks a move, truncated or not, misses it and says nothing wrong.
+NULL means not recorded (leases written before the revision, ARP intervals); there is no
+backfill. Every `fg_dhcp` element the lease job writes into `leases.evidence` also carries its
+row's VDOM as `"vd"` (no schema change). The downgrade drops `leases.moves` only; both are
+derived data, no 5651 data is lost.
 
 ## Conventions
 
@@ -265,7 +287,7 @@ but which are not in a table go to `extra`.
 | `persons` | id | Name, department, title, e-mail, employee number (unique), active (persons are deactivated, never deleted), `usage_excluded` (left out of person-level usage views and reports; revision `0010_usage`) |
 | `devices` | `mac` | First/last seen, last IP/VLAN, `hostnames[]`, vendor, `randomized`, type (pc, phone, printer, ip_phone, ap, server, camera, other), `person_id` (the **current** owner, mirrored from `device_assignments`), `infrastructure`, notes, `tags[]`, label `name` |
 | `device_assignments` | id; partial unique `mac` where `valid_to` IS NULL | Assignment history (revision `0008_device_assignments`, ADR-0008): `mac` → `person_id` for `[valid_from, valid_to)` (`valid_to` NULL = current), `assigned_by`, `note` (given when the row is opened; an unassign takes none), `backfilled` (made by the migration from an older link; `valid_from` = the device's first sighting). No two intervals of one MAC overlap — exclusion constraint `ex_device_assignments_no_overlap` (`btree_gist`) or, where the extension cannot be created, a trigger with the same rule. Rows are never deleted; foreign keys RESTRICT. The 5651 person step reads the row valid at T. Not a time-series table (small) |
-| `leases` | id | IP ↔ MAC interval: vlan, server (a MikroTik DHCP server name, or the FortiGate interface of an `fg_dhcp` lease), hostname, `start`, `"end"` (NULL = open), `end_reason` (dhcp, timeout, superseded, arp, open), confidence (high/medium/low), `source_table` (`mt_dhcp`, `mt_arp` or `fg_dhcp`), `last_evidence`, `lease_seconds` (revision `0017_fortigate_dhcp`: the lease time a FortiGate ACK logged, when usable; NULL for every other lease), `evidence` (JSON list of `arcilogger_worker.lookup.EvidenceRef.to_dict()` objects: `{"table", "row_id", "time", "raw": {"source", "day", "line", "offset"} \| null, "summary"}`). Checks: `end ≥ start`; `end_reason = 'open'` exactly when `end` is NULL; `ck_leases_source_table` (the three tables); `ck_leases_lease_seconds` (NULL or 300–8,640,000, the FortiOS `lease-time` range). Indexes (ip, start), (mac, start), `ix_leases_source_table_end` (source_table, "end") (open and recently ended leases per table, revision `0017_fortigate_dhcp`). The downgrade of that revision deletes the `fg_dhcp` leases first (the previous code cannot read them; they are rebuildable) |
+| `leases` | id | IP ↔ MAC interval: vlan, server (a MikroTik DHCP server name, or the FortiGate interface of an `fg_dhcp` lease), hostname, `start`, `"end"` (NULL = open), `end_reason` (dhcp, timeout, superseded, arp, open), confidence (high/medium/low), `source_table` (`mt_dhcp`, `mt_arp` or `fg_dhcp`), `last_evidence`, `lease_seconds` (revision `0017_fortigate_dhcp`: the lease time a FortiGate ACK logged, when usable; NULL for every other lease), `evidence` (JSON list of `arcilogger_worker.lookup.EvidenceRef.to_dict()` objects: `{"table", "row_id", "time", "raw": {"source", "day", "line", "offset"} \| null, "summary"}`; an `fg_dhcp` element written from revision `0022_lease_moves` on also has `"vd"`, the VDOM of its row, `null` without one, which `EvidenceRef` ignores), `moves` (revision `0022_lease_moves`, JSONB, nullable, no default, no index, never loaded with the row: the FortiGate ACKs of the lease's MAC for another address that the lease job saw and did not apply, `{"truncated": bool, "groups": [{"ip", "interface", "vd", "source", "logid", "dhcp_msg", "times": [epoch µs, …]}, …]}`; at most 1,000 times in the 100 days before `"end"` (an open lease: before its newest move), the newest; `truncated` true once the job dropped one; NULL: not recorded, `"groups": []`: recorded, none; positive evidence only for the missed-move check). Checks: `end ≥ start`; `end_reason = 'open'` exactly when `end` is NULL; `ck_leases_source_table` (the three tables); `ck_leases_lease_seconds` (NULL or 300–8,640,000, the FortiOS `lease-time` range). Indexes (ip, start), (mac, start), `ix_leases_source_table_end` (source_table, "end") (open and recently ended leases per table, revision `0017_fortigate_dhcp`). The downgrade of that revision deletes the `fg_dhcp` leases first (the previous code cannot read them; they are rebuildable); that of `0022_lease_moves` drops `moves` only (the `"vd"` keys stay, the previous code ignores them) |
 | `job_runs` | id | Worker job runs: job, started/finished, status (running/ok/failed/skipped), details |
 | `settings` | `key` | Canonical-JSON value (no floats: every change is audited), `updated_at`, `updated_by` (`:seed` while it is the shipped default, else the admin's user name; `:system`, `:migration` for internal keys — `:` never occurs in a user name). Besides the keys of `DEFAULT_SETTINGS` it holds the **status rows** below, which are not settings: never listed by `GET /settings`, never editable (`settings set` refuses them) |
 | `users` | id; unique `username` | Lower-case ASCII user name, display name, role (admin/auditor/hr/viewer), Argon2id hash, `must_change_password`, encrypted TOTP secret, `totp_enabled`, `totp_last_counter` (replay guard), failed attempts, `locked_until`, last login, active |

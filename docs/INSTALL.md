@@ -1382,7 +1382,7 @@ outcome and the date of the check. Repeat the checks **after every FortiOS upgra
 fields may change between releases) and add the new outcome with its date; do not delete the old
 one. When an outcome differs from what is expected, correct the setting by the branches of
 [DEVICE-SETUP.md](DEVICE-SETUP.md) section 2.4. Without FortiGate DHCP, write "not used" in the
-rows V1–V6, V14 and V17.
+rows V1–V6, V14, V17 and V18.
 
 | # | To verify | How | Outcome to record | Outcome | Date |
 |---|---|---|---|---|---|
@@ -1398,6 +1398,7 @@ rows V1–V6, V14 and V17.
 | V15 | Whether each line's public IP address is static | DEVICE-SETUP.md section 2.6: ask the ISP; a line whose address may change is marked `public_dynamic` (on an ISP NAT exit; a direct line's changing address is found from the logs, DEVICE-SETUP.md section 2.6) | per line static / may change; the ISP's answer | | |
 | V16 | That FortiGate DHCP records carry a usable device time and the FortiGate's clock is right to within minutes: the FortiGate syncs with NTP | DEVICE-SETUP.md section 2.1 (the NTP step); on the FortiGate `diagnose sys ntp status` lists the NTP servers' information; the alert `R20-lease:source-clock` must not be open | FortiGate syncs with NTP: yes / no; the NTP server in the output of `diagnose sys ntp status` | | |
 | V17 | Whether FortiOS logs a DHCPDECLINE or checks an address before it offers it; that a client holds one lease per server interface and network | there is no separate trial: static devices are kept out of the DHCP range (DEVICE-SETUP.md section 2.4 step 8); the alert `R20-lease:fortigate-decline:<net>` | whether the alert opened; if so, the network and the correction made (address reserved or device moved) | | |
+| V18 | Whether two configured networks were merged later, or one taken off the network list | The lease job does not record with a lease a FortiGate DHCP Ack of its MAC for an address in **another configured network** than the lease's (D33: a laptop or a NAS with an address in each of two networks is no move; issue #127). Once the networks are merged, or one is taken off, today's networks make that Ack a move, but for a moment before a 5651 lookup's days it is recorded nowhere: the missed-move check does not see it for that moment (inside the lookup's days the rows are checked again with today's networks). Before merging two networks or deleting one on the Departmanlar ve VLAN'lar tab: in Search, `type:event logid:0100026001 ip:<network>` for each of the two networks (e.g. `ip:172.20.41.0/24`) and `type:event mac:<MAC>` for the clients found (the days in the database); whether a MAC took an address in both networks before the change | the network change and its date; whether a client took an address in both networks (if so, the MAC addresses): for their moments before that date, the missed-move check reads the lookup's days only | | |
 
 ## 17. Desktop Windows 11 Pro
 
