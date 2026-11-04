@@ -22,10 +22,13 @@
         \verify, \clock                   them); ArciApi, ArciWorker read (ArciIngest also state\seal)
       <data>\state\crl                    protected: LOCAL SERVICE modify (the CrlFetch task stores the
                                           revocation lists as evidence); ArciApi, ArciWorker read;
-                                          nothing for the collector or ingest
+                                          nothing for the collector or ingest; OWNER RIGHTS read
+                                          permissions (an owner from before the upgrade cannot
+                                          change them)
       <data>\state\renewal                protected: LOCAL SERVICE modify (the Renew task's renewal.json
                                           and renewal.lock); ArciApi, ArciWorker read; nothing for the
-                                          collector or ingest (they could silence the re-stamping alerts)
+                                          collector or ingest (they could silence the re-stamping alerts);
+                                          OWNER RIGHTS as for state\crl
       <data>\exports                      ArciApi, ArciWorker modify
       <data>\exports\reports              LOCAL SERVICE read (the Renew task re-stamps the tokens of the
                                           stored reports); ArciApi, ArciWorker keep the modify of exports

@@ -110,6 +110,9 @@ WINSW_ELEMENTS = {
 }  # fmt: skip
 WELL_KNOWN = {"system": "S-1-5-18", "local_service": "S-1-5-19", "admins": "S-1-5-32-544"}
 USERS_SID = "S-1-5-32-545"
+#: OWNER RIGHTS: an entry for it replaces the implicit rights (read and change the permissions)
+#: of whoever owns the path.
+OWNER_RIGHTS_SID = "S-1-3-4"
 TRUSTED_INSTALLER_SID = "S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464"
 BOM = b"\xef\xbb\xbf"
 #: The organisation name and the admin PC of the fictional example network: the installer has
@@ -2746,6 +2749,12 @@ def test_acl_plan_least_privilege(engine: str, tmp_path: Path) -> None:
     # R20-cert and renewal_due, or hold the run's lock.
     assert re.split(r"[\\/]", entries["renewal"]["Path"])[-2:] == ["state", "renewal"]
     assert _rights(entries["renewal"], ingest) == set()
+    # New in Wave 5, so a service may have created them (and owns them) before the upgrade: the
+    # owner may read their permissions, never change them (W5-E-9).
+    for job in ("crl", "renewal"):
+        assert _rights(entries[job], OWNER_RIGHTS_SID) == {"ReadPermissions"}, job
+    for job in ("seal", "replica", "verify", "clock"):
+        assert _rights(entries[job], OWNER_RIGHTS_SID) == set(), job
     # Stored reports: the Renew task reads them and their tokens (contract D3); the API and the
     # worker keep the rights of exports.
     reports = entries["reports"]
@@ -2800,6 +2809,11 @@ def test_acl_applied_keeps_sealed_file_deny_entries(tmp_path: Path) -> None:
     programdata.mkdir()
     (programdata / "secret.key").write_bytes(b"key")
     program.mkdir()
+    # state\crl as a service could have left it before the upgrade, with its Modify on state:
+    # its own folder, with an entry of its own (W5-E-9).
+    crl_state = data / "state" / "crl"
+    crl_state.mkdir(parents=True)
+    subprocess.run(["icacls", str(crl_state), "/grant", "*S-1-1-0:(OI)(CI)F"], check=True)
     # What arcilogger_core.immutability.lock() does to a sealed file.
     subprocess.run(["icacls", str(sealed), "/deny", "*S-1-1-0:(DE,WD,AD,WA,WEA)"], check=True)
     result = run_powershell(
@@ -2848,7 +2862,6 @@ foreach ($path in [System.IO.File]::ReadAllLines($ListPath)) {
     )
     out = tmp_path / "acl.json"
     seal_state = data / "state" / "seal"
-    crl_state = data / "state" / "crl"
     reports = data / "exports" / "reports"
     audit_spool = data / "spool" / "_audit"
     scheduled = data / "backups" / "scheduled"
@@ -2917,6 +2930,16 @@ foreach ($path in [System.IO.File]::ReadAllLines($ListPath)) {
         assert reader_rules, reader
         assert all(r["rights"] & writes == 0 for r in reader_rules), reader
     assert all(r["sid"] not in (collector, service_sid("ArciIngest")) for r in crl_rules)
+    # The owner of state\crl (here the account that created it before the ACL step) and of
+    # state\renewal reads their permissions and nothing more: OWNER RIGHTS takes the owner's
+    # implicit right to change them (W5-E-9). The earlier entry of state\crl is gone.
+    synchronize, read_control = 0x100000, 0x20000
+    for path in (crl_state, data / "state" / "renewal"):
+        assert all(r["sid"] != "S-1-1-0" for r in acls[path]["rules"]), path
+        owner_rules = [r for r in acls[path]["rules"] if r["sid"] == OWNER_RIGHTS_SID]
+        assert any(not r["inherited"] for r in owner_rules), path
+        for rule in owner_rules:
+            assert (rule["type"], rule["rights"] & ~synchronize) == ("Allow", read_control), path
     # Stored reports: the Renew task reads them, never writes or deletes one.
     report_tasks = [r for r in acls[reports]["rules"] if r["sid"] == tasks]
     assert report_tasks, "LOCAL SERVICE must read exports\\reports"
@@ -9050,6 +9073,10 @@ def test_acl_plan_gives_the_renew_and_crlfetch_tasks_their_rights(
     )
     owners = {WELL_KNOWN["system"], WELL_KNOWN["admins"]}
     modify, read = ("Modify", "all"), ("ReadAndExecute", "all")
+    # the owner of state\crl or state\renewal (a service that created it before the upgrade)
+    # reads its permissions and cannot change them (W5-E-9)
+    owner = {("ReadPermissions", "all")}
+    state_sids = owners | {tasks, api, worker, OWNER_RIGHTS_SID}
     # vault\renewals (records, tokens, their lock), the days and deletion records it reads.
     assert _grants(entries["data/vault"], tasks) == {modify}
     assert [path for path in entries if path.startswith("data/vault/")] == []
@@ -9057,8 +9084,9 @@ def test_acl_plan_gives_the_renew_and_crlfetch_tasks_their_rights(
     # the worker read it, nothing for the collector or ingest (W5-E-4); no entry for the files.
     renewal = entries["data/state/renewal"]
     assert (renewal["Kind"], renewal["Protect"]) == ("Directory", True)
-    assert {ace["Sid"] for ace in renewal["Aces"]} == owners | {tasks, api, worker}
+    assert {ace["Sid"] for ace in renewal["Aces"]} == state_sids
     assert _grants(renewal, tasks) == {modify}
+    assert _grants(renewal, OWNER_RIGHTS_SID) == owner
     assert _grants(renewal, api) == _grants(renewal, worker) == {read}
     for service in ("ArciCollector", "ArciIngest"):
         assert _grants(renewal, service_sid(service)) == set(), service
@@ -9070,8 +9098,9 @@ def test_acl_plan_gives_the_renew_and_crlfetch_tasks_their_rights(
     # state\crl: protected; the tasks write it, the API and the worker read it.
     crl = entries["data/state/crl"]
     assert (crl["Kind"], crl["Protect"]) == ("Directory", True)
-    assert {ace["Sid"] for ace in crl["Aces"]} == owners | {tasks, api, worker}
+    assert {ace["Sid"] for ace in crl["Aces"]} == state_sids
     assert _grants(crl, tasks) == {modify}
+    assert _grants(crl, OWNER_RIGHTS_SID) == owner
     assert _grants(crl, api) == _grants(crl, worker) == {read}
     # exports\reports: read, inherited by the reports and their tokens, nothing more.
     reports = entries["data/exports/reports"]

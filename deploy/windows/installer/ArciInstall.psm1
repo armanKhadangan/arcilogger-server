@@ -1852,9 +1852,13 @@ function Get-ArciAclPlan {
           state\renewal could silence the re-stamping alerts or hold the run's lock). Renew adds
           its records to vault\renewals through the inherited Modify of vault, and keeps
           renewal.json and renewal.lock in state\renewal: every run replaces renewal.json with a
-          new file (atomic write), which gets the folder's inherited entries. It reads the day and deletion-record tokens (sealed files
-          keep their deny entries, so no task changes them), state\crl, and the stored reports
-          and their tokens in exports\reports (read only).
+          new file (atomic write), which gets the folder's inherited entries. state\crl and
+          state\renewal also give OWNER RIGHTS ReadPermissions only: a service that created one
+          of them under an earlier release (its Modify on state allowed it) stays its owner,
+          since no entry changes an owner, and would otherwise keep the owner's right to change
+          the permissions. Renew reads the day and deletion-record tokens (sealed files keep
+          their deny entries, so no task changes them), state\crl, and the stored reports and
+          their tokens in exports\reports (read only).
           The database backup (Backup task, ADR-0009) writes and prunes backups\scheduled, which
           no service can read; backups and backups\db stay administrators-only. The tasks take
           their signed requests from state\requests (ADR-0014) and read admin\keys\keys.json,
@@ -1904,6 +1908,9 @@ function Get-ArciAclPlan {
     $admins = $script:WellKnownSid.Administrators
     $localService = $script:WellKnownSid.LocalService
     $creatorOwner = $script:WellKnownSid.CreatorOwner
+    # OWNER RIGHTS: an entry for it replaces the implicit rights of whoever owns the path (read
+    # and change its permissions) with the entry's own.
+    $ownerRights = 'S-1-3-4'
     $collector = Get-ArciServiceSid 'ArciCollector'
     $ingest = Get-ArciServiceSid 'ArciIngest'
     $api = Get-ArciServiceSid 'ArciApi'
@@ -1915,6 +1922,9 @@ function Get-ArciAclPlan {
     $modify = 'Modify'
     $appendOnly = 'ReadAndExecute, Write'
     $listOnly = 'ListDirectory, ReadAttributes, Traverse'
+    # What the owner of a protected state folder keeps (OWNER RIGHTS): reading its permissions,
+    # never changing them.
+    $ownerOnly = 'ReadPermissions'
     # The API's right on the inbox: create a request file and write it, read it back, list the
     # folder (quotas); deleting is left to CREATOR OWNER (its own temporary files).
     $inboxWriter = 'CreateFiles, WriteData, ReadData, ReadAttributes, ListDirectory'
@@ -2123,20 +2133,25 @@ function Get-ArciAclPlan {
                     (New-ArciAce -Sid $worker -Who 'NT SERVICE\ArciWorker' -Rights $read)))),
         # Revocation lists (CrlFetch, contract D8): stored byte for byte as evidence, so only the
         # tasks write them; the API (legal status, day page, evidence packages) and the worker
-        # (R20-crl, R20-cert) read them.
+        # (R20-crl, R20-cert) read them. Both state\crl and state\renewal are new in Wave 5: a
+        # service could have created either with its Modify on state before the upgrade and
+        # stays its owner (Set-ArciAclEntry never changes one), so OWNER RIGHTS takes the
+        # owner's implicit right to change the permissions.
         (New-Entry ($DataRoot + $p + 'state' + $p + 'crl') 'Directory' $true ($owners + @(
                     (New-ArciAce -Sid $localService -Who 'LOCAL SERVICE (tasks)' -Rights $modify),
                     (New-ArciAce -Sid $api -Who 'NT SERVICE\ArciApi' -Rights $read),
-                    (New-ArciAce -Sid $worker -Who 'NT SERVICE\ArciWorker' -Rights $read)))),
+                    (New-ArciAce -Sid $worker -Who 'NT SERVICE\ArciWorker' -Rights $read),
+                    (New-ArciAce -Sid $ownerRights -Who 'OWNER RIGHTS (whoever owns it)' -Rights $ownerOnly)))),
         # Re-stamping state (Renew): renewal.json, from which R20-renewal, R20-cert and the
         # legal status judge, and renewal.lock, one run at a time. Protected, so a service that
         # could write it cannot silence those alerts or hold the lock; renewal.json is replaced
         # on every run and gets these entries by inheritance. The API (Sistem page, legal
-        # status, day page) and the worker (the alerts) read it.
+        # status, day page) and the worker (the alerts) read it. OWNER RIGHTS as for state\crl.
         (New-Entry ($DataRoot + $p + 'state' + $p + 'renewal') 'Directory' $true ($owners + @(
                     (New-ArciAce -Sid $localService -Who 'LOCAL SERVICE (tasks)' -Rights $modify),
                     (New-ArciAce -Sid $api -Who 'NT SERVICE\ArciApi' -Rights $read),
-                    (New-ArciAce -Sid $worker -Who 'NT SERVICE\ArciWorker' -Rights $read)))),
+                    (New-ArciAce -Sid $worker -Who 'NT SERVICE\ArciWorker' -Rights $read),
+                    (New-ArciAce -Sid $ownerRights -Who 'OWNER RIGHTS (whoever owns it)' -Rights $ownerOnly)))),
         # Signed task requests (seal now, credit query, TSA and replica test; ADR-0014): ArciAdmin
         # writes them and deletes only its own, the tasks take, answer and delete them. No service
         # but the agent can put a request here; the signature is the authority.
