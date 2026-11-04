@@ -4,7 +4,8 @@
 and 5 for the fields the lease job keeps of a move (sender, interface, logid, ``dhcp_msg``): for
 every ``fg_dhcp`` row that rules 3, 6 and 7 accept (an IPv4 address, the FortiGate's own time, a
 usable MAC: what the job records a move from), and for every settings case, both give the same
-code, against PostgreSQL.
+code, against PostgreSQL (a test database has the installer's C locale, under which ``lower()``
+changes ASCII letters only: a non-ASCII message is compared as such).
 """
 
 from __future__ import annotations
@@ -38,6 +39,7 @@ CASES: dict[str, tuple[LookupSettings, Collection[str]]] = {
         LookupSettings(fortigate_dhcp_msgs={"0100026001": ("ACK", "DHCPACK"), "0100026002": ()}),
         (),
     ),
+    "messages-non-ascii": (LookupSettings(fortigate_dhcp_msgs={"0100026001": ("äck",)}), ()),
     "everything": (
         LookupSettings(
             fortigate_interfaces_excluded=("vlan43", "vlan44"),
@@ -58,7 +60,7 @@ def test_the_stored_refusal_is_the_rows_refusal(
         ("fortigate", STRANGER),
         ("vlan42", "vlan43", None),
         ("0100026001", "0100026002", "0100026003"),
-        ("Ack", "ack", "DHCPACK", ""),
+        ("Ack", "ack", "DHCPACK", "", "ÄCK"),
     )
     for n, (source, interface, logid, message) in enumerate(values):
         evidence.fortigate_dhcp(
@@ -80,7 +82,7 @@ def test_the_stored_refusal_is_the_rows_refusal(
             trust.refusal(settings, untrusted),
         )
     ).all()
-    assert len(rows) == 2 * 3 * 3 * 4
+    assert len(rows) == 2 * 3 * 3 * 5
     found = [
         stored_refusal(
             settings,

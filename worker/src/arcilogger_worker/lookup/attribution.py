@@ -76,6 +76,7 @@ from __future__ import annotations
 
 import ipaddress
 import re
+import string
 from collections import defaultdict
 from collections.abc import Collection, Iterable, Sequence
 from dataclasses import dataclass, replace
@@ -180,6 +181,8 @@ _VD_CUT: Final = 32
 _READABLE_MAC: Final = "^[0-9a-f]{2}(:[0-9a-f]{2}){5}$"
 #: The second hex digit of a MAC whose first octet has the multicast bit set (as ``trust``).
 _MULTICAST_HEX: Final = ("1", "3", "5", "7", "9", "b", "d", "f")
+#: PostgreSQL's ``lower()`` under the C locale: ASCII letters only (:func:`stored_refusal`).
+_ASCII_LOWER: Final = str.maketrans(string.ascii_uppercase, string.ascii_lowercase)
 
 
 def usable_lease(settings: LookupSettings, lease: int | None) -> int | None:
@@ -238,7 +241,9 @@ def stored_refusal(
     tested on again with today's settings. Its own copy for Python (``trust.refusal`` is SQL;
     a test keeps the two equal). Rules 3, 6 and 7 (an IPv6 address, the receive time, a bad
     MAC) are properties of the row that no setting changes: the job records a move only from a
-    row the build kept, so a recorded move never fails them."""
+    row the build kept, so a recorded move never fails them. Rule 5 lowers the recorded message
+    as PostgreSQL's ``lower()`` does under the database's C locale (the installer's): ASCII
+    letters only."""
     if source in untrusted:
         return UNTRUSTED_SOURCE
     if interface is not None and interface in settings.fortigate_interfaces_excluded:
@@ -247,7 +252,8 @@ def stored_refusal(
         return UNMAPPED
     messages = settings.fortigate_dhcp_msgs.get(logid)
     if messages is not None and (
-        dhcp_msg is None or dhcp_msg.lower() not in {message.lower() for message in messages}
+        dhcp_msg is None
+        or dhcp_msg.translate(_ASCII_LOWER) not in {message.lower() for message in messages}
     ):
         return UNEXPECTED_MSG
     return None
@@ -336,14 +342,13 @@ class StoredLease:
 class _Record:
     """A lease's own newest DHCP record at or before a moment (2.7): its time, its meaning
     (``assigned``/``deassigned``) and the usable lease it logged (``None``: none, or out of
-    range); ``row``: read from the ``fg_dhcp`` row itself (not from the stored refs). ``vd``
-    is its VDOM when ``vd_known``: always for a row, for a stored ref when the lease job stored
-    it with the ref (issue #127; ``None`` with it: a row without a VDOM)."""
+    range). ``vd`` is its VDOM when ``vd_known``: always for the ``fg_dhcp`` row itself, for a
+    stored ref when the lease job stored it with the ref (issue #127; ``None`` with it: a row
+    without a VDOM)."""
 
     time: datetime
     action: str | None
     lease: int | None
-    row: bool = False
     vd: str | None = None
     vd_known: bool = False
 
@@ -578,7 +583,6 @@ class Attributor:
             row.time,
             action,
             usable_lease(self.settings, row.lease),
-            row=True,
             vd=row[3],
             vd_known=True,
         )

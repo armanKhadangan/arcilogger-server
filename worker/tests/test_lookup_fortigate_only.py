@@ -696,12 +696,20 @@ def test_the_moment_of_the_missed_close_itself(db_session: Session, evidence: Ev
 
 
 def record_moves(session: Session, lease: Lease) -> None:
-    """Store ``lease.moves`` as the lease job records it (issue #127): every converted ACK of
-    the lease's MAC for another address inside the lease, one group per address, interface,
-    VDOM, sender, logid and message (:func:`.refs.fg_dhcp_move`, the job's own constructor).
-    For a lease a test opens by hand, which the job never saw open; the tests that call it only
-    move a MAC to an address in no configured network (``172.20.44.x``), so the job would have
-    recorded each of those ACKs, not applied it (D33 closes nothing without a network)."""
+    """Store ``lease.moves`` as the lease job records it (issue #127): every converted ACK (a
+    logid mapped to ``assigned``) of the lease's MAC for another address inside the lease, one
+    group per address, interface, VDOM, sender, logid and message (:func:`.refs.fg_dhcp_move`,
+    the job's own constructor). For an open MikroTik lease a test opens by hand, which the job
+    never saw open (so no end and no interface bound); the tests that call it only move a MAC
+    to an address in no configured network (``172.20.44.x``), so the job would have recorded
+    each of those ACKs, not applied it (D33 closes nothing without a network)."""
+    assert lease.end is None
+    assert lease.source_table == "mt_dhcp"
+    assigned = sorted(
+        logid
+        for logid, meaning in settings_for(session).fortigate_logids.items()
+        if meaning == "assigned"
+    )
     rows = session.execute(
         select(
             FgDhcp.time,
@@ -715,7 +723,7 @@ def record_moves(session: Session, lease: Lease) -> None:
             FgDhcp.mac == lease.mac,
             FgDhcp.ip != lease.ip,
             FgDhcp.time > lease.start,
-            FgDhcp.logid == "0100026001",
+            FgDhcp.logid.in_(assigned),
         )
     ).all()
     assert all(ipaddress.ip_address(row.ip) in ipaddress.ip_network(NOWHERE) for row in rows)

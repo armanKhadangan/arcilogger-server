@@ -132,15 +132,17 @@ def test_a_mikrotik_lease_records_a_fortigate_ack_of_its_mac_elsewhere(
 
 
 def test_moves_after_an_earlier_end_are_cut(db_session: Session, evidence: Evidence) -> None:
-    """The look-ahead records a move after midnight; late evidence then ends the lease before
-    midnight (D33), and the seed's rebuild drops the move after its new end, as does the range
-    rebuild that the late evidence job runs. The new lease keeps it."""
+    """The day's rebuild records a move before midnight, its look-ahead one after; late
+    evidence then ends the lease before midnight, after the first (D33), and the seed's rebuild
+    drops both moves after its new end, the stored one before midnight included, as does the
+    range rebuild that the late evidence job runs. The new lease keeps them."""
     evidence.fortigate_dhcp(tr(D, 20), PC, MAC)
+    evidence.fortigate_dhcp(tr(D, 23, 55), NOWHERE, MAC)
     evidence.fortigate_dhcp(tr(D1, 3), NOWHERE, MAC)
     db_session.commit()
     rebuild_day(db_session, D, horizon=tr(D1, 12))
     db_session.commit()
-    assert moves(db_session)[(PC, MAC, tr(D, 20))] == [group(NOWHERE, tr(D1, 3))]
+    assert moves(db_session)[(PC, MAC, tr(D, 20))] == [group(NOWHERE, tr(D, 23, 55), tr(D1, 3))]
     evidence.fortigate_dhcp(tr(D, 23, 50), SAME, MAC)  # ingest backlog
     db_session.commit()
     report = rebuild_day(db_session, D1, horizon=tr(D1, 12))
@@ -156,7 +158,7 @@ def test_moves_after_an_earlier_end_are_cut(db_session: Session, evidence: Evide
     assert after[pc_id] == single[pc_id]
     stored = moves(db_session)
     assert stored[(PC, MAC, tr(D, 20))] == []
-    assert stored[(SAME, MAC, tr(D, 23, 50))] == [group(NOWHERE, tr(D1, 3))]
+    assert stored[(SAME, MAC, tr(D, 23, 50))] == [group(NOWHERE, tr(D, 23, 55), tr(D1, 3))]
 
 
 # -- every mode stores the same -------------------------------------------------------------------
@@ -292,6 +294,10 @@ def test_a_run_with_nothing_new_writes_nothing_and_reads_no_moves(
     report = run_incremental(db_session, now=tr(D, 14, 30))
     db_session.commit()
     assert report.updated == 0
+    # A rebuild that ends before the watermark keeps the moves after its end.
+    rebuild_day(db_session, D, horizon=tr(D, 12))
+    db_session.commit()
+    assert moves(db_session)[(PC, MAC, tr(D, 8))] == [group(NOWHERE, tr(D, 10), tr(D, 13, 30))]
 
 
 def test_a_lease_written_before_the_moves_is_recorded_once_it_is_followed(
@@ -325,6 +331,25 @@ def test_a_lease_written_before_the_moves_is_recorded_once_it_is_followed(
     rows = {r.ip: r for r in db_session.scalars(select(Lease))}
     assert [e.get("vd", MISSING) for e in rows[PC].evidence] == ["root"]
     assert moves(db_session)[("172.20.42.70", "00:00:5e:00:53:70", tr(D, 6))] == []
+
+
+def test_a_closed_lease_written_before_the_moves_stays_not_recorded(
+    db_session: Session, evidence: Evidence
+) -> None:
+    """A seed of an older program (NULL) that late evidence closes before midnight is not
+    followed by the next day's rebuild: its moves stay NULL (not recorded), not ``[]``."""
+    evidence.fortigate_dhcp(tr(D, 20), PC, MAC)
+    db_session.commit()
+    rebuild_day(db_session, D, horizon=tr(D1, 12))
+    db_session.commit()
+    db_session.execute(update(Lease).values(moves=None))
+    db_session.commit()
+    evidence.fortigate_dhcp(tr(D, 23, 50), SAME, MAC)  # ingest backlog
+    db_session.commit()
+    report = rebuild_day(db_session, D1, horizon=tr(D1, 12))
+    db_session.commit()
+    assert report.stats["seeds_closed_before_midnight"] == 1
+    assert moves(db_session)[(PC, MAC, tr(D, 20))] is None
 
 
 # -- the VDOM of a seed ---------------------------------------------------------------------------

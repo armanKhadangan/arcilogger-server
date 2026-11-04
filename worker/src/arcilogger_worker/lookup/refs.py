@@ -32,6 +32,7 @@ from bisect import bisect_right
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from itertools import pairwise
 from typing import Any, Final
 
 from arcilogger_worker.lookup.types import EvidenceRef, RawRef
@@ -371,11 +372,22 @@ def _move_group(item: Any) -> MoveGroup | None:
     )
 
 
+def _canonical(groups: Sequence[MoveGroup]) -> bool:
+    """Whether ``groups`` are as :func:`moves_json` writes them (one group per key, in its order,
+    each with times strictly increasing): :func:`merge_moves` would return them unchanged."""
+    keys = [_sort_key(group) for group in groups]
+    return all(a < b for a, b in pairwise(keys)) and all(
+        group.times and all(a < b for a, b in pairwise(group.times)) for group in groups
+    )
+
+
 def parse_moves(value: Any) -> tuple[MoveGroup, ...] | None:
     """The groups of a stored ``leases.moves`` in :func:`moves_json`'s order; ``None`` for NULL
     (not recorded) or a value that is no list. Never raises on what it finds: a group without
     its fields, a time that is no integer, a time twice or out of order are left out or put
-    right, so a damaged value can only lack moves."""
+    right, so a damaged value can only lack moves. A value as the job writes it is only
+    checked, not merged again (the lookup decodes every recorded move it reads)."""
     if not isinstance(value, Sequence) or isinstance(value, str | bytes):
         return None
-    return merge_moves(group for item in value if (group := _move_group(item)) is not None)
+    groups = tuple(group for item in value if (group := _move_group(item)) is not None)
+    return groups if _canonical(groups) else merge_moves(groups)

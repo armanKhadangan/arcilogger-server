@@ -64,6 +64,16 @@ LOG_TABLES = (Message, FgTraffic, FgDhcp, FgEvent, MtDhcp, MtArp)
 #: An address in no configured network (the example site configures no 172.20.44.0/24): the
 #: lease build records a move of the PC's MAC to it and does not apply it (D33).
 ELSEWHERE = "172.20.44.58"
+#: What a recorded move keeps of its ``fg_dhcp`` row (:func:`.refs.fg_dhcp_move`).
+MOVE_ROW = (
+    FgDhcp.time,
+    FgDhcp.ip,
+    FgDhcp.interface,
+    FgDhcp.extra["vd"].astext.label("vd"),
+    FgDhcp.source,
+    FgDhcp.logid,
+    FgDhcp.dhcp_msg,
+)
 
 
 def settings_for(session: Session) -> LookupSettings:
@@ -149,25 +159,24 @@ def same_without_the_rows_outside_the_days(
 
 
 def record_moves(session: Session, lease: Lease) -> None:
-    """Store ``lease.moves`` as the lease job records it (issue #127): every ACK of the lease's
-    MAC for another address inside the lease (on its interface for a FortiGate lease), one
-    group per address, interface, VDOM, sender, logid and message (:func:`.refs.fg_dhcp_move`,
-    the job's own constructor). For a lease a test opens by hand, or whose moves were logged
-    after its build; the tests move the MAC to :data:`ELSEWHERE` only, in no configured network,
-    so the job would have recorded each of those ACKs, not applied it (D33)."""
-    query = select(
-        FgDhcp.time,
-        FgDhcp.ip,
-        FgDhcp.interface,
-        FgDhcp.extra["vd"].astext.label("vd"),
-        FgDhcp.source,
-        FgDhcp.logid,
-        FgDhcp.dhcp_msg,
-    ).where(
+    """Store ``lease.moves`` as the lease job records it (issue #127): every ACK (a logid mapped
+    to ``assigned``) of the lease's MAC for another address inside the lease (on its interface
+    for a FortiGate lease), one group per address, interface, VDOM, sender, logid and message
+    (:func:`.refs.fg_dhcp_move`, the job's own constructor). Only for a lease a test opens by
+    hand, which the job never followed; the tests move the MAC to :data:`ELSEWHERE` only, in no
+    configured network, so the job would have recorded each of those ACKs, not applied it
+    (D33). :func:`test_a_recorded_move_of_a_fortigate_lease_needs_its_interface_and_vdom`
+    keeps it equal to what a job run writes."""
+    assigned = sorted(
+        logid
+        for logid, meaning in settings_for(session).fortigate_logids.items()
+        if meaning == "assigned"
+    )
+    query = select(*MOVE_ROW).where(
         FgDhcp.mac == lease.mac,
         FgDhcp.ip != lease.ip,
         FgDhcp.time > lease.start,
-        FgDhcp.logid == "0100026001",
+        FgDhcp.logid.in_(assigned),
     )
     if lease.end is not None:
         query = query.where(FgDhcp.time < lease.end)
@@ -263,6 +272,10 @@ TODAY = {
         "dhcp.fortigate_logids",
         {"0100026003": "assigned", "0100026002": "deassigned"},
     ),
+    "logid-deassigned": (
+        "dhcp.fortigate_logids",
+        {"0100026003": "assigned", "0100026001": "deassigned", "0100026002": "deassigned"},
+    ),
     "message-not-listed": ("dhcp.fortigate_dhcp_msgs", {"0100026001": ["DHCPACK"]}),
     "interface-excluded": ("dhcp.fortigate_interfaces_excluded", ["vlan44"]),
     "network-entered": None,
@@ -275,9 +288,10 @@ def test_a_recorded_move_is_tested_again_with_todays_settings(
 ) -> None:
     """Issue #127: the lease job records a kept ACK under the settings of the build; the lookup
     tests it again with today's, as it tests a row: a sender untrusted since (D24), a logid no
-    longer mapped to ``assigned``, a ``dhcp_msg`` no longer listed (D25), an interface excluded
-    since (D28), or the address's network entered since, another one than the lease's (D33's
-    key), and the move counts no more. As recorded, it lowers the chain."""
+    longer mapped to ``assigned`` (unmapped, or mapped to ``deassigned``), a ``dhcp_msg`` no
+    longer listed (D25), an interface excluded since (D28), or the address's network entered
+    since, another one than the lease's (D33's key), and the move counts no more. As recorded,
+    it lowers the chain."""
     lease = kept_open(db_session, evidence)
     sender = "unknown-192.0.2.7" if case == "sender-untrusted" else "fortigate"
     moved = AT - timedelta(days=20)
@@ -358,19 +372,23 @@ def test_a_recorded_move_of_a_fortigate_lease_needs_its_interface_and_vdom(
     """D33's key for an ``fg_dhcp`` lease (2.7, round 7) over the recorded moves (issue #127):
     a FortiGate lease logged for 30 days, its ACK 14 days back (before the lookup's days, so
     its stored ref is its record), and the PC's MAC on an address in no configured network a
-    day later, recorded by the lease job (on the lease's interface only). Only a move on the
-    lease's interface and in its VDOM lowers the chain; a ref stored before the upgrade has no
-    VDOM, so any VDOM counts, as a row's did before."""
+    day later. The lease job follows the open lease and records that ACK on the lease's
+    interface only, and stores the VDOM of the lease's ref; :func:`record_moves` writes the
+    same moves. Only a move on the lease's interface and in its VDOM lowers the chain; a ref
+    stored before the upgrade has no VDOM, so any VDOM counts, as a row's did before."""
     ack = AT - timedelta(days=14)
     evidence.fortigate_dhcp(ack, PC, PC_MAC, lease=2_592_000, vd="root")
-    build(db_session, evidence, ack.date())
-    lease = db_session.scalars(select(Lease)).one()
-    lease.evidence = [
-        {k: v for k, v in item.items() if k != REF_VD} | ({REF_VD: "root"} if stored_vd else {})
-        for item in lease.evidence
-    ]
     evidence.fortigate_dhcp(AT - timedelta(days=13), ELSEWHERE, PC_MAC, interface=interface, vd=vd)
+    build(db_session, evidence, ack.date())  # the look-ahead follows the lease up to now
+    lease = db_session.scalars(select(Lease).where(Lease.ip == PC)).one()
+    assert [item.get(REF_VD) for item in lease.evidence if item["table"] == "fg_dhcp"] == ["root"]
+    recorded = db_session.scalar(select(Lease.moves).where(Lease.id == lease.id))
+    assert (recorded != []) is (interface == "vlan42")
+    # The tests' copy of the job's filter writes what the job wrote.
     record_moves(db_session, lease)
+    assert db_session.scalar(select(Lease.moves).where(Lease.id == lease.id)) == recorded
+    if not stored_vd:  # the refs as a lease written before the upgrade holds them
+        lease.evidence = [{k: v for k, v in item.items() if k != REF_VD} for item in lease.evidence]
     db_session.commit()
     before = internal(db_session)
     chain = before.attribution
@@ -385,6 +403,43 @@ def test_a_recorded_move_of_a_fortigate_lease_needs_its_interface_and_vdom(
         }
     else:
         assert (chain.confidence, chain.lease.confidence) == ("high", "high")
+    assert clamped_day(before) == FIRST.isoformat()
+
+    drop_before_the_days(db_session)
+    assert answer(internal(db_session)) == answer(before)
+
+
+def test_the_lookup_reads_the_moves_the_lease_job_recorded(
+    db_session: Session, evidence: Evidence
+) -> None:
+    """Issue #127 end to end, nothing stored by hand: a FortiGate lease logged for 30 days, its
+    ACK 14 days back (before the lookup's days), and an ACK of the PC's MAC for an address in no
+    configured network on the lease's interface and in its VDOM a day later. The lease job's
+    look-ahead follows the open lease and records that ACK with it (D33 does not apply it); the
+    lookup reads it there, before the first day: the chain is ``low``, named from the lease's
+    stored record, the look-back is noted all the same, and the answer is the same once the
+    rows before the days are dropped."""
+    ack = AT - timedelta(days=14)
+    evidence.fortigate_dhcp(ack, PC, PC_MAC, lease=2_592_000, vd="root")
+    moved = evidence.fortigate_dhcp(
+        AT - timedelta(days=13), ELSEWHERE, PC_MAC, interface="vlan42", vd="root"
+    )
+    build(db_session, evidence, ack.date())
+    row = db_session.execute(select(*MOVE_ROW).where(FgDhcp.id == moved)).one()
+    stored = db_session.scalar(select(Lease.moves).where(Lease.ip == PC))
+    assert stored == moves_json([fg_dhcp_move(row)])
+    assert stored != []
+
+    before = internal(db_session)
+    chain = before.attribution
+    assert chain is not None
+    assert chain.lease is not None
+    assert (chain.lease.source_table, chain.lease.last_dhcp_evidence) == ("fg_dhcp", ack)
+    assert (chain.confidence, chain.lease.confidence) == ("low", "low")
+    assert dict(next(e for e in chain.explanations if e.key == UNCONVERTED).params) == {
+        "last": iso(ack),
+        "ip": PC,
+    }
     assert clamped_day(before) == FIRST.isoformat()
 
     drop_before_the_days(db_session)
@@ -523,15 +578,15 @@ def test_a_newest_record_before_the_days_is_the_stored_one(
     chain (any VDOM counts), as before."""
     ack = AT - timedelta(days=14)
     evidence.fortigate_dhcp(ack, PC, PC_MAC, lease=2_592_000, vd="root")
-    build(db_session, evidence, ack.date())
-    lease = db_session.scalars(select(Lease)).one()
-    # The refs as the lease job stores them (the VDOM of each FortiGate ref's row), and as a
-    # lease written before the upgrade holds them (none).
-    lease.evidence = [
-        {k: v for k, v in item.items() if k != REF_VD} | ({REF_VD: "root"} if vd else {})
-        for item in lease.evidence
-    ]
     evidence.fortigate_dhcp(AT - timedelta(days=3), "172.20.42.130", PC_MAC, vd="misafir")
+    build(db_session, evidence, ack.date())
+    lease = db_session.scalars(select(Lease).where(Lease.ip == PC)).one()
+    # The ref as the lease job stores it (the VDOM of its row; the ACK in the other VDOM did not
+    # end the lease), and as a lease written before the upgrade holds it (none).
+    assert lease.end is None
+    assert [item.get(REF_VD) for item in lease.evidence if item["table"] == "fg_dhcp"] == ["root"]
+    if not vd:
+        lease.evidence = [{k: v for k, v in item.items() if k != REF_VD} for item in lease.evidence]
     db_session.commit()
     before = internal(db_session)
     chain = before.attribution

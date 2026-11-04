@@ -2164,10 +2164,19 @@ def test_the_recorded_moves_of_a_hundred_chains_are_fast(
     day in an unconfigured network."""
     moves: list[_Timed] = []
     recorded: list[_Timed] = []
+    returned: list[dict[int, tuple[MoveGroup, ...]]] = []
 
     def measure() -> None:
         moves.append(timer.time(Attributor, "_missed_moves"))
         recorded.append(timer.time(Attributor, "_recorded_moves"))
+        read = Attributor._recorded_moves
+
+        def kept(self: Attributor, *args: Any) -> dict[int, tuple[MoveGroup, ...]]:
+            found = read(self, *args)
+            returned.append(found)
+            return found
+
+        timer.monkeypatch.setattr(Attributor, "_recorded_moves", kept)
         executed.record(moves_site)
 
     outcome = _guard_lookup(moves_site, LookupRequest(at=MT_AT, public_ip=PUBLIC), measure)
@@ -2183,6 +2192,10 @@ def test_the_recorded_moves_of_a_hundred_chains_are_fast(
     (timed,) = moves
     (read,) = recorded
     assert len(timed.calls) == len(read.calls) == 1
+    # The check decoded every chain's moves (one that decodes nothing would be fast too).
+    (found,) = returned
+    assert len(found) == 100
+    assert {len(group.times) for groups in found.values() for group in groups} == {RECORDED_TIMES}
     sql, parameters = executed.one("leases.moves")
     executed.stop()
     assert "leases.moves IS NOT NULL" in sql

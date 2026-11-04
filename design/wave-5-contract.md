@@ -1700,3 +1700,109 @@ All Wave 5 questions are answered (2026-11-02).
   browse budget (500 ms) and the slowest request below 10 × that. In the same review A2 (an
   asynchronous spool watermark) was deferred, to be revisited with field figures from a Windows
   site (sahada doğrula), and A3 was declined (2026-11-04).
+
+## Deviations — #127 (2026-11-04)
+
+- **#127-1: the lease records its missed moves; the missed-move check reads them before the
+  first day.** W5-G-17 (b) cut the missed-move check (round 7, D33) to the lookup's days. The
+  lease job now stores, with each DHCP lease, the moves the build saw and did not apply, and the
+  check reads them where the rows are gone.
+  - **Definition (at write time; `correlation/leases.py:572-694`, `_Recorded`):** a kept
+    FortiGate ACK (logid mapped to `assigned`) of the lease's MAC for another address, strictly
+    inside the lease (`start < t < end`, or the run's end while it is open); for an `fg_dhcp`
+    lease on its own interface; not in another configured network than the lease's (the
+    networks of the run). The build applies every other ACK of the MAC: it ends the lease at
+    that time, which the strict bounds leave out. Every mode (live incremental, range rebuild,
+    single days in any order) computes the same value from the same rows: the run's range
+    `[lo, hi)`, the look-ahead's rows of each followed MAC, and the stored moves outside the
+    range, all cut to the lease (a lease that late evidence ends earlier loses the moves after
+    its new end).
+  - **Format (`leases.moves`, JSONB, nullable, no default, no index; revision
+    `0022_lease_moves`, `models.py:931-942`):** a list of groups
+    `{"ip", "interface", "vd", "source", "logid", "dhcp_msg", "times"}`, one per those six
+    values, `times` as integer epoch microseconds (UTC), sorted, once each; the groups sorted by
+    the six fields, `null` after every text (`lookup/refs.py:339`, `moves_json`). No row id (a
+    reload changes ids) and no `"from"` field. NULL: not recorded (a lease written before the
+    revision, an ARP interval); `[]`: recorded, none. `parse_moves` (`refs.py:384`) never raises
+    on a stored value: a damaged value can only lack moves. The column is deferred and raises when
+    loaded by accident; only the lease job and the check read it, by `select(Lease.id,
+    Lease.moves)`.
+  - **Read (`lookup/attribution.py:1350-1400`):** for a chain whose window starts before
+    `reads_from`, one more query reads the moves of those leases; a move counts in
+    `(since, min(reads_from, T − 1 µs)]` and is tested again with today's settings and networks:
+    rules 1, 2, 4 and 5 of `trust.refusal` (`stored_refusal`, `attribution.py:230`; rule 5 lowers
+    the message ASCII-only, as PostgreSQL's `lower()` does under the installer's C locale), the
+    logid still mapped to `assigned`, `_bears` (interface, VDOM, D33's key) and an address other
+    than the chain's. Inside the days nothing changes: the rows decide.
+  - **Positive evidence only; the clamp note is unchanged (W5-G-17 (b)).** A recorded move can
+    only lower a chain. `_targets` keeps `_from(since, mark=True)`
+    (`attribution.py:1163-1169`), so a look-back that reaches before the first day still carries
+    `lookback_clamped_to_window` with its text (`texts.py:247-257`), whether or not moves are
+    recorded. Dropping the note for a fully recorded lease would need a texts change and is an
+    owner question.
+  - **Gaps that stay:** (a) the held branch (c2, `attribution.py:1245`) keeps the days-only
+    reach: it finds rows the build refused, which the job never keeps (Q1, default accepted);
+    (b) the network filter is applied at write time (Q2, default accepted): a move between two
+    networks configured differently at build time and merged or unconfigured since is not
+    recorded; (c) rows refused at build time and later trusted, and rows loaded but never
+    rebuilt, are not recorded; (d) a lease written before the upgrade (NULL) reads the days only,
+    as under W5-G-17, until a run follows it.
+  - **No backfill and no recommended rebuild.** The revision cannot run D33 and the trust rules
+    (revisions never import application code), and only the window's rows are in the database.
+    Reloads do not trigger lease rebuilds: `leases.late_evidence` ignores days older than
+    `db.retention_days` (`correlation/late.py:17-20`, `:72-75`), and an archive reload restores
+    the same line counts per raw day (`IngestService._reset_file`), so nothing re-records old
+    moves from reloaded rows. Every existing lease keeps NULL; the job records from its next run
+    on.
+  - **One-off write on the first incremental run after the upgrade:** every open DHCP lease of
+    the older program (moves NULL) is followed by the run and written once with its moves (`[]`
+    for most), with a new `updated_at` (`leases.py:661-679`). Nothing reads NULL and `[]`
+    differently in a lookup; later runs read an open lease's moves only when they change
+    (`run_incremental` tests them for NULL only, `leases.py:1355`). A lease that ended before a
+    run's range stays NULL.
+  - **Performance:** the new guard `test_the_recorded_moves_of_a_hundred_chains_are_fast` (100
+    `mt_dhcp` chains, 1,000 recorded times each, decoded and tested in memory) stays under the
+    0.2 s of 3.8 (0.102 s for the converted-row query and 0.034 s for `_recorded_moves` on the
+    2026-11-04 run; the guard asserts the decoded result, 100 leases with all their times); the
+    existing `test_the_converted_row_query_of_a_hundred_chains_is_fast` is unchanged (0.082 s).
+    A lease's moves have no bound but its life. `_seed_candidates` reads the moves of every seed
+    on every rebuild (`leases.py:842`), so each same-day rebuild of the service
+    (`worker/service.py:246`) reads all open leases' moves: their part outside `[lo, hi)` must be
+    recomputed, so the incremental job's shortcut does not apply.
+  - **Rollback:** the downgrade of `0022_lease_moves` (`v0022_lease_moves.py:53-55`) drops
+    `leases.moves` only: no raw log, log row or other lease column changes, no 5651 data is lost.
+    A `0021_db_window` program ignores the `"vd"` keys of #127-2 (`EvidenceRef.from_dict` reads
+    its own keys) and drops them from a lease it rewrites. Moves left stale after a rollback
+    without the downgrade are harmless: moves only ever add evidence (a move the 0021 program
+    saw is simply missing), and a rebuild of the lease's days cuts them to the lease again.
+  - **Tests:** renamed `test_the_missed_move_check_reads_from_the_first_day_and_says_so` →
+    `test_the_missed_move_check_reads_the_recorded_moves_before_the_first_day` (and its
+    `EMITTED_BY` entry in `test_lookup_fortigate_only.py`); new in `test_lookup_lookback.py`:
+    `test_the_lookup_reads_the_moves_the_lease_job_recorded` (job to lookup, nothing stored by
+    hand), `test_a_recorded_move_is_tested_again_with_todays_settings`,
+    `test_the_recorded_moves_reach_up_to_the_first_day`,
+    `test_a_recorded_move_of_a_fortigate_lease_needs_its_interface_and_vdom` (also keeps the
+    tests' `record_moves` equal to what a job run writes); `worker/tests/test_lease_moves.py`,
+    `worker/tests/test_lease_moves_format.py`, `worker/tests/test_lookup_stored_refusal.py`,
+    `db/tests/test_migration_0022.py`; the `recorded` variants of
+    `test_a_mikrotik_lease_kept_open_reads_back_one_probe_window`; the guard above.
+- **#127-2: a stored FortiGate ref keeps the VDOM of its row.** Every `fg_dhcp` ref the lease job
+  writes into `leases.evidence` carries `"vd"` (the row's `extra.vd`, `null` without one;
+  `refs.py:200`, `ref_dict`). It is not part of `EvidenceRef`, the API or the stored outcomes
+  (`to_dict` is unchanged). A lease's newest record read from its stored ref (W5-G-17 (b)) now
+  has its VDOM, so D33's VDOM rule applies to it as to the row:
+  `test_a_newest_record_before_the_days_is_the_stored_one[ref-with-vdom]` goes from `low` to
+  `high` (an ACK of the MAC in another VDOM is skipped). `_annotated` (`leases.py:861`) takes a
+  seed's VDOM from its stored ref first, so D33 still closes it once the row of its newest ACK is
+  gone. A ref written before the upgrade has no `"vd"` and keeps today's rule (any VDOM counts);
+  it gains the key when a rebuild reads its row again, so an answer for an old moment can change
+  once, when that happens.
+- **Pins outside #127's files, follow-ups for their owners:** `docs/DATA-MODEL.md` (the revision
+  list at :3-5, the `leases` row at :268: the `moves` column and the `"vd"` key of the evidence
+  element format); `docs/CORRELATION.md` (:84-92 and :936-948, "reads about 12 days" of the
+  converted-row check: the recorded moves before the first day); `lookup/types.py:330-332`
+  (`EvidenceRef.to_dict` says it is also the element format of `leases.evidence`; an `fg_dhcp`
+  element now also carries `"vd"`); `db/tests/test_migration_0021.py` (pin `revision=REVISION`
+  in its `upgrade(...)` calls, as `test_migration_0020.py` does: 9 tests fail at head
+  `0022_lease_moves` until then); #147's `REVISION` pins in `db/tests/test_cli_downgrade.py`
+  (whichever of #147 and #127 merges second updates them).
