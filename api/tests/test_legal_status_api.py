@@ -37,7 +37,7 @@ from arcilogger_core.seal import Sealer
 from arcilogger_core.timeutil import isoformat_site
 from arcilogger_core.tsa.mock import MockTsa
 from arcilogger_db.models import AuditLog, Lease, Person
-from arcilogger_worker.alerts.system import pinned_roots, stamp_in_use
+from arcilogger_worker.alerts.system import crl_stamp, pinned_roots, stamp_in_use
 from arcilogger_worker.vaulttesting import SealedVault, at_site, make_vault
 
 Login = Callable[..., LoggedIn]
@@ -709,6 +709,19 @@ def test_crl_stale_not_for_a_mock_install(site: Site, admin: TestClient) -> None
     site.sealed(test_root=True)
     assert stamp_in_use(site.layout, pinned_roots(site.config, site.layout)) is not None
     assert codes(get(admin)) == ["provider_not_legal"]
+
+
+@pytest.mark.parametrize("test_root", [True, False])
+def test_crl_stamp_leaves_out_only_a_chain_to_the_test_root(site: Site, test_root: bool) -> None:
+    """``crl_stamp``, the one rule ``R20-crl`` and ``crl_stale`` share (W5-C-13): no stamp for
+    a chain to ARCILOGGER's test root, the stamp itself for any other root."""
+    site.use(legal(site.config))
+    site.sealed(test_root=test_root)
+    site.pin_roots()
+    stamp = stamp_in_use(site.layout, pinned_roots(site.config, site.layout))
+    assert stamp is not None
+    assert crl_stamp(stamp) is (None if test_root else stamp)
+    assert crl_stamp(None) is None
 
 
 @pytest.mark.parametrize(("test_root", "stale"), [(True, False), (False, True)])

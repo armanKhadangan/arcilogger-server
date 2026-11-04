@@ -1054,6 +1054,7 @@ All Wave 5 questions are answered (2026-11-02).
   stamp's chain whatever its root. The legal-status tests and samples now seal through a made-up
   CA outside the test organization (`legalstatus.testing.simulated_ca`): the samples' Kamu SM
   cases run on a site of their own whose sealed days repeat the capture's. Tests:
+  `test_crl_stamp_leaves_out_only_a_chain_to_the_test_root`,
   `test_crl_stale_not_for_a_mock_install`,
   `test_crl_stale_only_for_a_root_outside_the_test_organization` and
   `test_crl_stale_on_a_mixed_site_by_the_newest_sealed_day` (`api/tests/test_legal_status_api.py`).

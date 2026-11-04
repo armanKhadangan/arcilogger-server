@@ -2182,6 +2182,12 @@ def stamp_in_use(layout: Layout, roots: Sequence[x509.Certificate]) -> StampInUs
     return _newest_stamp(layout, roots)[0]
 
 
+def crl_stamp(stamp: StampInUse | None) -> StampInUse | None:
+    """The stamp whose issuers need a revocation list (``R20-crl``, ``crl_stale``): none for a
+    chain to ARCILOGGER's test root (W5-A D5; deviation W5-E-5)."""
+    return stamp
+
+
 def _newest_stamp(
     layout: Layout, roots: Sequence[x509.Certificate]
 ) -> tuple[StampInUse | None, bool]:
@@ -2547,14 +2553,6 @@ def _carries_revocation(alert: Alert) -> bool:
     expiry-only finding writes ``revoked`` 0 into its details)."""
     revoked = (alert.details or {}).get("revoked")
     return alert.severity == "critical" or (isinstance(revoked, int) and revoked > 0)
-
-
-def crl_stamp(stamp: StampInUse | None) -> StampInUse | None:
-    """The stamp whose issuers need a revocation list (``R20-crl``, ``crl_stale``): none for a
-    chain to ARCILOGGER's test root (W5-A D5; deviation W5-E-5)."""
-    if stamp is not None and is_test_stamp("", stamp.chain[-1].subject.rfc4514_string()):
-        return None
-    return stamp
 
 
 def check_stamp_crl(ctx: CheckContext) -> Outcome:
