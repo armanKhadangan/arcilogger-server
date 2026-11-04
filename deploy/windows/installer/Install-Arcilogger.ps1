@@ -117,7 +117,17 @@
                 FortiGate DHCP cannot read those lines) and prints the count; a failure or
                 -SkipDatabase only warns. The next arcilogger-db upgrade restores the leases
                 the previous version left as they were and prints the days to rebuild for the
-                rest.
+                rest. Then, without -RestoreDatabase and when this version's schema has
+                0021_db_window (daily partitions) and the previous version's does not (both read
+                from their migrations folders) and the database is at 0021_db_window or later
+                (arcilogger-db current), "arcilogger-db schema downgrade --to <revision> --json"
+                takes the database to the previous version's head, never below the revision 0021
+                revises, before the swap (issue #122). A failed downgrade stops the rollback with
+                3 before the swap: this version stays installed; run -Rollback again (it goes on
+                where it stopped) or -Rollback -RestoreDatabase. A previous schema that cannot be
+                told, or -SkipDatabase when the downgrade is needed, stops it with 2 before any
+                change. -RestoreDatabase restores the dump into a new database and renames it into
+                place; the replaced database is kept as <name>_replaced_<time>.
     -Uninstall: removes services, scheduled tasks, the Event Log source ARCILOGGER-Admin, firewall
                 rules and the ARCILOGGER program folders (only folders that this installer
                 created) and restores the power settings Set-ArciPower.ps1 recorded. It NEVER
@@ -272,6 +282,10 @@ $script:RestoreStarted = $false      # pg_restore was started (the database cont
 $script:LastDump = $null
 $script:ConfigRestored = $false      # Restore-ConfigForProgram put the copy from before the upgrade back
 $script:LeasesLowered = $false       # a rollback lowered the FortiGate leases and this version still runs
+$script:SchemaDowngraded = $false    # a rollback took the database schema down and this version still runs
+$script:SchemaDowngradeFailed = $false   # the schema downgrade of a rollback failed before the swap
+$script:SchemaDowngradeExit = $null  # ... and the exit code of its command (2: it refused the target)
+$script:SchemaChain = @()            # this version's Alembic revisions, oldest first (Get-SchemaRollbackPlan)
 $PreviousDir = $null
 $ConfigPath = $null
 $transcript = $null
@@ -493,6 +507,10 @@ $VenvPython = Join-Path $Venv 'Scripts\python.exe'
 $BasePython = Join-Path $InstallDir 'python\python.exe'
 $CoreExe = Join-Path $Venv 'Scripts\arcilogger-core.exe'
 $DbExe = Join-Path $Venv 'Scripts\arcilogger-db.exe'
+# The schema downgrade of a rollback (issue #122): this version's command (arcilogger-db <command>
+# --to <revision> --json), and the revision of the daily partitions a version before it cannot handle.
+$SchemaDowngradeCommand = @('schema', 'downgrade')
+$DailyPartitionRevision = '0021_db_window'
 $ApiExe = Join-Path $Venv 'Scripts\arcilogger-api.exe'
 $ServicesDir = Join-Path $InstallDir 'services'
 $ScriptsDir = Join-Path $ReleaseRoot 'scripts'
@@ -794,7 +812,25 @@ function Get-RestoreDump {
     $latest.FullName
 }
 
+function Get-RestoreDatabaseName([string]$Name, [string]$Tag, [string]$Stamp) {
+    <# <name>_<tag>_<stamp>, the name cut so that it fits PostgreSQL's 63 characters. #>
+    $suffix = '_{0}_{1}' -f $Tag, $Stamp
+    $Name.Substring(0, [Math]::Min($Name.Length, 63 - $suffix.Length)) + $suffix
+}
+
 function Invoke-DatabaseRestore {
+    <#
+    The dump replaces the database (docs/YEDEKLEME.md section 5: a restore always goes into a new
+    database). pg_restore runs in one transaction into a new database <name>_restore_<stamp>,
+    with the owner, encoding, locale, database settings and rights of the current one, and only
+    then, in one transaction, the current database is renamed aside to <name>_replaced_<stamp>
+    (kept: the rows written after the dump are only there) and the new one into its place. A
+    restore into the current database (pg_restore --clean) cannot drop what the dump does not
+    know: a newer schema's objects that depend on the dump's (issue #122: 0021_db_window's
+    archive_reloads on lookups) made it fail. A failure before the rename drops the new database
+    and leaves the current one as it was. The database services are stopped (the rename needs
+    no other session on either database).
+    #>
     $db = Get-DatabaseSettings
     $dump = Get-RestoreDump
     if (-not $Force) {
@@ -802,15 +838,58 @@ function Invoke-DatabaseRestore {
         if ($answer -notmatch '^(e|E|y|Y)') { throw 'İptal edildi [cancelled].' }
     }
     $credential = Get-PgCredential
-    # TimescaleDB needs its restore mode around pg_restore (verify on site, docs/KURULUM.md).
+    $stamp = [DateTime]::UtcNow.ToString('yyyyMMddHHmmss')
+    $restore = Get-RestoreDatabaseName -Name ([string]$db.name) -Tag 'restore' -Stamp $stamp
+    $replaced = Get-RestoreDatabaseName -Name ([string]$db.name) -Tag 'replaced' -Stamp $stamp
+    $names = @(("\set db_name '{0}'" -f $db.name), ("\set new_name '{0}'" -f $restore), ("\set old_name '{0}'" -f $replaced)) -join "`n"
+    $provider = (Invoke-Psql -Database 'postgres' -TuplesOnly -Sql ($names + "`nSELECT datlocprovider FROM pg_database WHERE datname = :'db_name';`n")).StdOut.Trim()
+    if ($provider -ne 'c') {
+        # The locale of a database PostgreSQL's ICU provides is not copied: restore it by hand.
+        throw ("Veritabanı '{0}' bulunamadı ya da yerel ayarı libc değil (datlocprovider '{1}'); yedeği docs\YEDEKLEME.md bölüm 5'e göre elle geri yükleyin [database not found, or its locale is not libc: restore the dump by hand, docs\BACKUP.md section 5]" -f $db.name, $provider)
+    }
+    # TimescaleDB needs its restore mode around pg_restore (verify on site, docs/KURULUM.md): the
+    # current database's stops its background workers (they would keep it open for the rename).
     $timescale = (Invoke-Psql -Database $db.name -TuplesOnly -Sql "SELECT count(*) FROM pg_extension WHERE extname = 'timescaledb';`n").StdOut.Trim() -eq '1'
+    $create = @(
+        '\set ON_ERROR_STOP on',
+        $names,
+        "SELECT format('CREATE DATABASE %I OWNER %I TEMPLATE template0 ENCODING %L LOCALE_PROVIDER libc LC_COLLATE %L LC_CTYPE %L', :'new_name', pg_get_userbyid(datdba), pg_encoding_to_char(encoding), datcollate, datctype) FROM pg_database WHERE datname = :'db_name' \gexec",
+        # The database's own settings (timescaledb.telemetry_level 'off' among them, before the
+        # extension exists) and rights, as Invoke-DatabaseProvision gave them.
+        "SELECT format('ALTER DATABASE %I SET %s = %L', :'new_name', array_to_string(ARRAY(SELECT quote_ident(part) FROM unnest(string_to_array(split_part(c, '=', 1), '.')) AS part), '.'), substr(c, strpos(c, '=') + 1)) FROM pg_db_role_setting s CROSS JOIN LATERAL unnest(s.setconfig) AS c WHERE s.setrole = 0 AND s.setdatabase = (SELECT oid FROM pg_database WHERE datname = :'db_name') AND split_part(c, '=', 1) <> 'timescaledb.restoring' \gexec",
+        "SELECT format('REVOKE ALL ON DATABASE %I FROM PUBLIC', :'new_name') FROM pg_database WHERE datname = :'db_name' AND datacl IS NOT NULL \gexec",
+        "SELECT format('GRANT %s ON DATABASE %I TO %s', a.privilege_type, :'new_name', CASE WHEN a.grantee = 0 THEN 'PUBLIC' ELSE quote_ident(pg_get_userbyid(a.grantee)) END) FROM pg_database d CROSS JOIN LATERAL aclexplode(d.datacl) AS a WHERE d.datname = :'db_name' \gexec"
+    ) -join "`n"
+    $created = $false
+    $renamed = $false
     if ($timescale) { [void](Invoke-Psql -Database $db.name -Sql "SELECT timescaledb_pre_restore();`n") }
-    $script:RestoreStarted = $true
-    # One transaction: a failed restore leaves the database as it was.
-    [void](Invoke-PgTool -Tool 'pg_restore.exe' -ArgumentList @('-h', [string]$db.host, '-p', [string]$db.port, '-U', $credential.UserName, '--clean', '--if-exists', '--single-transaction', '-d', [string]$db.name, $dump))
+    try {
+        [void](Invoke-Psql -Database 'postgres' -Sql ($create + "`n"))
+        $created = $true
+        if ($timescale) { [void](Invoke-Psql -Database $restore -Sql "CREATE EXTENSION IF NOT EXISTS timescaledb;`nSELECT timescaledb_pre_restore();`n") }
+        $script:RestoreStarted = $true
+        # One transaction: a failed restore leaves an empty new database, dropped below.
+        [void](Invoke-PgTool -Tool 'pg_restore.exe' -ArgumentList @('-h', [string]$db.host, '-p', [string]$db.port, '-U', $credential.UserName, '--single-transaction', '--exit-on-error', '-d', $restore, $dump))
+        $swap = @('\set ON_ERROR_STOP on', $names, 'BEGIN;', 'ALTER DATABASE :"db_name" RENAME TO :"old_name";', 'ALTER DATABASE :"new_name" RENAME TO :"db_name";', 'COMMIT;') -join "`n"
+        [void](Invoke-Psql -Database 'postgres' -Sql ($swap + "`n"))
+        $renamed = $true
+    }
+    finally {
+        if (-not $renamed) {
+            if ($created) {
+                try { [void](Invoke-Psql -Database 'postgres' -Sql ($names + "`n" + 'DROP DATABASE IF EXISTS :"new_name" WITH (FORCE);' + "`n")) }
+                catch { Write-ArciWarn ("Yarım kalan '{0}' veritabanı silinemedi; elle silin [the half-restored database could not be dropped, drop it by hand]: {1}" -f $restore, $_.Exception.Message) }
+            }
+            if ($timescale) {
+                try { [void](Invoke-Psql -Database $db.name -Sql "SELECT timescaledb_post_restore();`n") }
+                catch { Write-ArciWarn ("'{0}' için timescaledb_post_restore() çalışmadı; elle çalıştırın [run it by hand]: {1}" -f $db.name, $_.Exception.Message) }
+            }
+        }
+    }
     if ($timescale) { [void](Invoke-Psql -Database $db.name -Sql "SELECT timescaledb_post_restore();`n") }
-    Write-InstallState @{ pending_database_restore = $null; last_restore = $dump }
+    Write-InstallState @{ pending_database_restore = $null; last_restore = $dump; replaced_database = $replaced }
     Write-ArciInfo ("Veritabanı geri yüklendi [database restored]: {0}" -f $dump)
+    Write-ArciWarn ("Önceki veritabanı '{0}' adıyla saklandı: yedekten sonra yazılan satırlar yalnızca onda; diskte yer tutar, silmek yöneticinin kararıdır (docs\YEDEKLEME.md bölüm 5) [the replaced database is kept as '{0}': the rows written after the dump are only there; it takes disk space, removing it is the administrator's decision (docs\BACKUP.md section 5)]" -f $replaced)
 }
 
 # --- licence -------------------------------------------------------------------------------------------
@@ -3042,13 +3121,17 @@ function Complete-FailedChange {
     param([ValidateSet('upgrade', 'repair', 'rollback')][string]$Operation, [string]$Reason)
     Write-Host ''
     Write-Host ("HATA [error] ({0}): {1}" -f $Operation, $Reason) -ForegroundColor Red
-    $databaseUncertain = [bool]($script:MigrationStarted -or $script:RestoreStarted)
     $swapBack = ($Operation -eq 'upgrade') -and $script:ProgramMoved
     if ($swapBack) { Write-Host 'Önceki sürüm geri getiriliyor [restoring the previous version] ...' -ForegroundColor Yellow }
     else { Write-Host 'Hizmetler ve görevler geri getiriliyor [bringing services and tasks back] ...' -ForegroundColor Yellow }
-    # Before this version's services start again: their jobs would rewrite the lowered leases.
-    $leaseProblem = $(if ($Operation -eq 'rollback' -and $script:LeasesLowered) { Restore-LoweredLeases })
+    # Before this version's services start again: they need this version's schema, and their
+    # jobs would rewrite the lowered leases. Its "arcilogger-db upgrade" puts back both, or the
+    # leases alone; a schema it cannot put back keeps the database services stopped.
+    $schemaProblem = $(if ($Operation -eq 'rollback' -and $script:SchemaDowngraded) { Restore-DowngradedSchema })
+    $leaseProblem = $(if ($Operation -eq 'rollback' -and $script:LeasesLowered -and -not $schemaProblem) { Restore-LoweredLeases })
+    $databaseUncertain = [bool]($script:MigrationStarted -or $script:RestoreStarted -or $schemaProblem)
     $problems = @(Restore-ArciRuntime -SwapBack:$swapBack -CollectorOnly:$databaseUncertain)
+    if ($schemaProblem) { $problems += $schemaProblem }
     if ($leaseProblem) { $problems += $leaseProblem }
     $dump = $script:LastDump
     Write-InstallState @{
@@ -3073,6 +3156,20 @@ function Complete-FailedChange {
         else {
             Write-Host ('  Hatayı giderip yeniden çalıştırın [fix the error and run again]: powershell -ExecutionPolicy Bypass -File "{0}"' -f $installerPath)
         }
+    }
+    if ($Operation -eq 'rollback' -and $script:SchemaDowngradeFailed) {
+        # Issue #122: stopped before the swap, the previous version never runs on this schema.
+        $installerPath = Join-Path $InstallDir 'installer\Install-Arcilogger.ps1'
+        Write-Host 'Geri alma durduruldu: program değiştirilmedi, bu sürüm kurulu kaldı [the rollback stopped: the program was not swapped, this version stays installed].' -ForegroundColor Yellow
+        if ($script:SchemaDowngradeExit -ne 2) {
+            Write-Host '  -Rollback komutunu yeniden çalıştırın: şemanın indirilmesi kaldığı yerden sürer [run -Rollback again: the downgrade goes on where it stopped].'
+            Write-Host '  Yine olmazsa veritabanını yükseltme öncesi yedekten geri yükleyin [if it keeps failing, restore the database from the pre-upgrade backup] (docs\YEDEKLEME.md bölüm 5, docs\BACKUP.md section 5):'
+        }
+        else {
+            # The command refused the revision itself: running it again changes nothing.
+            Write-Host '  Veritabanını yükseltme öncesi yedekten geri yükleyin [restore the database from the pre-upgrade backup] (docs\YEDEKLEME.md bölüm 5, docs\BACKUP.md section 5):'
+        }
+        Write-Host ('    powershell -ExecutionPolicy Bypass -File "{0}" -Rollback -RestoreDatabase' -f $installerPath)
     }
     if ($problems.Count -gt 0) {
         Write-Host ''
@@ -3295,6 +3392,184 @@ function Restore-LoweredLeases {
     'FortiGate kiraları düşük güvende kaldı ({0}); yönetici PowerShell''inde çalıştırın, sonra yazdırdığı günlerin kiralarını yeniden oluşturun [FortiGate leases stay at low confidence: run this in an administrator PowerShell, then rebuild the leases of the days it prints]: {1}' -f $problem, $command
 }
 
+function Get-SchemaRollbackPlan {
+    <#
+    Issue #122: whether a rollback without -RestoreDatabase takes the database schema down before
+    the swap, and to which revision, decided before any change. The revisions of both programs
+    are read from their migrations folders, without Python and without the database
+    (Get-ArciAlembicChain; a capability check as Test-PreviousLeaseRollbackModule's, #81). A
+    version from before 0021_db_window creates and drops monthly partitions only, so it gets its
+    own schema back: the target is its head, but never below the revision 0021_db_window revises.
+    The revisions before it were made for a previous version to run on (a rollback has never
+    undone them: the NAT rows, the FortiGate leases of contract 2.2.1, which the next upgrade
+    restores), and their downgrades delete data (0017's the FortiGate DHCP table; a question to
+    the manager on #122). Nothing to do when this version has no 0021_db_window or the previous
+    version has it too (it handles daily partitions; a rollback undoes no later revision either,
+    as before #122). The database's own revision is read in the step (Invoke-SchemaDowngradeStep).
+    Stops the run (2) when the previous head cannot be determined (never a guess; -RestoreDatabase
+    needs no downgrade), and when the downgrade is needed under -SkipDatabase.
+    #>
+    $ours = Join-Path $Venv 'Lib\site-packages\arcilogger_db\migrations\versions'
+    $theirs = Join-Path $PreviousDir 'venv\Lib\site-packages\arcilogger_db\migrations\versions'
+    $detail = [pscustomobject]@{ command = ('arcilogger-db ' + ($SchemaDowngradeCommand -join ' ')); needed = $false; to = $null; installed_head = $null; previous_head = $null; previous_migrations = $theirs; database_head = $null; result = $null }
+    $installerPath = Join-Path $InstallDir 'installer\Install-Arcilogger.ps1'
+    $refuse = {
+        param([string]$Message)
+        Add-PlanItem -Id 'database.downgrade' -Status 'fail' -Text $Message -Detail $detail
+        Stop-Installer 2 $Message
+    }
+    $unknown = 'Geri alınan sürümün veritabanı şeması anlaşılamadı, hiçbir şey değiştirilmedi [could not tell the restored version''s database schema, nothing changed] ({0}). -RestoreDatabase ile yükseltme öncesi yedek veritabanının yerine geçer, şema indirilmez [with -RestoreDatabase the pre-upgrade dump replaces the database, no downgrade]: powershell -ExecutionPolicy Bypass -File "{1}" -Rollback -RestoreDatabase'
+    try {
+        $chain = Get-ArciAlembicChain -Folder $ours
+        $detail.installed_head = $chain[-1]
+        $window = [array]::IndexOf($chain, $DailyPartitionRevision)
+        if ($window -lt 0) { return $detail }
+        $previous = Get-ArciAlembicChain -Folder $theirs
+        $detail.previous_head = $previous[-1]
+        if ($previous -ccontains $DailyPartitionRevision) { return $detail }
+        $at = [array]::IndexOf($chain, $detail.previous_head)
+        if ($at -lt 0 -or $window -eq 0) {
+            throw ('önceki sürümün şema başı bu sürümün geçişlerinde yok [the previous version''s head is not one of this version''s revisions]: {0}' -f $detail.previous_head)
+        }
+    }
+    catch { & $refuse ($unknown -f $_.Exception.Message, $installerPath) }
+    $script:SchemaChain = $chain
+    $detail.needed = $true
+    $detail.to = $chain[[Math]::Max($at, $window - 1)]
+    if ($SkipDatabase) {
+        & $refuse ('Veritabanı şeması geri alınan sürümünkine indirilmeli ({0} -> {1}), -SkipDatabase ile geri alma yapılmadı, hiçbir şey değiştirilmedi [the database schema must go down to the restored version''s: no rollback with -SkipDatabase, nothing changed]. -SkipDatabase olmadan ya da -RestoreDatabase ile çalıştırın [run it without -SkipDatabase, or with -RestoreDatabase].' -f $detail.installed_head, $detail.to)
+    }
+    $detail
+}
+
+function Get-DatabaseSchemaRevision {
+    <#
+    The database's Alembic revision, from this version's read-only "arcilogger-db current" (exit
+    0 at this version's head, 1 below it; the line "Veritabanı: <revision>"). Throws when the
+    command fails or does not name one revision (no schema, several heads).
+    #>
+    $result = Invoke-ArciProcess -FilePath $DbExe -ArgumentList @('current', '--config', $ConfigPath) -AllowFailure -TimeoutSeconds 300
+    $match = [regex]::Match([string]$result.StdOut, '(?m)^Veritaban\S*\s*:\s*([A-Za-z0-9_]+)\s*$')
+    if ($result.ExitCode -notin @(0, 1) -or -not $match.Success) {
+        throw ('veritabanının şema sürümü okunamadı [could not read the database''s schema revision] ({0})' -f (Get-DbLicenseProblem $result))
+    }
+    $match.Groups[1].Value
+}
+
+function Invoke-SchemaDowngradeStep($Plan) {
+    <#
+    Issue #122 (Get-SchemaRollbackPlan decided it): after the services stopped and after the lease
+    step, which works on this version's schema, and before the swap, this version's
+    "arcilogger-db schema downgrade --to <revision> --json" takes the database down to the
+    previous version's schema; 0021_db_window's downgrade merges the daily partitions into
+    monthly ones, a step per table and month, and goes on where an interrupted run stopped
+    (W5-G-15). First the database's own revision (Get-DatabaseSchemaRevision): one from before
+    0021_db_window (an -Upgrade -SkipDatabase left it there) has no daily partitions, so nothing
+    is done. The command takes its own lock and writes the settings.change entry of
+    db.retention_days (30 -> 400) itself; its JSON is kept in the plan's detail (result). A
+    failure stops the rollback before the swap (Complete-FailedChange): this version stays
+    installed on its own schema (the committed steps leave a valid layout of it, and its
+    "arcilogger-db upgrade" runs first unless the command certainly changed nothing), and the
+    output names the restore of the pre-upgrade dump as the way back.
+    #>
+    if (-not $Plan.needed) {
+        $previous = $(if ($Plan.previous_head) { $Plan.previous_head } else { '-' })
+        $skipped = 'Veritabanı şeması indirilmiyor: geri alınan sürüm {0} şemasını biliyor ya da bu sürümün şeması ondan önce [database schema not downgraded: the restored version knows {0}, or this version''s schema is from before it] ({1}; {2})' -f $DailyPartitionRevision, $Plan.installed_head, $previous
+        Add-PlanItem -Id 'database.downgrade' -Status 'skipped' -Text $skipped -Detail $Plan
+        Write-ArciStep $skipped
+        return
+    }
+    $text = 'Veritabanı geri alınan sürümün şemasına indiriliyor [downgrading the database to the restored version''s schema] ({0} -> {1}, arcilogger-db {2} --to {1})' -f $Plan.installed_head, $Plan.to, ($SchemaDowngradeCommand -join ' ')
+    Invoke-Step 'database.downgrade' $text {
+        $problem = $null
+        try {
+            $Plan.database_head = Get-DatabaseSchemaRevision
+            $at = [array]::IndexOf($script:SchemaChain, $Plan.database_head)
+            if ($at -lt 0) {
+                throw ('veritabanı bu sürümün bilmediği bir şema sürümünde [the database is at a revision this version does not know]: {0}' -f $Plan.database_head)
+            }
+        }
+        catch { $problem = $_.Exception.Message }
+        if (-not $problem -and $at -lt [array]::IndexOf($script:SchemaChain, $DailyPartitionRevision)) {
+            Write-ArciInfo ('Veritabanı şeması {0}, {1} öncesinde: birleştirilecek günlük bölüm yok, indirilmedi [the database schema is at {0}, from before {1}: no daily partitions, not downgraded]' -f $Plan.database_head, $DailyPartitionRevision)
+            return
+        }
+        $result = $null
+        if (-not $problem) {
+            # Before the call: a command that committed the version's move and then failed to
+            # say so (the connection dropped at the commit, the process was stopped) leaves the
+            # database at the previous version's schema; this version's upgrade (a no-op at its
+            # head) then brings its own back before its services start (Restore-DowngradedSchema).
+            $script:SchemaDowngraded = $true
+            # No time limit, as the upgrade: a month of a large table takes as long as it takes;
+            # the command's lock timeout ends a wait for a lock.
+            try { $result = Invoke-ArciProcess -FilePath $DbExe -ArgumentList (@($SchemaDowngradeCommand) + @('--to', $Plan.to, '--json', '--config', $ConfigPath)) -AllowFailure }
+            catch { $problem = $_.Exception.Message }
+        }
+        if ($result) { $script:SchemaDowngradeExit = $result.ExitCode }
+        if ($result -and $result.ExitCode -eq 0) {
+            $answer = $null
+            try { $answer = ([string]$result.StdOut) | ConvertFrom-Json } catch { $answer = $null }
+            $Plan.result = $answer
+            if ((Get-ArciJsonField -Object $answer -Name 'to') -ceq $Plan.to) {
+                $line = 'Veritabanı şeması [database schema]: {0} -> {1}' -f (Get-ArciJsonField -Object $answer -Name 'from'), $Plan.to
+                $days = Get-ArciJsonField -Object $answer -Name 'retention_days'
+                $audit = Get-ArciJsonField -Object $answer -Name 'audit_id'
+                $pending = Get-ArciJsonField -Object $answer -Name 'upgrade_audit_id'
+                if ($null -ne $days) { $line += ('; db.retention_days {0} -> {1}' -f (Get-ArciJsonField -Object $days -Name 'before'), (Get-ArciJsonField -Object $days -Name 'after')) }
+                if ($null -ne $audit) { $line += (', denetim kaydı [audit entry] {0}' -f $audit) }
+                if ($null -ne $pending) { $line += ('; yükseltmenin değişikliği [the upgrade''s change]: denetim kaydı [audit entry] {0}' -f $pending) }
+                Write-ArciInfo $line
+                return
+            }
+            $problem = 'beklenmeyen yanıt [unexpected answer]: {0}' -f ((([string]$result.StdOut) -replace '\s+', ' ').Trim())
+        }
+        elseif ($result -and $result.ExitCode -in @(2, 3)) {
+            # Checked before the command changes anything: a revision it refuses (2), a database
+            # it cannot reach (3). This version's schema is as it was.
+            $script:SchemaDowngraded = $false
+            $problem = Get-DbLicenseProblem $result
+            if ($result.ExitCode -eq 2) { $problem = Get-CommandSaid $result }
+        }
+        elseif ($result) { $problem = Get-CommandSaid $result }
+        $script:SchemaDowngradeFailed = $true
+        throw ('Veritabanı geri alınan sürümün şemasına indirilemedi [the database could not be downgraded to the restored version''s schema] ({0})' -f $problem)
+    } $Plan
+}
+
+function Get-CommandSaid($Result) {
+    <# A command's own message, Turkish and English (its lines), in one line. #>
+    $said = (@((([string]$Result.StdErr) + "`n" + ([string]$Result.StdOut)) -split '\r?\n' | ForEach-Object { $_.Trim() } | Where-Object { $_ }) -join ' ')
+    if ($said.Length -gt 1000) { $said = $said.Substring(0, 1000) + '...' }
+    $(if ($said) { 'çıkış kodu {0} [exit code]: {1}' -f $Result.ExitCode, $said } else { Get-DbLicenseProblem $Result })
+}
+
+function Restore-DowngradedSchema {
+    <#
+    A rollback took the schema down (or its downgrade may have moved alembic's version before it
+    failed) and then failed before the swap: this version runs on, so its "arcilogger-db upgrade"
+    brings its schema back (a no-op for the version at its head; with the seed, the leases the
+    lease step lowered). No time limit, unlike Restore-LoweredLeases's 900 s on a schema at its
+    head: after a whole downgrade 0021_db_window's upgrade runs again, as long as it took the
+    first time. Returns the manual step when that did not work; the database services then stay
+    stopped (Complete-FailedChange).
+    #>
+    $command = '& "{0}" upgrade --config "{1}"' -f $DbExe, $ConfigPath
+    try {
+        $result = Invoke-ArciProcess -FilePath $DbExe -ArgumentList @('upgrade', '--config', $ConfigPath) -AllowFailure
+        if ($result.ExitCode -eq 0) {
+            $script:SchemaDowngraded = $false
+            $script:LeasesLowered = $false
+            Write-ArciInfo 'Veritabanı şeması yeniden bu sürümünkü [the database schema is this version''s again] (arcilogger-db upgrade)'
+            foreach ($line in @(([string]$result.StdOut) -split '\r?\n' | Where-Object { $_.Trim() })) { Write-ArciInfo $line.Trim() }
+            return
+        }
+        $problem = Get-DbLicenseProblem $result
+    }
+    catch { $problem = $_.Exception.Message }
+    'Veritabanı şeması bu sürümünkine geri getirilemedi ({0}); yönetici PowerShell''inde çalıştırın, sonra hizmetleri başlatın, ya da yükseltme öncesi yedeği geri yükleyin (-Rollback -RestoreDatabase) [the database schema is not this version''s again: run this in an administrator PowerShell, then start the services, or restore the pre-upgrade dump (-Rollback -RestoreDatabase)]: {1}' -f $problem, $command
+}
+
 function Invoke-RollbackMode {
     $previousState = Get-ArciProgramFolderState -Path $PreviousDir
     if ($previousState -eq 'foreign') {
@@ -3307,11 +3582,19 @@ function Invoke-RollbackMode {
     if ((Get-ArciProgramFolderState -Path $InstallDir) -eq 'foreign') {
         Stop-Installer 2 ("{0} ARCILOGGER'a ait değil [not an ARCILOGGER folder]." -f $InstallDir)
     }
+    # Before any change: a schema the previous version cannot tell stops the run here.
+    $schema = $(if (-not $RestoreDatabase) { Get-SchemaRollbackPlan })
     try {
         Invoke-Step 'tasks.disable' 'Zamanlanmış görevler duraklatılıyor [pausing scheduled tasks]' { Disable-ArciTasks }
+        # All of them (ArciIngest and ArciWorker too): the downgrade merges the partitions they write.
         Invoke-Step 'services.stop' 'Hizmetler durduruluyor [stopping services]' { Stop-ArciServices }
-        # With -RestoreDatabase the dump replaces the database: nothing to lower.
-        if (-not $RestoreDatabase) { Invoke-LeaseRollbackStep }
+        # With -RestoreDatabase the dump replaces the database: nothing to lower, nothing to take
+        # down. The lease step first: it works on this version's schema, which the downgrade
+        # changes (a failed downgrade then puts the leases back with Restore-LoweredLeases).
+        if (-not $RestoreDatabase) {
+            Invoke-LeaseRollbackStep
+            Invoke-SchemaDowngradeStep $schema
+        }
         Invoke-Step 'program.swap' ("{0} geri getiriliyor [restoring]" -f $PreviousDir) {
             $aside = '{0}.rolled-back-{1}' -f $InstallDir, [DateTime]::UtcNow.ToString('yyyyMMddHHmmss')
             $movedAside = $false
@@ -3325,12 +3608,17 @@ function Invoke-RollbackMode {
                 if ($movedAside) { Rename-ArciFolder -LiteralPath $aside -NewName (Split-Path -Leaf $InstallDir) }
                 throw
             }
-            # From here on the previous version runs on the lowered leases: nothing to undo.
+            # From here on the previous version runs on the lowered leases and on its own schema:
+            # nothing to undo.
             $script:LeasesLowered = $false
+            $script:SchemaDowngraded = $false
         }
         Invoke-Step 'services.remove' 'Hizmet kayıtları kaldırılıyor [removing service registrations]' { Remove-ArciServices }
         if ($RestoreDatabase) {
-            Invoke-Step 'database.restore' 'Veritabanı yükseltme öncesi yedekten geri yükleniyor [restoring pre-upgrade dump]' { Invoke-DatabaseRestore }
+            # After the swap the previous version must not run on this version's database (a
+            # schema from 0021_db_window on, issue #122): a restore that fails at any point, also
+            # before pg_restore, keeps the database services stopped (Complete-FailedChange).
+            Invoke-Step 'database.restore' 'Veritabanı yükseltme öncesi yedekten geri yükleniyor [restoring pre-upgrade dump]' { $script:RestoreStarted = $true; Invoke-DatabaseRestore }
         }
         # A version from before the browser administration refuses what the browser added.
         Invoke-Step 'config.compatible' 'Yapılandırma önceki sürümle yükleniyor, gerekirse yükseltme öncesi kopya geri konuyor [the configuration must load with the previous version, else the copy from before the upgrade is put back]' { Restore-ConfigForProgram }
