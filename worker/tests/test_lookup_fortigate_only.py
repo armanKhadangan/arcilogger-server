@@ -62,7 +62,8 @@ from arcilogger_worker.lookup import (
     run_lookup,
     trust,
 )
-from arcilogger_worker.lookup.attribution import Attributor
+from arcilogger_worker.lookup.attribution import MISSED_MOVE_WINDOW, Attributor
+from arcilogger_worker.lookup.refs import fg_dhcp_move, moves_json
 from arcilogger_worker.lookup.texts import ENGINE_EXPLANATIONS
 from arcilogger_worker.lookup.types import EXPLANATIONS, EvidenceRef
 from arcilogger_worker.testing import FIREWALL, FORTIGATE_DHCP_TEXTS, Evidence, tr
@@ -83,6 +84,8 @@ FORMAT_NOTES = {"fortigate_format_unverified", "fortigate_format_verified"}
 UNCONVERTED, OVERLAP = "fortigate_dhcp_not_converted_since_lease", "dhcp_sources_overlap"
 #: An unconfigured sender (D24).
 STRANGER = "unknown-192.0.2.7"
+#: Addresses in no configured network (the example site configures no 172.20.44.0/24).
+NOWHERE = "172.20.44.0/24"
 
 
 def build(session: Session, first: date, last: date) -> None:
@@ -692,6 +695,35 @@ def test_the_moment_of_the_missed_close_itself(db_session: Session, evidence: Ev
     assert note(at_line, UNCONVERTED) == {"last": iso(tr(DAY, 8, 41, 10)), "ip": PC}
 
 
+def record_moves(session: Session, lease: Lease) -> None:
+    """Store ``lease.moves`` as the lease job records it (issue #127): every converted ACK of
+    the lease's MAC for another address inside the lease, one group per address, interface,
+    VDOM, sender, logid and message (:func:`.refs.fg_dhcp_move`, the job's own constructor).
+    For a lease a test opens by hand, which the job never saw open; the tests that call it only
+    move a MAC to an address in no configured network (``172.20.44.x``), so the job would have
+    recorded each of those ACKs, not applied it (D33 closes nothing without a network)."""
+    rows = session.execute(
+        select(
+            FgDhcp.time,
+            FgDhcp.ip,
+            FgDhcp.interface,
+            FgDhcp.extra["vd"].astext.label("vd"),
+            FgDhcp.source,
+            FgDhcp.logid,
+            FgDhcp.dhcp_msg,
+        ).where(
+            FgDhcp.mac == lease.mac,
+            FgDhcp.ip != lease.ip,
+            FgDhcp.time > lease.start,
+            FgDhcp.logid == "0100026001",
+        )
+    ).all()
+    assert all(ipaddress.ip_address(row.ip) in ipaddress.ip_network(NOWHERE) for row in rows)
+    moves = moves_json(fg_dhcp_move(row) for row in rows)
+    session.execute(update(Lease).where(Lease.id == lease.id).values(moves=moves))
+
+
+@pytest.mark.parametrize("recorded", [False, True], ids=["moves-not-recorded", "moves-recorded"])
 @pytest.mark.parametrize(
     ("converted", "days", "lowered", "refs"),
     [
@@ -724,14 +756,20 @@ def test_a_mikrotik_lease_kept_open_reads_back_one_probe_window(
     days: int,
     lowered: bool,
     refs: bool,
+    recorded: bool,
 ) -> None:
     """Round 7: a MikroTik lease that traffic keeps open has its last DHCP record far back; the
     post-lease check reads no further back than the D8 probe window before the moment: for an
     ``fg_event`` line the 3.8 fallback, 604,800 s (7 days; deviation c2), for a converted row
     the 8,640,000 s (100 days) of 2.7, and never before the first of the lookup's days (12 days
-    back with the defaults: a converted row 99 days back is not read, and the answer says so,
-    ``lookback_clamped_to_window``; W5-G deviations); from the lease start when the lease has no
-    DHCP record (printed as ``{last}``)."""
+    back with the defaults; W5-G deviations); from the lease start when the lease has no DHCP
+    record (printed as ``{last}``). Before the first day the converted-row check reads the moves
+    the lease job recorded with the lease (issue #127): a converted row 99 or 13 days back lowers
+    the chain when it was recorded, and is not read when the lease has no recorded moves (a
+    lease written before the upgrade). Either way the window reached before the first day, and
+    the answer says so (``lookback_clamped_to_window``): the recorded moves can only add one.
+    The MAC moves to ``172.20.44.58``, in no configured network: the build would have recorded
+    that ACK, not applied it (:func:`record_moves`)."""
     moment = AT
     ack = moment - timedelta(days=120)
     evidence.dhcp(ack, "assigned", PC, PC_MAC, server="dhcp42")
@@ -743,19 +781,26 @@ def test_a_mikrotik_lease_kept_open_reads_back_one_probe_window(
     if not refs:
         lease.evidence = []
     if converted:
-        evidence.fortigate_dhcp(moment - timedelta(days=days), "172.20.42.120", PC_MAC)
+        evidence.fortigate_dhcp(moment - timedelta(days=days), "172.20.44.58", PC_MAC)
     else:
         unconverted_line(evidence, moment - timedelta(days=days), "172.20.42.121", PC_MAC)
+    if recorded:
+        record_moves(db_session, lease)
+    else:
+        db_session.execute(update(Lease).values(moves=None))
     db_session.commit()
+    assert db_session.scalar(select(Lease.moves.is_(None))) is not recorded
     outcome = internal(db_session, PC, moment)
     # The converted-row window (100 days) of a chain the line check left ``high`` always
     # reaches before the lookup's first day; the line window (7 days) never does.
     assert ("lookback_clamped_to_window" in keys(outcome)) is (converted or not lowered)
+    # A recorded move inside the 100 days and before the first day is read from the lease.
+    from_the_lease = recorded and converted and timedelta(days=days) < MISSED_MOVE_WINDOW
     chain = outcome.attribution
     assert chain is not None
     assert chain.lease is not None
     assert chain.lease.source_table == "mt_dhcp"
-    if lowered:
+    if lowered or from_the_lease:
         assert (chain.confidence, chain.lease.confidence) == ("low", "low")
         assert note(chain, UNCONVERTED) == {"last": iso(start), "ip": PC}
     else:
@@ -2959,7 +3004,7 @@ EMITTED_BY: dict[str, tuple[str, str]] = {
     "lease_timeline_behind": ("test_lookup_engine.py", "test_lease_timeline_behind_is_reported"),
     "lookback_clamped_to_window": (
         "test_lookup_lookback.py",
-        "test_the_missed_move_check_reads_from_the_first_day_and_says_so",
+        "test_the_missed_move_check_reads_the_recorded_moves_before_the_first_day",
     ),
     "mac_multiple_ips": (
         "test_lookup_srcmac.py",
