@@ -1342,8 +1342,9 @@ All Wave 5 questions are answered (2026-11-02).
   5 M line `.xz` day with its claim hashing the file 18 times, as a 14-day request of one source;
   latency of a live line from its append to its commit; no reload: median 0.36 s, max 0.75–1.30
   s): with the day's rows already dropped, the worst delay went from 31.2 s to 0.82 s while the
-  claim hashed and 2.54 s while the file was scanned (the reload's own batches, 3.95 s at most
-  while it loads, are as before); with the day's rows still in the database (the window's first
+  claim hashed and 2.54 s while the file was scanned (the reload's own batches while it loads are as
+  before: at most 4.59 s, median 2.59 s, in the run with the day's rows present; 4.28 s, median
+  2.78 s, before, over the first two minutes of its loading); with the day's rows still in the database (the window's first
   days), from 79.5 s (scan and reset transaction in one round) to 41.7 s. Bound: while a check
   runs, a live line waits for the normal batch cycle plus about one check step (≤ 50 ms) and the
   loop's share of the interpreter lock; the test bound is 5 s (`LIVE_BOUND`). Not covered by the
