@@ -478,12 +478,17 @@ class _Records:
         self.add(f"deletions/{record}", "deletion")
 
     def _renewals(self, days: Sequence[_Day], report_token: bytes | None) -> None:
-        """The renewal records whose text names a packaged day's manifest or token hash, or the
-        packaged report's token hash (Wave 5 D1-D3: a renewal of a renewal repeats them)."""
+        """The renewal records whose text names a packaged day's manifest or token hash, the
+        token hash of a packaged deletion record, or the packaged report's token hash (Wave 5
+        D1-D3: a renewal of a renewal repeats them; contract W5-A-18)."""
         folder = self.layout.renewals_dir
         if not folder.is_dir():
             return
-        hashes = set()
+        hashes = {
+            hashlib.sha256(entry.data).hexdigest()
+            for entry in self.entries.values()
+            if entry.role == "deletion_token" and entry.data is not None
+        }
         for day in days:
             hashes.add(hashlib.sha256(day.manifest_bytes).hexdigest())
             hashes.add(hashlib.sha256(day.token_bytes).hexdigest())

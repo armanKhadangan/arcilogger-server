@@ -1,7 +1,9 @@
-"""Evidence packages carry the renewals of their days and of their report (Wave 5 D1-D3, §3).
+"""Evidence packages carry the renewals of their days, of their deletion records and of their
+report (Wave 5 D1-D3, §3).
 
-The builder is not changed for renewals (D1): it ships every ``vault/renewals/*.json`` whose
-raw text holds a packaged day's manifest or token hash, or the packaged report's token hash.
+The builder ships every ``vault/renewals/*.json`` whose raw text holds a packaged day's manifest
+or token hash, the packaged report's token hash (D1, D3) or a packaged deletion record's token
+hash (contract W5-A-18).
 A renewal of a renewal repeats the hashes the older one protected (``protects``, D2), so a
 package of one day picks up the whole chain. The stamps here are made in October 2026, before
 the real date: the builder's self-check verifies the finished package at the real time. R3's
@@ -27,7 +29,7 @@ from arcilogger_core.seal import sha256_file
 from arcilogger_core.timeutil import utc_now
 
 from .renewal_cases import entry_of
-from .renewal_world import DAY, REPORT_NAME, RenewalWorld, make_world
+from .renewal_world import CNA, DAY, REPORT_NAME, RenewalWorld, make_world
 from .test_evidence import findings, in_process, isolated, unlock_tree, unpack
 
 #: The day of the package; its stamp's certificate expires in March 2027.
@@ -41,6 +43,11 @@ R2 = ("2026-10-16-1", datetime(2026, 10, 16, 9, tzinfo=UTC), datetime(2027, 2, 1
 R3 = ("2026-10-17-1", datetime(2026, 10, 17, 9, tzinfo=UTC), datetime(2069, 1, 1, tzinfo=UTC))
 #: When the whole chain is needed for the day to be covered.
 JUDGED = datetime(2026, 12, 1, tzinfo=UTC)
+#: The deletion record's renewal (stamped as R1) runs a month short of the record's certificate
+#: (:data:`CNA`); two months before that, both are due and only the renewal of the renewal
+#: (stamped as R2, to 2069) lets it cover the record's token.
+D1_EXPIRES = datetime(2031, 9, 1, tzinfo=UTC)
+DELETION_JUDGED = datetime(2031, 8, 1, tzinfo=UTC)
 
 
 @pytest.fixture
@@ -171,4 +178,62 @@ def test_a_package_with_the_report_ships_the_report_renewal(
     assert covers["where"] == "yenileme"
     # without the report the renewal names nothing of the package
     assert _records(_build(rw, [DAY], tmp_path / "out-plain"), tmp_path / "pkg-plain") == []
+    unlock_tree(tmp_path)
+
+
+def test_a_package_with_a_deletion_record_ships_its_renewals(
+    rw: RenewalWorld, tmp_path: Path
+) -> None:
+    """D3 and W5-A-18: a deletion record's token is renewed like a day's; a package that ships
+    the record (the next day's manifest lists it) ships the renewals that list its token hash,
+    the renewal of that renewal too (D2), with their tokens. The standalone verifier checks
+    them as renewals and judges only the days (§2.1.4)."""
+    deletion, deletion_token = rw.add_deletion("2026-10-13-imha.json")
+    rw.seal(OTHER)  # its certificate runs to CNA here: not due at any real date
+    manifest = json.loads(rw.layout.manifest(OTHER).read_bytes())
+    assert [entry["path"] for entry in manifest["deletions"]] == ["deletions/2026-10-13-imha.json"]
+    # the first renewal lists only the record's token, the second only the first's (whose
+    # ``protects`` repeats it)
+    entry = RecordEntry(
+        "deletion",
+        "deletions/2026-10-13-imha.json.zd",
+        sha256_file(deletion_token),
+        CNA,
+        record_sha256=sha256_file(deletion),
+    )
+    rw.set_now(R1[1])
+    rw.write_renewal(R1[0], [entry], rw.legal_provider(D1_EXPIRES))
+    rw.set_now(R2[1])
+    rw.write_renewal(R2[0], [entry_of(rw, f"renewals/{R1[0]}.json")], rw.legal_provider(R3[2]))
+    paths = [f"renewals/{R1[0]}.json", f"renewals/{R2[0]}.json"]
+    second = json.loads((rw.layout.vault / paths[1]).read_bytes())
+    assert sha256_file(deletion_token) not in {e["token_sha256"] for e in second["tokens"]}
+    assert sha256_file(deletion_token) in second["tokens"][0]["protects"]
+    # the core: near the end of the record's certificate, the first covers it through the second
+    status = rw.status(DELETION_JUDGED)
+    assert rw.of(status, entry.path).covered_by == paths[0]
+    info = _build(rw, [OTHER], tmp_path / "out")
+    folder = tmp_path / "pkg"
+    assert _records(info, folder) == sorted(
+        f"vault/{path}{suffix}" for path in paths for suffix in ("", ".zd")
+    )
+    index = json.loads((folder / "paket.json").read_bytes())
+    assert [n for n in index["records"] if n.startswith("vault/deletions/")] == [
+        "vault/deletions/2026-10-13-imha.json",
+        "vault/deletions/2026-10-13-imha.json.zd",
+    ]
+    code, verified = isolated(folder, "--kokler", str(_roots(rw, tmp_path / "kokler")))
+    assert code == 0, verified["findings"]
+    assert {"deletion-ok", "renewal-ok"} <= {f["code"] for f in verified["findings"]}
+    assert [f["where"] for f in findings(verified, "renewal-ok")] == ["yenileme"] * 2
+    assert [f["where"] for f in findings(verified, "renewal-covers")] == ["yenileme"] * 2
+    # the day is judged by its own token, which no renewal lists
+    (day,) = [
+        f
+        for f in verified["findings"]
+        if f["code"].startswith("renewal-") and f["where"] == OTHER.isoformat()
+    ]
+    assert day["code"] == "renewal-not-due"
+    # a package without the deletion record carries none of them
+    assert _records(_build(rw, [DAY], tmp_path / "out-day"), tmp_path / "pkg-day") == []
     unlock_tree(tmp_path)

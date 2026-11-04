@@ -1552,3 +1552,17 @@ All Wave 5 questions are answered (2026-11-02).
   after the site turned the rule strict again) cover the rest. The standalone verifier's output
   changes, so `VERIFIER_VERSION` is "7" (addendum H4): #136 has not merged, so W5-A-8's "7"
   for #136 becomes "8" when it does; `test_verifier_version_is_7` pins it.
+- **W5-A-18: a package ships the renewals of its deletion records (answer to Q5 on #132, #137
+  item 7).** D3 renews deletion-record tokens, but the builder's `_renewals` matched only the
+  packaged days' manifest and token hashes and the report's token hash, so a package that ships
+  a deletion record (listed in a day's manifest, or behind the chain anchor) left out the
+  renewals of that record's token. `_renewals` now also matches the token hash of every
+  deletion record the package ships, and the same raw-text match picks up a renewal of that
+  renewal (D2, `protects`); each goes with its `.zd`, as D1. The standalone verifier checks them
+  as any renewal (`renewal-ok`, `renewal-covers`) and judges only the days (§2.1.4), so its
+  code is unchanged; the package's contents change, which W5-A-17's `VERIFIER_VERSION` "7"
+  already covers. The module docstring of `builder.py` still says "renewal stamps that cover
+  the included days or the included report's time stamp" (a second hunk, outside #137's grant).
+  `test_a_package_with_a_deletion_record_ships_its_renewals` (`test_renewal_evidence.py`)
+  covers a two-deep chain behind a deletion record, the core's status of its token, the
+  auditor's verifier on the package, and that a package without the record ships none of them.
