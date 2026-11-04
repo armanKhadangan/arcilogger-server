@@ -607,8 +607,9 @@ def test_report_time_stamp_with_the_configured_provider(
     # downloading again neither renders nor stamps again
     assert download(client, data["id"]) == pdf
     assert tsa.credits == credits - 1
-    # a changed token file is refused
-    (layout.exports / stamp["token_file"]).write_bytes(token[:-1] + b"\x00")
+    # a changed token file is refused; the last byte is flipped, not set: a DER token's last
+    # byte is a signature byte, already 0x00 in about 1 run in 256 (#167)
+    (layout.exports / stamp["token_file"]).write_bytes(token[:-1] + bytes([token[-1] ^ 0xFF]))
     response = client.get(f"/api/v1/lookup/{data['id']}/report.pdf.zd")
     assert (response.status_code, response.json()["error"]["code"]) == (409, "report_damaged")
 
