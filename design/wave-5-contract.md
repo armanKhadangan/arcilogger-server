@@ -1885,8 +1885,8 @@ All Wave 5 questions are answered (2026-11-02).
   temporary names is for the owner of `core/src/arcilogger_core/crl.py` (not changed here). An
   item whose entries give Administrators no right to read or take it over (its owner took them
   away) is taken over all the same by the elevated step: the Windows CI runner shows it for a
-  `renewal.lock` that a service left with its own entry only, which is the case Q4 on #158
-  names. The step itself enables no privilege; where the take-over still fails (a policy that
+  `renewal.lock` that a service left as its own, with inheritance off, which is the case Q4 on
+  #158 names. The step itself enables no privilege; where the take-over still fails (a policy that
   took the take-ownership privilege away), it stops with an error naming the item and the
   remedy (every read and write of an item, the link check, the listing and its entries, is
   wrapped alike; a link's own error stays as it is), and `takeown /A /R /F <folder>` in an
@@ -1907,9 +1907,10 @@ All Wave 5 questions are answered (2026-11-02).
   owner), `test_acl_step_stops_at_a_link_in_a_protected_state_folder` (a junction and a hard
   link in `state\renewal`, protected beforehand so that `state`'s entry does not reach them: the
   file they point to keeps its owner and every entry, the inherited ones too) and
-  `test_acl_step_takes_over_a_lock_that_leaves_administrators_out` (a `renewal.lock` with
-  inheritance off and a stand-in service's entry and ownership only: afterwards Administrators
-  own it, it has inherited entries only, and LOCAL SERVICE keeps its inherited Modify).
+  `test_acl_step_takes_over_a_lock_a_service_left_as_its_own` (a `renewal.lock` with
+  inheritance off, a stand-in service as its owner and a Modify entry of its own: afterwards
+  Administrators own it, it has inherited entries only, and LOCAL SERVICE keeps its inherited
+  Modify).
 
 ## Deviations — #119 (2026-11-04)
 

@@ -3137,13 +3137,12 @@ def test_acl_step_stops_at_a_link_in_a_protected_state_folder(kind: str, tmp_pat
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="NTFS rights are Windows-only")
-def test_acl_step_takes_over_a_lock_that_leaves_administrators_out(tmp_path: Path) -> None:
-    """A renewal.lock a service left with its own entry only and itself as the owner
-    (inheritance off, nothing for Administrators): held, it would stop every Renew run (answer
-    to Q4 on #158). The elevated step takes it over all the same: afterwards Administrators own
-    it, it has inherited entries only, the service has nothing, and LOCAL SERVICE keeps its
-    inherited Modify (W5-E-9). NETWORK SERVICE stands in for the collector, as in the test
-    above."""
+def test_acl_step_takes_over_a_lock_a_service_left_as_its_own(tmp_path: Path) -> None:
+    """A renewal.lock a service left as its own: itself as the owner, a Modify entry of its own,
+    inheritance off. Held, it would stop every Renew run (answer to Q4 on #158). The elevated
+    step takes it over all the same: afterwards Administrators own it, it has inherited entries
+    only, the service has nothing, and LOCAL SERVICE keeps its inherited Modify (W5-E-9).
+    NETWORK SERVICE stands in for the collector, as in the test above."""
     powershell = _windows_admin_powershell()
     data, programdata, program = tmp_path / "data", tmp_path / "programdata", tmp_path / "program"
     programdata.mkdir()
@@ -3156,9 +3155,10 @@ def test_acl_step_takes_over_a_lock_that_leaves_administrators_out(tmp_path: Pat
     subprocess.run(["icacls", str(lock), "/grant", f"*{collector}:M"], check=True)
     subprocess.run(["icacls", str(lock), "/setowner", f"*{collector}"], check=True)
     subprocess.run(["icacls", str(lock), "/inheritance:r"], check=True)
-    before = _owners_and_rules(powershell, tmp_path, [lock])
-    assert before[lock]["owner"] == collector
-    assert all(r["sid"] == collector for r in before[lock]["rules"])
+    before = _owners_and_rules(powershell, tmp_path, [lock])[lock]
+    assert before["owner"] == collector, before
+    assert not any(r["inherited"] for r in before["rules"]), before
+    assert any(r["sid"] == collector for r in before["rules"]), before
     result = run_powershell(
         powershell,
         WINDOWS / "scripts" / "Set-ArciVaultAcl.ps1",
@@ -3172,15 +3172,17 @@ def test_acl_step_takes_over_a_lock_that_leaves_administrators_out(tmp_path: Pat
     )
     assert result.returncode == 0, result.stdout + result.stderr
     after = _owners_and_rules(powershell, tmp_path, [lock])[lock]
-    assert after["owner"] == admins
-    assert after["protected"] is False
-    assert after["rules"]
-    assert all(r["inherited"] for r in after["rules"])
-    assert all(r["sid"] != collector for r in after["rules"])
+    assert after["owner"] == admins, (before, after)
+    assert after["protected"] is False, (before, after)
+    assert after["rules"], (before, after)
+    assert all(r["inherited"] for r in after["rules"]), (before, after)
+    assert all(r["sid"] != collector for r in after["rules"]), (before, after)
     write_data, append_data, delete = 0x2, 0x4, 0x10000
     modify_bits = write_data | append_data | delete
     tasks = [r for r in after["rules"] if r["sid"] == WELL_KNOWN["local_service"]]
-    assert any(r["type"] == "Allow" and r["rights"] & modify_bits == modify_bits for r in tasks)
+    assert any(
+        r["type"] == "Allow" and r["rights"] & modify_bits == modify_bits for r in tasks
+    ), (before, after)
 
 
 def _windows_admin_powershell() -> str:
