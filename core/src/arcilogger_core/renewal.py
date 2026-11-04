@@ -1419,12 +1419,19 @@ def earlier_state_path(layout: Layout) -> Path:
     return layout.state / STATE_NAME
 
 
+#: What the first :func:`write_state` after an upgrade takes from :func:`earlier_state_path`,
+#: which every service could write: the count of failed runs only, never the token list, its
+#: time or the last run (contract W5-E-8).
+EARLIER_KEPT: Final = ("failures_in_a_row",)
+
+
 def state_to_read(layout: Layout) -> Path:
     """The file the report is read from: :func:`state_path`, or :func:`earlier_state_path` while
     the new file is missing. The first :func:`write_state` after an upgrade reads the earlier
-    file once and carries it over; from then on the new file exists and the earlier one is never
-    read again. Until then the readers (the alerts, the Sistem page, the legal status) read it
-    too, so an upgrade does not resolve an open alert before the first run."""
+    file once and carries only :data:`EARLIER_KEPT` over; from then on the new file exists and
+    the earlier one is never read again. Until then the readers (the alerts, the Sistem page,
+    the legal status) read it too, so an upgrade does not resolve an open alert before the first
+    run."""
     path = state_path(layout)
     try:
         path.stat()
@@ -1437,7 +1444,10 @@ def state_to_read(layout: Layout) -> Path:
 
 def read_state(layout: Layout) -> dict[str, Any] | None:
     """The last report (:func:`state_to_read`); None when there is none or it cannot be read."""
-    path = state_to_read(layout)
+    return _read_report(layout, state_to_read(layout))
+
+
+def _read_report(layout: Layout, path: Path) -> dict[str, Any] | None:
     try:
         data = json.loads(path.read_bytes().decode("utf-8"))
     except FileNotFoundError:
@@ -1467,9 +1477,14 @@ def write_state(
     kept with their ``at``, and without them the file has no token list, which W5-C's reader
     takes as unknown (never as "nothing due"). ``last_run`` is None for a dry run, which keeps
     the last run and ``failures_in_a_row``; a failed or refused run adds one to
-    ``failures_in_a_row``, any other run sets it to 0.
+    ``failures_in_a_row``, any other run sets it to 0. From an earlier release's file only
+    :data:`EARLIER_KEPT` is taken: a refused run then writes no token list and a dry run no
+    last run.
     """
-    previous = read_state(layout) or {}
+    path = state_to_read(layout)
+    previous = _read_report(layout, path) or {}
+    if path != state_path(layout):
+        previous = {key: previous[key] for key in EARLIER_KEPT if key in previous}
     state: dict[str, Any] = {"schema": STATE_SCHEMA}
     if report is not None:
         state.update(at=utc_text(at), renew_before_days=renew_before, **report.as_json())

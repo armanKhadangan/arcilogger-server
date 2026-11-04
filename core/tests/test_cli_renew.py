@@ -340,10 +340,10 @@ def test_an_earlier_state_file_is_read_once_and_never_written(
     cli: Cli, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """An upgrade from a release that kept ``state/renewal.json`` and ``state/renewal.lock`` in
-    ``state``, which every service may write (W5-E-4): the first write carries the earlier
-    report over into ``state/renewal/renewal.json``, and from then on the earlier file is never
-    read. Neither earlier file is ever written, and a process holding the earlier lock blocks
-    no run."""
+    ``state``, which every service may write (W5-E-4): the first write carries only the
+    earlier ``failures_in_a_row`` over into ``state/renewal/renewal.json`` (W5-E-8), and from
+    then on the earlier file is never read. Neither earlier file is ever written, and a process
+    holding the earlier lock blocks no run."""
     state = cli.rw.layout.state
     state.mkdir(parents=True, exist_ok=True)
     earlier, earlier_lock = state / "renewal.json", state / "renewal.lock"
@@ -360,10 +360,11 @@ def test_an_earlier_state_file_is_read_once_and_never_written(
     )
     earlier_lock.write_bytes(b"")
     now = CNA - timedelta(days=100)
-    # a dry run keeps the last run: the earlier one, read from the earlier file
+    # a dry run keeps the last run, but not the earlier file's: only its count is carried over
     assert cli.run("--dry-run", now=now) == 0
     carried = cli.state()
-    assert (carried["last_run"], carried["failures_in_a_row"]) == (last_run, 1)
+    assert "last_run" not in carried
+    assert carried["failures_in_a_row"] == 1
     assert carried["at"] == "2031-06-23T00:00:00Z"
     # once the new file exists, a changed earlier file decides nothing
     earlier.write_text(
@@ -388,6 +389,48 @@ def test_an_earlier_state_file_is_read_once_and_never_written(
         "renewal.lock",
     ]
     capsys.readouterr()
+
+
+@pytest.mark.parametrize(("failures", "counted"), [(1, 2), (-3, 1), ("0", 1), (None, 1)])
+def test_a_refused_run_takes_no_statuses_from_an_earlier_state_file(
+    cli: Cli, capsys: pytest.CaptureFixture[str], failures: object, counted: int
+) -> None:
+    """The earlier ``state/renewal.json`` could be written by every service, the network-facing
+    collector too (W5-E-8). A run that cannot compute the statuses (no pinned root) keeps the
+    last known token list only from ``state/renewal/renewal.json``: without it the statuses
+    stay unknown, never the earlier file's "nothing due". Its ``failures_in_a_row`` is taken as
+    a whole number >= 0, anything else as 0."""
+    state = cli.rw.layout.state
+    state.mkdir(parents=True, exist_ok=True)
+    made_up = {
+        "schema": STATE_SCHEMA,
+        "at": "2031-06-22T00:30:00Z",
+        "renew_before_days": 180,
+        "tokens": [{"path": DAY_TOKEN, "kind": "day", "status": "covered"}],
+        "totals": {"due": 0, "uncovered": 0},
+        "unreadable": [],
+        "mismatched": [],
+        "notes": [],
+        "last_run": {"at": "2031-06-22T00:30:00Z", "outcome": "renewed", "exit_code": 0},
+        "failures_in_a_row": failures,
+    }
+    (state / "renewal.json").write_text(json.dumps(made_up), encoding="utf-8")
+    empty = cli.config.parent / "empty-roots"
+    empty.mkdir()
+    cli.configure(
+        f'provider = "rfc3161"\nurl = "http://192.0.2.10"\nroots_dir = "{empty.as_posix()}"'
+    )
+    assert cli.run(now=CNA - timedelta(days=100)) == 2
+    assert "(roots)" in capsys.readouterr().err
+    written = cli.state()
+    assert sorted(written) == ["failures_in_a_row", "last_run", "schema"]
+    assert (written["last_run"]["outcome"], written["last_run"]["error"]) == ("refused", "roots")
+    assert written["failures_in_a_row"] == counted
+    # the next refused run finds the protected file and keeps what it wrote: still no token list
+    assert cli.run(now=CNA - timedelta(days=99)) == 2
+    capsys.readouterr()
+    assert "tokens" not in cli.state()
+    assert cli.state()["failures_in_a_row"] == counted + 1
 
 
 # -- --dry-run and --json --------------------------------------------------------------------------

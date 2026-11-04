@@ -129,8 +129,8 @@ def test_a_state_without_statuses_reads_as_unknown(tmp_path: Path) -> None:
 def test_the_writer_and_the_readers_meet_in_the_protected_folder(tmp_path: Path) -> None:
     """The report is written to ``state/renewal/renewal.json`` only, and every reader (the
     alerts, the Sistem page's ``read_renew_runs``, ``/legal-status`` and the day page) reads it
-    there (W5-E-4). An earlier release's ``state/renewal.json`` is carried over by the first
-    write and never written; after that it decides nothing."""
+    there (W5-E-4). The first write takes only ``failures_in_a_row`` from an earlier release's
+    ``state/renewal.json`` (W5-E-8) and never writes it; after that it decides nothing."""
     layout = Layout(tmp_path / "data")
     earlier = layout.state / "renewal.json"
     earlier.parent.mkdir(parents=True)
