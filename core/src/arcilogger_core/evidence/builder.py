@@ -432,7 +432,19 @@ class _Records:
                 raise EvidenceError(f"{relative}.zd: differs from the hash sealed in the manifest")
             name = f"{VAULT}{relative}.zd"
             self.entries[name] = _Entry(name, f"{role}_token", data=token_data)
-            root = _root_of(token_data, data, self.roots, self.require_critical_eku)
+            require_critical_eku = self.require_critical_eku
+            if role == "renewal":
+                # judged by its own record's EKU rule (K6), as both verifiers judge it, not by
+                # the package's days (contract W5-A-17); a record that cannot be read: strict
+                try:
+                    record = json.loads(data)
+                except ValueError:
+                    record = None
+                tsa = record.get("tsa") if isinstance(record, dict) else None
+                require_critical_eku = not (
+                    isinstance(tsa, dict) and tsa.get("require_critical_eku") is False
+                )
+            root = _root_of(token_data, data, self.roots, require_critical_eku)
             if root:
                 self.used_roots.add(root)
         elif token_sha256:

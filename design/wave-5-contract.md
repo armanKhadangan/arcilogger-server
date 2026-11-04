@@ -1583,19 +1583,21 @@ All Wave 5 questions are answered (2026-11-02).
   after the site turned the rule strict again) cover the rest. The standalone verifier's output
   changes, so `VERIFIER_VERSION` is "7" (addendum H4): #136 has not merged, so W5-A-8's "7"
   for #136 becomes "8" when it does; `test_verifier_version_is_7` pins it.
-  One caller does not agree yet: the evidence builder picks the root to bundle for every
-  record token, renewals included, with the package's rule (`_Records(require_critical_eku=all(
-  day.require_critical_eku ...))` → `_root_of`), and a token with an EKU error yields no root.
-  So a renewal whose record is relaxed and whose non-critical-EKU certificate chains to a root
-  no packaged strict day uses (a new root after a CA change) leaves that root out, the
-  standalone self-check fails the renewal token (`token-chain`) and the package is refused;
-  when the renewal shares a day's root, the root is bundled from the day and nothing shows.
-  The fix is a second `builder.py` hunk outside #137's grant (asked for on the issue): in
-  `_Records.add`, a `renewal` record passes its own rule (`tsa.require_critical_eku is not
-  False`) to `_root_of`, with a test in `test_renewal_evidence.py` (a strict day and a relaxed
-  renewal under the legal CA's root). Until it lands, the builder refuses such a package; the
-  verifiers' verdict on the shared case "its record relaxed, the day sealed strict"
-  (`renewal-covered`, the case's files checked with every root) does not change with it.
+  The evidence builder judges each renewal token by its own record's rule too: it picks the
+  root to bundle for a record's token with `_root_of`, and a token with an EKU error yields no
+  root, so with the package's rule (`_Records(require_critical_eku=all(day.require_critical_eku
+  ...))`) a relaxed renewal whose non-critical-EKU certificate chains to a root no packaged
+  strict day uses (a new root after a CA change) left that root out and the self-check refused
+  the package (`token-chain`). `_Records.add` now passes a `renewal` record's own rule
+  (`tsa.require_critical_eku is not False`; a record that cannot be read is judged strict, as
+  `_renewal_eku` judges it) to `_root_of`; deletion records and the report's stamp keep the
+  package's rule, and the renewals of a deletion record (W5-A-18) are `renewal` records like
+  any other (the second `builder.py` hunk outside #137's files, granted on #137,
+  2026-11-04T09:07Z). `test_a_relaxed_renewal_under_the_legal_root_is_packaged_and_judged_alike`
+  (`test_renewal_evidence.py`) builds a package of a strict day renewed under the legal CA's
+  root by a relaxed record with a non-critical EKU: the legal root is bundled, and the
+  standalone verifier on the package and the core on the vault find the day
+  `renewal-covered` with the same texts (rule 5).
 - **W5-A-18: a package ships the renewals of its deletion records (answer to Q5 on #132, #137
   item 7).** D3 renews deletion-record tokens, but the builder's `_renewals` matched only the
   packaged days' manifest and token hashes and the report's token hash, so a package that ships

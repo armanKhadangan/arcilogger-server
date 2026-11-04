@@ -28,8 +28,8 @@ from arcilogger_core.renewal import RecordEntry, renew
 from arcilogger_core.seal import sha256_file
 from arcilogger_core.timeutil import utc_now
 
-from .renewal_cases import entry_of
-from .renewal_world import CNA, DAY, REPORT_NAME, RenewalWorld, make_world
+from .renewal_cases import LEVELS, Built, core_verdict, entry_of, renew_day
+from .renewal_world import CNA, DAY, REPORT_NAME, RenewalWorld, day_token_path, make_world
 from .test_evidence import findings, in_process, isolated, unlock_tree, unpack
 
 #: The day of the package; its stamp's certificate expires in March 2027.
@@ -236,4 +236,37 @@ def test_a_package_with_a_deletion_record_ships_its_renewals(
     assert day["code"] == "renewal-not-due"
     # a package without the deletion record carries none of them
     assert _records(_build(rw, [DAY], tmp_path / "out-day"), tmp_path / "pkg-day") == []
+    unlock_tree(tmp_path)
+
+
+def test_a_relaxed_renewal_under_the_legal_root_is_packaged_and_judged_alike(
+    rw: RenewalWorld, tmp_path: Path
+) -> None:
+    """W5-A-17: the builder picks the root of a renewal's token with its own record's EKU rule,
+    as both verifiers judge it. A day sealed strict, renewed with a non-critical EKU under the
+    legal CA's root (which no packaged day uses) by a record that says the site relaxed the
+    rule: the package ships that root and builds, and the standalone verifier on it and the
+    core on the vault find the day covered by the renewal, with the same texts (rule 5)."""
+    manifest = json.loads(rw.layout.manifest(DAY).read_bytes())
+    assert "require_critical_eku" not in manifest["tsa"]
+    record = renew_day(rw, R1[0], R1[1], expires=R3[2], eku_critical=False, relaxed=True)
+    assert (
+        json.loads((rw.layout.vault / record).read_bytes())["tsa"]["require_critical_eku"] is False
+    )
+    info = _build(rw, [DAY], tmp_path / "out")
+    folder = tmp_path / "pkg"
+    assert _records(info, folder) == [f"vault/{record}", f"vault/{record}.zd"]
+    index = json.loads((folder / "paket.json").read_bytes())
+    assert rw.legal.fingerprint in {root["sha256"] for root in index["roots"]}
+    # near the end of the day's certificate: covered by the renewal, in both verifiers
+    built = Built(CNA - timedelta(days=90))
+    report = in_process(folder, roots_dir=_roots(rw, tmp_path / "kokler"), now=built.now)
+    assert report.passed, report.codes()
+    (day,) = [f for f in report.findings if f.code in LEVELS and f.where == DAY.isoformat()]
+    core = core_verdict(rw, built)
+    assert (day.code, day.level) == (core.code, core.level) == ("renewal-covered", "ok")
+    assert (day.tr, day.en) == (core.message_tr, core.message_en)
+    assert rw.of(rw.status(built.now), day_token_path()).covered_by == record
+    found = [(f.level, f.code, f.where) for f in report.findings if f.code.startswith("token-eku")]
+    assert found == [("warn", "token-eku-not-critical", "yenileme")]
     unlock_tree(tmp_path)
