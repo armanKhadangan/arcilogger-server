@@ -31,6 +31,9 @@ EXPECTED = {
     "ClockCheck": "clock-check",
     # What the web interface asks for (credit query, time-stamp and replica test; ADR-0014).
     "Requests": "requests run",
+    # Re-stamping and the revocation lists (Wave 5 contract D4, D7).
+    "Renew": "renew",
+    "CrlFetch": "crl fetch",
 }
 #: Task → command of ``python -I -m arcilogger_db`` (the scheduled database backup, ADR-0009).
 EXPECTED_DB = {"Backup": "backup run"}
@@ -157,6 +160,31 @@ def test_backup_runs_daily_after_sealing() -> None:
     assert settings is not None
     assert settings.findtext("t:ExecutionTimeLimit", namespaces=NS) == "PT4H"
     assert DUMP_TIMEOUT_SECONDS < 4 * 3600
+
+
+def _start(name: str) -> str:
+    """The time of day of a daily task's only trigger (``HH:MM``)."""
+    root = ET.parse(TASKS / f"{name}.xml").getroot()  # noqa: S314
+    triggers = root.findall("t:Triggers/*", NS)
+    assert len(triggers) == 1, name
+    trigger = triggers[0]
+    assert trigger.tag == f"{{{NS['t']}}}CalendarTrigger", name
+    assert trigger.findtext("t:ScheduleByDay/t:DaysInterval", namespaces=NS) == "1", name
+    assert trigger.find("t:Repetition", NS) is None, name
+    return (trigger.findtext("t:StartBoundary", namespaces=NS) or "").partition("T")[2][:5]
+
+
+def test_renew_runs_daily_after_seal_and_crlfetch() -> None:
+    """Both run once a day (contract D4, D7). CrlFetch runs after the seal's first run (00:10)
+    and before VerifyDaily, which then sees fresh lists. Renew runs after Seal (A4), after
+    CrlFetch, since it refuses a new stamp that the stored lists show revoked (C15), and after
+    Retention, whose deletion records it covers too."""
+    seal = ET.parse(TASKS / "Seal.xml").getroot()  # noqa: S314
+    sealed = seal.findtext("t:Triggers/t:CalendarTrigger/t:StartBoundary", namespaces=NS) or ""
+    assert sealed.partition("T")[2][:5] == "00:10"
+    assert "00:10" < _start("CrlFetch") < _start("VerifyDaily")
+    assert max("00:10", _start("CrlFetch"), _start("Retention")) < _start("Renew")
+    assert (_start("CrlFetch"), _start("Renew")) == ("00:30", "02:30")
 
 
 def test_register_script_registers_every_definition() -> None:

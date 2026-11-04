@@ -1891,11 +1891,19 @@ function Get-ArciAclPlan {
         - Collector (the only network-facing Python service): reads and writes the spool but has no
           Delete right there, so it cannot delete or rename raw evidence (it can write into a
           file it opens; the nightly seal is what proves the content). It has no access to the
-          audit spool, to the sealing/replica/verify/clock state, to the vault or to secret.key.
+          audit spool, to the sealing/replica/verify/clock/CRL state, to the vault or to
+          secret.key.
         - Scheduled tasks (LOCAL SERVICE, see deploy/windows/tasks): seal (read + delete closed
           spool days, write and lock the vault), retention (delete expired vault days), replica,
-          verify and clock check; only they write state\seal, state\replica, state\verify and
-          state\clock (core seal.py trusts state\seal\<day>.json when it decides a day is sealed).
+          verify, clock check and the revocation lists (CrlFetch); only they write state\seal,
+          state\replica, state\verify, state\clock and state\crl (core seal.py trusts
+          state\seal\<day>.json when it decides a day is sealed; the CRL job writes only under
+          state\crl). Re-stamping (Renew) adds its records to vault\renewals and writes
+          state\renewal.json and state\renewal.lock through the inherited Modify of vault and
+          state: every run replaces renewal.json with a new file (atomic write), which would
+          lose an entry of its own. It reads the day and deletion-record tokens (sealed files
+          keep their deny entries, so no task changes them), state\crl, and the stored reports
+          and their tokens in exports\reports (read only).
           The database backup (Backup task, ADR-0009) writes and prunes backups\scheduled, which
           no service can read; backups and backups\db stay administrators-only. The tasks take
           their signed requests from state\requests (ADR-0014) and read admin\keys\keys.json,
@@ -2162,6 +2170,13 @@ function Get-ArciAclPlan {
                     (New-ArciAce -Sid $localService -Who 'LOCAL SERVICE (tasks)' -Rights $modify),
                     (New-ArciAce -Sid $api -Who 'NT SERVICE\ArciApi' -Rights $read),
                     (New-ArciAce -Sid $worker -Who 'NT SERVICE\ArciWorker' -Rights $read)))),
+        # Revocation lists (CrlFetch, contract D8): stored byte for byte as evidence, so only the
+        # tasks write them; the API (legal status, day page, evidence packages) and the worker
+        # (R20-crl, R20-cert) read them.
+        (New-Entry ($DataRoot + $p + 'state' + $p + 'crl') 'Directory' $true ($owners + @(
+                    (New-ArciAce -Sid $localService -Who 'LOCAL SERVICE (tasks)' -Rights $modify),
+                    (New-ArciAce -Sid $api -Who 'NT SERVICE\ArciApi' -Rights $read),
+                    (New-ArciAce -Sid $worker -Who 'NT SERVICE\ArciWorker' -Rights $read)))),
         # Signed task requests (seal now, credit query, TSA and replica test; ADR-0014): ArciAdmin
         # writes them and deletes only its own, the tasks take, answer and delete them. No service
         # but the agent can put a request here; the signature is the authority.
@@ -2172,6 +2187,10 @@ function Get-ArciAclPlan {
         (New-Entry ($DataRoot + $p + 'exports') 'Directory' $false @(
                 (New-ArciAce -Sid $api -Who 'NT SERVICE\ArciApi' -Rights $modify),
                 (New-ArciAce -Sid $worker -Who 'NT SERVICE\ArciWorker' -Rights $modify))),
+        # Stored official reports: the Renew task reads them and their tokens to re-stamp the
+        # tokens (contract D3), read only; the API and the worker keep the rights of exports.
+        (New-Entry ($DataRoot + $p + 'exports' + $p + 'reports') 'Directory' $false @(
+                (New-ArciAce -Sid $localService -Who 'LOCAL SERVICE (tasks)' -Rights $read))),
         (New-Entry ($DataRoot + $p + 'logs') 'Directory' $false @(
                 (New-ArciAce -Sid $collector -Who 'NT SERVICE\ArciCollector' -Rights $modify),
                 (New-ArciAce -Sid $ingest -Who 'NT SERVICE\ArciIngest' -Rights $modify),
