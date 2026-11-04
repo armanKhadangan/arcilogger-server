@@ -1841,17 +1841,18 @@ function Get-ArciAclPlan {
         - Collector (the only network-facing Python service): reads and writes the spool but has no
           Delete right there, so it cannot delete or rename raw evidence (it can write into a
           file it opens; the nightly seal is what proves the content). It has no access to the
-          audit spool, to the sealing/replica/verify/clock/CRL state, to the vault or to
-          secret.key.
+          audit spool, to the sealing/replica/verify/clock/CRL/re-stamping state, to the vault
+          or to secret.key.
         - Scheduled tasks (LOCAL SERVICE, see deploy/windows/tasks): seal (read + delete closed
           spool days, write and lock the vault), retention (delete expired vault days), replica,
-          verify, clock check and the revocation lists (CrlFetch); only they write state\seal,
-          state\replica, state\verify, state\clock and state\crl (core seal.py trusts
-          state\seal\<day>.json when it decides a day is sealed; the CRL job writes only under
-          state\crl). Re-stamping (Renew) adds its records to vault\renewals and writes
-          state\renewal.json and state\renewal.lock through the inherited Modify of vault and
-          state: every run replaces renewal.json with a new file (atomic write), which would
-          lose an entry of its own. It reads the day and deletion-record tokens (sealed files
+          verify, clock check, the revocation lists (CrlFetch) and re-stamping (Renew); only
+          they write state\seal, state\replica, state\verify, state\clock, state\crl and
+          state\renewal (core seal.py trusts state\seal\<day>.json when it decides a day is
+          sealed; the CRL job writes only under state\crl; a service that could write
+          state\renewal could silence the re-stamping alerts or hold the run's lock). Renew adds
+          its records to vault\renewals through the inherited Modify of vault, and keeps
+          renewal.json and renewal.lock in state\renewal: every run replaces renewal.json with a
+          new file (atomic write), which gets the folder's inherited entries. It reads the day and deletion-record tokens (sealed files
           keep their deny entries, so no task changes them), state\crl, and the stored reports
           and their tokens in exports\reports (read only).
           The database backup (Backup task, ADR-0009) writes and prunes backups\scheduled, which
@@ -2124,6 +2125,15 @@ function Get-ArciAclPlan {
         # tasks write them; the API (legal status, day page, evidence packages) and the worker
         # (R20-crl, R20-cert) read them.
         (New-Entry ($DataRoot + $p + 'state' + $p + 'crl') 'Directory' $true ($owners + @(
+                    (New-ArciAce -Sid $localService -Who 'LOCAL SERVICE (tasks)' -Rights $modify),
+                    (New-ArciAce -Sid $api -Who 'NT SERVICE\ArciApi' -Rights $read),
+                    (New-ArciAce -Sid $worker -Who 'NT SERVICE\ArciWorker' -Rights $read)))),
+        # Re-stamping state (Renew): renewal.json, from which R20-renewal, R20-cert and the
+        # legal status judge, and renewal.lock, one run at a time. Protected, so a service that
+        # could write it cannot silence those alerts or hold the lock; renewal.json is replaced
+        # on every run and gets these entries by inheritance. The API (Sistem page, legal
+        # status, day page) and the worker (the alerts) read it.
+        (New-Entry ($DataRoot + $p + 'state' + $p + 'renewal') 'Directory' $true ($owners + @(
                     (New-ArciAce -Sid $localService -Who 'LOCAL SERVICE (tasks)' -Rights $modify),
                     (New-ArciAce -Sid $api -Who 'NT SERVICE\ArciApi' -Rights $read),
                     (New-ArciAce -Sid $worker -Who 'NT SERVICE\ArciWorker' -Rights $read)))),
