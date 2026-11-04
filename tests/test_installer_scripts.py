@@ -8524,7 +8524,7 @@ def test_database_restore_puts_a_0020_dump_in_place_of_a_0021_database(
              str(dump), name],
             env=env, check=True, capture_output=True, timeout=300,
         )  # fmt: skip
-        upgrade(site, timescale=mode)
+        upgrade(site, revision="0021_db_window", timescale=mode)
         with site.begin() as connection:
             connection.execute(
                 text(
