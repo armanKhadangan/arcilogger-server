@@ -885,6 +885,33 @@ def test_a_revoked_stamp_of_an_interrupted_run_is_removed(
     assert rw.of(rw.status(), DAY_TOKEN).covered_by == run.record_path
 
 
+def test_a_renewal_keeps_the_eku_rule_its_record_was_written_under(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#137 item 4 (W5-A-17): a renewal token is judged by its own record's EKU rule, not by
+    the site's setting when it is read. A site that relaxed ``tsa.require_critical_eku`` (K6)
+    stamps with a certificate whose EKU is not critical, the run stops after the stamp, and the
+    site turns the rule strict again: the next run still completes the part (its record says
+    relaxed), and the record covers the day."""
+    rw = make_world(tmp_path, require_critical_eku=False)
+    rw.set_now(CNA - timedelta(days=100))
+    provider = rw.legal_provider(FAR, eku_critical=False)
+    token = _stop_after_stamp(rw, provider, monkeypatch, "after the stamp")
+    part = rw.layout.renewals_dir / "2031-06-23-1.json.part"
+    assert json.loads(part.read_bytes())["tsa"]["require_critical_eku"] is False
+    strict = verify_token(token.read_bytes(), roots=rw.roots, file_path=part, now=rw.clock.now)
+    assert not strict.ok  # the strict rule refuses it
+    config = rw.world.config
+    tsa = config.tsa.model_copy(update={"require_critical_eku": True})
+    rw.world.config = config.model_copy(update={"tsa": tsa})
+
+    assert recover(rw.layout, rw.roots, now=rw.clock.now) == []
+    assert _renewal_files(rw) == ["2031-06-23-1.json", "2031-06-23-1.json.zd"]
+    assert rw.of(rw.status(), DAY_TOKEN).covered_by == "renewals/2031-06-23-1.json"
+    with pytest.raises(RenewalNotNeeded):
+        _renew(rw, rw.legal_provider(FAR))
+
+
 def test_recover_never_removes_a_locked_file(rw: RenewalWorld) -> None:
     """A locked token without its record is what is left when someone removed a completed
     record: evidence of that, so it stays (rule 2; only the retention job deletes)."""

@@ -94,12 +94,14 @@ def renew_day(
     expires: datetime = FAR,
     not_before: datetime | None = None,
     eku_critical: bool = True,
+    relaxed: bool | None = None,
 ) -> str:
     """A legal renewal of the day stamped at ``at`` by a new certificate of the legal CA valid
-    until ``expires`` (its EKU critical unless ``eku_critical`` is false); its record path."""
+    until ``expires`` (its EKU critical unless ``eku_critical`` is false); its record says the
+    site's EKU rule, or the one ``relaxed`` names. Its record path."""
     rw.set_now(at)
     provider = rw.legal_provider(expires, not_before=not_before, eku_critical=eku_critical)
-    rw.write_renewal(name, [rw.day_entry()], provider)
+    rw.write_renewal(name, [rw.day_entry()], provider, relaxed=relaxed)
     return f"renewals/{name}.json"
 
 
@@ -245,11 +247,40 @@ def _chain_broken(rw: RenewalWorld) -> Built:
     return Built(CHAIN_NOW)
 
 
-def _eku_not_critical(rw: RenewalWorld) -> Built:
-    """The renewal's certificate marks its EKU non-critical; whether it counts is the rule the
-    day was sealed with (and, in a package of that one day, the standalone verifier's)."""
-    renew_day(rw, "2031-06-23-1", CNA - timedelta(days=100), eku_critical=False)
+def _eku_not_critical(rw: RenewalWorld, *, relaxed: bool | None = None) -> Built:
+    """The renewal's certificate marks its EKU non-critical; whether it counts is the rule its
+    own record was written under (the site's, or the one ``relaxed`` names), not the day's."""
+    record = renew_day(
+        rw, "2031-06-23-1", CNA - timedelta(days=100), eku_critical=False, relaxed=relaxed
+    )
+    tsa = json.loads((rw.layout.vault / record).read_bytes())["tsa"]
+    if relaxed is not None:
+        assert ("require_critical_eku" in tsa) is relaxed
     return Built(CNA - timedelta(days=90))
+
+
+def _eku_relaxed_record(rw: RenewalWorld) -> Built:
+    """A day sealed strict, then a renewal whose record says the site relaxed the rule."""
+    return _eku_not_critical(rw, relaxed=True)
+
+
+def _eku_strict_record(rw: RenewalWorld) -> Built:
+    """A day sealed relaxed, then a renewal whose record says the rule is strict again."""
+    return _eku_not_critical(rw, relaxed=False)
+
+
+def _eku_strict_record_beside_a_relaxed_day(rw: RenewalWorld) -> Built:
+    """The day sealed strict and the next one relaxed, in one package; the renewal of the first
+    day says the rule is strict: a relaxed manifest elsewhere does not relax it."""
+    config = rw.world.config
+    rw.world.config = config.model_copy(
+        update={"tsa": config.tsa.model_copy(update={"require_critical_eku": False})}
+    )
+    rw.seal(OTHER)
+    rw.world.config = config
+    manifest = json.loads(rw.layout.manifest(OTHER).read_bytes())
+    assert manifest["tsa"]["require_critical_eku"] is False
+    return _eku_not_critical(rw, relaxed=False)
 
 
 def _mock(rw: RenewalWorld) -> Built:
@@ -376,17 +407,37 @@ CASES: tuple[RenewalCase, ...] = (
         "renewal-due",
         "warn",
     ),
-    # the EKU rule (K6): the day's sealed rule judges its renewals
+    # the EKU rule (K6): each renewal's own record judges its token, as a day's manifest does
+    # the day's (#137 item 4, W5-A-17)
     RenewalCase(
-        "a renewal with a non-critical EKU, the day sealed relaxed",
+        "a renewal with a non-critical EKU, its record and the day relaxed",
         _eku_not_critical,
         "renewal-covered",
         "ok",
         relaxed=True,
     ),
     RenewalCase(
-        "a renewal with a non-critical EKU, the day sealed strict",
+        "a renewal with a non-critical EKU, its record and the day strict",
         _eku_not_critical,
+        "renewal-due",
+        "warn",
+    ),
+    RenewalCase(
+        "a renewal with a non-critical EKU, its record relaxed, the day sealed strict",
+        _eku_relaxed_record,
+        "renewal-covered",
+        "ok",
+    ),
+    RenewalCase(
+        "a renewal with a non-critical EKU, its record strict, the day sealed relaxed",
+        _eku_strict_record,
+        "renewal-due",
+        "warn",
+        relaxed=True,
+    ),
+    RenewalCase(
+        "a renewal with a non-critical EKU, its record strict, beside a relaxed day",
+        _eku_strict_record_beside_a_relaxed_day,
         "renewal-due",
         "warn",
     ),
@@ -450,8 +501,15 @@ def core_verdict(rw: RenewalWorld, built: Built) -> Verdict:
 
 
 def standalone_verdict(rw: RenewalWorld, built: Built, folder: Path) -> Verdict:
-    """The standalone verifier's finding for the day, on a copy of the vault (``sil/`` holds
-    the lists, ``--kokler`` the roots), in this process at ``now``."""
+    """The standalone verifier's finding for the day (:func:`standalone_report`)."""
+    report = standalone_report(rw, built, folder)
+    (finding,) = [f for f in report.findings if f.code in LEVELS and f.where == DAY.isoformat()]
+    return Verdict(finding.code, finding.level, finding.tr, finding.en)
+
+
+def standalone_report(rw: RenewalWorld, built: Built, folder: Path) -> sv.Report:
+    """The standalone verifier's report on a copy of the vault (``sil/`` holds the lists,
+    ``--kokler`` the roots), in this process at ``now``."""
     copy = folder / "kopya"
     shutil.copytree(rw.layout.vault, copy)
     if built.lists:
@@ -463,9 +521,7 @@ def standalone_verdict(rw: RenewalWorld, built: Built, folder: Path) -> Verdict:
     roots.mkdir()
     for number, root in enumerate(_roots(rw, built)):
         (roots / f"root-{number}.pem").write_bytes(root.public_bytes(serialization.Encoding.PEM))
-    report = in_process(copy, roots_dir=roots, now=built.now)
-    (finding,) = [f for f in report.findings if f.code in LEVELS and f.where == DAY.isoformat()]
-    return Verdict(finding.code, finding.level, finding.tr, finding.en)
+    return in_process(copy, roots_dir=roots, now=built.now)
 
 
 def core_status(rw: RenewalWorld, built: Built) -> str:

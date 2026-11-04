@@ -1455,14 +1455,10 @@ All Wave 5 questions are answered (2026-11-02).
   `True` yet. As in the standalone verifier, only a day whose token verified gets a status (a
   day that fails for another reason, such as a changed log file, keeps the status of its
   token), and the window is the caller's `renew_before_days` (default the §2.5 180 days):
-  `verify_day` reads no configuration (W5-A-16). The
-  renewal tokens are checked with an EKU rule (`tsa.require_critical_eku`, K6) that each side
-  takes from its own source: `verify_day` from that day's manifest, the standalone verifier
-  relaxed when any manifest of the package is (`_relaxed_eku`), `renewal_status` and `renew`
-  from the site's configuration. They agree for a package of one day sealed under the current
-  setting (the table's two EKU cases); a package of a relaxed and a strict day, or a site that
-  changed the setting after sealing, can split them for a renewal with a non-critical EKU
-  (a question in the pull request). The renewals are judged with the `legal_roots` and the
+  `verify_day` reads no configuration (W5-A-16). Each renewal token is checked with the EKU
+  rule (`tsa.require_critical_eku`, K6) its own record was written under, as a day's token is
+  with its manifest's, in both verifiers and in `renewal_status` and `renew` alike (W5-A-17).
+  The renewals are judged with the `legal_roots` and the
   revocation lists `verify_day` already has; each call reads and verifies every renewal record
   again, so a caller that checks many days with `renewals=True` pays days × records. In the
   core too, a renewal whose stamp is from ARCILOGGER's test TSA (policy under 2.999 or the test
@@ -1532,3 +1528,27 @@ All Wave 5 questions are answered (2026-11-02).
   (`renewal.renew_before_days`, W5-A-1). `test_the_caller_passes_the_window` pins the default,
   that no configuration is read, both edges of the window, and that it reaches a renewal's own
   token.
+- **W5-A-17: each renewal token is judged by its own record's EKU rule (answer to Q6 on #132,
+  #137 item 4).** A renewal record's `tsa` block carries `require_critical_eku: false` when the
+  site had relaxed the rule (K6) as it wrote the record (`tsa_block`, the manifest's keys), so
+  its token is now verified with that rule, as a day's token is with its manifest's: in the
+  core's `renewal_status` (`_Reader`), `day_renewal` (and so `verify_day(..., renewals=True)`),
+  `recover` (a part with its own record's rule) and `renew` (`_write`, whose record carries
+  today's setting), and in the standalone verifier's `check_renewals` (`_renewal_eku`; a record
+  that cannot be read is judged strict and never counts anyway). Neither the day's rule, the
+  other manifests of a package (`_relaxed_eku` now judges deletion records only) nor the
+  site's setting at the time of reading decides any more, so W5-A-11's split between the
+  callers is gone: `day_renewal` and `recover` lose their `require_critical_eku` parameter,
+  and `verify_day` no longer passes the day's rule. The standalone verifier's
+  `token-eku-not-critical` warning on a renewal token says the site relaxed the rule in the
+  renewal record ("bunu yenileme kaydında belirtmiştir" / "sealed that choice in the renewal
+  record") instead of the manifest. The shared case table (rule 5) gains three cases: a strict
+  day with a relaxed renewal record (`renewal-covered`), a relaxed day with a strict one
+  (`renewal-due`), and a strict renewal record beside a relaxed day in one package
+  (`renewal-due`; the standalone verifier relaxed it before); the two existing EKU cases keep
+  their verdicts. `test_a_renewal_token_is_judged_by_its_own_records_eku_rule` (both settings
+  of the site afterwards, and the warning text) and
+  `test_a_renewal_keeps_the_eku_rule_its_record_was_written_under` (`recover` and the status
+  after the site turned the rule strict again) cover the rest. The standalone verifier's output
+  changes, so `VERIFIER_VERSION` is "7" (addendum H4): #136 has not merged, so W5-A-8's "7"
+  for #136 becomes "8" when it does; `test_verifier_version_is_7` pins it.

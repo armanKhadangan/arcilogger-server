@@ -37,7 +37,9 @@ of every deletion record under its final name, of every stored official report
 ``unreadable``, one whose imprint is not the file it stamps as it is today (a changed file) in
 ``mismatched``, so no renewal ever lists the hash of a changed file; one that disappears
 during the scan (the retention job deleting its day) is skipped. Each renewal token is verified
-against the pinned roots and the stored revocation lists. :func:`renewal_status` only reads;
+against the pinned roots and the stored revocation lists, with the EKU rule its own record was
+written under (``tsa.require_critical_eku``, K6), as a day's token is judged by its manifest's
+(contract W5-A-17). :func:`renewal_status` only reads;
 ``state/renewal.json`` is written by the ``Renew`` task's command line (``arcilogger-core renew``)
 with :func:`write_state`.
 
@@ -245,6 +247,13 @@ def tsa_block(provider: TimestampProvider, config: Config) -> dict[str, Any]:
     if not config.tsa.require_critical_eku:
         block["require_critical_eku"] = False
     return block
+
+
+def _critical_eku(tsa: Mapping[str, Any]) -> bool:
+    """The EKU rule (K6) of a record's (or a manifest's) ``tsa`` block: strict unless the block
+    says ``require_critical_eku: false``. A renewal token is verified with its own record's rule
+    (contract W5-A-17)."""
+    return tsa.get("require_critical_eku") is not False
 
 
 def build_record(
@@ -576,8 +585,9 @@ def _parse_record(raw: bytes) -> dict[str, Any] | None:
 class _Reader:
     """One scan of a data directory: the renewable tokens and the renewal records (D3).
 
-    ``legal_roots`` (``tsa.legal_root_fingerprints``) and ``require_critical_eku`` judge the
-    renewal tokens; ``crls``, when given, are the stored revocation lists already read.
+    ``legal_roots`` (``tsa.legal_root_fingerprints``) judges the renewal tokens, each verified
+    with its own record's EKU rule (:func:`_critical_eku`); ``crls``, when given, are the stored
+    revocation lists already read.
     """
 
     def __init__(
@@ -587,7 +597,6 @@ class _Reader:
         now: datetime,
         *,
         legal_roots: Collection[str],
-        require_critical_eku: bool,
         renew_before: timedelta,
         crls: Sequence[Crl] | None = None,
     ) -> None:
@@ -595,7 +604,6 @@ class _Reader:
         self.roots = roots
         self.now = require_aware(now)
         self.legal_roots = legal_roots
-        self.require_critical_eku = require_critical_eku
         self.renew_before = renew_before
         self.renewables: list[Renewable] = []
         self.renewals: list[RenewalFact] = []
@@ -615,7 +623,6 @@ class _Reader:
             roots,
             now,
             legal_roots=config.tsa.legal_root_fingerprints,
-            require_critical_eku=config.tsa.require_critical_eku,
             renew_before=timedelta(days=renew_before_days(config)),
         )
 
@@ -791,7 +798,8 @@ class _Reader:
             roots=self.roots,
             file_path=record,
             now=max(self.now, utc_now()),
-            require_critical_eku=self.require_critical_eku,
+            # The rule the site wrote into this record (K6), not today's setting.
+            require_critical_eku=_critical_eku(parsed["tsa"]),
             crls=self.crls(),
         )
         # D5: a test record or a test stamp never counts; a legal claim counts only when rule 4
@@ -854,8 +862,8 @@ def renewal_status(
     """The long-term status of every renewable token of ``layout`` at ``now`` (§2.1.2, D3).
 
     ``roots`` are the pinned roots the renewal tokens are verified against (with the stored
-    revocation lists); ``tsa.legal_root_fingerprints`` and ``tsa.renew_before_days`` come from
-    ``config``. Writes nothing.
+    revocation lists and each record's own EKU rule); ``tsa.legal_root_fingerprints`` and
+    ``tsa.renew_before_days`` come from ``config``. Writes nothing.
     """
     return _Reader.of(layout, config, roots, now or utc_now()).read().report()
 
@@ -965,7 +973,6 @@ def day_renewal(
     legal_roots: Collection[str] = (),
     now: datetime | None = None,
     crls: Sequence[Crl] | None = None,
-    require_critical_eku: bool = True,
     renew_before_days: int = DEFAULT_RENEW_BEFORE_DAYS,
 ) -> DayRenewal | None:
     """The long-term status of ``day``'s stamp at ``now`` (default: the system clock), from the
@@ -973,8 +980,9 @@ def day_renewal(
     its manifest (it has no status). Writes nothing.
 
     ``legal_roots`` (``tsa.legal_root_fingerprints``) and ``crls`` (the stored lists, read from
-    ``state/crl`` when None) judge the renewals as :func:`renewal_status` does;
-    ``require_critical_eku`` is the rule the renewal tokens are verified with. The window is
+    ``state/crl`` when None) judge the renewals as :func:`renewal_status` does, each renewal
+    token with its own record's EKU rule (:func:`_critical_eku`), as the day's token is judged
+    by its manifest's: neither the day's rule nor the site's setting. The window is
     the §2.5 default, as the standalone verifier's (contract W5-A-5), unless the caller passes
     the site's ``tsa.renew_before_days``.
     """
@@ -984,7 +992,6 @@ def day_renewal(
         roots,
         now or utc_now(),
         legal_roots=legal_roots,
-        require_critical_eku=require_critical_eku,
         renew_before=renew_before,
         crls=crls,
     )
@@ -1239,17 +1246,17 @@ def recover(
     layout: Layout,
     roots: Sequence[x509.Certificate],
     *,
-    require_critical_eku: bool = True,
     crls: Sequence[Crl] | None = None,
     now: datetime | None = None,
 ) -> list[str]:
     """Tidy up what an interrupted run left in ``vault/renewals``; returns the removed names.
 
     * ``X.json.part`` with a token (``X.json.part.zd``, or ``X.json.zd`` when the run stopped
-      between the two renames) that verifies against it and whose certificate ``crls`` (the
-      stored lists, read from ``state/crl`` when None) do not show revoked at or before the
-      stamp: promoted (W5-A-3). A revoked one is removed, as the run would have removed it (C15:
-      a revoked new stamp leaves no record);
+      between the two renames) that verifies against it, with the part's own EKU rule
+      (:func:`_critical_eku`), and whose certificate ``crls`` (the stored lists, read from
+      ``state/crl`` when None) do not show revoked at or before the stamp: promoted (W5-A-3).
+      A revoked one is removed, as the run would have removed it (C15: a revoked new stamp
+      leaves no record);
     * any other ``….part`` and ``….part.zd``, a final token without its record and a temporary
       file of an interrupted write (``.….tmp``): removed. None of them is evidence: a record
       without a verified token protects nothing. A locked file is never removed: a locked token
@@ -1272,12 +1279,13 @@ def recover(
         if not final.exists() and len(tokens) == 1:
             if not lists_read:  # read only when a part is to be checked
                 lists_read, crls = True, _stored_lists(layout)
+            parsed = _parse_record(part.read_bytes())
             check = verify_token(
                 tokens[0].read_bytes(),
                 roots=roots,
                 file_path=part,
                 now=moment,
-                require_critical_eku=require_critical_eku,
+                require_critical_eku=_critical_eku(parsed["tsa"]) if parsed else True,
                 crls=crls,
             )
             refusal = _refusal(check)
@@ -1325,13 +1333,13 @@ def _write(
     roots: Sequence[x509.Certificate],
     *,
     crls: Sequence[Crl] | None,
-    require_critical_eku: bool,
     now: datetime,
 ) -> None:
     """Write, stamp and verify ``record`` as ``<final>.part``, then promote it; on any failure
-    remove both files and raise (§2.1.1: a record without its token is not evidence). A token
-    that verifies but whose certificate the stored lists show revoked at or before its genTime
-    is refused too: such a renewal would never count (C15)."""
+    remove both files and raise (§2.1.1: a record without its token is not evidence). The token
+    is verified with the record's own EKU rule (:func:`_critical_eku`). A token that verifies
+    but whose certificate the stored lists show revoked at or before its genTime is refused
+    too: such a renewal would never count (C15)."""
     part = _part(final)
     atomic_write_bytes(part, canonical_json(record))
     removed: list[str] = []
@@ -1342,7 +1350,7 @@ def _write(
             roots=roots,
             file_path=part,
             now=max(now, utc_now()),
-            require_critical_eku=require_critical_eku,
+            require_critical_eku=_critical_eku(record["tsa"]),
             crls=crls,
         )
         refusal = _refusal(check)
@@ -1391,8 +1399,7 @@ def renew_held(
     (an :class:`OSError`), ``report_after`` is the status before the run, with a warning in the
     log."""
     moment = require_aware(now or utc_now())
-    eku = config.tsa.require_critical_eku
-    discarded = recover(layout, roots, require_critical_eku=eku, now=moment)
+    discarded = recover(layout, roots, now=moment)
     reader = _Reader.of(layout, config, roots, moment).read()
     before = reader.report()
     due = {token.path for token in before.tokens if token.status in ("due", "uncovered")}
@@ -1419,7 +1426,6 @@ def renew_held(
         provider,
         roots,
         crls=reader.crls(),
-        require_critical_eku=eku,
         now=moment,
     )
     record_path = f"renewals/{final.name}"

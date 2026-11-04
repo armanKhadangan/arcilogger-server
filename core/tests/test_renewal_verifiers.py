@@ -37,6 +37,7 @@ from .renewal_cases import (
     core_status,
     core_verdict,
     renew_day,
+    standalone_report,
     standalone_verdict,
 )
 from .renewal_world import CNA, DAY, RenewalWorld, make_world
@@ -100,6 +101,47 @@ def test_a_renewal_stamped_at_its_own_not_after_verifies_but_does_not_count(
     assert rw.of(report, f"{record}.zd").status == "uncovered"
     roots = [sv.parse_certificate(root.public_bytes(Encoding.DER)) for root in rw.roots]
     assert sv.verify_timestamp(token, path.read_bytes(), roots, now=now).ok
+
+
+@pytest.mark.parametrize("relaxed", [True, False], ids=["relaxed record", "strict record"])
+def test_a_renewal_token_is_judged_by_its_own_records_eku_rule(
+    tmp_path: Path, relaxed: bool
+) -> None:
+    """#137 item 4 (W5-A-17): a renewal whose certificate marks its EKU non-critical counts
+    exactly when its own record says the site relaxed the rule (``tsa.require_critical_eku``,
+    K6), as a day's token is judged by its own manifest. The day's rule (sealed the other way
+    here) and the site's setting today decide nothing: ``renewal_status``, ``verify_day`` and
+    the standalone verifier agree under either setting, and the standalone verifier's warning
+    names the record as where the site relaxed it."""
+    rw = make_world(tmp_path / "site", require_critical_eku=relaxed)
+    manifest = json.loads(rw.layout.manifest(DAY).read_bytes())
+    assert ("require_critical_eku" in manifest["tsa"]) is not relaxed
+    at = CNA - timedelta(days=100)
+    record = renew_day(rw, "2031-06-23-1", at, eku_critical=False, relaxed=relaxed)
+    assert (
+        "require_critical_eku" in json.loads((rw.layout.vault / record).read_bytes())["tsa"]
+    ) is relaxed
+    built = Built(CNA - timedelta(days=90))
+    code = "renewal-covered" if relaxed else "renewal-due"
+    config = rw.world.config
+    for setting in (True, False):
+        tsa = config.tsa.model_copy(update={"require_critical_eku": setting})
+        rw.world.config = config.model_copy(update={"tsa": tsa})
+        assert f"renewal-{core_status(rw, built).replace('_', '-')}" == code
+    assert core_verdict(rw, built).code == code
+
+    report = standalone_report(rw, built, tmp_path)
+    (day,) = [f for f in report.findings if f.code in LEVELS and f.where == DAY.isoformat()]
+    assert day.code == code
+    found = [(f.level, f.code) for f in report.findings if f.code.startswith("token-eku")]
+    if relaxed:
+        assert found == [("warn", "token-eku-not-critical")]
+        (warning,) = [f for f in report.findings if f.code == "token-eku-not-critical"]
+        assert warning.where == "yenileme"
+        assert "bunu yenileme kaydında belirtmiştir" in warning.tr
+        assert "sealed that choice in the renewal record" in warning.en
+    else:
+        assert found == [("fail", "token-eku")]
 
 
 def test_the_caller_passes_the_window(rw: RenewalWorld, monkeypatch: pytest.MonkeyPatch) -> None:
