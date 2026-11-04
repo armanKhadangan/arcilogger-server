@@ -1516,15 +1516,13 @@ All Wave 5 questions are answered (2026-11-02).
   its `reason: "test"` record (D5, exit 1 for an expired token). With the claim, a pinned set
   that lacks the listed root, which the stamp's verification failed with exit 3
   (`renewal_stamp_invalid`, W5-A-9), is now refused with this exit 2 before the stamp. The dry
-  run is unchanged. `last_run.error` takes the cause from the error in `cli.py`'s
-  `_renew_cause` (a hunk outside #137's files, asked for on the issue); until it lands the
-  command still exits 2 as `refused`, under `_provider_cause`'s cause (`provider` for a provider
-  that can be made, as in the test; `secret-store` for a `zamane` site whose secret store cannot
-  list its names), and `_RenewError.refused` puts the error's whole "TR [EN]" text into both
-  `message_tr` and `message_en` (the same hunk should build them from the error's
-  `message_tr`/`message_en`). `test_a_legal_claim_without_a_listed_root_exits_2` pins the
-  interim cause in the JSON and in `last_run.error`, so the line changes to `legal-roots` when
-  the hunk lands.
+  run is unchanged. The cause is `legal-roots` in the JSON's `error.code` and in
+  `last_run.error`: `cli.py`'s `_renew_cause` takes it from the error (`exc.cause`), and
+  `_RenewError.refused` builds `message_tr` from the error's `message_tr` and `message_en` from
+  its `message_en`, not its "TR [EN]" text into both (the `cli.py` hunk outside #137's files
+  granted on #137, 2026-11-04T09:07Z: those two functions and the error's import).
+  `test_a_legal_claim_without_a_listed_root_exits_2` pins the cause in both places and each
+  text in its own language.
 - **W5-A-14: `recover` checks revocation as the run does (#137 item 2).** W5-A-3's `recover`
   promoted an interrupted part whose token verified, without the stored revocation lists, so a
   run stopped between the stamp and its C15 check left a record that never counts. It now

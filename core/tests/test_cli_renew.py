@@ -21,6 +21,7 @@ from arcilogger_core.execpolicy import ExecutableRefusedError
 from arcilogger_core.renewal import (
     STATE_SCHEMA,
     RenewalBusyError,
+    RenewalLegalRootsError,
     one_run,
     renew,
     renewal_status,
@@ -299,6 +300,12 @@ def test_a_legal_claim_without_a_listed_root_exits_2(
     data = json.loads(captured.out)
     assert (data["outcome"], data["exit_code"], data["record"]) == ("refused", 2, None)
     assert data["due"] == [DAY_TOKEN]
+    # each field in its own language, not the error's "TR [EN]" text twice
+    refusal = RenewalLegalRootsError()
+    assert data["error"]["message_tr"].endswith(f"(legal-roots): {refusal.message_tr}")
+    assert data["error"]["message_en"].endswith(f"(legal-roots): {refusal.message_en}")
+    assert refusal.message_en not in data["error"]["message_tr"]
+    assert refusal.message_tr not in data["error"]["message_en"]
     assert "tsa.legal_root_fingerprints" in data["error"]["message_tr"]
     assert "tsa.legal_root_fingerprints" in data["error"]["message_en"]
     assert "Sağlayıcı yasal geçerli damga beyan ediyor" in captured.err
@@ -308,10 +315,7 @@ def test_a_legal_claim_without_a_listed_root_exits_2(
     assert _statuses(state) == {DAY_TOKEN: "due"}
     assert (state["last_run"]["outcome"], state["last_run"]["exit_code"]) == ("refused", 2)
     assert (state["last_run"]["record"], state["failures_in_a_row"]) == (None, 1)
-    # The cause is `_provider_cause`'s ("provider" for this mock site) until cli.py's
-    # `_renew_cause` hunk maps RenewalLegalRootsError.cause (asked on #137, W5-A-13); then both
-    # say "legal-roots" and this line changes with it.
-    assert (data["error"]["code"], state["last_run"]["error"]) == ("provider", "provider")
+    assert (data["error"]["code"], state["last_run"]["error"]) == ("legal-roots", "legal-roots")
     assert cli.run(now=now + timedelta(days=1), provider=provider) == 2
     assert cli.state()["failures_in_a_row"] == 2
     assert calls == []
