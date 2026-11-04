@@ -152,7 +152,7 @@ def site_config(capture: Capture, case: Case, roots: Path, root_sha256: str) -> 
 
 
 def renewal_report(capture: Capture, tsa: MockTsa, status: str) -> dict[str, Any]:
-    """``state/renewal.json`` (§2.1.2) for the sealed days' tokens, each of ``status``."""
+    """``state/renewal/renewal.json`` (§2.1.2) for the sealed days' tokens, each of ``status``."""
     layout = capture.layout
     not_after = tsa.tsa_certificate.not_valid_after_utc if status == "not_due" else DUE_NOT_AFTER
     tokens = [
