@@ -1301,6 +1301,31 @@ All Wave 5 questions are answered (2026-11-02).
   keep time there too. Test: `test_the_409_names_the_keep_days_of_the_setting` sets 12 and finds
   it in the lookup's and the search's 409 and in the search's 200 `archived`.
 
+- **W5-G-21: the window step locks the chunks it drops before `drop_chunks` (#133).** On
+  TimescaleDB, `drop_chunks` locks the catalog rows of its chunks before their tables, while the
+  compression policy (`compress_chunk`, added to every time-series hypertable by `0001_baseline`)
+  locks a chunk's table before its catalog row. A `db.window` step that dropped a chunk the
+  policy had opened ended in `deadlock detected` (CI run 41669326395, TimescaleDB job, two W5-G
+  tests; the other process was the `Columnstore Policy` worker). `partitions.drop_before` now
+  takes `LOCK TABLE … IN ACCESS EXCLUSIVE MODE` on every chunk that goes (`show_chunks …
+  older_than`), in the step's transaction after `ARCIPART` and before `drop_chunks`, so it waits
+  for an open chunk without holding any catalog row; the policy finishes and commits (it commits
+  per chunk), or a recompression gives up with TimescaleDB's own 40001 and runs again next time.
+  The locks are taken in chunk-id order (`_timescaledb_functions.chunk_id_from_relid`), the order
+  in which a query's planning locks the chunks: in name order (`_10_` before `_9_`) the step
+  deadlocked with a reader of every chunk (the unbounded `min(time)` of `usage` and of the
+  lookup's window). `drop_chunks` itself locks by OID, the same order until the OID counter wraps
+  around (checked on TimescaleDB 2.30.2: after a wraparound the planner keeps chunk-id order).
+  The same chunks are locked as before, so the step's bound (W5-G-7) and the lock budget do not
+  change, and the drop and its audit entry stay in one transaction. Plain PostgreSQL has no
+  chunks and no compression policy: nothing changes there. Tests (`db/tests/test_partitions.py`,
+  TimescaleDB with compression, two or three connections, steps ordered by polling `pg_locks`):
+  `test_a_compression_that_has_opened_a_chunk_is_not_a_deadlock_for_the_drop` (a compression and
+  a recompression; both fail with the deadlock without the change),
+  `test_a_compression_that_comes_after_the_drop_has_locked_the_chunk_is_no_deadlock` (the other
+  arrival order: the compression fails with `55P03`, "chunk deleted by other transaction"),
+  `test_the_drop_locks_the_chunks_in_the_order_a_reader_does` (12 chunks; fails in name order).
+
 ## Deviations — W5-H (2026-11-03)
 
 - **W5-H-1: the first line view of an xz file decompresses more than one stream.** §5.4 says
