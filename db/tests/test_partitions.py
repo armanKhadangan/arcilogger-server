@@ -32,8 +32,10 @@ from arcilogger_db.partitions import (
     DROPPED_KEY,
     MIN_WINDOW_DAYS,
     MONTHS_BACK,
+    PARTITION_LOCK_KEY,
     RAW_DAY_MARGIN,
     Partition,
+    PartitionLockTimeoutError,
     PartitionReport,
     add_months,
     day_bounds,
@@ -47,6 +49,7 @@ from arcilogger_db.partitions import (
     include_name,
     is_partition_table,
     list_partitions,
+    lock_partitions,
     maintain_window,
     month_bounds,
     months_back_for,
@@ -1123,3 +1126,45 @@ def test_the_drop_locks_the_chunks_in_the_order_a_reader_does(db_engine: Engine)
     assert step.errors == []
     assert (reader.errors, reader.results) == ([], [None])  # the chunks went before it read
     assert _empty(db_engine, "mt_dhcp")
+
+
+def test_the_lock_of_a_step_is_waited_for_its_timeout_only(db_engine: Engine) -> None:
+    """``lock_partitions(timeout_ms=…)`` (W5-G-24): a lock held shared (an export) is waited for
+    that long, then :class:`PartitionLockTimeoutError` (``lock_not_available``) and the transaction
+    is aborted; any other failure is raised as it is; once it is granted, the transaction's other
+    lock waits keep the ``lock_timeout`` they had."""
+    other = engine_from_url(db_engine.url, poolclass=NullPool)
+    try:
+        with other.connect() as holder:
+            holder.execute(
+                text("SELECT pg_advisory_lock_shared(:key)"), {"key": PARTITION_LOCK_KEY}
+            )
+            holder.commit()
+            with db_engine.connect() as connection:
+                started = time.monotonic()
+                with pytest.raises(PartitionLockTimeoutError):
+                    lock_partitions(connection, timeout_ms=200)
+                assert 0.2 <= time.monotonic() - started < 2.0
+                with pytest.raises(DBAPIError, match="aborted"):
+                    connection.execute(text("SELECT 1"))
+                connection.rollback()
+                # Any other failure of the statement goes on as it is (here a cancel).
+                connection.execute(text("SET LOCAL statement_timeout = '100ms'"))
+                with pytest.raises(DBAPIError) as failed:
+                    lock_partitions(connection, timeout_ms=5000)
+                assert not isinstance(failed.value, PartitionLockTimeoutError)
+                assert getattr(failed.value.orig, "sqlstate", None) == "57014"
+                connection.rollback()
+            holder.execute(
+                text("SELECT pg_advisory_unlock_shared(:key)"), {"key": PARTITION_LOCK_KEY}
+            )
+            holder.commit()
+    finally:
+        other.dispose()
+    with db_engine.begin() as connection:
+        connection.execute(text("SET LOCAL lock_timeout = '7s'"))
+        lock_partitions(connection, timeout_ms=200)
+        assert connection.execute(text("SHOW lock_timeout")).scalar_one() == "7s"
+    with db_engine.begin() as connection:
+        lock_partitions(connection, timeout_ms=200)
+        assert connection.execute(text("SHOW lock_timeout")).scalar_one() == "0"

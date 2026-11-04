@@ -65,7 +65,10 @@ Locking: each table is handled under ``LOCK TABLE <parent> IN ACCESS EXCLUSIVE M
 before partition, the same order as an insert, so no deadlock with the ingest service); ingest
 waits for the few milliseconds a new, empty partition takes. Only the rare catch-up of rows
 from the default partition holds the lock longer. A transaction-level advisory lock serialises
-concurrent maintenance runs; the caller provides the transaction (``engine.begin()``). On
+concurrent maintenance runs (:func:`lock_partitions`); the caller provides the transaction
+(``engine.begin()``). The searches, the lookups and an export hold it shared; the worker's steps
+wait for it at most half of ``search.request_budget_ms`` (:func:`step_lock_timeout_ms`, W5-G-24)
+and try again at their next run, so a search does not queue behind a step that waits. On
 TimescaleDB :func:`drop_before` locks the chunks that go after that lock and before
 ``drop_chunks``, in chunk-id order (a query's planning locks them in it), so that neither the
 compression policy nor a reader of the chunks meets it in the opposite order (#133).
@@ -83,6 +86,7 @@ from typing import Final
 from alembic.runtime.environment import NameFilterParentNames, NameFilterType
 from sqlalchemy import Connection, delete, func, text
 from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy.exc import DBAPIError
 
 from arcilogger_core.timeutil import day_window, site_day, utc_now
 from arcilogger_db.models import TIME_SERIES_TABLES, SearchCount, Setting, SourceClockSample
@@ -109,6 +113,11 @@ MONTHS_AHEAD: Final = 3
 MONTHS_BACK: Final = 1
 #: pg_advisory_xact_lock key ("ARCIPART" as a signed 64-bit integer).
 PARTITION_LOCK_KEY: Final = int.from_bytes(b"ARCIPART", "big") - 2**63
+#: The worker's steps (``db.window``, ``partitions.ensure``) wait for :data:`PARTITION_LOCK_KEY`
+#: at most ``search.request_budget_ms`` divided by this (W5-G-24, :func:`step_lock_timeout_ms`).
+STEP_LOCK_DIVISOR: Final = 2
+#: PostgreSQL ``lock_not_available``: ``lock_timeout`` ran out.
+LOCK_NOT_AVAILABLE: Final = "55P03"
 #: Whole days a raw day's rows reach into the partitions either side of it (module text): 2, the
 #: day of a device time 25 hours before the raw day's midnight.
 RAW_DAY_MARGIN: Final = math.ceil(COUNTS_TIME_MARGIN / timedelta(days=1))
@@ -177,6 +186,64 @@ def retention_days(connection: Connection) -> int:
     if isinstance(value, int) and not isinstance(value, bool) and value > 0:
         return max(MIN_WINDOW_DAYS, value)
     return default
+
+
+class PartitionLockTimeoutError(TimeoutError):
+    """:func:`lock_partitions` waited its ``timeout_ms`` and did not get the lock; the caller's
+    transaction is aborted (it changed nothing that stays)."""
+
+
+def step_lock_timeout_ms(connection: Connection) -> int:
+    """How long a step of the worker waits for :data:`PARTITION_LOCK_KEY` (W5-G-24): half of
+    setting ``search.request_budget_ms`` (the shipped default when unset or out of its range).
+
+    A step that waits holds a request for the lock exclusively, and every search that comes
+    meanwhile queues behind it, waiting at most its ``search.request_budget_ms`` for the lock
+    shared (W5-G-18). A running export holds it shared for minutes (W5-G-23): the step gives
+    up after half that budget, so a search queued behind it keeps at least the other half for
+    its scan and answers no 504 because of the step."""
+    key = "search.request_budget_ms"
+    low, high = INTEGER_RANGES[key]
+    value = connection.execute(
+        text("SELECT value FROM settings WHERE key = :key"), {"key": key}
+    ).scalar_one_or_none()
+    if (
+        not isinstance(value, int)
+        or isinstance(value, bool)
+        or value < low
+        or (high is not None and value > high)
+    ):
+        value = int(DEFAULT_SETTINGS[key])
+    return value // STEP_LOCK_DIVISOR
+
+
+def lock_partitions(connection: Connection, *, timeout_ms: int | None = None) -> None:
+    """Take :data:`PARTITION_LOCK_KEY` exclusively for the caller's transaction.
+
+    ``timeout_ms`` (the worker's steps, :func:`step_lock_timeout_ms`): wait at most that long
+    (:class:`PartitionLockTimeoutError`; PostgreSQL has aborted the transaction then); the other
+    lock waits of the transaction keep the ``lock_timeout`` they had. ``None``: wait as long as
+    it takes (the upgrade, ``arcilogger-db partitions``, a lock the transaction holds
+    already)."""
+    if timeout_ms is None:
+        connection.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": PARTITION_LOCK_KEY})
+        return
+    before = connection.execute(text("SELECT current_setting('lock_timeout')")).scalar_one()
+    try:
+        connection.execute(
+            text(
+                "SELECT pg_advisory_xact_lock(:key) "
+                "FROM (SELECT set_config('lock_timeout', :wait, true)) AS deadline"
+            ),
+            {"key": PARTITION_LOCK_KEY, "wait": f"{max(1, timeout_ms)}ms"},
+        )
+    except DBAPIError as exc:
+        if getattr(exc.orig, "sqlstate", None) == LOCK_NOT_AVAILABLE:
+            raise PartitionLockTimeoutError(
+                f"partition lock not granted within {timeout_ms} ms"
+            ) from exc
+        raise
+    connection.execute(text("SELECT set_config('lock_timeout', :before, true)"), {"before": before})
 
 
 def partition_name(table: str, month: date) -> str:
@@ -391,6 +458,7 @@ def ensure_partitions(
     months_back: int | None = None,
     limit: int = DAYS_PER_RUN,
     since: date | None = None,
+    lock_timeout_ms: int | None = None,
 ) -> PartitionReport:
     """Create the missing partitions around ``today`` (site day); idempotent.
 
@@ -403,12 +471,14 @@ def ensure_partitions(
     a UTC day that ends by its local midnight); ``months_ahead`` does not apply. With
     ``months_back``: the monthly partitions of ``months_back`` months before ``today``'s up to
     ``months_ahead`` after it, as earlier versions made them; a month that already has a
-    partition (a daily one) is left as it is.
+    partition (a daily one) is left as it is. ``lock_timeout_ms``: the partition maintenance
+    lock is waited for at most that long (:func:`lock_partitions`; the worker's
+    ``partitions.ensure``).
     """
     report = PartitionReport(tables=partitioned_tables(connection))
     if not report.tables:
         return report
-    connection.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": PARTITION_LOCK_KEY})
+    lock_partitions(connection, timeout_ms=lock_timeout_ms)
     day = today or site_day(utc_now())
     if months_back is None:
         # Today and the days ahead first, then the window's past days newest first.
