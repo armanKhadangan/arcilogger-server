@@ -1859,6 +1859,10 @@
           "title": "First Day",
           "type": "string"
         },
+        "keep_days": {
+          "title": "Keep Days",
+          "type": "integer"
+        },
         "last_day": {
           "format": "date",
           "title": "Last Day",
@@ -1867,7 +1871,8 @@
       },
       "required": [
         "first_day",
-        "last_day"
+        "last_day",
+        "keep_days"
       ],
       "title": "ArchivedRange",
       "type": "object"

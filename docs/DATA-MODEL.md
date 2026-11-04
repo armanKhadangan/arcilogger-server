@@ -539,14 +539,18 @@ PostgreSQL 16.
       days** old (19 in the last two minutes before a midnight). An older lookup needs a reload
       of its 14 days. A look-back of the engine that reaches before the first day (the 100-day
       cap of the missed-move check, a logged lease longer than 14 days: the lease's newest
-      record, the post-lease checks, the two-origin check) and the two-origin check's read past
-      the last day read only the lookup's days (`lookup.days.reads_from` to `reads_until`), and
-      the answer says so (`lookback_clamped_to_window`, TR/EN, naming the days; W5-G-17), so it
-      is the same before a drop and after the reload. An administrator who wants **30 days** of
-      lookups without a reload sets `db.retention_days` to **42** (30 + 12): the database then
-      holds 43 site days, about 69 GB at 1 M lines a day instead of 49.6 GB ("Size" below). A
-      longer `lookup.max_session_seconds`, or a lease time in the DHCP settings that reaches
-      further than those 12 days, takes as much off the reach. Both stay as they are (manager
+      record, the post-lease checks, the two-origin check) reads only from the first of the
+      lookup's days (`lookup.days.reads_from`), and the answer says so
+      (`lookback_clamped_to_window`, TR/EN, naming the days; W5-G-17); the two-origin check's
+      read past the moment ends with the last day (`reads_until`) without a note, a method rule
+      (docs/CORRELATION.md section 3), so the answer is the same before a drop and after the
+      reload. An administrator who wants **30 days** of lookups without a reload sets
+      `db.retention_days` to **42** (30 + 12): the database then holds 43 site days, about 69 GB
+      at 1 M lines a day instead of 49.6 GB ("Size" below). A longer
+      `lookup.max_session_seconds`, or a lease time in the DHCP settings that reaches further
+      than those 12 days, takes as much off the reach; their upper bounds (2 days; 7 days ×
+      125 %; [SETTINGS.md](SETTINGS.md) section 1) keep every lookup's days within one reload
+      (#126, W5-G-19). Both stay as they are (manager
       answer 3 on #121): the 30-day window is the owner's decision, and the look-back is needed
       for correct answers. Until the day's run of
       the job (after 04:00) the database holds one day more; a cutoff held by an unsealed day or

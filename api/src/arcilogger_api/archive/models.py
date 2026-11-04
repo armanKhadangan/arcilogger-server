@@ -86,3 +86,7 @@ class ArchivedRange(BaseModel):
 
     first_day: date
     last_day: date
+    #: ``db.reload_keep_days`` at the time of the answer, as in the 409's ``details`` (C23): a
+    #: search that answers with ``archived`` names the real keep time to a user who cannot read
+    #: ``/settings``.
+    keep_days: int

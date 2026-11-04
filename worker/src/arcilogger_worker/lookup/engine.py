@@ -923,6 +923,8 @@ class _Lookup:
         if missing:
             self.explanations.append(explain("chain_missing", count=missing))
         unconverted = self._unconverted(matches)
+        # A look-back cut at the first day; D27's read past the moment ends with the last day
+        # without a note (a method rule, docs/CORRELATION.md).
         if self.attributor.clamped:
             self.explanations.append(
                 explain(

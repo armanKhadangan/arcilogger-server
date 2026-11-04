@@ -14,8 +14,9 @@ level before its transaction (``archive.service.hold_window``), so its snapshot 
 * the wait is part of the request's budget: the scan gets what is left of it;
 * a search that cannot get the lock within ``search.request_budget_ms`` answers 504
   ``search_timeout`` (audited ``outcome: timeout``);
-* the lock never stays on a pooled connection: after an answer, after a failure inside the read
-  and after the timeout, the window job gets the lock exclusively at once.
+* the lock never stays on a pooled connection: after an answer, after a failure inside the read,
+  after the timeout and after a failure of the statement that takes it, the window job gets the
+  lock exclusively at once.
 
 The day is ten days before today (daily partitions); its two lines are CORE-R1 heartbeats, at
 01:00 (UTC-day partition of the day before) and at 12:00 (its own UTC day), written to the spool
@@ -24,12 +25,14 @@ and the database and sealed with the mock TSA.
 
 from __future__ import annotations
 
+import asyncio
 import threading
 import time
 from collections.abc import Callable, Iterator
 from datetime import date, datetime, timedelta
 from pathlib import Path
-from typing import Any
+from types import SimpleNamespace
+from typing import Any, cast
 
 import pytest
 from fastapi import FastAPI
@@ -324,6 +327,97 @@ def test_an_aborted_read_does_not_keep_the_lock_on_its_connection(
     assert exclusive(outside)
 
 
+#: :data:`archive_service._HOLD` failing after the lock is granted (#126): the ``CASE`` takes the
+#: lock before it divides, and ``random()`` keeps the division from being folded before the lock.
+_HOLD_THEN_FAIL = (
+    "SELECT CASE WHEN pg_advisory_lock_shared(%s)::text IS NOT NULL "
+    "THEN 1 / CAST(random() * 0 AS integer) END "
+    "FROM (SELECT set_config('lock_timeout', %s, true)) AS deadline"
+)
+
+
+def test_a_failed_hold_does_not_keep_the_lock_on_its_connection(
+    client: TestClient,
+    app_session_factory: sessionmaker[Session],
+    outside: Engine,
+    monkeypatch: pytest.MonkeyPatch,
+    day: date,
+) -> None:
+    """A failure of the statement that takes the lock, other than its timeout, may come after
+    the lock was granted (a session lock outlives the failed statement): the connection is
+    closed instead of going back to the pool holding it (#126)."""
+    sign_in(client, app_session_factory)
+    monkeypatch.setattr(archive_service, "_HOLD", _HOLD_THEN_FAIL)
+    with pytest.raises(Exception, match="division by zero"):  # psycopg's, not wrapped
+        search(client)
+    monkeypatch.undo()
+    assert soon_exclusive(outside)
+    found = search(client)
+    assert found.status_code == 200, found.text
+    assert exclusive(outside)
+
+
+class _LostError(Exception):
+    """A lost connection (the driver's error; psycopg stays behind arcilogger_db, ADR-0005)."""
+
+
+class _LockTimeoutError(Exception):
+    """The driver's ``lock_not_available``."""
+
+    sqlstate = "55P03"
+
+
+class _Raw:
+    """A DBAPI connection whose statement fails with ``error``."""
+
+    def __init__(self, error: BaseException) -> None:
+        self.error = error
+        self.closed = False
+        self.autocommit = False
+
+    def execute(self, *_args: object) -> None:
+        raise self.error
+
+
+class _Connection:
+    """The SQLAlchemy connection around :class:`_Raw`: ``invalidate`` closes it."""
+
+    def __init__(self, raw: _Raw) -> None:
+        self.connection = SimpleNamespace(driver_connection=raw)
+        self.invalidated = 0
+
+    def invalidate(self) -> None:
+        self.invalidated += 1
+        self.connection.driver_connection.closed = True
+
+
+@pytest.mark.parametrize(
+    "error",
+    [KeyboardInterrupt(), asyncio.CancelledError(), _LostError("server closed the connection")],
+    ids=["interrupt", "cancelled", "lost"],
+)
+def test_any_failure_but_the_timeout_invalidates_the_held_connection(error: BaseException) -> None:
+    """#126: also an interrupt or a cancelled task (not an ``Exception``) may come after the lock
+    was granted: the connection is invalidated and the error goes on unchanged."""
+    connection = _Connection(_Raw(error))
+    db = cast(Session, SimpleNamespace(connection=lambda: connection))
+    with pytest.raises(type(error)) as raised:
+        archive_service.hold_window(db, 1)
+    assert raised.value is error
+    assert connection.invalidated == 1
+
+
+def test_the_lock_timeout_keeps_the_connection() -> None:
+    """The lock's timeout (``lock_not_available``) was never granted: the connection stays, back
+    out of autocommit, and the answer is :class:`TimeoutError`."""
+    raw = _Raw(_LockTimeoutError("canceling statement due to lock timeout"))
+    connection = _Connection(raw)
+    db = cast(Session, SimpleNamespace(connection=lambda: connection))
+    with pytest.raises(TimeoutError, match="not granted within 1 s"):
+        archive_service.hold_window(db, 1)
+    assert (connection.invalidated, raw.autocommit) == (0, False)
+
+
 def test_a_next_page_waiting_for_a_drop_sees_it(
     client: TestClient,
     app_session_factory: sessionmaker[Session],
@@ -362,6 +456,7 @@ def test_a_next_page_waiting_for_a_drop_sees_it(
     assert response.json()["archived"] == {
         "first_day": DAY.isoformat(),
         "last_day": DAY.isoformat(),
+        "keep_days": 7,
     }
     assert exclusive(outside)
 
