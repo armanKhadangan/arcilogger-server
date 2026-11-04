@@ -2898,21 +2898,26 @@ foreach ($path in [System.IO.File]::ReadAllLines($ListPath)) {
     tasks = WELL_KNOWN["local_service"]
     assert acls[crl_state]["protected"] is True
     writes = write_data | append_data | delete | delete_child
-    crl_rules = {r["sid"]: r for r in acls[crl_state]["rules"] if r["type"] == "Allow"}
-    assert crl_rules[tasks]["rights"] & (write_data | append_data | delete) != 0
+    modify_bits = write_data | append_data | delete
+    # ReadData, ReadExtendedAttributes, ExecuteFile, ReadAttributes, ReadPermissions, Synchronize.
+    read_and_execute = 0x1200A9
+    crl_rules = [r for r in acls[crl_state]["rules"] if r["type"] == "Allow"]
+    crl_tasks = [r for r in crl_rules if r["sid"] == tasks]
+    assert any(r["rights"] & modify_bits == modify_bits for r in crl_tasks)
     for reader in (service_sid("ArciApi"), worker):
-        assert crl_rules[reader]["rights"] & writes == 0, reader
-    assert collector not in crl_rules
-    assert service_sid("ArciIngest") not in crl_rules
+        reader_rules = [r for r in crl_rules if r["sid"] == reader]
+        assert reader_rules, reader
+        assert all(r["rights"] & writes == 0 for r in reader_rules), reader
+    assert all(r["sid"] not in (collector, service_sid("ArciIngest")) for r in crl_rules)
     # Stored reports: the Renew task reads them, never writes or deletes one.
     report_tasks = [r for r in acls[reports]["rules"] if r["sid"] == tasks]
     assert report_tasks, "LOCAL SERVICE must read exports\\reports"
     assert all(r["type"] == "Allow" and r["rights"] & writes == 0 for r in report_tasks)
+    assert any(r["rights"] & read_and_execute == read_and_execute for r in report_tasks)
     # state\renewal.json after two atomic writes: the tasks' Modify, inherited from state.
     renewal_tasks = [r for r in acls[renewal]["rules"] if r["sid"] == tasks]
     assert renewal_tasks, "the Renew task must write state\\renewal.json"
     assert all(r["inherited"] for r in renewal_tasks)
-    modify_bits = write_data | append_data | delete
     assert any(
         r["type"] == "Allow" and r["rights"] & modify_bits == modify_bits for r in renewal_tasks
     )
