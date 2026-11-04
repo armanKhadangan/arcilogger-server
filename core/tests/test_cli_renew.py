@@ -385,10 +385,11 @@ def test_an_earlier_state_file_is_read_once_and_never_written(
     cli: Cli, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """An upgrade from a release that kept ``state/renewal.json`` and ``state/renewal.lock`` in
-    ``state``, which every service may write (W5-E-4): the first write carries only the
-    earlier ``failures_in_a_row`` over into ``state/renewal/renewal.json`` (W5-E-8), and from
-    then on the earlier file is never read. Neither earlier file is ever written, and a process
-    holding the earlier lock blocks no run."""
+    ``state``, which every service may write (W5-E-4): a dry run writes nothing while the
+    earlier file is the only one, the first counted run carries only the earlier
+    ``failures_in_a_row`` over into ``state/renewal/renewal.json`` (W5-E-8), and from then on
+    the earlier file is never read. Neither earlier file is ever written, and a process holding
+    the earlier lock blocks no run."""
     state = cli.rw.layout.state
     state.mkdir(parents=True, exist_ok=True)
     earlier, earlier_lock = state / "renewal.json", state / "renewal.lock"
@@ -404,19 +405,18 @@ def test_an_earlier_state_file_is_read_once_and_never_written(
         encoding="utf-8",
     )
     earlier_lock.write_bytes(b"")
-    now = CNA - timedelta(days=100)
-    # a dry run keeps the last run, but not the earlier file's: only its count is carried over
-    assert cli.run("--dry-run", now=now) == 0
-    carried = cli.state()
-    assert "last_run" not in carried
-    assert carried["failures_in_a_row"] == 1
-    assert carried["at"] == "2031-06-23T00:00:00Z"
-    # once the new file exists, a changed earlier file decides nothing
-    earlier.write_text(
-        json.dumps({"schema": STATE_SCHEMA, "failures_in_a_row": 0, "tokens": []}),
-        encoding="utf-8",
-    )
     kept = {path: (path.read_bytes(), path.stat().st_mtime_ns) for path in (earlier, earlier_lock)}
+    now = CNA - timedelta(days=100)
+    # a dry run leaves the earlier file to the readers (answer to Q5 on #158): no new file
+    assert cli.run("--dry-run", "--json", now=now) == 0
+    data = _json(capsys)
+    assert (data["outcome"], data["state_written"]) == ("dry_run", False)
+    assert data["report"]["tokens"] != []
+    assert not cli.state_file.exists()
+    assert [path.name for path in cli.state_file.parent.iterdir()] == ["renewal.lock"]
+    assert renewal_module.state_to_read(cli.rw.layout) == earlier
+    assert {p: (p.read_bytes(), p.stat().st_mtime_ns) for p in (earlier, earlier_lock)} == kept
+    # the first counted run takes the earlier count only, while a process holds the earlier lock
     cli.rw.legal_tsa.failure = MockFailure.UNREACHABLE
     handle = os.open(earlier_lock, os.O_RDWR)
     try:
@@ -425,15 +425,28 @@ def test_an_earlier_state_file_is_read_once_and_never_written(
     finally:
         renewal_module._unlock(handle)
         os.close(handle)
+    capsys.readouterr()
     after = cli.state()
     assert (after["last_run"]["outcome"], after["failures_in_a_row"]) == ("failed", 2)
-    assert after["tokens"] == carried["tokens"] != []
+    assert after["last_run"]["at"] == "2031-06-23T01:00:00Z"
+    assert after["tokens"] == data["report"]["tokens"]
+    # once the new file exists, a changed earlier file decides nothing, a dry run's neither
+    earlier.write_text(
+        json.dumps({"schema": STATE_SCHEMA, "failures_in_a_row": 0, "tokens": []}),
+        encoding="utf-8",
+    )
+    kept = {path: (path.read_bytes(), path.stat().st_mtime_ns) for path in (earlier, earlier_lock)}
+    assert cli.run("--dry-run", now=now + timedelta(hours=2)) == 0
+    capsys.readouterr()
+    dry = cli.state()
+    assert (dry["last_run"], dry["failures_in_a_row"]) == (after["last_run"], 2)
+    assert dry["tokens"] == after["tokens"] != []
+    assert dry["at"] == "2031-06-23T02:00:00Z"
     assert {p: (p.read_bytes(), p.stat().st_mtime_ns) for p in (earlier, earlier_lock)} == kept
     assert sorted(path.name for path in cli.state_file.parent.iterdir()) == [
         "renewal.json",
         "renewal.lock",
     ]
-    capsys.readouterr()
 
 
 @pytest.mark.parametrize(("failures", "counted"), [(1, 2), (-3, 1), ("0", 1), (None, 1)])
@@ -791,7 +804,7 @@ def test_the_state_file_is_written_under_the_lock(
     def no_secrets(app: App) -> Any:
         raise SecretStoreError("the secret store cannot be read")
 
-    def checked(layout: Any, *args: Any, **kwargs: Any) -> dict[str, Any]:
+    def checked(layout: Any, *args: Any, **kwargs: Any) -> dict[str, Any] | None:
         try:
             with one_run(layout):
                 held.append(False)

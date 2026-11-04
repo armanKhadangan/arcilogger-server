@@ -30,7 +30,7 @@ from arcilogger_core.config import Config
 from arcilogger_core.crl import CrlOptions, parse_crl
 from arcilogger_core.crl import fetch as crl_fetch
 from arcilogger_core.layout import Layout
-from arcilogger_core.renewal import LastRun, write_state
+from arcilogger_core.renewal import LastRun, RenewalReport, write_state
 from arcilogger_core.seal import Sealer
 from arcilogger_core.timeutil import isoformat_site
 from arcilogger_core.tsa.mock import MockTsaProvider
@@ -515,6 +515,50 @@ def test_stamp_renewal_cleared_after_a_successful_run(
     assert RENEWAL_KEY not in check()
     reason = resolved(db_session, RENEWAL_KEY).details["auto_resolved"]["reason"]
     assert reason == "renewal_ok"
+
+
+def test_a_dry_run_after_an_upgrade_leaves_the_alerts_as_they_are(
+    check: Any, layout: Layout, db_session: Session
+) -> None:
+    """An upgrade keeps the earlier release's ``state/renewal.json`` as the report until the
+    first counted run (W5-E-4). A dry run in between writes nothing, whatever statuses it found
+    (W5-E-8, answer to Q5 on #158): ``R20-renewal`` and ``R20-cert`` stay as they were. The first
+    counted run writes ``state/renewal/renewal.json``, and its report decides."""
+    earlier = layout.state / "renewal.json"
+    soon = (NOW + timedelta(days=12)).astimezone(UTC).isoformat().replace("+00:00", "Z")
+    token = {"path": "2026/10/01/manifest-2026-10-01.json.zd", "kind": "day", "status": "due"}
+    last_run = {"at": "2026-11-01T23:30:00Z", "outcome": "failed", "exit_code": 3}
+    write(
+        earlier,
+        {
+            "tokens": [{**token, "cert_not_after": soon, "covered_by": None}],
+            "last_run": last_run,
+            "failures_in_a_row": 2,
+        },
+    )
+    before = earlier.read_bytes()
+
+    def seen() -> dict[str, tuple[str, str, str, dict[str, Any]]]:
+        found = check()
+        return {key: (a.rule, a.severity, a.title, a.details) for key, a in found.items()}
+
+    raised = seen()
+    assert sorted(raised) == sorted((RENEWAL_KEY, CERT_KEY))
+    assert raised[RENEWAL_KEY][3]["failures_in_a_row"] == 2
+    assert raised[CERT_KEY][3]["expiring"] == 1
+    nothing_due = RenewalReport.of(())
+    # a dry run that finds nothing due: it would have written an empty token list
+    written = write_state(layout, nothing_due, at=NOW, renew_before=180, last_run=None)
+    assert written is None
+    assert not stamp_renewal_path(layout).exists()
+    assert earlier.read_bytes() == before
+    assert seen() == raised
+    run = LastRun(NOW - timedelta(hours=1), "not_needed", 0)  # the first counted run
+    write_state(layout, nothing_due, at=NOW, renew_before=180, last_run=run)
+    assert stamp_renewal_path(layout).is_file()
+    assert seen() == {}
+    for key, reason in ((RENEWAL_KEY, "renewal_ok"), (CERT_KEY, "certificate_ok")):
+        assert resolved(db_session, key).details["auto_resolved"]["reason"] == reason
 
 
 def test_stamp_renewal_unreadable_runs_decide_nothing(check: Any, layout: Layout) -> None:

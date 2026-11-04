@@ -964,7 +964,8 @@ def cmd_renew(args: argparse.Namespace, app: App) -> int:
 
     Every run but a busy one writes ``state/renewal/renewal.json`` (W5-A-2), also after a
     failure: ``last_run`` and ``failures_in_a_row`` are what W5-E's "Renew failed twice in a row"
-    reads. A dry run writes the statuses and keeps ``last_run``. The whole run, the state write
+    reads. A dry run writes the statuses and keeps ``last_run``; while only an earlier release's
+    ``state/renewal.json`` exists it writes nothing (W5-E-8). The whole run, the state write
     included, holds ``state/renewal/renewal.lock``, so two runs never write the file over each
     other; a run that finds the lock held writes nothing. The errors are caught here: ``main``
     would turn every :class:`TsaError` into exit 1.
@@ -1065,9 +1066,9 @@ def _renew_done(
     """Write ``state/renewal/renewal.json``, print the outcome and return the exit code.
 
     A busy run writes nothing (the run holding the lock writes the file), nor does a dry run
-    without statuses; every other call holds ``state/renewal/renewal.lock`` (or found it
-    unusable). A state file that cannot be written fails the run (exit 3): the alerts and the
-    Sistem page judge from it."""
+    without statuses or while only an earlier release's file exists (W5-E-8); every other call
+    holds ``state/renewal/renewal.lock`` (or found it unusable). A state file that cannot be
+    written fails the run (exit 3): the alerts and the Sistem page judge from it."""
     written = False
     dry_run = bool(args.dry_run)
     if outcome != "busy" and (report is not None or not dry_run):
@@ -1081,14 +1082,14 @@ def _renew_done(
                 error=error.code if error is not None else None,
             )
         try:
-            write_state(
+            state = write_state(
                 app.layout,
                 report,
                 at=now,
                 renew_before=renew_before_days(app.config),
                 last_run=last_run,
             )
-            written = True
+            written = state is not None
         except OSError as exc:
             log.error("renew: state/renewal/renewal.json not written: %s", exc)
             print(

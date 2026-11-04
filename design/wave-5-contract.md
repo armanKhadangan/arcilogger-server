@@ -1700,9 +1700,9 @@ All Wave 5 questions are answered (2026-11-02).
   creates the folder in plan order; `renewal.one_run` creates it too when it is missing, as
   `crl fetch` does `state\crl`.
   **Upgrade.** `renewal.state_to_read` gives the new file, or the earlier `state/renewal.json`
-  while the new one is missing. The first `write_state` after the upgrade (every run but a busy
-  one, and a dry run that computed the statuses) carries over only the earlier file's
-  `failures_in_a_row` (W5-E-8); from then on the new file exists and the earlier one is never
+  while the new one is missing. The first counted run after the upgrade (every run but a busy
+  one or a dry run: while the earlier file is the only one, a dry run writes nothing) carries
+  over only the earlier file's `failures_in_a_row` (W5-E-8); from then on the new file exists and the earlier one is never
   read again. Nothing
   writes, moves or removes the earlier `state/renewal.json` or `state/renewal.lock`: both stay
   as they are and decide nothing. The earlier lock is never taken, so a process holding it
@@ -1792,13 +1792,22 @@ All Wave 5 questions are answered (2026-11-02).
   outlived the move for good. Now `renewal.write_state` takes from the earlier file only
   `renewal.EARLIER_KEPT`, that is `failures_in_a_row`, read as W5-A-2 reads it (a whole number
   ≥ 0, anything else 0). A refused run with no protected previous file writes no token list,
-  which W5-C-1 reads as unknown, never as nothing due; a dry run writes no `last_run`, so the
-  Sistem page's Renew row shows `missing` until the next counted run (W5-E-2). A made-up count
-  can only do what a missing file (0) or a real count could: hide the failures before the
-  upgrade from `R20-renewal`'s failure branch, or raise it a run early; it cannot make tokens
-  known. The readers still read the earlier file until the new one exists (W5-E-4). Tests:
+  which W5-C-1 reads as unknown, never as nothing due. While the earlier file is the only one, a
+  dry run writes nothing (`write_state` returns None, `--json` gives `state_written` false;
+  answer to Q5 on #158): it would have written no `last_run`, turning the Sistem page's Renew
+  row `missing` (W5-E-2), and its own statuses in place of the earlier ones, changing
+  `R20-renewal` and `R20-cert` before any counted run. A dry run never makes the state look
+  worse. `state/renewal/` gets no report (only the lock every run holds), so the readers keep
+  reading the earlier file (W5-E-4, Q2); the first counted run migrates as above, and from then
+  on a dry run writes its statuses and keeps `last_run` (W5-A-2). A made-up count can only do
+  what a missing file (0) or a real count could: hide the failures before the upgrade from
+  `R20-renewal`'s failure branch, or raise it a run early; it cannot make tokens known. Tests:
   `test_a_refused_run_takes_no_statuses_from_an_earlier_state_file` and
-  `test_an_earlier_state_file_is_read_once_and_never_written` (`core/tests/test_cli_renew.py`).
+  `test_an_earlier_state_file_is_read_once_and_never_written` (`core/tests/test_cli_renew.py`),
+  `test_renew_row_reads_an_earlier_report_until_the_first_run`
+  (`api/tests/test_system_health.py`) and
+  `test_a_dry_run_after_an_upgrade_leaves_the_alerts_as_they_are`
+  (`worker/tests/test_alerts_legal.py`).
 - **W5-E-9: the owner of `state\crl` and `state\renewal` cannot change their rights (#151;
   review of the follow-up).** Both folders are new in Wave 5 (W5-B, W5-E-4). Under the earlier
   release's ACL the collector, ingest and the worker hold Modify on `state`, so a compromised one

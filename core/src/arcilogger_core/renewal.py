@@ -1516,19 +1516,19 @@ def earlier_state_path(layout: Layout) -> Path:
     return layout.state / STATE_NAME
 
 
-#: What the first :func:`write_state` after an upgrade takes from :func:`earlier_state_path`,
-#: which every service could write: the count of failed runs only, never the token list, its
-#: time or the last run (contract W5-E-8).
+#: What the first counted run after an upgrade takes from :func:`earlier_state_path`, which
+#: every service could write: the count of failed runs only, never the token list, its time or
+#: the last run (contract W5-E-8).
 EARLIER_KEPT: Final = ("failures_in_a_row",)
 
 
 def state_to_read(layout: Layout) -> Path:
     """The file the report is read from: :func:`state_path`, or :func:`earlier_state_path` while
-    the new file is missing. The first :func:`write_state` after an upgrade reads the earlier
-    file once and carries only :data:`EARLIER_KEPT` over; from then on the new file exists and
-    the earlier one is never read again. Until then the readers (the alerts, the Sistem page,
-    the legal status) read it too, so an upgrade does not resolve an open alert before the first
-    run."""
+    the new file is missing. The first counted run after an upgrade (a dry run writes nothing
+    while the earlier file is the only one) reads the earlier file once and carries only
+    :data:`EARLIER_KEPT` over; from then on the new file exists and the earlier one is never
+    read again. Until then the readers (the alerts, the Sistem page, the legal status) read it
+    too, so an upgrade does not resolve an open alert before the first run."""
     path = state_path(layout)
     try:
         path.stat()
@@ -1564,8 +1564,9 @@ def write_state(
     at: datetime,
     renew_before: int,
     last_run: LastRun | None,
-) -> dict[str, Any]:
-    """Write ``state/renewal/renewal.json`` atomically and return what was written (W5-A-2).
+) -> dict[str, Any] | None:
+    """Write ``state/renewal/renewal.json`` atomically and return what was written (W5-A-2);
+    None when nothing was written.
 
     Only the ``Renew`` task's command line calls this, holding :func:`one_run` around the read
     of the previous file and the write; the API and the alerts only read the file (§2.1.2).
@@ -1575,12 +1576,16 @@ def write_state(
     takes as unknown (never as "nothing due"). ``last_run`` is None for a dry run, which keeps
     the last run and ``failures_in_a_row``; a failed or refused run adds one to
     ``failures_in_a_row``, any other run sets it to 0. From an earlier release's file only
-    :data:`EARLIER_KEPT` is taken: a refused run then writes no token list and a dry run no
-    last run.
+    :data:`EARLIER_KEPT` is taken: a refused run then writes no token list. While that file is
+    the only one, a dry run writes nothing, so the readers keep reading it until the first
+    counted run (contract W5-E-8): a dry run never makes the state look worse.
     """
     path = state_to_read(layout)
+    earlier = path != state_path(layout)
+    if earlier and last_run is None and path.exists():
+        return None  # a dry run: the readers keep the earlier file until a counted run
     previous = _read_report(layout, path) or {}
-    if path != state_path(layout):
+    if earlier:
         previous = {key: previous[key] for key in EARLIER_KEPT if key in previous}
     state: dict[str, Any] = {"schema": STATE_SCHEMA}
     if report is not None:
