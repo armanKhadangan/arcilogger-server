@@ -28,7 +28,11 @@ the range that are gone from the database and in the sealed vault, or being load
 (:func:`arcilogger_api.archive.service.check_window`, in the snapshot the rows are read from,
 under the partition lock held shared from before that snapshot);
 when every day of the range is gone, the answer is 409 ``archive_reload_required`` with what a
-reload would bring back as ``details``. ``POST /archive-reloads`` brings the days back.
+reload would bring back as ``details``. ``POST /archive-reloads`` brings the days back. The
+export checks its search's range again in its own snapshot (W5-G-24): the same 409, or a file
+marked partial (``archived``, :mod:`~.search.export`). A search or export that waited for the
+partition lock until its budget was gone answers 504 ``search_timeout`` with the text of a lock
+wait (``search.messages.VARIANTS``), not the one of the shortest time slice.
 
 Errors are ``search.messages`` (Turkish first, with the span of a refused query in
 ``details``); the event drawer (``GET /search/event``) reads one row by its key and is audited
@@ -216,6 +220,11 @@ def _seconds(settings: dict[str, Any], key: str) -> float:
     return int(settings[key]) / 1000
 
 
+class LockWaitError(SearchTimeoutError):
+    """The partition lock was not granted within ``search.request_budget_ms``, or its wait used
+    the request's budget up (:func:`reading`, :func:`_budget_left`): nothing was scanned."""
+
+
 #: ``Session.info`` key of :func:`reading` with ``window``: the seconds the partition lock was
 #: waited for, set while the lock is held (:func:`_archived` and :func:`_budget_left` read it).
 WINDOW_WAIT: Final = "arcilogger.search.window_wait"
@@ -244,8 +253,8 @@ def reading(
     also ends that setting. ``window`` (the reads that check the database window, G8, and the
     export, W5-G-23): the partition lock is held shared from before the snapshot to its end
     (:func:`~arcilogger_api.archive.service.hold_window`), waited for at most
-    ``search.request_budget_ms`` (:class:`SearchTimeoutError`); the wait is part of the
-    request's budget (:func:`_budget_left`) and :data:`WINDOW_WAIT` says the lock is held."""
+    ``search.request_budget_ms`` (:class:`LockWaitError`); the wait is part of the request's
+    budget (:func:`_budget_left`) and :data:`WINDOW_WAIT` says the lock is held."""
     db.commit()  # the authentication's transaction; a waiting request holds no connection
     with state.gate.slot(user.id, int(settings["search.max_concurrent"])):
         held = None
@@ -255,7 +264,7 @@ def reading(
             try:
                 held = hold_window(db, seconds)
             except TimeoutError:
-                raise SearchTimeoutError(seconds) from None
+                raise LockWaitError(seconds) from None
             db.info[WINDOW_WAIT] = max(0.0, state.clock() - asked)
         try:
             db.execute(text(READ_ONLY))
@@ -272,10 +281,10 @@ def reading(
 def _budget_left(db: Session, budget: float) -> float:
     """``budget`` less the wait for the partition lock (:func:`reading`): a request takes at
     most ``search.request_budget_ms`` in all, the gate's queue aside; nothing left is a
-    timeout."""
+    timeout of the lock's wait (:class:`LockWaitError`)."""
     left = budget - float(db.info.get(WINDOW_WAIT, 0.0))
     if left <= 0:
-        raise SearchTimeoutError(budget)
+        raise LockWaitError(budget)
     return left
 
 
@@ -318,9 +327,12 @@ def _shown(seconds: float) -> float:
     return int(seconds) if seconds == int(seconds) else seconds
 
 
-def _timeout(settings: dict[str, Any]) -> ApiError:
+def _timeout(settings: dict[str, Any], exc: SearchTimeoutError) -> ApiError:
+    """504 ``search_timeout`` of a search: the text of the shortest time slice, or of the wait
+    for the partition lock (:class:`LockWaitError`)."""
     seconds = _seconds(settings, "search.request_budget_ms")
-    return search_error("search_timeout", {"seconds": _shown(seconds)})
+    variant = "lock" if isinstance(exc, LockWaitError) else None
+    return search_error("search_timeout", {"seconds": _shown(seconds)}, variant=variant)
 
 
 def _oldest_notice(db: Session, state: SearchState, start: datetime) -> list[dict[str, Any]]:
@@ -436,7 +448,7 @@ def run_search(
             )
             items = page_rows(db, plan, page.rows, site)
             found = _oldest_notice(db, state, start)
-    except SearchTimeoutError:
+    except SearchTimeoutError as exc:
         details |= {
             "search_id": None,
             "rows": 0,
@@ -446,7 +458,7 @@ def run_search(
         }
         record_audit(db, actor=user, action="search.run", details=details, ip=client_ip(request))
         db.commit()
-        raise _timeout(settings) from None
+        raise _timeout(settings, exc) from None
     entry = Entry(
         search_id=search_id,
         user_id=user.id,
@@ -515,8 +527,8 @@ def next_page(
                 horizons=storage.horizons,
             )
             items = page_rows(db, entry.plan, page.rows, site)
-    except SearchTimeoutError:
-        raise _timeout(settings) from None
+    except SearchTimeoutError as exc:
+        raise _timeout(settings, exc) from None
     return _page_answer(entry, items, page, archived)
 
 
@@ -804,12 +816,17 @@ def search_export(
     request: Request,
     db: DbSession,
     config: ConfigDep,
+    layout: LayoutDep,
     user: ExporterDep,
     state: StateDep,
 ) -> StreamingResponse:
     """The rows of a search as a file (audited ``search.export`` before it is sent). The
-    partition lock is waited for as by a search (504 ``search_timeout``), the wait taken from
-    ``search.export_budget_seconds``, and released before the audit entry is written."""
+    partition lock is waited for as by a search (504 ``search_timeout``, the text of a lock
+    wait), the wait taken from ``search.export_budget_seconds``, and released before the audit
+    entry is written. Under it, in the export's snapshot, the range is checked against the
+    database window as the search does (G8, W5-G-24): every day gone answers the search's 409
+    ``archive_reload_required``, nothing audited; some days gone give a file marked partial
+    (``archived``) whose header ``X-Arci-Export-Archived`` and entry name them."""
     settings = _settings(db)
     entry = _entry(state, body.search_id, user)
     with state.exports.hold(user.id):
@@ -828,6 +845,10 @@ def search_export(
             # Its windows read in one snapshot under the partition lock held shared from before
             # it (W5-G-23): a step of the window job never drops a day between two of them.
             with reading(db, state, user, settings, window=True) as storage:
+                # A step that finished between the search and the export is seen here: the same
+                # answer as the search's for the range, never a partial file that does not say so
+                # (W5-G-24). The 409 leaves no file and no entry, as the timeout below.
+                state_.archived = _archived(db, layout, entry.start, entry.end, refuse=True)
                 rows = exports.read_rows(
                     db,
                     entry.plan,
@@ -843,9 +864,12 @@ def search_export(
                 )
                 built = exports.build(rows, body.format, info, state_)
         except SearchTimeoutError as exc:  # no file and no row: nothing is audited (W5-G-23)
-            # The budget used up: the wait for the lock's (``search.request_budget_ms``) or the
-            # export's own (``search.export_budget_seconds``, by :func:`_budget_left`).
-            raise search_error("search_timeout", {"seconds": _shown(exc.seconds)}) from None
+            # The budget used up by the wait for the lock: the lock's (``search.request_budget_ms``)
+            # or the export's own (``search.export_budget_seconds``, by :func:`_budget_left`); the
+            # read itself stops at its deadline with a partial file (``time``).
+            raise search_error(
+                "search_timeout", {"seconds": _shown(exc.seconds)}, variant="export_lock"
+            ) from None
         try:
             record_audit(
                 db,
@@ -860,6 +884,9 @@ def search_export(
                     "format": body.format,
                     "rows": built.rows,
                     "truncated": built.truncated,
+                    "archived": (
+                        None if built.archived is None else built.archived.model_dump(mode="json")
+                    ),
                     "bytes": built.size,
                     "sha256": built.sha256,
                 },
@@ -877,6 +904,8 @@ def search_export(
     }
     if built.truncated is not None:
         headers["X-Arci-Export-Truncated"] = built.truncated
+    if built.archived is not None:  # also beside ``rows``/``time``: a CSV has no "Bilgi" sheet
+        headers["X-Arci-Export-Archived"] = exports.archived_header(built.archived)
     return StreamingResponse(
         built.chunks(),
         media_type=built.media_type,

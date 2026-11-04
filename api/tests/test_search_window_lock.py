@@ -22,7 +22,15 @@ level before its transaction (``archive.service.hold_window``), so its snapshot 
   it, and the file holds the whole day. It waits for the lock as a search does (504
   ``search_timeout``, nothing audited), the wait taken from ``search.export_budget_seconds``,
   and releases it before its audit entry is written; a failure inside the read leaves no lock
-  behind.
+  behind;
+* the export checks its search's range against the database window again, in its own snapshot
+  (W5-G-24): after a drop that finished between the search and the export it answers as a search
+  of that range would — 409 ``archive_reload_required`` with the same details and texts, no
+  ``search.export`` entry; or the rows the database holds in a file marked partial (``-kismi``,
+  ``X-Arci-Export-Truncated: archived``, ``X-Arci-Export-Archived``, the "Bilgi" sheet, the
+  entry's ``truncated`` and ``archived``), never a partial file that does not say so;
+* a search or export that waited for the lock until its budget was gone says so (the lock-wait
+  text of ``search_timeout``); a scan that ran out keeps the text of the shortest time slice.
 
 The day is ten days before today (daily partitions); its two lines are CORE-R1 heartbeats, at
 01:00 (UTC-day partition of the day before) and at 12:00 (its own UTC day), written to the spool
@@ -45,18 +53,21 @@ from typing import Any, cast
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from openpyxl import load_workbook
 from sqlalchemy import Connection, Engine, select, text
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import NullPool
 
 from arcilogger_api.archive import service as archive_service
+from arcilogger_api.archive.models import ArchivedRange
 from arcilogger_api.audit import record_audit
 from arcilogger_api.lookup_testing import seal_day
 from arcilogger_api.routers import search as search_router
 from arcilogger_api.routers.search import state_of
 from arcilogger_api.search import export as exports
 from arcilogger_api.search import windows
+from arcilogger_api.search.messages import MESSAGES, VARIANTS, placeholders, texts
 from arcilogger_api.search.testing import sign_in
 from arcilogger_api.testing import LoggedIn
 from arcilogger_core.config import Config
@@ -65,9 +76,17 @@ from arcilogger_core.layout import Layout
 from arcilogger_core.timeutil import day_window, isoformat_site, site_day, utc_now
 from arcilogger_db.engine import engine_from_url
 from arcilogger_db.models import AuditLog, Message
-from arcilogger_db.partitions import PARTITION_LOCK_KEY, day_bounds, drop_before, ensure_days
+from arcilogger_db.partitions import (
+    PARTITION_LOCK_KEY,
+    day_bounds,
+    drop_before,
+    dropped_before,
+    ensure_days,
+)
 from arcilogger_db.settings import DEFAULT_SETTINGS, set_setting
 from arcilogger_worker.testing import Evidence, tr
+
+from .test_search_grammar import OVERSTATEMENT
 
 API = "/api/v1/search"
 #: The searched day: ten days old, inside the daily partitions.
@@ -135,20 +154,29 @@ def day(
     return DAY
 
 
-def search(client: TestClient, **body: Any) -> Any:
+def search(client: TestClient, *, last: date = DAY, **body: Any) -> Any:
+    """A search of :data:`DAY` (to the end of ``last``)."""
     return client.post(
         API,
         json={
             "q": "",
             "from": day_window(DAY)[0].isoformat(),
-            "to": day_window(DAY)[1].isoformat(),
+            "to": day_window(last)[1].isoformat(),
             **body,
         },
     )
 
 
-def export(client: TestClient, search_id: str) -> Any:
-    return client.post(f"{API}/export", json={"search_id": search_id, "format": "csv"})
+def export(client: TestClient, search_id: str, fmt: str = "csv") -> Any:
+    return client.post(f"{API}/export", json={"search_id": search_id, "format": fmt})
+
+
+def exported_times(response: Any) -> list[str]:
+    """The Zaman column of an exported CSV file."""
+    rows = list(
+        csv.reader(io.StringIO(response.content.decode("utf-8-sig"), newline=""), delimiter=";")
+    )
+    return [row[0] for row in rows[1:]]
 
 
 def export_entries(factory: sessionmaker[Session]) -> list[AuditLog]:
@@ -278,6 +306,10 @@ def test_a_search_that_cannot_get_the_lock_in_time_times_out(
     error = response.json()["error"]
     assert error["code"] == "search_timeout"
     assert error["message_tr"] != error["message_en"]
+    # The lock wait's text (W5-G-24), not the shortest time slice's: nothing was scanned.
+    assert (error["message_tr"], error["message_en"]) == texts(
+        "search_timeout", {"seconds": 0.5}, variant="lock"
+    )
     assert waited > 0.4
     with app_session_factory() as session:
         audited = session.scalars(
@@ -521,7 +553,12 @@ def test_the_wait_for_the_lock_is_taken_from_the_budget(
     assert budgets == [DEFAULT_SETTINGS["search.request_budget_ms"] / 1000 - 1.5]
     used_up = search(client)
     assert used_up.status_code == 504, used_up.text
-    assert used_up.json()["error"]["code"] == "search_timeout"
+    error = used_up.json()["error"]
+    assert error["code"] == "search_timeout"
+    seconds = DEFAULT_SETTINGS["search.request_budget_ms"] / 1000
+    assert (error["message_tr"], error["message_en"]) == texts(
+        "search_timeout", {"seconds": int(seconds)}, variant="lock"
+    )
     assert len(budgets) == 1
 
 
@@ -649,6 +686,9 @@ def test_an_export_that_cannot_get_the_lock_in_time_times_out(
     assert error["message_tr"] != error["message_en"]
     assert "0.5 saniyede" in error["message_tr"]
     assert "0.5 s" in error["message_en"]
+    assert (error["message_tr"], error["message_en"]) == texts(
+        "search_timeout", {"seconds": 0.5}, variant="export_lock"
+    )
     assert waited > 0.4
     assert export_entries(app_session_factory) == []
     assert exclusive(outside)
@@ -703,6 +743,9 @@ def test_the_export_takes_the_wait_for_the_lock_from_its_budget(
     assert error["code"] == "search_timeout"
     assert "10 saniyede" in error["message_tr"]
     assert "10 s" in error["message_en"]
+    assert (error["message_tr"], error["message_en"]) == texts(
+        "search_timeout", {"seconds": 10}, variant="export_lock"
+    )
     assert len(budgets) == 1
     assert len(export_entries(app_session_factory)) == 1
 
@@ -763,3 +806,183 @@ def test_a_failed_export_does_not_keep_the_lock(
     again = export(client, found.json()["search_id"])
     assert again.status_code == 200, again.text
     assert exclusive(outside)
+
+
+# -- the export checks the database window (W5-G-24) -----------------------------------------------
+
+
+def step_drops(engine: Engine) -> None:
+    """A step of the window job that finishes between the search and the export: the drop of the
+    UTC-day partition of ``DAY - 1`` (``CUTOFF``), committed."""
+    with engine.begin() as step:
+        drop_before(step, CUTOFF)
+        assert EARLY not in times(step)
+        assert LATE in times(step)
+        assert dropped_before(step) == CUTOFF
+
+
+def test_an_export_after_a_drop_of_its_whole_range_answers_as_the_search(
+    client: TestClient,
+    app_session_factory: sessionmaker[Session],
+    reauthenticate: Callable[[LoggedIn], None],
+    outside: Engine,
+    day: date,
+) -> None:
+    """The search of ``DAY`` answered before the drop (``archived: null``, both lines); after it
+    every day of its range is gone (the cutoff is after ``DAY``), so the export answers 409
+    ``archive_reload_required`` exactly as a search of that range does now, with no file and no
+    ``search.export`` entry (the hourly limit counts files) — never the line at 12:00 alone as if
+    the day were complete. Fails without the check: 200 with ``truncated: null``."""
+    reauthenticate(sign_in(client, app_session_factory))
+    found = search(client)
+    assert found.status_code == 200, found.text
+    assert found.json()["archived"] is None
+    assert len(found.json()["items"]) == 2
+    step_drops(outside)
+
+    response = export(client, found.json()["search_id"])
+    assert response.status_code == 409, response.text
+    error = response.json()["error"]
+    assert error["code"] == "archive_reload_required"
+    assert (error["details"]["first_day"], error["details"]["last_day"]) == (
+        DAY.isoformat(),
+        DAY.isoformat(),
+    )
+    again = search(client)  # what a search of the range answers now
+    assert again.status_code == 409, again.text
+    assert error == again.json()["error"]
+    assert export_entries(app_session_factory) == []
+    assert exclusive(outside)
+
+
+def test_an_export_after_a_drop_of_part_of_its_range_is_marked_partial(
+    client: TestClient,
+    app_session_factory: sessionmaker[Session],
+    reauthenticate: Callable[[LoggedIn], None],
+    layout: Layout,
+    outside: Engine,
+    day: date,
+) -> None:
+    """The search of ``DAY`` and ``DAY + 1`` answered before the drop with every line; after it
+    ``DAY`` is gone and ``DAY + 1`` is not, so the export gives the rows the database holds, as a
+    search of the range does now (with ``archived``), in a file that says so: ``-kismi``,
+    ``X-Arci-Export-Truncated: archived``, ``X-Arci-Export-Archived`` and the "Bilgi" sheet
+    naming the days, and the entry's ``truncated`` and ``archived`` (the search's ``archived``).
+    Where the reading stopped (``rows``) stays the header's and the entry's ``truncated``, with
+    ``X-Arci-Export-Archived`` and ``archived`` beside it.
+    Fails without the check: no marking, ``truncated: null``."""
+    following = tr(DAY + timedelta(days=1), 12)
+    with app_session_factory() as session:
+        Evidence(session, layout).heartbeat(following)
+        session.commit()
+    reauthenticate(sign_in(client, app_session_factory))
+    found = search(client, last=DAY + timedelta(days=1))
+    assert found.status_code == 200, found.text
+    assert found.json()["archived"] is None
+    assert len(found.json()["items"]) == 3
+    step_drops(outside)
+    again = search(client, last=DAY + timedelta(days=1))  # what a search answers now
+    assert again.status_code == 200, again.text
+    archived = again.json()["archived"]
+    assert archived == {"first_day": DAY.isoformat(), "last_day": DAY.isoformat(), "keep_days": 7}
+    shown = [isoformat_site(datetime.fromisoformat(item["time"])) for item in again.json()["items"]]
+    assert shown == [isoformat_site(following), isoformat_site(LATE)]
+
+    response = export(client, found.json()["search_id"])
+    assert response.status_code == 200, response.text
+    assert response.headers["X-Arci-Export-Truncated"] == "archived"
+    assert response.headers["X-Arci-Export-Archived"] == DAY.isoformat()
+    assert '-kismi.csv"' in response.headers["content-disposition"]
+    assert exported_times(response) == shown
+    (entry,) = export_entries(app_session_factory)
+    assert entry.details["truncated"] == "archived"
+    assert entry.details["archived"] == archived
+    assert entry.details["rows"] == 2
+
+    book = export(client, found.json()["search_id"], "xlsx")
+    assert book.status_code == 200, book.text
+    assert '-kismi.xlsx"' in book.headers["content-disposition"]
+    info = {
+        row[0].value: row[1].value
+        for row in load_workbook(io.BytesIO(book.content))["Bilgi"].iter_rows()
+    }
+    assert info["Durum / Status"] == " / ".join(exports.TRUNCATION_TEXTS["archived"])
+    assert info[exports.ARCHIVED_LABEL] == DAY.isoformat()  # one day, named once
+
+    with app_session_factory() as session:
+        set_setting(session, "search.export_max_rows", 1, updated_by="test")
+        session.commit()
+    cut = export(client, found.json()["search_id"])
+    assert cut.status_code == 200, cut.text
+    assert cut.headers["X-Arci-Export-Truncated"] == "rows"
+    assert cut.headers["X-Arci-Export-Archived"] == DAY.isoformat()  # the CSV names the days too
+    assert '-kismi.csv"' in cut.headers["content-disposition"]
+    *_, last = export_entries(app_session_factory)
+    assert (last.details["truncated"], last.details["archived"]) == ("rows", archived)
+    assert exclusive(outside)
+
+
+def test_the_days_gone_are_named_once_for_one_day_and_as_a_span_for_more() -> None:
+    """The "Bilgi" line and ``X-Arci-Export-Archived``: one day once, else first and last."""
+    one = ArchivedRange(first_day=DAY, last_day=DAY, keep_days=7)
+    two = ArchivedRange(first_day=DAY, last_day=DAY + timedelta(days=1), keep_days=7)
+    following = (DAY + timedelta(days=1)).isoformat()
+    assert exports.archived_header(one) == DAY.isoformat()
+    assert exports.archived_header(two) == f"{DAY.isoformat()}/{following}"
+    info = exports.Info(query="*", start=EARLY, end=LATE, username="u", created_at=LATE)
+    rows = dict(exports.info_rows(info, exports.Reading(archived=two)))
+    assert rows[exports.ARCHIVED_LABEL] == f"{DAY.isoformat()} - {following}"
+    assert rows["Durum / Status"] == " / ".join(exports.TRUNCATION_TEXTS["archived"])
+    assert exports.ARCHIVED_LABEL not in dict(exports.info_rows(info, exports.Reading()))
+
+
+# -- the lock-wait text of search_timeout (W5-G-24) ------------------------------------------------
+
+
+@pytest.mark.parametrize("variant", ["lock", "export_lock"])
+def test_the_lock_wait_texts_are_turkish_and_english_with_the_same_placeholders(
+    variant: str,
+) -> None:
+    """As every text of the catalogue (``test_search_grammar``), and not the slice's."""
+    message_tr, message_en = VARIANTS["search_timeout", variant]
+    for message in (message_tr, message_en):
+        assert message.strip() == message
+        assert message.endswith(".")
+        assert "5 " not in message  # not the shortest time slice (5 minutes)
+    assert message_tr != message_en
+    assert placeholders(message_tr) == placeholders(message_en) == {"seconds"}
+    assert (message_tr, message_en) != MESSAGES["search_timeout"]
+    shown = texts("search_timeout", {"seconds": 4}, variant=variant)
+    for message in (*shown, message_tr, message_en):
+        assert not OVERSTATEMENT.search(message), message
+    assert "{" not in "".join(shown)  # every placeholder filled
+    assert "4 saniyede" in shown[0]
+    assert "4 s" in shown[1]
+    assert shown[0].startswith("Dışa aktarma" if variant == "export_lock" else "Arama")
+
+
+def test_a_scan_that_runs_out_keeps_the_text_of_the_time_slice(
+    app: FastAPI,
+    client: TestClient,
+    app_session_factory: sessionmaker[Session],
+    day: date,
+) -> None:
+    """The lock was granted at once and the scan used the budget up: the text of the shortest
+    time slice, not the lock wait's."""
+    sign_in(client, app_session_factory)
+    with app_session_factory() as session:
+        set_setting(session, "search.request_budget_ms", 500, updated_by="test")
+        session.commit()
+
+    def always_slow(db: Session, _lower: datetime, _upper: datetime) -> None:
+        db.execute(text("SELECT pg_sleep(5)"))
+
+    state_of(app).hook = always_slow
+    try:
+        response = search(client, q="srcip:172.20.41.5")
+    finally:
+        state_of(app).hook = None
+    assert response.status_code == 504, response.text
+    error = response.json()["error"]
+    assert error["code"] == "search_timeout"
+    assert (error["message_tr"], error["message_en"]) == texts("search_timeout", {"seconds": 0.5})
