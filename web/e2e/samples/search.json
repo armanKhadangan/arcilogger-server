@@ -150,7 +150,7 @@
         }
       },
       "headers": {
-        "retry-after": "3599"
+        "retry-after": "3598"
       },
       "status": 429
     },
@@ -225,12 +225,12 @@
       "body": {
         "error": {
           "code": "search_rate_limited",
-          "message_en": "Too many searches in a short time; try again in 56 s.",
-          "message_tr": "Kısa sürede çok fazla arama yaptınız; 56 saniye sonra yeniden deneyin."
+          "message_en": "Too many searches in a short time; try again in 54 s.",
+          "message_tr": "Kısa sürede çok fazla arama yaptınız; 54 saniye sonra yeniden deneyin."
         }
       },
       "headers": {
-        "retry-after": "56"
+        "retry-after": "54"
       },
       "status": 429
     },
@@ -546,12 +546,12 @@
       "headers": {
         "cache-control": "no-store",
         "content-disposition": "attachment; filename=\"arama-20261009T0000-20261010T0000.xlsx\"",
-        "content-length": "7150",
+        "content-length": "7147",
         "content-type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        "repr-digest": "sha-256=:y4fXGv4nsPW0Log9B70ockFidvyqLwiaIBU6kkF0s54=:"
+        "repr-digest": "sha-256=:ydQ+z6asRPG2o0ARpSxhy+s5P6FVbgD9XCcWQF6sk+A=:"
       },
-      "sha256": "cb87d71afe27b0f5b42e883d07bd2872416276fcaa2f089a20153a924174b39e",
-      "size": 7150
+      "sha256": "c9d43ecfa6ac44f1b6a34011a52c61cbeb393fa1556e00fd5c2716405eac93e0",
+      "size": 7147
     }
   },
   "fields": {
@@ -1637,7 +1637,7 @@
     ]
   },
   "meta": {
-    "captured_at": "2026-10-13T04:01:36.401243+00:00",
+    "captured_at": "2026-10-13T04:01:52.894782+00:00",
     "clock": "2026-10-13T07:00:00+03:00",
     "info": "captured by web/scripts/capture_api_samples.py; do not edit",
     "site_day": "2026-10-09",
@@ -1816,7 +1816,7 @@
       "items": []
     },
     "created": {
-      "created_at": "2026-10-13T04:00:31.521641Z",
+      "created_at": "2026-10-13T04:00:40.544940Z",
       "id": 1,
       "last_run_at": null,
       "name": "Planlama PC trafiği",
@@ -1825,10 +1825,10 @@
         "from": "2026-10-08T21:00:00Z",
         "to": "2026-10-09T21:00:00Z"
       },
-      "updated_at": "2026-10-13T04:00:31.521685Z"
+      "updated_at": "2026-10-13T04:00:40.545011Z"
     },
     "created_preset": {
-      "created_at": "2026-10-13T04:00:31.583958Z",
+      "created_at": "2026-10-13T04:00:40.635122Z",
       "id": 2,
       "last_run_at": null,
       "name": "Son 24 saat engellenen web",
@@ -1836,13 +1836,13 @@
       "range": {
         "preset": "24h"
       },
-      "updated_at": "2026-10-13T04:00:31.583998Z"
+      "updated_at": "2026-10-13T04:00:40.635165Z"
     },
     "deleted_status": 204,
     "list": {
       "items": [
         {
-          "created_at": "2026-10-13T04:00:31.521641Z",
+          "created_at": "2026-10-13T04:00:40.544940Z",
           "id": 1,
           "last_run_at": null,
           "name": "Planlama PC trafiği",
@@ -1851,10 +1851,10 @@
             "from": "2026-10-08T21:00:00Z",
             "to": "2026-10-09T21:00:00Z"
           },
-          "updated_at": "2026-10-13T04:00:31.521685Z"
+          "updated_at": "2026-10-13T04:00:40.545011Z"
         },
         {
-          "created_at": "2026-10-13T04:00:31.583958Z",
+          "created_at": "2026-10-13T04:00:40.635122Z",
           "id": 2,
           "last_run_at": null,
           "name": "Son 24 saat engellenen web",
@@ -1862,29 +1862,29 @@
           "range": {
             "preset": "24h"
           },
-          "updated_at": "2026-10-13T04:00:31.583998Z"
+          "updated_at": "2026-10-13T04:00:40.635165Z"
         }
       ]
     },
     "list_after_delete": {
       "items": [
         {
-          "created_at": "2026-10-13T04:00:31.521641Z",
+          "created_at": "2026-10-13T04:00:40.544940Z",
           "id": 1,
-          "last_run_at": "2026-10-13T04:00:31.800710Z",
+          "last_run_at": "2026-10-13T04:00:40.937559Z",
           "name": "Planlama PC — oturumlar",
           "q": "srcip:172.20.42.57 type:traffic",
           "range": {
             "from": "2026-10-08T21:00:00Z",
             "to": "2026-10-09T21:00:00Z"
           },
-          "updated_at": "2026-11-04T22:00:55.535010Z"
+          "updated_at": "2026-11-02T23:39:29.093188Z"
         }
       ]
     },
     "run": {
       "archived": null,
-      "expires_at": "2026-10-13T04:30:31.820699Z",
+      "expires_at": "2026-10-13T04:30:40.964217Z",
       "items": [
         {
           "key": "fg_traffic:2026-10-09T10:30:00.000000+00:00:25",
@@ -2093,7 +2093,7 @@
       },
       "scan": {
         "complete": true,
-        "elapsed_ms": 11,
+        "elapsed_ms": 14,
         "scanned_from": "2026-10-08T21:00:00Z",
         "scanned_to": "2026-10-09T21:00:00Z",
         "windows": 5
@@ -2101,7 +2101,7 @@
       "search_id": "ornek-arama-11"
     },
     "updated": {
-      "created_at": "2026-10-13T04:00:31.521641Z",
+      "created_at": "2026-10-13T04:00:40.544940Z",
       "id": 1,
       "last_run_at": null,
       "name": "Planlama PC — oturumlar",
@@ -2110,13 +2110,13 @@
         "from": "2026-10-08T21:00:00Z",
         "to": "2026-10-09T21:00:00Z"
       },
-      "updated_at": "2026-10-13T04:00:31.683646Z"
+      "updated_at": "2026-10-13T04:00:40.777314Z"
     }
   },
   "search": {
     "auditor": {
       "archived": null,
-      "expires_at": "2026-10-13T04:30:29.607410Z",
+      "expires_at": "2026-10-13T04:30:37.917718Z",
       "items": [
         {
           "key": "fg_web:2026-10-09T08:24:32.000000+00:00:1",
@@ -2211,7 +2211,7 @@
       },
       "scan": {
         "complete": true,
-        "elapsed_ms": 11,
+        "elapsed_ms": 13,
         "scanned_from": "2026-10-09T00:00:00+03:00",
         "scanned_to": "2026-10-10T00:00:00+03:00",
         "windows": 5
@@ -2220,7 +2220,7 @@
     },
     "empty": {
       "archived": null,
-      "expires_at": "2026-10-13T04:30:28.786204Z",
+      "expires_at": "2026-10-13T04:30:36.990609Z",
       "items": [],
       "next_cursor": null,
       "notices": [
@@ -2297,7 +2297,7 @@
       },
       "scan": {
         "complete": true,
-        "elapsed_ms": 43,
+        "elapsed_ms": 313,
         "scanned_from": "2026-10-09T00:00:00+03:00",
         "scanned_to": "2026-10-10T00:00:00+03:00",
         "windows": 5
@@ -2306,7 +2306,7 @@
     },
     "first_page": {
       "archived": null,
-      "expires_at": "2026-10-13T04:30:28.602124Z",
+      "expires_at": "2026-10-13T04:30:36.454819Z",
       "items": [
         {
           "key": "messages:2026-10-09T11:00:00.000000+00:00:103107",
@@ -2551,7 +2551,7 @@
       },
       "scan": {
         "complete": true,
-        "elapsed_ms": 8,
+        "elapsed_ms": 10,
         "scanned_from": "2026-10-09T08:25:26Z",
         "scanned_to": "2026-10-10T00:00:00+03:00",
         "windows": 4
@@ -2560,7 +2560,7 @@
     },
     "next_page": {
       "archived": null,
-      "expires_at": "2026-10-13T04:30:28.634096Z",
+      "expires_at": "2026-10-13T04:30:36.504704Z",
       "items": [
         {
           "key": "messages:2026-10-09T08:24:36.000000+00:00:103114",
@@ -2805,7 +2805,7 @@
       },
       "scan": {
         "complete": true,
-        "elapsed_ms": 3,
+        "elapsed_ms": 5,
         "scanned_from": "2026-10-09T08:23:46Z",
         "scanned_to": "2026-10-09T08:25:26Z",
         "windows": 1
@@ -2814,7 +2814,7 @@
     },
     "partial": {
       "archived": null,
-      "expires_at": "2026-10-13T04:30:29.493760Z",
+      "expires_at": "2026-10-13T04:30:37.756449Z",
       "items": [
         {
           "key": "fg_traffic:2026-10-09T08:24:36.000000+00:00:5",
@@ -3044,7 +3044,7 @@
       },
       "scan": {
         "complete": false,
-        "elapsed_ms": 595,
+        "elapsed_ms": 606,
         "scanned_from": "2026-10-09T10:30:00+03:00",
         "scanned_to": "2026-10-09T11:30:00+03:00",
         "windows": 1
@@ -3053,7 +3053,7 @@
     },
     "text": {
       "archived": null,
-      "expires_at": "2026-10-13T04:30:28.502616Z",
+      "expires_at": "2026-10-13T04:30:36.313717Z",
       "items": [
         {
           "key": "messages:2026-10-09T08:14:56.003000+00:00:103108",
@@ -3171,7 +3171,7 @@
       },
       "scan": {
         "complete": true,
-        "elapsed_ms": 13,
+        "elapsed_ms": 16,
         "scanned_from": "2026-10-09T00:00:00+03:00",
         "scanned_to": "2026-10-10T00:00:00+03:00",
         "windows": 5
@@ -3180,7 +3180,7 @@
     },
     "typed": {
       "archived": null,
-      "expires_at": "2026-10-13T04:30:28.403216Z",
+      "expires_at": "2026-10-13T04:30:36.166363Z",
       "items": [
         {
           "key": "mt_arp:2026-10-09T11:00:00.000000+00:00:2",
@@ -3562,7 +3562,7 @@
       },
       "scan": {
         "complete": true,
-        "elapsed_ms": 47,
+        "elapsed_ms": 62,
         "scanned_from": "2026-10-09T00:00:00+03:00",
         "scanned_to": "2026-10-10T00:00:00+03:00",
         "windows": 5
@@ -3575,7 +3575,7 @@
       "complete": true,
       "covered_from": "2026-10-09T00:00:00+03:00",
       "covered_to": "2026-10-10T00:00:00+03:00",
-      "elapsed_ms": 26,
+      "elapsed_ms": 20,
       "facets": {
         "action": {
           "other": 0,
@@ -3746,7 +3746,7 @@
       "complete": true,
       "covered_from": "2026-10-09T11:00:00+03:00",
       "covered_to": "2026-10-09T12:00:00+03:00",
-      "elapsed_ms": 26,
+      "elapsed_ms": 30,
       "facets": {
         "action": {
           "other": 0,
@@ -4074,7 +4074,7 @@
       "complete": true,
       "covered_from": "2026-10-09T00:30:00+03:00",
       "covered_to": "2026-10-09T23:30:00+03:00",
-      "elapsed_ms": 31,
+      "elapsed_ms": 41,
       "facets": {
         "action": {
           "other": 0,
@@ -4432,7 +4432,7 @@
       "complete": true,
       "covered_from": "2026-10-09T00:00:00+03:00",
       "covered_to": "2026-10-10T00:00:00+03:00",
-      "elapsed_ms": 8,
+      "elapsed_ms": 9,
       "facets": {
         "action": {
           "other": 0,

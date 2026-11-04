@@ -5,12 +5,12 @@
         "alerts": [
           {
             "id": 4,
-            "opened_at": "2026-10-13T07:00:16.962558+03:00",
+            "opened_at": "2026-10-13T07:00:15.331968+03:00",
             "rule": "R15",
             "severity": "high"
           }
         ],
-        "checked_at": "2026-10-13T07:01:13.584337+03:00",
+        "checked_at": "2026-10-13T07:01:09.937323+03:00",
         "doc_en": "COMPLIANCE-STATUS.md section 2.1",
         "doc_tr": "UYUM-DURUMU.md bölüm 2.1",
         "facts": [
@@ -56,7 +56,7 @@
       },
       {
         "alerts": [],
-        "checked_at": "2026-10-13T07:01:13.584337+03:00",
+        "checked_at": "2026-10-13T07:01:09.937323+03:00",
         "doc_en": "COMPLIANCE-STATUS.md section 2.2",
         "doc_tr": "UYUM-DURUMU.md bölüm 2.2",
         "facts": [
@@ -109,7 +109,7 @@
       },
       {
         "alerts": [],
-        "checked_at": "2026-10-13T07:01:13.584337+03:00",
+        "checked_at": "2026-10-13T07:01:09.937323+03:00",
         "doc_en": "COMPLIANCE-STATUS.md section 2.3",
         "doc_tr": "UYUM-DURUMU.md bölüm 2.3",
         "facts": [
@@ -169,7 +169,7 @@
       },
       {
         "alerts": [],
-        "checked_at": "2026-10-13T07:01:13.584337+03:00",
+        "checked_at": "2026-10-13T07:01:09.937323+03:00",
         "doc_en": "COMPLIANCE-STATUS.md section 2.4",
         "doc_tr": "UYUM-DURUMU.md bölüm 2.4",
         "facts": [
@@ -208,7 +208,7 @@
       },
       {
         "alerts": [],
-        "checked_at": "2026-10-13T07:01:13.584337+03:00",
+        "checked_at": "2026-10-13T07:01:09.937323+03:00",
         "doc_en": "COMPLIANCE-STATUS.md section 2.5",
         "doc_tr": "UYUM-DURUMU.md bölüm 2.5",
         "facts": [
@@ -275,7 +275,7 @@
       },
       {
         "alerts": [],
-        "checked_at": "2026-10-13T07:01:13.584337+03:00",
+        "checked_at": "2026-10-13T07:01:09.937323+03:00",
         "doc_en": "COMPLIANCE-STATUS.md section 2.6",
         "doc_tr": "UYUM-DURUMU.md bölüm 2.6",
         "facts": [
@@ -283,8 +283,8 @@
             "key": "checked_at",
             "label_en": "Last measurement",
             "label_tr": "Son ölçüm",
-            "value_en": "13.10.2026 06:10:16",
-            "value_tr": "13.10.2026 06:10:16"
+            "value_en": "13.10.2026 06:10:14",
+            "value_tr": "13.10.2026 06:10:14"
           },
           {
             "key": "server",
@@ -330,12 +330,12 @@
         "alerts": [
           {
             "id": 12,
-            "opened_at": "2026-10-13T07:01:13.522186+03:00",
+            "opened_at": "2026-10-13T07:01:09.874858+03:00",
             "rule": "R20-filter",
             "severity": "high"
           }
         ],
-        "checked_at": "2026-10-13T07:01:13.584337+03:00",
+        "checked_at": "2026-10-13T07:01:09.937323+03:00",
         "doc_en": "COMPLIANCE-STATUS.md section 2.7",
         "doc_tr": "UYUM-DURUMU.md bölüm 2.7",
         "facts": [
@@ -411,24 +411,24 @@
         "alerts": [
           {
             "id": 11,
-            "opened_at": "2026-10-13T07:01:07.665909+03:00",
+            "opened_at": "2026-10-13T07:01:04.108327+03:00",
             "rule": "R20-lease",
             "severity": "medium"
           },
           {
             "id": 10,
-            "opened_at": "2026-10-13T07:01:07.665909+03:00",
+            "opened_at": "2026-10-13T07:01:04.108327+03:00",
             "rule": "R20-lease",
             "severity": "high"
           },
           {
             "id": 9,
-            "opened_at": "2026-10-13T07:01:07.405454+03:00",
+            "opened_at": "2026-10-13T07:01:03.900091+03:00",
             "rule": "R20-lease",
             "severity": "info"
           }
         ],
-        "checked_at": "2026-10-13T07:01:13.584337+03:00",
+        "checked_at": "2026-10-13T07:01:09.937323+03:00",
         "doc_en": "COMPLIANCE-STATUS.md section 2.8",
         "doc_tr": "UYUM-DURUMU.md bölüm 2.8",
         "facts": [
@@ -474,7 +474,7 @@
       },
       {
         "alerts": [],
-        "checked_at": "2026-10-13T07:01:13.584337+03:00",
+        "checked_at": "2026-10-13T07:01:09.937323+03:00",
         "doc_en": "COMPLIANCE-STATUS.md section 2.9",
         "doc_tr": "UYUM-DURUMU.md bölüm 2.9",
         "facts": [
@@ -520,7 +520,7 @@
       },
       {
         "alerts": [],
-        "checked_at": "2026-10-13T07:01:13.584337+03:00",
+        "checked_at": "2026-10-13T07:01:09.937323+03:00",
         "doc_en": "COMPLIANCE-STATUS.md section 2.10",
         "doc_tr": "UYUM-DURUMU.md bölüm 2.10",
         "facts": [
@@ -571,7 +571,7 @@
       "ok": 1,
       "warning": 4
     },
-    "generated_at": "2026-10-13T07:01:13.584337+03:00",
+    "generated_at": "2026-10-13T07:01:09.937323+03:00",
     "notice_en": "ARCILOGGER is designed to support 5651 obligations. These cards are the results of technical checks of log collection, sealing and backups; they are neither a legal assessment nor a statement of conformity. Confirm the results with your legal counsel.",
     "notice_tr": "ARCILOGGER, 5651 yükümlülüklerini desteklemek için tasarlanmıştır. Bu kartlar kayıt toplama, mühürleme ve yedeklemenin teknik denetimlerinin sonucudur; hukuki bir değerlendirme ya da uygunluk beyanı değildir. Sonuçları hukuk müşavirinizle teyit edin.",
     "site_name": "Örnek Lojistik A.Ş."
@@ -582,12 +582,12 @@
         "alerts": [
           {
             "id": 4,
-            "opened_at": "2026-10-13T07:00:16.962558+03:00",
+            "opened_at": "2026-10-13T07:00:15.331968+03:00",
             "rule": "R15",
             "severity": "high"
           }
         ],
-        "checked_at": "2026-10-13T07:01:14.114909+03:00",
+        "checked_at": "2026-10-13T07:01:10.443431+03:00",
         "doc_en": "COMPLIANCE-STATUS.md section 2.1",
         "doc_tr": "UYUM-DURUMU.md bölüm 2.1",
         "facts": [
@@ -633,7 +633,7 @@
       },
       {
         "alerts": [],
-        "checked_at": "2026-10-13T07:01:14.114909+03:00",
+        "checked_at": "2026-10-13T07:01:10.443431+03:00",
         "doc_en": "COMPLIANCE-STATUS.md section 2.2",
         "doc_tr": "UYUM-DURUMU.md bölüm 2.2",
         "facts": [
@@ -686,7 +686,7 @@
       },
       {
         "alerts": [],
-        "checked_at": "2026-10-13T07:01:14.114909+03:00",
+        "checked_at": "2026-10-13T07:01:10.443431+03:00",
         "doc_en": "COMPLIANCE-STATUS.md section 2.3",
         "doc_tr": "UYUM-DURUMU.md bölüm 2.3",
         "facts": [
@@ -746,7 +746,7 @@
       },
       {
         "alerts": [],
-        "checked_at": "2026-10-13T07:01:14.114909+03:00",
+        "checked_at": "2026-10-13T07:01:10.443431+03:00",
         "doc_en": "COMPLIANCE-STATUS.md section 2.4",
         "doc_tr": "UYUM-DURUMU.md bölüm 2.4",
         "facts": [
@@ -785,7 +785,7 @@
       },
       {
         "alerts": [],
-        "checked_at": "2026-10-13T07:01:14.114909+03:00",
+        "checked_at": "2026-10-13T07:01:10.443431+03:00",
         "doc_en": "COMPLIANCE-STATUS.md section 2.5",
         "doc_tr": "UYUM-DURUMU.md bölüm 2.5",
         "facts": [
@@ -852,7 +852,7 @@
       },
       {
         "alerts": [],
-        "checked_at": "2026-10-13T07:01:14.114909+03:00",
+        "checked_at": "2026-10-13T07:01:10.443431+03:00",
         "doc_en": "COMPLIANCE-STATUS.md section 2.6",
         "doc_tr": "UYUM-DURUMU.md bölüm 2.6",
         "facts": [
@@ -860,8 +860,8 @@
             "key": "checked_at",
             "label_en": "Last measurement",
             "label_tr": "Son ölçüm",
-            "value_en": "13.10.2026 06:10:16",
-            "value_tr": "13.10.2026 06:10:16"
+            "value_en": "13.10.2026 06:10:14",
+            "value_tr": "13.10.2026 06:10:14"
           },
           {
             "key": "server",
@@ -907,12 +907,12 @@
         "alerts": [
           {
             "id": 12,
-            "opened_at": "2026-10-13T07:01:13.522186+03:00",
+            "opened_at": "2026-10-13T07:01:09.874858+03:00",
             "rule": "R20-filter",
             "severity": "high"
           }
         ],
-        "checked_at": "2026-10-13T07:01:14.114909+03:00",
+        "checked_at": "2026-10-13T07:01:10.443431+03:00",
         "doc_en": "COMPLIANCE-STATUS.md section 2.7",
         "doc_tr": "UYUM-DURUMU.md bölüm 2.7",
         "facts": [
@@ -988,24 +988,24 @@
         "alerts": [
           {
             "id": 11,
-            "opened_at": "2026-10-13T07:01:07.665909+03:00",
+            "opened_at": "2026-10-13T07:01:04.108327+03:00",
             "rule": "R20-lease",
             "severity": "medium"
           },
           {
             "id": 10,
-            "opened_at": "2026-10-13T07:01:07.665909+03:00",
+            "opened_at": "2026-10-13T07:01:04.108327+03:00",
             "rule": "R20-lease",
             "severity": "high"
           },
           {
             "id": 9,
-            "opened_at": "2026-10-13T07:01:07.405454+03:00",
+            "opened_at": "2026-10-13T07:01:03.900091+03:00",
             "rule": "R20-lease",
             "severity": "info"
           }
         ],
-        "checked_at": "2026-10-13T07:01:14.114909+03:00",
+        "checked_at": "2026-10-13T07:01:10.443431+03:00",
         "doc_en": "COMPLIANCE-STATUS.md section 2.8",
         "doc_tr": "UYUM-DURUMU.md bölüm 2.8",
         "facts": [
@@ -1051,7 +1051,7 @@
       },
       {
         "alerts": [],
-        "checked_at": "2026-10-13T07:01:14.114909+03:00",
+        "checked_at": "2026-10-13T07:01:10.443431+03:00",
         "doc_en": "COMPLIANCE-STATUS.md section 2.9",
         "doc_tr": "UYUM-DURUMU.md bölüm 2.9",
         "facts": [
@@ -1097,7 +1097,7 @@
       },
       {
         "alerts": [],
-        "checked_at": "2026-10-13T07:01:14.114909+03:00",
+        "checked_at": "2026-10-13T07:01:10.443431+03:00",
         "doc_en": "COMPLIANCE-STATUS.md section 2.10",
         "doc_tr": "UYUM-DURUMU.md bölüm 2.10",
         "facts": [
@@ -1126,15 +1126,15 @@
             "key": "config_copy",
             "label_en": "Configuration copy confirmed",
             "label_tr": "Yapılandırma kopyası onayı",
-            "value_en": "13.10.2026 07:01:14",
-            "value_tr": "13.10.2026 07:01:14"
+            "value_en": "13.10.2026 07:01:10",
+            "value_tr": "13.10.2026 07:01:10"
           }
         ],
         "id": "backup",
         "number": 10,
         "page": "settings",
-        "reason_en": "Last database backup 13.10.2026 01:52:10 (1.2 GB); configuration copy confirmed on 13.10.2026 07:01:14.",
-        "reason_tr": "Son veritabanı yedeği 13.10.2026 01:52:10 (1,2 GB); yapılandırma kopyası 13.10.2026 07:01:14 tarihinde onaylandı.",
+        "reason_en": "Last database backup 13.10.2026 01:52:10 (1.2 GB); configuration copy confirmed on 13.10.2026 07:01:10.",
+        "reason_tr": "Son veritabanı yedeği 13.10.2026 01:52:10 (1,2 GB); yapılandırma kopyası 13.10.2026 07:01:10 tarihinde onaylandı.",
         "title_en": "Configuration and database backups",
         "title_tr": "Yapılandırma ve veritabanı yedekleri",
         "tone": "ok",
@@ -1148,7 +1148,7 @@
       "ok": 2,
       "warning": 3
     },
-    "generated_at": "2026-10-13T07:01:14.114909+03:00",
+    "generated_at": "2026-10-13T07:01:10.443431+03:00",
     "notice_en": "ARCILOGGER is designed to support 5651 obligations. These cards are the results of technical checks of log collection, sealing and backups; they are neither a legal assessment nor a statement of conformity. Confirm the results with your legal counsel.",
     "notice_tr": "ARCILOGGER, 5651 yükümlülüklerini desteklemek için tasarlanmıştır. Bu kartlar kayıt toplama, mühürleme ve yedeklemenin teknik denetimlerinin sonucudur; hukuki bir değerlendirme ya da uygunluk beyanı değildir. Sonuçları hukuk müşavirinizle teyit edin.",
     "site_name": "Örnek Lojistik A.Ş."
@@ -1159,12 +1159,12 @@
         "alerts": [
           {
             "id": 4,
-            "opened_at": "2026-10-13T07:00:16.962558+03:00",
+            "opened_at": "2026-10-13T07:00:15.331968+03:00",
             "rule": "R15",
             "severity": "high"
           }
         ],
-        "checked_at": "2026-10-13T07:01:13.584337+03:00",
+        "checked_at": "2026-10-13T07:01:09.937323+03:00",
         "doc_en": "COMPLIANCE-STATUS.md section 2.1",
         "doc_tr": "UYUM-DURUMU.md bölüm 2.1",
         "facts": [
@@ -1210,7 +1210,7 @@
       },
       {
         "alerts": [],
-        "checked_at": "2026-10-13T07:01:13.584337+03:00",
+        "checked_at": "2026-10-13T07:01:09.937323+03:00",
         "doc_en": "COMPLIANCE-STATUS.md section 2.2",
         "doc_tr": "UYUM-DURUMU.md bölüm 2.2",
         "facts": [
@@ -1263,7 +1263,7 @@
       },
       {
         "alerts": [],
-        "checked_at": "2026-10-13T07:01:13.584337+03:00",
+        "checked_at": "2026-10-13T07:01:09.937323+03:00",
         "doc_en": "COMPLIANCE-STATUS.md section 2.3",
         "doc_tr": "UYUM-DURUMU.md bölüm 2.3",
         "facts": [
@@ -1323,7 +1323,7 @@
       },
       {
         "alerts": [],
-        "checked_at": "2026-10-13T07:01:13.584337+03:00",
+        "checked_at": "2026-10-13T07:01:09.937323+03:00",
         "doc_en": "COMPLIANCE-STATUS.md section 2.4",
         "doc_tr": "UYUM-DURUMU.md bölüm 2.4",
         "facts": [
@@ -1362,7 +1362,7 @@
       },
       {
         "alerts": [],
-        "checked_at": "2026-10-13T07:01:13.584337+03:00",
+        "checked_at": "2026-10-13T07:01:09.937323+03:00",
         "doc_en": "COMPLIANCE-STATUS.md section 2.5",
         "doc_tr": "UYUM-DURUMU.md bölüm 2.5",
         "facts": [
@@ -1429,7 +1429,7 @@
       },
       {
         "alerts": [],
-        "checked_at": "2026-10-13T07:01:13.584337+03:00",
+        "checked_at": "2026-10-13T07:01:09.937323+03:00",
         "doc_en": "COMPLIANCE-STATUS.md section 2.6",
         "doc_tr": "UYUM-DURUMU.md bölüm 2.6",
         "facts": [
@@ -1437,8 +1437,8 @@
             "key": "checked_at",
             "label_en": "Last measurement",
             "label_tr": "Son ölçüm",
-            "value_en": "13.10.2026 06:10:16",
-            "value_tr": "13.10.2026 06:10:16"
+            "value_en": "13.10.2026 06:10:14",
+            "value_tr": "13.10.2026 06:10:14"
           },
           {
             "key": "server",
@@ -1484,12 +1484,12 @@
         "alerts": [
           {
             "id": 12,
-            "opened_at": "2026-10-13T07:01:13.522186+03:00",
+            "opened_at": "2026-10-13T07:01:09.874858+03:00",
             "rule": "R20-filter",
             "severity": "high"
           }
         ],
-        "checked_at": "2026-10-13T07:01:13.584337+03:00",
+        "checked_at": "2026-10-13T07:01:09.937323+03:00",
         "doc_en": "COMPLIANCE-STATUS.md section 2.7",
         "doc_tr": "UYUM-DURUMU.md bölüm 2.7",
         "facts": [
@@ -1565,24 +1565,24 @@
         "alerts": [
           {
             "id": 11,
-            "opened_at": "2026-10-13T07:01:07.665909+03:00",
+            "opened_at": "2026-10-13T07:01:04.108327+03:00",
             "rule": "R20-lease",
             "severity": "medium"
           },
           {
             "id": 10,
-            "opened_at": "2026-10-13T07:01:07.665909+03:00",
+            "opened_at": "2026-10-13T07:01:04.108327+03:00",
             "rule": "R20-lease",
             "severity": "high"
           },
           {
             "id": 9,
-            "opened_at": "2026-10-13T07:01:07.405454+03:00",
+            "opened_at": "2026-10-13T07:01:03.900091+03:00",
             "rule": "R20-lease",
             "severity": "info"
           }
         ],
-        "checked_at": "2026-10-13T07:01:13.584337+03:00",
+        "checked_at": "2026-10-13T07:01:09.937323+03:00",
         "doc_en": "COMPLIANCE-STATUS.md section 2.8",
         "doc_tr": "UYUM-DURUMU.md bölüm 2.8",
         "facts": [
@@ -1628,7 +1628,7 @@
       },
       {
         "alerts": [],
-        "checked_at": "2026-10-13T07:01:13.584337+03:00",
+        "checked_at": "2026-10-13T07:01:09.937323+03:00",
         "doc_en": "COMPLIANCE-STATUS.md section 2.9",
         "doc_tr": "UYUM-DURUMU.md bölüm 2.9",
         "facts": [
@@ -1674,7 +1674,7 @@
       },
       {
         "alerts": [],
-        "checked_at": "2026-10-13T07:01:13.584337+03:00",
+        "checked_at": "2026-10-13T07:01:09.937323+03:00",
         "doc_en": "COMPLIANCE-STATUS.md section 2.10",
         "doc_tr": "UYUM-DURUMU.md bölüm 2.10",
         "facts": [
@@ -1725,14 +1725,14 @@
       "ok": 1,
       "warning": 4
     },
-    "generated_at": "2026-10-13T07:01:13.584337+03:00",
+    "generated_at": "2026-10-13T07:01:09.937323+03:00",
     "notice_en": "ARCILOGGER is designed to support 5651 obligations. These cards are the results of technical checks of log collection, sealing and backups; they are neither a legal assessment nor a statement of conformity. Confirm the results with your legal counsel.",
     "notice_tr": "ARCILOGGER, 5651 yükümlülüklerini desteklemek için tasarlanmıştır. Bu kartlar kayıt toplama, mühürleme ve yedeklemenin teknik denetimlerinin sonucudur; hukuki bir değerlendirme ya da uygunluk beyanı değildir. Sonuçları hukuk müşavirinizle teyit edin.",
     "site_name": "Örnek Lojistik A.Ş."
   },
   "config_backup": {
-    "config_sha256": "38a083292b6db5418dfa17bd0a230b1496bfba62df9a03d15f9dd1c96fb48172",
-    "confirmed_at": "2026-10-13T07:01:14.072587+03:00"
+    "config_sha256": "21a0f63dcc1a1342cb0e7dc11c4c64c55a1a6ccf8511ee584edad80573e0c1ee",
+    "confirmed_at": "2026-10-13T07:01:10.394136+03:00"
   },
   "errors": {
     "config_backup_unreadable": {
@@ -1759,7 +1759,7 @@
     }
   },
   "meta": {
-    "captured_at": "2026-10-13T04:01:36.401243+00:00",
+    "captured_at": "2026-10-13T04:01:29.280516+00:00",
     "clock": "2026-10-13T07:00:00+03:00",
     "info": "captured by web/scripts/capture_api_samples.py; do not edit",
     "site_day": "2026-10-09",
@@ -1771,9 +1771,9 @@
       "cache-control": "no-store",
       "content-disposition": "attachment; filename=\"ARCILOGGER-uyum-durumu-20261013-0701.pdf\"",
       "content-type": "application/pdf",
-      "x-arci-sha256": "694b737ee4c1785767eb242a038953c8dbc84cb639134034e13f8d05e4a9a896"
+      "x-arci-sha256": "06d958a20758a7027fc5d5027f9b30436dbe77bff23cb802b703f3aa2140ad2d"
     },
-    "sha256": "694b737ee4c1785767eb242a038953c8dbc84cb639134034e13f8d05e4a9a896",
-    "size": 55123
+    "sha256": "06d958a20758a7027fc5d5027f9b30436dbe77bff23cb802b703f3aa2140ad2d",
+    "size": 55132
   }
 }

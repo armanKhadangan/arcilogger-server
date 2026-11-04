@@ -304,11 +304,17 @@ describe('SystemView', () => {
     };
     fail('Backup', 'backup_failed');
     fail('CrlFetch', 'index_unreadable');
-    fail('Renew', 'renewal_stopped');
+    fail('Renew', 'renew_refused');
+    fail('Seal', 'seal_stopped');
     renderView({ health });
     const tasks = within(block('tasks')).getAllByRole('row').slice(1);
     expect(tasks[8]).toHaveTextContent('BackupHer gün 01:40BaşarısızSon yedekleme tamamlanamadı.—');
-    expect(tasks[11]).toHaveTextContent('RenewHer gün 02:30Başarısızrenewal_stopped—');
+    expect(tasks[0]).toHaveTextContent(
+      "SealHer gün 00:10'dan sonra 5 dakikada birBaşarısızseal_stopped—",
+    );
+    expect(tasks[11]).toHaveTextContent(
+      'RenewHer gün 02:30BaşarısızSon yeniden damgalama çalışması yapılandırma nedeniyle reddedildi.—',
+    );
     expect(tasks[12]).toHaveTextContent(
       'CrlFetchHer gün 00:30Başarısızİptal listelerinin dizini okunamıyor.—',
     );

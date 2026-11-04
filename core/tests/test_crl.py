@@ -622,6 +622,10 @@ def test_a_stored_list_that_cannot_be_read_stops_the_run_and_is_recorded(
         fetch(options(second, url), layout, [root.certificate], later)
     recorded = {"at": "2026-11-03T12:00:00+03:00", "error": "stored_file_unreadable"}
     assert read_index(layout) == {**before, "run_failure": recorded}
+    # Written as every index is (the issuer's name stays UTF-8, ``crl status`` prints it).
+    assert (layout.crl_dir / "index.json").read_text(encoding="utf-8") == json.dumps(
+        {**before, "run_failure": recorded}, ensure_ascii=False, indent=2
+    ) + "\n"
     newer_name = stored_name(root, "20261102T000000Z", newer)
     assert (layout.crl_dir / newer_name).read_bytes() == newer  # stored, not indexed yet
     # No URL: every index entry is hashed, and the same stop is recorded with this run's time.
@@ -665,6 +669,26 @@ def test_a_stopped_run_whose_record_cannot_be_written_still_raises(
     assert (layout.crl_dir / "index.json").read_bytes() == written
     assert "the stopped run cannot be recorded" in caplog.text
     assert "No space left on device" in caplog.text
+
+
+def test_a_list_that_cannot_be_stored_stops_the_run_unrecorded(
+    server: Server, root: Ca, layout: Layout, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Only a stored list that cannot be read is recorded (#171): a list that cannot be written
+    (a full disk) stops the run with its ``OSError``, and the index stays as it is."""
+    data = make_crl(root, datetime(2026, 11, 1, tzinfo=UTC))
+    server.routes["/root.crl"] = Route(data)
+    assert fetch(options(server.url("/root.crl")), layout, [root.certificate], NOW).exit_code == 0
+    written = (layout.crl_dir / "index.json").read_bytes()
+    server.routes["/newer.crl"] = Route(make_crl(root, datetime(2026, 11, 2, tzinfo=UTC)))
+
+    def full_disk(path: Path, data: bytes) -> bool:
+        raise OSError(28, "No space left on device", str(path))
+
+    monkeypatch.setattr(crl_module, "_store_new", full_disk)
+    with pytest.raises(OSError, match="No space left on device"):
+        fetch(options(server.url("/newer.crl")), layout, [root.certificate], NOW)
+    assert (layout.crl_dir / "index.json").read_bytes() == written
 
 
 def test_the_index_keeps_the_failures_of_the_latest_run_only(

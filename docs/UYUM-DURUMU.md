@@ -687,7 +687,8 @@ yok" (henüz kanıt yok); "Kullanılmıyor" (görev bu yapılandırmada iş yapm
 (ArciApi'nin okuyabileceği bir kanıt yok); "Başarısız" (kanıt dosyası görevin son çalışmasının
 başarısız olduğunu gösteriyor; ne kadar eski olursa olsun bir sonraki tamamlanan çalışmaya kadar
 sürer; yanıt hata metnini değil yalnızca bir kodu taşır: `backup_failed`, `index_unreadable`,
-`stored_file_unreadable`). Sınırlar görevin çalışma sıklığı artı bir paydır; ayar değildir.
+`stored_file_unreadable`, `renew_failed`, `renew_refused`). Sınırlar görevin çalışma sıklığı artı
+bir paydır; ayar değildir.
 
 | Görev | Çalışma | Kanıt | Gecikti | Kullanılmıyor |
 |---|---|---|---|---|

@@ -65,6 +65,8 @@ const TASK_FAILURES: Record<string, string> = {
   backup_failed: 'Son yedekleme tamamlanamadı.',
   index_unreadable: 'İptal listelerinin dizini okunamıyor.',
   stored_file_unreadable: 'Saklanan bir iptal listesi okunamadı; indirme yarıda kaldı.',
+  renew_failed: 'Son yeniden damgalama çalışması başarısız oldu.',
+  renew_refused: 'Son yeniden damgalama çalışması yapılandırma nedeniyle reddedildi.',
 };
 
 const JOB_STATES: Record<string, string> = {

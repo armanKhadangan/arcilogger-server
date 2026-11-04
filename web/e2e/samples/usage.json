@@ -1096,7 +1096,7 @@
   },
   "company_today": {
     "active_users": 1,
-    "computed_until": "2026-10-13T04:01:17.218841Z",
+    "computed_until": "2026-10-13T04:01:05.734593Z",
     "departments": [
       {
         "active_users": 1,
@@ -3245,7 +3245,7 @@
       "content-disposition": "attachment; filename=\"arcilogger-kullanim-categories-20261012-20261012.xlsx\"",
       "content-type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     },
-    "sha256": "bc570233c8acf0c66928e324cf5f9fe5e63705be87aaa2279f5ab9a21bb31ad8",
+    "sha256": "5b83794555eb6f27ae0e9c1aa8b38ccc25f8cdee352807334df2176b770a638e",
     "size": 5795
   },
   "export_category_csv": {
@@ -3274,7 +3274,7 @@
       "content-disposition": "attachment; filename=\"arcilogger-kullanim-company-20261012-20261012.xlsx\"",
       "content-type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     },
-    "sha256": "d46aff9c27bdcbabcc41f3f39158a8c35d2ec682551bcb3cc3f7a5797504b4ab",
+    "sha256": "8e231bc0fd7f9b764f5c49cbe83079655b71e55366a056dc12e61188593f0fc7",
     "size": 10390
   },
   "export_departments_csv": {
@@ -3303,7 +3303,7 @@
       "content-disposition": "attachment; filename=\"arcilogger-kullanim-sites-20261012-20261012.xlsx\"",
       "content-type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     },
-    "sha256": "d2a0522c887f337001a64a436b34af6bc8bfbd46c549cb5b6718a1248a042fdf",
+    "sha256": "c8074bf1fc57485a1e40ed30e87697f443dbdb81bea5f7e3f9133a490664af50",
     "size": 6123
   },
   "export_subject_csv": {
@@ -3322,7 +3322,7 @@
       "content-disposition": "attachment; filename=\"arcilogger-kullanim-subject-20261012-20261012.xlsx\"",
       "content-type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     },
-    "sha256": "d2da6bafd3d7f0e558a2cb90d400e692e9733a234eb58f88055510cbeb21256f",
+    "sha256": "fef5460ea2dbfcdd5c016dcf27ad22ad8e32297fb84fcbae008540b58e81c0ff",
     "size": 13078
   },
   "export_subjects_csv": {
@@ -3482,7 +3482,7 @@
     "total": 3
   },
   "meta": {
-    "captured_at": "2026-10-13T04:01:36.401243+00:00",
+    "captured_at": "2026-10-13T04:01:17.864635+00:00",
     "clock": "2026-10-13T07:00:00+03:00",
     "info": "captured by web/scripts/capture_api_samples.py; do not edit",
     "site_day": "2026-10-09",
@@ -3572,19 +3572,19 @@
     }
   ],
   "rebuild_done": {
-    "created_at": "2026-10-13T04:01:20.153786Z",
+    "created_at": "2026-10-13T04:01:07.490109Z",
     "error": null,
-    "finished_at": "2026-10-13T04:01:20.213756Z",
+    "finished_at": "2026-10-13T04:01:07.532036Z",
     "from": "2026-10-12",
     "job_id": 1,
     "progress": 1.0,
     "requested_by": "tolga",
-    "started_at": "2026-10-13T04:01:20.213756Z",
+    "started_at": "2026-10-13T04:01:07.532036Z",
     "status": "done",
     "to": "2026-10-12"
   },
   "rebuild_queued": {
-    "created_at": "2026-10-13T04:01:20.153786Z",
+    "created_at": "2026-10-13T04:01:07.490109Z",
     "error": null,
     "finished_at": null,
     "from": "2026-10-12",
@@ -3596,7 +3596,7 @@
     "to": "2026-10-12"
   },
   "rebuild_requested": {
-    "created_at": "2026-10-13T04:01:20.153786Z",
+    "created_at": "2026-10-13T04:01:07.490109Z",
     "error": null,
     "finished_at": null,
     "from": "2026-10-12",

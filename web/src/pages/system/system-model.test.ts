@@ -231,7 +231,13 @@ describe('state badges', () => {
       'Failed',
     ]);
     // The failure codes of `system_health/tasks.py` (`TaskFailure`), each worded in both languages.
-    for (const code of ['backup_failed', 'index_unreadable', 'stored_file_unreadable'])
+    for (const code of [
+      'backup_failed',
+      'index_unreadable',
+      'stored_file_unreadable',
+      'renew_failed',
+      'renew_refused',
+    ])
       for (const t of [tr, en]) {
         const key = `system.tasks.failure.${code}`;
         expect(t(key), key).not.toBe(key);

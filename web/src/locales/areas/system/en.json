@@ -124,7 +124,9 @@
       "failure": {
         "backup_failed": "The latest backup did not complete.",
         "index_unreadable": "The index of the revocation lists cannot be read.",
-        "stored_file_unreadable": "A stored revocation list could not be read; the fetch stopped."
+        "stored_file_unreadable": "A stored revocation list could not be read; the fetch stopped.",
+        "renew_failed": "The latest re-stamping run failed.",
+        "renew_refused": "The latest re-stamping run was refused by the configuration."
       }
     },
     "jobs": {

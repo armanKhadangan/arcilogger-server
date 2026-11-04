@@ -124,7 +124,9 @@
       "failure": {
         "backup_failed": "Son yedekleme tamamlanamadı.",
         "index_unreadable": "İptal listelerinin dizini okunamıyor.",
-        "stored_file_unreadable": "Saklanan bir iptal listesi okunamadı; indirme yarıda kaldı."
+        "stored_file_unreadable": "Saklanan bir iptal listesi okunamadı; indirme yarıda kaldı.",
+        "renew_failed": "Son yeniden damgalama çalışması başarısız oldu.",
+        "renew_refused": "Son yeniden damgalama çalışması yapılandırma nedeniyle reddedildi."
       }
     },
     "jobs": {

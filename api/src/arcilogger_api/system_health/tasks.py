@@ -25,28 +25,32 @@ Requests       ``state/requests`` (not readable): ``not_observable``     —    
 ApplySystem    ``at`` of ``admin/system/status.json``                    15 min      browser
                                                                                      admin off
 Renew          ``last_run.at`` of ``state/renewal/renewal.json``         26 h        —
-               (not ``at``, which a run without pinned roots keeps)
+               (not ``at``, which a run without pinned roots keeps);
+               ``failed`` when its ``outcome`` is ``failed`` or
+               ``refused``
 CrlFetch       newest ``fetched_at`` of the ``lists`` or ``at`` of the   26 h        —
                ``failures`` of ``state/crl/index.json``; with no
-               failure, also when the index was written; ``failed``
-               with its ``run_failure``, or when ``crl fetch`` cannot
-               read the index
+               failure and no ``run_failure``, also when the index was
+               written; ``failed`` with its ``run_failure``, or when
+               ``crl fetch`` cannot read the index
 =============  ========================================================  ==========  ==========
 
 ``missing``: no evidence yet; ``late``: the evidence is older than the limit — each task's cadence
 (the task's XML) plus a grace, not a setting; ``failed``: the task's latest run recorded that it
 failed, however long ago, with a ``code`` (:data:`TaskFailure`) and the failure's time as the
-evidence (#171). The names of the verification results are the ones
-``arcilogger-core verify`` really writes (contract Implementation note 7): it puts ``last-``
-before its kind, and the kind of ``--last N`` is ``last-<days verified>`` (:func:`verify_state`).
+evidence (#171). The names of the verification results are the ones ``arcilogger-core verify``
+really writes (contract Implementation note 7): it puts ``last-`` before its kind, and the kind
+of ``--last N`` is ``last-<days verified>`` (:func:`verify_state`).
 Seal is judged by every day's state except those Retention rewrote: it marks each day it deletes
 (``status = "deleted"``, ``retention._delete_day``), which says nothing about Seal, while Seal
 itself may rewrite any day's state, also an old one it retries after a time-stamp outage.
 Backup, Renew and CrlFetch are judged by their state files, never by an exit code (Wave 5
 contract C12, A4). Backup's row is ``failed`` while ``last.json`` records a failed attempt, as
-R20-backup reads it; its ``error`` text is never read (KVKK). Renew's row says that the task ran,
-and whether it succeeded is R20-renewal's; the per-URL ``failures`` of CrlFetch's index leave its
-row ``ok`` too, they are R20-crl's (W5-E-2). A dry run of ``renew`` keeps ``last_run``, and a
+R20-backup reads it; its ``error`` text is never read (KVKK). Renew's row is ``failed`` while
+``last_run.outcome`` is ``failed`` or ``refused`` (exit 3 or 2, answer to Q3 on #171), until a
+run that renews or finds nothing due; the run's ``error`` is never read either, and how many
+failed in a row is R20-renewal's. The per-URL ``failures`` of CrlFetch's index leave its row
+``ok``, they are R20-crl's (W5-E-2). A dry run of ``renew`` keeps ``last_run``, and a
 ``crl fetch`` that finds the lock held writes nothing, so neither is evidence. From an upgrade to
 the first counted Renew run the Renew row reads the earlier release's ``state/renewal.json`` and
 names it as its evidence (Wave 5 contract W5-E-4). Every ``crl fetch`` that gets past its lock and
@@ -54,7 +58,8 @@ its reads rewrites the index with the failures of that run only, so an index tha
 failure and no run failure was written by a completed run without one, and its modification time
 is that run: also on a site that knows no list address any more, whose stored lists keep their
 old ``fetched_at`` (W5-E-2, answer to Q8 on #158). A run that finds the lock held writes nothing,
-but the run holding it writes the index, so the row stays fresh. A run that cannot read a stored
+but the run holding it writes the index, so the row stays fresh; a holder that hangs shows
+``late`` 26 h after the run before (answer to Q1 on #171). A run that cannot read a stored
 list exits 1 (answer to Q9) and writes the index as it read it with a ``run_failure``, its time
 and code and never the error text: the row is ``failed`` until the next completed run writes the
 index without one. A run that cannot read the index itself writes nothing: the row is ``failed``
@@ -100,15 +105,23 @@ REPLICA_DAYS: Final = 3
 
 #: The ``code`` of a ``failed`` row: never the error text a task wrote, which can hold paths,
 #: URLs, host and user names (KVKK).
-TaskFailure = Literal["backup_failed", "index_unreadable", "stored_file_unreadable"]
+TaskFailure = Literal[
+    "backup_failed", "index_unreadable", "stored_file_unreadable", "renew_failed", "renew_refused"
+]
 #: The ``run_failure.error`` values a ``crl fetch`` records in its index; a record with another
 #: one is no evidence.
 CRL_RUN_FAILURES: Final[tuple[TaskFailure, ...]] = ("stored_file_unreadable",)
+#: The ``last_run.outcome`` of ``renew`` that turns its row ``failed`` (exit 3 and exit 2, answer
+#: to Q3 on #171); the run's ``error`` is never read.
+RENEW_FAILURES: Final[Mapping[str, TaskFailure]] = {
+    "failed": "renew_failed",
+    "refused": "renew_refused",
+}
 
 
 @dataclass(frozen=True)
 class Evidence:
-    """What the readers of one request share: the files are read once per request."""
+    """What the readers of one request share, read once per request."""
 
     layout: Layout
     config: Config
@@ -290,9 +303,15 @@ def _until_now(evidence: Evidence, moments: Iterable[datetime | None]) -> dateti
     return _newest(moment for moment in moments if moment is not None and moment <= evidence.now)
 
 
-def _renew(evidence: Evidence) -> datetime | None:
+def _renew(evidence: Evidence) -> Reading | datetime | None:
+    """``last_run.at``; a run that failed or was refused (``last_run.outcome``) is a failed task
+    with that time until a run that renews or finds nothing due (answer to Q3 on #171)."""
     runs = read_renew_runs(evidence.layout)
-    return None if runs is None else _until_now(evidence, (runs.last_run_at,))
+    if runs is None:
+        return None
+    at = _until_now(evidence, (runs.last_run_at,))
+    failure = RENEW_FAILURES.get(runs.outcome or "")
+    return at if failure is None else Reading(at, failure)
 
 
 def _renew_shown(evidence: Evidence) -> str:
@@ -310,6 +329,11 @@ def _renew_shown(evidence: Evidence) -> str:
 
 
 def _crl_fetch(evidence: Evidence) -> Reading | datetime | None:
+    """The index is read twice: by the reader of ``crl fetch`` for what stops a run, and by
+    W5-C's for its times. Its modification time counts only when the file did not change in
+    between: a stopped run that writes its ``run_failure`` meanwhile is no completed run."""
+    path = crl_index_path(evidence.layout)
+    written = _modified(path)
     try:
         # The reader of crl fetch itself: what it cannot get past, the task cannot either. It is
         # stricter than R20-crl's (a byte order mark, for one).
@@ -327,11 +351,11 @@ def _crl_fetch(evidence: Evidence) -> Reading | datetime | None:
     index = read_crl_index(evidence.layout)
     moments: list[datetime | None] = [entry.fetched_at for entry in index.lists]
     moments += [failure.at for failure in index.failures]
-    if completed and index.readable and not index.failures:
+    if completed and index.readable and not index.failures and _modified(path) == written:
         # The run that wrote the index completed and failed nowhere: its lists' fetched_at can
         # be older, when it knew no list address (#151, answer to Q8 on #158). state/crl is
         # protected.
-        moments.append(_modified(crl_index_path(evidence.layout)))
+        moments.append(written)
     return _until_now(evidence, moments)
 
 

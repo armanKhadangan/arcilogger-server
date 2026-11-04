@@ -29,21 +29,30 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from arcilogger_api.app import API_PREFIX
 from arcilogger_api.system_health import routes
+from arcilogger_api.system_health import tasks as tasks_module
 from arcilogger_api.system_health.jobs import from_time_tr, schedule_texts
 from arcilogger_api.system_health.models import TaskName
-from arcilogger_api.system_health.tasks import TASKS, Evidence, task_health, verify_state
+from arcilogger_api.system_health.tasks import (
+    CRL_RUN_FAILURES,
+    RENEW_FAILURES,
+    TASKS,
+    Evidence,
+    TaskFailure,
+    task_health,
+    verify_state,
+)
 from arcilogger_api.testing import LoggedIn
 from arcilogger_core.admin.contract import SystemStatus, dump_document, parse_document
 from arcilogger_core.admin.testing import FakeAgent, FakeSystem, Installed
 from arcilogger_core.cli import main as core_main
 from arcilogger_core.config import Config
 from arcilogger_core.crl import INDEX_SCHEMA as CRL_INDEX_SCHEMA
-from arcilogger_core.crl import CrlError, CrlOptions
+from arcilogger_core.crl import CrlError, CrlOptions, RunFailureCode
 from arcilogger_core.crl import _one_run as held_crl_lock
 from arcilogger_core.crl import fetch as crl_fetch
 from arcilogger_core.layout import Layout
+from arcilogger_core.renewal import FAILED_OUTCOMES, LastRun, Outcome, RenewalReport
 from arcilogger_core.renewal import STATE_SCHEMA as RENEWAL_SCHEMA
-from arcilogger_core.renewal import LastRun, Outcome, RenewalReport
 from arcilogger_core.renewal import write_state as write_renewal_state
 from arcilogger_core.timeutil import isoformat_site, site_day, to_site, utc_now
 from arcilogger_db.backup import write_last_state
@@ -51,6 +60,7 @@ from arcilogger_db.models import AuditLog, JobRun
 from arcilogger_worker.alerts import system as alerts_system
 from arcilogger_worker.alerts.system import (
     CheckContext,
+    CrlIndexState,
     backup_state_path,
     check_backup,
     check_stamp_crl,
@@ -509,28 +519,40 @@ def test_renew_row_survives_a_state_folder_it_cannot_look_into(
 
 def test_renew_and_crlfetch_are_judged_by_their_state_files(api_config: Config) -> None:
     """Renew by ``last_run.at`` of ``state/renewal/renewal.json``, CrlFetch by the newest
-    ``fetched_at`` or failure of ``state/crl/index.json``, never by an exit code (C12, A4): the
-    row says the task ran; whether it succeeded is R20-renewal's and R20-crl's. A time later than
-    now is no evidence; an index ``crl fetch`` cannot get past is a failed task (#171)."""
+    ``fetched_at`` or failure of ``state/crl/index.json``, never by an exit code (C12, A4). A
+    Renew run that failed or was refused is a failed task until the next run that renews or
+    finds nothing due (answer to Q3 on #171); how many failed in a row is R20-renewal's, and
+    whether the lists are fresh R20-crl's. A time later than now is no evidence; an index
+    ``crl fetch`` cannot get past is a failed task (#171)."""
     now = utc_now().replace(microsecond=0)
     layout = Layout(api_config.data_dir)
 
     # Renew: a dry run before any run leaves no last run.
     renew_run(layout, None)
     assert states(evidence(api_config, now))["Renew"] == "missing"
-    for _ in range(3):  # refused three times (no pinned roots): the task ran each time
+    for _ in range(3):  # refused three times (no pinned roots)
         renew_run(layout, now - timedelta(hours=1), "refused")
     assert json.loads(stamp_renewal_path(layout).read_bytes())["failures_in_a_row"] == 3
     rows = task_rows(evidence(api_config, now))
-    assert (rows["Renew"]["state"], rows["Renew"]["evidence"]) == (
-        "ok",
+    assert (rows["Renew"]["state"], rows["Renew"]["code"], rows["Renew"]["evidence"]) == (
+        "failed",
+        "renew_refused",
         "state\\renewal\\renewal.json",
     )
     assert moment(rows["Renew"]["last_evidence_at"]) == now - timedelta(hours=1)
     renew_run(layout, None)  # a dry run keeps the last run
-    assert moment(task_rows(evidence(api_config, now))["Renew"]["last_evidence_at"]) == now - (
-        timedelta(hours=1)
-    )
+    assert task_rows(evidence(api_config, now))["Renew"] == rows["Renew"]
+    row = task_rows(evidence(api_config, now + timedelta(days=3)))["Renew"]  # however old
+    assert (row["state"], row["code"]) == ("failed", "renew_refused")
+    renew_run(layout, now - timedelta(hours=1), "failed")
+    row = task_rows(evidence(api_config, now))["Renew"]
+    assert (row["state"], row["code"]) == ("failed", "renew_failed")
+    renew_run(layout, now + timedelta(minutes=5), "failed")  # a clock set back: no time
+    row = task_rows(evidence(api_config, now))["Renew"]
+    assert (row["state"], row["code"], row["last_evidence_at"]) == ("failed", "renew_failed", None)
+    renew_run(layout, now - timedelta(hours=1), "renewed")  # the next run that works clears it
+    row = task_rows(evidence(api_config, now))["Renew"]
+    assert (row["state"], row["code"]) == ("ok", None)
     renew_run(layout, now - timedelta(hours=25))  # within the 26 h limit
     assert states(evidence(api_config, now))["Renew"] == "ok"
     renew_run(layout, now - timedelta(hours=27))
@@ -538,7 +560,7 @@ def test_renew_and_crlfetch_are_judged_by_their_state_files(api_config: Config) 
     renew_run(layout, now + timedelta(minutes=5))  # a clock set back
     assert states(evidence(api_config, now))["Renew"] == "missing"
     # The failure count is R20-renewal's: a file without one, or with one that is no count,
-    # still shows the run.
+    # still shows the failed run.
     renew_run(layout, now - timedelta(hours=1), "failed")
     written = json.loads(stamp_renewal_path(layout).read_bytes())
     without = {key: value for key, value in written.items() if key != "failures_in_a_row"}
@@ -547,7 +569,15 @@ def test_renew_and_crlfetch_are_judged_by_their_state_files(api_config: Config) 
             stamp_renewal_path(layout),
             without | ({} if count is None else {"failures_in_a_row": count}),
         )
-        assert states(evidence(api_config, now))["Renew"] == "ok", count
+        row = task_rows(evidence(api_config, now))["Renew"]
+        assert (row["state"], row["code"]) == ("failed", "renew_failed"), count
+    # An outcome Renew never writes is no failure: the run shows.
+    write_json(
+        stamp_renewal_path(layout),
+        written | {"last_run": written["last_run"] | {"outcome": "aborted"}},
+    )
+    row = task_rows(evidence(api_config, now))["Renew"]
+    assert (row["state"], row["code"]) == ("ok", None)
     # The report's own ``at`` is no run: a run without pinned roots keeps it from the last file.
     write_json(stamp_renewal_path(layout), {"schema": RENEWAL_SCHEMA, "at": isoformat_site(now)})
     assert states(evidence(api_config, now))["Renew"] == "missing"
@@ -613,6 +643,7 @@ def test_renew_and_crlfetch_are_judged_by_their_state_files(api_config: Config) 
         b'{"lists": ',
         b"[]",
         json.dumps({**index, "lists": {"file": stored(now)}}).encode(),
+        b"[" * 100_000,  # nested too deeply to parse: crl fetch stops on it as well
     ]
     for document in unreadable:
         crl_index_path(layout).write_bytes(document)
@@ -787,7 +818,11 @@ def test_backup_row_shows_a_failed_attempt(api_config: Config) -> None:
     row = task_rows(evidence(api_config, now))["Backup"]
     assert (row["state"], row["code"], row["last_evidence_at"]) == ("failed", "backup_failed", None)
     # ``ok`` missing or no boolean, ``finished`` that is no time: still the failed attempt.
-    for written in ({"finished": "gestern"}, {"ok": "true", "finished": isoformat_site(now)}):
+    for written in (
+        {"finished": "dün"},
+        {"ok": "true", "finished": isoformat_site(now)},
+        {"ok": 1, "finished": isoformat_site(now)},
+    ):
         write_json(backup_state_path(layout), written)
         row = task_rows(evidence(api_config, now))["Backup"]
         assert (row["state"], row["code"]) == ("failed", "backup_failed"), written
@@ -836,6 +871,9 @@ def test_crlfetch_row_shows_a_run_that_stopped(api_config: Config) -> None:
     assert moment(row["last_evidence_at"]) == now - timedelta(hours=2)
     row = task_rows(evidence(api_config, now + timedelta(days=3)))["CrlFetch"]
     assert (row["state"], row["code"]) == ("failed", "stored_file_unreadable")  # not late
+    write_json(path, {**read, "run_failure": run_failure(now)})  # a run of this very second
+    row = task_rows(evidence(api_config, now))["CrlFetch"]
+    assert (row["state"], moment(row["last_evidence_at"])) == ("failed", now)
 
     # Later than now, an unknown code, no time, no object: the lists' times only (30 h: late).
     for record in (
@@ -868,6 +906,43 @@ def test_crlfetch_row_shows_a_run_that_stopped(api_config: Config) -> None:
     assert (row["state"], row["code"]) == ("ok", None)
 
 
+def test_crlfetch_index_rewritten_while_it_is_read_is_no_completed_run(
+    api_config: Config, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The row reads the index twice (``crl fetch``'s reader, then W5-C's for the times): a run
+    that stops on a stored list and writes its ``run_failure`` in between is no completed run,
+    so the index's modification time does not count for that request."""
+    now = utc_now().replace(microsecond=0)
+    layout = Layout(api_config.data_dir)
+    path = crl_index_path(layout)
+    fetched_at = now - timedelta(hours=30)
+    entry = {
+        "issuer": "CN=Örnek Test TSA Kök,O=Örnek A.Ş.,C=TR",
+        "issuer_sha256": "0" * 64,
+        "this_update": isoformat_site(fetched_at - timedelta(days=1), "seconds"),
+        "next_update": isoformat_site(fetched_at + timedelta(days=6), "seconds"),
+        "file": "000000000000-20261001T000000Z-00000000.crl",
+        "sha256": "0" * 64,
+        "url": "http://192.0.2.10/ornek.crl",
+        "fetched_at": isoformat_site(fetched_at, "seconds"),
+    }
+    read = {"schema": CRL_INDEX_SCHEMA, "lists": [entry], "failures": []}
+    write_json(path, read)
+    touch(path, now - timedelta(hours=1))
+    row = task_rows(evidence(api_config, now))["CrlFetch"]
+    assert (row["state"], moment(row["last_evidence_at"])) == ("ok", now - timedelta(hours=1))
+    real = read_crl_index
+
+    def stopped_meanwhile(layout: Layout) -> CrlIndexState:
+        write_json(path, {**read, "run_failure": run_failure(now - timedelta(minutes=1))})
+        touch(path, now - timedelta(minutes=1))
+        return real(layout)
+
+    monkeypatch.setattr(tasks_module, "read_crl_index", stopped_meanwhile)
+    row = task_rows(evidence(api_config, now))["CrlFetch"]
+    assert (row["state"], moment(row["last_evidence_at"])) == ("late", fetched_at)
+
+
 def test_crlfetch_index_arciapi_cannot_read_is_missing(
     api_config: Config, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -893,8 +968,8 @@ def test_failed_rows_name_no_error_text(
     client: TestClient, login_as: Login, layout: Layout
 ) -> None:
     """KVKK: a failed row carries a code and a time only. The error text of ``last.json`` (it
-    can hold the database server and role) and the list addresses of the index never reach the
-    answer."""
+    can hold the database server and role), the ``error`` of Renew's last run and the list
+    addresses of the index never reach the answer."""
     now = utc_now().replace(microsecond=0)
     backup_attempt(
         layout,
@@ -903,6 +978,13 @@ def test_failed_rows_name_no_error_text(
         error='connection to server at "192.0.2.10", port 5432 failed: '
         'FATAL: password authentication failed for user "ornek"',
     )
+    last_run = LastRun(
+        at=now - timedelta(hours=1),
+        outcome="failed",
+        exit_code=3,
+        error="test: http://192.0.2.10/tsa unreachable as ornek",
+    )
+    write_renewal_state(layout, None, at=now, renew_before=180, last_run=last_run)
     entry = {
         "issuer": "CN=Örnek Test TSA Kök,O=Örnek A.Ş.,C=TR",
         "issuer_sha256": "0" * 64,
@@ -932,6 +1014,7 @@ def test_failed_rows_name_no_error_text(
         "failed",
         "stored_file_unreadable",
     )
+    assert (tasks["Renew"]["state"], tasks["Renew"]["code"]) == ("failed", "renew_failed")
     for secret in ("192.0.2.10", "ornek", "198.51.100.7", "203.0.113.5", "password", "5432"):
         assert secret not in response.text, secret
 
@@ -957,7 +1040,11 @@ def test_run_failure_leaves_the_alerts_as_they_are(
         "url": "http://192.0.2.10/ornek.crl",
         "fetched_at": isoformat_site(fetched_at, "seconds"),
     }
-    failure = {"url": "http://192.0.2.10/ornek.crl", "at": isoformat_site(now), "error": "timeout"}
+    failure = {
+        "url": "http://192.0.2.10/ornek.crl",
+        "at": isoformat_site(now),
+        "error": "unreachable",
+    }
     read = {"schema": CRL_INDEX_SCHEMA, "lists": [entry], "failures": [failure]}
     backup_attempt(layout, now - timedelta(hours=1), ok=False, error="test: disk full")
     with app_session_factory() as session:
@@ -1380,3 +1467,11 @@ def test_checked_at_is_site_time(client: TestClient, login_as: Login) -> None:
     assert checked is not None
     assert checked.utcoffset() == timedelta(hours=3)
     assert abs(checked - datetime.now(UTC)) < timedelta(minutes=1)
+
+
+def test_the_failure_codes_are_the_ones_the_tasks_write() -> None:
+    """A code ``crl fetch`` records that the row does not know would be ignored, and an outcome
+    of ``renew`` the row does not know would show its run as ``ok`` (#171)."""
+    assert set(CRL_RUN_FAILURES) == set(get_args(RunFailureCode))
+    assert set(RENEW_FAILURES) == FAILED_OUTCOMES  # the outcomes R20-renewal counts
+    assert set(CRL_RUN_FAILURES) | set(RENEW_FAILURES.values()) <= set(get_args(TaskFailure))

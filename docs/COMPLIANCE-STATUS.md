@@ -704,8 +704,9 @@ One row per task of `deploy\windows\tasks\`. The state is derived from the task'
 evidence" (no evidence yet); "Not used" (the task does nothing in this configuration); "Not
 observable" (no evidence ArciApi can read); "Failed" (the evidence file shows that the task's
 latest run failed; it lasts until the next completed run, however old; the answer carries only a
-code, never the error text: `backup_failed`, `index_unreadable`, `stored_file_unreadable`). The
-limits are the task's cadence plus a margin; they are not settings.
+code, never the error text: `backup_failed`, `index_unreadable`, `stored_file_unreadable`,
+`renew_failed`, `renew_refused`). The limits are the task's cadence plus a margin; they are not
+settings.
 
 | Task | Schedule | Evidence | Late after | Not used when |
 |---|---|---|---|---|

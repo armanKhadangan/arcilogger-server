@@ -2800,9 +2800,10 @@ null, stratum | null}]}}`. `task` is one of `Seal`, `VerifyDaily`, `VerifyWeekly
   Scheduler or service-manager query, owner question Q19). `missing` = no evidence yet, `late` =
   evidence older than the limit (each task's cadence plus a grace, not a setting), `failed` = the
   evidence file shows that the latest run failed, until the next completed run however old, with
-  `code` `backup_failed`, `index_unreadable` or `stored_file_unreadable` (null in every other
-  state; never the error text) and the failure's time as `last_evidence_at` (#171); a file that
-  cannot be read is no evidence and never fails the request:
+  `code` `backup_failed`, `index_unreadable`, `stored_file_unreadable`, `renew_failed` or
+  `renew_refused` (null in every other state; never the error text) and the failure's time as
+  `last_evidence_at` (#171); a file that cannot be read is no evidence and never fails the
+  request:
 
   | `task` | `schedule_tr` / `schedule_en` | Evidence (below the data folder) | Late after | `not_used` when |
   |---|---|---|---|---|
