@@ -1042,6 +1042,21 @@ All Wave 5 questions are answered (2026-11-02).
   `alerts.system.CERT_EXPIRY_WARNING` (`timedelta(days=30)`), not a setting. A revocation still
   makes it `critical`. The findings count both (`expiring`, `uncovered`, beside `revoked`).
   "The `Renew` task failed twice in a row" stays W5-E's (W5-C-7).
+- **W5-C-13: `crl_stale` leaves out ARCILOGGER's test root, as `R20-crl` does (#160; W5-E-5,
+  Q6 of #158).** A chain whose root carries ARCILOGGER's test organization has no issuer in use
+  for `crl_stale` (W5-A D5: a test stamp never counts), so a mock or trial install no longer
+  shows it beside its `provider_not_legal`. The rule is one helper,
+  `alerts.system.crl_stamp` (the newest sealed day's stamp, or none for such a chain), which
+  `check_stamp_crl` and `compute_legal_status` both pass to `crl_status` (D11); this ends the
+  difference W5-E-5 left open. Only the root decides, and only the newest sealed day's chain is
+  in use (W5-C-3): on a site that holds test days and real days, `crl_stale` holds while the
+  newest one is a real CA's and that CA has no fresh list. `certificate_revoked` still reads the
+  stamp's chain whatever its root. The legal-status tests and samples now seal through a made-up
+  CA outside the test organization (`legalstatus.testing.simulated_ca`): the samples' Kamu SM
+  cases run on a site of their own whose sealed days repeat the capture's. Tests:
+  `test_crl_stale_not_for_a_mock_install`,
+  `test_crl_stale_only_for_a_root_outside_the_test_organization` and
+  `test_crl_stale_on_a_mixed_site_by_the_newest_sealed_day` (`api/tests/test_legal_status_api.py`).
 
 ## Deviations — W5-G (2026-11-03)
 

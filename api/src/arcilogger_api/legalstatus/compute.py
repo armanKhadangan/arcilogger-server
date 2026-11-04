@@ -172,7 +172,7 @@ def compute_legal_status(layout: Layout, config: Config, now: datetime) -> Legal
         )
     # ARCILOGGER's test root needs no list, as for R20-crl (W5-C-13, W5-E-5)
     index = read_crl_index(layout)
-    status = crl_status(lists, index, stamp, now, options.crl_max_age_days)
+    status = crl_status(lists, index, crl_stamp(stamp), now, options.crl_max_age_days)
     reasons += _crl_reasons(status, options)
     ordered = _sorted(reasons)
     level: LegalLevel = ordered[0].level if ordered else "ok"
