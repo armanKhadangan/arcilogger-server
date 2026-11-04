@@ -113,7 +113,7 @@ from arcilogger_core.layout import Layout
 from arcilogger_core.timeutil import SITE_TZ, site_day, to_site, utc_now
 from arcilogger_db.engine import session_factory
 from arcilogger_db.models import JobRun
-from arcilogger_db.partitions import ensure_partitions
+from arcilogger_db.partitions import ensure_partitions, step_lock_timeout_ms
 from arcilogger_worker import __version__
 from arcilogger_worker.admin_jobs import import_admin_events, process_requests
 from arcilogger_worker.alerts.importer import import_alerts
@@ -260,8 +260,15 @@ def job_leases_nightly(ctx: JobContext) -> Mapping[str, Any]:
 
 
 def job_partitions(ctx: JobContext) -> Mapping[str, Any]:
+    """The daily partitions; the partition lock is waited for at most half of
+    ``search.request_budget_ms`` (W5-G-24: a search export holds it shared), else the run fails
+    and is retried (``R20-job`` after ``alerts.job_failures`` failed runs in a row)."""
     with ctx.engine.begin() as connection:
-        report = ensure_partitions(connection, today=site_day(ctx.now))
+        report = ensure_partitions(
+            connection,
+            today=site_day(ctx.now),
+            lock_timeout_ms=step_lock_timeout_ms(connection),
+        )
     return {"tables": len(report.tables), "created": report.created, "moved": report.moved}
 
 
