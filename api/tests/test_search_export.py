@@ -3,7 +3,7 @@ cells, the "Bilgi" sheet, truncation by rows and by time (name, header, sheet, a
 query that times out cuts the file too, never half-empty rows), the same rows in any chunk size
 (also at exactly ``from``), the ``Repr-Digest`` and audited SHA-256, re-authentication, one
 export at a time and the hourly limit counted from the audit log (it survives a new
-application)."""
+application), and the audit entry committed before the file's first byte is sent."""
 
 from __future__ import annotations
 
@@ -11,6 +11,7 @@ import base64
 import csv
 import hashlib
 import io
+from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -284,6 +285,33 @@ def test_a_fill_in_query_that_times_out_cuts_the_file(
     (entry,) = audits(app_session_factory)
     assert entry.details["truncated"] == "time"
     assert entry.details["rows"] == 0
+
+
+def test_the_audit_entry_is_committed_before_the_first_byte_is_sent(
+    client: TestClient,
+    exporter: LoggedIn,
+    lines: Lines,
+    app_session_factory: sessionmaker[Session],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """KVKK: no row leaves the API without its audit entry. When the response asks for the
+    file's first chunk, ``search.export`` with the file's SHA-256 is already committed (read in
+    a session of its own)."""
+    seen: list[list[AuditLog]] = []
+    chunks = exports.ExportFile.chunks
+
+    def checking(self: exports.ExportFile) -> Iterator[bytes]:
+        seen.append(audits(app_session_factory))
+        yield from chunks(self)
+
+    monkeypatch.setattr(exports.ExportFile, "chunks", checking)
+    response = export(client, search_id(client))
+    assert response.status_code == 200, response.text
+    ((entry,),) = seen
+    assert (
+        entry.details["sha256"] == _digest(response) == hashlib.sha256(response.content).hexdigest()
+    )
+    assert entry.details["rows"] == 3
 
 
 def test_export_needs_a_recent_re_authentication(
