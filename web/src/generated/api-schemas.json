@@ -15445,7 +15445,9 @@
             "ClockCheck",
             "Backup",
             "Requests",
-            "ApplySystem"
+            "ApplySystem",
+            "Renew",
+            "CrlFetch"
           ],
           "title": "Task",
           "type": "string"

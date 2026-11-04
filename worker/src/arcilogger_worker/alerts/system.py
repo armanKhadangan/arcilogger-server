@@ -1994,6 +1994,51 @@ def _stamp_renewal(entry: Any) -> StampRenewal | None:
 
 
 @dataclass(frozen=True)
+class RenewRuns:
+    """The runs of the ``Renew`` task as ``state/renewal.json`` keeps them (``last_run``,
+    ``failures_in_a_row``; W5-A's A4). A dry run changes neither."""
+
+    #: When the last run started (None: no run yet, or a time this reader leaves out).
+    last_run_at: datetime | None = None
+    #: How it ended: ``renewed``, ``not_needed``, ``failed`` or ``refused`` (None: no run yet,
+    #: or not a text).
+    outcome: str | None = None
+    #: Failed and refused runs in a row (None: unknown).
+    failures_in_a_row: int | None = 0
+
+
+def read_renew_runs(layout: Layout) -> RenewRuns | None:
+    """The ``Renew`` task's runs from ``state/renewal.json``: no run and no failure when the task
+    has not written it yet, ``None`` (unknown) when it cannot be read. Judged from this file,
+    never from the task's exit code (C12)."""
+    path = stamp_renewal_path(layout)
+    try:
+        data = _read_json(path)
+    except (OSError, ValueError) as exc:
+        log.info("re-stamping runs %s unknown: %s", path, exc)
+        return None
+    if data is None:
+        return RenewRuns()
+    if not isinstance(data, dict):
+        log.info("re-stamping runs %s unknown: not an object", path)
+        return None
+    last_run = data.get("last_run")
+    last_run = last_run if isinstance(last_run, dict) else {}
+    outcome = last_run.get("outcome")
+    failures = data.get("failures_in_a_row")
+    return RenewRuns(
+        last_run_at=_calendar_time(last_run.get("at")),
+        outcome=outcome if isinstance(outcome, str) else None,
+        # bool is an int to Python, not a count
+        failures_in_a_row=(
+            failures
+            if isinstance(failures, int) and not isinstance(failures, bool) and failures >= 0
+            else None
+        ),
+    )
+
+
+@dataclass(frozen=True)
 class CrlListEntry:
     """A stored revocation list as ``state/crl/index.json`` lists it."""
 
