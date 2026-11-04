@@ -518,11 +518,55 @@ def test_some_good_some_failed(server: Server, root: Ca, layout: Layout) -> None
     assert [failure.url for failure in run.failures] == [gone]
 
 
-def test_no_url_known_writes_nothing(root: Ca, layout: Layout) -> None:
+def test_no_url_known_writes_an_empty_index(root: Ca, layout: Layout) -> None:
+    """#151: with no URL the run still writes the index, with no list and no failure, so the
+    Sistem page sees that the task ran. It still exits 2 and fetches nothing."""
     run = fetch(options(), layout, [root.certificate], NOW)
     assert run.exit_code == 2
     assert run.as_json() == {"ok": False, "urls": [], "lists": [], "failures": []}
-    assert not layout.crl_dir.exists()
+    assert read_index(layout) == {"schema": INDEX_SCHEMA, "lists": [], "failures": []}
+    assert sorted(path.name for path in layout.crl_dir.iterdir()) == [LOCK_NAME, "index.json"]
+    assert fetch(options(), layout, [root.certificate], NOW).exit_code == 2
+    assert read_index(layout) == {"schema": INDEX_SCHEMA, "lists": [], "failures": []}
+
+
+def test_no_url_known_keeps_the_stored_lists(server: Server, root: Ca, layout: Layout) -> None:
+    """A run that knows no URL any more (the setting or the pinned roots changed) keeps every
+    stored list and its entry (D8), drops the failures of the run before, and still hashes every
+    stored file (C14). A lock held or an index that cannot be read stops it, as any run."""
+    data = make_crl(root, datetime(2026, 11, 1, tzinfo=UTC))
+    server.routes["/root.crl"] = Route(data)
+    url, gone = server.url("/root.crl"), closed_port_url()
+    assert fetch(options(url, gone), layout, [root.certificate], NOW).exit_code == 1
+    before = read_index(layout)
+    assert [failure["url"] for failure in before["failures"]] == [gone]
+    name = stored_name(root, "20261101T000000Z", data)
+
+    run = fetch(options(), layout, [root.certificate], NOW + timedelta(days=1))
+    assert (run.exit_code, run.lists, run.failures) == (2, (), ())
+    assert read_index(layout) == {**before, "failures": []}
+    assert (layout.crl_dir / name).read_bytes() == data
+
+    changed = bytearray(data)
+    changed[len(changed) // 2] ^= 1
+    (layout.crl_dir / name).write_bytes(bytes(changed))  # test: the stored file is changed
+    run = fetch(options(), layout, [root.certificate], NOW + timedelta(days=2))
+    assert run.exit_code == 2
+    assert [(failure.url, failure.error) for failure in run.failures] == [
+        (url, "stored_file_changed")
+    ]
+    index = read_index(layout)
+    assert (index["lists"], len(index["failures"])) == (before["lists"], 1)
+    assert (layout.crl_dir / name).read_bytes() == bytes(changed)
+
+    written = (layout.crl_dir / "index.json").read_bytes()
+    with crl_module._one_run(layout.crl_dir), pytest.raises(CrlError, match="another"):
+        fetch(options(), layout, [root.certificate], NOW + timedelta(days=3))
+    assert (layout.crl_dir / "index.json").read_bytes() == written
+    (layout.crl_dir / "index.json").write_text("{not json", encoding="utf-8")
+    with pytest.raises(CrlError):
+        fetch(options(), layout, [root.certificate], NOW + timedelta(days=3))
+    assert (layout.crl_dir / "index.json").read_text(encoding="utf-8") == "{not json"
 
 
 def test_a_wrong_index_stops_the_run_and_stays(server: Server, root: Ca, layout: Layout) -> None:
@@ -1597,6 +1641,12 @@ def test_cli_no_url_known_exits_2(tmp_path: Path, capsys: pytest.CaptureFixture[
     assert "Bilinen SİL adresi yok" in capsys.readouterr().out
     assert main(["--config", config, "crl", "fetch", "--json"]) == 2
     assert json.loads(capsys.readouterr().out)["urls"] == []
+    # The run still leaves its index (#151): the CrlFetch task is seen to run.
+    assert read_index(Layout(tmp_path / "data")) == {
+        "schema": INDEX_SCHEMA,
+        "lists": [],
+        "failures": [],
+    }
 
 
 def test_cli_fetch_and_status(

@@ -924,7 +924,8 @@ def fetch(
     """Download, verify and store the lists of D7/D8 and update ``state/crl/index.json``.
 
     ``roots``: the pinned roots (:func:`arcilogger_core.tsa.trusted_roots`). Writes only under
-    ``state/crl``, never overwrites or deletes a file there. With no URL nothing is written. A
+    ``state/crl``, never overwrites or deletes a file there. With no URL the index is still
+    written, with the lists stored before and no fetch failure, so the run is seen (#151). A
     stored list whose file no longer holds its bytes (or is gone) is the failure
     ``stored_file_changed`` of its URL (C14), also when the URL serves a newer list by now: the
     file and its index entry stay as they are. Raises
@@ -933,8 +934,6 @@ def fetch(
     """
     tokens = scan_tokens(layout)
     urls = crl_urls(options, roots, tokens.newest, tokens.every)
-    if not urls:
-        return CrlRun(urls=())
     # Every CA certificate of any token: a list of an intermediate the provider no longer
     # signs with still verifies.
     issuers = trusted_issuers(roots, tokens.every)
