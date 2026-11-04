@@ -1613,8 +1613,8 @@ issue fixed is kept (command, flags, exit codes 0/1/2, JSON fields); what differ
   reads the database's revision with this version's `arcilogger-db current`: a database from
   before `0021_db_window` (`-Upgrade -SkipDatabase`) is left as it is. The command name is one
   variable, `$SchemaDowngradeCommand`.
-- **#122-5 (deviation, question to the manager): the floor.** The target is the previous head
-  but never below `0020_fg_traffic_transip_time`, the revision `0021` revises. The older
+- **#122-5 (deviation, accepted by the manager on #147): the floor.** The target is the previous
+  head but never below `0020_fg_traffic_transip_time`, the revision `0021` revises. The older
   revisions were made for a previous version to run on, and their downgrades delete or rebuild
   data: `0017` drops `fg_dhcp` (which contract 2.2.1's lease step expects the next upgrade to
   restore), `0018` rebuilds the old NAT settings (the docs said "-Rollback runs no schema
@@ -1627,25 +1627,64 @@ issue fixed is kept (command, flags, exit codes 0/1/2, JSON fields); what differ
   restarts on its own schema; unless the command certainly changed nothing (exit 2, exit 3, or
   `arcilogger-db current` failed) its `arcilogger-db upgrade` runs first (no time limit; a
   no-op at its head; also when the command answered exit 0 with JSON whose `to` is not the
-  target), which also restores lowered leases. The TR/EN text names `-Rollback` again and then
-  `-Rollback -RestoreDatabase` (YEDEKLEME/BACKUP section 5); after exit 2 only the restore. A
-  successful downgrade followed by a failed swap runs this version's `upgrade` too; if that
-  fails, only the collector and the web server run, with a manual step naming the command.
+  target, or could not be started or ended without an answer), which also restores lowered
+  leases (this re-upgrade rule: accepted by the manager on #147). The TR/EN text names
+  `-Rollback` again and then `-Rollback -RestoreDatabase` (YEDEKLEME/BACKUP section 5); after
+  exit 2 only the restore. A successful downgrade followed by a failed swap runs this version's
+  `upgrade` too; if that fails, only the collector and the web server run, with a manual step
+  naming the command.
 - **#122-7: refusals before any change (exit 2).** A previous head that cannot be told (no
   folder, no revision file, an unreadable line, a duplicate, a branch, two bases, a broken
   chain, a head not among this version's revisions), or `-SkipDatabase` when the downgrade is
   needed. `-RestoreDatabase` skips the schema check.
-- **#122-8 (deviation, question to the manager): `-RestoreDatabase` restores into a new
-  database.** `pg_restore --clean --single-transaction` into the live database cannot restore a
-  `0020` dump over a `0021` database (`archive_reloads`' foreign key on `pk_lookups`, which the
-  dump does not know, makes the whole restore fail), and the swap has run by then. The installer
-  now restores, in one transaction, into `<name>_restore_<stamp>` (owner, encoding, libc locale,
-  database settings and rights copied from the current database; TimescaleDB's
-  pre/post-restore around it, sahada doğrula), then renames, in one transaction, the current
-  database to `<name>_replaced_<stamp>` and the new one into place. A failure before the rename
-  drops the new database and leaves the current one as it was. The replaced database is kept
-  (the rows written after the dump are only there) and named in the output and in
-  `install\state.json` (`replaced_database`); removing it is the owner's decision. A database
-  whose locale is not libc is refused (restore by hand). After the swap any failure of the
-  restore keeps the database services stopped. Tested against PostgreSQL 16 with the
-  installer's own SQL and arguments.
+- **#122-8 (deviation, accepted by the manager on #147 with the review's items 1–6):
+  `-RestoreDatabase` restores into a new database.** `pg_restore --clean --single-transaction`
+  into the live database cannot restore a `0020` dump over a `0021` database (`archive_reloads`'
+  foreign key on `pk_lookups`, which the dump does not know, makes the whole restore fail), and
+  the swap has run by then. The installer now restores into `<name>_restore_<stamp>` (owner,
+  encoding, libc locale, database settings and rights copied from the current database; the
+  settings and rights in a psql run after `CREATE DATABASE`, so that a failure there drops the
+  empty database too) with `pg_restore --exit-on-error`, one transaction per object, not
+  `--single-transaction`, as `arcilogger-db restore` (`backup.py` `_restore_into`, for every
+  database): one transaction holds a lock on every table, index and TOAST table, which a
+  TimescaleDB database's chunks outgrow (`max_locks_per_transaction`); the new database is dropped
+  on failure anyway. TimescaleDB: `timescaledb_pre_restore()` in the current database,
+  `CREATE EXTENSION timescaledb VERSION '<the current database's extversion>'` and
+  `timescaledb_pre_restore()` in the new one, `timescaledb_post_restore()` in the database in
+  place afterwards. Then, in one transaction, the current database is renamed to
+  `<name>_replaced_<stamp>` and the new one into place; when psql reports an error but the current
+  database is already under its new name (a connection lost after the `COMMIT`), the rename counts
+  as done. Before any change, the drive of PostgreSQL's data directory (`data_directory`, else the
+  service's `-D`) must have the current database's `pg_database_size`, a quarter more and
+  `max_wal_size` free (both databases stay and `pg_restore` writes its WAL there; the quarter is a
+  margin for TimescaleDB chunks compressed since the dump, which come back uncompressed: sahada
+  doğrula), or the restore is refused (TR/EN; a warning when the free space cannot be read or
+  `[database] host` is not loopback, whose data directory is a path on another server). A failure
+  before the rename drops the new database and leaves the current one as it was; a rename refused
+  because another session is open on a database names those sessions (`pg_stat_activity`: a
+  pgAdmin window). The replaced database is kept (the rows written after the dump are only there):
+  right after the rename commits it is named on the console, then recorded in `install\state.json`
+  as one more entry of `replaced_databases` (`name`, `dump`, `replaced_at`,
+  `timescaledb_restoring`; a list, so that a second restore keeps the first one's record; a record
+  that cannot be written is a warning that names it again, and the restore goes on); removing it
+  is the owner's decision. On TimescaleDB it stays in restore mode (`timescaledb.restoring = on`,
+  carried by the rename): the console and BACKUP/YEDEKLEME section 5 say to run
+  `timescaledb_post_restore()` in it before putting it back; the installer does not (it would
+  start that database's jobs). A database whose locale is not libc is refused (restore by hand).
+  After the swap, and on the database-only path (no `.previous`: the program in place may not
+  match the database), any failure of the restore, also a refusal before `pg_restore`, keeps the
+  database services stopped; the output says the database was not changed when the failure came
+  before the rename, and names this version's installer for the retry (the copy in
+  `<InstallDir>.rolled-back-<stamp>\installer\`, else the running one). A failed upgrade's
+  migration names the same way the copy in `<InstallDir>.failed-<stamp>\installer\`: after either
+  swap the one in `<InstallDir>\installer\` is the previous version's, whose restore is the
+  `pg_restore --clean` above. A failure after the rename committed says the database was restored
+  and not to restore again (that would replace the restored database once more); when
+  `timescaledb_post_restore()` of the database in place did not run, the database services stay
+  stopped and the output gives that command and the one that starts them, otherwise they start
+  again. Tested against PostgreSQL 16 and TimescaleDB 2.30.2
+  (`test_database_restore_puts_a_0020_dump_in_place_of_a_0021_database[timescaledb]`, run by the
+  Linux CI job, failing there without TimescaleDB, psql/pg_dump/pg_restore or PowerShell) with the
+  installer's own SQL and arguments; the restore of a site's real chunk count, the free-space
+  margin and a TimescaleDB updated between the dump and the rollback stay "sahada doğrula"
+  (INSTALL/KURULUM section 16).

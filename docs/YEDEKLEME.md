@@ -274,12 +274,25 @@ olursa geri dönüş yolu bir geri yüklemedir (geri almadan önceki bir yedek y
 `-Rollback -RestoreDatabase`).
 
 **`-Rollback -RestoreDatabase`** de bu bölümün kuralına uyar: kurulum programı yükseltme öncesi
-yedeği tek işlemde yeni bir veritabanına (`<ad>_restore_<zaman>`; şimdikinin sahibi, yerel ayarı,
-ayarları ve haklarıyla) geri yükler ve ancak sonra onu yeniden adlandırarak şimdikinin yerine
-koyar; yerine geçilen veritabanı `<ad>_replaced_<zaman>` adıyla saklanır. Yedekle geri yükleme
-arasında yazılan satırlar yalnızca yerine geçilen veritabanındadır; siz kaldırana kadar diskte yer
-tutar, kaldırmak sahibin kararıdır (yukarıdaki 4. adımdaki gibi). Başarısız bir geri yükleme
-şimdiki veritabanını olduğu gibi bırakır.
+yedeği yeni bir veritabanına (`<ad>_restore_<zaman>`; şimdikinin sahibi, yerel ayarı, ayarları ve
+haklarıyla; `arcilogger-db restore` gibi her nesne kendi işleminde, ilk hatada durarak: tek bir
+işlem her tablo ve parça için bir kilit tutardı) geri yükler ve ancak sonra onu yeniden adlandırarak
+şimdikinin yerine koyar; yerine geçilen veritabanı `<ad>_replaced_<zaman>` adıyla saklanır ve
+`install\state.json` dosyasında listelenir (`replaced_databases`, her geri yüklemeninki). İki
+veritabanı da kaldığı ve `pg_restore` WAL'ını oraya yazdığı için geri yükleme PostgreSQL veri
+diskinde şimdiki veritabanının boyutu (`pg_database_size`), dörtte biri ve `max_wal_size` kadar boş
+alan ister (dörtte bir, bir güvenlik payıdır: yedekten sonra sıkıştırılan TimescaleDB parçaları
+sıkıştırılmamış geri gelir; sahada doğrula); kurulum programı bunu hiçbir şeyi değiştirmeden önce
+denetler, yetmezse reddeder (boş alan okunamazsa ya da PostgreSQL başka bir sunucudaysa yalnızca
+uyarır). Yeni veritabanı varsayılan tablo alanında (`pg_default`) oluşturulur; kurulum programı
+kendi veritabanını da oraya koyar. Yedekle geri yükleme arasında yazılan satırlar yalnızca yerine
+geçilen veritabanındadır; siz kaldırana kadar diskte yer tutar, kaldırmak sahibin kararıdır
+(yukarıdaki 4. adımdaki gibi). Başarısız bir geri yükleme şimdiki veritabanını olduğu gibi bırakır.
+TimescaleDB'de yerine geçilen veritabanı TimescaleDB'nin geri yükleme kipinde kalır
+(`timescaledb_pre_restore()`'un koyduğu ve yeniden adlandırmanın taşıdığı `timescaledb.restoring =
+on`; arka plan işleri çalışmaz): yeniden kullanmadan önce (yerine koymadan ya da ARCILOGGER'la
+okumadan önce) onda `SELECT timescaledb_post_restore();` çalıştırın; kurulum programı bunu
+çalıştırmaz, çünkü o veritabanının işlerini başlatırdı.
 
 **Yeni bir sunucuya (felaket sonrası):** (1) PostgreSQL'i ve ARCILOGGER'ın önkoşullarını
 [KURULUM.md](KURULUM.md)'ye göre kurun; (2) çevrim dışı ortamdan `arcilogger.toml`, `secret.key`

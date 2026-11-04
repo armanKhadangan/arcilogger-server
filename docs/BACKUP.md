@@ -273,12 +273,24 @@ refused with `2`; `3` means the database cannot be reached. When running it agai
 way back is a restore (a dump from before the rollback, or `-Rollback -RestoreDatabase`).
 
 **`-Rollback -RestoreDatabase`** follows the rule of this section too: the installer restores the
-pre-upgrade dump, in one transaction, into a new database (`<name>_restore_<time>`, with the
-owner, locale, settings and rights of the current one) and only then renames it into the current
-one's place; the replaced database is kept as `<name>_replaced_<time>`. The rows written between
-the dump and the restore are only in the replaced database; it takes disk space until you remove
-it, which is the owner's decision (as in step 4 above). A failed restore leaves the current
-database as it was.
+pre-upgrade dump into a new database (`<name>_restore_<time>`, with the owner, locale, settings
+and rights of the current one; one transaction per object, stopping at the first error, as
+`arcilogger-db restore`: a single transaction would hold a lock on every table and chunk) and
+only then renames it into the current one's place; the replaced database is kept as
+`<name>_replaced_<time>` and listed in `install\state.json` (`replaced_databases`, every
+restore's). The restore needs the current database's size (`pg_database_size`), a quarter more and
+`max_wal_size` free on the PostgreSQL data drive, since both databases stay and `pg_restore` writes
+its WAL there (the quarter is a margin: TimescaleDB chunks compressed since the dump come back
+uncompressed; verify on site); the installer checks it before any change and refuses otherwise
+(only a warning when the free space cannot be read or PostgreSQL runs on another server). The new
+database is created in the default tablespace (`pg_default`), where the installer puts its
+database too. The rows written between the dump and the restore are only in the replaced
+database; it takes disk space until you remove it, which is the owner's decision (as in step 4
+above). A failed restore leaves the current database as it was. On TimescaleDB the replaced
+database stays in TimescaleDB's restore mode (`timescaledb.restoring = on`, set by
+`timescaledb_pre_restore()` and kept by the rename; its background jobs do not run): run
+`SELECT timescaledb_post_restore();` in it before putting it back (renaming it into place or
+reading it with ARCILOGGER); the installer does not run it, since that would start its jobs.
 
 **On a new server (after a disaster):** (1) install PostgreSQL and ARCILOGGER's prerequisites as
 in [INSTALL.md](INSTALL.md); (2) copy `arcilogger.toml`, `secret.key` (and `secrets.json` if you
