@@ -454,6 +454,17 @@ def test_renew_and_crlfetch_are_judged_by_their_state_files(api_config: Config) 
     assert states(evidence(api_config, now))["Renew"] == "late"
     renew_run(layout, now + timedelta(minutes=5))  # a clock set back
     assert states(evidence(api_config, now))["Renew"] == "missing"
+    # The failure count is R20-renewal's: a file without one, or with one that is no count,
+    # still shows the run.
+    renew_run(layout, now - timedelta(hours=1), "failed")
+    written = json.loads(stamp_renewal_path(layout).read_bytes())
+    without = {key: value for key, value in written.items() if key != "failures_in_a_row"}
+    for count in (None, "two", True, -1):
+        write_json(
+            stamp_renewal_path(layout),
+            without | ({} if count is None else {"failures_in_a_row": count}),
+        )
+        assert states(evidence(api_config, now))["Renew"] == "ok", count
     # The report's own ``at`` is no run: a run without pinned roots keeps it from the last file.
     write_json(stamp_renewal_path(layout), {"schema": RENEWAL_SCHEMA, "at": isoformat_site(now)})
     assert states(evidence(api_config, now))["Renew"] == "missing"
