@@ -2185,6 +2185,8 @@ def stamp_in_use(layout: Layout, roots: Sequence[x509.Certificate]) -> StampInUs
 def crl_stamp(stamp: StampInUse | None) -> StampInUse | None:
     """The stamp whose issuers need a revocation list (``R20-crl``, ``crl_stale``): none for a
     chain to ARCILOGGER's test root (W5-A D5; deviation W5-E-5)."""
+    if stamp is not None and is_test_stamp("", stamp.chain[-1].subject.rfc4514_string()):
+        return None
     return stamp
 
 
