@@ -65,7 +65,10 @@ Locking: each table is handled under ``LOCK TABLE <parent> IN ACCESS EXCLUSIVE M
 before partition, the same order as an insert, so no deadlock with the ingest service); ingest
 waits for the few milliseconds a new, empty partition takes. Only the rare catch-up of rows
 from the default partition holds the lock longer. A transaction-level advisory lock serialises
-concurrent maintenance runs; the caller provides the transaction (``engine.begin()``).
+concurrent maintenance runs; the caller provides the transaction (``engine.begin()``). On
+TimescaleDB :func:`drop_before` locks the chunks that go after that lock and before
+``drop_chunks``, in chunk-id order (a query's planning locks them in it), so that neither the
+compression policy nor a reader of the chunks meets it in the opposite order (#133).
 """
 
 from __future__ import annotations
@@ -595,6 +598,26 @@ def drop_before(connection: Connection, cutoff: date) -> PartitionReport:
                 report.dropped.append(partition.name)
             elif start < limit and table == "messages":
                 kept_from = min(kept_from, start)
+    # The chunks that go are locked first (#133): ``drop_chunks`` locks the catalog rows of its
+    # chunks before their tables, ``compress_chunk`` (the compression policy) its chunk's table
+    # before the catalog row. Waiting on the tables before holding any of those rows lets a
+    # policy run that has opened a chunk finish (it commits per chunk). The order is chunk id,
+    # the order in which a query's planning locks the chunks: any other order (the names sort
+    # ``_10_`` before ``_9_``) deadlocks with a reader of all the chunks. ``drop_chunks`` itself
+    # locks by OID, the same order until the OID counter wraps around. A chunk created after
+    # ``show_chunks`` (a late row of an old day) is only locked by ``drop_chunks``; no policy
+    # can have opened one that new.
+    for table in report.hypertables:
+        old = connection.execute(
+            text(
+                "SELECT CAST(c AS text) FROM show_chunks(CAST(:table AS regclass), "
+                "older_than => CAST(:limit AS timestamptz)) AS c "
+                "ORDER BY _timescaledb_functions.chunk_id_from_relid(c)"
+            ),
+            {"table": table, "limit": limit},
+        ).scalars()
+        for chunk in list(old):  # a regclass as text: quoted where needed
+            connection.execute(text(f"LOCK TABLE {chunk} IN ACCESS EXCLUSIVE MODE"))
     for table in report.hypertables:
         chunks = connection.execute(
             text(

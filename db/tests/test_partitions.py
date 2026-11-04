@@ -7,14 +7,17 @@ from __future__ import annotations
 import itertools
 import os
 import re
+import threading
+import time
 from collections import Counter
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
 import pytest
-from sqlalchemy import Connection, Engine, insert, select, text
+from sqlalchemy import Connection, Engine, func, insert, select, text
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import NullPool
 
@@ -903,3 +906,220 @@ def test_drop_before_drops_whole_chunks_on_timescaledb(db_engine: Engine) -> Non
     with db_engine.begin() as connection:
         again = drop_before(connection, cutoff)
     assert (again.dropped, again.counts_deleted, again.clock_samples_deleted) == ([], 0, 0)
+
+
+def _with_compression(engine: Engine) -> None:
+    """The deadlock tests of #133 need hypertables with compression (on the Linux CI job,
+    ``ARCILOGGER_EXPECT_TIMESCALE=1``, they fail instead of skipping). The compression policies
+    are paused: the tests play the policy themselves, step by step."""
+    with engine.connect() as connection:
+        status = connection.execute(
+            text("SELECT value FROM settings WHERE key = 'db.timescale'")
+        ).scalar_one()
+    if status["storage"] != "hypertables" or not status.get("compression"):
+        if os.environ.get("ARCILOGGER_EXPECT_TIMESCALE") == "1":
+            pytest.fail(f"TimescaleDB with compression expected, the template has {status}")
+        pytest.skip("TimescaleDB with compression is not available (the Linux CI job runs this)")
+    pause_compression_jobs(engine)
+
+
+def _chunks_by_id(engine: Engine, table: str) -> list[str]:
+    """The chunks of ``table`` as ``CAST(chunk AS regclass)`` prints them, in chunk-id order."""
+    with engine.connect() as connection:
+        return list(
+            connection.execute(
+                text(
+                    "SELECT CAST(c AS text) FROM show_chunks(CAST(:table AS regclass)) AS c "
+                    "ORDER BY _timescaledb_functions.chunk_id_from_relid(c)"
+                ),
+                {"table": table},
+            ).scalars()
+        )
+
+
+def _sqlstate(error: BaseException) -> str | None:
+    return getattr(getattr(error, "orig", error), "sqlstate", None)
+
+
+class _Backend:
+    """One transaction run in its own thread (one backend): its pid, its result or its error.
+    :meth:`wait_for_lock` returns once the backend waits for a lock, which is how the tests
+    order their steps (no sleeps that guess a duration)."""
+
+    def __init__(self, engine: Engine, work: Callable[[Connection], object]) -> None:
+        self.engine, self.work = engine, work
+        self.pid: list[int] = []
+        self.results: list[object] = []
+        self.errors: list[BaseException] = []
+        self.thread = threading.Thread(target=self._run, daemon=True)
+        self.thread.start()
+
+    def _run(self) -> None:
+        try:
+            with self.engine.begin() as connection:
+                self.pid.append(connection.execute(text("SELECT pg_backend_pid()")).scalar_one())
+                self.results.append(self.work(connection))
+        except BaseException as exc:  # the test thread asserts on it
+            self.errors.append(exc)
+
+    def wait_for_lock(self, watcher: Connection, relation: str | None = None) -> None:
+        deadline = time.monotonic() + 30
+        while True:
+            waiting = watcher.execute(
+                text(
+                    "SELECT count(*) FROM pg_locks WHERE pid = ANY(CAST(:pid AS integer[])) "
+                    "AND NOT granted AND (CAST(:relation AS text) IS NULL "
+                    "OR relation = CAST(CAST(:relation AS text) AS regclass))"
+                ),
+                {"pid": self.pid, "relation": relation},
+            ).scalar_one()
+            watcher.rollback()
+            if waiting:
+                return
+            assert self.thread.is_alive(), f"finished without waiting for {relation}: {self.errors}"
+            assert time.monotonic() < deadline, f"never waited for {relation}"
+            time.sleep(0.02)
+
+    def join(self) -> None:
+        self.thread.join(30)
+        assert not self.thread.is_alive()
+
+
+def _empty(engine: Engine, table: str) -> bool:
+    with engine.connect() as connection:
+        rows = connection.execute(text(f"SELECT count(*) FROM {table}")).scalar_one()  # noqa: S608
+    return rows == 0 and _chunks_by_id(engine, table) == []
+
+
+@pytest.mark.parametrize("partial", [False, True], ids=["compression", "recompression"])
+def test_a_compression_that_has_opened_a_chunk_is_not_a_deadlock_for_the_drop(
+    db_engine: Engine, partial: bool
+) -> None:
+    """#133: the compression policy opens a chunk (``compress_chunk`` locks its table), then
+    locks the chunk's catalog row; ``drop_chunks`` locks the catalog rows of its chunks, then
+    their tables. :func:`drop_before` locks the chunks that go first, so it waits for the open
+    one without holding a row the compression waits for: both finish, none is aborted with
+    ``deadlock detected``. ``recompression``: the chunk was compressed and a late row made it
+    partial, so the policy compresses it again."""
+    _with_compression(db_engine)
+    cutoff = date(2026, 9, 15)  # local midnight 14.09. 21:00 UTC
+    with Session(db_engine) as session:
+        session.add_all(
+            [
+                _dhcp(datetime(2026, 9, 12, 9, tzinfo=UTC)),
+                _dhcp(datetime(2026, 9, 13, 9, tzinfo=UTC)),
+            ]
+        )
+        session.commit()
+    chunks = _chunks_by_id(db_engine, "mt_dhcp")
+    assert len(chunks) == 2
+    opened = chunks[1]  # 13.09.
+    if partial:
+        with db_engine.begin() as connection:
+            connection.execute(
+                text("SELECT compress_chunk(CAST(:chunk AS regclass))"), {"chunk": opened}
+            )
+        with Session(db_engine) as session:
+            session.add(_dhcp(datetime(2026, 9, 13, 10, tzinfo=UTC), ip="172.20.60.184"))
+            session.commit()
+    with db_engine.connect() as compression, db_engine.connect() as watcher:
+        # 1. The compression has opened the chunk.
+        compression.execute(text(f"LOCK TABLE {opened} IN ACCESS SHARE MODE"))
+        # 2. The step of the window drops what is older than the cutoff: it waits for the chunk.
+        step = _Backend(db_engine, lambda connection: drop_before(connection, cutoff))
+        step.wait_for_lock(watcher, opened)
+        # 3. The compression goes on with the chunk it has opened, and commits. A recompression
+        # gives up instead when another transaction waits for the chunk (SQLSTATE 40001,
+        # "aborting recompression due to concurrent DML on uncompressed data, retrying with
+        # next policy run"): TimescaleDB's own way out, not a deadlock.
+        outcome: object
+        try:
+            outcome = compression.execute(
+                text("SELECT CAST(compress_chunk(CAST(:chunk AS regclass)) AS text)"),
+                {"chunk": opened},
+            ).scalar_one()
+            compression.commit()
+        except DBAPIError as error:
+            compression.rollback()
+            outcome = _sqlstate(error)
+        step.join()
+    assert step.errors == []
+    assert outcome == ("40001" if partial else opened)
+    assert _empty(db_engine, "mt_dhcp")
+
+
+def test_a_compression_that_comes_after_the_drop_has_locked_the_chunk_is_no_deadlock(
+    db_engine: Engine,
+) -> None:
+    """#133, the other order: the step has locked the chunk when the compression policy comes
+    to it. The compression waits for the chunk's table holding no catalog row, and fails
+    without a deadlock once the step has dropped the chunk ("chunk deleted by other
+    transaction"); the policy tries again on its next run. A TimescaleDB whose
+    ``compress_chunk`` locked the catalog row first would turn this into a deadlock."""
+    _with_compression(db_engine)
+    cutoff = date(2026, 9, 15)
+    with Session(db_engine) as session:
+        session.add_all(
+            [
+                _dhcp(datetime(2026, 9, 12, 9, tzinfo=UTC)),
+                _dhcp(datetime(2026, 9, 13, 9, tzinfo=UTC)),
+            ]
+        )
+        session.commit()
+    locked, held = _chunks_by_id(db_engine, "mt_dhcp")  # 12.09., 13.09.
+    with db_engine.connect() as blocker, db_engine.connect() as watcher:
+        # 1. Another reader holds the second chunk: the step locks the first and waits there.
+        blocker.execute(text(f"LOCK TABLE {held} IN ACCESS SHARE MODE"))
+        step = _Backend(db_engine, lambda connection: drop_before(connection, cutoff))
+        step.wait_for_lock(watcher, held)
+        # 2. The compression comes to the first chunk, which the step has locked.
+        compression = _Backend(
+            db_engine,
+            lambda connection: connection.execute(
+                text("SELECT compress_chunk(CAST(:chunk AS regclass))"), {"chunk": locked}
+            ).scalar_one(),
+        )
+        compression.wait_for_lock(watcher, locked)
+        # 3. The reader ends: the step drops both chunks.
+        blocker.commit()
+        step.join()
+        compression.join()
+    assert step.errors == []
+    assert [_sqlstate(error) for error in compression.errors] == ["55P03"]  # lock_not_available
+    assert _empty(db_engine, "mt_dhcp")
+
+
+def test_the_drop_locks_the_chunks_in_the_order_a_reader_does(db_engine: Engine) -> None:
+    """#133: :func:`drop_before` locks its chunks in chunk-id order, the order in which a query
+    of the whole hypertable (``min(time)`` of ``usage`` or of the lookup's window) locks them.
+    In name order (``_10_`` before ``_9_``) the step held the chunks from 10 on, the reader
+    those before 10, and each waited for the other's."""
+    _with_compression(db_engine)
+    cutoff = date(2026, 9, 15)
+    with Session(db_engine) as session:
+        session.add_all(
+            [_dhcp(datetime(2026, 9, 1, 9, tzinfo=UTC) + timedelta(days=day)) for day in range(12)]
+        )
+        session.commit()
+    chunks = _chunks_by_id(db_engine, "mt_dhcp")
+    assert len(chunks) == 12
+    assert sorted(chunks) != chunks, "the chunk ids must cross a digit (1 to 9, then 10 on)"
+    last = chunks[-1]  # the last chunk the step locks
+    with db_engine.connect() as blocker, db_engine.connect() as watcher:
+        # 1. Another reader holds the last chunk: the step has locked all the others, waits.
+        blocker.execute(text(f"LOCK TABLE {last} IN ACCESS SHARE MODE"))
+        step = _Backend(db_engine, lambda connection: drop_before(connection, cutoff))
+        step.wait_for_lock(watcher, last)
+        # 2. A query of every chunk waits for the first one it needs that the step holds.
+        reader = _Backend(
+            db_engine,
+            lambda connection: connection.execute(select(func.min(MtDhcp.time))).scalar_one(),
+        )
+        reader.wait_for_lock(watcher)
+        # 3. The other reader ends: the step goes on with the chunks it has not locked yet.
+        blocker.commit()
+        step.join()
+        reader.join()
+    assert step.errors == []
+    assert (reader.errors, reader.results) == ([], [None])  # the chunks went before it read
+    assert _empty(db_engine, "mt_dhcp")
