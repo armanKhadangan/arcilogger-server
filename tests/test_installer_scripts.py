@@ -9208,15 +9208,21 @@ Invoke-DatabaseRestore
 """
 
 
-def _pg_bin(tmp_path: Path) -> Path | None:
+def _pg_bin(tmp_path: Path, major: int) -> Path | None:
     """A folder with psql.exe, pg_dump.exe and pg_restore.exe as the installer runs them (on
-    Linux links to PostgreSQL's binaries): ARCILOGGER_PGBIN, /usr/lib/postgresql/16/bin (Debian
-    and Ubuntu, whose PATH has wrapper scripts), or the folder of psql on PATH."""
+    Linux links to PostgreSQL's binaries), of the server's own major version ``major``, as the
+    installer bundles them: a newer pg_dump writes settings an older server does not know
+    (``SET transaction_timeout`` from 17 on), which ``pg_restore --exit-on-error`` stops at.
+    ARCILOGGER_PGBIN, /usr/lib/postgresql/<major>/bin (Debian and Ubuntu: their PATH has
+    pg_wrapper scripts, which pick the tool by their own name and so fail behind a ``.exe``
+    link), or the folder of psql on PATH when it is that version."""
     found = os.environ.get("ARCILOGGER_PGBIN")
-    if not found and Path("/usr/lib/postgresql/16/bin/psql").is_file():
-        found = "/usr/lib/postgresql/16/bin"
+    if not found and Path(f"/usr/lib/postgresql/{major}/bin/psql").is_file():
+        found = f"/usr/lib/postgresql/{major}/bin"
     if not found and (psql := shutil.which("psql")):
-        found = str(Path(psql).parent)
+        version = subprocess.run([psql, "--version"], capture_output=True, text=True).stdout
+        if re.search(rf"\b{major}\.\d", version):
+            found = str(Path(psql).parent)
     if not found:
         return None
     if os.name == "nt":  # the binaries are the .exe files already
@@ -9281,17 +9287,21 @@ def test_database_restore_puts_a_0020_dump_in_place_of_a_0021_database(
     assert TEST_PG is not None
     timescale = server == "timescaledb"
     expected = timescale and os.environ.get("ARCILOGGER_EXPECT_TIMESCALE") == "1"
-    pg_bin = _pg_bin(tmp_path)
-    if pg_bin is None:
-        if expected:
-            pytest.fail("psql / pg_dump / pg_restore not found (ARCILOGGER_EXPECT_TIMESCALE=1)")
-        pytest.skip("psql / pg_dump / pg_restore not found")
     dsn = urllib.parse.urlsplit(TEST_PG)
     user, password = dsn.username or "postgres", dsn.password or ""
     host, port = dsn.hostname or "127.0.0.1", str(dsn.port or 5432)
     name = f"arci_t_restore_{uuid.uuid4().hex[:12]}"
     base_url = f"postgresql+psycopg://{user}:{password}@{host}:{port}"
     admin = create_engine(f"{base_url}/postgres", isolation_level="AUTOCOMMIT", poolclass=NullPool)
+    with admin.connect() as connection:
+        major = int(connection.execute(text("SHOW server_version_num")).scalar_one()) // 10000
+    pg_bin = _pg_bin(tmp_path, major)
+    if pg_bin is None:
+        admin.dispose()
+        tools = f"PostgreSQL {major}'s psql / pg_dump / pg_restore not found"
+        if expected:
+            pytest.fail(f"{tools} (ARCILOGGER_EXPECT_TIMESCALE=1)")
+        pytest.skip(tools)
     if timescale and (missing := _timescale_missing(admin)):
         admin.dispose()
         if expected:

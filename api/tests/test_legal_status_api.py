@@ -28,7 +28,7 @@ from arcilogger_api.legalstatus import routes, texts
 from arcilogger_api.legalstatus.compute import compute_legal_status, late_unstamped_days
 from arcilogger_api.legalstatus.models import LegalReason, LegalStatus
 from arcilogger_api.legalstatus.options import legal_options
-from arcilogger_api.legalstatus.testing import root_list, store_lists
+from arcilogger_api.legalstatus.testing import CA_POLICY, root_list, simulated_ca, store_lists
 from arcilogger_api.testing import LoggedIn
 from arcilogger_core.config import KAMUSM_PRODUCTION_HOST, KAMUSM_TEST_HOST, Config
 from arcilogger_core.layout import Layout
@@ -37,6 +37,7 @@ from arcilogger_core.seal import Sealer
 from arcilogger_core.timeutil import isoformat_site
 from arcilogger_core.tsa.mock import MockTsa
 from arcilogger_db.models import AuditLog, Lease, Person
+from arcilogger_worker.alerts.system import crl_stamp, pinned_roots, stamp_in_use
 from arcilogger_worker.vaulttesting import SealedVault, at_site, make_vault
 
 Login = Callable[..., LoggedIn]
@@ -88,11 +89,22 @@ class Site:
         self.app.dependency_overrides[deps.get_config] = lambda: config
         return config
 
-    def vault(self) -> SealedVault:
+    def new_vault(self, *, test_root: bool = False) -> SealedVault:
+        """The site's vault: its stamps chain to a made-up CA's root (``simulated_ca``), as a
+        real provider's do, or with ``test_root`` to ARCILOGGER's test root, as on a mock
+        install (W5-E-5)."""
+        if not test_root:
+            simulated_ca(self.layout.state / "mock-tsa")
+        sealed = make_vault(self.config.data_dir, tsa_now=at_site(date(2026, 9, 29)))
+        if not test_root:
+            sealed.tsa.policy = CA_POLICY
+        self.vaults.append(sealed)
+        return sealed
+
+    def vault(self, *, test_root: bool = False) -> SealedVault:
         """29 October sealed, 30 October written and never stamped (57 hours after its end at
         ``NOW``), 31 October and 1 November closed without data, not yet late."""
-        sealed = make_vault(self.config.data_dir, tsa_now=at_site(date(2026, 9, 29)))
-        self.vaults.append(sealed)
+        sealed = self.new_vault(test_root=test_root)
         sealed.seal_days([date(2026, 10, 29)])
         sealed.write_day(date(2026, 10, 30))
         return sealed
@@ -117,21 +129,22 @@ class Site:
             {"at": isoformat_site(NOW - timedelta(hours=6), "seconds"), "checks": [check]},
         )
 
-    def sealed(self) -> SealedVault:
+    def sealed(self, *, test_root: bool = False) -> SealedVault:
         """29 and 30 October sealed: no closed day is late at ``NOW``. The newest stamp (30
         October's) is the one in use."""
-        sealed = make_vault(self.config.data_dir, tsa_now=at_site(date(2026, 9, 29)))
-        self.vaults.append(sealed)
+        sealed = self.new_vault(test_root=test_root)
         sealed.seal_days([date(2026, 10, 29), date(2026, 10, 30)])
         return sealed
 
     def pin_roots(self) -> None:
-        """The mock TSA's root as a pinned root of ``tsa.roots_dir``: the root a real provider's
-        stamps reach (a legal provider never trusts the mock root by itself)."""
+        """The roots of the vaults' mock TSAs as pinned roots of ``tsa.roots_dir``: the roots
+        a real provider's stamps reach (a legal provider never trusts the mock TSA's own folder
+        by itself)."""
         folder = self.config.data_dir.parent / "pinned-roots"
         folder.mkdir(exist_ok=True)
-        root = self.vaults[-1].tsa.root_certificate
-        (folder / "root.pem").write_bytes(root.public_bytes(Encoding.PEM))
+        for number, sealed in enumerate(self.vaults):
+            root = sealed.tsa.root_certificate
+            (folder / f"root-{number}.pem").write_bytes(root.public_bytes(Encoding.PEM))
         self.use(tsa_config(self.config, roots_dir=folder))
 
     def lists(
@@ -586,7 +599,7 @@ def test_crl_stale_needs_a_stamp_in_use(site: Site, admin: TestClient) -> None:
         [(tsa, root_list(tsa, NOW - timedelta(days=30)))],
         fetched_at=NOW - timedelta(days=30),
     )
-    assert crl_reasons(admin) == []  # the mock root is not pinned for a legal provider
+    assert crl_reasons(admin) == []  # the stamps' root is not pinned for a legal provider
 
 
 def test_crl_stale_counts_only_the_lists_that_match_their_index_entry(
@@ -687,6 +700,85 @@ def test_crl_stale_only_for_the_issuers_of_the_chain_in_use(
     assert len(crl_reasons(admin)) == 1  # a fresh list of another root is no list of this one
 
 
+def test_crl_stale_not_for_a_mock_install(site: Site, admin: TestClient) -> None:
+    """W5-C-13, as ``R20-crl`` (W5-E-5): a mock or trial install's stamps chain to ARCILOGGER's
+    test root, which publishes no list, and a test stamp never counts (W5-A D5). The stamp is in
+    use (the mock root is pinned while ``tsa.provider`` is ``mock``); the banner's danger reason
+    ``provider_not_legal`` says what matters."""
+    site.use(site.config)
+    site.sealed(test_root=True)
+    assert stamp_in_use(site.layout, pinned_roots(site.config, site.layout)) is not None
+    assert codes(get(admin)) == ["provider_not_legal"]
+
+
+@pytest.mark.parametrize("test_root", [True, False])
+def test_crl_stamp_leaves_out_only_a_chain_to_the_test_root(site: Site, test_root: bool) -> None:
+    """``crl_stamp``, the one rule ``R20-crl`` and ``crl_stale`` share (W5-C-13): no stamp for
+    a chain to ARCILOGGER's test root, the stamp itself for any other root."""
+    site.use(legal(site.config))
+    site.sealed(test_root=test_root)
+    site.pin_roots()
+    stamp = stamp_in_use(site.layout, pinned_roots(site.config, site.layout))
+    assert stamp is not None
+    assert crl_stamp(stamp) is (None if test_root else stamp)
+    assert crl_stamp(None) is None
+
+
+@pytest.mark.parametrize(("test_root", "stale"), [(True, False), (False, True)])
+def test_crl_stale_only_for_a_root_outside_the_test_organization(
+    site: Site, admin: TestClient, test_root: bool, stale: bool
+) -> None:
+    """Only the root decides (W5-E-5): pinned in ``tsa.roots_dir`` for a legal provider,
+    ARCILOGGER's test root still needs no list, while a made-up CA's root without any list
+    gives ``crl_stale``."""
+    site.use(legal(site.config))
+    site.sealed(test_root=test_root)
+    site.pin_roots()
+    assert stamp_in_use(site.layout, pinned_roots(site.config, site.layout)) is not None
+    assert len(crl_reasons(admin)) == int(stale)
+
+
+@pytest.mark.parametrize("newest", ["real", "test"])
+def test_crl_stale_on_a_mixed_site_by_the_newest_sealed_day(
+    site: Site, admin: TestClient, tmp_path: Path, newest: str
+) -> None:
+    """A site that moved from the mock TSA to a real provider, or back, holds test days and
+    real days. The issuers in use are the newest sealed day's chain's (W5-C-3), so
+    ``crl_stale`` holds only while that chain is the real CA's, and then only the real CA's list
+    counts: the test root never needs one (W5-C-13)."""
+    site.use(legal(site.config))
+    older = site.new_vault(test_root=newest == "real")
+    if newest == "real":
+        simulated_ca(tmp_path / "newer-tsa")
+    tsa = MockTsa(tmp_path / "newer-tsa", key_type="ec", clock=older.tsa_clock)
+    if newest == "real":
+        tsa.policy = CA_POLICY
+    newer = SealedVault(root=older.root, config=older.config, tsa=tsa, tsa_clock=older.tsa_clock)
+    site.vaults.append(newer)
+    older.seal_days([date(2026, 10, 29)])
+    newer.seal_days([date(2026, 10, 30)])
+    site.pin_roots()
+    real, test = (newer, older) if newest == "real" else (older, newer)
+    stamp = stamp_in_use(site.layout, pinned_roots(site.config, site.layout))
+    assert stamp is not None
+    assert (stamp.day, stamp.chain[-1]) == (date(2026, 10, 30), newer.tsa.root_certificate)
+
+    # neither root has a list
+    assert len(crl_reasons(admin)) == int(newest == "real")
+    # a fresh list of the test root alone is no list of the real CA
+    store_lists(
+        site.layout, [(test.tsa, root_list(test.tsa, NOW - timedelta(days=1)))], fetched_at=NOW
+    )
+    site.app.state.arci_legal_status.invalidate()
+    assert len(crl_reasons(admin)) == int(newest == "real")
+    # a fresh list of the real CA alone is enough, whichever day is newer
+    store_lists(
+        site.layout, [(real.tsa, root_list(real.tsa, NOW - timedelta(days=1)))], fetched_at=NOW
+    )
+    site.app.state.arci_legal_status.invalidate()
+    assert crl_reasons(admin) == []
+
+
 @pytest.mark.parametrize(
     ("revoked_at", "revoked"),
     [
@@ -700,6 +792,7 @@ def test_certificate_revoked_from_the_stored_lists(
     """The newest sealed day's chain is checked against the stored lists too, so a revocation
     shows before the next scheduled verification finds it."""
     site.use(legal(site.config))
+    site.sealed(test_root=True)  # the mock TSA's names; certificate_revoked reads any chain
     site.lists(NOW - timedelta(hours=2), revoked_at=revoked_at)
     found = [r for r in get(admin)["reasons"] if r["code"] == "certificate_revoked"]
     if not revoked:

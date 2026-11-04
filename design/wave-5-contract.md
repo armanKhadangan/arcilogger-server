@@ -1042,6 +1042,22 @@ All Wave 5 questions are answered (2026-11-02).
   `alerts.system.CERT_EXPIRY_WARNING` (`timedelta(days=30)`), not a setting. A revocation still
   makes it `critical`. The findings count both (`expiring`, `uncovered`, beside `revoked`).
   "The `Renew` task failed twice in a row" stays W5-E's (W5-C-7).
+- **W5-C-13: `crl_stale` leaves out ARCILOGGER's test root, as `R20-crl` does (#160; W5-E-5,
+  Q6 of #158).** A chain whose root carries ARCILOGGER's test organization has no issuer in use
+  for `crl_stale` (W5-A D5: a test stamp never counts), so a mock or trial install no longer
+  shows it beside its `provider_not_legal`. The rule is one helper,
+  `alerts.system.crl_stamp` (the newest sealed day's stamp, or none for such a chain), which
+  `check_stamp_crl` and `compute_legal_status` both pass to `crl_status` (D11); this ends the
+  difference W5-E-5 left open. Only the root decides, and only the newest sealed day's chain is
+  in use (W5-C-3): on a site that holds test days and real days, `crl_stale` holds while the
+  newest one is a real CA's and that CA has no fresh list. `certificate_revoked` still reads the
+  stamp's chain whatever its root. The legal-status tests and samples now seal through a made-up
+  CA outside the test organization (`legalstatus.testing.simulated_ca`): the samples' Kamu SM
+  cases run on a site of their own whose sealed days repeat the capture's. Tests:
+  `test_crl_stamp_leaves_out_only_a_chain_to_the_test_root`,
+  `test_crl_stale_not_for_a_mock_install`,
+  `test_crl_stale_only_for_a_root_outside_the_test_organization` and
+  `test_crl_stale_on_a_mixed_site_by_the_newest_sealed_day` (`api/tests/test_legal_status_api.py`).
 
 ## Deviations — W5-G (2026-11-03)
 
@@ -2004,6 +2020,19 @@ All Wave 5 questions are answered (2026-11-02).
   browse budget (500 ms) and the slowest request below 10 × that. In the same review A2 (an
   asynchronous spool watermark) was deferred, to be revisited with field figures from a Windows
   site (sahada doğrula), and A3 was declined (2026-11-04).
+- **#119-2: the browse guard bounds what ingest adds, not the 95th percentile itself**
+  (decided on #119, 2026-11-04; amends the budget of #119-1). `test_browse_under_concurrent_ingest`
+  times a settled series before and after the series under ingest and asserts that the 95th
+  percentile under ingest less the larger settled one stays below the browse budget (500 ms);
+  `CEILING` (5 s) bounds the slowest request of each of the three series. Reason: on a Windows
+  runner the audit spool's `os.fsync` waits for the disk's write-back (#90's case; out of scope
+  by #119 item 3) in whichever series meets it, settled ones too. Run 41875393810 (#166 at
+  `32d4d2a`, job 126733285902) failed the absolute bound: under ingest p50 124 / p95 590 / max
+  757 ms (p95: sql 23, commit 7, fsync 511 ms), settled p95 331 ms (fsync 277 ms). Its re-run
+  (job 126780370555) passed: under ingest p95 134 ms, settled p95 332 ms with one 507 ms fsync.
+  Ingest held the stated rate in both (1,984 and 2,155 lines/s loaded). The absolute browse
+  budget of a settled server stays with `test_search_perf`'s Q1 (best of rounds, 500 ms), so a
+  regression that slows browse in every series is still caught there.
 
 ## Deviations — #122 (2026-11-04)
 
