@@ -8,7 +8,8 @@ A package is one ZIP file that lets someone outside the company check sealed day
   (``include_audit_log``; it holds other requests and staff data, KVKK) — otherwise it is listed
   in ``paket.json`` as excluded with its sealed SHA-256;
 * deletion records and the chain anchor when a day links to a deleted day or lists a deletion,
-  renewal stamps that cover the included days or the included report's time stamp;
+  renewal stamps that cover the included days, the included deletion records' time stamps or
+  the included report's time stamp;
 * the trusted root certificates the package's tokens actually chain to, the TSA certificates
   taken from the tokens and, from the CRL folder (``state/crl``), the revocation lists the days
   need: for each issuer of their chains the newest list and the first one issued at or after

@@ -1002,7 +1002,9 @@ def _renew_held(args: argparse.Namespace, app: App, now: datetime) -> int:
         run = renew_held(app.layout, app.config, provider, roots, now)
     except RenewalNotNeeded as exc:
         return _renew_done(args, app, "not_needed", 0, now=now, report=exc.report)
-    except TsaConfigurationError as exc:  # found only at stamp time (no Java, no client)
+    except TsaConfigurationError as exc:
+        # Found only at stamp time: no Java, no client, or legal-roots (no listed root pinned
+        # before the stamp, or the stamp's own root not listed after it; W5-A-13).
         return _renew_refused(args, app, now, roots, _renew_cause(app, exc), exc)
     except (TsaError, RenewalError, OSError, subprocess.SubprocessError) as exc:
         log.error("renew failed: %s", exc)
