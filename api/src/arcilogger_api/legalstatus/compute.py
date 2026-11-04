@@ -31,6 +31,7 @@ from arcilogger_core.timeutil import day_window, isoformat_site
 from arcilogger_worker.alerts.system import (
     CrlStatus,
     NoStamps,
+    crl_stamp,
     crl_status,
     pinned_roots,
     read_crl_index,
@@ -127,7 +128,8 @@ def _renewal_reasons(layout: Layout, options: LegalOptions) -> list[LegalReason]
 def _crl_reasons(status: CrlStatus, options: LegalOptions) -> list[LegalReason]:
     """``crl_stale``: an issuer of the newest sealed day's chain without a fresh stored list
     (C22: fetched in the last ``tsa.crl_max_age_days`` days and not past its ``nextUpdate``;
-    all of them when ``state/crl`` cannot be read)."""
+    all of them when ``state/crl`` cannot be read). A chain to ARCILOGGER's test root has no
+    issuer in use (``crl_stamp``, W5-C-13)."""
     if not status.stale:
         return []
     return [_reason("crl_stale", "settings-tsa", since=status.since, days=options.crl_max_age_days)]
@@ -168,7 +170,9 @@ def compute_legal_status(layout: Layout, config: Config, now: datetime) -> Legal
                 name=certificate_name(first.name),
             )
         )
-    status = crl_status(lists, read_crl_index(layout), stamp, now, options.crl_max_age_days)
+    # ARCILOGGER's test root needs no list, as for R20-crl (W5-C-13, W5-E-5)
+    index = read_crl_index(layout)
+    status = crl_status(lists, index, stamp, now, options.crl_max_age_days)
     reasons += _crl_reasons(status, options)
     ordered = _sorted(reasons)
     level: LegalLevel = ordered[0].level if ordered else "ok"
