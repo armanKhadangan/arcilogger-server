@@ -316,7 +316,9 @@ class Attributor:
     the ``dhcp.fortigate_format_verified`` settings row, which :func:`.engine.run_lookup` reads.
     ``reads_from`` and ``reads_until``: the earliest and the latest device time of a log row a
     lookup reads (:func:`.days.reads_from`, :func:`.days.reads_until`); a read reaching past
-    either reads up to it, and :attr:`clamped` says so (``lookback_clamped_to_window``).
+    either reads up to it. A look-back cut at ``reads_from`` sets :attr:`clamped`
+    (``lookback_clamped_to_window``); D27's read past the moment ends at ``reads_until`` without
+    it, a method rule (docs/CORRELATION.md, W5-G deviations).
     """
 
     def __init__(
@@ -337,7 +339,9 @@ class Attributor:
         self.format_verified = format_verified
         self.reads_from = reads_from
         self.reads_until = reads_until
-        #: A read cut at :attr:`reads_from` or :attr:`reads_until` (the rows beyond were not read).
+        #: A look-back cut at :attr:`reads_from` (the rows before were not read). The forward
+        #: cut at :attr:`reads_until` (D27) does not set it: it fires on most lookups, the same
+        #: way before a drop and after the reload, and says nothing about the case.
         self.clamped = False
         self._kept: ColumnElement[bool] | None = None
         #: Per ``(lease id, moment)`` the lease's own newest DHCP record (``None``: none).
@@ -556,10 +560,10 @@ class Attributor:
 
     def _until(self, high: datetime) -> datetime:
         """``high``, no later than :attr:`reads_until` (a lookup reads no log row after its
-        days, G7); :attr:`clamped` when it was later."""
+        days, G7). Not :attr:`clamped`: D27 reads up to the end of the lookup's last day, a
+        method rule, not a note on the answer (docs/CORRELATION.md)."""
         if self.reads_until is None or high <= self.reads_until:
             return high
-        self.clamped = True
         return self.reads_until
 
     def _released(self, lease: StoredLease, at: datetime) -> datetime | None:

@@ -4,9 +4,12 @@ A lookup reads no log row before the first of its days (:func:`.days.reads_from`
 that reaches further (the 100-day cap of the missed-move check, round 7; a FortiGate lease whose
 logged lease time is longer than one reload holds, through its newest record and D27) reads from
 that day on, and the answer says so (``lookback_clamped_to_window``). A logged lease that one
-reload holds is inside the days, so the 409 and the reload cover it. Either way the answer is the
-same with the rows before the lookup's days and without them (the window job dropped them, only
-the lookup's days were reloaded): it never changes silently.
+reload holds is inside the days, so the 409 and the reload cover it. D27's read past the moment
+ends with the last of the days (:func:`.days.reads_until`) without that note: a method rule
+(docs/CORRELATION.md) that cuts nearly every FortiGate lookup (FortiOS's 7-day lease) and a
+MikroTik lookup late in the day (#126). Either way the answer is the same with the rows outside
+the lookup's days and without them (the window job dropped them, only the lookup's days were
+reloaded): it never changes silently.
 
 The site is Selin Kaya's PC (``172.20.42.57`` / ``00:00:5e:00:53:57``, VLAN 42), its leases built
 with ``rebuild_day`` as the nightly job does.
@@ -49,20 +52,20 @@ def settings_for(session: Session) -> LookupSettings:
     return LookupSettings.from_settings(get_settings(session))
 
 
-def asked() -> LookupRequest:
-    return LookupRequest(at=AT, internal_ip=PC)
+def asked(at: datetime = AT) -> LookupRequest:
+    return LookupRequest(at=at, internal_ip=PC)
 
 
-def internal(session: Session) -> LookupOutcome:
-    outcome = run_lookup(session, asked(), settings_for(session), now=NOW)
+def internal(session: Session, at: datetime = AT) -> LookupOutcome:
+    outcome = run_lookup(session, asked(at), settings_for(session), now=NOW)
     session.rollback()
     return outcome
 
 
-def build(session: Session, evidence: Evidence, *days: date) -> None:
+def build(session: Session, evidence: Evidence, *days: date, at: datetime = AT) -> None:
     """The PC's session at the moment (the day is in the database), then the leases of
     ``days``."""
-    evidence.traffic(AT, PC, 51001, "203.0.113.10", 443, duration=10)
+    evidence.traffic(at, PC, 51001, "203.0.113.10", 443, duration=10)
     session.commit()
     for day in days:
         rebuild_day(session, day, horizon=NOW)
@@ -78,11 +81,11 @@ def drop_before_the_days(session: Session) -> None:
     session.commit()
 
 
-def drop_after_the_days(session: Session) -> None:
+def drop_after_the_days(session: Session, at: datetime = AT) -> None:
     """The database as a reload of the lookup's days leaves it when the days after them are
     older than the window too: no log row after them."""
-    end = reads_until(asked(), settings_for(session))
-    assert end < day_window(lookup_days(asked(), settings_for(session))[1])[1]
+    end = reads_until(asked(at), settings_for(session))
+    assert end < day_window(lookup_days(asked(at), settings_for(session))[1])[1]
     assert end + timedelta(microseconds=1) == day_window(LAST)[1]
     for model in LOG_TABLES:
         session.execute(delete(model).where(model.time > end))
@@ -110,6 +113,21 @@ def clamped_days(outcome: LookupOutcome) -> dict[str, Any]:
 
 def iso(moment: datetime) -> str:
     return moment.astimezone(UTC).isoformat()
+
+
+def same_without_the_rows_outside_the_days(
+    session: Session, before: LookupOutcome, at: datetime = AT
+) -> None:
+    """The answer without the rows before and after the lookup's days (they can be dropped
+    while only the lookup's days are reloaded) is ``before``."""
+    drop_before_the_days(session)
+    drop_after_the_days(session, at)
+    after = answer(internal(session, at))
+    expected = answer(before)
+    # Here the newest day of the database goes too (in the field it is today's).
+    for data in (after, expected):
+        data["data_window"].pop("db_last_day")
+    assert after == expected
 
 
 def test_the_defaults_reach_back_as_far_as_one_reload_holds(db_session: Session) -> None:
@@ -185,7 +203,9 @@ def test_a_logged_lease_longer_than_a_reload_reads_from_the_first_day_and_says_s
     assert chain.lease.last_dhcp_evidence == ack
     assert (chain.confidence, chain.lease.confidence) == ("high", "high")
     assert OVERLAP not in [e.key for e in chain.explanations]
-    assert clamped_day(before) == FIRST.isoformat()
+    # The look-back cut names the lookup's days (D27's forward cut, here too, adds nothing).
+    assert clamped_days(before) == {"day": FIRST.isoformat(), "last": LAST.isoformat()}
+    assert keys(before).count(CLAMPED) == 1
 
     drop_before_the_days(db_session)
     assert answer(internal(db_session)) == answer(before)
@@ -198,7 +218,7 @@ def test_a_logged_lease_one_reload_holds_is_read_inside_the_days(
     eight days the configured rules alone reach): the lookup's days hold it, so the 409 and the
     reload cover it, its record is read inside them (the missing renewal at half the lease is
     named from it, D6), and no look-back is clamped. Only the two-origin check's forward read
-    (``T`` + 10 days, D27) ends at the last of the days, and the answer names both days."""
+    (``T`` + 10 days, D27) ends at the last of the days, a method rule: no note (#126)."""
     ack = AT - timedelta(days=9)
     evidence.fortigate_dhcp(ack, PC, PC_MAC, lease=864_000)
     build(db_session, evidence, ack.date())
@@ -214,47 +234,70 @@ def test_a_logged_lease_one_reload_holds_is_read_inside_the_days(
     assert (chain.lease.lease_seconds, chain.lease.last_dhcp_evidence) == (864_000, ack)
     renewal = next(e for e in chain.explanations if e.key == "lease_renewal_not_seen")
     assert dict(renewal.params) == {"last": iso(ack), "lease": 864_000}
-    assert clamped_days(before) == {"day": FIRST.isoformat(), "last": LAST.isoformat()}
+    assert CLAMPED not in keys(before)
 
     drop_before_the_days(db_session)
     assert answer(internal(db_session)) == answer(before)
 
 
-def test_the_two_origin_check_reads_up_to_the_last_day_and_says_so(
+def test_the_two_origin_check_reads_up_to_the_last_day_without_a_note(
     db_session: Session, evidence: Evidence
 ) -> None:
-    """D27 reads ``[T - W, T + W]``, W the alive window of the chain's lease: a FortiGate lease
-    logged for 10 days reaches 10 days past the moment, beyond the last of the lookup's days. A
-    MikroTik DHCP server that served VLAN 42 5 days after the moment is not read (the chain
-    stays ``high``; with the rows after the days it would be ``low``, two origins), the answer
-    names both days, and it is the same without the rows after the days (they can be dropped
-    while the lookup's days are reloaded)."""
+    """#126: D27 reads ``[T - W, T + W]``, W the alive window of the chain's lease: a FortiGate
+    lease logged for 7 days (FortiOS's default lease, docs/CORRELATION.md section 1) reaches 7
+    days past the moment, beyond the last of the lookup's days, while its look-back stays inside
+    them. A MikroTik DHCP server that served VLAN 42 5 days after the moment is not read (the
+    chain stays ``high``; with the rows after the days it would be ``low``, two origins). The
+    cut is a method rule, D27 reads up to the end of the lookup's last day, so the answer carries
+    no ``lookback_clamped_to_window``, and it is the same without the rows outside the days."""
     ack = AT - timedelta(days=2)
-    evidence.fortigate_dhcp(ack, PC, PC_MAC, lease=864_000)
+    evidence.fortigate_dhcp(ack, PC, PC_MAC, lease=604_800)
     build(db_session, evidence, ack.date())
-    evidence.dhcp(
-        AT + timedelta(days=5), "assigned", "172.20.42.88", "00:00:5e:00:53:88", server="dhcp42"
-    )
+    served = AT + timedelta(days=5)
+    evidence.dhcp(served, "assigned", "172.20.42.88", "00:00:5e:00:53:88", server="dhcp42")
     db_session.commit()
+    assert reads_until(asked(), settings_for(db_session)) < served  # the forward cut
     before = internal(db_session)
     chain = before.attribution
     assert chain is not None
     assert chain.lease is not None
-    assert (chain.lease.source_table, chain.lease.lease_seconds) == ("fg_dhcp", 864_000)
+    assert (chain.lease.source_table, chain.lease.lease_seconds) == ("fg_dhcp", 604_800)
     assert (chain.confidence, chain.lease.confidence) == ("high", "high")
     assert OVERLAP not in [e.key for e in chain.explanations]
-    assert clamped_days(before) == {"day": FIRST.isoformat(), "last": LAST.isoformat()}
-    text = next(e for e in before.explanations if e.key == CLAMPED)
-    assert f"{LAST:%d.%m.%Y}" in text.text_tr
-    assert f"{LAST:%d.%m.%Y}" in text.text_en
+    assert CLAMPED not in keys(before)
 
-    drop_after_the_days(db_session)
-    after = answer(internal(db_session))
-    expected = answer(before)
-    # Here the newest day of the database goes too (in the field it is today's).
-    for data in (after, expected):
-        data["data_window"].pop("db_last_day")
-    assert after == expected
+    same_without_the_rows_outside_the_days(db_session, before)
+
+
+def test_a_mikrotik_lookup_late_in_the_day_reads_up_to_the_last_day_without_a_note(
+    db_session: Session, evidence: Evidence
+) -> None:
+    """#126: a MikroTik lease's alive window with the defaults (``lease.default_seconds``, 1 day,
+    x ``lease.timeout_percent``, 110) reaches past the end of the next day for a moment after
+    21:36. A FortiGate DHCP ACK in VLAN 42 26 h 10 min after a moment at 22:00 is inside that
+    window and after the last of the lookup's days: not read, no note, the same answer without
+    the rows outside the days."""
+    moment = tr(DAY, 22)
+    ack = moment - timedelta(hours=1)
+    evidence.dhcp(ack, "assigned", PC, PC_MAC, server="dhcp42")
+    build(db_session, evidence, ack.date(), at=moment)
+    served = moment + timedelta(hours=26, minutes=10)
+    evidence.fortigate_dhcp(served, "172.20.42.130", "00:00:5e:00:53:30")
+    db_session.commit()
+    assert lookup_days(asked(moment), settings_for(db_session)) == (FIRST, LAST)
+    assert reads_until(asked(moment), settings_for(db_session)) < served
+    alive = settings_for(db_session).lease_timeout_seconds("dhcp42")
+    assert served < moment + timedelta(seconds=alive)
+    before = internal(db_session, moment)
+    chain = before.attribution
+    assert chain is not None
+    assert chain.lease is not None
+    assert chain.lease.source_table == "mt_dhcp"
+    assert (chain.confidence, chain.lease.confidence) == ("high", "high")
+    assert OVERLAP not in [e.key for e in chain.explanations]
+    assert CLAMPED not in keys(before)
+
+    same_without_the_rows_outside_the_days(db_session, before, moment)
 
 
 def test_a_newest_record_before_the_days_is_the_stored_one(
@@ -281,6 +324,47 @@ def test_a_newest_record_before_the_days_is_the_stored_one(
         "ip": PC,
     }
     assert clamped_day(before) == FIRST.isoformat()
+
+    drop_before_the_days(db_session)
+    assert answer(internal(db_session)) == answer(before)
+
+
+def test_a_newest_record_before_the_days_alone_says_so(
+    db_session: Session, evidence: Evidence
+) -> None:
+    """The lease's newest record alone reaches before the lookup's days: a FortiGate lease
+    logged for one day, its ACK 20 days before the moment, kept open by traffic (as the
+    missed-move case above). D27 reads one day and a tenth back (inside the days), the lease
+    has no RELEASE, and the missing renewal at half the lease (D6) makes the chain ``low``
+    before the post-lease checks, which then look at nothing. So only the newest record's read
+    is cut at the first day: the stored record decides, and the answer names the days in the
+    explanation's TR/EN text (looking back before the first day)."""
+    ack = AT - timedelta(days=20)
+    evidence.fortigate_dhcp(ack, PC, PC_MAC, lease=86_400)
+    build(db_session, evidence, ack.date())
+    lease = db_session.scalars(select(Lease)).one()
+    lease.end, lease.end_reason = None, "open"
+    lease.last_evidence = AT - timedelta(hours=1)  # the traffic of yesterday and today
+    db_session.commit()
+    settings = settings_for(db_session)
+    alive = timedelta(seconds=settings.lease_timeout_seconds(lease.server, 86_400))
+    assert AT - alive > reads_from(asked(), settings)  # D27 reads inside the days
+
+    before = internal(db_session)
+    chain = before.attribution
+    assert chain is not None
+    assert chain.lease is not None
+    assert (chain.lease.source_table, chain.lease.last_dhcp_evidence) == ("fg_dhcp", ack)
+    assert (chain.confidence, chain.lease.confidence) == ("low", "low")
+    assert "lease_renewal_not_seen" in [e.key for e in chain.explanations]
+    assert UNCONVERTED not in [e.key for e in chain.explanations]
+    assert clamped_days(before) == {"day": FIRST.isoformat(), "last": LAST.isoformat()}
+    text = next(e for e in before.explanations if e.key == CLAMPED)
+    assert "bu sorgunun okuduğu ilk günden daha geriye bakardı" in text.text_tr
+    assert f"{FIRST:%d.%m.%Y} ile {LAST:%d.%m.%Y} arasındaki" in text.text_tr
+    assert "daha eski kayıtlar denetime girmedi" in text.text_tr
+    assert "would look back before the first day this lookup reads" in text.text_en
+    assert "older records were not part of the check" in text.text_en
 
     drop_before_the_days(db_session)
     assert answer(internal(db_session)) == answer(before)

@@ -344,7 +344,7 @@ class WindowCheck:
         days = self.reloadable()
         if not days:
             return None
-        return ArchivedRange(first_day=days[0], last_day=days[-1])
+        return ArchivedRange(first_day=days[0], last_day=days[-1], keep_days=self.keep_days)
 
 
 #: :func:`hold_window`'s statement: the lock, waited for at most ``lock_timeout`` (the subquery
@@ -368,7 +368,10 @@ def hold_window(db: Session, seconds: float) -> Connection:
     dropped day read without ``archived``). So the lock is taken at session level, in a statement
     of its own (autocommit), on the connection of ``db``'s transaction, which the session keeps
     until its commit or rollback. :func:`release_window` must follow on every path, before the
-    session gives the connection back to the pool."""
+    session gives the connection back to the pool. On any failure but the lock's timeout (a
+    cancelled statement, a lost connection, a failure after the lock was granted) the connection
+    is invalidated, as :func:`release_window` does: whether the lock was granted is not known,
+    and closing the connection releases it."""
     connection = db.connection()
     raw = connection.connection.driver_connection
     if raw is None:  # pragma: no cover - a pooled connection always has one
@@ -376,9 +379,13 @@ def hold_window(db: Session, seconds: float) -> Connection:
     raw.autocommit = True
     try:
         raw.execute(_HOLD, (PARTITION_LOCK_KEY, str(max(1, int(seconds * 1000)))))
-    except Exception as exc:
+    except BaseException as exc:
         if getattr(exc, "sqlstate", None) == _LOCK_NOT_AVAILABLE:
             raise TimeoutError(f"partition lock not granted within {seconds} s") from exc
+        try:
+            connection.invalidate()
+        except Exception as failed:  # the first error is the one raised
+            exc.add_note(f"invalidating the connection failed too: {failed!r}")
         raise
     finally:
         if not raw.closed:  # a lost connection keeps the original error

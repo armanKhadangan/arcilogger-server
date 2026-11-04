@@ -81,4 +81,6 @@ export interface ArchiveReloadRequired {
 export interface ArchivedRange {
   first_day: DateString;
   last_day: DateString;
+  /** `db.reload_keep_days` at the time of the answer, as in the 409's `details` (C23). */
+  keep_days: number;
 }
