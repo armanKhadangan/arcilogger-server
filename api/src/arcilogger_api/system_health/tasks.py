@@ -26,8 +26,8 @@ ApplySystem    ``at`` of ``admin/system/status.json``                    15 min 
 Renew          ``last_run.at`` of ``state/renewal/renewal.json``         26 h        —
                (not ``at``, which a run without pinned roots keeps)
 CrlFetch       newest ``fetched_at`` of the ``lists`` or ``at`` of the   26 h        —
-               ``failures`` of ``state/crl/index.json``; with neither,
-               when the index was written
+               ``failures`` of ``state/crl/index.json``; with no
+               failure, also when the index was written
 =============  ========================================================  ==========  ==========
 
 ``missing``: no evidence yet; ``late``: the evidence is older than the limit — each task's cadence
@@ -42,8 +42,13 @@ A4); like Backup's, their rows say that the task ran, and whether it succeeded i
 and R20-crl's. A dry run of ``renew`` keeps ``last_run``, and a ``crl fetch`` that finds the lock
 held writes nothing, so neither is evidence. From an upgrade to the first counted Renew run the
 Renew row reads the earlier release's ``state/renewal.json`` and names it as its evidence (Wave 5
-contract W5-E-4). A ``crl fetch`` that knows no list address writes the index with no list and no
-failure on a site that never stored one, so there the index's own modification time is the run.
+contract W5-E-4). Every ``crl fetch`` that gets past its lock and its reads rewrites the index
+with the failures of that run only, so an index that records no failure was written by a run
+without one, and its modification time is that run: also on a site that knows no list address
+any more, whose stored lists keep their old ``fetched_at`` (W5-E-2, answer to Q8 on #158). A run
+that fails on a held lock, or on an index or a stored list it cannot read, exits 1 and writes
+nothing: the row keeps the run before and turns late, or shows ``missing`` while the index
+cannot be read (answer to Q9).
 A time later than now is no evidence of these two: a clock set back never keeps them fresh.
 A file that cannot be read is no evidence; it never fails the request.
 """
@@ -261,8 +266,9 @@ def _crl_fetch(evidence: Evidence) -> datetime | None:
     index = read_crl_index(evidence.layout)
     moments: list[datetime | None] = [entry.fetched_at for entry in index.lists]
     moments += [failure.at for failure in index.failures]
-    if index.readable and not moments:
-        # A run that knew no list address: an index with no list and no failure (#151).
+    if index.readable and not index.failures:
+        # The run that wrote the index failed nowhere: its lists' fetched_at can be older, when
+        # it knew no list address (#151, answer to Q8 on #158). state/crl is protected.
         moments.append(_modified(crl_index_path(evidence.layout)))
     return _until_now(evidence, moments)
 

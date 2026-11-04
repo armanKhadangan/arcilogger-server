@@ -1647,6 +1647,20 @@ def test_cli_no_url_known_exits_2(tmp_path: Path, capsys: pytest.CaptureFixture[
         "lists": [],
         "failures": [],
     }
+    # A held lock or an index that cannot be read fails the run as with addresses (answer to
+    # Q9 on #158): exit 1 with the TR/EN text, the index left as it is.
+    index = Layout(tmp_path / "data").crl_dir / "index.json"
+    written = index.read_bytes()
+    with crl_module._one_run(index.parent):
+        assert main(["--config", config, "crl", "fetch"]) == 1
+    assert "Hata [error]: another 'crl fetch' is running" in capsys.readouterr().err
+    assert index.read_bytes() == written
+    index.write_text("{not json", encoding="utf-8")
+    assert main(["--config", config, "crl", "fetch"]) == 1
+    error = capsys.readouterr().err
+    assert error.startswith("Hata [error]: ")
+    assert "cannot be read" in error
+    assert index.read_text(encoding="utf-8") == "{not json"
 
 
 def test_cli_fetch_and_status(

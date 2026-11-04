@@ -1646,8 +1646,8 @@ All Wave 5 questions are answered (2026-11-02).
   `state/renewal.json`, not its top-level `at` (a run that does not know the pinned roots keeps
   the earlier `at`, W5-A-2), so a dry run, which keeps `last_run`, is no evidence. **CrlFetch**
   shows the newest of `lists[].fetched_at` and `failures[].at` of `state/crl/index.json`, read with
-  W5-C's `read_crl_index` (another schema is unreadable; since W5-E-6, an index with neither shows
-  its modification time). A time later than now is no evidence,
+  W5-C's `read_crl_index` (another schema is unreadable; since W5-E-6, an index that records no
+  failure shows its modification time too). A time later than now is no evidence,
   and a file that cannot be read shows `missing` and never fails the request. The row says the
   task ran: a refused or failed Renew run, or a fetch with failures only, is `ok` there, and
   whether it succeeded is `R20-renewal`'s and `R20-crl`'s question (the Backup row's precedent;
@@ -1755,22 +1755,31 @@ All Wave 5 questions are answered (2026-11-02).
   recorded as `stored_file_changed`. On a site that never stored a list that is
   `{"schema": "arcilogger.crl-index/1", "lists": [], "failures": []}`. It still fetches nothing
   and exits 2 ("no URL known" outranks a `stored_file_changed` failure, which exits 1 when URLs
-  are known); like any run it raises `CrlError` (exit 1) when the lock is held or the index or a
-  stored file cannot be read, and leaves the index as it is. Nothing else in `crl.py` and
+  are known); like any run it raises `CrlError` (exit 1, "Hata [error]: …" on standard error)
+  when the lock is held or the index or a stored file cannot be read, and leaves the index as it
+  is (answer to Q9 on #158: a real failure). Nothing else in `crl.py` and
   nothing in the standalone verifier changes (it reads `paket.json`, never `state/crl/index.json`),
-  so the verdicts of both verifiers stay the same (rule 5). W5-E-2 changes: when the readable
-  index holds neither a list nor a failure, the `CrlFetch` row's evidence is the index's
-  modification time (later than now is no evidence, as for the other times); otherwise the
-  row reads `fetched_at` and `failures[].at` only, as before. A site that knew list addresses
-  earlier and knows none now keeps its old lists in the index, so its row shows their last
-  fetch and turns `late` although the task runs; `R20-crl` says why when an issuer in use has
-  no fresh list. W5-C's readers need no change: an empty index is read as no list, so it
-  raises no `R20-crl` and no `crl_stale` while no issuer is in use (an open `R20-crl` is
-  resolved, `crl_fresh`), and an issuer in use without a list is stale as before. Tests:
+  so the verdicts of both verifiers stay the same (rule 5). W5-E-2 changes (answer to Q8 on
+  #158): when the readable index records no failure, the `CrlFetch` row also counts the index's
+  modification time as a run, beside `fetched_at` (later than now is no evidence, as for the
+  other times). Each run that gets past its lock and its reads rewrites the index with the
+  failures of that run only, so such an index was written by a run without a failure, and
+  `state\crl` is protected, so its modification time can be trusted. With a failure the
+  row reads `fetched_at` and `failures[].at` only, as before (the failures carry the run's
+  time). A site that knew list addresses earlier and knows none now keeps its old lists, with
+  their old `fetched_at`, in the index; its row shows each run and is not `late` while the task
+  runs. The row says whether the task runs; how fresh the lists are is `R20-crl`'s question,
+  raised when an issuer in use has no fresh list. A run that exits 1 (Q9) writes nothing, so
+  the row shows no run for it: it keeps the run before and turns `late` after 26 h, or shows
+  `missing` while the index cannot be read. W5-C's readers need no change: an empty index is
+  read as no list, so it raises no `R20-crl` and no `crl_stale` while no issuer is in use (an
+  open `R20-crl` is resolved, `crl_fresh`), and an issuer in use without a list is stale as
+  before. Tests:
   `test_no_url_known_writes_an_empty_index`, `test_no_url_known_keeps_the_stored_lists` and
   `test_cli_no_url_known_exits_2` (`core/tests/test_crl.py`),
-  `test_crlfetch_without_a_list_address_shows_the_run` (`api/tests/test_system_health.py`),
-  `test_stamp_crl_after_a_fetch_without_a_list_address` and
+  `test_crlfetch_without_a_list_address_shows_the_run` and
+  `test_crlfetch_after_the_list_addresses_are_gone_shows_the_run`
+  (`api/tests/test_system_health.py`), `test_stamp_crl_after_a_fetch_without_a_list_address` and
   `test_stamp_crl_raised_after_a_fetch_without_a_list_address_while_in_use`
   (`worker/tests/test_alerts_legal.py`).
 - **W5-E-7: the title of an `R20-renewal` raised by the failures alone (#151; item 4).** W5-E-3
