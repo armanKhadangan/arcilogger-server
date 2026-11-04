@@ -1507,8 +1507,9 @@ All Wave 5 questions are answered (2026-11-02).
   does not verify, it was revoked) is still renewable.
 - **W5-A-8: `VERIFIER_VERSION` is "6", not §2.1.4's "5".** Addendum H4: W5-H (#130) merged into
   `wave-5` first (84e71e1) and set "5", so W5-A, merging second, sets "6" (manager on #132,
-  2026-11-03 20:51). `test_renewal_standalone.py::test_verifier_version_is_6` pins it. If #136
-  (`xz-unsupported`) merges after W5-A, it takes "7" and updates that test.
+  2026-11-03 20:51). Superseded by W5-A-17: #136 takes "8" (answer to Q8, #156 item 7). W5-A-17
+  set "7", which `test_renewal_standalone.py::test_verifier_version_is_7` pins; #136
+  (`xz-unsupported`) updates that test when it merges.
 - **W5-A-9: exit codes beyond §2.1.3's wording.** `renew` catches its own errors (`main` maps
   every `TsaError` to 1). Exit 3 also covers a new stamp that does not verify or is revoked
   (`renewal_stamp_invalid`), another run holding `state/renewal.lock` (`renewal_busy`), a lock
