@@ -1385,7 +1385,11 @@ def renew_held(
     now: datetime | None = None,
 ) -> RenewalRun:
     """:func:`renew` for a caller that already holds :func:`one_run` (the ``renew`` command,
-    which writes ``state/renewal.json`` under the same lock)."""
+    which writes ``state/renewal.json`` under the same lock).
+
+    Once the record is written the run is a renewal: when the status after it cannot be read
+    (an :class:`OSError`), ``report_after`` is the status before the run, with a warning in the
+    log."""
     moment = require_aware(now or utc_now())
     eku = config.tsa.require_critical_eku
     discarded = recover(layout, roots, require_critical_eku=eku, now=moment)
@@ -1426,13 +1430,23 @@ def renew_held(
         reason,
         len(entries),
     )
+    try:
+        after = renewal_status(layout, config, roots, moment)
+    except OSError as exc:  # the record is written: the run stays a renewal
+        log.warning(
+            "renewal: the status after %s cannot be read (%s); the status before the run is "
+            "reported, the next run reads it again",
+            record_path,
+            exc,
+        )
+        after = before
     return RenewalRun(
         record_path=record_path,
         token_path=f"{record_path}.zd",
         reason=reason,
         renewed=tuple(entry["path"] for entry in record["tokens"]),
         report_before=before,
-        report_after=renewal_status(layout, config, roots, moment),
+        report_after=after,
         discarded=tuple(discarded),
     )
 

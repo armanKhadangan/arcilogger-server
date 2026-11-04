@@ -600,6 +600,33 @@ def test_any_failure_of_the_provider_leaves_no_part(
     assert _renewal_files(rw) == []
 
 
+def test_a_status_after_the_run_that_cannot_be_read_keeps_the_renewal(
+    rw: RenewalWorld, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """W5-A-15: once the record is written, a file error while reading the status after the
+    run does not undo the run: ``report_after`` is the status before it, with a warning."""
+    rw.set_now(CNA - timedelta(days=100))
+
+    def unreadable(*args: Any, **kwargs: Any) -> Any:
+        raise OSError(errno.EIO, "Input/output error")
+
+    monkeypatch.setattr(renewal_module, "renewal_status", unreadable)
+    run = _renew(rw, rw.legal_provider(FAR))
+    assert (run.record_path, run.reason, run.renewed) == (
+        "renewals/2031-06-23-1.json",
+        "due",
+        (DAY_TOKEN,),
+    )
+    assert run.report_after == run.report_before
+    assert rw.of(run.report_after, DAY_TOKEN).status == "due"
+    assert "the status after renewals/2031-06-23-1.json cannot be read" in caplog.text
+    assert "Input/output error" in caplog.text
+    assert _renewal_files(rw) == ["2031-06-23-1.json", "2031-06-23-1.json.zd"]
+    assert all(is_locked(rw.layout.vault / path) for path in (run.record_path, run.token_path))
+    monkeypatch.undo()
+    assert rw.of(rw.status(), DAY_TOKEN).covered_by == run.record_path
+
+
 def test_a_lock_that_cannot_be_taken_is_not_called_busy(
     rw: RenewalWorld, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -526,6 +526,35 @@ def test_a_state_file_that_cannot_be_written_alone_exits_3(
     assert cli.renewal_files() == ["2031-06-23-1.json", "2031-06-23-1.json.zd"]
 
 
+def test_a_status_after_the_run_that_cannot_be_read_still_renews(
+    cli: Cli, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """W5-A-15: the record is written, only the status after the run cannot be read: the run
+    is still ``renewed`` with its record, judged and reported from the status before it."""
+
+    def unreadable(*args: Any, **kwargs: Any) -> Any:
+        raise OSError(5, "Input/output error")
+
+    monkeypatch.setattr("arcilogger_core.renewal.renewal_status", unreadable)
+    now = CNA - timedelta(days=100)
+    cli.rw.set_now(now)
+    assert cli.run("--json", now=now, provider=cli.rw.legal_provider(FAR)) == 0
+    data = _json(capsys)
+    assert (data["outcome"], data["exit_code"], data["record"]) == ("renewed", 0, RECORD)
+    assert (data["error"], data["renewed"], data["state_written"]) == (None, [DAY_TOKEN], True)
+    assert cli.renewal_files() == ["2031-06-23-1.json", "2031-06-23-1.json.zd"]
+    state = cli.state()
+    assert state["last_run"] == {
+        "at": "2031-06-23T00:00:00Z",
+        "outcome": "renewed",
+        "exit_code": 0,
+        "record": RECORD,
+        "error": None,
+    }
+    assert state["failures_in_a_row"] == 0
+    assert _statuses(state) == {DAY_TOKEN: "due"}  # the next run reads the status again
+
+
 @pytest.mark.parametrize(
     ("error", "cause"),
     [

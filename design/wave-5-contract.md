@@ -1509,3 +1509,14 @@ All Wave 5 questions are answered (2026-11-02).
   locked file is still never removed. `test_a_revoked_stamp_of_an_interrupted_run_is_removed`
   covers both places the token can be (`.part.zd`, and the final `.zd` after the first rename),
   through `recover` and through the next run.
+- **W5-A-15: a status after the run that cannot be read keeps the renewal (#137 item 3).** Once
+  the record and its token are renamed and locked, the run has renewed. `renew_held` used to read
+  the status after the run (`report_after`) unguarded, so an `OSError` there made the command
+  exit 3 as `failed` with `last_run.record` null while the record was in the vault. Now that
+  error is logged as a warning and `report_after` is the status before the run: the command
+  reports `renewed` with its record path and writes it to `last_run`, and the exit code and the
+  statuses in `state/renewal.json` come from that before-status (a token that was `uncovered`
+  before the run still gives exit 1, and a renewed token still shows `due`) until the next run
+  reads the status again. Only `OSError` is caught; errors before the record is written are
+  unchanged. `test_a_status_after_the_run_that_cannot_be_read_keeps_the_renewal` (core) and
+  `test_a_status_after_the_run_that_cannot_be_read_still_renews` (command) cover it.
