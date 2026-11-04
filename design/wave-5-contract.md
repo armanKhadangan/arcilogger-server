@@ -1824,16 +1824,16 @@ issue fixed is kept (command, flags, exit codes 0/1/2, JSON fields); what differ
   first day.** W5-G-17 (b) cut the missed-move check (round 7, D33) to the lookup's days. The
   lease job now stores, with each DHCP lease, the moves the build saw and did not apply, and the
   check reads them where the rows are gone.
-  - **Definition (at write time; `correlation/leases.py:579-741`, `_Recorded`):** a kept
+  - **Definition (at write time; `correlation/leases.py:579-745`, `_Recorded`):** a kept
     FortiGate ACK (logid mapped to `assigned`) of the lease's MAC for another address, strictly
     inside the lease (`start < t < end`, or the run's end while it is open); for an `fg_dhcp`
     lease on its own interface; not in another configured network than the lease's (the
     networks of the run). The build applies every other ACK of the MAC: it ends the lease at
     that time, which the strict bounds leave out. Every mode (live incremental, range rebuild,
-    single days in any order) computes the same value from the same rows: the run's range
-    `[lo, hi)`, the look-ahead's rows of each followed MAC, and the stored moves outside the
-    range, all cut to the lease (a lease that late evidence ends earlier loses the moves after
-    its new end), then bounded (below).
+    single days in any order) computes the same value from the same rows (except the bound's
+    case below): the run's range `[lo, hi)`, the look-ahead's rows of each followed MAC, and
+    the stored moves outside the range, all cut to the lease (a lease that late evidence ends
+    earlier loses the moves after its new end), then bounded (below).
   - **Format (`leases.moves`, JSONB, nullable, no default, no index; revision
     `0022_lease_moves`, `models.py:931-945`):** `{"truncated": bool, "groups": [...]}`, a group
     `{"ip", "interface", "vd", "source", "logid", "dhcp_msg", "times"}`, one per those six
@@ -1869,7 +1869,7 @@ issue fixed is kept (command, flags, exit codes 0/1/2, JSON fields); what differ
     - **`truncated`** becomes `true` when the bound drops a time, and stays `true` while a
       run takes part of the lease from the stored value (a dropped time cannot come back from
       it); a run that recomputes the whole lease from rows (a closed lease inside its range
-      `[lo, hi)`) sets it from what it drops itself (`leases.py:694-700`). It records that
+      `[lo, hi)`) sets it from what it drops itself (`leases.py:699-705`). It records that
       the list may lack older moves; nothing is ever added that was not seen.
     - **How the check reads a truncated value:** as any other (`attribution.py:1353-1374`,
       `_recorded_moves`; `_recorded_move`, `_bears` and `_move_counts` are unchanged). The
@@ -1915,9 +1915,9 @@ issue fixed is kept (command, flags, exit codes 0/1/2, JSON fields); what differ
   - **One-off write on the first incremental run after the upgrade:** every open DHCP lease of
     the older program (moves NULL) is followed by the run and written once with its moves
     (`{"truncated": false, "groups": []}` for most), with a new `updated_at`
-    (`leases.py:658-701`). Nothing reads NULL and "none recorded" differently in a lookup;
+    (`leases.py:663-706`). Nothing reads NULL and "none recorded" differently in a lookup;
     later runs read an open lease's moves only when they change (`run_incremental` tests them
-    for NULL only, `leases.py:1377`). A lease that ended before a run's range stays NULL.
+    for NULL only, `leases.py:1382`). A lease that ended before a run's range stays NULL.
   - **Performance:** the new guard `test_the_recorded_moves_of_a_hundred_chains_are_fast` (100
     `mt_dhcp` chains, each lease at the cap: `RECORDED_TIMES = MOVE_TIMES_CAP`, 1,000 recorded
     times, marked truncated, decoded and tested in memory) stays under the 0.2 s of 3.8
@@ -1927,7 +1927,7 @@ issue fixed is kept (command, flags, exit codes 0/1/2, JSON fields); what differ
     already in the job's form, `refs.py:422-428`); the existing
     `test_the_converted_row_query_of_a_hundred_chains_is_fast` is unchanged (0.067 s). With
     the bound no lease decodes more than the guard's. `_seed_candidates` reads the moves of every
-    seed on every rebuild (`leases.py:864`), so each same-day rebuild of the service
+    seed on every rebuild (`leases.py:869`), so each same-day rebuild of the service
     (`worker/service.py:246`) reads all open leases' moves (at most 1,000 times each): their
     part outside `[lo, hi)` must be recomputed, so the incremental job's shortcut does not
     apply.
@@ -1972,7 +1972,7 @@ issue fixed is kept (command, flags, exit codes 0/1/2, JSON fields); what differ
   (`to_dict` is unchanged). A lease's newest record read from its stored ref (W5-G-17 (b)) now
   has its VDOM, so D33's VDOM rule applies to it as to the row:
   `test_a_newest_record_before_the_days_is_the_stored_one[ref-with-vdom]` goes from `low` to
-  `high` (an ACK of the MAC in another VDOM is skipped). `_annotated` (`leases.py:883`) takes a
+  `high` (an ACK of the MAC in another VDOM is skipped). `_annotated` (`leases.py:888`) takes a
   seed's VDOM from its stored ref first, so D33 still closes it once the row of its newest ACK is
   gone. A ref written before the upgrade has no `"vd"` and keeps today's rule (any VDOM counts);
   it gains the key when a rebuild reads its row again, so an answer for an old moment can change

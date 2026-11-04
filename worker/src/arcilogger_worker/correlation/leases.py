@@ -592,8 +592,9 @@ class _Recorded:
     follows, so every mode sees the same ones. A stored row keeps its moves outside that range;
     everything is cut to the interval, so a lease that late evidence ends earlier loses the
     moves after its new end. A single-day rebuild, a range and the live job store the same
-    value. A stored NULL (written before revision ``0022_lease_moves``) stays NULL for a lease
-    that ended before the range; one the run follows is recorded from then on.
+    value (but see the bound below). A stored NULL (written before revision
+    ``0022_lease_moves``) stays NULL for a lease that ended before the range; one the run
+    follows is recorded from then on.
 
     The value is bounded (lease rows are never dropped; a MAC can move for months): only the
     times within the check's look-back (:data:`_MOVES_KEPT_US`) before the lease's newest moment,
