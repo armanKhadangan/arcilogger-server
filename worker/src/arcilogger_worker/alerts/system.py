@@ -81,19 +81,20 @@ Key                              Problem (setting)
                                  Durumu) — high; resolved once a record arrives or the window is
                                  no longer expected
 ``R20-renewal:none``             ``state/renewal.json`` has a token due for re-stamping or one
-                                 whose certificate expired without it — high; resolved by a
-                                 readable report without such a token (Wave 5 contract 2.3.1;
-                                 prepared, :data:`LEGAL_CHECKS`)
+                                 whose certificate expired without it, or says the ``Renew``
+                                 task failed twice in a row (``failures_in_a_row``, A4) — high;
+                                 resolved by a readable report without such a token and without
+                                 those failures (Wave 5 contract 2.3.1, :data:`LEGAL_CHECKS`)
 ``R20-cert:none``                a time-stamp certificate on a revocation list at or before a
                                  stamp — critical; a token due for re-stamping whose certificate
                                  expires within 30 days (:data:`CERT_EXPIRY_WARNING`), or one
-                                 whose certificate expired uncovered — high (prepared,
-                                 :data:`LEGAL_CHECKS`)
+                                 whose certificate expired uncovered — high
+                                 (:data:`LEGAL_CHECKS`)
 ``R20-crl:none``                 no stored revocation list fetched in the last
                                  ``tsa.crl_max_age_days`` (7) days and not past its own
                                  ``nextUpdate`` (C22) for an issuer of the newest sealed day's
-                                 chain, judged from ``state/crl`` only — medium (prepared,
-                                 :data:`LEGAL_CHECKS`)
+                                 chain, judged from ``state/crl`` only — medium
+                                 (:data:`LEGAL_CHECKS`)
 ===============================  ==============================================================
 
 A check that fails (an unreadable folder, a database error) is reported in the job's details and
@@ -1994,6 +1995,53 @@ def _stamp_renewal(entry: Any) -> StampRenewal | None:
 
 
 @dataclass(frozen=True)
+class RenewRuns:
+    """The runs of the ``Renew`` task as ``state/renewal.json`` keeps them (``last_run``,
+    ``failures_in_a_row``; W5-A's A4). A dry run changes neither."""
+
+    #: When the last run started (None: no run yet, or a time this reader leaves out).
+    last_run_at: datetime | None = None
+    #: How it ended: ``renewed``, ``not_needed``, ``failed`` or ``refused`` (None: no run yet,
+    #: or not a text).
+    outcome: str | None = None
+    #: Failed and refused runs in a row (None: unknown).
+    failures_in_a_row: int | None = 0
+
+
+def read_renew_runs(layout: Layout) -> RenewRuns | None:
+    """The ``Renew`` task's runs from ``state/renewal.json``: no run and no failure when the task
+    has not written it yet, ``None`` (unknown) when it cannot be read. Judged from this file,
+    never from the task's exit code (C12). A file without ``failures_in_a_row`` records no
+    failure, as the writer reads it (``renewal.write_state``); one that is not a count is
+    unknown."""
+    path = stamp_renewal_path(layout)
+    try:
+        data = _read_json(path)
+    except (OSError, ValueError) as exc:
+        log.info("re-stamping runs %s unknown: %s", path, exc)
+        return None
+    if data is None:
+        return RenewRuns()
+    if not isinstance(data, dict):
+        log.info("re-stamping runs %s unknown: not an object", path)
+        return None
+    last_run = data.get("last_run")
+    last_run = last_run if isinstance(last_run, dict) else {}
+    outcome = last_run.get("outcome")
+    failures = data.get("failures_in_a_row", 0)
+    return RenewRuns(
+        last_run_at=_calendar_time(last_run.get("at")),
+        outcome=outcome if isinstance(outcome, str) else None,
+        # bool is an int to Python, not a count
+        failures_in_a_row=(
+            failures
+            if isinstance(failures, int) and not isinstance(failures, bool) and failures >= 0
+            else None
+        ),
+    )
+
+
+@dataclass(frozen=True)
 class CrlListEntry:
     """A stored revocation list as ``state/crl/index.json`` lists it."""
 
@@ -2315,17 +2363,22 @@ def crl_max_age_days(config: Config) -> int:
 
 # -- re-stamping, certificates and revocation lists (Wave 5 contract 2.3.1) ------------------------
 #
-# Prepared for the switch-on package (W5-E), which appends LEGAL_CHECKS to CHECKS together with
-# the alerts' catalogue texts and their rows in the first-steps guide. Until then each code is
-# written only as part of its dedup key, and the rule is taken from the key (D14). The findings
-# carry counts only: no certificate name, no person, no log line.
+# Switched on by W5-E (D14): the codes, their catalogue texts (alerts.texts) and their rows in the
+# first-steps guide came together, and LEGAL_CHECKS is part of CHECKS. The findings carry counts
+# only: no certificate name, no person, no log line.
 
-RENEWAL_KEY: Final = "R20-renewal:none"
-CERT_KEY: Final = "R20-cert:none"
-CRL_KEY: Final = "R20-crl:none"
+RENEWAL_RULE: Final = "R20-renewal"
+CERT_RULE: Final = "R20-cert"
+CRL_RULE: Final = "R20-crl"
+RENEWAL_KEY: Final = f"{RENEWAL_RULE}:none"
+CERT_KEY: Final = f"{CERT_RULE}:none"
+CRL_KEY: Final = f"{CRL_RULE}:none"
 #: A token due for re-stamping is ``high`` for R20-cert when its certificate expires this soon
 #: (at most 30 days left; an ``uncovered`` one always is). Manager answer on #117, W5-C-12.
 CERT_EXPIRY_WARNING: Final = timedelta(days=30)
+#: "The Renew task failed twice in a row" (contract 2.3.1): ``failures_in_a_row`` of
+#: ``state/renewal.json`` at least this (failed and refused runs, A4).
+RENEW_FAILURES_ALERT: Final = 2
 
 
 def _rule_of(key: str) -> str:
@@ -2343,35 +2396,54 @@ def _keep(alert: Alert) -> str | None:
 
 def check_stamp_renewal(ctx: CheckContext) -> Outcome:
     """``R20-renewal:none``: a token of the re-stamping report is ``due``, or its certificate
-    expired ``uncovered``. Resolved by a readable report without such a token; an unreadable one
-    decides nothing."""
+    expired ``uncovered``, or the ``Renew`` task failed twice in a row (``failures_in_a_row`` of
+    the same file, failed and refused runs; A4), judged from ``state/renewal.json``, never from
+    the task's exit code (C12). The failures raise it also while the token list is unknown (a
+    refused run without pinned roots writes none, W5-A-2). Resolved by a readable report without
+    such a token and without those failures; what cannot be read decides nothing."""
+    # Two reads of the same file: a run that replaces it in between can pair the previous
+    # tokens with the new count. Each half is true of one file the task wrote, and the next pass
+    # reads them alike.
     renewals = read_stamp_renewals(ctx.layout)
-    if renewals is None:
+    runs = read_renew_runs(ctx.layout)
+    failures = runs.failures_in_a_row if runs is not None else None
+    failing = failures is not None and failures >= RENEW_FAILURES_ALERT
+    if renewals is None and not failing:
         return Outcome([], _owned(RENEWAL_KEY), _keep)
-    counts = Counter(renewal.status for renewal in renewals)
+    counts = Counter(renewal.status for renewal in renewals or ())
     due, uncovered = counts["due"], counts["uncovered"]
-    findings = []
+    parts_tr, parts_en = [], []
     if due or uncovered:
+        parts_tr.append(
+            f"{due} damganın zamanı geldi, {uncovered} damga yeniden damgalanmadan sona erdi"
+        )
+        parts_en.append(f"{due} stamp(s) due, {uncovered} expired without re-stamping")
+    if failing:
+        parts_tr.append(f"Renew görevi art arda {failures} kez başarısız oldu")
+        parts_en.append(f"the Renew task failed {failures} times in a row")
+    findings = []
+    if parts_tr:
         findings.append(
             Finding(
                 key=RENEWAL_KEY,
-                rule=_rule_of(RENEWAL_KEY),
+                rule=RENEWAL_RULE,
                 severity="high",
-                title=(
-                    f"Yeniden damgalama gerekiyor: {due} damganın zamanı geldi, {uncovered} damga "
-                    "yeniden damgalanmadan sona erdi"
-                ),
+                title=f"Yeniden damgalama gerekiyor: {'; '.join(parts_tr)}",
                 details={
-                    "due": due,
-                    "uncovered": uncovered,
-                    "title_en": (
-                        f"Re-stamping needed: {due} stamp(s) due, {uncovered} expired without "
-                        "re-stamping"
-                    ),
+                    # unknown (None) while the report has no token list
+                    "due": due if renewals is not None else None,
+                    "uncovered": uncovered if renewals is not None else None,
+                    "failures_in_a_row": failures,
+                    "title_en": f"Re-stamping needed: {'; '.join(parts_en)}",
                 },
             )
         )
-    return Outcome(findings, _owned(RENEWAL_KEY), lambda alert: "renewal_ok")
+
+    def clear(alert: Alert) -> str | None:
+        # the token list known (the early return) and the failures known and too few
+        return "renewal_ok" if failures is not None else None
+
+    return Outcome(findings, _owned(RENEWAL_KEY), clear)
 
 
 def check_stamp_cert(ctx: CheckContext) -> Outcome:
@@ -2398,7 +2470,7 @@ def check_stamp_cert(ctx: CheckContext) -> Outcome:
         findings.append(
             Finding(
                 key=CERT_KEY,
-                rule=_rule_of(CERT_KEY),
+                rule=CERT_RULE,
                 severity="critical",
                 title=f"Zaman damgası sertifikası iptal listesinde: {len(revoked)} sertifika",
                 details={
@@ -2417,7 +2489,7 @@ def check_stamp_cert(ctx: CheckContext) -> Outcome:
         findings.append(
             Finding(
                 key=CERT_KEY,
-                rule=_rule_of(CERT_KEY),
+                rule=CERT_RULE,
                 severity="high",
                 title=(
                     f"Zaman damgası sertifikası: {expiring} damganın sertifikası {days} gün "
@@ -2477,7 +2549,7 @@ def check_stamp_crl(ctx: CheckContext) -> Outcome:
         findings.append(
             Finding(
                 key=CRL_KEY,
-                rule=_rule_of(CRL_KEY),
+                rule=CRL_RULE,
                 severity="medium",
                 title=f"{max_age} günden yeni doğrulanmış bir iptal listesi (SİL) yok",
                 details={
@@ -2498,7 +2570,7 @@ def check_stamp_crl(ctx: CheckContext) -> Outcome:
     return Outcome(findings, _owned(CRL_KEY), clear)
 
 
-#: The checks of Wave 5 contract 2.3.1, for W5-E to append to :data:`CHECKS`.
+#: The checks of Wave 5 contract 2.3.1, the last ones of :data:`CHECKS`.
 LEGAL_CHECKS: Final[tuple[tuple[str, Callable[[CheckContext], Outcome]], ...]] = (
     ("stamp_renewal", check_stamp_renewal),
     ("stamp_cert", check_stamp_cert),
@@ -2522,6 +2594,8 @@ CHECKS: Final[tuple[tuple[str, Callable[[CheckContext], Outcome]], ...]] = (
     ("lease_evidence", check_lease_evidence),
     ("nat_exits", check_nat_exits),
     ("filter", check_filter),
+    # Wave 5 contract 2.3.1 (D14): re-stamping, the time-stamp certificate, revocation lists.
+    *LEGAL_CHECKS,
 )
 
 
