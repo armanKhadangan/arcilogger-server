@@ -1752,6 +1752,10 @@ def _db_window(d: Mapping[str, Any]) -> Facts | None:
     )
 
 
+#: alerts.system.RENEW_FAILURES_ALERT (that module imports this one).
+_RENEW_FAILURES_ALERT: Final = 2
+
+
 def _renewal(d: Mapping[str, Any]) -> Facts | None:
     """``R20-renewal``: the stamps due and expired without re-stamping, and the Renew task's
     failed runs in a row (counts only)."""
@@ -1763,7 +1767,7 @@ def _renewal(d: Mapping[str, Any]) -> Facts | None:
             "yeniden damgalanmadan sona erdi."
         )
         parts_en.append(f"{due} stamp(s) due for re-stamping, {uncovered} expired without it.")
-    if failures is not None and failures >= 2:
+    if failures is not None and failures >= _RENEW_FAILURES_ALERT:
         parts_tr.append(f"Renew görevi art arda {failures} kez başarısız oldu.")
         parts_en.append(f"The Renew task failed {failures} times in a row.")
     return (" ".join(parts_tr), " ".join(parts_en)) if parts_tr else None

@@ -792,6 +792,10 @@ def test_the_wave5_alert_codes_are_switched_on() -> None:
     expiring = describe(CERT_RULE, {"revoked": 0, "expiring": 1, "uncovered": 0})
     assert all(f"{CERT_EXPIRY_WARNING.days} " in sentence for sentence in expiring)
     assert f"{CERT_EXPIRY_WARNING.days} gün" in runbook(CERT_RULE)[0]
+    # So is the number of failed Renew runs that raises R20-renewal.
+    for failures, told in ((RENEW_FAILURES_ALERT, True), (RENEW_FAILURES_ALERT - 1, False)):
+        facts = describe(RENEWAL_RULE, {"due": 0, "uncovered": 0, "failures_in_a_row": failures})
+        assert ("Renew" in facts[0] and "Renew" in facts[1]) is told, failures
 
 
 def test_registered_checks_raise_and_clear_the_legal_alerts(
