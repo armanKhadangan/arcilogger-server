@@ -1882,12 +1882,15 @@ All Wave 5 questions are answered (2026-11-02).
   later. The step then stops at that folder, before `state\renewal` and the entries after it;
   the error for a hard link says to delete only the `.<random>.tmp` name in the same folder,
   never a `.crl` file, which is evidence. That `crl fetch` should remove its own leftover
-  temporary names is for the owner of `core/src/arcilogger_core/crl.py` (not changed here). The
-  step enables no privilege: an item whose entries give Administrators no right to read or take
-  it over (its owner took them away) stops it with an error naming the item and the remedy
-  (every read and write of an item, the link check, the listing and its entries, is wrapped
-  alike; a link's own error stays as it is), and `takeown /A /R /F <folder>` in an elevated
-  PowerShell takes it over by hand before the step is run again. Tests:
+  temporary names is for the owner of `core/src/arcilogger_core/crl.py` (not changed here). An
+  item whose entries give Administrators no right to read or take it over (its owner took them
+  away) is taken over all the same by the elevated step: the Windows CI runner shows it for a
+  `renewal.lock` that a service left with its own entry only, which is the case Q4 on #158
+  names. The step itself enables no privilege; where the take-over still fails (a policy that
+  took the take-ownership privilege away), it stops with an error naming the item and the
+  remedy (every read and write of an item, the link check, the listing and its entries, is
+  wrapped alike; a link's own error stays as it is), and `takeown /A /R /F <folder>` in an
+  elevated PowerShell takes it over by hand before the step is run again. Tests:
   `test_acl_plan_least_privilege`, `test_acl_plan_gives_the_renew_and_crlfetch_tasks_their_rights`,
   `test_acl_plan_resets_the_owner_of_the_two_protected_state_folders_only` (exactly the two
   entries carry `ResetOwner`), `test_only_the_acl_script_passes_reset_owner`, and on Windows
@@ -1896,14 +1899,17 @@ All Wave 5 questions are answered (2026-11-02).
   `state\crl` and `state\renewal`), `test_acl_applied_takes_over_the_protected_state_folders`
   (both folders, `renewal.lock`, `index.json` and a folder below `state\crl` with a file in it,
   each owned by the collector or ingest with a Modify entry of its own, set with `icacls
-  /setowner`, which uses the administrator's restore privilege: afterwards Administrators own
+  /setowner`, which uses the administrator's restore privilege; NETWORK SERVICE and Guests stand
+  in for the two services, whose own SIDs exist only where they are installed: afterwards
+  Administrators own
   them, the items below have inherited entries only, the collector and ingest have nothing,
   LOCAL SERVICE keeps its inherited Modify on the lock, and `logs` keeps the collector as its
   owner), `test_acl_step_stops_at_a_link_in_a_protected_state_folder` (a junction and a hard
   link in `state\renewal`, protected beforehand so that `state`'s entry does not reach them: the
   file they point to keeps its owner and every entry, the inherited ones too) and
-  `test_acl_step_names_an_item_it_cannot_take_over` (a `renewal.lock` with inheritance off and
-  the collector's entry only: the step fails naming it and `takeown`).
+  `test_acl_step_takes_over_a_lock_that_leaves_administrators_out` (a `renewal.lock` with
+  inheritance off and a stand-in service's entry and ownership only: afterwards Administrators
+  own it, it has inherited entries only, and LOCAL SERVICE keeps its inherited Modify).
 
 ## Deviations — #119 (2026-11-04)
 

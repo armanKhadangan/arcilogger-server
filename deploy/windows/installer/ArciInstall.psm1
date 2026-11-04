@@ -2259,9 +2259,10 @@ function Set-ArciAclEntry {
         hard-linked ".<random>.tmp" is a temporary name a CrlFetch run left behind (it links the
         new list to its final name, then removes the temporary one): delete only that .tmp
         name, never a .crl file, which is evidence. An item whose entries give Administrators no
-        right to read or take it over stops the step too, with an error naming it, since no
-        privilege is enabled; "takeown /A /R /F <folder>" in an elevated PowerShell takes it over
-        by hand.
+        right to read or take it over is taken over all the same by the elevated step (the
+        Windows CI runner shows it); where that fails (a policy that took the take-ownership
+        privilege away), the step stops with an error naming the item, and "takeown /A /R /F
+        <folder>" in an elevated PowerShell takes it over by hand.
     #>
     [CmdletBinding()]
     param([Parameter(Mandatory = $true)]$Entry, [switch]$ResetOwner)
