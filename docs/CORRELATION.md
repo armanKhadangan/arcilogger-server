@@ -88,7 +88,11 @@
   MikroTik kirası, istemcisini başka bir adrese taşıyan çevrilmemiş bir satırdan 7 günden fazla
   sonra o istemciyi uyarısız gösterebilir. Bir 5651 sorgusu kendi günlerinin dışında log satırı
   okumaz: ilk günden daha geriye bakan bir denetim o günden okur ve yanıt bunu söyler
-  (`lookback_clamped_to_window`); iki DHCP kaynağı denetimi (D27) **sorgunun son gününün sonuna
+  (`lookback_clamped_to_window`); çevrilmiş kayıtlarla denetim ilk günden önceki kısım için kira
+  işinin kirayla birlikte kaydettiği taşınmaları okur (`leases.moves`: kiranın bitişinden, açık
+  kirada en yeni taşınmasından önceki 100 günün en çok 1.000 zamanı, en yenileri; iş bir zamanı
+  attığında `truncated` olarak işaretlenir), bunlar yalnızca güveni düşürebilir ve not yine
+  verilir; iki DHCP kaynağı denetimi (D27) **sorgunun son gününün sonuna
   kadar okur**, bu bir yöntem kuralıdır ve yanıtta açıklama olarak yer almaz (bölüm 3).
 - Ölçüm: günde 3.000.000 trafik satırında (iki ardışık gün) ±60 sn aday araması **1,2–1,3 sn**,
   alan adıyla **1,1–1,5 sn**, hedef IP + port ile **0,04 sn** (hedef < 5 sn). Bu, sıkıştırılmamış
@@ -944,9 +948,13 @@ WHERE duration >= 300` and split the scan into "logged within 5 minutes of the w
     `lookback_clamped_to_window`, and D27's read past the moment ends with the last day without
     it (D27 reads up to the end of the lookup's last day, a method rule; section 3), so the
     answer is the same before the database window drops those days and after their reload
-    (Wave 5 contract G7, W5-G-17). With the defaults the converted-row check reads about 12 days
-    back, not 100, and the post-lease check of a FortiGate lease starts no earlier than the
-    first day.
+    (Wave 5 contract G7, W5-G-17). With the defaults the converted-row check reads rows about
+    12 days back, not 100; before the first day it reads the moves the lease job recorded with
+    the lease (`leases.moves`, issue #127: at most 1,000 times in the 100 days before the
+    lease's end, or its newest move while it is open, the newest kept and the value marked
+    `truncated` once the job dropped one), which can only lower a chain, and the cut look-back
+    is still noted. The post-lease check of a FortiGate lease starts no earlier than the first
+    day.
 - **Rows loaded before the upgrade.** FortiGate DHCP lines loaded before the upgrade are not
   converted (D8; the lookup names them, sections 2 and 3), and for each client no chain is built
   until its first Ack under the new version, up to half its lease (3.5 days with the FortiOS

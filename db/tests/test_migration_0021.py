@@ -155,7 +155,7 @@ def test_the_window_setting_is_converted(
     }
     expected = (change, ":migration") if converted[0] != value else None
     assert _setting(empty_engine, CHANGE_KEY) == expected
-    result = upgrade(empty_engine)
+    result = upgrade(empty_engine, revision=REVISION)
     assert _setting(empty_engine, "db.retention_days") == converted
     assert _setting(empty_engine, "db.reload_keep_days") == (7, ":seed")
     assert _setting(empty_engine, CHANGE_KEY) == expected  # the seed leaves it to the job
@@ -171,7 +171,7 @@ def test_the_window_setting_is_converted(
 
 
 def test_a_new_database_gets_both_keys_and_the_table(empty_engine: Engine) -> None:
-    assert upgrade(empty_engine).after == (REVISION,)
+    assert upgrade(empty_engine, revision=REVISION).after == (REVISION,)
     assert _setting(empty_engine, "db.retention_days") == (30, ":seed")
     assert _setting(empty_engine, "db.reload_keep_days") == (7, ":seed")
     inspector = inspect(empty_engine)
@@ -318,7 +318,9 @@ def test_the_empty_months_ahead_are_dropped_and_daily_partitions_follow(
         assert [add_months(before, n) for n in (-2, -1, 0)] == months[:3], table
         assert all(month <= after for month in months if month != future), table
         assert (future in months) is (table == "mt_dhcp"), table
-    assert upgrade(empty_engine).after == (REVISION,)  # seed and the window's partitions
+    assert upgrade(empty_engine, revision=REVISION).after == (
+        REVISION,
+    )  # seed and the window's partitions
     for _ in range(5):
         with empty_engine.begin() as connection:
             if ensure_partitions(connection).remaining == 0:
@@ -376,7 +378,7 @@ def test_down_merges_the_daily_partitions_into_monthly_ones(empty_engine: Engine
     local month with daily partitions, the rows (and the default partition's rows of that
     month) in it — the rows of the UTC day a month ends in split between the two months —, the
     indexes of the parent on it; up again."""
-    assert upgrade(empty_engine, timescale="off").after == (REVISION,)
+    assert upgrade(empty_engine, revision=REVISION, timescale="off").after == (REVISION,)
     # The first run's days (today - 8 … today + 7) and the next month's 1st, not the whole
     # window (test_the_downgrade_merges_in_steps_that_fit_the_default_lock_table): fewer steps.
     following = add_months(month_of(site_day(utc_now())), 1)
@@ -420,7 +422,9 @@ def test_down_merges_the_daily_partitions_into_monthly_ones(empty_engine: Engine
     assert _setting(empty_engine, "db.retention_days") == (400, ":seed")
     assert _setting(empty_engine, "db.reload_keep_days") is None
     assert _setting(empty_engine, DROPPED_KEY) is None
-    assert upgrade(empty_engine, timescale="off").after == (REVISION,)  # and up again
+    assert upgrade(empty_engine, revision=REVISION, timescale="off").after == (
+        REVISION,
+    )  # and up again
     assert _setting(empty_engine, "db.retention_days") == (30, ":seed")
     assert len(_where(empty_engine, "mt_dhcp")) == 5
 
@@ -435,7 +439,7 @@ def test_down_merges_the_change_over_into_monthly_ones(empty_engine: Engine) -> 
         command.upgrade(alembic_config(connection, timescale="off"), BEFORE)
         ensure_partitions(connection, today=site_day(utc_now()), months_back=1)
     _migrate(empty_engine, REVISION)
-    assert upgrade(empty_engine, timescale="off").after == (REVISION,)
+    assert upgrade(empty_engine, revision=REVISION, timescale="off").after == (REVISION,)
     current = month_of(site_day(utc_now()))  # a site midnight on a 1st may pass in between
     following, after_that = add_months(current, 1), add_months(current, 2)
     # Only the daily partitions the rows need: the change-over slice, a day of the next month,
@@ -495,14 +499,16 @@ def test_down_merges_the_change_over_into_monthly_ones(empty_engine: Engine) -> 
     assert bounds[after_that] == month_bounds(after_that)
     assert _where(empty_engine, "mt_dhcp") == list(rows.values())
     assert times == list(rows)
-    assert upgrade(empty_engine, timescale="off").after == (REVISION,)  # and up again
+    assert upgrade(empty_engine, revision=REVISION, timescale="off").after == (
+        REVISION,
+    )  # and up again
     assert _where(empty_engine, "mt_dhcp") == list(rows.values())
 
 
 def _full_window(engine: Engine) -> None:
     """The window's daily partitions, the days ahead and a week before the window (days the
     window job keeps while they are not sealed): 46 UTC days and more."""
-    assert upgrade(engine, timescale="off").after == (REVISION,)
+    assert upgrade(engine, revision=REVISION, timescale="off").after == (REVISION,)
     for _ in range(10):
         with engine.begin() as connection:
             if ensure_partitions(connection).remaining == 0:
@@ -559,7 +565,7 @@ def test_an_interrupted_downgrade_goes_on_where_it_stopped(empty_engine: Engine)
     dropped that month's daily partitions) leaves the tables before it and ``mt_dhcp``'s first
     month merged, the rest as they were, every row once, the version, the table and the settings
     at ``0021_db_window``; a second run goes on from there to the end."""
-    assert upgrade(empty_engine, timescale="off").after == (REVISION,)
+    assert upgrade(empty_engine, revision=REVISION, timescale="off").after == (REVISION,)
     following = add_months(month_of(site_day(utc_now())), 1)
     with empty_engine.begin() as connection:  # a UTC day across a month's end in every table
         ensure_days(connection, following, following)
@@ -640,7 +646,9 @@ def test_an_interrupted_downgrade_goes_on_where_it_stopped(empty_engine: Engine)
     assert TABLE not in inspect(empty_engine).get_table_names()
     assert _setting(empty_engine, "db.retention_days") == (400, ":seed")
     assert _setting(empty_engine, "db.reload_keep_days") is None
-    assert upgrade(empty_engine, timescale="off").after == (REVISION,)  # and up again
+    assert upgrade(empty_engine, revision=REVISION, timescale="off").after == (
+        REVISION,
+    )  # and up again
     assert _rows(empty_engine) == rows
 
 
@@ -649,7 +657,7 @@ def test_the_rest_of_the_downgrade_goes_with_alembics_version(empty_engine: Engi
     the transaction in which alembic moves its version: a downgrade interrupted at that move
     has every month merged (committed step by step) and the rest as ``0021_db_window`` has it,
     so the next run finds nothing to merge and ends at the previous version."""
-    assert upgrade(empty_engine, timescale="off").after == (REVISION,)
+    assert upgrade(empty_engine, revision=REVISION, timescale="off").after == (REVISION,)
     months = _months(empty_engine, "mt_dhcp")
 
     def interrupt(conn: Any, cursor: Any, statement: str, *_args: Any) -> None:
@@ -684,7 +692,7 @@ def test_a_daily_partition_made_between_two_steps_stops_the_version(empty_engine
     between two of them (a service still running) is found under the partitions' advisory lock
     before alembic's version moves, and the downgrade refuses (TR/EN), the version and the rest
     at ``0021_db_window``; the next run merges it too."""
-    assert upgrade(empty_engine, timescale="off").after == (REVISION,)
+    assert upgrade(empty_engine, revision=REVISION, timescale="off").after == (REVISION,)
     first = sorted(TIME_SERIES_TABLES)[0]  # its steps are done before mt_dhcp's
     later = add_months(_daily(empty_engine, first)[-1], 3) + timedelta(days=9)
     stray = day_partition_name(first, later)
@@ -732,7 +740,7 @@ def test_a_daily_partition_made_in_a_planned_month_stops_its_step(empty_engine: 
     the step finds it under its locks and refuses with the same TR/EN text before it changes
     anything, the steps before it merged, the version at ``0021_db_window``; the next run merges
     it, with its row."""
-    assert upgrade(empty_engine, timescale="off").after == (REVISION,)
+    assert upgrade(empty_engine, revision=REVISION, timescale="off").after == (REVISION,)
     first = sorted(TIME_SERIES_TABLES)[0]  # its steps are done before mt_dhcp's
     later = _daily(empty_engine, "mt_dhcp")[-1] + timedelta(days=1)
     with empty_engine.connect() as connection:
@@ -801,4 +809,4 @@ def test_up_and_down_on_timescaledb(empty_engine: Engine) -> None:
     assert TABLE not in inspect(empty_engine).get_table_names()
     assert _setting(empty_engine, "db.retention_days") == (400, ":seed")
     assert _setting(empty_engine, CHANGE_KEY) is None
-    assert upgrade(empty_engine).after == (REVISION,)
+    assert upgrade(empty_engine, revision=REVISION).after == (REVISION,)

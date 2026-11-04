@@ -1524,7 +1524,7 @@ anlatılır). Her satırın sonucunu ve
 denetimin tarihini yazın. Denetimleri **her FortiOS yükseltmesinden sonra** yineleyin (kayıt
 alanları sürümler arasında değişebilir) ve yeni sonucu tarihiyle ekleyin; eskisini silmeyin.
 Bir sonuç beklenenden farklıysa [DEVICE-SETUP.md](DEVICE-SETUP.md) bölüm 2.4'teki dallara göre
-ayarı düzeltin. FortiGate DHCP kullanılmıyorsa V1–V6, V14 ve V17 satırlarına "kullanılmıyor"
+ayarı düzeltin. FortiGate DHCP kullanılmıyorsa V1–V6, V14, V17 ve V18 satırlarına "kullanılmıyor"
 yazın.
 
 | # | Doğrulanacak | Nasıl | Yazılacak sonuç | Sonuç | Tarih |
@@ -1541,6 +1541,7 @@ yazın.
 | V15 | Her hattın genel IP adresi sabit mi | DEVICE-SETUP.md bölüm 2.6: servis sağlayıcıya sorulur; değişebilecek adresli hat `public_dynamic` olarak işaretlenir (servis sağlayıcı NAT'ı çıkışında; değişen adresli doğrudan hattı ARCILOGGER kayıtlardan bulur, DEVICE-SETUP.md bölüm 2.6) | hat başına sabit / değişebilir; servis sağlayıcının yanıtı | | |
 | V16 | FortiGate DHCP kayıtları kullanılabilir bir cihaz zamanı taşıyor ve FortiGate'in saati dakikalar içinde doğru: FortiGate NTP ile eşitleniyor | DEVICE-SETUP.md bölüm 2.1 (NTP adımı); FortiGate'te `diagnose sys ntp status` NTP sunucularının bilgisini listeler; `R20-lease:source-clock` uyarısı açık olmamalı | FortiGate NTP ile eşitleniyor: evet / hayır; `diagnose sys ntp status` çıktısındaki NTP sunucusu | | |
 | V17 | FortiOS bir DHCPDECLINE kaydı yazıyor mu ya da bir adresi vermeden önce denetliyor mu; bir istemci bir sunucu arayüzü ve ağı için tek bir kira tutar | Ayrı bir deneme yoktur: statik cihazlar DHCP aralığının dışında tutulur (DEVICE-SETUP.md bölüm 2.4 adım 8); `R20-lease:fortigate-decline:<ağ>` uyarısı | uyarı açıldı mı; açıldıysa ağ ve yapılan düzeltme (adres ayrıldı ya da cihaz taşındı) | | |
+| V18 | Yapılandırılmış iki ağ sonradan birleştirildi ya da biri ağ listesinden çıkarıldı mı | Kira işi, bir MAC adresinin kiranın ağından **başka bir yapılandırılmış ağdaki** bir adres için aldığı FortiGate DHCP Ack'ini kirayla birlikte kaydetmez (D33: iki ağda birer adresi olan bir dizüstü bilgisayar ya da NAS taşınma sayılmaz; issue #127). Ağlar sonradan birleştirilir ya da biri çıkarılırsa bugünkü ağlarla bu Ack bir taşınmadır, ama 5651 sorgusunun günlerinden önceki bir an için hiçbir yerde kayıtlı değildir: kaçırılmış taşınma denetimi o an için onu görmez (sorgunun günleri içinde satırlar bugünkü ağlarla yeniden denetlenir). Departmanlar ve VLAN'lar sekmesinde iki ağı birleştirmeden ya da bir ağı silmeden önce: Arama'da her iki ağ için `type:event logid:0100026001 ip:<ağ>` (ör. `ip:172.20.41.0/24`), bulunan istemciler için `type:event mac:<MAC>` (veritabanındaki günler); değişiklikten önce iki ağda da adres almış bir MAC var mı | ağ değişikliği ve tarihi; iki ağda da adres almış istemci var mı (varsa MAC adresleri): bu istemcilerin o tarihten önceki anları için kaçırılmış taşınma denetimi yalnızca sorgunun günlerini okur | | |
 
 ## 17. Masaüstü Windows 11 Pro
 

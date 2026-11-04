@@ -922,9 +922,26 @@ class Lease(Base):
     #: other lease (configured or fallback time). Revision ``0017_fortigate_dhcp``.
     lease_seconds: Mapped[int | None] = mapped_column(Integer)
     #: Evidence references: a list of ``arcilogger_worker.lookup.EvidenceRef.to_dict()`` objects,
-    #: ``{"table", "row_id", "time", "raw": {source, day, line, offset} | null, "summary"}``.
+    #: ``{"table", "row_id", "time", "raw": {source, day, line, offset} | null, "summary"}``; an
+    #: ``fg_dhcp`` ref the lease job wrote from revision ``0022_lease_moves`` on also carries
+    #: ``"vd"``, the VDOM of its row (``null`` without one; issue #127).
     evidence: Mapped[list[Any]] = mapped_column(
         JSONB, nullable=False, server_default=text("'[]'::jsonb")
+    )
+    #: The kept FortiGate ACKs of the lease's MAC for another address that the build saw and did
+    #: not apply (the missed moves of ADR-0016 D33, round 7 of the lookup; issue #127):
+    #: ``{"truncated": bool, "groups": [{"ip", "interface", "vd", "source", "logid", "dhcp_msg",
+    #: "times": [epoch µs, …]}, …]}`` (``arcilogger_worker.lookup.refs.moves_json``). Bounded
+    #: (rows are never dropped): only the times in the 100 days before the lease's end (its
+    #: newest move while it is open), at most 1,000, the newest; ``truncated`` says the job
+    #: dropped one. Positive evidence only: the check applies today's rules to them again and a
+    #: hit only lowers a chain, so a value that lacks a move, truncated or not, misses it,
+    #: nothing more. NULL: not recorded (a lease written before revision ``0022_lease_moves``,
+    #: an ARP interval); ``"groups": []``: recorded, none. Deferred, and loading it by accident
+    #: raises: only the lease job and the missed-move check read it, by
+    #: ``select(Lease.id, Lease.moves)``.
+    moves: Mapped[dict[str, Any] | None] = mapped_column(
+        JSONB(none_as_null=True), deferred=True, deferred_raiseload=True
     )
     created_at: Mapped[datetime] = _created()
     updated_at: Mapped[datetime] = _updated()
