@@ -35,7 +35,8 @@ from arcilogger_core.admin.contract import SystemStatus, dump_document, parse_do
 from arcilogger_core.admin.testing import FakeAgent, FakeSystem, Installed
 from arcilogger_core.cli import main as core_main
 from arcilogger_core.config import Config
-from arcilogger_core.crl import CrlOptions
+from arcilogger_core.crl import CrlError, CrlOptions
+from arcilogger_core.crl import _one_run as held_crl_lock
 from arcilogger_core.crl import fetch as crl_fetch
 from arcilogger_core.layout import Layout
 from arcilogger_core.renewal import STATE_SCHEMA as RENEWAL_SCHEMA
@@ -447,6 +448,8 @@ def test_renew_and_crlfetch_are_judged_by_their_state_files(api_config: Config) 
     assert moment(task_rows(evidence(api_config, now))["Renew"]["last_evidence_at"]) == now - (
         timedelta(hours=1)
     )
+    renew_run(layout, now - timedelta(hours=25))  # within the 26 h limit
+    assert states(evidence(api_config, now))["Renew"] == "ok"
     renew_run(layout, now - timedelta(hours=27))
     assert states(evidence(api_config, now))["Renew"] == "late"
     renew_run(layout, now + timedelta(minutes=5))  # a clock set back
@@ -454,17 +457,27 @@ def test_renew_and_crlfetch_are_judged_by_their_state_files(api_config: Config) 
     # The report's own ``at`` is no run: a run without pinned roots keeps it from the last file.
     write_json(stamp_renewal_path(layout), {"schema": RENEWAL_SCHEMA, "at": isoformat_site(now)})
     assert states(evidence(api_config, now))["Renew"] == "missing"
-    stamp_renewal_path(layout).write_bytes(b'{"last_run": {"at": ')
-    assert states(evidence(api_config, now))["Renew"] == "missing"
+    # Truncated, not an object, a last run that is not one or has no time: never a server error.
+    for unknown in (
+        b'{"last_run": {"at": ',
+        b"[]",
+        b'"x"',
+        b'{"last_run": []}',
+        b'{"last_run": {"at": 5}}',
+    ):
+        stamp_renewal_path(layout).write_bytes(unknown)
+        assert states(evidence(api_config, now))["Renew"] == "missing", unknown
 
-    # CrlFetch: a held lock writes no index.
-    layout.crl_dir.mkdir(parents=True)
-    (layout.crl_dir / ".fetch.lock").write_bytes(b"")
-    assert states(evidence(api_config, now))["CrlFetch"] == "missing"
-    # A run whose only list address cannot be reached records its failure: the task ran.
+    # CrlFetch: a run that finds the lock held (another run, W5-B-2) writes no index.
     with socket.create_server(("127.0.0.1", 0)) as listener:
         closed = f"http://127.0.0.1:{listener.getsockname()[1]}/ornek.crl"
-    run = crl_fetch(CrlOptions(urls=(closed,), timeout_seconds=1), layout, [], now)
+    options = CrlOptions(urls=(closed,), timeout_seconds=1)
+    with held_crl_lock(layout.crl_dir), pytest.raises(CrlError, match="another 'crl fetch'"):
+        crl_fetch(options, layout, [], now)
+    assert not crl_index_path(layout).exists()
+    assert states(evidence(api_config, now))["CrlFetch"] == "missing"
+    # A run whose only list address cannot be reached records its failure: the task ran.
+    run = crl_fetch(options, layout, [], now)
     assert [failure.error for failure in run.failures] == ["unreachable"]
     assert json.loads(crl_index_path(layout).read_bytes())["lists"] == []
     rows = task_rows(evidence(api_config, now))
@@ -473,6 +486,7 @@ def test_renew_and_crlfetch_are_judged_by_their_state_files(api_config: Config) 
         "state\\crl\\index.json",
     )
     assert moment(rows["CrlFetch"]["last_evidence_at"]) == now
+    assert states(evidence(api_config, now + timedelta(hours=25)))["CrlFetch"] == "ok"
     assert states(evidence(api_config, now + timedelta(hours=27)))["CrlFetch"] == "late"
 
     def stored(fetched_at: datetime) -> dict[str, Any]:
@@ -496,8 +510,16 @@ def test_renew_and_crlfetch_are_judged_by_their_state_files(api_config: Config) 
     rows = task_rows(evidence(api_config, now))
     assert rows["CrlFetch"]["state"] == "late"
     assert moment(rows["CrlFetch"]["last_evidence_at"]) == now - timedelta(hours=27)
-    write_json(crl_index_path(layout), {**index, "schema": "another/1", "lists": lists})
-    assert states(evidence(api_config, now))["CrlFetch"] == "missing"
+    # Another schema, truncated, not an object, lists that are no list: no evidence.
+    unreadable = [
+        json.dumps({**index, "schema": "another/1", "lists": lists}).encode(),
+        b'{"lists": ',
+        b"[]",
+        json.dumps({**index, "lists": {"file": stored(now)}}).encode(),
+    ]
+    for document in unreadable:
+        crl_index_path(layout).write_bytes(document)
+        assert states(evidence(api_config, now))["CrlFetch"] == "missing", document
 
 
 @pytest.fixture
