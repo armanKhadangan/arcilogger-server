@@ -452,9 +452,10 @@ class _Records:
             raise EvidenceError(f"{relative}.zd: time stamp missing in the vault")
 
     def collect(self, days: Sequence[_Day], report_token: bytes | None = None) -> list[_Entry]:
-        """The records of ``days``. A deletion record's token is judged by the EKU rule of the
-        manifest that lists it (strict when one of them is), as both verifiers judge it; one
-        reached only through the chain anchor by the package's (contract W5-A-19)."""
+        """The records of ``days``. The root for a deletion record's token is picked by the EKU
+        rule of the manifests that list it (strict when one of them is, as the verifier judges
+        its anchor link); one reached only through the chain anchor by the package's (contract
+        W5-A-19)."""
         sealed = {day.day for day in days}
         listed: dict[str, bool] = {}
         for day in days:
@@ -468,7 +469,7 @@ class _Records:
                     "deletion",
                     str(record.get("sha256") or "") or None,
                     str(record.get("token_sha256") or "") or None,
-                    require_critical_eku=day.require_critical_eku,
+                    require_critical_eku=listed[str(record.get("path", ""))],
                 )
             self._anchor(day, sealed, listed)
         self._renewals(days, report_token)

@@ -370,7 +370,9 @@ def test_a_deletion_records_token_is_judged_by_the_manifest_that_lists_it(
     assert found == case.findings
     # and on the package
     if not case.relaxed:
-        failures = [f"token-eku ({where})" for _, _, where in sorted(case.findings)]
+        failures = [
+            f"token-eku ({where})" for level, _, where in sorted(case.findings) if level == "fail"
+        ]
         with pytest.raises(EvidenceError, match="token-eku") as refused:
             _build(rw, list(days), tmp_path / "out")
         assert all(failure in str(refused.value) for failure in failures), refused.value

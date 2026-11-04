@@ -658,6 +658,16 @@ def _listed_relaxed_beside_a_strict_day(rw: RenewalWorld) -> tuple[date, ...]:
     return (DAY, OTHER)
 
 
+def _listed_strict_and_relaxed(rw: RenewalWorld) -> tuple[date, ...]:
+    """Listed twice: the run that sealed :data:`OTHER` stopped before it marked the record
+    sealed, so the next manifest lists it again."""
+    record = deletion_record(rw, [])
+    rw.seal(OTHER, relaxed=False)
+    record.with_suffix(".sealed").unlink()
+    rw.seal(THIRD, relaxed=True)
+    return (OTHER, THIRD)
+
+
 def _listed_strict(rw: RenewalWorld) -> tuple[date, ...]:
     deletion_record(rw, [])
     rw.seal(OTHER, relaxed=False)
@@ -701,6 +711,11 @@ DELETION_CASES: tuple[DeletionCase, ...] = (
         _eku(("warn", OTHER)),
     ),
     DeletionCase("listed by a strict manifest", _listed_strict, _eku(("fail", OTHER))),
+    DeletionCase(
+        "listed by a strict and by a relaxed manifest",
+        _listed_strict_and_relaxed,
+        _eku(("fail", OTHER), ("warn", THIRD)),
+    ),
     DeletionCase(
         "only behind the chain anchor, the package relaxed",
         _behind_the_anchor_relaxed,
