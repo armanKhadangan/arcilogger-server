@@ -1762,9 +1762,10 @@ All Wave 5 questions are answered (2026-11-02).
     run's range stays NULL.
   - **Performance:** the new guard `test_the_recorded_moves_of_a_hundred_chains_are_fast` (100
     `mt_dhcp` chains, 1,000 recorded times each, decoded and tested in memory) stays under the
-    0.2 s of 3.8 (0.102 s for the converted-row query and 0.034 s for `_recorded_moves` on the
-    2026-11-04 run; the guard asserts the decoded result, 100 leases with all their times); the
-    existing `test_the_converted_row_query_of_a_hundred_chains_is_fast` is unchanged (0.082 s).
+    0.2 s of 3.8 (0.10–0.14 s for the whole check, of which 0.03–0.06 s `_recorded_moves`, in
+    the 2026-11-04 runs; the guard asserts the decoded result, 100 leases with all their times,
+    and `parse_moves` only checks a value already in the job's form, `refs.py:375-394`); the
+    existing `test_the_converted_row_query_of_a_hundred_chains_is_fast` is unchanged (0.08 s).
     A lease's moves have no bound but its life. `_seed_candidates` reads the moves of every seed
     on every rebuild (`leases.py:842`), so each same-day rebuild of the service
     (`worker/service.py:246`) reads all open leases' moves: their part outside `[lo, hi)` must be
