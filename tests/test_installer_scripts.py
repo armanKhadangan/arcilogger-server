@@ -41,7 +41,7 @@ from collections.abc import Callable, Iterator
 from datetime import UTC, date, datetime, timedelta
 from io import StringIO
 from pathlib import Path
-from typing import Any, NoReturn
+from typing import Any, Literal, NoReturn
 
 import pytest
 from cryptography import x509
@@ -158,6 +158,15 @@ def engine(request: pytest.FixtureRequest) -> str:
     if value is None:
         if os.environ.get("ARCILOGGER_REQUIRE_PWSH") == "1":
             pytest.fail("PowerShell is required (ARCILOGGER_REQUIRE_PWSH=1) but none was found")
+        # The only test of the installer's restore against a real TimescaleDB runs in the Linux
+        # job (ARCILOGGER_EXPECT_TIMESCALE=1): there it must not go quiet for want of pwsh.
+        callspec = getattr(request.node, "callspec", None)
+        if (
+            os.environ.get("ARCILOGGER_EXPECT_TIMESCALE") == "1"
+            and callspec is not None
+            and callspec.params.get("server") == "timescaledb"
+        ):
+            pytest.fail("PowerShell is required for the TimescaleDB variant (EXPECT_TIMESCALE=1)")
         pytest.skip("no PowerShell available")
     return value
 
@@ -3203,6 +3212,43 @@ def write_version(folder: Path, version: str, fingerprint: str) -> Path:
     return folder
 
 
+#: Where pip installs arcilogger_db's Alembic revisions in a program folder (issue #122).
+MIGRATIONS = Path("venv", "Lib", "site-packages", "arcilogger_db", "migrations", "versions")
+#: The revisions of this repository, which the bundle's wheel ships.
+REPO_MIGRATIONS = REPO / "db" / "src" / "arcilogger_db" / "migrations" / "versions"
+#: A schema with 0021_db_window (daily partitions) and the revisions the installer compares.
+SCHEMA = ("0001_baseline", "0016_search", "0020_fg_traffic_transip_time", "0021_db_window")
+
+
+def write_migrations(folder: Path, *revisions: str) -> Path:
+    """A program folder's revision files, oldest first, each revising the one before (the two
+    lines the installer reads, as Alembic's files write them)."""
+    versions = folder / MIGRATIONS
+    versions.mkdir(parents=True, exist_ok=True)
+    parent = "None"
+    for revision in revisions:
+        text = (
+            f'"""Revision ID: {revision}"""\n\nrevision: str = "{revision}"\n'
+            f"down_revision: str | Sequence[str] | None = {parent}\n"
+        )
+        (versions / f"v{revision}.py").write_text(text, encoding="utf-8")
+        parent = f'"{revision}"'
+    return versions
+
+
+def write_rollback_programs(
+    tmp_path: Path, previous: tuple[str, ...] | None = SCHEMA
+) -> tuple[Path, Path]:
+    """The installed program (``SCHEMA``) and the one -Rollback returns to, with ``previous`` as
+    its revisions (the same schema by default: no downgrade; None: no migrations folder)."""
+    program = write_version(tmp_path / "program" / "ARCILOGGER", "9.9.10", "1" * 64)
+    write_migrations(program, *SCHEMA)
+    kept = write_version(Path(f"{program}.previous"), "9.9.9", "2" * 64)
+    if previous is not None:
+        write_migrations(kept, *previous)
+    return program, kept
+
+
 #: The server address the dry runs pass unless a test checks how it is remembered or detected
 #: (it is not an address of the test machine: the collector-bind check fails for a new install).
 SERVER_ADDRESS = "172.20.20.15"
@@ -4087,6 +4133,8 @@ def test_dry_run_rollback_plan(engine: str, tmp_path: Path) -> None:
         "health.check",
     )
     assert "leases.prepare-rollback" not in _ids(plan), "the dump replaces the database"
+    # Neither program has a migrations folder: with the dump no schema is looked at (issue #122).
+    assert "database.downgrade" not in _ids(plan), "the dump replaces the database"
 
 
 def test_dry_run_rollback_lowers_the_fortigate_leases_before_the_swap(
@@ -4095,8 +4143,7 @@ def test_dry_run_rollback_lowers_the_fortigate_leases_before_the_swap(
     """Contract 2.2.1, 3.7: without -RestoreDatabase the rollback runs this version's
     ``arcilogger-db leases prepare-rollback`` after the services stop and before the swap."""
     bundle = make_fake_bundle(tmp_path)
-    program = write_version(tmp_path / "program" / "ARCILOGGER", "9.9.10", "1" * 64)
-    write_version(Path(f"{program}.previous"), "9.9.9", "2" * 64)
+    program, _ = write_rollback_programs(tmp_path)
     result, plan = dry_run(engine, tmp_path, bundle, "-Rollback")
     assert_dry_run_exit(result, plan)
     ids = _ids(plan)
@@ -4135,10 +4182,9 @@ def test_dry_run_rollback_skips_the_lease_step_for_a_version_that_reads_fortigat
     is recorded as skipped with its reason, also with -SkipDatabase and then without that
     warning. Without the module the step is planned as before."""
     bundle = make_fake_bundle(tmp_path)
-    program = write_version(tmp_path / "program" / "ARCILOGGER", "9.9.10", "1" * 64)
-    previous = write_version(Path(f"{program}.previous"), "9.9.9", "2" * 64)
+    _, previous = write_rollback_programs(tmp_path)
     package = previous / "venv" / "Lib" / "site-packages" / "arcilogger_db"
-    package.mkdir(parents=True)
+    package.mkdir(parents=True, exist_ok=True)
     (package / "__init__.py").write_text("", encoding="utf-8")
     module = package / "lease_rollback.py"
     module.write_text("", encoding="utf-8")
@@ -4163,6 +4209,209 @@ def test_dry_run_rollback_skips_the_lease_step_for_a_version_that_reads_fortigat
     assert step["detail"]["previous_check"] is None
 
 
+#: The schema step of a rollback (issue #122): its id, and the texts it plans, skips and refuses.
+DOWNGRADE = "database.downgrade"
+DOWNGRADE_TEXT = "[downgrading the database to the restored version's schema]"
+DOWNGRADE_NOT_NEEDED = (
+    "[database schema not downgraded: the restored version knows 0021_db_window, or this "
+    "version's schema is from before it]"
+)
+SCHEMA_UNKNOWN = "[could not tell the restored version's database schema, nothing changed]"
+SCHEMA_SKIP_DATABASE = (
+    "[the database schema must go down to the restored version's: no rollback with "
+    "-SkipDatabase, nothing changed]"
+)
+
+
+def _downgrade_detail(plan: dict[str, Any]) -> dict[str, Any]:
+    detail: dict[str, Any] = _items(plan)[DOWNGRADE]["detail"]
+    return detail
+
+
+def test_dry_run_rollback_downgrades_the_schema_before_the_swap(
+    engine: str, tmp_path: Path
+) -> None:
+    """Issue #122: this version's schema has 0021_db_window (daily partitions) and the previous
+    version's head is below it: after the services stop and after the lease step, before the
+    swap, ``arcilogger-db schema downgrade --to <revision>`` takes the database to the previous
+    version's head, never below the revision 0021 revises (the revisions before it were made for
+    a previous version to run on; their downgrades delete data). The heads are read from the
+    revision files of both programs; the installed one has this repository's, as the wheel ships
+    them, so the reading is checked against Alembic's own head. A previous version that has
+    0021_db_window gets no downgrade, also when this version has a later revision (the issue's
+    rule: only a previous head below 0021_db_window)."""
+    from arcilogger_db.migrate import head_revisions
+
+    bundle = make_fake_bundle(tmp_path)
+    program, previous = write_rollback_programs(tmp_path, ("0001_baseline", "0016_search"))
+    shutil.rmtree(program / MIGRATIONS)
+    shutil.copytree(REPO_MIGRATIONS, program / MIGRATIONS)
+    (head,) = head_revisions()
+    result, plan = dry_run(engine, tmp_path, bundle, "-Rollback")
+    assert_dry_run_exit(result, plan)
+    ids = _ids(plan)
+    _before(ids, "services.stop", "leases.prepare-rollback", DOWNGRADE, "program.swap")
+    assert ids.count(DOWNGRADE) == 1
+    step = _items(plan)[DOWNGRADE]
+    assert step["status"] == "planned"
+    assert DOWNGRADE_TEXT in step["text"]
+    assert f"arcilogger-db schema downgrade --to {SCHEMA[2]})" in step["text"]
+    detail = _downgrade_detail(plan)
+    assert _windows_path(detail.pop("previous_migrations")) == _windows_path(
+        str(previous / MIGRATIONS)
+    )
+    assert detail == {
+        "command": "arcilogger-db schema downgrade",
+        "needed": True,
+        "to": "0020_fg_traffic_transip_time",
+        "installed_head": head,
+        "previous_head": "0016_search",
+        "database_head": None,
+        "result": None,
+    }
+    # A previous version at the revision 0021 revises goes back to its head, the same one.
+    write_migrations(previous, *SCHEMA[:3])
+    result, plan = dry_run(engine, tmp_path, bundle, "-Rollback")
+    assert_dry_run_exit(result, plan)
+    assert _downgrade_detail(plan)["to"] == "0020_fg_traffic_transip_time"
+    assert _downgrade_detail(plan)["previous_head"] == "0020_fg_traffic_transip_time"
+    # A previous version from 0021_db_window on handles daily partitions: no downgrade, also of a
+    # later revision of this version.
+    shutil.rmtree(program / MIGRATIONS)
+    write_migrations(program, *SCHEMA, "0022_example")
+    write_migrations(previous, *SCHEMA)
+    result, plan = dry_run(engine, tmp_path, bundle, "-Rollback")
+    assert_dry_run_exit(result, plan)
+    assert _items(plan)[DOWNGRADE]["status"] == "skipped"
+    detail = _downgrade_detail(plan)
+    assert (detail["installed_head"], detail["previous_head"]) == ("0022_example", SCHEMA[-1])
+    assert (detail["needed"], detail["to"]) == (False, None)
+    # A previous version below it goes past 0022 and 0021, down to the floor.
+    shutil.rmtree(previous / MIGRATIONS)
+    write_migrations(previous, *SCHEMA[:2])
+    result, plan = dry_run(engine, tmp_path, bundle, "-Rollback")
+    assert_dry_run_exit(result, plan)
+    detail = _downgrade_detail(plan)
+    assert (detail["installed_head"], detail["to"]) == ("0022_example", SCHEMA[2])
+
+
+def test_dry_run_rollback_skips_the_downgrade_the_restored_version_does_not_need(
+    engine: str, tmp_path: Path
+) -> None:
+    """Issue #122: no downgrade when the previous version knows this version's head (the same
+    schema, or a newer one), nor when this version has no 0021_db_window (the previous program is
+    not looked at then); the step is recorded as skipped with both heads, also with
+    -SkipDatabase, which then stops nothing."""
+    bundle = make_fake_bundle(tmp_path)
+    program, previous = write_rollback_programs(tmp_path)
+
+    def skipped(*extra: str) -> dict[str, Any]:
+        result, plan = dry_run(engine, tmp_path, bundle, "-Rollback", *extra)
+        assert_dry_run_exit(result, plan)
+        _before(_ids(plan), "services.stop", "leases.prepare-rollback", DOWNGRADE, "program.swap")
+        step = _items(plan)[DOWNGRADE]
+        assert step["status"] == "skipped", extra
+        assert _unwrapped(DOWNGRADE_NOT_NEEDED) in _unwrapped(step["text"])
+        assert _unwrapped(DOWNGRADE_NOT_NEEDED) in _unwrapped(result.stdout)
+        detail: dict[str, Any] = step["detail"]
+        assert (detail["needed"], detail["to"], detail["result"]) == (False, None, None)
+        return detail
+
+    for extra in ([], ["-SkipDatabase"]):
+        detail = skipped(*extra)
+        assert (detail["installed_head"], detail["previous_head"]) == (SCHEMA[-1], SCHEMA[-1])
+    # A newer previous version: this version's head is among its revisions.
+    write_migrations(previous, *SCHEMA, "0022_example")
+    detail = skipped()
+    assert (detail["installed_head"], detail["previous_head"]) == (SCHEMA[-1], "0022_example")
+    # This version from before 0021_db_window: the previous program's revisions are not read.
+    shutil.rmtree(program / MIGRATIONS)
+    shutil.rmtree(previous / MIGRATIONS)
+    write_migrations(program, *SCHEMA[:3])
+    detail = skipped()
+    assert (detail["installed_head"], detail["previous_head"]) == (SCHEMA[2], None)
+
+
+def _assert_refused(result: subprocess.CompletedProcess[str], plan: dict[str, Any]) -> str:
+    """A rollback stopped (2) before any change, with the step's refusal in the plan."""
+    assert result.returncode == 2, result.stdout + result.stderr
+    assert plan["exit_code"] == 2
+    ids = _ids(plan)
+    assert ids[-1] == DOWNGRADE, ids
+    assert not {"tasks.disable", "services.stop", "leases.prepare-rollback", "program.swap"} & set(
+        ids
+    )
+    step = _items(plan)[DOWNGRADE]
+    assert step["status"] == "fail"
+    assert _unwrapped(step["text"]) in _unwrapped(result.stdout)
+    return str(step["text"])
+
+
+def test_dry_run_rollback_refuses_a_previous_schema_it_cannot_tell(
+    engine: str, tmp_path: Path
+) -> None:
+    """Issue #122: never a guess. No migrations folder in the previous program, revision files
+    that do not form one line, or a previous head that is not one of this version's revisions:
+    the rollback stops before any change (2) and names -Rollback -RestoreDatabase, with which
+    the pre-upgrade dump replaces the database and no schema is looked at."""
+    bundle = make_fake_bundle(tmp_path)
+    _, previous = write_rollback_programs(tmp_path, None)
+    result, plan = dry_run(engine, tmp_path, bundle, "-Rollback")
+    text = _assert_refused(result, plan)
+    assert text.startswith("Geri alınan sürümün veritabanı şeması anlaşılamadı"), text
+    assert SCHEMA_UNKNOWN in text
+    assert "[migrations folder not found or not readable]" in text
+    assert str(previous / MIGRATIONS).replace("/", "\\") in text.replace("/", "\\")
+    restore = r'-File ".*installer.Install-Arcilogger\.ps1" -Rollback -RestoreDatabase$'
+    assert re.search(restore, text), text
+    broken = {
+        "revision found twice": ("v0016_copy.py", "0016_search", '"0001_baseline"'),
+        "the revisions branch": ("v0020_other.py", "0020_other", '"0016_search"'),
+        "revision or down_revision not readable": ("v0019_bad.py", "0019_bad", '("a", "b")'),
+        "not one base revision": ("v0002_base.py", "0002_base", "None"),
+        "the revisions do not form one line": ("v0019_lost.py", "0019_lost", '"0018_gone"'),
+    }
+    for reason, (name, revision, parent) in broken.items():
+        versions = write_migrations(previous, *SCHEMA[:3])
+        text = f'revision: str = "{revision}"\ndown_revision: str | None = {parent}\n'
+        (versions / name).write_text(text, encoding="utf-8")
+        result, plan = dry_run(engine, tmp_path, bundle, "-Rollback")
+        text = _assert_refused(result, plan)
+        assert SCHEMA_UNKNOWN in text, reason
+        assert f"[{reason}]" in text, (reason, text)
+        shutil.rmtree(versions)
+    (previous / MIGRATIONS).mkdir(parents=True)  # a folder without a revision file
+    (previous / MIGRATIONS / "__init__.py").write_text("", encoding="utf-8")
+    result, plan = dry_run(engine, tmp_path, bundle, "-Rollback")
+    assert "[no revision file]" in _assert_refused(result, plan)
+    shutil.rmtree(previous / MIGRATIONS)
+    write_migrations(previous, "0001_baseline", "0016_other")
+    result, plan = dry_run(engine, tmp_path, bundle, "-Rollback")
+    text = _assert_refused(result, plan)
+    assert "[the previous version's head is not one of this version's revisions]: 0016_other" in (
+        text
+    )
+    # With the dump: no schema is looked at, the rollback is planned.
+    result, plan = dry_run(engine, tmp_path, bundle, "-Rollback", "-RestoreDatabase")
+    assert_dry_run_exit(result, plan)
+    assert DOWNGRADE not in _ids(plan)
+    _before(_ids(plan), "program.swap", "database.restore")
+
+
+def test_dry_run_rollback_needing_the_downgrade_refuses_skip_database(
+    engine: str, tmp_path: Path
+) -> None:
+    """-SkipDatabase does no database work, so a rollback that needs the downgrade stops before
+    any change (the previous version would run on the daily partitions)."""
+    bundle = make_fake_bundle(tmp_path)
+    write_rollback_programs(tmp_path, SCHEMA[:3])
+    result, plan = dry_run(engine, tmp_path, bundle, "-Rollback", "-SkipDatabase")
+    text = _assert_refused(result, plan)
+    assert SCHEMA_SKIP_DATABASE in text
+    assert "(0021_db_window -> 0020_fg_traffic_transip_time)" in text
+    assert _downgrade_detail(plan)["needed"] is True
+
+
 def test_dry_run_rollback_sets_firewall_and_time_from_the_restored_configuration(
     engine: str, tmp_path: Path
 ) -> None:
@@ -4171,8 +4420,7 @@ def test_dry_run_rollback_sets_firewall_and_time_from_the_restored_configuration
     Set-ArciFirewall.ps1 (full mode, the remembered choices of the state file) and
     Set-ArciTime.ps1 run again, so a source the configuration put back lists is let through."""
     bundle = make_fake_bundle(tmp_path)
-    program = write_version(tmp_path / "program" / "ARCILOGGER", "9.9.10", "1" * 64)
-    write_version(Path(f"{program}.previous"), "9.9.9", "2" * 64)
+    program, _ = write_rollback_programs(tmp_path)
     state = tmp_path / "programdata" / "ARCILOGGER" / "install" / "firewall-state.json"
     state.parent.mkdir(parents=True)
     state.write_text(json.dumps({"schema": 1, "admin_address": [ADMIN_ADDRESS]}), "utf-8")
@@ -5281,9 +5529,12 @@ function Write-Text([string]$Path, [string]$Text) { [System.IO.File]::WriteAllTe
 function New-FakeProgram {
     # -InstallPath: the program folder its service definitions name (the installer fills in
     # {{INSTALL_DIR}}), also for a version kept aside as .previous.
+    # -Revisions: the Alembic revision files of its arcilogger_db where pip installs the wheel,
+    # oldest first (issue #122); none: no migrations folder.
     param(
         [string]$Folder, [string]$Version, [string]$Fingerprint, [switch]$Partial,
-        [string[]]$Services = @($executables.Keys), [string]$InstallPath = $Folder
+        [string[]]$Services = @($executables.Keys), [string]$InstallPath = $Folder,
+        [string[]]$Revisions = @()
     )
     foreach ($sub in @('services', 'venv/Scripts', 'tasks', 'caddy', 'installer')) {
         [void](New-Item -ItemType Directory -Path (Join-Path $Folder $sub) -Force)
@@ -5305,6 +5556,14 @@ function New-FakeProgram {
         Write-Text (Join-Path $Folder "tasks/$task.xml") '<Task/>'
     }
     Write-Text (Join-Path $Folder 'installer/Install-Arcilogger.ps1') '# stub'
+    $versions = Join-Path $Folder 'venv/Lib/site-packages/arcilogger_db/migrations/versions'
+    $parent = 'None'
+    foreach ($revision in $Revisions) {
+        [void](New-Item -ItemType Directory -Path $versions -Force)
+        $text = "revision: str = `"$revision`"`ndown_revision: str | None = $parent`n"
+        Write-Text (Join-Path $versions "v$revision.py") $text
+        $parent = "`"$revision`""
+    }
 }
 
 function Get-FolderVersion([string]$Folder) {
@@ -5319,14 +5578,25 @@ function Get-FolderVersion([string]$Folder) {
 
 # --- the installed system before the run ---
 $rollback = $Scenario.StartsWith('rollback')
-# A rollback leaves a version with ArciAdmin for one from before it.
+# A rollback leaves a version with ArciAdmin for one from before it. Both have the same schema
+# (no downgrade, issue #122), except in the downgrade scenarios: the version before has no
+# 0021_db_window, or (rollback-downgrade-unknown) no migrations folder that tells.
 $currentServices = $(if ($rollback) { @($executables.Keys) } else { $oldServices })
-New-FakeProgram -Folder $program -Version '1.0.0' -Fingerprint ('a' * 64) -Services $currentServices
+$schema = @('0001_baseline', '0020_fg_traffic_transip_time', '0021_db_window')
+$previousSchema = $schema
+if ($Scenario.Contains('downgrade')) { $previousSchema = $schema[0..1] }
+if ($Scenario -eq 'rollback-downgrade-unknown') { $previousSchema = @() }
+$revisions = $(if ($rollback) { $schema } else { @() })
+New-FakeProgram -Folder $program -Version '1.0.0' -Fingerprint ('a' * 64) `
+    -Services $currentServices -Revisions $revisions
 $uninstall = $Scenario.StartsWith('uninstall')
-if ($rollback -or $uninstall) {
+# rollback-restore-db-only-fails: no previous program folder (an upgrade's swap-back put it in
+# place), so -Rollback -RestoreDatabase restores the database only.
+if (($rollback -or $uninstall) -and $Scenario -ne 'rollback-restore-db-only-fails') {
     $previous = "$program.previous"
+    $revisions = $(if ($rollback) { $previousSchema } else { @() })
     New-FakeProgram -Folder $previous -Version '0.9.0' -Fingerprint ('c' * 64) `
-        -Services $oldServices -InstallPath $program
+        -Services $oldServices -InstallPath $program -Revisions $revisions
 }
 # The previous version's arcilogger_db as pip installed it (issue #81): with the rollback step's
 # module (a version that reads FortiGate DHCP; also with a swap that fails), without it (one from
@@ -5337,6 +5607,7 @@ $previousModules = @{
     'rollback-swap-reads-fortigate-dhcp' = @('__init__.py', 'lease_rollback.py')
     'rollback-before-fortigate-dhcp'     = @('__init__.py', 'cli.py')
     'rollback-module-no-package'         = @('lease_rollback.py')
+    'rollback-downgrade-usage'           = @('__init__.py', 'lease_rollback.py')
 }
 if ($previousModules.ContainsKey($Scenario)) {
     $package = Join-Path $previous 'venv/Lib/site-packages/arcilogger_db'
@@ -5372,12 +5643,12 @@ if ($Scenario -in @('success', 'migration', 'program-files')) {
 }
 if ($rollback) {
     $changed = $beforeUpgrade
-    if ($Scenario -in @('rollback-incompatible', 'rollback-no-copy')) {
+    if ($Scenario -eq 'rollback-incompatible' -or $Scenario.StartsWith('rollback-no-copy')) {
         $changed += "enabled = false`n"
     }
     Write-Text $configPath $changed
     $copy = "$configPath.before-upgrade-20261020-101500"
-    if ($Scenario -ne 'rollback-no-copy') { Write-Text $copy $beforeUpgrade }
+    if (-not $Scenario.StartsWith('rollback-no-copy')) { Write-Text $copy $beforeUpgrade }
     $recorded = @{ database_provisioned = $true; config_before_upgrade = $copy } | ConvertTo-Json
     Write-Text (Join-Path $programData 'install/state.json') $recorded
 }
@@ -5397,6 +5668,15 @@ switch ($Scenario) {
     { $uninstall } { $mode['Uninstall'] = $true }
     'repair' { }
     default { $mode['Upgrade'] = $true }
+}
+# rollback-restore-*: -Rollback -RestoreDatabase -DatabaseDump <dump>, whose restore fails
+# after the swap (-db-fails: psql cannot reach the server; -db-only-fails: the same without a
+# previous program folder), or whose rename committed (-committed-*, below).
+if ($Scenario.StartsWith('rollback-restore-')) {
+    $mode['RestoreDatabase'] = $true
+    $mode['DatabaseDump'] = Join-Path $Base 'before-upgrade.dump'
+    $mode['Force'] = $true
+    Write-Text $mode['DatabaseDump'] 'PGDMP simulated'
 }
 $bundle = Join-Path $Base 'bundle'
 $taskWait = if ($Scenario -in @('tasks-busy', 'uninstall-busy-stuck')) { 0 } else { 1 }
@@ -5536,6 +5816,7 @@ function Rename-Item {
     if ($Scenario.StartsWith('rollback-swap') -and $LiteralPath -eq $PreviousDir) {
         throw 'simulated: the folder is in use'
     }
+    $sim.calls.Add(('rename {0} {1}' -f (Split-Path -Leaf $LiteralPath), $NewName))
     Microsoft.PowerShell.Management\Rename-Item -LiteralPath $LiteralPath -NewName $NewName
 }
 function Register-ArciTaskSet {
@@ -5621,6 +5902,11 @@ function Get-PgCredential {
 function Invoke-PgTool {
     param([string]$Tool, [string[]]$ArgumentList, [string]$StdinText, [string[]]$Redact = @())
     $sim.calls.Add("pg $Tool")
+    if ($Scenario -in @('rollback-restore-db-fails', 'rollback-restore-db-only-fails') -and
+        $Tool -eq 'psql.exe') {
+        throw ('psql.exe: çıkış kodu 2 [exit code]: connection to server at "127.0.0.1", ' +
+            'port 5432 failed')
+    }
     if ($Tool -eq 'pg_dump.exe') {
         Write-Text $ArgumentList[[array]::IndexOf($ArgumentList, '-f') + 1] 'PGDMP simulated'
     }
@@ -5728,19 +6014,69 @@ if ($licenseScenario) {
 if ($rollback) {
     # "arcilogger-db leases prepare-rollback" (contract 2.2.1): the count it prints, or (rollback-
     # leases-down) the database cannot be reached; "arcilogger-db upgrade" after a failed swap:
-    # the seed's restore, or (rollback-swap-restore-fails) a database error.
+    # the seed's restore, or (...-restore-fails) a database error; "arcilogger-db current": the
+    # database at 0021_db_window, (rollback-downgrade-below) at the revision before it, or
+    # (rollback-downgrade-current-down) unreachable; "arcilogger-db schema downgrade --to
+    # <revision> --json" (issue #122): its JSON, or a failure (rollback-downgrade-fails: 1,
+    # -usage: 2, -db-down: 3), an answer of exit 0 that is not it (-bad-to, -not-json), or a
+    # process that could not be started or died without an answer (-crash: Invoke-ArciProcess
+    # throws).
     function Invoke-ArciProcess {
         param([string]$FilePath, [string[]]$ArgumentList, [string]$StdinText,
             [hashtable]$Environment, [string[]]$Redact, [switch]$AllowFailure,
             [int]$TimeoutSeconds)
         $exe = [System.IO.Path]::GetFileName($FilePath)
         $sim.calls.Add(('process {0} {1}' -f $exe, ($ArgumentList[0..1] -join ' ')))
+        $sim.processes.Add([ordered]@{
+                exe = $exe; arguments = ($ArgumentList -join ' '); timeout = $TimeoutSeconds
+            })
         if ($Scenario -eq 'rollback-leases-down') {
             $unreachable = "Veritabanına ulaşılamadı.`n[The database cannot be reached.]`n"
             return [pscustomobject]@{ ExitCode = 3; StdOut = ''; StdErr = $unreachable }
         }
+        if ($ArgumentList[0] -eq 'current') {
+            if ($Scenario -eq 'rollback-downgrade-current-down') {
+                $unreachable = "Veritabanına ulaşılamadı.`n[The database cannot be reached.]`n"
+                return [pscustomobject]@{ ExitCode = 3; StdOut = ''; StdErr = $unreachable }
+            }
+            if ($Scenario -eq 'rollback-downgrade-below') {
+                $out = "Veritabanı: 0020_fg_traffic_transip_time`nEn yeni   : 0021_db_window`n"
+                return [pscustomobject]@{ ExitCode = 1; StdOut = $out; StdErr = '' }
+            }
+            $out = "Veritabanı: 0021_db_window`nEn yeni   : 0021_db_window`n"
+            return [pscustomobject]@{ ExitCode = 0; StdOut = $out; StdErr = '' }
+        }
+        if (($ArgumentList[0..1] -join ' ') -eq 'schema downgrade') {
+            if ($Scenario -eq 'rollback-downgrade-crash') {
+                throw ('arcilogger-db.exe: işlem yanıtsız sonlandı [the process ended without ' +
+                    'an answer]')
+            }
+            if ($Scenario -eq 'rollback-downgrade-fails') {
+                $refused = "Günlük bölümler birleştirilemedi: kilit beklenirken süre doldu.`n" +
+                "[The daily partitions could not be merged: lock timeout.]`n"
+                return [pscustomobject]@{ ExitCode = 1; StdOut = ''; StdErr = $refused }
+            }
+            if ($Scenario -eq 'rollback-downgrade-usage') {
+                $refused = 'Şema geri alınmadı [schema not downgraded]: bilinmeyen şema sürümü ' +
+                "[unknown schema revision]`n"
+                return [pscustomobject]@{ ExitCode = 2; StdOut = ''; StdErr = $refused }
+            }
+            if ($Scenario -eq 'rollback-downgrade-db-down') {
+                $unreachable = "Veritabanına ulaşılamadı.`n[The database cannot be reached.]`n"
+                return [pscustomobject]@{ ExitCode = 3; StdOut = ''; StdErr = $unreachable }
+            }
+            if ($Scenario -eq 'rollback-downgrade-not-json') {
+                return [pscustomobject]@{ ExitCode = 0; StdOut = "Şema geri alındı`n"; StdErr = '' }
+            }
+            $to = $ArgumentList[[array]::IndexOf($ArgumentList, '--to') + 1]
+            if ($Scenario -eq 'rollback-downgrade-bad-to') { $to = '0021_db_window' }
+            $json = '{{"from": "0021_db_window", "to": "{0}", "downgraded": true, ' +
+            '"audit_id": 4711, "retention_days": {{"before": 30, "after": 400}}, ' +
+            '"upgrade_audit_id": 4710}}'
+            return [pscustomobject]@{ ExitCode = 0; StdOut = ($json -f $to); StdErr = '' }
+        }
         if ($ArgumentList[0] -eq 'upgrade') {
-            if ($Scenario -eq 'rollback-swap-restore-fails') {
+            if ($Scenario.EndsWith('-restore-fails')) {
                 return [pscustomobject]@{ ExitCode = 1; StdOut = ''; StdErr = "lock timeout`n" }
             }
             $out = 'Geri almadan sonra FortiGate kiraları [FortiGate leases after a rollback]: ' +
@@ -5750,6 +6086,24 @@ if ($rollback) {
         $out = 'FortiGate kiraları düşük güvene indirildi [FortiGate leases lowered to low ' +
         "confidence]: 1.234`n"
         [pscustomobject]@{ ExitCode = 0; StdOut = $out; StdErr = '' }
+    }
+}
+# rollback-restore-committed-*: the restore's rename committed (Invoke-DatabaseRestore itself is
+# tested on its own below), then (-post-fails) its timescaledb_post_restore() of the database in
+# place failed, or (-health-fails) the restore is done and the health check after it fails.
+if ($Scenario.StartsWith('rollback-restore-committed')) {
+    function Invoke-DatabaseRestore {
+        $sim.calls.Add('database restore')
+        $script:RestoreDump = $DatabaseDump
+        $due = $Scenario -eq 'rollback-restore-committed-post-fails'
+        $script:RestoreCommitted = [pscustomobject]@{
+            database = 'arcilogger'; replaced = 'arcilogger_replaced_20261104120000'
+            host = '127.0.0.1'; port = '5432'; user = 'postgres'; post_restore_due = $due
+        }
+        if ($due) { throw 'psql.exe: çıkış kodu 3 [exit code]: ERROR: simulated post_restore' }
+    }
+    if ($Scenario -eq 'rollback-restore-committed-health-fails') {
+        function Invoke-HealthCheck { $sim.calls.Add('health'); throw 'simulated: API down' }
     }
 }
 
@@ -5847,13 +6201,14 @@ $report = [ordered]@{
     config_files = @(Get-ChildItem -LiteralPath $programData -File | ForEach-Object { $_.Name })
     config_kept = (Test-Path -LiteralPath $statePath)
     module_path = $env:PSModulePath
+    plan = @($script:Plan.ToArray())
     health = [ordered]@{
         exit_code = $script:ExitCode; warnings = $script:Warnings.ToArray()
         api_calls = $sim.api_calls; https_calls = $sim.https_calls; api_uri = $sim.api_uri
         root_copied = (Test-Path -LiteralPath $CaddyRootCopy)
     }
 }
-Write-Text $OutputPath ($report | ConvertTo-Json -Depth 6)
+Write-Text $OutputPath ($report | ConvertTo-Json -Depth 8)
 """
 
 
@@ -6009,6 +6364,30 @@ def test_upgrade_failing_in_the_migration_runs_only_the_evidence_path(
     assert Path(dump).is_file()
     assert report["state"]["last_failure"]["database_uncertain"] is True
     assert "-Rollback -RestoreDatabase -DatabaseDump" in report["stdout"]
+
+
+def test_upgrade_failing_in_the_migration_names_this_versions_installer_for_the_restore(
+    engine: str, tmp_path: Path
+) -> None:
+    """Review of #147 (round 2), as item 1 for a rollback: after the swap-back
+    <InstallDir>\\installer\\ holds the previous version's installer, whose -RestoreDatabase
+    is pg_restore --clean into the live database (it fails on a schema from 0021_db_window on).
+    The printed restore names this version's copy, in the folder the failed version was moved
+    to, and says why not the one in the program folder."""
+    report = simulate(engine, tmp_path, "migration")
+    assert report["exit"] == 3
+    (failed,) = [n for n in _folders(report) if n.startswith("ARCILOGGER.failed-")]
+    stdout = _unwrapped(report["stdout"])
+    retry = re.search(r'-File"([^"]*)"-Rollback-RestoreDatabase-DatabaseDump"([^"]*)"', stdout)
+    assert retry is not None, stdout
+    program = tmp_path / "sim" / "program"
+    assert Path(retry.group(1).replace("\\", "/")) == (
+        program / failed / "installer" / "Install-Arcilogger.ps1"
+    )
+    assert Path(retry.group(2)) == Path(report["state"]["last_dump"])
+    installed = str(program / "ARCILOGGER" / "installer").replace("\\", "").replace("/", "")
+    shown = stdout.replace("\\", "").replace("/", "")
+    assert _unwrapped(NOT_THE_PREVIOUS_INSTALLER.format(installed)) in shown
 
 
 def test_upgrade_failing_to_move_the_program_folder_changes_nothing(
@@ -6213,6 +6592,601 @@ def test_rollback_lowers_the_leases_when_the_previous_program_cannot_be_checked(
     assert _unwrapped(PACKAGE_NOT_FOUND) in stdout
     assert stdout.index(_unwrapped(LEASES_UNDECIDED)) < stdout.index(_unwrapped(LEASES_LOWERED))
     assert _unwrapped(LEASES_NOT_NEEDED) not in stdout
+
+
+#: What the rollback prints after "arcilogger-db schema downgrade" (the simulated JSON).
+SCHEMA_DOWNGRADED = (
+    "Veritabanı şeması [database schema]: 0021_db_window -> 0020_fg_traffic_transip_time; "
+    "db.retention_days 30 -> 400, denetim kaydı [audit entry] 4711; yükseltmenin değişikliği "
+    "[the upgrade's change]: denetim kaydı [audit entry] 4710"
+)
+#: ... and when the command failed: the rollback stopped before the swap, and the way back.
+SCHEMA_NOT_DOWNGRADED = (
+    "[the database could not be downgraded to the restored version's schema] (çıkış kodu 1 "
+    "[exit code]: Günlük bölümler birleştirilemedi: kilit beklenirken süre doldu. [The daily "
+    "partitions could not be merged: lock timeout.])"
+)
+ROLLBACK_STOPPED = (
+    "Geri alma durduruldu: program değiştirilmedi, bu sürüm kurulu kaldı [the rollback stopped: "
+    "the program was not swapped, this version stays installed]."
+)
+SCHEMA_WAY_BACK = (
+    "[if it keeps failing, restore the database from the pre-upgrade backup] "
+    "(docs\\YEDEKLEME.md bölüm 5, docs\\BACKUP.md section 5):"
+)
+#: ... when the command refused the revision itself (2): only the restore.
+SCHEMA_RESTORE_ONLY = (
+    "[restore the database from the pre-upgrade backup] (docs\\YEDEKLEME.md bölüm 5, "
+    "docs\\BACKUP.md section 5):"
+)
+RUN_AGAIN = "[run -Rollback again: the downgrade goes on where it stopped]"
+#: After a downgrade and a failed swap: this version's schema back, or the manual step.
+SCHEMA_BACK = "[the database schema is this version's again] (arcilogger-db upgrade)"
+SCHEMA_NOT_BACK = (
+    "[the database schema is not this version's again: run this in an administrator PowerShell, "
+    "then start the services, or restore the pre-upgrade dump (-Rollback -RestoreDatabase)]"
+)
+DOWNGRADE_CALL = "process arcilogger-db.exe schema downgrade"
+CURRENT_CALL = "process arcilogger-db.exe current --config"
+REUPGRADE_CALL = "process arcilogger-db.exe upgrade --config"
+
+
+def _first_call(calls: list[str], prefix: str) -> int:
+    return min(i for i, c in enumerate(calls) if c.startswith(prefix))
+
+
+def test_rollback_downgrades_the_schema_before_the_swap(engine: str, tmp_path: Path) -> None:
+    """Issue #122: the previous version has no 0021_db_window. With the services stopped and
+    after the lease step (which works on this version's schema), before the program folders are
+    swapped, this version's ``arcilogger-db schema downgrade --to <its head> --json`` runs once,
+    without a time limit, after ``arcilogger-db current`` read the database's revision; its JSON
+    is kept in the plan and printed (the old and the new db.retention_days and the audit entries
+    the command wrote); then the rollback goes on."""
+    report = simulate(engine, tmp_path, "rollback-downgrade")
+    assert report["exit"] is None, report["message"]
+    calls = report["calls"]
+    step = calls.index(DOWNGRADE_CALL)
+    assert calls.count(DOWNGRADE_CALL) == 1
+    assert calls.index("process arcilogger-db.exe leases prepare-rollback") < calls.index(
+        CURRENT_CALL
+    )
+    assert calls.index(CURRENT_CALL) < step
+    assert step > max(i for i, c in enumerate(calls) if c.startswith("stop "))
+    for name in ("ArciIngest", "ArciWorker"):
+        assert calls.index(f"stop {name}") < step, name
+    assert step > calls.index("process arcilogger-db.exe leases prepare-rollback")
+    assert step < _first_call(calls, "rename "), "before the program folders are swapped"
+    (process,) = [p for p in report["processes"] if p["arguments"].startswith("schema ")]
+    arguments = process["arguments"]
+    assert re.fullmatch(
+        r"schema downgrade --to 0020_fg_traffic_transip_time --json --config \S*arcilogger\.toml",
+        arguments,
+    ), arguments
+    assert process["timeout"] == 0
+    item = {i["id"]: i for i in report["plan"]}[DOWNGRADE]
+    assert item["status"] == "done"
+    assert item["detail"]["result"] == {
+        "from": "0021_db_window",
+        "to": "0020_fg_traffic_transip_time",
+        "downgraded": True,
+        "audit_id": 4711,
+        "retention_days": {"before": 30, "after": 400},
+        "upgrade_audit_id": 4710,
+    }
+    assert item["detail"]["database_head"] == "0021_db_window"
+    assert _unwrapped(SCHEMA_DOWNGRADED) in _unwrapped(report["stdout"])
+    assert REUPGRADE_CALL not in calls
+    assert _folders(report)["ARCILOGGER"] == "0.9.0"
+    assert _running(report) == ALL_SERVICES
+    assert report["state"].get("last_failure") is None
+
+
+def test_rollback_to_the_same_schema_runs_no_downgrade(engine: str, tmp_path: Path) -> None:
+    """The previous version knows this version's head: no command, the step is recorded as
+    skipped, and the rollback goes on."""
+    report = simulate(engine, tmp_path, "rollback")
+    assert report["exit"] is None, report["message"]
+    assert not [c for c in report["calls"] if "schema" in c]
+    item = {i["id"]: i for i in report["plan"]}[DOWNGRADE]
+    assert item["status"] == "skipped"
+    assert item["detail"]["previous_head"] == item["detail"]["installed_head"] == SCHEMA[-1]
+    assert _unwrapped(DOWNGRADE_NOT_NEEDED) in _unwrapped(report["stdout"])
+    assert _folders(report)["ARCILOGGER"] == "0.9.0"
+
+
+def test_rollback_that_cannot_downgrade_the_schema_keeps_the_current_version(
+    engine: str, tmp_path: Path
+) -> None:
+    """Issue #122: the downgrade failed (1, its TR/EN message on stderr). The rollback stops
+    before the swap (3): both program folders are as they were, this version's services and
+    tasks run again on its own schema, and the output names -Rollback again and the restore of
+    the pre-upgrade dump (YEDEKLEME/BACKUP section 5) as the way back. A command that failed
+    may have moved alembic's version before it ended, so this version's upgrade runs once before
+    its services start (a no-op at its head; with the seed, the lowered leases come back)."""
+    report = simulate(engine, tmp_path, "rollback-downgrade-fails")
+    assert report["exit"] == 3
+    assert "[previous state restored]" in report["message"]
+    assert _folders(report) == {"ARCILOGGER": "1.0.0", "ARCILOGGER.previous": "0.9.0"}
+    calls = report["calls"]
+    assert not [c for c in calls if c.startswith("rename ")], "nothing swapped"
+    assert calls.count(DOWNGRADE_CALL) == 1
+    assert _running(report) == NEW_SERVICES
+    assert report["tasks"] == {"Replica": "Disabled", "Seal": "Ready", "VerifyDaily": "Ready"}
+    # One upgrade (Restore-DowngradedSchema, which also restores the leases), before start.
+    assert calls.count(REUPGRADE_CALL) == 1
+    assert calls.index(DOWNGRADE_CALL) < calls.index(REUPGRADE_CALL) < _first_call(calls, "start ")
+    assert _unwrapped(SCHEMA_BACK) in _unwrapped(report["stdout"])
+    assert _unwrapped(LEASES_RESTORED) in _unwrapped(report["stdout"])
+    failure = report["state"]["last_failure"]
+    assert failure["operation"] == "rollback"
+    assert failure["database_uncertain"] is False
+    assert SCHEMA_NOT_DOWNGRADED in failure["reason"]
+    assert not failure["manual_steps"]
+    stdout = _unwrapped(report["stdout"])
+    assert _unwrapped(SCHEMA_NOT_DOWNGRADED) in stdout
+    assert _unwrapped(ROLLBACK_STOPPED) in stdout
+    assert _unwrapped(RUN_AGAIN) in stdout
+    assert _unwrapped(SCHEMA_WAY_BACK) in stdout
+    assert re.search(r'-File"[^"]*Install-Arcilogger\.ps1"-Rollback-RestoreDatabase', stdout)
+    assert DOWNGRADE not in {i["id"] for i in report["plan"]}, "not done"
+
+
+def test_rollback_whose_downgrade_process_died_brings_this_versions_schema_back(
+    engine: str, tmp_path: Path
+) -> None:
+    """The downgrade command could not be started or ended without an answer (Invoke-ArciProcess
+    throws): it may have committed the version's move, so the flag set before the call makes
+    this version's upgrade run once before its services start, and the rollback stops before
+    the swap as after a failed downgrade (-Rollback again, then the restore)."""
+    report = simulate(engine, tmp_path, "rollback-downgrade-crash")
+    failure = _assert_stopped_before_the_swap(report)
+    calls = report["calls"]
+    assert calls.count(DOWNGRADE_CALL) == 1
+    assert calls.count(REUPGRADE_CALL) == 1
+    assert calls.index(DOWNGRADE_CALL) < calls.index(REUPGRADE_CALL) < _first_call(calls, "start ")
+    assert "[the process ended without an answer]" in failure["reason"]
+    stdout = _unwrapped(report["stdout"])
+    assert _unwrapped(SCHEMA_BACK) in stdout
+    assert _unwrapped(RUN_AGAIN) in stdout
+    assert _unwrapped(SCHEMA_WAY_BACK) in stdout
+
+
+def _assert_stopped_before_the_swap(report: dict[str, Any]) -> dict[str, Any]:
+    """Exit 3, nothing swapped, this version's services and tasks back; the failure record."""
+    assert report["exit"] == 3, report["message"]
+    assert _folders(report) == {"ARCILOGGER": "1.0.0", "ARCILOGGER.previous": "0.9.0"}
+    assert not [c for c in report["calls"] if c.startswith("rename ")], "nothing swapped"
+    assert _running(report) == NEW_SERVICES
+    assert report["tasks"] == {"Replica": "Disabled", "Seal": "Ready", "VerifyDaily": "Ready"}
+    assert _unwrapped(ROLLBACK_STOPPED) in _unwrapped(report["stdout"])
+    assert DOWNGRADE not in {i["id"] for i in report["plan"]}, "not done"
+    failure: dict[str, Any] = report["state"]["last_failure"]
+    assert failure["database_uncertain"] is False
+    assert not failure["manual_steps"]
+    return failure
+
+
+def test_rollback_whose_downgrade_refused_the_revision_names_only_the_backup_restore(
+    engine: str, tmp_path: Path
+) -> None:
+    """The command refused the revision (2: checked before it changes anything): nothing to
+    bring back, so no upgrade runs (the lease step was not needed either), and running -Rollback
+    again would refuse the same way: the output names only the restore of the dump."""
+    report = simulate(engine, tmp_path, "rollback-downgrade-usage")
+    failure = _assert_stopped_before_the_swap(report)
+    calls = report["calls"]
+    assert calls.count(DOWNGRADE_CALL) == 1
+    assert REUPGRADE_CALL not in calls
+    assert "process arcilogger-db.exe leases prepare-rollback" not in calls
+    assert (
+        "çıkış kodu 2 [exit code]: Şema geri alınmadı [schema not downgraded]"
+        in (failure["reason"])
+    )
+    stdout = _unwrapped(report["stdout"])
+    assert _unwrapped(SCHEMA_BACK) not in stdout
+    assert _unwrapped(RUN_AGAIN) not in stdout
+    assert _unwrapped(SCHEMA_RESTORE_ONLY) in stdout
+    assert re.search(r'-File"[^"]*Install-Arcilogger\.ps1"-Rollback-RestoreDatabase', stdout)
+
+
+def test_rollback_whose_downgrade_cannot_reach_the_database_brings_back_only_the_leases(
+    engine: str, tmp_path: Path
+) -> None:
+    """The command could not connect (3): the schema is as it was, so only the lease restore
+    runs this version's upgrade; the reason says the database cannot be reached."""
+    report = simulate(engine, tmp_path, "rollback-downgrade-db-down")
+    failure = _assert_stopped_before_the_swap(report)
+    calls = report["calls"]
+    assert calls.count(DOWNGRADE_CALL) == 1
+    assert calls.count(REUPGRADE_CALL) == 1
+    assert "veritabanına ulaşılamadı [database unreachable]" in failure["reason"]
+    stdout = _unwrapped(report["stdout"])
+    assert _unwrapped(SCHEMA_BACK) not in stdout
+    assert _unwrapped(LEASES_RESTORED) in stdout
+    assert _unwrapped(RUN_AGAIN) in stdout
+
+
+@pytest.mark.parametrize("scenario", ["rollback-downgrade-bad-to", "rollback-downgrade-not-json"])
+def test_rollback_does_not_swap_on_an_answer_it_cannot_check(
+    engine: str, tmp_path: Path, scenario: str
+) -> None:
+    """Exit 0 with JSON whose ``to`` is not the target, or with no JSON: the schema is not known
+    to be the previous version's, so nothing is swapped, and this version's upgrade runs once
+    before its services start (the command may have moved the version)."""
+    report = simulate(engine, tmp_path, scenario)
+    failure = _assert_stopped_before_the_swap(report)
+    calls = report["calls"]
+    assert calls.count(DOWNGRADE_CALL) == 1
+    assert calls.count(REUPGRADE_CALL) == 1
+    assert calls.index(DOWNGRADE_CALL) < calls.index(REUPGRADE_CALL) < _first_call(calls, "start ")
+    assert "beklenmeyen yanıt [unexpected answer]" in failure["reason"]
+    assert _unwrapped(SCHEMA_BACK) in _unwrapped(report["stdout"])
+
+
+def test_rollback_on_a_database_from_before_the_daily_partitions_runs_no_downgrade(
+    engine: str, tmp_path: Path
+) -> None:
+    """``-Upgrade -SkipDatabase`` left the database at the revision before 0021_db_window: there
+    are no daily partitions, so the step reads the revision and runs no downgrade, and the
+    rollback goes on (the target would be above the database's revision)."""
+    report = simulate(engine, tmp_path, "rollback-downgrade-below")
+    assert report["exit"] is None, report["message"]
+    calls = report["calls"]
+    assert CURRENT_CALL in calls
+    assert DOWNGRADE_CALL not in calls
+    assert REUPGRADE_CALL not in calls
+    item = {i["id"]: i for i in report["plan"]}[DOWNGRADE]
+    assert item["status"] == "done"
+    assert item["detail"]["database_head"] == "0020_fg_traffic_transip_time"
+    assert item["detail"]["result"] is None
+    below = "[the database schema is at 0020_fg_traffic_transip_time, from before 0021_db_window"
+    assert below in report["stdout"]
+    assert _folders(report)["ARCILOGGER"] == "0.9.0"
+    assert _running(report) == ALL_SERVICES
+
+
+def test_rollback_that_cannot_read_the_database_revision_runs_no_downgrade(
+    engine: str, tmp_path: Path
+) -> None:
+    """``arcilogger-db current`` cannot reach the database: no downgrade command, nothing to
+    bring back for the schema, the rollback stops before the swap."""
+    report = simulate(engine, tmp_path, "rollback-downgrade-current-down")
+    failure = _assert_stopped_before_the_swap(report)
+    calls = report["calls"]
+    assert CURRENT_CALL in calls
+    assert DOWNGRADE_CALL not in calls
+    assert calls.count(REUPGRADE_CALL) == 1, "the lease restore only"
+    assert "[could not read the database's schema revision]" in failure["reason"]
+    assert "veritabanına ulaşılamadı [database unreachable]" in failure["reason"]
+    assert _unwrapped(SCHEMA_BACK) not in _unwrapped(report["stdout"])
+
+
+def test_rollback_that_downgraded_and_failed_after_the_swap_does_not_upgrade_the_schema(
+    engine: str, tmp_path: Path
+) -> None:
+    """The downgrade and the swap succeeded, then a later step failed (a configuration the
+    previous version cannot load and no copy to put back): the previous version is in place on
+    its own schema, so no upgrade runs (this version's command would be the previous one's now)
+    and nothing claims this version's schema is back."""
+    report = simulate(engine, tmp_path, "rollback-no-copy-downgrade")
+    assert report["exit"] == 3
+    assert _unwrapped("fix it by hand]") in _unwrapped(report["stdout"])
+    calls = report["calls"]
+    assert calls.count(DOWNGRADE_CALL) == 1
+    assert calls.index(DOWNGRADE_CALL) < _first_call(calls, "rename ")
+    assert REUPGRADE_CALL not in calls
+    assert _unwrapped(SCHEMA_BACK) not in _unwrapped(report["stdout"])
+    assert _unwrapped(ROLLBACK_STOPPED) not in _unwrapped(report["stdout"])
+    assert _folders(report)["ARCILOGGER"] == "0.9.0"
+
+
+def test_rollback_that_downgraded_and_cannot_swap_brings_the_schema_back(
+    engine: str, tmp_path: Path
+) -> None:
+    """The downgrade succeeded, then the swap failed: this version runs on, so its own
+    ``arcilogger-db upgrade`` brings its schema back (and the lowered leases, once) before its
+    services start; nothing is left to do by hand."""
+    report = simulate(engine, tmp_path, "rollback-swap-downgrade")
+    assert report["exit"] == 3
+    assert _folders(report) == {"ARCILOGGER": "1.0.0", "ARCILOGGER.previous": "0.9.0"}
+    assert _running(report) == NEW_SERVICES
+    calls = report["calls"]
+    assert calls.count(REUPGRADE_CALL) == 1
+    assert calls.index(DOWNGRADE_CALL) < calls.index(REUPGRADE_CALL) < _first_call(calls, "start ")
+    assert _unwrapped(SCHEMA_BACK) in _unwrapped(report["stdout"])
+    assert _unwrapped(LEASES_RESTORED) in _unwrapped(report["stdout"])
+    failure = report["state"]["last_failure"]
+    assert failure["database_uncertain"] is False
+    assert not failure["manual_steps"]
+    assert _unwrapped(ROLLBACK_STOPPED) not in _unwrapped(report["stdout"])
+
+
+def test_rollback_that_downgraded_cannot_swap_nor_upgrade_keeps_the_database_services_stopped(
+    engine: str, tmp_path: Path
+) -> None:
+    """... and that upgrade failed too: this version must not run on the previous version's
+    schema, so only the collector and the web server run (no syslog is lost), and the manual step
+    names this version's upgrade command and the restore of the pre-upgrade dump."""
+    report = simulate(engine, tmp_path, "rollback-swap-downgrade-restore-fails")
+    assert report["exit"] == 3
+    assert _folders(report) == {"ARCILOGGER": "1.0.0", "ARCILOGGER.previous": "0.9.0"}
+    assert _running(report) == {"ArciCollector", "ArciWeb"}
+    for name in ("ArciIngest", "ArciApi", "ArciWorker", "ArciAdmin"):
+        assert report["services"][name]["start"] == "demand", name
+    assert report["calls"].count(REUPGRADE_CALL) == 1, "the leases are not tried again"
+    failure = report["state"]["last_failure"]
+    assert failure["database_uncertain"] is True
+    (step,) = failure["manual_steps"]
+    assert SCHEMA_NOT_BACK in step
+    assert "lock timeout" in step
+    assert re.search(r'arcilogger-db\.exe" upgrade --config ".*arcilogger\.toml"$', step), step
+
+
+#: After a restore that failed after the swap: run it again with this version's installer ...
+RESTORE_AGAIN = (
+    "Hatayı giderip geri yüklemeyi bu sürümün kurulum betiğiyle yeniden çalıştırın [fix the error "
+    "and run the restore again with this version's installer]:"
+)
+#: ... not with the previous version's, now in <InstallDir>\\installer\\.
+NOT_THE_PREVIOUS_INSTALLER = (
+    "[not the one in {0}: it is the previous version's, whose restore writes the dump over the "
+    "live database (pg_restore --clean)]."
+)
+
+
+def test_rollback_whose_restore_fails_after_the_swap_names_this_versions_installer(
+    engine: str, tmp_path: Path
+) -> None:
+    """Review of #147, item 1: after the swap <InstallDir>\\installer\\ holds the previous
+    version's installer, whose -RestoreDatabase writes the dump over the live database
+    (pg_restore --clean, the failure #122-8 fixes). A restore that fails then keeps the database
+    services stopped and names this version's copy, in the folder it was moved to, with the dump
+    it was restoring, and says why not the one in the program folder."""
+    report = simulate(engine, tmp_path, "rollback-restore-db-fails")
+    assert report["exit"] == 3, report["message"]
+    folders = _folders(report)
+    (aside,) = [n for n in folders if n.startswith("ARCILOGGER.rolled-back-")]
+    assert folders["ARCILOGGER"] == "0.9.0"
+    assert folders[aside] == "1.0.0"
+    assert re.fullmatch(r"ARCILOGGER\.rolled-back-\d{14}", aside), aside
+    assert _running(report) == {"ArciCollector", "ArciWeb"}, "the database services stay stopped"
+    failure = report["state"]["last_failure"]
+    assert failure["operation"] == "rollback"
+    assert failure["database_uncertain"] is True
+    assert "connection to server" in failure["reason"]
+    stdout = _unwrapped(report["stdout"])
+    assert _unwrapped(RESTORE_AGAIN) in stdout
+    program = tmp_path / "sim" / "program"
+    retry = re.search(r'-File"([^"]*)"-Rollback-RestoreDatabase-DatabaseDump"([^"]*)"', stdout)
+    assert retry is not None, stdout
+    copy = Path(retry.group(1).replace("\\", "/"))
+    assert copy == program / aside / "installer" / "Install-Arcilogger.ps1"
+    assert Path(retry.group(2)) == tmp_path / "sim" / "before-upgrade.dump"
+    installed = str(program / "ARCILOGGER" / "installer").replace("\\", "").replace("/", "")
+    shown = stdout.replace("\\", "").replace("/", "")
+    assert _unwrapped(NOT_THE_PREVIOUS_INSTALLER.format(installed)) in shown
+    # Refused before the rename: the database is as it was, only the program does not match it.
+    assert _unwrapped(RESTORE_NOT_CHANGED) in stdout
+    assert _unwrapped("[the database may be half-changed]") not in stdout
+
+
+#: A restore refused or failed before its rename.
+RESTORE_NOT_CHANGED = (
+    "[the database was not changed; the database services do not start before the restore is done]."
+)
+#: A restore whose rename committed ...
+RESTORE_DONE = "[the database was restored from the dump]: {0}"
+#: ... is not run again.
+RESTORE_NOT_AGAIN = (
+    "[do not run the restore again: it would replace the restored database once more and take "
+    "the space of another copy]."
+)
+
+
+def test_database_only_restore_that_fails_keeps_the_database_services_stopped(
+    engine: str, tmp_path: Path
+) -> None:
+    """Review of #147 (round 2): -Rollback -RestoreDatabase without ARCILOGGER.previous (after an
+    upgrade's swap-back, or the retry run from the rolled-back folder) restores the database
+    only. The program in place may not match the database, so a restore that fails before
+    pg_restore (here psql cannot reach the server; also a short disk) keeps the database
+    services stopped and on manual start, as after a rollback's swap, and names the retry."""
+    report = simulate(engine, tmp_path, "rollback-restore-db-only-fails")
+    assert report["exit"] == 3, report["message"]
+    assert _folders(report) == {"ARCILOGGER": "1.0.0"}
+    assert _running(report) == {"ArciCollector", "ArciWeb"}, "the database services stay stopped"
+    for name in ("ArciIngest", "ArciApi", "ArciWorker", "ArciAdmin"):
+        assert report["services"][name]["start"] == "demand", name
+    failure = report["state"]["last_failure"]
+    assert failure["operation"] == "rollback"
+    assert failure["database_uncertain"] is True
+    assert "connection to server" in failure["reason"]
+    stdout = _unwrapped(report["stdout"])
+    assert _unwrapped(RESTORE_NOT_CHANGED) in stdout
+    assert _unwrapped(RESTORE_AGAIN) in stdout
+    retry = re.search(r'-File"([^"]*)"-Rollback-RestoreDatabase-DatabaseDump"([^"]*)"', stdout)
+    assert retry is not None, stdout
+    assert Path(retry.group(1)) == INSTALL_SCRIPT, "no swap: the running installer"
+    assert Path(retry.group(2)) == tmp_path / "sim" / "before-upgrade.dump"
+
+
+def test_rollback_whose_restore_committed_but_post_restore_failed_says_what_is_left(
+    engine: str, tmp_path: Path
+) -> None:
+    """Review of #147 (round 2): the rename committed, timescaledb_post_restore() of the database
+    now in place failed. The database is the dump's but in TimescaleDB's restore mode: the
+    database services stay stopped, and the text says so, names the replaced database, the
+    post_restore to run and how to start the services; it does not tell to restore again (that
+    would replace the restored database once more)."""
+    report = simulate(engine, tmp_path, "rollback-restore-committed-post-fails")
+    assert report["exit"] == 3, report["message"]
+    assert _running(report) == {"ArciCollector", "ArciWeb"}
+    assert report["state"]["last_failure"]["database_uncertain"] is True
+    stdout = _unwrapped(report["stdout"])
+    dump = str(tmp_path / "sim" / "before-upgrade.dump")
+    assert _unwrapped(RESTORE_DONE.format(dump)) in stdout
+    kept = "[the replaced database is kept as 'arcilogger_replaced_20261104120000'"
+    assert _unwrapped(kept) in stdout
+    assert _unwrapped('"arcilogger" -c "SELECT timescaledb_post_restore();"') in stdout
+    start_services = (
+        "foreach ($n in 'ArciIngest', 'ArciApi', 'ArciWorker', 'ArciAdmin') { if (Get-Service "
+        "$n -ErrorAction SilentlyContinue) { sc.exe config $n start= delayed-auto; "
+        "Start-Service $n } }"
+    )
+    assert _unwrapped(start_services) in stdout
+    assert _unwrapped(RESTORE_NOT_AGAIN) in stdout
+    assert _unwrapped(RESTORE_AGAIN) not in stdout
+    assert _unwrapped("[the database may be half-changed]") not in stdout
+
+
+def test_rollback_whose_restore_is_done_starts_the_services_when_a_later_step_fails(
+    engine: str, tmp_path: Path
+) -> None:
+    """Review of #147 (round 2): the restore is done (renamed, post_restore run): the database is
+    the pre-upgrade dump's, which the restored program runs on. A later step (the health check)
+    fails: the services start again and the text does not ask for another restore."""
+    report = simulate(engine, tmp_path, "rollback-restore-committed-health-fails")
+    assert report["exit"] == 3, report["message"]
+    assert "health" in report["calls"]
+    assert _running(report) == ALL_SERVICES
+    assert report["state"]["last_failure"]["database_uncertain"] is False
+    stdout = _unwrapped(report["stdout"])
+    dump = str(tmp_path / "sim" / "before-upgrade.dump")
+    assert _unwrapped(RESTORE_DONE.format(dump)) in stdout
+    assert _unwrapped(RESTORE_NOT_AGAIN) in stdout
+    assert _unwrapped(RESTORE_AGAIN) not in stdout
+    assert "timescaledb_post_restore" not in stdout
+
+
+def test_rollback_refuses_when_the_previous_schema_cannot_be_told(
+    engine: str, tmp_path: Path
+) -> None:
+    """No migrations folder in the previous program: the rollback stops before any change (2),
+    the services and tasks of this version run on untouched."""
+    report = simulate(engine, tmp_path, "rollback-downgrade-unknown")
+    assert report["exit"] == 2
+    assert SCHEMA_UNKNOWN in report["message"]
+    assert "-Rollback -RestoreDatabase" in report["message"]
+    calls = report["calls"]
+    assert not [c for c in calls if c.startswith(("stop ", "process ", "rename ", "exe "))]
+    assert _folders(report) == {"ARCILOGGER": "1.0.0", "ARCILOGGER.previous": "0.9.0"}
+    assert _running(report) == NEW_SERVICES
+    assert report["tasks"] == {"Replica": "Disabled", "Seal": "Ready", "VerifyDaily": "Ready"}
+    assert report["state"].get("last_failure") is None
+
+
+class _FakeConnection:
+    """What ``arcilogger-db``'s handlers do with a connection when the database parts are
+    replaced (the installer's side of the interface is tested, not the database's)."""
+
+    def __enter__(self) -> _FakeConnection:
+        return self
+
+    def __exit__(self, *_exc: object) -> None:
+        return None
+
+
+class _FakeEngine:
+    def connect(self) -> _FakeConnection:
+        return _FakeConnection()
+
+    def dispose(self) -> None:
+        return None
+
+
+def _db_cli(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, argv: list[str], capsys: Any
+) -> tuple[int, str]:
+    """The real ``arcilogger-db`` parser and handler for ``argv`` (``--config`` appended)."""
+    from arcilogger_db import cli
+
+    monkeypatch.setattr(cli, "_engine", lambda config: _FakeEngine())
+    config = tmp_path / "arcilogger.toml"
+    config.write_text(f'data_dir = "{(tmp_path / "data").as_posix()}"\n', encoding="utf-8")
+    capsys.readouterr()
+    code = cli.main([*argv, "--config", str(config)])
+    return code, capsys.readouterr().out
+
+
+def _installer_downgrade_argv(revision: str) -> list[str]:
+    """The arguments Invoke-SchemaDowngradeStep passes, from the installer's own text."""
+    text = INSTALL_SCRIPT.read_text(encoding="utf-8-sig")
+    match = re.search(r"^\$SchemaDowngradeCommand = @\(([^)]*)\)$", text, re.MULTILINE)
+    assert match, "the installer names its command in $SchemaDowngradeCommand"
+    command = re.findall(r"'([^']*)'", match.group(1))
+    step = text[text.index("function Invoke-SchemaDowngradeStep") :]
+    call = "@($SchemaDowngradeCommand) + @('--to', $Plan.to, '--json', '--config', $ConfigPath)"
+    assert call in step
+    return [*command, "--to", revision, "--json"]
+
+
+def test_the_installers_downgrade_call_and_its_json_match_arcilogger_db(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Issue #122, the interface between the two halves: the installer's exact arguments go
+    through the real ``arcilogger-db`` parser to the schema handler, and every field the
+    installer reads from the answer is in the JSON that handler prints (``to`` as the target)."""
+    from arcilogger_db import cli
+    from arcilogger_db.downgrade import DowngradeResult
+
+    seen: list[str] = []
+
+    def downgrade(connection: Any, revision: str, **_kwargs: Any) -> DowngradeResult:
+        seen.append(revision)
+        return DowngradeResult(
+            before=("0021_db_window",),
+            after=(revision,),
+            retention_before=30,
+            retention_after=400,
+            audit_id=12,
+            upgrade_audit_id=11,
+        )
+
+    monkeypatch.setattr(cli, "downgrade_schema", downgrade)
+    target = "0020_fg_traffic_transip_time"
+    code, out = _db_cli(monkeypatch, tmp_path, _installer_downgrade_argv(target), capsys)
+    assert code == 0
+    assert seen == [target]
+    document = json.loads(out)
+    text = INSTALL_SCRIPT.read_text(encoding="utf-8-sig")
+    step = text[text.index("function Invoke-SchemaDowngradeStep") :]
+    step = step[: step.index("\nfunction ")]
+    fields = set(re.findall(r"-Object \$answer -Name '(\w+)'", step))
+    assert fields == {"to", "from", "retention_days", "audit_id", "upgrade_audit_id"}
+    assert fields <= set(document)
+    assert set(re.findall(r"-Object \$days -Name '(\w+)'", step)) == set(document["retention_days"])
+    assert document["to"] == target
+
+
+@pytest.mark.parametrize(("revisions", "code"), [(("0021_db_window",), 0), (("0020_x",), 1)])
+def test_the_installers_reading_of_arcilogger_db_current_matches_its_output(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    revisions: tuple[str, ...],
+    code: int,
+) -> None:
+    """Get-DatabaseSchemaRevision's pattern finds the revision in what the real ``arcilogger-db
+    current`` prints, at this version's head (0) and below it (1); no schema prints none."""
+    from arcilogger_db import cli
+
+    monkeypatch.setattr(cli, "head_revisions", lambda: ("0021_db_window",))
+    text = INSTALL_SCRIPT.read_text(encoding="utf-8-sig")
+    function = text[text.index("function Get-DatabaseSchemaRevision") :]
+    pattern = re.search(r"\[regex\]::Match\(\[string\]\$result\.StdOut, '([^']+)'\)", function)
+    assert pattern, "the installer's pattern"
+    assert "@('current', '--config', $ConfigPath)" in function
+    regex = re.compile(pattern.group(1).replace("(?m)", ""), re.MULTILINE)
+    for current, exit_code in ((revisions, code), ((), 1)):
+        monkeypatch.setattr(cli, "current_revisions", lambda connection, c=current: c)
+        result, out = _db_cli(monkeypatch, tmp_path, ["current"], capsys)
+        assert result == exit_code
+        match = regex.search(out)
+        if current:
+            assert match, out
+            assert match.group(1) == current[0], out
+        else:
+            assert match is None, out
 
 
 #: arcilogger.toml as the harness writes it before an upgrade (no key a version before the
@@ -6893,6 +7867,752 @@ def test_database_create_statement_runs_on_postgresql(engine: str, tmp_path: Pat
         run("\n".join(sql) + "\n")  # run again: the existing database is left alone
     finally:
         run(f"DROP DATABASE IF EXISTS {name};\n")
+
+
+# --- Invoke-DatabaseRestore (issue #122, -Rollback -RestoreDatabase) ------------------------------
+#
+# Simulated: the installer's restore runs for real (dot-sourced) with psql and pg_restore replaced
+# by a recorder that answers as a server would; the tests see every call and its SQL. Then the
+# same function against a real PostgreSQL 16 and a real TimescaleDB.
+
+_RESTORE_SIM_SCRIPT = r"""
+param([string]$Installer, [string]$Base, [string]$Scenario, [string]$OutputPath,
+    [string]$StateFile = '')
+$ErrorActionPreference = 'Stop'
+$programData = Join-Path $Base 'programdata/ARCILOGGER'
+[void](New-Item -ItemType Directory -Path (Join-Path $programData 'install') -Force)
+if ($StateFile) {
+    Copy-Item -LiteralPath $StateFile -Destination (Join-Path $programData 'install/state.json')
+}
+$dump = Join-Path $Base 'before.dump'
+[System.IO.File]::WriteAllText($dump, 'PGDMP simulated')
+. $Installer -InstallDir (Join-Path $Base 'program/ARCILOGGER') -ProgramDataDir $programData `
+    -DataRoot (Join-Path $Base 'data/ARCILOGGER') -BundleRoot (Join-Path $Base 'bundle') `
+    -SkipFirewall -SkipTimeSetup -PgBinDir $Base -DatabaseDump $dump -Force
+$script:Recorded = New-Object System.Collections.Generic.List[object]
+$script:SimRenamed = $false
+# remote: PostgreSQL on another server ([database] host not loopback).
+function Get-DatabaseSettings {
+    $address = $(if ($Scenario -eq 'remote') { '192.0.2.10' } else { '127.0.0.1' })
+    [pscustomobject]@{ host = $address; port = 5432; name = 'arcilogger'; user = 'arcilogger' }
+}
+# state-fails: install\state.json cannot take the replaced database (locked, or the disk full).
+if ($Scenario -eq 'state-fails') {
+    $script:WriteState = ${function:Write-InstallState}
+    function Write-InstallState([hashtable]$Changes) {
+        if ($Changes.ContainsKey('replaced_databases')) { throw 'simulated: state.json is locked' }
+        & $script:WriteState $Changes
+    }
+}
+function Get-PgCredential {
+    $secret = ConvertTo-SecureString 'x' -AsPlainText -Force
+    New-Object System.Management.Automation.PSCredential -ArgumentList 'postgres', $secret
+}
+function Find-PostgresService { $null }
+# The PostgreSQL data drive: 1 MB free (disk-short), the database's size (disk-equal) or 100 GB;
+# the database has 5 GB, max_wal_size is 1 GB.
+function Get-ArciDriveFacts {
+    param([string]$Root)
+    $script:Recorded.Add([ordered]@{
+            tool = 'drive'; database = $null; arguments = $Root; sql = $null
+            renamed = $script:SimRenamed
+        })
+    $free = $(switch ($Scenario) { 'disk-short' { 1MB } 'disk-equal' { 5GB } default { 100GB } })
+    [pscustomobject]@{
+        Root = $Root; DriveType = 'Fixed'; IsReady = $true; DriveFormat = 'NTFS'
+        FreeBytes = [int64]$free
+    }
+}
+# A TimescaleDB 2.30.2 database (plain: none), its data directory D:\ARCILOGGER\db (disk-unknown:
+# not readable), and the failures: the settings and rights after CREATE DATABASE (grant-fails),
+# the rename while a pgAdmin window is open (rename-busy), the post_restore of the database
+# renamed into place (post-restore-fails), and a rename that committed although psql reported
+# an error (rename-lost: the connection was lost after the COMMIT).
+function Invoke-PgTool {
+    param([string]$Tool, [string[]]$ArgumentList, [string]$StdinText, [string[]]$Redact = @())
+    $database = $null
+    if ($ArgumentList -contains '-d') {
+        $database = $ArgumentList[[array]::IndexOf($ArgumentList, '-d') + 1]
+    }
+    $script:Recorded.Add([ordered]@{
+            tool = $Tool; database = $database; arguments = ($ArgumentList -join ' ')
+            sql = $StdinText; renamed = $script:SimRenamed
+        })
+    $sql = [string]$StdinText
+    $out = ''
+    if ($sql -match 'datlocprovider') { $out = 'c' }
+    elseif ($sql -match 'pg_database_size') {
+        $directory = $(if ($Scenario -eq 'disk-unknown') { '' } else { 'D:\ARCILOGGER\db' })
+        $out = '{0}|{1}|{2}' -f (5GB), (1GB), $directory
+    }
+    elseif ($sql -match "datname = :'old_name'") {
+        $out = $(if ($script:SimRenamed) { '1' } else { '0' })
+    }
+    elseif ($sql -match 'extversion') {
+        $out = $(if ($Scenario -eq 'plain') { '' } else { '2.30.2' })
+    }
+    elseif ($sql -match 'pg_stat_activity') {
+        $out = "pid 4242 'pgAdmin 4 - DB:arcilogger' (arcilogger)"
+    }
+    elseif ($sql -match 'GRANT %s' -and $Scenario -eq 'grant-fails') {
+        throw 'psql.exe: çıkış kodu 3 [exit code]: ERROR: role "arcilogger_ro" does not exist'
+    }
+    elseif ($sql -match 'RENAME TO') {
+        if ($Scenario -eq 'rename-busy') {
+            throw ('psql.exe: çıkış kodu 3 [exit code]: ERROR: database "arcilogger" is being ' +
+                'accessed by other users')
+        }
+        $script:SimRenamed = $true
+        if ($Scenario -eq 'rename-lost') {
+            throw 'psql.exe: çıkış kodu 2 [exit code]: server closed the connection unexpectedly'
+        }
+    }
+    elseif ($sql -match 'timescaledb_post_restore' -and $script:SimRenamed -and
+        $Scenario -eq 'post-restore-fails') {
+        throw 'psql.exe: çıkış kodu 3 [exit code]: ERROR: simulated post_restore failure'
+    }
+    [pscustomobject]@{ ExitCode = 0; StdOut = $out; StdErr = '' }
+}
+$failure = $null
+try { Invoke-DatabaseRestore } catch { $failure = $_.Exception.Message }
+$state = $null
+if (Test-Path -LiteralPath $StatePath) {
+    $state = [System.IO.File]::ReadAllText($StatePath) | ConvertFrom-Json
+}
+# Where the failure left the database, for Complete-FailedChange.
+$report = [ordered]@{
+    error = $failure; calls = $script:Recorded.ToArray(); state = $state
+    committed = $script:RestoreCommitted; current_restoring = $script:RestoreCurrentRestoring
+}
+$utf8 = New-Object System.Text.UTF8Encoding -ArgumentList $false
+[System.IO.File]::WriteAllText($OutputPath, ($report | ConvertTo-Json -Depth 6), $utf8)
+"""
+
+
+def _restore_sim(
+    engine: str, tmp_path: Path, scenario: str, state: dict[str, Any] | None = None
+) -> dict[str, Any]:
+    output = tmp_path / "restore.json"
+    script = write_script(tmp_path / "restore-sim.ps1", _RESTORE_SIM_SCRIPT)
+    base = tmp_path / "restore-sim"
+    base.mkdir()
+    extra: list[str] = []
+    if state is not None:
+        state_file = tmp_path / "state-before.json"
+        state_file.write_text(json.dumps(state), encoding="utf-8")
+        extra = ["-StateFile", str(state_file)]
+    result = run_powershell(
+        engine, script, "-Installer", str(INSTALL_SCRIPT), "-Base", str(base), "-Scenario",
+        scenario, "-OutputPath", str(output), *extra,
+    )  # fmt: skip
+    assert result.returncode == 0, result.stdout + result.stderr
+    report: dict[str, Any] = read_json(output)
+    report["stdout"] = result.stdout
+    report["dump"] = str(base / "before.dump")
+    return report
+
+
+def _call(report: dict[str, Any], needle: str) -> int:
+    """The index of the first call whose SQL or arguments contain ``needle``."""
+    return next(
+        i
+        for i, call in enumerate(report["calls"])
+        if needle in (call["sql"] or "") or needle in call["arguments"]
+    )
+
+
+def _has_call(report: dict[str, Any], needle: str) -> bool:
+    return any(needle in (c["sql"] or "") or needle in c["arguments"] for c in report["calls"])
+
+
+def _sql_of(report: dict[str, Any], needle: str) -> str:
+    """The SQL of the first call whose SQL or arguments contain ``needle``."""
+    return str(report["calls"][_call(report, needle)]["sql"])
+
+
+#: The console warning when the rename has committed ...
+REPLACED_KEPT = (
+    "[the replaced database is kept as '{0}': the rows written after the dump are only there; it "
+    "takes disk space, removing it is the administrator's decision (docs\\BACKUP.md section 5)]"
+)
+#: ... and, on TimescaleDB, that the replaced database is still in restore mode.
+REPLACED_RESTORING = (
+    "'{0}' TimescaleDB geri yükleme kipinde kaldı (timescaledb.restoring = on): yeniden "
+    "kullanmadan önce onda SELECT timescaledb_post_restore(); çalıştırın [it stays in TimescaleDB "
+    "restore mode: run SELECT timescaledb_post_restore(); in it before putting it back]"
+)
+#: The refusal when the PostgreSQL data drive cannot hold the new database.
+RESTORE_DISK_SHORT = (
+    "[not enough free space on the PostgreSQL data drive, the database was not changed: {0} MB "
+    "free, the restore needs about {1} MB (the current database's size and a quarter more, plus "
+    "max_wal_size for the WAL; the current one is kept too); free some space or restore the dump "
+    "by hand, docs\\BACKUP.md section 5]: {2}"
+)
+#: The simulated database (5 GB) and a quarter more, plus max_wal_size (1 GB), in MB.
+RESTORE_SIM_NEED_MB = 5120 + 1280 + 1024
+#: The rename refused because another session is open on a database.
+RESTORE_RENAME_BUSY = (
+    "[the database could not be renamed: another session is open on it ({0}), for example a "
+    "pgAdmin or psql window; close it and run the restore again (the new database is dropped, "
+    "the current one stays as it was)]"
+)
+
+
+def test_database_restore_runs_pg_restore_per_object_with_the_extension_version_pinned(
+    engine: str, tmp_path: Path
+) -> None:
+    """Review of #147, items 2 and 3: pg_restore stops at the first error but runs one
+    transaction per object, as ``arcilogger-db restore`` (backup.py ``_restore_into``): one
+    transaction holds a lock on every table, index and TOAST table, which a TimescaleDB
+    database's chunks outgrow (max_locks_per_transaction). The new database gets TimescaleDB at
+    the current database's version, in its restore mode, before pg_restore; the order is
+    pre_restore of the current database, CREATE DATABASE, its settings and rights (a run of
+    their own), the extension, pg_restore, the rename, post_restore of the database now in
+    place."""
+    report = _restore_sim(engine, tmp_path, "timescale")
+    assert report["error"] is None, report["error"]
+    calls = report["calls"]
+    (restore,) = [c for c in calls if c["tool"] == "pg_restore.exe"]
+    arguments = restore["arguments"].split(" ")
+    assert "--exit-on-error" in arguments
+    assert "--single-transaction" not in arguments
+    assert "--clean" not in arguments
+    new = restore["database"]
+    assert re.fullmatch(r"arcilogger_restore_\d{14}", new), new
+    assert arguments[-1] == report["dump"]
+    extension = calls[_call(report, "CREATE EXTENSION")]
+    assert extension["database"] == new
+    assert extension["sql"] == (
+        "CREATE EXTENSION IF NOT EXISTS timescaledb VERSION '2.30.2';\n"
+        "SELECT timescaledb_pre_restore();\n"
+    )
+    pre = _call(report, "timescaledb_pre_restore")
+    assert calls[pre]["database"] == "arcilogger"
+    create = _call(report, "CREATE DATABASE")
+    assert "GRANT" not in calls[create]["sql"]
+    assert "ALTER DATABASE" not in calls[create]["sql"]
+    grants = _call(report, "GRANT %s")
+    rename = _call(report, "RENAME TO")
+    (post,) = [i for i, c in enumerate(calls) if "timescaledb_post_restore" in (c["sql"] or "")]
+    assert pre < create < grants < calls.index(extension) < calls.index(restore) < rename < post
+    assert calls[post]["database"] == "arcilogger"
+    assert calls[post]["renamed"]
+    (entry,) = report["state"]["replaced_databases"]
+    replaced = entry["name"]
+    assert replaced == new.replace("_restore_", "_replaced_")
+    assert entry["dump"] == report["dump"]
+    assert entry["timescaledb_restoring"] is True
+    assert re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ", entry["replaced_at"])
+    assert report["state"]["last_restore"] == report["dump"]
+    stdout = _unwrapped(report["stdout"])
+    assert _unwrapped(REPLACED_KEPT.format(replaced)) in stdout
+    assert _unwrapped(REPLACED_RESTORING.format(replaced)) in stdout
+    # Done: a later step's failure needs neither another restore nor stopped services.
+    assert report["committed"] == {
+        "database": "arcilogger",
+        "replaced": replaced,
+        "host": "127.0.0.1",
+        "port": "5432",
+        "user": "postgres",
+        "post_restore_due": False,
+    }
+    assert report["current_restoring"] is False
+
+
+def test_database_restore_without_timescaledb_has_no_restore_mode(
+    engine: str, tmp_path: Path
+) -> None:
+    report = _restore_sim(engine, tmp_path, "plain")
+    assert report["error"] is None, report["error"]
+    assert not _has_call(report, "CREATE EXTENSION")
+    assert not _has_call(report, "timescaledb_pre_restore")
+    assert not _has_call(report, "timescaledb_post_restore")
+    (entry,) = report["state"]["replaced_databases"]
+    assert entry["timescaledb_restoring"] is False
+    assert "[it stays in TimescaleDB restore mode" not in _unwrapped(report["stdout"])
+
+
+def test_database_restore_records_the_replaced_database_as_soon_as_the_rename_commits(
+    engine: str, tmp_path: Path
+) -> None:
+    """Review of #147, item 4: post_restore of the database now in place fails after the rename
+    committed. The replaced database is already in install\\state.json and on the console; an
+    earlier restore's replaced database stays in the record (a list, oldest first)."""
+    earlier = {
+        "name": "arcilogger_replaced_20261101090000",
+        "dump": "D:\\ARCILOGGER\\backups\\db\\arcilogger-20261101-085500Z-before-2.0.0.dump",
+        "replaced_at": "2026-11-01T09:00:00Z",
+        "timescaledb_restoring": True,
+    }
+    state = {"database_provisioned": True, "replaced_databases": [earlier]}
+    report = _restore_sim(engine, tmp_path, "post-restore-fails", state=state)
+    assert report["error"] is not None
+    assert "simulated post_restore failure" in report["error"]
+    kept = report["state"]["replaced_databases"]
+    assert kept[0] == earlier
+    assert len(kept) == 2
+    replaced = kept[1]["name"]
+    assert re.fullmatch(r"arcilogger_replaced_\d{14}", replaced), replaced
+    assert kept[1]["timescaledb_restoring"] is True
+    stdout = _unwrapped(report["stdout"])
+    assert _unwrapped(REPLACED_KEPT.format(replaced)) in stdout
+    assert _unwrapped(REPLACED_RESTORING.format(replaced)) in stdout
+    assert not _has_call(report, "DROP DATABASE"), "nothing is dropped after the rename"
+    assert report["committed"]["replaced"] == replaced
+    assert report["committed"]["post_restore_due"] is True, "the database services stay stopped"
+
+
+def test_database_restore_refuses_when_the_data_drive_cannot_hold_the_new_database(
+    engine: str, tmp_path: Path
+) -> None:
+    """Review of #147, item 5: before any change, the drive of PostgreSQL's data directory must
+    have the current database's size free (the new database lands there, the current one is
+    kept), and a margin: a quarter more (chunks the current database compressed after the dump
+    come back uncompressed) plus max_wal_size for the WAL pg_restore writes on that drive. Free
+    space just at the database's size is refused too (the drive would fill: PostgreSQL stops on
+    a full pg_wal, the collector cannot write raw logs)."""
+    for scenario, free_mb in (("disk-short", 1), ("disk-equal", 5120)):
+        (tmp_path / scenario).mkdir()
+        report = _restore_sim(engine, tmp_path / scenario, scenario)
+        expected = RESTORE_DISK_SHORT.format(free_mb, RESTORE_SIM_NEED_MB, "D:\\ARCILOGGER\\db")
+        assert report["error"] is not None, scenario
+        assert report["error"].endswith(expected), report["error"]
+        assert report["error"].startswith("PostgreSQL veri diskinde yeterli boş alan yok")
+        assert [c["tool"] for c in report["calls"]].count("drive") == 1, "the data drive read"
+        for needle in ("timescaledb_pre_restore", "CREATE DATABASE", "pg_restore", "RENAME TO"):
+            assert not _has_call(report, needle), needle
+        assert "replaced_databases" not in (report["state"] or {})
+        assert "max_wal_size" in _sql_of(report, "pg_database_size")
+        assert report["committed"] is None
+        assert report["current_restoring"] is False
+
+
+def test_database_restore_warns_when_the_free_space_cannot_be_read(
+    engine: str, tmp_path: Path
+) -> None:
+    report = _restore_sim(engine, tmp_path, "disk-unknown")
+    assert report["error"] is None, report["error"]
+    warning = (
+        "[the free space of the PostgreSQL data drive could not be read: the restore needs about "
+        f"{RESTORE_SIM_NEED_MB} MB]"
+    )
+    assert _unwrapped(warning) in _unwrapped(report["stdout"])
+
+
+def test_database_restore_does_not_read_a_local_drive_for_a_remote_server(
+    engine: str, tmp_path: Path
+) -> None:
+    """Review of #147 (round 2): with a [database] host that is not this computer, the data
+    directory is a path on that server: no local drive decides, a warning names the need."""
+    report = _restore_sim(engine, tmp_path, "remote")
+    assert report["error"] is None, report["error"]
+    assert not [c for c in report["calls"] if c["tool"] == "drive"]
+    warning = (
+        "[PostgreSQL runs on another server: the free space of its data drive was not checked; "
+        f"the restore needs about {RESTORE_SIM_NEED_MB} MB there]"
+    )
+    assert _unwrapped(warning) in _unwrapped(report["stdout"])
+    assert _has_call(report, "RENAME TO")
+
+
+def test_database_restore_names_the_open_session_that_keeps_the_rename_from_running(
+    engine: str, tmp_path: Path
+) -> None:
+    """Review of #147, item 1: the rename fails while another session is open on a database (a
+    pgAdmin window): the error names it, the new database is dropped and the current one leaves
+    its restore mode."""
+    report = _restore_sim(engine, tmp_path, "rename-busy")
+    session = "pid 4242 'pgAdmin 4 - DB:arcilogger' (arcilogger)"
+    assert report["error"] is not None
+    assert RESTORE_RENAME_BUSY.format(session) in report["error"], report["error"]
+    assert "is being accessed by other users" in report["error"]
+    rename = _call(report, "RENAME TO")
+    drop = _call(report, 'DROP DATABASE IF EXISTS :"new_name" WITH (FORCE);')
+    post = _call(report, "timescaledb_post_restore")
+    assert rename < _call(report, "pg_stat_activity") < drop < post
+    assert report["calls"][post]["database"] == "arcilogger"
+    assert "replaced_databases" not in (report["state"] or {})
+    assert report["committed"] is None
+    assert report["current_restoring"] is False, "the database was not changed"
+
+
+def test_database_restore_drops_the_new_database_when_its_rights_cannot_be_copied(
+    engine: str, tmp_path: Path
+) -> None:
+    """Review of #147, optional item: CREATE DATABASE succeeded, its settings or rights failed:
+    the empty new database is dropped too."""
+    report = _restore_sim(engine, tmp_path, "grant-fails")
+    assert report["error"] is not None
+    assert "arcilogger_ro" in report["error"]
+    assert _call(report, "GRANT %s") < _call(report, 'DROP DATABASE IF EXISTS :"new_name"')
+    assert not _has_call(report, "pg_restore")
+
+
+def test_database_restore_names_the_replaced_database_before_it_records_it(
+    engine: str, tmp_path: Path
+) -> None:
+    """Review of #147 (round 2): install\\state.json cannot take the replaced database after the
+    rename committed (locked, or the drive full after a large restore). Its name is on the
+    console already, a warning says it was not recorded, and the restore goes on: the database
+    now in place leaves TimescaleDB's restore mode."""
+    report = _restore_sim(engine, tmp_path, "state-fails")
+    assert report["error"] is None, report["error"]
+    stdout = _unwrapped(report["stdout"])
+    (restore,) = [c for c in report["calls"] if c["tool"] == "pg_restore.exe"]
+    replaced = restore["database"].replace("_restore_", "_replaced_")
+    assert _unwrapped(REPLACED_KEPT.format(replaced)) in stdout
+    not_recorded = (
+        f"Yerine geçilen veritabanı '{replaced}' install\\state.json dosyasına yazılamadı; adını "
+        "not edin [the replaced database could not be recorded in install\\state.json: note its "
+        "name]: simulated: state.json is locked"
+    )
+    assert _unwrapped(not_recorded) in stdout
+    assert stdout.index(_unwrapped(REPLACED_KEPT.format(replaced))) < stdout.index(
+        _unwrapped(not_recorded)
+    )
+    (post,) = [c for c in report["calls"] if "timescaledb_post_restore" in (c["sql"] or "")]
+    assert post["renamed"]
+    assert "replaced_databases" not in report["state"]
+    assert report["state"]["last_restore"] == report["dump"]
+
+
+def test_database_restore_counts_a_rename_that_committed_although_psql_reported_an_error(
+    engine: str, tmp_path: Path
+) -> None:
+    """Review of #147 (round 2): psql reports an error for a COMMIT that reached the server (the
+    connection lost after it). The current database is already under its new name: the rename
+    counts, the replaced database is recorded, nothing is dropped and post_restore runs."""
+    report = _restore_sim(engine, tmp_path, "rename-lost")
+    assert report["error"] is None, report["error"]
+    (entry,) = report["state"]["replaced_databases"]
+    assert _call(report, "RENAME TO") < _call(report, "datname = :'old_name'")
+    assert not _has_call(report, "DROP DATABASE")
+    assert not _has_call(report, "pg_stat_activity")
+    (post,) = [c for c in report["calls"] if "timescaledb_post_restore" in (c["sql"] or "")]
+    assert post["renamed"]
+    assert post["database"] == "arcilogger"
+    stdout = _unwrapped(report["stdout"])
+    assert _unwrapped("[psql reported an error, but the rename committed]") in stdout
+    assert _unwrapped(REPLACED_KEPT.format(entry["name"])) in stdout
+
+
+_RESTORE_SCRIPT = r"""
+param([string]$Installer, [string]$Base, [string]$DbName, [string]$DbHost, [string]$Port,
+    [string]$User, [string]$Password, [string]$PgBin, [string]$Dump, [long]$FreeBytes = -1)
+$ErrorActionPreference = 'Stop'
+$programData = Join-Path $Base 'programdata/ARCILOGGER'
+[void](New-Item -ItemType Directory -Path (Join-Path $programData 'install') -Force)
+. $Installer -InstallDir (Join-Path $Base 'program/ARCILOGGER') -ProgramDataDir $programData `
+    -DataRoot (Join-Path $Base 'data/ARCILOGGER') -BundleRoot (Join-Path $Base 'bundle') `
+    -SkipFirewall -SkipTimeSetup -PgBinDir $PgBin -DatabaseDump $Dump -Force
+function Get-DatabaseSettings {
+    [pscustomobject]@{ host = $DbHost; port = [int]$Port; name = $DbName; user = $User }
+}
+function Get-PgCredential {
+    $secret = ConvertTo-SecureString $Password -AsPlainText -Force
+    New-Object System.Management.Automation.PSCredential -ArgumentList $User, $secret
+}
+if ($FreeBytes -ge 0) {
+    # A data drive with -FreeBytes free, and the data directory the service would name for a role
+    # that cannot read data_directory (not a superuser).
+    function Get-ArciDriveFacts {
+        param([string]$Root)
+        [pscustomobject]@{
+            Root = $Root; DriveType = 'Fixed'; IsReady = $true; DriveFormat = 'NTFS'
+            FreeBytes = $FreeBytes
+        }
+    }
+    function Get-PostgresDataDir($Service) { 'D:\ARCILOGGER\db' }
+}
+Invoke-DatabaseRestore
+"""
+
+
+def _pg_bin(tmp_path: Path) -> Path | None:
+    """A folder with psql.exe, pg_dump.exe and pg_restore.exe as the installer runs them (on
+    Linux links to PostgreSQL's binaries): ARCILOGGER_PGBIN, /usr/lib/postgresql/16/bin (Debian
+    and Ubuntu, whose PATH has wrapper scripts), or the folder of psql on PATH."""
+    found = os.environ.get("ARCILOGGER_PGBIN")
+    if not found and Path("/usr/lib/postgresql/16/bin/psql").is_file():
+        found = "/usr/lib/postgresql/16/bin"
+    if not found and (psql := shutil.which("psql")):
+        found = str(Path(psql).parent)
+    if not found:
+        return None
+    if os.name == "nt":  # the binaries are the .exe files already
+        return Path(found)
+    links = tmp_path / "pgbin"
+    links.mkdir()
+    for tool in ("psql", "pg_dump", "pg_restore"):
+        if not (Path(found) / tool).is_file():
+            return None
+        (links / f"{tool}.exe").symlink_to(Path(found) / tool)
+    return links
+
+
+def _timescale_missing(admin: Any) -> str | None:
+    """Why the server of ARCILOGGER_TEST_PG cannot take the TimescaleDB variant, or None."""
+    from sqlalchemy import text
+
+    with admin.connect() as connection:
+        available = connection.execute(
+            text("SELECT count(*) FROM pg_available_extensions WHERE name = 'timescaledb'")
+        ).scalar()
+        if not available:
+            return "the timescaledb extension is not installed"
+        superuser = connection.execute(
+            text("SELECT rolsuper FROM pg_roles WHERE rolname = current_user")
+        ).scalar()
+        if not superuser:
+            return "ARCILOGGER_TEST_PG is not a superuser (CREATE EXTENSION timescaledb)"
+        preload = str(connection.execute(text("SHOW shared_preload_libraries")).scalar())
+    if "timescaledb" not in preload:
+        return "timescaledb is not in shared_preload_libraries"
+    return None
+
+
+@pytest.mark.skipif(not TEST_PG, reason="ARCILOGGER_TEST_PG (a PostgreSQL to create a database on)")
+@pytest.mark.parametrize("server", ["postgresql", "timescaledb"])
+def test_database_restore_puts_a_0020_dump_in_place_of_a_0021_database(
+    engine: str, tmp_path: Path, server: str
+) -> None:
+    """Issue #122 (-Rollback -RestoreDatabase after 0021_db_window): the installer's own restore
+    against a real server. A pre-upgrade dump (0020) replaces a database upgraded since (0021:
+    archive_reloads depends on lookups, which pg_restore --clean into the database could not
+    drop). The dump goes into a new database with the current one's owner, locale, settings and
+    rights, which is renamed into place; the replaced database is kept with the rows written
+    after the dump, and every restore's stays recorded. A dump that cannot be restored, a data
+    drive that cannot hold the new database, and a session left open on the current one (a
+    pgAdmin window) leave the database as it was and no new one.
+
+    ``timescaledb``: the same with hypertables and their chunks, through TimescaleDB's restore
+    mode (review of #147, item 6): the rename right after ``timescaledb_pre_restore()``, the
+    chunks restored, the extension at the current database's version, and the replaced database
+    still in restore mode (``timescaledb.restoring`` carried over by the rename). It runs where
+    ARCILOGGER_TEST_PG is a TimescaleDB superuser (the Linux CI job's service container); with
+    ``ARCILOGGER_EXPECT_TIMESCALE=1`` (that job) a server without it fails instead of skipping.
+    The ``postgresql`` variant creates its database from template0, so it has no TimescaleDB on
+    any server; ARCILOGGER_TEST_PG needs CREATEDB only there (it owns the databases)."""
+    from sqlalchemy import create_engine, text
+    from sqlalchemy.pool import NullPool
+
+    from arcilogger_db.migrate import current_revisions, upgrade
+
+    assert TEST_PG is not None
+    timescale = server == "timescaledb"
+    expected = timescale and os.environ.get("ARCILOGGER_EXPECT_TIMESCALE") == "1"
+    pg_bin = _pg_bin(tmp_path)
+    if pg_bin is None:
+        if expected:
+            pytest.fail("psql / pg_dump / pg_restore not found (ARCILOGGER_EXPECT_TIMESCALE=1)")
+        pytest.skip("psql / pg_dump / pg_restore not found")
+    dsn = urllib.parse.urlsplit(TEST_PG)
+    user, password = dsn.username or "postgres", dsn.password or ""
+    host, port = dsn.hostname or "127.0.0.1", str(dsn.port or 5432)
+    name = f"arci_t_restore_{uuid.uuid4().hex[:12]}"
+    base_url = f"postgresql+psycopg://{user}:{password}@{host}:{port}"
+    admin = create_engine(f"{base_url}/postgres", isolation_level="AUTOCOMMIT", poolclass=NullPool)
+    if timescale and (missing := _timescale_missing(admin)):
+        admin.dispose()
+        if expected:
+            pytest.fail(f"TimescaleDB expected (ARCILOGGER_EXPECT_TIMESCALE=1): {missing}")
+        pytest.skip(f"{missing} (the Linux CI job runs this)")
+
+    def names() -> list[str]:
+        with admin.connect() as connection:
+            return list(
+                connection.execute(
+                    text("SELECT datname FROM pg_database WHERE datname LIKE :p ORDER BY 1"),
+                    {"p": f"{name}%"},
+                ).scalars()
+            )
+
+    def facts(database: str) -> tuple[Any, ...]:
+        with admin.connect() as connection:
+            return tuple(
+                connection.execute(
+                    text(
+                        "SELECT pg_get_userbyid(d.datdba), pg_encoding_to_char(d.encoding), "
+                        "d.datcollate, d.datctype, d.datacl::text, (SELECT s.setconfig::text "
+                        "FROM pg_db_role_setting s WHERE s.setdatabase = d.oid AND s.setrole = 0)"
+                        " FROM pg_database d WHERE d.datname = :n"
+                    ),
+                    {"n": database},
+                ).one()
+            )
+
+    def restoring(database: str) -> bool:
+        """timescaledb.restoring = on for the database (timescaledb_pre_restore() sets it)."""
+        with admin.connect() as connection:
+            settings = connection.execute(
+                text(
+                    "SELECT s.setconfig FROM pg_db_role_setting s JOIN pg_database d "
+                    "ON d.oid = s.setdatabase WHERE d.datname = :n AND s.setrole = 0"
+                ),
+                {"n": database},
+            ).scalar()
+        return "timescaledb.restoring=on" in (settings or [])
+
+    def state_of(database: str) -> tuple[Any, ...]:
+        db = create_engine(f"{base_url}/{database}", poolclass=NullPool)
+        try:
+            with db.connect() as connection:
+                chunks = extension = None
+                if timescale:
+                    chunks = connection.execute(
+                        text(
+                            "SELECT count(*) FROM timescaledb_information.chunks "
+                            "WHERE hypertable_name = 'messages'"
+                        )
+                    ).scalar()
+                    extension = connection.execute(
+                        text("SELECT extversion FROM pg_extension WHERE extname = 'timescaledb'")
+                    ).scalar()
+                return (
+                    current_revisions(connection),
+                    connection.execute(text("SELECT to_regclass('archive_reloads')")).scalar(),
+                    connection.execute(
+                        text("SELECT value FROM settings WHERE key = 'test.after_dump'")
+                    ).scalar(),
+                    connection.execute(text("SELECT count(*) FROM messages")).scalar(),
+                    chunks,
+                    extension,
+                )
+        finally:
+            db.dispose()
+
+    def restore(dump: Path, free_bytes: int = -1) -> tuple[subprocess.CompletedProcess[str], Any]:
+        # One installation for every run: its install\\state.json collects what they record.
+        script = write_script(tmp_path / "restore.ps1", _RESTORE_SCRIPT)
+        base = tmp_path / "restore"
+        base.mkdir(exist_ok=True)
+        free = ["-FreeBytes", str(free_bytes)] if free_bytes >= 0 else []
+        result = run_powershell(
+            engine, script, "-Installer", str(INSTALL_SCRIPT), "-Base", str(base), "-DbName",
+            name, "-DbHost", host, "-Port", port, "-User", user, "-Password", password,
+            "-PgBin", str(pg_bin), "-Dump", str(dump), *free,
+        )  # fmt: skip
+        state_file = base / "programdata" / "ARCILOGGER" / "install" / "state.json"
+        return result, (read_json(state_file) if state_file.is_file() else None)
+
+    with admin.connect() as connection:
+        connection.execute(text(f'CREATE DATABASE "{name}" TEMPLATE template0'))
+        connection.execute(text(f'REVOKE ALL ON DATABASE "{name}" FROM PUBLIC'))
+        connection.execute(text(f'GRANT CONNECT, TEMPORARY ON DATABASE "{name}" TO "{user}"'))
+        connection.execute(text(f"ALTER DATABASE \"{name}\" SET work_mem = '8MB'"))
+    try:
+        site = create_engine(f"{base_url}/{name}", poolclass=NullPool)
+        mode: Literal["require", "off"] = "require" if timescale else "off"
+        upgrade(site, revision="0020_fg_traffic_transip_time", timescale=mode)
+        # Lines of the last ten days: a chunk per day on TimescaleDB.
+        now = datetime.now(UTC).replace(microsecond=0)
+        with site.begin() as connection:
+            for day in range(10):
+                received = now - timedelta(days=day, hours=1)
+                connection.execute(
+                    text(
+                        "INSERT INTO messages (time, time_received, source, sender, raw_day, "
+                        "raw_line, raw_offset, type, text) VALUES (:time, :time, 'fortigate', "
+                        "'172.20.10.1', :day, :line, 0, 'traffic', '')"
+                    ),
+                    {"time": received, "day": received.date(), "line": day + 1},
+                )
+        dump = tmp_path / "before.dump"
+        env = {**os.environ, "PGPASSWORD": password}
+        subprocess.run(
+            [str(pg_bin / "pg_dump.exe"), "-h", host, "-p", port, "-U", user, "-Fc", "-f",
+             str(dump), name],
+            env=env, check=True, capture_output=True, timeout=300,
+        )  # fmt: skip
+        upgrade(site, timescale=mode)
+        with site.begin() as connection:
+            connection.execute(
+                text(
+                    "INSERT INTO settings (key, value, updated_by) "
+                    "VALUES ('test.after_dump', CAST('1' AS jsonb), 'tolga')"
+                )
+            )
+        site.dispose()
+        upgraded = state_of(name)
+        assert upgraded[:4] == (("0021_db_window",), "archive_reloads", 1, 10)
+        if timescale:
+            assert upgraded[4] is not None
+            assert upgraded[4] >= 10, "a chunk per day"
+            assert upgraded[5]
+        before = facts(name)
+
+        def unchanged(result: subprocess.CompletedProcess[str], state: Any) -> None:
+            assert result.returncode != 0, result.stdout
+            assert names() == [name], "no new database is left behind"
+            assert state_of(name) == upgraded
+            assert facts(name) == before
+            assert not restoring(name), "the current database left its restore mode"
+            assert "replaced_databases" not in (state or {})
+
+        broken = tmp_path / "broken.dump"
+        broken.write_bytes(dump.read_bytes()[: dump.stat().st_size // 2])
+        unchanged(*restore(broken))
+
+        # Review of #147, item 5: refused before any change (also before pre_restore).
+        result, state = restore(dump, free_bytes=0)
+        unchanged(result, state)
+        short = "[not enough free space on the PostgreSQL data drive, the database was not "
+        short += "changed: 0 MB free, the restore needs about "
+        need = r"\d+MB\(thecurrentdatabase'ssizeandaquartermore,plusmax_wal_size"
+        pattern = re.escape(_unwrapped(short)) + need
+        assert re.search(pattern, _unwrapped(result.stdout + result.stderr)), result.stderr
+
+        # Review of #147, item 1: a session left open on the current database (a pgAdmin window).
+        window = create_engine(
+            f"{base_url}/{name}",
+            poolclass=NullPool,
+            connect_args={"application_name": f"pgAdmin 4 - DB:{name}"},
+        )
+        with window.connect() as connection:
+            connection.execute(text("SELECT 1"))
+            result, state = restore(dump)
+        window.dispose()
+        unchanged(result, state)
+        busy = "[the database could not be renamed: another session is open on it (pid "
+        said = _unwrapped(result.stdout + result.stderr)
+        assert _unwrapped(busy) in said, result.stderr
+        assert _unwrapped(f"'pgAdmin 4 - DB:{name}' ({name})") in said
+
+        result, state = restore(dump)
+        assert result.returncode == 0, result.stdout + result.stderr
+        (replaced,) = [n for n in names() if n != name]
+        assert re.fullmatch(rf"{name}_replaced_\d{{14}}", replaced), replaced
+        restored = state_of(name)
+        assert restored[:4] == (("0020_fg_traffic_transip_time",), None, None, 10)
+        assert state_of(replaced) == upgraded
+        assert facts(name) == before, "owner, encoding, locale, rights and settings"
+        kept = f"[the replaced database is kept as '{replaced}': the rows written after the dump"
+        assert _unwrapped(kept) in _unwrapped(result.stdout)
+        (entry,) = state["replaced_databases"]
+        assert (entry["name"], entry["dump"]) == (replaced, str(dump))
+        assert entry["timescaledb_restoring"] is timescale
+        assert not restoring(name)
+        if timescale:
+            assert restored[4] == upgraded[4], "every chunk restored"
+            assert restored[5] == upgraded[5], "the extension at the current database's version"
+            # The assumption the console warning and BACKUP.md section 5 rest on.
+            assert restoring(replaced), "the rename keeps timescaledb.restoring = on"
+            assert _unwrapped(REPLACED_RESTORING.format(replaced)) in _unwrapped(result.stdout)
+
+        # A second restore: the database the first one put in place is kept as well, and the
+        # record keeps both.
+        result, state_again = restore(dump)
+        assert result.returncode == 0, result.stdout + result.stderr
+        (second,) = [n for n in names() if n not in (name, replaced)]
+        assert state_of(second)[:3] == (("0020_fg_traffic_transip_time",), None, None)
+        assert state_of(name)[:4] == restored[:4]
+        assert [e["name"] for e in state_again["replaced_databases"]] == [replaced, second]
+        assert state_again["replaced_databases"][0] == entry
+    finally:
+        for database in names():
+            with admin.connect() as connection:
+                connection.execute(text(f'DROP DATABASE IF EXISTS "{database}" WITH (FORCE)'))
+        admin.dispose()
 
 
 TSDB_PG = os.environ.get("ARCILOGGER_TSDB_PG")
@@ -7745,6 +9465,8 @@ def test_the_end_to_end_settings_checks_read_what_the_api_could_not(
 
 @pytest.mark.skipif(not E2E_BUNDLE, reason="needs the real bundle the end-to-end job builds")
 def test_real_install_upgrade_rollback_and_uninstall(tmp_path: Path) -> None:
+    from arcilogger_db.migrate import head_revisions
+
     powershell = _windows_admin_powershell()
     assert E2E_BUNDLE is not None
     first = Path(E2E_BUNDLE)
@@ -7928,6 +9650,12 @@ def test_real_install_upgrade_rollback_and_uninstall(tmp_path: Path) -> None:
         assert any(warning.startswith("ArciAdmin:") for warning in warnings), last()
         items = {item["id"]: item for item in plans[-1].get("items", [])}
         assert items["leases.prepare-rollback"]["detail"]["previous_has_module"] is False, last()
+        # Issue #122: both bundles ship the same revisions, read from the wheels' files in both
+        # venvs: no schema downgrade, recorded as skipped.
+        downgrade = items[DOWNGRADE]
+        assert downgrade["status"] == "skipped", last()
+        heads = (downgrade["detail"]["installed_head"], downgrade["detail"]["previous_head"])
+        assert heads == (head_revisions()[0],) * 2, last()
         if E2E_DB:
             # Contract 2.2.1: before the swap, this version lowered its FortiGate leases (this
             # site has none) and printed the count.
