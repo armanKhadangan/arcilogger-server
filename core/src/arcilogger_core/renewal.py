@@ -52,7 +52,8 @@ like sealed files. A failed stamp removes both, so a record never exists under i
 without its token; leftovers of an interrupted run are tidied by the next one (contract W5-A-3).
 A run whose provider claims legal grade while no pinned root is listed takes no stamp: its
 renewals would never count (W5-A-13). A stamp whose chain ends at a pinned root that is not
-listed is removed with its record, as a revoked one is (C15).
+listed is removed with its record, as a revoked one is (C15), also when the next run finds it
+left by an interrupted one.
 """
 
 from __future__ import annotations
@@ -1285,12 +1286,19 @@ def _refusal(check: VerifyResult) -> tuple[str, ...]:
     return ()
 
 
+def _unlisted(check: VerifyResult, legal_roots: Collection[str]) -> bool:
+    """Whether a verified token's chain ends at a pinned root not listed in ``legal_roots``
+    (``tsa.legal_root_fingerprints``): a legal-grade renewal under it never counts (D5)."""
+    return (check.details.get("root_sha256") or "") not in set(legal_roots)
+
+
 def recover(
     layout: Layout,
     roots: Sequence[x509.Certificate],
     *,
     crls: Sequence[Crl] | None = None,
     now: datetime | None = None,
+    legal_roots: Collection[str] | None = None,
 ) -> list[str]:
     """Tidy up what an interrupted run left in ``vault/renewals``; returns the removed names.
 
@@ -1299,7 +1307,9 @@ def recover(
       (:func:`_critical_eku`), and whose certificate ``crls`` (the stored lists, read from
       ``state/crl`` when None) do not show revoked at or before the stamp: promoted (W5-A-3).
       A revoked one is removed, as the run would have removed it (C15: a revoked new stamp
-      leaves no record);
+      leaves no record), and so is one whose record claims legal grade while its chain ends at
+      a pinned root not in ``legal_roots`` (``tsa.legal_root_fingerprints``, when the caller
+      passes them: W5-A-13);
     * any other ``….part`` and ``….part.zd``, a final token without its record and a temporary
       file of an interrupted write (``.….tmp``): removed. None of them is evidence: a record
       without a verified token protects nothing. A locked file is never removed: a locked token
@@ -1332,6 +1342,18 @@ def recover(
                 crls=crls,
             )
             refusal = _refusal(check)
+            if (
+                not refusal
+                and legal_roots is not None
+                and parsed is not None
+                and parsed["tsa"]["legal_grade"] is True
+                and _unlisted(check, legal_roots)
+            ):
+                refusal = (
+                    "it claims legal grade, but its chain ends at a root not in "
+                    f"tsa.legal_root_fingerprints ({check.details.get('root') or ''}, SHA-256 "
+                    f"{check.details.get('root_sha256') or ''})",
+                )
             if not refusal:
                 _promote(part, tokens[0], final)
                 log.warning("renewal: completed %s of an interrupted run", final.name)
@@ -1403,10 +1425,10 @@ def _write(
         refusal = _refusal(check)
         if refusal:
             raise RenewalStampInvalidError(refusal)
-        root_sha256 = check.details.get("root_sha256") or ""
-        if provider.legal_grade is True and root_sha256 not in set(legal_roots):
+        if provider.legal_grade is True and _unlisted(check, legal_roots):
             raise RenewalLegalRootsError(
-                root=check.details.get("root") or "", root_sha256=root_sha256
+                root=check.details.get("root") or "",
+                root_sha256=check.details.get("root_sha256") or "",
             )
     except BaseException:  # a provider's own error or an interrupt too: never a part left
         _remove(token_path_for(part), removed)
@@ -1452,7 +1474,7 @@ def renew_held(
     (an :class:`OSError`), ``report_after`` is the status before the run, with a warning in the
     log."""
     moment = require_aware(now or utc_now())
-    discarded = recover(layout, roots, now=moment)
+    discarded = recover(layout, roots, now=moment, legal_roots=config.tsa.legal_root_fingerprints)
     reader = _Reader.of(layout, config, roots, moment).read()
     before = reader.report()
     due = {token.path for token in before.tokens if token.status in ("due", "uncovered")}

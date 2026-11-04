@@ -12,6 +12,7 @@ import errno
 import json
 import os
 import subprocess
+from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -874,10 +875,15 @@ def test_a_crash_between_stamp_and_rename_is_recovered(rw: RenewalWorld) -> None
 
 
 def _stop_after_stamp(
-    rw: RenewalWorld, provider: TimestampProvider, monkeypatch: pytest.MonkeyPatch, stopped: str
+    rw: RenewalWorld,
+    provider: TimestampProvider,
+    monkeypatch: pytest.MonkeyPatch,
+    stopped: str,
+    roots: Sequence[x509.Certificate] | None = None,
 ) -> Path:
     """A run whose process stops right after ``provider``'s stamp, before the token is checked
-    (and so before any clean-up), or after the first rename too; the token it leaves."""
+    (and so before any clean-up), or after the first rename too; the token it leaves. The run
+    pins ``roots`` (the world's by default)."""
     names: list[str] = []
 
     def stop(data: bytes, *, file_path: Path, **kwargs: Any) -> Any:
@@ -888,7 +894,7 @@ def _stop_after_stamp(
         patched.setattr(renewal_module, "verify_token", stop)
         patched.setattr(renewal_module, "_remove", lambda path, removed: None)  # no clean-up
         with pytest.raises(SystemExit):
-            _renew(rw, provider)
+            renew(rw.layout, rw.world.config, provider, roots or rw.roots, rw.clock.now)
     part = rw.layout.renewals_dir / names[0]
     token = token_path_for(part)
     if stopped == "between the renames":
@@ -928,6 +934,59 @@ def test_a_revoked_stamp_of_an_interrupted_run_is_removed(
     assert run.record_path == "renewals/2031-06-23-1.json"
     assert _renewal_files(rw) == ["2031-06-23-1.json", "2031-06-23-1.json.zd"]
     assert rw.of(rw.status(), DAY_TOKEN).covered_by == run.record_path
+
+
+@pytest.mark.parametrize("stopped", ["after the stamp", "between the renames"])
+def test_an_interrupted_stamp_under_a_pinned_but_unlisted_root_is_removed(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    stopped: str,
+) -> None:
+    """W5-A-13: a run stopped between the stamp and its legal-roots check leaves a part whose
+    token verifies under a pinned root that is not listed. The next run checks it as the
+    stamping run would have, and removes it instead of promoting it: a legal-grade renewal
+    under that root never counts (D5), and a locked one could not be removed. ``recover``
+    without the list (a caller with no configuration) still promotes it."""
+    rw = make_world(tmp_path)
+    unlisted = LegalCa("Örnek Unlisted Root (test)")
+    roots = [rw.legal.root, unlisted.root]
+    rw.set_now(CNA - timedelta(days=100))
+    provider = rw.legal_provider(FAR, ca=unlisted)
+    before = renewal_status(rw.layout, rw.world.config, roots, rw.clock.now)
+    token = _stop_after_stamp(rw, provider, monkeypatch, stopped, roots)
+    part = rw.layout.renewals_dir / "2031-06-23-1.json.part"
+    assert _renewal_files(rw) == sorted([part.name, token.name])
+    check = verify_token(token.read_bytes(), roots=roots, file_path=part, now=rw.clock.now)
+    assert check.ok  # only the list refuses it
+    assert check.details["root_sha256"] == unlisted.fingerprint
+
+    listed = [rw.legal.fingerprint]
+    assert recover(rw.layout, roots, now=rw.clock.now, legal_roots=listed) == [
+        token.name,
+        part.name,
+    ]
+    assert _renewal_files(rw) == []
+    assert renewal_status(rw.layout, rw.world.config, roots, rw.clock.now) == before
+    assert "is not kept: it claims legal grade" in caplog.text
+    assert unlisted.fingerprint in caplog.text
+
+    # the next run tidies the same leftover first, then stamps under the listed root
+    token = _stop_after_stamp(rw, provider, monkeypatch, stopped, roots)
+    run = renew(rw.layout, rw.world.config, rw.legal_provider(FAR), roots, rw.clock.now)
+    assert run.discarded == (token.name, part.name)
+    assert run.record_path == "renewals/2031-06-23-1.json"
+    assert _renewal_files(rw) == ["2031-06-23-1.json", "2031-06-23-1.json.zd"]
+
+    # without the list, a part whose token verifies is promoted, as before
+    other = make_world(tmp_path / "other")
+    other.set_now(CNA - timedelta(days=100))
+    other_roots = [other.legal.root, unlisted.root]
+    token = _stop_after_stamp(
+        other, other.legal_provider(FAR, ca=unlisted), monkeypatch, stopped, other_roots
+    )
+    assert recover(other.layout, other_roots, now=other.clock.now) == []
+    assert _renewal_files(other) == ["2031-06-23-1.json", "2031-06-23-1.json.zd"]
 
 
 @pytest.mark.parametrize("stopped", ["after the stamp", "between the renames"])

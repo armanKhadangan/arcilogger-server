@@ -1606,11 +1606,18 @@ All Wave 5 questions are answered (2026-11-02).
   TR/EN texts name that root (subject and SHA-256 fingerprint) and say that the record and its
   token were removed; the stamp's credit is spent. The command handles it as above: exit 2,
   `legal-roots` in `error.code` and `last_run.error`, `failures_in_a_row` + 1, so `R20-renewal`
-  raises after the second run. `recover` has no configuration and does not apply this check.
+  raises after the second run. A run stopped between the stamp and this check (in
+  `verify_token`, say) leaves a part whose token verifies, so `recover` applies it too, as it
+  applies C15 (W5-A-14): `renew_held` passes `tsa.legal_root_fingerprints` as
+  `recover(..., legal_roots=)`, and a part whose record claims legal grade while its chain ends
+  at a root that is not listed is removed with its token, with a warning in the log naming that
+  root, instead of being promoted and locked (a locked record that never counts could not be
+  removed). `recover` without `legal_roots` (a caller with no configuration) does not apply it.
   `test_a_stamp_under_a_pinned_but_unlisted_root_is_removed` (two pinned roots, one listed; a
-  stamp under the listed one is still kept) and
-  `test_a_stamp_under_a_pinned_but_unlisted_root_exits_2` (`failures_in_a_row` 1, then 2) pin
-  it.
+  stamp under the listed one is still kept),
+  `test_a_stamp_under_a_pinned_but_unlisted_root_exits_2` (`failures_in_a_row` 1, then 2) and
+  `test_an_interrupted_stamp_under_a_pinned_but_unlisted_root_is_removed` (both places the
+  token can be, through `recover` and through the next run) pin it.
 - **W5-A-14: `recover` checks revocation as the run does (#137 item 2).** W5-A-3's `recover`
   promoted an interrupted part whose token verified, without the stored revocation lists, so a
   run stopped between the stamp and its C15 check left a record that never counts. It now
