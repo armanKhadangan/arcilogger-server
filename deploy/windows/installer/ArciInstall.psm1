@@ -1487,6 +1487,56 @@ function Get-ArciProgramFolderState {
     'foreign'
 }
 
+function Get-ArciAlembicChain {
+    <#
+    .SYNOPSIS
+        The Alembic revisions of a program's migrations folder (arcilogger_db\migrations\versions
+        in its venv), oldest first, read from the files: no Python and no database (issue #122).
+    .DESCRIPTION
+        Every revision file names itself and the revision it revises ('revision: str = "..."',
+        'down_revision: ... = "..."' or None). They must form one line from one base to one
+        head; anything else throws (no folder, no revision file, a file without both lines, the
+        same revision twice, a merge or a branch, a revision revising one that is not there), so
+        a caller never guesses a head.
+    #>
+    [CmdletBinding()]
+    [OutputType([string[]])]
+    param([Parameter(Mandatory = $true)][string]$Folder)
+    if (-not (Test-Path -LiteralPath $Folder -PathType Container)) {
+        throw ('Geçiş klasörü bulunamadı ya da okunamadı [migrations folder not found or not readable]: {0}' -f $Folder)
+    }
+    $revises = @{}
+    foreach ($file in @(Get-ChildItem -LiteralPath $Folder -Filter '*.py' -File | Where-Object { $_.Extension -eq '.py' -and $_.Name -ne '__init__.py' })) {
+        $text = [System.IO.File]::ReadAllText($file.FullName, [System.Text.Encoding]::UTF8)
+        $revision = [regex]::Match($text, '(?m)^revision(?:\s*:[^=\r\n]*)?\s*=\s*[''"]([^''"\r\n]+)[''"]\s*$')
+        $parent = [regex]::Match($text, '(?m)^down_revision(?:\s*:[^=\r\n]*)?\s*=\s*(?:None|[''"]([^''"\r\n]+)[''"])\s*$')
+        if (-not $revision.Success -or -not $parent.Success) {
+            throw ('Geçiş dosyasında revision ya da down_revision okunamadı [revision or down_revision not readable]: {0}' -f $file.FullName)
+        }
+        $name = $revision.Groups[1].Value
+        if ($revises.ContainsKey($name)) { throw ('Geçiş iki kez var [revision found twice]: {0}' -f $name) }
+        $revises[$name] = $(if ($parent.Groups[1].Success) { $parent.Groups[1].Value } else { $null })
+    }
+    if ($revises.Count -eq 0) { throw ('Geçiş dosyası yok [no revision file]: {0}' -f $Folder) }
+    $next = @{}
+    $bases = @()
+    foreach ($name in $revises.Keys) {
+        $parent = $revises[$name]
+        if ($null -eq $parent) { $bases += $name; continue }
+        if ($next.ContainsKey($parent)) { throw ('Geçişler dallanıyor [the revisions branch] ({0}): {1}' -f $Folder, $parent) }
+        $next[$parent] = $name
+    }
+    if ($bases.Count -ne 1) { throw ('Geçişlerin tek bir başlangıcı yok [not one base revision]: {0}' -f $Folder) }
+    $chain = New-Object System.Collections.Generic.List[string]
+    $at = $bases[0]
+    while ($null -ne $at) {
+        $chain.Add($at)
+        $at = $(if ($next.ContainsKey($at)) { $next[$at] } else { $null })
+    }
+    if ($chain.Count -ne $revises.Count) { throw ('Geçişler tek bir sıra oluşturmuyor [the revisions do not form one line]: {0}' -f $Folder) }
+    , $chain.ToArray()
+}
+
 # --- licence (advisory checks without Python) -----------------------------------------------------
 #
 # The installer reads a licence file (-LicenseFile) and the status file the product writes
@@ -3356,7 +3406,7 @@ Export-ModuleMember -Function @(
     'Get-ArciTimePeerList', 'Read-ArciAdminAddress',
     'ConvertTo-ArciNetwork', 'Test-ArciAddressSpec', 'Test-ArciAddressInNetwork', 'Get-ArciForeignRdpSession',
     'Get-ArciNetworkFacts', 'Get-ArciLocalAddresses', 'Select-ArciServerAddress', 'Get-ArciCollectorBind', 'Test-ArciBindAddress',
-    'Get-ArciInstallMarkerName', 'Get-ArciProgramFolderState',
+    'Get-ArciInstallMarkerName', 'Get-ArciProgramFolderState', 'Get-ArciAlembicChain',
     'ConvertTo-ArciIsoDate', 'Get-ArciJsonField', 'Read-ArciLicenseFile', 'Read-ArciLicenseStatus', 'Test-ArciMaintenanceCovers',
     'Get-ArciProductReleaseDate', 'Get-ArciSiteToday', 'Get-ArciSiteTimestamp', 'Get-ArciOldestVaultDay', 'Get-ArciDaysBetween', 'Get-ArciWheelTestHelpers',
     'New-ArciAce', 'Get-ArciAclPlan', 'Get-ArciAceFlags',

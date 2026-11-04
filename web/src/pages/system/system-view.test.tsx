@@ -270,7 +270,7 @@ describe('SystemView', () => {
       'ArciCollector',
     );
     const tasks = within(block('tasks')).getAllByRole('row').slice(1);
-    expect(tasks).toHaveLength(11);
+    expect(tasks).toHaveLength(13);
     expect(tasks[4]).toHaveTextContent("ReplicaSaatte bir, 00:40'tanGecikti");
     expect(tasks[5]).toHaveTextContent('RetentionHer gün 02:00Kullanılmıyor—');
     expect(tasks[9]).toHaveTextContent('İzlenemiyor');

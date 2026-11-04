@@ -1008,13 +1008,83 @@ any change. If a step fails (exit code `3`):
   against it. The previous program folder is back but only `ArciCollector`, `ArciWeb` and the
   scheduled evidence jobs run (none needs the database: no syslog is lost, sealing goes on);
   `ArciIngest`, `ArciApi` and `ArciWorker` are set to manual start. The installer prints the exact
-  `-Rollback -RestoreDatabase -DatabaseDump <dump>` command (or fix the cause and run `-Upgrade`
-  again);
+  `-Rollback -RestoreDatabase -DatabaseDump <dump>` command with **this** version's installer, the
+  copy in the folder set aside (`C:\Program Files\ARCILOGGER.failed-<time>\installer\`), not the
+  one in `C:\Program Files\ARCILOGGER\installer\`: after the swap-back that is the previous
+  version's again, whose restore writes the dump over the live database (`pg_restore --clean`)
+  and fails on the schema from `0021_db_window` on (or fix the cause and run `-Upgrade` again);
 - whatever could not be put back automatically is listed under "manual action needed".
 
 Manual rollback: `Install-Arcilogger.ps1 -Rollback` (add `-RestoreDatabase` to restore the last
-pre-upgrade dump too; the restore is one transaction). Without `ARCILOGGER.previous`,
+pre-upgrade dump too). The dump is restored into a new database (`<name>_restore_<time>`, with the
+current database's owner, locale, settings and rights; one transaction per object, stopping at the
+first error), which then takes the current one's place by renaming; a failed restore leaves the
+current database as it was. The PostgreSQL data drive needs the current database's size
+(`pg_database_size`), a quarter more and `max_wal_size` free; the installer checks this first and
+refuses otherwise (only a warning when the free space cannot be read or PostgreSQL runs on another
+server). The replaced database is kept as `<name>_replaced_<time>`: the rows written after the dump
+are only there, and it takes disk space until an administrator removes it ([BACKUP.md](BACKUP.md)
+section 5); every restore's replaced database is listed in `install\state.json`
+(`replaced_databases`). The rename needs no other session on the database: close pgAdmin and psql
+windows first (the installer names a session that is still open). Without `ARCILOGGER.previous`,
 `-Rollback -RestoreDatabase` restores only the database while the collector keeps running.
+
+If the restore fails after the program folders were swapped (or without `ARCILOGGER.previous`),
+the database services stay stopped and the installer prints the command to run again. If a step fails
+after the rename has committed, it says so: do not run the restore again (it would replace the
+restored database once more); on TimescaleDB, when `timescaledb_post_restore()` did not run, it
+prints that command and the one that starts the database services. Run the command to run again
+with **this** version's installer, the copy in the folder it was moved to
+(`C:\Program Files\ARCILOGGER.rolled-back-<time>\installer\`), as printed; not the one in
+`C:\Program Files\ARCILOGGER\installer\`: after the swap that is the previous version's, whose
+restore writes the dump over the live database (`pg_restore --clean`), which fails on this
+version's schema.
+
+**Rollback to a version from before the daily partitions (schema revision `0021_db_window`).** A
+version from before this revision creates and drops monthly partitions only; it does not know the
+daily partitions (`<table>_pYYYYMMDD`). So a `-Rollback` without `-RestoreDatabase`, when the
+installed version's schema has `0021_db_window` and the schema of the version returned to does
+not, takes the database down to the schema of the version returned to after the services have
+stopped and after the FortiGate lease step (below; it works on the installed version's schema),
+before the program folders are swapped: the installed version's `arcilogger-db schema downgrade
+--to <revision> --json` (step `database.downgrade`). Both versions' schemas are read from the
+migration files in their program folders
+(`venv\Lib\site-packages\arcilogger_db\migrations\versions`); neither Python nor the database is
+needed for that. A version returned to that has
+`0021_db_window` too gets no downgrade, as before. The target is the head of the version returned
+to, but never below the revision `0021_db_window` revises (`0020_fg_traffic_transip_time`): the
+older revisions were made for the previous version to run on (the NAT rows and FortiGate leases
+below), and undoing them deletes data (`0017`, for example, the FortiGate DHCP table). Right
+before the command, the step reads the database's own revision (`arcilogger-db current`): a
+database from before `0021_db_window` (an `-Upgrade -SkipDatabase` left it there) has no daily
+partitions, and nothing is downgraded. The downgrade merges the daily partitions into monthly ones
+(each table and month in a transaction of its own), sets `db.retention_days` back from 30 to 400
+and writes that to the audit log as `settings.change` (actor `system`; also the upgrade's own 400
+→ 30 first, when the window job had not audited it yet); the installer prints the old and the new
+value and the audit entries' numbers, and the plan (`-PlanPath`) keeps the command's answer in
+`result`. There is no time limit: on large tables it can take long. The command waits at most
+30 seconds for a lock: a backup still running (`pg_dump`; the scheduled tasks are paused when the
+rollback starts) makes it fail; wait until the backup has finished and run `-Rollback` again.
+
+- **If the downgrade fails**, the rollback stops with `3` before the program folders are swapped:
+  the installed version stays in place and starts again on its own schema (the merges already
+  committed leave a valid layout of that schema; its `arcilogger-db upgrade` runs first, in case
+  the command ended after moving the schema revision), and the FortiGate leases set to low
+  confidence come back. Run `-Rollback` again: the downgrade goes on where it stopped. If it keeps
+  failing (or the command refused the revision, exit code `2`), restore the database from the
+  pre-upgrade dump ([BACKUP.md](BACKUP.md) section 5):
+
+  ```powershell
+  powershell -ExecutionPolicy Bypass -File "C:\Program Files\ARCILOGGER\installer\Install-Arcilogger.ps1" -Rollback -RestoreDatabase
+  ```
+- If the downgrade succeeded and the program folders cannot be swapped, the installed version's
+  `arcilogger-db upgrade` brings its schema back; if that fails too, only `ArciCollector` and
+  `ArciWeb` run and the installer prints the command to run by hand under "manual action needed".
+- If the schema head of the version returned to cannot be told (no migrations folder or one that
+  cannot be read, files that do not form one line, a head that is not one of the installed
+  version's revisions), or `-SkipDatabase` is given when the downgrade is needed, the rollback
+  stops with `2` and changes nothing. With `-RestoreDatabase` the pre-upgrade dump replaces the
+  database; no downgrade runs.
 
 A rollback (and the automatic return after a failed upgrade) loads the configuration **with the
 previous version's Python** before it starts that version's services. When the previous version
@@ -1128,19 +1198,22 @@ exits stay empty and the alert `R20-nat:conversion-failed` opens.
   FortiGate's NAT towards a DMZ, another VLAN, a VPN or a branch with the type "Not an internet
   exit".
 
-**Rollback:** the old NAT rows are kept, unread, in this version; `-Rollback` runs no schema
-downgrade, and the previous version reads these rows, that is the NAT values from **before the
-upgrade**. If you changed the internet exits after the upgrade, then after the rollback compare
-the previous version's `nat.public_ips` and `nat.wan_transip` values in Settings → Application
-settings with the change you made in this version and enter them by hand (the changes are in the
-audit log as `settings.change`); do not restore the database for this: `-RestoreDatabase`
-deletes every record made after the upgrade (audit, lookups, reports, alerts, device and person
-assignments). Before running `-Rollback`, download the official reports (PDF) of the lookups
-made in this version: a report is rendered once, on its first download, and the previous
-version does not print the rows this version adds (the unconfigured-sender warning, the "Kısmi
-kanıt [partial evidence]" label, the exit and FortiGate lease rows). On an installation that
-uses FortiGate DHCP the previous version cannot read the FortiGate DHCP records: it may keep a
-FortiGate lease open after the address was released or given to another client. So, before the
+**Rollback:** the old NAT rows are kept, unread, in this version; `-Rollback` does not undo this
+revision (it takes the schema down only to the revision before `0021_db_window`, above), and the
+previous version reads these rows, that is the NAT values from **before the upgrade**. If you
+changed the internet exits after the upgrade, then after the rollback compare the previous
+version's `nat.public_ips` and `nat.wan_transip` values in Settings → Application settings with
+the change you made in this version and enter them by hand (the changes are in the
+audit log as `settings.change`); do not restore the database for this: after `-RestoreDatabase`
+the database in use holds none of the records made after the upgrade (audit, lookups, reports,
+alerts, device and person assignments): they are only in the replaced database,
+`<name>_replaced_<time>` ([BACKUP.md](BACKUP.md) section 5). Before running `-Rollback`,
+download the official reports (PDF) of the lookups made in this version: a report is rendered
+once, on its first download, and the previous version does not print the rows this version adds
+(the unconfigured-sender warning, the "Kısmi kanıt [partial evidence]" label, the exit and
+FortiGate lease rows). On an installation that uses FortiGate DHCP the previous version cannot
+read the FortiGate DHCP records: it may keep a FortiGate lease open
+after the address was released or given to another client. So, before the
 program is swapped, `-Rollback` sets every FortiGate lease to **low confidence**; it prints how
 many and writes the count to the installation log (only derived lease rows change; raw records
 and seals are not touched; with `-RestoreDatabase` this step is skipped). Every chain that rests
@@ -1261,7 +1334,14 @@ The WinSW virtual-account setup (`sc.exe qc ArciCollector`) and "Log on as a ser
 `NT SERVICE\ALL SERVICES`; the EDB installer's rights on `D:\ARCILOGGER\db` and `pg_hba.conf`
 (`127.0.0.1/32 scram-sha-256`); the `auditpol` "File System" subcategory GUID; the Temurin MSI
 `INSTALLDIR` property; TimescaleDB `setup.exe` with the installed 16.x and
-`timescaledb_pre_restore()` / `timescaledb_post_restore()` around a restore; Inno Setup's
+`timescaledb_pre_restore()` / `timescaledb_post_restore()` around a restore; with
+`-Rollback -RestoreDatabase` on TimescaleDB, the rename right after `timescaledb_pre_restore()`
+(no background worker keeps the database open) and the restore of the real chunk count (the
+CI tests restore about ten chunks against TimescaleDB 2.30.2; a site after 400 days has
+thousands: its duration and that it completes), whether the free space it asks for (the current
+database's size, a quarter more and `max_wal_size`) suffices when chunks compressed since the
+dump come back uncompressed, and a TimescaleDB updated between the dump and the rollback (the new
+database gets the current database's extension version); Inno Setup's
 `Turkish.isl`; `arcilogger-api serve` on 127.0.0.1:8000 and that `setup-token` runs by its full
 path in an administrator PowerShell and prints a token (section 9); the Core Networking rule group
 (`Get-NetFirewallRule -DisplayGroup 'Core Networking' | Select-Object -First 1 Group` should print
