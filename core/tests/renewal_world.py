@@ -108,11 +108,12 @@ def issue_tsa(
 
 class LegalCa:
     """A made-up CA whose root the site lists as legal: valid from 2020 to 2070, so every
-    renewal a test stamps years ahead still chains to it."""
+    renewal a test stamps years ahead still chains to it. ``common_name`` names its root (a
+    second CA, pinned but not listed, W5-A-13)."""
 
-    def __init__(self) -> None:
+    def __init__(self, common_name: str = "Örnek Simulated Root (test)") -> None:
         self.key = ec.generate_private_key(ec.SECP256R1())
-        name = _name("Örnek Simulated CA (test)", "Örnek Simulated Root (test)")
+        name = _name("Örnek Simulated CA (test)", common_name)
         self.root = (
             x509.CertificateBuilder()
             .subject_name(name)
@@ -180,13 +181,15 @@ class RenewalWorld:
         claim: bool = True,
         not_before: datetime | None = None,
         eku_critical: bool = True,
+        ca: LegalCa | None = None,
     ) -> MockTsaProvider:
-        """A provider stamping with a new certificate of the legal CA (from ``not_before``, a
-        day before now by default, to ``cert_not_after``; its EKU critical unless
-        ``eku_critical`` is false); ``claim`` false: the plain mock provider's claim on that
-        CA."""
+        """A provider stamping with a new certificate of the legal CA, or of ``ca`` (from
+        ``not_before``, a day before now by default, to ``cert_not_after``; its EKU critical
+        unless ``eku_critical`` is false); ``claim`` false: the plain mock provider's claim on
+        that CA."""
+        issuer = ca or self.legal
         self.legal_tsa.signer = issue_tsa(
-            (self.legal.root, self.legal.key),
+            (issuer.root, issuer.key),
             not_before=not_before or self.clock.now - timedelta(days=1),
             not_after=cert_not_after,
             eku_critical=eku_critical,

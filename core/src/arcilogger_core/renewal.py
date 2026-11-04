@@ -51,7 +51,8 @@ verified; only then is the token renamed to its final name, then the record, and
 like sealed files. A failed stamp removes both, so a record never exists under its final name
 without its token; leftovers of an interrupted run are tidied by the next one (contract W5-A-3).
 A run whose provider claims legal grade while no pinned root is listed takes no stamp: its
-renewals would never count (W5-A-13).
+renewals would never count (W5-A-13). A stamp whose chain ends at a pinned root that is not
+listed is removed with its record, as a revoked one is (C15).
 """
 
 from __future__ import annotations
@@ -1070,27 +1071,47 @@ class RenewalStampInvalidError(TsaResponseError):
 
 
 class RenewalLegalRootsError(TsaConfigurationError):
-    """The provider claims legal grade, but no pinned root is listed in
-    ``tsa.legal_root_fingerprints``: no chain its stamps verify against can end at a listed
-    root, so none of its renewals would ever count (D5), and each stamp spends credit (D4). The
-    run refuses before it stamps; the command exits 2 with the cause :attr:`cause`
+    """The provider claims legal grade, but its renewals would never count (D5), and each
+    stamp spends credit (D4): no pinned root is listed in ``tsa.legal_root_fingerprints``, so
+    the run refuses before it stamps; or, given the root the stamp's chain ended at (``root``,
+    its subject, and ``root_sha256``), that pinned root is not listed, so the record and its
+    token were removed after the stamp. The command exits 2 with the cause :attr:`cause`
     (W5-A-13)."""
 
     cause = "legal-roots"
 
-    def __init__(self) -> None:
-        self.message_tr = (
-            "Sağlayıcı yasal geçerli damga beyan ediyor, ancak sabitlenmiş kök sertifikaların "
-            "hiçbirinin parmak izi tsa.legal_root_fingerprints listesinde değil: bu yenilemeler "
-            "hiçbir zaman sayılmaz, damga alınmadı. Kökün parmak izini yayımlanan değerle "
-            "karşılaştırıp tsa.legal_root_fingerprints listesine ekleyin."
-        )
-        self.message_en = (
-            "The provider claims legal grade, but no pinned root certificate's fingerprint is "
-            "in tsa.legal_root_fingerprints: such renewals never count, so no stamp was taken. "
-            "Compare the root's fingerprint with the published value and add it to "
-            "tsa.legal_root_fingerprints."
-        )
+    def __init__(self, *, root: str = "", root_sha256: str = "") -> None:
+        self.root = root
+        self.root_sha256 = root_sha256
+        if root_sha256:  # after the stamp: its chain ended at this pinned, unlisted root
+            self.message_tr = (
+                "Sağlayıcı yasal geçerli damga beyan ediyor, ancak damganın zinciri parmak izi "
+                "tsa.legal_root_fingerprints listesinde olmayan sabitlenmiş bir kök sertifikada "
+                f"bitiyor: {root} (SHA-256 {root_sha256}). Bu yenileme hiçbir zaman sayılmaz; "
+                "kayıt ve damgası silindi. Kökün parmak izini yayımlanan değerle karşılaştırıp "
+                "tsa.legal_root_fingerprints listesine ekleyin."
+            )
+            self.message_en = (
+                "The provider claims legal grade, but the time stamp's chain ends at a pinned "
+                "root certificate whose fingerprint is not in tsa.legal_root_fingerprints: "
+                f"{root} (SHA-256 {root_sha256}). Such a renewal never counts, so the record "
+                "and its token were removed. Compare the root's fingerprint with the published "
+                "value and add it to tsa.legal_root_fingerprints."
+            )
+        else:
+            self.message_tr = (
+                "Sağlayıcı yasal geçerli damga beyan ediyor, ancak sabitlenmiş kök "
+                "sertifikaların hiçbirinin parmak izi tsa.legal_root_fingerprints listesinde "
+                "değil: bu yenilemeler hiçbir zaman sayılmaz, damga alınmadı. Kökün parmak "
+                "izini yayımlanan değerle karşılaştırıp tsa.legal_root_fingerprints listesine "
+                "ekleyin."
+            )
+            self.message_en = (
+                "The provider claims legal grade, but no pinned root certificate's fingerprint "
+                "is in tsa.legal_root_fingerprints: such renewals never count, so no stamp was "
+                "taken. Compare the root's fingerprint with the published value and add it to "
+                "tsa.legal_root_fingerprints."
+            )
         super().__init__(f"{self.message_tr} [{self.message_en}]")
 
 
@@ -1340,6 +1361,7 @@ def _write(
     provider: TimestampProvider,
     roots: Sequence[x509.Certificate],
     *,
+    legal_roots: Collection[str],
     crls: Sequence[Crl] | None,
     now: datetime,
 ) -> None:
@@ -1347,7 +1369,10 @@ def _write(
     remove both files and raise (§2.1.1: a record without its token is not evidence). The token
     is verified with the record's own EKU rule (:func:`_critical_eku`). A token that verifies
     but whose certificate the stored lists show revoked at or before its genTime is refused
-    too: such a renewal would never count (C15)."""
+    too: such a renewal would never count (C15). So is a token of a provider that claims legal
+    grade whose chain ends at a pinned root not listed in ``legal_roots``
+    (``tsa.legal_root_fingerprints``): :class:`RenewalLegalRootsError` names that root
+    (W5-A-13)."""
     part = _part(final)
     atomic_write_bytes(part, canonical_json(record))
     removed: list[str] = []
@@ -1364,6 +1389,11 @@ def _write(
         refusal = _refusal(check)
         if refusal:
             raise RenewalStampInvalidError(refusal)
+        root_sha256 = check.details.get("root_sha256") or ""
+        if provider.legal_grade is True and root_sha256 not in set(legal_roots):
+            raise RenewalLegalRootsError(
+                root=check.details.get("root") or "", root_sha256=root_sha256
+            )
     except BaseException:  # a provider's own error or an interrupt too: never a part left
         _remove(token_path_for(part), removed)
         _remove(part, removed)
@@ -1386,7 +1416,8 @@ def renew(
     :class:`RenewalLockError` when the lock file cannot be used, :class:`RenewalNotNeeded` when
     nothing is due, :class:`RenewalLegalRootsError` before any stamp when the provider claims
     legal grade but no pinned root is listed in ``tsa.legal_root_fingerprints`` (its renewals
-    would never count), and the provider's :class:`TsaError` (or
+    would never count), or after it when the stamp's chain ends at a pinned root that is not
+    listed, leaving no record, and the provider's :class:`TsaError` (or
     :class:`RenewalStampInvalidError`) when the stamp fails, leaving no record.
     """
     with one_run(layout):
@@ -1433,6 +1464,7 @@ def renew_held(
         record,
         provider,
         roots,
+        legal_roots=config.tsa.legal_root_fingerprints,
         crls=reader.crls(),
         now=moment,
     )

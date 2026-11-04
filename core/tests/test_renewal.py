@@ -62,6 +62,7 @@ from .renewal_world import (
     CNA,
     DAY,
     REPORT_NAME,
+    LegalCa,
     RenewalWorld,
     day_token_path,
     make_world,
@@ -743,6 +744,49 @@ def test_without_a_listed_root_only_a_stamp_that_would_be_taken_is_refused(
     run = _renew(rw, provider)
     assert (run.reason, len(calls)) == ("test", 1)
     assert _renewal_files(rw) == ["2031-06-23-1.json", "2031-06-23-1.json.zd"]
+
+
+def test_a_stamp_under_a_pinned_but_unlisted_root_is_removed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """W5-A-13: two roots are pinned and one of them is listed, so a provider that claims legal
+    grade passes the check before the stamp. Its chain ends at the other root: the renewal
+    would never count (D5), so once the stamp verifies, the record and its token are removed
+    as a revoked one's are (C15), and the run is refused with ``legal-roots``, naming the root
+    the stamp used. A stamp under the listed root is still kept."""
+    rw = make_world(tmp_path)
+    unlisted = LegalCa("Örnek Unlisted Root (test)")
+    roots = [rw.legal.root, unlisted.root]
+    assert tuple(rw.world.config.tsa.legal_root_fingerprints) == (rw.legal.fingerprint,)
+    rw.set_now(CNA - timedelta(days=100))
+    provider = rw.legal_provider(FAR, ca=unlisted)
+    calls = _counted(provider, monkeypatch)
+    before = renewal_status(rw.layout, rw.world.config, roots, rw.clock.now)
+    with pytest.raises(RenewalLegalRootsError) as refused:
+        renew(rw.layout, rw.world.config, provider, roots, rw.clock.now)
+    assert len(calls) == 1  # the stamp was taken (D4), then refused
+    assert _renewal_files(rw) == []
+    assert renewal_status(rw.layout, rw.world.config, roots, rw.clock.now) == before
+    error = refused.value
+    assert (error.cause, error.retryable) == ("legal-roots", False)
+    assert (error.root, error.root_sha256) == (
+        unlisted.root.subject.rfc4514_string(),
+        unlisted.fingerprint,
+    )
+    for text in (error.message_tr, error.message_en):
+        assert f"{error.root} (SHA-256 {unlisted.fingerprint})" in text
+        assert "CN=Örnek Unlisted Root (test)" in text
+        assert rw.legal.fingerprint not in text
+        assert "tsa.legal_root_fingerprints" in text
+    assert error.message_tr.startswith("Sağlayıcı yasal geçerli damga beyan ediyor")
+    assert "kayıt ve damgası silindi" in error.message_tr
+    assert error.message_en.startswith("The provider claims legal grade")
+    assert "the record and its token were removed" in error.message_en
+    run = renew(rw.layout, rw.world.config, rw.legal_provider(FAR), roots, rw.clock.now)
+    assert run.reason == "due"
+    assert _renewal_files(rw) == ["2031-06-23-1.json", "2031-06-23-1.json.zd"]
+    after = renewal_status(rw.layout, rw.world.config, roots, rw.clock.now)
+    assert rw.of(after, DAY_TOKEN).status == "covered"
 
 
 def test_the_token_is_renamed_before_the_record(

@@ -1594,6 +1594,21 @@ All Wave 5 questions are answered (2026-11-02).
   granted on #137, 2026-11-04T09:07Z: those two functions and the error's import).
   `test_a_legal_claim_without_a_listed_root_exits_2` pins the cause in both places and each
   text in its own language.
+  **After the stamp too (#156 item 2).** The check before the stamp sees only the pinned set:
+  with roots A (listed) and B (not listed) both pinned and the provider chaining to B, it
+  passed, every due day was stamped and the renewal never counted (D5). `_write` now also
+  checks the stamp's own root once its token verifies: when the provider claims legal grade and
+  the root its chain ended at (`details["root_sha256"]`) is not in
+  `tsa.legal_root_fingerprints`, the record and its token are removed, as C15 does for a
+  revoked certificate, and the run raises `RenewalLegalRootsError(root=, root_sha256=)`. Its
+  TR/EN texts name that root (subject and SHA-256 fingerprint) and say that the record and its
+  token were removed; the stamp's credit is spent. The command handles it as above: exit 2,
+  `legal-roots` in `error.code` and `last_run.error`, `failures_in_a_row` + 1, so `R20-renewal`
+  raises after the second run. `recover` has no configuration and does not apply this check.
+  `test_a_stamp_under_a_pinned_but_unlisted_root_is_removed` (two pinned roots, one listed; a
+  stamp under the listed one is still kept) and
+  `test_a_stamp_under_a_pinned_but_unlisted_root_exits_2` (`failures_in_a_row` 1, then 2) pin
+  it.
 - **W5-A-14: `recover` checks revocation as the run does (#137 item 2).** W5-A-3's `recover`
   promoted an interrupted part whose token verified, without the stored revocation lists, so a
   run stopped between the stamp and its C15 check left a record that never counts. It now
