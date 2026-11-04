@@ -62,6 +62,7 @@ from arcilogger_core.admin.contract import (
     parse_document,
 )
 from arcilogger_core.config import ApiConfig
+from arcilogger_core.fsutil import atomic_write_bytes
 from arcilogger_core.rawlog import format_line
 from arcilogger_core.secretstore import KAMUSM_CUSTOMER, KAMUSM_PASSWORD, SecretStore
 
@@ -2730,7 +2731,7 @@ def test_acl_plan_least_privilege(engine: str, tmp_path: Path) -> None:
     assert _rights(vault, collector) == _rights(vault, web) == set()
     # Evidence-job state: core trusts state\seal\<day>.json ("sealed"), so only the tasks write it.
     assert _rights(entries["state"], collector) == {"Modify"}, "its own status and alerts"
-    for job in ("seal", "replica", "verify", "clock"):
+    for job in ("seal", "replica", "verify", "clock", "crl"):
         entry = entries[job]
         assert entry["Protect"] is True, job
         assert _rights(entry, tasks) == {"Modify"}, job
@@ -2740,6 +2741,14 @@ def test_acl_plan_least_privilege(engine: str, tmp_path: Path) -> None:
         assert _rights(entry, api) == _rights(entry, worker) == {"ReadAndExecute"}, job
     assert _rights(entries["seal"], ingest) == {"ReadAndExecute"}
     assert _rights(entries["replica"], ingest) == set()
+    assert _rights(entries["crl"], ingest) == set()
+    # Stored reports: the Renew task reads them and their tokens (contract D3); the API and the
+    # worker keep the rights of exports.
+    reports = entries["reports"]
+    assert re.split(r"[\\/]", reports["Path"])[-2:] == ["exports", "reports"]
+    assert reports["Protect"] is False
+    assert {ace["Sid"]: ace["Rights"] for ace in reports["Aces"]} == {tasks: "ReadAndExecute"}
+    assert _rights(entries["exports"], tasks) == set()
     # The collector never needs a secret; Caddy's CA key is Caddy's alone.
     assert _rights(entries["secret.key"], collector) == set()
     assert entries["secret.key"]["Kind"] == "File"
@@ -2801,6 +2810,11 @@ def test_acl_applied_keeps_sealed_file_deny_entries(tmp_path: Path) -> None:
         "-SkipAudit",
     )
     assert result.returncode == 0, result.stdout + result.stderr
+    # The Renew task's state file, written as renew writes it (a new file replaces the old one
+    # on every run): it has no entry of its own and keeps the tasks' Modify inherited from state.
+    renewal = data / "state" / "renewal.json"
+    atomic_write_bytes(renewal, b"{}\n")
+    atomic_write_bytes(renewal, b'{"failures_in_a_row": 0}\n')
     dump = write_script(
         tmp_path / "dump.ps1",
         r"""
@@ -2827,6 +2841,8 @@ foreach ($path in [System.IO.File]::ReadAllLines($ListPath)) {
     )
     out = tmp_path / "acl.json"
     seal_state = data / "state" / "seal"
+    crl_state = data / "state" / "crl"
+    reports = data / "exports" / "reports"
     audit_spool = data / "spool" / "_audit"
     scheduled = data / "backups" / "scheduled"
     paths = [
@@ -2837,6 +2853,9 @@ foreach ($path in [System.IO.File]::ReadAllLines($ListPath)) {
         programdata / "secret.key",
         sealed,
         seal_state,
+        crl_state,
+        reports,
+        renewal,
         audit_spool,
         scheduled,
     ]
@@ -2875,6 +2894,28 @@ foreach ($path in [System.IO.File]::ReadAllLines($ListPath)) {
         assert acls[path]["protected"] is True, path
         assert all(r["sid"] != collector for r in acls[path]["rules"]), path
     assert any(r["sid"] == WELL_KNOWN["local_service"] for r in acls[seal_state]["rules"])
+    # Revocation lists (CrlFetch): protected; the tasks write, the API and the worker only read.
+    tasks = WELL_KNOWN["local_service"]
+    assert acls[crl_state]["protected"] is True
+    writes = write_data | append_data | delete | delete_child
+    crl_rules = {r["sid"]: r for r in acls[crl_state]["rules"] if r["type"] == "Allow"}
+    assert crl_rules[tasks]["rights"] & (write_data | append_data | delete) != 0
+    for reader in (service_sid("ArciApi"), worker):
+        assert crl_rules[reader]["rights"] & writes == 0, reader
+    assert collector not in crl_rules
+    assert service_sid("ArciIngest") not in crl_rules
+    # Stored reports: the Renew task reads them, never writes or deletes one.
+    report_tasks = [r for r in acls[reports]["rules"] if r["sid"] == tasks]
+    assert report_tasks, "LOCAL SERVICE must read exports\\reports"
+    assert all(r["type"] == "Allow" and r["rights"] & writes == 0 for r in report_tasks)
+    # state\renewal.json after two atomic writes: the tasks' Modify, inherited from state.
+    renewal_tasks = [r for r in acls[renewal]["rules"] if r["sid"] == tasks]
+    assert renewal_tasks, "the Renew task must write state\\renewal.json"
+    assert all(r["inherited"] for r in renewal_tasks)
+    modify_bits = write_data | append_data | delete
+    assert any(
+        r["type"] == "Allow" and r["rights"] & modify_bits == modify_bits for r in renewal_tasks
+    )
     # Scheduled database dumps (ADR-0009): the Backup task writes them, no service reads them.
     assert acls[scheduled]["protected"] is True
     assert any(r["sid"] == WELL_KNOWN["local_service"] for r in acls[scheduled]["rules"])
@@ -8962,6 +9003,57 @@ def test_acl_plan_gives_the_administration_agent_exactly_its_rights(
     assert _grants(entries["programdata/admin/policy.json"], service_sid("ArciWorker")) == {
         ("Read", "file")
     }
+
+
+def test_acl_plan_gives_the_renew_and_crlfetch_tasks_their_rights(
+    engine: str, tmp_path: Path
+) -> None:
+    """Each right of the Renew task (LOCAL SERVICE, contract D3; A4 on #103) and of CrlFetch.
+
+    Renew creates and writes its records in vault\\renewals, modifies state\\renewal.json and
+    state\\renewal.lock, reads exports\\reports and reads the vault days, the deletion records
+    and state\\crl; CrlFetch writes state\\crl only (contract 0.1 rule 2). vault\\renewals and
+    the two files have no entry of their own: every run replaces renewal.json with a new file
+    (atomic write), which carries only the inherited entries, so their right is the inherited
+    Modify of vault and state. No entry gives a write right below vault: sealed days and
+    deletion records keep the deny entries of ``immutability.lock``
+    (``test_acl_applied_keeps_sealed_file_deny_entries``)."""
+    entries = _plan_by_path(_acl_plan(engine, tmp_path), tmp_path)
+    tasks, api, worker = (
+        WELL_KNOWN["local_service"],
+        service_sid("ArciApi"),
+        service_sid("ArciWorker"),
+    )
+    owners = {WELL_KNOWN["system"], WELL_KNOWN["admins"]}
+    modify, read = ("Modify", "all"), ("ReadAndExecute", "all")
+    # vault\renewals (records, tokens, their lock), the days and deletion records it reads.
+    assert _grants(entries["data/vault"], tasks) == {modify}
+    assert [path for path in entries if path.startswith("data/vault/")] == []
+    # state\renewal.json and state\renewal.lock.
+    assert entries["data/state"]["Protect"] is False
+    assert _grants(entries["data/state"], tasks) == {modify}
+    assert [path for path in entries if path.startswith("data/state/renewal")] == []
+    # state\crl: protected; the tasks write it, the API and the worker read it.
+    crl = entries["data/state/crl"]
+    assert (crl["Kind"], crl["Protect"]) == ("Directory", True)
+    assert {ace["Sid"] for ace in crl["Aces"]} == owners | {tasks, api, worker}
+    assert _grants(crl, tasks) == {modify}
+    assert _grants(crl, api) == _grants(crl, worker) == {read}
+    # exports\reports: read, inherited by the reports and their tokens, nothing more.
+    reports = entries["data/exports/reports"]
+    assert (reports["Kind"], reports["Protect"]) == ("Directory", False)
+    assert _grants(reports, tasks) == {read}
+    assert "data/exports" not in _granted(entries, tasks)
+    # Where the tasks may write: the folders of the earlier tasks and state\crl, nothing else.
+    assert _writes(entries, tasks) == {
+        "data/spool", "data/spool/_audit", "data/vault", "data/state", "data/state/seal",
+        "data/state/replica", "data/state/verify", "data/state/clock", "data/state/crl",
+        "data/state/requests", "data/logs", "data/backups/scheduled",
+    }  # fmt: skip
+    # Parents before children: Set-ArciVaultAcl.ps1 creates state\crl and exports\reports.
+    paths = list(entries)
+    assert paths.index("data/state") < paths.index("data/state/crl")
+    assert paths.index("data/exports") < paths.index("data/exports/reports")
 
 
 def test_acl_plan_keeps_the_api_and_the_tasks_out_of_the_configuration(
