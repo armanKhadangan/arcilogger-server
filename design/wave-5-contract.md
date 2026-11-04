@@ -1326,6 +1326,43 @@ All Wave 5 questions are answered (2026-11-02).
   arrival order: the compression fails with `55P03`, "chunk deleted by other transaction"),
   `test_the_drop_locks_the_chunks_in_the_order_a_reader_does` (12 chunks; fails in name order).
 
+- **W5-G-23: the search export holds the partition lock as the search does (W5-G-18; #148,
+  found on #145).** `POST /search/export` reads its rows in pages of windows of device time, each
+  window a statement of its own, in one REPEATABLE READ snapshot, but took no partition lock. On
+  plain PostgreSQL a `db.window` step still waited for it (its `LOCK TABLE messages IN ACCESS
+  EXCLUSIVE MODE` conflicts with the export's lock on the parent table, while it held `ARCIPART`
+  exclusively and so stalled ingest and new searches behind it); on TimescaleDB the step locks
+  only the chunks it drops (W5-G-21), which the export had not reached yet: a chunk dropped
+  between two windows was missing from the later one, and the file left out the day's first
+  hours with no `-kismi`, no `X-Arci-Export-Truncated` and `truncated: null` in its audit entry.
+  The export now reads under `reading(..., window=True)`: `ARCIPART` shared at session level
+  from before its snapshot (`hold_window`), released before the rollback and so before the
+  `search.export` entry is written and committed, which still happens before the file's first
+  byte is sent; the failure handling of W5-G-18 is the same (the connection invalidated on any
+  failure but the lock's timeout). The lock is waited for at most `search.request_budget_ms`, as
+  by a search; the wait is taken from `search.export_budget_seconds`, and a wait that uses either
+  up answers 504 `search_timeout` (no new code; its `{seconds}` is the budget used up). That
+  answer writes no `search.export` entry: no file and no row left the API (the search itself is
+  audited by `search.run`), and the hourly limit counts only files. Whatever takes `ARCIPART`
+  exclusively (a step of the window job, the daily `partitions.ensure`, ingest's reload claim)
+  now waits for a running export before it locks any table, for the rest of the export's read
+  and the writing of its file: about `search.export_budget_seconds` (at most 900), plus the last
+  page with its fill-in, the xlsx's writing and the SHA-256 pass, which come after the read's
+  deadline. Searches that come while such a step waits queue behind its exclusive request and
+  may answer 504 `search_timeout`; on TimescaleDB an export did not delay searches before (open
+  question on #148: a `lock_timeout` for the worker's step, or a cap on how long an export holds
+  the lock). On plain PostgreSQL ingest no longer stalls behind a step that waits for an export.
+  The export still does not check the
+  database window (`archived`, G8): a drop that finished before the export began gives the rows
+  the database holds, without saying which days are gone (open question on #148). Tests
+  (`api/tests/test_search_window_lock.py`, two connections ordered by polling `pg_locks`):
+  `test_an_export_in_progress_is_not_changed_by_a_drop` (fails without the lock on TimescaleDB),
+  `test_an_export_that_cannot_get_the_lock_in_time_times_out`,
+  `test_the_export_takes_the_wait_for_the_lock_from_its_budget`,
+  `test_the_export_releases_the_lock_before_its_audit_entry`,
+  `test_a_failed_export_does_not_keep_the_lock`; `api/tests/test_search_export.py`:
+  `test_the_audit_entry_is_committed_before_the_first_byte_is_sent`.
+
 ## Deviations — W5-H (2026-11-03)
 
 - **W5-H-1: the first line view of an xz file decompresses more than one stream.** §5.4 says

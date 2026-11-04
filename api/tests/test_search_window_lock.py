@@ -16,7 +16,13 @@ level before its transaction (``archive.service.hold_window``), so its snapshot 
   ``search_timeout`` (audited ``outcome: timeout``);
 * the lock never stays on a pooled connection: after an answer, after a failure inside the read,
   after the timeout and after a failure of the statement that takes it, the window job gets the
-  lock exclusively at once.
+  lock exclusively at once;
+* an export (#148, W5-G-23), which reads its windows in one snapshot as the pages do, holds the
+  lock the same way and is not changed by a drop that starts while it reads: the drop waits for
+  it, and the file holds the whole day. It waits for the lock as a search does (504
+  ``search_timeout``, nothing audited), the wait taken from ``search.export_budget_seconds``,
+  and releases it before its audit entry is written; a failure inside the read leaves no lock
+  behind.
 
 The day is ten days before today (daily partitions); its two lines are CORE-R1 heartbeats, at
 01:00 (UTC-day partition of the day before) and at 12:00 (its own UTC day), written to the spool
@@ -26,6 +32,8 @@ and the database and sealed with the mock TSA.
 from __future__ import annotations
 
 import asyncio
+import csv
+import io
 import threading
 import time
 from collections.abc import Callable, Iterator
@@ -43,18 +51,21 @@ from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import NullPool
 
 from arcilogger_api.archive import service as archive_service
+from arcilogger_api.audit import record_audit
 from arcilogger_api.lookup_testing import seal_day
 from arcilogger_api.routers import search as search_router
 from arcilogger_api.routers.search import state_of
+from arcilogger_api.search import export as exports
 from arcilogger_api.search import windows
 from arcilogger_api.search.testing import sign_in
+from arcilogger_api.testing import LoggedIn
 from arcilogger_core.config import Config
 from arcilogger_core.immutability import is_locked, unlock
 from arcilogger_core.layout import Layout
-from arcilogger_core.timeutil import day_window, site_day, utc_now
+from arcilogger_core.timeutil import day_window, isoformat_site, site_day, utc_now
 from arcilogger_db.engine import engine_from_url
 from arcilogger_db.models import AuditLog, Message
-from arcilogger_db.partitions import PARTITION_LOCK_KEY, drop_before, ensure_days
+from arcilogger_db.partitions import PARTITION_LOCK_KEY, day_bounds, drop_before, ensure_days
 from arcilogger_db.settings import DEFAULT_SETTINGS, set_setting
 from arcilogger_worker.testing import Evidence, tr
 
@@ -75,6 +86,10 @@ WAITING = text(
     "AND database = (SELECT oid FROM pg_database WHERE datname = current_database()) "
     "AND CAST(classid AS bigint) = :high AND CAST(objid AS bigint) = :low AND objsubid = 1"
 )
+#: The export's Zaman column of the two lines (site time).
+EXPORTED = [isoformat_site(LATE), isoformat_site(EARLY)]
+#: The step's statement waits for a lock (the partition lock, or a table the export reads).
+STEP_WAITING = text("SELECT count(*) FROM pg_locks WHERE pid = :pid AND NOT granted")
 
 
 @pytest.fixture(autouse=True)
@@ -130,6 +145,17 @@ def search(client: TestClient, **body: Any) -> Any:
             **body,
         },
     )
+
+
+def export(client: TestClient, search_id: str) -> Any:
+    return client.post(f"{API}/export", json={"search_id": search_id, "format": "csv"})
+
+
+def export_entries(factory: sessionmaker[Session]) -> list[AuditLog]:
+    with factory() as session:
+        rows = list(session.scalars(select(AuditLog).where(AuditLog.action == "search.export")))
+        session.expunge_all()
+    return rows
 
 
 def in_thread(call: Callable[[], Any]) -> tuple[threading.Thread, list[Any]]:
@@ -497,3 +523,243 @@ def test_the_wait_for_the_lock_is_taken_from_the_budget(
     assert used_up.status_code == 504, used_up.text
     assert used_up.json()["error"]["code"] == "search_timeout"
     assert len(budgets) == 1
+
+
+def test_an_export_in_progress_is_not_changed_by_a_drop(
+    app: FastAPI,
+    client: TestClient,
+    app_session_factory: sessionmaker[Session],
+    reauthenticate: Callable[[LoggedIn], None],
+    outside: Engine,
+    day: date,
+) -> None:
+    """#148: the export reads its rows in windows of device time, newest first, in one read-only
+    snapshot. It is paused before its first window that reaches the UTC-day partition of
+    ``DAY - 1`` (after the window with the line at 12:00), and a step of the window job that
+    drops that partition starts then: the step must wait for the export, on the partition lock
+    before it locks any table (on plain PostgreSQL it would otherwise wait on ``messages`` while
+    holding the lock exclusively, and ingest and new searches with it), and the file holds the
+    whole day, never the line at 12:00 alone as if the day were complete."""
+    reauthenticate(sign_in(client, app_session_factory))
+    found = search(client)
+    assert found.status_code == 200, found.text
+    assert found.json()["archived"] is None
+    assert len(found.json()["items"]) == 2
+    early_partition = day_bounds(DAY)[0]  # the line at 01:00 lies before it
+    paused, resume = threading.Event(), threading.Event()
+    reached: list[datetime] = []
+
+    def pause(_db: Session, lower: datetime, upper: datetime) -> None:
+        if lower < early_partition and not paused.is_set():
+            reached.append(upper)
+            paused.set()
+            assert resume.wait(30), "the test never resumed the export"
+
+    state_of(app).hook = pause
+    try:
+        exporting, exported = in_thread(lambda: export(client, found.json()["search_id"]))
+        try:
+            assert paused.wait(15), "the export never reached the day before"
+            assert reached[0] <= LATE  # the line at 12:00 is read already
+            with outside.connect() as step:
+                pid = step.execute(text("SELECT pg_backend_pid()")).scalar_one()
+                step.commit()
+
+                def run_step() -> list[Any]:
+                    drop_before(step, CUTOFF)
+                    after = times(step)
+                    step.commit()
+                    return after
+
+                stepping, stepped = in_thread(run_step)
+                # Sessions waiting for the partition lock once the step waits; ``None``: it was
+                # never seen waiting (asserted after the export is resumed, so it cannot hang).
+                on_the_lock: int | None = None
+                deadline = time.monotonic() + 15
+                with outside.connect() as watcher:
+                    while stepping.is_alive() and time.monotonic() < deadline:
+                        waits = watcher.execute(STEP_WAITING, {"pid": pid}).scalar_one()
+                        if waits:
+                            on_the_lock = watcher.execute(
+                                WAITING, {"high": KEY_HIGH, "low": KEY_LOW}
+                            ).scalar_one()
+                            watcher.rollback()
+                            break
+                        watcher.rollback()
+                        time.sleep(0.02)
+                dropped_first = not stepping.is_alive()
+                resume.set()
+                exporting.join(30)
+                stepping.join(30)
+                assert not stepping.is_alive()
+        finally:
+            resume.set()
+            exporting.join(30)
+    finally:
+        state_of(app).hook = None
+    assert not exporting.is_alive()
+    (response,) = exported
+    assert not isinstance(response, BaseException), response
+    assert response.status_code == 200, response.text
+    assert "X-Arci-Export-Truncated" not in response.headers
+    rows = list(
+        csv.reader(io.StringIO(response.content.decode("utf-8-sig"), newline=""), delimiter=";")
+    )
+    assert [row[0] for row in rows[1:]] == EXPORTED, (
+        "the export's later window no longer saw the dropped partition: a partial day"
+    )
+    assert not dropped_first, "the step dropped the partition while the export was reading"
+    assert on_the_lock is not None, "the step neither waited nor finished within 15 s"
+    assert on_the_lock == 1, "the step waited on a table the export reads, not the partition lock"
+    (after,) = stepped
+    assert after == [LATE]  # the step ran once the export had ended
+    assert exclusive(outside)
+
+
+def test_an_export_that_cannot_get_the_lock_in_time_times_out(
+    client: TestClient,
+    app_session_factory: sessionmaker[Session],
+    reauthenticate: Callable[[LoggedIn], None],
+    outside: Engine,
+    day: date,
+) -> None:
+    """The export waits for the lock at most ``search.request_budget_ms``, as a search does: 504
+    ``search_timeout``, no file and so no ``search.export`` entry (the hourly limit counts
+    those); its user's export, its slot and its connection are free again."""
+    reauthenticate(sign_in(client, app_session_factory))
+    found = search(client)
+    assert found.status_code == 200, found.text
+    with app_session_factory() as session:
+        set_setting(session, "search.request_budget_ms", 500, updated_by="test")
+        session.commit()
+    with outside.connect() as step:
+        step.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": PARTITION_LOCK_KEY})
+        began = time.monotonic()
+        thread, answer = in_thread(lambda: export(client, found.json()["search_id"]))
+        thread.join(15)
+        waited = time.monotonic() - began
+        step.rollback()
+    thread.join(30)
+    assert waited < 15, "the export waited for the lock without a bound"
+    (response,) = answer
+    assert not isinstance(response, BaseException), response
+    assert response.status_code == 504, response.text
+    error = response.json()["error"]
+    assert error["code"] == "search_timeout"
+    assert error["message_tr"] != error["message_en"]
+    assert "0.5 saniyede" in error["message_tr"]
+    assert "0.5 s" in error["message_en"]
+    assert waited > 0.4
+    assert export_entries(app_session_factory) == []
+    assert exclusive(outside)
+    again = export(client, found.json()["search_id"])
+    assert again.status_code == 200, again.text
+    assert len(export_entries(app_session_factory)) == 1
+    assert exclusive(outside)
+
+
+def test_the_export_takes_the_wait_for_the_lock_from_its_budget(
+    app: FastAPI,
+    client: TestClient,
+    app_session_factory: sessionmaker[Session],
+    reauthenticate: Callable[[LoggedIn], None],
+    monkeypatch: pytest.MonkeyPatch,
+    day: date,
+) -> None:
+    """The export reads for ``search.export_budget_seconds`` less the wait for the lock (on the
+    search's clock); a wait that used it up answers 504 ``search_timeout`` naming that budget,
+    not ``search.request_budget_ms``, and no file."""
+    reauthenticate(sign_in(client, app_session_factory))
+    found = search(client)
+    assert found.status_code == 200, found.text
+    with app_session_factory() as session:
+        set_setting(session, "search.export_budget_seconds", 10, updated_by="test")
+        session.commit()
+    budgets: list[float] = []
+    read_rows = exports.read_rows
+
+    def recording(*args: Any, **kwargs: Any) -> Any:
+        budgets.append(kwargs["budget_seconds"])
+        return read_rows(*args, **kwargs)
+
+    hold = archive_service.hold_window
+    now = [100.0]
+    waits = iter([1.5, 12.0])
+
+    def slow_hold(db: Session, seconds: float) -> Any:
+        held = hold(db, seconds)
+        now[0] += next(waits)
+        return held
+
+    monkeypatch.setattr(exports, "read_rows", recording)
+    monkeypatch.setattr(search_router, "hold_window", slow_hold)
+    monkeypatch.setattr(state_of(app), "clock", lambda: now[0])
+    exported = export(client, found.json()["search_id"])
+    assert exported.status_code == 200, exported.text
+    assert budgets == [10 - 1.5]
+    used_up = export(client, found.json()["search_id"])
+    assert used_up.status_code == 504, used_up.text
+    error = used_up.json()["error"]
+    assert error["code"] == "search_timeout"
+    assert "10 saniyede" in error["message_tr"]
+    assert "10 s" in error["message_en"]
+    assert len(budgets) == 1
+    assert len(export_entries(app_session_factory)) == 1
+
+
+def test_the_export_releases_the_lock_before_its_audit_entry(
+    client: TestClient,
+    app_session_factory: sessionmaker[Session],
+    reauthenticate: Callable[[LoggedIn], None],
+    outside: Engine,
+    monkeypatch: pytest.MonkeyPatch,
+    day: date,
+) -> None:
+    """The lock is released with the read, before the ``search.export`` entry is written and
+    committed (and so before the file is sent): the window job never waits for an audit entry
+    or a download."""
+    reauthenticate(sign_in(client, app_session_factory))
+    found = search(client)
+    assert found.status_code == 200, found.text
+    free: list[bool] = []
+
+    def checking(db: Session, **kwargs: Any) -> Any:
+        if kwargs["action"] == "search.export":
+            free.append(exclusive(outside))
+        return record_audit(db, **kwargs)
+
+    monkeypatch.setattr(search_router, "record_audit", checking)
+    response = export(client, found.json()["search_id"])
+    assert response.status_code == 200, response.text
+    assert free == [True]
+    assert exclusive(outside)
+
+
+def test_a_failed_export_does_not_keep_the_lock(
+    app: FastAPI,
+    client: TestClient,
+    app_session_factory: sessionmaker[Session],
+    reauthenticate: Callable[[LoggedIn], None],
+    outside: Engine,
+    day: date,
+) -> None:
+    """A statement that fails inside the export's read (not a timeout) leaves no lock on a
+    pooled connection, no entry and no running export behind."""
+    reauthenticate(sign_in(client, app_session_factory))
+    found = search(client)
+    assert found.status_code == 200, found.text
+
+    def failing(db: Session, _start: datetime, _end: datetime) -> None:
+        db.execute(text("SELECT 1 / 0"))
+
+    state_of(app).hook = failing
+    try:
+        with pytest.raises(DBAPIError, match="division by zero"):
+            export(client, found.json()["search_id"])
+    finally:
+        state_of(app).hook = None
+    assert soon_exclusive(outside)
+    assert export_entries(app_session_factory) == []
+    again = export(client, found.json()["search_id"])
+    assert again.status_code == 200, again.text
+    assert exclusive(outside)

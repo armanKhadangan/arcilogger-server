@@ -241,8 +241,8 @@ def reading(
 ) -> Iterator[Storage]:
     """A slot of the gate and one read-only snapshot (see the module text), on TimescaleDB with
     every statement planned with its values (``windows.plan_with_values``); rolled back, which
-    also ends that setting. ``window`` (the reads that check the database window, G8): the
-    partition lock is held shared from before the snapshot to its end
+    also ends that setting. ``window`` (the reads that check the database window, G8, and the
+    export, W5-G-23): the partition lock is held shared from before the snapshot to its end
     (:func:`~arcilogger_api.archive.service.hold_window`), waited for at most
     ``search.request_budget_ms`` (:class:`SearchTimeoutError`); the wait is part of the
     request's budget (:func:`_budget_left`) and :data:`WINDOW_WAIT` says the lock is held."""
@@ -807,7 +807,9 @@ def search_export(
     user: ExporterDep,
     state: StateDep,
 ) -> StreamingResponse:
-    """The rows of a search as a file (audited ``search.export`` before it is sent)."""
+    """The rows of a search as a file (audited ``search.export`` before it is sent). The
+    partition lock is waited for as by a search (504 ``search_timeout``), the wait taken from
+    ``search.export_budget_seconds``, and released before the audit entry is written."""
     settings = _settings(db)
     entry = _entry(state, body.search_id, user)
     with state.exports.hold(user.id):
@@ -821,21 +823,29 @@ def search_export(
             created_at=utc_now(),
         )
         state_ = exports.Reading()
-        with reading(db, state, user, settings) as storage:
-            rows = exports.read_rows(
-                db,
-                entry.plan,
-                entry.start,
-                entry.end,
-                site,
-                state_,
-                max_rows=int(settings["search.export_max_rows"]),
-                budget_seconds=float(settings["search.export_budget_seconds"]),
-                clock=state.clock,
-                hook=state.hook,
-                horizons=storage.horizons,
-            )
-            built = exports.build(rows, body.format, info, state_)
+        budget = float(settings["search.export_budget_seconds"])
+        try:
+            # Its windows read in one snapshot under the partition lock held shared from before
+            # it (W5-G-23): a step of the window job never drops a day between two of them.
+            with reading(db, state, user, settings, window=True) as storage:
+                rows = exports.read_rows(
+                    db,
+                    entry.plan,
+                    entry.start,
+                    entry.end,
+                    site,
+                    state_,
+                    max_rows=int(settings["search.export_max_rows"]),
+                    budget_seconds=_budget_left(db, budget),
+                    clock=state.clock,
+                    hook=state.hook,
+                    horizons=storage.horizons,
+                )
+                built = exports.build(rows, body.format, info, state_)
+        except SearchTimeoutError as exc:  # no file and no row: nothing is audited (W5-G-23)
+            # The budget used up: the wait for the lock's (``search.request_budget_ms``) or the
+            # export's own (``search.export_budget_seconds``, by :func:`_budget_left`).
+            raise search_error("search_timeout", {"seconds": _shown(exc.seconds)}) from None
         try:
             record_audit(
                 db,
