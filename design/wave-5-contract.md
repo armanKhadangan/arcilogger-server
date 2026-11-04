@@ -1861,7 +1861,11 @@ issue fixed is kept (command, flags, exit codes 0/1/2, JSON fields); what differ
       times once gives: live, range and single days still store the same value
       (`test_bounding_again_with_the_same_times_gives_the_same_value`, and the `truncated`
       variant of the consistency test below, which scales the bound down to one time and 12
-      hours).
+      hours), except a lease that late evidence ends earlier after the bound dropped times
+      from it: the times dropped against moves after its new end do not come back, so it
+      keeps fewer times than a rebuild from scratch, marked `truncated` (positive evidence
+      only: the check misses them). A rebuild from scratch (leases deleted) stores the full
+      value (`test_a_late_end_keeps_fewer_times_of_a_truncated_lease`).
     - **`truncated`** becomes `true` when the bound drops a time, and stays `true` while a
       run takes part of the lease from the stored value (a dropped time cannot come back from
       it); a run that recomputes the whole lease from rows (a closed lease inside its range

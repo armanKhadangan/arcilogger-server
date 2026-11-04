@@ -24,6 +24,7 @@ from sqlalchemy.orm import Session
 from arcilogger_db.models import FgDhcp, Lease
 from arcilogger_worker.correlation.leases import rebuild_day, rebuild_days, run_incremental
 from arcilogger_worker.correlation.watermark import set_watermark
+from arcilogger_worker.lookup import refs
 from arcilogger_worker.lookup.refs import MOVE_TIMES_CAP, epoch_us
 from arcilogger_worker.testing import Evidence, tr
 
@@ -343,6 +344,44 @@ def test_moves_older_than_the_window_before_the_end_are_dropped(
     assert moves(db_session)[(PC, MAC, tr(D, 8))] == value(
         group(NOWHERE, *moved[6:]), truncated=True
     )
+
+
+def test_a_late_end_keeps_fewer_times_of_a_truncated_lease(
+    db_session: Session, evidence: Evidence, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The one case where the modes differ: the live job caps an open lease against its newest
+    moves; late evidence then ends it before them, and the rebuild that the late evidence job
+    runs cuts them off. The times the cap dropped for them do not come back, so the lease keeps
+    fewer times than a rebuild from scratch, never others, and both say ``truncated`` (the check
+    reads them as positive evidence only). The cap is scaled down to five times."""
+    monkeypatch.setattr(refs, "MOVE_TIMES_CAP", 5)
+    evidence.fortigate_dhcp(tr(D, 19), PC, MAC, lease=LONGEST)
+    hours = [tr(D, 20) + timedelta(hours=k) for k in range(12)]  # D 20:00 ... D1 07:00
+    for moment in hours:
+        evidence.fortigate_dhcp(moment, NOWHERE, MAC, lease=3600)
+    db_session.commit()
+    now = tr(D, 19, 5)
+    while now <= tr(D1, 12):
+        run_incremental(db_session, now=now)
+        db_session.commit()
+        now += timedelta(hours=1)
+    assert moves(db_session)[(PC, MAC, tr(D, 19))] == value(
+        group(NOWHERE, *hours[-5:]), truncated=True
+    )
+    evidence.fortigate_dhcp(tr(D1, 1, 30), SAME, MAC)  # late: ends PC after D1 01:00
+    db_session.commit()
+    rebuild_days(db_session, D, D1, now=tr(D1, 12))
+    live = moves(db_session)[(PC, MAC, tr(D, 19))]
+    (row,) = db_session.scalars(select(Lease).where(Lease.ip == PC))
+    assert row.end == tr(D1, 1, 30)
+    db_session.execute(delete(Lease))
+    db_session.commit()
+    rebuild_days(db_session, D, D1, now=tr(D1, 12))
+    scratch = moves(db_session)[(PC, MAC, tr(D, 19))]
+    assert scratch == value(group(NOWHERE, *hours[1:6]), truncated=True)  # D 21:00 ... D1 01:00
+    assert live == value(group(NOWHERE, *hours[4:6]), truncated=True)  # D1 00:00, D1 01:00
+    live_times = {t for g in live["groups"] for t in g["times"]}
+    assert live_times < {t for g in scratch["groups"] for t in g["times"]}
 
 
 # -- the VDOM of a seed ---------------------------------------------------------------------------

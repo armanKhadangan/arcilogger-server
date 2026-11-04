@@ -601,7 +601,11 @@ class _Recorded:
     without a new move, so the run's end would make the modes differ), and of those at most
     :data:`.refs.MOVE_TIMES_CAP`, the newest (:func:`.refs.bound_moves`). A value that lost a
     time says so (``truncated``) until a run recomputes the whole lease (a closed lease inside
-    its range). Both cuts keep the newest times, so the modes still store the same value.
+    its range). Both cuts keep the newest times, so the modes still store the same value,
+    except a lease that late evidence ends earlier after the bound dropped times from it: the
+    times dropped against moves after its new end do not come back, so it keeps fewer times
+    than a rebuild from scratch, marked ``truncated`` (positive evidence only: the check misses
+    them). A rebuild from scratch (leases deleted) stores the full value.
 
     The VDOMs are those of the rows the run read, else those the stored refs carry: the same
     value while the row exists, and still there when it is gone.

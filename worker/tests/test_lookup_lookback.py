@@ -42,7 +42,7 @@ from arcilogger_db.models import (
 )
 from arcilogger_db.settings import get_settings, set_setting
 from arcilogger_worker.correlation.leases import rebuild_day
-from arcilogger_worker.lookup import LookupOutcome, LookupRequest, LookupSettings, run_lookup
+from arcilogger_worker.lookup import LookupOutcome, LookupRequest, LookupSettings, refs, run_lookup
 from arcilogger_worker.lookup.attribution import MISSED_MOVE_WINDOW
 from arcilogger_worker.lookup.days import RELOAD_DAYS, lookup_days, reads_from, reads_until
 from arcilogger_worker.lookup.refs import REF_VD, fg_dhcp_move, moves_json
@@ -433,6 +433,46 @@ def test_the_lookup_reads_the_moves_the_lease_job_recorded(
     stored = db_session.scalar(select(Lease.moves).where(Lease.ip == PC))
     assert stored == moves_json([fg_dhcp_move(row)])
     assert stored["groups"] != []
+
+    before = internal(db_session)
+    chain = before.attribution
+    assert chain is not None
+    assert chain.lease is not None
+    assert (chain.lease.source_table, chain.lease.last_dhcp_evidence) == ("fg_dhcp", ack)
+    assert (chain.confidence, chain.lease.confidence) == ("low", "low")
+    assert dict(next(e for e in chain.explanations if e.key == UNCONVERTED).params) == {
+        "last": iso(ack),
+        "ip": PC,
+    }
+    assert clamped_day(before) == FIRST.isoformat()
+
+    drop_before_the_days(db_session)
+    assert answer(internal(db_session)) == answer(before)
+
+
+def test_a_truncated_recorded_move_still_lowers_the_chain(
+    db_session: Session, evidence: Evidence, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Issue #127's bound: a value the lease job truncated is read like any other, its moves
+    positive evidence only. The lease of the test above and three ACKs of the PC's MAC for
+    :data:`ELSEWHERE` before the first day; the job, its cap scaled down to one time, keeps the
+    newest and says ``truncated``. That one move still lowers the chain, the look-back is noted
+    all the same, and the answer is the same once the rows before the days are dropped."""
+    monkeypatch.setattr(refs, "MOVE_TIMES_CAP", 1)
+    ack = AT - timedelta(days=14)
+    evidence.fortigate_dhcp(ack, PC, PC_MAC, lease=2_592_000, vd="root")
+    moved = [
+        evidence.fortigate_dhcp(
+            AT - timedelta(days=13, hours=k), ELSEWHERE, PC_MAC, interface="vlan42", vd="root"
+        )
+        for k in (2, 1, 0)
+    ]
+    build(db_session, evidence, ack.date())
+    monkeypatch.undo()  # the lookup reads with the real cap
+    row = db_session.execute(select(*MOVE_ROW).where(FgDhcp.id == moved[-1])).one()
+    assert row.time < day_window(FIRST)[0]
+    stored = db_session.scalar(select(Lease.moves).where(Lease.ip == PC))
+    assert stored == moves_json([fg_dhcp_move(row)], truncated=True)
 
     before = internal(db_session)
     chain = before.attribution
