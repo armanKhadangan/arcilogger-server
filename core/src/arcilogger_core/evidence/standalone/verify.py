@@ -91,7 +91,7 @@ except ImportError:  # pragma: no cover - every supported CPython build has it
     _LZMA_ERROR = _NoLzmaError
 
 
-VERIFIER_VERSION = "6"
+VERIFIER_VERSION = "7"
 INDEX_NAME = "paket.json"
 INDEX_SCHEMA = "arcilogger.evidence/1"
 #: The guides. The Turkish one has an ASCII name: ZIP tools that ignore the UTF-8 name flag
@@ -1406,8 +1406,9 @@ def verify_timestamp(
 
     The same rules as ARCILOGGER's own verifier (``arcilogger_core.tsa.verify``), so both
     reach the same verdict on the same token. ``require_critical_eku`` false — only when the
-    sealed manifest says the site accepted Kamu SM's profile (``tsa.require_critical_eku``) —
-    turns a non-critical EKU extension into a warning (``result.warnings``).
+    sealed manifest (for a renewal token, its record) says the site accepted Kamu SM's profile
+    (``tsa.require_critical_eku``) — turns a non-critical EKU extension into a warning
+    (``result.warnings``).
     """
     result = TimestampResult()
     try:
@@ -2163,6 +2164,17 @@ def _object(value: Any) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
+def _renewal_eku(record: bytes) -> bool:
+    """The EKU rule a renewal record was written under (its ``tsa.require_critical_eku``, K6):
+    its token is judged by it, as a day's token by its manifest's; strict unless the record
+    says false (one that cannot be read never counts anyway)."""
+    try:
+        data = load_json(record)
+    except (ValueError, RecursionError):
+        return True
+    return _object(_object(data).get("tsa")).get("require_critical_eku") is not False
+
+
 #: The long-term status of a day's stamp: (level, code, TR, EN), the texts of contract 2.6.
 #: ``{renewal}`` is the record that counts (``renewals/<name>.json``); ``{date}`` the
 #: certificate's expiry, for ``late`` the time of the re-stamping.
@@ -2817,22 +2829,30 @@ class Verifier:
                     report.add(level, code, day, tr, en)
         self._cross_check_index(day, result)
 
-    def _eku_warnings(self, result: TimestampResult, where: str) -> None:
+    def _eku_warnings(self, result: TimestampResult, where: str, *, record: bool = False) -> None:
+        """A non-critical EKU the site accepted: in the sealed manifest, or (``record``) in the
+        renewal record the token stamps."""
+        in_tr, in_en = (
+            ("yenileme kaydında", "renewal record")
+            if record
+            else ("mühürlü manifestte", "manifest")
+        )
         for warning in result.warnings:
             self.report.warn(
                 warning.code,
                 where,
                 f"Zaman damgası: {warning.tr}. Site, Kamu SM'nin sertifika profilini kabul edip "
-                "bu kuralı gevşetmiş ve bunu mühürlü manifestte belirtmiştir "
+                f"bu kuralı gevşetmiş ve bunu {in_tr} belirtmiştir "
                 '(tsa.require_critical_eku = false); OpenSSL "ts -verify" böyle bir damgayı '
                 '"unsuitable certificate purpose" diyerek reddeder',
                 f"{warning.en}; the site relaxed this rule and sealed that choice in the "
-                "manifest (OpenSSL ts -verify rejects such a token)",
+                f"{in_en} (OpenSSL ts -verify rejects such a token)",
             )
 
     def _relaxed_eku(self) -> bool:
         """Whether a sealed manifest of the package says the site accepts a non-critical EKU
-        (then the stamps of its records — deletions, renewals — are judged the same way)."""
+        (then the stamps of its deletion records and the packaged report's stamp are judged the
+        same way; a renewal record carries its own rule, :func:`_renewal_eku`)."""
         for state in self.days.values():
             try:
                 manifest = load_json(state.data or b"")
@@ -3047,9 +3067,18 @@ class Verifier:
             )
 
     def _check_stamped_record(
-        self, name: str, record: bytes, where: str, kind: str, token_sha256: Any = None
+        self,
+        name: str,
+        record: bytes,
+        where: str,
+        kind: str,
+        token_sha256: Any = None,
+        *,
+        require_critical_eku: bool | None = None,
     ) -> TimestampResult | None:
-        """A deletion or renewal record and its own time-stamp token (``<name>.zd``)."""
+        """A deletion or renewal record, or the packaged report, and its own time-stamp token
+        (``<name>.zd``), with the EKU rule ``require_critical_eku`` (a renewal record's own),
+        or for a deletion record and the report the package's (:meth:`_relaxed_eku`)."""
         report = self.report
         token = self._read(name + ".zd", where)
         if token is None:
@@ -3061,12 +3090,14 @@ class Verifier:
                 f"{name}.zd: özet manifestteki değerle uyuşmuyor",
                 f"{name}.zd: differs from the manifest",
             )
+        if require_critical_eku is None:
+            require_critical_eku = not self._relaxed_eku()
         result = verify_timestamp(
-            token, record, self.roots, now=self.now, require_critical_eku=not self._relaxed_eku()
+            token, record, self.roots, now=self.now, require_critical_eku=require_critical_eku
         )
         for error in result.errors:
             report.failed(error, where, f"{name}: ")
-        self._eku_warnings(result, where)
+        self._eku_warnings(result, where, record=kind == "renewal")
         if result.ok and result.gen_time is not None:
             report.ok(
                 f"{kind}-ok",
@@ -3293,7 +3324,9 @@ class Verifier:
             record = self._read(name, "yenileme")
             if record is None:
                 continue
-            result = self._check_stamped_record(name, record, "yenileme", "renewal")
+            result = self._check_stamped_record(
+                name, record, "yenileme", "renewal", require_critical_eku=_renewal_eku(record)
+            )
             text = record.decode("utf-8", "replace")
             covered = sorted({known[h] for h in _HEX64.findall(text) if h in known})
             if result is not None and result.ok:

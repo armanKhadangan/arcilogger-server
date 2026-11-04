@@ -256,13 +256,20 @@ def _record_activity(db: Session, row: UserSession, now: datetime) -> None:
       two pooled connections at once. With N concurrent requests each holding one and waiting
       for a second, the pool runs dry and every one of them fails after ``pool_timeout``
       (``test_concurrent_requests_do_not_exhaust_the_connection_pool``).
+    * **Committed asynchronously** (``synchronous_commit`` off, #119; deviation #119-1 of
+      design/wave-5-contract.md): a crash can lose only the newest ``last_seen_at`` (at most
+      about 3 x ``wal_writer_delay``), which is neither evidence nor audited personal data.
+      ``SET LOCAL`` ends with this transaction, so the endpoint's own transactions, and every
+      audit write, stay synchronous (``test_activity_commit.py``).
 
     The commit returns the connection to the pool; the endpoint's queries start a new
     transaction. Everything read so far stays usable (the caller copied it into
     :class:`CurrentUser` before). A dependency that runs before authentication must therefore
-    not write to the request's session (none does): its changes would be committed here too.
+    not write to the request's session (none does): its changes would be committed here too,
+    asynchronously.
     """
     row.last_seen_at = now
+    db.connection().exec_driver_sql("SET LOCAL synchronous_commit = off")
     db.commit()
 
 
