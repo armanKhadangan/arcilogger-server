@@ -65,10 +65,25 @@ def toml_of(world: World, sources: Sequence[dict[str, Any]], extra: str = "") ->
 
 
 def rewrite(path: Path, content: str) -> None:
-    """New content with a new modification time (as the agent's replace or an editor)."""
+    """New content with a new modification time (as the agent's replace or an editor).
+
+    The content goes to a temporary file in the same folder that then replaces the target, so the
+    service's config watcher never reads a truncated or half-written file (issue #120).
+    """
     before = path.stat().st_mtime_ns if path.exists() else 0
-    path.write_text(content, encoding="utf-8")
-    os.utime(path, ns=(before + 1_000_000_000, before + 1_000_000_000))
+    temp = path.with_name(f".{path.name}.rewrite")
+    temp.write_text(content, encoding="utf-8")
+    os.utime(temp, ns=(before + 1_000_000_000, before + 1_000_000_000))
+    for attempt in range(50):
+        try:
+            temp.replace(path)
+            return
+        except PermissionError:
+            # Windows refuses the replace while the watcher holds the target open; it reads
+            # the file in one go, so the next attempt finds it closed.
+            if attempt == 49:
+                raise
+            time.sleep(0.02)
 
 
 def sha(path: Path) -> str:
