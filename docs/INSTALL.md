@@ -1030,7 +1030,11 @@ windows first (the installer names a session that is still open). Without `ARCIL
 `-Rollback -RestoreDatabase` restores only the database while the collector keeps running.
 
 If the restore fails after the program folders were swapped (or without `ARCILOGGER.previous`),
-the database services stay stopped and the installer prints the command to run again. If a step fails
+the database services stay stopped and the installer prints the command to run again. Without
+`ARCILOGGER.previous`, a restore refused before it began to change the database (answered `H`, no
+dump, PostgreSQL not reachable, the locale or the free-space refusal) puts the database services
+back as they were: those that ran start again, those stopped on manual start stay so
+([BACKUP.md](BACKUP.md) section 5). If a step fails
 after the rename has committed, it says so: do not run the restore again (it would replace the
 restored database once more); on TimescaleDB, when `timescaledb_post_restore()` did not run, it
 prints that command and the one that starts the database services. Run the command to run again

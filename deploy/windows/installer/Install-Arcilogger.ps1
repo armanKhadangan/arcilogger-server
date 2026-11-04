@@ -283,6 +283,10 @@ $script:ProgramMoved = $false        # the old program folder is now <InstallDir
 $script:TasksRegistered = $false     # the tasks were registered from the new program folder
 $script:MigrationStarted = $false    # arcilogger-db upgrade was started (the schema may have changed)
 $script:RestoreStarted = $false      # a restore step was started: on a failure the database services stay stopped
+$script:RestoreChangeStarted = $false   # ... and reached its first change (timescaledb_pre_restore() or CREATE DATABASE)
+$script:DatabaseServicesBefore = $null  # a database-only restore: the database services as they were before it stopped them
+$script:ServicesNotPutBack = @()        # ... those of them Restore-ArciServiceState could not put back so
+$script:RestoreCancelled = $false       # the operator answered no at the restore's question
 $script:RestoreDump = $null          # the dump Invoke-DatabaseRestore restores (a retry names it)
 $script:RestoreCommitted = $null     # its rename committed: the database, the replaced one, post_restore still due
 $script:RestoreCurrentRestoring = $false   # pre_restore ran in the current database, its post_restore not yet
@@ -909,15 +913,17 @@ function Invoke-DatabaseRestore {
     max_wal_size free (Get-RestoreDatabaseSpace). A failure before the rename drops the new
     database and leaves the current one as it was. The database services are stopped (the rename
     needs no other session on either database: one that is open, a pgAdmin window, is named).
-    The caller sets $script:RestoreStarted first; $script:RestoreCommitted and
-    $script:RestoreCurrentRestoring tell Complete-FailedChange where a failure left the database.
+    The caller sets $script:RestoreStarted first; $script:RestoreChangeStarted (the first
+    change: timescaledb_pre_restore() or CREATE DATABASE; a refusal before it changed nothing),
+    $script:RestoreCommitted and $script:RestoreCurrentRestoring tell Complete-FailedChange where
+    a failure left the database.
     #>
     $db = Get-DatabaseSettings
     $dump = Get-RestoreDump
     $script:RestoreDump = $dump
     if (-not $Force) {
         $answer = Read-Host ("'{0}' veritabanı {1} yedeğiyle değiştirilecek. Devam? (E/H) [replace the database with this dump?]" -f $db.name, $dump)
-        if ($answer -notmatch '^(e|E|y|Y)') { throw 'İptal edildi [cancelled].' }
+        if ($answer -notmatch '^(e|E|y|Y)') { $script:RestoreCancelled = $true; throw 'İptal edildi [cancelled].' }
     }
     $credential = Get-PgCredential
     $stamp = [DateTime]::UtcNow.ToString('yyyyMMddHHmmss')
@@ -966,6 +972,9 @@ function Invoke-DatabaseRestore {
     ) -join "`n"
     $created = $false
     $renamed = $false
+    # The first change: everything above only read (a cancel, a missing dump, the locale and the
+    # space refusal leave the database as it was).
+    $script:RestoreChangeStarted = $true
     if ($timescale) {
         $script:RestoreCurrentRestoring = $true
         [void](Invoke-Psql -Database $db.name -Sql "SELECT timescaledb_pre_restore();`n")
@@ -1176,6 +1185,50 @@ function Set-ArciServiceStartMode([string[]]$Name, [ValidateSet('demand', 'delay
             Invoke-ArciExe -FilePath 'sc.exe' -ArgumentList @('config', $service, 'start=', $Mode)
         }
     }
+}
+
+function Get-ArciServiceState([string[]]$Name) {
+    <#
+    Each of these services that exists: whether it ran (Running, or StartPending as at boot; one
+    that was stopping or paused did not) and its start type (Automatic also for delayed-auto).
+    #>
+    $state = @{}
+    foreach ($service in $Name) {
+        $found = Get-Service -Name $service -ErrorAction SilentlyContinue
+        if ($found) {
+            $state[$service] = [pscustomobject]@{
+                Running   = @('Running', 'StartPending') -contains [string]$found.Status
+                StartType = [string]$found.StartType
+            }
+        }
+    }
+    $state
+}
+
+function Restore-ArciServiceState([hashtable]$State) {
+    <#
+    Put services back as Get-ArciServiceState found them: one that ran starts again (with automatic
+    start: delayed-auto again, what the service XMLs request; with manual start it keeps it); one
+    that was stopped stays stopped with its start type (on manual start after a failed upgrade,
+    Complete-FailedChange). Each is attempted, also the start of one whose start type could not
+    be set; $script:ServicesNotPutBack names those left otherwise, and so does the error.
+    #>
+    $ran = @($ServiceNames | Where-Object { $State.ContainsKey($_) -and $State[$_].Running })
+    $script:ServicesNotPutBack = $ran   # until they are
+    $failed = New-Object System.Collections.Generic.List[string]
+    foreach ($name in @($ran | Where-Object { $State[$_].StartType -eq 'Automatic' })) {
+        try { Set-ArciServiceStartMode -Name $name -Mode 'delayed-auto' }
+        catch {
+            $failed.Add($name)
+            Write-ArciWarn ('{0}: otomatik başlatmaya alınamadı [not set to automatic start]: {1}' -f $name, $_.Exception.Message)
+        }
+    }
+    Start-ArciServices -Only $ran
+    foreach ($name in $ran) {
+        if ([string](Get-Service -Name $name -ErrorAction SilentlyContinue).Status -ne 'Running' -and -not $failed.Contains($name)) { $failed.Add($name) }
+    }
+    $script:ServicesNotPutBack = @($ran | Where-Object { $failed.Contains($_) })
+    if ($failed.Count -gt 0) { throw ('önceki durumlarına getirilemedi [not put back as they were]: {0}' -f ($script:ServicesNotPutBack -join ', ')) }
 }
 
 function Start-ArciServices([string[]]$Only = $ServiceNames) {
@@ -3195,8 +3248,11 @@ function Restore-ArciRuntime {
       -CollectorOnly  the database may have changed: ArciIngest, ArciApi and ArciWorker are set to
                       manual start and stay stopped. The collector, Caddy and the evidence jobs
                       need no database, so no syslog message is lost and sealing goes on.
+      -PutBack        the database services as Get-ArciServiceState recorded them before a
+                      database-only restore that changed nothing: they are put back so
+                      (Restore-ArciServiceState) instead of all being started.
     #>
-    param([switch]$SwapBack, [switch]$CollectorOnly)
+    param([switch]$SwapBack, [switch]$CollectorOnly, [hashtable]$PutBack)
     $problems = New-Object System.Collections.Generic.List[string]
     $step = {
         param([string]$Text, [scriptblock]$Action)
@@ -3247,6 +3303,10 @@ function Restore-ArciRuntime {
         }
         & $step 'ArciCollector ve ArciWeb başlatıldı [started]' { Start-ArciServices -Only @('ArciCollector', 'ArciWeb') }
     }
+    elseif ($PutBack) {
+        & $step ('Önceki durumlarına getirildi [put back as they were]: {0}' -f ($DatabaseServiceNames -join ', ')) { Restore-ArciServiceState -State $PutBack }
+        & $step 'ArciCollector ve ArciWeb başlatıldı [started]' { Start-ArciServices -Only @('ArciCollector', 'ArciWeb') }
+    }
     else {
         & $step 'Hizmetler başlatıldı [services started]' { Start-ArciServices }
     }
@@ -3279,15 +3339,29 @@ function Complete-FailedChange {
     # the program in place runs on: a later step's failure keeps no database service stopped.
     $committed = $script:RestoreCommitted
     $restored = ($null -ne $committed) -and -not $committed.post_restore_due
-    $databaseUncertain = [bool]($script:MigrationStarted -or ($script:RestoreStarted -and -not $restored) -or $schemaProblem)
-    $problems = @(Restore-ArciRuntime -SwapBack:$swapBack -CollectorOnly:$databaseUncertain)
+    # A database-only restore (Invoke-DatabaseOnlyRestore) that failed before its first change, a
+    # cancel or a refusal: the database is as it was, so the database services go back as they
+    # were (issue #155). After a rollback's swap the previous program runs here: no such record.
+    $putBack = ($Operation -eq 'rollback') -and ($null -ne $script:DatabaseServicesBefore) -and -not $script:RestoreChangeStarted
+    $databaseUncertain = [bool]($script:MigrationStarted -or ($script:RestoreStarted -and -not $restored) -or $schemaProblem) -and -not $putBack
+    # Put back, what install\state.json says of the database stays as it was too: a failed
+    # upgrade's migration left it uncertain, and its pending_database_restore is kept (below).
+    $recordedUncertain = $databaseUncertain
+    if ($putBack) {
+        $previousState = Read-InstallState
+        $previousFailure = $(if ($previousState.PSObject.Properties['last_failure']) { $previousState.last_failure })
+        $recordedUncertain = [bool]($previousFailure -and $previousFailure.PSObject.Properties['database_uncertain'] -and $previousFailure.database_uncertain)
+    }
+    $runtime = @{ SwapBack = $swapBack; CollectorOnly = $databaseUncertain }
+    if ($putBack) { $runtime['PutBack'] = $script:DatabaseServicesBefore }
+    $problems = @(Restore-ArciRuntime @runtime)
     if ($schemaProblem) { $problems += $schemaProblem }
     if ($leaseProblem) { $problems += $leaseProblem }
     $dump = $script:LastDump
-    Write-InstallState @{
-        last_failure = [pscustomobject]@{ operation = $Operation; reason = $Reason; at = [DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ'); database_uncertain = $databaseUncertain; manual_steps = $problems }
-        pending_database_restore = $(if ($databaseUncertain -and $Operation -eq 'upgrade') { $dump } else { $null })
-    }
+    $failure = @{ last_failure = [pscustomobject]@{ operation = $Operation; reason = $Reason; at = [DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ'); database_uncertain = $recordedUncertain; manual_steps = $problems } }
+    # (Put back: a failed upgrade's pending_database_restore stays as it was too.)
+    if (-not $putBack) { $failure['pending_database_restore'] = $(if ($databaseUncertain -and $Operation -eq 'upgrade') { $dump } else { $null }) }
+    Write-InstallState $failure
     Write-Host ''
     if ($swapBack) { Write-Host ('Program: önceki sürüm geri getirildi [previous version is back]: {0}' -f $InstallDir) -ForegroundColor Yellow }
     # After a swap <InstallDir>\installer\ holds the previous version's installer (Get-RestoreRetryInstaller).
@@ -3304,6 +3378,38 @@ function Complete-FailedChange {
             Write-Host ('    foreach ($n in ''{0}'') {{ if (Get-Service $n -ErrorAction SilentlyContinue) {{ sc.exe config $n start= delayed-auto; Start-Service $n }} }}' -f ($DatabaseServiceNames -join ''', '''))
         }
         Write-Host '  Geri yüklemeyi yeniden çalıştırmayın: geri yüklenen veritabanını bir kez daha değiştirir ve bir kopya daha yer tutar [do not run the restore again: it would replace the restored database once more and take the space of another copy].'
+    }
+    if ($putBack) {
+        # Only what Restore-ArciServiceState did: a service it could not put back is named, with
+        # the command that does it.
+        $notPutBack = @($script:ServicesNotPutBack)
+        if ($notPutBack.Count -eq 0) {
+            Write-Host 'Veritabanı değiştirilmedi; veritabanı hizmetleri önceki durumlarında [the database was not changed; the database services are as they were]:' -ForegroundColor Yellow
+        }
+        else {
+            Write-Host ('Veritabanı değiştirilmedi; şu veritabanı hizmetleri önceki durumlarına getirilemedi [the database was not changed; these database services could not be put back as they were]: {0}' -f ($notPutBack -join ', ')) -ForegroundColor Yellow
+            Write-Host '  Önceki durumları [as they were]:'
+        }
+        foreach ($name in $DatabaseServiceNames) {
+            $before = $script:DatabaseServicesBefore[$name]
+            if ($null -eq $before) { continue }
+            $status = $(if ($before.Running) { 'çalışıyor', 'running' } else { 'durdurulmuş', 'stopped' })
+            $start = $(switch ($before.StartType) { 'Automatic' { 'otomatik başlatma', 'automatic start' } 'Manual' { 'elle başlatma', 'manual start' } 'Disabled' { 'devre dışı', 'disabled' } default { $before.StartType, $before.StartType } })
+            Write-Host ('  {0}: {1}, {2} [{3}, {4}]' -f $name, $status[0], $start[0], $status[1], $start[1])
+        }
+        if ($notPutBack.Count -gt 0) {
+            $automatic = @($notPutBack | Where-Object { $script:DatabaseServicesBefore[$_].StartType -eq 'Automatic' })
+            $manual = @($notPutBack | Where-Object { $automatic -notcontains $_ })
+            Write-Host ('  Günlüklerine ({0}\<hizmet>.*.log) bakıp onları önceki durumlarına getirin [read their logs ({0}\<service>.*.log) and put them back as they were]:' -f $script:LogDir)
+            if ($automatic.Count -gt 0) { Write-Host ('    foreach ($n in ''{0}'') {{ sc.exe config $n start= delayed-auto; Start-Service $n }}' -f ($automatic -join ''', ''')) }
+            if ($manual.Count -gt 0) { Write-Host ('    Start-Service ''{0}''' -f ($manual -join ''', ''')) }
+        }
+        $retry = '    powershell -ExecutionPolicy Bypass -File "{0}" -Rollback -RestoreDatabase' -f (Get-RestoreRetryInstaller)
+        if ($script:RestoreDump) { $retry += (' -DatabaseDump "{0}"' -f $script:RestoreDump) }
+        # After a cancel there is no error to fix.
+        if ($script:RestoreCancelled) { Write-Host '  Geri yüklemeyi bu sürümün kurulum betiğiyle yeniden çalıştırmak için [to run the restore again, with this version''s installer]:' }
+        else { Write-Host '  Hatayı giderip geri yüklemeyi bu sürümün kurulum betiğiyle yeniden çalıştırın [fix the error and run the restore again with this version''s installer]:' }
+        Write-Host $retry
     }
     if ($databaseUncertain) {
         if ($Operation -eq 'rollback' -and $script:RestoreStarted -and -not $committed -and -not $script:RestoreCurrentRestoring -and -not $schemaProblem) {
@@ -3474,10 +3580,15 @@ function Invoke-DatabaseOnlyRestore {
     #>
     Add-PlanItem -Id 'rollback.database-only' -Status 'ok' -Text 'Önceki program klasörü yok; yalnızca veritabanı geri yüklenecek [no previous program folder: database only]'
     try {
-        Invoke-Step 'services.stop' ("Veritabanı kullanan hizmetler durduruluyor [stopping the database services]: {0}" -f ($DatabaseServiceNames -join ', ')) { Stop-ArciServices -Only $DatabaseServiceNames }
+        # As they were (running, start type): a restore that fails before its first change (a
+        # cancel, a missing dump, the locale or the space refusal) puts them back so.
+        Invoke-Step 'services.stop' ("Veritabanı kullanan hizmetler durduruluyor [stopping the database services]: {0}" -f ($DatabaseServiceNames -join ', ')) {
+            $script:DatabaseServicesBefore = Get-ArciServiceState -Name $DatabaseServiceNames
+            Stop-ArciServices -Only $DatabaseServiceNames
+        }
         # The program in place may not match the database (an upgrade whose migration failed): a
-        # restore that fails at any point, also before pg_restore, keeps the database services
-        # stopped (Complete-FailedChange), as after a rollback's swap.
+        # restore that fails after its first change keeps the database services stopped
+        # (Complete-FailedChange), as after a rollback's swap.
         Invoke-Step 'database.restore' 'Veritabanı yedekten geri yükleniyor [restoring the dump]' { $script:RestoreStarted = $true; Invoke-DatabaseRestore } $(if ($DatabaseDump) { $DatabaseDump } else { 'pending_database_restore / last_dump' })
         Invoke-Step 'services.start-mode' 'Otomatik başlatma yeniden açılıyor [automatic start again]' { Set-ArciServiceStartMode -Name $DatabaseServiceNames -Mode 'delayed-auto' }
         Invoke-Step 'services.start' 'Hizmetler başlatılıyor [starting services]' { Start-ArciServices }

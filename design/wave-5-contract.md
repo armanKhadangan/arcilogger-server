@@ -1835,10 +1835,24 @@ issue fixed is kept (command, flags, exit codes 0/1/2, JSON fields); what differ
   carried by the rename): the console and BACKUP/YEDEKLEME section 5 say to run
   `timescaledb_post_restore()` in it before putting it back; the installer does not (it would
   start that database's jobs). A database whose locale is not libc is refused (restore by hand).
-  After the swap, and on the database-only path (no `.previous`: the program in place may not
-  match the database), any failure of the restore, also a refusal before `pg_restore`, keeps the
-  database services stopped; the output says the database was not changed when the failure came
-  before the rename, and names this version's installer for the retry (the copy in
+  After the swap any failure of the restore, also a refusal before `pg_restore`, keeps the
+  database services stopped. On the database-only path (no `.previous`: the program in place may
+  not match the database) so does any failure from the restore's first change on (the current
+  database's `timescaledb_pre_restore()`, else `CREATE DATABASE`); a failure before it (a cancel,
+  a missing dump, psql not reaching the server, the locale or the space refusal) changed nothing,
+  and the four database services go back as `services.stop` found them (issue #155,
+  `Get-ArciServiceState`): one that ran (`Running` or `StartPending`) on automatic start is set to
+  `delayed-auto` again and started (plain `auto` comes back as `delayed-auto`: the start type does
+  not tell them apart), one that ran on manual start is started and keeps it, one that was
+  stopped (on manual start after a failed upgrade) stays so, with its start type; each is
+  attempted, also the start of one whose start type could not be set. The output says, TR/EN,
+  that the database was not changed and that the services are as they were, naming each; if one
+  could not be put back it says instead which, with the command that does it, and lists it under
+  the manual steps. `install\state.json` stays as it was for the database: a failed upgrade's
+  `pending_database_restore` stays recorded, and `last_failure.database_uncertain` keeps the
+  previous `last_failure`'s value (false without one). Otherwise the output says the database
+  was not changed when the failure came before the rename. Either way it names this version's
+  installer for the retry (the copy in
   `<InstallDir>.rolled-back-<stamp>\installer\`, else the running one). A failed upgrade's
   migration names the same way the copy in `<InstallDir>.failed-<stamp>\installer\`: after either
   swap the one in `<InstallDir>\installer\` is the previous version's, whose restore is the
