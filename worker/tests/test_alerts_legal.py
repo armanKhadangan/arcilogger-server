@@ -27,7 +27,8 @@ from sqlalchemy import Engine, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from arcilogger_core.config import Config
-from arcilogger_core.crl import parse_crl
+from arcilogger_core.crl import CrlOptions, parse_crl
+from arcilogger_core.crl import fetch as crl_fetch
 from arcilogger_core.layout import Layout
 from arcilogger_core.renewal import LastRun, write_state
 from arcilogger_core.seal import Sealer
@@ -682,6 +683,41 @@ def test_stamp_crl_raised_for_an_issuer_in_use_without_any_list(
     crl_lists(ca_sealed, None, failures=(FAILURE, {**FAILURE, "error": "unknown_issuer"}))
     alert = check()[CRL_KEY]
     assert (alert.details["stale_issuers"], alert.details["failures"]) == (1, 2)
+    assert alert.details["newest_fetched_at"] is None
+
+
+def test_stamp_crl_after_a_fetch_without_a_list_address(
+    monkeypatch: pytest.MonkeyPatch, check: Any, layout: Layout, db_session: Session
+) -> None:
+    """#151: ``crl fetch`` with no list address known writes an index with no list and no
+    failure. Before the first sealed day no issuer is in use, so it raises nothing, and an open
+    alert is resolved: the lists can be read."""
+    run = crl_fetch(CrlOptions(), layout, [], NOW)
+    assert run.exit_code == 2
+    assert json.loads(crl_index_path(layout).read_bytes()) == {
+        "schema": CRL_INDEX_SCHEMA,
+        "lists": [],
+        "failures": [],
+    }
+    monkeypatch.setattr(system, "issuers_in_use", lambda stamp: frozenset({"0" * 64}))
+    assert check()[CRL_KEY].details["stale_issuers"] == 1  # test: an issuer in use
+    monkeypatch.undo()
+    assert CRL_KEY not in check()
+    assert resolved(db_session, CRL_KEY).details["auto_resolved"]["reason"] == "crl_fresh"
+
+
+def test_stamp_crl_raised_after_a_fetch_without_a_list_address_while_in_use(
+    check: Any, ca_sealed: Stamps
+) -> None:
+    """The made-up CA names no list address and ``tsa.crl_urls`` is empty: the empty index the
+    fetch writes is no list, and the issuer in use is stale."""
+    layout = ca_sealed.layout
+    run = crl_fetch(CrlOptions(), layout, [ca_sealed.root], NOW)
+    assert (run.urls, run.exit_code) == ((), 2)
+    index = json.loads(crl_index_path(layout).read_bytes())
+    assert (index["lists"], index["failures"]) == ([], [])
+    alert = check()[CRL_KEY]
+    assert (alert.details["stale_issuers"], alert.details["failures"]) == (1, 0)
     assert alert.details["newest_fetched_at"] is None
 
 
