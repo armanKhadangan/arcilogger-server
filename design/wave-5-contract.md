@@ -1479,15 +1479,11 @@ All Wave 5 questions are answered (2026-11-02).
   what it was (`test_without_renewals_every_caller_sees_the_same_bytes`); no caller passes
   `True` yet. As in the standalone verifier, only a day whose token verified gets a status (a
   day that fails for another reason, such as a changed log file, keeps the status of its
-  token), and the window is the §2.5 default of 180 days: `verify_day` has no configuration,
-  and `day_renewal` takes the site's `tsa.renew_before_days` from a caller that has one. The
-  renewal tokens are checked with an EKU rule (`tsa.require_critical_eku`, K6) that each side
-  takes from its own source: `verify_day` from that day's manifest, the standalone verifier
-  relaxed when any manifest of the package is (`_relaxed_eku`), `renewal_status` and `renew`
-  from the site's configuration. They agree for a package of one day sealed under the current
-  setting (the table's two EKU cases); a package of a relaxed and a strict day, or a site that
-  changed the setting after sealing, can split them for a renewal with a non-critical EKU
-  (a question in the pull request). The renewals are judged with the `legal_roots` and the
+  token), and the window is the caller's `renew_before_days` (default the §2.5 180 days):
+  `verify_day` reads no configuration (W5-A-16). Each renewal token is checked with the EKU
+  rule (`tsa.require_critical_eku`, K6) its own record was written under, as a day's token is
+  with its manifest's, in both verifiers and in `renewal_status` and `renew` alike (W5-A-17).
+  The renewals are judged with the `legal_roots` and the
   revocation lists `verify_day` already has; each call reads and verifies every renewal record
   again, so a caller that checks many days with `renewals=True` pays days × records. In the
   core too, a renewal whose stamp is from ARCILOGGER's test TSA (policy under 2.999 or the test
@@ -1505,6 +1501,117 @@ All Wave 5 questions are answered (2026-11-02).
   (`useDefault`) and allows only a `token_sha256` field with exactly 64 lower-case hex digits; it
   clears those 9 matches and nothing else in the repository. No path allowlist, no rule turned
   off, `ci.yml` unchanged. Every new allowlist entry needs the manager's review.
+- **W5-A-13: exit 2 cause `legal-roots` (answer to Q1 on #132, #137 item 1).** A run whose
+  provider claims legal grade while no pinned root is listed in `tsa.legal_root_fingerprints`
+  takes no stamp: a token verifies only by a chain ending at a pinned root, so with none listed
+  no renewal it writes would ever count (D5), and each one spends credit (D4). `renew` raises
+  `renewal.RenewalLegalRootsError` (a `TsaConfigurationError`, `cause = "legal-roots"`, TR/EN
+  texts naming `tsa.legal_root_fingerprints`) before the provider is called, so the command
+  exits 2 and writes `last_run {outcome: "refused", exit_code: 2, record: null, error:
+  "legal-roots"}`, which adds one to `failures_in_a_row`; the statuses are computed afresh, as for
+  any refusal with known roots. The provider's own chain is not known before a stamp, so the
+  check is on the pinned roots: none of them listed (the list empty, or naming only roots that
+  are not pinned). It runs after the status, only when something is due: "nothing due" stays
+  `not_needed` (exit 0, no credit spent), and a provider that claims no legal grade still writes
+  its `reason: "test"` record (D5, exit 1 for an expired token). With the claim, a pinned set
+  that lacks the listed root, which the stamp's verification failed with exit 3
+  (`renewal_stamp_invalid`, W5-A-9), is now refused with this exit 2 before the stamp. The dry
+  run is unchanged. The cause is `legal-roots` in the JSON's `error.code` and in
+  `last_run.error`: `cli.py`'s `_renew_cause` takes it from the error (`exc.cause`), and
+  `_RenewError.refused` builds `message_tr` from the error's `message_tr` and `message_en` from
+  its `message_en`, not its "TR [EN]" text into both (the `cli.py` hunk outside #137's files
+  granted on #137, 2026-11-04T09:07Z: those two functions and the error's import).
+  `test_a_legal_claim_without_a_listed_root_exits_2` pins the cause in both places and each
+  text in its own language.
+- **W5-A-14: `recover` checks revocation as the run does (#137 item 2).** W5-A-3's `recover`
+  promoted an interrupted part whose token verified, without the stored revocation lists, so a
+  run stopped between the stamp and its C15 check left a record that never counts. It now
+  verifies that token with the stored lists (`crls=`, read from `state/crl` when the caller
+  passes none, and only when a part is to be checked; unreadable lists are logged and the token
+  is verified without them, Q12) and refuses it as `_write` does (one helper, `_refusal`): a
+  token whose certificate was revoked at or before its genTime is removed with its part, with a
+  warning in the log, instead of being promoted (C15: a revoked new stamp leaves no record). A
+  locked file is still never removed. `test_a_revoked_stamp_of_an_interrupted_run_is_removed`
+  covers both places the token can be (`.part.zd`, and the final `.zd` after the first rename),
+  through `recover` and through the next run.
+- **W5-A-15: a status after the run that cannot be read keeps the renewal (#137 item 3).** Once
+  the record and its token are renamed and locked, the run has renewed. `renew_held` used to read
+  the status after the run (`report_after`) unguarded, so an `OSError` there made the command
+  exit 3 as `failed` with `last_run.record` null while the record was in the vault. Now that
+  error is logged as a warning and `report_after` is the status before the run: the command
+  reports `renewed` with its record path and writes it to `last_run`, and the exit code and the
+  statuses in `state/renewal.json` come from that before-status (a token that was `uncovered`
+  before the run still gives exit 1, and a renewed token still shows `due`) until the next run
+  reads the status again. Only `OSError` is caught; errors before the record is written are
+  unchanged. `test_a_status_after_the_run_that_cannot_be_read_keeps_the_renewal` (core) and
+  `test_a_status_after_the_run_that_cannot_be_read_still_renews` (command) cover it.
+- **W5-A-16: `verify_day` takes the window from its caller (answer to Q3 on #132, #137 item 5).**
+  `chain.verify_day(..., renewals=True, renew_before_days=180)` passes `renew_before_days` to
+  `renewal.day_renewal`, which judges the day's token and, through the chain rule (§2.1.2), the
+  renewals' own tokens with it; `verify_day` reads no configuration, and the default is §2.5's
+  (`renewal.DEFAULT_RENEW_BEFORE_DAYS`, written as the number because `renewal` imports
+  `chain`). Without `renewals` the window is not used and the output is unchanged. No caller in
+  the product passes `renewals=True` yet (W5-A-11), so no caller passes the window either: the
+  shared case table passes the standalone verifier's `RENEW_BEFORE` (W5-A-5), and when W5-T
+  lands the A3 `config.py` hunk wires the command line's caller to `tsa.renew_before_days`
+  (`renewal.renew_before_days`, W5-A-1). `test_the_caller_passes_the_window` pins the default,
+  that no configuration is read, both edges of the window, and that it reaches a renewal's own
+  token.
+- **W5-A-17: each renewal token is judged by its own record's EKU rule (answer to Q6 on #132,
+  #137 item 4).** A renewal record's `tsa` block carries `require_critical_eku: false` when the
+  site had relaxed the rule (K6) as it wrote the record (`tsa_block`, the manifest's keys), so
+  its token is now verified with that rule, as a day's token is with its manifest's: in the
+  core's `renewal_status` (`_Reader`), `day_renewal` (and so `verify_day(..., renewals=True)`),
+  `recover` (a part with its own record's rule) and `renew` (`_write`, whose record carries
+  today's setting), and in the standalone verifier's `check_renewals` (`_renewal_eku`; a record
+  that cannot be read is judged strict and never counts anyway). Neither the day's rule, the
+  other manifests of a package (`_relaxed_eku` now judges deletion records and the packaged
+  report's stamp only) nor the site's setting at the time of reading decides any more, so
+  W5-A-11's split between the
+  callers is gone: `day_renewal` and `recover` lose their `require_critical_eku` parameter,
+  and `verify_day` no longer passes the day's rule. The standalone verifier's
+  `token-eku-not-critical` warning on a renewal token says the site relaxed the rule in the
+  renewal record ("bunu yenileme kaydında belirtmiştir" / "sealed that choice in the renewal
+  record") instead of the manifest, and `DENETCI-KILAVUZU.md` §7's row for that code says
+  either place (the item 6 hunk). The shared case table (rule 5) gains three cases: a strict
+  day with a relaxed renewal record (`renewal-covered`), a relaxed day with a strict one
+  (`renewal-due`), and a strict renewal record beside a relaxed day in one package
+  (`renewal-due`; the standalone verifier relaxed it before); the two existing EKU cases keep
+  their verdicts. `test_a_renewal_token_is_judged_by_its_own_records_eku_rule` (both settings
+  of the site afterwards, and the warning text) and
+  `test_a_renewal_keeps_the_eku_rule_its_record_was_written_under` (`recover` and the status
+  after the site turned the rule strict again) cover the rest. The standalone verifier's output
+  changes, so `VERIFIER_VERSION` is "7" (addendum H4): #136 has not merged, so W5-A-8's "7"
+  for #136 becomes "8" when it does; `test_verifier_version_is_7` pins it.
+  The evidence builder judges each renewal token by its own record's rule too: it picks the
+  root to bundle for a record's token with `_root_of`, and a token with an EKU error yields no
+  root, so with the package's rule (`_Records(require_critical_eku=all(day.require_critical_eku
+  ...))`) a relaxed renewal whose non-critical-EKU certificate chains to a root no packaged
+  strict day uses (a new root after a CA change) left that root out and the self-check refused
+  the package (`token-chain`). `_Records.add` now passes a `renewal` record's own rule
+  (`tsa.require_critical_eku is not False`; a record that cannot be read is judged strict, as
+  `_renewal_eku` judges it) to `_root_of`; deletion records and the report's stamp keep the
+  package's rule, and the renewals of a deletion record (W5-A-18) are `renewal` records like
+  any other (the second `builder.py` hunk outside #137's files, granted on #137,
+  2026-11-04T09:07Z). `test_a_relaxed_renewal_under_the_legal_root_is_packaged_and_judged_alike`
+  (`test_renewal_evidence.py`) builds a package of a strict day renewed under the legal CA's
+  root by a relaxed record with a non-critical EKU: the legal root is bundled, and the
+  standalone verifier on the package and the core on the vault find the day
+  `renewal-covered` with the same texts (rule 5).
+- **W5-A-18: a package ships the renewals of its deletion records (answer to Q5 on #132, #137
+  item 7).** D3 renews deletion-record tokens, but the builder's `_renewals` matched only the
+  packaged days' manifest and token hashes and the report's token hash, so a package that ships
+  a deletion record (listed in a day's manifest, or behind the chain anchor) left out the
+  renewals of that record's token. `_renewals` now also matches the token hash of every
+  deletion record the package ships, and the same raw-text match picks up a renewal of that
+  renewal (D2, `protects`); each goes with its `.zd`, as D1. The standalone verifier checks them
+  as any renewal (`renewal-ok`, `renewal-covers`) and judges only the days (§2.1.4), so its
+  code is unchanged; the package's contents change, which W5-A-17's `VERIFIER_VERSION` "7"
+  already covers. The module docstring of `builder.py` still says "renewal stamps that cover
+  the included days or the included report's time stamp" (a second hunk, outside #137's grant).
+  `test_a_package_with_a_deletion_record_ships_its_renewals` (`test_renewal_evidence.py`)
+  covers a two-deep chain behind a deletion record, the core's status of its token, the
+  auditor's verifier on the package, and that a package without the record ships none of them.
 
 ## Deviations — W5-E (2026-11-04)
 

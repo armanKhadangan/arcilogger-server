@@ -252,10 +252,17 @@ class RenewalWorld:
         provider: TimestampProvider,
         *,
         reason: Any = None,
+        relaxed: bool | None = None,
     ) -> Path:
         """A renewal record ``renewals/<name>.json`` of ``entries``, stamped by ``provider`` now
-        (without :func:`arcilogger_core.renewal.renew`)."""
+        (without :func:`arcilogger_core.renewal.renew`). Its ``tsa`` block says the site's EKU
+        rule, or the one ``relaxed`` names (a site that changed ``tsa.require_critical_eku``
+        between sealing the day and the renewal, K6)."""
         tsa = tsa_block(provider, self.world.config)
+        if relaxed is True:
+            tsa["require_critical_eku"] = False
+        elif relaxed is False:
+            tsa.pop("require_critical_eku", None)
         record = build_record(
             entries,
             created_at=self.clock.now,
