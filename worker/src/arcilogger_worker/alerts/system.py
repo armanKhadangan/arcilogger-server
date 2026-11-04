@@ -2401,6 +2401,9 @@ def check_stamp_renewal(ctx: CheckContext) -> Outcome:
     the task's exit code (C12). The failures raise it also while the token list is unknown (a
     refused run without pinned roots writes none, W5-A-2). Resolved by a readable report without
     such a token and without those failures; what cannot be read decides nothing."""
+    # Two reads of the same file: a run that replaces it in between can pair the previous
+    # tokens with the new count. Each half is true of one file the task wrote, and the next pass
+    # reads them alike.
     renewals = read_stamp_renewals(ctx.layout)
     runs = read_renew_runs(ctx.layout)
     failures = runs.failures_in_a_row if runs is not None else None
