@@ -927,7 +927,8 @@ export function applySystemHealth(state: ApplySystemHealth['state'] = 'ok'): App
 /**
  * One row per `TaskName` in the server's order, texts as `system_health/tasks.py` has them; every
  * state: Replica `late`, Retention `not_used` (retention off), Backup `missing` (its state file is
- * unreadable), Requests `not_observable`.
+ * unreadable), Requests `not_observable`. Renew and CrlFetch as the captured sample has them
+ * (W5-E); `w4-fixtures.test.ts` keeps the list and the order in step with `TaskName` and the API.
  */
 export const TASKS: readonly TaskHealth[] = [
   {
@@ -1017,6 +1018,22 @@ export const TASKS: readonly TaskHealth[] = [
     state: 'ok',
     last_evidence_at: '2026-10-13T06:55:03+03:00',
     evidence: 'admin\\system\\status.json',
+  },
+  {
+    task: 'Renew',
+    schedule_tr: 'Her gün 02:30',
+    schedule_en: 'Daily at 02:30',
+    state: 'ok',
+    last_evidence_at: '2026-10-13T02:31:04+03:00',
+    evidence: 'state\\renewal.json',
+  },
+  {
+    task: 'CrlFetch',
+    schedule_tr: 'Her gün 00:30',
+    schedule_en: 'Daily at 00:30',
+    state: 'ok',
+    last_evidence_at: '2026-10-13T00:30:12+03:00',
+    evidence: 'state\\crl\\index.json',
   },
 ];
 
