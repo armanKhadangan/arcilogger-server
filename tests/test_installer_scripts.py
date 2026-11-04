@@ -3180,9 +3180,8 @@ def test_acl_step_takes_over_a_lock_a_service_left_as_its_own(tmp_path: Path) ->
     write_data, append_data, delete = 0x2, 0x4, 0x10000
     modify_bits = write_data | append_data | delete
     tasks = [r for r in after["rules"] if r["sid"] == WELL_KNOWN["local_service"]]
-    assert any(
-        r["type"] == "Allow" and r["rights"] & modify_bits == modify_bits for r in tasks
-    ), (before, after)
+    modify = [r for r in tasks if r["type"] == "Allow" and r["rights"] & modify_bits == modify_bits]
+    assert modify, (before, after)
 
 
 def _windows_admin_powershell() -> str:
