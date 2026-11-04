@@ -432,7 +432,19 @@ class _Records:
                 raise EvidenceError(f"{relative}.zd: differs from the hash sealed in the manifest")
             name = f"{VAULT}{relative}.zd"
             self.entries[name] = _Entry(name, f"{role}_token", data=token_data)
-            root = _root_of(token_data, data, self.roots, self.require_critical_eku)
+            require_critical_eku = self.require_critical_eku
+            if role == "renewal":
+                # judged by its own record's EKU rule (K6), as both verifiers judge it, not by
+                # the package's days (contract W5-A-17); a record that cannot be read: strict
+                try:
+                    record = json.loads(data)
+                except (ValueError, RecursionError):
+                    record = None
+                tsa = record.get("tsa") if isinstance(record, dict) else None
+                require_critical_eku = not (
+                    isinstance(tsa, dict) and tsa.get("require_critical_eku") is False
+                )
+            root = _root_of(token_data, data, self.roots, require_critical_eku)
             if root:
                 self.used_roots.add(root)
         elif token_sha256:
@@ -478,12 +490,17 @@ class _Records:
         self.add(f"deletions/{record}", "deletion")
 
     def _renewals(self, days: Sequence[_Day], report_token: bytes | None) -> None:
-        """The renewal records whose text names a packaged day's manifest or token hash, or the
-        packaged report's token hash (Wave 5 D1-D3: a renewal of a renewal repeats them)."""
+        """The renewal records whose text names a packaged day's manifest or token hash, the
+        token hash of a packaged deletion record, or the packaged report's token hash (Wave 5
+        D1-D3: a renewal of a renewal repeats them; contract W5-A-18)."""
         folder = self.layout.renewals_dir
         if not folder.is_dir():
             return
-        hashes = set()
+        hashes = {
+            hashlib.sha256(entry.data).hexdigest()
+            for entry in self.entries.values()
+            if entry.role == "deletion_token" and entry.data is not None
+        }
         for day in days:
             hashes.add(hashlib.sha256(day.manifest_bytes).hexdigest())
             hashes.add(hashlib.sha256(day.token_bytes).hexdigest())

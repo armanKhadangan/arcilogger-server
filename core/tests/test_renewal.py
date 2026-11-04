@@ -29,6 +29,7 @@ from arcilogger_core.renewal import (
     NOTES,
     RENEWAL_SCHEMA,
     RenewalBusyError,
+    RenewalLegalRootsError,
     RenewalLockError,
     RenewalNotNeeded,
     RenewalRun,
@@ -46,6 +47,7 @@ from arcilogger_core.timeutil import site_day
 from arcilogger_core.tsa.base import (
     TimestampProvider,
     TokenInfo,
+    TsaConfigurationError,
     TsaError,
     TsaNoCreditError,
     TsaRejectedError,
@@ -54,7 +56,7 @@ from arcilogger_core.tsa.base import (
 )
 from arcilogger_core.tsa.client import token_path_for
 from arcilogger_core.tsa.mock import MockFailure, MockTsaProvider
-from arcilogger_core.tsa.verify import inspect_token
+from arcilogger_core.tsa.verify import inspect_token, verify_token
 
 from .renewal_world import (
     CNA,
@@ -599,6 +601,33 @@ def test_any_failure_of_the_provider_leaves_no_part(
     assert _renewal_files(rw) == []
 
 
+def test_a_status_after_the_run_that_cannot_be_read_keeps_the_renewal(
+    rw: RenewalWorld, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """W5-A-15: once the record is written, a file error while reading the status after the
+    run does not undo the run: ``report_after`` is the status before it, with a warning."""
+    rw.set_now(CNA - timedelta(days=100))
+
+    def unreadable(*args: Any, **kwargs: Any) -> Any:
+        raise OSError(errno.EIO, "Input/output error")
+
+    monkeypatch.setattr(renewal_module, "renewal_status", unreadable)
+    run = _renew(rw, rw.legal_provider(FAR))
+    assert (run.record_path, run.reason, run.renewed) == (
+        "renewals/2031-06-23-1.json",
+        "due",
+        (DAY_TOKEN,),
+    )
+    assert run.report_after == run.report_before
+    assert rw.of(run.report_after, DAY_TOKEN).status == "due"
+    assert "the status after renewals/2031-06-23-1.json cannot be read" in caplog.text
+    assert "Input/output error" in caplog.text
+    assert _renewal_files(rw) == ["2031-06-23-1.json", "2031-06-23-1.json.zd"]
+    assert all(is_locked(rw.layout.vault / path) for path in (run.record_path, run.token_path))
+    monkeypatch.undo()
+    assert rw.of(rw.status(), DAY_TOKEN).covered_by == run.record_path
+
+
 def test_a_lock_that_cannot_be_taken_is_not_called_busy(
     rw: RenewalWorld, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -657,6 +686,63 @@ def test_a_stamp_that_does_not_verify_leaves_no_record(rw: RenewalWorld, case: s
     assert any(expected in error for error in raised.value.errors), raised.value.errors
     assert _renewal_files(rw) == []
     assert rw.status() == before
+
+
+def _counted(provider: TimestampProvider, monkeypatch: pytest.MonkeyPatch) -> list[Path]:
+    """The files ``provider`` is asked to stamp from now on."""
+    calls: list[Path] = []
+    real = provider.stamp
+
+    def stamp(path: Path) -> Any:
+        calls.append(path)
+        return real(path)
+
+    monkeypatch.setattr(provider, "stamp", stamp)
+    return calls
+
+
+@pytest.mark.parametrize("case", ["nothing listed", "listed root not pinned"])
+def test_a_legal_claim_without_a_listed_root_takes_no_stamp(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, case: str
+) -> None:
+    """W5-A-13: a provider that claims legal grade while no pinned root is listed in
+    ``tsa.legal_root_fingerprints`` would write renewals that never count (D5), each one a
+    spent credit (D4): the run refuses before the provider is called, as a configuration error
+    (exit 2, cause ``legal-roots``), and leaves nothing behind."""
+    rw = make_world(tmp_path, legal_listed=case != "nothing listed")
+    roots = rw.roots if case == "nothing listed" else [rw.tsa.root_certificate]
+    rw.set_now(CNA - timedelta(days=100))
+    provider = rw.legal_provider(FAR)
+    calls = _counted(provider, monkeypatch)
+    before = renewal_status(rw.layout, rw.world.config, roots, rw.clock.now)
+    with pytest.raises(RenewalLegalRootsError) as refused:
+        renew(rw.layout, rw.world.config, provider, roots, rw.clock.now)
+    assert isinstance(refused.value, TsaConfigurationError)
+    assert not refused.value.retryable
+    assert refused.value.cause == "legal-roots"
+    assert "tsa.legal_root_fingerprints" in refused.value.message_tr
+    assert "tsa.legal_root_fingerprints" in refused.value.message_en
+    assert refused.value.message_tr.startswith("Sağlayıcı yasal geçerli damga beyan ediyor")
+    assert refused.value.message_en.startswith("The provider claims legal grade")
+    assert calls == []
+    assert _renewal_files(rw) == []
+    assert renewal_status(rw.layout, rw.world.config, roots, rw.clock.now) == before
+
+
+def test_without_a_listed_root_only_a_stamp_that_would_be_taken_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Nothing due is still ``RenewalNotNeeded`` (no credit is spent), and a provider that
+    claims no legal grade still writes its ``reason: "test"`` record (D5)."""
+    rw = make_world(tmp_path, legal_listed=False)
+    with pytest.raises(RenewalNotNeeded):
+        _renew(rw, rw.legal_provider(FAR))
+    rw.set_now(CNA - timedelta(days=100))
+    provider = rw.legal_provider(FAR, claim=False)
+    calls = _counted(provider, monkeypatch)
+    run = _renew(rw, provider)
+    assert (run.reason, len(calls)) == ("test", 1)
+    assert _renewal_files(rw) == ["2031-06-23-1.json", "2031-06-23-1.json.zd"]
 
 
 def test_the_token_is_renamed_before_the_record(
@@ -741,6 +827,90 @@ def test_a_crash_between_stamp_and_rename_is_recovered(rw: RenewalWorld) -> None
     with pytest.raises(RenewalNotNeeded):  # the promoted records cover the day
         _renew(rw, provider)
     assert rw.of(rw.status(), DAY_TOKEN).covered_by == "renewals/2031-06-20-1.json"
+
+
+def _stop_after_stamp(
+    rw: RenewalWorld, provider: TimestampProvider, monkeypatch: pytest.MonkeyPatch, stopped: str
+) -> Path:
+    """A run whose process stops right after ``provider``'s stamp, before the token is checked
+    (and so before any clean-up), or after the first rename too; the token it leaves."""
+    names: list[str] = []
+
+    def stop(data: bytes, *, file_path: Path, **kwargs: Any) -> Any:
+        names.append(file_path.name)
+        raise SystemExit("the process stopped before the check")
+
+    with monkeypatch.context() as patched:
+        patched.setattr(renewal_module, "verify_token", stop)
+        patched.setattr(renewal_module, "_remove", lambda path, removed: None)  # no clean-up
+        with pytest.raises(SystemExit):
+            _renew(rw, provider)
+    part = rw.layout.renewals_dir / names[0]
+    token = token_path_for(part)
+    if stopped == "between the renames":
+        token = token.rename(token_path_for(part.with_name(part.name.removesuffix(".part"))))
+    return token
+
+
+@pytest.mark.parametrize("stopped", ["after the stamp", "between the renames"])
+def test_a_revoked_stamp_of_an_interrupted_run_is_removed(
+    rw: RenewalWorld,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    stopped: str,
+) -> None:
+    """C15: a run stopped between the stamp and its revocation check leaves a part whose token
+    verifies, while the stored lists show its certificate revoked at or before the stamp. The
+    next run checks it with those lists, as the stamping run would have, and removes it instead
+    of promoting it: a revoked new stamp leaves no record."""
+    rw.set_now(CNA - timedelta(days=100))
+    provider = _unverifiable(rw, "revoked")
+    before = rw.status()
+    token = _stop_after_stamp(rw, provider, monkeypatch, stopped)
+    part = rw.layout.renewals_dir / "2031-06-23-1.json.part"
+    assert _renewal_files(rw) == sorted([part.name, token.name])
+    unchecked = verify_token(token.read_bytes(), roots=rw.roots, file_path=part, now=rw.clock.now)
+    assert unchecked.ok  # only the revocation lists refuse it
+
+    assert recover(rw.layout, rw.roots, now=rw.clock.now) == [token.name, part.name]
+    assert _renewal_files(rw) == []
+    assert rw.status() == before
+    assert "revoked at or before the stamp" in caplog.text
+
+    # the next run tidies the same leftover first, then stamps with a certificate not revoked
+    token = _stop_after_stamp(rw, provider, monkeypatch, stopped)
+    run = _renew(rw, rw.legal_provider(FAR))
+    assert run.discarded == (token.name, part.name)
+    assert run.record_path == "renewals/2031-06-23-1.json"
+    assert _renewal_files(rw) == ["2031-06-23-1.json", "2031-06-23-1.json.zd"]
+    assert rw.of(rw.status(), DAY_TOKEN).covered_by == run.record_path
+
+
+def test_a_renewal_keeps_the_eku_rule_its_record_was_written_under(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#137 item 4 (W5-A-17): a renewal token is judged by its own record's EKU rule, not by
+    the site's setting when it is read. A site that relaxed ``tsa.require_critical_eku`` (K6)
+    stamps with a certificate whose EKU is not critical, the run stops after the stamp, and the
+    site turns the rule strict again: the next run still completes the part (its record says
+    relaxed), and the record covers the day."""
+    rw = make_world(tmp_path, require_critical_eku=False)
+    rw.set_now(CNA - timedelta(days=100))
+    provider = rw.legal_provider(FAR, eku_critical=False)
+    token = _stop_after_stamp(rw, provider, monkeypatch, "after the stamp")
+    part = rw.layout.renewals_dir / "2031-06-23-1.json.part"
+    assert json.loads(part.read_bytes())["tsa"]["require_critical_eku"] is False
+    strict = verify_token(token.read_bytes(), roots=rw.roots, file_path=part, now=rw.clock.now)
+    assert not strict.ok  # the strict rule refuses it
+    config = rw.world.config
+    tsa = config.tsa.model_copy(update={"require_critical_eku": True})
+    rw.world.config = config.model_copy(update={"tsa": tsa})
+
+    assert recover(rw.layout, rw.roots, now=rw.clock.now) == []
+    assert _renewal_files(rw) == ["2031-06-23-1.json", "2031-06-23-1.json.zd"]
+    assert rw.of(rw.status(), DAY_TOKEN).covered_by == "renewals/2031-06-23-1.json"
+    with pytest.raises(RenewalNotNeeded):
+        _renew(rw, rw.legal_provider(FAR))
 
 
 def test_recover_never_removes_a_locked_file(rw: RenewalWorld) -> None:

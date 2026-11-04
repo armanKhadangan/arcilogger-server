@@ -375,7 +375,7 @@ aynı olduğunu; her günün gün bitiminden ne kadar sonra damgalandığını.
 
 Tablo, `verify.py`'nin yazabileceği **bütün** kodları listeler (`--json` çıktısındaki `code`
 alanı); ekrandaki her satır ayrıca Türkçe ve İngilizce açıklamasını taşır. Bir HATA paketi
-"DOĞRULANAMADI" yapar; UYARI incelenmelidir; BİLGİ ve OK yalnızca bilgi verir.
+"DOĞRULANAMADI" yapar; UYARI incelenmelidir; BİLGİ ve TAMAM yalnızca bilgi verir.
 
 | Kod | Düzey | Anlamı |
 |---|---|---|
@@ -393,7 +393,7 @@ alanı); ekrandaki her satır ayrıca Türkçe ve İngilizce açıklamasını ta
 | `token-swapped` | HATA | Damga dosyaları günler arasında yer değiştirmiş |
 | `token-signature`, `token-message-digest`, `token-content-type`, `token-ess` | HATA | Damganın imzası ya da imzalı öznitelikleri geçersiz |
 | `token-eku` | HATA | TSA sertifikası zaman damgası için yetkili değil |
-| `token-eku-not-critical` | UYARI | EKU uzantısı kritik değil; kurum bunu mühürlü manifestte kabul etmiş (`tsa.require_critical_eku = false`, K6). OpenSSL `ts -verify` böyle bir damgayı "unsuitable certificate purpose" diyerek reddeder |
+| `token-eku-not-critical` | UYARI | EKU uzantısı kritik değil; kurum bunu mühürlü manifestte ya da (yenileme damgası için) yenileme kaydında kabul etmiş (`tsa.require_critical_eku = false`, K6). OpenSSL `ts -verify` böyle bir damgayı "unsuitable certificate purpose" diyerek reddeder |
 | `chain-skip-invalid` | HATA | Manifestteki boş gün dizisi geçersiz ya da bu günden hemen önce bitmiyor |
 | `summary-several-roots` | UYARI | Paketteki damgalar birden çok köke bağlanıyor; her kökün parmak izini ayrı karşılaştırın |
 | `token-chain`, `token-not-ca` | HATA | Sertifika zinciri güvenilen bir köke ulaşmıyor |
@@ -447,14 +447,14 @@ alanı); ekrandaki her satır ayrıca Türkçe ve İngilizce açıklamasını ta
 | `manifest`, `root`, `root-trust`, `roots-external` | BİLGİ | Manifest dosyası ve özeti; kök sertifika ve parmak izleri; parmak izlerini Kamu SM'nin yayımladığı değerlerle karşılaştırma hatırlatması; yalnızca `--kokler` ile verilen köklere güveniliyor |
 | `renewal-covers` | BİLGİ | Yenileme damgasının kapsadığı günler |
 | `renewal-not-due` | BİLGİ | Günün damgası için yeniden damgalama henüz gerekmiyor: TSA sertifikası 180 günden uzun süre daha geçerli (paket kurumun ayarını taşımaz; varsayılan 180 gün kullanılır) |
-| `renewal-covered` | OK | Günün damgası, sertifikası sona ermeden yeniden damgalanmış; sayılan yenileme kaydının adı verilir. Test (mock) damgalı, `reason: "test"` yazılmış ya da paketteki SİL'e göre iptal edilmiş bir yenileme sayılmaz |
+| `renewal-covered` | TAMAM | Günün damgası, sertifikası sona ermeden yeniden damgalanmış; sayılan yenileme kaydının adı verilir. Test (mock) damgalı, `reason: "test"` yazılmış ya da paketteki SİL'e göre iptal edilmiş bir yenileme sayılmaz |
 | `renewal-due` | UYARI | Damga sertifikası 180 gün içinde sona eriyor ve sayılan bir yenileme yok; yeniden damgalama bekleniyor |
 | `renewal-late` | UYARI | Yeniden damgalama, eski sertifikanın süresi dolduktan sonra yapılmış (verilen tarih yeniden damgalama zamanıdır) |
 | `renewal-uncovered` | UYARI | Damga sertifikasının süresi dolmuş ve yeniden damgalama yok; damga, alındığı an için geçerlidir. Uzun süreli kanıt için yeniden damgalama önerilir |
 | `report-hash` | BİLGİ | Raporun SHA-256 özeti: ARCILOGGER'daki sorgu kaydı ve denetim kaydıyla (`lookup.report`) aynı olmalı |
 | `report-not-stamped` | BİLGİ | Rapora ayrıca zaman damgası alınmamış (isteğe bağlı ayar) |
 | `summary-days`, `summary-root` | BİLGİ | Özet: incelenen günler; damgaların bağlandığı kök (Kamu SM'nin yayımladığı parmak iziyle karşılaştırın) |
-| `file-ok`, `token-ok`, `chain-ok`, `chain-anchor`, `contents-ok`, `crl-ok`, `extract-ok`, `index-files`, `deletion-ok`, `renewal-ok`, `report-ok` | OK | İlgili kontrol geçti (dosya, damga, zincir bağlantısı, imha edilmiş önceki gün için zincir çapası, paket içeriği, SİL, alıntı, paket dizini, imha tutanağı, yenileme ve rapor damgası) |
+| `file-ok`, `token-ok`, `chain-ok`, `chain-anchor`, `contents-ok`, `crl-ok`, `extract-ok`, `index-files`, `deletion-ok`, `renewal-ok`, `report-ok` | TAMAM | İlgili kontrol geçti (dosya, damga, zincir bağlantısı, imha edilmiş önceki gün için zincir çapası, paket içeriği, SİL, alıntı, paket dizini, imha tutanağı, yenileme ve rapor damgası) |
 
 ## 8. Sahada netleşecek konular
 
