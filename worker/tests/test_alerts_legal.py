@@ -81,9 +81,9 @@ REGISTERED = system.CHECKS
 #: The dedup keys of the three alerts.
 KEYS = (RENEWAL_KEY, CERT_KEY, CRL_KEY)
 #: A made-up CA a real install's stamps chain to: not ARCILOGGER's test organization, and a
-#: policy outside the test arc 2.999.
+#: policy outside the test arc 2.999, under the documentation arc 1.3.6.1.4.1.32473 (RFC 5612).
 CA_ORGANIZATION = "Örnek Simulated CA"
-CA_POLICY = "1.3.6.1.4.1.55555.1.1"
+CA_POLICY = "1.3.6.1.4.1.32473.1.1"
 
 
 @pytest.fixture(autouse=True)
