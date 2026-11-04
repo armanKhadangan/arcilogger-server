@@ -1480,3 +1480,25 @@ All Wave 5 questions are answered (2026-11-02).
   (`useDefault`) and allows only a `token_sha256` field with exactly 64 lower-case hex digits; it
   clears those 9 matches and nothing else in the repository. No path allowlist, no rule turned
   off, `ci.yml` unchanged. Every new allowlist entry needs the manager's review.
+
+## Deviations — #119 (2026-11-04)
+
+- **#119-1: the activity commit is asynchronous.** `_record_activity`
+  (`api/src/arcilogger_api/security.py`) commits `last_seen_at` with `SET LOCAL
+  synchronous_commit = off` (decision A1 in the review of #145, 2026-11-04). It changes durability only,
+  not the order of MVP-CONTRACTS §6: activity is still committed before the endpoint runs. A
+  crash can lose the newest `last_seen_at` (at most about 3 × `wal_writer_delay`); the session
+  then counts as idle from the activity before, never longer. That value is neither evidence nor
+  audited personal data. `SET LOCAL` ends with that transaction, so the endpoint's transactions
+  and every audit write (`append_entry`) stay synchronous. In `api/tests/test_activity_commit.py`,
+  `test_every_audit_write_commits_synchronously` asserts it for representative requests
+  (sign-in, search, settings change, user created, background request);
+  `test_the_check_catches_an_audit_write_in_the_activity_transaction` shows that the check
+  catches an audit entry written in the activity transaction; and
+  `test_synchronous_commit_is_turned_off_only_for_the_activity` keeps every other engine and
+  deployment file synchronous. It holds for every request because of the rule of MVP-CONTRACTS
+  §6 that no dependency writes to the request's session before authentication. The guard
+  `test_browse_under_concurrent_ingest` now holds the 95th percentile under ingest below the
+  browse budget (500 ms) and the slowest request below 10 × that. In the same review A2 (an
+  asynchronous spool watermark) was deferred, to be revisited with field figures from a Windows
+  site (sahada doğrula), and A3 was declined (2026-11-04).
