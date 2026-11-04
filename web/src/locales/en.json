@@ -484,7 +484,8 @@
         "holiday": "Enter the date as MM-DD or YYYY-MM-DD.",
         "totpRoles": "Two-factor authentication is mandatory for the administrator and auditor roles.",
         "serverName": "The DHCP server's name cannot be empty.",
-        "serverSeconds": "The lease time must be at least 60 seconds.",
+        "serverSeconds": "Each DHCP server needs a lease time between {{min}} and {{max}} seconds.",
+        "serverSecondsMin": "The lease time must be at least {{min}} seconds.",
         "integerList": "Write one whole number of 0 or more per line.",
         "object": "Enter a valid JSON object."
       }
