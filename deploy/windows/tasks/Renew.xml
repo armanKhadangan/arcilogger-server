@@ -1,7 +1,7 @@
 <Task version="1.4" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
   <RegistrationInfo>
     <Author>ARCILOGGER</Author>
-    <Description>Sertifikasının süresi yaklaşan zaman damgalarını yeniden damgalar; bir çalıştırma en çok bir damga alır (arcilogger-core renew; durum: state\renewal.json).</Description>
+    <Description>Sertifikasının süresi yaklaşan zaman damgalarını yeniden damgalar; bir çalıştırma en çok bir damga alır (arcilogger-core renew; durum: state\renewal\renewal.json).</Description>
     <URI>\ARCILOGGER\Renew</URI>
   </RegistrationInfo>
   <Triggers>

@@ -23,10 +23,11 @@ Backup         ``finished`` of ``state/backup/last.json``                26 h   
 Requests       ``state/requests`` (not readable): ``not_observable``     —           —
 ApplySystem    ``at`` of ``admin/system/status.json``                    15 min      browser
                                                                                      admin off
-Renew          ``last_run.at`` of ``state/renewal.json`` (not ``at``,    26 h        —
-               which a run without pinned roots keeps)
+Renew          ``last_run.at`` of ``state/renewal/renewal.json``         26 h        —
+               (not ``at``, which a run without pinned roots keeps)
 CrlFetch       newest ``fetched_at`` of the ``lists`` or ``at`` of the   26 h        —
-               ``failures`` of ``state/crl/index.json``
+               ``failures`` of ``state/crl/index.json``; with no
+               failure, also when the index was written
 =============  ========================================================  ==========  ==========
 
 ``missing``: no evidence yet; ``late``: the evidence is older than the limit — each task's cadence
@@ -38,9 +39,19 @@ Seal is judged by every day's state except those Retention rewrote: it marks eac
 itself may rewrite any day's state, also an old one it retries after a time-stamp outage.
 Renew and CrlFetch are judged by their state files, never by an exit code (Wave 5 contract C12,
 A4); like Backup's, their rows say that the task ran, and whether it succeeded is R20-renewal's
-and R20-crl's. A dry run of ``renew`` keeps ``last_run``, and a ``crl fetch`` that knows no list
-address or finds the lock held writes nothing, so neither is evidence. A time later than now is
-no evidence of these two: a clock set back never keeps them fresh.
+and R20-crl's. A dry run of ``renew`` keeps ``last_run``, and a ``crl fetch`` that finds the lock
+held writes nothing, so neither is evidence. From an upgrade to the first counted Renew run the
+Renew row reads the earlier release's ``state/renewal.json`` and names it as its evidence (Wave 5
+contract W5-E-4). Every ``crl fetch`` that gets past its lock and its reads rewrites the index
+with the failures of that run only, so an index that records no failure was written by a run
+without one, and its modification time is that run: also on a site that knows no list address
+any more, whose stored lists keep their old ``fetched_at`` (W5-E-2, answer to Q8 on #158). A run
+that finds the lock held writes nothing, but the run holding it writes the index, so the row
+stays fresh. A run that fails on an index or a stored list it cannot read exits 1 (answer to Q9)
+and writes nothing: the row keeps the run before and turns late 26 h after it, or shows
+``missing`` while the index cannot be read. It cannot show that run as failed: the states have
+no such value, and the exit code is no evidence here (C12, A4; a question on #158).
+A time later than now is no evidence of these two: a clock set back never keeps them fresh.
 A file that cannot be read is no evidence; it never fails the request.
 """
 
@@ -57,9 +68,16 @@ from arcilogger_api.sealinfo import credit_history
 from arcilogger_api.system_health.models import TaskHealth, TaskName
 from arcilogger_core.config import Config
 from arcilogger_core.layout import Layout
+from arcilogger_core.renewal import state_path as renewal_state_path
+from arcilogger_core.renewal import state_to_read as renewal_state_to_read
 from arcilogger_core.seal import DELETED
 from arcilogger_core.timeutil import site_day, to_site
-from arcilogger_worker.alerts.system import backup_state_path, read_crl_index, read_renew_runs
+from arcilogger_worker.alerts.system import (
+    backup_state_path,
+    crl_index_path,
+    read_crl_index,
+    read_renew_runs,
+)
 
 #: ``verify --last 2`` (VerifyDaily) checks 1 day on a chain of one sealed day, else 2; more
 #: days are the weekly ``--last 90`` (on a young chain: every sealed day there is).
@@ -95,6 +113,8 @@ class TaskRow:
     late_after: timedelta | None
     #: The task is switched off by the configuration (it runs and does nothing).
     not_used: Callable[[Evidence], bool] | None = None
+    #: The evidence shown, when it depends on which file is there (None: ``evidence``).
+    shown: Callable[[Evidence], str] | None = None
 
 
 def aware_time(value: Any) -> datetime | None:
@@ -235,12 +255,29 @@ def _renew(evidence: Evidence) -> datetime | None:
     return None if runs is None else _until_now(evidence, (runs.last_run_at,))
 
 
+def _renew_shown(evidence: Evidence) -> str:
+    """The file :func:`_renew` reads: ``state\\renewal\\renewal.json``, or the earlier release's
+    ``state\\renewal.json`` while it is the only one (W5-E-4, answer to Q2 on #158). Never
+    raises: a file that cannot be looked at names the file the task writes."""
+    written = renewal_state_path(evidence.layout)
+    path = renewal_state_to_read(evidence.layout)
+    try:
+        earlier = path != written and path.exists()
+    except OSError:  # Path.exists() raises PermissionError, for one
+        earlier = False
+    shown = path if earlier else written  # neither file yet: the task writes the new one
+    return "\\".join(shown.relative_to(evidence.layout.root).parts)
+
+
 def _crl_fetch(evidence: Evidence) -> datetime | None:
     index = read_crl_index(evidence.layout)
-    return _until_now(
-        evidence,
-        [entry.fetched_at for entry in index.lists] + [failure.at for failure in index.failures],
-    )
+    moments: list[datetime | None] = [entry.fetched_at for entry in index.lists]
+    moments += [failure.at for failure in index.failures]
+    if index.readable and not index.failures:
+        # The run that wrote the index failed nowhere: its lists' fetched_at can be older, when
+        # it knew no list address (#151, answer to Q8 on #158). state/crl is protected.
+        moments.append(_modified(crl_index_path(evidence.layout)))
+    return _until_now(evidence, moments)
 
 
 #: One row per file of ``deploy/windows/tasks/``, in the order of the contract's table (a test
@@ -343,9 +380,10 @@ TASKS: Final[tuple[TaskRow, ...]] = (
         "Renew",
         "Her gün 02:30",
         "Daily at 02:30",
-        "state\\renewal.json",
+        "state\\renewal\\renewal.json",
         _renew,
         timedelta(hours=26),
+        shown=_renew_shown,
     ),
     TaskRow(
         "CrlFetch",
@@ -376,7 +414,7 @@ def judge(row: TaskRow, evidence: Evidence) -> TaskHealth:
         schedule_en=row.schedule_en,
         state=state,
         last_evidence_at=None if last is None else to_site(last),
-        evidence=row.evidence,
+        evidence=row.evidence if row.shown is None else row.shown(evidence),
     )
 
 

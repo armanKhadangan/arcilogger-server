@@ -40,8 +40,9 @@ from arcilogger_core.tsa import trusted_roots
 from arcilogger_core.tsa.mock import MockTsa, MockTsaProvider
 from arcilogger_core.tsa.verify import fingerprint, verify_token
 
-#: A made-up policy OID (not 2.999, not a real Kamu SM policy).
-SIMULATED_POLICY = "1.3.6.1.4.1.55555.1.1"
+#: A made-up policy OID (not 2.999, not a real Kamu SM policy), under 1.3.6.1.4.1.32473, the
+#: Private Enterprise Number RFC 5612 reserves for documentation.
+SIMULATED_POLICY = "1.3.6.1.4.1.32473.1.1"
 
 
 @dataclass

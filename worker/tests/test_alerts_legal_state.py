@@ -34,6 +34,7 @@ from arcilogger_worker.alerts.system import (
     CrlIndexState,
     CrlListEntry,
     CrlStatus,
+    RenewRuns,
     RevokedCertificate,
     StampRenewal,
     crl_fetch_times,
@@ -43,6 +44,7 @@ from arcilogger_worker.alerts.system import (
     issuers_in_use,
     pinned_roots,
     read_crl_index,
+    read_renew_runs,
     read_stamp_renewals,
     revoked_certificates,
     scheduled_verifications,
@@ -101,7 +103,7 @@ def index(*lists: Any, failures: tuple[dict[str, Any], ...] = ()) -> dict[str, A
     return {"schema": CRL_INDEX_SCHEMA, "lists": list(lists), "failures": list(failures)}
 
 
-# -- state/renewal.json ---------------------------------------------------------------------------
+# -- state/renewal/renewal.json -------------------------------------------------------------------
 
 
 def test_stamp_renewals_are_read_from_the_report(layout: Layout) -> None:
@@ -114,7 +116,7 @@ def test_stamp_renewals_are_read_from_the_report(layout: Layout) -> None:
             covered=1,
         ),
     )
-    assert stamp_renewal_path(layout) == layout.state / "renewal.json"
+    assert stamp_renewal_path(layout) == layout.state / "renewal" / "renewal.json"
     assert read_stamp_renewals(layout) == (
         StampRenewal(
             path="2026/10/01/manifest-2026-10-01.json.zd",
@@ -133,6 +135,38 @@ def test_stamp_renewals_are_read_from_the_report(layout: Layout) -> None:
             renewed_at=None,
         ),
     )
+
+
+def test_the_readers_read_an_earlier_report_only_until_the_new_one_exists(layout: Layout) -> None:
+    """The report lives in ``state/renewal/``, which only the tasks write (W5-E-4). An earlier
+    release kept it as ``state/renewal.json``, which every service may write: the readers take
+    it only while the new file is missing (until the first run after the upgrade, so an upgrade
+    resolves no open alert); once the new file exists, the earlier one decides nothing."""
+    earlier = layout.state / "renewal.json"
+    write(
+        earlier,
+        {
+            **report(token("2026-10-01", "due", "2027-03-01T00:00:00Z"), due=1),
+            "last_run": {"at": "2026-11-01T23:30:00Z", "outcome": "failed"},
+            "failures_in_a_row": 3,
+        },
+    )
+    before = earlier.read_bytes()
+    assert [renewal.status for renewal in read_stamp_renewals(layout) or ()] == ["due"]
+    assert read_renew_runs(layout) == RenewRuns(
+        last_run_at=datetime(2026, 11, 1, 23, 30, tzinfo=UTC), outcome="failed", failures_in_a_row=3
+    )
+    write(
+        stamp_renewal_path(layout),
+        report(token("2026-10-01", "covered", "2027-03-01T00:00:00Z", "renewals/x.json")),
+    )
+    assert [renewal.status for renewal in read_stamp_renewals(layout) or ()] == ["covered"]
+    assert read_renew_runs(layout) == RenewRuns()
+    # a damaged new file is unknown: the earlier one never stands in for it
+    stamp_renewal_path(layout).write_text('{"tokens": [', encoding="utf-8")
+    assert read_stamp_renewals(layout) is None
+    assert read_renew_runs(layout) is None
+    assert earlier.read_bytes() == before
 
 
 def test_stamp_renewals_take_renewed_at_and_a_plain_list(layout: Layout) -> None:

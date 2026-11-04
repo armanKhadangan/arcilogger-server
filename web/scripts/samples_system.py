@@ -30,8 +30,8 @@ system's clock is the machine's):
   verification results (the monthly full check has not run yet: ``missing``), yesterday's backup
   (today's has not run: ``late``), ApplySystem's report and the agent's heartbeat (fresh), today's
   hourly clock samples (a 3.2 ms offset, one probe no server answered), today's Renew run
-  (``state/renewal.json`` as ``renew`` writes it: nothing due) and today's CrlFetch run
-  (``state/crl/index.json``: one list of a documentation address).
+  (``state/renewal/renewal.json`` as ``renew`` writes it: nothing due) and today's CrlFetch
+  run (``state/crl/index.json``: one list of a documentation address).
 
 What the files hold: ``system.json`` ``summary`` (``GET /system``, the processor measured) and
 ``summary_first_reading`` (the first reading of a process: ``cpu_percent`` null),

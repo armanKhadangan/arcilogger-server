@@ -464,7 +464,8 @@ def test_renewal_status_writes_nothing(rw: RenewalWorld) -> None:
     before = sorted(path for path in rw.layout.root.rglob("*") if path.is_file())
     renewal_status(rw.layout, rw.world.config, rw.roots, CNA)
     assert sorted(path for path in rw.layout.root.rglob("*") if path.is_file()) == before
-    assert not (rw.layout.state / "renewal.json").exists()
+    assert not renewal_module.state_path(rw.layout).exists()
+    assert not renewal_module.state_dir(rw.layout).exists()
     assert inspect_token(rw.layout.token(DAY).read_bytes()).tsa_cert_not_after == CNA
 
 
@@ -641,12 +642,12 @@ def test_a_lock_that_cannot_be_taken_is_not_called_busy(
         pass
     assert not isinstance(failed.value, RenewalBusyError)
     assert failed.value.code == "renewal_lock_failed"
-    assert failed.value.message_tr.startswith("state/renewal.lock açılamadı")
-    assert failed.value.message_en.startswith("state/renewal.lock cannot be opened")
+    assert failed.value.message_tr.startswith("state/renewal/renewal.lock açılamadı")
+    assert failed.value.message_en.startswith("state/renewal/renewal.lock cannot be opened")
     monkeypatch.undo()
 
     real_open = os.open
-    lock_file = rw.layout.state / "renewal.lock"
+    lock_file = rw.layout.state / "renewal" / "renewal.lock"
 
     def refuse(path: Any, *args: Any, **kwargs: Any) -> int:
         if Path(path) == lock_file:
@@ -1038,7 +1039,8 @@ def test_renewal_files_are_locked(rw: RenewalWorld) -> None:
     run = _renew(rw, rw.legal_provider(FAR))
     for path in (run.record_path, run.token_path):
         assert is_locked(rw.layout.vault / path)
-    assert (rw.layout.state / "renewal.lock").exists()
+    assert (rw.layout.state / "renewal" / "renewal.lock").exists()
+    assert not (rw.layout.state / "renewal.lock").exists()
 
 
 def test_sealed_files_are_never_touched(rw: RenewalWorld) -> None:
@@ -1064,8 +1066,8 @@ def test_a_second_run_while_one_holds_the_lock_is_refused(rw: RenewalWorld) -> N
     provider = rw.legal_provider(FAR)
     with one_run(rw.layout), pytest.raises(RenewalBusyError) as busy:
         _renew(rw, provider)
-    assert "state/renewal.lock" in busy.value.message_tr
-    assert "state/renewal.lock" in busy.value.message_en
+    assert "state/renewal/renewal.lock" in busy.value.message_tr
+    assert "state/renewal/renewal.lock" in busy.value.message_en
     assert _renewal_files(rw) == []
     assert _renew(rw, provider).reason == "due"
 
