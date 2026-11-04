@@ -1493,7 +1493,13 @@ All Wave 5 questions are answered (2026-11-02).
   (`renewal_stamp_invalid`, W5-A-9), is now refused with this exit 2 before the stamp. The dry
   run is unchanged. `last_run.error` takes the cause from the error in `cli.py`'s
   `_renew_cause` (a hunk outside #137's files, asked for on the issue); until it lands the
-  command still exits 2 as `refused` with these texts, under the cause `provider`.
+  command still exits 2 as `refused`, under `_provider_cause`'s cause (`provider` for a provider
+  that can be made, as in the test; `secret-store` for a `zamane` site whose secret store cannot
+  list its names), and `_RenewError.refused` puts the error's whole "TR [EN]" text into both
+  `message_tr` and `message_en` (the same hunk should build them from the error's
+  `message_tr`/`message_en`). `test_a_legal_claim_without_a_listed_root_exits_2` pins the
+  interim cause in the JSON and in `last_run.error`, so the line changes to `legal-roots` when
+  the hunk lands.
 - **W5-A-14: `recover` checks revocation as the run does (#137 item 2).** W5-A-3's `recover`
   promoted an interrupted part whose token verified, without the stored revocation lists, so a
   run stopped between the stamp and its C15 check left a record that never counts. It now
@@ -1536,13 +1542,15 @@ All Wave 5 questions are answered (2026-11-02).
   `recover` (a part with its own record's rule) and `renew` (`_write`, whose record carries
   today's setting), and in the standalone verifier's `check_renewals` (`_renewal_eku`; a record
   that cannot be read is judged strict and never counts anyway). Neither the day's rule, the
-  other manifests of a package (`_relaxed_eku` now judges deletion records only) nor the
-  site's setting at the time of reading decides any more, so W5-A-11's split between the
+  other manifests of a package (`_relaxed_eku` now judges deletion records and the packaged
+  report's stamp only) nor the site's setting at the time of reading decides any more, so
+  W5-A-11's split between the
   callers is gone: `day_renewal` and `recover` lose their `require_critical_eku` parameter,
   and `verify_day` no longer passes the day's rule. The standalone verifier's
   `token-eku-not-critical` warning on a renewal token says the site relaxed the rule in the
   renewal record ("bunu yenileme kaydında belirtmiştir" / "sealed that choice in the renewal
-  record") instead of the manifest. The shared case table (rule 5) gains three cases: a strict
+  record") instead of the manifest, and `DENETCI-KILAVUZU.md` §7's row for that code says
+  either place (the item 6 hunk). The shared case table (rule 5) gains three cases: a strict
   day with a relaxed renewal record (`renewal-covered`), a relaxed day with a strict one
   (`renewal-due`), and a strict renewal record beside a relaxed day in one package
   (`renewal-due`; the standalone verifier relaxed it before); the two existing EKU cases keep
@@ -1552,6 +1560,19 @@ All Wave 5 questions are answered (2026-11-02).
   after the site turned the rule strict again) cover the rest. The standalone verifier's output
   changes, so `VERIFIER_VERSION` is "7" (addendum H4): #136 has not merged, so W5-A-8's "7"
   for #136 becomes "8" when it does; `test_verifier_version_is_7` pins it.
+  One caller does not agree yet: the evidence builder picks the root to bundle for every
+  record token, renewals included, with the package's rule (`_Records(require_critical_eku=all(
+  day.require_critical_eku ...))` → `_root_of`), and a token with an EKU error yields no root.
+  So a renewal whose record is relaxed and whose non-critical-EKU certificate chains to a root
+  no packaged strict day uses (a new root after a CA change) leaves that root out, the
+  standalone self-check fails the renewal token (`token-chain`) and the package is refused;
+  when the renewal shares a day's root, the root is bundled from the day and nothing shows.
+  The fix is a second `builder.py` hunk outside #137's grant (asked for on the issue): in
+  `_Records.add`, a `renewal` record passes its own rule (`tsa.require_critical_eku is not
+  False`) to `_root_of`, with a test in `test_renewal_evidence.py` (a strict day and a relaxed
+  renewal under the legal CA's root). Until it lands, the builder refuses such a package; the
+  verifiers' verdict on the shared case "its record relaxed, the day sealed strict"
+  (`renewal-covered`, the case's files checked with every root) does not change with it.
 - **W5-A-18: a package ships the renewals of its deletion records (answer to Q5 on #132, #137
   item 7).** D3 renews deletion-record tokens, but the builder's `_renewals` matched only the
   packaged days' manifest and token hashes and the report's token hash, so a package that ships

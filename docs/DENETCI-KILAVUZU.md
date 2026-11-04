@@ -393,7 +393,7 @@ alanı); ekrandaki her satır ayrıca Türkçe ve İngilizce açıklamasını ta
 | `token-swapped` | HATA | Damga dosyaları günler arasında yer değiştirmiş |
 | `token-signature`, `token-message-digest`, `token-content-type`, `token-ess` | HATA | Damganın imzası ya da imzalı öznitelikleri geçersiz |
 | `token-eku` | HATA | TSA sertifikası zaman damgası için yetkili değil |
-| `token-eku-not-critical` | UYARI | EKU uzantısı kritik değil; kurum bunu mühürlü manifestte kabul etmiş (`tsa.require_critical_eku = false`, K6). OpenSSL `ts -verify` böyle bir damgayı "unsuitable certificate purpose" diyerek reddeder |
+| `token-eku-not-critical` | UYARI | EKU uzantısı kritik değil; kurum bunu mühürlü manifestte ya da (yenileme damgası için) yenileme kaydında kabul etmiş (`tsa.require_critical_eku = false`, K6). OpenSSL `ts -verify` böyle bir damgayı "unsuitable certificate purpose" diyerek reddeder |
 | `chain-skip-invalid` | HATA | Manifestteki boş gün dizisi geçersiz ya da bu günden hemen önce bitmiyor |
 | `summary-several-roots` | UYARI | Paketteki damgalar birden çok köke bağlanıyor; her kökün parmak izini ayrı karşılaştırın |
 | `token-chain`, `token-not-ca` | HATA | Sertifika zinciri güvenilen bir köke ulaşmıyor |

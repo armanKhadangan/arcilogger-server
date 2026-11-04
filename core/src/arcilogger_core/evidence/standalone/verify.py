@@ -2851,8 +2851,8 @@ class Verifier:
 
     def _relaxed_eku(self) -> bool:
         """Whether a sealed manifest of the package says the site accepts a non-critical EKU
-        (then the stamps of its deletion records are judged the same way; a renewal record
-        carries its own rule, :func:`_renewal_eku`)."""
+        (then the stamps of its deletion records and the packaged report's stamp are judged the
+        same way; a renewal record carries its own rule, :func:`_renewal_eku`)."""
         for state in self.days.values():
             try:
                 manifest = load_json(state.data or b"")
@@ -3076,9 +3076,9 @@ class Verifier:
         *,
         require_critical_eku: bool | None = None,
     ) -> TimestampResult | None:
-        """A deletion or renewal record and its own time-stamp token (``<name>.zd``), with the
-        EKU rule ``require_critical_eku`` (a renewal record's own), or for a deletion record
-        the package's (:meth:`_relaxed_eku`)."""
+        """A deletion or renewal record, or the packaged report, and its own time-stamp token
+        (``<name>.zd``), with the EKU rule ``require_critical_eku`` (a renewal record's own),
+        or for a deletion record and the report the package's (:meth:`_relaxed_eku`)."""
         report = self.report
         token = self._read(name + ".zd", where)
         if token is None:
