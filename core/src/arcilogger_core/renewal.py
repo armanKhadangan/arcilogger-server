@@ -1103,15 +1103,18 @@ class RenewalLegalRootsError(TsaConfigurationError):
                 "Sağlayıcı yasal geçerli damga beyan ediyor, ancak damganın zinciri parmak izi "
                 "tsa.legal_root_fingerprints listesinde olmayan sabitlenmiş bir kök sertifikada "
                 f"bitiyor: {root} (SHA-256 {root_sha256}). Bu yenileme hiçbir zaman sayılmaz; "
-                "kayıt ve damgası silindi. Kökün parmak izini yayımlanan değerle karşılaştırıp "
-                "tsa.legal_root_fingerprints listesine ekleyin."
+                "kayıt ve damgası silindi. Bir damga kredisi harcandı; kök "
+                "tsa.legal_root_fingerprints listesine eklenene ya da sağlayıcı düzeltilene "
+                "kadar sonraki her çalıştırma bir kredi daha harcar. Kökün parmak izini "
+                "yayımlanan değerle karşılaştırın."
             )
             self.message_en = (
                 "The provider claims legal grade, but the time stamp's chain ends at a pinned "
                 "root certificate whose fingerprint is not in tsa.legal_root_fingerprints: "
                 f"{root} (SHA-256 {root_sha256}). Such a renewal never counts, so the record "
-                "and its token were removed. Compare the root's fingerprint with the published "
-                "value and add it to tsa.legal_root_fingerprints."
+                "and its token were removed. One stamp credit was spent; every later run "
+                "spends another until the root is listed in tsa.legal_root_fingerprints or the "
+                "provider is corrected. Compare the root's fingerprint with the published value."
             )
         else:
             self.message_tr = (
@@ -1296,9 +1299,9 @@ def recover(
     layout: Layout,
     roots: Sequence[x509.Certificate],
     *,
+    legal_roots: Collection[str],
     crls: Sequence[Crl] | None = None,
     now: datetime | None = None,
-    legal_roots: Collection[str] | None = None,
 ) -> list[str]:
     """Tidy up what an interrupted run left in ``vault/renewals``; returns the removed names.
 
@@ -1308,8 +1311,8 @@ def recover(
       ``state/crl`` when None) do not show revoked at or before the stamp: promoted (W5-A-3).
       A revoked one is removed, as the run would have removed it (C15: a revoked new stamp
       leaves no record), and so is one whose record claims legal grade while its chain ends at
-      a pinned root not in ``legal_roots`` (``tsa.legal_root_fingerprints``, when the caller
-      passes them: W5-A-13);
+      a pinned root not in ``legal_roots`` (``tsa.legal_root_fingerprints``, W5-A-13: required,
+      so that no caller skips the check by leaving it out);
     * any other ``….part`` and ``….part.zd``, a final token without its record and a temporary
       file of an interrupted write (``.….tmp``): removed. None of them is evidence: a record
       without a verified token protects nothing. A locked file is never removed: a locked token
@@ -1344,7 +1347,6 @@ def recover(
             refusal = _refusal(check)
             if (
                 not refusal
-                and legal_roots is not None
                 and parsed is not None
                 and parsed["tsa"]["legal_grade"] is True
                 and _unlisted(check, legal_roots)

@@ -488,6 +488,12 @@ def _renewal_files(rw: RenewalWorld) -> list[str]:
     return sorted(path.name for path in folder.iterdir()) if folder.is_dir() else []
 
 
+def _recover(rw: RenewalWorld) -> list[str]:
+    """``recover`` as ``renew_held`` calls it, with the world's ``tsa.legal_root_fingerprints``."""
+    legal = rw.world.config.tsa.legal_root_fingerprints
+    return recover(rw.layout, rw.roots, now=rw.clock.now, legal_roots=legal)
+
+
 def test_at_most_one_record_per_run(rw: RenewalWorld) -> None:
     """Due tokens of every kind go into one record; a second run with nothing due writes no
     file; something newly due on the same date gets the next number."""
@@ -783,6 +789,12 @@ def test_a_stamp_under_a_pinned_but_unlisted_root_is_removed(
     assert "kayıt ve damgası silindi" in error.message_tr
     assert error.message_en.startswith("The provider claims legal grade")
     assert "the record and its token were removed" in error.message_en
+    # the credit is spent, and every later run spends another (answer to Q6 on #177)
+    assert "Bir damga kredisi harcandı" in error.message_tr
+    assert "sonraki her çalıştırma bir kredi daha harcar" in error.message_tr
+    assert "One stamp credit was spent" in error.message_en
+    assert "every later run spends another" in error.message_en
+    assert "the provider is corrected" in error.message_en
     run = renew(rw.layout, rw.world.config, rw.legal_provider(FAR), roots, rw.clock.now)
     assert run.reason == "due"
     assert _renewal_files(rw) == ["2031-06-23-1.json", "2031-06-23-1.json.zd"]
@@ -853,7 +865,7 @@ def test_a_crash_between_stamp_and_rename_is_recovered(rw: RenewalWorld) -> None
     (folder / "2031-06-22-4.json.zd").write_bytes(b"token")
     (folder / ".2031-06-22-5.json.part.tmp").write_bytes(record)
 
-    assert recover(rw.layout, rw.roots, now=rw.clock.now) == [
+    assert _recover(rw) == [
         "2031-06-22-1.json.part",
         "2031-06-22-2.json.part.zd",
         "2031-06-22-2.json.part",
@@ -868,7 +880,7 @@ def test_a_crash_between_stamp_and_rename_is_recovered(rw: RenewalWorld) -> None
         "2031-06-21-1.json.zd",
     ]
     assert all(is_locked(folder / name) for name in _renewal_files(rw))
-    assert recover(rw.layout, rw.roots, now=rw.clock.now) == []
+    assert _recover(rw) == []
     with pytest.raises(RenewalNotNeeded):  # the promoted records cover the day
         _renew(rw, provider)
     assert rw.of(rw.status(), DAY_TOKEN).covered_by == "renewals/2031-06-20-1.json"
@@ -922,7 +934,7 @@ def test_a_revoked_stamp_of_an_interrupted_run_is_removed(
     unchecked = verify_token(token.read_bytes(), roots=rw.roots, file_path=part, now=rw.clock.now)
     assert unchecked.ok  # only the revocation lists refuse it
 
-    assert recover(rw.layout, rw.roots, now=rw.clock.now) == [token.name, part.name]
+    assert _recover(rw) == [token.name, part.name]
     assert _renewal_files(rw) == []
     assert rw.status() == before
     assert "revoked at or before the stamp" in caplog.text
@@ -947,7 +959,8 @@ def test_an_interrupted_stamp_under_a_pinned_but_unlisted_root_is_removed(
     token verifies under a pinned root that is not listed. The next run checks it as the
     stamping run would have, and removes it instead of promoting it: a legal-grade renewal
     under that root never counts (D5), and a locked one could not be removed. ``recover``
-    without the list (a caller with no configuration) still promotes it."""
+    requires the list (answer to Q5 on #177): a call without it is a ``TypeError``, and with
+    that root listed the part is promoted."""
     rw = make_world(tmp_path)
     unlisted = LegalCa("Örnek Unlisted Root (test)")
     roots = [rw.legal.root, unlisted.root]
@@ -978,14 +991,18 @@ def test_an_interrupted_stamp_under_a_pinned_but_unlisted_root_is_removed(
     assert run.record_path == "renewals/2031-06-23-1.json"
     assert _renewal_files(rw) == ["2031-06-23-1.json", "2031-06-23-1.json.zd"]
 
-    # without the list, a part whose token verifies is promoted, as before
+    # the list cannot be left out; with that root listed, the part is promoted
     other = make_world(tmp_path / "other")
     other.set_now(CNA - timedelta(days=100))
     other_roots = [other.legal.root, unlisted.root]
     token = _stop_after_stamp(
         other, other.legal_provider(FAR, ca=unlisted), monkeypatch, stopped, other_roots
     )
-    assert recover(other.layout, other_roots, now=other.clock.now) == []
+    with pytest.raises(TypeError, match="legal_roots"):
+        recover(other.layout, other_roots, now=other.clock.now)  # type: ignore[call-arg]
+    assert _renewal_files(other) == sorted([part.name, token.name])
+    both = [other.legal.fingerprint, unlisted.fingerprint]
+    assert recover(other.layout, other_roots, now=other.clock.now, legal_roots=both) == []
     assert _renewal_files(other) == ["2031-06-23-1.json", "2031-06-23-1.json.zd"]
 
 
@@ -1006,7 +1023,7 @@ def test_an_interrupted_part_is_promoted_when_the_lists_cannot_be_read(
     rw.layout.crl_dir.mkdir(parents=True, exist_ok=True)
     (rw.layout.crl_dir / "index.json").write_text("{", encoding="utf-8")
 
-    assert recover(rw.layout, rw.roots, now=rw.clock.now) == []
+    assert _recover(rw) == []
     names = ["2031-06-23-1.json", "2031-06-23-1.json.zd"]
     assert _renewal_files(rw) == names
     assert all(is_locked(rw.layout.renewals_dir / name) for name in names)
@@ -1037,7 +1054,7 @@ def test_a_renewal_keeps_the_eku_rule_its_record_was_written_under(
     tsa = config.tsa.model_copy(update={"require_critical_eku": True})
     rw.world.config = config.model_copy(update={"tsa": tsa})
 
-    assert recover(rw.layout, rw.roots, now=rw.clock.now) == []
+    assert _recover(rw) == []
     assert _renewal_files(rw) == ["2031-06-23-1.json", "2031-06-23-1.json.zd"]
     assert rw.of(rw.status(), DAY_TOKEN).covered_by == "renewals/2031-06-23-1.json"
     with pytest.raises(RenewalNotNeeded):
@@ -1078,7 +1095,7 @@ def test_an_interrupted_part_with_a_key_twice_is_judged_strict(
     )
     assert relaxed.ok  # only the strict rule refuses it
 
-    assert recover(rw.layout, rw.roots, now=rw.clock.now) == [token.name, part.name]
+    assert _recover(rw) == [token.name, part.name]
     assert _renewal_files(rw) == []
     assert "is not kept" in caplog.text
 
@@ -1094,7 +1111,7 @@ def test_recover_never_removes_a_locked_file(rw: RenewalWorld) -> None:
     leftover = rw.layout.renewals_dir / "2031-06-22-1.json.part"
     leftover.write_bytes(b"{}")
     lock(leftover)
-    assert recover(rw.layout, rw.roots, now=rw.clock.now) == []
+    assert _recover(rw) == []
     assert (token.exists(), is_locked(token), leftover.exists()) == (True, True, True)
 
 
@@ -1114,7 +1131,7 @@ def test_a_renewal_left_unlocked_is_locked_by_the_next_run(
         _renew(rw, rw.legal_provider(FAR))
     names = ["2031-06-23-1.json", "2031-06-23-1.json.zd"]
     assert _renewal_files(rw) == names
-    assert recover(rw.layout, rw.roots, now=rw.clock.now) == []
+    assert _recover(rw) == []
     assert not any(is_locked(rw.layout.renewals_dir / name) for name in names)
     monkeypatch.undo()
     with pytest.raises(RenewalNotNeeded):  # the record counts, unlocked or not

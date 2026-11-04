@@ -1604,7 +1604,9 @@ All Wave 5 questions are answered (2026-11-02).
   `tsa.legal_root_fingerprints`, the record and its token are removed, as C15 does for a
   revoked certificate, and the run raises `RenewalLegalRootsError(root=, root_sha256=)`. Its
   TR/EN texts name that root (subject and SHA-256 fingerprint) and say that the record and its
-  token were removed; the stamp's credit is spent. The command handles it as above: exit 2,
+  token were removed, and that one stamp credit was spent and every later run spends another
+  until the root is listed in `tsa.legal_root_fingerprints` or the provider is corrected (answer
+  to Q6 on #177). The command handles it as above: exit 2,
   `legal-roots` in `error.code` and `last_run.error`, `failures_in_a_row` + 1, so `R20-renewal`
   raises after the second run. A run stopped between the stamp and this check (in
   `verify_token`, say) leaves a part whose token verifies, so `recover` applies it too, as it
@@ -1612,12 +1614,15 @@ All Wave 5 questions are answered (2026-11-02).
   `recover(..., legal_roots=)`, and a part whose record claims legal grade while its chain ends
   at a root that is not listed is removed with its token, with a warning in the log naming that
   root, instead of being promoted and locked (a locked record that never counts could not be
-  removed). `recover` without `legal_roots` (a caller with no configuration) does not apply it.
+  removed). `legal_roots` is a required keyword argument of `recover`, without a default, so no
+  caller skips the check by leaving it out; it applies only to a record that claims legal grade
+  (answer to Q5 on #177).
   `test_a_stamp_under_a_pinned_but_unlisted_root_is_removed` (two pinned roots, one listed; a
   stamp under the listed one is still kept),
   `test_a_stamp_under_a_pinned_but_unlisted_root_exits_2` (`failures_in_a_row` 1, then 2) and
   `test_an_interrupted_stamp_under_a_pinned_but_unlisted_root_is_removed` (both places the
-  token can be, through `recover` and through the next run) pin it.
+  token can be, through `recover` and through the next run; `recover` without `legal_roots` is a
+  `TypeError`) pin it.
 - **W5-A-14: `recover` checks revocation as the run does (#137 item 2).** W5-A-3's `recover`
   promoted an interrupted part whose token verified, without the stored revocation lists, so a
   run stopped between the stamp and its C15 check left a record that never counts. It now

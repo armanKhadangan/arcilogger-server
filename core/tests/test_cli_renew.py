@@ -362,6 +362,8 @@ def test_a_stamp_under_a_pinned_but_unlisted_root_exits_2(
     assert named in data["error"]["message_en"]
     assert "kayıt ve damgası silindi" in data["error"]["message_tr"]
     assert "the record and its token were removed" in data["error"]["message_en"]
+    assert "Bir damga kredisi harcandı" in data["error"]["message_tr"]
+    assert "every later run spends another" in data["error"]["message_en"]
     assert cli.rw.legal.fingerprint not in captured.out
     assert len(calls) == 1
     assert cli.renewal_files() == []
