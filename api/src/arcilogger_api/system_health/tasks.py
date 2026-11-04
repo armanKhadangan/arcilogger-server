@@ -26,7 +26,8 @@ ApplySystem    ``at`` of ``admin/system/status.json``                    15 min 
 Renew          ``last_run.at`` of ``state/renewal/renewal.json``         26 h        —
                (not ``at``, which a run without pinned roots keeps)
 CrlFetch       newest ``fetched_at`` of the ``lists`` or ``at`` of the   26 h        —
-               ``failures`` of ``state/crl/index.json``
+               ``failures`` of ``state/crl/index.json``; with neither,
+               when the index was written
 =============  ========================================================  ==========  ==========
 
 ``missing``: no evidence yet; ``late``: the evidence is older than the limit — each task's cadence
@@ -38,9 +39,11 @@ Seal is judged by every day's state except those Retention rewrote: it marks eac
 itself may rewrite any day's state, also an old one it retries after a time-stamp outage.
 Renew and CrlFetch are judged by their state files, never by an exit code (Wave 5 contract C12,
 A4); like Backup's, their rows say that the task ran, and whether it succeeded is R20-renewal's
-and R20-crl's. A dry run of ``renew`` keeps ``last_run``, and a ``crl fetch`` that knows no list
-address or finds the lock held writes nothing, so neither is evidence. A time later than now is
-no evidence of these two: a clock set back never keeps them fresh.
+and R20-crl's. A dry run of ``renew`` keeps ``last_run``, and a ``crl fetch`` that finds the lock
+held writes nothing, so neither is evidence. A ``crl fetch`` that knows no list address writes
+the index with no list and no failure on a site that never stored one, so there the index's own
+modification time is the run. A time later than now is no evidence of these two: a clock set
+back never keeps them fresh.
 A file that cannot be read is no evidence; it never fails the request.
 """
 
@@ -59,7 +62,12 @@ from arcilogger_core.config import Config
 from arcilogger_core.layout import Layout
 from arcilogger_core.seal import DELETED
 from arcilogger_core.timeutil import site_day, to_site
-from arcilogger_worker.alerts.system import backup_state_path, read_crl_index, read_renew_runs
+from arcilogger_worker.alerts.system import (
+    backup_state_path,
+    crl_index_path,
+    read_crl_index,
+    read_renew_runs,
+)
 
 #: ``verify --last 2`` (VerifyDaily) checks 1 day on a chain of one sealed day, else 2; more
 #: days are the weekly ``--last 90`` (on a young chain: every sealed day there is).
@@ -237,10 +245,12 @@ def _renew(evidence: Evidence) -> datetime | None:
 
 def _crl_fetch(evidence: Evidence) -> datetime | None:
     index = read_crl_index(evidence.layout)
-    return _until_now(
-        evidence,
-        [entry.fetched_at for entry in index.lists] + [failure.at for failure in index.failures],
-    )
+    moments: list[datetime | None] = [entry.fetched_at for entry in index.lists]
+    moments += [failure.at for failure in index.failures]
+    if index.readable and not moments:
+        # A run that knew no list address: an index with no list and no failure (#151).
+        moments.append(_modified(crl_index_path(evidence.layout)))
+    return _until_now(evidence, moments)
 
 
 #: One row per file of ``deploy/windows/tasks/``, in the order of the contract's table (a test

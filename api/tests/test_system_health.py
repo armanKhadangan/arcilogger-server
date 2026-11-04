@@ -35,6 +35,7 @@ from arcilogger_core.admin.contract import SystemStatus, dump_document, parse_do
 from arcilogger_core.admin.testing import FakeAgent, FakeSystem, Installed
 from arcilogger_core.cli import main as core_main
 from arcilogger_core.config import Config
+from arcilogger_core.crl import INDEX_SCHEMA as CRL_INDEX_SCHEMA
 from arcilogger_core.crl import CrlError, CrlOptions
 from arcilogger_core.crl import _one_run as held_crl_lock
 from arcilogger_core.crl import fetch as crl_fetch
@@ -557,6 +558,42 @@ def test_renew_and_crlfetch_are_judged_by_their_state_files(api_config: Config) 
     for document in unreadable:
         crl_index_path(layout).write_bytes(document)
         assert states(evidence(api_config, now))["CrlFetch"] == "missing", document
+
+
+def test_crlfetch_without_a_list_address_shows_the_run(api_config: Config) -> None:
+    """#151: a ``crl fetch`` that knows no list address (no ``tsa.crl_urls``, no pinned root, no
+    token) writes ``state/crl/index.json`` with no list and no failure, so the row shows the run
+    by the time the index was written instead of a permanent ``missing``. A run that finds the
+    lock held still writes nothing, and a time later than now is still no evidence. An index that
+    holds a list or a failure is judged by their times alone (the test above)."""
+    now = utc_now().replace(microsecond=0)
+    layout = Layout(api_config.data_dir)
+    path = crl_index_path(layout)
+    with held_crl_lock(layout.crl_dir), pytest.raises(CrlError, match="another 'crl fetch'"):
+        crl_fetch(CrlOptions(), layout, [], now)
+    assert not path.exists()
+    assert states(evidence(api_config, now))["CrlFetch"] == "missing"
+
+    run = crl_fetch(CrlOptions(), layout, [], now)
+    assert (run.urls, run.exit_code) == ((), 2)
+    empty = {"schema": CRL_INDEX_SCHEMA, "lists": [], "failures": []}
+    assert json.loads(path.read_bytes()) == empty
+    rows = task_rows(evidence(api_config, now + timedelta(minutes=1)))
+    assert (rows["CrlFetch"]["state"], rows["CrlFetch"]["evidence"]) == (
+        "ok",
+        "state\\crl\\index.json",
+    )
+    touch(path, now - timedelta(hours=2))  # test: the run was two hours ago
+    row = task_rows(evidence(api_config, now))["CrlFetch"]
+    assert (row["state"], moment(row["last_evidence_at"])) == ("ok", now - timedelta(hours=2))
+    assert states(evidence(api_config, now + timedelta(hours=23)))["CrlFetch"] == "ok"
+    assert states(evidence(api_config, now + timedelta(hours=25)))["CrlFetch"] == "late"
+    touch(path, now + timedelta(hours=1))  # test: a clock set back since the run
+    assert states(evidence(api_config, now))["CrlFetch"] == "missing"
+    # The next run without an address writes the same index again: the task ran.
+    crl_fetch(CrlOptions(), layout, [], now)
+    assert json.loads(path.read_bytes()) == empty
+    assert states(evidence(api_config, now + timedelta(minutes=1)))["CrlFetch"] == "ok"
 
 
 @pytest.fixture
