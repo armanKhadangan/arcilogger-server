@@ -1,8 +1,9 @@
-"""``alerts.system``: the prepared legal-validity checks of Wave 5 contract 2.3.1 — re-stamping
+"""``alerts.system``: the legal-validity checks of Wave 5 contract 2.3.1 — re-stamping
 (``R20-renewal``), the time-stamp certificate (``R20-cert``) and the revocation lists
 (``R20-crl``) — run as ``alerts.system`` runs its checks, with :data:`~arcilogger_worker.alerts.
-system.LEGAL_CHECKS` in place of the registered ones (W5-E switches them on). Their e-mails name
-no certificate and no person, and until W5-E no Python string constant spells a whole code (D14).
+system.LEGAL_CHECKS` in place of the registered ones (one test runs every registered check).
+Their e-mails name no certificate and no person, and only the alerts' own modules spell a whole
+code (D14: W5-E switched them on).
 
 The state files are written as their writers write them (``test_alerts_legal_state.py``)."""
 
@@ -37,13 +38,24 @@ from arcilogger_worker.alerts.mail import MailItem, render_html, render_text, su
 from arcilogger_worker.alerts.system import (
     CERT_EXPIRY_WARNING,
     CERT_KEY,
+    CERT_RULE,
     CRL_INDEX_SCHEMA,
     CRL_KEY,
+    CRL_RULE,
     LEGAL_CHECKS,
     RENEWAL_KEY,
+    RENEWAL_RULE,
     crl_index_path,
     run_system_checks,
     stamp_renewal_path,
+)
+from arcilogger_worker.alerts.texts import (
+    DESCRIBERS,
+    RULES,
+    UNKNOWN_RUNBOOK,
+    describe,
+    rule_text,
+    runbook,
 )
 from arcilogger_worker.vaulttesting import SealedVault, at_site, make_vault
 
@@ -55,10 +67,12 @@ REVOKED = (
     "legal review is recommended."
 )
 URL = "https://arcilogger.example.com"
-#: The alert codes whose whole-string constants only W5-E adds (D14).
+#: The alert codes whose whole-string constants only the switch-on package W5-E adds (D14).
 WAVE5_CODES = frozenset({"R20-renewal", "R20-cert", "R20-crl"})
 #: The registered checks (the fixture below replaces them for each test).
 REGISTERED = system.CHECKS
+#: The dedup keys of the three alerts.
+KEYS = (RENEWAL_KEY, CERT_KEY, CRL_KEY)
 
 
 @pytest.fixture(autouse=True)
@@ -575,6 +589,19 @@ def test_legal_alert_mails_carry_no_names_and_no_log_lines(
         shown = alert.title + json.dumps(alert.details, ensure_ascii=False)
         for hidden in ("Örnek", "Mock", "192.0.2.", "manifest-", ".crl"):
             assert hidden not in shown, hidden
+    # What an e-mail and the alert detail can say of the three codes: the catalogue line, the
+    # facts of the details and the runbook.
+    for item in items:
+        text = rule_text(item.rule)
+        catalogue = (
+            text.name_tr, text.name_en, text.action_tr, text.action_en,
+            *describe(item.rule, item.details), *runbook(item.rule),
+        )  # fmt: skip
+        for line in catalogue:
+            for hidden in ("Örnek", "Test TSA", "Mock TSA", "CN=", "192.0.2.", "manifest-"):
+                assert hidden not in line, (item.rule, hidden)
+            for claim in ("uyumlu", "garanti", "compliant"):
+                assert claim not in line.lower(), (item.rule, claim)
 
 
 # -- D14 ------------------------------------------------------------------------------------------
@@ -594,13 +621,60 @@ def _code_constants() -> list[str]:
     return found
 
 
-def test_no_whole_string_constant_for_the_wave5_alert_codes() -> None:
-    """D14: only the switch-on package W5-E adds the whole-string constants ``R20-renewal``,
-    ``R20-cert`` and ``R20-crl``, with their texts and first-steps guide rows. Until then the
-    checks write each code only inside its dedup key.
+def test_the_wave5_alert_codes_are_switched_on() -> None:
+    """D14: the switch-on package W5-E added the whole-string constants ``R20-renewal``,
+    ``R20-cert`` and ``R20-crl`` with their catalogue texts, runbooks and first-steps guide rows
+    (``tests/test_docs_consistency.py::test_first_steps_explain_every_alert_code``), and
+    registered the three checks, last. Only the alerts' own modules spell a whole code."""
+    found = {Path(where.split(":", 1)[0]).as_posix() for where in _code_constants()}
+    assert found == {
+        "worker/src/arcilogger_worker/alerts/system.py",
+        "worker/src/arcilogger_worker/alerts/texts.py",
+    }
+    assert {RENEWAL_RULE, CERT_RULE, CRL_RULE} == WAVE5_CODES
+    assert KEYS == ("R20-renewal:none", "R20-cert:none", "R20-crl:none")
+    assert tuple(system._rule_of(key) for key in KEYS) == (RENEWAL_RULE, CERT_RULE, CRL_RULE)
+    assert REGISTERED[-len(LEGAL_CHECKS) :] == LEGAL_CHECKS
+    assert len({name for name, _ in REGISTERED}) == len(REGISTERED)
+    for code in sorted(WAVE5_CODES):
+        assert code in RULES, code
+        assert code in DESCRIBERS, code
+        assert runbook(code) != UNKNOWN_RUNBOOK, code
+    # The texts' 30 days are alerts.system's (which imports alerts.texts).
+    expiring = describe(CERT_RULE, {"revoked": 0, "expiring": 1, "uncovered": 0})
+    assert all(f"{CERT_EXPIRY_WARNING.days} " in sentence for sentence in expiring)
+    assert f"{CERT_EXPIRY_WARNING.days} gün" in runbook(CERT_RULE)[0]
 
-    W5-E: delete or invert this test in the pull request that adds the constants."""
-    assert _code_constants() == []
-    assert {system._rule_of(key) for key in (RENEWAL_KEY, CERT_KEY, CRL_KEY)} == WAVE5_CODES
-    # Prepared, not switched on (W5-E appends them).
-    assert {check for _, check in REGISTERED} & {check for _, check in LEGAL_CHECKS} == set()
+
+def test_registered_checks_raise_and_clear_the_legal_alerts(
+    monkeypatch: pytest.MonkeyPatch,
+    check: Any,
+    layout: Layout,
+    db_session: Session,
+    sealed: SealedVault,
+) -> None:
+    """Wave 5 contract §3 W5-C, "alert raise/clear for the three codes (after W5-E)": with every
+    registered check, as the worker runs them."""
+    monkeypatch.setattr(system, "CHECKS", REGISTERED)
+    renewals(layout, ("due", NOW + timedelta(days=10)))
+    revoked_day(layout)
+    crl_lists(sealed, 9, failures=(FAILURE,))
+    alerts = check()
+    assert {key: (alerts[key].rule, alerts[key].severity) for key in alerts if key in KEYS} == {
+        RENEWAL_KEY: ("R20-renewal", "high"),
+        CERT_KEY: ("R20-cert", "critical"),
+        CRL_KEY: ("R20-crl", "medium"),
+    }
+    renewals(layout, ("covered", NOW + timedelta(days=10)))
+    write(
+        layout.state / "verify" / "last-day.json",
+        {"at": isoformat_site(NOW, "seconds"), "deep": False, "checks": []},
+    )
+    crl_lists(sealed, 1)
+    assert set(check()) & set(KEYS) == set()
+    reasons = {key: resolved(db_session, key).details["auto_resolved"]["reason"] for key in KEYS}
+    assert reasons == {
+        RENEWAL_KEY: "renewal_ok",
+        CERT_KEY: "certificate_ok",
+        CRL_KEY: "crl_fresh",
+    }

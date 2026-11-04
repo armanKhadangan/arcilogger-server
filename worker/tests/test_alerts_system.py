@@ -21,7 +21,7 @@ from arcilogger_db.models import Alert, JobRun, Message, SealVerification
 from arcilogger_db.settings import set_setting
 from arcilogger_worker.alerts import system
 from arcilogger_worker.alerts.importer import import_alerts
-from arcilogger_worker.alerts.system import CheckError, drives, run_system_checks
+from arcilogger_worker.alerts.system import CRL_KEY, CheckError, drives, run_system_checks
 from arcilogger_worker.service import Worker, default_jobs
 from arcilogger_worker.vaulttesting import SealedVault, at_site, make_vault
 
@@ -205,7 +205,10 @@ def test_no_seal_alert_when_every_closed_day_is_sealed(
     vault.seal_days(DAYS)
     report = run(sessions, layout, vault.config, at_site(DAYS[2] + timedelta(days=1), 10))
     assert report.checks["seal"]["found"] == []
-    assert active(db_session) == {}
+    # The only alert: the sealed days' stamps chain to the mock root, which has no stored
+    # revocation list (no state/crl), so R20-crl (Wave 5 contract 2.3.1) is raised; the legal
+    # checks are tested in test_alerts_legal.py.
+    assert set(active(db_session)) == {CRL_KEY}
 
 
 def test_seal_overdue_hour_is_a_setting(
