@@ -94,6 +94,7 @@ from arcilogger_core.tsa.base import (
     TsaConfigurationError,
     TsaError,
     TsaResponseError,
+    VerifyResult,
 )
 from arcilogger_core.tsa.client import token_path_for
 from arcilogger_core.tsa.verify import (
@@ -1211,17 +1212,44 @@ def _lock_unlocked(paths: Iterable[Path]) -> None:
             log.warning("renewal: locked %s, left unlocked by an interrupted run", path.name)
 
 
+def _stored_lists(layout: Layout) -> Sequence[Crl] | None:
+    """The stored revocation lists, or None (logged) when they cannot be read: the token is
+    then verified without them (contract question Q12)."""
+    try:
+        return load_stored(layout)
+    except CrlError as exc:
+        log.warning("renewal: revocation lists not checked: %s", exc)
+        return None
+
+
+def _refusal(check: VerifyResult) -> tuple[str, ...]:
+    """Why a new renewal token is not kept: its errors, or its certificate revoked at or before
+    the stamp in the stored lists (such a renewal would never count, C15); empty when kept."""
+    if not check.ok:
+        return tuple(check.errors)
+    if check.details.get("crl") == "crl-revoked":
+        return (
+            "the TSA certificate was revoked at or before the stamp "
+            f"({check.details.get('crl_subject', '')}, {check.details.get('crl_at', '')})",
+        )
+    return ()
+
+
 def recover(
     layout: Layout,
     roots: Sequence[x509.Certificate],
     *,
     require_critical_eku: bool = True,
+    crls: Sequence[Crl] | None = None,
     now: datetime | None = None,
 ) -> list[str]:
     """Tidy up what an interrupted run left in ``vault/renewals``; returns the removed names.
 
     * ``X.json.part`` with a token (``X.json.part.zd``, or ``X.json.zd`` when the run stopped
-      between the two renames) that verifies against it: promoted (W5-A-3);
+      between the two renames) that verifies against it and whose certificate ``crls`` (the
+      stored lists, read from ``state/crl`` when None) do not show revoked at or before the
+      stamp: promoted (W5-A-3). A revoked one is removed, as the run would have removed it (C15:
+      a revoked new stamp leaves no record);
     * any other ``….part`` and ``….part.zd``, a final token without its record and a temporary
       file of an interrupted write (``.….tmp``): removed. None of them is evidence: a record
       without a verified token protects nothing. A locked file is never removed: a locked token
@@ -1235,23 +1263,31 @@ def recover(
     if not folder.is_dir():
         return removed
     moment = max(now or utc_now(), utc_now())
+    lists_read = crls is not None
     for part in sorted(folder.glob(f"*.json{PART_SUFFIX}")):
         final = part.with_name(part.name.removesuffix(PART_SUFFIX))
         tokens = [
             token for token in (token_path_for(part), token_path_for(final)) if token.is_file()
         ]
         if not final.exists() and len(tokens) == 1:
+            if not lists_read:  # read only when a part is to be checked
+                lists_read, crls = True, _stored_lists(layout)
             check = verify_token(
                 tokens[0].read_bytes(),
                 roots=roots,
                 file_path=part,
                 now=moment,
                 require_critical_eku=require_critical_eku,
+                crls=crls,
             )
-            if check.ok:
+            refusal = _refusal(check)
+            if not refusal:
                 _promote(part, tokens[0], final)
                 log.warning("renewal: completed %s of an interrupted run", final.name)
                 continue
+            log.warning(
+                "renewal: %s of an interrupted run is not kept: %s", final.name, "; ".join(refusal)
+            )
             _remove(tokens[0], removed)
         _remove(part, removed)
     for token in sorted(folder.glob(f"*.json{PART_SUFFIX}.zd")):
@@ -1309,15 +1345,9 @@ def _write(
             require_critical_eku=require_critical_eku,
             crls=crls,
         )
-        if not check.ok:
-            raise RenewalStampInvalidError(check.errors)
-        if check.details.get("crl") == "crl-revoked":  # C15: it would never count
-            raise RenewalStampInvalidError(
-                (
-                    "the TSA certificate was revoked at or before the stamp "
-                    f"({check.details.get('crl_subject', '')}, {check.details.get('crl_at', '')})",
-                )
-            )
+        refusal = _refusal(check)
+        if refusal:
+            raise RenewalStampInvalidError(refusal)
     except BaseException:  # a provider's own error or an interrupt too: never a part left
         _remove(token_path_for(part), removed)
         _remove(part, removed)

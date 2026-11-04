@@ -1498,3 +1498,14 @@ All Wave 5 questions are answered (2026-11-02).
   run is unchanged. `last_run.error` takes the cause from the error in `cli.py`'s
   `_renew_cause` (a hunk outside #137's files, asked for on the issue); until it lands the
   command still exits 2 as `refused` with these texts, under the cause `provider`.
+- **W5-A-14: `recover` checks revocation as the run does (#137 item 2).** W5-A-3's `recover`
+  promoted an interrupted part whose token verified, without the stored revocation lists, so a
+  run stopped between the stamp and its C15 check left a record that never counts. It now
+  verifies that token with the stored lists (`crls=`, read from `state/crl` when the caller
+  passes none, and only when a part is to be checked; unreadable lists are logged and the token
+  is verified without them, Q12) and refuses it as `_write` does (one helper, `_refusal`): a
+  token whose certificate was revoked at or before its genTime is removed with its part, with a
+  warning in the log, instead of being promoted (C15: a revoked new stamp leaves no record). A
+  locked file is still never removed. `test_a_revoked_stamp_of_an_interrupted_run_is_removed`
+  covers both places the token can be (`.part.zd`, and the final `.zd` after the first rename),
+  through `recover` and through the next run.

@@ -56,7 +56,7 @@ from arcilogger_core.tsa.base import (
 )
 from arcilogger_core.tsa.client import token_path_for
 from arcilogger_core.tsa.mock import MockFailure, MockTsaProvider
-from arcilogger_core.tsa.verify import inspect_token
+from arcilogger_core.tsa.verify import inspect_token, verify_token
 
 from .renewal_world import (
     CNA,
@@ -799,6 +799,63 @@ def test_a_crash_between_stamp_and_rename_is_recovered(rw: RenewalWorld) -> None
     with pytest.raises(RenewalNotNeeded):  # the promoted records cover the day
         _renew(rw, provider)
     assert rw.of(rw.status(), DAY_TOKEN).covered_by == "renewals/2031-06-20-1.json"
+
+
+def _stop_after_stamp(
+    rw: RenewalWorld, provider: TimestampProvider, monkeypatch: pytest.MonkeyPatch, stopped: str
+) -> Path:
+    """A run whose process stops right after ``provider``'s stamp, before the token is checked
+    (and so before any clean-up), or after the first rename too; the token it leaves."""
+    names: list[str] = []
+
+    def stop(data: bytes, *, file_path: Path, **kwargs: Any) -> Any:
+        names.append(file_path.name)
+        raise SystemExit("the process stopped before the check")
+
+    with monkeypatch.context() as patched:
+        patched.setattr(renewal_module, "verify_token", stop)
+        patched.setattr(renewal_module, "_remove", lambda path, removed: None)  # no clean-up
+        with pytest.raises(SystemExit):
+            _renew(rw, provider)
+    part = rw.layout.renewals_dir / names[0]
+    token = token_path_for(part)
+    if stopped == "between the renames":
+        token = token.rename(token_path_for(part.with_name(part.name.removesuffix(".part"))))
+    return token
+
+
+@pytest.mark.parametrize("stopped", ["after the stamp", "between the renames"])
+def test_a_revoked_stamp_of_an_interrupted_run_is_removed(
+    rw: RenewalWorld,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    stopped: str,
+) -> None:
+    """C15: a run stopped between the stamp and its revocation check leaves a part whose token
+    verifies, while the stored lists show its certificate revoked at or before the stamp. The
+    next run checks it with those lists, as the stamping run would have, and removes it instead
+    of promoting it: a revoked new stamp leaves no record."""
+    rw.set_now(CNA - timedelta(days=100))
+    provider = _unverifiable(rw, "revoked")
+    before = rw.status()
+    token = _stop_after_stamp(rw, provider, monkeypatch, stopped)
+    part = rw.layout.renewals_dir / "2031-06-23-1.json.part"
+    assert _renewal_files(rw) == sorted([part.name, token.name])
+    unchecked = verify_token(token.read_bytes(), roots=rw.roots, file_path=part, now=rw.clock.now)
+    assert unchecked.ok  # only the revocation lists refuse it
+
+    assert recover(rw.layout, rw.roots, now=rw.clock.now) == [token.name, part.name]
+    assert _renewal_files(rw) == []
+    assert rw.status() == before
+    assert "revoked at or before the stamp" in caplog.text
+
+    # the next run tidies the same leftover first, then stamps with a certificate not revoked
+    token = _stop_after_stamp(rw, provider, monkeypatch, stopped)
+    run = _renew(rw, rw.legal_provider(FAR))
+    assert run.discarded == (token.name, part.name)
+    assert run.record_path == "renewals/2031-06-23-1.json"
+    assert _renewal_files(rw) == ["2031-06-23-1.json", "2031-06-23-1.json.zd"]
+    assert rw.of(rw.status(), DAY_TOKEN).covered_by == run.record_path
 
 
 def test_recover_never_removes_a_locked_file(rw: RenewalWorld) -> None:
