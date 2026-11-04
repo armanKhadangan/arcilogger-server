@@ -2004,6 +2004,19 @@ All Wave 5 questions are answered (2026-11-02).
   browse budget (500 ms) and the slowest request below 10 × that. In the same review A2 (an
   asynchronous spool watermark) was deferred, to be revisited with field figures from a Windows
   site (sahada doğrula), and A3 was declined (2026-11-04).
+- **#119-2: the browse guard bounds what ingest adds, not the 95th percentile itself**
+  (decided on #119, 2026-11-04; amends the budget of #119-1). `test_browse_under_concurrent_ingest`
+  times a settled series before and after the series under ingest and asserts that the 95th
+  percentile under ingest less the larger settled one stays below the browse budget (500 ms);
+  `CEILING` (5 s) bounds the slowest request of each of the three series. Reason: on a Windows
+  runner the audit spool's `os.fsync` waits for the disk's write-back (#90's case; out of scope
+  by #119 item 3) in whichever series meets it, settled ones too. Run 41875393810 (#166 at
+  `32d4d2a`, job 126733285902) failed the absolute bound: under ingest p50 124 / p95 590 / max
+  757 ms (p95: sql 23, commit 7, fsync 511 ms), settled p95 331 ms (fsync 277 ms). Its re-run
+  (job 126780370555) passed: under ingest p95 134 ms, settled p95 332 ms with one 507 ms fsync.
+  Ingest held the stated rate in both (1,984 and 2,155 lines/s loaded). The absolute browse
+  budget of a settled server stays with `test_search_perf`'s Q1 (best of rounds, 500 ms), so a
+  regression that slows browse in every series is still caught there.
 
 ## Deviations — #122 (2026-11-04)
 
