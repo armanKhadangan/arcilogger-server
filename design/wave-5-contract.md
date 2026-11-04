@@ -1244,7 +1244,7 @@ All Wave 5 questions are answered (2026-11-02).
   aborted transaction, a lost connection) the connection is invalidated, never returned to the
   pool holding the lock. The wait is part of `search.request_budget_ms`: the scan gets what is
   left, and a wait that uses the budget up answers 504 `search_timeout` (audited `outcome:
-  timeout`). The lookup (READ COMMITTED) keeps the lock in its transaction as before. On any
+  timeout`; since W5-G-24 with the text of a lock wait). The lookup (READ COMMITTED) keeps the lock in its transaction as before. On any
   failure of the statement that takes the lock other than its timeout (`lock_not_available`) —
   a failure after the lock was granted, a cancelled statement, an interrupt or a cancelled task
   (`BaseException`), a lost connection — `hold_window` invalidates the connection too (#126 item
@@ -1341,7 +1341,8 @@ All Wave 5 questions are answered (2026-11-02).
   byte is sent; the failure handling of W5-G-18 is the same (the connection invalidated on any
   failure but the lock's timeout). The lock is waited for at most `search.request_budget_ms`, as
   by a search; the wait is taken from `search.export_budget_seconds`, and a wait that uses either
-  up answers 504 `search_timeout` (no new code; its `{seconds}` is the budget used up). That
+  up answers 504 `search_timeout` (no new code; its `{seconds}` is the budget used up; the
+  export's text of a lock wait since W5-G-24). That
   answer writes no `search.export` entry: no file and no row left the API (the search itself is
   audited by `search.run`), and the hourly limit counts only files. Whatever takes `ARCIPART`
   exclusively (a step of the window job, the daily `partitions.ensure`, ingest's reload claim)
@@ -1351,10 +1352,8 @@ All Wave 5 questions are answered (2026-11-02).
   deadline. Searches that come while such a step waits queue behind its exclusive request and
   may answer 504 `search_timeout`; on TimescaleDB an export did not delay searches before (open
   question on #148: a `lock_timeout` for the worker's step, or a cap on how long an export holds
-  the lock). On plain PostgreSQL ingest no longer stalls behind a step that waits for an export.
-  The export still does not check the
-  database window (`archived`, G8): a drop that finished before the export began gives the rows
-  the database holds, without saying which days are gone (open question on #148). Tests
+  the lock — answered by W5-G-24). On plain PostgreSQL ingest no longer stalls behind a step
+  that waits for an export. Since #165 the export checks the window (W5-G-24). Tests
   (`api/tests/test_search_window_lock.py`, two connections ordered by polling `pg_locks`):
   `test_an_export_in_progress_is_not_changed_by_a_drop` (fails without the lock on TimescaleDB),
   `test_an_export_that_cannot_get_the_lock_in_time_times_out`,
@@ -1362,6 +1361,106 @@ All Wave 5 questions are answered (2026-11-02).
   `test_the_export_releases_the_lock_before_its_audit_entry`,
   `test_a_failed_export_does_not_keep_the_lock`; `api/tests/test_search_export.py`:
   `test_the_audit_entry_is_committed_before_the_first_byte_is_sent`.
+
+- **W5-G-24: the export checks the database window; the worker's steps back off from a long
+  export; a lock-wait text of `search_timeout` (#165, the open questions of W5-G-23 on #148).**
+  - **(a) The export checks the window (G8).** A step of `db.window` that finished between
+    `POST /search` and `POST /search/export` left the export the rows the database still held,
+    in a file that did not say days were missing (no `-kismi`, no `X-Arci-Export-Truncated`,
+    `truncated: null`). Now, under the shared `ARCIPART` the export holds from before its
+    snapshot (W5-G-23), in that snapshot and before its first window, the export checks its
+    search's range with the search's own G8 function (`routers.search._archived(…,
+    refuse=True)`, `check_window(held=True)`) and answers as a search of that range would now.
+    **Every day gone** (and in the vault or being loaded): the search's 409
+    `archive_reload_required`, with the same `details` and texts; no file is built and no
+    `search.export` entry is written, as for the lock's 504 (the hourly limit counts files).
+    **Some days gone:** the rows the database holds, in a file marked partial with the new
+    reason `archived` (`Truncated` = `rows` | `time` | `archived`): the name `-kismi`,
+    `X-Arci-Export-Truncated: archived`, the "Bilgi" status "Bazı günler veritabanında yok
+    (mühürlü arşivde ya da yeniden yükleniyor) / Some days are not in the database (in the sealed
+    vault or being loaded again)" and a line "Veritabanında olmayan günler / Days not in the
+    database" (`YYYY-MM-DD`, or `YYYY-MM-DD - YYYY-MM-DD` for more than one day), and the entry's
+    `truncated: "archived"`. The `search.export` entry gets a new key `archived`: the search's
+    `ArchivedRange` (`{first_day, last_day, keep_days}`), or `null`. When the reading also
+    stopped at a limit, `X-Arci-Export-Truncated` and `truncated` keep where it stopped (`rows`,
+    `time`: one value, as before, so a client that reads them is unchanged), and the new header
+    `X-Arci-Export-Archived` (`YYYY-MM-DD`, or `YYYY-MM-DD/YYYY-MM-DD`), sent whenever days are
+    gone, names them: a CSV has no "Bilgi" sheet. Days gone with nothing in the vault to reload
+    give an unmarked file, as the search answers 200 with `archived: null` there (G8 unchanged).
+    Tests (`api/tests/test_search_window_lock.py`, the drop being the real `drop_before`,
+    committed after `POST /search` and before `POST /search/export`, no concurrency):
+    `test_an_export_after_a_drop_of_its_whole_range_answers_as_the_search` (the error equals a
+    fresh search's 409; no entry; the lock free),
+    `test_an_export_after_a_drop_of_part_of_its_range_is_marked_partial` (CSV and xlsx, the
+    rows a fresh search returns, the entry's `truncated` and `archived`, and with
+    `search.export_max_rows` 1 `rows` beside `X-Arci-Export-Archived`),
+    `test_the_days_gone_are_named_once_for_one_day_and_as_a_span_for_more`;
+    `api/tests/test_search_export.py` `test_csv`, `test_xlsx` (`archived: null`, no header, no
+    line).
+  - **(b) The worker's steps wait for the lock at most half the search budget.** Since W5-G-23
+    an export holds `ARCIPART` shared for up to `search.export_budget_seconds` (at most 900 s). A
+    `db.window` step or the daily `partitions.ensure` that asked for it exclusively meanwhile
+    kept that request queued, and every search that came behind it waited for the lock and
+    answered 504 `search_timeout`. Both now wait for it at most half of
+    `search.request_budget_ms` (`partitions.step_lock_timeout_ms`: 2000 ms at the default 4000,
+    250 ms at 500, 15 s at 30000; read at every step; a value unset or outside its range reads
+    as the default), by `partitions.lock_partitions(timeout_ms=…)`, which applies `lock_timeout`
+    to the lock's statement only and restores the transaction's previous value for its other
+    lock waits. Half, because a search waits for the lock shared at most its own budget
+    (W5-G-18) and PostgreSQL queues a new shared request behind a waiting exclusive one: a search
+    queued behind a step that does not get the lock keeps at least half its budget for its
+    scan, and a step still outwaits a running search that has less than half its budget left.
+    This bounds only the step's wait for the export: when the lock comes free during the wait
+    (the export ends), the step takes it, and a search queued behind it waits for the step as
+    before W5-G-23 (its table locks after `ARCIPART`, W5-G-21's wait behind a compression). A
+    step that does not get the lock in time (`lock_not_available`, `PartitionLockTimeoutError`)
+    changes nothing (the lock comes first in the step: no reload expired, nothing dropped, its
+    transaction rolled back; earlier steps of the run stay), writes a warning line, and fails
+    the run, which the worker retries (15 min,
+    30 min, … at most 4 h). It is not recorded `skipped`: a skipped run counts as the day's and
+    would not be retried until the next day. `db.window` opens `R20-db-window` (G3's key
+    `R20-db-window:none`, medium, `details.error` `PartitionLockTimeoutError`) for such a run
+    only when it is the `alerts.job_failures`-th (default 3) failed run in a row, counted as
+    `R20-job` counts them (`db_window.failed_in_a_row`: finished runs of the last 7 days,
+    `JOB_WINDOW`; a run a person started ends the count). Three failed runs in a row (about 0,
+    15 and 45 minutes) mean the lock was held longer than one export holds it. Every other
+    failure still opens it at once (G3), and the next successful run resolves it as before;
+    `R20-job:db.window` (high) is unchanged. `partitions.ensure` has no alert of its own
+    (`R20-job` after `alerts.job_failures` failed runs, unchanged); on TimescaleDB it has no
+    partitioned table and takes no lock. Ingest's exclusive takers (the reload claim and
+    `ensure_days`, `ingest/src/arcilogger_ingest/service.py`, `PARTITION_LOCK_TIMEOUT` 5 s) are
+    not changed: their 5 s exceed the default search budget of 4 s, so a search behind them may
+    still answer 504 (open question on #165). Tests: `worker/tests/test_db_window.py`
+    `test_the_steps_wait_for_the_lock_half_the_search_budget`,
+    `test_a_step_backs_off_from_an_export_and_a_search_meanwhile_is_not_held_up` (an export's
+    shared lock, the step's exclusive request and a search queued behind it, ordered by polling
+    `pg_locks`; the search is granted when the step gives up; nothing changed; the retry 15 min
+    later does the work), `test_only_the_third_backoff_in_a_row_raises_r20_db_window`,
+    `test_the_failed_runs_in_a_row_are_counted_as_r20_job_counts_them`,
+    `test_the_partitions_job_backs_off_from_an_export`; `db/tests/test_partitions.py`
+    `test_the_lock_of_a_step_is_waited_for_its_timeout_only`.
+  - **(c) A lock-wait text of `search_timeout`** (504, the same code; approved on #165). The
+    contract's text of `search_timeout` ("Arama {seconds} saniyede en kısa zaman dilimini (5
+    dakika) bile tarayamadı. …" / "The search could not scan even the shortest time slice (5
+    minutes) within {seconds} s. …") stays for a scan that ran out. When the partition lock was
+    not granted within `search.request_budget_ms`, or its wait used the request's budget up
+    (`routers.search.LockWaitError`), nothing was scanned, and a search and its next pages answer
+    with the variant `lock` (`search.messages.VARIANTS`): "Arama {seconds} saniyede başlayamadı:
+    veritabanı bakımının (eski günlerin kaldırılması, yeni bölümlerin açılması ya da arşivden
+    yeniden yükleme) bitmesi beklendi. Biraz sonra yeniden deneyin." / "The search could not
+    start within {seconds} s: it waited for database maintenance (old days being dropped, new
+    partitions being created or archived days being loaded again) to finish. Try again a little
+    later." The export's 504 is always the variant `export_lock` (its read stops at its deadline
+    with a `time` file, so its 504 is a lock wait): "Dışa aktarma {seconds} saniyede
+    başlayamadı: veritabanı bakımının (eski günlerin kaldırılması, yeni bölümlerin açılması ya
+    da arşivden yeniden yükleme) bitmesi beklendi. Biraz sonra yeniden deneyin." / "The export
+    could not start within {seconds} s: it waited for database maintenance (old days being
+    dropped, new partitions being created or archived days being loaded again) to finish. Try
+    again a little later." `{seconds}` is the budget used up, as before; the audit of a search's
+    timeout (`outcome: timeout`) is unchanged. Tests (`api/tests/test_search_window_lock.py`):
+    `test_the_lock_wait_texts_are_turkish_and_english_with_the_same_placeholders`,
+    `test_a_scan_that_runs_out_keeps_the_text_of_the_time_slice`, and the exact texts in the
+    lock-timeout and wait-from-budget tests of the search and the export.
 
 ## Deviations — W5-H (2026-11-03)
 
