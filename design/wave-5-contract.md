@@ -1652,7 +1652,9 @@ All Wave 5 questions are answered (2026-11-02).
   task ran: a refused or failed Renew run, or a fetch with failures only, is `ok` there, and
   whether it succeeded is `R20-renewal`'s and `R20-crl`'s question (the Backup row's precedent;
   the API has no failing task state). A run that finds its lock held writes nothing (W5-A-2,
-  W5-B-2), so it leaves no evidence. Tests:
+  W5-B-2), so it leaves no evidence; the run that holds the lock writes its file. A run that
+  exits 1 without writing (W5-E-6) cannot be shown as failed either (answer to Q9 on #158, an
+  open question there). Tests:
   `test_renew_and_crlfetch_are_judged_by_their_state_files` (`api/tests/test_system_health.py`;
   the files are written by W5-A's `write_state` and the real `crl.fetch`), and
   `test_read_renew_runs_from_the_writers_file`.
@@ -1775,9 +1777,15 @@ All Wave 5 questions are answered (2026-11-02).
   time). A site that knew list addresses earlier and knows none now keeps its old lists, with
   their old `fetched_at`, in the index; its row shows each run and is not `late` while the task
   runs. The row says whether the task runs; how fresh the lists are is `R20-crl`'s question,
-  raised when an issuer in use has no fresh list. A run that exits 1 (Q9) writes nothing, so
-  the row shows no run for it: it keeps the run before and turns `late` after 26 h, or shows
-  `missing` while the index cannot be read. W5-C's readers need no change: an empty index is
+  raised when an issuer in use has no fresh list. A run that finds the lock held exits 1 and
+  writes nothing, but the run that holds the lock writes the index, so the row stays fresh. A
+  run that exits 1 because it cannot read the index or a stored list writes nothing, so the row
+  shows no run for it: it keeps the run before and turns `late` 26 h after that run, or shows
+  `missing` while the index cannot be read. The answer to Q9 asks the row to show such a run as
+  failed; it cannot. `TaskHealthState` has no failed value (W5-E-2: the API has no failing task
+  state; adding one changes the API contract and the web types, which this package does not
+  own), and no file records the exit code, which C12 and A4 forbid judging by alone. That is an
+  open question to the manager on #158. W5-C's readers need no change: an empty index is
   read as no list, so it raises no `R20-crl` and no `crl_stale` while no issuer is in use (an
   open `R20-crl` is resolved, `crl_fresh`), and an issuer in use without a list is stale as
   before. Tests:

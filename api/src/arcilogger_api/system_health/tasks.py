@@ -46,9 +46,11 @@ contract W5-E-4). Every ``crl fetch`` that gets past its lock and its reads rewr
 with the failures of that run only, so an index that records no failure was written by a run
 without one, and its modification time is that run: also on a site that knows no list address
 any more, whose stored lists keep their old ``fetched_at`` (W5-E-2, answer to Q8 on #158). A run
-that fails on a held lock, or on an index or a stored list it cannot read, exits 1 and writes
-nothing: the row keeps the run before and turns late, or shows ``missing`` while the index
-cannot be read (answer to Q9).
+that finds the lock held writes nothing, but the run holding it writes the index, so the row
+stays fresh. A run that fails on an index or a stored list it cannot read exits 1 (answer to Q9)
+and writes nothing: the row keeps the run before and turns late 26 h after it, or shows
+``missing`` while the index cannot be read. It cannot show that run as failed: the states have
+no such value, and the exit code is no evidence here (C12, A4; a question on #158).
 A time later than now is no evidence of these two: a clock set back never keeps them fresh.
 A file that cannot be read is no evidence; it never fails the request.
 """
