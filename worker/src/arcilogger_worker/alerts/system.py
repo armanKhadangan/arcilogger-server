@@ -93,8 +93,8 @@ Key                              Problem (setting)
 ``R20-crl:none``                 no stored revocation list fetched in the last
                                  ``tsa.crl_max_age_days`` (7) days and not past its own
                                  ``nextUpdate`` (C22) for an issuer of the newest sealed day's
-                                 chain, judged from ``state/crl`` only — medium
-                                 (:data:`LEGAL_CHECKS`)
+                                 chain (none for ARCILOGGER's test root), judged from
+                                 ``state/crl`` only — medium (:data:`LEGAL_CHECKS`)
 ===============================  ==============================================================
 
 A check that fails (an unreadable folder, a database error) is reported in the job's details and
@@ -157,6 +157,7 @@ from arcilogger_core.tsa.verify import (
     check_revocation,
     fingerprint,
     inspect_token,
+    is_test_stamp,
     load_certificates,
     load_roots_dir,
     token_chain,
@@ -2547,9 +2548,13 @@ def check_stamp_crl(ctx: CheckContext) -> Outcome:
     revocation list (C22: fetched in the last ``tsa.crl_max_age_days`` days, not past its
     ``nextUpdate``, still matching its index entry), or ``state/crl`` cannot be read while one
     is in use. Judged from the stored lists and ``state/crl/index.json``, never from the
-    CrlFetch task's exit code (C12); lists that cannot be read resolve nothing."""
+    CrlFetch task's exit code (C12); lists that cannot be read resolve nothing. A chain to
+    ARCILOGGER's test root has no issuer in use: the mock TSA publishes no list, and a test stamp
+    never counts (W5-A D5; deviation W5-E-5)."""
     max_age = crl_max_age_days(ctx.config)
     stamp = stamp_in_use(ctx.layout, pinned_roots(ctx.config, ctx.layout))
+    if stamp is not None and is_test_stamp("", stamp.chain[-1].subject.rfc4514_string()):
+        stamp = None
     index = read_crl_index(ctx.layout)
     status = crl_status(stored_lists(ctx.layout), index, stamp, ctx.now, max_age)
     findings = []
