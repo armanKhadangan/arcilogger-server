@@ -23,8 +23,8 @@ Backup         ``finished`` of ``state/backup/last.json``                26 h   
 Requests       ``state/requests`` (not readable): ``not_observable``     —           —
 ApplySystem    ``at`` of ``admin/system/status.json``                    15 min      browser
                                                                                      admin off
-Renew          ``last_run.at`` of ``state/renewal.json`` (not ``at``,    26 h        —
-               which a run without pinned roots keeps)
+Renew          ``last_run.at`` of ``state/renewal/renewal.json``         26 h        —
+               (not ``at``, which a run without pinned roots keeps)
 CrlFetch       newest ``fetched_at`` of the ``lists`` or ``at`` of the   26 h        —
                ``failures`` of ``state/crl/index.json``
 =============  ========================================================  ==========  ==========
@@ -343,7 +343,7 @@ TASKS: Final[tuple[TaskRow, ...]] = (
         "Renew",
         "Her gün 02:30",
         "Daily at 02:30",
-        "state\\renewal.json",
+        "state\\renewal\\renewal.json",
         _renew,
         timedelta(hours=26),
     ),

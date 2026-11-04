@@ -10,9 +10,10 @@ The facts about sealed days come from the vault and the job state that the sched
 * ``vault/deletions/*-imha.json`` + ``.zd`` — days deleted by retention (a record without its
   time stamp is the leftover of a retention run that failed and deleted nothing);
 * ``state/credit.jsonl`` — Kamu SM credit checks;
-* ``state/renewal.json`` — the re-stamping report of the Renew task (a day's ``renewal``, Wave 5
-  contract 2.3.1), read through :func:`arcilogger_worker.alerts.system.read_stamp_renewals`, the
-  reader the legal-validity status uses.
+* ``state/renewal/renewal.json`` — the re-stamping report of the Renew task (a day's
+  ``renewal``, Wave 5 contract 2.3.1), read through
+  :func:`arcilogger_worker.alerts.system.read_stamp_renewals`, the reader the legal-validity
+  status uses.
 
 The one database fact is the result of "Doğrula" (``seal_verifications``): the API may not
 write ``state/verify`` (ADR-0007). The page shows the newer of the two verifications.

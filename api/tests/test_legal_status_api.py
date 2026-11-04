@@ -101,7 +101,10 @@ class Site:
         totals = dict.fromkeys(("not_due", "due", "covered", "late", "uncovered"), 0)
         for entry in tokens:
             totals[entry["status"]] += 1
-        write(self.layout.state / "renewal.json", {"tokens": list(tokens), "totals": totals})
+        write(
+            self.layout.state / "renewal" / "renewal.json",
+            {"tokens": list(tokens), "totals": totals},
+        )
 
     def revoked(self, subject: str = TSA_SUBJECT) -> None:
         error = (
@@ -724,12 +727,12 @@ NESTED = "[" * 100_000 + "]" * 100_000
             json.dumps({"at": NOW.isoformat(), "checks": [{"day": "2026-10-29", "errors": 3}]}),
         ),
         ("verify/last-1.json", NESTED),
-        ("renewal.json", NESTED),
+        ("renewal/renewal.json", NESTED),
         ("crl/index.json", NESTED),
         ("seal/2026-10-31.json", NESTED),
         *(
             (
-                "renewal.json",
+                "renewal/renewal.json",
                 json.dumps(
                     {
                         "tokens": [
@@ -755,7 +758,7 @@ NESTED = "[" * 100_000 + "]" * 100_000
         ),
         *(
             (
-                "renewal.json",
+                "renewal/renewal.json",
                 json.dumps(
                     {
                         "tokens": [
@@ -797,7 +800,8 @@ def test_legal_status_corrupt_state_files_never_fail_the_request(
     site.use(legal(site.config))
     state = site.layout.state
     (state / "crl").mkdir(parents=True)
-    (state / "renewal.json").write_text('{"tokens": [', encoding="utf-8")
+    (state / "renewal").mkdir()
+    (state / "renewal" / "renewal.json").write_text('{"tokens": [', encoding="utf-8")
     (state / "crl" / "index.json").write_text('{"schema": "x"}', encoding="utf-8")
     (state / "verify").mkdir()
     (state / "verify" / "last-1.json").write_text("[", encoding="utf-8")

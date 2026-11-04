@@ -870,8 +870,9 @@ def _crl_status(app: App) -> int:
     return 0
 
 
-#: ``last_run.error`` of ``state/renewal.json`` for a time-stamp server error without a code of
-#: its own (the renewal errors carry theirs: ``renewal_stamp_invalid``, ``renewal_lock_failed``).
+#: ``last_run.error`` of ``state/renewal/renewal.json`` for a time-stamp server error without a
+#: code of its own (the renewal errors carry theirs: ``renewal_stamp_invalid``,
+#: ``renewal_lock_failed``).
 _TSA_ERROR_CODES: tuple[tuple[type[TsaError], str], ...] = (
     (TsaUnavailableError, "tsa_unavailable"),
     (TsaNoCreditError, "tsa_no_credit"),
@@ -950,15 +951,15 @@ def cmd_renew(args: argparse.Namespace, app: App) -> int:
     task, contract 2.1.3). Exit 0: renewed, or nothing was due; 1: renewed, but some token is
     still ``uncovered``; 2: the configuration refused (no provider credentials, no usable pinned
     root, a provider that cannot run); 3: the time-stamp server failed, or the run did
-    (retryable; also when another run holds ``state/renewal.lock``). ``--dry-run`` takes no
-    stamp and writes no record: it computes the statuses and exits 0 or 1 by the same rule.
+    (retryable; also when another run holds ``state/renewal/renewal.lock``). ``--dry-run`` takes
+    no stamp and writes no record: it computes the statuses and exits 0 or 1 by the same rule.
 
-    Every run but a busy one writes ``state/renewal.json`` (W5-A-2), also after a failure:
-    ``last_run`` and ``failures_in_a_row`` are what W5-E's "Renew failed twice in a row" reads.
-    A dry run writes the statuses and keeps ``last_run``. The whole run, the state write
-    included, holds ``state/renewal.lock``, so two runs never write the file over each other; a
-    run that finds the lock held writes nothing. The errors are caught here: ``main`` would
-    turn every :class:`TsaError` into exit 1.
+    Every run but a busy one writes ``state/renewal/renewal.json`` (W5-A-2), also after a
+    failure: ``last_run`` and ``failures_in_a_row`` are what W5-E's "Renew failed twice in a row"
+    reads. A dry run writes the statuses and keeps ``last_run``. The whole run, the state write
+    included, holds ``state/renewal/renewal.lock``, so two runs never write the file over each
+    other; a run that finds the lock held writes nothing. The errors are caught here: ``main``
+    would turn every :class:`TsaError` into exit 1.
     """
     now = utc_now()
     try:
@@ -972,7 +973,7 @@ def cmd_renew(args: argparse.Namespace, app: App) -> int:
 
 
 def _renew_held(args: argparse.Namespace, app: App, now: datetime) -> int:
-    """:func:`cmd_renew` while it holds ``state/renewal.lock``."""
+    """:func:`cmd_renew` while it holds ``state/renewal/renewal.lock``."""
     try:
         roots = app.roots()
     except (TsaConfigurationError, ValueError, OSError) as exc:  # none pinned, or unreadable
@@ -1053,12 +1054,12 @@ def _renew_done(
     run: RenewalRun | None = None,
     error: _RenewError | None = None,
 ) -> int:
-    """Write ``state/renewal.json``, print the outcome and return the exit code.
+    """Write ``state/renewal/renewal.json``, print the outcome and return the exit code.
 
     A busy run writes nothing (the run holding the lock writes the file), nor does a dry run
-    without statuses; every other call holds ``state/renewal.lock`` (or found it unusable). A
-    state file that cannot be written fails the run (exit 3): the alerts and the Sistem page
-    judge from it."""
+    without statuses; every other call holds ``state/renewal/renewal.lock`` (or found it
+    unusable). A state file that cannot be written fails the run (exit 3): the alerts and the
+    Sistem page judge from it."""
     written = False
     dry_run = bool(args.dry_run)
     if outcome != "busy" and (report is not None or not dry_run):
@@ -1081,9 +1082,9 @@ def _renew_done(
             )
             written = True
         except OSError as exc:
-            log.error("renew: state/renewal.json not written: %s", exc)
+            log.error("renew: state/renewal/renewal.json not written: %s", exc)
             print(
-                f"Hata [error]: state/renewal.json yazılamadı [cannot be written]: {exc}",
+                f"Hata [error]: state/renewal/renewal.json yazılamadı [cannot be written]: {exc}",
                 file=sys.stderr,
             )
             code = 3

@@ -420,18 +420,41 @@ def task_rows(found: Evidence) -> dict[str, dict[str, Any]]:
 
 
 def renew_run(layout: Layout, at: datetime | None, outcome: Outcome = "not_needed") -> None:
-    """A run of ``arcilogger-core renew`` as it writes ``state/renewal.json`` (W5-A's writer):
-    ``at`` None is a dry run. Without a report, as a run without pinned roots writes it."""
+    """A run of ``arcilogger-core renew`` as it writes ``state/renewal/renewal.json`` (W5-A's
+    writer): ``at`` None is a dry run. Without a report, as a run without pinned roots writes
+    it."""
     exit_code = {"renewed": 0, "not_needed": 0, "refused": 2, "failed": 3}[outcome]
     last_run = None if at is None else LastRun(at=at, outcome=outcome, exit_code=exit_code)
     write_renewal_state(layout, None, at=at or utc_now(), renew_before=180, last_run=last_run)
 
 
+def test_renew_row_reads_an_earlier_report_until_the_first_run(api_config: Config) -> None:
+    """After an upgrade the Renew row shows the last run of the earlier release's
+    ``state/renewal.json`` until the task writes ``state/renewal/renewal.json`` (W5-E-4); from
+    then on only the new file counts, whatever a service writes into the earlier one."""
+    now = utc_now().replace(microsecond=0)
+    layout = Layout(api_config.data_dir)
+    earlier = layout.state / "renewal.json"
+
+    def earlier_run(at: datetime) -> None:
+        last_run = {"at": isoformat_site(at), "outcome": "not_needed", "exit_code": 0}
+        write_json(earlier, {"schema": RENEWAL_SCHEMA, "last_run": last_run})
+
+    earlier_run(now - timedelta(hours=2))
+    row = task_rows(evidence(api_config, now))["Renew"]
+    assert (row["state"], moment(row["last_evidence_at"])) == ("ok", now - timedelta(hours=2))
+    renew_run(layout, now - timedelta(hours=1))
+    assert stamp_renewal_path(layout) == layout.state / "renewal" / "renewal.json"
+    earlier_run(now - timedelta(minutes=10))
+    row = task_rows(evidence(api_config, now))["Renew"]
+    assert moment(row["last_evidence_at"]) == now - timedelta(hours=1)
+
+
 def test_renew_and_crlfetch_are_judged_by_their_state_files(api_config: Config) -> None:
-    """Renew by ``last_run.at`` of ``state/renewal.json``, CrlFetch by the newest ``fetched_at``
-    or failure of ``state/crl/index.json``, never by an exit code (C12, A4): the row says the
-    task ran; whether it succeeded is R20-renewal's and R20-crl's. A time later than now is no
-    evidence, and a file that cannot be read is none either."""
+    """Renew by ``last_run.at`` of ``state/renewal/renewal.json``, CrlFetch by the newest
+    ``fetched_at`` or failure of ``state/crl/index.json``, never by an exit code (C12, A4): the
+    row says the task ran; whether it succeeded is R20-renewal's and R20-crl's. A time later than
+    now is no evidence, and a file that cannot be read is none either."""
     now = utc_now().replace(microsecond=0)
     layout = Layout(api_config.data_dir)
 
@@ -442,7 +465,10 @@ def test_renew_and_crlfetch_are_judged_by_their_state_files(api_config: Config) 
         renew_run(layout, now - timedelta(hours=1), "refused")
     assert json.loads(stamp_renewal_path(layout).read_bytes())["failures_in_a_row"] == 3
     rows = task_rows(evidence(api_config, now))
-    assert (rows["Renew"]["state"], rows["Renew"]["evidence"]) == ("ok", "state\\renewal.json")
+    assert (rows["Renew"]["state"], rows["Renew"]["evidence"]) == (
+        "ok",
+        "state\\renewal\\renewal.json",
+    )
     assert moment(rows["Renew"]["last_evidence_at"]) == now - timedelta(hours=1)
     renew_run(layout, None)  # a dry run keeps the last run
     assert moment(task_rows(evidence(api_config, now))["Renew"]["last_evidence_at"]) == now - (

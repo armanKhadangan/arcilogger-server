@@ -38,15 +38,17 @@ of every deletion record under its final name, of every stored official report
 ``mismatched``, so no renewal ever lists the hash of a changed file; one that disappears
 during the scan (the retention job deleting its day) is skipped. Each renewal token is verified
 against the pinned roots and the stored revocation lists. :func:`renewal_status` only reads;
-``state/renewal.json`` is written by the ``Renew`` task's command line (``arcilogger-core renew``)
-with :func:`write_state`.
+``state/renewal/renewal.json`` is written by the ``Renew`` task's command line
+(``arcilogger-core renew``) with :func:`write_state`. ``state/renewal/`` is protected: only the
+tasks write it, so no service can silence the re-stamping alerts or hold the lock (contract
+W5-E-4).
 
 **A run** (:func:`renew`, D4) writes at most one record, covering every token that is ``due``
-or ``uncovered``, under ``state/renewal.lock`` (never inside ``vault/renewals``). As a deletion
-record is (``retention``), the record is written as ``<name>.json.part``, stamped and verified;
-only then is the token renamed to its final name, then the record, and both are locked like
-sealed files. A failed stamp removes both, so a record never exists under its final name without
-its token; leftovers of an interrupted run are tidied by the next one (contract W5-A-3).
+or ``uncovered``, under ``state/renewal/renewal.lock`` (never inside ``vault/renewals``). As a
+deletion record is (``retention``), the record is written as ``<name>.json.part``, stamped and
+verified; only then is the token renamed to its final name, then the record, and both are locked
+like sealed files. A failed stamp removes both, so a record never exists under its final name
+without its token; leftovers of an interrupted run are tidied by the next one (contract W5-A-3).
 """
 
 from __future__ import annotations
@@ -107,7 +109,7 @@ RENEWAL_SCHEMA: Final = "arcilogger.renewal/1"
 #: official report (``exports/reports/*.pdf.zd``, owner answer Q3) or of an earlier renewal.
 Kind = Literal["day", "deletion", "report", "renewal"]
 KINDS: Final[tuple[Kind, ...]] = ("day", "deletion", "report", "renewal")
-#: The long-term status of a token; W5-C's reader of ``state/renewal.json`` takes exactly these.
+#: The long-term status of a token; W5-C's reader of the state file takes exactly these.
 Status = Literal["not_due", "due", "covered", "late", "uncovered"]
 STATUSES: Final[tuple[Status, ...]] = ("not_due", "due", "covered", "late", "uncovered")
 #: ``due``: written by a legal-grade provider; ``test``: by any other, and never counts (D5).
@@ -118,7 +120,11 @@ DEFAULT_RENEW_BEFORE_DAYS: Final = 180
 #: The stored official reports and their tokens, under ``exports`` (the API's report store).
 REPORTS_FOLDER: Final = "reports"
 REPORT_TOKEN_SUFFIX: Final = ".pdf.zd"  # noqa: S105 - a file suffix
-#: ``state/renewal.lock``: one run at a time (the ``Renew`` task and a run started by hand).
+#: ``state/renewal/``: the ``Renew`` task's state file and lock, in a folder of their own that
+#: only the tasks write (protected, ``Get-ArciAclPlan``; contract W5-E-4).
+STATE_FOLDER: Final = "renewal"
+#: ``state/renewal/renewal.lock``: one run at a time (the ``Renew`` task and a run started by
+#: hand).
 LOCK_NAME: Final = "renewal.lock"
 #: Suffix of a record (and its token) that is not complete yet.
 PART_SUFFIX: Final = ".part"
@@ -347,7 +353,7 @@ class TokenStatus:
     renewed_at: datetime | None = None
 
     def as_json(self) -> dict[str, Any]:
-        """The entry of ``state/renewal.json`` (the shape W5-C's reader takes, W5-C-1)."""
+        """The entry of ``state/renewal/renewal.json`` (the shape W5-C's reader takes, W5-C-1)."""
         return {
             "path": self.path,
             "kind": self.kind,
@@ -1004,16 +1010,16 @@ class RenewalError(Exception):
 
 
 class RenewalBusyError(RenewalError):
-    """Another run holds ``state/renewal.lock``."""
+    """Another run holds ``state/renewal/renewal.lock``."""
 
     code = "renewal_busy"
 
     def __init__(self) -> None:
         super().__init__(
-            "Başka bir yeniden damgalama çalışıyor (state/renewal.lock kilitli); daha sonra "
-            "yeniden deneyin.",
-            "Another re-stamping run is in progress (state/renewal.lock is locked); try again "
-            "later.",
+            "Başka bir yeniden damgalama çalışıyor (state/renewal/renewal.lock kilitli); daha "
+            "sonra yeniden deneyin.",
+            "Another re-stamping run is in progress (state/renewal/renewal.lock is locked); try "
+            "again later.",
         )
 
 
@@ -1048,15 +1054,15 @@ class RenewalStampInvalidError(TsaResponseError):
 
 
 class RenewalLockError(RenewalError):
-    """``state/renewal.lock`` cannot be opened or locked for another reason than a run holding
-    it (no write right on ``state``, no lock support)."""
+    """``state/renewal/renewal.lock`` cannot be opened or locked for another reason than a run
+    holding it (no write right on ``state/renewal``, no lock support)."""
 
     code = "renewal_lock_failed"
 
     def __init__(self, exc: OSError) -> None:
         super().__init__(
-            f"state/renewal.lock açılamadı veya kilitlenemedi: {exc}",
-            f"state/renewal.lock cannot be opened or locked: {exc}",
+            f"state/renewal/renewal.lock açılamadı veya kilitlenemedi: {exc}",
+            f"state/renewal/renewal.lock cannot be opened or locked: {exc}",
         )
 
 
@@ -1081,11 +1087,14 @@ class RenewalRun:
 
 @contextmanager
 def one_run(layout: Layout) -> Iterator[None]:
-    """Hold ``state/renewal.lock`` (:data:`LOCK_NAME`); raise :class:`RenewalBusyError` while
-    another run holds it, :class:`RenewalLockError` when it cannot be opened or locked."""
+    """Hold ``state/renewal/renewal.lock`` (:data:`LOCK_NAME`); raise :class:`RenewalBusyError`
+    while another run holds it, :class:`RenewalLockError` when it cannot be opened or locked.
+
+    The ``state/renewal.lock`` of an earlier release is no longer used: it is left as it is (an
+    empty file that holds nothing), and a process holding it blocks no run."""
     try:
-        layout.state.mkdir(parents=True, exist_ok=True)
-        handle = os.open(layout.state / LOCK_NAME, os.O_RDWR | os.O_CREAT, 0o644)
+        state_dir(layout).mkdir(parents=True, exist_ok=True)
+        handle = os.open(state_dir(layout) / LOCK_NAME, os.O_RDWR | os.O_CREAT, 0o644)
     except OSError as exc:
         raise RenewalLockError(exc) from exc
     try:
@@ -1311,7 +1320,7 @@ def renew_held(
     now: datetime | None = None,
 ) -> RenewalRun:
     """:func:`renew` for a caller that already holds :func:`one_run` (the ``renew`` command,
-    which writes ``state/renewal.json`` under the same lock)."""
+    which writes ``state/renewal/renewal.json`` under the same lock)."""
     moment = require_aware(now or utc_now())
     eku = config.tsa.require_critical_eku
     discarded = recover(layout, roots, require_critical_eku=eku, now=moment)
@@ -1359,10 +1368,11 @@ def renew_held(
     )
 
 
-# -- state/renewal.json ---------------------------------------------------------------------------
+# -- state/renewal/renewal.json -------------------------------------------------------------------
 
 STATE_SCHEMA: Final = "arcilogger.renewal-status/1"
-#: ``state/renewal.json``, the path of W5-C's reader (``alerts.system.stamp_renewal_path``).
+#: ``state/renewal/renewal.json``, the path of W5-C's reader (``alerts.system.stamp_renewal_path``,
+#: which reads :func:`state_to_read`). An earlier release wrote ``state/renewal.json``.
 STATE_NAME: Final = "renewal.json"
 #: How a run of ``arcilogger-core renew`` ended (``last_run.outcome``): a record written,
 #: nothing due, the time-stamp server or the run failed (exit 3), the configuration refused
@@ -1374,8 +1384,8 @@ FAILED_OUTCOMES: Final[frozenset[str]] = frozenset({"failed", "refused"})
 
 @dataclass(frozen=True)
 class LastRun:
-    """A run of the ``Renew`` task as ``state/renewal.json`` keeps it: when it started, how it
-    ended, its exit code, the record it wrote (vault-relative) and a code for its error."""
+    """A run of the ``Renew`` task as ``state/renewal/renewal.json`` keeps it: when it started,
+    how it ended, its exit code, the record it wrote (vault-relative) and a code for its error."""
 
     at: datetime
     outcome: Outcome
@@ -1393,19 +1403,50 @@ class LastRun:
         }
 
 
+def state_dir(layout: Layout) -> Path:
+    return layout.state / STATE_FOLDER
+
+
 def state_path(layout: Layout) -> Path:
+    """``state/renewal/renewal.json``, the only path :func:`write_state` writes."""
+    return state_dir(layout) / STATE_NAME
+
+
+def earlier_state_path(layout: Layout) -> Path:
+    """``state/renewal.json``, where an earlier release kept the report. Every service could
+    write it there (``state``'s rights), so it is only read, and only while the new file is
+    missing (:func:`state_to_read`); nothing writes or removes it."""
     return layout.state / STATE_NAME
 
 
-def read_state(layout: Layout) -> dict[str, Any] | None:
-    """The last ``state/renewal.json``; None when there is none or it cannot be read."""
+def state_to_read(layout: Layout) -> Path:
+    """The file the report is read from: :func:`state_path`, or :func:`earlier_state_path` while
+    the new file is missing. The first :func:`write_state` after an upgrade reads the earlier
+    file once and carries it over; from then on the new file exists and the earlier one is never
+    read again. Until then the readers (the alerts, the Sistem page, the legal status) read it
+    too, so an upgrade does not resolve an open alert before the first run."""
+    path = state_path(layout)
     try:
-        data = json.loads(state_path(layout).read_bytes().decode("utf-8"))
+        path.stat()
+    except FileNotFoundError:
+        return earlier_state_path(layout)
+    except OSError:
+        pass  # the read fails alike and says why
+    return path
+
+
+def read_state(layout: Layout) -> dict[str, Any] | None:
+    """The last report (:func:`state_to_read`); None when there is none or it cannot be read."""
+    path = state_to_read(layout)
+    try:
+        data = json.loads(path.read_bytes().decode("utf-8"))
     except FileNotFoundError:
         return None
     except (OSError, ValueError, RecursionError) as exc:
-        log.warning("renewal: %s cannot be read (%s); it is written anew", state_path(layout), exc)
+        log.warning("renewal: %s cannot be read (%s); it is written anew", path, exc)
         return None
+    if path != state_path(layout):
+        log.info("renewal: %s of an earlier release read; %s replaces it", path, state_path(layout))
     return data if isinstance(data, dict) else None
 
 
@@ -1417,7 +1458,7 @@ def write_state(
     renew_before: int,
     last_run: LastRun | None,
 ) -> dict[str, Any]:
-    """Write ``state/renewal.json`` atomically and return what was written (W5-A-2).
+    """Write ``state/renewal/renewal.json`` atomically and return what was written (W5-A-2).
 
     Only the ``Renew`` task's command line calls this, holding :func:`one_run` around the read
     of the previous file and the write; the API and the alerts only read the file (§2.1.2).

@@ -1,4 +1,5 @@
-"""``arcilogger-core renew [--dry-run] [--json]`` (contract 2.1.3) and ``state/renewal.json``.
+"""``arcilogger-core renew [--dry-run] [--json]`` (contract 2.1.3) and
+``state/renewal/renewal.json``.
 
 The command runs on a real configuration file; only the clock (and, where a test needs a
 certificate of its own, the provider) is replaced, so the times of :mod:`renewal_world` hold.
@@ -7,6 +8,7 @@ certificate of its own, the provider) is replaced, so the times of :mod:`renewal
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -16,6 +18,7 @@ import pytest
 from cryptography.hazmat.primitives import serialization
 
 from arcilogger_core import cli as cli_module
+from arcilogger_core import renewal as renewal_module
 from arcilogger_core.cli import App, main
 from arcilogger_core.execpolicy import ExecutableRefusedError
 from arcilogger_core.renewal import (
@@ -80,10 +83,13 @@ class Cli:
             self.monkeypatch.setattr(App, "provider", lambda app: provider)
         return main(["--config", str(self.config), "renew", *args])
 
+    @property
+    def state_file(self) -> Path:
+        """``state/renewal/renewal.json``: in the folder only the tasks write (W5-E-4)."""
+        return self.rw.layout.state / "renewal" / "renewal.json"
+
     def state(self) -> dict[str, Any]:
-        data: dict[str, Any] = json.loads(
-            (self.rw.layout.state / "renewal.json").read_text(encoding="utf-8")
-        )
+        data: dict[str, Any] = json.loads(self.state_file.read_text(encoding="utf-8"))
         return data
 
     def renewal_files(self) -> list[str]:
@@ -306,7 +312,7 @@ def test_another_run_holding_the_lock_exits_3_and_writes_no_state(
         "renewal_busy",
         False,
     )
-    assert not (cli.rw.layout.state / "renewal.json").exists()
+    assert not cli.state_file.exists()
 
 
 def test_failures_in_a_row_counts_and_resets(cli: Cli, capsys: pytest.CaptureFixture[str]) -> None:
@@ -327,6 +333,60 @@ def test_failures_in_a_row_counts_and_resets(cli: Cli, capsys: pytest.CaptureFix
     assert cli.run(now=now + timedelta(days=2), provider=provider) == 0
     state = cli.state()
     assert (state["failures_in_a_row"], state["last_run"]["outcome"]) == (0, "renewed")
+    capsys.readouterr()
+
+
+def test_an_earlier_state_file_is_read_once_and_never_written(
+    cli: Cli, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """An upgrade from a release that kept ``state/renewal.json`` and ``state/renewal.lock`` in
+    ``state``, which every service may write (W5-E-4): the first write carries the earlier
+    report over into ``state/renewal/renewal.json``, and from then on the earlier file is never
+    read. Neither earlier file is ever written, and a process holding the earlier lock blocks
+    no run."""
+    state = cli.rw.layout.state
+    state.mkdir(parents=True, exist_ok=True)
+    earlier, earlier_lock = state / "renewal.json", state / "renewal.lock"
+    last_run = {
+        "at": "2031-06-20T00:30:00Z",
+        "outcome": "failed",
+        "exit_code": 3,
+        "record": None,
+        "error": "tsa_unavailable",
+    }
+    earlier.write_text(
+        json.dumps({"schema": STATE_SCHEMA, "last_run": last_run, "failures_in_a_row": 1}),
+        encoding="utf-8",
+    )
+    earlier_lock.write_bytes(b"")
+    now = CNA - timedelta(days=100)
+    # a dry run keeps the last run: the earlier one, read from the earlier file
+    assert cli.run("--dry-run", now=now) == 0
+    carried = cli.state()
+    assert (carried["last_run"], carried["failures_in_a_row"]) == (last_run, 1)
+    assert carried["at"] == "2031-06-23T00:00:00Z"
+    # once the new file exists, a changed earlier file decides nothing
+    earlier.write_text(
+        json.dumps({"schema": STATE_SCHEMA, "failures_in_a_row": 0, "tokens": []}),
+        encoding="utf-8",
+    )
+    kept = {path: (path.read_bytes(), path.stat().st_mtime_ns) for path in (earlier, earlier_lock)}
+    cli.rw.legal_tsa.failure = MockFailure.UNREACHABLE
+    handle = os.open(earlier_lock, os.O_RDWR)
+    try:
+        renewal_module._lock(handle)  # a run of the earlier release, or a service, holds it
+        assert cli.run(now=now + timedelta(hours=1), provider=cli.rw.legal_provider(FAR)) == 3
+    finally:
+        renewal_module._unlock(handle)
+        os.close(handle)
+    after = cli.state()
+    assert (after["last_run"]["outcome"], after["failures_in_a_row"]) == ("failed", 2)
+    assert after["tokens"] == carried["tokens"] != []
+    assert {p: (p.read_bytes(), p.stat().st_mtime_ns) for p in (earlier, earlier_lock)} == kept
+    assert sorted(path.name for path in cli.state_file.parent.iterdir()) == [
+        "renewal.json",
+        "renewal.lock",
+    ]
     capsys.readouterr()
 
 
@@ -447,7 +507,9 @@ def test_the_state_file_shape(cli: Cli, capsys: pytest.CaptureFixture[str]) -> N
     )
     report = renewal_status(cli.rw.layout, cli.rw.world.config, cli.rw.roots, now)
     assert state["tokens"] == report.as_json()["tokens"]
-    assert not list(cli.rw.layout.state.glob(".renewal.json*.tmp"))
+    assert cli.state_file.is_file()
+    assert not list(cli.state_file.parent.glob(".renewal.json*.tmp"))
+    assert not (cli.rw.layout.state / "renewal.json").exists(), "never the earlier path"
 
 
 # -- the lock, the refusals and the state write ---------------------------------------------------
@@ -472,7 +534,7 @@ def test_the_exit_code_follows_the_status_after_the_run(
 def test_a_state_file_that_cannot_be_written_alone_exits_3(
     cli: Cli, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The record is written, only ``state/renewal.json`` fails: still exit 3."""
+    """The record is written, only ``state/renewal/renewal.json`` fails: still exit 3."""
 
     def full(*args: Any, **kwargs: Any) -> None:
         raise OSError(28, "No space left on device")
@@ -485,7 +547,7 @@ def test_a_state_file_that_cannot_be_written_alone_exits_3(
     data = json.loads(captured.out)
     assert (data["outcome"], data["exit_code"], data["error"]) == ("renewed", 3, None)
     assert data["state_written"] is False
-    assert "state/renewal.json yazılamadı [cannot be written]" in captured.err
+    assert "state/renewal/renewal.json yazılamadı [cannot be written]" in captured.err
     assert cli.renewal_files() == ["2031-06-23-1.json", "2031-06-23-1.json.zd"]
 
 
@@ -577,7 +639,7 @@ def test_a_dry_run_without_roots_exits_2_and_writes_nothing(
     assert cli.run("--dry-run", "--json", now=CNA) == 2
     data = _json(capsys)
     assert (data["outcome"], data["dry_run"], data["state_written"]) == ("refused", True, False)
-    assert not (cli.rw.layout.state / "renewal.json").exists()
+    assert not cli.state_file.exists()
 
 
 def test_a_dry_run_while_another_run_holds_the_lock_writes_nothing(
@@ -589,7 +651,7 @@ def test_a_dry_run_while_another_run_holds_the_lock_writes_nothing(
     cli.rw.legal_tsa.failure = MockFailure.UNREACHABLE
     assert cli.run(now=now, provider=cli.rw.legal_provider(FAR)) == 3
     capsys.readouterr()
-    before = (cli.rw.layout.state / "renewal.json").read_bytes()
+    before = cli.state_file.read_bytes()
     with one_run(cli.rw.layout):
         assert cli.run("--dry-run", "--json", now=now + timedelta(hours=1)) == 3
     data = _json(capsys)
@@ -598,15 +660,15 @@ def test_a_dry_run_while_another_run_holds_the_lock_writes_nothing(
         "renewal_busy",
         False,
     )
-    assert (cli.rw.layout.state / "renewal.json").read_bytes() == before
+    assert cli.state_file.read_bytes() == before
 
 
 @pytest.mark.parametrize("kind", ["renewed", "not_needed", "failed", "refused", "dry_run"])
 def test_the_state_file_is_written_under_the_lock(
     cli: Cli, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch, kind: str
 ) -> None:
-    """Every outcome reads and writes ``state/renewal.json`` while it holds
-    ``state/renewal.lock``."""
+    """Every outcome reads and writes ``state/renewal/renewal.json`` while it holds
+    ``state/renewal/renewal.lock``."""
     held: list[bool] = []
 
     def no_secrets(app: App) -> Any:
@@ -642,7 +704,7 @@ def test_the_state_file_is_replaced_atomically(
     now = CNA - timedelta(days=181)
     assert cli.run(now=now) == 0
     capsys.readouterr()
-    path = cli.rw.layout.state / "renewal.json"
+    path = cli.state_file
     before = path.read_bytes()
 
     def broken(self: Path, target: Any) -> Path:
@@ -658,11 +720,11 @@ def test_the_state_file_is_replaced_atomically(
 
 
 def test_only_the_command_writes_the_state_file(cli: Cli) -> None:
-    """``renewal_status`` and ``renew`` themselves never write ``state/renewal.json``: only
-    the ``Renew`` task's command does (§2.1.2, W5-A-2)."""
+    """``renewal_status`` and ``renew`` themselves never write ``state/renewal/renewal.json``:
+    only the ``Renew`` task's command does (§2.1.2, W5-A-2)."""
     now = CNA - timedelta(days=100)
     cli.rw.set_now(now)
     renewal_status(cli.rw.layout, cli.rw.world.config, cli.rw.roots, now)
     renew(cli.rw.layout, cli.rw.world.config, cli.rw.legal_provider(FAR), cli.rw.roots, now)
     assert cli.renewal_files() == ["2031-06-23-1.json", "2031-06-23-1.json.zd"]
-    assert not (cli.rw.layout.state / "renewal.json").exists()
+    assert not cli.state_file.exists()
