@@ -20,7 +20,15 @@
                                           ArciApi read
       <data>\state\seal, \replica,        protected: LOCAL SERVICE modify (only the evidence jobs write
         \verify, \clock                   them); ArciApi, ArciWorker read (ArciIngest also state\seal)
+      <data>\state\crl                    protected: LOCAL SERVICE modify (the CrlFetch task stores the
+                                          revocation lists as evidence); ArciApi, ArciWorker read;
+                                          nothing for the collector or ingest
+      <data>\state\renewal                protected: LOCAL SERVICE modify (the Renew task's renewal.json
+                                          and renewal.lock); ArciApi, ArciWorker read; nothing for the
+                                          collector or ingest (they could silence the re-stamping alerts)
       <data>\exports                      ArciApi, ArciWorker modify
+      <data>\exports\reports              LOCAL SERVICE read (the Renew task re-stamps the tokens of the
+                                          stored reports); ArciApi, ArciWorker keep the modify of exports
       <data>\logs                         every ARCILOGGER account modify
       <data>\backups, \backups\db         administrators only (the installer's dumps before upgrades)
       <data>\backups\scheduled            protected: LOCAL SERVICE modify (the Backup task writes and
