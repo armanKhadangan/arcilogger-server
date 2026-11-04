@@ -9311,6 +9311,40 @@ def test_only_the_acl_script_passes_reset_owner() -> None:
     }
 
 
+def test_acl_script_help_lists_every_state_folder_of_the_plan() -> None:
+    """Answer to Q11 on #158: the rights table of Set-ArciVaultAcl.ps1's help has a row for
+    every folder of Get-ArciAclPlan under state, state\\requests too, and the state row names
+    ArciAdmin's read, as the plan gives it."""
+    plan = _function(MODULE.read_text("utf-8-sig"), "Get-ArciAclPlan")
+    folders = re.findall(r"\(\$DataRoot \+ \$p \+ 'state' \+ \$p \+ '(\w+)'\)", plan)
+    assert {"crl", "renewal", "requests"} <= set(folders)
+    help_text = _between(
+        (WINDOWS / "scripts" / "Set-ArciVaultAcl.ps1").read_text("utf-8-sig"),
+        ".DESCRIPTION",
+        ".PARAMETER",
+    )
+    table = help_text.split("\n\n")[1].split("\n")[2:]
+    rows: dict[str, str] = {}
+    folder = ""
+    for line in table:
+        if line[:42].strip():
+            folder = line[:42].strip()
+            rows[folder] = line[42:]
+        else:
+            rows[folder] += " " + line[42:]
+    named = " ".join(rows)
+    for name in folders:
+        assert re.search(rf"\\{name}\b", named), f"state\\{name} has no row"
+    state = _between(plan, "(New-Entry ($DataRoot + $p + 'state') ", "\n        (New-Entry")
+    assert "'NT SERVICE\\ArciAdmin' -Rights $read" in state
+    assert "ArciAdmin read" in rows["<data>\\state"]
+    requests = _between(plan, "+ $p + 'requests') ", "\n        (New-Entry")
+    assert "'NT SERVICE\\ArciAdmin' -Rights $requestWriter" in requests
+    assert "-Rights $modify" in requests
+    assert "ArciAdmin read, create and write" in rows["<data>\\state\\requests"]
+    assert "LOCAL SERVICE modify" in rows["<data>\\state\\requests"]
+
+
 def test_acl_plan_keeps_the_api_and_the_tasks_out_of_the_configuration(
     engine: str, tmp_path: Path
 ) -> None:

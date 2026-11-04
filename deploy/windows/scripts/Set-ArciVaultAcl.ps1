@@ -17,7 +17,8 @@
       <data>\vault                        LOCAL SERVICE modify (seal, retention); ArciApi, ArciWorker,
                                           ArciIngest read; auditing (SACL) of every write/delete/permission change
       <data>\state                        collector, ingest, worker, tasks modify (status, alerts);
-                                          ArciApi read
+                                          ArciApi read; ArciAdmin read (which configuration each service
+                                          loaded); neither reaches the protected folders below
       <data>\state\seal, \replica,        protected: LOCAL SERVICE modify (only the evidence jobs write
         \verify, \clock                   them); ArciApi, ArciWorker read (ArciIngest also state\seal)
       <data>\state\crl                    protected: LOCAL SERVICE modify (the CrlFetch task stores the
@@ -32,6 +33,10 @@
                                           collector or ingest (they could silence the re-stamping alerts
                                           or hold the lock); owner, items below and OWNER RIGHTS as
                                           for state\crl
+      <data>\state\requests               protected: ArciAdmin read, create and write (signed task
+                                          requests, ADR-0014; it deletes only its own); LOCAL SERVICE
+                                          modify (the tasks take, answer and delete them); nothing for
+                                          the collector, ingest, ArciApi or ArciWorker
       <data>\exports                      ArciApi, ArciWorker modify
       <data>\exports\reports              LOCAL SERVICE read (the Renew task re-stamps the tokens of the
                                           stored reports); ArciApi, ArciWorker keep the modify of exports
