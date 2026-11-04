@@ -1612,6 +1612,24 @@ All Wave 5 questions are answered (2026-11-02).
   (`tests/test_renewal_state_reader.py`),
   `test_renew_row_reads_an_earlier_report_until_the_first_run`
   (`api/tests/test_system_health.py`), and the ACL tests of W5-E-1.
+- **W5-E-5: ARCILOGGER's test root is no issuer in use for `R20-crl` (#151; Q8 of #140).**
+  §2.3.1 raises `R20-crl` when an issuer in use has no verified list newer than
+  `tsa.crl_max_age_days`, and W5-C's `pinned_roots` pins the mock TSA's root while
+  `tsa.provider` is `mock`. That root publishes no list, so every mock or trial install had a
+  permanent, e-mailed `R20-crl`. Following W5-A's rule that a test stamp never counts (D5),
+  `check_stamp_crl` treats the newest sealed day's stamp as no stamp in use when its chain's
+  root carries ARCILOGGER's test organization (`tsa.verify.is_test_stamp` on the root's
+  subject, the detection W5-A, the chain check and the evidence package use). Only the root
+  decides: a test policy on a real CA's chain still needs that CA's lists. An `R20-crl` raised
+  before is resolved (`crl_fresh`) at the next pass, unless `state/crl` cannot be read.
+  `pinned_roots`, `stamp_in_use`, `issuers_in_use` and `crl_status` are unchanged, so `R20-cert`
+  still reads the mock stamp's chain against the stored lists, and `/legal-status` still gives
+  `crl_stale` for a mock install (whether that banner reason should follow is a question on
+  #151). Tests: `test_stamp_crl_not_raised_for_arcilogger_test_root`,
+  `test_stamp_crl_raised_for_a_real_root_without_a_list` (`worker/tests/test_alerts_legal.py`;
+  its other `R20-crl` tests now seal through a made-up CA outside the test organization, pinned
+  in `tsa.roots_dir`), and `test_no_seal_alert_when_every_closed_day_is_sealed`
+  (`worker/tests/test_alerts_system.py`: a sealed mock install raises no alert at all).
 
 ## Deviations — #119 (2026-11-04)
 
