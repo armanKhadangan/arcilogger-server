@@ -22,16 +22,23 @@ from typing import Any
 import pytest
 from cryptography.hazmat.primitives import serialization
 
-from arcilogger_core.evidence.builder import _Records, build_package
+from arcilogger_core.evidence.builder import (
+    _collect_days,
+    _Records,
+    build_package,
+    requires_critical_eku,
+)
 from arcilogger_core.evidence.model import EvidenceError, PackageInfo
 from arcilogger_core.renewal import RecordEntry, _parse_record, renew
 from arcilogger_core.seal import sha256_file
 from arcilogger_core.timeutil import utc_now
 
 from .renewal_cases import (
+    DELETION_CASES,
     LEVELS,
     TAMPERINGS,
     Built,
+    DeletionCase,
     core_verdict,
     entry_of,
     renew_day,
@@ -335,4 +342,46 @@ def test_a_tampered_renewal_record_is_strict_in_all_three_readers(
     assert found == [("fail", "token-eku", "yenileme")]
     (day,) = [f for f in report.findings if f.code in LEVELS and f.where == DAY.isoformat()]
     assert day.code == "renewal-due"
+    unlock_tree(tmp_path)
+
+
+@pytest.mark.parametrize("case", DELETION_CASES, ids=[case.name for case in DELETION_CASES])
+def test_a_deletion_records_token_is_judged_by_the_manifest_that_lists_it(
+    tmp_path: Path, case: DeletionCase
+) -> None:
+    """#156 item 1 (W5-A-19): a deletion record's token is judged by the EKU rule of the
+    manifest that seals the record, not by any manifest of the package; a record reached only
+    through the chain anchor by the package's rule. The standalone verifier on the vault and on
+    the package gives the case's findings, and the builder takes the legal CA's root for the
+    token exactly when they are warnings (rule 5): it ships a package that passes, or its
+    self-check refuses one whose record token fails."""
+    rw = make_world(tmp_path / "site")
+    days = case.build(rw)
+    # the builder
+    collected, _ = _collect_days(rw.layout, days, rw.roots, None)
+    records = _Records(
+        rw.layout, rw.roots, require_critical_eku=requires_critical_eku(rw.layout, days)
+    )
+    records.collect(collected)
+    assert (rw.legal.fingerprint in records.used_roots) is case.relaxed
+    # the standalone verifier on the vault (the auditor's roots: the mock and the legal one)
+    report = standalone_report(rw, Built(utc_now()), tmp_path / "vault-check")
+    found = {(f.level, f.code, f.where) for f in report.findings if f.code.startswith("token-eku")}
+    assert found == case.findings
+    # and on the package
+    if not case.relaxed:
+        failures = [f"token-eku ({where})" for _, _, where in sorted(case.findings)]
+        with pytest.raises(EvidenceError, match="token-eku") as refused:
+            _build(rw, list(days), tmp_path / "out")
+        assert all(failure in str(refused.value) for failure in failures), refused.value
+        unlock_tree(tmp_path)
+        return
+    info = _build(rw, list(days), tmp_path / "out")
+    folder = unpack(info, tmp_path / "pkg")
+    index = json.loads((folder / "paket.json").read_bytes())
+    assert rw.legal.fingerprint in {root["sha256"] for root in index["roots"]}
+    report = in_process(folder)
+    assert report.passed, report.codes()
+    found = {(f.level, f.code, f.where) for f in report.findings if f.code.startswith("token-eku")}
+    assert found == case.findings
     unlock_tree(tmp_path)

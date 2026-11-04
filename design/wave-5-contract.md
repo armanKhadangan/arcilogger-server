@@ -1507,9 +1507,10 @@ All Wave 5 questions are answered (2026-11-02).
   does not verify, it was revoked) is still renewable.
 - **W5-A-8: `VERIFIER_VERSION` is "6", not §2.1.4's "5".** Addendum H4: W5-H (#130) merged into
   `wave-5` first (84e71e1) and set "5", so W5-A, merging second, sets "6" (manager on #132,
-  2026-11-03 20:51). Superseded by W5-A-17: #136 takes "8" (answer to Q8, #156 item 7). W5-A-17
-  set "7", which `test_renewal_standalone.py::test_verifier_version_is_7` pins; #136
-  (`xz-unsupported`) updates that test when it merges.
+  2026-11-03 20:51). Superseded by W5-A-17 and W5-A-19 (answer to Q8, #156 item 7): W5-A-17
+  set "7", and W5-A-19 sets "8" because #136 has not merged, which
+  `test_renewal_standalone.py::test_verifier_version_is_8` pins; #136 (`xz-unsupported`) takes
+  "9" and updates that test when it merges.
 - **W5-A-9: exit codes beyond §2.1.3's wording.** `renew` catches its own errors (`main` maps
   every `TsaError` to 1). Exit 3 also covers a new stamp that does not verify or is revoked
   (`renewal_stamp_invalid`), another run holding `state/renewal.lock` (`renewal_busy`), a lock
@@ -1699,6 +1700,34 @@ All Wave 5 questions are answered (2026-11-02).
   `test_a_package_with_a_deletion_record_ships_its_renewals` (`test_renewal_evidence.py`)
   covers a two-deep chain behind a deletion record, the core's status of its token, the
   auditor's verifier on the package, and that a package without the record ships none of them.
+- **W5-A-19: a deletion record's token is judged by the manifest that seals it (answer to Q5,
+  #156 item 1).** W5-A-17 left deletion records under the package's rule (`_relaxed_eku`:
+  relaxed when any manifest of the package is), so the token of a record that a strict manifest
+  lists, with a non-critical EKU, passed with a warning beside a relaxed day. The standalone
+  verifier now judges it by the `tsa.require_critical_eku` of the manifest that lists it:
+  `_check_deletions` by that day's manifest, and `_check_anchor_link` by `_deletion_eku` (strict
+  when one of the package's manifests that list the record is strict; a record that no packaged
+  manifest lists, reached only through the chain anchor, by the package's rule). The builder
+  picks the root to bundle for that token the same way (rule 5): `_Records.collect` passes each
+  listing day's rule to `add`, and `_anchor` the rule of the packaged manifests that list the
+  record, else the package's. The packaged report's stamp keeps the package's rule
+  (`_relaxed_eku`, `requires_critical_eku`), so W5-A-17's "`_relaxed_eku` now judges deletion
+  records and the packaged report's stamp only" now reads "a deletion record that no packaged
+  manifest lists and the packaged report's stamp". The core judges no deletion record's token
+  once a manifest seals it (`renewal._Reader` reads only its hashes and certificate,
+  `chain.verify_day` does not read `deletions`; `retention` verifies a new record with the
+  site's setting at that time), so no core file changes. The standalone verifier's output
+  changes, so `VERIFIER_VERSION` is "8" (addendum H4): #136 has not merged, so it takes "9"
+  (W5-A-8), which replaces W5-A-17's "W5-A-8's '7' for #136 becomes '8'";
+  `test_verifier_version_is_8` pins it. The shared case table gains `DELETION_CASES`
+  (`renewal_cases.py`): a record listed by a strict manifest beside a relaxed day (`token-eku`,
+  a warning before), one listed by a relaxed manifest beside a strict day
+  (`token-eku-not-critical`), one listed by a strict manifest, one only behind the chain anchor
+  in a relaxed and in a strict package, and one behind the anchor and listed by a strict
+  manifest in a relaxed package (`token-eku` at both days).
+  `test_a_deletion_records_token_is_judged_by_the_manifest_that_lists_it`
+  (`test_renewal_evidence.py`) runs each through the builder's choice of roots, the standalone
+  verifier on the vault and on the package (built, or refused by the self-check).
 
 ## Deviations — W5-E (2026-11-04)
 

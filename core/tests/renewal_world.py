@@ -198,16 +198,23 @@ class RenewalWorld:
             return ProductionLikeProvider(self.legal_tsa)
         return MockTsaProvider(self.legal_tsa)
 
-    def seal(self, day: date, cert_not_after: datetime = CNA) -> None:
+    def seal(
+        self, day: date, cert_not_after: datetime = CNA, *, relaxed: bool | None = None
+    ) -> None:
         """Seal ``day`` (the mock provider, a certificate expiring at ``cert_not_after``); the
-        clock is then at 00:30 site time of the next day."""
+        clock is then at 00:30 site time of the next day. Its manifest says the site's EKU
+        rule, or the one ``relaxed`` names (``tsa.require_critical_eku``, K6)."""
         self.world.busy_day(day)
         self.set_now(
             datetime.combine(day + timedelta(days=1), time(0, 30), tzinfo=SITE_TZ).astimezone(UTC)
         )
         self.mock_signer(cert_not_after)
+        config = self.world.config
+        if relaxed is not None:
+            tsa = config.tsa.model_copy(update={"require_critical_eku": not relaxed})
+            config = config.model_copy(update={"tsa": tsa})
         sealer = Sealer(
-            self.world.config,
+            config,
             provider=MockTsaProvider(self.tsa),
             roots=[self.tsa.root_certificate],
             clock=self.clock,

@@ -419,7 +419,11 @@ class _Records:
         role: str,
         sha256: str | None = None,
         token_sha256: str | None = None,
+        *,
+        require_critical_eku: bool | None = None,
     ) -> None:
+        """Ship a sealed record and its token; ``require_critical_eku`` is the EKU rule its
+        token is judged by when the root to bundle is picked (the package's when None)."""
         path = _vault_path(self.layout, relative)
         if not path.is_file():
             raise EvidenceError(f"{relative}: sealed record missing in the vault")
@@ -434,7 +438,8 @@ class _Records:
                 raise EvidenceError(f"{relative}.zd: differs from the hash sealed in the manifest")
             name = f"{VAULT}{relative}.zd"
             self.entries[name] = _Entry(name, f"{role}_token", data=token_data)
-            require_critical_eku = self.require_critical_eku
+            if require_critical_eku is None:
+                require_critical_eku = self.require_critical_eku
             if role == "renewal":
                 # judged by its own record's EKU rule (K6), as both verifiers judge it, not by
                 # the package's days (contract W5-A-17); a record the verifier cannot read
@@ -447,7 +452,15 @@ class _Records:
             raise EvidenceError(f"{relative}.zd: time stamp missing in the vault")
 
     def collect(self, days: Sequence[_Day], report_token: bytes | None = None) -> list[_Entry]:
+        """The records of ``days``. A deletion record's token is judged by the EKU rule of the
+        manifest that lists it (strict when one of them is), as both verifiers judge it; one
+        reached only through the chain anchor by the package's (contract W5-A-19)."""
         sealed = {day.day for day in days}
+        listed: dict[str, bool] = {}
+        for day in days:
+            for record in day.manifest.get("deletions") or []:
+                path = str(record.get("path", ""))
+                listed[path] = listed.get(path, False) or day.require_critical_eku
         for day in days:
             for record in day.manifest.get("deletions") or []:
                 self.add(
@@ -455,13 +468,15 @@ class _Records:
                     "deletion",
                     str(record.get("sha256") or "") or None,
                     str(record.get("token_sha256") or "") or None,
+                    require_critical_eku=day.require_critical_eku,
                 )
-            self._anchor(day, sealed)
+            self._anchor(day, sealed, listed)
         self._renewals(days, report_token)
         return list(self.entries.values())
 
-    def _anchor(self, day: _Day, sealed: set[date]) -> None:
-        """The previous day was deleted by retention: ship the anchor and its record."""
+    def _anchor(self, day: _Day, sealed: set[date], listed: dict[str, bool]) -> None:
+        """The previous day was deleted by retention: ship the anchor and its record (``listed``:
+        the EKU rule of each deletion record a packaged manifest lists)."""
         previous = day.manifest.get("previous")
         if not isinstance(previous, dict):
             return
@@ -483,7 +498,12 @@ class _Records:
             return
         relative = anchor_path.relative_to(self.layout.vault).as_posix()
         self.entries[VAULT + relative] = _Entry(VAULT + relative, "chain_anchor", data=data)
-        self.add(f"deletions/{record}", "deletion")
+        record_path = f"deletions/{record}"
+        self.add(
+            record_path,
+            "deletion",
+            require_critical_eku=listed.get(record_path, self.require_critical_eku),
+        )
 
     def _renewals(self, days: Sequence[_Day], report_token: bytes | None) -> None:
         """The renewal records whose text names a packaged day's manifest or token hash, the
