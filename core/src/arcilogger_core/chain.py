@@ -152,6 +152,7 @@ def verify_day(
     now: datetime | None = None,
     crls: Sequence[Crl] | None = None,
     renewals: bool = False,
+    renew_before_days: int = 180,
 ) -> DayCheck:
     """Verify one sealed day (see the module docstring).
 
@@ -162,7 +163,11 @@ def verify_day(
     revocation lists (:func:`arcilogger_core.crl.load_stored`), read from ``state/crl`` when
     None. A day whose chain is revoked at or before its stamp is not legal grade (C15).
     ``renewals``: also give the long-term status of a verified token in ``renewal``
-    (:func:`arcilogger_core.renewal.day_renewal`, Wave 5 §2.1.4).
+    (:func:`arcilogger_core.renewal.day_renewal`, Wave 5 §2.1.4; each renewal token is judged
+    by its own record's EKU rule, as this day's by its manifest's), with ``renew_before_days``
+    as its window: this function reads no configuration, so a caller that has one passes the
+    site's ``tsa.renew_before_days`` (``renewal.renew_before_days``); the default is §2.5's
+    (``renewal.DEFAULT_RENEW_BEFORE_DAYS``, which this module cannot import).
     """
     check = DayCheck(day)
     if crls is None:
@@ -238,7 +243,7 @@ def verify_day(
                 legal_roots=legal_roots,
                 now=now,
                 crls=crls,
-                require_critical_eku=tsa.get("require_critical_eku") is not False,
+                renew_before_days=renew_before_days,
             )
 
     entries = [*manifest.get("files", []), manifest.get("audit_log") or {}]

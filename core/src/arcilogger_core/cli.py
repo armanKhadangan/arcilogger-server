@@ -111,6 +111,7 @@ from arcilogger_core.renewal import (
     Outcome,
     RenewalBusyError,
     RenewalError,
+    RenewalLegalRootsError,
     RenewalLockError,
     RenewalNotNeeded,
     RenewalReport,
@@ -908,10 +909,14 @@ class _RenewError:
 
     @classmethod
     def refused(cls, cause: str, exc: BaseException) -> _RenewError:
+        # An error with texts of its own gives each language its own (its str() is "TR [EN]").
+        text_tr = text_en = str(exc)
+        if isinstance(exc, RenewalLegalRootsError):
+            text_tr, text_en = exc.message_tr, exc.message_en
         return cls(
             cause,
-            f"Yapılandırma yeniden damgalamaya izin vermiyor ({cause}): {exc}",
-            f"The configuration refuses re-stamping ({cause}): {exc}",
+            f"Yapılandırma yeniden damgalamaya izin vermiyor ({cause}): {text_tr}",
+            f"The configuration refuses re-stamping ({cause}): {text_en}",
         )
 
     def as_json(self) -> dict[str, str]:
@@ -919,11 +924,14 @@ class _RenewError:
 
 
 def _renew_cause(app: App, exc: BaseException) -> str:
-    """Why the provider cannot be made (the causes of :func:`_sealer`)."""
+    """Why the run is refused: the provider cannot be made (the causes of :func:`_sealer`), or
+    it claims legal grade while no listed root is pinned."""
     if isinstance(exc, SecretStoreError):
         return "secret-store"
     if isinstance(exc, TsaExecutableError):
         return "executable"
+    if isinstance(exc, RenewalLegalRootsError):  # no listed root pinned (W5-A-13)
+        return exc.cause
     return _provider_cause(app)
 
 
