@@ -201,6 +201,7 @@ describe('Arama — days in the sealed archive', () => {
           jsonResponse(
             200,
             archivedPage({
+              archived: { ...ARCHIVE_SEARCH_ARCHIVED.archived, keep_days: 12 },
               notices: [
                 {
                   code: 'vault_only_before',
@@ -227,8 +228,8 @@ describe('Arama — days in the sealed archive', () => {
     // The answer's rows (none here) are shown beside it.
     expect(await screen.findByRole('table', { name: 'Arama sonuçları' })).toBeInTheDocument();
 
-    // A page gives no keep time: the dialog says the administrator's time with its default.
-    await confirmReload('yöneticinin ayarladığı süre (varsayılan 7 gün) boyunca orada kalır');
+    // The dialog names the keep time of the page's `archived` days (C23, W5-G-20).
+    await confirmReload('ve 12 gün boyunca veritabanında kalır');
     expect(reloadPosts(calls)).toEqual([
       { reason: 'search', first_day: '2026-10-04', last_day: '2026-10-05' },
     ]);
@@ -326,5 +327,51 @@ describe('Arama — days in the sealed archive', () => {
     await nextPoll();
     expect(searches(calls)).toHaveLength(3);
     expect(reloadPosts(calls)).toHaveLength(1);
+  });
+
+  it('the dialog names the keep time of each answer: a 409’s own, a page’s own (C23)', async () => {
+    const { details } = ARCHIVE_SEARCH_REQUIRED.body.error;
+    serve({
+      searches: [
+        () =>
+          jsonResponse(ARCHIVE_SEARCH_REQUIRED.status, {
+            error: { ...ARCHIVE_SEARCH_REQUIRED.body.error, details: { ...details, keep_days: 9 } },
+          }),
+        () =>
+          jsonResponse(
+            200,
+            archivedPage({ archived: { ...ARCHIVE_SEARCH_ARCHIVED.archived, keep_days: 12 } }),
+          ),
+      ],
+      reloads: [ARCHIVE_LOADING],
+    });
+    renderApp('/search');
+
+    await searchFor('srcip:172.20.42.57');
+    await user.click(within(await card()).getByRole('button', { name: 'Arşivden yükle' }));
+    let dialog = await screen.findByRole('dialog', { name: 'Günler arşivden yüklensin mi?' });
+    expect(dialog).toHaveTextContent('ve 9 gün boyunca veritabanında kalır');
+    await user.click(within(dialog).getByRole('button', { name: 'İptal' }));
+
+    await searchFor('srcip:172.20.42.58');
+    await user.click(within(await card()).getByRole('button', { name: 'Arşivden yükle' }));
+    dialog = await screen.findByRole('dialog', { name: 'Günler arşivden yüklensin mi?' });
+    expect(dialog).toHaveTextContent('ve 12 gün boyunca veritabanında kalır');
+  });
+
+  it('a page whose archived days give no whole number of days: the setting with its default', async () => {
+    serve({
+      searches: [
+        () =>
+          jsonResponse(
+            200,
+            archivedPage({ archived: { ...ARCHIVE_SEARCH_ARCHIVED.archived, keep_days: 0 } }),
+          ),
+      ],
+      reloads: [ARCHIVE_LOADING],
+    });
+    renderApp('/search');
+    await searchFor('srcip:172.20.42.57');
+    await confirmReload('yöneticinin ayarladığı süre (varsayılan 7 gün) boyunca orada kalır');
   });
 });
