@@ -27,13 +27,15 @@ stopped and a ``CHECKPOINT`` has written its rows back, for comparison. For each
 call and where it went (SQL, commits, fsyncs, other; ``test_search_perf.Timer``) are kept; the
 median, the 95th percentile (nearest rank, so the split shown is that request's), the slowest
 request and the mean are printed past pytest's capture. Of the commits counted, the read-only
-one after authentication (``reading()``) writes no WAL: one POST /search flushes WAL three times
-(activity, audit row, spool watermark) and fsyncs the spool once (#119).
+one after authentication (``reading()``) writes no WAL, and the activity commit does not wait
+for its WAL (``synchronous_commit`` off, #119): one POST /search waits for WAL flushes twice
+(audit row, spool watermark) and fsyncs the spool once.
 
-**Guards:** every request answers a full page; the 95th percentile under ingest stays below
-``CEILING``, which only a broken server misses (the real budget follows from both CI jobs'
-figures, #119); the feeder kept its rate and ingest loaded at least half of what was fed during
-the measurement, so the test cannot pass with the feed or ingest idle.
+**Guards:** every request answers a full page; the 95th percentile under ingest stays below the
+browse budget ``BROWSE`` (500 ms, decided in the review of #145) and the slowest request below
+``CEILING``, which only a broken server misses; the feeder kept its rate and ingest loaded at
+least half of what was fed during the measurement, so the test cannot pass with the feed or
+ingest idle.
 """
 
 from __future__ import annotations
@@ -103,9 +105,10 @@ SETTLED_REQUESTS = REQUESTS
 INTERVAL = 0.2
 #: Lines ingest has loaded before the timing starts (one second of the feed).
 WARM_LINES = LINES_PER_SECOND
-#: Only a broken server misses it: ten times the browse budget ``BROWSE`` (500 ms). Ten times the
-#: settled figure (53-72 ms best, docs/SEARCH.md §13) would be 0.5-0.7 s, inside the +500 ms that a
-#: Windows runner's write-back adds to one request (#90), so it could fail on a sound server.
+#: The bound on the slowest request under ingest (the 95th percentile has ``BROWSE``): only a
+#: broken server misses it, ten times the browse budget. Ten times the settled figure (53-72 ms
+#: best, docs/SEARCH.md §13) would be 0.5-0.7 s, inside the +500 ms that a Windows runner's
+#: write-back adds to one request (#90), so it could fail on a sound server.
 CEILING = 10 * BROWSE
 #: The device time of a format-sample line: FortiGate ``date``/``time`` and ``eventtime``
 #: (nanoseconds in the samples), MikroTik's RFC 3339 stamp.
@@ -361,17 +364,18 @@ def mean(results: list[tuple[float, Split]]) -> tuple[float, Split]:
     )
 
 
-def report(browse: Browse, name: str, results: list[tuple[float, Split]]) -> float:
+def report(browse: Browse, name: str, results: list[tuple[float, Split]]) -> tuple[float, float]:
     """Prints the median, 95th percentile, slowest and mean request with their splits; returns
-    the 95th percentile."""
+    the 95th percentile and the slowest request."""
     p50, p95, top, average = rank(results, 50), rank(results, 95), rank(results, 100), mean(results)
     browse.show(
         f"{name}: {len(results)} requests, p50 {p50[0] * 1000:.0f} ms, p95 {p95[0] * 1000:.0f} ms, "
-        f"max {top[0] * 1000:.0f} ms (ceiling {CEILING * 1000:.0f} ms)"
+        f"max {top[0] * 1000:.0f} ms (budget {BROWSE * 1000:.0f} ms, ceiling "
+        f"{CEILING * 1000:.0f} ms)"
     )
     for label, (total, split) in (("p50", p50), ("p95", p95), ("max", top), ("mean", average)):
         browse.show(f"  {label}: {total * 1000:.0f} ms: {split.text(total)}")
-    return p95[0]
+    return p95[0], top[0]
 
 
 # -- the guard ------------------------------------------------------------------------------------
@@ -407,8 +411,9 @@ def test_browse_under_concurrent_ingest(browse: Browse) -> None:
         f"ingest during the timing: {LINES_PER_SECOND} lines/s offered for {seconds:.1f} s "
         f"({fed} lines), {done} loaded ({done / seconds:.0f} lines/s); afterwards {checkpoint}"
     )
-    p95 = report(browse, "Q1 browse 1 d under ingest", under)
+    p95, slowest = report(browse, "Q1 browse 1 d under ingest", under)
     report(browse, "Q1 browse 1 d settled (ingest stopped)", settled)
     assert fed >= 0.9 * LINES_PER_SECOND * seconds, f"the feed fell behind: {fed} lines"
     assert done >= fed / 2, f"ingest loaded {done} of {fed} lines fed: {ingest.text()}"
-    assert p95 < CEILING
+    assert p95 < BROWSE, f"95th percentile under ingest {p95 * 1000:.0f} ms"
+    assert slowest < CEILING, f"slowest request under ingest {slowest * 1000:.0f} ms"
