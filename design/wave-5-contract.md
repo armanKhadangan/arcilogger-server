@@ -1301,6 +1301,31 @@ All Wave 5 questions are answered (2026-11-02).
   keep time there too. Test: `test_the_409_names_the_keep_days_of_the_setting` sets 12 and finds
   it in the lookup's and the search's 409 and in the search's 200 `archived`.
 
+- **W5-G-21: the window step locks the chunks it drops before `drop_chunks` (#133).** On
+  TimescaleDB, `drop_chunks` locks the catalog rows of its chunks before their tables, while the
+  compression policy (`compress_chunk`, added to every time-series hypertable by `0001_baseline`)
+  locks a chunk's table before its catalog row. A `db.window` step that dropped a chunk the
+  policy had opened ended in `deadlock detected` (CI run 41669326395, TimescaleDB job, two W5-G
+  tests; the other process was the `Columnstore Policy` worker). `partitions.drop_before` now
+  takes `LOCK TABLE … IN ACCESS EXCLUSIVE MODE` on every chunk that goes (`show_chunks …
+  older_than`), in the step's transaction after `ARCIPART` and before `drop_chunks`, so it waits
+  for an open chunk without holding any catalog row; the policy finishes and commits (it commits
+  per chunk), or a recompression gives up with TimescaleDB's own 40001 and runs again next time.
+  The locks are taken in chunk-id order (`_timescaledb_functions.chunk_id_from_relid`), the order
+  in which a query's planning locks the chunks: in name order (`_10_` before `_9_`) the step
+  deadlocked with a reader of every chunk (the unbounded `min(time)` of `usage` and of the
+  lookup's window). `drop_chunks` itself locks by OID, the same order until the OID counter wraps
+  around (checked on TimescaleDB 2.30.2: after a wraparound the planner keeps chunk-id order).
+  The same chunks are locked as before, so the step's bound (W5-G-7) and the lock budget do not
+  change, and the drop and its audit entry stay in one transaction. Plain PostgreSQL has no
+  chunks and no compression policy: nothing changes there. Tests (`db/tests/test_partitions.py`,
+  TimescaleDB with compression, two or three connections, steps ordered by polling `pg_locks`):
+  `test_a_compression_that_has_opened_a_chunk_is_not_a_deadlock_for_the_drop` (a compression and
+  a recompression; both fail with the deadlock without the change),
+  `test_a_compression_that_comes_after_the_drop_has_locked_the_chunk_is_no_deadlock` (the other
+  arrival order: the compression fails with `55P03`, "chunk deleted by other transaction"),
+  `test_the_drop_locks_the_chunks_in_the_order_a_reader_does` (12 chunks; fails in name order).
+
 ## Deviations — W5-H (2026-11-03)
 
 - **W5-H-1: the first line view of an xz file decompresses more than one stream.** §5.4 says
@@ -1480,6 +1505,72 @@ All Wave 5 questions are answered (2026-11-02).
   (`useDefault`) and allows only a `token_sha256` field with exactly 64 lower-case hex digits; it
   clears those 9 matches and nothing else in the repository. No path allowlist, no rule turned
   off, `ci.yml` unchanged. Every new allowlist entry needs the manager's review.
+
+## Deviations — W5-E (2026-11-04)
+
+- **W5-E-1: the `Renew` task's rights on its state files and on `vault\renewals` come from
+  their parents.** A4 (manager on #103, 2026-11-04 00:18) asks for "create and write in
+  `vault\renewals`" and "modify on `state\renewal.json` and `state\renewal.lock`", and §4.3 gives
+  W5-E the ACL of `state\crl` and LOCAL SERVICE read on `exports\reports`. `Get-ArciAclPlan` adds
+  exactly those two entries (`state\crl`: protected, owners full control, LOCAL SERVICE Modify,
+  ArciApi and ArciWorker ReadAndExecute, no collector or ingest access; `exports\reports`: LOCAL
+  SERVICE ReadAndExecute), and none for the three A4 paths: they get A4's rights from the
+  inherited LOCAL SERVICE Modify of `vault` and `state`. An entry of its own on
+  `state\renewal.json` would be lost at the first run, since `renewal.write_state` replaces the
+  file (`atomic_write_bytes`) and the new file carries only the inherited rights of its folder.
+  W5-E adds no entry for `vault` and none below it (`vault` keeps its earlier entry), so none
+  gives a write right on a sealed day or a deletion record; their files keep the
+  `immutability.lock` deny entries. Tests:
+  `test_acl_plan_gives_the_renew_and_crlfetch_tasks_their_rights` (one assertion per A4 right,
+  no entry below `vault` or for `state\renewal*`, the exact set of folders the tasks may write),
+  `test_acl_plan_least_privilege` (`state\crl` protected, no ingest access; `exports\reports`
+  read only), and on Windows `test_acl_applied_keeps_sealed_file_deny_entries` (LOCAL SERVICE
+  keeps an inherited Modify on `state\renewal.json` after two `atomic_write_bytes` calls).
+- **W5-E-2: how the Sistem page judges `Renew` and `CrlFetch`.** §3 W5-E says only "`TaskName`
+  in the API and the web", and C12/A4 say to judge both tasks from their state files, not from
+  their exit codes. Both rows come after ApplySystem, are `late` after 26 h as the other daily
+  tasks, and are never `not_used` (both run for every provider). **Renew** shows `last_run.at` of
+  `state/renewal.json`, not its top-level `at` (a run that does not know the pinned roots keeps
+  the earlier `at`, W5-A-2), so a dry run, which keeps `last_run`, is no evidence. **CrlFetch**
+  shows the newest of `lists[].fetched_at` and `failures[].at` of `state/crl/index.json`, read with
+  W5-C's `read_crl_index` (another schema is unreadable). A time later than now is no evidence,
+  and a file that cannot be read shows `missing` and never fails the request. The row says the
+  task ran: a refused or failed Renew run, or a fetch with failures only, is `ok` there, and
+  whether it succeeded is `R20-renewal`'s and `R20-crl`'s question (the Backup row's precedent;
+  the API has no failing task state). A run that finds its lock held writes nothing (W5-A-2,
+  W5-B-2), so it leaves no evidence. Tests:
+  `test_renew_and_crlfetch_are_judged_by_their_state_files` (`api/tests/test_system_health.py`;
+  the files are written by W5-A's `write_state` and the real `crl.fetch`), and
+  `test_read_renew_runs_from_the_writers_file`.
+- **W5-E-3: `R20-renewal`'s "failed twice in a row".** §2.3.1 raises it "also when the `Renew`
+  task failed twice in a row"; A4 makes that `failures_in_a_row >= 2` of `state/renewal.json`
+  (`RENEW_FAILURES_ALERT = 2`, read with `read_renew_runs`, never from the exit code). The count
+  decides even while the token list is unknown, because a refused run without pinned roots writes
+  no `tokens` (W5-A-2):
+
+  | tokens | `failures_in_a_row` | `R20-renewal:none` |
+  |---|---|---|
+  | unknown (no token list, unreadable) | known, ≥ 2 | raised |
+  | unknown | < 2 or unknown | an open alert stays (W5-C-1) |
+  | known, a `due` or `uncovered` token | any | raised |
+  | known, none due | ≥ 2 | raised |
+  | known, none due | < 2 | resolved (`renewal_ok`) |
+  | known, none due | unknown | an open alert stays |
+
+  A count that is not a whole number ≥ 0 (text, bool, float, negative, null, a list) is unknown;
+  a file without `failures_in_a_row` counts as 0, as `renewal.write_state` reads it. W5-A's
+  writer continues a damaged count differently (`True` as 1, `"two"` as 0); only a hand-edited
+  file has one, and the failure branch then decides nothing until the next run writes a number
+  (the rows with "unknown" above). The details are `due`, `uncovered` (both null while the
+  tokens are unknown), `failures_in_a_row` and `title_en`: counts only. The check reads the file
+  twice (W5-C's token reader and `read_renew_runs`); a run in between can pair the earlier tokens
+  with the new count, each half is true of a file the task wrote, and the next pass reads both
+  alike. Tests:
+  `test_stamp_renewal_raised_after_two_failed_runs`, `test_stamp_renewal_refused_runs_count`,
+  `test_stamp_renewal_failures_without_tokens_raise`,
+  `test_stamp_renewal_cleared_after_a_successful_run` (a dry run keeps the failures),
+  `test_stamp_renewal_unreadable_runs_decide_nothing` and
+  `test_read_renew_runs_from_the_writers_file` (`worker/tests/test_alerts_legal.py`).
 
 ## Deviations — #119 (2026-11-04)
 

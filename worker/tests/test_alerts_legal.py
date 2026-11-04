@@ -1,8 +1,9 @@
-"""``alerts.system``: the prepared legal-validity checks of Wave 5 contract 2.3.1 — re-stamping
+"""``alerts.system``: the legal-validity checks of Wave 5 contract 2.3.1 — re-stamping
 (``R20-renewal``), the time-stamp certificate (``R20-cert``) and the revocation lists
 (``R20-crl``) — run as ``alerts.system`` runs its checks, with :data:`~arcilogger_worker.alerts.
-system.LEGAL_CHECKS` in place of the registered ones (W5-E switches them on). Their e-mails name
-no certificate and no person, and until W5-E no Python string constant spells a whole code (D14).
+system.LEGAL_CHECKS` in place of the registered ones (one test runs every registered check).
+Their e-mails name no certificate and no person, and only the alerts' own modules spell a whole
+code (D14: W5-E switched them on).
 
 The state files are written as their writers write them (``test_alerts_legal_state.py``)."""
 
@@ -27,6 +28,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from arcilogger_core.config import Config
 from arcilogger_core.crl import parse_crl
 from arcilogger_core.layout import Layout
+from arcilogger_core.renewal import LastRun, write_state
 from arcilogger_core.timeutil import isoformat_site
 from arcilogger_core.tsa.mock import MockTsa
 from arcilogger_core.tsa.verify import fingerprint
@@ -37,13 +39,27 @@ from arcilogger_worker.alerts.mail import MailItem, render_html, render_text, su
 from arcilogger_worker.alerts.system import (
     CERT_EXPIRY_WARNING,
     CERT_KEY,
+    CERT_RULE,
     CRL_INDEX_SCHEMA,
     CRL_KEY,
+    CRL_RULE,
     LEGAL_CHECKS,
+    RENEW_FAILURES_ALERT,
     RENEWAL_KEY,
+    RENEWAL_RULE,
+    RenewRuns,
     crl_index_path,
+    read_renew_runs,
     run_system_checks,
     stamp_renewal_path,
+)
+from arcilogger_worker.alerts.texts import (
+    DESCRIBERS,
+    RULES,
+    UNKNOWN_RUNBOOK,
+    describe,
+    rule_text,
+    runbook,
 )
 from arcilogger_worker.vaulttesting import SealedVault, at_site, make_vault
 
@@ -55,10 +71,12 @@ REVOKED = (
     "legal review is recommended."
 )
 URL = "https://arcilogger.example.com"
-#: The alert codes whose whole-string constants only W5-E adds (D14).
+#: The alert codes whose whole-string constants only the switch-on package W5-E adds (D14).
 WAVE5_CODES = frozenset({"R20-renewal", "R20-cert", "R20-crl"})
 #: The registered checks (the fixture below replaces them for each test).
 REGISTERED = system.CHECKS
+#: The dedup keys of the three alerts.
+KEYS = (RENEWAL_KEY, CERT_KEY, CRL_KEY)
 
 
 @pytest.fixture(autouse=True)
@@ -259,6 +277,150 @@ def test_stamp_renewal_unknown_report_decides_nothing(check: Any, layout: Layout
     assert RENEWAL_KEY in check()  # unreadable: neither raised again nor resolved
     write(stamp_renewal_path(layout), {"tokens": "none"})
     assert RENEWAL_KEY in check()
+
+
+#: The exit code of each ``last_run.outcome`` (W5-A-9).
+EXIT_CODES: dict[str, int] = {"renewed": 0, "not_needed": 0, "refused": 2, "failed": 3}
+
+
+def renew_runs(layout: Layout, *outcomes: str) -> None:
+    """``state/renewal.json`` after the ``Renew`` task's runs ``outcomes``, written by W5-A's
+    writer as the task writes it when its statuses cannot be computed (the token list, if any,
+    is kept). ``dry`` is a dry run: it keeps ``last_run`` and ``failures_in_a_row``."""
+    for number, outcome in enumerate(outcomes):
+        at = NOW - timedelta(hours=len(outcomes) - number)
+        last_run = None
+        if outcome != "dry":
+            error = {"refused": "roots", "failed": "tsa_unavailable"}.get(outcome)
+            last_run = LastRun(at, outcome, EXIT_CODES[outcome], error=error)  # type: ignore[arg-type]
+        write_state(layout, None, at=at, renew_before=180, last_run=last_run)
+
+
+def test_stamp_renewal_raised_after_two_failed_runs(check: Any, layout: Layout) -> None:
+    """Contract 2.3.1 and A4: "the Renew task failed twice in a row" is ``failures_in_a_row``
+    of ``state/renewal.json`` at least 2, read from the file, never from an exit code."""
+    assert RENEW_FAILURES_ALERT == 2
+    renewals(layout, ("not_due", NOW + timedelta(days=400)))
+    renew_runs(layout, "renewed", "failed")
+    assert json.loads(stamp_renewal_path(layout).read_bytes())["failures_in_a_row"] == 1
+    assert RENEWAL_KEY not in check()  # negative: one failure
+    renew_runs(layout, "failed")
+    alert = check()[RENEWAL_KEY]
+    assert (alert.rule, alert.severity) == ("R20-renewal", "high")
+    assert alert.details == {
+        "due": 0,
+        "uncovered": 0,
+        "failures_in_a_row": 2,
+        "title_en": "Re-stamping needed: the Renew task failed 2 times in a row",
+    }
+    assert alert.title == "Yeniden damgalama gerekiyor: Renew görevi art arda 2 kez başarısız oldu"
+    assert describe(RENEWAL_RULE, alert.details) == (
+        "Renew görevi art arda 2 kez başarısız oldu.",
+        "The Renew task failed 2 times in a row.",
+    )
+    renew_runs(layout, "failed")
+    assert check()[RENEWAL_KEY].details["failures_in_a_row"] == 3  # brought up to date
+
+
+def test_stamp_renewal_refused_runs_count(check: Any, layout: Layout) -> None:
+    """A refused run (exit 2: the configuration, for example no pinned root) counts like a
+    failed one (A4)."""
+    renewals(layout, ("not_due", NOW + timedelta(days=400)))
+    renew_runs(layout, "refused")
+    assert RENEWAL_KEY not in check()
+    renew_runs(layout, "failed")
+    assert check()[RENEWAL_KEY].details["failures_in_a_row"] == 2
+    renew_runs(layout, "not_needed", "refused", "refused")
+    assert check()[RENEWAL_KEY].details["failures_in_a_row"] == 2
+
+
+def test_stamp_renewal_failures_without_tokens_raise(check: Any, layout: Layout) -> None:
+    """A refused run without pinned roots computes no statuses and writes no token list
+    (W5-A-2): the tokens are unknown, the failures still raise the alert."""
+    renew_runs(layout, "refused")
+    assert "tokens" not in json.loads(stamp_renewal_path(layout).read_bytes())
+    assert RENEWAL_KEY not in check()
+    renew_runs(layout, "refused")
+    alert = check()[RENEWAL_KEY]
+    assert alert.details == {
+        "due": None,
+        "uncovered": None,
+        "failures_in_a_row": 2,
+        "title_en": "Re-stamping needed: the Renew task failed 2 times in a row",
+    }
+    assert describe(RENEWAL_RULE, alert.details)[1] == "The Renew task failed 2 times in a row."
+
+
+def test_stamp_renewal_cleared_after_a_successful_run(
+    check: Any, layout: Layout, db_session: Session
+) -> None:
+    later = NOW + timedelta(days=100)
+    renewals(layout, ("due", later))
+    renew_runs(layout, "failed", "failed")
+    alert = check()[RENEWAL_KEY]
+    assert (alert.details["due"], alert.details["failures_in_a_row"]) == (1, 2)
+    assert alert.title == (
+        "Yeniden damgalama gerekiyor: 1 damganın zamanı geldi, 0 damga yeniden damgalanmadan "
+        "sona erdi; Renew görevi art arda 2 kez başarısız oldu"
+    )
+    assert alert.details["title_en"] == (
+        "Re-stamping needed: 1 stamp(s) due, 0 expired without re-stamping; the Renew task "
+        "failed 2 times in a row"
+    )
+    assert describe(RENEWAL_RULE, alert.details) == (
+        "1 damganın yeniden damgalama zamanı geldi, 0 damganın sertifikası yeniden "
+        "damgalanmadan sona erdi. Renew görevi art arda 2 kez başarısız oldu.",
+        "1 stamp(s) due for re-stamping, 0 expired without it. The Renew task failed 2 times "
+        "in a row.",
+    )
+    renewals(layout, ("covered", later))  # a new report, then two more failed runs
+    renew_runs(layout, "failed", "failed")
+    assert check()[RENEWAL_KEY].details["due"] == 0  # nothing due, the failures hold it open
+    renew_runs(layout, "dry")  # a dry run keeps them
+    assert RENEWAL_KEY in check()
+    renew_runs(layout, "renewed")
+    assert RENEWAL_KEY not in check()
+    reason = resolved(db_session, RENEWAL_KEY).details["auto_resolved"]["reason"]
+    assert reason == "renewal_ok"
+
+
+def test_stamp_renewal_unreadable_runs_decide_nothing(check: Any, layout: Layout) -> None:
+    renewals(layout, ("not_due", NOW + timedelta(days=400)))
+    renew_runs(layout, "failed", "failed")
+    assert RENEWAL_KEY in check()
+    path = stamp_renewal_path(layout)
+    state = json.loads(path.read_bytes())
+    for damaged in ("two", True, -1, 1.5, None, [2]):
+        write(path, {**state, "failures_in_a_row": damaged})
+        assert RENEWAL_KEY in check(), damaged  # nothing due, failures unknown: kept
+    path.write_text('{"tokens": [', encoding="utf-8")
+    assert RENEWAL_KEY in check()
+    write(path, {**state, "tokens": "none"})  # failures known, tokens unknown: still raised
+    assert check()[RENEWAL_KEY].details["due"] is None
+    # A file without the count records no failure, as the writer reads it.
+    write(path, {key: value for key, value in state.items() if key != "failures_in_a_row"})
+    assert RENEWAL_KEY not in check()
+
+
+def test_read_renew_runs_from_the_writers_file(layout: Layout) -> None:
+    """The reader of the Sistem page's Renew row and of R20-renewal, against W5-A's writer."""
+    assert read_renew_runs(layout) == RenewRuns()  # no file: no run, no failure
+    renew_runs(layout, "refused")
+    first = read_renew_runs(layout)
+    assert first == RenewRuns(NOW - timedelta(hours=1), "refused", 1)
+    renew_runs(layout, "dry")
+    assert read_renew_runs(layout) == first  # a dry run changes neither
+    renew_runs(layout, "not_needed")
+    assert read_renew_runs(layout) == RenewRuns(NOW - timedelta(hours=1), "not_needed", 0)
+    path = stamp_renewal_path(layout)
+    state = json.loads(path.read_bytes())
+    write(path, {**state, "failures_in_a_row": True, "last_run": {"at": 5, "outcome": 3}})
+    assert read_renew_runs(layout) == RenewRuns(None, None, None)
+    write(path, {"tokens": []})
+    assert read_renew_runs(layout) == RenewRuns(None, None, 0)
+    for damaged in ("{", "[]", '"x"'):
+        path.write_text(damaged, encoding="utf-8")
+        assert read_renew_runs(layout) is None, damaged
 
 
 # -- R20-cert -------------------------------------------------------------------------------------
@@ -575,6 +737,19 @@ def test_legal_alert_mails_carry_no_names_and_no_log_lines(
         shown = alert.title + json.dumps(alert.details, ensure_ascii=False)
         for hidden in ("Örnek", "Mock", "192.0.2.", "manifest-", ".crl"):
             assert hidden not in shown, hidden
+    # What an e-mail and the alert detail can say of the three codes: the catalogue line, the
+    # facts of the details and the runbook.
+    for item in items:
+        text = rule_text(item.rule)
+        catalogue = (
+            text.name_tr, text.name_en, text.action_tr, text.action_en,
+            *describe(item.rule, item.details), *runbook(item.rule),
+        )  # fmt: skip
+        for line in catalogue:
+            for hidden in ("Örnek", "Test TSA", "Mock TSA", "CN=", "192.0.2.", "manifest-"):
+                assert hidden not in line, (item.rule, hidden)
+            for claim in ("uyumlu", "garanti", "compliant"):
+                assert claim not in line.lower(), (item.rule, claim)
 
 
 # -- D14 ------------------------------------------------------------------------------------------
@@ -594,13 +769,64 @@ def _code_constants() -> list[str]:
     return found
 
 
-def test_no_whole_string_constant_for_the_wave5_alert_codes() -> None:
-    """D14: only the switch-on package W5-E adds the whole-string constants ``R20-renewal``,
-    ``R20-cert`` and ``R20-crl``, with their texts and first-steps guide rows. Until then the
-    checks write each code only inside its dedup key.
+def test_the_wave5_alert_codes_are_switched_on() -> None:
+    """D14: the switch-on package W5-E added the whole-string constants ``R20-renewal``,
+    ``R20-cert`` and ``R20-crl`` with their catalogue texts, runbooks and first-steps guide rows
+    (``tests/test_docs_consistency.py::test_first_steps_explain_every_alert_code``), and
+    registered the three checks, last. Only the alerts' own modules spell a whole code."""
+    found = {Path(where.split(":", 1)[0]).as_posix() for where in _code_constants()}
+    assert found == {
+        "worker/src/arcilogger_worker/alerts/system.py",
+        "worker/src/arcilogger_worker/alerts/texts.py",
+    }
+    assert {RENEWAL_RULE, CERT_RULE, CRL_RULE} == WAVE5_CODES
+    assert KEYS == ("R20-renewal:none", "R20-cert:none", "R20-crl:none")
+    assert tuple(system._rule_of(key) for key in KEYS) == (RENEWAL_RULE, CERT_RULE, CRL_RULE)
+    assert REGISTERED[-len(LEGAL_CHECKS) :] == LEGAL_CHECKS
+    assert len({name for name, _ in REGISTERED}) == len(REGISTERED)
+    for code in sorted(WAVE5_CODES):
+        assert code in RULES, code
+        assert code in DESCRIBERS, code
+        assert runbook(code) != UNKNOWN_RUNBOOK, code
+    # The texts' 30 days are alerts.system's (which imports alerts.texts).
+    expiring = describe(CERT_RULE, {"revoked": 0, "expiring": 1, "uncovered": 0})
+    assert all(f"{CERT_EXPIRY_WARNING.days} " in sentence for sentence in expiring)
+    assert f"{CERT_EXPIRY_WARNING.days} gün" in runbook(CERT_RULE)[0]
+    # So is the number of failed Renew runs that raises R20-renewal.
+    for failures, told in ((RENEW_FAILURES_ALERT, True), (RENEW_FAILURES_ALERT - 1, False)):
+        facts = describe(RENEWAL_RULE, {"due": 0, "uncovered": 0, "failures_in_a_row": failures})
+        assert ("Renew" in facts[0] and "Renew" in facts[1]) is told, failures
 
-    W5-E: delete or invert this test in the pull request that adds the constants."""
-    assert _code_constants() == []
-    assert {system._rule_of(key) for key in (RENEWAL_KEY, CERT_KEY, CRL_KEY)} == WAVE5_CODES
-    # Prepared, not switched on (W5-E appends them).
-    assert {check for _, check in REGISTERED} & {check for _, check in LEGAL_CHECKS} == set()
+
+def test_registered_checks_raise_and_clear_the_legal_alerts(
+    monkeypatch: pytest.MonkeyPatch,
+    check: Any,
+    layout: Layout,
+    db_session: Session,
+    sealed: SealedVault,
+) -> None:
+    """Wave 5 contract §3 W5-C, "alert raise/clear for the three codes (after W5-E)": with every
+    registered check, as the worker runs them."""
+    monkeypatch.setattr(system, "CHECKS", REGISTERED)
+    renewals(layout, ("due", NOW + timedelta(days=10)))
+    revoked_day(layout)
+    crl_lists(sealed, 9, failures=(FAILURE,))
+    alerts = check()
+    assert {key: (alerts[key].rule, alerts[key].severity) for key in alerts if key in KEYS} == {
+        RENEWAL_KEY: ("R20-renewal", "high"),
+        CERT_KEY: ("R20-cert", "critical"),
+        CRL_KEY: ("R20-crl", "medium"),
+    }
+    renewals(layout, ("covered", NOW + timedelta(days=10)))
+    write(
+        layout.state / "verify" / "last-day.json",
+        {"at": isoformat_site(NOW, "seconds"), "deep": False, "checks": []},
+    )
+    crl_lists(sealed, 1)
+    assert set(check()) & set(KEYS) == set()
+    reasons = {key: resolved(db_session, key).details["auto_resolved"]["reason"] for key in KEYS}
+    assert reasons == {
+        RENEWAL_KEY: "renewal_ok",
+        CERT_KEY: "certificate_ok",
+        CRL_KEY: "crl_fresh",
+    }

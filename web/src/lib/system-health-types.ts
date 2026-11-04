@@ -13,7 +13,9 @@ export type TaskName =
   | 'ClockCheck'
   | 'Backup'
   | 'Requests'
-  | 'ApplySystem';
+  | 'ApplySystem'
+  | 'Renew'
+  | 'CrlFetch';
 
 export interface ServiceHealth {
   name: ServiceName;

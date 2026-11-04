@@ -71,6 +71,9 @@ file whose data is empty is not written. The Uyum Durumu and Sistem samples (``c
 ``system.json``, ``system-disk.json``, ``system-health.json``; Wave 4 contract 2.3, 2.5, 2.6)
 come from ``samples_compliance.py`` and ``samples_system.py``, run on the main site after the
 others (the cards read the whole site; the Sistem samples fix what the host would say). The
+legal-validity samples (``legal-status.json``; Wave 5 contract 2.3.1) come from
+``samples_legal_status.py``, run after the Sistem samples and before the archive's, with a
+configuration and state files of their own for each case, put back afterwards. The
 archive reload samples (``archive.json``; Wave 5 contract §5) come from ``samples_archive.py``,
 run last on the main site with the database window narrowed for their time. The
 Wave 3 lookups (FortiGate DHCP alone, srcmac, the internet exits' cases, a source clock, an
