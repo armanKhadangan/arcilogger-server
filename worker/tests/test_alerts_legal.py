@@ -537,6 +537,9 @@ def test_a_dry_run_after_an_upgrade_leaves_the_alerts_as_they_are(
         },
     )
     before = earlier.read_bytes()
+    # The runbook names both files, as the Sistem page's Renew row does (W5-E-4).
+    for text in runbook(RENEWAL_RULE):
+        assert "\\state\\renewal\\renewal.json" in text and "\\state\\renewal.json" in text
 
     def seen() -> dict[str, tuple[str, str, str, dict[str, Any]]]:
         found = check()
