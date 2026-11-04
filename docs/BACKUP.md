@@ -286,7 +286,17 @@ uncompressed; verify on site); the installer checks it before any change and ref
 database is created in the default tablespace (`pg_default`), where the installer puts its
 database too. The rows written between the dump and the restore are only in the replaced
 database; it takes disk space until you remove it, which is the owner's decision (as in step 4
-above). A failed restore leaves the current database as it was. On TimescaleDB the replaced
+above). A failed restore leaves the current database as it was. After a rollback's swap the
+database services (`ArciIngest`, `ArciApi`, `ArciWorker`, `ArciAdmin`) stay stopped after any
+failed restore: the previous version must not run on this version's database. Without
+`ARCILOGGER.previous` (database only) they stay stopped too once the restore has begun to change
+the database (the current database's `timescaledb_pre_restore()` or `CREATE DATABASE`); a restore
+refused before that (answered `H`, dump not found, PostgreSQL not reachable, a locale that is not
+libc, too little free space) changed nothing, and the services are put back as they were: those
+that ran on automatic start are set to automatic (delayed) start again and started, one that ran
+on manual start is started and keeps it, those that were stopped on manual start (after a failed
+upgrade) stay so; the installer says so, or names a service it could not put back with the
+command that does it. On TimescaleDB the replaced
 database stays in TimescaleDB's restore mode (`timescaledb.restoring = on`, set by
 `timescaledb_pre_restore()` and kept by the rename; its background jobs do not run): run
 `SELECT timescaledb_post_restore();` in it before putting it back (renaming it into place or

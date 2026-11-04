@@ -1172,7 +1172,11 @@ kalan oturumu adıyla yazar).
 
 Geri yükleme program klasörleri değiştirildikten sonra (ya da `ARCILOGGER.previous` olmadan)
 başarısız olursa veritabanı hizmetleri durur ve kurulum programı yeniden çalıştırılacak komutu
-yazar. Yeniden adlandırma tamamlandıktan sonra bir adım başarısız olursa bunu söyler: geri yüklemeyi
+yazar. `ARCILOGGER.previous` olmadan, geri yükleme veritabanını değiştirmeye başlamadan önce
+reddedildiyse (soruya `H` yanıtı, yedek yok, PostgreSQL'e ulaşılamıyor, yerel ayar ya da boş alan
+reddi) veritabanı hizmetleri önceki durumlarına getirilir: çalışanlar yeniden başlar, elle
+başlatmada durmuş olanlar öyle kalır ([YEDEKLEME.md](YEDEKLEME.md) bölüm 5). Yeniden adlandırma
+tamamlandıktan sonra bir adım başarısız olursa bunu söyler: geri yüklemeyi
 yeniden çalıştırmayın (geri yüklenen veritabanını bir kez daha değiştirir); TimescaleDB'de
 `timescaledb_post_restore()` çalışmadıysa onu ve veritabanı hizmetlerini başlatacak komutu yazar.
 Yeniden çalıştırma komutunu **bu** sürümün kurulum betiğiyle, kenara konduğu klasördeki kopyayla
