@@ -380,11 +380,12 @@ NOT_AFTER = datetime(2031, 8, 30, 21, 30, tzinfo=UTC)
 
 
 def write_renewals(layout: Layout, *tokens: dict[str, Any]) -> None:
-    """``state/renewal.json`` with the per-token fields of 2.1.2 and the totals per status."""
+    """``state/renewal/renewal.json`` with the per-token fields of 2.1.2 and the totals per
+    status."""
     totals = dict.fromkeys(("not_due", "due", "covered", "late", "uncovered"), 0)
     for entry in tokens:
         totals[entry["status"]] += 1
-    path = layout.state / "renewal.json"
+    path = layout.state / "renewal" / "renewal.json"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps({"tokens": list(tokens), "totals": totals}), encoding="utf-8")
 
@@ -631,7 +632,7 @@ def test_day_detail_renewal_null_without_a_report(
 def test_day_detail_renewal_survives_a_corrupt_report(
     client: TestClient, login_as: Login, vault: SealedVault, layout: Layout, content: bytes
 ) -> None:
-    path = layout.state / "renewal.json"
+    path = layout.state / "renewal" / "renewal.json"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(content)
     login_as(client, "auditor")

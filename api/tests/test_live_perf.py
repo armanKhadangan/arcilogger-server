@@ -6,9 +6,10 @@ a typed filter.
   three readers — stays at or below 0.4 s per wall second on a core as fast as CI's runners.
 * The event loop's CPU a delivered line (the SSE side: each stream's events, Starlette's and
   Uvicorn's writes), counted in lines of the gauge, stays at or below its bound. On CI (and with
-  ``ARCILOGGER_PERF_STRICT=1``) the bound is tighter on a faster core: a costlier write path
-  fails on a fast runner and on a slow one alike. Elsewhere it is a flat ``OFF_CI_GAUGE_LINES``,
-  and CI's bound and the margin to it are shown, not asserted.
+  ``ARCILOGGER_PERF_STRICT=1``) the bound is tighter on a faster core, down to a floor: a costlier
+  write path fails on a fast runner and on a slow one alike (``test_ci_bound_on_ci_readings``
+  holds it to CI's readings). Elsewhere it is a flat ``OFF_CI_GAUGE_LINES``, and CI's bound and
+  the margin to it are shown, not asserted.
 * That split is not a fix of the root cause (#125). On some cloud-session hosts the gauge runs
   warm (the fastest of back-to-back rounds, mostly C library code) and the SSE path cold (short
   runs of interpreted code after the loop idled): at the same gauge CI's ubuntu-latest read 11.71
@@ -60,6 +61,8 @@ from .test_live_api import STREAM_HEADERS, Reader, traffic
 
 pytestmark = pytest.mark.perf
 
+#: CI's figures below are windows-latest's on Windows and ubuntu-latest's on every other system.
+SYSTEM = "win32" if sys.platform == "win32" else "linux"
 LINES_PER_SECOND = 10_000
 SECONDS = 10
 #: The test process's CPU a wall second on a core like CI's runners (0.18 to 0.37 s/s there).
@@ -70,7 +73,8 @@ CPU_PER_SECOND = 0.4
 #: seven on each system: windows-latest 9.13 to 17.76 us, ubuntu-latest 7.88 to 15.90 us. Other
 #: systems take Linux's figures. Three later runs on each system (41455124190, 41465153350,
 #: 41478486887; ubuntu-latest up to 16.04 us, inside the tolerance) passed with these figures.
-REFERENCE_GAUGE = 17.76e-6 if sys.platform == "win32" else 15.90e-6
+REFERENCE_GAUGES = {"win32": 17.76e-6, "linux": 15.90e-6}
+REFERENCE_GAUGE = REFERENCE_GAUGES[SYSTEM]
 #: A gauge up to this many times the reference leaves the CPU a second at 0.4 s (the gauge's
 #: noise); beyond it the bound grows with the excess only, so a gauge that reads high never
 #: loosens it by more than its excess over the tolerance.
@@ -86,9 +90,11 @@ STRICT = (
 #: 40 % costlier fails on a fast runner as on a slow one. From the ten runs above, 41477960420,
 #: 41617780788 and 41633136399 (13 on each system), each brought to the reference by
 #: ``LOOP_EXPONENT``: at least 1.10 times the costliest and below 1.4 times the cheapest / 1.05.
-#: ubuntu-latest read 5.10 to 6.14 there (6.76 to 6.80 allowed), windows-latest 4.49 to 5.01
-#: (5.51 to 5.99); a path 40 % costlier is over the limit by at least 5.1 % and 12.3 %.
-LOOP_GAUGE_LINES = 5.6 if sys.platform == "win32" else 6.8
+#: ubuntu-latest read 5.10 to 6.14 there (6.76 to 6.80 allowed), windows-latest 4.33 to 5.01
+#: (5.51 to 5.77, with windows-latest's floor of 0.7); a path 40 % costlier is over the limit by
+#: at least 5.1 % and 8.2 %.
+LOOP_GAUGE_LINES_BY_SYSTEM = {"win32": 5.6, "linux": 6.8}
+LOOP_GAUGE_LINES = LOOP_GAUGE_LINES_BY_SYSTEM[SYSTEM]
 #: A faster core gets a tighter limit, in gauge lines: the limit goes with the gauge, relative to
 #: the reference, to this power. On those runs the loop's CPU a line went with the gauge to the
 #: power 1.25 on ubuntu-latest and 1.20 on windows-latest (log-log slopes); their mean less 1 is
@@ -101,13 +107,47 @@ LOOP_EXPONENT = 0.20
 #: Linux cloud sessions only: on a Windows machine off CI it is loose by far (windows-latest read
 #: 4.03 to 4.98).
 OFF_CI_GAUGE_LINES = 9.4
-#: Below this fraction of the reference the limit no longer falls, in gauge lines. CI's gauges ran
-#: from about 0.5 to 1 times the reference (the fastest at the floor); the bound is shown to hold
-#: over that range.
-LOOP_FLOOR = 0.5
+#: Below this fraction of the reference the limit no longer falls, in gauge lines. ubuntu-latest:
+#: 0.5, where the fit above had a reading (41414800703, 7.88 us, 4.54). windows-latest: 0.7
+#: (#157); the fit had no runner of it below 0.51. Its seven fastest readings to date (8.61 to
+#: 9.28 us, speed 0.48 to 0.52; jobs 126533986627, 126041887269, 126380950814, 126457680808,
+#: 126339541553 and the fit's 125153105570 and 125388444835) read 4.03 to 5.01, median 4.57, no
+#: less than its 15 runners at 0.70 to 0.76 (12.44 to 13.42 us: 4.21 to 4.84, median 4.43):
+#: below 0.7 the figure no longer falls with the gauge. 0.5's limit (4.88) failed sound code at
+#: 8.61 us (5.01, run 41818104722) and 8.79 us (4.92, run 41771172349); 0.7's, 5.21, is 4.1 %
+#: above the costliest of the seven and 1.2 times their median 5.2 % above it. Over CI's 136
+#: readings of 2026-11-02 to 11-04 (70 windows-latest, 66 ubuntu-latest) every one passes (by
+#: 2.1 % at least on each system), a path 1.4 times as costly fails on all 136 and one 1.2 times
+#: as costly on 72.
+LOOP_FLOORS = {"win32": 0.7, "linux": 0.5}
+LOOP_FLOOR = LOOP_FLOORS[SYSTEM]
 #: A cycle counts in the event loop's figure when at least this many of its lines reached the
 #: streams (about 150 in a busy one).
 CYCLE_LINES = 50
+#: CI's readings ``test_ci_bound_on_ci_readings`` holds the bound to (#157): the system, the
+#: throughput guard's job, its gauge (us), its event loop's figure (gauge lines), a factor on that
+#: figure and whether the product passes. Of the 136 readings above, at the reference (speed 0.9
+#: and up) and below 0.6 of it on each system: the costliest passes, a loop 20 % costlier fails
+#: on the median runner and on the costliest, and one 40 % costlier on the cheapest. On
+#: ubuntu-latest at the reference 20 % fails on 18 of its 38 runners only, not on the median
+#: (5.63, job 125907495605: 0.3 % under the limit); 6.8 there is #129's, unchanged.
+CI_READINGS = [
+    ("win32", 126226298897, 17.56, 5.47, 1.0, True),
+    ("win32", 126533986627, 8.61, 5.01, 1.0, True),
+    ("win32", 126357487502, 17.24, 4.70, 1.2, False),
+    ("win32", 126041887269, 8.78, 4.57, 1.2, False),
+    ("win32", 126226298897, 17.56, 5.47, 1.2, False),
+    ("win32", 126533986627, 8.61, 5.01, 1.2, False),
+    ("win32", 126476924796, 16.26, 4.26, 1.4, False),
+    ("win32", 125153105570, 9.13, 4.03, 1.4, False),
+    ("linux", 126399858478, 15.77, 6.47, 1.0, True),
+    ("linux", 126075098521, 8.40, 5.86, 1.0, True),
+    ("linux", 125388444265, 8.65, 5.39, 1.2, False),
+    ("linux", 126399858478, 15.77, 6.47, 1.2, False),
+    ("linux", 126075098521, 8.40, 5.86, 1.2, False),
+    ("linux", 126151620758, 15.26, 4.86, 1.4, False),
+    ("linux", 126431632764, 8.57, 4.51, 1.4, False),
+]
 #: Lines in a round of the gauge (about 30 ms) and rounds before the burst and again after it.
 GAUGE_LINES = 2_000
 GAUGE_ROUNDS = 8
@@ -241,9 +281,7 @@ def test_three_streams_under_ten_thousand_lines_a_second(
         gauge = Gauge.of(rounds + later)
         # a core slower than the tolerance allows raises the bound by its excess only
         scale = max(1.0, gauge.seconds / (TOLERANCE * REFERENCE_GAUGE))
-        # a core faster than the reference gets a tighter limit a line, in gauge lines
-        speed = min(max(gauge.seconds / REFERENCE_GAUGE, LOOP_FLOOR), 1.0)
-        ci_limit = LOOP_GAUGE_LINES * speed**LOOP_EXPONENT
+        ci_limit, speed = strict_limit(gauge.seconds)
         limit = ci_limit if STRICT else OFF_CI_GAUGE_LINES
         # In gauge lines, the median of the busy cycles: a pause in one of them (a garbage
         # collection, a neighbour) does not move it. A run that delivered nothing fails below,
@@ -308,6 +346,25 @@ def test_three_streams_under_ten_thousand_lines_a_second(
         for client, stream_id in zip(clients, streams, strict=True):
             client.delete(f"/api/v1/live/streams/{stream_id}", headers=STREAM_HEADERS)
             client.close()
+
+
+def strict_limit(gauge: float, system: str = SYSTEM) -> tuple[float, float]:
+    """CI's bound on the event loop's CPU a delivered line, in gauge lines, for a gauge of
+    ``gauge`` seconds a line on ``system``, and the speed factor it rests on: a core faster than
+    the reference gets a tighter limit, down to the system's floor."""
+    speed = min(max(gauge / REFERENCE_GAUGES[system], LOOP_FLOORS[system]), 1.0)
+    return LOOP_GAUGE_LINES_BY_SYSTEM[system] * speed**LOOP_EXPONENT, speed
+
+
+@pytest.mark.parametrize(("system", "job", "gauge", "lines", "factor", "passes"), CI_READINGS)
+def test_ci_bound_on_ci_readings(
+    system: str, job: int, gauge: float, lines: float, factor: float, passes: bool
+) -> None:
+    """CI's bound passes CI's sound readings and fails a costlier event loop (#157): the
+    figure of a loop ``factor`` times as costly as job ``job``'s, against the limit the live test
+    asserts for that gauge."""
+    limit, _ = strict_limit(gauge * 1e-6, system)
+    assert (lines * factor <= limit) is passes, (job, round(lines * factor, 3), round(limit, 3))
 
 
 def _settled(hub: Hub, stream_id: str, written: int) -> bool:

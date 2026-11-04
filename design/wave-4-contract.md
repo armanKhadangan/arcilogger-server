@@ -1896,6 +1896,18 @@ otherwise), `LOOP_FLOOR` and the cycles are unchanged.
 
   Detection on CI rests on this arithmetic: no CI run has yet injected +40 % or +400 µs (the
   diagnostic draft pull request after this one does, on both perf jobs).
+- **#157-1 (2026-11-04): `LOOP_FLOOR` is 0.7 on windows-latest, 0.5 elsewhere.** The fit above
+  had no windows-latest reading below speed 0.51; its first ones at 0.48–0.49 (8.61–8.79 µs)
+  read 4.05–5.01 gauge lines, and 0.5's limit (4.88) failed sound code twice (runs 41818104722,
+  5.01, and 41771172349, 4.92). Its seven readings below 0.6 (median 4.57) are no cheaper than
+  its fifteen at 0.70–0.76 (median 4.43): below 0.7 the figure stops falling with the gauge. The
+  limit there is now 5.21 (+4.1 % over 5.01; 1.2 × the median fails by 5.2 %); speed 0.7 and
+  up and ubuntu-latest are unchanged. Over CI's 136 readings of 2026-11-02 to 11-04 every one
+  passes (at least +2.1 % on each system) and 1.4× fails all; #125-2's windows-latest window
+  becomes [5.511, 5.771), still holding 5.6, and 1.4× fails its 13 by at least 8.2 % (was
+  12.3 %). `test_ci_bound_on_ci_readings` holds the bound to 15 named readings: the costliest
+  passes, 1.2× the median (not on ubuntu-latest at the reference, where 6.8 lets 20 of its 38
+  runners through) and 1.4× the cheapest fail.
 
 ---
 

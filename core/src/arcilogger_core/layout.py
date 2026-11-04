@@ -14,6 +14,7 @@
                                                administration and their results (ADR-0014)
     state/crl/                                 verified revocation lists (SİL/CRL) and their
                                                index.json, never deleted
+    state/renewal/                             renewal.json and renewal.lock of the Renew task
     logs/                                      service logs
 """
 

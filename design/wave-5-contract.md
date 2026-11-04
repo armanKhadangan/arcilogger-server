@@ -1042,6 +1042,22 @@ All Wave 5 questions are answered (2026-11-02).
   `alerts.system.CERT_EXPIRY_WARNING` (`timedelta(days=30)`), not a setting. A revocation still
   makes it `critical`. The findings count both (`expiring`, `uncovered`, beside `revoked`).
   "The `Renew` task failed twice in a row" stays W5-E's (W5-C-7).
+- **W5-C-13: `crl_stale` leaves out ARCILOGGER's test root, as `R20-crl` does (#160; W5-E-5,
+  Q6 of #158).** A chain whose root carries ARCILOGGER's test organization has no issuer in use
+  for `crl_stale` (W5-A D5: a test stamp never counts), so a mock or trial install no longer
+  shows it beside its `provider_not_legal`. The rule is one helper,
+  `alerts.system.crl_stamp` (the newest sealed day's stamp, or none for such a chain), which
+  `check_stamp_crl` and `compute_legal_status` both pass to `crl_status` (D11); this ends the
+  difference W5-E-5 left open. Only the root decides, and only the newest sealed day's chain is
+  in use (W5-C-3): on a site that holds test days and real days, `crl_stale` holds while the
+  newest one is a real CA's and that CA has no fresh list. `certificate_revoked` still reads the
+  stamp's chain whatever its root. The legal-status tests and samples now seal through a made-up
+  CA outside the test organization (`legalstatus.testing.simulated_ca`): the samples' Kamu SM
+  cases run on a site of their own whose sealed days repeat the capture's. Tests:
+  `test_crl_stamp_leaves_out_only_a_chain_to_the_test_root`,
+  `test_crl_stale_not_for_a_mock_install`,
+  `test_crl_stale_only_for_a_root_outside_the_test_organization` and
+  `test_crl_stale_on_a_mixed_site_by_the_newest_sealed_day` (`api/tests/test_legal_status_api.py`).
 
 ## Deviations — W5-G (2026-11-03)
 
@@ -1326,6 +1342,40 @@ All Wave 5 questions are answered (2026-11-02).
   arrival order: the compression fails with `55P03`, "chunk deleted by other transaction"),
   `test_the_drop_locks_the_chunks_in_the_order_a_reader_does` (12 chunks; fails in name order).
 
+- **W5-G-22: a reload's file checks run beside the ingest loop (#124, G4 live data first).** The
+  claim's SHA-256 of every file it would reset, and a file's size check and `received_outside`
+  read before its reset, run in a daemon thread per check (`IngestService._beside`) that only
+  reads files; every decision and every transaction stays on the loop, which goes on loading live
+  batches and acts on the result in a later round, in W5-G's order: the claim transaction only
+  after every file passed (W5-G-4), a file's reset transaction only after its scan, then a fresh
+  stream at offset 0. A failed check fails the request with `archive_file_unreadable` before
+  anything of the file is deleted, and the size check is made again on the loop right before the
+  file's transaction, so a file gone during the rounds since its scan is not reset (W5-G-5). A
+  stop ends a check within one 1 MiB step (`CheckStoppedError`); nothing is decided and the next
+  start claims the request again. A scan of a request that ends meanwhile gives up the same way.
+  A reload's partitions are made one day a round (`_ensure_days`), also while the scan runs.
+  Measured once each (4 vCPU, plain PostgreSQL 16, live feed 160 lines/s, a one-day reload of a
+  5 M line `.xz` day with its claim hashing the file 18 times, as a 14-day request of one source;
+  latency of a live line from its append to its commit; no reload: median 0.36 s, max 0.75–1.30
+  s): with the day's rows already dropped, the worst delay went from 31.2 s to 0.82 s while the
+  claim hashed and 2.54 s while the file was scanned (the reload's own batches while it loads are as
+  before: at most 4.59 s, median 2.59 s, in the run with the day's rows present; 4.28 s, median
+  2.78 s, before, over the first two minutes of its loading); with the day's rows still in the database (the window's first
+  days), from 79.5 s (scan and reset transaction in one round) to 41.7 s. Bound: while a check
+  runs, a live line waits for the normal batch cycle plus about one check step (≤ 50 ms) and the
+  loop's share of the interpreter lock; the test bound is 5 s (`LIVE_BOUND`). Not covered by the
+  bound, still on the loop: the reset transaction (38.7 s for a 5 M line file whose rows are
+  present; up to three such files per source when a request reaches the window's first day),
+  one day's partitions per round (up to 0.4 s) and the waits of up to `PARTITION_LOCK_TIMEOUT`
+  (5 s) for the partition lock in `_ensure_days` and the claim. Moving the reset transaction off
+  the loop (a second database connection for ingest) is an open owner question of #124. Tests
+  (`ingest/tests/test_archive_reload.py`):
+  `test_live_data_is_loaded_while_a_reload_checks_its_files`,
+  `test_a_stop_during_a_reloads_check_is_prompt`,
+  `test_a_check_that_fails_beside_the_loop_fails_the_request_and_deletes_nothing` (each for the
+  claim and the reset), `test_the_scan_of_a_reload_that_ended_gives_up`,
+  `test_a_sealed_file_gone_after_its_scan_is_not_reset`,
+  `test_a_reloads_partitions_are_made_a_day_a_round`.
 - **W5-G-23: the search export holds the partition lock as the search does (W5-G-18; #148,
   found on #145).** `POST /search/export` reads its rows in pages of windows of device time, each
   window a statement of its own, in one REPEATABLE READ snapshot, but took no partition lock. On
@@ -1751,24 +1801,30 @@ All Wave 5 questions are answered (2026-11-02).
 
 ## Deviations — W5-E (2026-11-04)
 
-- **W5-E-1: the `Renew` task's rights on its state files and on `vault\renewals` come from
-  their parents.** A4 (manager on #103, 2026-11-04 00:18) asks for "create and write in
-  `vault\renewals`" and "modify on `state\renewal.json` and `state\renewal.lock`", and §4.3 gives
-  W5-E the ACL of `state\crl` and LOCAL SERVICE read on `exports\reports`. `Get-ArciAclPlan` adds
-  exactly those two entries (`state\crl`: protected, owners full control, LOCAL SERVICE Modify,
-  ArciApi and ArciWorker ReadAndExecute, no collector or ingest access; `exports\reports`: LOCAL
-  SERVICE ReadAndExecute), and none for the three A4 paths: they get A4's rights from the
-  inherited LOCAL SERVICE Modify of `vault` and `state`. An entry of its own on
-  `state\renewal.json` would be lost at the first run, since `renewal.write_state` replaces the
-  file (`atomic_write_bytes`) and the new file carries only the inherited rights of its folder.
-  W5-E adds no entry for `vault` and none below it (`vault` keeps its earlier entry), so none
-  gives a write right on a sealed day or a deletion record; their files keep the
-  `immutability.lock` deny entries. Tests:
+- **W5-E-1: the `Renew` task's rights on `vault\renewals` and on its state files come from
+  their folders.** A4 (manager on #103, 2026-11-04 00:18) asks for "create and write in
+  `vault\renewals`" and "modify on `state\renewal.json` and `state\renewal.lock`" (since W5-E-4
+  `state\renewal\renewal.json` and `state\renewal\renewal.lock`), and §4.3 gives W5-E the ACL of
+  `state\crl` and LOCAL SERVICE read on `exports\reports`. `Get-ArciAclPlan` adds those two
+  entries (`state\crl`: protected, owners full control, LOCAL SERVICE Modify, ArciApi and
+  ArciWorker ReadAndExecute, no collector or ingest access, since W5-E-9 OWNER RIGHTS
+  ReadPermissions; `exports\reports`: LOCAL SERVICE ReadAndExecute) and, since W5-E-4,
+  `state\renewal` with the rights of `state\crl`. None is
+  added for the three A4 paths themselves: `vault\renewals` gets A4's right from the inherited
+  LOCAL SERVICE Modify of `vault`, the two state files from the inherited Modify of
+  `state\renewal`. An entry of its own on `renewal.json` would be lost at the first run, since
+  `renewal.write_state` replaces the file (`atomic_write_bytes`) and the new file carries only
+  the inherited rights of its folder. W5-E adds no entry for `vault` and none below it (`vault`
+  keeps its earlier entry), so none gives a write right on a sealed day or a deletion record;
+  their files keep the `immutability.lock` deny entries. Tests:
   `test_acl_plan_gives_the_renew_and_crlfetch_tasks_their_rights` (one assertion per A4 right,
-  no entry below `vault` or for `state\renewal*`, the exact set of folders the tasks may write),
-  `test_acl_plan_least_privilege` (`state\crl` protected, no ingest access; `exports\reports`
-  read only), and on Windows `test_acl_applied_keeps_sealed_file_deny_entries` (LOCAL SERVICE
-  keeps an inherited Modify on `state\renewal.json` after two `atomic_write_bytes` calls).
+  no entry below `vault`, `state\renewal` protected without collector or ingest access and no
+  entry for its files, the exact set of folders the tasks may write),
+  `test_acl_plan_least_privilege` (`state\crl` and `state\renewal` protected, no ingest access;
+  `exports\reports` read only), and on Windows `test_acl_applied_keeps_sealed_file_deny_entries`
+  (LOCAL SERVICE keeps an inherited Modify on `state\renewal\renewal.json` after two
+  `atomic_write_bytes` calls; the folder is protected, and the collector and ingest have no
+  entry on it or on the file).
 - **W5-E-2: how the Sistem page judges `Renew` and `CrlFetch`.** §3 W5-E says only "`TaskName`
   in the API and the web", and C12/A4 say to judge both tasks from their state files, not from
   their exit codes. Both rows come after ApplySystem, are `late` after 26 h as the other daily
@@ -1776,12 +1832,15 @@ All Wave 5 questions are answered (2026-11-02).
   `state/renewal.json`, not its top-level `at` (a run that does not know the pinned roots keeps
   the earlier `at`, W5-A-2), so a dry run, which keeps `last_run`, is no evidence. **CrlFetch**
   shows the newest of `lists[].fetched_at` and `failures[].at` of `state/crl/index.json`, read with
-  W5-C's `read_crl_index` (another schema is unreadable). A time later than now is no evidence,
+  W5-C's `read_crl_index` (another schema is unreadable; since W5-E-6, an index that records no
+  failure shows its modification time too). A time later than now is no evidence,
   and a file that cannot be read shows `missing` and never fails the request. The row says the
   task ran: a refused or failed Renew run, or a fetch with failures only, is `ok` there, and
   whether it succeeded is `R20-renewal`'s and `R20-crl`'s question (the Backup row's precedent;
   the API has no failing task state). A run that finds its lock held writes nothing (W5-A-2,
-  W5-B-2), so it leaves no evidence. Tests:
+  W5-B-2), so it leaves no evidence; the run that holds the lock writes its file. A run that
+  exits 1 without writing (W5-E-6) cannot be shown as failed either (answer to Q9 on #158, an
+  open question there). Tests:
   `test_renew_and_crlfetch_are_judged_by_their_state_files` (`api/tests/test_system_health.py`;
   the files are written by W5-A's `write_state` and the real `crl.fetch`), and
   `test_read_renew_runs_from_the_writers_file`.
@@ -1814,6 +1873,230 @@ All Wave 5 questions are answered (2026-11-02).
   `test_stamp_renewal_cleared_after_a_successful_run` (a dry run keeps the failures),
   `test_stamp_renewal_unreadable_runs_decide_nothing` and
   `test_read_renew_runs_from_the_writers_file` (`worker/tests/test_alerts_legal.py`).
+- **W5-E-4: the re-stamping state moves into the protected `state\renewal` (#151; Q2 of #140).**
+  A4, §2.1.2 and §2.1.3 put the report at `state/renewal.json` and the lock at
+  `state/renewal.lock` (so do D16, W5-A-2, W5-A-3, W5-C-1 and W5-E-1 to W5-E-3). There they
+  inherited the Modify of `state`, which ArciCollector (network-facing), ArciIngest and ArciWorker
+  hold: a compromised service could write a report that silences `R20-renewal`, `R20-cert` and
+  the legal status's `renewal_due` and `renewal_uncovered`, or hold the lock so that no run
+  counts. They are now `state/renewal/renewal.json` and `state/renewal/renewal.lock`
+  (`renewal.STATE_FOLDER`, `state_dir`, `state_path`); A4's paths change accordingly, its rights
+  do not. `Get-ArciAclPlan` gives `state\renewal` the rights of `state\crl`: protected, SYSTEM
+  and Administrators full control, LOCAL SERVICE Modify, ArciApi and ArciWorker ReadAndExecute,
+  nothing for the collector, ingest, ArciWeb or ArciAdmin. Every file `atomic_write_bytes` writes
+  there inherits these entries. `Set-ArciVaultAcl.ps1` (and with it the installer's ACL step)
+  creates the folder in plan order; `renewal.one_run` creates it too when it is missing, as
+  `crl fetch` does `state\crl`.
+  **Upgrade.** `renewal.state_to_read` gives the new file, or the earlier `state/renewal.json`
+  while the new one is missing. The first counted run after the upgrade (every run but a busy
+  one or a dry run: while the earlier file is the only one, a dry run writes nothing) carries
+  over only the earlier file's `failures_in_a_row` (W5-E-8); from then on the new file exists
+  and the earlier one is never read again. Nothing writes, moves or removes the earlier
+  `state/renewal.json` or `state/renewal.lock`, neither at the upgrade nor at a run (answer to
+  Q3 on #158: deleting them at the upgrade would break the read below): both are left in place
+  and, once `state\renewal\renewal.json` exists, ignored.
+  The earlier lock is never taken, so a process holding it blocks no run. W5-C's readers
+  (`read_stamp_renewals`, `read_renew_runs`; through them the alerts, the Sistem page's Renew
+  row, `/legal-status` and the day page) read the same `state_to_read`, so an upgrade does not
+  resolve an open `R20-renewal` or `R20-cert` before the first run (at most a day: the task runs
+  at 02:30). Until then they trust a file every service could write, but no more than before the
+  move, and a missing report already reads as nothing due (answer to Q2 on #158: the one-time
+  read stays). `stamp_renewal_path` is `renewal.state_path`. While the readers read the earlier
+  file they show its path as the evidence: the Sistem page's Renew row says
+  `state\renewal.json` then, and `state\renewal\renewal.json` once that file exists, while
+  neither does, or while it cannot be looked at (`TaskRow.shown`; `Path.exists()` raises
+  PermissionError, and the evidence text never fails the request). Step 2 of the `R20-renewal`
+  runbook names both files: `state\renewal\renewal.json`, and `state\renewal.json` until the
+  first run after an upgrade. The day page's problem text stays `renewal.json: unreadable`,
+  the name of both files.
+  Tests: `test_an_earlier_state_file_is_read_once_and_never_written`
+  (`core/tests/test_cli_renew.py`),
+  `test_the_readers_read_an_earlier_report_only_until_the_new_one_exists`
+  (`worker/tests/test_alerts_legal_state.py`),
+  `test_the_writer_and_the_readers_meet_in_the_protected_folder`
+  (`tests/test_renewal_state_reader.py`),
+  `test_renew_row_reads_an_earlier_report_until_the_first_run`
+  (`api/tests/test_system_health.py`; the evidence text, and the earlier file left in place),
+  `test_renew_row_survives_a_state_folder_it_cannot_look_into` (the same file; the row is
+  `missing` and names `state\renewal\renewal.json`), the runbook's two paths in
+  `test_a_dry_run_after_an_upgrade_leaves_the_alerts_as_they_are`
+  (`worker/tests/test_alerts_legal.py`), and the ACL tests of W5-E-1.
+- **W5-E-5: ARCILOGGER's test root is no issuer in use for `R20-crl` (#151; Q8 of #140).**
+  §2.3.1 raises `R20-crl` when an issuer in use has no verified list newer than
+  `tsa.crl_max_age_days`, and W5-C's `pinned_roots` pins the mock TSA's root while
+  `tsa.provider` is `mock`. That root publishes no list, so every mock or trial install had a
+  permanent, e-mailed `R20-crl`. Following W5-A's rule that a test stamp never counts (D5),
+  `check_stamp_crl` treats the newest sealed day's stamp as no stamp in use when its chain's
+  root carries ARCILOGGER's test organization (`tsa.verify.is_test_stamp` on the root's
+  subject, the detection W5-A, the chain check and the evidence package use). Only the root
+  decides: a test policy on a real CA's chain still needs that CA's lists. An `R20-crl` raised
+  before is resolved (`crl_fresh`) at the next pass, unless `state/crl` cannot be read.
+  `pinned_roots`, `stamp_in_use`, `issuers_in_use` and `crl_status` are unchanged, so `R20-cert`
+  still reads the mock stamp's chain against the stored lists, and `/legal-status` still gives
+  `crl_stale` for a mock install (whether that banner reason should follow is a question on
+  #151). Tests: `test_stamp_crl_not_raised_for_arcilogger_test_root`,
+  `test_stamp_crl_raised_for_a_real_root_without_a_list` (`worker/tests/test_alerts_legal.py`;
+  its other `R20-crl` tests now seal through a made-up CA outside the test organization, pinned
+  in `tsa.roots_dir`), and `test_no_seal_alert_when_every_closed_day_is_sealed`
+  (`worker/tests/test_alerts_system.py`: a sealed mock install raises no alert at all).
+- **W5-E-6: a `crl fetch` that knows no list address writes its index (#151; Q3 of #140).**
+  W5-B's `fetch` returned before the lock when no URL was known (neither `tsa.crl_urls` nor an
+  http/https distribution point in a pinned root or a token), so on such a site
+  `state/crl/index.json` never appeared and the Sistem page's `CrlFetch` row stayed `missing`
+  for good although the task ran every day. Now that run takes the lock and writes the index as
+  every run does: the lists stored before and their entries stay (D8), the failures of the run
+  before drop out, and every stored file is still hashed (C14), so a changed one is still
+  recorded as `stored_file_changed`. On a site that never stored a list that is
+  `{"schema": "arcilogger.crl-index/1", "lists": [], "failures": []}`. It still fetches nothing
+  and exits 2 ("no URL known" outranks a `stored_file_changed` failure, which exits 1 when URLs
+  are known); like any run it raises `CrlError` (exit 1, "Hata [error]: …" on standard error)
+  when the lock is held or the index or a stored file cannot be read, and leaves the index as it
+  is (answer to Q9 on #158: a real failure). Nothing else in `crl.py` and
+  nothing in the standalone verifier changes (it reads `paket.json`, never `state/crl/index.json`),
+  so the verdicts of both verifiers stay the same (rule 5). W5-E-2 changes (answer to Q8 on
+  #158): when the readable index records no failure, the `CrlFetch` row also counts the index's
+  modification time as a run, beside `fetched_at` (later than now is no evidence, as for the
+  other times). Each run that gets past its lock and its reads rewrites the index with the
+  failures of that run only, so such an index was written by a run without a failure, and
+  `state\crl` is protected, so its modification time can be trusted. With a failure the
+  row reads `fetched_at` and `failures[].at` only, as before (the failures carry the run's
+  time). A site that knew list addresses earlier and knows none now keeps its old lists, with
+  their old `fetched_at`, in the index; its row shows each run and is not `late` while the task
+  runs. The row says whether the task runs; how fresh the lists are is `R20-crl`'s question,
+  raised when an issuer in use has no fresh list. A run that finds the lock held exits 1 and
+  writes nothing, but the run that holds the lock writes the index, so the row stays fresh. A
+  run that exits 1 because it cannot read the index or a stored list writes nothing, so the row
+  shows no run for it: it keeps the run before and turns `late` 26 h after that run, or shows
+  `missing` while the index cannot be read. The answer to Q9 asks the row to show such a run as
+  failed; it cannot. `TaskHealthState` has no failed value (W5-E-2: the API has no failing task
+  state; adding one changes the API contract and the web types, which this package does not
+  own), and no file records the exit code, which C12 and A4 forbid judging by alone. That is an
+  open question to the manager on #158. W5-C's readers need no change: an empty index is
+  read as no list, so it raises no `R20-crl` and no `crl_stale` while no issuer is in use (an
+  open `R20-crl` is resolved, `crl_fresh`), and an issuer in use without a list is stale as
+  before. Tests:
+  `test_no_url_known_writes_an_empty_index`, `test_no_url_known_keeps_the_stored_lists` and
+  `test_cli_no_url_known_exits_2` (`core/tests/test_crl.py`),
+  `test_crlfetch_without_a_list_address_shows_the_run` and
+  `test_crlfetch_after_the_list_addresses_are_gone_shows_the_run`
+  (`api/tests/test_system_health.py`), `test_stamp_crl_after_a_fetch_without_a_list_address` and
+  `test_stamp_crl_raised_after_a_fetch_without_a_list_address_while_in_use`
+  (`worker/tests/test_alerts_legal.py`).
+- **W5-E-7: the title of an `R20-renewal` raised by the failures alone (#151; item 4).** W5-E-3
+  titled every `R20-renewal` "Yeniden damgalama gerekiyor: … / Re-stamping needed: …", also when
+  only `failures_in_a_row >= 2` raised it and no stamp was due (the token list known with none
+  `due` or `uncovered`, or unknown). Then the title is
+  `alerts.texts.RENEW_FAILED_TITLE`: "Yeniden damgalama görevi art arda {failures} kez başarısız /
+  The re-stamping task failed {failures} times in a row", with the count from
+  `failures_in_a_row`. The issue's example said "twice"; the count is used because the alert
+  stays open and counts on (a third failure is "3 kez / 3 times"; at the threshold it reads
+  "2 kez / 2 times"). With a `due` or `uncovered` token the title stays "Re-stamping needed: …"
+  with the failures added, as before. The open alert's title follows each pass (the store
+  replaces it when it changes). The rule's catalogue name (`RULES["R20-renewal"]`, "Yeniden
+  damgalama gerekiyor / Re-stamping needed"), the details, the facts and the runbook are
+  unchanged; the title carries the count only, no name, address or log line. Tests:
+  `test_stamp_renewal_title_follows_what_raised_it`, and the titles in
+  `test_stamp_renewal_raised_after_two_failed_runs` and
+  `test_stamp_renewal_failures_without_tokens_raise` (`worker/tests/test_alerts_legal.py`).
+- **W5-E-8: an upgrade takes only `failures_in_a_row` from the earlier `state/renewal.json`
+  (#151; review of the follow-up).** W5-E-4 carried the earlier file over as W5-A-2 carries the
+  previous one: a refused run (no pinned root, or the provider refused; no statuses computed)
+  copied its `at`, `tokens`, `totals`, `unreadable`, `mismatched` and `notes`, a dry run its
+  `last_run`, into the protected file, and every later refused or dry run kept them. Every
+  service could write the earlier file, so a made-up token list ("nothing due") would have
+  outlived the move for good. Now `renewal.write_state` takes from the earlier file only
+  `renewal.EARLIER_KEPT`, that is `failures_in_a_row`, read as W5-A-2 reads it (a whole number
+  ≥ 0, anything else 0). A refused run with no protected previous file writes no token list,
+  which W5-C-1 reads as unknown, never as nothing due. While the earlier file is the only one, a
+  dry run writes nothing (`write_state` returns None, `--json` gives `state_written` false;
+  answer to Q5 on #158): it would have written no `last_run`, turning the Sistem page's Renew
+  row `missing` (W5-E-2), and its own statuses in place of the earlier ones, changing
+  `R20-renewal` and `R20-cert` before any counted run. A dry run never makes the state look
+  worse. `state/renewal/` gets no report (only the lock every run holds), so the readers keep
+  reading the earlier file (W5-E-4, Q2); the first counted run migrates as above, and from then
+  on a dry run writes its statuses and keeps `last_run` (W5-A-2). A made-up count can only do
+  what a missing file (0) or a real count could: hide the failures before the upgrade from
+  `R20-renewal`'s failure branch, or raise it a run early; it cannot make tokens known. Tests:
+  `test_a_refused_run_takes_no_statuses_from_an_earlier_state_file` and
+  `test_an_earlier_state_file_is_read_once_and_never_written` (`core/tests/test_cli_renew.py`),
+  `test_renew_row_reads_an_earlier_report_until_the_first_run`
+  (`api/tests/test_system_health.py`) and
+  `test_a_dry_run_after_an_upgrade_leaves_the_alerts_as_they_are`
+  (`worker/tests/test_alerts_legal.py`).
+- **W5-E-9: the owner of `state\crl` and `state\renewal` cannot change their rights (#151;
+  review of the follow-up).** Both folders are new in Wave 5 (W5-B, W5-E-4). Under the earlier
+  release's ACL the collector, ingest and the worker hold Modify on `state`, so a compromised one
+  could create either folder before the upgrade and own it. `Set-ArciVaultAcl.ps1` replaced only
+  the DACL of a folder that exists (`Set-ArciAclEntry` set no owner before the answer to Q4
+  below), and an owner keeps the implicit right to read and change the DACL whatever it says: it could give itself Modify
+  again, write `renewal.json` (silencing `R20-renewal`, `R20-cert` and `renewal_due`), hold
+  `renewal.lock`, or change a stored list. `Get-ArciAclPlan` now gives both folders an entry for
+  OWNER RIGHTS (`S-1-3-4`) with `ReadPermissions` only, inherited by what is created below;
+  Windows then gives the owner that entry's rights in place of the implicit ones.
+  `ReadPermissions`, not `ReadAndExecute`, so that an owning service still cannot list or read
+  the folder (nothing for the collector or ingest, W5-E-1). SYSTEM, Administrators and the
+  tasks keep their own entries, and neither `Renew` nor `CrlFetch` changes a permission there
+  (the immutability lock is used only below `vault`).
+  **The items below (answer to Q4 on #158).** A service could also have put items of its own in
+  either folder before the upgrade, with their own owner and explicit or protected entries,
+  which replacing the folder's DACL leaves as they are: a `state\renewal\renewal.lock` with its
+  own Modify could hold the lock and stop every Renew run, a made-up `renewal.json` could be
+  one the task cannot replace. The plan's entries now carry `ResetOwner` (false everywhere but
+  `state\crl` and `state\renewal`), and `Set-ArciVaultAcl.ps1`, which the installer's ACL step
+  runs, passes it to `Set-ArciAclEntry -ResetOwner`. That opt-in switch makes
+  `BUILTIN\Administrators` (`S-1-5-32-544`) the owner of the folder and of every item below it
+  and leaves each item below with the inherited entries only (what `icacls /reset /T` does),
+  through the .NET security calls the module already uses (`Get-ArciAccessControl`,
+  `Set-ArciAccessControl`); a folder's items are listed only after its own entries are reset.
+  Every other entry and the installer's own calls (`admin\`, `admin\keys`, the configuration
+  files) never write an owner (`Set-ArciAccessControl`): the tasks lock the sealed files they
+  create, and unlock them for retention, by the owner's right to change their entries (their
+  Modify has no ChangePermissions), and a folder another account created would hit Set-Acl's
+  "not allowed to be the owner" failure. A link below either folder (a reparse point, or a hard
+  link: the same file under another name elsewhere) stops the step with an error before the
+  folder's own entries are written, since a reset would hand Administrators, and inherited
+  entries only, whatever it points to. Every item below is checked first (listing needs only the
+  access Administrators inherit from `state`): writing a folder's entries also writes the
+  inherited entries of everything below it, and a hard link shares its entries with the file it
+  names elsewhere. After the folder's reset its items are listed again, and each is checked once
+  more before its own reset. Windows' propagation of the entries written before, which every
+  entry of the plan has always caused, is not changed: `state`'s, on the first upgrade, still
+  reaches a folder that is not protected yet, and a link in it. In `state\crl`, `crl fetch` itself
+  can leave a hard link: `_store_new` writes a list under a `.<random>.tmp` name, links it to its
+  final name and then removes the temporary name, so a run stopped in between (a reboot, the
+  task's time limit) or a failed removal leaves both names, and nothing in `crl.py` removes them
+  later. The step then stops at that folder, before `state\renewal` and the entries after it;
+  the error for a hard link says to delete only the `.<random>.tmp` name in the same folder,
+  never a `.crl` file, which is evidence. That `crl fetch` should remove its own leftover
+  temporary names is for the owner of `core/src/arcilogger_core/crl.py` (not changed here). An
+  item whose entries give Administrators no right to read or take it over (its owner took them
+  away) is taken over all the same by the elevated step: the Windows CI runner shows it for a
+  `renewal.lock` that a service left as its own, with inheritance off, which is the case Q4 on
+  #158 names. The step itself enables no privilege; where the take-over still fails (a policy that
+  took the take-ownership privilege away), it stops with an error naming the item and the
+  remedy (every read and write of an item, the link check, the listing and its entries, is
+  wrapped alike; a link's own error stays as it is), and `takeown /A /R /F <folder>` in an
+  elevated PowerShell takes it over by hand before the step is run again. Tests:
+  `test_acl_plan_least_privilege`, `test_acl_plan_gives_the_renew_and_crlfetch_tasks_their_rights`,
+  `test_acl_plan_resets_the_owner_of_the_two_protected_state_folders_only` (exactly the two
+  entries carry `ResetOwner`), `test_only_the_acl_script_passes_reset_owner`, and on Windows
+  `test_acl_applied_keeps_sealed_file_deny_entries` (`state\crl` created before the ACL step
+  with an entry of its own: that entry is gone, and OWNER RIGHTS has `ReadPermissions` only on
+  `state\crl` and `state\renewal`), `test_acl_applied_takes_over_the_protected_state_folders`
+  (both folders, `renewal.lock`, `index.json` and a folder below `state\crl` with a file in it,
+  each owned by the collector or ingest with a Modify entry of its own, set with `icacls
+  /setowner`, which uses the administrator's restore privilege; NETWORK SERVICE and Guests stand
+  in for the two services, whose own SIDs exist only where they are installed: afterwards
+  Administrators own
+  them, the items below have inherited entries only, the collector and ingest have nothing,
+  LOCAL SERVICE keeps its inherited Modify on the lock, and `logs` keeps the collector as its
+  owner), `test_acl_step_stops_at_a_link_in_a_protected_state_folder` (a junction and a hard
+  link in `state\renewal`, protected beforehand so that `state`'s entry does not reach them: the
+  file they point to keeps its owner and every entry, the inherited ones too) and
+  `test_acl_step_takes_over_a_lock_a_service_left_as_its_own` (a `renewal.lock` with
+  inheritance off, a stand-in service as its owner and a Modify entry of its own: afterwards
+  Administrators own it, it has inherited entries only, and LOCAL SERVICE keeps its inherited
+  Modify).
 
 ## Deviations — #119 (2026-11-04)
 
@@ -1836,6 +2119,19 @@ All Wave 5 questions are answered (2026-11-02).
   browse budget (500 ms) and the slowest request below 10 × that. In the same review A2 (an
   asynchronous spool watermark) was deferred, to be revisited with field figures from a Windows
   site (sahada doğrula), and A3 was declined (2026-11-04).
+- **#119-2: the browse guard bounds what ingest adds, not the 95th percentile itself**
+  (decided on #119, 2026-11-04; amends the budget of #119-1). `test_browse_under_concurrent_ingest`
+  times a settled series before and after the series under ingest and asserts that the 95th
+  percentile under ingest less the larger settled one stays below the browse budget (500 ms);
+  `CEILING` (5 s) bounds the slowest request of each of the three series. Reason: on a Windows
+  runner the audit spool's `os.fsync` waits for the disk's write-back (#90's case; out of scope
+  by #119 item 3) in whichever series meets it, settled ones too. Run 41875393810 (#166 at
+  `32d4d2a`, job 126733285902) failed the absolute bound: under ingest p50 124 / p95 590 / max
+  757 ms (p95: sql 23, commit 7, fsync 511 ms), settled p95 331 ms (fsync 277 ms). Its re-run
+  (job 126780370555) passed: under ingest p95 134 ms, settled p95 332 ms with one 507 ms fsync.
+  Ingest held the stated rate in both (1,984 and 2,155 lines/s loaded). The absolute browse
+  budget of a settled server stays with `test_search_perf`'s Q1 (best of rounds, 500 ms), so a
+  regression that slows browse in every series is still caught there.
 
 ## Deviations — #122 (2026-11-04)
 

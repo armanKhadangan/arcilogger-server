@@ -664,10 +664,11 @@ _STEPS: Final[dict[str, tuple[str, str]]] = {
         "sertifikasının yeniden damgalanmadan sona erdiğini ve Renew görevinin art arda kaç kez "
         "başarısız olduğunu görün.\n"
         "2. Sistem sayfasında Renew görevinin satırına bakın; son çalıştırmanın sonucu "
-        "D:\\ARCILOGGER\\state\\renewal.json dosyasında last_run altındadır (refused: "
-        "yapılandırma reddetti, örneğin kimlik bilgileri ya da sabitlenmiş kök sertifikalar yok; "
-        "failed: zaman damgası sunucusu yanıt vermedi, yeni damga doğrulanmadı ya da bir dosya "
-        "hatası).\n"
+        "D:\\ARCILOGGER\\state\\renewal\\renewal.json dosyasında, yükseltmeden sonraki ilk "
+        "çalıştırmaya kadar D:\\ARCILOGGER\\state\\renewal.json dosyasında last_run altındadır "
+        "(refused: yapılandırma reddetti, örneğin kimlik bilgileri ya da sabitlenmiş kök "
+        "sertifikalar yok; failed: zaman damgası sunucusu yanıt vermedi, yeni damga doğrulanmadı "
+        "ya da bir dosya hatası).\n"
         "3. Neyin yeniden damgalanacağını damga almadan görün: arcilogger-core renew --dry-run "
         "--json. Ayarlar → Zaman damgası'nda sağlayıcıyı, kimlik bilgilerini ve kökleri "
         "denetleyin; görev her gün kendiliğinden yeniden dener.\n"
@@ -677,9 +678,10 @@ _STEPS: Final[dict[str, tuple[str, str]]] = {
         "1. See in the details how many stamps are due for re-stamping, how many certificates "
         "expired without re-stamping and how many times in a row the Renew task failed.\n"
         "2. Look at the Renew task's row on the System page; the last run's result is under "
-        "last_run in D:\\ARCILOGGER\\state\\renewal.json (refused: the configuration refused, "
-        "for example no credentials or no pinned root certificates; failed: the time-stamp "
-        "server did not answer, the new stamp did not verify or a file error).\n"
+        "last_run in D:\\ARCILOGGER\\state\\renewal\\renewal.json, until the first run after an "
+        "upgrade in D:\\ARCILOGGER\\state\\renewal.json (refused: the configuration refused, for "
+        "example no credentials or no pinned root certificates; failed: the time-stamp server did "
+        "not answer, the new stamp did not verify or a file error).\n"
         "3. See what would be re-stamped without taking a stamp: arcilogger-core renew --dry-run "
         "--json. Check the provider, the credentials and the roots under Settings → Time "
         "stamping; the task retries by itself every day.\n"
@@ -1754,6 +1756,13 @@ def _db_window(d: Mapping[str, Any]) -> Facts | None:
     )
 
 
+#: The title of ``R20-renewal`` raised by the Renew task's failures alone (no stamp due or
+#: expired without re-stamping, or the token list unknown), formatted with ``failures``, the
+#: count in a row (at least alerts.system.RENEW_FAILURES_ALERT); W5-E-7.
+RENEW_FAILED_TITLE: Final = (
+    "Yeniden damgalama görevi art arda {failures} kez başarısız",
+    "The re-stamping task failed {failures} times in a row",
+)
 #: alerts.system.RENEW_FAILURES_ALERT (that module imports this one).
 _RENEW_FAILURES_ALERT: Final = 2
 

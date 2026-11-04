@@ -9,6 +9,7 @@ test runs the real ``arcilogger-core verify``), never by hand (contract Implemen
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -35,12 +36,13 @@ from arcilogger_core.admin.contract import SystemStatus, dump_document, parse_do
 from arcilogger_core.admin.testing import FakeAgent, FakeSystem, Installed
 from arcilogger_core.cli import main as core_main
 from arcilogger_core.config import Config
+from arcilogger_core.crl import INDEX_SCHEMA as CRL_INDEX_SCHEMA
 from arcilogger_core.crl import CrlError, CrlOptions
 from arcilogger_core.crl import _one_run as held_crl_lock
 from arcilogger_core.crl import fetch as crl_fetch
 from arcilogger_core.layout import Layout
 from arcilogger_core.renewal import STATE_SCHEMA as RENEWAL_SCHEMA
-from arcilogger_core.renewal import LastRun, Outcome
+from arcilogger_core.renewal import LastRun, Outcome, RenewalReport
 from arcilogger_core.renewal import write_state as write_renewal_state
 from arcilogger_core.timeutil import isoformat_site, site_day, to_site, utc_now
 from arcilogger_db.models import AuditLog, JobRun
@@ -420,18 +422,81 @@ def task_rows(found: Evidence) -> dict[str, dict[str, Any]]:
 
 
 def renew_run(layout: Layout, at: datetime | None, outcome: Outcome = "not_needed") -> None:
-    """A run of ``arcilogger-core renew`` as it writes ``state/renewal.json`` (W5-A's writer):
-    ``at`` None is a dry run. Without a report, as a run without pinned roots writes it."""
+    """A run of ``arcilogger-core renew`` as it writes ``state/renewal/renewal.json`` (W5-A's
+    writer): ``at`` None is a dry run. Without a report, as a run without pinned roots writes
+    it."""
     exit_code = {"renewed": 0, "not_needed": 0, "refused": 2, "failed": 3}[outcome]
     last_run = None if at is None else LastRun(at=at, outcome=outcome, exit_code=exit_code)
     write_renewal_state(layout, None, at=at or utc_now(), renew_before=180, last_run=last_run)
 
 
+def test_renew_row_reads_an_earlier_report_until_the_first_run(api_config: Config) -> None:
+    """After an upgrade the Renew row shows the last run of the earlier release's
+    ``state/renewal.json``, and names that file as its evidence, until the task writes
+    ``state/renewal/renewal.json`` (W5-E-4, answer to Q2 on #158); a dry run in between writes
+    nothing and leaves the row as it is (W5-E-8, answer to Q5 on #158). From the first counted
+    run on only the new file counts, whatever a service writes into the earlier one, which stays
+    where it is."""
+    now = utc_now().replace(microsecond=0)
+    layout = Layout(api_config.data_dir)
+    earlier = layout.state / "renewal.json"
+
+    def earlier_run(at: datetime) -> None:
+        last_run = {"at": isoformat_site(at), "outcome": "not_needed", "exit_code": 0}
+        write_json(earlier, {"schema": RENEWAL_SCHEMA, "last_run": last_run})
+
+    row = task_rows(evidence(api_config, now))["Renew"]  # neither file: the one the task writes
+    assert (row["state"], row["evidence"]) == ("missing", "state\\renewal\\renewal.json")
+    earlier_run(now - timedelta(hours=2))
+    row = task_rows(evidence(api_config, now))["Renew"]
+    assert (row["state"], moment(row["last_evidence_at"])) == ("ok", now - timedelta(hours=2))
+    assert row["evidence"] == "state\\renewal.json"
+    dry = write_renewal_state(layout, RenewalReport.of(()), at=now, renew_before=180, last_run=None)
+    assert dry is None
+    assert not stamp_renewal_path(layout).exists()
+    assert task_rows(evidence(api_config, now))["Renew"] == row
+    renew_run(layout, now - timedelta(hours=1))
+    assert stamp_renewal_path(layout) == layout.state / "renewal" / "renewal.json"
+    assert earlier.is_file()  # left in place and ignored from now on (answer to Q3 on #158)
+    earlier_run(now - timedelta(minutes=10))
+    row = task_rows(evidence(api_config, now))["Renew"]
+    assert moment(row["last_evidence_at"]) == now - timedelta(hours=1)
+    assert row["evidence"] == "state\\renewal\\renewal.json"
+
+
+def test_renew_row_survives_a_state_folder_it_cannot_look_into(
+    api_config: Config, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``state\\renewal`` that ArciApi cannot list (a service created it under the earlier
+    release with its own entries only, and the ACL step has not reset it yet, W5-E-9): looking
+    at ``renewal.json`` there raises PermissionError, which ``Path.exists()`` re-raises. The row
+    is ``missing`` and names the file the task writes; the request never fails (the module's
+    rule). The earlier ``state/renewal.json`` is not read then: the new file may exist."""
+    now = utc_now().replace(microsecond=0)
+    layout = Layout(api_config.data_dir)
+    last_run = {"at": isoformat_site(now - timedelta(hours=2)), "outcome": "not_needed"}
+    write_json(layout.state / "renewal.json", {"schema": RENEWAL_SCHEMA, "last_run": last_run})
+    hidden = stamp_renewal_path(layout)
+    stat = Path.stat
+
+    def refused(self: Path, **kwargs: Any) -> os.stat_result:
+        if self == hidden:
+            raise PermissionError(13, "Permission denied", str(self))
+        return stat(self, **kwargs)
+
+    monkeypatch.setattr(Path, "stat", refused)
+    with pytest.raises(PermissionError):
+        hidden.exists()
+    row = task_rows(evidence(api_config, now))["Renew"]
+    assert (row["state"], row["evidence"]) == ("missing", "state\\renewal\\renewal.json")
+    assert row["last_evidence_at"] is None
+
+
 def test_renew_and_crlfetch_are_judged_by_their_state_files(api_config: Config) -> None:
-    """Renew by ``last_run.at`` of ``state/renewal.json``, CrlFetch by the newest ``fetched_at``
-    or failure of ``state/crl/index.json``, never by an exit code (C12, A4): the row says the
-    task ran; whether it succeeded is R20-renewal's and R20-crl's. A time later than now is no
-    evidence, and a file that cannot be read is none either."""
+    """Renew by ``last_run.at`` of ``state/renewal/renewal.json``, CrlFetch by the newest
+    ``fetched_at`` or failure of ``state/crl/index.json``, never by an exit code (C12, A4): the
+    row says the task ran; whether it succeeded is R20-renewal's and R20-crl's. A time later than
+    now is no evidence, and a file that cannot be read is none either."""
     now = utc_now().replace(microsecond=0)
     layout = Layout(api_config.data_dir)
 
@@ -442,7 +507,10 @@ def test_renew_and_crlfetch_are_judged_by_their_state_files(api_config: Config) 
         renew_run(layout, now - timedelta(hours=1), "refused")
     assert json.loads(stamp_renewal_path(layout).read_bytes())["failures_in_a_row"] == 3
     rows = task_rows(evidence(api_config, now))
-    assert (rows["Renew"]["state"], rows["Renew"]["evidence"]) == ("ok", "state\\renewal.json")
+    assert (rows["Renew"]["state"], rows["Renew"]["evidence"]) == (
+        "ok",
+        "state\\renewal\\renewal.json",
+    )
     assert moment(rows["Renew"]["last_evidence_at"]) == now - timedelta(hours=1)
     renew_run(layout, None)  # a dry run keeps the last run
     assert moment(task_rows(evidence(api_config, now))["Renew"]["last_evidence_at"]) == now - (
@@ -512,12 +580,15 @@ def test_renew_and_crlfetch_are_judged_by_their_state_files(api_config: Config) 
             "fetched_at": isoformat_site(fetched_at, "seconds"),
         }
 
-    # The newest fetch counts, unless it is later than now.
+    # The newest fetch counts, unless it is later than now. An index without a failure shows
+    # its modification time too (Q8 on #158): later than now here, and older than a fetch.
     index = {"schema": "arcilogger.crl-index/1", "failures": []}
     write_json(crl_index_path(layout), {**index, "lists": [stored(now + timedelta(hours=1))]})
+    touch(crl_index_path(layout), now + timedelta(hours=1))  # test: a clock set back
     assert states(evidence(api_config, now))["CrlFetch"] == "missing"
     lists = [stored(now + timedelta(hours=1)), stored(now - timedelta(hours=27))]
     write_json(crl_index_path(layout), {**index, "lists": lists})
+    touch(crl_index_path(layout), now - timedelta(hours=28))
     rows = task_rows(evidence(api_config, now))
     assert rows["CrlFetch"]["state"] == "late"
     assert moment(rows["CrlFetch"]["last_evidence_at"]) == now - timedelta(hours=27)
@@ -531,6 +602,112 @@ def test_renew_and_crlfetch_are_judged_by_their_state_files(api_config: Config) 
     for document in unreadable:
         crl_index_path(layout).write_bytes(document)
         assert states(evidence(api_config, now))["CrlFetch"] == "missing", document
+
+
+def test_crlfetch_without_a_list_address_shows_the_run(api_config: Config) -> None:
+    """#151: a ``crl fetch`` that knows no list address (no ``tsa.crl_urls``, no pinned root, no
+    token) writes ``state/crl/index.json`` with no list and no failure, so the row shows the run
+    by the time the index was written instead of a permanent ``missing``. A run that finds the
+    lock held still writes nothing, and a time later than now is still no evidence. An index that
+    records a failure is judged by the times of its lists and failures alone (the test below)."""
+    now = utc_now().replace(microsecond=0)
+    layout = Layout(api_config.data_dir)
+    path = crl_index_path(layout)
+    with held_crl_lock(layout.crl_dir), pytest.raises(CrlError, match="another 'crl fetch'"):
+        crl_fetch(CrlOptions(), layout, [], now)
+    assert not path.exists()
+    assert states(evidence(api_config, now))["CrlFetch"] == "missing"
+
+    run = crl_fetch(CrlOptions(), layout, [], now)
+    assert (run.urls, run.exit_code) == ((), 2)
+    empty = {"schema": CRL_INDEX_SCHEMA, "lists": [], "failures": []}
+    assert json.loads(path.read_bytes()) == empty
+    rows = task_rows(evidence(api_config, now + timedelta(minutes=1)))
+    assert (rows["CrlFetch"]["state"], rows["CrlFetch"]["evidence"]) == (
+        "ok",
+        "state\\crl\\index.json",
+    )
+    touch(path, now - timedelta(hours=2))  # test: the run was two hours ago
+    row = task_rows(evidence(api_config, now))["CrlFetch"]
+    assert (row["state"], moment(row["last_evidence_at"])) == ("ok", now - timedelta(hours=2))
+    assert states(evidence(api_config, now + timedelta(hours=23)))["CrlFetch"] == "ok"
+    assert states(evidence(api_config, now + timedelta(hours=25)))["CrlFetch"] == "late"
+    touch(path, now + timedelta(hours=1))  # test: a clock set back since the run
+    assert states(evidence(api_config, now))["CrlFetch"] == "missing"
+    # The next run without an address writes the same index again: the task ran.
+    crl_fetch(CrlOptions(), layout, [], now)
+    assert json.loads(path.read_bytes()) == empty
+    assert states(evidence(api_config, now + timedelta(minutes=1)))["CrlFetch"] == "ok"
+
+
+def test_crlfetch_after_the_list_addresses_are_gone_shows_the_run(api_config: Config) -> None:
+    """Answer to Q8 on #158: a site that stored a list and knows no list address any more keeps
+    it in the index with its old ``fetched_at`` (D8), and each run rewrites the index with no
+    failure, so the row shows the run by the index's modification time and is not late while
+    the task runs (how fresh the lists are is R20-crl's). An index that records a failure is
+    judged by its times alone. Answer to Q9: a run that exits 1 on a held lock or an index it
+    cannot read writes nothing, so the row keeps the run before, or shows ``missing``."""
+    now = utc_now().replace(microsecond=0)
+    layout = Layout(api_config.data_dir)
+    path = crl_index_path(layout)
+    data = b"test: a stored list, only hashed by a run without addresses (C14)"
+    sha256 = hashlib.sha256(data).hexdigest()
+    name = f"000000000000-20261001T000000Z-{sha256[:8]}.crl"
+    layout.crl_dir.mkdir(parents=True, exist_ok=True)
+    (layout.crl_dir / name).write_bytes(data)
+    fetched_at = now - timedelta(days=30)
+    entry = {
+        "issuer": "CN=Örnek Test TSA Kök,O=Örnek A.Ş.,C=TR",
+        "issuer_sha256": "0" * 64,
+        "this_update": isoformat_site(fetched_at - timedelta(days=1), "seconds"),
+        "next_update": isoformat_site(fetched_at + timedelta(days=6), "seconds"),
+        "file": name,
+        "sha256": sha256,
+        "url": "http://192.0.2.10/ornek.crl",
+        "fetched_at": isoformat_site(fetched_at, "seconds"),
+    }
+    # The last run that knew the address, thirty days ago.
+    write_json(path, {"schema": CRL_INDEX_SCHEMA, "lists": [entry], "failures": []})
+    touch(path, fetched_at)
+    row = task_rows(evidence(api_config, now))["CrlFetch"]
+    assert (row["state"], moment(row["last_evidence_at"])) == ("late", fetched_at)
+
+    run = crl_fetch(CrlOptions(), layout, [], now)
+    assert (run.urls, run.failures, run.exit_code) == ((), (), 2)
+    assert json.loads(path.read_bytes()) == {
+        "schema": CRL_INDEX_SCHEMA,
+        "lists": [entry],
+        "failures": [],
+    }
+    assert states(evidence(api_config, now + timedelta(minutes=1)))["CrlFetch"] == "ok"
+    touch(path, now - timedelta(hours=1))  # test: the run was an hour ago
+    row = task_rows(evidence(api_config, now))["CrlFetch"]
+    assert (row["state"], moment(row["last_evidence_at"])) == ("ok", now - timedelta(hours=1))
+
+    # Q9: a held lock fails the run (exit 1) and leaves the index as it is: no new run.
+    written = path.read_bytes()
+    with held_crl_lock(layout.crl_dir), pytest.raises(CrlError, match="another 'crl fetch'"):
+        crl_fetch(CrlOptions(), layout, [], now + timedelta(hours=26))
+    assert path.read_bytes() == written
+    row = task_rows(evidence(api_config, now + timedelta(hours=26)))["CrlFetch"]
+    assert (row["state"], moment(row["last_evidence_at"])) == ("late", now - timedelta(hours=1))
+
+    # A run that records a failure shows the failure's time, not when the index was written.
+    (layout.crl_dir / name).write_bytes(data + b"\n")  # test: the stored file is changed
+    run = crl_fetch(CrlOptions(), layout, [], now - timedelta(minutes=30))
+    assert [failure.error for failure in run.failures] == ["stored_file_changed"]
+    touch(path, now - timedelta(minutes=10))
+    row = task_rows(evidence(api_config, now))["CrlFetch"]
+    assert (row["state"], moment(row["last_evidence_at"])) == ("ok", now - timedelta(minutes=30))
+
+    # Q9: an index the run cannot read fails it too and stays; the row has no run to show.
+    for damaged in (b'{"lists": ', json.dumps({"schema": "another/1"}).encode()):
+        path.write_bytes(damaged)
+        touch(path, now - timedelta(minutes=5))
+        with pytest.raises(CrlError):
+            crl_fetch(CrlOptions(), layout, [], now)
+        assert path.read_bytes() == damaged
+        assert states(evidence(api_config, now))["CrlFetch"] == "missing", damaged
 
 
 @pytest.fixture

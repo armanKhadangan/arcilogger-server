@@ -1,4 +1,5 @@
-"""``state/renewal.json`` as W5-A writes it is what W5-C reads (contract 2.1.2, W5-C-1).
+"""``state/renewal/renewal.json`` as W5-A writes it is what W5-C reads (contract 2.1.2, W5-C-1,
+W5-E-4).
 
 The writer is ``arcilogger_core.renewal.write_state`` (the ``Renew`` task's command line); the
 readers are the one W5-C wrote for the alerts and ``/legal-status``
@@ -19,9 +20,15 @@ from arcilogger_core.renewal import (
     RenewalFact,
     TokenFact,
     compute_statuses,
+    state_path,
     write_state,
 )
-from arcilogger_worker.alerts.system import read_stamp_renewals
+from arcilogger_worker.alerts.system import (
+    RenewRuns,
+    read_renew_runs,
+    read_stamp_renewals,
+    stamp_renewal_path,
+)
 
 NOW = datetime(2031, 6, 23, 0, 0, tzinfo=UTC)
 WINDOW = timedelta(days=180)
@@ -117,3 +124,39 @@ def test_a_state_without_statuses_reads_as_unknown(tmp_path: Path) -> None:
         layout, None, at=NOW, renew_before=180, last_run=LastRun(NOW, "refused", 2, error="roots")
     )
     assert read_stamp_renewals(layout) is None
+
+
+def test_the_writer_and_the_readers_meet_in_the_protected_folder(tmp_path: Path) -> None:
+    """The report is written to ``state/renewal/renewal.json`` only, and every reader (the
+    alerts, the Sistem page's ``read_renew_runs``, ``/legal-status`` and the day page) reads it
+    there (W5-E-4). The first write takes only ``failures_in_a_row`` from an earlier release's
+    ``state/renewal.json`` (W5-E-8) and never writes it; after that it decides nothing."""
+    layout = Layout(tmp_path / "data")
+    earlier = layout.state / "renewal.json"
+    earlier.parent.mkdir(parents=True)
+    earlier.write_text('{"tokens": [], "failures_in_a_row": 1}\n', encoding="utf-8")
+    due = TokenFact(_day(date(2026, 10, 12)), "day", _hash(1), NOW + timedelta(days=100))
+    report = compute_statuses([due], [], now=NOW, renew_before=WINDOW)
+    failed = LastRun(NOW, "failed", 3, error="tsa_unavailable")
+    write_state(layout, report, at=NOW, renew_before=180, last_run=failed)
+    path = layout.state / "renewal" / "renewal.json"
+    assert stamp_renewal_path(layout) == state_path(layout) == path
+    assert path.is_file()
+    assert earlier.read_text(encoding="utf-8") == '{"tokens": [], "failures_in_a_row": 1}\n'
+    expected_runs = RenewRuns(last_run_at=NOW, outcome="failed", failures_in_a_row=2)
+    assert read_renew_runs(layout) == expected_runs
+    # a service writing the earlier file afterwards changes nothing any reader sees
+    earlier.write_text('{"tokens": [], "failures_in_a_row": 0}\n', encoding="utf-8")
+    assert [(entry.path, entry.status) for entry in read_stamp_renewals(layout) or ()] == [
+        (due.path, "due")
+    ]
+    assert read_renew_runs(layout) == expected_runs
+    config = Config.model_validate({"data_dir": str(layout.root), "secrets_dir": str(tmp_path)})
+    view = VaultView(layout, config, now=NOW)
+    assert view.renewal(date(2026, 10, 12)) == {
+        "status": "due",
+        "cert_not_after": NOW + timedelta(days=100),
+        "covered_by": None,
+        "renewed_at": None,
+    }
+    assert view.problems == []

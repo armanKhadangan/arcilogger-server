@@ -110,7 +110,14 @@ WINSW_ELEMENTS = {
 }  # fmt: skip
 WELL_KNOWN = {"system": "S-1-5-18", "local_service": "S-1-5-19", "admins": "S-1-5-32-544"}
 USERS_SID = "S-1-5-32-545"
+#: OWNER RIGHTS: an entry for it replaces the implicit rights (read and change the permissions)
+#: of whoever owns the path.
+OWNER_RIGHTS_SID = "S-1-3-4"
 TRUSTED_INSTALLER_SID = "S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464"
+#: Accounts every Windows can name that stand in for a service in the ACL tests of state\crl
+#: and state\renewal: NETWORK SERVICE and Guests. The plan gives neither anything, and the
+#: administrator running the tests is a member of neither.
+STAND_IN_SERVICES = ("S-1-5-20", "S-1-5-32-546")
 BOM = b"\xef\xbb\xbf"
 #: The organisation name and the admin PC of the fictional example network: the installer has
 #: no default for either (product decisions D1, D3), so the dry runs pass them unless a test
@@ -2740,7 +2747,7 @@ def test_acl_plan_least_privilege(engine: str, tmp_path: Path) -> None:
     assert _rights(vault, collector) == _rights(vault, web) == set()
     # Evidence-job state: core trusts state\seal\<day>.json ("sealed"), so only the tasks write it.
     assert _rights(entries["state"], collector) == {"Modify"}, "its own status and alerts"
-    for job in ("seal", "replica", "verify", "clock", "crl"):
+    for job in ("seal", "replica", "verify", "clock", "crl", "renewal"):
         entry = entries[job]
         assert entry["Protect"] is True, job
         assert _rights(entry, tasks) == {"Modify"}, job
@@ -2751,6 +2758,16 @@ def test_acl_plan_least_privilege(engine: str, tmp_path: Path) -> None:
     assert _rights(entries["seal"], ingest) == {"ReadAndExecute"}
     assert _rights(entries["replica"], ingest) == set()
     assert _rights(entries["crl"], ingest) == set()
+    # The re-stamping state (W5-E-4): a service that could write it could silence R20-renewal,
+    # R20-cert and renewal_due, or hold the run's lock.
+    assert re.split(r"[\\/]", entries["renewal"]["Path"])[-2:] == ["state", "renewal"]
+    assert _rights(entries["renewal"], ingest) == set()
+    # New in Wave 5, so a service may have created them (and owns them) before the upgrade: the
+    # owner may read their permissions, never change them (W5-E-9).
+    for job in ("crl", "renewal"):
+        assert _rights(entries[job], OWNER_RIGHTS_SID) == {"ReadPermissions"}, job
+    for job in ("seal", "replica", "verify", "clock"):
+        assert _rights(entries[job], OWNER_RIGHTS_SID) == set(), job
     # Stored reports: the Renew task reads them and their tokens (contract D3); the API and the
     # worker keep the rights of exports.
     reports = entries["reports"]
@@ -2805,6 +2822,11 @@ def test_acl_applied_keeps_sealed_file_deny_entries(tmp_path: Path) -> None:
     programdata.mkdir()
     (programdata / "secret.key").write_bytes(b"key")
     program.mkdir()
+    # state\crl as a service could have left it before the upgrade, with its Modify on state:
+    # its own folder, with an entry of its own (W5-E-9).
+    crl_state = data / "state" / "crl"
+    crl_state.mkdir(parents=True)
+    subprocess.run(["icacls", str(crl_state), "/grant", "*S-1-1-0:(OI)(CI)F"], check=True)
     # What arcilogger_core.immutability.lock() does to a sealed file.
     subprocess.run(["icacls", str(sealed), "/deny", "*S-1-1-0:(DE,WD,AD,WA,WEA)"], check=True)
     result = run_powershell(
@@ -2820,8 +2842,11 @@ def test_acl_applied_keeps_sealed_file_deny_entries(tmp_path: Path) -> None:
     )
     assert result.returncode == 0, result.stdout + result.stderr
     # The Renew task's state file, written as renew writes it (a new file replaces the old one
-    # on every run): it has no entry of its own and keeps the tasks' Modify inherited from state.
-    renewal = data / "state" / "renewal.json"
+    # on every run) into state\renewal, which Set-ArciVaultAcl.ps1 created from the plan: it has
+    # no entry of its own and keeps the folder's entries by inheritance (W5-E-4).
+    renewal_state = data / "state" / "renewal"
+    assert renewal_state.is_dir(), "Set-ArciVaultAcl.ps1 creates state\\renewal"
+    renewal = renewal_state / "renewal.json"
     atomic_write_bytes(renewal, b"{}\n")
     atomic_write_bytes(renewal, b'{"failures_in_a_row": 0}\n')
     dump = write_script(
@@ -2850,7 +2875,6 @@ foreach ($path in [System.IO.File]::ReadAllLines($ListPath)) {
     )
     out = tmp_path / "acl.json"
     seal_state = data / "state" / "seal"
-    crl_state = data / "state" / "crl"
     reports = data / "exports" / "reports"
     audit_spool = data / "spool" / "_audit"
     scheduled = data / "backups" / "scheduled"
@@ -2864,6 +2888,7 @@ foreach ($path in [System.IO.File]::ReadAllLines($ListPath)) {
         seal_state,
         crl_state,
         reports,
+        renewal_state,
         renewal,
         audit_spool,
         scheduled,
@@ -2918,23 +2943,254 @@ foreach ($path in [System.IO.File]::ReadAllLines($ListPath)) {
         assert reader_rules, reader
         assert all(r["rights"] & writes == 0 for r in reader_rules), reader
     assert all(r["sid"] not in (collector, service_sid("ArciIngest")) for r in crl_rules)
+    # The owner of state\crl and of state\renewal (Administrators after the ACL step, see
+    # test_acl_applied_takes_over_the_protected_state_folders) reads their permissions and
+    # nothing more: OWNER RIGHTS takes the owner's implicit right to change them (W5-E-9). The
+    # earlier entry of state\crl is gone.
+    synchronize, read_control = 0x100000, 0x20000
+    for path in (crl_state, data / "state" / "renewal"):
+        assert all(r["sid"] != "S-1-1-0" for r in acls[path]["rules"]), path
+        owner_rules = [r for r in acls[path]["rules"] if r["sid"] == OWNER_RIGHTS_SID]
+        assert any(not r["inherited"] for r in owner_rules), path
+        for rule in owner_rules:
+            assert (rule["type"], rule["rights"] & ~synchronize) == ("Allow", read_control), path
     # Stored reports: the Renew task reads them, never writes or deletes one.
     report_tasks = [r for r in acls[reports]["rules"] if r["sid"] == tasks]
     assert report_tasks, "LOCAL SERVICE must read exports\\reports"
     assert all(r["type"] == "Allow" and r["rights"] & writes == 0 for r in report_tasks)
     assert any(r["rights"] & read_and_execute == read_and_execute for r in report_tasks)
-    # state\renewal.json after two atomic writes: the tasks' Modify, inherited from state.
+    # state\renewal\renewal.json after two atomic writes: the tasks' Modify, inherited from
+    # the protected folder; the API and the worker read it; the collector and ingest reach
+    # neither the folder nor the file (W5-E-4).
+    assert acls[renewal_state]["protected"] is True
     renewal_tasks = [r for r in acls[renewal]["rules"] if r["sid"] == tasks]
-    assert renewal_tasks, "the Renew task must write state\\renewal.json"
+    assert renewal_tasks, "the Renew task must write state\\renewal\\renewal.json"
     assert all(r["inherited"] for r in renewal_tasks)
     assert any(
         r["type"] == "Allow" and r["rights"] & modify_bits == modify_bits for r in renewal_tasks
     )
+    for path in (renewal_state, renewal):
+        rules = [r for r in acls[path]["rules"] if r["type"] == "Allow"]
+        assert all(r["sid"] not in (collector, service_sid("ArciIngest")) for r in rules), path
+        for reader in (service_sid("ArciApi"), worker):
+            reader_rules = [r for r in rules if r["sid"] == reader]
+            assert reader_rules, (path, reader)
+            assert all(r["rights"] & writes == 0 for r in reader_rules), (path, reader)
     # Scheduled database dumps (ADR-0009): the Backup task writes them, no service reads them.
     assert acls[scheduled]["protected"] is True
     assert any(r["sid"] == WELL_KNOWN["local_service"] for r in acls[scheduled]["rules"])
     services = {service_sid(n) for n in ("ArciCollector", "ArciIngest", "ArciApi", "ArciWorker")}
     assert not any(r["sid"] in services for r in acls[scheduled]["rules"])
+
+
+_OWNER_DUMP_SCRIPT = r"""
+param([string]$ListPath, [string]$OutputPath)
+# A Get-Acl that cannot run must fail the test, not write an empty owner or empty rules.
+$ErrorActionPreference = 'Stop'
+Remove-TypeData -TypeName System.Array -ErrorAction SilentlyContinue
+$sidType = [System.Security.Principal.SecurityIdentifier]
+$out = [ordered]@{}
+foreach ($path in [System.IO.File]::ReadAllLines($ListPath)) {
+    $acl = Get-Acl -LiteralPath $path
+    $out[$path] = [ordered]@{
+        owner = $acl.GetOwner($sidType).Value
+        protected = $acl.AreAccessRulesProtected
+        rules = @($acl.GetAccessRules($true, $true, $sidType) | ForEach-Object {
+                [ordered]@{
+                    sid = $_.IdentityReference.Value; rights = [int]$_.FileSystemRights
+                    type = [string]$_.AccessControlType; inherited = $_.IsInherited
+                }
+            })
+    }
+}
+[System.IO.File]::WriteAllText($OutputPath, ($out | ConvertTo-Json -Depth 6))
+"""
+
+
+def _owners_and_rules(powershell: str, tmp_path: Path, paths: list[Path]) -> dict[Path, Any]:
+    dump = write_script(tmp_path / "owners.ps1", _OWNER_DUMP_SCRIPT)
+    listing, out = tmp_path / "owner-paths.txt", tmp_path / "owners.json"
+    listing.write_text("\n".join(str(p) for p in paths) + "\n", encoding="utf-8")
+    result = run_powershell(powershell, dump, "-ListPath", str(listing), "-OutputPath", str(out))
+    assert result.returncode == 0, result.stdout + result.stderr
+    return {Path(k): v for k, v in read_json(out).items()}
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="NTFS rights are Windows-only")
+def test_acl_applied_takes_over_the_protected_state_folders(tmp_path: Path) -> None:
+    """state\\crl and state\\renewal as a service could have left them before the upgrade
+    (W5-E-9, answer to Q4 on #158): its own folders and files, renewal.lock among them (held,
+    it would stop every Renew run), each with a Modify entry of its own. After the ACL step
+    Administrators own the two folders and everything below them, the items below have
+    inherited entries only, and the collector and ingest have nothing there. A folder outside
+    the two keeps its owner. icacls sets the foreign owners with the administrator's restore
+    privilege (administrator CI runner). NETWORK SERVICE and Guests stand in for the collector
+    and ingest: their own SIDs (NT SERVICE\\ArciCollector, ...) exist only where the services
+    are installed, and icacls cannot map them elsewhere (error 1332)."""
+    powershell = _windows_admin_powershell()
+    data, programdata, program = tmp_path / "data", tmp_path / "programdata", tmp_path / "program"
+    programdata.mkdir()
+    program.mkdir()
+    collector, ingest = STAND_IN_SERVICES
+    renewal_state, crl_state, logs = (
+        data / "state" / "renewal",
+        data / "state" / "crl",
+        data / "logs",
+    )
+    lock = renewal_state / "renewal.lock"
+    index = crl_state / "index.json"
+    # A folder of its own below state\crl: the step resets it, then what is in it.
+    planted = crl_state / "planted"
+    planted_list = planted / "list.crl"
+    for folder in (renewal_state, planted, logs):
+        folder.mkdir(parents=True)
+    lock.write_bytes(b"")
+    index.write_bytes(b"{}\n")
+    planted_list.write_bytes(b"not a list\n")
+    owned = {
+        renewal_state: collector, lock: collector, crl_state: ingest, index: ingest,
+        planted: ingest, planted_list: ingest, logs: collector,
+    }  # fmt: skip
+    for path, sid in owned.items():
+        grant = f"*{sid}:(OI)(CI)M" if path.is_dir() else f"*{sid}:M"
+        subprocess.run(["icacls", str(path), "/grant", grant], check=True)
+        subprocess.run(["icacls", str(path), "/setowner", f"*{sid}"], check=True)
+    before = _owners_and_rules(powershell, tmp_path, list(owned))
+    for path, sid in owned.items():
+        assert before[path]["owner"] == sid, path
+        assert any(r["sid"] == sid and not r["inherited"] for r in before[path]["rules"]), path
+    result = run_powershell(
+        powershell,
+        WINDOWS / "scripts" / "Set-ArciVaultAcl.ps1",
+        "-DataRoot",
+        str(data),
+        "-ProgramDataDir",
+        str(programdata),
+        "-InstallDir",
+        str(program),
+        "-SkipAudit",
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    after = _owners_and_rules(powershell, tmp_path, list(owned))
+    admins, tasks = WELL_KNOWN["admins"], WELL_KNOWN["local_service"]
+    taken_over = [path for path in owned if path != logs]
+    for path in taken_over:
+        assert after[path]["owner"] == admins, path
+        rules = after[path]["rules"]
+        assert all(r["sid"] not in (collector, ingest) for r in rules), path
+    for folder in (renewal_state, crl_state):
+        assert after[folder]["protected"] is True, folder
+    for item in (lock, index, planted, planted_list):
+        assert after[item]["protected"] is False, item
+        assert after[item]["rules"], item
+        assert all(r["inherited"] for r in after[item]["rules"]), item
+    # The Renew task still takes its lock: the folder's Modify, inherited.
+    write_data, append_data, delete = 0x2, 0x4, 0x10000
+    modify_bits = write_data | append_data | delete
+    lock_tasks = [r for r in after[lock]["rules"] if r["sid"] == tasks]
+    assert any(
+        r["type"] == "Allow" and r["rights"] & modify_bits == modify_bits for r in lock_tasks
+    )
+    # Everywhere else the owner stays (Set-ArciAccessControl): logs keeps the collector.
+    assert after[logs]["owner"] == collector
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="NTFS rights are Windows-only")
+@pytest.mark.parametrize("kind", ["junction", "hard link"])
+def test_acl_step_stops_at_a_link_in_a_protected_state_folder(kind: str, tmp_path: Path) -> None:
+    """A link below state\\renewal (a directory junction, or a hard link: the same file under
+    another name elsewhere) stops the ACL step with an error before the folder's own entries are
+    written: Windows then writes the inherited entries of everything below too, and a hard link
+    shares its entries with the file it names (W5-E-9). The folder is protected beforehand, so
+    that the entry of state, written first, does not reach the link either. The file elsewhere
+    keeps its owner and every entry, the inherited ones too."""
+    powershell = _windows_admin_powershell()
+    data, programdata, program = tmp_path / "data", tmp_path / "programdata", tmp_path / "program"
+    programdata.mkdir()
+    program.mkdir()
+    renewal_state = data / "state" / "renewal"
+    renewal_state.mkdir(parents=True)
+    admins = WELL_KNOWN["admins"]
+    subprocess.run(["icacls", str(renewal_state), "/grant", f"*{admins}:(OI)(CI)F"], check=True)
+    subprocess.run(["icacls", str(renewal_state), "/inheritance:r"], check=True)
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    kept = elsewhere / "kept.txt"
+    kept.write_bytes(b"kept\n")
+    subprocess.run(["icacls", str(kept), "/grant", "*S-1-1-0:R"], check=True)
+    link, target, flag = (
+        (renewal_state / "renewal", elsewhere, "/J")
+        if kind == "junction"
+        else (renewal_state / "renewal.lock", kept, "/H")
+    )
+    subprocess.run(["cmd", "/c", "mklink", flag, str(link), str(target)], check=True)
+    before = _owners_and_rules(powershell, tmp_path, [kept])
+    assert any(r["inherited"] for r in before[kept]["rules"]), "kept.txt inherits from elsewhere"
+    result = run_powershell(
+        powershell,
+        WINDOWS / "scripts" / "Set-ArciVaultAcl.ps1",
+        "-DataRoot",
+        str(data),
+        "-ProgramDataDir",
+        str(programdata),
+        "-InstallDir",
+        str(program),
+        "-SkipAudit",
+    )
+    assert result.returncode != 0, result.stdout + result.stderr
+    message = "[a link (reparse point or hard link) in a protected state folder"
+    assert _unwrapped(message) in _unwrapped(result.stdout + result.stderr)
+    after = _owners_and_rules(powershell, tmp_path, [kept])
+    assert after[kept] == before[kept]
+    assert any(r["sid"] == "S-1-1-0" and not r["inherited"] for r in after[kept]["rules"])
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="NTFS rights are Windows-only")
+def test_acl_step_takes_over_a_lock_a_service_left_as_its_own(tmp_path: Path) -> None:
+    """A renewal.lock a service left as its own: itself as the owner, a Modify entry of its own,
+    inheritance off. Held, it would stop every Renew run (answer to Q4 on #158). The elevated
+    step takes it over all the same: afterwards Administrators own it, it has inherited entries
+    only, the service has nothing, and LOCAL SERVICE keeps its inherited Modify (W5-E-9).
+    NETWORK SERVICE stands in for the collector, as in the test above."""
+    powershell = _windows_admin_powershell()
+    data, programdata, program = tmp_path / "data", tmp_path / "programdata", tmp_path / "program"
+    programdata.mkdir()
+    program.mkdir()
+    renewal_state = data / "state" / "renewal"
+    renewal_state.mkdir(parents=True)
+    lock = renewal_state / "renewal.lock"
+    lock.write_bytes(b"")
+    collector, admins = STAND_IN_SERVICES[0], WELL_KNOWN["admins"]
+    subprocess.run(["icacls", str(lock), "/grant", f"*{collector}:M"], check=True)
+    subprocess.run(["icacls", str(lock), "/setowner", f"*{collector}"], check=True)
+    subprocess.run(["icacls", str(lock), "/inheritance:r"], check=True)
+    before = _owners_and_rules(powershell, tmp_path, [lock])[lock]
+    assert before["owner"] == collector, before
+    assert not any(r["inherited"] for r in before["rules"]), before
+    assert any(r["sid"] == collector for r in before["rules"]), before
+    result = run_powershell(
+        powershell,
+        WINDOWS / "scripts" / "Set-ArciVaultAcl.ps1",
+        "-DataRoot",
+        str(data),
+        "-ProgramDataDir",
+        str(programdata),
+        "-InstallDir",
+        str(program),
+        "-SkipAudit",
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    after = _owners_and_rules(powershell, tmp_path, [lock])[lock]
+    assert after["owner"] == admins, (before, after)
+    assert after["protected"] is False, (before, after)
+    assert after["rules"], (before, after)
+    assert all(r["inherited"] for r in after["rules"]), (before, after)
+    assert all(r["sid"] != collector for r in after["rules"]), (before, after)
+    write_data, append_data, delete = 0x2, 0x4, 0x10000
+    modify_bits = write_data | append_data | delete
+    tasks = [r for r in after["rules"] if r["sid"] == WELL_KNOWN["local_service"]]
+    modify = [r for r in tasks if r["type"] == "Allow" and r["rights"] & modify_bits == modify_bits]
+    assert modify, (before, after)
 
 
 def _windows_admin_powershell() -> str:
@@ -8622,15 +8878,21 @@ Invoke-DatabaseRestore
 """
 
 
-def _pg_bin(tmp_path: Path) -> Path | None:
+def _pg_bin(tmp_path: Path, major: int) -> Path | None:
     """A folder with psql.exe, pg_dump.exe and pg_restore.exe as the installer runs them (on
-    Linux links to PostgreSQL's binaries): ARCILOGGER_PGBIN, /usr/lib/postgresql/16/bin (Debian
-    and Ubuntu, whose PATH has wrapper scripts), or the folder of psql on PATH."""
+    Linux links to PostgreSQL's binaries), of the server's own major version ``major``, as the
+    installer bundles them: a newer pg_dump writes settings an older server does not know
+    (``SET transaction_timeout`` from 17 on), which ``pg_restore --exit-on-error`` stops at.
+    ARCILOGGER_PGBIN, /usr/lib/postgresql/<major>/bin (Debian and Ubuntu: their PATH has
+    pg_wrapper scripts, which pick the tool by their own name and so fail behind a ``.exe``
+    link), or the folder of psql on PATH when it is that version."""
     found = os.environ.get("ARCILOGGER_PGBIN")
-    if not found and Path("/usr/lib/postgresql/16/bin/psql").is_file():
-        found = "/usr/lib/postgresql/16/bin"
+    if not found and Path(f"/usr/lib/postgresql/{major}/bin/psql").is_file():
+        found = f"/usr/lib/postgresql/{major}/bin"
     if not found and (psql := shutil.which("psql")):
-        found = str(Path(psql).parent)
+        version = subprocess.run([psql, "--version"], capture_output=True, text=True).stdout
+        if re.search(rf"\b{major}\.\d", version):
+            found = str(Path(psql).parent)
     if not found:
         return None
     if os.name == "nt":  # the binaries are the .exe files already
@@ -8695,17 +8957,21 @@ def test_database_restore_puts_a_0020_dump_in_place_of_a_0021_database(
     assert TEST_PG is not None
     timescale = server == "timescaledb"
     expected = timescale and os.environ.get("ARCILOGGER_EXPECT_TIMESCALE") == "1"
-    pg_bin = _pg_bin(tmp_path)
-    if pg_bin is None:
-        if expected:
-            pytest.fail("psql / pg_dump / pg_restore not found (ARCILOGGER_EXPECT_TIMESCALE=1)")
-        pytest.skip("psql / pg_dump / pg_restore not found")
     dsn = urllib.parse.urlsplit(TEST_PG)
     user, password = dsn.username or "postgres", dsn.password or ""
     host, port = dsn.hostname or "127.0.0.1", str(dsn.port or 5432)
     name = f"arci_t_restore_{uuid.uuid4().hex[:12]}"
     base_url = f"postgresql+psycopg://{user}:{password}@{host}:{port}"
     admin = create_engine(f"{base_url}/postgres", isolation_level="AUTOCOMMIT", poolclass=NullPool)
+    with admin.connect() as connection:
+        major = int(connection.execute(text("SHOW server_version_num")).scalar_one()) // 10000
+    pg_bin = _pg_bin(tmp_path, major)
+    if pg_bin is None:
+        admin.dispose()
+        tools = f"PostgreSQL {major}'s psql / pg_dump / pg_restore not found"
+        if expected:
+            pytest.fail(f"{tools} (ARCILOGGER_EXPECT_TIMESCALE=1)")
+        pytest.skip(tools)
     if timescale and (missing := _timescale_missing(admin)):
         admin.dispose()
         if expected:
@@ -11037,13 +11303,14 @@ def test_acl_plan_gives_the_renew_and_crlfetch_tasks_their_rights(
 ) -> None:
     """Each right of the Renew task (LOCAL SERVICE, contract D3; A4 on #103) and of CrlFetch.
 
-    Renew creates and writes its records in vault\\renewals, modifies state\\renewal.json and
-    state\\renewal.lock, reads exports\\reports and reads the vault days, the deletion records
-    and state\\crl; CrlFetch writes state\\crl only (contract 0.1 rule 2). vault\\renewals and
-    the two files have no entry of their own: every run replaces renewal.json with a new file
-    (atomic write), which carries only the inherited entries, so their right is the inherited
-    Modify of vault and state. No entry gives a write right below vault: sealed days and
-    deletion records keep the deny entries of ``immutability.lock``
+    Renew creates and writes its records in vault\\renewals, modifies renewal.json and
+    renewal.lock in state\\renewal, reads exports\\reports and reads the vault days, the
+    deletion records and state\\crl; CrlFetch writes state\\crl only (contract 0.1 rule 2).
+    vault\\renewals has no entry of its own: its right is the inherited Modify of vault.
+    state\\renewal is protected like state\\crl (W5-E-4): the two files have no entry of their
+    own, since every run replaces renewal.json with a new file (atomic write), which carries
+    only the folder's inherited entries. No entry gives a write right below vault: sealed days
+    and deletion records keep the deny entries of ``immutability.lock``
     (``test_acl_applied_keeps_sealed_file_deny_entries``)."""
     entries = _plan_by_path(_acl_plan(engine, tmp_path), tmp_path)
     tasks, api, worker = (
@@ -11053,18 +11320,34 @@ def test_acl_plan_gives_the_renew_and_crlfetch_tasks_their_rights(
     )
     owners = {WELL_KNOWN["system"], WELL_KNOWN["admins"]}
     modify, read = ("Modify", "all"), ("ReadAndExecute", "all")
+    # the owner of state\crl or state\renewal (a service that created it before the upgrade)
+    # reads its permissions and cannot change them (W5-E-9)
+    owner = {("ReadPermissions", "all")}
+    state_sids = owners | {tasks, api, worker, OWNER_RIGHTS_SID}
     # vault\renewals (records, tokens, their lock), the days and deletion records it reads.
     assert _grants(entries["data/vault"], tasks) == {modify}
     assert [path for path in entries if path.startswith("data/vault/")] == []
-    # state\renewal.json and state\renewal.lock.
+    # state\renewal (renewal.json, renewal.lock): protected, the tasks write it, the API and
+    # the worker read it, nothing for the collector or ingest (W5-E-4); no entry for the files.
+    renewal = entries["data/state/renewal"]
+    assert (renewal["Kind"], renewal["Protect"]) == ("Directory", True)
+    assert {ace["Sid"] for ace in renewal["Aces"]} == state_sids
+    assert _grants(renewal, tasks) == {modify}
+    assert _grants(renewal, OWNER_RIGHTS_SID) == owner
+    assert _grants(renewal, api) == _grants(renewal, worker) == {read}
+    for service in ("ArciCollector", "ArciIngest"):
+        assert _grants(renewal, service_sid(service)) == set(), service
+    assert [path for path in entries if path.startswith("data/state/renewal")] == [
+        "data/state/renewal"
+    ]
     assert entries["data/state"]["Protect"] is False
     assert _grants(entries["data/state"], tasks) == {modify}
-    assert [path for path in entries if path.startswith("data/state/renewal")] == []
     # state\crl: protected; the tasks write it, the API and the worker read it.
     crl = entries["data/state/crl"]
     assert (crl["Kind"], crl["Protect"]) == ("Directory", True)
-    assert {ace["Sid"] for ace in crl["Aces"]} == owners | {tasks, api, worker}
+    assert {ace["Sid"] for ace in crl["Aces"]} == state_sids
     assert _grants(crl, tasks) == {modify}
+    assert _grants(crl, OWNER_RIGHTS_SID) == owner
     assert _grants(crl, api) == _grants(crl, worker) == {read}
     # exports\reports: read, inherited by the reports and their tokens, nothing more.
     reports = entries["data/exports/reports"]
@@ -11075,12 +11358,85 @@ def test_acl_plan_gives_the_renew_and_crlfetch_tasks_their_rights(
     assert _writes(entries, tasks) == {
         "data/spool", "data/spool/_audit", "data/vault", "data/state", "data/state/seal",
         "data/state/replica", "data/state/verify", "data/state/clock", "data/state/crl",
-        "data/state/requests", "data/logs", "data/backups/scheduled",
+        "data/state/renewal", "data/state/requests", "data/logs", "data/backups/scheduled",
     }  # fmt: skip
-    # Parents before children: Set-ArciVaultAcl.ps1 creates state\crl and exports\reports.
+    # Parents before children: Set-ArciVaultAcl.ps1 creates state\crl, state\renewal and
+    # exports\reports.
     paths = list(entries)
     assert paths.index("data/state") < paths.index("data/state/crl")
+    assert paths.index("data/state") < paths.index("data/state/renewal")
     assert paths.index("data/exports") < paths.index("data/exports/reports")
+
+
+def test_acl_plan_resets_the_owner_of_the_two_protected_state_folders_only(
+    engine: str, tmp_path: Path
+) -> None:
+    """W5-E-9 (answer to Q4 on #158): only state\\crl and state\\renewal ask Set-ArciAclEntry
+    to make Administrators their owner and to leave the items below them with inherited entries
+    only. A service could have created both folders, and a renewal.lock that holds every Renew
+    run, under an earlier release. Every other entry keeps its owner: the tasks unlock the sealed
+    files they own by the owner's right to change their entries."""
+    entries = _plan_by_path(_acl_plan(engine, tmp_path), tmp_path)
+    assert all(isinstance(entry["ResetOwner"], bool) for entry in entries.values())
+    reset = [path for path, entry in entries.items() if entry["ResetOwner"]]
+    assert reset == ["data/state/crl", "data/state/renewal"]
+    for path in reset:
+        assert (entries[path]["Kind"], entries[path]["Protect"]) == ("Directory", True), path
+
+
+def test_only_the_acl_script_passes_reset_owner() -> None:
+    """Set-ArciAclEntry -ResetOwner is opt-in (W5-E-9): Set-ArciVaultAcl.ps1, which the
+    installer's ACL step runs, passes each plan entry's ResetOwner; the installer's own calls
+    (admin\\ and admin\\keys before the keys exist, the configuration files after a secret was
+    stored) pass none and never write an owner."""
+    calls = {
+        path.name: re.findall(r"Set-ArciAclEntry -Entry[^\r\n}]*", path.read_text("utf-8-sig"))
+        for path in sorted(WINDOWS.rglob("*.ps1"))
+    }
+    assert calls["Set-ArciVaultAcl.ps1"] == [
+        "Set-ArciAclEntry -Entry $entry -ResetOwner:$entry.ResetOwner"
+    ]
+    assert [call.strip() for call in calls[INSTALL_SCRIPT.name]] == [
+        "Set-ArciAclEntry -Entry $entry"
+    ] * 2
+    assert {name for name, found in calls.items() if found} == {
+        "Set-ArciVaultAcl.ps1",
+        INSTALL_SCRIPT.name,
+    }
+
+
+def test_acl_script_help_lists_every_state_folder_of_the_plan() -> None:
+    """Answer to Q11 on #158: the rights table of Set-ArciVaultAcl.ps1's help has a row for
+    every folder of Get-ArciAclPlan under state, state\\requests too, and the state row names
+    ArciAdmin's read, as the plan gives it."""
+    plan = _function(MODULE.read_text("utf-8-sig"), "Get-ArciAclPlan")
+    folders = re.findall(r"\(\$DataRoot \+ \$p \+ 'state' \+ \$p \+ '(\w+)'\)", plan)
+    assert {"crl", "renewal", "requests"} <= set(folders)
+    help_text = _between(
+        (WINDOWS / "scripts" / "Set-ArciVaultAcl.ps1").read_text("utf-8-sig"),
+        ".DESCRIPTION",
+        ".PARAMETER",
+    )
+    table = help_text.split("\n\n")[1].split("\n")[2:]
+    rows: dict[str, str] = {}
+    folder = ""
+    for line in table:
+        if line[:42].strip():
+            folder = line[:42].strip()
+            rows[folder] = line[42:]
+        else:
+            rows[folder] += " " + line[42:]
+    named = " ".join(rows)
+    for name in folders:
+        assert re.search(rf"\\{name}\b", named), f"state\\{name} has no row"
+    state = _between(plan, "(New-Entry ($DataRoot + $p + 'state') ", "\n        (New-Entry")
+    assert "'NT SERVICE\\ArciAdmin' -Rights $read" in state
+    assert "ArciAdmin read" in rows["<data>\\state"]
+    requests = _between(plan, "+ $p + 'requests') ", "\n        (New-Entry")
+    assert "'NT SERVICE\\ArciAdmin' -Rights $requestWriter" in requests
+    assert "-Rights $modify" in requests
+    assert "ArciAdmin read, create and write" in rows["<data>\\state\\requests"]
+    assert "LOCAL SERVICE modify" in rows["<data>\\state\\requests"]
 
 
 def test_acl_plan_keeps_the_api_and_the_tasks_out_of_the_configuration(

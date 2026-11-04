@@ -22,8 +22,9 @@ stamps and writes a tick's lines (about 0.8 ms of CPU every 20 ms at 2,000 lines
 development VM), which lands in "other". Ingest itself is another process.
 
 **Timing:** ``REQUESTS`` requests while ingest runs, one every ``INTERVAL`` seconds (the next
-starts at once when one runs over), then ``SETTLED_REQUESTS`` on the same server once ingest has
-stopped and a ``CHECKPOINT`` has written its rows back, for comparison. For each the time of the
+starts at once when one runs over), between two series of ``SETTLED_REQUESTS`` on the same
+server with ingest stopped and its rows written back by a ``CHECKPOINT``: one before (after a
+first feed has filled the browsed day's first page), one after. For each the time of the
 call and where it went (SQL, commits, fsyncs, other; ``test_search_perf.Timer``) are kept; the
 median, the 95th percentile (nearest rank, so the split shown is that request's), the slowest
 request and the mean are printed past pytest's capture. Of the commits counted, the read-only
@@ -31,11 +32,17 @@ one after authentication (``reading()``) writes no WAL, and the activity commit 
 for its WAL (``synchronous_commit`` off, #119): one POST /search waits for WAL flushes twice
 (audit row, spool watermark) and fsyncs the spool once.
 
-**Guards:** every request answers a full page; the 95th percentile under ingest stays below the
-browse budget ``BROWSE`` (500 ms, decided in the review of #145) and the slowest request below
+**Guards:** every request answers a full page; what ingest adds stays below the browse budget
+``BROWSE`` (500 ms): the 95th percentile under ingest less the larger of the two settled ones
+(decided on #119, 2026-11-04, deviation #119-2); the slowest request of each series stays below
 ``CEILING``, which only a broken server misses; the feeder kept its rate and ingest loaded at
 least half of what was fed during the measurement, so the test cannot pass with the feed or
-ingest idle.
+ingest idle. Why the difference and not the 95th percentile itself: on a Windows runner the
+audit spool's ``os.fsync`` waits for the disk's write-back (#90's case, kept out of scope by
+#119 item 3), 255-511 ms at the 95th percentile in whichever series meets it, settled ones too
+(run 41875393810: 590 ms under ingest against 331 ms settled; its re-run 134 against 332). The
+absolute budget of a settled browse stays with ``test_search_perf``'s Q1. The splits printed
+for every series show where a failure's time went.
 """
 
 from __future__ import annotations
@@ -105,10 +112,11 @@ SETTLED_REQUESTS = REQUESTS
 INTERVAL = 0.2
 #: Lines ingest has loaded before the timing starts (one second of the feed).
 WARM_LINES = LINES_PER_SECOND
-#: The bound on the slowest request under ingest (the 95th percentile has ``BROWSE``): only a
-#: broken server misses it, ten times the browse budget. Ten times the settled figure (53-72 ms
-#: best, docs/SEARCH.md §13) would be 0.5-0.7 s, inside the +500 ms that a Windows runner's
-#: write-back adds to one request (#90), so it could fail on a sound server.
+#: The bound on the slowest request of each series (what ingest adds at the 95th percentile has
+#: ``BROWSE``): only a broken server misses it, ten times the browse budget. Ten times the
+#: settled figure (53-72 ms best, docs/SEARCH.md §13) would be 0.5-0.7 s, inside the +500 ms
+#: that a Windows runner's write-back adds to one request (#90), so it could fail on a sound
+#: server.
 CEILING = 10 * BROWSE
 #: The device time of a format-sample line: FortiGate ``date``/``time`` and ``eventtime``
 #: (nanoseconds in the samples), MikroTik's RFC 3339 stamp.
@@ -132,15 +140,17 @@ class Feed:
     """Appends ``LINES_PER_SECOND`` lines a second to ``NEWEST``'s spool files of the FortiGate
     and the MikroTik until :meth:`close`; receive times advance with the feed from 09:45."""
 
-    def __init__(self, world: World) -> None:
+    def __init__(self, world: World, first: int = 0) -> None:
         self.paths = {
             source: world.layout.spool_file(source, NEWEST) for source in ("fortigate", "core-r1")
         }
         for path in self.paths.values():
             path.parent.mkdir(parents=True, exist_ok=True)
         self.start = datetime.combine(NEWEST, clock(9, 45), tzinfo=SITE_TZ)
-        #: Lines appended so far (read by the test while the thread writes).
-        self.written = 0
+        #: Lines appended so far (read by the test while the thread writes). A second feed
+        #: carries on from the first one's count, so no line or receive time occurs twice.
+        self.written = first
+        self._first = first
         #: What ended the thread early (a spool file it could not write).
         self.error: BaseException | None = None
         self._stop = threading.Event()
@@ -157,7 +167,7 @@ class Feed:
     def _feed(self) -> None:
         began = time.perf_counter()
         while not self._stop.wait(TICK):
-            due = int((time.perf_counter() - began) * LINES_PER_SECOND)
+            due = self._first + int((time.perf_counter() - began) * LINES_PER_SECOND)
             with contextlib.ExitStack() as stack:
                 files = {s: stack.enter_context(p.open("ab")) for s, p in self.paths.items()}
                 for index in range(self.written, due):
@@ -370,8 +380,7 @@ def report(browse: Browse, name: str, results: list[tuple[float, Split]]) -> tup
     p50, p95, top, average = rank(results, 50), rank(results, 95), rank(results, 100), mean(results)
     browse.show(
         f"{name}: {len(results)} requests, p50 {p50[0] * 1000:.0f} ms, p95 {p95[0] * 1000:.0f} ms, "
-        f"max {top[0] * 1000:.0f} ms (budget {BROWSE * 1000:.0f} ms, ceiling "
-        f"{CEILING * 1000:.0f} ms)"
+        f"max {top[0] * 1000:.0f} ms (ceiling {CEILING * 1000:.0f} ms)"
     )
     for label, (total, split) in (("p50", p50), ("p95", p95), ("max", top), ("mean", average)):
         browse.show(f"  {label}: {total * 1000:.0f} ms: {split.text(total)}")
@@ -381,18 +390,37 @@ def report(browse: Browse, name: str, results: list[tuple[float, Split]]) -> tup
 # -- the guard ------------------------------------------------------------------------------------
 
 
+def warm(browse: Browse, ingest: Ingest, feed: Feed, lines: int) -> None:
+    """Waits until ingest has loaded ``lines`` lines of the browsed day."""
+    deadline = time.perf_counter() + 120
+    while loaded(browse.engine) < lines:
+        ingest.alive()
+        feed.alive()
+        assert time.perf_counter() < deadline, ingest.text()
+        time.sleep(0.1)
+
+
 def test_browse_under_concurrent_ingest(browse: Browse) -> None:
+    # The browsed day's first page (and more), then a settled series before ingest runs again.
     ingest = Ingest(browse.world, browse.dsn, browse.engine)
     try:
         feed = Feed(browse.world)
         try:
-            # Ingest is up and has filled the browsed day's first page (and more).
-            deadline = time.perf_counter() + 120
-            while loaded(browse.engine) < WARM_LINES:
-                ingest.alive()
-                feed.alive()
-                assert time.perf_counter() < deadline, ingest.text()
-                time.sleep(0.1)
+            warm(browse, ingest, feed, WARM_LINES)
+        finally:
+            feed.close()
+    finally:
+        ingest.close()
+    first = feed.written
+    _checkpoint(browse.engine)
+    q1(browse)  # warm-up
+    settled_before = series(browse, SETTLED_REQUESTS)
+    # Under ingest: the feed carries on from its count, ingest from its offsets.
+    ingest = Ingest(browse.world, browse.dsn, browse.engine)
+    try:
+        feed = Feed(browse.world, first)
+        try:
+            warm(browse, ingest, feed, loaded(browse.engine) + WARM_LINES)
             q1(browse)  # warm-up
             fed, before, began = feed.written, loaded(browse.engine), time.perf_counter()
             under = series(browse, REQUESTS)
@@ -404,16 +432,28 @@ def test_browse_under_concurrent_ingest(browse: Browse) -> None:
             feed.close()
     finally:
         ingest.close()
-    # The same server settled: ingest stopped, its writes back on disk.
+    # The same server settled again: ingest stopped, its writes back on disk.
     checkpoint = _checkpoint(browse.engine)
-    settled = series(browse, SETTLED_REQUESTS)
+    settled_after = series(browse, SETTLED_REQUESTS)
     browse.show(
         f"ingest during the timing: {LINES_PER_SECOND} lines/s offered for {seconds:.1f} s "
         f"({fed} lines), {done} loaded ({done / seconds:.0f} lines/s); afterwards {checkpoint}"
     )
     p95, slowest = report(browse, "Q1 browse 1 d under ingest", under)
-    report(browse, "Q1 browse 1 d settled (ingest stopped)", settled)
+    p95_before, slowest_before = report(browse, "Q1 browse 1 d settled before", settled_before)
+    p95_after, slowest_after = report(browse, "Q1 browse 1 d settled after", settled_after)
+    added = p95 - max(p95_before, p95_after)
+    browse.show(
+        f"what ingest adds at the 95th percentile: {added * 1000:.0f} ms "
+        f"(budget {BROWSE * 1000:.0f} ms; settled {p95_before * 1000:.0f} ms before, "
+        f"{p95_after * 1000:.0f} ms after)"
+    )
     assert fed >= 0.9 * LINES_PER_SECOND * seconds, f"the feed fell behind: {fed} lines"
     assert done >= fed / 2, f"ingest loaded {done} of {fed} lines fed: {ingest.text()}"
-    assert p95 < BROWSE, f"95th percentile under ingest {p95 * 1000:.0f} ms"
-    assert slowest < CEILING, f"slowest request under ingest {slowest * 1000:.0f} ms"
+    assert added < BROWSE, f"ingest adds {added * 1000:.0f} ms at the 95th percentile"
+    for name, top in (
+        ("under ingest", slowest),
+        ("settled before", slowest_before),
+        ("settled after", slowest_after),
+    ):
+        assert top < CEILING, f"slowest request {name} {top * 1000:.0f} ms"

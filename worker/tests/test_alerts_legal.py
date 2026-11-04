@@ -12,7 +12,7 @@ from __future__ import annotations
 import ast
 import json
 from collections.abc import Iterator
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -22,16 +22,19 @@ from cryptography import x509
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives.serialization import Encoding, load_pem_private_key
+from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
 from sqlalchemy import Engine, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from arcilogger_core.config import Config
-from arcilogger_core.crl import parse_crl
+from arcilogger_core.crl import CrlOptions, parse_crl
+from arcilogger_core.crl import fetch as crl_fetch
 from arcilogger_core.layout import Layout
-from arcilogger_core.renewal import LastRun, write_state
+from arcilogger_core.renewal import LastRun, RenewalReport, write_state
+from arcilogger_core.seal import Sealer
 from arcilogger_core.timeutil import isoformat_site
-from arcilogger_core.tsa.mock import MockTsa
-from arcilogger_core.tsa.verify import fingerprint
+from arcilogger_core.tsa.mock import MockTsaProvider
+from arcilogger_core.tsa.verify import TEST_ORGANIZATION, fingerprint
 from arcilogger_db.engine import session_factory
 from arcilogger_db.models import Alert
 from arcilogger_worker.alerts import system
@@ -77,6 +80,10 @@ WAVE5_CODES = frozenset({"R20-renewal", "R20-cert", "R20-crl"})
 REGISTERED = system.CHECKS
 #: The dedup keys of the three alerts.
 KEYS = (RENEWAL_KEY, CERT_KEY, CRL_KEY)
+#: A made-up CA a real install's stamps chain to: not ARCILOGGER's test organization, and a
+#: policy outside the test arc 2.999, under the documentation arc 1.3.6.1.4.1.32473 (RFC 5612).
+CA_ORGANIZATION = "Örnek Simulated CA"
+CA_POLICY = "1.3.6.1.4.1.32473.1.1"
 
 
 @pytest.fixture(autouse=True)
@@ -93,7 +100,16 @@ def sessions(db_engine: Engine) -> sessionmaker[Session]:
 
 @pytest.fixture
 def config(layout: Layout) -> Config:
-    return Config(data_dir=layout.root, secrets_dir=layout.root)
+    """The mock provider (its test root is pinned once the mock TSA exists) and the pinned
+    roots of :func:`roots_dir` (empty until a test puts one there)."""
+    return Config(
+        data_dir=layout.root, secrets_dir=layout.root, tsa={"roots_dir": roots_dir(layout)}
+    )
+
+
+def roots_dir(layout: Layout) -> Path:
+    """``tsa.roots_dir`` of :func:`config`, outside the data directory."""
+    return layout.root.parent / "kokler"
 
 
 @pytest.fixture
@@ -155,41 +171,118 @@ def revoked_day(layout: Layout, day: date = date(2026, 10, 30)) -> None:
     )
 
 
+@dataclass(frozen=True)
+class Stamps:
+    """A sealed vault and who stamped it: the root its days' chain reaches (whose key signs the
+    root's revocation lists) and the TSA certificate."""
+
+    vault: SealedVault
+    root: x509.Certificate
+    key: ec.EllipticCurvePrivateKey
+    tsa: x509.Certificate
+
+    @property
+    def layout(self) -> Layout:
+        return self.vault.layout
+
+
+def _name(organization: str, common_name: str) -> x509.Name:
+    return x509.Name(
+        [
+            x509.NameAttribute(NameOID.COUNTRY_NAME, "TR"),
+            x509.NameAttribute(NameOID.ORGANIZATION_NAME, organization),
+            x509.NameAttribute(NameOID.COMMON_NAME, common_name),
+        ]
+    )
+
+
 @pytest.fixture
-def sealed(layout: Layout) -> Iterator[SealedVault]:
+def sealed(layout: Layout) -> Iterator[Stamps]:
     """30 October sealed by the mock TSA (its root is pinned while ``tsa.provider`` is
-    ``mock``): the stamp in use, whose root's lists must stay fresh."""
+    ``mock``), as on a mock or trial install: ARCILOGGER's test root publishes no list."""
     vault = make_vault(layout.root, tsa_now=at_site(date(2026, 9, 29)))
     vault.seal_days([date(2026, 10, 30)])
-    yield vault
+    key = load_pem_private_key((vault.tsa.state_dir / "root.key").read_bytes(), None)
+    assert isinstance(key, ec.EllipticCurvePrivateKey)
+    assert TEST_ORGANIZATION in vault.tsa.root_certificate.subject.rfc4514_string()
+    yield Stamps(vault, vault.tsa.root_certificate, key, vault.tsa.tsa_certificate)
+    vault.unlock_all()
+
+
+@pytest.fixture
+def ca_sealed(layout: Layout) -> Iterator[Stamps]:
+    """30 October sealed as on a real install: a made-up CA's TSA certificate, its root pinned
+    in ``tsa.roots_dir``; the stamp in use, whose root's lists must stay fresh."""
+    key = ec.generate_private_key(ec.SECP256R1())
+    name = _name(CA_ORGANIZATION, "Örnek Simulated Root")
+    root = (
+        x509.CertificateBuilder()
+        .subject_name(name)
+        .issuer_name(name)
+        .public_key(key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(datetime(2020, 1, 1, tzinfo=UTC))
+        .not_valid_after(datetime(2070, 1, 1, tzinfo=UTC))
+        .add_extension(x509.BasicConstraints(ca=True, path_length=0), critical=True)
+        .sign(key, hashes.SHA256())
+    )
+    tsa_key = ec.generate_private_key(ec.SECP256R1())
+    tsa = (
+        x509.CertificateBuilder()
+        .subject_name(_name(CA_ORGANIZATION, "Örnek Simulated TSA"))
+        .issuer_name(name)
+        .public_key(tsa_key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(datetime(2026, 1, 1, tzinfo=UTC))
+        .not_valid_after(datetime(2031, 1, 1, tzinfo=UTC))
+        .add_extension(x509.BasicConstraints(ca=False, path_length=None), critical=True)
+        .add_extension(x509.ExtendedKeyUsage([ExtendedKeyUsageOID.TIME_STAMPING]), critical=True)
+        .sign(key, hashes.SHA256())
+    )
+    roots_dir(layout).mkdir(parents=True)
+    (roots_dir(layout) / "root.pem").write_bytes(root.public_bytes(Encoding.PEM))
+    vault = make_vault(layout.root, tsa_now=at_site(date(2026, 9, 29)))
+    vault.tsa.signer = (tsa, tsa_key)
+    vault.tsa.policy = CA_POLICY
+    day = date(2026, 10, 30)
+    vault.write_day(day)
+    now = at_site(day + timedelta(days=1))
+    vault.tsa_clock.now = now + timedelta(seconds=5)
+    sealer = Sealer(
+        vault.config,
+        provider=MockTsaProvider(vault.tsa),
+        roots=[root],
+        clock=lambda: now,
+        clock_status=lambda: "test clock status",
+    )
+    assert sealer.seal_day(day).status == "sealed"
+    yield Stamps(vault, root, key, tsa)
     vault.unlock_all()
 
 
 def root_list(
-    tsa: MockTsa, this_update: datetime, revoked_at: datetime | None = None, valid_days: int = 7
+    stamps: Stamps, this_update: datetime, revoked_at: datetime | None = None, valid_days: int = 7
 ) -> bytes:
-    """A list of the mock root issued at ``this_update`` and valid for ``valid_days``, with the
-    TSA certificate revoked at ``revoked_at`` (none: no entry)."""
-    key = load_pem_private_key((tsa.state_dir / "root.key").read_bytes(), None)
-    assert isinstance(key, ec.EllipticCurvePrivateKey)
+    """A list of the stamps' root issued at ``this_update`` and valid for ``valid_days``, with
+    the TSA certificate revoked at ``revoked_at`` (none: no entry)."""
     builder = (
         x509.CertificateRevocationListBuilder()
-        .issuer_name(tsa.root_certificate.subject)
+        .issuer_name(stamps.root.subject)
         .last_update(this_update)
         .next_update(this_update + timedelta(days=valid_days))
     )
     if revoked_at is not None:
         builder = builder.add_revoked_certificate(
             x509.RevokedCertificateBuilder()
-            .serial_number(tsa.tsa_certificate.serial_number)
+            .serial_number(stamps.tsa.serial_number)
             .revocation_date(revoked_at)
             .build()
         )
-    return builder.sign(key, hashes.SHA256()).public_bytes(Encoding.DER)
+    return builder.sign(stamps.key, hashes.SHA256()).public_bytes(Encoding.DER)
 
 
 def crl_lists(
-    vault: SealedVault,
+    stamps: Stamps,
     issued_days_ago: int | None,
     *,
     fetched_days_ago: int = 0,
@@ -200,12 +293,12 @@ def crl_lists(
     """``state/crl`` as ``crl fetch`` leaves it (Wave 5 contract 2.2): the root's list issued
     ``issued_days_ago`` days before ``NOW`` (none: no list), valid for ``valid_days`` and last
     fetched ``fetched_days_ago`` days before ``NOW``, and ``failures``; its stored name."""
-    layout, tsa = vault.layout, vault.tsa
+    layout = stamps.layout
     layout.crl_dir.mkdir(parents=True, exist_ok=True)
     entries, name = [], None
     if issued_days_ago is not None:
-        der = root_list(tsa, NOW - timedelta(days=issued_days_ago), revoked_at, valid_days)
-        crl = replace(parse_crl(der), issuer_sha256=fingerprint(tsa.root_certificate))
+        der = root_list(stamps, NOW - timedelta(days=issued_days_ago), revoked_at, valid_days)
+        crl = replace(parse_crl(der), issuer_sha256=fingerprint(stamps.root))
         name = crl.file_name
         (layout.crl_dir / name).write_bytes(der)
         entries.append(
@@ -311,9 +404,9 @@ def test_stamp_renewal_raised_after_two_failed_runs(check: Any, layout: Layout) 
         "due": 0,
         "uncovered": 0,
         "failures_in_a_row": 2,
-        "title_en": "Re-stamping needed: the Renew task failed 2 times in a row",
+        "title_en": "The re-stamping task failed 2 times in a row",
     }
-    assert alert.title == "Yeniden damgalama gerekiyor: Renew görevi art arda 2 kez başarısız oldu"
+    assert alert.title == "Yeniden damgalama görevi art arda 2 kez başarısız"
     assert describe(RENEWAL_RULE, alert.details) == (
         "Renew görevi art arda 2 kez başarısız oldu.",
         "The Renew task failed 2 times in a row.",
@@ -346,9 +439,49 @@ def test_stamp_renewal_failures_without_tokens_raise(check: Any, layout: Layout)
         "due": None,
         "uncovered": None,
         "failures_in_a_row": 2,
-        "title_en": "Re-stamping needed: the Renew task failed 2 times in a row",
+        "title_en": "The re-stamping task failed 2 times in a row",
     }
+    assert alert.title == "Yeniden damgalama görevi art arda 2 kez başarısız"
     assert describe(RENEWAL_RULE, alert.details)[1] == "The Renew task failed 2 times in a row."
+
+
+def test_stamp_renewal_title_follows_what_raised_it(check: Any, layout: Layout) -> None:
+    """#151 (W5-E-7): raised by the Renew task's failures alone, the title says the task failed,
+    with the count in a row, not that re-stamping is needed; a stamp due or expired without
+    re-stamping gives "Re-stamping needed" with the failures added. The open alert's title
+    follows each pass."""
+    later = NOW + timedelta(days=100)
+    renewals(layout, ("not_due", NOW + timedelta(days=400)))
+    renew_runs(layout, "failed", "failed", "refused")
+    alert = check()[RENEWAL_KEY]
+    titles = (alert.title, alert.details["title_en"])
+    assert titles == (
+        "Yeniden damgalama görevi art arda 3 kez başarısız",
+        "The re-stamping task failed 3 times in a row",
+    )
+    for word in ("gerekiyor", "needed"):  # negative: not the title of a stamp to re-stamp
+        assert all(word not in title for title in titles), word
+    renewals(layout, ("due", later))  # a token due: re-stamping is needed
+    renew_runs(layout, "failed", "failed", "failed")
+    alert = check()[RENEWAL_KEY]
+    assert (alert.title, alert.details["title_en"]) == (
+        "Yeniden damgalama gerekiyor: 1 damganın zamanı geldi, 0 damga yeniden damgalanmadan "
+        "sona erdi; Renew görevi art arda 3 kez başarısız oldu",
+        "Re-stamping needed: 1 stamp(s) due, 0 expired without re-stamping; the Renew task "
+        "failed 3 times in a row",
+    )
+    renewals(layout, ("uncovered", NOW - timedelta(days=3)))  # an expired one, no failure
+    assert check()[RENEWAL_KEY].title == (
+        "Yeniden damgalama gerekiyor: 0 damganın zamanı geldi, 1 damga yeniden damgalanmadan "
+        "sona erdi"
+    )
+    renewals(layout, ("covered", later))  # covered: then the failures alone hold it open
+    renew_runs(layout, "refused", "failed", "failed")
+    alert = check()[RENEWAL_KEY]
+    assert (alert.title, alert.details["title_en"]) == titles
+    for title in titles:  # counts only: no name, no address, no log line
+        for hidden in ("Örnek", "Mock", "CN=", "192.0.2.", "tsa_unavailable", "roots"):
+            assert hidden not in title, hidden
 
 
 def test_stamp_renewal_cleared_after_a_successful_run(
@@ -382,6 +515,54 @@ def test_stamp_renewal_cleared_after_a_successful_run(
     assert RENEWAL_KEY not in check()
     reason = resolved(db_session, RENEWAL_KEY).details["auto_resolved"]["reason"]
     assert reason == "renewal_ok"
+
+
+def test_a_dry_run_after_an_upgrade_leaves_the_alerts_as_they_are(
+    check: Any, layout: Layout, db_session: Session
+) -> None:
+    """An upgrade keeps the earlier release's ``state/renewal.json`` as the report until the
+    first counted run (W5-E-4). A dry run in between writes nothing, whatever statuses it found
+    (W5-E-8, answer to Q5 on #158): ``R20-renewal`` and ``R20-cert`` stay as they were. The first
+    counted run writes ``state/renewal/renewal.json``, and its report decides."""
+    earlier = layout.state / "renewal.json"
+    soon = (NOW + timedelta(days=12)).astimezone(UTC).isoformat().replace("+00:00", "Z")
+    token = {"path": "2026/10/01/manifest-2026-10-01.json.zd", "kind": "day", "status": "due"}
+    last_run = {"at": "2026-11-01T23:30:00Z", "outcome": "failed", "exit_code": 3}
+    write(
+        earlier,
+        {
+            "tokens": [{**token, "cert_not_after": soon, "covered_by": None}],
+            "last_run": last_run,
+            "failures_in_a_row": 2,
+        },
+    )
+    before = earlier.read_bytes()
+    # The runbook names both files, as the Sistem page's Renew row does (W5-E-4).
+    for text in runbook(RENEWAL_RULE):
+        assert "\\state\\renewal\\renewal.json" in text
+        assert "\\state\\renewal.json" in text
+
+    def seen() -> dict[str, tuple[str, str, str, dict[str, Any]]]:
+        found = check()
+        return {key: (a.rule, a.severity, a.title, a.details) for key, a in found.items()}
+
+    raised = seen()
+    assert sorted(raised) == sorted((RENEWAL_KEY, CERT_KEY))
+    assert raised[RENEWAL_KEY][3]["failures_in_a_row"] == 2
+    assert raised[CERT_KEY][3]["expiring"] == 1
+    nothing_due = RenewalReport.of(())
+    # a dry run that finds nothing due: it would have written an empty token list
+    written = write_state(layout, nothing_due, at=NOW, renew_before=180, last_run=None)
+    assert written is None
+    assert not stamp_renewal_path(layout).exists()
+    assert earlier.read_bytes() == before
+    assert seen() == raised
+    run = LastRun(NOW - timedelta(hours=1), "not_needed", 0)  # the first counted run
+    write_state(layout, nothing_due, at=NOW, renew_before=180, last_run=run)
+    assert stamp_renewal_path(layout).is_file()
+    assert seen() == {}
+    for key, reason in ((RENEWAL_KEY, "renewal_ok"), (CERT_KEY, "certificate_ok")):
+        assert resolved(db_session, key).details["auto_resolved"]["reason"] == reason
 
 
 def test_stamp_renewal_unreadable_runs_decide_nothing(check: Any, layout: Layout) -> None:
@@ -508,13 +689,13 @@ def test_stamp_cert_cleared(check: Any, layout: Layout, db_session: Session) -> 
 
 
 def test_stamp_crl_raised_when_stale_and_cleared_after_a_fresh_list(
-    check: Any, layout: Layout, config: Config, db_session: Session, sealed: SealedVault
+    check: Any, layout: Layout, config: Config, db_session: Session, ca_sealed: Stamps
 ) -> None:
     # C22: a root's list, 90 days old and valid for months, fetched yesterday is fresh
-    crl_lists(sealed, 90, valid_days=120, fetched_days_ago=1)
+    crl_lists(ca_sealed, 90, valid_days=120, fetched_days_ago=1)
     assert CRL_KEY not in check()
     # a fetch exactly seven days old is not "newer than seven days"
-    crl_lists(sealed, 90, valid_days=120, fetched_days_ago=7)
+    crl_lists(ca_sealed, 90, valid_days=120, fetched_days_ago=7)
     alert = check()[CRL_KEY]
     assert (alert.rule, alert.severity) == ("R20-crl", "medium")
     assert alert.title == "7 günden yeni doğrulanmış bir iptal listesi (SİL) yok"
@@ -528,17 +709,18 @@ def test_stamp_crl_raised_when_stale_and_cleared_after_a_fresh_list(
     }
     crl_index_path(layout).write_text("{", encoding="utf-8")
     assert CRL_KEY in check()  # unreadable lists resolve nothing
-    crl_lists(sealed, 1)
+    crl_lists(ca_sealed, 1)
     assert CRL_KEY not in check()
     assert resolved(db_session, CRL_KEY).details["auto_resolved"]["reason"] == "crl_fresh"
     # a list past its own nextUpdate is stale, though it was fetched just now
-    crl_lists(sealed, 8, fetched_days_ago=0)
+    crl_lists(ca_sealed, 8, fetched_days_ago=0)
     assert CRL_KEY in check()
-    crl_lists(sealed, 1, fetched_days_ago=2)
+    crl_lists(ca_sealed, 1, fetched_days_ago=2)
     assert CRL_KEY not in check()
-    crl_lists(sealed, 2, valid_days=1, fetched_days_ago=0)  # issued two days ago: nextUpdate alone
+    # issued two days ago: nextUpdate alone
+    crl_lists(ca_sealed, 2, valid_days=1, fetched_days_ago=0)
     assert CRL_KEY in check()
-    crl_lists(sealed, 1, fetched_days_ago=2)
+    crl_lists(ca_sealed, 1, fetched_days_ago=2)
     assert CRL_KEY not in check()
 
     # tsa.crl_max_age_days (Wave 5 contract 2.5) sets the age of the last fetch.
@@ -555,42 +737,102 @@ def test_stamp_crl_needs_an_issuer_in_use(check: Any, layout: Layout) -> None:
     assert CRL_KEY not in check()
 
 
+def test_stamp_crl_not_raised_for_arcilogger_test_root(
+    monkeypatch: pytest.MonkeyPatch, check: Any, db_session: Session, sealed: Stamps
+) -> None:
+    """W5-E-5: on a mock or trial install the stamps chain to ARCILOGGER's test root, which
+    publishes no list; a test stamp never counts (W5-A D5), so it has no issuer in use. An
+    R20-crl raised before (as every mock install had one) is resolved."""
+    monkeypatch.setattr(system, "is_test_stamp", lambda policy, root_subject: False)
+    assert check()[CRL_KEY].details["stale_issuers"] == 1  # as before W5-E-5
+    monkeypatch.undo()
+    assert CRL_KEY not in check()  # no index
+    assert resolved(db_session, CRL_KEY).details["auto_resolved"]["reason"] == "crl_fresh"
+    crl_lists(sealed, None, failures=(FAILURE,))
+    assert CRL_KEY not in check()  # every fetch fails
+    crl_lists(sealed, 9, fetched_days_ago=8)
+    assert CRL_KEY not in check()  # a stale list of the test root
+
+
+def test_stamp_crl_raised_for_a_real_root_without_a_list(check: Any, ca_sealed: Stamps) -> None:
+    """W5-E-5 leaves out only ARCILOGGER's test organization: a root outside it, without any
+    stored list, is still an issuer in use."""
+    assert TEST_ORGANIZATION not in ca_sealed.root.subject.rfc4514_string()
+    alert = check()[CRL_KEY]
+    assert (alert.rule, alert.details["stale_issuers"]) == ("R20-crl", 1)
+
+
 def test_stamp_crl_raised_for_an_issuer_in_use_without_any_list(
-    check: Any, sealed: SealedVault
+    check: Any, ca_sealed: Stamps
 ) -> None:
     """The worst case: no fetch has stored a list for the stamps' root yet, or every URL
     fails (only ``failures`` in the index)."""
     assert check()[CRL_KEY].details["stale_issuers"] == 1  # no index yet
-    crl_lists(sealed, None, failures=(FAILURE, {**FAILURE, "error": "unknown_issuer"}))
+    crl_lists(ca_sealed, None, failures=(FAILURE, {**FAILURE, "error": "unknown_issuer"}))
     alert = check()[CRL_KEY]
     assert (alert.details["stale_issuers"], alert.details["failures"]) == (1, 2)
     assert alert.details["newest_fetched_at"] is None
 
 
-def test_stamp_crl_judged_from_the_index_not_an_exit_code(check: Any, sealed: SealedVault) -> None:
+def test_stamp_crl_after_a_fetch_without_a_list_address(
+    monkeypatch: pytest.MonkeyPatch, check: Any, layout: Layout, db_session: Session
+) -> None:
+    """#151: ``crl fetch`` with no list address known writes an index with no list and no
+    failure. Before the first sealed day no issuer is in use, so it raises nothing, and an open
+    alert is resolved: the lists can be read."""
+    run = crl_fetch(CrlOptions(), layout, [], NOW)
+    assert run.exit_code == 2
+    assert json.loads(crl_index_path(layout).read_bytes()) == {
+        "schema": CRL_INDEX_SCHEMA,
+        "lists": [],
+        "failures": [],
+    }
+    monkeypatch.setattr(system, "issuers_in_use", lambda stamp: frozenset({"0" * 64}))
+    assert check()[CRL_KEY].details["stale_issuers"] == 1  # test: an issuer in use
+    monkeypatch.undo()
+    assert CRL_KEY not in check()
+    assert resolved(db_session, CRL_KEY).details["auto_resolved"]["reason"] == "crl_fresh"
+
+
+def test_stamp_crl_raised_after_a_fetch_without_a_list_address_while_in_use(
+    check: Any, ca_sealed: Stamps
+) -> None:
+    """The made-up CA names no list address and ``tsa.crl_urls`` is empty: the empty index the
+    fetch writes is no list, and the issuer in use is stale."""
+    layout = ca_sealed.layout
+    run = crl_fetch(CrlOptions(), layout, [ca_sealed.root], NOW)
+    assert (run.urls, run.exit_code) == ((), 2)
+    index = json.loads(crl_index_path(layout).read_bytes())
+    assert (index["lists"], index["failures"]) == ([], [])
+    alert = check()[CRL_KEY]
+    assert (alert.details["stale_issuers"], alert.details["failures"]) == (1, 0)
+    assert alert.details["newest_fetched_at"] is None
+
+
+def test_stamp_crl_judged_from_the_index_not_an_exit_code(check: Any, ca_sealed: Stamps) -> None:
     """C12: the fetch is judged from ``state/crl``. Failed fetches raise nothing while the
     stored list's last fetch is recent (C22); once it is old the alert counts them from the
     index."""
-    crl_lists(sealed, 4, fetched_days_ago=4, failures=(FAILURE, FAILURE))
+    crl_lists(ca_sealed, 4, fetched_days_ago=4, failures=(FAILURE, FAILURE))
     assert CRL_KEY not in check()
-    crl_lists(sealed, 9, fetched_days_ago=8, failures=(FAILURE,))
+    crl_lists(ca_sealed, 9, fetched_days_ago=8, failures=(FAILURE,))
     alert = check()[CRL_KEY]
     assert alert.details["failures"] == 1
     assert alert.details["newest_fetched_at"] == isoformat_site(NOW - timedelta(days=8), "seconds")
 
 
-def test_stamp_crl_a_changed_list_is_no_verified_list(check: Any, sealed: SealedVault) -> None:
+def test_stamp_crl_a_changed_list_is_no_verified_list(check: Any, ca_sealed: Stamps) -> None:
     """C14: a fresh list whose file no longer holds its bytes does not count."""
-    name = crl_lists(sealed, 1)
+    name = crl_lists(ca_sealed, 1)
     assert name is not None
     assert CRL_KEY not in check()
-    path = sealed.layout.crl_dir / name
+    path = ca_sealed.layout.crl_dir / name
     path.write_bytes(path.read_bytes() + b"\x00")  # test: the stored file is changed
     alert = check()[CRL_KEY]
     assert (alert.details["stale_issuers"], alert.details["changed_files"]) == (1, 1)
 
 
-def test_stamp_cert_critical_from_the_stored_lists(check: Any, sealed: SealedVault) -> None:
+def test_stamp_cert_critical_from_the_stored_lists(check: Any, sealed: Stamps) -> None:
     """The newest stamp's chain against the stored lists: a revocation before it is raised
     before the next scheduled verification finds it; one after it is not ``crl-revoked``."""
     crl_lists(sealed, 0, revoked_at=NOW - timedelta(hours=1))  # after the stamp of 31.10.
@@ -602,7 +844,7 @@ def test_stamp_cert_critical_from_the_stored_lists(check: Any, sealed: SealedVau
 
 
 def test_stamp_cert_from_the_lists_stays_open_while_they_cannot_be_read(
-    check: Any, layout: Layout, sealed: SealedVault, db_session: Session
+    check: Any, layout: Layout, sealed: Stamps, db_session: Session
 ) -> None:
     """W5-C-7: an input that cannot be read decides nothing. A revocation found from the stored
     lists (before a scheduled verification records it) is not resolved while the index, the
@@ -618,7 +860,7 @@ def test_stamp_cert_from_the_lists_stays_open_while_they_cannot_be_read(
     index.write_bytes(saved_index)
     token = layout.token(date(2026, 10, 30))
     saved_token = token.read_bytes()
-    sealed.tamper(token, b"\x00")  # test: the token in use cannot be read
+    sealed.vault.tamper(token, b"\x00")  # test: the token in use cannot be read
     assert check()[CERT_KEY].severity == "critical"
     token.write_bytes(saved_token)
     assert check()[CERT_KEY].severity == "critical"  # readable again: still revoked
@@ -637,7 +879,7 @@ def test_stamp_cert_from_the_lists_stays_open_while_they_cannot_be_read(
 
 
 def test_stamp_cert_expiry_resolves_although_a_list_was_changed(
-    check: Any, layout: Layout, sealed: SealedVault, db_session: Session
+    check: Any, layout: Layout, sealed: Stamps, db_session: Session
 ) -> None:
     """A changed or deleted list (C14/C20) keeps its index entry for good, so it holds open only
     an alert that carries a revocation (manager's re-review of #117): an expiry alert resolves
@@ -678,7 +920,7 @@ def test_stamp_cert_expiry_resolves_although_a_list_was_changed(
 
 
 def test_stamp_cert_from_a_verification_stays_open_while_it_cannot_be_read(
-    check: Any, layout: Layout, sealed: SealedVault, db_session: Session
+    check: Any, layout: Layout, sealed: Stamps, db_session: Session
 ) -> None:
     """W5-C-7: a revocation that only a scheduled verification recorded is not resolved while
     that ``last-*.json`` cannot be read or holds no verification."""
@@ -703,11 +945,11 @@ def test_stamp_cert_from_a_verification_stays_open_while_it_cannot_be_read(
 
 
 def test_legal_alert_mails_carry_no_names_and_no_log_lines(
-    check: Any, layout: Layout, sealed: SealedVault
+    check: Any, layout: Layout, ca_sealed: Stamps
 ) -> None:
     renewals(layout, ("due", NOW + timedelta(days=10)), ("uncovered", NOW - timedelta(days=1)))
     revoked_day(layout)
-    crl_lists(sealed, 9, failures=(FAILURE,))
+    crl_lists(ca_sealed, 9, failures=(FAILURE,))
     alerts = check()
     items = [
         MailItem(a.id, "new", a.rule, a.severity, a.state, a.time, None, a.details)
@@ -803,14 +1045,14 @@ def test_registered_checks_raise_and_clear_the_legal_alerts(
     check: Any,
     layout: Layout,
     db_session: Session,
-    sealed: SealedVault,
+    ca_sealed: Stamps,
 ) -> None:
     """Wave 5 contract §3 W5-C, "alert raise/clear for the three codes (after W5-E)": with every
     registered check, as the worker runs them."""
     monkeypatch.setattr(system, "CHECKS", REGISTERED)
     renewals(layout, ("due", NOW + timedelta(days=10)))
     revoked_day(layout)
-    crl_lists(sealed, 9, failures=(FAILURE,))
+    crl_lists(ca_sealed, 9, failures=(FAILURE,))
     alerts = check()
     assert {key: (alerts[key].rule, alerts[key].severity) for key in alerts if key in KEYS} == {
         RENEWAL_KEY: ("R20-renewal", "high"),
@@ -822,7 +1064,7 @@ def test_registered_checks_raise_and_clear_the_legal_alerts(
         layout.state / "verify" / "last-day.json",
         {"at": isoformat_site(NOW, "seconds"), "deep": False, "checks": []},
     )
-    crl_lists(sealed, 1)
+    crl_lists(ca_sealed, 1)
     assert set(check()) & set(KEYS) == set()
     reasons = {key: resolved(db_session, key).details["auto_resolved"]["reason"] for key in KEYS}
     assert reasons == {

@@ -42,6 +42,7 @@ day is :data:`~arcilogger_api.lookup_testing.DAY` (12.10.2026).
 from __future__ import annotations
 
 import json
+import threading
 from collections.abc import Callable, Iterator
 from datetime import date, datetime, timedelta
 from pathlib import Path
@@ -281,24 +282,24 @@ def unreadable_mid_load(monkeypatch: pytest.MonkeyPatch, path: Path) -> None:
     """``path`` becomes unreadable while ArciIngest loads it: at the loader's second read of it
     the file is damaged in place, and that read and every later one fail (the reset's reading of
     its receive times, :func:`~arcilogger_ingest.service.received_outside`, comes before the load
-    and is not counted). (A reader meets such damage where its buffer ends; a test file fits in
-    the buffer, so the reader is told.)"""
+    and is not counted; it runs beside the loop, so whether a read is the reset's is known per
+    thread). (A reader meets such damage where its buffer ends; a test file fits in the buffer,
+    so the reader is told.)"""
     reads = 0
-    resetting = False
+    resetting = threading.local()
     outside = ingest_service.received_outside
 
     def reset_read(file: Path, day: date) -> list[datetime]:
-        nonlocal resetting
-        resetting = True
+        resetting.now = True
         try:
             return outside(file, day)
         finally:
-            resetting = False
+            resetting.now = False
 
     class Damaged(VaultReader):
         def read(self, max_bytes: int) -> bytes:
             nonlocal reads
-            if self.path.name == path.name and not resetting:
+            if self.path.name == path.name and not getattr(resetting, "now", False):
                 reads += 1
                 if reads == 2:
                     unlock(path)

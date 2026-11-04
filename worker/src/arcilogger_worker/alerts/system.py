@@ -80,8 +80,8 @@ Key                              Problem (setting)
                                  :mod:`~arcilogger_worker.compliance_filter`, card 7 of Uyum
                                  Durumu) — high; resolved once a record arrives or the window is
                                  no longer expected
-``R20-renewal:none``             ``state/renewal.json`` has a token due for re-stamping or one
-                                 whose certificate expired without it, or says the ``Renew``
+``R20-renewal:none``             ``state/renewal/renewal.json`` has a token due for re-stamping
+                                 or one whose certificate expired without it, or says the ``Renew``
                                  task failed twice in a row (``failures_in_a_row``, A4) — high;
                                  resolved by a readable report without such a token and without
                                  those failures (Wave 5 contract 2.3.1, :data:`LEGAL_CHECKS`)
@@ -93,8 +93,8 @@ Key                              Problem (setting)
 ``R20-crl:none``                 no stored revocation list fetched in the last
                                  ``tsa.crl_max_age_days`` (7) days and not past its own
                                  ``nextUpdate`` (C22) for an issuer of the newest sealed day's
-                                 chain, judged from ``state/crl`` only — medium
-                                 (:data:`LEGAL_CHECKS`)
+                                 chain (none for ARCILOGGER's test root), judged from
+                                 ``state/crl`` only — medium (:data:`LEGAL_CHECKS`)
 ===============================  ==============================================================
 
 A check that fails (an unreadable folder, a database error) is reported in the job's details and
@@ -148,6 +148,8 @@ from arcilogger_core.config import Config
 from arcilogger_core.crl import Crl, CrlError, CrlOptions, StoredLists, crl_options, load_stored
 from arcilogger_core.fmt import format_date
 from arcilogger_core.layout import Layout
+from arcilogger_core.renewal import state_path as renewal_state_path
+from arcilogger_core.renewal import state_to_read as renewal_state_to_read
 from arcilogger_core.seal import Sealer
 from arcilogger_core.timeutil import SITE_TZ, day_window, isoformat_site, site_day
 from arcilogger_core.tsa.base import StampResult, TsaError
@@ -155,6 +157,7 @@ from arcilogger_core.tsa.verify import (
     check_revocation,
     fingerprint,
     inspect_token,
+    is_test_stamp,
     load_certificates,
     load_roots_dir,
     token_chain,
@@ -200,6 +203,7 @@ from arcilogger_worker.alerts.texts import (
     NAT_TEXTS,
     REFUSAL_REASONS,
     REFUSED_HIGH_TITLE,
+    RENEW_FAILED_TITLE,
 )
 from arcilogger_worker.compliance_filter import filter_evidence
 from arcilogger_worker.lookup import trust
@@ -1896,7 +1900,7 @@ def check_filter(ctx: CheckContext) -> Outcome:
 # One reader per state file, so the banner, the Panel, the Mühürleme page and the alerts judge
 # from the same values (D11). The API imports these; the worker never imports the API.
 
-#: What ``state/renewal.json`` says of a token (Wave 5 contract 2.1.2).
+#: What ``state/renewal/renewal.json`` says of a token (Wave 5 contract 2.1.2).
 StampRenewalStatus = Literal["not_due", "due", "covered", "late", "uncovered"]
 STAMP_RENEWAL_STATUSES: Final[frozenset[str]] = frozenset(get_args(StampRenewalStatus))
 CRL_INDEX_SCHEMA: Final = crl.INDEX_SCHEMA
@@ -1924,14 +1928,19 @@ class StampRenewal:
 
 
 def stamp_renewal_path(layout: Layout) -> Path:
-    return layout.state / "renewal.json"
+    """``state/renewal/renewal.json``, where the ``Renew`` task writes the re-stamping report
+    (``renewal.state_path``): a folder only the tasks write (contract W5-E-4). The readers read
+    :func:`arcilogger_core.renewal.state_to_read`: this file, or while it is missing the
+    ``state/renewal.json`` of an earlier release, until the first run after the upgrade."""
+    return renewal_state_path(layout)
 
 
 def read_stamp_renewals(layout: Layout) -> tuple[StampRenewal, ...] | None:
-    """The tokens of ``state/renewal.json``: empty when the Renew task has not written it yet,
-    ``None`` (unknown) when it cannot be read. The statuses are counted from the tokens, never
-    from the report's totals; an entry this reader does not understand is left out."""
-    path = stamp_renewal_path(layout)
+    """The tokens of the re-stamping report (:func:`stamp_renewal_path`): empty when the Renew
+    task has not written it yet, ``None`` (unknown) when it cannot be read. The statuses are
+    counted from the tokens, never from the report's totals; an entry this reader does not
+    understand is left out."""
+    path = renewal_state_to_read(layout)
     try:
         data = _read_json(path)
     except (OSError, ValueError) as exc:
@@ -1996,8 +2005,8 @@ def _stamp_renewal(entry: Any) -> StampRenewal | None:
 
 @dataclass(frozen=True)
 class RenewRuns:
-    """The runs of the ``Renew`` task as ``state/renewal.json`` keeps them (``last_run``,
-    ``failures_in_a_row``; W5-A's A4). A dry run changes neither."""
+    """The runs of the ``Renew`` task as ``state/renewal/renewal.json`` keeps them
+    (``last_run``, ``failures_in_a_row``; W5-A's A4). A dry run changes neither."""
 
     #: When the last run started (None: no run yet, or a time this reader leaves out).
     last_run_at: datetime | None = None
@@ -2009,12 +2018,13 @@ class RenewRuns:
 
 
 def read_renew_runs(layout: Layout) -> RenewRuns | None:
-    """The ``Renew`` task's runs from ``state/renewal.json``: no run and no failure when the task
-    has not written it yet, ``None`` (unknown) when it cannot be read. Judged from this file,
+    """The ``Renew`` task's runs from the re-stamping report (:func:`stamp_renewal_path`): no
+    run and no failure when the task has not written it yet, ``None`` (unknown) when it cannot
+    be read. Judged from this file,
     never from the task's exit code (C12). A file without ``failures_in_a_row`` records no
     failure, as the writer reads it (``renewal.write_state``); one that is not a count is
     unknown."""
-    path = stamp_renewal_path(layout)
+    path = renewal_state_to_read(layout)
     try:
         data = _read_json(path)
     except (OSError, ValueError) as exc:
@@ -2170,6 +2180,14 @@ def stamp_in_use(layout: Layout, roots: Sequence[x509.Certificate]) -> StampInUs
     day, or when that day's token cannot be read or reaches no pinned root (the day check says
     why)."""
     return _newest_stamp(layout, roots)[0]
+
+
+def crl_stamp(stamp: StampInUse | None) -> StampInUse | None:
+    """The stamp whose issuers need a revocation list (``R20-crl``, ``crl_stale``): none for a
+    chain to ARCILOGGER's test root (W5-A D5; deviation W5-E-5)."""
+    if stamp is not None and is_test_stamp("", stamp.chain[-1].subject.rfc4514_string()):
+        return None
+    return stamp
 
 
 def _newest_stamp(
@@ -2377,7 +2395,7 @@ CRL_KEY: Final = f"{CRL_RULE}:none"
 #: (at most 30 days left; an ``uncovered`` one always is). Manager answer on #117, W5-C-12.
 CERT_EXPIRY_WARNING: Final = timedelta(days=30)
 #: "The Renew task failed twice in a row" (contract 2.3.1): ``failures_in_a_row`` of
-#: ``state/renewal.json`` at least this (failed and refused runs, A4).
+#: ``state/renewal/renewal.json`` at least this (failed and refused runs, A4).
 RENEW_FAILURES_ALERT: Final = 2
 
 
@@ -2397,10 +2415,11 @@ def _keep(alert: Alert) -> str | None:
 def check_stamp_renewal(ctx: CheckContext) -> Outcome:
     """``R20-renewal:none``: a token of the re-stamping report is ``due``, or its certificate
     expired ``uncovered``, or the ``Renew`` task failed twice in a row (``failures_in_a_row`` of
-    the same file, failed and refused runs; A4), judged from ``state/renewal.json``, never from
-    the task's exit code (C12). The failures raise it also while the token list is unknown (a
-    refused run without pinned roots writes none, W5-A-2). Resolved by a readable report without
-    such a token and without those failures; what cannot be read decides nothing."""
+    the same file, failed and refused runs; A4), judged from ``state/renewal/renewal.json``,
+    never from the task's exit code (C12). The failures raise it also while the token list is
+    unknown (a refused run without pinned roots writes none, W5-A-2); raised by the failures
+    alone, its title says the task failed (W5-E-7). Resolved by a readable report without such a
+    token and without those failures; what cannot be read decides nothing."""
     # Two reads of the same file: a run that replaces it in between can pair the previous
     # tokens with the new count. Each half is true of one file the task wrote, and the next pass
     # reads them alike.
@@ -2423,18 +2442,23 @@ def check_stamp_renewal(ctx: CheckContext) -> Outcome:
         parts_en.append(f"the Renew task failed {failures} times in a row")
     findings = []
     if parts_tr:
+        title_tr = f"Yeniden damgalama gerekiyor: {'; '.join(parts_tr)}"
+        title_en = f"Re-stamping needed: {'; '.join(parts_en)}"
+        if not (due or uncovered):
+            # the failures alone (nothing due, or the token list unknown) name the task (W5-E-7)
+            title_tr, title_en = (title.format(failures=failures) for title in RENEW_FAILED_TITLE)
         findings.append(
             Finding(
                 key=RENEWAL_KEY,
                 rule=RENEWAL_RULE,
                 severity="high",
-                title=f"Yeniden damgalama gerekiyor: {'; '.join(parts_tr)}",
+                title=title_tr,
                 details={
                     # unknown (None) while the report has no token list
                     "due": due if renewals is not None else None,
                     "uncovered": uncovered if renewals is not None else None,
                     "failures_in_a_row": failures,
-                    "title_en": f"Re-stamping needed: {'; '.join(parts_en)}",
+                    "title_en": title_en,
                 },
             )
         )
@@ -2538,9 +2562,11 @@ def check_stamp_crl(ctx: CheckContext) -> Outcome:
     revocation list (C22: fetched in the last ``tsa.crl_max_age_days`` days, not past its
     ``nextUpdate``, still matching its index entry), or ``state/crl`` cannot be read while one
     is in use. Judged from the stored lists and ``state/crl/index.json``, never from the
-    CrlFetch task's exit code (C12); lists that cannot be read resolve nothing."""
+    CrlFetch task's exit code (C12); lists that cannot be read resolve nothing. A chain to
+    ARCILOGGER's test root has no issuer in use: the mock TSA publishes no list, and a test stamp
+    never counts (W5-A D5; deviation W5-E-5)."""
     max_age = crl_max_age_days(ctx.config)
-    stamp = stamp_in_use(ctx.layout, pinned_roots(ctx.config, ctx.layout))
+    stamp = crl_stamp(stamp_in_use(ctx.layout, pinned_roots(ctx.config, ctx.layout)))
     index = read_crl_index(ctx.layout)
     status = crl_status(stored_lists(ctx.layout), index, stamp, ctx.now, max_age)
     findings = []
