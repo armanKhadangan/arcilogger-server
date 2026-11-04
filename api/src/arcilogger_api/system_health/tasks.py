@@ -23,6 +23,10 @@ Backup         ``finished`` of ``state/backup/last.json``                26 h   
 Requests       ``state/requests`` (not readable): ``not_observable``     —           —
 ApplySystem    ``at`` of ``admin/system/status.json``                    15 min      browser
                                                                                      admin off
+Renew          ``last_run.at`` of ``state/renewal.json`` (not ``at``,    26 h        —
+               which a run without pinned roots keeps)
+CrlFetch       newest ``fetched_at`` of the ``lists`` or ``at`` of the   26 h        —
+               ``failures`` of ``state/crl/index.json``
 =============  ========================================================  ==========  ==========
 
 ``missing``: no evidence yet; ``late``: the evidence is older than the limit — each task's cadence
@@ -32,13 +36,18 @@ before its kind, and the kind of ``--last N`` is ``last-<days verified>`` (:func
 Seal is judged by every day's state except those Retention rewrote: it marks each day it deletes
 (``status = "deleted"``, ``retention._delete_day``), which says nothing about Seal, while Seal
 itself may rewrite any day's state, also an old one it retries after a time-stamp outage.
+Renew and CrlFetch are judged by their state files, never by an exit code (Wave 5 contract C12,
+A4); like Backup's, their rows say that the task ran, and whether it succeeded is R20-renewal's
+and R20-crl's. A dry run of ``renew`` keeps ``last_run``, and a ``crl fetch`` that knows no list
+address or finds the lock held writes nothing, so neither is evidence. A time later than now is
+no evidence of these two: a clock set back never keeps them fresh.
 A file that cannot be read is no evidence; it never fails the request.
 """
 
 from __future__ import annotations
 
 import json
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
@@ -50,7 +59,7 @@ from arcilogger_core.config import Config
 from arcilogger_core.layout import Layout
 from arcilogger_core.seal import DELETED
 from arcilogger_core.timeutil import site_day, to_site
-from arcilogger_worker.alerts.system import backup_state_path
+from arcilogger_worker.alerts.system import backup_state_path, read_crl_index, read_renew_runs
 
 #: ``verify --last 2`` (VerifyDaily) checks 1 day on a chain of one sealed day, else 2; more
 #: days are the weekly ``--last 90`` (on a young chain: every sealed day there is).
@@ -216,6 +225,24 @@ def _apply_system(evidence: Evidence) -> datetime | None:
     return evidence.system_at
 
 
+def _until_now(evidence: Evidence, moments: Iterable[datetime | None]) -> datetime | None:
+    """The newest of ``moments`` that is not later than now."""
+    return _newest(moment for moment in moments if moment is not None and moment <= evidence.now)
+
+
+def _renew(evidence: Evidence) -> datetime | None:
+    runs = read_renew_runs(evidence.layout)
+    return None if runs is None else _until_now(evidence, (runs.last_run_at,))
+
+
+def _crl_fetch(evidence: Evidence) -> datetime | None:
+    index = read_crl_index(evidence.layout)
+    return _until_now(
+        evidence,
+        [entry.fetched_at for entry in index.lists] + [failure.at for failure in index.failures],
+    )
+
+
 #: One row per file of ``deploy/windows/tasks/``, in the order of the contract's table (a test
 #: compares the rows with the files and the times of the texts with their triggers).
 TASKS: Final[tuple[TaskRow, ...]] = (
@@ -311,6 +338,22 @@ TASKS: Final[tuple[TaskRow, ...]] = (
         _apply_system,
         timedelta(minutes=15),
         lambda evidence: not evidence.administration,
+    ),
+    TaskRow(
+        "Renew",
+        "Her gün 02:30",
+        "Daily at 02:30",
+        "state\\renewal.json",
+        _renew,
+        timedelta(hours=26),
+    ),
+    TaskRow(
+        "CrlFetch",
+        "Her gün 00:30",
+        "Daily at 00:30",
+        "state\\crl\\index.json",
+        _crl_fetch,
+        timedelta(hours=26),
     ),
 )
 TASK_ROWS: Final[Mapping[str, TaskRow]] = {row.task: row for row in TASKS}

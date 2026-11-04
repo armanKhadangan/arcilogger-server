@@ -23,6 +23,8 @@ TaskName = Literal[
     "Backup",
     "Requests",
     "ApplySystem",
+    "Renew",
+    "CrlFetch",
 ]
 TaskHealthState = Literal["ok", "late", "missing", "not_used", "not_observable"]
 JobHealthState = Literal["ok", "failing", "skipped", "running", "never"]
