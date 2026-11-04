@@ -1495,6 +1495,8 @@ All Wave 5 questions are answered (2026-11-02).
   `test_a_renewal_stamped_at_its_own_not_after_verifies_but_does_not_count` (the stamp verifies
   in both verifiers, and the renewal does not count), so neither is "fixed" into the other
   unnoticed.
+  Superseded in part by W5-A-19 (answer to Q3 on #177): `VERIFIER_VERSION` is "8", not "6"
+  (W5-A-17 set "7"; W5-A-8).
 - **W5-A-6: what stays in section 5.** The existing `renewal-ok` (each record's stamp) and
   `renewal-covers` (which packaged days a record names) stay beside the five new codes, and the
   section "5. Yenileme damgaları" now appears whenever the package has a day whose token
@@ -1698,6 +1700,10 @@ All Wave 5 questions are answered (2026-11-02).
   root by a relaxed record with a non-critical EKU: the legal root is bundled, and the
   standalone verifier on the package and the core on the vault find the day
   `renewal-covered` with the same texts (rule 5).
+  Superseded in part by W5-A-19 (answer to Q3 on #177): `VERIFIER_VERSION` is "8", not "7"
+  (`test_verifier_version_is_8`), and #136 takes "9", not "8" (W5-A-8); `_relaxed_eku` no longer
+  judges a deletion record that a packaged manifest lists (the manifest that lists it does), and
+  the builder picks the root for that record's token by the same rule, not the package's.
 - **W5-A-18: a package ships the renewals of its deletion records (answer to Q5 on #132, #137
   item 7).** D3 renews deletion-record tokens, but the builder's `_renewals` matched only the
   packaged days' manifest and token hashes and the report's token hash, so a package that ships
