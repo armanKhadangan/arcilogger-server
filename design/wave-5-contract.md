@@ -1702,17 +1702,22 @@ All Wave 5 questions are answered (2026-11-02).
   **Upgrade.** `renewal.state_to_read` gives the new file, or the earlier `state/renewal.json`
   while the new one is missing. The first counted run after the upgrade (every run but a busy
   one or a dry run: while the earlier file is the only one, a dry run writes nothing) carries
-  over only the earlier file's `failures_in_a_row` (W5-E-8); from then on the new file exists and the earlier one is never
-  read again. Nothing
-  writes, moves or removes the earlier `state/renewal.json` or `state/renewal.lock`: both stay
-  as they are and decide nothing. The earlier lock is never taken, so a process holding it
-  blocks no run. W5-C's readers (`read_stamp_renewals`, `read_renew_runs`; through them the
-  alerts, the Sistem page's Renew row, `/legal-status` and the day page) read the same
-  `state_to_read`, so an upgrade does not resolve an open `R20-renewal` or `R20-cert` before the
-  first run (at most a day: the task runs at 02:30). Until then they trust a file every service
-  could write, but no more than before the move, and a missing report already reads as nothing
-  due. `stamp_renewal_path` is `renewal.state_path`; the Sistem page's evidence text is
-  `state\renewal\renewal.json`, the day page's problem text stays `renewal.json: unreadable`.
+  over only the earlier file's `failures_in_a_row` (W5-E-8); from then on the new file exists
+  and the earlier one is never read again. Nothing writes, moves or removes the earlier
+  `state/renewal.json` or `state/renewal.lock`, neither at the upgrade nor at a run (answer to
+  Q3 on #158: deleting them at the upgrade would break the read below): both are left in place
+  and, once `state\renewal\renewal.json` exists, ignored.
+  The earlier lock is never taken, so a process holding it blocks no run. W5-C's readers
+  (`read_stamp_renewals`, `read_renew_runs`; through them the alerts, the Sistem page's Renew
+  row, `/legal-status` and the day page) read the same `state_to_read`, so an upgrade does not
+  resolve an open `R20-renewal` or `R20-cert` before the first run (at most a day: the task runs
+  at 02:30). Until then they trust a file every service could write, but no more than before the
+  move, and a missing report already reads as nothing due (answer to Q2 on #158: the one-time
+  read stays). `stamp_renewal_path` is `renewal.state_path`. While the readers read the earlier
+  file they show its path as the evidence: the Sistem page's Renew row says
+  `state\renewal.json` then, and `state\renewal\renewal.json` once that file exists or while
+  neither does (`TaskRow.shown`). The day page's problem text stays `renewal.json: unreadable`,
+  the name of both files.
   Tests: `test_an_earlier_state_file_is_read_once_and_never_written`
   (`core/tests/test_cli_renew.py`),
   `test_the_readers_read_an_earlier_report_only_until_the_new_one_exists`
@@ -1720,7 +1725,8 @@ All Wave 5 questions are answered (2026-11-02).
   `test_the_writer_and_the_readers_meet_in_the_protected_folder`
   (`tests/test_renewal_state_reader.py`),
   `test_renew_row_reads_an_earlier_report_until_the_first_run`
-  (`api/tests/test_system_health.py`), and the ACL tests of W5-E-1.
+  (`api/tests/test_system_health.py`; the evidence text, and the earlier file left in place),
+  and the ACL tests of W5-E-1.
 - **W5-E-5: ARCILOGGER's test root is no issuer in use for `R20-crl` (#151; Q8 of #140).**
   §2.3.1 raises `R20-crl` when an issuer in use has no verified list newer than
   `tsa.crl_max_age_days`, and W5-C's `pinned_roots` pins the mock TSA's root while

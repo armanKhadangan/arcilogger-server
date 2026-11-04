@@ -431,10 +431,11 @@ def renew_run(layout: Layout, at: datetime | None, outcome: Outcome = "not_neede
 
 def test_renew_row_reads_an_earlier_report_until_the_first_run(api_config: Config) -> None:
     """After an upgrade the Renew row shows the last run of the earlier release's
-    ``state/renewal.json`` until the task writes ``state/renewal/renewal.json`` (W5-E-4); a dry
-    run in between writes nothing and leaves the row as it is (W5-E-8, answer to Q5 on #158).
-    From the first counted run on only the new file counts, whatever a service writes into the
-    earlier one."""
+    ``state/renewal.json``, and names that file as its evidence, until the task writes
+    ``state/renewal/renewal.json`` (W5-E-4, answer to Q2 on #158); a dry run in between writes
+    nothing and leaves the row as it is (W5-E-8, answer to Q5 on #158). From the first counted
+    run on only the new file counts, whatever a service writes into the earlier one, which stays
+    where it is."""
     now = utc_now().replace(microsecond=0)
     layout = Layout(api_config.data_dir)
     earlier = layout.state / "renewal.json"
@@ -443,18 +444,23 @@ def test_renew_row_reads_an_earlier_report_until_the_first_run(api_config: Confi
         last_run = {"at": isoformat_site(at), "outcome": "not_needed", "exit_code": 0}
         write_json(earlier, {"schema": RENEWAL_SCHEMA, "last_run": last_run})
 
+    row = task_rows(evidence(api_config, now))["Renew"]  # neither file: the one the task writes
+    assert (row["state"], row["evidence"]) == ("missing", "state\\renewal\\renewal.json")
     earlier_run(now - timedelta(hours=2))
     row = task_rows(evidence(api_config, now))["Renew"]
     assert (row["state"], moment(row["last_evidence_at"])) == ("ok", now - timedelta(hours=2))
+    assert row["evidence"] == "state\\renewal.json"
     dry = write_renewal_state(layout, RenewalReport.of(()), at=now, renew_before=180, last_run=None)
     assert dry is None
     assert not stamp_renewal_path(layout).exists()
     assert task_rows(evidence(api_config, now))["Renew"] == row
     renew_run(layout, now - timedelta(hours=1))
     assert stamp_renewal_path(layout) == layout.state / "renewal" / "renewal.json"
+    assert earlier.is_file()  # left in place and ignored from now on (answer to Q3 on #158)
     earlier_run(now - timedelta(minutes=10))
     row = task_rows(evidence(api_config, now))["Renew"]
     assert moment(row["last_evidence_at"]) == now - timedelta(hours=1)
+    assert row["evidence"] == "state\\renewal\\renewal.json"
 
 
 def test_renew_and_crlfetch_are_judged_by_their_state_files(api_config: Config) -> None:

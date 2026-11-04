@@ -40,10 +40,11 @@ itself may rewrite any day's state, also an old one it retries after a time-stam
 Renew and CrlFetch are judged by their state files, never by an exit code (Wave 5 contract C12,
 A4); like Backup's, their rows say that the task ran, and whether it succeeded is R20-renewal's
 and R20-crl's. A dry run of ``renew`` keeps ``last_run``, and a ``crl fetch`` that finds the lock
-held writes nothing, so neither is evidence. A ``crl fetch`` that knows no list address writes
-the index with no list and no failure on a site that never stored one, so there the index's own
-modification time is the run. A time later than now is no evidence of these two: a clock set
-back never keeps them fresh.
+held writes nothing, so neither is evidence. From an upgrade to the first counted Renew run the
+Renew row reads the earlier release's ``state/renewal.json`` and names it as its evidence (Wave 5
+contract W5-E-4). A ``crl fetch`` that knows no list address writes the index with no list and no
+failure on a site that never stored one, so there the index's own modification time is the run.
+A time later than now is no evidence of these two: a clock set back never keeps them fresh.
 A file that cannot be read is no evidence; it never fails the request.
 """
 
@@ -60,6 +61,8 @@ from arcilogger_api.sealinfo import credit_history
 from arcilogger_api.system_health.models import TaskHealth, TaskName
 from arcilogger_core.config import Config
 from arcilogger_core.layout import Layout
+from arcilogger_core.renewal import state_path as renewal_state_path
+from arcilogger_core.renewal import state_to_read as renewal_state_to_read
 from arcilogger_core.seal import DELETED
 from arcilogger_core.timeutil import site_day, to_site
 from arcilogger_worker.alerts.system import (
@@ -103,6 +106,8 @@ class TaskRow:
     late_after: timedelta | None
     #: The task is switched off by the configuration (it runs and does nothing).
     not_used: Callable[[Evidence], bool] | None = None
+    #: The evidence shown, when it depends on which file is there (None: ``evidence``).
+    shown: Callable[[Evidence], str] | None = None
 
 
 def aware_time(value: Any) -> datetime | None:
@@ -243,6 +248,15 @@ def _renew(evidence: Evidence) -> datetime | None:
     return None if runs is None else _until_now(evidence, (runs.last_run_at,))
 
 
+def _renew_shown(evidence: Evidence) -> str:
+    """The file :func:`_renew` reads: ``state\\renewal\\renewal.json``, or the earlier release's
+    ``state\\renewal.json`` while it is the only one (W5-E-4, answer to Q2 on #158)."""
+    path = renewal_state_to_read(evidence.layout)
+    if not path.exists():  # neither file yet: the task writes the new one
+        path = renewal_state_path(evidence.layout)
+    return "\\".join(path.relative_to(evidence.layout.root).parts)
+
+
 def _crl_fetch(evidence: Evidence) -> datetime | None:
     index = read_crl_index(evidence.layout)
     moments: list[datetime | None] = [entry.fetched_at for entry in index.lists]
@@ -356,6 +370,7 @@ TASKS: Final[tuple[TaskRow, ...]] = (
         "state\\renewal\\renewal.json",
         _renew,
         timedelta(hours=26),
+        shown=_renew_shown,
     ),
     TaskRow(
         "CrlFetch",
@@ -386,7 +401,7 @@ def judge(row: TaskRow, evidence: Evidence) -> TaskHealth:
         schedule_en=row.schedule_en,
         state=state,
         last_evidence_at=None if last is None else to_site(last),
-        evidence=row.evidence,
+        evidence=row.evidence if row.shown is None else row.shown(evidence),
     )
 
 
