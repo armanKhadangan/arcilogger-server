@@ -288,6 +288,17 @@ uyarır). Yeni veritabanı varsayılan tablo alanında (`pg_default`) oluşturul
 kendi veritabanını da oraya koyar. Yedekle geri yükleme arasında yazılan satırlar yalnızca yerine
 geçilen veritabanındadır; siz kaldırana kadar diskte yer tutar, kaldırmak sahibin kararıdır
 (yukarıdaki 4. adımdaki gibi). Başarısız bir geri yükleme şimdiki veritabanını olduğu gibi bırakır.
+Sürüm geri almada program klasörleri değiştirildikten sonra başarısız her geri yüklemede veritabanı
+hizmetleri (`ArciIngest`, `ArciApi`, `ArciWorker`, `ArciAdmin`) durur: önceki sürüm bu sürümün
+veritabanıyla çalıştırılmaz. `ARCILOGGER.previous` olmadan (yalnızca veritabanı) geri yükleme
+veritabanını değiştirmeye başladıktan sonra (şimdiki veritabanında `timescaledb_pre_restore()` ya da
+`CREATE DATABASE`) başarısız olursa da dururlar; ondan önce reddedilen bir geri yükleme (soruya `H`
+yanıtı, yedek dosyası yok, PostgreSQL'e ulaşılamıyor, yerel ayar libc değil, boş alan yetmiyor)
+hiçbir şeyi değiştirmemiştir ve hizmetler önceki durumlarına getirilir: otomatik başlatmada
+çalışanlar yeniden otomatik (gecikmeli) başlatmaya alınıp başlatılır, elle başlatmada çalışan
+başlatılır ve elle başlatmada kalır, elle başlatmada durmuş olanlar (başarısız bir yükseltmeden
+sonra) öyle kalır; kurulum programı bunu yazar ya da önceki durumuna getiremediği bir hizmeti, bunu
+yapan komutla birlikte adıyla yazar.
 TimescaleDB'de yerine geçilen veritabanı TimescaleDB'nin geri yükleme kipinde kalır
 (`timescaledb_pre_restore()`'un koyduğu ve yeniden adlandırmanın taşıdığı `timescaledb.restoring =
 on`; arka plan işleri çalışmaz): yeniden kullanmadan önce (yerine koymadan ya da ARCILOGGER'la
