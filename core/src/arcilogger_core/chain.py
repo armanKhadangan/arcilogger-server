@@ -19,7 +19,7 @@ import json
 from collections.abc import Collection, Sequence
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from cryptography import x509
 
@@ -40,6 +40,9 @@ from arcilogger_core.tsa.verify import (
     verify_token,
 )
 
+if TYPE_CHECKING:
+    from arcilogger_core.renewal import DayRenewal
+
 
 @dataclass
 class DayCheck:
@@ -59,6 +62,9 @@ class DayCheck:
     #: Empty days this day's manifest stands for (not stamped one by one, see
     #: ``seal.max_consecutive_empty_days``).
     skipped: list[date] = field(default_factory=list)
+    #: The long-term status of the day's stamp (``renewals=True`` only, Wave 5 §2.1.4); never
+    #: an error or a warning (D6).
+    renewal: DayRenewal | None = None
 
     @property
     def ok(self) -> bool:
@@ -78,6 +84,8 @@ class DayCheck:
         }
         if self.skipped:
             result["skipped"] = [day.isoformat() for day in self.skipped]
+        if self.renewal is not None:
+            result["renewal"] = self.renewal.as_json()
         return result
 
 
@@ -143,6 +151,7 @@ def verify_day(
     legal_roots: Collection[str] = (),
     now: datetime | None = None,
     crls: Sequence[Crl] | None = None,
+    renewals: bool = False,
 ) -> DayCheck:
     """Verify one sealed day (see the module docstring).
 
@@ -152,6 +161,8 @@ def verify_day(
     time a token's genTime may not be after (default: the system clock). ``crls``: the stored
     revocation lists (:func:`arcilogger_core.crl.load_stored`), read from ``state/crl`` when
     None. A day whose chain is revoked at or before its stamp is not legal grade (C15).
+    ``renewals``: also give the long-term status of a verified token in ``renewal``
+    (:func:`arcilogger_core.renewal.day_renewal`, Wave 5 §2.1.4).
     """
     check = DayCheck(day)
     if crls is None:
@@ -216,6 +227,19 @@ def verify_day(
                     "legal-grade claim not confirmed: the root is not in "
                     "tsa.legal_root_fingerprints"
                 )
+        if renewals and result.ok:
+            # arcilogger_core.renewal imports this module, so it is looked up here.
+            from arcilogger_core.renewal import day_renewal
+
+            check.renewal = day_renewal(
+                layout,
+                day,
+                roots,
+                legal_roots=legal_roots,
+                now=now,
+                crls=crls,
+                require_critical_eku=tsa.get("require_critical_eku") is not False,
+            )
 
     entries = [*manifest.get("files", []), manifest.get("audit_log") or {}]
     for entry in entries:
