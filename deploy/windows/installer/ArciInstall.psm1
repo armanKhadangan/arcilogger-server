@@ -2253,55 +2253,102 @@ function Set-ArciAclEntry {
         A service could create those folders before the upgrade and put items of its own in
         them, a renewal.lock with its own Modify that holds every Renew run for example, and an
         owner can always change the entries of what it owns. A link there (a reparse point, or
-        a hard link: a file with another name elsewhere) stops the step, since resetting it would
-        take over whatever it points to. So does an item whose entries give Administrators no
-        right to take it over, since no privilege is enabled; "takeown /A /R /F <folder>" in an
-        elevated PowerShell takes it over by hand.
+        a hard link: a file with another name elsewhere) stops the step before the folder's own
+        entries are written, since writing them also writes the inherited entries of what is
+        below, and resetting a link would take over whatever it points to. In state\crl a
+        hard-linked ".<random>.tmp" is a temporary name a CrlFetch run left behind (it links the
+        new list to its final name, then removes the temporary one): delete only that .tmp
+        name, never a .crl file, which is evidence. An item whose entries give Administrators no
+        right to read or take it over stops the step too, with an error naming it, since no
+        privilege is enabled; "takeown /A /R /F <folder>" in an elevated PowerShell takes it over
+        by hand.
     #>
     [CmdletBinding()]
     param([Parameter(Mandatory = $true)]$Entry, [switch]$ResetOwner)
     $item = Get-Item -LiteralPath $Entry.Path -Force
     $admins = New-Object System.Security.Principal.SecurityIdentifier -ArgumentList $script:WellKnownSid.Administrators
+    function Get-TakeOverError([System.IO.FileSystemInfo]$Taken, $ErrorRecord) {
+        # Access denied on an item names no path: name the item and the remedy.
+        "Sahiplik alınamadı, yükseltilmiş PowerShell'de takeown /A /R /F {0} ile elle devralın [could not take ownership, take it over by hand with takeown /A /R /F {0} in an elevated PowerShell]: {1}: {2}" -f $item.FullName, $Taken.FullName, $ErrorRecord.Exception.Message
+    }
     function Assert-NoLink([System.IO.FileSystemInfo]$Link) {
-        # LinkType (PowerShell's own property) is HardLink for a file with more than one name.
-        $hardLink = $Link -is [System.IO.FileInfo] -and $Link.LinkType -eq 'HardLink'
-        if ($hardLink -or ($Link.Attributes -band [System.IO.FileAttributes]::ReparsePoint)) {
-            throw ("Korunan durum klasöründe bir bağlantı var, elle kaldırın [a link (reparse point or hard link) in a protected state folder, remove it by hand]: {0}" -f $Link.FullName)
+        # The attributes come with the listing. LinkType (PowerShell's own property) opens the
+        # file and is HardLink for a file with more than one name.
+        try {
+            $reparse = [bool]($Link.Attributes -band [System.IO.FileAttributes]::ReparsePoint)
+            $hardLink = -not $reparse -and $Link -is [System.IO.FileInfo] -and $Link.LinkType -eq 'HardLink'
+        }
+        catch { throw (Get-TakeOverError $Link $_) }
+        if (-not ($reparse -or $hardLink)) { return }
+        $message = "Korunan durum klasöründe bir bağlantı var, elle kaldırın [a link (reparse point or hard link) in a protected state folder, remove it by hand]: {0}" -f $Link.FullName
+        if ($hardLink) {
+            # crl._store_new links a new list to its final name from a ".<random>.tmp" name in
+            # the same folder and then removes that name: a run stopped in between leaves both.
+            $message += " (state\crl içinde aynı klasördeki '.<rastgele>.tmp' adı bir CrlFetch çalıştırmasının bıraktığı geçici addır: yalnızca o .tmp adını silin, kanıt olan .crl dosyasını asla silmeyin [in state\crl a '.<random>.tmp' name in the same folder is a temporary name a CrlFetch run left behind: delete only that .tmp name, never a .crl file, which is evidence])"
+        }
+        throw $message
+    }
+    function Get-ItemBelow([System.IO.DirectoryInfo]$Folder) {
+        try { $Folder.GetFileSystemInfos() }
+        catch { throw (Get-TakeOverError $Folder $_) }
+    }
+    if ($ResetOwner) {
+        # Every item below is checked before the folder's own entries are written: Windows then
+        # writes the inherited entries of everything below too, and a hard link shares its
+        # entries with the file it names elsewhere. Listing needs only the access Administrators
+        # inherit from state.
+        Assert-NoLink $item
+        if ($item -is [System.IO.DirectoryInfo]) {
+            $folders = New-Object System.Collections.Generic.List[object]
+            $folders.Add($item)
+            for ($i = 0; $i -lt $folders.Count; $i++) {
+                foreach ($child in @(Get-ItemBelow $folders[$i])) {
+                    Assert-NoLink $child
+                    if ($child -is [System.IO.DirectoryInfo]) { $folders.Add($child) }
+                }
+            }
         }
     }
-    if ($ResetOwner) { Assert-NoLink $item }
-    $security = Get-ArciAccessControl -Item $item
-    $security.SetAccessRuleProtection([bool]$Entry.Protect, $false)
-    $explicit = $security.GetAccessRules($true, $false, [System.Security.Principal.SecurityIdentifier])
-    foreach ($rule in @($explicit)) { [void]$security.RemoveAccessRuleSpecific($rule) }
-    foreach ($ace in $Entry.Aces) {
-        $sid = New-Object System.Security.Principal.SecurityIdentifier -ArgumentList $ace.Sid
-        $rights = [System.Security.AccessControl.FileSystemRights]$ace.Rights
-        $flags = Get-ArciAceFlags -Kind $Entry.Kind -Ace $ace
-        $inherit = [System.Security.AccessControl.InheritanceFlags]$flags.Inheritance
-        $propagation = [System.Security.AccessControl.PropagationFlags]$flags.Propagation
-        $rule = New-Object System.Security.AccessControl.FileSystemAccessRule -ArgumentList $sid, $rights, $inherit, $propagation, ([System.Security.AccessControl.AccessControlType]::Allow)
-        $security.AddAccessRule($rule)
+    try {
+        $security = Get-ArciAccessControl -Item $item
+        $security.SetAccessRuleProtection([bool]$Entry.Protect, $false)
+        $explicit = $security.GetAccessRules($true, $false, [System.Security.Principal.SecurityIdentifier])
+        foreach ($rule in @($explicit)) { [void]$security.RemoveAccessRuleSpecific($rule) }
+        foreach ($ace in $Entry.Aces) {
+            $sid = New-Object System.Security.Principal.SecurityIdentifier -ArgumentList $ace.Sid
+            $rights = [System.Security.AccessControl.FileSystemRights]$ace.Rights
+            $flags = Get-ArciAceFlags -Kind $Entry.Kind -Ace $ace
+            $inherit = [System.Security.AccessControl.InheritanceFlags]$flags.Inheritance
+            $propagation = [System.Security.AccessControl.PropagationFlags]$flags.Propagation
+            $rule = New-Object System.Security.AccessControl.FileSystemAccessRule -ArgumentList $sid, $rights, $inherit, $propagation, ([System.Security.AccessControl.AccessControlType]::Allow)
+            $security.AddAccessRule($rule)
+        }
+        if ($ResetOwner) { $security.SetOwner($admins) }
+        Set-ArciAccessControl -Item $item -Security $security
     }
-    if ($ResetOwner) { $security.SetOwner($admins) }
-    Set-ArciAccessControl -Item $item -Security $security
+    catch {
+        if ($ResetOwner) { throw (Get-TakeOverError $item $_) }
+        throw
+    }
     if (-not $ResetOwner -or $item -isnot [System.IO.DirectoryInfo]) { return }
-    # A folder's items are listed only after its own entries are reset: they then give
-    # Administrators the inherited full control.
+    # Then the items below, listed again after the folder's own entries are reset (they now give
+    # Administrators the inherited full control), so that one made since the check is reset too.
     $sidType = [System.Security.Principal.SecurityIdentifier]
     $below = New-Object System.Collections.Generic.List[object]
-    foreach ($child in $item.GetFileSystemInfos()) { $below.Add($child) }
+    foreach ($child in @(Get-ItemBelow $item)) { $below.Add($child) }
     for ($i = 0; $i -lt $below.Count; $i++) {
         $child = $below[$i]
         Assert-NoLink $child
-        $childSecurity = Get-ArciAccessControl -Item $child
-        $childSecurity.SetAccessRuleProtection($false, $false)
-        foreach ($rule in @($childSecurity.GetAccessRules($true, $false, $sidType))) { [void]$childSecurity.RemoveAccessRuleSpecific($rule) }
-        $childSecurity.SetOwner($admins)
-        try { Set-ArciAccessControl -Item $child -Security $childSecurity }
-        catch { throw ("Sahiplik alınamadı [could not take ownership]: {0}: {1}" -f $child.FullName, $_.Exception.Message) }
+        try {
+            $childSecurity = Get-ArciAccessControl -Item $child
+            $childSecurity.SetAccessRuleProtection($false, $false)
+            foreach ($rule in @($childSecurity.GetAccessRules($true, $false, $sidType))) { [void]$childSecurity.RemoveAccessRuleSpecific($rule) }
+            $childSecurity.SetOwner($admins)
+            Set-ArciAccessControl -Item $child -Security $childSecurity
+        }
+        catch { throw (Get-TakeOverError $child $_) }
         if ($child -is [System.IO.DirectoryInfo]) {
-            foreach ($grandchild in $child.GetFileSystemInfos()) { $below.Add($grandchild) }
+            foreach ($grandchild in @(Get-ItemBelow $child)) { $below.Add($grandchild) }
         }
     }
 }

@@ -1854,13 +1854,27 @@ All Wave 5 questions are answered (2026-11-02).
   Modify has no ChangePermissions), and a folder another account created would hit Set-Acl's
   "not allowed to be the owner" failure. A link below either folder (a reparse point, or a hard
   link: the same file under another name elsewhere) stops the step with an error before the
-  reset reaches it, since it would hand Administrators, and inherited entries only, whatever it
-  points to; Windows' own propagation of the folder's inheritable entries, which every entry of
-  the plan has always caused, is not changed. The step enables no privilege: an item whose
-  entries give Administrators no right to take it over (its owner took them away) stops it with
-  an error naming the item, and `takeown /A /R /F <folder>` in an elevated PowerShell takes it
-  over by hand before the step is run again. Tests: `test_acl_plan_least_privilege`,
-  `test_acl_plan_gives_the_renew_and_crlfetch_tasks_their_rights`,
+  folder's own entries are written, since a reset would hand Administrators, and inherited
+  entries only, whatever it points to. Every item below is checked first (listing needs only the
+  access Administrators inherit from `state`): writing a folder's entries also writes the
+  inherited entries of everything below it, and a hard link shares its entries with the file it
+  names elsewhere. After the folder's reset its items are listed again, and each is checked once
+  more before its own reset. Windows' propagation of the entries written before, which every
+  entry of the plan has always caused, is not changed: `state`'s, on the first upgrade, still
+  reaches a folder that is not protected yet, and a link in it. In `state\crl`, `crl fetch` itself
+  can leave a hard link: `_store_new` writes a list under a `.<random>.tmp` name, links it to its
+  final name and then removes the temporary name, so a run stopped in between (a reboot, the
+  task's time limit) or a failed removal leaves both names, and nothing in `crl.py` removes them
+  later. The step then stops at that folder, before `state\renewal` and the entries after it;
+  the error for a hard link says to delete only the `.<random>.tmp` name in the same folder,
+  never a `.crl` file, which is evidence. That `crl fetch` should remove its own leftover
+  temporary names is for the owner of `core/src/arcilogger_core/crl.py` (not changed here). The
+  step enables no privilege: an item whose entries give Administrators no right to read or take
+  it over (its owner took them away) stops it with an error naming the item and the remedy
+  (every read and write of an item, the link check, the listing and its entries, is wrapped
+  alike; a link's own error stays as it is), and `takeown /A /R /F <folder>` in an elevated
+  PowerShell takes it over by hand before the step is run again. Tests:
+  `test_acl_plan_least_privilege`, `test_acl_plan_gives_the_renew_and_crlfetch_tasks_their_rights`,
   `test_acl_plan_resets_the_owner_of_the_two_protected_state_folders_only` (exactly the two
   entries carry `ResetOwner`), `test_only_the_acl_script_passes_reset_owner`, and on Windows
   `test_acl_applied_keeps_sealed_file_deny_entries` (`state\crl` created before the ACL step
@@ -1871,8 +1885,11 @@ All Wave 5 questions are answered (2026-11-02).
   /setowner`, which uses the administrator's restore privilege: afterwards Administrators own
   them, the items below have inherited entries only, the collector and ingest have nothing,
   LOCAL SERVICE keeps its inherited Modify on the lock, and `logs` keeps the collector as its
-  owner) and `test_acl_step_stops_at_a_link_in_a_protected_state_folder` (a junction and a hard
-  link; the file they point to keeps its entry).
+  owner), `test_acl_step_stops_at_a_link_in_a_protected_state_folder` (a junction and a hard
+  link in `state\renewal`, protected beforehand so that `state`'s entry does not reach them: the
+  file they point to keeps its owner and every entry, the inherited ones too) and
+  `test_acl_step_names_an_item_it_cannot_take_over` (a `renewal.lock` with inheritance off and
+  the collector's entry only: the step fails naming it and `takeown`).
 
 ## Deviations — #119 (2026-11-04)
 

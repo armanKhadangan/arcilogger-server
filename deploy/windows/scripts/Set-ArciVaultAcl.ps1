@@ -58,7 +58,10 @@
     only the explicit entries of the folders listed above are replaced; Windows recomputes the
     inherited entries of the files below them. Below state\crl and state\renewal alone, every
     item also loses its explicit entries and gets Administrators as its owner (contract W5-E-9).
-    File contents are never touched.
+    A link there (a reparse point such as a junction, or a hard link) stops the script before
+    that folder is changed; an item Administrators cannot read or take over stops it with an
+    error naming the item (takeown /A /R /F <folder> takes it over by hand). File contents are
+    never touched.
 
     Run again at any time (idempotent), e.g. after restoring the server.
 

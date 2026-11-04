@@ -3084,15 +3084,20 @@ def test_acl_applied_takes_over_the_protected_state_folders(tmp_path: Path) -> N
 @pytest.mark.parametrize("kind", ["junction", "hard link"])
 def test_acl_step_stops_at_a_link_in_a_protected_state_folder(kind: str, tmp_path: Path) -> None:
     """A link below state\\renewal (a directory junction, or a hard link: the same file under
-    another name elsewhere) stops the ACL step with an error before the reset reaches what the
-    link points to: it would hand Administrators, and inherited entries only, whatever a service
-    pointed it at (W5-E-9). The file elsewhere keeps its entry of its own."""
+    another name elsewhere) stops the ACL step with an error before the folder's own entries are
+    written: Windows then writes the inherited entries of everything below too, and a hard link
+    shares its entries with the file it names (W5-E-9). The folder is protected beforehand, so
+    that the entry of state, written first, does not reach the link either. The file elsewhere
+    keeps its owner and every entry, the inherited ones too."""
     powershell = _windows_admin_powershell()
     data, programdata, program = tmp_path / "data", tmp_path / "programdata", tmp_path / "program"
     programdata.mkdir()
     program.mkdir()
     renewal_state = data / "state" / "renewal"
     renewal_state.mkdir(parents=True)
+    admins = WELL_KNOWN["admins"]
+    subprocess.run(["icacls", str(renewal_state), "/grant", f"*{admins}:(OI)(CI)F"], check=True)
+    subprocess.run(["icacls", str(renewal_state), "/inheritance:r"], check=True)
     elsewhere = tmp_path / "elsewhere"
     elsewhere.mkdir()
     kept = elsewhere / "kept.txt"
@@ -3104,6 +3109,8 @@ def test_acl_step_stops_at_a_link_in_a_protected_state_folder(kind: str, tmp_pat
         else (renewal_state / "renewal.lock", kept, "/H")
     )
     subprocess.run(["cmd", "/c", "mklink", flag, str(link), str(target)], check=True)
+    before = _owners_and_rules(powershell, tmp_path, [kept])
+    assert any(r["inherited"] for r in before[kept]["rules"]), "kept.txt inherits from elsewhere"
     result = run_powershell(
         powershell,
         WINDOWS / "scripts" / "Set-ArciVaultAcl.ps1",
@@ -3119,7 +3126,47 @@ def test_acl_step_stops_at_a_link_in_a_protected_state_folder(kind: str, tmp_pat
     message = "[a link (reparse point or hard link) in a protected state folder"
     assert _unwrapped(message) in _unwrapped(result.stdout + result.stderr)
     after = _owners_and_rules(powershell, tmp_path, [kept])
+    assert after[kept] == before[kept]
     assert any(r["sid"] == "S-1-1-0" and not r["inherited"] for r in after[kept]["rules"])
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="NTFS rights are Windows-only")
+def test_acl_step_names_an_item_it_cannot_take_over(tmp_path: Path) -> None:
+    """A renewal.lock a service left with its own entry only (inheritance off, nothing for
+    Administrators): no privilege is enabled, so the step cannot read or take it over, and it
+    stops with an error naming the lock and the takeown remedy (W5-E-9), not with Windows' own
+    access-denied text, which names no path."""
+    powershell = _windows_admin_powershell()
+    data, programdata, program = tmp_path / "data", tmp_path / "programdata", tmp_path / "program"
+    programdata.mkdir()
+    program.mkdir()
+    renewal_state = data / "state" / "renewal"
+    renewal_state.mkdir(parents=True)
+    lock = renewal_state / "renewal.lock"
+    lock.write_bytes(b"")
+    collector, admins = service_sid("ArciCollector"), WELL_KNOWN["admins"]
+    subprocess.run(["icacls", str(lock), "/grant", f"*{collector}:M"], check=True)
+    subprocess.run(["icacls", str(lock), "/setowner", f"*{collector}"], check=True)
+    subprocess.run(["icacls", str(lock), "/inheritance:r"], check=True)
+    try:
+        result = run_powershell(
+            powershell,
+            WINDOWS / "scripts" / "Set-ArciVaultAcl.ps1",
+            "-DataRoot",
+            str(data),
+            "-ProgramDataDir",
+            str(programdata),
+            "-InstallDir",
+            str(program),
+            "-SkipAudit",
+        )
+    finally:  # icacls takes it back with the restore privilege, so that pytest can delete it
+        subprocess.run(["icacls", str(lock), "/setowner", f"*{admins}"], check=True)
+        subprocess.run(["icacls", str(lock), "/reset"], check=True)
+    assert result.returncode != 0, result.stdout + result.stderr
+    output = _unwrapped(result.stdout + result.stderr)
+    assert _unwrapped("[could not take ownership, take it over by hand with takeown") in output
+    assert _unwrapped("state\\renewal\\renewal.lock") in output
 
 
 def _windows_admin_powershell() -> str:
