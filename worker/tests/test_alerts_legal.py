@@ -404,9 +404,9 @@ def test_stamp_renewal_raised_after_two_failed_runs(check: Any, layout: Layout) 
         "due": 0,
         "uncovered": 0,
         "failures_in_a_row": 2,
-        "title_en": "Re-stamping needed: the Renew task failed 2 times in a row",
+        "title_en": "The re-stamping task failed 2 times in a row",
     }
-    assert alert.title == "Yeniden damgalama gerekiyor: Renew görevi art arda 2 kez başarısız oldu"
+    assert alert.title == "Yeniden damgalama görevi art arda 2 kez başarısız"
     assert describe(RENEWAL_RULE, alert.details) == (
         "Renew görevi art arda 2 kez başarısız oldu.",
         "The Renew task failed 2 times in a row.",
@@ -439,9 +439,49 @@ def test_stamp_renewal_failures_without_tokens_raise(check: Any, layout: Layout)
         "due": None,
         "uncovered": None,
         "failures_in_a_row": 2,
-        "title_en": "Re-stamping needed: the Renew task failed 2 times in a row",
+        "title_en": "The re-stamping task failed 2 times in a row",
     }
+    assert alert.title == "Yeniden damgalama görevi art arda 2 kez başarısız"
     assert describe(RENEWAL_RULE, alert.details)[1] == "The Renew task failed 2 times in a row."
+
+
+def test_stamp_renewal_title_follows_what_raised_it(check: Any, layout: Layout) -> None:
+    """#151 (W5-E-7): raised by the Renew task's failures alone, the title says the task failed,
+    with the count in a row, not that re-stamping is needed; a stamp due or expired without
+    re-stamping gives "Re-stamping needed" with the failures added. The open alert's title
+    follows each pass."""
+    later = NOW + timedelta(days=100)
+    renewals(layout, ("not_due", NOW + timedelta(days=400)))
+    renew_runs(layout, "failed", "failed", "refused")
+    alert = check()[RENEWAL_KEY]
+    titles = (alert.title, alert.details["title_en"])
+    assert titles == (
+        "Yeniden damgalama görevi art arda 3 kez başarısız",
+        "The re-stamping task failed 3 times in a row",
+    )
+    for word in ("gerekiyor", "needed"):  # negative: not the title of a stamp to re-stamp
+        assert all(word not in title for title in titles), word
+    renewals(layout, ("due", later))  # a token due: re-stamping is needed
+    renew_runs(layout, "failed", "failed", "failed")
+    alert = check()[RENEWAL_KEY]
+    assert (alert.title, alert.details["title_en"]) == (
+        "Yeniden damgalama gerekiyor: 1 damganın zamanı geldi, 0 damga yeniden damgalanmadan "
+        "sona erdi; Renew görevi art arda 3 kez başarısız oldu",
+        "Re-stamping needed: 1 stamp(s) due, 0 expired without re-stamping; the Renew task "
+        "failed 3 times in a row",
+    )
+    renewals(layout, ("uncovered", NOW - timedelta(days=3)))  # an expired one, no failure
+    assert check()[RENEWAL_KEY].title == (
+        "Yeniden damgalama gerekiyor: 0 damganın zamanı geldi, 1 damga yeniden damgalanmadan "
+        "sona erdi"
+    )
+    renewals(layout, ("covered", later))  # covered: then the failures alone hold it open
+    renew_runs(layout, "refused", "failed", "failed")
+    alert = check()[RENEWAL_KEY]
+    assert (alert.title, alert.details["title_en"]) == titles
+    for title in titles:  # counts only: no name, no address, no log line
+        for hidden in ("Örnek", "Mock", "CN=", "192.0.2.", "tsa_unavailable", "roots"):
+            assert hidden not in title, hidden
 
 
 def test_stamp_renewal_cleared_after_a_successful_run(

@@ -203,6 +203,7 @@ from arcilogger_worker.alerts.texts import (
     NAT_TEXTS,
     REFUSAL_REASONS,
     REFUSED_HIGH_TITLE,
+    RENEW_FAILED_TITLE,
 )
 from arcilogger_worker.compliance_filter import filter_evidence
 from arcilogger_worker.lookup import trust
@@ -2408,9 +2409,9 @@ def check_stamp_renewal(ctx: CheckContext) -> Outcome:
     expired ``uncovered``, or the ``Renew`` task failed twice in a row (``failures_in_a_row`` of
     the same file, failed and refused runs; A4), judged from ``state/renewal/renewal.json``,
     never from the task's exit code (C12). The failures raise it also while the token list is
-    unknown (a refused run without pinned roots writes none, W5-A-2). Resolved by a readable
-    report without such a token and without those failures; what cannot be read decides
-    nothing."""
+    unknown (a refused run without pinned roots writes none, W5-A-2); raised by the failures
+    alone, its title says the task failed (W5-E-7). Resolved by a readable report without such a
+    token and without those failures; what cannot be read decides nothing."""
     # Two reads of the same file: a run that replaces it in between can pair the previous
     # tokens with the new count. Each half is true of one file the task wrote, and the next pass
     # reads them alike.
@@ -2433,18 +2434,23 @@ def check_stamp_renewal(ctx: CheckContext) -> Outcome:
         parts_en.append(f"the Renew task failed {failures} times in a row")
     findings = []
     if parts_tr:
+        title_tr = f"Yeniden damgalama gerekiyor: {'; '.join(parts_tr)}"
+        title_en = f"Re-stamping needed: {'; '.join(parts_en)}"
+        if not (due or uncovered):
+            # the failures alone (nothing due, or the token list unknown) name the task (W5-E-7)
+            title_tr, title_en = (title.format(failures=failures) for title in RENEW_FAILED_TITLE)
         findings.append(
             Finding(
                 key=RENEWAL_KEY,
                 rule=RENEWAL_RULE,
                 severity="high",
-                title=f"Yeniden damgalama gerekiyor: {'; '.join(parts_tr)}",
+                title=title_tr,
                 details={
                     # unknown (None) while the report has no token list
                     "due": due if renewals is not None else None,
                     "uncovered": uncovered if renewals is not None else None,
                     "failures_in_a_row": failures,
-                    "title_en": f"Re-stamping needed: {'; '.join(parts_en)}",
+                    "title_en": title_en,
                 },
             )
         )

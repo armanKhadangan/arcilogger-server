@@ -1754,6 +1754,13 @@ def _db_window(d: Mapping[str, Any]) -> Facts | None:
     )
 
 
+#: The title of ``R20-renewal`` raised by the Renew task's failures alone (no stamp due or
+#: expired without re-stamping, or the token list unknown), formatted with ``failures``, the
+#: count in a row (at least alerts.system.RENEW_FAILURES_ALERT); W5-E-7.
+RENEW_FAILED_TITLE: Final = (
+    "Yeniden damgalama görevi art arda {failures} kez başarısız",
+    "The re-stamping task failed {failures} times in a row",
+)
 #: alerts.system.RENEW_FAILURES_ALERT (that module imports this one).
 _RENEW_FAILURES_ALERT: Final = 2
 
