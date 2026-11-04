@@ -1493,10 +1493,11 @@ All Wave 5 questions are answered (2026-11-02).
   inherited LOCAL SERVICE Modify of `vault` and `state`. An entry of its own on
   `state\renewal.json` would be lost at the first run, since `renewal.write_state` replaces the
   file (`atomic_write_bytes`) and the new file carries only the inherited rights of its folder.
-  No plan entry targets anything at or below `vault`, so none gives a write right on a sealed day
-  or a deletion record; their files keep the `immutability.lock` deny entries. Tests:
+  W5-E adds no entry for `vault` and none below it (`vault` keeps its earlier entry), so none
+  gives a write right on a sealed day or a deletion record; their files keep the
+  `immutability.lock` deny entries. Tests:
   `test_acl_plan_gives_the_renew_and_crlfetch_tasks_their_rights` (one assertion per A4 right,
-  nothing at or below `vault/` or `state/renewal*`, the exact set of folders the tasks may write),
+  no entry below `vault` or for `state\renewal*`, the exact set of folders the tasks may write),
   `test_acl_plan_least_privilege` (`state\crl` protected, no ingest access; `exports\reports`
   read only), and on Windows `test_acl_applied_keeps_sealed_file_deny_entries` (LOCAL SERVICE
   keeps an inherited Modify on `state\renewal.json` after two `atomic_write_bytes` calls).
@@ -1535,11 +1536,11 @@ All Wave 5 questions are answered (2026-11-02).
   a file without `failures_in_a_row` counts as 0, as `renewal.write_state` reads it. W5-A's
   writer continues a damaged count differently (`True` as 1, `"two"` as 0); only a hand-edited
   file has one, and the failure branch then decides nothing until the next run writes a number
-  (the rows with "unknown" above). The details
-  are `due`, `uncovered` (both null while the tokens are unknown), `failures_in_a_row` and
-  `title_en`: counts only. The check reads the file twice (W5-C's token reader and
-  `read_renew_runs`); a run in between can pair the earlier tokens with the new count, each half
-  is true of a file the task wrote, and the next pass reads both alike. Tests:
+  (the rows with "unknown" above). The details are `due`, `uncovered` (both null while the
+  tokens are unknown), `failures_in_a_row` and `title_en`: counts only. The check reads the file
+  twice (W5-C's token reader and `read_renew_runs`); a run in between can pair the earlier tokens
+  with the new count, each half is true of a file the task wrote, and the next pass reads both
+  alike. Tests:
   `test_stamp_renewal_raised_after_two_failed_runs`, `test_stamp_renewal_refused_runs_count`,
   `test_stamp_renewal_failures_without_tokens_raise`,
   `test_stamp_renewal_cleared_after_a_successful_run` (a dry run keeps the failures),
