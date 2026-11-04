@@ -1538,7 +1538,8 @@ All Wave 5 questions are answered (2026-11-02).
   `state/renewal.json`, not its top-level `at` (a run that does not know the pinned roots keeps
   the earlier `at`, W5-A-2), so a dry run, which keeps `last_run`, is no evidence. **CrlFetch**
   shows the newest of `lists[].fetched_at` and `failures[].at` of `state/crl/index.json`, read with
-  W5-C's `read_crl_index` (another schema is unreadable). A time later than now is no evidence,
+  W5-C's `read_crl_index` (another schema is unreadable; since W5-E-6, an index with neither shows
+  its modification time). A time later than now is no evidence,
   and a file that cannot be read shows `missing` and never fails the request. The row says the
   task ran: a refused or failed Renew run, or a fetch with failures only, is `ok` there, and
   whether it succeeded is `R20-renewal`'s and `R20-crl`'s question (the Backup row's precedent;
@@ -1630,6 +1631,34 @@ All Wave 5 questions are answered (2026-11-02).
   its other `R20-crl` tests now seal through a made-up CA outside the test organization, pinned
   in `tsa.roots_dir`), and `test_no_seal_alert_when_every_closed_day_is_sealed`
   (`worker/tests/test_alerts_system.py`: a sealed mock install raises no alert at all).
+- **W5-E-6: a `crl fetch` that knows no list address writes its index (#151; Q3 of #140).**
+  W5-B's `fetch` returned before the lock when no URL was known (neither `tsa.crl_urls` nor an
+  http/https distribution point in a pinned root or a token), so on such a site
+  `state/crl/index.json` never appeared and the Sistem page's `CrlFetch` row stayed `missing`
+  for good although the task ran every day. Now that run takes the lock and writes the index as
+  every run does: the lists stored before and their entries stay (D8), the failures of the run
+  before drop out, and every stored file is still hashed (C14), so a changed one is still
+  recorded as `stored_file_changed`. On a site that never stored a list that is
+  `{"schema": "arcilogger.crl-index/1", "lists": [], "failures": []}`. It still fetches nothing
+  and exits 2 ("no URL known" outranks a `stored_file_changed` failure, which exits 1 when URLs
+  are known); like any run it raises `CrlError` (exit 1) when the lock is held or the index or a
+  stored file cannot be read, and leaves the index as it is. Nothing else in `crl.py` and
+  nothing in the standalone verifier changes (it reads `paket.json`, never `state/crl/index.json`),
+  so the verdicts of both verifiers stay the same (rule 5). W5-E-2 changes: when the readable
+  index holds neither a list nor a failure, the `CrlFetch` row's evidence is the index's
+  modification time (later than now is no evidence, as for the other times); otherwise the
+  row reads `fetched_at` and `failures[].at` only, as before. A site that knew list addresses
+  earlier and knows none now keeps its old lists in the index, so its row shows their last
+  fetch and turns `late` although the task runs; `R20-crl` says why when an issuer in use has
+  no fresh list. W5-C's readers need no change: an empty index is read as no list, so it
+  raises no `R20-crl` and no `crl_stale` while no issuer is in use (an open `R20-crl` is
+  resolved, `crl_fresh`), and an issuer in use without a list is stale as before. Tests:
+  `test_no_url_known_writes_an_empty_index`, `test_no_url_known_keeps_the_stored_lists` and
+  `test_cli_no_url_known_exits_2` (`core/tests/test_crl.py`),
+  `test_crlfetch_without_a_list_address_shows_the_run` (`api/tests/test_system_health.py`),
+  `test_stamp_crl_after_a_fetch_without_a_list_address` and
+  `test_stamp_crl_raised_after_a_fetch_without_a_list_address_while_in_use`
+  (`worker/tests/test_alerts_legal.py`).
 
 ## Deviations — #119 (2026-11-04)
 
