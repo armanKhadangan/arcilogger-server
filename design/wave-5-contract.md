@@ -1715,8 +1715,11 @@ All Wave 5 questions are answered (2026-11-02).
   move, and a missing report already reads as nothing due (answer to Q2 on #158: the one-time
   read stays). `stamp_renewal_path` is `renewal.state_path`. While the readers read the earlier
   file they show its path as the evidence: the Sistem page's Renew row says
-  `state\renewal.json` then, and `state\renewal\renewal.json` once that file exists or while
-  neither does (`TaskRow.shown`). The day page's problem text stays `renewal.json: unreadable`,
+  `state\renewal.json` then, and `state\renewal\renewal.json` once that file exists, while
+  neither does, or while it cannot be looked at (`TaskRow.shown`; `Path.exists()` raises
+  PermissionError, and the evidence text never fails the request). Step 2 of the `R20-renewal`
+  runbook names both files: `state\renewal\renewal.json`, and `state\renewal.json` until the
+  first run after an upgrade. The day page's problem text stays `renewal.json: unreadable`,
   the name of both files.
   Tests: `test_an_earlier_state_file_is_read_once_and_never_written`
   (`core/tests/test_cli_renew.py`),
@@ -1726,7 +1729,10 @@ All Wave 5 questions are answered (2026-11-02).
   (`tests/test_renewal_state_reader.py`),
   `test_renew_row_reads_an_earlier_report_until_the_first_run`
   (`api/tests/test_system_health.py`; the evidence text, and the earlier file left in place),
-  and the ACL tests of W5-E-1.
+  `test_renew_row_survives_a_state_folder_it_cannot_look_into` (the same file; the row is
+  `missing` and names `state\renewal\renewal.json`), the runbook's two paths in
+  `test_a_dry_run_after_an_upgrade_leaves_the_alerts_as_they_are`
+  (`worker/tests/test_alerts_legal.py`), and the ACL tests of W5-E-1.
 - **W5-E-5: ARCILOGGER's test root is no issuer in use for `R20-crl` (#151; Q8 of #140).**
   §2.3.1 raises `R20-crl` when an issuer in use has no verified list newer than
   `tsa.crl_max_age_days`, and W5-C's `pinned_roots` pins the mock TSA's root while
