@@ -47,7 +47,16 @@ anything of it is deleted. Then it deletes in one transaction that file's rows (
 :data:`~arcilogger_db.models.TIME_SERIES_MODELS`, by ``(source, raw_day)``, wherever their
 device times lie: :meth:`IngestService._reset_file`), its parse failures, search counts and clock
 samples, and resets its ``ingest_offsets`` row to 0 — in the loader's step order (offsets, rows,
-failures, counts), one file per round so live data is not held up. The file is then an ordinary
+failures, counts), one file per round so live data is not held up. The checks read whole files
+(the SHA-256 of every file at the claim, a file's receive times before its reset: about 0.5 s and
+25 s for a 5 M line day), so they run in a thread beside the loop
+(:meth:`IngestService._beside`), which goes on loading live data and acts on a check's result in
+a later round, in the same order: nothing is deleted before its check has passed, and the size
+check is made again on the loop right before the file's transaction. The partitions of a
+request's days are made one day a round, also while a check runs. What still holds the loop up
+is the reset's transaction itself (about 8 s for every 1 M lines whose rows are still there),
+one day's partitions (up to 0.4 s) and a wait for the partition lock while the window job holds
+it (up to :data:`PARTITION_LOCK_TIMEOUT`). The file is then an ordinary
 stream: it is read from the sealed file by the reader above, after every newer day (live data
 first), and loaded exactly once like any other. ``bytes_done`` is Σ committed offset; the
 request is ``ready`` when every file has finished (``expires_at`` = ``ready_at`` +
@@ -88,6 +97,8 @@ import threading
 import time
 from collections import Counter
 from collections.abc import Callable, Iterable
+from concurrent.futures import Future
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from pathlib import Path
@@ -185,14 +196,37 @@ PARTITION_LOCK_TIMEOUT: Final = "5s"
 LOCK_NOT_AVAILABLE: Final = "55P03"
 #: The raw days around a request's days whose files are loaded with it (module text).
 RELOAD_MARGIN: Final = timedelta(days=RAW_DAY_MARGIN)
-#: Bytes read at a time when a sealed file is checked against its manifest's SHA-256.
+#: Bytes read at a time when a sealed file is checked against its manifest's SHA-256 (and when
+#: it is read for its receive times, :func:`received_outside`): a check beside the loop gives up
+#: within one such slice once the service stops (:class:`CheckStoppedError`).
 HASH_CHUNK: Final = 1 << 20
+#: The name of the thread an archive reload's file check runs in (:meth:`IngestService._beside`).
+CHECK_THREAD: Final = "arcilogger-archive-check"
 #: The bytes of a spool line that name the minute it was received in, when its receive time is
 #: as the collector writes it (``2026-09-23T09:38:26.380000+03:00 ``): ``line[:17] +
 #: line[19:20] + line[26:33]``, the minute, the decimal point and the UTC offset.
 STAMP_KEY: Final = re.compile(rb"\d{4}-\d\d-\d\dT\d\d:\d\d:\.[+-]\d\d:\d\d ")
 #: The unit of a ``source_clock_samples`` key.
 MINUTE: Final = timedelta(minutes=1)
+
+
+class CheckStoppedError(Exception):
+    """An archive reload's file check gave up because the service is stopping (nothing is
+    decided, the request is checked again at the next start) or its request is no longer loaded
+    by this service."""
+
+
+#: The stops of the archive reload's file check running in this thread
+#: (:meth:`IngestService._beside`): the service's and its request's; none, as in a direct call,
+#: a check never gives up.
+_CHECK_STOP: ContextVar[tuple[threading.Event, ...]] = ContextVar("check_stop", default=())
+
+
+def _check_stopped() -> None:
+    """Between two slices of a file check: raise :class:`CheckStoppedError` once the service
+    that runs it stops or the request it is for has ended."""
+    if any(stop.is_set() for stop in _CHECK_STOP.get()):
+        raise CheckStoppedError
 
 
 def _lock_not_available(exc: DBAPIError) -> bool:
@@ -237,7 +271,9 @@ def received_outside(path: Path, day: date) -> list[datetime]:
     by :class:`VaultReader` like every sealed file (a receive time as the collector writes it is
     parsed once a minute, by :data:`STAMP_KEY`, any other line on its own); a line without a
     usable receive time has no row and is left out.
-    Raises :class:`VaultReadError` or ``OSError`` when it cannot be read."""
+    Raises :class:`VaultReadError` or ``OSError`` when it cannot be read; beside the loop
+    (:meth:`IngestService._beside`) :class:`CheckStoppedError` within one slice of
+    :data:`HASH_CHUNK` once the service stops."""
     start, end = day_window(day)
     known: dict[bytes, datetime | None] = {}
     odd: set[bytes] = set()
@@ -262,6 +298,7 @@ def received_outside(path: Path, day: date) -> list[datetime]:
     try:
         while data := reader.read(HASH_CHUNK):
             take(data.removesuffix(b"\n").split(b"\n"))
+            _check_stopped()
     finally:
         reader.close()
     return sorted(m for m in minutes if m is not None and not start <= m < end)
@@ -366,10 +403,36 @@ class ArchiveJob:
     #: ``bytes_done`` as last written.
     written: int = 0
     next_progress: float = 0.0
+    #: The check of the next file to reset, running beside the loop
+    #: (:meth:`IngestService._reset_next`): that file, and the minutes its lines were received
+    #: in outside its day (``None``: missing, changed or unreadable).
+    scan: tuple[Key, Future[list[datetime] | None]] | None = None
+    #: Set when the job ends (:meth:`IngestService._drop_job`): a scan of it still running gives
+    #: up at its next slice.
+    ended: threading.Event = field(default_factory=threading.Event)
 
     @property
     def bytes_total(self) -> int:
         return sum(self.files.values())
+
+
+@dataclass
+class PendingClaim:
+    """A request being claimed (:meth:`IngestService._claim_archive`) while its files are checked
+    beside the loop."""
+
+    id: int
+    first_day: date
+    last_day: date
+    #: ``status`` when it was read (``queued``, or ``loading`` after a restart).
+    status: str
+    #: Every file of the request (as :attr:`ArchiveJob.files`); ``None``: a day not in the vault.
+    files: dict[Key, int] | None
+    #: The files that count as loaded already (never checked, never reset).
+    done: frozenset[Key]
+    #: Whether every other file is intact (:meth:`IngestService._sealed_file_intact`); ``None``:
+    #: nothing to check.
+    check: Future[bool] | None
 
 
 @dataclass
@@ -444,8 +507,13 @@ class IngestService:
         self._archive_error_seconds = archive_error_seconds
         self._next_archive = 0.0
         self._archive_job: ArchiveJob | None = None
+        #: The request whose files are being checked before it is claimed (no job meanwhile).
+        self._claim: PendingClaim | None = None
         #: The last claim failed a request (the next one is taken at once).
         self._claim_failed = False
+        #: Set when :meth:`run` ends: a file check still running beside it gives up (a fresh
+        #: event for every run).
+        self._halt = threading.Event()
         self._preparer: Preparer | None = None
         #: Batches being built, oldest first; only the first is loaded. With parse workers a
         #: second one is read ahead, so its lines are prepared while the first is loading.
@@ -488,6 +556,7 @@ class IngestService:
                 self.layout.root,
                 self.workers,
             )
+            self._halt = threading.Event()
             # No status file yet: until the lock is ours it may belong to another instance.
             failed_start = self._start(once=once)
             if failed_start is not None:
@@ -505,7 +574,7 @@ class IngestService:
                         return EXIT_LOCKED if self._locked_out else EXIT_DB_UNAVAILABLE
                     continue  # stop was requested while the database was down
                 if read == 0 and self._batch_empty():
-                    if once and self._archive_job is None:
+                    if once and self._archive_job is None and self._claim is None:
                         break
                     self._write_status_if_due()
                     self.stop.wait(settings.poll_seconds)
@@ -518,6 +587,7 @@ class IngestService:
             self.state = "failed"  # the CLI logs the traceback and exits 1
             raise
         finally:
+            self._halt.set()  # a file check beside the loop gives up; it is not waited for
             for stream in self.streams.values():
                 stream.close()
             if self._preparer is not None:
@@ -812,28 +882,30 @@ class IngestService:
     def _ensure_days(self, first_day: date, last_day: date) -> bool:
         """The daily partitions of the site days ``first_day`` … ``last_day`` (plain PostgreSQL;
         nothing to do with TimescaleDB), one transaction a day (its device times lie in two UTC
-        days, at most 32 partitions: the lock table of PostgreSQL's defaults holds about 256).
-        ``False`` when a table lock was not free within :data:`PARTITION_LOCK_TIMEOUT` (tried
-        again later); other database errors are raised."""
-        day = first_day
-        while day <= last_day:
-            if day not in self._partitioned:
-                try:
-                    with self.engine.begin() as connection:
-                        connection.execute(
-                            text(f"SET LOCAL lock_timeout = '{PARTITION_LOCK_TIMEOUT}'")
-                        )
-                        report = ensure_days(connection, day, day)
-                except DBAPIError as exc:
-                    if not _lock_not_available(exc):
-                        raise
-                    log.info("partitions of %s: a table is locked, trying again later", day)
-                    return False
-                if report.created:
-                    log.info("partitions of %s created (%d)", day, len(report.created))
-                self._partitioned.add(day)
-            day += timedelta(days=1)
-        return True
+        days, at most 32 partitions: the lock table of PostgreSQL's defaults holds about 256),
+        and one day a call: up to 0.4 s each, so between two batches of live data the loop makes
+        sure of one day, not of the 22 of a long archive reload (4.7 s). ``False`` until every
+        day is done, or when a table lock was not free within :data:`PARTITION_LOCK_TIMEOUT`
+        (tried again later, :attr:`_partitioned` keeps the days done); other database errors are
+        raised."""
+        days = [first_day + timedelta(days=n) for n in range((last_day - first_day).days + 1)]
+        missing = [day for day in days if day not in self._partitioned]
+        if not missing:
+            return True
+        day = missing[0]
+        try:
+            with self.engine.begin() as connection:
+                connection.execute(text(f"SET LOCAL lock_timeout = '{PARTITION_LOCK_TIMEOUT}'"))
+                report = ensure_days(connection, day, day)
+        except DBAPIError as exc:
+            if not _lock_not_available(exc):
+                raise
+            log.info("partitions of %s: a table is locked, trying again later", day)
+            return False
+        if report.created:
+            log.info("partitions of %s created (%d)", day, len(report.created))
+        self._partitioned.add(day)
+        return len(missing) == 1
 
     def _today(self) -> date:
         return site_day(self._clock())
@@ -842,20 +914,43 @@ class IngestService:
 
     def _archive(self) -> bool:
         """Between two batches: reset the next file of the loading archive reload, write its
-        progress or end it, and take the next queued request (at once after one ended).
-        ``False`` when the database was unavailable (everything is tried again next round)."""
+        progress or end it, finish the claim of a request whose files have been checked, and
+        take the next queued request (at once after one ended). It never waits for a file check
+        (:meth:`_beside`): the loop loads live data meanwhile and looks at the check again in the
+        next round. ``False`` when the database was unavailable (everything is tried again next
+        round)."""
         try:
             job = self._archive_job
             if job is not None:
                 if job.pending:
                     self._reset_next(job)
                 self._archive_progress(job)
-            if self._archive_job is None and time.monotonic() >= self._next_archive:
+            claim = self._claim
+            if (
+                self._archive_job is None
+                and claim is not None
+                and (claim.check is None or claim.check.done())
+                and self._take_lock()
+            ):
+                self._claim_failed = False
+                self._archive_job = self._finish_claim(claim)
+                if self._claim_failed:  # the next request at once
+                    self._next_archive = 0.0
+            if (
+                self._archive_job is None
+                and self._claim is None
+                and time.monotonic() >= self._next_archive
+            ):
                 self._next_archive = time.monotonic() + self._archive_seconds
-                # A request that fails at once (not in the vault, a file changed) is followed by
-                # the next one in the same round.
+                # A request that fails at once (not in the vault, a file changed and found so
+                # by a quick check) is followed by the next one in the same round.
                 self._claim_failed = True
-                while self._archive_job is None and self._claim_failed and self._take_lock():
+                while (
+                    self._archive_job is None
+                    and self._claim is None
+                    and self._claim_failed
+                    and self._take_lock()
+                ):
                     self._claim_failed = False
                     self._archive_job = self._claim_archive()
         except DBAPIError as exc:
@@ -864,20 +959,17 @@ class IngestService:
         return True
 
     def _claim_archive(self) -> ArchiveJob | None:
-        """The ``loading`` request (this service stopped while loading it: every file not
-        loaded already is reset again, which loads the same rows) or else the oldest ``queued``
-        one, now ``loading``.
+        """Start claiming the ``loading`` request (this service stopped while loading it: every
+        file not loaded already is reset again, which loads the same rows) or else the oldest
+        ``queued`` one.
 
         The files that count as loaded already (:meth:`loaded_files`) are left alone; every
         other file it would load is checked against its manifest first
-        (:meth:`_sealed_file_intact`, outside any transaction: it reads them whole): a day of the
-        request that is not sealed (``archive_day_not_in_vault``) or a file missing or changed
-        (``archive_file_unreadable``) fails the request before anything is deleted. Then one
-        transaction under the partition maintenance lock (the window job holds it while it reads
-        the reloads and drops: it either saw this request as active, or its drop is done before
-        a file is reset) finds the same files loaded and moves it on. ``None`` when there is
-        none, when it failed, when it or its loaded files changed meanwhile, or when the lock is
-        busy (tried again at the next poll)."""
+        (:meth:`_sealed_file_intact`, outside any transaction and beside the loop,
+        :meth:`_beside`: it reads them whole, about 0.5 s for a 5 M line day), then
+        :meth:`_finish_claim` moves the request on, in this round when there is nothing to check
+        (or the check was quick), else in a later one. ``None`` while the files are checked, or
+        as :meth:`_finish_claim`."""
         r = ArchiveReload
         with self.engine.connect() as connection:
             row = connection.execute(
@@ -894,15 +986,44 @@ class IngestService:
             return None
         reload_id, first_day, last_day, status = row
         files = self._request_files(reload_id, first_day, last_day)
-        error = None
         done: frozenset[Key] = frozenset()
-        if files is None:
-            error = ARCHIVE_NOT_IN_VAULT
-        else:
+        check: Future[bool] | None = None
+        if files is not None:
             with self.engine.connect() as connection:
                 done = self.loaded_files(connection, reload_id, first_day, files)
-            if not all(self._sealed_file_intact(*key) for key in sorted(files.keys() - done)):
+            unchecked = sorted(files.keys() - done)
+            if unchecked:  # the first file missing or changed ends the check
+                check = self._beside(
+                    lambda: all(self._sealed_file_intact(*key) for key in unchecked)
+                )
+        self._claim = PendingClaim(reload_id, first_day, last_day, status, files, done, check)
+        return self._finish_claim(self._claim)
+
+    def _finish_claim(self, claim: PendingClaim) -> ArchiveJob | None:
+        """The claim of a request once its files are checked (:meth:`_claim_archive`): a day of
+        the request that is not sealed (``archive_day_not_in_vault``) or a file missing or
+        changed (``archive_file_unreadable``) fails the request before anything is deleted.
+        Otherwise one transaction under the partition maintenance lock (the window job holds it
+        while it reads the reloads and drops: it either saw this request as active, or its drop
+        is done before a file is reset) finds the same files loaded and moves it on. ``None``
+        while the check runs, when it failed, when it or its loaded files changed meanwhile, when
+        the check gave up (the service stops) or when the lock is busy (claimed and checked
+        again at the next poll)."""
+        if claim.check is not None and not claim.check.done():
+            return None
+        self._claim = None
+        reload_id, first_day, last_day = claim.id, claim.first_day, claim.last_day
+        status, files, done = claim.status, claim.files, claim.done
+        error = ARCHIVE_NOT_IN_VAULT if files is None else None
+        if claim.check is not None:
+            try:
+                intact = claim.check.result()
+            except CheckStoppedError:  # a stop of an earlier run: claimed afresh at once
+                self._next_archive = 0.0
+                return None
+            if not intact:
                 error = ARCHIVE_UNREADABLE
+        r = ArchiveReload
         try:
             with self.engine.begin() as connection:
                 connection.execute(text(f"SET LOCAL lock_timeout = '{PARTITION_LOCK_TIMEOUT}'"))
@@ -1046,7 +1167,9 @@ class IngestService:
         """Whether the sealed file of ``(source, day)`` is in the vault as its manifest — read
         afresh, not from :class:`SealIndex`'s cache — describes it: its size and (``digest``)
         SHA-256. Checked before the file's rows are deleted, so a reload never deletes rows it
-        could not load again."""
+        could not load again. Run beside the loop (:meth:`_beside`), it raises
+        :class:`CheckStoppedError` within one slice of :data:`HASH_CHUNK` once the service
+        stops."""
         try:
             state = json.loads(self.layout.seal_state(day).read_bytes())
             manifest = json.loads(self.layout.manifest(day).read_bytes())
@@ -1062,37 +1185,93 @@ class IngestService:
             with open_shared(path) as handle:  # the file as stored: compressed bytes
                 while chunk := handle.read(HASH_CHUNK):
                     sha256.update(chunk)
+                    _check_stopped()
             return sha256.hexdigest() == str(entry["sha256"])
         except (OSError, ValueError, KeyError, TypeError, AttributeError, StopIteration):
             return False
 
-    def _reset_next(self, job: ArchiveJob) -> None:
-        """Reset the request's next file so that it is loaded again from the vault: its sealed
-        file still there (the claim checked it whole) and read for the minutes its lines were
-        received in outside its day (:func:`received_outside`, before any transaction), the
-        partitions its rows can land in first, then one transaction, then a fresh stream at
-        offset 0. A file gone or changed since stops the resets: the request stays ``loading``
-        until the files already reset have loaded, then fails (:meth:`_archive_progress`)."""
-        source, day = key = job.pending[0]
-        entry = self.seals.entry(day, source)
-        strays: list[datetime] | None = None
-        if entry is not None and self._sealed_file_intact(source, day, digest=False):
+    def _beside[T](
+        self, check: Callable[[], T], *, ended: threading.Event | None = None
+    ) -> Future[T]:
+        """Run ``check``, an archive reload's reading of sealed files (the claim's SHA-256, the
+        reset's :func:`received_outside`: 0.5 s and 25 s for a 5 M line day), in a daemon thread
+        of its own, so that the loop goes on loading live data (Wave 5 contract G4: live data first)
+        and looks at the result in a later round. The thread only reads files: every decision
+        and every transaction stays with the loop, in W5-G's order.
+
+        A daemon thread and a plain :class:`~concurrent.futures.Future`, not an executor, whose
+        threads are joined when the interpreter exits: that would hold up a stop on Windows
+        (:data:`~arcilogger_ingest.stopping.WINDOWS_GRACE_SECONDS`) by a whole file's read. The
+        check gives up within one slice of :data:`HASH_CHUNK` once :meth:`run` ends or ``ended``
+        is set (its request is no longer this service's: :meth:`_drop_job`), raising
+        :class:`CheckStoppedError`, and is never waited for."""
+        future: Future[T] = Future()
+        future.set_running_or_notify_cancel()
+        stops = (self._halt,) if ended is None else (self._halt, ended)
+
+        def run() -> None:
+            _CHECK_STOP.set(stops)
             try:
-                strays = received_outside(entry.path, day)
-            except (VaultReadError, OSError) as exc:
-                log.warning("archive reload %d: %s %s: %s", job.id, source, day, exc)
+                future.set_result(check())
+            except BaseException as exc:  # raised in the loop, which looks at the result
+                future.set_exception(exc)
+
+        threading.Thread(target=run, name=CHECK_THREAD, daemon=True).start()
+        return future
+
+    def _file_strays(
+        self, reload_id: int, source: str, day: date, path: Path | None
+    ) -> list[datetime] | None:
+        """The check of a file before its reset (beside the loop): the minutes its lines were
+        received in outside its day (:func:`received_outside`) when its sealed file ``path`` is
+        still there as its manifest describes it (by size: the claim read it whole); ``None``
+        when it is missing, changed or cannot be read."""
+        if path is None or not self._sealed_file_intact(source, day, digest=False):
+            return None
+        try:
+            return received_outside(path, day)
+        except (VaultReadError, OSError) as exc:
+            log.warning("archive reload %d: %s %s: %s", reload_id, source, day, exc)
+            return None
+
+    def _reset_next(self, job: ArchiveJob) -> None:
+        """Reset the request's next file so that it is loaded again from the vault, over several
+        rounds (each loads a batch of live data too): its sealed file still there (the claim
+        checked it whole) and read for the minutes its lines were received in outside its day
+        (:meth:`_file_strays`, beside the loop and before any transaction), then the partitions
+        its rows can land in (a day a round, :meth:`_ensure_days`, while the scan runs and after
+        it), then its size checked again on the loop (the file may have gone during the rounds
+        since the scan), then one transaction, then a fresh stream at offset 0. A file gone or
+        changed since stops the resets: the request stays ``loading`` until the files already
+        reset have loaded, then fails (:meth:`_archive_progress`)."""
+        source, day = key = job.pending[0]
+        if job.scan is None or job.scan[0] != key:
+            entry = self.seals.entry(day, source)
+            path = None if entry is None else entry.path
+
+            def check() -> list[datetime] | None:
+                return self._file_strays(job.id, source, day, path)
+
+            job.scan = (key, self._beside(check, ended=job.ended))
+            return
+        scan = job.scan[1]
+        if not scan.done():
+            self._ensure_days(*self._reload_partition_days(job))  # meanwhile, a day a round
+            return
+        try:
+            strays = scan.result()
+        except CheckStoppedError:
+            job.scan = None
+            return
         if strays is None:
-            log.warning(
-                "archive reload %d: %s %s: sealed file missing or changed", job.id, source, day
-            )
-            job.error_code = ARCHIVE_UNREADABLE
-            for unset in job.pending:
-                job.files.pop(unset, None)
-            job.pending.clear()
+            self._stop_resets(job, source, day)
             return
         if not self._ensure_days(*self._reload_partition_days(job)):
-            return
+            return  # the check's result is kept for the next round
         if not self._take_lock():
+            return
+        if not self._sealed_file_intact(source, day, digest=False):  # gone since its scan
+            self._stop_resets(job, source, day)
             return
         if any(key in building.batch.offsets for building in self._queue):
             self._discard_batches()  # read from what is being replaced: read again afterwards
@@ -1100,6 +1279,7 @@ class IngestService:
             self._reset_file(
                 connection, source, day, strays=strays, defaults=self._defaults(connection)
             )
+        job.scan = None
         job.pending.pop(0)
         old = self.streams.pop(key, None)
         if old is not None:
@@ -1109,6 +1289,17 @@ class IngestService:
         stream = self._new_stream(source, day)
         stream.in_db = True
         self.streams[key] = stream
+
+    @staticmethod
+    def _stop_resets(job: ArchiveJob, source: str, day: date) -> None:
+        """The sealed file of the next file to reset is missing, changed or unreadable: no file
+        is reset any more (:meth:`_reset_next`)."""
+        log.warning("archive reload %d: %s %s: sealed file missing or changed", job.id, source, day)
+        job.scan = None
+        job.error_code = ARCHIVE_UNREADABLE
+        for unset in job.pending:
+            job.files.pop(unset, None)
+        job.pending.clear()
 
     @staticmethod
     def _defaults(connection: Connection) -> list[str]:
@@ -1262,7 +1453,13 @@ class IngestService:
         job.written, job.next_progress = done, now + ARCHIVE_PROGRESS_SECONDS
         if changed != 1:  # changed by hand: its files go on as ordinary streams
             log.warning("archive reload %d is no longer loading", job.id)
-            self._archive_job = None
+            self._drop_job(job)
+
+    def _drop_job(self, job: ArchiveJob) -> None:
+        """The loop is done with ``job``: a scan of it still running beside the loop
+        (:meth:`_reset_next`) gives up at its next slice instead of reading on."""
+        job.ended.set()
+        self._archive_job = None
 
     def _archive_end(self, job: ArchiveJob, status: str, *, error_code: str | None = None) -> None:
         """``ready`` (``ready_at`` now, ``expires_at`` ``db.reload_keep_days`` later) or
@@ -1286,7 +1483,7 @@ class IngestService:
                 .values(**values)
                 .execution_options(synchronize_session=False)
             )
-        self._archive_job = None
+        self._drop_job(job)
         self._next_archive = 0.0
         if status == "ready":
             log.info("archive reload %d ready (%d bytes)", job.id, job.bytes_total)

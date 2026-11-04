@@ -17,6 +17,13 @@ window comes back from the vault, exactly once.
   be read; a sealed file that does not match its manifest fails the request before anything of
   it is deleted; one that becomes unreadable while it loads stays short of its size.
 * A request starts loading only when the window job does not hold the partition lock.
+* Live data first while a reload checks its files (#124): the claim's SHA-256 and a reset's
+  read of the file's receive times run beside the loop, so a live line is loaded while a check
+  is held, and nothing is claimed or reset before its check; a stop while a check runs is
+  prompt and leaves the request to the next start; a check that fails beside the loop fails the
+  request as on it; the scan of a request that ended gives up. A file cut short after its scan
+  is not reset (its size is checked again right before the transaction), and the partitions
+  are made a day a round, all of them before the reset.
 * On TimescaleDB with compression, a reload resets and loads raw days whose chunks are
   compressed (the margin days of a day near the window's start are older than
   ``COMPRESS_AFTER``): the same rows come back, also from a reload run twice.
@@ -31,8 +38,11 @@ from __future__ import annotations
 import gzip
 import json
 import os
+import threading
+from collections.abc import Callable
 from datetime import UTC, date, datetime, time, timedelta
 from pathlib import Path
+from time import monotonic, sleep
 from typing import Any
 
 import pytest
@@ -54,6 +64,10 @@ from arcilogger_ingest.files import VaultReader, VaultReadError
 from arcilogger_ingest.service import (
     ARCHIVE_NOT_IN_VAULT,
     ARCHIVE_UNREADABLE,
+    CHECK_THREAD,
+    RELOAD_MARGIN,
+    ArchiveJob,
+    CheckStoppedError,
     IngestService,
     received_outside,
 )
@@ -207,25 +221,25 @@ def sealed_file(world: World, day: date, source: str) -> tuple[Path, int]:
 def unreadable_mid_load(monkeypatch: pytest.MonkeyPatch, path: Path) -> None:
     """``path`` becomes unreadable while it is loaded: at the loader's second read of it the
     file is damaged in place, and that read and every later one fail (the reset's reading of
-    its receive times, :func:`received_outside`, comes before the load and is not counted). (A
-    reader meets such damage where its buffer ends; a test file fits in the buffer, so the
-    reader is told.)"""
+    its receive times, :func:`received_outside`, comes before the load and is not counted; it
+    runs beside the loop, so whether a read is the reset's is known per thread). (A reader meets
+    such damage where its buffer ends; a test file fits in the buffer, so the reader is
+    told.)"""
     reads = 0
-    resetting = False
+    resetting = threading.local()
     outside = service_module.received_outside
 
     def reset_read(file: Path, day: date) -> list[datetime]:
-        nonlocal resetting
-        resetting = True
+        resetting.now = True
         try:
             return outside(file, day)
         finally:
-            resetting = False
+            resetting.now = False
 
     class Damaged(VaultReader):
         def read(self, max_bytes: int) -> bytes:
             nonlocal reads
-            if self.path.name == path.name and not resetting:
+            if self.path.name == path.name and not getattr(resetting, "now", False):
                 reads += 1
                 if reads == 2:
                     unlock(path)
@@ -947,3 +961,391 @@ def test_a_reload_resets_and_loads_its_raw_days_in_compressed_chunks(
         assert row["bytes_total"] == row["bytes_done"] == total  # every file reset and loaded
         assert snapshot(db_engine) == before
         counts_agree(db_engine)
+
+
+# -- live data first while a reload checks its files (#124) ---------------------------------------
+
+#: How long a live line may take to load while a reload's file check runs. The test World's
+#: batch is 0.05 s and its poll 0.02 s, so the line takes well under 0.3 s; the rest is room for
+#: a slow CI runner. Before #124 it waited for the whole check (the claim's SHA-256 of every
+#: file, a reset's read of the file: 0.5 s and 15 to 25 s for a 5 M line day's file).
+LIVE_BOUND = 5.0
+#: Longest wait for a step of the service running in a thread.
+WAIT = 30.0
+#: Longest wait for the loop to make its rounds, or for a reload to finish loading, in the
+#: latency test: a reset's rounds make its partitions a day each, which takes 0.2 to 0.4 s here
+#: and several seconds on the Windows CI runners. Only a deadline: the waits end as soon as the
+#: condition holds, and the latency itself is held to :data:`LIVE_BOUND`.
+SETTLE = 180.0
+#: Rounds of the loop a held check is watched for: more than a reset takes once its check has
+#: passed (its partitions, a day a round: 9 days for a one-day request, then its transaction).
+HELD_ROUNDS = 30
+
+
+class Gate:
+    """Holds a reload's file check (the claim's SHA-256 or a reset's read of the file's receive
+    times) until :attr:`open` is set; :attr:`entered` once one has started, :attr:`threads` the
+    threads the checks ran in."""
+
+    def __init__(self) -> None:
+        self.entered = threading.Event()
+        self.open = threading.Event()
+        self.threads: list[str] = []
+
+    def hold(self) -> None:
+        self.threads.append(threading.current_thread().name)
+        self.entered.set()
+        self.open.wait(WAIT)
+
+
+def hold_check(monkeypatch: pytest.MonkeyPatch, step: str) -> Gate:
+    """A :class:`Gate` on the reload's ``step``: ``claim`` (the SHA-256 of a file,
+    ``_sealed_file_intact`` with ``digest``) or ``reset`` (:func:`received_outside`)."""
+    gate = Gate()
+    if step == "claim":
+        real = IngestService._sealed_file_intact
+
+        def intact(self: IngestService, source: str, day: date, *, digest: bool = True) -> bool:
+            if digest:
+                gate.hold()
+            return real(self, source, day, digest=digest)
+
+        monkeypatch.setattr(IngestService, "_sealed_file_intact", intact)
+    else:
+        outside = service_module.received_outside
+
+        def scan(path: Path, day: date) -> list[datetime]:
+            gate.hold()
+            return outside(path, day)
+
+        monkeypatch.setattr(service_module, "received_outside", scan)
+    return gate
+
+
+def wait_for(condition: Callable[[], bool], seconds: float = WAIT) -> bool:
+    """Whether ``condition`` becomes true within ``seconds`` (looked at every 10 ms)."""
+    deadline = monotonic() + seconds
+    while not condition():
+        if monotonic() >= deadline:
+            return False
+        sleep(0.01)
+    return True
+
+
+def day_offsets(engine: Engine, day: date) -> list[tuple[Any, ...]]:
+    """:func:`stored_offsets` of the files of ``day``."""
+    return [row for row in stored_offsets(engine) if row[1] == day]
+
+
+def in_default(engine: Engine, day: date) -> int:
+    """The ``messages`` rows of the raw day ``day`` in the default partition (plain PostgreSQL;
+    none with TimescaleDB): a reload that resets before its partitions are made puts them
+    there."""
+    with engine.connect() as connection:
+        return int(
+            connection.execute(
+                text(
+                    "SELECT count(*) FROM messages WHERE raw_day = :day "
+                    "AND CAST(tableoid AS regclass)::text = 'messages_default'"
+                ),
+                {"day": day},
+            ).scalar_one()
+        )
+
+
+@pytest.mark.parametrize("step", ["claim", "reset"])
+def test_live_data_is_loaded_while_a_reload_checks_its_files(
+    world: World, db_engine: Engine, monkeypatch: pytest.MonkeyPatch, step: str
+) -> None:
+    """G4, live data first (#124): a reload's file checks read whole files, the claim every
+    file's SHA-256, each reset the file's receive times (:func:`received_outside`) — for a 5 M
+    line day 0.5 s and 15 to 25 s a file, which on the loop held up every live batch. They run
+    beside it: a live line that arrives while a check is held is loaded within
+    :data:`LIVE_BOUND`. And the loop waits for the check, however many rounds it makes
+    meanwhile (:data:`HELD_ROUNDS`): the request stays ``queued`` (the claim), no file is reset
+    (no ``DELETE``, the offsets as they were) and no further check starts. Once the check goes
+    on, the day comes back exactly once."""
+    load_day(world, db_engine)
+    before = snapshot(db_engine)
+    drop(db_engine, DAY + timedelta(days=2))
+    stored = day_offsets(db_engine, DAY)
+    gate = hold_check(monkeypatch, step)
+    reload_id = queue(db_engine, DAY)
+    service = world.service(db_engine, archive_seconds=0.0)
+    rounds = 0
+    archive = service._archive
+
+    def counted() -> bool:
+        nonlocal rounds
+        rounds += 1
+        return archive()
+
+    monkeypatch.setattr(service, "_archive", counted)
+    deletes: list[str] = []
+
+    def seen(conn: Any, cursor: Any, statement: str, *args: Any) -> None:
+        if statement.lstrip().upper().startswith("DELETE") and not gate.open.is_set():
+            deletes.append(statement)
+
+    event.listen(db_engine, "before_cursor_execute", seen)
+    results: list[int] = []
+    runner = threading.Thread(target=lambda: results.append(service.run()))
+    runner.start()
+    try:
+        assert gate.entered.wait(WAIT)
+        spool = world.append("fortigate", TODAY, (fortigate_message(i) for i in range(12)))
+        size = spool.stat().st_size
+
+        def live_loaded() -> bool:
+            return offsets(db_engine).get(("fortigate", TODAY), (0, 0, False))[0] == size
+
+        assert wait_for(live_loaded, LIVE_BOUND), (
+            f"a live line waited more than {LIVE_BOUND} s for the reload's {step} check"
+        )
+        held, started = rounds, monotonic()
+        assert wait_for(lambda: rounds >= held + HELD_ROUNDS, SETTLE), (
+            f"{rounds - held} rounds of the loop in {monotonic() - started:.1f} s"
+            f" while the reload's {step} check was held"
+        )
+        assert not gate.open.is_set()
+        assert gate.threads == [CHECK_THREAD]  # beside the loop, held all along
+        status = reload_row(db_engine, reload_id)["status"]
+        assert status == ("queued" if step == "claim" else "loading")
+        assert deletes == []
+        assert day_offsets(db_engine, DAY) == stored  # no file of the day reset
+        if step == "reset":  # the partitions were made meanwhile, a day a round
+            margin = RELOAD_MARGIN.days
+            days = {DAY + timedelta(days=n) for n in range(-2 * margin, 2 * margin + 1)}
+            assert service._partitioned == days
+    finally:
+        gate.open.set()
+        wait_for(lambda: reload_row(db_engine, reload_id)["status"] in ("ready", "failed"), SETTLE)
+        service.stop.set()
+        runner.join(WAIT)
+        event.remove(db_engine, "before_cursor_execute", seen)
+    assert results == [0]
+    row = reload_row(db_engine, reload_id)
+    assert row["status"] == "ready", f"the reload after {SETTLE} s: {row}"
+    after = snapshot(db_engine)
+    assert [row for row in after["messages"] if row[-3] == DAY] == before["messages"]
+    assert of_source(after, "core-r1") == of_source(before, "core-r1")
+    assert len([row for row in after["messages"] if row[-3] == TODAY]) == 12
+    assert in_default(db_engine, DAY) == 0
+    counts_agree(db_engine)
+
+
+def test_a_reloads_partitions_are_made_a_day_a_round(
+    world: World, db_engine: Engine, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """G4, live data first (#124): the partitions of a reload's days are made one day a call
+    (up to 0.4 s each, 22 days for a 14-day request), and the reset waits until the last is
+    made (``_ensure_days`` is ``True`` only then): its rows land in their partitions, not in the
+    default ones."""
+    drop(db_engine, TODAY)
+    made: list[tuple[date, date]] = []
+    real = ensure_days
+
+    def counted(connection: Any, first_day: date, last_day: date) -> Any:
+        made.append((first_day, last_day))
+        return real(connection, first_day, last_day)
+
+    monkeypatch.setattr(service_module, "ensure_days", counted)
+    service = world.service(db_engine)
+    days = [DAY + timedelta(days=n) for n in range(3)]
+    assert [service._ensure_days(days[0], days[-1]) for _ in days] == [False, False, True]
+    assert made == [(day, day) for day in days]
+    assert service._ensure_days(days[0], days[-1])  # nothing left to make
+    assert len(made) == 3
+
+
+def test_a_sealed_file_gone_after_its_scan_is_not_reset(
+    world: World, db_engine: Engine, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """W5-G-5 with the scan beside the loop (#124): the scan of a file and its reset are rounds
+    apart (its partitions, the lock), so its size is checked again on the loop right before
+    the transaction. A sealed file cut short after its scan is not reset: its rows, still in
+    the database (no drop has reached them), stay; the request fails."""
+    load_day(world, db_engine)
+    before, stored = snapshot(db_engine), day_offsets(db_engine, DAY)
+    vault_file, _ = sealed_file(world, DAY, "fortigate")
+    outside = service_module.received_outside
+
+    def scan(path: Path, day: date) -> list[datetime]:
+        found = outside(path, day)
+        if path.resolve() == vault_file.resolve():  # gone after it was read: cut short
+            good = vault_file.read_bytes()
+            unlock(vault_file)
+            vault_file.write_bytes(good[: len(good) // 2])
+        return found
+
+    monkeypatch.setattr(service_module, "received_outside", scan)
+    reload_id = queue(db_engine, DAY)
+    run_once(world, db_engine, archive_error_seconds=0.0)
+    row = reload_row(db_engine, reload_id)
+    assert (row["status"], row["error_code"]) == ("failed", ARCHIVE_UNREADABLE)
+    after = snapshot(db_engine)
+    assert of_source(before, "fortigate")["messages"]
+    assert of_source(after, "fortigate") == of_source(before, "fortigate")
+    fortigate = [offset for offset in day_offsets(db_engine, DAY) if offset[0] == "fortigate"]
+    assert fortigate == [offset for offset in stored if offset[0] == "fortigate"]  # not reset
+
+
+class EndlessFile:
+    """A sealed file that never ends as the claim's hash reads it (``open_shared``): a huge
+    file on a slow disk, 10 ms a read."""
+
+    def __init__(self) -> None:
+        self.reads = 0
+        self.closed = threading.Event()
+
+    def read(self, size: int = -1) -> bytes:
+        self.reads += 1
+        sleep(0.01)
+        return b"\0" * 4096
+
+    def __enter__(self) -> EndlessFile:
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        self.closed.set()
+
+
+def endless_scans(monkeypatch: pytest.MonkeyPatch, endless: EndlessFile) -> None:
+    """A reset's reading of a sealed file's receive times (:func:`received_outside`, in the check
+    thread) meets a file that never ends, 10 ms a slice; the loader's reads, in the loop's
+    thread, are as they are."""
+    line = format_line(datetime.combine(DAY, time(9), tzinfo=SITE_TZ), "172.20.10.1", b"<13>x")
+
+    class EndlessReader(VaultReader):
+        def read(self, max_bytes: int) -> bytes:
+            if threading.current_thread().name != CHECK_THREAD:
+                return super().read(max_bytes)
+            endless.reads += 1
+            sleep(0.01)
+            return line * 64
+
+        def close(self) -> None:
+            if threading.current_thread().name == CHECK_THREAD:
+                endless.closed.set()
+            super().close()
+
+    monkeypatch.setattr(service_module, "VaultReader", EndlessReader)
+
+
+@pytest.mark.parametrize("step", ["claim", "reset"])
+def test_a_stop_during_a_reloads_check_is_prompt(
+    world: World, db_engine: Engine, monkeypatch: pytest.MonkeyPatch, step: str
+) -> None:
+    """A stop while a check reads a file that does not end (``claim``: the SHA-256, ``reset``:
+    the receive times, 10 ms a slice): the service stops at once, well within the 4.5 s of a
+    Windows console stop (``WINDOWS_GRACE_SECONDS``), and the check gives up at its next slice
+    and closes the file (it is not waited for). Nothing was decided or deleted: the request is
+    still ``queued`` or ``loading``, the next start carries it out exactly once."""
+    load_day(world, db_engine)
+    before = snapshot(db_engine)
+    drop(db_engine, DAY + timedelta(days=2))
+    stored = day_offsets(db_engine, DAY)
+    reload_id = queue(db_engine, DAY)
+    endless = EndlessFile()
+    with monkeypatch.context() as patch:
+        if step == "claim":
+            patch.setattr(service_module, "open_shared", lambda path: endless)
+        else:
+            endless_scans(patch, endless)
+        service = world.service(db_engine, archive_seconds=0.0)
+        results: list[int] = []
+        runner = threading.Thread(target=lambda: results.append(service.run()))
+        runner.start()
+        try:
+            assert wait_for(lambda: endless.reads >= 3)
+        finally:
+            service.stop.set()
+            stopped = monotonic()
+            runner.join(WAIT)
+        assert results == [0]
+        assert monotonic() - stopped < 2.0
+        assert endless.closed.wait(1.0)  # the check gave up within a slice
+    assert reload_row(db_engine, reload_id)["status"] == (
+        "queued" if step == "claim" else "loading"
+    )
+    assert day_offsets(db_engine, DAY) == stored
+    run_once(world, db_engine)
+    assert reload_row(db_engine, reload_id)["status"] == "ready"
+    assert snapshot(db_engine) == before
+
+
+def test_the_scan_of_a_reload_that_ended_gives_up(
+    world: World, db_engine: Engine, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A request that ends while the scan of its next file runs beside the loop (it failed, or
+    it was changed by hand: ``_drop_job``): the scan gives up at its next slice and closes the
+    file, instead of reading the whole file on beside the next request's checks."""
+    load_day(world, db_engine)
+    endless = EndlessFile()
+    endless_scans(monkeypatch, endless)
+    service = world.service(db_engine)
+    key = ("fortigate", DAY)
+    job = ArchiveJob(1, DAY, DAY, {key: sealed_file(world, DAY, "fortigate")[1]}, [key])
+    service._archive_job = job
+    service._reset_next(job)
+    assert job.scan is not None
+    assert job.scan[0] == key
+    assert wait_for(lambda: endless.reads >= 3)
+    service._drop_job(job)
+    with pytest.raises(CheckStoppedError):
+        job.scan[1].result(timeout=1.0)
+    assert endless.closed.wait(1.0)
+    assert service._archive_job is None
+
+
+@pytest.mark.parametrize("step", ["claim", "reset"])
+def test_a_check_that_fails_beside_the_loop_fails_the_request_and_deletes_nothing(
+    world: World, db_engine: Engine, monkeypatch: pytest.MonkeyPatch, step: str
+) -> None:
+    """The checks run beside the loop and still decide as before: a file that does not match its
+    manifest at the claim (cut short) fails the request with ``archive_file_unreadable`` before
+    anything is deleted; one whose receive times cannot be read at its reset is not reset (the
+    files reset before it load back, then the request fails) — its rows and its offset stay as
+    they were."""
+    load_day(world, db_engine)
+    loaded = snapshot(db_engine)
+    drop(db_engine, DAY + timedelta(days=2))
+    before, stored = snapshot(db_engine), day_offsets(db_engine, DAY)
+    threads: list[str] = []
+    if step == "claim":
+        vault_file, _ = sealed_file(world, DAY, "fortigate")
+        good = vault_file.read_bytes()
+        unlock(vault_file)
+        vault_file.write_bytes(good[: len(good) // 2])
+        real = IngestService._sealed_file_intact
+
+        def intact(self: IngestService, source: str, day: date, *, digest: bool = True) -> bool:
+            threads.append(threading.current_thread().name)
+            return real(self, source, day, digest=digest)
+
+        monkeypatch.setattr(IngestService, "_sealed_file_intact", intact)
+    else:
+        outside = service_module.received_outside
+
+        def scan(path: Path, day: date) -> list[datetime]:
+            threads.append(threading.current_thread().name)
+            if path.name.startswith("fortigate"):
+                raise VaultReadError(f"{path.name}: damaged xz data")
+            return outside(path, day)
+
+        monkeypatch.setattr(service_module, "received_outside", scan)
+    reload_id = queue(db_engine, DAY)
+    run_once(world, db_engine, archive_error_seconds=0.0)
+    row = reload_row(db_engine, reload_id)
+    assert (row["status"], row["error_code"]) == ("failed", ARCHIVE_UNREADABLE)
+    assert threads
+    assert set(threads) == {CHECK_THREAD}
+    after = snapshot(db_engine)
+    assert of_source(after, "fortigate") == of_source(before, "fortigate") == {}
+    fortigate = [offset for offset in day_offsets(db_engine, DAY) if offset[0] == "fortigate"]
+    assert fortigate == [offset for offset in stored if offset[0] == "fortigate"]  # not reset
+    if step == "claim":
+        assert after == before
+        assert day_offsets(db_engine, DAY) == stored
+    else:  # the file reset before it loaded back
+        assert of_source(after, "core-r1") == of_source(loaded, "core-r1")
