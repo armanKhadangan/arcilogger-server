@@ -2356,23 +2356,23 @@ The Sistem page shows a task whose latest run recorded a failure (issue #171, fo
 #158). The design comment on #171 and the manager's answers there are the brief; the deviation
 line is W5-E-10, and what it amends in detail:
 
-- **#171-1: a task state `failed` and a `code` (amends W4-D §2.6.1 and §2.6.2, and W5-E-2's
-  "the API has no failing task state").** `TaskHealthState` (`system_health/models.py`) is
-  `"ok" | "late" | "missing" | "not_used" | "not_observable" | "failed"`, mirrored by
-  `system-health-types.ts`. `TaskHealth` gains `code: str | None` after `state`, as
-  `ApplySystemHealth.code`: one of `backup_failed`, `index_unreadable`, `stored_file_unreadable`,
-  `renew_failed`, `renew_refused` (`tasks.py`, `TaskFailure`) when `failed`, null in every other
-  state. The answer never carries the error text a task wrote, which can hold paths, URLs, host
-  and user names (KVKK; precedent `system_health/jobs.py`). `last_evidence_at` of a `failed`
-  row is the failure's time (null: unknown). `judge` decides in this order: `not_used`, `not_observable`, `failed`, `missing`,
-  `late` or `ok`. `failed` holds until the next completed run, however old the failure (it
-  outranks `late`); a failure time later than now is no evidence, as for the other times
-  (`_until_now`). `TaskRow.read` returns a datetime, or a `Reading` (`at`, `failure`) for the
-  three tasks below. Backup's `last.json` and Renew's `renewal.json` are read once per request;
-  CrlFetch's index is read by core `read_index` (what stops a run, and its `run_failure`) and,
-  unless an accepted `run_failure` decides the row, once more by W5-C's `read_crl_index` for its
-  times. Its modification time then counts only when it did not change between the two reads: a
-  stopped run that writes its `run_failure` in between is no completed run.
+- **#171-1: a task state `failed` and a `code` (amends W4-D §2.6.1 and §2.6.2, and W5-E-2's "the API
+  has no failing task state").** `TaskHealthState` (`system_health/models.py`) is `"ok" | "late" |
+  "missing" | "not_used" | "not_observable" | "failed"`, mirrored by `system-health-types.ts`.
+  `TaskHealth` gains `code: str | None` after `state`, as `ApplySystemHealth.code`: one of
+  `backup_failed`, `index_unreadable`, `stored_file_unreadable`, `renew_failed`, `renew_refused`
+  (`tasks.py`, `TaskFailure`) when `failed`, null in every other state. The answer never carries the
+  error text a task wrote, which can hold paths, URLs, host and user names (KVKK; precedent
+  `system_health/jobs.py`). `last_evidence_at` of a `failed` row is the failure's time (null:
+  unknown). `judge` decides in this order: `not_used`, `not_observable`, `failed`, `missing`, `late`
+  or `ok`. `failed` holds until the next completed run, however old the failure (it outranks
+  `late`); a failure time later than now is no evidence, as for the other times (`_until_now`).
+  `TaskRow.read` returns a datetime, or a `Reading` (`at`, `failure`) for the three tasks below.
+  Backup's `last.json` and Renew's `renewal.json` are read once per request; CrlFetch's index is
+  read by core `read_index` (what stops a run, and its `run_failure`) and, unless an accepted
+  `run_failure` decides the row, once more by W5-C's `read_crl_index` for its times. Its
+  modification time then counts only when it did not change between the two reads: a stopped run
+  that writes its `run_failure` in between is no completed run.
 - **#171-2: the Backup row (amends the Backup row of W4-D §2.6.2).** `state/backup/last.json`
   is read once (`_backup`): a file that is no object or cannot be read is no evidence
   (`missing`, as before); `ok` not `true` (as `R20-backup`'s `check_backup` reads it) is
