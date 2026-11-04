@@ -957,6 +957,45 @@ def test_a_renewal_keeps_the_eku_rule_its_record_was_written_under(
         _renew(rw, rw.legal_provider(FAR))
 
 
+def test_an_interrupted_part_with_a_key_twice_is_judged_strict(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """#156 item 3: ``recover`` reads a part as the standalone verifier's ``load_json`` does. A
+    part whose ``tsa.require_critical_eku`` is written twice, the last one false, stamped with
+    a non-critical EKU: ``json.loads`` would read it relaxed and promote it, but it cannot be
+    read, so its token is judged strict and the part and its token are removed."""
+    rw = make_world(tmp_path, require_critical_eku=False)
+    rw.set_now(CNA - timedelta(days=100))
+    provider = rw.legal_provider(FAR, eku_critical=False)
+    record = canonical_json(
+        build_record(
+            [rw.day_entry()],
+            created_at=rw.clock.now,
+            system=system_block(rw.world.config),
+            tsa=tsa_block(provider, rw.world.config),
+            reason="due",
+        )
+    )
+    edited = record.replace(b'"tsa":{', b'"tsa":{"require_critical_eku":true,', 1)
+    assert json.loads(edited)["tsa"]["require_critical_eku"] is False
+    part = rw.layout.renewals_dir / "2031-06-23-1.json.part"
+    part.parent.mkdir(parents=True)
+    part.write_bytes(edited)
+    token = provider.stamp(part).token_path
+    relaxed = verify_token(
+        token.read_bytes(),
+        roots=rw.roots,
+        file_path=part,
+        now=rw.clock.now,
+        require_critical_eku=False,
+    )
+    assert relaxed.ok  # only the strict rule refuses it
+
+    assert recover(rw.layout, rw.roots, now=rw.clock.now) == [token.name, part.name]
+    assert _renewal_files(rw) == []
+    assert "is not kept" in caplog.text
+
+
 def test_recover_never_removes_a_locked_file(rw: RenewalWorld) -> None:
     """A locked token without its record is what is left when someone removed a completed
     record: evidence of that, so it stays (rule 2; only the retention job deletes)."""

@@ -68,6 +68,7 @@ from arcilogger_core.evidence.standalone.verify import (
     INDEX_SCHEMA,
     VERIFIER_VERSION,
     PackageError,
+    _renewal_eku,
     verify_package,
 )
 from arcilogger_core.fsutil import fsync_dir, fsync_file
@@ -435,15 +436,9 @@ class _Records:
             require_critical_eku = self.require_critical_eku
             if role == "renewal":
                 # judged by its own record's EKU rule (K6), as both verifiers judge it, not by
-                # the package's days (contract W5-A-17); a record that cannot be read: strict
-                try:
-                    record = json.loads(data)
-                except (ValueError, RecursionError):
-                    record = None
-                tsa = record.get("tsa") if isinstance(record, dict) else None
-                require_critical_eku = not (
-                    isinstance(tsa, dict) and tsa.get("require_critical_eku") is False
-                )
+                # the package's days (contract W5-A-17); a record the verifier cannot read
+                # (not UTF-8, a key twice in one object, too deep): strict
+                require_critical_eku = _renewal_eku(data)
             root = _root_of(token_data, data, self.roots, require_critical_eku)
             if root:
                 self.used_roots.add(root)

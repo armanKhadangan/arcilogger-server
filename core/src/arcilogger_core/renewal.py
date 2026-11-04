@@ -570,10 +570,24 @@ class Renewable:
     entry: RecordEntry
 
 
+def _refuse_duplicates(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError(f"duplicate key {key!r}")
+        result[key] = value
+    return result
+
+
 def _parse_record(raw: bytes) -> dict[str, Any] | None:
-    """A renewal record (:data:`RENEWAL_SCHEMA`) with what the status needs, or None."""
+    """A renewal record (:data:`RENEWAL_SCHEMA`) with what the status needs, or None.
+
+    It is read as the standalone verifier's ``load_json`` reads it (rule 5): UTF-8 only, and a
+    key that appears twice in one object makes it unreadable (``json.loads`` keeps the last
+    one, so a record could say ``require_critical_eku`` both ways). None never counts, and
+    :func:`recover` judges its token strict, as the verifiers do."""
     try:
-        record = json.loads(raw.decode("utf-8"))
+        record = json.loads(raw.decode("utf-8"), object_pairs_hook=_refuse_duplicates)
     except (ValueError, RecursionError):
         return None
     if (

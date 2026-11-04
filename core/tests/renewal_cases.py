@@ -23,6 +23,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
 
+import pytest
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 
@@ -330,6 +331,50 @@ def _changed_after_its_stamp(rw: RenewalWorld) -> Built:
     return Built(CNA - timedelta(days=90))
 
 
+#: How :func:`tampered_renewal` edits a record: each one a reader that keeps the last of two keys
+#: (``json.loads``), or guesses the encoding of bytes, reads as relaxed.
+TAMPERINGS = ("a key twice", "UTF-16")
+
+
+def tampered_renewal(
+    rw: RenewalWorld,
+    how: str,
+    name: str = "2031-06-23-1",
+    at: datetime = CNA - timedelta(days=100),
+    *,
+    expires: datetime = FAR,
+) -> str:
+    """A renewal of the day with a non-critical EKU (as :func:`renew_day`) whose record, edited
+    and then stamped again, says relaxed only to a lax reader: ``tsa.require_critical_eku``
+    written twice, true first and false last (``a key twice``), or the relaxed record in UTF-16
+    (``UTF-16``). The standalone verifier's ``load_json`` cannot read either, so each reader
+    must judge its token strict (#156 item 3). Its record path."""
+    record = renew_day(rw, name, at, expires=expires, eku_critical=False, relaxed=True)
+    path = rw.layout.vault / record
+    raw = path.read_bytes()
+    if how == "a key twice":
+        edited = raw.replace(b'"tsa":{', b'"tsa":{"require_critical_eku":true,', 1)
+    else:
+        edited = raw.decode("utf-8").encode("utf-16")
+    assert json.loads(edited)["tsa"]["require_critical_eku"] is False  # the lax reading
+    with pytest.raises(ValueError, match=r"appears twice|can't decode"):
+        sv.load_json(edited)
+    token_path_for(path).unlink()
+    path.write_bytes(edited)
+    rw.legal_provider(expires, eku_critical=False).stamp(path)
+    return record
+
+
+def _tampered_twice(rw: RenewalWorld) -> Built:
+    tampered_renewal(rw, "a key twice")
+    return Built(CNA - timedelta(days=90))
+
+
+def _tampered_utf16(rw: RenewalWorld) -> Built:
+    tampered_renewal(rw, "UTF-16")
+    return Built(CNA - timedelta(days=90))
+
+
 def _root_not_pinned(rw: RenewalWorld) -> Built:
     renew_day(rw, "2031-06-23-1", CNA - timedelta(days=100))
     return Built(CNA - timedelta(days=90), legal_root_pinned=False)
@@ -462,6 +507,13 @@ CASES: tuple[RenewalCase, ...] = (
     RenewalCase(
         "a record changed after its stamp", _changed_after_its_stamp, "renewal-due", "warn"
     ),
+    RenewalCase(
+        "a record with require_critical_eku twice, the last false",
+        _tampered_twice,
+        "renewal-due",
+        "warn",
+    ),
+    RenewalCase("a relaxed record in UTF-16", _tampered_utf16, "renewal-due", "warn"),
     RenewalCase("a root that is not pinned", _root_not_pinned, "renewal-due", "warn"),
     RenewalCase("a renewal of another token only", _lists_another_token, "renewal-due", "warn"),
     # revocation of the renewal's certificate (C15): only at or before the stamp
