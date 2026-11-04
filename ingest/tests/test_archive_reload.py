@@ -972,6 +972,11 @@ def test_a_reload_resets_and_loads_its_raw_days_in_compressed_chunks(
 LIVE_BOUND = 5.0
 #: Longest wait for a step of the service running in a thread.
 WAIT = 30.0
+#: Longest wait for the loop to make its rounds, or for a reload to finish loading, in the
+#: latency test: a reset's rounds make its partitions a day each, which takes 0.2 to 0.4 s here
+#: and several seconds on the Windows CI runners. Only a deadline: the waits end as soon as the
+#: condition holds, and the latency itself is held to :data:`LIVE_BOUND`.
+SETTLE = 180.0
 #: Rounds of the loop a held check is watched for: more than a reset takes once its check has
 #: passed (its partitions, a day a round: 9 days for a one-day request, then its transaction).
 HELD_ROUNDS = 30
@@ -1097,8 +1102,11 @@ def test_live_data_is_loaded_while_a_reload_checks_its_files(
         assert wait_for(live_loaded, LIVE_BOUND), (
             f"a live line waited more than {LIVE_BOUND} s for the reload's {step} check"
         )
-        held = rounds
-        assert wait_for(lambda: rounds >= held + HELD_ROUNDS)
+        held, started = rounds, monotonic()
+        assert wait_for(lambda: rounds >= held + HELD_ROUNDS, SETTLE), (
+            f"{rounds - held} rounds of the loop in {monotonic() - started:.1f} s"
+            f" while the reload's {step} check was held"
+        )
         assert not gate.open.is_set()
         assert gate.threads == [CHECK_THREAD]  # beside the loop, held all along
         status = reload_row(db_engine, reload_id)["status"]
@@ -1111,12 +1119,13 @@ def test_live_data_is_loaded_while_a_reload_checks_its_files(
             assert service._partitioned == days
     finally:
         gate.open.set()
-        wait_for(lambda: reload_row(db_engine, reload_id)["status"] in ("ready", "failed"))
+        wait_for(lambda: reload_row(db_engine, reload_id)["status"] in ("ready", "failed"), SETTLE)
         service.stop.set()
         runner.join(WAIT)
         event.remove(db_engine, "before_cursor_execute", seen)
     assert results == [0]
-    assert reload_row(db_engine, reload_id)["status"] == "ready"
+    row = reload_row(db_engine, reload_id)
+    assert row["status"] == "ready", f"the reload after {SETTLE} s: {row}"
     after = snapshot(db_engine)
     assert [row for row in after["messages"] if row[-3] == DAY] == before["messages"]
     assert of_source(after, "core-r1") == of_source(before, "core-r1")
