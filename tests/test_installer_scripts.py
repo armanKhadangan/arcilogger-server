@@ -114,6 +114,10 @@ USERS_SID = "S-1-5-32-545"
 #: of whoever owns the path.
 OWNER_RIGHTS_SID = "S-1-3-4"
 TRUSTED_INSTALLER_SID = "S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464"
+#: Accounts every Windows can name that stand in for a service in the ACL tests of state\crl
+#: and state\renewal: NETWORK SERVICE and Guests. The plan gives neither anything, and the
+#: administrator running the tests is a member of neither.
+STAND_IN_SERVICES = ("S-1-5-20", "S-1-5-32-546")
 BOM = b"\xef\xbb\xbf"
 #: The organisation name and the admin PC of the fictional example network: the installer has
 #: no default for either (product decisions D1, D3), so the dry runs pass them unless a test
@@ -3011,12 +3015,14 @@ def test_acl_applied_takes_over_the_protected_state_folders(tmp_path: Path) -> N
     Administrators own the two folders and everything below them, the items below have
     inherited entries only, and the collector and ingest have nothing there. A folder outside
     the two keeps its owner. icacls sets the foreign owners with the administrator's restore
-    privilege (administrator CI runner)."""
+    privilege (administrator CI runner). NETWORK SERVICE and Guests stand in for the collector
+    and ingest: their own SIDs (NT SERVICE\\ArciCollector, ...) exist only where the services
+    are installed, and icacls cannot map them elsewhere (error 1332)."""
     powershell = _windows_admin_powershell()
     data, programdata, program = tmp_path / "data", tmp_path / "programdata", tmp_path / "program"
     programdata.mkdir()
     program.mkdir()
-    collector, ingest = service_sid("ArciCollector"), service_sid("ArciIngest")
+    collector, ingest = STAND_IN_SERVICES
     renewal_state, crl_state, logs = (
         data / "state" / "renewal",
         data / "state" / "crl",
@@ -3135,7 +3141,8 @@ def test_acl_step_names_an_item_it_cannot_take_over(tmp_path: Path) -> None:
     """A renewal.lock a service left with its own entry only (inheritance off, nothing for
     Administrators): no privilege is enabled, so the step cannot read or take it over, and it
     stops with an error naming the lock and the takeown remedy (W5-E-9), not with Windows' own
-    access-denied text, which names no path."""
+    access-denied text, which names no path. NETWORK SERVICE stands in for the collector, as in
+    the test above."""
     powershell = _windows_admin_powershell()
     data, programdata, program = tmp_path / "data", tmp_path / "programdata", tmp_path / "program"
     programdata.mkdir()
@@ -3144,7 +3151,7 @@ def test_acl_step_names_an_item_it_cannot_take_over(tmp_path: Path) -> None:
     renewal_state.mkdir(parents=True)
     lock = renewal_state / "renewal.lock"
     lock.write_bytes(b"")
-    collector, admins = service_sid("ArciCollector"), WELL_KNOWN["admins"]
+    collector, admins = STAND_IN_SERVICES[0], WELL_KNOWN["admins"]
     subprocess.run(["icacls", str(lock), "/grant", f"*{collector}:M"], check=True)
     subprocess.run(["icacls", str(lock), "/setowner", f"*{collector}"], check=True)
     subprocess.run(["icacls", str(lock), "/inheritance:r"], check=True)
