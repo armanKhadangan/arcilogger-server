@@ -986,3 +986,49 @@ def test_tk_start_is_tried_again_only_for_unreadable_library_files(
     with pytest.raises(tkinter.TclError):
         window.new_root()
     assert len(calls) == 1
+
+
+def test_tk_start_is_tried_again_when_tcl_find_library_is_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The same start-up failure, when the unread library file is the one that defines
+    ``tcl_findLibrary`` (seen on the Windows runner, issue #139)."""
+    tkinter = pytest.importorskip("tkinter", reason="this Python has no tkinter")
+    from arcilogger_core.desktop import window
+
+    missing = 'invalid command name "tcl_findLibrary"'
+    calls: list[int] = []
+    ROOT = object()  # noqa: N806 - stands for the Tk root
+
+    def once() -> object:
+        calls.append(1)
+        if len(calls) < 2:
+            raise tkinter.TclError(missing)
+        return ROOT
+
+    monkeypatch.setattr(tkinter, "Tk", once)
+    monkeypatch.setattr("arcilogger_core.desktop.window.time.sleep", lambda seconds: None)
+    assert window.new_root() is ROOT
+    assert len(calls) == 2
+
+    calls.clear()
+
+    def never() -> object:
+        calls.append(1)
+        raise tkinter.TclError(missing)
+
+    monkeypatch.setattr(tkinter, "Tk", never)
+    with pytest.raises(tkinter.TclError, match="tcl_findLibrary"):
+        window.new_root()
+    assert len(calls) == window.TK_ATTEMPTS
+
+    calls.clear()
+
+    def other_command() -> object:
+        calls.append(1)
+        raise tkinter.TclError('invalid command name "ttk::style"')
+
+    monkeypatch.setattr(tkinter, "Tk", other_command)
+    with pytest.raises(tkinter.TclError):
+        window.new_root()
+    assert len(calls) == 1
