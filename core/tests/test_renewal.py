@@ -930,6 +930,34 @@ def test_a_revoked_stamp_of_an_interrupted_run_is_removed(
     assert rw.of(rw.status(), DAY_TOKEN).covered_by == run.record_path
 
 
+@pytest.mark.parametrize("stopped", ["after the stamp", "between the renames"])
+def test_an_interrupted_part_is_promoted_when_the_lists_cannot_be_read(
+    rw: RenewalWorld,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    stopped: str,
+) -> None:
+    """#156 item 5, Q12: stored revocation lists that cannot be read are logged, and the part's
+    token is verified without them, as the stamping run verifies a new token: the part whose
+    token verifies is promoted and locked, not left or removed."""
+    rw.set_now(CNA - timedelta(days=100))
+    token = _stop_after_stamp(rw, rw.legal_provider(FAR), monkeypatch, stopped)
+    part = rw.layout.renewals_dir / "2031-06-23-1.json.part"
+    assert _renewal_files(rw) == sorted([part.name, token.name])
+    rw.layout.crl_dir.mkdir(parents=True, exist_ok=True)
+    (rw.layout.crl_dir / "index.json").write_text("{", encoding="utf-8")
+
+    assert recover(rw.layout, rw.roots, now=rw.clock.now) == []
+    names = ["2031-06-23-1.json", "2031-06-23-1.json.zd"]
+    assert _renewal_files(rw) == names
+    assert all(is_locked(rw.layout.renewals_dir / name) for name in names)
+    assert "revocation lists not checked" in caplog.text
+    assert "completed 2031-06-23-1.json of an interrupted run" in caplog.text
+    report = rw.status()
+    assert rw.of(report, DAY_TOKEN).covered_by == "renewals/2031-06-23-1.json"
+    assert [note.code for note in report.notes] == ["crl_unreadable"]
+
+
 def test_a_renewal_keeps_the_eku_rule_its_record_was_written_under(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
