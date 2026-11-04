@@ -5590,9 +5590,10 @@ $revisions = $(if ($rollback) { $schema } else { @() })
 New-FakeProgram -Folder $program -Version '1.0.0' -Fingerprint ('a' * 64) `
     -Services $currentServices -Revisions $revisions
 $uninstall = $Scenario.StartsWith('uninstall')
-# rollback-restore-db-only-fails: no previous program folder (an upgrade's swap-back put it in
+# rollback-restore-db-only-*: no previous program folder (an upgrade's swap-back put it in
 # place), so -Rollback -RestoreDatabase restores the database only.
-if (($rollback -or $uninstall) -and $Scenario -ne 'rollback-restore-db-only-fails') {
+$databaseOnly = $Scenario.StartsWith('rollback-restore-db-only')
+if (($rollback -or $uninstall) -and -not $databaseOnly) {
     $previous = "$program.previous"
     $revisions = $(if ($rollback) { $previousSchema } else { @() })
     New-FakeProgram -Folder $previous -Version '0.9.0' -Fingerprint ('c' * 64) `
@@ -5649,7 +5650,16 @@ if ($rollback) {
     Write-Text $configPath $changed
     $copy = "$configPath.before-upgrade-20261020-101500"
     if (-not $Scenario.StartsWith('rollback-no-copy')) { Write-Text $copy $beforeUpgrade }
-    $recorded = @{ database_provisioned = $true; config_before_upgrade = $copy } | ConvertTo-Json
+    $recorded = @{ database_provisioned = $true; config_before_upgrade = $copy }
+    if ($Scenario.EndsWith('-demand')) {
+        # What the failed upgrade's migration recorded with the stopped services (below).
+        $recorded['pending_database_restore'] = Join-Path $Base 'before-upgrade.dump'
+        $recorded['last_failure'] = @{
+            operation = 'upgrade'; reason = 'simulated: schema migration failed'
+            at = '2026-10-20T10:20:00Z'; database_uncertain = $true; manual_steps = @()
+        }
+    }
+    $recorded = $recorded | ConvertTo-Json
     Write-Text (Join-Path $programData 'install/state.json') $recorded
 }
 $stubScripts = Join-Path $Base 'stubscripts'
@@ -5670,13 +5680,15 @@ switch ($Scenario) {
     default { $mode['Upgrade'] = $true }
 }
 # rollback-restore-*: -Rollback -RestoreDatabase -DatabaseDump <dump>, whose restore fails
-# after the swap (-db-fails: psql cannot reach the server; -db-only-fails: the same without a
-# previous program folder), or whose rename committed (-committed-*, below).
+# after the swap (-db-fails: psql cannot reach the server; -db-cancel: the operator answers H),
+# or whose rename committed (-committed-*, below); -db-only-*: without a previous program
+# folder, the restore refused or failed as Invoke-PgTool says below (-cancel: the operator
+# answers H; -no-dump: the dump given does not exist).
 if ($Scenario.StartsWith('rollback-restore-')) {
     $mode['RestoreDatabase'] = $true
     $mode['DatabaseDump'] = Join-Path $Base 'before-upgrade.dump'
-    $mode['Force'] = $true
-    Write-Text $mode['DatabaseDump'] 'PGDMP simulated'
+    if (-not $Scenario.Contains('-cancel')) { $mode['Force'] = $true }
+    if (-not $Scenario.Contains('-no-dump')) { Write-Text $mode['DatabaseDump'] 'PGDMP simulated' }
 }
 $bundle = Join-Path $Base 'bundle'
 $taskWait = if ($Scenario -in @('tasks-busy', 'uninstall-busy-stuck')) { 0 } else { 1 }
@@ -5700,6 +5712,23 @@ foreach ($name in $currentServices) {
         status = 'Running'; start = 'auto'; account = "NT SERVICE\$name"; version = '1.0.0'
     }
 }
+# ...-demand: the database services stopped and on manual start, as a failed upgrade's
+# migration left them (Complete-FailedChange).
+if ($Scenario.EndsWith('-demand')) {
+    foreach ($name in @('ArciIngest', 'ArciApi', 'ArciWorker', 'ArciAdmin')) {
+        $sim.services[$name].status = 'Stopped'
+        $sim.services[$name].start = 'demand'
+    }
+}
+# ...-mixed: ArciIngest started by hand on manual start, ArciApi stopped on manual start,
+# ArciWorker still starting at boot (delayed-auto), ArciAdmin running.
+if ($Scenario.EndsWith('-mixed')) {
+    $sim.services['ArciIngest'].start = 'demand'
+    $sim.services['ArciApi'].status = 'Stopped'
+    $sim.services['ArciApi'].start = 'demand'
+    $sim.services['ArciWorker'].status = 'StartPending'
+    $sim.services['ArciWorker'].start = 'delayed-auto'
+}
 $sim.tasks['Seal'] = 'Ready'
 $sim.tasks['Replica'] = 'Disabled'   # switched off by the operator: stays off after a recovery
 $sim.tasks['VerifyDaily'] = 'Ready'
@@ -5716,10 +5745,15 @@ $script:Manifest = [pscustomobject]@{
 $script:ReleaseDate = '2026-10-20'
 
 # --- simulated Windows ---
+# ServiceController.StartType of each sc.exe "start=" value (delayed-auto reads as Automatic).
+$startTypes = @{ 'auto' = 'Automatic'; 'delayed-auto' = 'Automatic'; 'demand' = 'Manual' }
 function Get-Service {
     param([string]$Name, $ErrorAction)
     if (-not $sim.services.ContainsKey($Name)) { return }
-    $service = [pscustomobject]@{ Name = $Name; Status = $sim.services[$Name].status }
+    $service = [pscustomobject]@{
+        Name = $Name; Status = $sim.services[$Name].status
+        StartType = $startTypes[$sim.services[$Name].start]
+    }
     $wait = { param($Status, $Timeout) }
     $service | Add-Member -MemberType ScriptMethod -Name WaitForStatus -Value $wait
     $service
@@ -5731,8 +5765,11 @@ function Stop-Service {
 }
 function Start-Service {
     param([string]$Name)
-    $sim.services[$Name].status = 'Running'
     $sim.calls.Add("start $Name")
+    if ($Scenario.EndsWith('-start-fails') -and $Name -eq 'ArciApi') {
+        throw 'simulated: ArciApi did not start'
+    }
+    $sim.services[$Name].status = 'Running'
 }
 function Get-ScheduledTask {
     param([string]$TaskPath, [string]$TaskName, $ErrorAction)
@@ -5791,7 +5828,13 @@ function Invoke-ArciExe {
         $service = $ArgumentList[1]
         if ($ArgumentList[0] -eq 'delete') { $sim.services.Remove($service) }
         elseif ($ArgumentList[2] -eq 'obj=') { $sim.services[$service].account = $ArgumentList[3] }
-        elseif ($ArgumentList[2] -eq 'start=') { $sim.services[$service].start = $ArgumentList[3] }
+        elseif ($ArgumentList[2] -eq 'start=') {
+            # ...-start-fails: ArciIngest's start type cannot be set (ArciApi does not start).
+            if ($Scenario.EndsWith('-start-fails') -and $service -eq 'ArciIngest') {
+                throw 'sc.exe: çıkış kodu 5 [exit code]: simulated'
+            }
+            $sim.services[$service].start = $ArgumentList[3]
+        }
         return
     }
     if ($exe -eq 'arcilogger-db.exe') {
@@ -5902,13 +5945,59 @@ function Get-PgCredential {
 function Invoke-PgTool {
     param([string]$Tool, [string[]]$ArgumentList, [string]$StdinText, [string[]]$Redact = @())
     $sim.calls.Add("pg $Tool")
-    if ($Scenario -in @('rollback-restore-db-fails', 'rollback-restore-db-only-fails') -and
-        $Tool -eq 'psql.exe') {
+    if ($Scenario -eq 'rollback-restore-db-fails' -and $Tool -eq 'psql.exe') {
         throw ('psql.exe: çıkış kodu 2 [exit code]: connection to server at "127.0.0.1", ' +
             'port 5432 failed')
     }
+    if ($databaseOnly -and $Tool -eq 'psql.exe') {
+        # As PostgreSQL 16 answers for a TimescaleDB 2.30.2 database of 5 GB (max_wal_size 1 GB)
+        # whose data directory's drive Get-ArciDriveFacts reads below; -locale: the database's
+        # locale is ICU's; -fails: the connection is lost on the run after CREATE DATABASE (the
+        # new database's settings and rights), -pre-restore-fails: on the first change, the
+        # current database's timescaledb_pre_restore(), -unreachable: on the first query (the
+        # locale's), before any change. The changes are recorded as "sql <change>".
+        $sql = [string]$StdinText
+        foreach ($change in @('timescaledb_pre_restore', 'CREATE DATABASE', 'RENAME TO')) {
+            if ($sql.Contains($change)) { $sim.calls.Add("sql $change") }
+        }
+        $lost = @{
+            'rollback-restore-db-only-fails'             = 'ALTER DATABASE %I SET'
+            'rollback-restore-db-only-pre-restore-fails' = 'SELECT timescaledb_pre_restore();'
+            'rollback-restore-db-only-unreachable'       = 'datlocprovider'
+        }[$Scenario]
+        if ($lost -and $sql.Contains($lost)) {
+            throw ('psql.exe: çıkış kodu 2 [exit code]: connection to server at "127.0.0.1", ' +
+                'port 5432 failed')
+        }
+        $out = ''
+        if ($sql.Contains('datlocprovider')) {
+            $out = $(if ($Scenario.Contains('-locale')) { 'i' } else { 'c' })
+        }
+        elseif ($sql.Contains('pg_database_size')) { $out = '{0}|{1}|D:\ARCILOGGER\db' -f 5GB, 1GB }
+        elseif ($sql.Contains('extversion')) { $out = '2.30.2' }
+        return [pscustomobject]@{ ExitCode = 0; StdOut = $out; StdErr = '' }
+    }
     if ($Tool -eq 'pg_dump.exe') {
         Write-Text $ArgumentList[[array]::IndexOf($ArgumentList, '-f') + 1] 'PGDMP simulated'
+    }
+}
+if ($databaseOnly) {
+    # The drive of PostgreSQL's data directory: 1 MB free (-space) or 100 GB.
+    function Get-ArciDriveFacts {
+        param([string]$Root)
+        $free = $(if ($Scenario.Contains('-space')) { 1MB } else { 100GB })
+        [pscustomobject]@{
+            Root = $Root; DriveType = 'Fixed'; IsReady = $true; DriveFormat = 'NTFS'
+            FreeBytes = [int64]$free
+        }
+    }
+}
+if ($Scenario.Contains('-cancel')) {
+    # The operator answers H (no) at the restore's question.
+    function Read-Host {
+        param([Parameter(Position = 0)][string]$Prompt)
+        $sim.calls.Add(('read-host: {0}' -f $Prompt))
+        'H'
     }
 }
 if ($Scenario.StartsWith('first-install')) {
@@ -6983,17 +7072,27 @@ RESTORE_NOT_AGAIN = (
 )
 
 
-def test_database_only_restore_that_fails_keeps_the_database_services_stopped(
-    engine: str, tmp_path: Path
+@pytest.mark.parametrize("scenario", ["fails", "pre-restore-fails"])
+def test_database_only_restore_that_fails_after_its_first_change_keeps_the_services_stopped(
+    engine: str, tmp_path: Path, scenario: str
 ) -> None:
-    """Review of #147 (round 2): -Rollback -RestoreDatabase without ARCILOGGER.previous (after an
-    upgrade's swap-back, or the retry run from the rolled-back folder) restores the database
-    only. The program in place may not match the database, so a restore that fails before
-    pg_restore (here psql cannot reach the server; also a short disk) keeps the database
-    services stopped and on manual start, as after a rollback's swap, and names the retry."""
-    report = simulate(engine, tmp_path, "rollback-restore-db-only-fails")
+    """Review of #147 (round 2), issue #155: -Rollback -RestoreDatabase without
+    ARCILOGGER.previous (after an upgrade's swap-back, or the retry run from the rolled-back
+    folder) restores the database only. The program in place may not match the database, so a
+    restore that fails from its first change on (here psql loses the server on the run after
+    CREATE DATABASE, or on the first change itself, timescaledb_pre_restore() in the current
+    database) keeps the database services stopped and on manual start, also those that ran
+    before, as after a rollback's swap, and names the retry."""
+    report = simulate(engine, tmp_path, f"rollback-restore-db-only-{scenario}")
     assert report["exit"] == 3, report["message"]
     assert _folders(report) == {"ARCILOGGER": "1.0.0"}
+    calls = report["calls"]
+    if scenario == "fails":
+        assert calls.index("sql timescaledb_pre_restore") < calls.index("sql CREATE DATABASE")
+    else:
+        assert "sql timescaledb_pre_restore" in calls
+        assert "sql CREATE DATABASE" not in calls
+    assert "sql RENAME TO" not in calls
     assert _running(report) == {"ArciCollector", "ArciWeb"}, "the database services stay stopped"
     for name in ("ArciIngest", "ArciApi", "ArciWorker", "ArciAdmin"):
         assert report["services"][name]["start"] == "demand", name
@@ -7002,12 +7101,207 @@ def test_database_only_restore_that_fails_keeps_the_database_services_stopped(
     assert failure["database_uncertain"] is True
     assert "connection to server" in failure["reason"]
     stdout = _unwrapped(report["stdout"])
-    assert _unwrapped(RESTORE_NOT_CHANGED) in stdout
+    # A failed pre_restore may have put the current database into TimescaleDB's restore mode;
+    # after CREATE DATABASE the failure dropped the new one and ended that mode again.
+    said = RESTORE_NOT_CHANGED if scenario == "fails" else "[the database may be half-changed]"
+    assert _unwrapped(said) in stdout
+    assert _unwrapped(RESTORE_AS_THEY_WERE) not in stdout
     assert _unwrapped(RESTORE_AGAIN) in stdout
     retry = re.search(r'-File"([^"]*)"-Rollback-RestoreDatabase-DatabaseDump"([^"]*)"', stdout)
     assert retry is not None, stdout
     assert Path(retry.group(1)) == INSTALL_SCRIPT, "no swap: the running installer"
     assert Path(retry.group(2)) == tmp_path / "sim" / "before-upgrade.dump"
+
+
+#: A database-only restore refused before its first change (issue #155) ...
+RESTORE_AS_THEY_WERE = "[the database was not changed; the database services are as they were]:"
+#: ... and each database service as it was: running on automatic start, or stopped on manual
+#: start (as a failed upgrade's migration leaves them).
+SERVICE_WAS_RUNNING = "{0}: çalışıyor, otomatik başlatma [running, automatic start]"
+SERVICE_WAS_STOPPED = "{0}: durdurulmuş, elle başlatma [stopped, manual start]"
+DATABASE_SERVICES = ("ArciIngest", "ArciApi", "ArciWorker", "ArciAdmin")
+#: After a cancel there is no error to fix (RESTORE_AGAIN otherwise).
+RESTORE_AGAIN_CANCELLED = (
+    "Geri yüklemeyi bu sürümün kurulum betiğiyle yeniden çalıştırmak için [to run the restore "
+    "again, with this version's installer]:"
+)
+
+
+def _refusal(case: str, tmp_path: Path) -> str:
+    """What the restore of the database-only scenario ``case`` says when it refuses."""
+    dump = tmp_path / "sim" / "before-upgrade.dump"
+    return {
+        "cancel": "İptal edildi [cancelled].",
+        "space": RESTORE_DISK_SHORT.format(1, RESTORE_SIM_NEED_MB, "D:\\ARCILOGGER\\db"),
+        "no-dump": f"Yedek dosyası yok [dump not found]: {dump}",
+        "unreachable": 'connection to server at "127.0.0.1", port 5432 failed',
+        "locale": (
+            "[database not found, or its locale is not libc: restore the dump by hand, "
+            "docs\\BACKUP.md section 5]"
+        ),
+    }[case]
+
+
+@pytest.mark.parametrize("case", ["cancel", "space", "no-dump", "locale", "unreachable"])
+def test_database_only_restore_refused_before_any_change_starts_the_services_again(
+    engine: str, tmp_path: Path, case: str
+) -> None:
+    """Issue #155: a database-only restore that fails before its first change (the operator
+    answers H, the PostgreSQL data drive is short, the dump does not exist, the database's
+    locale is not libc, psql cannot reach the server on the first query) changed nothing: the
+    database services that ran on automatic start run again, on delayed-auto, also while
+    PostgreSQL is not reachable (they ran so before), and the output says, TR/EN, that the
+    database was not changed and the services are as they were."""
+    report = simulate(engine, tmp_path, f"rollback-restore-db-only-{case}")
+    assert report["exit"] == 3, report["message"]
+    calls = report["calls"]
+    assert not [c for c in calls if c.startswith("sql ")], "refused before any change"
+    assert "pg pg_restore.exe" not in calls
+    if case == "cancel":
+        assert [c for c in calls if c.startswith("read-host: ")], calls
+    assert _running(report) == NEW_SERVICES, "the database services run again"
+    for name in DATABASE_SERVICES:
+        assert report["services"][name]["start"] == "delayed-auto", name
+        assert calls.index(f"stop {name}") < calls.index(f"start {name}"), name
+    failure = report["state"]["last_failure"]
+    assert failure["operation"] == "rollback"
+    assert failure["database_uncertain"] is False
+    assert failure["manual_steps"] == []
+    stdout = _unwrapped(report["stdout"])
+    assert _unwrapped(_refusal(case, tmp_path)) in stdout
+    assert _unwrapped(RESTORE_AS_THEY_WERE) in stdout
+    for name in DATABASE_SERVICES:
+        assert _unwrapped(SERVICE_WAS_RUNNING.format(name)) in stdout, name
+    assert _unwrapped(RESTORE_NOT_CHANGED) not in stdout
+    assert _unwrapped("[set to manual start, stopped]") not in stdout
+    again = RESTORE_AGAIN_CANCELLED if case == "cancel" else RESTORE_AGAIN
+    assert _unwrapped(again) in stdout
+    assert _unwrapped("[previous state restored]") in _unwrapped(report["message"])
+
+
+@pytest.mark.parametrize("case", ["cancel", "space"])
+def test_database_only_restore_refused_before_any_change_leaves_stopped_services_stopped(
+    engine: str, tmp_path: Path, case: str
+) -> None:
+    """Issue #155: the same refusals after a failed upgrade, whose migration left the database
+    services stopped and on manual start: they stay so, and the output says so. What
+    install\\state.json says of the database stays as it was too: its pending_database_restore
+    and that the database is uncertain."""
+    report = simulate(engine, tmp_path, f"rollback-restore-db-only-{case}-demand")
+    assert report["exit"] == 3, report["message"]
+    calls = report["calls"]
+    assert not [c for c in calls if c.startswith("sql ")], "refused before any change"
+    assert _running(report) == {"ArciCollector", "ArciWeb"}, "they stay stopped"
+    for name in DATABASE_SERVICES:
+        assert report["services"][name]["start"] == "demand", name
+        assert f"start {name}" not in calls, name
+    assert not [c for c in calls if c.startswith("exe sc.exe config ")], calls
+    state = report["state"]
+    assert state["last_failure"]["operation"] == "rollback"
+    assert state["last_failure"]["database_uncertain"] is True
+    assert state["pending_database_restore"] == str(tmp_path / "sim" / "before-upgrade.dump")
+    stdout = _unwrapped(report["stdout"])
+    assert _unwrapped(_refusal(case, tmp_path)) in stdout
+    assert _unwrapped(RESTORE_AS_THEY_WERE) in stdout
+    for name in DATABASE_SERVICES:
+        assert _unwrapped(SERVICE_WAS_STOPPED.format(name)) in stdout, name
+    assert _unwrapped(RESTORE_AGAIN_CANCELLED if case == "cancel" else RESTORE_AGAIN) in stdout
+
+
+def test_database_only_restore_refused_before_any_change_puts_each_service_back_as_it_was(
+    engine: str, tmp_path: Path
+) -> None:
+    """Issue #155: each database service goes back as it was: one that ran on manual start runs
+    again and keeps manual start, one stopped on manual start stays so, one still starting at
+    boot (StartPending) and one running on automatic start run again on delayed-auto."""
+    report = simulate(engine, tmp_path, "rollback-restore-db-only-cancel-mixed")
+    assert report["exit"] == 3, report["message"]
+    calls = report["calls"]
+    assert not [c for c in calls if c.startswith("sql ")], "refused before any change"
+    services = report["services"]
+    assert _running(report) == NEW_SERVICES - {"ArciApi"}
+    assert services["ArciIngest"]["start"] == "demand"
+    assert services["ArciApi"]["start"] == "demand"
+    assert services["ArciWorker"]["start"] == "delayed-auto"
+    assert services["ArciAdmin"]["start"] == "delayed-auto"
+    configs = [c for c in calls if c.startswith("exe sc.exe config ")]
+    assert configs == [
+        "exe sc.exe config ArciWorker start= delayed-auto",
+        "exe sc.exe config ArciAdmin start= delayed-auto",
+    ]
+    assert "start ArciApi" not in calls
+    assert report["state"]["last_failure"]["manual_steps"] == []
+    stdout = _unwrapped(report["stdout"])
+    assert _unwrapped(RESTORE_AS_THEY_WERE) in stdout
+    assert _unwrapped("ArciIngest: çalışıyor, elle başlatma [running, manual start]") in stdout
+    assert _unwrapped(SERVICE_WAS_STOPPED.format("ArciApi")) in stdout
+    assert _unwrapped(SERVICE_WAS_RUNNING.format("ArciWorker")) in stdout
+    assert _unwrapped(SERVICE_WAS_RUNNING.format("ArciAdmin")) in stdout
+
+
+#: The database services a database-only restore that changed nothing could not put back.
+RESTORE_NOT_PUT_BACK = (
+    "[the database was not changed; these database services could not be put back as they "
+    "were]: {0}"
+)
+
+
+def test_database_only_restore_whose_services_cannot_be_put_back_names_them(
+    engine: str, tmp_path: Path
+) -> None:
+    """Issue #155, review: when a database service cannot be put back (here ArciIngest's start
+    type cannot be set, and ArciApi does not start), the output does not say the services are
+    as they were: it names those it could not put back, with the command that does it, and the
+    run reports what is left to do. The others are put back, and ArciIngest is started all the
+    same."""
+    report = simulate(engine, tmp_path, "rollback-restore-db-only-cancel-start-fails")
+    assert report["exit"] == 3, report["message"]
+    calls = report["calls"]
+    assert not [c for c in calls if c.startswith("sql ")], "refused before any change"
+    services = report["services"]
+    assert _running(report) == NEW_SERVICES - {"ArciApi"}
+    assert "start ArciApi" in calls
+    assert services["ArciIngest"]["start"] == "auto", "its start type could not be set"
+    for name in ("ArciApi", "ArciWorker", "ArciAdmin"):
+        assert services[name]["start"] == "delayed-auto", name
+    steps = report["state"]["last_failure"]["manual_steps"]
+    assert len(steps) == 1
+    assert steps[0].endswith("[not put back as they were]: ArciIngest, ArciApi"), steps
+    stdout = _unwrapped(report["stdout"])
+    assert _unwrapped(RESTORE_AS_THEY_WERE) not in stdout
+    assert _unwrapped(RESTORE_NOT_PUT_BACK.format("ArciIngest, ArciApi")) in stdout
+    for name in DATABASE_SERVICES:
+        assert _unwrapped(SERVICE_WAS_RUNNING.format(name)) in stdout, name
+    assert (
+        _unwrapped(
+            "foreach ($n in 'ArciIngest', 'ArciApi') { sc.exe config $n start= delayed-auto; "
+            "Start-Service $n }"
+        )
+        in stdout
+    )
+    assert _unwrapped("[manual action needed]:") in stdout
+    assert _unwrapped("[recovery incomplete, see above]") in _unwrapped(report["message"])
+
+
+def test_rollback_cancelled_after_the_swap_keeps_the_database_services_stopped(
+    engine: str, tmp_path: Path
+) -> None:
+    """Issue #155, item 4: after a rollback's swap the previous version is in place, which must
+    not run on this version's database: a cancel at the restore's question, before any change,
+    keeps the database services stopped and on manual start (#147), not as they were."""
+    report = simulate(engine, tmp_path, "rollback-restore-db-cancel")
+    assert report["exit"] == 3, report["message"]
+    assert _folders(report)["ARCILOGGER"] == "0.9.0"
+    assert [c for c in report["calls"] if c.startswith("read-host: ")], report["calls"]
+    assert "pg pg_restore.exe" not in report["calls"], "refused before any change"
+    assert _running(report) == {"ArciCollector", "ArciWeb"}, "the database services stay stopped"
+    for name in ("ArciIngest", "ArciApi", "ArciWorker"):
+        assert report["services"][name]["start"] == "demand", name
+    assert report["state"]["last_failure"]["database_uncertain"] is True
+    stdout = _unwrapped(report["stdout"])
+    assert _unwrapped("İptal edildi [cancelled].") in stdout
+    assert _unwrapped(RESTORE_NOT_CHANGED) in stdout
+    assert _unwrapped(RESTORE_AS_THEY_WERE) not in stdout
 
 
 def test_rollback_whose_restore_committed_but_post_restore_failed_says_what_is_left(
