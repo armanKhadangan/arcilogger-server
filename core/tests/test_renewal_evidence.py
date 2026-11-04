@@ -23,7 +23,7 @@ import pytest
 from cryptography.hazmat.primitives import serialization
 
 from arcilogger_core.evidence.builder import build_package
-from arcilogger_core.evidence.model import PackageInfo
+from arcilogger_core.evidence.model import EvidenceError, PackageInfo
 from arcilogger_core.renewal import RecordEntry, renew
 from arcilogger_core.seal import sha256_file
 from arcilogger_core.timeutil import utc_now
@@ -269,4 +269,23 @@ def test_a_relaxed_renewal_under_the_legal_root_is_packaged_and_judged_alike(
     assert rw.of(rw.status(built.now), day_token_path()).covered_by == record
     found = [(f.level, f.code, f.where) for f in report.findings if f.code.startswith("token-eku")]
     assert found == [("warn", "token-eku-not-critical", "yenileme")]
+    unlock_tree(tmp_path)
+
+
+def test_an_unreadable_renewal_record_stops_the_build_with_an_evidence_error(
+    rw: RenewalWorld, tmp_path: Path
+) -> None:
+    """W5-A-17: a renewal record the builder cannot read is judged strict, as the verifiers
+    judge it, even when it is nested too deep for the JSON reader (a RecursionError, not a
+    ValueError). A tampered record that names the day's token hash: the build is refused with
+    an EvidenceError the callers handle, not a crash."""
+    record = renew_day(rw, R1[0], R1[1], expires=R3[2])
+    path = rw.layout.vault / record
+    path.chmod(0o644)
+    digest = json.dumps(sha256_file(rw.layout.token(DAY)))
+    path.write_text("[" * 100_000 + digest + "]" * 100_000, encoding="utf-8")
+    with pytest.raises(RecursionError):
+        json.loads(path.read_bytes())
+    with pytest.raises(EvidenceError, match=r"token-imprint \(yenileme\)"):
+        _build(rw, [DAY], tmp_path / "out")
     unlock_tree(tmp_path)

@@ -438,7 +438,7 @@ class _Records:
                 # the package's days (contract W5-A-17); a record that cannot be read: strict
                 try:
                     record = json.loads(data)
-                except ValueError:
+                except (ValueError, RecursionError):
                     record = None
                 tsa = record.get("tsa") if isinstance(record, dict) else None
                 require_critical_eku = not (
