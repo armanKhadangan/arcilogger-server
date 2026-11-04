@@ -1917,10 +1917,12 @@ issue fixed is kept (command, flags, exit codes 0/1/2, JSON fields); what differ
   - **Performance:** the new guard `test_the_recorded_moves_of_a_hundred_chains_are_fast` (100
     `mt_dhcp` chains, each lease at the cap: `RECORDED_TIMES = MOVE_TIMES_CAP`, 1,000 recorded
     times, marked truncated, decoded and tested in memory) stays under the 0.2 s of 3.8
-    (PERF_FIGURES; the guard asserts the decoded result, 100 leases with all their times, and
-    `parse_moves` only checks a value already in the job's form, `refs.py:422-428`); the
-    existing `test_the_converted_row_query_of_a_hundred_chains_is_fast` is unchanged. With the
-    bound no lease decodes more than the guard's. `_seed_candidates` reads the moves of every
+    (0.098 s for the whole check, of which 0.032 s `_recorded_moves`, in the 2026-11-04 run with
+    the bound; 0.10–0.14 s and 0.03–0.06 s in the runs before it; the guard asserts the
+    decoded result, 100 leases with all their times, and `parse_moves` only checks a value
+    already in the job's form, `refs.py:422-428`); the existing
+    `test_the_converted_row_query_of_a_hundred_chains_is_fast` is unchanged (0.067 s). With
+    the bound no lease decodes more than the guard's. `_seed_candidates` reads the moves of every
     seed on every rebuild (`leases.py:864`), so each same-day rebuild of the service
     (`worker/service.py:246`) reads all open leases' moves (at most 1,000 times each): their
     part outside `[lo, hi)` must be recomputed, so the incremental job's shortcut does not
@@ -1981,11 +1983,11 @@ issue fixed is kept (command, flags, exit codes 0/1/2, JSON fields); what differ
   `moves` with its bound and `truncated`, the `"vd"` key of an evidence element);
   `docs/CORRELATION.md` (TR and EN: the recorded moves before the first day and their bound);
   `docs/KURULUM.md` bölüm 16 / `docs/INSTALL.md` section 16 (V18, above);
-  `worker/tests/test_leases_consistency.py` (above).
+  `worker/tests/test_leases_consistency.py` (above); `db/tests/test_migration_0021.py` (its
+  `upgrade(...)` calls pinned to `revision=REVISION`, as `test_migration_0020.py` does, so they
+  stop at `0021_db_window` under head `0022_lease_moves`; granted on #127).
 - **Pins outside #127's files still open, follow-ups for their owners:**
-  `db/tests/test_migration_0021.py` (pin `revision=REVISION` in its `upgrade(...)` calls, as
-  `test_migration_0020.py` does: 9 tests fail at head `0022_lease_moves` until then; permission
-  asked on #127); `lookup/types.py:330-332` (`EvidenceRef.to_dict` says it is also the element
+  `lookup/types.py:330-332` (`EvidenceRef.to_dict` says it is also the element
   format of `leases.evidence`; an `fg_dhcp` element now also carries `"vd"`);
   `docs/ASSUMPTIONS.md` (:226 and :479 name the checks V1–V17 of the Wave 3 contract; V18 is
   §16's own, as the list's introduction says, and not a Wave 3 number).
