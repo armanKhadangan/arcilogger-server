@@ -6385,7 +6385,7 @@ def test_upgrade_failing_in_the_migration_names_this_versions_installer_for_the_
         program / failed / "installer" / "Install-Arcilogger.ps1"
     )
     assert Path(retry.group(2)) == Path(report["state"]["last_dump"])
-    installed = str(program / "ARCILOGGER" / "installer").replace("/", "")
+    installed = str(program / "ARCILOGGER" / "installer").replace("\\", "").replace("/", "")
     shown = stdout.replace("\\", "").replace("/", "")
     assert _unwrapped(NOT_THE_PREVIOUS_INSTALLER.format(installed)) in shown
 
@@ -6962,7 +6962,7 @@ def test_rollback_whose_restore_fails_after_the_swap_names_this_versions_install
     copy = Path(retry.group(1).replace("\\", "/"))
     assert copy == program / aside / "installer" / "Install-Arcilogger.ps1"
     assert Path(retry.group(2)) == tmp_path / "sim" / "before-upgrade.dump"
-    installed = str(program / "ARCILOGGER" / "installer").replace("/", "")
+    installed = str(program / "ARCILOGGER" / "installer").replace("\\", "").replace("/", "")
     shown = stdout.replace("\\", "").replace("/", "")
     assert _unwrapped(NOT_THE_PREVIOUS_INSTALLER.format(installed)) in shown
     # Refused before the rename: the database is as it was, only the program does not match it.
