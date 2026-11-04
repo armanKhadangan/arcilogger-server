@@ -120,7 +120,12 @@
       "schedule": "Çizelge",
       "state": "Durum",
       "lastEvidence": "Son kanıt",
-      "evidence": "Kanıt dosyası"
+      "evidence": "Kanıt dosyası",
+      "failure": {
+        "backup_failed": "Son yedekleme tamamlanamadı.",
+        "index_unreadable": "İptal listelerinin dizini okunamıyor.",
+        "stored_file_unreadable": "Saklanan bir iptal listesi okunamadı; indirme yarıda kaldı."
+      }
     },
     "jobs": {
       "caption": "Worker işlerinin son çalışması",
@@ -185,7 +190,8 @@
         "late": "Gecikti",
         "missing": "Kanıt yok",
         "not_used": "Kullanılmıyor",
-        "not_observable": "İzlenemiyor"
+        "not_observable": "İzlenemiyor",
+        "failed": "Başarısız"
       },
       "job": {
         "ok": "Tamam",

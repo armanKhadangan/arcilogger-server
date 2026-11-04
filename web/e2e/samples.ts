@@ -544,7 +544,8 @@ export const SYSTEM_DISK = load('system-disk') as {
 
 /**
  * Services, scheduled tasks, worker jobs and the clock (captured, Wave 4 contract 2.6): the
- * tasks `ok`, `late`, `missing`, `not_used` and `not_observable`, the jobs `ok`, `failing`,
+ * tasks `ok`, `late`, `missing`, `not_used`, `not_observable` and `failed` (CrlFetch, code
+ * `stored_file_unreadable`), the jobs `ok`, `failing`,
  * `skipped`, `running` and `never`, the clock samples of today (one probe no server answered),
  * and the auditor's refusal.
  */

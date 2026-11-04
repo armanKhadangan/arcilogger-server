@@ -178,13 +178,17 @@ export const APPLY_SYSTEM_STYLE: Record<ApplySystemHealth['state'], StateStyle> 
   disabled: { tone: 'neutral', icon: CircleMinus, label: 'system.state.apply.disabled' },
 };
 
-/** A scheduled task judged by its evidence file (contract 2.6.2). */
+/**
+ * A scheduled task judged by its evidence file (contract 2.6.2); `failed` when that file
+ * records a run that did not complete (#171), with the reason in the row's `code`.
+ */
 export const TASK_STYLE: Record<TaskHealth['state'], StateStyle> = {
   ok: { tone: 'success', icon: CircleCheck, label: 'system.state.task.ok' },
   late: { tone: 'warning', icon: Clock, label: 'system.state.task.late' },
   missing: { tone: 'warning', icon: FileQuestion, label: 'system.state.task.missing' },
   not_used: { tone: 'neutral', icon: CircleMinus, label: 'system.state.task.not_used' },
   not_observable: { tone: 'neutral', icon: EyeOff, label: 'system.state.task.not_observable' },
+  failed: { tone: 'danger', icon: CircleX, label: 'system.state.task.failed' },
 };
 
 export const JOB_STYLE: Record<JobHealth['state'], StateStyle> = {

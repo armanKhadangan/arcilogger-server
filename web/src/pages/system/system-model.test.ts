@@ -225,6 +225,17 @@ describe('state badges', () => {
     const jobs = new Set<JobHealth['state']>(JOBS.map((job) => job.state));
     expect([...jobs].sort()).toEqual(Object.keys(JOB_STYLE).sort());
     expect(en(TASK_STYLE.not_observable.label)).toBe('Not observable');
+    expect(TASK_STYLE.failed).toMatchObject({ tone: 'danger' });
+    expect([tr(TASK_STYLE.failed.label), en(TASK_STYLE.failed.label)]).toEqual([
+      'Başarısız',
+      'Failed',
+    ]);
+    // The failure codes of `system_health/tasks.py` (`TaskFailure`), each worded in both languages.
+    for (const code of ['backup_failed', 'index_unreadable', 'stored_file_unreadable'])
+      for (const t of [tr, en]) {
+        const key = `system.tasks.failure.${code}`;
+        expect(t(key), key).not.toBe(key);
+      }
     expect(tr(JOB_STYLE.failing.label)).toBe('Hata veriyor');
     expect(JOB_STYLE.failing.tone).toBe('danger');
     expectWorded(TASK_STYLE);
