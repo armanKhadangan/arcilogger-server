@@ -525,6 +525,6 @@ def standalone_report(rw: RenewalWorld, built: Built, folder: Path) -> sv.Report
 
 
 def core_status(rw: RenewalWorld, built: Built) -> str:
-    """The status ``renewal_status`` gives the day's token (``state/renewal.json``)."""
+    """The status ``renewal_status`` gives the day's token (``state/renewal/renewal.json``)."""
     report = renewal_status(rw.layout, rw.world.config, _roots(rw, built), built.now)
     return rw.of(report, day_token_path()).status

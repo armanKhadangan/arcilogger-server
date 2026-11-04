@@ -205,10 +205,11 @@ def test_no_seal_alert_when_every_closed_day_is_sealed(
     vault.seal_days(DAYS)
     report = run(sessions, layout, vault.config, at_site(DAYS[2] + timedelta(days=1), 10))
     assert report.checks["seal"]["found"] == []
-    # The only alert: the sealed days' stamps chain to the mock root, which has no stored
-    # revocation list (no state/crl), so R20-crl (Wave 5 contract 2.3.1) is raised; the legal
-    # checks are tested in test_alerts_legal.py.
-    assert set(active(db_session)) == {CRL_KEY}
+    # No alert at all: the sealed days' stamps chain to the mock root, which publishes no
+    # revocation list (no state/crl), and ARCILOGGER's test root is no issuer in use, so a mock
+    # install raises no R20-crl (W5-E-5); the legal checks are tested in test_alerts_legal.py.
+    assert CRL_KEY not in active(db_session)
+    assert set(active(db_session)) == set()
 
 
 def test_seal_overdue_hour_is_a_setting(

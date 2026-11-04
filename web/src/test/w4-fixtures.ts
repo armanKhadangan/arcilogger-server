@@ -1025,7 +1025,7 @@ export const TASKS: readonly TaskHealth[] = [
     schedule_en: 'Daily at 02:30',
     state: 'ok',
     last_evidence_at: '2026-10-13T02:31:04+03:00',
-    evidence: 'state\\renewal.json',
+    evidence: 'state\\renewal\\renewal.json',
   },
   {
     task: 'CrlFetch',

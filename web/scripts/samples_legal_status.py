@@ -15,10 +15,10 @@ waiting) with a ``[tsa]`` configuration and the state files of a running site:
   with the mock TSA's root pinned in ``tsa.roots_dir`` (the root a real provider's stamps reach)
   and its fingerprint in ``tsa.legal_root_fingerprints``, or without that fingerprint and with
   ``seal.late_after_hours`` 24, so the failed 11.10 (31 hours after its end) is late;
-* ``state/renewal.json`` as §2.1.2 describes it (on a site the ``Renew`` task writes it with
-  ``arcilogger-core renew``, W5-A-2; here only ``tokens`` and ``totals``): the sealed days' tokens,
-  ``not_due`` with the mock certificate's real expiry, or ``due`` for a provider certificate that
-  ends on 01.03.2027 (within ``tsa.renew_before_days``);
+* ``state/renewal/renewal.json`` as §2.1.2 describes it (on a site the ``Renew`` task writes it
+  with ``arcilogger-core renew``, W5-A-2; here only ``tokens`` and ``totals``): the sealed days'
+  tokens, ``not_due`` with the mock certificate's real expiry, or ``due`` for a provider
+  certificate that ends on 01.03.2027 (within ``tsa.renew_before_days``);
 * stored revocation lists of the mock root as ``crl fetch`` stores them
   (:mod:`arcilogger_api.legalstatus.testing`): one issued yesterday and fetched an hour ago, a
   root's list issued 90 days ago and valid for months whose last fetch is nine days old (older
@@ -37,8 +37,8 @@ configuration knows no ``turktrust`` before W5-T, and the capture's vault has no
 earlier certificate.
 
 The 60-second answer cache is cleared before every case. Everything the module writes is put back
-afterwards: the configuration the app reads, ``state/renewal.json``, ``state/crl`` and the pinned
-root folder.
+afterwards: the configuration the app reads, ``state/renewal/renewal.json``, ``state/crl`` and
+the pinned root folder.
 """
 
 from __future__ import annotations
@@ -97,7 +97,7 @@ class Case:
     name: str
     #: ``mock`` (the site's own configuration), ``legal`` or ``no_root`` (Kamu SM production).
     tsa: str
-    #: The status of every sealed day's token in ``state/renewal.json``.
+    #: The status of every sealed day's token in ``state/renewal/renewal.json``.
     renewal: str
     #: The stored list: ``fresh``, ``stale`` or ``revoked``.
     crl: str
@@ -152,7 +152,7 @@ def site_config(capture: Capture, case: Case, roots: Path, root_sha256: str) -> 
 
 
 def renewal_report(capture: Capture, tsa: MockTsa, status: str) -> dict[str, Any]:
-    """``state/renewal.json`` (§2.1.2) for the sealed days' tokens, each of ``status``."""
+    """``state/renewal/renewal.json`` (§2.1.2) for the sealed days' tokens, each of ``status``."""
     layout = capture.layout
     not_after = tsa.tsa_certificate.not_valid_after_utc if status == "not_due" else DUE_NOT_AFTER
     tokens = [
