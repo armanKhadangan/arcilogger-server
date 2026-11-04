@@ -81,9 +81,10 @@ Key                              Problem (setting)
                                  Durumu) — high; resolved once a record arrives or the window is
                                  no longer expected
 ``R20-renewal:none``             ``state/renewal.json`` has a token due for re-stamping or one
-                                 whose certificate expired without it — high; resolved by a
-                                 readable report without such a token (Wave 5 contract 2.3.1,
-                                 :data:`LEGAL_CHECKS`)
+                                 whose certificate expired without it, or says the ``Renew``
+                                 task failed twice in a row (``failures_in_a_row``, A4) — high;
+                                 resolved by a readable report without such a token and without
+                                 those failures (Wave 5 contract 2.3.1, :data:`LEGAL_CHECKS`)
 ``R20-cert:none``                a time-stamp certificate on a revocation list at or before a
                                  stamp — critical; a token due for re-stamping whose certificate
                                  expires within 30 days (:data:`CERT_EXPIRY_WARNING`), or one
@@ -2010,7 +2011,9 @@ class RenewRuns:
 def read_renew_runs(layout: Layout) -> RenewRuns | None:
     """The ``Renew`` task's runs from ``state/renewal.json``: no run and no failure when the task
     has not written it yet, ``None`` (unknown) when it cannot be read. Judged from this file,
-    never from the task's exit code (C12)."""
+    never from the task's exit code (C12). A file without ``failures_in_a_row`` records no
+    failure, as the writer reads it (``renewal.write_state``); one that is not a count is
+    unknown."""
     path = stamp_renewal_path(layout)
     try:
         data = _read_json(path)
@@ -2025,7 +2028,7 @@ def read_renew_runs(layout: Layout) -> RenewRuns | None:
     last_run = data.get("last_run")
     last_run = last_run if isinstance(last_run, dict) else {}
     outcome = last_run.get("outcome")
-    failures = data.get("failures_in_a_row")
+    failures = data.get("failures_in_a_row", 0)
     return RenewRuns(
         last_run_at=_calendar_time(last_run.get("at")),
         outcome=outcome if isinstance(outcome, str) else None,
@@ -2373,6 +2376,9 @@ CRL_KEY: Final = f"{CRL_RULE}:none"
 #: A token due for re-stamping is ``high`` for R20-cert when its certificate expires this soon
 #: (at most 30 days left; an ``uncovered`` one always is). Manager answer on #117, W5-C-12.
 CERT_EXPIRY_WARNING: Final = timedelta(days=30)
+#: "The Renew task failed twice in a row" (contract 2.3.1): ``failures_in_a_row`` of
+#: ``state/renewal.json`` at least this (failed and refused runs, A4).
+RENEW_FAILURES_ALERT: Final = 2
 
 
 def _rule_of(key: str) -> str:
@@ -2390,35 +2396,51 @@ def _keep(alert: Alert) -> str | None:
 
 def check_stamp_renewal(ctx: CheckContext) -> Outcome:
     """``R20-renewal:none``: a token of the re-stamping report is ``due``, or its certificate
-    expired ``uncovered``. Resolved by a readable report without such a token; an unreadable one
-    decides nothing."""
+    expired ``uncovered``, or the ``Renew`` task failed twice in a row (``failures_in_a_row`` of
+    the same file, failed and refused runs; A4), judged from ``state/renewal.json``, never from
+    the task's exit code (C12). The failures raise it also while the token list is unknown (a
+    refused run without pinned roots writes none, W5-A-2). Resolved by a readable report without
+    such a token and without those failures; what cannot be read decides nothing."""
     renewals = read_stamp_renewals(ctx.layout)
-    if renewals is None:
+    runs = read_renew_runs(ctx.layout)
+    failures = runs.failures_in_a_row if runs is not None else None
+    failing = failures is not None and failures >= RENEW_FAILURES_ALERT
+    if renewals is None and not failing:
         return Outcome([], _owned(RENEWAL_KEY), _keep)
-    counts = Counter(renewal.status for renewal in renewals)
+    counts = Counter(renewal.status for renewal in renewals or ())
     due, uncovered = counts["due"], counts["uncovered"]
-    findings = []
+    parts_tr, parts_en = [], []
     if due or uncovered:
+        parts_tr.append(
+            f"{due} damganın zamanı geldi, {uncovered} damga yeniden damgalanmadan sona erdi"
+        )
+        parts_en.append(f"{due} stamp(s) due, {uncovered} expired without re-stamping")
+    if failing:
+        parts_tr.append(f"Renew görevi art arda {failures} kez başarısız oldu")
+        parts_en.append(f"the Renew task failed {failures} times in a row")
+    findings = []
+    if parts_tr:
         findings.append(
             Finding(
                 key=RENEWAL_KEY,
                 rule=RENEWAL_RULE,
                 severity="high",
-                title=(
-                    f"Yeniden damgalama gerekiyor: {due} damganın zamanı geldi, {uncovered} damga "
-                    "yeniden damgalanmadan sona erdi"
-                ),
+                title=f"Yeniden damgalama gerekiyor: {'; '.join(parts_tr)}",
                 details={
-                    "due": due,
-                    "uncovered": uncovered,
-                    "title_en": (
-                        f"Re-stamping needed: {due} stamp(s) due, {uncovered} expired without "
-                        "re-stamping"
-                    ),
+                    # unknown (None) while the report has no token list
+                    "due": due if renewals is not None else None,
+                    "uncovered": uncovered if renewals is not None else None,
+                    "failures_in_a_row": failures,
+                    "title_en": f"Re-stamping needed: {'; '.join(parts_en)}",
                 },
             )
         )
-    return Outcome(findings, _owned(RENEWAL_KEY), lambda alert: "renewal_ok")
+
+    def clear(alert: Alert) -> str | None:
+        # the token list known (the early return) and the failures known and too few
+        return "renewal_ok" if failures is not None else None
+
+    return Outcome(findings, _owned(RENEWAL_KEY), clear)
 
 
 def check_stamp_cert(ctx: CheckContext) -> Outcome:

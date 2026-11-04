@@ -28,6 +28,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from arcilogger_core.config import Config
 from arcilogger_core.crl import parse_crl
 from arcilogger_core.layout import Layout
+from arcilogger_core.renewal import LastRun, write_state
 from arcilogger_core.timeutil import isoformat_site
 from arcilogger_core.tsa.mock import MockTsa
 from arcilogger_core.tsa.verify import fingerprint
@@ -43,9 +44,12 @@ from arcilogger_worker.alerts.system import (
     CRL_KEY,
     CRL_RULE,
     LEGAL_CHECKS,
+    RENEW_FAILURES_ALERT,
     RENEWAL_KEY,
     RENEWAL_RULE,
+    RenewRuns,
     crl_index_path,
+    read_renew_runs,
     run_system_checks,
     stamp_renewal_path,
 )
@@ -273,6 +277,150 @@ def test_stamp_renewal_unknown_report_decides_nothing(check: Any, layout: Layout
     assert RENEWAL_KEY in check()  # unreadable: neither raised again nor resolved
     write(stamp_renewal_path(layout), {"tokens": "none"})
     assert RENEWAL_KEY in check()
+
+
+#: The exit code of each ``last_run.outcome`` (W5-A-9).
+EXIT_CODES: dict[str, int] = {"renewed": 0, "not_needed": 0, "refused": 2, "failed": 3}
+
+
+def renew_runs(layout: Layout, *outcomes: str) -> None:
+    """``state/renewal.json`` after the ``Renew`` task's runs ``outcomes``, written by W5-A's
+    writer as the task writes it when its statuses cannot be computed (the token list, if any,
+    is kept). ``dry`` is a dry run: it keeps ``last_run`` and ``failures_in_a_row``."""
+    for number, outcome in enumerate(outcomes):
+        at = NOW - timedelta(hours=len(outcomes) - number)
+        last_run = None
+        if outcome != "dry":
+            error = {"refused": "roots", "failed": "tsa_unavailable"}.get(outcome)
+            last_run = LastRun(at, outcome, EXIT_CODES[outcome], error=error)  # type: ignore[arg-type]
+        write_state(layout, None, at=at, renew_before=180, last_run=last_run)
+
+
+def test_stamp_renewal_raised_after_two_failed_runs(check: Any, layout: Layout) -> None:
+    """Contract 2.3.1 and A4: "the Renew task failed twice in a row" is ``failures_in_a_row``
+    of ``state/renewal.json`` at least 2, read from the file, never from an exit code."""
+    assert RENEW_FAILURES_ALERT == 2
+    renewals(layout, ("not_due", NOW + timedelta(days=400)))
+    renew_runs(layout, "renewed", "failed")
+    assert json.loads(stamp_renewal_path(layout).read_bytes())["failures_in_a_row"] == 1
+    assert RENEWAL_KEY not in check()  # negative: one failure
+    renew_runs(layout, "failed")
+    alert = check()[RENEWAL_KEY]
+    assert (alert.rule, alert.severity) == ("R20-renewal", "high")
+    assert alert.details == {
+        "due": 0,
+        "uncovered": 0,
+        "failures_in_a_row": 2,
+        "title_en": "Re-stamping needed: the Renew task failed 2 times in a row",
+    }
+    assert alert.title == "Yeniden damgalama gerekiyor: Renew görevi art arda 2 kez başarısız oldu"
+    assert describe(RENEWAL_RULE, alert.details) == (
+        "Renew görevi art arda 2 kez başarısız oldu.",
+        "The Renew task failed 2 times in a row.",
+    )
+    renew_runs(layout, "failed")
+    assert check()[RENEWAL_KEY].details["failures_in_a_row"] == 3  # brought up to date
+
+
+def test_stamp_renewal_refused_runs_count(check: Any, layout: Layout) -> None:
+    """A refused run (exit 2: the configuration, for example no pinned root) counts like a
+    failed one (A4)."""
+    renewals(layout, ("not_due", NOW + timedelta(days=400)))
+    renew_runs(layout, "refused")
+    assert RENEWAL_KEY not in check()
+    renew_runs(layout, "failed")
+    assert check()[RENEWAL_KEY].details["failures_in_a_row"] == 2
+    renew_runs(layout, "not_needed", "refused", "refused")
+    assert check()[RENEWAL_KEY].details["failures_in_a_row"] == 2
+
+
+def test_stamp_renewal_failures_without_tokens_raise(check: Any, layout: Layout) -> None:
+    """A refused run without pinned roots computes no statuses and writes no token list
+    (W5-A-2): the tokens are unknown, the failures still raise the alert."""
+    renew_runs(layout, "refused")
+    assert "tokens" not in json.loads(stamp_renewal_path(layout).read_bytes())
+    assert RENEWAL_KEY not in check()
+    renew_runs(layout, "refused")
+    alert = check()[RENEWAL_KEY]
+    assert alert.details == {
+        "due": None,
+        "uncovered": None,
+        "failures_in_a_row": 2,
+        "title_en": "Re-stamping needed: the Renew task failed 2 times in a row",
+    }
+    assert describe(RENEWAL_RULE, alert.details)[1] == "The Renew task failed 2 times in a row."
+
+
+def test_stamp_renewal_cleared_after_a_successful_run(
+    check: Any, layout: Layout, db_session: Session
+) -> None:
+    later = NOW + timedelta(days=100)
+    renewals(layout, ("due", later))
+    renew_runs(layout, "failed", "failed")
+    alert = check()[RENEWAL_KEY]
+    assert (alert.details["due"], alert.details["failures_in_a_row"]) == (1, 2)
+    assert alert.title == (
+        "Yeniden damgalama gerekiyor: 1 damganın zamanı geldi, 0 damga yeniden damgalanmadan "
+        "sona erdi; Renew görevi art arda 2 kez başarısız oldu"
+    )
+    assert alert.details["title_en"] == (
+        "Re-stamping needed: 1 stamp(s) due, 0 expired without re-stamping; the Renew task "
+        "failed 2 times in a row"
+    )
+    assert describe(RENEWAL_RULE, alert.details) == (
+        "1 damganın yeniden damgalama zamanı geldi, 0 damganın sertifikası yeniden "
+        "damgalanmadan sona erdi. Renew görevi art arda 2 kez başarısız oldu.",
+        "1 stamp(s) due for re-stamping, 0 expired without it. The Renew task failed 2 times "
+        "in a row.",
+    )
+    renewals(layout, ("covered", later))  # a new report, then two more failed runs
+    renew_runs(layout, "failed", "failed")
+    assert check()[RENEWAL_KEY].details["due"] == 0  # nothing due, the failures hold it open
+    renew_runs(layout, "dry")  # a dry run keeps them
+    assert RENEWAL_KEY in check()
+    renew_runs(layout, "renewed")
+    assert RENEWAL_KEY not in check()
+    reason = resolved(db_session, RENEWAL_KEY).details["auto_resolved"]["reason"]
+    assert reason == "renewal_ok"
+
+
+def test_stamp_renewal_unreadable_runs_decide_nothing(check: Any, layout: Layout) -> None:
+    renewals(layout, ("not_due", NOW + timedelta(days=400)))
+    renew_runs(layout, "failed", "failed")
+    assert RENEWAL_KEY in check()
+    path = stamp_renewal_path(layout)
+    state = json.loads(path.read_bytes())
+    for damaged in ("two", True, -1, 1.5, None, [2]):
+        write(path, {**state, "failures_in_a_row": damaged})
+        assert RENEWAL_KEY in check(), damaged  # nothing due, failures unknown: kept
+    path.write_text('{"tokens": [', encoding="utf-8")
+    assert RENEWAL_KEY in check()
+    write(path, {**state, "tokens": "none"})  # failures known, tokens unknown: still raised
+    assert check()[RENEWAL_KEY].details["due"] is None
+    # A file without the count records no failure, as the writer reads it.
+    write(path, {key: value for key, value in state.items() if key != "failures_in_a_row"})
+    assert RENEWAL_KEY not in check()
+
+
+def test_read_renew_runs_from_the_writers_file(layout: Layout) -> None:
+    """The reader of the Sistem page's Renew row and of R20-renewal, against W5-A's writer."""
+    assert read_renew_runs(layout) == RenewRuns()  # no file: no run, no failure
+    renew_runs(layout, "refused")
+    first = read_renew_runs(layout)
+    assert first == RenewRuns(NOW - timedelta(hours=1), "refused", 1)
+    renew_runs(layout, "dry")
+    assert read_renew_runs(layout) == first  # a dry run changes neither
+    renew_runs(layout, "not_needed")
+    assert read_renew_runs(layout) == RenewRuns(NOW - timedelta(hours=1), "not_needed", 0)
+    path = stamp_renewal_path(layout)
+    state = json.loads(path.read_bytes())
+    write(path, {**state, "failures_in_a_row": True, "last_run": {"at": 5, "outcome": 3}})
+    assert read_renew_runs(layout) == RenewRuns(None, None, None)
+    write(path, {"tokens": []})
+    assert read_renew_runs(layout) == RenewRuns(None, None, 0)
+    for damaged in ("{", "[]", '"x"'):
+        path.write_text(damaged, encoding="utf-8")
+        assert read_renew_runs(layout) is None, damaged
 
 
 # -- R20-cert -------------------------------------------------------------------------------------
