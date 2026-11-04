@@ -27,6 +27,9 @@ G4 to G9).
   partial answer (W5-G answer 9).
 * ``POST /lookup/5651`` answers 409 ``archive_reload_required`` (audited ``lookup.run_failed``);
   the search answers ``archived`` or 409. Both name the current ``db.reload_keep_days`` (C23).
+  A lease time stored above its bound (before the bounds of #126) whose days to reload are more
+  than one reload holds answers 503 ``lookup_settings_invalid`` naming the setting; with fewer
+  days to reload 409, with every day in the database the lookup runs.
 * **The G7 equality test**: a lookup over days that were dropped and then reloaded from the vault
   by the real ingest gives the same answer and the same raw-line references as before the drop;
   the same for a search over a day with a line of the next raw day in it (a session logged
@@ -42,7 +45,7 @@ import json
 from collections.abc import Callable, Iterator
 from datetime import date, datetime, timedelta
 from pathlib import Path
-from typing import Any, get_args
+from typing import Any, Final, get_args
 
 import pytest
 from fastapi import FastAPI
@@ -83,12 +86,14 @@ from arcilogger_core.timeutil import day_window
 from arcilogger_db.egress import legacy_egresses
 from arcilogger_db.models import ArchiveReload, AuditLog, Lookup
 from arcilogger_db.partitions import DROPPED_KEY, PARTITION_LOCK_KEY, drop_before
-from arcilogger_db.settings import set_setting
+from arcilogger_db.settings import get_settings, set_setting
 from arcilogger_ingest import service as ingest_service
 from arcilogger_ingest.files import VaultReader, VaultReadError
 from arcilogger_ingest.service import IngestService
 from arcilogger_worker.alerts.system import drives
 from arcilogger_worker.correlation.leases import rebuild_day
+from arcilogger_worker.lookup import LookupRequest, LookupSettings
+from arcilogger_worker.lookup.days import RELOAD_DAYS, lookup_days
 from arcilogger_worker.testing import FIREWALL, ROUTER, Evidence, tr
 
 Login = Callable[..., LoggedIn]
@@ -1031,6 +1036,91 @@ def test_a_lookup_with_its_days_in_the_window_runs(
     assert client.post(LOOKUP, json=lookup_body(internal_ip=PC)).status_code == 201
 
 
+#: A lease time stored before the bounds of #126 (written around the validator, which now allows
+#: at most 7 days): 14 days for the PC's DHCP server, the issue's example.
+LONG_LEASE: Final = {"dhcp42": 14 * 86_400}
+
+
+def store_long_lease(factory: sessionmaker[Session]) -> tuple[date, date]:
+    """Store :data:`LONG_LEASE`; the lookup's days with it, longer than one reload holds."""
+    with factory() as session:
+        set_setting(session, "lease.server_seconds", LONG_LEASE, updated_by="test")
+        session.commit()
+        settings = LookupSettings.from_settings(get_settings(session))
+    first, last = lookup_days(LookupRequest(at=AT, internal_ip=PC), settings)
+    assert (last - first).days + 1 > RELOAD_DAYS
+    return first, last
+
+
+def test_a_lease_stored_above_its_bound_refuses_a_reload_longer_than_one(
+    client: TestClient,
+    login_as: Login,
+    app_session_factory: sessionmaker[Session],
+    db_engine: Engine,
+    api_config: Config,
+    layout: Layout,
+    sealed: Site,
+) -> None:
+    """#126: the days to bring back (the first day of the lookup's days, sealed with a line,
+    to the site's day) are more than one reload holds: the 409 would ask for a reload that is
+    refused (``archive_reload_too_large``), so the lookup answers 503 ``lookup_settings_invalid``
+    with the text that names the setting and the days; nothing is stored."""
+    signed_in(client, login_as, app_session_factory)
+    first, _ = store_long_lease(app_session_factory)
+    with app_session_factory() as session:
+        Evidence(session, layout).traffic(tr(first, 12), PC, 51002)
+        session.commit()
+    seal_day(api_config, layout, first)
+    drop(db_engine)
+    response = client.post(LOOKUP, json=lookup_body(internal_ip=PC))
+    assert response.status_code == 503, response.text
+    error = response.json()["error"]
+    days = (DAY - first).days + 1
+    assert days > MAX_DAYS
+    assert error["code"] == "lookup_settings_invalid"
+    assert error["message_tr"] == (
+        "5651 sorgu ayarları geçersiz: sınırının üstünde kayıtlı bir değer var "
+        f"(lease.server_seconds). Bu sorgunun veritabanında olmayan günleri ({first:%d.%m.%Y} - "
+        f"{DAY:%d.%m.%Y}, {days} gün) tek bir arşivden yeniden yüklemeye (en çok 14 gün) sığmaz. "
+        "Sistem yöneticisi değeri sınırların içine çekmelidir (Ayarlar → Uygulama ayarları)."
+    )
+    assert error["message_en"] == (
+        "The 5651 lookup settings are invalid: a value is stored above its bound "
+        f"(lease.server_seconds). The days of this lookup that are not in the database ({first} "
+        f"- {DAY}, {days} days) do not fit one archive reload (at most 14 days). An administrator "
+        "must bring the value within its bounds (Settings → Application settings)."
+    )
+    with app_session_factory() as session:
+        assert session.scalars(select(Lookup)).all() == []
+
+
+def test_a_lease_stored_above_its_bound_still_answers_what_one_reload_holds(
+    client: TestClient,
+    login_as: Login,
+    app_session_factory: sessionmaker[Session],
+    db_engine: Engine,
+    clock: Clock,
+    sealed: Site,
+) -> None:
+    """#126: the same stored value blocks no lookup that can be answered: with the site's day
+    alone to bring back the answer is the 409 (one reload of one day), and with every day in
+    the database the lookup runs."""
+    signed_in(client, login_as, app_session_factory)
+    store_long_lease(app_session_factory)
+    clock.now = SOON
+    assert client.post(LOOKUP, json=lookup_body(internal_ip=PC)).status_code == 201
+    clock.now = LATER
+    drop(db_engine)
+    response = client.post(LOOKUP, json=lookup_body(internal_ip=PC))
+    assert response.status_code == 409, response.text
+    error = response.json()["error"]
+    assert error["code"] == "archive_reload_required"
+    assert (error["details"]["first_day"], error["details"]["last_day"]) == (
+        DAY.isoformat(),
+        DAY.isoformat(),
+    )
+
+
 #: What differs between two runs of one lookup over the same rows: the row numbers (a reload
 #: renumbers the rows it loads) and the time the outcome was made.
 VARYING = frozenset({"row_id", "generated_at"})
@@ -1342,7 +1432,11 @@ def test_the_search_answers_archived_or_409(
     # A range reaching into the window: its rows, and the archived part.
     partly = search(client, DAY, DAY + timedelta(days=16))
     assert partly.status_code == 200, partly.text
-    assert partly.json()["archived"] == {"first_day": DAY.isoformat(), "last_day": DAY.isoformat()}
+    assert partly.json()["archived"] == {
+        "first_day": DAY.isoformat(),
+        "last_day": DAY.isoformat(),
+        "keep_days": 7,
+    }
     assert partly.json()["items"] == []
 
 
@@ -1368,6 +1462,15 @@ def test_the_409_names_the_keep_days_of_the_setting(
         error = response.json()["error"]
         assert error["code"] == "archive_reload_required"
         assert error["details"]["keep_days"] == 12
+    # A search reaching into the window answers 200 with `archived`, which names it too (#126
+    # item 5): the dialog of that answer, the most common one, gets the real keep time as well.
+    with app_session_factory() as session:
+        set_setting(session, "db.retention_days", 7, updated_by="admin")
+        session.commit()
+    clock.now = tr(DAY + timedelta(days=20), 12)  # the window starts on DAY + 13
+    partly = search(client, DAY, DAY + timedelta(days=16))
+    assert partly.status_code == 200, partly.text
+    assert partly.json()["archived"]["keep_days"] == 12
 
 
 @pytest.mark.parametrize("stored", ["0", "-3", "true", '"12"', "null"])

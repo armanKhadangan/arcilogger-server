@@ -390,11 +390,12 @@ _LOOKUP = _group(
         "lease.server_seconds",
         "Sunucuya göre kira süresi",
         "Lease time per server",
-        'Kira süresi farklı DHCP sunucuları: {"<ad>": saniye}, her biri en az 60. Ad, DHCP '
-        "sunucusu adı (MikroTik, ör. dhcp61) ya da FortiGate DHCP arayüzü adı (ör. vlan61).",
-        'DHCP servers with another lease time: {"<name>": seconds}, each at least 60. The name '
-        "is the DHCP server name (MikroTik, e.g. dhcp61) or the FortiGate DHCP interface name "
-        "(e.g. vlan61).",
+        'Kira süresi farklı DHCP sunucuları: {"<ad>": saniye}, her biri 60 ile 604800 (7 gün) '
+        "arasında. Ad, DHCP sunucusu adı (MikroTik, ör. dhcp61) ya da FortiGate DHCP arayüzü "
+        "adı (ör. vlan61).",
+        'DHCP servers with another lease time: {"<name>": seconds}, each between 60 and 604800 '
+        "(7 days). The name is the DHCP server name (MikroTik, e.g. dhcp61) or the FortiGate "
+        "DHCP interface name (e.g. vlan61).",
     ),
     (
         "lease.timeout_percent",

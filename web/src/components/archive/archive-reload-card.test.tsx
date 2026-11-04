@@ -5,6 +5,7 @@ import { StrictMode } from 'react';
 
 import { BACKGROUND_HEADER } from '@/lib/api';
 import type { ArchiveReload } from '@/lib/archive-reload-types';
+import { formatDateTime } from '@/lib/format';
 import { setLanguage } from '@/lib/i18n';
 import { errorResponse, installFetch, jsonResponse } from '@/test/api-mock';
 import type { RecordedRequest } from '@/test/api-mock';
@@ -23,6 +24,10 @@ import { testQueryClient } from '@/test/render';
 
 import { ARCHIVE_RELOAD_POLL_MS } from './archive-model';
 import { ArchiveReloadCard, type ArchiveReloadCardProps } from './archive-reload-card';
+
+// The ready sample's `expires_at` as the card shows it: captured anew with every capture of the
+// samples, so the expected text follows it instead of a fixed time.
+const READY_UNTIL = formatDateTime(ARCHIVE_READY.expires_at ?? '');
 
 /*
  * The card of the lookup and search pages (Wave 5 contract §5, G10): the API's 409 text or the
@@ -439,7 +444,7 @@ describe('ArchiveReloadCard — progress and the re-run', () => {
     expect(bar).toHaveAttribute('aria-valuenow', '100');
     const status = screen.getByTestId('archive-reload-status');
     expect(status).toHaveTextContent(
-      'Günler yüklendi; 20.10.2026 07:01:19 tarihine kadar veritabanında kalır.',
+      `Günler yüklendi; ${READY_UNTIL} tarihine kadar veritabanında kalır.`,
     );
     expect(status).toHaveTextContent('Sorgu yeniden çalıştırılıyor…');
     expect(status).not.toHaveTextContent('63,5 KB');
@@ -743,7 +748,7 @@ describe('ArchiveReloadCard — English', () => {
     expect(onReady).toHaveBeenCalledTimes(1);
     const status = screen.getByTestId('archive-reload-status');
     expect(status).toHaveTextContent(
-      'The days are loaded; they stay in the database until 20.10.2026 07:01:19.',
+      `The days are loaded; they stay in the database until ${READY_UNTIL}.`,
     );
     expect(status).toHaveTextContent('Running the search again…');
   });

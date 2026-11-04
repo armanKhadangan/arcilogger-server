@@ -353,8 +353,8 @@ SETTING_ERRORS: Final[Mapping[str, tuple[str, str]]] = {
         "The first group must capture the VLAN number, e.g. ^dhcp(\\d+)$.",
     ),
     "setting_lease_seconds": (
-        "Her DHCP sunucusu için en az 60 saniye gerekir.",
-        "Each DHCP server needs at least 60 seconds.",
+        "Her DHCP sunucusu için 60 ile 604800 saniye (7 gün) arasında bir süre gerekir.",
+        "Each DHCP server needs a time between 60 and 604800 seconds (7 days).",
     ),
     "setting_arp_grace_above_interval": (
         "ARP kaydı aralığından (arp.interval_seconds) uzun olamaz.",
@@ -575,12 +575,20 @@ LOCKED_KEYS: Final[frozenset[str]] = frozenset({"devices.oui_file", "usage.psl_f
 INTEGER_RANGES: Final[Mapping[str, tuple[int, int | None]]] = {
     "lookup.tolerance_seconds": (0, 3600),
     "lookup.max_candidates": (1, 10_000),
-    "lookup.max_session_seconds": (60, None),
     "lookup.timeout_seconds": (1, 300),
     "lookup.srcmac_max_ips": (1, 16),
-    "lease.default_seconds": (60, None),
-    "lease.timeout_percent": (100, 1000),
-    "arp.interval_seconds": (60, None),
+    # #126: the days a 5651 lookup reads (arcilogger_worker.lookup.days) grow with the tolerance
+    # and the longest session (both before and after the moment), the DNS look-back and the
+    # longest lease timeout or ARP grace (lease or ARP interval x percent). These bounds keep
+    # them within one archive reload (14 days, archive_reload_too_large) for every accepted
+    # value: 2 x (1 h + 2 d + 1 min) + 7 d x 125 % stays under 13 days, which touch at most 14
+    # site days (worker/tests/test_lookup_reach.py). 7 days is FortiOS's default lease-time
+    # (DEVICE-SETUP.md section 2.4), and each server of lease.server_seconds has the same bounds.
+    "lookup.max_session_seconds": (60, 172_800),
+    "lookup.dns_lookback_seconds": (0, 604_800),
+    "lease.default_seconds": (60, 604_800),
+    "lease.timeout_percent": (100, 125),
+    "arp.interval_seconds": (60, 604_800),
     "worker.leases_lag_seconds": (0, 86400),
     "auth.idle_minutes": (1, 120),
     "auth.absolute_hours": (1, 24),
@@ -643,6 +651,9 @@ INTEGER_RANGES: Final[Mapping[str, tuple[int, int | None]]] = {
     "live.max_minutes": (5, 480),
     "live.backfill_lines": (0, 200),
 }
+#: The bounds of each server's lease time in ``lease.server_seconds``: those of
+#: ``lease.default_seconds`` (#126, above).
+LEASE_SERVER_SECONDS: Final = INTEGER_RANGES["lease.default_seconds"]
 #: Area E: most addresses ``alerts.email_recipients`` may list.
 MAX_EMAIL_RECIPIENTS: Final = 20
 #: Area E: the alert severities, lowest first (``alerts.email_min_severity``).
@@ -806,10 +817,19 @@ def validate_setting(key: str, value: Any) -> Any:
                 f"{key}: ilk grup VLAN numarasını yakalamalı, örn. ^dhcp(\\d+)$",
             )
     if key == "lease.server_seconds":
+        low, high = LEASE_SERVER_SECONDS
         for server, seconds in value.items():
-            if type(seconds) is not int or seconds < 60:
+            if type(seconds) is not int or seconds < low:
                 raise SettingValueError(
-                    key, "setting_lease_seconds", f"{key}: {server!r} için en az 60 saniye gerekir"
+                    key,
+                    "setting_lease_seconds",
+                    f"{key}: {server!r} için en az {low} saniye gerekir",
+                )
+            if high is not None and seconds > high:
+                raise SettingValueError(
+                    key,
+                    "setting_lease_seconds",
+                    f"{key}: {server!r} için en çok {high} saniye girilebilir",
                 )
     if key == "privacy.notice_version" and not value.strip():
         raise SettingValueError(key, "setting_empty", f"{key}: boş olamaz")

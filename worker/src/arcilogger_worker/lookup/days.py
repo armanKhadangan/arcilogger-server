@@ -36,13 +36,24 @@ longest session ``S`` (``lookup.max_session_seconds``):
 A look-back of the engine that reaches before the first of these days (the 100-day cap of the
 missed-move check, round 7; a logged lease longer than what a reload holds, through the lease's
 newest record, the post-lease checks, D27 and the ARP interval after a RELEASE) reads only from
-the start of that day, :func:`reads_from`; the one read that reaches forward past the moment, D27
-(``T + W``, W up to a logged lease time), reads only up to the end of the last day,
-:func:`reads_until`. Either way the answer says so (``lookback_clamped_to_window``, W5-G
-deviations): its confidence and its notes rest only on rows a reload brings back, so a lookup
-gives the same answer before a drop and after the reload (G7) and never changes silently. The
-``leases``, devices and assignments the chains rest on are not log rows: the window job never
-drops them.
+the start of that day, :func:`reads_from`, and the answer says so (``lookback_clamped_to_window``,
+W5-G deviations). The one read that reaches forward past the moment, D27 (``T + W``, W up to a
+logged lease time), reads only up to the end of the last day, :func:`reads_until`: a method rule
+(docs/CORRELATION.md), not a note on the answer. Either way the answer's confidence and notes
+rest only on rows a reload brings back, so a lookup gives the same answer before a drop and after
+the reload (G7) and never changes silently. The ``leases``, devices and assignments the chains
+rest on are not log rows: the window job never drops them.
+
+The days of every lookup fit one reload (#126): the settings that widen them have upper bounds
+(``arcilogger_db.settings.INTEGER_RANGES``: ``lookup.max_session_seconds`` 2 days,
+``lookup.dns_lookback_seconds``, ``lease.default_seconds``, each server of
+``lease.server_seconds`` and ``arp.interval_seconds`` 7 days, ``lease.timeout_percent`` 125;
+``lookup.tolerance_seconds`` and the request's tolerance 3600 s) under which the days are at most
+:data:`RELOAD_DAYS`. A value stored before those bounds, or written around the validator, can
+still widen them. Such a lookup runs while its days are in the database; when the days it needs
+back from the vault are more than one reload holds, :func:`check_reload` refuses it, naming the
+settings above their bounds (:func:`above_bounds`): a reload of those days would be refused
+(``archive_reload_too_large``), so the 409 would lead nowhere.
 """
 
 from __future__ import annotations
@@ -52,6 +63,7 @@ from typing import Final
 
 from arcilogger_core.timeutil import day_window, site_day
 from arcilogger_db.models import LEASE_SECONDS_RANGE
+from arcilogger_db.settings import INTEGER_RANGES, LEASE_SERVER_SECONDS
 from arcilogger_worker.lookup.attribution import UNCONVERTED_WINDOW
 from arcilogger_worker.lookup.engine import DEFAULT_DNS_LOOKBACK_SECONDS
 from arcilogger_worker.lookup.sessions import LOG_SLACK
@@ -123,6 +135,63 @@ def lookup_days(
         logged = site_day(request.at - chains - LOG_SLACK - LOGGED_LEASE_MAX)
         first = min(first, max(logged, last - timedelta(days=RELOAD_DAYS - 1)))
     return first, last
+
+
+class LookupReachError(Exception):
+    """The days a lookup needs back from the vault are more than one reload holds
+    (:func:`check_reload`)."""
+
+    def __init__(self, first: date, last: date, settings: list[str]) -> None:
+        self.first = first
+        self.last = last
+        #: The settings above their bounds (:func:`above_bounds`); empty: none.
+        self.settings = settings
+        self.days = (last - first).days + 1
+        super().__init__(
+            f"the lookup needs {self.days} days back from the archive ({first} to {last}), more "
+            f"than one reload holds ({RELOAD_DAYS}): {', '.join(settings) or 'no setting'} above "
+            "its bound"
+        )
+
+
+def check_reload(
+    first: date,
+    last: date,
+    settings: LookupSettings,
+    *,
+    dns_lookback_seconds: int = DEFAULT_DNS_LOOKBACK_SECONDS,
+) -> None:
+    """:class:`LookupReachError` when the days ``first`` ... ``last`` a lookup needs back from
+    the vault (the 409's days) are more than :data:`RELOAD_DAYS`: one reload of them would be
+    refused (``archive_reload_too_large``), so the lookup is refused instead, naming the settings
+    that widen its days above their bounds (module text; #126). Only a value stored before those
+    bounds, or written around the validator, gets here."""
+    if (last - first).days + 1 > RELOAD_DAYS:
+        raise LookupReachError(first, last, above_bounds(settings, dns_lookback_seconds))
+
+
+def above_bounds(
+    settings: LookupSettings, dns_lookback_seconds: int = DEFAULT_DNS_LOOKBACK_SECONDS
+) -> list[str]:
+    """The settings that widen a lookup's days with a value above their upper bound
+    (``INTEGER_RANGES``; each server of ``lease.server_seconds``), in the order of the module
+    text."""
+    values = {
+        "lookup.tolerance_seconds": settings.tolerance_seconds,
+        "lookup.max_session_seconds": settings.max_session_seconds,
+        "lookup.dns_lookback_seconds": dns_lookback_seconds,
+        "lease.default_seconds": settings.lease_default_seconds,
+        "lease.server_seconds": max(settings.lease_server_seconds.values(), default=0),
+        "lease.timeout_percent": settings.lease_timeout_percent,
+        "arp.interval_seconds": settings.arp_interval_seconds,
+    }
+    bounds = {**INTEGER_RANGES, "lease.server_seconds": LEASE_SERVER_SECONDS}
+    above = []
+    for key, value in values.items():
+        high = bounds[key][1]
+        if high is not None and value > high:
+            above.append(key)
+    return above
 
 
 def reads_from(

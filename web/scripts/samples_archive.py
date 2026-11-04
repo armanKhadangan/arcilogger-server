@@ -151,7 +151,8 @@ def _capture(capture: Capture, admin: Any, auditor: Any, newcomer: Any) -> dict[
     archived = capture.json(
         auditor.post("/api/v1/search", json=_search(FIRST, FIRST + timedelta(days=4))), 200
     )
-    if archived["archived"] != {"first_day": FIRST.isoformat(), "last_day": LAST.isoformat()}:
+    expected = {"first_day": FIRST.isoformat(), "last_day": LAST.isoformat(), "keep_days": 7}
+    if archived["archived"] != expected:
         raise SystemExit(f"archive: the search did not answer archived: {archived['archived']}")
     out["search_archived"] = archived
     out["search_required"] = capture.error(

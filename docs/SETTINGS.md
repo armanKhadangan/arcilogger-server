@@ -44,6 +44,37 @@ change that breaks this. When you lower the interval below 300 seconds, change b
 one save. A time written outside this rule (by hand in SQL) is read by the lease job as the
 default (300 seconds, at most the interval), with a warning in the worker log.
 
+**The days a lookup reads** (same group): the days a 5651 lookup reads (reloaded from the archive
+when the database no longer has them) grow with the longest session, the DNS look-back and the
+longest lease timeout; one reload holds at most 14 days. These settings therefore have upper
+bounds, so that every lookup's days fit one reload:
+
+| Setting | Default | Bounds |
+|---|---|---|
+| `lookup.max_session_seconds` | 86400 (1 day) | 60–172800 (2 days) |
+| `lookup.dns_lookback_seconds` | 3600 | 0–604800 (7 days) |
+| `lease.default_seconds` | 86400 (1 day) | 60–604800 (7 days, FortiOS's default `lease-time`, [DEVICE-SETUP.md](DEVICE-SETUP.md) section 2.4) |
+| `lease.server_seconds` | `{}` | each server 60–604800 (7 days) |
+| `lease.timeout_percent` | 110 | 100–125 |
+| `arp.interval_seconds` | 3600 | 60–604800 (7 days) |
+
+The browser and the console both refuse a value of these settings above its bound (for example
+"Must be between 60 and 604800."); a server time above 604800 seconds in `lease.server_seconds` is
+refused by the API when it is saved ("Each DHCP server needs a time between 60 and 604800 seconds
+(7 days)."). For a server whose lease time is longer than 7 days, at most 7 days can be entered;
+ARCILOGGER then closes that server's leases 7 days × `lease.timeout_percent` after their last
+evidence. The logged lease time of FortiGate leases (`dhcp.fortigate_use_logged_lease`) is not
+bound by it. MikroTik's own default lease time is not stated in these documents (**sahada
+doğrula**, verify on site): the bounds lie above ARCILOGGER's defaults (a 1-day lease, ARP-LOG
+every hour). The 2-day bound of `lookup.max_session_seconds` is to be verified on site against
+the FortiGate's session times as well.
+
+A value stored before these bounds is read as it is: while a lookup's days are in the database
+the lookup answers, and when the days it needs back from the archive fit one reload (14 days) it
+asks for them with 409 `archive_reload_required`. A lookup that needs more than 14 days back is
+refused with 503 `lookup_settings_invalid`, whose text names the setting above its bound and the
+days: bring the value within the bounds.
+
 The **first-run wizard** ("İlk kurulum sihirbazı", `/settings/setup`) shows what is left to do after
 the installation as a checklist: Administrator and two-step verification, Site settings, Log
 sources, Kamu SM: test server, Kamu SM: production, Replica, E-mail and Summary. It opens from the
