@@ -456,6 +456,7 @@ def test_a_next_page_waiting_for_a_drop_sees_it(
     assert response.json()["archived"] == {
         "first_day": DAY.isoformat(),
         "last_day": DAY.isoformat(),
+        "keep_days": 7,
     }
     assert exclusive(outside)
 

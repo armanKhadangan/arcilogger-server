@@ -1432,7 +1432,11 @@ def test_the_search_answers_archived_or_409(
     # A range reaching into the window: its rows, and the archived part.
     partly = search(client, DAY, DAY + timedelta(days=16))
     assert partly.status_code == 200, partly.text
-    assert partly.json()["archived"] == {"first_day": DAY.isoformat(), "last_day": DAY.isoformat()}
+    assert partly.json()["archived"] == {
+        "first_day": DAY.isoformat(),
+        "last_day": DAY.isoformat(),
+        "keep_days": 7,
+    }
     assert partly.json()["items"] == []
 
 
@@ -1458,6 +1462,15 @@ def test_the_409_names_the_keep_days_of_the_setting(
         error = response.json()["error"]
         assert error["code"] == "archive_reload_required"
         assert error["details"]["keep_days"] == 12
+    # A search reaching into the window answers 200 with `archived`, which names it too (#126
+    # item 5): the dialog of that answer, the most common one, gets the real keep time as well.
+    with app_session_factory() as session:
+        set_setting(session, "db.retention_days", 7, updated_by="admin")
+        session.commit()
+    clock.now = tr(DAY + timedelta(days=20), 12)  # the window starts on DAY + 13
+    partly = search(client, DAY, DAY + timedelta(days=16))
+    assert partly.status_code == 200, partly.text
+    assert partly.json()["archived"]["keep_days"] == 12
 
 
 @pytest.mark.parametrize("stored", ["0", "-3", "true", '"12"', "null"])

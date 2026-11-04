@@ -344,7 +344,7 @@ class WindowCheck:
         days = self.reloadable()
         if not days:
             return None
-        return ArchivedRange(first_day=days[0], last_day=days[-1])
+        return ArchivedRange(first_day=days[0], last_day=days[-1], keep_days=self.keep_days)
 
 
 #: :func:`hold_window`'s statement: the lock, waited for at most ``lock_timeout`` (the subquery

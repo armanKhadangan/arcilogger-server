@@ -1307,6 +1307,14 @@ All Wave 5 questions are answered (2026-11-02).
   `api/tests/test_archive_api.py` (the 503, and the 409 and the answer with the same stored
   value).
 
+- **W5-G-20: the search's `archived` names `keep_days` too (an addition to C23; #126 item 5,
+  from the review of #123).** C23 put `keep_days` only in the `details` of 409
+  `archive_reload_required`. A search that answers 200 with `archived` days, the most common
+  case, now carries it as well: `ArchivedRange.keep_days`, the current `db.reload_keep_days` at
+  the time of the answer (the same value and read as the 409's), so W5-J's dialog names the real
+  keep time there too. Test: `test_the_409_names_the_keep_days_of_the_setting` sets 12 and finds
+  it in the lookup's and the search's 409 and in the search's 200 `archived`.
+
 ## Deviations — W5-H (2026-11-03)
 
 - **W5-H-1: the first line view of an xz file decompresses more than one stream.** §5.4 says
