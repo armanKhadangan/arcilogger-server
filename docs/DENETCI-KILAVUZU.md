@@ -446,6 +446,11 @@ alanı); ekrandaki her satır ayrıca Türkçe ve İngilizce açıklamasını ta
 | `index-hash`, `index-scope` | BİLGİ | `paket.json`'ın SHA-256 özeti (denetim kaydıyla karşılaştırın); paket no, oluşturan, zaman, günler, kaynaklar, sorgu |
 | `manifest`, `root`, `root-trust`, `roots-external` | BİLGİ | Manifest dosyası ve özeti; kök sertifika ve parmak izleri; parmak izlerini Kamu SM'nin yayımladığı değerlerle karşılaştırma hatırlatması; yalnızca `--kokler` ile verilen köklere güveniliyor |
 | `renewal-covers` | BİLGİ | Yenileme damgasının kapsadığı günler |
+| `renewal-not-due` | BİLGİ | Günün damgası için yeniden damgalama henüz gerekmiyor: TSA sertifikası 180 günden uzun süre daha geçerli (paket kurumun ayarını taşımaz; varsayılan 180 gün kullanılır) |
+| `renewal-covered` | OK | Günün damgası, sertifikası sona ermeden yeniden damgalanmış; sayılan yenileme kaydının adı verilir. Test (mock) damgalı, `reason: "test"` yazılmış ya da paketteki SİL'e göre iptal edilmiş bir yenileme sayılmaz |
+| `renewal-due` | UYARI | Damga sertifikası 180 gün içinde sona eriyor ve sayılan bir yenileme yok; yeniden damgalama bekleniyor |
+| `renewal-late` | UYARI | Yeniden damgalama, eski sertifikanın süresi dolduktan sonra yapılmış (verilen tarih yeniden damgalama zamanıdır) |
+| `renewal-uncovered` | UYARI | Damga sertifikasının süresi dolmuş ve yeniden damgalama yok; damga, alındığı an için geçerlidir. Uzun süreli kanıt için yeniden damgalama önerilir |
 | `report-hash` | BİLGİ | Raporun SHA-256 özeti: ARCILOGGER'daki sorgu kaydı ve denetim kaydıyla (`lookup.report`) aynı olmalı |
 | `report-not-stamped` | BİLGİ | Rapora ayrıca zaman damgası alınmamış (isteğe bağlı ayar) |
 | `summary-days`, `summary-root` | BİLGİ | Özet: incelenen günler; damgaların bağlandığı kök (Kamu SM'nin yayımladığı parmak iziyle karşılaştırın) |

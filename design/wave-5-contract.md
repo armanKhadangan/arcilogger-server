@@ -889,20 +889,6 @@ All Wave 5 questions are answered (2026-11-02).
 - **W5-B-8: the config adapter.** `crl.crl_options` reads `tsa.crl_urls`,
   `tsa.crl_max_age_days` and `network.https_proxy` with `getattr` and the §2.5 defaults until
   W5-T's day-1 pull request lands; then it becomes plain attribute access.
-- **W5-B-9: an interim field of the shared revocation table (C6), for W5-A to clear.** The core
-  applies C6 now; the standalone verifier follows with W5-A (merge order W5-B, then W5-A). The
-  C6 cases are already in `core/tests/revocation_cases.py` (W5-A does not add them again). Five
-  cases expect `crl-revoked` and carry `standalone_before_c6`, what the standalone verifier
-  gives today:
-  - `crl-hold`: a hold, then a revocation before the stamp; the same at the stamp time; a hold
-    and a privilegeWithdrawn revocation of the same date;
-  - `TypeError`: a hold and a revocation without a reason of the same date; two revocations of
-    the same date, one without a reason and one for key compromise.
-
-  `test_revocation.py` asserts exactly that, so it fails once W5-A changes `check_revocation`.
-  W5-A then removes the value from each case and, with the last one, the dataclass field, the
-  module-docstring paragraph and the interim branch of `test_revocation.py`, and this entry:
-  both verifiers must agree on every case.
 - **W5-B-10: C8's "packaged chain certificate"** is a certificate of a packaged day token's
   verified chain below its root (the TSA certificate and its intermediates; the chain
   `verify_token` checks, `tsa.verify.token_chain`). "Has an entry" means any entry for its
@@ -1269,3 +1255,165 @@ All Wave 5 questions are answered (2026-11-02).
   instead of an exception. Its Turkish text is one rule in `api/src/arcilogger_api/issues.py`
   (W5-C's), granted on #111 (2026-11-03 19:08): "{path}: sıkıştırılmış veri açılamıyor (dosya
   bozuk)"; the English text is the core's message itself.
+
+## Deviations — W5-A (2026-11-03)
+
+- **W5-A-1: the config adapter.** `renewal.renew_before_days` reads `tsa.renew_before_days`
+  with `getattr` and the §2.5 default (180) until W5-T's day-1 pull request lands (as W5-B-8
+  for `crl.crl_options`). It is the one place in `arcilogger_core` that reads the key; W5-C's
+  `legalstatus/options.py` has its own reader. Both become plain attribute access when W5-T
+  lands. Until then the 30–730 bounds are not enforced: they are W5-T's validation.
+- **W5-A-2: who writes `state/renewal.json`, and what it holds.** §2.1.2 says the status function
+  "also writes `state/renewal.json`" and "only the task writes it". `renewal_status` only
+  computes; the `Renew` task's command line (`arcilogger-core renew`, also `--dry-run`) writes the
+  file with `renewal.write_state` (`atomic_write_bytes`), so `verify_day`, the builder and the API
+  never write it. Each entry of `tokens` is W5-C's shape (`path`, `kind`, `cert_not_after`,
+  `status`, `covered_by`) plus `renewed_at` (UTC `…Z`, the counting renewal's genTime, else null),
+  taken from the status **after** the run. Top-level keys beside `tokens`, ignored by W5-C's
+  reader: `schema` (`arcilogger.renewal-status/1`), `at` (when the statuses were computed),
+  `renew_before_days`, `totals` (all five keys), `unreadable`, `mismatched`, `notes` (TR/EN),
+  `last_run {at, outcome, exit_code, record, error}` (`outcome`: `renewed`, `not_needed`,
+  `failed` or `refused`; `error`: a code such as `tsa_unavailable`, `renewal_stamp_invalid`,
+  `credentials`, `roots`) and `failures_in_a_row` (a failed or refused run adds one, any other
+  run sets 0) for W5-E's "Renew failed twice in a row" (C12); the names were accepted on #132
+  (A4), and W5-E follows them. The file is written after a failed (exit 3) or refused (exit 2) run too: the
+  statuses are computed afresh when the pinned roots are known (time passes while the server
+  fails, and a token turns `uncovered`), else the last known `tokens` stay with their `at`; with
+  none known the file has no `tokens`, which W5-C's reader takes as unknown, never as "nothing
+  due". A dry run writes the statuses and keeps `last_run` and `failures_in_a_row`. Every run
+  holds `state/renewal.lock` from before it computes the statuses until it has written the file,
+  so a dry run never writes over a run in progress; a run (dry or not) that finds the lock held
+  writes nothing (the holder writes the file).
+- **W5-A-3: the crash-safe write order.** §2.1.1 says the record "is written with
+  `atomic_write_bytes`, stamped", and a failed run deletes it. `renew` writes it as
+  `<name>.json.part` (with `atomic_write_bytes`), stamps it to `<name>.json.part.zd` and verifies
+  that token against the pinned roots; only then is the token renamed to its final name, then the
+  record, and both are locked with `immutability.lock`, as `retention` does for a deletion record.
+  A failed stamp (`TsaError`, `OSError`, or anything else the provider raises) or a token that
+  does not verify, or whose certificate the stored revocation lists show revoked at or before its
+  genTime (it would never count, C15: `RenewalStampInvalidError`, a `TsaResponseError`), removes
+  both files and is raised. So a record never exists under its final name without its token, and
+  the builder (which ships `renewals/*.json`) never ships one. Leftovers of an interrupted run are
+  tidied by the next run (`renewal.recover`): a part whose token (`.part.zd`, or the final `.zd`
+  when the run stopped between the renames) verifies against it is promoted; any other part, a
+  token without its record and an interrupted write's temporary file are removed, but never a
+  locked file (a locked token without its record means a completed record was removed: it stays
+  for a person, with a warning in the log; `recover` never unlocks). A record and its token under
+  their final names that are not both locked (`lock` failed after the renames) are locked by the
+  next run, as the seal locks every file of its day. One run at a time: `state/renewal.lock`
+  (never inside `vault/renewals`, where the standalone verifier's vault mode would report an
+  unknown file); a second run raises `RenewalBusyError` (`renewal_busy`), and a lock file that
+  cannot be opened or locked for another reason `RenewalLockError` (`renewal_lock_failed`), both
+  with TR/EN texts.
+- **W5-A-4: token paths.** A deletion token's path is the real
+  `deletions/<YYYY-MM-DD>[-N]-imha.json.zd` (`retention.records`, final names only, so no
+  `.part` file and no `chain-anchor.json`); §2.1.1's `…-retention.json.zd` is illustrative. A
+  report token's path is data-dir relative (`exports/reports/<name>.pdf.zd`), as §2.1.1 says;
+  every other path is vault-relative, and a day's is its token's (`…/manifest-<day>.json.zd`),
+  the key W5-C's day page looks it up by.
+- **W5-A-5: the standalone verifier's rule and window.** The package carries neither
+  `tsa.legal_root_fingerprints` nor `tsa.renew_before_days`, and §2.1.4 computes "from the
+  package alone". So in `verify.py` a renewal record counts when its token verifies against the
+  package's roots, the record is `arcilogger.renewal/1` with `tsa.legal_grade: true` and
+  `reason: "due"`, the stamp is not one of ARCILOGGER's test TSA (a policy under 2.999 or a root
+  of "ARCILOGGER TEST - NOT VALID", as `legal-claim-mismatch` judges a day) and the package's
+  CRLs do not show its certificate revoked at or before the stamp; and its own stamp is
+  `not_due` or `covered` (the chain of §2.1.2, the same rules as the core's, copied in the
+  standard library as `RenewalRules`). The window is the default 180 days (`RENEW_BEFORE`). A
+  production-like stamp whose root the site has not listed therefore counts in the standalone
+  verifier and not in the core: that case is the core's only. Only a day whose token verified
+  gets a finding (its certificate's `notAfter` comes from the verified signer); a day whose
+  token fails has failed already. `{date}` is `_format_time` in the Turkish text and ISO 8601
+  in the English one, as the other findings of the file write times; for `renewal-late` it is
+  the time of the re-stamping (the counting renewal's genTime), for the other codes the
+  certificate's expiry. `VERIFIER_VERSION` is "6" by addendum H4 (W5-A-8). At the edges both
+  verifiers follow §2.1.2 literally (owner answer Q16): a renewal stamped at the certificate's
+  notAfter itself is `late`, and a certificate counts as expired from its notAfter on
+  (`cert_not_after <= now`), although `tsa/verify.py:_valid_at` (and the standalone
+  `Certificate.valid_at`) treats a stamp made at notAfter as valid;
+  `test_the_expiry_boundaries_are_pinned` pins both, and so do the shared case table's three
+  notAfter cases (`renewal_cases.py`) and
+  `test_a_renewal_stamped_at_its_own_not_after_verifies_but_does_not_count` (the stamp verifies
+  in both verifiers, and the renewal does not count), so neither is "fixed" into the other
+  unnoticed.
+- **W5-A-6: what stays in section 5.** The existing `renewal-ok` (each record's stamp) and
+  `renewal-covers` (which packaged days a record names) stay beside the five new codes, and the
+  section "5. Yenileme damgaları" now appears whenever the package has a day whose token
+  verified, with one finding per such day, also when the package has no renewal record. None of
+  the five codes is `fail` (D6): the verdict of a package does not change.
+- **W5-A-7: a test record's own token is not renewable.** A renewal record written with
+  `reason: "test"` is read as a renewal (it never counts, D5), but its own token is not listed
+  as a token to renew: otherwise each test renewal would be renewed again, with nothing to
+  protect. A record with `reason: "due"` that does not count (its root is not listed, its token
+  does not verify, it was revoked) is still renewable.
+- **W5-A-8: `VERIFIER_VERSION` is "6", not §2.1.4's "5".** Addendum H4: W5-H (#130) merged into
+  `wave-5` first (84e71e1) and set "5", so W5-A, merging second, sets "6" (manager on #132,
+  2026-11-03 20:51). `test_renewal_standalone.py::test_verifier_version_is_6` pins it. If #136
+  (`xz-unsupported`) merges after W5-A, it takes "7" and updates that test.
+- **W5-A-9: exit codes beyond §2.1.3's wording.** `renew` catches its own errors (`main` maps
+  every `TsaError` to 1). Exit 3 also covers a new stamp that does not verify or is revoked
+  (`renewal_stamp_invalid`), another run holding `state/renewal.lock` (`renewal_busy`), a lock
+  file that cannot be used (`renewal_lock_failed`), a file error during the run (`io_error`) and a
+  `state/renewal.json` that cannot be written: each is retried by the next run. Exit 2 is a
+  provider that cannot be made (`credentials`, `zamane-jar`, `executable`, `secret-store`,
+  `provider`), a provider configuration error found only while stamping (a
+  `TsaConfigurationError` such as no Java or no Zamane client: `executable` or `provider`, it
+  needs an administrator, not a retry), or no usable pinned root (`roots`: none, or one that
+  cannot be read); a dry run needs only the roots. Another run holding the lock gives 3 before
+  any of these is checked. Exit 1 is any token still `uncovered` after the run, so a
+  test provider (whose records never count, D5) leaves an expired token `uncovered` and exits 1;
+  "nothing due" with an `uncovered` token cannot happen, as an uncovered token is due for
+  renewal. A dry run exits 1 when a token is `uncovered` now, else 0. The text output is Turkish
+  with English in brackets, errors on stderr; `--json` prints `outcome`, `exit_code`, `dry_run`,
+  `record`, `reason`, `due`, `renewed`, `discarded`, `error {code, message_tr, message_en}`,
+  `state_written` and `report`. Its `outcome` is one of the four of `last_run` or `dry_run` (a
+  dry run that ran) or `busy` (another run holds the lock); neither of the last two is ever a
+  `last_run.outcome`.
+- **W5-A-10: what the report adds.** `RenewalReport` also names the tokens and records it could
+  not read (`unreadable`: a token that cannot be parsed or whose stamped file is missing, a record
+  that is not `arcilogger.renewal/1` or has no token, a token whose imprint algorithm is not
+  supported; none of them has a status), names in `mismatched` the tokens whose imprint is not the
+  file they stamp as it is today (a changed manifest, deletion record, report or renewal record:
+  no status, never renewed, so no renewal record ever lists the hash of a changed file for the
+  builder to ship beside it), and carries notes with TR/EN texts for what it could not check:
+  unreadable stored revocation lists (the renewal tokens are then verified without lists, Q12),
+  stored lists left out because they do not match their index entry (`crl_mismatched`, naming the
+  files, C14) and an `exports/reports` folder that cannot be read (the `Renew` task may lack the
+  right; the run goes on without report tokens). A token that disappears during the scan (the
+  retention job) is skipped. The certificate's `notAfter` is read from each token, never from
+  `state/seal`.
+- **W5-A-11: the core verifier's day status (A2 on #132).** `chain.verify_day(...,
+  renewals=True)` puts the day's long-term status in `DayCheck.renewal`
+  (`renewal.day_renewal`: `status`, `code`, `level`, `cert_not_after`, `covered_by`,
+  `renewed_at` and the §2.6 TR/EN texts, the standalone verifier's codes, levels and texts) and
+  `as_json` adds the key `renewal`; it never adds an error or a warning (D6). With the default
+  `renewals=False` nothing reads the renewals and the output of every caller is byte for byte
+  what it was (`test_without_renewals_every_caller_sees_the_same_bytes`); no caller passes
+  `True` yet. As in the standalone verifier, only a day whose token verified gets a status (a
+  day that fails for another reason, such as a changed log file, keeps the status of its
+  token), and the window is the §2.5 default of 180 days: `verify_day` has no configuration,
+  and `day_renewal` takes the site's `tsa.renew_before_days` from a caller that has one. The
+  renewal tokens are checked with an EKU rule (`tsa.require_critical_eku`, K6) that each side
+  takes from its own source: `verify_day` from that day's manifest, the standalone verifier
+  relaxed when any manifest of the package is (`_relaxed_eku`), `renewal_status` and `renew`
+  from the site's configuration. They agree for a package of one day sealed under the current
+  setting (the table's two EKU cases); a package of a relaxed and a strict day, or a site that
+  changed the setting after sealing, can split them for a renewal with a non-critical EKU
+  (a question in the pull request). The renewals are judged with the `legal_roots` and the
+  revocation lists `verify_day` already has; each call reads and verifies every renewal record
+  again, so a caller that checks many days with `renewals=True` pays days × records. In the
+  core too, a renewal whose stamp is from ARCILOGGER's test TSA (policy under 2.999 or the test
+  root, `is_test_stamp`) never counts, even under a listed root (D5), as in the standalone
+  verifier (W5-A-5); the core looks for the test organization in the root's name only, the
+  standalone verifier in every certificate of the chain, which differ only for a test
+  intermediate under a root that is not the test root. The two verifiers agree on the shared
+  case table `core/tests/renewal_cases.py` (rule 5); its one exception, a production-like stamp
+  under a root the site has not listed, is W5-A-5's.
+- **W5-A-12: a root `.gitleaks.toml` (granted on #132, 2026-11-03T22:08Z).** The frozen fixture
+  (D15) holds the product's own JSON, and gitleaks' default `generic-api-key` rule reads its
+  `"token_sha256":"<64 hex>"` fields (the manifests, the deletion record and its anchor, the
+  renewal record: 9 matches) as secrets; they are SHA-256 digests of token files. JSON carries no
+  `# gitleaks:allow`, and the fixture's bytes are pinned, so the file keeps every default rule
+  (`useDefault`) and allows only a `token_sha256` field with exactly 64 lower-case hex digits; it
+  clears those 9 matches and nothing else in the repository. No path allowlist, no rule turned
+  off, `ci.yml` unchanged. Every new allowlist entry needs the manager's review.
