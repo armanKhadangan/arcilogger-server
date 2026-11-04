@@ -1659,6 +1659,22 @@ All Wave 5 questions are answered (2026-11-02).
   `test_stamp_crl_after_a_fetch_without_a_list_address` and
   `test_stamp_crl_raised_after_a_fetch_without_a_list_address_while_in_use`
   (`worker/tests/test_alerts_legal.py`).
+- **W5-E-7: the title of an `R20-renewal` raised by the failures alone (#151; item 4).** W5-E-3
+  titled every `R20-renewal` "Yeniden damgalama gerekiyor: … / Re-stamping needed: …", also when
+  only `failures_in_a_row >= 2` raised it and no stamp was due (the token list known with none
+  `due` or `uncovered`, or unknown). Then the title is
+  `alerts.texts.RENEW_FAILED_TITLE`: "Yeniden damgalama görevi art arda {failures} kez başarısız /
+  The re-stamping task failed {failures} times in a row", with the count from
+  `failures_in_a_row`. The issue's example said "twice"; the count is used because the alert
+  stays open and counts on (a third failure is "3 kez / 3 times"; at the threshold it reads
+  "2 kez / 2 times"). With a `due` or `uncovered` token the title stays "Re-stamping needed: …"
+  with the failures added, as before. The open alert's title follows each pass (the store
+  replaces it when it changes). The rule's catalogue name (`RULES["R20-renewal"]`, "Yeniden
+  damgalama gerekiyor / Re-stamping needed"), the details, the facts and the runbook are
+  unchanged; the title carries the count only, no name, address or log line. Tests:
+  `test_stamp_renewal_title_follows_what_raised_it`, and the titles in
+  `test_stamp_renewal_raised_after_two_failed_runs` and
+  `test_stamp_renewal_failures_without_tokens_raise` (`worker/tests/test_alerts_legal.py`).
 
 ## Deviations — #119 (2026-11-04)
 
