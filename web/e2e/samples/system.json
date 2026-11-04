@@ -13,7 +13,7 @@
     }
   },
   "meta": {
-    "captured_at": "2026-10-13T04:01:21.707320+00:00",
+    "captured_at": "2026-10-13T04:01:36.401243+00:00",
     "clock": "2026-10-13T07:00:00+03:00",
     "info": "captured by web/scripts/capture_api_samples.py; do not edit",
     "site_day": "2026-10-09",
@@ -21,25 +21,25 @@
     "tsa": "mock (never legally valid)"
   },
   "summary": {
-    "checked_at": "2026-10-13T07:01:06.833292+03:00",
+    "checked_at": "2026-10-13T07:01:14.558062+03:00",
     "collector": {
       "dropped_transport": 0,
       "dropped_unknown": 0,
       "sources": [
         {
           "bytes": 1102092770,
-          "last_received": "2026-10-13T07:01:02.754362+03:00",
+          "last_received": "2026-10-13T07:01:10.462460+03:00",
           "messages": 1652310,
           "name": "fortigate"
         },
         {
           "bytes": 31219480,
-          "last_received": "2026-10-13T07:00:16.754362+03:00",
+          "last_received": "2026-10-13T07:00:24.462460+03:00",
           "messages": 183644,
           "name": "core-r1"
         }
       ],
-      "started_at": "2026-10-11T02:01:06+03:00",
+      "started_at": "2026-10-11T02:01:14+03:00",
       "state": "running",
       "tcp_connections": 0,
       "tcp_framing_errors": 0,
@@ -49,12 +49,12 @@
         "count": 1,
         "messages": 14
       },
-      "updated_at": "2026-10-13T07:00:46+03:00",
+      "updated_at": "2026-10-13T07:00:54+03:00",
       "write_error_since": null,
       "write_failures": 0
     },
     "database": {
-      "measured_at": "2026-10-13T07:01:06.789160+03:00",
+      "measured_at": "2026-10-13T07:01:14.506403+03:00",
       "storage": "postgresql",
       "tables": [
         {
@@ -167,7 +167,7 @@
       ],
       "state": "running",
       "unknown_sources": 1,
-      "updated_at": "2026-10-13T07:01:03+03:00",
+      "updated_at": "2026-10-13T07:01:11+03:00",
       "workers_active": 2,
       "workers_configured": 2
     },
@@ -179,25 +179,25 @@
     }
   },
   "summary_first_reading": {
-    "checked_at": "2026-10-13T07:01:06.789160+03:00",
+    "checked_at": "2026-10-13T07:01:14.506403+03:00",
     "collector": {
       "dropped_transport": 0,
       "dropped_unknown": 0,
       "sources": [
         {
           "bytes": 1102092770,
-          "last_received": "2026-10-13T07:01:02.754362+03:00",
+          "last_received": "2026-10-13T07:01:10.462460+03:00",
           "messages": 1652310,
           "name": "fortigate"
         },
         {
           "bytes": 31219480,
-          "last_received": "2026-10-13T07:00:16.754362+03:00",
+          "last_received": "2026-10-13T07:00:24.462460+03:00",
           "messages": 183644,
           "name": "core-r1"
         }
       ],
-      "started_at": "2026-10-11T02:01:06+03:00",
+      "started_at": "2026-10-11T02:01:14+03:00",
       "state": "running",
       "tcp_connections": 0,
       "tcp_framing_errors": 0,
@@ -207,12 +207,12 @@
         "count": 1,
         "messages": 14
       },
-      "updated_at": "2026-10-13T07:00:46+03:00",
+      "updated_at": "2026-10-13T07:00:54+03:00",
       "write_error_since": null,
       "write_failures": 0
     },
     "database": {
-      "measured_at": "2026-10-13T07:01:06.789160+03:00",
+      "measured_at": "2026-10-13T07:01:14.506403+03:00",
       "storage": "postgresql",
       "tables": [
         {
@@ -325,7 +325,7 @@
       ],
       "state": "running",
       "unknown_sources": 1,
-      "updated_at": "2026-10-13T07:01:03+03:00",
+      "updated_at": "2026-10-13T07:01:11+03:00",
       "workers_active": 2,
       "workers_configured": 2
     },

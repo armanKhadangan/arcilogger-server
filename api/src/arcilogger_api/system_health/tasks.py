@@ -19,7 +19,8 @@ Retention      none ArciApi can read: ``not_observable``                 —    
 Credit         newest ``time`` of ``state/credit.jsonl``                 26 h        not Zamane
 ClockCheck     newest ``time`` of ``state/clock/<day>.jsonl`` (today,    2 h         —
                yesterday)
-Backup         ``finished`` of ``state/backup/last.json``                26 h        backup off
+Backup         ``finished`` of ``state/backup/last.json``; ``failed``    26 h        backup off
+               when its ``ok`` is not ``true``
 Requests       ``state/requests`` (not readable): ``not_observable``     —           —
 ApplySystem    ``at`` of ``admin/system/status.json``                    15 min      browser
                                                                                      admin off
@@ -27,31 +28,41 @@ Renew          ``last_run.at`` of ``state/renewal/renewal.json``         26 h   
                (not ``at``, which a run without pinned roots keeps)
 CrlFetch       newest ``fetched_at`` of the ``lists`` or ``at`` of the   26 h        —
                ``failures`` of ``state/crl/index.json``; with no
-               failure, also when the index was written
+               failure, also when the index was written; ``failed``
+               with its ``run_failure``, or when ``crl fetch`` cannot
+               read the index
 =============  ========================================================  ==========  ==========
 
 ``missing``: no evidence yet; ``late``: the evidence is older than the limit — each task's cadence
-(the task's XML) plus a grace, not a setting. The names of the verification results are the ones
+(the task's XML) plus a grace, not a setting; ``failed``: the task's latest run recorded that it
+failed, however long ago, with a ``code`` (:data:`TaskFailure`) and the failure's time as the
+evidence (#171). The names of the verification results are the ones
 ``arcilogger-core verify`` really writes (contract Implementation note 7): it puts ``last-``
 before its kind, and the kind of ``--last N`` is ``last-<days verified>`` (:func:`verify_state`).
 Seal is judged by every day's state except those Retention rewrote: it marks each day it deletes
 (``status = "deleted"``, ``retention._delete_day``), which says nothing about Seal, while Seal
 itself may rewrite any day's state, also an old one it retries after a time-stamp outage.
-Renew and CrlFetch are judged by their state files, never by an exit code (Wave 5 contract C12,
-A4); like Backup's, their rows say that the task ran, and whether it succeeded is R20-renewal's
-and R20-crl's. A dry run of ``renew`` keeps ``last_run``, and a ``crl fetch`` that finds the lock
-held writes nothing, so neither is evidence. From an upgrade to the first counted Renew run the
-Renew row reads the earlier release's ``state/renewal.json`` and names it as its evidence (Wave 5
-contract W5-E-4). Every ``crl fetch`` that gets past its lock and its reads rewrites the index
-with the failures of that run only, so an index that records no failure was written by a run
-without one, and its modification time is that run: also on a site that knows no list address
-any more, whose stored lists keep their old ``fetched_at`` (W5-E-2, answer to Q8 on #158). A run
-that finds the lock held writes nothing, but the run holding it writes the index, so the row
-stays fresh. A run that fails on an index or a stored list it cannot read exits 1 (answer to Q9)
-and writes nothing: the row keeps the run before and turns late 26 h after it, or shows
-``missing`` while the index cannot be read. It cannot show that run as failed: the states have
-no such value, and the exit code is no evidence here (C12, A4; a question on #158).
-A time later than now is no evidence of these two: a clock set back never keeps them fresh.
+Backup, Renew and CrlFetch are judged by their state files, never by an exit code (Wave 5
+contract C12, A4). Backup's row is ``failed`` while ``last.json`` records a failed attempt, as
+R20-backup reads it; its ``error`` text is never read (KVKK). Renew's row says that the task ran,
+and whether it succeeded is R20-renewal's; the per-URL ``failures`` of CrlFetch's index leave its
+row ``ok`` too, they are R20-crl's (W5-E-2). A dry run of ``renew`` keeps ``last_run``, and a
+``crl fetch`` that finds the lock held writes nothing, so neither is evidence. From an upgrade to
+the first counted Renew run the Renew row reads the earlier release's ``state/renewal.json`` and
+names it as its evidence (Wave 5 contract W5-E-4). Every ``crl fetch`` that gets past its lock and
+its reads rewrites the index with the failures of that run only, so an index that records no
+failure and no run failure was written by a completed run without one, and its modification time
+is that run: also on a site that knows no list address any more, whose stored lists keep their
+old ``fetched_at`` (W5-E-2, answer to Q8 on #158). A run that finds the lock held writes nothing,
+but the run holding it writes the index, so the row stays fresh. A run that cannot read a stored
+list exits 1 (answer to Q9) and writes the index as it read it with a ``run_failure``, its time
+and code and never the error text: the row is ``failed`` until the next completed run writes the
+index without one. A run that cannot read the index itself writes nothing: the row is ``failed``
+with no time when the reader of ``crl fetch`` rejects what the index holds
+(``arcilogger_core.crl.read_index``, stricter than R20-crl's: a byte order mark, for one), and
+``missing`` while ArciApi cannot read the file at all.
+A time later than now is no evidence of Renew or CrlFetch, nor a failed Backup's time: a clock set
+back never keeps them fresh.
 A file that cannot be read is no evidence; it never fails the request.
 """
 
@@ -62,11 +73,13 @@ from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
-from typing import Any, Final
+from typing import Any, Final, Literal
 
 from arcilogger_api.sealinfo import credit_history
 from arcilogger_api.system_health.models import TaskHealth, TaskName
 from arcilogger_core.config import Config
+from arcilogger_core.crl import CrlError
+from arcilogger_core.crl import read_index as read_crl_document
 from arcilogger_core.layout import Layout
 from arcilogger_core.renewal import state_path as renewal_state_path
 from arcilogger_core.renewal import state_to_read as renewal_state_to_read
@@ -85,6 +98,13 @@ DAILY_VERIFY_DAYS: Final = (1, 2)
 #: Days of ``state/replica`` read, ending today (a day is copied after it was sealed).
 REPLICA_DAYS: Final = 3
 
+#: The ``code`` of a ``failed`` row: never the error text a task wrote, which can hold paths,
+#: URLs, host and user names (KVKK).
+TaskFailure = Literal["backup_failed", "index_unreadable", "stored_file_unreadable"]
+#: The ``run_failure.error`` values a ``crl fetch`` records in its index; a record with another
+#: one is no evidence.
+CRL_RUN_FAILURES: Final[tuple[TaskFailure, ...]] = ("stored_file_unreadable",)
+
 
 @dataclass(frozen=True)
 class Evidence:
@@ -102,14 +122,26 @@ class Evidence:
 
 
 @dataclass(frozen=True)
+class Reading:
+    """The evidence of a task whose latest run can record that it failed."""
+
+    #: Newest evidence (None: none yet); when ``failure`` is set, the failure's time (None:
+    #: unknown).
+    at: datetime | None
+    #: Why the latest run failed (None: it did not).
+    failure: TaskFailure | None = None
+
+
+@dataclass(frozen=True)
 class TaskRow:
     task: TaskName
     schedule_tr: str
     schedule_en: str
     #: Shown as the evidence, relative to the data folder (empty: none).
     evidence: str
-    #: Newest evidence (None: none yet); None for a task whose evidence ArciApi cannot read.
-    read: Callable[[Evidence], datetime | None] | None
+    #: Newest evidence (None: none yet), or a :class:`Reading` with the failure of the latest
+    #: run; None for a task whose evidence ArciApi cannot read.
+    read: Callable[[Evidence], Reading | datetime | None] | None
     late_after: timedelta | None
     #: The task is switched off by the configuration (it runs and does nothing).
     not_used: Callable[[Evidence], bool] | None = None
@@ -237,8 +269,16 @@ def _clock(evidence: Evidence) -> datetime | None:
     return _newest(evidence.clock_times)
 
 
-def _backup(evidence: Evidence) -> datetime | None:
-    return _field_time(backup_state_path(evidence.layout), "finished")
+def _backup(evidence: Evidence) -> Reading | datetime | None:
+    """``finished`` of ``state/backup/last.json``; a failed attempt (``ok`` not ``true``, as
+    R20-backup reads it) writes the time it failed there. ``error`` is never read (KVKK)."""
+    data = _read_json(backup_state_path(evidence.layout))
+    if not isinstance(data, dict):
+        return None
+    finished = aware_time(data.get("finished"))
+    if data.get("ok") is not True:
+        return Reading(_until_now(evidence, (finished,)), "backup_failed")
+    return finished
 
 
 def _apply_system(evidence: Evidence) -> datetime | None:
@@ -269,15 +309,44 @@ def _renew_shown(evidence: Evidence) -> str:
     return "\\".join(shown.relative_to(evidence.layout.root).parts)
 
 
-def _crl_fetch(evidence: Evidence) -> datetime | None:
+def _crl_fetch(evidence: Evidence) -> Reading | datetime | None:
+    try:
+        # The reader of crl fetch itself: what it cannot get past, the task cannot either. It is
+        # stricter than R20-crl's (a byte order mark, for one).
+        document = read_crl_document(evidence.layout)
+    except CrlError as exc:
+        # An index ArciApi cannot read is no evidence; one it reads and crl fetch rejects is.
+        return None if isinstance(exc.__cause__, OSError) else Reading(None, "index_unreadable")
+    except RecursionError:  # nested too deeply to parse: crl fetch stops on it as well
+        return Reading(None, "index_unreadable")
+    completed = "run_failure" not in document
+    if not completed:
+        failed = _crl_run_failure(evidence, document["run_failure"])
+        if failed is not None:
+            return failed
     index = read_crl_index(evidence.layout)
     moments: list[datetime | None] = [entry.fetched_at for entry in index.lists]
     moments += [failure.at for failure in index.failures]
-    if index.readable and not index.failures:
-        # The run that wrote the index failed nowhere: its lists' fetched_at can be older, when
-        # it knew no list address (#151, answer to Q8 on #158). state/crl is protected.
+    if completed and index.readable and not index.failures:
+        # The run that wrote the index completed and failed nowhere: its lists' fetched_at can
+        # be older, when it knew no list address (#151, answer to Q8 on #158). state/crl is
+        # protected.
         moments.append(_modified(crl_index_path(evidence.layout)))
     return _until_now(evidence, moments)
+
+
+def _crl_run_failure(evidence: Evidence, record: Any) -> Reading | None:
+    """The ``run_failure`` a ``crl fetch`` that could not complete wrote into the index as it
+    read it; the next completed run writes an index without one. None for a record with an
+    unknown ``error`` or a time that is missing or later than now: the row is then judged by the
+    index's lists and failures, but never by its modification time, which is no completed run."""
+    if not isinstance(record, dict):
+        return None
+    at = aware_time(record.get("at"))
+    code = next((known for known in CRL_RUN_FAILURES if known == record.get("error")), None)
+    if at is None or at > evidence.now or code is None:
+        return None
+    return Reading(at, code)
 
 
 #: One row per file of ``deploy/windows/tasks/``, in the order of the contract's table (a test
@@ -398,12 +467,18 @@ TASK_ROWS: Final[Mapping[str, TaskRow]] = {row.task: row for row in TASKS}
 
 
 def judge(row: TaskRow, evidence: Evidence) -> TaskHealth:
-    """One task's row: its state from its newest evidence and the configuration."""
-    last = row.read(evidence) if row.read is not None else None
+    """One task's row: its state from its newest evidence and the configuration, in this order:
+    ``not_used``, ``not_observable``, ``failed`` (however old, until the next completed run),
+    ``missing``, ``late`` or ``ok``."""
+    found = row.read(evidence) if row.read is not None else None
+    reading = found if isinstance(found, Reading) else Reading(found)
+    last = reading.at
     if row.not_used is not None and row.not_used(evidence):
         state = "not_used"
     elif row.read is None or row.late_after is None:
         state = "not_observable"
+    elif reading.failure is not None:
+        state = "failed"
     elif last is None:
         state = "missing"
     else:
@@ -413,6 +488,7 @@ def judge(row: TaskRow, evidence: Evidence) -> TaskHealth:
         schedule_tr=row.schedule_tr,
         schedule_en=row.schedule_en,
         state=state,
+        code=reading.failure if state == "failed" else None,
         last_evidence_at=None if last is None else to_site(last),
         evidence=row.evidence if row.shown is None else row.shown(evidence),
     )

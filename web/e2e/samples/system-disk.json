@@ -1,6 +1,6 @@
 {
   "disk": {
-    "checked_at": "2026-10-13T07:01:06.875981+03:00",
+    "checked_at": "2026-10-13T07:01:14.610955+03:00",
     "drives": [
       {
         "critical_percent": 95,
@@ -39,7 +39,7 @@
     ]
   },
   "disk_not_growing": {
-    "checked_at": "2026-10-13T07:01:06.902208+03:00",
+    "checked_at": "2026-10-13T07:01:14.642356+03:00",
     "drives": [
       {
         "critical_percent": 95,
@@ -91,7 +91,7 @@
     }
   },
   "meta": {
-    "captured_at": "2026-10-13T04:01:21.707320+00:00",
+    "captured_at": "2026-10-13T04:01:36.401243+00:00",
     "clock": "2026-10-13T07:00:00+03:00",
     "info": "captured by web/scripts/capture_api_samples.py; do not edit",
     "site_day": "2026-10-09",

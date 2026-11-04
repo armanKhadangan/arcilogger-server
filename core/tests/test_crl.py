@@ -587,6 +587,86 @@ def test_a_wrong_index_stops_the_run_and_stays(server: Server, root: Ca, layout:
     assert server.requests == []
 
 
+def _unreadable(monkeypatch: pytest.MonkeyPatch, path: Path) -> None:
+    """``path`` cannot be read from now on (as a file whose ACL denies the service account)."""
+    read_bytes = Path.read_bytes
+
+    def denied(self: Path) -> bytes:
+        if self == path:
+            raise PermissionError(13, "Permission denied", str(self))
+        return read_bytes(self)
+
+    monkeypatch.setattr(Path, "read_bytes", denied)
+
+
+def test_a_stored_list_that_cannot_be_read_stops_the_run_and_is_recorded(
+    server: Server, root: Ca, layout: Layout, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#171: a stored list that cannot be read stops the run (exit 1). The index is written as
+    it was read, with ``run_failure`` (the run's time and code only, no file name or URL), not
+    with the lists of the run that stopped; the next completed run drops it."""
+    data = make_crl(root, datetime(2026, 11, 1, tzinfo=UTC))
+    server.routes["/root.crl"] = Route(data)
+    url, gone = server.url("/root.crl"), closed_port_url()
+    assert fetch(options(url, gone), layout, [root.certificate], NOW).exit_code == 1
+    before = read_index(layout)
+    name = stored_name(root, "20261101T000000Z", data)
+    newer = make_crl(root, datetime(2026, 11, 2, tzinfo=UTC))
+    server.routes["/newer.crl"] = Route(newer)
+    second = server.url("/newer.crl")
+    _unreadable(monkeypatch, layout.crl_dir / name)
+
+    # The newer list is stored first; the known one then cannot be hashed.
+    later = NOW + timedelta(days=1)
+    with pytest.raises(CrlError, match=re.escape(f"stored CRL {name} cannot be read")):
+        fetch(options(second, url), layout, [root.certificate], later)
+    recorded = {"at": "2026-11-03T12:00:00+03:00", "error": "stored_file_unreadable"}
+    assert read_index(layout) == {**before, "run_failure": recorded}
+    newer_name = stored_name(root, "20261102T000000Z", newer)
+    assert (layout.crl_dir / newer_name).read_bytes() == newer  # stored, not indexed yet
+    # No URL: every index entry is hashed, and the same stop is recorded with this run's time.
+    with pytest.raises(CrlError, match="cannot be read"):
+        fetch(options(), layout, [root.certificate], later + timedelta(hours=1))
+    assert read_index(layout)["run_failure"] == {**recorded, "at": "2026-11-03T13:00:00+03:00"}
+    assert read_index(layout)["lists"] == before["lists"]
+
+    monkeypatch.undo()
+    run = fetch(options(second, url), layout, [root.certificate], later + timedelta(hours=2))
+    assert run.exit_code == 0
+    index = read_index(layout)
+    assert "run_failure" not in index
+    assert [entry["file"] for entry in index["lists"]] == sorted([name, newer_name])
+    assert index["failures"] == []
+
+
+def test_a_stopped_run_whose_record_cannot_be_written_still_raises(
+    server: Server,
+    root: Ca,
+    layout: Layout,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The index write of ``run_failure`` fails as well: it is logged, and the run still raises
+    the error of the stored list (exit 1); the index stays as it is."""
+    data = make_crl(root, datetime(2026, 11, 1, tzinfo=UTC))
+    server.routes["/root.crl"] = Route(data)
+    url = server.url("/root.crl")
+    assert fetch(options(url), layout, [root.certificate], NOW).exit_code == 0
+    written = (layout.crl_dir / "index.json").read_bytes()
+    name = stored_name(root, "20261101T000000Z", data)
+    _unreadable(monkeypatch, layout.crl_dir / name)
+
+    def full_disk(path: Path, text: str) -> None:
+        raise OSError(28, "No space left on device", str(path))
+
+    monkeypatch.setattr(crl_module, "atomic_write_text", full_disk)
+    with pytest.raises(CrlError, match=re.escape(f"stored CRL {name} cannot be read")):
+        fetch(options(url), layout, [root.certificate], NOW)
+    assert (layout.crl_dir / "index.json").read_bytes() == written
+    assert "the stopped run cannot be recorded" in caplog.text
+    assert "No space left on device" in caplog.text
+
+
 def test_the_index_keeps_the_failures_of_the_latest_run_only(
     server: Server, root: Ca, layout: Layout
 ) -> None:

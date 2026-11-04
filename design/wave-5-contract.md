@@ -2326,3 +2326,109 @@ issue fixed is kept (command, flags, exit codes 0/1/2, JSON fields); what differ
   format of `leases.evidence`; an `fg_dhcp` element now also carries `"vd"`);
   `docs/ASSUMPTIONS.md` (:226 and :479 name the checks V1–V17 of the Wave 3 contract; V18 is
   §16's own, as the list's introduction says, and not a Wave 3 number).
+
+## Deviations — #171 (2026-11-04)
+
+The Sistem page shows a task whose latest run recorded a failure (issue #171, follow-up of Q9 on
+#158). The design comment on #171 is the brief; what it amends:
+
+- **#171-1: a task state `failed` and a `code` (amends W4-D §2.6.1 and §2.6.2, and W5-E-2's
+  "the API has no failing task state").** `TaskHealthState` (`system_health/models.py`) is
+  `"ok" | "late" | "missing" | "not_used" | "not_observable" | "failed"`, mirrored by
+  `system-health-types.ts`. `TaskHealth` gains `code: str | None` after `state`, as
+  `ApplySystemHealth.code`: one of `backup_failed`, `index_unreadable`, `stored_file_unreadable`
+  (`tasks.py`, `TaskFailure`) when `failed`, null in every other state. The answer never carries
+  the error text a task wrote, which can hold paths, URLs, host and user names (KVKK; precedent
+  `system_health/jobs.py`). `last_evidence_at` of a `failed` row is the failure's time (null:
+  unknown). `judge` decides in this order: `not_used`, `not_observable`, `failed`, `missing`,
+  `late` or `ok`. `failed` holds until the next completed run, however old the failure (it
+  outranks `late`); a failure time later than now is no evidence, as for the other times
+  (`_until_now`). The rows read each file once per request: `TaskRow.read` returns a datetime,
+  or a `Reading` (`at`, `failure`) for the two tasks below.
+- **#171-2: the Backup row (amends the Backup row of W4-D §2.6.2).** `state/backup/last.json`
+  is read once (`_backup`): a file that is no object or cannot be read is no evidence
+  (`missing`, as before); `ok` not `true` (as `R20-backup`'s `check_backup` reads it) is
+  `failed`, code `backup_failed`, with `finished` as `last_evidence_at` (a failed attempt writes
+  the time it failed there; null when it does not parse or is later than now); otherwise `late`
+  or `ok` from `finished`. `[backup] enabled = false` stays `not_used` first, as `check_backup`
+  resolves everything then. A later success writes `ok: true` and clears it. `error` is never
+  read. No change to `db/src/arcilogger_db/backup.py` (there is no `last_failure` key; the
+  writer's keys stay those of `write_last_state`).
+- **#171-3: the CrlFetch row, three cases (amends W5-E-2 and W5-E-6).**
+  - **(a) The lock is held:** nothing is recorded (W5-B-2 unchanged). The run holding the lock
+    writes the index, so the row stays fresh; a holder that hangs shows `late`. Writing the
+    index without the lock would also share `atomic_write_bytes`' temporary
+    `.index.json.tmp` with the holder.
+  - **(b) The index cannot be read:** `crl fetch` writes nothing (the index is left as it is).
+    ArciApi judges it with the core parser of `crl fetch` itself,
+    `arcilogger_core.crl.read_index(layout)`, not W5-C's `read_crl_index`, which is more lenient
+    (it reads a UTF-8 byte order mark, which Windows PowerShell 5 `Set-Content -Encoding UTF8`
+    writes and on which every run stops). A `CrlError` whose `__cause__` is not an `OSError`
+    (bad JSON, a byte order mark, another schema, `lists` or `failures` that are no list), or a
+    document nested too deeply to parse (`RecursionError`), is `failed`, code
+    `index_unreadable`, `last_evidence_at` null (the file's modification time is no run). An
+    `OSError` (ArciApi cannot read the file) is no evidence: `missing`, as before; no index is
+    `missing` as before. This replaces W5-E-2's "a file that cannot be read shows `missing`"
+    for content `crl fetch` rejects.
+  - **(c) A stored list cannot be read** (`CrlError` from `_file_sha256` inside the run): the
+    run writes the index **as it was read**, not its half-updated lists, with one more
+    top-level key `"run_failure": {"at": <the run's at, site time, seconds>, "error":
+    "stored_file_unreadable"}` (`_record_run_failure`; its code is the new Literal
+    `RunFailureCode`, not the per-URL `FailureCode`; never `str(exc)`, which names the file),
+    then raises the original `CrlError` (exit 1, as before). When that write itself raises
+    `OSError`, it is logged and the original `CrlError` is still raised (the CLI catches only
+    `CrlError`). Lists stored earlier in that run stay as files outside the index; the next
+    completed run indexes them. The next completed run (exit 0, 1 with recorded failures, or 2)
+    rebuilds the document from its literal, which has no `run_failure`, so the record clears
+    without a deletion (`test_the_crl_module_has_no_way_to_delete` still holds). The API reads
+    the record from the same `read_index` call as (b): a `run_failure` whose `at` parses and is
+    not later than now and whose `error` is a known code (`CRL_RUN_FAILURES`) is `failed` with
+    that code and `at` as `last_evidence_at`; any other record is ignored, and the row is then
+    judged by its lists and failures as before.
+  - **W5-E-6's modification-time rule (answer to Q8 on #158)** now also requires that the
+    index has no `run_failure`: an index rewritten by a stopped run is no completed run. "Each
+    run that gets past its lock and its reads rewrites the index with the failures of that run
+    only" holds for completed runs; a stopped run (c) writes the index it read with its
+    `run_failure`.
+  - **Per-URL `failures` stay `ok`** (W5-E-2 unchanged): exit 1 "some failed (recorded)" is a
+    completed run, and whether the lists are fresh is `R20-crl`'s question.
+  - **`crl.py` hunk (coordination with #170):** the `try`/`except CrlError` wraps `fetch` from
+    `tried: list[str] = []` through the index's `atomic_write_text` (lines 947-973 at
+    `651c433`); `with _one_run(...)`, `index = read_index(layout)` and the `lists` dict (lines
+    942-946 at `651c433`) are unchanged, so #170's cleanup at the start of the run under the
+    lock does not touch the same lines.
+- **#171-4: §2.2's index format gains an optional top-level key** `"run_failure": {"at": "...",
+  "error": "stored_file_unreadable"}`, present only in an index written by a run that stopped
+  on a stored list it could not read. `read_crl_index` (`worker/.../alerts/system.py`, W5-C) and
+  `crl._index` ignore it, so `R20-crl`, `crl_stale`/`crl_fresh` and the legal status are
+  unchanged; `crl status` prints it with the rest of the index. The standalone verifier never
+  reads `state/crl/index.json`, so neither verifier's verdict changes (rule 5).
+- **#171-5: the `fetch` docstring.** "(the index is then left as it is)" now holds for a held
+  lock and an index that cannot be read; a stored file that cannot be read is recorded as
+  `run_failure` (#171-3 (c)).
+- **Renew is unchanged** (`ok` after a refused or failed run, W5-E-2); whether its
+  `last_run.outcome` should count is Q3 below.
+- **Docs (W4-G files, minimal):** `docs/UYUM-DURUMU.md` / `docs/COMPLIANCE-STATUS.md` §4.6 (the
+  state sentence and the Backup row), `docs/MVP-CONTRACTS.md` §19.5 (the state union, `code`,
+  the Tasks sentence and the Backup row) and `docs/adr/0017-compliance-and-system-pages.md`
+  D9 (the state list). The task tables still have no Renew or CrlFetch row (predates #171).
+- **Questions (pending answers on #171; the defaults above are implemented meanwhile):**
+  - **Q1:** should a held lock be recorded? Default: no (W5-B-2 stays; the holder's run is the
+    evidence).
+  - **Q2:** an index the run cannot read carries no time: is `failed` with `last_evidence_at`
+    null enough, or should a separate `state/crl/run.json` record the run's time (and, written
+    without the lock, case (a))? Default: no new file.
+  - **Q3:** should Renew's `last_run.outcome` `failed` or `refused` turn its row `failed`?
+    Default: no change.
+- **Tests:** see the PR. Changed: in `api/tests/test_system_health.py`,
+  `test_task_states_from_evidence_files` (a failed Backup attempt is `failed`, no longer `ok`),
+  `test_renew_and_crlfetch_are_judged_by_their_state_files` (a damaged index is `failed` /
+  `index_unreadable`, no longer `missing`) and
+  `test_crlfetch_after_the_list_addresses_are_gone_shows_the_run` (Q9's damaged index, and one
+  with a byte order mark that `read_crl_index` still reads, is `failed` with no time). New in
+  `api/tests/test_system_health.py`: `test_backup_row_shows_a_failed_attempt`,
+  `test_crlfetch_row_shows_a_run_that_stopped`,
+  `test_crlfetch_index_arciapi_cannot_read_is_missing`, `test_failed_rows_name_no_error_text`
+  and `test_run_failure_leaves_the_alerts_as_they_are`; in `core/tests/test_crl.py`:
+  `test_a_stored_list_that_cannot_be_read_stops_the_run_and_is_recorded` and
+  `test_a_stopped_run_whose_record_cannot_be_written_still_raises`.

@@ -702,8 +702,10 @@ page lists every configured source).
 One row per task of `deploy\windows\tasks\`. The state is derived from the task's **evidence file**
 (paths relative to the data folder): "On time"; "Late" (the evidence is older than the limit); "No
 evidence" (no evidence yet); "Not used" (the task does nothing in this configuration); "Not
-observable" (no evidence ArciApi can read). The limits are the task's cadence plus a margin; they
-are not settings.
+observable" (no evidence ArciApi can read); "Failed" (the evidence file shows that the task's
+latest run failed; it lasts until the next completed run, however old; the answer carries only a
+code, never the error text: `backup_failed`, `index_unreadable`, `stored_file_unreadable`). The
+limits are the task's cadence plus a margin; they are not settings.
 
 | Task | Schedule | Evidence | Late after | Not used when |
 |---|---|---|---|---|
@@ -715,7 +717,7 @@ are not settings.
 | Retention | Daily at 02:00 | no readable evidence → "Not observable" | — | `[retention] enabled = false` |
 | Credit | Daily at 06:00 | newest `time` of `state\credit.jsonl` | 26 h | `[tsa] provider` is not `zamane` |
 | ClockCheck | Hourly from 00:05 | newest `time` of `state\clock\<day>.jsonl` (today, yesterday) | 2 h | — |
-| Backup | Daily at 01:40 | `finished` of `state\backup\last.json` | 26 h | `[backup] enabled = false` |
+| Backup | Daily at 01:40 | `finished` of `state\backup\last.json`; "Failed" (`backup_failed`) when its `ok` is not `true` | 26 h | `[backup] enabled = false` |
 | Requests | On event and every 5 minutes | ArciApi cannot read `state\requests` → "Not observable" | — | — |
 | ApplySystem | On event and every 5 minutes | `at` of `admin\system\status.json` | 15 min | browser administration off |
 

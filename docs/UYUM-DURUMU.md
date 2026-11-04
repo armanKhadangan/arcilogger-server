@@ -684,8 +684,10 @@ sayfası her yapılandırılmış kaynağı listeler).
 `deploy\windows\tasks\` içindeki her görev için bir satır. Durum görevin **kanıt dosyasından**
 çıkarılır (yollar veri klasörüne göredir): "Zamanında"; "Gecikti" (kanıt, sınırdan eski); "Kanıt
 yok" (henüz kanıt yok); "Kullanılmıyor" (görev bu yapılandırmada iş yapmaz); "İzlenemiyor"
-(ArciApi'nin okuyabileceği bir kanıt yok). Sınırlar görevin çalışma sıklığı artı bir paydır; ayar
-değildir.
+(ArciApi'nin okuyabileceği bir kanıt yok); "Başarısız" (kanıt dosyası görevin son çalışmasının
+başarısız olduğunu gösteriyor; ne kadar eski olursa olsun bir sonraki tamamlanan çalışmaya kadar
+sürer; yanıt hata metnini değil yalnızca bir kodu taşır: `backup_failed`, `index_unreadable`,
+`stored_file_unreadable`). Sınırlar görevin çalışma sıklığı artı bir paydır; ayar değildir.
 
 | Görev | Çalışma | Kanıt | Gecikti | Kullanılmıyor |
 |---|---|---|---|---|
@@ -697,7 +699,7 @@ değildir.
 | Retention | Her gün 02:00 | okunabilir kanıt yok → "İzlenemiyor" | — | `[retention] enabled = false` |
 | Credit | Her gün 06:00 | `state\credit.jsonl` içindeki en yeni `time` | 26 saat | `[tsa] provider` `zamane` değil |
 | ClockCheck | Saatte bir, 00:05'ten | bugünün ve dünün `state\clock\<gün>.jsonl` dosyalarındaki en yeni `time` | 2 saat | — |
-| Backup | Her gün 01:40 | `state\backup\last.json` içindeki `finished` | 26 saat | `[backup] enabled = false` |
+| Backup | Her gün 01:40 | `state\backup\last.json` içindeki `finished`; `ok` değeri `true` değilse "Başarısız" (`backup_failed`) | 26 saat | `[backup] enabled = false` |
 | Requests | Olayla ve 5 dakikada bir | ArciApi `state\requests` klasörünü okuyamaz → "İzlenemiyor" | — | — |
 | ApplySystem | Olayla ve 5 dakikada bir | `admin\system\status.json` içindeki `at` | 15 dakika | tarayıcıdan yönetim kapalı |
 

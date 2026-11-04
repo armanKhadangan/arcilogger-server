@@ -9,6 +9,7 @@ test runs the real ``arcilogger-core verify``), never by hand (contract Implemen
 
 from __future__ import annotations
 
+import codecs
 import hashlib
 import json
 import os
@@ -45,8 +46,18 @@ from arcilogger_core.renewal import STATE_SCHEMA as RENEWAL_SCHEMA
 from arcilogger_core.renewal import LastRun, Outcome, RenewalReport
 from arcilogger_core.renewal import write_state as write_renewal_state
 from arcilogger_core.timeutil import isoformat_site, site_day, to_site, utc_now
+from arcilogger_db.backup import write_last_state
 from arcilogger_db.models import AuditLog, JobRun
-from arcilogger_worker.alerts.system import backup_state_path, crl_index_path, stamp_renewal_path
+from arcilogger_worker.alerts import system as alerts_system
+from arcilogger_worker.alerts.system import (
+    CheckContext,
+    backup_state_path,
+    check_backup,
+    check_stamp_crl,
+    crl_index_path,
+    read_crl_index,
+    stamp_renewal_path,
+)
 from arcilogger_worker.service import Job, JobState, default_jobs
 from arcilogger_worker.vaulttesting import SealedVault, at_site, make_vault
 
@@ -292,17 +303,21 @@ def test_task_states_from_evidence_files(
     assert tasks["VerifyWeekly"]["state"] == "ok"
     assert moment(tasks["VerifyWeekly"]["last_evidence_at"]) == now - timedelta(days=2)
     assert tasks["VerifyMonthly"]["state"] == "late"
-    # The task ran; whether the dump succeeded is R20-backup's (Uyarılar).
-    assert tasks["Backup"]["state"] == "ok"
+    # A failed attempt writes the time it failed (#171).
+    assert (tasks["Backup"]["state"], tasks["Backup"]["code"]) == ("failed", "backup_failed")
+    assert moment(tasks["Backup"]["last_evidence_at"]) == now
+    assert {task["code"] for name, task in tasks.items() if name != "Backup"} == {None}
 
     touch(layout.seal_state(yesterday), now - timedelta(hours=27))
     write_json(verify / verify_name(2), {"at": isoformat_site(now - timedelta(hours=1))})
     write_json(verify / verify_name(3), {"at": isoformat_site(now - timedelta(days=9))})
     (verify / verify_name(90)).unlink()
+    write_json(backup_state_path(layout), {"ok": True, "finished": isoformat_site(now)})
     tasks = by(get(client)["tasks"], "task")
     assert tasks["Seal"]["state"] == "late"
     assert tasks["VerifyDaily"]["state"] == "ok"
     assert tasks["VerifyWeekly"]["state"] == "late"  # a young chain: --last 90 verified 3 days
+    assert (tasks["Backup"]["state"], tasks["Backup"]["code"]) == ("ok", None)
 
     # Retention rewrites the state of each day it deletes (``retention._delete_day``): it is
     # not Seal's evidence, nor is an old day's state touched by anything else.
@@ -496,7 +511,7 @@ def test_renew_and_crlfetch_are_judged_by_their_state_files(api_config: Config) 
     """Renew by ``last_run.at`` of ``state/renewal/renewal.json``, CrlFetch by the newest
     ``fetched_at`` or failure of ``state/crl/index.json``, never by an exit code (C12, A4): the
     row says the task ran; whether it succeeded is R20-renewal's and R20-crl's. A time later than
-    now is no evidence, and a file that cannot be read is none either."""
+    now is no evidence; an index ``crl fetch`` cannot get past is a failed task (#171)."""
     now = utc_now().replace(microsecond=0)
     layout = Layout(api_config.data_dir)
 
@@ -592,7 +607,7 @@ def test_renew_and_crlfetch_are_judged_by_their_state_files(api_config: Config) 
     rows = task_rows(evidence(api_config, now))
     assert rows["CrlFetch"]["state"] == "late"
     assert moment(rows["CrlFetch"]["last_evidence_at"]) == now - timedelta(hours=27)
-    # Another schema, truncated, not an object, lists that are no list: no evidence.
+    # Another schema, truncated, not an object, lists that are no list: every run stops on it.
     unreadable = [
         json.dumps({**index, "schema": "another/1", "lists": lists}).encode(),
         b'{"lists": ',
@@ -601,7 +616,12 @@ def test_renew_and_crlfetch_are_judged_by_their_state_files(api_config: Config) 
     ]
     for document in unreadable:
         crl_index_path(layout).write_bytes(document)
-        assert states(evidence(api_config, now))["CrlFetch"] == "missing", document
+        row = task_rows(evidence(api_config, now))["CrlFetch"]
+        assert (row["state"], row["code"], row["last_evidence_at"]) == (
+            "failed",
+            "index_unreadable",
+            None,
+        ), document
 
 
 def test_crlfetch_without_a_list_address_shows_the_run(api_config: Config) -> None:
@@ -646,7 +666,8 @@ def test_crlfetch_after_the_list_addresses_are_gone_shows_the_run(api_config: Co
     failure, so the row shows the run by the index's modification time and is not late while
     the task runs (how fresh the lists are is R20-crl's). An index that records a failure is
     judged by its times alone. Answer to Q9: a run that exits 1 on a held lock or an index it
-    cannot read writes nothing, so the row keeps the run before, or shows ``missing``."""
+    cannot read writes nothing: the row keeps the run before on a held lock, and is ``failed``
+    with no time on an index it cannot read (#171)."""
     now = utc_now().replace(microsecond=0)
     layout = Layout(api_config.data_dir)
     path = crl_index_path(layout)
@@ -700,14 +721,259 @@ def test_crlfetch_after_the_list_addresses_are_gone_shows_the_run(api_config: Co
     row = task_rows(evidence(api_config, now))["CrlFetch"]
     assert (row["state"], moment(row["last_evidence_at"])) == ("ok", now - timedelta(minutes=30))
 
-    # Q9: an index the run cannot read fails it too and stays; the row has no run to show.
-    for damaged in (b'{"lists": ', json.dumps({"schema": "another/1"}).encode()):
+    # Q9: an index the run cannot read fails it too and stays; the row shows a failed task with
+    # no time (the modification time is no run). A byte order mark (Windows PowerShell 5's
+    # ``Set-Content -Encoding UTF8``) is read by R20-crl, but no run gets past it.
+    empty = {"schema": CRL_INDEX_SCHEMA, "lists": [], "failures": []}
+    for damaged in (
+        b'{"lists": ',
+        json.dumps({"schema": "another/1"}).encode(),
+        codecs.BOM_UTF8 + json.dumps(empty).encode(),
+    ):
         path.write_bytes(damaged)
         touch(path, now - timedelta(minutes=5))
         with pytest.raises(CrlError):
             crl_fetch(CrlOptions(), layout, [], now)
         assert path.read_bytes() == damaged
-        assert states(evidence(api_config, now))["CrlFetch"] == "missing", damaged
+        row = task_rows(evidence(api_config, now))["CrlFetch"]
+        assert (row["state"], row["code"], row["last_evidence_at"]) == (
+            "failed",
+            "index_unreadable",
+            None,
+        ), damaged
+    assert read_crl_index(layout).readable  # the BOM index: R20-crl reads it
+
+
+def backup_attempt(layout: Layout, finished: datetime, *, ok: bool, error: str | None) -> None:
+    """``state/backup/last.json`` as the Backup task writes it (``write_last_state``): a failed
+    attempt (``_failed``) has no file and writes the time it failed as ``finished``."""
+    write_last_state(
+        layout,
+        finished=finished,
+        ok=ok,
+        file="backups/scheduled/arcilogger-20261012-0140.dump" if ok else None,
+        size=1_281_734_656 if ok else None,
+        sha256="0" * 64 if ok else None,
+        error=error,
+    )
+
+
+def test_backup_row_shows_a_failed_attempt(api_config: Config) -> None:
+    """#171: ``ok`` not ``true`` in ``state/backup/last.json`` is a failed task with the time it
+    failed, however old (``failed`` outranks ``late``), until a backup succeeds. Backup switched
+    off is ``not_used`` first, as R20-backup resolves everything then; a time later than now is
+    not shown, and a file that is no object is no evidence."""
+    now = utc_now().replace(microsecond=0)
+    layout = Layout(api_config.data_dir)
+    error = "test: connection refused"
+    backup_attempt(layout, now - timedelta(hours=30), ok=False, error=error)
+    row = task_rows(evidence(api_config, now))["Backup"]
+    assert (row["state"], row["code"]) == ("failed", "backup_failed")
+    assert moment(row["last_evidence_at"]) == now - timedelta(hours=30)
+    off = api_config.model_copy(
+        update={"backup": api_config.backup.model_copy(update={"enabled": False})}
+    )
+    row = task_rows(evidence(off, now))["Backup"]
+    assert (row["state"], row["code"]) == ("not_used", None)
+
+    backup_attempt(layout, now - timedelta(hours=1), ok=True, error=None)  # the next one works
+    row = task_rows(evidence(api_config, now))["Backup"]
+    assert (row["state"], row["code"]) == ("ok", None)
+    assert moment(row["last_evidence_at"]) == now - timedelta(hours=1)
+    backup_attempt(layout, now - timedelta(hours=27), ok=True, error=None)
+    assert states(evidence(api_config, now))["Backup"] == "late"
+
+    backup_attempt(layout, now + timedelta(minutes=5), ok=False, error=error)  # a clock set back
+    row = task_rows(evidence(api_config, now))["Backup"]
+    assert (row["state"], row["code"], row["last_evidence_at"]) == ("failed", "backup_failed", None)
+    # ``ok`` missing or no boolean, ``finished`` that is no time: still the failed attempt.
+    for written in ({"finished": "gestern"}, {"ok": "true", "finished": isoformat_site(now)}):
+        write_json(backup_state_path(layout), written)
+        row = task_rows(evidence(api_config, now))["Backup"]
+        assert (row["state"], row["code"]) == ("failed", "backup_failed"), written
+    for unknown in (b"[]", b'"ok"', b'{"ok": tr'):
+        backup_state_path(layout).write_bytes(unknown)
+        row = task_rows(evidence(api_config, now))["Backup"]
+        assert (row["state"], row["code"]) == ("missing", None), unknown
+
+
+def run_failure(at: datetime, error: str = "stored_file_unreadable") -> dict[str, Any]:
+    """The ``run_failure`` a ``crl fetch`` that could not read a stored list writes into the
+    index as it read it: its ``at`` and a code, never the error's text."""
+    return {"at": isoformat_site(at, "seconds"), "error": error}
+
+
+def test_crlfetch_row_shows_a_run_that_stopped(api_config: Config) -> None:
+    """#171: an index with a ``run_failure`` (a stored list the run could not read) is a failed
+    task with the run's time, however old, until the next completed run writes the index without
+    one; per-URL failures of a completed run stay ``ok`` (R20-crl's, W5-E-2). A record later than
+    now or with an unknown code is no evidence, and the index's modification time is no completed
+    run then."""
+    now = utc_now().replace(microsecond=0)
+    layout = Layout(api_config.data_dir)
+    path = crl_index_path(layout)
+    data = b"test: a stored list, only hashed by the runs below (C14)"
+    sha256 = hashlib.sha256(data).hexdigest()
+    name = f"000000000000-20261001T000000Z-{sha256[:8]}.crl"
+    layout.crl_dir.mkdir(parents=True, exist_ok=True)
+    (layout.crl_dir / name).write_bytes(data)
+    fetched_at = now - timedelta(hours=30)
+    entry = {
+        "issuer": "CN=Örnek Test TSA Kök,O=Örnek A.Ş.,C=TR",
+        "issuer_sha256": "0" * 64,
+        "this_update": isoformat_site(fetched_at - timedelta(days=1), "seconds"),
+        "next_update": isoformat_site(fetched_at + timedelta(days=6), "seconds"),
+        "file": name,
+        "sha256": sha256,
+        "url": "http://192.0.2.10/ornek.crl",
+        "fetched_at": isoformat_site(fetched_at, "seconds"),
+    }
+    read = {"schema": CRL_INDEX_SCHEMA, "lists": [entry], "failures": []}
+    write_json(path, {**read, "run_failure": run_failure(now - timedelta(hours=2))})
+    touch(path, now - timedelta(hours=2))
+    row = task_rows(evidence(api_config, now))["CrlFetch"]
+    assert (row["state"], row["code"]) == ("failed", "stored_file_unreadable")
+    assert moment(row["last_evidence_at"]) == now - timedelta(hours=2)
+    row = task_rows(evidence(api_config, now + timedelta(days=3)))["CrlFetch"]
+    assert (row["state"], row["code"]) == ("failed", "stored_file_unreadable")  # not late
+
+    # Later than now, an unknown code, no time, no object: the lists' times only (30 h: late).
+    for record in (
+        run_failure(now + timedelta(hours=1)),
+        run_failure(now - timedelta(hours=2), "lock_held"),
+        {"error": "stored_file_unreadable"},
+        "stored_file_unreadable",
+    ):
+        write_json(path, {**read, "run_failure": record})
+        touch(path, now - timedelta(minutes=1))
+        row = task_rows(evidence(api_config, now))["CrlFetch"]
+        assert (row["state"], row["code"]) == ("late", None), record
+        assert moment(row["last_evidence_at"]) == fetched_at, record
+
+    # The next completed run rebuilds the index without the record: a URL it cannot reach is a
+    # recorded failure, and the row is ok again.
+    write_json(path, {**read, "run_failure": run_failure(now - timedelta(hours=2))})
+    with socket.create_server(("127.0.0.1", 0)) as listener:
+        closed = f"http://127.0.0.1:{listener.getsockname()[1]}/ornek.crl"
+    run = crl_fetch(CrlOptions(urls=(closed,), timeout_seconds=1), layout, [], now)
+    assert [failure.error for failure in run.failures] == ["unreachable"]
+    assert "run_failure" not in json.loads(path.read_bytes())
+    row = task_rows(evidence(api_config, now))["CrlFetch"]
+    assert (row["state"], row["code"], moment(row["last_evidence_at"])) == ("ok", None, now)
+    # So does a run that knows no list address.
+    write_json(path, {**read, "run_failure": run_failure(now - timedelta(hours=2))})
+    crl_fetch(CrlOptions(), layout, [], now)
+    assert json.loads(path.read_bytes()) == read
+    row = task_rows(evidence(api_config, now + timedelta(minutes=1)))["CrlFetch"]
+    assert (row["state"], row["code"]) == ("ok", None)
+
+
+def test_crlfetch_index_arciapi_cannot_read_is_missing(
+    api_config: Config, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An index ArciApi cannot read (its rights, an OSError) is no evidence: ``missing``, not a
+    failed task, since it says nothing of what ``crl fetch`` read."""
+    now = utc_now().replace(microsecond=0)
+    layout = Layout(api_config.data_dir)
+    path = crl_index_path(layout)
+    write_json(path, {"schema": CRL_INDEX_SCHEMA, "lists": [], "failures": []})
+    read_bytes = Path.read_bytes
+
+    def refused(self: Path) -> bytes:
+        if self == path:
+            raise PermissionError(13, "Permission denied", str(self))
+        return read_bytes(self)
+
+    monkeypatch.setattr(Path, "read_bytes", refused)
+    row = task_rows(evidence(api_config, now))["CrlFetch"]
+    assert (row["state"], row["code"], row["last_evidence_at"]) == ("missing", None, None)
+
+
+def test_failed_rows_name_no_error_text(
+    client: TestClient, login_as: Login, layout: Layout
+) -> None:
+    """KVKK: a failed row carries a code and a time only. The error text of ``last.json`` (it
+    can hold the database server and role) and the list addresses of the index never reach the
+    answer."""
+    now = utc_now().replace(microsecond=0)
+    backup_attempt(
+        layout,
+        now - timedelta(hours=1),
+        ok=False,
+        error='connection to server at "192.0.2.10", port 5432 failed: '
+        'FATAL: password authentication failed for user "ornek"',
+    )
+    entry = {
+        "issuer": "CN=Örnek Test TSA Kök,O=Örnek A.Ş.,C=TR",
+        "issuer_sha256": "0" * 64,
+        "this_update": isoformat_site(now - timedelta(days=1), "seconds"),
+        "next_update": isoformat_site(now + timedelta(days=6), "seconds"),
+        "file": "000000000000-20261001T000000Z-00000000.crl",
+        "sha256": "0" * 64,
+        "url": "http://198.51.100.7/ornek-kok.crl",
+        "fetched_at": isoformat_site(now - timedelta(hours=30), "seconds"),
+    }
+    failure = {"url": "http://203.0.113.5/ornek-ara.crl", "at": entry["fetched_at"]}
+    write_json(
+        crl_index_path(layout),
+        {
+            "schema": CRL_INDEX_SCHEMA,
+            "lists": [entry],
+            "failures": [{**failure, "error": "unreachable"}],
+            "run_failure": run_failure(now - timedelta(minutes=30)),
+        },
+    )
+    login_as(client, "admin")
+    response = client.get(API)
+    assert response.status_code == 200, response.text
+    tasks = by(response.json()["tasks"], "task")
+    assert (tasks["Backup"]["state"], tasks["Backup"]["code"]) == ("failed", "backup_failed")
+    assert (tasks["CrlFetch"]["state"], tasks["CrlFetch"]["code"]) == (
+        "failed",
+        "stored_file_unreadable",
+    )
+    for secret in ("192.0.2.10", "ornek", "198.51.100.7", "203.0.113.5", "password", "5432"):
+        assert secret not in response.text, secret
+
+
+def test_run_failure_leaves_the_alerts_as_they_are(
+    api_config: Config, app_session_factory: sessionmaker[Session], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The index's ``run_failure`` is the Sistem row's only: R20-crl reads the same lists and
+    failures with or without it (its title and details unchanged), and R20-backup still judges
+    a failed attempt by ``last.json`` as before, with its own texts."""
+    now = utc_now().replace(microsecond=0)
+    layout = Layout(api_config.data_dir)
+    # test: an issuer in use, whose only list is older than tsa.crl_max_age_days
+    monkeypatch.setattr(alerts_system, "issuers_in_use", lambda stamp: frozenset({"0" * 64}))
+    fetched_at = now - timedelta(days=9)
+    entry = {
+        "issuer": "CN=Örnek Test TSA Kök,O=Örnek A.Ş.,C=TR",
+        "issuer_sha256": "0" * 64,
+        "this_update": isoformat_site(fetched_at - timedelta(days=1), "seconds"),
+        "next_update": isoformat_site(fetched_at + timedelta(days=6), "seconds"),
+        "file": "000000000000-20261001T000000Z-00000000.crl",
+        "sha256": "0" * 64,
+        "url": "http://192.0.2.10/ornek.crl",
+        "fetched_at": isoformat_site(fetched_at, "seconds"),
+    }
+    failure = {"url": "http://192.0.2.10/ornek.crl", "at": isoformat_site(now), "error": "timeout"}
+    read = {"schema": CRL_INDEX_SCHEMA, "lists": [entry], "failures": [failure]}
+    backup_attempt(layout, now - timedelta(hours=1), ok=False, error="test: disk full")
+    with app_session_factory() as session:
+        context = CheckContext(
+            session=session, layout=layout, config=api_config, now=now, settings={}
+        )
+        found = []
+        for document in (read, {**read, "run_failure": run_failure(now - timedelta(hours=1))}):
+            write_json(crl_index_path(layout), document)
+            found.append((check_stamp_crl(context).findings, check_backup(context).findings))
+    assert found[0] == found[1]
+    crl_findings, backup_findings = found[0]
+    assert [(item.rule, item.details["failures"]) for item in crl_findings] == [("R20-crl", 1)]
+    assert [(item.details["case"], item.title) for item in backup_findings] == [
+        ("failed", "Veritabanı yedeği başarısız: test: disk full")
+    ]
 
 
 @pytest.fixture

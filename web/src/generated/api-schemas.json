@@ -15403,6 +15403,17 @@
     },
     "TaskHealth": {
       "properties": {
+        "code": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Code"
+        },
         "evidence": {
           "title": "Evidence",
           "type": "string"
@@ -15433,7 +15444,8 @@
             "late",
             "missing",
             "not_used",
-            "not_observable"
+            "not_observable",
+            "failed"
           ],
           "title": "State",
           "type": "string"
@@ -15463,6 +15475,7 @@
         "schedule_tr",
         "schedule_en",
         "state",
+        "code",
         "last_evidence_at",
         "evidence"
       ],
