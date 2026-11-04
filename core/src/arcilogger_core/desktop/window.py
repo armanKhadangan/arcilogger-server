@@ -39,8 +39,12 @@ from arcilogger_core.desktop.status import (
 INTERVAL_MS: Final = 10_000
 #: Tk start-up attempts. On a busy Windows CI runner Tk's start-up script now and then cannot read
 #: one of its own library files ("couldn't read file …/tk8.6/icons.tcl", another file each time);
-#: the next interpreter reads them all. Any other start-up error (no display) is raised at once.
+#: the next interpreter reads them all. When the unread file is the one that defines
+#: ``tcl_findLibrary``, the same failure reads 'invalid command name "tcl_findLibrary"'. Any other
+#: start-up error (no display) is raised at once.
 TK_ATTEMPTS: Final = 3
+#: The start-up messages :data:`TK_ATTEMPTS` tries again on.
+TK_RETRY_MESSAGES: Final = ("couldn't read file", 'invalid command name "tcl_findLibrary"')
 POLL_MS: Final = 250
 WEB_URL: Final = "https://localhost/"
 PAD: Final = 8
@@ -258,7 +262,7 @@ def new_root() -> tk.Tk:
         try:
             return tk.Tk()
         except tk.TclError as exc:
-            if attempt == TK_ATTEMPTS or "couldn't read file" not in str(exc):
+            if attempt == TK_ATTEMPTS or not any(m in str(exc) for m in TK_RETRY_MESSAGES):
                 raise
             time.sleep(0.2 * attempt)
     raise RuntimeError("no Tk attempt was made")

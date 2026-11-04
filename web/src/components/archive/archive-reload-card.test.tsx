@@ -5,7 +5,6 @@ import { StrictMode } from 'react';
 
 import { BACKGROUND_HEADER } from '@/lib/api';
 import type { ArchiveReload } from '@/lib/archive-reload-types';
-import { formatDateTime } from '@/lib/format';
 import { setLanguage } from '@/lib/i18n';
 import { errorResponse, installFetch, jsonResponse } from '@/test/api-mock';
 import type { RecordedRequest } from '@/test/api-mock';
@@ -25,9 +24,10 @@ import { testQueryClient } from '@/test/render';
 import { ARCHIVE_RELOAD_POLL_MS } from './archive-model';
 import { ArchiveReloadCard, type ArchiveReloadCardProps } from './archive-reload-card';
 
-// The ready sample's `expires_at` as the card shows it: captured anew with every capture of the
-// samples, so the expected text follows it instead of a fixed time.
-const READY_UNTIL = formatDateTime(ARCHIVE_READY.expires_at ?? '');
+// The ready sample with a fixed `expires_at`, so a new capture of the samples leaves the expected
+// text alone and the test pins the format: the site time (Europe/Istanbul), the same in TR and EN.
+const READY: ArchiveReload = { ...ARCHIVE_READY, expires_at: '2026-10-20T04:01:19Z' };
+const READY_UNTIL = '20.10.2026 07:01:19';
 
 /*
  * The card of the lookup and search pages (Wave 5 contract §5, G10): the API's 409 text or the
@@ -433,7 +433,7 @@ describe('ArchiveReloadCard — progress and the re-run', () => {
   });
 
   it('ready: the days stay until expires_at, the page runs again exactly once', async () => {
-    const calls = serve(() => jsonResponse(202, ARCHIVE_CREATED), ARCHIVE_LOADING, ARCHIVE_READY);
+    const calls = serve(() => jsonResponse(202, ARCHIVE_CREATED), ARCHIVE_LOADING, READY);
     const view = renderCard();
     await confirmReload();
     await settle();
@@ -727,7 +727,7 @@ describe('ArchiveReloadCard — English', () => {
   it('the search text, the clipped note, ready and expired in English', async () => {
     setLanguage('en');
     serve(() => jsonResponse(202, ARCHIVE_CREATED), {
-      ...ARCHIVE_READY,
+      ...READY,
       reason: 'search',
     });
     const { onReady } = renderCard({

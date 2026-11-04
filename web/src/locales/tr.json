@@ -484,7 +484,8 @@
         "holiday": "Tarihi AA-GG ya da YYYY-AA-GG biçiminde girin.",
         "totpRoles": "Yönetici ve denetçi rolleri için iki adımlı doğrulama zorunludur.",
         "serverName": "DHCP sunucusunun adı boş olamaz.",
-        "serverSeconds": "Kira süresi en az 60 saniye olmalı.",
+        "serverSeconds": "Her DHCP sunucusu için {{min}} ile {{max}} saniye arasında bir kira süresi gerekir.",
+        "serverSecondsMin": "Kira süresi en az {{min}} saniye olmalı.",
         "integerList": "Her satıra 0 ya da daha büyük bir tam sayı yazın.",
         "object": "Geçerli bir JSON nesnesi girin."
       }

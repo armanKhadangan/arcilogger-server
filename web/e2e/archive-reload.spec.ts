@@ -28,19 +28,14 @@ const SAMPLE_NOW = new Date(`${SAMPLE_TODAY}T15:00:00+03:00`);
 
 /** The days of the captured 409 and `archived` range, as the card shows them. */
 const DAYS = '04.10.2026 – 05.10.2026';
-/** The confirmation after a 409: it names the captured `keep_days` (7, C23). */
+/**
+ * The confirmation names the captured `keep_days` (7): the 409's `details.keep_days` (C23) or a
+ * search page's `archived.keep_days` (W5-G-20).
+ */
 const DIALOG_TEXT =
   `${DAYS} günlerinin kayıtları mühürlü arşivden veritabanına yüklenir ve 7 gün boyunca ` +
   'veritabanında kalır; sonra yeniden kaldırılır. Bu, o günlerin kişisel verilerini de ' +
   'veritabanına geri getirir. İstek denetim kaydına yazılır.';
-/**
- * The confirmation for a search page's `archived` days, which give no keep time: the time the
- * administrator set, with its default (never the setting's key, #134).
- */
-const DIALOG_SETTING_TEXT =
-  `${DAYS} günlerinin kayıtları mühürlü arşivden veritabanına yüklenir ve yöneticinin ` +
-  'ayarladığı süre (varsayılan 7 gün) boyunca orada kalır; sonra yeniden kaldırılır. Bu, o ' +
-  'günlerin kişisel verilerini de veritabanına geri getirir. İstek denetim kaydına yazılır.';
 /** `archive_file_unreadable` of a failed reload: the web's text (the API sends none). */
 const UNREADABLE =
   'Yükleme yapılamadı: bir günün mühürlü dosyası okunamadı veya mühür kaydıyla eşleşmiyor. ' +
@@ -188,7 +183,7 @@ test.describe('archive reload', () => {
     // The rows inside the window are shown beside the card.
     await expect(page.getByRole('heading', { name: 'Zaman dağılımı' })).toBeVisible();
 
-    await reload(page, 'Arşivden yükle', DIALOG_SETTING_TEXT);
+    await reload(page);
     expect(bodies(api, '/archive-reloads')).toEqual([{ reason: 'search', ...RELOAD_DAYS }]);
     await expect.poll(() => api.callsTo('POST', '/search').length).toBe(2);
     const runs = bodies(api, '/search');
