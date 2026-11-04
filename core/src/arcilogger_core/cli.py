@@ -926,12 +926,13 @@ class _RenewError:
 
 def _renew_cause(app: App, exc: BaseException) -> str:
     """Why the run is refused: the provider cannot be made (the causes of :func:`_sealer`), or
-    it claims legal grade while no listed root is pinned."""
+    it claims legal grade while no listed root is pinned, or the stamp's own root is not listed
+    (W5-A-13)."""
     if isinstance(exc, SecretStoreError):
         return "secret-store"
     if isinstance(exc, TsaExecutableError):
         return "executable"
-    if isinstance(exc, RenewalLegalRootsError):  # no listed root pinned (W5-A-13)
+    if isinstance(exc, RenewalLegalRootsError):  # legal-roots, before or after the stamp (W5-A-13)
         return exc.cause
     return _provider_cause(app)
 
