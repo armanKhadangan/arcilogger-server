@@ -8880,11 +8880,22 @@ Invoke-DatabaseRestore
 
 def _pg_bin(tmp_path: Path) -> Path | None:
     """A folder with psql.exe, pg_dump.exe and pg_restore.exe as the installer runs them (on
-    Linux links to PostgreSQL's binaries): ARCILOGGER_PGBIN, /usr/lib/postgresql/16/bin (Debian
-    and Ubuntu, whose PATH has wrapper scripts), or the folder of psql on PATH."""
+    Linux links to PostgreSQL's binaries): ARCILOGGER_PGBIN, the newest
+    /usr/lib/postgresql/<major>/bin from 16 on (Debian and Ubuntu: their PATH has pg_wrapper
+    scripts, which pick the tool by their own name and so fail behind a ``.exe`` link; a newer
+    pg_dump dumps an older server, and the ubuntu-26.04 runners have no 16), or the folder of
+    psql on PATH."""
     found = os.environ.get("ARCILOGGER_PGBIN")
-    if not found and Path("/usr/lib/postgresql/16/bin/psql").is_file():
-        found = "/usr/lib/postgresql/16/bin"
+    if not found:
+        majors = [
+            folder
+            for folder in Path("/usr/lib/postgresql").glob("*/bin")
+            if folder.parent.name.isdigit()
+            and int(folder.parent.name) >= 16
+            and (folder / "psql").is_file()
+        ]
+        if majors:
+            found = str(max(majors, key=lambda folder: int(folder.parent.name)))
     if not found and (psql := shutil.which("psql")):
         found = str(Path(psql).parent)
     if not found:
