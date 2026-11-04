@@ -46,7 +46,9 @@ or ``uncovered``, under ``state/renewal.lock`` (never inside ``vault/renewals``)
 record is (``retention``), the record is written as ``<name>.json.part``, stamped and verified;
 only then is the token renamed to its final name, then the record, and both are locked like
 sealed files. A failed stamp removes both, so a record never exists under its final name without
-its token; leftovers of an interrupted run are tidied by the next one (contract W5-A-3).
+its token; leftovers of an interrupted run are tidied by the next one (contract W5-A-3). A run
+whose provider claims legal grade while no pinned root is listed takes no stamp: its renewals
+would never count (W5-A-13).
 """
 
 from __future__ import annotations
@@ -86,10 +88,17 @@ from arcilogger_core.timeutil import (
     utc_now,
 )
 from arcilogger_core.tsa.asn1 import READABLE_DIGESTS
-from arcilogger_core.tsa.base import TimestampProvider, TokenInfo, TsaError, TsaResponseError
+from arcilogger_core.tsa.base import (
+    TimestampProvider,
+    TokenInfo,
+    TsaConfigurationError,
+    TsaError,
+    TsaResponseError,
+)
 from arcilogger_core.tsa.client import token_path_for
 from arcilogger_core.tsa.verify import (
     confirmed_legal_grade,
+    fingerprint,
     inspect_token,
     is_test_stamp,
     verify_token,
@@ -1047,6 +1056,39 @@ class RenewalStampInvalidError(TsaResponseError):
         super().__init__(f"{self.message_tr} [{self.message_en}]")
 
 
+class RenewalLegalRootsError(TsaConfigurationError):
+    """The provider claims legal grade, but no pinned root is listed in
+    ``tsa.legal_root_fingerprints``: no chain its stamps verify against can end at a listed
+    root, so none of its renewals would ever count (D5), and each stamp spends credit (D4). The
+    run refuses before it stamps; the command exits 2 with the cause :attr:`cause`
+    (W5-A-13)."""
+
+    cause = "legal-roots"
+
+    def __init__(self) -> None:
+        self.message_tr = (
+            "Sağlayıcı yasal geçerli damga beyan ediyor, ancak sabitlenmiş kök sertifikaların "
+            "hiçbirinin parmak izi tsa.legal_root_fingerprints listesinde değil: bu yenilemeler "
+            "hiçbir zaman sayılmaz, damga alınmadı. Kökün parmak izini yayımlanan değerle "
+            "karşılaştırıp tsa.legal_root_fingerprints listesine ekleyin."
+        )
+        self.message_en = (
+            "The provider claims legal grade, but no pinned root certificate's fingerprint is "
+            "in tsa.legal_root_fingerprints: such renewals never count, so no stamp was taken. "
+            "Compare the root's fingerprint with the published value and add it to "
+            "tsa.legal_root_fingerprints."
+        )
+        super().__init__(f"{self.message_tr} [{self.message_en}]")
+
+
+def _listed_root_pinned(roots: Sequence[x509.Certificate], legal_roots: Collection[str]) -> bool:
+    """Whether a pinned root is listed in ``legal_roots`` (``tsa.legal_root_fingerprints``):
+    a token verifies only by a chain that ends at a pinned root, so without one listed no stamp
+    ever counts as legal grade (rule 4)."""
+    listed = set(legal_roots)
+    return any(fingerprint(root) in listed for root in roots)
+
+
 class RenewalLockError(RenewalError):
     """``state/renewal.lock`` cannot be opened or locked for another reason than a run holding
     it (no write right on ``state``, no lock support)."""
@@ -1296,7 +1338,9 @@ def renew(
     the provider's claim: ``due`` for a legal-grade provider, else ``test``, and a test record
     never counts (D5). Raises :class:`RenewalBusyError` while another run holds the lock,
     :class:`RenewalLockError` when the lock file cannot be used, :class:`RenewalNotNeeded` when
-    nothing is due, and the provider's :class:`TsaError` (or
+    nothing is due, :class:`RenewalLegalRootsError` before any stamp when the provider claims
+    legal grade but no pinned root is listed in ``tsa.legal_root_fingerprints`` (its renewals
+    would never count), and the provider's :class:`TsaError` (or
     :class:`RenewalStampInvalidError`) when the stamp fails, leaving no record.
     """
     with one_run(layout):
@@ -1320,6 +1364,10 @@ def renew_held(
     due = {token.path for token in before.tokens if token.status in ("due", "uncovered")}
     if not due:
         raise RenewalNotNeeded(before)
+    if provider.legal_grade is True and not _listed_root_pinned(
+        roots, config.tsa.legal_root_fingerprints
+    ):
+        raise RenewalLegalRootsError
     entries = [renewable.entry for renewable in reader.renewables if renewable.fact.path in due]
     reason: Reason = "due" if provider.legal_grade is True else "test"
     record = build_record(

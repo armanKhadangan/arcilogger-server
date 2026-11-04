@@ -1480,3 +1480,21 @@ All Wave 5 questions are answered (2026-11-02).
   (`useDefault`) and allows only a `token_sha256` field with exactly 64 lower-case hex digits; it
   clears those 9 matches and nothing else in the repository. No path allowlist, no rule turned
   off, `ci.yml` unchanged. Every new allowlist entry needs the manager's review.
+- **W5-A-13: exit 2 cause `legal-roots` (answer to Q1 on #132, #137 item 1).** A run whose
+  provider claims legal grade while no pinned root is listed in `tsa.legal_root_fingerprints`
+  takes no stamp: a token verifies only by a chain ending at a pinned root, so with none listed
+  no renewal it writes would ever count (D5), and each one spends credit (D4). `renew` raises
+  `renewal.RenewalLegalRootsError` (a `TsaConfigurationError`, `cause = "legal-roots"`, TR/EN
+  texts naming `tsa.legal_root_fingerprints`) before the provider is called, so the command
+  exits 2 and writes `last_run {outcome: "refused", exit_code: 2, record: null, error:
+  "legal-roots"}`, which adds one to `failures_in_a_row`; the statuses are computed afresh, as for
+  any refusal with known roots. The provider's own chain is not known before a stamp, so the
+  check is on the pinned roots: none of them listed (the list empty, or naming only roots that
+  are not pinned). It runs after the status, only when something is due: "nothing due" stays
+  `not_needed` (exit 0, no credit spent), and a provider that claims no legal grade still writes
+  its `reason: "test"` record (D5, exit 1 for an expired token). With the claim, a pinned set
+  that lacks the listed root, which the stamp's verification failed with exit 3
+  (`renewal_stamp_invalid`, W5-A-9), is now refused with this exit 2 before the stamp. The dry
+  run is unchanged. `last_run.error` takes the cause from the error in `cli.py`'s
+  `_renew_cause` (a hunk outside #137's files, asked for on the issue); until it lands the
+  command still exits 2 as `refused` with these texts, under the cause `provider`.

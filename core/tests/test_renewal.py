@@ -29,6 +29,7 @@ from arcilogger_core.renewal import (
     NOTES,
     RENEWAL_SCHEMA,
     RenewalBusyError,
+    RenewalLegalRootsError,
     RenewalLockError,
     RenewalNotNeeded,
     RenewalRun,
@@ -46,6 +47,7 @@ from arcilogger_core.timeutil import site_day
 from arcilogger_core.tsa.base import (
     TimestampProvider,
     TokenInfo,
+    TsaConfigurationError,
     TsaError,
     TsaNoCreditError,
     TsaRejectedError,
@@ -656,6 +658,63 @@ def test_a_stamp_that_does_not_verify_leaves_no_record(rw: RenewalWorld, case: s
     assert any(expected in error for error in raised.value.errors), raised.value.errors
     assert _renewal_files(rw) == []
     assert rw.status() == before
+
+
+def _counted(provider: TimestampProvider, monkeypatch: pytest.MonkeyPatch) -> list[Path]:
+    """The files ``provider`` is asked to stamp from now on."""
+    calls: list[Path] = []
+    real = provider.stamp
+
+    def stamp(path: Path) -> Any:
+        calls.append(path)
+        return real(path)
+
+    monkeypatch.setattr(provider, "stamp", stamp)
+    return calls
+
+
+@pytest.mark.parametrize("case", ["nothing listed", "listed root not pinned"])
+def test_a_legal_claim_without_a_listed_root_takes_no_stamp(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, case: str
+) -> None:
+    """W5-A-13: a provider that claims legal grade while no pinned root is listed in
+    ``tsa.legal_root_fingerprints`` would write renewals that never count (D5), each one a
+    spent credit (D4): the run refuses before the provider is called, as a configuration error
+    (exit 2, cause ``legal-roots``), and leaves nothing behind."""
+    rw = make_world(tmp_path, legal_listed=case != "nothing listed")
+    roots = rw.roots if case == "nothing listed" else [rw.tsa.root_certificate]
+    rw.set_now(CNA - timedelta(days=100))
+    provider = rw.legal_provider(FAR)
+    calls = _counted(provider, monkeypatch)
+    before = renewal_status(rw.layout, rw.world.config, roots, rw.clock.now)
+    with pytest.raises(RenewalLegalRootsError) as refused:
+        renew(rw.layout, rw.world.config, provider, roots, rw.clock.now)
+    assert isinstance(refused.value, TsaConfigurationError)
+    assert not refused.value.retryable
+    assert refused.value.cause == "legal-roots"
+    assert "tsa.legal_root_fingerprints" in refused.value.message_tr
+    assert "tsa.legal_root_fingerprints" in refused.value.message_en
+    assert refused.value.message_tr.startswith("Sağlayıcı yasal geçerli damga beyan ediyor")
+    assert refused.value.message_en.startswith("The provider claims legal grade")
+    assert calls == []
+    assert _renewal_files(rw) == []
+    assert renewal_status(rw.layout, rw.world.config, roots, rw.clock.now) == before
+
+
+def test_without_a_listed_root_only_a_stamp_that_would_be_taken_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Nothing due is still ``RenewalNotNeeded`` (no credit is spent), and a provider that
+    claims no legal grade still writes its ``reason: "test"`` record (D5)."""
+    rw = make_world(tmp_path, legal_listed=False)
+    with pytest.raises(RenewalNotNeeded):
+        _renew(rw, rw.legal_provider(FAR))
+    rw.set_now(CNA - timedelta(days=100))
+    provider = rw.legal_provider(FAR, claim=False)
+    calls = _counted(provider, monkeypatch)
+    run = _renew(rw, provider)
+    assert (run.reason, len(calls)) == ("test", 1)
+    assert _renewal_files(rw) == ["2031-06-23-1.json", "2031-06-23-1.json.zd"]
 
 
 def test_the_token_is_renamed_before_the_record(

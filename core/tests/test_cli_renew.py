@@ -51,7 +51,7 @@ quiet_seconds = 0
 
 [tsa]
 {tsa}
-legal_root_fingerprints = ["{fingerprint}"]
+legal_root_fingerprints = {fingerprints}
 """
 
 
@@ -62,12 +62,14 @@ class Cli:
     roots: Path
     monkeypatch: pytest.MonkeyPatch
 
-    def configure(self, tsa: str) -> None:
+    def configure(self, tsa: str, *, listed: bool = True) -> None:
+        """The configuration with ``tsa``; the legal CA's root listed unless ``listed`` is
+        false (then ``tsa.legal_root_fingerprints`` is empty)."""
         self.config.write_text(
             CONFIG.format(
                 data=self.rw.layout.root.as_posix(),
                 tsa=tsa,
-                fingerprint=self.rw.legal.fingerprint,
+                fingerprints=json.dumps([self.rw.legal.fingerprint] if listed else []),
             ),
             encoding="utf-8",
         )
@@ -266,15 +268,50 @@ def test_a_failed_stamp_exits_3(
 
 
 def test_a_stamp_by_an_unpinned_root_exits_3(cli: Cli, capsys: pytest.CaptureFixture[str]) -> None:
-    """The new token does not verify (its root is not pinned): no record, exit 3."""
+    """The new token does not verify (its root is not pinned): no record, exit 3. The provider
+    claims no legal grade: with the claim, no listed root pinned is refused before the stamp
+    (exit 2, ``test_a_legal_claim_without_a_listed_root_exits_2``)."""
     (cli.roots / "legal.pem").unlink()
     now = CNA - timedelta(days=100)
     cli.rw.set_now(now)
-    assert cli.run("--json", now=now, provider=cli.rw.legal_provider(FAR)) == 3
+    assert cli.run("--json", now=now, provider=cli.rw.legal_provider(FAR, claim=False)) == 3
     data = _json(capsys)
     assert data["error"]["code"] == "renewal_stamp_invalid"
     assert data["error"]["message_tr"].startswith("Yenileme kaydının zaman damgası doğrulanamadı")
     assert cli.renewal_files() == []
+
+
+def test_a_legal_claim_without_a_listed_root_exits_2(
+    cli: Cli, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """W5-A-13: a provider that claims legal grade while ``tsa.legal_root_fingerprints`` lists
+    no pinned root is refused before any stamp (its renewals would never count, D5): exit 2,
+    no record, the state file says refused and counts the failure, and the text names the
+    setting."""
+    cli.configure(f'provider = "mock"\nroots_dir = "{cli.roots.as_posix()}"', listed=False)
+    now = CNA - timedelta(days=100)
+    cli.rw.set_now(now)
+    provider = cli.rw.legal_provider(FAR)
+    calls: list[Path] = []
+    monkeypatch.setattr(provider, "stamp", calls.append)
+    assert cli.run("--json", now=now, provider=provider) == 2
+    captured = capsys.readouterr()
+    data = json.loads(captured.out)
+    assert (data["outcome"], data["exit_code"], data["record"]) == ("refused", 2, None)
+    assert data["due"] == [DAY_TOKEN]
+    assert "tsa.legal_root_fingerprints" in data["error"]["message_tr"]
+    assert "tsa.legal_root_fingerprints" in data["error"]["message_en"]
+    assert "Sağlayıcı yasal geçerli damga beyan ediyor" in captured.err
+    assert calls == []
+    assert cli.renewal_files() == []
+    state = cli.state()
+    assert _statuses(state) == {DAY_TOKEN: "due"}
+    assert (state["last_run"]["outcome"], state["last_run"]["exit_code"]) == ("refused", 2)
+    assert (state["last_run"]["record"], state["failures_in_a_row"]) == (None, 1)
+    assert cli.run(now=now + timedelta(days=1), provider=provider) == 2
+    assert cli.state()["failures_in_a_row"] == 2
+    assert calls == []
+    capsys.readouterr()
 
 
 def test_a_file_error_exits_3(
