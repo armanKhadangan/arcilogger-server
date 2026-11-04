@@ -1135,13 +1135,17 @@ Bir adım başarısız olursa (çıkış kodu `3`):
   Eski program klasörü geri gelir, ancak yalnızca `ArciCollector`, `ArciWeb` ve zamanlanmış kanıt
   görevleri çalışır — bunların hiçbiri veritabanı kullanmaz, syslog kaybı olmaz, mühürleme sürer.
   `ArciIngest`, `ArciApi`, `ArciWorker` elle başlatmaya alınır ve durur. Betik, yükseltme öncesi
-  yedeği geri yükleyecek komutu tam olarak yazar:
+  yedeği **bu** sürümün kurulum betiğiyle, kenara konan klasördeki kopyayla geri yükleyecek komutu
+  tam olarak yazar:
 
   ```powershell
-  powershell -ExecutionPolicy Bypass -File "C:\Program Files\ARCILOGGER\installer\Install-Arcilogger.ps1" -Rollback -RestoreDatabase -DatabaseDump "D:\ARCILOGGER\backups\db\<yedek>.dump"
+  powershell -ExecutionPolicy Bypass -File "C:\Program Files\ARCILOGGER.failed-<zaman>\installer\Install-Arcilogger.ps1" -Rollback -RestoreDatabase -DatabaseDump "D:\ARCILOGGER\backups\db\<yedek>.dump"
   ```
 
-  Ya da hatayı giderip yükseltmeyi yeniden çalıştırın.
+  `C:\Program Files\ARCILOGGER\installer\` içindekiyle değil: geri getirmeden sonra o yine önceki
+  sürümün betiğidir, geri yüklemesi yedeği canlı veritabanının üzerine yazar
+  (`pg_restore --clean`) ve `0021_db_window` ile gelen şemada başarısız olur. Ya da hatayı giderip
+  yükseltmeyi yeniden çalıştırın.
 - Kendiliğinden yapılamayan her şey "ELLE YAPILMASI GEREKENLER" başlığıyla yazılır.
 
 **Geri alma:**
@@ -1153,8 +1157,73 @@ powershell -ExecutionPolicy Bypass -File "C:\Program Files\ARCILOGGER\installer\
 ```
 
 `ARCILOGGER.previous` yoksa `-Rollback -RestoreDatabase` yalnızca veritabanını geri yükler
-(toplayıcı çalışmaya devam eder; geri yükleme tek işlemdir, başarısız olursa veritabanı olduğu gibi
-kalır).
+(toplayıcı çalışmaya devam eder). Yedek yeni bir veritabanına (`<ad>_restore_<zaman>`; şimdiki
+veritabanının sahibi, yerel ayarı, ayarları ve haklarıyla; her nesne kendi işleminde, ilk hatada
+durarak) geri yüklenir, sonra yeniden adlandırılarak şimdikinin yerine geçer; başarısız bir geri
+yükleme şimdiki veritabanını olduğu gibi bırakır. PostgreSQL veri diskinde şimdiki veritabanının
+boyutu (`pg_database_size`), dörtte biri ve `max_wal_size` kadar boş alan gerekir; kurulum programı
+önce bunu denetler, yetmezse geri yüklemeyi reddeder (boş alan okunamazsa ya da PostgreSQL başka bir
+sunucudaysa yalnızca uyarır). Yerine geçilen veritabanı `<ad>_replaced_<zaman>` adıyla saklanır:
+yedekten sonra yazılan satırlar yalnızca ondadır ve bir yönetici kaldırana kadar diskte yer tutar
+([YEDEKLEME.md](YEDEKLEME.md) bölüm 5); her geri yüklemenin yerine geçilen veritabanı
+`install\state.json` dosyasında listelenir (`replaced_databases`). Yeniden adlandırma veritabanında
+başka oturum olmamasını ister: önce pgAdmin ve psql pencerelerini kapatın (kurulum programı açık
+kalan oturumu adıyla yazar).
+
+Geri yükleme program klasörleri değiştirildikten sonra (ya da `ARCILOGGER.previous` olmadan)
+başarısız olursa veritabanı hizmetleri durur ve kurulum programı yeniden çalıştırılacak komutu
+yazar. Yeniden adlandırma tamamlandıktan sonra bir adım başarısız olursa bunu söyler: geri yüklemeyi
+yeniden çalıştırmayın (geri yüklenen veritabanını bir kez daha değiştirir); TimescaleDB'de
+`timescaledb_post_restore()` çalışmadıysa onu ve veritabanı hizmetlerini başlatacak komutu yazar.
+Yeniden çalıştırma komutunu **bu** sürümün kurulum betiğiyle, kenara konduğu klasördeki kopyayla
+(`C:\Program Files\ARCILOGGER.rolled-back-<zaman>\installer\`), yazıldığı gibi çalıştırın;
+`C:\Program Files\ARCILOGGER\installer\` içindekiyle değil: değiştirmeden sonra o önceki sürümün
+betiğidir, geri yüklemesi yedeği canlı veritabanının üzerine yazar (`pg_restore --clean`) ve bu
+sürümün şemasında başarısız olur.
+
+**Günlük bölümlerden önceki bir sürüme geri alma (şema revizyonu `0021_db_window`).** Bu
+revizyondan önceki bir sürüm yalnızca aylık bölümler oluşturur ve siler, günlük bölümleri
+(`<tablo>_pYYYYMMDD`) tanımaz. Bu yüzden `-RestoreDatabase` olmadan bir `-Rollback`, kurulu sürümün
+şemasında `0021_db_window` varsa ve geri dönülen sürümün şemasında yoksa, hizmetler durduktan ve
+FortiGate kira adımından (aşağıda; o, kurulu sürümün şemasıyla çalışır) sonra, program klasörleri
+değiştirilmeden önce veritabanını geri dönülen sürümün şemasına indirir: kurulu sürümün
+`arcilogger-db schema downgrade --to <revizyon> --json` komutu (adım `database.downgrade`). İki
+sürümün şeması program klasörlerindeki geçiş dosyalarından okunur
+(`venv\Lib\site-packages\arcilogger_db\migrations\versions`); bunun için Python ve veritabanı
+gerekmez. `0021_db_window`'u o da bilen bir sürüme dönülürken, önceden olduğu gibi şema indirilmez.
+Hedef, geri dönülen sürümün şema başıdır, ama `0021_db_window`'un geri aldığı revizyonun
+(`0020_fg_traffic_transip_time`) altına hiç inilmez: daha eski revizyonlar önceki sürümün
+üzerlerinde çalışması için yapıldı (aşağıdaki NAT satırları ve FortiGate kiraları), geri alınmaları
+veri siler (ör. `0017` FortiGate DHCP tablosunu). Komuttan hemen önce adım veritabanının kendi
+revizyonunu okur (`arcilogger-db current`): `0021_db_window` öncesindeki bir veritabanında (bir
+`-Upgrade -SkipDatabase` onu orada bıraktı) günlük bölüm yoktur ve şema indirilmez. İndirme günlük
+bölümleri aylık bölümlerle birleştirir (her tablo ve ay ayrı bir işlemde), `db.retention_days`
+değerini 30'dan 400'e döndürür ve bunu denetim kaydına `settings.change` (yapan `system`) olarak
+yazar (pencere işi henüz denetim kaydına yazmadıysa önce yükseltmenin kendi 400 → 30 değişikliğini
+de); kurulum eski ve yeni değeri ve denetim kayıtlarının numaralarını yazar, plan (`-PlanPath`)
+komutun yanıtını `result` alanında tutar. Süre sınırı yoktur: büyük tablolarda uzun sürebilir.
+Komut bir kilidi en çok 30 saniye bekler: hâlâ süren bir yedekleme (`pg_dump`; zamanlanmış görevler
+geri alma başlarken duraklatılır) onu başarısız kılar; yedeklemenin bitmesini bekleyip `-Rollback`
+komutunu yeniden çalıştırın.
+
+- **İndirme başarısız olursa** geri alma, program klasörleri değiştirilmeden `3` ile durur: kurulu
+  sürüm yerinde kalır ve kendi şemasıyla yeniden başlar (tamamlanan birleştirmeler bu şemanın
+  geçerli bir düzenini bırakır; komut şema revizyonunu taşıdıktan sonra bitmiş olabileceği için önce
+  onun `arcilogger-db upgrade` komutu çalışır), düşük güvene indirilen FortiGate kiraları geri gelir.
+  `-Rollback` komutunu yeniden çalıştırın: indirme kaldığı yerden sürer. Yine başarısız olursa (ya
+  da komut revizyonu reddettiyse, çıkış kodu `2`) veritabanını yükseltme öncesi yedekten geri
+  yükleyin ([YEDEKLEME.md](YEDEKLEME.md) bölüm 5):
+
+  ```powershell
+  powershell -ExecutionPolicy Bypass -File "C:\Program Files\ARCILOGGER\installer\Install-Arcilogger.ps1" -Rollback -RestoreDatabase
+  ```
+- İndirme başarılı olup program klasörleri değiştirilemezse kurulu sürümün `arcilogger-db upgrade`
+  komutu şemasını geri getirir; o da başarısız olursa yalnızca `ArciCollector` ve `ArciWeb` çalışır
+  ve betik elle çalıştırılacak komutu "ELLE YAPILMASI GEREKENLER" altında yazar.
+- Geri dönülen sürümün şema başı anlaşılamazsa (geçiş klasörü yok ya da okunamıyor, dosyalar tek
+  bir sıra oluşturmuyor, baş kurulu sürümün revizyonlarından biri değil) ya da indirme gerekirken
+  `-SkipDatabase` verildiyse geri alma hiçbir şey değiştirmeden `2` ile durur. `-RestoreDatabase`
+  ile yükseltme öncesi yedek veritabanının yerine geçer; şema indirilmez.
 
 Geri alma (ve başarısız bir yükseltmenin kendiliğinden geri dönüşü), önceki sürümün hizmetlerini
 başlatmadan önce yapılandırmayı **o sürümün Python'uyla** yükler. Tarayıcıdan yapılmış bir
@@ -1261,19 +1330,21 @@ açılır.
   kayıtlarda görülen adres olarak yanıtlanır. FortiGate'in DMZ'ye, başka bir VLAN'a, VPN'e ya da
   şubeye yaptığı NAT'ın adreslerini "İnternet çıkışı değil" türüyle girin.
 
-**Geri alma:** eski NAT satırları bu sürümde okunmadan saklanır; `-Rollback` şema geri dönüşü
-yapmaz, önceki sürüm bu satırları, yani **yükseltme öncesi** NAT değerlerini okur. Yükseltmeden
-sonra İnternet çıkışlarında bir değişiklik yaptıysanız, geri döndükten sonra önceki sürümün
-Ayarlar → Uygulama ayarları bölümündeki `nat.public_ips` ve `nat.wan_transip` değerlerini bu
-sürümde yaptığınız değişiklikle karşılaştırıp elle girin (değişiklikler denetim kaydında
-`settings.change` olarak durur); bunun için veritabanını geri yüklemeyin: `-RestoreDatabase`
-yükseltmeden sonraki bütün kayıtları (denetim, sorgu, rapor, uyarı, cihaz ve kişi atamaları)
-siler. `-Rollback` çalıştırmadan önce bu sürümde yapılan sorguların resmi raporlarını (PDF)
-indirin: bir rapor ilk indirildiğinde bir kez oluşturulur ve önceki sürüm, bu sürümün eklediği
-satırları (tanımsız gönderici uyarısı, "Kısmi kanıt" etiketi, çıkış ve FortiGate kira satırları)
-yazmaz. FortiGate DHCP kullanan bir kurulumda önceki sürüm FortiGate DHCP kayıtlarını okuyamaz:
-bir FortiGate kirasını, adres bırakıldıktan ya da başka bir istemciye verildikten sonra da açık
-tutabilir. Bu yüzden `-Rollback`, program değiştirilmeden önce, bütün FortiGate kiralarını
+**Geri alma:** eski NAT satırları bu sürümde okunmadan saklanır; `-Rollback` bu revizyonu geri
+almaz (şemayı yalnızca `0021_db_window`'dan önceki revizyona kadar indirir, yukarıda), önceki
+sürüm bu satırları, yani **yükseltme öncesi** NAT değerlerini okur. Yükseltmeden sonra İnternet
+çıkışlarında bir değişiklik yaptıysanız, geri döndükten sonra önceki sürümün Ayarlar → Uygulama
+ayarları bölümündeki `nat.public_ips` ve `nat.wan_transip` değerlerini bu sürümde yaptığınız
+değişiklikle karşılaştırıp elle girin (değişiklikler denetim kaydında `settings.change` olarak
+durur); bunun için veritabanını geri yüklemeyin: `-RestoreDatabase` sonrasında kullanılan
+veritabanında yükseltmeden sonraki kayıtların (denetim, sorgu, rapor, uyarı, cihaz ve kişi
+atamaları) hiçbiri yoktur: yalnızca yerine geçilen veritabanında, `<ad>_replaced_<zaman>` içinde
+kalırlar ([YEDEKLEME.md](YEDEKLEME.md) bölüm 5). `-Rollback` çalıştırmadan önce bu sürümde yapılan
+sorguların resmi raporlarını (PDF) indirin: bir rapor ilk indirildiğinde bir kez oluşturulur ve
+önceki sürüm, bu sürümün eklediği satırları (tanımsız gönderici uyarısı, "Kısmi kanıt" etiketi,
+çıkış ve FortiGate kira satırları) yazmaz. FortiGate DHCP kullanan bir kurulumda önceki sürüm
+FortiGate DHCP kayıtlarını okuyamaz: bir FortiGate kirasını, adres bırakıldıktan ya da başka bir
+istemciye verildikten sonra da açık tutabilir. Bu yüzden `-Rollback`, program değiştirilmeden önce, bütün FortiGate kiralarını
 **düşük güvene** indirir; kaç kira olduğunu yazar ve kurulum günlüğüne kaydeder (yalnızca
 türetilmiş kira satırları değişir; ham kayıtlara ve mühürlere dokunulmaz; `-RestoreDatabase`
 ile bu adım yapılmaz). Önceki sürümde FortiGate DHCP'ye dayanan bütün zincirler bu nedenle
@@ -1404,6 +1475,13 @@ delildir; silinmeleri yalnızca saklama/imha işiyle ve imha tutanağıyla olur.
 - Temurin MSI `INSTALLDIR` özelliği; TimescaleDB `setup.exe`'nin kurulu PostgreSQL 16 sürümüyle
   çalışması ve geri yüklemede `timescaledb_pre_restore()` / `timescaledb_post_restore()`; Inno
   Setup'ta `Turkish.isl` dil dosyası.
+- TimescaleDB'de `-Rollback -RestoreDatabase`: `timescaledb_pre_restore()`'dan hemen sonra yeniden
+  adlandırmanın çalışması (veritabanını açık tutan arka plan işçisi kalmaması) ve gerçek parça
+  (chunk) sayısının geri yüklenmesi (CI testleri TimescaleDB 2.30.2'ye karşı on kadar parça geri
+  yükler; 400 günlük bir kurulumda binlerce vardır: sürenin ve tamamlandığının kaydı); istediği boş
+  alanın (şimdiki veritabanının boyutu, dörtte biri ve `max_wal_size`) yedekten sonra sıkıştırılan
+  parçalar sıkıştırılmamış geri gelirken yetip yetmediği; yedekle geri alma arasında güncellenen
+  bir TimescaleDB (yeni veritabanı eklentiyi şimdiki veritabanının sürümüyle alır).
 - Güvenlik duvarındaki "Core Networking" grubunun kaynak adı:
   `Get-NetFirewallRule -DisplayGroup 'Core Networking' | Select-Object -First 1 Group` →
   `@FirewallAPI.dll,-25000` beklenir (Türkçe Windows'ta görünen ad farklı olabilir; betik hem

@@ -37,6 +37,9 @@
     arcilogger-db leases prepare-rollback [--config PATH]
                                                before a rollback (the installer): FortiGate
                                                leases to low confidence, prints the count
+    arcilogger-db schema downgrade --to REVISION [--json] [--config PATH]
+                                               before a rollback (the installer): the schema
+                                               down to the previous version's revision
     arcilogger-db version
 
 ``settings set`` is the supported way to change a database setting until the settings page
@@ -61,6 +64,19 @@ assumes lower case).
 version cannot read FortiGate DHCP lines, so every ``fg_dhcp`` lease is set to ``low`` in one
 transaction before the program is swapped; ``upgrade`` (its seed) restores the ones the previous
 version left as they were and prints both counts with the lease rebuild range.
+
+``schema downgrade`` is the schema step of ``Install-Arcilogger.ps1 -Rollback`` without
+``-RestoreDatabase`` back to a version from before ``0021_db_window`` (issue #122;
+:mod:`arcilogger_db.downgrade`), run after the services stop and before the program is swapped:
+alembic's downgrade under the migrations' lock, held for the session (``0021``'s downgrade
+commits a step per table and month, and a second run goes on where a failed one stopped), and the
+one ``settings.change`` entry (actor ``system``) when it changed ``db.retention_days``, after
+the entry of the upgrade's own change when that was still unaudited and the downgrade dropped its
+status row. Exit 0 also when the database is at the revision already (nothing done); 1 when the
+downgrade failed or refused; 2 for a revision this version does not ship or one not below the
+database's; 3 when the database cannot be reached. ``--json`` prints ``{"from", "to",
+"downgraded", "audit_id", "retention_days": {"before", "after"} | null, "upgrade_audit_id"}`` on
+success.
 
 ``license …`` (offline licensing, licensing contract 6.8) is the only command that loads the
 licence code (:mod:`arcilogger_db.licensing`, imported inside its handler): ``upgrade``,
@@ -121,6 +137,7 @@ from arcilogger_db.backup import (
     run_backup,
     verify_backup,
 )
+from arcilogger_db.downgrade import DowngradeUsageError, check_target, downgrade_schema
 from arcilogger_db.engine import make_engine
 from arcilogger_db.lease_rollback import prepare_rollback
 from arcilogger_db.migrate import current_revisions, head_revisions, upgrade
@@ -897,6 +914,94 @@ def cmd_leases(config: Config, args: argparse.Namespace) -> int:
     return LEASES_ACTIONS[args.leases_command](config, args)
 
 
+# -- schema (issue #122) --------------------------------------------------------------------------
+
+
+def _schema_downgrade(config: Config, args: argparse.Namespace) -> int:
+    try:  # before connecting
+        revision = check_target(args.to)
+    except DowngradeUsageError as exc:
+        print(f"Şema geri alınmadı [schema not downgraded]: {exc}", file=sys.stderr)
+        return EXIT_USAGE
+    engine = _engine(config)
+    try:
+        try:
+            connection = engine.connect()
+        except OperationalError as exc:
+            raise _UnreachableError(_describe(exc)) from exc
+        with connection:
+            result = downgrade_schema(
+                connection,
+                revision,
+                timescale=config.database.timescale,
+                details={"via": "arcilogger-db", "os_user": _os_actor()[1]},
+            )
+    except DowngradeUsageError as exc:
+        print(f"Şema geri alınmadı [schema not downgraded]: {exc}", file=sys.stderr)
+        return EXIT_USAGE
+    except _UnreachableError:
+        raise
+    except Exception as exc:  # whatever stopped it: the installer must not swap the program
+        message = _describe(exc) if isinstance(exc, SQLAlchemyError) else str(exc)
+        print(_downgrade_failed(revision, message), file=sys.stderr)
+        return EXIT_ATTENTION
+    finally:
+        engine.dispose()
+    if args.json:
+        retention = None
+        if result.downgraded:
+            retention = {"before": result.retention_before, "after": result.retention_after}
+        document = {
+            "from": ",".join(result.before),
+            "to": ",".join(result.after),
+            "downgraded": result.downgraded,
+            "audit_id": result.audit_id,
+            "retention_days": retention,
+            "upgrade_audit_id": result.upgrade_audit_id,
+        }
+        print(json.dumps(document, ensure_ascii=False))
+        return EXIT_OK
+    if not result.downgraded:
+        print(
+            f"Şema zaten {revision} sürümünde; hiçbir şey değiştirilmedi [the schema is at "
+            f"{revision} already; nothing changed]."
+        )
+        return EXIT_OK
+    print(f"Şema geri alındı [schema downgraded]: {result.before[0]} → {', '.join(result.after)}")
+    if result.audit_id is not None:
+        print(
+            f"  db.retention_days: {_json(result.retention_before)} → "
+            f"{_json(result.retention_after)} (denetim kaydı [audit entry] #{result.audit_id}, "
+            "settings.change, system)"
+        )
+    if result.upgrade_audit_id is not None:
+        print(
+            "  db.retention_days: yükseltmenin denetlenmemiş değişikliği yazıldı [the "
+            "upgrade's unaudited change was written] (denetim kaydı [audit entry] "
+            f"#{result.upgrade_audit_id})"
+        )
+    return EXIT_OK
+
+
+def _downgrade_failed(revision: str, reason: str) -> str:
+    """The TR/EN text of a downgrade that failed or refused."""
+    return (
+        f"Şema {revision} sürümüne geri alınamadı [the schema was not downgraded to {revision}]: "
+        f"{reason}\n"
+        "Tamamlanan adımlar kalır; komutu yeniden çalıştırmak kaldığı yerden sürdürür. Yine "
+        "başarısız olursa veritabanını yedekten geri yükleyin (docs/YEDEKLEME.md bölüm 5). "
+        "[The steps completed stay; running the command again goes on where it stopped. If it "
+        "keeps failing, restore the database from a backup (docs/BACKUP.md section 5).]"
+    )
+
+
+SCHEMA_ACTIONS = {"downgrade": _schema_downgrade}
+
+
+def cmd_schema(config: Config, args: argparse.Namespace) -> int:
+    return SCHEMA_ACTIONS[args.schema_command](config, args)
+
+
 # -- license (offline licensing, contract 6.8) ---------------------------------------------------
 
 #: A licence file larger than this is not read at all (the licence limit is 64 KiB).
@@ -1301,6 +1406,18 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     for sub in (leases, prepare):
         sub.add_argument("--config", type=Path, default=argparse.SUPPRESS)
+    schema = commands.add_parser("schema", help="the schema: the step before a rollback")
+    schema_actions = schema.add_subparsers(dest="schema_command", metavar="<action>")
+    downgrade = schema_actions.add_parser(
+        "downgrade",
+        help="before a rollback: the schema down to a revision (resumable, audited)",
+    )
+    downgrade.add_argument(
+        "--to", required=True, metavar="REVISION", help="the previous version's newest revision"
+    )
+    downgrade.add_argument("--json", action="store_true")
+    for sub in (schema, downgrade):
+        sub.add_argument("--config", type=Path, default=argparse.SUPPRESS)
     licence = commands.add_parser(
         "license", help="offline licence: state, request code, verify, install, remove"
     )
@@ -1344,6 +1461,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         handler = _search_counts_handler(args)
     if args.command == "leases" and getattr(args, "leases_command", None):
         handler = _leases_handler(args)
+    if args.command == "schema" and getattr(args, "schema_command", None):
+        handler = _schema_handler(args)
     if handler is None:
         parser.print_help()
         return EXIT_USAGE
@@ -1387,6 +1506,10 @@ def _search_counts_handler(args: argparse.Namespace) -> Any:
 
 def _leases_handler(args: argparse.Namespace) -> Any:
     return lambda config: cmd_leases(config, args)
+
+
+def _schema_handler(args: argparse.Namespace) -> Any:
+    return lambda config: cmd_schema(config, args)
 
 
 if __name__ == "__main__":
