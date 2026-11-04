@@ -34,6 +34,10 @@ export type Draft = boolean | string | string[] | WorkHours | ServerSeconds[] | 
 export const WORK_HOURS_KEY = 'usage.work_hours';
 export const HOLIDAYS_KEY = 'usage.holidays';
 export const SERVER_SECONDS_KEY = 'lease.server_seconds';
+/** Each server of `lease.server_seconds` has the bounds of this setting (W5-G-19). */
+export const LEASE_DEFAULT_KEY = 'lease.default_seconds';
+/** The least lease time of a server when the group does not carry `lease.default_seconds`. */
+const SERVER_SECONDS_MIN = 60;
 export const SEVERITY_KEY = 'alerts.email_min_severity';
 export const TOTP_ROLES_KEY = 'auth.totp_required_roles';
 /** Lists of e-mail addresses. */
@@ -117,6 +121,21 @@ export type Parsed =
   /** `params` fill the placeholders of the error's text (a limit, a type name). */
   | { value?: undefined; error: string; params?: Record<string, string | number> };
 
+/**
+ * The settings of a group with the bounds the browser checks. The API states the bounds of each
+ * server's lease time (`LEASE_SERVER_SECONDS`) as those of `lease.default_seconds` and lists
+ * none for `lease.server_seconds`, an object (W5-G-19): it takes them from the setting beside it.
+ */
+export function withServerBounds(settings: readonly SettingOut[]): readonly SettingOut[] {
+  const lease = settings.find((setting) => setting.key === LEASE_DEFAULT_KEY);
+  if (!lease) return settings;
+  return settings.map((setting) =>
+    setting.key === SERVER_SECONDS_KEY && setting.min === null && setting.max === null
+      ? { ...setting, min: lease.min, max: lease.max }
+      : setting,
+  );
+}
+
 /** The value a draft stands for, or the i18n key of its problem. */
 export function fromDraft(
   setting: Pick<SettingOut, 'key' | 'type' | 'min' | 'max'>,
@@ -155,8 +174,14 @@ export function fromDraft(
       const server = row.server.trim();
       const seconds = parseInteger(row.seconds);
       if (!server) return { error: 'settings.application.errors.serverName' };
-      if (seconds === null || seconds < 60)
-        return { error: 'settings.application.errors.serverSeconds' };
+      const low = setting.min ?? SERVER_SECONDS_MIN;
+      if (seconds === null || integerError(row.seconds, low, setting.max))
+        return setting.max === null
+          ? { error: 'settings.application.errors.serverSecondsMin', params: { min: low } }
+          : {
+              error: 'settings.application.errors.serverSeconds',
+              params: { min: low, max: setting.max },
+            };
       value[server] = seconds;
     }
     return { value };
