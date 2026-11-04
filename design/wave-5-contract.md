@@ -1826,9 +1826,9 @@ All Wave 5 questions are answered (2026-11-02).
 - **W5-E-9: the owner of `state\crl` and `state\renewal` cannot change their rights (#151;
   review of the follow-up).** Both folders are new in Wave 5 (W5-B, W5-E-4). Under the earlier
   release's ACL the collector, ingest and the worker hold Modify on `state`, so a compromised one
-  could create either folder before the upgrade and own it. `Set-ArciVaultAcl.ps1` replaces only
-  the DACL of a folder that exists (`Set-ArciAclEntry` never sets the owner), and an owner keeps
-  the implicit right to read and change the DACL whatever it says: it could give itself Modify
+  could create either folder before the upgrade and own it. `Set-ArciVaultAcl.ps1` replaced only
+  the DACL of a folder that exists (`Set-ArciAclEntry` set no owner before the answer to Q4
+  below), and an owner keeps the implicit right to read and change the DACL whatever it says: it could give itself Modify
   again, write `renewal.json` (silencing `R20-renewal`, `R20-cert` and `renewal_due`), hold
   `renewal.lock`, or change a stored list. `Get-ArciAclPlan` now gives both folders an entry for
   OWNER RIGHTS (`S-1-3-4`) with `ReadPermissions` only, inherited by what is created below;
@@ -1836,17 +1836,43 @@ All Wave 5 questions are answered (2026-11-02).
   `ReadPermissions`, not `ReadAndExecute`, so that an owning service still cannot list or read
   the folder (nothing for the collector or ingest, W5-E-1). SYSTEM, Administrators and the
   tasks keep their own entries, and neither `Renew` nor `CrlFetch` changes a permission there
-  (the immutability lock is used only below `vault`). Not covered, and outside W5-E's files: an
-  item a service created inside such a folder before the upgrade keeps its owner and its
-  explicit or protected entries, which `Set-ArciVaultAcl.ps1` does not replace (for example a
-  made-up `state\renewal\renewal.json` the Renew task cannot replace). Setting the owner of a
-  protected entry to Administrators, and resetting the items below `state\crl` and
-  `state\renewal`, belong to `Set-ArciAclEntry` and `Set-ArciVaultAcl.ps1`; they are proposed on
-  #151. Tests: `test_acl_plan_least_privilege`,
-  `test_acl_plan_gives_the_renew_and_crlfetch_tasks_their_rights`, and on Windows
+  (the immutability lock is used only below `vault`).
+  **The items below (answer to Q4 on #158).** A service could also have put items of its own in
+  either folder before the upgrade, with their own owner and explicit or protected entries,
+  which replacing the folder's DACL leaves as they are: a `state\renewal\renewal.lock` with its
+  own Modify could hold the lock and stop every Renew run, a made-up `renewal.json` could be
+  one the task cannot replace. The plan's entries now carry `ResetOwner` (false everywhere but
+  `state\crl` and `state\renewal`), and `Set-ArciVaultAcl.ps1`, which the installer's ACL step
+  runs, passes it to `Set-ArciAclEntry -ResetOwner`. That opt-in switch makes
+  `BUILTIN\Administrators` (`S-1-5-32-544`) the owner of the folder and of every item below it
+  and leaves each item below with the inherited entries only (what `icacls /reset /T` does),
+  through the .NET security calls the module already uses (`Get-ArciAccessControl`,
+  `Set-ArciAccessControl`); a folder's items are listed only after its own entries are reset.
+  Every other entry and the installer's own calls (`admin\`, `admin\keys`, the configuration
+  files) never write an owner (`Set-ArciAccessControl`): the tasks lock the sealed files they
+  create, and unlock them for retention, by the owner's right to change their entries (their
+  Modify has no ChangePermissions), and a folder another account created would hit Set-Acl's
+  "not allowed to be the owner" failure. A link below either folder (a reparse point, or a hard
+  link: the same file under another name elsewhere) stops the step with an error before the
+  reset reaches it, since it would hand Administrators, and inherited entries only, whatever it
+  points to; Windows' own propagation of the folder's inheritable entries, which every entry of
+  the plan has always caused, is not changed. The step enables no privilege: an item whose
+  entries give Administrators no right to take it over (its owner took them away) stops it with
+  an error naming the item, and `takeown /A /R /F <folder>` in an elevated PowerShell takes it
+  over by hand before the step is run again. Tests: `test_acl_plan_least_privilege`,
+  `test_acl_plan_gives_the_renew_and_crlfetch_tasks_their_rights`,
+  `test_acl_plan_resets_the_owner_of_the_two_protected_state_folders_only` (exactly the two
+  entries carry `ResetOwner`), `test_only_the_acl_script_passes_reset_owner`, and on Windows
   `test_acl_applied_keeps_sealed_file_deny_entries` (`state\crl` created before the ACL step
   with an entry of its own: that entry is gone, and OWNER RIGHTS has `ReadPermissions` only on
-  `state\crl` and `state\renewal`).
+  `state\crl` and `state\renewal`), `test_acl_applied_takes_over_the_protected_state_folders`
+  (both folders, `renewal.lock`, `index.json` and a folder below `state\crl` with a file in it,
+  each owned by the collector or ingest with a Modify entry of its own, set with `icacls
+  /setowner`, which uses the administrator's restore privilege: afterwards Administrators own
+  them, the items below have inherited entries only, the collector and ingest have nothing,
+  LOCAL SERVICE keeps its inherited Modify on the lock, and `logs` keeps the collector as its
+  owner) and `test_acl_step_stops_at_a_link_in_a_protected_state_folder` (a junction and a hard
+  link; the file they point to keeps its entry).
 
 ## Deviations — #119 (2026-11-04)
 

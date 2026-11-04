@@ -2930,9 +2930,10 @@ foreach ($path in [System.IO.File]::ReadAllLines($ListPath)) {
         assert reader_rules, reader
         assert all(r["rights"] & writes == 0 for r in reader_rules), reader
     assert all(r["sid"] not in (collector, service_sid("ArciIngest")) for r in crl_rules)
-    # The owner of state\crl (here the account that created it before the ACL step) and of
-    # state\renewal reads their permissions and nothing more: OWNER RIGHTS takes the owner's
-    # implicit right to change them (W5-E-9). The earlier entry of state\crl is gone.
+    # The owner of state\crl and of state\renewal (Administrators after the ACL step, see
+    # test_acl_applied_takes_over_the_protected_state_folders) reads their permissions and
+    # nothing more: OWNER RIGHTS takes the owner's implicit right to change them (W5-E-9). The
+    # earlier entry of state\crl is gone.
     synchronize, read_control = 0x100000, 0x20000
     for path in (crl_state, data / "state" / "renewal"):
         assert all(r["sid"] != "S-1-1-0" for r in acls[path]["rules"]), path
@@ -2967,6 +2968,158 @@ foreach ($path in [System.IO.File]::ReadAllLines($ListPath)) {
     assert any(r["sid"] == WELL_KNOWN["local_service"] for r in acls[scheduled]["rules"])
     services = {service_sid(n) for n in ("ArciCollector", "ArciIngest", "ArciApi", "ArciWorker")}
     assert not any(r["sid"] in services for r in acls[scheduled]["rules"])
+
+
+_OWNER_DUMP_SCRIPT = r"""
+param([string]$ListPath, [string]$OutputPath)
+# A Get-Acl that cannot run must fail the test, not write an empty owner or empty rules.
+$ErrorActionPreference = 'Stop'
+Remove-TypeData -TypeName System.Array -ErrorAction SilentlyContinue
+$sidType = [System.Security.Principal.SecurityIdentifier]
+$out = [ordered]@{}
+foreach ($path in [System.IO.File]::ReadAllLines($ListPath)) {
+    $acl = Get-Acl -LiteralPath $path
+    $out[$path] = [ordered]@{
+        owner = $acl.GetOwner($sidType).Value
+        protected = $acl.AreAccessRulesProtected
+        rules = @($acl.GetAccessRules($true, $true, $sidType) | ForEach-Object {
+                [ordered]@{
+                    sid = $_.IdentityReference.Value; rights = [int]$_.FileSystemRights
+                    type = [string]$_.AccessControlType; inherited = $_.IsInherited
+                }
+            })
+    }
+}
+[System.IO.File]::WriteAllText($OutputPath, ($out | ConvertTo-Json -Depth 6))
+"""
+
+
+def _owners_and_rules(powershell: str, tmp_path: Path, paths: list[Path]) -> dict[Path, Any]:
+    dump = write_script(tmp_path / "owners.ps1", _OWNER_DUMP_SCRIPT)
+    listing, out = tmp_path / "owner-paths.txt", tmp_path / "owners.json"
+    listing.write_text("\n".join(str(p) for p in paths) + "\n", encoding="utf-8")
+    result = run_powershell(powershell, dump, "-ListPath", str(listing), "-OutputPath", str(out))
+    assert result.returncode == 0, result.stdout + result.stderr
+    return {Path(k): v for k, v in read_json(out).items()}
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="NTFS rights are Windows-only")
+def test_acl_applied_takes_over_the_protected_state_folders(tmp_path: Path) -> None:
+    """state\\crl and state\\renewal as a service could have left them before the upgrade
+    (W5-E-9, answer to Q4 on #158): its own folders and files, renewal.lock among them (held,
+    it would stop every Renew run), each with a Modify entry of its own. After the ACL step
+    Administrators own the two folders and everything below them, the items below have
+    inherited entries only, and the collector and ingest have nothing there. A folder outside
+    the two keeps its owner. icacls sets the foreign owners with the administrator's restore
+    privilege (administrator CI runner)."""
+    powershell = _windows_admin_powershell()
+    data, programdata, program = tmp_path / "data", tmp_path / "programdata", tmp_path / "program"
+    programdata.mkdir()
+    program.mkdir()
+    collector, ingest = service_sid("ArciCollector"), service_sid("ArciIngest")
+    renewal_state, crl_state, logs = (
+        data / "state" / "renewal",
+        data / "state" / "crl",
+        data / "logs",
+    )
+    lock = renewal_state / "renewal.lock"
+    index = crl_state / "index.json"
+    # A folder of its own below state\crl: the step resets it, then what is in it.
+    planted = crl_state / "planted"
+    planted_list = planted / "list.crl"
+    for folder in (renewal_state, planted, logs):
+        folder.mkdir(parents=True)
+    lock.write_bytes(b"")
+    index.write_bytes(b"{}\n")
+    planted_list.write_bytes(b"not a list\n")
+    owned = {
+        renewal_state: collector, lock: collector, crl_state: ingest, index: ingest,
+        planted: ingest, planted_list: ingest, logs: collector,
+    }  # fmt: skip
+    for path, sid in owned.items():
+        grant = f"*{sid}:(OI)(CI)M" if path.is_dir() else f"*{sid}:M"
+        subprocess.run(["icacls", str(path), "/grant", grant], check=True)
+        subprocess.run(["icacls", str(path), "/setowner", f"*{sid}"], check=True)
+    before = _owners_and_rules(powershell, tmp_path, list(owned))
+    for path, sid in owned.items():
+        assert before[path]["owner"] == sid, path
+        assert any(r["sid"] == sid and not r["inherited"] for r in before[path]["rules"]), path
+    result = run_powershell(
+        powershell,
+        WINDOWS / "scripts" / "Set-ArciVaultAcl.ps1",
+        "-DataRoot",
+        str(data),
+        "-ProgramDataDir",
+        str(programdata),
+        "-InstallDir",
+        str(program),
+        "-SkipAudit",
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    after = _owners_and_rules(powershell, tmp_path, list(owned))
+    admins, tasks = WELL_KNOWN["admins"], WELL_KNOWN["local_service"]
+    taken_over = [path for path in owned if path != logs]
+    for path in taken_over:
+        assert after[path]["owner"] == admins, path
+        rules = after[path]["rules"]
+        assert all(r["sid"] not in (collector, ingest) for r in rules), path
+    for folder in (renewal_state, crl_state):
+        assert after[folder]["protected"] is True, folder
+    for item in (lock, index, planted, planted_list):
+        assert after[item]["protected"] is False, item
+        assert after[item]["rules"], item
+        assert all(r["inherited"] for r in after[item]["rules"]), item
+    # The Renew task still takes its lock: the folder's Modify, inherited.
+    write_data, append_data, delete = 0x2, 0x4, 0x10000
+    modify_bits = write_data | append_data | delete
+    lock_tasks = [r for r in after[lock]["rules"] if r["sid"] == tasks]
+    assert any(
+        r["type"] == "Allow" and r["rights"] & modify_bits == modify_bits for r in lock_tasks
+    )
+    # Everywhere else the owner stays (Set-ArciAccessControl): logs keeps the collector.
+    assert after[logs]["owner"] == collector
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="NTFS rights are Windows-only")
+@pytest.mark.parametrize("kind", ["junction", "hard link"])
+def test_acl_step_stops_at_a_link_in_a_protected_state_folder(kind: str, tmp_path: Path) -> None:
+    """A link below state\\renewal (a directory junction, or a hard link: the same file under
+    another name elsewhere) stops the ACL step with an error before the reset reaches what the
+    link points to: it would hand Administrators, and inherited entries only, whatever a service
+    pointed it at (W5-E-9). The file elsewhere keeps its entry of its own."""
+    powershell = _windows_admin_powershell()
+    data, programdata, program = tmp_path / "data", tmp_path / "programdata", tmp_path / "program"
+    programdata.mkdir()
+    program.mkdir()
+    renewal_state = data / "state" / "renewal"
+    renewal_state.mkdir(parents=True)
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    kept = elsewhere / "kept.txt"
+    kept.write_bytes(b"kept\n")
+    subprocess.run(["icacls", str(kept), "/grant", "*S-1-1-0:R"], check=True)
+    link, target, flag = (
+        (renewal_state / "renewal", elsewhere, "/J")
+        if kind == "junction"
+        else (renewal_state / "renewal.lock", kept, "/H")
+    )
+    subprocess.run(["cmd", "/c", "mklink", flag, str(link), str(target)], check=True)
+    result = run_powershell(
+        powershell,
+        WINDOWS / "scripts" / "Set-ArciVaultAcl.ps1",
+        "-DataRoot",
+        str(data),
+        "-ProgramDataDir",
+        str(programdata),
+        "-InstallDir",
+        str(program),
+        "-SkipAudit",
+    )
+    assert result.returncode != 0, result.stdout + result.stderr
+    message = "[a link (reparse point or hard link) in a protected state folder"
+    assert _unwrapped(message) in _unwrapped(result.stdout + result.stderr)
+    after = _owners_and_rules(powershell, tmp_path, [kept])
+    assert any(r["sid"] == "S-1-1-0" and not r["inherited"] for r in after[kept]["rules"])
 
 
 def _windows_admin_powershell() -> str:
@@ -9119,6 +9272,43 @@ def test_acl_plan_gives_the_renew_and_crlfetch_tasks_their_rights(
     assert paths.index("data/state") < paths.index("data/state/crl")
     assert paths.index("data/state") < paths.index("data/state/renewal")
     assert paths.index("data/exports") < paths.index("data/exports/reports")
+
+
+def test_acl_plan_resets_the_owner_of_the_two_protected_state_folders_only(
+    engine: str, tmp_path: Path
+) -> None:
+    """W5-E-9 (answer to Q4 on #158): only state\\crl and state\\renewal ask Set-ArciAclEntry
+    to make Administrators their owner and to leave the items below them with inherited entries
+    only. A service could have created both folders, and a renewal.lock that holds every Renew
+    run, under an earlier release. Every other entry keeps its owner: the tasks unlock the sealed
+    files they own by the owner's right to change their entries."""
+    entries = _plan_by_path(_acl_plan(engine, tmp_path), tmp_path)
+    assert all(isinstance(entry["ResetOwner"], bool) for entry in entries.values())
+    reset = [path for path, entry in entries.items() if entry["ResetOwner"]]
+    assert reset == ["data/state/crl", "data/state/renewal"]
+    for path in reset:
+        assert (entries[path]["Kind"], entries[path]["Protect"]) == ("Directory", True), path
+
+
+def test_only_the_acl_script_passes_reset_owner() -> None:
+    """Set-ArciAclEntry -ResetOwner is opt-in (W5-E-9): Set-ArciVaultAcl.ps1, which the
+    installer's ACL step runs, passes each plan entry's ResetOwner; the installer's own calls
+    (admin\\ and admin\\keys before the keys exist, the configuration files after a secret was
+    stored) pass none and never write an owner."""
+    calls = {
+        path.name: re.findall(r"Set-ArciAclEntry -Entry[^\r\n}]*", path.read_text("utf-8-sig"))
+        for path in sorted(WINDOWS.rglob("*.ps1"))
+    }
+    assert calls["Set-ArciVaultAcl.ps1"] == [
+        "Set-ArciAclEntry -Entry $entry -ResetOwner:$entry.ResetOwner"
+    ]
+    assert [call.strip() for call in calls[INSTALL_SCRIPT.name]] == [
+        "Set-ArciAclEntry -Entry $entry"
+    ] * 2
+    assert {name for name, found in calls.items() if found} == {
+        "Set-ArciVaultAcl.ps1",
+        INSTALL_SCRIPT.name,
+    }
 
 
 def test_acl_plan_keeps_the_api_and_the_tasks_out_of_the_configuration(

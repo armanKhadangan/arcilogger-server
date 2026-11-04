@@ -22,13 +22,16 @@
         \verify, \clock                   them); ArciApi, ArciWorker read (ArciIngest also state\seal)
       <data>\state\crl                    protected: LOCAL SERVICE modify (the CrlFetch task stores the
                                           revocation lists as evidence); ArciApi, ArciWorker read;
-                                          nothing for the collector or ingest; OWNER RIGHTS read
-                                          permissions (an owner from before the upgrade cannot
-                                          change them)
+                                          nothing for the collector or ingest. Owner: Administrators,
+                                          of the folder and of everything below it, and the items
+                                          below keep the inherited entries only (a service may have
+                                          created them before the upgrade); OWNER RIGHTS read
+                                          permissions (no owner can change them)
       <data>\state\renewal                protected: LOCAL SERVICE modify (the Renew task's renewal.json
                                           and renewal.lock); ArciApi, ArciWorker read; nothing for the
-                                          collector or ingest (they could silence the re-stamping alerts);
-                                          OWNER RIGHTS as for state\crl
+                                          collector or ingest (they could silence the re-stamping alerts
+                                          or hold the lock); owner, items below and OWNER RIGHTS as
+                                          for state\crl
       <data>\exports                      ArciApi, ArciWorker modify
       <data>\exports\reports              LOCAL SERVICE read (the Renew task re-stamps the tokens of the
                                           stored reports); ArciApi, ArciWorker keep the modify of exports
@@ -48,7 +51,9 @@
 
     Sealed files keep the deny entries that arcilogger_core.immutability puts on them (ADR-0003):
     only the explicit entries of the folders listed above are replaced; Windows recomputes the
-    inherited entries of the files below them. File contents are never touched.
+    inherited entries of the files below them. Below state\crl and state\renewal alone, every
+    item also loses its explicit entries and gets Administrators as its owner (contract W5-E-9).
+    File contents are never touched.
 
     Run again at any time (idempotent), e.g. after restoring the server.
 
@@ -116,6 +121,7 @@ foreach ($entry in $plan) {
         Write-ArciInfo ("{0,-28} {1}{2}" -f $ace.Who, $ace.Rights, $scope)
     }
     if ($entry.Audit) { Write-ArciInfo 'Denetim: yazma/silme/izin değişikliği [audit: write/delete/permission change]' }
+    if ($entry.ResetOwner) { Write-ArciInfo 'Sahip: Yöneticiler grubu, içindekiler yalnızca kalıtılan izinlerle [owner: Administrators, the items below keep inherited entries only]' }
 }
 
 if ($PlanOnly) {
@@ -134,7 +140,8 @@ foreach ($entry in $plan) {
         }
         [void](New-Item -ItemType Directory -Path $entry.Path -Force)
     }
-    Set-ArciAclEntry -Entry $entry
+    # Only state\crl and state\renewal carry ResetOwner (Get-ArciAclPlan).
+    Set-ArciAclEntry -Entry $entry -ResetOwner:$entry.ResetOwner
 }
 
 if (-not $SkipAudit) {

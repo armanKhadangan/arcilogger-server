@@ -1831,7 +1831,8 @@ function Get-ArciAclPlan {
         Who may do what in the ARCILOGGER folders (least privilege, docs/adr/0007, docs/adr/0014).
     .DESCRIPTION
         Returns one entry per path: Path, Kind (Directory/File), Protect (inheritance from the
-        parent disabled), Aces and Audit. Pure data, no system calls: the dry run prints it and the
+        parent disabled), Aces, Audit and ResetOwner (Set-ArciAclEntry -ResetOwner, for state\crl
+        and state\renewal only). Pure data, no system calls: the dry run prints it and the
         tests check it on any platform. Parents come before their children (Set-ArciVaultAcl.ps1
         creates a missing folder in this order). "Read" of a folder is ReadAndExecute (list and
         traverse), of a file Read. The entries go down the pipeline one by one, so
@@ -1852,11 +1853,12 @@ function Get-ArciAclPlan {
           state\renewal could silence the re-stamping alerts or hold the run's lock). Renew adds
           its records to vault\renewals through the inherited Modify of vault, and keeps
           renewal.json and renewal.lock in state\renewal: every run replaces renewal.json with a
-          new file (atomic write), which gets the folder's inherited entries. state\crl and
-          state\renewal also give OWNER RIGHTS ReadPermissions only: a service that created one
-          of them under an earlier release (its Modify on state allowed it) stays its owner,
-          since no entry changes an owner, and would otherwise keep the owner's right to change
-          the permissions. Renew reads the day and deletion-record tokens (sealed files keep
+          new file (atomic write), which gets the folder's inherited entries. A service could
+          have created state\crl or state\renewal, and items in them, under an earlier release
+          (its Modify on state allowed it): both carry ResetOwner, so Administrators become the
+          owner of the folder and of everything below it, and the items below keep the
+          inherited entries only; OWNER RIGHTS gets ReadPermissions only there, so no owner can
+          change the permissions. Renew reads the day and deletion-record tokens (sealed files keep
           their deny entries, so no task changes them), state\crl, and the stored reports and
           their tokens in exports\reports (read only).
           The database backup (Backup task, ADR-0009) writes and prunes backups\scheduled, which
@@ -1931,8 +1933,8 @@ function Get-ArciAclPlan {
     # The agent's right on state\requests: read, create a task request and write it.
     $requestWriter = 'ReadAndExecute, CreateFiles, WriteData'
 
-    function New-Entry([string]$Path, [string]$Kind, [bool]$Protect, [object[]]$Aces, [bool]$Audit = $false) {
-        [pscustomobject]@{ Path = $Path; Kind = $Kind; Protect = $Protect; Aces = @($Aces); Audit = $Audit }
+    function New-Entry([string]$Path, [string]$Kind, [bool]$Protect, [object[]]$Aces, [bool]$Audit = $false, [bool]$ResetOwner = $false) {
+        [pscustomobject]@{ Path = $Path; Kind = $Kind; Protect = $Protect; Aces = @($Aces); Audit = $Audit; ResetOwner = $ResetOwner }
     }
     $owners = @(
         (New-ArciAce -Sid $system -Who 'SYSTEM' -Rights $full),
@@ -2134,24 +2136,27 @@ function Get-ArciAclPlan {
         # Revocation lists (CrlFetch, contract D8): stored byte for byte as evidence, so only the
         # tasks write them; the API (legal status, day page, evidence packages) and the worker
         # (R20-crl, R20-cert) read them. Both state\crl and state\renewal are new in Wave 5: a
-        # service could have created either with its Modify on state before the upgrade and
-        # stays its owner (Set-ArciAclEntry never changes one), so OWNER RIGHTS takes the
-        # owner's implicit right to change the permissions.
+        # service could have created either with its Modify on state before the upgrade, and
+        # items in it (a renewal.lock with its own Modify would hold every Renew run).
+        # ResetOwner makes Administrators the owner of the folder and of everything below it
+        # and leaves the items below with the inherited entries only; OWNER RIGHTS takes the
+        # owner's implicit right to change the permissions (contract W5-E-9).
         (New-Entry ($DataRoot + $p + 'state' + $p + 'crl') 'Directory' $true ($owners + @(
                     (New-ArciAce -Sid $localService -Who 'LOCAL SERVICE (tasks)' -Rights $modify),
                     (New-ArciAce -Sid $api -Who 'NT SERVICE\ArciApi' -Rights $read),
                     (New-ArciAce -Sid $worker -Who 'NT SERVICE\ArciWorker' -Rights $read),
-                    (New-ArciAce -Sid $ownerRights -Who 'OWNER RIGHTS (whoever owns it)' -Rights $ownerOnly)))),
+                    (New-ArciAce -Sid $ownerRights -Who 'OWNER RIGHTS (whoever owns it)' -Rights $ownerOnly))) -ResetOwner $true),
         # Re-stamping state (Renew): renewal.json, from which R20-renewal, R20-cert and the
         # legal status judge, and renewal.lock, one run at a time. Protected, so a service that
         # could write it cannot silence those alerts or hold the lock; renewal.json is replaced
         # on every run and gets these entries by inheritance. The API (Sistem page, legal
-        # status, day page) and the worker (the alerts) read it. OWNER RIGHTS as for state\crl.
+        # status, day page) and the worker (the alerts) read it. ResetOwner and OWNER RIGHTS as
+        # for state\crl.
         (New-Entry ($DataRoot + $p + 'state' + $p + 'renewal') 'Directory' $true ($owners + @(
                     (New-ArciAce -Sid $localService -Who 'LOCAL SERVICE (tasks)' -Rights $modify),
                     (New-ArciAce -Sid $api -Who 'NT SERVICE\ArciApi' -Rights $read),
                     (New-ArciAce -Sid $worker -Who 'NT SERVICE\ArciWorker' -Rights $read),
-                    (New-ArciAce -Sid $ownerRights -Who 'OWNER RIGHTS (whoever owns it)' -Rights $ownerOnly)))),
+                    (New-ArciAce -Sid $ownerRights -Who 'OWNER RIGHTS (whoever owns it)' -Rights $ownerOnly))) -ResetOwner $true),
         # Signed task requests (seal now, credit query, TSA and replica test; ADR-0014): ArciAdmin
         # writes them and deletes only its own, the tasks take, answer and delete them. No service
         # but the agent can put a request here; the signature is the authority.
@@ -2221,8 +2226,12 @@ function Get-ArciAccessControl {
 
 function Set-ArciAccessControl {
     param([Parameter(Mandatory = $true)][System.IO.FileSystemInfo]$Item, [Parameter(Mandatory = $true)]$Security)
-    # Only the changed sections are written (never the owner), which avoids Set-Acl's
-    # "not allowed to be the owner" failure on folders created by another account.
+    # Only the changed sections are written. The owner only where Set-ArciAclEntry -ResetOwner
+    # sets it (state\crl and state\renewal, to Administrators); everywhere else it stays as it
+    # is, which avoids Set-Acl's "not allowed to be the owner" failure on folders created by
+    # another account and keeps what owners rely on: the tasks lock the sealed files they
+    # create, and unlock them for retention, by the owner's right to change their entries (their
+    # Modify has no ChangePermissions; arcilogger_core.immutability).
     if ($Item.PSObject.Methods.Name -contains 'SetAccessControl') { $Item.SetAccessControl($Security); return }
     if ($Item -is [System.IO.DirectoryInfo]) {
         [System.IO.FileSystemAclExtensions]::SetAccessControl([System.IO.DirectoryInfo]$Item, [System.Security.AccessControl.DirectorySecurity]$Security)
@@ -2237,10 +2246,30 @@ function Set-ArciAclEntry {
         Make the explicit ACL of one path exactly the planned one. Explicit entries on children
         (for example the deny entries that arcilogger_core.immutability puts on sealed files) are
         not touched; inherited entries are recomputed by Windows.
+    .DESCRIPTION
+        -ResetOwner (the entry's ResetOwner: state\crl and state\renewal only, contract W5-E-9)
+        also makes BUILTIN\Administrators the owner of the path and of every item below it, and
+        leaves each item below with the inherited entries only (what icacls /reset /T does).
+        A service could create those folders before the upgrade and put items of its own in
+        them, a renewal.lock with its own Modify that holds every Renew run for example, and an
+        owner can always change the entries of what it owns. A link there (a reparse point, or
+        a hard link: a file with another name elsewhere) stops the step, since resetting it would
+        take over whatever it points to. So does an item whose entries give Administrators no
+        right to take it over, since no privilege is enabled; "takeown /A /R /F <folder>" in an
+        elevated PowerShell takes it over by hand.
     #>
     [CmdletBinding()]
-    param([Parameter(Mandatory = $true)]$Entry)
+    param([Parameter(Mandatory = $true)]$Entry, [switch]$ResetOwner)
     $item = Get-Item -LiteralPath $Entry.Path -Force
+    $admins = New-Object System.Security.Principal.SecurityIdentifier -ArgumentList $script:WellKnownSid.Administrators
+    function Assert-NoLink([System.IO.FileSystemInfo]$Link) {
+        # LinkType (PowerShell's own property) is HardLink for a file with more than one name.
+        $hardLink = $Link -is [System.IO.FileInfo] -and $Link.LinkType -eq 'HardLink'
+        if ($hardLink -or ($Link.Attributes -band [System.IO.FileAttributes]::ReparsePoint)) {
+            throw ("Korunan durum klasöründe bir bağlantı var, elle kaldırın [a link (reparse point or hard link) in a protected state folder, remove it by hand]: {0}" -f $Link.FullName)
+        }
+    }
+    if ($ResetOwner) { Assert-NoLink $item }
     $security = Get-ArciAccessControl -Item $item
     $security.SetAccessRuleProtection([bool]$Entry.Protect, $false)
     $explicit = $security.GetAccessRules($true, $false, [System.Security.Principal.SecurityIdentifier])
@@ -2254,7 +2283,27 @@ function Set-ArciAclEntry {
         $rule = New-Object System.Security.AccessControl.FileSystemAccessRule -ArgumentList $sid, $rights, $inherit, $propagation, ([System.Security.AccessControl.AccessControlType]::Allow)
         $security.AddAccessRule($rule)
     }
+    if ($ResetOwner) { $security.SetOwner($admins) }
     Set-ArciAccessControl -Item $item -Security $security
+    if (-not $ResetOwner -or $item -isnot [System.IO.DirectoryInfo]) { return }
+    # A folder's items are listed only after its own entries are reset: they then give
+    # Administrators the inherited full control.
+    $sidType = [System.Security.Principal.SecurityIdentifier]
+    $below = New-Object System.Collections.Generic.List[object]
+    foreach ($child in $item.GetFileSystemInfos()) { $below.Add($child) }
+    for ($i = 0; $i -lt $below.Count; $i++) {
+        $child = $below[$i]
+        Assert-NoLink $child
+        $childSecurity = Get-ArciAccessControl -Item $child
+        $childSecurity.SetAccessRuleProtection($false, $false)
+        foreach ($rule in @($childSecurity.GetAccessRules($true, $false, $sidType))) { [void]$childSecurity.RemoveAccessRuleSpecific($rule) }
+        $childSecurity.SetOwner($admins)
+        try { Set-ArciAccessControl -Item $child -Security $childSecurity }
+        catch { throw ("Sahiplik alınamadı [could not take ownership]: {0}: {1}" -f $child.FullName, $_.Exception.Message) }
+        if ($child -is [System.IO.DirectoryInfo]) {
+            foreach ($grandchild in $child.GetFileSystemInfos()) { $below.Add($grandchild) }
+        }
+    }
 }
 
 function Set-ArciVaultAudit {
