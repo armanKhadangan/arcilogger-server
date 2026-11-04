@@ -1417,3 +1417,81 @@ All Wave 5 questions are answered (2026-11-02).
   (`useDefault`) and allows only a `token_sha256` field with exactly 64 lower-case hex digits; it
   clears those 9 matches and nothing else in the repository. No path allowlist, no rule turned
   off, `ci.yml` unchanged. Every new allowlist entry needs the manager's review.
+
+## Deviations — #122 (2026-11-04)
+
+The rollback's schema downgrade (issue #122, follow-up of question 8 on #121). The interface the
+issue fixed is kept (command, flags, exit codes 0/1/2, JSON fields); what differs or was added:
+
+- **#122-1: `arcilogger-db schema downgrade --to <revision> [--json] [--config PATH]`.** It
+  stops nothing (the installer stops the services first), takes `MIGRATION_LOCK_KEY` (the lock
+  of `arcilogger-db upgrade`) at **session** level, since `0021`'s downgrade commits a step per
+  table and month, sets `lock_timeout` 30 s and no statement timeout, and runs alembic's
+  downgrade with no seed and no partition step (this version's would make daily partitions
+  again). Exit 0 also when the database is at the target already (nothing done, no entry); 1
+  when the downgrade fails or refuses (TR/EN on stderr naming `docs/YEDEKLEME.md bölüm 5` /
+  `docs/BACKUP.md section 5`; only the committed resumable steps stay); 2 for a revision this
+  version does not ship (exact ids only: no `base`, `heads`, `-1` or prefixes; checked before
+  connecting) or one not below the database's; **3** (added) when the database cannot be
+  reached at connect time. JSON only on exit 0; `retention_days` is `null` only when nothing was
+  downgraded.
+- **#122-2 (deviation): the `settings.change` entry is written in the transaction in which
+  alembic moves its version**, not in a separate transaction after the downgrade. `0021`'s
+  downgrade restores 400 in that transaction, so the value, the version and the entry commit
+  together: an entry that fails rolls back the version's move, and the next run writes it once
+  (with a separate transaction a failed entry after a committed downgrade would be lost: the
+  next run finds the target reached). Entry: target `setting:db.retention_days`, actor
+  `system`, details `old`, `new`, `was_set_by`, `downgrade {from, to}`, `via`, `os_user`.
+  `0021`'s downgrade leaves an administrator's value; no entry is written then.
+- **#122-3 (addition): the upgrade's change that `db.window` had not audited yet.** `0021`'s
+  downgrade drops the status row `db.retention_days_migration`. When it still says `audited:
+  false` (a rollback before the window job's first run after the upgrade), the command first
+  writes that change's own `settings.change` entry (`old`, `new`, `was_set_by`, `migration`,
+  `changed_at`, as `db.window` would, plus `audited_at_downgrade {from, to}`), in the same
+  transaction, then its own. The JSON gets one more field, `upgrade_audit_id` (int or null);
+  the installer prints it.
+- **#122-4: when the installer downgrades.** `-Rollback` without `-RestoreDatabase` reads both
+  programs' Alembic revisions from `venv\Lib\site-packages\arcilogger_db\migrations\versions`
+  (no Python, no database; `Get-ArciAlembicChain`, as `Test-PreviousLeaseRollbackModule`'s
+  capability check). The step `database.downgrade` runs when this version has `0021_db_window`
+  and the previous one does not (the issue's rule; a previous version from `0021` on gets no
+  downgrade, also of later revisions, as rollbacks before #122). Right before the command it
+  reads the database's revision with this version's `arcilogger-db current`: a database from
+  before `0021_db_window` (`-Upgrade -SkipDatabase`) is left as it is. The command name is one
+  variable, `$SchemaDowngradeCommand`.
+- **#122-5 (deviation, question to the manager): the floor.** The target is the previous head
+  but never below `0020_fg_traffic_transip_time`, the revision `0021` revises. The older
+  revisions were made for a previous version to run on, and their downgrades delete or rebuild
+  data: `0017` drops `fg_dhcp` (which contract 2.2.1's lease step expects the next upgrade to
+  restore), `0018` rebuilds the old NAT settings (the docs said "-Rollback runs no schema
+  downgrade"), `0019` drops `source_clock_samples`. The literal rule ("to the previous
+  program's head") is one line away (`[Math]::Max($at, $window - 1)` in
+  `Get-SchemaRollbackPlan`).
+- **#122-6: order and failures.** Services stop (all, ArciIngest and ArciWorker too) →
+  `leases.prepare-rollback` (works on the current schema) → `database.downgrade` →
+  `program.swap`. A failed downgrade stops the rollback with 3 before the swap: this version
+  restarts on its own schema; unless the command certainly changed nothing (exit 2, exit 3, or
+  `arcilogger-db current` failed) its `arcilogger-db upgrade` runs first (no time limit; a
+  no-op at its head; also when the command answered exit 0 with JSON whose `to` is not the
+  target), which also restores lowered leases. The TR/EN text names `-Rollback` again and then
+  `-Rollback -RestoreDatabase` (YEDEKLEME/BACKUP section 5); after exit 2 only the restore. A
+  successful downgrade followed by a failed swap runs this version's `upgrade` too; if that
+  fails, only the collector and the web server run, with a manual step naming the command.
+- **#122-7: refusals before any change (exit 2).** A previous head that cannot be told (no
+  folder, no revision file, an unreadable line, a duplicate, a branch, two bases, a broken
+  chain, a head not among this version's revisions), or `-SkipDatabase` when the downgrade is
+  needed. `-RestoreDatabase` skips the schema check.
+- **#122-8 (deviation, question to the manager): `-RestoreDatabase` restores into a new
+  database.** `pg_restore --clean --single-transaction` into the live database cannot restore a
+  `0020` dump over a `0021` database (`archive_reloads`' foreign key on `pk_lookups`, which the
+  dump does not know, makes the whole restore fail), and the swap has run by then. The installer
+  now restores, in one transaction, into `<name>_restore_<stamp>` (owner, encoding, libc locale,
+  database settings and rights copied from the current database; TimescaleDB's
+  pre/post-restore around it, sahada doğrula), then renames, in one transaction, the current
+  database to `<name>_replaced_<stamp>` and the new one into place. A failure before the rename
+  drops the new database and leaves the current one as it was. The replaced database is kept
+  (the rows written after the dump are only there) and named in the output and in
+  `install\state.json` (`replaced_database`); removing it is the owner's decision. A database
+  whose locale is not libc is refused (restore by hand). After the swap any failure of the
+  restore keeps the database services stopped. Tested against PostgreSQL 16 with the
+  installer's own SQL and arguments.

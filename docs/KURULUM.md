@@ -1153,8 +1153,56 @@ powershell -ExecutionPolicy Bypass -File "C:\Program Files\ARCILOGGER\installer\
 ```
 
 `ARCILOGGER.previous` yoksa `-Rollback -RestoreDatabase` yalnızca veritabanını geri yükler
-(toplayıcı çalışmaya devam eder; geri yükleme tek işlemdir, başarısız olursa veritabanı olduğu gibi
-kalır).
+(toplayıcı çalışmaya devam eder). Yedek tek işlemde yeni bir veritabanına (`<ad>_restore_<zaman>`;
+şimdiki veritabanının sahibi, yerel ayarı, ayarları ve haklarıyla) geri yüklenir, sonra yeniden
+adlandırılarak şimdikinin yerine geçer; başarısız bir geri yükleme şimdiki veritabanını olduğu gibi
+bırakır. Yerine geçilen veritabanı `<ad>_replaced_<zaman>` adıyla saklanır: yedekten sonra yazılan
+satırlar yalnızca ondadır ve bir yönetici kaldırana kadar diskte yer tutar
+([YEDEKLEME.md](YEDEKLEME.md) bölüm 5).
+
+**Günlük bölümlerden önceki bir sürüme geri alma (şema revizyonu `0021_db_window`).** Bu
+revizyondan önceki bir sürüm yalnızca aylık bölümler oluşturur ve siler, günlük bölümleri
+(`<tablo>_pYYYYMMDD`) tanımaz. Bu yüzden `-RestoreDatabase` olmadan bir `-Rollback`, kurulu sürümün
+şemasında `0021_db_window` varsa ve geri dönülen sürümün şemasında yoksa, hizmetler durduktan ve
+FortiGate kira adımından (aşağıda; o, kurulu sürümün şemasıyla çalışır) sonra, program klasörleri
+değiştirilmeden önce veritabanını geri dönülen sürümün şemasına indirir: kurulu sürümün
+`arcilogger-db schema downgrade --to <revizyon> --json` komutu (adım `database.downgrade`). İki
+sürümün şeması program klasörlerindeki geçiş dosyalarından okunur
+(`venv\Lib\site-packages\arcilogger_db\migrations\versions`); bunun için Python ve veritabanı
+gerekmez. `0021_db_window`'u o da bilen bir sürüme dönülürken, önceden olduğu gibi şema indirilmez.
+Hedef, geri dönülen sürümün şema başıdır, ama `0021_db_window`'un geri aldığı revizyonun
+(`0020_fg_traffic_transip_time`) altına hiç inilmez: daha eski revizyonlar önceki sürümün
+üzerlerinde çalışması için yapıldı (aşağıdaki NAT satırları ve FortiGate kiraları), geri alınmaları
+veri siler (ör. `0017` FortiGate DHCP tablosunu). Komuttan hemen önce adım veritabanının kendi
+revizyonunu okur (`arcilogger-db current`): `0021_db_window` öncesindeki bir veritabanında (bir
+`-Upgrade -SkipDatabase` onu orada bıraktı) günlük bölüm yoktur ve şema indirilmez. İndirme günlük
+bölümleri aylık bölümlerle birleştirir (her tablo ve ay ayrı bir işlemde), `db.retention_days`
+değerini 30'dan 400'e döndürür ve bunu denetim kaydına `settings.change` (yapan `system`) olarak
+yazar (pencere işi henüz denetim kaydına yazmadıysa önce yükseltmenin kendi 400 → 30 değişikliğini
+de); kurulum eski ve yeni değeri ve denetim kayıtlarının numaralarını yazar, plan (`-PlanPath`)
+komutun yanıtını `result` alanında tutar. Süre sınırı yoktur: büyük tablolarda uzun sürebilir.
+Komut bir kilidi en çok 30 saniye bekler: hâlâ süren bir yedekleme (`pg_dump`; zamanlanmış görevler
+geri alma başlarken duraklatılır) onu başarısız kılar; yedeklemenin bitmesini bekleyip `-Rollback`
+komutunu yeniden çalıştırın.
+
+- **İndirme başarısız olursa** geri alma, program klasörleri değiştirilmeden `3` ile durur: kurulu
+  sürüm yerinde kalır ve kendi şemasıyla yeniden başlar (tamamlanan birleştirmeler bu şemanın
+  geçerli bir düzenini bırakır; komut şema revizyonunu taşıdıktan sonra bitmiş olabileceği için önce
+  onun `arcilogger-db upgrade` komutu çalışır), düşük güvene indirilen FortiGate kiraları geri gelir.
+  `-Rollback` komutunu yeniden çalıştırın: indirme kaldığı yerden sürer. Yine başarısız olursa (ya
+  da komut revizyonu reddettiyse, çıkış kodu `2`) veritabanını yükseltme öncesi yedekten geri
+  yükleyin ([YEDEKLEME.md](YEDEKLEME.md) bölüm 5):
+
+  ```powershell
+  powershell -ExecutionPolicy Bypass -File "C:\Program Files\ARCILOGGER\installer\Install-Arcilogger.ps1" -Rollback -RestoreDatabase
+  ```
+- İndirme başarılı olup program klasörleri değiştirilemezse kurulu sürümün `arcilogger-db upgrade`
+  komutu şemasını geri getirir; o da başarısız olursa yalnızca `ArciCollector` ve `ArciWeb` çalışır
+  ve betik elle çalıştırılacak komutu "ELLE YAPILMASI GEREKENLER" altında yazar.
+- Geri dönülen sürümün şema başı anlaşılamazsa (geçiş klasörü yok ya da okunamıyor, dosyalar tek
+  bir sıra oluşturmuyor, baş kurulu sürümün revizyonlarından biri değil) ya da indirme gerekirken
+  `-SkipDatabase` verildiyse geri alma hiçbir şey değiştirmeden `2` ile durur. `-RestoreDatabase`
+  ile yükseltme öncesi yedek veritabanının yerine geçer; şema indirilmez.
 
 Geri alma (ve başarısız bir yükseltmenin kendiliğinden geri dönüşü), önceki sürümün hizmetlerini
 başlatmadan önce yapılandırmayı **o sürümün Python'uyla** yükler. Tarayıcıdan yapılmış bir
@@ -1261,11 +1309,11 @@ açılır.
   kayıtlarda görülen adres olarak yanıtlanır. FortiGate'in DMZ'ye, başka bir VLAN'a, VPN'e ya da
   şubeye yaptığı NAT'ın adreslerini "İnternet çıkışı değil" türüyle girin.
 
-**Geri alma:** eski NAT satırları bu sürümde okunmadan saklanır; `-Rollback` şema geri dönüşü
-yapmaz, önceki sürüm bu satırları, yani **yükseltme öncesi** NAT değerlerini okur. Yükseltmeden
-sonra İnternet çıkışlarında bir değişiklik yaptıysanız, geri döndükten sonra önceki sürümün
-Ayarlar → Uygulama ayarları bölümündeki `nat.public_ips` ve `nat.wan_transip` değerlerini bu
-sürümde yaptığınız değişiklikle karşılaştırıp elle girin (değişiklikler denetim kaydında
+**Geri alma:** eski NAT satırları bu sürümde okunmadan saklanır; `-Rollback` bu revizyonu geri
+almaz (şemayı yalnızca `0021_db_window`'dan önceki revizyona kadar indirir, yukarıda), önceki
+sürüm bu satırları, yani **yükseltme öncesi** NAT değerlerini okur. Yükseltmeden sonra İnternet
+çıkışlarında bir değişiklik yaptıysanız, geri döndükten sonra önceki sürümün Ayarlar → Uygulama
+ayarları bölümündeki `nat.public_ips` ve `nat.wan_transip` değerlerini bu sürümde yaptığınız değişiklikle karşılaştırıp elle girin (değişiklikler denetim kaydında
 `settings.change` olarak durur); bunun için veritabanını geri yüklemeyin: `-RestoreDatabase`
 yükseltmeden sonraki bütün kayıtları (denetim, sorgu, rapor, uyarı, cihaz ve kişi atamaları)
 siler. `-Rollback` çalıştırmadan önce bu sürümde yapılan sorguların resmi raporlarını (PDF)
