@@ -255,11 +255,16 @@ def _renew(evidence: Evidence) -> datetime | None:
 
 def _renew_shown(evidence: Evidence) -> str:
     """The file :func:`_renew` reads: ``state\\renewal\\renewal.json``, or the earlier release's
-    ``state\\renewal.json`` while it is the only one (W5-E-4, answer to Q2 on #158)."""
+    ``state\\renewal.json`` while it is the only one (W5-E-4, answer to Q2 on #158). Never
+    raises: a file that cannot be looked at names the file the task writes."""
+    written = renewal_state_path(evidence.layout)
     path = renewal_state_to_read(evidence.layout)
-    if not path.exists():  # neither file yet: the task writes the new one
-        path = renewal_state_path(evidence.layout)
-    return "\\".join(path.relative_to(evidence.layout.root).parts)
+    try:
+        earlier = path != written and path.exists()
+    except OSError:  # Path.exists() raises PermissionError, for one
+        earlier = False
+    shown = path if earlier else written  # neither file yet: the task writes the new one
+    return "\\".join(shown.relative_to(evidence.layout.root).parts)
 
 
 def _crl_fetch(evidence: Evidence) -> datetime | None:

@@ -464,6 +464,34 @@ def test_renew_row_reads_an_earlier_report_until_the_first_run(api_config: Confi
     assert row["evidence"] == "state\\renewal\\renewal.json"
 
 
+def test_renew_row_survives_a_state_folder_it_cannot_look_into(
+    api_config: Config, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``state\\renewal`` that ArciApi cannot list (a service created it under the earlier
+    release with its own entries only, and the ACL step has not reset it yet, W5-E-9): looking
+    at ``renewal.json`` there raises PermissionError, which ``Path.exists()`` re-raises. The row
+    is ``missing`` and names the file the task writes; the request never fails (the module's
+    rule). The earlier ``state/renewal.json`` is not read then: the new file may exist."""
+    now = utc_now().replace(microsecond=0)
+    layout = Layout(api_config.data_dir)
+    last_run = {"at": isoformat_site(now - timedelta(hours=2)), "outcome": "not_needed"}
+    write_json(layout.state / "renewal.json", {"schema": RENEWAL_SCHEMA, "last_run": last_run})
+    hidden = stamp_renewal_path(layout)
+    stat = Path.stat
+
+    def refused(self: Path, **kwargs: Any) -> os.stat_result:
+        if self == hidden:
+            raise PermissionError(13, "Permission denied", str(self))
+        return stat(self, **kwargs)
+
+    monkeypatch.setattr(Path, "stat", refused)
+    with pytest.raises(PermissionError):
+        hidden.exists()
+    row = task_rows(evidence(api_config, now))["Renew"]
+    assert (row["state"], row["evidence"]) == ("missing", "state\\renewal\\renewal.json")
+    assert row["last_evidence_at"] is None
+
+
 def test_renew_and_crlfetch_are_judged_by_their_state_files(api_config: Config) -> None:
     """Renew by ``last_run.at`` of ``state/renewal/renewal.json``, CrlFetch by the newest
     ``fetched_at`` or failure of ``state/crl/index.json``, never by an exit code (C12, A4): the
