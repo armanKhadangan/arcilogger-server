@@ -7,6 +7,7 @@ import {
   toDraft,
   validHoliday,
   valueText,
+  withServerBounds,
 } from './setting-values';
 import { integerError, validateClock, validateHost, validateSiteName } from './settings-validation';
 
@@ -121,6 +122,54 @@ describe('database settings as drafts and back (contract 2.13)', () => {
     });
   });
 
+  it('W5-G-19: the bounds of the API refuse a value above them, a server row those of the default lease', () => {
+    const session = setting({
+      key: 'lookup.max_session_seconds',
+      type: 'integer',
+      value: 3600,
+      min: 60,
+      max: 172_800,
+    });
+    expect(fromDraft(session, '172800')).toEqual({ value: 172_800 });
+    expect(fromDraft(session, '172801')).toEqual({ error: 'admin.errors.max' });
+    const percent = setting({
+      key: 'lease.timeout_percent',
+      type: 'integer',
+      value: 110,
+      min: 100,
+      max: 125,
+    });
+    expect(fromDraft(percent, '126')).toEqual({ error: 'admin.errors.max' });
+    expect(fromDraft(percent, '99')).toEqual({ error: 'admin.errors.min' });
+    const lease = setting({
+      key: 'lease.default_seconds',
+      type: 'integer',
+      value: 86_400,
+      min: 60,
+      max: 604_800,
+    });
+    const perServer = setting({
+      key: 'lease.server_seconds',
+      type: 'object',
+      value: { dhcp61: 3600 },
+    });
+    const [, servers] = withServerBounds([lease, perServer]);
+    if (!servers) throw new Error('lease.server_seconds missing');
+    expect(servers).toMatchObject({ key: 'lease.server_seconds', min: 60, max: 604_800 });
+    expect(fromDraft(servers, [{ server: 'dhcp61', seconds: '604800' }])).toEqual({
+      value: { dhcp61: 604_800 },
+    });
+    const refused = {
+      error: 'settings.application.errors.serverSeconds',
+      params: { min: 60, max: 604_800 },
+    };
+    expect(fromDraft(servers, [{ server: 'dhcp61', seconds: '604801' }])).toEqual(refused);
+    expect(fromDraft(servers, [{ server: 'dhcp61', seconds: '59' }])).toEqual(refused);
+    // A group without `lease.default_seconds` is taken as it is.
+    expect(withServerBounds([perServer])).toEqual([perServer]);
+    expect(withServerBounds([lease])).toEqual([lease]);
+  });
+
   it('lease time per DHCP server and the two-factor roles', () => {
     const servers = setting({
       key: 'lease.server_seconds',
@@ -131,8 +180,10 @@ describe('database settings as drafts and back (contract 2.13)', () => {
     expect(fromDraft(servers, [{ server: ' dhcp70 ', seconds: '7200' }])).toEqual({
       value: { dhcp70: 7200 },
     });
+    // Without the bounds of `lease.default_seconds` beside it, only the least time is known.
     expect(fromDraft(servers, [{ server: 'dhcp70', seconds: '30' }])).toEqual({
-      error: 'settings.application.errors.serverSeconds',
+      error: 'settings.application.errors.serverSecondsMin',
+      params: { min: 60 },
     });
     expect(fromDraft(servers, [{ server: '', seconds: '3600' }])).toEqual({
       error: 'settings.application.errors.serverName',

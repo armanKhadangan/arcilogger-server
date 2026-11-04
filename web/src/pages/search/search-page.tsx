@@ -14,6 +14,7 @@ import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/ui/empty-state';
 import { Skeleton } from '@/components/ui/skeleton';
 import { errorMessage, isApiError } from '@/lib/api';
+import type { ArchivedRange } from '@/lib/archive-reload-types';
 import { useAuth } from '@/lib/auth';
 import { parseId } from '@/lib/display';
 import { formatDateTime } from '@/lib/format';
@@ -68,6 +69,16 @@ function noticesOf(...lists: (Notice[] | undefined)[]): Notice[] {
   return lists
     .flatMap((list) => list ?? [])
     .filter((notice) => !seen.has(notice.code) && seen.add(notice.code));
+}
+
+/**
+ * `db.reload_keep_days` of a page's `archived` days (C23, W5-G-20; the 409 carries the same value
+ * in its `details`), checked as {@link keepDaysOf} checks the 409's: `null` when it is no whole
+ * number of days, and the dialog names the setting with its default.
+ */
+function archivedKeepDays(archived: ArchivedRange | null): number | null {
+  const days: unknown = archived?.keep_days;
+  return typeof days === 'number' && Number.isInteger(days) && days >= 1 ? days : null;
 }
 
 /**
@@ -273,8 +284,8 @@ export function SearchPage() {
   if (answered.page !== first) setAnswered({ page: first, input: state.input });
   // The card is there only for the search in `state.input`: a 409 is its answer (a new run clears
   // it), a page's `archived` days only until another search is started.
-  const archived =
-    required ?? (first && answered.input === state.input ? (first.archived ?? null) : null);
+  const pageArchived = first && answered.input === state.input ? (first.archived ?? null) : null;
+  const archived = required ?? pageArchived;
   // A new search of the user is a new card; running the same search again (its id expired, or the
   // card's own re-run) keeps the card and a reload in progress.
   const [searches, setSearches] = useState<{ input: SearchInput | null; count: number }>({
@@ -391,7 +402,7 @@ export function SearchPage() {
           reason="search"
           range={archived}
           message={required ? errorMessage(state.error) : null}
-          keepDays={keepDaysOf(required)}
+          keepDays={required ? keepDaysOf(required) : archivedKeepDays(pageArchived)}
           onReady={rerun}
         />
       ) : null}
