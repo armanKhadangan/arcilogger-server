@@ -1185,30 +1185,43 @@ Yeniden çalıştırma komutunu **bu** sürümün kurulum betiğiyle, kenara kon
 betiğidir, geri yüklemesi yedeği canlı veritabanının üzerine yazar (`pg_restore --clean`) ve bu
 sürümün şemasında başarısız olur.
 
-**Günlük bölümlerden önceki bir sürüme geri alma (şema revizyonu `0021_db_window`).** Bu
-revizyondan önceki bir sürüm yalnızca aylık bölümler oluşturur ve siler, günlük bölümleri
-(`<tablo>_pYYYYMMDD`) tanımaz. Bu yüzden `-RestoreDatabase` olmadan bir `-Rollback`, kurulu sürümün
-şemasında `0021_db_window` varsa ve geri dönülen sürümün şemasında yoksa, hizmetler durduktan ve
-FortiGate kira adımından (aşağıda; o, kurulu sürümün şemasıyla çalışır) sonra, program klasörleri
-değiştirilmeden önce veritabanını geri dönülen sürümün şemasına indirir: kurulu sürümün
-`arcilogger-db schema downgrade --to <revizyon> --json` komutu (adım `database.downgrade`). İki
-sürümün şeması program klasörlerindeki geçiş dosyalarından okunur
+**Daha eski şemalı bir sürüme geri alma (`0021_db_window`'dan itibaren şema revizyonları).**
+`0021_db_window`'dan önceki bir sürüm yalnızca aylık bölümler oluşturur ve siler, günlük bölümleri
+(`<tablo>_pYYYYMMDD`) tanımaz. `0021_db_window`'u bilen ama kurulu sürümün sonraki bir revizyonunu
+(ör. `0022_lease_moves`) bilmeyen bir sürüm çalışır, ancak kendi `arcilogger-db upgrade` komutu
+(onarım çalıştırması, başka bir pakete `-Upgrade`) gönderilmediği bir revizyondaki veritabanında
+başarısız olur ("Can't locate revision"). Bu yüzden `-RestoreDatabase` olmadan bir `-Rollback`,
+kurulu sürümün şemasında `0021_db_window` varsa ve geri dönülen sürüm kurulu sürümün şema başını
+bilmiyorsa, hizmetler durduktan ve FortiGate kira adımından (aşağıda; o, kurulu sürümün şemasıyla
+çalışır) sonra, program klasörleri değiştirilmeden önce veritabanını geri dönülen sürümün şemasına
+indirir: kurulu sürümün `arcilogger-db schema downgrade --to <revizyon> --json` komutu (adım
+`database.downgrade`). İki sürümün şeması program klasörlerindeki geçiş dosyalarından okunur
 (`venv\Lib\site-packages\arcilogger_db\migrations\versions`); bunun için Python ve veritabanı
-gerekmez. `0021_db_window`'u o da bilen bir sürüme dönülürken, önceden olduğu gibi şema indirilmez.
-Hedef, geri dönülen sürümün şema başıdır, ama `0021_db_window`'un geri aldığı revizyonun
-(`0020_fg_traffic_transip_time`) altına hiç inilmez: daha eski revizyonlar önceki sürümün
-üzerlerinde çalışması için yapıldı (aşağıdaki NAT satırları ve FortiGate kiraları), geri alınmaları
-veri siler (ör. `0017` FortiGate DHCP tablosunu). Komuttan hemen önce adım veritabanının kendi
-revizyonunu okur (`arcilogger-db current`): `0021_db_window` öncesindeki bir veritabanında (bir
-`-Upgrade -SkipDatabase` onu orada bıraktı) günlük bölüm yoktur ve şema indirilmez. İndirme günlük
-bölümleri aylık bölümlerle birleştirir (her tablo ve ay ayrı bir işlemde), `db.retention_days`
-değerini 30'dan 400'e döndürür ve bunu denetim kaydına `settings.change` (yapan `system`) olarak
-yazar (pencere işi henüz denetim kaydına yazmadıysa önce yükseltmenin kendi 400 → 30 değişikliğini
-de); kurulum eski ve yeni değeri ve denetim kayıtlarının numaralarını yazar, plan (`-PlanPath`)
-komutun yanıtını `result` alanında tutar. Süre sınırı yoktur: büyük tablolarda uzun sürebilir.
-Komut bir kilidi en çok 30 saniye bekler: hâlâ süren bir yedekleme (`pg_dump`; zamanlanmış görevler
-geri alma başlarken duraklatılır) onu başarısız kılar; yedeklemenin bitmesini bekleyip `-Rollback`
-komutunu yeniden çalıştırın.
+gerekmez. Geri dönülen sürümün revizyonları kurulu sürümünkilerin ilkleri olmalıdır, aynı sırayla.
+Kurulu sürümün şema başını bilen bir sürüme (aynı revizyonlar ya da ardından daha fazlası)
+dönülürken şema indirilmez. Hedef, geri dönülen sürümün şema başıdır, ama `0021_db_window`'un geri
+aldığı revizyonun (`0020_fg_traffic_transip_time`) altına hiç inilmez: daha eski revizyonlar
+önceki sürümün üzerlerinde çalışması için yapıldı (aşağıdaki NAT satırları ve FortiGate kiraları),
+geri alınmaları veri siler (ör. `0017` FortiGate DHCP tablosunu). İndirme yalnızca kurulumun 5651
+verisi için kayıpsız saydığı revizyonlardan geçer (ham loglar, log satırları, kiralar ve denetim
+kaydı her satırını korur): `0022_lease_moves` (yalnızca `leases.moves` sütununu, kiraların
+kaydedilmiş kaçırılan taşınmalarını kaldırır: türetilmiş veridir, ACK'ler FortiGate DHCP ham
+loglarında kalır; yeniden oluşturulmaz: sonraki bir yükseltmeden sonra sütun boştur ve kira işi
+taşınmaları bir sonraki çalışmasından itibaren yeniden kaydeder, bu yüzden bir kiranın veritabanı
+penceresinden önceki taşınmaları artık veritabanında yoktur) ve `0021_db_window` (aşağıda). Komuttan hemen önce adım veritabanının kendi revizyonunu
+okur (`arcilogger-db current`): hedefte ya da öncesindeki bir veritabanı (bir
+`-Upgrade -SkipDatabase` onu orada bıraktı) olduğu gibi bırakılır; `0021_db_window`
+öncesindekinde günlük bölüm de yoktur. `0021_db_window`'a inerken yalnızca `leases.moves` gider;
+`0020_fg_traffic_transip_time`'a inerken `0021_db_window` da geri alınır: indirme günlük bölümleri
+aylık bölümlerle birleştirir (her tablo ve ay ayrı bir işlemde), arşivden yeniden yükleme
+isteklerini kaldırır (mühürlü günler kasada kalır), `db.retention_days` değerini 30'dan 400'e
+döndürür ve bunu denetim kaydına `settings.change` (yapan `system`) olarak yazar (pencere işi
+henüz denetim kaydına yazmadıysa önce yükseltmenin kendi 400 → 30 değişikliğini de); kurulum eski
+ve yeni değeri (yalnızca değiştiyse) ve denetim kayıtlarının numaralarını yazar, plan
+(`-PlanPath`) komutun yanıtını `result` alanında tutar. Süre sınırı yoktur: büyük tablolarda uzun sürebilir. Komut bir kilidi en
+çok 30 saniye bekler: hâlâ süren bir yedekleme (`pg_dump`; zamanlanmış görevler geri alma
+başlarken duraklatılır) onu başarısız kılar; yedeklemenin bitmesini bekleyip `-Rollback` komutunu
+yeniden çalıştırın.
 
 - **İndirme başarısız olursa** geri alma, program klasörleri değiştirilmeden `3` ile durur: kurulu
   sürüm yerinde kalır ve kendi şemasıyla yeniden başlar (tamamlanan birleştirmeler bu şemanın
@@ -1225,9 +1238,11 @@ komutunu yeniden çalıştırın.
   komutu şemasını geri getirir; o da başarısız olursa yalnızca `ArciCollector` ve `ArciWeb` çalışır
   ve betik elle çalıştırılacak komutu "ELLE YAPILMASI GEREKENLER" altında yazar.
 - Geri dönülen sürümün şema başı anlaşılamazsa (geçiş klasörü yok ya da okunamıyor, dosyalar tek
-  bir sıra oluşturmuyor, baş kurulu sürümün revizyonlarından biri değil) ya da indirme gerekirken
-  `-SkipDatabase` verildiyse geri alma hiçbir şey değiştirmeden `2` ile durur. `-RestoreDatabase`
-  ile yükseltme öncesi yedek veritabanının yerine geçer; şema indirilmez.
+  bir sıra oluşturmuyor, baş kurulu sürümün revizyonlarından biri değil, revizyonlar kurulu
+  sürümünkilerin ilkleri değil), indirme kurulumun kayıpsız saymadığı bir revizyondan geçecekse ya
+  da indirme gerekirken `-SkipDatabase` verildiyse geri alma hiçbir şey değiştirmeden `2` ile
+  durur. `-RestoreDatabase` ile yükseltme öncesi yedek veritabanının yerine geçer; şema
+  indirilmez.
 
 Geri alma (ve başarısız bir yükseltmenin kendiliğinden geri dönüşü), önceki sürümün hizmetlerini
 başlatmadan önce yapılandırmayı **o sürümün Python'uyla** yükler. Tarayıcıdan yapılmış bir
