@@ -7,8 +7,9 @@ case's code and level and the same TR/EN texts.
 
 from __future__ import annotations
 
+import inspect
 import json
-from datetime import timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -19,7 +20,12 @@ from arcilogger_core import renewal as renewal_module
 from arcilogger_core.chain import DayCheck, verify_day, verify_range
 from arcilogger_core.evidence.standalone import verify as sv
 from arcilogger_core.immutability import unlock
-from arcilogger_core.renewal import DAY_FINDINGS, finding_time
+from arcilogger_core.renewal import (
+    DAY_FINDINGS,
+    DEFAULT_RENEW_BEFORE_DAYS,
+    day_renewal,
+    finding_time,
+)
 from arcilogger_core.tsa.client import token_path_for
 from arcilogger_core.tsa.verify import inspect_token, verify_token
 
@@ -94,6 +100,70 @@ def test_a_renewal_stamped_at_its_own_not_after_verifies_but_does_not_count(
     assert rw.of(report, f"{record}.zd").status == "uncovered"
     roots = [sv.parse_certificate(root.public_bytes(Encoding.DER)) for root in rw.roots]
     assert sv.verify_timestamp(token, path.read_bytes(), roots, now=now).ok
+
+
+def test_the_caller_passes_the_window(rw: RenewalWorld, monkeypatch: pytest.MonkeyPatch) -> None:
+    """``verify_day`` reads no configuration (#137 item 5): the window is its
+    ``renew_before_days``, the §2.5 default unless the caller passes the site's
+    ``tsa.renew_before_days``. It judges the day's token and, through the chain rule, the
+    renewals' own tokens, as ``day_renewal`` with the same window does."""
+    default = inspect.signature(verify_day).parameters["renew_before_days"].default
+    assert default == DEFAULT_RENEW_BEFORE_DAYS == sv.RENEW_BEFORE.days
+
+    def refuse(*_: Any, **__: Any) -> None:
+        raise AssertionError("verify_day read tsa.renew_before_days from a configuration")
+
+    monkeypatch.setattr(renewal_module, "renew_before_days", refuse)
+    legal = [rw.legal.fingerprint]
+
+    def status(now: datetime, window: int | None = None) -> str:
+        """The day's code within ``window`` days, or without passing one."""
+        args: dict[str, Any] = {"legal_roots": legal, "now": now}
+        check = (
+            verify_day(rw.layout, DAY, rw.roots, renewals=True, **args)
+            if window is None
+            else verify_day(
+                rw.layout, DAY, rw.roots, renewals=True, renew_before_days=window, **args
+            )
+        )
+        assert check.ok, check.errors
+        assert check.renewal is not None
+        assert check.renewal == day_renewal(
+            rw.layout,
+            DAY,
+            rw.roots,
+            renew_before_days=DEFAULT_RENEW_BEFORE_DAYS if window is None else window,
+            **args,
+        )
+        return check.renewal.code
+
+    # 150 days before the day's certificate expires: due within 180 and within 150 days (not
+    # due while more than the window is left), not due within 149 or 90 days.
+    now = CNA - timedelta(days=150)
+    assert status(now) == "renewal-due"
+    assert status(now, 180) == "renewal-due"
+    assert status(now, 150) == "renewal-due"
+    assert status(now, 149) == "renewal-not-due"
+    assert status(now, 90) == "renewal-not-due"
+    # 200 days before: not due within the default, due within a longer window.
+    assert status(CNA - timedelta(days=200)) == "renewal-not-due"
+    assert status(CNA - timedelta(days=200), 365) == "renewal-due"
+
+    # A renewal whose own certificate has 490 days left counts within the default and within
+    # 489 days; within 490 its own token is due, so it no longer covers the day (§2.1.2).
+    renew_day(rw, "2031-06-23-1", CNA - timedelta(days=100), expires=CNA + timedelta(days=400))
+    now = CNA - timedelta(days=90)
+    assert status(now) == "renewal-covered"
+    assert status(now, 489) == "renewal-covered"
+    assert status(now, 490) == "renewal-due"
+
+    # Without renewals the window changes nothing.
+    plain = verify_day(rw.layout, DAY, rw.roots, legal_roots=legal, now=now)
+    windowed = verify_day(
+        rw.layout, DAY, rw.roots, legal_roots=legal, now=now, renew_before_days=500
+    )
+    assert windowed.renewal is None
+    assert _bytes([windowed]) == _bytes([plain])
 
 
 # -- verify_day without renewals is what it was (A2) -----------------------------------------------

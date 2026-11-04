@@ -430,7 +430,8 @@ def _roots(rw: RenewalWorld, built: Built) -> list[x509.Certificate]:
 
 def core_verdict(rw: RenewalWorld, built: Built) -> Verdict:
     """The core verifier's ``renewal`` of the day: ``verify_day(..., renewals=True)`` with the
-    lists stored as ``crl fetch`` stores them and the legal root listed (rule 4)."""
+    lists stored as ``crl fetch`` stores them, the legal root listed (rule 4) and the
+    standalone verifier's window (the §2.5 default, W5-A-5) passed as the site's."""
     if built.lists:
         _store(rw.layout, list(built.lists), rw.legal.root)
     check = verify_day(
@@ -440,6 +441,7 @@ def core_verdict(rw: RenewalWorld, built: Built) -> Verdict:
         legal_roots=[rw.legal.fingerprint],
         now=built.now,
         renewals=True,
+        renew_before_days=sv.RENEW_BEFORE.days,
     )
     assert check.ok, check.errors
     assert check.renewal is not None

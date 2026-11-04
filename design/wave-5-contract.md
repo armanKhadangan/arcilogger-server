@@ -1454,8 +1454,8 @@ All Wave 5 questions are answered (2026-11-02).
   what it was (`test_without_renewals_every_caller_sees_the_same_bytes`); no caller passes
   `True` yet. As in the standalone verifier, only a day whose token verified gets a status (a
   day that fails for another reason, such as a changed log file, keeps the status of its
-  token), and the window is the §2.5 default of 180 days: `verify_day` has no configuration,
-  and `day_renewal` takes the site's `tsa.renew_before_days` from a caller that has one. The
+  token), and the window is the caller's `renew_before_days` (default the §2.5 180 days):
+  `verify_day` reads no configuration (W5-A-16). The
   renewal tokens are checked with an EKU rule (`tsa.require_critical_eku`, K6) that each side
   takes from its own source: `verify_day` from that day's manifest, the standalone verifier
   relaxed when any manifest of the package is (`_relaxed_eku`), `renewal_status` and `renew`
@@ -1520,3 +1520,15 @@ All Wave 5 questions are answered (2026-11-02).
   reads the status again. Only `OSError` is caught; errors before the record is written are
   unchanged. `test_a_status_after_the_run_that_cannot_be_read_keeps_the_renewal` (core) and
   `test_a_status_after_the_run_that_cannot_be_read_still_renews` (command) cover it.
+- **W5-A-16: `verify_day` takes the window from its caller (answer to Q3 on #132, #137 item 5).**
+  `chain.verify_day(..., renewals=True, renew_before_days=180)` passes `renew_before_days` to
+  `renewal.day_renewal`, which judges the day's token and, through the chain rule (§2.1.2), the
+  renewals' own tokens with it; `verify_day` reads no configuration, and the default is §2.5's
+  (`renewal.DEFAULT_RENEW_BEFORE_DAYS`, written as the number because `renewal` imports
+  `chain`). Without `renewals` the window is not used and the output is unchanged. No caller in
+  the product passes `renewals=True` yet (W5-A-11), so no caller passes the window either: the
+  shared case table passes the standalone verifier's `RENEW_BEFORE` (W5-A-5), and when W5-T
+  lands the A3 `config.py` hunk wires the command line's caller to `tsa.renew_before_days`
+  (`renewal.renew_before_days`, W5-A-1). `test_the_caller_passes_the_window` pins the default,
+  that no configuration is read, both edges of the window, and that it reaches a renewal's own
+  token.
