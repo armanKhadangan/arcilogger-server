@@ -1508,24 +1508,29 @@ All Wave 5 questions are answered (2026-11-02).
 
 ## Deviations — W5-E (2026-11-04)
 
-- **W5-E-1: the `Renew` task's rights on its state files and on `vault\renewals` come from
-  their parents.** A4 (manager on #103, 2026-11-04 00:18) asks for "create and write in
-  `vault\renewals`" and "modify on `state\renewal.json` and `state\renewal.lock`", and §4.3 gives
-  W5-E the ACL of `state\crl` and LOCAL SERVICE read on `exports\reports`. `Get-ArciAclPlan` adds
-  exactly those two entries (`state\crl`: protected, owners full control, LOCAL SERVICE Modify,
-  ArciApi and ArciWorker ReadAndExecute, no collector or ingest access; `exports\reports`: LOCAL
-  SERVICE ReadAndExecute), and none for the three A4 paths: they get A4's rights from the
-  inherited LOCAL SERVICE Modify of `vault` and `state`. An entry of its own on
-  `state\renewal.json` would be lost at the first run, since `renewal.write_state` replaces the
-  file (`atomic_write_bytes`) and the new file carries only the inherited rights of its folder.
-  W5-E adds no entry for `vault` and none below it (`vault` keeps its earlier entry), so none
-  gives a write right on a sealed day or a deletion record; their files keep the
-  `immutability.lock` deny entries. Tests:
+- **W5-E-1: the `Renew` task's rights on `vault\renewals` and on its state files come from
+  their folders.** A4 (manager on #103, 2026-11-04 00:18) asks for "create and write in
+  `vault\renewals`" and "modify on `state\renewal.json` and `state\renewal.lock`" (since W5-E-4
+  `state\renewal\renewal.json` and `state\renewal\renewal.lock`), and §4.3 gives W5-E the ACL of
+  `state\crl` and LOCAL SERVICE read on `exports\reports`. `Get-ArciAclPlan` adds those two
+  entries (`state\crl`: protected, owners full control, LOCAL SERVICE Modify, ArciApi and
+  ArciWorker ReadAndExecute, no collector or ingest access; `exports\reports`: LOCAL SERVICE
+  ReadAndExecute) and, since W5-E-4, `state\renewal` with the rights of `state\crl`. None is
+  added for the three A4 paths themselves: `vault\renewals` gets A4's right from the inherited
+  LOCAL SERVICE Modify of `vault`, the two state files from the inherited Modify of
+  `state\renewal`. An entry of its own on `renewal.json` would be lost at the first run, since
+  `renewal.write_state` replaces the file (`atomic_write_bytes`) and the new file carries only
+  the inherited rights of its folder. W5-E adds no entry for `vault` and none below it (`vault`
+  keeps its earlier entry), so none gives a write right on a sealed day or a deletion record;
+  their files keep the `immutability.lock` deny entries. Tests:
   `test_acl_plan_gives_the_renew_and_crlfetch_tasks_their_rights` (one assertion per A4 right,
-  no entry below `vault` or for `state\renewal*`, the exact set of folders the tasks may write),
-  `test_acl_plan_least_privilege` (`state\crl` protected, no ingest access; `exports\reports`
-  read only), and on Windows `test_acl_applied_keeps_sealed_file_deny_entries` (LOCAL SERVICE
-  keeps an inherited Modify on `state\renewal.json` after two `atomic_write_bytes` calls).
+  no entry below `vault`, `state\renewal` protected without collector or ingest access and no
+  entry for its files, the exact set of folders the tasks may write),
+  `test_acl_plan_least_privilege` (`state\crl` and `state\renewal` protected, no ingest access;
+  `exports\reports` read only), and on Windows `test_acl_applied_keeps_sealed_file_deny_entries`
+  (LOCAL SERVICE keeps an inherited Modify on `state\renewal\renewal.json` after two
+  `atomic_write_bytes` calls; the folder is protected, and the collector and ingest have no
+  entry on it or on the file).
 - **W5-E-2: how the Sistem page judges `Renew` and `CrlFetch`.** §3 W5-E says only "`TaskName`
   in the API and the web", and C12/A4 say to judge both tasks from their state files, not from
   their exit codes. Both rows come after ApplySystem, are `late` after 26 h as the other daily
@@ -1571,6 +1576,42 @@ All Wave 5 questions are answered (2026-11-02).
   `test_stamp_renewal_cleared_after_a_successful_run` (a dry run keeps the failures),
   `test_stamp_renewal_unreadable_runs_decide_nothing` and
   `test_read_renew_runs_from_the_writers_file` (`worker/tests/test_alerts_legal.py`).
+- **W5-E-4: the re-stamping state moves into the protected `state\renewal` (#151; Q2 of #140).**
+  A4, §2.1.2 and §2.1.3 put the report at `state/renewal.json` and the lock at
+  `state/renewal.lock` (so do D16, W5-A-2, W5-A-3, W5-C-1 and W5-E-1 to W5-E-3). There they
+  inherited the Modify of `state`, which ArciCollector (network-facing), ArciIngest and ArciWorker
+  hold: a compromised service could write a report that silences `R20-renewal`, `R20-cert` and
+  the legal status's `renewal_due` and `renewal_uncovered`, or hold the lock so that no run
+  counts. They are now `state/renewal/renewal.json` and `state/renewal/renewal.lock`
+  (`renewal.STATE_FOLDER`, `state_dir`, `state_path`); A4's paths change accordingly, its rights
+  do not. `Get-ArciAclPlan` gives `state\renewal` the rights of `state\crl`: protected, SYSTEM
+  and Administrators full control, LOCAL SERVICE Modify, ArciApi and ArciWorker ReadAndExecute,
+  nothing for the collector, ingest, ArciWeb or ArciAdmin. Every file `atomic_write_bytes` writes
+  there inherits these entries. `Set-ArciVaultAcl.ps1` (and with it the installer's ACL step)
+  creates the folder in plan order; `renewal.one_run` creates it too when it is missing, as
+  `crl fetch` does `state\crl`.
+  **Upgrade.** `renewal.state_to_read` gives the new file, or the earlier `state/renewal.json`
+  while the new one is missing. The first `write_state` after the upgrade (every run but a busy
+  one, and a dry run that computed the statuses) carries the earlier file over as W5-A-2 carries
+  the previous one (`last_run`, `failures_in_a_row`, and the token list of a run that computed
+  none); from then on the new file exists and the earlier one is never read again. Nothing
+  writes, moves or removes the earlier `state/renewal.json` or `state/renewal.lock`: both stay
+  as they are and decide nothing. The earlier lock is never taken, so a process holding it
+  blocks no run. W5-C's readers (`read_stamp_renewals`, `read_renew_runs`; through them the
+  alerts, the Sistem page's Renew row, `/legal-status` and the day page) read the same
+  `state_to_read`, so an upgrade does not resolve an open `R20-renewal` or `R20-cert` before the
+  first run (at most a day: the task runs at 02:30). Until then they trust a file every service
+  could write, but no more than before the move, and a missing report already reads as nothing
+  due. `stamp_renewal_path` is `renewal.state_path`; the Sistem page's evidence text is
+  `state\renewal\renewal.json`, the day page's problem text stays `renewal.json: unreadable`.
+  Tests: `test_an_earlier_state_file_is_read_once_and_never_written`
+  (`core/tests/test_cli_renew.py`),
+  `test_the_readers_read_an_earlier_report_only_until_the_new_one_exists`
+  (`worker/tests/test_alerts_legal_state.py`),
+  `test_the_writer_and_the_readers_meet_in_the_protected_folder`
+  (`tests/test_renewal_state_reader.py`),
+  `test_renew_row_reads_an_earlier_report_until_the_first_run`
+  (`api/tests/test_system_health.py`), and the ACL tests of W5-E-1.
 
 ## Deviations — #119 (2026-11-04)
 
