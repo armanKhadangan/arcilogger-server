@@ -1354,7 +1354,8 @@ All Wave 5 questions are answered (2026-11-02).
   file's transaction, so a file gone during the rounds since its scan is not reset (W5-G-5). A
   stop ends a check within one 1 MiB step (`CheckStoppedError`); nothing is decided and the next
   start claims the request again. A scan of a request that ends meanwhile gives up the same way.
-  A reload's partitions are made one day a round (`_ensure_days`), also while the scan runs.
+  A reload's partitions are made one day a round (`_ensure_days`), also while the scan runs
+  (one table a round, changed by #182 (W5-G-25)).
   Measured once each (4 vCPU, plain PostgreSQL 16, live feed 160 lines/s, a one-day reload of a
   5 M line `.xz` day with its claim hashing the file 18 times, as a 14-day request of one source;
   latency of a live line from its append to its commit; no reload: median 0.36 s, max 0.75–1.30
@@ -1368,17 +1369,18 @@ All Wave 5 questions are answered (2026-11-02).
   bound, still on the loop: the reset transaction (38.7 s for a 5 M line file whose rows are
   present; up to three such files per source when a request reaches the window's first day;
   split into steps of the loop by W5-G-25, #124 stage 2, which measured and did not take a
-  second database connection for it), one day's partitions per round (up to 0.4 s) and the
-  waits of up to `PARTITION_LOCK_TIMEOUT` (5 s) for the partition lock in `_ensure_days` and
-  the claim (since #124 stage 2 half of `search.request_budget_ms` for the lock and the tables
-  together, at most `PARTITION_LOCK_TIMEOUT_MS` 2 s, W5-G-24 (b)). Tests
+  second database connection for it), one day's partitions per round (up to 0.4 s; one table's,
+  about 30 ms, changed by #182 (W5-G-25)) and the waits of up to `PARTITION_LOCK_TIMEOUT` (5 s)
+  for the partition lock in `_ensure_days` and the claim (half of `search.request_budget_ms`
+  for the lock and the tables together, at most `PARTITION_LOCK_TIMEOUT_MS` 2 s: the 5 s → 2 s
+  cap changed by #182 (W5-G-25), W5-G-24 (b)). Tests
   (`ingest/tests/test_archive_reload.py`):
   `test_live_data_is_loaded_while_a_reload_checks_its_files`,
   `test_a_stop_during_a_reloads_check_is_prompt`,
   `test_a_check_that_fails_beside_the_loop_fails_the_request_and_deletes_nothing` (each for the
   claim and the reset), `test_the_scan_of_a_reload_that_ended_gives_up`,
   `test_a_sealed_file_gone_after_its_scan_is_not_reset`,
-  `test_a_reloads_partitions_are_made_a_day_a_round`.
+  `test_a_reloads_partitions_are_made_a_table_a_round` (`..._a_day_a_round` before #182).
 - **W5-G-23: the search export holds the partition lock as the search does (W5-G-18; #148,
   found on #145).** `POST /search/export` reads its rows in pages of windows of device time, each
   window a statement of its own, in one REPEATABLE READ snapshot, but took no partition lock. On
@@ -1519,16 +1521,19 @@ All Wave 5 questions are answered (2026-11-02).
     5 s, above the default search budget of 4 s: the open question on #165), wait for
     `ARCIPART` and then for their tables (the claim for its request's row) the same half of
     `search.request_budget_ms` in all, read from the settings in their transaction
-    (`IngestService._lock_budget`; a day's tables, a transaction each, share one budget), and
-    never longer than `PARTITION_LOCK_TIMEOUT_MS` (2000, the default's half): the loop waits, so
-    a budget of 30 s does not hold live data for 15 s, and a stop during the wait stays within
-    the 4.5 s of a Windows console stop (W5-G-25). On a timeout the loop goes on with live
+    (`IngestService._lock_budget`; a day's tables, a transaction each, share one budget; a
+    round each: changed by #182 (W5-G-25)), and never longer than `PARTITION_LOCK_TIMEOUT_MS`
+    (2000, the default's half; the 5 s → 2 s cap changed by #182 (W5-G-25)): the loop waits, so
+    a budget of 30 s does not hold live data for 15 s, and a stop during the wait stays within the
+    4.5 s of a Windows console stop (W5-G-25). On a timeout the loop goes on with live
     data: the claim is kept with its checked files and finished again after `archive_seconds`
     (5 s; its status and loaded files are read again under the lock then), so its files are not
     read again while an export runs; the request stays `queued`, not failed (`--once` ends, the
     next start claims it). `_ensure_days` returns `False` and asks for no partition for the
     next `archive_seconds`, so the loop, and searches behind its request, are held at most the
-    budget every 5 s while an export runs, not every round. Tests: `db/tests/test_partitions.py`
+    budget every 5 s while an export runs, not every round (changed by #182 (W5-G-25): twice as
+    long after each wait that runs out, up to `PARTITION_RETRY_MAX_SECONDS` 60 s). Tests:
+    `db/tests/test_partitions.py`
     `test_a_steps_lock_waits_share_one_budget` (both back ends: an export holds `ARCIPART`, a
     plain `SELECT` the table or chunk; the step waits 1 s for the lock, then the rest for the
     table: 2 s in all, not 3 s; nothing dropped; `lock_timeout` restored),
@@ -1552,11 +1557,27 @@ All Wave 5 questions are answered (2026-11-02).
     lock budget and tries again (04:15, 04:45, …), and if the dump still runs at the
     `alerts.job_failures`-th (3rd) run, `R20-db-window` opens (medium), every night the dump runs
     that long; `partitions.ensure` backs off likewise (`R20-job` at the 3rd failed run). An archive
-    reload's partitions during the dump are tried every `archive_seconds` (5 s), each time holding
-    `ARCIPART` up to 2 s (searches wait, they do not time out). How long a dump takes on site is to
-    be checked (sahada doğrula); whether `db.window` should run away from the backup, or a backup's
-    overlap not count toward `R20-db-window`, and whether ingest's retry should back off further
-    while it fails, are questions to the owner (#124 stage 2 pull request).
+    reload's partitions during the dump are tried after `archive_seconds` (5 s), then 10, 20, 40
+    and every 60 s (`PARTITION_RETRY_MAX_SECONDS`; back to 5 s once a table is made; #182 review
+    Q7, W5-G-25), each time holding `ARCIPART` up to 2 s (searches wait, they do not time out).
+    How long a dump takes on site is to be checked (sahada doğrula). The owner's answers on #182
+    (review Q6): the overlap keeps counting toward `R20-db-window` (three nights in a row is a
+    real, lasting problem; hiding it is worse); whether `db.window` should run away from the
+    backup is follow-up #188, not #182.
+
+    **The default times overlap (#182 review Q6).** `db.window` is due daily after 04:00 site
+    time (`worker/src/arcilogger_worker/service.py:427`, `daily_after=time(4, 0)`; a fixed
+    schedule, no setting), its retries after a failed run 15 and 30 minutes later
+    (`DAILY_RETRY_FIRST`, `service.py:145`: 04:15, 04:45). The Backup task starts `pg_dump` daily
+    at 01:40 local time (`deploy/windows/tasks/Backup.xml:10`, ASSUMPTIONS B7), which gives up
+    after 3 h 30 min (`DUMP_TIMEOUT_SECONDS`, `db/src/arcilogger_db/backup.py:84`: 05:10 at the
+    latest; the task's own limit is 4 h, `Backup.xml:41`), and a start missed while the server
+    was off runs once it is on again (`StartWhenAvailable`, `Backup.xml:29`). So 04:00 lies
+    inside the dump's default window of 01:40–05:10: a dump of more than 2 h 20 min meets the
+    first run, one of more than about 3 h 05 min the third (04:45, `R20-db-window`), and a dump
+    started late (the server off at 01:40) meets it sooner. `partitions.ensure` (00:15) comes
+    before the dump. How long a dump takes is the site's (sahada doğrula); nothing is changed
+    here.
   - **(c) A lock-wait text of `search_timeout`** (504, the same code; approved on #165). The
     contract's text of `search_timeout` ("Arama {seconds} saniyede en kısa zaman dilimini (5
     dakika) bile tarayamadı. …" / "The search could not scan even the shortest time slice (5
@@ -1590,51 +1611,83 @@ All Wave 5 questions are answered (2026-11-02).
   `ingest_offsets` row, sets its offset to 0 and marks it (`counts_from_line = 0`, a value no
   file has otherwise: a file loaded before `0016_search` is marked from line 2 on; it also makes
   a search count the file's hours from the rows, `searchcounts.verify` leave it out and
-  `search.counts_backfill` wait), deletes its parse failures, its site day's clock samples and
-  the file's part of the samples of the minutes its lines were received in outside its day (only
-  in the transaction that sets the mark: one taken up again leaves them), on plain PostgreSQL
-  its rows in the default partitions outside its time window, and its `search_counts` of the
-  hours no step reaches. Then its rows (all 16 tables, by `(source, raw_day)`) are deleted in
-  steps of device time, the reach of its stray receive times first and its time window last,
-  between rounds of the loop (`RESET_ROUND_SECONDS` 0.25 s of steps a round, at least one; live
-  batches between): each step a transaction of its own of at most `RESET_STEP_LINES` (10 000)
-  lines by the `search_counts` of every file in its hours (what its deletes read: the `fg_*`
-  tables have no index by source), an hour of more lines split evenly, with the file's counts of
-  the hours it finishes. Each step first locks the offsets row and compares it as the loader
-  does (`byte_offset = 0`, `line_number = 0`, unfinished): a file whose offset has moved (two
-  instances, one with its lock connection down) is not touched, the offsets are read again and a
-  file still marked is reset again from its first transaction. The last step takes the mark off
-  (the offsets row first, the loader's order) and deletes the file's counts left; only then is
-  the file a stream at offset 0. From before its first transaction on the file is no stream (its
-  batches in the queue are dropped), so no batch of it is read or committed under the mark. A
-  marked file is never a stream (start-up, spool and vault scan) and never counts as loaded (its
-  offset is 0). A start that finds one resets it again from its first transaction: for its
-  request when that is still `loading` (the claim), or on its own when no request holds it
-  (failed or changed by hand meanwhile: scan beside the loop, partitions, size check, steps; a
-  file that cannot be read stays marked and is tried again after `vault_scan_seconds`, the
-  others meanwhile; none is begun while a request is `loading`, and no request is claimed while
-  one is checked). A step over rows already deleted deletes nothing, so a stop after any
-  transaction re-resets the file and loads it exactly once. `arcilogger-db search-counts
-  rebuild` of a file between two steps counts the rows still there and clears the mark: an
-  unfinished file at offset 0 that has counts is a reset all the same (a file loads its rows
-  and counts in one transaction with its offset, and the last step deletes them with the mark),
-  and the next step puts the mark back. A rebuild that finds none of its rows in its window
-  finds none left (the window goes last), except for a file whose every line was received
-  outside its day: a rebuild of such a file between its first steps, then a stop before its
-  next step, can load the rows not yet deleted twice (open question on #124: the rebuild should
-  refuse a file marked `0`, `db/cli.py`, and `status` call it resetting). A step waits at most
+  `search.counts_backfill` wait; kept as the mark, #182 review Q3, and said so on
+  `IngestOffset.counts_from_line`, a comment, no migration), deletes its parse failures, its site
+  day's clock samples and the file's part of the samples of the minutes its lines were received in
+  outside its day (only in the transaction that sets the mark: one taken up again leaves them), on
+  plain PostgreSQL its rows in the default partitions outside its time window, and its
+  `search_counts` of the hours no step reaches. Then its rows (all 16 tables, by `(source,
+  raw_day)`) are deleted in steps of device time, the reach of its stray receive times first and its
+  time window last, between rounds of the loop (`RESET_ROUND_SECONDS` 0.25 s of steps a round, at
+  least one; live batches between): each step a transaction of its own of at most `RESET_STEP_LINES`
+  (10 000) lines by the `search_counts` of every file in its hours (what its deletes read: the
+  `fg_*` tables have no index by source), an hour of more lines split evenly, with the file's counts
+  of the hours it finishes. Each step first locks the offsets row and compares it as the loader does
+  (`byte_offset = 0`, `line_number = 0`, unfinished): a file whose offset has moved (two instances,
+  one with its lock connection down) is not touched, the offsets are read again and a file still
+  marked is reset again from its first transaction. With two instances while the lock is lost, the
+  clock samples of the file's lines received outside its day can be counted twice (#182 review 3):
+  derived data, which `clocksamples.rebuild` counts again from the rows (a function; no command
+  calls it yet, DATA-MODEL). The last step takes the mark off (the offsets row first, the loader's
+  order) and deletes the file's counts left; only then is the file a stream at offset 0. From before
+  its first transaction on the file is no stream (its batches in the queue are dropped), so no batch
+  of it is read or committed under the mark. A marked file is never a stream (start-up, spool and
+  vault scan) and never counts as loaded (its offset is 0). A start that finds one resets it again
+  from its first transaction: for its request when that is still `loading` (the claim), or on its
+  own when no request holds it (failed or changed by hand meanwhile: scan beside the loop,
+  partitions, size check, steps; none is begun while a request is `loading`, and no request is
+  claimed while one is checked). A file that cannot be read while its day is still sealed
+  (missing, changed, damaged, its drive not ready) stays marked and is tried again after
+  `vault_scan_seconds`, the others meanwhile, reported once a run; it may be put back, and then it
+  loads exactly once. A file whose day vault retention has deleted was tried again the same way,
+  with a warning each time, and stayed marked and unfinished for good (`search.counts_backfill`
+  counting it `waiting`; #182 review 1). Now, when its day's seal state says `deleted`
+  (`_gone_from_vault`, read afresh; retention deletes the day's files first and marks the state
+  last), its reset is finished without the file, reported once: with no receive times to read, the
+  hours that reach outside its window that its `search_counts` still name stand for them
+  (`_counted_outside`; those of the steps already made went with their rows; a line its counts
+  never told, of a file loaded before `0016_search`, is not found and its row stays until the window
+  job drops its day), then its window, and its last step deletes its offsets row instead of taking
+  the mark off. No stream follows: nothing loads a day that is not sealed (neither the vault scan
+  nor a request), so no later start looks at it again. Only that day is given up: a sealed file
+  missing from a day still `sealed` (an evidence incident, or a retention run cut short), or a state
+  that is missing or cannot be read, waits as above (#182 review round 2: retired there, a file
+  loaded before `0016_search` was loaded again by the vault scan once its file was back, with the
+  row its counts never told twice). Accepted: a deleted day put back by hand as `sealed` brings
+  that case back for a file retired with it (within the vault scan's horizon its row twice; asked
+  for, its rows once but that row's clock sample taken off twice: derived data,
+  `clocksamples.rebuild`). A step over rows already deleted deletes nothing, so a stop after any
+  transaction re-resets the file and loads it exactly once. `arcilogger-db search-counts rebuild`
+  refuses a file marked `0` and unfinished (exit 1, a TR/EN text, nothing written; it only takes the
+  offsets row lock), and `search-counts status` lists it as "sıfırlanıyor [resetting]" (#182 review
+  Q1, `db/src/arcilogger_db/cli.py`). So only the reset's last step takes the mark off. Before, a
+  rebuild between two steps counted the rows still there and took the mark off, which left one case
+  open: a file whose every line was received outside its day. Its window goes last, so a rebuild
+  between its first steps found none of its rows, left no counts and took the mark off; a stop
+  before its next step then left a file at offset 0 with no mark and no counts, which looks like a
+  fresh stream, and the rows not yet deleted could be loaded a second time. That double load can no
+  longer come through the command. Ingest's recount guard stays, a second line of defence for a mark
+  taken off by hand in SQL: an unfinished file at offset 0 that has counts is a reset all the same
+  (`_recounted`; a file loads its rows and counts in one transaction with its offset, and the last
+  step deletes them with the mark), and the next step puts the mark back; a mark taken off by hand
+  from such a file with no counts left is not caught (the case above). A step waits at most
   `RESET_LOCK_TIMEOUT` (1 s) for a lock (on TimescaleDB the compression policy recompressing a
   chunk the step deletes from, a rebuild holding the offsets row) and is made again in a later
   round. Steps are planned from the counts as they are: a file whose counts were not complete
   (`counts_from_line` set before the reset) is stepped at most `RESET_CAPPED_STEP` (5 minutes)
-  in its time window; a reset taken up again has lost that value and is planned by its counts
-  (larger steps for such a file, not other rows). A reset of a failed request's file taken up
-  on its own makes its partitions and loads it although no request holds it, as after a crash
-  before (the window job drops it again). Two items of the review of #159 come with it: a claim
-  is accepted when the files loaded at its check are still loaded (a file loaded since, a
-  stream that finished meanwhile, is left alone, not hashed again); and while a claim's files
-  are checked its request's status is read every `ARCHIVE_PROGRESS_SECONDS`: once it has
-  changed, the check stops at its next slice and the next request is claimed.
+  in its time window. A reset taken up again with the file still marked is capped as well: the mark
+  took the place of that value, so whether its counts were complete is no longer known (#182 review
+  2: such a file taken up after a crash was stepped by counts that do not cover its lines, a step
+  far above `RESET_STEP_LINES`; about 890 steps of 5 minutes for its 74 h window, most of them
+  empty). One whose mark was taken off by hand is planned by its counts as
+  they are (larger steps at worst, never other rows). A reset of a failed request's file taken up on
+  its own makes its partitions and loads it although no request holds it, as after a crash before
+  (the window job drops it again; #182 review Q4: accepted, no raw data is touched), unless vault
+  retention has deleted its day (above). Two items of the review of #159 come with it: a claim is
+  accepted when the files loaded at its check are still loaded (a file loaded since, a stream that
+  finished meanwhile, is left alone, not hashed again); and while a claim's files are checked its
+  request's status is read every `ARCHIVE_PROGRESS_SECONDS`: once it has changed, the check stops at
+  its next slice and the next request is claimed.
 
   Two designs were measured (4 vCPU Linux, PostgreSQL 16 / TimescaleDB 2.30.2, the real ingest
   loop with 2 parse workers, live feed 160 lines/s; latency of a live line from its append to
@@ -1669,14 +1722,23 @@ All Wave 5 questions are answered (2026-11-02).
   lines). Fixed one-hour steps are not enough: a 5 M line day's peak hour holds about 545 000
   lines (5–8 s). Bound: a live line waits at most one round of steps (0.25 s and the step that
   ends it: up to about 1.2 s measured for an I/O spike) and a lock wait of up to 1 s; the test
-  bound is 5 s (`LIVE_BOUND`). Not covered, still on the loop: a reload's partitions, one site day
-  a round in one transaction (16 partitions: 0.3–0.45 s on Linux; one table-day a transaction
-  measured 34 ms; on the Windows runners of #159 a round took long enough that the latency tests
-  could not count their rounds, not measured: sahada doğrula). Moving that DDL off the loop
-  would not help (its `ACCESS EXCLUSIVE` on the parent holds the loop's `COPY` all the same);
-  one table-day a transaction came with the prompt stop below (`partitions.ensure_days(...,
-  tables=)`); as many as fit in 0.25 s a round is not taken. Not measured on Windows or a
-  spinning disk (sahada doğrula, KURULUM/INSTALL §16).
+  bound is 5 s (`LIVE_BOUND`). Not covered, still on the loop: a reload's partitions, one table
+  of a site day a round since #182 (review Q2): a transaction of two partitions (its device
+  times lie in two UTC days), 34 ms measured on Linux, where the day's 16 tables in one round
+  took 0.3–0.45 s on Linux and 0.844 s on a Windows runner (on the runners of #159 a round took
+  long enough that the latency tests could not count their rounds). A day's tables share one
+  lock budget over their rounds (`DayPartitions`; a fresh one after it ran out), and the vault
+  scan, every `vault_scan_seconds`, still makes a day in one call (`whole`). While the lock
+  stays held (an export holds it up to 15 minutes, W5-G-23), the partitions are asked for again
+  after `archive_seconds` (5 s), then twice as long after each wait that ran out, up to
+  `PARTITION_RETRY_MAX_SECONDS` (60 s), and after 5 s again once a table is made (#182 review
+  Q7: at a flat 5 s a 15-minute export meant about 130 asks, each holding the loop, and queueing
+  searches, up to 2 s). `test_live_data_is_loaded_while_a_reload_checks_its_files` prints the
+  longest round in the CI log's warnings summary. Moving that DDL off the loop would not help
+  (its `ACCESS EXCLUSIVE` on the parent holds the loop's `COPY` all the same); one table-day a
+  transaction came with the prompt stop below (`partitions.ensure_days(..., tables=)`). One
+  table's round is not measured on Windows or a spinning disk (sahada doğrula, KURULUM/INSTALL
+  §16).
 
   **A prompt stop (the manager's comment on #124 of 2026-11-05 01:07).**
   `test_a_stop_during_a_reloads_check_is_prompt[reset]` took 2.016 s against its 2.0 s bound on
@@ -1685,25 +1747,31 @@ All Wave 5 questions are answered (2026-11-02).
   reset's scan runs, that work is the request's next day's partitions, which were one
   transaction of 16 tables (0.27–0.32 s measured here at the moment of the stop; several seconds
   on the Windows runners). `partitions.ensure_days` now takes `tables=`, and `_ensure_days`
-  makes a day's partitions one table a transaction, the stop looked at before each (still one
-  site day a round: the round's time is as before); a reset's round of steps looks at the stop
-  after each step; and once the service stops, no unit of work that waits for a lock is begun:
-  not a reset's first transaction (for the request's next file or for a file marked on its
-  own), not a claim of a request, nor the end of a claim whose files are checked. A reset's
-  first transaction (it sweeps the default partitions, which a `db.window` step holds with its
-  parent) waits for a lock at most `RESET_LOCK_TIMEOUT` (1 s) as a step does, and is made again
-  in the next round. Worst case of a stop, analytically: the single unit of loop work under way
-  when it comes, then the shutdown's one batch and the last status write (no fsync, below).
-  That unit is one of: one table's partitions (about 30 ms; 1/16 of a day's) plus its wait for
-  `ARCIPART` and the table (none, or at most the lock budget of W5-G-24 (b), 2 s, while an export
-  or the window job holds the lock or a reader the table); one step or a reset's first transaction
-  (at most 0.38 s measured, about 1.2 s on an I/O spike) plus its lock wait (at most
-  `RESET_LOCK_TIMEOUT`, 1 s); the claim's transaction (a few reads and writes, plus the same lock
-  budget); one status write (no fsync, below); or one live batch as before.
-  A stop does not cut short a lock wait under way (that would cancel the statement from another
-  thread); the lock budget is never more than `PARTITION_LOCK_TIMEOUT_MS` (2 s) whatever
-  `search.request_budget_ms` is, so the worst case is about 2.2 s and one batch, within the
-  4.5 s of a Windows console stop by design. Without a lock held the stop waits for one table's
+  makes a day's partitions one table a transaction, the stop looked at before each (one table a
+  round since #182 review Q2, above); a reset's round of steps looks at the stop after each step;
+  and once the service stops, no unit of work that waits for a lock is begun: not a reset's first
+  transaction (for the request's next file or for a file marked on its own), not a claim of a
+  request, nor the end of a claim whose files are checked. A reset's first transaction (it sweeps
+  the default partitions, which a `db.window` step holds with its parent) waits for a lock at most
+  `RESET_LOCK_TIMEOUT` (1 s) as a step does, and is made again in the next round. Worst case of a
+  stop, analytically: the single unit of loop work under way when it comes, then the shutdown's one
+  batch and the last status write (no fsync, below). That unit is one of: one table's partitions
+  (about 30 ms; 1/16 of a day's) plus its wait for `ARCIPART` and the table (none, or at most the
+  lock budget of W5-G-24 (b), 2 s, while an export or the window job holds the lock or a reader the
+  table); one step or a reset's first transaction (at most 0.38 s measured, about 1.2 s on an I/O
+  spike) plus its lock wait (at most `RESET_LOCK_TIMEOUT`, 1 s); the claim's transaction (a few
+  reads and writes, plus the same lock budget); one status write (no fsync, below); or one live
+  batch as before. A stop does not cut short a lock wait under way (that would cancel the statement
+  from another thread); the lock budget is never more than `PARTITION_LOCK_TIMEOUT_MS` (2 s)
+  whatever `search.request_budget_ms` is, so the worst case is about 2.2 s and one batch, within the
+  4.5 s of a Windows console stop by design. The budget bounds each lock a statement waits for, not
+  the statement (`partitions._lock_table`, W5-G-24 (b)): `LOCK TABLE` of a parent waits for the
+  parent, then for each partition a reader holds without the parent, each up to what was left when
+  the statement began (`RESET_LOCK_TIMEOUT` is per lock too). "At most 2 s" assumes that readers
+  reach the partitions through the parent, as the searches, exports, lookups, ingest, the worker and
+  `pg_dump` (which locks the parent too) do; a session that holds partitions by their own names
+  without the parent and lets each go within the budget (a hand-written query) can hold one table's
+  statement up to 2 s for each such partition. Without a lock held the stop waits for one table's
   partitions or one step: 0.006–0.033 s measured here on plain PostgreSQL for the reset's check
   and 0.002–0.011 s for the claim's, 0.002–0.005 s on TimescaleDB, so the test's 2.0 s bound
   (no lock held) holds by design, not by a hair. The test reports the time as a warning, which
@@ -1771,8 +1839,8 @@ All Wave 5 questions are answered (2026-11-02).
   transaction, for the request and on its own),
   `test_a_reset_whose_offset_has_moved_is_not_carried_on`,
   `test_a_batch_loaded_under_the_mark_begins_the_reset_again`,
-  `test_a_recount_during_a_reset_does_not_load_its_file_twice` (while running, after a crash
-  for the request and on its own),
+  `test_a_recount_during_a_reset_does_not_load_its_file_twice` (a mark taken off by hand; while
+  running, after a crash for the request and on its own; ingest's `RESETTING` is the CLI's),
   `test_a_first_transaction_whose_answer_is_lost_is_made_again`,
   `test_one_unreadable_file_does_not_hold_up_another_files_reset`,
   `test_a_file_of_a_loading_request_is_not_reset_on_its_own`, `test_one_file_is_reset_at_a_time`,
@@ -1783,8 +1851,32 @@ All Wave 5 questions are answered (2026-11-02).
   `test_a_stop_during_a_resets_steps_ends_its_round`,
   `test_no_reset_is_begun_once_the_service_stops`,
   `test_no_claim_is_begun_or_finished_once_the_service_stops`,
-  `test_a_resets_first_transaction_waiting_for_a_lock_is_made_again_later`; changed,
-  `test_a_reloads_partitions_are_made_a_day_a_round` (one table a transaction),
+  `test_a_resets_first_transaction_waiting_for_a_lock_is_made_again_later`; since the review
+  of #182, `test_a_marked_file_whose_day_was_deleted_ends_its_reset_and_is_not_tried_again`
+  (its day deleted as retention does, within the vault scan's horizon: its rows, one received
+  outside its day found by its counts, its counts and its offsets row deleted, reported once,
+  scanned once over two starts; put back and asked for, loaded exactly once; of a file loaded
+  before `0016_search` that row stays, and once asked for its clock sample is taken off twice
+  until `clocksamples.rebuild`; fix 1),
+  `test_a_marked_file_missing_from_a_sealed_day_waits_and_loads_once_put_back` (both kinds of
+  file, the day within the vault scan's horizon: marked, no stream, its rows as they were, tried
+  again, reported once; put back, loaded exactly once with no request; fix 1, review round 2),
+  `test_a_reset_taken_up_again_keeps_the_step_cap_of_a_file_loaded_before_the_counts` (fix 2),
+  `test_a_reloads_partitions_ask_for_the_lock_less_often_while_it_stays_held` (5, 10, 20, 40,
+  60, 60 s, then 5 s again after a table is made; Q7), and in `db/tests/test_cli.py`
+  `test_search_counts_rebuild_refuses_a_file_being_reset` (exit 1, both texts, `ingest_offsets`
+  and `search_counts` unchanged; `status`'s summary and resetting line; the mark taken off, it
+  rebuilds; Q1) and
+  `test_search_counts_rebuild_waits_for_the_offsets_row_and_then_refuses_a_reset` (a reset's
+  first transaction holds the row while the rebuild starts and marks the file: the rebuild
+  waits, then refuses, `search_counts` unchanged; Q1, review round 2); changed,
+  `test_a_reloads_partitions_are_made_a_table_a_round` (named
+  `..._a_day_a_round` before #182 review Q2: one table a round, the vault scan's day in one
+  call), `test_a_days_tables_share_one_lock_budget` (over two rounds),
+  `test_a_stop_while_a_days_partitions_are_made_waits_for_one_table` (the round after the stop
+  makes none), `test_a_reloads_partitions_back_off_from_an_export_and_a_search_is_not_timed_out`
+  (a table a round after the lock comes free),
+  `test_live_data_is_loaded_while_a_reload_checks_its_files` (prints the longest round),
   `test_a_stop_during_a_reloads_check_is_prompt` (reports its time); unchanged, the equality
   tests
   (`test_a_dropped_day_comes_back_identically`, `test_a_reload_run_twice_gives_the_same_rows_and_counts`,

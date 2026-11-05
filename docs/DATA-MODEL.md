@@ -281,7 +281,7 @@ but which are not in a table go to `extra`.
 |---|---|---|
 | `sources` | `name` | Type (fortigate/mikrotik/generic), address, enabled, expected, heartbeat minutes, `unknown` (sender not configured → alert "yeni log kaynağı"), first/last seen |
 | `parse_failures` | id; unique (source, day, pattern) | Count of unparsed lines per source/day/pattern, first/last seen, **one example** raw reference (`example_line`, `example_offset`), last error |
-| `ingest_offsets` | (source, day) | Ingest resume point: `byte_offset` and `line_number` of complete lines loaded; `finished_at` when the day is done; `counts_from_line` (revision `0016_search`): NULL when every loaded line of the file is in `search_counts`, else the lines before it were loaded before the upgrade and wait for the worker job `search.counts_backfill`, which recounts the finished file and clears it (the migration sets `line_number + 1` on every file with loaded lines); `0` while an archive reload resets the file (offset 0, its rows deleted in steps, W5-G-25) |
+| `ingest_offsets` | (source, day) | Ingest resume point: `byte_offset` and `line_number` of complete lines loaded; `finished_at` when the day is done; `counts_from_line` (revision `0016_search`): NULL when every loaded line of the file is in `search_counts`, else the lines before it were loaded before the upgrade and wait for the worker job `search.counts_backfill`, which recounts the finished file and clears it (the migration sets `line_number + 1` on every file with loaded lines); `0` while an archive reload resets the file (offset 0, its rows deleted in steps, W5-G-25; no file has `0` otherwise, `arcilogger-db search-counts rebuild` refuses such a file and `status` lists it as resetting) |
 | `vlans` | `subnet` | The site's VLANs and subnets (none are shipped): `vlan_id` (unique, NULL for a network without one, e.g. a transit network), `name_tr`, `purpose`, `dhcp_server` (e.g. `dhcp60`), `department_id`, `guest` |
 | `departments` | id | The site's departments, entered by its administrator (none are shipped, see "Seed data") |
 | `persons` | id | Name, department, title, e-mail, employee number (unique), active (persons are deactivated, never deleted), `usage_excluded` (left out of person-level usage views and reports; revision `0010_usage`) |
@@ -626,17 +626,28 @@ PostgreSQL 16.
       last takes the mark off. Only then does it load the sealed file with the normal reader,
       after every newer day (live data first). A marked file is never loaded and never counts
       as loaded: after a stop between two steps its reset is taken up again (for its request,
-      or on its own when no request holds it), and it loads exactly once. The checks that read
+      or on its own when no request holds it), and it loads exactly once. A file taken up on
+      its own whose day vault retention has deleted (its seal state `deleted`) has its reset
+      finished without it (its rows outside its day are found by the hours its `search_counts`
+      still name; of a file loaded before `0016_search` a line its counts never told stays until
+      the window job drops its day), and its `ingest_offsets` row is deleted with the last step:
+      nothing loads a day that is not sealed, so it is not tried again (#182). One that cannot
+      be read while its day is still sealed (missing, changed, its drive not ready) stays marked
+      and is tried again, reported once a run: it may be put back, and then it loads exactly
+      once. While a file is marked, `arcilogger-db search-counts rebuild` refuses it (exit 1)
+      and `search-counts status` lists it as "sıfırlanıyor [resetting]". The checks that read
       whole files (the SHA-256 at the claim, a file's receive times before its reset: about
       0.5 s and 25 s for a 5 M line day) run in a thread beside ingest's loop, which goes on
       loading live data and acts on each result in a later round, in the same order (the size
       is checked again on the loop right before the file's first transaction); the reload's
-      partitions are made a day a round (#124, W5-G-22), one table a transaction (a stop waits
-      for one table's). Its claim and its partitions wait for the partition maintenance lock,
-      and then for the tables, at most half of `search.request_budget_ms` in all (never more
-      than 2 s; W5-G-24): a search queued behind them keeps half its budget; they are tried
-      again at the next look at the requests (the claim keeps its checked files), the request
-      is not failed. A live line waits at most about one
+      partitions are made one table a round (#124, W5-G-22, W5-G-25; a transaction of about
+      30 ms, a stop waits for one table's). Its claim and its partitions wait for the partition
+      maintenance lock, and then for the tables, at most half of `search.request_budget_ms` in
+      all (never more than 2 s; W5-G-24; a day's tables share one budget): a search queued
+      behind them keeps half its budget; the claim is tried again at the next look at the
+      requests (it keeps its checked files), the partitions after 5 s, then 10, 20, 40 and
+      every 60 s while the lock stays held (back to 5 s once a table is made); the request is
+      not failed. A live line waits at most about one
       round of steps (0.25 s and the step that ends it) instead of about 5 to 8 s per 1 M lines of a
       file whose rows are still there (the window's first days).
       A reload run twice gives the same rows and
