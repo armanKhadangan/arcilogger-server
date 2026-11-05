@@ -525,6 +525,32 @@ $DbExe = Join-Path $Venv 'Scripts\arcilogger-db.exe'
 # --to <revision> --json), and the revision of the daily partitions a version before it cannot handle.
 $SchemaDowngradeCommand = @('schema', 'downgrade')
 $DailyPartitionRevision = '0021_db_window'
+# Issue #164: the revisions a rollback may take down, newest first: those above the floor (the
+# revision 0021_db_window revises, #122-5), each judged lossless for 5651 data (raw logs, log rows,
+# leases and the audit log keep every row; what goes is derived, or a request). Every revision
+# above the floor is judged before it ships, and listed here or in $LossyDowngrades (a test
+# compares both lists with the migrations folder and fails until then); a rollback whose way down
+# crosses a revision not in $LosslessDowngrades is refused before any change
+# (Get-SchemaRollbackPlan).
+$LosslessDowngrades = @(
+    # Drops leases.moves, nothing else: the missed moves the lease job recorded, derived data (the
+    # FortiGate DHCP raw logs keep the ACKs; the database keeps fg_dhcp rows for its window only).
+    # Not rebuilt: a later upgrade brings the column back NULL (no backfill, contract #127), the
+    # lease job records the moves it sees from its next run on, and a lease's moves from before the
+    # window are then gone from the database. The "vd" keys stay in leases.evidence, raw logs, log
+    # rows and every other lease column as they are (v0022_lease_moves.py).
+    '0022_lease_moves',
+    # Merges the daily partitions into monthly ones with every row, a step per table and month;
+    # drops archive_reloads (the reload requests: the sealed days stay in the vault),
+    # db.reload_keep_days and the window's status rows; db.retention_days 30 -> 400, which the
+    # command audits (a longer window, nothing deleted; v0021_db_window.py, contract #122).
+    '0021_db_window'
+)
+# The revisions above the floor whose downgrade loses 5651 data, each with what it loses in a
+# comment: none today. Never in $LosslessDowngrades, so a rollback across one is refused; the way
+# back is the pre-upgrade dump (-Rollback -RestoreDatabase). Read by the test, not by the plan.
+$LossyDowngrades = @(
+)
 $ApiExe = Join-Path $Venv 'Scripts\arcilogger-api.exe'
 $ServicesDir = Join-Path $InstallDir 'services'
 $ScriptsDir = Join-Path $ReleaseRoot 'scripts'
@@ -3692,20 +3718,25 @@ function Restore-LoweredLeases {
 
 function Get-SchemaRollbackPlan {
     <#
-    Issue #122: whether a rollback without -RestoreDatabase takes the database schema down before
-    the swap, and to which revision, decided before any change. The revisions of both programs
-    are read from their migrations folders, without Python and without the database
-    (Get-ArciAlembicChain; a capability check as Test-PreviousLeaseRollbackModule's, #81). A
-    version from before 0021_db_window creates and drops monthly partitions only, so it gets its
-    own schema back: the target is its head, but never below the revision 0021_db_window revises.
-    The revisions before it were made for a previous version to run on (a rollback has never
-    undone them: the NAT rows, the FortiGate leases of contract 2.2.1, which the next upgrade
-    restores), and their downgrades delete data (0017's the FortiGate DHCP table; a question to
-    the manager on #122). Nothing to do when this version has no 0021_db_window or the previous
-    version has it too (it handles daily partitions; a rollback undoes no later revision either,
-    as before #122). The database's own revision is read in the step (Invoke-SchemaDowngradeStep).
-    Stops the run (2) when the previous head cannot be determined (never a guess; -RestoreDatabase
-    needs no downgrade), and when the downgrade is needed under -SkipDatabase.
+    Issue #122, generalised by #164: whether a rollback without -RestoreDatabase takes the
+    database schema down before the swap, and to which revision, decided before any change. The
+    revisions of both programs are read from their migrations folders, without Python and without
+    the database (Get-ArciAlembicChain; a capability check as Test-PreviousLeaseRollbackModule's,
+    #81). The previous version's revisions are the first ones of this version's, so it gets its
+    own schema back: a version from before 0021_db_window creates and drops monthly partitions
+    only, and one from 0021 on fails its own "arcilogger-db upgrade" (its repair run, an -Upgrade
+    to another bundle) on a revision it does not ship ("Can't locate revision", #164). The target
+    is its head, but never below the revision 0021_db_window revises (#122-5): the revisions
+    before it were made for a previous version to run on (a rollback has never undone them: the
+    NAT rows, the FortiGate leases of contract 2.2.1, which the next upgrade restores), and their
+    downgrades delete data (0017's the FortiGate DHCP table; a question to the manager on #122).
+    The way down, from this version's head (the database is not above it) to the target, crosses
+    only revisions of $LosslessDowngrades. Nothing to do when this version has no 0021_db_window
+    or the previous version knows this version's head (the same revisions, or more after them).
+    The database's own revision is read in the step (Invoke-SchemaDowngradeStep). Stops the run
+    (2) when the previous head cannot be determined or its revisions are not the first ones of
+    this version's (never a guess; -RestoreDatabase needs no downgrade), when the way down
+    crosses a revision not on the list, and when the downgrade is needed under -SkipDatabase.
     #>
     $ours = Join-Path $Venv 'Lib\site-packages\arcilogger_db\migrations\versions'
     $theirs = Join-Path $PreviousDir 'venv\Lib\site-packages\arcilogger_db\migrations\versions'
@@ -3724,16 +3755,26 @@ function Get-SchemaRollbackPlan {
         if ($window -lt 0) { return $detail }
         $previous = Get-ArciAlembicChain -Folder $theirs
         $detail.previous_head = $previous[-1]
-        if ($previous -ccontains $DailyPartitionRevision) { return $detail }
+        # The revisions both programs have, from the base on, in the same order (issue #164).
+        $same = 0
+        while ($same -lt [Math]::Min($chain.Count, $previous.Count) -and $previous[$same] -ceq $chain[$same]) { $same++ }
+        if ($same -eq $chain.Count) { return $detail }
         $at = [array]::IndexOf($chain, $detail.previous_head)
         if ($at -lt 0 -or $window -eq 0) {
             throw ('önceki sürümün şema başı bu sürümün geçişlerinde yok [the previous version''s head is not one of this version''s revisions]: {0}' -f $detail.previous_head)
+        }
+        if ($same -lt $previous.Count) {
+            throw ('önceki sürümün revizyonları bu sürümünkilerin ilkleri değil [the previous version''s revisions are not the first ones of this version''s]: {0}. revizyon {1}, bu sürümde {2} [revision {0} is {1}, here {2}]' -f ($same + 1), $previous[$same], $chain[$same])
         }
     }
     catch { & $refuse ($unknown -f $_.Exception.Message, $installerPath) }
     $script:SchemaChain = $chain
     $detail.needed = $true
     $detail.to = $chain[[Math]::Max($at, $window - 1)]
+    $lossy = @($chain[([array]::IndexOf($chain, $detail.to) + 1)..($chain.Count - 1)] | Where-Object { $LosslessDowngrades -cnotcontains $_ })
+    if ($lossy.Count -gt 0) {
+        & $refuse ('Veritabanı şeması geri alınan sürümünkine kayıpsız indirilemez, hiçbir şey değiştirilmedi [the database schema cannot go down to the restored version''s without loss, nothing changed] ({0} -> {1}; kayıpsız indirilen revizyonlar listesinde değil [not on the list of lossless downgrades]: {2}). -RestoreDatabase ile yükseltme öncesi yedek veritabanının yerine geçer, şema indirilmez [with -RestoreDatabase the pre-upgrade dump replaces the database, no downgrade]: powershell -ExecutionPolicy Bypass -File "{3}" -Rollback -RestoreDatabase' -f $detail.installed_head, $detail.to, ($lossy -join ', '), $installerPath)
+    }
     if ($SkipDatabase) {
         & $refuse ('Veritabanı şeması geri alınan sürümünkine indirilmeli ({0} -> {1}), -SkipDatabase ile geri alma yapılmadı, hiçbir şey değiştirilmedi [the database schema must go down to the restored version''s: no rollback with -SkipDatabase, nothing changed]. -SkipDatabase olmadan ya da -RestoreDatabase ile çalıştırın [run it without -SkipDatabase, or with -RestoreDatabase].' -f $detail.installed_head, $detail.to)
     }
@@ -3759,12 +3800,13 @@ function Invoke-SchemaDowngradeStep($Plan) {
     Issue #122 (Get-SchemaRollbackPlan decided it): after the services stopped and after the lease
     step, which works on this version's schema, and before the swap, this version's
     "arcilogger-db schema downgrade --to <revision> --json" takes the database down to the
-    previous version's schema; 0021_db_window's downgrade merges the daily partitions into
-    monthly ones, a step per table and month, and goes on where an interrupted run stopped
-    (W5-G-15). First the database's own revision (Get-DatabaseSchemaRevision): one from before
-    0021_db_window (an -Upgrade -SkipDatabase left it there) has no daily partitions, so nothing
-    is done. The command takes its own lock and writes the settings.change entry of
-    db.retention_days (30 -> 400) itself; its JSON is kept in the plan's detail (result). A
+    previous version's schema (#164: 0022_lease_moves' downgrade drops leases.moves); down to
+    0020, 0021_db_window's downgrade merges the daily partitions into monthly ones, a step per
+    table and month, and goes on where an interrupted run stopped (W5-G-15). First the database's
+    own revision (Get-DatabaseSchemaRevision): one at the target or before it (an -Upgrade
+    -SkipDatabase left it there; one from before 0021_db_window has no daily partitions) is left
+    as it is, nothing is done. The command takes its own lock and writes the settings.change
+    entry of db.retention_days (30 -> 400) itself; its JSON is kept in the plan's detail (result). A
     failure stops the rollback before the swap (Complete-FailedChange): this version stays
     installed on its own schema (the committed steps leave a valid layout of it, and its
     "arcilogger-db upgrade" runs first unless the command certainly changed nothing), and the
@@ -3772,7 +3814,7 @@ function Invoke-SchemaDowngradeStep($Plan) {
     #>
     if (-not $Plan.needed) {
         $previous = $(if ($Plan.previous_head) { $Plan.previous_head } else { '-' })
-        $skipped = 'Veritabanı şeması indirilmiyor: geri alınan sürüm {0} şemasını biliyor ya da bu sürümün şeması ondan önce [database schema not downgraded: the restored version knows {0}, or this version''s schema is from before it] ({1}; {2})' -f $DailyPartitionRevision, $Plan.installed_head, $previous
+        $skipped = 'Veritabanı şeması indirilmiyor: geri alınan sürüm bu sürümün şemasını biliyor ya da bu sürümün şeması {0} öncesinde [database schema not downgraded: the restored version knows this version''s schema, or this version''s schema is from before {0}] ({1}; {2})' -f $DailyPartitionRevision, $Plan.installed_head, $previous
         Add-PlanItem -Id 'database.downgrade' -Status 'skipped' -Text $skipped -Detail $Plan
         Write-ArciStep $skipped
         return
@@ -3790,6 +3832,10 @@ function Invoke-SchemaDowngradeStep($Plan) {
         catch { $problem = $_.Exception.Message }
         if (-not $problem -and $at -lt [array]::IndexOf($script:SchemaChain, $DailyPartitionRevision)) {
             Write-ArciInfo ('Veritabanı şeması {0}, {1} öncesinde: birleştirilecek günlük bölüm yok, indirilmedi [the database schema is at {0}, from before {1}: no daily partitions, not downgraded]' -f $Plan.database_head, $DailyPartitionRevision)
+            return
+        }
+        if (-not $problem -and $at -le [array]::IndexOf($script:SchemaChain, $Plan.to)) {
+            Write-ArciInfo ('Veritabanı şeması {0}, hedef {1} ya da öncesinde: indirilmedi [the database schema is at {0}, the target {1} or before it: not downgraded]' -f $Plan.database_head, $Plan.to)
             return
         }
         $result = $null
@@ -3814,7 +3860,10 @@ function Invoke-SchemaDowngradeStep($Plan) {
                 $days = Get-ArciJsonField -Object $answer -Name 'retention_days'
                 $audit = Get-ArciJsonField -Object $answer -Name 'audit_id'
                 $pending = Get-ArciJsonField -Object $answer -Name 'upgrade_audit_id'
-                if ($null -ne $days) { $line += ('; db.retention_days {0} -> {1}' -f (Get-ArciJsonField -Object $days -Name 'before'), (Get-ArciJsonField -Object $days -Name 'after')) }
+                $before = Get-ArciJsonField -Object $days -Name 'before'
+                $after = Get-ArciJsonField -Object $days -Name 'after'
+                # Down to 0021 only 0022's drop runs: the window stays, nothing to print.
+                if ($null -ne $days -and "$before" -cne "$after") { $line += ('; db.retention_days {0} -> {1}' -f $before, $after) }
                 if ($null -ne $audit) { $line += (', denetim kaydı [audit entry] {0}' -f $audit) }
                 if ($null -ne $pending) { $line += ('; yükseltmenin değişikliği [the upgrade''s change]: denetim kaydı [audit entry] {0}' -f $pending) }
                 Write-ArciInfo $line

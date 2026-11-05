@@ -2066,15 +2066,49 @@ issue fixed is kept (command, flags, exit codes 0/1/2, JSON fields); what differ
   `changed_at`, as `db.window` would, plus `audited_at_downgrade {from, to}`), in the same
   transaction, then its own. The JSON gets one more field, `upgrade_audit_id` (int or null);
   the installer prints it.
-- **#122-4: when the installer downgrades.** `-Rollback` without `-RestoreDatabase` reads both
-  programs' Alembic revisions from `venv\Lib\site-packages\arcilogger_db\migrations\versions`
-  (no Python, no database; `Get-ArciAlembicChain`, as `Test-PreviousLeaseRollbackModule`'s
-  capability check). The step `database.downgrade` runs when this version has `0021_db_window`
-  and the previous one does not (the issue's rule; a previous version from `0021` on gets no
-  downgrade, also of later revisions, as rollbacks before #122). Right before the command it
-  reads the database's revision with this version's `arcilogger-db current`: a database from
-  before `0021_db_window` (`-Upgrade -SkipDatabase`) is left as it is. The command name is one
-  variable, `$SchemaDowngradeCommand`.
+- **#122-4 (deviation, issue #164): when the installer downgrades.** `-Rollback` without
+  `-RestoreDatabase` reads both programs' Alembic revisions from
+  `venv\Lib\site-packages\arcilogger_db\migrations\versions` (no Python, no database;
+  `Get-ArciAlembicChain`, as `Test-PreviousLeaseRollbackModule`'s capability check). Nothing is
+  downgraded when this version has no `0021_db_window`, or when the previous version knows this
+  version's head (the same revisions, or this version's followed by more). Otherwise the previous
+  version's revisions must be the first ones of this version's (the same ids in the same order),
+  and the step `database.downgrade` takes the database to max(previous head,
+  `0020_fg_traffic_transip_time`) (the floor, #122-5). #122's rule was "only when the previous
+  version has no `0021`; a previous version from `0021` on gets no downgrade, also of later
+  revisions": after `0022_lease_moves` a rollback to a program with `0021` but without `0022`
+  left the database at `0022`, and that program's own `arcilogger-db upgrade` (its repair run, an
+  `-Upgrade` to another bundle without `0022`, what `arcilogger-db check`/`current` advise) fails
+  with `Can't locate revision identified by '0022_lease_moves'` (issue #164, from the review of
+  #163). The way down crosses only revisions whose downgrade is lossless for 5651 data (raw logs,
+  log rows, leases and the audit log keep every row): `$LosslessDowngrades` in the installer,
+  newest first, each with its judgement in a comment. Today `0022_lease_moves` (drops
+  `leases.moves`, the recorded missed moves, and nothing else: derived data, the FortiGate DHCP
+  raw logs keep the ACKs, while the database keeps `fg_dhcp` rows for its window only; the moves
+  are not rebuilt: a later upgrade brings the column back NULL, no backfill (#127), the lease job
+  records the moves it sees from its next run on, and a lease's moves from before the window are
+  then gone from the database; the `"vd"` keys stay in `leases.evidence`, #127) and
+  `0021_db_window` (merges the daily partitions into monthly ones with every row; drops
+  `archive_reloads`, whose sealed days stay in the vault, `db.reload_keep_days` and the window's
+  status rows; `db.retention_days` 30 → 400, a longer window, audited by the command, #122-2). A
+  revision whose downgrade loses such data goes into `$LossyDowngrades` (none today), with what it
+  loses; a rollback across it is refused (#122-7), the way back is the pre-upgrade dump. The plan
+  checks the way from this version's head (the database is not above it) down to the target.
+  `test_the_lossless_downgrades_are_this_versions_revisions_above_the_floor` asserts that every
+  revision of this version above the floor is in exactly one of the two lists, each newest first
+  and each entry with its judgement: a new revision fails it until it is judged and listed, and
+  none enters the rollback silently. Right before the command the step reads the
+  database's revision with this version's `arcilogger-db current`: a database at the target or
+  below it (`-Upgrade -SkipDatabase`; one from before `0021_db_window` has no daily partitions) is
+  left as it is. The command name is one variable, `$SchemaDowngradeCommand`. The release path
+  wave-4 (`0020`) → wave-5 → `-Rollback` is unchanged: down to `0020`, through `0022`'s drop and
+  `0021`'s merge. Tests: `test_dry_run_rollback_downgrades_to_a_previous_head_from_0021_on`,
+  `test_rollback_from_0022_downgrades_to_the_previous_head`,
+  `test_rollback_to_a_version_at_this_versions_head_runs_no_downgrade`,
+  `test_rollback_on_a_database_at_the_target_runs_no_downgrade`, and against PostgreSQL
+  `test_the_downgrade_to_0021_drops_only_the_lease_moves` (`schema downgrade --to
+  0021_db_window` from the head). `arcilogger-db schema downgrade` needed no change: it already
+  takes every revision this version ships (#122-1).
 - **#122-5 (deviation, accepted by the manager on #147): the floor.** The target is the previous
   head but never below `0020_fg_traffic_transip_time`, the revision `0021` revises. The older
   revisions were made for a previous version to run on, and their downgrades delete or rebuild
@@ -2097,8 +2131,15 @@ issue fixed is kept (command, flags, exit codes 0/1/2, JSON fields); what differ
   naming the command.
 - **#122-7: refusals before any change (exit 2).** A previous head that cannot be told (no
   folder, no revision file, an unreadable line, a duplicate, a branch, two bases, a broken
-  chain, a head not among this version's revisions), or `-SkipDatabase` when the downgrade is
-  needed. `-RestoreDatabase` skips the schema check.
+  chain, a head not among this version's revisions), previous revisions that are not the first
+  ones of this version's (#164: one missing before its head, or one in another place; the text
+  names the first that differs), a way down across a revision not on `$LosslessDowngrades`
+  (#164; the text names it), or `-SkipDatabase` when the downgrade is needed. Each is TR/EN; all
+  but the last give the command `-Rollback -RestoreDatabase`, the last says to run without
+  `-SkipDatabase` or with `-RestoreDatabase`. `-RestoreDatabase` skips the schema check. Tests:
+  `test_dry_run_rollback_refuses_previous_revisions_that_are_not_the_first_of_this_versions`,
+  `test_dry_run_rollback_refuses_a_way_down_through_a_revision_not_listed_as_lossless`,
+  `test_rollback_refuses_a_diverged_or_lossy_way_down_before_any_change`.
 - **#122-8 (deviation, accepted by the manager on #147 with the review's items 1–6):
   `-RestoreDatabase` restores into a new database.** `pg_restore --clean --single-transaction`
   into the live database cannot restore a `0020` dump over a `0021` database (`archive_reloads`'
@@ -2278,10 +2319,13 @@ issue fixed is kept (command, flags, exit codes 0/1/2, JSON fields); what differ
     (`worker/service.py:246`) reads all open leases' moves (at most 1,000 times each): their
     part outside `[lo, hi)` must be recomputed, so the incremental job's shortcut does not
     apply.
-  - **Rollback (manager decision 4 on #127):** per #122-4, `-Rollback` to a previous version
-    from `0021_db_window` on runs **no** downgrade, so after a rollback to a `0021` program the
-    `leases.moves` column stays: the `0021` program inserts leases with `moves` NULL (it does
-    not know the column) and leaves the moves of the rows it updates. Stale moves are harmless:
+  - **Rollback (manager decision 4 on #127):** changed by issue #164 (#122-4): `-Rollback` to a
+    `0021` program now downgrades to `0021_db_window`, which drops `leases.moves` only (below);
+    a later upgrade brings the column back NULL and the lease job records from its next run on.
+    The rest of this item is the decision as made on #127. Per #122-4, `-Rollback` to a
+    previous version from `0021_db_window` on runs **no** downgrade, so after a rollback to a
+    `0021` program the `leases.moves` column stays: the `0021` program inserts leases with
+    `moves` NULL (it does not know the column) and leaves the moves of the rows it updates. Stale moves are harmless:
     moves only ever add evidence (a move the `0021` program saw is simply missing), and the
     `0022` program cuts them to the lease, and bounds them, on its next write of that lease.
     When a downgrade below `0022_lease_moves` does run (#122's command to an older target), it
