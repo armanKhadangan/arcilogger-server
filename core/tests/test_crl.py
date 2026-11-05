@@ -6,13 +6,16 @@ reaches a real CA. The CAs and their lists are made here with ``cryptography``.
 
 from __future__ import annotations
 
+import ast
 import hashlib
 import http.client
 import json
+import os
 import re
 import select
 import socket
 import ssl
+import tempfile
 import threading
 import time
 from collections.abc import Iterator, Sequence
@@ -1350,19 +1353,215 @@ def test_an_index_entry_with_a_foreign_file_name_is_not_reused(
     assert (layout.crl_dir / name).read_bytes() == data
 
 
+#: The one removal ``crl.py`` may make: the first step of ``fetch`` under its lock, of the
+#: temporary names ``_store_new`` makes (the tempfile module's ``.`` + 8 characters + ``.tmp``)
+#: that a stopped run left (#170, Q15). A change to it fails the guard below, to be looked at.
+_LEFTOVER_CLEANUP = r"""
+with os.scandir(layout.crl_dir) as entries:
+    leftovers = [
+        entry.name
+        for entry in entries
+        if re.fullmatch(r"\.[a-z0-9_]{8}\.tmp", entry.name)
+        and entry.is_file(follow_symlinks=False)
+    ]
+for name in sorted(leftovers):
+    try:
+        (layout.crl_dir / name).unlink()
+    except FileNotFoundError:
+        continue
+    except OSError as exc:
+        log.warning("state/crl: leftover temporary file %s not removed: %s", name, exc)
+        continue
+    log.warning("state/crl: removed the leftover temporary file %s of a stopped run", name)
+"""
+#: What removes, renames or overwrites a file. Path.replace is a rename over the target;
+#: dataclasses' replace makes a copy. A file opened to write may be one that is there.
+_DELETE_OR_OVERWRITE = re.compile(
+    r"\b(unlink|remove|rmtree|rmdir|os\.replace|\.rename|truncate|O_TRUNC|write_bytes"
+    r"|write_text|shutil)\b"
+    r"|(?<!\bdataclasses)\.replace\("
+    r"""|\bopen\([^)]*["'][rbtx]*[wa+]"""
+)
+
+
 def test_the_crl_module_has_no_way_to_delete() -> None:
     """Static guard (D8, rule 2): ``crl.py`` only writes. The index goes through fsutil's
     atomic write; a list is linked from a fresh temporary file (``os.link`` never replaces a
-    file), whose temporary name the tempfile module removes."""
+    file), whose temporary name the tempfile module removes. The one removal is
+    ``_LEFTOVER_CLEANUP``, the first step of ``fetch`` under the lock (#170, Q15): a second way
+    to delete, rename or overwrite anywhere in the module fails here, and so does a change to
+    that one (another pattern, another place, symbolic links followed)."""
     source = (CORE_SRC / "arcilogger_core" / "crl.py").read_text(encoding="utf-8")
-    forbidden = re.compile(
-        r"\b(unlink|remove|rmtree|rmdir|os\.replace|\.rename|truncate|O_TRUNC)\b"
-        # Path.replace (a rename over the target); dataclasses' replace makes a copy.
-        r"|(?<!\bdataclasses)\.replace\("
+    tree = ast.parse(source)
+    (fetch_def,) = (
+        node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == "fetch"
     )
-    assert forbidden.findall(source) == [], "crl.py must never delete or rename a file"
-    assert forbidden.search("path.replace(target)")
-    assert not forbidden.search("dataclasses.replace(crl, url=url)")
+    (locked,) = (
+        node
+        for node in fetch_def.body
+        if isinstance(node, ast.With)
+        and [ast.unparse(item.context_expr) for item in node.items] == ["_one_run(layout.crl_dir)"]
+    )
+    cleanup = ast.parse(_LEFTOVER_CLEANUP).body
+    assert [ast.dump(node) for node in locked.body[: len(cleanup)]] == [
+        ast.dump(node) for node in cleanup
+    ], "fetch's first step under the lock is the leftover cleanup, as it stands above"
+    (allowed,) = (
+        node.lineno
+        for statement in locked.body[: len(cleanup)]
+        for node in ast.walk(statement)
+        if isinstance(node, ast.Attribute) and node.attr == "unlink"
+    )
+    found = [
+        (source.count("\n", 0, match.start()) + 1, match.group())
+        for match in _DELETE_OR_OVERWRITE.finditer(source)
+    ]
+    assert found == [(allowed, "unlink")], "crl.py must never delete, rename or overwrite a file"
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "path.unlink()",
+        "os.unlink(path)",
+        "os.remove(path)",
+        "shutil.rmtree(folder)",
+        "folder.rmdir()",
+        "os.replace(temporary, path)",
+        "path.replace(target)",
+        "temporary.rename(path)",
+        "os.truncate(path, 0)",
+        "os.open(path, os.O_WRONLY | os.O_TRUNC)",
+        "path.write_bytes(data)",
+        "path.write_text(text)",
+        "shutil.move(temporary, path)",
+        'open(path, "wb")',
+        "path.open('a')",
+        'open(path, mode="r+b")',
+    ],
+)
+def test_the_delete_guard_sees_every_way_to_delete_or_overwrite(line: str) -> None:
+    assert _DELETE_OR_OVERWRITE.search(line), line
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "dataclasses.replace(crl, url=url)",
+        "replace(parse_crl(data), path=path)",
+        "os.link(temporary.name, path)",
+        "atomic_write_text(path, text)",
+        "os.open(folder / LOCK_NAME, os.O_RDWR | os.O_CREAT, 0o644)",
+        "opener.open(request, timeout=options.timeout_seconds)",
+        'open(path, "rb")',
+        "the removed file",
+    ],
+)
+def test_the_delete_guard_lets_reads_and_new_files_be(line: str) -> None:
+    assert not _DELETE_OR_OVERWRITE.search(line), line
+
+
+def _leftover(folder: Path) -> Path:
+    """A temporary name as ``_store_new`` makes it (the tempfile module's own naming), kept as a
+    stopped run keeps it. If tempfile names its files otherwise one day, the cleanup's pattern
+    no longer matches and the tests below fail."""
+    with tempfile.NamedTemporaryFile(
+        dir=folder, prefix=".", suffix=".tmp", delete=False
+    ) as temporary:
+        temporary.write(b"part of a list")
+    return Path(temporary.name)
+
+
+def test_fetch_removes_the_temporary_names_a_stopped_run_left(
+    server: Server, root: Ca, layout: Layout, caplog: pytest.LogCaptureFixture
+) -> None:
+    """#170, Q15: a run stopped between ``_store_new``'s link and the tempfile module's cleanup
+    leaves the temporary name, a hard link to the stored list when the link was made. The next
+    run removes that name under its lock and logs it; the list keeps its bytes and its entry."""
+    data = make_crl(root, datetime(2026, 11, 1, tzinfo=UTC))
+    server.routes["/root.crl"] = Route(data)
+    url = server.url("/root.crl")
+    assert fetch(options(url), layout, [root.certificate], NOW).exit_code == 0
+    name = stored_name(root, "20261101T000000Z", data)
+    stored = layout.crl_dir / name
+    before = read_index(layout)
+    linked = _leftover(layout.crl_dir)
+    linked.unlink()  # test: the name made again as the hard link a stopped run leaves
+    os.link(stored, linked)
+    partial = _leftover(layout.crl_dir)  # stopped before the link: a part of a list
+    assert stored.stat().st_nlink == 2
+
+    run = fetch(options(url), layout, [root.certificate], NOW + timedelta(days=1))
+    assert run.exit_code == 0, run.as_json()
+    assert sorted(path.name for path in layout.crl_dir.iterdir()) == [LOCK_NAME, name, "index.json"]
+    assert stored.read_bytes() == data
+    assert stored.stat().st_nlink == 1
+    (entry,) = read_index(layout)["lists"]
+    assert {**entry, "fetched_at": None} == {**before["lists"][0], "fetched_at": None}
+    for leftover in (linked, partial):
+        assert f"removed the leftover temporary file {leftover.name}" in caplog.text
+
+
+def test_fetch_removes_only_the_temporary_names_of_store_new(
+    server: Server, root: Ca, layout: Layout, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The cleanup takes the pattern of ``_store_new``'s names only: a stored list, one not in
+    the index, the index, the lock, a file of someone else and names that only look alike (a
+    ``.crl`` among them, a folder, a symbolic link where the system allows one) all stay."""
+    data = make_crl(root, datetime(2026, 11, 1, tzinfo=UTC))
+    server.routes["/root.crl"] = Route(data)
+    url = server.url("/root.crl")
+    assert fetch(options(url), layout, [root.certificate], NOW).exit_code == 0
+    folder = layout.crl_dir
+    name = stored_name(root, "20261101T000000Z", data)
+    kept: dict[str, bytes] = {
+        "kept-aside.crl": data,  # a list that is not in the index
+        "notes.txt": b"operator's notes",
+        ".abcdefgh.crl": data,  # the temporary pattern's stem, a list's type
+        ".abcdefgh.tmp.crl": data,
+        ".abcdefg.tmp": b"seven",  # one character short
+        ".abcdefghi.tmp": b"nine",  # one character more
+        "abcdefgh.tmp": b"no dot",
+        ".abcd-fgh.tmp": b"not tempfile's characters",
+        ".abcdefgh.tmp~": b"another type",
+    }
+    for kept_name, kept_bytes in kept.items():
+        (folder / kept_name).write_bytes(kept_bytes)
+    (folder / ".folder00.tmp").mkdir()
+    (folder / ".folder00.tmp" / "inside.txt").write_bytes(b"inside")
+    try:
+        (folder / ".symlink0.tmp").symlink_to(folder / name)
+        symlink = True
+    except OSError:  # Windows without the symbolic-link privilege
+        symlink = False
+    leftover = _leftover(folder)
+    names = sorted(path.name for path in folder.iterdir())
+
+    run = fetch(options(url), layout, [root.certificate], NOW + timedelta(days=1))
+    assert run.exit_code == 0, run.as_json()
+    assert sorted(path.name for path in folder.iterdir()) == sorted(set(names) - {leftover.name})
+    assert (folder / name).read_bytes() == data
+    for kept_name, kept_bytes in kept.items():
+        assert (folder / kept_name).read_bytes() == kept_bytes, kept_name
+    assert (folder / ".folder00.tmp" / "inside.txt").read_bytes() == b"inside"
+    if symlink:
+        assert (folder / ".symlink0.tmp").is_symlink()
+    assert [entry["file"] for entry in read_index(layout)["lists"]] == [name]
+    assert caplog.text.count("removed the leftover temporary file") == 1
+
+
+def test_a_leftover_temporary_name_stays_while_another_run_holds_the_lock(
+    root: Ca, layout: Layout
+) -> None:
+    """The cleanup runs under the lock: a run that finds ``state/crl`` locked stops before it,
+    and the name the other run may still be writing stays."""
+    layout.crl_dir.mkdir(parents=True)
+    leftover = _leftover(layout.crl_dir)
+    with crl_module._one_run(layout.crl_dir), pytest.raises(CrlError, match="another"):
+        fetch(options(), layout, [root.certificate], NOW)
+    assert leftover.read_bytes() == b"part of a list"
+    assert fetch(options(), layout, [root.certificate], NOW).exit_code == 2  # free again
+    assert not leftover.exists()
 
 
 _URL = re.compile(r"""https?://[^\s"'`<>)\]]+""", re.IGNORECASE)
