@@ -479,16 +479,36 @@
       "addServer": "Add a server",
       "errors": {
         "workDays": "Choose at least one work day.",
-        "workTime": "Enter the times as HH:MM (e.g. 08:00).",
-        "workOrder": "Work must start before it ends.",
+        "workTime": "$t(settings.application.weekdays.{{day}}): enter the times as HH:MM (e.g. 08:00).",
+        "workOrder": "$t(settings.application.weekdays.{{day}}): work must start before it ends.",
         "holiday": "Enter the date as MM-DD or YYYY-MM-DD.",
         "totpRoles": "Two-factor authentication is mandatory for the administrator and auditor roles.",
         "serverName": "The DHCP server's name cannot be empty.",
         "serverSeconds": "Each DHCP server needs a lease time between {{min}} and {{max}} seconds.",
         "serverSecondsMin": "The lease time must be at least {{min}} seconds.",
         "integerList": "Write one whole number of 0 or more per line.",
-        "object": "Enter a valid JSON object."
-      }
+        "object": "Enter a valid JSON object.",
+        "breakCount": "$t(settings.application.weekdays.{{day}}): at most {{max}} breaks a day.",
+        "breakTime": "$t(settings.application.weekdays.{{day}}): enter the break times as HH:MM (e.g. 12:30).",
+        "breakShort": "$t(settings.application.weekdays.{{day}}): each break must last at least {{min}} minutes.",
+        "breakOutside": "$t(settings.application.weekdays.{{day}}): breaks must be inside the work hours.",
+        "breakOverlap": "$t(settings.application.weekdays.{{day}}): breaks must not overlap."
+      },
+      "workDay": "Day",
+      "breaks": "Breaks",
+      "preview": "Preview",
+      "applyAll": "Apply to all days",
+      "applyAllFrom": "Apply the hours of {{day}} to all days",
+      "dayStart": "{{day}}: work starts",
+      "dayEnd": "{{day}}: work ends",
+      "breakStart": "{{day}}: break {{number}} starts",
+      "breakEnd": "{{day}}: break {{number}} ends",
+      "removeBreak": "Remove break {{number}} of {{day}}",
+      "addBreak": "Add a break",
+      "addBreakFor": "Add a break on {{day}}",
+      "stripOff": "{{day}}: no work",
+      "stripWork": "{{day}}: work {{hours}}, no breaks",
+      "stripBreaks": "{{day}}: work {{hours}}, breaks {{breaks}}"
     },
     "history": {
       "title": "Change history",
@@ -2170,8 +2190,9 @@
       "label": "Hours",
       "all": "All hours",
       "work": "Work hours",
+      "break": "Breaks",
       "off": "Off hours",
-      "hint": "Work hours come from the server settings (default Monday–Friday 08:00–18:00)."
+      "hint": "Work hours and breaks come from the server settings (Settings → Application settings; default Monday–Friday 08:00–18:00, no breaks)."
     },
     "computed": {
       "today": "Data processed up to {{time}}",
