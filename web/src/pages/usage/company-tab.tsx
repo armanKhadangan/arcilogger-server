@@ -24,6 +24,7 @@ import type { CompanyUsage, SiteRow, UsageParams } from '@/lib/api-types';
 import { visibleText } from '@/lib/display';
 import { formatBytes, formatDuration, formatNumber } from '@/lib/format';
 import { currentLang } from '@/lib/i18n';
+import { cn } from '@/lib/utils';
 
 import { ExportMenu } from './usage-export';
 import { DONUT_SLICES, donutSlices, hourLabel, shareText } from './usage-format';
@@ -121,7 +122,11 @@ function CompanyContent({
   return (
     <div className="flex flex-col gap-4">
       <div
-        className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4"
+        // Nine cards with "Mola" (W5 P2): three rows of three instead of a lone ninth card.
+        className={cn(
+          'grid gap-3 sm:grid-cols-2',
+          metrics.break_active_seconds > 0 ? 'xl:grid-cols-3' : 'xl:grid-cols-4',
+        )}
         role="group"
         aria-label={t('usage.company.kpis')}
       >
