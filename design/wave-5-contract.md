@@ -1727,17 +1727,23 @@ All Wave 5 questions are answered (2026-11-02).
   trace showing the three writes; on the Windows runner each took about 0.45 s (an inference:
   its fsync was not measured). The status file is now replaced atomically without an fsync
   (`status.replace_text`, the same `.ingest-status.json.tmp` renamed over it): it is a report
-  for monitoring, not evidence, written again every 5 s; one lost to a power cut is old or
-  empty, which `read_status` reads as `None` (5651 asks nothing of it). And once the service
-  stops its loop writes none of its own, only the last one. A stop now waits for no fsync:
-  with every fsync 0.2 s slower, 0.002–0.006 s (claim) and 0.009–0.027 s (reset), three runs,
-  none of the trace's fsyncs; with 2 ms a statement and 50 ms a `CREATE` too, 0.004 / 0.014 s.
-  The cost of a write on the Windows runner stays an inference until its next run: should it lie
-  in the file's close or rename (a virus scan, say) rather than in the fsync, a stop still waits
-  for two writes, the one under way and the last (on Linux with every rename 0.4 s slower,
-  0.78 s instead of 1.19 s). So both tests report beside the stop's time the status writes that
-  ended after it and the part of its time they took (`stop during the claim check: 0.012 s,
-  status writes after it: 1, 0.004 s`), which the Windows run's warnings summary shows.
+  for monitoring, not evidence, written again every 5 s. The file is replaced atomically, not
+  fsynced: a monitoring report; after a crash it may be empty or old and reads as missing until
+  the next write (NTFS may keep the rename but not the data). The ingest service's
+  `read_status` reads it as `None` and the API's System page as `missing`, and neither fails:
+  `ingest/tests/test_reload.py::test_a_status_file_a_crash_left_empty_or_half_reads_as_missing`
+  (empty and half a file). 5651 asks nothing of the file. The collector's and the worker's
+  status writes stay as they are: no stop path waits on them, and nothing was measured. And once the
+  service stops its loop writes none of its own, only the last one. A stop now waits for no fsync:
+  with every fsync 0.2 s slower, 0.002–0.006 s (claim) and 0.009–0.027 s (reset), three runs, none
+  of the trace's fsyncs; with 2 ms a statement and 50 ms a `CREATE` too, 0.004 / 0.014 s.
+  Had the cost of a write on Windows lain in the file's close or rename (a virus scan, say)
+  rather than in the fsync, a stop would still wait for two writes, the one under way and the
+  last (on Linux with every rename 0.4 s slower, 0.78 s instead of 1.19 s). So both tests report
+  beside the stop's time the status writes that ended after it and the part of its time they
+  took, in the warnings summary. The Windows runner's run of 6a5c779 settles it: a stop during
+  the claim check 0.015 s, one status write after it, 0.015 s; during the reset check 0.000 s;
+  on the slowed disk 0.015 / 0.000 s (Linux: 0.001 / 0.002 s).
   Tests:
   `test_a_stop_during_a_reloads_check_waits_for_no_fsync` (every fsync 1 s slower, every
   statement 2 ms and every `CREATE`/`ALTER`/`DROP` 50 ms: less than one fsync, the status file

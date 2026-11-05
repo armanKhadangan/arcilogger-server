@@ -1,7 +1,9 @@
 """``state/ingest-status.json``: what the ingest service is doing, for the dashboard/System page.
 
 Written atomically (:func:`replace_text`) every few seconds and when the service stops, so a
-reader never sees half a file. Layout::
+reader never sees half a file while the machine runs. Replaced atomically, not fsynced: a
+monitoring report; after a crash it may be empty or old and reads as missing until the next
+write (:func:`read_status`: ``None``). Layout::
 
     {
       "version": "0.1.0", "pid": 4242, "state": "running",   # starting | running |

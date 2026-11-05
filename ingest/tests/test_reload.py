@@ -19,6 +19,8 @@ import pytest
 from sqlalchemy import Engine, select, text
 from sqlalchemy.orm import Session
 
+from arcilogger_api.system.resources import ingest_info
+from arcilogger_api.system.resources import read_status as api_read_status
 from arcilogger_core.config import load_config
 from arcilogger_core.timeutil import utc_now
 from arcilogger_db.engine import engine_from_url
@@ -409,6 +411,26 @@ def test_once_the_service_stops_its_loop_writes_no_status_but_the_last(
     monkeypatch.setattr(service, "_idle", stop_at_the_wait)
     assert service.run() == 0
     assert after_stop == ["stopped"]
+
+
+@pytest.mark.parametrize("kept", ["empty", "half"])
+def test_a_status_file_a_crash_left_empty_or_half_reads_as_missing(
+    world: World, db_engine: Engine, kept: str
+) -> None:
+    """The status file is replaced atomically, not fsynced (#124 stage 2): after a crash NTFS
+    may have kept the rename but not the data, so the file is empty or holds part of a write.
+    Every reader takes that as missing and none fails: the ingest service's
+    :func:`read_status` (``None``) and the API's System page (``missing``), until the next
+    write."""
+    assert world.service(db_engine).run(once=True) == 0
+    path = world.layout.ingest_status
+    whole = path.read_bytes()
+    assert read_status(path) is not None
+    path.write_bytes(b"" if kept == "empty" else whole[: len(whole) // 2])
+    assert read_status(path) is None
+    now = utc_now()
+    assert api_read_status(path, now) == ("missing", {})
+    assert ingest_info(world.layout, world.config, now).state == "missing"
 
 
 def test_without_a_watched_file_there_is_no_config_block(world: World, db_engine: Engine) -> None:
