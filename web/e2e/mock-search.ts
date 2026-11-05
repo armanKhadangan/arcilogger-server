@@ -9,7 +9,8 @@
  * above the site's `search.page_size_max` (without one: `min(100, page_size_max)` for a run, the
  * search's own for its pages), and a range longer than `search.max_days` answers
  * `search_range_too_long`. Options set those two settings, refuse the next call of a kind with 429
- * `search_busy` (`Retry-After: 2`) or 504 `search_timeout`, and expire a search.
+ * `search_busy` (`Retry-After: 2`) or 504 `search_timeout`, expire a search, and make the export
+ * partial or answer it the captured 409 `archive_reload_required` (`samples/archive.json`).
  *
  * What the real API answered is taken from `samples/search.json` (`samples_search.py`): the field
  * catalogue, the texts of every refusal and notice (contract 2.20, the placeholders filled in
@@ -49,6 +50,7 @@ import type {
   SearchStats,
   SearchSummary,
 } from '../src/lib/search-types';
+import { ARCHIVE_SEARCH_REQUIRED } from '../src/test/archive-fixtures';
 
 import type { MockApi, MockUser, RecordedCall } from './mock-api';
 import { copy, SEARCH } from './samples';
@@ -591,8 +593,18 @@ export interface SearchOptions {
    * `Retry-After: 2`; the web app asks once more) or 504 `search_timeout`.
    */
   refuseNext?: { call: SlotCall; code: 'search_busy' | 'search_timeout' } | null;
-  /** The export file is cut short (`X-Arci-Export-Truncated`). */
-  exportTruncated?: 'rows' | 'time' | null;
+  /**
+   * The export file is partial (`X-Arci-Export-Truncated`): cut at the row limit or the time
+   * budget, or without the days not in the database (`archived`).
+   */
+  exportTruncated?: 'rows' | 'time' | 'archived' | null;
+  /** The days the export file lacks (`X-Arci-Export-Archived`: `YYYY-MM-DD[/YYYY-MM-DD]`). */
+  exportArchived?: string | null;
+  /**
+   * The next export answers the captured 409 `archive_reload_required` (every day of the range
+   * outside the database window, G8), after its permission and re-authentication.
+   */
+  exportRequiredNext?: boolean;
   /** Days the references are not sealed on. */
   unsealedDays?: string[];
   /** The site's `search.page_size_max` (the setting's default: 500; at least 50). */
@@ -614,6 +626,8 @@ export class SearchMock {
   expireNext: SearchOptions['expireNext'];
   refuseNext: SearchOptions['refuseNext'];
   exportTruncated: SearchOptions['exportTruncated'];
+  exportArchived: SearchOptions['exportArchived'];
+  exportRequiredNext: boolean;
   unsealedDays: string[];
   pageSizeMax: number;
   maxDays: number;
@@ -628,6 +642,8 @@ export class SearchMock {
     this.expireNext = options.expireNext ?? null;
     this.refuseNext = options.refuseNext ?? null;
     this.exportTruncated = options.exportTruncated ?? null;
+    this.exportArchived = options.exportArchived ?? null;
+    this.exportRequiredNext = options.exportRequiredNext ?? false;
     this.unsealedDays = options.unsealedDays ?? [];
     this.pageSizeMax = options.pageSizeMax ?? CATALOGUE.limits.page_size_max;
     this.maxDays = options.maxDays ?? CATALOGUE.limits.max_days;
@@ -1231,6 +1247,10 @@ export class SearchMock {
     if (Array.isArray(account)) return account;
     const search = this.searchOf(call, 'export', account);
     if (Array.isArray(search)) return search;
+    if (this.exportRequiredNext) {
+      this.exportRequiredNext = false;
+      return [ARCHIVE_SEARCH_REQUIRED.status, copy(ARCHIVE_SEARCH_REQUIRED.body)];
+    }
     const format = (call.body as { format: string }).format;
     const lines = ['Zaman;Alınma zamanı;Kaynak;Tür;Kaynak IP;Hedef IP;Eylem;Ham kayıt'];
     for (const row of this.exportTruncated ? search.rows.slice(0, 1) : search.rows)
@@ -1266,6 +1286,7 @@ export class SearchMock {
           'Repr-Digest': `sha-256=:${createHash('sha256').update(body).digest('base64')}:`,
           'Cache-Control': 'no-store',
           ...(this.exportTruncated ? { 'X-Arci-Export-Truncated': this.exportTruncated } : {}),
+          ...(this.exportArchived ? { 'X-Arci-Export-Archived': this.exportArchived } : {}),
         },
       },
     ];

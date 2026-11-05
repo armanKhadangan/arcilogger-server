@@ -274,6 +274,11 @@ describe('SystemView', () => {
     expect(tasks[4]).toHaveTextContent("ReplicaSaatte bir, 00:40'tanGecikti");
     expect(tasks[5]).toHaveTextContent('RetentionHer gün 02:00Kullanılmıyor—');
     expect(tasks[9]).toHaveTextContent('İzlenemiyor');
+    // A failed run says why in words under its badge, beside the time of that run (#171).
+    expect(tasks[12]).toHaveTextContent(
+      'CrlFetchHer gün 00:30BaşarısızSaklanan bir iptal listesi okunamadı; indirme yarıda kaldı.13.10.2026 00:30:12',
+    );
+    expect(tasks[8]).toHaveTextContent('BackupHer gün 01:40Kanıt yok—');
     const jobs = within(block('jobs')).getAllByRole('row').slice(1);
     expect(jobs[3]).toHaveTextContent('alerts.notifyHer 1 dakikada bir—Hata veriyor');
     expect(jobs[3]).toHaveTextContent('30,0 sn');
@@ -286,6 +291,35 @@ describe('SystemView', () => {
         expect(badge.querySelector('svg[aria-hidden="true"]'), id).not.toBeNull();
         expect(badge.textContent.trim(), id).not.toBe('');
       }
+  });
+
+  it('words every failure code of a task, and shows a code it does not know as it is', () => {
+    const health: SystemHealth = systemHealth();
+    const fail = (name: string, code: string) => {
+      const task = need(
+        health.tasks.find((row) => row.task === name),
+        name,
+      );
+      Object.assign(task, { state: 'failed', code, last_evidence_at: null });
+    };
+    fail('Backup', 'backup_failed');
+    fail('CrlFetch', 'index_unreadable');
+    fail('Renew', 'renew_refused');
+    fail('Seal', 'seal_stopped');
+    renderView({ health });
+    const tasks = within(block('tasks')).getAllByRole('row').slice(1);
+    expect(tasks[8]).toHaveTextContent('BackupHer gün 01:40BaşarısızSon yedekleme tamamlanamadı.—');
+    expect(tasks[0]).toHaveTextContent(
+      "SealHer gün 00:10'dan sonra 5 dakikada birBaşarısızseal_stopped—",
+    );
+    expect(tasks[11]).toHaveTextContent(
+      'RenewHer gün 02:30BaşarısızSon yeniden damgalama çalışması yapılandırma nedeniyle reddedildi.—',
+    );
+    expect(tasks[12]).toHaveTextContent(
+      'CrlFetchHer gün 00:30Başarısızİptal listelerinin dizini okunamıyor.—',
+    );
+    // The other rows carry no code and show none.
+    expect(tasks[4]).toHaveTextContent("ReplicaSaatte bir, 00:40'tanGecikti12.10.2026 00:41:09");
   });
 
   it('shows the time servers, the applied peers and the samples of the last 24 hours', () => {
@@ -384,6 +418,9 @@ describe('SystemView', () => {
     expect(block('collector')).toHaveTextContent('2 senders, 37 messages, 6.4 KB');
     expect(within(block('tasks')).getAllByRole('row')[1]).toHaveTextContent(
       'SealEvery 5 minutes from 00:10On time',
+    );
+    expect(within(block('tasks')).getAllByRole('row')[13]).toHaveTextContent(
+      'CrlFetchDaily at 00:30FailedA stored revocation list could not be read; the fetch stopped.',
     );
     expect(within(block('jobs')).getAllByRole('row')[1]).toHaveTextContent('Daily after 00:15');
     // The release day is written as the maintenance day beside it, as on the licence page.
