@@ -3040,7 +3040,6 @@ class Verifier:
                     "file was not checked (the compressed file's SHA-256 matches the manifest). "
                     "Run again with a Python that has lzma (python.org)",
                 )
-                raw_sha256, lines = entry["sha256_uncompressed"], entry.get("lines")
                 detail = "; açılmış içerik denetlenemedi (lzma yok)"
             except READ_ERRORS as exc:
                 report.fail(
@@ -3050,15 +3049,16 @@ class Verifier:
                     f"{path}: cannot be decompressed ({exc})",
                 )
                 return False
-            if raw_sha256 != entry["sha256_uncompressed"] or lines != entry.get("lines"):
-                report.fail(
-                    "file-content-mismatch",
-                    day,
-                    f"{path}: açılmış içerik manifestle uyuşmuyor",
-                    f"{path}: uncompressed content differs from the manifest",
-                )
-                return False
-            detail = detail or f"; açılmış hali {lines} satır, SHA-256 aynı"
+            else:
+                if raw_sha256 != entry["sha256_uncompressed"] or lines != entry.get("lines"):
+                    report.fail(
+                        "file-content-mismatch",
+                        day,
+                        f"{path}: açılmış içerik manifestle uyuşmuyor",
+                        f"{path}: uncompressed content differs from the manifest",
+                    )
+                    return False
+                detail = f"; açılmış hali {lines} satır, SHA-256 aynı"
         report.ok(
             "file-ok",
             day,
