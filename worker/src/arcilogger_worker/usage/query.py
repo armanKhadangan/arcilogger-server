@@ -781,6 +781,23 @@ def _merge_timeline(
     ]
 
 
+def _break_bands(session: Session, day: date) -> list[dict[str, Any]]:
+    """The breaks that the rollup of ``day`` counted (``usage_days.details``): the bands of the
+    person timeline (W5-P). None for a day computed without breaks."""
+    details = session.execute(
+        text("SELECT details FROM usage_days WHERE day = :day"), {"day": day}
+    ).scalar()
+    runs = (details or {}).get("breaks") or []
+    start_of_day = day_window(day)[0].astimezone(UTC)
+    return [
+        {
+            "start": start_of_day + timedelta(minutes=first),
+            "end": start_of_day + timedelta(minutes=end),
+        }
+        for first, end in runs
+    ]
+
+
 def subject_detail(ctx: Context, key: str) -> dict[str, Any]:
     """``GET /usage/subjects/{key}`` (``key`` from :func:`find_subject`)."""
     session, period = ctx.session, ctx.period
@@ -878,10 +895,12 @@ def subject_detail(ctx: Context, key: str) -> dict[str, Any]:
     blocked = blocked_rows(ctx, [key], limit=5000)
     hourly = subject_hours(ctx, key)
     timeline: list[dict[str, Any]] = []
+    breaks: list[dict[str, Any]] = []
     if period.first == period.last:
         statement = text(f"SELECT timeline FROM usage_daily WHERE {where}")  # noqa: S608
         runs = [run for (value,) in session.execute(statement, params) for run in value]
         timeline = _merge_timeline(runs, period.first, ctx.categories(r[2] for r in runs))
+        breaks = _break_bands(session, period.first)
     devices, per_device = _devices(ctx, key)
     return {
         **envelope(session, period),
@@ -890,6 +909,7 @@ def subject_detail(ctx: Context, key: str) -> dict[str, Any]:
         "devices": devices,
         "metrics": stats.metrics,
         "timeline": timeline,
+        "breaks": breaks,
         "sites": site_list,
         "categories": category_list,
         "apps": apps,

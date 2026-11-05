@@ -605,7 +605,23 @@ class DayBuilder:
             "flows": len(self.flow_list),
             **dict(sorted(self.counts.items())),
         }
+        breaks = self._break_runs()
+        if breaks:
+            result.stats["breaks"] = breaks
         return result
+
+    def _break_runs(self) -> list[list[int]]:
+        """The breaks of the day as ``[first, end)`` minute pairs: what the rollup counted as
+        break time, kept with the day for the person timeline's bands (W5-P)."""
+        runs: list[list[int]] = []
+        for index, part in enumerate(self.parts):
+            if part != "break":
+                continue
+            if runs and runs[-1][1] == index:
+                runs[-1][1] = index + 1
+            else:
+                runs.append([index, index + 1])
+        return runs
 
     def _moment(self, index: int) -> datetime:
         return datetime.fromtimestamp(self.lo_ts + index * BUCKET, UTC)

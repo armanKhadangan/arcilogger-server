@@ -183,6 +183,9 @@ def test_breaks_are_their_own_part_of_the_day(
     assert _get(admin, "/company", hours="break")["period"]["hours"] == "break"
     response = admin.get(f"{API}/company", params={**PERIOD, "hours": "lunch"})
     assert response.status_code == 422
+    # The person timeline's bands: the break the day's rollup counted, 12:00-13:00 site time.
+    detail = _get(admin, f"/subjects/person:{site.can}")
+    assert detail["breaks"] == [{"start": "2026-10-14T09:00:00Z", "end": "2026-10-14T10:00:00Z"}]
 
 
 def test_a_period_without_an_end_runs_to_today(
@@ -270,6 +273,7 @@ def test_subject_detail_of_a_person_day(admin: TestClient, site: GoldenSite) -> 
     assert data["department"] == "Finans"
     assert [device["label"] for device in data["devices"]] == ["Ayşe'nin bilgisayarı"]
     # 09:00-09:02 Video, 09:02 posta (no category), 09:03 Video, 19:30-19:32 Haber.
+    assert data["breaks"] == []  # the work hours have none
     assert [(t["start"], t["end"], t["category"]) for t in data["timeline"]] == [
         ("2026-10-14T06:00:00Z", "2026-10-14T06:02:00Z", "Video"),
         ("2026-10-14T06:02:00Z", "2026-10-14T06:03:00Z", None),

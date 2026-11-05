@@ -482,6 +482,10 @@ def test_a_break_is_split_from_the_work_hours(db_session: Session, site: GoldenS
         select(func.sum(UsageDaily.active_seconds)).where(UsageDaily.day == DAY)
     ).scalar_one()
     assert totals == 240 + 120 + 180 + 120 + 240 + 60 + 60
+    # The day keeps the break it counted, for the person timeline's bands (W5-P).
+    details = db_session.get(UsageDay, DAY)
+    assert details is not None
+    assert details.details["breaks"] == [[720, 780]]
 
 
 def test_a_rebuild_is_idempotent(db_session: Session, site: GoldenSite) -> None:

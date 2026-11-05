@@ -1393,6 +1393,12 @@ export interface BlockedRow {
 }
 
 /** Merged active minutes of one day. */
+/** A break of the work hours (instants, end exclusive). */
+export interface BreakSpan {
+  start: DateTimeString;
+  end: DateTimeString;
+}
+
 export interface TimelineSpan {
   start: DateTimeString;
   end: DateTimeString;
@@ -1506,6 +1512,8 @@ export interface SubjectDetail {
   metrics: Metrics;
   /** Only for a single day (`from == to`), else empty. */
   timeline: TimelineSpan[];
+  /** The breaks of the day as its rollup counted them (one-day periods only, W5-K); empty without. */
+  breaks: BreakSpan[];
   sites: SiteRow[];
   categories: CategoryRow[];
   apps: AppRow[];

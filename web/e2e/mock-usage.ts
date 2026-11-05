@@ -2064,6 +2064,7 @@ class GeneratedDays implements Source {
       devices,
       metrics: stats.metrics,
       timeline,
+      breaks: [],
       sites,
       categories: categoryRows(sites, categoryUsers),
       apps: this.appRows(records),

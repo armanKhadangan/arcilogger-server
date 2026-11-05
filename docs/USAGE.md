@@ -130,7 +130,14 @@ At most 6 breaks a day, each at least 5 minutes, inside the work hours and not o
 work day has other hours (e.g. Saturday 09:00-13:00), `by_day` gives that day its own hours and
 breaks; a `by_day` entry without breaks has none (the general breaks are not inherited). A change
 rebuilds the last `usage.auto_rebuild_days` days by itself; days older than the database window
-(30 days) are split by break only when their logs are reloaded from the archive and rebuilt. ARCILOGGER ships only the **fixed-date national holidays** of
+(30 days) are split by break only when their logs are reloaded from the archive and rebuilt.
+Use in a break is personal data too (the same roles, notice and audit record); naming the
+measurement of break-time use in the employee information text is recommended, with a review by
+your legal adviser. A rollback (`-Rollback`) to a version before breaks deletes the usage
+rollups of the days that have break rows; the older version rebuilds only the last
+`usage.auto_rebuild_days` of them by itself, so request a rebuild for the older days (for days
+older than the database window, reload their logs from the archive first). Raw logs and 5651 data
+are not affected. ARCILOGGER ships only the **fixed-date national holidays** of
 Türkiye: 1 January, 23 April, 1 May, 19 May, 15 July, 30 August, 29 October. **The religious
 holidays (Ramazan and Kurban Bayramı) move every year; the administrator enters their dates every
 year as `YYYY-MM-DD`.** Half days (eves, the afternoon of 28 October) cannot be expressed in this

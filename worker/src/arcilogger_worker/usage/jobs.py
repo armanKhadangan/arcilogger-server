@@ -102,11 +102,11 @@ def rebuild_day(
         status=status,
         inputs=inputs,
         now=now,
-        duration_ms=int((time.perf_counter() - started) * 1000),
+        started=started,
     )
     session.commit()
     details = report.details()
-    details["duration_ms"] = int((time.perf_counter() - started) * 1000)
+    details["duration_ms"] = report.duration_ms
     log.info("usage %s: %s in %s ms", day, status, details["duration_ms"])
     return details
 

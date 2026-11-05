@@ -169,6 +169,28 @@ def test_full_day_report_matches_the_golden_day(db_session: Session, site: Golde
     assert _full_day(db_session) == data
 
 
+def test_breaks_follow_the_rollups_of_the_period(db_session: Session, site: GoldenSite) -> None:
+    """W5-K (K5): the documents show the breaks while the work hours have them, and also after
+    they were removed, as long as the period's rollups still hold break time."""
+    assert _full_day(db_session)["breaks"] is False
+    lunch = {
+        "days": [1, 2, 3, 4, 5],
+        "start": "08:00",
+        "end": "18:00",
+        "breaks": [{"start": "12:00", "end": "13:00"}],
+    }
+    set_setting(db_session, "usage.work_hours", lunch, updated_by="test")
+    db_session.commit()
+    rebuild_day(db_session, DAY, now=NOW)
+    data = _full_day(db_session)
+    assert (data["breaks"], data["company"]["break_active_seconds"]) == (True, 60)
+    # Breaks removed, the day not rebuilt: its stored break time is still shown.
+    plain = {"days": [1, 2, 3, 4, 5], "start": "08:00", "end": "18:00"}
+    set_setting(db_session, "usage.work_hours", plain, updated_by="test")
+    db_session.commit()
+    assert _full_day(db_session)["breaks"] is True
+
+
 def test_company_only_and_pseudonymised_reports(
     db_session: Session, site: GoldenSite, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

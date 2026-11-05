@@ -260,8 +260,9 @@ def build_report_data(
         "person_level": person_level,
         "pseudonymized": pseudonymize,
         "computed_until": _iso(query.computed_until(session, period)),
-        # The work hours had breaks on a day of the report (W5-K, K5): the documents show them.
-        "breaks": settings.has_breaks(period.days()),
+        # The work hours have breaks on a day of the report, or the rollups of its days hold break
+        # time from earlier work hours (W5-K, K5): the documents show them.
+        "breaks": settings.has_breaks(period.days()) or company["break_active_seconds"] > 0,
         "company": {
             "active_users": active_users,
             "online_seconds": company["online_seconds"],

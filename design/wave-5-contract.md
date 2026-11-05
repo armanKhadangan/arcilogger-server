@@ -3511,9 +3511,13 @@ line is W5-E-10, and what it amends in detail:
 - **W5-K-4: the rollback list.** `0023_usage_period` is in the installer's `$LosslessDowngrades`
   (#164's test requires every revision above the floor to be judged). Its downgrade first deletes
   the days that have break rows from the seven rollup tables and `usage_days`: usage analytics,
-  derived data. The older program rebuilds such a day from the log rows the 30-day window still
-  holds; an older day has no rollup until its logs are reloaded from the archive. Raw logs, log
-  rows, leases and the audit log keep every row.
+  derived data. The older program rebuilds by itself only the last `usage.auto_rebuild_days`
+  days (default 7) of them; an older day inside the 30-day window stays empty until a rebuild is
+  requested, and a day before the window also needs its logs reloaded from the archive
+  (`docs/KULLANIM.md` §2.5). Folding the break rows into the work rows instead was weighed and
+  left out: sessions across a break and the JSON columns (`hosts`, `top_domains`, timelines)
+  cannot be merged exactly in SQL, so the older program's own rebuild is the honest source. Raw
+  logs, log rows, leases and the audit log keep every row.
 - **W5-K-5: files outside the ownership of §6.6.**
   - `deploy/windows/installer/Install-Arcilogger.ps1`: only the W5-K-4 list entry.
   - `db/tests/test_cli_downgrade.py`, `db/tests/test_migrations.py`: the head.
@@ -3523,6 +3527,15 @@ line is W5-E-10, and what it amends in detail:
 - **W5-K-6: the upgrade alone rebuilds nothing.** A work-hours value without breaks and `by_day`
   keeps the Wave 4 fingerprint (`[days, start, end]`), so an upgrade does not rebuild the recent
   days; only a changed setting does (test `test_breaks_and_per_day_hours_split_the_day_in_three_parts`).
+- **W5-K-7: the subject answer carries the day's breaks.** P2 shades break bands on the person
+  timeline, and the usage roles cannot read `/settings`. `GET /usage/subjects/{key}` therefore
+  has `breaks` (`[{start, end}]` instants, one-day periods only, like `timeline`; empty
+  otherwise). They come from `usage_days.details.breaks`, the minute runs the rollup itself
+  counted as break, so the bands match the figures even after the setting changed. Additive.
+- **W5-K-8: `0023_usage_period` changes the column in place.** `ALTER COLUMN off_hours TYPE text
+  USING …`, then `RENAME COLUMN … TO period`: one rewrite per table with its indexes and no dead
+  rows, instead of a new column, a full-table `UPDATE` and a new primary key (review of #206).
+  The primary keys keep their names and column order; the downgrade is the mirror image.
 
 ## Deviations — W5-L (2026-11-05)
 
@@ -3534,7 +3547,9 @@ line is W5-E-10, and what it amends in detail:
   is that field, so the answers add only `updated_at`: the newest `computed_at` of the period's
   days. The web types get it (types only).
 - **W5-L-3: the back-off measures from the last refresh's start.** `usage_days` keeps the start
-  of the last rollup (`computed_at`) and its `duration_ms`. A refresh starts when
+  of the last rollup (`computed_at`) and its `duration_ms`, measured until the day's rows are
+  written (the commit after it is not included; the job's log shows the same figure). A refresh
+  starts when
   `now ≥ computed_at + 3 × duration_ms`, which is "twice the duration after it ended" (L2); no
   `finished_at` is stored. A `computed_at` later than now (the clock went back, or a rebuild ran
   with a later moment) never holds today back.

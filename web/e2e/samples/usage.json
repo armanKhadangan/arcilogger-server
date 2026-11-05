@@ -58,7 +58,7 @@
       "hours": "all",
       "to": "2026-10-12"
     },
-    "updated_at": "2026-10-13T04:01:19.552173Z"
+    "updated_at": "2026-10-13T04:01:21.177927Z"
   },
   "categories_department_filter": {
     "computed_until": "2026-10-12T21:00:00Z",
@@ -103,7 +103,7 @@
       "hours": "all",
       "to": "2026-10-12"
     },
-    "updated_at": "2026-10-13T04:01:19.552173Z"
+    "updated_at": "2026-10-13T04:01:21.177927Z"
   },
   "category": {
     "category": "Video",
@@ -139,7 +139,7 @@
       "upload_bytes": 1860,
       "users": 1
     },
-    "updated_at": "2026-10-13T04:01:19.552173Z",
+    "updated_at": "2026-10-13T04:01:21.177927Z",
     "users": [
       {
         "department": "Finans",
@@ -214,7 +214,7 @@
       "upload_bytes": 0,
       "users": 1
     },
-    "updated_at": "2026-10-13T04:01:19.552173Z",
+    "updated_at": "2026-10-13T04:01:21.177927Z",
     "users": [
       {
         "department": "Planlama",
@@ -354,7 +354,7 @@
       "upload_bytes": 7700,
       "users": 2
     },
-    "updated_at": "2026-10-13T04:01:19.552173Z",
+    "updated_at": "2026-10-13T04:01:21.177927Z",
     "users": [
       {
         "department": "Finans",
@@ -833,7 +833,7 @@
         "users": 1
       }
     ],
-    "updated_at": "2026-10-13T04:01:19.552173Z"
+    "updated_at": "2026-10-13T04:01:21.177927Z"
   },
   "company_off_hours": {
     "active_users": 2,
@@ -1110,11 +1110,11 @@
         "users": 1
       }
     ],
-    "updated_at": "2026-10-13T04:01:19.552173Z"
+    "updated_at": "2026-10-13T04:01:21.177927Z"
   },
   "company_today": {
     "active_users": 1,
-    "computed_until": "2026-10-13T04:01:19.659307Z",
+    "computed_until": "2026-10-13T04:01:21.300349Z",
     "departments": [
       {
         "active_users": 1,
@@ -1349,7 +1349,7 @@
         "users": 1
       }
     ],
-    "updated_at": "2026-10-13T04:01:19.659307Z"
+    "updated_at": "2026-10-13T04:01:21.300349Z"
   },
   "company_week": {
     "active_users": 5,
@@ -2761,7 +2761,7 @@
         "users": 1
       }
     ],
-    "updated_at": "2026-10-13T04:01:19.552173Z"
+    "updated_at": "2026-10-13T04:01:21.177927Z"
   },
   "company_work_hours": {
     "active_users": 5,
@@ -3123,7 +3123,7 @@
         "users": 1
       }
     ],
-    "updated_at": "2026-10-13T04:01:19.552173Z"
+    "updated_at": "2026-10-13T04:01:21.177927Z"
   },
   "errors": {
     "forbidden_pseudonyms": {
@@ -3276,7 +3276,7 @@
       "content-disposition": "attachment; filename=\"arcilogger-kullanim-categories-20261012-20261012.xlsx\"",
       "content-type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     },
-    "sha256": "22d0f9136612bef8913adfaee4c64ce9b64e825ff5b786250fb87a9ada413505",
+    "sha256": "2da96aab672bd53dda82e1653d55d259e583dd2e83985952a89dd587a7d38efe",
     "size": 5795
   },
   "export_category_csv": {
@@ -3305,7 +3305,7 @@
       "content-disposition": "attachment; filename=\"arcilogger-kullanim-company-20261012-20261012.xlsx\"",
       "content-type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     },
-    "sha256": "9a95097500e133ae861e34ff58c18966efe8087b2f390d0666c642de21fac6d7",
+    "sha256": "e9f00c283b6c8d571be3104bf3c54c621226e87d0fc49da781017ae2a1e1ca05",
     "size": 10427
   },
   "export_departments_csv": {
@@ -3334,7 +3334,7 @@
       "content-disposition": "attachment; filename=\"arcilogger-kullanim-sites-20261012-20261012.xlsx\"",
       "content-type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     },
-    "sha256": "c9c37e74ce6bf98a7efe3affcea66c819c8c6e065f2be8e5faf1ae0f96a41156",
+    "sha256": "58489b7f99772d5d75cd192096fcf28e5e95dceed5eeddac9c847c2506c7cbc9",
     "size": 6123
   },
   "export_subject_csv": {
@@ -3353,7 +3353,7 @@
       "content-disposition": "attachment; filename=\"arcilogger-kullanim-subject-20261012-20261012.xlsx\"",
       "content-type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     },
-    "sha256": "5fd236816a87dbfdbd3082edf5b8bfbc82f51e320506d565dac8bfbb8fc818dc",
+    "sha256": "88283417ca4bc25537ebafad39bc4c4147abb4d62b410067fdcef3d6f175e589",
     "size": 13108
   },
   "export_subjects_csv": {
@@ -3514,10 +3514,10 @@
       "to": "2026-10-12"
     },
     "total": 3,
-    "updated_at": "2026-10-13T04:01:22.786058Z"
+    "updated_at": "2026-10-13T04:01:24.664211Z"
   },
   "meta": {
-    "captured_at": "2026-10-13T04:01:40.186093+00:00",
+    "captured_at": "2026-10-13T04:01:42.725567+00:00",
     "clock": "2026-10-13T07:00:00+03:00",
     "info": "captured by web/scripts/capture_api_samples.py; do not edit",
     "site_day": "2026-10-09",
@@ -3607,19 +3607,19 @@
     }
   ],
   "rebuild_done": {
-    "created_at": "2026-10-13T04:01:22.721796Z",
+    "created_at": "2026-10-13T04:01:24.593839Z",
     "error": null,
-    "finished_at": "2026-10-13T04:01:22.786058Z",
+    "finished_at": "2026-10-13T04:01:24.664211Z",
     "from": "2026-10-12",
     "job_id": 1,
     "progress": 1.0,
     "requested_by": "tolga",
-    "started_at": "2026-10-13T04:01:22.786058Z",
+    "started_at": "2026-10-13T04:01:24.664211Z",
     "status": "done",
     "to": "2026-10-12"
   },
   "rebuild_queued": {
-    "created_at": "2026-10-13T04:01:22.721796Z",
+    "created_at": "2026-10-13T04:01:24.593839Z",
     "error": null,
     "finished_at": null,
     "from": "2026-10-12",
@@ -3631,7 +3631,7 @@
     "to": "2026-10-12"
   },
   "rebuild_requested": {
-    "created_at": "2026-10-13T04:01:22.721796Z",
+    "created_at": "2026-10-13T04:01:24.593839Z",
     "error": null,
     "finished_at": null,
     "from": "2026-10-12",
@@ -3674,7 +3674,7 @@
       "upload_bytes": 0,
       "users": 2
     },
-    "updated_at": "2026-10-13T04:01:19.552173Z",
+    "updated_at": "2026-10-13T04:01:21.177927Z",
     "users": [
       {
         "department": "Planlama",
@@ -3783,7 +3783,7 @@
       "upload_bytes": 0,
       "users": 1
     },
-    "updated_at": "2026-10-13T04:01:19.552173Z",
+    "updated_at": "2026-10-13T04:01:21.177927Z",
     "users": [
       {
         "department": "Finans",
@@ -3981,7 +3981,7 @@
       "to": "2026-10-12"
     },
     "total": 11,
-    "updated_at": "2026-10-13T04:01:19.552173Z"
+    "updated_at": "2026-10-13T04:01:21.177927Z"
   },
   "sites_category_filter": {
     "computed_until": "2026-10-12T21:00:00Z",
@@ -4010,7 +4010,7 @@
       "to": "2026-10-12"
     },
     "total": 1,
-    "updated_at": "2026-10-13T04:01:19.552173Z"
+    "updated_at": "2026-10-13T04:01:21.177927Z"
   },
   "sites_department_filter": {
     "computed_until": "2026-10-12T21:00:00Z",
@@ -4143,7 +4143,7 @@
       "to": "2026-10-12"
     },
     "total": 9,
-    "updated_at": "2026-10-13T04:01:19.552173Z"
+    "updated_at": "2026-10-13T04:01:21.177927Z"
   },
   "sites_search": {
     "computed_until": "2026-10-12T21:00:00Z",
@@ -4172,11 +4172,12 @@
       "to": "2026-10-12"
     },
     "total": 1,
-    "updated_at": "2026-10-13T04:01:19.552173Z"
+    "updated_at": "2026-10-13T04:01:21.177927Z"
   },
   "subject_device": {
     "apps": [],
     "blocked": [],
+    "breaks": [],
     "categories": [
       {
         "category": "Bulut Depolama",
@@ -8079,12 +8080,13 @@
         "start": "2026-10-12T20:59:00Z"
       }
     ],
-    "updated_at": "2026-10-13T04:01:19.552173Z",
+    "updated_at": "2026-10-13T04:01:21.177927Z",
     "urls": []
   },
   "subject_ip": {
     "apps": [],
     "blocked": [],
+    "breaks": [],
     "categories": [
       {
         "category": "Bilinmiyor",
@@ -11954,7 +11956,7 @@
         "start": "2026-10-12T11:00:00Z"
       }
     ],
-    "updated_at": "2026-10-13T04:01:19.552173Z",
+    "updated_at": "2026-10-13T04:01:21.177927Z",
     "urls": []
   },
   "subject_person": {
@@ -12004,6 +12006,7 @@
         "url": "/canli"
       }
     ],
+    "breaks": [],
     "categories": [
       {
         "category": "Video",
@@ -16072,7 +16075,7 @@
         "start": "2026-10-12T16:30:00Z"
       }
     ],
-    "updated_at": "2026-10-13T04:01:19.552173Z",
+    "updated_at": "2026-10-13T04:01:21.177927Z",
     "urls": [
       {
         "blocked": false,
@@ -16106,6 +16109,7 @@
   "subject_reassigned_after": {
     "apps": [],
     "blocked": [],
+    "breaks": [],
     "categories": [
       {
         "category": "İş Uygulamaları",
@@ -20020,12 +20024,13 @@
         "start": "2026-10-12T10:00:00Z"
       }
     ],
-    "updated_at": "2026-10-13T04:01:19.552173Z",
+    "updated_at": "2026-10-13T04:01:21.177927Z",
     "urls": []
   },
   "subject_reassigned_before": {
     "apps": [],
     "blocked": [],
+    "breaks": [],
     "categories": [
       {
         "category": "İş Uygulamaları",
@@ -23940,7 +23945,7 @@
         "start": "2026-10-12T08:59:00Z"
       }
     ],
-    "updated_at": "2026-10-13T04:01:19.552173Z",
+    "updated_at": "2026-10-13T04:01:21.177927Z",
     "urls": []
   },
   "subject_week": {
@@ -23990,6 +23995,7 @@
         "url": "/canli"
       }
     ],
+    "breaks": [],
     "categories": [
       {
         "category": "Video",
@@ -29189,7 +29195,7 @@
       "pseudonymous": false
     },
     "timeline": [],
-    "updated_at": "2026-10-13T04:01:19.552173Z",
+    "updated_at": "2026-10-13T04:01:21.177927Z",
     "urls": [
       {
         "blocked": false,
@@ -29322,7 +29328,7 @@
       "to": "2026-10-12"
     },
     "total": 2,
-    "updated_at": "2026-10-13T04:01:19.552173Z"
+    "updated_at": "2026-10-13T04:01:21.177927Z"
   },
   "subjects_departments": {
     "computed_until": "2026-10-12T21:00:00Z",
@@ -29389,7 +29395,7 @@
       "to": "2026-10-12"
     },
     "total": 3,
-    "updated_at": "2026-10-13T04:01:19.552173Z"
+    "updated_at": "2026-10-13T04:01:21.177927Z"
   },
   "subjects_devices": {
     "computed_until": "2026-10-12T21:00:00Z",
@@ -29485,7 +29491,7 @@
       "to": "2026-10-12"
     },
     "total": 2,
-    "updated_at": "2026-10-13T04:01:19.552173Z"
+    "updated_at": "2026-10-13T04:01:21.177927Z"
   },
   "subjects_page": {
     "computed_until": "2026-10-12T21:00:00Z",
@@ -29537,7 +29543,7 @@
       "to": "2026-10-12"
     },
     "total": 3,
-    "updated_at": "2026-10-13T04:01:19.552173Z"
+    "updated_at": "2026-10-13T04:01:21.177927Z"
   },
   "subjects_persons": {
     "computed_until": "2026-10-12T21:00:00Z",
@@ -29677,7 +29683,7 @@
       "to": "2026-10-12"
     },
     "total": 3,
-    "updated_at": "2026-10-13T04:01:19.552173Z"
+    "updated_at": "2026-10-13T04:01:21.177927Z"
   },
   "subjects_search": {
     "computed_until": "2026-10-12T21:00:00Z",
@@ -29745,7 +29751,7 @@
       "to": "2026-10-12"
     },
     "total": 1,
-    "updated_at": "2026-10-13T04:01:19.552173Z"
+    "updated_at": "2026-10-13T04:01:21.177927Z"
   },
   "viewer_company": {
     "active_users": 5,
@@ -30149,7 +30155,7 @@
         "users": 1
       }
     ],
-    "updated_at": "2026-10-13T04:01:22.786058Z"
+    "updated_at": "2026-10-13T04:01:24.664211Z"
   },
   "viewer_sites_pseudonymous": {
     "category": "İş Uygulamaları",
@@ -30183,7 +30189,7 @@
       "upload_bytes": 0,
       "users": 2
     },
-    "updated_at": "2026-10-13T04:01:22.786058Z",
+    "updated_at": "2026-10-13T04:01:24.664211Z",
     "users": [
       {
         "department": "Planlama",
@@ -30307,6 +30313,7 @@
         "url": "/canli"
       }
     ],
+    "breaks": [],
     "categories": [
       {
         "category": "Video",
@@ -34375,7 +34382,7 @@
         "start": "2026-10-12T16:30:00Z"
       }
     ],
-    "updated_at": "2026-10-13T04:01:22.786058Z",
+    "updated_at": "2026-10-13T04:01:24.664211Z",
     "urls": [
       {
         "blocked": false,
@@ -34544,7 +34551,7 @@
       "to": "2026-10-12"
     },
     "total": 3,
-    "updated_at": "2026-10-13T04:01:22.786058Z"
+    "updated_at": "2026-10-13T04:01:24.664211Z"
   },
   "viewer_subjects_pseudonymous": {
     "computed_until": "2026-10-12T21:00:00Z",
@@ -34684,6 +34691,6 @@
       "to": "2026-10-12"
     },
     "total": 3,
-    "updated_at": "2026-10-13T04:01:22.786058Z"
+    "updated_at": "2026-10-13T04:01:24.664211Z"
   }
 }

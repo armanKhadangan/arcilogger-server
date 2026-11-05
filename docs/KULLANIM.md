@@ -132,7 +132,13 @@ gününün saatleri farklıysa (ör. Cumartesi 09:00-13:00) `by_day` o güne ken
 molalarını verir; `by_day` girişinde mola yoksa o günün molası yoktur (genel molalar devralınmaz).
 Ayar değişince son `usage.auto_rebuild_days` gün kendiliğinden yeniden hesaplanır; veritabanı
 penceresinden (30 gün) eski günler ancak kayıtları arşivden yeniden yüklenip yeniden
-hesaplanırsa molaya göre ayrılır. ARCILOGGER yalnızca **sabit tarihli resmî tatilleri**
+hesaplanırsa molaya göre ayrılır. Moladaki kullanım da kişisel veridir (aynı roller, aynı
+bildirim ve denetim kaydı); molada kullanımın ölçüldüğünü çalışan aydınlatma metninde belirtmeniz
+önerilir, metni hukuk danışmanınıza inceletin. Molaları getiren sürümden önceki bir sürüme geri
+dönülürse (`-Rollback`) mola satırı olan günlerin kullanım özetleri silinir; eski sürüm bunlardan
+yalnızca son `usage.auto_rebuild_days` günü kendiliğinden yeniden hesaplar, daha eski günler için
+yeniden hesaplama isteyin (veritabanı penceresinden eski günlerde önce kayıtları arşivden
+yükleyin). Ham kayıtlar ve 5651 verisi bundan etkilenmez. ARCILOGGER yalnızca **sabit tarihli resmî tatilleri**
 getirir: 1 Ocak, 23 Nisan, 1 Mayıs, 19 Mayıs, 15 Temmuz, 30 Ağustos, 29 Ekim. **Dini bayramların
 (Ramazan ve Kurban Bayramı) tarihleri her yıl değişir; yönetici her yıl `YYYY-AA-GG` olarak
 girmelidir.** Yarım günler (arife günleri, 28 Ekim öğleden sonra) bu sürümde ifade edilemez: gün

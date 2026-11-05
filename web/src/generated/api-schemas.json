@@ -2352,6 +2352,27 @@
       "title": "BlockedRow",
       "type": "object"
     },
+    "BreakSpan": {
+      "description": "A break of the work hours on a one-day period, as the day's rollup counted it (W5-K).",
+      "properties": {
+        "end": {
+          "format": "date-time",
+          "title": "End",
+          "type": "string"
+        },
+        "start": {
+          "format": "date-time",
+          "title": "Start",
+          "type": "string"
+        }
+      },
+      "required": [
+        "start",
+        "end"
+      ],
+      "title": "BreakSpan",
+      "type": "object"
+    },
     "Calendar": {
       "properties": {
         "counts": {
@@ -14816,6 +14837,13 @@
           "title": "Blocked",
           "type": "array"
         },
+        "breaks": {
+          "items": {
+            "$ref": "#/components/schemas/BreakSpan"
+          },
+          "title": "Breaks",
+          "type": "array"
+        },
         "categories": {
           "items": {
             "$ref": "#/components/schemas/CategoryRow"
@@ -14943,6 +14971,7 @@
         "devices",
         "metrics",
         "timeline",
+        "breaks",
         "sites",
         "categories",
         "apps",

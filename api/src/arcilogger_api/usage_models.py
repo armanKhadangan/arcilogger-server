@@ -128,6 +128,13 @@ class TimelineSpan(BaseModel):
     category: str | None
 
 
+class BreakSpan(BaseModel):
+    """A break of the work hours on a one-day period, as the day's rollup counted it (W5-K)."""
+
+    start: datetime
+    end: datetime
+
+
 class HeatCell(BaseModel):
     day: date
     hour: int
@@ -223,6 +230,8 @@ class SubjectDetail(UsageEnvelope):
     devices: list[SubjectRef]
     metrics: Metrics
     timeline: list[TimelineSpan]
+    #: The breaks of the day (one-day periods only, like ``timeline``); empty without breaks.
+    breaks: list[BreakSpan]
     sites: list[SiteRow]
     categories: list[CategoryRow]
     apps: list[AppRow]
