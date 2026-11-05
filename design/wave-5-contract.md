@@ -2104,8 +2104,16 @@ All Wave 5 questions are answered (2026-11-02).
   `crl fetch` temporary name removed; #170, item N2) is skipped, with what was below it, and
   the step goes on: `Test-ArciItemGone` takes a not-found error (`FileNotFoundException`,
   `DirectoryNotFoundException`, `ItemNotFoundException`, a Win32 error 2 or 3, also wrapped,
-  as in a `MethodInvocationException`) for one only when the item is indeed no longer there,
-  and every other error still stops the step with the take-over error. Tests:
+  as in a `MethodInvocationException`) for one only when the item is indeed no longer there:
+  its folder, listed again, no longer lists its exact name (`Test-ArciItemListed`; a folder
+  that is gone itself lists nothing), never `Test-Path`, since Windows drops a trailing dot or
+  space from a path and an item still there would read as gone (#170, review of round 2).
+  Every other error still stops the step with the take-over error. A name that Windows cannot
+  open by its path, made through the `\\?\` prefix (a trailing dot or space, a device name
+  such as `NUL`, also with an extension), stops the link check, the pre-flight (W5-E-10) as
+  well as the owner reset, with its own error before anything of the item is read: by its path
+  neither its link type nor its entries are its own, and a hard link under such a name would
+  otherwise reopen the gap of W5-E-10. Tests:
   `test_acl_plan_least_privilege`, `test_acl_plan_gives_the_renew_and_crlfetch_tasks_their_rights`,
   `test_acl_plan_resets_the_owner_of_the_two_protected_state_folders_only` (exactly the two
   entries carry `ResetOwner`), `test_only_the_acl_script_passes_reset_owner`, and on Windows
@@ -2126,12 +2134,19 @@ All Wave 5 questions are answered (2026-11-02).
   inheritance off, a stand-in service as its owner and a Modify entry of its own: afterwards
   Administrators own it, it has inherited entries only, and LOCAL SERVICE keeps its inherited
   Modify), `test_acl_owner_reset_skips_only_an_item_that_is_gone` (the classification, with
-  every PowerShell), `test_acl_owner_reset_checks_vanished_items_where_it_lists_and_resets`,
+  every PowerShell; an item in a folder that is gone too is gone, a `dotted.json.` still there
+  is not), `test_acl_owner_reset_checks_vanished_items_where_it_lists_and_resets`,
   and on Windows `test_acl_step_skips_an_item_removed_after_its_listing` (a file and a folder
   with a file in it, removed by a wrapper of the module's own `Confirm-ArciNoLink` or
   `Get-ArciAccessControl` as the reset loop reaches them: the step succeeds and takes over
   `renewal.json`) and `test_acl_step_still_stops_at_an_item_it_cannot_reset` (access denied
-  on reading an item's entries: the take-over error naming the item).
+  on reading an item's entries: the take-over error naming the item);
+  `test_acl_link_check_stops_at_a_name_windows_cannot_open_by_its_path` (with every
+  PowerShell: such names stop the check, names that only look alike pass),
+  `test_acl_link_check_reads_nothing_of_a_name_windows_cannot_open`, and on Windows
+  `test_acl_step_stops_at_a_name_windows_cannot_open_by_its_path` (a hard link
+  `renewal.lock.`, or one in a folder `old `, in a pre-created `state\renewal` that is not
+  protected: the step stops with that error and nothing written, as in W5-E-10).
 - **W5-E-10: the ACL step checks both protected state folders for links before it writes any
   entry (#170, item N1).** `Set-ArciVaultAcl.ps1` wrote `state` before it reached the two
   `ResetOwner` entries, and writing `state` passes its inheritable Modify (collector, ingest,

@@ -14,6 +14,7 @@ setup script.
 from __future__ import annotations
 
 import base64
+import contextlib
 import hashlib
 import hmac
 import http.server
@@ -3196,6 +3197,102 @@ def test_acl_step_finds_a_link_before_it_writes_any_entry(tmp_path: Path) -> Non
     # The write loop never started: it creates the plan's missing folders as it reaches them.
     for folder in (programdata / "kamusm-roots", data / "spool"):
         assert not folder.exists(), (folder, output)
+
+
+def _extended(path: Path, *names: str) -> Path:
+    """The path with the names below it, with the \\\\?\\ prefix on Windows: Win32 then keeps a
+    trailing dot or space and a device name as they are, which a service can do too. Elsewhere
+    the path itself."""
+    below = path.joinpath(*names)
+    return Path("\\\\?\\" + str(below)) if os.name == "nt" else below
+
+
+def _names(folder: Path) -> list[str]:
+    return sorted(item.name for item in folder.iterdir())
+
+
+def _remove_extended(made: list[Path]) -> None:
+    """Remove what _extended made, the deepest first; what is not there (a failed setup) is
+    left alone."""
+    for item in reversed(made):
+        with contextlib.suppress(FileNotFoundError):
+            if item.is_dir():
+                item.rmdir()
+            else:
+                item.unlink()
+
+
+#: The start of the link check's error for a name Windows cannot open by its path.
+_UNOPENABLE_NAME = "[a name in a protected state folder that Windows cannot open by its path"
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="NTFS rights are Windows-only")
+@pytest.mark.parametrize("kind", ["trailing dot", "trailing space"])
+def test_acl_step_stops_at_a_name_windows_cannot_open_by_its_path(
+    kind: str, tmp_path: Path
+) -> None:
+    """A hard link in a pre-created state\\renewal that is not protected yet, under a name made
+    through the \\\\?\\ prefix that Windows cannot open by its path (#170, review of round 2):
+    "renewal.lock." (a trailing dot), or "inner.lock" in a folder "old " (a trailing space).
+    Opened by its path, the name reaches another item or none, so neither its link type nor its
+    entries can be read, and reading it as gone would let the entries of state reach the file it
+    names elsewhere (W5-E-10). The ACL step stops at the name before it writes any entry: the
+    file elsewhere, the data root, state and state\\renewal keep their owners and every entry,
+    and no folder of the plan is created."""
+    powershell = _windows_admin_powershell()
+    data, programdata, program = tmp_path / "data", tmp_path / "programdata", tmp_path / "program"
+    programdata.mkdir()
+    program.mkdir()
+    state = data / "state"
+    renewal_state = state / "renewal"
+    renewal_state.mkdir(parents=True)
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    kept = elsewhere / "kept.txt"
+    kept.write_bytes(b"kept\n")
+    subprocess.run(["icacls", str(kept), "/grant", "*S-1-1-0:R"], check=True)
+    if kind == "trailing dot":
+        named, made = "renewal.lock.", [_extended(renewal_state, "renewal.lock.")]
+    else:
+        named = "old "
+        made = [_extended(renewal_state, named), _extended(renewal_state, named, "inner.lock")]
+        made[0].mkdir()
+    try:
+        made[-1].hardlink_to(kept)
+        # What the setup guarantees: the name is listed as made, kept.txt has a second name,
+        # state\renewal inherits (state's entries would reach it), and kept.txt has entries
+        # inherited from elsewhere that a write through the link would replace.
+        assert _names(renewal_state) == [named], _names(renewal_state)
+        assert kept.stat().st_nlink == 2, kept.stat()
+        watched = [kept, data, state, renewal_state]
+        before = _owners_and_rules(powershell, tmp_path, watched)
+        assert before[renewal_state]["protected"] is False, before
+        assert any(r["inherited"] for r in before[kept]["rules"]), before
+        result = run_powershell(
+            powershell,
+            WINDOWS / "scripts" / "Set-ArciVaultAcl.ps1",
+            "-DataRoot",
+            str(data),
+            "-ProgramDataDir",
+            str(programdata),
+            "-InstallDir",
+            str(program),
+            "-SkipAudit",
+        )
+        output = result.stdout + result.stderr
+        assert result.returncode != 0, output
+        message, unwrapped = _unwrapped(_UNOPENABLE_NAME), _unwrapped(output)
+        assert message in unwrapped, output
+        named_path = _unwrapped("renewal" + os.sep + named)
+        assert named_path in unwrapped[unwrapped.index(message) :], output
+        after = _owners_and_rules(powershell, tmp_path, watched)
+        for path in watched:
+            assert after[path] == before[path], (path, before[path], after[path], output)
+        for folder in (programdata / "kamusm-roots", data / "spool"):
+            assert not folder.exists(), (folder, output)
+        assert _names(renewal_state) == [named], (_names(renewal_state), output)
+    finally:
+        _remove_extended(made)
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="NTFS rights are Windows-only")
@@ -11974,6 +12071,17 @@ $missing = New-Object System.IO.FileInfo -ArgumentList (Join-Path $Folder 'gone.
 $missingFolder = New-Object System.IO.DirectoryInfo -ArgumentList (Join-Path $Folder 'gone')
 $present = New-Object System.IO.FileInfo -ArgumentList (Join-Path $Folder 'kept.json')
 [System.IO.File]::WriteAllText($present.FullName, '{}')
+$below = Join-Path $missingFolder.FullName 'inner.json'
+$missingBelow = New-Object System.IO.FileInfo -ArgumentList $below
+# Made by the test through the \\?\ prefix on Windows; taken from the listing, which keeps
+# the trailing dot (a path made from the name would lose it).
+$names = @($present.Directory.GetFileSystemInfos())
+$listed = @($names | Where-Object { $_.Name -ceq 'dotted.json.' })
+if ($listed.Count -ne 1) {
+    $shown = @($names | ForEach-Object { "'" + $_.Name + "'" }) -join ', '
+    throw ('dotted.json. not listed: {0}' -f $shown)
+}
+$dotted = $listed[0]
 function Get-Record([scriptblock]$Fail) {
     try { & $Fail } catch { return $_ }
     throw 'the stand-in call did not fail'
@@ -11996,6 +12104,8 @@ $cases = @(
     [pscustomobject]@{ name = 'win32_file'; target = $missing; call = { throw (New-Wrapped 2) } }
     [pscustomobject]@{ name = 'win32_path'; target = $missingFolder; call = $wrapped3 }
     [pscustomobject]@{ name = 'still_there'; target = $present; call = $readMissing }
+    [pscustomobject]@{ name = 'below_gone'; target = $missingBelow; call = $readMissing }
+    [pscustomobject]@{ name = 'dotted_there'; target = $dotted; call = $readMissing }
     [pscustomobject]@{ name = 'denied'; target = $missing; call = $denied }
     [pscustomobject]@{ name = 'win32_denied'; target = $missing; call = { throw (New-Wrapped 5) } }
 )
@@ -12015,21 +12125,33 @@ def test_acl_owner_reset_skips_only_an_item_that_is_gone(engine: str, tmp_path: 
     FileNotFoundException or DirectoryNotFoundException, wrapped in a MethodInvocationException;
     Get-Item's ItemNotFoundException; a wrapped Win32 "file or path not found", as PowerShell's
     LinkType reports it) for an item that is gone: skipped. The same error while the item is
-    still there, access denied, or another Win32 error: not skipped, the step stops. On Windows
-    the step itself: test_acl_step_skips_an_item_removed_after_its_listing and
+    still there, access denied, or another Win32 error: not skipped, the step stops. Gone means
+    that the item's folder no longer lists its exact name (#170, review of round 2): an item in
+    a folder that is gone too is gone, and "dotted.json.", still there, is not, though a path
+    made from its name loses the trailing dot on Windows (Test-Path would call it gone). On
+    Windows the step itself: test_acl_step_skips_an_item_removed_after_its_listing and
     test_acl_step_still_stops_at_an_item_it_cannot_reset."""
     script = write_script(tmp_path / "gone.ps1", _ITEM_GONE_SCRIPT)
     folder, out = tmp_path / "items", tmp_path / "gone.json"
     folder.mkdir()
-    result = run_powershell(
-        engine, script, "-ModulePath", str(MODULE), "-Folder", str(folder), "-OutputPath", str(out)
-    )
+    made = [_extended(folder, "dotted.json.")]
+    try:
+        with made[0].open("xb") as dotted:
+            dotted.write(b"{}")
+        assert "dotted.json." in _names(folder), _names(folder)
+        result = run_powershell(
+            engine, script, "-ModulePath", str(MODULE), "-Folder", str(folder),
+            "-OutputPath", str(out),
+        )  # fmt: skip
+    finally:
+        _remove_extended(made)
     assert result.returncode == 0, result.stdout + result.stderr
     report = read_json(out)
     gone = {name: case["gone"] for name, case in report.items()}
     assert gone == {
         "net_file": True, "net_folder": True, "get_item": True, "win32_file": True,
-        "win32_path": True, "still_there": False, "denied": False, "win32_denied": False,
+        "win32_path": True, "still_there": False, "below_gone": True, "dotted_there": False,
+        "denied": False, "win32_denied": False,
     }, report  # fmt: skip
 
 
@@ -12048,7 +12170,14 @@ def test_acl_owner_reset_checks_vanished_items_where_it_lists_and_resets() -> No
         "$exception = $exception.InnerException",
     ):
         assert cause in gone, cause
-    assert gone.rstrip().endswith("$notFound -and -not (Test-Path -LiteralPath $Item.FullName)")
+    assert gone.rstrip().endswith("$notFound -and -not (Test-ArciItemListed $Item)")
+    # Gone is confirmed by the folder's listing, never by a path made from the name.
+    listed = _function(module, "Test-ArciItemListed")
+    code = [line for line in (gone + listed).splitlines() if not line.lstrip().startswith("#")]
+    assert not [line for line in code if "Test-Path" in line], code
+    assert "foreach ($listed in @($folder.GetFileSystemInfos())) { $listed.Name }" in listed
+    assert "catch { return (-not (Test-ArciItemGone $folder $_)) }" in listed
+    assert listed.rstrip().endswith("$names -contains $Item.Name")
     check = _function(module, "Confirm-ArciNoLink")
     assert check.count("Test-ArciItemGone $checked $_") == 2
     assert "if (Test-ArciItemGone $checked $_) { continue }\n" in check
@@ -12066,6 +12195,81 @@ def test_acl_owner_reset_checks_vanished_items_where_it_lists_and_resets() -> No
     assert entry.index("Set-ArciAccessControl -Item $child") < entry.index(child)
     assert "if ($ResetOwner) { throw (Get-TakeOverError $item $_) }" in entry
     assert entry[entry.index("#>") :].count("Test-ArciItemGone") == 2
+
+
+_NAME_CHECK_SCRIPT = r"""
+param([string]$ModulePath, [string]$Folder, [string]$OutputPath)
+$ErrorActionPreference = 'Stop'
+Import-Module $ModulePath -Force
+# Each item as the listing gives it (a path made from the name would lose a trailing dot).
+$out = @()
+$folderItem = New-Object System.IO.DirectoryInfo -ArgumentList $Folder
+foreach ($item in @($folderItem.GetFileSystemInfos())) {
+    $failure = $null
+    try { Confirm-ArciNoLink -Item $item -Folder $Folder }
+    catch { $failure = [string]$_.Exception.Message }
+    $out += [pscustomobject]@{ name = $item.Name; failure = $failure }
+}
+[System.IO.File]::WriteAllText($OutputPath, (ConvertTo-Json -InputObject @($out) -Depth 4))
+"""
+
+
+def test_acl_link_check_stops_at_a_name_windows_cannot_open_by_its_path(
+    engine: str, tmp_path: Path
+) -> None:
+    """#170, review of round 2: a name that ends in a dot or a space, which Windows drops from a
+    path, or that is a device name (NUL, also with an extension), made through the \\\\?\\
+    prefix, stops the link check of state\\crl and state\\renewal with its own error: its path
+    opens another item or none, so its link type and its entries cannot be read. Names that
+    only look alike pass. On Windows the step itself:
+    test_acl_step_stops_at_a_name_windows_cannot_open_by_its_path."""
+    script = write_script(tmp_path / "names.ps1", _NAME_CHECK_SCRIPT)
+    folder, out = tmp_path / "names", tmp_path / "names.json"
+    folder.mkdir()
+    stopped = ["renewal.lock.", "old ", "NUL", "nul.json", "COM1", "lpt9.log", "AUX .txt"]
+    passed = ["renewal.json", "NULL", "console.log", "COM10", ".abcdefgh.tmp", "a. b"]
+    made: list[Path] = []
+    try:
+        for name in [*stopped, *passed]:
+            made.append(_extended(folder, name))
+            if name == "old ":
+                made[-1].mkdir()
+            else:
+                made[-1].touch(exist_ok=False)
+        assert _names(folder) == sorted([*stopped, *passed]), _names(folder)
+        result = run_powershell(
+            engine, script, "-ModulePath", str(MODULE), "-Folder", str(folder),
+            "-OutputPath", str(out),
+        )  # fmt: skip
+    finally:
+        _remove_extended(made)
+    assert result.returncode == 0, result.stdout + result.stderr
+    report = {case["name"]: case["failure"] for case in read_json(out)}
+    assert sorted(report) == sorted([*stopped, *passed]), report
+    for name in stopped:
+        failure = report[name]
+        assert failure, (name, report)
+        assert _UNOPENABLE_NAME in failure, (name, report)
+        assert failure.endswith(os.sep + name), (name, report)
+    assert {name: report[name] for name in passed} == dict.fromkeys(passed), report
+
+
+def test_acl_link_check_reads_nothing_of_a_name_windows_cannot_open() -> None:
+    """The name check comes first in Confirm-ArciNoLink, before the attributes and the link type
+    are read and before a folder is listed, and its error is its own (not the take-over error,
+    whose takeown remedy would not help), Turkish first with English beside it."""
+    check = _function(MODULE.read_text("utf-8-sig"), "Confirm-ArciNoLink")
+    name_check = (
+        "if ($checked.Name -match '[. ]$' -or $checked.Name -match"
+        " '^(CON|PRN|AUX|NUL|COM[0-9¹²³]|LPT[0-9¹²³]|CONIN\\$|CONOUT\\$) *(\\.|$)') {\n"
+        '            throw ("Korunan durum klasöründe'
+    )
+    assert check.count(name_check) == 1
+    for read in ("$checked.Attributes", "$checked.LinkType", "$checked.GetFileSystemInfos()"):
+        assert check.index(name_check) < check.index(read), read
+    error = check[check.index(name_check) :].split("\n")[1]
+    assert error.index("Korunan durum") < error.index(_UNOPENABLE_NAME) < error.index("-f $checked")
+    assert "takeown" not in error
 
 
 def test_acl_script_help_lists_every_state_folder_of_the_plan() -> None:

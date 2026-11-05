@@ -2302,14 +2302,28 @@ function Test-ArciItemGone([System.IO.FileSystemInfo]$Item, $ErrorRecord) {
     # renewal.json replaced in one step or the ".<random>.tmp" name a CrlFetch run removes once
     # its list has its final name (#170 N2). The cause may come wrapped (a .NET call's
     # MethodInvocationException, a property's GetValueInvocationException). A not-found error
-    # while the item is still there (an assembly that cannot be loaded) is not one: it stands.
+    # while the item is still there (an assembly that cannot be loaded, a name Windows cannot
+    # open by its path) is not one: it stands.
     $notFound = $false
     for ($exception = $ErrorRecord.Exception; $null -ne $exception; $exception = $exception.InnerException) {
         if ($exception -is [System.IO.FileNotFoundException] -or $exception -is [System.IO.DirectoryNotFoundException] -or $exception -is [System.Management.Automation.ItemNotFoundException]) { $notFound = $true }
         # ERROR_FILE_NOT_FOUND and ERROR_PATH_NOT_FOUND, as PowerShell's LinkType reports them.
         if ($exception -is [System.ComponentModel.Win32Exception] -and @(2, 3) -contains $exception.NativeErrorCode) { $notFound = $true }
     }
-    $notFound -and -not (Test-Path -LiteralPath $Item.FullName)
+    $notFound -and -not (Test-ArciItemListed $Item)
+}
+
+function Test-ArciItemListed([System.IO.FileSystemInfo]$Item) {
+    # True while the folder of $Item still lists its exact name (Test-ArciItemGone). Not
+    # Test-Path: Windows drops a trailing dot or space from a path, so an item named so through
+    # \\?\ would read as gone while it is still there (#170, review). A folder that cannot be
+    # listed because it is gone itself lists nothing; any other failure, or no folder above (a
+    # drive root), counts as listed: the error stands.
+    if ($Item -is [System.IO.DirectoryInfo]) { $folder = $Item.Parent } else { $folder = $Item.Directory }
+    if ($null -eq $folder) { return $true }
+    try { $names = @(foreach ($listed in @($folder.GetFileSystemInfos())) { $listed.Name }) }
+    catch { return (-not (Test-ArciItemGone $folder $_)) }
+    $names -contains $Item.Name
 }
 
 function Confirm-ArciNoLink {
@@ -2326,7 +2340,10 @@ function Confirm-ArciNoLink {
         are written and on each item below before that item's reset. Listing needs only the
         access Administrators inherit from state; an item removed since it was listed is
         skipped (Test-ArciItemGone), and one that cannot be read or listed stops it with the
-        take-over error that names -Folder.
+        take-over error that names -Folder. A name that Windows cannot open by its path (a
+        trailing dot or space, which it drops, or a device name such as NUL, made through the
+        \\?\ prefix) stops it too, before anything of it is read: its path reaches another
+        item, or none, so it can be neither checked nor reset.
     #>
     [CmdletBinding()]
     param([Parameter(Mandatory = $true)][System.IO.FileSystemInfo]$Item, [Parameter(Mandatory = $true)][string]$Folder, [switch]$Below)
@@ -2334,8 +2351,14 @@ function Confirm-ArciNoLink {
     $items.Add($Item)
     for ($i = 0; $i -lt $items.Count; $i++) {
         $checked = $items[$i]
-        # The attributes come with the listing. LinkType (PowerShell's own property) opens the
-        # file and is HardLink for a file with more than one name.
+        # The listed name first: where it ends in a dot or a space, which Windows drops from a
+        # path, or is a device name (NUL, also with an extension, which Windows maps to the
+        # device where it still does), its path opens another item or none, so nothing read by
+        # it would be this item's. The attributes come with the listing. LinkType (PowerShell's
+        # own property) opens the file and is HardLink for a file with more than one name.
+        if ($checked.Name -match '[. ]$' -or $checked.Name -match '^(CON|PRN|AUX|NUL|COM[0-9¹²³]|LPT[0-9¹²³]|CONIN\$|CONOUT\$) *(\.|$)') {
+            throw ("Korunan durum klasöründe Windows'un yolundan açamadığı bir ad var (sonda nokta ya da boşluk, NUL gibi bir aygıt adı), \\?\ önekiyle elle kaldırın [a name in a protected state folder that Windows cannot open by its path (a trailing dot or space, a device name such as NUL), remove it by hand with the \\?\ prefix]: {0}" -f $checked.FullName)
+        }
         try {
             $reparse = [bool]($checked.Attributes -band [System.IO.FileAttributes]::ReparsePoint)
             $hardLink = -not $reparse -and $checked -is [System.IO.FileInfo] -and $checked.LinkType -eq 'HardLink'
@@ -2382,12 +2405,14 @@ function Set-ArciAclEntry {
         new list to its final name, then removes the temporary one): delete only that .tmp
         name, never a .crl file, which is evidence. An item below that is removed between its
         listing and its check or reset (renewal.json replaced in one step, a CrlFetch temporary
-        name) is skipped, with what was below it (Test-ArciItemGone); any other failure stops
-        the step as follows. An item whose entries give Administrators no right to read or take
-        it over is taken over all the same by the elevated step (the Windows CI runner shows
-        it); where that fails (a policy that took the take-ownership privilege away), the step
-        stops with an error naming the item, and "takeown /A /R /F <folder>" in an elevated
-        PowerShell takes it over by hand.
+        name) is skipped, with what was below it (Test-ArciItemGone: its folder no longer lists
+        its name); a name that Windows cannot open by its path (a trailing dot or space, a
+        device name) stops the step at its check; any other failure stops the step as follows.
+        An item whose entries give Administrators no right to read or take it over is taken
+        over all the same by the elevated step (the Windows CI runner shows it); where that
+        fails (a policy that took the take-ownership privilege away), the step stops with an
+        error naming the item, and "takeown /A /R /F <folder>" in an elevated PowerShell takes
+        it over by hand.
     #>
     [CmdletBinding()]
     param([Parameter(Mandatory = $true)]$Entry, [switch]$ResetOwner)
