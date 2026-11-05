@@ -197,7 +197,12 @@ transaction, from exactly the lines whose rows loaded in it:
   status` lists the files still to count, `rebuild --source S --day YYYY-MM-DD` recounts one at
   once (also one still being loaded: it locks the file's `ingest_offsets` row, so ingest's next
   batch of that file waits until the recount commits), `verify --hours 2` recounts the recent
-  hours from the rows and exits 1 on a difference. A recount reads every row of its file through
+  hours from the rows and exits 1 on a difference. While an archive reload resets a file its
+  `counts_from_line` is `0` (offset 0, its rows deleted in steps; contract W5-G-25), and `status`
+  lists it as one still loading with 0 lines not counted. A `rebuild` of such a file counts the
+  rows still there and takes the mark off; ingest still treats an unfinished file at offset 0
+  that has counts as being reset (no stream, not loaded), and its next step puts the mark back.
+  A recount reads every row of its file through
   a cursor planned for all its rows and never as a nested loop (`searchcounts.RECOUNT_PLANNER`):
   a quiet day beside a busy one is recounted as fast as any other, guarded by
   `worker/tests/test_search_counts_performance.py` (`perf`: the plan and the time).

@@ -1095,7 +1095,8 @@ All Wave 5 questions are answered (2026-11-02).
   minutes of other days, shared with those days' own lines) lose the file's part instead of
   being deleted; a sample of another file's line received in the reset file's day goes with
   that day's minutes (derived data, `clocksamples.rebuild`). A reload run twice leaves every row
-  and every sample of its files once, on both back ends.
+  and every sample of its files once, on both back ends. Since W5-G-25 the rows are deleted in
+  steps after a first transaction, not in one transaction.
 - **W5-G-7: bounded steps (G2, G3).** At most 16 days of partitions are created per call (about
   600 partitions exhaust the default lock table); the job drops in bounded steps of 16 created
   plus dropped days per transaction, up to 64 steps a run; `maintain_window` refuses a cutoff
@@ -1349,10 +1350,11 @@ All Wave 5 questions are answered (2026-11-02).
   runs, a live line waits for the normal batch cycle plus about one check step (≤ 50 ms) and the
   loop's share of the interpreter lock; the test bound is 5 s (`LIVE_BOUND`). Not covered by the
   bound, still on the loop: the reset transaction (38.7 s for a 5 M line file whose rows are
-  present; up to three such files per source when a request reaches the window's first day),
-  one day's partitions per round (up to 0.4 s) and the waits of up to `PARTITION_LOCK_TIMEOUT`
-  (5 s) for the partition lock in `_ensure_days` and the claim. Moving the reset transaction off
-  the loop (a second database connection for ingest) is an open owner question of #124. Tests
+  present; up to three such files per source when a request reaches the window's first day;
+  split into steps of the loop by W5-G-25, #124 stage 2, which measured and did not take a
+  second database connection for it), one day's partitions per round (up to 0.4 s) and the
+  waits of up to `PARTITION_LOCK_TIMEOUT` (5 s) for the partition lock in `_ensure_days` and
+  the claim. Tests
   (`ingest/tests/test_archive_reload.py`):
   `test_live_data_is_loaded_while_a_reload_checks_its_files`,
   `test_a_stop_during_a_reloads_check_is_prompt`,
@@ -1396,6 +1398,119 @@ All Wave 5 questions are answered (2026-11-02).
   `test_the_export_releases_the_lock_before_its_audit_entry`,
   `test_a_failed_export_does_not_keep_the_lock`; `api/tests/test_search_export.py`:
   `test_the_audit_entry_is_committed_before_the_first_byte_is_sent`.
+- **W5-G-25: a reset deletes its file's rows in steps on the loop (#124 stage 2, G4 live data
+  first).** The reset transaction of W5-G-6 (38.7 s for a 5 M line file whose rows are present,
+  W5-G-22) is split, one file at a time. Its first transaction locks the file's
+  `ingest_offsets` row, sets its offset to 0 and marks it (`counts_from_line = 0`, a value no
+  file has otherwise: a file loaded before `0016_search` is marked from line 2 on; it also makes
+  a search count the file's hours from the rows, `searchcounts.verify` leave it out and
+  `search.counts_backfill` wait), deletes its parse failures, its site day's clock samples and
+  the file's part of the samples of the minutes its lines were received in outside its day (only
+  in the transaction that sets the mark: one taken up again leaves them), on plain PostgreSQL
+  its rows in the default partitions outside its time window, and its `search_counts` of the
+  hours no step reaches. Then its rows (all 16 tables, by `(source, raw_day)`) are deleted in
+  steps of device time, the reach of its stray receive times first and its time window last,
+  between rounds of the loop (`RESET_ROUND_SECONDS` 0.25 s of steps a round, at least one; live
+  batches between): each step a transaction of its own of at most `RESET_STEP_LINES` (10 000)
+  lines by the `search_counts` of every file in its hours (what its deletes read: the `fg_*`
+  tables have no index by source), an hour of more lines split evenly, with the file's counts of
+  the hours it finishes. Each step first locks the offsets row and compares it as the loader
+  does (`byte_offset = 0`, `line_number = 0`, unfinished): a file whose offset has moved (two
+  instances, one with its lock connection down) is not touched, the offsets are read again and a
+  file still marked is reset again from its first transaction. The last step takes the mark off
+  (the offsets row first, the loader's order) and deletes the file's counts left; only then is
+  the file a stream at offset 0. From before its first transaction on the file is no stream (its
+  batches in the queue are dropped), so no batch of it is read or committed under the mark. A
+  marked file is never a stream (start-up, spool and vault scan) and never counts as loaded (its
+  offset is 0). A start that finds one resets it again from its first transaction: for its
+  request when that is still `loading` (the claim), or on its own when no request holds it
+  (failed or changed by hand meanwhile: scan beside the loop, partitions, size check, steps; a
+  file that cannot be read stays marked and is tried again after `vault_scan_seconds`, the
+  others meanwhile; none is begun while a request is `loading`, and no request is claimed while
+  one is checked). A step over rows already deleted deletes nothing, so a stop after any
+  transaction re-resets the file and loads it exactly once. `arcilogger-db search-counts
+  rebuild` of a file between two steps counts the rows still there and clears the mark: an
+  unfinished file at offset 0 that has counts is a reset all the same (a file loads its rows
+  and counts in one transaction with its offset, and the last step deletes them with the mark),
+  and the next step puts the mark back. A rebuild that finds none of its rows in its window
+  finds none left (the window goes last), except for a file whose every line was received
+  outside its day: a rebuild of such a file between its first steps, then a stop before its
+  next step, can load the rows not yet deleted twice (open question on #124: the rebuild should
+  refuse a file marked `0`, `db/cli.py`, and `status` call it resetting). A step waits at most
+  `RESET_LOCK_TIMEOUT` (1 s) for a lock (on TimescaleDB the compression policy recompressing a
+  chunk the step deletes from, a rebuild holding the offsets row) and is made again in a later
+  round. Steps are planned from the counts as they are: a file whose counts were not complete
+  (`counts_from_line` set before the reset) is stepped at most `RESET_CAPPED_STEP` (5 minutes)
+  in its time window; a reset taken up again has lost that value and is planned by its counts
+  (larger steps for such a file, not other rows). A reset of a failed request's file taken up
+  on its own makes its partitions and loads it although no request holds it, as after a crash
+  before (the window job drops it again). Two items of the review of #159 come with it: a claim
+  is accepted when the files loaded at its check are still loaded (a file loaded since, a
+  stream that finished meanwhile, is left alone, not hashed again); and while a claim's files
+  are checked its request's status is read every `ARCHIVE_PROGRESS_SECONDS`: once it has
+  changed, the check stops at its next slice and the next request is claimed.
+
+  Two designs were measured (4 vCPU Linux, PostgreSQL 16 / TimescaleDB 2.30.2, the real ingest
+  loop with 2 parse workers, live feed 160 lines/s; latency of a live line from its append to
+  the commit that covers it; a 1 M line FortiGate day loaded by ingest, about 2 M rows in 16
+  tables; the "5 M" day is its rows copied four more times into the same hours, counts × 5;
+  "compressed": every chunk compressed, as the window's first days are). The second design, the
+  same one transaction on a second ingest connection beside the loop, was not taken: on plain
+  PostgreSQL it holds `RowExclusiveLock` on the 16 parent tables for the whole delete, and a
+  partition DDL that arrives meanwhile (the worker's `partitions.ensure`, a `db.window` step,
+  ingest's own `_ensure_days`: `ACCESS EXCLUSIVE` on the parent) waits for it while every later
+  live `COPY` into that table queues behind the waiting request: a live line waited 4.86 s and
+  5.08 s during a 6.8 s delete of a 1 M line file (up to about 38 s for 5 M). On TimescaleDB it
+  did not wait (`drop_chunks` 0.07 s, a new chunk 0.06 s). Taking `ARCIPART` shared beside it
+  would move the queue to searches and exports (504). The steps hold every lock for one step:
+  the window job, `partitions.ensure`, `ARCIPART` and the single-instance lock behave as
+  before, and ingest keeps its two connections. Measured with the implementation (once each;
+  the reset's time, then live latency median / max around it; no reset: 0.30–0.39 s / 0.54–1.33 s;
+  the synthetic 5 M day resets faster than stage 1's real one, 38.7 s):
+
+  | Back end, file whose rows are present | One transaction (before) | In steps (W5-G-25) |
+  |---|---|---|
+  | PostgreSQL, 1 M lines | 4.5 s: 2.60 / 5.24 s | 7.3 s, 106 steps (median 42 ms, max 283 ms): 0.50 / 1.18 s |
+  | the same with a `db.window` step / a day's partitions beside it | – | 0.51 / 1.31 s (drop 0.20 s) / 0.51 / 1.22 s (ensure 0.42 s) |
+  | PostgreSQL, 5 M lines | 25.4 s: 14.01 / 26.74 s | 39.0 s, 514 steps (median 48 ms, max 379 ms): 0.52 / 1.29 s |
+  | TimescaleDB, 1 M lines | 4.5 s: 2.64 / 5.30 s | 6.1 s, 106 steps (median 34 ms, max 57 ms): 0.49 / 1.10 s |
+  | TimescaleDB compressed, 5 M lines | 1.7 s: 1.16 / 2.36 s | 41.5 s, 514 steps (median 67 ms, max 145 ms): 0.50 / 1.12 s |
+
+  The steps take about 1.4–1.6 times as long as the one transaction, uncompressed. On compressed
+  chunks a step scans the chunk's compressed batches of the source whatever its size (it deletes
+  whole batches directly and decompresses only those at its edges): about 24 times the one
+  transaction there, still small next to the file's load (about 19 minutes for 5 M
+  lines). Fixed one-hour steps are not enough: a 5 M line day's peak hour holds about 545 000
+  lines (5–8 s). Bound: a live line waits at most one round of steps (0.25 s and the step that
+  ends it: up to about 1.2 s measured for an I/O spike) and a lock wait of up to 1 s; the test
+  bound is 5 s (`LIVE_BOUND`). Not covered, still on the loop: a reload's partitions, one site day
+  a round in one transaction (16 partitions: 0.3–0.45 s on Linux; one table-day a transaction
+  measured 34 ms; on the Windows runners of #159 a round took long enough that the latency tests
+  could not count their rounds, not measured: sahada doğrula). Moving that DDL off the loop
+  would not help (its `ACCESS EXCLUSIVE` on the parent holds the loop's `COPY` all the same);
+  one table-day a transaction, as many as fit in 0.25 s a round, needs
+  `partitions.ensure_days(..., tables=)` (`db`, requested on #124). Not measured on Windows or a
+  spinning disk (sahada doğrula, KURULUM/INSTALL §16). Tests
+  (`ingest/tests/test_archive_reload.py`, both back ends):
+  `test_a_resets_steps_hold_their_budget_of_lines`,
+  `test_live_data_is_loaded_while_a_reset_deletes_a_files_rows` (held on an Event between two
+  steps: a live line within `LIVE_BOUND`, the file marked, partly deleted, no stream, its sealed
+  file not opened, not loaded; a `db.window` step and a day's partitions beside it with
+  `lock_timeout` 1 s),
+  `test_a_crash_after_each_step_of_a_reset_re_resets_and_loads_exactly_once` (after each
+  transaction, for the request and on its own),
+  `test_a_reset_whose_offset_has_moved_is_not_carried_on`,
+  `test_a_batch_loaded_under_the_mark_begins_the_reset_again`,
+  `test_a_recount_during_a_reset_does_not_load_its_file_twice` (while running, after a crash
+  for the request and on its own),
+  `test_a_first_transaction_whose_answer_is_lost_is_made_again`,
+  `test_one_unreadable_file_does_not_hold_up_another_files_reset`,
+  `test_a_file_of_a_loading_request_is_not_reset_on_its_own`, `test_one_file_is_reset_at_a_time`,
+  `test_a_step_waiting_for_a_lock_is_made_again_in_a_later_round`,
+  `test_a_file_loaded_during_the_claim_check_is_not_hashed_again`,
+  `test_a_request_changed_during_its_claim_check_stops_reading`; unchanged, the equality tests
+  (`test_a_dropped_day_comes_back_identically`, `test_a_reload_run_twice_gives_the_same_rows_and_counts`,
+  `api/tests/test_archive_api.py` G7 and G8) and the throughput gate.
 
 ## Deviations — W5-H (2026-11-03)
 

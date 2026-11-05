@@ -281,7 +281,7 @@ but which are not in a table go to `extra`.
 |---|---|---|
 | `sources` | `name` | Type (fortigate/mikrotik/generic), address, enabled, expected, heartbeat minutes, `unknown` (sender not configured → alert "yeni log kaynağı"), first/last seen |
 | `parse_failures` | id; unique (source, day, pattern) | Count of unparsed lines per source/day/pattern, first/last seen, **one example** raw reference (`example_line`, `example_offset`), last error |
-| `ingest_offsets` | (source, day) | Ingest resume point: `byte_offset` and `line_number` of complete lines loaded; `finished_at` when the day is done; `counts_from_line` (revision `0016_search`): NULL when every loaded line of the file is in `search_counts`, else the lines before it were loaded before the upgrade and wait for the worker job `search.counts_backfill`, which recounts the finished file and clears it (the migration sets `line_number + 1` on every file with loaded lines) |
+| `ingest_offsets` | (source, day) | Ingest resume point: `byte_offset` and `line_number` of complete lines loaded; `finished_at` when the day is done; `counts_from_line` (revision `0016_search`): NULL when every loaded line of the file is in `search_counts`, else the lines before it were loaded before the upgrade and wait for the worker job `search.counts_backfill`, which recounts the finished file and clears it (the migration sets `line_number + 1` on every file with loaded lines); `0` while an archive reload resets the file (offset 0, its rows deleted in steps, W5-G-25) |
 | `vlans` | `subnet` | The site's VLANs and subnets (none are shipped): `vlan_id` (unique, NULL for a network without one, e.g. a transit network), `name_tr`, `purpose`, `dhcp_server` (e.g. `dhcp60`), `department_id`, `guest` |
 | `departments` | id | The site's departments, entered by its administrator (none are shipped, see "Seed data") |
 | `persons` | id | Name, department, title, e-mail, employee number (unique), active (persons are deactivated, never deleted), `usage_excluded` (left out of person-level usage views and reports; revision `0010_usage`) |
@@ -612,20 +612,28 @@ PostgreSQL 16.
       alone, so a second user's request of loaded days becomes `ready` with its own record and
       no load. For each other `(source, day)` it first checks the sealed file against its
       manifest (size and SHA-256, read afresh): a missing or changed file fails the request
-      before anything of it is deleted. Then it deletes that file's rows by `(source, raw_day)`
-      wherever their device times lie (all 16 tables): within its time window, and around every
-      minute in which a line of the file was received outside its day (a damaged or
-      hand-restored spool line; ± 1 day 1 h, read from the sealed file before the reset), on plain
-      PostgreSQL also in the default partitions; its parse failures, `search_counts` and clock
-      samples (the file's part of the samples of those other minutes); and resets its
-      `ingest_offsets` row, in one transaction; then it loads the sealed file with the normal
-      reader, after every newer day (live data first). The checks that read whole files (the
-      SHA-256 at the claim, a file's receive times before its reset: about 0.5 s and 25 s for a
-      5 M line day) run in a thread beside ingest's loop, which goes on loading live data and
-      acts on each result in a later round, in the same order (the size is checked again on the
-      loop right before the file's transaction); the reload's partitions are made a day a round
-      (#124, W5-G-22). The reset's transaction still runs on the loop: for a file whose rows are
-      still there (the window's first days) it holds live data up for about 8 s per 1 M lines.
+      before anything of it is deleted. Then it resets the file, one file at a time (W5-G-25):
+      one transaction sets its `ingest_offsets` row to 0 and marks it (`counts_from_line = 0`),
+      and deletes its parse failures, its clock samples (the file's part of the samples of the
+      minutes in which a line of it was received outside its day, taken off once, here), on
+      plain PostgreSQL its rows in the default partitions outside its time window, and its
+      `search_counts` of hours no later step reaches. Then its rows, by `(source, raw_day)`
+      wherever their device times lie (all 16 tables): around every minute in which a line of
+      the file was received outside its day (a damaged or hand-restored spool line; ± 1 day 1 h,
+      read from the sealed file before the reset), then within its time window, are deleted in
+      steps of device time between rounds of live data, each a transaction of at most 10 000
+      lines by `search_counts` (about 0.1 s), with the counts of the hours it finishes; the
+      last takes the mark off. Only then does it load the sealed file with the normal reader,
+      after every newer day (live data first). A marked file is never loaded and never counts
+      as loaded: after a stop between two steps its reset is taken up again (for its request,
+      or on its own when no request holds it), and it loads exactly once. The checks that read
+      whole files (the SHA-256 at the claim, a file's receive times before its reset: about
+      0.5 s and 25 s for a 5 M line day) run in a thread beside ingest's loop, which goes on
+      loading live data and acts on each result in a later round, in the same order (the size
+      is checked again on the loop right before the file's first transaction); the reload's
+      partitions are made a day a round (#124, W5-G-22). A live line waits at most about one
+      round of steps (0.25 s and the step that ends it) instead of about 5 to 8 s per 1 M lines of a
+      file whose rows are still there (the window's first days).
       A reload run twice gives the same rows and
       counts, on both back ends. `bytes_done` is Σ committed offset of `bytes_total` (Σ `bytes_uncompressed` of
       those files). `ready` sets `ready_at` and `expires_at` = `ready_at` +

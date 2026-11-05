@@ -1513,6 +1513,13 @@ delildir; silinmeleri yalnızca saklama/imha işiyle ve imha tutanağıyla olur.
   klasörüne yalnızca kendi dosyalarını ekleyip silebilmesi, `ARCILOGGER-Admin` olaylarının
   `Requests`, `Seal` ve `ApplySystem` görevlerini uyandırması (`Get-WinEvent`, Görev Zamanlayıcı
   geçmişi) ve güvenlik duvarı kuralı yerinde güncellenirken syslog iletisi kaybolmaması.
+- Arşivden yeniden yükleme, satırları hâlâ veritabanında olan günlerle (pencerenin ilk günleri):
+  dosyalar adım adım sıfırlanırken (her adım en çok 10 000 satır; Linux'ta adım başına yaklaşık
+  0,1 s, ölçüldü) Canlı sayfadaki gecikmenin 5 saniyenin altında kalması ve ingest gecikme
+  uyarısının açılmaması; ingest günlüğünde "a step of its reset waits for a lock" satırının
+  dakikalarca yinelenmemesi (TimescaleDB'de sıkıştırma ilkesi bir parçayı yeniden sıkıştırırken
+  adım bekler); bir günün bölümlerinin (partition) bir turda ne kadar sürdüğü (Linux'ta 0,3–0,4 s;
+  Windows'ta ve döner diskte ölçülmedi, sözleşme W5-G-25).
 - Masaüstü Windows 11 Pro'da: yukarıdakilerin hepsi ve güç ayarları, Akıllı Uygulama Denetimi,
   zorunlu bir güncelleme yeniden başlatması — adım adım:
   [KABUL-TESTI-WINDOWS11.md](KABUL-TESTI-WINDOWS11.md).

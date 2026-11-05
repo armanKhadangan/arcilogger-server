@@ -1369,7 +1369,13 @@ id on Settings → Licence must equal the one of `arcilogger-db license status`;
 change of the file (`Get-Acl`), that ArciAdmin can add and delete only its own files in
 `kamusm-roots`, that the `ARCILOGGER-Admin` events wake the `Requests`, `Seal` and `ApplySystem`
 tasks (`Get-WinEvent`, the Task Scheduler history), and that no syslog message is lost while a
-firewall rule is updated in place.
+firewall rule is updated in place; for an archive reload of days whose rows are still in the
+database (the window's first days), that while its files are reset in steps (at most 10,000
+lines each; about 0.1 s a step on Linux, measured) the delay on the Live page stays under
+5 seconds and the ingest lag alert does not open, that the ingest log does not repeat "a step of
+its reset waits for a lock" for minutes (on TimescaleDB a step waits while the compression policy
+recompresses a chunk), and how long a day's partitions take a round (0.3–0.4 s on Linux; not
+measured on Windows or a spinning disk, contract W5-G-25).
 On desktop Windows 11 Pro all of the above plus the power settings, Smart App Control and a
 forced update restart, step by step:
 [KABUL-TESTI-WINDOWS11.md](KABUL-TESTI-WINDOWS11.md).
