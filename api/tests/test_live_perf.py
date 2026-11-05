@@ -30,9 +30,11 @@ a typed filter.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import itertools
 import json
 import os
+import platform
 import re
 import statistics
 import subprocess
@@ -41,6 +43,7 @@ import time
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from functools import cache
 from pathlib import Path
 from typing import Any
 
@@ -137,8 +140,9 @@ FLOOR_CLASS_LIMITS = {"win32": 5.37}
 #: streams (about 150 in a busy one).
 CYCLE_LINES = 50
 #: CI's readings ``test_ci_bound_on_ci_readings`` holds the bound to (#157): the system, the
-#: throughput guard's job, its gauge (us), its event loop's figure (gauge lines), a factor on that
-#: figure and whether the product passes. Of the 136 readings above, at the reference (speed 0.9
+#: throughput guard's job, its gauge (us), the runner's CPU model as the guard prints it since
+#: #191 (None: before #191), its event loop's figure (gauge lines), a factor on that figure and
+#: whether the product passes. Of the 136 readings above, at the reference (speed 0.9
 #: and up) and below 0.6 of it on each system: the costliest passes, a loop 20 % costlier fails
 #: on the median runner and on the costliest, and one 40 % costlier on the cheapest. On
 #: ubuntu-latest at the reference 20 % fails on 18 of its 38 runners only, not on the median
@@ -147,27 +151,29 @@ CYCLE_LINES = 50
 #: re-run at 0.66 (job 127045733227) and a runner at 0.72 (job 126731675111) whose 20 % costlier
 #: loop still fails: the flat limit does not reach speed 0.6 and up.
 CI_READINGS = [
-    ("win32", 126226298897, 17.56, 5.47, 1.0, True),
-    ("win32", 127021406709, 9.09, 5.26, 1.0, True),
-    ("win32", 127045733227, 11.72, 4.63, 1.0, True),
-    ("win32", 126357487502, 17.24, 4.70, 1.2, False),
-    ("win32", 127248835105, 9.52, 4.67, 1.2, False),
-    ("win32", 126226298897, 17.56, 5.47, 1.2, False),
-    ("win32", 127021406709, 9.09, 5.26, 1.2, False),
-    ("win32", 126731675111, 12.82, 4.41, 1.2, False),
-    ("win32", 126476924796, 16.26, 4.26, 1.4, False),
-    ("win32", 126710077852, 8.69, 3.94, 1.4, False),
-    ("linux", 126399858478, 15.77, 6.47, 1.0, True),
-    ("linux", 126075098521, 8.40, 5.86, 1.0, True),
-    ("linux", 125388444265, 8.65, 5.39, 1.2, False),
-    ("linux", 126399858478, 15.77, 6.47, 1.2, False),
-    ("linux", 126075098521, 8.40, 5.86, 1.2, False),
-    ("linux", 126151620758, 15.26, 4.86, 1.4, False),
-    ("linux", 126431632764, 8.57, 4.51, 1.4, False),
+    ("win32", 126226298897, 17.56, None, 5.47, 1.0, True),
+    ("win32", 127021406709, 9.09, None, 5.26, 1.0, True),
+    ("win32", 127045733227, 11.72, None, 4.63, 1.0, True),
+    ("win32", 126357487502, 17.24, None, 4.70, 1.2, False),
+    ("win32", 127248835105, 9.52, None, 4.67, 1.2, False),
+    ("win32", 126226298897, 17.56, None, 5.47, 1.2, False),
+    ("win32", 127021406709, 9.09, None, 5.26, 1.2, False),
+    ("win32", 126731675111, 12.82, None, 4.41, 1.2, False),
+    ("win32", 126476924796, 16.26, None, 4.26, 1.4, False),
+    ("win32", 126710077852, 8.69, None, 3.94, 1.4, False),
+    ("linux", 126399858478, 15.77, None, 6.47, 1.0, True),
+    ("linux", 126075098521, 8.40, None, 5.86, 1.0, True),
+    ("linux", 125388444265, 8.65, None, 5.39, 1.2, False),
+    ("linux", 126399858478, 15.77, None, 6.47, 1.2, False),
+    ("linux", 126075098521, 8.40, None, 5.86, 1.2, False),
+    ("linux", 126151620758, 15.26, None, 4.86, 1.4, False),
+    ("linux", 126431632764, 8.57, None, 4.51, 1.4, False),
 ]
 #: Lines in a round of the gauge (about 30 ms) and rounds before the burst and again after it.
 GAUGE_LINES = 2_000
 GAUGE_ROUNDS = 8
+#: The first processor's registry key on Windows (its model in ``ProcessorNameString``).
+CPU_KEY = r"HARDWARE\DESCRIPTION\System\CentralProcessor\0"
 #: Windows' ``thread_time`` counts whole clock ticks of 1/64 s: each of the gauge's two runs of
 #: rounds reads within one tick of its CPU.
 WINDOWS_TICK = 1 / 64
@@ -316,6 +322,8 @@ def test_three_streams_under_ten_thousand_lines_a_second(
                 print(
                     f"  {stream.query or '(empty)'}: {stream.delivered} delivered, {stream.dropped}"
                 )
+            model, cores = _cpu_model()
+            print(f"  cpu: {model}, {cores}")
             print(
                 f"  gauge: {gauge.seconds * 1e6:.2f} us a line (fastest of {len(gauge.rounds)} "
                 f"rounds: {Gauge.of(rounds).seconds * 1e6:.2f} before the burst, "
@@ -378,15 +386,48 @@ def strict_limit(gauge: float, system: str = SYSTEM) -> tuple[float, float]:
     return limit, speed
 
 
-@pytest.mark.parametrize(("system", "job", "gauge", "lines", "factor", "passes"), CI_READINGS)
+@pytest.mark.parametrize(
+    ("system", "job", "gauge", "cpu", "lines", "factor", "passes"), CI_READINGS
+)
 def test_ci_bound_on_ci_readings(
-    system: str, job: int, gauge: float, lines: float, factor: float, passes: bool
+    system: str, job: int, gauge: float, cpu: str | None, lines: float, factor: float, passes: bool
 ) -> None:
     """CI's bound passes CI's sound readings and fails a costlier event loop (#157): the
     figure of a loop ``factor`` times as costly as job ``job``'s, against the limit the live test
     asserts for that gauge."""
     limit, _ = strict_limit(gauge * 1e-6, system)
     assert (lines * factor <= limit) is passes, (job, round(lines * factor, 3), round(limit, 3))
+
+
+@cache
+def _cpu_model() -> tuple[str, str]:
+    """The runner's CPU model and its cores, for CI's readings (#191): on Linux the first
+    ``model name`` of ``/proc/cpuinfo`` and its physical cores (its distinct ``physical id`` and
+    ``core id`` pairs), on Windows the registry's ``ProcessorNameString``; ``os.cpu_count()``'s
+    logical CPUs where the cores are not known, ``platform.processor()`` or ``unknown`` where the
+    model is not. It never raises. worker's ``test_lookup_performance`` has a copy: the two
+    packages share no test module."""
+    model, cores = "", set[tuple[str, str]]()
+    with contextlib.suppress(OSError):
+        if sys.platform == "win32":
+            import winreg
+
+            with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, CPU_KEY) as key:
+                model = str(winreg.QueryValueEx(key, "ProcessorNameString")[0])
+        else:
+            physical = ""
+            for line in Path("/proc/cpuinfo").read_text("utf-8", "replace").splitlines():
+                name, _, value = (part.strip() for part in line.partition(":"))
+                if name == "model name" and not model:
+                    model = value
+                elif name == "physical id":
+                    physical = value
+                elif name == "core id":
+                    cores.add((physical, value))
+    model = model.strip() or platform.processor() or "unknown"
+    if cores:
+        return model, f"{len(cores)} cores"
+    return model, f"{os.cpu_count() or 'unknown'} logical CPUs"
 
 
 def _settled(hub: Hub, stream_id: str, written: int) -> bool:
