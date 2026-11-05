@@ -61,7 +61,6 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
-from psycopg import errors
 from sqlalchemy import Engine, event, select, text
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
@@ -3299,6 +3298,13 @@ def test_a_stop_during_a_resets_steps_ends_its_round(
 # -- a reload aborted by a conflict is made again in the next round (#149) -------------------
 
 
+class DeadlockError(Exception):
+    """A driver error with the SQLSTATE of a deadlock, as psycopg's carry it (``sqlstate``); the
+    driver is not imported here: psycopg stays behind ``arcilogger_db`` (ADR-0005)."""
+
+    sqlstate = "40P01"
+
+
 @pytest.mark.parametrize("where", ["reset", "load"])
 def test_a_reload_aborted_by_a_deadlock_is_made_again_in_the_next_round(
     world: World,
@@ -3321,7 +3327,7 @@ def test_a_reload_aborted_by_a_deadlock_is_made_again_in_the_next_round(
 
     def deadlock() -> OperationalError:
         aborts.append(where)
-        return OperationalError("DELETE", None, errors.DeadlockDetected("aborted by the test"))
+        return OperationalError("DELETE", None, DeadlockError("deadlock detected (by the test)"))
 
     if where == "reset":
         real_step = IngestService._reset_step

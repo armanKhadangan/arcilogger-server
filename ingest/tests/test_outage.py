@@ -12,7 +12,6 @@ from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from typing import Any
 
 import pytest
-from psycopg import errors
 from sqlalchemy import Connection, Engine, event
 from sqlalchemy.exc import OperationalError
 
@@ -310,21 +309,29 @@ def test_stop_while_the_database_is_down(
     assert check_exactly_once(db_engine, world) == []
 
 
-def aborted(error: type[Exception]) -> OperationalError:
-    """The error SQLAlchemy raises for a transaction PostgreSQL aborted with ``error``."""
-    return OperationalError("COPY", None, error("aborted by the test"))
+class DriverError(Exception):
+    """A driver error carrying a SQLSTATE, as psycopg's do (``sqlstate``). The driver is not
+    imported here: psycopg stays behind ``arcilogger_db`` (ADR-0005)."""
+
+    def __init__(self, sqlstate: str) -> None:
+        super().__init__(f"aborted by the test ({sqlstate})")
+        self.sqlstate = sqlstate
+
+
+def aborted(sqlstate: str) -> OperationalError:
+    """The error SQLAlchemy raises for a transaction PostgreSQL aborted with ``sqlstate``."""
+    return OperationalError("COPY", None, DriverError(sqlstate))
 
 
 @pytest.mark.parametrize(
-    ("error", "sqlstate"),
-    [(errors.DeadlockDetected, "40P01"), (errors.SerializationFailure, "40001")],
+    "sqlstate",
+    ["40P01", "40001"],  # deadlock detected, serialization failure
 )
 def test_a_batch_aborted_by_a_conflict_is_made_again_without_an_outage(
     world: World,
     db_engine: Engine,
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
-    error: type[Exception],
     sqlstate: str,
 ) -> None:
     """#149: a batch aborted for another transaction (a TimescaleDB recompression policy and a
@@ -341,7 +348,7 @@ def test_a_batch_aborted_by_a_conflict_is_made_again_without_an_outage(
     def abort_twice(batch: Batch) -> LoadResult:
         calls.append(1)
         if len(calls) in (2, 3):  # the second batch, twice: within the bounded retries
-            raise aborted(error)
+            raise aborted(sqlstate)
         return real_load(batch)
 
     monkeypatch.setattr(service.loader, "load", abort_twice)
@@ -371,7 +378,7 @@ def test_a_conflict_that_keeps_aborting_the_batch_is_reported_as_an_outage(
     def abort(batch: Batch) -> LoadResult:
         calls.append(1)
         if len(calls) <= CONFLICT_RETRIES + 1:
-            raise aborted(errors.DeadlockDetected)
+            raise aborted("40P01")
         return real_load(batch)
 
     real_down = service._database_down

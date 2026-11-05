@@ -21,7 +21,6 @@ from collections.abc import Callable
 from time import monotonic, sleep
 from typing import Any
 
-import psycopg
 import pytest
 from sqlalchemy import Engine, text
 
@@ -117,7 +116,7 @@ def run_policy(engine: Engine, job: int, notices: list[str]) -> Callable[[], int
     def call() -> int:
         with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as connection:
             raw = connection.connection.driver_connection
-            assert isinstance(raw, psycopg.Connection)
+            assert raw is not None
             raw.add_notice_handler(
                 lambda notice: notices.append(f"{notice.message_primary} {notice.message_detail}")
             )
