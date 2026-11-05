@@ -1898,6 +1898,45 @@ All Wave 5 questions are answered (2026-11-02).
   changed, `worker/tests/test_service.py` `test_default_jobs_run_against_the_database` (its
   03:30 tick now runs `db.window`, its 09:00 tick no longer).
 
+- **W5-G-28: a write aborted by a conflict is made again, not reported as an outage (#149, a
+  TimescaleDB recompression policy against a write; seen once in #133's loop).**
+  **The cycle, reproduced.** Where the columnstore policy recompresses a partial chunk by rebuilding
+  it (a hypertable it cannot recompress segment by segment), it holds `ShareLock` on the chunk and
+  then asks for `AccessExclusiveLock` on its index. A transaction that has read the chunk
+  (`AccessShareLock` on the index) and then writes it queues its `RowExclusiveLock` behind the
+  policy's `ShareLock`: a cycle, and PostgreSQL aborts the side that waited longer with `40P01` (in
+  #133's loop, and in the test, the policy, which leaves the chunk partial for its next run). On
+  `messages` TimescaleDB 2.30.2 recompresses segment by segment and gives a chunk with concurrent
+  writes up at once ("aborting recompression due to concurrent DML on uncompressed data, retrying
+  with next policy run"), without waiting.
+  **Not a statement of ours.** No ingest transaction reads a time-series chunk before it writes it:
+  the loader's first lock on a chunk is its COPY's `RowExclusiveLock` (`ingest_offsets` comes first,
+  and `search_counts` and `source_clock_samples` are plain tables), and a reset step's first lock on
+  a chunk is its DELETE's. The time-series tables have no foreign keys. So nothing is reordered
+  (#149 step 3: only if the reproduction showed the statement was ours); which transaction of #133's
+  loop read before it wrote is not in the server log, which does not print the surviving side's
+  query.
+  **Ingest's handling** (`IngestService._flush`, `_archive`). A batch aborted by a deadlock
+  (`40P01`) or a serialization failure (`40001`) was rolled back: offsets and the spool are as they
+  were. It is made again at once, up to `CONFLICT_RETRIES` (3) times after 0.1, 0.2 and 0.4 s, each
+  with a log line naming the conflict and its SQLSTATE. The database is not reported unavailable and
+  its connections stay (no `engine.dispose()`). A conflict that keeps aborting after that, and every
+  other error (a lost connection, a server down), still reads `database_unavailable` with the
+  outage's backoff. A reload's step aborted the same way (a reset step, the claim, a partition) is
+  made again in the next round, and its load goes through `_flush`. The status file's shape is
+  unchanged (the conflict is in the log only), so no new TR/EN text.
+  Tests: `ingest/tests/test_outage.py`
+  `test_a_batch_aborted_by_a_conflict_is_made_again_without_an_outage[40P01|40001]`,
+  `test_a_conflict_that_keeps_aborting_the_batch_is_reported_as_an_outage`,
+  `test_a_lost_connection_is_still_reported_as_an_outage`; `ingest/tests/test_archive_reload.py`
+  `test_a_reload_aborted_by_a_deadlock_is_made_again_in_the_next_round[reset|load]`; TimescaleDB
+  with compression, `ingest/tests/test_recompression.py`
+  `test_a_read_then_write_transaction_deadlocks_with_a_rebuilding_recompression` (the cycle, the
+  policy's notice "deadlock detected", the chunk left partial) and
+  `test_an_ingest_batch_and_the_recompression_do_not_deadlock` (a real batch held open after its
+  COPY while the policy runs on `messages`: no deadlock, the batch not aborted, the next run
+  recompresses the chunk), both ordered through `pg_locks`.
+
 ## Deviations — W5-H (2026-11-03)
 
 - **W5-H-1: the first line view of an xz file decompresses more than one stream.** §5.4 says
