@@ -88,12 +88,12 @@ def _renewal(rw: RenewalWorld, name: str, at: datetime, day: date, *, legal: boo
     return f"renewals/{name}.json"
 
 
-def test_verifier_version_is_8() -> None:
+def test_verifier_version_is_9() -> None:
     """Addendum H4 (W5-A-8): W5-H merged first and set "5", so W5-A set "6"; #137 changed the
     output (each renewal token judged by its own record's EKU rule, W5-A-17) and took "7";
-    #156 item 1 changes it again (a deletion record's token judged by the manifest that lists
-    it, W5-A-19) and, as #136 has not merged, takes "8"."""
-    assert sv.VERIFIER_VERSION == "8"
+    #156 item 1 changed it again (a deletion record's token judged by the manifest that lists
+    it, W5-A-19) and took "8"; #136 adds ``xz-unsupported`` and takes "9"."""
+    assert sv.VERIFIER_VERSION == "9"
 
 
 def test_texts_are_the_contract_texts() -> None:
