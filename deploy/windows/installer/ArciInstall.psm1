@@ -2331,7 +2331,7 @@ function Confirm-ArciNoLink {
     .SYNOPSIS
         Stop at a link in a protected state folder: a reparse point (a junction, a symbolic
         link) or a hard link (a file with another name elsewhere), at -Item and, with -Below, at
-        every item below it too (contract W5-E-9, W5-E-10). Changes nothing.
+        every item below it too (contract W5-E-9, W5-E-11). Changes nothing.
     .DESCRIPTION
         Set-ArciVaultAcl.ps1 runs it on state\crl and state\renewal (the plan's ResetOwner
         entries) before it writes any entry: the entries of state, written before them, reach a

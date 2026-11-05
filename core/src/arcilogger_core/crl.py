@@ -108,6 +108,10 @@ FailureCode = Literal[
     "stored_file_changed",
 ]
 
+#: Why a run stopped before it wrote a new index (the ``error`` of the index's ``run_failure``,
+#: #171): ``stored_file_unreadable``, a stored list that cannot be read. Not a failure of a URL.
+RunFailureCode = Literal["stored_file_unreadable"]
+
 _CRL_REASON = "2.5.29.21"
 _DELTA_CRL_INDICATOR = "2.5.29.27"
 #: The signature algorithms the standalone verifier can check (RSA PKCS #1 v1.5, RSASSA-PSS and
@@ -928,9 +932,10 @@ def fetch(
     written, with the lists stored before and no fetch failure, so the run is seen (#151). A
     stored list whose file no longer holds its bytes (or is gone) is the failure
     ``stored_file_changed`` of its URL (C14), also when the URL serves a newer list by now: the
-    file and its index entry stay as they are. Raises
-    :class:`CrlError` when another run holds the lock, or when the existing index or a stored
-    file cannot be read (the index is then left as it is).
+    file and its index entry stay as they are. Raises :class:`CrlError` when another run holds
+    the lock or the existing index cannot be read (the index is then left as it is), and when a
+    stored file cannot be read: the index is then written as it was read, with ``run_failure``
+    (the run's ``at`` and ``stored_file_unreadable``, #171), which the next completed run drops.
     """
     tokens = scan_tokens(layout)
     urls = crl_urls(options, roots, tokens.newest, tokens.every)
@@ -964,33 +969,40 @@ def fetch(
         lists: dict[str, dict[str, Any]] = {
             str(entry.get("file")): entry for entry in index["lists"] if isinstance(entry, dict)
         }
-        tried: list[str] = []
-        got: list[dict[str, Any]] = []
-        failures: list[CrlFailure] = []
-        for url in urls:
-            if _with_credentials(url):
-                url = _redacted(url)
-                log.warning("CRL %s: a URL with a user name or password is not fetched", url)
-                outcome: dict[str, Any] | FailureCode = "unreachable"
-            else:
-                outcome = _fetch_one(opener, url, options, issuers, layout, lists)
-            tried.append(url)
-            if isinstance(outcome, str):
-                failures.append(CrlFailure(url=url, at=at, error=outcome))
-                continue
-            entry = {**outcome, "url": url, "fetched_at": at}
-            lists[entry["file"]] = entry
-            got.append(entry)
-        failures.extend(_changed_files(layout, lists.values(), failures, at))
-        document = {
-            "schema": INDEX_SCHEMA,
-            "lists": [lists[name] for name in sorted(lists)],
-            # The failures of the latest run: a URL that works again drops out.
-            "failures": [failure.as_json() for failure in failures],
-        }
-        atomic_write_text(
-            layout.crl_dir / INDEX_NAME, json.dumps(document, ensure_ascii=False, indent=2) + "\n"
-        )
+        try:
+            tried: list[str] = []
+            got: list[dict[str, Any]] = []
+            failures: list[CrlFailure] = []
+            for url in urls:
+                if _with_credentials(url):
+                    url = _redacted(url)
+                    log.warning("CRL %s: a URL with a user name or password is not fetched", url)
+                    outcome: dict[str, Any] | FailureCode = "unreachable"
+                else:
+                    outcome = _fetch_one(opener, url, options, issuers, layout, lists)
+                tried.append(url)
+                if isinstance(outcome, str):
+                    failures.append(CrlFailure(url=url, at=at, error=outcome))
+                    continue
+                entry = {**outcome, "url": url, "fetched_at": at}
+                lists[entry["file"]] = entry
+                got.append(entry)
+            failures.extend(_changed_files(layout, lists.values(), failures, at))
+            document = {
+                "schema": INDEX_SCHEMA,
+                "lists": [lists[name] for name in sorted(lists)],
+                # The failures of the latest run: a URL that works again drops out.
+                "failures": [failure.as_json() for failure in failures],
+            }
+            atomic_write_text(
+                layout.crl_dir / INDEX_NAME,
+                json.dumps(document, ensure_ascii=False, indent=2) + "\n",
+            )
+        except CrlError:
+            # A stored list that cannot be read (_file_sha256): the run stops, and the index as it
+            # was read records that, not this run's lists (they are half done).
+            _record_run_failure(layout, index, at, "stored_file_unreadable")
+            raise
     return CrlRun(urls=tuple(tried), lists=tuple(got), failures=tuple(failures))
 
 
@@ -1032,6 +1044,21 @@ else:
 
     def _unlock(handle: int) -> None:
         fcntl.flock(handle, fcntl.LOCK_UN)
+
+
+def _record_run_failure(
+    layout: Layout, index: dict[str, Any], at: str, error: RunFailureCode
+) -> None:
+    """Write ``index`` as it was read, with ``run_failure``: the Sistem page sees the run that
+    stopped. Only its time and code, never the error's text (it names the file). A write that
+    fails is logged: the run's own error is the one raised."""
+    document = {**index, "run_failure": {"at": at, "error": error}}
+    try:
+        atomic_write_text(
+            layout.crl_dir / INDEX_NAME, json.dumps(document, ensure_ascii=False, indent=2) + "\n"
+        )
+    except OSError as exc:
+        log.error("CRL index: the stopped run cannot be recorded: %s", exc)
 
 
 def _fetch_one(

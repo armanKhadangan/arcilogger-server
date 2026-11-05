@@ -3149,7 +3149,7 @@ def test_acl_step_stops_at_a_link_in_a_protected_state_folder(kind: str, tmp_pat
 @pytest.mark.skipif(sys.platform != "win32", reason="NTFS rights are Windows-only")
 def test_acl_step_finds_a_link_before_it_writes_any_entry(tmp_path: Path) -> None:
     """A hard link in a state\\renewal that a service could have created before the upgrade,
-    not protected yet (#170 N1, W5-E-10): written first, the entries of state would reach the
+    not protected yet (#170 N1, W5-E-11): written first, the entries of state would reach the
     folder, and through the link the file it names elsewhere. The ACL step checks both
     protected state folders before it writes any entry and stops at the link: the file
     elsewhere keeps its owner and every entry, the inherited ones too, the data root, state and
@@ -3236,7 +3236,7 @@ def test_acl_step_stops_at_a_name_windows_cannot_open_by_its_path(
     "renewal.lock." (a trailing dot), or "inner.lock" in a folder "old " (a trailing space).
     Opened by its path, the name reaches another item or none, so neither its link type nor its
     entries can be read, and reading it as gone would let the entries of state reach the file it
-    names elsewhere (W5-E-10). The ACL step stops at the name before it writes any entry: the
+    names elsewhere (W5-E-11). The ACL step stops at the name before it writes any entry: the
     file elsewhere, the data root, state and state\\renewal keep their owners and every entry,
     and no folder of the plan is created."""
     powershell = _windows_admin_powershell()
@@ -12023,7 +12023,7 @@ def test_only_the_acl_script_passes_reset_owner() -> None:
 
 
 def test_acl_script_checks_both_protected_state_folders_for_links_first() -> None:
-    """#170 N1 (W5-E-10): Set-ArciVaultAcl.ps1 checks state\\crl and state\\renewal (the plan's
+    """#170 N1 (W5-E-11): Set-ArciVaultAcl.ps1 checks state\\crl and state\\renewal (the plan's
     ResetOwner entries) and everything below them for links after its Windows and administrator
     checks and before its write loop, so that a link stops it with nothing written. The check
     is the module's, the one Set-ArciAclEntry -ResetOwner runs again on the folder before its

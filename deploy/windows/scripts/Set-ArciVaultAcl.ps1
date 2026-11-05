@@ -60,7 +60,7 @@
     item also loses its explicit entries and gets Administrators as its owner (contract W5-E-9).
     A link there (a reparse point such as a junction, or a hard link) stops the script before
     any entry is written: both folders and everything below them are checked first, since the
-    entries of state reach a folder below that is not protected yet (contract W5-E-10), and
+    entries of state reach a folder below that is not protected yet (contract W5-E-11), and
     each again before it is changed. An item whose entries leave Administrators out is taken
     over all the same; one that still cannot be (a policy that took the take-ownership privilege
     away) stops it with an error naming the item (takeown /A /R /F <folder> takes it over by
@@ -143,7 +143,7 @@ if ($PlanOnly) {
 if (-not (Test-ArciWindows)) { throw 'Bu betik yalnızca Windows üzerinde çalışır [Windows only].' }
 if (-not (Test-ArciAdministrator)) { throw 'Yönetici olarak çalıştırın [run as Administrator].' }
 
-# Links first, before any entry is written (contract W5-E-10): state, written before state\crl
+# Links first, before any entry is written (contract W5-E-11): state, written before state\crl
 # and state\renewal, passes its inheritable entries on to either folder while it is not
 # protected yet, and through a hard link in it to the file it names elsewhere.
 # Set-ArciAclEntry -ResetOwner checks each folder again just before it changes it.
