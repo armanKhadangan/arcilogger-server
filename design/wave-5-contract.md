@@ -1526,14 +1526,20 @@ All Wave 5 questions are answered (2026-11-02).
   which filtered every ACK against each of the 100 windows (564,201 rows removed). Wrapped,
   they are estimated at about 2,870 (9,100 at five times) and the branch hashes on the MAC on
   every plain-PostgreSQL layout measured. Medians on PostgreSQL 16.15 (Linux), before → after,
-  MAC branch alone / whole statement: guards' layout 73.5 → 23.1 / 80.2 → 26.9 ms (1 M lines a day, as loaded),
-  72.2 → 20.7 / 72.1 → 25.7 ms (5 M, after `ANALYZE`); daily partitions (hash join before and
-  after) 28.6 → 33.2, 23.1 → 23.4, 25.3 → 25.2, 25.4 → 27.9 ms and monthly ones 19.6 → 21.3,
-  23.9 → 17.4, 19.9 → 21.4, 21.7 → 20.7 ms (1 M and 5 M, as loaded and after `ANALYZE`: within
-  noise, best times within 1 ms). TimescaleDB and Windows (PostgreSQL 17, where the statement
-  runs under a parallel Gather) were not measured locally: their figures are **pending** (the
-  measurement runs in `test-perf` while the pull request is a draft; the figures and the
-  verdict on them come here before it is ready).
+  MAC branch alone / whole statement: guards' layout 73.5 → 23.1 / 80.2 → 26.9 ms (1 M lines a
+  day, as loaded), 72.2 → 20.7 / 72.1 → 25.7 ms (5 M, after `ANALYZE`); daily partitions (hash
+  join before and after) 28.6 → 33.2, 23.1 → 23.4, 25.3 → 25.2, 25.4 → 27.9 ms and monthly ones
+  19.6 → 21.3, 23.9 → 17.4, 19.9 → 21.4, 21.7 → 20.7 ms (1 M and 5 M, as loaded and after
+  `ANALYZE`: within noise, best times within 1 ms). On CI (#187 at `2ebe2dc`), both forms timed
+  side by side in the same transactions, alternating, both prepared: windows-latest (PostgreSQL
+  17.11) guards' layout at 1 M nested loop → hash join, MAC branch 97.6 → 23.6 ms, whole
+  statement 124.5 → 64.1 ms (as loaded; 98.8 → 24.4 and 119.6 → 61.4 after `ANALYZE`); at 5 M,
+  and on daily and monthly partitions, both forms hash-join and stay within noise (MAC branch
+  18.7–25.7 ms either way). The whole statement runs under a parallel Gather (2 workers) in the
+  same worlds with either form: the wrapper does not cause it. TimescaleDB (2.30.2-pg16,
+  one-day chunks): both forms hash-join, MAC branch 19.6 → 19.6 / 21.0 → 21.1 ms, whole
+  statement 23.7 → 24.0 / 25.1 → 24.9 ms (1 M / 5 M, as loaded; the same after `ANALYZE`): no
+  loss.
   Other forms measured and not taken: `IS NOT TRUE` of the refusal (the nested loop stays),
   `LATERAL` per window (fast, but drops the measured MAC list and reads 100 chunk appends on
   TimescaleDB), an `OFFSET 0` fence (7–11 ms slower on daily partitions at 5 M). An
@@ -1543,8 +1549,9 @@ All Wave 5 questions are answered (2026-11-02).
   15 s, not `perf`, both CI layouts) checks the two estimates against the rows and pins the
   branch: no join of it removes a row by its join filter, and on plain PostgreSQL its join is a
   Hash Join on `mac` (the bare test fails it there: Nested Loop, 564,201 removed).
-  `worker/tests/test_missed_moves_measure.py`, the measurement, becomes opt-in
-  (`ARCILOGGER_PERF_185=1`) once those figures are in. G7 and the lookup tests are unchanged.
+  `worker/tests/test_missed_moves_measure.py`, the measurement (both forms side by side), is
+  opt-in (`ARCILOGGER_PERF_185=1`), so the default `test-perf` does not run it. G7 and the
+  lookup tests are unchanged.
 
 ## Deviations — W5-H (2026-11-03)
 
