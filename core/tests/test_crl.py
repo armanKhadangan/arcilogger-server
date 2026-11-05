@@ -1377,8 +1377,8 @@ for name in sorted(leftovers):
 #: What removes, renames or overwrites a file. Path.replace is a rename over the target;
 #: dataclasses' replace makes a copy. A file opened to write may be one that is there.
 _DELETE_OR_OVERWRITE = re.compile(
-    r"\b(unlink|remove|rmtree|rmdir|os\.replace|\.rename|truncate|O_TRUNC|write_bytes"
-    r"|write_text|shutil)\b"
+    r"\b(unlink|remove(?:dirs)?|renames?|rmtree|rmdir|os\.replace|f?truncate|O_TRUNC"
+    r"|write_bytes|write_text|shutil)\b"
     r"|(?<!\bdataclasses)\.replace\("
     r"""|\bopen\([^)]*["'][rbtx]*[wa+]"""
 )
@@ -1430,7 +1430,12 @@ def test_the_crl_module_has_no_way_to_delete() -> None:
         "os.replace(temporary, path)",
         "path.replace(target)",
         "temporary.rename(path)",
+        "(folder / name).rename(path)",
+        "os.rename(temporary, path)",
+        "os.renames(temporary, path)",
+        "os.removedirs(folder)",
         "os.truncate(path, 0)",
+        "os.ftruncate(fd, 0)",
         "os.open(path, os.O_WRONLY | os.O_TRUNC)",
         "path.write_bytes(data)",
         "path.write_text(text)",
@@ -1455,6 +1460,7 @@ def test_the_delete_guard_sees_every_way_to_delete_or_overwrite(line: str) -> No
         "opener.open(request, timeout=options.timeout_seconds)",
         'open(path, "rb")',
         "the removed file",
+        "a stopped run's leftover is not removed",
     ],
 )
 def test_the_delete_guard_lets_reads_and_new_files_be(line: str) -> None:
