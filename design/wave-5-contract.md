@@ -1610,6 +1610,8 @@ All Wave 5 questions are answered (2026-11-02).
   `test_a_renewal_stamped_at_its_own_not_after_verifies_but_does_not_count` (the stamp verifies
   in both verifiers, and the renewal does not count), so neither is "fixed" into the other
   unnoticed.
+  Superseded in part by W5-A-19 (answer to Q3 on #177): `VERIFIER_VERSION` is "8", not "6"
+  (W5-A-17 set "7"; W5-A-8).
 - **W5-A-6: what stays in section 5.** The existing `renewal-ok` (each record's stamp) and
   `renewal-covers` (which packaged days a record names) stay beside the five new codes, and the
   section "5. Yenileme damgaları" now appears whenever the package has a day whose token
@@ -1622,8 +1624,10 @@ All Wave 5 questions are answered (2026-11-02).
   does not verify, it was revoked) is still renewable.
 - **W5-A-8: `VERIFIER_VERSION` is "6", not §2.1.4's "5".** Addendum H4: W5-H (#130) merged into
   `wave-5` first (84e71e1) and set "5", so W5-A, merging second, sets "6" (manager on #132,
-  2026-11-03 20:51). `test_renewal_standalone.py::test_verifier_version_is_6` pins it. If #136
-  (`xz-unsupported`) merges after W5-A, it takes "7" and updates that test.
+  2026-11-03 20:51). Superseded by W5-A-17 and W5-A-19 (answer to Q8, #156 item 7): W5-A-17
+  set "7", and W5-A-19 sets "8" because #136 has not merged, which
+  `test_renewal_standalone.py::test_verifier_version_is_8` pins; #136 (`xz-unsupported`) takes
+  "9" and updates that test when it merges.
 - **W5-A-9: exit codes beyond §2.1.3's wording.** `renew` catches its own errors (`main` maps
   every `TsaError` to 1). Exit 3 also covers a new stamp that does not verify or is revoked
   (`renewal_stamp_invalid`), another run holding `state/renewal.lock` (`renewal_busy`), a lock
@@ -1709,6 +1713,33 @@ All Wave 5 questions are answered (2026-11-02).
   granted on #137, 2026-11-04T09:07Z: those two functions and the error's import).
   `test_a_legal_claim_without_a_listed_root_exits_2` pins the cause in both places and each
   text in its own language.
+  **After the stamp too (#156 item 2).** The check before the stamp sees only the pinned set:
+  with roots A (listed) and B (not listed) both pinned and the provider chaining to B, it
+  passed, every due day was stamped and the renewal never counted (D5). `_write` now also
+  checks the stamp's own root once its token verifies: when the provider claims legal grade and
+  the root its chain ended at (`details["root_sha256"]`) is not in
+  `tsa.legal_root_fingerprints`, the record and its token are removed, as C15 does for a
+  revoked certificate, and the run raises `RenewalLegalRootsError(root=, root_sha256=)`. Its
+  TR/EN texts name that root (subject and SHA-256 fingerprint) and say that the record and its
+  token were removed, and that one stamp credit was spent and every later run spends another
+  until the root is listed in `tsa.legal_root_fingerprints` or the provider is corrected (answer
+  to Q6 on #177). The command handles it as above: exit 2,
+  `legal-roots` in `error.code` and `last_run.error`, `failures_in_a_row` + 1, so `R20-renewal`
+  raises after the second run. A run stopped between the stamp and this check (in
+  `verify_token`, say) leaves a part whose token verifies, so `recover` applies it too, as it
+  applies C15 (W5-A-14): `renew_held` passes `tsa.legal_root_fingerprints` as
+  `recover(..., legal_roots=)`, and a part whose record claims legal grade while its chain ends
+  at a root that is not listed is removed with its token, with a warning in the log naming that
+  root, instead of being promoted and locked (a locked record that never counts could not be
+  removed). `legal_roots` is a required keyword argument of `recover`, without a default, so no
+  caller skips the check by leaving it out; it applies only to a record that claims legal grade
+  (answer to Q5 on #177).
+  `test_a_stamp_under_a_pinned_but_unlisted_root_is_removed` (two pinned roots, one listed; a
+  stamp under the listed one is still kept),
+  `test_a_stamp_under_a_pinned_but_unlisted_root_exits_2` (`failures_in_a_row` 1, then 2) and
+  `test_an_interrupted_stamp_under_a_pinned_but_unlisted_root_is_removed` (both places the
+  token can be, through `recover` and through the next run; `recover` without `legal_roots` is a
+  `TypeError`) pin it.
 - **W5-A-14: `recover` checks revocation as the run does (#137 item 2).** W5-A-3's `recover`
   promoted an interrupted part whose token verified, without the stored revocation lists, so a
   run stopped between the stamp and its C15 check left a record that never counts. It now
@@ -1784,6 +1815,10 @@ All Wave 5 questions are answered (2026-11-02).
   root by a relaxed record with a non-critical EKU: the legal root is bundled, and the
   standalone verifier on the package and the core on the vault find the day
   `renewal-covered` with the same texts (rule 5).
+  Superseded in part by W5-A-19 (answer to Q3 on #177): `VERIFIER_VERSION` is "8", not "7"
+  (`test_verifier_version_is_8`), and #136 takes "9", not "8" (W5-A-8); `_relaxed_eku` no longer
+  judges a deletion record that a packaged manifest lists (the manifest that lists it does), and
+  the builder picks the root for that record's token by the same rule, not the package's.
 - **W5-A-18: a package ships the renewals of its deletion records (answer to Q5 on #132, #137
   item 7).** D3 renews deletion-record tokens, but the builder's `_renewals` matched only the
   packaged days' manifest and token hashes and the report's token hash, so a package that ships
@@ -1798,6 +1833,42 @@ All Wave 5 questions are answered (2026-11-02).
   `test_a_package_with_a_deletion_record_ships_its_renewals` (`test_renewal_evidence.py`)
   covers a two-deep chain behind a deletion record, the core's status of its token, the
   auditor's verifier on the package, and that a package without the record ships none of them.
+- **W5-A-19: a deletion record's token is judged by the manifest that seals it (answer to Q5,
+  #156 item 1).** W5-A-17 left deletion records under the package's rule (`_relaxed_eku`:
+  relaxed when any manifest of the package is), so the token of a record that a strict manifest
+  lists, with a non-critical EKU, passed with a warning beside a relaxed day. The standalone
+  verifier now judges it by the `tsa.require_critical_eku` of the manifest that lists it:
+  `_check_deletions` by that day's manifest, and `_check_anchor_link` by `_deletion_eku` (strict
+  when one of the package's manifests that list the record is strict; a record that no packaged
+  manifest lists, reached only through the chain anchor, by the package's rule). The builder
+  picks the root to bundle for that token as `_deletion_eku` does (rule 5): `_Records.collect`
+  passes `add`, for a listed record and for the one `_anchor` ships, the rule of the packaged
+  manifests that list it (strict when one of them is), else the package's. A record listed by
+  two manifests with different rules (a seal run that stopped before it wrote the record's
+  `.sealed` marker, so the next manifest lists it again) is judged strict for the anchor link
+  and the builder's root, and its token still at each listing day by that day's manifest (answer
+  to Q4 on #177): such a package fails at the strict day, and the builder's self-check refuses
+  it. The packaged report's stamp keeps the package's rule (`_relaxed_eku`,
+  `requires_critical_eku`), so W5-A-17's "`_relaxed_eku` now judges deletion records and the
+  packaged report's stamp only" now reads "a deletion record that no packaged
+  manifest lists and the packaged report's stamp". The core judges no deletion record's token
+  once a manifest seals it (`renewal._Reader` reads only its hashes and certificate,
+  `chain.verify_day` does not read `deletions`; `retention` verifies a new record with the
+  site's setting at that time), so no core file changes. Retention's own check of a new record
+  (`retention.recover`, `unfinished_record`) uses the `tsa.require_critical_eku` of its day, and
+  the rule of the manifest that lists the record decides (answer to Q7 on #177). The
+  standalone verifier's output changes, so `VERIFIER_VERSION` is "8" (addendum H4): #136 has
+  not merged, so it takes "9" (W5-A-8), which replaces W5-A-17's "W5-A-8's '7' for #136
+  becomes '8'"; `test_verifier_version_is_8` pins it. The shared case table gains `DELETION_CASES`
+  (`renewal_cases.py`): a record listed by a strict manifest beside a relaxed day (`token-eku`,
+  a warning before), one listed by a relaxed manifest beside a strict day
+  (`token-eku-not-critical`), one listed by a strict manifest, one listed by a strict and by a
+  relaxed manifest (`token-eku` at the strict day, `token-eku-not-critical` at the relaxed
+  one), one only behind the chain anchor in a relaxed and in a strict package, and one behind
+  the anchor and listed by a strict manifest in a relaxed package (`token-eku` at both days).
+  `test_a_deletion_records_token_is_judged_by_the_manifest_that_lists_it`
+  (`test_renewal_evidence.py`) runs each through the builder's choice of roots, the standalone
+  verifier on the vault and on the package (built, or refused by the self-check).
 
 ## Deviations — W5-E (2026-11-04)
 

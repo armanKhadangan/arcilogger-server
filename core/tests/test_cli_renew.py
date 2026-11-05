@@ -35,7 +35,7 @@ from arcilogger_core.tsa import TsaExecutableError
 from arcilogger_core.tsa.base import TimestampProvider, TsaConfigurationError
 from arcilogger_core.tsa.mock import MockFailure
 
-from .renewal_world import CNA, RenewalWorld, day_token_path, make_world
+from .renewal_world import CNA, LegalCa, RenewalWorld, day_token_path, make_world
 
 DAY_TOKEN = day_token_path()
 FAR = CNA + timedelta(days=1825)
@@ -325,6 +325,58 @@ def test_a_legal_claim_without_a_listed_root_exits_2(
     assert cli.run(now=now + timedelta(days=1), provider=provider) == 2
     assert cli.state()["failures_in_a_row"] == 2
     assert calls == []
+    capsys.readouterr()
+
+
+def test_a_stamp_under_a_pinned_but_unlisted_root_exits_2(
+    cli: Cli, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """W5-A-13: two roots are pinned and one of them is listed; the provider claims legal grade
+    and its chain ends at the other. Each run takes its stamp, removes the record and its token
+    (that renewal would never count, D5) and is refused with ``legal-roots``, naming the root
+    used: exit 2, ``failures_in_a_row`` + 1, so the second run reaches the count that raises
+    ``R20-renewal``."""
+    unlisted = LegalCa("Örnek Unlisted Root (test)")
+    pem = unlisted.root.public_bytes(serialization.Encoding.PEM)
+    (cli.roots / "unlisted.pem").write_bytes(pem)
+    now = CNA - timedelta(days=100)
+    cli.rw.set_now(now)
+    provider = cli.rw.legal_provider(FAR, ca=unlisted)
+    calls: list[Path] = []
+    real = provider.stamp
+
+    def stamp(path: Path) -> Any:
+        calls.append(path)
+        return real(path)
+
+    monkeypatch.setattr(provider, "stamp", stamp)
+    assert cli.run("--json", now=now, provider=provider) == 2
+    captured = capsys.readouterr()
+    data = json.loads(captured.out)
+    assert (data["outcome"], data["exit_code"], data["record"]) == ("refused", 2, None)
+    assert data["due"] == [DAY_TOKEN]
+    subject = unlisted.root.subject.rfc4514_string()
+    assert subject.startswith("CN=Örnek Unlisted Root (test),")
+    named = f"{subject} (SHA-256 {unlisted.fingerprint})"
+    assert named in data["error"]["message_tr"]
+    assert named in data["error"]["message_en"]
+    assert "kayıt ve damgası silindi" in data["error"]["message_tr"]
+    assert "the record and its token were removed" in data["error"]["message_en"]
+    assert "Bir damga kredisi harcandı" in data["error"]["message_tr"]
+    assert "every later run spends another" in data["error"]["message_en"]
+    assert cli.rw.legal.fingerprint not in captured.out
+    assert len(calls) == 1
+    assert cli.renewal_files() == []
+    state = cli.state()
+    assert _statuses(state) == {DAY_TOKEN: "due"}
+    assert (state["last_run"]["outcome"], state["last_run"]["exit_code"]) == ("refused", 2)
+    assert (state["last_run"]["record"], state["failures_in_a_row"]) == (None, 1)
+    assert (data["error"]["code"], state["last_run"]["error"]) == ("legal-roots", "legal-roots")
+    assert cli.run(now=now + timedelta(days=1), provider=provider) == 2
+    state = cli.state()
+    assert (state["last_run"]["error"], state["failures_in_a_row"]) == ("legal-roots", 2)
+    assert len(calls) == 2
+    assert cli.renewal_files() == []
     capsys.readouterr()
 
 
