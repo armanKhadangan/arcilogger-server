@@ -131,6 +131,7 @@ from arcilogger_worker.evidence_jobs import import_job_events, purge_evidence
 from arcilogger_worker.licensing import StatusCache, job_license_check, module_gate
 from arcilogger_worker.reports.runner import purge_reports, resolve_while_unlicensed, run_due
 from arcilogger_worker.search_jobs import backfill_counts
+from arcilogger_worker.snmp.job import SNMP_POLL_EVERY, job_snmp_poll
 from arcilogger_worker.system_jobs import job_system_sample
 from arcilogger_worker.usage import jobs as usage_jobs
 
@@ -433,6 +434,7 @@ def default_jobs(interval_seconds: int) -> tuple[Job, ...]:
         # The disk forecast of Sistem and the Panel: one sample of the drives a day (Wave 4
         # contract 2.5.2).
         Job("system.sample", job_system_sample, daily_after=time(0, 30)),
+        Job("snmp.poll", job_snmp_poll, every=SNMP_POLL_EVERY),
         # Last: it may take a minute, and nothing waits for it (statistics count directly until
         # a file is counted).
         Job("search.counts_backfill", job_search_counts_backfill, every=SEARCH_COUNTS_EVERY),

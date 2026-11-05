@@ -184,6 +184,7 @@ def test_default_jobs_run_against_the_database(
         ("reports.run_due", "ok"),
         ("reports.purge", "ok"),
         ("system.sample", "ok"),
+        ("snmp.poll", "skipped"),  # no source has SNMP on
         ("search.counts_backfill", "skipped"),  # no file loaded before the summary table
     ]
     clock.now = tr(DAY, 9)
@@ -202,6 +203,7 @@ def test_default_jobs_run_against_the_database(
         ("usage.today", "ok"),
         ("usage.reattribute", "skipped"),
         ("reports.run_due", "ok"),
+        ("snmp.poll", "skipped"),
         ("search.counts_backfill", "skipped"),
     ]
     lease = db_session.scalars(select(Lease)).one()

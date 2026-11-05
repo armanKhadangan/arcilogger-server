@@ -122,6 +122,11 @@ ignore_missing_imports = true
 module = ["openpyxl", "openpyxl.*"]
 ignore_missing_imports = true
 
+[[tool.mypy.overrides]]
+# pysnmp and pyasn1 (W5-N: the internet line's speed over SNMPv3) ship no type information.
+module = ["pysnmp", "pysnmp.*", "pyasn1", "pyasn1.*"]
+ignore_missing_imports = true
+
 # ---------------------------------------------------------------------------------------------
 # pytest + coverage
 # ---------------------------------------------------------------------------------------------
