@@ -3,8 +3,9 @@
 Not a guard (no bound: the #179/#181 guards in ``test_lookup_performance.py`` keep theirs, and
 their headroom is read from their own output, not from here; the plan W5-G-26 chose is pinned by
 ``test_missed_moves_plan.py``): it prints, past pytest's capture, what the planner does with the
-branch on the layout the test database has. It measures the code as it is (the figures before
-W5-G-26 are #185's, taken without the wrapper). It costs a few minutes on each perf job. While
+branch on the layout the test database has. It measures the code as it is and, side by side in
+the same transactions, the form before W5-G-26 (:func:`_forms`). It costs a few minutes on each
+perf job. While
 #185's pull request is a draft it runs in ``test-perf``, so its CI logs the TimescaleDB and the
 Windows figures (#185, Q2); ``ARCILOGGER_PERF=0`` (as the guard module) or
 ``ARCILOGGER_PERF_185=0`` switches it off. Before the pull request is ready it becomes opt-in
@@ -38,6 +39,16 @@ the MAC branch alone on one connection; the plans their executions used on the c
 more lookup (not timed; ``pg_prepared_statements``: custom and generic); and ``EXPLAIN (ANALYZE,
 BUFFERS)`` of the statement and of the MAC branch alone, run in that lookup's own transaction right
 after its statement ran, with the branch's estimate against what it read.
+
+**Old against new** (W5-G-26): the old form is the captured statement with its MAC branch's
+conversion test written back from ``CASE WHEN (<kept>) THEN true ELSE false END`` to the bare
+``<kept>`` (``CASE ... END IS NULL``), an exact text rewrite that fails when the wrapper is not
+found once in the MAC branch (the IP branch carries the bare test as it was). Both forms' MAC
+branches return the same rows; both are explained in the explained lookup's transaction (the
+branch's estimate against what it read, its joins and the rows their filters removed, and whether
+the whole statement runs under a ``Gather``), and the MAC branch and the statement of both are
+timed on one connection in one transaction, old and new alternating over :data:`RUNS` rounds
+after a warm-up of each (:func:`_alternated`). Each world's summary has an "old → new" line.
 
 **Twice a world** (:data:`STAGES`): as the module loads it (written, then one ``VACUUM (ANALYZE)``
 of the whole database, as the guards' ``_site`` does), and again after an explicit ``ANALYZE`` of
@@ -99,6 +110,11 @@ RUNS = 9
 MONTHLY_DAYS = 400
 #: The statement's text (``_missed_moves``' one with the two ``JOIN fg_dhcp`` branches).
 MARKS = ("WITH ORDINALITY", "JOIN fg_dhcp")
+#: The MAC branch's conversion test as W5-G-26 writes it: ``CASE WHEN (<kept>) THEN true ELSE
+#: false END`` around the bare test (``<kept>`` is ``CASE WHEN (...) ... END IS NULL``).
+WRAPPER_OPEN = "CASE WHEN ("
+WRAPPER_CLOSE = ") THEN true ELSE false END"
+BARE_OPEN, BARE_CLOSE = "CASE WHEN (", " END IS NULL"
 #: What the API's lookup sets for its transaction (``search.sql.custom_plans_statement``).
 CUSTOM_PLANS = "SELECT set_config('plan_cache_mode', 'force_custom_plan', true)"
 #: Each world is measured at each stage, in this order (#185, Q1).
@@ -311,6 +327,50 @@ def _captured(site: Engine) -> tuple[LookupOutcome, str, dict[str, Any]]:
     return outcome, *found
 
 
+@dataclass(frozen=True)
+class _Forms:
+    """``_missed_moves``' statement and its MAC branch as sent (new), and both with the MAC
+    branch's conversion test written back to the bare test (old, before W5-G-26)."""
+
+    sql: str
+    branch: str
+    old_sql: str
+    old_branch: str
+    #: The bare test (``<kept>``) the rewrite leaves.
+    bare: str
+
+
+def _forms(sql: str) -> _Forms:
+    """The old form of ``sql``: its MAC branch's ``CASE WHEN (<kept>) THEN true ELSE false END``
+    replaced by ``<kept>``, by text. Fails unless the MAC branch has the wrapper exactly once and
+    the IP branch carries the same ``<kept>`` bare (the one test, rendered with the same
+    parameters in both)."""
+    assert sql.count(" UNION ALL ") == 1
+    branch, held = sql.split(" UNION ALL ")
+    opening = WRAPPER_OPEN + BARE_OPEN
+    closing = BARE_CLOSE + WRAPPER_CLOSE
+    assert branch.count(opening) == 1, f"the MAC branch's wrapper opens {branch.count(opening)} x"
+    assert branch.count(closing) == 1, f"the MAC branch's wrapper closes {branch.count(closing)} x"
+    start = branch.index(opening)
+    end = branch.index(closing) + len(closing)
+    wrapper = branch[start:end]
+    bare = wrapper[len(WRAPPER_OPEN) : -len(WRAPPER_CLOSE)]
+    assert wrapper == WRAPPER_OPEN + bare + WRAPPER_CLOSE
+    assert bare.startswith(BARE_OPEN)
+    assert bare.endswith(BARE_CLOSE)
+    assert bare.count("(") == bare.count(")"), "the bare test's parentheses do not pair"
+    assert held.count(opening) == 0, "the IP branch has the wrapper too"
+    assert held.count(closing) == 0, "the IP branch has the wrapper too"
+    assert held.count(bare) == 1, "the IP branch does not carry the bare test once"
+    assert sql.count(wrapper) == 1
+    old_branch = branch.replace(wrapper, bare)
+    old_sql = sql.replace(wrapper, bare)
+    assert old_sql == f"{old_branch} UNION ALL {held}"
+    assert old_branch.count(bare) == 1
+    assert WRAPPER_CLOSE not in old_sql
+    return _Forms(sql=sql, branch=branch, old_sql=old_sql, old_branch=old_branch, bare=bare)
+
+
 @contextmanager
 def _statement_timed(site: Engine, runs: _Runs) -> Iterator[None]:
     """Each execution of ``_missed_moves``' statement while open, as the lookup sent it."""
@@ -376,6 +436,26 @@ def _timed_statement(site: Engine, sql: str, parameters: dict[str, Any]) -> _Run
     return runs
 
 
+def _alternated(
+    site: Engine, old: str, new: str, parameters: dict[str, Any]
+) -> tuple[_Runs, _Runs]:
+    """``old`` and ``new`` on one connection in one transaction, planned with their values as in
+    the lookup: a warm-up of each, then :data:`RUNS` rounds of both, old first in the odd rounds
+    (the first, the third, ...) and new first in the even ones."""
+    assert old != new
+    runs = {old: _Runs(), new: _Runs()}
+    with site.begin() as connection:
+        connection.execute(text(CUSTOM_PLANS))
+        for sql in (old, new):
+            connection.exec_driver_sql(sql, parameters).all()
+        for each in range(RUNS):
+            for sql in (old, new) if each % 2 == 0 else (new, old):
+                began = time.perf_counter()
+                connection.exec_driver_sql(sql, parameters).all()
+                runs[sql].seconds.append(time.perf_counter() - began)
+    return runs[old], runs[new]
+
+
 @dataclass
 class _Explained:
     """What one more lookup's transaction showed right after its statement ran."""
@@ -383,32 +463,47 @@ class _Explained:
     plans: list[str] = field(default_factory=list)
     branch: list[str] = field(default_factory=list)
     figures: dict[str, Any] = field(default_factory=dict)
+    #: The whole statement's plan (``FORMAT JSON``).
+    statement: dict[str, Any] = field(default_factory=dict)
+    #: The same of the old form (:func:`_forms`), explained in the same transaction.
+    old_plans: list[str] = field(default_factory=list)
+    old_branch: list[str] = field(default_factory=list)
+    old_figures: dict[str, Any] = field(default_factory=dict)
+    old_statement: dict[str, Any] = field(default_factory=dict)
     prepared: list[str] = field(default_factory=list)
     plan_cache_mode: str = ""
     backend: int = 0
 
 
-def _explained_lookup(site: Engine, mac_branch: str) -> _Explained:
+def _explained_lookup(site: Engine, forms: _Forms) -> _Explained:
     """One more lookup (not timed) in which, on its own connection and in its own transaction
     right after ``_missed_moves``' statement ran, ``EXPLAIN (ANALYZE, BUFFERS)`` of the statement
-    and of the MAC branch alone runs with the statement's parameters, and the plans the
-    statement's executions on that connection used are read (``pg_prepared_statements``)."""
+    and of the MAC branch alone runs with the statement's parameters, then the same of their old
+    forms, and the plans the statement's executions on that connection used are read
+    (``pg_prepared_statements``)."""
     found = _Explained()
 
     def after(*args: Any) -> None:
         _connection, cursor, statement, parameters, _context, _many = args
         if not all(m in statement for m in MARKS) or found.plans:
             return
+        # The old forms are this statement's: the lookup sent the one captured before.
+        assert statement == forms.sql
         found.backend = cursor.connection.info.backend_pid
         with cursor.connection.cursor() as other:
-            explain = "EXPLAIN (ANALYZE, BUFFERS, FORMAT {}) {}"
-            other.execute(explain.format("TEXT", statement), parameters)
-            found.plans = [row[0] for row in other.fetchall()]
-            other.execute(explain.format("TEXT", mac_branch), parameters)
-            found.branch = [row[0] for row in other.fetchall()]
-            other.execute(explain.format("JSON", mac_branch), parameters)
-            value = other.fetchone()[0]
-            found.figures = (json.loads(value) if isinstance(value, str) else value)[0]["Plan"]
+
+            def explained(sql: str) -> tuple[list[str], dict[str, Any]]:
+                explain = "EXPLAIN (ANALYZE, BUFFERS, FORMAT {}) {}"
+                other.execute(explain.format("TEXT", sql), parameters)
+                lines = [row[0] for row in other.fetchall()]
+                other.execute(explain.format("JSON", sql), parameters)
+                value = other.fetchone()[0]
+                return lines, (json.loads(value) if isinstance(value, str) else value)[0]["Plan"]
+
+            found.plans, found.statement = explained(statement)
+            found.branch, found.figures = explained(forms.branch)
+            found.old_plans, found.old_statement = explained(forms.old_sql)
+            found.old_branch, found.old_figures = explained(forms.old_branch)
             other.execute("SELECT current_setting('plan_cache_mode')")
             found.plan_cache_mode = other.fetchone()[0]
             # psycopg prepares it with $n placeholders: found by its marks.
@@ -478,6 +573,48 @@ def _figures(plan: dict[str, Any]) -> list[str]:
                 f"filter {node.get('Rows Removed by Join Filter', 0)}"
             )
     return lines
+
+
+def _parallel(plan: dict[str, Any]) -> str:
+    """Whether a plan runs under a ``Gather`` (or ``Gather Merge``), with its workers."""
+    gathers = [node for node in _nodes(plan) if node["Node Type"] in ("Gather", "Gather Merge")]
+    if not gathers:
+        return "no Gather"
+    return ", ".join(
+        f"{node['Node Type']} ({node.get('Workers Launched', 0)} of "
+        f"{node.get('Workers Planned', 0)} workers)"
+        for node in gathers
+    )
+
+
+def _times(runs: _Runs) -> str:
+    return f"{min(runs.seconds) * 1000:.1f}/{statistics.median(runs.seconds) * 1000:.1f}"
+
+
+def _old_new(
+    explained: _Explained, branches: tuple[_Runs, _Runs], statements: tuple[_Runs, _Runs]
+) -> str:
+    """The old form's figures against the new one's, on one line."""
+    (old_reading, old_join), (new_reading, new_join) = (
+        _shape(explained.old_figures),
+        _shape(explained.figures),
+    )
+
+    def join(node: dict[str, Any] | None) -> str:
+        return "no join" if node is None else f"{node['Node Type']} ({node['Join Type']})"
+
+    def removed(node: dict[str, Any] | None) -> int:
+        return 0 if node is None else int(node.get("Rows Removed by Join Filter", 0))
+
+    return (
+        f"old → new: fg_dhcp est {old_reading['Plan Rows']} → {new_reading['Plan Rows']} "
+        f"(actual {old_reading['Actual Rows']} → {new_reading['Actual Rows']}); "
+        f"{join(old_join)} → {join(new_join)}, join filter removed {removed(old_join)} → "
+        f"{removed(new_join)}; MAC branch best/median {_times(branches[0])} → "
+        f"{_times(branches[1])} ms; statement best/median {_times(statements[0])} → "
+        f"{_times(statements[1])} ms; statement {_parallel(explained.old_statement)} → "
+        f"{_parallel(explained.statement)}"
+    )
 
 
 def _summary(plan: dict[str, Any]) -> str:
@@ -587,8 +724,8 @@ def _measured(
     name: str,
     scale: str,
     stage: str,
-) -> str:
-    """One world's measurement at one stage, printed; its summary line."""
+) -> list[str]:
+    """One world's measurement at one stage, printed; its summary lines (the second: old → new)."""
     g = guards()
     factor = SCALES[scale]
     outcome, sql, parameters = _captured(site)
@@ -600,11 +737,14 @@ def _measured(
         assert chain.lease.source_table == "mt_dhcp"
         assert chain.confidence in ("high", "medium")
     assert sql.count(" UNION ALL ") == 1
-    mac_branch = sql.split(" UNION ALL ")[0]
+    forms = _forms(sql)
+    mac_branch = forms.branch
     with site.begin() as connection:
         connection.execute(text(CUSTOM_PLANS))
         rows = connection.exec_driver_sql(sql, parameters).all()
         branch_rows = connection.exec_driver_sql(mac_branch, parameters).all()
+        old_rows = connection.exec_driver_sql(forms.old_sql, parameters).all()
+        old_branch_rows = connection.exec_driver_sql(forms.old_branch, parameters).all()
         moves = connection.execute(
             text("SELECT count(*) FROM leases WHERE moves IS NOT NULL")
         ).scalar_one()
@@ -614,6 +754,9 @@ def _measured(
         (str(ip).startswith("172.20.60."), interface, held) for _n, ip, interface, _vd, held in rows
     } == {(True, "vlan60", False)}
     assert sorted(branch_rows) == sorted(rows)
+    # The wrapper changes the plan, not the rows (W5-G-26).
+    assert sorted(old_branch_rows) == sorted(branch_rows)
+    assert sorted(old_rows) == sorted(rows)
     with site.connect() as connection:
         read = connection.execute(
             text(
@@ -626,8 +769,11 @@ def _measured(
     lookups, checks, sent = _timed_lookups(site)
     branch = _timed_statement(site, mac_branch, parameters)
     whole = _timed_statement(site, sql, parameters)
-    explained = _explained_lookup(site, mac_branch)
+    branches = _alternated(site, forms.old_branch, mac_branch, parameters)
+    statements = _alternated(site, forms.old_sql, sql, parameters)
+    explained = _explained_lookup(site, forms)
     assert explained.plan_cache_mode == "force_custom_plan"
+    old_new = _old_new(explained, branches, statements)
     _show(
         capsys,
         [
@@ -655,6 +801,17 @@ def _measured(
             *explained.prepared,
             "--- MAC branch figures (in a lookup's transaction) ---",
             *_figures(explained.figures),
+            f"whole statement: {_parallel(explained.statement)}",
+            "--- old (before W5-G-26: the MAC branch's test bare) against new (as sent): old and "
+            "new alternating on one connection, one transaction, after a warm-up of each ---",
+            branches[0].line("old: MAC branch alone"),
+            branches[1].line("new: MAC branch alone"),
+            statements[0].line("old: statement alone"),
+            statements[1].line("new: statement alone"),
+            "old: MAC branch figures (same transaction as the new one's):",
+            *_figures(explained.old_figures),
+            f"old: whole statement: {_parallel(explained.old_statement)}",
+            old_new,
             "--- statement (as sent; parameters bound) ---",
             sql,
             "--- EXPLAIN (ANALYZE, BUFFERS) of the statement, in a lookup's transaction "
@@ -662,16 +819,24 @@ def _measured(
             *explained.plans,
             "--- EXPLAIN (ANALYZE, BUFFERS) of the MAC branch alone, same transaction ---",
             *explained.branch,
+            "--- old: the MAC branch's test written back to the bare one (the IP branch "
+            "unchanged) ---",
+            forms.bare,
+            "--- old: EXPLAIN (ANALYZE, BUFFERS) of the statement, same transaction ---",
+            *explained.old_plans,
+            "--- old: EXPLAIN (ANALYZE, BUFFERS) of the MAC branch alone, same transaction ---",
+            *explained.old_branch,
             f"===== end of {name}, {scale}, {stage} =====",
         ],
     )
     median = statistics.median
-    return (
+    return [
         f"{name:11s} {stage:13s} {_summary(explained.figures)}; MAC branch alone best "
         f"{min(branch.seconds) * 1000:.1f} / median {median(branch.seconds) * 1000:.1f} ms; "
         f"statement as sent median {median(sent.seconds) * 1000:.1f} ms; whole lookup median "
-        f"{median(lookups.seconds) * 1000:.1f} ms"
-    )
+        f"{median(lookups.seconds) * 1000:.1f} ms",
+        f"{name:11s} {stage:13s} {old_new}",
+    ]
 
 
 @pytest.mark.perf
@@ -685,7 +850,8 @@ def test_the_missed_moves_mac_branch_is_measured(
     """#185 step 1: the plan and the times of the MAC branch on every layout of this server's
     kind, as loaded and after ``ANALYZE fg_dhcp``, printed; the lookup's answer is the guards'
     (100 ``mt_dhcp`` chains, none lowered), the check decoded the recorded moves, and the branch
-    read every chain's ACKs on the staff Wi-Fi and nothing else."""
+    read every chain's ACKs on the staff Wi-Fi and nothing else; the form before W5-G-26 returned
+    the same rows and is measured beside it."""
     summary: list[str] = []
     for layout in LAYOUTS:
         with _world(pg_server, pg_template, layout, SCALES[scale]) as (site, timescale):
@@ -694,10 +860,14 @@ def test_the_missed_moves_mac_branch_is_measured(
                 if stage == ANALYZED:
                     seconds = _analyze_fg_dhcp(site)
                     summary.append(f"{name:11s} ANALYZE fg_dhcp and its children: {seconds:.1f} s")
-                summary.append(_measured(site, capsys, name=name, scale=scale, stage=stage))
+                summary.extend(_measured(site, capsys, name=name, scale=scale, stage=stage))
             if timescale:
                 break
     _show(
         capsys,
-        [f"===== #185 summary, {scale}: as loaded against after ANALYZE fg_dhcp =====", *summary],
+        [
+            f"===== #185 summary, {scale}: as loaded against after ANALYZE fg_dhcp; old (bare "
+            "test) → new (W5-G-26) =====",
+            *summary,
+        ],
     )
