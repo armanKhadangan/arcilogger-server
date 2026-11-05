@@ -22,6 +22,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.pool import NullPool
 
 from arcilogger_core.timeutil import day_window, site_day
+from arcilogger_db import partitions as partitions_module
 from arcilogger_db.clocksamples import ClockKey, minute_of, upsert_samples
 from arcilogger_db.engine import engine_from_url
 from arcilogger_db.migrate import upgrade
@@ -34,6 +35,7 @@ from arcilogger_db.partitions import (
     MONTHS_BACK,
     PARTITION_LOCK_KEY,
     RAW_DAY_MARGIN,
+    LockBudget,
     Partition,
     PartitionLockTimeoutError,
     PartitionReport,
@@ -1168,3 +1170,198 @@ def test_the_lock_of_a_step_is_waited_for_its_timeout_only(db_engine: Engine) ->
     with db_engine.begin() as connection:
         lock_partitions(connection, timeout_ms=200)
         assert connection.execute(text("SHOW lock_timeout")).scalar_one() == "0"
+
+
+def test_a_steps_lock_waits_share_one_budget(db_engine: Engine) -> None:
+    """W5-G-24, #124 stage 2: a step's wait for the partition lock (an export holds it shared)
+    and its table locks after it (a reader that takes no partition lock, a plain ``SELECT``,
+    holds the table: on plain PostgreSQL the parent, on TimescaleDB the chunk) share one
+    :class:`LockBudget`. The table is waited for what the partition lock left: the step gives up
+    after its budget in all (here at least 1 s for the lock, then the rest for the table: 2 s,
+    not 3 s), with :class:`PartitionLockTimeoutError`, nothing dropped. A step whose locks are
+    free keeps the transaction's ``lock_timeout``."""
+    cutoff = date(2026, 9, 15)  # local midnight 14.09. 21:00 UTC
+    with db_engine.begin() as connection:
+        hyper = bool(hypertables(connection))
+        ensure_days(connection, date(2026, 9, 12), date(2026, 9, 13))  # plain PostgreSQL
+    if hyper:
+        pause_compression_jobs(db_engine)
+    with Session(db_engine) as session:
+        session.add_all(
+            [
+                _dhcp(datetime(2026, 9, 12, 9, tzinfo=UTC)),
+                _dhcp(datetime(2026, 9, 13, 9, tzinfo=UTC)),
+            ]
+        )
+        session.commit()
+    held = _chunks_by_id(db_engine, "mt_dhcp")[0] if hyper else "mt_dhcp"
+    budget_ms = 2000
+    export = engine_from_url(db_engine.url, poolclass=NullPool)
+    try:
+        with (
+            export.connect() as holder,
+            db_engine.connect() as reader,
+            db_engine.connect() as watcher,
+        ):
+            holder.execute(
+                text("SELECT pg_advisory_lock_shared(:key)"), {"key": PARTITION_LOCK_KEY}
+            )
+            holder.commit()
+            assert reader.execute(text("SELECT count(*) FROM mt_dhcp")).scalar_one() == 2
+            started = time.monotonic()
+            step = _Backend(
+                db_engine,
+                lambda connection: drop_before(connection, cutoff, budget=LockBudget(budget_ms)),
+            )
+            step.wait_for_lock(watcher)  # the partition lock
+            time.sleep(budget_ms / 2000)  # half the budget goes to it, at least
+            holder.execute(
+                text("SELECT pg_advisory_unlock_shared(:key)"), {"key": PARTITION_LOCK_KEY}
+            )
+            holder.commit()
+            step.wait_for_lock(watcher, held)  # then the table the reader holds
+            step.join()
+            took = time.monotonic() - started
+            reader.rollback()
+    finally:
+        export.dispose()
+    assert [type(error) for error in step.errors] == [PartitionLockTimeoutError]
+    assert budget_ms / 1000 <= took < budget_ms / 1000 + 0.8  # not half the budget more
+    with db_engine.connect() as connection:
+        assert connection.execute(text("SELECT count(*) FROM mt_dhcp")).scalar_one() == 2
+    with db_engine.begin() as connection:
+        connection.execute(text("SET LOCAL lock_timeout = '7s'"))
+        report = drop_before(connection, cutoff, budget=LockBudget(200))
+        assert connection.execute(text("SHOW lock_timeout")).scalar_one() == "7s"
+    assert report.dropped
+    with db_engine.connect() as connection:
+        assert connection.execute(text("SELECT count(*) FROM mt_dhcp")).scalar_one() == 0
+
+
+def test_a_budget_used_up_still_bounds_the_wait(db_engine: Engine) -> None:
+    """#124 stage 2 review: a lock granted in the budget's last moment can leave nothing (the
+    wait counts the round trip): what is left is 1 ms then, never 0, which PostgreSQL takes as
+    no limit (a table lock after it would wait as long as a reader holds it)."""
+    budget = LockBudget(100)
+    budget.waited = 0.2
+    assert budget.left_ms() == 1
+    with db_engine.begin() as connection:
+        budget.bound(connection)
+        assert connection.execute(text("SHOW lock_timeout")).scalar_one() == "1ms"
+
+
+def _ms(setting: str) -> int:
+    """A ``lock_timeout`` as PostgreSQL shows it (``1500ms``, ``2s``), in milliseconds."""
+    if setting.endswith("ms"):
+        return int(setting[:-2])
+    assert setting.endswith("s"), setting
+    return int(setting[:-1]) * 1000
+
+
+@contextmanager
+def _export_holding(engine: Engine) -> Iterator[Connection]:
+    """The partition lock held shared at session level, as a running search export holds it;
+    the connection lets go of it with :func:`_let_go`."""
+    export = engine_from_url(engine.url, poolclass=NullPool)
+    try:
+        with export.connect() as holder:
+            holder.execute(
+                text("SELECT pg_advisory_lock_shared(:key)"), {"key": PARTITION_LOCK_KEY}
+            )
+            holder.commit()
+            yield holder
+    finally:
+        export.dispose()
+
+
+def _made(engine: Engine, table: str, day: date) -> bool:
+    """Whether ``table`` has a daily partition of the site day ``day`` (its UTC days)."""
+    with engine.connect() as connection:
+        return any(p.day in utc_days(day, day) for p in list_partitions(connection, table))
+
+
+def _let_go(holder: Connection) -> None:
+    holder.execute(text("SELECT pg_advisory_unlock_shared(:key)"), {"key": PARTITION_LOCK_KEY})
+    holder.commit()
+
+
+def test_ensure_days_waits_for_the_lock_and_a_table_within_one_budget(db_engine: Engine) -> None:
+    """W5-G-24, #124 stage 2 review: ingest's ``ensure_days(budget=)`` as the window step: an
+    export holds the partition lock for half the budget, then a reader that takes no partition
+    lock holds the first table: the table is waited for what is left, the call gives up after
+    the budget in all with :class:`PartitionLockTimeoutError`, nothing made. On TimescaleDB
+    there is nothing to make and no lock is taken."""
+    day = date(2026, 6, 10)  # before any window the fixtures make
+    with db_engine.connect() as connection:
+        tables = partitioned_tables(connection)
+    if not tables:  # TimescaleDB
+        with _export_holding(db_engine), db_engine.begin() as connection:
+            assert ensure_days(connection, day, day, budget=LockBudget(200)).created == []
+        return
+    budget_ms = 2000
+    with (
+        _export_holding(db_engine) as holder,
+        db_engine.connect() as reader,
+        db_engine.connect() as watcher,
+    ):
+        reader.execute(text(f"SELECT count(*) FROM {tables[0]}"))  # noqa: S608
+        started = time.monotonic()
+        step = _Backend(
+            db_engine,
+            lambda connection: ensure_days(connection, day, day, budget=LockBudget(budget_ms)),
+        )
+        step.wait_for_lock(watcher)  # the partition lock
+        time.sleep(budget_ms / 2000)  # half the budget goes to it, at least
+        _let_go(holder)
+        step.wait_for_lock(watcher, tables[0])  # then the table the reader holds
+        step.join()
+        took = time.monotonic() - started
+        reader.rollback()
+    assert [type(error) for error in step.errors] == [PartitionLockTimeoutError]
+    assert budget_ms / 1000 <= took < budget_ms / 1000 + 0.8  # not half the budget more
+    assert not _made(db_engine, tables[0], day)
+
+
+def test_the_statements_after_a_lock_wait_get_what_is_left(
+    db_engine: Engine, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """W5-G-24, #124 stage 2 review: within a :class:`LockBudget` the statements after a wait
+    wait at most what is left of it, not what was left before the wait: the partitions' table
+    locks after the partition lock (an export held it 0.5 s of 2 s), and those after a table
+    lock that a reader held 0.5 s. The step then makes its partitions."""
+    day = date(2026, 6, 11)
+    with db_engine.connect() as connection:
+        tables = partitioned_tables(connection)
+    if not tables:  # TimescaleDB: nothing to make
+        with db_engine.begin() as connection:
+            assert ensure_days(connection, day, day, budget=LockBudget(200)).created == []
+        return
+    seen: list[int] = []
+    real = partitions_module._lock_table
+
+    def lock_table(connection: Connection, name: str, budget: LockBudget | None) -> None:
+        seen.append(_ms(connection.execute(text("SHOW lock_timeout")).scalar_one()))
+        real(connection, name, budget)
+
+    monkeypatch.setattr(partitions_module, "_lock_table", lock_table)
+    with (
+        _export_holding(db_engine) as holder,
+        db_engine.connect() as reader,
+        db_engine.connect() as watcher,
+    ):
+        reader.execute(text(f"SELECT count(*) FROM {tables[0]}"))  # noqa: S608
+        step = _Backend(
+            db_engine, lambda connection: ensure_days(connection, day, day, budget=LockBudget(2000))
+        )
+        step.wait_for_lock(watcher)  # the partition lock
+        time.sleep(0.5)
+        _let_go(holder)
+        step.wait_for_lock(watcher, tables[0])
+        time.sleep(0.5)
+        reader.rollback()
+        step.join()
+    assert step.errors == []
+    first, after_table = seen[0], seen[1]
+    assert first <= 1500  # what the partition lock left, not the whole 2 s
+    assert after_table <= first - 500  # what the table lock left
+    assert _made(db_engine, tables[0], day)
