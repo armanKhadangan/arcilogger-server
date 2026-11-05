@@ -265,19 +265,22 @@ runs.
 - **Waiting for database maintenance.** While database maintenance holds the partition lock (old
   days being dropped, new partitions being created, archived days being loaded again), an export
   waits for it at most `search.request_budget_ms` (4 seconds), and the wait counts against
-  `search.export_budget_seconds`. If the wait runs out, the answer is `504 search_timeout` with
-  the text "The export could not start within {seconds} s: it waited for database maintenance
-  (old days being dropped, new partitions being created or archived days being loaded again) to
-  finish. Try again a little later." No file is made and nothing is audited, so it does not count
-  against the hourly limit. A search that waits the same way gets the same text beginning "The
-  search could not start …"; the text about the shortest time slice (section 5) is only for a
-  scan that ran out of time.
-- An export holds that lock for as long as it reads. Meanwhile the database window job and the
-  daily partition job wait for it at most half of `search.request_budget_ms` (2 seconds by
-  default) and then give up, so a search that comes while one of them waits keeps at least half
-  its time for its own reading. The jobs try again later (15 minutes, 30 minutes, … at most 4
-  hours). Only the `alerts.job_failures`-th (3 by default) failed run of the window job in a row
-  raises the `R20-db-window` alert.
+  `search.export_budget_seconds`. If the wait runs out, the answer is `504 search_timeout` with the
+  text "The export could not start within the {seconds} s it was allowed: it waited for database
+  maintenance (old days being dropped, new partitions being created or archived days being loaded
+  again) to finish. Try again a little later." (`{seconds}` is `search.request_budget_ms` in
+  seconds, or `search.export_budget_seconds` when the wait used that up.) No file is made and
+  nothing is audited, so it does not count against the hourly limit. A search that waits the same
+  way gets the same text beginning "The search could not start …"; the text about the shortest time
+  slice (section 5) is only for a scan that ran out of time.
+- An export holds that lock for as long as it reads. Meanwhile the database window job, the daily
+  partition job and an archive reload (the start of its loading, its days' partitions) wait for it,
+  and then for the tables they change, at most half of `search.request_budget_ms` in all (2 seconds
+  by default; an archive reload never more than 2 seconds) and then give up, so a search that comes
+  while one of them waits keeps at least half its time for its own reading. The jobs try again later
+  (15 minutes, 30 minutes, … at most 4 hours), an archive reload at the next look at the requests (5
+  seconds), without failing the request. Only the `alerts.job_failures`-th (3 by default) failed run
+  of the window job in a row raises the `R20-db-window` alert.
 - **CSV:** UTF-8 (BOM), `;` separator, CRLF line ends. **Excel:** the sheets "Sonuçlar"
   (results) and "Bilgi", every cell text. Columns: Zaman, Alınma zamanı, Kaynak, Gönderici, Tür,
   Alt tür, Kaynak IP, Kaynak port, Hedef IP, Hedef port, NAT IP, NAT port, Eylem, Alan adı, URL,

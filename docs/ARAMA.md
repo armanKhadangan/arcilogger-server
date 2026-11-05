@@ -265,18 +265,23 @@ yön değiştirme) içeremez. Kayıtlı bir aramayı çalıştırmak normal bir 
 - **Veritabanı bakımının beklenmesi.** Veritabanı bakımı (eski günlerin kaldırılması, yeni
   bölümlerin açılması, arşivden yeniden yükleme) bölüm kilidini tutarken dışa aktarma kilidi en
   fazla `search.request_budget_ms` (4 saniye) bekler; bekleme `search.export_budget_seconds`
-  süresinden düşülür. Bekleme süresi dolarsa yanıt `504 search_timeout` olur, metni: "Dışa
-  aktarma {seconds} saniyede başlayamadı: veritabanı bakımının (eski günlerin kaldırılması, yeni
-  bölümlerin açılması ya da arşivden yeniden yükleme) bitmesi beklendi. Biraz sonra yeniden
-  deneyin." Dosya oluşmaz, denetim kaydı yazılmaz; saatlik sınırdan düşülmez. Aynı şekilde
-  bekleyen bir arama da "Arama {seconds} saniyede başlayamadı …" diye başlayan aynı metni alır;
-  en kısa zaman dilimiyle ilgili metin (bölüm 5) yalnızca süresi biten bir tarama içindir.
-- Dışa aktarma okuduğu sürece bu kilidi tutar. Bu sırada veritabanı penceresi işi ve günlük bölüm
-  işi kilidi en fazla `search.request_budget_ms` değerinin yarısı kadar (varsayılan 2 saniye)
-  bekler ve sonra vazgeçer; böylece bunlardan biri beklerken gelen bir arama süresinin en az
-  yarısını kendi okumasına ayırır. İşler daha sonra yeniden dener (15 dakika, 30 dakika, … en
-  çok 4 saat). Yalnızca pencere işinin art arda
-  `alerts.job_failures`. (varsayılan 3) başarısız çalıştırması `R20-db-window` uyarısını açar.
+  süresinden düşülür. Bekleme süresi dolarsa yanıt `504 search_timeout` olur, metni: "Dışa aktarma
+  kendisine tanınan {seconds} saniyede başlayamadı: veritabanı bakımının (eski günlerin
+  kaldırılması, yeni bölümlerin açılması ya da arşivden yeniden yükleme) bitmesi beklendi. Biraz
+  sonra yeniden deneyin." (`{seconds}`, saniye olarak `search.request_budget_ms` ya da bekleme onu
+  tükettiyse `search.export_budget_seconds` değeridir.) Dosya oluşmaz, denetim kaydı yazılmaz;
+  saatlik sınırdan düşülmez. Aynı şekilde bekleyen bir arama da "Arama {seconds} saniyede
+  başlayamadı …" diye başlayan aynı metni alır; en kısa zaman dilimiyle ilgili metin (bölüm 5)
+  yalnızca süresi biten bir tarama içindir.
+- Dışa aktarma okuduğu sürece bu kilidi tutar. Bu sırada veritabanı penceresi işi, günlük bölüm işi
+  ve arşivden yeniden yükleme (yüklemenin başlaması, günlerinin bölümleri) kilidi ve ardından
+  değiştirdikleri tabloları toplam en fazla `search.request_budget_ms` değerinin yarısı kadar
+  (varsayılan 2 saniye; arşivden yeniden yükleme hiçbir zaman 2 saniyeden fazla değil) bekler ve
+  sonra vazgeçer; böylece bunlardan biri beklerken gelen bir arama süresinin en az yarısını kendi
+  okumasına ayırır. İşler daha sonra yeniden dener (15 dakika, 30 dakika, … en çok 4 saat), arşivden
+  yeniden yükleme isteklere bir sonraki bakışta (5 saniye), isteği başarısız saymadan. Yalnızca
+  pencere işinin art arda `alerts.job_failures`. (varsayılan 3) başarısız çalıştırması
+  `R20-db-window` uyarısını açar.
 - **CSV:** UTF-8 (BOM), `;` ayraç, CRLF satır sonu. **Excel:** "Sonuçlar" ve "Bilgi" sayfaları,
   her hücre metin. Sütunlar: Zaman, Alınma zamanı, Kaynak, Gönderici, Tür, Alt tür, Kaynak IP,
   Kaynak port, Hedef IP, Hedef port, NAT IP, NAT port, Eylem, Alan adı, URL, Kullanıcı,

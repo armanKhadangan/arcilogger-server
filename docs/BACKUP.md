@@ -259,18 +259,23 @@ the dump. The entries written after it stay in the vault's sealed daily audit fi
 restore (date, file, reason, who) in a written report.
 
 **Version rollback and schema downgrade:** `Install-Arcilogger.ps1 -Rollback` without
-`-RestoreDatabase`, going back to a version from before `0021_db_window`, runs
-`& $db schema downgrade --to <the previous version's schema> --json` after the services stop and
-before the program is swapped. The command merges the daily partitions back into monthly ones
-(each month of each table in its own transaction); a `db.retention_days` of 30 written by the
-installation or the upgrade goes back to 400, and one `settings.change` audit entry (`system`)
-records it; a value an administrator set stays, and no entry is written. When the window job had
-not yet audited the upgrade's own change (400 → 30), the command writes that entry first, in the
-same transaction. When it fails (`1`) the months merged so far stay merged and the schema revision
-does not change; running the command again goes on where it stopped. At that schema already it
-does nothing (`0`); a revision this version does not know, or one newer than the database's, is
-refused with `2`; `3` means the database cannot be reached. When running it again fails too, the
-way back is a restore (a dump from before the rollback, or `-Rollback -RestoreDatabase`).
+`-RestoreDatabase`, going back to a version that does not have the installed version's schema head
+(when the installed version has `0021_db_window` or later; [INSTALL.md](INSTALL.md) section 13),
+runs `& $db schema downgrade --to <revision> --json` after the services stop and before the program
+is swapped: down to the previous version's head, never below `0020_fg_traffic_transip_time` (the
+revision `0021_db_window` revises), and only through the revisions the installer lists as lossless
+(`$LosslessDowngrades`: `0022_lease_moves`, `0021_db_window`). Down to `0021_db_window` only the
+column `leases.moves` goes. Down to `0020_fg_traffic_transip_time` the command merges the daily
+partitions back into monthly ones (each month of each table in its own transaction); a
+`db.retention_days` of 30 written by the installation or the upgrade goes back to 400, and one
+`settings.change` audit entry (`system`) records it; a value an administrator set stays, and no
+entry is written. When the window job had not yet audited the upgrade's own change (400 → 30), the
+command writes that entry first, in the same transaction. When it fails (`1`) the months merged so
+far stay merged and the schema revision does not change; running the command again goes on where it
+stopped. At that schema already it does nothing (`0`); a revision this version does not know, or one
+newer than the database's, is refused with `2`; `3` means the database cannot be reached. When
+running it again fails too, the way back is a restore (a dump from before the rollback, or
+`-Rollback -RestoreDatabase`).
 
 **`-Rollback -RestoreDatabase`** follows the rule of this section too: the installer restores the
 pre-upgrade dump into a new database (`<name>_restore_<time>`, with the owner, locale, settings

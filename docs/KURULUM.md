@@ -1518,7 +1518,10 @@ delildir; silinmeleri yalnızca saklama/imha işiyle ve imha tutanağıyla olur.
   olması (`Get-MpPreference`); `spool` ve `vault` için sahibin kararı (istisna mı, zamanlanmış
   tarama mı).
 - Gece veritabanı yedeği: ilk gecenin `D:\ARCILOGGER\state\backup\last.json` sonucu, yedeğin
-  süresi ve boyutu, ilk geri yükleme tatbikatı ([YEDEKLEME.md](YEDEKLEME.md) bölüm 6 ve 8).
+  süresi ve boyutu (01:40'ta başlayıp 04:00'ü geçen bir yedek `db.window` çalışmasına denk gelir;
+  iş geri çekilir, 04:15 ve 04:45'te yeniden dener: yaklaşık 3 saatten uzun süren bir yedek böyle
+  her gece `R20-db-window` uyarısını açar, sözleşme W5-G-24), ilk geri yükleme tatbikatı
+  ([YEDEKLEME.md](YEDEKLEME.md) bölüm 6 ve 8).
 - Arama'lı sürüme yükseltmede `ix_fg_web_rhost_time` indeksiyle şema yükseltmesinin gerçek
   veritabanında ne kadar sürdüğü (bölüm 13) ve ilk günlerden sonra
   `arcilogger-db search-counts verify` sonucu: özet tablosu satırlarla aynı olmalı; küçük harfle
@@ -1528,6 +1531,15 @@ delildir; silinmeleri yalnızca saklama/imha işiyle ve imha tutanağıyla olur.
   klasörüne yalnızca kendi dosyalarını ekleyip silebilmesi, `ARCILOGGER-Admin` olaylarının
   `Requests`, `Seal` ve `ApplySystem` görevlerini uyandırması (`Get-WinEvent`, Görev Zamanlayıcı
   geçmişi) ve güvenlik duvarı kuralı yerinde güncellenirken syslog iletisi kaybolmaması.
+- Arşivden yeniden yükleme, satırları hâlâ veritabanında olan günlerle (pencerenin ilk günleri):
+  dosyalar adım adım sıfırlanırken (her adım en çok 10 000 satır; Linux'ta adım başına yaklaşık
+  0,1 s, ölçüldü) Canlı sayfadaki gecikmenin 5 saniyenin altında kalması ve ingest gecikme
+  uyarısının açılmaması; ingest günlüğünde "a step of its reset waits for a lock" satırının
+  dakikalarca yinelenmemesi (TimescaleDB'de sıkıştırma ilkesi bir parçayı yeniden sıkıştırırken
+  adım bekler); yeniden yüklemenin bölümlerinin (partition) bir turunun ne kadar sürdüğü (her
+  turda bir günün bir tablosu: Linux'ta yaklaşık 30 ms; bir günün 16 tablosu birlikte Linux'ta
+  0,3–0,45 s, bir Windows CI makinesinde 0,84 s sürdü; bir tablonun turu Windows'ta ve döner
+  diskte ölçülmedi, sözleşme W5-G-25).
 - Masaüstü Windows 11 Pro'da: yukarıdakilerin hepsi ve güç ayarları, Akıllı Uygulama Denetimi,
   zorunlu bir güncelleme yeniden başlatması — adım adım:
   [KABUL-TESTI-WINDOWS11.md](KABUL-TESTI-WINDOWS11.md).

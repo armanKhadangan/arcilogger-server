@@ -25,7 +25,8 @@
                                                the search summary table (ADR-0015): hours held,
                                                files still to count
     arcilogger-db search-counts rebuild --source S --day YYYY-MM-DD
-                                               count one spool file again from its rows
+                                               count one spool file again from its rows (not
+                                               one being reset)
     arcilogger-db search-counts verify [--hours 2]
                                                recount the recent hours from the rows and
                                                compare (1 on a difference)
@@ -55,9 +56,11 @@ nat.egresses - --by tolga``.
 and the worker job ``search.counts_backfill`` fills in for files loaded before revision
 ``0016_search``: ``rebuild`` locks the file's ``ingest_offsets`` row first (ingest waits with that
 file until the recount commits, so a file still being loaded can be recounted too) and clears its
-``counts_from_line``; ``verify`` reads rows and counts in one read-only snapshot and also prints
-how many names are not stored in lower case (``fg_dns.qname``, ``fg_web.hostname``: ``domain:``
-assumes lower case).
+``counts_from_line``; it refuses a file whose reset is under way (``counts_from_line = 0``,
+unfinished, W5-G-25: ingest is deleting its rows to load it again, and a recount would take that
+mark off), which ``status`` shows as resetting; ``verify`` reads rows and counts in one read-only
+snapshot and also prints how many names are not stored in lower case (``fg_dns.qname``,
+``fg_web.hostname``: ``domain:`` assumes lower case).
 
 ``leases prepare-rollback`` is the lease step of ``Install-Arcilogger.ps1 -Rollback`` without
 ``-RestoreDatabase`` (ADR-0016, round 6; :mod:`arcilogger_db.lease_rollback`): the previous
@@ -66,8 +69,10 @@ transaction before the program is swapped; ``upgrade`` (its seed) restores the o
 version left as they were and prints both counts with the lease rebuild range.
 
 ``schema downgrade`` is the schema step of ``Install-Arcilogger.ps1 -Rollback`` without
-``-RestoreDatabase`` back to a version from before ``0021_db_window`` (issue #122;
-:mod:`arcilogger_db.downgrade`), run after the services stop and before the program is swapped:
+``-RestoreDatabase`` back to a version that does not have this version's head revision (issues
+#122, #164; :mod:`arcilogger_db.downgrade`): down to that version's head, never below
+``0020_fg_traffic_transip_time``, through the lossless revisions only (``0022_lease_moves``,
+``0021_db_window``), run after the services stop and before the program is swapped:
 alembic's downgrade under the migrations' lock, held for the session (``0021``'s downgrade
 commits a step per table and month, and a second run goes on where a failed one stopped), and the
 one ``settings.change`` entry (actor ``system``) when it changed ``db.retention_days``, after
@@ -86,8 +91,8 @@ licence code (:mod:`arcilogger_db.licensing`, imported inside its handler): ``up
 
 Exit codes: 0 success / up to date, 1 needs attention (not migrated, outdated, warnings; a
 backup, check or prune that failed; a licence refused, none installed, or the licence code
-unavailable), 2 usage or configuration error (a restore refused before any change), 3 the
-database cannot be reached.
+unavailable; a search-counts rebuild refused for a file being reset), 2 usage or configuration
+error (a restore refused before any change), 3 the database cannot be reached.
 """
 
 from __future__ import annotations
@@ -708,6 +713,11 @@ def cmd_backup(config: Config, args: argparse.Namespace) -> int:
 VERIFY_HOURS_MAX = 31 * 24
 #: Files and differences listed one per line (the totals count all of them).
 SEARCH_COUNTS_LIST_MAX = 20
+#: ``ingest_offsets.counts_from_line`` of an unfinished file whose reset is under way (ingest's
+#: ``RESETTING``, W5-G-25): its offset is 0 and ingest deletes its rows in steps, then loads it
+#: again if its file is in the vault. A file loaded before ``0016_search`` is marked from line 2
+#: on.
+RESETTING = 0
 
 
 def _n(value: int) -> str:
@@ -750,14 +760,22 @@ def _search_counts_status(config: Config, args: argparse.Namespace) -> int:
         print("Sayılmayı bekleyen dosya yok [no file waits to be counted].")
         return EXIT_OK
     finished = sum(1 for row in pending if row[3])
+    resetting = sum(1 for row in pending if row[2] == RESETTING and not row[3])
     print(
         f"Sayılmayı bekleyen dosyalar [files waiting to be counted]: {_n(len(pending))} "
         f"({_n(finished)} bitmiş, worker işi search.counts_backfill sayar [finished, counted by "
-        f"the worker job]; {_n(len(pending) - finished)} hâlâ yükleniyor [still loading]). Bu "
-        "günlerin istatistikleri doğrudan sayılır [statistics of these days are counted "
-        "directly]."
+        f"the worker job]; {_n(len(pending) - finished - resetting)} hâlâ yükleniyor [still "
+        f"loading]; {_n(resetting)} sıfırlanıyor [resetting]). Bu günlerin istatistikleri "
+        "doğrudan sayılır [statistics of these days are counted directly]."
     )
     for source, day, from_line, done in pending[:SEARCH_COUNTS_LIST_MAX]:
+        if from_line == RESETTING and not done:
+            print(
+                f"  {source} {day}: sıfırlanıyor [resetting], satırları silinir, dosya "
+                "kasadaysa yeniden yüklenir [its rows are deleted, then loaded again if its file "
+                "is in the vault]"
+            )
+            continue
         state = "bitti [finished]" if done else "yükleniyor [loading]"
         before = (from_line or 1) - 1  # the lines loaded before the upgrade
         print(f"  {source} {day}: ilk {_n(before)} satır sayılmadı [lines not counted], {state}")
@@ -766,15 +784,27 @@ def _search_counts_status(config: Config, args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
-def _lock_file(connection: Connection, source: str, day: date) -> bool:
-    """Lock the file's ``ingest_offsets`` row (ingest's next batch of that file waits); whether its
-    ``counts_from_line`` is set."""
+def _lock_file(connection: Connection, source: str, day: date) -> tuple[int | None, bool]:
+    """Lock the file's ``ingest_offsets`` row (ingest's next batch of that file waits); its
+    ``counts_from_line`` and whether it is finished (``None, False`` without a row)."""
     row = connection.execute(
-        select(IngestOffset.counts_from_line)
+        select(IngestOffset.counts_from_line, IngestOffset.finished_at.is_not(None))
         .where(IngestOffset.source == source, IngestOffset.day == day)
         .with_for_update()
     ).one_or_none()
-    return row is not None and row[0] is not None
+    return (None, False) if row is None else (row[0], row[1])
+
+
+def _rebuild_resetting(source: str, day: date) -> str:
+    """The TR/EN text of a rebuild refused for a file whose reset is under way (W5-G-25)."""
+    return (
+        f"{source} {day}: dosya sıfırlanıyor, yeniden sayılmadı [the file is being reset, not "
+        "recounted]. Ingest satırlarını adım adım siliyor, dosya kasadaysa sonra onu "
+        "sayımlarıyla birlikte yeniden yükler; sıfırlama bitene kadar bu dosya için komut "
+        "reddedilir (search-counts status). [Ingest is deleting its rows step by step, then "
+        "loads the file again with its counts if it is in the vault; until the reset is over the "
+        "command is refused for this file (search-counts status).]"
+    )
 
 
 def _search_counts_rebuild(config: Config, args: argparse.Namespace) -> int:
@@ -787,7 +817,12 @@ def _search_counts_rebuild(config: Config, args: argparse.Namespace) -> int:
     engine = _engine(config)
     try:
         with engine.begin() as connection:
-            marked = _lock_file(connection, source, day)
+            from_line, finished = _lock_file(connection, source, day)
+            if from_line == RESETTING and not finished:
+                # A recount would take the reset's mark off between its steps: nothing written.
+                print(_rebuild_resetting(source, day), file=sys.stderr)
+                return EXIT_ATTENTION
+            marked = from_line is not None
             result = rebuild_stream(connection, source, day)
             if marked:
                 connection.execute(
