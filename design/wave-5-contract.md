@@ -3152,3 +3152,62 @@ line is W5-E-10, and what it amends in detail:
   `test_a_stored_list_that_cannot_be_read_stops_the_run_and_is_recorded`,
   `test_a_stopped_run_whose_record_cannot_be_written_still_raises` and
   `test_a_list_that_cannot_be_stored_stops_the_run_unrecorded`.
+
+## Deviations — #179 (2026-11-05)
+
+- **#179-1: the two guards of the converted-row check take the best of 5 timed rounds and print
+  their split.** `test_the_converted_row_query_of_a_hundred_chains_is_fast` and
+  `test_the_recorded_moves_of_a_hundred_chains_are_fast` (`worker/tests/test_lookup_performance.py`)
+  run the lookup once to warm up, then 5 timed rounds (`ROUNDS`, `_best_lookup`), and hold the best
+  round's `_missed_moves` to the bound. The bound stays 0.2 s on both platforms (3.8, #127-1). The
+  structural assertions hold for every round (one call, the statement's shape and first day, every
+  chain's moves decoded); the rows are read again from the best round's statement. Past pytest's
+  capture, each guard prints one `guard split, …` line every run: every round's seconds, and the
+  best round's split into SQL (SQLAlchemy's cursor events while `_missed_moves` runs, with the
+  statement count and the `leases.moves` statement's share), decode (`_recorded_moves` less that
+  statement: SQLAlchemy's work for it, the jsonb values read at fetch and `parse_moves`), judging
+  (`_bears` and `_recorded_move`, with the calls of `_move_counts` and `stored_refusal`) and other;
+  a round with a full (gen-2) collection of Python's garbage collector inside `_missed_moves` shows
+  their count and pause beside its seconds. `event_site` and `moves_site` end with a `CHECKPOINT`
+  after their writes and `VACUUM (ANALYZE)` (as `test_search_perf` for #90), so their write-back
+  does not run into the timed rounds; its seconds, or that it was skipped (without a superuser or
+  `pg_checkpoint`), end the guard's line.
+  - **Failures:** run 41883865419/1, job 126763249694 (Windows, recorded-moves guard): 0.216 s, of
+    which `_recorded_moves` 0.050 s. Run 41913167039/1, job 126865764532 (Windows, recorded-moves
+    guard): 0.211 s / 0.048 s. Run 41924238041/1, job 126904942486 (ubuntu-24.04): converted-row
+    0.287 s, while the same job's C3 `converted_row` (the same `_missed_moves` on compressed chunks)
+    was 0.048 s.
+  - **Local figures (plain PostgreSQL, the Windows layout), before and after #163:** converted-row
+    median 77.3 → 82.9 ms with the same plan; recorded-moves 117.4 ms, of which reading the moves is
+    about 35 ms. The timed round is warm: the same connection as the warm-up, compilation paid in
+    the warm-up, psycopg's prepare threshold not reached. With this change, six serial runs (two of
+    the whole file, four of the two guards alone) gave a best of 0.078–0.080 s for the converted-row
+    guard and 0.112–0.129 s for the recorded-moves guard; the other rounds of the whole-file runs
+    took 0.080–0.092 s and 0.119–0.146 s, with one recorded-moves round of 0.349 s. Run alone, the
+    converted-row guard's fifth round took 0.195–0.225 s in all four runs, a gen-2 collection of 133
+    ms in the one measured; the best of 5 leaves it out.
+  - **The main cost** is the nested loop of the statement's MAC branch: about 60 of 65 ms locally,
+    the `fg_dhcp` Append estimated at 27 rows against 5,699 returned (its join filter discards
+    564,201). Changing it is product code (`lookup/attribution.py`, `_missed_moves`): #185, not
+    this change (the manager's answer to Q2 on #181).
+- **#179-2: the recorded-moves guard's bound on windows-latest is 0.21 s** (decided on #181:
+  Linux keeps 0.2 s; Windows takes the slowest best of 5 of passing CI runs plus a stated
+  margin, unless its slow runners stay under about 0.17 s). Eleven passing readings of the two
+  throughput jobs (runs 41950691995 and 41956302626, the latter's single jobs re-run one at a
+  time), each a best of 5 with its split, are kept as `MOVES_READINGS` in
+  `worker/tests/test_lookup_performance.py` with their run, job and gauge:
+  - **windows-latest:** converted-row 0.052–0.132 s; recorded-moves 0.085–0.173 s. The four
+    slow-class runners (gauge 16.72–17.87 µs a line, the class of both failures) gave 0.161,
+    0.173, 0.169 and 0.170 s, almost all of it the statement's SQL (0.113–0.127 s) plus 0.034 s of
+    decoding.
+    Single rounds of those runs reached 0.209 and 0.216 s, which the one timed round of before
+    would have failed on.
+  - **ubuntu-24.04 (TimescaleDB):** converted-row 0.024–0.041 s; recorded-moves 0.047–0.090 s,
+    gauges 7.97–15.86.
+  - **The rule:** `MOVES_BOUNDS["win32"]` = 0.173 s × `MOVES_MARGIN` (1.2), rounded up to 10 ms,
+    0.21 s. The converted-row query keeps 0.2 s on both (`CONVERTED_BOUND`; its slowest best is
+    0.132 s), and Linux keeps 0.2 s for both guards. `test_the_bounds_hold_every_ci_reading` checks
+    every reading against its bound and the Windows bound against the rule, so a reading added
+    later that the bound no longer holds, or a bound that no longer follows from the readings,
+    fails at once. When #185 makes the MAC branch cheaper, the readings are taken again and the
+    Windows bound goes back to 0.2 s.
