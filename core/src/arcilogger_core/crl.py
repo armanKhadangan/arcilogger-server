@@ -940,6 +940,26 @@ def fetch(
     opener = _opener(options)
     at = isoformat_site(now, "seconds")
     with _one_run(layout.crl_dir):
+        # A run stopped between _store_new's link and the tempfile module's cleanup (a reboot,
+        # the task's time limit) leaves the temporary name, a hard link to a stored list when
+        # the link was made, at which the installer's ACL step stops (W5-E-9). Only that name
+        # goes (tempfile's ``.`` + 8 random characters + ``.tmp``), never a list (#170, Q15).
+        with os.scandir(layout.crl_dir) as entries:
+            leftovers = [
+                entry.name
+                for entry in entries
+                if re.fullmatch(r"\.[a-z0-9_]{8}\.tmp", entry.name)
+                and entry.is_file(follow_symlinks=False)
+            ]
+        for name in sorted(leftovers):
+            try:
+                (layout.crl_dir / name).unlink()
+            except FileNotFoundError:
+                continue
+            except OSError as exc:
+                log.warning("state/crl: leftover temporary file %s not removed: %s", name, exc)
+                continue
+            log.warning("state/crl: removed the leftover temporary file %s of a stopped run", name)
         index = read_index(layout)
         lists: dict[str, dict[str, Any]] = {
             str(entry.get("file")): entry for entry in index["lists"] if isinstance(entry, dict)

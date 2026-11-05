@@ -2064,11 +2064,21 @@ All Wave 5 questions are answered (2026-11-02).
   protected yet on the first upgrade, and a link in it. In `state\crl`, `crl fetch` itself
   can leave a hard link: `_store_new` writes a list under a `.<random>.tmp` name, links it to its
   final name and then removes the temporary name, so a run stopped in between (a reboot, the
-  task's time limit) or a failed removal leaves both names, and nothing in `crl.py` removes them
-  later. The step then stops before it writes any entry (W5-E-10);
+  task's time limit) or a failed removal leaves both names. The next `crl fetch` removes them
+  (#170, item Q15): at its start, under its lock, it removes each regular file of `state\crl`
+  named as `_store_new`'s temporary names are (`.`, eight of the tempfile module's characters
+  `a-z0-9_`, `.tmp`) and logs each removal; a `.crl` file, the index, the lock and every other
+  name stay, so D8 holds (the list a leftover name links to keeps its bytes under its own name).
+  Until that run the step stops before it writes any entry (W5-E-10);
   the error for a hard link says to delete only the `.<random>.tmp` name in the same folder,
-  never a `.crl` file, which is evidence. That `crl fetch` should remove its own leftover
-  temporary names is for the owner of `core/src/arcilogger_core/crl.py` (not changed here). An
+  never a `.crl` file, which is evidence. Tests (`core/tests/test_crl.py`):
+  `test_fetch_removes_the_temporary_names_a_stopped_run_left` (a hard link to a stored list and
+  a part of a list, both made by the tempfile module as `_store_new` makes them: both names go,
+  the list keeps its bytes and its entry), `test_fetch_removes_only_the_temporary_names_of_store_new`
+  (lists, one not in the index, the index, the lock, another file, a folder, a symbolic link
+  and names that only look alike stay),
+  `test_a_leftover_temporary_name_stays_while_another_run_holds_the_lock` and
+  `test_the_crl_module_has_no_way_to_delete` (the one removal in `crl.py` is this one). An
   item whose entries give Administrators no right to read or take it over (its owner took them
   away) is taken over all the same by the elevated step: the Windows CI runner shows it for a
   `renewal.lock` that a service left as its own, with inheritance off, which is the case Q4 on
