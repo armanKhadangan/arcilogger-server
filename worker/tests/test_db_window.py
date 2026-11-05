@@ -4,7 +4,7 @@ gone does not), the oldest day of an active archive reload —, the expiry of re
 ``db.reload_keep_days``, the ``R20-db-window`` alert of a failed run and of a reload without
 progress (its texts, and an e-mail that names it), the audit entries of a step that dropped
 something and of the upgrade's change of ``db.retention_days``, and the job's place in the worker
-(daily after 01:00, it and its first retry before the Backup task's dump; W5-G-26).
+(daily after 01:00, it and its first retry before the Backup task's dump; W5-G-27).
 
 The database tests run on the template's storage: plain PostgreSQL (rows of other months in the
 default partition, daily partitions made by the job) or TimescaleDB in the Linux CI job (chunks
@@ -74,7 +74,7 @@ NOW = tr(TODAY, 5)
 WINDOW = int(DEFAULT_SETTINGS["db.retention_days"])
 KEEP = int(DEFAULT_SETTINGS["db.reload_keep_days"])
 URL = "https://arcilogger.example.com"
-#: The scheduled ``pg_dump`` (ADR-0009) that ``db.window`` runs before (#188, W5-G-26).
+#: The scheduled ``pg_dump`` (ADR-0009) that ``db.window`` runs before (#188, W5-G-27).
 BACKUP_TASK = Path(__file__).resolve().parents[2] / "deploy" / "windows" / "tasks" / "Backup.xml"
 TASK_NS = {"t": "http://schemas.microsoft.com/windows/2004/02/mit/task"}
 

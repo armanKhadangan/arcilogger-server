@@ -1552,7 +1552,7 @@ All Wave 5 questions are answered (2026-11-02).
 
     **A long backup (sahada doğrula).** `pg_dump` (the Backup task, daily at 01:40, YEDEKLEME/BACKUP
     §2) holds `ACCESS SHARE` on every table and chunk it dumps until it ends. A `db.window` run
-    (daily after 04:00 then, 01:00 since W5-G-26) that meets a dump still running used to wait for
+    (daily after 04:00 then, 01:00 since W5-G-27) that meets a dump still running used to wait for
     the rest of the dump with `ARCIPART` held, so every search answered 504 until it ended; now the
     step backs off after the lock budget and tries again (15 and 30 minutes later, …), and if a
     dump still runs at the `alerts.job_failures`-th (3rd) run, `R20-db-window` opens (medium);
@@ -1568,7 +1568,7 @@ All Wave 5 questions are answered (2026-11-02).
     **The default times (#182 review Q6, #188).** At 04:00 `db.window` lay inside the dump's
     default window of 01:40–05:10 (`DUMP_TIMEOUT_SECONDS`, 3 h 30 min). Since #188 it runs daily
     after 01:00, before the dump at 01:40, and only its rare second retry (01:45) or a dump
-    started late can still meet one: W5-G-26.
+    started late can still meet one: W5-G-27.
   - **(c) A lock-wait text of `search_timeout`** (504, the same code; approved on #165). The
     contract's text of `search_timeout` ("Arama {seconds} saniyede en kısa zaman dilimini (5
     dakika) bile tarayamadı. …" / "The search could not scan even the shortest time slice (5
@@ -1873,7 +1873,7 @@ All Wave 5 questions are answered (2026-11-02).
   (`test_a_dropped_day_comes_back_identically`, `test_a_reload_run_twice_gives_the_same_rows_and_counts`,
   `api/tests/test_archive_api.py` G7 and G8) and the throughput gate.
 
-- **W5-G-26: `db.window` runs before the backup (#188, follow-up of #182 review Q6; changes
+- **W5-G-27: `db.window` runs before the backup (#188, follow-up of #182 review Q6; changes
   G3's "daily after 04:00").** The manager's decision on #188 (option 1; a scheduling choice,
   "what is better and safer"): `db.window` is due daily after **01:00** site time
   (`worker/src/arcilogger_worker/service.py`, `daily_after=time(1, 0)`; a fixed schedule, no

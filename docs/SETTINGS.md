@@ -236,7 +236,7 @@ administrator enters the dates of the religious holidays every year. Details:
 
 The **Database** group says how long the parsed records stay in the database. The raw records in
 the sealed vault are not affected. The worker job `db.window` drops the days older than the
-window every night after 04:00; a day not sealed yet and the days of an active archive reload are
+window every night after 01:00; a day not sealed yet and the days of an active archive reload are
 never dropped. When an older day is needed, the 5651 lookup and Search ask for it with "arşivden
 yeniden yükle" (reload from the archive). Both settings are retention periods of personal data:
 a change needs the password again and is audited as `settings.change`. Details:

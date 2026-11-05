@@ -425,7 +425,7 @@ def default_jobs(interval_seconds: int) -> tuple[Job, ...]:
         ),
         # Data minimisation: personal data must still be deleted on time, licensed or not.
         Job("usage.retention", job_usage_retention, daily_after=time(3, 30)),
-        # Before the Backup task's pg_dump (01:40, W5-G-26): a dump does not hold up its drops.
+        # Before the Backup task's pg_dump (01:40, W5-G-27): a dump does not hold up its drops.
         Job("db.window", job_db_window, daily_after=time(1, 0)),
         # Reports after the alerts: a report lists the alerts imported just before it.
         Job("reports.run_due", job_reports_run_due, every=REPORTS_EVERY, module=REPORTS_MODULE),
