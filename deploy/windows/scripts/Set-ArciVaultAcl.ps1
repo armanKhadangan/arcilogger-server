@@ -59,10 +59,12 @@
     inherited entries of the files below them. Below state\crl and state\renewal alone, every
     item also loses its explicit entries and gets Administrators as its owner (contract W5-E-9).
     A link there (a reparse point such as a junction, or a hard link) stops the script before
-    that folder is changed. An item whose entries leave Administrators out is taken over all the
-    same; one that still cannot be (a policy that took the take-ownership privilege away) stops
-    it with an error naming the item (takeown /A /R /F <folder> takes it over by hand). File
-    contents are never touched.
+    any entry is written: both folders and everything below them are checked first, since the
+    entries of state reach a folder below that is not protected yet (contract W5-E-10), and
+    each again before it is changed. An item whose entries leave Administrators out is taken
+    over all the same; one that still cannot be (a policy that took the take-ownership privilege
+    away) stops it with an error naming the item (takeown /A /R /F <folder> takes it over by
+    hand). File contents are never touched.
 
     Run again at any time (idempotent), e.g. after restoring the server.
 
@@ -140,6 +142,16 @@ if ($PlanOnly) {
 
 if (-not (Test-ArciWindows)) { throw 'Bu betik yalnızca Windows üzerinde çalışır [Windows only].' }
 if (-not (Test-ArciAdministrator)) { throw 'Yönetici olarak çalıştırın [run as Administrator].' }
+
+# Links first, before any entry is written (contract W5-E-10): state, written before state\crl
+# and state\renewal, passes its inheritable entries on to either folder while it is not
+# protected yet, and through a hard link in it to the file it names elsewhere.
+# Set-ArciAclEntry -ResetOwner checks each folder again just before it changes it.
+foreach ($entry in @($plan | Where-Object { $_.ResetOwner })) {
+    if (Test-Path -LiteralPath $entry.Path) {
+        Confirm-ArciNoLink -Item (Get-Item -LiteralPath $entry.Path -Force) -Folder $entry.Path -Below
+    }
+}
 
 foreach ($entry in $plan) {
     if (-not (Test-Path -LiteralPath $entry.Path)) {

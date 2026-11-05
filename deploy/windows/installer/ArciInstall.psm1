@@ -2290,6 +2290,56 @@ function Set-ArciAccessControl {
     [System.IO.FileSystemAclExtensions]::SetAccessControl([System.IO.FileInfo]$Item, [System.Security.AccessControl.FileSecurity]$Security)
 }
 
+function Get-ArciTakeOverError([string]$Folder, [System.IO.FileSystemInfo]$Taken, $ErrorRecord) {
+    # Access denied on an item names no path: name the item and the remedy (Confirm-ArciNoLink,
+    # Set-ArciAclEntry -ResetOwner).
+    "Sahiplik alınamadı, yükseltilmiş PowerShell'de takeown /A /R /F {0} ile elle devralın [could not take ownership, take it over by hand with takeown /A /R /F {0} in an elevated PowerShell]: {1}: {2}" -f $Folder, $Taken.FullName, $ErrorRecord.Exception.Message
+}
+
+function Confirm-ArciNoLink {
+    <#
+    .SYNOPSIS
+        Stop at a link in a protected state folder: a reparse point (a junction, a symbolic
+        link) or a hard link (a file with another name elsewhere), at -Item and, with -Below, at
+        every item below it too (contract W5-E-9, W5-E-10). Changes nothing.
+    .DESCRIPTION
+        Set-ArciVaultAcl.ps1 runs it on state\crl and state\renewal (the plan's ResetOwner
+        entries) before it writes any entry: the entries of state, written before them, reach a
+        folder below that is not protected yet, and through a hard link in it the file it names
+        elsewhere. Set-ArciAclEntry -ResetOwner runs it again on the folder before its entries
+        are written and on each item below before that item's reset. Listing needs only the
+        access Administrators inherit from state; an item that cannot be read or listed stops it
+        with the take-over error that names -Folder.
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory = $true)][System.IO.FileSystemInfo]$Item, [Parameter(Mandatory = $true)][string]$Folder, [switch]$Below)
+    $items = New-Object System.Collections.Generic.List[object]
+    $items.Add($Item)
+    for ($i = 0; $i -lt $items.Count; $i++) {
+        $checked = $items[$i]
+        # The attributes come with the listing. LinkType (PowerShell's own property) opens the
+        # file and is HardLink for a file with more than one name.
+        try {
+            $reparse = [bool]($checked.Attributes -band [System.IO.FileAttributes]::ReparsePoint)
+            $hardLink = -not $reparse -and $checked -is [System.IO.FileInfo] -and $checked.LinkType -eq 'HardLink'
+        }
+        catch { throw (Get-ArciTakeOverError $Folder $checked $_) }
+        if ($reparse -or $hardLink) {
+            $message = "Korunan durum klasöründe bir bağlantı var, elle kaldırın [a link (reparse point or hard link) in a protected state folder, remove it by hand]: {0}" -f $checked.FullName
+            if ($hardLink) {
+                # crl._store_new links a new list to its final name from a ".<random>.tmp" name in
+                # the same folder and then removes that name: a run stopped in between leaves both.
+                $message += " (state\crl içinde aynı klasördeki '.<rastgele>.tmp' adı bir CrlFetch çalıştırmasının bıraktığı geçici addır: yalnızca o .tmp adını silin, kanıt olan .crl dosyasını asla silmeyin [in state\crl a '.<random>.tmp' name in the same folder is a temporary name a CrlFetch run left behind: delete only that .tmp name, never a .crl file, which is evidence])"
+            }
+            throw $message
+        }
+        if ($Below -and $checked -is [System.IO.DirectoryInfo]) {
+            try { foreach ($child in @($checked.GetFileSystemInfos())) { $items.Add($child) } }
+            catch { throw (Get-ArciTakeOverError $Folder $checked $_) }
+        }
+    }
+}
+
 function Set-ArciAclEntry {
     <#
     .SYNOPSIS
@@ -2305,7 +2355,8 @@ function Set-ArciAclEntry {
         owner can always change the entries of what it owns. A link there (a reparse point, or
         a hard link: a file with another name elsewhere) stops the step before the folder's own
         entries are written, since writing them also writes the inherited entries of what is
-        below, and resetting a link would take over whatever it points to. In state\crl a
+        below, and resetting a link would take over whatever it points to (Confirm-ArciNoLink;
+        Set-ArciVaultAcl.ps1 runs it on both folders before it writes any entry). In state\crl a
         hard-linked ".<random>.tmp" is a temporary name a CrlFetch run left behind (it links the
         new list to its final name, then removes the temporary one): delete only that .tmp
         name, never a .crl file, which is evidence. An item whose entries give Administrators no
@@ -2318,27 +2369,7 @@ function Set-ArciAclEntry {
     param([Parameter(Mandatory = $true)]$Entry, [switch]$ResetOwner)
     $item = Get-Item -LiteralPath $Entry.Path -Force
     $admins = New-Object System.Security.Principal.SecurityIdentifier -ArgumentList $script:WellKnownSid.Administrators
-    function Get-TakeOverError([System.IO.FileSystemInfo]$Taken, $ErrorRecord) {
-        # Access denied on an item names no path: name the item and the remedy.
-        "Sahiplik alınamadı, yükseltilmiş PowerShell'de takeown /A /R /F {0} ile elle devralın [could not take ownership, take it over by hand with takeown /A /R /F {0} in an elevated PowerShell]: {1}: {2}" -f $item.FullName, $Taken.FullName, $ErrorRecord.Exception.Message
-    }
-    function Assert-NoLink([System.IO.FileSystemInfo]$Link) {
-        # The attributes come with the listing. LinkType (PowerShell's own property) opens the
-        # file and is HardLink for a file with more than one name.
-        try {
-            $reparse = [bool]($Link.Attributes -band [System.IO.FileAttributes]::ReparsePoint)
-            $hardLink = -not $reparse -and $Link -is [System.IO.FileInfo] -and $Link.LinkType -eq 'HardLink'
-        }
-        catch { throw (Get-TakeOverError $Link $_) }
-        if (-not ($reparse -or $hardLink)) { return }
-        $message = "Korunan durum klasöründe bir bağlantı var, elle kaldırın [a link (reparse point or hard link) in a protected state folder, remove it by hand]: {0}" -f $Link.FullName
-        if ($hardLink) {
-            # crl._store_new links a new list to its final name from a ".<random>.tmp" name in
-            # the same folder and then removes that name: a run stopped in between leaves both.
-            $message += " (state\crl içinde aynı klasördeki '.<rastgele>.tmp' adı bir CrlFetch çalıştırmasının bıraktığı geçici addır: yalnızca o .tmp adını silin, kanıt olan .crl dosyasını asla silmeyin [in state\crl a '.<random>.tmp' name in the same folder is a temporary name a CrlFetch run left behind: delete only that .tmp name, never a .crl file, which is evidence])"
-        }
-        throw $message
-    }
+    function Get-TakeOverError([System.IO.FileSystemInfo]$Taken, $ErrorRecord) { Get-ArciTakeOverError $item.FullName $Taken $ErrorRecord }
     function Get-ItemBelow([System.IO.DirectoryInfo]$Folder) {
         try { $Folder.GetFileSystemInfos() }
         catch { throw (Get-TakeOverError $Folder $_) }
@@ -2346,19 +2377,10 @@ function Set-ArciAclEntry {
     if ($ResetOwner) {
         # Every item below is checked before the folder's own entries are written: Windows then
         # writes the inherited entries of everything below too, and a hard link shares its
-        # entries with the file it names elsewhere. Listing needs only the access Administrators
-        # inherit from state.
-        Assert-NoLink $item
-        if ($item -is [System.IO.DirectoryInfo]) {
-            $folders = New-Object System.Collections.Generic.List[object]
-            $folders.Add($item)
-            for ($i = 0; $i -lt $folders.Count; $i++) {
-                foreach ($child in @(Get-ItemBelow $folders[$i])) {
-                    Assert-NoLink $child
-                    if ($child -is [System.IO.DirectoryInfo]) { $folders.Add($child) }
-                }
-            }
-        }
+        # entries with the file it names elsewhere. Set-ArciVaultAcl.ps1 checked both folders
+        # before its first entry; this check also covers an item made since then, and any other
+        # caller.
+        Confirm-ArciNoLink -Item $item -Folder $item.FullName -Below
     }
     try {
         $security = Get-ArciAccessControl -Item $item
@@ -2389,7 +2411,7 @@ function Set-ArciAclEntry {
     foreach ($child in @(Get-ItemBelow $item)) { $below.Add($child) }
     for ($i = 0; $i -lt $below.Count; $i++) {
         $child = $below[$i]
-        Assert-NoLink $child
+        Confirm-ArciNoLink -Item $child -Folder $item.FullName
         try {
             $childSecurity = Get-ArciAccessControl -Item $child
             $childSecurity.SetAccessRuleProtection($false, $false)
@@ -3532,7 +3554,7 @@ Export-ModuleMember -Function @(
     'ConvertTo-ArciIsoDate', 'Get-ArciJsonField', 'Read-ArciLicenseFile', 'Read-ArciLicenseStatus', 'Test-ArciMaintenanceCovers',
     'Get-ArciProductReleaseDate', 'Get-ArciSiteToday', 'Get-ArciSiteTimestamp', 'Get-ArciOldestVaultDay', 'Get-ArciDaysBetween', 'Get-ArciWheelTestHelpers',
     'New-ArciAce', 'Get-ArciAclPlan', 'Get-ArciAceFlags',
-    'Get-ArciAccessControl', 'Set-ArciAccessControl', 'Set-ArciAclEntry', 'Set-ArciVaultAudit',
+    'Get-ArciAccessControl', 'Set-ArciAccessControl', 'Confirm-ArciNoLink', 'Set-ArciAclEntry', 'Set-ArciVaultAudit',
     'Get-ArciDefaultSourceNetworks', 'ConvertTo-ArciSourceNetwork', 'New-ArciAdminPolicy', 'Read-ArciAdminPolicy',
     'ConvertTo-ArciSyslogSender', 'Get-ArciSyslogSenderProblem', 'Get-ArciOutboundProblem', 'Test-ArciHostName',
     'Get-ArciEventLogApi', 'Register-ArciEventSource', 'Unregister-ArciEventSource', 'Write-ArciEvent', 'Test-ArciProgramConfig', 'Test-ArciPathBelow',

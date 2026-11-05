@@ -2059,13 +2059,13 @@ All Wave 5 questions are answered (2026-11-02).
   access Administrators inherit from `state`): writing a folder's entries also writes the
   inherited entries of everything below it, and a hard link shares its entries with the file it
   names elsewhere. After the folder's reset its items are listed again, and each is checked once
-  more before its own reset. Windows' propagation of the entries written before, which every
-  entry of the plan has always caused, is not changed: `state`'s, on the first upgrade, still
-  reaches a folder that is not protected yet, and a link in it. In `state\crl`, `crl fetch` itself
+  more before its own reset. Both folders are also checked before the plan's first entry is
+  written (W5-E-10): `state`'s entries, written before them, reach a folder that is not
+  protected yet on the first upgrade, and a link in it. In `state\crl`, `crl fetch` itself
   can leave a hard link: `_store_new` writes a list under a `.<random>.tmp` name, links it to its
   final name and then removes the temporary name, so a run stopped in between (a reboot, the
   task's time limit) or a failed removal leaves both names, and nothing in `crl.py` removes them
-  later. The step then stops at that folder, before `state\renewal` and the entries after it;
+  later. The step then stops before it writes any entry (W5-E-10);
   the error for a hard link says to delete only the `.<random>.tmp` name in the same folder,
   never a `.crl` file, which is evidence. That `crl fetch` should remove its own leftover
   temporary names is for the owner of `core/src/arcilogger_core/crl.py` (not changed here). An
@@ -2097,6 +2097,27 @@ All Wave 5 questions are answered (2026-11-02).
   inheritance off, a stand-in service as its owner and a Modify entry of its own: afterwards
   Administrators own it, it has inherited entries only, and LOCAL SERVICE keeps its inherited
   Modify).
+- **W5-E-10: the ACL step checks both protected state folders for links before it writes any
+  entry (#170, item N1).** `Set-ArciVaultAcl.ps1` wrote `state` before it reached the two
+  `ResetOwner` entries, and writing `state` passes its inheritable Modify (collector, ingest,
+  worker) on to a `state\renewal` or `state\crl` that a service created before the upgrade and
+  that is not protected yet, and through a hard link in it to the file it names elsewhere,
+  before the W5-E-9 link check of that folder ran. The script now runs that check, the module's
+  `Confirm-ArciNoLink -Below` (exported; the W5-E-9 check and its error texts, moved out of
+  `Set-ArciAclEntry` with the take-over error, `Get-ArciTakeOverError`), on every `ResetOwner`
+  entry that exists and everything below it after its Windows and administrator checks and
+  before its write loop: a link stops the step with no entry written and no folder of the plan
+  created. `Set-ArciAclEntry -ResetOwner` keeps its own checks (the folder and everything below
+  before the folder's entries, each item again before its reset), calling the same function:
+  not a duplicate, since they also cover an item made between the pre-flight and the folder's
+  write and any other caller of the switch. Tests:
+  `test_acl_script_checks_both_protected_state_folders_for_links_first` (the order in the
+  script, the calls in `Set-ArciAclEntry`) and on Windows
+  `test_acl_step_finds_a_link_before_it_writes_any_entry` (a hard link in a pre-created
+  `state\renewal` that is not protected: the step exits non-zero with the link error, the file
+  the link names keeps its owner and every entry, the inherited ones too, the data root, `state`
+  and `state\renewal` keep theirs, and neither `kamusm-roots` in the configuration folder nor
+  `spool` in the data root is created).
 
 ## Deviations — #119 (2026-11-04)
 

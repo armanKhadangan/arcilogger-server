@@ -3146,6 +3146,59 @@ def test_acl_step_stops_at_a_link_in_a_protected_state_folder(kind: str, tmp_pat
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="NTFS rights are Windows-only")
+def test_acl_step_finds_a_link_before_it_writes_any_entry(tmp_path: Path) -> None:
+    """A hard link in a state\\renewal that a service could have created before the upgrade,
+    not protected yet (#170 N1, W5-E-10): written first, the entries of state would reach the
+    folder, and through the link the file it names elsewhere. The ACL step checks both
+    protected state folders before it writes any entry and stops at the link: the file
+    elsewhere keeps its owner and every entry, the inherited ones too, the data root, state and
+    state\\renewal keep theirs, and no folder of the plan is created."""
+    powershell = _windows_admin_powershell()
+    data, programdata, program = tmp_path / "data", tmp_path / "programdata", tmp_path / "program"
+    programdata.mkdir()
+    program.mkdir()
+    state = data / "state"
+    renewal_state = state / "renewal"
+    renewal_state.mkdir(parents=True)
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    kept = elsewhere / "kept.txt"
+    kept.write_bytes(b"kept\n")
+    subprocess.run(["icacls", str(kept), "/grant", "*S-1-1-0:R"], check=True)
+    link = renewal_state / "renewal.lock"
+    subprocess.run(["cmd", "/c", "mklink", "/H", str(link), str(kept)], check=True)
+    watched = [kept, data, state, renewal_state]
+    before = _owners_and_rules(powershell, tmp_path, watched)
+    # What the setup guarantees: state\renewal inherits (state's entries would reach it), and
+    # kept.txt has entries inherited from elsewhere that a write through the link would replace.
+    assert before[renewal_state]["protected"] is False, before
+    assert any(r["inherited"] for r in before[kept]["rules"]), before
+    result = run_powershell(
+        powershell,
+        WINDOWS / "scripts" / "Set-ArciVaultAcl.ps1",
+        "-DataRoot",
+        str(data),
+        "-ProgramDataDir",
+        str(programdata),
+        "-InstallDir",
+        str(program),
+        "-SkipAudit",
+    )
+    output = result.stdout + result.stderr
+    assert result.returncode != 0, output
+    message = _unwrapped("[a link (reparse point or hard link) in a protected state folder")
+    unwrapped = _unwrapped(output)
+    assert message in unwrapped, output
+    assert "renewal.lock" in unwrapped[unwrapped.index(message) :], output
+    after = _owners_and_rules(powershell, tmp_path, watched)
+    for path in watched:
+        assert after[path] == before[path], (path, before[path], after[path], output)
+    # The write loop never started: it creates the plan's missing folders as it reaches them.
+    for folder in (programdata / "kamusm-roots", data / "spool"):
+        assert not folder.exists(), (folder, output)
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="NTFS rights are Windows-only")
 def test_acl_step_takes_over_a_lock_a_service_left_as_its_own(tmp_path: Path) -> None:
     """A renewal.lock a service left as its own: itself as the owner, a Modify entry of its own,
     inheritance off. Held, it would stop every Renew run (answer to Q4 on #158). The elevated
@@ -11733,6 +11786,47 @@ def test_only_the_acl_script_passes_reset_owner() -> None:
         "Set-ArciVaultAcl.ps1",
         INSTALL_SCRIPT.name,
     }
+
+
+def test_acl_script_checks_both_protected_state_folders_for_links_first() -> None:
+    """#170 N1 (W5-E-10): Set-ArciVaultAcl.ps1 checks state\\crl and state\\renewal (the plan's
+    ResetOwner entries) and everything below them for links after its Windows and administrator
+    checks and before its write loop, so that a link stops it with nothing written. The check
+    is the module's, the one Set-ArciAclEntry -ResetOwner runs again on the folder before its
+    entries and on each item below before its reset. On Windows:
+    test_acl_step_finds_a_link_before_it_writes_any_entry."""
+    script = (WINDOWS / "scripts" / "Set-ArciVaultAcl.ps1").read_text("utf-8-sig")
+    # The code after the help, without its comments (they name the commands too).
+    code = "\n".join(
+        line
+        for line in script[script.index("#>") :].splitlines()
+        if not line.lstrip().startswith("#")
+    )
+    preflight = (
+        "foreach ($entry in @($plan | Where-Object { $_.ResetOwner })) {\n"
+        "    if (Test-Path -LiteralPath $entry.Path) {\n"
+        "        Confirm-ArciNoLink -Item (Get-Item -LiteralPath $entry.Path -Force)"
+        " -Folder $entry.Path -Below\n"
+    )
+    assert code.count(preflight) == 1
+    assert code.count("Confirm-ArciNoLink") == 1
+    write_loop = "foreach ($entry in $plan) {\n    if (-not (Test-Path -LiteralPath $entry.Path))"
+    assert code.count(write_loop) == 1
+    administrator = "if (-not (Test-ArciAdministrator)) { throw"
+    first_write = min(
+        code.index(write) for write in ("Set-ArciAclEntry", "New-Item", "Set-ArciVaultAudit")
+    )
+    assert code.index(administrator) < code.index(preflight) < code.index(write_loop)
+    assert code.index(write_loop) < first_write
+    module = MODULE.read_text("utf-8-sig")
+    assert "Assert-NoLink" not in module
+    exported = module[module.index("\nExport-ModuleMember -Function @(") :]
+    assert "'Confirm-ArciNoLink'" in exported
+    entry = _function(module, "Set-ArciAclEntry")
+    folder_check = "Confirm-ArciNoLink -Item $item -Folder $item.FullName -Below"
+    child_check = "Confirm-ArciNoLink -Item $child -Folder $item.FullName\n"
+    assert entry.index(folder_check) < entry.index("Set-ArciAccessControl -Item $item")
+    assert entry.index(child_check) < entry.index("Set-ArciAccessControl -Item $child")
 
 
 def test_acl_script_help_lists_every_state_folder_of_the_plan() -> None:
