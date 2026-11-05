@@ -22,7 +22,7 @@ from dataclasses import dataclass
 from datetime import date
 from pathlib import Path, PureWindowsPath
 from typing import Literal
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urlsplit
 
 from pydantic import (
     BaseModel,
@@ -152,6 +152,34 @@ class TsaConfig(_Model):
     #: docs/kamusm.md: set false only after the Kamu SM certificate profile is confirmed to
     #: mark it non-critical; the choice is sealed into every manifest.
     require_critical_eku: bool = True
+    #: Re-stamping (W5-A): a token whose TSA certificate expires within this many days is
+    #: renewed.
+    renew_before_days: int = Field(default=180, ge=30, le=730)
+    #: Revocation lists (W5-B, D7): where ``CrlFetch`` downloads them from. Empty (the default):
+    #: the http/https distribution points named in the pinned certificates. Each is an http or
+    #: https URL without a user name or password.
+    crl_urls: tuple[str, ...] = Field(default=(), max_length=20)
+    #: An issuer's newest revocation list fetched longer ago than this is stale (C22).
+    crl_max_age_days: int = Field(default=7, ge=1, le=60)
+    #: Lets ``provider = "turktrust"`` use a plain ``http://`` URL. The user name and password
+    #: then cross the network in clear text, so it is off by default and only meaningful for
+    #: ``turktrust`` (§2.4).
+    allow_plain_http: bool = False
+
+    @field_validator("crl_urls")
+    @classmethod
+    def _crl_urls(cls, values: tuple[str, ...]) -> tuple[str, ...]:
+        for value in values:
+            parts = urlsplit(value)
+            try:
+                port = parts.port
+            except ValueError:  # not a number, or out of range
+                port = -1
+            if parts.scheme not in ("http", "https") or not parts.hostname or port == -1:
+                raise ValueError(f"not an http or https URL: {value!r}")
+            if parts.username is not None or parts.password is not None:
+                raise ValueError(f"no user name or password in a revocation list URL: {value!r}")
+        return values
 
     @field_validator("legal_root_fingerprints")
     @classmethod
@@ -175,6 +203,36 @@ class TsaConfig(_Model):
         when its verified token also chains to a root of ``legal_root_fingerprints``
         (:func:`arcilogger_core.tsa.verify.confirmed_legal_grade`)."""
         return self.provider == "zamane" and self.host == KAMUSM_PRODUCTION_HOST
+
+
+class NetworkConfig(_Model):
+    #: Outbound HTTP proxy for the time-stamp server and the revocation lists:
+    #: ``http://host:port`` (a numeric port, no user name or password), or empty for a direct
+    #: connection.
+    https_proxy: str = ""
+
+    @field_validator("https_proxy")
+    @classmethod
+    def _proxy(cls, value: str) -> str:
+        if not value:
+            return value
+        parts = urlsplit(value)
+        try:
+            port = parts.port
+        except ValueError:  # not a number, or out of range
+            port = None
+        if (
+            parts.scheme != "http"
+            or not parts.hostname
+            or port is None
+            or parts.username is not None
+            or parts.password is not None
+            or parts.path not in ("", "/")
+            or parts.query
+            or parts.fragment
+        ):
+            raise ValueError(f"https_proxy must be http://host:port (no credentials): {value!r}")
+        return value
 
 
 class RetentionConfig(_Model):
@@ -377,6 +435,7 @@ class Config(_Model):
     retention: RetentionConfig = RetentionConfig()
     replica: ReplicaConfig = ReplicaConfig()
     clock: ClockConfig = ClockConfig()
+    network: NetworkConfig = NetworkConfig()
     database: DatabaseConfig = DatabaseConfig()
     api: ApiConfig = ApiConfig()
     ingest: IngestConfig = IngestConfig()
