@@ -3293,3 +3293,64 @@ def test_a_stop_during_a_resets_steps_ends_its_round(
     assert reload_row(db_engine, reload_id)["status"] == "ready"
     assert snapshot(db_engine) == before
     counts_agree(db_engine)
+
+
+# -- a reload aborted by a conflict is made again in the next round (#149) -------------------
+
+
+class DeadlockError(Exception):
+    """A driver error with the SQLSTATE of a deadlock, as psycopg's carry it (``sqlstate``); the
+    driver is not imported here: psycopg stays behind ``arcilogger_db`` (ADR-0005)."""
+
+    sqlstate = "40P01"
+
+
+@pytest.mark.parametrize("where", ["reset", "load"])
+def test_a_reload_aborted_by_a_deadlock_is_made_again_in_the_next_round(
+    world: World,
+    db_engine: Engine,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    where: str,
+) -> None:
+    """#149: a reload's write aborted by a deadlock (a TimescaleDB recompression of the chunk
+    it writes into), in a step of its reset or in a batch of its load, is rolled back and made
+    again in the next round. The database is not reported unavailable, and the day comes back
+    exactly once."""
+    load_day(world, db_engine)
+    before = snapshot(db_engine)
+    drop(db_engine, DAY + timedelta(days=2))
+    reload_id = queue(db_engine, DAY)
+    service = world.service(db_engine)
+    aborts: list[str] = []
+    downs: list[str] = []
+
+    def deadlock() -> OperationalError:
+        aborts.append(where)
+        return OperationalError("DELETE", None, DeadlockError("deadlock detected (by the test)"))
+
+    if where == "reset":
+        real_step = IngestService._reset_step
+
+        def step(*args: Any, **kwargs: Any) -> bool:
+            if not aborts:
+                raise deadlock()
+            return real_step(*args, **kwargs)
+
+        monkeypatch.setattr(IngestService, "_reset_step", staticmethod(step))
+    else:
+        real_load = service.loader.load
+
+        def load(batch: Any) -> Any:
+            if not aborts:
+                raise deadlock()
+            return real_load(batch)
+
+        monkeypatch.setattr(service.loader, "load", load)
+    monkeypatch.setattr(service, "_database_down", lambda exc: downs.append(str(exc)))
+    assert service.run(once=True) == 0
+    assert aborts == [where]
+    assert downs == []
+    assert reload_row(db_engine, reload_id)["status"] == "ready"
+    assert snapshot(db_engine) == before
+    assert "(40P01)" in caplog.text
