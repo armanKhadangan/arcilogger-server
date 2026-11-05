@@ -61,7 +61,8 @@ def test_an_extract_from_an_xz_day_without_lzma_fails_as_xz_unsupported(
     world: Any, days: list[Any], tmp_path: Path
 ) -> None:
     """#136: an extract cannot be compared without lzma, so it must not pass; it fails as
-    ``xz-unsupported`` (not as ``extract-mismatch``), and the day's own file only warns."""
+    ``extract-xz-unsupported`` (not as ``extract-mismatch``), and the day's own file only warns
+    (``xz-unsupported``)."""
     world.reconfigure(seal={"quiet_seconds": 0, "compression": "xz"})
     for day in days:
         world.busy_day(day)
@@ -86,7 +87,7 @@ def test_an_extract_from_an_xz_day_without_lzma_fails_as_xz_unsupported(
         sv.lzma = saved
     fails = {(f.code, f.where) for f in report.findings if f.level == "fail"}
     warns = {f.code for f in report.findings if f.level == "warn"}
-    assert ("xz-unsupported", "alıntı") in fails
+    assert ("extract-xz-unsupported", "alıntı") in fails
     assert not {code for code, _ in fails} & {"extract-mismatch", "file-content-mismatch"}
     assert "xz-unsupported" in warns
     assert report.passed is False

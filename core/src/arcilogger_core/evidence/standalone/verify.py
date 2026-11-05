@@ -1748,7 +1748,8 @@ READ_ERRORS = (OSError, EOFError, zipfile.BadZipFile, zlib.error, _LZMA_ERROR, T
 
 class XzUnsupportedError(OSError):
     """This Python has no ``lzma`` module, so an ``.xz`` file cannot be decompressed. Not damage:
-    the report names it ``xz-unsupported``, never as a content or extract mismatch."""
+    the report names it ``xz-unsupported`` (a day's file, a warning) or
+    ``extract-xz-unsupported`` (an extract, a failure), never a content or extract mismatch."""
 
 
 #: The suffixes of a sealed day's files: gzip (every day sealed before Wave 5) and seekable xz.
@@ -3650,7 +3651,7 @@ class Verifier:
                         found[number + 1] = rest  # a torn last line is a line too
         except XzUnsupportedError:
             report.fail(
-                "xz-unsupported",
+                "extract-xz-unsupported",
                 "alıntı",
                 f"{name}: bu Python'da lzma modülü yok; alıntının kaynağı {sealed} açılamadığı "
                 "için alıntı satırları denetlenemedi. lzma'lı bir Python ile (python.org) tekrar "

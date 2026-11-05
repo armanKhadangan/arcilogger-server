@@ -49,7 +49,8 @@ FortiGate / MikroTik ── syslog ──► ArciCollector ──► spool\<kayn
    kaynak dosyası belirlenimci olarak sıkıştırılır, sıkıştırılmış ve açılmış halinin SHA-256
    özetleri ve satır sayısı hesaplanır. Biçim `xz`'dir (`<kaynak>.log.xz`, `audit.jsonl.xz`):
    dosya, her biri 16 MiB açılmış veri taşıyan bağımsız xz akışlarının art arda eklenmesidir;
-   ARCILOGGER tek bir satırı göstermek için yalnızca o satırın akışını açar. Bu biçimden önce
+   ARCILOGGER bir dosyanın ilk gösteriminde satır numarasını denetlemek için önceki akışlardaki
+   satırları sayar, sonraki gösterimlerde yalnızca o satırın akışını açar. Bu biçimden önce
    mühürlenmiş günler `gzip -n` (dosya adı ve zaman yok) ile `.gz` olarak kalır ve hiçbir zaman
    yeniden sıkıştırılmaz (ham kayıt delildir); bir kasada iki biçim yan yana bulunabilir.
    Manifestteki `path` uzantısı biçimi söyler. Dosyaları açmak için bölüm 5'teki "Mühürlü
@@ -330,11 +331,17 @@ günlerindir ve aynı şekilde açılır.
   olmalıdır.
 - **Linux/macOS, xz:** `xz -dc <kaynak>.log.xz > <kaynak>.log` (dosyayı yerinde bırakır);
   `xz -t <dosya>` yalnızca bütünlüğü sınar. Eski günler için `gzip -dc <kaynak>.log.gz`.
-- **Python:** `python -I -c "import lzma,shutil,sys; shutil.copyfileobj(lzma.open(sys.argv[1]),
-  open(sys.argv[2], 'wb'))" <kaynak>.log.xz <kaynak>.log` (`.gz` için `lzma` yerine `gzip`).
+**Önce C2'yi çalıştırın.** Bir dosyayı açmadan önce sıkıştırılmış halinin SHA-256 özetini
+manifestle karşılaştırın (C2) ya da her şeyi `verify.py`'ye bırakın: `verify.py` dosyayı akış
+akış okur ve bozuk bir akışta hata verir. Python'un `lzma.open` işlevi bozuk bir sonraki akışta
+hata vermeden durabilir ve daha kısa bir çıktı verebilir; bu yüzden burada Python ile açma
+yolu verilmez. C2'den geçmiş bir dosya 7-Zip ya da `xz -dc` ile güvenle açılır.
 
-`verify.py` iki biçimi de yalnızca Python'un standart kitaplığıyla okur; Python `lzma` modülü
-olmadan derlenmişse `.xz` dosyaları için hata verir, `.gz` günleri yine doğrulanır.
+`verify.py` iki biçimi de yalnızca Python'un standart kitaplığıyla okur. Python `lzma` modülü
+olmadan derlenmişse `.xz` dosyalarının açılmış içeriği denetlenemez: günün dosyası için
+`xz-unsupported` UYARI'sı verilir (sıkıştırılmış dosyanın SHA-256 değeri yine denetlenir), bir
+alıntı ise karşılaştırılamadığı için `extract-xz-unsupported` HATA'sı olur; `.gz` günleri tam doğrulanır. python.org'dan
+kurulan Python'da `lzma` vardır.
 
 ### Kök sertifikalar
 
@@ -402,6 +409,8 @@ alanı); ekrandaki her satır ayrıca Türkçe ve İngilizce açıklamasını ta
 | `chain-broken`, `chain-not-previous-day` | HATA | Önceki gün sonradan değiştirilmiş ya da bağlantı yanlış |
 | `index-hash-mismatch`, `index-not-canonical` | HATA | `paket.json` ya da listelediği bir dosya değiştirilmiş |
 | `extract-mismatch`, `extract-unknown` | HATA | Alıntı satırı mühürlü dosyadakiyle aynı değil; alıntı klasöründe beklenmeyen dosya |
+| `xz-unsupported` | UYARI | Bu Python'da `lzma` modülü yok: `.xz` dosyasının açılmış içeriği denetlenemedi (sıkıştırılmış halinin SHA-256 değeri yine denetlendi). python.org'dan kurulan bir Python ile tekrar çalıştırın |
+| `extract-xz-unsupported` | HATA | Bu Python'da `lzma` modülü yok: alıntının kaynağı olan `.xz` dosyası açılamadığı için alıntı satırları karşılaştırılamadı |
 | `legal-claim-mismatch` | HATA | Manifest yasal damga diyor, damga test TSA'sından |
 | `manifest-day-mismatch`, `manifest-misplaced` | HATA | Manifest başka bir güne ait ya da yanlış gün klasöründe |
 | `file-unreadable`, `file-path-invalid` | HATA | Dosya okunamadı; manifestteki yol geçersiz (`..`, mutlak yol vb.) |
@@ -514,7 +523,9 @@ python -I -c "import lzma,hashlib,sys; d=lzma.open(sys.argv[1]).read(); print(ha
 ```
 
 Çıkan değer girdideki `range_sha256` ile aynı olmalıdır; satır sayısı `to_line - from_line + 1`,
-yani `count` olmalıdır. Eski bir `.gz` gün için `lzma` yerine `gzip`, spool dosyası için
+yani `count` olmalıdır. Bunu dosyanın C2 denetiminden (sıkıştırılmış halinin SHA-256 değeri
+manifestle aynı) geçtikten sonra yapın: `lzma.open` bozuk bir sonraki akışta hata vermeden
+durabilir. Eski bir `.gz` gün için `lzma` yerine `gzip`, spool dosyası için
 `lzma.open` yerine `open(sys.argv[1], 'rb')` kullanın.
 
 **Dışa aktarma ve aramadan kanıt paketi.** `search.export` girdisindeki `sha256`, indirilen
@@ -679,18 +690,23 @@ manifest's SHA-256 is sent to TÜBİTAK BİLGEM Kamu SM, which returns an RFC 31
 read-only and copies them to the WORM share of the replica (e.g. on a NAS).
 
 **Sealed file formats.** Days are sealed as xz (`<source>.log.xz`, `audit.jsonl.xz`): a
-concatenation of independent xz streams of 16 MiB of uncompressed data each, so ARCILOGGER shows
-one line by decompressing only its stream. Days sealed before this format stay `.gz` (`gzip -n`)
+concatenation of independent xz streams of 16 MiB of uncompressed data each: the first view of a
+file counts the lines of the earlier streams (to check the line number), later views decompress
+only the line's stream. Days sealed before this format stay `.gz` (`gzip -n`)
 and are never re-encoded (raw logs are evidence); one vault can hold both. The `path` suffix in
 the manifest tells the format. Every xz tool decompresses all streams in order into the file whose
 SHA-256 is the manifest's `sha256_uncompressed`: on Windows 7-Zip ("7-Zip → Extract here", or
 `7z e <source>.log.xz`, which writes `<source>.log` itself; do not redirect output with `>`:
 Windows PowerShell 5.1 turns the bytes into UTF-16 text; ARCILOGGER's Windows tests check that 7-Zip reads the
 whole multi-stream file, and a one-time check with the site's 7-Zip version is recommended: field
-check X1), on Linux/macOS `xz -dc <source>.log.xz > <source>.log` (`xz -t` tests only), in Python
-`lzma.open(path).read()`; days sealed as gzip (`.gz`) with `gzip -dc` / `gzip.open`. `verify.py` reads both formats
-with the standard library; a Python built without `lzma` fails on `.xz` files and still verifies
-`.gz` days. In the manual checks of section 5 use `*.xz` (old days `*.gz`) for C2 and
+check X1), on Linux/macOS `xz -dc <source>.log.xz > <source>.log` (`xz -t` tests only); days
+sealed as gzip (`.gz`) with `gzip -dc`. **Run C2 first** (the compressed file's SHA-256 against
+the manifest) or let `verify.py` do it: Python's `lzma.open` can stop without an error at a
+damaged later stream and give a shorter output, so this guide gives no Python way to open a file.
+`verify.py` reads both formats with the standard library, stream by stream; a Python built
+without `lzma` cannot check an `.xz` file's content: `xz-unsupported` is a warning for a day's
+file (its compressed SHA-256 is still checked), and `extract-xz-unsupported` a failure for an
+extract, which cannot be compared; `.gz` days are verified in full. In the manual checks of section 5 use `*.xz` (old days `*.gz`) for C2 and
 `xz -dc … | sed -n 'Np'` (old days `gzip -dc`) for C4.
 
 **Retention.** Spool: until the day is sealed. Vault: 760 days by default, never below 730; the
@@ -813,7 +829,7 @@ after sealing in the decompressed `vault\YYYY\MM\DD\<source>.log.xz` (`.log.gz` 
 package holding that day of that source (sealing does not change the bytes). Recompute it with
 `python -I -c "import lzma,hashlib,sys; d=lzma.open(sys.argv[1]).read();
 print(hashlib.sha256(d[int(sys.argv[2]):int(sys.argv[3])]).hexdigest())" <source>.log.xz <from_offset>
-<to_offset>` (`gzip` instead of `lzma` for an old `.gz` day, `open(path, 'rb')` for the spool file); `count` is `to_line - from_line + 1`. The
+<to_offset>` (`gzip` instead of `lzma` for an old `.gz` day, `open(path, 'rb')` for the spool file), after the file passed C2; `count` is `to_line - from_line + 1`. The
 `sha256` of `search.export` is the downloaded file's (`Get-FileHash -Algorithm SHA256`; the answer
 carries it as `Repr-Digest`); an export is not sealed, as its "Bilgi" sheet says: the evidence
 package is the integrity proof. A package built from a search shows `search.refs`, then the same
