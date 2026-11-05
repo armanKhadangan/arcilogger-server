@@ -19,7 +19,8 @@ import pytest
 from arcilogger_core import sealedfile
 from arcilogger_core.chain import verify_range
 from arcilogger_core.config import SealConfig
-from arcilogger_core.seal import compress_deterministic
+from arcilogger_core.immutability import lock, unlock
+from arcilogger_core.seal import SealError, compress_deterministic
 from arcilogger_core.sealedfile import SealedFileError
 
 
@@ -210,6 +211,30 @@ def test_a_retry_in_the_other_format_removes_the_first_attempt(tmp_path: Path) -
     xz = tmp_path / sealedfile.log_name("fw", "xz")
     compress_deterministic(source, xz, SealConfig())
     assert sorted(p.name for p in tmp_path.iterdir()) == ["fw.log" + ".xz", "spool.log"]
+
+
+@pytest.mark.parametrize("why", ["locked", "named by a manifest", "unreadable manifest"])
+def test_a_sealed_file_in_the_other_format_is_never_removed(tmp_path: Path, why: str) -> None:
+    """Only a leftover of a failed attempt goes; sealed evidence stops the attempt (#136)."""
+    source = tmp_path / "spool.log"
+    source.write_bytes(b"x\n")
+    gz = tmp_path / sealedfile.log_name("fw", "gzip")
+    compress_deterministic(source, gz, SealConfig(compression="gzip"))
+    if why == "locked":
+        lock(gz)
+    elif why == "named by a manifest":
+        manifest = {"files": [{"path": f"2026/10/12/{gz.name}"}], "audit_log": None}
+        (tmp_path / "manifest-2026-10-12.json").write_text(json.dumps(manifest), encoding="utf-8")
+    else:
+        (tmp_path / "manifest-2026-10-12.json").write_bytes(b"[" * 100_000)
+    before = gz.read_bytes()
+    xz = tmp_path / sealedfile.log_name("fw", "xz")
+    with pytest.raises(SealError, match="sealed or locked"):
+        compress_deterministic(source, xz, SealConfig())
+    assert gz.read_bytes() == before
+    assert not xz.exists()
+    if why == "locked":
+        unlock(gz)
 
 
 def test_sealing_with_xz_keeps_old_gzip_days_and_verifies(world: Any, days: list[date]) -> None:

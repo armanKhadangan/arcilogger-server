@@ -327,9 +327,17 @@ def compress_deterministic(source: Path, target: Path, config: SealConfig) -> No
 
     The same file in the other format (an attempt made before ``[seal] compression`` changed) is
     removed first, with its ``.part``, so a vault day never holds both: readers would refuse the
-    pair as ``sealed_file_ambiguous``.
+    pair as ``sealed_file_ambiguous``. Only a leftover of a failed attempt is removed: a file that
+    is locked (sealed files are made read-only) or that a manifest of its folder names is sealed
+    evidence, and the attempt stops with :class:`SealError` instead.
     """
     for other in sealedfile.other_formats(target):
+        if other.exists() and (is_locked(other) or _named_by_a_manifest(other)):
+            raise SealError(
+                f"{other.name}: the same file in the other format is sealed or locked; "
+                "refusing to remove it",
+                retryable=False,
+            )
         other.unlink(missing_ok=True)
         other.with_name(other.name + ".part").unlink(missing_ok=True)
     sealedfile.write(
@@ -339,6 +347,21 @@ def compress_deterministic(source: Path, target: Path, config: SealConfig) -> No
         xz_preset=config.xz_preset,
         xz_threads=config.xz_threads,
     )
+
+
+def _named_by_a_manifest(path: Path) -> bool:
+    """A manifest in ``path``'s folder lists it (a file or the audit log); a manifest that
+    cannot be read counts as naming it, the side that never removes evidence."""
+    for manifest in path.parent.glob("manifest-*.json"):
+        try:
+            data = json.loads(manifest.read_bytes())
+            entries = [*data.get("files", []), data.get("audit_log") or {}]
+            named = {str(entry.get("path", "")).rsplit("/", 1)[-1] for entry in entries}
+        except (OSError, ValueError, AttributeError, TypeError, RecursionError):
+            return True
+        if path.name in named:
+            return True
+    return False
 
 
 def summarize_spool(
