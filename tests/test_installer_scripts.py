@@ -3227,16 +3227,17 @@ _UNOPENABLE_NAME = "[a name in a protected state folder that Windows cannot open
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="NTFS rights are Windows-only")
-@pytest.mark.parametrize("kind", ["trailing dot", "trailing space"])
+@pytest.mark.parametrize("kind", ["trailing dot", "trailing space", "device name"])
 def test_acl_step_stops_at_a_name_windows_cannot_open_by_its_path(
     kind: str, tmp_path: Path
 ) -> None:
     """A hard link in a pre-created state\\renewal that is not protected yet, under a name made
-    through the \\\\?\\ prefix that Windows cannot open by its path (#170, review of round 2):
-    "renewal.lock." (a trailing dot), or "inner.lock" in a folder "old " (a trailing space).
-    Opened by its path, the name reaches another item or none, so neither its link type nor its
-    entries can be read, and reading it as gone would let the entries of state reach the file it
-    names elsewhere (W5-E-11). The ACL step stops at the name before it writes any entry: the
+    through the \\\\?\\ prefix that Windows cannot open by its path (#170, review of round 2,
+    answer 5): "renewal.lock." (a trailing dot), "inner.lock" in a folder "old " (a trailing
+    space), or "NUL" (a device name, which its path opens instead). Opened by its path, the
+    name reaches another item or none, so neither its link type nor its entries can be read,
+    and reading it as gone would let the entries of state reach the file it names elsewhere
+    (W5-E-11). The ACL step stops at the name before it writes any entry: the
     file elsewhere, the data root, state and state\\renewal keep their owners and every entry,
     and no folder of the plan is created."""
     powershell = _windows_admin_powershell()
@@ -3253,6 +3254,8 @@ def test_acl_step_stops_at_a_name_windows_cannot_open_by_its_path(
     subprocess.run(["icacls", str(kept), "/grant", "*S-1-1-0:R"], check=True)
     if kind == "trailing dot":
         named, made = "renewal.lock.", [_extended(renewal_state, "renewal.lock.")]
+    elif kind == "device name":
+        named, made = "NUL", [_extended(renewal_state, "NUL")]
     else:
         named = "old "
         made = [_extended(renewal_state, named), _extended(renewal_state, named, "inner.lock")]
@@ -12226,8 +12229,16 @@ def test_acl_link_check_stops_at_a_name_windows_cannot_open_by_its_path(
     script = write_script(tmp_path / "names.ps1", _NAME_CHECK_SCRIPT)
     folder, out = tmp_path / "names", tmp_path / "names.json"
     folder.mkdir()
-    stopped = ["renewal.lock.", "old ", "NUL", "nul.json", "COM1", "lpt9.log", "AUX .txt"]
-    passed = ["renewal.json", "NULL", "console.log", "COM10", ".abcdefgh.tmp", "a. b"]
+    # One of each kind (answer 5 on #170): a trailing dot, a trailing space, and every device
+    # name, bare or with an extension.
+    stopped = [
+        "renewal.lock.", "old ", "CON", "prn.txt", "AUX .txt", "NUL", "NUL.txt", "nul.json",
+        "COM1", "COM9", "com\u00b9.log", "LPT1", "lpt9.log", "CONIN$", "conout$.txt",
+    ]  # fmt: skip
+    passed = [
+        "renewal.json", "NULL", "console.log", "COM10", "COM", "LPT", "AUXILIARY.txt",
+        "CONIN", ".abcdefgh.tmp", "a. b",
+    ]  # fmt: skip
     made: list[Path] = []
     try:
         for name in [*stopped, *passed]:

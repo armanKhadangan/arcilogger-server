@@ -2180,9 +2180,11 @@ All Wave 5 questions are answered (2026-11-02).
   that is gone itself lists nothing), never `Test-Path`, since Windows drops a trailing dot or
   space from a path and an item still there would read as gone (#170, review of round 2).
   Every other error still stops the step with the take-over error. A name that Windows cannot
-  open by its path, made through the `\\?\` prefix (a trailing dot or space, a device name
-  such as `NUL`, also with an extension), stops the link check, the pre-flight (W5-E-11) as
-  well as the owner reset, with its own error before anything of the item is read: by its path
+  open by its path, made through the `\\?\` prefix (a trailing dot or space, or a device name:
+  `CON`, `PRN`, `AUX`, `NUL`, `COM0`–`COM9`, `LPT0`–`LPT9` and their superscript forms, `CONIN$`,
+  `CONOUT$`, also with an extension such as `NUL.txt`; answer 5 on #170), stops the link
+  check, the pre-flight (W5-E-11) as well as the owner reset, with its own error naming the
+  item, Turkish first with English beside it, before anything of the item is read: by its path
   neither its link type nor its entries are its own, and a hard link under such a name would
   otherwise reopen the gap of W5-E-11. Tests:
   `test_acl_plan_least_privilege`, `test_acl_plan_gives_the_renew_and_crlfetch_tasks_their_rights`,
@@ -2213,11 +2215,13 @@ All Wave 5 questions are answered (2026-11-02).
   `renewal.json`) and `test_acl_step_still_stops_at_an_item_it_cannot_reset` (access denied
   on reading an item's entries: the take-over error naming the item);
   `test_acl_link_check_stops_at_a_name_windows_cannot_open_by_its_path` (with every
-  PowerShell: such names stop the check, names that only look alike pass),
+  PowerShell: a trailing dot, a trailing space and every kind of device name, bare or with an
+  extension, stop the check with the error naming the item; names that only look alike pass),
   `test_acl_link_check_reads_nothing_of_a_name_windows_cannot_open`, and on Windows
   `test_acl_step_stops_at_a_name_windows_cannot_open_by_its_path` (a hard link
-  `renewal.lock.`, or one in a folder `old `, in a pre-created `state\renewal` that is not
-  protected: the step stops with that error and nothing written, as in W5-E-11).
+  `renewal.lock.`, one in a folder `old `, or one named `NUL`, in a pre-created
+  `state\renewal` that is not protected: the step stops with that error and nothing written,
+  as in W5-E-11).
 - **W5-E-10: a failed task state (#171; the follow-up of Q9 on #158).** The task rows gain
   `failed` with a `code` (never the error text): (a) a `crl fetch` that finds the lock held is
   still not recorded (W5-B-2), (b) an index `crl fetch` cannot read is judged by the reader, with
