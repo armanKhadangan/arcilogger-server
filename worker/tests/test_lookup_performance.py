@@ -50,11 +50,13 @@ of the same kind on the traffic site.
 
 from __future__ import annotations
 
+import contextlib
 import functools
 import gc
 import itertools
 import math
 import os
+import platform
 import re
 import sys
 import time
@@ -63,6 +65,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
 from datetime import time as time_of_day
 from ipaddress import IPv4Network
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -1226,38 +1229,73 @@ MOVES_BOUND = MOVES_BOUNDS.get(sys.platform, 0.2)
 #: The margin over the slowest Windows reading.
 MOVES_MARGIN = 1.2
 #: CI's passing readings of the two guards (2026-11-05, ``guard split`` lines of the throughput
-#: step): platform, run/attempt, job, the runner's gauge (µs a line, the live-tail guard's),
-#: the best of :data:`ROUNDS` of the converted-row query and of the recorded-moves check, in
-#: seconds. Runs 41950691995 (``a2a859f``) and 41956302626 (``57742d0``, attempts 1-9 re-run
-#: one job each).
+#: step): platform, run/attempt, job, the runner's gauge (µs a line, the live-tail guard's), its
+#: CPU model as the ``guard split`` line prints it since #191 (None: before #191), the best of
+#: :data:`ROUNDS` of the converted-row query and of the recorded-moves check, in seconds. Runs
+#: 41950691995 (``a2a859f``) and 41956302626 (``57742d0``, attempts 1-9 re-run one job each).
 MOVES_READINGS = [
-    ("win32", "41950691995/1", 126993650686, 16.72, 0.115, 0.161),
-    ("win32", "41956302626/1", 127012205925, 8.62, 0.062, 0.085),
-    ("win32", "41956302626/2", 127052081954, 17.87, 0.123, 0.173),
-    ("win32", "41956302626/4", 127114691601, 17.54, 0.129, 0.169),
-    ("win32", "41956302626/6", 127194052338, 17.05, 0.132, 0.170),
-    ("win32", "41956302626/8", 127248835105, 9.52, 0.052, 0.104),
-    ("linux", "41950691995/1", 126993650651, 7.97, 0.024, 0.047),
-    ("linux", "41956302626/1", 127012206493, 11.81, 0.032, 0.067),
-    ("linux", "41956302626/3", 127071812028, 15.86, 0.041, 0.090),
-    ("linux", "41956302626/5", 127138516744, 15.84, 0.040, 0.086),
-    ("linux", "41956302626/7", 127221054741, 15.42, 0.037, 0.077),
+    ("win32", "41950691995/1", 126993650686, 16.72, None, 0.115, 0.161),
+    ("win32", "41956302626/1", 127012205925, 8.62, None, 0.062, 0.085),
+    ("win32", "41956302626/2", 127052081954, 17.87, None, 0.123, 0.173),
+    ("win32", "41956302626/4", 127114691601, 17.54, None, 0.129, 0.169),
+    ("win32", "41956302626/6", 127194052338, 17.05, None, 0.132, 0.170),
+    ("win32", "41956302626/8", 127248835105, 9.52, None, 0.052, 0.104),
+    ("linux", "41950691995/1", 126993650651, 7.97, None, 0.024, 0.047),
+    ("linux", "41956302626/1", 127012206493, 11.81, None, 0.032, 0.067),
+    ("linux", "41956302626/3", 127071812028, 15.86, None, 0.041, 0.090),
+    ("linux", "41956302626/5", 127138516744, 15.84, None, 0.040, 0.086),
+    ("linux", "41956302626/7", 127221054741, 15.42, None, 0.037, 0.077),
 ]
 
 
 @pytest.mark.parametrize(
-    ("system", "run", "job", "gauge", "converted", "moves"),
+    ("system", "run", "job", "gauge", "cpu", "converted", "moves"),
     MOVES_READINGS,
     ids=[f"{system}-{job}" for system, _run, job, *_rest in MOVES_READINGS],
 )
 def test_the_bounds_hold_every_ci_reading(
-    system: str, run: str, job: int, gauge: float, converted: float, moves: float
+    system: str, run: str, job: int, gauge: float, cpu: str | None, converted: float, moves: float
 ) -> None:
     """#179-2: every passing CI reading meets its bound, and Windows' bound is the rule's."""
     assert converted < CONVERTED_BOUND
     assert moves < MOVES_BOUNDS[system]
     slowest = max(m for s, *_rest, m in MOVES_READINGS if s == "win32")
     assert MOVES_BOUNDS["win32"] == math.ceil(round(slowest * MOVES_MARGIN * 100, 6)) / 100
+
+
+#: The first processor's registry key on Windows (its model in ``ProcessorNameString``).
+CPU_KEY = r"HARDWARE\DESCRIPTION\System\CentralProcessor\0"
+
+
+@functools.cache
+def _cpu_model() -> tuple[str, str]:
+    """The runner's CPU model and its cores, for CI's readings (#191): on Linux the first
+    ``model name`` of ``/proc/cpuinfo`` and its physical cores (its distinct ``physical id`` and
+    ``core id`` pairs), on Windows the registry's ``ProcessorNameString``; ``os.cpu_count()``'s
+    logical CPUs where the cores are not known, ``platform.processor()`` or ``unknown`` where the
+    model is not. It never raises. api's ``test_live_perf`` has a copy: the two packages share no
+    test module."""
+    model, cores = "", set[tuple[str, str]]()
+    with contextlib.suppress(OSError):
+        if sys.platform == "win32":
+            import winreg
+
+            with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, CPU_KEY) as key:
+                model = str(winreg.QueryValueEx(key, "ProcessorNameString")[0])
+        else:
+            physical = ""
+            for line in Path("/proc/cpuinfo").read_text("utf-8", "replace").splitlines():
+                name, _, value = (part.strip() for part in line.partition(":"))
+                if name == "model name" and not model:
+                    model = value
+                elif name == "physical id":
+                    physical = value
+                elif name == "core id":
+                    cores.add((physical, value))
+    model = model.strip() or platform.processor() or "unknown"
+    if cores:
+        return model, f"{len(cores)} cores"
+    return model, f"{os.cpu_count() or 'unknown'} logical CPUs"
 
 
 @dataclass
@@ -1279,10 +1317,10 @@ def _best_lookup(
     """``request`` run once to warm the caches, then :data:`ROUNDS` times, each round with a
     timer of its own: the split of ``_missed_moves`` (:meth:`_Timer.split`), what ``measure``
     installs on the timer and the statements recorded, all undone after the round. Every
-    round's ``_missed_moves`` (with its full collections, if any), the best round's split and
-    the site's :data:`CHECKPOINTS` entry are printed past pytest's capture (``poe test-perf``
-    runs without ``-s``, and the job log must show a passing run's figures too); the last
-    outcome, the rounds and the best of them are returned."""
+    round's ``_missed_moves`` (with its full collections, if any), the best round's split, the
+    site's :data:`CHECKPOINTS` entry and the runner's CPU (:func:`_cpu_model`, #191) are printed
+    past pytest's capture (``poe test-perf`` runs without ``-s``, and the job log must show a
+    passing run's figures too); the last outcome, the rounds and the best of them are returned."""
     _guard_run(site, request)
     rounds: list[_Round] = []
     outcome = None
@@ -1304,10 +1342,11 @@ def _best_lookup(
     best = min(rounds, key=lambda each: each.split.missed.seconds)
     seconds = " ".join(each.split.seconds() for each in rounds)
     checkpoint = CHECKPOINTS.get(site.url.database, "no checkpoint")
+    model, cores = _cpu_model()
     with capsys.disabled():
         print(
             f"\nguard split, {title}: _missed_moves best {best.split.missed.seconds:.3f}s "
-            f"of {ROUNDS} ({seconds}): {best.split.text()}; {checkpoint}"
+            f"of {ROUNDS} ({seconds}): {best.split.text()}; {checkpoint}; cpu {model}, {cores}"
         )
     best.timer.report(title)
     return outcome, rounds, best
