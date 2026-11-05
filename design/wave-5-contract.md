@@ -2498,23 +2498,31 @@ issue fixed is kept (command, flags, exit codes 0/1/2, JSON fields); what differ
   capture, each guard prints one `guard split, …` line every run: every round's seconds, and the
   best round's split into SQL (SQLAlchemy's cursor events while `_missed_moves` runs, with the
   statement count and the `leases.moves` statement's share), decode (`_recorded_moves` less that
-  statement: jsonb at fetch plus `parse_moves`), judging (`_bears` and `_recorded_move`, with the
-  calls of `_move_counts` and `stored_refusal`) and other. `event_site` and `moves_site` end with a
-  `CHECKPOINT` after their writes and `VACUUM (ANALYZE)` (as `test_search_perf` for #90), so their
-  write-back does not run into the timed rounds; without a superuser or `pg_checkpoint` it is
-  skipped and said so in the fixture's output.
-  - **Failures:** run 41883865419/1, job 126763249694 (Windows): 0.216 s, of which
-    `_recorded_moves` 0.050 s. Run 41913167039/1, job 126865764532 (Windows): 0.211 s / 0.048 s.
-    Run 41924238041/1, job 126904942486 (ubuntu-24.04): converted-row 0.287 s, while the same
-    job's C3 `converted_row` (the same `_missed_moves` on compressed chunks) was 0.048 s.
+  statement: SQLAlchemy's work for it, the jsonb values read at fetch and `parse_moves`), judging
+  (`_bears` and `_recorded_move`, with the calls of `_move_counts` and `stored_refusal`) and other;
+  a round with a full (gen-2) collection of Python's garbage collector inside `_missed_moves` shows
+  their count and pause beside its seconds. `event_site` and `moves_site` end with a `CHECKPOINT`
+  after their writes and `VACUUM (ANALYZE)` (as `test_search_perf` for #90), so their write-back
+  does not run into the timed rounds; its seconds, or that it was skipped (without a superuser or
+  `pg_checkpoint`), end the guard's line.
+  - **Failures:** run 41883865419/1, job 126763249694 (Windows, recorded-moves guard): 0.216 s, of
+    which `_recorded_moves` 0.050 s. Run 41913167039/1, job 126865764532 (Windows, recorded-moves
+    guard): 0.211 s / 0.048 s. Run 41924238041/1, job 126904942486 (ubuntu-24.04): converted-row
+    0.287 s, while the same job's C3 `converted_row` (the same `_missed_moves` on compressed chunks)
+    was 0.048 s.
   - **Local figures (plain PostgreSQL, the Windows layout), before and after #163:** converted-row
-    median 77.3 → 82.9 ms with the same plan; recorded-moves 117.4 ms, of which reading the moves
-    is about 35 ms. The timed round is warm: the same connection as the warm-up, compilation paid
-    in the warm-up, psycopg's prepare threshold not reached. With this change, one serial run gave
-    best 0.079 s (rounds 0.080–0.092) and 0.129 s (rounds 0.129–0.146 and one of 0.349).
+    median 77.3 → 82.9 ms with the same plan; recorded-moves 117.4 ms, of which reading the moves is
+    about 35 ms. The timed round is warm: the same connection as the warm-up, compilation paid in
+    the warm-up, psycopg's prepare threshold not reached. With this change, six serial runs (two of
+    the whole file, four of the two guards alone) gave a best of 0.078–0.080 s for the converted-row
+    guard and 0.112–0.129 s for the recorded-moves guard; the other rounds of the whole-file runs
+    took 0.080–0.092 s and 0.119–0.146 s, with one recorded-moves round of 0.349 s. Run alone, the
+    converted-row guard's fifth round took 0.195–0.225 s in all four runs, a gen-2 collection of 133
+    ms in the one measured; the best of 5 leaves it out.
   - **The main cost** is the nested loop of the statement's MAC branch: about 60 of 65 ms locally,
-    the `fg_dhcp` scans estimated at 27 rows against 5,699 returned. Changing it is a question for
-    the product code (`lookup/attribution.py`, `_missed_moves`), not changed here.
+    the `fg_dhcp` Append estimated at 27 rows against 5,699 returned (its join filter discards
+    564,201). Changing it is a question for the product code (`lookup/attribution.py`,
+    `_missed_moves`), not changed here.
   - **Open (step 2):** a measured budget per OS is decided only after the draft pull request has
     collected readings from passing CI runs. The Windows recorded-moves guard is expected near
     0.19–0.21 s on slow runners, so best of 5 may not be enough there.
