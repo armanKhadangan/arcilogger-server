@@ -2196,6 +2196,7 @@
     },
     "computed": {
       "today": "Data processed up to {{time}}",
+      "updated": "Last update {{updated}} (data up to {{time}})",
       "other": "Data processed up to {{date}} {{time}}",
       "endOfDay": "Data processed up to the end of {{date}}",
       "none": "The usage data has not been computed yet"
@@ -2211,6 +2212,7 @@
       "sessions": "Sessions",
       "blocked": "Blocked",
       "offHours": "Off hours",
+      "breaks": "Breaks",
       "firstLast": "First / last activity",
       "firstLastShort": "First – last",
       "time": "Time",
@@ -2227,6 +2229,8 @@
       "perUser": "Average per user {{value}}",
       "offHours": "Active time outside work hours",
       "offHoursShare": "Share of the active time: {{share}}",
+      "breaks": "Active time in the breaks of the work hours",
+      "breaksShare": "Share of the active time: {{share}}",
       "sessions": "Separate connection sessions",
       "blocked": "Web, DNS and application filter",
       "firstLast": "First and last active minute",

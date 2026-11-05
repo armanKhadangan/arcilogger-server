@@ -2196,6 +2196,7 @@
     },
     "computed": {
       "today": "Veriler {{time}}{{suffix}} kadar işlendi",
+      "updated": "Son güncelleme {{updated}} (veriler {{time}}{{suffix}} kadar)",
       "other": "Veriler {{date}} {{time}}{{suffix}} kadar işlendi",
       "endOfDay": "Veriler {{date}} sonuna kadar işlendi",
       "none": "Kullanım verileri henüz hesaplanmadı"
@@ -2211,6 +2212,7 @@
       "sessions": "Oturum",
       "blocked": "Engellenen",
       "offHours": "Mesai dışı",
+      "breaks": "Mola",
       "firstLast": "İlk / son etkinlik",
       "firstLastShort": "İlk – son",
       "time": "Süre",
@@ -2227,6 +2229,8 @@
       "perUser": "Kullanıcı başına ort. {{value}}",
       "offHours": "Mesai saatleri dışındaki aktif süre",
       "offHoursShare": "Aktif sürede payı: {{share}}",
+      "breaks": "Mesai içindeki molalarda geçen aktif süre",
+      "breaksShare": "Aktif sürede payı: {{share}}",
       "sessions": "Ayrı bağlantı oturumları",
       "blocked": "Web, DNS ve uygulama filtresi",
       "firstLast": "İlk ve son etkin dakika",

@@ -2,6 +2,7 @@ import {
   ArrowDownToLine,
   ArrowRight,
   ArrowUpFromLine,
+  Coffee,
   MonitorPlay,
   Moon,
   Network,
@@ -106,6 +107,8 @@ function CompanyContent({
   const perUser = data.active_users > 0 ? metrics.active_seconds / data.active_users : 0;
   const offShare =
     metrics.active_seconds > 0 ? metrics.off_hours_active_seconds / metrics.active_seconds : 0;
+  const breakShare =
+    metrics.active_seconds > 0 ? metrics.break_active_seconds / metrics.active_seconds : 0;
   const hourly = data.hourly.map((point) => ({
     hour: point.hour,
     download: point.download_bytes,
@@ -149,6 +152,15 @@ function CompanyContent({
           hint={t('usage.hints.offHoursShare', { share: shareText(offShare, lang) })}
           estimate={note}
         />
+        {metrics.break_active_seconds > 0 ? (
+          <KpiCard
+            label={t('usage.metrics.breaks')}
+            icon={Coffee}
+            value={formatDuration(metrics.break_active_seconds, lang)}
+            hint={t('usage.hints.breaksShare', { share: shareText(breakShare, lang) })}
+            estimate={note}
+          />
+        ) : null}
         <KpiCard
           label={t('usage.metrics.download')}
           icon={ArrowDownToLine}
@@ -385,7 +397,11 @@ export function CompanyTab({
   const data = company.data;
   return (
     <div className="flex flex-col gap-4">
-      <DataNote computedUntil={data?.computed_until} noticeKey={data?.notice_key} />
+      <DataNote
+        computedUntil={data?.computed_until}
+        updatedAt={data?.updated_at}
+        noticeKey={data?.notice_key}
+      />
       <QueryState query={company} empty={data ? noTraffic(data.metrics) : false}>
         {() =>
           data ? (

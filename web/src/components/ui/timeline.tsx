@@ -75,6 +75,12 @@ export interface DaySegment {
   detail?: string;
 }
 
+/** A shaded stretch of the day behind the segments (minutes since 00:00, `end` exclusive). */
+export interface DayBand {
+  start: number;
+  end: number;
+}
+
 interface DayActivityBarProps {
   segments: DaySegment[];
   /** Category order fixes the colours (never re-coloured by rank). */
@@ -82,6 +88,9 @@ interface DayActivityBarProps {
   lang?: Lang;
   label: string;
   className?: string;
+  /** Shaded stretches, e.g. the breaks of the work hours, named in the legend by `bandLabel`. */
+  bands?: DayBand[];
+  bandLabel?: string;
 }
 
 function clock(minutes: number): string {
@@ -102,12 +111,27 @@ export function DayActivityBar({
   lang = 'tr',
   label,
   className,
+  bands = [],
+  bandLabel,
 }: DayActivityBarProps) {
   const [hover, setHover] = useState<DaySegment | null>(null);
+  const bandText = bands.map((band) => `${clock(band.start)}–${clock(band.end)}`).join(', ');
   return (
     <figure className={cn('flex flex-col gap-2', className)}>
       <figcaption className="sr-only">{label}</figcaption>
       <div className="relative h-6 w-full rounded-md bg-subtle" role="list" aria-label={label}>
+        {bands.map((band) => (
+          <span
+            key={`band-${band.start}`}
+            aria-hidden="true"
+            data-testid="day-band"
+            className="absolute inset-y-0 border-x border-dashed border-warning bg-warning-soft"
+            style={{
+              left: `${(band.start / 1440) * 100}%`,
+              width: `${((band.end - band.start) / 1440) * 100}%`,
+            }}
+          />
+        ))}
         {segments.map((segment) => {
           const colour = seriesColor(categories.indexOf(segment.category));
           const text = describe(segment, lang);
@@ -151,6 +175,15 @@ export function DayActivityBar({
             {category}
           </li>
         ))}
+        {bands.length > 0 && bandLabel ? (
+          <li className="flex items-center gap-1.5">
+            <span
+              aria-hidden="true"
+              className="size-2.5 rounded-sm border border-dashed border-warning bg-warning-soft"
+            />
+            {`${bandLabel} (${bandText})`}
+          </li>
+        ) : null}
       </ul>
     </figure>
   );
