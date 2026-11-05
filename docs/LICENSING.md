@@ -147,6 +147,7 @@ data of a module that is off is not deleted.
 | `reports.run_due` | Scheduled usage reports | skipped |
 | `reports.purge` | — (deletion of report files) | always runs |
 | `system.sample` | 5651 Core | always runs |
+| `snmp.poll` | 5651 Core | always runs |
 | `search.counts_backfill` | 5651 Core | always runs |
 
 On the command line only `arcilogger-worker usage rebuild` is refused while Usage analytics is off

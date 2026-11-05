@@ -148,6 +148,7 @@ uyarısı açmaz. Kapalı modülün verileri silinmez.
 | `reports.run_due` | Zamanlanmış kullanım raporları | atlanır |
 | `reports.purge` | — (rapor dosyalarının silinmesi) | her zaman çalışır |
 | `system.sample` | 5651 Temel | her zaman çalışır |
+| `snmp.poll` | 5651 Temel | her zaman çalışır |
 | `search.counts_backfill` | 5651 Temel | her zaman çalışır |
 
 Komut satırında yalnızca `arcilogger-worker usage rebuild` Kullanım analizi kapalıyken reddedilir
