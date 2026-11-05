@@ -461,7 +461,7 @@ def test_a_turktrust_day_is_legal_grade_only_with_its_root_listed(
     day = _day(tmp_path)
     token = MockTsaProvider(tsa).stamp(day).token_path.read_bytes()
     claim = TsaConfig(provider="turktrust", url="https://zd.turktrust.com.tr/").legal_grade
-    result = verify_token(token, roots=[tsa.root_certificate], file_path=day, now=NOW)
+    result = verify_token(token, roots=[tsa.root_certificate], file_path=day)
     assert result.ok, result.errors
     root = fingerprint(tsa.root_certificate)
     assert result.details["root_sha256"] == root
