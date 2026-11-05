@@ -34,8 +34,14 @@ def _seal(world: Any, days: list[date]) -> None:
 def _old(world: Any, days: list[date], *, deleting: int = 1) -> None:
     """Seal ``days`` and move to the day on which the first ``deleting`` of them expire."""
     _seal(world, days)
-    world.reconfigure(retention={"enabled": True, "days": 730})
+    world.reconfigure(retention={"enabled": True, "days": 730, "batch_days": 1})
     world.set_now(days[deleting] + timedelta(days=730))
+
+
+def _batched(world: Any, days: list[date], batch_days: int) -> None:
+    """Seal ``days`` with retention on, deleting in batches of ``batch_days`` (#195)."""
+    _seal(world, days)
+    world.reconfigure(retention={"enabled": True, "days": 730, "batch_days": batch_days})
 
 
 def _run(world: Any) -> RetentionResult:
@@ -330,3 +336,88 @@ def test_a_record_without_a_valid_stamp_never_authorises_a_deletion(
     assert result.record == f"{today}-2-imha.json"
     assert result.deleted == [days[0]]
     assert legacy.exists()  # never deleted: an earlier manifest may have sealed it
+
+
+# -- batches (#195) --------------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("batch_days", [1, 2, 30, 180])
+def test_a_batch_is_due_once_its_oldest_day_has_been_expired_batch_days(
+    world: Any, days: list[date], batch_days: int
+) -> None:
+    """``due_day``: the oldest expired day expires 731 days after it (older than the cutoff of
+    730), and the batch is due ``batch_days`` days later, counting that first day: with 1 on the
+    day it expires, which is the behaviour before #195."""
+    world.reconfigure(retention={"enabled": True, "days": 730, "batch_days": batch_days})
+    first = days[0] + timedelta(days=731)
+    assert retention.plan(world.layout, world.config, first)[0] == days[0] + timedelta(days=1)
+    assert retention.due_day(days[0], world.config) == first + timedelta(days=batch_days - 1)
+
+
+def test_a_day_expired_fewer_than_batch_days_ago_is_not_deleted(
+    world: Any, days: list[date]
+) -> None:
+    """Expired for 1 of 2 days: the run does nothing and writes nothing (no record, no token,
+    no anchor, no alert); the result says when the batch is due."""
+    _batched(world, days, 2)
+    world.set_now(days[1] + timedelta(days=730))  # days[0]'s first expired day
+    result = _run(world)
+    assert result.candidates == [days[0]]
+    assert (result.deleted, result.record, result.error) == ([], None, None)
+    assert result.due == days[0] + timedelta(days=732)
+    assert _deletions(world) == []
+    assert _retention_alerts(world) == []
+    assert sealed_days(world.layout) == days
+
+
+def test_a_due_batch_deletes_every_expired_day_under_one_stamp(
+    world: Any, days: list[date], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The batch is due: both expired days go in one record, stamped once; the chain verifies
+    from the day after them."""
+    _batched(world, days, 2)
+    stamped: list[str] = []
+    stamp = MockTsaProvider.stamp
+
+    def counted(provider: MockTsaProvider, path: Path) -> Any:
+        stamped.append(path.name)
+        return stamp(provider, path)
+
+    monkeypatch.setattr(MockTsaProvider, "stamp", counted)
+    world.set_now(days[1] + timedelta(days=730))
+    assert _run(world).deleted == []
+    world.set_now(days[2] + timedelta(days=730))  # days[0] expired 2 days, days[1] 1 day
+    result = _run(world)
+    assert result.error is None, result.error
+    assert (result.deleted, result.due) == (days[:2], None)
+    name = f"{(days[2] + timedelta(days=730)).isoformat()}-imha.json"
+    assert result.record == name
+    assert stamped == [name + retention.PART_SUFFIX]
+    record = json.loads((world.layout.deletions / name).read_bytes())
+    assert [entry["day"] for entry in record["days"]] == [day.isoformat() for day in days[:2]]
+    assert _deletions(world) == [name, name + ".zd", "chain-anchor.json"]
+    assert sealed_days(world.layout) == days[2:]
+    _chain_ok(world, days[2:])
+
+
+def test_a_failed_batch_deletes_nothing_and_the_next_run_retries(
+    world: Any, days: list[date]
+) -> None:
+    """A due batch whose stamp fails is not lost: nothing is deleted, and the next run, still
+    due, deletes the whole batch."""
+    _batched(world, days, 2)
+    world.set_now(days[2] + timedelta(days=730))
+    world.tsa.failure = MockFailure.UNREACHABLE
+    failed = _run(world)
+    assert failed.error is not None
+    assert "nothing deleted" in failed.error
+    assert (failed.deleted, failed.record) == ([], None)
+    assert _deletions(world) == []
+    assert sealed_days(world.layout) == days
+
+    world.tsa.failure = MockFailure.NONE
+    world.set_now(days[2] + timedelta(days=730), hh=12)
+    again = _run(world)
+    assert again.error is None, again.error
+    assert again.deleted == days[:2]
+    _chain_ok(world, days[2:])

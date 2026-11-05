@@ -107,8 +107,11 @@ Saklama ve imha kararları için hukuk müşavirine verilecek taslaklar:
 [legal/saklama-imha-politikasi-taslak.md](legal/saklama-imha-politikasi-taslak.md),
 [legal/aydinlatma-metni-taslak.md](legal/aydinlatma-metni-taslak.md).
 
-Kasadan silme yalnızca saklama görevi (`retention`, varsayılan **kapalı**) tarafından yapılır:
-süresi dolan gün önce yeniden doğrulanır, silinen günlerin listesi ve özetleri bir **imha
+Kasadan silme yalnızca saklama görevi (`retention`, varsayılan **kapalı**) tarafından yapılır.
+Görev her gün çalışır ama toplu siler: süresi dolan en eski gün `retention.batch_days` gündür
+(varsayılan 30, 1–180) süresi dolmuşsa süresi dolan bütün günler tek bir imha tutanağıyla silinir;
+bir gün bu yüzden süresi dolduktan sonra en çok `batch_days` gün daha kasada kalabilir. Silinecek
+her gün önce yeniden doğrulanır, silinen günlerin listesi ve özetleri bir **imha
 tutanağına** yazılır, tutanak zaman damgasıyla mühürlenir, son silinen günün özetleri **zincir
 çapası** olarak saklanır ve tutanak ertesi günün manifestine eklenir. Böylece zincir, kalan en eski
 günden itibaren doğrulanabilir kalır.
@@ -695,7 +698,10 @@ with the standard library; a Python built without `lzma` fails on `.xz` files an
 
 **Retention.** Spool: until the day is sealed. Vault: 760 days by default, never below 730; the
 retention job is off by default. Vault days are deleted only by the retention job, with a
-time-stamped deletion record and a chain anchor. Evidence packages in `exports/`: 30 days. Stored
+time-stamped deletion record and a chain anchor. The job runs daily but deletes in batches: once
+the oldest expired day has been expired for `retention.batch_days` days (default 30, 1–180), every
+expired day goes under one deletion record, so a day may stay in the vault up to `batch_days`
+days after it expired. Evidence packages in `exports/`: 30 days. Stored
 official 5651 reports (`exports\reports\`) and the 5651 lookups: no expiry yet. ARCILOGGER's audit
 log: no expiry in the database; its daily file is sealed with the day. Parsed records in the
 database: derived and rebuildable from the vault; intended 400 days, but no deletion job exists yet

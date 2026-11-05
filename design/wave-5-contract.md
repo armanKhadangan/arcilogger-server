@@ -2299,6 +2299,24 @@ All Wave 5 questions are answered (2026-11-02).
   `test_a_deletion_records_token_is_judged_by_the_manifest_that_lists_it`
   (`test_renewal_evidence.py`) runs each through the builder's choice of roots, the standalone
   verifier on the vault and on the package (built, or refused by the self-check).
+- **W5-A-20: retention deletes in batches (#195, the manager's decision; the owner asked about
+  stamp usage on 2026-11-05).** One deletion record a day would double the credit use once the
+  vault passes `retention.days` (about 365 extra stamps a year). The `Retention` task stays daily,
+  but a run deletes only once the oldest expired day has been expired `retention.batch_days` days
+  (new key, `config.RetentionConfig`, default 30, 1–180; `retention.due_day`: that day plus
+  `retention.days + batch_days`, so 1 deletes a day on the day it expires, as before), and then
+  every expired day under one record, one stamp; about 12 records a year. Any other run does
+  nothing and writes nothing (`RetentionResult.due` names the day); a failed run deletes nothing
+  and the next one retries. 180 is KVKK's six-month ceiling of periodic destruction (sahada
+  doğrula: legal review, not a legal claim). Unchanged: the 730-day floor, the re-verification,
+  the record format, the chain anchor, the next manifest listing the record, the `.part` and
+  verify-before-rename rules, and an unfinished record of an interrupted run (finished first,
+  whatever the batch). The key is in `arcilogger.toml` only, not on the settings page. Tests:
+  `test_a_batch_is_due_once_its_oldest_day_has_been_expired_batch_days`,
+  `test_a_day_expired_fewer_than_batch_days_ago_is_not_deleted`,
+  `test_a_due_batch_deletes_every_expired_day_under_one_stamp`,
+  `test_a_failed_batch_deletes_nothing_and_the_next_run_retries` (`core/tests/test_retention.py`)
+  and `test_retention_batch_days_outside_1_to_180_is_refused` (`core/tests/test_config.py`).
 
 ## Deviations — W5-E (2026-11-04)
 
