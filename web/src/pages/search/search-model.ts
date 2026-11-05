@@ -2,7 +2,7 @@
  * Arama's pure helpers: the top bar's term as a query, adding and removing clauses (facets, "Hariç
  * tut"), completions for the query bar, a row's summary, the state of a partial scan, the
  * hand-over of a search's raw lines to the evidence wizard, the record drawer's fields, the
- * export's truncation and the names of saved searches.
+ * export's truncation and missing days, and the names of saved searches.
  *
  * The query text is the single source of truth: a facet click edits the text, and the server
  * parses it again (`POST /search`). The small lexer here only finds where the clauses of the text
@@ -446,10 +446,31 @@ export function filledFields(fields: Record<string, unknown>): [string, string][
     .map(([name, value]) => [name, shownValue(value)]);
 }
 
-/** Why a file was cut short (`X-Arci-Export-Truncated`: `rows` or `time`), `null` when whole. */
-export function truncationOf(file: Pick<DownloadedFile, 'headers'>): 'rows' | 'time' | null {
+/**
+ * Why a file is partial (`X-Arci-Export-Truncated`): cut at the row limit (`rows`) or the time
+ * budget (`time`), or some days of the range are not in the database (`archived`, G8, W5-G-24);
+ * `null` when whole.
+ */
+export function truncationOf(
+  file: Pick<DownloadedFile, 'headers'>,
+): 'rows' | 'time' | 'archived' | null {
   const value = file.headers.get('X-Arci-Export-Truncated');
-  return value === 'rows' || value === 'time' ? value : null;
+  return value === 'rows' || value === 'time' || value === 'archived' ? value : null;
+}
+
+/**
+ * The days of the range a file lacks because they are not in the database
+ * (`X-Arci-Export-Archived`: `YYYY-MM-DD` or `YYYY-MM-DD/YYYY-MM-DD`, sent beside `rows` or `time`
+ * too), `null` when none or the header is not of that form.
+ */
+export function archivedDaysOf(
+  file: Pick<DownloadedFile, 'headers'>,
+): { first_day: DateString; last_day: DateString } | null {
+  const match = /^(\d{4}-\d{2}-\d{2})(?:\/(\d{4}-\d{2}-\d{2}))?$/.exec(
+    file.headers.get('X-Arci-Export-Archived')?.trim() ?? '',
+  );
+  if (!match?.[1]) return null;
+  return { first_day: match[1], last_day: match[2] ?? match[1] };
 }
 
 /** `SavedSearchIn.name`: 1 … 80 characters. */

@@ -450,7 +450,7 @@ Her hata `code`, `message_tr` ve `message_en` taşır; reddedilen sorgunun hatal
 | `search_range_too_long` | 422 | aralık `search.max_days` gününden uzun |
 | `search_cursor_invalid` | 422 | sayfa konumu bu aramaya ait değil |
 | `search_expired` | 409 | arama numarasının süresi doldu (sayfa aramayı yeniden çalıştırır) |
-| `search_timeout` | 504 | en kısa dilim (5 dakika) bile süreye sığmadı |
+| `search_timeout` | 504 | en kısa dilim (5 dakika) bile süreye sığmadı; ya da arama veya dışa aktarma süresi dolana kadar veritabanı bakımını (bölüm kilidi) bekledi ("Arama {seconds} saniyede başlayamadı …", "Dışa aktarma {seconds} saniyede başlayamadı …", bölüm 9) |
 | `search_busy` | 429 | çok sayıda arama çalışıyor |
 | `search_rate_limited` | 429 | kısa sürede çok fazla arama |
 | `search_event_not_found` | 404 | kayıt veritabanında yok |

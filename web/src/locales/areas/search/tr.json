@@ -147,7 +147,7 @@
         "xlsx": "“Sonuçlar” ve “Bilgi” sayfaları (sorgu, aralık, satır sayısı); hücreler metindir.",
         "csvSemicolons": "UTF-8, noktalı virgülle ayrılmış; Excel ile açılır."
       },
-      "limit": "Dosya en fazla ayarlardaki satır sayısı (varsayılan 100.000) ya da süre kadar satır içerir; kesilen dosyanın adı “-kismi” ile biter.",
+      "limit": "Dosya en fazla ayarlardaki satır sayısı (varsayılan 100.000) ya da süre kadar satır içerir; kesilen ya da bazı günleri veritabanında olmayan dosyanın adı “-kismi” ile biter.",
       "privacy": "Dosya kişisel veri içerir: yalnızca gerektiği kadar saklayın ve paylaşmayın. Dışa aktarma denetim kaydına yazılır.",
       "notSealed": "Bu dosya mühürlü değildir; bütünlük için Kanıt Paketi'ni kullanın.",
       "reauth": "Dışa aktarma son {{minutes}} dakika içinde parolanızı yeniden girmenizi gerektirir.",
@@ -156,7 +156,12 @@
       "truncatedTitle": "Dosya kısaltıldı",
       "truncated": {
         "rows": "Satır sınırına ulaşıldı: dosya aramanın yalnızca ilk satırlarını içerir.",
-        "time": "Süre sınırına ulaşıldı: dosya aramanın yalnızca bir kısmını içerir."
+        "time": "Süre sınırına ulaşıldı: dosya aramanın yalnızca bir kısmını içerir.",
+        "archived": "Aramanın bazı günleri veritabanında yok (mühürlü arşivde ya da yeniden yükleniyor): dosya yalnızca veritabanındaki satırları içerir."
+      },
+      "archivedDays": {
+        "one": "Veritabanında olmayan gün: {{day}}",
+        "span": "Veritabanında olmayan günler: {{first}} – {{last}}"
       }
     },
     "evidence": {
