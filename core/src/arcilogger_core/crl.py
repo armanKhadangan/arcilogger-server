@@ -928,8 +928,9 @@ def fetch(
     """Download, verify and store the lists of D7/D8 and update ``state/crl/index.json``.
 
     ``roots``: the pinned roots (:func:`arcilogger_core.tsa.trusted_roots`). Writes only under
-    ``state/crl``, never overwrites or deletes a file there. With no URL the index is still
-    written, with the lists stored before and no fetch failure, so the run is seen (#151). A
+    ``state/crl``, never overwrites a file there, and deletes only the leftover temporary names
+    of a stopped run. With no URL the index is still written, with the lists stored before and
+    no fetch failure, so the run is seen (#151). A
     stored list whose file no longer holds its bytes (or is gone) is the failure
     ``stored_file_changed`` of its URL (C14), also when the URL serves a newer list by now: the
     file and its index entry stay as they are. Raises :class:`CrlError` when another run holds
@@ -945,6 +946,26 @@ def fetch(
     opener = _opener(options)
     at = isoformat_site(now, "seconds")
     with _one_run(layout.crl_dir):
+        # A run stopped between _store_new's link and the tempfile module's cleanup (a reboot,
+        # the task's time limit) leaves the temporary name, a hard link to a stored list when
+        # the link was made, at which the installer's ACL step stops (W5-E-9). Only that name
+        # goes (tempfile's ``.`` + 8 random characters + ``.tmp``), never a list (#170, Q15).
+        with os.scandir(layout.crl_dir) as entries:
+            leftovers = [
+                entry.name
+                for entry in entries
+                if re.fullmatch(r"\.[a-z0-9_]{8}\.tmp", entry.name)
+                and entry.is_file(follow_symlinks=False)
+            ]
+        for name in sorted(leftovers):
+            try:
+                (layout.crl_dir / name).unlink()
+            except FileNotFoundError:
+                continue
+            except OSError as exc:
+                log.warning("state/crl: leftover temporary file %s not removed: %s", name, exc)
+                continue
+            log.warning("state/crl: removed the leftover temporary file %s of a stopped run", name)
         index = read_index(layout)
         lists: dict[str, dict[str, Any]] = {
             str(entry.get("file")): entry for entry in index["lists"] if isinstance(entry, dict)

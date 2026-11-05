@@ -1594,7 +1594,7 @@ EARLIER_KEPT: Final = ("failures_in_a_row",)
 
 def state_to_read(layout: Layout) -> Path:
     """The file the report is read from: :func:`state_path`, or :func:`earlier_state_path` while
-    the new file is missing. The first counted run after an upgrade (a dry run writes nothing
+    the new file is missing. The first counted run after an upgrade (a dry run writes no state file
     while the earlier file is the only one) reads the earlier file once and carries only
     :data:`EARLIER_KEPT` over; from then on the new file exists and the earlier one is never
     read again. Until then the readers (the alerts, the Sistem page, the legal status) read it
@@ -1647,7 +1647,7 @@ def write_state(
     the last run and ``failures_in_a_row``; a failed or refused run adds one to
     ``failures_in_a_row``, any other run sets it to 0. From an earlier release's file only
     :data:`EARLIER_KEPT` is taken: a refused run then writes no token list. While that file is
-    the only one, a dry run writes nothing, so the readers keep reading it until the first
+    the only one, a dry run writes no state file, so the readers keep reading it until the first
     counted run (contract W5-E-8): a dry run never makes the state look worse.
     """
     path = state_to_read(layout)

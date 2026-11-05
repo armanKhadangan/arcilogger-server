@@ -2351,15 +2351,17 @@ All Wave 5 questions are answered (2026-11-02).
   `renewal.EARLIER_KEPT`, that is `failures_in_a_row`, read as W5-A-2 reads it (a whole number
   ≥ 0, anything else 0). A refused run with no protected previous file writes no token list,
   which W5-C-1 reads as unknown, never as nothing due. While the earlier file is the only one, a
-  dry run writes nothing (`write_state` returns None, `--json` gives `state_written` false;
-  answer to Q5 on #158): it would have written no `last_run`, turning the Sistem page's Renew
-  row `missing` (W5-E-2), and its own statuses in place of the earlier ones, changing
-  `R20-renewal` and `R20-cert` before any counted run. A dry run never makes the state look
-  worse. `state/renewal/` gets no report (only the lock every run holds), so the readers keep
-  reading the earlier file (W5-E-4, Q2); the first counted run migrates as above, and from then
-  on a dry run writes its statuses and keeps `last_run` (W5-A-2). A made-up count can only do
-  what a missing file (0) or a real count could: hide the failures before the upgrade from
-  `R20-renewal`'s failure branch, or raise it a run early; it cannot make tokens known. Tests:
+  dry run writes no state file (`write_state` returns None, `--json` gives `state_written` false;
+  answer to Q5 on #158; #170, wording): it would have written no `last_run`, turning the Sistem
+  page's Renew row `missing` (W5-E-2), and its own statuses in place of the earlier ones,
+  changing `R20-renewal` and `R20-cert` before any counted run. A dry run never makes the state
+  look worse. It is not a run that writes nothing: like every run it creates `state/renewal/`
+  and `state/renewal/renewal.lock` if they are missing and holds the lock (`renewal.one_run`),
+  but `state/renewal/` gets no `renewal.json`, so the readers keep reading the earlier file
+  (W5-E-4, Q2); the first counted run migrates as above, and from then on a dry run writes its
+  statuses and keeps `last_run` (W5-A-2). A made-up count can only do what a missing file (0)
+  or a real count could: hide the failures before the upgrade from `R20-renewal`'s failure
+  branch, or raise it a run early; it cannot make tokens known. Tests:
   `test_a_refused_run_takes_no_statuses_from_an_earlier_state_file` and
   `test_an_earlier_state_file_is_read_once_and_never_written` (`core/tests/test_cli_renew.py`),
   `test_renew_row_reads_an_earlier_report_until_the_first_run`
@@ -2380,6 +2382,17 @@ All Wave 5 questions are answered (2026-11-02).
   the folder (nothing for the collector or ingest, W5-E-1). SYSTEM, Administrators and the
   tasks keep their own entries, and neither `Renew` nor `CrlFetch` changes a permission there
   (the immutability lock is used only below `vault`).
+  **Administrators own everything below (answer to Q14 on #158; #170, wording).** After every
+  run of the ACL step, `BUILTIN\Administrators` owns `state\crl`, `state\renewal` and every
+  item below them, whichever account created them (the items below, next). An item a task
+  creates there later (a new `renewal.json`, a stored list) is owned by the task's account
+  (LOCAL SERVICE) until the next run of the step, and inherits the folder's OWNER RIGHTS entry,
+  which leaves its owner `ReadPermissions` only; the tasks' Modify has no `ChangePermissions`.
+  So no task can change an entry there, by ownership or otherwise. The immutability lock works
+  by exactly that right (the owner of a sealed file changes its entries, as below `vault`), so a
+  future immutability lock under `state\crl` or `state\renewal` would conflict with OWNER
+  RIGHTS `ReadPermissions`: the plan must change first (its OWNER RIGHTS entry, or who owns
+  what there, with its own tests and a contract change), never be worked around by the task.
   **The items below (answer to Q4 on #158).** A service could also have put items of its own in
   either folder before the upgrade, with their own owner and explicit or protected entries,
   which replacing the folder's DACL leaves as they are: a `state\renewal\renewal.lock` with its
@@ -2402,16 +2415,26 @@ All Wave 5 questions are answered (2026-11-02).
   access Administrators inherit from `state`): writing a folder's entries also writes the
   inherited entries of everything below it, and a hard link shares its entries with the file it
   names elsewhere. After the folder's reset its items are listed again, and each is checked once
-  more before its own reset. Windows' propagation of the entries written before, which every
-  entry of the plan has always caused, is not changed: `state`'s, on the first upgrade, still
-  reaches a folder that is not protected yet, and a link in it. In `state\crl`, `crl fetch` itself
+  more before its own reset. Both folders are also checked before the plan's first entry is
+  written (W5-E-11): `state`'s entries, written before them, reach a folder that is not
+  protected yet on the first upgrade, and a link in it. In `state\crl`, `crl fetch` itself
   can leave a hard link: `_store_new` writes a list under a `.<random>.tmp` name, links it to its
   final name and then removes the temporary name, so a run stopped in between (a reboot, the
-  task's time limit) or a failed removal leaves both names, and nothing in `crl.py` removes them
-  later. The step then stops at that folder, before `state\renewal` and the entries after it;
+  task's time limit) or a failed removal leaves both names. The next `crl fetch` removes them
+  (#170, item Q15): at its start, under its lock, it removes each regular file of `state\crl`
+  named as `_store_new`'s temporary names are (`.`, eight of the tempfile module's characters
+  `a-z0-9_`, `.tmp`) and logs each removal; a `.crl` file, the index, the lock and every other
+  name stay, so D8 holds (the list a leftover name links to keeps its bytes under its own name).
+  Until that run the step stops before it writes any entry (W5-E-11);
   the error for a hard link says to delete only the `.<random>.tmp` name in the same folder,
-  never a `.crl` file, which is evidence. That `crl fetch` should remove its own leftover
-  temporary names is for the owner of `core/src/arcilogger_core/crl.py` (not changed here). An
+  never a `.crl` file, which is evidence. Tests (`core/tests/test_crl.py`):
+  `test_fetch_removes_the_temporary_names_a_stopped_run_left` (a hard link to a stored list and
+  a part of a list, both made by the tempfile module as `_store_new` makes them: both names go,
+  the list keeps its bytes and its entry), `test_fetch_removes_only_the_temporary_names_of_store_new`
+  (lists, one not in the index, the index, the lock, another file, a folder, a symbolic link
+  and names that only look alike stay),
+  `test_a_leftover_temporary_name_stays_while_another_run_holds_the_lock` and
+  `test_the_crl_module_has_no_way_to_delete` (the one removal in `crl.py` is this one). An
   item whose entries give Administrators no right to read or take it over (its owner took them
   away) is taken over all the same by the elevated step: the Windows CI runner shows it for a
   `renewal.lock` that a service left as its own, with inheritance off, which is the case Q4 on
@@ -2419,7 +2442,23 @@ All Wave 5 questions are answered (2026-11-02).
   took the take-ownership privilege away), it stops with an error naming the item and the
   remedy (every read and write of an item, the link check, the listing and its entries, is
   wrapped alike; a link's own error stays as it is), and `takeown /A /R /F <folder>` in an
-  elevated PowerShell takes it over by hand before the step is run again. Tests:
+  elevated PowerShell takes it over by hand before the step is run again. An item below that
+  is gone between its listing and its check or reset (`renewal.json` replaced in one step, a
+  `crl fetch` temporary name removed; #170, item N2) is skipped, with what was below it, and
+  the step goes on: `Test-ArciItemGone` takes a not-found error (`FileNotFoundException`,
+  `DirectoryNotFoundException`, `ItemNotFoundException`, a Win32 error 2 or 3, also wrapped,
+  as in a `MethodInvocationException`) for one only when the item is indeed no longer there:
+  its folder, listed again, no longer lists its exact name (`Test-ArciItemListed`; a folder
+  that is gone itself lists nothing), never `Test-Path`, since Windows drops a trailing dot or
+  space from a path and an item still there would read as gone (#170, review of round 2).
+  Every other error still stops the step with the take-over error. A name that Windows cannot
+  open by its path, made through the `\\?\` prefix (a trailing dot or space, or a device name:
+  `CON`, `PRN`, `AUX`, `NUL`, `COM0`–`COM9`, `LPT0`–`LPT9` and their superscript forms, `CONIN$`,
+  `CONOUT$`, also with an extension such as `NUL.txt`; answer 5 on #170), stops the link
+  check, the pre-flight (W5-E-11) as well as the owner reset, with its own error naming the
+  item, Turkish first with English beside it, before anything of the item is read: by its path
+  neither its link type nor its entries are its own, and a hard link under such a name would
+  otherwise reopen the gap of W5-E-11. Tests:
   `test_acl_plan_least_privilege`, `test_acl_plan_gives_the_renew_and_crlfetch_tasks_their_rights`,
   `test_acl_plan_resets_the_owner_of_the_two_protected_state_folders_only` (exactly the two
   entries carry `ResetOwner`), `test_only_the_acl_script_passes_reset_owner`, and on Windows
@@ -2439,7 +2478,22 @@ All Wave 5 questions are answered (2026-11-02).
   `test_acl_step_takes_over_a_lock_a_service_left_as_its_own` (a `renewal.lock` with
   inheritance off, a stand-in service as its owner and a Modify entry of its own: afterwards
   Administrators own it, it has inherited entries only, and LOCAL SERVICE keeps its inherited
-  Modify).
+  Modify), `test_acl_owner_reset_skips_only_an_item_that_is_gone` (the classification, with
+  every PowerShell; an item in a folder that is gone too is gone, a `dotted.json.` still there
+  is not), `test_acl_owner_reset_checks_vanished_items_where_it_lists_and_resets`,
+  and on Windows `test_acl_step_skips_an_item_removed_after_its_listing` (a file and a folder
+  with a file in it, removed by a wrapper of the module's own `Confirm-ArciNoLink` or
+  `Get-ArciAccessControl` as the reset loop reaches them: the step succeeds and takes over
+  `renewal.json`) and `test_acl_step_still_stops_at_an_item_it_cannot_reset` (access denied
+  on reading an item's entries: the take-over error naming the item);
+  `test_acl_link_check_stops_at_a_name_windows_cannot_open_by_its_path` (with every
+  PowerShell: a trailing dot, a trailing space and every kind of device name, bare or with an
+  extension, stop the check with the error naming the item; names that only look alike pass),
+  `test_acl_link_check_reads_nothing_of_a_name_windows_cannot_open`, and on Windows
+  `test_acl_step_stops_at_a_name_windows_cannot_open_by_its_path` (a hard link
+  `renewal.lock.`, one in a folder `old `, or one named `NUL`, in a pre-created
+  `state\renewal` that is not protected: the step stops with that error and nothing written,
+  as in W5-E-11).
 - **W5-E-10: a failed task state (#171; the follow-up of Q9 on #158).** The task rows gain
   `failed` with a `code` (never the error text): (a) a `crl fetch` that finds the lock held is
   still not recorded (W5-B-2), (b) an index `crl fetch` cannot read is judged by the reader, with
@@ -2447,6 +2501,27 @@ All Wave 5 questions are answered (2026-11-02).
   it cannot read is recorded in the index as `run_failure` (`stored_file_unreadable`), Backup's
   `ok` not `true` is `backup_failed`, and Renew is included (`renew_failed`, `renew_refused`).
   Details: "Deviations — #171" below.
+- **W5-E-11: the ACL step checks both protected state folders for links before it writes any
+  entry (#170, item N1).** `Set-ArciVaultAcl.ps1` wrote `state` before it reached the two
+  `ResetOwner` entries, and writing `state` passes its inheritable Modify (collector, ingest,
+  worker) on to a `state\renewal` or `state\crl` that a service created before the upgrade and
+  that is not protected yet, and through a hard link in it to the file it names elsewhere,
+  before the W5-E-9 link check of that folder ran. The script now runs that check, the module's
+  `Confirm-ArciNoLink -Below` (exported; the W5-E-9 check and its error texts, moved out of
+  `Set-ArciAclEntry` with the take-over error, `Get-ArciTakeOverError`), on every `ResetOwner`
+  entry that exists and everything below it after its Windows and administrator checks and
+  before its write loop: a link stops the step with no entry written and no folder of the plan
+  created. `Set-ArciAclEntry -ResetOwner` keeps its own checks (the folder and everything below
+  before the folder's entries, each item again before its reset), calling the same function:
+  not a duplicate, since they also cover an item made between the pre-flight and the folder's
+  write and any other caller of the switch. Tests:
+  `test_acl_script_checks_both_protected_state_folders_for_links_first` (the order in the
+  script, the calls in `Set-ArciAclEntry`) and on Windows
+  `test_acl_step_finds_a_link_before_it_writes_any_entry` (a hard link in a pre-created
+  `state\renewal` that is not protected: the step exits non-zero with the link error, the file
+  the link names keeps its owner and every entry, the inherited ones too, the data root, `state`
+  and `state\renewal` keep theirs, and neither `kamusm-roots` in the configuration folder nor
+  `spool` in the data root is created).
 
 ## Deviations — #119 (2026-11-04)
 
