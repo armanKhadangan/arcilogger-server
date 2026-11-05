@@ -91,7 +91,7 @@ except ImportError:  # pragma: no cover - every supported CPython build has it
     _LZMA_ERROR = _NoLzmaError
 
 
-VERIFIER_VERSION = "8"
+VERIFIER_VERSION = "9"
 INDEX_NAME = "paket.json"
 INDEX_SCHEMA = "arcilogger.evidence/1"
 #: The guides. The Turkish one has an ASCII name: ZIP tools that ignore the UTF-8 name flag
@@ -1744,6 +1744,13 @@ class TooLargeError(Exception):
 #: What reading a file can raise: OS errors, a bad ZIP entry (CRC), a corrupt gzip or xz stream,
 #: a file above the size limits.
 READ_ERRORS = (OSError, EOFError, zipfile.BadZipFile, zlib.error, _LZMA_ERROR, TooLargeError)
+
+
+class XzUnsupportedError(OSError):
+    """This Python has no ``lzma`` module, so an ``.xz`` file cannot be decompressed. Not damage:
+    the report names it ``xz-unsupported``, never as a content or extract mismatch."""
+
+
 #: The suffixes of a sealed day's files: gzip (every day sealed before Wave 5) and seekable xz.
 SEALED_SUFFIXES = (".gz", ".xz")
 
@@ -1955,7 +1962,7 @@ def _xz_chunks(handle: IO[bytes]) -> Iterator[bytes]:
     shorter one.
     """
     if lzma is None:  # pragma: no cover - see the import
-        raise OSError("this Python has no lzma module; xz files cannot be opened")
+        raise XzUnsupportedError("this Python has no lzma module; xz files cannot be opened")
     decompressor: Any = None
     pending = b""
     while True:
@@ -3020,6 +3027,20 @@ class Verifier:
             try:
                 with self.package.open(name) as handle:
                     raw_sha256, lines = sealed_digest(handle, name)
+            except XzUnsupportedError:
+                report.warn(
+                    "xz-unsupported",
+                    day,
+                    f"{path}: bu Python'da lzma modülü yok; .xz dosyasının açılmış içeriği "
+                    "denetlenemedi (sıkıştırılmış dosyanın SHA-256 değeri manifestle aynı). "
+                    "İçeriği de denetlemek için lzma'lı bir Python ile (python.org) tekrar "
+                    "çalıştırın",
+                    f"{path}: this Python has no lzma module; the uncompressed content of the .xz "
+                    "file was not checked (the compressed file's SHA-256 matches the manifest). "
+                    "Run again with a Python that has lzma (python.org)",
+                )
+                raw_sha256, lines = entry["sha256_uncompressed"], entry.get("lines")
+                detail = "; açılmış içerik denetlenemedi (lzma yok)"
             except READ_ERRORS as exc:
                 report.fail(
                     "file-content-mismatch",
@@ -3036,7 +3057,7 @@ class Verifier:
                     f"{path}: uncompressed content differs from the manifest",
                 )
                 return False
-            detail = f"; açılmış hali {lines} satır, SHA-256 aynı"
+            detail = detail or f"; açılmış hali {lines} satır, SHA-256 aynı"
         report.ok(
             "file-ok",
             day,
@@ -3627,6 +3648,17 @@ class Verifier:
                 else:
                     if rest and number + 1 in wanted:
                         found[number + 1] = rest  # a torn last line is a line too
+        except XzUnsupportedError:
+            report.fail(
+                "xz-unsupported",
+                "alıntı",
+                f"{name}: bu Python'da lzma modülü yok; alıntının kaynağı {sealed} açılamadığı "
+                "için alıntı satırları denetlenemedi. lzma'lı bir Python ile (python.org) tekrar "
+                "çalıştırın",
+                f"{name}: this Python has no lzma module; {sealed} cannot be opened, so the "
+                "extracted lines were not checked. Run again with a Python that has lzma",
+            )
+            return
         except READ_ERRORS as exc:
             report.fail(
                 "extract-mismatch",

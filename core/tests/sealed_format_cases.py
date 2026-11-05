@@ -44,10 +44,23 @@ class SealedFormatCase:
     core: str | None = None
     #: The standalone verifier's failure code for the last day; None: the chain passes.
     standalone: str | None = None
+    #: The standalone verifier runs as on a Python built without ``lzma`` (#136): an ``.xz``
+    #: file's content cannot be checked, which is the warning ``xz-unsupported``, never a
+    #: mismatch; ``.gz`` days are still checked in full.
+    no_lzma: bool = False
 
 
 CASES = (
     SealedFormatCase("gzip only (days sealed before W5-H)", ("gzip", "gzip", "gzip")),
+    SealedFormatCase("xz only, a Python without lzma", ("xz", "xz", "xz"), no_lzma=True),
+    SealedFormatCase(
+        "corrupt gzip data, re-stamped, a Python without lzma",
+        ("xz", "xz", "gzip"),
+        "flipped-restamped",
+        core="cannot be decompressed",
+        standalone="file-content-mismatch",
+        no_lzma=True,
+    ),
     SealedFormatCase("gzip, then xz", ("gzip", "gzip", "xz")),
     SealedFormatCase("xz, back to gzip, xz again", ("xz", "gzip", "xz")),
     SealedFormatCase("xz only", ("xz", "xz", "xz")),
@@ -114,7 +127,20 @@ def core_errors(layout: Layout, days: list[date], roots: list[x509.Certificate])
     return checks[-1].errors
 
 
-def standalone_codes(layout: Layout, roots_dir: Path) -> tuple[bool, set[str]]:
-    with sv.open_package(layout.vault) as package:
-        report = sv.verify_package(package, roots_dir=roots_dir, deep=True)
-    return report.passed, {finding.code for finding in report.findings if finding.level == "fail"}
+def standalone_codes(
+    layout: Layout, roots_dir: Path, *, no_lzma: bool = False
+) -> tuple[bool, set[str], set[str]]:
+    """``(passed, failure codes, warning codes)`` of the standalone verifier on the vault;
+    ``no_lzma`` runs it as a Python built without the ``lzma`` module does."""
+    saved = sv.lzma
+    if no_lzma:
+        sv.lzma = None
+    try:
+        with sv.open_package(layout.vault) as package:
+            report = sv.verify_package(package, roots_dir=roots_dir, deep=True)
+    finally:
+        sv.lzma = saved
+    codes = {
+        level: {f.code for f in report.findings if f.level == level} for level in ("fail", "warn")
+    }
+    return report.passed, codes["fail"], codes["warn"]
