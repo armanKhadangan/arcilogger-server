@@ -2775,6 +2775,18 @@
         "totals": {
           "$ref": "#/components/schemas/CategoryRow"
         },
+        "updated_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Updated At"
+        },
         "users": {
           "items": {
             "$ref": "#/components/schemas/SubjectRow"
@@ -2791,6 +2803,7 @@
         "period",
         "estimated",
         "computed_until",
+        "updated_at",
         "notice_key",
         "category",
         "totals",
@@ -2833,12 +2846,25 @@
         },
         "period": {
           "$ref": "#/components/schemas/UsagePeriod"
+        },
+        "updated_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Updated At"
         }
       },
       "required": [
         "period",
         "estimated",
         "computed_until",
+        "updated_at",
         "notice_key",
         "items"
       ],
@@ -3414,12 +3440,25 @@
           },
           "title": "Top Sites",
           "type": "array"
+        },
+        "updated_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Updated At"
         }
       },
       "required": [
         "period",
         "estimated",
         "computed_until",
+        "updated_at",
         "notice_key",
         "active_users",
         "metrics",
@@ -4437,12 +4476,25 @@
         "total": {
           "title": "Total",
           "type": "integer"
+        },
+        "updated_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Updated At"
         }
       },
       "required": [
         "period",
         "estimated",
         "computed_until",
+        "updated_at",
         "notice_key",
         "total",
         "limit",
@@ -13253,6 +13305,18 @@
         "totals": {
           "$ref": "#/components/schemas/SiteRow"
         },
+        "updated_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Updated At"
+        },
         "users": {
           "items": {
             "$ref": "#/components/schemas/SubjectRow"
@@ -13269,6 +13333,7 @@
         "period",
         "estimated",
         "computed_until",
+        "updated_at",
         "notice_key",
         "domain",
         "category",
@@ -13351,12 +13416,25 @@
         "total": {
           "title": "Total",
           "type": "integer"
+        },
+        "updated_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Updated At"
         }
       },
       "required": [
         "period",
         "estimated",
         "computed_until",
+        "updated_at",
         "notice_key",
         "total",
         "limit",
@@ -14834,6 +14912,18 @@
           "title": "Timeline",
           "type": "array"
         },
+        "updated_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Updated At"
+        },
         "urls": {
           "items": {
             "$ref": "#/components/schemas/UrlRow"
@@ -14846,6 +14936,7 @@
         "period",
         "estimated",
         "computed_until",
+        "updated_at",
         "notice_key",
         "subject",
         "department",
@@ -14954,12 +15045,25 @@
         "total": {
           "title": "Total",
           "type": "integer"
+        },
+        "updated_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Updated At"
         }
       },
       "required": [
         "period",
         "estimated",
         "computed_until",
+        "updated_at",
         "notice_key",
         "total",
         "limit",

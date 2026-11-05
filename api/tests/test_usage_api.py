@@ -95,6 +95,8 @@ def test_company_totals_match_the_golden_day(admin: TestClient) -> None:
     assert data["notice_key"] == "usage.method_note"
     assert data["period"] == {"from": "2026-10-14", "to": "2026-10-14", "hours": "all"}
     assert data["computed_until"] == "2026-10-14T21:00:00Z"
+    # W5-L (L3): when the newest rollup of the period was computed, the page's "Son güncelleme".
+    assert data["updated_at"] == "2026-10-16T06:00:00Z"  # NOW, 09:00 site time
     assert data["active_users"] == 5
     metrics = data["metrics"]
     assert {k: metrics[k] for k in metrics if not k.endswith("activity")} == {

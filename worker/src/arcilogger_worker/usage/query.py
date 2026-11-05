@@ -357,12 +357,22 @@ def computed_until(session: Session, period: Period) -> datetime | None:
     return value if isinstance(value, datetime) else None
 
 
+def updated_at(session: Session, period: Period) -> datetime | None:
+    """When the newest rollup of the period was computed: the page's "Son güncelleme" (W5-L, L3)."""
+    value = session.execute(
+        text("SELECT max(computed_at) FROM usage_days WHERE day >= :first AND day <= :last"),
+        {"first": period.first, "last": period.last},
+    ).scalar_one_or_none()
+    return value if isinstance(value, datetime) else None
+
+
 def envelope(session: Session, period: Period) -> dict[str, Any]:
     """The fields every answer carries."""
     return {
         "period": period.to_json(),
         "estimated": True,
         "computed_until": computed_until(session, period),
+        "updated_at": updated_at(session, period),
         "notice_key": NOTICE_KEY,
     }
 

@@ -197,7 +197,7 @@ Jobs of the `ArciWorker` service ([CORRELATION.md](CORRELATION.md) section 4):
 
 | Job | When | What |
 |---|---|---|
-| `usage.today` | every 5 minutes | Recomputes today from the logs loaded so far (`partial`) |
+| `usage.today` | every minute (with back-off, §8) | Recomputes today from the logs loaded so far (`partial`); waits twice the last refresh's duration after it ended |
 | `usage.daily` | daily after 00:45 | Rebuilds yesterday as `final` |
 | `usage.reattribute` | every 10 minutes | Rebuilds any of the last `usage.auto_rebuild_days` days whose inputs changed: a device was (re)assigned or the lease timeline changed, late logs were loaded (also while the day was being computed), the `usage.*` settings changed; also missing or still `partial` days |
 | `usage.requests` | every 30 seconds | Rebuilds requested in the web interface (`POST /api/v1/usage/rebuild`) |
@@ -314,6 +314,15 @@ load generator, 50 people (100 user devices plus infrastructure):
 Budget (`worker/tests/test_usage_performance.py`, heavy load with `ARCILOGGER_USAGE_PERF=heavy`):
 30 s and 120 s. Linear extrapolation to the specification's busy day (5 million messages a day,
 ~1.4 million traffic rows): a bit more than one minute per rollup late in the day.
+
+**Refresh every minute (W5-L).** `usage.today` runs every minute, but starts a new refresh only
+when twice the last refresh's duration has passed since that refresh ended. The refresh interval
+is therefore at least one minute and at most three times the last duration: every minute at both
+loads above (2 s and 6 s), about every 3 minutes late on the specification's busy day. A held run
+shows as `skipped` (`reason: backoff`) in the job log; yesterday's final rollup (`usage.daily`) and
+rebuild requests never wait. The page shows "Son güncelleme" (`updated_at`) and how far the logs
+were processed (`computed_until`). A long session's bytes appear only when FortiGate logs them
+(an interim or the final log, §9).
 
 ## 9. Verify on site
 

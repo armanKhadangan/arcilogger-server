@@ -1206,6 +1206,8 @@ export interface CompanyUsage {
   estimated: boolean;
   /** How far the rollups have processed traffic. */
   computed_until: DateTimeString | null;
+  /** When the newest rollup of the period was computed (W5-L): "Son güncelleme". */
+  updated_at: DateTimeString | null;
   /** Locale key of the method note (`usage.method_note`). */
   notice_key: string;
   active_users: number;
@@ -1432,6 +1434,8 @@ export interface SubjectPage {
   period: UsagePeriod;
   estimated: boolean;
   computed_until: DateTimeString | null;
+  /** When the newest rollup of the period was computed (W5-L): "Son güncelleme". */
+  updated_at: DateTimeString | null;
   notice_key: string;
 }
 
@@ -1444,6 +1448,8 @@ export interface DepartmentPage {
   period: UsagePeriod;
   estimated: boolean;
   computed_until: DateTimeString | null;
+  /** When the newest rollup of the period was computed (W5-L): "Son güncelleme". */
+  updated_at: DateTimeString | null;
   notice_key: string;
 }
 
@@ -1490,6 +1496,8 @@ export interface SubjectDetail {
   period: UsagePeriod;
   estimated: boolean;
   computed_until: DateTimeString | null;
+  /** When the newest rollup of the period was computed (W5-L): "Son güncelleme". */
+  updated_at: DateTimeString | null;
   notice_key: string;
   subject: SubjectRef;
   department: string | null;
@@ -1522,6 +1530,8 @@ export interface SitePage {
   period: UsagePeriod;
   estimated: boolean;
   computed_until: DateTimeString | null;
+  /** When the newest rollup of the period was computed (W5-L): "Son güncelleme". */
+  updated_at: DateTimeString | null;
   notice_key: string;
 }
 
@@ -1540,6 +1550,8 @@ export interface SiteDetail {
   period: UsagePeriod;
   estimated: boolean;
   computed_until: DateTimeString | null;
+  /** When the newest rollup of the period was computed (W5-L): "Son güncelleme". */
+  updated_at: DateTimeString | null;
   notice_key: string;
   domain: string;
   category: string | null;
@@ -1557,6 +1569,8 @@ export interface CategoryList {
   period: UsagePeriod;
   estimated: boolean;
   computed_until: DateTimeString | null;
+  /** When the newest rollup of the period was computed (W5-L): "Son güncelleme". */
+  updated_at: DateTimeString | null;
   notice_key: string;
   items: CategoryRow[];
 }
@@ -1569,6 +1583,8 @@ export interface CategoryDetail {
   period: UsagePeriod;
   estimated: boolean;
   computed_until: DateTimeString | null;
+  /** When the newest rollup of the period was computed (W5-L): "Son güncelleme". */
+  updated_at: DateTimeString | null;
   notice_key: string;
   category: string;
   totals: CategoryRow;

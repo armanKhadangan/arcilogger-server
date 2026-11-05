@@ -33,8 +33,11 @@ class UsageEnvelope(BaseModel):
     period: UsagePeriod
     #: Always true: the numbers are estimated from connection logs.
     estimated: bool
-    #: How far the rollups have processed traffic (end of the newest computed day of the period).
+    #: How far the rollups have processed traffic (end of the newest computed day of the period):
+    #: the "veriler … kadar" of the page (contract W5 §6 L3).
     computed_until: datetime | None
+    #: When the newest rollup of the period was computed (W5-L): the page's "Son güncelleme".
+    updated_at: datetime | None
     #: Text key of the method note (web locales ``usage.method_note``).
     notice_key: str
 

@@ -104,7 +104,7 @@ USAGE_DOMAIN_KINDS: Final = ("domain", "service", "ip")
 #: The part of the day a usage row covers (contract W5 §6 K2, revision ``0023_usage_period``):
 #: work hours, a break inside them ("mola"), or off hours (holidays and days off included).
 USAGE_PARTS: Final = ("work", "break", "off")
-#: ``partial``: today (refreshed every 5 minutes); ``final``: rebuilt after the day ended.
+#: ``partial``: today (refreshed every minute, W5-L); ``final``: rebuilt after the day ended.
 USAGE_DAY_STATUSES: Final = ("partial", "final")
 USAGE_BLOCKED_SOURCES: Final = ("web", "dns", "app")
 USAGE_REBUILD_STATUSES: Final = ("queued", "running", "done", "failed")

@@ -197,7 +197,7 @@ eski günler için elle yeniden hesaplayın.
 
 | İş | Zaman | Ne yapar |
 |---|---|---|
-| `usage.today` | 5 dakikada bir | Bugünü o ana kadar yüklenen kayıtlardan yeniden hesaplar (`partial`) |
+| `usage.today` | dakikada bir (geri çekilmeli, §8) | Bugünü o ana kadar yüklenen kayıtlardan yeniden hesaplar (`partial`); son hesaplama bittikten sonra onun süresinin iki katı kadar bekler |
 | `usage.daily` | her gün 00:45 sonrası | Dünü kesin (`final`) olarak yeniden hesaplar |
 | `usage.reattribute` | 10 dakikada bir | Son `usage.auto_rebuild_days` günden, hesaplandığı girdileri değişenleri yeniden hesaplar: bir cihaz bir kişiye (yeniden) atandı ya da kira zaman çizelgesi değişti, geç gelen kayıtlar yüklendi (gün hesaplanırken yüklenenler de), `usage.*` ayarları değişti; eksik ya da hâlâ `partial` günler de |
 | `usage.requests` | 30 saniyede bir | Web arayüzünden istenen yeniden hesaplamalar (`POST /api/v1/usage/rebuild`) |
@@ -314,6 +314,15 @@ Geliştirme makinesinde (4 çekirdek paylaşımlı, PostgreSQL 16, TimescaleDB y
 Bütçe (`worker/tests/test_usage_performance.py`, `ARCILOGGER_USAGE_PERF=heavy` ile yoğun yük):
 30 sn ve 120 sn. Şartnamenin yoğun günü (günde 5 milyon mesaj, ~1,4 milyon trafik satırı) için
 doğrusal tahmin: gün sonunda hesap başına bir dakikadan biraz fazla.
+
+**Dakikalık güncelleme (W5-L).** `usage.today` dakikada bir çalışır, ama yeni bir hesaplamaya
+ancak son hesaplama bittikten sonra onun süresinin iki katı geçtiyse başlar. Böylece güncelleme
+aralığı en az 1 dakika, en çok son hesaplama süresinin üç katıdır: yukarıdaki iki yükte (2 sn ve
+6 sn) dakikada bir, şartnamenin yoğun gününde gün sonuna doğru yaklaşık 3 dakikada bir. Bekleyen
+çalışma iş kaydında `skipped` (`reason: backoff`) görünür; dünün kesin hesabı (`usage.daily`) ve
+yeniden hesaplama istekleri hiç beklemez. Sayfa "Son güncelleme" zamanını (`updated_at`) ve
+verilerin hangi ana kadar işlendiğini (`computed_until`) gösterir. Uzun bir bağlantının baytları
+ancak FortiGate onu kaydettiğinde (ara kayıt ya da kapanış) görünür (§9).
 
 ## 9. Sahada doğrulanacaklar
 

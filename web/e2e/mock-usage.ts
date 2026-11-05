@@ -417,7 +417,7 @@ interface Scope {
   keys: ReadonlySet<string> | null;
 }
 
-type Bare<T> = Omit<T, 'period' | 'estimated' | 'computed_until' | 'notice_key'>;
+type Bare<T> = Omit<T, 'period' | 'estimated' | 'computed_until' | 'updated_at' | 'notice_key'>;
 
 /** Where the figures come from: the captured day or the generated dataset. */
 interface Source {
@@ -2570,6 +2570,8 @@ export class UsageMock {
       period,
       estimated: true,
       computed_until: source.computedUntil(period),
+      // The mock has no rollup runs: the newest one "ran" when its data ends (W5-L).
+      updated_at: source.computedUntil(period),
       notice_key: NOTICE_KEY,
     };
   }

@@ -3523,3 +3523,28 @@ line is W5-E-10, and what it amends in detail:
 - **W5-K-6: the upgrade alone rebuilds nothing.** A work-hours value without breaks and `by_day`
   keeps the Wave 4 fingerprint (`[days, start, end]`), so an upgrade does not rebuild the recent
   days; only a changed setting does (test `test_breaks_and_per_day_hours_split_the_day_in_three_parts`).
+
+## Deviations — W5-L (2026-11-05)
+
+- **W5-L-1: one pull request with W5-K.** The manager's session can push only one branch, and
+  W5-L changes the files W5-K changes. W5-K and W5-L therefore come as one pull request (#206),
+  not two. #199 and #200 both close with it.
+- **W5-L-2: `data_until` is the existing `computed_until`.** Every usage answer has carried
+  `computed_until`, "how far the rollups have processed traffic", since group 2. L3's `data_until`
+  is that field, so the answers add only `updated_at`: the newest `computed_at` of the period's
+  days. The web types get it (types only).
+- **W5-L-3: the back-off measures from the last refresh's start.** `usage_days` keeps the start
+  of the last rollup (`computed_at`) and its `duration_ms`. A refresh starts when
+  `now ≥ computed_at + 3 × duration_ms`, which is "twice the duration after it ended" (L2); no
+  `finished_at` is stored. A `computed_at` later than now (the clock went back, or a rebuild ran
+  with a later moment) never holds today back.
+- **W5-L-4: measured** (`worker/tests/test_usage_performance.py`, the same container, plain
+  PostgreSQL 16; seconds for the full-day rollup, "again" in brackets):
+
+  | Load | wave-5 | W5-K/L |
+  |---|---|---|
+  | default | 1.77 (1.29) | 1.99 (1.55); another test ran at the same time |
+  | heavy | 6.30 (7.10) | 6.09 (6.90) |
+
+  Both loads refresh every minute. The specification's busy day (a rollup of about a minute late
+  in the day) refreshes about every 3 minutes.
