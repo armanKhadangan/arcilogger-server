@@ -53,8 +53,10 @@ from __future__ import annotations
 import functools
 import gc
 import itertools
+import math
 import os
 import re
+import sys
 import time
 from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass, field
@@ -1212,6 +1214,51 @@ def _guard_lookup(site: Engine, request: LookupRequest, measure: Any) -> LookupO
 #: best one is held to 3.8's bound, so one stall of a runner does not fail the guard.
 ROUNDS = 5
 
+#: 3.8's bound of the converted-row query (0.2 s), which every CI reading meets by far
+#: (:data:`MOVES_READINGS`).
+CONVERTED_BOUND = 0.2
+#: The bound of the converted-row check with the recorded moves, per platform (#179-2): Linux
+#: keeps 3.8's 0.2 s; windows-latest's slow runners (gauge about 17 µs a line) take its best
+#: round to 0.16-0.17 s on plain PostgreSQL (the MAC branch's plan, #185), so its bound is the
+#: slowest best of :data:`MOVES_READINGS` times :data:`MOVES_MARGIN`, rounded up to 10 ms.
+MOVES_BOUNDS = {"win32": 0.21, "linux": 0.2}
+MOVES_BOUND = MOVES_BOUNDS.get(sys.platform, 0.2)
+#: The margin over the slowest Windows reading.
+MOVES_MARGIN = 1.2
+#: CI's passing readings of the two guards (2026-11-05, ``guard split`` lines of the throughput
+#: step): platform, run/attempt, job, the runner's gauge (µs a line, the live-tail guard's),
+#: the best of :data:`ROUNDS` of the converted-row query and of the recorded-moves check, in
+#: seconds. Runs 41950691995 (``a2a859f``) and 41956302626 (``57742d0``, attempts 1-9 re-run
+#: one job each).
+MOVES_READINGS = [
+    ("win32", "41950691995/1", 126993650686, 16.72, 0.115, 0.161),
+    ("win32", "41956302626/1", 127012205925, 8.62, 0.062, 0.085),
+    ("win32", "41956302626/2", 127052081954, 17.87, 0.123, 0.173),
+    ("win32", "41956302626/4", 127114691601, 17.54, 0.129, 0.169),
+    ("win32", "41956302626/6", 127194052338, 17.05, 0.132, 0.170),
+    ("win32", "41956302626/8", 127248835105, 9.52, 0.052, 0.104),
+    ("linux", "41950691995/1", 126993650651, 7.97, 0.024, 0.047),
+    ("linux", "41956302626/1", 127012206493, 11.81, 0.032, 0.067),
+    ("linux", "41956302626/3", 127071812028, 15.86, 0.041, 0.090),
+    ("linux", "41956302626/5", 127138516744, 15.84, 0.040, 0.086),
+    ("linux", "41956302626/7", 127221054741, 15.42, 0.037, 0.077),
+]
+
+
+@pytest.mark.parametrize(
+    ("system", "run", "job", "gauge", "converted", "moves"),
+    MOVES_READINGS,
+    ids=[f"{system}-{job}" for system, _run, job, *_rest in MOVES_READINGS],
+)
+def test_the_bounds_hold_every_ci_reading(
+    system: str, run: str, job: int, gauge: float, converted: float, moves: float
+) -> None:
+    """#179-2: every passing CI reading meets its bound, and Windows' bound is the rule's."""
+    assert converted < CONVERTED_BOUND
+    assert moves < MOVES_BOUNDS[system]
+    slowest = max(m for s, *_rest, m in MOVES_READINGS if s == "win32")
+    assert MOVES_BOUNDS["win32"] == math.ceil(round(slowest * MOVES_MARGIN * 100, 6)) / 100
+
 
 @dataclass
 class _Round:
@@ -2365,7 +2412,9 @@ def test_the_converted_row_query_of_a_hundred_chains_is_fast(
         (str(ip).startswith("172.20.60."), interface, held) for _n, ip, interface, _vd, held in rows
     } == {(True, "vlan60", False)}
     seconds = best.split.missed.seconds
-    assert seconds < 0.2, f"the converted-row query took {seconds:.3f} s (best of {ROUNDS})"
+    assert seconds < CONVERTED_BOUND, (
+        f"the converted-row query took {seconds:.3f} s (best of {ROUNDS})"
+    )
 
 
 @pytest.mark.perf
@@ -2431,7 +2480,9 @@ def test_the_recorded_moves_of_a_hundred_chains_are_fast(
         for time in group["times"]
     )
     seconds = best.split.missed.seconds
-    assert seconds < 0.2, f"the converted-row check took {seconds:.3f} s (best of {ROUNDS})"
+    assert seconds < MOVES_BOUND, (
+        f"the converted-row check took {seconds:.3f} s (best of {ROUNDS}, bound {MOVES_BOUND} s)"
+    )
 
 
 # -- the event site on compressed chunks (WP-C3; the manager's answer to Q1 of PR #30) ------------

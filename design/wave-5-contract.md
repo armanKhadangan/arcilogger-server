@@ -2727,8 +2727,26 @@ line is W5-E-10, and what it amends in detail:
     ms in the one measured; the best of 5 leaves it out.
   - **The main cost** is the nested loop of the statement's MAC branch: about 60 of 65 ms locally,
     the `fg_dhcp` Append estimated at 27 rows against 5,699 returned (its join filter discards
-    564,201). Changing it is a question for the product code (`lookup/attribution.py`,
-    `_missed_moves`), not changed here.
-  - **Open (step 2):** a measured budget per OS is decided only after the draft pull request has
-    collected readings from passing CI runs. The Windows recorded-moves guard is expected near
-    0.19–0.21 s on slow runners, so best of 5 may not be enough there.
+    564,201). Changing it is product code (`lookup/attribution.py`, `_missed_moves`): #185, not
+    this change (the manager's answer to Q2 on #181).
+- **#179-2: the recorded-moves guard's bound on windows-latest is 0.21 s** (decided on #181:
+  Linux keeps 0.2 s; Windows takes the slowest best of 5 of passing CI runs plus a stated
+  margin, unless its slow runners stay under about 0.17 s). Eleven passing readings of the two
+  throughput jobs (runs 41950691995 and 41956302626, the latter's single jobs re-run one at a
+  time), each a best of 5 with its split, are kept as `MOVES_READINGS` in
+  `worker/tests/test_lookup_performance.py` with their run, job and gauge:
+  - **windows-latest:** converted-row 0.052–0.132 s; recorded-moves 0.085–0.173 s. The four
+    slow-class runners (gauge 16.72–17.87 µs a line, the class of both failures) gave 0.161,
+    0.173, 0.169 and 0.170 s, almost all of it the statement's SQL (0.113–0.127 s) plus 0.034 s of
+    decoding.
+    Single rounds of those runs reached 0.209 and 0.216 s, which the one timed round of before
+    would have failed on.
+  - **ubuntu-24.04 (TimescaleDB):** converted-row 0.024–0.041 s; recorded-moves 0.047–0.090 s,
+    gauges 7.97–15.86.
+  - **The rule:** `MOVES_BOUNDS["win32"]` = 0.173 s × `MOVES_MARGIN` (1.2), rounded up to 10 ms,
+    0.21 s. The converted-row query keeps 0.2 s on both (`CONVERTED_BOUND`; its slowest best is
+    0.132 s), and Linux keeps 0.2 s for both guards. `test_the_bounds_hold_every_ci_reading` checks
+    every reading against its bound and the Windows bound against the rule, so a reading added
+    later that the bound no longer holds, or a bound that no longer follows from the readings,
+    fails at once. When #185 makes the MAC branch cheaper, the readings are taken again and the
+    Windows bound goes back to 0.2 s.
