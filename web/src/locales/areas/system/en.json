@@ -120,7 +120,14 @@
       "schedule": "Schedule",
       "state": "State",
       "lastEvidence": "Latest evidence",
-      "evidence": "Evidence file"
+      "evidence": "Evidence file",
+      "failure": {
+        "backup_failed": "The latest backup did not complete.",
+        "index_unreadable": "The index of the revocation lists cannot be read.",
+        "stored_file_unreadable": "A stored revocation list could not be read; the fetch stopped.",
+        "renew_failed": "The latest re-stamping run failed.",
+        "renew_refused": "The latest re-stamping run was refused by the configuration."
+      }
     },
     "jobs": {
       "caption": "Latest run of the worker jobs",
@@ -185,7 +192,8 @@
         "late": "Late",
         "missing": "No evidence",
         "not_used": "Not used",
-        "not_observable": "Not observable"
+        "not_observable": "Not observable",
+        "failed": "Failed"
       },
       "job": {
         "ok": "OK",
