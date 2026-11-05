@@ -51,7 +51,7 @@ branch's estimate against what it read, its joins and the rows their filters rem
 statement's ``Gather`` nodes, each marked when it is in an InitPlan or a SubPlan), and the MAC
 branch and the statement of both are timed on one connection in one transaction, old and new
 alternating over :data:`RUNS` rounds after a warm-up that leaves both prepared, so that neither
-is parsed in a timed round (:func:`_alternated`). Each world's summary has an "old → new" line.
+is parsed in a timed round (:func:`_alternated`). Each world's summary has an "old -> new" line.
 
 **Twice a world** (:data:`STAGES`): as the module loads it (written, then one ``VACUUM (ANALYZE)``
 of the whole database, as the guards' ``_site`` does), and again after an explicit ``ANALYZE`` of
@@ -667,12 +667,12 @@ def _old_new(
         return f"{node['Actual Rows']} x {node['Actual Loops']}"
 
     return (
-        f"old → new: fg_dhcp est {old_reading['Plan Rows']} → {new_reading['Plan Rows']} "
-        f"(actual {actual(old_reading)} → {actual(new_reading)}); "
-        f"{join(old_join)} → {join(new_join)}, join filter removed {removed(old_join)} → "
-        f"{removed(new_join)}; MAC branch best/median {_times(branches[0])} → "
-        f"{_times(branches[1])} ms; statement best/median {_times(statements[0])} → "
-        f"{_times(statements[1])} ms; statement {_parallel(explained.old_statement)} → "
+        f"old -> new: fg_dhcp est {old_reading['Plan Rows']} -> {new_reading['Plan Rows']} "
+        f"(actual {actual(old_reading)} -> {actual(new_reading)}); "
+        f"{join(old_join)} -> {join(new_join)}, join filter removed {removed(old_join)} -> "
+        f"{removed(new_join)}; MAC branch best/median {_times(branches[0])} -> "
+        f"{_times(branches[1])} ms; statement best/median {_times(statements[0])} -> "
+        f"{_times(statements[1])} ms; statement {_parallel(explained.old_statement)} -> "
         f"{_parallel(explained.statement)}"
     )
 
@@ -785,7 +785,7 @@ def _measured(
     scale: str,
     stage: str,
 ) -> list[str]:
-    """One world's measurement at one stage, printed; its summary lines (the second: old → new)."""
+    """One world's measurement at one stage, printed; its summary lines (the second: old -> new)."""
     g = guards()
     factor = SCALES[scale]
     outcome, sql, parameters = _captured(site)
@@ -928,7 +928,7 @@ def test_the_missed_moves_mac_branch_is_measured(
         capsys,
         [
             f"===== #185 summary, {scale}: as loaded against after ANALYZE fg_dhcp; old (bare "
-            "test) → new (W5-G-26) =====",
+            "test) -> new (W5-G-26) =====",
             *summary,
         ],
     )
