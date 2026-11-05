@@ -3211,3 +3211,42 @@ line is W5-E-10, and what it amends in detail:
     later that the bound no longer holds, or a bound that no longer follows from the readings,
     fails at once. When #185 makes the MAC branch cheaper, the readings are taken again and the
     Windows bound goes back to 0.2 s.
+
+## Deviations — #136 (2026-11-05)
+
+- **#136-1: `xz-unsupported` is a failure (`fail`, HATA), and the file is still checked.** A
+  Python built without `lzma` cannot decompress an `.xz` file, so the deep content check of that
+  file, and an extract taken from it, are not done. The verifier reports `xz-unsupported` for each
+  such file (where: its day) and extract (where: "alıntı") instead of `file-content-mismatch` or
+  `extract-mismatch`. Its text says that the check could not be done, not that the file was
+  changed. The level is `fail` because a check the package relies on was not done, so the
+  package is not verified (like `root-none`). The stored file's SHA-256 is still compared with
+  the manifest (`file-ok`), and gzip days and their extracts verify as before.
+  `VERIFIER_VERSION` is "9" (#177 took "8", W5-A-19). The case is in `sealed_format_cases.py`,
+  run with `lzma` taken away in-process. `test_sealed_formats.py` also runs `verify.py` as a
+  script with `lzma` and `_lzma` blocked, and covers an extract from an xz day.
+- **#136-2: only a stamped manifest protects a file from `compress_deterministic`.**
+  - **The refusal:** the sealer refuses with a TR/EN `SealError` (not retryable, so the alert is
+    critical) when the same day's file in the other format is locked, or when a manifest of its
+    folder with its time stamp beside it names it. A stamped manifest that cannot be read
+    protects every file of the folder.
+  - **The narrowing:** a manifest without a time stamp does not protect the file. It belongs to
+    the same failed attempt (the stamp did not come back, e.g. the TSA was down), and the retry
+    rewrites it. Taken literally, "a manifest names it" would block that retry for good after a
+    `seal.compression` change.
+- **#136-3: the guide's wording.**
+  - **Which sentence:** the issue's "§2" is read as item 2 ("Mühürleme") of §1 of
+    `docs/DENETCI-KILAVUZU.md`, where "only the line's stream" stands. §2 (the retention table)
+    does not mention it.
+  - **The Python commands:** the one-liner that opens xz files is dropped (TR §5 "Mühürlü
+    dosyaları açmak", EN "Sealed file formats"). The guide now says to run C2 first, or to use
+    7-Zip, `xz -dc` or `verify.py`.
+  - **Not changed:** the `range_sha256` commands of §9 (TR and EN). They compare their output
+    with a stored hash, so a shortened output fails and is never read as a match (question on
+    #136).
+- **#136-4: the memory ceiling is documented, not capped.** `seal.xz_preset` keeps 0–9 (the
+  manager's preference on #136). `docs/DATA-MODEL.md` "Sealed files" gives the measured memory
+  and the estimate for 8 threads. The H5 wording there now says "a fifth of half the limit, or a
+  tenth of PT2H". The extra decompression that verifies each sealed file was measured on a 1 M
+  line day: 4.4 s for xz 6 at 148 MB/s, about 35 s for a 5 GB day. The issue estimated about a
+  minute.
