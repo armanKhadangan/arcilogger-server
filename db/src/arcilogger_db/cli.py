@@ -66,8 +66,10 @@ transaction before the program is swapped; ``upgrade`` (its seed) restores the o
 version left as they were and prints both counts with the lease rebuild range.
 
 ``schema downgrade`` is the schema step of ``Install-Arcilogger.ps1 -Rollback`` without
-``-RestoreDatabase`` back to a version from before ``0021_db_window`` (issue #122;
-:mod:`arcilogger_db.downgrade`), run after the services stop and before the program is swapped:
+``-RestoreDatabase`` back to a version that does not have this version's head revision (issues
+#122, #164; :mod:`arcilogger_db.downgrade`): down to that version's head, never below
+``0020_fg_traffic_transip_time``, through the lossless revisions only (``0022_lease_moves``,
+``0021_db_window``), run after the services stop and before the program is swapped:
 alembic's downgrade under the migrations' lock, held for the session (``0021``'s downgrade
 commits a step per table and month, and a second run goes on where a failed one stopped), and the
 one ``settings.change`` entry (actor ``system``) when it changed ``db.retention_days``, after

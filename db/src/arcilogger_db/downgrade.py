@@ -1,10 +1,15 @@
 """The schema downgrade of a site rollback (``arcilogger-db schema downgrade``, issue #122).
 
-``Install-Arcilogger.ps1 -Rollback`` without ``-RestoreDatabase``, back to a version from before
-revision ``0021_db_window``, runs it after the services stop and before the program is swapped,
-with this version's program still in place: the previous version creates and drops monthly
-partitions only, and ``0021_db_window``'s downgrade merges the daily partitions back into
-monthly ones. :func:`downgrade_schema`
+``Install-Arcilogger.ps1 -Rollback`` without ``-RestoreDatabase``, back to a version that does
+not have this version's head revision (issue #164; ``Get-SchemaRollbackPlan``), runs it after the
+services stop and before the program is swapped, with this version's program still in place:
+down to the previous version's head, never below ``0020_fg_traffic_transip_time`` (the revision
+``0021_db_window`` revises), and only through the revisions the installer lists as lossless
+(``$LosslessDowngrades``: ``0022_lease_moves``, ``0021_db_window``). A version from before
+``0021_db_window`` creates and drops monthly partitions only, and ``0021_db_window``'s downgrade
+merges the daily partitions back into monthly ones; one that has ``0021`` but not this head would
+fail its own ``arcilogger-db upgrade`` (its repair run) on a revision it does not ship.
+:func:`downgrade_schema`
 
 * takes the migrations' advisory lock (:data:`~arcilogger_db.migrate.MIGRATION_LOCK_KEY`, which
   ``arcilogger-db upgrade`` takes for its transaction) at **session** level: ``0021``'s
