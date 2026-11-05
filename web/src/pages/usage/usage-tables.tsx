@@ -168,7 +168,7 @@ function textColumn<T>(
 }
 
 /** Some row has time in the breaks of the work hours: the tables show the "Mola" column. */
-export function hasBreakTime<T>(rows: readonly T[], get: (row: T) => Metrics): boolean {
+function hasBreakTime<T>(rows: readonly T[], get: (row: T) => Metrics): boolean {
   return rows.some((row) => get(row).break_active_seconds > 0);
 }
 

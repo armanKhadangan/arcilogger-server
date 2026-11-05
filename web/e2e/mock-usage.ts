@@ -81,7 +81,8 @@ export interface UsageOptions {
   rebuildFails?: boolean;
   /**
    * A one-hour break of the work hours on work days, starting at this hour (W5-K): the generated
-   * days split it from the work hours. None by default, like the captured site.
+   * days split it from the work hours. None by default, like the captured site. The generated
+   * people are away at 12:00, so a break with activity in it is another hour (e.g. 10).
    */
   breakHour?: number;
 }
