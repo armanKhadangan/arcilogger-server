@@ -35,7 +35,10 @@ Timings and plans are printed (run with ``-s`` to see them).
 **Wave 3 guards** (contract 3.8; marked ``perf``, so ``poe test-perf`` runs them, alone): the
 lookup's srcmac guard and sightings, the D8 probe, the post-lease checks, the clock measurement
 and the DHCP-origin query, each under its own bound, on two sites written once for the module
-(see the comment above :data:`GUARD_AT`).
+(see the comment above :data:`GUARD_AT`). The two guards of the converted-row check hold the
+best of :data:`ROUNDS` timed rounds to their bound and print every round's seconds and the best
+one's split past the capture, with their site's checkpoint (the ``guard split, …`` lines of the
+log, #179).
 
 **The exit guards** (contract 3.8, WP-C3): the two-exit ``= ANY`` candidate search, the unclaimed
 search with a ``<<= ANY`` exclusion, a direct exit with a /29 public network and the overlap probe
@@ -48,11 +51,14 @@ of the same kind on the traffic site.
 from __future__ import annotations
 
 import functools
+import gc
 import itertools
+import math
 import os
 import re
+import sys
 import time
-from collections.abc import Iterator, Sequence
+from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
 from datetime import time as time_of_day
@@ -895,6 +901,30 @@ def _site(server: TestServer, template: str, statements: Sequence[str]) -> Itera
             site.dispose()
 
 
+def _checkpoint(site: Engine) -> str:
+    """Write a site's rows back to disk before its guards (#179, as api's ``test_search_perf``
+    does for #90): the writes and ``VACUUM (ANALYZE)`` leave dirty pages, and their write-back
+    must not run into a guard's timed rounds. ``CHECKPOINT`` needs a superuser or
+    ``pg_checkpoint`` (both CI jobs connect as one); without, it is skipped and said so."""
+    with site.connect().execution_options(isolation_level="AUTOCOMMIT") as connection:
+        allowed = connection.scalar(
+            text(
+                "SELECT rolsuper OR pg_has_role(current_user, 'pg_checkpoint', 'MEMBER') "
+                "FROM pg_roles WHERE rolname = current_user"
+            )
+        )
+        if not allowed:
+            return "no checkpoint (the role has no pg_checkpoint)"
+        began = time.perf_counter()
+        connection.execute(text("CHECKPOINT"))
+    return f"checkpoint in {time.perf_counter() - began:.1f} s"
+
+
+#: :func:`_checkpoint`'s result for a site's database, shown in its guards' ``guard split``
+#: line (a module fixture's own output only shows in a failure's report).
+CHECKPOINTS: dict[str | None, str] = {}
+
+
 @pytest.fixture(scope="module")
 def traffic_site(pg_server: TestServer, pg_template: str) -> Iterator[Engine]:
     for site in _site(pg_server, pg_template, TRAFFIC_SITE):
@@ -908,7 +938,10 @@ def traffic_site(pg_server: TestServer, pg_template: str) -> Iterator[Engine]:
 
 @pytest.fixture(scope="module")
 def event_site(pg_server: TestServer, pg_template: str) -> Iterator[Engine]:
-    yield from _site(pg_server, pg_template, EVENT_SITE)
+    for site in _site(pg_server, pg_template, EVENT_SITE):
+        # The converted-row guard times on a settled server (#179).
+        CHECKPOINTS[site.url.database] = _checkpoint(site)
+        yield site
 
 
 @pytest.fixture(scope="module")
@@ -919,7 +952,7 @@ def lines_site(pg_server: TestServer, pg_template: str) -> Iterator[Engine]:
 @pytest.fixture(scope="module")
 def moves_site(pg_server: TestServer, pg_template: str) -> Iterator[Engine]:
     """:data:`MOVES_SITE` in its own database, the moves committed: the guard's lookups read
-    with their own sessions (:func:`_guard_lookup`)."""
+    with their own sessions (:func:`_guard_run`)."""
     for site in _site(pg_server, pg_template, MOVES_SITE):
         start = GUARD_AT - timedelta(days=150)  # the leases' start (_MT_DHCP_LEASES)
         moved = MoveGroup(
@@ -936,6 +969,8 @@ def moves_site(pg_server: TestServer, pg_template: str) -> Iterator[Engine]:
             session.commit()
         with site.connect().execution_options(isolation_level="AUTOCOMMIT") as connection:
             connection.execute(text("VACUUM (ANALYZE) leases"))
+        # Its guard is the first test after these writes (#179).
+        CHECKPOINTS[site.url.database] = _checkpoint(site)
         yield site
 
 
@@ -945,6 +980,59 @@ class _Timed:
 
     seconds: float = 0.0
     calls: list[tuple[Any, ...]] = field(default_factory=list)
+
+
+@dataclass
+class _Split:
+    """Where one timed run of ``Attributor._missed_moves`` went (#179), timed in the test only
+    (product code has no timing hooks): its statements (SQLAlchemy's cursor events, as api's
+    ``test_search_perf.Timer``), the ``leases.moves`` one apart; the decoding of the recorded
+    moves (``_recorded_moves`` less that statement: SQLAlchemy's work for it, the jsonb values
+    read at fetch and ``parse_moves``); the judging (``_bears`` and ``_recorded_move``, less any
+    statement in them), with the calls of ``_move_counts`` and ``stored_refusal``; the rest is
+    "other". Python's full (generation 2) collections in it are counted with their pause, which
+    lies in the parts above."""
+
+    missed: _Timed
+    recorded: _Timed
+    sql: float = 0.0
+    statements: int = 0
+    moves_sql: float = 0.0
+    judging: float = 0.0
+    calls: dict[str, int] = field(default_factory=dict)
+    collections: int = 0
+    collected: float = 0.0
+    #: While ``_missed_moves`` runs (only then are statements, calls and collections taken).
+    inside: bool = False
+    #: While a judging call runs (only the outer one is timed).
+    judged: bool = False
+    #: When the running full collection began.
+    collecting: float = 0.0
+
+    def seconds(self) -> str:
+        """The run's seconds, with its full collections when there were any."""
+        if not self.collections:
+            return f"{self.missed.seconds:.3f}"
+        return f"{self.missed.seconds:.3f} [gc2 {self.collections}: {self.collected:.3f}]"
+
+    def text(self) -> str:
+        decode = self.recorded.seconds - self.moves_sql
+        other = self.missed.seconds - self.sql - decode - self.judging
+        calls = ", ".join(f"{name} {count}" for name, count in self.calls.items())
+        return (
+            f"sql {self.sql:.3f} ({self.statements}, moves {self.moves_sql:.3f}), "
+            f"decode {decode:.3f}, judging {self.judging:.3f} ({calls}), other {other:.3f}"
+        )
+
+    def collection(self, phase: str, info: dict[str, Any]) -> None:
+        """A ``gc.callbacks`` entry: a full collection while ``_missed_moves`` runs."""
+        if not self.inside or info["generation"] != 2:
+            return
+        if phase == "start":
+            self.collecting = time.perf_counter()
+        else:
+            self.collections += 1
+            self.collected += time.perf_counter() - self.collecting
 
 
 class _Timer:
@@ -975,6 +1063,82 @@ class _Timer:
         print(f"\n--- guard (seconds), {title} ---")
         for name, timed in self.timed.items():
             print(f"{name:28s} {timed.seconds:8.3f}  ({len(timed.calls)} calls)")
+
+    def split(self, site: Engine) -> tuple[_Split, Callable[[], None]]:
+        """``Attributor._missed_moves`` and ``_recorded_moves`` timed (:meth:`time`), and the
+        former split (:class:`_Split`): the statements ``site`` sends while it runs and the
+        judging functions timed (the outer call only: ``_recorded_move`` calls ``_bears``), the
+        counted ones counted, the full collections taken; with the function that removes the
+        cursor listeners and the collection callback (the monkeypatch undoes the rest)."""
+        found = _Split(
+            self.time(Attributor, "_missed_moves"), self.time(Attributor, "_recorded_moves")
+        )
+        missed = Attributor._missed_moves
+
+        @functools.wraps(missed)
+        def flagged(*args: Any, **kwargs: Any) -> Any:
+            found.inside = True
+            try:
+                return missed(*args, **kwargs)
+            finally:
+                found.inside = False
+
+        def judging(name: str) -> None:
+            original = getattr(Attributor, name)
+
+            @functools.wraps(original)
+            def timed(*args: Any, **kwargs: Any) -> Any:
+                if found.judged:
+                    return original(*args, **kwargs)
+                found.judged = True
+                began, sql = time.perf_counter(), found.sql
+                try:
+                    return original(*args, **kwargs)
+                finally:
+                    found.judging += time.perf_counter() - began - (found.sql - sql)
+                    found.judged = False
+
+            self.monkeypatch.setattr(Attributor, name, timed)
+
+        def counted(owner: Any, name: str) -> None:
+            original = getattr(owner, name)
+            found.calls[name] = 0
+
+            @functools.wraps(original)
+            def count(*args: Any, **kwargs: Any) -> Any:
+                if found.inside:
+                    found.calls[name] += 1
+                return original(*args, **kwargs)
+
+            self.monkeypatch.setattr(owner, name, count)
+
+        def before(conn: Any, cursor: Any, statement: str, *args: Any) -> None:
+            if found.inside:
+                conn.info.setdefault("arci_split_began", []).append(time.perf_counter())
+
+        def after(conn: Any, cursor: Any, statement: str, *args: Any) -> None:
+            if found.inside:
+                seconds = time.perf_counter() - conn.info["arci_split_began"].pop()
+                found.sql += seconds
+                found.statements += 1
+                if "leases.moves" in statement:
+                    found.moves_sql += seconds
+
+        self.monkeypatch.setattr(Attributor, "_missed_moves", flagged)
+        judging("_bears")
+        judging("_recorded_move")
+        counted(Attributor, "_move_counts")
+        counted(attribution, "stored_refusal")
+        event.listen(site, "before_cursor_execute", before)
+        event.listen(site, "after_cursor_execute", after)
+        gc.callbacks.append(found.collection)
+
+        def remove() -> None:
+            event.remove(site, "before_cursor_execute", before)
+            event.remove(site, "after_cursor_execute", after)
+            gc.callbacks.remove(found.collection)
+
+        return found, remove
 
 
 @pytest.fixture
@@ -1029,19 +1193,124 @@ def executed() -> Iterator[_Executed]:
         recorded.stop()
 
 
+def _guard_run(site: Engine, request: LookupRequest) -> LookupOutcome:
+    """One run of ``request`` in its own session (a lookup only reads; it is rolled back)."""
+    with Session(site) as session:
+        settings = LookupSettings.from_settings(get_settings(session))
+        outcome = run_lookup(session, request, settings, now=GUARD_AT + timedelta(days=2))
+        session.rollback()
+    return outcome
+
+
 def _guard_lookup(site: Engine, request: LookupRequest, measure: Any) -> LookupOutcome:
     """``request`` run once to warm the caches, then again with ``measure()`` installing the
     timers (a lookup only reads; each run is rolled back)."""
+    _guard_run(site, request)
+    measure()
+    return _guard_run(site, request)
+
+
+#: The timed rounds after the warm-up of the two guards of the converted-row check (#179): the
+#: best one is held to 3.8's bound, so one stall of a runner does not fail the guard.
+ROUNDS = 5
+
+#: 3.8's bound of the converted-row query (0.2 s), which every CI reading meets by far
+#: (:data:`MOVES_READINGS`).
+CONVERTED_BOUND = 0.2
+#: The bound of the converted-row check with the recorded moves, per platform (#179-2): Linux
+#: keeps 3.8's 0.2 s; windows-latest's slow runners (gauge about 17 µs a line) take its best
+#: round to 0.16-0.17 s on plain PostgreSQL (the MAC branch's plan, #185), so its bound is the
+#: slowest best of :data:`MOVES_READINGS` times :data:`MOVES_MARGIN`, rounded up to 10 ms.
+MOVES_BOUNDS = {"win32": 0.21, "linux": 0.2}
+MOVES_BOUND = MOVES_BOUNDS.get(sys.platform, 0.2)
+#: The margin over the slowest Windows reading.
+MOVES_MARGIN = 1.2
+#: CI's passing readings of the two guards (2026-11-05, ``guard split`` lines of the throughput
+#: step): platform, run/attempt, job, the runner's gauge (µs a line, the live-tail guard's),
+#: the best of :data:`ROUNDS` of the converted-row query and of the recorded-moves check, in
+#: seconds. Runs 41950691995 (``a2a859f``) and 41956302626 (``57742d0``, attempts 1-9 re-run
+#: one job each).
+MOVES_READINGS = [
+    ("win32", "41950691995/1", 126993650686, 16.72, 0.115, 0.161),
+    ("win32", "41956302626/1", 127012205925, 8.62, 0.062, 0.085),
+    ("win32", "41956302626/2", 127052081954, 17.87, 0.123, 0.173),
+    ("win32", "41956302626/4", 127114691601, 17.54, 0.129, 0.169),
+    ("win32", "41956302626/6", 127194052338, 17.05, 0.132, 0.170),
+    ("win32", "41956302626/8", 127248835105, 9.52, 0.052, 0.104),
+    ("linux", "41950691995/1", 126993650651, 7.97, 0.024, 0.047),
+    ("linux", "41956302626/1", 127012206493, 11.81, 0.032, 0.067),
+    ("linux", "41956302626/3", 127071812028, 15.86, 0.041, 0.090),
+    ("linux", "41956302626/5", 127138516744, 15.84, 0.040, 0.086),
+    ("linux", "41956302626/7", 127221054741, 15.42, 0.037, 0.077),
+]
+
+
+@pytest.mark.parametrize(
+    ("system", "run", "job", "gauge", "converted", "moves"),
+    MOVES_READINGS,
+    ids=[f"{system}-{job}" for system, _run, job, *_rest in MOVES_READINGS],
+)
+def test_the_bounds_hold_every_ci_reading(
+    system: str, run: str, job: int, gauge: float, converted: float, moves: float
+) -> None:
+    """#179-2: every passing CI reading meets its bound, and Windows' bound is the rule's."""
+    assert converted < CONVERTED_BOUND
+    assert moves < MOVES_BOUNDS[system]
+    slowest = max(m for s, *_rest, m in MOVES_READINGS if s == "win32")
+    assert MOVES_BOUNDS["win32"] == math.ceil(round(slowest * MOVES_MARGIN * 100, 6)) / 100
+
+
+@dataclass
+class _Round:
+    """One timed round of :func:`_best_lookup`: its timer, its split and its statements."""
+
+    timer: _Timer
+    split: _Split
+    executed: _Executed
+
+
+def _best_lookup(
+    site: Engine,
+    request: LookupRequest,
+    title: str,
+    capsys: pytest.CaptureFixture[str],
+    measure: Callable[[_Timer], None] | None = None,
+) -> tuple[LookupOutcome, list[_Round], _Round]:
+    """``request`` run once to warm the caches, then :data:`ROUNDS` times, each round with a
+    timer of its own: the split of ``_missed_moves`` (:meth:`_Timer.split`), what ``measure``
+    installs on the timer and the statements recorded, all undone after the round. Every
+    round's ``_missed_moves`` (with its full collections, if any), the best round's split and
+    the site's :data:`CHECKPOINTS` entry are printed past pytest's capture (``poe test-perf``
+    runs without ``-s``, and the job log must show a passing run's figures too); the last
+    outcome, the rounds and the best of them are returned."""
+    _guard_run(site, request)
+    rounds: list[_Round] = []
     outcome = None
-    for warm in (True, False):
-        if not warm:
-            measure()
-        with Session(site) as session:
-            settings = LookupSettings.from_settings(get_settings(session))
-            outcome = run_lookup(session, request, settings, now=GUARD_AT + timedelta(days=2))
-            session.rollback()
+    for _ in range(ROUNDS):
+        recorded = _Executed()
+        with pytest.MonkeyPatch.context() as patch:
+            timer = _Timer(patch)
+            split, remove = timer.split(site)
+            if measure is not None:
+                measure(timer)
+            recorded.record(site)
+            try:
+                outcome = _guard_run(site, request)
+            finally:
+                recorded.stop()
+                remove()
+        rounds.append(_Round(timer, split, recorded))
     assert outcome is not None
-    return outcome
+    best = min(rounds, key=lambda each: each.split.missed.seconds)
+    seconds = " ".join(each.split.seconds() for each in rounds)
+    checkpoint = CHECKPOINTS.get(site.url.database, "no checkpoint")
+    with capsys.disabled():
+        print(
+            f"\nguard split, {title}: _missed_moves best {best.split.missed.seconds:.3f}s "
+            f"of {ROUNDS} ({seconds}): {best.split.text()}; {checkpoint}"
+        )
+    best.timer.report(title)
+    return outcome, rounds, best
 
 
 def _keys(outcome: LookupOutcome) -> list[str]:
@@ -2103,25 +2372,19 @@ def test_the_post_lease_query_of_a_hundred_chains_is_fast(
 
 @pytest.mark.perf
 def test_the_converted_row_query_of_a_hundred_chains_is_fast(
-    event_site: Engine, timer: _Timer, executed: _Executed
+    event_site: Engine, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """3.8: the round-7 converted-row query of 2.7 for the MACs of 100 chains on
     ``ix_fg_dhcp_mac_time``, at the load generator's FortiGate DHCP rate over 400 days (the
     chains' MACs on the staff Wi-Fi: read, every chain's rows returned, and no move under D33's
     key), with its branch for the chains' addresses on ``ix_fg_dhcp_ip_time`` (deviation c2) in
-    the same statement, under 0.2 s. The 100-day cap (no fallback) reaches before the lookup's
-    days, so the query reads from the first of them, more than 12 days (W5-G deviations; a
-    lookup never reads the whole cap any more). The addresses are no planning constant
-    (``ARRAY(SELECT unnest(…))``): on TimescaleDB each day is a one-day chunk, planned with the
-    statement's lists."""
-    moves: list[_Timed] = []
-
-    def measure() -> None:
-        moves.append(timer.time(Attributor, "_missed_moves"))
-        executed.record(event_site)
-
-    outcome = _guard_lookup(event_site, LookupRequest(at=MT_AT, public_ip=PUBLIC), measure)
-    timer.report("round-7 converted-row query")
+    the same statement, under 0.2 s (the best of :data:`ROUNDS`, #179). The 100-day cap (no
+    fallback) reaches before the lookup's days, so the query reads from the first of them, more
+    than 12 days (W5-G deviations; a lookup never reads the whole cap any more). The addresses
+    are no planning constant (``ARRAY(SELECT unnest(…))``): on TimescaleDB each day is a one-day
+    chunk, planned with the statement's lists."""
+    request = LookupRequest(at=MT_AT, public_ip=PUBLIC)
+    outcome, rounds, best = _best_lookup(event_site, request, "round-7 converted-row query", capsys)
     assert len(outcome.matches) == 100
     for match in outcome.matches:
         chain = match.chain
@@ -2130,17 +2393,16 @@ def test_the_converted_row_query_of_a_hundred_chains_is_fast(
         assert chain.lease.last_dhcp_evidence is not None
         assert chain.at - chain.lease.last_dhcp_evidence > attribution.MISSED_MOVE_WINDOW
     assert all(m.chain is not None and m.chain.confidence != "low" for m in outcome.matches)
-    (timed,) = moves
-    assert len(timed.calls) == 1
-    sql, parameters = executed.one("WITH ORDINALITY", "JOIN fg_dhcp")
-    executed.stop()
-    assert sql.count("JOIN fg_dhcp") == 2
-    assert "fg_dhcp.ip = ANY (array((SELECT unnest(" in sql
-    moments = _moments(parameters)
     first = _first_read(event_site, MT_AT)
     assert first > MT_AT - attribution.MISSED_MOVE_WINDOW
-    assert min(moments) == first
+    for each in rounds:
+        assert len(each.split.missed.calls) == 1
+        sql, parameters = each.executed.one("WITH ORDINALITY", "JOIN fg_dhcp")
+        assert sql.count("JOIN fg_dhcp") == 2
+        assert "fg_dhcp.ip = ANY (array((SELECT unnest(" in sql
+        assert min(_moments(parameters)) == first
     assert "lookback_clamped_to_window" in _keys(outcome)
+    sql, parameters = best.executed.one("WITH ORDINALITY", "JOIN fg_dhcp")
     with event_site.connect() as connection:
         rows = connection.exec_driver_sql(sql, parameters).all()
     # The MAC branch reads every chain's rows; the address branch (deviation c2) reads the
@@ -2149,27 +2411,27 @@ def test_the_converted_row_query_of_a_hundred_chains_is_fast(
     assert {
         (str(ip).startswith("172.20.60."), interface, held) for _n, ip, interface, _vd, held in rows
     } == {(True, "vlan60", False)}
-    assert timed.seconds < 0.2, f"the converted-row query took {timed.seconds:.3f} s"
+    seconds = best.split.missed.seconds
+    assert seconds < CONVERTED_BOUND, (
+        f"the converted-row query took {seconds:.3f} s (best of {ROUNDS})"
+    )
 
 
 @pytest.mark.perf
 def test_the_recorded_moves_of_a_hundred_chains_are_fast(
-    moves_site: Engine, timer: _Timer, executed: _Executed
+    moves_site: Engine, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """3.8 and issue #127: the converted-row check of the 100 ``mt_dhcp`` chains with the moves
-    their lease job recorded, under 0.2 s together: one more query, for the leases whose window
-    starts before the lookup's days (all 100: their last DHCP record is 150 days old), returns
-    each lease's :data:`RECORDED_TIMES` times, decoded and tested in memory. None lies in a
-    window, so every chain stays as it was, and the look-back is still noted (the recorded
-    moves only ever add one). Every lease is at the bound the lease job keeps (contract
-    deviation #127-1: 1,000 times, ``refs.MOVE_TIMES_CAP``), so no lease decodes more."""
-    moves: list[_Timed] = []
-    recorded: list[_Timed] = []
+    their lease job recorded, under 0.2 s together (the best of :data:`ROUNDS`, #179): one more
+    query, for the leases whose window starts before the lookup's days (all 100: their last
+    DHCP record is 150 days old), returns each lease's :data:`RECORDED_TIMES` times, decoded and
+    tested in memory. None lies in a window, so every chain stays as it was, and the look-back
+    is still noted (the recorded moves only ever add one). Every lease is at the bound the lease
+    job keeps (contract deviation #127-1: 1,000 times, ``refs.MOVE_TIMES_CAP``), so no lease
+    decodes more."""
     returned: list[dict[int, tuple[MoveGroup, ...]]] = []
 
-    def measure() -> None:
-        moves.append(timer.time(Attributor, "_missed_moves"))
-        recorded.append(timer.time(Attributor, "_recorded_moves"))
+    def measure(timer: _Timer) -> None:
         read = Attributor._recorded_moves
 
         def kept(self: Attributor, *args: Any) -> dict[int, tuple[MoveGroup, ...]]:
@@ -2178,10 +2440,10 @@ def test_the_recorded_moves_of_a_hundred_chains_are_fast(
             return found
 
         timer.monkeypatch.setattr(Attributor, "_recorded_moves", kept)
-        executed.record(moves_site)
 
-    outcome = _guard_lookup(moves_site, LookupRequest(at=MT_AT, public_ip=PUBLIC), measure)
-    timer.report(f"recorded moves, {RECORDED_TIMES} times a lease")
+    request = LookupRequest(at=MT_AT, public_ip=PUBLIC)
+    title = f"recorded moves, {RECORDED_TIMES} times a lease"
+    outcome, rounds, best = _best_lookup(moves_site, request, title, capsys, measure)
     assert len(outcome.matches) == 100
     for match in outcome.matches:
         chain = match.chain
@@ -2190,16 +2452,18 @@ def test_the_recorded_moves_of_a_hundred_chains_are_fast(
         assert chain.lease.source_table == "mt_dhcp"
         assert chain.confidence in ("high", "medium")
     assert "lookback_clamped_to_window" in _keys(outcome)
-    (timed,) = moves
-    (read,) = recorded
-    assert len(timed.calls) == len(read.calls) == 1
-    # The check decoded every chain's moves (one that decodes nothing would be fast too).
-    (found,) = returned
-    assert len(found) == 100
-    assert {len(group.times) for groups in found.values() for group in groups} == {RECORDED_TIMES}
-    sql, parameters = executed.one("leases.moves")
-    executed.stop()
-    assert "leases.moves IS NOT NULL" in sql
+    for each in rounds:
+        assert len(each.split.missed.calls) == len(each.split.recorded.calls) == 1
+        sql, _parameters = each.executed.one("leases.moves")
+        assert "leases.moves IS NOT NULL" in sql
+    # Every round decoded every chain's moves (one that decodes nothing would be fast too).
+    assert len(returned) == ROUNDS
+    for found in returned:
+        assert len(found) == 100
+        assert {len(group.times) for groups in found.values() for group in groups} == {
+            RECORDED_TIMES
+        }
+    sql, parameters = best.executed.one("leases.moves")
     with moves_site.connect() as connection:
         rows = connection.exec_driver_sql(sql, parameters).all()
     # The query read every chain's moves: 100 leases, each with all its times.
@@ -2215,7 +2479,10 @@ def test_the_recorded_moves_of_a_hundred_chains_are_fast(
         for group in value["groups"]
         for time in group["times"]
     )
-    assert timed.seconds < 0.2, f"the converted-row check took {timed.seconds:.3f} s"
+    seconds = best.split.missed.seconds
+    assert seconds < MOVES_BOUND, (
+        f"the converted-row check took {seconds:.3f} s (best of {ROUNDS}, bound {MOVES_BOUND} s)"
+    )
 
 
 # -- the event site on compressed chunks (WP-C3; the manager's answer to Q1 of PR #30) ------------
