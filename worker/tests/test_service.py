@@ -180,6 +180,7 @@ def test_default_jobs_run_against_the_database(
         ("usage.today", "ok"),
         ("usage.reattribute", "skipped"),  # nothing changed
         ("usage.retention", "ok"),
+        ("db.window", "ok"),  # after 01:00; nothing sealed yet, so only the partitions
         ("reports.run_due", "ok"),
         ("reports.purge", "ok"),
         ("system.sample", "ok"),
@@ -200,7 +201,6 @@ def test_default_jobs_run_against_the_database(
         ("usage.requests", "skipped"),
         ("usage.today", "ok"),
         ("usage.reattribute", "skipped"),
-        ("db.window", "ok"),  # after 04:00; nothing sealed yet, so only the partitions
         ("reports.run_due", "ok"),
         ("search.counts_backfill", "skipped"),
     ]
