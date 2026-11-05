@@ -1,4 +1,8 @@
-"""Kamu SM credit (kontör) check: logged daily, alert below the threshold."""
+"""Kamu SM credit (kontör) check: logged daily, alert below the threshold.
+
+A provider without a credit query (``rfc3161``, ``turktrust``: :meth:`credits` answers None
+without an error) is logged as ``{"supported": false}`` and never raises ``R20-credit``
+(Wave 5 contract §2.4, C21); ``GET /credits`` then reports ``supported: false``."""
 
 from __future__ import annotations
 
@@ -32,7 +36,9 @@ def check_credit(
         credits = None
     else:
         entry["credits"] = credits
-        if credits is not None and credits < threshold:
+        if credits is None:
+            entry["supported"] = False
+        elif credits < threshold:
             raise_alert(
                 layout.alerts,
                 "R20-credit",

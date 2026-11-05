@@ -7,6 +7,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import http.client
+import json
 import logging
 import select
 import socket
@@ -30,6 +31,7 @@ from pydantic import ValidationError
 
 from arcilogger_core.admin.contract import FALLBACK_POLICY
 from arcilogger_core.config import TURKTRUST_PRODUCTION_HOST, Config, TsaConfig
+from arcilogger_core.credit import check_credit
 from arcilogger_core.execpolicy import TrustAnchors
 from arcilogger_core.layout import Layout
 from arcilogger_core.secretstore import TURKTRUST_PASSWORD, TURKTRUST_USERNAME, SecretStore
@@ -544,3 +546,17 @@ def test_the_seal_preflight_needs_the_turktrust_account(tmp_path: Path) -> None:
     account = frozenset({TURKTRUST_USERNAME, TURKTRUST_PASSWORD})
     # The account is enough: no Zamane client or Java is asked for (only the roots remain).
     assert seal_preflight(config, anchors=anchors, secrets=secrets, stored=account) == ["roots"]
+
+
+def test_the_credit_task_records_no_credit_query(tmp_path: Path) -> None:
+    """§2.4, C21: TÜRKTRUST has no credit query. The Credit task logs ``supported: false`` and
+    never raises ``R20-credit``."""
+    layout = Layout(tmp_path / "data")
+    provider = _provider("https://zd.turktrust.com.tr/")
+    assert check_credit(provider, layout, 500) is None
+    (entry,) = [json.loads(line) for line in layout.credit_log.read_text("utf-8").splitlines()]
+    assert entry["provider"] == "turktrust"
+    assert entry["credits"] is None
+    assert entry["supported"] is False
+    alerts = list(layout.alerts.rglob("*")) if layout.alerts.exists() else []
+    assert not any("R20-credit" in path.read_text("utf-8") for path in alerts if path.is_file())

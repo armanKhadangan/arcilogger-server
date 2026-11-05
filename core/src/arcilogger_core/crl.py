@@ -175,20 +175,14 @@ class CrlOptions:
 
 
 def crl_options(config: Config) -> CrlOptions:
-    """The CRL settings of ``config``: the one place that reads them.
-
-    ``tsa.crl_urls``, ``tsa.crl_max_age_days`` and ``network.https_proxy`` are added to
-    :class:`~arcilogger_core.config.Config` by W5-T's day-1 configuration pull request (issue
-    #98), which has not landed on this branch yet. Until it has, they are read with
-    ``getattr`` and the contract's defaults (§2.5); afterwards each becomes a plain attribute.
-    ``max_age_days`` is read here for the ``crl_stale`` status of W5-C, not by the fetch.
-    """
-    tsa, network = config.tsa, getattr(config, "network", None)
+    """The CRL settings of ``config``: the one place that reads them (``tsa.crl_urls``,
+    ``tsa.timeout_seconds``, ``network.https_proxy`` and ``tsa.crl_max_age_days``, §2.5).
+    ``max_age_days`` is read here for the ``crl_stale`` status of W5-C, not by the fetch."""
     return CrlOptions(
-        urls=tuple(str(url) for url in getattr(tsa, "crl_urls", ())),
-        timeout_seconds=tsa.timeout_seconds,
-        https_proxy=str(getattr(network, "https_proxy", "")),
-        max_age_days=int(getattr(tsa, "crl_max_age_days", 7)),
+        urls=tuple(config.tsa.crl_urls),
+        timeout_seconds=config.tsa.timeout_seconds,
+        https_proxy=config.network.https_proxy,
+        max_age_days=config.tsa.crl_max_age_days,
     )
 
 

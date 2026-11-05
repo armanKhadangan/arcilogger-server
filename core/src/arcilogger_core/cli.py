@@ -13,8 +13,8 @@ or the web application::
     arcilogger-core requests run                     the browser administration's signed
                                                      requests: credit query, TSA test,
                                                      replica test (ADR-0014)
-    arcilogger-core secret init|set|list|delete      encrypted credentials (Kamu SM, database,
-                                                     replica, SMTP)
+    arcilogger-core secret init|set|list|delete      encrypted credentials (Kamu SM, TÜRKTRUST,
+                                                     database, replica, SMTP)
     arcilogger-core status                           summary for monitoring
     arcilogger-core config-check [--json]            what a production configuration still
                                                      lacks (organisation name, time source)
@@ -132,6 +132,8 @@ from arcilogger_core.secretstore import (
     KAMUSM_PASSWORD,
     REPLICA_PASSWORD,
     SMTP_PASSWORD,
+    TURKTRUST_PASSWORD,
+    TURKTRUST_USERNAME,
     USAGE_PSEUDONYM_KEY,
     SecretStore,
     SecretStoreError,
@@ -154,6 +156,8 @@ from arcilogger_core.tsa.verify import confirmed_legal_grade, verify_token
 SECRET_NAMES = (
     KAMUSM_CUSTOMER,
     KAMUSM_PASSWORD,
+    TURKTRUST_USERNAME,
+    TURKTRUST_PASSWORD,
     DATABASE_PASSWORD,
     REPLICA_PASSWORD,
     SMTP_PASSWORD,
