@@ -6,6 +6,8 @@ import io
 import json
 import subprocess
 import sys
+import threading
+import time
 from collections import Counter
 from collections.abc import Iterator
 from datetime import UTC, date, datetime, timedelta
@@ -540,6 +542,148 @@ def test_search_counts_status_rebuild_and_verify(
     assert main([*args, "--config", config]) == 0  # the repair it names
     assert "Yükseltmeden" not in capsys.readouterr().out
     assert main(["search-counts", "verify", "--config", config]) == 0
+
+
+def _rows(path: Path, statement: str) -> list[tuple[Any, ...]]:
+    engine = make_engine(load_config(path))
+    try:
+        with engine.connect() as connection:
+            return [tuple(row) for row in connection.execute(text(statement))]
+    finally:
+        engine.dispose()
+
+
+def test_search_counts_rebuild_refuses_a_file_being_reset(
+    setup: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """#182 review Q1 (W5-G-25): a file whose reset is under way (``counts_from_line = 0``,
+    offset 0, unfinished; ingest deletes its rows in steps, then loads it again) is not
+    recounted: a recount would take the mark off between two steps. Nothing is written, and
+    ``status`` shows the file as resetting beside a file still loading."""
+    config = str(setup)
+    assert main(["upgrade", "--config", config]) == 0
+    day = site_day(utc_now())
+    _half_counted_file(setup, "fortigate", day, 4)
+    _half_counted_file(setup, "core-r1", day, 3)
+    # The reset's first transaction: offset 0, marked; its rows and counts not deleted yet.
+    _sql(
+        setup,
+        "UPDATE ingest_offsets SET byte_offset = 0, line_number = 0, counts_from_line = 0 "
+        "WHERE source = 'fortigate'",
+    )
+    offsets = "SELECT * FROM ingest_offsets ORDER BY source"
+    counts = "SELECT * FROM search_counts ORDER BY id"
+    before = _rows(setup, offsets), _rows(setup, counts)
+    capsys.readouterr()
+
+    args = ["search-counts", "rebuild", "--source", "fortigate", "--day", day.isoformat()]
+    assert main([*args, "--config", config]) == 1
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert (
+        f"fortigate {day}: dosya sıfırlanıyor, yeniden sayılmadı [the file is being reset, not "
+        "recounted]." in captured.err
+    )
+    assert "[Ingest is deleting its rows step by step" in captured.err
+    assert (_rows(setup, offsets), _rows(setup, counts)) == before
+
+    assert main(["search-counts", "status", "--config", config]) == 0
+    out = capsys.readouterr().out
+    assert (
+        "Sayılmayı bekleyen dosyalar [files waiting to be counted]: 2 (0 bitmiş, worker işi "
+        "search.counts_backfill sayar [finished, counted by the worker job]; 1 hâlâ yükleniyor "
+        "[still loading]; 1 sıfırlanıyor [resetting])." in out
+    )
+    assert (
+        f"  fortigate {day}: sıfırlanıyor [resetting], satırları silinir, dosya kasadaysa "
+        "yeniden yüklenir [its rows are deleted, then loaded again if its file is in the vault]\n"
+        in out
+    )
+    assert f"  core-r1 {day}: ilk 2 satır sayılmadı [lines not counted], yükleniyor" in out
+
+    # The file still loading is recounted as before; the reset's last step takes the mark off,
+    # and then its file is recounted too.
+    assert (
+        main(
+            [
+                "search-counts",
+                "rebuild",
+                "--source",
+                "core-r1",
+                "--day",
+                day.isoformat(),
+                "--config",
+                config,
+            ]
+        )
+        == 0
+    )
+    _sql(setup, "UPDATE ingest_offsets SET counts_from_line = NULL WHERE source = 'fortigate'")
+    capsys.readouterr()
+    assert main([*args, "--config", config]) == 0
+    assert f"fortigate {day}: 4 satır yeniden sayıldı" in capsys.readouterr().out
+
+
+def _waits_for_a_lock(path: Path, seconds: float = 30.0) -> bool:
+    """Whether another session of the test database comes to wait for a lock within ``seconds``."""
+    engine = make_engine(load_config(path))
+    try:
+        deadline = time.monotonic() + seconds
+        while time.monotonic() < deadline:
+            with engine.connect() as connection:
+                if connection.execute(
+                    text(
+                        "SELECT 1 FROM pg_stat_activity WHERE datname = current_database() "
+                        "AND pid <> pg_backend_pid() AND wait_event_type = 'Lock'"
+                    )
+                ).first():
+                    return True
+            time.sleep(0.05)
+        return False
+    finally:
+        engine.dispose()
+
+
+def test_search_counts_rebuild_waits_for_the_offsets_row_and_then_refuses_a_reset(
+    setup: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """#182 review round 2: the refusal has no race because the rebuild locks the file's
+    ``ingest_offsets`` row (``FOR UPDATE``) before it reads the mark, the row ingest locks in
+    every transaction of a reset (READ COMMITTED). A reset's first transaction that holds the
+    row while the rebuild starts: the rebuild waits for it, then reads the mark that
+    transaction committed and refuses; ``search_counts`` stays as it was."""
+    config = str(setup)
+    assert main(["upgrade", "--config", config]) == 0
+    day = site_day(utc_now())
+    _half_counted_file(setup, "fortigate", day, 4)
+    counts = "SELECT * FROM search_counts ORDER BY id"
+    before = _rows(setup, counts)
+    capsys.readouterr()
+    args = ["search-counts", "rebuild", "--source", "fortigate", "--day", day.isoformat()]
+    results: list[int] = []
+    runner = threading.Thread(target=lambda: results.append(main([*args, "--config", config])))
+    engine = make_engine(load_config(setup))
+    try:
+        with engine.begin() as reset:  # its first transaction, as ingest's _begin_reset
+            reset.execute(
+                text("SELECT 1 FROM ingest_offsets WHERE source = 'fortigate' FOR UPDATE")
+            )
+            runner.start()
+            assert _waits_for_a_lock(setup)
+            reset.execute(
+                text(
+                    "UPDATE ingest_offsets SET byte_offset = 0, line_number = 0, "
+                    "counts_from_line = 0 WHERE source = 'fortigate'"
+                )
+            )
+    finally:
+        runner.join(30.0)
+        engine.dispose()
+    assert results == [1]
+    assert f"fortigate {day}: dosya sıfırlanıyor" in capsys.readouterr().err
+    assert _rows(setup, counts) == before
+    marked = "SELECT counts_from_line FROM ingest_offsets WHERE source = 'fortigate'"
+    assert _rows(setup, marked) == [(0,)]
 
 
 def test_search_counts_refuses_bad_input_and_needs_the_database(

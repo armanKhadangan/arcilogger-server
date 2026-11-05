@@ -130,7 +130,10 @@ MESSAGES: Final[Mapping[str, tuple[str, str]]] = {
 #: answer. ``search_timeout`` of a search (``lock``) or an export (``export_lock``) that waited
 #: for the partition lock (``ARCIPART``, held exclusively by a step of the window job, the daily
 #: partitions or a reload's load) until its budget was gone: nothing was scanned, so the text of
-#: the shortest time slice does not fit (W5-G-24).
+#: the shortest time slice does not fit (W5-G-24). ``{seconds}`` is the budget used up, which
+#: for an export is the lock's (``search.request_budget_ms``) or its own
+#: (``search.export_budget_seconds``, when the wait used that up): the export's text names it as
+#: the time it was allowed, true of either, not as the wait.
 VARIANTS: Final[Mapping[tuple[str, str], tuple[str, str]]] = {
     ("search_timeout", "lock"): (
         "Arama {seconds} saniyede başlayamadı: veritabanı bakımının (eski günlerin "
@@ -141,12 +144,12 @@ VARIANTS: Final[Mapping[tuple[str, str], tuple[str, str]]] = {
         "again) to finish. Try again a little later.",
     ),
     ("search_timeout", "export_lock"): (
-        "Dışa aktarma {seconds} saniyede başlayamadı: veritabanı bakımının (eski günlerin "
-        "kaldırılması, yeni bölümlerin açılması ya da arşivden yeniden yükleme) bitmesi "
-        "beklendi. Biraz sonra yeniden deneyin.",
-        "The export could not start within {seconds} s: it waited for database maintenance "
-        "(old days being dropped, new partitions being created or archived days being loaded "
-        "again) to finish. Try again a little later.",
+        "Dışa aktarma kendisine tanınan {seconds} saniyede başlayamadı: veritabanı bakımının "
+        "(eski günlerin kaldırılması, yeni bölümlerin açılması ya da arşivden yeniden yükleme) "
+        "bitmesi beklendi. Biraz sonra yeniden deneyin.",
+        "The export could not start within the {seconds} s it was allowed: it waited for "
+        "database maintenance (old days being dropped, new partitions being created or archived "
+        "days being loaded again) to finish. Try again a little later.",
     ),
 }
 

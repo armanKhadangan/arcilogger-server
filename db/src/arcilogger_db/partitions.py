@@ -67,8 +67,12 @@ waits for the few milliseconds a new, empty partition takes. Only the rare catch
 from the default partition holds the lock longer. A transaction-level advisory lock serialises
 concurrent maintenance runs (:func:`lock_partitions`); the caller provides the transaction
 (``engine.begin()``). The searches, the lookups and an export hold it shared; the worker's steps
-wait for it at most half of ``search.request_budget_ms`` (:func:`step_lock_timeout_ms`, W5-G-24)
-and try again at their next run, so a search does not queue behind a step that waits. On
+and ingest's (a reload's claim and partitions) wait for it at most half of
+``search.request_budget_ms`` (:func:`step_lock_timeout_ms`, W5-G-24) and try again later, so a
+search does not queue behind a step that waits. That wait and the step's table locks after it
+share one budget (:class:`LockBudget`): a table lock held by a reader that takes no partition lock
+(a plain ``SELECT``, a backup) does not keep the step, and the searches queued behind its
+partition lock, waiting either. On
 TimescaleDB :func:`drop_before` locks the chunks that go after that lock and before
 ``drop_chunks``, in chunk-id order (a query's planning locks them in it), so that neither the
 compression policy nor a reader of the chunks meets it in the opposite order (#133).
@@ -78,6 +82,9 @@ from __future__ import annotations
 
 import math
 import re
+import time
+from collections.abc import Collection, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
 from datetime import time as dt_time
@@ -189,8 +196,37 @@ def retention_days(connection: Connection) -> int:
 
 
 class PartitionLockTimeoutError(TimeoutError):
-    """:func:`lock_partitions` waited its ``timeout_ms`` and did not get the lock; the caller's
-    transaction is aborted (it changed nothing that stays)."""
+    """:func:`lock_partitions` waited its ``timeout_ms`` and did not get the lock, or a step's
+    lock waits used its :class:`LockBudget` up; the caller's transaction is aborted (it changed
+    nothing that stays)."""
+
+
+class LockBudget:
+    """How long a step may wait for its locks in all (W5-G-24): the partition lock
+    (:func:`lock_partitions`), then the table locks of the partitions and chunks it creates and
+    drops (``LOCK TABLE``, which locks a partitioned table's partitions with it), each waited for
+    at most what the waits before it left. Searches queue behind the step's partition lock while
+    it waits for a table, so these waits count as much as the partition lock's. Only the waits
+    count: the step's work (a partition made, a chunk dropped) takes as long as it takes, and its
+    other statements wait at most what is left when they come (none is expected to: the table
+    locks cover them). When the budget is used up, the wait that ran out raises
+    :class:`PartitionLockTimeoutError`."""
+
+    def __init__(self, timeout_ms: int) -> None:
+        self.timeout_ms = timeout_ms
+        #: Seconds waited so far.
+        self.waited = 0.0
+
+    def left_ms(self) -> int:
+        """What is left of the budget, at least 1 ms: ``lock_timeout`` 0 means no limit to
+        PostgreSQL (with 1 ms a lock that is free is still taken, one that is not gives up)."""
+        return max(1, math.ceil(self.timeout_ms - self.waited * 1000))
+
+    def bound(self, connection: Connection) -> None:
+        """The transaction's ``lock_timeout`` to what is left of the budget."""
+        connection.execute(
+            text("SELECT set_config('lock_timeout', :wait, true)"), {"wait": f"{self.left_ms()}ms"}
+        )
 
 
 def step_lock_timeout_ms(connection: Connection) -> int:
@@ -217,18 +253,23 @@ def step_lock_timeout_ms(connection: Connection) -> int:
     return value // STEP_LOCK_DIVISOR
 
 
-def lock_partitions(connection: Connection, *, timeout_ms: int | None = None) -> None:
+def lock_partitions(
+    connection: Connection, *, timeout_ms: int | None = None, budget: LockBudget | None = None
+) -> None:
     """Take :data:`PARTITION_LOCK_KEY` exclusively for the caller's transaction.
 
     ``timeout_ms`` (the worker's steps, :func:`step_lock_timeout_ms`): wait at most that long
     (:class:`PartitionLockTimeoutError`; PostgreSQL has aborted the transaction then); the other
-    lock waits of the transaction keep the ``lock_timeout`` they had. ``None``: wait as long as
-    it takes (the upgrade, ``arcilogger-db partitions``, a lock the transaction holds
-    already)."""
+    lock waits of the transaction keep the ``lock_timeout`` they had. ``budget``: wait at most
+    what is left of it, and count the wait. Neither: wait as long as it takes (the upgrade,
+    ``arcilogger-db partitions``, a lock the transaction holds already)."""
+    if budget is not None:
+        timeout_ms = budget.left_ms()
     if timeout_ms is None:
         connection.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": PARTITION_LOCK_KEY})
         return
     before = connection.execute(text("SELECT current_setting('lock_timeout')")).scalar_one()
+    started = time.monotonic()
     try:
         connection.execute(
             text(
@@ -243,7 +284,60 @@ def lock_partitions(connection: Connection, *, timeout_ms: int | None = None) ->
                 f"partition lock not granted within {timeout_ms} ms"
             ) from exc
         raise
+    finally:
+        if budget is not None:
+            budget.waited += time.monotonic() - started
     connection.execute(text("SELECT set_config('lock_timeout', :before, true)"), {"before": before})
+
+
+@contextmanager
+def _within(connection: Connection, budget: LockBudget | None) -> Iterator[None]:
+    """The lock waits of the block within ``budget`` (:class:`LockBudget`; nothing without one):
+    every statement waits at most what is left of it, set again after the partition lock
+    (:func:`_lock_partitions_within`) and before and after each table lock (:func:`_lock_table`);
+    a wait that runs out raises :class:`PartitionLockTimeoutError`; after the block the
+    transaction's ``lock_timeout`` is what it was."""
+    if budget is None:
+        yield
+        return
+    before = connection.execute(text("SELECT current_setting('lock_timeout')")).scalar_one()
+    budget.bound(connection)
+    try:
+        yield
+    except DBAPIError as exc:
+        if getattr(exc.orig, "sqlstate", None) == LOCK_NOT_AVAILABLE:
+            raise PartitionLockTimeoutError(
+                f"table lock not granted within the step's {budget.timeout_ms} ms"
+            ) from exc
+        raise
+    connection.execute(text("SELECT set_config('lock_timeout', :before, true)"), {"before": before})
+
+
+def _lock_partitions_within(connection: Connection, budget: LockBudget | None) -> None:
+    """:func:`lock_partitions` in :func:`_within`: the statements after it wait at most what its
+    wait left of ``budget`` (it puts back the ``lock_timeout`` it found, the whole budget)."""
+    lock_partitions(connection, budget=budget)
+    if budget is not None:
+        budget.bound(connection)
+
+
+def _lock_table(connection: Connection, name: str, budget: LockBudget | None) -> None:
+    """``LOCK TABLE <name> IN ACCESS EXCLUSIVE MODE`` (``name`` quoted), waited for at most what
+    is left of ``budget``, which counts the wait here; the statements after it wait at most what
+    is left then. ``lock_timeout`` bounds each lock the statement waits for, not the statement:
+    the parent's first, then each partition's that a reader holds without the parent (one that
+    reads a partition by its own name), each up to what was left when the statement began."""
+    statement = text(f"LOCK TABLE {name} IN ACCESS EXCLUSIVE MODE")
+    if budget is None:
+        connection.execute(statement)
+        return
+    budget.bound(connection)
+    started = time.monotonic()
+    try:
+        connection.execute(statement)
+    finally:
+        budget.waited += time.monotonic() - started
+    budget.bound(connection)
 
 
 def partition_name(table: str, month: date) -> str:
@@ -458,7 +552,7 @@ def ensure_partitions(
     months_back: int | None = None,
     limit: int = DAYS_PER_RUN,
     since: date | None = None,
-    lock_timeout_ms: int | None = None,
+    budget: LockBudget | None = None,
 ) -> PartitionReport:
     """Create the missing partitions around ``today`` (site day); idempotent.
 
@@ -471,50 +565,63 @@ def ensure_partitions(
     a UTC day that ends by its local midnight); ``months_ahead`` does not apply. With
     ``months_back``: the monthly partitions of ``months_back`` months before ``today``'s up to
     ``months_ahead`` after it, as earlier versions made them; a month that already has a
-    partition (a daily one) is left as it is. ``lock_timeout_ms``: the partition maintenance
-    lock is waited for at most that long (:func:`lock_partitions`; the worker's
-    ``partitions.ensure``).
+    partition (a daily one) is left as it is. ``budget``: the partition maintenance lock and the
+    tables are waited for at most that long in all (:class:`LockBudget`; the worker's steps).
     """
     report = PartitionReport(tables=partitioned_tables(connection))
     if not report.tables:
         return report
-    lock_partitions(connection, timeout_ms=lock_timeout_ms)
     day = today or site_day(utc_now())
-    if months_back is None:
-        # Today and the days ahead first, then the window's past days newest first.
-        oldest = day - timedelta(days=retention_days(connection))
-        days = utc_days(oldest, day + timedelta(days=DAYS_AHEAD))
-        window = [d for d in days if d >= day] + [d for d in reversed(days) if d < day]
-        if since is not None:
-            window = [d for d in window if day_bounds(d)[1] > day_window(since)[0]]
-        missing = _missing(connection, report.tables, window)
-        report.remaining = max(0, len(missing) - max(0, limit))
-        report.days_created = len(missing[: max(0, limit)])
-        _ensure_days(connection, report, missing[: max(0, limit)])
-        return report
-    current = month_of(day)
-    months = [add_months(current, n) for n in range(-months_back, months_ahead + 1)]
-    for table in report.tables:
-        existing = list_partitions(connection, table)
-        default = next((p.name for p in existing if p.is_default), None)
-        for month in months:
-            if not _overlaps(existing, *month_bounds(month)):
-                name = partition_name(table, month)
-                _create(connection, report, table, name, month_bounds(month), default)
+    with _within(connection, budget):
+        _lock_partitions_within(connection, budget)
+        if months_back is None:
+            # Today and the days ahead first, then the window's past days newest first.
+            oldest = day - timedelta(days=retention_days(connection))
+            days = utc_days(oldest, day + timedelta(days=DAYS_AHEAD))
+            window = [d for d in days if d >= day] + [d for d in reversed(days) if d < day]
+            if since is not None:
+                window = [d for d in window if day_bounds(d)[1] > day_window(since)[0]]
+            missing = _missing(connection, report.tables, window)
+            report.remaining = max(0, len(missing) - max(0, limit))
+            report.days_created = len(missing[: max(0, limit)])
+            _ensure_days(connection, report, missing[: max(0, limit)], budget)
+            return report
+        current = month_of(day)
+        months = [add_months(current, n) for n in range(-months_back, months_ahead + 1)]
+        for table in report.tables:
+            existing = list_partitions(connection, table)
+            default = next((p.name for p in existing if p.is_default), None)
+            for month in months:
+                if not _overlaps(existing, *month_bounds(month)):
+                    name = partition_name(table, month)
+                    _create(connection, report, table, name, month_bounds(month), default, budget)
     return report
 
 
-def ensure_days(connection: Connection, first_day: date, last_day: date) -> PartitionReport:
+def ensure_days(
+    connection: Connection,
+    first_day: date,
+    last_day: date,
+    *,
+    tables: Collection[str] | None = None,
+    budget: LockBudget | None = None,
+) -> PartitionReport:
     """Create the daily partitions that hold the device times of the site days ``first_day`` …
     ``last_day`` (both included; :func:`utc_days`) where no partition covers them yet, e.g.
-    before an archive reload loads them; idempotent."""
+    before an archive reload loads them; idempotent. ``tables``: only those of the partitioned
+    tables (ingest makes a table's partitions a transaction). ``budget``: the partition
+    maintenance lock and the tables are waited for at most that long in all
+    (:class:`LockBudget`)."""
     report = PartitionReport(tables=partitioned_tables(connection))
+    if tables is not None:
+        report.tables = [table for table in report.tables if table in tables]
     if not report.tables or last_day < first_day:
         return report
-    connection.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": PARTITION_LOCK_KEY})
-    days = utc_days(first_day, last_day)
-    report.days_created = len(_missing(connection, report.tables, days))
-    _ensure_days(connection, report, days)
+    with _within(connection, budget):
+        _lock_partitions_within(connection, budget)
+        days = utc_days(first_day, last_day)
+        report.days_created = len(_missing(connection, report.tables, days))
+        _ensure_days(connection, report, days, budget)
     return report
 
 
@@ -539,12 +646,14 @@ def _needed(existing: list[Partition], table: str, day: date) -> tuple[datetime,
     return _free_part(existing, *day_bounds(day))
 
 
-def _ensure_days(connection: Connection, report: PartitionReport, days: list[date]) -> None:
+def _ensure_days(
+    connection: Connection, report: PartitionReport, days: list[date], budget: LockBudget | None
+) -> None:
     for table in report.tables:
         existing = list_partitions(connection, table)
         default = next((p.name for p in existing if p.is_default), None)
         for day in days:
-            _ensure_day(connection, report, table, existing, default, day)
+            _ensure_day(connection, report, table, existing, default, day, budget)
 
 
 def _ensure_day(
@@ -554,12 +663,13 @@ def _ensure_day(
     existing: list[Partition],
     default: str | None,
     day: date,
+    budget: LockBudget | None,
 ) -> None:
     bounds = _needed(existing, table, day)
     if bounds is None:
         return
     name = day_partition_name(table, day)
-    _create(connection, report, table, name, bounds, default)
+    _create(connection, report, table, name, bounds, default, budget)
     existing.append(Partition(table, name, None, False, day, *bounds))
 
 
@@ -570,8 +680,9 @@ def _create(
     name: str,
     bounds: tuple[datetime, datetime],
     default: str | None,
+    budget: LockBudget | None,
 ) -> None:
-    moved = _create_partition(connection, table, name, bounds, default)
+    moved = _create_partition(connection, table, name, bounds, default, budget)
     report.created.append(name)
     if moved:
         report.moved[name] = moved
@@ -583,11 +694,12 @@ def _create_partition(
     name: str,
     bounds: tuple[datetime, datetime],
     default: str | None,
+    budget: LockBudget | None,
 ) -> int:
     start, end = bounds
     values = f"FROM ({_literal(start)}) TO ({_literal(end)})"
     in_range = f"time >= {_literal(start)} AND time < {_literal(end)}"
-    connection.execute(text(f"LOCK TABLE {_quoted(table)} IN ACCESS EXCLUSIVE MODE"))
+    _lock_table(connection, _quoted(table), budget)
     stray = 0
     if default is not None:
         stray = int(
@@ -623,7 +735,9 @@ def _create_partition(
     return stray
 
 
-def drop_before(connection: Connection, cutoff: date) -> PartitionReport:
+def drop_before(
+    connection: Connection, cutoff: date, *, budget: LockBudget | None = None
+) -> PartitionReport:
     """Drop everything older than the site day ``cutoff``: every partition the drop rule lets go
     at its first instant (local midnight; :func:`_drop_end`), the older rows of the default
     partitions, on TimescaleDB every chunk that ends on or before that instant (``drop_chunks``),
@@ -641,14 +755,23 @@ def drop_before(connection: Connection, cutoff: date) -> PartitionReport:
     changes nothing there: those days went earlier).
 
     Unbounded: one call drops the whole backlog in the caller's transaction (tests, small
-    ranges); :func:`maintain_window` steps through a long one.
+    ranges); :func:`maintain_window` steps through a long one. ``budget``: the partition
+    maintenance lock, the tables and the chunks are waited for at most that long in all
+    (:class:`LockBudget`; the worker's steps).
     """
+    with _within(connection, budget):
+        return _drop_before(connection, cutoff, budget)
+
+
+def _drop_before(
+    connection: Connection, cutoff: date, budget: LockBudget | None
+) -> PartitionReport:
     report = PartitionReport(
         tables=partitioned_tables(connection), hypertables=hypertables(connection)
     )
     limit = day_window(cutoff)[0]
     kept_from = limit
-    connection.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": PARTITION_LOCK_KEY})
+    _lock_partitions_within(connection, budget)
     for table in report.tables:
         for partition in list_partitions(connection, table):
             start, end = partition.start, partition.end
@@ -663,7 +786,7 @@ def drop_before(connection: Connection, cutoff: date) -> PartitionReport:
             elif not partition.named or start is None or end is None:
                 continue  # not made here: left alone
             elif _drop_end(end) <= limit:
-                connection.execute(text(f"LOCK TABLE {_quoted(table)} IN ACCESS EXCLUSIVE MODE"))
+                _lock_table(connection, _quoted(table), budget)
                 connection.execute(text(f"DROP TABLE {_quoted(partition.name)}"))
                 report.dropped.append(partition.name)
             elif start < limit and table == "messages":
@@ -687,7 +810,7 @@ def drop_before(connection: Connection, cutoff: date) -> PartitionReport:
             {"table": table, "limit": limit},
         ).scalars()
         for chunk in list(old):  # a regclass as text: quoted where needed
-            connection.execute(text(f"LOCK TABLE {chunk} IN ACCESS EXCLUSIVE MODE"))
+            _lock_table(connection, chunk, budget)
     for table in report.hypertables:
         chunks = connection.execute(
             text(
@@ -802,6 +925,7 @@ def maintain_window(
     *,
     today: date | None = None,
     days: int = DAYS_PER_RUN,
+    budget: LockBudget | None = None,
 ) -> PartitionReport:
     """One step of the database window (worker job ``db.window``, G3) in the caller's
     transaction: the daily partitions of the window and ahead (:func:`ensure_partitions`), then
@@ -814,17 +938,19 @@ def maintain_window(
     The caller computes ``cutoff`` (the earliest of ``today - db.retention_days``, the oldest
     day not sealed yet less :data:`RAW_DAY_MARGIN` and the oldest day of an active archive
     reload); a cutoff less than :data:`MIN_WINDOW_DAYS` before ``today`` is refused
-    (``ValueError``), so a wrong clock or caller can never empty the database.
+    (``ValueError``), so a wrong clock or caller can never empty the database. ``budget``: the
+    step's lock waits in all (:class:`LockBudget`; the worker's step takes the partition lock with
+    it before it calls this).
     """
     day = today or site_day(utc_now())
     if cutoff > day - timedelta(days=MIN_WINDOW_DAYS):
         raise ValueError(f"cutoff {cutoff} is less than {MIN_WINDOW_DAYS} days before {day}")
-    report = ensure_partitions(connection, today=day, limit=days, since=cutoff)
-    budget = days - report.days_created
-    if budget <= 0:
+    report = ensure_partitions(connection, today=day, limit=days, since=cutoff, budget=budget)
+    left = days - report.days_created
+    if left <= 0:
         return report
-    step = next_drop_cutoff(connection, cutoff, days=budget)
-    dropped = drop_before(connection, step)
+    step = next_drop_cutoff(connection, cutoff, days=left)
+    dropped = drop_before(connection, step, budget=budget)
     report.applied = step
     report.dropped = dropped.dropped
     report.purged = dropped.purged

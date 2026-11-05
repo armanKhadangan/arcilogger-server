@@ -721,6 +721,12 @@ class IngestOffset(Base):
     #: ``NULL``: every loaded line of the file is in ``search_counts``. A number: the lines before
     #: it were loaded before revision ``0016_search`` and are not counted yet (the worker job
     #: ``search.counts_backfill`` recounts the file once it is finished, then clears this).
+    #: ``0`` (a value no file has otherwise: a file loaded before ``0016_search`` is marked from
+    #: line 2 on): an unfinished file whose reset is under way, offset 0 and its rows deleted in
+    #: steps, then loaded again if its file is in the vault (ingest's ``RESETTING``, contract
+    #: W5-G-25; the offsets row of a file whose day vault retention deleted goes with its last
+    #: step): a search counts its hours from the rows, ``search.counts_backfill`` waits for it,
+    #: and ``arcilogger-db search-counts rebuild`` refuses it (``status`` shows it as resetting).
     counts_from_line: Mapped[int | None] = mapped_column(Integer)
 
 

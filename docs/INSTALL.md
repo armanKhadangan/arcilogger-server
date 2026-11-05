@@ -1369,11 +1369,14 @@ path in an administrator PowerShell and prints a token (section 9); the Core Net
 Core Networking's rules; Microsoft Defender's state and the two exclusions of section 2 step 4
 after the installation (`Get-MpPreference`), and the owner's decision on `spool` and `vault`
 (exclusion or scheduled scan only); the first night's `D:\ARCILOGGER\state\backup\last.json`, the
-duration and size of the nightly database dump and the first restore drill ([BACKUP.md](BACKUP.md)
-sections 6 and 8); on the upgrade to the version with Arama, how long the schema migration with
-`ix_fg_web_rhost_time` takes on the real database (section 13) and, after the first days,
-`arcilogger-db search-counts verify`: the summary table must match the rows and the counts of
-names not stored in lower case (`fg_dns.qname`, `fg_web.hostname`) must be 0; that the Python
+duration and size of the nightly database dump (a dump that starts at 01:40 and runs past 04:00
+meets the `db.window` run, which then backs off and tries again at 04:15 and 04:45: a dump of
+more than about 3 hours opens `R20-db-window` every such night, contract W5-G-24) and the first
+restore drill ([BACKUP.md](BACKUP.md) sections 6 and 8); on the upgrade to the version with
+Arama, how long the schema migration with `ix_fg_web_rhost_time` takes on the real database
+(section 13) and, after the first days, `arcilogger-db search-counts verify`: the summary table
+must match the rows and the counts of names not stored in lower case (`fg_dns.qname`,
+`fg_web.hostname`) must be 0; that the Python
 services start with the isolated interpreter (`Get-CimInstance
 Win32_Process -Filter "Name = 'python.exe'" | Format-List CommandLine`: `python.exe -I -X utf8 -u
 -m arcilogger_api serve …`; `sc.exe qc` shows the service wrapper) and that the server id reads the
@@ -1384,7 +1387,15 @@ id on Settings → Licence must equal the one of `arcilogger-db license status`;
 change of the file (`Get-Acl`), that ArciAdmin can add and delete only its own files in
 `kamusm-roots`, that the `ARCILOGGER-Admin` events wake the `Requests`, `Seal` and `ApplySystem`
 tasks (`Get-WinEvent`, the Task Scheduler history), and that no syslog message is lost while a
-firewall rule is updated in place.
+firewall rule is updated in place; for an archive reload of days whose rows are still in the
+database (the window's first days), that while its files are reset in steps (at most 10,000
+lines each; about 0.1 s a step on Linux, measured) the delay on the Live page stays under
+5 seconds and the ingest lag alert does not open, that the ingest log does not repeat "a step of
+its reset waits for a lock" for minutes (on TimescaleDB a step waits while the compression policy
+recompresses a chunk), and how long a round of a reload's partitions takes (one table of a day a
+round: about 30 ms on Linux; a whole day's 16 tables took 0.3–0.45 s on Linux and 0.84 s on a
+Windows CI machine; one table's round not measured on Windows or a spinning disk, contract
+W5-G-25).
 On desktop Windows 11 Pro all of the above plus the power settings, Smart App Control and a
 forced update restart, step by step:
 [KABUL-TESTI-WINDOWS11.md](KABUL-TESTI-WINDOWS11.md).

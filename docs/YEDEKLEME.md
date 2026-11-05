@@ -260,18 +260,23 @@ bugünkü `spool\_audit` dosyasında kalır; geri yüklenen zincir yedeğin son 
 Her geri yüklemeyi (tarih, dosya, neden, kim) yazılı bir tutanakla kaydedin.
 
 **Sürüm geri alma ve şema geri dönüşü:** `Install-Arcilogger.ps1 -Rollback`, `-RestoreDatabase`
-olmadan `0021_db_window` öncesi bir sürüme dönerken, hizmetler durduktan sonra ve program
-değiştirilmeden önce `& $db schema downgrade --to <önceki sürümün şeması> --json` çalıştırır.
-Komut günlük bölümleri aylık bölümlerde birleştirir (her tablonun her ayı kendi işleminde);
-kurulumun ya da yükseltmenin yazdığı `db.retention_days` 30 ise 400'e döner ve bunun için bir
-`settings.change` denetim kaydı (`system`) yazılır; yöneticinin verdiği bir değer kalır ve kayıt
-yazılmaz. Pencere işi yükseltmenin kendi değişikliğini (400 → 30) henüz denetim kaydına
-yazmadıysa komut önce o kaydı, aynı işlemde yazar. Başarısız olursa (`1`) birleştirilen aylar
-birleştirilmiş kalır, şema sürümü değişmez; komutu yeniden çalıştırmak kaldığı yerden sürdürür.
-Zaten o şemadaysa hiçbir şey yapmaz (`0`); bu sürümün bilmediği ya da veritabanınınkinden yeni
-bir şema `2` ile reddedilir; `3` veritabanına ulaşılamadığını söyler. Yeniden denemek de başarısız
-olursa geri dönüş yolu bir geri yüklemedir (geri almadan önceki bir yedek ya da
-`-Rollback -RestoreDatabase`).
+olmadan kurulu sürümün şema başını bilmeyen bir sürüme dönerken (kurulu sürümde `0021_db_window` ya
+da sonrası varsa; [KURULUM.md](KURULUM.md) bölüm 13), hizmetler durduktan sonra ve program
+değiştirilmeden önce `& $db schema downgrade --to <revizyon> --json` çalıştırır: önceki sürümün şema
+başına iner, ama `0020_fg_traffic_transip_time`'ın (`0021_db_window`'un üzerine kurulduğu revizyon)
+altına hiç inmez ve yalnızca kurulumun kayıpsız saydığı revizyonlardan geçer (`$LosslessDowngrades`:
+`0022_lease_moves`, `0021_db_window`). `0021_db_window`'a inerken yalnızca `leases.moves` sütunu
+gider.
+`0020_fg_traffic_transip_time`'a inerken komut günlük bölümleri aylık bölümlerde birleştirir (her
+tablonun her ayı kendi işleminde); kurulumun ya da yükseltmenin yazdığı `db.retention_days` 30 ise
+400'e döner ve bunun için bir `settings.change` denetim kaydı (`system`) yazılır; yöneticinin
+verdiği bir değer kalır ve kayıt yazılmaz. Pencere işi yükseltmenin kendi değişikliğini (400 → 30)
+henüz denetim kaydına yazmadıysa komut önce o kaydı, aynı işlemde yazar. Başarısız olursa (`1`)
+birleştirilen aylar birleştirilmiş kalır, şema sürümü değişmez; komutu yeniden çalıştırmak kaldığı
+yerden sürdürür. Zaten o şemadaysa hiçbir şey yapmaz (`0`); bu sürümün bilmediği ya da
+veritabanınınkinden yeni bir şema `2` ile reddedilir; `3` veritabanına ulaşılamadığını söyler.
+Yeniden denemek de başarısız olursa geri dönüş yolu bir geri yüklemedir (geri almadan önceki bir
+yedek ya da `-Rollback -RestoreDatabase`).
 
 **`-Rollback -RestoreDatabase`** de bu bölümün kuralına uyar: kurulum programı yükseltme öncesi
 yedeği yeni bir veritabanına (`<ad>_restore_<zaman>`; şimdikinin sahibi, yerel ayarı, ayarları ve

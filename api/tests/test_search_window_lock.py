@@ -741,8 +741,8 @@ def test_the_export_takes_the_wait_for_the_lock_from_its_budget(
     assert used_up.status_code == 504, used_up.text
     error = used_up.json()["error"]
     assert error["code"] == "search_timeout"
-    assert "10 saniyede" in error["message_tr"]
-    assert "10 s" in error["message_en"]
+    assert "kendisine tanınan 10 saniyede" in error["message_tr"]  # its budget, not the wait
+    assert "the 10 s it was allowed" in error["message_en"]
     assert (error["message_tr"], error["message_en"]) == texts(
         "search_timeout", {"seconds": 10}, variant="export_lock"
     )
