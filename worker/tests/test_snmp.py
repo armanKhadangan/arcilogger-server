@@ -343,7 +343,69 @@ def test_only_enabled_single_address_sources_are_polled(tmp_path: Path) -> None:
         "aes128",
     )
     assert snmp_sources(_config(tmp_path, enabled=False)) == []
-    assert snmp_sources(_config(tmp_path, interfaces=[])) == []
+    refused: dict[str, str] = {}
+    snmp_sources(config, refused)
+    assert refused == {"aps": "snmp_source_is_network"}  # a network is never a target
+
+
+@pytest.mark.parametrize(
+    ("settings", "code"),
+    [
+        ({"version": 2}, "snmp_auth_priv_required"),
+        ({"community": "public"}, "snmp_auth_priv_required"),
+        ({"auth": "none"}, "snmp_auth_priv_required"),  # noAuthNoPriv
+        ({"priv": "none"}, "snmp_auth_priv_required"),  # authNoPriv
+        ({"auth": "md5"}, "snmp_auth_priv_required"),
+        ({"priv": "des"}, "snmp_auth_priv_required"),
+        ({"port": 0}, "snmp_setting_invalid"),
+        ({"port": 65536}, "snmp_setting_invalid"),
+        ({"interval_seconds": 9}, "snmp_setting_invalid"),
+        ({"interval_seconds": 61}, "snmp_setting_invalid"),
+        ({"interfaces": []}, "snmp_setting_invalid"),
+        ({"interfaces": ["a", "b", "c", "d", "e"]}, "snmp_setting_invalid"),
+        ({"interfaces": ["wan1", "wan1"]}, "snmp_setting_invalid"),
+        ({"user": ""}, "snmp_setting_invalid"),
+        ({"capacity_mbps": {"wan9": {"down": 10, "up": 1}}}, "snmp_setting_invalid"),
+        ({"capacity_mbps": {"wan1": {"down": 0, "up": 1}}}, "snmp_setting_invalid"),
+    ],
+)
+def test_n1_refusals(tmp_path: Path, settings: dict[str, Any], code: str) -> None:
+    """The rules of N1 (Q3 on #202: the adapter applies them until W5-T's model does)."""
+    refused: dict[str, str] = {}
+    assert snmp_sources(_config(tmp_path, **settings), refused) == []
+    assert refused == {"fw-1": code, "aps": "snmp_source_is_network"}
+
+
+@pytest.mark.parametrize(
+    "settings",
+    [
+        {"auth": "sha1", "priv": "aes256"},
+        {"auth": "sha512", "port": 65535, "interval_seconds": 60},
+        {"interfaces": ["a", "b", "c", "d"], "interval_seconds": 10, "port": 1},
+        {"capacity_mbps": {"wan1": {"down": 1000, "up": 100}}},
+    ],
+)
+def test_n1_bounds_and_choices_accepted(tmp_path: Path, settings: dict[str, Any]) -> None:
+    (source,) = snmp_sources(_config(tmp_path, **settings))
+    assert source.name == "fw-1"
+
+
+@pytest.mark.parametrize("keys", [None, ("short", "privkeyprivkey"), ("x" * 65, "privkeyprivkey")])
+def test_a_missing_or_bad_key_is_reported_and_polled_without_a_request(
+    tmp_path: Path, layout: Layout, keys: tuple[str, str] | None
+) -> None:
+    store = _store(tmp_path)
+    if keys is None:
+        store.delete(priv_key_name("fw-1"))
+    else:
+        store.set(auth_key_name("fw-1"), keys[0])
+    fake = agent()
+    report = snmp_job.poll_due(layout, _config(tmp_path), now=T0, sessions=None, client=fake)
+    assert report is not None
+    assert report.refused == {"fw-1": "snmp_secret_missing", "aps": "snmp_source_is_network"}
+    assert (fake.walks, fake.gets) == (0, [])
+    line = read_state(layout.wan_rates).sources["fw-1"].lines["wan1"]
+    assert line.status == "auth_failed"
 
 
 def test_the_job_polls_due_sources_and_writes_the_file(tmp_path: Path, layout: Layout) -> None:

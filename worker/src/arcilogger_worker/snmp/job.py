@@ -23,7 +23,13 @@ from arcilogger_core.snmp import PysnmpClient, SnmpClient
 from arcilogger_core.timeutil import isoformat_site
 from arcilogger_worker.alerts.store import active_alerts, open_alert, resolve
 from arcilogger_worker.snmp.poller import poll_source
-from arcilogger_worker.snmp.settings import SnmpSource, secret_store, snmp_sources, target
+from arcilogger_worker.snmp.settings import (
+    SECRET_MISSING,
+    SnmpSource,
+    secret_store,
+    snmp_sources,
+    target,
+)
 from arcilogger_worker.snmp.state import SourceState, read_state, write_state
 
 if TYPE_CHECKING:
@@ -60,6 +66,8 @@ class PollReport:
     failing: list[str] = field(default_factory=list)
     opened: list[str] = field(default_factory=list)
     resolved: list[str] = field(default_factory=list)
+    #: Source → why it is not polled, or polled without a request (N1's refusal codes).
+    refused: dict[str, str] = field(default_factory=dict)
 
     def details(self) -> dict[str, Any]:
         return {
@@ -67,7 +75,19 @@ class PollReport:
             "failing": self.failing,
             "opened": self.opened,
             "resolved": self.resolved,
+            "refused": self.refused,
         }
+
+
+#: (source, code) pairs already logged by this process: a refusal is logged once, not every 5 s.
+_logged: set[tuple[str, str]] = set()
+
+
+def _log_refusals(refused: Mapping[str, str]) -> None:
+    for pair in sorted(refused.items()):
+        if pair not in _logged:
+            _logged.add(pair)
+            log.warning("SNMP source %s is not polled as configured: %s", *pair)
 
 
 def _due(source: SnmpSource, state: SourceState | None, now: datetime) -> bool:
@@ -81,10 +101,18 @@ async def _poll_all(
     config: Config,
     client: SnmpClient,
     now: datetime,
+    refused: dict[str, str],
 ) -> None:
     store = secret_store(config)
+    targets = [target(source, store) for source, _ in jobs]
+    for (source, _), found in zip(jobs, targets, strict=True):
+        if found is None:
+            refused[source.name] = SECRET_MISSING  # polled as auth_failed, no request sent
     await asyncio.gather(
-        *(poll_source(source, target(source, store), client, state, now) for source, state in jobs)
+        *(
+            poll_source(source, found, client, state, now)
+            for (source, state), found in zip(jobs, targets, strict=True)
+        )
     )
 
 
@@ -111,12 +139,13 @@ def poll_due(
     client: SnmpClient | None = None,
 ) -> PollReport | None:
     """One run of ``snmp.poll``; ``None`` when no source has SNMP and nothing is left to clear."""
-    sources = snmp_sources(config)
+    report = PollReport()
+    sources = snmp_sources(config, report.refused)
     path = layout.wan_rates
     wan = read_state(path)
     if not sources and not wan.sources and not path.exists():
+        _log_refusals(report.refused)
         return None
-    report = PollReport()
     jobs = []
     for source in sources:
         state = wan.sources.get(source.name)
@@ -125,7 +154,7 @@ def poll_due(
                 state = wan.sources[source.name] = SourceState(name=source.name)
             jobs.append((source, state))
     if jobs:
-        asyncio.run(_poll_all(jobs, config, client or PysnmpClient(), now))
+        asyncio.run(_poll_all(jobs, config, client or PysnmpClient(), now, report.refused))
         report.polled = [source.name for source, _ in jobs]
     enabled = {source.name for source in sources}
     configured = {source.name for source in config.sources}
@@ -145,6 +174,7 @@ def poll_due(
     report.failing = sorted(name for name, lines in failing.items() if lines)
     if sessions is not None:
         _alerts(sessions, failing, now, report)
+    _log_refusals(report.refused)
     return report
 
 
