@@ -1237,6 +1237,18 @@ class Attributor:
         its constant list, which tests each row by a hash: it reads every row of the MACs, and
         in the same form it was slower on monthly partitions (3.8, measured with daily ones).
 
+        Its conversion test is ``CASE WHEN <kept> THEN true ELSE false END``, the same rows as
+        the bare :func:`.trust.kept` (``CASE ... END IS NULL`` is never NULL), for the planner
+        (issue #185, W5-G-26): it has no statistics on either and estimates ``IS NULL`` of an
+        expression at 0.005 and a boolean one at 0.5. At 0.005 the MACs' rows read as about 26
+        (5,699 in the #179 guards' world, also after ``ANALYZE``); with the days before the 16
+        daily partitions in ``fg_dhcp_default`` (the guards' layout) a nested loop and a hash
+        join then cost the same within the planner's 1 % fuzz, and the nested loop it took
+        filtered the 5,699 rows against each of the 100 windows (about 75 ms against 25 ms). At
+        0.5 they read as some thousands and it hashes on every layout measured. An
+        overestimate costs a hash build at worst; a planner that folds the wrapper back would
+        bring the 0.005 back, so ``test_missed_moves_plan.py`` pins the plan.
+
         The statement reads from :attr:`reads_from` on (G7). The part of a window before it,
         ``(since, reads_from]``, is read from the moves the lease job recorded with the lease
         (``leases.moves``, issue #127; :meth:`_recorded_moves`, one more query): tested again
@@ -1284,7 +1296,6 @@ class Attributor:
             FgDhcp.time > low,
             FgDhcp.time < high,
             FgDhcp.logid.in_(assigned),
-            self._kept,
         )
         moves = (
             select(
@@ -1298,7 +1309,12 @@ class Attributor:
             .join_from(
                 windows, FgDhcp, and_(FgDhcp.mac == windows.c.mac, FgDhcp.ip != windows.c.ip)
             )
-            .where(FgDhcp.mac.in_(sorted({lease.mac for _, _, lease, _ in targets})), inside)
+            .where(
+                FgDhcp.mac.in_(sorted({lease.mac for _, _, lease, _ in targets})),
+                inside,
+                # The same test, estimated at a half (#185, see above).
+                case((self._kept, true()), else_=false()),
+            )
         )
         held = (
             select(
@@ -1320,6 +1336,7 @@ class Attributor:
             .where(
                 FgDhcp.ip == any_(_selected(sorted({c.internal_ip for _, c, _, _ in targets}))),
                 inside,
+                self._kept,
             )
         )
         rows = self.session.execute(union_all(moves, held)).all()
