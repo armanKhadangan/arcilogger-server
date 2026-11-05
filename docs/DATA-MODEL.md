@@ -234,7 +234,17 @@ can be cited in an evidence package.
 
   On 1 M lines the ratios are the same; xz 6 on 2 threads seals at 8.3 MB/s (5 GB day: 603 s).
   Preset 9 gains nothing on logs (4.45 % against 4.44 %) for twice the memory, so the defaults
-  stay preset 6 on 2 threads: a 5 GB day takes about 12 minutes, a fifth of the limit.
+  stay preset 6 on 2 threads: a 5 GB day takes about 12 minutes (733 s), a fifth of half the
+  limit (3 600 s), or a tenth of PT2H. Sealing then decompresses each sealed file once more to
+  check it against the spool's hash and line count: on a 1 M line day (654 MB, same machine,
+  #136) that took 4.4 s for xz 6 (148 MB/s) and 3.1 s for gzip -9, so about 35 s more for a 5 GB
+  day (gzip: 24 s).
+- **Memory ceiling.** The xz writer's memory grows with the preset and the thread count: from the
+  table, 154 MB (preset 6, 1 thread) and 269 MB (2 threads); 288 MB (preset 9, 1 thread) and
+  511 MB (2 threads). The settings allow up to preset 9 on 8 threads, about 1.9 GB by those
+  figures (preset 6 on 8 threads: about 1 GB). Presets above 6 gain nothing on 16 MiB streams of
+  logs. `seal.xz_preset` keeps its range 0–9, as an administrator's choice; on a server with
+  little memory to spare, keep preset 6 and raise `seal.xz_threads` only with the memory for it.
 
   Showing one cited line (`/raw`, the code the API runs) on the 5 M line day:
 

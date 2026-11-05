@@ -6,6 +6,8 @@ file afterwards. ``test_sealed_formats.py`` seals the chain with the product's s
 :func:`core_errors` (``chain.verify_range``, deep) and :func:`standalone_codes` (the standalone
 verifier on the vault folder, deep, read as it is) and asserts the case's outcome for both:
 nothing found for an intact chain, the named error and failure code for a damaged file.
+A case run ``without_lzma`` takes the standalone verifier's ``lzma`` away, as on a Python built
+without it: the files are intact, and only the standalone verifier cannot read the xz days (#136).
 
 "Re-stamped" damage is a file that was already damaged when its manifest was written (or a
 careful forger who rewrote the manifest's ``sha256`` and stamped it again): its stored hash
@@ -44,6 +46,8 @@ class SealedFormatCase:
     core: str | None = None
     #: The standalone verifier's failure code for the last day; None: the chain passes.
     standalone: str | None = None
+    #: Run the standalone verifier as on a Python without the lzma module.
+    without_lzma: bool = False
 
 
 CASES = (
@@ -78,6 +82,12 @@ CASES = (
         "flipped-restamped",
         core="cannot be decompressed",
         standalone="file-content-mismatch",
+    ),
+    SealedFormatCase(
+        "intact xz days, read by a Python without lzma",
+        ("gzip", "xz", "xz"),
+        standalone="xz-unsupported",
+        without_lzma=True,
     ),
 )
 
