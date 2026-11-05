@@ -19,7 +19,8 @@ import pytest
 from arcilogger_core import sealedfile
 from arcilogger_core.chain import verify_range
 from arcilogger_core.config import SealConfig
-from arcilogger_core.seal import compress_deterministic
+from arcilogger_core.immutability import lock, unlock
+from arcilogger_core.seal import SealError, compress_deterministic
 from arcilogger_core.sealedfile import SealedFileError
 
 
@@ -210,6 +211,65 @@ def test_a_retry_in_the_other_format_removes_the_first_attempt(tmp_path: Path) -
     xz = tmp_path / sealedfile.log_name("fw", "xz")
     compress_deterministic(source, xz, SealConfig())
     assert sorted(p.name for p in tmp_path.iterdir()) == ["fw.log" + ".xz", "spool.log"]
+
+
+def _first_attempt(tmp_path: Path) -> tuple[Path, Path]:
+    """A gzip file of a first attempt and the spool file the xz retry seals."""
+    source = tmp_path / "spool.log"
+    source.write_bytes(b"x\n")
+    gz = tmp_path / sealedfile.log_name("fw", "gzip")
+    compress_deterministic(source, gz, SealConfig(compression="gzip"))
+    return source, gz
+
+
+def _manifest(folder: Path, names: list[str], *, stamped: bool, readable: bool = True) -> None:
+    manifest = folder / "manifest-2026-10-12.json"
+    files = [{"path": f"2026/10/12/{name}"} for name in names]
+    data = {"files": files, "audit_log": {"path": "2026/10/12/audit.jsonl.gz"}}
+    manifest.write_bytes(json.dumps(data).encode() if readable else b"{")
+    if stamped:
+        manifest.with_name(manifest.name + ".zd").write_bytes(b"token")
+
+
+def test_a_locked_file_in_the_other_format_is_never_deleted(tmp_path: Path) -> None:
+    """#136 item 3: a locked file (lock() ran: the day was sealed) refuses the retry."""
+    source, gz = _first_attempt(tmp_path)
+    lock(gz)
+    try:
+        with pytest.raises(SealError, match="is locked") as raised:
+            compress_deterministic(source, tmp_path / sealedfile.log_name("fw", "xz"), SealConfig())
+        assert gz.exists()
+        assert not raised.value.retryable
+        assert "kilitli" in str(raised.value)
+        assert sorted(p.name for p in tmp_path.iterdir()) == ["fw.log.gz", "spool.log"]
+    finally:
+        unlock(gz)
+
+
+@pytest.mark.parametrize("readable", [True, False], ids=["names-it", "unreadable"])
+def test_a_file_a_stamped_manifest_names_is_never_deleted(tmp_path: Path, readable: bool) -> None:
+    """#136 item 3: an unlocked file that a stamped manifest names (or a stamped manifest that
+    cannot be read, which might) refuses the retry; the file stays."""
+    source, gz = _first_attempt(tmp_path)
+    _manifest(tmp_path, [gz.name], stamped=True, readable=readable)
+    with pytest.raises(SealError, match=r"stamped manifest manifest-2026-10-12\.json"):
+        compress_deterministic(source, tmp_path / sealedfile.log_name("fw", "xz"), SealConfig())
+    assert gz.read_bytes()[:2] == b"\x1f\x8b"
+    assert not (tmp_path / sealedfile.log_name("fw", "xz")).exists()
+
+
+def test_a_leftover_named_only_by_an_unstamped_manifest_is_removed(tmp_path: Path) -> None:
+    """A manifest whose stamp never came back is the same failed attempt (the retry rewrites
+    it): it does not protect the file, and a stamped manifest naming other files does not
+    either."""
+    source, gz = _first_attempt(tmp_path)
+    _manifest(tmp_path, [gz.name], stamped=False)
+    compress_deterministic(source, tmp_path / sealedfile.log_name("fw", "xz"), SealConfig())
+    assert not gz.exists()
+    _, gz = _first_attempt(tmp_path)  # a gzip attempt again: the xz file goes
+    _manifest(tmp_path, ["core-r1.log.gz"], stamped=True)
+    compress_deterministic(source, tmp_path / sealedfile.log_name("fw", "xz"), SealConfig())
+    assert not gz.exists()
 
 
 def test_sealing_with_xz_keeps_old_gzip_days_and_verifies(world: Any, days: list[date]) -> None:
