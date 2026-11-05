@@ -631,7 +631,12 @@ PostgreSQL 16.
       0.5 s and 25 s for a 5 M line day) run in a thread beside ingest's loop, which goes on
       loading live data and acts on each result in a later round, in the same order (the size
       is checked again on the loop right before the file's first transaction); the reload's
-      partitions are made a day a round (#124, W5-G-22). A live line waits at most about one
+      partitions are made a day a round (#124, W5-G-22), one table a transaction (a stop waits
+      for one table's). Its claim and its partitions wait for the partition maintenance lock,
+      and then for the tables, at most half of `search.request_budget_ms` in all (never more
+      than 2 s; W5-G-24): a search queued behind them keeps half its budget; they are tried
+      again at the next look at the requests (the claim keeps its checked files), the request
+      is not failed. A live line waits at most about one
       round of steps (0.25 s and the step that ends it) instead of about 5 to 8 s per 1 M lines of a
       file whose rows are still there (the window's first days).
       A reload run twice gives the same rows and
