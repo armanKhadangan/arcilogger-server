@@ -60,6 +60,17 @@ class RuleText:
     action_en: str
 
 
+#: The internet line's speed over SNMP (Wave 5 §6 N4, the worker job ``snmp.poll``): a source
+#: with a WAN line that has had no good read for 10 minutes (low, one alert per source).
+SNMP_RULE: Final = "R20-snmp"
+#: The N4 status of a line that cannot be read, in Turkish and English.
+SNMP_STATUSES: Final[Mapping[str, tuple[str, str]]] = {
+    "timeout": ("yanıt yok", "no answer"),
+    "auth_failed": ("kimlik doğrulama başarısız", "authentication failed"),
+    "no_such_interface": ("arayüz bulunamadı", "interface not found"),
+    "snmp_no_hc_counters": ("64 bit sayaç yok", "no 64-bit counters"),
+}
+
 RULES: Final[Mapping[str, RuleText]] = {
     "R15": RuleText(
         "Log kaynağı sessiz",
@@ -275,6 +286,16 @@ RULES: Final[Mapping[str, RuleText]] = {
         "yeniden yüklemede ArciIngest'i denetleyin: Get-Service ArciIngest.",
         "Look at logs\\worker.log and state\\worker-status.json; for a reload without progress "
         "check ArciIngest: Get-Service ArciIngest.",
+    ),
+    # The internet line's speed (Wave 5 §6 N4): the source's name and the reasons only, never an
+    # interface name, a user name or a key.
+    SNMP_RULE: RuleText(
+        "İnternet hattı hızı okunamıyor",
+        "Internet line speed cannot be read",
+        "Kaynaklar'da kaynağın SNMP ayarlarını ve Bağlantıyı dene'yi denetleyin; sıkı giden "
+        "modda güvenlik duvarını denetleyin.",
+        "Check the source's SNMP settings and Test connection under Sources; in strict "
+        "outbound mode check the firewall.",
     ),
     "new-log-source": RuleText(
         "Yeni log kaynağı",
@@ -760,6 +781,31 @@ _STEPS: Final[dict[str, tuple[str, str]]] = {
         "dropped, so the database stays larger than the window meanwhile.\n"
         "4. The next successful run, or the reload moving on (or ending), or the queue before "
         "it moving, closes the alert by itself.",
+    ),
+    SNMP_RULE: (
+        "1. Ayrıntılarda hangi kaynağın kaç hattının okunamadığını ve nedenini görün: yanıt yok, "
+        "kimlik doğrulama başarısız, arayüz bulunamadı ya da 64 bit sayaç yok.\n"
+        "2. Kaynaklar'da kaynağı açın ve Bağlantıyı dene ile cihazın arayüz listesini alın; "
+        "SNMPv3 kullanıcısını, kimlik doğrulama ve şifreleme protokolünü ve anahtarları cihazdaki "
+        "ayarlarla karşılaştırın (DEVICE-SETUP.md, sahada doğrula). Arayüz bulunamadıysa listeden "
+        "doğru WAN hattını seçin.\n"
+        "3. Yanıt yoksa cihazın SNMP'yi ARCILOGGER sunucusunun adresine, bir LAN arayüzünde "
+        "açtığını ve sıkı giden modda güvenlik duvarında ARCILOGGER SNMP <kaynak> kuralının "
+        "olduğunu denetleyin. SNMP hiçbir zaman bir WAN arayüzünde açılmamalıdır.\n"
+        "4. Hız okunamadığı sürece Canlı Durum'daki hat kartı boş kalır; loglar ve 5651 işlevleri "
+        "bundan etkilenmez. Uyarı, hattın sonraki iyi okumasında kendiliğinden kapanır.",
+        "1. See in the details which source has how many lines that cannot be read, and why: no "
+        "answer, authentication failed, interface not found or no 64-bit counters.\n"
+        "2. Open the source under Sources and get the device's interface list with Test "
+        "connection; compare the SNMPv3 user, the authentication and privacy protocols and the "
+        "keys with the device's settings (DEVICE-SETUP.md, verify on site). If the interface was "
+        "not found, pick the right WAN line from the list.\n"
+        "3. With no answer, check that the device answers SNMP only to the ARCILOGGER server's "
+        "address, on a LAN interface, and in strict outbound mode that the firewall has the rule "
+        "ARCILOGGER SNMP <source>. SNMP must never be open on a WAN interface.\n"
+        "4. While the speed cannot be read the line card of Canlı Durum stays empty; logs and the "
+        "5651 functions are not affected. The alert closes by itself at the line's next good "
+        "read.",
     ),
     "new-log-source": (
         "1. Göndericinin adresini ayrıntılarda görün ve hangi cihaz olduğunu belirleyin.\n"
@@ -1831,6 +1877,25 @@ def _crl(d: Mapping[str, Any]) -> Facts | None:
     return (f"{tr}.", f"{en}.")
 
 
+def _snmp(d: Mapping[str, Any]) -> Facts | None:
+    """``R20-snmp``: the source, how many lines and why; never an interface name."""
+    source, minutes = source_name(d), _int(d, "minutes")
+    lines = d.get("lines")
+    if source is None or minutes is None or not isinstance(lines, Mapping) or not lines:
+        return None
+    reasons = sorted({str(status) for status in lines.values()} & set(SNMP_STATUSES))
+    if not reasons:
+        return None
+    tr = ", ".join(SNMP_STATUSES[reason][0] for reason in reasons)
+    en = ", ".join(SNMP_STATUSES[reason][1] for reason in reasons)
+    return (
+        f"{source} kaynağının {len(lines)} internet hattının hızı {minutes} dakikadan uzun "
+        f"süredir okunamıyor ({tr}).",
+        f"The speed of {len(lines)} internet line(s) of {source} has not been read for more than "
+        f"{minutes} minutes ({en}).",
+    )
+
+
 DESCRIBERS: Final[Mapping[str, Callable[[Mapping[str, Any]], Facts | None]]] = {
     "R15": _r15,
     "R20-seal": _seal,
@@ -1856,6 +1921,7 @@ DESCRIBERS: Final[Mapping[str, Callable[[Mapping[str, Any]], Facts | None]]] = {
     "R20-renewal": _renewal,
     "R20-cert": _cert,
     "R20-crl": _crl,
+    SNMP_RULE: _snmp,
     "new-log-source": _sender,
     "new_source": _sender,
     "wrong-transport": _sender,

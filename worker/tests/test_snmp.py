@@ -38,6 +38,7 @@ from arcilogger_core.snmp import (
 )
 from arcilogger_core.timeutil import SITE_TZ
 from arcilogger_db.models import Alert
+from arcilogger_worker.alerts import texts
 from arcilogger_worker.snmp import job as snmp_job
 from arcilogger_worker.snmp.poller import poll_source
 from arcilogger_worker.snmp.settings import (
@@ -533,3 +534,28 @@ def test_the_keys_never_reach_a_log_line_the_file_or_an_alert(
     for text in (caplog.text, written, alerts):
         assert AUTH_KEY not in text
         assert PRIV_KEY not in text
+
+
+def test_the_alert_texts_name_the_source_and_the_reasons_only() -> None:
+    """``R20-snmp`` in the e-mail catalogue: the source, a count and the reasons; never an
+    interface name (a configuration value), a user name or a key."""
+    details = {
+        "source": "fw-1",
+        "lines": {"wan1": "timeout", "isp-b": "auth_failed"},
+        "minutes": 10,
+        "title_en": "x",
+    }
+    found = texts.facts("R20-snmp", details)
+    assert found is not None
+    tr, en = found
+    assert "fw-1" in tr
+    assert "2 internet" in tr
+    assert "yanıt yok" in tr
+    assert "kimlik doğrulama başarısız" in tr
+    assert en.startswith("The speed of 2 internet line(s) of fw-1")
+    for text in (tr, en):
+        assert "wan1" not in text
+        assert "isp-b" not in text
+    assert texts.RULES["R20-snmp"].name_en == "Internet line speed cannot be read"
+    assert "Test connection" in texts.runbook("R20-snmp")[1]
+    assert texts.facts("R20-snmp", {"source": "fw-1", "lines": {}, "minutes": 10}) is None

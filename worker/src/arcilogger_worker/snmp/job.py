@@ -22,6 +22,7 @@ from arcilogger_core.layout import Layout
 from arcilogger_core.snmp import PysnmpClient, SnmpClient
 from arcilogger_core.timeutil import isoformat_site
 from arcilogger_worker.alerts.store import active_alerts, open_alert, resolve
+from arcilogger_worker.alerts.texts import SNMP_RULE, SNMP_STATUSES
 from arcilogger_worker.snmp.poller import poll_source
 from arcilogger_worker.snmp.settings import (
     SECRET_MISSING,
@@ -39,21 +40,13 @@ log = logging.getLogger(__name__)
 
 #: How often the job looks for due sources; each source is polled by its ``interval_seconds``.
 SNMP_POLL_EVERY: Final = timedelta(seconds=5)
-RULE: Final = "R20-snmp"
+RULE: Final = SNMP_RULE
 SEVERITY: Final = "low"
 #: A source is reported once one of its interfaces has had no good read for this long (N4).
 ALERT_AFTER: Final = timedelta(minutes=10)
 #: A source is due this much before its interval has passed: the job runs every 5 s, so an
 #: interval of 15 s is kept instead of drifting to 20 s.
 DUE_EARLY: Final = timedelta(seconds=2.5)
-
-#: The Turkish and English words of a line's status in an alert title.
-STATUS_WORDS: Final[Mapping[str, tuple[str, str]]] = {
-    "timeout": ("yanıt yok", "no answer"),
-    "auth_failed": ("kimlik doğrulama başarısız", "authentication failed"),
-    "no_such_interface": ("arayüz bulunamadı", "interface not found"),
-    "snmp_no_hc_counters": ("64 bit sayaç yok", "no 64-bit counters"),
-}
 
 
 def dedup_key(source: str) -> str:
@@ -189,8 +182,8 @@ def _alerts(
         for source, lines in failing.items():
             if not lines:
                 continue
-            parts_tr = ", ".join(f"{name}: {STATUS_WORDS[s][0]}" for name, s in lines.items())
-            parts_en = ", ".join(f"{name}: {STATUS_WORDS[s][1]}" for name, s in lines.items())
+            parts_tr = ", ".join(f"{name}: {SNMP_STATUSES[s][0]}" for name, s in lines.items())
+            parts_en = ", ".join(f"{name}: {SNMP_STATUSES[s][1]}" for name, s in lines.items())
             minutes = int(ALERT_AFTER.total_seconds() // 60)
             opened = open_alert(
                 session,
