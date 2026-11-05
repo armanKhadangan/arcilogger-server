@@ -2076,7 +2076,13 @@ All Wave 5 questions are answered (2026-11-02).
   took the take-ownership privilege away), it stops with an error naming the item and the
   remedy (every read and write of an item, the link check, the listing and its entries, is
   wrapped alike; a link's own error stays as it is), and `takeown /A /R /F <folder>` in an
-  elevated PowerShell takes it over by hand before the step is run again. Tests:
+  elevated PowerShell takes it over by hand before the step is run again. An item below that
+  is gone between its listing and its check or reset (`renewal.json` replaced in one step, a
+  `crl fetch` temporary name removed; #170, item N2) is skipped, with what was below it, and
+  the step goes on: `Test-ArciItemGone` takes a not-found error (`FileNotFoundException`,
+  `DirectoryNotFoundException`, `ItemNotFoundException`, a Win32 error 2 or 3, also wrapped,
+  as in a `MethodInvocationException`) for one only when the item is indeed no longer there,
+  and every other error still stops the step with the take-over error. Tests:
   `test_acl_plan_least_privilege`, `test_acl_plan_gives_the_renew_and_crlfetch_tasks_their_rights`,
   `test_acl_plan_resets_the_owner_of_the_two_protected_state_folders_only` (exactly the two
   entries carry `ResetOwner`), `test_only_the_acl_script_passes_reset_owner`, and on Windows
@@ -2096,7 +2102,13 @@ All Wave 5 questions are answered (2026-11-02).
   `test_acl_step_takes_over_a_lock_a_service_left_as_its_own` (a `renewal.lock` with
   inheritance off, a stand-in service as its owner and a Modify entry of its own: afterwards
   Administrators own it, it has inherited entries only, and LOCAL SERVICE keeps its inherited
-  Modify).
+  Modify), `test_acl_owner_reset_skips_only_an_item_that_is_gone` (the classification, with
+  every PowerShell), `test_acl_owner_reset_checks_vanished_items_where_it_lists_and_resets`,
+  and on Windows `test_acl_step_skips_an_item_removed_after_its_listing` (a file and a folder
+  with a file in it, removed by a wrapper of the module's own `Confirm-ArciNoLink` or
+  `Get-ArciAccessControl` as the reset loop reaches them: the step succeeds and takes over
+  `renewal.json`) and `test_acl_step_still_stops_at_an_item_it_cannot_reset` (access denied
+  on reading an item's entries: the take-over error naming the item).
 - **W5-E-10: the ACL step checks both protected state folders for links before it writes any
   entry (#170, item N1).** `Set-ArciVaultAcl.ps1` wrote `state` before it reached the two
   `ResetOwner` entries, and writing `state` passes its inheritable Modify (collector, ingest,

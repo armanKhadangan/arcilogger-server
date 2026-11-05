@@ -3246,6 +3246,143 @@ def test_acl_step_takes_over_a_lock_a_service_left_as_its_own(tmp_path: Path) ->
     assert modify, (before, after)
 
 
+_VANISHED_ITEM_SCRIPT = r"""
+param(
+    [string]$ModulePath, [string]$DataRoot, [string]$Base, [string]$Stage, [string]$ListPath,
+    [string]$OutputPath
+)
+$ErrorActionPreference = 'Stop'
+$module = Import-Module $ModulePath -Force -PassThru
+$plan = Get-ArciAclPlan -DataRoot $DataRoot -ProgramDataDir (Join-Path $Base 'programdata') `
+    -InstallDir (Join-Path $Base 'program')
+$entry = @($plan | Where-Object { $_.ResetOwner -and (Split-Path -Leaf $_.Path) -eq 'renewal' })
+if ($entry.Count -ne 1) { throw ('state\renewal entries in the plan: {0}' -f $entry.Count) }
+# The listed items (by name) are reached in the loop over the items below state\renewal, which
+# lists them after the folder's own reset. "link check" removes each as Confirm-ArciNoLink is
+# called on it there, "reset" as its entries are read for the reset, and "denied" fails that read
+# with access denied instead, removing nothing. The module's own functions are wrapped in its
+# scope; the module itself is the one Set-ArciVaultAcl.ps1 imports.
+& $module {
+    param([string]$Stage, [string[]]$Listed)
+    $script:TestListed = @($Listed)
+    $script:TestStage = $Stage
+    $script:TestRemoved = New-Object System.Collections.Generic.List[string]
+    $script:TestConfirm = ${function:Confirm-ArciNoLink}
+    $script:TestAccess = ${function:Get-ArciAccessControl}
+    function script:Test-Listed([System.IO.FileSystemInfo]$Item) {
+        ($script:TestListed -contains $Item.Name) -and -not $script:TestRemoved.Contains($Item.Name)
+    }
+    function script:Remove-Listed([System.IO.FileSystemInfo]$Item) {
+        Remove-Item -LiteralPath $Item.FullName -Recurse -Force -ErrorAction Stop
+        $script:TestRemoved.Add($Item.Name)
+    }
+    if ($Stage -eq 'link check') {
+        function script:Confirm-ArciNoLink {
+            param([System.IO.FileSystemInfo]$Item, [string]$Folder, [switch]$Below)
+            if (Test-Listed $Item) { Remove-Listed $Item }
+            & $script:TestConfirm -Item $Item -Folder $Folder -Below:$Below
+        }
+    }
+    else {
+        function script:Get-ArciAccessControl {
+            param([System.IO.FileSystemInfo]$Item, [string]$Sections = 'Access')
+            if (Test-Listed $Item) {
+                if ($script:TestStage -eq 'denied') {
+                    $message = 'stand-in denial'
+                    throw (New-Object System.UnauthorizedAccessException -ArgumentList $message)
+                }
+                Remove-Listed $Item
+            }
+            & $script:TestAccess -Item $Item -Sections $Sections
+        }
+    }
+} $Stage ([System.IO.File]::ReadAllLines($ListPath))
+$failure = $null
+try { Set-ArciAclEntry -Entry $entry[0] -ResetOwner }
+catch { $failure = [string]$_.Exception.Message }
+$removed = @(& $module { $script:TestRemoved.ToArray() })
+$report = [ordered]@{ failure = $failure; removed = $removed }
+[System.IO.File]::WriteAllText($OutputPath, (ConvertTo-Json -InputObject $report -Depth 4))
+"""
+
+
+def _reset_with_vanishing_items(
+    powershell: str, tmp_path: Path, data: Path, stage: str, names: list[str]
+) -> dict[str, Any]:
+    """Set-ArciAclEntry -ResetOwner on the plan's state\\renewal entry, with the named items
+    below it removed (or, for "denied", refused) as the reset loop reaches them."""
+    script = write_script(tmp_path / "vanish.ps1", _VANISHED_ITEM_SCRIPT)
+    listing, out = tmp_path / "vanish-names.txt", tmp_path / "vanish.json"
+    listing.write_text("\n".join(names) + "\n", encoding="utf-8")
+    result = run_powershell(
+        powershell, script, "-ModulePath", str(MODULE), "-DataRoot", str(data),
+        "-Base", str(tmp_path), "-Stage", stage, "-ListPath", str(listing),
+        "-OutputPath", str(out),
+    )  # fmt: skip
+    assert result.returncode == 0, result.stdout + result.stderr
+    report: dict[str, Any] = read_json(out)
+    return report
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="NTFS rights are Windows-only")
+@pytest.mark.parametrize("stage", ["link check", "reset"])
+def test_acl_step_skips_an_item_removed_after_its_listing(stage: str, tmp_path: Path) -> None:
+    """#170 N2: an item below state\\renewal that is gone between the listing and its reset
+    (renewal.json replaced in one step, a temporary name removed) is skipped, and so is what was
+    below a removed folder; the step succeeds and resets what is still there. The test removes a
+    file and a folder with a file in it as the reset loop reaches them, either just before the
+    link check of the item or just before its entries are read (Test-ArciItemGone classifies
+    the not-found error either raises). renewal.json, owned by a stand-in service with an entry
+    of its own (NETWORK SERVICE, as above), is taken over as usual."""
+    powershell = _windows_admin_powershell()
+    data = tmp_path / "data"
+    renewal_state = data / "state" / "renewal"
+    gone_file, gone_folder = renewal_state / ".renewal.json.k3v9.tmp", renewal_state / "gone"
+    gone_folder.mkdir(parents=True)
+    (gone_folder / "inner.json").write_bytes(b"{}\n")
+    gone_file.write_bytes(b"{}\n")
+    kept = renewal_state / "renewal.json"
+    kept.write_bytes(b"{}\n")
+    collector = STAND_IN_SERVICES[0]
+    subprocess.run(["icacls", str(kept), "/grant", f"*{collector}:M"], check=True)
+    subprocess.run(["icacls", str(kept), "/setowner", f"*{collector}"], check=True)
+    before = _owners_and_rules(powershell, tmp_path, [kept])[kept]
+    assert before["owner"] == collector, before
+    assert any(r["sid"] == collector and not r["inherited"] for r in before["rules"]), before
+    names = [gone_file.name, gone_folder.name]
+    report = _reset_with_vanishing_items(powershell, tmp_path, data, stage, names)
+    assert report["failure"] is None, report
+    # Each removal happened in the loop, after the listing: the hook saw both items.
+    assert sorted(report["removed"]) == sorted(names), report
+    assert not gone_file.exists(), report
+    assert not gone_folder.exists(), report
+    after = _owners_and_rules(powershell, tmp_path, [kept])[kept]
+    assert after["owner"] == WELL_KNOWN["admins"], (before, after, report)
+    assert after["rules"], (before, after, report)
+    assert all(r["inherited"] for r in after["rules"]), (before, after, report)
+    assert all(r["sid"] != collector for r in after["rules"]), (before, after, report)
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="NTFS rights are Windows-only")
+def test_acl_step_still_stops_at_an_item_it_cannot_reset(tmp_path: Path) -> None:
+    """#170 N2: only an item that is gone is skipped. Any other failure of an item's reset (here
+    access denied when its entries are read, the item still there) stops the step with the
+    take-over error that names the item and the takeown remedy."""
+    powershell = _windows_admin_powershell()
+    data = tmp_path / "data"
+    renewal_state = data / "state" / "renewal"
+    renewal_state.mkdir(parents=True)
+    lock = renewal_state / "renewal.lock"
+    lock.write_bytes(b"")
+    report = _reset_with_vanishing_items(powershell, tmp_path, data, "denied", [lock.name])
+    failure = report["failure"]
+    assert failure, report
+    assert "[could not take ownership, take it over by hand with takeown /A /R /F" in failure
+    assert f"{lock.name}: stand-in denial" in failure, report
+    assert report["removed"] == [], report
+    assert lock.exists(), report
+
+
 def _windows_admin_powershell() -> str:
     # os.name rather than sys.platform: mypy would treat the rest as unreachable off Windows.
     powershell = shutil.which("powershell")
@@ -11827,6 +11964,108 @@ def test_acl_script_checks_both_protected_state_folders_for_links_first() -> Non
     child_check = "Confirm-ArciNoLink -Item $child -Folder $item.FullName\n"
     assert entry.index(folder_check) < entry.index("Set-ArciAccessControl -Item $item")
     assert entry.index(child_check) < entry.index("Set-ArciAccessControl -Item $child")
+
+
+_ITEM_GONE_SCRIPT = r"""
+param([string]$ModulePath, [string]$Folder, [string]$OutputPath)
+$ErrorActionPreference = 'Stop'
+$module = Import-Module $ModulePath -Force -PassThru
+$missing = New-Object System.IO.FileInfo -ArgumentList (Join-Path $Folder 'gone.json')
+$missingFolder = New-Object System.IO.DirectoryInfo -ArgumentList (Join-Path $Folder 'gone')
+$present = New-Object System.IO.FileInfo -ArgumentList (Join-Path $Folder 'kept.json')
+[System.IO.File]::WriteAllText($present.FullName, '{}')
+function Get-Record([scriptblock]$Fail) {
+    try { & $Fail } catch { return $_ }
+    throw 'the stand-in call did not fail'
+}
+# A Win32 error in a wrapper, as PowerShell's LinkType reports one (the code: 2 file not found,
+# 3 path not found, 5 access denied).
+function New-Wrapped([int]$Code) {
+    $inner = New-Object System.ComponentModel.Win32Exception -ArgumentList $Code
+    New-Object System.Management.Automation.RuntimeException -ArgumentList 'stand-in', $inner
+}
+$readMissing = { [void][System.IO.File]::ReadAllBytes($missing.FullName) }
+$listMissing = { [void]$missingFolder.GetFileSystemInfos() }
+$getMissing = { Get-Item -LiteralPath $missing.FullName -ErrorAction Stop }
+$denied = { throw (New-Object System.UnauthorizedAccessException) }
+$wrapped3 = { throw (New-Wrapped 3) }
+$cases = @(
+    [pscustomobject]@{ name = 'net_file'; target = $missing; call = $readMissing }
+    [pscustomobject]@{ name = 'net_folder'; target = $missingFolder; call = $listMissing }
+    [pscustomobject]@{ name = 'get_item'; target = $missing; call = $getMissing }
+    [pscustomobject]@{ name = 'win32_file'; target = $missing; call = { throw (New-Wrapped 2) } }
+    [pscustomobject]@{ name = 'win32_path'; target = $missingFolder; call = $wrapped3 }
+    [pscustomobject]@{ name = 'still_there'; target = $present; call = $readMissing }
+    [pscustomobject]@{ name = 'denied'; target = $missing; call = $denied }
+    [pscustomobject]@{ name = 'win32_denied'; target = $missing; call = { throw (New-Wrapped 5) } }
+)
+$out = [ordered]@{}
+foreach ($case in $cases) {
+    $record = Get-Record $case.call
+    $gone = & $module { param($Item, $Record) Test-ArciItemGone $Item $Record } $case.target $record
+    $out[$case.name] = [ordered]@{ gone = $gone; error = $record.Exception.GetType().FullName }
+}
+[System.IO.File]::WriteAllText($OutputPath, (ConvertTo-Json -InputObject $out -Depth 4))
+"""
+
+
+def test_acl_owner_reset_skips_only_an_item_that_is_gone(engine: str, tmp_path: Path) -> None:
+    """#170 N2: Test-ArciItemGone, with which the link check and the owner reset of state\\crl
+    and state\\renewal skip an item removed since it was listed. A not-found error (a .NET call's
+    FileNotFoundException or DirectoryNotFoundException, wrapped in a MethodInvocationException;
+    Get-Item's ItemNotFoundException; a wrapped Win32 "file or path not found", as PowerShell's
+    LinkType reports it) for an item that is gone: skipped. The same error while the item is
+    still there, access denied, or another Win32 error: not skipped, the step stops. On Windows
+    the step itself: test_acl_step_skips_an_item_removed_after_its_listing and
+    test_acl_step_still_stops_at_an_item_it_cannot_reset."""
+    script = write_script(tmp_path / "gone.ps1", _ITEM_GONE_SCRIPT)
+    folder, out = tmp_path / "items", tmp_path / "gone.json"
+    folder.mkdir()
+    result = run_powershell(
+        engine, script, "-ModulePath", str(MODULE), "-Folder", str(folder), "-OutputPath", str(out)
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    report = read_json(out)
+    gone = {name: case["gone"] for name, case in report.items()}
+    assert gone == {
+        "net_file": True, "net_folder": True, "get_item": True, "win32_file": True,
+        "win32_path": True, "still_there": False, "denied": False, "win32_denied": False,
+    }, report  # fmt: skip
+
+
+def test_acl_owner_reset_checks_vanished_items_where_it_lists_and_resets() -> None:
+    """#170 N2: where the link check and the owner reset read an item listed earlier (its
+    attributes and link type, its listing, its entries), a not-found error for an item that is
+    gone skips it (Test-ArciItemGone) and every other error still throws the take-over error.
+    The folder's own reset stays as it was: an error there always stops the step."""
+    module = MODULE.read_text("utf-8-sig")
+    gone = _function(module, "Test-ArciItemGone")
+    for cause in (
+        "[System.IO.FileNotFoundException]",
+        "[System.IO.DirectoryNotFoundException]",
+        "[System.Management.Automation.ItemNotFoundException]",
+        "[System.ComponentModel.Win32Exception] -and @(2, 3) -contains $exception.NativeErrorCode",
+        "$exception = $exception.InnerException",
+    ):
+        assert cause in gone, cause
+    assert gone.rstrip().endswith("$notFound -and -not (Test-Path -LiteralPath $Item.FullName)")
+    check = _function(module, "Confirm-ArciNoLink")
+    assert check.count("Test-ArciItemGone $checked $_") == 2
+    assert "if (Test-ArciItemGone $checked $_) { continue }\n" in check
+    entry = _function(module, "Set-ArciAclEntry")
+    below = "if (-not (Test-ArciItemGone $Folder $_)) { throw (Get-TakeOverError $Folder $_) }"
+    assert entry.count(below) == 1
+    child = (
+        "        catch {\n"
+        "            # Removed since the listing: skipped, and what was below it with it.\n"
+        "            if (Test-ArciItemGone $child $_) { continue }\n"
+        "            throw (Get-TakeOverError $child $_)\n"
+        "        }\n"
+    )
+    assert entry.count(child) == 1
+    assert entry.index("Set-ArciAccessControl -Item $child") < entry.index(child)
+    assert "if ($ResetOwner) { throw (Get-TakeOverError $item $_) }" in entry
+    assert entry[entry.index("#>") :].count("Test-ArciItemGone") == 2
 
 
 def test_acl_script_help_lists_every_state_folder_of_the_plan() -> None:
