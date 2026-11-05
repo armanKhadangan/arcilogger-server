@@ -12,6 +12,7 @@ from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from typing import Any
 
 import pytest
+from psycopg import errors
 from sqlalchemy import Connection, Engine, event
 from sqlalchemy.exc import OperationalError
 
@@ -19,7 +20,12 @@ from arcilogger_db.bulk import copy_rows
 from arcilogger_db.engine import engine_from_url
 from arcilogger_ingest import loader
 from arcilogger_ingest.loader import Batch, LoadResult
-from arcilogger_ingest.service import EXIT_DB_UNAVAILABLE, EXIT_OK, IngestService
+from arcilogger_ingest.service import (
+    CONFLICT_RETRIES,
+    EXIT_DB_UNAVAILABLE,
+    EXIT_OK,
+    IngestService,
+)
 from arcilogger_ingest.status import read_status
 from arcilogger_ingest.testing import (
     DAY,
@@ -301,4 +307,122 @@ def test_stop_while_the_database_is_down(
     assert len(loaded(db_engine)) == 5  # the unloaded lines stay in the spool
     proxy.up()
     assert world.service(proxied_engine).run(once=True) == EXIT_OK
+    assert check_exactly_once(db_engine, world) == []
+
+
+def aborted(error: type[Exception]) -> OperationalError:
+    """The error SQLAlchemy raises for a transaction PostgreSQL aborted with ``error``."""
+    return OperationalError("COPY", None, error("aborted by the test"))
+
+
+@pytest.mark.parametrize(
+    ("error", "sqlstate"),
+    [(errors.DeadlockDetected, "40P01"), (errors.SerializationFailure, "40001")],
+)
+def test_a_batch_aborted_by_a_conflict_is_made_again_without_an_outage(
+    world: World,
+    db_engine: Engine,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    error: type[Exception],
+    sqlstate: str,
+) -> None:
+    """#149: a batch aborted for another transaction (a TimescaleDB recompression policy and a
+    write into the chunk it recompresses) is made again at once. The database is up: it is not
+    reported unavailable, its connections stay, and every line is loaded exactly once."""
+    world.reconfigure(ingest={"batch_rows": 100})
+    world.append("core-r1", DAY, (dhcp_message(i) for i in range(300)))
+    service = world.service(db_engine)
+    real_load = service.loader.load
+    calls: list[int] = []
+    downs: list[str] = []
+    disposed: list[int] = []
+
+    def abort_twice(batch: Batch) -> LoadResult:
+        calls.append(1)
+        if len(calls) in (2, 3):  # the second batch, twice: within the bounded retries
+            raise aborted(error)
+        return real_load(batch)
+
+    monkeypatch.setattr(service.loader, "load", abort_twice)
+    monkeypatch.setattr(service, "_database_down", lambda exc: downs.append(str(exc)))
+    monkeypatch.setattr(service.engine, "dispose", lambda: disposed.append(1))
+    assert service.run(once=True) == EXIT_OK
+    assert check_exactly_once(db_engine, world) == []
+    assert offsets(db_engine)[("core-r1", DAY)][1] == 300
+    assert downs == []  # never "database unavailable"
+    assert disposed == []
+    assert service.state != "database_unavailable"
+    assert caplog.text.count(f"({sqlstate}), nothing is lost: made again") == 2
+
+
+def test_a_conflict_that_keeps_aborting_the_batch_is_reported_as_an_outage(
+    world: World, db_engine: Engine, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The retries of a conflict are bounded (:data:`CONFLICT_RETRIES`): one that keeps
+    aborting the batch is then any other database error, reported unavailable and retried with
+    the outage's backoff until it is loaded."""
+    world.append("core-r1", DAY, (dhcp_message(i) for i in range(20)))
+    service = world.service(db_engine)
+    real_load = service.loader.load
+    calls: list[int] = []
+    downs: list[str] = []
+
+    def abort(batch: Batch) -> LoadResult:
+        calls.append(1)
+        if len(calls) <= CONFLICT_RETRIES + 1:
+            raise aborted(errors.DeadlockDetected)
+        return real_load(batch)
+
+    real_down = service._database_down
+
+    def down(exc: BaseException) -> None:
+        downs.append(type(exc).__name__)
+        real_down(exc)
+
+    monkeypatch.setattr(service.loader, "load", abort)
+    monkeypatch.setattr(service, "_database_down", down)
+    running = Running(service)
+    try:
+        wait_for(all_loaded(db_engine, world))
+    finally:
+        assert running.stop() == EXIT_OK
+    assert len(calls) == CONFLICT_RETRIES + 2
+    assert downs == ["OperationalError"]  # once, after the bounded retries
+    assert check_exactly_once(db_engine, world) == []
+
+
+def test_a_lost_connection_is_still_reported_as_an_outage(
+    world: World, db_engine: Engine, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An error without a conflict's SQLSTATE (here a connection lost mid-batch) is not taken
+    for one: the database is reported unavailable at once and its connections are dropped."""
+    world.append("core-r1", DAY, (dhcp_message(i) for i in range(20)))
+    service = world.service(db_engine)
+    real_load = service.loader.load
+    calls: list[int] = []
+    states: list[str] = []
+    disposed: list[int] = []
+    real_dispose = service.engine.dispose
+
+    def lose_once(batch: Batch) -> LoadResult:
+        calls.append(1)
+        if len(calls) == 1:
+            raise OperationalError("COPY", None, Exception("server closed the connection"))
+        return real_load(batch)
+
+    def dispose() -> None:
+        states.append(service.state)
+        disposed.append(1)
+        real_dispose()
+
+    monkeypatch.setattr(service.loader, "load", lose_once)
+    monkeypatch.setattr(service.engine, "dispose", dispose)
+    running = Running(service)
+    try:
+        wait_for(all_loaded(db_engine, world))
+    finally:
+        assert running.stop() == EXIT_OK
+    assert states == ["database_unavailable"]
+    assert disposed == [1]
     assert check_exactly_once(db_engine, world) == []
