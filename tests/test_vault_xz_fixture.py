@@ -14,6 +14,7 @@ import lzma
 import os
 import shutil
 import subprocess
+import sys
 from datetime import date
 from pathlib import Path
 
@@ -23,6 +24,7 @@ from cryptography import x509
 from arcilogger_core import sealedfile
 from arcilogger_core.chain import verify_day
 from arcilogger_core.evidence.runner import run_verifier
+from arcilogger_core.evidence.standalone import VERIFY_PY
 from arcilogger_core.layout import Layout
 
 FIXTURE = Path(__file__).parent / "fixtures" / "vault-xz"
@@ -96,6 +98,30 @@ def test_the_standalone_verifier_verifies_the_day_in_an_isolated_python(tmp_path
     failures = [finding for finding in report["findings"] if finding["level"] == "fail"]
     assert (result.returncode, failures) == (0, [])
     assert {"file-ok", "token-ok"} <= {finding["code"] for finding in report["findings"]}
+
+
+def test_a_python_without_lzma_warns_xz_unsupported_and_still_verifies(tmp_path: Path) -> None:
+    """#136: the auditor's Python may lack lzma (``-I -S``, ``lzma`` blocked as such a build
+    has it): the day still verifies by its stamped SHA-256 values, and each .xz file's content
+    is the warning ``xz-unsupported``, never a mismatch."""
+    layout = _vault(tmp_path)
+    runner = (
+        "import runpy, sys; sys.modules['lzma'] = None; sys.argv = sys.argv[1:]; "
+        "runpy.run_path(sys.argv[0], run_name='__main__')"
+    )
+    result = subprocess.run(
+        [sys.executable, "-I", "-S", "-c", runner, str(VERIFY_PY), str(layout.vault),
+         "--json", "--kokler", str(ROOTS)],
+        capture_output=True, text=True, encoding="utf-8", timeout=300, check=False,
+    )  # fmt: skip
+    report = json.loads(result.stdout)
+    levels = {(f["level"], f["code"]) for f in report["findings"]}
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert not {code for level, code in levels if level == "fail"}
+    unsupported = [f for f in report["findings"] if f["code"] == "xz-unsupported"]
+    assert {f["level"] for f in unsupported} == {"warn"}
+    # fortigate.log.xz; the audit log's entry has no uncompressed digest to check
+    assert [f["tr"].split(":")[0] for f in unsupported] == ["2026/10/12/fortigate.log.xz"]
 
 
 @pytest.mark.parametrize("tool", ["xz", "7z"])
