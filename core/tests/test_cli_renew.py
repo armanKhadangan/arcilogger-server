@@ -437,7 +437,7 @@ def test_an_earlier_state_file_is_read_once_and_never_written(
     cli: Cli, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """An upgrade from a release that kept ``state/renewal.json`` and ``state/renewal.lock`` in
-    ``state``, which every service may write (W5-E-4): a dry run writes nothing while the
+    ``state``, which every service may write (W5-E-4): a dry run writes no state file while the
     earlier file is the only one, the first counted run carries only the earlier
     ``failures_in_a_row`` over into ``state/renewal/renewal.json`` (W5-E-8), and from then on
     the earlier file is never read. Neither earlier file is ever written, and a process holding
