@@ -1,4 +1,4 @@
-"""Issue #185 (W5-G-26): the plan of ``Attributor._missed_moves``' MAC branch, pinned.
+"""Issue #185 (W5-G-26): ``_missed_moves``' MAC branch: no nested loop that filters ACKs per window.
 
 The branch tests each ``fg_dhcp`` row with :func:`.trust.kept` (``CASE ... END IS NULL``),
 written ``CASE WHEN <kept> THEN true ELSE false END``: PostgreSQL has no statistics on either
