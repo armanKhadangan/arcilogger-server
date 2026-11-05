@@ -381,6 +381,7 @@ alanı); ekrandaki her satır ayrıca Türkçe ve İngilizce açıklamasını ta
 |---|---|---|
 | (çıkış kodu 2) | — | Paket okunamadı: şifreli, bozuk ZIP, güvenli olmayan ya da (büyük/küçük harf farkıyla) çakışan dosya adları |
 | `file-hash-mismatch`, `file-size-mismatch`, `file-content-mismatch` | HATA | Kayıt dosyası mühürlendikten sonra değiştirilmiş |
+| `xz-unsupported` | HATA | Bu Python `lzma` modülü olmadan derlenmiş: `.xz` dosyasının açılmış içeriği ya da ondan alınan alıntı denetlenemedi (dosyanın kendisi `file-ok` ile ayrıca sınanır). Dosyanın değiştirildiğini göstermez; `verify.py`'yi `lzma` modülü olan bir Python ile (python.org sürümleri) yeniden çalıştırın |
 | `file-not-sealed` | HATA | Gün klasöründe manifestte olmayan, yani hiç mühürlenmemiş bir dosya var |
 | `file-unexpected` | HATA (kasa kopyasında UYARI) | Paketin bilinen bir parçası olmayan dosya |
 | `file-missing`, `index-file-missing`, `manifest-missing` | HATA | Dosya ya da (kapsamdaki) bir gün eksik |

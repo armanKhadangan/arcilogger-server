@@ -91,7 +91,7 @@ except ImportError:  # pragma: no cover - every supported CPython build has it
     _LZMA_ERROR = _NoLzmaError
 
 
-VERIFIER_VERSION = "8"
+VERIFIER_VERSION = "9"
 INDEX_NAME = "paket.json"
 INDEX_SCHEMA = "arcilogger.evidence/1"
 #: The guides. The Turkish one has an ASCII name: ZIP tools that ignore the UTF-8 name flag
@@ -3016,7 +3016,7 @@ class Verifier:
             )
             return False
         detail = ""
-        if self.deep and "sha256_uncompressed" in entry:
+        if self.deep and "sha256_uncompressed" in entry and self._readable(name, day, path):
             try:
                 with self.package.open(name) as handle:
                     raw_sha256, lines = sealed_digest(handle, name)
@@ -3603,8 +3603,31 @@ class Verifier:
         verified = [name for name in present if state is not None and name in state.verified_files]
         return (verified or present or [base + SEALED_SUFFIXES[0]])[0]
 
+    def _readable(self, name: str, where: str, shown: str) -> bool:
+        """False, with ``xz-unsupported``, when ``name`` is xz and this Python has no lzma.
+
+        Without the module an xz file cannot be decompressed at all; that says nothing about
+        the file, so it gets a code of its own instead of a mismatch that reads as tampering.
+        The check it stops was not done, so the package is not verified (``fail``).
+        """
+        if lzma is not None or not name.endswith(SEALED_SUFFIXES[1]):
+            return True
+        self.report.fail(
+            "xz-unsupported",
+            where,
+            f"{shown}: bu Python'da lzma modülü yok, .xz dosyasının içi okunamadı ve bu kontrol "
+            "yapılamadı. Dosyanın değiştirildiğini göstermez: verify.py'yi lzma modülü olan bir "
+            "Python ile (python.org sürümleri) yeniden çalıştırın",
+            f"{shown}: this Python has no lzma module, so the .xz file could not be read and "
+            "this check was not done. It does not mean the file was changed: run verify.py again "
+            "with a Python that has lzma (python.org builds)",
+        )
+        return False
+
     def _compare_extract(self, name: str, sealed: str, wanted: dict[int, bytes]) -> None:
         report = self.report
+        if not self._readable(sealed, "alıntı", sealed):
+            return
         found: dict[int, bytes] = {}
         last = max(wanted) if wanted else 0
         try:
