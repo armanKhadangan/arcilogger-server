@@ -113,7 +113,6 @@ interface EditorProps<D extends Draft> {
 function DayStrip({ row, name }: { row: WorkDayDraft; name: string }) {
   const { t } = useTranslation();
   const parts = dayParts(row);
-  const work = parts.filter((part) => part.part === 'work');
   const pauses = parts.filter((part) => part.part === 'break');
   const label =
     parts.length === 0
@@ -131,7 +130,6 @@ function DayStrip({ row, name }: { row: WorkDayDraft; name: string }) {
       role="img"
       aria-label={label}
       title={label}
-      data-work-minutes={work.reduce((sum, part) => sum + part.end - part.start, 0)}
     >
       {parts.map((part) => (
         <span
