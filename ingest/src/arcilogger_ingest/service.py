@@ -56,23 +56,27 @@ counts), and each a compare-and-set on the offset: the file is no stream from be
 one on, so no batch of it is read or committed under the mark. A marked file is never a stream
 and never counts as loaded (its offset is 0): a start that finds one resets it again from its
 first step, for its request or on its own, so a stop between two steps loads it exactly once all
-the same. The checks read whole files
-(the SHA-256 of every file at the claim, a file's receive times before its reset: about 0.5 s and
-25 s for a 5 M line day), so they run in a thread beside the loop
+the same; one on its own whose day vault retention has deleted has its reset finished without
+its file and its offsets row removed (nothing loads a day that is not sealed). The checks read
+whole files (the SHA-256 of every file at the claim, a file's receive times before its reset:
+about 0.5 s and 25 s for a 5 M line day), so they run in a thread beside the loop
 (:meth:`IngestService._beside`), which goes on loading live data and acts on a check's result in
 a later round, in the same order: nothing is deleted before its check has passed, and the size
 check is made again on the loop right before the file's first transaction. The partitions of a
-request's days are made one day a round, also while a check or a reset's steps run. What still
-holds the loop up is one round of a reset's steps (:data:`RESET_ROUND_SECONDS` and the step
-that ends it: 0.1 s, up to about 1 s on a slow disk; a lock waited for up to
-:data:`RESET_LOCK_TIMEOUT`, as by its first transaction), one day's partitions (up to 0.4 s on
-Linux; not measured on Windows; one table a transaction, so that a stop does not wait for the
-day) and a wait for the partition lock while the window job or a search export holds it (half of
-``search.request_budget_ms``, at most :data:`PARTITION_LOCK_TIMEOUT_MS`, for the lock and the
-tables together; then none for ``archive_seconds``). A stop is looked at between these: none
-is begun once it has come (W5-G-25). After its last step the file is an ordinary
-stream: it is read from the sealed file by the reader above, after every newer day (live data
-first), and loaded exactly once like any other. ``bytes_done`` is Σ committed offset; the
+request's days are made one table a round (a site day is 16 tables), also while a check or a
+reset's steps run. What still holds the loop up is one round of a reset's steps
+(:data:`RESET_ROUND_SECONDS` and the step that ends it: 0.1 s, up to about 1 s on a slow disk; a
+lock waited for up to :data:`RESET_LOCK_TIMEOUT`, as by its first transaction), one table's
+partitions of a day (about 30 ms on Linux) and a wait for the partition lock while the window
+job or a search export holds it (half of ``search.request_budget_ms``, at most
+:data:`PARTITION_LOCK_TIMEOUT_MS`, for the lock and the tables of a day together; then none for
+``archive_seconds``, doubled after each wait that ran out up to
+:data:`PARTITION_RETRY_MAX_SECONDS`). A stop is looked at between these: none is begun once it
+has come (W5-G-25). The vault scan still makes the partitions of each day it loads whole in one
+round (a day's 16 tables: 0.84 s on a Windows runner; after a database loss, every day of the
+window in one scan; ``_scan_vault``). After its last step the file is an ordinary stream: it is
+read from the sealed file by the reader above, after every newer day (live data first), and
+loaded exactly once like any other. ``bytes_done`` is Σ committed offset; the
 request is ``ready`` when every file has finished (``expires_at`` = ``ready_at`` +
 ``db.reload_keep_days``) and ``failed`` with an ``error_code`` when a day is no longer sealed in
 the vault or a file stays unreadable. A file that becomes unreadable while it loads (changed in
@@ -227,6 +231,11 @@ ARCHIVE_UNREADABLE: Final = "archive_file_unreadable"
 #: (:data:`~arcilogger_ingest.stopping.WINDOWS_GRACE_SECONDS`, W5-G-25). Ingest tries again
 #: later instead of holding up live data (:meth:`IngestService._lock_budget`).
 PARTITION_LOCK_TIMEOUT_MS: Final = 2000
+#: The longest time no partitions are asked for after the lock was not free in time: the first
+#: wait is ``archive_seconds``, each one after it twice the one before, up to this (a search
+#: export holds the lock for up to 15 minutes, W5-G-23: at a flat 5 s ingest would ask about 130
+#: times, each a wait searches queue behind); back to ``archive_seconds`` once a table is made.
+PARTITION_RETRY_MAX_SECONDS: Final = 60.0
 LOCK_NOT_AVAILABLE: Final = "55P03"
 #: The raw days around a request's days whose files are loaded with it (module text).
 RELOAD_MARGIN: Final = timedelta(days=RAW_DAY_MARGIN)
@@ -250,9 +259,10 @@ HOUR: Final = timedelta(hours=1)
 #: 2 on. And it says what a reset needs said: the file's lines are not all in ``search_counts``
 #: (a search counts their hours from the rows, ``searchcounts.verify`` leaves the file out) and
 #: it is not finished (``search.counts_backfill`` waits for it). ``arcilogger-db search-counts
-#: rebuild`` takes it off (it recounts the rows still there): a file at offset 0 whose counts are
-#: not empty is a reset all the same (:meth:`IngestService._recounted`), and a step puts the mark
-#: back.
+#: rebuild`` refuses such a file (``arcilogger_db.cli.RESETTING``, the same value): only the
+#: reset's last step takes the mark off. A mark taken off by hand in SQL is caught all the same: a
+#: file at offset 0 whose counts are not empty is a reset (:meth:`IngestService._recounted`), and
+#: a step puts the mark back.
 RESETTING: Final = 0
 #: Lines a step of a reset deletes at most, in a transaction of its own (W5-G-25), counted by the
 #: ``search_counts`` of every file in its hours (what the step's deletes read: the ``fg_*`` tables
@@ -574,6 +584,21 @@ def count_hours(steps: list[tuple[datetime, datetime]]) -> list[ResetStep]:
 
 
 @dataclass
+class DayPartitions:
+    """The daily partitions of a site day being made, one table a round
+    (:meth:`IngestService._ensure_days`)."""
+
+    day: date
+    #: The partitioned tables not made yet, in order (``None`` before the day's first round).
+    tables: list[str] | None = None
+    #: The waits for the partition lock and the tables of the day's rounds, in all (W5-G-24):
+    #: one budget for the day, as when it was made in one round; a fresh one after it ran out.
+    budget: LockBudget | None = None
+    #: Partitions created so far (for the log).
+    created: int = 0
+
+
+@dataclass
 class Reset:
     """A file whose rows are being deleted in steps (W5-G-25,
     :meth:`IngestService._reset_round`): its offset is 0 and its row marked
@@ -581,8 +606,10 @@ class Reset:
 
     key: Key
     #: The minutes its lines were received in outside its day (:func:`received_outside`): a
-    #: reset begun again (:meth:`IngestService._reset_round`) reaches the same rows.
-    strays: list[datetime]
+    #: reset begun again (:meth:`IngestService._reset_round`) reaches the same rows. ``None``:
+    #: vault retention deleted its day (:meth:`IngestService._resume_reset`): its counts tell
+    #: where its rows still lie, and the last step removes its offsets row (no stream after it).
+    strays: list[datetime] | None
     #: The transactions still to make, in order; ``None`` before its first transaction
     #: (:meth:`IngestService._begin_reset`), made again when its answer did not come.
     steps: list[ResetStep] | None = None
@@ -656,8 +683,13 @@ class IngestService:
         self._retention_days = int(DEFAULT_SETTINGS["db.retention_days"])
         #: Days whose daily partitions this run has made sure of (``ensure_days``).
         self._partitioned: set[date] = set()
+        #: The day whose partitions are being made, a table a round (:meth:`_ensure_days`).
+        self._making: DayPartitions | None = None
         #: No partitions are made before this (``monotonic``): the lock was not free in time.
         self._partitions_due = 0.0
+        #: How long none are made after the next time the lock is not free in time: from
+        #: ``archive_seconds``, doubled each time up to :data:`PARTITION_RETRY_MAX_SECONDS`.
+        self._partitions_wait = archive_seconds
         self._archive_seconds = archive_seconds
         self._archive_error_seconds = archive_error_seconds
         self._next_archive = 0.0
@@ -856,8 +888,8 @@ class IngestService:
 
     def _load_offsets(self) -> None:
         """Positions from ``ingest_offsets`` (the only source of truth after a restart). A file
-        marked :data:`RESETTING`, or whose mark a recount took off (:meth:`_recounted`), is not a
-        stream: its reset is finished first (:meth:`_archive`)."""
+        marked :data:`RESETTING`, or whose mark was taken off by hand (:meth:`_recounted`), is not
+        a stream: its reset is finished first (:meth:`_archive`)."""
         o = IngestOffset
         with self.engine.connect() as connection:
             rows = connection.execute(
@@ -908,12 +940,11 @@ class IngestService:
         """The files of ``keys`` (unfinished, at offset 0, not marked :data:`RESETTING`) that
         still have ``search_counts``: rows of theirs are still there, so a reset of theirs has not
         ended (W5-G-25). A file loads its rows and their counts in one transaction with its
-        offset, and its reset's last step deletes the counts with the mark, so only a recount
-        (``arcilogger-db search-counts rebuild``, which counts the rows still there in
-        ``stream_window`` and takes the mark off) leaves such a file. A reset deletes that
-        window last, after the rows around its stray receive times: a recount that finds none
-        of its rows there finds no row of it left (but for a file whose every line was received
-        outside its day)."""
+        offset, and its reset's last step deletes the counts with the mark, so only a mark taken
+        off by hand in SQL leaves such a file (``arcilogger-db search-counts rebuild`` refuses a
+        marked file): a second line of defence. One whose counts went too (a recount by hand
+        that found none of its rows in ``stream_window``: a reset deletes that window last, so
+        of a file whose every line was received outside its day) is not caught."""
         if not keys:
             return set()
         sc = SearchCount
@@ -1094,24 +1125,26 @@ class IngestService:
                 self._vault_done.add(day)
                 continue
             try:
-                self._ensure_days(day, day)
+                self._ensure_days(day, day, whole=True)
             except DBAPIError as exc:  # the loader reports database problems
                 log.debug("partitions of %s not created: %s", day, exc)
             for source in pending:
                 self._add_stream(source, day)
 
-    def _ensure_days(self, first_day: date, last_day: date) -> bool:
+    def _ensure_days(self, first_day: date, last_day: date, *, whole: bool = False) -> bool:
         """The daily partitions of the site days ``first_day`` … ``last_day`` (plain PostgreSQL;
-        nothing to do with TimescaleDB), one day a call: up to 0.4 s each, so between two batches
-        of live data the loop makes sure of one day, not of the 22 of a long archive reload
-        (4.7 s). One table a transaction (its device times lie in two UTC days: two partitions,
-        about 30 ms), the stop looked at before each: a stop waits for one table's, not for the
-        day's (several seconds on the Windows CI runners). ``False`` until every day is done,
-        when the service stops, or when the partition lock and the tables were not free within
-        :meth:`_lock_budget` for the call (a search export holds the lock): then none is made for
-        the next ``archive_seconds``, live data loaded meanwhile (while the loop waits for the
-        lock, searches queue behind it). :attr:`_partitioned` keeps the days done; other database
-        errors are raised."""
+        nothing to do with TimescaleDB), one table a call (its device times lie in two UTC days:
+        two partitions, about 30 ms, a transaction), so that between two batches of live data
+        the loop makes one table's, not a day's of 16 tables (0.3 to 0.45 s on Linux, 0.84 s on
+        a Windows runner) nor the 22 days of a long archive reload; ``whole``: the rest of the
+        day in this call (the vault scan). The stop is looked at before each table. A day's
+        tables share one :meth:`_lock_budget` for the partition lock and the tables, over its
+        rounds (:class:`DayPartitions`). ``False`` until every day is done, when the service
+        stops, or when the budget ran out (a search export holds the lock): then none is made
+        for the next ``archive_seconds``, twice as long after each such time up to
+        :data:`PARTITION_RETRY_MAX_SECONDS` (back to ``archive_seconds`` once a table is made),
+        live data loaded meanwhile (while the loop waits for the lock, searches queue behind
+        it). :attr:`_partitioned` keeps the days done; other database errors are raised."""
         days = [first_day + timedelta(days=n) for n in range((last_day - first_day).days + 1)]
         missing = [day for day in days if day not in self._partitioned]
         if not missing:
@@ -1119,25 +1152,50 @@ class IngestService:
         if time.monotonic() < self._partitions_due:
             return False
         day = missing[0]
-        with self.engine.connect() as connection:
-            tables = partitioned_tables(connection)
-            budget = self._lock_budget(connection)
-        created = 0
-        for table in tables:
+        making = self._making
+        if making is None or making.day != day:
+            making = DayPartitions(day)
+            if not whole:  # the vault scan leaves the day a reload is making alone (its budget)
+                self._making = making
+        if making.tables is None or making.budget is None:
+            with self.engine.connect() as connection:
+                if making.tables is None:
+                    making.tables = partitioned_tables(connection)
+                making.budget = self._lock_budget(connection)
+        while making.tables:
             if self.stop.is_set():
                 return False
             try:
                 with self.engine.begin() as connection:
-                    report = ensure_days(connection, day, day, tables=[table], budget=budget)
+                    report = ensure_days(
+                        connection, day, day, tables=making.tables[:1], budget=making.budget
+                    )
             except PartitionLockTimeoutError as exc:
-                log.info("partitions of %s: %s, trying again later", day, exc)
-                self._partitions_due = time.monotonic() + self._archive_seconds
+                wait = self._partitions_wait
+                log.info("partitions of %s: %s, trying again in %.0f s", day, exc, wait)
+                self._partitions_due = time.monotonic() + wait
+                self._partitions_wait = min(max(wait, PARTITION_RETRY_MAX_SECONDS), 2 * wait)
+                making.budget = None  # used up: a fresh one when the day is tried again
                 return False
-            created += len(report.created)
-        if created:
-            log.info("partitions of %s created (%d)", day, created)
+            self._partitions_wait = self._archive_seconds
+            making.created += len(report.created)
+            making.tables.pop(0)
+            if making.tables and not whole:
+                return False  # the next table in the next round
+        if making.created:
+            log.info("partitions of %s created (%d)", day, making.created)
+        if self._making is making:
+            self._making = None
         self._partitioned.add(day)
         return len(missing) == 1
+
+    def _forget_days(self, first_day: date, last_day: date) -> None:
+        """The days ``first_day`` … ``last_day`` are made sure of again before they are loaded:
+        the window job may have dropped them since this run made sure of them."""
+        days = {first_day + timedelta(days=n) for n in range((last_day - first_day).days + 1)}
+        self._partitioned -= days
+        if self._making is not None and self._making.day in days:
+            self._making = None
 
     @staticmethod
     def _lock_budget(connection: Connection) -> LockBudget:
@@ -1354,11 +1412,7 @@ class IngestService:
             claim.retry_at = time.monotonic() + self._archive_seconds
             self._claim = claim
             return None
-        # The window job may have dropped them since this run made sure of them.
-        first, last = self._reload_partition_days(job)
-        self._partitioned.difference_update(
-            first + timedelta(days=n) for n in range((last - first).days + 1)
-        )
+        self._forget_days(*self._reload_partition_days(job))
         log.info(
             "archive reload %d: %s … %s, %d file(s) (%d loaded already), %d bytes",
             job.id,
@@ -1552,7 +1606,7 @@ class IngestService:
         rounds (each loads a batch of live data too): its sealed file still there (the claim
         checked it whole) and read for the minutes its lines were received in outside its day
         (:meth:`_file_strays`, beside the loop and before any transaction), then the partitions
-        its rows can land in (a day a round, :meth:`_ensure_days`, while the scan runs and after
+        its rows can land in (a table a round, :meth:`_ensure_days`, while the scan runs and after
         it), then the steps of the file before it, if they are not done yet (:meth:`_reset_round`),
         then its size checked again on the loop (the file may have gone during the rounds since
         the scan), then the reset's first transaction (:meth:`_start_reset`): its rows are
@@ -1565,7 +1619,7 @@ class IngestService:
             return
         scan = job.scan[1]
         if not scan.done():
-            self._ensure_days(*self._reload_partition_days(job))  # meanwhile, a day a round
+            self._ensure_days(*self._reload_partition_days(job))  # meanwhile, a table a round
             return
         try:
             strays = scan.result()
@@ -1592,10 +1646,15 @@ class IngestService:
         changed by hand) is reset on its own, as a request's file is, from its first step: its
         sealed file read for its receive times (beside the loop), its partitions, its size
         checked again, then its steps; it is a stream after the last. None is begun while a
-        request is ``loading`` (its claim resets its own files again). A file that cannot be
-        read stays marked (never a stream, never loaded) and is tried again after
-        ``vault_scan_seconds``, the others in the meantime. The loop claims no request while one
-        is checked."""
+        request is ``loading`` (its claim resets its own files again). A file whose day vault
+        retention has deleted (:meth:`_gone_from_vault`) is not waited for: its reset is
+        finished without it, its rows reached by the hours its counts still name
+        (:meth:`_begin_reset`), and its last step removes its offsets row. Nothing loads a day
+        that is not sealed (neither the vault scan nor a request), so it is not tried again. A
+        file that cannot be read while its day is still sealed (missing, changed, damaged, its
+        drive not ready: it may be put back) stays marked (never a stream, never loaded), is
+        tried again after ``vault_scan_seconds``, the others in the meantime, and is reported
+        once a run. The loop claims no request while one is checked."""
         if self._orphan is None:
             now = time.monotonic()
             key = next(
@@ -1609,11 +1668,7 @@ class IngestService:
                 if connection.execute(select(r.id).where(r.status == "loading")).first():
                     return
             log.info("%s %s: its reset was not finished, finishing it", *key)
-            first, last = key[1] - RELOAD_MARGIN, key[1] + RELOAD_MARGIN
-            # The window job may have dropped them since this run made sure of them.
-            self._partitioned.difference_update(
-                first + timedelta(days=n) for n in range((last - first).days + 1)
-            )
+            self._forget_days(key[1] - RELOAD_MARGIN, key[1] + RELOAD_MARGIN)
             self._orphan = (key, self._scan("reset", key, None))
             return
         key, scan = self._orphan
@@ -1631,14 +1686,40 @@ class IngestService:
             return  # none begun at a stop: the next start finds the mark
         self._orphan = None
         if strays is None or not self._sealed_file_intact(source, day, digest=False):
-            log.warning("%s %s: sealed file missing or changed; its reset waits for it", *key)
+            if self._gone_from_vault(day):
+                log.warning(
+                    "%s %s: its day was deleted from the vault (retention); its reset is "
+                    "finished without its file and its offsets row removed",
+                    *key,
+                )
+                self._orphan_due.pop(key, None)
+                self._start_reset(key, None)
+                return
+            if key not in self._orphan_due:  # reported once, tried again quietly
+                log.warning(
+                    "%s %s: sealed file missing, changed or unreadable; its reset waits", *key
+                )
             self._orphan_due[key] = time.monotonic() + self._vault_scan_seconds
             self._resume_reset()  # the next one meanwhile
             return
         self._orphan_due.pop(key, None)
         self._start_reset(key, strays)
 
-    def _start_reset(self, key: Key, strays: list[datetime]) -> None:
+    def _gone_from_vault(self, day: date) -> bool:
+        """Whether vault retention has deleted ``day``, read afresh: its seal state says
+        ``deleted`` (``arcilogger_core.retention``, which deletes the day's files first and then
+        marks the state). A day still ``sealed`` whose file or manifest is missing (an evidence
+        incident, or a retention run cut short: the next one marks it), and a state that is
+        missing or cannot be read (its drive not ready), are not: the file may be put back, and
+        a file loaded before ``0016_search`` would be loaded twice if its offsets row went
+        meanwhile (its counts do not tell the rows its lines received outside its day left)."""
+        try:
+            state = json.loads(self.layout.seal_state(day).read_bytes())
+        except (OSError, ValueError):
+            return False
+        return isinstance(state, dict) and state.get("status") == "deleted"
+
+    def _start_reset(self, key: Key, strays: list[datetime] | None) -> None:
         """The first transaction of the file's reset (:meth:`_begin_reset`); its steps follow
         from the next round on (:meth:`_reset_round`). The file is no stream from before it on
         (no batch of it is read or committed under the mark: the batches read from it are
@@ -1679,13 +1760,14 @@ class IngestService:
     def _reset_round(self) -> None:
         """The steps of the reset under way, for :data:`RESET_ROUND_SECONDS` (at least one), each
         a transaction of its own (:meth:`_reset_step`), live batches between the rounds; after
-        the last one (which takes the mark off) a fresh stream at offset 0. A step that waits
-        for a lock longer than :data:`RESET_LOCK_TIMEOUT` is made again in the next round; a stop
-        ends the round after the step under way (the next start goes on from the mark). A
-        file whose offset has moved meanwhile (another instance loaded it while this one's lock
-        connection was down) is not touched any further: the offsets are read again, and while
-        it is still marked its reset begins again (its rows deleted whole, then it loads from
-        offset 0)."""
+        the last one (which takes the mark off) a fresh stream at offset 0, none for a file
+        whose day vault retention deleted (the last step removed its offsets row:
+        :meth:`_resume_reset`). A step that waits for a lock longer than
+        :data:`RESET_LOCK_TIMEOUT` is made again in the next round; a stop ends the round after
+        the step under way (the next start goes on from the mark). A file whose offset has moved
+        meanwhile (another instance loaded it while this one's lock connection was down) is not
+        touched any further: the offsets are read again, and while it is still marked its reset
+        begins again (its rows deleted whole, then it loads from offset 0)."""
         reset = self._reset
         if reset is None or not self._take_lock():
             return
@@ -1698,7 +1780,12 @@ class IngestService:
             try:
                 with self.engine.begin() as connection:
                     marked = self._reset_step(
-                        connection, source, day, reset.steps[0], last=len(reset.steps) == 1
+                        connection,
+                        source,
+                        day,
+                        reset.steps[0],
+                        last=len(reset.steps) == 1,
+                        retire=reset.strays is None,
                     )
             except DBAPIError as exc:
                 if not _lock_not_available(exc):
@@ -1719,6 +1806,9 @@ class IngestService:
                 return
         self._reset = None
         self.resetting.discard(key)
+        if reset.strays is None:  # its day deleted: its offsets row went with the last step
+            log.info("%s %s: its reset is finished, its offsets row removed", source, day)
+            return
         stream = self._new_stream(source, day)
         stream.in_db = True
         self.streams[key] = stream
@@ -1745,7 +1835,7 @@ class IngestService:
         source: str,
         day: date,
         *,
-        strays: Iterable[datetime] = (),
+        strays: Iterable[datetime] | None = (),
         defaults: list[str] | None = None,
     ) -> list[ResetStep]:
         """The first transaction of a reset of the file ``(source, day)`` (W5-G-25), in the
@@ -1768,7 +1858,12 @@ class IngestService:
           that the claim checked against its manifest: the bytes that were loaded) in which a
           line of the file was received outside its day — a damaged or hand-restored spool line
           can carry a receive time of any other day, and its rows lie within
-          :data:`~arcilogger_db.searchcounts.COUNTS_TIME_MARGIN` of it;
+          :data:`~arcilogger_db.searchcounts.COUNTS_TIME_MARGIN` of it; ``None`` when vault
+          retention deleted the file's day (a reset taken up on its own, :meth:`_resume_reset`):
+          around the hours outside the window that its counts still name (those of the hours
+          its steps finished went with them; a line its counts never told, of a file loaded
+          before ``0016_search``, is not found: its row stays until the window job drops its
+          day);
         * on plain PostgreSQL the default partitions (``defaults``) outside the window too, a
           cheap sweep, here.
 
@@ -1776,9 +1871,12 @@ class IngestService:
         their hours (of every file: what their deletes read). A file whose counts were not
         complete (``counts_from_line`` set before its reset) is stepped at most
         :data:`RESET_CAPPED_STEP` in its time window: its counts do not tell its lines. A reset
-        taken up again (the file marked, or its mark taken off by a recount: :meth:`_recounted`)
-        is planned by the counts as they are: those of the hours its steps finished went with
-        them, the others still tell its rows (a recount counted the rows still there).
+        taken up again (the file marked, or its mark taken off by hand: :meth:`_recounted`) is
+        planned by the counts as they are: those of the hours its steps finished went with them,
+        the others still tell its rows. One taken up with the file still marked is capped as
+        well: the mark took the place of ``counts_from_line``, so whether its counts were
+        complete is no longer known (#182 review); one whose mark was taken off by hand is not
+        (larger steps at worst, never other rows).
 
         Its clock samples are the source's minutes of its site day, and what the lines received
         outside it added to the minutes they were received in (those keys are shared with that
@@ -1799,8 +1897,12 @@ class IngestService:
                 and bool(IngestService._recounted(connection, [(source, day)]))
             )
         )
-        capped = row is not None and row[3] is not None and not resumed  # counts not complete
+        # Counts not complete, or not known to be (the mark, taken up again); a mark taken off by
+        # hand leaves the counts as they are.
+        capped = row is not None and row[3] is not None
         lo, hi = stream_window(day)
+        if strays is None:  # the file is gone: where its counts say its rows still lie
+            strays = IngestService._counted_outside(connection, source, day, lo, hi)
         reach = _reach(strays)
         received: Counter[ClockKey] = Counter()
         if not resumed:
@@ -1864,17 +1966,48 @@ class IngestService:
         return count_hours(steps)
 
     @staticmethod
+    def _counted_outside(
+        connection: Connection, source: str, day: date, lo: datetime, hi: datetime
+    ) -> list[datetime]:
+        """The hours that reach outside ``[lo, hi)`` (the file's ``stream_window``; one that
+        begins before ``lo`` too, for a site offset not of whole hours) that the file's
+        ``search_counts`` still name: the rows of its lines received outside its day that no
+        step has deleted yet lie in them (:meth:`_begin_reset` of a file whose day vault
+        retention deleted)."""
+        sc = SearchCount
+        return list(
+            connection.execute(
+                select(sc.hour)
+                .where(
+                    sc.source == source,
+                    sc.raw_day == day,
+                    or_(sc.hour < lo, sc.hour >= hi),
+                )
+                .distinct()
+                .order_by(sc.hour)
+            ).scalars()
+        )
+
+    @staticmethod
     def _reset_step(
-        connection: Connection, source: str, day: date, step: ResetStep, *, last: bool
+        connection: Connection,
+        source: str,
+        day: date,
+        step: ResetStep,
+        *,
+        last: bool,
+        retire: bool = False,
     ) -> bool:
         """A step of the file's reset (:meth:`_begin_reset`): its rows of the device times of
         ``step`` (``messages`` first) and its counts of the hours ``step`` finishes; the
         ``last`` takes the mark off first (the offsets row first, the loader's order) and
-        deletes all its counts left. A compare-and-set as the loader's: ``False`` (and nothing
-        deleted) when the file's offset is no longer 0 or it has finished (another instance
-        loaded it while this one's lock connection was down). A mark taken off meanwhile with
-        the offset still 0 (``arcilogger-db search-counts rebuild``, which recounts the rows
-        still there) is put back: no batch has loaded the file since its reset began."""
+        deletes all its counts left; with ``retire`` (vault retention deleted the file's day,
+        :meth:`_resume_reset`) it deletes the offsets row instead. A compare-and-set as the
+        loader's: ``False`` (and nothing deleted) when the file's offset is no longer 0 or it
+        has finished (another instance loaded it while this one's lock connection was down). A
+        mark taken off by hand in SQL meanwhile with the offset still 0 (``arcilogger-db
+        search-counts rebuild`` refuses a marked file) is put back: no batch has loaded the file
+        since its reset began."""
         o = IngestOffset
         at = (o.source == source, o.day == day)
         connection.execute(text(f"SET LOCAL lock_timeout = '{RESET_LOCK_TIMEOUT}'"))
@@ -1887,11 +2020,14 @@ class IngestService:
             return False
         if last or row[3] != RESETTING:
             if row[3] != RESETTING:
-                log.warning("%s %s: its reset's mark was taken off (a recount?)", source, day)
-            mark = None if last else RESETTING
-            connection.execute(
-                update(o).where(*at).values(counts_from_line=mark, updated_at=func.now())
-            )
+                log.warning("%s %s: its reset's mark was taken off (by hand?)", source, day)
+            if last and retire:
+                connection.execute(delete(o).where(*at))
+            else:
+                mark = None if last else RESETTING
+                connection.execute(
+                    update(o).where(*at).values(counts_from_line=mark, updated_at=func.now())
+                )
         for name in RESET_TABLES:
             table = Base.metadata.tables[name]
             connection.execute(

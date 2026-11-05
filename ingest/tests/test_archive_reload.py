@@ -23,15 +23,16 @@ window comes back from the vault, exactly once.
   prompt and leaves the request to the next start; a check that fails beside the loop fails the
   request as on it; the scan of a request that ended gives up. A file cut short after its scan
   is not reset (its size is checked again right before the transaction), and the partitions
-  are made a day a round, all of them before the reset. A file loaded while the claim checks the
+  are made a table a round, all of them before the reset. A file loaded while the claim checks the
   files is not hashed again; a request that ends during its claim's check stops the check.
 * A reset deletes its file's rows in steps (#124 stage 2): a live line is loaded between two of
   them (also while a step waits for a lock), the file stays marked and is no stream meanwhile,
   its counts go with the hours each step finishes, and one file is reset at a time. A crash
-  after any of its transactions, a first transaction whose answer is lost, a recount that takes
-  the mark off (``search-counts rebuild``) and a batch loaded under the mark each reset it again
-  and load it exactly once, for its request or on its own; a file that cannot be read does not
-  hold up the reset of another.
+  after any of its transactions, a first transaction whose answer is lost, a mark taken off by
+  hand in SQL (``search-counts rebuild`` refuses a marked file) and a batch loaded under the mark
+  each reset it again and load it exactly once, for its request or on its own; a file that cannot
+  be read does not hold up the reset of another, nor is it given up while its day is sealed, and
+  one whose day vault retention deleted has its reset finished without it.
 * On TimescaleDB with compression, a reload resets and loads raw days whose chunks are
   compressed (the margin days of a day near the window's start are older than
   ``COMPRESS_AFTER``): the same rows come back, also from a reload run twice.
@@ -45,7 +46,9 @@ from __future__ import annotations
 
 import gzip
 import json
+import logging
 import os
+import shutil
 import threading
 import warnings
 from collections.abc import Callable, Iterator
@@ -54,6 +57,7 @@ from datetime import UTC, date, datetime, time, timedelta
 from itertools import pairwise
 from pathlib import Path
 from time import monotonic, sleep
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -67,10 +71,13 @@ from arcilogger_core.immutability import unlock
 from arcilogger_core.rawlog import format_line
 from arcilogger_core.sealedfile import Compression
 from arcilogger_core.timeutil import SITE_TZ, day_window
+from arcilogger_db import cli as db_cli
+from arcilogger_db.clocksamples import rebuild as rebuild_samples
 from arcilogger_db.engine import engine_from_url
 from arcilogger_db.models import TIME_SERIES_TABLES, Base
 from arcilogger_db.partitions import (
     PARTITION_LOCK_KEY,
+    PartitionLockTimeoutError,
     drop_before,
     ensure_days,
     partitioned_tables,
@@ -1018,13 +1025,14 @@ LIVE_BOUND = 5.0
 #: Longest wait for a step of the service running in a thread.
 WAIT = 30.0
 #: Longest wait for the loop to make its rounds, or for a reload to finish loading, in the
-#: latency test: a reset's rounds make its partitions a day each, which takes 0.2 to 0.4 s here
-#: and several seconds on the Windows CI runners. Only a deadline: the waits end as soon as the
+#: latency test: a reset's rounds make its partitions a table each, about 30 ms here (a day of
+#: them took 0.84 s on a Windows CI runner). Only a deadline: the waits end as soon as the
 #: condition holds, and the latency itself is held to :data:`LIVE_BOUND`.
 SETTLE = 180.0
 #: Rounds of the loop a held check is watched for: more than a reset takes once its check has
-#: passed (its partitions, a day a round: 9 days for a one-day request, then its transaction).
-HELD_ROUNDS = 30
+#: passed (its partitions, a table a round: 9 days of 16 tables for a one-day request, 144
+#: rounds, then its transaction), with some 50 rounds to spare.
+HELD_ROUNDS = 200
 
 
 class Gate:
@@ -1157,8 +1165,8 @@ def test_live_data_is_loaded_while_a_reload_checks_its_files(
             f"{rounds - held} rounds of the loop in {monotonic() - started:.1f} s"
             f" while the reload's {step} check was held"
         )
-        # The longest round (a day of partitions on the reset's side) for the CI logs: the
-        # Windows runners give no figure of it otherwise (#124 stage 2).
+        # The longest round (a table's partitions on the reset's side, #182 review Q2) for the
+        # CI logs: the Windows runners give no figure of it otherwise (#124 stage 2).
         warnings.warn(
             f"longest loop round during the {step} check: {longest:.3f} s",
             UserWarning,
@@ -1170,7 +1178,7 @@ def test_live_data_is_loaded_while_a_reload_checks_its_files(
         assert status == ("queued" if step == "claim" else "loading")
         assert deletes == []
         assert day_offsets(db_engine, DAY) == stored  # no file of the day reset
-        if step == "reset":  # the partitions were made meanwhile, a day a round
+        if step == "reset":  # the partitions were made meanwhile, a table a round
             margin = RELOAD_MARGIN.days
             days = {DAY + timedelta(days=n) for n in range(-2 * margin, 2 * margin + 1)}
             assert service._partitioned == days
@@ -1191,13 +1199,15 @@ def test_live_data_is_loaded_while_a_reload_checks_its_files(
     counts_agree(db_engine)
 
 
-def test_a_reloads_partitions_are_made_a_day_a_round(
+def test_a_reloads_partitions_are_made_a_table_a_round(
     world: World, db_engine: Engine, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """G4, live data first (#124): the partitions of a reload's days are made one day a call
-    (up to 0.4 s each, 22 days for a 14-day request), one table a transaction (a stop waits for
-    one table's, #124 stage 2), and the reset waits until the last is made (``_ensure_days`` is
-    ``True`` only then): its rows land in their partitions, not in the default ones."""
+    """G4, live data first (#124): the partitions of a reload's days are made one table a call
+    (a transaction of about 30 ms; a site day is 16 tables, 0.3 to 0.45 s on Linux and 0.84 s
+    on a Windows runner in one round, 22 days for a 14-day request; #182 review Q2), day after
+    day, and the reset waits until the last is made (``_ensure_days`` is ``True`` only then):
+    its rows land in their partitions, not in the default ones. The vault scan makes a day in
+    one call (``whole``)."""
     drop(db_engine, TODAY)
     made: list[tuple[date, date, str]] = []
     real = ensure_days
@@ -1211,10 +1221,15 @@ def test_a_reloads_partitions_are_made_a_day_a_round(
         tables = partitioned_tables(connection)  # none on TimescaleDB: nothing to make
     service = world.service(db_engine)
     days = [DAY + timedelta(days=n) for n in range(3)]
-    assert [service._ensure_days(days[0], days[-1]) for _ in days] == [False, False, True]
+    rounds = max(1, len(tables)) * len(days)  # TimescaleDB: a day a call, nothing to make
+    answers = [service._ensure_days(days[0], days[-1]) for _ in range(rounds)]
+    assert answers == [False] * (rounds - 1) + [True]
     assert made == [(day, day, table) for day in days for table in tables]
     assert service._ensure_days(days[0], days[-1])  # nothing left to make
     assert len(made) == 3 * len(tables)
+    later = DAY + timedelta(days=5)
+    assert service._ensure_days(later, later, whole=True)  # the vault scan's: the day at once
+    assert made[3 * len(tables) :] == [(later, later, table) for table in tables]
 
 
 def test_a_sealed_file_gone_after_its_scan_is_not_reset(
@@ -1602,9 +1617,10 @@ def file_counts(engine: Engine, source: str, day: date) -> int:
 
 
 def recount_by_hand(engine: Engine, source: str, day: date) -> None:
-    """What ``arcilogger-db search-counts rebuild`` does (``arcilogger_db.cli``): the file's
-    offsets row locked, its counts made again from its rows, its ``counts_from_line`` cleared
-    when set (the mark of a reset among them)."""
+    """A recount by hand in SQL that takes a reset's mark off: what ``arcilogger-db
+    search-counts rebuild`` does to a file not being reset (the file's offsets row locked, its
+    counts made again from its rows, its ``counts_from_line`` cleared), done to a marked file,
+    which the command refuses (``arcilogger_db.cli.RESETTING``)."""
     with engine.begin() as connection:
         marked = connection.execute(
             text(
@@ -1981,13 +1997,16 @@ def test_a_batch_loaded_under_the_mark_begins_the_reset_again(
 def test_a_recount_during_a_reset_does_not_load_its_file_twice(
     world: World, db_engine: Engine, monkeypatch: pytest.MonkeyPatch, when: str
 ) -> None:
-    """#124 stage 2 review M1: ``arcilogger-db search-counts rebuild`` of a file between two
-    steps of its reset counts the rows still there and takes the mark off (it clears any
-    ``counts_from_line``). While the service runs (``running``) the next step puts the mark
-    back (the offset still 0: no batch has loaded the file since). After a crash, the file at
-    offset 0 with counts not empty is a reset all the same: no stream, not loaded, and its
-    reset is taken up again (its stray line's clock sample not taken off twice), for the
-    request or on its own (``none``, failed by hand). Either way it loads exactly once."""
+    """#124 stage 2 review M1: a recount between two steps of a file's reset that takes the mark
+    off (by hand in SQL: ``arcilogger-db search-counts rebuild`` refuses a marked file since
+    #182, so this is ingest's second line of defence) counts the rows still there. While the
+    service runs (``running``) the next step puts the mark back (the offset still 0: no batch
+    has loaded the file since). After a crash, the file at offset 0 with counts not empty is a
+    reset all the same: no stream, not loaded, and its reset is taken up again (its stray
+    line's clock sample not taken off twice), for the request or on its own (``none``, failed
+    by hand). Either way it loads exactly once. Ingest's mark is the value the command
+    refuses."""
+    assert service_module.RESETTING == db_cli.RESETTING
     spread_day(world, db_engine)
     before = snapshot(db_engine)
     key = ("core-r1", DAY)
@@ -2118,6 +2137,244 @@ def test_one_unreadable_file_does_not_hold_up_another_files_reset(
     restarted = world.service(db_engine)
     restarted._load_offsets()
     assert restarted.resetting == {stuck}
+
+
+def offsets_row(engine: Engine, source: str, day: date) -> int:
+    """How many ``ingest_offsets`` rows the file ``(source, day)`` has (0 or 1)."""
+    with engine.connect() as connection:
+        return int(
+            connection.execute(
+                text("SELECT count(*) FROM ingest_offsets WHERE source = :source AND day = :day"),
+                {"source": source, "day": day},
+            ).scalar_one()
+        )
+
+
+def marked_orphan(world: World, engine: Engine, *, old: bool) -> tuple[Path, bytes]:
+    """:func:`spread_day`'s file marked resetting with no step made and no request (the service
+    stopped after its first transaction, its request failed since): returns the sealed file and
+    its bytes. ``old``: loaded before ``0016_search`` (``counts_from_line`` set, its counts
+    gone): its counts do not tell its line received outside its day."""
+    key = ("core-r1", DAY)
+    path, _ = sealed_file(world, DAY, "core-r1")
+    with engine.begin() as connection:
+        if old:
+            at = {"source": key[0], "day": key[1]}
+            connection.execute(
+                text(
+                    "UPDATE ingest_offsets SET counts_from_line = 2 "
+                    "WHERE source = :source AND day = :day"
+                ),
+                at,
+            )
+            connection.execute(
+                text("DELETE FROM search_counts WHERE source = :source AND raw_day = :day"), at
+            )
+        IngestService._begin_reset(
+            connection,
+            *key,
+            strays=received_outside(path, DAY),
+            defaults=IngestService._defaults(connection),
+        )
+    assert file_rows(engine, *key) == len(SPREAD) + 1  # no step made yet
+    return path, path.read_bytes()
+
+
+@pytest.mark.parametrize("old", [False, True], ids=["counted", "before-0016"])
+def test_a_marked_file_whose_day_was_deleted_ends_its_reset_and_is_not_tried_again(
+    world: World,
+    db_engine: Engine,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    tmp_path: Path,
+    old: bool,
+) -> None:
+    """#182 review 1: a file marked resetting that no request holds, whose day vault retention
+    has deleted since (its files and manifest gone, its seal state ``deleted``), was scanned
+    again every ``vault_scan_seconds`` with a warning each time, marked and unfinished for good
+    (``search.counts_backfill`` waiting for it). Its reset is finished without the file: its
+    rows deleted, also the one received three days before ``TODAY`` (outside its window: found
+    by its counts; of a file loaded before ``0016_search`` its counts never told it, and it
+    stays), its counts with them, and its offsets row removed; reported once, and no later
+    start looks at it again, the day within the vault scan's horizon too. Put back by hand and
+    asked for, it loads exactly once (the request's reset finds that row from the file); the
+    clock sample of a line that stayed was taken off by both resets (derived data, accepted in
+    W5-G-25: ``clocksamples.rebuild`` counts it again from the rows)."""
+    received = spread_day(world, db_engine)
+    before = snapshot(db_engine)
+    key = ("core-r1", DAY)
+    marked_orphan(world, db_engine, old=old)
+    vault_day, state = world.layout.vault_day(DAY), world.layout.seal_state(DAY)
+    kept, kept_state = tmp_path / "vault-day", state.read_bytes()
+    shutil.copytree(vault_day, kept)
+    removed = sorted(f for f in vault_day.rglob("*") if f.is_file())
+    for each in removed:  # what arcilogger_core.retention does
+        unlock(each)
+        each.unlink()
+    vault_day.rmdir()
+    deleted = {**json.loads(kept_state), "status": "deleted", "deleted_by": "imha-0001.json"}
+    state.write_text(json.dumps(deleted), encoding="utf-8")
+    scans: list[tuple[str, date]] = []
+    real_scan = IngestService._scan
+
+    def scan(self: IngestService, what: str, key: tuple[str, date], *args: Any) -> Any:
+        scans.append(key)
+        return real_scan(self, what, key, *args)
+
+    monkeypatch.setattr(IngestService, "_scan", scan)
+    caplog.set_level(logging.INFO, logger="arcilogger.ingest")
+    world.set_today(DAY + timedelta(days=1))  # within the vault scan's horizon
+    for _ in range(2):  # the start that finishes it, and one after it
+        run_once(world, db_engine)
+    world.set_today(TODAY)
+    assert scans == [key]
+    reported = [r for r in caplog.records if "deleted from the vault" in r.getMessage()]
+    assert [r.levelno for r in reported] == [logging.WARNING]
+    assert offsets_row(db_engine, *key) == 0
+    assert file_rows(db_engine, *key) == (1 if old else 0)
+    assert file_counts(db_engine, *key) == 0
+    after = snapshot(db_engine)
+    for name in TIME_SERIES_TABLES:
+        assert [row for row in after[name] if row[-3] != DAY] == [
+            row for row in before[name] if row[-3] != DAY
+        ]
+    if not old:  # ``old``: the row its counts never told stays uncounted until it is loaded
+        counts_agree(db_engine)
+    restarted = world.service(db_engine)
+    restarted._load_offsets()
+    assert key not in restarted.resetting
+    # Put back (the vault restored from a copy) and asked for: loaded exactly once.
+    vault_day.mkdir()
+    for each in removed:
+        shutil.copyfile(kept / each.relative_to(vault_day), each)
+    state.write_bytes(kept_state)
+    monkeypatch.undo()
+    reload_id = queue(db_engine, DAY)
+    run_once(world, db_engine)
+    assert reload_row(db_engine, reload_id)["status"] == "ready"
+    if old:
+        minute = received.astimezone(UTC).replace(second=0)
+        shared = [row for row in before["source_clock_samples"] if row[1] == minute]
+        assert shared == [("core-r1", minute, -1800, 2)]
+        assert snapshot(db_engine) == {
+            **before,
+            "source_clock_samples": [
+                ("core-r1", minute, -1800, 1) if row in shared else row
+                for row in before["source_clock_samples"]
+            ],
+        }
+        with db_engine.begin() as connection:
+            rebuild_samples(connection, "core-r1", minute, minute + timedelta(minutes=1))
+    assert snapshot(db_engine) == before
+    counts_agree(db_engine)
+
+
+@pytest.mark.parametrize("old", [False, True], ids=["counted", "before-0016"])
+def test_a_marked_file_missing_from_a_sealed_day_waits_and_loads_once_put_back(
+    world: World,
+    db_engine: Engine,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    old: bool,
+) -> None:
+    """#182 review round 2: a file marked resetting that no request holds, whose sealed file is
+    missing while its day is still sealed (an evidence incident, or a retention run cut short),
+    is not given up: had its reset ended without it and its offsets row gone, the vault scan
+    (the day within its horizon) would load it at offset 0 once the file is back, and a file
+    loaded before ``0016_search`` would have the row its counts never told twice. It stays
+    marked (no stream, its rows as they were), is tried again after ``vault_scan_seconds``, and
+    is reported once. Put back, it is reset from its own file and loads exactly once with no
+    request."""
+    spread_day(world, db_engine)
+    before = snapshot(db_engine)
+    key = ("core-r1", DAY)
+    path, kept = marked_orphan(world, db_engine, old=old)
+    unlock(path)
+    path.unlink()
+    scans: list[tuple[str, date]] = []
+    real_scan = IngestService._scan
+
+    def scan(self: IngestService, what: str, key: tuple[str, date], *args: Any) -> Any:
+        scans.append(key)
+        return real_scan(self, what, key, *args)
+
+    monkeypatch.setattr(IngestService, "_scan", scan)
+    caplog.set_level(logging.INFO, logger="arcilogger.ingest")
+    world.set_today(DAY + timedelta(days=1))  # within the vault scan's horizon
+    service = world.service(db_engine, vault_scan_seconds=0.0)
+    results: list[int] = []
+    runner = threading.Thread(target=lambda: results.append(service.run()))
+    runner.start()
+    try:
+        assert wait_for(lambda: len(scans) >= 3)  # tried again
+    finally:
+        service.stop.set()
+        runner.join(WAIT)
+    assert results == [0]
+    assert set(scans) == {key}
+    assert key not in service.streams
+    waits = [r for r in caplog.records if "its reset waits" in r.getMessage()]
+    assert [r.levelno for r in waits] == [logging.WARNING]
+    assert not [r for r in caplog.records if "deleted from the vault" in r.getMessage()]
+    assert marker(db_engine, *key) == (0, service_module.RESETTING, False)
+    assert offsets_row(db_engine, *key) == 1
+    assert file_rows(db_engine, *key) == len(SPREAD) + 1
+    path.write_bytes(kept)  # put back; no request
+    monkeypatch.undo()
+    run_once(world, db_engine)
+    world.set_today(TODAY)
+    assert snapshot(db_engine) == before
+    assert marker(db_engine, *key) == (sealed_file(world, DAY, "core-r1")[1], None, True)
+    counts_agree(db_engine)
+
+
+def test_a_reset_taken_up_again_keeps_the_step_cap_of_a_file_loaded_before_the_counts(
+    world: World, db_engine: Engine, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#182 review 2: a file loaded before ``0016_search`` (``counts_from_line`` set, its lines
+    before it not in ``search_counts``) is stepped at most ``RESET_CAPPED_STEP`` in its time
+    window, as its counts do not tell its lines. The mark takes the place of
+    ``counts_from_line``: a reset taken up again (a stop after its first transaction) stepped
+    the window by the counts, in one step here (the other files' few lines). It is capped as
+    well (an hour here, as in
+    ``test_a_row_outside_its_days_window_is_replaced_not_doubled``), and the next start
+    finishes it and loads the file exactly once."""
+    load_day(world, db_engine)
+    before = snapshot(db_engine)
+    key = ("core-r1", DAY)
+    at = {"source": key[0], "day": key[1]}
+    with db_engine.begin() as connection:
+        connection.execute(
+            text(
+                "UPDATE ingest_offsets SET counts_from_line = 2 "
+                "WHERE source = :source AND day = :day"
+            ),
+            at,
+        )
+        connection.execute(
+            text("DELETE FROM search_counts WHERE source = :source AND raw_day = :day"), at
+        )
+    cap = timedelta(hours=1)
+    monkeypatch.setattr(service_module, "RESET_CAPPED_STEP", cap)
+    lo, hi = stream_window(DAY)
+    planned = []
+    for _ in range(2):  # its first transaction, then taken up again
+        with db_engine.begin() as connection:
+            planned.append(
+                IngestService._begin_reset(
+                    connection, *key, defaults=IngestService._defaults(connection)
+                )
+            )
+    assert marker(db_engine, *key) == (0, service_module.RESETTING, False)
+    for steps in planned:
+        window = [(step.start, step.end) for step in steps]  # no strays: the window alone
+        assert (window[0][0], window[-1][1]) == (lo, hi)
+        assert all(a[1] == b[0] for a, b in pairwise(window))
+        assert max(end - start for start, end in window) <= cap
+    run_once(world, db_engine)  # the next start: on its own, from its first transaction
+    assert marker(db_engine, *key) == (sealed_file(world, DAY, "core-r1")[1], None, True)
+    assert snapshot(db_engine) == before
+    counts_agree(db_engine)
 
 
 def test_a_file_of_a_loading_request_is_not_reset_on_its_own(
@@ -2609,8 +2866,59 @@ def test_a_reloads_partitions_back_off_from_an_export_and_a_search_is_not_timed_
         assert service._ensure_days(DAY, DAY) is False
     assert asked == tables[:1]
     service._partitions_due = 0.0  # the next poll
-    assert service._ensure_days(DAY, DAY)
+    answers = [service._ensure_days(DAY, DAY) for _ in tables]  # a table a round
+    assert answers == [False] * (len(tables) - 1) + [True]
     assert partitions_of(db_engine) > before
+
+
+def test_a_reloads_partitions_ask_for_the_lock_less_often_while_it_stays_held(
+    world: World, db_engine: Engine, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#182 review Q7: while the partition lock stays held (a search export holds it for up to
+    15 minutes, W5-G-23), a reload's partitions are not asked for again before
+    ``archive_seconds`` (5 s), then twice as long after each wait that ran out, up to
+    ``PARTITION_RETRY_MAX_SECONDS`` (60 s): 5, 10, 20, 40, 60, 60 s, not about 130 asks of up to
+    2 s each that searches queue behind. Once a table is made the next wait is
+    ``archive_seconds`` again. The loop's clock is moved by hand (no sleep), and a stand-in for
+    ``ensure_days`` gives up as the lock's budget does. On TimescaleDB there is nothing to make
+    and no lock is taken."""
+    drop(db_engine, TODAY)
+    with db_engine.connect() as connection:
+        tables = partitioned_tables(connection)
+    now = 0.0
+    monkeypatch.setattr(service_module, "time", SimpleNamespace(monotonic=lambda: now))
+    held = True
+    asked: list[float] = []
+    real = ensure_days
+
+    def gated(connection: Any, first_day: date, last_day: date, **kwargs: Any) -> Any:
+        asked.append(now)
+        if held:
+            raise PartitionLockTimeoutError("the partition lock is held (an export)")
+        return real(connection, first_day, last_day, **kwargs)
+
+    monkeypatch.setattr(service_module, "ensure_days", gated)
+    service = world.service(db_engine, archive_seconds=5.0)
+    if not tables:  # TimescaleDB
+        assert service._ensure_days(DAY, DAY)
+        assert asked == []
+        return
+    waits = []
+    for _ in range(6):
+        assert service._ensure_days(DAY, DAY) is False
+        waits.append(service._partitions_due - now)
+        now += waits[-1] - 0.5
+        assert service._ensure_days(DAY, DAY) is False  # half a second early: not asked
+        now += 0.5
+    assert waits == [5.0, 10.0, 20.0, 40.0, 60.0, 60.0]
+    assert asked == [0.0, 5.0, 15.0, 35.0, 75.0, 135.0]
+    held = False
+    assert service._ensure_days(DAY, DAY) is False  # a table made, the next in the next round
+    held = True
+    assert service._ensure_days(DAY, DAY) is False
+    assert service._partitions_due - now == 5.0  # archive_seconds again
+    assert len(asked) == 8
+    assert DAY not in service._partitioned
 
 
 def claimed_and_checked(
@@ -2739,12 +3047,13 @@ def test_a_claim_backs_off_from_its_requests_row_held(
 def test_a_days_tables_share_one_lock_budget(
     world: World, db_engine: Engine, outside: Engine, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """W5-G-24 for ingest (review): a day's tables, a transaction each, share the call's one
-    budget. The first table waits for the partition lock (an export holds it) three quarters of
-    it; the export lets go and takes it again before the second table asks: that one waits
-    only what is left (0.5 s), not the whole budget again, then the call gives up. Searches
-    that hold the lock one after the other cannot keep the loop a budget a table (16 a day). On
-    TimescaleDB there is nothing to make and no lock is taken."""
+    """W5-G-24 for ingest (review): a day's tables, a transaction and a round each (#182
+    review Q2), share the day's one budget. The first table waits for the partition lock (an
+    export holds it) three quarters of it; the export lets go and takes it again before the
+    second table asks, in the next round: that one waits only what is left (0.5 s), not the
+    whole budget again, then the round gives up. Searches that hold the lock one after the
+    other cannot keep the loop a budget a table (16 a day). On TimescaleDB there is nothing to
+    make and no lock is taken."""
     drop(db_engine, TODAY)
     with db_engine.connect() as connection:
         tables = partitioned_tables(connection)
@@ -2771,7 +3080,9 @@ def test_a_days_tables_share_one_lock_budget(
     with outside.connect() as holder:
         holder.execute(text("SELECT pg_advisory_lock_shared(:key)"), key)
         holder.commit()
-        step, answer = in_thread(lambda: service._ensure_days(DAY, DAY))
+        step, answer = in_thread(
+            lambda: [service._ensure_days(DAY, DAY), service._ensure_days(DAY, DAY)]  # two rounds
+        )
         wait_for_waiters(outside, ["ExclusiveLock"], step)
         sleep(budget * 0.75)  # spends the budget; the order comes from pg_locks and the events
         holder.execute(text("SELECT pg_advisory_unlock_shared(:key)"), key)
@@ -2785,7 +3096,7 @@ def test_a_days_tables_share_one_lock_budget(
         took = monotonic() - second
         holder.execute(text("SELECT pg_advisory_unlock_shared(:key)"), key)
         holder.commit()
-    assert answer == [False]
+    assert answer == [[False, False]]
     assert asked == tables[:2]
     assert took < budget * 0.75  # what was left (0.5 s), 1 s of margin; the whole budget is 2 s
     assert DAY not in service._partitioned
@@ -2825,8 +3136,8 @@ def test_no_reset_is_begun_once_the_service_stops(
             )
         real_days = IngestService._ensure_days
 
-        def ensure(self: IngestService, first_day: date, last_day: date) -> bool:
-            done = real_days(self, first_day, last_day)
+        def ensure(self: IngestService, first_day: date, last_day: date, **kwargs: Any) -> bool:
+            done = real_days(self, first_day, last_day, **kwargs)
             if done and self._orphan is not None:
                 self.stop.set()  # its scan and partitions are done
             return done
@@ -2912,10 +3223,10 @@ def test_a_resets_first_transaction_waiting_for_a_lock_is_made_again_later(
 def test_a_stop_while_a_days_partitions_are_made_waits_for_one_table(
     world: World, db_engine: Engine, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """#124 stage 2: a day's partitions are made one table a transaction and the stop is looked
-    at before each, so a stop waits for one table's (about 30 ms), not for the day's (up to
-    0.4 s here, several seconds on the Windows runners). The day is not taken as made; the next
-    run makes the rest."""
+    """#124 stage 2: a day's partitions are made one table a transaction, a round each (#182
+    review Q2), and the stop is looked at before each, so a stop waits for one table's (about
+    30 ms), not for the day's (up to 0.4 s here, 0.84 s on a Windows runner): the round after
+    it makes none. The day is not taken as made; the next run makes the rest."""
     drop(db_engine, TODAY)
     with db_engine.connect() as connection:
         tables = partitioned_tables(connection)
@@ -2935,10 +3246,13 @@ def test_a_stop_while_a_days_partitions_are_made_waits_for_one_table(
         return
     assert service._ensure_days(DAY, DAY) is False
     assert asked == tables[:1]
+    assert service._ensure_days(DAY, DAY) is False  # the next round: stopped, none made
+    assert service._ensure_days(DAY, DAY, whole=True) is False  # nor the vault scan's day
+    assert asked == tables[:1]
     assert DAY not in service._partitioned
     monkeypatch.setattr(service_module, "ensure_days", real)
     again = world.service(db_engine)
-    assert again._ensure_days(DAY, DAY)
+    assert again._ensure_days(DAY, DAY, whole=True)
     assert in_default(db_engine, DAY) == 0
 
 
