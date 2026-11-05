@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import sys
 from collections.abc import Callable, Iterator
 from datetime import UTC, date, datetime, timedelta
@@ -17,17 +18,20 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from arcilogger_api import sealcheck
+from arcilogger_api.legalstatus.testing import root_list, store_lists
 from arcilogger_api.routers import seals as seals_router
 from arcilogger_api.sealcheck import CheckResult, read_roots, run_check
-from arcilogger_api.sealinfo import VaultView
+from arcilogger_api.sealinfo import VaultView, revocation_json
 from arcilogger_api.testing import LoggedIn
 from arcilogger_core.config import Config
+from arcilogger_core.crl import StoredLists
 from arcilogger_core.immutability import unlock
 from arcilogger_core.layout import Layout
 from arcilogger_core.timeutil import site_day, utc_now
-from arcilogger_core.tsa.mock import MockFailure
-from arcilogger_core.tsa.verify import inspect_token
+from arcilogger_core.tsa.mock import MockFailure, MockTsaProvider
+from arcilogger_core.tsa.verify import fingerprint, inspect_token
 from arcilogger_db.models import AuditLog, SealVerification
+from arcilogger_worker.alerts.system import stored_lists
 from arcilogger_worker.vaulttesting import SealedVault, at_site, make_vault
 
 API = "/api/v1/seals"
@@ -309,6 +313,10 @@ def test_day_detail_equals_the_sealed_manifest(
     assert detail["replica"]["files"] == 5
     assert detail["seal_state"]["status"] == "sealed"
     assert detail["verification"] is None
+    # Wave 5 contract 2.3.1: no re-stamping report yet; no stored revocation list (C19)
+    assert detail["renewal"] is None
+    assert detail["revocation"] == CRL_NONE
+    assert "revocation" not in detail["token"]
 
     first = client.get(f"{API}/{D10.isoformat()}").json()
     assert first["previous"] is None  # the chain starts here
@@ -317,6 +325,7 @@ def test_day_detail_equals_the_sealed_manifest(
     assert failed["manifest"] is None
     assert failed["seal_state"]["attempts"] == 1
     assert failed["seal_state"]["last_error"]
+    assert (failed["renewal"], failed["revocation"]) == (None, None)  # present on every day
 
 
 def test_day_detail_shows_a_broken_link(
@@ -361,6 +370,518 @@ def test_the_token_facts_keep_the_claim_and_the_test_stamp_apart(
     claimed = client.get(f"{API}/{D10.isoformat()}").json()["token"]
     assert (claimed["legal_grade_claimed"], claimed["test_stamp"]) == (True, True)
     assert claimed["legal_grade"] is False
+
+
+# -- re-stamping and revocation (Wave 5 contract 2.3.1) -------------------------------------------
+
+#: The day token of D11 as the re-stamping report names it (vault-relative, 2.1.1).
+D11_TOKEN = "2026/09/11/manifest-2026-09-11.json.zd"
+NOT_AFTER = datetime(2031, 8, 30, 21, 30, tzinfo=UTC)
+
+
+def write_renewals(layout: Layout, *tokens: dict[str, Any]) -> None:
+    """``state/renewal/renewal.json`` with the per-token fields of 2.1.2 and the totals per
+    status."""
+    totals = dict.fromkeys(("not_due", "due", "covered", "late", "uncovered"), 0)
+    for entry in tokens:
+        totals[entry["status"]] += 1
+    path = layout.state / "renewal" / "renewal.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"tokens": list(tokens), "totals": totals}), encoding="utf-8")
+
+
+def renewal_record(vault: SealedVault, name: str, stamped_at: datetime) -> datetime:
+    """A renewal record ``vault/renewals/<name>`` time-stamped by the mock TSA at
+    ``stamped_at``; its token's genTime."""
+    record = vault.layout.vault / "renewals" / name
+    record.parent.mkdir(parents=True, exist_ok=True)
+    record.write_text(json.dumps({"tokens": [{"path": D11_TOKEN}]}), encoding="utf-8")
+    vault.tsa_clock.now = stamped_at
+    return MockTsaProvider(vault.tsa).stamp(record).info.gen_time
+
+
+@pytest.mark.parametrize("status", ["not_due", "due", "covered", "late", "uncovered"])
+def test_day_detail_renewal_from_the_renewal_report(
+    client: TestClient, login_as: Login, vault: SealedVault, layout: Layout, status: str
+) -> None:
+    counted = status in ("covered", "late")
+    gen_time = renewal_record(vault, "2031-05-04-1.json", at_site(date(2031, 5, 4), 2, 0))
+    write_renewals(
+        layout,
+        {
+            "path": D11_TOKEN,
+            "kind": "day",
+            "cert_not_after": "2031-08-30T21:30:00Z",
+            "status": status,
+            "covered_by": "renewals/2031-05-04-1.json" if counted else None,
+        },
+        {
+            "path": "2026/09/10/manifest-2026-09-10.json.zd",
+            "kind": "day",
+            "cert_not_after": "2031-08-30T21:30:00Z",
+            "status": "due",
+            "covered_by": None,
+        },
+    )
+    login_as(client, "auditor")
+    renewal = client.get(f"{API}/{D11.isoformat()}").json()["renewal"]
+    assert set(renewal) == {"status", "cert_not_after", "covered_by", "renewed_at"}
+    assert renewal["status"] == status
+    assert datetime.fromisoformat(renewal["cert_not_after"]) == NOT_AFTER
+    if counted:
+        assert renewal["covered_by"] == "renewals/2031-05-04-1.json"
+        assert datetime.fromisoformat(renewal["renewed_at"]) == gen_time
+    else:
+        assert (renewal["covered_by"], renewal["renewed_at"]) == (None, None)
+
+
+#: The web mirror of the day page (C2): the day detail is not in the OpenAPI contract, so the
+#: members of its Wave 5 interfaces are compared with the API's keys here.
+SEAL_TYPES = Path(__file__).resolve().parents[2] / "web" / "src" / "lib" / "seal-types.ts"
+
+
+def ts_members(interface: str) -> set[str]:
+    text = SEAL_TYPES.read_text(encoding="utf-8")
+    body = re.search(rf"^export interface {interface} \{{\n(.*?)^\}}", text, re.M | re.S)
+    assert body is not None, interface
+    return set(re.findall(r"^  (\w+)\??:", body[1], re.M))
+
+
+def test_day_detail_renewal_and_revocation_match_the_web_types(
+    client: TestClient, login_as: Login, vault: SealedVault, layout: Layout
+) -> None:
+    write_renewals(
+        layout,
+        {
+            "path": D11_TOKEN,
+            "kind": "day",
+            "cert_not_after": "2031-08-30T21:30:00Z",
+            "status": "covered",
+            "covered_by": "renewals/2031-05-04-1.json",
+        },
+    )
+    login_as(client, "auditor")
+    detail = client.get(f"{API}/{D11.isoformat()}").json()
+    assert set(detail["renewal"]) == ts_members("SealRenewal")
+    assert set(detail["revocation"]) == ts_members("SealRevocation")
+    assert {"renewal", "revocation"} <= ts_members("SealDayDetail")
+
+
+@pytest.mark.parametrize("prefix", ["", "vault/"])
+def test_day_detail_renewal_time_from_the_report_and_a_token_path(
+    client: TestClient, login_as: Login, vault: SealedVault, layout: Layout, prefix: str
+) -> None:
+    """A report that names the renewal's token (``.json.zd``) and its time: the record path and
+    the report's time are shown, the token is not read. A leading ``vault/`` on either path is
+    read as vault-relative (W5-C-1)."""
+    renewed = datetime(2031, 9, 2, 6, 0, tzinfo=UTC)
+    write_renewals(
+        layout,
+        {
+            "path": prefix + D11_TOKEN,
+            "kind": "day",
+            "cert_not_after": "2031-08-30T21:30:00Z",
+            "status": "late",
+            "covered_by": prefix + "renewals/2031-09-02-1.json.zd",
+            "renewed_at": renewed.isoformat(),
+        },
+    )
+    login_as(client, "auditor")
+    renewal = client.get(f"{API}/{D11.isoformat()}").json()["renewal"]
+    assert renewal["covered_by"] == "renewals/2031-09-02-1.json"
+    assert datetime.fromisoformat(renewal["renewed_at"]) == renewed
+
+
+def test_day_detail_renewal_without_its_token_has_no_time(
+    client: TestClient, login_as: Login, vault: SealedVault, layout: Layout
+) -> None:
+    write_renewals(
+        layout,
+        {
+            "path": D11_TOKEN,
+            "kind": "day",
+            "cert_not_after": "2031-08-30T21:30:00Z",
+            "status": "covered",
+            "covered_by": "renewals/2031-05-04-1.json",
+        },
+    )
+    login_as(client, "auditor")
+    renewal = client.get(f"{API}/{D11.isoformat()}").json()["renewal"]
+    assert (renewal["covered_by"], renewal["renewed_at"]) == ("renewals/2031-05-04-1.json", None)
+
+
+@pytest.mark.parametrize(
+    "record", ["renewals/../../../outside.json", "renewals/../outside.json", "ABS"]
+)
+def test_day_detail_renewal_token_is_read_only_from_the_renewals_folder(
+    client: TestClient,
+    login_as: Login,
+    vault: SealedVault,
+    layout: Layout,
+    tmp_path: Path,
+    record: str,
+) -> None:
+    """``covered_by`` comes from a state file: a record outside ``vault/renewals`` (a ``..``
+    step, an absolute path) is not followed, though a valid token lies there."""
+    renewal_record(vault, "2031-05-04-1.json", at_site(date(2031, 5, 4), 2, 0))
+    token = (layout.renewals_dir / "2031-05-04-1.json.zd").read_bytes()
+    if record == "ABS":
+        record = (tmp_path / "outside.json").as_posix()
+    target = (layout.vault / record).resolve()
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.with_name(target.name + ".zd").write_bytes(token)
+    write_renewals(
+        layout,
+        {
+            "path": D11_TOKEN,
+            "kind": "day",
+            "cert_not_after": "2031-08-30T21:30:00Z",
+            "status": "covered",
+            "covered_by": record,
+        },
+    )
+    login_as(client, "auditor")
+    response = client.get(f"{API}/{D11.isoformat()}")
+    assert response.status_code == 200
+    renewal = response.json()["renewal"]
+    assert (renewal["covered_by"], renewal["renewed_at"]) == (record, None)
+
+
+@pytest.mark.parametrize(
+    "record",
+    [
+        "renewals/../renewals/2031-05-04-1.json",  # a valid token, reached through ``..``
+        "C:/outside.json",
+        "//192.0.2.1/share/outside.json",
+        "\\\\192.0.2.1\\share\\outside.json",
+        "renewals\\..\\outside.json",
+    ],
+)
+def test_day_detail_renewal_record_with_a_drive_a_root_or_a_parent_step_is_refused(
+    client: TestClient, login_as: Login, vault: SealedVault, layout: Layout, record: str
+) -> None:
+    """A record path with ``..``, a drive or a root (a UNC path on Windows) is refused as
+    written, before anything on the disk is opened: ``renewed_at`` stays null."""
+    renewal_record(vault, "2031-05-04-1.json", at_site(date(2031, 5, 4), 2, 0))
+    write_renewals(
+        layout,
+        {
+            "path": D11_TOKEN,
+            "kind": "day",
+            "cert_not_after": "2031-08-30T21:30:00Z",
+            "status": "covered",
+            "covered_by": record,
+        },
+    )
+    login_as(client, "auditor")
+    response = client.get(f"{API}/{D11.isoformat()}")
+    assert response.status_code == 200
+    renewal = response.json()["renewal"]
+    assert (renewal["covered_by"], renewal["renewed_at"]) == (record, None)
+
+
+def test_day_detail_renewal_token_linked_out_of_the_renewals_folder_is_not_read(
+    client: TestClient, login_as: Login, vault: SealedVault, layout: Layout, tmp_path: Path
+) -> None:
+    """The token that is read is checked, not only the record: a ``<record>.zd`` in
+    ``vault/renewals`` that links to a token outside it is not followed."""
+    renewal_record(vault, "2031-05-04-1.json", at_site(date(2031, 5, 4), 2, 0))
+    outside = tmp_path / "outside.json.zd"
+    outside.write_bytes((layout.renewals_dir / "2031-05-04-1.json.zd").read_bytes())
+    try:
+        (layout.renewals_dir / "linked.json.zd").symlink_to(outside)
+    except OSError as exc:  # Windows creates one only with the privilege for it
+        pytest.skip(f"no symbolic links here: {exc}")
+    write_renewals(
+        layout,
+        {
+            "path": D11_TOKEN,
+            "kind": "day",
+            "cert_not_after": "2031-08-30T21:30:00Z",
+            "status": "covered",
+            "covered_by": "renewals/linked.json",
+        },
+    )
+    login_as(client, "auditor")
+    renewal = client.get(f"{API}/{D11.isoformat()}").json()["renewal"]
+    assert (renewal["covered_by"], renewal["renewed_at"]) == ("renewals/linked.json", None)
+
+
+def test_day_detail_renewal_null_without_a_report(
+    client: TestClient, login_as: Login, vault: SealedVault, layout: Layout
+) -> None:
+    login_as(client, "auditor")
+    assert client.get(f"{API}/{D11.isoformat()}").json()["renewal"] is None
+    # a report that does not list the day
+    write_renewals(
+        layout,
+        {
+            "path": "2026/09/10/manifest-2026-09-10.json.zd",
+            "kind": "day",
+            "cert_not_after": "2031-08-30T21:30:00Z",
+            "status": "due",
+            "covered_by": None,
+        },
+    )
+    detail = client.get(f"{API}/{D11.isoformat()}").json()
+    assert detail["renewal"] is None
+    assert detail["problems"] == []
+
+
+@pytest.mark.parametrize("content", [b"{not json", b'{"tokens": 3}'])
+def test_day_detail_renewal_survives_a_corrupt_report(
+    client: TestClient, login_as: Login, vault: SealedVault, layout: Layout, content: bytes
+) -> None:
+    path = layout.state / "renewal" / "renewal.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(content)
+    login_as(client, "auditor")
+    response = client.get(f"{API}/{D11.isoformat()}")
+    assert response.status_code == 200, response.text
+    detail = response.json()
+    assert detail["renewal"] is None
+    assert detail["problems"] == ["renewal.json: unreadable"]
+    assert detail["token"]["check"]["ok"] is True  # the rest of the page is unchanged
+
+
+#: The day page's ``revocation`` of a day no stored list covers (D10: information only).
+CRL_NONE = {
+    "code": "crl-none",
+    "level": "info",
+    "message_tr": "Bu sertifikayı kapsayan saklı SİL yok; iptal durumu bilinmiyor.",
+    "message_en": "No stored revocation list covers this certificate; the revocation status is "
+    "unknown.",
+}
+
+
+def gen_time(layout: Layout, day: date) -> datetime:
+    return inspect_token(layout.token(day).read_bytes()).gen_time
+
+
+def legal_view(layout: Layout, config: Config, vault: SealedVault) -> VaultView:
+    """A view whose configuration lists the mock root as a legal root, so a day that claims
+    legal grade is confirmed by its verified chain (and the stored lists, C15)."""
+    legal = config.tsa.model_copy(
+        update={"legal_root_fingerprints": (fingerprint(vault.tsa.root_certificate),)}
+    )
+    return VaultView(layout, config.model_copy(update={"tsa": legal}))
+
+
+def claimed_token(view: VaultView, vault: SealedVault, day: date) -> dict[str, Any]:
+    """The day page's token of ``day`` for a manifest that claims legal grade."""
+    manifest = json.loads(view.layout.manifest(day).read_bytes())
+    claimed = {**manifest, "tsa": {**manifest["tsa"], "legal_grade": True}}
+    token = view._token(day, claimed, [vault.tsa.root_certificate])
+    assert token is not None
+    return token
+
+
+def test_day_detail_revocation_crl_none_without_lists(
+    client: TestClient, login_as: Login, vault: SealedVault
+) -> None:
+    """C19: the token is checked with the stored lists; before the first ``crl fetch`` there
+    are none, which is information (``crl-none``), not a problem of the page."""
+    login_as(client, "auditor")
+    detail = client.get(f"{API}/{D11.isoformat()}").json()
+    assert detail["token"]["check"]["ok"] is True
+    assert detail["revocation"] == CRL_NONE
+    assert detail["problems"] == []
+
+
+@pytest.mark.parametrize(
+    ("revoked_after", "hold", "code", "level", "legal_grade"),
+    [
+        (timedelta(hours=-1), False, "crl-revoked", "fail", False),
+        (timedelta(0), False, "crl-revoked", "fail", False),  # at the stamp time
+        (timedelta(days=2), False, "crl-revoked-later", "warn", True),
+        (timedelta(hours=-1), True, "crl-hold", "warn", True),
+        (None, False, "crl-ok", "ok", True),
+    ],
+    ids=["before", "at", "later", "hold", "ok"],
+)
+def test_day_detail_revoked_day_is_not_legal_grade(
+    client: TestClient,
+    login_as: Login,
+    vault: SealedVault,
+    layout: Layout,
+    api_config: Config,
+    revoked_after: timedelta | None,
+    hold: bool,
+    code: str,
+    level: str,
+    legal_grade: bool,
+) -> None:
+    """C15/C19: a day whose TSA certificate is revoked at or before its stamp is not legal
+    grade on the day page, and ``revocation`` gives the verifiers' code and level (C4)."""
+    stamped = gen_time(layout, D11)
+    assert claimed_token(legal_view(layout, api_config, vault), vault, D11)["legal_grade"]
+    revoked_at = None if revoked_after is None else stamped + revoked_after
+    issued = root_list(vault.tsa, stamped + timedelta(days=3), revoked_at=revoked_at, hold=hold)
+    store_lists(layout, [(vault.tsa, issued)], fetched_at=stamped + timedelta(days=3))
+    token = claimed_token(legal_view(layout, api_config, vault), vault, D11)
+    assert token["check"]["ok"] is True  # revocation never changes the token check
+    assert token["legal_grade"] is legal_grade
+    assert (token["revocation"]["code"], token["revocation"]["level"]) == (code, level)
+
+    login_as(client, "auditor")
+    detail = client.get(f"{API}/{D11.isoformat()}").json()
+    assert "revocation" not in detail["token"]
+    assert detail["revocation"] == token["revocation"]
+    if code == "crl-revoked":
+        assert detail["revocation"]["message_tr"] == (
+            "Zaman damgası sertifikası iptal listesinde: ARCILOGGER Mock TSA (TEST ONLY) tsa. "
+            "Zaman damgası "
+            "sağlayıcısıyla görüşün; hukuki inceleme önerilir."
+        )
+    assert detail["problems"] == []
+
+
+def test_day_detail_reads_the_stored_lists_once(
+    vault: SealedVault, layout: Layout, api_config: Config, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """C19: read once per request and cached, however many tokens the view checks."""
+    calls: list[Layout] = []
+
+    def counting(layout: Layout) -> StoredLists | None:
+        calls.append(layout)
+        return stored_lists(layout)
+
+    monkeypatch.setattr("arcilogger_api.sealinfo.stored_lists", counting)
+    view = legal_view(layout, api_config, vault)
+    for day in (D10, D11, D12):
+        assert claimed_token(view, vault, day)["revocation"] == CRL_NONE
+    assert calls == [layout]
+
+
+def test_day_detail_revocation_unreadable_index_is_a_problem(
+    client: TestClient, login_as: Login, vault: SealedVault, layout: Layout
+) -> None:
+    """``state/crl`` that cannot be read: the revocation is not checked (``null``), the page
+    says so, and the rest of it is as before (never a server error)."""
+    layout.crl_dir.mkdir(parents=True)
+    (layout.crl_dir / "index.json").write_text("{not json", encoding="utf-8")
+    login_as(client, "auditor")
+    response = client.get(f"{API}/{D11.isoformat()}")
+    assert response.status_code == 200, response.text
+    detail = response.json()
+    assert detail["revocation"] is None
+    assert detail["token"]["check"]["ok"] is True
+    assert detail["problems"] == ["revocation not checked: state/crl cannot be read"]
+
+
+def test_day_detail_names_a_changed_stored_list(
+    client: TestClient, login_as: Login, vault: SealedVault, layout: Layout
+) -> None:
+    """C14: a list whose file no longer holds its bytes is left out, and the page names it
+    instead of dropping its revocation silently."""
+    stamped = gen_time(layout, D11)
+    issued = root_list(vault.tsa, stamped + timedelta(days=1), revoked_at=stamped)
+    (name,) = store_lists(layout, [(vault.tsa, issued)], fetched_at=stamped + timedelta(days=1))
+    path = layout.crl_dir / name
+    path.write_bytes(path.read_bytes() + b"\x00")  # test: the stored file is changed
+    login_as(client, "auditor")
+    detail = client.get(f"{API}/{D11.isoformat()}").json()
+    assert detail["revocation"] == CRL_NONE
+    assert detail["problems"] == [f"revocation list {name} does not match its index entry"]
+
+
+SUBJECT = "CN=Örnek Test TSA 1,O=Örnek A.Ş.,C=TR"
+
+
+@pytest.mark.parametrize(
+    ("details", "expected"),
+    [
+        (
+            {
+                "crl": "crl-revoked",
+                "crl_level": "fail",
+                "crl_subject": SUBJECT,
+                "crl_at": "2026-09-01T09:00:00+00:00",
+            },
+            (
+                "fail",
+                "Zaman damgası sertifikası iptal listesinde: Örnek Test TSA 1. Zaman damgası "
+                "sağlayıcısıyla görüşün; hukuki inceleme önerilir.",
+                "A time-stamp certificate is on a revocation list: Örnek Test TSA 1. Contact the "
+                "provider; legal review is recommended.",
+            ),
+        ),
+        (
+            {
+                "crl": "crl-revoked-later",
+                "crl_level": "warn",
+                "crl_subject": SUBJECT,
+                "crl_at": "2026-10-01T21:30:00+00:00",
+            },
+            (
+                "warn",
+                "Sertifika zaman damgasından sonra iptal edilmiş (02.10.2026): Örnek Test TSA 1; "
+                "iptal nedeninin incelenmesi gerekir.",
+                "The certificate was revoked after the stamp (02.10.2026): Örnek Test TSA 1; the "
+                "reason for the revocation should be reviewed.",
+            ),
+        ),
+        (
+            {
+                "crl": "crl-hold",
+                "crl_level": "warn",
+                "crl_subject": SUBJECT,
+                "crl_at": "2026-09-05T08:00:00+00:00",
+            },
+            (
+                "warn",
+                "Sertifika SİL'de askıya alınmış görünüyor (05.09.2026): Örnek Test TSA 1; askının "
+                "damga anını kapsayıp kapsamadığı incelenmeli.",
+                "The certificate is on hold on a revocation list (05.09.2026): Örnek Test TSA 1; "
+                "check whether the hold covers the stamp time.",
+            ),
+        ),
+        (
+            {"crl": "crl-none", "crl_level": "info", "crl_subject": SUBJECT, "crl_at": ""},
+            (
+                "info",
+                "Bu sertifikayı kapsayan saklı SİL yok; iptal durumu bilinmiyor.",
+                "No stored revocation list covers this certificate; the revocation status is "
+                "unknown.",
+            ),
+        ),
+        (
+            {"crl": "crl-stale", "crl_subject": SUBJECT, "crl_at": "2026-09-01T00:00:00+00:00"},
+            (
+                "info",  # no crl_level: the level of D10
+                "Saklı en yeni SİL zaman damgasından önce yayımlanmış; damga anındaki iptal "
+                "durumu bilinmiyor.",
+                "The newest stored revocation list predates the stamp; the revocation status at "
+                "the stamp time is unknown.",
+            ),
+        ),
+        (
+            {
+                "crl": "crl-ok",
+                "crl_level": "ok",
+                "crl_subject": SUBJECT,
+                "crl_at": "2026-09-12T00:00:00+00:00",
+            },
+            ("ok", "SİL'de iptal kaydı yok.", "No revocation entry on the revocation lists."),
+        ),
+    ],
+    ids=lambda value: value["crl"] if isinstance(value, dict) else "",
+)
+def test_revocation_json_maps_codes_and_levels(
+    details: dict[str, str], expected: tuple[str, str, str]
+) -> None:
+    level, message_tr, message_en = expected
+    assert revocation_json(details) == {
+        "code": details["crl"],
+        "level": level,
+        "message_tr": message_tr,
+        "message_en": message_en,
+    }
+
+
+@pytest.mark.parametrize("details", [{}, {"crl": "not checked"}, {"crl": "crl-unknown"}])
+def test_revocation_json_is_null_when_not_checked(details: dict[str, str]) -> None:
+    assert revocation_json(details) is None
 
 
 @pytest.mark.parametrize(("path", "status"), [("2026-02-30", 422), ("2999-01-01", 404)])

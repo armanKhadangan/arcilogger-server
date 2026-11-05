@@ -244,6 +244,18 @@ ENGINE_EXPLANATIONS: Final[Mapping[str, tuple[str, str]]] = {
         "{day} is older than the database retention ({days} days); the records are kept only "
         "in the sealed vault.",
     ),
+    "lookback_clamped_to_window": (
+        "Kira denetimlerinden biri (kiranın en yeni DHCP kaydı, kiradan sonraki DHCP kayıtları, "
+        "iki DHCP kaynağı ya da bırakmadan sonraki ARP kayıtları) bu sorgunun okuduğu ilk günden "
+        "daha geriye bakardı; denetim yalnızca {day} ile {last} arasındaki günlerin kayıtlarını "
+        "okuyabildi (sorgunun günleri; bir arşivden yeniden yükleme en çok 14 gün tutar). Güven "
+        "düzeyi ve notlar bu günlerin kayıtlarına dayanır; daha eski kayıtlar denetime girmedi.",
+        "One of the lease checks (the lease's newest DHCP record, the DHCP records after the "
+        "lease, two DHCP origins or the ARP records after a release) would look back before the "
+        "first day this lookup reads; the check could only read the records of {day} to {last} "
+        "(the lookup's days; one archive reload holds at most 14 days). The confidence and the "
+        "notes rest on the records of those days; older records were not part of the check.",
+    ),
     "future_time": (
         "İstenen an ({at}) henüz gelmedi veya sunucu saatinin ilerisinde.",
         "The requested moment ({at}) is in the future of the server clock.",
@@ -595,6 +607,24 @@ ENGINE_EXPLANATIONS: Final[Mapping[str, tuple[str, str]]] = {
         "confidence. If the result is empty, run the lookup again: for a public IP with the "
         "tolerance widened by the offset, for an internal IP or a MAC address at the requested "
         "moment shifted by the offset (later for a positive offset, earlier for a negative one).",
+    ),
+    "source_clock_shared": (
+        "{at} çevresindeki cihaz zamanları şu kaynakların başka bir gerçek zamanda gönderdiği "
+        "kayıtlarda da kullanıldı (cihazın saati sonradan değiştirilmiş): o kayıtların zamanları "
+        "ARCILOGGER'ın alma zamanından ortanca olarak saniye cinsinden şu kadar farklıydı: "
+        "{offsets} (sınır {limit} saniye). Arama ve kira zaman çizelgesi cihazın zamanlarını "
+        "kullandı: bulunan oturumlar ve kayıtlar o anınkilerin yanında bu fark kadar sonra (fark "
+        "eksiyse) ya da önce (fark artıysa) yapılmış olanları da içerebilir. Bu sonuçta zincir "
+        "varsa düşük güvenle gösterildi. Bir oturumun gerçek zamanını ham kayıttaki alma "
+        "zamanından doğrulayın.",
+        "The device times around {at} were also used by records these sources sent at another "
+        "real time (the device's clock was changed later): the times of those records differed "
+        "from ARCILOGGER's receive time by a median of (in seconds): {offsets} (limit {limit} "
+        "seconds). The search and the lease timeline used the device's times: beside those of "
+        "that moment, the sessions and records found may include ones made that much later (for "
+        "a negative offset) or earlier (for a positive one). Any chain of this result is "
+        "therefore shown with low confidence. Check a session's real time against the receive "
+        "time in its raw record.",
     ),
 }
 

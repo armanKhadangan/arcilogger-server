@@ -23,7 +23,7 @@ endpoints the pages use are in section 10.
 | Page (address) | Changed from the browser | Deliberately console only |
 |---|---|---|
 | **General** (`/settings/general`) | organisation name (`site_name`), local and fallback time source (`[clock] ntp_server`, `[clock] fallback_server`), clock offset alert threshold (`[clock] alert_offset_ms`); the last measured offset is shown, a new time server is tried before it is saved | `[clock] ntp_port` |
-| **Application settings** (`/settings/application`) | the database settings by group (alerts and e-mail, 5651 lookup and lease timeline, search and live tail, usage analytics with the work hours and holidays, usage reports, evidence packages, sessions, passwords and privacy, database); in the 5651 lookup group **Rebuild the leases** (at most 31 days) | `devices.oui_file`, `usage.psl_file`, which name files |
+| **Application settings** (`/settings/application`) | the database settings by group (alerts and e-mail, 5651 lookup and lease timeline, search and live tail, usage analytics with the work hours and holidays, usage reports, evidence packages, sessions, passwords and privacy, database); in the 5651 lookup group the **Internet exits (NAT)** editor, under it the "Kayıtlarda görülen NAT adresleri" (NAT addresses seen in the logs) panel, and **Rebuild the leases** (at most 31 days) | `devices.oui_file`, `usage.psl_file`, which name files |
 | **Kamu SM** (`/settings/kamusm`) | a wizard: Java (one of those the administration service found on the server), Zamane client (upload), root certificates (add) and legal root fingerprints (installed roots only), customer number and password (tried with a credit query when saved), **Stamp test (uses 1 credit)**, **Switch to production** (and back to test), credit alert threshold and timeout; `[seal]` read-only | the mock or another provider, a free URL or port, the digest, removing a root or a fingerprint, a free `java` path, approving an unknown Zamane release (`approve-jar`, section 4) |
 | **Sources** (`/settings/sources`) | add a log source, edit it (the name is fixed), switch it on or off (`[[sources]] enabled`), remove it (typing its name); the table shows the last message and the firewall state | the whole `[collector]` section (bind address, ports, TLS, `unknown_senders`) |
 | **E-mail** (`/settings/email`) | `[smtp]` (on/off, server, port, security, user, sender, timeout), the SMTP password, a CA file for the server's certificate (upload, or back to the Windows certificate store), the alert e-mail settings (`alerts.email_*`: recipients, lowest severity, hourly limit …); a trial e-mail before saving; **Send a test e-mail** (with the saved settings, at most 5 an hour) | — |
@@ -31,10 +31,66 @@ endpoints the pages use are in section 10.
 | **Retention** (`/settings/retention`) | deleting expired days on/off, the retention period (at least 730 days); the number of days it deletes is shown first and typed to confirm | — |
 | **Backup** (`/settings/backup`) | on/off, `[backup] keep_daily`, `[backup] keep_weekly`, `[backup] keep_monthly`, `[backup] min_free_gb`; this version does not show the last backup's details on the page, a failed backup is an `R20-backup` alert | `[backup] dir`, `[backup] pg_dump`, `[backup] pg_restore` |
 | **Change history** (`/settings/history`) | the requests, their states and changes, a link to the audit log; **Cancel**, **Revert**; the configuration versions; **Download the diagnostics package** (a ZIP for support, no secrets) | restoring a version (`versions restore`, the page shows the command) |
+| **First-run wizard** (`/settings/setup`) | changes no value itself: it shows the steps after the installation in order and opens one of the pages above in each step (below) | — |
 
 No page changes `data_dir`, `secrets_dir`, `[database]`, `[api]`, `[ingest]`, `[worker]`,
 `[seal]`, the database password or the usage pseudonym key. They belong to the installer and the
 administrator.
+
+**ARP times** (Application settings, 5651 lookup and lease timeline): "Ignore ARP after a release"
+(`arp.ignore_after_release_seconds`, 300 seconds) cannot be longer than the "ARP log interval"
+(`arp.interval_seconds`); the browser and the console (`arcilogger-db settings set`) both refuse a
+change that breaks this. When you lower the interval below 300 seconds, change both settings in
+one save. A time written outside this rule (by hand in SQL) is read by the lease job as the
+default (300 seconds, at most the interval), with a warning in the worker log.
+
+**The days a lookup reads** (same group): the days a 5651 lookup reads (reloaded from the archive
+when the database no longer has them) grow with the longest session, the DNS look-back and the
+longest lease timeout; one reload holds at most 14 days. These settings therefore have upper
+bounds, so that every lookup's days fit one reload:
+
+| Setting | Default | Bounds |
+|---|---|---|
+| `lookup.max_session_seconds` | 86400 (1 day) | 60–172800 (2 days) |
+| `lookup.dns_lookback_seconds` | 3600 | 0–604800 (7 days) |
+| `lease.default_seconds` | 86400 (1 day) | 60–604800 (7 days, FortiOS's default `lease-time`, [DEVICE-SETUP.md](DEVICE-SETUP.md) section 2.4) |
+| `lease.server_seconds` | `{}` | each server 60–604800 (7 days) |
+| `lease.timeout_percent` | 110 | 100–125 |
+| `arp.interval_seconds` | 3600 | 60–604800 (7 days) |
+
+The browser and the console both refuse a value of these settings above its bound (for example
+"Must be between 60 and 604800."); a server time above 604800 seconds in `lease.server_seconds` is
+refused by the API when it is saved ("Each DHCP server needs a time between 60 and 604800 seconds
+(7 days)."). For a server whose lease time is longer than 7 days, at most 7 days can be entered;
+ARCILOGGER then closes that server's leases 7 days × `lease.timeout_percent` after their last
+evidence. The logged lease time of FortiGate leases (`dhcp.fortigate_use_logged_lease`) is not
+bound by it. MikroTik's own default lease time is not stated in these documents (**sahada
+doğrula**, verify on site): the bounds lie above ARCILOGGER's defaults (a 1-day lease, ARP-LOG
+every hour). The 2-day bound of `lookup.max_session_seconds` is to be verified on site against
+the FortiGate's session times as well.
+
+A value stored before these bounds is read as it is: while a lookup's days are in the database
+the lookup answers, and when the days it needs back from the archive fit one reload (14 days) it
+asks for them with 409 `archive_reload_required`. A lookup that needs more than 14 days back is
+refused with 503 `lookup_settings_invalid`, whose text names the setting above its bound and the
+days: bring the value within the bounds.
+
+The **first-run wizard** ("İlk kurulum sihirbazı", `/settings/setup`) shows what is left to do after
+the installation as a checklist: Administrator and two-step verification, Site settings, Log
+sources, Kamu SM: test server, Kamu SM: production, Replica, E-mail and Summary. It opens from the
+**First-run wizard** card on the Settings overview and from the **Open the first-run wizard** link
+on the Uyum Durumu page; it does not open by itself after the first sign-in. The wizard has no form
+of its own and stores nothing: each step's state ("OK" / "Missing") is derived again on every
+visit from the server's configuration and the stamp tests in the request history; the Log sources
+step also shows whether data arrived from each configured source (this does not change the step's
+state). **Open in Settings** opens the page concerned, where the change is saved and checked as
+always; **Skip this step for now** goes on to the next step, and the skipped step stays "Missing".
+The e-mail step is "OK" only while sending e-mail is switched on and an SMTP server and a sender are
+set. On a page opened from the wizard the way back reads **Back to the first-run wizard** ("Kurulum
+sihirbazına dön") instead of **Settings** and leads to `/settings/setup` (also between the steps of
+the Kamu SM wizard); this is remembered in that browser tab only and ends back in the wizard or on
+the Settings overview. The steps and when each counts as "OK":
+[COMPLIANCE-STATUS.md](COMPLIANCE-STATUS.md) section 5.
 
 **Switching a source off** (`enabled = false`): the firewall removes the sender's 514 opening;
 the silent-source alert (R15) and the sealer's gap check no longer expect it. A message that
@@ -79,6 +135,118 @@ reads them again (a live tail when it opens):
 | `live.buffer_lines` | 5000 | 500–50000 | newest lines the server keeps for a resume |
 | `live.max_minutes` | 60 | 5–480 | duration of one tail (unattended screen); Resume starts it again |
 | `live.backfill_lines` | 50 | 0–200 | recent lines shown at once when a tail opens |
+
+The **5651 lookup and lease timeline** group also holds, in this version
+([adr/0016-fortigate-dhcp-and-internet-exits.md](adr/0016-fortigate-dhcp-and-internet-exits.md)),
+the settings for the internet exits, srcmac and the FortiGate DHCP records. The values are
+entered on site or verified there, never assumed; what to enter when is in
+[FIRST-STEPS.md](FIRST-STEPS.md) section 6 and [DEVICE-SETUP.md](DEVICE-SETUP.md) sections
+2.4–2.6. The old settings `nat.public_ips`, `nat.wan_transip` and `lookup.port_hint` are gone: the
+upgrade converts them into the internet exits ([INSTALL.md](INSTALL.md) section 13).
+
+| Setting | Default | Bounds | Meaning |
+|---|---|---|---|
+| `nat.egresses` | `{}` | at most 8 exits; an exit name of lower-case letters, digits and hyphens (at most 32 characters, e.g. `hat-1`) | Internet exits (NAT): each line's public IP addresses and whether they may change, the FortiGate's NAT address on that line (transip), its interfaces (dstintf), the NAT type and port preservation; entered with the editor below. Empty: one double-NAT exit is assumed |
+| `nat.snat_trandisp` | `["snat"]` | 1–8 values, each starting with a lower-case letter (at most 16 characters) | the FortiGate `trandisp` values a candidate search takes for addresses no exit claims; only `snat` was seen in logs, verify on site (the panel flags other values) |
+| `lookup.srcmac_interfaces` | `[]` | an interface name of 1–35 characters | the FortiGate interfaces (`srcintf`) whose srcmac is used: for a session without a lease, the MAC address, the device and the person are shown from this field with low confidence, as partial evidence; no lease is ever created. Only interfaces checked on site with two clients ([DEVICE-SETUP.md](DEVICE-SETUP.md) section 2.5). Empty: srcmac is not used |
+| `lookup.srcmac_max_ips` | 1 | 1–16 | a srcmac seen with more distinct IPv4 addresses within ±1 hour of the requested moment counts as a router's or switch's address and is not used (IPv6 addresses are not counted) |
+| `dhcp.fortigate_logids` | `{"0100026001": "assigned", "0100026002": "deassigned"}` | at most 16 entries; a logid of 10 digits, meaning `assigned` or `deassigned` | the FortiGate DHCP events that become lease evidence; the defaults come from the FortiOS log reference (the Release logid derived from its numbering rule), verify them on site. Empty: FortiGate DHCP records are not used |
+| `dhcp.fortigate_dhcp_msgs` | `{"0100026001": ["Ack"]}` | 1–8 values per logid, each of 1–32 characters | per logid, the `dhcp_msg` values that count as lease evidence (case-insensitive); a record with another value is not used and raises an alert; a logid without an entry is not restricted |
+| `dhcp.fortigate_use_logged_lease` | on | — | the lease time in the DHCP Ack record is the lease's time; values below 300 seconds, above 100 days or 0 (unlimited) use `lease.server_seconds` / `lease.default_seconds` (with the `lease.timeout_percent` margin) |
+| `dhcp.fortigate_traffic_extends` | off | — | when on, traffic extends a FortiGate lease; switch it on only when it is verified on site that renewals are not logged and the organisation accepts the wrong-person risk (while on, the help text shows as a warning) |
+| `dhcp.fortigate_interfaces_excluded` | `[]` | an interface name of 1–35 characters | FortiGate interfaces whose DHCP records are no lease evidence: the interfaces of DHCP-over-IPsec servers (`server-type ipsec`) |
+| `dhcp.fortigate_format_verified` | off | — | switched on once the record format has been verified on site as [DEVICE-SETUP.md](DEVICE-SETUP.md) section 2.4 says; reports name who marked it and when; after every FortiOS upgrade switched off and the check repeated |
+
+In the `lease.server_seconds` editor the server's name is the DHCP server's name on a MikroTik
+(e.g. `dhcp61`) and the DHCP interface's name on a FortiGate.
+
+**Rebuild the leases after a settings change.** After changing any `dhcp.fortigate_*` setting
+(except `dhcp.fortigate_format_verified`, which only changes the lookup and report texts) or a
+FortiGate source (**Sources**), rebuild the leases from the first affected day to today with
+**Rebuild the leases** in the same group (at most 31 days per request; several requests for a longer
+range): the change applies to past days only after the rebuild. After a **change that adds
+evidence** (a logid or `dhcp_msg` value mapped, a FortiGate source added), a 5651 lookup for moments
+of those days may answer without a chain until then (the safe side). After a **change that removes
+or narrows evidence** (an interface added to `dhcp.fortigate_interfaces_excluded`,
+`dhcp.fortigate_traffic_extends` or `dhcp.fortigate_use_logged_lease` switched off, a logid or
+`dhcp_msg` value removed, a FortiGate source removed or retyped), the leases built under the old
+settings stay, at their old confidence, until the rebuild, so a moment can still name the earlier
+device. **Rebuild at once**, from the first affected day. For a network added or changed later:
+[FIRST-STEPS.md](FIRST-STEPS.md) section 5.
+
+**The Internet exits (NAT) editor** (`nat.egresses`). Each exit is a row: name, label, type,
+public addresses, NAT addresses, interfaces (dstintf) and port preservation. The types are
+"Direct (public IP on the FortiGate)", "ISP NAT (double NAT)", "Does not pass the FortiGate" and
+"Not an internet exit (NAT towards a DMZ, VLAN, VPN or branch)"; public addresses are not entered
+for the last, NAT addresses only for ISP NAT and the last, and port preservation ("Unknown",
+"Kept (verified on site)", "Not kept") and the check box "Public IP may change (dynamic)" only for
+ISP NAT. A public address cannot be a private (RFC 1918) or shared (RFC 6598, e.g. 100.64.x.x)
+address: the FortiGate's address behind the ISP router is the NAT address of an ISP NAT exit. The
+editor shows the server's rules next to the field before saving and warns about: an ISP NAT exit
+without a public address or marked as changing (it is also searched for public IPs no exit
+claims), a line without interfaces when there are two or more lines (without them a lookup cannot
+tell by which line a session left), an ISP NAT exit whose NAT address is a public address (if the
+FortiGate holds it itself, the line is direct), and exits converted at the upgrade without
+interfaces ([INSTALL.md](INSTALL.md) section 13). The server has the last word: when it refuses a
+value, its code and text show above the editor. The change is written to the audit log as
+`settings.change` and applies to the next lookups at once. The console equivalent:
+[FIRST-STEPS.md](FIRST-STEPS.md) section 6.
+
+**The "Kayıtlarda görülen NAT adresleri (son 24 saat)" (NAT addresses seen in the logs, last 24
+hours) panel** is under the editor, so that the values are read from the records instead of
+guessed (counts and the FortiGate's own addresses only; not audited; the counts are kept 5
+minutes, which exit claims an address is computed from the current settings every time):
+
+- **NAT addresses:** the FortiGate's source-NAT address (`transip`), the outgoing interface
+  (`dstintf`), the NAT type (`trandisp`), the number of sessions, first and last seen, and the
+  exit that claims the address. For an address no exit claims, **Add as exit** prefills a row: a
+  public address becomes a Direct exit, a private or shared address an ISP NAT exit with an empty
+  public address (you enter the ISP's public address); beside it, **Add as not an internet exit**
+  is for the address of the FortiGate's NAT towards a DMZ, another VLAN, a VPN or a branch (no
+  session is searched on such addresses). An unknown `trandisp` value is flagged. When the stored
+  exit definition cannot be read, the panel says so and the exit column stays empty (`R20-nat`).
+- **Interfaces with srcmac (last hour):** per interface (`srcintf`) the number of records with a
+  srcmac ("Records"), the number of distinct MACs ("Distinct MACs") and the most IP addresses seen
+  with one MAC ("Most IPs per MAC", `max_ips_per_mac`); all three count only records with an IPv4
+  source address (a dual-stack client's IPv6 addresses are not counted), and whether the interface
+  is in `lookup.srcmac_interfaces` ("srcmac in use"). **Use for srcmac** is disabled on interfaces
+  whose `max_ips_per_mac` is above `lookup.srcmac_max_ips`. Do the two-client check before you add
+  an interface ([DEVICE-SETUP.md](DEVICE-SETUP.md) section 2.5).
+
+The three `alerts.filter_*` settings of the **Alerts and e-mail** group say when content filter
+records are expected; they are the thresholds of card 7 of the Uyum Durumu page and of the
+`R20-filter` alert ("No content filter records", severity high). While an enabled FortiGate source
+exists, if neither a web nor a DNS filter record has arrived for the last
+`alerts.filter_quiet_hours` hours and every day the window touches is an expected day, card 7 shows
+**Problem** and the alert opens; if the window touches a day that is not expected, card 7 shows
+**Attention** without an alert. Either kind of record is enough: when only one of them falls silent
+for that time, card 7 shows **Attention** too. The alert closes by itself when a new record arrives.
+A day is expected when its ISO weekday is in `alerts.filter_days` and (while
+`alerts.filter_skip_holidays` is on) it is not in the holiday list of the **Usage analytics** group
+(`usage.holidays`). The defaults are the owner's decision (2026-10-28): every day of the week except
+the listed holidays, 24 hours. `usage.holidays` ships only the fixed-date national holidays; the
+administrator enters the dates of the religious holidays every year. Details:
+[COMPLIANCE-STATUS.md](COMPLIANCE-STATUS.md) section 2.7, [ALERTS.md](ALERTS.md) section 2.
+
+| Setting | Default | Bounds | Meaning |
+|---|---|---|---|
+| `alerts.filter_days` | `[1,2,3,4,5,6,7]` (every day) | each 1–7 (1 = Monday, 7 = Sunday), stored sorted without duplicates; may be empty (no day expected) | the ISO weekdays on which content filter records are expected; one day number per line on the page |
+| `alerts.filter_skip_holidays` | on | — | on: no record is expected on the days of `usage.holidays`; off: public holidays count as expected days |
+| `alerts.filter_quiet_hours` | 24 | 6–168 | the longest time without a record on expected days (hours) |
+
+The **Database** group says how long the parsed records stay in the database. The raw records in
+the sealed vault are not affected. The worker job `db.window` drops the days older than the
+window every night after 01:00; a day not sealed yet and the days of an active archive reload are
+never dropped. When an older day is needed, the 5651 lookup and Search ask for it with "arşivden
+yeniden yükle" (reload from the archive). Both settings are retention periods of personal data:
+a change needs the password again and is audited as `settings.change`. Details:
+[DATA-MODEL.md](DATA-MODEL.md) "Retention",
+[legal/saklama-imha-politikasi-taslak.md](legal/saklama-imha-politikasi-taslak.md).
+
+| Setting | Default | Bounds | Meaning |
+|---|---|---|---|
+| `db.retention_days` | 30 (400 in earlier versions; the upgrade changes a 400 to 30 and a value below 7 to 7, and keeps any other value) | at least 7 | the days of logs the database keeps; older days are dropped every night and reloaded from the sealed vault on request |
+| `db.reload_keep_days` | 7 | 1–30 | how many days the days reloaded from the archive stay in the database after their reload finished; then they are dropped again. These days contain personal data |
 
 ## 2. How it works
 
@@ -320,7 +488,7 @@ carries `code`, `message_tr` and `message_en`.
 |---|---|
 | Status chip, every page | `GET /admin/status`, `GET /admin/config` (values, `etag`s, locked fields) |
 | General | `POST /admin/config/general/check`, `PUT /admin/config/general` |
-| Application settings | `GET /settings`, `PATCH /settings`, `POST /settings/{key}/reset`; `POST /admin/actions/lease-rebuild` |
+| Application settings | `GET /settings`, `PATCH /settings`, `POST /settings/{key}/reset`; `GET /settings/fortigate/observed` (NAT addresses seen in the logs); `POST /admin/actions/lease-rebuild` |
 | Kamu SM | `POST /admin/config/tsa/check`, `PUT /admin/config/tsa`; `POST /admin/uploads?kind=…` then `POST /admin/config/tsa/zamane`, `POST /admin/config/tsa/roots`, `POST /admin/config/tsa/legal-roots`; `POST /admin/actions/tsa-test` |
 | Sources | `POST /admin/config/sources/check`, `POST /admin/config/sources`, `PUT /admin/config/sources/{name}`, `DELETE /admin/config/sources/{name}` |
 | E-mail | `POST /admin/config/smtp/check`, `PUT /admin/config/smtp`, `POST /admin/config/smtp/ca`, `DELETE /admin/config/smtp/ca`; `POST /admin/actions/test-email`; the alert e-mail settings `PATCH /settings` |
@@ -329,6 +497,7 @@ carries `code`, `message_tr` and `message_en`.
 | Backup | `POST /admin/config/backup/check`, `PUT /admin/config/backup` |
 | Change history | `GET /admin/requests`, `GET /admin/requests/{id}`, `DELETE /admin/requests/{id}` (Cancel), `POST /admin/requests/{id}/revert` (Revert), `GET /admin/config/versions`, `GET /admin/diagnostics` |
 | Sealing | `POST /seals/{day}/seal` (Seal now), `GET /credits`, `POST /credits/query` (Query credit) |
+| First-run wizard | reads only: `GET /admin/config`, `GET /admin/status`, `GET /admin/requests?kind=action.tsa_test` (the stamp tests), `GET /sources` (the log sources step) |
 
 The application settings and the worker's actions (the test e-mail, the lease rebuild) go
 through the database and do not wait for the administration service; everything else reaches

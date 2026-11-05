@@ -32,6 +32,19 @@ const SEARCH_LABELS: readonly [string, string, string][] = [
   ['raw.tail', 'Kaynağın son satırları görüntülendi', "A source's latest lines viewed"],
 ];
 
+/**
+ * The database window's actions (Wave 5 contract G3, G6): a step of the worker job drops database
+ * rows older than the window, never a sealed original in the vault.
+ */
+const DB_WINDOW_LABELS: readonly [string, string, string][] = [
+  ['archive.reload', 'Arşivden yeniden yükleme istendi', 'Archive reload requested'],
+  [
+    'db.window',
+    'Veritabanı penceresi: eski günler veritabanından kaldırıldı',
+    'Database window: older days dropped from the database',
+  ],
+];
+
 describe('audit action labels', () => {
   it.each(SEARCH_LABELS)('%s', (action, turkish, english) => {
     expect(KNOWN_ACTIONS).toContain(action);
@@ -47,6 +60,16 @@ describe('audit action labels', () => {
     expect(KNOWN_ACTIONS).toContain(action);
     expect(i18n.getFixedT('tr')(actionKey(action))).toBe(turkish);
     expect(i18n.getFixedT('en')(actionKey(action))).toBe(english);
+  });
+
+  it.each(DB_WINDOW_LABELS)('%s', (action, turkish, english) => {
+    expect(KNOWN_ACTIONS).toContain(action);
+    expect(i18n.getFixedT('tr')(actionKey(action))).toBe(turkish);
+    expect(i18n.getFixedT('en')(actionKey(action))).toBe(english);
+  });
+
+  it('offers the archive reload and database window prefixes', () => {
+    expect(ACTION_PREFIXES).toEqual(expect.arrayContaining(['archive.', 'db.']));
   });
 
   it('labels every known action in both languages and offers the licence prefix', () => {

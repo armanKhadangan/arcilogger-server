@@ -24,7 +24,7 @@ import { currentLang } from '@/lib/i18n';
 import { isReauthCancelled, useReauth } from '@/lib/reauth';
 import type { AdminPolicyOut, TsaSection, UploadPreview } from '@/lib/settings-types';
 
-import { normalizeSha256 } from './kamusm-model';
+import { normalizeSha256, providerText } from './kamusm-model';
 
 /** A request one of these steps started, followed until it ends. */
 function Started({ requestId }: { requestId: string | null }) {
@@ -229,7 +229,8 @@ export function ZamaneStep({
 /**
  * Step 3 "Kök sertifikalar": the installed roots (subject, validity, SHA-256, legal root) and
  * the upload of another. A root becomes a legal root only after the administrator confirms that
- * its fingerprint was compared with the value Kamu SM publishes; removing a root or a legal
+ * its fingerprint was compared with the value the provider publishes (Kamu SM, or TÜRKTRUST while
+ * it is in use: "TÜRKTRUST kök sertifikası", Wave 5 contract 2.4); removing a root or a legal
  * fingerprint is done on the server console.
  */
 export function RootsStep({
@@ -302,7 +303,7 @@ export function RootsStep({
       ) : (
         <div className="overflow-x-auto rounded-lg border border-border">
           <table className="w-full text-13">
-            <caption className="sr-only">{t('settings.kamusm.roots.caption')}</caption>
+            <caption className="sr-only">{t(providerText(tsa.provider, 'roots.caption'))}</caption>
             <thead className="bg-subtle text-left text-xs text-muted-strong">
               <tr>
                 <th scope="col" className="px-3 py-2 font-medium">
@@ -365,7 +366,7 @@ export function RootsStep({
       ) : null}
       <UploadField
         kind="kamusm_root"
-        label={t('settings.kamusm.roots.upload')}
+        label={t(providerText(tsa.provider, 'roots.upload'))}
         hint={t('settings.kamusm.roots.uploadHint')}
         accept=".pem,.crt,.cer,.der"
         disabled={!writable}
@@ -424,7 +425,7 @@ export function RootsStep({
                     }}
                   />
                   <Label htmlFor={`${id}-confirmed`} className="font-normal">
-                    {t('settings.kamusm.roots.compared')}
+                    {t(providerText(tsa.provider, 'roots.compared'))}
                   </Label>
                 </div>
               ) : null}
@@ -450,7 +451,7 @@ export function RootsStep({
         }}
         check={null}
         title={t('settings.kamusm.roots.markTitle')}
-        description={t('settings.kamusm.roots.markBody')}
+        description={t(providerText(tsa.provider, 'roots.markBody'))}
         confirmLabel={t('settings.kamusm.roots.mark')}
         busy={addLegal.isPending}
         confirmDisabled={!markConfirmed}
@@ -468,7 +469,7 @@ export function RootsStep({
             }}
           />
           <Label htmlFor={`${id}-mark-confirmed`} className="font-normal">
-            {t('settings.kamusm.roots.compared')}
+            {t(providerText(tsa.provider, 'roots.compared'))}
           </Label>
         </div>
       </ChangeReviewDialog>

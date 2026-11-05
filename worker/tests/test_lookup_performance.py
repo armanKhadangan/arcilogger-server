@@ -35,35 +35,44 @@ Timings and plans are printed (run with ``-s`` to see them).
 **Wave 3 guards** (contract 3.8; marked ``perf``, so ``poe test-perf`` runs them, alone): the
 lookup's srcmac guard and sightings, the D8 probe, the post-lease checks, the clock measurement
 and the DHCP-origin query, each under its own bound, on two sites written once for the module
-(see the comment above :data:`GUARD_AT`).
+(see the comment above :data:`GUARD_AT`). The two guards of the converted-row check hold the
+best of :data:`ROUNDS` timed rounds to their bound and print every round's seconds and the best
+one's split past the capture, with their site's checkpoint (the ``guard split, …`` lines of the
+log, #179).
 
 **The exit guards** (contract 3.8, WP-C3): the two-exit ``= ANY`` candidate search, the unclaimed
-search with a ``<<= ANY`` exclusion, a direct exit with a /29 public network, the overlap probe
-of an unclaimed address and the D15 "seen, but not alone" check, on the traffic site; on
-TimescaleDB, the event site's FortiGate DHCP checks once more on compressed chunks (their seconds
-in the ``C3-compressed:`` line of the log).
+search with a ``<<= ANY`` exclusion, a direct exit with a /29 public network and the overlap probe
+of an unclaimed address, on the traffic site; on TimescaleDB, the event site's FortiGate DHCP
+checks once more on compressed chunks (their seconds in the ``C3-compressed:`` line of the log).
+The D15 "seen, but not alone" check of an exit's address (``_Lookup._carried``, #67) has a guard
+of the same kind on the traffic site.
 """
 
 from __future__ import annotations
 
 import functools
+import gc
+import itertools
+import math
 import os
 import re
+import sys
 import time
-from collections.abc import Iterator, Sequence
+from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
+from datetime import time as time_of_day
 from ipaddress import IPv4Network
 from typing import Any
 
 import pytest
-from sqlalchemy import Engine, event, text
+from sqlalchemy import Engine, event, text, update
 from sqlalchemy.orm import Session
 
 from arcilogger_core.timeutil import day_window
 from arcilogger_db.egress import legacy_egresses
 from arcilogger_db.engine import engine_from_url
-from arcilogger_db.models import Source
+from arcilogger_db.models import Lease, Source
 from arcilogger_db.partitions import ensure_partitions
 from arcilogger_db.settings import get_settings, set_setting
 from arcilogger_db.testing import TestServer, pause_compression_jobs
@@ -77,6 +86,8 @@ from arcilogger_worker.lookup import (
 )
 from arcilogger_worker.lookup import engine as lookup_engine
 from arcilogger_worker.lookup.attribution import Attributor
+from arcilogger_worker.lookup.days import reads_from
+from arcilogger_worker.lookup.refs import MOVE_TIMES_CAP, MoveGroup, epoch_us, moves_json
 from arcilogger_worker.lookup.sessions import Window, explain_rows
 from arcilogger_worker.lookup.trust import untrusted_sources
 from arcilogger_worker.testing import tr
@@ -351,15 +362,79 @@ def test_lookup_is_fast_on_continuous_data(db_engine: Engine, db_session: Sessio
         print("\n".join(plan))
 
     _check_answers_and_budget(timings, lookups)
-    # Every plan reads through an index with the bounded time range (no sequential scan).
+    # Every plan reads through an index with the bounded time range (no sequential scan of a
+    # partition that holds data: the daily partitions beside the loaded days, Wave 5 G2, hold
+    # none or a few rows in a page or two, which the planner rightly reads whole), and reads a
+    # partition with data that way, so the first check cannot pass on empty partitions alone.
     for name, plan in plans.items():
         joined = "\n".join(plan)
-        assert "Seq Scan" not in joined, name
+        assert _seq_scans_of_data(db_session, plan) == [], name
+        assert _partitions_read_by_index(db_session, plan), name
         assert "Index" in joined, name
         assert '"time" >=' in joined, name
         assert '"time" <=' in joined, name
     assert "transip_transport_time" in "\n".join(plans["exact"])
     assert "dstip_dstport_time" in "\n".join(plans["candidates_destination"])
+
+
+_SEQ_SCAN = re.compile(r"Seq Scan on (?P<table>[a-z_0-9]+)")
+#: A read through an index: an index scan, or the heap scan of a bitmap index scan.
+_INDEX_READ = re.compile(
+    r"(?:Index (?:Only )?Scan(?: Backward)? using \S+|Bitmap Heap Scan) on (?P<table>[a-z_0-9]+)"
+)
+#: A partition this small (8 kB pages, ``pg_class.relpages``) is read whole by any plan: no data
+#: to speak of.
+SMALL_PAGES = 10
+
+
+def _pages(session: Session, table: str) -> int:
+    """``table``'s pages as the planner knows them (``pg_class.relpages``), which must be current:
+    the fixtures write their rows, then run ``VACUUM (ANALYZE)``, so the pages it recorded are the
+    relation's pages now. A relation written since, or holding rows never analyzed (its
+    ``relpages`` 0), fails here instead of passing for an empty one."""
+    relpages, now = session.execute(
+        text(
+            "SELECT relpages, pg_relation_size(oid) / current_setting('block_size')::integer "
+            "FROM pg_class WHERE relname = :table"
+        ),
+        {"table": table},
+    ).one()
+    assert relpages == now, (table, relpages, now)
+    return int(relpages)
+
+
+def _seq_scans_of_data(
+    session: Session, plan: Sequence[str], *, pages: int = SMALL_PAGES
+) -> list[str]:
+    """The plan's sequential scans of tables larger than ``pages`` (:func:`_pages`;
+    :data:`SMALL_PAGES`; 0: of any table that is not empty)."""
+    found = []
+    for line in plan:
+        match = _SEQ_SCAN.search(line)
+        if match is not None and _pages(session, match.group("table")) > pages:
+            found.append(line.strip())
+    return found
+
+
+def _partitions_read_by_index(session: Session, plan: Sequence[str]) -> list[str]:
+    """The partitions or chunks (children of a partitioned table or a hypertable) larger than
+    :data:`SMALL_PAGES` (:func:`_pages`) that the plan reads through an index."""
+    found = []
+    for line in plan:
+        match = _INDEX_READ.search(line)
+        if match is None:
+            continue
+        table = match.group("table")
+        child = session.scalar(
+            text(
+                "SELECT EXISTS (SELECT 1 FROM pg_inherits AS i JOIN pg_class AS c "
+                "ON c.oid = i.inhrelid WHERE c.relname = :table)"
+            ),
+            {"table": table},
+        )
+        if child and _pages(session, table) > SMALL_PAGES:
+            found.append(table)
+    return found
 
 
 def test_lookup_is_fast_on_compressed_chunks(db_engine: Engine, db_session: Session) -> None:
@@ -453,7 +528,9 @@ def test_lookup_is_fast_on_compressed_chunks(db_engine: Engine, db_session: Sess
 # the 2.8.3 fallback, the last 604,800 s (``attribution.UNCONVERTED_WINDOW``; deviation c2), except
 # for an ``fg_dhcp`` chain, whose post-lease window starts at its last ACK uncapped (half a lease:
 # the 30-day guard). The converted-row query reads ``fg_dhcp`` on its MAC and address indexes and
-# keeps the 100 days of 2.7.
+# keeps the 100 days of 2.7. Since W5-G no window starts before the first of the lookup's days
+# (12 days before the moment's day with the defaults, ``lookup.days.reads_from``): the 30-day
+# guard and the converted-row query read from that day.
 
 #: Moments of the guards: the traffic site's and the event site's lookups.
 GUARD_AT = tr(DAY, 14)
@@ -481,6 +558,12 @@ PUBLIC = "198.51.100.20"
 #: exit is configured), used from 4 hours after the guards' moment on by 10,000 sessions a day,
 #: about 1 % of the site's rows (the overlap probe's moderately busy address).
 LATER_LINE = "198.51.100.30"
+#: Another shared NAT address, on ``wan3``, a session every 10 s over the whole traffic site, with
+#: a ``trandisp`` value only the ``_carried`` guard lists in ``nat.snat_trandisp``: the D15
+#: evidence beside :data:`WAN` that makes its check pass "seen, but not alone". Outside every
+#: network another guard claims (:data:`EXCLUDED`).
+BESIDE = "100.64.14.9"
+BESIDE_TRANDISP = "perfnat"
 #: The site's FortiGate and a second one (an HA pair's other member; the clock guard measures
 #: two sources), and the core router.
 GUARD_SOURCES = (
@@ -519,6 +602,20 @@ TRAFFIC_SITE = (
     "FROM generate_series(1, 10000 * 21 / 24) AS g, "
     "LATERAL (SELECT CAST(:at AS timestamptz) + interval '4 hours' "
     "+ g * interval '8.64 seconds' AS t) AS x",
+    # The D15 evidence beside the site's NAT address for the ``_carried`` guard: a session every
+    # 10 s through BESIDE, another shared NAT address, on wan3, over the whole site, with a
+    # trandisp only that guard lists: no other guard's search or D15 check takes these rows (a
+    # lookup that searches the unclaimed addresses names them in its nat_unknown_trandisp note).
+    "INSERT INTO fg_traffic (time, time_received, source, sender, raw_day, raw_line, raw_offset, "
+    "logid, subtype, action, sessionid, proto, srcip, srcport, srcintf, srcmac, dstip, dstport, "
+    "dstintf, transip, transport, trandisp, duration, is_interim) "
+    "SELECT t, t, 'fortigate', '172.31.255.1', :day, 3000000 + g, (3000000 + g)::bigint * 900, "
+    "'0000000013', 'forward', 'accept', 4000000 + g, 6, '172.20.99.10', 1024 + (g % 60000), "
+    "'vlan99', '00:00:5e:00:53:fe', '203.0.113.9', 443, 'wan3', CAST(:beside AS inet), "
+    "1024 + (g % 60000), :beside_trandisp, g % 97, false "
+    "FROM generate_series(0, 28 * 360) AS g, "
+    "LATERAL (SELECT CAST(:at AS timestamptz) - interval '2 hours' "
+    "+ g * interval '10 seconds' AS t) AS x",
     # FortiGate DHCP ACKs of 400 days (none of the first three clients): a 1-day lease logged
     # until 30 days ago, a 7-day lease since.
     "INSERT INTO fg_dhcp (time, time_received, source, sender, extra, raw_day, raw_line, "
@@ -561,6 +658,15 @@ TRAFFIC_SITE = (
     "generate_series(1, :rows_4h) AS g, "
     "LATERAL (SELECT CAST(:at AS timestamptz) - interval '2 hours' "
     "+ g * CAST(:step AS interval) AS t) AS x",
+    # The clock samples of both FortiGates' messages, as ingest writes them: one key a received
+    # minute (a second behind: offset 0) for 30 days around T, and in every tenth minute a few
+    # lines 10 minutes late (a minority of their minute, which no clock sample takes as shifted).
+    "INSERT INTO source_clock_samples (source, minute, seconds, n) "
+    "SELECT s.name, CAST(:at AS timestamptz) - interval '15 days' + g * interval '1 minute', "
+    "o.seconds, o.n FROM (VALUES ('fortigate'), ('fortigate-2')) AS s(name), "
+    "generate_series(0, 30 * 1440 - 1) AS g, "
+    "LATERAL (VALUES (0, 694), (-600, CASE WHEN g % 10 = 0 THEN 5 END)) AS o(seconds, n) "
+    "WHERE o.n IS NOT NULL",
     # The search counts of 400 days (the clock check picks the sources of an empty search
     # from them).
     "INSERT INTO search_counts (hour, source, raw_day, kind, tbl, action, net, n) "
@@ -572,6 +678,66 @@ TRAFFIC_SITE = (
     "('fortigate', 'event', 'fg_dhcp', NULL, 16), "
     "('fortigate-2', 'traffic', 'fg_traffic', 'accept', 1000)) AS s(name, kind, tbl, action, n), "
     "generate_series(41, 43) AS v",
+)
+
+#: FortiGate DHCP of 400 days on the staff Wi-Fi (VLAN 60, another configured network than
+#: the chains' own), the chains' MACs among them.
+_STAFF_WIFI_DHCP = (
+    "INSERT INTO fg_dhcp (time, time_received, source, sender, extra, raw_day, raw_line, "
+    "raw_offset, logid, subtype, dhcp_msg, interface, ip, mac, lease, device_time) "
+    "SELECT t, t, 'fortigate', '172.31.255.1', '{\"vd\": \"root\"}'::jsonb, :day, g, g * 300, "
+    "'0100026001', 'system', 'Ack', 'vlan60', ('172.20.60.' || (10 + g % 200))::inet, "
+    "('00:00:5e:00:53:' || lpad(to_hex(g % 256), 2, '0'))::macaddr, 86400, true "
+    "FROM generate_series(1, 400 * 86400 / :dhcp_step) AS g, "
+    "LATERAL (SELECT CAST(:at AS timestamptz) - g * make_interval(secs => :dhcp_step) AS t) AS x"
+)
+
+#: The 100 mt_dhcp chains (VLANs 41 and 43, MACs :00-:63): assigned 150 days ago.
+_MT_DHCP_CHAINS = (
+    "INSERT INTO mt_dhcp (time, time_received, source, sender, raw_day, raw_line, raw_offset, "
+    "server, vlan, action, ip, mac) "
+    "SELECT CAST(:at AS timestamptz) - interval '150 days', "
+    "CAST(:at AS timestamptz) - interval '150 days', 'core-r1', '172.20.10.1', :day, j, 0, "
+    "'dhcp' || v, v, 'assigned', ('172.20.' || v || '.' || (100 + j % 50))::inet, "
+    "('00:00:5e:00:53:' || lpad(to_hex(j), 2, '0'))::macaddr "
+    "FROM generate_series(0, 99) AS j, LATERAL (SELECT CASE WHEN j < 50 THEN 41 ELSE 43 END "
+    "AS v) AS x"
+)
+
+#: Their leases, open: traffic kept them alive (last evidence an hour ago).
+_MT_DHCP_LEASES = (
+    "INSERT INTO leases (ip, mac, vlan, server, start, end_reason, confidence, source_table, "
+    "last_evidence, evidence) "
+    "SELECT ip, mac, v, 'dhcp' || v, s, 'open', 'high', 'mt_dhcp', "
+    "CAST(:at AS timestamptz) - interval '1 hour', "
+    "jsonb_build_array(jsonb_build_object('table', 'mt_dhcp', 'row_id', j + 1, 'time', s, "
+    "'raw', jsonb_build_object('source', 'core-r1', 'day', :day, 'line', j, 'offset', 0), "
+    "'summary', 'dhcp' || v || ' assigned ' || host(ip) || ' for ' || mac)) "
+    "FROM generate_series(0, 99) AS j, LATERAL (SELECT CASE WHEN j < 50 THEN 41 ELSE 43 END "
+    "AS v, CAST(:at AS timestamptz) - interval '150 days' AS s) AS x, "
+    "LATERAL (SELECT ('172.20.' || v || '.' || (100 + j % 50))::inet AS ip, "
+    "('00:00:5e:00:53:' || lpad(to_hex(j), 2, '0'))::macaddr AS mac) AS k"
+)
+
+#: The sessions: 20 addresses without any DHCP row (172.20.42.200-219), the 20 fg_dhcp
+#: chains, the 100 mt_dhcp chains and the 20 long-lease chains, each group at its moment.
+_GUARD_SESSIONS = (
+    "INSERT INTO fg_traffic (time, time_received, source, sender, raw_day, raw_line, raw_offset, "
+    "logid, subtype, action, sessionid, proto, srcip, srcport, srcintf, dstip, dstport, dstintf, "
+    "transip, transport, trandisp, duration, is_interim) "
+    "SELECT t, t, 'fortigate', '172.31.255.1', :day, n, n::bigint * 900, '0000000013', "
+    "'forward', 'accept', 2000000 + n, 6, ip, 40000 + n, "
+    "'vlan' || split_part(host(ip), '.', 3), ('198.51.100.' || (n % 200 + 1))::inet, 443, "
+    "'wan1', CAST(:wan AS inet), 50000 + n, 'snat', 5, false "
+    "FROM (SELECT n, CAST(:at AS timestamptz) + (n % 20) * interval '1 second' AS t, "
+    "('172.20.42.' || (200 + n))::inet AS ip FROM generate_series(0, 19) AS n "
+    "UNION ALL SELECT 100 + i, CAST(:fg_at AS timestamptz) + i * interval '1 second', "
+    "('172.20.42.' || (100 + i))::inet FROM generate_series(0, 19) AS i "
+    "UNION ALL SELECT 200 + j, CAST(:mt_at AS timestamptz) + (j % 30) * interval '1 second', "
+    "('172.20.' || CASE WHEN j < 50 THEN 41 ELSE 43 END || '.' || (100 + j % 50))::inet "
+    "FROM generate_series(0, 99) AS j "
+    "UNION ALL SELECT 300 + i, CAST(:long_at AS timestamptz) + i * interval '1 second', "
+    "('172.20.42.' || (140 + i))::inet FROM generate_series(0, 19) AS i) AS s"
 )
 
 EVENT_SITE = (
@@ -594,15 +760,7 @@ EVENT_SITE = (
     "FROM generate_series(1, 299 * 288) AS g, "
     "LATERAL (SELECT CAST(:at AS timestamptz) - interval '101 days' "
     "- g * interval '5 minutes' AS t) AS x",
-    # FortiGate DHCP of 400 days on the staff Wi-Fi (VLAN 60, another configured network than
-    # the chains' own), the chains' MACs among them.
-    "INSERT INTO fg_dhcp (time, time_received, source, sender, extra, raw_day, raw_line, "
-    "raw_offset, logid, subtype, dhcp_msg, interface, ip, mac, lease, device_time) "
-    "SELECT t, t, 'fortigate', '172.31.255.1', '{\"vd\": \"root\"}'::jsonb, :day, g, g * 300, "
-    "'0100026001', 'system', 'Ack', 'vlan60', ('172.20.60.' || (10 + g % 200))::inet, "
-    "('00:00:5e:00:53:' || lpad(to_hex(g % 256), 2, '0'))::macaddr, 86400, true "
-    "FROM generate_series(1, 400 * 86400 / :dhcp_step) AS g, "
-    "LATERAL (SELECT CAST(:at AS timestamptz) - g * make_interval(secs => :dhcp_step) AS t) AS x",
+    _STAFF_WIFI_DHCP,
     # The 20 fg_dhcp chains (VLAN 42, MACs :64-:77): an ACK every half lease of 7 days, the last
     # one half a lease (less a minute) before their moment.
     "INSERT INTO fg_dhcp (time, time_received, source, sender, extra, raw_day, raw_line, "
@@ -624,27 +782,8 @@ EVENT_SITE = (
     "FROM generate_series(0, 19) AS i, generate_series(0, 2) AS k, "
     "LATERAL (SELECT CAST(:long_at AS timestamptz) - make_interval(secs => :long_lease / 2 - 60) "
     "- k * make_interval(secs => :long_lease / 2) AS t) AS x",
-    # The 100 mt_dhcp chains (VLANs 41 and 43, MACs :00-:63): assigned 150 days ago.
-    "INSERT INTO mt_dhcp (time, time_received, source, sender, raw_day, raw_line, raw_offset, "
-    "server, vlan, action, ip, mac) "
-    "SELECT CAST(:at AS timestamptz) - interval '150 days', "
-    "CAST(:at AS timestamptz) - interval '150 days', 'core-r1', '172.20.10.1', :day, j, 0, "
-    "'dhcp' || v, v, 'assigned', ('172.20.' || v || '.' || (100 + j % 50))::inet, "
-    "('00:00:5e:00:53:' || lpad(to_hex(j), 2, '0'))::macaddr "
-    "FROM generate_series(0, 99) AS j, LATERAL (SELECT CASE WHEN j < 50 THEN 41 ELSE 43 END "
-    "AS v) AS x",
-    # Their leases, open: traffic kept them alive (last evidence an hour ago).
-    "INSERT INTO leases (ip, mac, vlan, server, start, end_reason, confidence, source_table, "
-    "last_evidence, evidence) "
-    "SELECT ip, mac, v, 'dhcp' || v, s, 'open', 'high', 'mt_dhcp', "
-    "CAST(:at AS timestamptz) - interval '1 hour', "
-    "jsonb_build_array(jsonb_build_object('table', 'mt_dhcp', 'row_id', j + 1, 'time', s, "
-    "'raw', jsonb_build_object('source', 'core-r1', 'day', :day, 'line', j, 'offset', 0), "
-    "'summary', 'dhcp' || v || ' assigned ' || host(ip) || ' for ' || mac)) "
-    "FROM generate_series(0, 99) AS j, LATERAL (SELECT CASE WHEN j < 50 THEN 41 ELSE 43 END "
-    "AS v, CAST(:at AS timestamptz) - interval '150 days' AS s) AS x, "
-    "LATERAL (SELECT ('172.20.' || v || '.' || (100 + j % 50))::inet AS ip, "
-    "('00:00:5e:00:53:' || lpad(to_hex(j), 2, '0'))::macaddr AS mac) AS k",
+    _MT_DHCP_CHAINS,
+    _MT_DHCP_LEASES,
     # The fg_dhcp chains' leases, open since their first ACK of the 30 days.
     "INSERT INTO leases (ip, mac, vlan, server, start, end_reason, confidence, source_table, "
     "last_evidence, lease_seconds, evidence) "
@@ -658,7 +797,9 @@ EVENT_SITE = (
     "- interval '302340 seconds' - 8 * interval '302400 seconds' AS s) AS x, "
     "LATERAL (SELECT ('172.20.42.' || (100 + i))::inet AS ip, "
     "('00:00:5e:00:53:' || to_hex(100 + i))::macaddr AS mac) AS k",
-    # The long-lease chains' leases, open since their first ACK.
+    # The long-lease chains' leases, open since their first ACK, with the refs the lease build
+    # keeps (the opening and the newest continuation): their last ACK lies before the lookup's
+    # days, so the stored record stands in for the row (W5-G deviations).
     "INSERT INTO leases (ip, mac, vlan, server, start, end_reason, confidence, source_table, "
     "last_evidence, lease_seconds, evidence) "
     "SELECT ip, mac, 42, 'vlan42', s, 'open', 'high', 'fg_dhcp', "
@@ -666,30 +807,53 @@ EVENT_SITE = (
     "jsonb_build_array(jsonb_build_object('table', 'fg_dhcp', 'row_id', 500 + i * 10 + 2, "
     "'time', s, 'raw', jsonb_build_object('source', 'fortigate', 'day', :day, "
     "'line', 500 + i * 10 + 2, 'offset', 0), 'summary', 'vlan42 assigned ' || host(ip) "
+    "|| ' for ' || mac || ' (FortiGate DHCP, logid 0100026001, lease ' || :long_lease || ')'), "
+    "jsonb_build_object('table', 'fg_dhcp', 'row_id', 500 + i * 10, "
+    "'time', CAST(:long_at AS timestamptz) - make_interval(secs => :long_lease / 2 - 60), "
+    "'raw', jsonb_build_object('source', 'fortigate', 'day', :day, "
+    "'line', 500 + i * 10, 'offset', 0), 'summary', 'vlan42 assigned ' || host(ip) "
     "|| ' for ' || mac || ' (FortiGate DHCP, logid 0100026001, lease ' || :long_lease || ')')) "
     "FROM generate_series(0, 19) AS i, LATERAL (SELECT CAST(:long_at AS timestamptz) "
     "- make_interval(secs => :long_lease / 2 - 60) "
     "- 2 * make_interval(secs => :long_lease / 2) AS s) AS x, "
     "LATERAL (SELECT ('172.20.42.' || (140 + i))::inet AS ip, "
     "('00:00:5e:00:53:' || to_hex(120 + i))::macaddr AS mac) AS k",
-    # The sessions: 20 addresses without any DHCP row (172.20.42.200-219), the 20 fg_dhcp
-    # chains, the 100 mt_dhcp chains and the 20 long-lease chains, each group at its moment.
+    _GUARD_SESSIONS,
+)
+
+
+#: The moves site (issue #127): the event site's FortiGate DHCP of the staff Wi-Fi, its 100
+#: ``mt_dhcp`` chains with their leases, and the sessions; no ``fg_event`` lines. Each lease
+#: holds the moves the lease job records for a MAC that also took an address in no configured
+#: network: :data:`RECORDED_TIMES` ACKs an hour apart from the lease's start on (``moves_site``),
+#: marked truncated (a MAC that moved more often).
+MOVES_SITE = (_STAFF_WIFI_DHCP, _MT_DHCP_CHAINS, _MT_DHCP_LEASES, _GUARD_SESSIONS)
+#: The recorded ACKs of each of the moves site's leases: the most the lease job keeps
+#: (``refs.MOVE_TIMES_CAP``), 1,000 hours, about 42 days, all more than the 100 days of the
+#: converted-row check before the moment.
+RECORDED_TIMES = MOVE_TIMES_CAP
+
+#: The second line of :data:`LINES_SITE`.
+SECOND_LINE = "100.64.13.9"
+#: Two load-balanced lines (#71): the site's NAT address and :data:`SECOND_LINE` take turns, a
+#: session each, at 1 M sessions a day for the two days before the guards' moment; the first line
+#: is down from then on and the second carries every session for a day. ``transip`` is then far
+#: from the table's order, unlike the traffic site's single line: a probe step on the first line
+#: after its last row, ordered by ``transip, time`` with ``transip = :address``, was planned on
+#: the primary key and read every row of the second line in its range.
+LINES_SITE = (
     "INSERT INTO fg_traffic (time, time_received, source, sender, raw_day, raw_line, raw_offset, "
     "logid, subtype, action, sessionid, proto, srcip, srcport, srcintf, dstip, dstport, dstintf, "
     "transip, transport, trandisp, duration, is_interim) "
-    "SELECT t, t, 'fortigate', '172.31.255.1', :day, n, n::bigint * 900, '0000000013', "
-    "'forward', 'accept', 2000000 + n, 6, ip, 40000 + n, "
-    "'vlan' || split_part(host(ip), '.', 3), ('198.51.100.' || (n % 200 + 1))::inet, 443, "
-    "'wan1', CAST(:wan AS inet), 50000 + n, 'snat', 5, false "
-    "FROM (SELECT n, CAST(:at AS timestamptz) + (n % 20) * interval '1 second' AS t, "
-    "('172.20.42.' || (200 + n))::inet AS ip FROM generate_series(0, 19) AS n "
-    "UNION ALL SELECT 100 + i, CAST(:fg_at AS timestamptz) + i * interval '1 second', "
-    "('172.20.42.' || (100 + i))::inet FROM generate_series(0, 19) AS i "
-    "UNION ALL SELECT 200 + j, CAST(:mt_at AS timestamptz) + (j % 30) * interval '1 second', "
-    "('172.20.' || CASE WHEN j < 50 THEN 41 ELSE 43 END || '.' || (100 + j % 50))::inet "
-    "FROM generate_series(0, 99) AS j "
-    "UNION ALL SELECT 300 + i, CAST(:long_at AS timestamptz) + i * interval '1 second', "
-    "('172.20.42.' || (140 + i))::inet FROM generate_series(0, 19) AS i) AS s",
+    "SELECT t, t, 'fortigate', '172.31.255.1', :day, g, g::bigint * 900, '0000000013', "
+    "'forward', 'accept', 1000000 + g, 6, ('172.20.41.' || (100 + g % 100))::inet, "
+    "1024 + (g % 60000), 'vlan41', ('198.51.100.' || (g % 200 + 1))::inet, 443, "
+    "CASE WHEN t < :at AND g % 2 = 0 THEN 'wan1' ELSE 'wan2' END, "
+    "CASE WHEN t < :at AND g % 2 = 0 THEN CAST(:wan AS inet) ELSE CAST(:second AS inet) END, "
+    "1024 + (g % 60000), 'snat', g % 97, false "
+    "FROM generate_series(1, 3000000) AS g, "
+    "LATERAL (SELECT CAST(:at AS timestamptz) - interval '2 days' "
+    "+ g * interval '86.4 milliseconds' AS t) AS x",
 )
 
 
@@ -715,6 +879,9 @@ def _site(server: TestServer, template: str, statements: Sequence[str]) -> Itera
                 "day": DAY,
                 "wan": WAN,
                 "line": LATER_LINE,
+                "second": SECOND_LINE,
+                "beside": BESIDE,
+                "beside_trandisp": BESIDE_TRANDISP,
                 "rows": 1_000_000 * 27 // 24,
                 "rows_4h": 1_000_000 // 6,
                 "step": "86.4 milliseconds",
@@ -734,6 +901,30 @@ def _site(server: TestServer, template: str, statements: Sequence[str]) -> Itera
             site.dispose()
 
 
+def _checkpoint(site: Engine) -> str:
+    """Write a site's rows back to disk before its guards (#179, as api's ``test_search_perf``
+    does for #90): the writes and ``VACUUM (ANALYZE)`` leave dirty pages, and their write-back
+    must not run into a guard's timed rounds. ``CHECKPOINT`` needs a superuser or
+    ``pg_checkpoint`` (both CI jobs connect as one); without, it is skipped and said so."""
+    with site.connect().execution_options(isolation_level="AUTOCOMMIT") as connection:
+        allowed = connection.scalar(
+            text(
+                "SELECT rolsuper OR pg_has_role(current_user, 'pg_checkpoint', 'MEMBER') "
+                "FROM pg_roles WHERE rolname = current_user"
+            )
+        )
+        if not allowed:
+            return "no checkpoint (the role has no pg_checkpoint)"
+        began = time.perf_counter()
+        connection.execute(text("CHECKPOINT"))
+    return f"checkpoint in {time.perf_counter() - began:.1f} s"
+
+
+#: :func:`_checkpoint`'s result for a site's database, shown in its guards' ``guard split``
+#: line (a module fixture's own output only shows in a failure's report).
+CHECKPOINTS: dict[str | None, str] = {}
+
+
 @pytest.fixture(scope="module")
 def traffic_site(pg_server: TestServer, pg_template: str) -> Iterator[Engine]:
     for site in _site(pg_server, pg_template, TRAFFIC_SITE):
@@ -747,7 +938,40 @@ def traffic_site(pg_server: TestServer, pg_template: str) -> Iterator[Engine]:
 
 @pytest.fixture(scope="module")
 def event_site(pg_server: TestServer, pg_template: str) -> Iterator[Engine]:
-    yield from _site(pg_server, pg_template, EVENT_SITE)
+    for site in _site(pg_server, pg_template, EVENT_SITE):
+        # The converted-row guard times on a settled server (#179).
+        CHECKPOINTS[site.url.database] = _checkpoint(site)
+        yield site
+
+
+@pytest.fixture(scope="module")
+def lines_site(pg_server: TestServer, pg_template: str) -> Iterator[Engine]:
+    yield from _site(pg_server, pg_template, LINES_SITE)
+
+
+@pytest.fixture(scope="module")
+def moves_site(pg_server: TestServer, pg_template: str) -> Iterator[Engine]:
+    """:data:`MOVES_SITE` in its own database, the moves committed: the guard's lookups read
+    with their own sessions (:func:`_guard_run`)."""
+    for site in _site(pg_server, pg_template, MOVES_SITE):
+        start = GUARD_AT - timedelta(days=150)  # the leases' start (_MT_DHCP_LEASES)
+        moved = MoveGroup(
+            ip="172.20.44.58",
+            interface="vlan44",
+            vd="root",
+            source="fortigate",
+            logid="0100026001",
+            dhcp_msg="Ack",
+            times=tuple(epoch_us(start + timedelta(hours=k)) for k in range(1, RECORDED_TIMES + 1)),
+        )
+        with Session(site) as session:
+            session.execute(update(Lease).values(moves=moves_json([moved], truncated=True)))
+            session.commit()
+        with site.connect().execution_options(isolation_level="AUTOCOMMIT") as connection:
+            connection.execute(text("VACUUM (ANALYZE) leases"))
+        # Its guard is the first test after these writes (#179).
+        CHECKPOINTS[site.url.database] = _checkpoint(site)
+        yield site
 
 
 @dataclass
@@ -756,6 +980,59 @@ class _Timed:
 
     seconds: float = 0.0
     calls: list[tuple[Any, ...]] = field(default_factory=list)
+
+
+@dataclass
+class _Split:
+    """Where one timed run of ``Attributor._missed_moves`` went (#179), timed in the test only
+    (product code has no timing hooks): its statements (SQLAlchemy's cursor events, as api's
+    ``test_search_perf.Timer``), the ``leases.moves`` one apart; the decoding of the recorded
+    moves (``_recorded_moves`` less that statement: SQLAlchemy's work for it, the jsonb values
+    read at fetch and ``parse_moves``); the judging (``_bears`` and ``_recorded_move``, less any
+    statement in them), with the calls of ``_move_counts`` and ``stored_refusal``; the rest is
+    "other". Python's full (generation 2) collections in it are counted with their pause, which
+    lies in the parts above."""
+
+    missed: _Timed
+    recorded: _Timed
+    sql: float = 0.0
+    statements: int = 0
+    moves_sql: float = 0.0
+    judging: float = 0.0
+    calls: dict[str, int] = field(default_factory=dict)
+    collections: int = 0
+    collected: float = 0.0
+    #: While ``_missed_moves`` runs (only then are statements, calls and collections taken).
+    inside: bool = False
+    #: While a judging call runs (only the outer one is timed).
+    judged: bool = False
+    #: When the running full collection began.
+    collecting: float = 0.0
+
+    def seconds(self) -> str:
+        """The run's seconds, with its full collections when there were any."""
+        if not self.collections:
+            return f"{self.missed.seconds:.3f}"
+        return f"{self.missed.seconds:.3f} [gc2 {self.collections}: {self.collected:.3f}]"
+
+    def text(self) -> str:
+        decode = self.recorded.seconds - self.moves_sql
+        other = self.missed.seconds - self.sql - decode - self.judging
+        calls = ", ".join(f"{name} {count}" for name, count in self.calls.items())
+        return (
+            f"sql {self.sql:.3f} ({self.statements}, moves {self.moves_sql:.3f}), "
+            f"decode {decode:.3f}, judging {self.judging:.3f} ({calls}), other {other:.3f}"
+        )
+
+    def collection(self, phase: str, info: dict[str, Any]) -> None:
+        """A ``gc.callbacks`` entry: a full collection while ``_missed_moves`` runs."""
+        if not self.inside or info["generation"] != 2:
+            return
+        if phase == "start":
+            self.collecting = time.perf_counter()
+        else:
+            self.collections += 1
+            self.collected += time.perf_counter() - self.collecting
 
 
 class _Timer:
@@ -786,6 +1063,82 @@ class _Timer:
         print(f"\n--- guard (seconds), {title} ---")
         for name, timed in self.timed.items():
             print(f"{name:28s} {timed.seconds:8.3f}  ({len(timed.calls)} calls)")
+
+    def split(self, site: Engine) -> tuple[_Split, Callable[[], None]]:
+        """``Attributor._missed_moves`` and ``_recorded_moves`` timed (:meth:`time`), and the
+        former split (:class:`_Split`): the statements ``site`` sends while it runs and the
+        judging functions timed (the outer call only: ``_recorded_move`` calls ``_bears``), the
+        counted ones counted, the full collections taken; with the function that removes the
+        cursor listeners and the collection callback (the monkeypatch undoes the rest)."""
+        found = _Split(
+            self.time(Attributor, "_missed_moves"), self.time(Attributor, "_recorded_moves")
+        )
+        missed = Attributor._missed_moves
+
+        @functools.wraps(missed)
+        def flagged(*args: Any, **kwargs: Any) -> Any:
+            found.inside = True
+            try:
+                return missed(*args, **kwargs)
+            finally:
+                found.inside = False
+
+        def judging(name: str) -> None:
+            original = getattr(Attributor, name)
+
+            @functools.wraps(original)
+            def timed(*args: Any, **kwargs: Any) -> Any:
+                if found.judged:
+                    return original(*args, **kwargs)
+                found.judged = True
+                began, sql = time.perf_counter(), found.sql
+                try:
+                    return original(*args, **kwargs)
+                finally:
+                    found.judging += time.perf_counter() - began - (found.sql - sql)
+                    found.judged = False
+
+            self.monkeypatch.setattr(Attributor, name, timed)
+
+        def counted(owner: Any, name: str) -> None:
+            original = getattr(owner, name)
+            found.calls[name] = 0
+
+            @functools.wraps(original)
+            def count(*args: Any, **kwargs: Any) -> Any:
+                if found.inside:
+                    found.calls[name] += 1
+                return original(*args, **kwargs)
+
+            self.monkeypatch.setattr(owner, name, count)
+
+        def before(conn: Any, cursor: Any, statement: str, *args: Any) -> None:
+            if found.inside:
+                conn.info.setdefault("arci_split_began", []).append(time.perf_counter())
+
+        def after(conn: Any, cursor: Any, statement: str, *args: Any) -> None:
+            if found.inside:
+                seconds = time.perf_counter() - conn.info["arci_split_began"].pop()
+                found.sql += seconds
+                found.statements += 1
+                if "leases.moves" in statement:
+                    found.moves_sql += seconds
+
+        self.monkeypatch.setattr(Attributor, "_missed_moves", flagged)
+        judging("_bears")
+        judging("_recorded_move")
+        counted(Attributor, "_move_counts")
+        counted(attribution, "stored_refusal")
+        event.listen(site, "before_cursor_execute", before)
+        event.listen(site, "after_cursor_execute", after)
+        gc.callbacks.append(found.collection)
+
+        def remove() -> None:
+            event.remove(site, "before_cursor_execute", before)
+            event.remove(site, "after_cursor_execute", after)
+            gc.callbacks.remove(found.collection)
+
+        return found, remove
 
 
 @pytest.fixture
@@ -840,23 +1193,139 @@ def executed() -> Iterator[_Executed]:
         recorded.stop()
 
 
+def _guard_run(site: Engine, request: LookupRequest) -> LookupOutcome:
+    """One run of ``request`` in its own session (a lookup only reads; it is rolled back)."""
+    with Session(site) as session:
+        settings = LookupSettings.from_settings(get_settings(session))
+        outcome = run_lookup(session, request, settings, now=GUARD_AT + timedelta(days=2))
+        session.rollback()
+    return outcome
+
+
 def _guard_lookup(site: Engine, request: LookupRequest, measure: Any) -> LookupOutcome:
     """``request`` run once to warm the caches, then again with ``measure()`` installing the
     timers (a lookup only reads; each run is rolled back)."""
+    _guard_run(site, request)
+    measure()
+    return _guard_run(site, request)
+
+
+#: The timed rounds after the warm-up of the two guards of the converted-row check (#179): the
+#: best one is held to 3.8's bound, so one stall of a runner does not fail the guard.
+ROUNDS = 5
+
+#: 3.8's bound of the converted-row query (0.2 s), which every CI reading meets by far
+#: (:data:`MOVES_READINGS`).
+CONVERTED_BOUND = 0.2
+#: The bound of the converted-row check with the recorded moves, per platform (#179-2): Linux
+#: keeps 3.8's 0.2 s; windows-latest's slow runners (gauge about 17 µs a line) take its best
+#: round to 0.16-0.17 s on plain PostgreSQL (the MAC branch's plan, #185), so its bound is the
+#: slowest best of :data:`MOVES_READINGS` times :data:`MOVES_MARGIN`, rounded up to 10 ms.
+MOVES_BOUNDS = {"win32": 0.21, "linux": 0.2}
+MOVES_BOUND = MOVES_BOUNDS.get(sys.platform, 0.2)
+#: The margin over the slowest Windows reading.
+MOVES_MARGIN = 1.2
+#: CI's passing readings of the two guards (2026-11-05, ``guard split`` lines of the throughput
+#: step): platform, run/attempt, job, the runner's gauge (µs a line, the live-tail guard's),
+#: the best of :data:`ROUNDS` of the converted-row query and of the recorded-moves check, in
+#: seconds. Runs 41950691995 (``a2a859f``) and 41956302626 (``57742d0``, attempts 1-9 re-run
+#: one job each).
+MOVES_READINGS = [
+    ("win32", "41950691995/1", 126993650686, 16.72, 0.115, 0.161),
+    ("win32", "41956302626/1", 127012205925, 8.62, 0.062, 0.085),
+    ("win32", "41956302626/2", 127052081954, 17.87, 0.123, 0.173),
+    ("win32", "41956302626/4", 127114691601, 17.54, 0.129, 0.169),
+    ("win32", "41956302626/6", 127194052338, 17.05, 0.132, 0.170),
+    ("win32", "41956302626/8", 127248835105, 9.52, 0.052, 0.104),
+    ("linux", "41950691995/1", 126993650651, 7.97, 0.024, 0.047),
+    ("linux", "41956302626/1", 127012206493, 11.81, 0.032, 0.067),
+    ("linux", "41956302626/3", 127071812028, 15.86, 0.041, 0.090),
+    ("linux", "41956302626/5", 127138516744, 15.84, 0.040, 0.086),
+    ("linux", "41956302626/7", 127221054741, 15.42, 0.037, 0.077),
+]
+
+
+@pytest.mark.parametrize(
+    ("system", "run", "job", "gauge", "converted", "moves"),
+    MOVES_READINGS,
+    ids=[f"{system}-{job}" for system, _run, job, *_rest in MOVES_READINGS],
+)
+def test_the_bounds_hold_every_ci_reading(
+    system: str, run: str, job: int, gauge: float, converted: float, moves: float
+) -> None:
+    """#179-2: every passing CI reading meets its bound, and Windows' bound is the rule's."""
+    assert converted < CONVERTED_BOUND
+    assert moves < MOVES_BOUNDS[system]
+    slowest = max(m for s, *_rest, m in MOVES_READINGS if s == "win32")
+    assert MOVES_BOUNDS["win32"] == math.ceil(round(slowest * MOVES_MARGIN * 100, 6)) / 100
+
+
+@dataclass
+class _Round:
+    """One timed round of :func:`_best_lookup`: its timer, its split and its statements."""
+
+    timer: _Timer
+    split: _Split
+    executed: _Executed
+
+
+def _best_lookup(
+    site: Engine,
+    request: LookupRequest,
+    title: str,
+    capsys: pytest.CaptureFixture[str],
+    measure: Callable[[_Timer], None] | None = None,
+) -> tuple[LookupOutcome, list[_Round], _Round]:
+    """``request`` run once to warm the caches, then :data:`ROUNDS` times, each round with a
+    timer of its own: the split of ``_missed_moves`` (:meth:`_Timer.split`), what ``measure``
+    installs on the timer and the statements recorded, all undone after the round. Every
+    round's ``_missed_moves`` (with its full collections, if any), the best round's split and
+    the site's :data:`CHECKPOINTS` entry are printed past pytest's capture (``poe test-perf``
+    runs without ``-s``, and the job log must show a passing run's figures too); the last
+    outcome, the rounds and the best of them are returned."""
+    _guard_run(site, request)
+    rounds: list[_Round] = []
     outcome = None
-    for warm in (True, False):
-        if not warm:
-            measure()
-        with Session(site) as session:
-            settings = LookupSettings.from_settings(get_settings(session))
-            outcome = run_lookup(session, request, settings, now=GUARD_AT + timedelta(days=2))
-            session.rollback()
+    for _ in range(ROUNDS):
+        recorded = _Executed()
+        with pytest.MonkeyPatch.context() as patch:
+            timer = _Timer(patch)
+            split, remove = timer.split(site)
+            if measure is not None:
+                measure(timer)
+            recorded.record(site)
+            try:
+                outcome = _guard_run(site, request)
+            finally:
+                recorded.stop()
+                remove()
+        rounds.append(_Round(timer, split, recorded))
     assert outcome is not None
-    return outcome
+    best = min(rounds, key=lambda each: each.split.missed.seconds)
+    seconds = " ".join(each.split.seconds() for each in rounds)
+    checkpoint = CHECKPOINTS.get(site.url.database, "no checkpoint")
+    with capsys.disabled():
+        print(
+            f"\nguard split, {title}: _missed_moves best {best.split.missed.seconds:.3f}s "
+            f"of {ROUNDS} ({seconds}): {best.split.text()}; {checkpoint}"
+        )
+    best.timer.report(title)
+    return outcome, rounds, best
 
 
 def _keys(outcome: LookupOutcome) -> list[str]:
     return [e.key for e in outcome.explanations]
+
+
+def _first_read(site: Engine, at: datetime) -> datetime:
+    """The earliest device time a guard lookup of ``PUBLIC`` at ``at`` reads (the start of the
+    first of its days, :func:`.days.reads_from`: 12 days before ``at``'s day with the
+    defaults); a look-back reaching further reads from it (``lookback_clamped_to_window``)."""
+    with Session(site) as session:
+        settings = LookupSettings.from_settings(get_settings(session))
+    first = reads_from(LookupRequest(at=at, public_ip=PUBLIC), settings)
+    assert at - first > timedelta(days=12)
+    return first
 
 
 # -- the traffic site ---------------------------------------------------------------------------
@@ -947,7 +1416,9 @@ def test_internal_srcmac_sightings_are_fast(traffic_site: Engine, timer: _Timer,
 
 
 @pytest.mark.perf
-def test_the_source_clock_of_an_empty_search_is_fast(traffic_site: Engine, timer: _Timer) -> None:
+def test_the_source_clock_of_an_empty_search_is_fast(
+    traffic_site: Engine, timer: _Timer, executed: _Executed
+) -> None:
     """3.8: the per-lookup clock measurement (2.7) for two sources over [T - 1 h, T + 1 h] of
     ``messages`` at 1 M lines a day each, under 0.2 s, with the ``search_counts`` choice of the
     searched sources of an empty result (a destination no session went to)."""
@@ -956,9 +1427,11 @@ def test_the_source_clock_of_an_empty_search_is_fast(traffic_site: Engine, timer
     def measure() -> None:
         parts.append(timer.time(lookup_engine._Lookup, "_searched_sources"))
         parts.append(timer.time(lookup_engine._Lookup, "_clock"))
+        executed.record(traffic_site)
 
     request = LookupRequest(at=GUARD_AT, public_ip=PUBLIC, dest_ip="203.0.113.250", dest_port=443)
     outcome = _guard_lookup(traffic_site, request, measure)
+    executed.stop()
     timer.report("source clock, empty search")
     assert (outcome.mode, outcome.matches) == ("none", ())
     assert "destination_not_found" in _keys(outcome)
@@ -966,6 +1439,26 @@ def test_the_source_clock_of_an_empty_search_is_fast(traffic_site: Engine, timer
     assert len(searched.calls) == 1
     assert sorted(call[1] for call in clock.calls) == ["fortigate", "fortigate-2"]
     assert "source_clock_offset" not in _keys(outcome)  # 1 s behind: measured, within the limit
+    # Each source by device time (messages), by receive time (its samples of two hours) and by
+    # the minutes that put their device times around T (#82): each of the last on the table's
+    # key, its minutes within a day and an hour of T, not the 30 days of samples.
+    sampled = [(sql, p) for sql, p in executed.statements if "source_clock_samples" in sql]
+    assert len(sampled) == 4
+    shifted = [(sql, p) for sql, p in sampled if "OVER (PARTITION BY" in sql]
+    assert len(shifted) == 2
+    span = 2 * (lookup_engine.CLOCK_SPAN + timedelta(days=1)) // timedelta(minutes=1)
+    for sql, parameters in shifted:
+        with traffic_site.connect() as connection:
+            plan = (
+                connection.exec_driver_sql(f"EXPLAIN (ANALYZE, BUFFERS) {sql}", parameters)
+                .scalars()
+                .all()
+            )
+        print("\n".join(plan))
+        assert not any("Seq Scan" in line for line in plan)
+        scans, _removed = _plan_reads(plan)
+        assert [name for name, _n in scans] == ["pk_source_clock_samples"], scans
+        assert scans[0][1] <= span * 11 // 10 + 10, (scans, span)  # 1.1 keys a minute
     seconds = searched.seconds + clock.seconds
     assert seconds < 0.2, f"the clock measurement took {seconds:.3f} s"
 
@@ -1285,7 +1778,9 @@ def test_a_direct_exit_with_a_29_public_network_is_fast(
 
 #: The overlap probe's cases (D31 (a), no exit configured): an unclaimed address with no row at
 #: all; the site's busy NAT address (its sessions overlap the moment) at the guards' moment and 20
-#: hours later, when the partition holds 22 hours of the address's rows before the probe's range;
+#: hours later, when the partition holds 22 hours of the address's rows before the probe's range,
+#: and 30 minutes after its last row (a line switched away: no row of it in the probe's range, the
+#: partition full of its rows before it; #71);
 #: the busy address 5 hours before the guards' moment, before its first row (its rows fill the
 #: range's 24-hour tail, none of them overlaps the window); and the second line
 #: (:data:`LATER_LINE`, about 1 % of the rows of the range, none overlapping the moment). The busy
@@ -1295,6 +1790,7 @@ OVERLAP = {
     "no_rows": (PUBLIC, GUARD_AT),
     "busy": (WAN, GUARD_AT),
     "busy_late": (WAN, GUARD_AT + timedelta(hours=20)),
+    "busy_after": (WAN, GUARD_AT + timedelta(hours=25, minutes=30)),
     "busy_before": (WAN, GUARD_AT - timedelta(hours=5)),
     "later_line": (LATER_LINE, GUARD_AT),
 }
@@ -1329,6 +1825,31 @@ def _plan_reads(plan: Sequence[str]) -> tuple[list[tuple[str, int]], int]:
     return scans, removed
 
 
+def _binds(parameters: dict[str, Any], address: str) -> bool:
+    """``address`` is bound to the statement, alone or as a one-element array."""
+    return any(value in (address, [address]) for value in parameters.values())
+
+
+def _buffers(plan: Sequence[str]) -> int:
+    """The shared buffers an ``EXPLAIN (ANALYZE, BUFFERS)`` plan's execution touched (its top
+    node's, hit and read; 0 when no node touched any, e.g. a plan answered by ``One-Time Filter:
+    false``, not the planning's that follow the tree): index entries a scan walks and filters by
+    its index condition show here, not as rows."""
+    for line in plan:
+        if line.strip().startswith("Planning"):
+            break
+        if line.strip().startswith("Buffers:"):
+            return sum(int(n) for n in re.findall(r"(?:hit|read)=(\d+)", line))
+    return 0
+
+
+#: The buffers a probe step may touch beyond one per row of its range: the index's upper pages
+#: and the pages of the range's first and last entries. Walking every index entry of a busy
+#: address in the partition, as a port-less step on ``ix_fg_traffic_transip_transport_time`` did,
+#: touches thousands (#71).
+STEP_BUFFERS = 100
+
+
 @pytest.mark.perf
 @pytest.mark.parametrize("case", sorted(OVERLAP))
 def test_the_overlap_probe_of_an_unclaimed_address_is_fast(
@@ -1338,8 +1859,9 @@ def test_the_overlap_probe_of_an_unclaimed_address_is_fast(
     no rows and for a busy unclaimed P (:data:`OVERLAP`), under 0.2 s (:data:`OVERLAP_SECONDS`);
     through the lookup's own probe (``_Probe.seen_overlap``), which asks the probe window first
     and the tail after it only when the window has no overlapping session. Each statement's plan
-    reads the address's own rows of its range only (``ix_fg_traffic_transip_transport_time``)
-    and stops at the first overlapping session, over partitions and over chunks."""
+    reads the address's own rows of its range only (``ix_fg_traffic_transip_time``, no other
+    index entry of the address: :data:`STEP_BUFFERS`) and stops at the first overlapping
+    session, over partitions and over chunks."""
     address, at = OVERLAP[case]
     probes: list[_Timed] = []
 
@@ -1357,7 +1879,7 @@ def test_the_overlap_probe_of_an_unclaimed_address_is_fast(
     statements = [
         (sql, parameters)
         for sql, parameters in executed.statements
-        if "make_interval" in sql and SEARCH not in sql and address in parameters.values()
+        if "make_interval" in sql and SEARCH not in sql and _binds(parameters, address)
     ]
     probe = timedelta(seconds=lookup_engine.TRANSIP_PROBE_SECONDS)
     low, high = at - probe, at + probe
@@ -1367,7 +1889,7 @@ def test_the_overlap_probe_of_an_unclaimed_address_is_fast(
     condition = "transip = CAST(:address AS inet)"
     read, kept = _rows_of(traffic_site, low, end, high, condition, address=address)
     in_window, kept_in_window = _rows_of(traffic_site, low, high, high, condition, address=address)
-    if case == "no_rows":
+    if case in ("no_rows", "busy_after"):
         assert (read, kept) == (0, 0)
     elif case in ("busy", "busy_late"):
         assert kept_in_window > 0
@@ -1398,7 +1920,9 @@ def test_the_overlap_probe_of_an_unclaimed_address_is_fast(
     for (sql, parameters), (_first, _last, rows) in zip(statements, ranges, strict=True):
         with traffic_site.connect() as connection:
             plan = (
-                connection.exec_driver_sql(f"EXPLAIN (ANALYZE) {sql}", parameters).scalars().all()
+                connection.exec_driver_sql(f"EXPLAIN (ANALYZE, BUFFERS) {sql}", parameters)
+                .scalars()
+                .all()
             )
         print("\n".join(plan))
         assert not any("Seq Scan" in line for line in plan), case
@@ -1411,7 +1935,8 @@ def test_the_overlap_probe_of_an_unclaimed_address_is_fast(
         # (``busy_before``'s, before the site's first row), a scan that fetched nothing.
         scans, removed = _plan_reads(plan)
         assert scans, case
-        assert all("transip_transport_time" in index or not n for index, n in scans), scans
+        assert all("transip_time" in index or not n for index, n in scans), scans
+        assert _buffers(plan) <= rows + STEP_BUFFERS, (case, _buffers(plan), rows)
         if kept_in_window:
             assert removed < in_window // 10, (case, removed, in_window)
         else:
@@ -1420,154 +1945,261 @@ def test_the_overlap_probe_of_an_unclaimed_address_is_fast(
     assert timed.seconds < bound, f"{case}: the overlap probe took {timed.seconds:.3f} s"
 
 
-#: The "seen, but not alone" check's second line (D15, ``_Lookup._carried``): the shared address
-#: ``hat-2``'s modem hands the FortiGate on ``wan1`` when that line is in router mode. Its 20
-#: sessions, logged 10 minutes before the guard's moment (a short burst, inside the probe's
-#: ±15 minutes and before the search window), are written in the measured lookup's own
-#: transaction only and rolled back with it, so the site the other guards read never holds them.
-SECOND_LINE = "100.64.14.9"
-#: The two exits of the check: the site's line (:data:`WAN`) and the second line, both
-#: ``isp_nat`` without a public address on ``wan1``, so each is in the other's G(E) and either
-#: address, asked for, is a ``transip`` resolution whose check sees the other one beside it.
-CARRIED_EXITS = {
-    "hat-1": {"mode": "isp_nat", "transips": [WAN], "interfaces": ["wan1"]},
-    "hat-2": {"mode": "isp_nat", "transips": [SECOND_LINE], "interfaces": ["wan1"]},
-}
-SECOND_LINE_ROWS = (
-    "INSERT INTO fg_traffic (time, time_received, source, sender, raw_day, raw_line, raw_offset, "
-    "logid, subtype, action, sessionid, proto, srcip, srcport, srcintf, dstip, dstport, dstintf, "
-    "transip, transport, trandisp, duration, is_interim) "
-    "SELECT t, t, 'fortigate', '172.31.255.1', :day, 4000000 + g, (4000000 + g)::bigint * 900, "
-    "'0000000013', 'forward', 'accept', 5000000 + g, 6, '172.20.42.110', 40000 + g, 'vlan42', "
-    "'203.0.113.80', 443, 'wan1', CAST(:line AS inet), 50000 + g, 'snat', 5, false "
-    "FROM generate_series(1, 20) AS g, "
-    "LATERAL (SELECT CAST(:at AS timestamptz) - interval '10 minutes' "
-    "- g * interval '1 second' AS t) AS x"
-)
-#: The port of the busy address's session logged at the guards' moment (``g`` = 83,334 of the
-#: site's sessions, 11 s long), so its exact search has an answer.
-BUSY_PORT = 24358
-#: The check's cases (D15 "seen, but not alone", round 7): the address, the moment, the port and
-#: the statements the check asks (:meth:`~arcilogger_worker.lookup.engine._Lookup._carried`). The
-#: site's busy NAT address at the guards' moment, with the port of its session there and without
-#: a port (the first step answers); the second line, whose only rows are those before the window
-#: (seen, but no row in any of the check's ranges); and the busy address 10 minutes after its
-#: last row (the line went quiet: seen, its 27 hours of rows all before the check's ranges).
+#: The D15 "seen, but not alone" check (``_Lookup._carried``): its exits, address, moment, port
+#: and answer. The site's NAT address claimed by an ``isp_nat`` exit (:data:`BESIDE` beside it):
+#: at the guards' moment (a session of the window answers), 5 minutes before its first row (a
+#: 2-hour session of the scan's tail spans the window), 10 minutes after its last row (nothing
+#: after it: the fallback), and with a port no session of the window or the tail used (a session
+#: on any port spans the moment); the second line (:data:`LATER_LINE`) as a ``direct`` exit's
+#: public address 6 hours after the moment and 10 minutes before its first session (the
+#: fallback). An address with no row near the moment never reaches the check (it is not seen).
 CARRIED = {
-    "busy": (WAN, GUARD_AT, BUSY_PORT, 1),
-    "busy_without_port": (WAN, GUARD_AT, None, 1),
-    "no_rows": (SECOND_LINE, GUARD_AT, BUSY_PORT, 3),
-    "no_rows_without_port": (SECOND_LINE, GUARD_AT, None, 2),
-    "busy_no_row": (WAN, GUARD_AT + timedelta(hours=25, minutes=10), BUSY_PORT, 3),
+    "busy": (WAN, GUARD_AT, None, True),
+    "busy_before": (WAN, GUARD_AT - timedelta(hours=2, minutes=5), None, True),
+    "busy_after": (WAN, GUARD_AT + timedelta(hours=25, minutes=10), None, False),
+    "busy_port": (WAN, GUARD_AT, 1024, True),
+    "later_line": (LATER_LINE, GUARD_AT + timedelta(hours=6), None, True),
+    "quiet": (LATER_LINE, GUARD_AT + timedelta(hours=3, minutes=50), None, False),
 }
-#: 3.8's bound of a lookup probe (the overlap probe's 0.2 s).
-CARRIED_SECONDS = 0.2
+#: The exits of :data:`CARRIED`, per address.
+CARRIED_EXITS: dict[str, dict[str, Any]] = {
+    WAN: {"hat-1": {"mode": "isp_nat", "transips": [WAN]}},
+    LATER_LINE: {"hat-1": {"mode": "direct", "public": [LATER_LINE]}},
+}
+#: The orders in which ``_carried`` asks its steps after the window: with a port, that of
+#: ``ix_fg_traffic_transip_transport_time``; without one, that of ``ix_fg_traffic_transip_time``
+#: (#71), with the index each one reads.
+CARRIED_ORDER = {
+    True: (
+        "ORDER BY fg_traffic.transip, fg_traffic.transport, fg_traffic.time",
+        "transip_transport_time",
+    ),
+    False: ("ORDER BY fg_traffic.transip, fg_traffic.time", "transip_time"),
+}
+
+
+def _utc_days(start: datetime, end: datetime) -> list[tuple[datetime, datetime]]:
+    """``[start, end]`` cut at the UTC midnights in between: TimescaleDB's daily chunks."""
+    bounds = [start]
+    midnight = datetime.combine(start.astimezone(UTC).date(), time_of_day.min, UTC)
+    while (midnight := midnight + timedelta(days=1)) < end:
+        bounds.append(midnight)
+    return [*itertools.pairwise([*bounds, end])]
 
 
 @pytest.mark.perf
 @pytest.mark.parametrize("case", sorted(CARRIED))
-def test_the_seen_but_not_alone_check_is_fast(
+def test_the_d15_carried_check_is_fast(
     traffic_site: Engine,
     timer: _Timer,
     executed: _Executed,
     monkeypatch: pytest.MonkeyPatch,
     case: str,
 ) -> None:
-    """3.8: the D15 "seen, but not alone" check (``_Lookup._carried``, deviation c1) of a busy
-    address, of an address with no row in its ranges and of a busy address with no row there
-    (:data:`CARRIED`), under 0.2 s, through the real ``run_lookup``, warm. Each statement's plan
-    reads the address's own rows of its range only (``ix_fg_traffic_transip_transport_time``),
-    never a sequential scan of the partition, and the answer is the check's: the search on the
-    address, or the fallback over both lines."""
-    address, at, port, steps = CARRIED[case]
-    request = LookupRequest(at=at, public_ip=address, public_port=port)
-    ranges: list[tuple[int, int]] = []
-    original = lookup_engine._Lookup._carried
-
-    def carried(self: Any, checked: str) -> bool:
-        first = len(executed.statements)
-        try:
-            return bool(original(self, checked))
-        finally:
-            ranges.append((first, len(executed.statements)))
-
-    monkeypatch.setattr(lookup_engine._Lookup, "_carried", carried)
+    """3.8: the D15 "seen, but not alone" check of an exit's address (``_Lookup._carried``,
+    :data:`CARRIED`) under 0.2 s, the probe's bound, through the real lookup: the exit's check
+    sees the address and :data:`BESIDE` beside it, so the search on the address keeps its answer
+    only when a session through it spans the moment or would be found in the window. Asked in
+    steps (the window's rows in time order, then on an index on the address, with a port
+    ``ix_fg_traffic_transip_transport_time``, without one ``ix_fg_traffic_transip_time``, and
+    one UTC day, a TimescaleDB chunk, at a time the scan's tail and, with a port, the sessions
+    spanning the moment on any port), the window's plan reads at most its rows of every address,
+    every other plan the address's own rows of its day only (no other index entry of the
+    address: :data:`STEP_BUFFERS`), stopping at the first that answers. As one ``EXISTS`` the
+    busy address was a sequential scan of the partition and the address after its last row a
+    time-ordered scan of every address's rows of the range; on the first index a port-less step
+    walked every index entry of the address in the partition (#71)."""
+    address, at, port, carried = CARRIED[case]
     checks: list[_Timed] = []
-    plans: list[list[str]] = []
+
+    sent: list[tuple[int, int]] = []
+
+    def measure() -> None:
+        checks.append(timer.time(lookup_engine._Lookup, "_carried"))
+        timed_check = lookup_engine._Lookup._carried
+
+        def recorded(self: Any, address: str) -> bool:
+            start = len(executed.statements)
+            try:
+                return bool(timed_check(self, address))
+            finally:
+                sent.append((start, len(executed.statements)))
+
+        monkeypatch.setattr(lookup_engine._Lookup, "_carried", recorded)
+        executed.record(traffic_site)
+
+    request = LookupRequest(at=at, public_ip=address, public_port=port)
     outcome, seconds = None, 0.0
     for warm in (True, False):
         if not warm:
-            ranges.clear()
-            checks.append(timer.time(lookup_engine._Lookup, "_carried"))
-            executed.record(traffic_site)
+            measure()
         with Session(traffic_site) as session:
-            session.execute(text(SECOND_LINE_ROWS), {"at": at, "day": DAY, "line": SECOND_LINE})
-            values = {**get_settings(session), "nat.egresses": CARRIED_EXITS}
+            values = {
+                **get_settings(session),
+                "nat.egresses": CARRIED_EXITS[address],
+                "nat.snat_trandisp": ["snat", BESIDE_TRANDISP],
+            }
             settings = LookupSettings.from_settings(values)
             began = time.perf_counter()
             outcome = run_lookup(session, request, settings, now=GUARD_AT + timedelta(days=2))
             seconds = time.perf_counter() - began
-            if not warm:
-                executed.stop()
-                (span,) = ranges
-                for sql, parameters in executed.statements[span[0] : span[1]]:
-                    explained = session.connection().exec_driver_sql(
-                        f"EXPLAIN (ANALYZE) {sql}", parameters
-                    )
-                    plans.append([str(line) for line in explained.scalars()])
             session.rollback()
+    executed.stop()
+    timer.report(f"D15 carried check, {case}, lookup {seconds:.3f} s")
     assert outcome is not None
-    timer.report(f"seen, but not alone, {case}, lookup {seconds:.3f} s")
+    assert outcome.egress is not None
+    claimed = "transip" if address == WAN else "public"
+    assert outcome.egress.resolution == (claimed if carried else "fallback"), case
+    if not carried:  # the D15 evidence the fallback names: what the exit's check saw beside it
+        beside = (BESIDE,) if address == WAN else (WAN, BESIDE)
+        assert outcome.egress.searched.outside_seen == beside, case
     (timed,) = checks
     (call,) = timed.calls
     assert call[1:] == (address,)
-    assert outcome.egress is not None
-    assert [e.name for e in outcome.egress.egresses][:1] == (
-        ["hat-2"] if address == SECOND_LINE else ["hat-1"]
-    )
-    for plan in plans:
-        print("\n".join(plan))
-    assert len(plans) == steps, case
-    if case.startswith("busy") and not case.endswith("no_row"):
-        # A session through the address spans the moment: the search on it runs.
-        assert outcome.egress.resolution == "transip"
-        assert outcome.mode == ("exact" if port else "candidates")
-    else:
-        # Nothing went through the address in the check's ranges: the fallback over both lines.
-        assert outcome.egress.resolution == "fallback"
-        other = WAN if address == SECOND_LINE else SECOND_LINE
-        assert outcome.egress.searched.outside_seen == (other,)
-        assert "public_ip_not_transip" in _keys(outcome)
-    # Each step reads the address's own rows of its range only, along its index entries: a busy
-    # address's first step stops at its first row there, the ranges of the others hold none of
-    # its rows. A sequential scan of the partition also read the rows of every other address and
-    # time (``EXISTS`` did for the busy address). Another index may only be the planner's choice
-    # for a range with no row at all, a scan that fetched nothing. Over daily chunks the ordered
-    # step is a Merge Append that needs a first row from every chunk of its range, so a busy
-    # address also has its rows of the next day's chunk read until one passes (7 rows of the
-    # requested port on CI's TimescaleDB job): under a tenth of its rows of the window.
-    window = Window(at, LookupSettings().tolerance_seconds, LookupSettings().max_session_seconds)
-    condition = "transip = CAST(:address AS inet)"
-    in_window, _kept = _rows_of(
-        traffic_site, window.low, window.high, window.high, condition, address=address
-    )
-    for plan in plans:
-        shown = "\n".join(plan)
-        assert not any("Seq Scan" in line for line in plan), (case, shown)
-        scans, removed = _plan_reads(plan)
-        assert scans, (case, shown)
-        assert all("transip_transport_time" in index or not n for index, n in scans), (
-            case,
-            scans,
-            shown,
+    defaults = LookupSettings()
+    window = Window(at, defaults.tolerance_seconds, defaults.max_session_seconds)
+    # The steps, each (its bound moments, the range of rows it reads, its port): the window in
+    # time order, then the scan's tail after it (its lower bound exclusive) and, with a port, the
+    # sessions spanning the moment on any port, these two one UTC day (a chunk) at a time.
+    # The day pieces are half-open at the midnights between them (``time < midnight``, then
+    # ``time >= midnight``), as TimescaleDB's chunks are.
+    tiny = timedelta(microseconds=1)
+    steps = [([window.low, window.high, window.high], (window.low, window.high, window.high), port)]
+    days = _utc_days(window.high, window.scan_end)
+    for index, (first, last) in enumerate(days):
+        low, high = (
+            first + tiny if index == 0 else first,
+            last if index == len(days) - 1 else last - tiny,
         )
-        if case.startswith("busy") and not case.endswith("no_row"):
-            assert in_window >= WINDOW_ROWS // 1000  # 2 minutes of the site's rows
-            assert removed < in_window // 10, (case, removed, in_window, shown)
+        steps.append(([first, last, window.high], (low, high, window.high), port))
+    if port is not None:
+        spans_end = at + timedelta(seconds=window.max_session)
+        days = _utc_days(at, spans_end)
+        for index, (first, last) in enumerate(days):
+            high = last if index == len(days) - 1 else last - tiny
+            steps.append(([first, last, at], (first, high, at), None))
+    # The statements the check sent, whatever their shape: in order, each of them a step, the
+    # last one the first that finds a row (a carried address) or the last step (the fallback).
+    ((start, end),) = sent
+    statements = executed.statements[start:end]
+    assert 0 < len(statements) <= len(steps), case
+    if not carried:
+        assert len(statements) == len(steps), case
+    condition = "transip = CAST(:address AS inet)"
+    by_index: list[str] = []
+    for index, (sql, parameters) in enumerate(statements):
+        moments, (first, last, start_bound), step_port = steps[index]
+        with traffic_site.connect() as connection:
+            found = connection.exec_driver_sql(sql, parameters).scalar() is not None
+            plan = (
+                connection.exec_driver_sql(f"EXPLAIN (ANALYZE, BUFFERS) {sql}", parameters)
+                .scalars()
+                .all()
+            )
+        print("\n".join(plan))
+        # The plans first (the one ``EXISTS`` fails here): no step scans a partition, but for
+        # the empty daily partition of a day ahead (0 pages, plain PostgreSQL; read whole, as
+        # the planner rightly does with nothing to read), and the first one, the window in time
+        # order, reads its rows of every address at most (two minutes of the site's rows),
+        # whichever index the planner takes.
+        with Session(traffic_site) as session:
+            assert _seq_scans_of_data(session, plan, pages=0) == [], case
+            by_index += _partitions_read_by_index(session, plan)
+        scans, removed = _plan_reads(plan)
+        # A day no chunk holds (TimescaleDB creates chunks for written rows only) is answered
+        # without reading anything, and so is a day whose daily partition is empty.
+        empty = any(_SEQ_SCAN.search(line) for line in plan) and not _buffers(plan)
+        assert scans or any("One-Time Filter: false" in line for line in plan) or empty, case
+        if index == 0:
+            every, _kept = _rows_of(traffic_site, window.low, window.high, window.high, "true")
+            assert sum(n for _name, n in scans) <= every, (case, scans, every)
+        assert sorted(_moments(parameters)) == sorted(moments), (case, index)
+        assert found == (carried and index == len(statements) - 1), (case, index)
+        if index == 0:
+            continue
+        # The address's own rows of the step's day only, along its index entries: a step that
+        # finds nothing reads and filters out every one of them, a step that answers stops early.
+        order, index_name = CARRIED_ORDER[step_port is not None]
+        assert order in sql, case
+        assert all(index_name in name or not n for name, n in scans), scans
+        own = condition if step_port is None else f"{condition} AND transport = :port"
+        rows, _kept = _rows_of(
+            traffic_site, first, last, start_bound, own, address=address, port=step_port
+        )
+        # No other index entry of the address than its rows of the step's range: on
+        # ``ix_fg_traffic_transip_transport_time`` a port-less step walked them all (#71).
+        assert _buffers(plan) <= rows + STEP_BUFFERS, (case, index, _buffers(plan), rows)
+        if found:
+            assert removed <= max(rows // 10, 100), (case, index, removed, rows)
         else:
-            assert removed == 0, (case, removed, shown)
-    assert timed.seconds < CARRIED_SECONDS, f"{case}: the check took {timed.seconds:.3f} s"
+            assert removed == rows, (case, index, removed, rows)
+    # The steps read a partition with data through an index: not only empty ones whole.
+    assert by_index, case
+    assert timed.seconds < 0.2, f"{case}: the D15 carried check took {timed.seconds:.3f} s"
     assert seconds < LIMIT_SECONDS, f"{case}: the lookup took {seconds:.3f} s"
+
+
+#: The probe steps on :data:`LINES_SITE`: the first line 30 minutes after its last row with no
+#: exit (the overlap probe, then ``unconfigured``), and 10 minutes after it as an ``isp_nat`` exit's
+#: address (seen, the second line beside it: the D15 check, then the fallback).
+LINES = {
+    "overlap": (timedelta(minutes=30), {}, "unconfigured"),
+    "carried": (
+        timedelta(minutes=10),
+        {"hat-1": {"mode": "isp_nat", "transips": [WAN]}},
+        "fallback",
+    ),
+}
+
+
+@pytest.mark.perf
+@pytest.mark.parametrize("case", sorted(LINES))
+def test_the_probe_steps_of_a_line_that_took_turns_read_its_own_rows(
+    lines_site: Engine, executed: _Executed, case: str
+) -> None:
+    """3.8 (#71): with two lines taking turns (:data:`LINES_SITE`), each step of the overlap probe
+    and of the D15 check ordered by the address (``ORDER BY transip, time``) is planned on
+    ``ix_fg_traffic_transip_time`` and touches no more buffers than its own rows of the range
+    (none: the first line is down) plus :data:`STEP_BUFFERS`. With ``transip = :address`` the
+    sort lost ``transip`` and the planner took the primary key, reading every row of the second
+    line in the range (``_address_is``)."""
+    after, exits, resolution = LINES[case]
+    request = LookupRequest(at=GUARD_AT + after, public_ip=WAN)
+    outcome = None
+    for warm in (True, False):
+        if not warm:
+            executed.record(lines_site)
+        with Session(lines_site) as session:
+            values = {**get_settings(session), "nat.egresses": exits}
+            settings = LookupSettings.from_settings(values)
+            outcome = run_lookup(session, request, settings, now=GUARD_AT + timedelta(days=2))
+            session.rollback()
+    executed.stop()
+    assert outcome is not None
+    assert outcome.egress is not None
+    assert outcome.egress.resolution == resolution, case
+    steps = [
+        (sql, parameters)
+        for sql, parameters in executed.statements
+        if "make_interval" in sql
+        and "ORDER BY fg_traffic.transip" in sql
+        and _binds(parameters, WAN)
+    ]
+    assert len(steps) >= 2, case  # the probe's window and tail; the check's tail, a day at a time
+    for sql, parameters in steps:
+        with lines_site.connect() as connection:
+            plan = (
+                connection.exec_driver_sql(f"EXPLAIN (ANALYZE, BUFFERS) {sql}", parameters)
+                .scalars()
+                .all()
+            )
+        print("\n".join(plan))
+        assert not any("Seq Scan" in line for line in plan), case
+        scans, removed = _plan_reads(plan)
+        assert scans or any("One-Time Filter: false" in line for line in plan), case
+        assert all("transip_time" in name for name, _n in scans), (case, scans)
+        assert removed == 0, (case, removed)
+        assert _buffers(plan) <= STEP_BUFFERS, (case, _buffers(plan))
 
 
 # -- the event site -----------------------------------------------------------------------------
@@ -1651,8 +2283,10 @@ def test_the_post_lease_query_of_long_fortigate_leases_is_fast(
 ) -> None:
     """3.8 and the manager's review of PR #30, item 4: the ``fg_event`` post-lease query of 20
     ``fg_dhcp`` chains with a 30-day lease, half a lease after their last ACK. An ``fg_dhcp``
-    chain's window starts at its last record and has no 7-day fallback (deviation c2), so the
-    query reads about 15 days of the site's ``system`` lines; under 0.5 s."""
+    chain's window starts at its last record and has no 7-day fallback (deviation c2); that
+    record lies 15 days back, before the lookup's days, so the window starts at the first of
+    them (W5-G deviations; the lease's stored record is its last record) and the query reads
+    more than 12 days of the site's ``system`` lines; under 0.5 s."""
     lines: list[_Timed] = []
 
     def measure() -> None:
@@ -1664,18 +2298,21 @@ def test_the_post_lease_query_of_long_fortigate_leases_is_fast(
     chains = [m.chain for m in outcome.matches]
     assert len(chains) == 20
     half = timedelta(seconds=LONG_LEASE // 2 - 60)
+    first = _first_read(event_site, LONG_AT)
+    assert LONG_AT - half < first
     for chain in chains:
         assert chain is not None
         assert chain.lease is not None
         assert chain.lease.source_table == "fg_dhcp"
         assert chain.lease.last_dhcp_evidence == LONG_AT - half
         assert chain.confidence in ("high", "medium")
+    assert "lookback_clamped_to_window" in _keys(outcome)
     (timed,) = lines
     assert len(timed.calls) == 1
     _sql, parameters = executed.one("FROM fg_event", "extra ->> ")
     moments = _moments(parameters)
     low, high = min(moments), max(moments)
-    assert (low, high) == (LONG_AT - half, max(chain.at for chain in chains if chain))
+    assert (low, high) == (first, max(chain.at for chain in chains if chain))
     with event_site.connect() as connection:
         read = connection.execute(
             text(
@@ -1684,7 +2321,7 @@ def test_the_post_lease_query_of_long_fortigate_leases_is_fast(
             ),
             {"low": low, "high": high},
         ).scalar_one()
-    assert read >= 14 * EVENT_ROWS
+    assert read >= 12 * EVENT_ROWS
     assert timed.seconds < 0.5, f"the post-lease query took {timed.seconds:.3f} s"
 
 
@@ -1735,23 +2372,19 @@ def test_the_post_lease_query_of_a_hundred_chains_is_fast(
 
 @pytest.mark.perf
 def test_the_converted_row_query_of_a_hundred_chains_is_fast(
-    event_site: Engine, timer: _Timer, executed: _Executed
+    event_site: Engine, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """3.8: the round-7 converted-row query of 2.7 for the MACs of 100 chains on
-    ``ix_fg_dhcp_mac_time`` over the 100-day cap (no fallback), at the load generator's
-    FortiGate DHCP rate over 400 days (the chains' MACs on the staff Wi-Fi: read, every chain's
-    rows returned, and no move under D33's key), with its branch for the chains' addresses on
-    ``ix_fg_dhcp_ip_time`` (deviation c2) in the same statement, under 0.2 s. The addresses are
-    no planning constant (``ARRAY(SELECT unnest(…))``): on TimescaleDB the 100 days are 100
-    one-day chunks, each planned with the statement's lists."""
-    moves: list[_Timed] = []
-
-    def measure() -> None:
-        moves.append(timer.time(Attributor, "_missed_moves"))
-        executed.record(event_site)
-
-    outcome = _guard_lookup(event_site, LookupRequest(at=MT_AT, public_ip=PUBLIC), measure)
-    timer.report("round-7 converted-row query")
+    ``ix_fg_dhcp_mac_time``, at the load generator's FortiGate DHCP rate over 400 days (the
+    chains' MACs on the staff Wi-Fi: read, every chain's rows returned, and no move under D33's
+    key), with its branch for the chains' addresses on ``ix_fg_dhcp_ip_time`` (deviation c2) in
+    the same statement, under 0.2 s (the best of :data:`ROUNDS`, #179). The 100-day cap (no
+    fallback) reaches before the lookup's days, so the query reads from the first of them, more
+    than 12 days (W5-G deviations; a lookup never reads the whole cap any more). The addresses
+    are no planning constant (``ARRAY(SELECT unnest(…))``): on TimescaleDB each day is a one-day
+    chunk, planned with the statement's lists."""
+    request = LookupRequest(at=MT_AT, public_ip=PUBLIC)
+    outcome, rounds, best = _best_lookup(event_site, request, "round-7 converted-row query", capsys)
     assert len(outcome.matches) == 100
     for match in outcome.matches:
         chain = match.chain
@@ -1760,14 +2393,16 @@ def test_the_converted_row_query_of_a_hundred_chains_is_fast(
         assert chain.lease.last_dhcp_evidence is not None
         assert chain.at - chain.lease.last_dhcp_evidence > attribution.MISSED_MOVE_WINDOW
     assert all(m.chain is not None and m.chain.confidence != "low" for m in outcome.matches)
-    (timed,) = moves
-    assert len(timed.calls) == 1
-    sql, parameters = executed.one("WITH ORDINALITY", "JOIN fg_dhcp")
-    executed.stop()
-    assert sql.count("JOIN fg_dhcp") == 2
-    assert "fg_dhcp.ip = ANY (array((SELECT unnest(" in sql
-    moments = _moments(parameters)
-    assert min(moments) == MT_AT - attribution.MISSED_MOVE_WINDOW
+    first = _first_read(event_site, MT_AT)
+    assert first > MT_AT - attribution.MISSED_MOVE_WINDOW
+    for each in rounds:
+        assert len(each.split.missed.calls) == 1
+        sql, parameters = each.executed.one("WITH ORDINALITY", "JOIN fg_dhcp")
+        assert sql.count("JOIN fg_dhcp") == 2
+        assert "fg_dhcp.ip = ANY (array((SELECT unnest(" in sql
+        assert min(_moments(parameters)) == first
+    assert "lookback_clamped_to_window" in _keys(outcome)
+    sql, parameters = best.executed.one("WITH ORDINALITY", "JOIN fg_dhcp")
     with event_site.connect() as connection:
         rows = connection.exec_driver_sql(sql, parameters).all()
     # The MAC branch reads every chain's rows; the address branch (deviation c2) reads the
@@ -1776,14 +2411,86 @@ def test_the_converted_row_query_of_a_hundred_chains_is_fast(
     assert {
         (str(ip).startswith("172.20.60."), interface, held) for _n, ip, interface, _vd, held in rows
     } == {(True, "vlan60", False)}
-    assert timed.seconds < 0.2, f"the converted-row query took {timed.seconds:.3f} s"
+    seconds = best.split.missed.seconds
+    assert seconds < CONVERTED_BOUND, (
+        f"the converted-row query took {seconds:.3f} s (best of {ROUNDS})"
+    )
+
+
+@pytest.mark.perf
+def test_the_recorded_moves_of_a_hundred_chains_are_fast(
+    moves_site: Engine, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """3.8 and issue #127: the converted-row check of the 100 ``mt_dhcp`` chains with the moves
+    their lease job recorded, under 0.2 s together (the best of :data:`ROUNDS`, #179): one more
+    query, for the leases whose window starts before the lookup's days (all 100: their last
+    DHCP record is 150 days old), returns each lease's :data:`RECORDED_TIMES` times, decoded and
+    tested in memory. None lies in a window, so every chain stays as it was, and the look-back
+    is still noted (the recorded moves only ever add one). Every lease is at the bound the lease
+    job keeps (contract deviation #127-1: 1,000 times, ``refs.MOVE_TIMES_CAP``), so no lease
+    decodes more."""
+    returned: list[dict[int, tuple[MoveGroup, ...]]] = []
+
+    def measure(timer: _Timer) -> None:
+        read = Attributor._recorded_moves
+
+        def kept(self: Attributor, *args: Any) -> dict[int, tuple[MoveGroup, ...]]:
+            found = read(self, *args)
+            returned.append(found)
+            return found
+
+        timer.monkeypatch.setattr(Attributor, "_recorded_moves", kept)
+
+    request = LookupRequest(at=MT_AT, public_ip=PUBLIC)
+    title = f"recorded moves, {RECORDED_TIMES} times a lease"
+    outcome, rounds, best = _best_lookup(moves_site, request, title, capsys, measure)
+    assert len(outcome.matches) == 100
+    for match in outcome.matches:
+        chain = match.chain
+        assert chain is not None
+        assert chain.lease is not None
+        assert chain.lease.source_table == "mt_dhcp"
+        assert chain.confidence in ("high", "medium")
+    assert "lookback_clamped_to_window" in _keys(outcome)
+    for each in rounds:
+        assert len(each.split.missed.calls) == len(each.split.recorded.calls) == 1
+        sql, _parameters = each.executed.one("leases.moves")
+        assert "leases.moves IS NOT NULL" in sql
+    # Every round decoded every chain's moves (one that decodes nothing would be fast too).
+    assert len(returned) == ROUNDS
+    for found in returned:
+        assert len(found) == 100
+        assert {len(group.times) for groups in found.values() for group in groups} == {
+            RECORDED_TIMES
+        }
+    sql, parameters = best.executed.one("leases.moves")
+    with moves_site.connect() as connection:
+        rows = connection.exec_driver_sql(sql, parameters).all()
+    # The query read every chain's moves: 100 leases, each with all its times.
+    assert len(rows) == 100
+    assert {len(group["times"]) for _id, value in rows for group in value["groups"]} == {
+        RECORDED_TIMES
+    }
+    assert {value["truncated"] for _id, value in rows} == {True}
+    first = _first_read(moves_site, MT_AT)
+    assert all(
+        time < epoch_us(MT_AT - attribution.MISSED_MOVE_WINDOW) < epoch_us(first)
+        for _id, value in rows
+        for group in value["groups"]
+        for time in group["times"]
+    )
+    seconds = best.split.missed.seconds
+    assert seconds < MOVES_BOUND, (
+        f"the converted-row check took {seconds:.3f} s (best of {ROUNDS}, bound {MOVES_BOUND} s)"
+    )
 
 
 # -- the event site on compressed chunks (WP-C3; the manager's answer to Q1 of PR #30) ------------
 #
 # On TimescaleDB every chunk older than 7 days is compressed, and a compressed chunk's btree
 # indexes hold only its rows that are not compressed: the D8 probe, the post-lease queries and
-# the converted-row query, which read up to 100 days back, read such chunks for most requests.
+# the converted-row query, which read up to 12 days back (the lookup's days), read such chunks for
+# most requests.
 # Measured once on the Linux CI job, not a guard with its own bound: one follows only if a query
 # takes more than 1 s. The job log's line ``C3-compressed: d8_probe=…s lease_checks=…s
 # post_lease=…s post_lease_long=…s converted_row=…s`` gives the numbers.
@@ -1901,8 +2608,9 @@ def test_the_fortigate_dhcp_checks_on_compressed_chunks(
         assert _system_lines(site, min(moments), PROBE_AT, after=False) >= 7 * EVENT_ROWS
 
         # The round-5 lease checks of 20 fg_dhcp chains half a 7-day lease after their last ACK:
-        # each chain's fg_dhcp row of the moment, read from its lease's start (about 28 days, nine
-        # ACKs), and the post-lease query from that ACK.
+        # each chain's fg_dhcp row of the moment, read from its lease's start (about 31 days,
+        # nine ACKs) but no earlier than the first of the lookup's days (three ACKs; W5-G
+        # deviations), and the post-lease query from that ACK.
         outcome, (records, fg_lines), recorded = _measured_lookup(
             site, FG_AT, "_row_record", "_unconverted_lines"
         )
@@ -1918,22 +2626,25 @@ def test_the_fortigate_dhcp_checks_on_compressed_chunks(
         assert (len(records.calls), len(fg_lines.calls)) == (20, 1)
         starts = {lease.start for _attributor, lease, _at in records.calls}
         assert starts == {acked - 8 * timedelta(seconds=302_400)}
+        first = _first_read(site, FG_AT)
+        assert min(starts) < first
         with site.connect() as connection:
             acks = connection.execute(
                 text(
                     "SELECT count(*) FROM fg_dhcp WHERE ip <<= CAST('172.20.42.96/27' AS cidr) "
                     "AND time >= :start AND time <= :at"
                 ),
-                {"start": min(starts), "at": FG_AT},
+                {"start": first, "at": FG_AT},
             ).scalar_one()
-        assert acks == 20 * 9
+        assert acks == 20 * 3
         _sql, parameters = recorded.one("FROM fg_event", "extra ->> ")
         low = min(_moments(parameters))
         assert low == acked
         assert _system_lines(site, low, max(_moments(parameters)), after=True) >= 3 * EVENT_ROWS
 
         # The post-lease query of 100 mt_dhcp chains (the 7-day cap) and the converted-row query
-        # of their MACs and addresses over 100 days, in one lookup.
+        # of their MACs and addresses from the first of the lookup's days (the 100-day cap
+        # reaches before it), in one lookup.
         outcome, (lines, moves), recorded = _measured_lookup(
             site, MT_AT, "_unconverted_lines", "_missed_moves"
         )
@@ -1947,12 +2658,13 @@ def test_the_fortigate_dhcp_checks_on_compressed_chunks(
         assert low == MT_AT - attribution.UNCONVERTED_WINDOW
         assert _system_lines(site, low, max(_moments(parameters)), after=True) >= 7 * EVENT_ROWS
         sql, parameters = recorded.one("WITH ORDINALITY", "JOIN fg_dhcp")
-        assert min(_moments(parameters)) == MT_AT - attribution.MISSED_MOVE_WINDOW
+        assert min(_moments(parameters)) == _first_read(site, MT_AT)
         with site.connect() as connection:
             rows = connection.exec_driver_sql(sql, parameters).all()
         assert {n for n, _ip, _interface, _vd, _held in rows} == set(range(1, 101))
 
-        # The post-lease query of 20 fg_dhcp chains half a 30-day lease after their last ACK.
+        # The post-lease query of 20 fg_dhcp chains half a 30-day lease after their last ACK,
+        # which lies before the lookup's days: from the first of them.
         outcome, (long_lines,), recorded = _measured_lookup(site, LONG_AT, "_unconverted_lines")
         half = timedelta(seconds=LONG_LEASE // 2 - 60)
         chains = [m.chain for m in outcome.matches]
@@ -1962,9 +2674,9 @@ def test_the_fortigate_dhcp_checks_on_compressed_chunks(
         assert len(long_lines.calls) == 1
         _sql, parameters = recorded.one("FROM fg_event", "extra ->> ")
         low = min(_moments(parameters))
-        assert low == LONG_AT - half
+        assert low == _first_read(site, LONG_AT)
         high = max(_moments(parameters))
-        assert _system_lines(site, low, high, after=True) >= 14 * EVENT_ROWS
+        assert _system_lines(site, low, high, after=True) >= 12 * EVENT_ROWS
 
         seconds = {
             "d8_probe": probe.seconds,

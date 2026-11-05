@@ -45,6 +45,10 @@ dosyalarını kanıt kadar özenle saklayın: kişisel veri içerirler (KVKK).
 - Görev `\ARCILOGGER\Backup`, her gün 01:40 (Türkiye saati), LOCAL SERVICE hesabıyla; sunucu o
   saatte kapalıysa açıldıktan sonra çalışır. `pg_dump -Fc` ile, ARCILOGGER'ın kendi veritabanı
   rolüyle (parola şifreli gizli depodan, komut satırına yazılmadan).
+- Worker'ın veritabanı penceresi işi `db.window` (`db.retention_days` günden eski log satırlarını
+  siler) her gün 01:00'den sonra, yedek başlamadan önce çalışır, böylece ikisi karşılaşmaz;
+  yalnızca işin seyrek ikinci yeniden denemesi (01:45) ya da geç başlayan bir yedek ona denk
+  gelebilir ve böyle bir çalışma `R20-db-window` uyarısına sayılır.
 - Dosya: `D:\ARCILOGGER\backups\scheduled\arcilogger-YYYYAAGG-SSDDss.dump` ve yanında
   `….dump.json` (SHA-256, boyut, sürümler, şema sürümü). Yedek geçici bir adla yazılır,
   `pg_restore --list` ile denetlenir, sonra adlandırılır.
@@ -258,6 +262,57 @@ yedek (dün geceki, henüz kopyalanmamış) yalnızca kazara bozulmaya karşı d
 anına geri sarar. Yedekten sonraki kayıtlar kasadaki mühürlü günlük denetim dosyalarında ve
 bugünkü `spool\_audit` dosyasında kalır; geri yüklenen zincir yedeğin son kaydından devam eder.
 Her geri yüklemeyi (tarih, dosya, neden, kim) yazılı bir tutanakla kaydedin.
+
+**Sürüm geri alma ve şema geri dönüşü:** `Install-Arcilogger.ps1 -Rollback`, `-RestoreDatabase`
+olmadan kurulu sürümün şema başını bilmeyen bir sürüme dönerken (kurulu sürümde `0021_db_window` ya
+da sonrası varsa; [KURULUM.md](KURULUM.md) bölüm 13), hizmetler durduktan sonra ve program
+değiştirilmeden önce `& $db schema downgrade --to <revizyon> --json` çalıştırır: önceki sürümün şema
+başına iner, ama `0020_fg_traffic_transip_time`'ın (`0021_db_window`'un üzerine kurulduğu revizyon)
+altına hiç inmez ve yalnızca kurulumun kayıpsız saydığı revizyonlardan geçer (`$LosslessDowngrades`:
+`0022_lease_moves`, `0021_db_window`). `0021_db_window`'a inerken yalnızca `leases.moves` sütunu
+gider.
+`0020_fg_traffic_transip_time`'a inerken komut günlük bölümleri aylık bölümlerde birleştirir (her
+tablonun her ayı kendi işleminde); kurulumun ya da yükseltmenin yazdığı `db.retention_days` 30 ise
+400'e döner ve bunun için bir `settings.change` denetim kaydı (`system`) yazılır; yöneticinin
+verdiği bir değer kalır ve kayıt yazılmaz. Pencere işi yükseltmenin kendi değişikliğini (400 → 30)
+henüz denetim kaydına yazmadıysa komut önce o kaydı, aynı işlemde yazar. Başarısız olursa (`1`)
+birleştirilen aylar birleştirilmiş kalır, şema sürümü değişmez; komutu yeniden çalıştırmak kaldığı
+yerden sürdürür. Zaten o şemadaysa hiçbir şey yapmaz (`0`); bu sürümün bilmediği ya da
+veritabanınınkinden yeni bir şema `2` ile reddedilir; `3` veritabanına ulaşılamadığını söyler.
+Yeniden denemek de başarısız olursa geri dönüş yolu bir geri yüklemedir (geri almadan önceki bir
+yedek ya da `-Rollback -RestoreDatabase`).
+
+**`-Rollback -RestoreDatabase`** de bu bölümün kuralına uyar: kurulum programı yükseltme öncesi
+yedeği yeni bir veritabanına (`<ad>_restore_<zaman>`; şimdikinin sahibi, yerel ayarı, ayarları ve
+haklarıyla; `arcilogger-db restore` gibi her nesne kendi işleminde, ilk hatada durarak: tek bir
+işlem her tablo ve parça için bir kilit tutardı) geri yükler ve ancak sonra onu yeniden adlandırarak
+şimdikinin yerine koyar; yerine geçilen veritabanı `<ad>_replaced_<zaman>` adıyla saklanır ve
+`install\state.json` dosyasında listelenir (`replaced_databases`, her geri yüklemeninki). İki
+veritabanı da kaldığı ve `pg_restore` WAL'ını oraya yazdığı için geri yükleme PostgreSQL veri
+diskinde şimdiki veritabanının boyutu (`pg_database_size`), dörtte biri ve `max_wal_size` kadar boş
+alan ister (dörtte bir, bir güvenlik payıdır: yedekten sonra sıkıştırılan TimescaleDB parçaları
+sıkıştırılmamış geri gelir; sahada doğrula); kurulum programı bunu hiçbir şeyi değiştirmeden önce
+denetler, yetmezse reddeder (boş alan okunamazsa ya da PostgreSQL başka bir sunucudaysa yalnızca
+uyarır). Yeni veritabanı varsayılan tablo alanında (`pg_default`) oluşturulur; kurulum programı
+kendi veritabanını da oraya koyar. Yedekle geri yükleme arasında yazılan satırlar yalnızca yerine
+geçilen veritabanındadır; siz kaldırana kadar diskte yer tutar, kaldırmak sahibin kararıdır
+(yukarıdaki 4. adımdaki gibi). Başarısız bir geri yükleme şimdiki veritabanını olduğu gibi bırakır.
+Sürüm geri almada program klasörleri değiştirildikten sonra başarısız her geri yüklemede veritabanı
+hizmetleri (`ArciIngest`, `ArciApi`, `ArciWorker`, `ArciAdmin`) durur: önceki sürüm bu sürümün
+veritabanıyla çalıştırılmaz. `ARCILOGGER.previous` olmadan (yalnızca veritabanı) geri yükleme
+veritabanını değiştirmeye başladıktan sonra (şimdiki veritabanında `timescaledb_pre_restore()` ya da
+`CREATE DATABASE`) başarısız olursa da dururlar; ondan önce reddedilen bir geri yükleme (soruya `H`
+yanıtı, yedek dosyası yok, PostgreSQL'e ulaşılamıyor, yerel ayar libc değil, boş alan yetmiyor)
+hiçbir şeyi değiştirmemiştir ve hizmetler önceki durumlarına getirilir: otomatik başlatmada
+çalışanlar yeniden otomatik (gecikmeli) başlatmaya alınıp başlatılır, elle başlatmada çalışan
+başlatılır ve elle başlatmada kalır, elle başlatmada durmuş olanlar (başarısız bir yükseltmeden
+sonra) öyle kalır; kurulum programı bunu yazar ya da önceki durumuna getiremediği bir hizmeti, bunu
+yapan komutla birlikte adıyla yazar.
+TimescaleDB'de yerine geçilen veritabanı TimescaleDB'nin geri yükleme kipinde kalır
+(`timescaledb_pre_restore()`'un koyduğu ve yeniden adlandırmanın taşıdığı `timescaledb.restoring =
+on`; arka plan işleri çalışmaz): yeniden kullanmadan önce (yerine koymadan ya da ARCILOGGER'la
+okumadan önce) onda `SELECT timescaledb_post_restore();` çalıştırın; kurulum programı bunu
+çalıştırmaz, çünkü o veritabanının işlerini başlatırdı.
 
 **Yeni bir sunucuya (felaket sonrası):** (1) PostgreSQL'i ve ARCILOGGER'ın önkoşullarını
 [KURULUM.md](KURULUM.md)'ye göre kurun; (2) çevrim dışı ortamdan `arcilogger.toml`, `secret.key`

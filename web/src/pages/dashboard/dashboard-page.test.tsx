@@ -2,6 +2,8 @@ import { QueryClientProvider, focusManager } from '@tanstack/react-query';
 import { act, render, renderHook, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { FileWarning } from 'lucide-react';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import type { ReactNode } from 'react';
 import { MemoryRouter } from 'react-router-dom';
 
@@ -12,7 +14,7 @@ import {
   useDashboardSummary,
   useTodayCompanyUsage,
 } from '@/lib/api-hooks';
-import type { DashboardSummary, LicenseOut, Role } from '@/lib/api-types';
+import type { ApiErrorBody, DashboardSummary, LicenseOut, Role } from '@/lib/api-types';
 import {
   errorResponse,
   installFetch,
@@ -23,11 +25,27 @@ import {
 import { formatBytes } from '@/lib/format';
 import { handoff } from '@/lib/handoff';
 import { setLanguage } from '@/lib/i18n';
+import { ROLES } from '@/lib/permissions';
+import { SYSTEM_POLL_MS, useSystemDisk } from '@/lib/system-hooks';
+import type { SystemDisk } from '@/lib/system-types';
 import { renderApp, testQueryClient } from '@/test/render';
 import { DASHBOARD, licenseSample, RAW, USAGE } from '@/test/samples';
 
+import { BlockingCard } from './dashboard-cards';
+import { diskRequested } from './dashboard-model';
 import { DashCard } from './dashboard-parts';
-import { PARSE_FAILURES, withParseFailures } from './test-data';
+import { BLOCKING, PARSE_FAILURES, withBlocking, withParseFailures } from './test-data';
+
+/** `GET /system/disk` as the real API answered it (`e2e/samples/system-disk.json`, a Windows host). */
+const SYSTEM_DISK = JSON.parse(
+  readFileSync(join(process.cwd(), 'e2e', 'samples', 'system-disk.json'), 'utf8'),
+) as {
+  disk: SystemDisk;
+  errors: Record<
+    'forbidden',
+    { status: number; headers: Record<string, string>; body: ApiErrorBody }
+  >;
+};
 
 /**
  * The summary the API sent to `role` (captured per role; `hr` is refused), with a known
@@ -43,6 +61,7 @@ function serve(
   role: Role,
   change?: (summary: DashboardSummary) => void,
   license: LicenseOut | Response = licenseSample('trial'),
+  disk: () => Response | Promise<Response> = () => jsonResponse(200, SYSTEM_DISK.disk),
 ): RecordedRequest[] {
   return installFetch((request) => {
     switch (request.path) {
@@ -59,6 +78,12 @@ function serve(
       }
       case '/api/v1/usage/company':
         return jsonResponse(200, USAGE.company);
+      // `system.read`: administrators only.
+      case '/api/v1/system/disk': {
+        if (role === 'admin') return disk();
+        const refused = SYSTEM_DISK.errors.forbidden;
+        return jsonResponse(refused.status, refused.body, refused.headers);
+      }
       case '/api/v1/raw': {
         const line =
           RAW.lines[
@@ -78,6 +103,7 @@ const CARDS = [
   'card-seal',
   'card-credit',
   'card-clock',
+  'card-disk',
   'card-usage',
   'card-alerts',
   'card-sites',
@@ -90,6 +116,13 @@ async function shownCards(): Promise<string[]> {
   return CARDS.filter((id) => screen.queryByTestId(id) !== null);
 }
 
+/** Lets the requests still in flight answer (a request that should not be made, is not). */
+async function settle() {
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  });
+}
+
 afterEach(() => {
   vi.unstubAllGlobals();
 });
@@ -100,6 +133,7 @@ describe('Panel — blocks by permission', () => {
     renderApp('/');
     expect(await screen.findByRole('heading', { level: 1, name: 'Panel' })).toBeInTheDocument();
     await screen.findByTestId('card-ingest');
+    await screen.findByTestId('card-disk');
     expect(await shownCards()).toEqual(CARDS);
     const ingest = screen.getByTestId('card-ingest');
     expect(within(ingest).getByText('2/3 kaynak aktif')).toBeInTheDocument();
@@ -118,6 +152,9 @@ describe('Panel — blocks by permission', () => {
     expect(screen.getByTestId('card-credit')).toHaveTextContent('~6 yıl yeter');
     expect(screen.getByTestId('card-credit')).not.toHaveTextContent('Eşiğin altında');
     expect(screen.getByTestId('card-clock')).toHaveTextContent('Normal');
+    expect(
+      within(screen.getByTestId('card-clock')).getByRole('link', { name: 'Sistem sayfasını aç' }),
+    ).toHaveAttribute('href', '/system');
     const alerts = screen.getByTestId('card-alerts');
     expect(within(alerts).getByRole('link', { name: /Yüksek 2/ })).toHaveAttribute(
       'href',
@@ -199,7 +236,10 @@ describe('Panel — blocks by permission', () => {
     serve('auditor');
     renderApp('/');
     await screen.findByTestId('card-seal');
-    expect(await shownCards()).toEqual(CARDS.filter((id) => id !== 'card-alerts'));
+    // Nor the disk card (no system.read).
+    expect(await shownCards()).toEqual(
+      CARDS.filter((id) => id !== 'card-alerts' && id !== 'card-disk'),
+    );
     // The auditor may not open "Kaynaklar" or "Sistem": no links there.
     expect(within(screen.getByTestId('card-ingest')).queryByRole('link')).not.toBeInTheDocument();
     expect(within(screen.getByTestId('card-clock')).queryByRole('link')).not.toBeInTheDocument();
@@ -251,6 +291,124 @@ describe('Panel — blocks by permission', () => {
     expect(screen.getByText('Sunucu hatası.')).toBeInTheDocument();
     expect(await screen.findByTestId('card-usage')).toBeInTheDocument();
     expect(screen.queryByTestId('card-ingest')).not.toBeInTheDocument();
+  });
+});
+
+describe('Panel — disk card (Wave 4 contract 2.8.3)', () => {
+  const diskCalls = (calls: RecordedRequest[]) =>
+    calls.filter((call) => call.path === '/api/v1/system/disk');
+
+  /** The Panel's cards in page order. */
+  function pageOrder(): string[] {
+    return Array.from(document.querySelectorAll<HTMLElement>('[data-testid^="card-"]'))
+      .map((card) => card.dataset.testid ?? '')
+      .filter((id) => CARDS.includes(id));
+  }
+
+  it('administrator: right after the clock card, the captured drives, linking to Sistem', async () => {
+    const calls = serve('admin');
+    renderApp('/');
+    const card = await screen.findByTestId('card-disk');
+    expect(pageOrder().slice(4, 6)).toEqual(['card-clock', 'card-disk']);
+    expect(within(card).getByRole('heading', { name: 'Disk' })).toBeInTheDocument();
+    const drives = within(card).getAllByTestId('drive-meter');
+    expect(drives[0]).toHaveTextContent('D:Veri sürücüsü%59 dolu');
+    expect(drives[1]).toHaveTextContent('C:Sistem sürücüsü%39 dolu');
+    expect(within(card).getAllByTestId('disk-card-forecast')[1]).toHaveTextContent(
+      'Tahmin için en az 7 günlük ölçüm gerekiyor (3/7).',
+    );
+    expect(within(card).getByRole('link', { name: 'Sistem sayfasını aç' })).toHaveAttribute(
+      'href',
+      '/system',
+    );
+    // Six health cards: three a row, then all six in one row.
+    expect(card.parentElement?.className).toMatch(/\blg:grid-cols-3 2xl:grid-cols-6\b/);
+    expect(card.parentElement).toBe(screen.getByTestId('card-clock').parentElement);
+    // The first load is the user's.
+    expect(diskCalls(calls).map((call) => call.headers.get(BACKGROUND_HEADER))).toEqual([null]);
+  });
+
+  it('only with system.read: the others neither ask for the disks nor see the card', async () => {
+    for (const role of ['auditor', 'viewer', 'hr'] satisfies Role[]) {
+      const calls = serve(role);
+      const view = renderApp('/');
+      await screen.findByTestId('card-usage');
+      await settle();
+      expect(screen.queryByTestId('card-disk')).not.toBeInTheDocument();
+      expect(diskCalls(calls)).toEqual([]);
+      if (role === 'auditor') {
+        // Five health cards keep their five columns.
+        expect(screen.getByTestId('card-clock').parentElement?.className).toMatch(
+          /\b2xl:grid-cols-5\b/,
+        );
+      }
+      view.unmount();
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('no card while the disks load: it appears with the answer', async () => {
+    let answer: (response: Response) => void = () => undefined;
+    const pending = new Promise<Response>((resolve) => {
+      answer = resolve;
+    });
+    serve('admin', undefined, undefined, () => pending);
+    renderApp('/');
+    await screen.findByTestId('card-clock');
+    await settle();
+    expect(screen.queryByTestId('card-disk')).not.toBeInTheDocument();
+    // Only the summary's skeleton is a loading state; the five cards are on screen.
+    expect(screen.queryByRole('status', { name: 'Yükleniyor' })).not.toBeInTheDocument();
+    answer(jsonResponse(200, SYSTEM_DISK.disk));
+    expect(await screen.findByTestId('card-disk')).toHaveTextContent('%59 dolu');
+  });
+
+  it('no card and no message when the disks are refused or fail (the Sistem page shows it)', async () => {
+    const answers = [
+      () => {
+        const refused = SYSTEM_DISK.errors.forbidden;
+        return jsonResponse(refused.status, refused.body, refused.headers);
+      },
+      () => errorResponse(500, 'internal_error', { tr: 'Sunucu hatası.' }),
+    ];
+    for (const disk of answers) {
+      const calls = serve('admin', undefined, undefined, disk);
+      const view = renderApp('/');
+      await screen.findByTestId('card-clock');
+      await waitFor(() => {
+        expect(diskCalls(calls)).toHaveLength(1);
+      });
+      await settle();
+      expect(screen.queryByTestId('card-disk')).not.toBeInTheDocument();
+      expect(screen.queryByText('Sunucu hatası.')).not.toBeInTheDocument();
+      expect(screen.queryByText('Bu işlem için yetkiniz yok.')).not.toBeInTheDocument();
+      expect(screen.queryByText('Panel bilgileri alınamadı.')).not.toBeInTheDocument();
+      view.unmount();
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('"Yenile" asks for the disks again as the user\'s request; a failed answer hides the card', async () => {
+    let failing = false;
+    const calls = serve('admin', undefined, undefined, () =>
+      failing
+        ? errorResponse(500, 'internal_error', { tr: 'Sunucu hatası.' })
+        : jsonResponse(200, SYSTEM_DISK.disk),
+    );
+    renderApp('/');
+    await screen.findByTestId('card-disk');
+    failing = true;
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: 'Yenile' }));
+    await waitFor(() => {
+      expect(screen.queryByTestId('card-disk')).not.toBeInTheDocument();
+    });
+    expect(diskCalls(calls).map((call) => call.headers.get(BACKGROUND_HEADER))).toEqual([
+      null,
+      null,
+    ]);
+    expect(screen.getByTestId('card-clock')).toBeInTheDocument();
+    expect(screen.queryByText('Sunucu hatası.')).not.toBeInTheDocument();
   });
 });
 
@@ -332,6 +490,162 @@ describe('Panel — parse failures (contract 2.17)', () => {
   });
 });
 
+describe('Panel — blocking card (Wave 5 contract 2.3.1)', () => {
+  /** The blocking card's sentence: the day, how late, the documentation reference. */
+  const BODY =
+    'En eski damgalanmamış gün 10.10.2026; damgası 49 saat gecikti. (ZAMAN-DAMGASI.md bölüm 5.5)';
+
+  it('administrator: red, at the top above the health cards, linking to that day', async () => {
+    serve('admin', (summary) => {
+      summary.seal = withBlocking(summary).seal;
+    });
+    renderApp('/');
+    const card = await screen.findByTestId('dashboard-blocking');
+    expect(card).toHaveTextContent('Kapanmış günler zaman damgası bekliyor');
+    expect(card).toHaveTextContent(BODY);
+    expect(card).not.toHaveTextContent(/uyumlu|uyumu|garanti|complian|guarantee/i);
+    // Polite: the banner above every page already announces `unstamped_days` at once.
+    expect(card).toHaveAttribute('role', 'status');
+    expect(card.className).toMatch(/\bbg-danger-soft\b/);
+    expect(card.querySelector('svg')).not.toBeNull();
+    expect(
+      within(card).getByRole('link', { name: 'Günü Mühürleme sayfasında aç' }),
+    ).toHaveAttribute('href', '/sealing?month=2026-10&day=2026-10-10');
+    // Above every card, and none of them: no `h3`, no `card-*` id, the grid unchanged.
+    await screen.findByTestId('card-disk');
+    expect(
+      card.compareDocumentPosition(screen.getByTestId('card-ingest')) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(within(card).queryByRole('heading')).not.toBeInTheDocument();
+    expect(card.getAttribute('data-testid')).not.toMatch(/^card-/);
+    expect(await shownCards()).toEqual(CARDS);
+    expect(screen.getByTestId('card-ingest').parentElement?.className).toMatch(
+      /\b2xl:grid-cols-6\b/,
+    );
+    expect(screen.getByTestId('card-seal')).toHaveTextContent('Henüz mühürlenmedi');
+  });
+
+  it('auditor: the card and its link (seal.read)', async () => {
+    serve('auditor', (summary) => {
+      summary.seal = withBlocking(summary).seal;
+    });
+    renderApp('/');
+    const card = await screen.findByTestId('dashboard-blocking');
+    expect(card).toHaveTextContent(BODY);
+    expect(within(card).getByRole('link')).toHaveAttribute(
+      'href',
+      '/sealing?month=2026-10&day=2026-10-10',
+    );
+    expect(await shownCards()).toEqual(
+      CARDS.filter((id) => id !== 'card-alerts' && id !== 'card-disk'),
+    );
+  });
+
+  it('no card while `blocking` is null, nor from an API that does not send it', async () => {
+    serve('admin', (summary) => {
+      summary.seal = withBlocking(summary, null).seal;
+    });
+    const view = renderApp('/');
+    await screen.findByTestId('card-seal');
+    expect(screen.queryByTestId('dashboard-blocking')).not.toBeInTheDocument();
+    view.unmount();
+
+    // An API before Wave 5 sends no `blocking` at all.
+    serve('admin', (summary) => {
+      if (summary.seal) delete (summary.seal as { blocking?: unknown }).blocking;
+    });
+    renderApp('/');
+    await screen.findByTestId('card-seal');
+    expect(screen.queryByTestId('dashboard-blocking')).not.toBeInTheDocument();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it('report viewer and HR: no seal box, so no card', async () => {
+    const calls = serve('viewer', (summary) => {
+      summary.seal = withBlocking(summary).seal;
+    });
+    const view = renderApp('/');
+    await screen.findByTestId('card-ingest');
+    expect(await shownCards()).toEqual([
+      'card-ingest',
+      'card-parse-failures',
+      'card-usage',
+      'card-sites',
+      'card-categories',
+    ]);
+    expect(screen.queryByTestId('dashboard-blocking')).not.toBeInTheDocument();
+    expect(calls.some((call) => call.path === '/api/v1/dashboard/summary')).toBe(true);
+    view.unmount();
+
+    serve('hr');
+    renderApp('/');
+    await shownCards();
+    expect(screen.queryByTestId('dashboard-blocking')).not.toBeInTheDocument();
+  });
+
+  it('goes away with the next answer once the day is stamped', async () => {
+    let blocking: typeof BLOCKING | null = BLOCKING;
+    serve('admin', (summary) => {
+      summary.seal = withBlocking(summary, blocking).seal;
+    });
+    renderApp('/');
+    await screen.findByTestId('dashboard-blocking');
+    blocking = null;
+    await userEvent.click(screen.getByRole('button', { name: 'Yenile' }));
+    await waitFor(() => {
+      expect(screen.queryByTestId('dashboard-blocking')).not.toBeInTheDocument();
+    });
+    expect(screen.getByTestId('card-seal')).toBeInTheDocument();
+  });
+
+  it('English, whole hours (never rounded up), one hour in the singular', () => {
+    setLanguage('en');
+    try {
+      const { rerender } = render(
+        <MemoryRouter>
+          <BlockingCard
+            blocking={{ oldest_unstamped_day: '2026-10-10', hours_late: 1048.9 }}
+            to="/sealing?month=2026-10&day=2026-10-10"
+          />
+        </MemoryRouter>,
+      );
+      const card = screen.getByTestId('dashboard-blocking');
+      expect(card).toHaveTextContent('Closed days are waiting for a time stamp');
+      expect(card).toHaveTextContent(
+        'The oldest unstamped day is 10.10.2026; its time stamp is 1,048 hours late. (TIME-STAMPING.md section 5.5)',
+      );
+      expect(
+        within(card).getByRole('link', { name: 'Open the day on the sealing page' }),
+      ).toBeVisible();
+      rerender(
+        <MemoryRouter>
+          <BlockingCard
+            blocking={{ oldest_unstamped_day: '2026-10-10', hours_late: 1 }}
+            to={null}
+          />
+        </MemoryRouter>,
+      );
+      expect(screen.getByTestId('dashboard-blocking')).toHaveTextContent(
+        'its time stamp is 1 hour late.',
+      );
+    } finally {
+      setLanguage('tr');
+    }
+  });
+
+  it('without a page to open, the text alone', () => {
+    render(
+      <MemoryRouter>
+        <BlockingCard blocking={BLOCKING} to={null} />
+      </MemoryRouter>,
+    );
+    const card = screen.getByTestId('dashboard-blocking');
+    expect(card).toHaveTextContent(BODY);
+    expect(within(card).queryByRole('link')).not.toBeInTheDocument();
+  });
+});
+
 describe('DashCard', () => {
   it('wraps a long title instead of cutting it, and links from its footer', () => {
     const title = 'Çok uzun bir başlık: dünkü mühür, kontör ve saat sapması';
@@ -369,12 +683,6 @@ describe('Panel — licence (contract 8.4)', () => {
   const usageCalls = (calls: RecordedRequest[]) =>
     calls.filter((call) => call.path.startsWith('/api/v1/usage'));
 
-  async function settle() {
-    await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 50));
-    });
-  }
-
   it('usage analytics off: a locked card, no /usage/company request, the health boxes unchanged', async () => {
     const calls = serve('admin', undefined, licenseSample('trial_expired'));
     renderApp('/');
@@ -385,6 +693,8 @@ describe('Panel — licence (contract 8.4)', () => {
       '/settings/license',
     );
     expect(await screen.findByTestId('card-ingest')).toHaveTextContent('2/3 kaynak aktif');
+    // The disk card is 5651 Temel: the same in every licence state.
+    expect(await screen.findByTestId('card-disk')).toBeInTheDocument();
     for (const id of ['card-seal', 'card-credit', 'card-clock', 'card-alerts', 'card-calendar'])
       expect(screen.getByTestId(id)).toBeInTheDocument();
     for (const id of ['card-usage', 'card-sites', 'card-categories'])
@@ -532,5 +842,32 @@ describe('Panel — polling', () => {
     const summary = count(calls, '/dashboard/summary');
     expect(summary).toHaveLength(2);
     expect(summary[1]?.headers.get(BACKGROUND_HEADER)).toBe('1');
+  });
+
+  it('the disk (system.read only) refreshes every 30 s in the background; "Yenile" is the user\'s', async () => {
+    expect(SYSTEM_POLL_MS).toBe(30_000);
+    const disk: SystemDisk = { checked_at: '2026-10-12T09:00:00Z', drives: [] };
+    const calls = installFetch(() => jsonResponse(200, disk));
+    const granted = (role: Role) =>
+      new Set(ROLES.find((item) => item.id === role)?.permissions ?? []);
+    for (const role of ['auditor', 'hr', 'viewer'] as const) {
+      renderHook(() => useSystemDisk(diskRequested(granted(role))), { wrapper });
+    }
+    await act(() => vi.advanceTimersByTimeAsync(60_000));
+    expect(count(calls, '/system/disk')).toEqual([]);
+
+    const { result } = renderHook(() => useSystemDisk(diskRequested(granted('admin'))), {
+      wrapper,
+    });
+    await act(() => vi.advanceTimersByTimeAsync(10));
+    await act(() => vi.advanceTimersByTimeAsync(60_000));
+    await act(() => result.current.refresh());
+    const asked = count(calls, '/system/disk');
+    expect(asked.map((call) => call.headers.get(BACKGROUND_HEADER))).toEqual([
+      null,
+      '1',
+      '1',
+      null,
+    ]);
   });
 });

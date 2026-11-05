@@ -163,9 +163,11 @@ That is a valid state, but until sources are added the installer's firewall open
 sender and nothing is recorded (with `-SkipFirewall` every sender is recorded as `unknown-<ip>`,
 its parser chosen by content); the silent-source alert (R15) watches no source and the Panel's
 "Log alımı" box says "İzlenen kaynak yok". Add one `[[sources]]` entry for every device that sends
-syslog, at least your firewall and your core router (the DHCP server): remove the `#` in front of
-the example lines in the file and use your device's name and address
-([DEVICE-SETUP.md](DEVICE-SETUP.md) section 4). Then run the installer again or the commands of
+syslog, at least your firewall and your core router (when the DHCP server is the MikroTik or
+ARP-LOG is used): remove the `#` in front of the example lines in the file and use your device's
+name and address ([DEVICE-SETUP.md](DEVICE-SETUP.md) section 4). The FortiGate's DHCP records
+count as lease evidence only when they come from a source entered with `type = "fortigate"`
+([DEVICE-SETUP.md](DEVICE-SETUP.md) section 2.4). Then run the installer again or the commands of
 section 4; `& $core config-check` no longer warns about sources.
 
 Device setup: [DEVICE-SETUP.md](DEVICE-SETUP.md). After a test message from every device, **every
@@ -178,9 +180,11 @@ Get-Content D:\ARCILOGGER\state\collector-status.json
 ```
 
 The firewall admits 514 only from the `[[sources]]` addresses. A source without a file sends from
-another address than the configured one: [DEVICE-SETUP.md](DEVICE-SETUP.md) section 4. Check
-the core router in particular (MikroTik; DHCP and ARP-LOG, the core of the 5651 access
-records).
+another address than the configured one: [DEVICE-SETUP.md](DEVICE-SETUP.md) section 4. The
+source that sends the lease evidence (the core MikroTik router: DHCP and ARP-LOG records; on
+FortiGate-only networks the FortiGate: DHCP event records) is the core of the 5651 access records;
+check it in particular: the **Kira kanıtı** (lease evidence) card of the **Kaynaklar** page shows
+whether usable records arrive from it.
 
 ### Persons and device assignments
 
@@ -193,17 +197,31 @@ administrator, on the **Cihazlar ve Kişiler** page:
    both are empty on a new installation. On the **Departmanlar ve VLAN'lar** tab add the
    departments first (persons and the person CSV refer to them), then every VLAN or subnet of
    the organisation with **VLAN ekle** (add a VLAN): the network address with its prefix length
-   (e.g. `10.0.20.0/24`, host bits zero), the VLAN id (1–4094, its number on the network: the
-   VLAN number of a lease comes from the DHCP server's name, `dhcp.server_vlan_regex`, e.g.
-   `dhcp20` → 20; empty for a network without one such as a transit network), a name and,
-   optionally, the purpose, the DHCP server's name on the router (e.g. `dhcp20`), a department,
-   the **Misafir ağı** (guest network) flag (a guest network that leaves through another exit
-   than the FortiGate, [DEVICE-SETUP.md](DEVICE-SETUP.md) section 5) and notes. A device is in
-   the VLAN of its VLAN number or of the network its IP address is in: it takes that VLAN's
-   name and, without a person, its department; a smaller network inside another one (e.g. a
-   `/25` inside a `/24`) comes first.
+   (e.g. `10.0.20.0/24`, host bits zero), the VLAN id (1–4094, its number on the network: the VLAN
+   number of a MikroTik lease comes from the DHCP server's name, `dhcp.server_vlan_regex`, e.g.
+   `dhcp20` → 20, that of a FortiGate lease from the network holding the address; empty for a
+   network without one such as a transit network), a name and, optionally, the purpose, the DHCP
+   server's name (MikroTik: its name on the router, e.g. `dhcp20`; FortiGate: the DHCP server's
+   interface name; when one interface carries several DHCP servers, e.g. for relayed networks, the
+   name can be given to one network only and stays empty on the others), a department, the **Misafir
+   ağı** (guest network) flag (a guest network that leaves through another exit than the FortiGate,
+   [DEVICE-SETUP.md](DEVICE-SETUP.md) section 5) and notes. A device is in the VLAN of its VLAN
+   number or of the network its IP address is in: it takes that VLAN's name and, without a person,
+   its department; a smaller network inside another one (e.g. a `/25` inside a `/24`) comes first.
    The network, the VLAN id and the DHCP server are unique. Collection, sealing, 5651 lookups
    and usage work without VLANs; devices then get no VLAN name and no VLAN department.
+
+   With FortiGate DHCP, add every network the FortiGate serves by DHCP, even without a VLAN
+   number: FortiGate chains of addresses outside the entered networks are shown with low
+   confidence (`fortigate_dhcp_no_network`). If you add or change a network later, rebuild the
+   leases from the day of that network's first FortiGate DHCP record (the first day in the
+   details of the `R20-lease:fortigate-dhcp-subnet` alert) to today in Settings → Application
+   settings → 5651 lookup and lease timeline → Rebuild the leases (at most 31 days per request):
+   a network applies to past leases only after a rebuild; until then the chains concerned are
+   shown with low confidence. Enter each DHCP scope as exactly one network: do not enter a
+   smaller network inside a scope or one wide network that spans several scopes (ARCILOGGER
+   follows a client's change of address network by network; [DEVICE-SETUP.md](DEVICE-SETUP.md)
+   section 2.4).
 2. Add persons, or import them from CSV: download the template
    (`name;department;title;email;employee_no;active;notes;usage_excluded`; only `name` is required,
    `usage_excluded` evet/hayır leaves the person out of the usage reports), save it in Excel as
@@ -230,40 +248,66 @@ Database settings are read and changed on **Ayarlar → Uygulama ayarları** (Se
 Application settings) in the web interface or, on the console, with `arcilogger-db settings`. Every change is written to the **hash-chained audit log**
 (`settings.change`) with the old and the new value; `--by` is the ARCILOGGER user name of whoever
 made the change (`tolga` in the examples below). Upgrades and the seed never reset a changed
-value.
+value. An upgrade may convert an old setting into a new one; that is written to the audit log too
+([INSTALL.md](INSTALL.md) section 13).
+
+The internet exits (`nat.egresses`) are normally entered with the exit editor in Settings →
+Application settings → 5651 lookup and lease timeline → Internet exits (NAT): the editor checks
+every field before it saves, and the "Kayıtlarda görülen NAT adresleri" (NAT addresses seen in
+the logs) table under it shows the NAT addresses and interfaces of the FortiGate records
+([SETTINGS.md](SETTINGS.md) section 1). The example below is the console equivalent (`<public IP>`
+is the line's public address):
 
 ```powershell
 & $db settings list
-& $db settings get nat.wan_transip
+& $db settings get nat.egresses
 & $db settings set lookup.tolerance_seconds 60 --by tolga
-& $db settings set nat.wan_transip '<FortiGate WAN address>' --by tolga
+'{"hat-1": {"mode": "direct", "public": ["<public IP>"]}}' | & $db settings set nat.egresses - --by tolga
 '["<MAC 1>", "<MAC 2>"]' | & $db settings set devices.infrastructure_macs - --by tolga
 ```
 
-Values are JSON (no floats). A text value may be written without JSON quotes (like the WAN address
-above). A list or an object — any value with double quotes — is **piped in**, with `-` in place of
-the value: Windows PowerShell 5.1 drops the double quotes of command-line arguments it passes to
-programs. Always check the result with `settings get`. Settings are read from the database when
-they are used; no service restart is needed. To be set on site ([CORRELATION.md](CORRELATION.md)
-section 8):
+Values are JSON (no floats). A text value may be written without JSON quotes. A list or an object —
+any value with double quotes — is **piped in**, with `-` in place of the value: Windows PowerShell
+5.1 drops the double quotes of command-line arguments it passes to programs. Always check the result
+with `settings get`. Settings are read from the database when they are used; no service restart is
+needed. To be set on site ([CORRELATION.md](CORRELATION.md) section 8):
 
 | Setting | When |
 |---|---|
-| `nat.public_ips`, `nat.wan_transip` | once the FortiGate's public / WAN address is confirmed (double NAT, [ASSUMPTIONS.md](ASSUMPTIONS.md) A9); with several ISP lines, each behind its own router, `nat.wan_transip` stays empty ([INSTALL.md](INSTALL.md) section 0.1) |
+| `nat.egresses` (internet exits) | for each internet line: the public IP (and whether it may change), the FortiGate's NAT address on that line, its interfaces (dstintf; required with two or more lines), the NAT type and port preservation ("Kept" only after a measurement); the addresses of the FortiGate's NAT towards a DMZ, another VLAN, a VPN or a branch with the type "Not an internet exit". Read the values from the "Kayıtlarda görülen NAT adresleri" table ([DEVICE-SETUP.md](DEVICE-SETUP.md) section 2.6); exits converted from the old NAT settings at the upgrade: [INSTALL.md](INSTALL.md) section 13 |
 | `devices.infrastructure_macs` | MAC addresses of the core router, the FortiGate and the switches (no IP-conflict alarms for them) |
-| `lease.server_seconds` | DHCP servers whose lease time differs from one day (`lease.default_seconds`), e.g. the guest network's: `{"<server name>": <seconds>}` (piped in) |
+| `lease.server_seconds` | DHCP servers whose lease time differs from one day (`lease.default_seconds`), e.g. the guest network's: `{"<server name>": <seconds>}` (piped in); the name is the DHCP server's name on a MikroTik, the DHCP interface's name on a FortiGate. FortiGate leases use these times only when the lease time in the record cannot be used (`dhcp.fortigate_use_logged_lease`) |
 | `devices.oui_file` | optional vendor names: put the file at `C:\ProgramData\ARCILOGGER\oui.csv` ([CORRELATION.md](CORRELATION.md) section 1, "Vendor") |
-| `lookup.port_hint` | only after the ISP router is confirmed to keep source ports |
+| `lookup.srcmac_interfaces` | optional: only interfaces with device identification on, whose gateway is the FortiGate and that were checked on site with two known clients ([DEVICE-SETUP.md](DEVICE-SETUP.md) section 2.5); never an interface that faces a routed (L3) network |
+| `dhcp.fortigate_interfaces_excluded` | with FortiGate DHCP: the interfaces of DHCP-over-IPsec servers (`server-type ipsec`) ([DEVICE-SETUP.md](DEVICE-SETUP.md) section 2.4) |
+| `dhcp.fortigate_logids`, `dhcp.fortigate_dhcp_msgs` | only when the site check shows another logid or `dhcp_msg` value (e.g. release records come under another logid; [DEVICE-SETUP.md](DEVICE-SETUP.md) section 2.4) |
+| `dhcp.fortigate_use_logged_lease` | stays on (the default): the lease time in the FortiGate DHCP Ack record is that lease's time |
+| `dhcp.fortigate_traffic_extends` | stays off (recommended); switched on only when it is verified on site that renewals are not logged and the organisation, with its legal counsel, accepts the wrong-person risk its help text describes ([DEVICE-SETUP.md](DEVICE-SETUP.md) section 2.4) |
+| `dhcp.fortigate_format_verified` | switched on once the site check of the FortiGate DHCP record format passes; after every FortiOS upgrade switched off, checked again and switched on again ([DEVICE-SETUP.md](DEVICE-SETUP.md) section 2.4) |
+
+After changing any `dhcp.fortigate_*` setting (except `dhcp.fortigate_format_verified`, which only
+changes the lookup and report texts) or a FortiGate source (Settings → Sources), rebuild the leases
+from the first affected day to today in Settings → Application settings → 5651 lookup and lease
+timeline → Rebuild the leases (at most 31 days per request): the change applies to past days only
+after the rebuild. After a **change that adds evidence** (a logid or `dhcp_msg` value mapped, a
+FortiGate source added), a 5651 lookup for moments of those days may answer without a chain until
+then (the safe side). After a **change that removes or narrows evidence** (an interface added to
+`dhcp.fortigate_interfaces_excluded`, `dhcp.fortigate_traffic_extends` or
+`dhcp.fortigate_use_logged_lease` switched off, a logid or `dhcp_msg` value removed, a FortiGate
+source removed or retyped), the leases built under the old settings stay, at their old confidence,
+until the rebuild, so a moment can still name the earlier device. **Rebuild at once**, from the
+first affected day.
 
 ## 7. Limits of this release
 
 - **No department history:** the person in a 5651 result is the assignment at the moment of the
   event, the department is the person's current one (the report says so). A past assignment
   cannot be corrected in the interface (section 5).
-- Only **Uyum Durumu and Sistem** are still placeholders. Working pages: Panel, Kaynaklar and
-  Canlı Akış (section 9), Arama, 5651 Sorgu, Kullanım (section 16), Güvenlik, Mühürleme, Kanıt
-  Paketleri, Cihazlar ve Kişiler (section 12), Raporlar (Panel, Güvenlik and Raporlar: section
-  15), Denetim Kaydı, Ayarlar (users and roles, licence: section 17).
+- Every page of the menu works: Panel, Kaynaklar and Canlı Akış (section 9), Arama, 5651 Sorgu,
+  Kullanım (section 16), Güvenlik, Mühürleme, Kanıt Paketleri, Cihazlar ve Kişiler (section 12),
+  Raporlar (Panel, Güvenlik and Raporlar: section 15), Uyum Durumu (section 9,
+  [COMPLIANCE-STATUS.md](COMPLIANCE-STATUS.md)), Denetim Kaydı, Ayarlar (users and roles,
+  licence: section 17), Sistem ([COMPLIANCE-STATUS.md](COMPLIANCE-STATUS.md) section 4).
 - **Paid modules** (licence, [LICENSING.md](LICENSING.md)): Usage analytics (the Kullanım page,
   the dashboard's usage sections), Scheduled usage reports (the Raporlar page) and Bulk import
   (CSV). All are on during the trial; a module that is off shows its page locked. Everything else
@@ -310,6 +354,8 @@ section 8):
 
 Every day:
 
+- Every morning look at the **Uyum Durumu** page (compliance status); each card says what it
+  checks and what to do ([COMPLIANCE-STATUS.md](COMPLIANCE-STATUS.md)).
 - **Panel**: log intake, today's parse failures, yesterday's seal, credit, clock offset and open
   alerts at a glance. **Güvenlik** page: look into the new alerts, set the ones you work on to
   İnceleniyor.
@@ -371,6 +417,11 @@ Every day:
   | `R20-config-change` | Significant configuration change (a guarded setting): retention switched on or its days lowered, the replica switched off or retargeted, a log source switched off or removed, production → test, the Kamu SM credentials changed, a root or a legal fingerprint added, a Zamane client uploaded or promoted (high); SMTP or the backup switched off (medium). If no known administrator made it, **Cancel** a held change or **Revert** an applied one on the **Change history** page and look at the audit log |
   | `R20-lease` | Lease evidence problem: lease evidence (FortiGate DHCP, MikroTik DHCP or ARP-LOG) stopped, FortiGate DHCP records are not used or could not be converted, renewals do not appear, two DHCP sources on one network, a source's clock is off or a setting is not verified on site; the cause and what to do are in the alert's details (Sources → Lease evidence; [ALERTS.md](ALERTS.md) section 2) |
   | `R20-nat` | Internet exit definition problem: the old NAT settings could not be converted, the exits setting cannot be read, an old NAT setting changed during a rollback, or a NAT address no exit defines is in use (Settings → Application settings → 5651 lookup and lease timeline → Internet exits (NAT)) |
+  | `R20-filter` | No web or DNS filter record for 24 hours on an expected day (`alerts.filter_quiet_hours`, `alerts.filter_days`; Uyum Durumu card 7) |
+  | `R20-db-window` | The database window job (`db.window`, daily after 01:00) failed: days older than the window (`db.retention_days`, 30 days) were not dropped; the worker retries the job, and the next successful run resolves the alert (medium). Or an archive reload has made no progress since the previous run (`R20-db-window:reload-<number>`, medium; with its number and days): a `loading` reload, or a `queued` one while nothing is `loading` and the queue does not move; a reload queued behind a progressing load raises nothing: days being loaded are never dropped, so the database grows beyond the window meanwhile; check ArciIngest (`Get-Service ArciIngest`). Resolved by itself once the reload or the queue before it moves on, or the reload ends |
+  | `R20-renewal` | Re-stamping needed (high): the `state\renewal.json` report has a stamp due for re-stamping (`due`) or one whose certificate expired without re-stamping (`uncovered`), or the `Renew` task failed twice in a row (`failures_in_a_row` ≥ 2; a refused run counts too, for example while no root certificate is pinned). Check the `Renew` task on the System page; to see what would be re-stamped without taking a stamp, `& $core renew --dry-run`. Resolved by itself once the report shows no such stamp and the task has not failed twice in a row. Stamps stay valid for the moment they were made |
+  | `R20-cert` | Time-stamp certificate problem: a certificate in use is on a revocation list (`crl-revoked`, critical; contact the time-stamp provider, legal review is recommended), or the certificate of a stamp not re-stamped expires within 30 days or expired without re-stamping (high). Resolved only once every input (the re-stamping report, the scheduled verifications, the newest sealed day's stamp, the revocation lists) can be read |
+  | `R20-crl` | Revocation list not current (medium): an issuer in use has no list fetched and verified in the last `tsa.crl_max_age_days` (7) days that is not past its own `nextUpdate`; judged from the `state\crl` folder only. Check the `CrlFetch` task on the System page and the `failures` in `state\crl\index.json` (`& $core crl status`); a stored list that was changed or deleted counts too. Kamu SM's and TÜRKTRUST's list publication intervals are to be verified on site (K10/T4). Resolved by itself once a current list arrives |
   | `new-log-source` | A sender that is not in the configuration (if the firewall let it through) |
   | `wrong-transport` | A message arrived over a transport its source does not allow (`[[sources]] transport`): a forged UDP message or a wrong device setting; the message was not recorded |
 
@@ -458,14 +509,15 @@ Every change, import and export is written to the audit log.
   network keeps the VLAN's name, department and flag. Deleting asks for a confirmation: the
   devices of that network lose the VLAN name and the VLAN's department, also on the usage pages;
   raw logs, leases and stored 5651 results do not change. A change takes effect like a
-  department change, at once: the device list and the next 5651 lookups use the new table, the
-  usage pages take the VLAN's department by its VLAN number when they are read. The VLAN number
-  of the usage is that of the VLAN holding the address; when no VLAN holds it, the lease's (from
-  the DHCP server's name, else the network, when the lease was built). When this number changes
-  (a renumbered VLAN, a new one or one with a new network; for the addresses that leave a VLAN's
-  network — a deleted or moved VLAN — only the hours without a lease), the usage of the recent
-  days is recomputed by itself (`usage.reattribute`, `usage.auto_rebuild_days`); older days need
-  `usage rebuild` (section 13).
+  department change, at once: the device list and the next 5651 lookups use the new table, the usage
+  pages take the VLAN's department by its VLAN number when they are read. To FortiGate DHCP leases,
+  however, a network added or changed applies only once the leases are rebuilt (section 5). The VLAN
+  number of the usage is that of the VLAN holding the address; when no VLAN holds it, the lease's
+  (from the DHCP server's name, else the network, when the lease was built). When this number
+  changes (a renumbered VLAN, a new one or one with a new network; for the addresses that leave a
+  VLAN's network — a deleted or moved VLAN — only the hours without a lease), the usage of the
+  recent days is recomputed by itself (`usage.reattribute`, `usage.auto_rebuild_days`); older days
+  need `usage rebuild` (section 13).
 - **İçe/Dışa aktar** (import/export): the whole lists as CSV (`;`-separated for Excel, times in
   local time, evet/hayır for yes/no); the files hold personal data, keep them only as long as
   needed. An exported person list imports back as updates: its `id` column names each person,

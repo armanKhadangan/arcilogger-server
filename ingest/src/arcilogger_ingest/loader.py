@@ -1,5 +1,5 @@
-"""Load one batch in **one transaction**: rows, failures, sources, alerts, the search counts and
-the offsets.
+"""Load one batch in **one transaction**: rows, failures, sources, alerts, the search counts, the
+clock samples and the offsets.
 
 Exactly-once rests on two things done here:
 
@@ -17,6 +17,9 @@ counts are exactly-once like the rows: a line whose typed row ``COPY`` refused c
 ``tbl = ''`` (the search over typed tables does not find it either), a line without a ``messages``
 row (``rawlog.invalid``, or a ``messages`` row ``COPY`` refused) does not count. One ingest writes
 a file, and a finished file is never written again, so the counts need no lock of their own.
+The clock samples ``source_clock_samples`` (:mod:`arcilogger_db.clocksamples`, ADR-0016 D28) are
+written in the same step from the same lines: per source, received minute and device clock
+offset, the lines whose ``messages`` row loaded with a device time of its own.
 
 A row that passed :func:`~arcilogger_db.rowcheck.check_row` should always load. If ``COPY``
 still rejects something (``DataError``/``IntegrityError``, or a value the driver cannot encode),
@@ -42,6 +45,7 @@ from sqlalchemy.exc import DataError, DBAPIError, IntegrityError
 
 from arcilogger_core.timeutil import isoformat_site, utc_now
 from arcilogger_db.bulk import copy_rows
+from arcilogger_db.clocksamples import ClockKey, offset_of, upsert_samples
 from arcilogger_db.kinds import CLIENT_IP
 from arcilogger_db.models import Alert, IngestOffset, ParseFailure, Source
 from arcilogger_db.rowcheck import check_row
@@ -78,6 +82,7 @@ class _CopyFailedError(Exception):
 _Loaded = tuple[Sequence[PreparedLine], bool]
 _EPOCH: Final = datetime(1970, 1, 1, tzinfo=UTC)
 _HOUR: Final = timedelta(hours=1)
+_MINUTE: Final = timedelta(minutes=1)
 
 
 @dataclass(frozen=True, slots=True)
@@ -200,6 +205,7 @@ class Loader:
             new_sources = self._update_sources(connection, batch.sources.values())
             self._step("counts")
             upsert_counts(connection, _count_keys(loaded))
+            upsert_samples(connection, _clock_keys(loaded))
             self._step("commit")
         return LoadResult(rows=counts, failures=failures, new_sources=new_sources)
 
@@ -376,6 +382,7 @@ class Loader:
         self, connection: Connection, seen: Iterable[SourceSeen]
     ) -> tuple[str, ...]:
         created: list[str] = []
+        # fixed lock order, the same as IngestService._sync_configured_sources
         for source in sorted(seen, key=lambda s: s.name):
             inserted = connection.execute(
                 insert(Source)
@@ -482,6 +489,29 @@ def _count_keys(loaded: Iterable[_Loaded]) -> Counter[CountKey]:
     for message, table, typed, lines in groups.values():
         keys[count_key(message, table, typed)] += lines
     return keys
+
+
+def _clock_keys(loaded: Iterable[_Loaded]) -> dict[ClockKey, int]:
+    """The ``source_clock_samples`` keys of the loaded lines: those of
+    :func:`~arcilogger_db.clocksamples.clock_key` of the ``messages`` row, grouped first by the
+    source, the received minute (an integer, exact at a minute's end) and the offset, so a key is
+    made once per group; a line whose time is its receive time has none."""
+    groups: dict[tuple[str, int, int], int] = {}
+    for lines, _typed_loaded in loaded:
+        for line in lines:
+            rows = line.rows
+            if not rows or rows[0][0] != "messages":
+                continue
+            message = rows[0][1]
+            time, received = message["time"], message["time_received"]
+            if time == received:
+                continue
+            group = (message["source"], (received - _EPOCH) // _MINUTE, offset_of(time, received))
+            groups[group] = groups.get(group, 0) + 1
+    return {
+        ClockKey(source, _EPOCH + minute * _MINUTE, seconds): lines
+        for (source, minute, seconds), lines in groups.items()
+    }
 
 
 def _copy_lines(

@@ -4,7 +4,7 @@
     arcilogger-db current    [--config PATH]   current and newest revision
     arcilogger-db check      [--config PATH]   connectivity, encoding, schema, TimescaleDB,
                                                partitions
-    arcilogger-db partitions [--config PATH]   create missing monthly partitions (plain
+    arcilogger-db partitions [--config PATH]   create missing daily partitions (plain
                                                PostgreSQL; the worker also does it daily)
     arcilogger-db settings list              [--config PATH]
     arcilogger-db settings get KEY           [--config PATH]
@@ -25,7 +25,8 @@
                                                the search summary table (ADR-0015): hours held,
                                                files still to count
     arcilogger-db search-counts rebuild --source S --day YYYY-MM-DD
-                                               count one spool file again from its rows
+                                               count one spool file again from its rows (not
+                                               one being reset)
     arcilogger-db search-counts verify [--hours 2]
                                                recount the recent hours from the rows and
                                                compare (1 on a difference)
@@ -37,6 +38,9 @@
     arcilogger-db leases prepare-rollback [--config PATH]
                                                before a rollback (the installer): FortiGate
                                                leases to low confidence, prints the count
+    arcilogger-db schema downgrade --to REVISION [--json] [--config PATH]
+                                               before a rollback (the installer): the schema
+                                               down to the previous version's revision
     arcilogger-db version
 
 ``settings set`` is the supported way to change a database setting until the settings page
@@ -52,15 +56,32 @@ nat.egresses - --by tolga``.
 and the worker job ``search.counts_backfill`` fills in for files loaded before revision
 ``0016_search``: ``rebuild`` locks the file's ``ingest_offsets`` row first (ingest waits with that
 file until the recount commits, so a file still being loaded can be recounted too) and clears its
-``counts_from_line``; ``verify`` reads rows and counts in one read-only snapshot and also prints
-how many names are not stored in lower case (``fg_dns.qname``, ``fg_web.hostname``: ``domain:``
-assumes lower case).
+``counts_from_line``; it refuses a file whose reset is under way (``counts_from_line = 0``,
+unfinished, W5-G-25: ingest is deleting its rows to load it again, and a recount would take that
+mark off), which ``status`` shows as resetting; ``verify`` reads rows and counts in one read-only
+snapshot and also prints how many names are not stored in lower case (``fg_dns.qname``,
+``fg_web.hostname``: ``domain:`` assumes lower case).
 
 ``leases prepare-rollback`` is the lease step of ``Install-Arcilogger.ps1 -Rollback`` without
 ``-RestoreDatabase`` (ADR-0016, round 6; :mod:`arcilogger_db.lease_rollback`): the previous
 version cannot read FortiGate DHCP lines, so every ``fg_dhcp`` lease is set to ``low`` in one
 transaction before the program is swapped; ``upgrade`` (its seed) restores the ones the previous
 version left as they were and prints both counts with the lease rebuild range.
+
+``schema downgrade`` is the schema step of ``Install-Arcilogger.ps1 -Rollback`` without
+``-RestoreDatabase`` back to a version that does not have this version's head revision (issues
+#122, #164; :mod:`arcilogger_db.downgrade`): down to that version's head, never below
+``0020_fg_traffic_transip_time``, through the lossless revisions only (``0022_lease_moves``,
+``0021_db_window``), run after the services stop and before the program is swapped:
+alembic's downgrade under the migrations' lock, held for the session (``0021``'s downgrade
+commits a step per table and month, and a second run goes on where a failed one stopped), and the
+one ``settings.change`` entry (actor ``system``) when it changed ``db.retention_days``, after
+the entry of the upgrade's own change when that was still unaudited and the downgrade dropped its
+status row. Exit 0 also when the database is at the revision already (nothing done); 1 when the
+downgrade failed or refused; 2 for a revision this version does not ship or one not below the
+database's; 3 when the database cannot be reached. ``--json`` prints ``{"from", "to",
+"downgraded", "audit_id", "retention_days": {"before", "after"} | null, "upgrade_audit_id"}`` on
+success.
 
 ``license …`` (offline licensing, licensing contract 6.8) is the only command that loads the
 licence code (:mod:`arcilogger_db.licensing`, imported inside its handler): ``upgrade``,
@@ -70,8 +91,8 @@ licence code (:mod:`arcilogger_db.licensing`, imported inside its handler): ``up
 
 Exit codes: 0 success / up to date, 1 needs attention (not migrated, outdated, warnings; a
 backup, check or prune that failed; a licence refused, none installed, or the licence code
-unavailable), 2 usage or configuration error (a restore refused before any change), 3 the
-database cannot be reached.
+unavailable; a search-counts rebuild refused for a file being reset), 2 usage or configuration
+error (a restore refused before any change), 3 the database cannot be reached.
 """
 
 from __future__ import annotations
@@ -82,7 +103,7 @@ import json
 import logging
 import sys
 from collections.abc import Sequence
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -121,16 +142,12 @@ from arcilogger_db.backup import (
     run_backup,
     verify_backup,
 )
+from arcilogger_db.downgrade import DowngradeUsageError, check_target, downgrade_schema
 from arcilogger_db.engine import make_engine
 from arcilogger_db.lease_rollback import prepare_rollback
 from arcilogger_db.migrate import current_revisions, head_revisions, upgrade
 from arcilogger_db.models import IngestOffset, SearchCount
-from arcilogger_db.partitions import (
-    add_months,
-    ensure_partitions,
-    month_of,
-    partition_status,
-)
+from arcilogger_db.partitions import DAYS_AHEAD_WARNING, ensure_partitions, partition_status
 from arcilogger_db.searchcounts import rebuild_stream, verify
 from arcilogger_db.seed import SeedReport
 from arcilogger_db.settings import DEFAULT_SETTINGS
@@ -191,7 +208,7 @@ def cmd_upgrade(config: Config) -> int:
     print(f"TimescaleDB: {_timescale_text(timescale)}")
     if result.partitions.tables:
         print(
-            f"Aylık bölümler: {len(result.partitions.tables)} tablo, "
+            f"Bölümler: {len(result.partitions.tables)} tablo, "
             f"{len(result.partitions.created)} yeni bölüm"
         )
     if seed.rollback_restored is not None:
@@ -227,11 +244,11 @@ def cmd_partitions(config: Config) -> int:
     if not report.tables:
         print("Bölümlenmiş tablo yok (TimescaleDB hypertable kullanılıyor).")
         return EXIT_OK
-    print(f"Aylık bölümler: {len(report.tables)} tablo, {len(report.created)} yeni bölüm")
+    print(f"Bölümler: {len(report.tables)} tablo, {len(report.created)} yeni bölüm")
     for name, rows in sorted(report.moved.items()):
         print(f"  {name}: varsayılan bölümden {rows} satır taşındı")
     if status.covered_until is not None:
-        print(f"Kapsanan son ay: {status.covered_until:%Y-%m}")
+        print(f"Kapsanan son gün: {status.covered_until:%Y-%m-%d}")
     return EXIT_OK
 
 
@@ -241,7 +258,7 @@ def _timescale_text(status: Any) -> str:
     if status.get("enabled"):
         compression = "sıkıştırma açık" if status.get("compression") else "sıkıştırma yok"
         return f"açık (sürüm {status.get('version')}, {compression})"
-    storage = "aylık bölümler" if status.get("storage") == "partitions" else "düz tablolar"
+    storage = "bölümler" if status.get("storage") == "partitions" else "düz tablolar"
     return f"kapalı ({status.get('reason') or '-'}; {storage})"
 
 
@@ -317,7 +334,7 @@ def cmd_check(config: Config) -> int:
                     report["partitions"] = {
                         "tables": partitions.tables,
                         "covered_until": (
-                            f"{partitions.covered_until:%Y-%m}"
+                            f"{partitions.covered_until:%Y-%m-%d}"
                             if partitions.covered_until
                             else None
                         ),
@@ -325,11 +342,11 @@ def cmd_check(config: Config) -> int:
                             t for t, rows in partitions.default_rows.items() if rows
                         ),
                     }
-                    next_month = add_months(month_of(site_day(utc_now())), 1)
-                    if partitions.covered_until is None or partitions.covered_until < next_month:
+                    horizon = site_day(utc_now()) + timedelta(days=DAYS_AHEAD_WARNING)
+                    if partitions.covered_until is None or partitions.covered_until < horizon:
                         warnings.append(
-                            "gelecek ayın bölümleri yok: arcilogger-db partitions çalıştırın "
-                            "(worker bunu her gün yapar)"
+                            "önümüzdeki günlerin bölümleri yok: arcilogger-db partitions "
+                            "çalıştırın (worker bunu her gün yapar)"
                         )
     except OperationalError as exc:
         raise _UnreachableError(_describe(exc)) from exc
@@ -696,6 +713,11 @@ def cmd_backup(config: Config, args: argparse.Namespace) -> int:
 VERIFY_HOURS_MAX = 31 * 24
 #: Files and differences listed one per line (the totals count all of them).
 SEARCH_COUNTS_LIST_MAX = 20
+#: ``ingest_offsets.counts_from_line`` of an unfinished file whose reset is under way (ingest's
+#: ``RESETTING``, W5-G-25): its offset is 0 and ingest deletes its rows in steps, then loads it
+#: again if its file is in the vault. A file loaded before ``0016_search`` is marked from line 2
+#: on.
+RESETTING = 0
 
 
 def _n(value: int) -> str:
@@ -738,14 +760,22 @@ def _search_counts_status(config: Config, args: argparse.Namespace) -> int:
         print("Sayılmayı bekleyen dosya yok [no file waits to be counted].")
         return EXIT_OK
     finished = sum(1 for row in pending if row[3])
+    resetting = sum(1 for row in pending if row[2] == RESETTING and not row[3])
     print(
         f"Sayılmayı bekleyen dosyalar [files waiting to be counted]: {_n(len(pending))} "
         f"({_n(finished)} bitmiş, worker işi search.counts_backfill sayar [finished, counted by "
-        f"the worker job]; {_n(len(pending) - finished)} hâlâ yükleniyor [still loading]). Bu "
-        "günlerin istatistikleri doğrudan sayılır [statistics of these days are counted "
-        "directly]."
+        f"the worker job]; {_n(len(pending) - finished - resetting)} hâlâ yükleniyor [still "
+        f"loading]; {_n(resetting)} sıfırlanıyor [resetting]). Bu günlerin istatistikleri "
+        "doğrudan sayılır [statistics of these days are counted directly]."
     )
     for source, day, from_line, done in pending[:SEARCH_COUNTS_LIST_MAX]:
+        if from_line == RESETTING and not done:
+            print(
+                f"  {source} {day}: sıfırlanıyor [resetting], satırları silinir, dosya "
+                "kasadaysa yeniden yüklenir [its rows are deleted, then loaded again if its file "
+                "is in the vault]"
+            )
+            continue
         state = "bitti [finished]" if done else "yükleniyor [loading]"
         before = (from_line or 1) - 1  # the lines loaded before the upgrade
         print(f"  {source} {day}: ilk {_n(before)} satır sayılmadı [lines not counted], {state}")
@@ -754,15 +784,27 @@ def _search_counts_status(config: Config, args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
-def _lock_file(connection: Connection, source: str, day: date) -> bool:
-    """Lock the file's ``ingest_offsets`` row (ingest's next batch of that file waits); whether its
-    ``counts_from_line`` is set."""
+def _lock_file(connection: Connection, source: str, day: date) -> tuple[int | None, bool]:
+    """Lock the file's ``ingest_offsets`` row (ingest's next batch of that file waits); its
+    ``counts_from_line`` and whether it is finished (``None, False`` without a row)."""
     row = connection.execute(
-        select(IngestOffset.counts_from_line)
+        select(IngestOffset.counts_from_line, IngestOffset.finished_at.is_not(None))
         .where(IngestOffset.source == source, IngestOffset.day == day)
         .with_for_update()
     ).one_or_none()
-    return row is not None and row[0] is not None
+    return (None, False) if row is None else (row[0], row[1])
+
+
+def _rebuild_resetting(source: str, day: date) -> str:
+    """The TR/EN text of a rebuild refused for a file whose reset is under way (W5-G-25)."""
+    return (
+        f"{source} {day}: dosya sıfırlanıyor, yeniden sayılmadı [the file is being reset, not "
+        "recounted]. Ingest satırlarını adım adım siliyor, dosya kasadaysa sonra onu "
+        "sayımlarıyla birlikte yeniden yükler; sıfırlama bitene kadar bu dosya için komut "
+        "reddedilir (search-counts status). [Ingest is deleting its rows step by step, then "
+        "loads the file again with its counts if it is in the vault; until the reset is over the "
+        "command is refused for this file (search-counts status).]"
+    )
 
 
 def _search_counts_rebuild(config: Config, args: argparse.Namespace) -> int:
@@ -775,7 +817,12 @@ def _search_counts_rebuild(config: Config, args: argparse.Namespace) -> int:
     engine = _engine(config)
     try:
         with engine.begin() as connection:
-            marked = _lock_file(connection, source, day)
+            from_line, finished = _lock_file(connection, source, day)
+            if from_line == RESETTING and not finished:
+                # A recount would take the reset's mark off between its steps: nothing written.
+                print(_rebuild_resetting(source, day), file=sys.stderr)
+                return EXIT_ATTENTION
+            marked = from_line is not None
             result = rebuild_stream(connection, source, day)
             if marked:
                 connection.execute(
@@ -900,6 +947,94 @@ LEASES_ACTIONS = {"prepare-rollback": _leases_prepare_rollback}
 
 def cmd_leases(config: Config, args: argparse.Namespace) -> int:
     return LEASES_ACTIONS[args.leases_command](config, args)
+
+
+# -- schema (issue #122) --------------------------------------------------------------------------
+
+
+def _schema_downgrade(config: Config, args: argparse.Namespace) -> int:
+    try:  # before connecting
+        revision = check_target(args.to)
+    except DowngradeUsageError as exc:
+        print(f"Şema geri alınmadı [schema not downgraded]: {exc}", file=sys.stderr)
+        return EXIT_USAGE
+    engine = _engine(config)
+    try:
+        try:
+            connection = engine.connect()
+        except OperationalError as exc:
+            raise _UnreachableError(_describe(exc)) from exc
+        with connection:
+            result = downgrade_schema(
+                connection,
+                revision,
+                timescale=config.database.timescale,
+                details={"via": "arcilogger-db", "os_user": _os_actor()[1]},
+            )
+    except DowngradeUsageError as exc:
+        print(f"Şema geri alınmadı [schema not downgraded]: {exc}", file=sys.stderr)
+        return EXIT_USAGE
+    except _UnreachableError:
+        raise
+    except Exception as exc:  # whatever stopped it: the installer must not swap the program
+        message = _describe(exc) if isinstance(exc, SQLAlchemyError) else str(exc)
+        print(_downgrade_failed(revision, message), file=sys.stderr)
+        return EXIT_ATTENTION
+    finally:
+        engine.dispose()
+    if args.json:
+        retention = None
+        if result.downgraded:
+            retention = {"before": result.retention_before, "after": result.retention_after}
+        document = {
+            "from": ",".join(result.before),
+            "to": ",".join(result.after),
+            "downgraded": result.downgraded,
+            "audit_id": result.audit_id,
+            "retention_days": retention,
+            "upgrade_audit_id": result.upgrade_audit_id,
+        }
+        print(json.dumps(document, ensure_ascii=False))
+        return EXIT_OK
+    if not result.downgraded:
+        print(
+            f"Şema zaten {revision} sürümünde; hiçbir şey değiştirilmedi [the schema is at "
+            f"{revision} already; nothing changed]."
+        )
+        return EXIT_OK
+    print(f"Şema geri alındı [schema downgraded]: {result.before[0]} → {', '.join(result.after)}")
+    if result.audit_id is not None:
+        print(
+            f"  db.retention_days: {_json(result.retention_before)} → "
+            f"{_json(result.retention_after)} (denetim kaydı [audit entry] #{result.audit_id}, "
+            "settings.change, system)"
+        )
+    if result.upgrade_audit_id is not None:
+        print(
+            "  db.retention_days: yükseltmenin denetlenmemiş değişikliği yazıldı [the "
+            "upgrade's unaudited change was written] (denetim kaydı [audit entry] "
+            f"#{result.upgrade_audit_id})"
+        )
+    return EXIT_OK
+
+
+def _downgrade_failed(revision: str, reason: str) -> str:
+    """The TR/EN text of a downgrade that failed or refused."""
+    return (
+        f"Şema {revision} sürümüne geri alınamadı [the schema was not downgraded to {revision}]: "
+        f"{reason}\n"
+        "Tamamlanan adımlar kalır; komutu yeniden çalıştırmak kaldığı yerden sürdürür. Yine "
+        "başarısız olursa veritabanını yedekten geri yükleyin (docs/YEDEKLEME.md bölüm 5). "
+        "[The steps completed stay; running the command again goes on where it stopped. If it "
+        "keeps failing, restore the database from a backup (docs/BACKUP.md section 5).]"
+    )
+
+
+SCHEMA_ACTIONS = {"downgrade": _schema_downgrade}
+
+
+def cmd_schema(config: Config, args: argparse.Namespace) -> int:
+    return SCHEMA_ACTIONS[args.schema_command](config, args)
 
 
 # -- license (offline licensing, contract 6.8) ---------------------------------------------------
@@ -1217,7 +1352,7 @@ def _build_parser() -> argparse.ArgumentParser:
         ("upgrade", "migrate to the newest schema and seed the defaults"),
         ("current", "show the current and the newest schema revision"),
         ("check", "connectivity, encoding, schema state, TimescaleDB and partitions"),
-        ("partitions", "create the missing monthly partitions (plain PostgreSQL)"),
+        ("partitions", "create the missing daily partitions (plain PostgreSQL)"),
     ):
         sub = commands.add_parser(name, help=help_text)
         # Accepted after the command too: `arcilogger-db upgrade --config X`.
@@ -1306,6 +1441,18 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     for sub in (leases, prepare):
         sub.add_argument("--config", type=Path, default=argparse.SUPPRESS)
+    schema = commands.add_parser("schema", help="the schema: the step before a rollback")
+    schema_actions = schema.add_subparsers(dest="schema_command", metavar="<action>")
+    downgrade = schema_actions.add_parser(
+        "downgrade",
+        help="before a rollback: the schema down to a revision (resumable, audited)",
+    )
+    downgrade.add_argument(
+        "--to", required=True, metavar="REVISION", help="the previous version's newest revision"
+    )
+    downgrade.add_argument("--json", action="store_true")
+    for sub in (schema, downgrade):
+        sub.add_argument("--config", type=Path, default=argparse.SUPPRESS)
     licence = commands.add_parser(
         "license", help="offline licence: state, request code, verify, install, remove"
     )
@@ -1349,6 +1496,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         handler = _search_counts_handler(args)
     if args.command == "leases" and getattr(args, "leases_command", None):
         handler = _leases_handler(args)
+    if args.command == "schema" and getattr(args, "schema_command", None):
+        handler = _schema_handler(args)
     if handler is None:
         parser.print_help()
         return EXIT_USAGE
@@ -1392,6 +1541,10 @@ def _search_counts_handler(args: argparse.Namespace) -> Any:
 
 def _leases_handler(args: argparse.Namespace) -> Any:
     return lambda config: cmd_leases(config, args)
+
+
+def _schema_handler(args: argparse.Namespace) -> Any:
+    return lambda config: cmd_schema(config, args)
 
 
 if __name__ == "__main__":

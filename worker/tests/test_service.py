@@ -180,8 +180,10 @@ def test_default_jobs_run_against_the_database(
         ("usage.today", "ok"),
         ("usage.reattribute", "skipped"),  # nothing changed
         ("usage.retention", "ok"),
+        ("db.window", "ok"),  # after 01:00; nothing sealed yet, so only the partitions
         ("reports.run_due", "ok"),
         ("reports.purge", "ok"),
+        ("system.sample", "ok"),
         ("search.counts_backfill", "skipped"),  # no file loaded before the summary table
     ]
     clock.now = tr(DAY, 9)
@@ -212,6 +214,10 @@ def test_default_jobs_run_against_the_database(
     assert incremental.details["inserted"] == 1
     partitions = db_session.scalars(select(JobRun).where(JobRun.job == "partitions.ensure")).one()
     assert set(partitions.details) == {"tables", "created", "moved", "duration_ms"}
+    sample = db_session.scalars(select(JobRun).where(JobRun.job == "system.sample")).one()
+    assert sample.details["day"] == DAY.isoformat()
+    history = json.loads(layout.system_history.read_text(encoding="utf-8"))
+    assert [entry["day"] for entry in history["days"]] == [DAY.isoformat()]
 
 
 def test_a_failing_daily_job_is_retried_with_a_growing_delay(

@@ -139,8 +139,13 @@ DEFAULT_SETTINGS: Final[Mapping[str, Any]] = {
     "evidence.min_free_gb": 20,
     # Largest total size of exports\ (GiB).
     "evidence.exports_max_gb": 100,
-    # 7.3 the database keeps less than the vault (default 400 days).
-    "db.retention_days": 400,
+    # 7.3 the database keeps less than the vault: the last 30 days of log rows (owner decision
+    # 2026-11-02, Wave 5 contract G1; was 400). The worker job db.window drops older days; an
+    # older day comes back from the sealed vault on request (archive reload, G4).
+    "db.retention_days": 30,
+    # G4: days reloaded from the vault stay this many days after their reload is ready, then
+    # the window job drops them again (they bring personal data back into the database, KVKK).
+    "db.reload_keep_days": 7,
     # --- Area E: alerts (spec 11 R15/R20) and their e-mail (docs/ALERTS.md, ADR-0010) ---------
     # Who gets alert e-mails and which; the SMTP connection itself is [smtp] in arcilogger.toml
     # (password: secret smtp.password). Starting values, not measured facts (ASSUMPTIONS E1-E6).
@@ -348,8 +353,18 @@ SETTING_ERRORS: Final[Mapping[str, tuple[str, str]]] = {
         "The first group must capture the VLAN number, e.g. ^dhcp(\\d+)$.",
     ),
     "setting_lease_seconds": (
-        "Her DHCP sunucusu için en az 60 saniye gerekir.",
-        "Each DHCP server needs at least 60 seconds.",
+        "Her DHCP sunucusu için 60 ile 604800 saniye (7 gün) arasında bir süre gerekir.",
+        "Each DHCP server needs a time between 60 and 604800 seconds (7 days).",
+    ),
+    "setting_arp_grace_above_interval": (
+        "ARP kaydı aralığından (arp.interval_seconds) uzun olamaz.",
+        "Cannot be longer than the ARP log interval (arp.interval_seconds).",
+    ),
+    "setting_arp_interval_below_grace": (
+        "Bırakmadan sonra ARP'yi yok sayma süresinden (arp.ignore_after_release_seconds) kısa "
+        "olamaz; o süreyi de kısaltın.",
+        "Cannot be shorter than the time ARP is ignored after a release "
+        "(arp.ignore_after_release_seconds); shorten that one too.",
     ),
     "setting_empty": ("Boş olamaz.", "Cannot be empty."),
     "setting_email_invalid": ("Geçersiz e-posta adresi.", "Invalid e-mail address."),
@@ -536,6 +551,7 @@ REAUTH_KEYS: Final[frozenset[str]] = frozenset(
     {key for key in DEFAULT_SETTINGS if key.startswith(("auth.", "privacy."))}
     | {
         "db.retention_days",
+        "db.reload_keep_days",
         "usage.retention_days",
         "reports.keep_days",
         "evidence.keep_days",
@@ -559,12 +575,20 @@ LOCKED_KEYS: Final[frozenset[str]] = frozenset({"devices.oui_file", "usage.psl_f
 INTEGER_RANGES: Final[Mapping[str, tuple[int, int | None]]] = {
     "lookup.tolerance_seconds": (0, 3600),
     "lookup.max_candidates": (1, 10_000),
-    "lookup.max_session_seconds": (60, None),
     "lookup.timeout_seconds": (1, 300),
     "lookup.srcmac_max_ips": (1, 16),
-    "lease.default_seconds": (60, None),
-    "lease.timeout_percent": (100, 1000),
-    "arp.interval_seconds": (60, None),
+    # #126: the days a 5651 lookup reads (arcilogger_worker.lookup.days) grow with the tolerance
+    # and the longest session (both before and after the moment), the DNS look-back and the
+    # longest lease timeout or ARP grace (lease or ARP interval x percent). These bounds keep
+    # them within one archive reload (14 days, archive_reload_too_large) for every accepted
+    # value: 2 x (1 h + 2 d + 1 min) + 7 d x 125 % stays under 13 days, which touch at most 14
+    # site days (worker/tests/test_lookup_reach.py). 7 days is FortiOS's default lease-time
+    # (DEVICE-SETUP.md section 2.4), and each server of lease.server_seconds has the same bounds.
+    "lookup.max_session_seconds": (60, 172_800),
+    "lookup.dns_lookback_seconds": (0, 604_800),
+    "lease.default_seconds": (60, 604_800),
+    "lease.timeout_percent": (100, 125),
+    "arp.interval_seconds": (60, 604_800),
     "worker.leases_lag_seconds": (0, 86400),
     "auth.idle_minutes": (1, 120),
     "auth.absolute_hours": (1, 24),
@@ -577,7 +601,9 @@ INTEGER_RANGES: Final[Mapping[str, tuple[int, int | None]]] = {
     "evidence.max_requests_per_hour": (1, None),
     "evidence.min_free_percent": (0, 99),
     "evidence.exports_max_gb": (1, None),
-    "db.retention_days": (1, None),
+    # G1: at least a week; the window job never drops a day that is not sealed yet anyway.
+    "db.retention_days": (7, None),
+    "db.reload_keep_days": (1, 30),
     # Area E (alerts): a value that would switch a check or the e-mail off is not accepted.
     "alerts.email_max_per_hour": (1, 1000),
     "alerts.email_digest_seconds": (0, 3600),
@@ -625,6 +651,9 @@ INTEGER_RANGES: Final[Mapping[str, tuple[int, int | None]]] = {
     "live.max_minutes": (5, 480),
     "live.backfill_lines": (0, 200),
 }
+#: The bounds of each server's lease time in ``lease.server_seconds``: those of
+#: ``lease.default_seconds`` (#126, above).
+LEASE_SERVER_SECONDS: Final = INTEGER_RANGES["lease.default_seconds"]
 #: Area E: most addresses ``alerts.email_recipients`` may list.
 MAX_EMAIL_RECIPIENTS: Final = 20
 #: Area E: the alert severities, lowest first (``alerts.email_min_severity``).
@@ -656,6 +685,57 @@ _TYPE_NAMES_EN: Final[Mapping[type, str]] = {
     list: "a list",
     dict: "an object",
 }
+
+
+#: Integer settings that may not be longer than another one -> the key that bounds them, with the
+#: codes of :data:`SETTING_ERRORS` for a change of either key: the lease timeline ignores ARP
+#: sightings after a release for at most one ARP interval (CORRELATION §1), so a longer grace would
+#: stop the lease job on every run.
+AT_MOST_SETTINGS: Final[Mapping[str, tuple[str, str, str]]] = {
+    "arp.ignore_after_release_seconds": (
+        "arp.interval_seconds",
+        "setting_arp_grace_above_interval",
+        "setting_arp_interval_below_grace",
+    ),
+}
+_RULE_KEYS: Final = frozenset(
+    set(AT_MOST_SETTINGS) | {bound for bound, *_ in AT_MOST_SETTINGS.values()}
+)
+#: pg_advisory_xact_lock key ("ARCISETR" as a signed 64-bit integer) of the rules between keys.
+RULES_LOCK_KEY: Final = int.from_bytes(b"ARCISETR", "big") - 2**63
+
+
+def check_settings_together(session: Session, values: Mapping[str, Any]) -> list[SettingValueError]:
+    """The rules between keys (:data:`AT_MOST_SETTINGS`) that the validated ``values`` of one
+    write break together with the stored settings: one :class:`SettingValueError` for each key of
+    a broken rule that ``values`` changes, an empty list when none. A key ``values`` does not
+    change counts with its stored value (or the shipped default); one that is not an integer
+    (written around the validator) breaks no rule here.
+
+    A write that changes a key of a rule first takes :data:`RULES_LOCK_KEY` for the rest of the
+    caller's transaction, so two writes of the two keys at once (each would pass against the
+    other's old value) are checked one after the other."""
+    errors: list[SettingValueError] = []
+    if any(key in values for key in _RULE_KEYS):
+        session.execute(select(func.pg_advisory_xact_lock(RULES_LOCK_KEY)))
+    for key, (bound, key_code, bound_code) in AT_MOST_SETTINGS.items():
+        if key not in values and bound not in values:
+            continue
+        value = values[key] if key in values else get_setting(session, key)
+        limit = values[bound] if bound in values else get_setting(session, bound)
+        if not (_integer(value) and _integer(limit)) or value <= limit:
+            continue
+        if key in values:
+            errors.append(SettingValueError(key, key_code, f"{key}: en çok {bound} kadar olabilir"))
+        if bound in values:
+            errors.append(
+                SettingValueError(bound, bound_code, f"{bound}: en az {key} kadar olmalı")
+            )
+    return errors
+
+
+def _integer(value: Any) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool)
 
 
 def _mac(key: str, value: Any) -> str:
@@ -737,10 +817,19 @@ def validate_setting(key: str, value: Any) -> Any:
                 f"{key}: ilk grup VLAN numarasını yakalamalı, örn. ^dhcp(\\d+)$",
             )
     if key == "lease.server_seconds":
+        low, high = LEASE_SERVER_SECONDS
         for server, seconds in value.items():
-            if type(seconds) is not int or seconds < 60:
+            if type(seconds) is not int or seconds < low:
                 raise SettingValueError(
-                    key, "setting_lease_seconds", f"{key}: {server!r} için en az 60 saniye gerekir"
+                    key,
+                    "setting_lease_seconds",
+                    f"{key}: {server!r} için en az {low} saniye gerekir",
+                )
+            if high is not None and seconds > high:
+                raise SettingValueError(
+                    key,
+                    "setting_lease_seconds",
+                    f"{key}: {server!r} için en çok {high} saniye girilebilir",
                 )
     if key == "privacy.notice_version" and not value.strip():
         raise SettingValueError(key, "setting_empty", f"{key}: boş olamaz")

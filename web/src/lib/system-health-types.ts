@@ -1,5 +1,5 @@
 /** Mirror of api/src/arcilogger_api/system_health/models.py (Wave 4 contract 2.6.1). */
-import type { DateTimeString } from './api-types';
+import type { DateTimeString, Float } from './api-types';
 import type { ServiceName } from './settings-types';
 
 export type TaskName =
@@ -13,7 +13,9 @@ export type TaskName =
   | 'ClockCheck'
   | 'Backup'
   | 'Requests'
-  | 'ApplySystem';
+  | 'ApplySystem'
+  | 'Renew'
+  | 'CrlFetch';
 
 export interface ServiceHealth {
   name: ServiceName;
@@ -36,7 +38,8 @@ export interface TaskHealth {
   task: TaskName;
   schedule_tr: string;
   schedule_en: string;
-  state: 'ok' | 'late' | 'missing' | 'not_used' | 'not_observable';
+  state: 'ok' | 'late' | 'missing' | 'not_used' | 'not_observable' | 'failed';
+  code: string | null;
   last_evidence_at: DateTimeString | null;
   evidence: string;
 }
@@ -59,8 +62,8 @@ export interface ClockSampleOut {
   time: DateTimeString;
   server: string | null;
   ok: boolean;
-  offset_ms: number | null;
-  delay_ms: number | null;
+  offset_ms: Float | null;
+  delay_ms: Float | null;
   stratum: number | null;
 }
 

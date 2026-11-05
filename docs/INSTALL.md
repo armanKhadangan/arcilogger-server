@@ -36,10 +36,10 @@ run, and the 5651 functions always run. Request code, licence file, modules and 
 | 6 | Copy and verify the bundle | Server |
 | 7 | Install ARCILOGGER | Server |
 | 8 | Install the root certificate on the admin PC | Admin PC |
-| 9 | First login (first administrator) | Server + browser |
+| 9 | First login (first administrator), first-run wizard | Server + browser |
 | 10 | Kamu SM connection (test → production) | Server |
 | 11 | Device setup | FortiGate, MikroTik |
-| 12 | Checks after installation; then [FIRST-STEPS.md](FIRST-STEPS.md) | Server |
+| 12 | Checks after installation (console, the Uyum Durumu and Sistem pages); then [FIRST-STEPS.md](FIRST-STEPS.md) | Server + browser |
 
 ## 0. Requirements
 
@@ -75,32 +75,48 @@ every night; the points below decide whether a 5651 lookup reaches the device an
 what the usage analytics show.
 
 - **One site:** an installation covers one site: an IPv4 network that reaches the internet through
-  one FortiGate and gets its addresses from one core MikroTik router (the DHCP server). Several
-  branches that use the same private address range are not supported in one installation: the same
-  network cannot be entered twice in the VLAN list, and the same address in two branches counts as
-  one address (it looks like an IP conflict). A network segment that reaches the internet through
-  another line or a VPN tunnel (e.g. guest Wi-Fi) has no FortiGate records: only its leases (DHCP,
-  `ARP-LOG`) arrive; a 5651 lookup by public IP and port cannot find a device in it, and the usage
-  analytics do not see that traffic ([DEVICE-SETUP.md](DEVICE-SETUP.md) section 5).
-- **Device and person attribution:** the step from an internal IP address to the MAC address,
-  the device and the person rests on the leases of the MikroTik DHCP server
-  (`assigned`/`deassigned`); the hourly `ARP-LOG` script on the core router (optional;
-  [DEVICE-SETUP.md](DEVICE-SETUP.md) section 3) adds static-IP devices and the gaps between
-  leases with **medium confidence**. The logs of the FortiGate's own DHCP server are stored and
-  sealed, but this version does not build leases from them. When only the FortiGate (or another
-  server that is not a MikroTik) hands out addresses and no MikroTik sends `ARP-LOG`, there are
-  no leases: a 5651 lookup ends at the FortiGate session and the internal IP address (no MAC,
-  device or person), and the usage analytics count per IP address.
-- **NAT:** the FortiGate's source NAT is supported. When the public address is on the FortiGate
-  itself (ISP router in bridge mode; several addresses go into the `nat.public_ips` list), public
-  IP + port identify the session **exactly**. When the FortiGate sits behind an ISP router (double
-  NAT), the router's NAT record is missing and the lookup ranks **candidate** sessions
-  ([CORRELATION.md](CORRELATION.md) section 3). There is one mapping for the FortiGate's WAN address
-  (`nat.wan_transip`): several ISP lines, each behind its own router, are not modelled in this
-  version. On such a network leave `nat.wan_transip` empty: if it is set, every candidate search is
-  limited to that line, and a request for the other line's address cannot find its session; left
-  empty, the source-NAT sessions of every line are candidates. 5651 lookups by IPv6 address are not
-  supported: the leases (DHCP, `ARP-LOG`) cover IPv4 addresses only.
+  one FortiGate and gets its addresses from the DHCP server of a MikroTik router or of the
+  FortiGate. Several branches that use the same private address range are not supported in one
+  installation: the same network cannot be entered twice in the VLAN list, and the same address in
+  two branches counts as one address (it looks like an IP conflict). A network segment that
+  reaches the internet through another line or a VPN tunnel (e.g. guest Wi-Fi) has no FortiGate
+  records: only its leases (DHCP, `ARP-LOG`) arrive; a 5651 lookup by public IP and port cannot
+  find a device in it, and the usage analytics do not see that traffic
+  ([DEVICE-SETUP.md](DEVICE-SETUP.md) section 5).
+- **Person and device matching (lease evidence):** the step from the internal IP address to
+  the MAC address, the device and the person rests on the DHCP server's lease records:
+  - **MikroTik as DHCP server:** the main MikroTik router's lease records (`assigned` /
+    `deassigned`) are used; the hourly `ARP-LOG` script on the main router (optional, written
+    on site; [DEVICE-SETUP.md](DEVICE-SETUP.md) section 3) adds static-IP devices and the gaps
+    between lease records with **medium confidence**.
+  - **FortiGate as DHCP server (FortiGate-only networks):** the FortiGate DHCP server's event
+    records (DHCP Ack / Release) feed the lease timeline. Their format comes from the FortiOS
+    documentation and one community sample; it is verified on site at the first installation
+    ([DEVICE-SETUP.md](DEVICE-SETUP.md) section 2.4), and until then reports say so. Only
+    records of sources configured as a FortiGate are used. Every network the FortiGate serves
+    by DHCP is entered on the Cihazlar ve Kişiler page, even without a VLAN number: chains of
+    addresses outside the entered networks are shown with low confidence. A network added or
+    changed later applies to past leases only once the leases are rebuilt
+    ([FIRST-STEPS.md](FIRST-STEPS.md) section 5). Static-IP devices have no lease: the chain
+    ends at the internal IP; on interfaces whose gateway is the FortiGate, after a site check
+    with two clients, the srcmac field of the FortiGate session record can optionally give the
+    MAC address as **partial evidence**, with low confidence
+    ([DEVICE-SETUP.md](DEVICE-SETUP.md) section 2.5).
+  - **Both together:** when the two DHCP servers serve different networks, both are used.
+  - **Another DHCP server (e.g. Windows):** this version does not read its records; leases come
+    only from MikroTik `ARP-LOG`, with medium confidence. Without `ARP-LOG` a 5651 lookup ends
+    at the FortiGate session and the internal IP address (no MAC, device or person), and usage
+    analysis counts by IP address.
+- **Internet exits (NAT):** the FortiGate's source NAT is supported. Each internet line is
+  defined in Settings → Application settings → 5651 lookup and lease timeline → Internet exits
+  (NAT): the public IP (and whether it may change), the FortiGate's NAT address on that line,
+  its interfaces, the NAT type and port preservation. When the public address is on the
+  FortiGate itself (direct), public IP + port identify the session **exactly**. When the ISP
+  router does a second NAT, lookups for that line rank **candidate** sessions
+  ([CORRELATION.md](CORRELATION.md) section 3); when the public IP is shared with other
+  customers (CGNAT), the candidate list may not contain the right session, and an exact answer
+  needs the ISP's NAT record. 5651 lookups by IPv6 address are not supported: lease records
+  (DHCP, `ARP-LOG`) cover IPv4 addresses only.
 - **Usage analytics** (paid module, [LICENSING.md](LICENSING.md)) are computed from FortiGate logs
   only: time and bytes from the traffic logs (`logtraffic all`; with interim logs for long
   sessions), site names from the web filter, DNS filter, application control and SSL inspection
@@ -112,6 +128,14 @@ what the usage analytics show.
   kept unchanged, sealed and included in full-day evidence packages; they are loaded into the
   database as plain log lines (time, host name, program, message text) but not parsed into
   fields, and neither the 5651 lookup nor the usage analytics use them.
+
+**Not supported:** IPv6 lookups; two DHCP servers on one network (ARCILOGGER warns when it
+notices and gives the chains of those moments with low confidence); FortiGate leases where the
+FortiGate is a DHCP relay (lease evidence must come from the actual DHCP server); several
+branches using the same private address range; lookups for lines that do not pass the
+FortiGate (they are only marked "does not pass the FortiGate", and a lookup lists nobody);
+srcmac behind a router or an L3 switch (there it is that device's MAC address; with only
+layer-2 switches in between an interface is used only after a site check with two clients).
 
 ## 1. Prepare the server (elevated PowerShell)
 
@@ -629,6 +653,40 @@ with step 2. If you lost it, or ran the installer as a script with redirected ou
    & "C:\Program Files\ARCILOGGER\venv\Scripts\arcilogger-api.exe" create-admin --config "C:\ProgramData\ARCILOGGER\arcilogger.toml"
    ```
 
+**First-run wizard.** After sign-in, **Ayarlar → İlk kurulum sihirbazı** (Settings → First-run
+wizard, `/settings/setup`) shows the remaining steps of the installation in order; only
+administrators can open it (`settings.manage`). It does not open by itself after the first
+sign-in: the first-run setup page shows it as its third step ("Kurulum sihirbazı — Girişten sonra,
+Ayarlar'da", First-run wizard — After sign-in, in Settings), and the link **İlk kurulum sihirbazını
+aç** (Open the first-run wizard) on the Uyum Durumu page opens it too (while a card is not
+**Tamam**, OK). The wizard has no forms of its own and stores nothing: each step's state ("Tamam" /
+"Eksik", OK / Missing) is read again from the server's configuration and request history every
+time it opens. The wizard opens on the first step that is not done; **Ayarlar'da aç** (Open in
+Settings) opens the matching Settings page (whose way-back link then reads **Kurulum sihirbazına
+dön**, Back to the first-run wizard), **Bu adımı şimdilik atla** (Skip this step for now) goes on to
+the next step and the skipped step stays "Eksik".
+
+| Step | Done when | Opens (in this document) |
+|---|---|---|
+| Administrator and two-step verification | always (steps 1–3 above) | — |
+| Site settings | no configuration problem of level error about the organisation name or the time servers | Ayarlar → Genel (sections 1, 7.1) |
+| Log sources | at least one enabled source is defined | Ayarlar → Kaynaklar (section 11) |
+| Kamu SM: test server | a successful and verified stamp test in the request history, or the production server is selected | Ayarlar → Kamu SM, test step (section 10) |
+| Kamu SM: production | the production server is selected and sealing is ready | Ayarlar → Kamu SM, production step (section 10, "Switching to production") |
+| Replica | the replica is on | Ayarlar → Replika (section 10, "Replica") |
+| E-mail | sending e-mail is switched on, an SMTP server and a sender address are set | Ayarlar → E-posta |
+
+The last step is **Özet** (Summary): every step with its state, all configuration problems (every
+level), "Checks after installation: INSTALL.md section 12" and a link to the Uyum Durumu page. The
+**Log sources** step shows for each defined source whether data arrived, and the firewall's state
+(when the firewall is not managed by ARCILOGGER, open 514 by hand, section 12); for the device
+settings it only refers to [DEVICE-SETUP.md](DEVICE-SETUP.md) sections 1 and 4 (verify the commands
+on site): the web interface has no device commands and no pre-filled device list. The **Kamu SM**
+steps remind you that stamps of the test server have no legal validity and that the root
+fingerprints are to be compared with the values Kamu SM publishes before switching to production
+(verify on site). Details: [COMPLIANCE-STATUS.md](COMPLIANCE-STATUS.md) section 5,
+[SETTINGS.md](SETTINGS.md).
+
 Other users (the auditor etc.) and what comes next: [FIRST-STEPS.md](FIRST-STEPS.md).
 
 ## 10. Kamu SM connection (test → production)
@@ -737,6 +795,40 @@ Get-NetFirewallRule -Group ARCILOGGER | Format-Table DisplayName, Direction, Ena
 The last command prints the licence state, the modules that are on and the limits (trial: the
 days left; [LICENSING.md](LICENSING.md) section 5).
 
+**On the web.** Two pages show most of the same checks; both only read and refresh every 30
+seconds. The console commands stay valid: only they ask Windows for the state of the services and
+scheduled tasks and for the firewall rules.
+
+- **Uyum Durumu** (Compliance, `/compliance`, administrator and auditor): ten technical checks of
+  log collection, sealing and backups (log sources, yesterday's records sealed and verified, seal
+  chain, retention period, Kamu SM credit and time-stamp certificate, server clock, content filter
+  records, DHCP and ARP records, replica, backups). Each card gives its state with an icon and a
+  text ("Tamam", "Dikkat", "Sorun", "Bilgi yok": OK, Attention, Problem, No data), the reason and
+  what to do ([COMPLIANCE-STATUS.md](COMPLIANCE-STATUS.md) section 2). On a new installation some
+  cards are not **Tamam** until the first sealing, verification and nightly backup have run; look
+  again after the first night. Once the configuration files are copied to offline media, the
+  administrator confirms it on card 10 with **Yapılandırma yedeğini aldım** (I have copied the
+  configuration; [BACKUP.md](BACKUP.md) section 3). The **Uyum Durumu Raporu (PDF)** (Compliance
+  status report) writes the same cards to a PDF file; every export is written to the audit log.
+  ARCILOGGER is designed to support 5651 obligations ("5651 yükümlülüklerini desteklemek için
+  tasarlanmıştır"): the page and the report are technical checks, not a legal assessment; confirm
+  the results and how you use the report with your legal counsel
+  ([COMPLIANCE-STATUS.md](COMPLIANCE-STATUS.md) sections 1 and 3).
+- **Sistem** (System, `/system`, administrator only): resource use, disks and the disk forecast,
+  database size, collector and import (ingest), services (ArciCollector, ArciIngest and ArciWorker
+  from their status files, the administration service from its heartbeat, ApplySystem from its last
+  result), scheduled tasks (each task's state is derived from its evidence file, not asked of the
+  Task Scheduler), worker jobs, clock, version and maintenance (section 13;
+  [COMPLIANCE-STATUS.md](COMPLIANCE-STATUS.md) section 4). For the disk forecast the worker job
+  `system.sample` writes one sample a day after 00:30 to `state\system-history.json`; the forecast
+  shows after at least 7 days of samples. After the first night check on the Sistem page that the
+  resource values show (not "bu platformda okunamıyor", cannot be read on this platform) and that
+  the daily tasks do not show "Kanıt yok", No evidence (verify on site; Windows rights:
+  [COMPLIANCE-STATUS.md](COMPLIANCE-STATUS.md) section 6). VerifyWeekly shows "Kanıt yok" until the
+  first Sunday, VerifyMonthly until the first of the month; Requests and (with retention on)
+  Retention have no readable evidence ("İzlenemiyor", Not observable); the task of a feature that
+  is off (e.g. replica or retention off) shows "Kullanılmıyor" (Not used).
+
 Firewall (`Set-ArciFirewall.ps1`):
 
 - **Inbound:** default Block; allowed are only UDP/TCP 514 from `[[sources]]` (without any
@@ -781,8 +873,69 @@ Firewall (`Set-ArciFirewall.ps1`):
   powershell -ExecutionPolicy Bypass -File "C:\Program Files\ARCILOGGER\scripts\Set-ArciFirewall.ps1"
   Restart-Service ArciCollector, ArciIngest, ArciApi, ArciWorker
   ```
+- **When the firewall is not managed by ARCILOGGER** (Ayarlar → Kaynaklar and the first-run
+  wizard's Log sources step say so): after an installation with `-SkipFirewall`, open UDP/TCP 514 to
+  the addresses of the enabled sources in your own firewall by hand; with the browser
+  administration off, run the script above yourself after a change of the sources.
 - `-Remove` (run by the uninstaller) deletes ARCILOGGER's rules and restores the disabled rules
   and the profile settings found before the first run.
+
+### 12.1 Status window (ARCILOGGER Durum)
+
+When a member of the Administrators group logs on to the server, a small **ARCILOGGER Durum**
+window opens by itself. It shows whether ARCILOGGER runs without opening the web interface, and
+it looks again every 10 seconds.
+
+- **Services:** the state of the six Windows services (ArciCollector, ArciIngest, ArciApi,
+  ArciWorker, ArciWeb, ArciAdmin), and whether the API answers.
+- **Log flow:**
+  - the time of the last message;
+  - silent sources: the enabled, expected `[[sources]]` entries with no message for longer
+    than `[seal] gap_minutes` (one that sent nothing since the collector restarted counts too);
+  - a red warning when raw logs cannot be written to disk.
+- **Database loading:** whether the database can be written, and how far loading is behind.
+- **Sealing:**
+  - the last sealed day and its provider;
+  - orange for a failed attempt, with its error;
+  - orange when yesterday is not sealed by 03:00;
+  - red when the seal is later than `[seal] late_after_hours` (48 hours).
+- **Alerts:** the evidence-path alerts of the last 24 hours (`state\alerts.jsonl`). Every alert
+  is on the web interface's Uyarılar page.
+- **Data drive:** the free space of the data folder's drive. It turns orange below 15 % and red
+  below 5 %.
+
+Colours: green "running", orange "attention", red "problem", grey "cannot be read". When the state
+turns red, the taskbar button flashes. There is no sound, and the window does not jump to the
+front.
+
+The window is **read-only**:
+
+- it starts or stops no service and changes no setting;
+- it does not connect to the database;
+- it does not use the network: the API health check goes only to the API on this machine
+  (`[api] host`, by default `127.0.0.1`);
+- it sends no telemetry.
+
+"Web arayüzünü aç" opens `https://localhost/`. Without the root certificate on the server, the
+browser shows a certificate warning (section 8).
+
+- **Start:**
+  - the scheduled task `\ARCILOGGER\Desktop\StatusWindow` opens the window at every logon of a
+    member of Administrators, with the highest rights. There is no UAC prompt. The rights are
+    needed because only administrators may read `state\` of the data folder.
+  - A closed window opens again from the Start menu: **ARCILOGGER → ARCILOGGER Durum**. That
+    shortcut asks for UAC consent.
+  - Without consent, the window shows only the services and the API (on the default port 8000).
+    The configuration and the data folder are open to administrators only, so the other rows
+    say "cannot be read".
+- One window per session. A second start brings the open one to the front (the shortcut asks
+  for UAC consent for that too).
+- An upgrade and the removal close the window. After an upgrade it opens again at the next logon,
+  or from the shortcut.
+- One look from the command line (elevated PowerShell):
+  ```powershell
+  & "C:\Program Files\ARCILOGGER\venv\Scripts\python.exe" -I -m arcilogger_core.desktop --print
+  ```
 
 ## 13. Upgrade and rollback
 
@@ -797,6 +950,18 @@ is lost, UDP does not retransmit):
 powershell -ExecutionPolicy Bypass -File .\installer\Install-Arcilogger.ps1 -Upgrade -DryRun
 powershell -ExecutionPolicy Bypass -File .\installer\Install-Arcilogger.ps1 -Upgrade
 ```
+
+After the upgrade, check the new version and release date in the **Sürüm ve güncelleme** (Version
+and upgrades) block of the **Sistem** page, the services in its **Hizmetler** (Services) block, and
+the **Uyum Durumu** cards (section 12).
+
+**Installed version and maintenance on the web:** the **Sürüm ve güncelleme** block of the
+**Sistem** page (`/system`, administrator only) shows the product version, the core version, the
+release date and the licence's maintenance period (as in Ayarlar → Lisans); comparing a new
+bundle's release date with that maintenance period tells you beforehand whether the upgrade is
+covered (below). The block also says: "To upgrade, copy the new offline bundle to the server and
+follow INSTALL.md section 13. ARCILOGGER downloads no updates." An upgrade is always made with the
+offline bundle as this section describes.
 
 **Licence and maintenance** ([LICENSING.md](LICENSING.md) sections 7 and 8): before changing
 anything, an upgrade compares the new bundle's release date with the maintenance date of the
@@ -843,13 +1008,102 @@ any change. If a step fails (exit code `3`):
   against it. The previous program folder is back but only `ArciCollector`, `ArciWeb` and the
   scheduled evidence jobs run (none needs the database: no syslog is lost, sealing goes on);
   `ArciIngest`, `ArciApi` and `ArciWorker` are set to manual start. The installer prints the exact
-  `-Rollback -RestoreDatabase -DatabaseDump <dump>` command (or fix the cause and run `-Upgrade`
-  again);
+  `-Rollback -RestoreDatabase -DatabaseDump <dump>` command with **this** version's installer, the
+  copy in the folder set aside (`C:\Program Files\ARCILOGGER.failed-<time>\installer\`), not the
+  one in `C:\Program Files\ARCILOGGER\installer\`: after the swap-back that is the previous
+  version's again, whose restore writes the dump over the live database (`pg_restore --clean`)
+  and fails on the schema from `0021_db_window` on (or fix the cause and run `-Upgrade` again);
 - whatever could not be put back automatically is listed under "manual action needed".
 
 Manual rollback: `Install-Arcilogger.ps1 -Rollback` (add `-RestoreDatabase` to restore the last
-pre-upgrade dump too; the restore is one transaction). Without `ARCILOGGER.previous`,
+pre-upgrade dump too). The dump is restored into a new database (`<name>_restore_<time>`, with the
+current database's owner, locale, settings and rights; one transaction per object, stopping at the
+first error), which then takes the current one's place by renaming; a failed restore leaves the
+current database as it was. The PostgreSQL data drive needs the current database's size
+(`pg_database_size`), a quarter more and `max_wal_size` free; the installer checks this first and
+refuses otherwise (only a warning when the free space cannot be read or PostgreSQL runs on another
+server). The replaced database is kept as `<name>_replaced_<time>`: the rows written after the dump
+are only there, and it takes disk space until an administrator removes it ([BACKUP.md](BACKUP.md)
+section 5); every restore's replaced database is listed in `install\state.json`
+(`replaced_databases`). The rename needs no other session on the database: close pgAdmin and psql
+windows first (the installer names a session that is still open). Without `ARCILOGGER.previous`,
 `-Rollback -RestoreDatabase` restores only the database while the collector keeps running.
+
+If the restore fails after the program folders were swapped (or without `ARCILOGGER.previous`),
+the database services stay stopped and the installer prints the command to run again. Without
+`ARCILOGGER.previous`, a restore refused before it began to change the database (answered `H`, no
+dump, PostgreSQL not reachable, the locale or the free-space refusal) puts the database services
+back as they were: those that ran start again, those stopped on manual start stay so
+([BACKUP.md](BACKUP.md) section 5). If a step fails
+after the rename has committed, it says so: do not run the restore again (it would replace the
+restored database once more); on TimescaleDB, when `timescaledb_post_restore()` did not run, it
+prints that command and the one that starts the database services. Run the command to run again
+with **this** version's installer, the copy in the folder it was moved to
+(`C:\Program Files\ARCILOGGER.rolled-back-<time>\installer\`), as printed; not the one in
+`C:\Program Files\ARCILOGGER\installer\`: after the swap that is the previous version's, whose
+restore writes the dump over the live database (`pg_restore --clean`), which fails on this
+version's schema.
+
+**Rollback to a version with an older schema (schema revisions from `0021_db_window` on).** A
+version from before `0021_db_window` creates and drops monthly partitions only; it does not know
+the daily partitions (`<table>_pYYYYMMDD`). A version that has `0021_db_window` but not a later
+revision of the installed version (`0022_lease_moves`, for example) runs on, but its own
+`arcilogger-db upgrade` (its repair run, an `-Upgrade` to another bundle) fails on a database at
+a revision it does not ship ("Can't locate revision"). So a `-Rollback` without
+`-RestoreDatabase`, when the installed version's schema has `0021_db_window` and the version
+returned to does not have the installed version's head, takes the database down to the schema of
+the version returned to after the services have stopped and after the FortiGate lease step (below;
+it works on the installed version's schema), before the program folders are swapped: the
+installed version's `arcilogger-db schema downgrade --to <revision> --json` (step
+`database.downgrade`). Both versions' schemas are read from the migration files in their program
+folders (`venv\Lib\site-packages\arcilogger_db\migrations\versions`); neither Python nor the
+database is needed for that. The revisions of the version returned to must be the first ones of
+the installed version's, in the same order. A version returned to that has the installed
+version's head (the same revisions, or more after them) gets no downgrade. The target is the head
+of the version returned to, but never below the revision `0021_db_window` revises
+(`0020_fg_traffic_transip_time`): the older revisions were made for the previous version to run
+on (the NAT rows and FortiGate leases below), and undoing them deletes data (`0017`, for example,
+the FortiGate DHCP table). The downgrade goes only through revisions whose downgrade the
+installer lists as lossless for 5651 data (raw logs, log rows, leases and the audit log keep
+every row): `0022_lease_moves` (removes only the column `leases.moves`, the recorded missed moves
+of the leases: derived data, the FortiGate DHCP raw logs keep the ACKs; they are not rebuilt:
+after a later upgrade the column is empty and the lease job records moves again from its next run
+on, so a lease's moves from before the database window are no longer in the database) and
+`0021_db_window` (below).
+Right before the command, the step reads the database's own revision (`arcilogger-db current`): a
+database at the target or before it (an `-Upgrade -SkipDatabase` left it there) is left as it is;
+one from before `0021_db_window` has no daily partitions either. Down to `0021_db_window` only
+`leases.moves` goes; down to `0020_fg_traffic_transip_time` `0021_db_window` is undone too: the
+downgrade merges the daily partitions into monthly ones (each table and month in a transaction of
+its own), removes the requests to reload days from the archive (the sealed days stay in the
+vault), sets `db.retention_days` back from 30 to 400 and writes that to the audit log as
+`settings.change` (actor `system`; also the upgrade's own 400 → 30 first, when the window job had
+not audited it yet); the installer prints the old and the new value (only when it changed) and
+the audit entries' numbers, and the plan (`-PlanPath`) keeps the command's answer in `result`.
+There is no time limit: on large tables it can take long. The command waits at most 30 seconds for a lock: a backup
+still running (`pg_dump`; the scheduled tasks are paused when the rollback starts) makes it fail;
+wait until the backup has finished and run `-Rollback` again.
+
+- **If the downgrade fails**, the rollback stops with `3` before the program folders are swapped:
+  the installed version stays in place and starts again on its own schema (the merges already
+  committed leave a valid layout of that schema; its `arcilogger-db upgrade` runs first, in case
+  the command ended after moving the schema revision), and the FortiGate leases set to low
+  confidence come back. Run `-Rollback` again: the downgrade goes on where it stopped. If it keeps
+  failing (or the command refused the revision, exit code `2`), restore the database from the
+  pre-upgrade dump ([BACKUP.md](BACKUP.md) section 5):
+
+  ```powershell
+  powershell -ExecutionPolicy Bypass -File "C:\Program Files\ARCILOGGER\installer\Install-Arcilogger.ps1" -Rollback -RestoreDatabase
+  ```
+- If the downgrade succeeded and the program folders cannot be swapped, the installed version's
+  `arcilogger-db upgrade` brings its schema back; if that fails too, only `ArciCollector` and
+  `ArciWeb` run and the installer prints the command to run by hand under "manual action needed".
+- If the schema head of the version returned to cannot be told (no migrations folder or one that
+  cannot be read, files that do not form one line, a head that is not one of the installed
+  version's revisions, revisions that are not the first ones of the installed version's), the
+  way down crosses a revision the installer does not list as lossless, or `-SkipDatabase` is given
+  when the downgrade is needed, the rollback stops with `2` and changes nothing. With
+  `-RestoreDatabase` the pre-upgrade dump replaces the database; no downgrade runs.
 
 A rollback (and the automatic return after a failed upgrade) loads the configuration **with the
 previous version's Python** before it starts that version's services. When the previous version
@@ -902,6 +1156,142 @@ interface share the API's database connections (`[database] pool_size`, default 
 several people use Arama at the same time raises `pool_size` to 10 in `arcilogger.toml` and the
 setting `search.max_concurrent` with it (at most `pool_size` minus 2; Ayarlar → Arama ve canlı
 akış, [SETTINGS.md](SETTINGS.md)), then restarts the services (section 12).
+
+**Upgrading to the version with internet exits (schema revisions `0017_fortigate_dhcp`,
+`0018_nat_egresses`).** The migration adds a new table for the FortiGate DHCP records and one
+column to the `fg_traffic` table (fast even on large tables: the column is added empty). The old
+NAT settings are converted into one new setting, the **internet exits**: the `nat.public_ips`
+addresses become a direct exit named "Genel IP (yükseltmede aktarıldı) [public IP, carried over
+at the upgrade]", `nat.wan_transip` becomes an ISP NAT exit named "FortiGate WAN adresi
+(yükseltmede aktarıldı) [FortiGate WAN address, carried over at the upgrade]" (no separate exit
+when the address is one of the public IPs; a private or shared address in `nat.public_ips`, e.g.
+100.64.x.x, becomes a NAT address of this exit too), an exit named "Genel adresi tanımlanmamış
+hatlar [lines without a defined public address]" is added for the lines without a public
+address when no "FortiGate WAN adresi" exit is made and a public IP or `lookup.port_hint` is
+carried over, and `lookup.port_hint` becomes the port preservation value of the "FortiGate WAN
+adresi" exit, or of this exit when there is none. The conversion is written to the audit log
+as `settings.change` (`details.migration = "0018_nat_egresses"`; the dropped invalid, IPv6 or
+reserved values in `details.dropped`). When the conversion cannot give a valid definition, the
+exits stay empty and the alert `R20-nat:conversion-failed` opens.
+
+**After the upgrade:**
+
+- Enter each line's public address and interfaces (dstintf) in Settings → Application
+  settings → 5651 lookup and lease timeline → Internet exits (NAT). On every installation with
+  a carried-over "FortiGate WAN adresi" or "Genel adresi tanımlanmamış hatlar" exit, until they
+  are entered every lookup and report for an address that no exit defines carries the warning
+  `egress_public_unknown`; the carried-over exits keep the old NAT behaviour until interfaces are
+  entered or changed, but the NAT addresses of an exit added later are outside that. If the line
+  is still behind the ISP router and you add the FortiGate's NAT address on that line (e.g.
+  100.64.x.x) as a new exit, move the line's public address from the direct exit to this exit
+  and enter its interfaces; otherwise lookups of the direct exit may be answered with the
+  warning "Doğrudan hat doğrulanamadı [direct line not confirmed]".
+- When the NAT address of the carried-over "FortiGate WAN adresi" exit is the line's public
+  address (the FortiGate holds the public address itself), set the exit's type to **Direct**;
+  the editor warns about it.
+- Once every line is defined, delete the "Genel adresi tanımlanmamış hatlar" exit: while it
+  stays, a question about a public IP that belongs to no line lists unrelated sessions as
+  candidates.
+- One change: when an address that no exit defines appears at that moment in the FortiGate
+  records as a source NAT address, the lookup now makes an exact match on that address instead
+  of a candidate list, and says so with a warning (`egress_observed_not_configured`).
+- With FortiGate DHCP, do the check of [DEVICE-SETUP.md](DEVICE-SETUP.md) section 2.4 and write
+  the outcome into section 16; repeat the check after every FortiOS upgrade. For moments before
+  the upgrade 5651 lookups stop at the internal IP address: the FortiGate DHCP records of that
+  time are not converted into the lease timeline; the lookup says so and, in an internal-IP
+  lookup or an exact match, shows the record as evidence (`fortigate_dhcp_not_converted`). In a
+  chain that rests on an older lease (MikroTik or FortiGate), when such a record exists for that
+  address or for the lease's MAC address after the lease's last DHCP record (e.g. a client that
+  moved from MikroTik to FortiGate DHCP before the upgrade got another address), the chain is
+  shown with low confidence and the reason (`fortigate_dhcp_not_converted_since_lease`). **After
+  the upgrade too**, no chain is built for a client until its first DHCP Ack record arrives in
+  the new version: this can take up to half the lease time (3.5 days with the FortiOS default
+  lease of 7 days; a client renews at half its lease). Plan the upgrade knowing this gap;
+  installations that do not use FortiGate DHCP are not affected.
+- The srcmac of FortiGate session records loaded before the upgrade (or by the previous version
+  during a rollback) is not used by the 5651 lookup; no partial srcmac chain is built for those
+  moments.
+- A public NAT address that no exit defines (e.g. an IP pool) no longer counts as a sign of
+  double NAT and is not taken into the candidate search: it is the FortiGate's own address and,
+  when asked for, is answered as the address seen in the records. Enter the addresses of the
+  FortiGate's NAT towards a DMZ, another VLAN, a VPN or a branch with the type "Not an internet
+  exit".
+
+**Rollback:** the old NAT rows are kept, unread, in this version; `-Rollback` does not undo this
+revision (it takes the schema down only to the revision before `0021_db_window`, above), and the
+previous version reads these rows, that is the NAT values from **before the upgrade**. If you
+changed the internet exits after the upgrade, then after the rollback compare the previous
+version's `nat.public_ips` and `nat.wan_transip` values in Settings → Application settings with
+the change you made in this version and enter them by hand (the changes are in the
+audit log as `settings.change`); do not restore the database for this: after `-RestoreDatabase`
+the database in use holds none of the records made after the upgrade (audit, lookups, reports,
+alerts, device and person assignments): they are only in the replaced database,
+`<name>_replaced_<time>` ([BACKUP.md](BACKUP.md) section 5). Before running `-Rollback`,
+download the official reports (PDF) of the lookups made in this version: a report is rendered
+once, on its first download, and the previous version does not print the rows this version adds
+(the unconfigured-sender warning, the "Kısmi kanıt [partial evidence]" label, the exit and
+FortiGate lease rows). On an installation that uses FortiGate DHCP the previous version cannot
+read the FortiGate DHCP records: it may keep a FortiGate lease open
+after the address was released or given to another client. So, before the
+program is swapped, `-Rollback` sets every FortiGate lease to **low confidence**; it prints how
+many and writes the count to the installation log (only derived lease rows change; raw records
+and seals are not touched; with `-RestoreDatabase` this step is skipped). Every chain that rests
+on FortiGate DHCP is therefore shown with low confidence in the previous version. The previous
+version closes the existing FortiGate leases by the times of its own settings (without looking
+at the logged lease time, with the defaults about 26 hours after the lease's last DHCP record;
+this moment may already be in the past), deletes in its own rebuilds those that started on the
+rollback day or the day before (and those that started on the days it rebuilds for late
+records) and creates no new one; MikroTik leases follow the previous version's own rules, as
+before the upgrade. Make the 5651 lookups of FortiGate DHCP addresses for moments after the
+rollback after the re-upgrade. After the re-upgrade the FortiGate DHCP records of the days in
+between do not enter the lease timeline, and lookups say so: at a moment where no chain can be
+built, with `fortigate_dhcp_not_converted` when the newest DHCP record covering the moment is
+such a record; in a chain that rests on a DHCP lease, when such a record exists for that
+address or for the lease's MAC address after the lease's last DHCP record, the chain is shown
+with low confidence and the reason (`fortigate_dhcp_not_converted_since_lease`).
+
+`-Rollback` first looks in the program folder of the version it returns to
+(`ARCILOGGER.previous`) for `venv\Lib\site-packages\arcilogger_db\lease_rollback.py`. With the
+file (a rollback between two versions that both read FortiGate DHCP), that version already reads
+FortiGate DHCP records: the FortiGate leases are not lowered, the step is skipped, and the
+installer prints why and writes it to the installation log. Without the file, or when the check
+cannot decide (the folder is missing or cannot be read), the leases are set to low confidence as
+above; when the check could not decide, the installer prints why before it lowers the leases,
+and the plan (`-PlanPath`) keeps it in `previous_check`. If the version returned to does read
+FortiGate DHCP, FortiGate DHCP chains are then shown with low confidence until the next
+`arcilogger-db upgrade`; that upgrade (e.g. the re-upgrade) restores them (below). This low
+confidence never names a wrong person; it only shows the chain lower than needed.
+
+**Re-upgrade:** since the database schema is not rolled back, the conversion does not run again
+and the old NAT settings are not converted again. When `nat.public_ips`, `nat.wan_transip` or
+`lookup.port_hint` was changed in the previous version during the rollback, the alert
+`R20-nat:legacy-changed` names the changed settings: enter the change in the internet exits by
+hand; the alert closes when the exits are saved. The re-upgrade restores the confidence of the
+FortiGate leases the previous version did not change and prints how many came back, how many
+stay low and the days whose leases to rebuild; those that stay low are the leases the previous
+version closed or recomputed. On an installation that uses FortiGate DHCP, after the re-upgrade
+rebuild the leases from the day one longest lease time before the rollback day (7 days before
+with a 7-day lease) to the re-upgrade day in Settings → Application settings → 5651 lookup and
+lease timeline → Rebuild the leases (at most 31 days per request): only so are the FortiGate
+leases that the previous version closed early, deleted or left at low confidence rebuilt to the
+FortiGate's own end and confidence; without it a lookup for moments in that range may give an
+unexplained "no lease" or show the chain with low confidence. In the rollback range these
+rebuilt leases are shown with low confidence and the reason
+(`fortigate_dhcp_not_converted_since_lease`) when, after the lease's last DHCP record, the
+previous version loaded a FortiGate DHCP record for that address or MAC address: the address may
+have been released in between, given to another device, or the MAC address may have taken
+another address.
+
+**Upgrading to the version with the NAT address index (schema revision
+`0020_fg_traffic_transip_time`).** The migration builds one new index, `ix_fg_traffic_transip_time`
+on the FortiGate traffic table `fg_traffic` (the steps the 5651 lookup asks without a port on one
+NAT address). PostgreSQL builds it on every monthly partition (with TimescaleDB, on every chunk).
+On 4 vCPU at the default `maintenance_work_mem`, a monthly partition filled to day 28 at 1 million
+`fg_traffic` rows a day (28 million rows) took **about 18 seconds** (measured 2026-11-02); a large
+site with more rows or more months takes correspondingly longer. The index takes about 31.5 MB per
+million rows (about 0.9 GB for such a partition). Ingest, API and worker are stopped while the
+schema is migrated; the collector keeps writing the spool, so nothing is lost and ingest catches
+up afterwards ([INGEST.md](INGEST.md)).
 
 ## 14. Removal
 
@@ -963,7 +1353,14 @@ The WinSW virtual-account setup (`sc.exe qc ArciCollector`) and "Log on as a ser
 `NT SERVICE\ALL SERVICES`; the EDB installer's rights on `D:\ARCILOGGER\db` and `pg_hba.conf`
 (`127.0.0.1/32 scram-sha-256`); the `auditpol` "File System" subcategory GUID; the Temurin MSI
 `INSTALLDIR` property; TimescaleDB `setup.exe` with the installed 16.x and
-`timescaledb_pre_restore()` / `timescaledb_post_restore()` around a restore; Inno Setup's
+`timescaledb_pre_restore()` / `timescaledb_post_restore()` around a restore; with
+`-Rollback -RestoreDatabase` on TimescaleDB, the rename right after `timescaledb_pre_restore()`
+(no background worker keeps the database open) and the restore of the real chunk count (the
+CI tests restore about ten chunks against TimescaleDB 2.30.2; a site after 400 days has
+thousands: its duration and that it completes), whether the free space it asks for (the current
+database's size, a quarter more and `max_wal_size`) suffices when chunks compressed since the
+dump come back uncompressed, and a TimescaleDB updated between the dump and the rollback (the new
+database gets the current database's extension version); Inno Setup's
 `Turkish.isl`; `arcilogger-api serve` on 127.0.0.1:8000 and that `setup-token` runs by its full
 path in an administrator PowerShell and prints a token (section 9); the Core Networking rule group
 (`Get-NetFirewallRule -DisplayGroup 'Core Networking' | Select-Object -First 1 Group` should print
@@ -972,11 +1369,15 @@ path in an administrator PowerShell and prints a token (section 9); the Core Net
 Core Networking's rules; Microsoft Defender's state and the two exclusions of section 2 step 4
 after the installation (`Get-MpPreference`), and the owner's decision on `spool` and `vault`
 (exclusion or scheduled scan only); the first night's `D:\ARCILOGGER\state\backup\last.json`, the
-duration and size of the nightly database dump and the first restore drill ([BACKUP.md](BACKUP.md)
-sections 6 and 8); on the upgrade to the version with Arama, how long the schema migration with
-`ix_fg_web_rhost_time` takes on the real database (section 13) and, after the first days,
-`arcilogger-db search-counts verify`: the summary table must match the rows and the counts of
-names not stored in lower case (`fg_dns.qname`, `fg_web.hostname`) must be 0; that the Python
+duration and size of the nightly database dump (the dump starts at 01:40, after the `db.window`
+run at 01:00 and its first retry at 01:15; only the job's rare second retry at 01:45 or a dump
+started late can meet it, and that run then backs off and counts toward `R20-db-window`, contract
+W5-G-24 and W5-G-27) and the first
+restore drill ([BACKUP.md](BACKUP.md) sections 6 and 8); on the upgrade to the version with
+Arama, how long the schema migration with `ix_fg_web_rhost_time` takes on the real database
+(section 13) and, after the first days, `arcilogger-db search-counts verify`: the summary table
+must match the rows and the counts of names not stored in lower case (`fg_dns.qname`,
+`fg_web.hostname`) must be 0; that the Python
 services start with the isolated interpreter (`Get-CimInstance
 Win32_Process -Filter "Name = 'python.exe'" | Format-List CommandLine`: `python.exe -I -X utf8 -u
 -m arcilogger_api serve …`; `sc.exe qc` shows the service wrapper) and that the server id reads the
@@ -987,10 +1388,44 @@ id on Settings → Licence must equal the one of `arcilogger-db license status`;
 change of the file (`Get-Acl`), that ArciAdmin can add and delete only its own files in
 `kamusm-roots`, that the `ARCILOGGER-Admin` events wake the `Requests`, `Seal` and `ApplySystem`
 tasks (`Get-WinEvent`, the Task Scheduler history), and that no syslog message is lost while a
-firewall rule is updated in place.
+firewall rule is updated in place; for an archive reload of days whose rows are still in the
+database (the window's first days), that while its files are reset in steps (at most 10,000
+lines each; about 0.1 s a step on Linux, measured) the delay on the Live page stays under
+5 seconds and the ingest lag alert does not open, that the ingest log does not repeat "a step of
+its reset waits for a lock" for minutes (on TimescaleDB a step waits while the compression policy
+recompresses a chunk), and how long a round of a reload's partitions takes (one table of a day a
+round: about 30 ms on Linux; a whole day's 16 tables took 0.3–0.45 s on Linux and 0.84 s on a
+Windows CI machine; one table's round not measured on Windows or a spinning disk, contract
+W5-G-25).
 On desktop Windows 11 Pro all of the above plus the power settings, Smart App Control and a
 forced update restart, step by step:
 [KABUL-TESTI-WINDOWS11.md](KABUL-TESTI-WINDOWS11.md).
+
+**FortiGate DHCP, srcmac and internet exits.** The assumptions below rest on the FortiOS
+documentation or depend on the organisation's network; they are verified on site (the V numbers
+are this list's own; [CORRELATION.md](CORRELATION.md) section 8 describes the same assumptions by
+topic). Write down each row's
+outcome and the date of the check. Repeat the checks **after every FortiOS upgrade** (the record
+fields may change between releases) and add the new outcome with its date; do not delete the old
+one. When an outcome differs from what is expected, correct the setting by the branches of
+[DEVICE-SETUP.md](DEVICE-SETUP.md) section 2.4. Without FortiGate DHCP, write "not used" in the
+rows V1–V6, V14, V17 and V18.
+
+| # | To verify | How | Outcome to record | Outcome | Date |
+|---|---|---|---|---|---|
+| V1 | The real format of the FortiGate DHCP Ack record (logid `0100026001`) on syslog: the fields `ip`, `mac`, `dhcp_msg`, `lease`, `interface`, `hostname`, the quoting, how the MAC address is written; a missing or empty `hostname` | [DEVICE-SETUP.md](DEVICE-SETUP.md) section 2.4 step 5: the Sources → Lease evidence card and a trial 5651 lookup; when it passes, `dhcp.fortigate_format_verified` is switched on (step 6) | passed / failed; the setting corrected | | |
+| V2 | Whether a client's release (RELEASE) is logged; its logid (expected `0100026002`) and `dhcp_msg` value | DEVICE-SETUP.md section 2.4 step 5 (`ipconfig /release`, then `ipconfig /renew`) and its branches; another logid shows in the alert `R20-lease:fortigate-refused` as "unknown logid" | RELEASE logged: yes / no; logid; `dhcp_msg` | | |
+| V3 | Whether renewals (at half the lease, the client staying connected) give a second DHCP Ack record | DEVICE-SETUP.md section 2.4 step 5, the renewal check | renewals logged: yes / no; if not, the organisation's choice of DEVICE-SETUP.md section 2.4 step 5 (keep it as it is, or switch on `dhcp.fortigate_traffic_extends`) and the date of the choice | | |
+| V4 | Whether `lease` is in seconds; how an unlimited lease (`lease-time` `0`) is written | the `lease` value of the raw line in Arama (`logid:0100026001`) compared with the FortiGate's `lease-time` (DEVICE-SETUP.md section 2.4 step 7); the alerts `R20-lease:fortigate-lease` and `R20-lease:fortigate-lease-unlimited` | `lease` = `lease-time`: yes / no | | |
+| V5 | Whether the DHCP event records reach syslog with the settings of DEVICE-SETUP.md (severity `information`, no filter that excludes events) | DEVICE-SETUP.md section 2.4 steps 3–4; the state of the Sources → Lease evidence card (`ok`, `none`, `refused`) | the card's state; with `none` or `refused`, the correction made | | |
+| V6 | That interfaces where the FortiGate is a DHCP relay give no FortiGate DHCP record; that the interfaces of `server-type ipsec` servers (DHCP over IPsec, VPN pools) are excluded; whether a reply to a DHCPINFORM is logged as a DHCP Ack (its `dhcp_msg` value: V14); when the FortiGate serves several relayed networks on one interface, which `interface` and address the DHCP Ack record of a relayed client carries | DEVICE-SETUP.md section 2.4 steps 1, 2 and 9; `dhcp.fortigate_interfaces_excluded`; the alert `R20-lease:fortigate-dhcp-subnet` | relayed networks served on one interface: yes / no; if yes, whether the record's `interface` and address are of the client's own network; the excluded interfaces | | |
+| V8 | That srcmac comes only on interfaces with device identification and is the own MAC address of directly connected clients; behind a layer-2 switch only if the two-client check shows it; which device-identification fields the unit fills | DEVICE-SETUP.md section 2.5: with two known clients on the interface, `max_ips_per_mac` 1 (IPv4 sources) in the srcmac interfaces table of the "Kayıtlarda görülen NAT adresleri [NAT addresses seen in the logs]" panel (Settings → Application settings → 5651 lookup and lease timeline), and the two MAC addresses in Arama (`srcmac:`) are the clients' own (not a switch's or router's) | per interface: check passed / failed, listed in `lookup.srcmac_interfaces` or not; the fields the unit fills | | |
+| V11 | Whether each line's ISP router keeps source ports | DEVICE-SETUP.md section 2.6: the port preservation measurement | per line `preserved` (measured) or `unknown` | | |
+| V14 | The `dhcp_msg` values FortiOS writes under each mapped logid | the raw lines in Arama (`logid:<logid>`); the alert `R20-lease:fortigate-refused` names the values seen with the reason "unexpected dhcp_msg"; `dhcp.fortigate_dhcp_msgs` | the `dhcp_msg` values seen per logid | | |
+| V15 | Whether each line's public IP address is static | DEVICE-SETUP.md section 2.6: ask the ISP; a line whose address may change is marked `public_dynamic` (on an ISP NAT exit; a direct line's changing address is found from the logs, DEVICE-SETUP.md section 2.6) | per line static / may change; the ISP's answer | | |
+| V16 | That FortiGate DHCP records carry a usable device time and the FortiGate's clock is right to within minutes: the FortiGate syncs with NTP | DEVICE-SETUP.md section 2.1 (the NTP step); on the FortiGate `diagnose sys ntp status` lists the NTP servers' information; the alert `R20-lease:source-clock` must not be open | FortiGate syncs with NTP: yes / no; the NTP server in the output of `diagnose sys ntp status` | | |
+| V17 | Whether FortiOS logs a DHCPDECLINE or checks an address before it offers it; that a client holds one lease per server interface and network | there is no separate trial: static devices are kept out of the DHCP range (DEVICE-SETUP.md section 2.4 step 8); the alert `R20-lease:fortigate-decline:<net>` | whether the alert opened; if so, the network and the correction made (address reserved or device moved) | | |
+| V18 | Whether two configured networks were merged later, or one taken off the network list | The lease job does not record with a lease a FortiGate DHCP Ack of its MAC for an address in **another configured network** than the lease's (D33: a laptop or a NAS with an address in each of two networks is no move; issue #127). Once the networks are merged, or one is taken off, today's networks make that Ack a move, but for a moment before a 5651 lookup's days it is recorded nowhere: the missed-move check does not see it for that moment (inside the lookup's days the rows are checked again with today's networks). Before merging two networks or deleting one on the Departmanlar ve VLAN'lar tab: in Search, `type:event logid:0100026001 ip:<network>` for each of the two networks (e.g. `ip:172.20.41.0/24`) and `type:event mac:<MAC>` for the clients found (the days in the database); whether a MAC took an address in both networks before the change | the network change and its date; whether a client took an address in both networks (if so, the MAC addresses): for their moments before that date, the missed-move check reads the lookup's days only | | |
 
 ## 17. Desktop Windows 11 Pro
 

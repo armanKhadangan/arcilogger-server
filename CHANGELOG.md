@@ -5,6 +5,318 @@ versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Uyum Durumu, Sistem and the first-run wizard (Wave 4)
+
+The last two placeholder pages of the menu are real: **Uyum Durumu** (ten technical checks and the
+Uyum Durumu Raporu) and **Sistem** (the server's resources, services, scheduled tasks and clock),
+plus a disk card on the Panel and a first-run wizard in Ayarlar
+([ADR-0017](docs/adr/0017-compliance-and-system-pages.md); [UYUM-DURUMU](docs/UYUM-DURUMU.md) /
+[COMPLIANCE-STATUS](docs/COMPLIANCE-STATUS.md); MVP-CONTRACTS §19). Decided by the developer on the
+owner's delegation; the owner answered two questions on 2026-10-28 (who sees Uyum Durumu, Q1;
+card 7's expected days, Q10) and may change the others (the ADR lists the open points Q2–Q9 and
+Q11–Q21, [ASSUMPTIONS](docs/ASSUMPTIONS.md) the implemented defaults). "Uyum Durumu" is the page's
+name, not a verdict: the cards and the report are technical checks of log collection, sealing and
+backups by a product designed to support 5651 obligations ("5651 yükümlülüklerini desteklemek için
+tasarlanmıştır"), not a legal assessment, and no text says that a site conforms; have the report's
+texts reviewed by legal counsel (Q20). Both pages only read (files under `state\` and `admin\`, the
+vault, the database, the active alerts): they never ask a device or Kamu SM and never download or
+install anything.
+
+- **Uyum Durumu** (`/compliance`): ten cards, computed by one server function for the page and the
+  PDF and worded there in Turkish and English: log sources are sending; yesterday's records sealed
+  and verified; seal chain intact; retention period; Kamu SM credit and time-stamp certificate;
+  server clock; content filter records; DHCP and ARP records (the configured lease evidence of
+  Wave 3); second copy (replica); configuration and database backups. Each card has a state as icon
+  and text (**Tamam**, **Dikkat**, **Sorun**, **Bilgi yok**: the last always with its reason), the
+  reason, its facts, its open alerts, a link to the page that fixes it (hidden where the user may
+  not open it), its section of UYUM-DURUMU.md as text and, where the repository cannot confirm a
+  detail (the credit's format, the DNS filter profile), **Sahada doğrulayın**. A card that cannot be
+  computed reads "Bu denetim şu anda yapılamadı" with the error's class name; the others are
+  unaffected. The page refreshes every 30 s (one answer cached 30 s for everyone) and offers **İlk
+  kurulum sihirbazını aç** to an administrator while a card is not OK.
+- **Uyum Durumu Raporu (PDF):** made on request (`GET /compliance/report.pdf`) from a fresh
+  computation, A4, Turkish and English: the site, the time, the account that exported it (the only
+  name in it), the summary and every card with its state, reason, facts, verify-on-site note and
+  alerts, the neutral footer of the reports on every page. Not stored and not time-stamped (no
+  credit spent, Q14); its SHA-256 is in the response (`X-Arci-Sha256`, checked by the browser: a
+  mismatch is shown beside the button as `download_mismatch`) and in the audit entry. No schedule
+  and no Raporlar kind in this version. DENETCI-KILAVUZU section 11 says how to read it.
+- **Configuration backup confirmation:** on card 10, **Yapılandırma yedeğini aldım** records that
+  `arcilogger.toml`, `secret.key` and the Caddy CA folder were copied to encrypted offline media
+  kept apart from the backups (YEDEKLEME/BACKUP section 3), with the configuration's current
+  SHA-256; the card asks for a new copy once the configuration changes (Q13). A configuration file
+  that cannot be read refuses it with 409 `config_backup_unreadable`. A damaged
+  `state\backup\last.json` reads as a failed backup.
+- **Content-filter evidence** (card 7): the web and DNS filter records of the enabled FortiGate
+  sources, counted per day from the hourly summary table `search_counts`, the newest record, the web
+  filter profiles seen in 24 hours (no DNS profile is stored; sahada doğrula). Owner decision Q10:
+  records are expected on every day of the week except the days listed in `usage.holidays`, in a
+  rolling window of 24 hours, and a web or a DNS record is enough. Three new settings in **Ayarlar →
+  Uygulama ayarları → Uyarılar ve e-posta**: `alerts.filter_days` (ISO weekdays, default every day),
+  `alerts.filter_skip_holidays` (on) and `alerts.filter_quiet_hours` (24, 6–168). A site without a
+  FortiGate source expects no such records (**Bilgi yok**).
+- **Alert `R20-filter`** (docs/UYARILAR.md / ALERTS.md), high, one alert (`R20-filter:none`) in the
+  existing system job: no web or DNS filter record for `alerts.filter_quiet_hours` while every day
+  of that window is expected. It closes by itself when a record arrives or the window is no longer
+  expected; the e-mail carries only the hours, never an address or a name.
+- **Sistem** (`/system`): CPU, memory and uptime (read through the standard library, `ctypes` on
+  Windows and `/proc` on Linux, no `psutil`; CPU "ölçülüyor" until a second reading); each drive's
+  use with the warning mark (`alerts.disk_used_percent`, 80 %) and 95 % and a **disk forecast**; the
+  database's size and its ten largest tables (with TimescaleDB the hypertables' size; kept for
+  5 minutes); the collector and ingest statistics of the configured sources (an unknown sender is
+  only counted, its address shown on Kaynaklar only); the services ArciCollector, ArciIngest,
+  ArciWorker and ArciApi, the agent and ApplySystem; the **scheduled tasks** judged by the evidence
+  files they leave (Retention and Requests leave none ArciApi can read: shown as such; no Task
+  Scheduler or service manager query, Q19); every worker job with its schedule, last run, duration,
+  failures and a run in progress (`job_runs` read with two bounded probes per job, never a scan; no
+  purge of `job_runs`, Q21); the clock (time servers, the peers ApplySystem applied, the samples of
+  24 hours); the versions, the licence's maintenance and how to upgrade ("ARCILOGGER güncelleme
+  indirmez").
+- **Disk forecast:** the new worker job `system.sample` (daily after 00:30) writes one sample of the
+  data and the system drive to `state\system-history.json` (the newest 120 days). The forecast is a
+  straight line over the newest 30 samples, shown from 7 (Q17): the day the drive reaches the
+  warning mark (`alerts.disk_used_percent`) and the day it is full; "did not grow" when it did not;
+  no date when it grows so slowly that the date would be more than 100 years away.
+- **Panel:** a **Disk** card (each drive's use with its level as icon and text, the forecast in one
+  line, the link to Sistem) for the administrators (`GET /system/disk`). The clock card's link now
+  opens Sistem.
+- **First-run wizard** (**Ayarlar → İlk kurulum sihirbazı**, `/settings/setup`): a guided checklist
+  of administrator and two-step verification, site settings, log sources, Kamu SM test server,
+  Kamu SM production, replica, e-mail and a summary with the configuration problems. Each step says
+  what it is for, whether it is done and what is missing, and opens the existing Ayarlar page
+  (**Ayarlar'da aç**, whose way back reads **Kurulum sihirbazına dön**); **Bu adımı şimdilik atla**
+  goes on and leaves the step open. A step's state is read from the server's configuration and
+  history, nothing is stored and there is no automatic redirect after the first sign-in (Q18); the
+  e-mail step is done only when sending is switched on. The sources step says who opens port 514 and
+  refers to DEVICE-SETUP (no device commands in the web app, nothing pre-filled); the Kamu SM steps
+  repeat that test stamps have no legal validity and that the root fingerprints are to be compared
+  with Kamu SM's (sahada doğrula). The first-time account page `/setup` shows the wizard as its
+  third step, "Girişten sonra, Ayarlar'da".
+- **Who sees what** (docs/roles.md, SECURITY section 16): Uyum Durumu and its report administrators
+  and auditors (`compliance.read`; owner decision of 2026-10-28, Q1: the auditor now holds it, which
+  answers roles.md open question 5 for this page); the backup confirmation, the settings and the
+  wizard administrators only (`settings.manage`); Sistem and the Panel's disk card administrators
+  only (`system.read`, Q2). Neither page nor the PDF shows data about log subjects (no client
+  address or MAC, no person, no device host name, no sender address, no replica target), so there is
+  no KVKK notice and viewing is not audited; the report export (`compliance.report_export`, with its
+  SHA-256 and the count of each state) and the backup confirmation
+  (`compliance.config_backup_confirm`, with the configuration's SHA-256) are.
+- **5651 Temel:** both pages, the report, the wizard, `system.sample` and `R20-filter` are basic
+  functions; no licence state blocks them (LISANS/LICENSING).
+- **API:** `GET /compliance`, `GET /compliance/report.pdf`, `POST /compliance/config-backup`,
+  `GET /system`, `GET /system/disk`, `GET /system/health`; the error code `config_backup_unreadable`
+  (MVP-CONTRACTS §19). `GET /compliance`, `GET /system` and `GET /system/health` answer within 1 s
+  on the performance data (tests). The configuration problem about sources now comes in Turkish and
+  English like the others.
+- **Database:** no new table and no migration: the disk samples go to a state file, the backup
+  confirmation to the audit log, and the three `alerts.filter_*` keys belong to the existing group
+  "Uyarılar ve e-posta".
+- **Upgrade:** no step of its own. The disk forecast appears after 7 daily samples; until then
+  Sistem and the Panel say how many there are.
+- **Docs:** UYUM-DURUMU / COMPLIANCE-STATUS (new: each card, the report, Sistem, the wizard, what to
+  verify on site), KURULUM/INSTALL sections 9 (the wizard after the first sign-in), 12 (Uyum Durumu
+  and Sistem beside the console checks) and 13 (version and maintenance on Sistem),
+  AYARLAR/SETTINGS, ILK-ADIMLAR/FIRST-STEPS (the daily look at Uyum Durumu, `R20-filter`),
+  UYARILAR/ALERTS, YEDEKLEME/BACKUP section 3, SECURITY, roles.md, DENETCI-KILAVUZU section 11,
+  KABUL-TESTI-WINDOWS11, ARCHITECTURE, CORRELATION, LISANS/LICENSING, kamusm.md and
+  deploy/windows/README.md (`state\system-history.json`).
+
+### FortiGate DHCP, srcmac and internet exits (Wave 3)
+
+A 5651 lookup now follows the lease on sites whose FortiGate is the clients' DHCP server, may use
+the `srcmac` of a FortiGate session record as labelled partial evidence, and resolves a public IP
+to the internet exit (line) that holds it, so a site with two lines (one direct, one behind an ISP
+router) lists only that line's sessions
+([ADR-0016](docs/adr/0016-fortigate-dhcp-and-internet-exits.md); docs/CORRELATION.md; MVP-CONTRACTS
+§18). Decided by the developer on the owner's delegation; the owner may change it (the ADR lists
+the open points O1–O22, [ASSUMPTIONS](docs/ASSUMPTIONS.md) the implemented defaults, not yet
+confirmed). The rule behind every choice: a wrong person at high confidence is the worst outcome, a
+false "nobody" the second worst; where the logs cannot decide, the confidence is lowered and the
+reason given. Every FortiGate format detail that no official source or real sample confirms is a
+setting or has a loud check (sahada doğrula; KURULUM/INSTALL section 16 is the operator's list).
+
+- **FortiGate DHCP as lease evidence:** a FortiGate `event` line with `ip`, `mac` and `dhcp_msg` is
+  stored in the new table `fg_dhcp` by its shape alone (a value that does not convert keeps it an
+  `fg_event` row and the parse failure `fortigate.dhcp`). What a row means is the worker's setting
+  `dhcp.fortigate_logids`: the DHCP Ack `0100026001` assigns, the Release `0100026002` (derived
+  from the documented numbering, sahada doğrula) releases; `dhcp.fortigate_dhcp_msgs` allows `Ack`
+  under the Ack logid. Usable rows feed the same lease timeline as MikroTik DHCP: an Ack opens a
+  `high` lease, a Release ends it, an Ack from the other DHCP table supersedes it, and a FortiGate
+  Ack of a MAC for another address closes that MAC's other lease of the same origin, interface and
+  configured network. A logged lease of 300–8,640,000 s ends the lease exactly that long after its
+  last DHCP record, the FortiGate's own end; `0`, a missing or an out-of-range value use the
+  configured lease times. Traffic does not keep a FortiGate lease alive
+  (`dhcp.fortigate_traffic_extends`, off). A changed map applies to older rows after a lease
+  rebuild, without loading anything again.
+- **Only usable evidence counts:** FortiGate DHCP rows of an unconfigured sender (an
+  `unknown-<ip>` sender only inside the address of an enabled, configured FortiGate source), of an
+  interface in `dhcp.fortigate_interfaces_excluded` (DHCP over IPsec), without the FortiGate's own
+  time, with a zero, broadcast or multicast MAC, an unmapped logid or another `dhcp_msg` are never
+  lease evidence and are counted by reason; the lease job, the lookup, the alerts and the Kaynaklar
+  card read one rule for it (`lookup/trust.py`).
+- **5651 Sorgu:** a FortiGate lease prints its logged lease time and its last DHCP record at or
+  before the requested moment. A chain is `low`, with the reason, more than half a lease after that
+  record with no renewal seen (`lease_renewal_not_seen`), when two DHCP origins served its network
+  (`dhcp_sources_overlap`), for an address in no configured network (`fortigate_dhcp_no_network`),
+  when a cited source's clock was more than 120 s off at the moment (a source measured only for the
+  session search: more than the lookup tolerance, when that is wider; `source_clock_offset`), and
+  when an unconverted FortiGate DHCP line (loaded before the upgrade, or during a rollback) of its
+  IP or MAC follows its lease's last record (`fortigate_dhcp_not_converted_since_lease`). Such
+  lines are not converted (O3): when no chain is built the lookup names a covering one
+  (`fortigate_dhcp_not_converted`). Until `dhcp.fortigate_format_verified` is set after the site
+  check (DEVICE-SETUP section 2.4) every FortiGate chain says that the record format is not
+  verified on site. A match without a chain says so (`chain_missing`), and a match with rows of an
+  unconfigured sender is marked (`session_from_unknown_source`).
+- **srcmac, partial evidence:** the new column `fg_traffic.srcmac` keeps the session record's source
+  MAC (FortiOS fills it only with device identification on the source interface). A lookup uses it
+  only on interfaces listed in `lookup.srcmac_interfaces` (default none, so off), from a trusted
+  sender, for a MAC that is no infrastructure MAC, seen with at most `lookup.srcmac_max_ips` (1)
+  IPv4 addresses on that interface within an hour of the moment and holding no lease of another
+  address then. A chain without a lease then gets the MAC, device and person at `low`, labelled
+  **Kısmi kanıt: srcmac** (`srcmac_only`); a lease of another MAC makes both chains a `low`
+  conflict, listed side by side (`srcmac_mismatch`). srcmac never opens or extends a lease. This
+  departs from SPEC 9.1, as does traffic not extending a FortiGate lease (ASSUMPTIONS, "Deviations
+  from the specification").
+- **Internet exits:** one setting, `nat.egresses` (at most 8 exits by name), replaces
+  `nat.public_ips`, `nat.wan_transip` and `lookup.port_hint`. An exit is `direct` (the FortiGate
+  holds the public address: exact answers), `isp_nat` (an ISP router translates once more:
+  candidates), `not_logged` (the line bypasses the FortiGate) or `internal` (a source-NAT address
+  towards a DMZ, another VLAN, a VPN or a branch: claimed, never searched), with its public
+  addresses (never private, shared or reserved space; IPv6 refused), NAT addresses (`transips`),
+  interfaces (`dstintf`), port preservation (a ranking hint only) and `public_dynamic`. A lookup
+  matches the public IP against the exits, checks that the logs show the exit's NAT address within
+  ±15 minutes of the moment (a failed check is a warned fallback, e.g. "Doğrudan hat
+  doğrulanamadı") and searches that exit's sessions only. An address no exit claims is the
+  FortiGate's own when the logs show it as its NAT address near the moment; otherwise it is
+  searched only in the exits whose public address is unknown or dynamic, with a warning, else
+  nobody is listed (`public_ip_no_egress`). Only private or shared NAT addresses count as double-NAT
+  evidence; candidate searches over unclaimed addresses take only the `trandisp` values of
+  `nat.snat_trandisp` (`snat`) and name the others. Every answer records the exit it used and
+  warns when an exit changed after the moment (`egress_changed_after_event`; the earlier
+  definitions are in the audit log).
+- **Ayarlar → Uygulama ayarları → 5651 sorgu ve kira zaman çizelgesi:** ten new settings (the six
+  `dhcp.fortigate_*`, `lookup.srcmac_interfaces`, `lookup.srcmac_max_ips`, `nat.egresses`,
+  `nat.snat_trandisp`) with Turkish and English validation, no re-authentication (O8).
+  **İnternet çıkışları (NAT)** is an editor of its own (a form per exit, the server's rules checked
+  in the browser, a stored exit it cannot give back never rewritten); under it, **Kayıtlarda
+  görülen NAT adresleri (son 24 saat)** lists the `transip`, `dstintf` and `trandisp` groups of
+  the trusted session records with the exit that claims each (**Çıkış olarak ekle**, **İnternet
+  çıkışı değil olarak ekle**) and the interfaces whose records carry srcmac (**srcmac için ekle**).
+- **Kaynaklar:** a **Kira kanıtı** card: per evidence table (MikroTik DHCP, FortiGate DHCP,
+  ARP-LOG) the usable rows of the last 24 hours, the newest of the last hour and the leases open
+  or ended in that time, the FortiGate DHCP rows not used and those of excluded interfaces,
+  whether the record format is verified, the srcmac interfaces with their rows of the last hour,
+  and a state (lease evidence arrives, none arrives, or it is refused). Counts only, no client
+  address. A **Desteklenen ağ yapıları** box (also on Ayarlar → Kaynaklar) says which network
+  set-ups are supported and which are not (KURULUM/INSTALL section 0.1).
+- **Alerts** (docs/UYARILAR.md / ALERTS.md): `R20-lease:<cause>` and `R20-nat:<cause>`, one alert
+  per cause, in the existing system job. Lease evidence stopped per table (`none:fg_dhcp`,
+  `none:mt_arp` high; `none:mt_dhcp` medium and only while no ARP-LOG row arrives either) or
+  absent (info); FortiGate DHCP records refused, not converted, not verified on site, without
+  renewals, with unlimited or unexpected lease times, outside the configured networks, many
+  addresses for one MAC; a static device in the DHCP pool (`fortigate-decline:<net>`); two DHCP
+  sources on one network; a source clock beyond ±120 s (`source-clock`); a shared MAC on a srcmac
+  interface; for the exits a failed conversion, an unreadable value, an old NAT row changed during
+  a rollback and a NAT address no exit defines that keeps carrying sessions (`unmapped-transip`).
+  An e-mail carries only the cause's fixed line, counts, a VLAN number, an evidence table and a
+  clock offset; addresses, MACs and source names show on the Güvenlik page only.
+- **Arama:** `fg_dhcp` rows belong to the kind **FortiGate olayı** (the MikroTik kind is now
+  **DHCP (MikroTik)**) and answer `srcip:`, `ip:`, `mac:`, `interface:`, `logid:` and `level:`;
+  the new field `srcmac:` (`kaynakmac:`) searches the session records' source MAC (no index,
+  scanned in time slices; `mac:` never reads the session records).
+- **Report (PDF):** section 4 names the exit (**Çıkış**) with the method paragraph of its
+  resolution and mode (double NAT, a shared public address, what would make the answer exact), and
+  each candidate's exit and `dstintf`; the chain shows a FortiGate lease's logged time and last
+  DHCP record, the srcmac step as partial evidence with its session line, and the
+  unconfigured-sender warning; a method note says whether the FortiGate DHCP record format was
+  verified (by whom and when). The cross-check re-parses FortiGate DHCP and srcmac lines with the
+  shipped parser; FortiGate DHCP lines outside the lease timeline are shown, not compared.
+- **Who sees what** (docs/roles.md): `GET /settings/fortigate/observed` administrators only
+  (`settings.manage`; counts and the firewall's own addresses, not audited); the Kira kanıtı card
+  with `GET /sources` (`sources.read`). srcmac and FortiGate DHCP host names are personal data,
+  shown under the same permissions as MikroTik leases. No new permission key and no new audit
+  action; `lookup.run` also records the exit's resolution and names (never a person, MAC or raw
+  line), and the upgrade writes one `settings.change` entry for the conversion of the old NAT keys.
+- **5651 Temel:** FortiGate DHCP, srcmac, the exits and both alert rules are basic functions; no
+  licence state blocks them.
+- **Database:** revision `0017_fortigate_dhcp` (the time-series table `fg_dhcp` with indexes on
+  `(ip, time)` and `(mac, time)`, a hypertable or monthly partitions like the other log tables;
+  `fg_traffic.srcmac`, added empty, also on TimescaleDB with compressed chunks;
+  `leases.lease_seconds`) and `0018_nat_egresses` (settings only: an administrator's old NAT values
+  become exits through a frozen copy of the conversion, a result that does not validate becomes
+  `{}` with `R20-nat:conversion-failed`, the old rows are kept unread for one version; status rows
+  `nat.egresses_migration` and `nat.egresses_changes`). FortiGate DHCP lines loaded before the
+  upgrade stay `fg_event` rows (stored, searchable, sealed).
+- **API:** `GET /settings/fortigate/observed?hours=` (1–72; 504 `fortigate_observed_timeout` after
+  5 s), `lease_evidence` on `GET /sources`, and in the lookup outcome `egress` (resolution, exits,
+  addresses searched, each exit's last change), each match's exit and unconfigured senders,
+  `unconverted_dhcp` and a chain's `mac_source`; 503 `lookup_settings_invalid` when a stored
+  lookup setting cannot be read; refusal codes `setting_egress_*`, `setting_ipv6_not_supported`,
+  `setting_logid_invalid`, `setting_dhcp_msg_invalid`, `setting_interface_invalid`,
+  `setting_trandisp_invalid` (MVP-CONTRACTS §18). A lookup's transaction plans every statement
+  with its values, as the search does.
+- **Rollback:** `Install-Arcilogger.ps1 -Rollback` without `-RestoreDatabase` runs the step
+  `leases.prepare-rollback` after the services stop and before the program is swapped:
+  `arcilogger-db leases prepare-rollback` sets every FortiGate lease to `low` (derived rows only,
+  one transaction) and the count is printed and logged; a failure or `-SkipDatabase` is a warning
+  that says what it means for the lookups, never a silent skip. The next `arcilogger-db upgrade`
+  sets the leases the previous version left as they were back to `high`, prints how many it
+  restored and how many stay `low`, and names the days to rebuild. The step runs on every such
+  rollback, so **a rollback between two versions that both read FortiGate DHCP shows FortiGate-DHCP
+  chains `low` until the next `arcilogger-db upgrade`** (false lows only, never a wrong person;
+  ASSUMPTIONS RB1).
+- **Upgrade:** the old NAT values become exits named "Genel IP (yükseltmede aktarıldı)", "FortiGate
+  WAN adresi (yükseltmede aktarıldı)" and, where needed, "Genel adresi tanımlanmamış hatlar";
+  until each line's public address and interfaces are entered, lookups of an address no exit
+  claims carry `egress_public_unknown`. On a FortiGate-DHCP site no chain is built for a client
+  until its first Ack in the new version (up to half its lease); do the record check of
+  DEVICE-SETUP section 2.4 and set `dhcp.fortigate_format_verified` (KURULUM/INSTALL section 13).
+- **Load generator** (tools/loadgen/README.md): site plans `--dhcp-server mikrotik|fortigate|both`,
+  `--srcmac` and `--egress NAME:TRANSIP:DSTINTF:SHARE` (dual WAN); the truth file names each
+  lease's evidence and each session's exit; the default output is unchanged, byte for byte. Its
+  FortiGate DHCP lines are synthetic (the Release logid derived, renewal at half the lease a
+  simulation assumption).
+- **Performance:** ingest with `fg_dhcp` and `srcmac` stayed within the 5 % gate on the development
+  machine: the default mix +0.8 % in-process and +0.7 % with 2 workers, a FortiGate-only spool
+  −3.5 % and +1.7 %; on the load-generator days (the default options, and `--dhcp-server fortigate
+  --srcmac`; 16 alternating runs per tree) the medians were 2.4–3.2 % slower (docs/INGEST.md).
+  The lookup's probe of an address no exit claims reads the NAT address index in its own order,
+  the probe window first (a busy address in about 0.01 s); a busy unclaimed address with no
+  session over the moment takes about 0.5 s at a million lines a day, under a bound of 1 s of its
+  own, the whole lookup staying at about 1 s (contract, "Deviations — c3").
+- **Docs:** DEVICE-SETUP section 2.1–2.6 (NTP; FortiGate DHCP server records with the site check;
+  srcmac and device identification; several internet lines), KURULUM/INSTALL sections 0.1, 13 and
+  16, CORRELATION, RAPOR and DENETCI-KILAVUZU (how to read the new report rows), AYARLAR/SETTINGS,
+  ILK-ADIMLAR/FIRST-STEPS, and the legal drafts (FortiGate DHCP host names and device-identification
+  fields as personal data, for the organisation's counsel).
+
+### Fixes and smaller additions (Wave 3)
+
+- **A 5651 lookup by domain on compressed TimescaleDB chunks** took 6.0–7.2 s at 3 million rows a
+  day, over its 5 s: the web and application sub-query's time bound used `COALESCE`, which
+  TimescaleDB does not carry into the compressed batches. It is now two plain sub-queries (rows
+  with and without a duration) with the same matches: 1.45–1.56 s.
+- **Arama** opened with a hand-over's range (from the Panel or Canlı Akış) searched again on the
+  default last 24 hours (the Panel's "today" search showed 24 hours and was audited twice); a
+  letter typed right after taking a completion could land before the caret; a search whose
+  budget ran out while its first window was still being halved returned an empty page that
+  repeated the scan, now 504 `search_timeout`.
+- **Dialogs** of the devices, reports and users pages and the evidence wizard show their form from
+  the first frame (an edit no longer opens on an empty form for one frame).
+- **Accessible names** contain the text on screen (WCAG 2.5.3, checked by axe-core 4.14) in both
+  languages: user menu, Panel parse failures, settings history, report runs, usage period, Arama's
+  raw line, the syntax help's examples.
+- **Collector:** a status write refused on Windows (the file open in another process) is tried
+  again at the next round, so a new configuration's report no longer waits for the next status
+  interval.
+- **Worker:** the search-counts backfill ends its run when its budget is used up also on a coarse
+  clock (Windows).
+- **Dependencies:** the Python, web runtime and web tooling groups and the CI actions updated
+  (Dependabot).
+- **Development:** `CLAUDE.md`, `CONTRIBUTING.md` and a pull request template for the team; CI
+  runs on pull requests and on the `wave-*` integration branches, each test once, the Windows job
+  in three parts; `tools/dev/cloud-setup.sh` prepares PostgreSQL 16 for a cloud session.
+
 ### Search, live tail and sources (Wave 2)
 
 Three of the menu's placeholder pages are real: **Arama**, **Canlı Akış** and **Kaynaklar**, plus
@@ -382,7 +694,7 @@ obligations; nothing here is a claim of legal compliance.
   `usage.auto_rebuild_days` days (tested in `worker/tests/test_usage_jobs.py`).
 - **Texts:** the departments' empty-list hint no longer says the installer creates departments;
   the first-steps guides (ILK-ADIMLAR / FIRST-STEPS sections 5 and 12), KURULUM / INSTALL,
-  roles.md, DATA-MODEL, ARCHITECTURE and ASSUMPTIONS (P4, G6, V1–V4) describe entering the VLANs;
+  roles.md, DATA-MODEL, ARCHITECTURE and ASSUMPTIONS (P4, G6, VA1–VA4) describe entering the VLANs;
   the "VLAN list cannot be entered" limitation is gone.
 
 ### Usage reports

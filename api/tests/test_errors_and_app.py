@@ -52,6 +52,14 @@ EXPECTED_ROUTERS = {
     "/settings": "settings",
     # Arama (ADR-0015, docs/MVP-CONTRACTS.md section 17).
     "/search": "search",
+    # Uyum Durumu and Sistem (Wave 4 contract 2.2; mounted by W4-F, D2).
+    "/compliance": "compliance",
+    "/system": "system",
+    "/system/health": "system",
+    # Arşivden yeniden yükleme (Wave 5 contract G9; mounted by W5-G, C1).
+    "/archive-reloads": "archive",
+    # The legal-validity status, the banner on every page (Wave 5 contract 2.3.1; C1).
+    "/legal-status": "legal-status",
 }
 
 

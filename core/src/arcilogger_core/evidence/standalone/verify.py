@@ -31,7 +31,9 @@ explained again where it is implemented):
    (including days missing from the package, and runs of empty days a manifest lists as
    ``unsealed_empty_days`` instead of stamping them one by one). ARCILOGGER's own audit log is
    left out of packages by default (``scope.audit_log``): its absence is reported, not failed.
-4. Deletion records, the chain anchor and renewal stamps when the package contains them.
+4. Deletion records, the chain anchor and renewal stamps when the package contains them, and
+   the long-term status of every day's stamp: whether a renewal stamp that counts re-stamped it
+   before its TSA certificate expired (180 days ahead, from the package alone).
 5. The extract: every extracted line equals, byte for byte, that line of the sealed file.
 6. Nothing else: a file in a sealed day folder that no manifest lists was never sealed and is a
    failure; in an evidence package any file that is not a known part is a failure too.
@@ -67,13 +69,29 @@ import sys
 import unicodedata
 import zipfile
 import zlib
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import IO, Any
 
-VERIFIER_VERSION = "4"
+
+class _NoLzmaError(Exception):
+    """Never raised: stands in for ``lzma.LZMAError`` in :data:`READ_ERRORS` without lzma."""
+
+
+lzma: Any
+try:  # xz-sealed days (Wave 5); a Python built without _lzma still verifies gzip days
+    import lzma as _lzma
+
+    lzma = _lzma
+    _LZMA_ERROR: type[Exception] = _lzma.LZMAError
+except ImportError:  # pragma: no cover - every supported CPython build has it
+    lzma = None
+    _LZMA_ERROR = _NoLzmaError
+
+
+VERIFIER_VERSION = "8"
 INDEX_NAME = "paket.json"
 INDEX_SCHEMA = "arcilogger.evidence/1"
 #: The guides. The Turkish one has an ASCII name: ZIP tools that ignore the UTF-8 name flag
@@ -373,6 +391,11 @@ EC_PUBLIC_KEY = "1.2.840.10045.2.1"
 TEST_POLICY_PREFIX = "2.999."
 #: Organization (O) in every certificate of ARCILOGGER's mock TSA.
 TEST_ORGANIZATION = "ARCILOGGER TEST - NOT VALID"
+#: How long before its TSA certificate expires a stamp is due for re-stamping: the default of
+#: ARCILOGGER's ``tsa.renew_before_days``. The package does not carry the site's setting, so the
+#: verdict here uses the default (contract W5-A-5).
+RENEW_BEFORE = timedelta(days=180)
+RENEWAL_SCHEMA = "arcilogger.renewal/1"
 #: A ``gaps`` entry of a manifest that stands for a run of empty days that were not stamped
 #: one by one (ARCILOGGER ``seal.max_consecutive_empty_days``).
 UNSEALED_DAYS = "unsealed_empty_days"
@@ -1383,8 +1406,9 @@ def verify_timestamp(
 
     The same rules as ARCILOGGER's own verifier (``arcilogger_core.tsa.verify``), so both
     reach the same verdict on the same token. ``require_critical_eku`` false — only when the
-    sealed manifest says the site accepted Kamu SM's profile (``tsa.require_critical_eku``) —
-    turns a non-critical EKU extension into a warning (``result.warnings``).
+    sealed manifest (for a renewal token, its record) says the site accepted Kamu SM's profile
+    (``tsa.require_critical_eku``) — turns a non-critical EKU extension into a warning
+    (``result.warnings``).
     """
     result = TimestampResult()
     try:
@@ -1552,11 +1576,12 @@ def check_revocation(
 
     Returns ``(level, code, tr, en)`` tuples. A CRL is used only if its signature verifies with
     the key of the certificate's issuer from the chain. Every usable CRL is consulted (a CA may
-    drop an expired certificate from later lists): an entry dated at or before the stamp time
-    (``moment``) is a failure, a later one a warning, an entry on hold (certificateHold) a
-    warning. "Not revoked" is only reported when a usable CRL was issued after the stamp time;
-    an older one cannot know about revocations between its date and the stamp. Online checking
-    is not done.
+    drop an expired certificate from later lists): a revocation dated at or before the stamp
+    time (``moment``) is a failure, also when an earlier hold precedes it (C6); otherwise the
+    earliest entry decides: a hold (certificateHold) is a warning, a revocation after the stamp
+    time a warning. "Not revoked" is only reported when a usable CRL was issued after the stamp
+    time; an older one cannot know about revocations between its date and the stamp. Online
+    checking is not done.
     """
     findings = []
     for position, certificate in enumerate(chain[:-1]):
@@ -1582,14 +1607,21 @@ def check_revocation(
             )
             continue
         entries = sorted(
-            (crl.revoked[certificate.serial], crl.reasons.get(certificate.serial))
-            for crl in usable
-            if certificate.serial in crl.revoked
-            and crl.reasons.get(certificate.serial) != CRL_REASON_REMOVE
+            (
+                (crl.revoked[certificate.serial], crl.reasons.get(certificate.serial))
+                for crl in usable
+                if certificate.serial in crl.revoked
+                and crl.reasons.get(certificate.serial) != CRL_REASON_REMOVE
+            ),
+            # Of two entries of the same date, one without a reason comes first, then by reason
+            # code (as in the core).
+            key=lambda entry: (entry[0], -1 if entry[1] is None else entry[1]),
         )
         latest = max(usable, key=lambda crl: crl.this_update)
+        # C6: a revocation at or before the stamp time outranks an earlier hold.
+        before = [entry for entry in entries if entry[1] != CRL_REASON_HOLD and entry[0] <= moment]
         if entries:
-            findings.append(_revocation_finding(name, *entries[0], moment))
+            findings.append(_revocation_finding(name, *(before or entries)[0], moment))
         elif latest.this_update >= moment:
             findings.append(
                 (
@@ -1709,9 +1741,11 @@ class TooLargeError(Exception):
     """A file (or a raw line) is larger than this program is willing to hold in memory."""
 
 
-#: What reading a file can raise: OS errors, a bad ZIP entry (CRC), a corrupt gzip stream, a
-#: file above the size limits.
-READ_ERRORS = (OSError, EOFError, zipfile.BadZipFile, zlib.error, TooLargeError)
+#: What reading a file can raise: OS errors, a bad ZIP entry (CRC), a corrupt gzip or xz stream,
+#: a file above the size limits.
+READ_ERRORS = (OSError, EOFError, zipfile.BadZipFile, zlib.error, _LZMA_ERROR, TooLargeError)
+#: The suffixes of a sealed day's files: gzip (every day sealed before Wave 5) and seekable xz.
+SEALED_SUFFIXES = (".gz", ".xz")
 
 
 class PackageError(Exception):
@@ -1913,8 +1947,55 @@ def hash_stream(handle: IO[bytes]) -> tuple[str, int]:
     return hasher.hexdigest(), size
 
 
-def gunzip_digest(handle: IO[bytes]) -> tuple[str, int]:
-    """SHA-256 and line count of the uncompressed content of a gzip stream.
+def _xz_chunks(handle: IO[bytes]) -> Iterator[bytes]:
+    """The content of a seekable xz file: every stream, one after the other, strictly.
+
+    Unlike ``lzma.LZMAFile``, which stops quietly at a damaged later stream, anything after a
+    stream that is not a complete next stream is an error, so a damaged file never reads as a
+    shorter one.
+    """
+    if lzma is None:  # pragma: no cover - see the import
+        raise OSError("this Python has no lzma module; xz files cannot be opened")
+    decompressor: Any = None
+    pending = b""
+    while True:
+        if decompressor is None or decompressor.eof:
+            if decompressor is not None:
+                pending = decompressor.unused_data + pending
+            if not pending:
+                pending = handle.read(CHUNK)
+            if not pending:
+                if decompressor is None:
+                    raise EOFError("empty xz file")
+                return
+            decompressor = lzma.LZMADecompressor(format=lzma.FORMAT_XZ)
+        if not pending:
+            pending = handle.read(CHUNK)
+            if not pending:
+                raise EOFError("xz stream ends early")
+        out = decompressor.decompress(pending, CHUNK)
+        pending = b""
+        if out:
+            yield out
+        while not decompressor.eof and not decompressor.needs_input:
+            out = decompressor.decompress(b"", CHUNK)
+            if not out:
+                break
+            yield out
+
+
+def _gzip_chunks(handle: IO[bytes]) -> Iterator[bytes]:
+    with gzip.GzipFile(fileobj=handle, mode="rb") as unzipped:
+        yield from iter(lambda: unzipped.read(CHUNK), b"")
+
+
+def decompressed_chunks(handle: IO[bytes], name: str) -> Iterator[bytes]:
+    """The uncompressed content of a sealed file, by the suffix of its name (.gz or .xz)."""
+    return _xz_chunks(handle) if name.endswith(SEALED_SUFFIXES[1]) else _gzip_chunks(handle)
+
+
+def sealed_digest(handle: IO[bytes], name: str) -> tuple[str, int]:
+    """SHA-256 and line count of the uncompressed content of a sealed file of either format.
 
     Every ``\\n`` ends a line; a non-empty last line without ``\\n`` (a write torn by a crash
     or a full disk, sealed as it was and marked ``unterminated_last_line`` in the manifest)
@@ -1923,14 +2004,18 @@ def gunzip_digest(handle: IO[bytes]) -> tuple[str, int]:
     hasher = hashlib.sha256()
     lines = 0
     last = b""
-    with gzip.GzipFile(fileobj=handle, mode="rb") as unzipped:
-        for chunk in iter(lambda: unzipped.read(CHUNK), b""):
-            hasher.update(chunk)
-            lines += chunk.count(b"\n")
-            last = chunk[-1:]
+    for chunk in decompressed_chunks(handle, name):
+        hasher.update(chunk)
+        lines += chunk.count(b"\n")
+        last = chunk[-1:]
     if last not in (b"", b"\n"):
         lines += 1
     return hasher.hexdigest(), lines
+
+
+def gunzip_digest(handle: IO[bytes]) -> tuple[str, int]:
+    """:func:`sealed_digest` of a gzip file (the days sealed before Wave 5)."""
+    return sealed_digest(handle, SEALED_SUFFIXES[0])
 
 
 # =================================================================================================
@@ -2066,6 +2151,7 @@ class DayState:
     token_sha256: str = ""
     verified_files: set[str] = field(default_factory=set)
     gen_time: datetime | None = None  # only when the token verified
+    cert_not_after: datetime | None = None  # the TSA certificate's, only when the token verified
 
 
 def _entries(value: Any) -> list[dict[str, Any]]:
@@ -2076,6 +2162,128 @@ def _entries(value: Any) -> list[dict[str, Any]]:
 def _object(value: Any) -> dict[str, Any]:
     """A JSON object, or an empty one for anything else."""
     return value if isinstance(value, dict) else {}
+
+
+def _renewal_eku(record: bytes) -> bool:
+    """The EKU rule a renewal record was written under (its ``tsa.require_critical_eku``, K6):
+    its token is judged by it, as a day's token by its manifest's; strict unless the record
+    says false (one that cannot be read never counts anyway)."""
+    try:
+        data = load_json(record)
+    except (ValueError, RecursionError):
+        return True
+    return _object(_object(data).get("tsa")).get("require_critical_eku") is not False
+
+
+#: The long-term status of a day's stamp: (level, code, TR, EN), the texts of contract 2.6.
+#: ``{renewal}`` is the record that counts (``renewals/<name>.json``); ``{date}`` the
+#: certificate's expiry, for ``late`` the time of the re-stamping.
+RENEWAL_FINDINGS = {
+    "not_due": (
+        "info",
+        "renewal-not-due",
+        "Yeniden damgalama henüz gerekmiyor (sertifika {date} tarihine kadar geçerli).",
+        "Re-stamping is not due yet (certificate valid until {date}).",
+    ),
+    "covered": (
+        "ok",
+        "renewal-covered",
+        "Bu damga, sertifikası sona ermeden yeniden damgalanmış: {renewal}.",
+        "Re-stamped before its certificate expired: {renewal}.",
+    ),
+    "due": (
+        "warn",
+        "renewal-due",
+        "Damga sertifikası {date} tarihinde sona eriyor; yeniden damgalama bekleniyor.",
+        "The stamp certificate expires on {date}; re-stamping is due.",
+    ),
+    "late": (
+        "warn",
+        "renewal-late",
+        "Yeniden damgalama, eski sertifikanın süresi dolduktan sonra yapılmış ({date}).",
+        "Re-stamped after the old certificate had expired ({date}).",
+    ),
+    "uncovered": (
+        "warn",
+        "renewal-uncovered",
+        "Damga sertifikasının süresi {date} tarihinde doldu ve yeniden damgalama yok; damga, "
+        "alındığı an için geçerlidir.",
+        "The stamp certificate expired on {date} with no re-stamping; the stamp is valid for the "
+        "moment it was made.",
+    ),
+}
+
+
+@dataclass(frozen=True)
+class Renewal:
+    """A verified renewal record of the package: its path (``renewals/<name>.json``), its own
+    token, the stamp time, whether it can count and the token hashes it lists."""
+
+    record: str
+    token_sha256: str
+    cert_not_after: datetime
+    gen_time: datetime
+    eligible: bool
+    lists: frozenset[str] = frozenset()
+
+
+class RenewalRules:
+    """The status rules of ARCILOGGER's re-stamping (contract 2.1.2), the same as the server's.
+
+    A stamp is ``not_due`` while its certificate has more than :data:`RENEW_BEFORE` left.
+    Otherwise the renewals that count for it are the eligible ones that list its SHA-256 and
+    whose own stamp is ``not_due`` or ``covered`` (the chain of renewals is followed); of those
+    the earliest stamp time decides: ``covered`` when it is before the certificate expired, else
+    ``late``. With none, ``uncovered`` once the certificate has expired, else ``due``.
+    """
+
+    def __init__(
+        self, renewals: Sequence[Renewal], *, now: datetime, renew_before: timedelta = RENEW_BEFORE
+    ) -> None:
+        self.now = now
+        self.renew_before = renew_before
+        self.listing: dict[str, list[Renewal]] = {}
+        for renewal in renewals:
+            for token_sha256 in renewal.lists:
+                self.listing.setdefault(token_sha256, []).append(renewal)
+        self.known: dict[tuple[str, datetime], tuple[str, Renewal | None]] = {}
+        self.open: set[tuple[str, datetime]] = set()
+
+    def status(self, token_sha256: str, cert_not_after: datetime) -> tuple[str, Renewal | None]:
+        key = (token_sha256, cert_not_after)
+        if key not in self.known:
+            self.open.add(key)
+            try:
+                self.known[key] = self._decide(token_sha256, cert_not_after)
+            finally:
+                self.open.discard(key)
+        return self.known[key]
+
+    def _decide(self, token_sha256: str, expires: datetime) -> tuple[str, Renewal | None]:
+        if expires - self.now > self.renew_before:
+            return "not_due", None
+        counting = sorted(
+            (r for r in self.listing.get(token_sha256, ()) if self._counts(r)),
+            key=lambda renewal: (renewal.gen_time, renewal.record),
+        )
+        in_time = [renewal for renewal in counting if renewal.gen_time < expires]
+        if in_time:
+            return "covered", in_time[0]
+        if counting:
+            return "late", counting[0]
+        if expires <= self.now:
+            return "uncovered", None
+        return "due", None
+
+    def _counts(self, renewal: Renewal) -> bool:
+        # A renewal on the path being decided (a cycle) does not count; nor does one whose own
+        # stamp is due, late or uncovered.
+        if not renewal.eligible or (renewal.token_sha256, renewal.cert_not_after) in self.open:
+            return False
+        return self.status(renewal.token_sha256, renewal.cert_not_after)[0] in (
+            "not_due",
+            "covered",
+        )
 
 
 class Verifier:
@@ -2593,6 +2801,7 @@ class Verifier:
             summary["tsa"] = signer.subject_text
         if result.ok and result.gen_time is not None and signer is not None and root is not None:
             state.gen_time = result.gen_time
+            state.cert_not_after = signer.not_after
             summary["root_sha256"] = root.fingerprint()
             report.ok(
                 "token-ok",
@@ -2620,22 +2829,32 @@ class Verifier:
                     report.add(level, code, day, tr, en)
         self._cross_check_index(day, result)
 
-    def _eku_warnings(self, result: TimestampResult, where: str) -> None:
+    def _eku_warnings(self, result: TimestampResult, where: str, *, record: bool = False) -> None:
+        """A non-critical EKU the site accepted: in the sealed manifest, or (``record``) in the
+        renewal record the token stamps."""
+        in_tr, in_en = (
+            ("yenileme kaydında", "renewal record")
+            if record
+            else ("mühürlü manifestte", "manifest")
+        )
         for warning in result.warnings:
             self.report.warn(
                 warning.code,
                 where,
                 f"Zaman damgası: {warning.tr}. Site, Kamu SM'nin sertifika profilini kabul edip "
-                "bu kuralı gevşetmiş ve bunu mühürlü manifestte belirtmiştir "
+                f"bu kuralı gevşetmiş ve bunu {in_tr} belirtmiştir "
                 '(tsa.require_critical_eku = false); OpenSSL "ts -verify" böyle bir damgayı '
                 '"unsuitable certificate purpose" diyerek reddeder',
                 f"{warning.en}; the site relaxed this rule and sealed that choice in the "
-                "manifest (OpenSSL ts -verify rejects such a token)",
+                f"{in_en} (OpenSSL ts -verify rejects such a token)",
             )
 
     def _relaxed_eku(self) -> bool:
         """Whether a sealed manifest of the package says the site accepts a non-critical EKU
-        (then the stamps of its records — deletions, renewals — are judged the same way)."""
+        (then the packaged report's stamp and a deletion record that no manifest of the package
+        lists are judged the same way; a listed deletion record is judged by the manifests that
+        list it, :meth:`_deletion_eku`, and a renewal record carries its own rule,
+        :func:`_renewal_eku`)."""
         for state in self.days.values():
             try:
                 manifest = load_json(state.data or b"")
@@ -2645,6 +2864,22 @@ class Verifier:
             if tsa.get("require_critical_eku") is False:
                 return True
         return False
+
+    def _deletion_eku(self, name: str) -> bool:
+        """The EKU rule a deletion record's token is judged by: the ``tsa.require_critical_eku``
+        of the sealed manifests that list it (strict when one of them is), as a day's token is
+        judged by its own manifest's; a record that no manifest of the package lists (reached
+        only through the chain anchor) by the package's (:meth:`_relaxed_eku`, W5-A-19)."""
+        rules = [
+            _object(state.manifest.get("tsa")).get("require_critical_eku") is not False
+            for state in self.days.values()
+            if state.manifest is not None
+            and any(
+                self.prefix + str(entry.get("path", "")) == name
+                for entry in _entries(state.manifest.get("deletions"))
+            )
+        ]
+        return any(rules) if rules else not self._relaxed_eku()
 
     def _explain(self, result: TimestampResult, error: CheckError) -> CheckError:
         """A token whose imprint is another manifest of this package was swapped: say which."""
@@ -2784,10 +3019,13 @@ class Verifier:
         if self.deep and "sha256_uncompressed" in entry:
             try:
                 with self.package.open(name) as handle:
-                    raw_sha256, lines = gunzip_digest(handle)
+                    raw_sha256, lines = sealed_digest(handle, name)
             except READ_ERRORS as exc:
                 report.fail(
-                    "file-content-mismatch", day, f"{path}: açılamadı ({exc})", f"{path}: bad gzip"
+                    "file-content-mismatch",
+                    day,
+                    f"{path}: açılamadı ({exc})",
+                    f"{path}: cannot be decompressed ({exc})",
                 )
                 return False
             if raw_sha256 != entry["sha256_uncompressed"] or lines != entry.get("lines"):
@@ -2818,7 +3056,9 @@ class Verifier:
         return True
 
     def _check_deletions(self, state: DayState, manifest: dict[str, Any]) -> None:
-        """Deletion records (imha tutanağı) sealed into this day's manifest by retention."""
+        """Deletion records (imha tutanağı) sealed into this day's manifest by retention; their
+        tokens are judged by this manifest's EKU rule, the manifest that seals them (W5-A-19)."""
+        strict = _object(manifest.get("tsa")).get("require_critical_eku") is not False
         for entry in _entries(manifest.get("deletions")):
             path = str(entry.get("path", ""))
             name = self.prefix + path
@@ -2843,13 +3083,28 @@ class Verifier:
                 )
                 continue
             self._check_stamped_record(
-                name, record, state.day, "deletion", entry.get("token_sha256")
+                name,
+                record,
+                state.day,
+                "deletion",
+                entry.get("token_sha256"),
+                require_critical_eku=strict,
             )
 
     def _check_stamped_record(
-        self, name: str, record: bytes, where: str, kind: str, token_sha256: Any = None
+        self,
+        name: str,
+        record: bytes,
+        where: str,
+        kind: str,
+        token_sha256: Any = None,
+        *,
+        require_critical_eku: bool | None = None,
     ) -> TimestampResult | None:
-        """A deletion or renewal record and its own time-stamp token (``<name>.zd``)."""
+        """A deletion or renewal record, or the packaged report, and its own time-stamp token
+        (``<name>.zd``), with the EKU rule ``require_critical_eku`` (a renewal record's own, a
+        deletion record's from the manifests that list it), or for the report the package's
+        (:meth:`_relaxed_eku`)."""
         report = self.report
         token = self._read(name + ".zd", where)
         if token is None:
@@ -2861,12 +3116,14 @@ class Verifier:
                 f"{name}.zd: özet manifestteki değerle uyuşmuyor",
                 f"{name}.zd: differs from the manifest",
             )
+        if require_critical_eku is None:
+            require_critical_eku = not self._relaxed_eku()
         result = verify_timestamp(
-            token, record, self.roots, now=self.now, require_critical_eku=not self._relaxed_eku()
+            token, record, self.roots, now=self.now, require_critical_eku=require_critical_eku
         )
         for error in result.errors:
             report.failed(error, where, f"{name}: ")
-        self._eku_warnings(result, where)
+        self._eku_warnings(result, where, record=kind == "renewal")
         if result.ok and result.gen_time is not None:
             report.ok(
                 f"{kind}-ok",
@@ -3035,7 +3292,13 @@ class Verifier:
         record = self._read(record_name, day) if safe_name(record_name) else None
         record_ok = False
         if record is not None:
-            result = self._check_stamped_record(record_name, record, day, "deletion")
+            result = self._check_stamped_record(
+                record_name,
+                record,
+                day,
+                "deletion",
+                require_critical_eku=self._deletion_eku(record_name),
+            )
             try:
                 entries = _entries(load_json(record).get("days"))
             except (ValueError, AttributeError, RecursionError):
@@ -3067,22 +3330,35 @@ class Verifier:
     # -- 5. renewals ---------------------------------------------------------------------------
 
     def check_renewals(self) -> None:
-        """Renewal records re-stamp older tokens before the TSA certificate expires."""
+        """Renewal records re-stamp older tokens before the TSA certificate expires.
+
+        Each record and its token are verified; then every day whose token verified gets one
+        finding with the long-term status of its stamp at the verification time (contract
+        2.1.4), from the renewals in the package (:class:`RenewalRules`).
+        """
         folder = self.prefix + "renewals/"
         names = [n for n in self.names if n.startswith(folder) and n.endswith(".json")]
-        if not names:
+        days = [
+            (state, state.cert_not_after)
+            for _, state in sorted(self.days.items())
+            if state.cert_not_after is not None
+        ]
+        if not names and not days:
             return
         self.report.section("5. Yenileme damgaları", "renewal stamps")
         known = {}
         for state in self.days.values():
             known[state.manifest_sha256] = f"{state.day} manifest"
             known[state.token_sha256] = f"{state.day} damga"
+        renewals = []
         for name in names:
             self.covered.update((name, name + ".zd"))
             record = self._read(name, "yenileme")
             if record is None:
                 continue
-            result = self._check_stamped_record(name, record, "yenileme", "renewal")
+            result = self._check_stamped_record(
+                name, record, "yenileme", "renewal", require_critical_eku=_renewal_eku(record)
+            )
             text = record.decode("utf-8", "replace")
             covered = sorted({known[h] for h in _HEX64.findall(text) if h in known})
             if result is not None and result.ok:
@@ -3093,6 +3369,71 @@ class Verifier:
                     f"{', '.join(covered) or '(bu paketteki hiçbir gün)'}",
                     "what the renewal stamp covers",
                 )
+                renewal = self._renewal(name, record, result)
+                if renewal is not None:
+                    renewals.append(renewal)
+        rules = RenewalRules(renewals, now=self.now)
+        for state, expires in days:
+            status, renewal = rules.status(state.token_sha256, expires)
+            level, code, tr, en = RENEWAL_FINDINGS[status]
+            # late: when the stamp was renewed; otherwise when its certificate expires
+            moment = renewal.gen_time if status == "late" and renewal is not None else expires
+            counted = renewal.record if renewal is not None else ""
+            self.report.add(
+                level,
+                code,
+                state.day,
+                tr.format(renewal=counted, date=_format_time(moment)),
+                en.format(renewal=counted, date=moment.isoformat()),
+            )
+
+    def _renewal(self, name: str, record: bytes, result: TimestampResult) -> Renewal | None:
+        """What a verified renewal record says for the status rules; None when it is not an
+        ``arcilogger.renewal/1`` record. It counts (``eligible``) only when the record claims a
+        legal-grade provider and was not written as a test (``reason: "test"``), the stamp is
+        not one of ARCILOGGER's test TSA (policy under 2.999, test root) and the package's CRLs
+        do not show its certificate revoked at or before the stamp (D5, C15, contract W5-A-5:
+        the site's list of legal root fingerprints is not in the package)."""
+        try:
+            data = load_json(record)
+        except (ValueError, RecursionError):
+            return None
+        data = _object(data)
+        if data.get("schema") != RENEWAL_SCHEMA or result.gen_time is None:
+            return None
+        signer = result.signer
+        if signer is None:
+            return None
+        test_stamp = result.policy.startswith(TEST_POLICY_PREFIX) or any(
+            TEST_ORGANIZATION in cert.subject_text for cert in result.chain
+        )
+        revoked = any(
+            level == "fail"
+            for level, *_ in check_revocation(result.chain, self.crls, result.gen_time)
+        )
+        eligible = (
+            _object(data.get("tsa")).get("legal_grade") is True
+            and data.get("reason") == "due"
+            and not test_stamp
+            and not revoked
+        )
+        try:
+            token = self.package.read(name + ".zd")
+        except READ_ERRORS:  # it was read a moment ago; gone now, it cannot count
+            return None
+        lists = {
+            str(entry.get("token_sha256"))
+            for entry in _entries(data.get("tokens"))
+            if isinstance(entry.get("token_sha256"), str)
+        }
+        return Renewal(
+            record=name[len(self.prefix) :],
+            token_sha256=hashlib.sha256(token).hexdigest(),
+            cert_not_after=signer.not_after,
+            gen_time=result.gen_time,
+            eligible=eligible,
+            lists=frozenset(lists),
+        )
 
     # -- 5b. the official report ---------------------------------------------------------------
 
@@ -3210,7 +3551,7 @@ class Verifier:
             if match is None:
                 continue
             day, source = match.group("day"), match.group("source")
-            sealed = f"{self.prefix}{day[:4]}/{day[5:7]}/{day[8:10]}/{source}.log.gz"
+            sealed = self._extract_source(day, source)
             data = self._read(name, "alıntı")
             if data is None:
                 continue
@@ -3250,23 +3591,48 @@ class Verifier:
                 continue  # an unverified file is not read any further
             self._compare_extract(name, sealed, wanted)
 
+    def _extract_source(self, day: str, source: str) -> str:
+        """The sealed file an extract was taken from, in whichever format the day was sealed.
+
+        The one the day check verified wins; a name that is in neither format is returned as
+        the gzip name, which the caller then reports as missing.
+        """
+        base = f"{self.prefix}{day[:4]}/{day[5:7]}/{day[8:10]}/{source}.log"
+        present = [base + suffix for suffix in SEALED_SUFFIXES if base + suffix in self.name_set]
+        state = self.days.get(day)
+        verified = [name for name in present if state is not None and name in state.verified_files]
+        return (verified or present or [base + SEALED_SUFFIXES[0]])[0]
+
     def _compare_extract(self, name: str, sealed: str, wanted: dict[int, bytes]) -> None:
         report = self.report
         found: dict[int, bytes] = {}
         last = max(wanted) if wanted else 0
         try:
-            with self.package.open(sealed) as handle, gzip.GzipFile(fileobj=handle) as raw:
-                for number in range(1, last + 1):
-                    line = raw.readline(MAX_LINE + 1)
-                    if not line:
+            with self.package.open(sealed) as handle:
+                number = 0
+                rest = b""
+                for chunk in decompressed_chunks(handle, sealed):
+                    lines = (rest + chunk).split(b"\n")
+                    rest = lines.pop()
+                    if len(rest) > MAX_LINE:
+                        raise TooLargeError(f"line {number + 1} is longer than {MAX_LINE} bytes")
+                    for line in lines:
+                        number += 1
+                        if len(line) >= MAX_LINE:  # with its line end, as readline counted
+                            raise TooLargeError(f"line {number} is longer than {MAX_LINE} bytes")
+                        if number in wanted:
+                            found[number] = line
+                    if number >= last:
                         break
-                    if len(line) > MAX_LINE:
-                        raise TooLargeError(f"line {number} is longer than {MAX_LINE} bytes")
-                    if number in wanted:
-                        found[number] = line[:-1] if line.endswith(b"\n") else line
+                else:
+                    if rest and number + 1 in wanted:
+                        found[number + 1] = rest  # a torn last line is a line too
         except READ_ERRORS as exc:
             report.fail(
-                "extract-mismatch", "alıntı", f"{sealed}: açılamadı ({exc})", f"{sealed}: bad gzip"
+                "extract-mismatch",
+                "alıntı",
+                f"{sealed}: açılamadı ({exc})",
+                f"{sealed}: cannot be decompressed ({exc})",
             )
             return
         bad = sorted(number for number, line in wanted.items() if found.get(number) != line)

@@ -2,6 +2,8 @@ import { expect, test } from '@playwright/test';
 
 import { usePreferences } from './fixtures';
 import { mockApi } from './mock-api';
+import { mockNetwork } from './mock-network';
+import { mockW4 } from './mock-w4';
 
 /** Menu per role (docs/MVP-CONTRACTS.md section 6, spec 13). */
 const MENUS: [string, string, string[]][] = [
@@ -38,6 +40,7 @@ const MENUS: [string, string, string[]][] = [
       'Kullanım',
       'Mühürleme',
       'Kanıt Paketleri',
+      'Uyum Durumu',
       'Denetim Kaydı',
     ],
   ],
@@ -54,34 +57,6 @@ for (const [role, username, menu] of MENUS) {
     await expect(nav.getByRole('link')).toHaveText(menu);
     await page.getByRole('button', { name: /Kullanıcı menüsü/ }).click();
     await expect(page.getByRole('menu').getByText(role, { exact: false })).toBeVisible();
-  });
-}
-
-for (const [username, uiKit] of [
-  ['tolga', true],
-  ['ayse.yilmaz', false],
-  ['mehmet.kaya', false],
-  ['zeynep', false],
-] as const) {
-  test(`placeholder pages point to the UI kit only when it may be opened — ${username}`, async ({
-    page,
-  }) => {
-    // "Uyum Durumu" is still a placeholder; roles without it get it for this test.
-    await mockApi(page, {
-      signedInAs: username,
-      grant: { auditor: ['compliance.read'], hr: ['compliance.read'], viewer: ['compliance.read'] },
-    });
-    await page.goto('/compliance');
-    await expect(page.getByText('Bu sayfa sonraki bir sürümde eklenecek.')).toBeVisible();
-    const link = page.getByRole('link', { name: 'Bileşen Kitini aç' });
-    if (uiKit) {
-      await link.click();
-      await expect(page).toHaveURL(/\/ui-kit$/);
-      await expect(page.getByRole('heading', { level: 1, name: 'Bileşen Kiti' })).toBeVisible();
-    } else {
-      await expect(link).toHaveCount(0);
-      await expect(page.getByText(/Bileşen Kiti/)).toHaveCount(0);
-    }
   });
 }
 
@@ -102,6 +77,7 @@ test('pages outside the role stay closed when opened by URL', async ({ page }) =
     '/settings/retention',
     '/settings/backup',
     '/settings/history',
+    '/settings/setup',
     '/lookup',
     '/evidence',
     '/sealing',
@@ -135,6 +111,58 @@ test('pages outside the role stay closed when opened by URL', async ({ page }) =
       ].some((prefix) => call.path.startsWith(prefix)),
     ),
   ).toEqual([]);
+});
+
+// Uyum Durumu: administrator and auditor; Sistem and the first-run wizard (`settings.manage`):
+// administrator only (Wave 4 contract D15).
+for (const [username, paths] of [
+  ['ayse.yilmaz', ['/system', '/settings/setup']],
+  ['mehmet.kaya', ['/compliance', '/system', '/settings/setup']],
+  ['zeynep', ['/compliance', '/system', '/settings/setup']],
+] as const) {
+  test(`Uyum Durumu, Sistem and the first-run wizard stay closed by URL outside the role — ${username}`, async ({
+    page,
+  }) => {
+    const api = await mockApi(page, { signedInAs: username });
+    for (const path of paths) {
+      await page.goto(path);
+      await expect(
+        page.getByRole('heading', { level: 1, name: 'Bu sayfa için yetkiniz yok' }),
+      ).toBeVisible();
+    }
+    // Nothing was even asked of the API for those pages (the wizard reads the configuration, the
+    // administration service's requests and the sources).
+    expect(
+      api.calls.filter((call) =>
+        ['/compliance', '/system', '/admin', '/settings', '/sources'].some((prefix) =>
+          call.path.startsWith(prefix),
+        ),
+      ),
+    ).toEqual([]);
+  });
+}
+
+test('the auditor opens Uyum Durumu and downloads the report, without the confirm button', async ({
+  page,
+}) => {
+  // Wave 4 contract D15: `compliance.read` without `settings.manage`.
+  const api = await mockApi(page, { signedInAs: 'ayse.yilmaz' });
+  const w4 = await mockW4(page, api);
+  await page.goto('/compliance');
+  await expect(page.getByRole('heading', { level: 1, name: 'Uyum Durumu' })).toBeVisible();
+  await expect(page.getByRole('list', { name: 'Denetimler' }).getByRole('group')).toHaveCount(10);
+  await expect(page.getByRole('button', { name: 'Yapılandırma yedeğini aldım' })).toHaveCount(0);
+  await expect(page.getByRole('link', { name: 'İlk kurulum sihirbazını aç' })).toHaveCount(0);
+
+  const download = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Uyum Durumu Raporu (PDF)' }).click();
+  expect((await download).suggestedFilename()).toMatch(/^ARCILOGGER-uyum-durumu-.*\.pdf$/);
+  expect(w4.reports).toBe(1);
+  await expect(page.getByTestId('compliance-export-error')).toHaveCount(0);
+  expect(
+    api.calls.filter((call) => call.method !== 'GET' && call.path.startsWith('/compliance')),
+  ).toEqual([]);
+  expect(w4.confirmations).toBe(0);
 });
 
 test('the report viewer cannot open the 5651, evidence, sealing or log pages either', async ({
@@ -205,6 +233,7 @@ test('browser administration is for administrators: the API refuses everyone els
     '/settings/retention',
     '/settings/backup',
     '/settings/history',
+    '/settings/setup',
   ]) {
     await page.goto(path);
     await expect(
@@ -214,3 +243,52 @@ test('browser administration is for administrators: the API refuses everyone els
   expect(api.calls.filter((call) => call.path.startsWith('/admin'))).toEqual([]);
   expect(api.calls.filter((call) => call.path.startsWith('/settings'))).toEqual([]);
 });
+
+for (const [username, allowed] of [
+  ['tolga', true],
+  ['ayse.yilmaz', false],
+  ['mehmet.kaya', false],
+  ['zeynep', false],
+] as const) {
+  test(`what the FortiGate's records show is for administrators only — ${username}`, async ({
+    page,
+  }) => {
+    // `GET /settings/fortigate/observed` (the exit editor's "Kayıtlarda görülen NAT adresleri")
+    // needs settings.manage, as the whole settings router does (docs/roles.md). User management
+    // opens Ayarlar, not this: every other role is given it here, and still finds the page closed
+    // and the API refusing.
+    const api = await mockApi(page, {
+      signedInAs: username,
+      grant: { auditor: ['users.manage'], hr: ['users.manage'], viewer: ['users.manage'] },
+    });
+    await mockNetwork(page, api);
+    await page.goto('/settings/application?group=lookup');
+    if (allowed) {
+      await expect(page.getByTestId('fortigate-observed')).toBeVisible();
+      await expect(
+        page.getByRole('table', {
+          name: 'FortiGate oturum kayıtlarında görülen kaynak NAT adresleri',
+        }),
+      ).toBeVisible();
+      expect(api.callsTo('GET', '/settings/fortigate/observed')[0]?.query.get('hours')).toBe('24');
+    } else {
+      await expect(
+        page.getByRole('heading', { level: 1, name: 'Bu sayfa için yetkiniz yok' }),
+      ).toBeVisible();
+      await expect(page.getByTestId('fortigate-observed')).toHaveCount(0);
+      // Nothing was even asked of the API for that page.
+      expect(api.callsTo('GET', '/settings/fortigate/observed')).toEqual([]);
+    }
+    // Asked directly, the API answers the administrator and refuses everyone else.
+    const answer = await page.evaluate(async () => {
+      const response = await fetch('/api/v1/settings/fortigate/observed?hours=24');
+      const body = (await response.json()) as { error?: { code: string }; nat?: unknown };
+      return { status: response.status, code: body.error?.code ?? null, nat: 'nat' in body };
+    });
+    expect(answer).toEqual(
+      allowed
+        ? { status: 200, code: null, nat: true }
+        : { status: 403, code: 'forbidden', nat: false },
+    );
+  });
+}

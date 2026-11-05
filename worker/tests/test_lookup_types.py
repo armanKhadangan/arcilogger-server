@@ -10,6 +10,7 @@ from typing import Any
 
 import pytest
 
+from arcilogger_core import sealedfile
 from arcilogger_core.canonical import canonical_json
 from arcilogger_core.layout import Layout
 from arcilogger_db.egress import IMPLICIT_CATCH_ALL, Egress, legacy_egresses
@@ -249,7 +250,14 @@ def test_floats_are_rejected_in_serialised_data() -> None:
 def test_raw_ref_points_to_spool_and_vault(tmp_path: Path) -> None:
     layout = Layout(tmp_path)
     assert RAW.spool_path(layout) == tmp_path / "spool" / "core-r1" / "2026-10-12.log"
-    assert RAW.vault_path(layout) == tmp_path / "vault" / "2026" / "10" / "12" / "core-r1.log.gz"
+    assert RAW.vault_path(layout) is None  # not sealed yet
+    folder = tmp_path / "vault" / "2026" / "10" / "12"
+    folder.mkdir(parents=True)
+    for compression in ("xz", "gzip"):
+        sealed = folder / sealedfile.log_name("core-r1", compression)
+        sealed.write_bytes(b"")
+        assert RAW.vault_path(layout) == sealed
+        sealed.unlink()
 
 
 def test_settings_from_shipped_defaults_mean_double_nat() -> None:

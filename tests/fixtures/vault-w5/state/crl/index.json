@@ -1,0 +1,16 @@
+{
+  "schema": "arcilogger.crl-index/1",
+  "lists": [
+    {
+      "file": "573f811115a0-20260601T040000Z-2f45a62e.crl",
+      "issuer": "CN=ARCILOGGER Mock Root CA (TEST ONLY),O=ARCILOGGER TEST - NOT VALID,C=TR",
+      "issuer_sha256": "573f811115a0b22225bbcecd44716042ccb35678e17314d694cd6b9597ddf02e",
+      "this_update": "2026-06-01T04:00:00+00:00",
+      "next_update": "2026-06-08T04:00:00+00:00",
+      "sha256": "2f45a62eabb35011e7ce59da18398af872063c024e6b7515dbc70834328cba0a",
+      "url": "http://crl.example.com/arcilogger-mock-root.crl",
+      "fetched_at": "2026-06-01T08:00:00+03:00"
+    }
+  ],
+  "failures": []
+}

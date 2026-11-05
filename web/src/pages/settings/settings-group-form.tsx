@@ -15,7 +15,14 @@ import type { SettingChange, SettingOut, SettingProblem } from '@/lib/settings-t
 import { focusFirstError } from '@/lib/validation';
 
 import { SettingField } from './setting-editors';
-import { fromDraft, sameValue, settingControlId, toDraft, type Draft } from './setting-values';
+import {
+  fromDraft,
+  sameValue,
+  settingControlId,
+  toDraft,
+  withServerBounds,
+  type Draft,
+} from './setting-values';
 
 function drafts(settings: readonly SettingOut[]): Record<string, Draft> {
   return Object.fromEntries(settings.map((setting) => [setting.key, toDraft(setting)]));
@@ -44,7 +51,7 @@ function settingProblems(error: unknown): SettingProblem[] {
 export function SettingsGroupForm({
   title,
   description,
-  settings,
+  settings: listed,
   canEdit,
   onDirty,
   testId,
@@ -61,6 +68,8 @@ export function SettingsGroupForm({
   footer?: ReactNode;
 }) {
   const { t } = useTranslation();
+  // A server's lease time is checked against the bounds of `lease.default_seconds` (W5-G-19).
+  const settings = useMemo(() => withServerBounds(listed), [listed]);
   const { withReauth } = useReauth();
   const patch = usePatchSettings();
   const reset = useResetSetting();

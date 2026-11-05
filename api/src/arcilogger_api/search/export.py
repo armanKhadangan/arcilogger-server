@@ -3,10 +3,18 @@
 * **Rows:** the search's own plan read by the window scan in keyset chunks (one read-only
   snapshot) until ``search.export_max_rows`` (100,000) or ``search.export_budget_seconds``
   (120 s); then the file stops and says so — in its name (``-kismi``), in the "Bilgi" sheet, in
-  the header ``X-Arci-Export-Truncated`` (``rows`` or ``time``) and in the audit entry. Never
+  the header ``X-Arci-Export-Truncated`` (``rows``, ``time`` or ``archived``) and in the audit
+  entry. Never
   silent, never a count first. The fill-in queries of a chunk (typed fields, ``messages`` text)
   get the time the budget has left; one that times out cuts the file there (``time``), so no
   row is written with empty columns.
+* **Days gone from the database** (G8, W5-G-24): the router checks the range against the
+  database window as the search does, in the export's snapshot (:attr:`Reading.archived`). A
+  range with days gone and others left gives the rows the database holds, marked as partial the
+  same way (``archived``: the name, the header, the "Bilgi" sheet, which names the days, and the
+  audit entry, which also carries them as ``archived``); where the reading stopped (``rows``,
+  ``time``) is the header's and the entry's ``truncated`` when both apply, and the header
+  ``X-Arci-Export-Archived`` (:func:`archived_header`) names the days whenever some are gone.
 * **CSV:** the rules of :mod:`arcilogger_api.csvfiles` (UTF-8 with BOM, ``;``, CRLF, every cell
   neutralised against formula injection), written row by row.
 * **XLSX:** openpyxl write-only, every cell text (as ``usage_exports``: control characters an
@@ -41,6 +49,7 @@ from openpyxl.cell.cell import ILLEGAL_CHARACTERS_RE
 from openpyxl.styles import Font
 from sqlalchemy.orm import Session
 
+from arcilogger_api.archive.models import ArchivedRange
 from arcilogger_api.csvfiles import BOM, SEPARATOR, neutralise
 from arcilogger_api.search.cursor import Cursor
 from arcilogger_api.search.fields import SiteNetwork
@@ -58,7 +67,10 @@ from arcilogger_core.timeutil import isoformat_site, to_site
 from arcilogger_db.kinds import KINDS
 
 Format = Literal["csv", "xlsx"]
-Truncated = Literal["rows", "time"]
+#: Where the reading stopped (:attr:`Reading.truncated`).
+Stop = Literal["rows", "time"]
+#: Why a file is partial (:attr:`Reading.reason`, the header, the entry's ``truncated``).
+Truncated = Literal["rows", "time", "archived"]
 #: Rows read per page while exporting.
 CHUNK: Final = 1000
 #: ``messages.text`` is at most 2,000 characters (``parsers.base``).
@@ -98,7 +110,13 @@ TRUNCATION_TEXTS: Final = {
     None: ("Tamamı (kesilmedi)", "Complete (not cut)"),
     "rows": ("Satır sınırında kesildi", "Cut at the row limit"),
     "time": ("Süre sınırında kesildi", "Cut at the time limit"),
+    "archived": (
+        "Bazı günler veritabanında yok (mühürlü arşivde ya da yeniden yükleniyor)",
+        "Some days are not in the database (in the sealed vault or being loaded again)",
+    ),
 }
+#: The "Bilgi" sheet's label of the days gone from the database (:attr:`Reading.archived`).
+ARCHIVED_LABEL: Final = "Veritabanında olmayan günler / Days not in the database"
 SUMMARY_COLUMNS: Final = (
     "srcip",
     "srcport",
@@ -136,6 +154,8 @@ class ExportFile:
     size: int
     sha256: str
     filename: str
+    #: The days of the range gone from the database (:attr:`Reading.archived`).
+    archived: ArchivedRange | None = None
 
     @property
     def media_type(self) -> str:
@@ -181,10 +201,20 @@ def cells(row: dict[str, Any]) -> list[str]:
 
 @dataclass
 class Reading:
-    """Rows read so far and why the reading stopped."""
+    """Rows read so far, why the reading stopped (``rows``, ``time``) and the days of the range
+    gone from the database (``archived`` of the search answer, G8: set before the reading)."""
 
     count: int = 0
-    truncated: Truncated | None = None
+    truncated: Stop | None = None
+    archived: ArchivedRange | None = None
+
+    @property
+    def reason(self) -> Truncated | None:
+        """Why the file is partial: where the reading stopped, else ``archived`` when days of
+        the range are gone; ``None``: the whole range."""
+        if self.truncated is not None:
+            return self.truncated
+        return "archived" if self.archived is not None else None
 
 
 def read_rows(
@@ -272,9 +302,24 @@ def _cell(sheet: Any, value: str, *, bold: bool = False) -> Any:
     return cell
 
 
+def day_span(archived: ArchivedRange, between: str) -> str:
+    """The days gone from the database, ``YYYY-MM-DD`` (one day) or the first and the last
+    with ``between`` (as the stuck-reload alert names them)."""
+    first, last = archived.first_day.isoformat(), archived.last_day.isoformat()
+    return first if first == last else f"{first}{between}{last}"
+
+
+def archived_header(archived: ArchivedRange) -> str:
+    """``X-Arci-Export-Archived``: the days gone, ``YYYY-MM-DD`` or ``YYYY-MM-DD/YYYY-MM-DD``
+    (ISO 8601 interval), also when the reading stopped and ``X-Arci-Export-Truncated`` says
+    where — a CSV has no "Bilgi" sheet."""
+    return day_span(archived, "/")
+
+
 def info_rows(info: Info, reading: Reading) -> list[tuple[str, str]]:
     """The "Bilgi" sheet."""
-    truncated_tr, truncated_en = TRUNCATION_TEXTS[reading.truncated]
+    truncated_tr, truncated_en = TRUNCATION_TEXTS[reading.reason]
+    archived = reading.archived
     return [
         ("Sorgu / Query", info.query),
         ("Başlangıç / From", isoformat_site(info.start)),
@@ -283,6 +328,7 @@ def info_rows(info: Info, reading: Reading) -> list[tuple[str, str]]:
         ("Oluşturulma / Created", isoformat_site(info.created_at)),
         ("Satır / Rows", str(reading.count)),
         ("Durum / Status", f"{truncated_tr} / {truncated_en}"),
+        *([] if archived is None else [(ARCHIVED_LABEL, day_span(archived, " - "))]),
         ("Not", NOT_SEALED[0]),
         ("Note", NOT_SEALED[1]),
     ]
@@ -330,8 +376,9 @@ def build(rows: Iterator[Sequence[str]], fmt: Format, info: Info, reading: Readi
         file=target,
         format=fmt,
         rows=reading.count,
-        truncated=reading.truncated,
+        truncated=reading.reason,
         size=size,
         sha256=digest.hexdigest(),
-        filename=filename(info.start, info.end, fmt, partial=reading.truncated is not None),
+        filename=filename(info.start, info.end, fmt, partial=reading.reason is not None),
+        archived=reading.archived,
     )

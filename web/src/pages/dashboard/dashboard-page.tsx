@@ -15,12 +15,21 @@ import { useAuth } from '@/lib/auth';
 import { formatTime } from '@/lib/format';
 import { moduleEnabled, type ModuleKey } from '@/lib/license';
 import { hasAny } from '@/lib/permissions';
+import { useSystemDisk } from '@/lib/system-hooks';
 import { cn } from '@/lib/utils';
 
 import { AlertsCard, SealStripCard } from './dashboard-alerts';
-import { ClockCard, CreditCard, IngestCard, ParseFailuresCard, SealCard } from './dashboard-cards';
+import {
+  BlockingCard,
+  ClockCard,
+  CreditCard,
+  IngestCard,
+  ParseFailuresCard,
+  SealCard,
+} from './dashboard-cards';
 import {
   dashboardRequests,
+  diskRequested,
   isRefusal,
   linkTarget,
   RAW_LINE_PERMISSIONS,
@@ -28,15 +37,20 @@ import {
   visibleBlocks,
 } from './dashboard-model';
 import { CategoriesCard, SitesCard, UsageCard } from './dashboard-usage';
+import { DiskCard } from './disk-card';
 
 /** The usage widgets belong to "Kullanım analizi"; the health boxes never depend on a licence. */
 const USAGE_MODULE: ModuleKey = 'usage_analytics';
 
 /**
- * Panel (spec 12.3 item 2; `dashboard.view` or `dashboard.usage`): log intake and today's parse
- * failures, yesterday's seal, Kamu SM credit and clock offset, today's company usage, open security
- * alerts, the most visited sites, categories and the last 30 days of sealing. Each block appears only for those who may
- * see it (the API leaves the others out); each links to its page when the user may open that.
+ * Panel (spec 12.3 item 2; `dashboard.view` or `dashboard.usage`): a blocking card at the top
+ * while a closed day is unstamped for too long (Wave 5 contract 2.3.1, `seal.read`), log intake
+ * and today's parse failures, yesterday's seal, Kamu SM credit and clock offset, the disks
+ * (`system.read`), today's company usage, open security alerts, the most visited sites,
+ * categories and the last 30 days of sealing. Each block appears only for those who may see it
+ * (the API leaves the others out); each links to its page when the user may open that. The disk
+ * card shows only with an answer: not while it loads and not on an error (the Sistem page shows
+ * that).
  *
  * The live blocks refresh every 30 s, the usage figures every 5 minutes, both in the background
  * (`X-Arci-Background`: an unattended Panel does not keep the session alive) and only while the
@@ -56,10 +70,18 @@ export function DashboardPage() {
   const usageLocked = asked.usage && license.data !== undefined && !usageLicensed;
   const licenseFailed = asked.usage && license.data === undefined && license.isError;
   const usage = useTodayCompanyUsage(asked.usage && usageLicensed);
-  const blocks = visibleBlocks(permissions, summary.data, {
-    data: usageLicensed ? usage.data : undefined,
-    error: usageLicensed ? usage.error : null,
-  });
+  const askDisk = diskRequested(permissions);
+  const disk = useSystemDisk(askDisk);
+  const blocks = visibleBlocks(
+    permissions,
+    summary.data,
+    {
+      data: usageLicensed ? usage.data : undefined,
+      error: usageLicensed ? usage.error : null,
+    },
+    // A failed refresh keeps the last answer in `data`: still no card.
+    disk.isError ? undefined : disk.data,
+  );
   const data = summary.data;
   const usageProps = {
     usage: usage.data,
@@ -68,15 +90,21 @@ export function DashboardPage() {
     to: linkTarget('usage', permissions),
   };
   const sealing = linkTarget('sealing', permissions);
+  const blocking = blocks.has('blocking') ? (data?.seal?.blocking ?? null) : null;
   const security = linkTarget('security', permissions);
   const summaryLoading = asked.summary && summary.isPending;
   const usageLoading =
     asked.usage &&
     ((license.data === undefined && license.isPending) || (usageLicensed && usage.isPending));
-  const updatedAt = Math.max(summary.dataUpdatedAt, usageLicensed ? usage.dataUpdatedAt : 0);
+  const updatedAt = Math.max(
+    summary.dataUpdatedAt,
+    usageLicensed ? usage.dataUpdatedAt : 0,
+    askDisk ? disk.dataUpdatedAt : 0,
+  );
   const summaryFailed = asked.summary && summary.isError && !isRefusal(summary.error);
   const [raw, setRaw] = useState<RawLineTarget | null>(null);
   const sources = linkTarget('sources', permissions);
+  const system = linkTarget('system', permissions);
 
   const top = [
     blocks.has('ingest') && data?.ingest ? (
@@ -103,8 +131,9 @@ export function DashboardPage() {
       <CreditCard key="credit" credit={data.credit} to={sealing} />
     ) : null,
     blocks.has('clock') && data?.clock ? (
-      <ClockCard key="clock" clock={data.clock} to={linkTarget('system', permissions)} />
+      <ClockCard key="clock" clock={data.clock} to={system} />
     ) : null,
+    blocks.has('disk') && disk.data ? <DiskCard key="disk" disk={disk.data} to={system} /> : null,
   ].filter(Boolean);
 
   const showUsage = blocks.has('usage') || usageLoading;
@@ -143,6 +172,7 @@ export function DashboardPage() {
                 if (asked.summary) void summary.refresh();
                 // `refresh()` would fetch even a disabled query: never while the module is off.
                 if (asked.usage && usageLicensed) void usage.refresh();
+                if (askDisk) void disk.refresh();
               }}
             >
               <RefreshCw aria-hidden="true" />
@@ -151,6 +181,13 @@ export function DashboardPage() {
           </>
         }
       />
+
+      {blocking ? (
+        <BlockingCard
+          blocking={blocking}
+          to={sealing ? sealDayHref(sealing, blocking.oldest_unstamped_day) : null}
+        />
+      ) : null}
 
       {summaryFailed ? (
         <Alert tone="danger" title={t('dashboard.loadFailed')}>
@@ -175,11 +212,16 @@ export function DashboardPage() {
           ))}
         </div>
       ) : top.length > 0 ? (
-        // Five health cards: three a row up to 1535 px, then all five (each title wraps, never cut).
+        // Five or six health cards (the sixth is the disk card): three a row up to 1535 px, then
+        // all of them in one row (each title wraps, never cut).
         <div
           className={cn(
             'grid gap-4 sm:grid-cols-2',
-            top.length > 4 ? 'lg:grid-cols-3 2xl:grid-cols-5' : 'xl:grid-cols-4',
+            top.length > 5
+              ? 'lg:grid-cols-3 2xl:grid-cols-6'
+              : top.length > 4
+                ? 'lg:grid-cols-3 2xl:grid-cols-5'
+                : 'xl:grid-cols-4',
           )}
         >
           {top}

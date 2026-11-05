@@ -1561,6 +1561,370 @@ UYUM-DURUMU/COMPLIANCE-STATUS (W4-G merges last, §4.5).
   missing server or sender. Tests: `wizard-model.test.ts` "e-mail: switched off is not done, even
   with a server and a sender", `e2e/setup-wizard.spec.ts` (the fresh installation's e-mail step).
   W4-G: AYARLAR/SETTINGS (the wizard entry) and UYUM-DURUMU/COMPLIANCE-STATUS §5.
+- **The Sistem forecast sentence has three variants beside the fixed `estimated` text (2.8.2).**
+  (a) English says "(~1 day)" in the singular (the Turkish text needs none). (b) With a full day
+  but `warning_on` null (the drive has reached the mark, W4-B's second deviation): "%{warning}
+  eşiğine ulaşıldı; bu hızla dolmaya {full_on} (~{days} gün)." / "The {warning}% mark is reached;
+  at this rate the drive is full on {full_on} (~{days} days)." — "reached", not "passed", because
+  at exactly the mark the drive's badge still reads "Olağan". (c) With `full_on` null (W4-B's first
+  deviation, `forecast.HORIZON_DAYS`): "Disk kullanımı çok yavaş artıyor; dolma tarihi
+  öngörülemiyor." / "Disk use grows very slowly; no date can be given." Tests:
+  `system-model.test.ts` "says one day in the singular", "gives only the day it is full once the
+  drive has reached the warning mark", "agrees with the badge on a drive exactly at the warning
+  mark", "gives no day for a drive that grows too slowly to forecast". W4-G: MVP-CONTRACTS and
+  UYUM-DURUMU/COMPLIANCE-STATUS §4.
+- **A null CPU reads "bu platformda okunamıyor" on platform `other`** (reading of 2.8.2, which gives
+  "ölçülüyor" for a null CPU and "bu platformda okunamıyor" for null host values): on Windows and
+  Linux a null CPU is the first reading ("ölçülüyor"); on any other platform nothing is read.
+  Test: `system-model.test.ts` (`cpuPending`). Nothing to fold.
+- **The views' interface additions agreed with W4-F on #24 (2.8.1-2.8.3), all optional and
+  additive; the contract's prop names stay.**
+  - `ComplianceView({ …, exportError?: ApiError | null, confirmError?: ApiError | null })`:
+    `exportError` shows beside "Uyum Durumu Raporu (PDF)"; `confirmError` (the 409
+    `config_backup_unreadable` of 2.7) shows in the confirm dialog of "Yapılandırma yedeğini
+    aldım", also when it arrives while the dialog is open. The promise-returning
+    `onConfirmBackup` stays; the dialog shows `confirmError`, else the error the promise rejected
+    with.
+  - `SystemView({ …, healthError?: ApiError | null })`: `error` stays the `GET /system` error, the
+    page's; a `healthError` shows in the Saat block only, with "Tekrar dene". A health block
+    (Hizmetler, Zamanlanmış görevler, Worker işleri, Saat) without data never vanishes: with a
+    `healthError` the Saat block shows it and the other three say "Durum alınamadı; hata Saat
+    bölümünde." / "The status could not be read; the error is under Clock."; while loading, a
+    skeleton; beside the summary's blocks with no answer and no failure, "Durum henüz alınmadı." /
+    "No status received yet.". Data already shown stays under a later `healthError`.
+  - `DiskCard({ disk, to? })`: `to?: string | null`; left out, the Panel's link rule (`/system`
+    with `system.read`); a string is used as given; `null` gives no link. `data-testid="card-disk"`.
+  - The page `h1` is rendered in the loading and error states too, as Kaynaklar does.
+  - Both new error places show the server's text in the interface language with its code,
+    "… (config_backup_unreadable)".
+  Tests: `compliance-view.test.tsx` "shows the export’s error with its code beside the PDF
+  button", "shows the caller’s confirmError in the dialog, also when it arrives while open",
+  "shows a confirmError passed before the dialog opens once it is opened", "shows a loading state
+  before the first answer, and the error alone when it failed"; `system-view.test.tsx` "shows a
+  failed health request in the Saat block and keeps every health block", "shows the health error
+  beside the page error when nothing has arrived", "shows a failed health request while the first
+  summary is still on its way", "says so in the health blocks when the health has not answered and
+  nothing failed", "shows the error alone when nothing has arrived"; `disk-card.test.tsx` "links
+  where the caller says, or nowhere when it passes null". Fold into 2.8.1-2.8.3.
+- **`time.applied_peers` empty and null read differently (2.8.2; manager's note on #24).** `""`
+  (ApplySystem applied an empty peer list): "Uygulanan zaman sunucusu yok" / "No time server
+  applied"; `null` (no ApplySystem report yet): "ApplySystem henüz rapor vermedi" / "No ApplySystem
+  report yet". Test: `system-view.test.tsx` "tells an empty applied peer list from no ApplySystem
+  report". Fold into 2.8.2.
+
+## Deviations — W4-F (2026-10-29)
+
+- **W4F-1: five fractional fields are `Float`, not `number` (manager decision on #27).**
+  `IngestSource.lag_seconds`, `IngestSource.lines_per_second`, `IngestInfo.lines_per_second`
+  (`web/src/lib/system-types.ts`) and `ClockSampleOut.offset_ms`, `ClockSampleOut.delay_ms`
+  (`web/src/lib/system-health-types.ts`) are `Float` (`api-types.ts`). §2.5.1 and §2.6.1 mirror
+  these as `number`; they carry fractional values, and `api-samples.test.ts` takes only `Float`
+  for those (the Pydantic models are `float`; a `number` there is an integer). Test:
+  `web/src/lib/api-samples.test.ts` "system.json" and "system-health.json" (the captured
+  samples carry a 3.2 ms clock offset, a fractional ingest lag and fractional lines per second).
+  Fold into §2.5.1 and §2.6.1.
+- **W4F-2: a report whose bytes differ from its `X-Arci-Sha256` is the export's error
+  `download_mismatch`.** 2.8.1 gives `useComplianceReport()` the download only; the hook checks
+  the received bytes against `X-Arci-Sha256` like every hashed download of the app, and
+  `ComplianceView` has no place for the check's outcome (`HashCheckBadge`). So a mismatch fails
+  the mutation with a client-side `ApiError` (`code: "download_mismatch"`, the texts of
+  `download.mismatch`, TR and EN), shown through `exportError` beside "Uyum Durumu Raporu (PDF)"
+  with its code; a match or an unchecked file shows nothing. Tests:
+  `web/src/pages/compliance/compliance-page.test.tsx` "shows a report whose bytes differ from its
+  X-Arci-Sha256 beside its button", `web/e2e/compliance.spec.ts` "a report whose bytes differ
+  from its X-Arci-Sha256: the mismatch beside the button". Fold into 2.8.1.
+
+## Deviations — W4-G (2026-11-01)
+
+Docs only; the docs tests (`tests/test_docs_consistency.py`, `tests/test_search_docs.py`) show
+each entry. Every `## Deviations — <package>` section above is folded as §4.4 W4-G asks: into
+`docs/MVP-CONTRACTS.md` §19.8 (each package by name, with the API facts), `docs/ASSUMPTIONS.md`
+(the Wave 4 rows and "Decided while building (Wave 4)") and, where an operator sees it,
+`docs/UYUM-DURUMU.md` / `docs/COMPLIANCE-STATUS.md` (§2.10, §3, §4 intro, §4.1, §4.2, §4.7,
+§4.8, §5) and ADR-0017.
+
+- **Section headings stay as they are** (2.9 "§9 first sign-in → the wizard"). `docs/KURULUM.md`
+  keeps "## 9. İlk giriş" and `docs/INSTALL.md` "## 9. First login"; the wizard (Ayarlar → İlk
+  kurulum sihirbazı, `/settings/setup`, its steps and states, no redirect, Q18) is a new part of
+  that section, and the overview rows 9 and 12 name it. §12 and §13 keep their headings and add
+  Uyum Durumu and Sistem beside the console commands, and version and maintenance on Sistem. The
+  docs tests cut these sections by number (`_section(text, "## 13.", "## 14.")` in
+  `test_install_guides_describe_the_licence`) and other documents link them by number
+  ("KURULUM.md bölüm 9" in ILK-ADIMLAR and SECURITY). Nothing to fold.
+- **The wizard's e-mail step is written as W4-C's deviation, not as 2.8.4.** AYARLAR/SETTINGS (the
+  wizard entry), ASSUMPTIONS Q18 and UYUM-DURUMU/COMPLIANCE-STATUS §5 say the step is done only
+  while sending is switched on (`[smtp] enabled`) and a server and a sender are set; switched off,
+  it lists "E-posta gönderimi kapalı." / "Sending e-mail is switched off.". This is the merged
+  view (manager decision on #37).
+- **ADR-0017 adds two sections to ADR-0016's format:** "Owner decisions (2026-10-28)" (Q1 and Q10
+  with their answers) and "Deviations recorded during implementation" (the deviations that refine
+  one of D1-D15, by package; the full list with texts points to MVP-CONTRACTS §19.8 and
+  ASSUMPTIONS). The open questions with their defaults are under "Open points (owner decision)",
+  as in ADR-0016. Its status keeps the date of this contract and of the owner decisions,
+  "accepted (2026-10-28)" (the ADR-date question on #62).
+- **DENETCI-KILAVUZU's Uyum Durumu section is §11** ("## 11. Uyum Durumu Raporu'nu okumak"), after
+  WP-F2's reading table (§10, Wave 3), with the paragraph "Reading the Uyum Durumu Raporu (section
+  11)" in the file's English part (one file, no pair). It says technical checks, not a legal
+  assessment, recommends the lawyer review, and has the auditor open the page and download the
+  report (D15).
+- **ASSUMPTIONS keeps the Wave 4 part under one heading** ("## Uyum Durumu, Sistem, ilk kurulum
+  sihirbazı: Wave 4 (2026-10-28)"), after the integrator's Wave 3 part, with `###` subsections:
+  the owner decisions (Q1, Q10), the defaults of the open questions, "Decided while building
+  (Wave 4)", the lawyer review (Q20), "Verify on site (Wave 4)" and "Deviations from the
+  specification (Wave 4)". Its rows keep this contract's numbers Q1-Q21 (no other row of the file
+  uses a `Q` prefix) instead of a new letter series, and the verify-on-site list and the
+  specification deviations stay in that part rather than in the file's general sections, so the
+  Wave 4 part reads and merges as one (manager's note on #28).
+- **MVP-CONTRACTS §19 uses the file's compact notation** (`Name {field, field: type, …}`), not
+  2.3.1/2.5.1/2.6.1 verbatim: §19.1 endpoints, §19.2-§19.5 the JSON, §19.6 the settings,
+  `R20-filter` and the job `system.sample`, §19.7 the error code, the audit actions and the
+  permissions, §19.8 the deviations. Besides §19 and the §6 `compliance.read` row, the router
+  map names the three Wave 4 routers, the alerts section names `check_filter` (`R20-filter:none`,
+  high), and §15's stale route count is corrected: "5651 Temel: 103 routes" now reads 129 routes
+  at Wave 4, as `api/tests/test_license_routes.py` counts them (the route-count question on #62).
+- **UYUM-DURUMU/COMPLIANCE-STATUS §1: the auditor sees the count of open alerts, not the alerts.**
+  The sentence written by W4-E said the auditor sees each alert's rule, severity and opening time
+  on the card; the merged view shows only "Açık uyarı: {n}" / "Open alerts: {n}" (2.8.1), and the
+  rule, severity and opening time are in the Uyum Durumu Raporu (PDF). §1 and its evaluation rule
+  now say so. A correction of W4-E's text to the code rather than a fold (listed on #62 under
+  "Files outside my ownership").
+- **Beyond the literal 2.9 text:** `docs/roles.md` gets its own section "Uyum Durumu ve Sistem /
+  Compliance status and system pages" besides the table rows and "Kararlar / Decisions";
+  `docs/ARCHITECTURE.md` a section "Uyum Durumu and Sistem"; AYARLAR/SETTINGS the wizard's
+  read-only requests in the table of pages and their endpoints and, on the manager's note on #28,
+  the srcmac interface list's labels as the web names them ("srcmac görülen arayüzler (son 1 saat)" /
+  "Interfaces with srcmac (last hour)", the IPv4 rule without quotes).
+
+## Deviations — transip index (#71, 2026-11-02)
+
+Issue #71, follow-up of #40 item 13 and Q-C3-1. It is a Wave 3 matter (contract 1.2, 2.8.3, D15,
+3.8) recorded here because `wave-4` carries it.
+
+- **A sixth index on `fg_traffic`: `ix_fg_traffic_transip_time (transip, time)`** (revision
+  `0020_fg_traffic_transip_time`, on top of #79's `0019_source_clock_samples`; model `FgTraffic`).
+  The overlap probe (`_Probe.seen_overlap`, both steps) and the D15 check (`_Lookup._carried`,
+  its tail steps without a port and its spanning-sessions steps) now ask in the order
+  `transip, time`, the address written `transip = ANY(inet[])` with one element
+  (`_address_is`): with `transip = :address` PostgreSQL drops the constant from the sort, and
+  with two lines taking turns the planner took the primary key `(time, id)` instead (0.3 s for a
+  day of a 10-day partition). The steps with a port and the exact search keep
+  `ix_fg_traffic_transip_transport_time`; a port-less search on one address may now take the new
+  index (the same rows, in the same order). Before, a port-less step walked every index entry of the address in the
+  partition (`time` was the third column). That cost about 1.1 s per step for a busy address
+  after its last row on day 28 of a monthly partition at 1 M rows a day: 2.3 s for the overlap
+  probe and 2.3 s for the D15 check of one lookup. Now it is under 1 ms. `busy_before`'s tail
+  (Q-C3-1) went from 1.4 s to 0.25 s; its guard keeps its bound of 1 s (0.30 s measured). The
+  ingest gate holds (−1.5 % to +1.9 %, inside the spread of the runs). The index takes 31.5 MB
+  per million rows and builds in 18 s on a 28 M-row partition. `INCLUDE (duration)` was measured
+  and not taken: it is 29 % larger and answers `busy_before` from the index only on all-visible
+  pages. The numbers are in docs/INGEST.md "Measured throughput". The guards now bound each
+  step's shared buffers to the rows of its range plus 100 (`STEP_BUFFERS`); a walk over the
+  address's other entries showed only there (7,982 buffers for a step with no row on the guard
+  site). There is a new overlap case, `busy_after` (the site's NAT address 30 minutes after its
+  last row), and a new guard site with two lines taking turns (`LINES_SITE`,
+  `test_the_probe_steps_of_a_line_that_took_turns_read_its_own_rows`, which fails with
+  `transip = :address`: the primary key read 968,750 and 534,028 rows). Tests: `db/tests/test_migration_0020.py` (native, and TimescaleDB with a
+  compressed chunk), `db/tests/test_migrations.py`,
+  `worker/tests/test_lookup_performance.py`
+  (`test_the_overlap_probe_of_an_unclaimed_address_is_fast[busy_after]` and
+  `test_the_d15_carried_check_is_fast[busy_after]` fail on the old statements by their buffers).
+  **W4-G folds:**
+  - DATA-MODEL's `fg_traffic` index list gains `(transip, time)`.
+  - MVP-CONTRACTS' c3 bullet ("asks for the first row in the order of
+    `ix_fg_traffic_transip_transport_time`") names `ix_fg_traffic_transip_time`.
+  - ASSUMPTIONS Q-C3-1's follow-up ("measure `INCLUDE (duration)` on the `transip` index") is
+    answered: measured, not taken, and `(transip, time)` was added.
+
+## Deviations — #89 (loadgen, 2026-11-02)
+
+- **A MikroTik DHCP address stays held until its lease ends in the load generator** (Wave 3
+  contract 2.14, "the default output stays byte-identical"; #40 item 1). The default plan handed
+  an address to a second device while the earlier holder's truth lease still ran, when that lease
+  had outlived its activity; the truth then named two devices for one address at one moment.
+  `Simulation._free_ip` now holds an address until its lease ends on every VLAN, as it already
+  did for FortiGate DHCP. Runs that met the case change their bytes (line count unchanged); the
+  pinned `DEFAULT_DIGEST` of `tests/test_loadgen.py` and the single days of `docs/INGEST.md`
+  (2026-09-23, 2026-10-27) are unchanged. The staff Wi-Fi now fills up at about 125 users with
+  MikroTik DHCP (was 160). Tests: `test_loadgen.py`
+  "test_the_default_plan_never_gives_one_address_two_leases_at_once",
+  "test_too_many_users_for_the_wifi_pool_is_a_clear_error". `tools/loadgen/README.md` carries a
+  dated note for users who compare outputs. Fold into the loadgen part of Wave 3 2.14 (W4-G has
+  merged before this entry).
+
+## Deviations — #81 (2026-11-02)
+
+- **#81-1: the rollback's lease step runs only when the restored program may not read FortiGate
+  DHCP** (manager's issue #81, item 4 of #40). `design/wave-3-contract.md` 2.2.1 ("A site
+  rollback runs no downgrade, and one lease step") runs `arcilogger-db leases prepare-rollback`
+  on every `-Rollback` without `-RestoreDatabase`. `Invoke-LeaseRollbackStep` now first looks
+  for `<InstallDir>.previous\venv\Lib\site-packages\arcilogger_db\lease_rollback.py`: with it,
+  the plan item `leases.prepare-rollback` is `skipped` with its reason (also with
+  `-SkipDatabase`, then without that warning); without it, or when the check cannot decide (no
+  readable `__init__.py` in that package folder, any error), the step runs as in 2.2.1. The
+  item's detail gains `previous_module`, `previous_has_module` (`true`, `false`, or `null` when
+  undecided) and `previous_check` (why it could not decide, else `null`). This test replaces the
+  one the round-7 implementation note (a) proposed (no `leases` command, or a `VERSION.json`
+  older than the first Wave 3 version), as the issue asks: the module came after the
+  `fg_dhcp` table, so no build has it without reading FortiGate DHCP. Points (b) and (c) are
+  unchanged. Tests (`tests/test_installer_scripts.py`):
+  `test_dry_run_rollback_skips_the_lease_step_for_a_version_that_reads_fortigate_dhcp`,
+  `test_rollback_to_a_version_that_reads_fortigate_dhcp_keeps_the_leases`,
+  `test_rollback_to_a_version_before_fortigate_dhcp_lowers_the_leases`,
+  `test_rollback_lowers_the_leases_when_the_previous_program_cannot_be_checked`,
+  `test_rollback_that_skipped_the_lease_step_and_cannot_swap_restores_no_leases`, and step 3 of
+  `test_real_install_upgrade_rollback_and_uninstall`. Already updated in the same pull request:
+  ASSUMPTIONS RB1 and the rollback paragraph of KURULUM/INSTALL §13. Fold into `CHANGELOG.md`
+  (W4-G): the Wave 3 entry "The step runs on every such rollback, so a rollback between two
+  versions that both read FortiGate DHCP shows FortiGate-DHCP chains `low` …" holds for Wave 3
+  only; Wave 4 skips the step for such a rollback. `docs/CORRELATION.md` ("The step is
+  unconditional: …", owner W4-F) says the same and is listed in the pull request.
+
+## Deviations — #90 (search perf fixture, 2026-11-02)
+
+- **#90-1: the search performance data ends with a `CHECKPOINT`** (`docs/MVP-CONTRACTS.md` 17.10,
+  granted by the manager on #90, 2026-11-02 23:07Z). Since #60 shortened the fixture by about
+  1,300 s, Windows CI timed Q1 2–4 minutes after the 7 GB load and `VACUUM ANALYZE`, while its
+  write-back still ran: 33 of 91 runs failed against 0 of 106 before #60, the plan the same
+  backward primary-key scan in every state (PostgreSQL 16 and 17.11), the slow mode a fixed
+  +500 ms a request. `api/tests/test_search_perf.py` now runs a synchronous `CHECKPOINT` after
+  `VACUUM ANALYZE` (and the compression), prints its duration on the setup line, and skips it
+  with a note for a role without superuser or `pg_checkpoint` (cloud sessions; both CI jobs
+  connect as a superuser). Every budget is unchanged (`BROWSE` 0.5 s). A test-setup deviation
+  only: a live server under ingest is not settled, and its browse latency under write load is
+  the manager's follow-up (a browse guard under concurrent ingest). The audit spool's `os.fsync`
+  stays.
+- **#90-2: the guard prints its figures on a pass, with a per-call split.** The setup line and
+  every Q and S line print past pytest's capture (`capsys.disabled()`), and each Q/S line ends
+  with the best call's SQL, commit and fsync time (with their counts) and the rest ("other"),
+  from SQLAlchemy cursor events, a wrapped `do_commit` and a wrapped `os.fsync` inside the test
+  (no timing hook in product code).
+
+## Deviations — #125 (live-tail per-line check, 2026-11-03)
+
+Test-only (`api/tests/test_live_perf.py`); granted by the manager on #125, 2026-11-03 15:08Z.
+The CPU-a-second budget (0.4 s/s), the gauge, `REFERENCE_GAUGE` (17.76 µs windows, 15.90 µs
+otherwise), `LOOP_FLOOR` and the cycles are unchanged.
+
+- **#125-1: the per-line check is strict on CI only.** The bound `LOOP_GAUGE_LINES ×
+  speed ** LOOP_EXPONENT`, `speed = min(max(gauge / REFERENCE_GAUGE, 0.5), 1)`, applies when
+  `GITHUB_ACTIONS == "true"` or `ARCILOGGER_PERF_STRICT == "1"`; elsewhere a flat
+  `OFF_CI_GAUGE_LINES` = 9.4 gauge lines applies, without a speed factor (1.10 × the costliest
+  cloud-session reading, 8.52 at 11.90 µs). The output names the branch that ran
+  (`per-line check: strict (CI's bound)` or `per-line check: off CI`); off CI it also prints the
+  strict limit and the margin to it, not asserted. The reason: at the same gauge CI's
+  ubuntu-latest read 11.71 µs and 4.80 gauge lines (run 41455124190), so a path 1.4× costlier
+  reads 6.72 there, while the cloud sessions' fast-gauge class read 11.70 µs and 7.47 for
+  unchanged code; no bound from the gauge alone can be at least 7.47 and below 6.72. On that
+  class the gauge (the fastest of 16 back-to-back rounds, two thirds C library code) runs warm
+  and the SSE path (short runs of interpreted code after the loop idled 0.5 s) cold: on a
+  13.6–15.9 µs cloud host the same gauge code in 200-line rounds on the loop costs 1.15–1.21×
+  the guard's gauge (the fast class itself was not reproduced; #125 has the figures). This is
+  not a fix of the root cause: CI is the gate. Off CI a path 40 % costlier fails only on the
+  fast-gauge class (11–13 µs); on the median runs a path must cost about 26 % more there, 44 %
+  more on a 13.6–15.9 µs cloud host and 57 % more on #88's slow class (21.5–23.4 µs) before
+  the check fails, and #88's +39 µs probe passes on the last two. #31's +400 µs fails everywhere.
+  Not covered, a note in the test's docstring: a starved hub (8 busy neighbours on 4 CPUs) runs
+  fewer, larger cycles, its figure a line falls and a path 39 µs a line costlier can pass
+  (6.95–7.56 gauge lines on a 13.6–15.9 µs cloud host, 6.60 and 7.00 on #88's slow class); CI's
+  runners are not loaded so. `ci.yml` is unchanged (`ARCILOGGER_PERF_STRICT=1` there is
+  proposed in the pull request, the manager's decision when the perf jobs move).
+- **#125-2: the strict bound is refitted with #88's rules on 26 readings:** `LOOP_EXPONENT`
+  0.3 → **0.20**, `LOOP_GAUGE_LINES` 7.0 → **6.8** on Linux, **5.6** on Windows (unchanged).
+  The rules (#88): L ≥ 1.10 × the costliest reading brought to the reference
+  (gl ÷ speed^exponent) and L < 1.4 × the cheapest ÷ 1.05, the exponent the mean log-log slope
+  of the loop's µs a line on the gauge less 1, to 0.05. The measured slopes are **1.25 on
+  ubuntu-latest and 1.20 on windows-latest**: 1.2497 and 1.2034 on #88's 22 readings, whose
+  mean less 1, 0.2265, the rule takes to 0.25; 1.2459 and 1.1980 on all 26 (0.2219). The value
+  sits at the tie, and 0.20 is taken, not 0.25, for the windows of allowed L on the 26:
+
+  | exponent | ubuntu-latest | windows-latest |
+  |---|---|---|
+  | 0.30 (#88) | [7.117, 7.015): empty | [5.802, 6.053) |
+  | 0.25 (the rule) | [6.904, 6.909): no value with one decimal | [5.617, 6.032) |
+  | **0.20** | **[6.759, 6.804) → 6.8** | **[5.511, 5.988) → 5.6** |
+  | 0.15 | [6.758, 6.700): empty | [5.502, 5.937) |
+
+  Today's 7.0 / 0.3 already broke #88's own rule since run 41477960420 (ubuntu-latest 8.65 µs,
+  5.39 gauge lines): the Linux window at 0.3 is empty, and that run's fast runners kept only
+  8.2 % (ubuntu-latest) and 6.2 % (windows-latest) headroom, the least of all 26: exponent 0.3
+  tightens the bound faster than the path falls with the gauge. Windows stays at
+  5.6, not 5.7 (inside its window too), which would loosen it at every speed (+1.8 % at speed 1,
+  +9.1 % at the floor). Against #88's limits the bound is 2.9 % tighter on Linux at speed 1 and
+  the same on Windows; it is **looser only towards the floor**, at most +4.1 % on Linux and
+  +7.2 % on Windows at speed 0.5 (gauge ≤ 7.95 µs ubuntu-latest, ≤ 8.88 µs windows-latest:
+  the fastest runners only). There a path 1.4× costlier still fails, by at least 7.4 %
+  (ubuntu-latest, 7.88 µs) and 15.1 % (windows-latest, 9.13 µs; the 13.1 % on #125 was the
+  figure for 5.7). Over all 26 readings unchanged code keeps at least 10.7 % (ubuntu-latest,
+  median 21.1 %) and 11.8 % (windows-latest, median 19.6 %) headroom; 1.4× fails all 26, by at
+  least 5.1 % and 12.3 %; +400 µs by at least 348.8 % and 383.3 %. The Linux window is narrow:
+  one new ubuntu-latest reading above 6.182 or at or below 5.100 brought to the reference
+  (today's extremes 6.145, run 41438160162, and 5.103, run 41455124190, 0.06 % above that edge)
+  empties it for 6.8.
+
+  The 26 readings (the throughput guards' `gauge:` and `event loop:` lines, the median of the
+  busy cycles; recomputed with both sets of constants; the 4 new ones are from runs 41617780788,
+  da9ead8, and 41633136399, f198c9d; "1.4× over" is 1.4 × the reading over the new limit):
+
+  | system | run | gauge µs | gauge lines | speed | #88 limit | headroom | new limit | headroom | 1.4× over |
+  |---|---|---|---|---|---|---|---|---|---|
+  | ubuntu | 41414800703 | 7.88 | 4.54 | 0.50 | 5.69 | +25.2 % | 5.92 | +30.4 % | +7.4 % |
+  | ubuntu | 41478486887 | 8.28 | 4.93 | 0.52 | 5.76 | +16.7 % | 5.97 | +21.1 % | +15.6 % |
+  | ubuntu | 41477960420 | 8.65 | 5.39 | 0.54 | 5.83 | +8.2 % | 6.02 | +11.7 % | +25.3 % |
+  | ubuntu | 41455124190 | 11.71 | 4.80 | 0.74 | 6.39 | +33.0 % | 6.40 | +33.3 % | +5.1 % |
+  | ubuntu | 41368179019 | 11.81 | 5.24 | 0.74 | 6.40 | +22.2 % | 6.41 | +22.3 % | +14.5 % |
+  | ubuntu | 41430160072 | 13.88 | 5.07 | 0.87 | 6.72 | +32.6 % | 6.62 | +30.5 % | +7.3 % |
+  | ubuntu | 41617780788 (new) | 15.09 | 5.53 | 0.95 | 6.89 | +24.6 % | 6.73 | +21.7 % | +15.0 % |
+  | ubuntu | 41407611313 | 15.50 | 5.96 | 0.97 | 6.95 | +16.6 % | 6.77 | +13.5 % | +23.3 % |
+  | ubuntu | 41422165382 | 15.57 | 5.68 | 0.98 | 6.96 | +22.5 % | 6.77 | +19.2 % | +17.4 % |
+  | ubuntu | 41633136399 (new) | 15.63 | 5.63 | 0.98 | 6.96 | +23.7 % | 6.78 | +20.4 % | +16.3 % |
+  | ubuntu | 41438160162 | 15.84 | 6.14 | 1.00 | 6.99 | +13.9 % | 6.79 | +10.7 % | +26.5 % |
+  | ubuntu | 41446215228 | 15.90 | 5.64 | 1.00 | 7.00 | +24.1 % | 6.80 | +20.6 % | +16.1 % |
+  | ubuntu | 41465153350 | 16.04 | 5.58 | 1.00 | 7.00 | +25.4 % | 6.80 | +21.9 % | +14.9 % |
+  | windows | 41407611313 | 9.13 | 4.03 | 0.51 | 4.59 | +13.8 % | 4.90 | +21.6 % | +15.1 % |
+  | windows | 41477960420 | 9.27 | 4.34 | 0.52 | 4.61 | +6.2 % | 4.92 | +13.3 % | +23.6 % |
+  | windows | 41633136399 (new) | 12.50 | 4.57 | 0.70 | 5.04 | +10.3 % | 5.22 | +14.2 % | +22.6 % |
+  | windows | 41617780788 (new) | 12.51 | 4.36 | 0.70 | 5.04 | +15.6 % | 5.22 | +19.7 % | +16.9 % |
+  | windows | 41478486887 | 12.70 | 4.34 | 0.72 | 5.06 | +16.7 % | 5.24 | +20.7 % | +16.0 % |
+  | windows | 41438160162 | 14.01 | 4.44 | 0.79 | 5.22 | +17.5 % | 5.34 | +20.3 % | +16.4 % |
+  | windows | 41455124190 | 15.32 | 4.36 | 0.86 | 5.36 | +22.9 % | 5.44 | +24.7 % | +12.3 % |
+  | windows | 41368179019 | 16.60 | 4.62 | 0.93 | 5.49 | +18.8 % | 5.52 | +19.6 % | +17.1 % |
+  | windows | 41465153350 | 17.24 | 4.98 | 0.97 | 5.55 | +11.5 % | 5.57 | +11.8 % | +25.2 % |
+  | windows | 41414800703 | 17.26 | 4.79 | 0.97 | 5.55 | +15.9 % | 5.57 | +16.2 % | +20.4 % |
+  | windows | 41422165382 | 17.26 | 4.83 | 0.97 | 5.55 | +15.0 % | 5.57 | +15.3 % | +21.4 % |
+  | windows | 41446215228 | 17.31 | 4.73 | 0.97 | 5.56 | +17.5 % | 5.57 | +17.8 % | +18.9 % |
+  | windows | 41430160072 | 17.76 | 4.54 | 1.00 | 5.60 | +23.3 % | 5.60 | +23.3 % | +13.5 % |
+
+  Detection on CI rests on this arithmetic: no CI run has yet injected +40 % or +400 µs (the
+  diagnostic draft pull request after this one does, on both perf jobs).
+- **#157-1 (2026-11-04): `LOOP_FLOOR` is 0.7 on windows-latest, 0.5 elsewhere.** The fit above
+  had no windows-latest reading below speed 0.51; its first ones at 0.48–0.49 (8.61–8.79 µs)
+  read 4.05–5.01 gauge lines, and 0.5's limit (4.88) failed sound code twice (runs 41818104722,
+  5.01, and 41771172349, 4.92). Its seven readings below 0.6 (median 4.57) are no cheaper than
+  its fifteen at 0.70–0.76 (median 4.43): below 0.7 the figure stops falling with the gauge. The
+  limit there is now 5.21 (+4.1 % over 5.01; 1.2 × the median fails by 5.2 %); speed 0.7 and
+  up and ubuntu-latest are unchanged. Over CI's 136 readings of 2026-11-02 to 11-04 every one
+  passes (at least +2.1 % on each system) and 1.4× fails all; #125-2's windows-latest window
+  becomes [5.511, 5.771), still holding 5.6, and 1.4× fails its 13 by at least 8.2 % (was
+  12.3 %). `test_ci_bound_on_ci_readings` holds the bound to 15 named readings: the costliest
+  passes, 1.2× the median (not on ubuntu-latest at the reference, where 6.8 lets 20 of its 38
+  runners through) and 1.4× the cheapest fail.
+- **#186-1 (2026-11-05): below speed 0.6, windows-latest's limit is a flat 5.37 gauge lines.**
+  Run 41959248633, job 127021406709, on #184 (tested tree 9eea003, no live-path change since
+  #166): gauge 9.09 µs (speed 0.51, inside the range 0.7 was set on), 5.26 gauge lines against
+  5.21, −0.9 %; the same tree's re-run (job 127045733227) read 4.63 at 11.72 µs. No commit after
+  233ca50 in that tree touches `api/.../live`, `app.py`, `ingest` or `uv.lock`. The cause is the
+  class, not the code: windows-latest's floor class (speed < 0.6) now has 17 readings, 3.94–5.26,
+  median 4.67, against 4.42 at 0.70–0.76, so below 0.6 the figure rises again. Moving the floor
+  to 0.811 would pass 5.26 but also raise the limit for 0.70–0.81, where 1.2 × the 0.70–0.76
+  median would then pass; so `strict_limit` keeps 0.7's rule and takes the larger of it and
+  `FLOOR_CLASS_LIMITS["win32"]` = 5.37 below `FLOOR_CLASS` = 0.6. Over 129 windows-latest
+  readings every one passes (at least +2.1 %, the least margin #157-1 accepted), 1.2 × the floor
+  median fails by 4.2 %, 1.4 × its cheapest (3.94) by 2.6 %, 1.4× fails on all 129 and 1.2× on 88
+  (89 before); speed 0.6 and up, ubuntu-latest and #125-2's window are unchanged. With 17
+  readings 5.37 sits about 1.8 standard deviations above the class mean, so a floor-class run
+  may still fail now and then. `CI_READINGS` takes the new floor-class rows (costliest 127021406709,
+  median 127248835105, cheapest 126710077852), #184's re-run and a 0.72 runner (126731675111)
+  whose 1.2× still fails.
 
 ---
 

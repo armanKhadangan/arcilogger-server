@@ -1452,6 +1452,7 @@ TONES_2_11 = {
     "egress_public_dynamic": "warning",
     "egress_internal": "warning",
     "source_clock_offset": "warning",
+    "source_clock_shared": "warning",
 }
 #: The keys of earlier waves and the retired ones, with the tone the web interface gives them
 #: today; ``info`` is information by design.
@@ -1463,6 +1464,7 @@ TONES_BEFORE = {
     "only_in_vault": "warning",
     "not_in_database": "warning",
     "older_than_db_retention": "warning",
+    "lookback_clamped_to_window": "warning",
     "no_data_for_day": "warning",
     "lease_timeline_behind": "warning",
     "future_time": "warning",

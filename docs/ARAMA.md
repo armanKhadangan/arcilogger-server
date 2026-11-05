@@ -244,9 +244,44 @@ yön değiştirme) içeremez. Kayıtlı bir aramayı çalıştırmak normal bir 
 - Aramanın satırları en fazla `search.export_max_rows` (100.000) satır ya da
   `search.export_budget_seconds` (120 saniye) boyunca okunur; sınıra takılan dosya **kesilmiş**
   olarak işaretlenir: dosya adı `-kismi` ile biter, yanıtta `X-Arci-Export-Truncated: rows|time`
-  başlığı ve Excel'in "Bilgi" sayfasında nedeni bulunur. Satırların alanlarını tamamlayan
-  sorgular da bu süreden yer; süre biterse dosya orada kesilir (`time`), hiçbir satır boş
-  sütunlarla yazılmaz.
+  (`archived`: sonraki madde) başlığı ve Excel'in "Bilgi" sayfasında nedeni bulunur.
+  Satırların alanlarını tamamlayan sorgular da bu süreden yer; süre biterse dosya orada kesilir
+  (`time`), hiçbir satır boş sütunlarla yazılmaz.
+- **Aramadan sonra veritabanından çıkan günler.** Dışa aktarma, okumaya başladığında aramanın
+  aralığını veritabanı penceresine (`db.retention_days`) göre yeniden denetler ve o
+  aralıktaki bir aramanın şimdi vereceği yanıtı verir:
+  - aralığın bütün günleri gittiyse: aramanın yanıtı gibi, geri getirilecek günlerle `409
+    archive_reload_required`; dosya oluşmaz, denetim kaydı yazılmaz;
+  - yalnızca bazı günler gittiyse: veritabanında kalan satırlar, `archived` nedeniyle
+    **kesilmiş** olarak işaretlenmiş bir dosyada (dosya adı `-kismi`,
+    `X-Arci-Export-Truncated: archived`; "Bilgi" sayfası günleri "Veritabanında olmayan günler"
+    satırında yazar). `X-Arci-Export-Archived` başlığı (`YYYY-MM-DD` ya da
+    `YYYY-MM-DD/YYYY-MM-DD`) da günleri söyler; dosya ayrıca bir sınıra takıldığında da:
+    `X-Arci-Export-Truncated` o zaman o sınırı (`rows`/`time`) verir. Denetim kaydı günleri
+    `archived` olarak tutar.
+
+  Aralığın tamamı için aramayı yeniden çalıştırın, yanıtının önerdiği gibi günleri mühürlü
+  arşivden yeniden yükleyin ve yeniden dışa aktarın.
+- **Veritabanı bakımının beklenmesi.** Veritabanı bakımı (eski günlerin kaldırılması, yeni
+  bölümlerin açılması, arşivden yeniden yükleme) bölüm kilidini tutarken dışa aktarma kilidi en
+  fazla `search.request_budget_ms` (4 saniye) bekler; bekleme `search.export_budget_seconds`
+  süresinden düşülür. Bekleme süresi dolarsa yanıt `504 search_timeout` olur, metni: "Dışa aktarma
+  kendisine tanınan {seconds} saniyede başlayamadı: veritabanı bakımının (eski günlerin
+  kaldırılması, yeni bölümlerin açılması ya da arşivden yeniden yükleme) bitmesi beklendi. Biraz
+  sonra yeniden deneyin." (`{seconds}`, saniye olarak `search.request_budget_ms` ya da bekleme onu
+  tükettiyse `search.export_budget_seconds` değeridir.) Dosya oluşmaz, denetim kaydı yazılmaz;
+  saatlik sınırdan düşülmez. Aynı şekilde bekleyen bir arama da "Arama {seconds} saniyede
+  başlayamadı …" diye başlayan aynı metni alır; en kısa zaman dilimiyle ilgili metin (bölüm 5)
+  yalnızca süresi biten bir tarama içindir.
+- Dışa aktarma okuduğu sürece bu kilidi tutar. Bu sırada veritabanı penceresi işi, günlük bölüm işi
+  ve arşivden yeniden yükleme (yüklemenin başlaması, günlerinin bölümleri) kilidi ve ardından
+  değiştirdikleri tabloları toplam en fazla `search.request_budget_ms` değerinin yarısı kadar
+  (varsayılan 2 saniye; arşivden yeniden yükleme hiçbir zaman 2 saniyeden fazla değil) bekler ve
+  sonra vazgeçer; böylece bunlardan biri beklerken gelen bir arama süresinin en az yarısını kendi
+  okumasına ayırır. İşler daha sonra yeniden dener (15 dakika, 30 dakika, … en çok 4 saat), arşivden
+  yeniden yükleme isteklere bir sonraki bakışta (5 saniye), isteği başarısız saymadan. Yalnızca
+  pencere işinin art arda `alerts.job_failures`. (varsayılan 3) başarısız çalıştırması
+  `R20-db-window` uyarısını açar.
 - **CSV:** UTF-8 (BOM), `;` ayraç, CRLF satır sonu. **Excel:** "Sonuçlar" ve "Bilgi" sayfaları,
   her hücre metin. Sütunlar: Zaman, Alınma zamanı, Kaynak, Gönderici, Tür, Alt tür, Kaynak IP,
   Kaynak port, Hedef IP, Hedef port, NAT IP, NAT port, Eylem, Alan adı, URL, Kullanıcı,
@@ -258,8 +293,8 @@ yön değiştirme) içeremez. Kayıtlı bir aramayı çalıştırmak normal bir 
 - **Dosya mühürlü değildir.** "Bilgi" sayfası bunu söyler: "Bu dosya mühürlü değildir; bütünlük
   için Kanıt Paketi'ni kullanın." Resmi bir yanıt için Kanıt Paketi kullanın (bölüm 10).
 - Dosya oluşturulur, SHA-256 değeri hesaplanır ve **gönderilmeden önce** denetim kaydına yazılır
-  (`search.export`: satır sayısı, bayt, SHA-256, kesilme nedeni); tarayıcı `Repr-Digest`
-  başlığıyla gelen dosyanın değerini denetler.
+  (`search.export`: satır sayısı, bayt, SHA-256, kesilme nedeni, veritabanında olmayan günler);
+  tarayıcı `Repr-Digest` başlığıyla gelen dosyanın değerini denetler.
 - **Sınırlar:** kullanıcı başına aynı anda bir dışa aktarma (`search_export_running`), saatte en
   fazla `search.export_max_per_hour` (10); bu sayı denetim kaydından sayılır, sunucu yeniden
   başlasa da geçerlidir (`search_export_rate_limited`).
@@ -420,7 +455,7 @@ Her hata `code`, `message_tr` ve `message_en` taşır; reddedilen sorgunun hatal
 | `search_range_too_long` | 422 | aralık `search.max_days` gününden uzun |
 | `search_cursor_invalid` | 422 | sayfa konumu bu aramaya ait değil |
 | `search_expired` | 409 | arama numarasının süresi doldu (sayfa aramayı yeniden çalıştırır) |
-| `search_timeout` | 504 | en kısa dilim (5 dakika) bile süreye sığmadı |
+| `search_timeout` | 504 | en kısa dilim (5 dakika) bile süreye sığmadı; ya da arama veya dışa aktarma süresi dolana kadar veritabanı bakımını (bölüm kilidi) bekledi ("Arama {seconds} saniyede başlayamadı …", "Dışa aktarma {seconds} saniyede başlayamadı …", bölüm 9) |
 | `search_busy` | 429 | çok sayıda arama çalışıyor |
 | `search_rate_limited` | 429 | kısa sürede çok fazla arama |
 | `search_event_not_found` | 404 | kayıt veritabanında yok |

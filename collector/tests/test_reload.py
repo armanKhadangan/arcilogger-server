@@ -45,6 +45,12 @@ MESSAGE = b"<30>2026-10-25T09:38:26.380+03:00 SWITCH-2 system,info link up"
 #: ``asyncio.sleep(0.002)`` ends at the loop's next wake-up (the datagram just sent wakes it), not
 #: 2 ms later. 400 datagrams paced by it were all sent before the file was changed 0.2 s later.
 WINDOWS_TICK: Final = 1 / 64
+#: Longest wait while a sender runs. The sender, the receive path and the collector's disk work
+#: (one unbuffered write per datagram, the alert of a new sender, an fsync of the spool every
+#: ``fsync_interval_seconds``) share one event loop thread, and the loop's clock goes on while a
+#: call waits for the disk. On a loaded Windows runner fewer than 20 datagrams had been counted
+#: after 5 s (#66), likely for that reason. Met in well under a second otherwise.
+SENDING_SECONDS: Final = 60.0
 
 Timers = Literal["native", "windows"]
 
@@ -93,11 +99,22 @@ def status(layout: Layout) -> dict[str, Any]:
     return data
 
 
-async def wait_for(predicate: Callable[[], bool], timeout: float = 5.0) -> None:
+async def wait_for(
+    predicate: Callable[[], bool],
+    timeout: float = 5.0,
+    *,
+    alongside: asyncio.Task[Any] | None = None,
+    reached: Callable[[], str] | None = None,
+) -> None:
+    """Until ``predicate()``. A failure of ``alongside`` (the task the condition depends on) is
+    raised at once, and ``reached()`` tells in the timeout's message how far it got."""
     deadline = asyncio.get_running_loop().time() + timeout
     while not predicate():
+        if alongside is not None and alongside.done():
+            alongside.result()
         if asyncio.get_running_loop().time() > deadline:
-            raise AssertionError("condition not met in time")
+            detail = "" if reached is None else f" ({reached()})"
+            raise AssertionError(f"condition not met in time{detail}")
         await asyncio.sleep(0.01)
 
 
@@ -155,6 +172,13 @@ def messages_of(collector: Collector, source: str) -> int:
     return 0 if stats is None else stats.messages
 
 
+def counted(collector: Collector) -> str:
+    """The messages counted per source, for a failure message."""
+    sources = collector.stats.sources
+    counts = (f"{name}={stats.messages}" for name, stats in sorted(sources.items()))
+    return ", ".join(counts) or "none counted"
+
+
 @pytest.mark.parametrize("timers", ["native", "windows"])
 def test_a_new_source_is_taken_while_its_datagrams_arrive(
     config_path: Path, sender: socket.socket, timers: Timers
@@ -173,18 +197,26 @@ def test_a_new_source_is_taken_while_its_datagrams_arrive(
         sending = asyncio.create_task(
             send_until(collector, sender, lambda: messages_of(collector, "switch-2") >= 20)
         )
+
+        async def until(predicate: Callable[[], bool]) -> None:
+            await wait_for(
+                predicate, SENDING_SECONDS, alongside=sending, reached=lambda: counted(collector)
+            )
+
         try:
             # datagrams of a sender the configuration does not know yet
-            await wait_for(lambda: messages_of(collector, "unknown-127.0.0.2") >= 20)
+            await until(lambda: messages_of(collector, "unknown-127.0.0.2") >= 20)
             rewrite(config_path, config_path.read_text(encoding="utf-8") + SWITCH)
-            await wait_for(lambda: collector.config.source_for("127.0.0.2") is not None)
-            await wait_for(lambda: status(layout)["config"]["sha256"] == sha(config_path))
-            await wait_for(lambda: messages_of(collector, "switch-2") >= 20)
+            await until(lambda: collector.config.source_for("127.0.0.2") is not None)
+            await until(lambda: status(layout)["config"]["sha256"] == sha(config_path))
+            await until(lambda: messages_of(collector, "switch-2") >= 20)
             total = await sending
         finally:
             sending.cancel()
         await wait_for(
-            lambda: sum(stats.messages for stats in collector.stats.sources.values()) == total
+            lambda: sum(stats.messages for stats in collector.stats.sources.values()) == total,
+            SENDING_SECONDS,
+            reached=lambda: f"{counted(collector)} of {total} sent",
         )
         assert collector.udp_address == listening  # the same socket: nothing was restarted
 

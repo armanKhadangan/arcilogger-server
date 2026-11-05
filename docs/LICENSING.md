@@ -45,11 +45,12 @@ in every state. Prices are not part of the product.
 
 **Data the usage modules need:** Usage analytics and Scheduled usage reports are computed from
 FortiGate logs only: traffic logs (with interim logs for long sessions), web filter, DNS filter,
-application control and SSL inspection logs. Only traffic from private source addresses
-(the RFC 1918 blocks and IPv6 ULA) is counted: internal networks on other ranges (e.g. 100.64.0.0/10
-or public addresses used internally) are not analysed. Traffic is tied to the device and the person
-through the leases of the MikroTik DHCP server (and `ARP-LOG`); traffic without a lease is counted
-per IP address. Logs of other vendors are stored and sealed but not analysed. Before you buy a
+application control and SSL inspection logs. Only traffic from private source addresses (the RFC
+1918 blocks and IPv6 ULA) is counted: internal networks on other ranges (e.g. 100.64.0.0/10 or
+public addresses used internally) are not analysed. Traffic is tied to the device and the person
+through the leases of the DHCP server (MikroTik or FortiGate) and `ARP-LOG`; traffic without a lease
+is counted per IP address. The srcmac field of FortiGate session records (device identification) is
+not used for usage. Logs of other vendors are stored and sealed but not analysed. Before you buy a
 licence, check that your network fits ([INSTALL.md](INSTALL.md) section 0.1); the trial (section 3)
 also shows the result on your own network.
 
@@ -108,6 +109,10 @@ licence state.
 | `/license` | Licence state, upload and removal of the licence file | 5651 Core |
 | `/admin` | Settings: the machine configuration, the administration service's state, change requests and their history | 5651 Core |
 | `/settings` | Application settings (the database settings) | 5651 Core |
+| `/compliance` | Uyum Durumu: the ten check cards, the status report (PDF), the configuration backup confirmation | 5651 Core |
+| `/legal-status` | Legal-validity status: the banner on every page (every signed-in user) | 5651 Core |
+| `/system` | System page: resource use, disk forecast, database size, services, scheduled tasks, clock | 5651 Core |
+| `/archive-reloads` | Archive reload: days older than the database window asked back from the sealed vault, and their progress | 5651 Core |
 | `/usage` | The data of the Kullanım page, exports, rebuilds | Usage analytics |
 | `/reports` | Scheduled reports, runs, preview | Scheduled usage reports |
 | `/imports` | CSV import and its templates | Bulk import (CSV) |
@@ -138,8 +143,10 @@ data of a module that is off is not deleted.
 | `usage.today` | Usage analytics | skipped |
 | `usage.reattribute` | Usage analytics | skipped |
 | `usage.retention` | — (deletion of personal data) | always runs |
+| `db.window` | 5651 Core (the database window: log rows older than it dropped) | always runs |
 | `reports.run_due` | Scheduled usage reports | skipped |
 | `reports.purge` | — (deletion of report files) | always runs |
+| `system.sample` | 5651 Core | always runs |
 | `search.counts_backfill` | 5651 Core | always runs |
 
 On the command line only `arcilogger-worker usage rebuild` is refused while Usage analytics is off

@@ -9,8 +9,9 @@ Jobs (``DEFAULT_JOBS``):
 ``leases.late_evidence``    every 10 minutes: rebuild older days whose evidence arrived
                             after their rebuild (ingest backlog; ``correlation.late``)
 ``leases.nightly``          daily after 00:05 (site time): rebuild yesterday and today
-``partitions.ensure``       daily after 00:15 and at start-up: monthly partitions ahead
-                            (``arcilogger_db.partitions``; no-op with TimescaleDB)
+``partitions.ensure``       daily after 00:15 and at start-up: daily partitions of the
+                            window and ahead (``arcilogger_db.partitions``; no-op with
+                            TimescaleDB)
 ``license.check``           every 5 minutes: the licence state recomputed; state changes and
                             limit crossings audited once, the ``R20-license`` alerts opened
                             and resolved (:mod:`.alerts.license`),
@@ -39,11 +40,20 @@ Jobs (``DEFAULT_JOBS``):
                             changed are rebuilt (``usage.auto_rebuild_days``)
 ``usage.requests``          every 30 seconds: rebuild requests of the web interface
 ``usage.retention``         daily after 03:30: rollups older than ``usage.retention_days``
+``db.window``               daily after 01:00, so it and its first retry (01:15) are due
+                            before the Backup task's dump (01:40): log rows older than the
+                            database window (``db.retention_days``, unsealed days and archive
+                            reloads kept) dropped as whole partitions or chunks, expired
+                            reloads marked; a failure raises ``R20-db-window`` (:mod:`.db_window`)
 ``reports.run_due``         every minute: due report schedules queued (one run per
                             schedule after downtime), queued runs rendered (HTML, PDF,
                             Excel) and e-mailed per recipient (:mod:`.reports.runner`)
 ``reports.purge``           daily after 03:20: files of report runs older than
                             ``reports.keep_days`` deleted from ``exports/usage-reports``
+``system.sample``           daily after 00:30: one sample of the data and the system drive
+                            (total and used bytes) into ``state/system-history.json``
+                            (the newest 120 days) for the disk forecast of the Sistem page
+                            and the Panel (:mod:`.system_jobs`)
 ``search.counts_backfill``  every 10 minutes, no new file after 60 s: the finished files
                             loaded before the search summary table
                             (``ingest_offsets.counts_from_line``) counted into
@@ -104,7 +114,7 @@ from arcilogger_core.layout import Layout
 from arcilogger_core.timeutil import SITE_TZ, site_day, to_site, utc_now
 from arcilogger_db.engine import session_factory
 from arcilogger_db.models import JobRun
-from arcilogger_db.partitions import ensure_partitions
+from arcilogger_db.partitions import LockBudget, ensure_partitions, step_lock_timeout_ms
 from arcilogger_worker import __version__
 from arcilogger_worker.admin_jobs import import_admin_events, process_requests
 from arcilogger_worker.alerts.importer import import_alerts
@@ -116,10 +126,12 @@ from arcilogger_worker.correlation.leases import (
     run_incremental,
     run_late_evidence,
 )
+from arcilogger_worker.db_window import job_db_window
 from arcilogger_worker.evidence_jobs import import_job_events, purge_evidence
 from arcilogger_worker.licensing import StatusCache, job_license_check, module_gate
 from arcilogger_worker.reports.runner import purge_reports, resolve_while_unlicensed, run_due
 from arcilogger_worker.search_jobs import backfill_counts
+from arcilogger_worker.system_jobs import job_system_sample
 from arcilogger_worker.usage import jobs as usage_jobs
 
 log = logging.getLogger("arcilogger_worker")
@@ -249,8 +261,15 @@ def job_leases_nightly(ctx: JobContext) -> Mapping[str, Any]:
 
 
 def job_partitions(ctx: JobContext) -> Mapping[str, Any]:
+    """The daily partitions; the partition lock and the tables are waited for at most half of
+    ``search.request_budget_ms`` in all (W5-G-24: a search export holds it shared), else the run
+    fails and is retried (``R20-job`` after ``alerts.job_failures`` failed runs in a row)."""
     with ctx.engine.begin() as connection:
-        report = ensure_partitions(connection, today=site_day(ctx.now))
+        report = ensure_partitions(
+            connection,
+            today=site_day(ctx.now),
+            budget=LockBudget(step_lock_timeout_ms(connection)),
+        )
     return {"tables": len(report.tables), "created": report.created, "moved": report.moved}
 
 
@@ -406,9 +425,14 @@ def default_jobs(interval_seconds: int) -> tuple[Job, ...]:
         ),
         # Data minimisation: personal data must still be deleted on time, licensed or not.
         Job("usage.retention", job_usage_retention, daily_after=time(3, 30)),
+        # Before the Backup task's pg_dump (01:40, W5-G-27): a dump does not hold up its drops.
+        Job("db.window", job_db_window, daily_after=time(1, 0)),
         # Reports after the alerts: a report lists the alerts imported just before it.
         Job("reports.run_due", job_reports_run_due, every=REPORTS_EVERY, module=REPORTS_MODULE),
         Job("reports.purge", job_reports_purge, daily_after=time(3, 20)),
+        # The disk forecast of Sistem and the Panel: one sample of the drives a day (Wave 4
+        # contract 2.5.2).
+        Job("system.sample", job_system_sample, daily_after=time(0, 30)),
         # Last: it may take a minute, and nothing waits for it (statistics count directly until
         # a file is counted).
         Job("search.counts_backfill", job_search_counts_backfill, every=SEARCH_COUNTS_EVERY),

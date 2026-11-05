@@ -31,6 +31,7 @@ from sqlalchemy import delete, event, select, update
 from sqlalchemy.orm import Session
 
 from arcilogger_core.timeutil import to_site
+from arcilogger_db import clocksamples
 from arcilogger_db.egress import validate_egresses
 from arcilogger_db.models import (
     Department,
@@ -44,6 +45,7 @@ from arcilogger_db.models import (
     SearchCount,
     Setting,
     Source,
+    SourceClockSample,
     Vlan,
 )
 from arcilogger_db.searchcounts import rebuild_stream
@@ -60,7 +62,8 @@ from arcilogger_worker.lookup import (
     run_lookup,
     trust,
 )
-from arcilogger_worker.lookup.attribution import Attributor
+from arcilogger_worker.lookup.attribution import MISSED_MOVE_WINDOW, Attributor
+from arcilogger_worker.lookup.refs import fg_dhcp_move, moves_json
 from arcilogger_worker.lookup.texts import ENGINE_EXPLANATIONS
 from arcilogger_worker.lookup.types import EXPLANATIONS, EvidenceRef
 from arcilogger_worker.testing import FIREWALL, FORTIGATE_DHCP_TEXTS, Evidence, tr
@@ -81,6 +84,8 @@ FORMAT_NOTES = {"fortigate_format_unverified", "fortigate_format_verified"}
 UNCONVERTED, OVERLAP = "fortigate_dhcp_not_converted_since_lease", "dhcp_sources_overlap"
 #: An unconfigured sender (D24).
 STRANGER = "unknown-192.0.2.7"
+#: Addresses in no configured network (the example site configures no 172.20.44.0/24).
+NOWHERE = "172.20.44.0/24"
 
 
 def build(session: Session, first: date, last: date) -> None:
@@ -690,6 +695,44 @@ def test_the_moment_of_the_missed_close_itself(db_session: Session, evidence: Ev
     assert note(at_line, UNCONVERTED) == {"last": iso(tr(DAY, 8, 41, 10)), "ip": PC}
 
 
+def record_moves(session: Session, lease: Lease) -> None:
+    """Store ``lease.moves`` as the lease job records it (issue #127): every converted ACK (a
+    logid mapped to ``assigned``) of the lease's MAC for another address inside the lease, one
+    group per address, interface, VDOM, sender, logid and message (:func:`.refs.fg_dhcp_move`,
+    the job's own constructor). For an open MikroTik lease a test opens by hand, which the job
+    never saw open (so no end and no interface bound); the tests that call it only move a MAC
+    to an address in no configured network (``172.20.44.x``), so the job would have recorded
+    each of those ACKs, not applied it (D33 closes nothing without a network), and so few that
+    its bound drops none."""
+    assert lease.end is None
+    assert lease.source_table == "mt_dhcp"
+    assigned = sorted(
+        logid
+        for logid, meaning in settings_for(session).fortigate_logids.items()
+        if meaning == "assigned"
+    )
+    rows = session.execute(
+        select(
+            FgDhcp.time,
+            FgDhcp.ip,
+            FgDhcp.interface,
+            FgDhcp.extra["vd"].astext.label("vd"),
+            FgDhcp.source,
+            FgDhcp.logid,
+            FgDhcp.dhcp_msg,
+        ).where(
+            FgDhcp.mac == lease.mac,
+            FgDhcp.ip != lease.ip,
+            FgDhcp.time > lease.start,
+            FgDhcp.logid.in_(assigned),
+        )
+    ).all()
+    assert all(ipaddress.ip_address(row.ip) in ipaddress.ip_network(NOWHERE) for row in rows)
+    moves = moves_json(fg_dhcp_move(row) for row in rows)
+    session.execute(update(Lease).where(Lease.id == lease.id).values(moves=moves))
+
+
+@pytest.mark.parametrize("recorded", [False, True], ids=["moves-not-recorded", "moves-recorded"])
 @pytest.mark.parametrize(
     ("converted", "days", "lowered", "refs"),
     [
@@ -697,8 +740,10 @@ def test_the_moment_of_the_missed_close_itself(db_session: Session, evidence: Ev
         (False, 6, True, True),
         (False, 6, True, False),
         (True, 101, False, True),
-        (True, 99, True, True),
-        (True, 99, True, False),
+        (True, 99, False, True),
+        (True, 13, False, True),
+        (True, 11, True, True),
+        (True, 11, True, False),
         (True, 8, True, True),
     ],
     ids=[
@@ -706,6 +751,8 @@ def test_the_moment_of_the_missed_close_itself(db_session: Session, evidence: Ev
         "line-inside",
         "line-inside-without-a-record",
         "converted-beyond-the-window",
+        "converted-inside-the-window-before-the-lookup-days",
+        "converted-before-the-lookup-days",
         "converted-inside",
         "converted-inside-without-a-record",
         "converted-beyond-the-line-window",
@@ -718,12 +765,20 @@ def test_a_mikrotik_lease_kept_open_reads_back_one_probe_window(
     days: int,
     lowered: bool,
     refs: bool,
+    recorded: bool,
 ) -> None:
     """Round 7: a MikroTik lease that traffic keeps open has its last DHCP record far back; the
     post-lease check reads no further back than the D8 probe window before the moment: for an
     ``fg_event`` line the 3.8 fallback, 604,800 s (7 days; deviation c2), for a converted row
-    the 8,640,000 s (100 days) of 2.7; from the lease start when the lease has no DHCP record
-    (printed as ``{last}``)."""
+    the 8,640,000 s (100 days) of 2.7, and never before the first of the lookup's days (12 days
+    back with the defaults; W5-G deviations); from the lease start when the lease has no DHCP
+    record (printed as ``{last}``). Before the first day the converted-row check reads the moves
+    the lease job recorded with the lease (issue #127): a converted row 99 or 13 days back lowers
+    the chain when it was recorded, and is not read when the lease has no recorded moves (a
+    lease written before the upgrade). Either way the window reached before the first day, and
+    the answer says so (``lookback_clamped_to_window``): the recorded moves can only add one.
+    The MAC moves to ``172.20.44.58``, in no configured network: the build would have recorded
+    that ACK, not applied it (:func:`record_moves`)."""
     moment = AT
     ack = moment - timedelta(days=120)
     evidence.dhcp(ack, "assigned", PC, PC_MAC, server="dhcp42")
@@ -735,15 +790,26 @@ def test_a_mikrotik_lease_kept_open_reads_back_one_probe_window(
     if not refs:
         lease.evidence = []
     if converted:
-        evidence.fortigate_dhcp(moment - timedelta(days=days), "172.20.42.120", PC_MAC)
+        evidence.fortigate_dhcp(moment - timedelta(days=days), "172.20.44.58", PC_MAC)
     else:
         unconverted_line(evidence, moment - timedelta(days=days), "172.20.42.121", PC_MAC)
+    if recorded:
+        record_moves(db_session, lease)
+    else:
+        db_session.execute(update(Lease).values(moves=None))
     db_session.commit()
-    chain = internal(db_session, PC, moment).attribution
+    assert db_session.scalar(select(Lease.moves.is_(None))) is not recorded
+    outcome = internal(db_session, PC, moment)
+    # The converted-row window (100 days) of a chain the line check left ``high`` always
+    # reaches before the lookup's first day; the line window (7 days) never does.
+    assert ("lookback_clamped_to_window" in keys(outcome)) is (converted or not lowered)
+    # A recorded move inside the 100 days and before the first day is read from the lease.
+    from_the_lease = recorded and converted and timedelta(days=days) < MISSED_MOVE_WINDOW
+    chain = outcome.attribution
     assert chain is not None
     assert chain.lease is not None
     assert chain.lease.source_table == "mt_dhcp"
-    if lowered:
+    if lowered or from_the_lease:
         assert (chain.confidence, chain.lease.confidence) == ("low", "low")
         assert note(chain, UNCONVERTED) == {"last": iso(start), "ip": PC}
     else:
@@ -2233,6 +2299,7 @@ def test_a_healthy_mixed_site_keeps_its_chains(db_session: Session, evidence: Ev
 #: (an offset is the device time minus the receive time).
 BEHIND = -timedelta(minutes=8)
 CLOCK = "source_clock_offset"
+CLOCK_SHARED = "source_clock_shared"
 
 
 def clock_lines(
@@ -2275,9 +2342,9 @@ def as_loaded(session: Session, offset: timedelta) -> None:
     session.commit()
 
 
-def offsets(outcome: LookupOutcome) -> dict[str, int]:
-    """The sources ``source_clock_offset`` names, with their offsets in seconds."""
-    named = outcome_note(outcome, CLOCK)["offsets"]
+def offsets(outcome: LookupOutcome, key: str = CLOCK) -> dict[str, int]:
+    """The sources ``source_clock_offset`` (or ``key``) names, with their offsets in seconds."""
+    named = outcome_note(outcome, key)["offsets"]
     assert isinstance(named, str)
     pairs = (item.split(": ") for item in named.split(", "))
     return {name: int(value) for name, value in pairs}
@@ -2615,6 +2682,217 @@ def test_the_clock_is_measured_on_the_rows_nearest_the_moment(
     assert offsets(exact_request(db_session)) == {"fortigate": -480}
 
 
+#: The walk of step 4 (#61, #73): the FortiGate logged on time, then its clock was set 3 hours
+#: back half an hour before T; the PC's real session, received at T, is stamped T - 3 h.
+JUMP = -timedelta(hours=3)
+JUMPED = AT - timedelta(minutes=30)
+
+
+@pytest.fixture
+def clock_jumped(db_session: Session, evidence: Evidence) -> None:
+    """The PC's morning ACK on time and its lease built from it; heartbeat lines every two
+    minutes, on time from T - 2 h to the jump, 3 hours behind from it to T + 1 h; the session of
+    T (received at T); their clock samples as ingest writes them."""
+    evidence.fortigate_dhcp(tr(DAY, 8), PC, PC_MAC, hostname=HOST)
+    evidence.traffic(AT + JUMP, PC, 51001, transip=WAN)
+    received = AT - timedelta(hours=2)
+    while received < AT + timedelta(hours=1):
+        offset = timedelta(milliseconds=-300) if received < JUMPED else JUMP
+        evidence.heartbeat(received + offset, source="fortigate", received=received)
+        received += timedelta(minutes=2)
+    as_loaded(db_session, timedelta(milliseconds=-300))  # the typed rows on time ...
+    for model in (FgTraffic, Message):  # ... but the session of T, sent after the jump
+        db_session.execute(
+            update(model)
+            .where(model.source == "fortigate", model.time == AT + JUMP)
+            .values(time_received=AT)
+        )
+    clocksamples.rebuild(
+        db_session.connection(), "fortigate", tr(DAY, 0), tr(DAY + timedelta(days=1), 0)
+    )
+    db_session.commit()
+    build(db_session, DAY, DAY)
+    wan_exit(db_session)
+
+
+def test_a_clock_set_hours_back_is_named_at_the_real_moment(
+    db_session: Session, clock_jumped: None
+) -> None:
+    """The rows with a device time around T were sent on time before the jump (median 0); the
+    rows received around T are 3 hours behind. The exact request at T finds nothing in its
+    device-time window and names the clock; the internal lookup's chain, from the ACK of the
+    morning, is ``low`` with it. Measured by device time alone, both said nothing (#61 step 4,
+    "Fail 2")."""
+    outcome = exact_request(db_session)
+    assert (outcome.mode, outcome.matches) == ("none", ())
+    assert offsets(outcome) == {"fortigate": -10800}
+    assert outcome_note(outcome, CLOCK)["limit"] == 120
+    inside = internal(db_session, PC, AT)
+    assert inside.attribution is not None
+    assert inside.attribution.confidence == "low"
+    assert offsets(inside) == {"fortigate": -10800}
+
+
+def test_a_clock_set_hours_back_at_the_device_moment_is_named_as_before(
+    db_session: Session, clock_jumped: None
+) -> None:
+    """At the session's device time (T - 3 h) the rows with a device time around it are the
+    rows sent after the jump, 3 hours behind, as today; the rows received around it are older
+    and fewer (the site starts at T - 2 h): the session is found and the clock named."""
+    outcome = exact_request(db_session, at=AT + JUMP)
+    assert outcome.mode == "exact"
+    (match,) = outcome.matches
+    assert match.traffic.srcip == PC
+    assert offsets(outcome) == {"fortigate": -10800}
+
+
+#: #82: the clock is changed (set 3 hours back) two hours after T. The rows it sends from then on
+#: carry the device times of the hours around T; the second client's session of T + 3 h is stamped
+#: T and uses the PC's NAT port (port preservation, F15).
+CHANGED = AT + timedelta(hours=2)
+PC15, PC15_MAC = "172.20.42.58", "00:00:5e:00:53:58"
+
+
+def _jumps_later(
+    session: Session,
+    evidence: Evidence,
+    jump: timedelta | None,
+    corrected: timedelta | None = None,
+) -> None:
+    """The PC's and the second client's morning ACKs and leases; the PC's session of T, sent on
+    time; heartbeat lines every two minutes, on time from T - 2 h to :data:`CHANGED`, then (a
+    ``jump``) every six minutes ``jump`` off until CHANGED + 4 h, fewer than the rows sent on time
+    (an evening after a working day), or on time again (every two minutes) from CHANGED +
+    ``corrected``; with a jump back, the second client's session sent at T + 3 h with the device
+    time T; the clock samples as ingest writes them."""
+    evidence.fortigate_dhcp(tr(DAY, 8), PC, PC_MAC, hostname=HOST)
+    evidence.fortigate_dhcp(tr(DAY, 8, 5), PC15, PC15_MAC, hostname="PLN-PC15")
+    evidence.traffic(AT, PC, 51001, transip=WAN)
+    if jump is not None and jump < timedelta(0):
+        evidence.traffic(AT, PC15, 51001, transip=WAN)
+    received = AT - timedelta(hours=2)
+    while received < CHANGED + timedelta(hours=4 if corrected is None else 6):
+        on_time = jump is None or received < CHANGED
+        if corrected is not None and received >= CHANGED + corrected:
+            on_time = True
+        if on_time or jump is None:
+            evidence.heartbeat(
+                received - timedelta(milliseconds=300), source="fortigate", received=received
+            )
+            received += timedelta(minutes=2)
+        else:
+            evidence.heartbeat(received + jump, source="fortigate", received=received)
+            received += timedelta(minutes=6)
+    as_loaded(session, timedelta(milliseconds=-300))  # the typed rows on time ...
+    sent = AT + timedelta(hours=3)  # ... but the second client's, sent after the jump
+    lines = session.scalars(select(FgTraffic.raw_line).where(FgTraffic.srcip == PC15)).all()
+    for model in (FgTraffic, Message):
+        session.execute(
+            update(model)
+            .where(model.source == "fortigate", model.raw_line.in_(lines))
+            .values(time_received=sent)
+        )
+    clocksamples.rebuild(
+        session.connection(), "fortigate", tr(DAY, 0), tr(DAY + timedelta(days=1), 0)
+    )
+    session.commit()
+    build(session, DAY, DAY)
+    wan_exit(session)
+
+
+def test_a_lookup_hours_before_a_clock_set_back_names_the_shared_device_times(
+    db_session: Session, evidence: Evidence
+) -> None:
+    """The device times around T were also used by the rows sent after the jump, 3 hours later:
+    the exact request at T finds the PC's session and the second client's of T + 3 h, and names
+    the clock with both chains ``low``; so does the internal lookup. The rows with a device time
+    around T are mostly the ones sent on time (median 0), the rows received around T all are
+    (0): #79's two samples said nothing and both chains were ``high``. The offset is that of
+    the rows sent later, so the text says so (``source_clock_shared``), not that the clock was
+    off at T (#82)."""
+    _jumps_later(db_session, evidence, JUMP)
+    outcome = exact_request(db_session)
+    assert outcome.mode == "exact"
+    assert sorted(match.traffic.srcip for match in outcome.matches) == [PC, PC15]
+    assert offsets(outcome, CLOCK_SHARED) == {"fortigate": -10800}
+    assert outcome_note(outcome, CLOCK_SHARED)["limit"] == 120
+    assert CLOCK not in {e.key for e in outcome.explanations}
+    assert all(match.chain is not None for match in outcome.matches)
+    assert {match.chain.confidence for match in outcome.matches if match.chain} == {"low"}
+    inside = internal(db_session, PC, AT)
+    assert inside.attribution is not None
+    assert inside.attribution.confidence == "low"
+    assert offsets(inside, CLOCK_SHARED) == {"fortigate": -10800}
+
+
+@pytest.mark.parametrize(
+    ("drift", "printed"), [(0.0, -301), (12.0, None)], ids=["steady", "drifting"]
+)
+def test_a_clock_steadily_behind_is_named_as_off_at_the_moment(
+    db_session: Session, evidence: Evidence, drift: float, printed: int | None
+) -> None:
+    """A clock about 5 minutes behind all day (no NTP; #82 review), steady or drifting 12 s an
+    hour further behind. Its device times are shifted into the window from the minutes around
+    it too, stored away from zero (-300.4 s as -301); drifting, the shared minutes (received
+    about 5 minutes after their device times) lie further behind than the minutes received
+    around T and, rounded, further than the device-time median too. The clock was off at the
+    moment itself, so the lookup names ``source_clock_offset`` with the moment's median and its
+    remedy, never ``source_clock_shared``; the chain is ``low``. Taking the sample furthest
+    from 0 named the drifting clock ``shared``."""
+    evidence.fortigate_dhcp(tr(DAY, 8), PC, PC_MAC, hostname=HOST)
+    evidence.traffic(AT, PC, 51001, transip=WAN)
+    received = AT - timedelta(hours=3)
+    while received < AT + timedelta(hours=3):
+        hours = (received - AT) / timedelta(hours=1)
+        behind = timedelta(seconds=300.4 + drift * hours)
+        evidence.heartbeat(received - behind, source="fortigate", received=received)
+        received += timedelta(minutes=2)
+    as_loaded(db_session, -timedelta(seconds=300.4))
+    clocksamples.rebuild(
+        db_session.connection(), "fortigate", tr(DAY, 0), tr(DAY + timedelta(days=1), 0)
+    )
+    db_session.commit()
+    build(db_session, DAY, DAY)
+    wan_exit(db_session)
+    if printed is not None:  # what the second and third samples read
+        assert db_session.scalars(select(SourceClockSample.seconds).distinct()).all() == [printed]
+    outcome = exact_request(db_session)
+    (match,) = outcome.matches
+    assert match.chain is not None
+    assert match.chain.confidence == "low"
+    named = offsets(outcome)["fortigate"]
+    assert named == printed if printed is not None else -304 <= named <= -299, named
+    assert CLOCK_SHARED not in {e.key for e in outcome.explanations}
+
+
+def test_a_source_on_time_all_day_is_trusted_as_before(
+    db_session: Session, evidence: Evidence
+) -> None:
+    _jumps_later(db_session, evidence, None)
+    outcome = exact_request(db_session)
+    (match,) = outcome.matches
+    assert match.chain is not None
+    assert match.chain.confidence == "high"
+    assert {CLOCK, CLOCK_SHARED}.isdisjoint(e.key for e in outcome.explanations)
+
+
+def test_a_clock_set_ahead_and_corrected_is_named_at_the_moments_whose_device_times_it_used(
+    db_session: Session, evidence: Evidence
+) -> None:
+    """For symmetry: a clock set 3 hours ahead at :data:`CHANGED` and corrected an hour later
+    stamped the rows of that hour with device times from CHANGED + 3 h. A lookup at CHANGED +
+    3 h 30 min sees them among the rows sent on time (median 0) and receives only rows on time
+    around it (0); the minutes of that hour name +10800 s. One at T, before the change, says
+    nothing (no device time of T was used again)."""
+    _jumps_later(db_session, evidence, -JUMP, corrected=timedelta(hours=1))
+    later = internal(db_session, PC, CHANGED + timedelta(hours=3, minutes=30))
+    assert offsets(later, CLOCK_SHARED) == {"fortigate": 10800}
+    before = internal(db_session, PC, AT)
+    assert before.attribution is not None
+    assert before.attribution.confidence == "high"
+    assert {CLOCK, CLOCK_SHARED}.isdisjoint(e.key for e in before.explanations)
+
+
 def test_the_lookup_and_the_alert_share_the_clock_limits() -> None:
     """``source_clock_offset`` and ``R20-lease:source-clock`` use the same limit and the same
     minimum of rows (D28)."""
@@ -2733,6 +3011,10 @@ EMITTED_BY: dict[str, tuple[str, str]] = {
     ),
     "lease_renewal_not_seen": ("test_lookup_fortigate_only.py", "test_no_renewal_and_traffic_only"),
     "lease_timeline_behind": ("test_lookup_engine.py", "test_lease_timeline_behind_is_reported"),
+    "lookback_clamped_to_window": (
+        "test_lookup_lookback.py",
+        "test_the_missed_move_check_reads_the_recorded_moves_before_the_first_day",
+    ),
     "mac_multiple_ips": (
         "test_lookup_srcmac.py",
         "test_a_mac_only_lookup_finds_the_address_by_its_srcmac",
@@ -2800,6 +3082,10 @@ EMITTED_BY: dict[str, tuple[str, str]] = {
     "source_clock_offset": (
         "test_lookup_fortigate_only.py",
         "test_a_not_logged_exit_the_logs_saw_measures_the_search",
+    ),
+    "source_clock_shared": (
+        "test_lookup_fortigate_only.py",
+        "test_a_lookup_hours_before_a_clock_set_back_names_the_shared_device_times",
     ),
     "source_configured_later": (
         "test_lookup_fortigate_only.py",

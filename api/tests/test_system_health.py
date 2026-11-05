@@ -9,9 +9,12 @@ test runs the real ``arcilogger-core verify``), never by hand (contract Implemen
 
 from __future__ import annotations
 
+import codecs
+import hashlib
 import json
 import os
 import re
+import socket
 from collections.abc import Callable, Iterator
 from datetime import UTC, datetime, time, timedelta
 from pathlib import Path
@@ -26,18 +29,45 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from arcilogger_api.app import API_PREFIX
 from arcilogger_api.system_health import routes
+from arcilogger_api.system_health import tasks as tasks_module
 from arcilogger_api.system_health.jobs import from_time_tr, schedule_texts
 from arcilogger_api.system_health.models import TaskName
-from arcilogger_api.system_health.tasks import TASKS, Evidence, task_health, verify_state
+from arcilogger_api.system_health.tasks import (
+    CRL_RUN_FAILURES,
+    RENEW_FAILURES,
+    TASKS,
+    Evidence,
+    TaskFailure,
+    task_health,
+    verify_state,
+)
 from arcilogger_api.testing import LoggedIn
 from arcilogger_core.admin.contract import SystemStatus, dump_document, parse_document
 from arcilogger_core.admin.testing import FakeAgent, FakeSystem, Installed
 from arcilogger_core.cli import main as core_main
 from arcilogger_core.config import Config
+from arcilogger_core.crl import INDEX_SCHEMA as CRL_INDEX_SCHEMA
+from arcilogger_core.crl import CrlError, CrlOptions, RunFailureCode
+from arcilogger_core.crl import _one_run as held_crl_lock
+from arcilogger_core.crl import fetch as crl_fetch
 from arcilogger_core.layout import Layout
+from arcilogger_core.renewal import FAILED_OUTCOMES, LastRun, Outcome, RenewalReport
+from arcilogger_core.renewal import STATE_SCHEMA as RENEWAL_SCHEMA
+from arcilogger_core.renewal import write_state as write_renewal_state
 from arcilogger_core.timeutil import isoformat_site, site_day, to_site, utc_now
+from arcilogger_db.backup import write_last_state
 from arcilogger_db.models import AuditLog, JobRun
-from arcilogger_worker.alerts.system import backup_state_path
+from arcilogger_worker.alerts import system as alerts_system
+from arcilogger_worker.alerts.system import (
+    CheckContext,
+    CrlIndexState,
+    backup_state_path,
+    check_backup,
+    check_stamp_crl,
+    crl_index_path,
+    read_crl_index,
+    stamp_renewal_path,
+)
 from arcilogger_worker.service import Job, JobState, default_jobs
 from arcilogger_worker.vaulttesting import SealedVault, at_site, make_vault
 
@@ -252,6 +282,8 @@ def test_task_states_from_evidence_files(
         "Backup": "missing",
         "Requests": "not_observable",
         "ApplySystem": "not_used",
+        "Renew": "missing",
+        "CrlFetch": "missing",
     }
     assert tasks["Seal"]["schedule_tr"] == "Her gün 00:10'dan sonra 5 dakikada bir"
     assert tasks["Seal"]["schedule_en"] == "Every 5 minutes from 00:10"
@@ -281,17 +313,21 @@ def test_task_states_from_evidence_files(
     assert tasks["VerifyWeekly"]["state"] == "ok"
     assert moment(tasks["VerifyWeekly"]["last_evidence_at"]) == now - timedelta(days=2)
     assert tasks["VerifyMonthly"]["state"] == "late"
-    # The task ran; whether the dump succeeded is R20-backup's (Uyarılar).
-    assert tasks["Backup"]["state"] == "ok"
+    # A failed attempt writes the time it failed (#171).
+    assert (tasks["Backup"]["state"], tasks["Backup"]["code"]) == ("failed", "backup_failed")
+    assert moment(tasks["Backup"]["last_evidence_at"]) == now
+    assert {task["code"] for name, task in tasks.items() if name != "Backup"} == {None}
 
     touch(layout.seal_state(yesterday), now - timedelta(hours=27))
     write_json(verify / verify_name(2), {"at": isoformat_site(now - timedelta(hours=1))})
     write_json(verify / verify_name(3), {"at": isoformat_site(now - timedelta(days=9))})
     (verify / verify_name(90)).unlink()
+    write_json(backup_state_path(layout), {"ok": True, "finished": isoformat_site(now)})
     tasks = by(get(client)["tasks"], "task")
     assert tasks["Seal"]["state"] == "late"
     assert tasks["VerifyDaily"]["state"] == "ok"
     assert tasks["VerifyWeekly"]["state"] == "late"  # a young chain: --last 90 verified 3 days
+    assert (tasks["Backup"]["state"], tasks["Backup"]["code"]) == ("ok", None)
 
     # Retention rewrites the state of each day it deletes (``retention._delete_day``): it is
     # not Seal's evidence, nor is an old day's state touched by anything else.
@@ -404,6 +440,627 @@ def test_task_states_follow_the_configuration(api_config: Config, tmp_path: Path
     assert states(late)["ClockCheck"] == "late"
     assert states(evidence(api_config, now, administration=False))["ApplySystem"] == "not_used"
     assert states(evidence(api_config, now))["Requests"] == "not_observable"
+
+
+def task_rows(found: Evidence) -> dict[str, dict[str, Any]]:
+    return by([task.model_dump(mode="json") for task in task_health(found)], "task")
+
+
+def renew_run(layout: Layout, at: datetime | None, outcome: Outcome = "not_needed") -> None:
+    """A run of ``arcilogger-core renew`` as it writes ``state/renewal/renewal.json`` (W5-A's
+    writer): ``at`` None is a dry run. Without a report, as a run without pinned roots writes
+    it."""
+    exit_code = {"renewed": 0, "not_needed": 0, "refused": 2, "failed": 3}[outcome]
+    last_run = None if at is None else LastRun(at=at, outcome=outcome, exit_code=exit_code)
+    write_renewal_state(layout, None, at=at or utc_now(), renew_before=180, last_run=last_run)
+
+
+def test_renew_row_reads_an_earlier_report_until_the_first_run(api_config: Config) -> None:
+    """After an upgrade the Renew row shows the last run of the earlier release's
+    ``state/renewal.json``, and names that file as its evidence, until the task writes
+    ``state/renewal/renewal.json`` (W5-E-4, answer to Q2 on #158); a dry run in between writes
+    nothing and leaves the row as it is (W5-E-8, answer to Q5 on #158). From the first counted
+    run on only the new file counts, whatever a service writes into the earlier one, which stays
+    where it is."""
+    now = utc_now().replace(microsecond=0)
+    layout = Layout(api_config.data_dir)
+    earlier = layout.state / "renewal.json"
+
+    def earlier_run(at: datetime) -> None:
+        last_run = {"at": isoformat_site(at), "outcome": "not_needed", "exit_code": 0}
+        write_json(earlier, {"schema": RENEWAL_SCHEMA, "last_run": last_run})
+
+    row = task_rows(evidence(api_config, now))["Renew"]  # neither file: the one the task writes
+    assert (row["state"], row["evidence"]) == ("missing", "state\\renewal\\renewal.json")
+    earlier_run(now - timedelta(hours=2))
+    row = task_rows(evidence(api_config, now))["Renew"]
+    assert (row["state"], moment(row["last_evidence_at"])) == ("ok", now - timedelta(hours=2))
+    assert row["evidence"] == "state\\renewal.json"
+    dry = write_renewal_state(layout, RenewalReport.of(()), at=now, renew_before=180, last_run=None)
+    assert dry is None
+    assert not stamp_renewal_path(layout).exists()
+    assert task_rows(evidence(api_config, now))["Renew"] == row
+    renew_run(layout, now - timedelta(hours=1))
+    assert stamp_renewal_path(layout) == layout.state / "renewal" / "renewal.json"
+    assert earlier.is_file()  # left in place and ignored from now on (answer to Q3 on #158)
+    earlier_run(now - timedelta(minutes=10))
+    row = task_rows(evidence(api_config, now))["Renew"]
+    assert moment(row["last_evidence_at"]) == now - timedelta(hours=1)
+    assert row["evidence"] == "state\\renewal\\renewal.json"
+
+
+def test_renew_row_survives_a_state_folder_it_cannot_look_into(
+    api_config: Config, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``state\\renewal`` that ArciApi cannot list (a service created it under the earlier
+    release with its own entries only, and the ACL step has not reset it yet, W5-E-9): looking
+    at ``renewal.json`` there raises PermissionError, which ``Path.exists()`` re-raises. The row
+    is ``missing`` and names the file the task writes; the request never fails (the module's
+    rule). The earlier ``state/renewal.json`` is not read then: the new file may exist."""
+    now = utc_now().replace(microsecond=0)
+    layout = Layout(api_config.data_dir)
+    last_run = {"at": isoformat_site(now - timedelta(hours=2)), "outcome": "not_needed"}
+    write_json(layout.state / "renewal.json", {"schema": RENEWAL_SCHEMA, "last_run": last_run})
+    hidden = stamp_renewal_path(layout)
+    stat = Path.stat
+
+    def refused(self: Path, **kwargs: Any) -> os.stat_result:
+        if self == hidden:
+            raise PermissionError(13, "Permission denied", str(self))
+        return stat(self, **kwargs)
+
+    monkeypatch.setattr(Path, "stat", refused)
+    with pytest.raises(PermissionError):
+        hidden.exists()
+    row = task_rows(evidence(api_config, now))["Renew"]
+    assert (row["state"], row["evidence"]) == ("missing", "state\\renewal\\renewal.json")
+    assert row["last_evidence_at"] is None
+
+
+def test_renew_and_crlfetch_are_judged_by_their_state_files(api_config: Config) -> None:
+    """Renew by ``last_run.at`` of ``state/renewal/renewal.json``, CrlFetch by the newest
+    ``fetched_at`` or failure of ``state/crl/index.json``, never by an exit code (C12, A4). A
+    Renew run that failed or was refused is a failed task until the next run that renews or
+    finds nothing due (answer to Q3 on #171); how many failed in a row is R20-renewal's, and
+    whether the lists are fresh R20-crl's. A time later than now is no evidence; an index
+    ``crl fetch`` cannot get past is a failed task (#171)."""
+    now = utc_now().replace(microsecond=0)
+    layout = Layout(api_config.data_dir)
+
+    # Renew: a dry run before any run leaves no last run.
+    renew_run(layout, None)
+    assert states(evidence(api_config, now))["Renew"] == "missing"
+    for _ in range(3):  # refused three times (no pinned roots)
+        renew_run(layout, now - timedelta(hours=1), "refused")
+    assert json.loads(stamp_renewal_path(layout).read_bytes())["failures_in_a_row"] == 3
+    rows = task_rows(evidence(api_config, now))
+    assert (rows["Renew"]["state"], rows["Renew"]["code"], rows["Renew"]["evidence"]) == (
+        "failed",
+        "renew_refused",
+        "state\\renewal\\renewal.json",
+    )
+    assert moment(rows["Renew"]["last_evidence_at"]) == now - timedelta(hours=1)
+    renew_run(layout, None)  # a dry run keeps the last run
+    assert task_rows(evidence(api_config, now))["Renew"] == rows["Renew"]
+    row = task_rows(evidence(api_config, now + timedelta(days=3)))["Renew"]  # however old
+    assert (row["state"], row["code"]) == ("failed", "renew_refused")
+    renew_run(layout, now - timedelta(hours=1), "failed")
+    row = task_rows(evidence(api_config, now))["Renew"]
+    assert (row["state"], row["code"]) == ("failed", "renew_failed")
+    renew_run(layout, now + timedelta(minutes=5), "failed")  # a clock set back: no time
+    row = task_rows(evidence(api_config, now))["Renew"]
+    assert (row["state"], row["code"], row["last_evidence_at"]) == ("failed", "renew_failed", None)
+    renew_run(layout, now - timedelta(hours=1), "renewed")  # the next run that works clears it
+    row = task_rows(evidence(api_config, now))["Renew"]
+    assert (row["state"], row["code"]) == ("ok", None)
+    renew_run(layout, now - timedelta(hours=25))  # within the 26 h limit
+    assert states(evidence(api_config, now))["Renew"] == "ok"
+    renew_run(layout, now - timedelta(hours=27))
+    assert states(evidence(api_config, now))["Renew"] == "late"
+    renew_run(layout, now + timedelta(minutes=5))  # a clock set back
+    assert states(evidence(api_config, now))["Renew"] == "missing"
+    # The failure count is R20-renewal's: a file without one, or with one that is no count,
+    # still shows the failed run.
+    renew_run(layout, now - timedelta(hours=1), "failed")
+    written = json.loads(stamp_renewal_path(layout).read_bytes())
+    without = {key: value for key, value in written.items() if key != "failures_in_a_row"}
+    for count in (None, "two", True, -1):
+        write_json(
+            stamp_renewal_path(layout),
+            without | ({} if count is None else {"failures_in_a_row": count}),
+        )
+        row = task_rows(evidence(api_config, now))["Renew"]
+        assert (row["state"], row["code"]) == ("failed", "renew_failed"), count
+    # An outcome Renew never writes is no failure: the run shows.
+    write_json(
+        stamp_renewal_path(layout),
+        written | {"last_run": written["last_run"] | {"outcome": "aborted"}},
+    )
+    row = task_rows(evidence(api_config, now))["Renew"]
+    assert (row["state"], row["code"]) == ("ok", None)
+    # The report's own ``at`` is no run: a run without pinned roots keeps it from the last file.
+    write_json(stamp_renewal_path(layout), {"schema": RENEWAL_SCHEMA, "at": isoformat_site(now)})
+    assert states(evidence(api_config, now))["Renew"] == "missing"
+    # Truncated, not an object, a last run that is not one or has no time: never a server error.
+    for unknown in (
+        b'{"last_run": {"at": ',
+        b"[]",
+        b'"x"',
+        b'{"last_run": []}',
+        b'{"last_run": {"at": 5}}',
+    ):
+        stamp_renewal_path(layout).write_bytes(unknown)
+        assert states(evidence(api_config, now))["Renew"] == "missing", unknown
+
+    # CrlFetch: a run that finds the lock held (another run, W5-B-2) writes no index.
+    with socket.create_server(("127.0.0.1", 0)) as listener:
+        closed = f"http://127.0.0.1:{listener.getsockname()[1]}/ornek.crl"
+    options = CrlOptions(urls=(closed,), timeout_seconds=1)
+    with held_crl_lock(layout.crl_dir), pytest.raises(CrlError, match="another 'crl fetch'"):
+        crl_fetch(options, layout, [], now)
+    assert not crl_index_path(layout).exists()
+    assert states(evidence(api_config, now))["CrlFetch"] == "missing"
+    # A run whose only list address cannot be reached records its failure: the task ran.
+    run = crl_fetch(options, layout, [], now)
+    assert [failure.error for failure in run.failures] == ["unreachable"]
+    assert json.loads(crl_index_path(layout).read_bytes())["lists"] == []
+    rows = task_rows(evidence(api_config, now))
+    assert (rows["CrlFetch"]["state"], rows["CrlFetch"]["evidence"]) == (
+        "ok",
+        "state\\crl\\index.json",
+    )
+    assert moment(rows["CrlFetch"]["last_evidence_at"]) == now
+    assert states(evidence(api_config, now + timedelta(hours=25)))["CrlFetch"] == "ok"
+    assert states(evidence(api_config, now + timedelta(hours=27)))["CrlFetch"] == "late"
+
+    def stored(fetched_at: datetime) -> dict[str, Any]:
+        return {
+            "issuer": "CN=Örnek Test TSA Kök,O=Örnek A.Ş.,C=TR",
+            "issuer_sha256": "0" * 64,
+            "this_update": isoformat_site(now - timedelta(days=2), "seconds"),
+            "next_update": isoformat_site(now + timedelta(days=5), "seconds"),
+            "file": "000000000000-ornek.crl",
+            "sha256": "0" * 64,
+            "url": "http://192.0.2.10/ornek.crl",
+            "fetched_at": isoformat_site(fetched_at, "seconds"),
+        }
+
+    # The newest fetch counts, unless it is later than now. An index without a failure shows
+    # its modification time too (Q8 on #158): later than now here, and older than a fetch.
+    index = {"schema": "arcilogger.crl-index/1", "failures": []}
+    write_json(crl_index_path(layout), {**index, "lists": [stored(now + timedelta(hours=1))]})
+    touch(crl_index_path(layout), now + timedelta(hours=1))  # test: a clock set back
+    assert states(evidence(api_config, now))["CrlFetch"] == "missing"
+    lists = [stored(now + timedelta(hours=1)), stored(now - timedelta(hours=27))]
+    write_json(crl_index_path(layout), {**index, "lists": lists})
+    touch(crl_index_path(layout), now - timedelta(hours=28))
+    rows = task_rows(evidence(api_config, now))
+    assert rows["CrlFetch"]["state"] == "late"
+    assert moment(rows["CrlFetch"]["last_evidence_at"]) == now - timedelta(hours=27)
+    # Another schema, truncated, not an object, lists that are no list: every run stops on it.
+    unreadable = [
+        json.dumps({**index, "schema": "another/1", "lists": lists}).encode(),
+        b'{"lists": ',
+        b"[]",
+        json.dumps({**index, "lists": {"file": stored(now)}}).encode(),
+        b"[" * 100_000,  # nested too deeply to parse: crl fetch stops on it as well
+    ]
+    for document in unreadable:
+        crl_index_path(layout).write_bytes(document)
+        row = task_rows(evidence(api_config, now))["CrlFetch"]
+        assert (row["state"], row["code"], row["last_evidence_at"]) == (
+            "failed",
+            "index_unreadable",
+            None,
+        ), document
+
+
+def test_crlfetch_without_a_list_address_shows_the_run(api_config: Config) -> None:
+    """#151: a ``crl fetch`` that knows no list address (no ``tsa.crl_urls``, no pinned root, no
+    token) writes ``state/crl/index.json`` with no list and no failure, so the row shows the run
+    by the time the index was written instead of a permanent ``missing``. A run that finds the
+    lock held still writes nothing, and a time later than now is still no evidence. An index that
+    records a failure is judged by the times of its lists and failures alone (the test below)."""
+    now = utc_now().replace(microsecond=0)
+    layout = Layout(api_config.data_dir)
+    path = crl_index_path(layout)
+    with held_crl_lock(layout.crl_dir), pytest.raises(CrlError, match="another 'crl fetch'"):
+        crl_fetch(CrlOptions(), layout, [], now)
+    assert not path.exists()
+    assert states(evidence(api_config, now))["CrlFetch"] == "missing"
+
+    run = crl_fetch(CrlOptions(), layout, [], now)
+    assert (run.urls, run.exit_code) == ((), 2)
+    empty = {"schema": CRL_INDEX_SCHEMA, "lists": [], "failures": []}
+    assert json.loads(path.read_bytes()) == empty
+    rows = task_rows(evidence(api_config, now + timedelta(minutes=1)))
+    assert (rows["CrlFetch"]["state"], rows["CrlFetch"]["evidence"]) == (
+        "ok",
+        "state\\crl\\index.json",
+    )
+    touch(path, now - timedelta(hours=2))  # test: the run was two hours ago
+    row = task_rows(evidence(api_config, now))["CrlFetch"]
+    assert (row["state"], moment(row["last_evidence_at"])) == ("ok", now - timedelta(hours=2))
+    assert states(evidence(api_config, now + timedelta(hours=23)))["CrlFetch"] == "ok"
+    assert states(evidence(api_config, now + timedelta(hours=25)))["CrlFetch"] == "late"
+    touch(path, now + timedelta(hours=1))  # test: a clock set back since the run
+    assert states(evidence(api_config, now))["CrlFetch"] == "missing"
+    # The next run without an address writes the same index again: the task ran.
+    crl_fetch(CrlOptions(), layout, [], now)
+    assert json.loads(path.read_bytes()) == empty
+    assert states(evidence(api_config, now + timedelta(minutes=1)))["CrlFetch"] == "ok"
+
+
+def test_crlfetch_after_the_list_addresses_are_gone_shows_the_run(api_config: Config) -> None:
+    """Answer to Q8 on #158: a site that stored a list and knows no list address any more keeps
+    it in the index with its old ``fetched_at`` (D8), and each run rewrites the index with no
+    failure, so the row shows the run by the index's modification time and is not late while
+    the task runs (how fresh the lists are is R20-crl's). An index that records a failure is
+    judged by its times alone. Answer to Q9: a run that exits 1 on a held lock or an index it
+    cannot read writes nothing: the row keeps the run before on a held lock, and is ``failed``
+    with no time on an index it cannot read (#171)."""
+    now = utc_now().replace(microsecond=0)
+    layout = Layout(api_config.data_dir)
+    path = crl_index_path(layout)
+    data = b"test: a stored list, only hashed by a run without addresses (C14)"
+    sha256 = hashlib.sha256(data).hexdigest()
+    name = f"000000000000-20261001T000000Z-{sha256[:8]}.crl"
+    layout.crl_dir.mkdir(parents=True, exist_ok=True)
+    (layout.crl_dir / name).write_bytes(data)
+    fetched_at = now - timedelta(days=30)
+    entry = {
+        "issuer": "CN=Örnek Test TSA Kök,O=Örnek A.Ş.,C=TR",
+        "issuer_sha256": "0" * 64,
+        "this_update": isoformat_site(fetched_at - timedelta(days=1), "seconds"),
+        "next_update": isoformat_site(fetched_at + timedelta(days=6), "seconds"),
+        "file": name,
+        "sha256": sha256,
+        "url": "http://192.0.2.10/ornek.crl",
+        "fetched_at": isoformat_site(fetched_at, "seconds"),
+    }
+    # The last run that knew the address, thirty days ago.
+    write_json(path, {"schema": CRL_INDEX_SCHEMA, "lists": [entry], "failures": []})
+    touch(path, fetched_at)
+    row = task_rows(evidence(api_config, now))["CrlFetch"]
+    assert (row["state"], moment(row["last_evidence_at"])) == ("late", fetched_at)
+
+    run = crl_fetch(CrlOptions(), layout, [], now)
+    assert (run.urls, run.failures, run.exit_code) == ((), (), 2)
+    assert json.loads(path.read_bytes()) == {
+        "schema": CRL_INDEX_SCHEMA,
+        "lists": [entry],
+        "failures": [],
+    }
+    assert states(evidence(api_config, now + timedelta(minutes=1)))["CrlFetch"] == "ok"
+    touch(path, now - timedelta(hours=1))  # test: the run was an hour ago
+    row = task_rows(evidence(api_config, now))["CrlFetch"]
+    assert (row["state"], moment(row["last_evidence_at"])) == ("ok", now - timedelta(hours=1))
+
+    # Q9: a held lock fails the run (exit 1) and leaves the index as it is: no new run.
+    written = path.read_bytes()
+    with held_crl_lock(layout.crl_dir), pytest.raises(CrlError, match="another 'crl fetch'"):
+        crl_fetch(CrlOptions(), layout, [], now + timedelta(hours=26))
+    assert path.read_bytes() == written
+    row = task_rows(evidence(api_config, now + timedelta(hours=26)))["CrlFetch"]
+    assert (row["state"], moment(row["last_evidence_at"])) == ("late", now - timedelta(hours=1))
+
+    # A run that records a failure shows the failure's time, not when the index was written.
+    (layout.crl_dir / name).write_bytes(data + b"\n")  # test: the stored file is changed
+    run = crl_fetch(CrlOptions(), layout, [], now - timedelta(minutes=30))
+    assert [failure.error for failure in run.failures] == ["stored_file_changed"]
+    touch(path, now - timedelta(minutes=10))
+    row = task_rows(evidence(api_config, now))["CrlFetch"]
+    assert (row["state"], moment(row["last_evidence_at"])) == ("ok", now - timedelta(minutes=30))
+
+    # Q9: an index the run cannot read fails it too and stays; the row shows a failed task with
+    # no time (the modification time is no run). A byte order mark (Windows PowerShell 5's
+    # ``Set-Content -Encoding UTF8``) is read by R20-crl, but no run gets past it.
+    empty = {"schema": CRL_INDEX_SCHEMA, "lists": [], "failures": []}
+    for damaged in (
+        b'{"lists": ',
+        json.dumps({"schema": "another/1"}).encode(),
+        codecs.BOM_UTF8 + json.dumps(empty).encode(),
+    ):
+        path.write_bytes(damaged)
+        touch(path, now - timedelta(minutes=5))
+        with pytest.raises(CrlError):
+            crl_fetch(CrlOptions(), layout, [], now)
+        assert path.read_bytes() == damaged
+        row = task_rows(evidence(api_config, now))["CrlFetch"]
+        assert (row["state"], row["code"], row["last_evidence_at"]) == (
+            "failed",
+            "index_unreadable",
+            None,
+        ), damaged
+    assert read_crl_index(layout).readable  # the BOM index: R20-crl reads it
+
+
+def backup_attempt(layout: Layout, finished: datetime, *, ok: bool, error: str | None) -> None:
+    """``state/backup/last.json`` as the Backup task writes it (``write_last_state``): a failed
+    attempt (``_failed``) has no file and writes the time it failed as ``finished``."""
+    write_last_state(
+        layout,
+        finished=finished,
+        ok=ok,
+        file="backups/scheduled/arcilogger-20261012-0140.dump" if ok else None,
+        size=1_281_734_656 if ok else None,
+        sha256="0" * 64 if ok else None,
+        error=error,
+    )
+
+
+def test_backup_row_shows_a_failed_attempt(api_config: Config) -> None:
+    """#171: ``ok`` not ``true`` in ``state/backup/last.json`` is a failed task with the time it
+    failed, however old (``failed`` outranks ``late``), until a backup succeeds. Backup switched
+    off is ``not_used`` first, as R20-backup resolves everything then; a time later than now is
+    not shown, and a file that is no object is no evidence."""
+    now = utc_now().replace(microsecond=0)
+    layout = Layout(api_config.data_dir)
+    error = "test: connection refused"
+    backup_attempt(layout, now - timedelta(hours=30), ok=False, error=error)
+    row = task_rows(evidence(api_config, now))["Backup"]
+    assert (row["state"], row["code"]) == ("failed", "backup_failed")
+    assert moment(row["last_evidence_at"]) == now - timedelta(hours=30)
+    off = api_config.model_copy(
+        update={"backup": api_config.backup.model_copy(update={"enabled": False})}
+    )
+    row = task_rows(evidence(off, now))["Backup"]
+    assert (row["state"], row["code"]) == ("not_used", None)
+
+    backup_attempt(layout, now - timedelta(hours=1), ok=True, error=None)  # the next one works
+    row = task_rows(evidence(api_config, now))["Backup"]
+    assert (row["state"], row["code"]) == ("ok", None)
+    assert moment(row["last_evidence_at"]) == now - timedelta(hours=1)
+    backup_attempt(layout, now - timedelta(hours=27), ok=True, error=None)
+    assert states(evidence(api_config, now))["Backup"] == "late"
+
+    backup_attempt(layout, now + timedelta(minutes=5), ok=False, error=error)  # a clock set back
+    row = task_rows(evidence(api_config, now))["Backup"]
+    assert (row["state"], row["code"], row["last_evidence_at"]) == ("failed", "backup_failed", None)
+    # ``ok`` missing or no boolean, ``finished`` that is no time: still the failed attempt.
+    for written in (
+        {"finished": "dün"},
+        {"ok": "true", "finished": isoformat_site(now)},
+        {"ok": 1, "finished": isoformat_site(now)},
+    ):
+        write_json(backup_state_path(layout), written)
+        row = task_rows(evidence(api_config, now))["Backup"]
+        assert (row["state"], row["code"]) == ("failed", "backup_failed"), written
+    for unknown in (b"[]", b'"ok"', b'{"ok": tr'):
+        backup_state_path(layout).write_bytes(unknown)
+        row = task_rows(evidence(api_config, now))["Backup"]
+        assert (row["state"], row["code"]) == ("missing", None), unknown
+
+
+def run_failure(at: datetime, error: str = "stored_file_unreadable") -> dict[str, Any]:
+    """The ``run_failure`` a ``crl fetch`` that could not read a stored list writes into the
+    index as it read it: its ``at`` and a code, never the error's text."""
+    return {"at": isoformat_site(at, "seconds"), "error": error}
+
+
+def test_crlfetch_row_shows_a_run_that_stopped(api_config: Config) -> None:
+    """#171: an index with a ``run_failure`` (a stored list the run could not read) is a failed
+    task with the run's time, however old, until the next completed run writes the index without
+    one; per-URL failures of a completed run stay ``ok`` (R20-crl's, W5-E-2). A record later than
+    now or with an unknown code is no evidence, and the index's modification time is no completed
+    run then."""
+    now = utc_now().replace(microsecond=0)
+    layout = Layout(api_config.data_dir)
+    path = crl_index_path(layout)
+    data = b"test: a stored list, only hashed by the runs below (C14)"
+    sha256 = hashlib.sha256(data).hexdigest()
+    name = f"000000000000-20261001T000000Z-{sha256[:8]}.crl"
+    layout.crl_dir.mkdir(parents=True, exist_ok=True)
+    (layout.crl_dir / name).write_bytes(data)
+    fetched_at = now - timedelta(hours=30)
+    entry = {
+        "issuer": "CN=Örnek Test TSA Kök,O=Örnek A.Ş.,C=TR",
+        "issuer_sha256": "0" * 64,
+        "this_update": isoformat_site(fetched_at - timedelta(days=1), "seconds"),
+        "next_update": isoformat_site(fetched_at + timedelta(days=6), "seconds"),
+        "file": name,
+        "sha256": sha256,
+        "url": "http://192.0.2.10/ornek.crl",
+        "fetched_at": isoformat_site(fetched_at, "seconds"),
+    }
+    read = {"schema": CRL_INDEX_SCHEMA, "lists": [entry], "failures": []}
+    write_json(path, {**read, "run_failure": run_failure(now - timedelta(hours=2))})
+    touch(path, now - timedelta(hours=2))
+    row = task_rows(evidence(api_config, now))["CrlFetch"]
+    assert (row["state"], row["code"]) == ("failed", "stored_file_unreadable")
+    assert moment(row["last_evidence_at"]) == now - timedelta(hours=2)
+    row = task_rows(evidence(api_config, now + timedelta(days=3)))["CrlFetch"]
+    assert (row["state"], row["code"]) == ("failed", "stored_file_unreadable")  # not late
+    write_json(path, {**read, "run_failure": run_failure(now)})  # a run of this very second
+    row = task_rows(evidence(api_config, now))["CrlFetch"]
+    assert (row["state"], moment(row["last_evidence_at"])) == ("failed", now)
+
+    # Later than now, an unknown code, no time, no object: the lists' times only (30 h: late).
+    for record in (
+        run_failure(now + timedelta(hours=1)),
+        run_failure(now - timedelta(hours=2), "lock_held"),
+        {"error": "stored_file_unreadable"},
+        "stored_file_unreadable",
+    ):
+        write_json(path, {**read, "run_failure": record})
+        touch(path, now - timedelta(minutes=1))
+        row = task_rows(evidence(api_config, now))["CrlFetch"]
+        assert (row["state"], row["code"]) == ("late", None), record
+        assert moment(row["last_evidence_at"]) == fetched_at, record
+
+    # The next completed run rebuilds the index without the record: a URL it cannot reach is a
+    # recorded failure, and the row is ok again.
+    write_json(path, {**read, "run_failure": run_failure(now - timedelta(hours=2))})
+    with socket.create_server(("127.0.0.1", 0)) as listener:
+        closed = f"http://127.0.0.1:{listener.getsockname()[1]}/ornek.crl"
+    run = crl_fetch(CrlOptions(urls=(closed,), timeout_seconds=1), layout, [], now)
+    assert [failure.error for failure in run.failures] == ["unreachable"]
+    assert "run_failure" not in json.loads(path.read_bytes())
+    row = task_rows(evidence(api_config, now))["CrlFetch"]
+    assert (row["state"], row["code"], moment(row["last_evidence_at"])) == ("ok", None, now)
+    # So does a run that knows no list address.
+    write_json(path, {**read, "run_failure": run_failure(now - timedelta(hours=2))})
+    crl_fetch(CrlOptions(), layout, [], now)
+    assert json.loads(path.read_bytes()) == read
+    row = task_rows(evidence(api_config, now + timedelta(minutes=1)))["CrlFetch"]
+    assert (row["state"], row["code"]) == ("ok", None)
+
+
+def test_crlfetch_index_rewritten_while_it_is_read_is_no_completed_run(
+    api_config: Config, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The row reads the index twice (``crl fetch``'s reader, then W5-C's for the times): a run
+    that stops on a stored list and writes its ``run_failure`` in between is no completed run,
+    so the index's modification time does not count for that request."""
+    now = utc_now().replace(microsecond=0)
+    layout = Layout(api_config.data_dir)
+    path = crl_index_path(layout)
+    fetched_at = now - timedelta(hours=30)
+    entry = {
+        "issuer": "CN=Örnek Test TSA Kök,O=Örnek A.Ş.,C=TR",
+        "issuer_sha256": "0" * 64,
+        "this_update": isoformat_site(fetched_at - timedelta(days=1), "seconds"),
+        "next_update": isoformat_site(fetched_at + timedelta(days=6), "seconds"),
+        "file": "000000000000-20261001T000000Z-00000000.crl",
+        "sha256": "0" * 64,
+        "url": "http://192.0.2.10/ornek.crl",
+        "fetched_at": isoformat_site(fetched_at, "seconds"),
+    }
+    read = {"schema": CRL_INDEX_SCHEMA, "lists": [entry], "failures": []}
+    write_json(path, read)
+    touch(path, now - timedelta(hours=1))
+    row = task_rows(evidence(api_config, now))["CrlFetch"]
+    assert (row["state"], moment(row["last_evidence_at"])) == ("ok", now - timedelta(hours=1))
+    real = read_crl_index
+
+    def stopped_meanwhile(layout: Layout) -> CrlIndexState:
+        write_json(path, {**read, "run_failure": run_failure(now - timedelta(minutes=1))})
+        touch(path, now - timedelta(minutes=1))
+        return real(layout)
+
+    monkeypatch.setattr(tasks_module, "read_crl_index", stopped_meanwhile)
+    row = task_rows(evidence(api_config, now))["CrlFetch"]
+    assert (row["state"], moment(row["last_evidence_at"])) == ("late", fetched_at)
+
+
+def test_crlfetch_index_arciapi_cannot_read_is_missing(
+    api_config: Config, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An index ArciApi cannot read (its rights, an OSError) is no evidence: ``missing``, not a
+    failed task, since it says nothing of what ``crl fetch`` read."""
+    now = utc_now().replace(microsecond=0)
+    layout = Layout(api_config.data_dir)
+    path = crl_index_path(layout)
+    write_json(path, {"schema": CRL_INDEX_SCHEMA, "lists": [], "failures": []})
+    read_bytes = Path.read_bytes
+
+    def refused(self: Path) -> bytes:
+        if self == path:
+            raise PermissionError(13, "Permission denied", str(self))
+        return read_bytes(self)
+
+    monkeypatch.setattr(Path, "read_bytes", refused)
+    row = task_rows(evidence(api_config, now))["CrlFetch"]
+    assert (row["state"], row["code"], row["last_evidence_at"]) == ("missing", None, None)
+
+
+def test_failed_rows_name_no_error_text(
+    client: TestClient, login_as: Login, layout: Layout
+) -> None:
+    """KVKK: a failed row carries a code and a time only. The error text of ``last.json`` (it
+    can hold the database server and role), the ``error`` of Renew's last run and the list
+    addresses of the index never reach the answer."""
+    now = utc_now().replace(microsecond=0)
+    backup_attempt(
+        layout,
+        now - timedelta(hours=1),
+        ok=False,
+        error='connection to server at "192.0.2.10", port 5432 failed: '
+        'FATAL: password authentication failed for user "ornek"',
+    )
+    last_run = LastRun(
+        at=now - timedelta(hours=1),
+        outcome="failed",
+        exit_code=3,
+        error="test: http://192.0.2.10/tsa unreachable as ornek",
+    )
+    write_renewal_state(layout, None, at=now, renew_before=180, last_run=last_run)
+    entry = {
+        "issuer": "CN=Örnek Test TSA Kök,O=Örnek A.Ş.,C=TR",
+        "issuer_sha256": "0" * 64,
+        "this_update": isoformat_site(now - timedelta(days=1), "seconds"),
+        "next_update": isoformat_site(now + timedelta(days=6), "seconds"),
+        "file": "000000000000-20261001T000000Z-00000000.crl",
+        "sha256": "0" * 64,
+        "url": "http://198.51.100.7/ornek-kok.crl",
+        "fetched_at": isoformat_site(now - timedelta(hours=30), "seconds"),
+    }
+    failure = {"url": "http://203.0.113.5/ornek-ara.crl", "at": entry["fetched_at"]}
+    write_json(
+        crl_index_path(layout),
+        {
+            "schema": CRL_INDEX_SCHEMA,
+            "lists": [entry],
+            "failures": [{**failure, "error": "unreachable"}],
+            "run_failure": run_failure(now - timedelta(minutes=30)),
+        },
+    )
+    login_as(client, "admin")
+    response = client.get(API)
+    assert response.status_code == 200, response.text
+    tasks = by(response.json()["tasks"], "task")
+    assert (tasks["Backup"]["state"], tasks["Backup"]["code"]) == ("failed", "backup_failed")
+    assert (tasks["CrlFetch"]["state"], tasks["CrlFetch"]["code"]) == (
+        "failed",
+        "stored_file_unreadable",
+    )
+    assert (tasks["Renew"]["state"], tasks["Renew"]["code"]) == ("failed", "renew_failed")
+    for secret in ("192.0.2.10", "ornek", "198.51.100.7", "203.0.113.5", "password", "5432"):
+        assert secret not in response.text, secret
+
+
+def test_run_failure_leaves_the_alerts_as_they_are(
+    api_config: Config, app_session_factory: sessionmaker[Session], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The index's ``run_failure`` is the Sistem row's only: R20-crl reads the same lists and
+    failures with or without it (its title and details unchanged), and R20-backup still judges
+    a failed attempt by ``last.json`` as before, with its own texts."""
+    now = utc_now().replace(microsecond=0)
+    layout = Layout(api_config.data_dir)
+    # test: an issuer in use, whose only list is older than tsa.crl_max_age_days
+    monkeypatch.setattr(alerts_system, "issuers_in_use", lambda stamp: frozenset({"0" * 64}))
+    fetched_at = now - timedelta(days=9)
+    entry = {
+        "issuer": "CN=Örnek Test TSA Kök,O=Örnek A.Ş.,C=TR",
+        "issuer_sha256": "0" * 64,
+        "this_update": isoformat_site(fetched_at - timedelta(days=1), "seconds"),
+        "next_update": isoformat_site(fetched_at + timedelta(days=6), "seconds"),
+        "file": "000000000000-20261001T000000Z-00000000.crl",
+        "sha256": "0" * 64,
+        "url": "http://192.0.2.10/ornek.crl",
+        "fetched_at": isoformat_site(fetched_at, "seconds"),
+    }
+    failure = {
+        "url": "http://192.0.2.10/ornek.crl",
+        "at": isoformat_site(now),
+        "error": "unreachable",
+    }
+    read = {"schema": CRL_INDEX_SCHEMA, "lists": [entry], "failures": [failure]}
+    backup_attempt(layout, now - timedelta(hours=1), ok=False, error="test: disk full")
+    with app_session_factory() as session:
+        context = CheckContext(
+            session=session, layout=layout, config=api_config, now=now, settings={}
+        )
+        found = []
+        for document in (read, {**read, "run_failure": run_failure(now - timedelta(hours=1))}):
+            write_json(crl_index_path(layout), document)
+            found.append((check_stamp_crl(context).findings, check_backup(context).findings))
+    assert found[0] == found[1]
+    crl_findings, backup_findings = found[0]
+    assert [(item.rule, item.details["failures"]) for item in crl_findings] == [("R20-crl", 1)]
+    assert [(item.details["case"], item.title) for item in backup_findings] == [
+        ("failed", "Veritabanı yedeği başarısız: test: disk full")
+    ]
 
 
 @pytest.fixture
@@ -810,3 +1467,11 @@ def test_checked_at_is_site_time(client: TestClient, login_as: Login) -> None:
     assert checked is not None
     assert checked.utcoffset() == timedelta(hours=3)
     assert abs(checked - datetime.now(UTC)) < timedelta(minutes=1)
+
+
+def test_the_failure_codes_are_the_ones_the_tasks_write() -> None:
+    """A code ``crl fetch`` records that the row does not know would be ignored, and an outcome
+    of ``renew`` the row does not know would show its run as ``ok`` (#171)."""
+    assert set(CRL_RUN_FAILURES) == set(get_args(RunFailureCode))
+    assert set(RENEW_FAILURES) == FAILED_OUTCOMES  # the outcomes R20-renewal counts
+    assert set(CRL_RUN_FAILURES) | set(RENEW_FAILURES.values()) <= set(get_args(TaskFailure))

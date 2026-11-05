@@ -11,12 +11,17 @@ which asks the provider with the stored Kamu SM credentials and appends the answ
 ``state/credit.jsonl`` as the daily run does. At most one query a minute (429
 ``admin_rate_limited``); answer 202 with the request to follow, whose result is ``{credits,
 threshold, below_threshold}``.
+
+``supported`` is false for a provider without a credit query (Wave 5 contract 2.4, C3, C21:
+``rfc3161`` and ``turktrust``), or when the newest check of the configured provider says so
+(``{"supported": false}``, written by the Credit task). The web app then shows the neutral text of
+2.6 instead of a number; it never tests the provider name.
 """
 
 from __future__ import annotations
 
 from datetime import datetime, timedelta
-from typing import Annotated, Final
+from typing import Annotated, Any, Final
 
 from fastapi import APIRouter, Depends, Request, status
 from pydantic import BaseModel
@@ -32,6 +37,9 @@ ReaderDep = Annotated[CurrentUser, Depends(require("seal.read"))]
 ManagerDep = Annotated[CurrentUser, Depends(require("seal.manage"))]
 #: "Kontör sorgula" at most this often (contract 2.5.1).
 QUERY_EVERY: Final = timedelta(minutes=1)
+#: Providers without a credit query (Wave 5 contract 2.4, D12, C21): ``Rfc3161Client.credits()``
+#: returns ``None``, TÜRKTRUST offers none. ``zamane`` and ``mock`` (simulated balance) have one.
+NO_CREDIT_PROVIDERS: Final[frozenset[str]] = frozenset({"rfc3161", "turktrust"})
 
 
 class CreditCheck(BaseModel):
@@ -45,6 +53,8 @@ class CreditCheck(BaseModel):
 class Credits(BaseModel):
     provider: str
     legal_grade: bool
+    #: ``false``: the provider offers no credit query (``remaining`` stays ``null``).
+    supported: bool
     threshold: int
     latest: CreditCheck | None
     #: The last known number (the newest check that returned one).
@@ -52,6 +62,17 @@ class Credits(BaseModel):
     below_threshold: bool
     history: list[CreditCheck]
     unreadable_lines: int
+
+
+def credit_supported(provider: str, entries: list[dict[str, Any]]) -> bool:
+    """Whether the provider has a credit query: not one of :data:`NO_CREDIT_PROVIDERS`, and the
+    newest check, when it was of this provider, did not record ``"supported": false``."""
+    if provider in NO_CREDIT_PROVIDERS:
+        return False
+    newest = entries[-1] if entries else None
+    if newest is None or newest["provider"] not in (None, provider):
+        return True
+    return newest["supported"] is not False
 
 
 @router.get("")
@@ -65,6 +86,7 @@ def credits(user: ReaderDep, layout: LayoutDep, config: ConfigDep) -> Credits:
     return Credits(
         provider=config.tsa.provider,
         legal_grade=config.tsa.legal_grade,
+        supported=credit_supported(str(config.tsa.provider), entries),
         threshold=threshold,
         latest=history[-1] if history else None,
         remaining=remaining,

@@ -22,6 +22,7 @@ const EXPLANATION_TONE: Record<string, AlertTone> = {
   only_in_vault: 'warning',
   not_in_database: 'warning',
   older_than_db_retention: 'warning',
+  lookback_clamped_to_window: 'warning',
   no_data_for_day: 'warning',
   lease_timeline_behind: 'warning',
   future_time: 'warning',
@@ -61,6 +62,7 @@ const EXPLANATION_TONE: Record<string, AlertTone> = {
   egress_public_dynamic: 'warning',
   egress_internal: 'warning',
   source_clock_offset: 'warning',
+  source_clock_shared: 'warning',
 };
 
 /**

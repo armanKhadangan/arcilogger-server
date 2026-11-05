@@ -20,15 +20,14 @@ from sqlalchemy import Engine, event, inspect, text
 from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.pool import NullPool
 
-from arcilogger_core.timeutil import site_day
 from arcilogger_db.engine import engine_from_url
 from arcilogger_db.migrate import alembic_config, current_revisions, upgrade
 from arcilogger_db.models import TIME_SERIES_TABLES, Base
 from arcilogger_db.partitions import (
+    day_partition_name,
+    ensure_partitions,
     include_name,
     list_partitions,
-    month_of,
-    partition_name,
     partitioned_tables,
 )
 from arcilogger_db.testing import TestServer, pause_compression_jobs
@@ -274,6 +273,7 @@ def _check_downgraded(engine: Engine, before: dict[str, tuple[Any, str]], traffi
     assert upgrade(engine, revision=REVISION).after == (REVISION,)  # and up again
     status = _scalar(engine, "SELECT value FROM settings WHERE key = 'db.timescale'")
     assert TABLE in status["hypertables"] + status["partitioned"]
+    upgrade(engine)  # the models are the head's (later revisions add their own tables)
     with engine.connect() as connection:
         context = MigrationContext.configure(
             connection, opts={"compare_type": True, "include_name": include_name}
@@ -307,18 +307,23 @@ def test_up_and_down_on_native_partitions(empty_engine: Engine) -> None:
     _check_upgraded(empty_engine, "partitioned")
     status = _scalar(empty_engine, "SELECT value FROM settings WHERE key = 'db.timescale'")
     assert status["hypertables"] == []
+    for _ in range(5):  # the rest of the database window, as the worker's next runs make it
+        with empty_engine.begin() as connection:
+            if ensure_partitions(connection).remaining == 0:
+                break
     with empty_engine.connect() as connection:
         assert partitioned_tables(connection) == list(TIME_SERIES_TABLES)
         partitions = list_partitions(connection, TABLE)
         reference = list_partitions(connection, "mt_dhcp")
     assert partitions[-1].is_default
     assert partitions[-1].name == "fg_dhcp_default"
-    months = [partition.month for partition in partitions if partition.month is not None]
-    assert months == [partition.month for partition in reference if partition.month is not None]
+    spans = [(partition.start, partition.end) for partition in partitions if partition.named]
+    assert spans == [(partition.start, partition.end) for partition in reference if partition.named]
     assert _scalar(empty_engine, "SELECT count(*) FROM fg_traffic WHERE srcmac IS NULL") == 2
     _check_rules(empty_engine, at)
     holder = _scalar(empty_engine, "SELECT CAST(CAST(tableoid AS regclass) AS text) FROM fg_dhcp")
-    assert holder == partition_name(TABLE, month_of(site_day(at)))  # not the default partition
+    # Not the default partition: the daily partition of its UTC day.
+    assert holder == day_partition_name(TABLE, at.astimezone(UTC).date())
     _check_downgraded(empty_engine, before, traffic=2)
 
 

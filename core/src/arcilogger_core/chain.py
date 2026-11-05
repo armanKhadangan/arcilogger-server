@@ -6,6 +6,11 @@ uncompressed hash and line count), and ``previous`` matches the hashes of the pr
 manifest and token — or the chain anchor left by the retention job. The previous day is the day
 before, or — when the manifest lists a run of empty days that were not stamped one by one
 (``unsealed_empty_days`` in its ``gaps``) — the day before that run.
+
+The token is also checked against the stored revocation lists (``state/crl``, Wave 5 D10): a
+certificate of its chain revoked at or before the stamp time fails the day, which is then not
+legal grade either (C15); one revoked after it, or on hold, is a warning. A stored list that no
+longer matches its index entry is a warning on every day (C14).
 """
 
 from __future__ import annotations
@@ -14,15 +19,29 @@ import json
 from collections.abc import Collection, Sequence
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from cryptography import x509
 
 from arcilogger_core.canonical import is_canonical
+from arcilogger_core.crl import Crl, CrlError, StoredLists, load_stored
 from arcilogger_core.immutability import is_locked
 from arcilogger_core.layout import Layout
 from arcilogger_core.seal import gunzip_sha256, sha256_file, unsealed_days
-from arcilogger_core.tsa.verify import confirmed_legal_grade, is_test_stamp, verify_token
+from arcilogger_core.sealedfile import SealedFileError
+from arcilogger_core.timeutil import isoformat_site
+from arcilogger_core.tsa.verify import (
+    CRL_LEVELS,
+    Revocation,
+    check_revocation,
+    confirmed_legal_grade,
+    is_test_stamp,
+    token_chain,
+    verify_token,
+)
+
+if TYPE_CHECKING:
+    from arcilogger_core.renewal import DayRenewal
 
 
 @dataclass
@@ -37,11 +56,15 @@ class DayCheck:
     root_sha256: str | None = None
     #: The manifest says the day was stamped by the Kamu SM production server …
     legal_grade_claimed: bool = False
-    #: … and the verified chain ends at a root of ``tsa.legal_root_fingerprints``.
+    #: … the verified chain ends at a root of ``tsa.legal_root_fingerprints`` and no
+    #: certificate of it was revoked at or before the stamp (C15).
     legal_grade: bool = False
     #: Empty days this day's manifest stands for (not stamped one by one, see
     #: ``seal.max_consecutive_empty_days``).
     skipped: list[date] = field(default_factory=list)
+    #: The long-term status of the day's stamp (``renewals=True`` only, Wave 5 §2.1.4); never
+    #: an error or a warning (D6).
+    renewal: DayRenewal | None = None
 
     @property
     def ok(self) -> bool:
@@ -61,6 +84,8 @@ class DayCheck:
         }
         if self.skipped:
             result["skipped"] = [day.isoformat() for day in self.skipped]
+        if self.renewal is not None:
+            result["renewal"] = self.renewal.as_json()
         return result
 
 
@@ -90,6 +115,32 @@ def _link_target(layout: Layout, previous_day: date) -> dict[str, str] | None:
     return None
 
 
+def _revocation(check: DayCheck, findings: Sequence[Revocation]) -> None:
+    """The revocation findings of the token's chain (each certificate's, as the standalone
+    verifier lists them) as errors or warnings; the information codes (``crl-none``,
+    ``crl-stale``, ``crl-ok``) add nothing. ``crl-revoked`` is the ``certificate_revoked`` text of
+    the Wave 5 contract (§2.6); like every text here it is English, and the API gives the
+    Turkish one."""
+    for finding in findings:
+        name = finding.subject
+        when = isoformat_site(finding.at, "seconds") if finding.at is not None else ""
+        if finding.code == "crl-revoked":
+            check.errors.append(
+                f"A time-stamp certificate is on a revocation list: {name}. Contact the provider; "
+                "legal review is recommended."
+            )
+        elif finding.code == "crl-revoked-later":
+            check.warnings.append(
+                f"a certificate of the time stamp's chain was revoked after the stamp, on {when}: "
+                f"{name}; the reason for the revocation should be reviewed"
+            )
+        elif finding.code == "crl-hold":
+            check.warnings.append(
+                f"a certificate of the time stamp's chain is on hold on a revocation list since "
+                f"{when}: {name}; check whether the hold covers the stamp time"
+            )
+
+
 def verify_day(
     layout: Layout,
     day: date,
@@ -99,15 +150,35 @@ def verify_day(
     first_day: date | None = None,
     legal_roots: Collection[str] = (),
     now: datetime | None = None,
+    crls: Sequence[Crl] | None = None,
+    renewals: bool = False,
+    renew_before_days: int = 180,
 ) -> DayCheck:
     """Verify one sealed day (see the module docstring).
 
     ``legal_roots`` (``tsa.legal_root_fingerprints``) decides ``legal_grade``: the manifest's
     own claim counts only when the verified token chains to one of those roots. A claim that
     the verified chain contradicts (a test TSA's root or policy) is an error. ``now`` is the
-    time a token's genTime may not be after (default: the system clock).
+    time a token's genTime may not be after (default: the system clock). ``crls``: the stored
+    revocation lists (:func:`arcilogger_core.crl.load_stored`), read from ``state/crl`` when
+    None. A day whose chain is revoked at or before its stamp is not legal grade (C15).
+    ``renewals``: also give the long-term status of a verified token in ``renewal``
+    (:func:`arcilogger_core.renewal.day_renewal`, Wave 5 §2.1.4; each renewal token is judged
+    by its own record's EKU rule, as this day's by its manifest's), with ``renew_before_days``
+    as its window: this function reads no configuration, so a caller that has one passes the
+    site's ``tsa.renew_before_days`` (``renewal.renew_before_days``); the default is §2.5's
+    (``renewal.DEFAULT_RENEW_BEFORE_DAYS``, which this module cannot import).
     """
     check = DayCheck(day)
+    if crls is None:
+        try:
+            crls = load_stored(layout)
+        except CrlError as exc:
+            check.warnings.append(f"revocation not checked: {exc}")
+    if isinstance(crls, StoredLists):
+        check.warnings += [
+            f"revocation list {name} does not match its index entry" for name in crls.mismatched
+        ]
     manifest_path, token_path = layout.manifest(day), layout.token(day)
     if not manifest_path.exists():
         check.errors.append("manifest missing")
@@ -129,16 +200,22 @@ def verify_day(
     if not token_path.exists():
         check.errors.append("time-stamp token missing")
     else:
+        token = token_path.read_bytes()
         result = verify_token(
-            token_path.read_bytes(),
+            token,
             roots=roots,
             file_path=manifest_path,
             now=now,
             # The rule the site sealed into the manifest (tsa.require_critical_eku, K6).
             require_critical_eku=tsa.get("require_critical_eku") is not False,
+            crls=crls,
         )
         check.errors += [f"token: {error}" for error in result.errors]
         check.warnings += [f"token: {warning}" for warning in result.warnings]
+        if crls is not None and result.info is not None and _to_report(result.details):
+            # The result names the most severe finding; the chain's other ones are listed too.
+            chain = token_chain(token, roots)
+            _revocation(check, check_revocation(chain, crls, result.info.gen_time))
         if result.info is not None:
             check.serial = result.info.serial
             check.gen_time = result.info.gen_time.isoformat()
@@ -150,11 +227,24 @@ def verify_day(
                 check.errors.append(
                     "legal-grade claim, but the stamp is from the test TSA (mock root/policy)"
                 )
-            elif legal_roots and not check.legal_grade:
+            elif legal_roots and (check.root_sha256 or "") not in set(legal_roots):
                 check.warnings.append(
                     "legal-grade claim not confirmed: the root is not in "
                     "tsa.legal_root_fingerprints"
                 )
+        if renewals and result.ok:
+            # arcilogger_core.renewal imports this module, so it is looked up here.
+            from arcilogger_core.renewal import day_renewal
+
+            check.renewal = day_renewal(
+                layout,
+                day,
+                roots,
+                legal_roots=legal_roots,
+                now=now,
+                crls=crls,
+                renew_before_days=renew_before_days,
+            )
 
     entries = [*manifest.get("files", []), manifest.get("audit_log") or {}]
     for entry in entries:
@@ -167,9 +257,13 @@ def verify_day(
         if sha256_file(path) != entry["sha256"]:
             check.errors.append(f"{entry['path']}: SHA-256 mismatch (file changed)")
         elif deep and "sha256_uncompressed" in entry:
-            digest, lines = gunzip_sha256(path)
-            if digest != entry["sha256_uncompressed"] or lines != entry["lines"]:
-                check.errors.append(f"{entry['path']}: content differs from the manifest")
+            try:
+                digest, lines = gunzip_sha256(path)
+            except SealedFileError as exc:
+                check.errors.append(f"{entry['path']}: cannot be decompressed ({exc})")
+            else:
+                if digest != entry["sha256_uncompressed"] or lines != entry["lines"]:
+                    check.errors.append(f"{entry['path']}: content differs from the manifest")
         if not is_locked(path):
             check.warnings.append(f"{entry['path']}: not read-only")
 
@@ -206,6 +300,12 @@ def verify_day(
     return check
 
 
+def _to_report(details: dict[str, str]) -> bool:
+    """Whether the token's revocation result is a failure or a warning."""
+    level = CRL_LEVELS.get(details.get("crl") or "")
+    return level in ("fail", "warn")
+
+
 def verify_range(
     layout: Layout,
     days: Sequence[date],
@@ -216,6 +316,10 @@ def verify_range(
     now: datetime | None = None,
 ) -> list[DayCheck]:
     """Verify ``days`` and that no day between the first and last one is missing."""
+    try:
+        crls: Sequence[Crl] | None = load_stored(layout)
+    except CrlError:
+        crls = None  # each day reports it
     all_sealed = sealed_days(layout)
     first_day = all_sealed[0] if all_sealed else None
     if layout.chain_anchor.exists():
@@ -229,6 +333,7 @@ def verify_range(
             first_day=first_day,
             legal_roots=legal_roots,
             now=now,
+            crls=crls,
         )
         for day in days
     ]

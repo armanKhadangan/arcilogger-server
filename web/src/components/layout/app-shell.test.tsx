@@ -5,6 +5,8 @@ import { setLanguage } from '@/lib/i18n';
 import { BUILT_PAGES, NAV_ITEMS } from '@/nav';
 import { errorResponse, installFetch, jsonResponse, makeMe } from '@/test/api-mock';
 import { renderApp } from '@/test/render';
+import { licenseSample } from '@/test/samples';
+import { LEGAL_PROVIDER_NOT_LEGAL } from '@/test/w5-fixtures';
 
 function signedInAs(role: Role) {
   return installFetch((request) =>
@@ -78,11 +80,13 @@ describe('AppShell', () => {
     ['/sources', 'Kaynaklar'],
     ['/live', 'Canlı Akış'],
     ['/search', 'Arama'],
-  ])('opens %s as a page of its own, not a placeholder', async (path, heading) => {
+    // Wave 4: every data request answers 404 here, so the pages show their heading and the error.
+    ['/compliance', 'Uyum Durumu'],
+    ['/system', 'Sistem'],
+  ])('opens %s as a page of its own', async (path, heading) => {
     signedInAs('admin');
     renderApp(path);
     expect(await screen.findByRole('heading', { level: 1, name: heading })).toBeInTheDocument();
-    expect(screen.queryByText('Bu sayfa sonraki bir sürümde eklenecek.')).not.toBeInTheDocument();
   });
 
   it.each(['/', '/sources', '/live', '/audit', '/lookup', '/evidence', '/sealing'])(
@@ -112,16 +116,6 @@ describe('AppShell', () => {
     ).toBeInTheDocument();
   });
 
-  it('renders a placeholder without a milestone code for future pages', async () => {
-    signedInAs('admin');
-    renderApp('/compliance');
-    expect(
-      await screen.findByRole('heading', { level: 1, name: 'Uyum Durumu' }),
-    ).toBeInTheDocument();
-    expect(screen.getByText('Bu sayfa sonraki bir sürümde eklenecek.')).toBeInTheDocument();
-    expect(screen.queryByText(/\bM\d\b/)).not.toBeInTheDocument();
-  });
-
   it('switches the interface to English', async () => {
     window.localStorage.setItem('arci.sidebar.collapsed', '0');
     signedInAs('admin');
@@ -149,5 +143,23 @@ describe('AppShell', () => {
     renderApp('/');
     const trigger = await screen.findByRole('button', { name: 'Kullanıcı menüsü: Tolga Yılmaz' });
     expect(within(trigger).getByText('TY')).toBeInTheDocument();
+  });
+
+  it('puts the legal-validity banner under the licence banners, above the page (Wave 5 2.3.2)', async () => {
+    installFetch((request) => {
+      if (request.path === '/api/v1/auth/me') return jsonResponse(200, makeMe('admin'));
+      if (request.path === '/api/v1/license') return jsonResponse(200, licenseSample('trial'));
+      if (request.path === '/api/v1/legal-status')
+        return jsonResponse(200, LEGAL_PROVIDER_NOT_LEGAL);
+      return errorResponse(404, 'not_found');
+    });
+    renderApp('/usage');
+    const legal = await screen.findByTestId('legal-banner');
+    const license = await screen.findByTestId('license-banners');
+    const heading = await screen.findByRole('heading', { level: 1 });
+    const main = document.getElementById('content');
+    expect(main).toContainElement(legal);
+    expect(license.nextElementSibling).toBe(legal);
+    expect(legal.compareDocumentPosition(heading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 });

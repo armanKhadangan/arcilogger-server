@@ -46,11 +46,12 @@ Fiyatlar üründe yer almaz.
 **Kullanım modüllerinin veri ön koşulu:** Kullanım analizi ve Zamanlanmış kullanım raporları
 yalnızca FortiGate kayıtlarından hesaplanır: trafik kayıtları (uzun oturumlar için ara kayıtlarla),
 web filtresi, DNS filtresi, uygulama kontrolü ve SSL denetimi kayıtları. Yalnızca özel kaynak
-adreslerinden (RFC 1918 blokları ve IPv6 ULA) gelen trafik sayılır: iç ağda başka aralıklar
-(ör. 100.64.0.0/10 ya da içeride kullanılan genel adresler) kullanılıyorsa o trafik analiz edilmez.
-Trafik cihaza ve kişiye MikroTik DHCP sunucusunun kira kayıtlarıyla (ve `ARP-LOG` ile) bağlanır;
-kira kaydı olmayan trafik IP adresine göre sayılır. Başka üreticilerin kayıtları saklanır ve
-mühürlenir ama analiz edilmez. Lisans almadan önce ağınızın bu yapıya uyduğunu
+adreslerinden (RFC 1918 blokları ve IPv6 ULA) gelen trafik sayılır: iç ağda başka aralıklar (ör.
+100.64.0.0/10 ya da içeride kullanılan genel adresler) kullanılıyorsa o trafik analiz edilmez.
+Trafik cihaza ve kişiye DHCP sunucusunun (MikroTik ya da FortiGate) kira kayıtlarıyla (ve `ARP-LOG`
+ile) bağlanır; kira kaydı olmayan trafik IP adresine göre sayılır. FortiGate oturum kayıtlarının
+srcmac alanı (aygıt tanıma) kullanım analizinde kullanılmaz. Başka üreticilerin kayıtları saklanır
+ve mühürlenir ama analiz edilmez. Lisans almadan önce ağınızın bu yapıya uyduğunu
 [KURULUM.md](KURULUM.md) bölüm 0.1 ile denetleyin; deneme süresi (bölüm 3) sonucu kendi ağınızda
 görmek için de kullanılabilir.
 
@@ -109,6 +110,10 @@ vermez.
 | `/license` | Lisans durumu, lisans dosyası yükleme ve kaldırma | 5651 Temel |
 | `/admin` | Ayarlar: sunucu yapılandırması, yönetim hizmetinin durumu, değişiklik istekleri ve geçmişi | 5651 Temel |
 | `/settings` | Uygulama ayarları (veritabanı ayarları) | 5651 Temel |
+| `/compliance` | Uyum Durumu: on denetim kartı, Uyum Durumu Raporu (PDF), yapılandırma yedeği onayı | 5651 Temel |
+| `/legal-status` | Yasal geçerlilik durumu: her sayfadaki uyarı bandı (oturum açmış her kullanıcı) | 5651 Temel |
+| `/system` | Sistem sayfası: kaynak kullanımı, disk tahmini, veritabanı boyutu, hizmetler, zamanlanmış görevler, saat | 5651 Temel |
+| `/archive-reloads` | Arşivden yeniden yükleme: veritabanı penceresinden eski günlerin mühürlü kasadan geri istenmesi ve ilerlemesi | 5651 Temel |
 | `/usage` | Kullanım sayfasının verileri, dışa aktarma, yeniden hesaplama | Kullanım analizi |
 | `/reports` | Zamanlanmış raporlar, çalıştırmalar, önizleme | Zamanlanmış kullanım raporları |
 | `/imports` | CSV içe aktarma ve şablonları | Toplu içe aktarma (CSV) |
@@ -139,8 +144,10 @@ uyarısı açmaz. Kapalı modülün verileri silinmez.
 | `usage.today` | Kullanım analizi | atlanır |
 | `usage.reattribute` | Kullanım analizi | atlanır |
 | `usage.retention` | — (kişisel verilerin silinmesi) | her zaman çalışır |
+| `db.window` | 5651 Temel (veritabanı penceresi: pencereden eski log satırlarının düşürülmesi) | her zaman çalışır |
 | `reports.run_due` | Zamanlanmış kullanım raporları | atlanır |
 | `reports.purge` | — (rapor dosyalarının silinmesi) | her zaman çalışır |
+| `system.sample` | 5651 Temel | her zaman çalışır |
 | `search.counts_backfill` | 5651 Temel | her zaman çalışır |
 
 Komut satırında yalnızca `arcilogger-worker usage rebuild` Kullanım analizi kapalıyken reddedilir

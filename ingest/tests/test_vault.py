@@ -4,13 +4,13 @@ where a day must *not* be marked finished."""
 from __future__ import annotations
 
 import json
-from datetime import date, timedelta
+from datetime import timedelta
 
 import pytest
 from sqlalchemy import Engine, text
 
 from arcilogger_core.immutability import unlock
-from arcilogger_db.partitions import ensure_partitions
+from arcilogger_db.partitions import RAW_DAY_MARGIN, ensure_partitions
 from arcilogger_ingest.service import IngestService
 from arcilogger_ingest.status import read_status
 from arcilogger_ingest.testing import (
@@ -149,32 +149,43 @@ def test_more_bytes_loaded_than_sealed_is_never_finished(world: World, db_engine
     assert offsets(db_engine)[("fortigate", DAY)][2] is False
 
 
-def test_a_vault_day_months_old_lands_in_its_monthly_partition(
+def test_after_a_database_loss_only_the_window_is_loaded_again(
     world: World, db_engine: Engine
 ) -> None:
-    """After a database loss ingest re-loads every sealed day of db.retention_days from the
-    vault; the partitions cover that same window, so nothing lands in the default partition
-    (which every later monthly partition would have to scan under an exclusive lock)."""
-    old = DAY - timedelta(days=153)  # 2026-04-23
-    with db_engine.begin() as connection:
-        report = ensure_partitions(connection, today=DAY)  # what upgrade and the worker do
-    if not report.tables:
-        pytest.skip("TimescaleDB hypertables: no monthly partitions")
-    world.append("core-r1", old, (dhcp_message(i) for i in range(6)))
-    world.append("fortigate", old, (fortigate_message(i) for i in range(4)))
-    world.seal(old)
-    world.set_today(DAY)
-    assert run_once(world, db_engine).counters.lines == 10
-    assert offsets(db_engine)[("core-r1", old)][1:] == (6, True)
+    """After a database loss ingest re-loads the sealed days of the window (``db.retention_days``,
+    30: today - 30 is its oldest day) and the two raw days before it, whose rows reach into the
+    window's first day (``RAW_DAY_MARGIN``), from the vault, and nothing older: those come back
+    only on request (archive reload). Their daily partitions are made first, so nothing lands in
+    the default partition (which every later partition would have to scan under an exclusive
+    lock)."""
+    today = DAY + timedelta(days=30 + RAW_DAY_MARGIN)  # DAY - 1 is one raw day too old
+    for day in (DAY - timedelta(days=1), DAY):  # the chain: one day after the other
+        world.append("core-r1", day, (dhcp_message(i) for i in range(6)))
+        world.append("fortigate", day, (fortigate_message(i) for i in range(4)))
+        world.seal(day)
+    world.append("fortigate", today, (fortigate_message(i) for i in range(3)))
+    world.set_today(today)
+    with db_engine.begin() as connection:  # the new database's upgrade: today and ahead first
+        report = ensure_partitions(connection, today=today)
+    assert run_once(world, db_engine).counters.lines == 13
+    assert sorted(offsets(db_engine)) == [
+        ("core-r1", DAY),
+        ("fortigate", DAY),
+        ("fortigate", today),
+    ]
+    assert offsets(db_engine)[("core-r1", DAY)][1:] == (6, True)
+    assert {day for _, day, _, _ in loaded(db_engine)} == {DAY, today}
 
     def count(table: str) -> int:
         with db_engine.connect() as connection:
             query = text(f"SELECT count(*) FROM {table}")  # noqa: S608 - fixed table names
             return int(connection.execute(query).scalar_one())
 
+    if not report.tables:
+        pytest.skip("TimescaleDB hypertables: no partitions to create")
     for table in ("messages", "mt_dhcp", "fg_traffic"):
         assert count(f"{table}_default") == 0, table
-    assert count("messages_p202604") == 10
+    assert count(f"messages_p{DAY:%Y%m%d}") == 10
     with db_engine.begin() as connection:
-        later = ensure_partitions(connection, today=date(2026, 11, 2))
+        later = ensure_partitions(connection, today=today)
     assert later.moved == {}

@@ -1,6 +1,7 @@
 /**
  * The TypeScript API types (`api-types.ts`, `settings-types.ts`, `search-types.ts`,
- * `live-types.ts`, `sources-types.ts`) and the endpoints the app calls must match the API's
+ * `live-types.ts`, `sources-types.ts`, `compliance-types.ts`, `system-types.ts`,
+ * `system-health-types.ts`, `legal-status-types.ts`) and the endpoints the app calls must match the API's
  * OpenAPI document (`src/generated/api-schemas.json`, made by
  * `web/scripts/export_api_contract.py` from the FastAPI app). A renamed, retyped, newly required
  * or removed field — or a call to an endpoint that does not exist — fails here.
@@ -25,6 +26,11 @@ const TYPES_FILES = [
   'search-types.ts',
   'live-types.ts',
   'sources-types.ts',
+  'compliance-types.ts',
+  'system-types.ts',
+  'system-health-types.ts',
+  'archive-reload-types.ts',
+  'legal-status-types.ts',
 ].map((name) => join(SRC, 'lib', name));
 
 /**
@@ -58,6 +64,8 @@ const NOT_SCHEMAS = new Set([
   'SettingProblem',
   'SettingConflict',
   'SourceConfig',
+  // archive-reload-types.ts: the `details` of 409 `archive_reload_required`.
+  'ArchiveReloadRequired',
 ]);
 /** OpenAPI schemas the web app does not use. */
 const UNUSED_SCHEMAS = new Set(['HTTPValidationError', 'ValidationError', 'Health']);
@@ -127,8 +135,13 @@ function tsType(node: ts.TypeNode): string[] {
     if (name === 'DateTimeString') return ['string(date-time)'];
     if (name === 'Record') return ['object'];
     // `Partial<Record<…>>`: a map whose keys are a fixed list, not all of them present.
-    const [argument] = node.typeArguments ?? [];
+    const [argument, removed] = node.typeArguments ?? [];
     if (name === 'Partial' && argument && tsType(argument).join() === 'object') return ['object'];
+    // `Exclude<LegalLevel, 'ok'>`: the members of the first type that the second does not hold.
+    if (name === 'Exclude' && argument && removed) {
+      const gone = new Set(tsType(removed));
+      return tsType(argument).filter((atom) => !gone.has(atom));
+    }
     const narrowed = NARROWED[name];
     if (narrowed) return [narrowed];
     const alias = aliases.get(name);

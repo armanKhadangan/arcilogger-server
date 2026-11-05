@@ -173,6 +173,7 @@
       "label_tr": "Denetçi",
       "permissions": [
         "audit.read",
+        "compliance.read",
         "dashboard.usage",
         "dashboard.view",
         "evidence.download",

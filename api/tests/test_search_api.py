@@ -137,7 +137,9 @@ def test_a_search_answers_its_first_page_and_is_audited(
         "next_cursor",
         "scan",
         "notices",
+        "archived",
     }
+    assert page["archived"] is None  # the day is in the database window (Wave 5 G8)
     assert page["query"]["normalized"] == "srcip:172.20.41.105"
     assert page["plan"]["driver"] == "typed"
     assert page["plan"]["selective"] is True

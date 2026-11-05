@@ -6607,6 +6607,75 @@ report is summarised in `MVP-CONTRACTS.md` sections 6.1, 16, 17.8 and 18.9.
     and `busy` failed against the one-statement index order on TimescaleDB (the Merge Append above).
     Fold into 2.8.3 and 3.8.
 
+## Deviations — f2 (WP-F2, 2026-10-29)
+
+Each entry says what the contract says, what was written, and why. Test paths are under `tests/`.
+
+- **f2-1. The §13 catch-all exit is conditional** (2.15 KURULUM/INSTALL §13 paragraph, "genel
+  adresi olmayan hatlar için "Genel adresi tanımlanmamış hatlar" adlı bir çıkış eklenir,
+  `lookup.port_hint` o çıkışın port koruma değerine geçer"). The converter (2.8.2, the reference
+  code and `v0018_nat_egresses.py`) adds `tanimsiz` only when no `wan` exit is made and a public
+  address or `port_hint` is carried over, and gives `port_hint` to the `wan` exit when there is
+  one. The docs say so: "…, "FortiGate WAN adresi" çıkışı yapılmadıysa ve bir genel IP ya da
+  `lookup.port_hint` aktarıldıysa, "Genel adresi tanımlanmamış hatlar" adlı bir çıkış eklenir;
+  `lookup.port_hint` "FortiGate WAN adresi" çıkışının, o yoksa bu çıkışın port koruma değerine
+  geçer." (INSTALL the same in English). Fold into 2.15.
+- **f2-2. §13 carries the manager's rollback notes** (2.15 §13 text; rounds 5–7, manager's docs
+  items on #10). Beyond the 2.15 text the rollback paragraph says that the previous version
+  closes the FortiGate leases by its own settings ("varsayılanlarla kiranın son DHCP kaydından
+  yaklaşık 26 saat sonra") and deletes those that start on the rollback day or the day before in
+  its own rebuild, and those that start on the days it rebuilds for late records ("(ve geç gelen
+  kayıtlar için yeniden oluşturduğu günlerde başlayanları)" / "(and those that started on the days
+  it rebuilds for late records)", 2.2.1); to download the official reports before `-Rollback`; and
+  that the re-upgrade prints the days to rebuild. The srcmac sentence of item 2 is in §13 and CORRELATION §7. Fold
+  into 2.15.
+- **f2-3. Wording of the examples and labels.** The rebuild button is "Rebuild the leases" in
+  English, as in ALERTS.md and the web; the settings examples keep the existing `--by tolga` of
+  FIRST-STEPS instead of `--by <kullanıcı>`. Fold into 2.15.
+- **f2-4. CORRELATION §7 names the D8 probe window as max(longest window, 604,800 s)** (manager's
+  item 1 on #10, after "Deviations — c2"), and the clock limits apart: a fixed 120 s for the
+  `R20-lease:source-clock` alert (`alerts/system.py`), max(120 s, the lookup tolerance) for
+  lowering the chain of a source measured only for the session search (round-5 note "2.17 vs 2.7
+  clock limit"; DEVICE-SETUP 2.1 says the same). **§2.17 reads alike:** its clock bullet "unless the lookup tolerance is lower" becomes
+  "the limit is 120 s, or max(120 s, the lookup tolerance) for a source measured only for the
+  session search", and it gains the residual of the manager's item 3, as the manager corrected it in
+  the review of #52 (the first wording, "the safe side, never a wrong person", holds only for
+  changes that add evidence: stored leases are not checked again against today's settings, and the
+  automatic rebuilds cover only today, yesterday and the days rebuilt for late records): "**A
+  `dhcp.fortigate_*` setting (other than `dhcp.fortigate_format_verified`) or a FortiGate source
+  changed later** applies to past leases only after a rebuild from the first affected day. After a
+  change that adds evidence (a logid or `dhcp_msg` value mapped, a FortiGate source added), moments
+  before the rebuild answer without a chain until then (the safe side). After a change that removes
+  or narrows evidence (an interface added to `dhcp.fortigate_interfaces_excluded`,
+  `dhcp.fortigate_traffic_extends` or `dhcp.fortigate_use_logged_lease` switched off, a logid or
+  `dhcp_msg` value removed, a FortiGate source removed or retyped), the leases built under the old
+  settings stay, at their old confidence, until the rebuild, so a moment can still name the earlier
+  device: rebuild at once, from the first affected day." The same split is in AYARLAR / SETTINGS,
+  DEVICE-SETUP 2.4, ILK-ADIMLAR / FIRST-STEPS section 6 and CORRELATION sections 1 and
+  7. Fold into 2.17.
+- **f2-5. DEVICE-SETUP §2.** 2.1–2.3 keep the existing content under the titles "Syslog ve
+  saat", "Web ve DNS filtre profilleri", "Politikalar ve isteğe bağlı kayıtlar" (Turkish only, as
+  before); the English blocks of O11 are in the new 2.4–2.6. The rebuild statement of item 3 in
+  2.4 and in the `dhcp.fortigate_*` help leaves out `dhcp.fortigate_format_verified`, which
+  changes no lease. Fold into 2.15.
+- **f2-6. Placement.** The DENETCI-KILAVUZU reading table is a new section 10 "5651 raporunu
+  okumak (okuma tablosu)", in RAPOR's one-table bilingual shape (d-23) with the same two c2
+  cells; the English part points to it. KULLANIM/USAGE did not hold the literal "MikroTik DHCP
+  sunucusunun kiraları", so the source sentence is added where usage names the lease ("Kiralar
+  DHCP sunucusunun (MikroTik ya da FortiGate) kira kayıtlarından …"), with srcmac not used for
+  usage. Fold into 2.15.
+- **f2-7. The §3.7 end-to-end sites call the lookup engine directly** (3.7 "FortiGate-only site",
+  "dual-WAN site"). `test_mvp_end_to_end.py::test_fortigate_only_site` and
+  `::test_dual_wan_site` load the generator's lines through the shipped ingest, run the worker's
+  lease build, change settings with `settings_admin.change_setting` and answer with `run_lookup`
+  at a chosen `now` on fixed days (2026-10-13/14), as the API runs it (`lookup_now`: today's
+  settings, the data directory), not through HTTP: the HTTP route, the PDF and the evidence
+  package are already covered by the Wave 2 site in the same file (`test_mvp_end_to_end`), and a
+  chosen `now` keeps the half-lease and timeout checks independent of the wall clock.
+- **f2-8. The reading-table test matches whole labels** (3.9). An exit label counts only quoted
+  or in parentheses, so "NAT adresi" is not satisfied by "NAT adresi doğrulanamadı" or a
+  sentence. Test: `test_docs_consistency.py::test_reading_tables_cover_every_key_and_exit_label`.
+
 ## Deviations — e2 (WP-E part 2, 2026-10-29)
 
 - **d-27 in the web** (2.12; supersedes part 1's "Small additions" clause that a match shows its
@@ -6646,6 +6715,131 @@ report is summarised in `MVP-CONTRACTS.md` sections 6.1, 16, 17.8 and 18.9.
   `setting_egress_address`. The web mirror now decides IPv6 on the part before the first `/` as
   `ipaddress.ip_address` reads it. Tests: `db/tests/test_egress.py`,
   `web/src/pages/settings/egress-model.test.ts`. Nothing to fold.
+
+## Deviations — clock (2026-11)
+
+Issue #73 (Tayfun's step-4 walk on PR #61, the "clock 3 h back" section; the owner's decision of
+2026-11-01 makes it Wave 3's last required fix). A FortiGate that logged on time and then had its
+clock set 3 hours back was caught neither by the alert (for about as long as the jump itself)
+nor by a lookup at the real moment (no `source_clock_offset`, its chains `high`). Both readers
+selected or ranked rows **by device time**; the rows a jumped clock writes have device times
+hours away from their arrival, so neither sample held them. The offset is now measured by
+**receive time** as well, from a small table ingest fills.
+
+- **`source_clock_samples`** (new table; revision `0019_source_clock_samples`; D28, 1.2;
+  `db/clocksamples.py`). Key `(source, minute, seconds)`, column `n > 0`: per source, received
+  minute (UTC, `time_received` truncated) and device clock offset `time − time_received` in
+  whole seconds **rounded away from zero**, as 2.7 prints an offset (120.4 s is 121, so a row
+  beyond the 120-s limit is stored beyond it), **0 under 60 s either way** (no limit is that
+  small, so a source on time has one row a minute), the number of `messages` rows. A row whose
+  time is the receive time (no usable device time, or one beyond `max_clock_skew`) is not
+  counted, as before. A plain table on both storage modes (no partition, no hypertable: about
+  1,440 rows a day per source on time). Like `search_counts` it follows the log tables once
+  database retention runs: `partitions.drop_before` deletes its minutes before the first kept
+  month (`PartitionReport.clock_samples_deleted`; no job calls `drop_before` yet, DATA-MODEL).
+  The ingest loader adds a batch's samples in the `counts` step, the transaction of the rows, as
+  it adds `search_counts`; the exactly-once matrix of `test_exactly_once.py` checks them after
+  every interruption. `clocksamples.rebuild` counts a source's received range again from
+  `messages`. The upgrade counts the rows received in its last two hours (the same rule in SQL;
+  the services are stopped during an upgrade), so the first alert check after it reads the last
+  hour as before and an open `source-clock` is not resolved for want of samples; older lines
+  have no samples, and a lookup of such a moment is measured by device time alone, as before.
+  Alternatives considered: an index on `messages (source, time_received)` costs every row of the
+  largest table (and does not serve lookups weeks later on compressed TimescaleDB chunks); a BRIN
+  index on `time_received` does not order by source. Tests: `db/tests/test_clocksamples.py`,
+  `db/tests/test_migration_0019.py`, `db/tests/test_partitions.py`,
+  `ingest/tests/test_loader_clocks.py`, `ingest/tests/test_exactly_once.py`. Fold into 1.2 and
+  DATA-MODEL (done).
+- **`R20-lease:source-clock` reads the newest received minutes** (supersedes D28's "its newest
+  200 `messages` rows by device time within [now − 1 h − `max_clock_skew`, now + 1 h +
+  `max_clock_skew`] (`ix_messages_source_time`), of which those received in the last hour count"
+  (lines 545-548) and the same clause of the 2.6.3 table row (line 2010), the "latest records
+  whatever their device time" of line 303 and of V16 (1.3, line 1314), the 3.8 entry "the newest
+  200 `messages` rows per source in its skew-bounded range" (4977-4979), and Deviations b's
+  `source-clock` bullet (5867-5869: the worker's `MAX_CLOCK_SKEW` and its pin test are gone; the
+  same pin now holds `clocksamples.MAX_CLOCK_SKEW`, which bounds `rebuild`). Per checked source
+  the alert takes its `source_clock_samples` minutes received in [now − 1 h, now], newest first
+  and whole, until they hold 200 rows, or until they hold 10 rows once they reach back 10 minutes
+  (`CLOCK_RECENT`: a quieter source is judged on its recent minutes, not on its whole hour); all
+  of them when they hold fewer. With at least 10 rows, their median beyond ±120 s raises the
+  cause, as before. The source choice, the threshold, the texts and the resolution are unchanged.
+  A clock that jumps back or forward by up to a day (ingest's `max_clock_skew`) opens the cause
+  once most of those rows carry the new time, as long as the source keeps sending: a busy source
+  (200 rows within a few minutes) at the next check, a source that logs a line a minute about two
+  checks after the jump (it took half an hour over the whole hour, and up to the jump itself by
+  device time). A clock more than a day off is stamped with the receive time by ingest and gives
+  no sample; that stays with the `<parser>.time` parse failures and, for FortiGate DHCP lines,
+  `R20-lease:fortigate-refused` (V16). **Known side effect** (the safe side): lines a device
+  delivers late in a burst (after a link outage, from a buffer) arrive in the newest minutes and
+  can open the cause for those minutes until on-time rows outnumber them again; the old
+  device-time ranking put them behind the on-time rows. Perf (3.8): the read is one query on the
+  table's primary key, guarded under 0.2 s with 30 days of samples (the alert's 0.5 s bound
+  stays). Tests: `worker/tests/test_alerts_lease.py`
+  (`test_a_clock_that_jumps_after_logging_on_time_opens_at_the_next_check[−3 h]`,
+  `test_a_quiet_source_whose_clock_jumps_is_judged_on_its_recent_minutes` and
+  `test_a_clock_eight_minutes_behind_then_three_hours_is_measured_at_three_hours` fail on the
+  device-time sample; the `[+3 h]` case passed there too and guards the symmetry),
+  `worker/tests/test_alerts_lease_performance.py`. Fold into D28, 2.6.3, 1.1 (line 303), 1.3
+  V16 and 3.8.
+- **A lookup measures the clock by receive time too** (2.7 "Source clock at the requested moment";
+  amends Deviations c2's per-lookup clock bullet). Each measured source has three samples: the
+  device-time sample of c2 (its rows nearest T on each side, unchanged: the rows the search and the
+  lease timeline used), its `source_clock_samples` minutes received in [T − 1 h, T + 1 h], and (#82)
+  its minutes received at any time within `max_clock_skew` (T ± 25 h) whose clock put their device
+  times into [T − 1 h, T + 1 h] from an offset beyond 120 s (`clocksamples.shifted_into`). A minute
+  counts when that offset and its neighbours within 5 s (`SHIFT_BAND_SECONDS`: one clock's rows
+  spread over neighbouring whole seconds) hold more than half of the minute's rows, so a few late
+  lines among rows on time do not; its offsets behind and ahead give one median each, so a small
+  shift of many rows cannot hide a large one of fewer. Each sample counts with at least 10 rows. The
+  clock at the moment is the median further from 0 of the first two; beyond its limit, the source is
+  named `source_clock_offset` with that median, whatever the third says (a clock steadily off shifts
+  its device times into the window from every minute around it too, and the stored offsets are
+  rounded away from zero; #95 review). Only when the clock at the moment is within its limit and the
+  third sample, its side further from 0, is beyond it, the source is named `source_clock_shared`.
+  The limits (120 s; max(120 s, tolerance) for a source measured only for the session search), the
+  printed rounding and the source choice (cited sources, or the searched sources of an empty search
+  through `search_counts`) are unchanged. With a clock set hours back half an hour before T, the
+  rows with a device time around T were sent on time (median 0) while the rows received around T are
+  hours behind: an exact request at T now gives `none` with `source_clock_offset` (it cites no row,
+  so no chain), an internal lookup's chain is `low` with it; a lookup at the device moment of the
+  jumped rows behaves as before. **A new explanation key, `source_clock_shared`** (#82; 2.11 row,
+  TR/EN texts in `lookup/texts.py`, web tone `warning`, the reading-table row of RAPOR and
+  DENETCI-KILAVUZU, `READING_TABLE_KEYS`): with a clock set 3 hours back two hours after T and
+  lighter traffic after it, the rows with a device time around T were mostly sent on time and the
+  rows received around T all were (both medians 0), but the rows sent after the change carry device
+  times around T. The search at T finds the sessions of T and of T + 3 h (another client on the same
+  NAT port); the third sample names −10800 s and every chain is `low` (before #82, both chains
+  `high`). The offset is that of the rows sent at another real time, so `source_clock_offset`'s text
+  ("the record times around T differed…", and its remedy to shift the moment by the offset) would
+  mislead: `source_clock_shared` says that the moment's device times were also used by records sent
+  at another real time, that the sessions found may include ones made that much later or earlier,
+  and to check a session's real time against the receive time in its raw record; it has no shift
+  remedy. The same mirrored case (a clock set ahead and corrected an hour later, looked up where its
+  device times landed) gives +10800 s. A burst of a device's buffered late lines can make the
+  receive-time sample look behind for its minutes; that errs on the safe side (a `low` chain with
+  the offset stated, never a silent `high`). Perf (3.8): two more primary-key queries per measured
+  source, inside the lookup clock guard (0.2 s for two sources; the third reads about 3,300 keys of
+  50 h, T ± 25 h, 2.5 ms on the guard site's 30 days of samples). Tests:
+  `worker/tests/test_lookup_fortigate_only.py`
+  (`test_a_clock_set_hours_back_is_named_at_the_real_moment`, fails on the device-time sample;
+  `test_a_clock_set_hours_back_at_the_device_moment_is_named_as_before`;
+  `test_a_lookup_hours_before_a_clock_set_back_names_the_shared_device_times` and
+  `test_a_clock_set_ahead_and_corrected_is_named_at_the_moments_whose_device_times_it_used`, both
+  fail without the third sample; `test_a_source_on_time_all_day_is_trusted_as_before`;
+  `test_a_clock_steadily_behind_is_named_as_off_at_the_moment[steady, drifting]`, the drifting one
+  named `source_clock_shared` when the sample furthest from 0 decided),
+  `db/tests/test_clocksamples.py` (`test_the_minutes_that_shifted_their_device_times_into_a_range`,
+  `test_a_clock_spread_over_neighbouring_seconds_is_one_clock`,
+  `test_the_range_of_device_times_a_minute_falls_into`), `worker/tests/test_lookup_texts.py`
+  (`test_the_shared_device_times_text`), `worker/tests/test_lookup_performance.py`
+  (`test_the_source_clock_of_an_empty_search_is_fast`). Fold into 2.7, 2.11 (the new key), D28's
+  "measures the offset at the requested moment" paragraph, CORRELATION §2 and §7 (done), the reading
+  table (done) and the two test plan entries "source clock" (alerts 4394-4400, lookup 4555-4565).
+- **Ingest throughput** (3.8 gates; docs/INGEST.md "Measured throughput"): the loader's extra
+  work is one grouped upsert per batch. `bench_throughput.py --repeat 3` against `wave-3`, both
+  mixes, ABBA ×2 (12 runs per tree and worker count): default +2.4 % in-process and +0.4 % with 2
+  workers, FortiGate-only −0.9 % and −3.6 %, within the 5 % (docs/INGEST.md "Measured
+  throughput"). Nothing to fold.
 
 ---
 

@@ -163,9 +163,11 @@ satırıdır. Bu geçerli bir durumdur, ama kaynak eklenene kadar kurulumun güv
 hiçbir göndericiye açmaz ve hiçbir log kaydedilmez (`-SkipFirewall` ile her gönderici
 `unknown-<ip>` olarak kaydedilir, ayrıştırıcısı içerikten seçilir); sessiz kaynak uyarısı (R15)
 hiçbir kaynağı izlemez, Panel'in "Log alımı" kutusu "İzlenen kaynak yok" yazar. Log gönderen her
-cihaz için, en az güvenlik duvarınız ve ana yönlendiriciniz (DHCP sunucusu) için, bir
-`[[sources]]` kaydı ekleyin: dosyadaki örneklerin başındaki `#` işaretini silin, adı ve adresi
-kendi cihazınızınkiyle değiştirin ([DEVICE-SETUP.md](DEVICE-SETUP.md) bölüm 4). Sonra kurulumu
+cihaz için, en az güvenlik duvarınız ve ana yönlendiriciniz (DHCP sunucusu MikroTik ise ya da
+ARP-LOG kullanılıyorsa) için, bir `[[sources]]` kaydı ekleyin: dosyadaki örneklerin başındaki `#`
+işaretini silin, adı ve adresi kendi cihazınızınkiyle değiştirin ([DEVICE-SETUP.md](DEVICE-SETUP.md)
+bölüm 4). FortiGate'in DHCP kayıtları yalnızca `type = "fortigate"` ile tanımlı bir kaynaktan
+gelirse kira kanıtı sayılır ([DEVICE-SETUP.md](DEVICE-SETUP.md) bölüm 2.4). Sonra kurulumu
 yeniden çalıştırın ya da bölüm 4'teki komutları uygulayın; `& $core config-check` artık kaynak
 uyarısı vermez.
 
@@ -180,8 +182,10 @@ Get-Content D:\ARCILOGGER\state\collector-status.json
 
 Güvenlik duvarı 514'e yalnızca `[[sources]]` adreslerinden izin verir. Bir kaynağın dosyası
 yoksa cihazın gönderdiği adres yapılandırmadakiyle aynı değildir: [DEVICE-SETUP.md](DEVICE-SETUP.md)
-bölüm 4. Ana yönlendirici (MikroTik; DHCP ve ARP-LOG kayıtları, 5651 erişim kayıtlarının özü)
-özellikle denetlenmeli.
+bölüm 4. Kira kanıtını gönderen kaynak (ana MikroTik yönlendirici: DHCP ve ARP-LOG kayıtları;
+yalnız-FortiGate ağlarda FortiGate: DHCP olay kayıtları), 5651 erişim kayıtlarının özüdür ve
+özellikle denetlenmeli: **Kaynaklar** sayfasının **Kira kanıtı** kutusu ondan kullanılabilir
+kayıt gelip gelmediğini gösterir.
 
 ### Kişiler ve cihaz-kişi atamaları
 
@@ -193,16 +197,31 @@ bölüm 4. Ana yönlendirici (MikroTik; DHCP ve ARP-LOG kayıtları, 5651 erişi
    kurulumda ikisi de boştur. **Departmanlar ve VLAN'lar** sekmesinde önce departmanları
    ekleyin (kişiler ve kişi CSV'si onlara bağlanır), sonra **VLAN ekle** ile kurumun her
    VLAN'ını ya da alt ağını: ağ adresi ve önek uzunluğu (ör. `10.0.20.0/24`, ana bilgisayar
-   bitleri sıfır), VLAN numarası (1–4094, ağdaki numarası: kira kayıtlarının VLAN numarası DHCP
-   sunucusunun adından gelir, `dhcp.server_vlan_regex`, ör. `dhcp20` → 20; transit ağı gibi
-   numarasız bir ağda boş), ad ve isteğe bağlı olarak amaç, DHCP sunucusunun yönlendiricideki
-   adı (ör. `dhcp20`), departman, **Misafir ağı** işareti (FortiGate'ten değil başka bir
-   çıkıştan çıkan misafir ağı, [DEVICE-SETUP.md](DEVICE-SETUP.md) bölüm 5) ve not. Bir cihaz
+   bitleri sıfır), VLAN numarası (1–4094, ağdaki numarası: MikroTik kira kayıtlarının VLAN
+   numarası DHCP sunucusunun adından gelir, `dhcp.server_vlan_regex`, ör. `dhcp20` → 20,
+   FortiGate kiralarınınki adresi içeren ağdan; transit ağı gibi numarasız bir ağda boş), ad ve
+   isteğe bağlı olarak amaç, DHCP sunucusunun adı (MikroTik: yönlendiricideki adı, ör. `dhcp20`;
+   FortiGate: DHCP sunucusunun arayüz adı; bir arayüzde birden çok DHCP sunucusu varsa, ör.
+   aktarılan ağlarda, bu ad yalnızca bir ağa yazılabilir, ötekilerde boş kalır), departman,
+   **Misafir ağı** işareti (FortiGate'ten değil başka bir çıkıştan çıkan misafir ağı,
+   [DEVICE-SETUP.md](DEVICE-SETUP.md) bölüm 5) ve not. Bir cihaz
    VLAN numarasının ya da IP adresinin bulunduğu ağın VLAN'ındadır: onun adını, kimseye
    atanmamışsa onun departmanını alır; bir ağın içindeki daha küçük bir ağ (ör. bir `/24` içinde
    `/25`) ondan önce gelir. Ağ, VLAN numarası ve DHCP sunucusu tekildir. VLAN'lar olmadan da
    toplama, mühürleme, 5651 sorgusu ve kullanım çalışır; cihazlar ancak VLAN adı ve VLAN
    departmanı almaz.
+
+   FortiGate DHCP kullanılıyorsa FortiGate'in DHCP verdiği her ağı, VLAN numarası olmasa da,
+   ekleyin: tanımlı bir ağda olmayan adreslerin FortiGate zincirleri düşük güvenle gösterilir
+   (`fortigate_dhcp_no_network`). Bir ağı sonradan ekler ya da değiştirirseniz kiraları o ağın
+   ilk FortiGate DHCP kaydının gününden (`R20-lease:fortigate-dhcp-subnet` uyarısının
+   ayrıntılarındaki ilk gün) bugüne Ayarlar → Uygulama ayarları → 5651 sorgu ve kira zaman
+   çizelgesi → Kiraları yeniden oluştur bölümünde yeniden oluşturun (bir istekte en çok 31 gün):
+   bir ağ geçmiş kiralara ancak yeniden oluşturmadan sonra uygulanır; o zamana kadar etkilenen
+   zincirler düşük güvenle gösterilir. Her DHCP kapsamını tam olarak bir ağ olarak girin: bir
+   kapsamın içine daha küçük bir ağ ya da birkaç kapsamı içine alan tek bir geniş ağ girmeyin
+   (ARCILOGGER bir istemcinin adres değiştirmesini ağ ağ izler; [DEVICE-SETUP.md](DEVICE-SETUP.md)
+   bölüm 2.4).
 2. Kişileri ekleyin ya da CSV ile içe aktarın: şablonu indirin
    (`name;department;title;email;employee_no;active;notes;usage_excluded`; yalnızca `name`
    zorunludur, `usage_excluded` evet/hayır: kişiyi kullanım raporlarının dışında bırakır), Excel'de
@@ -228,40 +247,67 @@ Veritabanındaki ayarlar web arayüzünde **Ayarlar → Uygulama ayarları** say
 konsolda `arcilogger-db settings` komutuyla okunur ve değiştirilir. Her değişiklik eski ve yeni değeriyle **zincirli denetim kaydına**
 (`settings.change`) yazılır; `--by` değiştiren kişinin ARCILOGGER kullanıcı adıdır (aşağıda
 örnek olarak `tolga`). Değiştirilen
-bir değeri yükseltme ya da başlangıç verisi geri almaz.
+bir değeri yükseltme ya da başlangıç verisi geri almaz. Bir yükseltme eski bir ayarı yenisine
+çevirebilir; bu da denetim kaydına yazılır ([KURULUM.md](KURULUM.md) bölüm 13).
+
+İnternet çıkışları (`nat.egresses`) normalde Ayarlar → Uygulama ayarları → 5651 sorgu ve kira
+zaman çizelgesi → İnternet çıkışları (NAT) bölümündeki çıkış düzenleyicisiyle girilir: düzenleyici
+her alanı kaydetmeden önce denetler, altındaki "Kayıtlarda görülen NAT adresleri" tablosu
+FortiGate kayıtlarındaki NAT adreslerini ve arayüzlerini gösterir ([AYARLAR.md](AYARLAR.md) bölüm
+1). Konsoldaki karşılığı aşağıdaki örnektir (`<genel IP>` hattın genel adresidir):
 
 ```powershell
 & $db settings list
-& $db settings get nat.wan_transip
+& $db settings get nat.egresses
 & $db settings set lookup.tolerance_seconds 60 --by tolga
-& $db settings set nat.wan_transip '<FortiGate WAN adresi>' --by tolga
+'{"hat-1": {"mode": "direct", "public": ["<genel IP>"]}}' | & $db settings set nat.egresses - --by tolga
 '["<MAC 1>", "<MAC 2>"]' | & $db settings set devices.infrastructure_macs - --by tolga
 ```
 
-Değer JSON'dur (ondalık sayı yok). Metin değeri JSON tırnağı olmadan yazılabilir (yukarıdaki WAN
-adresi gibi). Liste ya da nesne, yani çift tırnak içeren bir değer, **boruyla** verilir ve değer
-yerine `-` yazılır: Windows PowerShell 5.1 programlara giden komut satırı argümanlarındaki çift
-tırnakları siler. Sonucu her zaman `settings get` ile denetleyin. Ayarlar kullanıldıkları anda
-veritabanından okunur; hizmetleri yeniden başlatmak gerekmez. Sahada belirlenip girilecekler
-([CORRELATION.md](CORRELATION.md) bölüm 8):
+Değer JSON'dur (ondalık sayı yok). Metin değeri JSON tırnağı olmadan yazılabilir. Liste ya da nesne,
+yani çift tırnak içeren bir değer, **boruyla** verilir ve değer yerine `-` yazılır: Windows
+PowerShell 5.1 programlara giden komut satırı argümanlarındaki çift tırnakları siler. Sonucu her
+zaman `settings get` ile denetleyin. Ayarlar kullanıldıkları anda veritabanından okunur; hizmetleri
+yeniden başlatmak gerekmez. Sahada belirlenip girilecekler ([CORRELATION.md](CORRELATION.md) bölüm
+8):
 
 | Ayar | Ne zaman |
 |---|---|
-| `nat.public_ips`, `nat.wan_transip` | FortiGate'in genel / WAN adresi doğrulandığında (çift NAT, [ASSUMPTIONS.md](ASSUMPTIONS.md) A9); her biri kendi modeminin arkasındaki birden çok ISS hattında `nat.wan_transip` boş kalır ([KURULUM.md](KURULUM.md) bölüm 0.1) |
+| `nat.egresses` (İnternet çıkışları) | Her internet hattı için: genel IP (ve değişip değişemeyeceği), FortiGate'in o hattaki NAT adresi, arayüzleri (dstintf; iki ya da daha çok hatta zorunlu), NAT türü ve port koruma ("Korunuyor" yalnızca ölçülünce); FortiGate'in DMZ'ye, başka bir VLAN'a, VPN'e ya da şubeye yaptığı NAT'ın adresleri "İnternet çıkışı değil" türüyle. Değerleri "Kayıtlarda görülen NAT adresleri" tablosundan okuyun ([DEVICE-SETUP.md](DEVICE-SETUP.md) bölüm 2.6); yükseltmede eski NAT ayarlarından aktarılan çıkışlar: [KURULUM.md](KURULUM.md) bölüm 13 |
 | `devices.infrastructure_macs` | Ana yönlendiricinin, FortiGate'in ve anahtarların MAC adresleri (IP çakışması sayılmasınlar) |
-| `lease.server_seconds` | Kira süresi bir günden (`lease.default_seconds`) farklı olan DHCP sunucuları, ör. misafir ağınınki: `{"<sunucu adı>": <saniye>}` (boruyla) |
+| `lease.server_seconds` | Kira süresi bir günden (`lease.default_seconds`) farklı olan DHCP sunucuları, ör. misafir ağınınki: `{"<sunucu adı>": <saniye>}` (boruyla); ad, MikroTik'te DHCP sunucusunun adı, FortiGate'te DHCP arayüzünün adıdır. FortiGate kiraları bu süreleri yalnızca kayıttaki kira süresi kullanılamadığında kullanır (`dhcp.fortigate_use_logged_lease`) |
 | `devices.oui_file` | İsteğe bağlı üretici adları: dosyayı `C:\ProgramData\ARCILOGGER\oui.csv` olarak koyun ([CORRELATION.md](CORRELATION.md) bölüm 1, "Vendor") |
-| `lookup.port_hint` | Yalnızca ISP yönlendiricisinin kaynak portu koruduğu doğrulanınca |
+| `lookup.srcmac_interfaces` | İsteğe bağlı: yalnızca aygıt tanıma açık, ağ geçidi FortiGate olan ve iki bilinen istemciyle sahada denetlenmiş arayüzler ([DEVICE-SETUP.md](DEVICE-SETUP.md) bölüm 2.5); yönlendirilmiş (L3) bir ağa bakan arayüz hiçbir zaman |
+| `dhcp.fortigate_interfaces_excluded` | FortiGate DHCP kullanılıyorsa: IPsec üzerinden DHCP veren sunucuların (`server-type ipsec`) arayüzleri ([DEVICE-SETUP.md](DEVICE-SETUP.md) bölüm 2.4) |
+| `dhcp.fortigate_logids`, `dhcp.fortigate_dhcp_msgs` | Yalnızca sahadaki doğrulama başka bir logid ya da `dhcp_msg` değeri gösterirse (ör. bırakma kaydı başka bir logid ile geliyorsa; [DEVICE-SETUP.md](DEVICE-SETUP.md) bölüm 2.4) |
+| `dhcp.fortigate_use_logged_lease` | Açık kalır (varsayılan): FortiGate DHCP Ack kaydındaki kira süresi o kiranın süresidir |
+| `dhcp.fortigate_traffic_extends` | Kapalı kalır (önerilen); yalnızca yenilemelerin kaydedilmediği sahada doğrulanırsa ve kurum, hukuk müşaviriyle, yardım metninin anlattığı yanlış kişi riskini kabul ederse açılır ([DEVICE-SETUP.md](DEVICE-SETUP.md) bölüm 2.4) |
+| `dhcp.fortigate_format_verified` | FortiGate DHCP kayıt biçiminin sahadaki doğrulaması geçince açılır; her FortiOS yükseltmesinden sonra kapatılır, doğrulama yinelenir ve yeniden açılır ([DEVICE-SETUP.md](DEVICE-SETUP.md) bölüm 2.4) |
+
+`dhcp.fortigate_*` ayarlarından birini (`dhcp.fortigate_format_verified` dışında: o yalnızca sorgu
+ve rapor metnini değiştirir) ya da bir FortiGate kaynağını (Ayarlar → Kaynaklar) değiştirdikten
+sonra kiraları etkilenen ilk günden bugüne Ayarlar → Uygulama ayarları → 5651 sorgu ve kira zaman
+çizelgesi → Kiraları yeniden oluştur bölümünde yeniden oluşturun (bir istekte en çok 31 gün):
+değişiklik geçmiş günlere ancak yeniden oluşturmadan sonra uygulanır. **Kanıt ekleyen bir
+değişiklikten** sonra (bir logid ya da `dhcp_msg` değeri eşlendi, bir FortiGate kaynağı eklendi) o
+zamana kadar o günlerin anları için 5651 sorgusu zincir kurmadan yanıt verebilir (güvenli taraf).
+**Kanıtı kaldıran ya da daraltan bir değişiklikten** sonra (bir arayüz
+`dhcp.fortigate_interfaces_excluded` listesine eklendi, `dhcp.fortigate_traffic_extends` ya da
+`dhcp.fortigate_use_logged_lease` kapatıldı, bir logid ya da `dhcp_msg` değeri çıkarıldı, bir
+FortiGate kaynağı kaldırıldı ya da türü değiştirildi) eski ayarlarla oluşturulan kiralar yeniden
+oluşturmaya kadar eski güven düzeyleriyle kalır; bir an hâlâ önceki cihazı gösterebilir. Bu durumda
+kiraları **hemen**, etkilenen ilk günden yeniden oluşturun.
 
 ## 7. Bu sürümün sınırları
 
 - **Departman geçmişi tutulmaz:** 5651 sonucundaki kişi olay anındaki atamadır, departmanı ise
   kişinin bugünkü departmanıdır (rapor bunu belirtir). Geçmişteki bir atama arayüzden
   düzeltilemez (bölüm 5).
-- Menüde yalnızca **Uyum Durumu ve Sistem** henüz yer tutucudur. Çalışan sayfalar: Panel,
-  Kaynaklar ve Canlı Akış (bölüm 9), Arama, 5651 Sorgu, Kullanım (bölüm 16), Güvenlik, Mühürleme,
-  Kanıt Paketleri, Cihazlar ve Kişiler (bölüm 12), Raporlar (Panel, Güvenlik ve Raporlar: bölüm
-  15), Denetim Kaydı, Ayarlar (Kullanıcılar ve Roller, Lisans: bölüm 17).
+- Menüdeki bütün sayfalar çalışır: Panel, Kaynaklar ve Canlı Akış (bölüm 9), Arama, 5651 Sorgu,
+  Kullanım (bölüm 16), Güvenlik, Mühürleme, Kanıt Paketleri, Cihazlar ve Kişiler (bölüm 12),
+  Raporlar (Panel, Güvenlik ve Raporlar: bölüm 15), Uyum Durumu (bölüm 9,
+  [UYUM-DURUMU.md](UYUM-DURUMU.md)), Denetim Kaydı, Ayarlar (Kullanıcılar ve Roller, Lisans:
+  bölüm 17), Sistem ([UYUM-DURUMU.md](UYUM-DURUMU.md) bölüm 4).
 - **Ücretli modüller** (lisans, [LISANS.md](LISANS.md)): Kullanım analizi (Kullanım sayfası,
   paneldeki kullanım bölümleri), Zamanlanmış kullanım raporları (Raporlar sayfası) ve Toplu içe
   aktarma (CSV). Deneme süresince hepsi açıktır; bir modül kapalıyken sayfası kilitli görünür.
@@ -308,6 +354,8 @@ veritabanından okunur; hizmetleri yeniden başlatmak gerekmez. Sahada belirleni
 
 Her gün:
 
+- Her sabah **Uyum Durumu** sayfasına bakın; her kart neyi denetlediğini ve ne yapılacağını söyler
+  ([UYUM-DURUMU.md](UYUM-DURUMU.md)).
 - **Panel**: log alımı, bugünkü ayrıştırma hataları, dünkü mühür, kontör, saat sapması ve açık
   uyarılar bir bakışta. **Güvenlik** sayfası: Yeni uyarıları inceleyin, ilgilendiklerinizi
   İnceleniyor yapın.
@@ -368,6 +416,11 @@ Her gün:
   | `R20-config-change` | Önemli yapılandırma değişikliği (korumalı bir ayar): saklama açıldı ya da gün sayısı düştü, replika kapandı ya da hedefi değişti, bir log kaynağı kapatıldı ya da silindi, üretimden teste dönüldü, Kamu SM kimlik bilgileri değişti, bir kök ya da yasal parmak izi eklendi, bir Zamane istemcisi yüklendi ya da onaylandı (yüksek); SMTP ya da yedekleme kapatıldı (orta). Değişikliği bilinen bir yönetici yapmadıysa **Değişiklik geçmişi** sayfasında bekleyeni **İptal et**, uygulanmışı **Geri al** ile geri alın ve denetim kaydına bakın |
   | `R20-lease` | Kira kanıtı sorunu: kira kanıtı (FortiGate DHCP, MikroTik DHCP ya da ARP-LOG) kesildi, FortiGate DHCP kayıtları kullanılmıyor ya da çevrilemedi, yenilemeler görünmüyor, aynı ağda iki DHCP kaynağı, bir kaynağın saati kayık ya da bir ayar sahada doğrulanmadı; neden ve ne yapılacağı uyarının ayrıntısındadır (Kaynaklar → Kira kanıtı; [UYARILAR.md](UYARILAR.md) bölüm 2) |
   | `R20-nat` | İnternet çıkışı tanımı sorunu: eski NAT ayarları aktarılamadı, çıkışlar ayarı okunamıyor, geri almada eski bir NAT ayarı değişti ya da hiçbir çıkışa tanımlı olmayan bir NAT adresi kullanılıyor (Ayarlar → Uygulama ayarları → 5651 sorgu ve kira zaman çizelgesi → İnternet çıkışları (NAT)) |
+  | `R20-filter` | Beklenen bir günde 24 saattir web ya da DNS filtresi kaydı gelmiyor (`alerts.filter_quiet_hours`, `alerts.filter_days`; Uyum Durumu kart 7) |
+  | `R20-db-window` | Veritabanı penceresi işi (`db.window`, her gün 01:00'den sonra) çalışamadı: pencereden (`db.retention_days`, 30 gün) eski günler silinmedi; worker işi yeniden dener, sonraki başarılı çalıştırma uyarıyı çözer (orta). Ya da bir arşivden yeniden yükleme önceki çalıştırmadan beri ilerlemedi (`R20-db-window:reload-<numara>`, orta; numarası ve günleriyle): `loading` durumundaki bir yükleme ya da hiçbir yükleme `loading` değilken ve sıra ilerlemezken `queued` bekleyen bir yükleme; ilerleyen bir yüklemenin arkasında sırada bekleyen yükleme uyarı vermez: yüklenen günler hiç silinmez, veritabanı o sürede pencereden büyür; ArciIngest'i denetleyin (`Get-Service ArciIngest`). Yükleme ya da önündeki sıra ilerleyince, ya da yükleme bitince kendiliğinden çözülür |
+  | `R20-renewal` | Yeniden damgalama gerekiyor (yüksek): `state\renewal.json` raporunda yeniden damgalama zamanı gelmiş (`due`) ya da sertifikası yeniden damgalanmadan sona ermiş (`uncovered`) bir damga var, ya da `Renew` görevi art arda iki kez başarısız oldu (`failures_in_a_row` ≥ 2; reddedilen bir çalıştırma da sayılır, örneğin sabitlenmiş kök sertifika yokken). Sistem sayfasında `Renew` görevini denetleyin; neyin yeniden damgalanacağını damga almadan görmek için `& $core renew --dry-run`. Rapor böyle bir damga göstermeyince ve görev art arda iki kez başarısız olmamışken kendiliğinden çözülür. Damgalar alındıkları an için geçerli kalır |
+  | `R20-cert` | Zaman damgası sertifikası sorunu: kullanılan bir sertifika iptal listesinde (`crl-revoked`, kritik; zaman damgası sağlayıcısıyla görüşün, hukuki inceleme önerilir) ya da yeniden damgalanmamış bir damganın sertifikası 30 gün içinde sona eriyor veya yeniden damgalanmadan sona erdi (yüksek). Yalnızca bütün girdiler (yeniden damgalama raporu, zamanlanmış doğrulamalar, son mühürlü günün damgası, iptal listeleri) okunabilince çözülür |
+  | `R20-crl` | İptal listesi (SİL) güncel değil (orta): kullanılan bir sertifika veren için son `tsa.crl_max_age_days` (7) gün içinde indirilip doğrulanmış ve kendi `nextUpdate` zamanı geçmemiş bir liste yok; yalnızca `state\crl` klasöründen değerlendirilir. Sistem sayfasında `CrlFetch` görevini ve `state\crl\index.json` içindeki `failures` kayıtlarını denetleyin (`& $core crl status`); değişen ya da silinen bir saklı liste de sayılır. Kamu SM'nin ve TÜRKTRUST'ın liste yayın aralıkları sahada doğrulanmalıdır (K10/T4). Güncel bir liste gelince kendiliğinden çözülür |
   | `new-log-source` | Yapılandırmada olmayan bir gönderici (güvenlik duvarı izin verdiyse) |
   | `wrong-transport` | Bir kaynaktan izin verilmeyen taşıma yoluyla mesaj geldi (`[[sources]] transport`); taklit edilmiş bir UDP gönderimi ya da yanlış cihaz ayarı olabilir, mesaj kaydedilmedi |
 
@@ -454,12 +507,13 @@ Her değişiklik, içe ve dışa aktarma denetim kaydına yazılır.
   adını ve VLAN'ın departmanını kaybeder, kullanım sayfalarında da; ham kayıtlar, kira kayıtları
   ve kaydedilmiş 5651 sonuçları değişmez. Değişiklik bir departman değişikliği gibi hemen
   geçerlidir: cihaz listesi ve sonraki 5651 sorguları yeni tabloyu kullanır, kullanım sayfaları
-  VLAN'ın departmanını VLAN numarasıyla, okurken alır. Kullanımın VLAN numarası adresi içeren
-  VLAN'ınkidir; adres hiçbir VLAN'ın ağında değilse kira kaydınınki (kayıt oluşurken DHCP
-  sunucusunun adından ya da o zamanki ağdan). Bu numara değişirse (numarası değişen, yeni eklenen
-  ya da ağı değişen VLAN; bir VLAN'ın ağından çıkan adreslerde — silinen ya da taşınan VLAN —
-  yalnızca kira kaydı olmayan saatler) son günlerin kullanımı kendiliğinden yeniden hesaplanır
-  (`usage.reattribute`, `usage.auto_rebuild_days`); daha eski günler için `usage rebuild`
+  VLAN'ın departmanını VLAN numarasıyla, okurken alır. FortiGate DHCP kiralarına ise eklenen ya da
+  değiştirilen bir ağ ancak kiralar yeniden oluşturulunca uygulanır (bölüm 5). Kullanımın VLAN
+  numarası adresi içeren VLAN'ınkidir; adres hiçbir VLAN'ın ağında değilse kira kaydınınki (kayıt
+  oluşurken DHCP sunucusunun adından ya da o zamanki ağdan). Bu numara değişirse (numarası değişen,
+  yeni eklenen ya da ağı değişen VLAN; bir VLAN'ın ağından çıkan adreslerde — silinen ya da taşınan
+  VLAN — yalnızca kira kaydı olmayan saatler) son günlerin kullanımı kendiliğinden yeniden
+  hesaplanır (`usage.reattribute`, `usage.auto_rebuild_days`); daha eski günler için `usage rebuild`
   (bölüm 13).
 - **İçe/Dışa aktar:** listelerin tamamı CSV olarak (Excel için `;` ayraçlı, zamanlar yerel saatle,
   evet/hayır); dosyalar kişisel veri içerir, yalnızca gerektiği kadar saklayın. Dışa aktarılan

@@ -40,15 +40,26 @@ that MAC's lease (D33), so the seeds' raw DHCP rows and the look-ahead are also 
 of the DHCP intervals. The job report counts the FortiGate rows read and refused
 (:mod:`.dhcp_sources`), and the timeline's ``fg_renewal_ack``, ``fg_mac_moved`` and
 ``superseded_across_sources``.
+
+**Beside the intervals (issue #127).** A DHCP lease also stores its missed moves
+(``leases.moves``): the kept FortiGate ACKs of its MAC for another address that the build saw and
+did not apply, which the lookup's missed-move check reads where the rows are gone; and every
+``fg_dhcp`` ref the job writes carries the VDOM of its row (``"vd"``), which the job itself reads
+back for a seed (:func:`_annotated`) and the lookup for a stored record. Neither holds a row id,
+and every mode computes them from the same rows (:class:`_Recorded`). The moves are bounded: the
+100 days before the lease's end (its newest move while it is open), at most 1,000 times, the
+newest, and marked when the job dropped one.
 """
 
 from __future__ import annotations
 
+import logging
 import re
 from collections import Counter, defaultdict
 from collections.abc import Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import UTC, date, datetime, timedelta
+from enum import Enum
 from typing import Any, Final
 
 from sqlalchemy import delete, func, insert, select, text, tuple_, update
@@ -97,14 +108,28 @@ from arcilogger_worker.correlation.watermark import (
     rebuild_horizon,
     set_watermark,
 )
+from arcilogger_worker.lookup.attribution import MISSED_MOVE_WINDOW
 from arcilogger_worker.lookup.refs import (
     ARP_TABLE,
     DHCP_TABLES,
     FG_DHCP_TABLE,
     TABLE_RANK,
     TRAFFIC_TABLE,
+    MoveGroup,
+    Moves,
+    RefKey,
     arp_ref,
+    bound_moves,
+    cut_moves,
     dhcp_action,
+    epoch_us,
+    fg_dhcp_move,
+    merge_moves,
+    moves_json,
+    parse_moves,
+    ref_dict,
+    ref_key,
+    stored_vds,
     traffic_ref,
 )
 from arcilogger_worker.lookup.trust import untrusted_sources
@@ -118,6 +143,8 @@ LOOKAHEAD_CHUNK: Final = timedelta(days=1)
 CATCH_UP_AFTER: Final = timedelta(days=1)
 #: Setting: ARP sightings this soon after a release of the pair are stale entries (seconds).
 RELEASE_GRACE_KEY: Final = "arp.ignore_after_release_seconds"
+
+log = logging.getLogger("arcilogger_worker.leases")
 
 
 # -- report ---------------------------------------------------------------------------------------
@@ -217,7 +244,10 @@ class Context:
         ``nat.egresses`` is kept as stored and never parsed here (``LookupSettings``), so an
         exit value that cannot be read never stops the lease timeline."""
         settings = LookupSettings.from_settings(get_settings(session))
-        release_grace = int(get_setting(session, RELEASE_GRACE_KEY, DEFAULT_RELEASE_GRACE))
+        release_grace = _release_grace(
+            get_setting(session, RELEASE_GRACE_KEY, DEFAULT_RELEASE_GRACE),
+            settings.arp_interval_seconds,
+        )
         rules = TimelineRules.from_settings(settings, release_grace=release_grace)
         if rules.shortest_timeout < TRAFFIC_BUCKET_SECONDS:
             raise ValueError("lease timeouts must be longer than the traffic bucket (300 s)")
@@ -261,6 +291,22 @@ class Context:
             row = find_vlan(self.session, ip)
             self._networks[ip] = (None, None) if row is None else (row.vlan_id, str(row.subnet))
         return self._networks[ip]
+
+
+def _release_grace(value: object, interval: int) -> int:
+    """``arp.ignore_after_release_seconds`` as the timeline can use it, read as the lookup reads
+    it: a value written around the validator that is no integer, negative or longer than the ARP
+    interval gives the shipped default, at most the interval, and a warning (the key and the
+    rule only), so the lease job never stops on it."""
+    if isinstance(value, int) and not isinstance(value, bool) and 0 <= value <= interval:
+        return value
+    default = min(DEFAULT_RELEASE_GRACE, interval)
+    log.warning(
+        "%s is not an integer between 0 and arp.interval_seconds; the default %d s applies",
+        RELEASE_GRACE_KEY,
+        default,
+    )
+    return default
 
 
 # -- evidence from the database -------------------------------------------------------------------
@@ -384,7 +430,11 @@ def interval_from_row(row: Lease) -> LeaseInterval:
     )
 
 
-def _values(interval: LeaseInterval) -> dict[str, Any]:
+def _values(
+    interval: LeaseInterval, vds: Mapping[RefKey, str | None] | None = None
+) -> dict[str, Any]:
+    """The columns of ``interval`` but ``moves``; its ``fg_dhcp`` refs carry the VDOMs ``vds``
+    knows (:func:`.refs.ref_dict`)."""
     return {
         "ip": interval.ip,
         "mac": interval.mac,
@@ -398,12 +448,18 @@ def _values(interval: LeaseInterval) -> dict[str, Any]:
         "source_table": interval.source_table,
         "last_evidence": interval.last_evidence,
         "lease_seconds": interval.lease_seconds,
-        "evidence": [ref.to_dict() for ref in interval.evidence],
+        "evidence": [ref_dict(ref, vds or {}) for ref in interval.evidence],
     }
 
 
-def _changed(before: LeaseInterval, after: LeaseInterval) -> bool:
-    return _values(before) != _values(after)
+def _changed(before: LeaseInterval, values: Mapping[str, Any], recorded: _Recorded) -> bool:
+    """Whether ``values`` (to be written over the stored row ``before``) differ from the row:
+    its columns, the VDOMs its refs carry and, when ``values`` writes them, its moves."""
+    row_id = before.row_id
+    stored = _values(before, None if row_id is None else recorded.stored_vds.get(row_id))
+    if "moves" in values:
+        stored["moves"] = recorded.stored_json(row_id)
+    return stored != values
 
 
 def _attach_traffic_refs(ctx: Context, intervals: list[LeaseInterval]) -> list[LeaseInterval]:
@@ -438,28 +494,38 @@ def _attach_traffic_refs(ctx: Context, intervals: list[LeaseInterval]) -> list[L
 
 
 def _write(
-    ctx: Context, intervals: Sequence[LeaseInterval], stored: Mapping[int | None, LeaseInterval]
+    ctx: Context,
+    intervals: Sequence[LeaseInterval],
+    stored: Mapping[int | None, LeaseInterval],
+    recorded: _Recorded,
 ) -> tuple[int, int]:
     """Insert the new intervals and update the stored rows that changed (``(inserted, updated)``).
 
     The traffic rows are attached first, so an unchanged interval compares equal to its row and
-    is not written again.
+    is not written again. Its moves and its refs' VDOMs come from ``recorded``; moves the run
+    leaves as stored are not written (a second batch without the column).
     """
     attached = _attach_traffic_refs(ctx, list(intervals))
-    inserts = [i for i in attached if i.row_id is None]
-    updates = [
-        i
-        for i in attached
-        if i.row_id is not None and (i.row_id not in stored or _changed(stored[i.row_id], i))
-    ]
+    inserts: list[dict[str, Any]] = []
+    updates: dict[bool, list[dict[str, Any]]] = {True: [], False: []}
+    for interval, moves in zip(attached, recorded.moves(ctx, attached), strict=True):
+        values = _values(interval, recorded.vds)
+        if moves is not _Keep.STORED:
+            values["moves"] = (
+                None if moves is None else moves_json(moves.groups, truncated=moves.truncated)
+            )
+        if interval.row_id is None:
+            inserts.append(values)
+        elif interval.row_id not in stored or _changed(stored[interval.row_id], values, recorded):
+            updates["moves" in values].append(
+                {"id": interval.row_id, **values, "updated_at": utc_now()}
+            )
     if inserts:
-        ctx.session.execute(insert(Lease), [_values(i) for i in inserts])
-    if updates:
-        ctx.session.execute(
-            update(Lease),
-            [{"id": i.row_id, **_values(i), "updated_at": utc_now()} for i in updates],
-        )
-    return len(inserts), len(updates)
+        ctx.session.execute(insert(Lease), inserts)
+    for batch in updates.values():
+        if batch:
+            ctx.session.execute(update(Lease), batch)
+    return len(inserts), len(updates[True]) + len(updates[False])
 
 
 def _match_stored(
@@ -482,6 +548,205 @@ def _match_stored(
         matched.append(interval)
     gone = sorted(row.row_id for rows in pool.values() for row in rows if row.row_id is not None)
     return matched, gone
+
+
+# -- what a lease stores beside its interval (issue #127) -----------------------------------------
+
+
+class _Keep(Enum):
+    """The moves of a stored row that the run neither read nor changes (not written)."""
+
+    STORED = "stored"
+
+
+#: How far back from a lease's newest moment its moves are kept (:meth:`_Recorded.moves`): the
+#: look-back of the missed-move check, which reads no move further back from a moment.
+_MOVES_KEPT_US: Final = MISSED_MOVE_WINDOW // timedelta(microseconds=1)
+#: What a move records of its ``fg_dhcp`` row (:func:`.refs.fg_dhcp_move`).
+_MOVE_COLUMNS: Final = (
+    FgDhcp.time,
+    FgDhcp.id,
+    FgDhcp.ip,
+    FgDhcp.interface,
+    FgDhcp.extra["vd"].astext.label("vd"),
+    FgDhcp.source,
+    FgDhcp.logid,
+    FgDhcp.dhcp_msg,
+)
+
+
+@dataclass
+class _Recorded:
+    """What one run stores beside the timeline's intervals: ``leases.moves`` and the VDOM of each
+    ``fg_dhcp`` ref (:mod:`.refs`; ADR-0016 D33, issue #127).
+
+    A move of a DHCP interval is a kept FortiGate ``assigned`` of its MAC for another address,
+    strictly inside the interval (its end, or the run's end while it is open), on the interval's
+    own interface for an ``fg_dhcp`` interval, and not in another configured network than the
+    interval's (the networks of the run). The build applies the others: it ends the interval at
+    the ACK's time, which the strict bounds leave out. The settings that kept the row are the
+    run's; the lookup applies its own again.
+
+    The run computes the moves of its own range ``[lo, hi)`` from the rows it read: every row of
+    that range, and in a look-ahead every FortiGate row of the MAC of every DHCP interval it
+    follows, so every mode sees the same ones. A stored row keeps its moves outside that range;
+    everything is cut to the interval, so a lease that late evidence ends earlier loses the
+    moves after its new end. A single-day rebuild, a range and the live job store the same
+    value (but see the bound below). A stored NULL (written before revision
+    ``0022_lease_moves``) stays NULL for a lease that ended before the range; one the run
+    follows is recorded from then on.
+
+    The value is bounded (lease rows are never dropped; a MAC can move for months): only the
+    times within the check's look-back (:data:`_MOVES_KEPT_US`) before the lease's newest moment,
+    its end, or for an open lease its newest move (the live job does not rewrite an open lease
+    without a new move, so the run's end would make the modes differ), and of those at most
+    :data:`.refs.MOVE_TIMES_CAP`, the newest (:func:`.refs.bound_moves`). A value that lost a
+    time says so (``truncated``) until a run recomputes the whole lease (a closed lease inside
+    its range). Both cuts keep the newest times, so the modes still store the same value,
+    except a lease that late evidence ends earlier after the bound dropped times from it: the
+    times dropped against moves after its new end do not come back, so it keeps fewer times
+    than a rebuild from scratch, marked ``truncated`` (positive evidence only: the check misses
+    them). A rebuild from scratch (leases deleted) stores the full value.
+
+    The VDOMs are those of the rows the run read, else those the stored refs carry: the same
+    value while the row exists, and still there when it is gone.
+    """
+
+    lo: datetime
+    hi: datetime
+    #: The VDOM of each ``fg_dhcp`` ref the run knows, by :func:`.refs.ref_key`.
+    vds: dict[RefKey, str | None] = field(default_factory=dict)
+    #: The FortiGate ``assigned`` events of ``[lo, hi)`` by MAC: the candidate moves.
+    seen: dict[str, list[DhcpEvent]] = field(default_factory=dict)
+    #: Per stored row: the VDOMs its refs carry (what :func:`_changed` compares with).
+    stored_vds: dict[int, dict[RefKey, str | None]] = field(default_factory=dict)
+    #: Per stored row whose moves were read: their value (``None``: NULL).
+    stored_moves: dict[int, Moves | None] = field(default_factory=dict)
+    #: Per stored row whose moves were not read: whether they are NULL.
+    unread: dict[int, bool] = field(default_factory=dict)
+
+    def row(self, row: Lease, moves: Any) -> None:
+        """A stored row read with its moves (``select(Lease, Lease.moves)``)."""
+        self._refs(row)
+        self.stored_moves[row.id] = parse_moves(moves)
+
+    def row_unread(self, row: Lease, null: bool) -> None:
+        """A stored row read without its moves (``select(Lease, Lease.moves.is_(None))``): the
+        incremental job reads them only where they can change (:meth:`moves`)."""
+        self._refs(row)
+        self.unread[row.id] = null
+
+    def _refs(self, row: Lease) -> None:
+        found = stored_vds(row.evidence)
+        self.stored_vds[row.id] = found
+        for key, vd in found.items():
+            self.vds.setdefault(key, vd)
+
+    def read(self, events: Iterable[Evidence | DhcpRow], *, window: bool = False) -> None:
+        """Rows or events the run read: the VDOMs of the ``fg_dhcp`` ones; ``window``: they lie
+        in ``[lo, hi)`` and their ``assigned`` ones are candidate moves."""
+        for event in events:
+            if not isinstance(event, DhcpEvent | DhcpRow) or event.table != FG_DHCP_TABLE:
+                continue
+            if event.ref is not None:
+                self.vds[ref_key(event.ref)] = None if event.origin is None else event.origin[1]
+            if window and isinstance(event, DhcpEvent) and event.action == "assigned":
+                self.seen.setdefault(event.mac, []).append(event)
+
+    def stored_json(self, row_id: int | None) -> dict[str, Any] | None:
+        """The stored moves of a row as :func:`.refs.moves_json` writes them (read or NULL)."""
+        if row_id is None:
+            return None
+        moves = self.stored_moves.get(row_id)
+        return None if moves is None else moves_json(moves.groups, truncated=moves.truncated)
+
+    def moves(self, ctx: Context, intervals: Sequence[LeaseInterval]) -> list[Moves | _Keep | None]:
+        """The moves to write for each of ``intervals``, in their order (two intervals can share
+        ip, mac and start): ``None`` for an ARP interval; :attr:`_Keep.STORED` where the stored
+        value stays and was not read."""
+        found = [self._candidates(ctx, interval) for interval in intervals]
+        groups = self._groups(ctx, [event for events in found for event in events])
+        self._load(
+            ctx,
+            sorted(
+                interval.row_id
+                for interval, events in zip(intervals, found, strict=True)
+                if interval.row_id is not None
+                and self.unread.get(interval.row_id) is False
+                and (events or interval.end is not None or interval.source_table not in DHCP_TABLES)
+            ),
+        )
+        lo, hi = epoch_us(self.lo), epoch_us(self.hi)
+        result: list[Moves | _Keep | None] = []
+        for interval, events in zip(intervals, found, strict=True):
+            row_id = interval.row_id
+            null = row_id is not None and self.unread.get(row_id, False)
+            if row_id is not None and self.unread.get(row_id) is False:
+                result.append(_Keep.STORED)  # open, nothing new: as stored
+                continue
+            if interval.source_table not in DHCP_TABLES:
+                result.append(None)
+                continue
+            stored = None if row_id is None or null else self.stored_moves.get(row_id)
+            known = row_id is not None and (null or row_id in self.stored_moves)
+            if known and stored is None and interval.end is not None and interval.end <= self.lo:
+                result.append(None)  # not recorded, and not followed by this run
+                continue
+            old = stored or Moves()
+            kept = (*cut_moves(old.groups, None, lo), *cut_moves(old.groups, hi - 1, None))
+            computed = [groups[key] for key in map(_event_key, events) if key in groups]
+            start = epoch_us(interval.start)
+            end = None if interval.end is None else epoch_us(interval.end)
+            inside = cut_moves(merge_moves(kept, computed), start, end)
+            newest = end if end is not None else max((g.times[-1] for g in inside), default=start)
+            bounded, dropped = bound_moves(inside, newest - _MOVES_KEPT_US)
+            # A time dropped before stays missing unless the run recomputes the whole lease.
+            whole = end is not None and lo <= start and end <= hi
+            result.append(Moves(bounded, dropped or (old.truncated and not whole)))
+        return result
+
+    def _candidates(self, ctx: Context, interval: LeaseInterval) -> list[DhcpEvent]:
+        """The moves of ``interval`` among the run's events (see the class docstring)."""
+        if interval.source_table not in DHCP_TABLES:
+            return []
+        own = ctx.network_for(interval.ip)
+        return [
+            event
+            for event in self.seen.get(interval.mac, ())
+            if event.ip != interval.ip
+            and interval.start < event.time
+            and (interval.end is None or event.time < interval.end)
+            and (interval.source_table != FG_DHCP_TABLE or event.server == interval.server)
+            and (own is None or event.network is None or event.network == own)
+        ]
+
+    def _groups(
+        self, ctx: Context, events: Iterable[DhcpEvent]
+    ) -> dict[tuple[datetime, int], MoveGroup]:
+        """The move of each event's row (its source, logid and DHCP message are no part of the
+        event), by primary key, 500 at a time."""
+        keys = sorted({key for key in map(_event_key, events) if key is not None})
+        found: dict[tuple[datetime, int], MoveGroup] = {}
+        for first in range(0, len(keys), 500):
+            query = select(*_MOVE_COLUMNS).where(
+                tuple_(FgDhcp.time, FgDhcp.id).in_(keys[first : first + 500])
+            )
+            for row in ctx.session.execute(query):
+                found[(row.time, int(row.id))] = fg_dhcp_move(row)
+        return found
+
+    def _load(self, ctx: Context, ids: Sequence[int]) -> None:
+        """Read the stored moves of the rows ``ids`` (explicitly: the column is never loaded
+        with the row)."""
+        for first in range(0, len(ids), 500):
+            query = select(Lease.id, Lease.moves).where(Lease.id.in_(ids[first : first + 500]))
+            for row_id, moves in ctx.session.execute(query):
+                self.stored_moves[row_id] = parse_moves(moves)
+                self.unread.pop(row_id, None)
+
+
+def _event_key(event: DhcpEvent) -> tuple[datetime, int] | None:
+    return None if event.ref is None or event.ref.row_id is None else (event.time, event.ref.row_id)
 
 
 def _devices(ctx: Context, events: Iterable[Evidence]) -> int:
@@ -585,7 +850,7 @@ def _ref_lease(ctx: Context, ref: EvidenceRef) -> int | None:
     return dhcp_sources.usable_lease(ctx.settings, int(match.group(1)) if match else None)
 
 
-def _seed_candidates(ctx: Context, day_start: datetime) -> list[LeaseInterval]:
+def _seed_candidates(ctx: Context, day_start: datetime, recorded: _Recorded) -> list[LeaseInterval]:
     """Stored intervals of earlier days that were alive at ``day_start``.
 
     A row is alive at midnight when it is open or ends at/after midnight (its stored chain of
@@ -595,18 +860,19 @@ def _seed_candidates(ctx: Context, day_start: datetime) -> list[LeaseInterval]:
     (``last + grace``), which can be after midnight — it is a candidate too, and :func:`_seeds`
     checks it against the raw evidence. Rows that ended before midnight are final: their end
     rests only on evidence before midnight, so a later sighting of the same pair (or traffic of
-    another client on the IP) never re-opens them.
+    another client on the IP) never re-opens them. Their moves and ref VDOMs go to ``recorded``.
     """
     rules = ctx.rules
     slack = timedelta(seconds=rules.arp_grace - rules.arp_interval)
     grace = timedelta(seconds=rules.arp_grace)
-    rows = ctx.session.scalars(
-        select(Lease)
+    rows = ctx.session.execute(
+        select(Lease, Lease.moves)
         .where(Lease.start < day_start, Lease.end.is_(None) | (Lease.end >= day_start - slack))
         .order_by(Lease.start, Lease.id)
     ).all()
     candidates = []
-    for row in rows:
+    for row, moves in rows:
+        recorded.row(row, moves)
         seed = interval_from_row(row)
         spans_midnight = seed.end is None or seed.end >= day_start
         undecided_arp = (
@@ -616,13 +882,18 @@ def _seed_candidates(ctx: Context, day_start: datetime) -> list[LeaseInterval]:
         )
         if spans_midnight or undecided_arp:
             candidates.append(seed)
-    return _annotated(ctx, candidates)
+    return _annotated(ctx, candidates, recorded.vds)
 
 
-def _annotated(ctx: Context, seeds: Sequence[LeaseInterval]) -> list[LeaseInterval]:
+def _annotated(
+    ctx: Context, seeds: Sequence[LeaseInterval], stored: Mapping[RefKey, str | None]
+) -> list[LeaseInterval]:
     """``seeds`` with what the stored rows do not hold (ADR-0016 D27, D33): the network of
-    their IP and their DHCP origin. A FortiGate seed's VDOM is read from the ``fg_dhcp`` row of
-    its newest own ref (by primary key; never the line that superseded it)."""
+    their IP and their DHCP origin. A FortiGate seed's VDOM is the one its newest own ref
+    carries (``stored``, by :func:`.refs.ref_key`; never the line that superseded it), else,
+    for a ref written before revision ``0022_lease_moves``, read from that ref's ``fg_dhcp``
+    row (by primary key): the same value while the row exists, and still known when it is
+    gone."""
     newest: dict[int | None, EvidenceRef] = {}
     for seed in seeds:
         if seed.source_table != FG_DHCP_TABLE:
@@ -636,7 +907,7 @@ def _annotated(ctx: Context, seeds: Sequence[LeaseInterval]) -> list[LeaseInterv
         ]
         if own:
             newest[seed.row_id] = max(own, key=lambda ref: (ref.time, ref.row_id or 0))
-    keys = sorted({(ref.time, ref.row_id) for ref in newest.values()})
+    keys = sorted({(r.time, r.row_id) for r in newest.values() if ref_key(r) not in stored})
     vds: dict[tuple[datetime, int | None], str | None] = {}
     for first in range(0, len(keys), 500):
         query = select(FgDhcp.time, FgDhcp.id, FgDhcp.extra["vd"].astext).where(
@@ -649,7 +920,12 @@ def _annotated(ctx: Context, seeds: Sequence[LeaseInterval]) -> list[LeaseInterv
         origin: Origin | None = None
         if seed.source_table == FG_DHCP_TABLE:
             ref = newest.get(seed.row_id)
-            origin = (FG_DHCP_TABLE, None if ref is None else vds.get((ref.time, ref.row_id)))
+            if ref is None:
+                origin = (FG_DHCP_TABLE, None)
+            elif ref_key(ref) in stored:
+                origin = (FG_DHCP_TABLE, stored[ref_key(ref)])
+            else:
+                origin = (FG_DHCP_TABLE, vds.get((ref.time, ref.row_id)))
         elif seed.source_table in DHCP_TABLES:
             origin = (seed.source_table, None)
         result.append(replace(seed, origin=origin, network=ctx.network_for(seed.ip)))
@@ -732,7 +1008,7 @@ def _midnight_lease(
     return max(usable)[1] if usable else None
 
 
-def _seeds(ctx: Context, day_start: datetime) -> _Seeds:
+def _seeds(ctx: Context, day_start: datetime, recorded: _Recorded) -> _Seeds:
     """The state at ``day_start`` of the intervals alive then (see the module docstring).
 
     For a seed that was continuously open from its start to midnight, every ARP sighting and
@@ -745,10 +1021,11 @@ def _seeds(ctx: Context, day_start: datetime) -> _Seeds:
     seed is closed exactly as the timeline would close it, never re-opened. A FortiGate seed's
     last evidence counts its DHCP records only unless ``dhcp.fortigate_traffic_extends`` (D26);
     its lease time is the one at midnight, and it is ``high`` again (re-derived from its rows,
-    which undoes the rollback step's ``low``, ``db.lease_rollback``).
+    which undoes the rollback step's ``low``, ``db.lease_rollback``). The stored moves and ref
+    VDOMs of the candidates, and the VDOMs of the raw rows read, go to ``recorded``.
     """
     rules = ctx.rules
-    candidates = _seed_candidates(ctx, day_start)
+    candidates = _seed_candidates(ctx, day_start, recorded)
     if not candidates:
         return _Seeds()
 
@@ -767,7 +1044,9 @@ def _seeds(ctx: Context, day_start: datetime) -> _Seeds:
     ).all()
     dhcp_by_ip: dict[str, list[DhcpRow]] = defaultdict(list)
     dhcp_by_mac: dict[str, list[DhcpRow]] = defaultdict(list)
-    for dhcp_row in load_rows(ctx, low, day_start, ips, macs):
+    dhcp_rows = load_rows(ctx, low, day_start, ips, macs)
+    recorded.read(dhcp_rows)
+    for dhcp_row in dhcp_rows:
         dhcp_by_ip[dhcp_row.ip].append(dhcp_row)
         if dhcp_row.table == FG_DHCP_TABLE:
             dhcp_by_mac[dhcp_row.mac].append(dhcp_row)
@@ -982,18 +1261,24 @@ def rebuild_day(
     start, end = (t.astimezone(UTC) for t in day_window(day))
     report = LeaseJobReport(mode="rebuild", window_start=start, days=[day.isoformat()])
     lines = ingest_lines(session, [day]).get(day, 0)
-    stored: dict[int | None, LeaseInterval] = {
-        row.id: interval_from_row(row)
-        for row in session.scalars(select(Lease).where(Lease.start >= start, Lease.start < end))
-    }
     limit = min(end, horizon)
+    recorded = _Recorded(lo=start, hi=limit)
+    stored: dict[int | None, LeaseInterval] = {}
+    for row, moves in session.execute(
+        select(Lease, Lease.moves).where(Lease.start >= start, Lease.start < end)
+    ):
+        stored[row.id] = interval_from_row(row)
+        recorded.row(row, moves)
     report.window_end = limit
     if start >= limit:
         report.deleted = _delete(session, stored)
         return report
-    seeds = _seeds(ctx, start)
-    timeline = LeaseTimeline(ctx.rules, seeds.open, releases=_releases(ctx, start))
+    seeds = _seeds(ctx, start, recorded)
+    releases = _releases(ctx, start)
+    recorded.read(releases)
+    timeline = LeaseTimeline(ctx.rules, seeds.open, releases=releases)
     dhcp = load_dhcp(ctx, start, limit, count=True)
+    recorded.read(dhcp, window=True)
     arp = load_arp(ctx, start, limit)
     traffic_ips = {s.ip for s in seeds.open if s.source_table in DHCP_TABLES}
     traffic_ips |= {e.ip for e in dhcp if e.action == "assigned"}
@@ -1017,11 +1302,12 @@ def rebuild_day(
             *load_arp(ctx, cursor, chunk_end, pending),
             *load_traffic(ctx, cursor, chunk_end, pending & dhcp_ips),
         ]
+        recorded.read(later, window=True)  # the moves of the intervals followed (#127)
         timeline.feed(later)
         timeline.expire(chunk_end)
         cursor = chunk_end
         report.lookahead_chunks += 1
-    report.window_end = cursor
+    report.window_end = recorded.hi = cursor
     result = timeline.finish(cursor)
     report.stats.update(timeline.stats)
     report.stats.update(seeds.stats)
@@ -1034,7 +1320,9 @@ def rebuild_day(
     )
     tails = [*(i for i in result if i.row_id in seed_ids), *seeds.closed]
     report.deleted = _delete(session, {i: stored[i] for i in gone})
-    report.inserted, report.updated = _write(ctx, [*days_rows, *tails], {**stored, **seeds.stored})
+    report.inserted, report.updated = _write(
+        ctx, [*days_rows, *tails], {**stored, **seeds.stored}, recorded
+    )
     report.devices = _devices(ctx, [*dhcp, *arp])
     session.flush()
     report.alerts, report.resolved_alerts = _day_conflicts(ctx, day, start, end)
@@ -1088,17 +1376,19 @@ def run_incremental(
         return report
     report.window_end = horizon
     ctx = Context.load(session)
-    # Stored rows as they are (their confidence included), with their network and origin.
-    seeds = _annotated(
-        ctx,
-        [
-            interval_from_row(row)
-            for row in session.scalars(select(Lease).where(Lease.end.is_(None)))
-        ],
-    )
+    # Stored rows as they are (their confidence included), with their network and origin; their
+    # moves are read only where they can change (:meth:`_Recorded.moves`), not every minute.
+    recorded = _Recorded(lo=watermark, hi=horizon)
+    rows = session.execute(select(Lease, Lease.moves.is_(None)).where(Lease.end.is_(None))).all()
+    for row, null in rows:
+        recorded.row_unread(row, bool(null))
+    seeds = _annotated(ctx, [interval_from_row(row) for row, _ in rows], recorded.vds)
     by_id: dict[int | None, LeaseInterval] = {s.row_id: s for s in seeds}
-    timeline = LeaseTimeline(ctx.rules, seeds, releases=_releases(ctx, watermark))
+    releases = _releases(ctx, watermark)
+    recorded.read(releases)
+    timeline = LeaseTimeline(ctx.rules, seeds, releases=releases)
     dhcp = load_dhcp(ctx, watermark, horizon, count=True)
+    recorded.read(dhcp, window=True)
     arp = load_arp(ctx, watermark, horizon)
     traffic_ips = {s.ip for s in seeds if s.source_table in DHCP_TABLES}
     traffic_ips |= {e.ip for e in dhcp if e.action == "assigned"}
@@ -1109,10 +1399,10 @@ def run_incremental(
     result = timeline.finish(horizon)
     report.stats.update(timeline.stats)
     report.stats.update(ctx.stats)
-    report.inserted, report.updated = _write(ctx, result, by_id)
+    report.inserted, report.updated = _write(ctx, result, by_id, recorded)
     report.devices = _devices(ctx, [*dhcp, *arp])
     session.flush()
-    touched = {i.ip for i in result if i.row_id is None or _changed(by_id[i.row_id], i)}
+    touched = {i.ip for i in result if i.row_id is None or _values(by_id[i.row_id]) != _values(i)}
     report.alerts = _conflicts(ctx, watermark, horizon, touched)
     set_watermark(session, horizon)
     return report

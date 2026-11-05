@@ -390,11 +390,12 @@ _LOOKUP = _group(
         "lease.server_seconds",
         "Sunucuya göre kira süresi",
         "Lease time per server",
-        'Kira süresi farklı DHCP sunucuları: {"<ad>": saniye}, her biri en az 60. Ad, DHCP '
-        "sunucusu adı (MikroTik, ör. dhcp61) ya da FortiGate DHCP arayüzü adı (ör. vlan61).",
-        'DHCP servers with another lease time: {"<name>": seconds}, each at least 60. The name '
-        "is the DHCP server name (MikroTik, e.g. dhcp61) or the FortiGate DHCP interface name "
-        "(e.g. vlan61).",
+        'Kira süresi farklı DHCP sunucuları: {"<ad>": saniye}, her biri 60 ile 604800 (7 gün) '
+        "arasında. Ad, DHCP sunucusu adı (MikroTik, ör. dhcp61) ya da FortiGate DHCP arayüzü "
+        "adı (ör. vlan61).",
+        'DHCP servers with another lease time: {"<name>": seconds}, each between 60 and 604800 '
+        "(7 days). The name is the DHCP server name (MikroTik, e.g. dhcp61) or the FortiGate "
+        "DHCP interface name (e.g. vlan61).",
     ),
     (
         "lease.timeout_percent",
@@ -511,8 +512,10 @@ _LOOKUP = _group(
         "arp.interval_seconds",
         "ARP kaydı aralığı (saniye)",
         "ARP log interval (seconds)",
-        "MikroTik zamanlayıcı betiğinin ARP-LOG aralığı.",
-        "The ARP-LOG interval of the MikroTik scheduler script.",
+        "MikroTik zamanlayıcı betiğinin ARP-LOG aralığı (en az 'Bırakmadan sonra ARP'yi yok "
+        "say' süresi kadar).",
+        "The ARP-LOG interval of the MikroTik scheduler script (at least as long as 'Ignore ARP "
+        "after a release').",
     ),
     (
         "arp.ignore_after_release_seconds",
@@ -998,10 +1001,23 @@ _DATABASE = _group(
         "db.retention_days",
         "Veritabanında saklama süresi (gün)",
         "Database retention (days)",
-        "Veritabanının sorgular için tuttuğu log günleri (varsayılan 400). Mühürlü kasadaki ham "
-        "loglar bundan etkilenmez.",
-        "How many days of logs the database keeps for lookups (default 400). The raw logs in "
-        "the sealed vault are not affected.",
+        "Veritabanının sorgular için tuttuğu log günleri (varsayılan 30, en az 7); daha eski "
+        "günler her gece silinir ve istendiğinde mühürlü kasadan yeniden yüklenir. Mühürlü "
+        "kasadaki ham loglar bundan etkilenmez.",
+        "How many days of logs the database keeps for lookups (default 30, at least 7); older "
+        "days are dropped every night and reloaded from the sealed vault on request. The raw "
+        "logs in the sealed vault are not affected.",
+    ),
+    (
+        "db.reload_keep_days",
+        "Arşivden yüklenen günlerin saklama süresi (gün)",
+        "Retention of days reloaded from the archive (days)",
+        "Mühürlü kasadan yeniden yüklenen günler, yükleme bittikten sonra bu kadar gün "
+        "veritabanında kalır, sonra yine silinir (1-30, varsayılan 7). Bu günler kişisel veri "
+        "içerir.",
+        "Days reloaded from the sealed vault stay in the database this many days after the "
+        "reload finished, then they are dropped again (1-30, default 7). These days contain "
+        "personal data.",
     ),
 )
 

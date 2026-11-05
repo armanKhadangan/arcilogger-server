@@ -22,8 +22,9 @@ jobs:
   # Each test runs once per operating system: the poe tasks of a platform together name every
   # testpaths directory once (tests/test_ci_workflows.py checks it); "poe test" is for local use.
   python-linux:
-    name: Python (ubuntu-latest, PostgreSQL 16 + TimescaleDB)
-    runs-on: ubuntu-latest
+    name: Python (ubuntu-24.04, PostgreSQL 16 + TimescaleDB)
+    # Pinned: the runner needs PostgreSQL 16's client tools, the service's major; ubuntu-26.04 has none.
+    runs-on: ubuntu-24.04
     services:
       postgres:
         # Same image as deploy/dev/compose.yaml. Throwaway CI credentials, not a secret.

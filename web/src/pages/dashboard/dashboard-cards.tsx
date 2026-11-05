@@ -11,10 +11,12 @@ import {
   TriangleAlert,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 
 import { Sparkline } from '@/components/charts/sparkline';
 import type { RawLineTarget } from '@/components/evidence/raw-line-sheet';
+import { docsReference } from '@/components/legal/reason-text';
+import { Alert } from '@/components/ui/alert';
 import { Badge, StatusBadge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import type {
@@ -22,6 +24,7 @@ import type {
   DashboardCredit,
   DashboardIngest,
   DashboardParseFailures,
+  SealBlocking,
   SealYesterday,
 } from '@/lib/api-types';
 import { formatDay, visibleText } from '@/lib/display';
@@ -102,6 +105,45 @@ export function IngestCard({ ingest, to }: { ingest: DashboardIngest } & LinkPro
         </div>
       ) : null}
     </DashCard>
+  );
+}
+
+/**
+ * The blocking card above the health cards (Wave 5 contract 2.3.1 "Panel", decision 11): a closed
+ * day is unstamped for longer than `seal.late_after_hours`. Full width and red, with an icon, the
+ * oldest such day, how late it is and the documentation reference, linking to that day on the
+ * sealing page. It is announced politely (`role="status"`): the legal-validity banner above every
+ * page already says it at once (`unstamped_days`). No `h3` and no `card-*` id, so the health
+ * cards' grid and title checks do not count it.
+ */
+export function BlockingCard({ blocking, to }: { blocking: SealBlocking } & LinkProps) {
+  const { t } = useTranslation();
+  const lang = currentLang();
+  // Whole hours, never rounded up: "48 saat" for 48 h 50 min.
+  const hours = Math.max(0, Math.floor(blocking.hours_late));
+  const body = t('dashboard.blocking.body', {
+    day: formatDay(blocking.oldest_unstamped_day),
+    count: hours,
+    hours: formatNumber(hours, 0, lang),
+  });
+  const reference = docsReference('unstamped_days', lang);
+  return (
+    <Alert
+      tone="danger"
+      assertive={false}
+      title={t('dashboard.blocking.title')}
+      data-testid="dashboard-blocking"
+    >
+      {reference ? `${body} (${reference})` : body}
+      {to ? (
+        <>
+          {' '}
+          <Link to={to} className="font-medium whitespace-nowrap underline underline-offset-2">
+            {t('dashboard.blocking.open')}
+          </Link>
+        </>
+      ) : null}
+    </Alert>
   );
 }
 

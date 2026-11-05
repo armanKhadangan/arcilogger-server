@@ -9,7 +9,9 @@ a job name, a licence state and the names of licence modules, the IP address of 
 a message refused for its transport (``wrong-transport``) or of an IP conflict, the section and
 the field names of a configuration change and the outcome code of the browser administration;
 for the lease evidence and internet exit alerts of ADR-0016 the cause's fixed line, a count, a
-VLAN number, an evidence table and a clock offset).
+VLAN number, an evidence table and a clock offset; for the legal-validity alerts of Wave 5
+contract 2.3.1 the counts of stamps, certificates, issuers and lists, the Renew task's failures
+in a row, a number of days and the moment of the last list fetched).
 Anything else an alert carries — raw log lines, error texts, person or device owner names, MAC
 addresses, paths, configuration values, user names, the licensee — is never put into an e-mail,
 whatever it contains.
@@ -228,6 +230,51 @@ RULES: Final[Mapping[str, RuleText]] = {
         "(NAT) bölümünü denetleyin.",
         "Check Settings → Application settings → 5651 lookup and lease timeline → Internet exits "
         "(NAT).",
+    ),
+    # Content-filter evidence (Wave 4 contract 2.4): the check check_filter of alerts.system.
+    "R20-filter": RuleText(
+        "İçerik filtresi kaydı gelmiyor",
+        "No content filter records",
+        "Güvenlik duvarının web ve DNS filtresi kayıtlarını gönderdiğini denetleyin (Uyum Durumu, "
+        "kart 7).",
+        "Check that the firewall sends its web and DNS filter records (Uyum Durumu, card 7).",
+    ),
+    # Legal validity (Wave 5 contract 2.3.1, D14): the checks check_stamp_renewal,
+    # check_stamp_cert and check_stamp_crl of alerts.system. Counts only, never a certificate's
+    # or a provider's name, a file or an address.
+    "R20-renewal": RuleText(
+        "Yeniden damgalama gerekiyor",
+        "Re-stamping needed",
+        "Sistem sayfasında Renew görevini ve Ayarlar → Zaman damgası'nı denetleyin; yeniden "
+        "damgalanacakları görmek için: arcilogger-core renew --dry-run.",
+        "Check the Renew task on the System page and Settings → Time stamping; to see what is "
+        "to be re-stamped: arcilogger-core renew --dry-run.",
+    ),
+    "R20-cert": RuleText(
+        "Zaman damgası sertifikası sorunu",
+        "Time-stamp certificate problem",
+        "İptal edilmiş bir sertifika için zaman damgası sağlayıcısıyla görüşün; hukuki inceleme "
+        "önerilir. Süresi dolan sertifikalar için Renew görevini denetleyin.",
+        "For a revoked certificate contact the time-stamp provider; legal review is recommended. "
+        "For expiring certificates check the Renew task.",
+    ),
+    "R20-crl": RuleText(
+        "İptal listesi (SİL) güncel değil",
+        "Revocation list not current",
+        "Sistem sayfasında CrlFetch görevini denetleyin; iptal listeleri indirilemiyorsa "
+        "tsa.crl_urls ayarını ve sıkı giden modda güvenlik duvarını denetleyin.",
+        "Check the CrlFetch task on the System page; if the revocation lists cannot be fetched, "
+        "check the tsa.crl_urls setting and, in strict outbound mode, the firewall.",
+    ),
+    # The database window (Wave 5 contract G3, worker job db.window): a failed run, or an
+    # archive reload without progress since the previous run (its days hold the cutoff).
+    "R20-db-window": RuleText(
+        "Veritabanı penceresi işi sorunu",
+        "Database window job problem",
+        "logs\\worker.log ve state\\worker-status.json dosyalarına bakın; ilerlemeyen bir "
+        "yeniden yüklemede ArciIngest'i denetleyin: Get-Service ArciIngest.",
+        "Look at logs\\worker.log and state\\worker-status.json; for a reload without progress "
+        "check ArciIngest: Get-Service ArciIngest.",
     ),
     "new-log-source": RuleText(
         "Yeni log kaynağı",
@@ -596,6 +643,123 @@ _STEPS: Final[dict[str, tuple[str, str]]] = {
         "audit log (settings.change).\n"
         "4. Raw logs are not affected and are sealed. The alert closes by itself once the exits "
         "are saved or 24 hours after the problem ends.",
+    ),
+    "R20-filter": (
+        "1. Uyum Durumu sayfasında 7. kartı açın: son kaydı ve beklenen günleri görün.\n"
+        "2. Güvenlik duvarında web ve DNS filtresi kullanan politikalarda kayıt tutmanın açık "
+        "olduğunu ve kayıtların ARCILOGGER'a gönderildiğini denetleyin (DEVICE-SETUP.md; sahada "
+        "doğrulayın).\n"
+        "3. Kurum bu günlerde çalışmıyorsa beklenen günleri ve tatil ayarını Ayarlar → Uygulama "
+        "ayarları → Uyarılar ve e-posta'da düzeltin.\n"
+        "4. Yeni bir içerik filtresi kaydı gelince uyarı kendiliğinden kapanır.",
+        "1. Open card 7 on the Uyum Durumu page: see the last record and the expected days.\n"
+        "2. Check on the firewall that the policies using web and DNS filtering log, and that the "
+        "records are sent to ARCILOGGER (DEVICE-SETUP.md; verify on site).\n"
+        "3. If the organisation does not work on these days, correct the expected days and the "
+        "holiday setting in Settings → Application settings → Alerts and e-mail.\n"
+        "4. The alert closes by itself when a new content filter record arrives.",
+    ),
+    "R20-renewal": (
+        "1. Ayrıntılarda kaç damganın yeniden damgalama zamanının geldiğini, kaçının "
+        "sertifikasının yeniden damgalanmadan sona erdiğini ve Renew görevinin art arda kaç kez "
+        "başarısız olduğunu görün.\n"
+        "2. Sistem sayfasında Renew görevinin satırına bakın; son çalıştırmanın sonucu "
+        "D:\\ARCILOGGER\\state\\renewal\\renewal.json dosyasında, yükseltmeden sonraki ilk "
+        "çalıştırmaya kadar D:\\ARCILOGGER\\state\\renewal.json dosyasında last_run altındadır "
+        "(refused: yapılandırma reddetti, örneğin kimlik bilgileri ya da sabitlenmiş kök "
+        "sertifikalar yok; failed: zaman damgası sunucusu yanıt vermedi, yeni damga doğrulanmadı "
+        "ya da bir dosya hatası).\n"
+        "3. Neyin yeniden damgalanacağını damga almadan görün: arcilogger-core renew --dry-run "
+        "--json. Ayarlar → Zaman damgası'nda sağlayıcıyı, kimlik bilgilerini ve kökleri "
+        "denetleyin; görev her gün kendiliğinden yeniden dener.\n"
+        "4. Damgalar alındıkları an için geçerli kalır; yeniden damgalama onları uzun süreli kanıt "
+        "olarak korur. Uyarı, rapor yeniden damgalanacak damga göstermeyince ve Renew görevi art "
+        "arda iki kez başarısız olmamışken kendiliğinden kapanır.",
+        "1. See in the details how many stamps are due for re-stamping, how many certificates "
+        "expired without re-stamping and how many times in a row the Renew task failed.\n"
+        "2. Look at the Renew task's row on the System page; the last run's result is under "
+        "last_run in D:\\ARCILOGGER\\state\\renewal\\renewal.json, until the first run after an "
+        "upgrade in D:\\ARCILOGGER\\state\\renewal.json (refused: the configuration refused, for "
+        "example no credentials or no pinned root certificates; failed: the time-stamp server did "
+        "not answer, the new stamp did not verify or a file error).\n"
+        "3. See what would be re-stamped without taking a stamp: arcilogger-core renew --dry-run "
+        "--json. Check the provider, the credentials and the roots under Settings → Time "
+        "stamping; the task retries by itself every day.\n"
+        "4. Stamps stay valid for the moment they were made; re-stamping keeps them as long-term "
+        "evidence. The alert closes by itself once the report shows nothing to re-stamp and the "
+        "Renew task has not failed twice in a row.",
+    ),
+    "R20-cert": (
+        "1. Ayrıntılarda kaç sertifikanın iptal listesinde olduğunu (kritik) ya da kaç damganın "
+        "sertifikasının 30 gün içinde sona erdiğini veya yeniden damgalanmadan sona erdiğini "
+        "(yüksek) görün.\n"
+        "2. İptal edilmiş bir sertifikada: hangi günlerin etkilendiğini Mühürleme sayfasında gün "
+        "ayrıntısında görün ve zaman damgası sağlayıcısıyla görüşün; hukuki inceleme önerilir. "
+        "Ham loglar ve mühürler değiştirilmez.\n"
+        "3. Süresi dolan sertifikalarda Renew görevini ve R20-renewal uyarısını denetleyin: "
+        "arcilogger-core renew --dry-run --json.\n"
+        "4. Uyarı, iptal ya da yaklaşan süre sonu kalmayınca ve bütün girdiler (yeniden "
+        "damgalama raporu, zamanlanmış doğrulamalar, son mühürlü günün damgası, iptal listeleri) "
+        "okunabilince kendiliğinden kapanır.",
+        "1. See in the details how many certificates are on a revocation list (critical), or how "
+        "many stamps have a certificate that expires within 30 days or expired without "
+        "re-stamping (high).\n"
+        "2. For a revoked certificate: see which days it concerns in the day detail of the "
+        "Sealing page and contact the time-stamp provider; legal review is recommended. Raw "
+        "logs and seals are not changed.\n"
+        "3. For expiring certificates check the Renew task and the R20-renewal alert: "
+        "arcilogger-core renew --dry-run --json.\n"
+        "4. The alert closes by itself once no revocation or near expiry is left and every "
+        "input (the re-stamping report, the scheduled verifications, the newest sealed day's "
+        "stamp, the revocation lists) can be read.",
+    ),
+    "R20-crl": (
+        "1. Ayrıntılarda kaç sertifika veren için güncel liste olmadığını, son indirmede kaç "
+        "adresin alınamadığını ve kaç saklı listenin değiştiğini ya da silindiğini görün.\n"
+        "2. Sistem sayfasında CrlFetch görevinin satırına bakın; listeleri şimdi indirin: "
+        "arcilogger-core crl fetch, sonra arcilogger-core crl status. İndirilemeyen adresler "
+        "D:\\ARCILOGGER\\state\\crl\\index.json dosyasında failures altındadır.\n"
+        "3. Adresler sertifikalardan alınır ya da tsa.crl_urls ayarıyla verilir; sıkı giden "
+        "modda güvenlik duvarının bu adreslere açık olduğunu denetleyin. Kamu SM'nin ve "
+        "TÜRKTRUST'ın iptal listesi yayın aralıkları sahada doğrulanmalıdır (K10/T4). "
+        "Değişen ya da silinen bir saklı liste kurcalama belirtisidir: dosyaya dokunmayın, "
+        "inceleyin.\n"
+        "4. Kullanılan her sertifika veren için tsa.crl_max_age_days (7) günden yeni, süresi "
+        "geçmemiş doğrulanmış bir liste olunca uyarı kendiliğinden kapanır.",
+        "1. See in the details for how many issuers no current list exists, how many addresses "
+        "the last fetch could not get and how many stored lists were changed or deleted.\n"
+        "2. Look at the CrlFetch task's row on the System page; fetch the lists now: "
+        "arcilogger-core crl fetch, then arcilogger-core crl status. Addresses that could not be "
+        "fetched are under failures in D:\\ARCILOGGER\\state\\crl\\index.json.\n"
+        "3. The addresses come from the certificates or from the tsa.crl_urls setting; in strict "
+        "outbound mode check that the firewall allows them. Kamu SM's and TÜRKTRUST's "
+        "revocation list publication intervals are to be verified on site (K10/T4). A stored "
+        "list that was changed or deleted is a sign of tampering: do not touch the file, look "
+        "into it.\n"
+        "4. The alert closes by itself once every issuer in use has a verified list newer than "
+        "tsa.crl_max_age_days (7) days and not past its own next update.",
+    ),
+    "R20-db-window": (
+        "1. Ayrıntılarda hangisi olduğunu görün: işin bir çalıştırması başarısız oldu ya da bir "
+        "arşivden yeniden yükleme (numarası ve günleriyle) önceki çalıştırmadan beri ilerlemedi.\n"
+        "2. Başarısız çalıştırmada D:\\ARCILOGGER\\logs\\worker.log dosyasına ve veritabanı "
+        "bağlantısına bakın; worker işi kendisi yeniden dener, pencereden eski günler o zamana "
+        "kadar silinmez.\n"
+        "3. İlerlemeyen yeniden yüklemede ArciIngest hizmetinin çalıştığını (Get-Service "
+        "ArciIngest) ve D:\\ARCILOGGER\\state\\ingest-status.json dosyasını denetleyin; yüklenen "
+        "günler hiçbir zaman silinmez, veritabanı bu sürede pencereden büyük kalır.\n"
+        "4. Sonraki başarılı çalıştırma ya da ilerleyen (veya biten) yeniden yükleme, ya da "
+        "önündeki sıranın ilerlemesi uyarıyı kendiliğinden kapatır.",
+        "1. See in the details which it is: a run of the job failed, or an archive reload (with "
+        "its number and days) has made no progress since the previous run.\n"
+        "2. For a failed run look at D:\\ARCILOGGER\\logs\\worker.log and the database "
+        "connection; the worker retries the job by itself, and days older than the window are "
+        "not dropped until then.\n"
+        "3. For a reload without progress check that the ArciIngest service runs (Get-Service "
+        "ArciIngest) and D:\\ARCILOGGER\\state\\ingest-status.json; days being loaded are never "
+        "dropped, so the database stays larger than the window meanwhile.\n"
+        "4. The next successful run, or the reload moving on (or ending), or the queue before "
+        "it moving, closes the alert by itself.",
     ),
     "new-log-source": (
         "1. Göndericinin adresini ayrıntılarda görün ve hangi cihaz olduğunu belirleyin.\n"
@@ -1560,6 +1724,113 @@ def _nat(d: Mapping[str, Any]) -> Facts | None:
     return _cause_line(NAT_CAUSES, d)
 
 
+def _filter(d: Mapping[str, Any]) -> Facts | None:
+    """``R20-filter``: the hours without a content filter record, nothing else (contract 2.4)."""
+    hours = _int(d, "hours")
+    if hours is None:
+        return None
+    return (
+        f"Son {hours} saatte içerik filtresi kaydı yok.",
+        f"No content filter record in the last {hours} hours.",
+    )
+
+
+def _db_window(d: Mapping[str, Any]) -> Facts | None:
+    """``R20-db-window``: the reload's number and days, or the day of the failed run."""
+    reload_id = _int(d, "reload_id")
+    first, last = _day(d.get("first_day")), _day(d.get("last_day"))
+    if reload_id is not None and first is not None and last is not None:
+        days = first if first == last else f"{first} - {last}"
+        return (
+            f"Arşivden yeniden yükleme #{reload_id} ({days}) önceki çalıştırmadan beri ilerlemedi; "
+            "o günden itibaren hiçbir kayıt silinmiyor.",
+            f"Archive reload #{reload_id} ({days}) has made no progress since the previous run; "
+            "nothing from that day on is dropped.",
+        )
+    day = _day(d.get("day"))
+    if reload_id is not None or day is None:
+        return None
+    return (
+        f"Veritabanı penceresi işi {day} günü çalışamadı; pencereden eski günler silinmedi.",
+        f"The database window job failed on {day}; days older than the window were not dropped.",
+    )
+
+
+#: The title of ``R20-renewal`` raised by the Renew task's failures alone (no stamp due or
+#: expired without re-stamping, or the token list unknown), formatted with ``failures``, the
+#: count in a row (at least alerts.system.RENEW_FAILURES_ALERT); W5-E-7.
+RENEW_FAILED_TITLE: Final = (
+    "Yeniden damgalama görevi art arda {failures} kez başarısız",
+    "The re-stamping task failed {failures} times in a row",
+)
+#: alerts.system.RENEW_FAILURES_ALERT (that module imports this one).
+_RENEW_FAILURES_ALERT: Final = 2
+
+
+def _renewal(d: Mapping[str, Any]) -> Facts | None:
+    """``R20-renewal``: the stamps due and expired without re-stamping, and the Renew task's
+    failed runs in a row (counts only)."""
+    due, uncovered, failures = _int(d, "due"), _int(d, "uncovered"), _int(d, "failures_in_a_row")
+    parts_tr, parts_en = [], []
+    if due is not None and uncovered is not None and (due or uncovered):
+        parts_tr.append(
+            f"{due} damganın yeniden damgalama zamanı geldi, {uncovered} damganın sertifikası "
+            "yeniden damgalanmadan sona erdi."
+        )
+        parts_en.append(f"{due} stamp(s) due for re-stamping, {uncovered} expired without it.")
+    if failures is not None and failures >= _RENEW_FAILURES_ALERT:
+        parts_tr.append(f"Renew görevi art arda {failures} kez başarısız oldu.")
+        parts_en.append(f"The Renew task failed {failures} times in a row.")
+    return (" ".join(parts_tr), " ".join(parts_en)) if parts_tr else None
+
+
+#: alerts.system.CERT_EXPIRY_WARNING in days (that module imports this one).
+_CERT_EXPIRY_DAYS: Final = 30
+
+
+def _cert(d: Mapping[str, Any]) -> Facts | None:
+    """``R20-cert``: revoked certificates, or the stamps whose certificate expires soon or
+    expired without re-stamping (counts only, never the certificate's name)."""
+    revoked, expiring, uncovered = _int(d, "revoked"), _int(d, "expiring"), _int(d, "uncovered")
+    if revoked:
+        return (
+            f"{revoked} zaman damgası sertifikası iptal listesinde; hukuki inceleme önerilir.",
+            f"{revoked} time-stamp certificate(s) on a revocation list; legal review is "
+            "recommended.",
+        )
+    if expiring is None or uncovered is None:
+        return None
+    days = _CERT_EXPIRY_DAYS
+    return (
+        f"{expiring} damganın sertifikası {days} gün içinde sona eriyor, {uncovered} damganınki "
+        "yeniden damgalanmadan sona erdi.",
+        f"{expiring} stamp certificate(s) expire within {days} days, {uncovered} expired "
+        "without re-stamping.",
+    )
+
+
+def _crl(d: Mapping[str, Any]) -> Facts | None:
+    """``R20-crl``: the issuers without a current list, the failed addresses and the changed
+    stored lists (counts), the age limit and the last successful fetch."""
+    stale, days = _int(d, "stale_issuers"), _int(d, "max_age_days")
+    if stale is None or days is None:
+        return None
+    tr = f"{stale} sertifika veren için {days} günden yeni doğrulanmış iptal listesi (SİL) yok"
+    en = f"No verified revocation list newer than {days} days for {stale} issuer(s)"
+    failures, changed = _int(d, "failures"), _int(d, "changed_files")
+    if failures:
+        tr += f"; son indirmede {failures} adres alınamadı"
+        en += f"; the last fetch failed for {failures} address(es)"
+    if changed:
+        tr += f"; {changed} saklı liste değişmiş ya da silinmiş"
+        en += f"; {changed} stored list(s) changed or deleted"
+    newest = _moment(d.get("newest_fetched_at"))
+    if newest:
+        tr += f". Son başarılı indirme: {newest}"
+        en += f". Last successful fetch: {newest}"
+    return (f"{tr}.", f"{en}.")
+
+
 DESCRIBERS: Final[Mapping[str, Callable[[Mapping[str, Any]], Facts | None]]] = {
     "R15": _r15,
     "R20-seal": _seal,
@@ -1580,6 +1851,11 @@ DESCRIBERS: Final[Mapping[str, Callable[[Mapping[str, Any]], Facts | None]]] = {
     "R20-config-change": _config_change,
     "R20-lease": _lease,
     "R20-nat": _nat,
+    "R20-filter": _filter,
+    "R20-db-window": _db_window,
+    "R20-renewal": _renewal,
+    "R20-cert": _cert,
+    "R20-crl": _crl,
     "new-log-source": _sender,
     "new_source": _sender,
     "wrong-transport": _sender,

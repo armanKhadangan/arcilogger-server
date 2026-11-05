@@ -333,3 +333,20 @@ def test_parse_config_reads_bytes_as_load_config_reads_the_file(tmp_path: Path) 
     assert parse_config(path.read_bytes(), path) == load_config(path)
     with pytest.raises(ValueError, match="utf-8"):
         parse_config(MINIMAL.encode("utf-16"), path)
+
+
+def test_seal_compression_keys(tmp_path: Path) -> None:
+    """Wave 5 H1: xz by default, preset 6 and 2 threads; gzip stays a choice."""
+    seal = load_config(_write(tmp_path, MINIMAL)).seal
+    assert (seal.compression, seal.xz_preset, seal.xz_threads, seal.gzip_level) == ("xz", 6, 2, 9)
+    chosen = load_config(_write(tmp_path, MINIMAL + '\n[seal]\ncompression = "gzip"\n')).seal
+    assert chosen.compression == "gzip"
+    for section, message in (
+        ('compression = "zstd"', "compression"),
+        ("xz_preset = 10", "less than or equal to 9"),
+        ("xz_preset = -1", "greater than or equal to 0"),
+        ("xz_threads = 0", "greater than or equal to 1"),
+        ("xz_threads = 9", "less than or equal to 8"),
+    ):
+        with pytest.raises(ValidationError, match=message):
+            load_config(_write(tmp_path, MINIMAL + "\n[seal]\n" + section + "\n"))

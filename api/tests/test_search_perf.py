@@ -14,10 +14,13 @@ and one rare free-text token.
 ``search_counts`` is filled with ``searchcounts.rebuild_stream``; ``VACUUM ANALYZE``; on
 TimescaleDB the chunks older than 7 days are compressed before timing (the compression policies
 are paused before loading: run against today's date, they would compress whichever chunks
-existed when they started).
+existed when they started); last a ``CHECKPOINT`` writes the load back to disk, so its write-back
+does not run into the timing (#90; skipped, and said so, for a role without ``pg_checkpoint``).
 
 **Timing:** through the API (``TestClient``), best of three after one warm-up; the cold run is
-printed too. The numbers are recorded in docs/ARAMA.md / docs/SEARCH.md ("Performans").
+printed too, past pytest's capture, so CI's log shows them for a passing run as well, with where
+the best call's time went (SQL, commits, fsyncs, other; :class:`Timer`, #90). The numbers are
+recorded in docs/ARAMA.md / docs/SEARCH.md ("Performans").
 
 **Plans:** for Q2-Q7 the statement of a whole-range window, as the search sends it (on
 TimescaleDB one window on each side of a compression horizon, where ``windows.run_page`` ends a
@@ -48,7 +51,7 @@ from typing import Any
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from sqlalchemy import Engine, select, text
+from sqlalchemy import Engine, event, select, text
 from sqlalchemy.orm import Session, sessionmaker
 
 from arcilogger_api.app import create_app
@@ -389,6 +392,96 @@ def _compress_old_chunks(engine: Engine, before: datetime) -> int:
     return compressed
 
 
+def _checkpoint(engine: Engine) -> str:
+    """Write the load back to disk before timing (#90). The load, the recount and ``VACUUM
+    ANALYZE`` leave gigabytes of dirty pages; on the Windows runner their write-back ran into Q1
+    and every commit and the audit spool's fsync of a search waited behind it (about +500 ms a
+    request, the plan unchanged). ``CHECKPOINT`` writes and syncs every file written since the
+    last one, so the timing starts on a settled server. It needs a superuser or
+    ``pg_checkpoint`` (both CI jobs connect as one); without, it is skipped and said so."""
+    with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as connection:
+        allowed = connection.scalar(
+            text(
+                "SELECT rolsuper OR pg_has_role(current_user, 'pg_checkpoint', 'MEMBER') "
+                "FROM pg_roles WHERE rolname = current_user"
+            )
+        )
+        if not allowed:
+            return "no checkpoint (the role has no pg_checkpoint)"
+        began = time.perf_counter()
+        connection.execute(text("CHECKPOINT"))
+    return f"checkpoint in {time.perf_counter() - began:.1f} s"
+
+
+@dataclass
+class Split:
+    """Where one request's time went (#90): its SQL statements, its commits and its fsyncs, timed
+    in this test only (product code has no timing hooks); the rest is "other" (Python, the ASGI
+    app, the client)."""
+
+    sql: float = 0.0
+    commits: float = 0.0
+    commit_count: int = 0
+    fsyncs: float = 0.0
+    fsync_count: int = 0
+
+    def text(self, total: float) -> str:
+        other = total - self.sql - self.commits - self.fsyncs
+        return (
+            f"sql {self.sql * 1000:.0f} ms, commit {self.commits * 1000:.0f} ms "
+            f"({self.commit_count}), fsync {self.fsyncs * 1000:.0f} ms ({self.fsync_count}), "
+            f"other {other * 1000:.0f} ms"
+        )
+
+
+class Timer:
+    """Times the statements and commits of ``engine`` and every ``os.fsync`` (the audit spool's)
+    into :attr:`current`, from :func:`install` until the monkeypatch and the listeners are undone.
+    One request runs at a time, so the counters need no lock."""
+
+    def __init__(self) -> None:
+        self.current = Split()
+        #: The split of the best call of the last :func:`measure`.
+        self.best = Split()
+
+    def install(self, engine: Engine, monkeypatch: pytest.MonkeyPatch) -> Callable[[], None]:
+        def before(conn: Any, cursor: Any, statement: str, *args: Any) -> None:
+            conn.info.setdefault("arci_perf_began", []).append(time.perf_counter())
+
+        def after(conn: Any, cursor: Any, statement: str, *args: Any) -> None:
+            self.current.sql += time.perf_counter() - conn.info["arci_perf_began"].pop()
+
+        commit = engine.dialect.do_commit
+        fsync = os.fsync
+
+        def do_commit(dbapi_connection: Any) -> None:
+            began = time.perf_counter()
+            try:
+                commit(dbapi_connection)
+            finally:
+                self.current.commits += time.perf_counter() - began
+                self.current.commit_count += 1
+
+        def timed_fsync(fd: int) -> None:
+            began = time.perf_counter()
+            try:
+                fsync(fd)
+            finally:
+                self.current.fsyncs += time.perf_counter() - began
+                self.current.fsync_count += 1
+
+        event.listen(engine, "before_cursor_execute", before)
+        event.listen(engine, "after_cursor_execute", after)
+        monkeypatch.setattr(engine.dialect, "do_commit", do_commit)
+        monkeypatch.setattr(os, "fsync", timed_fsync)
+
+        def remove() -> None:
+            event.remove(engine, "before_cursor_execute", before)
+            event.remove(engine, "after_cursor_execute", after)
+
+        return remove
+
+
 @dataclass
 class Site:
     client: TestClient
@@ -399,10 +492,22 @@ class Site:
     start: datetime
     end: datetime
     newest: tuple[datetime, datetime]
+    #: Prints past pytest's capture, so CI's log shows the figures of a passing run too (#90).
+    show: Callable[[str], None]
+    timer: Timer
 
 
 @pytest.fixture
-def site(tmp_path: Any, db_engine: Engine) -> Iterator[Site]:
+def site(
+    tmp_path: Any,
+    db_engine: Engine,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> Iterator[Site]:
+    def show(line: str) -> None:
+        with capsys.disabled():
+            print(line)
+
     newest_rows, other_rows = LINES.get(TIER, LINES["1"])
     days = [NEWEST - timedelta(days=offset) for offset in range(DAYS)]
     began = time.perf_counter()
@@ -432,11 +537,13 @@ def site(tmp_path: Any, db_engine: Engine) -> Iterator[Site]:
         compressed = _compress_old_chunks(db_engine, day_window(NEWEST - timedelta(days=7))[0])
         with db_engine.connect().execution_options(isolation_level="AUTOCOMMIT") as connection:
             connection.execute(text("ANALYZE"))
+    checkpoint = _checkpoint(db_engine)
     with db_engine.connect() as connection:
         total = connection.scalar(select(Message.id).order_by(Message.id.desc()).limit(1))
-    print(
+    show(
         f"\nsearch perf data (tier {TIER}): {total} messages rows, loaded in {loaded:.0f} s, "
-        f"ready in {time.perf_counter() - began:.0f} s, {compressed} chunks compressed"
+        f"ready in {time.perf_counter() - began:.0f} s, {compressed} chunks compressed, "
+        f"{checkpoint}"
     )
     config = Config.model_validate(
         {
@@ -450,6 +557,8 @@ def site(tmp_path: Any, db_engine: Engine) -> Iterator[Site]:
             ],
         }
     )
+    timer = Timer()
+    remove_timer = timer.install(db_engine, monkeypatch)
     app = create_app(config, db_engine, audit_flush_seconds=None)
     state: AppState = app.state.arci
     factory = state.session_factory()
@@ -470,22 +579,33 @@ def site(tmp_path: Any, db_engine: Engine) -> Iterator[Site]:
             session.commit()
         start, _ = day_window(days[-1])
         _, end = day_window(NEWEST)
-        yield Site(client, app, db_engine, factory, config, start, end, day_window(NEWEST))
+        try:
+            yield Site(
+                client, app, db_engine, factory, config, start, end, day_window(NEWEST), show, timer
+            )
+        finally:
+            remove_timer()
 
 
 # -- measuring ------------------------------------------------------------------------------------
 
 
-def measure(call: Callable[[], Any]) -> tuple[float, float, Any]:
-    """Cold run, then the best of three after it (the cold run is the warm-up)."""
+def measure(site: Site, call: Callable[[], Any]) -> tuple[float, float, Any]:
+    """Cold run, then the best of three after it (the cold run is the warm-up). The split of the
+    best call is kept in ``site.timer.best`` for :func:`report`."""
+    timer = site.timer
+    timer.current = Split()
     began = time.perf_counter()
     result = call()
     cold = time.perf_counter() - began
     best = float("inf")
     for _ in range(3):
+        timer.current = Split()
         began = time.perf_counter()
         result = call()
-        best = min(best, time.perf_counter() - began)
+        elapsed = time.perf_counter() - began
+        if elapsed < best:
+            best, timer.best = elapsed, timer.current
     return cold, best, result
 
 
@@ -583,10 +703,12 @@ def used(scans: list[Scan]) -> str:
     return ", ".join(names)
 
 
-def report(name: str, q: str, cold: float, best: float, budget: float, extra: str = "") -> None:
-    print(
+def report(
+    site: Site, name: str, q: str, cold: float, best: float, budget: float, extra: str = ""
+) -> None:
+    site.show(
         f"{name}: {q!r} cold {cold * 1000:.0f} ms, best {best * 1000:.0f} ms "
-        f"(budget {budget * 1000:.0f} ms){extra}"
+        f"(budget {budget * 1000:.0f} ms){extra}; best: {site.timer.best.text(best)}"
     )
 
 
@@ -599,8 +721,8 @@ def test_search_performance(site: Site) -> None:
 
     # Q1 browse, first page: a backward scan of the primary key of messages.
     for label, (start, end) in (("1 d", site.newest), ("30 d", month)):
-        cold, best, page = measure(partial(search, site, "", start, end))
-        report(f"Q1 browse {label}", "", cold, best, BROWSE)
+        cold, best, page = measure(site, partial(search, site, "", start, end))
+        report(site, f"Q1 browse {label}", "", cold, best, BROWSE)
         assert len(page["items"]) == 100
         assert best < BROWSE
     q1 = explain(site, "", day_end - timedelta(hours=1), day_end)
@@ -611,21 +733,23 @@ def test_search_performance(site: Site) -> None:
         ("1 d", site.newest, DAY_ROWS),
         ("30 d", month, MONTH_ROWS),
     ):
-        cold, best, page = measure(partial(search, site, f"srcip:{NEEDLE}", start, end))
-        report(f"Q2 srcip {label}", f"srcip:{NEEDLE}", cold, best, budget)
+        cold, best, page = measure(site, partial(search, site, f"srcip:{NEEDLE}", start, end))
+        report(site, f"Q2 srcip {label}", f"srcip:{NEEDLE}", cold, best, budget)
         assert len(page["items"]) == 100
         assert best < budget
     check_plan(explain(site, f"srcip:{NEEDLE}", *month), r"srcip_time")
 
     # Q3 a /24 for a day.
-    cold, best, page = measure(lambda: search(site, "srcip:172.20.41.0/24", day_start, day_end))
-    report("Q3 srcip /24 1 d", "srcip:172.20.41.0/24", cold, best, DAY_ROWS)
+    cold, best, page = measure(
+        site, lambda: search(site, "srcip:172.20.41.0/24", day_start, day_end)
+    )
+    report(site, "Q3 srcip /24 1 d", "srcip:172.20.41.0/24", cold, best, DAY_ROWS)
     assert page["items"]
     assert best < DAY_ROWS
     # A /24 holds about a fifth of the clients: reading the primary key backwards until the page
     # is full is the cheapest plan, so only a sequential scan is refused here.
     q3 = explain(site, "srcip:172.20.41.0/24", day_start, day_end)
-    print(f"Q3 plan: {used(q3)}")
+    site.show(f"Q3 plan: {used(q3)}")
     check_plan(q3, primary=True)
 
     # Q4-Q7 over 30 days.
@@ -641,8 +765,8 @@ def test_search_performance(site: Site) -> None:
         ("Q6", f"type:dhcp mac:{RARE_MAC}", (r"mac_time", r"mt_event\w*_event_time")),
         ("Q7", f"qname:{RARE_DOMAIN}", (r"qname_time",)),
     ):
-        cold, best, page = measure(partial(search, site, q, *month))
-        report(f"{name} 30 d", q, cold, best, MONTH_ROWS)
+        cold, best, page = measure(site, partial(search, site, q, *month))
+        report(site, f"{name} 30 d", q, cold, best, MONTH_ROWS)
         assert page["items"], q
         assert page["scan"]["complete"] is True
         assert best < MONTH_ROWS
@@ -654,9 +778,9 @@ def test_search_performance(site: Site) -> None:
     q8 = "type:web action:blocked department:Finans"
     page = search(site, q8, *month)
     cold, best, rolled = measure(
-        lambda: site.client.post(f"{API}/stats", json={"search_id": page["search_id"]}).json()
+        site, lambda: site.client.post(f"{API}/stats", json={"search_id": page["search_id"]}).json()
     )
-    report("Q8 stats 30 d", q8, cold, best, STATS_ROLLUP, f", mode {rolled['mode']}")
+    report(site, "Q8 stats 30 d", q8, cold, best, STATS_ROLLUP, f", mode {rolled['mode']}")
     assert rolled["mode"] in ("rollup", "hybrid")
     assert best < STATS_ROLLUP
     with site.factory() as session:
@@ -681,9 +805,9 @@ def test_search_performance(site: Site) -> None:
     # Q9 statistics of the needle, counted directly, for a day.
     page = search(site, f"srcip:{NEEDLE}", day_start, day_end)
     cold, best, counted = measure(
-        lambda: site.client.post(f"{API}/stats", json={"search_id": page["search_id"]}).json()
+        site, lambda: site.client.post(f"{API}/stats", json={"search_id": page["search_id"]}).json()
     )
-    report("Q9 stats 1 d direct", f"srcip:{NEEDLE}", cold, best, STATS_DIRECT)
+    report(site, "Q9 stats 1 d direct", f"srcip:{NEEDLE}", cold, best, STATS_DIRECT)
     assert counted["mode"] == "direct"
     assert counted["total"]["value"] == NEEDLE_PER_DAY
     assert best < STATS_DIRECT
@@ -694,11 +818,12 @@ def test_search_performance(site: Site) -> None:
         session.commit()
     page = search(site, f"srcip:{NEEDLE}", *month)
     cold, best, response = measure(
+        site,
         lambda: site.client.post(
             f"{API}/export", json={"search_id": page["search_id"], "format": "csv"}
-        )
+        ),
     )
-    report("Q10 export 10,000 rows", f"srcip:{NEEDLE}", cold, best, EXPORT)
+    report(site, "Q10 export 10,000 rows", f"srcip:{NEEDLE}", cold, best, EXPORT)
     assert response.status_code == 200, response.text
     assert response.headers.get("X-Arci-Export-Truncated") == "rows"
     assert response.content.count(b"\r\n") == 10_001
@@ -718,9 +843,10 @@ def test_search_performance(site: Site) -> None:
         ("S2", "dstport:3389 action:deny", site.newest, None),
         ("S3", f"ip:{NEEDLE}", month, None),
     ):
-        cold, best, page = measure(partial(search, site, q, start, end))
+        cold, best, page = measure(site, partial(search, site, q, start, end))
         complete = page["scan"]["complete"]
         report(
+            site,
             f"{name} scan",
             q,
             cold,
