@@ -12,6 +12,11 @@ both give the case's code, level and texts.
 The core decides "legal grade" with ``tsa.legal_root_fingerprints`` (rule 4), which a package
 does not carry (contract W5-A-5): every case lists the legal CA's root there, so a case whose
 root the site has not listed (it counts in the standalone verifier only) is not in the table.
+
+The deletion-record cases (:data:`DELETION_CASES`, #156 item 1) are shared by the evidence
+builder and the standalone verifier, and run in ``test_renewal_evidence.py``: the core judges no
+deletion record's token once a manifest seals it (its renewal status reads only the token's
+hashes and certificate).
 """
 
 from __future__ import annotations
@@ -20,15 +25,17 @@ import json
 import shutil
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
+import pytest
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 
 from arcilogger_core.canonical import canonical_json
 from arcilogger_core.chain import verify_day
 from arcilogger_core.evidence.standalone import verify as sv
+from arcilogger_core.immutability import is_locked, unlock
 from arcilogger_core.renewal import RecordEntry, protects, renew, renewal_status
 from arcilogger_core.seal import sha256_file
 from arcilogger_core.tsa.client import token_path_for
@@ -330,6 +337,50 @@ def _changed_after_its_stamp(rw: RenewalWorld) -> Built:
     return Built(CNA - timedelta(days=90))
 
 
+#: How :func:`tampered_renewal` edits a record: each one a reader that keeps the last of two keys
+#: (``json.loads``), or guesses the encoding of bytes, reads as relaxed.
+TAMPERINGS = ("a key twice", "UTF-16")
+
+
+def tampered_renewal(
+    rw: RenewalWorld,
+    how: str,
+    name: str = "2031-06-23-1",
+    at: datetime = CNA - timedelta(days=100),
+    *,
+    expires: datetime = FAR,
+) -> str:
+    """A renewal of the day with a non-critical EKU (as :func:`renew_day`) whose record, edited
+    and then stamped again, says relaxed only to a lax reader: ``tsa.require_critical_eku``
+    written twice, true first and false last (``a key twice``), or the relaxed record in UTF-16
+    (``UTF-16``). The standalone verifier's ``load_json`` cannot read either, so each reader
+    must judge its token strict (#156 item 3). Its record path."""
+    record = renew_day(rw, name, at, expires=expires, eku_critical=False, relaxed=True)
+    path = rw.layout.vault / record
+    raw = path.read_bytes()
+    if how == "a key twice":
+        edited = raw.replace(b'"tsa":{', b'"tsa":{"require_critical_eku":true,', 1)
+    else:
+        edited = raw.decode("utf-8").encode("utf-16")
+    assert json.loads(edited)["tsa"]["require_critical_eku"] is False  # the lax reading
+    with pytest.raises(ValueError, match=r"appears twice|can't decode"):
+        sv.load_json(edited)
+    token_path_for(path).unlink()
+    path.write_bytes(edited)
+    rw.legal_provider(expires, eku_critical=False).stamp(path)
+    return record
+
+
+def _tampered_twice(rw: RenewalWorld) -> Built:
+    tampered_renewal(rw, "a key twice")
+    return Built(CNA - timedelta(days=90))
+
+
+def _tampered_utf16(rw: RenewalWorld) -> Built:
+    tampered_renewal(rw, "UTF-16")
+    return Built(CNA - timedelta(days=90))
+
+
 def _root_not_pinned(rw: RenewalWorld) -> Built:
     renew_day(rw, "2031-06-23-1", CNA - timedelta(days=100))
     return Built(CNA - timedelta(days=90), legal_root_pinned=False)
@@ -462,6 +513,13 @@ CASES: tuple[RenewalCase, ...] = (
     RenewalCase(
         "a record changed after its stamp", _changed_after_its_stamp, "renewal-due", "warn"
     ),
+    RenewalCase(
+        "a record with require_critical_eku twice, the last false",
+        _tampered_twice,
+        "renewal-due",
+        "warn",
+    ),
+    RenewalCase("a relaxed record in UTF-16", _tampered_utf16, "renewal-due", "warn"),
     RenewalCase("a root that is not pinned", _root_not_pinned, "renewal-due", "warn"),
     RenewalCase("a renewal of another token only", _lists_another_token, "renewal-due", "warn"),
     # revocation of the renewal's certificate (C15): only at or before the stamp
@@ -528,3 +586,149 @@ def core_status(rw: RenewalWorld, built: Built) -> str:
     """The status ``renewal_status`` gives the day's token (``state/renewal/renewal.json``)."""
     report = renewal_status(rw.layout, rw.world.config, _roots(rw, built), built.now)
     return rw.of(report, day_token_path()).status
+
+
+# -- deletion records (#156 item 1, W5-A-19) -------------------------------------------------------
+
+#: The third sealed day of a deletion case.
+THIRD = DAY + timedelta(days=2)
+DELETION = "2026-10-14-imha.json"
+
+
+@dataclass(frozen=True)
+class DeletionCase:
+    """A deletion record whose token's certificate marks its EKU non-critical, in a package of
+    ``days`` (the days :attr:`build` seals and returns). Its token is judged by the EKU rule of
+    the manifests that list the record, or by the package's when none of the packaged ones
+    does (reached only through the chain anchor). ``findings``: the ``token-eku`` findings of
+    the standalone verifier on the package, as (level, code, day); the builder bundles the
+    legal CA's root for the token exactly when they are warnings, and refuses the package
+    (its self-check) when one fails."""
+
+    name: str
+    build: Callable[[RenewalWorld], tuple[date, ...]]
+    findings: frozenset[tuple[str, str, str]]
+
+    @property
+    def relaxed(self) -> bool:
+        return all(level == "warn" for level, _, _ in self.findings)
+
+
+def deletion_record(rw: RenewalWorld, days: list[dict[str, str]]) -> Path:
+    """``deletions/<DELETION>`` listing ``days``, stamped now under the legal CA's root (which
+    no sealed day uses) by a certificate whose EKU is not critical."""
+    record = rw.layout.deletions / DELETION
+    record.parent.mkdir(parents=True, exist_ok=True)
+    record.write_bytes(
+        canonical_json({"schema": "arcilogger.deletion/1", "days": days, "site": "Örnek A.Ş."})
+    )
+    rw.legal_provider(FAR, eku_critical=False).stamp(record)
+    return record
+
+
+def delete_day(rw: RenewalWorld) -> None:
+    """:data:`DAY` deleted as the retention job deletes it: a deletion record that keeps its
+    hashes, the chain anchor naming that record, and the day's folder gone. No manifest lists
+    the record yet (no day was sealed after it)."""
+    layout = rw.layout
+    hashes = {
+        "manifest_sha256": sha256_file(layout.manifest(DAY)),
+        "token_sha256": sha256_file(layout.token(DAY)),
+    }
+    deletion_record(rw, [{"day": DAY.isoformat(), **hashes}])
+    anchor = {"day": DAY.isoformat(), **hashes, "record": DELETION}
+    layout.chain_anchor.write_bytes(canonical_json(anchor))
+    folder = layout.vault_day(DAY)
+    for path in folder.iterdir():
+        if is_locked(path):
+            unlock(path)
+    shutil.rmtree(folder)
+
+
+def _listed_strict_beside_a_relaxed_day(rw: RenewalWorld) -> tuple[date, ...]:
+    deletion_record(rw, [])
+    rw.seal(OTHER, relaxed=False)
+    rw.seal(THIRD, relaxed=True)
+    return (OTHER, THIRD)
+
+
+def _listed_relaxed_beside_a_strict_day(rw: RenewalWorld) -> tuple[date, ...]:
+    deletion_record(rw, [])
+    rw.seal(OTHER, relaxed=True)
+    return (DAY, OTHER)
+
+
+def _listed_strict_and_relaxed(rw: RenewalWorld) -> tuple[date, ...]:
+    """Listed twice: the run that sealed :data:`OTHER` stopped before it marked the record
+    sealed, so the next manifest lists it again."""
+    record = deletion_record(rw, [])
+    rw.seal(OTHER, relaxed=False)
+    record.with_suffix(".sealed").unlink()
+    rw.seal(THIRD, relaxed=True)
+    return (OTHER, THIRD)
+
+
+def _listed_strict(rw: RenewalWorld) -> tuple[date, ...]:
+    deletion_record(rw, [])
+    rw.seal(OTHER, relaxed=False)
+    return (DAY, OTHER)
+
+
+def _behind_the_anchor(rw: RenewalWorld, *, relaxed: bool) -> tuple[date, ...]:
+    rw.seal(OTHER, relaxed=relaxed)
+    delete_day(rw)
+    return (OTHER,)
+
+
+def _behind_the_anchor_relaxed(rw: RenewalWorld) -> tuple[date, ...]:
+    return _behind_the_anchor(rw, relaxed=True)
+
+
+def _behind_the_anchor_strict(rw: RenewalWorld) -> tuple[date, ...]:
+    return _behind_the_anchor(rw, relaxed=False)
+
+
+def _behind_the_anchor_and_listed_strict(rw: RenewalWorld) -> tuple[date, ...]:
+    _behind_the_anchor(rw, relaxed=True)
+    rw.seal(THIRD, relaxed=False)
+    return (OTHER, THIRD)
+
+
+def _eku(*found: tuple[str, date]) -> frozenset[tuple[str, str, str]]:
+    codes = {"fail": "token-eku", "warn": "token-eku-not-critical"}
+    return frozenset((level, codes[level], day.isoformat()) for level, day in found)
+
+
+DELETION_CASES: tuple[DeletionCase, ...] = (
+    DeletionCase(
+        "listed by a strict manifest, beside a relaxed day",
+        _listed_strict_beside_a_relaxed_day,
+        _eku(("fail", OTHER)),
+    ),
+    DeletionCase(
+        "listed by a relaxed manifest, beside a strict day",
+        _listed_relaxed_beside_a_strict_day,
+        _eku(("warn", OTHER)),
+    ),
+    DeletionCase("listed by a strict manifest", _listed_strict, _eku(("fail", OTHER))),
+    DeletionCase(
+        "listed by a strict and by a relaxed manifest",
+        _listed_strict_and_relaxed,
+        _eku(("fail", OTHER), ("warn", THIRD)),
+    ),
+    DeletionCase(
+        "only behind the chain anchor, the package relaxed",
+        _behind_the_anchor_relaxed,
+        _eku(("warn", OTHER)),
+    ),
+    DeletionCase(
+        "only behind the chain anchor, the package strict",
+        _behind_the_anchor_strict,
+        _eku(("fail", OTHER)),
+    ),
+    DeletionCase(
+        "behind the chain anchor and listed by a strict manifest, the package relaxed",
+        _behind_the_anchor_and_listed_strict,
+        _eku(("fail", OTHER), ("fail", THIRD)),
+    ),
+)

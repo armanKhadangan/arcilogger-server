@@ -91,7 +91,7 @@ except ImportError:  # pragma: no cover - every supported CPython build has it
     _LZMA_ERROR = _NoLzmaError
 
 
-VERIFIER_VERSION = "7"
+VERIFIER_VERSION = "8"
 INDEX_NAME = "paket.json"
 INDEX_SCHEMA = "arcilogger.evidence/1"
 #: The guides. The Turkish one has an ASCII name: ZIP tools that ignore the UTF-8 name flag
@@ -2851,8 +2851,10 @@ class Verifier:
 
     def _relaxed_eku(self) -> bool:
         """Whether a sealed manifest of the package says the site accepts a non-critical EKU
-        (then the stamps of its deletion records and the packaged report's stamp are judged the
-        same way; a renewal record carries its own rule, :func:`_renewal_eku`)."""
+        (then the packaged report's stamp and a deletion record that no manifest of the package
+        lists are judged the same way; a listed deletion record is judged by the manifests that
+        list it, :meth:`_deletion_eku`, and a renewal record carries its own rule,
+        :func:`_renewal_eku`)."""
         for state in self.days.values():
             try:
                 manifest = load_json(state.data or b"")
@@ -2862,6 +2864,22 @@ class Verifier:
             if tsa.get("require_critical_eku") is False:
                 return True
         return False
+
+    def _deletion_eku(self, name: str) -> bool:
+        """The EKU rule a deletion record's token is judged by: the ``tsa.require_critical_eku``
+        of the sealed manifests that list it (strict when one of them is), as a day's token is
+        judged by its own manifest's; a record that no manifest of the package lists (reached
+        only through the chain anchor) by the package's (:meth:`_relaxed_eku`, W5-A-19)."""
+        rules = [
+            _object(state.manifest.get("tsa")).get("require_critical_eku") is not False
+            for state in self.days.values()
+            if state.manifest is not None
+            and any(
+                self.prefix + str(entry.get("path", "")) == name
+                for entry in _entries(state.manifest.get("deletions"))
+            )
+        ]
+        return any(rules) if rules else not self._relaxed_eku()
 
     def _explain(self, result: TimestampResult, error: CheckError) -> CheckError:
         """A token whose imprint is another manifest of this package was swapped: say which."""
@@ -3038,7 +3056,9 @@ class Verifier:
         return True
 
     def _check_deletions(self, state: DayState, manifest: dict[str, Any]) -> None:
-        """Deletion records (imha tutanağı) sealed into this day's manifest by retention."""
+        """Deletion records (imha tutanağı) sealed into this day's manifest by retention; their
+        tokens are judged by this manifest's EKU rule, the manifest that seals them (W5-A-19)."""
+        strict = _object(manifest.get("tsa")).get("require_critical_eku") is not False
         for entry in _entries(manifest.get("deletions")):
             path = str(entry.get("path", ""))
             name = self.prefix + path
@@ -3063,7 +3083,12 @@ class Verifier:
                 )
                 continue
             self._check_stamped_record(
-                name, record, state.day, "deletion", entry.get("token_sha256")
+                name,
+                record,
+                state.day,
+                "deletion",
+                entry.get("token_sha256"),
+                require_critical_eku=strict,
             )
 
     def _check_stamped_record(
@@ -3077,8 +3102,9 @@ class Verifier:
         require_critical_eku: bool | None = None,
     ) -> TimestampResult | None:
         """A deletion or renewal record, or the packaged report, and its own time-stamp token
-        (``<name>.zd``), with the EKU rule ``require_critical_eku`` (a renewal record's own),
-        or for a deletion record and the report the package's (:meth:`_relaxed_eku`)."""
+        (``<name>.zd``), with the EKU rule ``require_critical_eku`` (a renewal record's own, a
+        deletion record's from the manifests that list it), or for the report the package's
+        (:meth:`_relaxed_eku`)."""
         report = self.report
         token = self._read(name + ".zd", where)
         if token is None:
@@ -3266,7 +3292,13 @@ class Verifier:
         record = self._read(record_name, day) if safe_name(record_name) else None
         record_ok = False
         if record is not None:
-            result = self._check_stamped_record(record_name, record, day, "deletion")
+            result = self._check_stamped_record(
+                record_name,
+                record,
+                day,
+                "deletion",
+                require_critical_eku=self._deletion_eku(record_name),
+            )
             try:
                 entries = _entries(load_json(record).get("days"))
             except (ValueError, AttributeError, RecursionError):
