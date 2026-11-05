@@ -244,10 +244,40 @@ runs.
   **after re-entering the password within the last 5 minutes**.
 - The search's rows are read up to `search.export_max_rows` (100,000) rows or
   `search.export_budget_seconds` (120 seconds); a file that hits a limit is marked **cut**: its
-  name ends in `-kismi`, the answer carries the header `X-Arci-Export-Truncated: rows|time`, and
-  the Excel "Bilgi" (information) sheet gives the reason. The queries that fill in the rows'
-  fields use the same time; when it runs out the file is cut there (`time`), and no row is
-  written with empty columns.
+  name ends in `-kismi`, the answer carries the header `X-Arci-Export-Truncated: rows|time`
+  (`archived`: next point), and the Excel "Bilgi" (information) sheet gives the reason. The
+  queries that fill in the rows' fields use the same time; when it runs out the file is cut there
+  (`time`), and no row is written with empty columns.
+- **Days that left the database after the search.** The export checks the search's range
+  against the database window (`db.retention_days`) again when it starts reading, and
+  answers as a search of that range would now:
+  - every day of the range is gone: `409 archive_reload_required` with the days to bring back,
+    as the search answers; no file is made and nothing is audited;
+  - some days are gone: the rows the database still holds, in a file marked **cut** with the
+    reason `archived` (name `-kismi`, `X-Arci-Export-Truncated: archived`; the "Bilgi" sheet
+    names the days under "Days not in the database"). The header `X-Arci-Export-Archived`
+    (`YYYY-MM-DD` or `YYYY-MM-DD/YYYY-MM-DD`) names them too, also when the file was cut at a
+    limit as well: `X-Arci-Export-Truncated` then gives that limit (`rows`/`time`). The audit
+    entry records the days as `archived`.
+
+  For the whole range, run the search again, reload the days from the sealed vault as its answer
+  offers, and export again.
+- **Waiting for database maintenance.** While database maintenance holds the partition lock (old
+  days being dropped, new partitions being created, archived days being loaded again), an export
+  waits for it at most `search.request_budget_ms` (4 seconds), and the wait counts against
+  `search.export_budget_seconds`. If the wait runs out, the answer is `504 search_timeout` with
+  the text "The export could not start within {seconds} s: it waited for database maintenance
+  (old days being dropped, new partitions being created or archived days being loaded again) to
+  finish. Try again a little later." No file is made and nothing is audited, so it does not count
+  against the hourly limit. A search that waits the same way gets the same text beginning "The
+  search could not start …"; the text about the shortest time slice (section 5) is only for a
+  scan that ran out of time.
+- An export holds that lock for as long as it reads. Meanwhile the database window job and the
+  daily partition job wait for it at most half of `search.request_budget_ms` (2 seconds by
+  default) and then give up, so a search that comes while one of them waits keeps at least half
+  its time for its own reading. The jobs try again later (15 minutes, 30 minutes, … at most 4
+  hours). Only the `alerts.job_failures`-th (3 by default) failed run of the window job in a row
+  raises the `R20-db-window` alert.
 - **CSV:** UTF-8 (BOM), `;` separator, CRLF line ends. **Excel:** the sheets "Sonuçlar"
   (results) and "Bilgi", every cell text. Columns: Zaman, Alınma zamanı, Kaynak, Gönderici, Tür,
   Alt tür, Kaynak IP, Kaynak port, Hedef IP, Hedef port, NAT IP, NAT port, Eylem, Alan adı, URL,
@@ -260,7 +290,8 @@ runs.
 - **The file is not sealed.** The "Bilgi" sheet says so: "This file is not sealed; use an
   evidence package for integrity." Use an evidence package for an official answer (section 10).
 - The file is built, its SHA-256 computed and written to the audit log **before it is sent**
-  (`search.export`: rows, bytes, SHA-256, the reason it was cut); the browser checks the file
+  (`search.export`: rows, bytes, SHA-256, the reason it was cut, the days not in the database);
+  the browser checks the file
   against the `Repr-Digest` header.
 - **Limits:** one export per user at a time (`search_export_running`), at most
   `search.export_max_per_hour` (10) an hour, counted from the audit log, so it holds across a

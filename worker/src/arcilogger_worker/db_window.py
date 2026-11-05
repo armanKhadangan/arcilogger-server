@@ -62,9 +62,19 @@ Every step first takes the partition maintenance lock
 (:data:`~arcilogger_db.partitions.PARTITION_LOCK_KEY`) and only then reads the reloads: ArciIngest
 takes the same lock in the transaction that starts loading a reload (its ``loading``), so a
 reload is either seen here as active or starts loading after the step's drop, never dropped half
-loaded. The API's lookups and searches take it shared while they check and read the days.
+loaded. The API's lookups, searches and exports take it shared while they check and read the
+days.
 
-A failed step (the database, a sealing state that cannot be read) drops nothing — its
+A step waits for that lock at most half of ``search.request_budget_ms``
+(:func:`~arcilogger_db.partitions.step_lock_timeout_ms`, 2 s by default; W5-G-24): an export
+holds it shared for up to ``search.export_budget_seconds`` (W5-G-23), and every search that comes
+while the step waits queues behind the step's request. A step that does not get it in time does
+nothing (its transaction is rolled back; earlier steps of the run stay) and fails the run with
+``PartitionLockTimeoutError`` and a warning line; the worker tries again (15 min, 30 min, …).
+Only the ``alerts.job_failures``-th (3) failed run in a row opens ``R20-db-window`` (the threshold
+at which ``R20-job`` reports any job), so one long export is no incident.
+
+Any other failed step (the database, a sealing state that cannot be read) drops nothing — its
 transaction is rolled back; earlier steps of the run stay, each complete with its recorded
 cutoff — and opens the alert ``R20-db-window`` (medium, key :data:`WINDOW_KEY`); the worker
 retries the job (15 min, 30 min, … at most 4 h). The next successful run resolves it. A failure
@@ -87,7 +97,7 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Final
 
-from sqlalchemy import Connection, func, select, text, update
+from sqlalchemy import Connection, func, select, update
 from sqlalchemy.orm import Session
 
 from arcilogger_core.config import Config
@@ -99,15 +109,19 @@ from arcilogger_core.tsa.base import StampResult, TsaError
 from arcilogger_db.audit import append_audit
 from arcilogger_db.models import ARCHIVE_RELOAD_ACTIVE, ArchiveReload, JobRun, Setting
 from arcilogger_db.partitions import (
-    PARTITION_LOCK_KEY,
     RAW_DAY_MARGIN,
+    PartitionLockTimeoutError,
     PartitionReport,
     dropped_before,
     ensure_partitions,
+    lock_partitions,
     maintain_window,
     retention_days,
+    step_lock_timeout_ms,
 )
+from arcilogger_db.settings import INTEGER_RANGES, get_setting
 from arcilogger_worker.alerts.store import active_alert, active_alerts, open_alert, resolve
+from arcilogger_worker.alerts.system import JOB_WINDOW
 
 if TYPE_CHECKING:
     from arcilogger_worker.service import JobContext
@@ -139,6 +153,8 @@ CHANGE_TARGET: Final = "setting:db.retention_days"
 #: Steps one run takes at most (64 x 16 days: a first run after the upgrade from 400 days ends
 #: in one run; the next run goes on otherwise).
 MAX_STEPS: Final = 64
+#: Most runs :func:`failed_in_a_row` reads (the upper bound of ``alerts.job_failures``).
+ALERT_LIMIT: Final = INTEGER_RANGES["alerts.job_failures"][1]
 #: A reload ``queued`` or ``loading`` for longer is named in ``details.reloads_waiting``.
 RELOAD_WAITING: Final = timedelta(days=1)
 _MARGIN: Final = timedelta(days=RAW_DAY_MARGIN)
@@ -320,7 +336,7 @@ def maintain(
     (``cutoff``: the limit, ``applied``: the cutoff the step reached, ``done``: nothing is left
     to create or drop)."""
     today = site_day(now)
-    connection.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": PARTITION_LOCK_KEY})
+    lock_partitions(connection, timeout_ms=step_lock_timeout_ms(connection))
     expired = expire_reloads(connection, now)
     cutoff = cutoff_of(connection, config, layout or Layout(config.data_dir), now)
     details: dict[str, Any] = {
@@ -531,6 +547,9 @@ def job_db_window(ctx: JobContext) -> Mapping[str, Any]:
             changed = audit_window_change(session)
             session.commit()
         details = run_steps(ctx, config)
+    except PartitionLockTimeoutError as exc:
+        _back_off(ctx, exc)
+        raise
     except Exception as exc:
         _report_failure(ctx, exc)
         raise
@@ -544,6 +563,51 @@ def job_db_window(ctx: JobContext) -> Mapping[str, Any]:
         details[PROGRESS], details["reloads_stuck"] = report_stuck_reloads(session, ctx.now)
         session.commit()
     return details
+
+
+def failed_in_a_row(session: Session, now: datetime) -> int:
+    """Finished runs of the job that failed, counted back from the newest until one did not, as
+    ``R20-job`` counts them (:func:`~arcilogger_worker.alerts.system.check_jobs`): runs started
+    within :data:`~arcilogger_worker.alerts.system.JOB_WINDOW` before ``now``, and a run a
+    person started (``details.manual``) ends the count."""
+    runs = session.execute(
+        select(JobRun.status, JobRun.details)
+        .where(
+            JobRun.job == JOB,
+            JobRun.status != "running",
+            JobRun.started_at >= now - JOB_WINDOW,
+        )
+        .order_by(JobRun.started_at.desc(), JobRun.id.desc())
+        .limit(ALERT_LIMIT)
+    )
+    count = 0
+    for status, details in runs:
+        if status != "failed" or (details or {}).get("manual"):
+            break
+        count += 1
+    return count
+
+
+def _back_off(ctx: JobContext, exc: PartitionLockTimeoutError) -> None:
+    """A step did not get the partition lock in time (module text): logged, and the
+    ``R20-db-window`` alert only when this run is the ``alerts.job_failures``-th failed run in a
+    row; an alert that cannot be written is only logged (the run fails either way)."""
+    try:
+        with ctx.sessions() as session:
+            failures = failed_in_a_row(session, ctx.now) + 1
+            needed = max(1, int(get_setting(session, "alerts.job_failures", 3)))
+    except Exception:  # the database may be what failed: alert as for any failure
+        log.exception("the failed runs of db.window could not be read")
+        failures = needed = 1
+    log.warning(
+        "db.window: %s (search exports hold it); nothing done, tried again at the next run "
+        "(failed runs in a row: %d, alert from %d)",
+        exc,
+        failures,
+        needed,
+    )
+    if failures >= needed:
+        _report_failure(ctx, exc)
 
 
 def _report_failure(ctx: JobContext, exc: Exception) -> None:
