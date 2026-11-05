@@ -1908,6 +1908,23 @@ otherwise), `LOOP_FLOOR` and the cycles are unchanged.
   12.3 %). `test_ci_bound_on_ci_readings` holds the bound to 15 named readings: the costliest
   passes, 1.2× the median (not on ubuntu-latest at the reference, where 6.8 lets 20 of its 38
   runners through) and 1.4× the cheapest fail.
+- **#186-1 (2026-11-05): below speed 0.6, windows-latest's limit is a flat 5.37 gauge lines.**
+  Run 41959248633, job 127021406709, on #184 (tested tree 9eea003, no live-path change since
+  #166): gauge 9.09 µs (speed 0.51, inside the range 0.7 was set on), 5.26 gauge lines against
+  5.21, −0.9 %; the same tree's re-run (job 127045733227) read 4.63 at 11.72 µs. No commit after
+  233ca50 in that tree touches `api/.../live`, `app.py`, `ingest` or `uv.lock`. The cause is the
+  class, not the code: windows-latest's floor class (speed < 0.6) now has 17 readings, 3.94–5.26,
+  median 4.67, against 4.42 at 0.70–0.76, so below 0.6 the figure rises again. Moving the floor
+  to 0.811 would pass 5.26 but also raise the limit for 0.70–0.81, where 1.2 × the 0.70–0.76
+  median would then pass; so `strict_limit` keeps 0.7's rule and takes the larger of it and
+  `FLOOR_CLASS_LIMITS["win32"]` = 5.37 below `FLOOR_CLASS` = 0.6. Over 129 windows-latest
+  readings every one passes (at least +2.1 %, the least margin #157-1 accepted), 1.2 × the floor
+  median fails by 4.2 %, 1.4 × its cheapest (3.94) by 2.6 %, 1.4× fails on all 129 and 1.2× on 88
+  (89 before); speed 0.6 and up, ubuntu-latest and #125-2's window are unchanged. With 17
+  readings 5.37 sits about 1.8 standard deviations above the class mean, so a floor-class run
+  may still fail now and then. `CI_READINGS` takes the new floor-class rows (costliest 127021406709,
+  median 127248835105, cheapest 126710077852), #184's re-run and a 0.72 runner (126731675111)
+  whose 1.2× still fails.
 
 ---
 

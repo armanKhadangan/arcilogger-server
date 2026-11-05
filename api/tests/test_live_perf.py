@@ -121,6 +121,18 @@ OFF_CI_GAUGE_LINES = 9.4
 #: as costly on 72.
 LOOP_FLOORS = {"win32": 0.7, "linux": 0.5}
 LOOP_FLOOR = LOOP_FLOORS[SYSTEM]
+#: Below this fraction of the reference a system of :data:`FLOOR_CLASS_LIMITS` has a flat limit
+#: (#186), the class edge :data:`CI_READINGS` already uses.
+FLOOR_CLASS = 0.6
+#: windows-latest below :data:`FLOOR_CLASS`: 5.37 gauge lines, not 0.7's 5.21. The floor class
+#: grew to 17 readings by 2026-11-05 (3.94 to 5.26, median 4.67, against 4.42 at 0.70 to 0.76):
+#: below 0.6 the figure rises again. Its costliest, 5.26 at 9.09 us (job 127021406709, on #184,
+#: which touches no live path; the same tree's re-run read 4.63), failed 0.7's limit by 0.9 %.
+#: Moving the floor to 0.811 instead would pass it but lose 20 % detection at the 0.70 to 0.76
+#: median, so speed 0.6 and up keeps 0.7's rule. Over 129 windows-latest readings every one
+#: passes (by 2.1 % at least), 1.2 times the floor class's median fails by 4.2 %, 1.4 times its
+#: cheapest by 2.6 %, 1.4 times every reading fails on all 129 and 1.2 times on 88.
+FLOOR_CLASS_LIMITS = {"win32": 5.37}
 #: A cycle counts in the event loop's figure when at least this many of its lines reached the
 #: streams (about 150 in a busy one).
 CYCLE_LINES = 50
@@ -130,16 +142,21 @@ CYCLE_LINES = 50
 #: and up) and below 0.6 of it on each system: the costliest passes, a loop 20 % costlier fails
 #: on the median runner and on the costliest, and one 40 % costlier on the cheapest. On
 #: ubuntu-latest at the reference 20 % fails on 18 of its 38 runners only, not on the median
-#: (5.63, job 125907495605: 0.3 % under the limit); 6.8 there is #129's, unchanged.
+#: (5.63, job 125907495605: 0.3 % under the limit); 6.8 there is #129's, unchanged. The
+#: windows-latest floor class's rows are from its 17 readings to 2026-11-05 (#186), with #184's
+#: re-run at 0.66 (job 127045733227) and a runner at 0.72 (job 126731675111) whose 20 % costlier
+#: loop still fails: the flat limit does not reach speed 0.6 and up.
 CI_READINGS = [
     ("win32", 126226298897, 17.56, 5.47, 1.0, True),
-    ("win32", 126533986627, 8.61, 5.01, 1.0, True),
+    ("win32", 127021406709, 9.09, 5.26, 1.0, True),
+    ("win32", 127045733227, 11.72, 4.63, 1.0, True),
     ("win32", 126357487502, 17.24, 4.70, 1.2, False),
-    ("win32", 126041887269, 8.78, 4.57, 1.2, False),
+    ("win32", 127248835105, 9.52, 4.67, 1.2, False),
     ("win32", 126226298897, 17.56, 5.47, 1.2, False),
-    ("win32", 126533986627, 8.61, 5.01, 1.2, False),
+    ("win32", 127021406709, 9.09, 5.26, 1.2, False),
+    ("win32", 126731675111, 12.82, 4.41, 1.2, False),
     ("win32", 126476924796, 16.26, 4.26, 1.4, False),
-    ("win32", 125153105570, 9.13, 4.03, 1.4, False),
+    ("win32", 126710077852, 8.69, 3.94, 1.4, False),
     ("linux", 126399858478, 15.77, 6.47, 1.0, True),
     ("linux", 126075098521, 8.40, 5.86, 1.0, True),
     ("linux", 125388444265, 8.65, 5.39, 1.2, False),
@@ -351,9 +368,14 @@ def test_three_streams_under_ten_thousand_lines_a_second(
 def strict_limit(gauge: float, system: str = SYSTEM) -> tuple[float, float]:
     """CI's bound on the event loop's CPU a delivered line, in gauge lines, for a gauge of
     ``gauge`` seconds a line on ``system``, and the speed factor it rests on: a core faster than
-    the reference gets a tighter limit, down to the system's floor."""
-    speed = min(max(gauge / REFERENCE_GAUGES[system], LOOP_FLOORS[system]), 1.0)
-    return LOOP_GAUGE_LINES_BY_SYSTEM[system] * speed**LOOP_EXPONENT, speed
+    the reference gets a tighter limit, down to the system's floor, and below
+    :data:`FLOOR_CLASS` no lower than the system's :data:`FLOOR_CLASS_LIMITS` (#186)."""
+    measured = gauge / REFERENCE_GAUGES[system]
+    speed = min(max(measured, LOOP_FLOORS[system]), 1.0)
+    limit = LOOP_GAUGE_LINES_BY_SYSTEM[system] * speed**LOOP_EXPONENT
+    if measured < FLOOR_CLASS and system in FLOOR_CLASS_LIMITS:
+        limit = max(limit, FLOOR_CLASS_LIMITS[system])
+    return limit, speed
 
 
 @pytest.mark.parametrize(("system", "job", "gauge", "lines", "factor", "passes"), CI_READINGS)
