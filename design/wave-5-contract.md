@@ -1552,32 +1552,23 @@ All Wave 5 questions are answered (2026-11-02).
 
     **A long backup (sahada doğrula).** `pg_dump` (the Backup task, daily at 01:40, YEDEKLEME/BACKUP
     §2) holds `ACCESS SHARE` on every table and chunk it dumps until it ends. A `db.window` run
-    (daily after 04:00) that meets a dump still running used to wait for the rest of the dump with
-    `ARCIPART` held, so every search answered 504 until it ended; now the step backs off after the
-    lock budget and tries again (04:15, 04:45, …), and if the dump still runs at the
-    `alerts.job_failures`-th (3rd) run, `R20-db-window` opens (medium), every night the dump runs
-    that long; `partitions.ensure` backs off likewise (`R20-job` at the 3rd failed run). An archive
+    (daily after 04:00 then, 01:00 since W5-G-26) that meets a dump still running used to wait for
+    the rest of the dump with `ARCIPART` held, so every search answered 504 until it ended; now the
+    step backs off after the lock budget and tries again (15 and 30 minutes later, …), and if a
+    dump still runs at the `alerts.job_failures`-th (3rd) run, `R20-db-window` opens (medium);
+    `partitions.ensure` backs off likewise (`R20-job` at the 3rd failed run). An archive
     reload's partitions during the dump are tried after `archive_seconds` (5 s), then 10, 20, 40
     and every 60 s (`PARTITION_RETRY_MAX_SECONDS`; back to 5 s once a table is made; #182 review
     Q7, W5-G-25), each time holding `ARCIPART` up to 2 s (searches wait, they do not time out).
     How long a dump takes on site is to be checked (sahada doğrula). The owner's answers on #182
     (review Q6): the overlap keeps counting toward `R20-db-window` (three nights in a row is a
     real, lasting problem; hiding it is worse); whether `db.window` should run away from the
-    backup is follow-up #188, not #182.
+    backup was follow-up #188, not #182.
 
-    **The default times overlap (#182 review Q6).** `db.window` is due daily after 04:00 site
-    time (`worker/src/arcilogger_worker/service.py:427`, `daily_after=time(4, 0)`; a fixed
-    schedule, no setting), its retries after a failed run 15 and 30 minutes later
-    (`DAILY_RETRY_FIRST`, `service.py:145`: 04:15, 04:45). The Backup task starts `pg_dump` daily
-    at 01:40 local time (`deploy/windows/tasks/Backup.xml:10`, ASSUMPTIONS B7), which gives up
-    after 3 h 30 min (`DUMP_TIMEOUT_SECONDS`, `db/src/arcilogger_db/backup.py:84`: 05:10 at the
-    latest; the task's own limit is 4 h, `Backup.xml:41`), and a start missed while the server
-    was off runs once it is on again (`StartWhenAvailable`, `Backup.xml:29`). So 04:00 lies
-    inside the dump's default window of 01:40–05:10: a dump of more than 2 h 20 min meets the
-    first run, one of more than about 3 h 05 min the third (04:45, `R20-db-window`), and a dump
-    started late (the server off at 01:40) meets it sooner. `partitions.ensure` (00:15) comes
-    before the dump. How long a dump takes is the site's (sahada doğrula); nothing is changed
-    here.
+    **The default times (#182 review Q6, #188).** At 04:00 `db.window` lay inside the dump's
+    default window of 01:40–05:10 (`DUMP_TIMEOUT_SECONDS`, 3 h 30 min). Since #188 it runs daily
+    after 01:00, before the dump at 01:40, and only its rare second retry (01:45) or a dump
+    started late can still meet one: W5-G-26.
   - **(c) A lock-wait text of `search_timeout`** (504, the same code; approved on #165). The
     contract's text of `search_timeout` ("Arama {seconds} saniyede en kısa zaman dilimini (5
     dakika) bile tarayamadı. …" / "The search could not scan even the shortest time slice (5
@@ -1881,6 +1872,31 @@ All Wave 5 questions are answered (2026-11-02).
   tests
   (`test_a_dropped_day_comes_back_identically`, `test_a_reload_run_twice_gives_the_same_rows_and_counts`,
   `api/tests/test_archive_api.py` G7 and G8) and the throughput gate.
+
+- **W5-G-26: `db.window` runs before the backup (#188, follow-up of #182 review Q6; changes
+  G3's "daily after 04:00").** The manager's decision on #188 (option 1; a scheduling choice,
+  "what is better and safer"): `db.window` is due daily after **01:00** site time
+  (`worker/src/arcilogger_worker/service.py`, `daily_after=time(1, 0)`; a fixed schedule, no
+  setting). It comes after `leases.nightly` (00:05), the seal (the Seal task, 00:10),
+  `partitions.ensure` (00:15), `system.sample` (00:30) and `usage.daily` (00:45), and before the
+  Backup task's `pg_dump` at 01:40 (`deploy/windows/tasks/Backup.xml`, ASSUMPTIONS B7, unchanged;
+  its local time is the site's). The day it drops is about 31 days old (`db.retention_days` 30)
+  and long sealed, so it does not wait for last night's seal (`oldest_unsealed_day` still holds
+  the cutoff when sealing has stopped). **The rule:** the run and its first retry after a failure
+  (`retry_delay(job, 1)`, `DAILY_RETRY_FIRST`, 15 min: 01:15) are due before the dump starts; the
+  second retry (30 min later: 01:45) can meet a dump, and so can a dump started late
+  (`StartWhenAvailable`, the server off at 01:40); both are rare, and a run that backs off from a
+  dump stays counted toward `R20-db-window` (W5-G-24 (b), the owner's answer on #182: hiding it is
+  worse). No new state, signal or setting; the backup's schedule and ADR-0009's order are
+  unchanged; no raw data is touched and no licence state gates the job. The service's job table,
+  docs/CORRELATION.md and YEDEKLEME/BACKUP §2 give the new time. Tests
+  (`worker/tests/test_db_window.py`):
+  `test_the_window_runs_and_retries_once_before_the_backup_starts` (the task's `StartBoundary`
+  read from `Backup.xml` with the standard library, the job and its first retry delay from the
+  worker: `daily_after` + `retry_delay(job, 1)` < the start, so a later change of either fails),
+  `test_the_job_runs_daily_after_one_and_is_never_gated` (named `..._after_four_...` before);
+  changed, `worker/tests/test_service.py` `test_default_jobs_run_against_the_database` (its
+  03:30 tick now runs `db.window`, its 09:00 tick no longer).
 
 ## Deviations — W5-H (2026-11-03)
 
