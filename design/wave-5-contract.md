@@ -1511,6 +1511,36 @@ All Wave 5 questions are answered (2026-11-02).
     `test_the_lock_wait_texts_are_turkish_and_english_with_the_same_placeholders`,
     `test_a_scan_that_runs_out_keeps_the_text_of_the_time_slice`, and the exact texts in the
     lock-timeout and wait-from-budget tests of the search and the export.
+- **W5-G-26: the missed-move check's MAC branch tests its rows with a boolean `CASE` (#185).**
+  `Attributor._missed_moves` writes its conversion test (`trust.kept`, `CASE … END IS NULL`) in
+  the MAC branch as `CASE WHEN <kept> THEN true ELSE false END`: the same rows (`IS NULL` is
+  never NULL), the same parameters, the address branch and the constant MAC list unchanged.
+  Why: PostgreSQL has no statistics on the expression and estimates `IS NULL` of it at 0.005,
+  a boolean expression at 0.5. The chains' ACKs (5,699 in the #179 guards' world) were
+  estimated at 26 (86–91 at five times the rows), also after `ANALYZE fg_dhcp` and every
+  partition; on the guards' layout (16 daily partitions, the older days in `fg_dhcp_default`,
+  which a site's late lines, reloads or first hours after an install also reach) a nested loop
+  and a hash join then cost the same within the planner's 1 % fuzz, and it took the nested loop,
+  which filtered every ACK against each of the 100 windows (564,201 rows removed). Wrapped,
+  they are estimated at about 2,870 (9,100 at five times) and the branch hashes on the MAC on
+  every layout measured. Medians on PostgreSQL 16.15 (Linux), before → after, MAC branch alone /
+  whole statement: guards' layout 73.5 → 23.1 / 80.2 → 26.9 ms (1 M lines a day, as loaded),
+  72.2 → 20.7 / 72.1 → 25.7 ms (5 M, after `ANALYZE`); daily partitions (hash join before and
+  after) 28.6 → 33.2, 23.1 → 23.4, 25.3 → 25.2, 25.4 → 27.9 ms and monthly ones 19.6 → 21.3,
+  23.9 → 17.4, 19.9 → 21.4, 21.7 → 20.7 ms (1 M and 5 M, as loaded and after `ANALYZE`: within
+  noise, best times within 1 ms). TimescaleDB and Windows (PostgreSQL 17, where the statement
+  runs under a parallel Gather) were not measured locally: their figures are this PR's CI.
+  Other forms measured and not taken: `IS NOT TRUE` of the refusal (the nested loop stays),
+  `LATERAL` per window (fast, but drops the measured MAC list and reads 100 chunk appends on
+  TimescaleDB), an `OFFSET 0` fence (7–11 ms slower on daily partitions at 5 M). An
+  overestimate costs a hash build at worst; a planner that folds the wrapper back to the bare
+  test would bring the 0.005 back, so `worker/tests/test_missed_moves_plan.py`
+  `test_the_mac_branch_hashes_on_the_mac` (the guards' 400 days of ACKs and 100 chains, about
+  15 s, not `perf`, both CI layouts) checks the two estimates against the rows and pins the
+  branch: no join of it removes a row by its join filter, and on plain PostgreSQL its join is a
+  Hash Join on `mac` (the bare test fails it there: Nested Loop, 564,201 removed).
+  `worker/tests/test_missed_moves_measure.py`, the measurement, runs only with
+  `ARCILOGGER_PERF_185=1`. G7 and the lookup tests are unchanged.
 
 ## Deviations — W5-H (2026-11-03)
 
