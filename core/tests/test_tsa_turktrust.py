@@ -524,6 +524,8 @@ def test_make_provider_takes_the_port(tmp_path: Path) -> None:
         ("http://zd.turktrust.com.tr/", 80, "http://zd.turktrust.com.tr/"),
         ("https://zd.turktrust.com.tr/tsa", 8443, "https://zd.turktrust.com.tr:8443/tsa"),
         ("https://zd.turktrust.com.tr:9443/", 443, "https://zd.turktrust.com.tr:9443/"),
+        # tsa.port defaults to 80: an https URL without a port keeps 443.
+        ("https://zd.turktrust.com.tr/", 80, "https://zd.turktrust.com.tr/"),
     ],
 )
 def test_url_with_port(url: str, port: int, expected: str) -> None:

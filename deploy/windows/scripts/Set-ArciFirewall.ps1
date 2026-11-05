@@ -25,7 +25,11 @@
     Outbound (-StrictOutbound, optional; default action becomes Block):
       NTP (UDP 123) to [clock] ntp_server and fallback_server, DNS (53) to the configured DNS
       servers, Kamu SM (zd/tzd.kamusm.gov.tr and the host of [tsa] url, on [tsa] port; root
-      certificates and CRLs from sertifikalar.kamusm.gov.tr TCP 80/443, docs/kamusm.md), SMTP (the
+      certificates and CRLs from sertifikalar.kamusm.gov.tr TCP 80/443, docs/kamusm.md),
+      TÜRKTRUST (the host of [tsa] url when [tsa] provider = "turktrust", TCP 443, or 80 with
+      [tsa] allow_plain_http), the revocation lists (the hosts of [tsa] crl_urls, TCP 80/443) -
+      or, when [network] https_proxy is set, the proxy's host and port in place of TÜRKTRUST and
+      the revocation lists -, SMTP (the
       server of [smtp] in arcilogger.toml when enabled = true and host is set, on [smtp] port,
       default 587; and the host:port of -SmtpServer, if given, as a rule of its own) and the
       replica share (TCP 445 to the [replica] target host). Enabled outbound
@@ -444,22 +448,57 @@ if (-not $Remove) {
         }
 
         # Kamu SM: both servers (test and production, so switching [tsa] url needs no firewall
-        # change) plus whatever [tsa] url names, on the port the time-stamp client uses.
+        # change) plus whatever [tsa] url names, on the port the time-stamp client uses. A
+        # TÜRKTRUST url has its own rule below (Wave 5 contract 2.4).
+        $provider = [string](Get-ArciConfigValue -Config $config -Path 'tsa.provider' -Default 'mock')
         $tsaHosts = New-Object System.Collections.Generic.List[string]
         Add-Unique $tsaHosts $KamuSmHost
         $tsaPorts = New-Object System.Collections.Generic.List[string]
         $tsaUrl = [string](Get-ArciConfigValue -Config $config -Path 'tsa.url' -Default '')
+        $tsaPort = [int](Get-ArciConfigValue -Config $config -Path 'tsa.port' -Default 80)
         $uri = $null
-        if ($tsaUrl -and [System.Uri]::TryCreate($tsaUrl, [System.UriKind]::Absolute, [ref]$uri) -and $uri.Host) {
-            Add-Unique $tsaHosts @($uri.Host)
-            Add-Unique $tsaPorts @([string]$uri.Port)
+        $tsaUri = $null
+        if ($tsaUrl -and [System.Uri]::TryCreate($tsaUrl, [System.UriKind]::Absolute, [ref]$uri) -and $uri.Host) { $tsaUri = $uri }
+        if ($tsaUri -and $provider -ne 'turktrust') {
+            Add-Unique $tsaHosts @($tsaUri.Host)
+            Add-Unique $tsaPorts @([string]$tsaUri.Port)
         }
-        Add-Unique $tsaPorts @([string](Get-ArciConfigValue -Config $config -Path 'tsa.port' -Default 80))
+        Add-Unique $tsaPorts @([string]$(if ($provider -eq 'turktrust') { 80 } else { $tsaPort }))
         $kamusm = New-Object System.Collections.Generic.List[string]
         foreach ($name in $tsaHosts) { Add-Unique $kamusm (Resolve-HostAddresses $name) }
         if ($kamusm.Count -gt 0) { $rules.Add((New-RuleSpec 'ARCILOGGER Out Kamu SM' 'Outbound' 'TCP' $tsaPorts.ToArray() $kamusm.ToArray() 'time stamps (hash only)')) }
         $certificates = Resolve-HostAddresses $KamuSmCertificateHost
         if (@($certificates).Count -gt 0) { $rules.Add((New-RuleSpec 'ARCILOGGER Out Kamu SM certificates' 'Outbound' 'TCP' @('80', '443') $certificates 'roots and CRLs')) }
+
+        # TÜRKTRUST and the revocation lists (Wave 5 contract 2.4, D13): the host of [tsa] url
+        # with the provider turktrust, on its port (443; 80 with [tsa] allow_plain_http), and the
+        # hosts of [tsa] crl_urls on TCP 80 and 443 (the lists are signed, D8, so plain http is
+        # safe for them). Distribution points named in certificates are never opened by
+        # themselves: list them in crl_urls. With [network] https_proxy set, both go through the
+        # proxy, so one rule to its host:port replaces them (the Zamane client takes no proxy,
+        # D13: the Kamu SM rules above stay).
+        $proxy = ([string](Get-ArciConfigValue -Config $config -Path 'network.https_proxy' -Default '')).Trim()
+        $proxyUri = $null
+        if ($proxy -and [System.Uri]::TryCreate($proxy, [System.UriKind]::Absolute, [ref]$proxyUri) -and $proxyUri.Host) {
+            $proxyAddresses = Resolve-HostAddresses $proxyUri.Host
+            if (@($proxyAddresses).Count -gt 0) { $rules.Add((New-RuleSpec 'ARCILOGGER Out Proxy' 'Outbound' 'TCP' @([string]$proxyUri.Port) $proxyAddresses 'HTTPS proxy ([network] https_proxy)')) }
+        }
+        else {
+            if ($provider -eq 'turktrust' -and $tsaUri) {
+                # tsa.port 80 or 443 leaves the URL's own port in force (arcilogger_core.tsa.url_with_port).
+                $port = $(if (-not $tsaUri.IsDefaultPort -or $tsaPort -eq 80 -or $tsaPort -eq 443) { $tsaUri.Port } else { $tsaPort })
+                $turktrust = Resolve-HostAddresses $tsaUri.Host
+                if (@($turktrust).Count -gt 0) { $rules.Add((New-RuleSpec 'ARCILOGGER Out TURKTRUST' 'Outbound' 'TCP' @([string]$port) $turktrust 'time stamps (hash only)')) }
+            }
+            $crlHosts = New-Object System.Collections.Generic.List[string]
+            foreach ($url in @(Get-ArciConfigValue -Config $config -Path 'tsa.crl_urls' -Default @())) {
+                $crlUri = $null
+                if ($url -and [System.Uri]::TryCreate([string]$url, [System.UriKind]::Absolute, [ref]$crlUri) -and $crlUri.Host) { Add-Unique $crlHosts @($crlUri.Host) }
+            }
+            $crl = New-Object System.Collections.Generic.List[string]
+            foreach ($name in $crlHosts) { Add-Unique $crl (Resolve-HostAddresses $name) }
+            if ($crl.Count -gt 0) { $rules.Add((New-RuleSpec 'ARCILOGGER Out CRL' 'Outbound' 'TCP' @('80', '443') $crl.ToArray() 'revocation lists ([tsa] crl_urls)')) }
+        }
 
         # SMTP: the server the alert e-mail uses ([smtp] of arcilogger.toml, read on every run, so
         # an upgrade keeps the rule) and the host:port of -SmtpServer (remembered). One rule per

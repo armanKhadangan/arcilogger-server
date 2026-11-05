@@ -11105,6 +11105,66 @@ def test_firewall_strict_outbound_follows_the_tsa_settings(engine: str, tmp_path
     assert kamusm["ports"] == ["8080"]
 
 
+TURKTRUST_CONFIG = (
+    '[tsa]\nprovider = "turktrust"\nurl = "https://10.0.0.11/"\nport = 443\n'
+    'crl_urls = ["http://10.0.0.12/root.crl", "https://10.0.0.13/tsa.crl", '
+    '"http://10.0.0.12/sub.crl"]\n'
+)
+
+
+def _outbound(plan: dict[str, Any] | None) -> dict[str, dict[str, Any]]:
+    assert plan is not None
+    return {r["name"]: r for r in plan["rules"] if r["direction"] == "Outbound"}
+
+
+def test_firewall_strict_outbound_opens_turktrust_and_the_crl_hosts(
+    engine: str, tmp_path: Path
+) -> None:
+    """Wave 5 contract 2.4, #98: TÜRKTRUST's host on 443 and the hosts of [tsa] crl_urls on 80
+    and 443 (signed lists, D8); Kamu SM's rules stay, without the TÜRKTRUST host."""
+    result, plan = _firewall(
+        engine, tmp_path, STRICT_CONFIG + TURKTRUST_CONFIG, "-StrictOutbound", *STRICT_ARGS
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    outbound = _outbound(plan)
+    assert outbound["ARCILOGGER Out TURKTRUST"]["remote_address"] == ["10.0.0.11"]
+    assert outbound["ARCILOGGER Out TURKTRUST"]["ports"] == ["443"]
+    assert outbound["ARCILOGGER Out CRL"]["remote_address"] == ["10.0.0.12", "10.0.0.13"]
+    assert outbound["ARCILOGGER Out CRL"]["ports"] == ["80", "443"]
+    assert outbound["ARCILOGGER Out Kamu SM"]["remote_address"] == ["10.0.0.1"]
+    assert outbound["ARCILOGGER Out Kamu SM"]["ports"] == ["80"]
+    assert "ARCILOGGER Out Proxy" not in outbound
+
+
+def test_firewall_strict_outbound_turktrust_over_plain_http(engine: str, tmp_path: Path) -> None:
+    """TCP 80 instead of 443 with [tsa] allow_plain_http (contract 2.4)."""
+    text = STRICT_CONFIG + (
+        '[tsa]\nprovider = "turktrust"\nurl = "http://10.0.0.11/"\nport = 80\n'
+        "allow_plain_http = true\n"
+    )
+    result, plan = _firewall(engine, tmp_path, text, "-StrictOutbound", *STRICT_ARGS)
+    assert result.returncode == 0, result.stdout + result.stderr
+    outbound = _outbound(plan)
+    assert outbound["ARCILOGGER Out TURKTRUST"]["ports"] == ["80"]
+    assert "ARCILOGGER Out CRL" not in outbound  # no crl_urls: nothing is opened by itself
+
+
+def test_firewall_strict_outbound_the_proxy_replaces_turktrust_and_the_crls(
+    engine: str, tmp_path: Path
+) -> None:
+    """With [network] https_proxy, its host:port replaces the TÜRKTRUST and CRL rules (D13);
+    the Zamane client takes no proxy, so the Kamu SM rules stay."""
+    text = STRICT_CONFIG + TURKTRUST_CONFIG + '[network]\nhttps_proxy = "http://10.0.0.14:3128"\n'
+    result, plan = _firewall(engine, tmp_path, text, "-StrictOutbound", *STRICT_ARGS)
+    assert result.returncode == 0, result.stdout + result.stderr
+    outbound = _outbound(plan)
+    assert outbound["ARCILOGGER Out Proxy"]["remote_address"] == ["10.0.0.14"]
+    assert outbound["ARCILOGGER Out Proxy"]["ports"] == ["3128"]
+    assert "ARCILOGGER Out TURKTRUST" not in outbound
+    assert "ARCILOGGER Out CRL" not in outbound
+    assert outbound["ARCILOGGER Out Kamu SM"]["remote_address"] == ["10.0.0.1"]
+
+
 SMTP_CONFIG = '[smtp]\nenabled = true\nhost = "10.0.0.8"\nport = 465\nsecurity = "ssl"\n'
 SMTP_FREE_ARGS = STRICT_ARGS[: STRICT_ARGS.index("-SmtpServer")]
 

@@ -56,10 +56,11 @@ class TsaExecutableError(TsaConfigurationError):
 
 def url_with_port(url: str, port: int) -> str:
     """``tsa.url`` with ``tsa.port``: unchanged when the URL names a port itself or the port is
-    its scheme's default (80 for http, 443 for https), else the port inserted after the host."""
+    80 or 443 (the URL's scheme then decides, as for ``rfc3161``: ``tsa.port`` defaults to 80,
+    so an https URL without a port is not sent to port 80), else the port inserted after the
+    host."""
     parts = urlsplit(url)
-    default = {"http": 80, "https": 443}.get(parts.scheme)
-    if parts.port is not None or port == default or not parts.hostname:
+    if parts.port is not None or port in (80, 443) or not parts.hostname:
         return url
     return urlunsplit(parts._replace(netloc=f"{parts.netloc}:{port}"))
 
