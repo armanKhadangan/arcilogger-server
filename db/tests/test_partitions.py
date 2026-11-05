@@ -968,7 +968,7 @@ class _Backend:
             self.errors.append(exc)
 
     def wait_for_lock(self, watcher: Connection, relation: str | None = None) -> None:
-        deadline = time.monotonic() + 30
+        deadline = time.perf_counter() + 30
         while True:
             waiting = watcher.execute(
                 text(
@@ -982,7 +982,7 @@ class _Backend:
             if waiting:
                 return
             assert self.thread.is_alive(), f"finished without waiting for {relation}: {self.errors}"
-            assert time.monotonic() < deadline, f"never waited for {relation}"
+            assert time.perf_counter() < deadline, f"never waited for {relation}"
             time.sleep(0.02)
 
     def join(self) -> None:
@@ -1143,10 +1143,12 @@ def test_the_lock_of_a_step_is_waited_for_its_timeout_only(db_engine: Engine) ->
             )
             holder.commit()
             with db_engine.connect() as connection:
-                started = time.monotonic()
+                # perf_counter, not monotonic: on Windows monotonic ticks every 15.6 ms, and the
+                # 200 ms the server waited once read as 0.187 s.
+                started = time.perf_counter()
                 with pytest.raises(PartitionLockTimeoutError):
                     lock_partitions(connection, timeout_ms=200)
-                assert 0.2 <= time.monotonic() - started < 2.0
+                assert 0.2 <= time.perf_counter() - started < 2.0
                 with pytest.raises(DBAPIError, match="aborted"):
                     connection.execute(text("SELECT 1"))
                 connection.rollback()
@@ -1208,7 +1210,7 @@ def test_a_steps_lock_waits_share_one_budget(db_engine: Engine) -> None:
             )
             holder.commit()
             assert reader.execute(text("SELECT count(*) FROM mt_dhcp")).scalar_one() == 2
-            started = time.monotonic()
+            started = time.perf_counter()
             step = _Backend(
                 db_engine,
                 lambda connection: drop_before(connection, cutoff, budget=LockBudget(budget_ms)),
@@ -1221,7 +1223,7 @@ def test_a_steps_lock_waits_share_one_budget(db_engine: Engine) -> None:
             holder.commit()
             step.wait_for_lock(watcher, held)  # then the table the reader holds
             step.join()
-            took = time.monotonic() - started
+            took = time.perf_counter() - started
             reader.rollback()
     finally:
         export.dispose()
@@ -1305,7 +1307,7 @@ def test_ensure_days_waits_for_the_lock_and_a_table_within_one_budget(db_engine:
         db_engine.connect() as watcher,
     ):
         reader.execute(text(f"SELECT count(*) FROM {tables[0]}"))  # noqa: S608
-        started = time.monotonic()
+        started = time.perf_counter()
         step = _Backend(
             db_engine,
             lambda connection: ensure_days(connection, day, day, budget=LockBudget(budget_ms)),
@@ -1315,7 +1317,7 @@ def test_ensure_days_waits_for_the_lock_and_a_table_within_one_budget(db_engine:
         _let_go(holder)
         step.wait_for_lock(watcher, tables[0])  # then the table the reader holds
         step.join()
-        took = time.monotonic() - started
+        took = time.perf_counter() - started
         reader.rollback()
     assert [type(error) for error in step.errors] == [PartitionLockTimeoutError]
     assert budget_ms / 1000 <= took < budget_ms / 1000 + 0.8  # not half the budget more

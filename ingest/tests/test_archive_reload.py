@@ -56,7 +56,7 @@ from contextlib import contextmanager
 from datetime import UTC, date, datetime, time, timedelta
 from itertools import pairwise
 from pathlib import Path
-from time import monotonic, sleep
+from time import monotonic, perf_counter, sleep
 from types import SimpleNamespace
 from typing import Any
 
@@ -2756,7 +2756,7 @@ def search_lock(engine: Engine) -> float:
     """A search's wait for the partition lock (W5-G-18: shared, at most its budget, else
     ``lock_not_available``), in seconds: the statement of ``archive.service.hold_window``."""
     with engine.connect() as search:
-        started = monotonic()
+        started = perf_counter()
         search.execute(
             text(
                 "SELECT pg_advisory_lock_shared(:key) "
@@ -2764,7 +2764,7 @@ def search_lock(engine: Engine) -> float:
             ),
             {"key": PARTITION_LOCK_KEY, "wait": f"{SEARCH_BUDGET_MS}ms"},
         )
-        waited = monotonic() - started
+        waited = perf_counter() - started
         search.execute(text("SELECT pg_advisory_unlock_shared(:key)"), {"key": PARTITION_LOCK_KEY})
         search.commit()
     return waited
@@ -2807,8 +2807,10 @@ def beside_an_export(outside: Engine, call: Callable[[], Any]) -> tuple[Any, flo
     through ``pg_locks``: the call's result, how long it took and the search's wait. The search
     raises when it was not granted within its budget."""
     with export_holding(outside):
-        started = monotonic()
-        step, answer = in_thread(lambda: (call(), monotonic()))
+        # perf_counter, not monotonic: these waits have lower bounds, and on Windows monotonic
+        # ticks every 15.6 ms (a 200 ms wait once read as 0.187 s).
+        started = perf_counter()
+        step, answer = in_thread(lambda: (call(), perf_counter()))
         wait_for_waiters(outside, ["ExclusiveLock"], step)
         search, waited = in_thread(lambda: search_lock(outside))
         wait_for_waiters(outside, ["ExclusiveLock", "ShareLock"], search)

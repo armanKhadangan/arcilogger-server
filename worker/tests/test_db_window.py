@@ -22,7 +22,7 @@ from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from datetime import UTC, date, datetime, time, timedelta
 from pathlib import Path
-from time import monotonic, sleep
+from time import perf_counter, sleep
 from typing import Any
 
 import pytest
@@ -581,9 +581,9 @@ def _in_thread(call: Callable[[], Any]) -> tuple[threading.Thread, list[Any]]:
 
 def _wait_for_waiters(engine: Engine, modes: list[str], thread: threading.Thread) -> None:
     """Until the sessions waiting for the partition lock are exactly ``modes``."""
-    deadline = monotonic() + 15
+    deadline = perf_counter() + 15
     with engine.connect() as watcher:
-        while monotonic() < deadline:
+        while perf_counter() < deadline:
             waiting = list(watcher.execute(WAITING, {"high": KEY_HIGH, "low": KEY_LOW}).scalars())
             watcher.rollback()
             if waiting == modes:
@@ -598,7 +598,9 @@ def _search_lock(engine: Engine, budget_ms: int) -> float:
     The statement of ``archive.service.hold_window`` as raw SQL, not the API's request: the
     worker's tests do not start the API."""
     with engine.connect() as search:
-        started = monotonic()
+        # perf_counter, not monotonic: the waits here have lower bounds, and on Windows
+        # monotonic ticks every 15.6 ms (a 200 ms wait once read as 0.187 s).
+        started = perf_counter()
         search.execute(
             text(
                 "SELECT pg_advisory_lock_shared(:key) "
@@ -606,7 +608,7 @@ def _search_lock(engine: Engine, budget_ms: int) -> float:
             ),
             {"key": PARTITION_LOCK_KEY, "wait": f"{budget_ms}ms"},
         )
-        waited = monotonic() - started
+        waited = perf_counter() - started
         search.execute(text("SELECT pg_advisory_unlock_shared(:key)"), {"key": PARTITION_LOCK_KEY})
         search.commit()
     return waited
@@ -669,7 +671,7 @@ def test_a_step_backs_off_from_an_export_and_a_search_meanwhile_is_not_timed_out
     clock = Clock(NOW)
     worker = _window_worker(engine, layout, clock)
     with _export_holding(outside):
-        step, ran = _in_thread(lambda: (monotonic(), worker.tick(), monotonic()))
+        step, ran = _in_thread(lambda: (perf_counter(), worker.tick(), perf_counter()))
         _wait_for_waiters(outside, ["ExclusiveLock"], step)
         search, waited = _in_thread(lambda: _search_lock(outside, budget))
         _wait_for_waiters(outside, ["ExclusiveLock", "ShareLock"], search)
@@ -729,14 +731,14 @@ def test_a_step_backs_off_from_a_table_a_reader_holds_and_a_search_is_not_timed_
     worker = _window_worker(engine, layout, clock)
     with outside.connect() as reader, outside.connect() as watcher:
         assert reader.execute(select(func.count()).select_from(MtDhcp)).scalar_one() == 2
-        step, ran = _in_thread(lambda: (monotonic(), worker.tick(), monotonic()))
-        deadline = monotonic() + 15
+        step, ran = _in_thread(lambda: (perf_counter(), worker.tick(), perf_counter()))
+        deadline = perf_counter() + 15
         while not watcher.execute(TABLE_WAITERS).scalar_one():
             watcher.rollback()
             assert step.is_alive(), "the step did not wait for the table"
-            assert monotonic() < deadline, "the step never waited for the table"
+            assert perf_counter() < deadline, "the step never waited for the table"
             sleep(0.02)
-        seen = monotonic()
+        seen = perf_counter()
         watcher.rollback()
         search, waited = _in_thread(lambda: _search_lock(outside, budget))
         _wait_for_waiters(outside, ["ShareLock"], search)  # behind the step's partition lock
@@ -837,10 +839,10 @@ def test_the_partitions_job_backs_off_from_an_export(
     worker = Worker(engine=engine, layout=layout, jobs=[job], clock=clock, config=_config(layout))
     hypertables = _storage(engine) == "hypertables"
     with _export_holding(outside):
-        started = monotonic()
+        started = perf_counter()
         ticked = _tick_beside_export(worker)
         assert ticked == [("partitions.ensure", "ok" if hypertables else "failed")]
-        assert monotonic() - started < 2.0  # 250 ms
+        assert perf_counter() - started < 2.0  # 250 ms
     db_session.expire_all()
     (run,) = db_session.scalars(select(JobRun).where(JobRun.job == "partitions.ensure")).all()
     if hypertables:
