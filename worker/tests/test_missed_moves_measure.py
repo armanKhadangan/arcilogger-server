@@ -447,7 +447,9 @@ def _nodes(plan: dict[str, Any]) -> Iterator[dict[str, Any]]:
 
 
 def _reads_fg_dhcp(node: dict[str, Any]) -> bool:
-    return any(str(n.get("Relation Name", "")).startswith("fg_dhcp") for n in _nodes(node))
+    """Whether the node scans a table: the MAC branch's only one is ``fg_dhcp`` (a partition,
+    ``fg_dhcp_default`` or, on TimescaleDB, a ``_hyper_*`` chunk; ``windows`` is a function)."""
+    return any("Relation Name" in n for n in _nodes(node))
 
 
 def _shape(plan: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any] | None]:
