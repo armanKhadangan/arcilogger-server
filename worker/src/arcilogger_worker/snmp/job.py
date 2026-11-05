@@ -19,9 +19,9 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from arcilogger_core.config import Config
 from arcilogger_core.layout import Layout
+from arcilogger_core.snmp import PysnmpClient, SnmpClient
 from arcilogger_core.timeutil import isoformat_site
 from arcilogger_worker.alerts.store import active_alerts, open_alert, resolve
-from arcilogger_worker.snmp.client import PysnmpClient, SnmpClient
 from arcilogger_worker.snmp.poller import poll_source
 from arcilogger_worker.snmp.settings import SnmpSource, secret_store, snmp_sources, target
 from arcilogger_worker.snmp.state import SourceState, read_state, write_state

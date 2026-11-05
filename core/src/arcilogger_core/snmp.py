@@ -1,9 +1,12 @@
-"""The SNMP library boundary (Wave 5 contract §6, N1/N2): read-only SNMPv3 GETs and walks.
+"""The SNMP library boundary (Wave 5 contract §6, N1/N2/N5): read-only SNMPv3 GETs and walks.
 
 Only SNMPv3 with authentication and privacy (authPriv) exists here: there is no community
-string, so SNMPv1/v2c cannot be asked for. The poller and the probe talk to :class:`SnmpClient`;
-:class:`PysnmpClient` is the real one, tests use a double at this boundary. Every failure is an
-:class:`SnmpError` whose ``status`` is one of the codes of N4.
+string, so SNMPv1/v2c cannot be asked for. The worker's poller (``arcilogger_worker.snmp``) and
+the administration probe talk to :class:`SnmpClient`; :class:`PysnmpClient` is the real one,
+tests use a double at this boundary. Every failure is an :class:`SnmpError` whose ``status`` is
+one of the codes of N4. It lives in core, as ``smtp`` does, so the probe's child process needs
+nothing from the worker; pysnmp is imported only inside the methods here, so nothing the
+collector or ingest load ever loads it.
 
 The keys of a :class:`Target` never appear in its ``repr``, in a log line or in an error.
 """

@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from arcilogger_worker.snmp.client import (
+from arcilogger_core.snmp import (
     IF_HC_IN_OCTETS,
     IF_HC_OUT_OCTETS,
     IF_HIGH_SPEED,

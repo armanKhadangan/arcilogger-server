@@ -18,8 +18,8 @@ from pathlib import Path
 from typing import Any, Final, get_args
 
 from arcilogger_core.fsutil import atomic_write_text
+from arcilogger_core.snmp import Status
 from arcilogger_core.timeutil import isoformat_site
-from arcilogger_worker.snmp.client import Status
 
 log = logging.getLogger(__name__)
 

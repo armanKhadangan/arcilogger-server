@@ -15,9 +15,6 @@ dependencies = [
   # arcilogger_worker/fonts, shared with the 5651 report of the API) and the Excel workbook.
   "reportlab>=5.0.1",
   "openpyxl>=3.1.5",
-  # The internet line's speed (W5-N): read-only SNMPv3 (authPriv) GETs and ifName walks of the
-  # WAN interface counters. BSD-2-Clause. Pinned: a new release comes with a deliberate upgrade.
-  "pysnmp==7.1.30",
 ]
 
 [project.scripts]

@@ -14,7 +14,7 @@ from typing import Any, Final
 
 from arcilogger_core.config import Config
 from arcilogger_core.secretstore import SecretStore, SecretStoreError
-from arcilogger_worker.snmp.client import Auth, Priv, Target
+from arcilogger_core.snmp import Auth, Priv, Target
 
 DEFAULT_PORT: Final = 161
 DEFAULT_AUTH: Final[Auth] = "sha256"

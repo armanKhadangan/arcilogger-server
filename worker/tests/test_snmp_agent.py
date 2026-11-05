@@ -3,7 +3,7 @@
 pysnmp's own agent side answers on a loopback UDP port, in a thread with its own event loop:
 an authPriv user (SHA-256, AES-128), ``sysUpTime`` and the ``ifName``, ``ifHCInOctets``,
 ``ifHCOutOctets``, ``ifOperStatus`` and ``ifHighSpeed`` objects of two interfaces, whose
-counters the test moves. The real :class:`~arcilogger_worker.snmp.client.PysnmpClient` and the
+counters the test moves. The real :class:`~arcilogger_core.snmp.PysnmpClient` and the
 ``snmp.poll`` job then run as on a site: walk, GET, rates, the state file; and a wrong key gives
 ``auth_failed``, a port with no agent ``timeout``.
 """
@@ -25,9 +25,7 @@ import pytest
 
 from arcilogger_core.layout import Layout
 from arcilogger_core.secretstore import SecretStore
-from arcilogger_core.timeutil import SITE_TZ
-from arcilogger_worker.snmp import job as snmp_job
-from arcilogger_worker.snmp.client import (
+from arcilogger_core.snmp import (
     IF_HC_IN_OCTETS,
     IF_HC_OUT_OCTETS,
     IF_HIGH_SPEED,
@@ -38,6 +36,8 @@ from arcilogger_worker.snmp.client import (
     SnmpError,
     Target,
 )
+from arcilogger_core.timeutil import SITE_TZ
+from arcilogger_worker.snmp import job as snmp_job
 from arcilogger_worker.snmp.settings import auth_key_name, priv_key_name
 from arcilogger_worker.snmp.state import read_state
 

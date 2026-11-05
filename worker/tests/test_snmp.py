@@ -1,7 +1,7 @@
 """The internet line's speed over SNMPv3 (Wave 5 contract §6, W5-N tests of §6.5).
 
 The poller is driven through a test double at the library boundary (:class:`FakeAgent`, the
-:class:`~arcilogger_worker.snmp.client.SnmpClient` protocol): rates, counter and ``sysUpTime``
+:class:`~arcilogger_core.snmp.SnmpClient` protocol): rates, counter and ``sysUpTime``
 resets, the ``ifName`` mapping and its re-walk, every status code, the state file and its bounds,
 the job, the ``R20-snmp`` alert and that no key ever reaches a log line, the file or an alert.
 """
@@ -23,10 +23,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from arcilogger_core.layout import Layout
 from arcilogger_core.secretstore import SecretStore
-from arcilogger_core.timeutil import SITE_TZ
-from arcilogger_db.models import Alert
-from arcilogger_worker.snmp import job as snmp_job
-from arcilogger_worker.snmp.client import (
+from arcilogger_core.snmp import (
     IF_HC_IN_OCTETS,
     IF_HC_OUT_OCTETS,
     IF_HIGH_SPEED,
@@ -39,6 +36,9 @@ from arcilogger_worker.snmp.client import (
     Target,
     Value,
 )
+from arcilogger_core.timeutil import SITE_TZ
+from arcilogger_db.models import Alert
+from arcilogger_worker.snmp import job as snmp_job
 from arcilogger_worker.snmp.poller import poll_source
 from arcilogger_worker.snmp.settings import (
     SnmpSource,
