@@ -19,6 +19,7 @@ from sqlalchemy import Engine, select, text
 from sqlalchemy.orm import Session
 
 from arcilogger_core.config import load_config
+from arcilogger_core.fsutil import atomic_write_text
 from arcilogger_core.timeutil import utc_now
 from arcilogger_db.engine import engine_from_url
 from arcilogger_db.models import Alert
@@ -102,7 +103,9 @@ def config_path(world: World) -> Path:
 
 
 @contextmanager
-def running(world: World, engine: Engine, config_path: Path) -> Iterator[IngestService]:
+def running(
+    world: World, engine: Engine, config_path: Path, *, status_interval: float = 0.05
+) -> Iterator[IngestService]:
     """The service in a thread of its own, watching ``config_path`` every 50 ms."""
     stop = threading.Event()
     service = IngestService(
@@ -110,7 +113,7 @@ def running(world: World, engine: Engine, config_path: Path) -> Iterator[IngestS
         engine,
         stop=stop,
         clock=world.clock,
-        status_interval=0.05,
+        status_interval=status_interval,
         backoff_max=0.2,
         config_path=config_path,
         reload_seconds=0.05,
@@ -309,6 +312,62 @@ def test_a_start_up_key_is_reported_not_taken(
         wait_for(lambda: (status_config(world) or {}).get("restart_keys") == ["ingest"])
         assert service.config.ingest.batch_rows == 500
         assert (status_config(world) or {})["sha256"] == sha(config_path)
+
+
+def test_a_refused_status_write_is_tried_again_at_the_next_round(
+    world: World,
+    db_engine: Engine,
+    config_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """On Windows the replace of ``ingest-status.json`` is refused while another process
+    reads the file (the API, the agent waiting for the new SHA-256). The report of a new file
+    must not then wait for the next status interval (30 s here): the browser administration
+    waits for it. The refusal is logged once, however many rounds it lasts."""
+    path = world.layout.ingest_status
+    refuse = 0
+    refused: list[Path] = []
+
+    def refusing(target: Path, text: str) -> None:
+        nonlocal refuse
+        if target == path and refuse:
+            refuse -= 1
+            refused.append(target)
+            raise PermissionError(13, "Access is denied", str(target))
+        atomic_write_text(target, text)
+
+    monkeypatch.setattr("arcilogger_ingest.status.atomic_write_text", refusing)
+    with running(world, db_engine, config_path, status_interval=30.0):
+        wait_for(lambda: status_config(world) is not None)
+        refuse = 2  # two rounds in a row
+        rewrite(config_path, toml_of(world, [*SOURCES, SWITCH]))
+        wait_for(lambda: (status_config(world) or {}).get("sha256") == sha(config_path))
+    assert refused == [path, path], "the first two writes after the change failed"
+    warnings = [r for r in caplog.records if r.getMessage().startswith("could not write")]
+    assert len(warnings) == 1
+
+
+def test_a_successful_status_write_still_waits_the_interval(
+    world: World, db_engine: Engine, config_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = world.layout.ingest_status
+    writes: list[Path] = []
+
+    def counting(target: Path, text: str) -> None:
+        if target == path:
+            writes.append(target)
+        atomic_write_text(target, text)
+
+    monkeypatch.setattr("arcilogger_ingest.status.atomic_write_text", counting)
+    with running(world, db_engine, config_path, status_interval=30.0):
+        wait_for(lambda: status_config(world) is not None)
+        world.append("core-r1", DAY, (dhcp_message(i) for i in range(10)))
+        wait_for(lambda: lines_loaded(db_engine, "core-r1") == 10)  # many rounds later
+        world.append("core-r1", DAY, (dhcp_message(i) for i in range(10, 20)))
+        wait_for(lambda: lines_loaded(db_engine, "core-r1") == 20)
+        assert writes == [path]  # only the first round's
+    assert writes == [path, path]  # and the one when the service stopped
 
 
 def test_without_a_watched_file_there_is_no_config_block(world: World, db_engine: Engine) -> None:

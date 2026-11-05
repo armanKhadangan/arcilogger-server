@@ -4,6 +4,7 @@ conflict alerts, devices and the raw references in ``leases.evidence``."""
 from __future__ import annotations
 
 import json
+import logging
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -17,6 +18,7 @@ from arcilogger_core.timeutil import isoformat_site
 from arcilogger_db.models import Alert, Device, Lease, Person, Source
 from arcilogger_db.settings import set_setting
 from arcilogger_worker.correlation.leases import (
+    Context,
     rebuild_day,
     rebuild_days,
     run_incremental,
@@ -394,6 +396,65 @@ def test_bad_vlan_regex_falls_back_to_the_subnet(db_session: Session, evidence: 
     rebuild_day(db_session, DAY, horizon=tr(NEXT, 0))
     assert _row_count(db_session) == 1
     assert leases(db_session)[0]["vlan"] == 60
+
+
+@pytest.mark.parametrize(
+    ("grace", "interval", "applies"),
+    [
+        ("60", 3600, 300),  # not an integer
+        (True, 3600, 300),
+        (-1, 3600, 300),  # negative
+        (3601, 3600, 300),  # longer than the interval
+        (300, 120, 120),  # the shipped grace, the interval lowered: the default, capped
+    ],
+)
+def test_a_bad_arp_grace_never_stops_the_lease_job(
+    db_session: Session,
+    evidence: Evidence,
+    caplog: pytest.LogCaptureFixture,
+    grace: Any,
+    interval: int,
+    applies: int,
+) -> None:
+    """``arp.ignore_after_release_seconds`` written around the validator (#40 item 6) is read as
+    the lookup reads it: the shipped default, at most the ARP interval, with a warning that names
+    the key only, and the day rebuild and the incremental job run to their end."""
+    set_setting(db_session, "arp.ignore_after_release_seconds", grace, updated_by="tolga")
+    set_setting(db_session, "arp.interval_seconds", interval, updated_by="tolga")
+    released = tr(DAY, 9)
+    evidence.dhcp(tr(DAY, 8), "assigned", PC, A)
+    evidence.dhcp(released, "deassigned", PC, A)
+    evidence.arp(released + timedelta(seconds=applies), PC, A)  # still a stale entry
+    evidence.arp(released + timedelta(seconds=applies + 1), PC, A)  # a sighting again
+    db_session.commit()
+
+    with caplog.at_level(logging.WARNING, logger="arcilogger_worker.leases"):
+        assert Context.load(db_session).rules.release_grace == applies
+        report = rebuild_day(db_session, DAY, horizon=tr(NEXT, 0))
+        db_session.commit()
+        assert run_incremental(db_session, now=tr(NEXT, 11)).mode == "catch_up"
+        db_session.commit()
+
+    assert report.stats["ignored_arp_after_release"] == 1
+    arp = [row for row in leases(db_session) if row["source_table"] == "mt_arp"]
+    assert [row["start"] for row in arp] == [released + timedelta(seconds=applies + 1)]
+    # One warning per run, the key and the rule only (never the stored value).
+    assert {(record.levelname, record.getMessage()) for record in caplog.records} == {
+        (
+            "WARNING",
+            "arp.ignore_after_release_seconds is not an integer between 0 and "
+            f"arp.interval_seconds; the default {applies} s applies",
+        )
+    }
+
+
+def test_a_good_arp_grace_is_used_as_stored(
+    db_session: Session, caplog: pytest.LogCaptureFixture
+) -> None:
+    set_setting(db_session, "arp.ignore_after_release_seconds", 0, updated_by="tolga")
+    with caplog.at_level(logging.WARNING, logger="arcilogger_worker.leases"):
+        assert Context.load(db_session).rules.release_grace == 0
+    assert not caplog.records
 
 
 def test_rebuilding_one_old_day_follows_long_intervals_to_their_end(

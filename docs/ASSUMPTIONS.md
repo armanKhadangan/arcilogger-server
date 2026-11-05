@@ -309,9 +309,9 @@ list under "Technical assumptions to verify on site" below); the settings are in
 
 | # | Decision | Date |
 |---|---|---|
-| RB1 | **The installer's rollback step stays unconditional in Wave 3.** `Install-Arcilogger.ps1 -Rollback` without `-RestoreDatabase` runs `arcilogger-db leases prepare-rollback` after the services stop and before the program is swapped (`Invoke-LeaseRollbackStep`, `Install-Arcilogger.ps1:3121`, called at `:3197`): every FortiGate lease, ended ones too, gets confidence `low` (derived rows only) and the count is printed and logged; the next `arcilogger-db upgrade` restores the leases the previous version left as they were (`restore_after_rollback`, `arcilogger_db/lease_rollback.py:121`, run by the seed). A rollback between two versions that **both** read FortiGate DHCP therefore shows FortiGate-DHCP chains `low` until the next `arcilogger-db upgrade` (false lows only, never a wrong person; [KURULUM.md](KURULUM.md) §13). Point (a) of the contract's round-7 implementation note on the rollback step (run it only when the previous program cannot read FortiGate DHCP) is declined for Wave 3; points (b) and (c) are in the code (a rollback that fails after the step and keeps this version restores the leases through `arcilogger-db upgrade`, `Restore-LoweredLeases`, `Install-Arcilogger.ps1:3160`; lock timeout 30 s and statement timeout 10 min, `lease_rollback.py:53`). **Follow-up** for a later installer change: skip the step when the previous program already has `arcilogger_db\lease_rollback.py` | 2026-10-28 (manager, issue #11, from the review of the part 1 pull request #33) |
+| RB1 | **The installer's rollback step runs only when the previous program may not read FortiGate DHCP (done, with the condition).** `Install-Arcilogger.ps1 -Rollback` without `-RestoreDatabase` first looks in the program it returns to for `venv\Lib\site-packages\arcilogger_db\lease_rollback.py` (where pip installs the `arcilogger-db` wheel; `Test-PreviousLeaseRollbackModule`, `Install-Arcilogger.ps1:3121`, called by `Invoke-LeaseRollbackStep`, `:3136`, at `:3227`). With the file, that version already reads FortiGate DHCP: the step `leases.prepare-rollback` is `skipped` with its reason, printed and logged, and the leases stay as they are (also with `-SkipDatabase`, without its warning). Without the file, or when the check cannot decide (no readable `arcilogger_db\__init__.py` there, any error; the plan's `previous_check` keeps why, and the log says so when the step runs), the step runs as in Wave 3 after the services stop and before the program is swapped: every FortiGate lease, ended ones too, gets confidence `low` (derived rows only), the count is printed and logged, and the next `arcilogger-db upgrade` restores the leases the previous version left as they were (`restore_after_rollback`, `arcilogger_db/lease_rollback.py:121`, run by the seed). An undecided check therefore gives false lows until that upgrade, never a wrong person ([KURULUM.md](KURULUM.md) §13). This is point (a) of the contract's round-7 implementation note on the rollback step, declined for Wave 3 and done in Wave 4; points (b) and (c) are unchanged (a rollback that fails after the step and keeps this version restores the leases through `arcilogger-db upgrade`, `Restore-LoweredLeases`, `Install-Arcilogger.ps1:3190`; lock timeout 30 s and statement timeout 10 min, `lease_rollback.py:53`) | 2026-10-28 (manager, issue #11, from the review of the part 1 pull request #33); done 2026-11-01 (issue #81) |
 | RB2 | **A change of the FortiGate DHCP settings reaches past days only through a lease rebuild, and which side it errs on depends on the change** (the manager's correction of the "safe side" wording). Stored leases are never re-checked against today's settings: a lookup reads `leases` by address and time only (`Attributor._load`, `lookup/attribution.py:369`), a lease's DHCP record falls back to its stored refs when today's rules keep none of its rows (`Attributor.record`, `:477`), and the lease step keeps the stored confidence (`_lease_notes`, `:913`); the automatic rebuilds cover only today, yesterday and the days rebuilt for late records (`correlation/late.py`). **A change that adds evidence** (a logid or `dhcp_msg` mapped, a FortiGate source added) applies to past days only after the rebuild; until then such moments may answer without a chain (the safe side). **A change that removes or narrows evidence** (an interface added to `dhcp.fortigate_interfaces_excluded`, `dhcp.fortigate_traffic_extends` or `dhcp.fortigate_use_logged_lease` switched off, a logid removed from `dhcp.fortigate_logids` or `dhcp.fortigate_dhcp_msgs` narrowed, a FortiGate source removed or retyped): the leases built under the old settings stay, at their old confidence, until the rebuild, so a moment can still name the earlier device. **Rebuild at once**, from the first affected day. **Follow-up** (#40): an alert when such a setting changes without a rebuild | 2026-10-29 (manager, review of the WP-F2 pull request #52) |
-| Q-C3-1 | **The overlap probe's own bound of 1 s is accepted** (answer (a)): a busy unclaimed NAT address with no session overlapping the probe window (the busy-before shape) takes about 0.5 s at a million lines a day, under 1 s, the whole lookup staying at about 1 s within its 5 s; no index on `duration` in Wave 3 (it would cost ingest throughput and need a migration). **Follow-up** (#40): measure `INCLUDE (duration)` on the `transip` index against the ingest gates | 2026-10-29 (manager, review of the WP-C3 pull request #47; contract, "Deviations — c3") |
+| Q-C3-1 | **The overlap probe's own bound of 1 s is accepted** (answer (a)): a busy unclaimed NAT address with no session overlapping the probe window (the busy-before shape) takes about 0.5 s at a million lines a day, under 1 s, the whole lookup staying at about 1 s within its 5 s; no index on `duration` in Wave 3 (it would cost ingest throughput and need a migration). **Follow-up** (#40), answered by #71: `INCLUDE (duration)` was measured and **not taken**, since it is 29 % larger and answers `busy_before` from the index only on all-visible pages, which a month's newest days often are not; **`ix_fg_traffic_transip_time (transip, time)` was added** (revision `0020_fg_traffic_transip_time`): the probe's steps and the D15 check's steps after its window, without a port, went from about 1.1 s to under 1 ms for a busy address after its last row, `busy_before` from 1.4 s to 0.25 s (day 28 of a monthly partition at 1 M rows a day), ingest within the spread of the runs ([INGEST.md](INGEST.md) "Measured throughput"); `busy_before` keeps its own bound of 1 s | 2026-10-29 (manager, review of the WP-C3 pull request #47; contract, "Deviations — c3"); follow-up 2026-11-02 (issue #71, pull request #91; Wave 4 contract, "Deviations — transip index") |
 | CL1 | **A source clock is measured by receive time as well** (issue #73, Wave 3's last required fix): ingest counts every row with a device time of its own by source, received minute and offset (whole seconds away from zero) in `source_clock_samples` (`arcilogger_db/clocksamples.py`, revision `0019_source_clock_samples`, which counts the last two hours on upgrade); `R20-lease:source-clock` reads a source's newest received minutes of the last hour (200 rows, or at least 10 from the last 10 minutes, `CLOCK_RECENT`, `alerts/system.py:956`), a lookup reads its minutes received within an hour of the moment and (#82) the minutes received at any time whose clock put their device times within that hour from beyond 120 s, beside the device-time sample, and keeps the median further from 0 (so a lookup in the hours before a clock was set back is named too, as `source_clock_shared` when the clock at the moment itself was within its limit; a clock off at the moment stays `source_clock_offset`). A clock set back or ahead by up to a day (ingest's `max_clock_skew`) after logging on time is alerted once most of those rows carry it (a busy source at the next check, a line a minute within about two) and named by a lookup at the real moment; the limits and texts stay (O22, FD5). Known side effect, the safe side: a burst of lines a device delivers late can open the alert, or lower a lookup's chains, for its minutes (contract, "Deviations — clock (2026-11)") | 2026-11-01 (owner, issue #73, from the step-4 walk on pull request #61) |
 
 ### Other open points for the owner (Wave 3 contract review rounds)
@@ -337,6 +337,128 @@ the alternatives.
   switched to bridge mode, the exit not edited) is named by `egress_unmapped_seen` beside the
   candidate search; answering it as observed needs a new explanation key (contract, "Deviations —
   c1").
+
+## Uyum Durumu, Sistem, ilk kurulum sihirbazı: Wave 4 (2026-10-28)
+
+The owner questions Q1–Q21 of the Wave 4 contract (`design/wave-4-contract.md`, "Owner questions")
+with the answer or the default that is implemented
+([ADR-0017](adr/0017-compliance-and-system-pages.md); the pages and the wizard:
+[UYUM-DURUMU.md](UYUM-DURUMU.md) / [COMPLIANCE-STATUS.md](COMPLIANCE-STATUS.md)). Both pages and the
+wizard are 5651 Temel: no licence state closes them. "Uyum Durumu" is the page's name, not a
+verdict: its ten cards are technical checks of log collection, sealing and backups by a product
+designed to support 5651 obligations ("5651 yükümlülüklerini desteklemek için tasarlanmıştır"),
+neither a legal assessment nor a statement of conformity.
+
+### Owner decisions of 2026-10-28
+
+| # | Decision | Date | Where |
+|---|---|---|---|
+| Q1 | **Uyum Durumu for the administrator and the auditor:** `compliance.read` is held by `admin` and `auditor`; the auditor opens the page with its ten cards and downloads the **Uyum Durumu Raporu** (`GET /compliance/report.pdf` needs `compliance.read` only; the auditor's export is audited as `compliance.report_export` like the administrator's). Everything that changes state stays administrator-only: the confirmation **Yapılandırma yedeğini aldım** (`settings.manage`), every setting and the first-run wizard. The cards keep their open alerts for the auditor although `alerts.read` stays administrator-only: the page shows their number ("Açık uyarı: {n}") without a link to Güvenlik, the PDF their rule, severity and time opened; the web hides the links the auditor cannot open (Kaynaklar, Güvenlik, Ayarlar, Sistem; Mühürleme and Arama stay). The cards and the report carry no data about log subjects, so there is no KVKK notice gate and viewing is not audited. Answers open question 5 of roles.md for Uyum Durumu (kept open for the other pages) | 2026-10-28 | [roles.md](roles.md), [UYUM-DURUMU.md](UYUM-DURUMU.md) §1, [DENETCI-KILAVUZU.md](DENETCI-KILAVUZU.md) |
+| Q10 | **Card 7's expected days:** content-filter records are expected on **every day of the week** (`alerts.filter_days` `[1, 2, 3, 4, 5, 6, 7]`, ISO weekdays) except the days listed in `usage.holidays` (`alerts.filter_skip_holidays` `true`; the list ships the fixed-date national holidays, the administrator enters the others, U7); a **rolling window of 24 hours** (`alerts.filter_quiet_hours` 24, bounds 6–168); a **web or a DNS** filter record is enough; the alert **`R20-filter`** (dedup key `R20-filter:none`) is **high**. Card 7 is **Sorun** and `R20-filter` opens when no web or DNS filter record of an enabled FortiGate source arrived within the window and every site day the window touches is expected; the alert closes by itself when a record arrives. A window that includes a day on which none is expected, or one kind silent while the other arrives, makes the card **Dikkat** without an alert; without an enabled FortiGate source the card is **Bilgi yok**. The three settings are in Ayarlar → Uygulama ayarları → Uyarılar ve e-posta | 2026-10-28 | [UYUM-DURUMU.md](UYUM-DURUMU.md) §2.7, [UYARILAR.md](UYARILAR.md), [AYARLAR.md](AYARLAR.md) |
+
+### Defaults of the open owner questions (not yet confirmed)
+
+Each is implemented as written; changing one is a small follow-up.
+
+| # | Default | Alternative | Where |
+|---|---|---|---|
+| Q2 | **Sistem and the Panel's Disk card are administrator-only** (`system.read`); the İK Raporları (`hr`) and Rapor İzleyici (`viewer`) roles hold none of `compliance.read`, `system.read`, `settings.manage` | grant `system.read` to the auditor | [roles.md](roles.md) |
+| Q3 | A fourth state **Bilgi yok** / No data (`neutral`): no data yet, or the check does not apply, always with its reason; a card whose check cannot be run is `neutral` with "Bu denetim şu anda yapılamadı: {error code}" (the exception's class name) and the other cards are unaffected | three states only | [UYUM-DURUMU.md](UYUM-DURUMU.md) §1 |
+| Q4 | Card 1 with no watched source: **Dikkat** (amber) | red | [UYUM-DURUMU.md](UYUM-DURUMU.md) §2.1 |
+| Q5 | A stamp not from the Kamu SM production server (mock, RFC 3161, Kamu SM test server): card 5 **Sorun** (red); card 2 **Dikkat** (amber) when yesterday is otherwise sealed and verified | another card or colour | [UYUM-DURUMU.md](UYUM-DURUMU.md) §2.2, §2.5 |
+| Q6 | Card 3 judges the verification tasks as they run (VerifyDaily the last 2 days, VerifyWeekly the last 90 days, VerifyMonthly the whole chain, deep); a full chain check older than 35 days, or none while the first sealed day is 35 days old, is **Dikkat** | change the tasks to the specification (30 days daily, the full chain weekly) | [UYUM-DURUMU.md](UYUM-DURUMU.md) §2.3 |
+| Q7 | Card 4: the installation's age is its **first sealed day**, deleted days included (the earlier of the oldest sealed day in the vault and the oldest day deleted by retention); retention switched off with sealed days older than `retention.days` is **Dikkat** (amber). The card reads the retention task's active alerts by rule (`R20-retention`, severity other than `info`): they are imported without a dedup key | red | [UYUM-DURUMU.md](UYUM-DURUMU.md) §2.4 |
+| Q8 | Card 5: no extra "days of credit left" threshold: **Dikkat** at `[tsa] credit_alert_threshold` (500) with the estimated days, **Sorun** at a credit of 0 or below; the TSA certificate of the newest stamp is **Sorun** only once expired, **Dikkat** within 180 days; a credit reading older than two days is **Dikkat** | an extra days threshold; red before expiry | [UYUM-DURUMU.md](UYUM-DURUMU.md) §2.5 |
+| Q9 | Card 6 counts an offset **equal to** the limit (`[clock] alert_offset_ms`, 1000 ms) as a problem (the specification's "< 1 s"); the Panel's clock box keeps `<=` | align the Panel | [UYUM-DURUMU.md](UYUM-DURUMU.md) §2.6 |
+| Q11 | Card 8 follows the **configured lease evidence**: rows of `mt_dhcp`, `mt_arp` and `fg_dhcp` of the watched sources in the last 24 hours and the active `R20-lease:` alerts, not "DHCP and ARP" literally (a FortiGate-only site has no ARP log) | require DHCP and ARP records | [UYUM-DURUMU.md](UYUM-DURUMU.md) §2.8 |
+| Q12 | Card 9: the replica switched off is **Sorun** (red) | amber | [UYUM-DURUMU.md](UYUM-DURUMU.md) §2.9 |
+| Q13 | Card 10: the administrator's confirmation **Yapılandırma yedeğini aldım** is accepted as evidence of the offline copy of `arcilogger.toml`, `secret.key` and the Caddy CA folder (B12): an audit entry `compliance.config_backup_confirm` with the configuration file's SHA-256, compared with the current file; never confirmed, or confirmed for another SHA-256, is **Dikkat**. It is the administrator's statement, not a check of the media. A `state\backup\last.json` that does not parse counts as a failed backup (**Sorun**); one that cannot be read at all leaves the card **Bilgi yok** | report the database dumps only | [UYUM-DURUMU.md](UYUM-DURUMU.md) §2.10, [YEDEKLEME.md](YEDEKLEME.md) §3 |
+| Q14 | The **Uyum Durumu Raporu** (PDF) is made **on request only**: no schedule, no e-mail, not stored, not a report kind of Raporlar; **not time-stamped** (it uses no credit): its SHA-256 is in the audit entry `compliance.report_export` and in the `X-Arci-Sha256` header | a scheduled e-mail (to whom); a time stamp per export | [UYUM-DURUMU.md](UYUM-DURUMU.md) §3 |
+| Q15 | Cards name their document **as text** ("UYUM-DURUMU.md bölüm 2.{n}" / "COMPLIANCE-STATUS.md section 2.{n}"); the web app serves no documents | serve the bundled documents in the web app | [UYUM-DURUMU.md](UYUM-DURUMU.md) §1 |
+| Q16 | Processor, memory and uptime through the **standard library** (`arcilogger_core.hostinfo`: `ctypes` on Windows, `/proc` on Linux); the CPU percentage is measured between two readings of the API process, so the first answer shows "ölçülüyor" (on a platform other than Windows and Linux nothing is read and the page shows "bu platformda okunamıyor", W4-C); no new third-party dependency | `psutil` (per-process figures, a new third-party notice) | [UYUM-DURUMU.md](UYUM-DURUMU.md) §4.1 |
+| Q17 | Disk forecast: a straight line (least squares) over the newest **30 daily samples** of `state\system-history.json` (worker job `system.sample`, daily after 00:30, the newest 120 days kept), shown from **7 samples**; a date more than 100 years away is not given (the state stays "estimated", and the page says "Disk kullanımı çok yavaş artıyor; dolma tarihi öngörülemiyor."); whether a drive has already reached the warning mark is read from its measured use (the page then gives only the full date: "%{warning} eşiğine ulaşıldı; …", W4-C) | another model or sample count | [UYUM-DURUMU.md](UYUM-DURUMU.md) §4.2 |
+| Q18 | The first-run wizard (Ayarlar → **İlk kurulum sihirbazı**, `/settings/setup`) **stores nothing**: each step's state is derived from the configuration and the request history, a skipped step stays "Eksik"; it opens from the Ayarlar overview and from Uyum Durumu, never by itself after the first sign-in. The e-mail step is done only when sending is switched on (`[smtp] enabled`) besides a server and a sender | remember skipped steps; redirect the first administrator after the first sign-in | [UYUM-DURUMU.md](UYUM-DURUMU.md) §5, [AYARLAR.md](AYARLAR.md) |
+| Q19 | No Windows service-manager or Task Scheduler query: the services are judged by their status files and the scheduled tasks by their **evidence files** (Seal's ignores the states Retention rewrote for deleted days); Requests, and Retention while retention is switched on, are "İzlenemiyor" (Not observable); with retention off (the default) Retention is "Kullanılmıyor" (Not used), and a task disabled in the Task Scheduler shows only once its evidence is late | read the Windows states (needs a status file written by SYSTEM) | [UYUM-DURUMU.md](UYUM-DURUMU.md) §4.5–4.6 |
+| Q20 | The **Uyum Durumu Raporu texts are on the lawyer review list**, like the 5651 lookup report's ([RAPOR.md](RAPOR.md)); see the note below | no review | [UYUM-DURUMU.md](UYUM-DURUMU.md) §3 |
+| Q21 | **No purge of `job_runs`** in Wave 4 (about 17,000 rows a day); the Sistem page reads it with bounded probes per job (the newest finished run of the last 7 days, and a run in progress after it) | a purge after N days | [UYUM-DURUMU.md](UYUM-DURUMU.md) §4.7 |
+
+### Decided while building (Wave 4)
+
+The manager's decisions taken in the Wave 4 reviews, implemented as written. Every deviation of
+the packages, with its tests, is in the contract's "Deviations" sections and in
+[MVP-CONTRACTS.md](MVP-CONTRACTS.md) §19.8; those an operator sees are folded into the rows above
+(Q7 card 4 reads its alerts by rule, Q8 a credit of 0 or below, Q13 a damaged `last.json`, Q16 a
+platform other than Windows and Linux, Q17 the forecast without a date or after the mark, Q18 the
+e-mail step, Q19 Seal's evidence, Q21 a job in progress) and into [UYUM-DURUMU.md](UYUM-DURUMU.md).
+
+| Decision | Date | Where |
+|---|---|---|
+| **Card 10: a damaged `state\backup\last.json` is a failed backup.** A file that does not parse or is not an object takes the card's **Sorun** row, as the worker's backup check opens `R20-backup` for it ("Yedek durum dosyası okunamıyor"); a file that cannot be read at all (access denied, a sharing violation) leaves the card **Bilgi yok** ("Bu denetim şu anda yapılamadı"), like every unreadable file of every card (card 3's `last-full.json` included: an unreadable result is never a failed chain check). An answer with such a card is not kept in the 30-second cache | 2026-10-28 (manager, review of the W4-A pull request #41) | [UYUM-DURUMU.md](UYUM-DURUMU.md) §2.3, §2.10 |
+| **The wizard's e-mail step needs sending switched on** (`[smtp] enabled`) besides a server and a sender: while sending is off (the default) no alert or report e-mail goes out, so the step stays "Eksik" and lists "E-posta gönderimi kapalı." / "Sending e-mail is switched off." | 2026-10-28 (manager, review of the W4-C pull request #37) | [UYUM-DURUMU.md](UYUM-DURUMU.md) §5, [AYARLAR.md](AYARLAR.md) |
+| **An empty applied peer list is not a missing report.** On the Sistem page's Saat block, ApplySystem's empty peer list reads "Uygulanan zaman sunucusu yok" / "No time server applied", no ApplySystem report yet "ApplySystem henüz rapor vermedi" / "No ApplySystem report yet" | 2026-10-28 (manager, note on issue #24 from the W4-D review) | [UYUM-DURUMU.md](UYUM-DURUMU.md) §4.8 |
+| **The Sistem answers' fractional values stay fractional in the web app** (the ingest lag and rates, the clock offset and delay: `Float` in the TypeScript mirrors, W4F-1); the answers themselves are unchanged | 2026-10-29 (manager, answer on issue #27) | [MVP-CONTRACTS.md](MVP-CONTRACTS.md) §19.4, §19.5 |
+
+The web app compares each saved Uyum Durumu Raporu with the SHA-256 the server sends with it
+(`X-Arci-Sha256`), as every hashed download; when they differ, "İndirilen dosyanın özeti
+eşleşmiyor: dosyayı kullanmayın ve yeniden indirin" shows beside the button with the code
+`download_mismatch` (W4F-2; [UYUM-DURUMU.md](UYUM-DURUMU.md) §3).
+
+### Lawyer review (Q20)
+
+The texts of the Uyum Durumu Raporu (the notice at the top, the card titles, the reasons and facts,
+the verify-on-site notes, the state words "[TAMAM] / [OK]" … "[BİLGİ YOK] / [NO DATA]" and the
+footer note) and of the Uyum Durumu page go to the organisation's legal counsel for review before
+the report is first presented in an audit, together with the lookup report's wording. The report
+is a listing of technical checks, not a legal assessment ("teknik denetim, hukuki değerlendirme
+değil"); the choice of the ten cards and their thresholds are technical assumptions of this file.
+The report carries the notice that ARCILOGGER is designed to support 5651 obligations ("5651
+yükümlülüklerini desteklemek için tasarlanmıştır") and that the cards are neither a legal assessment
+nor a statement of conformity; legal review is recommended.
+
+### Verify on site (Wave 4)
+
+What the two pages cannot check from ARCILOGGER; the page or card shows each as "Sahada
+doğrulayın" / "Verify on site" ([UYUM-DURUMU.md](UYUM-DURUMU.md) §6):
+
+- **DNS filter profile** (card 7): no profile name is read from FortiGate DNS filter records (the
+  table has no profile column; card 7 lists web filter profiles only). Verify on the device which
+  DNS filter profile each policy uses.
+- **Firewall filter logging** (card 7, `R20-filter`): the card counts only the records that arrive.
+  Verify on the device that every policy using web or DNS filtering logs these events and sends
+  them to ARCILOGGER ([DEVICE-SETUP.md](DEVICE-SETUP.md) §2, commands to verify on site); if the
+  organisation produces no filtered traffic on some days, correct `alerts.filter_days` (Q10).
+- **Credit format** (card 5): the credit is read from the Kamu SM client's output with
+  `[tsa] credit_regex`; the format is not confirmed (kamusm.md K4). Compare the value read on the
+  test server with the one Kamu SM shows.
+- **WORM** (card 9): whether the replica target is write-once cannot be checked from ARCILOGGER;
+  verify the target's WORM setting and retention on site (see also the list below).
+- **Windows rights** (Sistem, cards 3 and 10): the pages read the status files and the Windows API
+  with the rights the installer gives `NT SERVICE\ArciApi`. After the first night, check on the
+  Sistem page that processor, memory and uptime show (not "bu platformda okunamıyor") and that none
+  of the daily tasks shows "Kanıt yok" (the weekly and monthly verification tasks do until the first
+  Sunday and the first day of the month); broken rights are repaired with `Set-ArciVaultAcl.ps1`.
+- **Kamu SM root fingerprints** (wizard, Kamu SM steps): stamps of the test server have no legal
+  validity; before switching to production compare the root fingerprints with the values Kamu SM
+  publishes ([kamusm.md](kamusm.md)).
+- **Device settings** (wizard, Log sources step): the wizard names DEVICE-SETUP.md sections 1 and 4
+  as references and shows no device commands; verify the commands on site, and open port 514 by
+  hand where ARCILOGGER does not manage the firewall ([KURULUM.md](KURULUM.md) §12).
+
+### Deviations from the specification (Wave 4)
+
+- SPEC 12.3 "rsyslog stats": the product has its own collector (ADR-0002); Sistem shows its
+  statistics.
+- SPEC 3.4 card 3 (a daily 30-day and a weekly full-chain check): the tasks verify 2 days daily,
+  90 days weekly and the whole chain monthly; card 3 judges those results (Q6).
+- SPEC 3.4 card 8 "DHCP + ARP logs": the card follows the configured lease evidence (Q11).
+- SPEC 3.1(a) "profile names seen" for DNS: no DNS filter profile is stored; card 7 says so,
+  "sahada doğrula".
+- SPEC 12.3 page 12 and the roadmap's "compliance" schedule kind in Raporlar: not in Wave 4 (Q14).
+- SPEC 12.3 page 17 pre-fills the sources from a customer's device list: the product ships no
+  customer data (P4, P5); the wizard pre-fills nothing.
+- SPEC 13's encrypted nightly dump of database and configuration to the replica target: the
+  dumps stay on the server's disk and the configuration is copied by hand (B9, B12); card 10
+  reports what exists.
 
 ## Technical assumptions to verify on site
 

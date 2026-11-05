@@ -64,6 +64,9 @@ export const KNOWN_ACTIONS = [
   'license.limit_exceeded',
   'license.limit_ok',
   'license.state',
+  // Uyum Durumu (Wave 4 contract 2.7): the report's SHA-256, the configuration's SHA-256.
+  'compliance.report_export',
+  'compliance.config_backup_confirm',
 ] as const;
 
 /** Prefixes offered in the action filter (the API filters by prefix). */
@@ -81,6 +84,7 @@ export const ACTION_PREFIXES = [
   'seal.',
   'retention.',
   'license.',
+  'compliance.',
 ] as const;
 
 /** i18n key of an action's label (`auth.login` → `auditActions.auth_login`). */

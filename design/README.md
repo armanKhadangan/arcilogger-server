@@ -12,6 +12,7 @@ bağlayıcıdır.
 | Wave | Contract | Integration branch | Work packages |
 |---|---|---|---|
 | 3 — FortiGate-only DHCP evidence, srcmac, per-exit NAT (dual WAN) | [wave-3-contract.md](wave-3-contract.md) | `wave-3` | §4 of the contract; one GitHub issue each |
+| 4 — Uyum Durumu, Sistem, first-run wizard | [wave-4-contract.md](wave-4-contract.md) | `wave-4` | §4 of the contract; one GitHub issue each |
 
 How to read a contract (the GitHub issue of your package says which sections you need):
 

@@ -31,7 +31,7 @@ kullanılıyorsa bir sonraki boş porta kayar; simülasyonun varsayımıdır, sa
 Aynı `--seed` ve seçenekler her zaman bayt bayt aynı satırları verir.
 
 Wave 3 site planları (her seçeneğin varsayılanı yukarıdaki davranıştır; varsayılan çıktı bayt
-bayt aynı kalır):
+bayt aynı kalır, aşağıdaki 2026-11-02 değişikliği dışında):
 
 - **`--dhcp-server mikrotik|fortigate|both`** (varsayılan `mikrotik`). `fortigate`: yalnızca
   FortiGate olan bir site. FortiGate her VLAN'ın ağ geçidi ve DHCP sunucusudur: DHCP döngüsü
@@ -82,10 +82,17 @@ uv run python tools/loadgen/arcilogger_loadgen.py --egress hat-1:100.64.12.9:wan
   `LOADGEN-DEMO.txt` işaret dosyasını bırakır (bu klasördeki satırlar sentetiktir, delil
   değildir); işaretli klasöre sonraki günler bayraksız yazılabilir. Mevcut bir dosyaya
   `--append` olmadan yazmaz.
-- Simülasyondaki her DHCP havuzunda 160 adres var (`.64`–`.223`): bütün telefonlar personel
-  Wi-Fi'ında (60) olduğundan o yaklaşık 160 kullanıcıyla dolar; DHCP'yi FortiGate verdiğinde
-  (`--dhcp-server fortigate` ya da `both`) bir adres kirası bitene kadar tutulduğundan yaklaşık
-  140 kullanıcıyla. Daha fazlası açık bir hata ile durur (çıkış kodu 2).
+- Simülasyondaki her DHCP havuzunda 160 adres var (`.64`–`.223`) ve bir adres kirası bitene
+  kadar tutulur: bütün telefonlar personel Wi-Fi'ında (60) olduğundan o yaklaşık 125 kullanıcıyla
+  dolar; DHCP'yi FortiGate verdiğinde (`--dhcp-server fortigate` ya da `both`) yaklaşık 140
+  kullanıcıyla. Daha fazlası açık bir hata ile durur (çıkış kodu 2).
+- **Değişiklik (2026-11-02, #89):** varsayılan planda (MikroTik DHCP) bir adres, önceki sahibinin
+  kirası bitene kadar başka bir cihaza verilmez; önceden kira cihazın etkinliğinden uzun sürünce
+  doğruluk verisinde aynı adreste aynı anda iki kira görünebiliyordu. Bunun olduğu
+  çalıştırmaların baytları değişir (satır sayısı aynı kalır), örneğin varsayılan ayarlarla iki
+  günlük bir çalıştırma; denenen tek günler (2026-09-23, 2026-10-27) ve testteki sabit özet
+  değişmedi. Personel Wi-Fi'ı artık
+  yaklaşık 160 değil 125 kullanıcıyla dolar. Eski çıktılarla karşılaştırırken bunu hesaba katın.
 - Çıktı her zaman UTF-8'dir (İngilizce yerel ayarlı bir Windows konsolunda da).
 - Toplayıcı kaynakları gönderen IP'sine göre tanır: her kaynağa `--bind` ile kendi yerel
   adresini verin (127.0.0.0/8 Linux ve Windows'ta loopback'tir) ve aynı adresleri
@@ -121,7 +128,7 @@ of the simulation to verify on site; ports are given out in time order over all 
 Deterministic per `--seed`.
 
 Wave 3 site plans (each option defaults to the behaviour above; the default output stays the
-same, byte for byte):
+same, byte for byte, apart from the 2026-11-02 change below):
 
 - **`--dhcp-server mikrotik|fortigate|both`** (default `mikrotik`). `fortigate`: a
   FortiGate-only site, where the FortiGate is every VLAN's gateway and DHCP server. DHCP churn
@@ -153,10 +160,18 @@ placeholders (verify on site).
 **Never on the production server.** `spool` refuses a data folder in use (sealed days, a `state`
 folder, spool files it did not write) unless `--i-know-this-is-not-production` is given on a test
 installation, and leaves the marker `LOADGEN-DEMO.txt` (synthetic lines, not evidence) in every
-data folder it writes to. Each simulated DHCP pool has 160 addresses (`.64`–`.223`): every phone
-is on the staff Wi-Fi, which fills up at about 160 users, or at about 140 when the FortiGate serves
-DHCP (`--dhcp-server fortigate` or `both`: an address stays held until its lease ends); more stop
-with a clear error (exit code 2). Output is always UTF-8.
+data folder it writes to. Each simulated DHCP pool has 160 addresses (`.64`–`.223`), and an
+address stays held until its lease ends: every phone is on the staff Wi-Fi, which fills up at
+about 125 users, or at about 140 when the FortiGate serves DHCP (`--dhcp-server fortigate` or
+`both`); more stop with a clear error (exit code 2). Output is always UTF-8.
+
+**Change (2026-11-02, #89):** in the default plan (MikroTik DHCP) an address is no longer handed
+to another device while the earlier holder's lease runs; before, a lease that outlived its
+device's activity could leave two leases on one address at one moment in the truth. Runs where
+this happened change their bytes (the line count stays the same), for example two days with the
+defaults; the single days checked (2026-09-23, 2026-10-27) and the pinned test digest did not
+change. The staff Wi-Fi now fills up at
+about 125 users instead of 160. Keep this in mind when you compare with earlier outputs.
 
 Commands: `spool` (raw spool files exactly as the collector writes them, through
 `arcilogger_core.rawlog.format_line`; refuses to append unless `--append`, and refuses a data

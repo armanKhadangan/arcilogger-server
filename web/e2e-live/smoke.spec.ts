@@ -10,7 +10,9 @@
  * log (chain verified by the server, entry hashes recomputed by the browser), creates a user,
  * signs in as that user with the temporary password and changes it. What the FortiGate's records
  * show (`GET /settings/fortigate/observed`, Wave 3) is refused to that user and answered to the
- * administrator.
+ * administrator. Then Wave 4: Uyum Durumu shows its ten cards with their reasons and downloads its
+ * report (the SHA-256 checked here, the export in the audit log), and Sistem shows every block
+ * without an error.
  *
  * With a seeded stack (`live_stack.py --seed`: one sealed day of real-format logs, mock TSA) it
  * goes on: a 5651 lookup through the browser (exact chain WAN → internal IP → MAC → device →
@@ -245,6 +247,10 @@ test('first administrator, TOTP, KVKK, audit log, a second user — against the 
   // ... and answers the administrator (the NAT addresses over 24 hours, srcmac over the last one).
   expect(await observed(page)).toEqual({ status: 200, code: null, hours: [24, 1] });
 
+  // 9. Wave 4 on the real API, with or without seeded logs: Uyum Durumu's ten cards each with
+  // its badge and reason, the report (its SHA-256 checked here) in the audit log, and Sistem.
+  await waveFour(page);
+
   const seed = readSeed();
   if (!seed) return;
   // The administrator signed in a moment ago: that counts as the recent re-authentication the
@@ -253,8 +259,67 @@ test('first administrator, TOTP, KVKK, audit log, a second user — against the 
   await waveTwo(page, seed);
 });
 
+async function waveFour(page: Page) {
+  await page.goto('/compliance');
+  await expect(page.getByRole('heading', { level: 1, name: 'Uyum Durumu' })).toBeVisible();
+  const cards = page.getByRole('list', { name: 'Denetimler' }).getByRole('group');
+  await expect(cards).toHaveCount(10);
+  for (let index = 0; index < 10; index += 1) {
+    const card = cards.nth(index);
+    await expect(card.getByRole('heading', { level: 2 })).toHaveText(
+      new RegExp(`^${String(index + 1)}\\. \\S`),
+    );
+    await expect(card).toContainText(/Tamam|Dikkat|Sorun|Bilgi yok/);
+    // The reason is the card's first paragraph, worded by the server.
+    await expect(card.locator('p').first()).toHaveText(/\S/);
+  }
+  await expect(page.getByTestId('compliance-summary')).toContainText(
+    /^10 denetimden \d+ tanesi tamam/,
+  );
+  await expect(page.getByText('Denetim sonuçları okunamadı')).toHaveCount(0);
+  const answer = page.waitForResponse(
+    (response) => new URL(response.url()).pathname === '/api/v1/compliance/report.pdf',
+  );
+  const pdf = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Uyum Durumu Raporu (PDF)' }).click();
+  const report = await pdf;
+  expect(report.suggestedFilename()).toMatch(/^ARCILOGGER-uyum-durumu-\d{8}-\d{4}\.pdf$/);
+  const reportPath = await report.path();
+  expect(readFileSync(reportPath).subarray(0, 5).toString('latin1')).toBe('%PDF-');
+  expect((await answer).headers()['x-arci-sha256']).toBe(sha256(reportPath));
+  await expect(page.getByTestId('compliance-export-error')).toHaveCount(0);
+
+  await page.goto('/system');
+  await expect(page.getByRole('heading', { level: 1, name: 'Sistem' })).toBeVisible();
+  await expect(page.getByTestId('system-blocks').getByRole('heading', { level: 2 })).toHaveText([
+    'Kaynak kullanımı',
+    'Diskler',
+    'Veritabanı',
+    'Toplayıcı',
+    'İçe aktarma',
+    'Hizmetler',
+    'Zamanlanmış görevler',
+    'Worker işleri',
+    'Saat',
+    'Sürüm ve güncelleme',
+  ]);
+  expect(await page.getByTestId('system-block-disks').getByRole('meter').count()).toBeGreaterThan(
+    0,
+  );
+  await expect(page.getByText('Sistem durumu alınamadı.')).toHaveCount(0);
+  await expect(page.getByTestId('system-health-error')).toHaveCount(0);
+
+  await page.goto('/audit');
+  await expect(page.getByText(/^Zincir doğrulandı · \d+ kayıt$/)).toBeVisible();
+  await expect(
+    page
+      .getByRole('table', { name: 'Denetim kaydı, en yeni kayıt önce' })
+      .getByText('Uyum Durumu Raporu indirildi', { exact: true }),
+  ).toBeVisible();
+}
+
 async function fiveSixFiveOne(page: Page, seed: Seed) {
-  // 9. The 5651 lookup of the seeded request.
+  // 10. The 5651 lookup of the seeded request.
   await page.goto('/lookup');
   await page.getByLabel('Makam').fill('İzmir Cumhuriyet Başsavcılığı');
   await page.getByLabel('Dosya / evrak no').fill('2026/48213 Soruşturma');
@@ -276,7 +341,7 @@ async function fiveSixFiveOne(page: Page, seed: Seed) {
   );
   await expect(summary).toContainText(`Kişi ${seed.person} / ${seed.department}`);
 
-  // 10. A cited raw line, read back from the sealed vault.
+  // 11. A cited raw line, read back from the sealed vault.
   const evidenceRow = results.getByRole('button', { name: /satır \d+/ }).first();
   await evidenceRow.click();
   const raw = page.getByRole('dialog', { name: 'Ham kayıt satırı' });
@@ -285,7 +350,7 @@ async function fiveSixFiveOne(page: Page, seed: Seed) {
   await page.keyboard.press('Escape');
   await expect(evidenceRow).toBeFocused();
 
-  // 11. The official report: the bytes, the hash shown and the browser's own check agree.
+  // 12. The official report: the bytes, the hash shown and the browser's own check agree.
   const pdf = page.waitForEvent('download');
   await page.getByRole('button', { name: 'Resmi Rapor (PDF)' }).click();
   const report = await pdf;
@@ -310,7 +375,7 @@ async function fiveSixFiveOne(page: Page, seed: Seed) {
   await expect(page.getByText(/ · 2 indirme · /)).toBeVisible();
   expect(lookupReads).toEqual([]);
 
-  // 12. An evidence package of this lookup, built by the API, downloaded and checked.
+  // 13. An evidence package of this lookup, built by the API, downloaded and checked.
   await page.getByRole('button', { name: 'Kanıt Paketi' }).click();
   const wizard = page.getByRole('dialog', { name: 'Yeni kanıt paketi' });
   await expect(wizard.getByRole('radio', { name: /5651 sorgusundan/ })).toBeChecked();
@@ -333,7 +398,7 @@ async function fiveSixFiveOne(page: Page, seed: Seed) {
   await expect(sheet.getByText('İndirmeler (1)')).toBeVisible();
   await page.keyboard.press('Escape');
 
-  // 13. The sealed day on the sealing page: mock TSA reported in red, verified once more.
+  // 14. The sealed day on the sealing page: mock TSA reported in red, verified once more.
   await page.goto(`/sealing?day=${seed.day}`);
   await expect(page.getByRole('heading', { name: dayText(seed.day) })).toBeVisible();
   await expect(page.getByTestId('not-legal-grade')).toBeVisible();
@@ -345,7 +410,7 @@ async function fiveSixFiveOne(page: Page, seed: Seed) {
     `${dayText(seed.day)} günü doğrulandı`,
   );
 
-  // 14. Everything above is in the audit log.
+  // 15. Everything above is in the audit log.
   await page.goto('/audit');
   const audit = page.getByRole('table', { name: 'Denetim kaydı, en yeni kayıt önce' });
   for (const label of [
@@ -393,7 +458,7 @@ function verifyPackage(zipPath: string): string {
 }
 
 async function waveTwo(page: Page, seed: Seed) {
-  // 15. Arama on the sealed day: the seeded firewall session, its record and raw line.
+  // 16. Arama on the sealed day: the seeded firewall session, its record and raw line.
   const from = `${seed.day}T00:00:00+03:00`;
   const to = `${nextDay(seed.day)}T00:00:00+03:00`;
   await page.goto(`/search?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`);
@@ -416,7 +481,7 @@ async function waveTwo(page: Page, seed: Seed) {
   await page.keyboard.press('Escape');
   await expect(record).toBeHidden();
 
-  // 16. "Kanıt paketine aktar": the search's lines in an evidence package that verifies.
+  // 17. "Kanıt paketine aktar": the search's lines in an evidence package that verifies.
   const count = await rows.count();
   await page.getByRole('button', { name: 'Kanıt paketine aktar' }).click();
   const wizard = page.getByRole('dialog', { name: 'Yeni kanıt paketi' });
@@ -436,7 +501,7 @@ async function waveTwo(page: Page, seed: Seed) {
   verifyPackage(zipPath);
   await page.keyboard.press('Escape');
 
-  // 17. Canlı Akış: a line written to today's spool file after the stream opened.
+  // 18. Canlı Akış: a line written to today's spool file after the stream opened.
   await page.goto('/live');
   await page.getByRole('button', { name: 'Başlat', exact: true }).click();
   await expect(page.getByTestId('live-status')).toContainText('Bağlı');
@@ -458,7 +523,7 @@ async function waveTwo(page: Page, seed: Seed) {
   await expect(lines.filter({ hasText: String(port) })).toHaveCount(1, { timeout: 20_000 });
   await page.getByRole('button', { name: 'Durdur' }).click();
 
-  // 18. Kaynaklar: the configured sources, and that line read back from the spool.
+  // 19. Kaynaklar: the configured sources, and that line read back from the spool.
   await page.goto('/sources');
   const sources = page.getByRole('table').first();
   for (const name of ['fortigate', 'core-r1'])
@@ -469,7 +534,7 @@ async function waveTwo(page: Page, seed: Seed) {
   await expect(drawer.getByText(`sessionid=${String(port)}`, { exact: false })).toBeVisible();
   await page.keyboard.press('Escape');
 
-  // 19. Every read of Wave 2 is in the audit log (the stream's close is written after it ends).
+  // 20. Every read of Wave 2 is in the audit log (the stream's close is written after it ends).
   await expect(async () => {
     await page.goto('/audit');
     const audit = page.getByRole('table', { name: 'Denetim kaydı, en yeni kayıt önce' });

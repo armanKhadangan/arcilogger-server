@@ -13,6 +13,14 @@ test.describe('first-run setup', () => {
     await page.goto('/login');
     await expect(page).toHaveURL(/\/setup$/);
     await expect(page.getByRole('heading', { level: 1, name: 'İlk kurulum' })).toBeVisible();
+    // The account is the first step; the rest of the installation follows in Ayarlar's wizard
+    // (Wave 4 contract 2.8.4).
+    const steps = page.getByRole('list', { name: 'Kurulum adımları' }).getByRole('listitem');
+    await expect(steps).toHaveCount(3);
+    await expect(steps.nth(0)).toHaveAttribute('aria-current', 'step');
+    await expect(steps.nth(0)).toContainText('Yönetici hesabı');
+    await expect(steps.nth(1)).toContainText('İki adımlı doğrulamaİlk girişte');
+    await expect(steps.nth(2)).toContainText("Kurulum sihirbazıGirişten sonra, Ayarlar'da");
     // The full path: the programs are not on PATH on the Windows server (docs/KURULUM.md §9).
     await expect(
       page.getByText(

@@ -173,4 +173,7 @@ ARCILOGGER'ın test belirteçleri `openssl ts -verify` ile otomatik testlerde de
 
 Zaman damgası, TSA sertifikası geçerli olduğu sürece geçerlidir. Her gün durum kaydına
 `tsa_cert_not_after` yazılır. Sertifikanın bitimine 180 gün kala yenileme manifesti (etkilenen
-manifestlerin ve belirteçlerin özetleri) yeni bir damgayla mühürlenecektir — **M6 kapsamında**.
+manifestlerin ve belirteçlerin özetleri) yeni bir damgayla mühürlenecektir — **sonraki bir
+sürümde**. Bu sürümde Uyum Durumu sayfasının 5. kartı son damganın TSA sertifikasının bitiş
+tarihini ve kalan gününü gösterir; 180 gün kala **Dikkat**, süre dolduysa **Sorun** olur
+([UYUM-DURUMU.md](UYUM-DURUMU.md) bölüm 2.5).

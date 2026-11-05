@@ -1,7 +1,7 @@
 import { ArrowLeft } from 'lucide-react';
 import { useEffect, useId } from 'react';
 import type { ReactNode } from 'react';
-import { Link, useBlocker } from 'react-router-dom';
+import { Link, useBlocker, useLocation } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 
 import { PageHeader } from '@/components/layout/page-header';
@@ -9,8 +9,32 @@ import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { useAdminConfig, useAdminStatus } from '@/lib/api-hooks';
+import {
+  startWizardMode,
+  WIZARD_PATH,
+  wizardInUrl,
+  wizardModeKept,
+} from '@/pages/setup-wizard/wizard-mode';
 
 import { AgentBanner, AgentStatusChip, ConfigProblems, RestartBanner } from './agent-status';
+
+/**
+ * The way back of a settings page: to Ayarlar, or in wizard mode (`wizard=1` in the URL, then kept
+ * for this tab; Wave 4 contract 2.8.4) to the first-run wizard.
+ */
+function useWayBack(): { to: string; label: string } {
+  const { t } = useTranslation();
+  const { pathname, search } = useLocation();
+  const fromUrl = wizardInUrl(search);
+  useEffect(() => {
+    // The wizard page itself ends the mode, it never starts it.
+    if (fromUrl && pathname !== WIZARD_PATH) startWizardMode();
+  }, [fromUrl, pathname]);
+  const wizard = pathname !== WIZARD_PATH && (fromUrl || wizardModeKept());
+  return wizard
+    ? { to: WIZARD_PATH, label: t('setupWizard.back') }
+    : { to: '/settings', label: t('nav.settings') };
+}
 
 /**
  * A page of "Ayarlar" (contract 2.17): the way back, the title with the administration
@@ -22,22 +46,25 @@ export function SettingsFrame({
   description,
   children,
   machine = true,
+  problems = true,
 }: {
   title: string;
   description?: ReactNode;
   children: ReactNode;
   /** The page changes the machine configuration (chip and banners); else only the way back. */
   machine?: boolean;
+  /** With `machine`: list the configuration's errors (the wizard lists them in its own steps). */
+  problems?: boolean;
 }) {
-  const { t } = useTranslation();
   const status = useAdminStatus(machine);
   const config = useAdminConfig(machine);
+  const back = useWayBack();
   return (
     <div>
       <Button asChild variant="link" size="sm" className="mb-2">
-        <Link to="/settings">
+        <Link to={back.to} data-testid="settings-back">
           <ArrowLeft aria-hidden="true" />
-          {t('nav.settings')}
+          {back.label}
         </Link>
       </Button>
       <PageHeader
@@ -49,7 +76,9 @@ export function SettingsFrame({
         {machine ? (
           <>
             <AgentBanner status={status.data} />
-            <ConfigProblems problems={config.data?.problems} levels={['error']} />
+            {problems ? (
+              <ConfigProblems problems={config.data?.problems} levels={['error']} />
+            ) : null}
             <RestartBanner status={status.data} />
           </>
         ) : null}

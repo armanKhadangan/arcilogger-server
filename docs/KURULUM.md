@@ -38,10 +38,10 @@ Toplam süre: yaklaşık 1–1,5 saat (Windows kurulumu hariç).
 | 6 | Paketi sunucuya kopyalama ve doğrulama | Sunucu |
 | 7 | ARCILOGGER kurulumu | Sunucu |
 | 8 | Kök sertifikayı yönetici PC'sine kurma | Yönetici PC'si |
-| 9 | İlk giriş (ilk yönetici) | Sunucu + tarayıcı |
+| 9 | İlk giriş (ilk yönetici), ilk kurulum sihirbazı | Sunucu + tarayıcı |
 | 10 | Kamu SM bağlantısı (test → üretim) | Sunucu |
 | 11 | Cihaz ayarları | FortiGate, MikroTik |
-| 12 | Kurulum sonrası denetim; sonra [ILK-ADIMLAR.md](ILK-ADIMLAR.md) | Sunucu |
+| 12 | Kurulum sonrası denetim (konsol, Uyum Durumu ve Sistem sayfaları); sonra [ILK-ADIMLAR.md](ILK-ADIMLAR.md) | Sunucu + tarayıcı |
 
 ---
 
@@ -763,6 +763,37 @@ edin. Anahtarı kaybettiyseniz ya da kurulumu betikle, yönlendirilmiş çıktı
    & "C:\Program Files\ARCILOGGER\venv\Scripts\arcilogger-api.exe" create-admin --config "C:\ProgramData\ARCILOGGER\arcilogger.toml"
    ```
 
+**İlk kurulum sihirbazı.** Girişten sonra kurulumun kalan adımlarını **Ayarlar → İlk kurulum
+sihirbazı** (`/settings/setup`) sırayla gösterir; yalnızca yönetici açabilir (`settings.manage`).
+İlk girişten sonra kendiliğinden açılmaz: İlk kurulum sayfası onu üçüncü adım olarak gösterir
+("Kurulum sihirbazı — Girişten sonra, Ayarlar'da"), Uyum Durumu sayfasındaki **İlk kurulum
+sihirbazını aç** bağlantısı da (bir kart **Tamam** değilken) onu açar. Sihirbazın kendi formu
+yoktur ve hiçbir şey saklamaz: her adımın durumu ("Tamam" / "Eksik") her açılışta sunucudaki
+yapılandırmadan ve istek geçmişinden yeniden okunur. Sihirbaz **Tamam** olmayan ilk adımla açılır;
+**Ayarlar'da aç** ilgili Ayarlar sayfasını açar (orada geri dönüş bağlantısı **Kurulum sihirbazına
+dön** olur), **Bu adımı şimdilik atla** sonraki adıma geçer ve atlanan adım "Eksik" kalır.
+
+| Adım | Tamam sayılır, eğer | Açtığı sayfa (bu belgede) |
+|---|---|---|
+| Yönetici ve iki adımlı doğrulama | her zaman (yukarıdaki 1–3. adımlar) | — |
+| Site ayarları | kuruluş adı ve saat sunucuları için hata düzeyinde bir yapılandırma sorunu yok | Ayarlar → Genel (bölüm 1.3, 7.1) |
+| Log kaynakları | en az bir etkin kaynak tanımlı | Ayarlar → Kaynaklar (bölüm 11) |
+| Kamu SM: test sunucusu | istek geçmişinde başarılı ve doğrulanmış bir damga testi var ya da üretim sunucusu seçili | Ayarlar → Kamu SM, test adımı (bölüm 10) |
+| Kamu SM: üretim | üretim sunucusu seçili ve mühürleme hazır | Ayarlar → Kamu SM, üretim adımı (bölüm 10, "Üretime geçiş") |
+| Replika | replika açık | Ayarlar → Replika (bölüm 10, "Replika") |
+| E-posta | e-posta gönderimi açık, SMTP sunucusu ve gönderen adresi ayarlı | Ayarlar → E-posta |
+
+Son adım **Özet**: her adım ve durumu, yapılandırma sorunlarının tamamı (her düzeyde), "Kurulum
+sonrası denetim listesi: KURULUM.md bölüm 12" ve Uyum Durumu sayfasına bağlantı.
+**Log kaynakları** adımı her tanımlı kaynak için veri gelip gelmediğini ve güvenlik duvarının
+durumunu yazar (güvenlik duvarı ARCILOGGER tarafından yönetilmiyorsa 514'ü elle açın, bölüm 12);
+cihaz ayarları için yalnızca [DEVICE-SETUP.md](DEVICE-SETUP.md) bölüm 1 ve 4'e başvurur (komutları
+sahada doğrulayın): web arayüzünde cihaz komutu ve önceden doldurulmuş bir cihaz listesi yoktur.
+**Kamu SM** adımları, test sunucusunun damgalarının yasal geçerliliği olmadığını ve üretime
+geçmeden önce kök sertifika parmak izlerinin Kamu SM'nin yayımladığı değerlerle karşılaştırılması
+gerektiğini hatırlatır (sahada doğrulayın). Ayrıntılar: [UYUM-DURUMU.md](UYUM-DURUMU.md) bölüm 5,
+[AYARLAR.md](AYARLAR.md).
+
 Diğer kullanıcılar (denetçi vb.) ve sonraki adımlar: [ILK-ADIMLAR.md](ILK-ADIMLAR.md).
 
 ## 10. Kamu SM bağlantısı (test → üretim)
@@ -887,6 +918,37 @@ Get-NetFirewallRule -Group ARCILOGGER | Format-Table DisplayName, Direction, Ena
 Son komut lisans durumunu, açık modülleri ve sınırları yazar (deneme, kalan gün; [LISANS.md](LISANS.md)
 bölüm 5).
 
+**Web arayüzünde.** Aynı denetimlerin çoğunu iki sayfa da gösterir; ikisi de yalnızca okur ve 30
+saniyede bir yenilenir. Konsol komutları geçerliliğini korur: Windows hizmetlerinin ve zamanlanmış
+görevlerin durumunu ve güvenlik duvarı kurallarını Windows'a yalnızca onlar sorar.
+
+- **Uyum Durumu** (`/compliance`, yönetici ve denetçi): kayıt toplama, mühürleme ve yedeklemenin on
+  teknik denetimi (log kaynakları, dünün kayıtlarının mühürlenmesi ve doğrulanması, mühür zinciri,
+  saklama süresi, Kamu SM kontörü ve zaman damgası sertifikası, sunucu saati, içerik filtresi
+  kayıtları, DHCP ve ARP kayıtları, replika, yedekler). Her kart durumunu simge ve metinle ("Tamam",
+  "Dikkat", "Sorun", "Bilgi yok"), gerekçesini ve ne yapılacağını yazar
+  ([UYUM-DURUMU.md](UYUM-DURUMU.md) bölüm 2). Yeni bir kurulumda ilk mühürleme, doğrulama ve gece
+  yedeği çalışana kadar bazı kartlar **Tamam** olmaz; ilk geceden sonra yeniden bakın. Yapılandırma
+  dosyalarını çevrim dışı ortama kopyaladıktan sonra yönetici kart 10'da **Yapılandırma yedeğini
+  aldım** ile onaylar ([YEDEKLEME.md](YEDEKLEME.md) bölüm 3). **Uyum Durumu Raporu (PDF)** aynı
+  kartları bir PDF dosyasına yazar; her indirme denetim kaydına yazılır. ARCILOGGER 5651
+  yükümlülüklerini desteklemek için tasarlanmıştır: sayfa ve rapor teknik denetimdir, hukuki
+  değerlendirme değildir; sonuçları ve raporun kullanımını hukuk müşavirinizle teyit edin
+  ([UYUM-DURUMU.md](UYUM-DURUMU.md) bölüm 1 ve 3).
+- **Sistem** (`/system`, yalnızca yönetici): kaynak kullanımı, diskler ve disk tahmini, veritabanı
+  boyutu, toplayıcı ve içe aktarma, hizmetler (ArciCollector, ArciIngest ve ArciWorker durum
+  dosyalarından, yönetim hizmetinin kalp atışından, ApplySystem'in son sonucundan), zamanlanmış
+  görevler (her görevin durumu Görev Zamanlayıcı'ya sorulmadan kanıt dosyasından çıkarılır), worker
+  işleri, saat, sürüm ve bakım (bölüm 13; [UYUM-DURUMU.md](UYUM-DURUMU.md) bölüm 4). Disk tahmini
+  için worker işi `system.sample` her gün 00:30'dan sonra `state\system-history.json` dosyasına bir
+  ölçüm yazar; tahmin en az 7 günlük ölçümden sonra görünür. İlk geceden sonra Sistem sayfasında
+  kaynak değerlerinin göründüğünü ("bu platformda okunamıyor" yazmadığını) ve her gün çalışan
+  görevlerin "Kanıt yok" göstermediğini denetleyin (sahada doğrulayın; Windows hakları:
+  [UYUM-DURUMU.md](UYUM-DURUMU.md) bölüm 6). VerifyWeekly ilk pazara, VerifyMonthly ayın ilk gününe
+  kadar "Kanıt yok" gösterir; Requests ve (saklama açıksa) Retention görevlerinin okunabilir kanıtı
+  yoktur ("İzlenemiyor"); kapalı bir özelliğin görevi (ör. replika ya da saklama kapalıyken)
+  "Kullanılmıyor" gösterir.
+
 Güvenlik duvarı (`Set-ArciFirewall.ps1`):
 
 - **Gelen:** varsayılan eylem *Engelle*. İzin yalnızca: UDP/TCP 514 `[[sources]]` adreslerinden
@@ -932,6 +994,10 @@ Güvenlik duvarı (`Set-ArciFirewall.ps1`):
   powershell -ExecutionPolicy Bypass -File "C:\Program Files\ARCILOGGER\scripts\Set-ArciFirewall.ps1"
   Restart-Service ArciCollector, ArciIngest, ArciApi, ArciWorker
   ```
+- **Güvenlik duvarı ARCILOGGER tarafından yönetilmiyorsa** (Ayarlar → Kaynaklar ve ilk kurulum
+  sihirbazının Log kaynakları adımı bunu yazar): kurulum `-SkipFirewall` ile yapıldıysa UDP/TCP
+  514'ü etkin kaynakların adreslerine kendi güvenlik duvarınızda elle açın; tarayıcı yönetimi
+  kapalıysa kaynak değişikliklerinden sonra yukarıdaki betiği kendiniz çalıştırın.
 - Kaldırma (`-Remove`, kaldırmada otomatik): ARCILOGGER kuralları silinir, kapatılan kurallar ve
   profil ayarları ilk çalıştırmadan önceki hâline döner.
 
@@ -949,6 +1015,17 @@ Güvenlik duvarı (`Set-ArciFirewall.ps1`):
    powershell -ExecutionPolicy Bypass -File .\installer\Install-Arcilogger.ps1 -Upgrade -DryRun
    powershell -ExecutionPolicy Bypass -File .\installer\Install-Arcilogger.ps1 -Upgrade
    ```
+3. Yükseltmeden sonra **Sistem** sayfasının **Sürüm ve güncelleme** bloğunda yeni sürümü ve yayın
+   tarihini, **Hizmetler** bloğunda hizmetlerin çalıştığını ve **Uyum Durumu** kartlarını denetleyin
+   (bölüm 12).
+
+**Kurulu sürüm ve bakım web arayüzünde:** **Sistem** sayfasının (`/system`, yalnızca yönetici)
+**Sürüm ve güncelleme** bloğu ürün sürümünü, çekirdek sürümünü, yayın tarihini ve lisansın bakım
+süresini (Ayarlar → Lisans'taki bilgi) gösterir; yeni paketin yayın tarihini oradaki bakım süresiyle
+karşılaştırarak yükseltmenin bakım kapsamında olup olmadığını önceden görebilirsiniz (aşağıda). Blok
+şunu da yazar: "Yükseltme için yeni çevrimdışı paketi sunucuya kopyalayıp KURULUM.md bölüm 13'teki
+adımları izleyin. ARCILOGGER güncelleme indirmez." Yükseltme her zaman bu bölümdeki gibi çevrimdışı
+paketle yapılır.
 
 **Lisans ve bakım** ([LISANS.md](LISANS.md) bölüm 7 ve 8): yükseltme, hiçbir şey değiştirmeden
 önce yeni paketin yayın tarihini kurulu lisansın (veri klasöründeki `state\license-status.json`)
@@ -1156,11 +1233,17 @@ belirtir: zincir kurulamayan bir anda, o anı kapsayan en yeni DHCP kaydı böyl
 kaydından sonra o adres ya da o kiranın MAC adresi için böyle bir kayıt varsa zincir düşük
 güvenle ve nedeniyle gösterilir (`fortigate_dhcp_not_converted_since_lease`).
 
-`-Rollback` FortiGate kiralarını, geri dönülen sürüm FortiGate DHCP kayıtlarını okusa da
-düşük güvene indirir: FortiGate DHCP okuyan iki sürüm arasındaki bir geri almadan sonra da
-FortiGate DHCP zincirleri bir sonraki `arcilogger-db upgrade` çalışmasına kadar düşük güvenle
-görünür. O yükseltme (ör. yeniden yükseltme) onları geri getirir (aşağıda). Bu düşük güven
-hiçbir zaman yanlış bir kişiyi göstermez; zinciri yalnızca gereğinden düşük gösterir.
+`-Rollback` önce geri dönülen sürümün program klasöründe (`ARCILOGGER.previous`)
+`venv\Lib\site-packages\arcilogger_db\lease_rollback.py` dosyasını arar. Dosya varsa (FortiGate
+DHCP okuyan iki sürüm arasındaki bir geri alma) o sürüm FortiGate DHCP kayıtlarını zaten okur:
+FortiGate kiraları düşük güvene indirilmez, adım atlanır; kurulum nedenini yazar ve kurulum
+günlüğüne kaydeder. Dosya yoksa ya da denetim karar veremezse (klasör yok ya da okunamıyor),
+kiralar yukarıdaki gibi düşük güvene indirilir; denetim karar veremediyse kurulum nedenini
+kiraları indirmeden önce yazar, plan da (`-PlanPath`) `previous_check` alanında tutar. Dönülen
+sürüm FortiGate DHCP okuyorsa FortiGate DHCP zincirleri o zaman bir sonraki
+`arcilogger-db upgrade` çalışmasına kadar düşük güvenle görünür; o yükseltme (ör. yeniden
+yükseltme) onları geri getirir (aşağıda). Bu düşük güven hiçbir zaman yanlış bir kişiyi
+göstermez; zinciri yalnızca gereğinden düşük gösterir.
 
 **Yeniden yükseltme:** veritabanı şeması geri alınmadığı için dönüşüm yeniden çalışmaz ve eski
 NAT ayarları yeniden çevrilmez. Geri dönüş sırasında önceki sürümde `nat.public_ips`,
@@ -1180,6 +1263,17 @@ gösterir. Yeniden kurulan bu kiralar geri dönüş aralığında, kiranın son 
 önceki sürümün o adres ya da MAC adresi için yüklediği bir FortiGate DHCP kaydı varsa düşük
 güvenle ve nedeniyle gösterilir (`fortigate_dhcp_not_converted_since_lease`): adres o arada
 bırakılmış, başka bir cihaza verilmiş ya da MAC adresi başka bir adres almış olabilir.
+
+**NAT adresi indeksli sürüme yükseltme (şema revizyonu `0020_fg_traffic_transip_time`).** Şema
+yükseltmesi FortiGate trafik tablosu `fg_traffic` üzerinde yeni bir indeks oluşturur:
+`ix_fg_traffic_transip_time` (5651 sorgusunun bir NAT adresinde port olmadan sorduğu adımlar).
+PostgreSQL indeksi her aylık bölümde (TimescaleDB ile her parçada) oluşturur. 4 vCPU'lu bir
+makinede, varsayılan `maintenance_work_mem` ile, günde 1 milyon `fg_traffic` satırıyla 28. güne
+kadar dolmuş bir aylık bölümde (28 milyon satır) **yaklaşık 18 saniye** sürdü (2026-11-02 ölçümü);
+daha çok satırı ya da ayı olan büyük bir kurumda yükseltme buna göre uzar. İndeks milyon satır
+başına yaklaşık 31,5 MB yer tutar (böyle bir bölümde yaklaşık 0,9 GB). Şema yükseltilirken ingest,
+API ve worker hizmetleri durur; toplayıcı spool'a yazmayı sürdürür, hiçbir şey kaybolmaz ve ingest
+ardından yetişir ([INGEST.md](INGEST.md)).
 
 ## 14. Kaldırma
 

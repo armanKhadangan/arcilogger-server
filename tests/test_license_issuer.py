@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from functools import cache
 from pathlib import Path
-from types import MappingProxyType, ModuleType
+from types import MappingProxyType, ModuleType, SimpleNamespace
 
 import pytest
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
@@ -30,7 +30,7 @@ from arcilogger_core.license.document import LICENSE_ID_PATTERN, load_license
 from arcilogger_core.license.fingerprint import ServerIdentity, server_id_of
 from arcilogger_core.license.request import make_request_code, new_request, request_sha256
 from arcilogger_core.license.state import check_applicable
-from arcilogger_core.license.testing import tamper
+from arcilogger_core.license.testing import public_key_b64, tamper, test_private_key
 from arcilogger_core.license.trusted_time import TrustedTime
 
 pytestmark = pytest.mark.license_live
@@ -206,6 +206,41 @@ def test_keygen_prints_the_public_key_and_its_hash(tmp_path: Path) -> None:
     assert public in completed.stdout
     assert digest in completed.stdout
     assert "keys.py" in completed.stdout
+
+
+def readme_keygen_lines(public: str) -> list[str]:
+    """The ``verify:`` line of keygen as the owner guide shows it (Turkish, then English part)."""
+    text = (ROOT / "tools" / "license-issuer" / "README.md").read_text(encoding="utf-8")
+    shown = re.findall(r"`(verify: --public-key=<43 (?:karakter|characters)>)`", text)
+    return [re.sub(r"<43 \w+>", public, line) for line in shown]
+
+
+def test_keygen_prints_the_verify_option_for_a_key_that_starts_with_a_dash(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # About one key in 64 starts with "-"; argparse takes "--public-key -…" for a missing value.
+    key = test_private_key(b"arcilogger test key 18")
+    public = public_key_b64(key)
+    assert public.startswith("-")
+    issuer = issuer_module()
+    monkeypatch.setattr(issuer, "Ed25519PrivateKey", SimpleNamespace(generate=lambda: key))
+    owner = Owner(tmp_path / "offline")
+    owner.root.mkdir()
+    owner.passphrase.write_text(PASSPHRASE + "\n", encoding="utf-8")
+    args = ["keygen", "--key-id", KEY_ID, "--out", str(owner.keys)]
+    assert issuer.main([*args, "--passphrase-file", str(owner.passphrase)]) == 0
+    assert owner.public_key() == public
+    printed = [line.strip() for line in capsys.readouterr().out.splitlines()]
+    line = f"verify: --public-key={public}"
+    assert line in printed
+    assert readme_keygen_lines(public) == [line, line]
+    completed = owner.issue("dash.lic", "--valid-until", "2099-01-31")
+    assert completed.returncode == 0, output(completed)
+    option = line.removeprefix("verify: ")
+    completed = run("verify", owner.root / "dash.lic", option)
+    assert completed.returncode == 0, output(completed)
+    assert "geçerli" in completed.stdout
+    assert run("verify", owner.root / "dash.lic", "--public-key", public).returncode == 2
 
 
 def test_keygen_refuses_existing_files(owner: Owner) -> None:

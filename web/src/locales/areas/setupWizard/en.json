@@ -1,0 +1,89 @@
+{
+  "setupWizard": {
+    "title": "First-run wizard",
+    "description": "The remaining steps of the installation in order. Each step opens its Settings page; a step's state is read from the configuration on the server.",
+    "settingsHint": "The installation's steps in order: site settings, log sources, Kamu SM, replica and e-mail.",
+    "stepsLabel": "Wizard steps",
+    "skip": "Skip this step for now",
+    "open": "Open in Settings",
+    "back": "Back to the first-run wizard",
+    "loadFailed": "The configuration could not be read",
+    "doneCount": "{{done}} of {{total}} done",
+    "missingTitle": "Still missing",
+    "nothingMissing": "Nothing is missing in this step.",
+    "steps": {
+      "admin": {
+        "title": "Administrator and two-step verification",
+        "purpose": "The first administrator account is created at installation; two-step verification is set up at the first sign-in. As you opened this page, this step is done. Further accounts are added in the user management of Settings."
+      },
+      "site": {
+        "title": "Site settings",
+        "purpose": "The organisation name appears in reports, e-mails and evidence packages. The time servers keep the server's clock, and so the times of the records, right; a local time source is recommended."
+      },
+      "sources": {
+        "title": "Log sources",
+        "purpose": "The devices that send logs (firewall, core router) are defined here as sources. Only the records of defined, enabled sources are expected; a source that falls silent raises an alert."
+      },
+      "kamusm_test": {
+        "title": "Kamu SM: test server",
+        "purpose": "A time stamp from the test server shows that Java, the Zamane client, the root certificates and the customer credentials work together. The test is the stamp test step of Settings → Kamu SM."
+      },
+      "kamusm_production": {
+        "title": "Kamu SM: production",
+        "purpose": "The daily seals take their time stamp from the Kamu SM production server. After the switch to production, sealing must be ready; if it is not, the causes are listed below."
+      },
+      "replica": {
+        "title": "Replica",
+        "purpose": "Sealed days are copied to a second place, a network share. If the server's disk fails, the copies remain on the replica."
+      },
+      "smtp": {
+        "title": "E-mail",
+        "purpose": "Alerts and reports are sent by e-mail. This needs an SMTP server and a sender address."
+      },
+      "summary": {
+        "title": "Summary",
+        "purpose": "The state of the steps and the problems of the configuration. Open a step that is missing to complete it."
+      }
+    },
+    "missing": {
+      "siteProblems": "The organisation name or a time server is not set (see the problems below).",
+      "noSource": "No log source is defined yet.",
+      "noEnabled": "None of the defined sources is enabled.",
+      "noTest": "No stamp test succeeded and was verified.",
+      "notProduction": "Time stamps do not come from the Kamu SM production server.",
+      "sealNotReady": "Sealing is not ready.",
+      "replicaOff": "The replica is switched off.",
+      "smtpOff": "Sending e-mail is switched off.",
+      "smtpServer": "No SMTP server is set.",
+      "smtpSender": "No sender address is set."
+    },
+    "sources": {
+      "firewallManaged": "ARCILOGGER's firewall rule opens port 514 to the addresses of the enabled sources by itself.",
+      "firewallNotManaged": "The firewall is not managed by ARCILOGGER; open port 514 to these addresses by hand (INSTALL.md section 12).",
+      "deviceSetup": "Device settings: DEVICE-SETUP.md sections 1 and 4 (verify the commands on site).",
+      "configured": "Defined sources",
+      "arrived": "Data arrived",
+      "lastMessage": "last message {{time}}",
+      "notArrived": "No data yet",
+      "arrivalUnknown": "Data state could not be read",
+      "disabled": "Off"
+    },
+    "kamusm": {
+      "legal": "Stamps of the test server have no legal validity (Kamu SM); before switching to production compare the root fingerprints with the values Kamu SM publishes (verify on site)."
+    },
+    "summary": {
+      "steps": "Steps",
+      "noProblems": "No problem found in the configuration.",
+      "checklist": "Checks after installation: INSTALL.md section 12",
+      "compliance": "Open the Compliance page"
+    }
+  },
+  "setup": {
+    "stepWizard": "First-run wizard",
+    "stepWizardHint": "After sign-in, in Settings"
+  },
+  "auditActions": {
+    "compliance_report_export": "Compliance status report exported",
+    "compliance_config_backup_confirm": "Configuration backup confirmed"
+  }
+}

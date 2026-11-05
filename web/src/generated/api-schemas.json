@@ -154,6 +154,15 @@
     "/api/v1/auth/totp/setup": [
       "get"
     ],
+    "/api/v1/compliance": [
+      "get"
+    ],
+    "/api/v1/compliance/config-backup": [
+      "post"
+    ],
+    "/api/v1/compliance/report.pdf": [
+      "get"
+    ],
     "/api/v1/credits": [
       "get"
     ],
@@ -336,6 +345,15 @@
       "get"
     ],
     "/api/v1/sources/{name}/tail": [
+      "get"
+    ],
+    "/api/v1/system": [
+      "get"
+    ],
+    "/api/v1/system/disk": [
+      "get"
+    ],
+    "/api/v1/system/health": [
       "get"
     ],
     "/api/v1/usage/categories": [
@@ -950,6 +968,38 @@
         "restart_required"
       ],
       "title": "AdminStatus",
+      "type": "object"
+    },
+    "AgentHealth": {
+      "properties": {
+        "heartbeat_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Heartbeat At"
+        },
+        "state": {
+          "enum": [
+            "ok",
+            "stale",
+            "missing",
+            "disabled"
+          ],
+          "title": "State",
+          "type": "string"
+        }
+      },
+      "required": [
+        "state",
+        "heartbeat_at"
+      ],
+      "title": "AgentHealth",
       "type": "object"
     },
     "AgentOut": {
@@ -1569,6 +1619,50 @@
         "bytes"
       ],
       "title": "AppRow",
+      "type": "object"
+    },
+    "ApplySystemHealth": {
+      "properties": {
+        "at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "At"
+        },
+        "code": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Code"
+        },
+        "state": {
+          "enum": [
+            "ok",
+            "failed",
+            "never",
+            "disabled"
+          ],
+          "title": "State",
+          "type": "string"
+        }
+      },
+      "required": [
+        "state",
+        "at",
+        "code"
+      ],
+      "title": "ApplySystemHealth",
       "type": "object"
     },
     "AssignRequest": {
@@ -2752,6 +2846,73 @@
       "title": "ClockBody",
       "type": "object"
     },
+    "ClockSampleOut": {
+      "properties": {
+        "delay_ms": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Delay Ms"
+        },
+        "offset_ms": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Offset Ms"
+        },
+        "ok": {
+          "title": "Ok",
+          "type": "boolean"
+        },
+        "server": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Server"
+        },
+        "stratum": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Stratum"
+        },
+        "time": {
+          "format": "date-time",
+          "title": "Time",
+          "type": "string"
+        }
+      },
+      "required": [
+        "time",
+        "server",
+        "ok",
+        "offset_ms",
+        "delay_ms",
+        "stratum"
+      ],
+      "title": "ClockSampleOut",
+      "type": "object"
+    },
     "ClockSection": {
       "properties": {
         "alert_offset_ms": {
@@ -2812,6 +2973,141 @@
         "message_en"
       ],
       "title": "CodeMessage",
+      "type": "object"
+    },
+    "CollectorInfo": {
+      "properties": {
+        "dropped_transport": {
+          "title": "Dropped Transport",
+          "type": "integer"
+        },
+        "dropped_unknown": {
+          "title": "Dropped Unknown",
+          "type": "integer"
+        },
+        "sources": {
+          "items": {
+            "$ref": "#/components/schemas/CollectorSource"
+          },
+          "title": "Sources",
+          "type": "array"
+        },
+        "started_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Started At"
+        },
+        "state": {
+          "enum": [
+            "running",
+            "stale",
+            "missing"
+          ],
+          "title": "State",
+          "type": "string"
+        },
+        "tcp_connections": {
+          "title": "Tcp Connections",
+          "type": "integer"
+        },
+        "tcp_framing_errors": {
+          "title": "Tcp Framing Errors",
+          "type": "integer"
+        },
+        "torn_lines": {
+          "title": "Torn Lines",
+          "type": "integer"
+        },
+        "unknown_senders": {
+          "$ref": "#/components/schemas/UnknownSenders"
+        },
+        "updated_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Updated At"
+        },
+        "write_error_since": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Write Error Since"
+        },
+        "write_failures": {
+          "title": "Write Failures",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "state",
+        "updated_at",
+        "started_at",
+        "sources",
+        "unknown_senders",
+        "dropped_unknown",
+        "dropped_transport",
+        "write_failures",
+        "write_error_since",
+        "torn_lines",
+        "tcp_connections",
+        "tcp_framing_errors"
+      ],
+      "title": "CollectorInfo",
+      "type": "object"
+    },
+    "CollectorSource": {
+      "properties": {
+        "bytes": {
+          "title": "Bytes",
+          "type": "integer"
+        },
+        "last_received": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Last Received"
+        },
+        "messages": {
+          "title": "Messages",
+          "type": "integer"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "messages",
+        "bytes",
+        "last_received"
+      ],
+      "title": "CollectorSource",
       "type": "object"
     },
     "CollectorState": {
@@ -2922,6 +3218,299 @@
         "departments"
       ],
       "title": "CompanyUsage",
+      "type": "object"
+    },
+    "ComplianceAlertRef": {
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "integer"
+        },
+        "opened_at": {
+          "format": "date-time",
+          "title": "Opened At",
+          "type": "string"
+        },
+        "rule": {
+          "title": "Rule",
+          "type": "string"
+        },
+        "severity": {
+          "enum": [
+            "info",
+            "low",
+            "medium",
+            "high",
+            "critical"
+          ],
+          "title": "Severity",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "rule",
+        "severity",
+        "opened_at"
+      ],
+      "title": "ComplianceAlertRef",
+      "type": "object"
+    },
+    "ComplianceCard": {
+      "properties": {
+        "alerts": {
+          "items": {
+            "$ref": "#/components/schemas/ComplianceAlertRef"
+          },
+          "title": "Alerts",
+          "type": "array"
+        },
+        "checked_at": {
+          "format": "date-time",
+          "title": "Checked At",
+          "type": "string"
+        },
+        "doc_en": {
+          "title": "Doc En",
+          "type": "string"
+        },
+        "doc_tr": {
+          "title": "Doc Tr",
+          "type": "string"
+        },
+        "facts": {
+          "items": {
+            "$ref": "#/components/schemas/ComplianceFact"
+          },
+          "title": "Facts",
+          "type": "array"
+        },
+        "id": {
+          "enum": [
+            "sources",
+            "seal_yesterday",
+            "chain",
+            "retention",
+            "tsa",
+            "clock",
+            "content_filter",
+            "lease_evidence",
+            "replica",
+            "backup"
+          ],
+          "title": "Id",
+          "type": "string"
+        },
+        "number": {
+          "title": "Number",
+          "type": "integer"
+        },
+        "page": {
+          "enum": [
+            "sources",
+            "sealing",
+            "search",
+            "settings",
+            "system"
+          ],
+          "title": "Page",
+          "type": "string"
+        },
+        "reason_en": {
+          "title": "Reason En",
+          "type": "string"
+        },
+        "reason_tr": {
+          "title": "Reason Tr",
+          "type": "string"
+        },
+        "title_en": {
+          "title": "Title En",
+          "type": "string"
+        },
+        "title_tr": {
+          "title": "Title Tr",
+          "type": "string"
+        },
+        "tone": {
+          "enum": [
+            "ok",
+            "warning",
+            "error",
+            "neutral"
+          ],
+          "title": "Tone",
+          "type": "string"
+        },
+        "verify_on_site_en": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Verify On Site En"
+        },
+        "verify_on_site_tr": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Verify On Site Tr"
+        }
+      },
+      "required": [
+        "id",
+        "number",
+        "tone",
+        "title_tr",
+        "title_en",
+        "reason_tr",
+        "reason_en",
+        "facts",
+        "alerts",
+        "page",
+        "doc_tr",
+        "doc_en",
+        "verify_on_site_tr",
+        "verify_on_site_en",
+        "checked_at"
+      ],
+      "title": "ComplianceCard",
+      "type": "object"
+    },
+    "ComplianceCounts": {
+      "properties": {
+        "error": {
+          "title": "Error",
+          "type": "integer"
+        },
+        "neutral": {
+          "title": "Neutral",
+          "type": "integer"
+        },
+        "ok": {
+          "title": "Ok",
+          "type": "integer"
+        },
+        "warning": {
+          "title": "Warning",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "ok",
+        "warning",
+        "error",
+        "neutral"
+      ],
+      "title": "ComplianceCounts",
+      "type": "object"
+    },
+    "ComplianceFact": {
+      "properties": {
+        "key": {
+          "title": "Key",
+          "type": "string"
+        },
+        "label_en": {
+          "title": "Label En",
+          "type": "string"
+        },
+        "label_tr": {
+          "title": "Label Tr",
+          "type": "string"
+        },
+        "value_en": {
+          "title": "Value En",
+          "type": "string"
+        },
+        "value_tr": {
+          "title": "Value Tr",
+          "type": "string"
+        }
+      },
+      "required": [
+        "key",
+        "label_tr",
+        "label_en",
+        "value_tr",
+        "value_en"
+      ],
+      "title": "ComplianceFact",
+      "type": "object"
+    },
+    "ComplianceStatus": {
+      "properties": {
+        "cards": {
+          "items": {
+            "$ref": "#/components/schemas/ComplianceCard"
+          },
+          "title": "Cards",
+          "type": "array"
+        },
+        "counts": {
+          "$ref": "#/components/schemas/ComplianceCounts"
+        },
+        "generated_at": {
+          "format": "date-time",
+          "title": "Generated At",
+          "type": "string"
+        },
+        "notice_en": {
+          "title": "Notice En",
+          "type": "string"
+        },
+        "notice_tr": {
+          "title": "Notice Tr",
+          "type": "string"
+        },
+        "site_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Site Name"
+        }
+      },
+      "required": [
+        "generated_at",
+        "site_name",
+        "counts",
+        "cards",
+        "notice_tr",
+        "notice_en"
+      ],
+      "title": "ComplianceStatus",
+      "type": "object"
+    },
+    "ConfigBackupOut": {
+      "properties": {
+        "config_sha256": {
+          "title": "Config Sha256",
+          "type": "string"
+        },
+        "confirmed_at": {
+          "format": "date-time",
+          "title": "Confirmed At",
+          "type": "string"
+        }
+      },
+      "required": [
+        "confirmed_at",
+        "config_sha256"
+      ],
+      "title": "ConfigBackupOut",
       "type": "object"
     },
     "ConfigVersion": {
@@ -3424,6 +4013,56 @@
         "parse_failures"
       ],
       "title": "DashboardSummary",
+      "type": "object"
+    },
+    "DatabaseInfo": {
+      "properties": {
+        "measured_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Measured At"
+        },
+        "storage": {
+          "enum": [
+            "postgresql",
+            "timescaledb"
+          ],
+          "title": "Storage",
+          "type": "string"
+        },
+        "tables": {
+          "items": {
+            "$ref": "#/components/schemas/TableSize"
+          },
+          "title": "Tables",
+          "type": "array"
+        },
+        "total_bytes": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Total Bytes"
+        }
+      },
+      "required": [
+        "storage",
+        "total_bytes",
+        "tables",
+        "measured_at"
+      ],
+      "title": "DatabaseInfo",
       "type": "object"
     },
     "DayHealth": {
@@ -4222,6 +4861,67 @@
       "title": "DeviceUsage",
       "type": "object"
     },
+    "DiskForecast": {
+      "properties": {
+        "full_on": {
+          "anyOf": [
+            {
+              "format": "date",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Full On"
+        },
+        "growth_bytes_per_day": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Growth Bytes Per Day"
+        },
+        "samples": {
+          "title": "Samples",
+          "type": "integer"
+        },
+        "state": {
+          "enum": [
+            "estimated",
+            "insufficient",
+            "not_growing"
+          ],
+          "title": "State",
+          "type": "string"
+        },
+        "warning_on": {
+          "anyOf": [
+            {
+              "format": "date",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Warning On"
+        }
+      },
+      "required": [
+        "state",
+        "samples",
+        "growth_bytes_per_day",
+        "warning_on",
+        "full_on"
+      ],
+      "title": "DiskForecast",
+      "type": "object"
+    },
     "DownloadOut": {
       "properties": {
         "ip": {
@@ -4251,6 +4951,62 @@
         "ip"
       ],
       "title": "DownloadOut",
+      "type": "object"
+    },
+    "DriveInfo": {
+      "properties": {
+        "critical_percent": {
+          "title": "Critical Percent",
+          "type": "integer"
+        },
+        "forecast": {
+          "$ref": "#/components/schemas/DiskForecast"
+        },
+        "free_bytes": {
+          "title": "Free Bytes",
+          "type": "integer"
+        },
+        "path": {
+          "title": "Path",
+          "type": "string"
+        },
+        "role": {
+          "enum": [
+            "data",
+            "system"
+          ],
+          "title": "Role",
+          "type": "string"
+        },
+        "total_bytes": {
+          "title": "Total Bytes",
+          "type": "integer"
+        },
+        "used_bytes": {
+          "title": "Used Bytes",
+          "type": "integer"
+        },
+        "used_percent": {
+          "title": "Used Percent",
+          "type": "integer"
+        },
+        "warning_percent": {
+          "title": "Warning Percent",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "role",
+        "path",
+        "total_bytes",
+        "used_bytes",
+        "free_bytes",
+        "used_percent",
+        "warning_percent",
+        "critical_percent",
+        "forecast"
+      ],
+      "title": "DriveInfo",
       "type": "object"
     },
     "EvidenceCreate": {
@@ -5237,6 +5993,72 @@
       "title": "HeatCell",
       "type": "object"
     },
+    "HostInfo": {
+      "properties": {
+        "cpu_percent": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Cpu Percent"
+        },
+        "memory_total_bytes": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Memory Total Bytes"
+        },
+        "memory_used_bytes": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Memory Used Bytes"
+        },
+        "platform": {
+          "enum": [
+            "windows",
+            "linux",
+            "other"
+          ],
+          "title": "Platform",
+          "type": "string"
+        },
+        "uptime_seconds": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Uptime Seconds"
+        }
+      },
+      "required": [
+        "platform",
+        "cpu_percent",
+        "memory_total_bytes",
+        "memory_used_bytes",
+        "uptime_seconds"
+      ],
+      "title": "HostInfo",
+      "type": "object"
+    },
     "HostnameRow": {
       "properties": {
         "bytes": {
@@ -5403,6 +6225,277 @@
         "preview"
       ],
       "title": "ImportResult",
+      "type": "object"
+    },
+    "IngestInfo": {
+      "properties": {
+        "database_ok": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Database Ok"
+        },
+        "lines_per_second": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Lines Per Second"
+        },
+        "service_state": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Service State"
+        },
+        "sources": {
+          "items": {
+            "$ref": "#/components/schemas/IngestSource"
+          },
+          "title": "Sources",
+          "type": "array"
+        },
+        "state": {
+          "enum": [
+            "running",
+            "stale",
+            "missing"
+          ],
+          "title": "State",
+          "type": "string"
+        },
+        "unknown_sources": {
+          "title": "Unknown Sources",
+          "type": "integer"
+        },
+        "updated_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Updated At"
+        },
+        "workers_active": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Workers Active"
+        },
+        "workers_configured": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Workers Configured"
+        }
+      },
+      "required": [
+        "state",
+        "service_state",
+        "updated_at",
+        "database_ok",
+        "workers_configured",
+        "workers_active",
+        "lines_per_second",
+        "sources",
+        "unknown_sources"
+      ],
+      "title": "IngestInfo",
+      "type": "object"
+    },
+    "IngestSource": {
+      "properties": {
+        "has_error": {
+          "title": "Has Error",
+          "type": "boolean"
+        },
+        "lag_bytes": {
+          "title": "Lag Bytes",
+          "type": "integer"
+        },
+        "lag_seconds": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Lag Seconds"
+        },
+        "lines_per_second": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Lines Per Second"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "unfinished_days": {
+          "title": "Unfinished Days",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "name",
+        "lag_bytes",
+        "lag_seconds",
+        "lines_per_second",
+        "unfinished_days",
+        "has_error"
+      ],
+      "title": "IngestSource",
+      "type": "object"
+    },
+    "JobHealth": {
+      "properties": {
+        "duration_ms": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Duration Ms"
+        },
+        "failures": {
+          "title": "Failures",
+          "type": "integer"
+        },
+        "job": {
+          "title": "Job",
+          "type": "string"
+        },
+        "last_finished": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Last Finished"
+        },
+        "last_started": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Last Started"
+        },
+        "last_status": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Last Status"
+        },
+        "module": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Module"
+        },
+        "next_due": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Next Due"
+        },
+        "schedule_en": {
+          "title": "Schedule En",
+          "type": "string"
+        },
+        "schedule_tr": {
+          "title": "Schedule Tr",
+          "type": "string"
+        },
+        "state": {
+          "enum": [
+            "ok",
+            "failing",
+            "skipped",
+            "running",
+            "never"
+          ],
+          "title": "State",
+          "type": "string"
+        }
+      },
+      "required": [
+        "job",
+        "schedule_tr",
+        "schedule_en",
+        "module",
+        "state",
+        "last_status",
+        "last_started",
+        "last_finished",
+        "duration_ms",
+        "failures",
+        "next_due"
+      ],
+      "title": "JobHealth",
       "type": "object"
     },
     "JsonValue": {},
@@ -11256,6 +12349,48 @@
       "title": "ServiceConfigOut",
       "type": "object"
     },
+    "ServiceHealth": {
+      "properties": {
+        "name": {
+          "enum": [
+            "ArciCollector",
+            "ArciIngest",
+            "ArciWorker",
+            "ArciApi"
+          ],
+          "title": "Name",
+          "type": "string"
+        },
+        "state": {
+          "enum": [
+            "running",
+            "stale",
+            "missing"
+          ],
+          "title": "State",
+          "type": "string"
+        },
+        "updated_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Updated At"
+        }
+      },
+      "required": [
+        "name",
+        "state",
+        "updated_at"
+      ],
+      "title": "ServiceHealth",
+      "type": "object"
+    },
     "SessionInfo": {
       "properties": {
         "created_at": {
@@ -13582,6 +14717,78 @@
       "title": "Suggested",
       "type": "object"
     },
+    "SystemDisk": {
+      "properties": {
+        "checked_at": {
+          "format": "date-time",
+          "title": "Checked At",
+          "type": "string"
+        },
+        "drives": {
+          "items": {
+            "$ref": "#/components/schemas/DriveInfo"
+          },
+          "title": "Drives",
+          "type": "array"
+        }
+      },
+      "required": [
+        "checked_at",
+        "drives"
+      ],
+      "title": "SystemDisk",
+      "type": "object"
+    },
+    "SystemHealth": {
+      "properties": {
+        "agent": {
+          "$ref": "#/components/schemas/AgentHealth"
+        },
+        "apply_system": {
+          "$ref": "#/components/schemas/ApplySystemHealth"
+        },
+        "checked_at": {
+          "format": "date-time",
+          "title": "Checked At",
+          "type": "string"
+        },
+        "jobs": {
+          "items": {
+            "$ref": "#/components/schemas/JobHealth"
+          },
+          "title": "Jobs",
+          "type": "array"
+        },
+        "services": {
+          "items": {
+            "$ref": "#/components/schemas/ServiceHealth"
+          },
+          "title": "Services",
+          "type": "array"
+        },
+        "tasks": {
+          "items": {
+            "$ref": "#/components/schemas/TaskHealth"
+          },
+          "title": "Tasks",
+          "type": "array"
+        },
+        "time": {
+          "$ref": "#/components/schemas/TimeHealth"
+        }
+      },
+      "required": [
+        "checked_at",
+        "services",
+        "agent",
+        "apply_system",
+        "tasks",
+        "jobs",
+        "time"
+      ],
+      "title": "SystemHealth",
+      "type": "object"
+    },
     "SystemOut": {
       "description": "ApplySystem's last run (``admin\\system\\status.json``).",
       "properties": {
@@ -13661,6 +14868,48 @@
       "title": "SystemOut",
       "type": "object"
     },
+    "SystemSummary": {
+      "properties": {
+        "checked_at": {
+          "format": "date-time",
+          "title": "Checked At",
+          "type": "string"
+        },
+        "collector": {
+          "$ref": "#/components/schemas/CollectorInfo"
+        },
+        "database": {
+          "$ref": "#/components/schemas/DatabaseInfo"
+        },
+        "drives": {
+          "items": {
+            "$ref": "#/components/schemas/DriveInfo"
+          },
+          "title": "Drives",
+          "type": "array"
+        },
+        "host": {
+          "$ref": "#/components/schemas/HostInfo"
+        },
+        "ingest": {
+          "$ref": "#/components/schemas/IngestInfo"
+        },
+        "version": {
+          "$ref": "#/components/schemas/VersionInfo"
+        }
+      },
+      "required": [
+        "checked_at",
+        "host",
+        "drives",
+        "database",
+        "collector",
+        "ingest",
+        "version"
+      ],
+      "title": "SystemSummary",
+      "type": "object"
+    },
     "SystemTaskCheck": {
       "description": "The start-up ping of ApplySystem (its status must change within 5 minutes).",
       "properties": {
@@ -13698,6 +14947,24 @@
         "error"
       ],
       "title": "SystemTaskCheck",
+      "type": "object"
+    },
+    "TableSize": {
+      "properties": {
+        "bytes": {
+          "title": "Bytes",
+          "type": "integer"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "bytes"
+      ],
+      "title": "TableSize",
       "type": "object"
     },
     "TailLine": {
@@ -13753,6 +15020,72 @@
       "title": "TailLine",
       "type": "object"
     },
+    "TaskHealth": {
+      "properties": {
+        "evidence": {
+          "title": "Evidence",
+          "type": "string"
+        },
+        "last_evidence_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Last Evidence At"
+        },
+        "schedule_en": {
+          "title": "Schedule En",
+          "type": "string"
+        },
+        "schedule_tr": {
+          "title": "Schedule Tr",
+          "type": "string"
+        },
+        "state": {
+          "enum": [
+            "ok",
+            "late",
+            "missing",
+            "not_used",
+            "not_observable"
+          ],
+          "title": "State",
+          "type": "string"
+        },
+        "task": {
+          "enum": [
+            "Seal",
+            "VerifyDaily",
+            "VerifyWeekly",
+            "VerifyMonthly",
+            "Replica",
+            "Retention",
+            "Credit",
+            "ClockCheck",
+            "Backup",
+            "Requests",
+            "ApplySystem"
+          ],
+          "title": "Task",
+          "type": "string"
+        }
+      },
+      "required": [
+        "task",
+        "schedule_tr",
+        "schedule_en",
+        "state",
+        "last_evidence_at",
+        "evidence"
+      ],
+      "title": "TaskHealth",
+      "type": "object"
+    },
     "TemporaryPassword": {
       "properties": {
         "temporary_password": {
@@ -13783,6 +15116,76 @@
         "to"
       ],
       "title": "TestEmailBody",
+      "type": "object"
+    },
+    "TimeHealth": {
+      "properties": {
+        "alert_offset_ms": {
+          "title": "Alert Offset Ms",
+          "type": "integer"
+        },
+        "applied_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Applied At"
+        },
+        "applied_peers": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Applied Peers"
+        },
+        "fallback_server": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Fallback Server"
+        },
+        "ntp_server": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Ntp Server"
+        },
+        "samples": {
+          "items": {
+            "$ref": "#/components/schemas/ClockSampleOut"
+          },
+          "title": "Samples",
+          "type": "array"
+        }
+      },
+      "required": [
+        "ntp_server",
+        "fallback_server",
+        "alert_offset_ms",
+        "applied_peers",
+        "applied_at",
+        "samples"
+      ],
+      "title": "TimeHealth",
       "type": "object"
     },
     "TimeOut": {
@@ -14127,6 +15530,30 @@
         }
       },
       "title": "TsaTestBody",
+      "type": "object"
+    },
+    "UnknownSenders": {
+      "description": "Status-file entries that are not a configured source, never listed by name.",
+      "properties": {
+        "bytes": {
+          "title": "Bytes",
+          "type": "integer"
+        },
+        "count": {
+          "title": "Count",
+          "type": "integer"
+        },
+        "messages": {
+          "title": "Messages",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "count",
+        "messages",
+        "bytes"
+      ],
+      "title": "UnknownSenders",
       "type": "object"
     },
     "UploadPreview": {
@@ -14703,6 +16130,35 @@
         "message_en"
       ],
       "title": "VerifyResult",
+      "type": "object"
+    },
+    "VersionInfo": {
+      "properties": {
+        "core_version": {
+          "title": "Core Version",
+          "type": "string"
+        },
+        "product": {
+          "title": "Product",
+          "type": "string"
+        },
+        "release_date": {
+          "format": "date",
+          "title": "Release Date",
+          "type": "string"
+        },
+        "version": {
+          "title": "Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "product",
+        "version",
+        "core_version",
+        "release_date"
+      ],
+      "title": "VersionInfo",
       "type": "object"
     },
     "VlanCreate": {

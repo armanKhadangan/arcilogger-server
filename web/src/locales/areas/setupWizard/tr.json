@@ -1,0 +1,89 @@
+{
+  "setupWizard": {
+    "title": "İlk kurulum sihirbazı",
+    "description": "Kurulumun kalan adımları sırayla. Her adım ilgili Ayarlar sayfasını açar; adımın durumu sunucudaki yapılandırmadan okunur.",
+    "settingsHint": "Kurulumun adımları sırayla: site ayarları, log kaynakları, Kamu SM, replika ve e-posta.",
+    "stepsLabel": "Sihirbaz adımları",
+    "skip": "Bu adımı şimdilik atla",
+    "open": "Ayarlar'da aç",
+    "back": "Kurulum sihirbazına dön",
+    "loadFailed": "Yapılandırma okunamadı",
+    "doneCount": "{{done}}/{{total}} tamam",
+    "missingTitle": "Eksik olan",
+    "nothingMissing": "Bu adımda eksik bir şey yok.",
+    "steps": {
+      "admin": {
+        "title": "Yönetici ve iki adımlı doğrulama",
+        "purpose": "İlk yönetici hesabı kurulumda oluşturulur; iki adımlı doğrulama ilk girişte kurulur. Bu sayfayı açtığınıza göre bu adım tamamdır. Başka hesaplar Ayarlar'daki kullanıcı yönetiminde eklenir."
+      },
+      "site": {
+        "title": "Site ayarları",
+        "purpose": "Kuruluş adı raporlarda, e-postalarda ve kanıt paketlerinde yer alır. Saat sunucuları sunucunun saatini, dolayısıyla kayıtların zamanını doğru tutar; yerel bir saat kaynağı önerilir."
+      },
+      "sources": {
+        "title": "Log kaynakları",
+        "purpose": "Log gönderen cihazlar (güvenlik duvarı, ana yönlendirici) burada kaynak olarak tanımlanır. Yalnızca tanımlı ve etkin kaynakların kayıtları beklenir; sessiz kalan kaynak için uyarı verilir."
+      },
+      "kamusm_test": {
+        "title": "Kamu SM: test sunucusu",
+        "purpose": "Test sunucusundan alınan bir zaman damgası Java'nın, Zamane istemcisinin, kök sertifikaların ve müşteri bilgilerinin birlikte çalıştığını gösterir. Test, Ayarlar → Kamu SM sayfasının damga testi adımında yapılır."
+      },
+      "kamusm_production": {
+        "title": "Kamu SM: üretim",
+        "purpose": "Günlük mühürler zaman damgasını Kamu SM'nin üretim sunucusundan alır. Üretime geçtikten sonra mühürleme hazır olmalıdır; hazır değilse nedenleri aşağıda listelenir."
+      },
+      "replica": {
+        "title": "Replika",
+        "purpose": "Mühürlü günler ikinci bir konuma, bir ağ paylaşımına kopyalanır. Sunucunun diski bozulursa kopyalar replikada kalır."
+      },
+      "smtp": {
+        "title": "E-posta",
+        "purpose": "Uyarılar ve raporlar e-postayla gönderilir. Bunun için bir SMTP sunucusu ve bir gönderen adresi gerekir."
+      },
+      "summary": {
+        "title": "Özet",
+        "purpose": "Adımların durumu ve yapılandırmadaki sorunlar. Eksik bir adımı açıp tamamlayabilirsiniz."
+      }
+    },
+    "missing": {
+      "siteProblems": "Kuruluş adı ya da saat sunucusu ayarlanmamış (aşağıdaki sorunlar).",
+      "noSource": "Henüz log kaynağı tanımlanmadı.",
+      "noEnabled": "Tanımlı kaynakların hiçbiri etkin değil.",
+      "noTest": "Başarılı ve doğrulanmış bir damga testi yok.",
+      "notProduction": "Zaman damgası Kamu SM'nin üretim sunucusundan alınmıyor.",
+      "sealNotReady": "Mühürleme hazır değil.",
+      "replicaOff": "Replika kapalı.",
+      "smtpOff": "E-posta gönderimi kapalı.",
+      "smtpServer": "SMTP sunucusu ayarlanmamış.",
+      "smtpSender": "Gönderen adresi ayarlanmamış."
+    },
+    "sources": {
+      "firewallManaged": "Etkin kaynakların adreslerine 514 numaralı bağlantı noktasını ARCILOGGER'ın güvenlik duvarı kuralı kendisi açar.",
+      "firewallNotManaged": "Güvenlik duvarı ARCILOGGER tarafından yönetilmiyor; 514 numaralı bağlantı noktasını bu adreslere elle açın (KURULUM.md bölüm 12).",
+      "deviceSetup": "Cihaz ayarları: DEVICE-SETUP.md bölüm 1 ve 4 (komutlar sahada doğrulanmalıdır).",
+      "configured": "Tanımlı kaynaklar",
+      "arrived": "Veri geldi",
+      "lastMessage": "son ileti {{time}}",
+      "notArrived": "Henüz veri gelmedi",
+      "arrivalUnknown": "Veri durumu okunamadı",
+      "disabled": "Kapalı"
+    },
+    "kamusm": {
+      "legal": "Test sunucusunun damgalarının yasal geçerliliği yoktur (Kamu SM); üretime geçmeden önce kök sertifika parmak izlerini Kamu SM'nin yayımladığı değerlerle karşılaştırın (sahada doğrula)."
+    },
+    "summary": {
+      "steps": "Adımlar",
+      "noProblems": "Yapılandırmada sorun bulunmadı.",
+      "checklist": "Kurulum sonrası denetim listesi: KURULUM.md bölüm 12",
+      "compliance": "Uyum Durumu sayfasını aç"
+    }
+  },
+  "setup": {
+    "stepWizard": "Kurulum sihirbazı",
+    "stepWizardHint": "Girişten sonra, Ayarlar'da"
+  },
+  "auditActions": {
+    "compliance_report_export": "Uyum Durumu Raporu indirildi",
+    "compliance_config_backup_confirm": "Yapılandırma yedeği onaylandı"
+  }
+}

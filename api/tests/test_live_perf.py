@@ -3,7 +3,24 @@
 a typed filter.
 
 * The hub's CPU — the whole test process's ``process_time``, which also holds the server and the
-  three readers — stays at or below 0.4 s per wall second.
+  three readers — stays at or below 0.4 s per wall second on a core as fast as CI's runners.
+* The event loop's CPU a delivered line (the SSE side: each stream's events, Starlette's and
+  Uvicorn's writes), counted in lines of the gauge, stays at or below its bound. On CI (and with
+  ``ARCILOGGER_PERF_STRICT=1``) the bound is tighter on a faster core: a costlier write path
+  fails on a fast runner and on a slow one alike. Elsewhere it is a flat ``OFF_CI_GAUGE_LINES``,
+  and CI's bound and the margin to it are shown, not asserted.
+* That split is not a fix of the root cause (#125). On some cloud-session hosts the gauge runs
+  warm (the fastest of back-to-back rounds, mostly C library code) and the SSE path cold (short
+  runs of interpreted code after the loop idled): at the same gauge CI's ubuntu-latest read 11.71
+  us and 4.80 gauge lines, such a host 11.70 us and 7.47, so no bound from the gauge alone passes
+  unchanged code there and fails a 40 % costlier path on CI. CI is the gate. Off CI a path 40 %
+  costlier fails only on that fast-gauge class (11 to 13 us); #31's +400 us fails everywhere.
+* Not covered: a starved hub (8 busy neighbours on 4 CPUs) runs fewer, larger cycles and its
+  figure a line falls, so a path 39 us a line costlier can pass. CI's runners are not loaded so.
+* A gauge — a fixed piece of the hub's per-line work, run outside the hub, the fastest of
+  several rounds by this thread's CPU — tells how fast this core is. Up to ``TOLERANCE`` times
+  the reference the CPU a second stays at 0.4 s; on a slower core it grows with the excess beyond
+  it only. A busy machine (time-slicing) does not raise the gauge: it counts CPU, not wall time.
 * Every stream stays at or below its rate cap, and the rest is reported: delivered + dropped =
   matching lines, exactly (the filters here match every line, so the count is known).
 * The buffer stays bounded; a line written once the burst is over arrives within 1.5 s.
@@ -11,12 +28,20 @@ a typed filter.
 
 from __future__ import annotations
 
+import asyncio
+import itertools
+import json
+import os
+import re
+import statistics
 import subprocess
 import sys
 import time
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 import httpx2 as httpx
 import pytest
@@ -37,7 +62,60 @@ pytestmark = pytest.mark.perf
 
 LINES_PER_SECOND = 10_000
 SECONDS = 10
+#: The test process's CPU a wall second on a core like CI's runners (0.18 to 0.37 s/s there).
 CPU_PER_SECOND = 0.4
+#: The gauge (seconds a gauge line, the fastest round) on CI's runners: the slowest one seen on
+#: each system, so that every runner keeps 0.4 s/s. From the throughput guards of CI runs
+#: 41368179019, 41407611313, 41414800703, 41422165382, 41430160072, 41438160162 and 41446215228,
+#: seven on each system: windows-latest 9.13 to 17.76 us, ubuntu-latest 7.88 to 15.90 us. Other
+#: systems take Linux's figures. Three later runs on each system (41455124190, 41465153350,
+#: 41478486887; ubuntu-latest up to 16.04 us, inside the tolerance) passed with these figures.
+REFERENCE_GAUGE = 17.76e-6 if sys.platform == "win32" else 15.90e-6
+#: A gauge up to this many times the reference leaves the CPU a second at 0.4 s (the gauge's
+#: noise); beyond it the bound grows with the excess only, so a gauge that reads high never
+#: loosens it by more than its excess over the tolerance.
+TOLERANCE = 1.2
+#: The per-line bound is CI's (``LOOP_GAUGE_LINES``, tighter on a faster core) on GitHub's
+#: runners (``GITHUB_ACTIONS=true``) or with ``ARCILOGGER_PERF_STRICT=1``, those values exactly,
+#: else the flat ``OFF_CI_GAUGE_LINES``.
+STRICT = (
+    os.environ.get("GITHUB_ACTIONS") == "true" or os.environ.get("ARCILOGGER_PERF_STRICT") == "1"
+)
+#: The event loop's CPU a delivered line on a core as fast as the reference, in gauge lines (the
+#: gauge's fastest round, on the same clock), so the bound follows the core's speed: a write path
+#: 40 % costlier fails on a fast runner as on a slow one. From the ten runs above, 41477960420,
+#: 41617780788 and 41633136399 (13 on each system), each brought to the reference by
+#: ``LOOP_EXPONENT``: at least 1.10 times the costliest and below 1.4 times the cheapest / 1.05.
+#: ubuntu-latest read 5.10 to 6.14 there (6.76 to 6.80 allowed), windows-latest 4.49 to 5.01
+#: (5.51 to 5.99); a path 40 % costlier is over the limit by at least 5.1 % and 12.3 %.
+LOOP_GAUGE_LINES = 5.6 if sys.platform == "win32" else 6.8
+#: A faster core gets a tighter limit, in gauge lines: the limit goes with the gauge, relative to
+#: the reference, to this power. On those runs the loop's CPU a line went with the gauge to the
+#: power 1.25 on ubuntu-latest and 1.20 on windows-latest (log-log slopes); their mean less 1 is
+#: 0.22 (0.23 on #88's 22 readings), taken to 0.20, not 0.25: at 0.25 the rule above leaves
+#: ubuntu-latest 6.904 to 6.909, at 0.3 nothing since 41477960420 (8.65 us, 5.39).
+LOOP_EXPONENT = 0.20
+#: The per-line bound off CI, in gauge lines, the same on every core: 1.10 times the costliest
+#: cloud-session reading (8.52, gauge 11.90 us; that class read 7.01 to 8.52, at 11.27 to 12.60
+#: us where the gauge was shown, #88's slow class 5.74 to 6.41 at 21.47 to 23.42 us). Taken on
+#: Linux cloud sessions only: on a Windows machine off CI it is loose by far (windows-latest read
+#: 4.03 to 4.98).
+OFF_CI_GAUGE_LINES = 9.4
+#: Below this fraction of the reference the limit no longer falls, in gauge lines. CI's gauges ran
+#: from about 0.5 to 1 times the reference (the fastest at the floor); the bound is shown to hold
+#: over that range.
+LOOP_FLOOR = 0.5
+#: A cycle counts in the event loop's figure when at least this many of its lines reached the
+#: streams (about 150 in a busy one).
+CYCLE_LINES = 50
+#: Lines in a round of the gauge (about 30 ms) and rounds before the burst and again after it.
+GAUGE_LINES = 2_000
+GAUGE_ROUNDS = 8
+#: Windows' ``thread_time`` counts whole clock ticks of 1/64 s: each of the gauge's two runs of
+#: rounds reads within one tick of its CPU.
+WINDOWS_TICK = 1 / 64
+#: A spool line's ``key=value`` pairs, the value quoted or not.
+PAIR = re.compile(rb'([a-z]+)=("[^"]*"|[^ ]*)')
 #: The writer: ``python -c WRITER <file> <file> <lines a second> <seconds> <message>``.
 WRITER = """
 import sys, time
@@ -56,6 +134,31 @@ for tick in range(seconds * 100):
     if delay > 0:
         time.sleep(delay)
 """
+
+if sys.platform == "win32":
+    import ctypes
+    from ctypes import wintypes
+
+    _kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    _current_thread = _kernel32.GetCurrentThread
+    _current_thread.argtypes = []
+    _current_thread.restype = wintypes.HANDLE
+    _thread_cycles = _kernel32.QueryThreadCycleTime
+    _thread_cycles.argtypes = [wintypes.HANDLE, ctypes.POINTER(ctypes.c_uint64)]
+    _thread_cycles.restype = wintypes.BOOL
+
+    def _thread_cpu() -> float:
+        """This thread's CPU in clock cycles: exact, where ``thread_time`` counts whole ticks."""
+        cycles = ctypes.c_uint64()
+        if not _thread_cycles(_current_thread(), ctypes.byref(cycles)):
+            raise ctypes.WinError(ctypes.get_last_error())
+        return float(cycles.value)
+
+else:
+
+    def _thread_cpu() -> float:
+        """This thread's CPU in seconds."""
+        return time.thread_time()
 
 
 @pytest.fixture
@@ -87,7 +190,10 @@ def test_three_streams_under_ten_thousand_lines_a_second(
     layout: Layout,
     app_session_factory: sessionmaker[Session],
     capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    hub: Hub = app.state.arci_live
+    loop = LoopCpu(hub, monkeypatch)
     today = site_day(datetime.now(UTC))
     paths = [layout.spool_file(folder, today) for folder in ("fortigate", "fortigate2")]
     for path in paths:
@@ -102,11 +208,11 @@ def test_three_streams_under_ten_thousand_lines_a_second(
         clients.append(client)
         streams.append(response.json()["stream_id"])
         readers.append(Reader(client, streams[-1]))
-    hub: Hub = app.state.arci_live
     try:
         for reader in readers:
             reader.wait(lambda r: bool(r.of("hello")))
-        cpu, wall = time.process_time(), time.monotonic()
+        rounds = _gauge(GAUGE_ROUNDS)
+        cpu, wall, (served, sent) = time.process_time(), time.monotonic(), loop.now()
         writer = subprocess.run(
             [
                 sys.executable,
@@ -129,6 +235,21 @@ def test_three_streams_under_ten_thousand_lines_a_second(
         ):
             time.sleep(0.05)
         used, elapsed = time.process_time() - cpu, time.monotonic() - wall
+        spent, delivered = loop.now()
+        cycles = loop.per_line(served)
+        later = _gauge(GAUGE_ROUNDS)
+        gauge = Gauge.of(rounds + later)
+        # a core slower than the tolerance allows raises the bound by its excess only
+        scale = max(1.0, gauge.seconds / (TOLERANCE * REFERENCE_GAUGE))
+        # a core faster than the reference gets a tighter limit a line, in gauge lines
+        speed = min(max(gauge.seconds / REFERENCE_GAUGE, LOOP_FLOOR), 1.0)
+        ci_limit = LOOP_GAUGE_LINES * speed**LOOP_EXPONENT
+        limit = ci_limit if STRICT else OFF_CI_GAUGE_LINES
+        # In gauge lines, the median of the busy cycles: a pause in one of them (a garbage
+        # collection, a neighbour) does not move it. A run that delivered nothing fails below,
+        # after the first assertions.
+        line = statistics.median(cycles) / gauge.cpu if cycles else float("inf")
+        whole = (spent - served) / max(delivered - sent, 1) / gauge.cpu
         # Shown also when the test passes (CI's log), as the ingest throughput gate does.
         with capsys.disabled():
             print(
@@ -140,6 +261,25 @@ def test_three_streams_under_ten_thousand_lines_a_second(
                 print(
                     f"  {stream.query or '(empty)'}: {stream.delivered} delivered, {stream.dropped}"
                 )
+            print(
+                f"  gauge: {gauge.seconds * 1e6:.2f} us a line (fastest of {len(gauge.rounds)} "
+                f"rounds: {Gauge.of(rounds).seconds * 1e6:.2f} before the burst, "
+                f"{Gauge.of(later).seconds * 1e6:.2f} after it; wall {gauge.wall * 1e6:.2f}; "
+                f"reference {REFERENCE_GAUGE * 1e6:.2f}), "
+                f"scale {scale:.2f}, budget {CPU_PER_SECOND * scale:.2f} s/s"
+            )
+            print(
+                f"  event loop: {line:.2f} gauge lines a delivered line (median of {len(cycles)} "
+                f"cycles; {whole:.2f} over the whole span), about {line * gauge.seconds * 1e6:.1f} "
+                f"us (limit {limit:.2f}, speed factor {speed:.2f})"
+            )
+            margin = f"margin {(ci_limit / line - 1) * 100:+.1f} %"
+            print(
+                f"  per-line check: strict (CI's bound), limit {ci_limit:.2f}, {margin}"
+                if STRICT
+                else f"  per-line check: off CI, limit {limit:.2f}; strict limit {ci_limit:.2f}, "
+                f"{margin} (not asserted)"
+            )
         for stream_id in streams:
             stream = hub.streams[stream_id]
             assert stream.delivered + sum(stream.dropped.values()) == written, stream.query
@@ -147,7 +287,8 @@ def test_three_streams_under_ten_thousand_lines_a_second(
         typed = hub.streams[streams[2]]
         assert typed.dropped.get("parse_budget", 0) > 0  # most lines were beyond the parse budget
         assert len(hub.buffer) <= hub.settings.buffer_lines
-        assert used / elapsed <= CPU_PER_SECOND
+        assert used / elapsed <= CPU_PER_SECOND * scale
+        assert line <= limit
         # once the burst is over, a single line arrives at once
         time.sleep(1.5)
         before = len(readers[0].lines())
@@ -175,3 +316,127 @@ def _settled(hub: Hub, stream_id: str, written: int) -> bool:
     if stream is None or stream.connection is None or not stream.connection.queue.empty():
         return False
     return stream.delivered + sum(stream.dropped.values()) == written
+
+
+class LoopCpu:
+    """The event loop thread's CPU outside the hub's read cycles (``_thread_cpu``), from now on.
+
+    ``Hub._cycle`` runs on the loop for every *written* line (buffer, filters, queues); its own
+    CPU is left out. What is left is the SSE side, a delivered line at a time: each stream's
+    ``events``, the frame, the response's, the middlewares' and Uvicorn's writes, and waking the
+    streams' tasks. Other tasks that run on the loop while a cycle waits for its read thread are
+    counted, not left out with the cycle. A cycle hands its lines to the streams, which send them
+    before the next cycle starts (0.5 s later), so the figure is also taken cycle by cycle.
+    """
+
+    def __init__(self, hub: Hub, monkeypatch: pytest.MonkeyPatch) -> None:
+        self.hub = hub
+        #: The cycles' own CPU so far, their waits for the read thread left out.
+        self.cycles = 0.0
+        #: The loop's CPU so far while a cycle waited for its read thread (other tasks' work).
+        self.waits = 0.0
+        #: At each cycle's start: the loop's CPU outside the cycles so far, and lines delivered.
+        self.marks: list[tuple[float, int]] = []
+        cycle, to_thread = hub._cycle, asyncio.to_thread
+
+        async def timed_cycle() -> None:
+            began, waits = _thread_cpu(), self.waits
+            self.marks.append((began - self.cycles, self._delivered()))
+            await cycle()
+            self.cycles += _thread_cpu() - began - (self.waits - waits)
+
+        async def timed_to_thread[T](func: Callable[..., T], /, *args: Any, **kwargs: Any) -> T:
+            if func != hub._read:
+                return await to_thread(func, *args, **kwargs)
+            began = _thread_cpu()
+            try:
+                return await to_thread(func, *args, **kwargs)
+            finally:
+                self.waits += _thread_cpu() - began
+
+        monkeypatch.setattr(hub, "_cycle", timed_cycle)
+        monkeypatch.setattr(asyncio, "to_thread", timed_to_thread)
+
+    def _delivered(self) -> int:
+        return sum(stream.delivered for stream in self.hub.streams.values())
+
+    def now(self) -> tuple[float, int]:
+        """The loop thread's CPU so far less the cycles' own, and the lines delivered so far:
+        both read on the loop, so that no cycle ends between the readings."""
+
+        async def read() -> tuple[float, int]:
+            return _thread_cpu() - self.cycles, self._delivered()
+
+        assert self.hub._task is not None
+        loop = self.hub._task.get_loop()
+        return asyncio.run_coroutine_threadsafe(read(), loop).result(timeout=10)
+
+    def per_line(self, since: float) -> list[float]:
+        """For each cycle from the CPU figure ``since`` on whose lines reached the streams (at
+        least ``CYCLE_LINES``): the loop's CPU outside the cycles from its start to the next
+        cycle's, a line delivered in that time."""
+        marks = [mark for mark in self.marks if mark[0] >= since]
+        return [
+            (cpu - began) / (lines - before)
+            for (began, before), (cpu, lines) in itertools.pairwise(marks)
+            if lines - before >= CYCLE_LINES
+        ]
+
+
+@dataclass(frozen=True)
+class Round:
+    """A round of the gauge: its wall time, its ``thread_time`` and its ``_thread_cpu``."""
+
+    wall: float
+    thread: float
+    cpu: float
+
+
+@dataclass(frozen=True)
+class Gauge:
+    """The gauge a line: in seconds (for the CPU a second) and in ``_thread_cpu`` units (for the
+    event loop's CPU a delivered line), the fastest round by this thread's CPU; ``wall`` is the
+    fastest round's wall time, shown only."""
+
+    rounds: list[Round]
+    seconds: float
+    cpu: float
+    wall: float
+
+    @classmethod
+    def of(cls, rounds: list[Round]) -> Gauge:
+        wall = min(r.wall for r in rounds) / GAUGE_LINES
+        if sys.platform == "win32":
+            # thread_time counts whole ticks there: the fastest round's wall time, but no more
+            # than the rounds' CPU allows (time-slicing makes a round's wall time longer)
+            lines = len(rounds) * GAUGE_LINES
+            seconds = min(wall, (sum(r.thread for r in rounds) + 2 * WINDOWS_TICK) / lines)
+        else:
+            seconds = min(r.thread for r in rounds) / GAUGE_LINES
+        return cls(rounds, seconds, min(r.cpu for r in rounds) / GAUGE_LINES, wall)
+
+
+def _gauge(rounds: int) -> list[Round]:
+    """Rounds of the gauge: a fixed FortiGate spool line cut, decoded, time-parsed, folded,
+    searched, split into its fields and written as JSON, ``GAUGE_LINES`` times a round. It runs
+    on this thread, outside the hub and outside the measured span."""
+    stamp = datetime(2026, 10, 26, 7, 0, tzinfo=UTC)
+    line = format_line(stamp, "172.31.255.1", traffic().encode()).rstrip(b"\n")
+    figures = []
+    for _ in range(rounds):
+        wall, thread, cpu, size = time.perf_counter(), time.thread_time(), _thread_cpu(), 0
+        for _ in range(GAUGE_LINES):
+            stamp_text, sender, message = line.split(b" ", 2)
+            datetime.fromisoformat(stamp_text.decode("ascii"))
+            sender.decode("ascii")
+            if b'type="traffic"' in message.lower():
+                fields = {
+                    key.decode("ascii"): value.strip(b'"').decode()
+                    for key, value in PAIR.findall(message)
+                }
+                size += len(json.dumps(fields, ensure_ascii=False, separators=(",", ":")))
+        figures.append(
+            Round(time.perf_counter() - wall, time.thread_time() - thread, _thread_cpu() - cpu)
+        )
+        assert size > GAUGE_LINES
+    return figures

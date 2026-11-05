@@ -166,6 +166,13 @@ DEFAULT_SETTINGS: Final[Mapping[str, Any]] = {
     "alerts.job_failures": 3,
     "alerts.backup_stale_hours": 36,
     "alerts.backup_missing_hours": 48,
+    # Content-filter evidence (Uyum Durumu card 7, R20-filter; Wave 4 contract 2.4, owner
+    # question Q10): the ISO weekdays on which FortiGate web or DNS filter records are expected
+    # (every day), whether the days of usage.holidays are left out, and the longest time (hours)
+    # without such a record on expected days.
+    "alerts.filter_days": [1, 2, 3, 4, 5, 6, 7],
+    "alerts.filter_skip_holidays": True,
+    "alerts.filter_quiet_hours": 24,
     # --- Area U: usage analytics (spec 10, docs/KULLANIM.md, ADR-0011) ------------------------
     # Starting values of spec 10.2-10.4, not measured facts (ASSUMPTIONS U1-U12). Every number
     # the rollups produce is an estimate; a changed value applies to the days rebuilt after it
@@ -343,6 +350,16 @@ SETTING_ERRORS: Final[Mapping[str, tuple[str, str]]] = {
     "setting_lease_seconds": (
         "Her DHCP sunucusu için en az 60 saniye gerekir.",
         "Each DHCP server needs at least 60 seconds.",
+    ),
+    "setting_arp_grace_above_interval": (
+        "ARP kaydı aralığından (arp.interval_seconds) uzun olamaz.",
+        "Cannot be longer than the ARP log interval (arp.interval_seconds).",
+    ),
+    "setting_arp_interval_below_grace": (
+        "Bırakmadan sonra ARP'yi yok sayma süresinden (arp.ignore_after_release_seconds) kısa "
+        "olamaz; o süreyi de kısaltın.",
+        "Cannot be shorter than the time ARP is ignored after a release "
+        "(arp.ignore_after_release_seconds); shorten that one too.",
     ),
     "setting_empty": ("Boş olamaz.", "Cannot be empty."),
     "setting_email_invalid": ("Geçersiz e-posta adresi.", "Invalid e-mail address."),
@@ -584,6 +601,7 @@ INTEGER_RANGES: Final[Mapping[str, tuple[int, int | None]]] = {
     "alerts.job_failures": (1, 100),
     "alerts.backup_stale_hours": (1, 720),
     "alerts.backup_missing_hours": (1, 720),
+    "alerts.filter_quiet_hours": (6, 168),
     # Area U (usage analytics).
     "usage.active_bytes_threshold": (1, 1_000_000_000),
     "usage.background_session_bytes": (0, 1_000_000_000),
@@ -648,6 +666,57 @@ _TYPE_NAMES_EN: Final[Mapping[type, str]] = {
     list: "a list",
     dict: "an object",
 }
+
+
+#: Integer settings that may not be longer than another one -> the key that bounds them, with the
+#: codes of :data:`SETTING_ERRORS` for a change of either key: the lease timeline ignores ARP
+#: sightings after a release for at most one ARP interval (CORRELATION §1), so a longer grace would
+#: stop the lease job on every run.
+AT_MOST_SETTINGS: Final[Mapping[str, tuple[str, str, str]]] = {
+    "arp.ignore_after_release_seconds": (
+        "arp.interval_seconds",
+        "setting_arp_grace_above_interval",
+        "setting_arp_interval_below_grace",
+    ),
+}
+_RULE_KEYS: Final = frozenset(
+    set(AT_MOST_SETTINGS) | {bound for bound, *_ in AT_MOST_SETTINGS.values()}
+)
+#: pg_advisory_xact_lock key ("ARCISETR" as a signed 64-bit integer) of the rules between keys.
+RULES_LOCK_KEY: Final = int.from_bytes(b"ARCISETR", "big") - 2**63
+
+
+def check_settings_together(session: Session, values: Mapping[str, Any]) -> list[SettingValueError]:
+    """The rules between keys (:data:`AT_MOST_SETTINGS`) that the validated ``values`` of one
+    write break together with the stored settings: one :class:`SettingValueError` for each key of
+    a broken rule that ``values`` changes, an empty list when none. A key ``values`` does not
+    change counts with its stored value (or the shipped default); one that is not an integer
+    (written around the validator) breaks no rule here.
+
+    A write that changes a key of a rule first takes :data:`RULES_LOCK_KEY` for the rest of the
+    caller's transaction, so two writes of the two keys at once (each would pass against the
+    other's old value) are checked one after the other."""
+    errors: list[SettingValueError] = []
+    if any(key in values for key in _RULE_KEYS):
+        session.execute(select(func.pg_advisory_xact_lock(RULES_LOCK_KEY)))
+    for key, (bound, key_code, bound_code) in AT_MOST_SETTINGS.items():
+        if key not in values and bound not in values:
+            continue
+        value = values[key] if key in values else get_setting(session, key)
+        limit = values[bound] if bound in values else get_setting(session, bound)
+        if not (_integer(value) and _integer(limit)) or value <= limit:
+            continue
+        if key in values:
+            errors.append(SettingValueError(key, key_code, f"{key}: en çok {bound} kadar olabilir"))
+        if bound in values:
+            errors.append(
+                SettingValueError(bound, bound_code, f"{bound}: en az {key} kadar olmalı")
+            )
+    return errors
+
+
+def _integer(value: Any) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool)
 
 
 def _mac(key: str, value: Any) -> str:
@@ -775,7 +844,8 @@ def email_addresses(
 
 
 def _validate_alert_setting(key: str, value: Any) -> Any:
-    """Area E: e-mail addresses, the severity name and the web address of the alert e-mail."""
+    """Area E: e-mail addresses, the severity name and the web address of the alert e-mail;
+    the content filter's expected weekdays."""
     if key == "alerts.email_recipients":
         return email_addresses(key, value)
     if key == "alerts.email_min_severity":
@@ -798,6 +868,14 @@ def _validate_alert_setting(key: str, value: Any) -> Any:
                 "https://10.0.0.10 (boş: yapılandırmadan)",
             )
         return url
+    if key == "alerts.filter_days":
+        if any(type(day) is not int or not 1 <= day <= 7 for day in value):
+            raise SettingValueError(
+                key,
+                "setting_work_hours_days",
+                f"{key}: 1 (Pazartesi) - 7 (Pazar) arası gün numaraları olmalı",
+            )
+        return sorted(set(value))
     return value
 
 

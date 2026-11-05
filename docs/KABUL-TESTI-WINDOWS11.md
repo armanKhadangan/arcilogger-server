@@ -6,7 +6,7 @@
 GitHub'ın derleme sunucuları yalnızca Windows Server çalıştırır; ARCILOGGER'ın masaüstü Windows'ta
 kurulumu, yükseltmesi, geri alınması ve kaldırılması orada denenemez. Bu test, masaüstü desteğini
 duyurmadan önce **atılabilir** bir Windows 11 Pro 25H2 bilgisayarda ya da sanal makinede yaklaşık
-bir saatte elle yapılır. Gerçek sunucuda ya da gerçek verilerle **yapmayın**: test, Windows
+bir buçuk saatte elle yapılır. Gerçek sunucuda ya da gerçek verilerle **yapmayın**: test, Windows
 ayarlarını değiştirir ve sonunda ARCILOGGER'ı kaldırır.
 
 Her adımda **beklenen** sonucu yazılana göre karşılaştırın ve sondaki tabloya "geçti / kaldı /
@@ -156,7 +156,9 @@ reddedildi" türünden bir hata ise bulgudur (NTFS hakları).
    olaylarını kaydedin (**doğrulayın**: günlüğün adı).
 2. Kök sertifikayı bu bilgisayara kurun ve arayüzü açın ([KURULUM.md](KURULUM.md) bölüm 17,
    "Arayüzü bu bilgisayarda açmak"). **Beklenen:** `https://localhost` sertifika uyarısı olmadan
-   açılır; `https://localhost/setup` sayfasında anahtarla ilk yönetici oluşturulur.
+   açılır; `https://localhost/setup` sayfasında anahtarla ilk yönetici oluşturulur. Sayfanın adım
+   listesinde üçüncü adım olarak **Kurulum sihirbazı** ("Girişten sonra, Ayarlar'da") görünür
+   (sihirbazın kendisi: adım 6a).
 
 ## 6. Syslog alımı (yaklaşık 5 dakika)
 
@@ -186,6 +188,102 @@ $udp.Close()
 **Beklenen:** kaynak eklenmeden önce mesaj hiçbir yere yazılmaz (514 kapalı); ekledikten sonra
 birkaç saniye içinde `C:\ARCILOGGER\spool\kabul\<gün>.log` dosyasında `kabul-testi-1` satırı
 görünür.
+
+## 6a. Uyum Durumu, Sistem ve ilk kurulum sihirbazı (yaklaşık 20 dakika)
+
+Sayfaların ne gösterdiği: [UYUM-DURUMU.md](UYUM-DURUMU.md). Uyum Durumu sunucunun verisi
+çoğaldıkça değişir; bu adım kartların doğru durumu değil, sayfaların, raporun, onayın ve
+yetkilerin çalıştığını sınar. Uyum Durumu'nun yanıtı 30 saniye saklanır: bir değişiklikten sonra en
+geç 30 saniye bekleyip **Yenile**'ye basın.
+
+1. İlk yöneticiyle oturum açın ve menüden **Uyum Durumu** sayfasını açın. **Beklenen:** üstte
+   "ARCILOGGER, 5651 yükümlülüklerini desteklemek için tasarlanmıştır." ile başlayan not; "…
+   denetimden … tanesi tamam" özet satırı; "Güncellendi" saati; 1'den 10'a on kart. Her kartta
+   numara, başlık, simgesi ve metniyle durum (**Tamam**, **Dikkat**, **Sorun** ya da **Bilgi yok**;
+   durum hiçbir yerde yalnızca renkle gösterilmez), neden, ayrıntılar ve "Belge: UYUM-DURUMU.md
+   bölüm 2.n" satırı vardır. Bu yeni kurulumda en az şunlar görünür: kart 5 **Sorun**
+   ("Damgalar Kamu SM üretim sunucusundan alınmıyor (sağlayıcı: Kamu SM test) …"), kart 7
+   **Bilgi yok** ("FortiGate kaynağı tanımlı değil; içerik filtresi kaydı beklenmiyor."), kart 9
+   **Sorun** ("Replika kapalı: …"). Tamam olmayan kart bulunduğu için "İlk kurulum sihirbazını aç"
+   bağlantısı görünür. Diğer kartların durumunu ve nedenini tabloya yazın: kurulumun saatine ve
+   adım 6'daki kaynağa bağlıdırlar.
+2. **Uyum Durumu Raporu (PDF)** düğmesine basın. **Beklenen:** `ARCILOGGER-uyum-durumu-<YYYYAAGG-SSDD>.pdf`
+   iner. Raporda başlık Türkçe ve İngilizce, kuruluş adı (`Örnek A.Ş.`), oluşturulma zamanı,
+   "Oluşturan / Exported by: <görünen ad> (<kullanıcı adı>)", özet satırı, not ve on kart vardır;
+   her kartın durumu metinle yazılır ("[TAMAM] / [OK]", "[SORUN] / [PROBLEM]" …); her sayfanın
+   altında "Sayfa n / N" yazar. Raporda, raporu indiren hesabın görünen adı ve kullanıcı
+   adı dışında kişi adı, istemci adresi ya da cihaz adı geçmez. **Denetim Kaydı** sayfasında "Uyum Durumu Raporu indirildi"
+   (`compliance.report_export`) girdisi vardır; ayrıntısındaki `sha256` değeri dosyanınkiyle
+   aynıdır (büyük/küçük harf dışında):
+
+   ```powershell
+   Get-FileHash "$env:USERPROFILE\Downloads\ARCILOGGER-uyum-durumu-*.pdf" -Algorithm SHA256
+   ```
+
+3. Yapılandırma yedeği onayı ([YEDEKLEME.md](YEDEKLEME.md) bölüm 3). Önce bir veritabanı yedeği
+   alın:
+
+   ```powershell
+   Start-ScheduledTask -TaskPath \ARCILOGGER\ -TaskName Backup
+   Start-Sleep -Seconds 120
+   Get-Content C:\ARCILOGGER\state\backup\last.json
+   ```
+
+   **Beklenen:** `last.json` içinde `"ok": true`; kart 10 **Dikkat**, "Yapılandırma dosyalarının
+   çevrimdışı kopyası hiç onaylanmadı (YEDEKLEME.md bölüm 3)." Kart 10'daki **Yapılandırma
+   yedeğini aldım** düğmesine basın (bu atılabilir makinede kopyayı gerçekten almanız gerekmez;
+   gerçek sunucuda kopyayı almadan onaylamayın). **Beklenen:** onay penceresi
+   `compliance.confirmBackupBody` metnini gösterir ("arcilogger.toml, secret.key ve Caddy CA
+   klasörünün (özel anahtarıyla) şifreli, çevrim dışı ve yedeklerden ayrı saklanan bir ortama
+   kopyalandığını onaylıyorsunuz …"); onaydan sonra kart 10 **Tamam**, nedeninde son yedeğin
+   zamanı ve boyutu ile onayın zamanı vardır; kart onaylayanın adını göstermez. Denetim Kaydı'nda
+   "Yapılandırma yedeği onaylandı" (`compliance.config_backup_confirm`) girdisinin `config_sha256`
+   değeri, büyük/küçük harf dışında, şununla aynıdır:
+
+   ```powershell
+   Get-FileHash C:\ProgramData\ARCILOGGER\arcilogger.toml -Algorithm SHA256
+   ```
+
+4. **Ayarlar → Yedekleme** sayfasında `[backup] keep_daily` değerini 14'ten 15'e çevirin (parola
+   yeniden sorulur) ve değişiklik etkin olunca Uyum Durumu'nu yenileyin. **Beklenen:** kart 10
+   **Dikkat**, "Yapılandırma son onaydan (…) sonra değişti; yeni bir çevrimdışı kopya alın."
+   Değeri 14'e geri alın ve yeniden onaylayın: denetim kaydında ikinci bir onay girdisi oluşur.
+5. **Ayarlar → Kullanıcılar ve Roller** sayfasında `denetci` adlı, rolü denetçi olan bir kullanıcı
+   oluşturun; başka bir tarayıcı penceresinde (gizli pencere) onunla oturum açın (iki adımlı
+   doğrulama denetçi için zorunludur). **Beklenen:** menüde Uyum Durumu vardır, Sistem yoktur;
+   kartlar ve **Uyum Durumu Raporu (PDF)** düğmesi görünür; **Yapılandırma yedeğini aldım** düğmesi
+   ve "İlk kurulum sihirbazını aç" bağlantısı görünmez; kartların Kaynaklar, Güvenlik, Ayarlar ve
+   Sistem bağlantıları gizlidir, Mühürleme ve Arama bağlantıları görünür; `https://localhost/system`
+   adresi Sistem verisini göstermez. Denetçinin indirdiği rapor "Oluşturan / Exported by" satırında
+   denetçinin adını taşır ve denetim kaydına onun adıyla `compliance.report_export` olarak yazılır.
+6. Yöneticiyle **Sistem** sayfasını açın. **Beklenen:** sırasıyla Kaynak kullanımı (işlemci ilk
+   açılışta "ölçülüyor", **Yenile**'den sonra bir yüzde; bellek; çalışma süresi), Diskler, Veritabanı,
+   Toplayıcı, İçe aktarma, Hizmetler, Zamanlanmış görevler, Worker işleri, Saat, Sürüm ve
+   güncelleme bölümleri. Tek diskli bu makinede tek bir disk göstergesi (`C:`) vardır; değer metin
+   olarak yazılır, %80 ve %95 işaretleri görünür; tahmin satırı "Tahmin için en az 7 günlük ölçüm
+   gerekiyor (…/7)." der. Toplayıcı bölümünde `kabul` kaynağı adıyla görünür; tanınmayan
+   göndericiler yalnızca sayılır, adresleri yazılmaz. Zamanlanmış görevler tablosunda ClockCheck'in
+   adım 4'teki ve Backup'ın bu adımdaki çalışması görünür. Sürüm bölümünde "ARCILOGGER güncelleme
+   indirmez." cümlesi vardır. **Panel**'de "Disk" kartı aynı yüzdeyi ve "Sistem sayfasını aç"
+   bağlantısını gösterir. Disk örneği dosyasını okuyun:
+
+   ```powershell
+   Get-Content C:\ARCILOGGER\state\system-history.json
+   ```
+
+   **Beklenen:** `"schema": 1` ve `days` içinde bugünün tarihiyle bir örnek (diskin etiketi,
+   toplam ve kullanılan bayt); başka bir şey yoktur.
+7. Yöneticiyle **Ayarlar** sayfasındaki **İlk kurulum sihirbazı** kartını açın
+   (`https://localhost/settings/setup`). **Beklenen:** solda adım listesi; her adımda simgesi ve
+   metniyle **Tamam** ya da **Eksik**; açılan adım, tamamlanmamış ilk adımdır. "Yönetici ve iki
+   adımlı doğrulama" ve "Log kaynakları" (adım 6'daki kaynak) **Tamam**; "Kamu SM: test sunucusu",
+   "Kamu SM: üretim", "Replika" ve "E-posta" **Eksik**. Log kaynakları adımı güvenlik duvarı notunu
+   ve "Cihaz ayarları: DEVICE-SETUP.md bölüm 1 ve 4 (komutlar sahada doğrulanmalıdır)." satırını
+   gösterir. Bir adımda **Ayarlar'da aç** ilgili Ayarlar sayfasını açar ve sayfanın dönüş bağlantısı
+   "Kurulum sihirbazına dön" olur; **Bu adımı şimdilik atla** sonraki adıma geçer, atlanan adım
+   **Eksik** kalır. **Özet** adımı her adımın durumunu, yapılandırma sorunlarını, "Kurulum sonrası
+   denetim listesi: KURULUM.md bölüm 12" satırını ve Uyum Durumu bağlantısını gösterir. Denetçi
+   `/settings/setup` adresini açamaz.
 
 ## 7. Güç ayarları (yaklaşık 3 dakika)
 
@@ -268,6 +366,7 @@ Ayarlar → Uygulamalar → Yüklü uygulamalar → ARCILOGGER → Kaldır (ayn�
 | 4 | Görevler LOCAL SERVICE, sonuçlar | |
 | 5 | Akıllı Uygulama Denetimi durumu; arayüz bu bilgisayarda | |
 | 6 | Syslog alımı | |
+| 6a | Uyum Durumu (on kart, PDF ve SHA-256'sı, yedek onayı ve değişen yapılandırma), denetçinin görünümü, Sistem ve `system-history.json`, Panel disk kartı, ilk kurulum sihirbazı | |
 | 7 | Güç ayarları sonra / önce | |
 | 8 | Yükseltme (hatırlanan adres), geri alma | |
 | 9 | Güncelleme yeniden başlatması, boşluğun süresi | |
@@ -282,7 +381,7 @@ komutu (`Set-NetAdapterPowerManagement -AllowComputerToTurnOffDevice`) bu Window
 
 ## English summary
 
-A manual acceptance test of about one hour on a **throw-away** Windows 11 Pro 25H2 PC or VM (TPM
+A manual acceptance test of about an hour and a half on a **throw-away** Windows 11 Pro 25H2 PC or VM (TPM
 2.0, Secure Boot, one disk, S mode off), because GitHub-hosted runners only run Windows Server.
 Never on the real server or with real data. Record the power, audit and firewall settings first
 (step 0), then: install with `ARCILOGGER-Setup-<version>.exe` from the GitHub release after
@@ -300,7 +399,17 @@ LOCAL SERVICE (step 4); Smart App Control unchanged and the interface on the PC 
 root certificate (step 5); a syslog message reaching the spool once the test PC is added as a
 `[[sources]]` entry (on Ayarlar → Kaynaklar or by hand), with no service restart: the collector
 and ingest load it live and ApplySystem opens 514 once the collector knows it (step 6; before, 514
-is closed; with the browser administration off, run `Set-ArciFirewall.ps1` yourself); the power settings after the
+is closed; with the browser administration off, run `Set-ArciFirewall.ps1` yourself); the
+Uyum Durumu page, its PDF report, the configuration backup confirmation, the auditor's view, the
+Sistem page and the first-run wizard (step 6a: the notice "designed to support 5651 obligations",
+ten cards with their state as icon and text, cards 5 and 9 Problem and card 7 No data on a fresh
+installation; the PDF's SHA-256 equal to the `sha256` of its `compliance.report_export` audit
+entry; card 10 Attention before the confirmation, OK after it, Attention again once a backup
+setting changes `arcilogger.toml`, with `config_sha256` equal to the file's SHA-256; the auditor
+sees the cards and the PDF button but no confirmation button, no wizard link and no Sistem; one
+disk meter with the 7-sample forecast note and today's sample in `state\system-history.json`;
+the wizard's steps marked Tamam or Eksik, "Ayarlar'da aç" leading back with "Kurulum sihirbazına
+dön", a skipped step staying Eksik); the power settings after the
 installation and the recorded previous values (step 7); an upgrade that uses the remembered
 address and asks no question, then a rollback (step 8); a forced update restart — services back,
 messages sent during the restart missing and not reported (step 9); removal, with the power

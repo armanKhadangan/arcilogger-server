@@ -6,6 +6,7 @@ import {
   HardDriveUpload,
   History,
   KeyRound,
+  ListChecks,
   Mail,
   Network,
   SlidersHorizontal,
@@ -13,7 +14,7 @@ import {
   Users,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
-import type { ReactNode } from 'react';
+import { useEffect, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 
@@ -25,6 +26,7 @@ import { Card } from '@/components/ui/card';
 import { useAdminConfig, useAdminStatus, useLicense } from '@/lib/api-hooks';
 import { useAuth } from '@/lib/auth';
 import { LICENSE_ADMIN_PERMISSION, LICENSE_PAGE } from '@/lib/license';
+import { endWizardMode, WIZARD_PATH } from '@/pages/setup-wizard/wizard-mode';
 
 /** Sections of spec 12.3 page 15 that come later ("Gizlilik" is in Uygulama ayarları). */
 const LATER_SECTIONS = ['rules'] as const;
@@ -131,7 +133,8 @@ function LicenseCard() {
 /**
  * Ayarlar: the sections. "Lisans" and the machine configuration (`settings.manage`),
  * "Kullanıcılar ve Roller" (`users.manage`); the header chip tells whether the administration
- * service that applies machine changes is running.
+ * service that applies machine changes is running. "İlk kurulum sihirbazı" opens the first-run
+ * wizard (Wave 4 contract 2.8.4); coming back here ends its wizard mode.
  */
 export function SettingsPage() {
   const { t } = useTranslation();
@@ -141,6 +144,9 @@ export function SettingsPage() {
   // The installation's setup problems (e.g. no local time source), every one of them here.
   const config = useAdminConfig(manage);
   const sections = SECTIONS.filter((section) => section.permissions.every((item) => can(item)));
+  useEffect(() => {
+    endWizardMode();
+  }, []);
   return (
     <div>
       <PageHeader
@@ -161,6 +167,15 @@ export function SettingsPage() {
             icon={Users}
             title={t('users.title')}
             hint={t('settings.usersHint')}
+          />
+        ) : null}
+        {manage ? (
+          <SectionCard
+            to={WIZARD_PATH}
+            icon={ListChecks}
+            title={t('setupWizard.title')}
+            hint={t('setupWizard.settingsHint')}
+            testId="settings-setup"
           />
         ) : null}
         {sections.map((section) => (
