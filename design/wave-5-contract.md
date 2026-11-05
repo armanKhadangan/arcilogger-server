@@ -3491,6 +3491,7 @@ line is W5-E-10, and what it amends in detail:
   tenth of PT2H". The extra decompression that verifies each sealed file was measured on a 1 M
   line day: 4.4 s for xz 6 at 148 MB/s, about 35 s for a 5 GB day. The issue estimated about a
   minute.
+
 ## Deviations — W5-K (2026-11-05)
 
 - **W5-K-1: the method names.** K2 names `UsageSettings.period(moment)`. The code has
