@@ -796,7 +796,8 @@ does. `search.run` (every run, a timed-out one too with `outcome: "timeout"`): `
 `sha256` of the reference list as canonical JSON; `search.export` (administrators, with
 re-authentication): `search_id`, `q`, `from`, `to`, `format`, `rows`, `truncated` (`rows`,
 `time`, `archived` or `null`), `archived` (the days not in the database,
-`{first_day, last_day, keep_days}`, or `null`), `bytes`, `sha256` of the file; `search.saved_create` and `search.saved_update`: `saved_id`, `name`, `q`;
+`{first_day, last_day, keep_days}`, or `null`), `bytes`, `sha256` of the file;
+`search.saved_create` and `search.saved_update`: `saved_id`, `name`, `q`;
 `search.saved_delete`: `saved_id`, `name`; `live.open`: `stream_id`, `q`, `folders`, `backfill`;
 `live.close`: `stream_id`, `seconds`, `delivered`, `dropped` by reason, `reason` (`closed`,
 `lingered`, `server_stopping` or the code that ended the stream, e.g. `time_limit`,

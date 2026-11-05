@@ -454,7 +454,7 @@ comes in `details` with its character position.
 | `search_range_too_long` | 422 | the range is longer than `search.max_days` days |
 | `search_cursor_invalid` | 422 | the page position does not belong to this search |
 | `search_expired` | 409 | the search id has expired (the page reruns the search) |
-| `search_timeout` | 504 | not even the shortest slice (5 minutes) fit the time budget; or the search or the export waited for database maintenance (the partition lock) until its time was up ("The search could not start …", "The export could not start …", section 9) |
+| `search_timeout` | 504 | not even the shortest slice (5 minutes) fit the time budget; or the search or the export waited for database maintenance (the partition lock) until its time was up ("The search could not start within {seconds} s …", "The export could not start within {seconds} s …", section 9) |
 | `search_busy` | 429 | too many searches are running |
 | `search_rate_limited` | 429 | too many searches in a short time |
 | `search_event_not_found` | 404 | the record is not in the database |
