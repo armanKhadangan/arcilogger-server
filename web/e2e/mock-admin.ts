@@ -72,6 +72,7 @@ import type {
   TestEmailResult,
   TsaBody,
   TsaSection,
+  TsaServer,
   TsaTestBody,
   TsaTestResult,
   UploadPreview,
@@ -641,6 +642,34 @@ const IPV4 = /^(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]
 
 function validHost(text: string): boolean {
   return /^[\d.]+$/.test(text) ? IPV4.test(text) : HOST.test(text);
+}
+
+/** The browser's time-stamp server choices (`rules.TSA_SERVERS`). */
+const TSA_SERVERS: readonly TsaServer[] = ['test', 'production', 'turktrust', 'turktrust-http'];
+/** TÜRKTRUST's account (contract §2.4). */
+const TURKTRUST_SECRETS = ['turktrust.username', 'turktrust.password'] as const;
+
+/** A revocation list URL as `config.TsaConfig` accepts it: http(s), a host, no user info (C10). */
+function validCrlUrl(value: unknown): boolean {
+  if (typeof value !== 'string') return false;
+  try {
+    const url = new URL(value);
+    return (
+      (url.protocol === 'http:' || url.protocol === 'https:') &&
+      url.hostname !== '' &&
+      url.username === '' &&
+      url.password === ''
+    );
+  } catch {
+    return false;
+  }
+}
+
+/** `network.https_proxy` as `config.NetworkConfig` accepts it: empty or `http://host:port`. */
+function validProxy(value: unknown): boolean {
+  if (value === '') return true;
+  if (typeof value !== 'string') return false;
+  return /^http:\/\/[A-Za-z0-9.-]+:\d{1,5}\/?$/.test(value);
 }
 
 /** A text field of a change body: trimmed, `null` when empty. */
@@ -1457,6 +1486,11 @@ export class AdminMock {
         ? clock.fallback_server.trim()
         : current.clock.fallback_server;
     const offset = clock.alert_offset_ms ?? current.clock.alert_offset_ms;
+    const proxy =
+      typeof body.network?.https_proxy === 'string'
+        ? body.network.https_proxy.trim()
+        : current.network.https_proxy;
+    if (!validProxy(proxy)) problems.push(problem('network.https_proxy', 'config_invalid'));
     if (ntp && !validHost(ntp)) problems.push(problem('clock.ntp_server', 'host_invalid'));
     if (fallback && !validHost(fallback))
       problems.push(problem('clock.fallback_server', 'host_invalid'));
@@ -1468,21 +1502,24 @@ export class AdminMock {
     const next = {
       site_name: name,
       clock: { ntp_server: ntp, fallback_server: fallback, alert_offset_ms: offset },
+      network: { https_proxy: proxy },
     };
     const changes = {
       ...diff('', { site_name: current.site_name }, { site_name: next.site_name }),
       ...diff('clock', { ...current.clock }, next.clock),
+      ...diff('network', { ...current.network }, next.network),
     };
     const clockChanged = Object.keys(changes).some((path) => path.startsWith('clock.'));
+    const proxyChanged = 'network.https_proxy' in changes;
     return this.change(call, host, dryRun, account, {
       section: 'general',
       changes,
       warnings: !ntp && fallback && clockChanged ? ['ntp_server_empty'] : [],
       effects: [
-        ...(changes.site_name ? ['reload.api', 'reload.worker'] : []),
+        ...(changes.site_name || proxyChanged ? ['reload.api', 'reload.worker'] : []),
         ...(clockChanged ? ['system.time', 'task.next_run:ClockCheck'] : []),
       ],
-      reauth: clockChanged,
+      reauth: clockChanged || proxyChanged,
       probe: clockChanged && body.probe !== false && Boolean(ntp),
       next: () => {
         this.sections.general = next;
@@ -1575,7 +1612,13 @@ export class AdminMock {
   private refreshTsa(tsa: TsaSection = this.sections.tsa): TsaSection {
     tsa.readiness = { production: false, missing: tsaMissing(tsa) };
     tsa.readiness.production = tsa.readiness.missing.length === 0;
-    const causes = tsa.provider === 'zamane' ? tsa.readiness.missing.map(causeOf) : [];
+    const account = TURKTRUST_SECRETS.every((name) => tsa.secrets[name]?.set);
+    const causes =
+      tsa.provider === 'zamane'
+        ? tsa.readiness.missing.map(causeOf)
+        : tsa.provider === 'turktrust' && !account
+          ? ['credentials']
+          : [];
     tsa.seal_ready = { ok: causes.length === 0, causes };
     return tsa;
   }
@@ -1595,14 +1638,28 @@ export class AdminMock {
     const current = this.sections.tsa;
     const server = body.server ?? current.server;
     if (server === 'mock') return this.refused([problem('tsa.provider', 'tsa_mock_refused')]);
-    if (server !== 'test' && server !== 'production')
+    if (!TSA_SERVERS.includes(server as TsaServer))
       return this.refused([problem('tsa.provider', 'tsa_server_invalid')]);
+    const turktrust = server === 'turktrust' || server === 'turktrust-http';
     const problems: FieldProblem[] = [];
     const threshold = body.credit_alert_threshold ?? current.credit_alert_threshold;
     if (!integer(threshold, 0, 1_000_000))
       problems.push(problem('tsa.credit_alert_threshold', 'config_invalid'));
     const timeout = body.timeout_seconds ?? current.timeout_seconds;
     if (!integer(timeout, 5, 600)) problems.push(problem('tsa.timeout_seconds', 'config_invalid'));
+    // Contract §2.5 and C10, as config.py checks them.
+    const renew = body.renew_before_days ?? current.renew_before_days;
+    if (!integer(renew, 30, 730)) problems.push(problem('tsa.renew_before_days', 'config_invalid'));
+    const maxAge = body.crl_max_age_days ?? current.crl_max_age_days;
+    if (!integer(maxAge, 1, 60)) problems.push(problem('tsa.crl_max_age_days', 'config_invalid'));
+    const crlUrls = body.crl_urls ?? current.crl_urls;
+    if (!Array.isArray(crlUrls) || crlUrls.length > 20 || !crlUrls.every(validCrlUrl))
+      problems.push(problem('tsa.crl_urls', 'config_invalid'));
+    const plainHttp = body.allow_plain_http ?? current.allow_plain_http;
+    if (typeof plainHttp !== 'boolean')
+      problems.push(problem('tsa.allow_plain_http', 'config_invalid'));
+    else if (server === 'turktrust-http' && !plainHttp)
+      problems.push(problem('tsa.allow_plain_http', 'config_invalid'));
     const java = body.java === undefined ? current.java : body.java;
     if (java !== null && !JAVA_CHOICES.includes(java))
       problems.push(problem('tsa.java', 'java_not_detected'));
@@ -1612,25 +1669,37 @@ export class AdminMock {
       problems.push(problem('kamusm.customer', 'secret_invalid'));
     if (password !== null && !/^[^\p{Cc}\p{Cf}]{1,128}$/u.test(password))
       problems.push(problem('kamusm.password', 'secret_invalid'));
+    const username = typeof body.turktrust_username === 'string' ? body.turktrust_username : null;
+    const secret = typeof body.turktrust_password === 'string' ? body.turktrust_password : null;
+    if (username !== null && !/^[^\p{Cc}\p{Cf}]{1,128}$/u.test(username))
+      problems.push(problem('turktrust.username', 'secret_invalid'));
+    if (secret !== null && !/^[^\p{Cc}\p{Cf}]{1,256}$/u.test(secret))
+      problems.push(problem('turktrust.password', 'secret_invalid'));
     if (problems.length > 0) return this.refused(problems);
     const clear = body.clear_credentials === true;
     const candidate = copy(current);
-    candidate.provider = 'zamane';
-    candidate.server = server;
+    candidate.provider = turktrust ? 'turktrust' : 'zamane';
+    candidate.server = server as TsaServer;
     candidate.java = java;
     candidate.credit_alert_threshold = threshold;
     candidate.timeout_seconds = timeout;
+    candidate.renew_before_days = renew;
+    candidate.crl_max_age_days = maxAge;
+    candidate.crl_urls = [...crlUrls];
+    candidate.allow_plain_http = plainHttp;
     const by = `web:${account.username}`;
     const secretChanges: Record<string, Change> = {};
     for (const [name, value] of [
       ['kamusm.customer', customer],
       ['kamusm.password', password],
+      ['turktrust.username', username],
+      ['turktrust.password', secret],
     ] as const) {
       const was = current.secrets[name]?.set ? 'set' : 'unset';
-      if (clear && was === 'set') {
+      if (clear && name.startsWith('kamusm.') && was === 'set') {
         candidate.secrets[name] = { set: false, changed_at: this.iso(), changed_by: by };
         secretChanges[name] = { secret: true, old: was, new: 'deleted', changed: true };
-      } else if (!clear && value !== null) {
+      } else if ((!clear || name.startsWith('turktrust.')) && value !== null) {
         candidate.secrets[name] = { set: true, changed_at: this.iso(), changed_by: by };
         secretChanges[name] = { secret: true, old: was, new: 'set', changed: true };
       }
@@ -1643,6 +1712,14 @@ export class AdminMock {
       });
     if (production && server === 'test' && body.confirm !== true)
       return this.refused([problem('tsa.provider', 'tsa_confirm_required')]);
+    if (server === 'turktrust-http' && current.server !== server && body.confirm !== true)
+      return this.refused([problem('tsa.provider', 'tsa_confirm_required')]);
+    const wasTurktrust = current.server === 'turktrust' || current.server === 'turktrust-http';
+    const missingAccount = TURKTRUST_SECRETS.filter((name) => !candidate.secrets[name]?.set);
+    if (turktrust && !wasTurktrust && missingAccount.length > 0)
+      return this.refused([problem('tsa.provider', 'tsa_not_ready')], {
+        missing: [...missingAccount],
+      });
     if (current.seal_ready.ok && !candidate.seal_ready.ok)
       return this.refused([problem('tsa.provider', 'tsa_would_break')], {
         causes: candidate.seal_ready.causes,
@@ -1652,6 +1729,10 @@ export class AdminMock {
       server: tsa.server,
       credit_alert_threshold: tsa.credit_alert_threshold,
       timeout_seconds: tsa.timeout_seconds,
+      allow_plain_http: tsa.allow_plain_http,
+      renew_before_days: tsa.renew_before_days,
+      crl_urls: tsa.crl_urls,
+      crl_max_age_days: tsa.crl_max_age_days,
       java: tsa.java,
     });
     const changes: Record<string, Change> = {

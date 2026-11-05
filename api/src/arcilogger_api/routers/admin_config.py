@@ -31,7 +31,7 @@ import zipfile
 from collections.abc import Mapping, Sequence
 from datetime import date, datetime, timedelta
 from pathlib import Path
-from typing import Annotated, Any, Final, Literal
+from typing import Annotated, Any, Final, Literal, cast, get_args
 
 from fastapi import APIRouter, Depends, Query, Request, Response, status
 from fastapi import Path as PathParam
@@ -104,9 +104,15 @@ class ClockSection(BaseModel):
     alert_offset_ms: int
 
 
+class NetworkSection(BaseModel):
+    #: ``[network] https_proxy``: ``http://host:port``, or empty for a direct connection.
+    https_proxy: str
+
+
 class GeneralSection(BaseModel):
     site_name: str
     clock: ClockSection
+    network: NetworkSection
 
 
 class StagedJar(BaseModel):
@@ -149,13 +155,26 @@ class SealReady(BaseModel):
     causes: list[str]
 
 
+TsaServer = Literal["test", "production", "turktrust", "turktrust-http"]
+
+
 class TsaSection(BaseModel):
-    #: ``mock``, ``rfc3161`` or ``zamane`` (only Zamane can be chosen in the browser).
+    #: ``mock``, ``rfc3161``, ``zamane`` or ``turktrust`` (Zamane and TÜRKTRUST can be chosen
+    #: in the browser).
     provider: str
-    #: ``test`` / ``production`` (a Zamane server of Kamu SM), else None.
-    server: Literal["test", "production"] | None
+    #: ``test`` / ``production`` (a Zamane server of Kamu SM), ``turktrust`` /
+    #: ``turktrust-http`` (TÜRKTRUST over HTTPS or plain HTTP), else None.
+    server: TsaServer | None
     credit_alert_threshold: int
     timeout_seconds: int
+    #: TÜRKTRUST over plain HTTP is allowed (its password then travels in clear text).
+    allow_plain_http: bool
+    #: Re-stamping: a token whose TSA certificate expires within this many days is renewed.
+    renew_before_days: int
+    #: Where the revocation lists are fetched from (empty: the certificates' distribution points).
+    crl_urls: list[str]
+    #: A revocation list fetched longer ago than this is stale.
+    crl_max_age_days: int
     java: str | None
     #: The Java 8 installations the administration service found (its heartbeat).
     java_choices: list[str]
@@ -370,9 +389,7 @@ def _tsa(
     config = files.config
     tsa = config.tsa
     server = rules.tsa_server(tsa.provider, tsa.url, tsa.port)
-    chosen: Literal["test", "production"] | None = (
-        "test" if server == "test" else "production" if server == "production" else None
-    )
+    chosen = cast(TsaServer, server) if server in get_args(TsaServer) else None
     roots = channel.roots(config)
     legal = set(tsa.legal_root_fingerprints)
     anchors = channel.anchors()
@@ -390,6 +407,10 @@ def _tsa(
         server=chosen,
         credit_alert_threshold=tsa.credit_alert_threshold,
         timeout_seconds=tsa.timeout_seconds,
+        allow_plain_http=tsa.allow_plain_http,
+        renew_before_days=tsa.renew_before_days,
+        crl_urls=list(tsa.crl_urls),
+        crl_max_age_days=tsa.crl_max_age_days,
         java=tsa.java[0] if tsa.java else None,
         java_choices=list(agent.java_candidates) if agent else [],
         zamane=_zamane(channel, config, staged),
@@ -510,6 +531,7 @@ def get_config(db: DbSession, user: SettingsDep, channel: ChannelDep) -> AdminCo
                 fallback_server=config.clock.fallback_server,
                 alert_offset_ms=config.clock.alert_offset_ms,
             ),
+            network=NetworkSection(https_proxy=config.network.https_proxy),
         ),
         tsa=_tsa(channel, files, meta, _staged(db)),
         smtp=SmtpSection(
@@ -763,17 +785,26 @@ class ClockBody(BaseModel):
     alert_offset_ms: int | None = None
 
 
+class NetworkBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    https_proxy: str | None = None
+
+
 class GeneralBody(Body):
     site_name: str | None = None
     clock: ClockBody | None = None
+    #: ``[network] https_proxy`` (re-authentication).
+    network: NetworkBody | None = None
     #: Test a changed time server first (SNTP).
     probe: bool = True
 
     def form(self) -> dict[str, Any]:
         data = super().form()
-        clock = data.get("clock")
-        if isinstance(clock, dict):
-            data["clock"] = {key: value for key, value in clock.items() if value is not None}
+        for nested in ("clock", "network"):
+            values = data.get(nested)
+            if isinstance(values, dict):
+                data[nested] = {key: value for key, value in values.items() if value is not None}
         return data
 
 
@@ -943,17 +974,28 @@ def files_of(ops: Sequence[Mapping[str, JsonValue]]) -> list[dict[str, JsonValue
 
 
 class TsaBody(Body):
-    #: ``test`` or ``production`` (a Zamane server of Kamu SM; ``mock``: 422 ``tsa_mock_refused``).
+    #: ``test`` or ``production`` (a Zamane server of Kamu SM), ``turktrust`` or
+    #: ``turktrust-http`` (needs ``allow_plain_http`` and ``confirm``); ``mock``: 422
+    #: ``tsa_mock_refused``.
     server: str | None = None
     credit_alert_threshold: int | None = None
     timeout_seconds: int | None = None
+    #: TÜRKTRUST over plain HTTP (the password then travels in clear text; re-authentication).
+    allow_plain_http: bool | None = None
+    renew_before_days: int | None = None
+    crl_urls: list[str] | None = None
+    crl_max_age_days: int | None = None
+    #: Write-only: TÜRKTRUST's user name and password (Fernet tokens to the agent).
+    turktrust_username: str | None = None
+    turktrust_password: str | None = None
     #: One of the Java installations of ``java_choices``.
     java: str | None = None
     #: Write-only: the Kamu SM customer number and password (Fernet tokens to the agent).
     customer: str | None = None
     password: str | None = None
     clear_credentials: bool = False
-    #: Production to test stops production stamps: say so.
+    #: Production to test stops production stamps, and turktrust-http sends the password in clear
+    #: text: say so.
     confirm: bool = False
     #: Test new credentials or a new server first (a credit query with the candidate values).
     probe: bool = True

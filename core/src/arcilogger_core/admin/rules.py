@@ -1540,19 +1540,13 @@ def _body_tsa(body: _Body, data: Mapping[str, Any]) -> None:
         for key, name in names:
             if data.get(key) is not None:
                 body.secret(name, data[key])
-    if data.get("clear_turktrust_credentials") is True:
-        if data.get("turktrust_username") or data.get("turktrust_password"):
-            body.error("config_invalid", "turktrust.username")
-        body.delete("turktrust.username")
-        body.delete("turktrust.password")
-    else:
-        turktrust: tuple[tuple[str, BrowserSecret], ...] = (
-            ("turktrust_username", "turktrust.username"),
-            ("turktrust_password", "turktrust.password"),
-        )
-        for key, name in turktrust:
-            if data.get(key) is not None:
-                body.secret(name, data[key])
+    turktrust: tuple[tuple[str, BrowserSecret], ...] = (
+        ("turktrust_username", "turktrust.username"),
+        ("turktrust_password", "turktrust.password"),
+    )
+    for key, name in turktrust:
+        if data.get(key) is not None:
+            body.secret(name, data[key])
     root = data.get("root")
     if root is not None:
         info = body.upload(root, "kamusm_root")

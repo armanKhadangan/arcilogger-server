@@ -78,10 +78,24 @@ def test_the_configuration_is_shown_without_any_secret(
             "fallback_server": "time.ume.tubitak.gov.tr",
             "alert_offset_ms": 1000,
         },
+        "network": {"https_proxy": ""},
     }
     assert document["sections"]["smtp"]["secrets"]["smtp.password"]["set"] is True
     assert document["sections"]["tsa"]["provider"] == "mock"
     assert document["sections"]["tsa"]["server"] is None
+    # W5-T (§2.4, §2.5): TÜRKTRUST's account as set/unset, never a value; the §2.5 keys flat.
+    tsa_secrets = document["sections"]["tsa"]["secrets"]
+    assert tsa_secrets["turktrust.username"]["set"] is False
+    assert tsa_secrets["turktrust.password"]["set"] is False
+    assert {
+        key: document["sections"]["tsa"][key]
+        for key in ("allow_plain_http", "renew_before_days", "crl_urls", "crl_max_age_days")
+    } == {
+        "allow_plain_http": False,
+        "renew_before_days": 180,
+        "crl_urls": [],
+        "crl_max_age_days": 7,
+    }
     assert document["sections"]["retention"]["minimum_days"] == 730
     assert set(document["etags"]) == {
         "general",
