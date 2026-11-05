@@ -38,6 +38,9 @@ DEFAULT_RETENTION_DAYS = 760  # two years plus a margin
 
 KAMUSM_PRODUCTION_HOST = "zd.kamusm.gov.tr"
 KAMUSM_TEST_HOST = "tzd.kamusm.gov.tr"
+#: TÜRKTRUST's time-stamp server (contract T1: the host is from TÜRKTRUST's e-mail, the path is
+#: to be confirmed on site).
+TURKTRUST_PRODUCTION_HOST = "zd.turktrust.com.tr"
 
 
 class _Model(BaseModel):
@@ -126,7 +129,7 @@ class SealConfig(_Model):
 
 
 class TsaConfig(_Model):
-    provider: Literal["mock", "rfc3161", "zamane"] = "mock"
+    provider: Literal["mock", "rfc3161", "zamane", "turktrust"] = "mock"
     #: Time-stamp server URL (Zamane: address passed to the console client).
     url: str = f"http://{KAMUSM_TEST_HOST}"
     port: int = Field(default=80, ge=1, le=65535)
@@ -181,6 +184,20 @@ class TsaConfig(_Model):
                 raise ValueError(f"no user name or password in a revocation list URL: {value!r}")
         return values
 
+    @model_validator(mode="after")
+    def _turktrust_https(self) -> TsaConfig:
+        if self.provider != "turktrust":
+            return self
+        scheme = urlsplit(self.url).scheme
+        if scheme == "http" and not self.allow_plain_http:
+            raise ValueError(
+                "provider turktrust needs an https:// url: over http:// the TÜRKTRUST user name "
+                "and password travel in clear text (set tsa.allow_plain_http = true to accept it)"
+            )
+        if scheme not in ("http", "https"):
+            raise ValueError("provider turktrust needs an https:// url")
+        return self
+
     @field_validator("legal_root_fingerprints")
     @classmethod
     def _fingerprints(cls, values: tuple[str, ...]) -> tuple[str, ...]:
@@ -198,11 +215,21 @@ class TsaConfig(_Model):
 
     @property
     def legal_grade(self) -> bool:
-        """Whether the configuration points at the Kamu SM production server (Zamane client,
-        zd.kamusm.gov.tr). This is only what the site **claims**: a day counts as legal grade
-        when its verified token also chains to a root of ``legal_root_fingerprints``
+        """Whether the configuration points at a production server whose stamps count as legal
+        grade: Kamu SM's (Zamane client, zd.kamusm.gov.tr), or TÜRKTRUST's (zd.turktrust.com.tr)
+        while the product constant
+        :data:`arcilogger_core.tsa.turktrust.TURKTRUST_LEGAL_GRADE` is true (D12). This is only
+        what the site **claims**: a day counts as legal grade when its verified token also
+        chains to a root of ``legal_root_fingerprints``
         (:func:`arcilogger_core.tsa.verify.confirmed_legal_grade`)."""
-        return self.provider == "zamane" and self.host == KAMUSM_PRODUCTION_HOST
+        if self.provider == "zamane":
+            return self.host == KAMUSM_PRODUCTION_HOST
+        if self.provider == "turktrust":
+            # Imported here: arcilogger_core.tsa imports this module.
+            from arcilogger_core.tsa.turktrust import TURKTRUST_LEGAL_GRADE
+
+            return TURKTRUST_LEGAL_GRADE and self.host == TURKTRUST_PRODUCTION_HOST
+        return False
 
 
 class NetworkConfig(_Model):
