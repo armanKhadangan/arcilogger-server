@@ -28,12 +28,13 @@ desteklemek için tasarlanmıştır; kişisel veri işleme kuralları için huku
 | **Site başına süre (tahmini)** | Her aktif dilimin 60 saniyesi, o dilimdeki sitelere arka plan dışı baytları oranında bölünür: site süreleri toplamı aktif süreye eşittir. **Ham süre**: sitenin herhangi bir trafiği olan her dilim için 60 sn (bölünmez; ayrıntı için) |
 | **Kategori başına süre** | Site sürelerinin FortiGuard kategorisine göre toplamı; kategorisi bilinmeyen siteler **Bilinmiyor** |
 | **İndirilen / Yüklenen** | `rcvdbyte` / `sentbyte`: ara kayıtların farkları + son kaydın kalanı, hiçbir zaman iki kez sayılmaz (arka plan dahil) |
-| **Oturum sayısı** | Ayrı FortiGate oturumları; bir oturum her kişi/cihaz için bir kez, ilk dakikasının bulunduğu bölümde (mesai/mesai dışı) sayılır; gece yarısını geçen oturum iki günde de sayılır |
+| **Oturum sayısı** | Ayrı FortiGate oturumları; bir oturum her kişi/cihaz için bir kez, ilk dakikasının bulunduğu bölümde (mesai, mola, mesai dışı) sayılır; gece yarısını geçen oturum iki günde de sayılır |
 | **Engellenen denemeler** | Web filtresinde engellenen (`blocked`), DNS filtresinde engellenen (`block`) ve uygulama kontrolünde engellenen (`block`, `reset`) her kayıt, kategorisiyle; kişinin cihaz dökümünde her cihaz kendi denemelerinin tamamını sayar. O gün yalnızca engellenen denemeleri olan bir cihaz da dökümde (ve raporun Cihazlar sayfasında) yer alır; IP'si ve VLAN'ı bu denemelerinkidir |
 | **İlk / son etkinlik** | Günün ilk aktif dakikasının başı / son aktif dakikasının sonu |
 | **Saatlik ısı haritası** | Gün × saat, renk = saatteki aktif dakika (seçilen günden geriye 30 gün) |
 | **Uygulamalar** | FortiGate `app`/`appcat` alanlarına göre süre ve bayt |
 | **Mesai dışı kullanım** | Mesai saatleri dışındaki (ve tatillerdeki) aktif süre |
+| **Moladaki kullanım** | Mesai saatleri içindeki molalarda (`usage.work_hours` `breaks`) geçen aktif süre; mesai içi kullanıma karışmaz, mesai dışı da sayılmaz |
 | **URL'ler** | Web filtresinin kaydettiği URL'ler (`fg_web.url`), kişi ve gün başına en yeni `usage.urls_per_day` (1000) tanesi; sertifika denetimiyle HTTPS'te çoğunlukla yalnızca `/` görünür |
 
 "Aktif kişi" sayısı, aktif süresi olan konuların (kişi, yoksa cihaz, yoksa IP) sayısıdır.
@@ -123,7 +124,15 @@ uygulamaların trafiğini de gizleyebilir — gerekirse listeden çıkarın.
 ### 2.5 Mesai saatleri ve tatiller
 
 `usage.work_hours` (varsayılan Pazartesi-Cuma 08:00-18:00) dışındaki ve `usage.holidays`
-günlerindeki her dakika **mesai dışıdır**. ARCILOGGER yalnızca **sabit tarihli resmî tatilleri**
+günlerindeki her dakika **mesai dışıdır**. Mesai içindeki **molalar** (`breaks`, ör. öğle arası
+12:30-13:30) ayrı bir bölümdür: moladaki kullanım "Mola" olarak gösterilir, mesai içi kullanıma
+karışmaz (Kullanım sayfası filtresi: Tüm saatler / Mesai içi / Mola / Mesai dışı). Günde en çok 6
+mola, her biri en az 5 dakika, mesai saatleri içinde ve birbiriyle çakışmadan girilir. Bir çalışma
+gününün saatleri farklıysa (ör. Cumartesi 09:00-13:00) `by_day` o güne kendi saatlerini ve
+molalarını verir; `by_day` girişinde mola yoksa o günün molası yoktur (genel molalar devralınmaz).
+Ayar değişince son `usage.auto_rebuild_days` gün kendiliğinden yeniden hesaplanır; veritabanı
+penceresinden (30 gün) eski günler ancak kayıtları arşivden yeniden yüklenip yeniden
+hesaplanırsa molaya göre ayrılır. ARCILOGGER yalnızca **sabit tarihli resmî tatilleri**
 getirir: 1 Ocak, 23 Nisan, 1 Mayıs, 19 Mayıs, 15 Temmuz, 30 Ağustos, 29 Ekim. **Dini bayramların
 (Ramazan ve Kurban Bayramı) tarihleri her yıl değişir; yönetici her yıl `YYYY-AA-GG` olarak
 girmelidir.** Yarım günler (arife günleri, 28 Ekim öğleden sonra) bu sürümde ifade edilemez: gün
@@ -132,6 +141,7 @@ ya tamamen tatildir ya değildir.
 ```powershell
 '["01-01", "04-23", "05-01", "05-19", "07-15", "08-30", "10-29", "2027-03-20", "2027-03-21"]' | & $db settings set usage.holidays - --by tolga
 '{"days": [1, 2, 3, 4, 5], "start": "08:30", "end": "18:00"}' | & $db settings set usage.work_hours - --by tolga
+'{"days": [1, 2, 3, 4, 5, 6], "start": "08:00", "end": "18:00", "breaks": [{"start": "12:30", "end": "13:30"}], "by_day": {"6": {"start": "09:00", "end": "13:00"}}}' | & $db settings set usage.work_hours - --by tolga
 ```
 
 (Örnekteki 2027 tarihleri yer tutucudur, gerçek tarih değildir; o yılın tarihlerini resmî takvimden alın.)
@@ -168,7 +178,7 @@ eski günler için elle yeniden hesaplayın.
 | `usage.background_domains` | spec 10.3 listesi | Arka plan ana bilgisayar kalıpları (`*`, `?`) |
 | `usage.background_appcats` | `["Update", "Network.Service"]` | Adı bilinmeyen oturumlarda arka plan uygulama kategorileri |
 | `usage.background_ports` | `[53, 123, 853]` | Arka plan hedef portları |
-| `usage.work_hours` | Pzt-Cum 08:00-18:00 | `{"days": [1..7], "start": "SS:DD", "end": "SS:DD"}` (bitiş hariç) |
+| `usage.work_hours` | Pzt-Cum 08:00-18:00, molasız | `{"days": [1..7], "start": "SS:DD", "end": "SS:DD", "breaks"?: [{"start", "end"}], "by_day"?: {"1".."7": {"start", "end", "breaks"?}}}` (bitiş hariç; §2.5) |
 | `usage.holidays` | 7 sabit resmî tatil | `AA-GG` her yıl, `YYYY-AA-GG` tek sefer |
 | `usage.psl_file` | `""` | Daha yeni `public_suffix_list.dat` dosyasının yolu (boş: paketteki) |
 | `usage.psl_private_suffixes` | `false` | Genel Sonek Listesi'nin özel bölümü de sayılsın mı |

@@ -3452,3 +3452,35 @@ line is W5-E-10, and what it amends in detail:
     later that the bound no longer holds, or a bound that no longer follows from the readings,
     fails at once. When #185 makes the MAC branch cheaper, the readings are taken again and the
     Windows bound goes back to 0.2 s.
+
+## Deviations — W5-K (2026-11-05)
+
+- **W5-K-1: the method names.** K2 names `UsageSettings.period(moment)`. The code has
+  `UsageSettings.part_of(moment)` (one minute) and `day_parts(day)` (every minute of a site day),
+  with the type `Part` and `PARTS = ("work", "break", "off")` in
+  `worker/src/arcilogger_worker/usage/config.py`. The reason: `query.Period` is already the date
+  range of every usage answer, and a second "period" in the same module would read as a date range.
+  The database column is `period`, as K3 says. `is_off_hours()` stays: a break is not off hours.
+- **W5-K-2: the `/usage` exports always have the break column.** "Molada aktif (sn)" follows
+  "Mesai dışı aktif (sn)", and "Mola süresi (sn, tahmini)" follows "Mesai dışı süre", also
+  without breaks (then 0). A CSV whose columns come and go with a setting breaks the tools that
+  read it. K5's conditional row and column stay as written for the scheduled reports (PDF, HTML,
+  Excel), which a person reads.
+- **W5-K-3: the report data has a top-level `breaks` flag.** It is true when the work hours had a
+  break on a work day of the report (`UsageSettings.has_breaks`), and the documents show the break
+  row and column by it (K5). The change is additive; schema 1 stays.
+- **W5-K-4: the rollback list.** `0023_usage_period` is in the installer's `$LosslessDowngrades`
+  (#164's test requires every revision above the floor to be judged). Its downgrade first deletes
+  the days that have break rows from the seven rollup tables and `usage_days`: usage analytics,
+  derived data. The older program rebuilds such a day from the log rows the 30-day window still
+  holds; an older day has no rollup until its logs are reloaded from the archive. Raw logs, log
+  rows, leases and the audit log keep every row.
+- **W5-K-5: files outside the ownership of §6.6.**
+  - `deploy/windows/installer/Install-Arcilogger.ps1`: only the W5-K-4 list entry.
+  - `db/tests/test_cli_downgrade.py`, `db/tests/test_migrations.py`: the head.
+  - Three web places that build a `Metrics` object, so `npm run check` stays green with the new
+    required field until W5-P: `web/src/pages/usage/usage-format.ts` (`sumMetrics`), its test and
+    `web/e2e/mock-usage.ts`.
+- **W5-K-6: the upgrade alone rebuilds nothing.** A work-hours value without breaks and `by_day`
+  keeps the Wave 4 fingerprint (`[days, start, end]`), so an upgrade does not rebuild the recent
+  days; only a changed setting does (test `test_breaks_and_per_day_hours_split_the_day_in_three_parts`).
