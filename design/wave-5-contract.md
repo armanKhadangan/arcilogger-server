@@ -3855,3 +3855,30 @@ Recorded on #104. W5-F moved to the manager on 2026-11-06 (05:50Z); part 1 is Sa
     appears for mock, rfc3161 and test servers, so the remedy holds; the guide's remedy names
     both providers.
   - The banner sections are 5.2–5.9 (Q3), as W5-D's locale keys have them.
+
+## Deviations — W5-P part P3 (2026-11-06)
+
+The manager took P3 as well (#203, 23:40Z); P4 stays with Gülşah.
+
+- **W5-P-8: the menu entry is the union of the parts' permissions.** "Canlı Durum" is after
+  "Canlı Akış". It is shown to `dashboard.view`, `system.read`, `usage.person` or
+  `usage.anonymous` and names no licence module. On the page:
+  - the lines need `dashboard.view` or `system.read` (N6);
+  - "Şu an" needs a usage permission, the `usage_analytics` module and the accepted KVKK notice
+    (M3). With the module off it says so, and the lines stay.
+  - The page waits for the licence answer before it asks `/activity/devices`, so a locked
+    module is never asked.
+  - Roles in the menu tests: auditor, İK and viewer now see the entry.
+- **W5-P-9: the e2e answers are built until they are captured.** `e2e/mock-activity.ts` builds
+  `/activity/devices` and `/activity/wan` from `src/lib/activity-types.ts` and the captured
+  people of `usage.json`, with fictional data only. It also builds the refusal
+  `activity_window_invalid`. When W5-M and W5-N merge, their answers are captured
+  (`capture_api_samples.py`) and replace the built ones part by part, in the pull request that
+  follows each of them.
+  - `e2e/mock-license.ts` refuses `/activity/devices` with the module off, as the API does (M3).
+- **W5-P-10: rates in Mbit/s.** The API gives bits per second and bytes. The page shows kbit/s,
+  Mbit/s or Gbit/s, and the charts' axes carry plain numbers in Mbit/s, named in the
+  description and the table view. The company chart turns each minute's bytes into its
+  average Mbit/s.
+- **W5-P-11: the texts are a locale area** (`web/src/locales/areas/activity/`), so the page adds
+  no lines to `tr.json`/`en.json` beyond `nav.activity`.
