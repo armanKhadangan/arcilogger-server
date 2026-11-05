@@ -1523,13 +1523,15 @@ All Wave 5 questions are answered (2026-11-02).
   and a hash join then cost the same within the planner's 1 % fuzz, and it took the nested loop,
   which filtered every ACK against each of the 100 windows (564,201 rows removed). Wrapped,
   they are estimated at about 2,870 (9,100 at five times) and the branch hashes on the MAC on
-  every layout measured. Medians on PostgreSQL 16.15 (Linux), before → after, MAC branch alone /
+  every plain-PostgreSQL layout measured. Medians on PostgreSQL 16.15 (Linux), before → after, MAC branch alone /
   whole statement: guards' layout 73.5 → 23.1 / 80.2 → 26.9 ms (1 M lines a day, as loaded),
   72.2 → 20.7 / 72.1 → 25.7 ms (5 M, after `ANALYZE`); daily partitions (hash join before and
   after) 28.6 → 33.2, 23.1 → 23.4, 25.3 → 25.2, 25.4 → 27.9 ms and monthly ones 19.6 → 21.3,
   23.9 → 17.4, 19.9 → 21.4, 21.7 → 20.7 ms (1 M and 5 M, as loaded and after `ANALYZE`: within
   noise, best times within 1 ms). TimescaleDB and Windows (PostgreSQL 17, where the statement
-  runs under a parallel Gather) were not measured locally: their figures are this PR's CI.
+  runs under a parallel Gather) were not measured locally: their figures are **pending** (the
+  measurement runs in `test-perf` while the pull request is a draft; the figures and the
+  verdict on them come here before it is ready).
   Other forms measured and not taken: `IS NOT TRUE` of the refusal (the nested loop stays),
   `LATERAL` per window (fast, but drops the measured MAC list and reads 100 chunk appends on
   TimescaleDB), an `OFFSET 0` fence (7–11 ms slower on daily partitions at 5 M). An
@@ -1539,8 +1541,8 @@ All Wave 5 questions are answered (2026-11-02).
   15 s, not `perf`, both CI layouts) checks the two estimates against the rows and pins the
   branch: no join of it removes a row by its join filter, and on plain PostgreSQL its join is a
   Hash Join on `mac` (the bare test fails it there: Nested Loop, 564,201 removed).
-  `worker/tests/test_missed_moves_measure.py`, the measurement, runs only with
-  `ARCILOGGER_PERF_185=1`. G7 and the lookup tests are unchanged.
+  `worker/tests/test_missed_moves_measure.py`, the measurement, becomes opt-in
+  (`ARCILOGGER_PERF_185=1`) once those figures are in. G7 and the lookup tests are unchanged.
 
 ## Deviations — W5-H (2026-11-03)
 

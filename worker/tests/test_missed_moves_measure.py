@@ -4,10 +4,13 @@ Not a guard (no bound: the #179/#181 guards in ``test_lookup_performance.py`` ke
 their headroom is read from their own output, not from here; the plan W5-G-26 chose is pinned by
 ``test_missed_moves_plan.py``): it prints, past pytest's capture, what the planner does with the
 branch on the layout the test database has. It measures the code as it is (the figures before
-W5-G-26 are #185's, taken without the wrapper). It costs a few minutes, so it is opt-in: it runs
-only with ``ARCILOGGER_PERF_185=1``, never in the default ``test-perf``::
+W5-G-26 are #185's, taken without the wrapper). It costs a few minutes on each perf job. While
+#185's pull request is a draft it runs in ``test-perf``, so its CI logs the TimescaleDB and the
+Windows figures (#185, Q2); ``ARCILOGGER_PERF=0`` (as the guard module) or
+``ARCILOGGER_PERF_185=0`` switches it off. Before the pull request is ready it becomes opt-in
+(only with ``ARCILOGGER_PERF_185=1``)::
 
-    ARCILOGGER_PERF_185=1 uv run --frozen poe test-perf worker/tests/test_missed_moves_measure.py
+    uv run --frozen poe test-perf worker/tests/test_missed_moves_measure.py
 
 **The world** is the recorded-moves guard's (``moves_site`` of the guard module, written with its
 statements): 400 days of FortiGate DHCP ACKs on the staff Wi-Fi (MACs ``:00``-``:ff``), the 100
@@ -82,8 +85,8 @@ from arcilogger_worker.lookup import LookupOutcome, LookupRequest, LookupSetting
 from arcilogger_worker.lookup.attribution import Attributor
 
 pytestmark = pytest.mark.skipif(
-    os.environ.get("ARCILOGGER_PERF_185", "0") != "1",
-    reason="#185 measurement, opt-in (ARCILOGGER_PERF_185=1)",
+    "0" in (os.environ.get("ARCILOGGER_PERF", "1"), os.environ.get("ARCILOGGER_PERF_185", "1")),
+    reason="#185 measurement switched off (ARCILOGGER_PERF=0 or ARCILOGGER_PERF_185=0)",
 )
 
 GUARDS = Path(__file__).with_name("test_lookup_performance.py")
