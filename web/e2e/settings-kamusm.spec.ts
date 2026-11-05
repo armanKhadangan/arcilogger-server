@@ -570,9 +570,8 @@ test.describe('Ayarlar → Kamu SM', () => {
     expect(api.callsTo('POST', '/auth/reauth')).toHaveLength(0);
     expect(api.admin.sections.tsa.credit_alert_threshold).toBe(300);
     await expect(page.getByRole('button', { name: 'Kontör sorgula' })).toBeVisible();
-    // The API does not report the re-stamping and revocation-list keys yet (before W5-T): no
-    // field for them.
-    await expect(page.getByTestId('tsa-evidence')).toHaveCount(0);
+    // W5-T's API reports the re-stamping and revocation-list keys: their fields are shown.
+    await expect(page.getByTestId('tsa-evidence')).toHaveCount(1);
   });
 
   test('re-stamping and revocation lists (Wave 5 contract 2.5): checked, sent only when changed', async ({
