@@ -2008,15 +2008,17 @@ All Wave 5 questions are answered (2026-11-02).
   `renewal.EARLIER_KEPT`, that is `failures_in_a_row`, read as W5-A-2 reads it (a whole number
   ≥ 0, anything else 0). A refused run with no protected previous file writes no token list,
   which W5-C-1 reads as unknown, never as nothing due. While the earlier file is the only one, a
-  dry run writes nothing (`write_state` returns None, `--json` gives `state_written` false;
-  answer to Q5 on #158): it would have written no `last_run`, turning the Sistem page's Renew
-  row `missing` (W5-E-2), and its own statuses in place of the earlier ones, changing
-  `R20-renewal` and `R20-cert` before any counted run. A dry run never makes the state look
-  worse. `state/renewal/` gets no report (only the lock every run holds), so the readers keep
-  reading the earlier file (W5-E-4, Q2); the first counted run migrates as above, and from then
-  on a dry run writes its statuses and keeps `last_run` (W5-A-2). A made-up count can only do
-  what a missing file (0) or a real count could: hide the failures before the upgrade from
-  `R20-renewal`'s failure branch, or raise it a run early; it cannot make tokens known. Tests:
+  dry run writes no state file (`write_state` returns None, `--json` gives `state_written` false;
+  answer to Q5 on #158; #170, wording): it would have written no `last_run`, turning the Sistem
+  page's Renew row `missing` (W5-E-2), and its own statuses in place of the earlier ones,
+  changing `R20-renewal` and `R20-cert` before any counted run. A dry run never makes the state
+  look worse. It is not a run that writes nothing: like every run it creates `state/renewal/`
+  and `state/renewal/renewal.lock` if they are missing and holds the lock (`renewal.one_run`),
+  but `state/renewal/` gets no `renewal.json`, so the readers keep reading the earlier file
+  (W5-E-4, Q2); the first counted run migrates as above, and from then on a dry run writes its
+  statuses and keeps `last_run` (W5-A-2). A made-up count can only do what a missing file (0)
+  or a real count could: hide the failures before the upgrade from `R20-renewal`'s failure
+  branch, or raise it a run early; it cannot make tokens known. Tests:
   `test_a_refused_run_takes_no_statuses_from_an_earlier_state_file` and
   `test_an_earlier_state_file_is_read_once_and_never_written` (`core/tests/test_cli_renew.py`),
   `test_renew_row_reads_an_earlier_report_until_the_first_run`
@@ -2037,6 +2039,17 @@ All Wave 5 questions are answered (2026-11-02).
   the folder (nothing for the collector or ingest, W5-E-1). SYSTEM, Administrators and the
   tasks keep their own entries, and neither `Renew` nor `CrlFetch` changes a permission there
   (the immutability lock is used only below `vault`).
+  **Administrators own everything below (answer to Q14 on #158; #170, wording).** After every
+  run of the ACL step, `BUILTIN\Administrators` owns `state\crl`, `state\renewal` and every
+  item below them, whichever account created them (the items below, next). An item a task
+  creates there later (a new `renewal.json`, a stored list) is owned by the task's account
+  (LOCAL SERVICE) until the next run of the step, and inherits the folder's OWNER RIGHTS entry,
+  which leaves its owner `ReadPermissions` only; the tasks' Modify has no `ChangePermissions`.
+  So no task can change an entry there, by ownership or otherwise. The immutability lock works
+  by exactly that right (the owner of a sealed file changes its entries, as below `vault`), so a
+  future immutability lock under `state\crl` or `state\renewal` would conflict with OWNER
+  RIGHTS `ReadPermissions`: the plan must change first (its OWNER RIGHTS entry, or who owns
+  what there, with its own tests and a contract change), never be worked around by the task.
   **The items below (answer to Q4 on #158).** A service could also have put items of its own in
   either folder before the upgrade, with their own owner and explicit or protected entries,
   which replacing the folder's DACL leaves as they are: a `state\renewal\renewal.lock` with its
