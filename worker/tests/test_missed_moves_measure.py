@@ -455,14 +455,14 @@ def _figures(plan: dict[str, Any]) -> list[str]:
 
 def _partitions(site: Engine) -> str:
     with site.connect() as connection:
-        found = list_partitions(connection, "fg_dhcp")
-        default = _count(connection, "fg_dhcp_default") if found else 0
         total = _count(connection, "fg_dhcp")
         chunks = _chunks(connection)
+        if chunks is not None:  # a hypertable: no partitions, no fg_dhcp_default
+            return f"fg_dhcp: {total} rows in {chunks} chunks"
+        found = list_partitions(connection, "fg_dhcp")
+        default = _count(connection, "fg_dhcp_default") if found else 0
     monthly = sum(1 for p in found if p.month is not None)
     daily = sum(1 for p in found if p.day is not None)
-    if chunks is not None:
-        return f"fg_dhcp: {total} rows in {chunks} chunks"
     return (
         f"fg_dhcp: {total} rows; {monthly} monthly and {daily} daily partitions, "
         f"{default} rows in fg_dhcp_default"
