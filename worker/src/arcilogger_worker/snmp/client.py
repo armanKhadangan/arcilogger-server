@@ -18,7 +18,12 @@ Auth = Literal["sha1", "sha256", "sha512"]
 Priv = Literal["aes128", "aes256"]
 #: ``ok`` and the failures of a poll (N4); ``disabled`` is a source whose SNMP was switched off.
 Status = Literal[
-    "ok", "timeout", "auth_failed", "no_such_interface", "snmp_no_hc_counters", "disabled"
+    "ok",
+    "timeout",
+    "auth_failed",
+    "no_such_interface",
+    "snmp_no_hc_counters",
+    "disabled",
 ]
 
 SYS_UPTIME: Final = "1.3.6.1.2.1.1.3.0"

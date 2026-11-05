@@ -42,8 +42,8 @@ from arcilogger_worker.snmp.settings import auth_key_name, priv_key_name
 from arcilogger_worker.snmp.state import read_state
 
 USER = "arcilogger"
-AUTH_KEY = "auth-key-for-test"
-PRIV_KEY = "priv-key-for-test"
+AUTH_KEY = "authkeyauthkey"
+PRIV_KEY = "privkeyprivkey"
 T0 = datetime(2026, 10, 12, 10, 0, tzinfo=SITE_TZ)
 
 
@@ -171,7 +171,7 @@ def test_the_client_walks_and_gets_with_authpriv(agent: Agent) -> None:
 def test_a_wrong_key_is_auth_failed_and_no_agent_is_timeout(agent: Agent) -> None:
     client = PysnmpClient()
     with pytest.raises(SnmpError) as wrong:
-        asyncio.run(client.get(_target(agent.port, auth_key="wrong-key-123"), [SYS_UPTIME]))
+        asyncio.run(client.get(_target(agent.port, auth_key="wrongwrongwrong"), [SYS_UPTIME]))
     assert wrong.value.status == "auth_failed"
     with pytest.raises(SnmpError) as silent:
         asyncio.run(client.get(_target(_free_port()), [SYS_UPTIME]))
