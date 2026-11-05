@@ -10,13 +10,24 @@ world). The wrapper is a planner fact, not a rule of the language: a version tha
 to the bare test brings the misestimate back, and this module fails then.
 
 **The world** is the recorded-moves guard's (``test_lookup_performance.py``) cut to what the
-branch reads: the staff Wi-Fi's FortiGate ACKs (MACs ``:00``-``:ff``, one every 75 s) for the
-guards' 400 days (:data:`DHCP_DAYS`), 100 ``mt_dhcp`` chains (MACs ``:00``-``:63``) with their
-open leases and one session each at :data:`AT`, laid out as the guards lay it out (one
-``ensure_partitions`` call: 16 daily partitions, the older days in ``fg_dhcp_default``). On
-TimescaleDB it is the hypertable's one-day chunks. A lookup of :data:`PUBLIC` at :data:`AT`
-sends the statement; its MAC branch (the first ``UNION ALL`` part) is explained with its
-parameters, planned with them as the API plans it.
+branch reads: the staff Wi-Fi's FortiGate ACKs (MACs ``:00``-``:ff``, one every 75 s) for
+:data:`DHCP_DAYS` days, 100 ``mt_dhcp`` chains (MACs ``:00``-``:63``) with their open leases and
+one session each at :data:`AT`, laid out as the guards lay it out (one ``ensure_partitions``
+call: 16 daily partitions, the older days in ``fg_dhcp_default``, the window's first four days
+among them). On TimescaleDB it is the hypertable's one-day chunks. A lookup of :data:`PUBLIC` at
+:data:`AT` sends the statement; its MAC branch (the first ``UNION ALL`` part) is explained with
+its parameters, planned with them as the API plans it.
+
+**Its size**, the guards' 400 days, is the fewest measured with which the bare test reproduces
+the default-partition misestimate's nested loop in every run: the planner takes it when its cost is
+within the 1 % fuzz of the hash join's, that is when the bitmap scan of the window's first days
+costs enough, and that cost grows with the pages of ``fg_dhcp_default`` (every day before the
+partitions). On PostgreSQL 16 here (the bare test loaded from before the wrapper, each run with
+its own ``ANALYZE`` sample) 400 days nested-looped in 50 runs of 50; below that the plan comes
+and goes with the sample (370 and 380 days in 62 of 64 runs, 360 in 17 of 21, 330 to 350 in 14
+of 19, 320 and fewer in none), and one ACK every 100 s over 400 days hashed. Built, it is about
+15 s, so the module is ``perf``: it runs in ``test-perf`` on both CI runners (Linux with
+TimescaleDB, and Windows), not in every other job.
 """
 
 from __future__ import annotations
@@ -40,15 +51,16 @@ from arcilogger_worker.lookup.days import reads_from
 from arcilogger_worker.lookup.trust import kept, untrusted_sources
 from arcilogger_worker.testing import tr
 
+pytestmark = pytest.mark.perf
+
 DAY = date(2026, 10, 12)
 #: The lookup's moment: the 100 chains' sessions, 30 s of them from it on.
 AT = tr(DAY, 14, 20)
 #: The public address of the lookup (no exit configured: the double-NAT candidate search).
 PUBLIC = "198.51.100.20"
 WAN = "100.64.12.9"
-#: Days of staff Wi-Fi ACKs before :data:`AT`, the guards'. With 40 to 300 the bare test also
-#: hashed on PostgreSQL 16 (the nested loop's cost is within the planner's 1 % fuzz of the hash
-#: join's at 400 days); 400 is the world the misestimate cost the guards on.
+#: Days of staff Wi-Fi ACKs before :data:`AT`, the guards': why not fewer, see the module's
+#: docstring.
 DHCP_DAYS = 400
 DHCP_STEP_SECONDS = 75
 #: What the API's lookup sets for its transaction (``search.sql.custom_plans_statement``).
@@ -182,11 +194,6 @@ def _reads_fg_dhcp(node: dict[str, Any]) -> bool:
     return any("Relation Name" in n for n in _nodes(node))
 
 
-def _timescale(site: Engine) -> bool:
-    with site.connect() as connection:
-        return "fg_dhcp" in hypertables(connection)
-
-
 def _estimates(site: Engine) -> tuple[int, int, int]:
     """The planner's estimate of the window's ACKs (every one kept) with the bare ``kept``
     test and with the wrapped one, and how many there are."""
@@ -207,11 +214,13 @@ def _estimates(site: Engine) -> tuple[int, int, int]:
     return bare, wrapped, actual
 
 
-def test_the_mac_branch_hashes_on_the_mac(site: Engine) -> None:
-    """W5-G-26: the MAC branch reads the chains' ACKs once and joins them to the windows on the
-    MAC (on plain PostgreSQL a Hash Join whose condition is the MAC), never a join that tests
-    every ACK against every window: no join of the branch removes a row by its join filter
-    (every ACK of a chain's MAC in the lookup's days is in its window, for another address).
+def test_the_mac_branch_filters_no_ack_per_window(site: Engine) -> None:
+    """W5-G-26: the MAC branch is no Nested Loop whose join filter removes rows, which tests
+    every ACK against every window (the bare test's plan: 564,201 removed), on every layout
+    built (TimescaleDB included); which join it takes instead (a Hash Join on the MAC today, a
+    Merge Join or another one later) is the planner's. Every ACK of a chain's MAC in the
+    lookup's days is in its window (for another address), so a join that matches them on the
+    MAC removes none.
 
     First the reason, on this server: the window's ACKs are estimated at about 0.5 % of them
     with the bare ``kept`` test and at about half with the wrapped one. If the bare side fails,
@@ -225,13 +234,14 @@ def test_the_mac_branch_hashes_on_the_mac(site: Engine) -> None:
     sql, parameters = _statement(site)
     assert sql.count(" UNION ALL ") == 1
     plan = _explained(site, sql.split(" UNION ALL ")[0], parameters)
+    loops = [
+        (node["Node Type"], node.get("Rows Removed by Join Filter", 0))
+        for node in _nodes(plan)
+        if node["Node Type"] == "Nested Loop"
+    ]
+    assert not any(removed > 0 for _loop, removed in loops), f"{loops}\n{json.dumps(plan)}"
     joins = [node for node in _nodes(plan) if "Join Type" in node and _reads_fg_dhcp(node)]
     assert joins, json.dumps(plan, indent=1)
-    removed = [(node["Node Type"], node.get("Rows Removed by Join Filter", 0)) for node in joins]
-    assert not any(rows for _join, rows in removed), removed
     outer = joins[0]
     # 5,699 ACKs of the chains' MACs (a parallel plan's figures are a worker's: times loops).
     assert outer["Actual Rows"] * outer["Actual Loops"] > 5_000, outer
-    if not _timescale(site):
-        assert outer["Node Type"] == "Hash Join", json.dumps(plan, indent=1)
-        assert "mac" in outer["Hash Cond"], outer["Hash Cond"]

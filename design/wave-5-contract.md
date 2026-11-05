@@ -1914,10 +1914,14 @@ All Wave 5 questions are answered (2026-11-02).
   TimescaleDB), an `OFFSET 0` fence (7–11 ms slower on daily partitions at 5 M). An
   overestimate costs a hash build at worst; a planner that folds the wrapper back to the bare
   test would bring the 0.005 back, so `worker/tests/test_missed_moves_plan.py`
-  `test_the_mac_branch_hashes_on_the_mac` (the guards' 400 days of ACKs and 100 chains, about
-  15 s, not `perf`, both CI layouts) checks the two estimates against the rows and pins the
-  branch: no join of it removes a row by its join filter, and on plain PostgreSQL its join is a
-  Hash Join on `mac` (the bare test fails it there: Nested Loop, 564,201 removed).
+  `test_the_mac_branch_filters_no_ack_per_window` (`perf`, so `test-perf` on both CI runners,
+  Linux with TimescaleDB and Windows; the guards' 400 days of ACKs, the fewest with which the
+  bare test nested-looped in every run on PostgreSQL 16, and 100 chains, about 15 s)
+  checks the two estimates against the rows and that the branch, on every layout it builds
+  (TimescaleDB included), is no Nested Loop whose join filter removes rows, read from
+  `EXPLAIN (ANALYZE, FORMAT JSON)`; the join taken instead (a Hash Join today, a Merge Join or
+  another later) is not pinned. The bare test fails it on PostgreSQL 16 (Nested Loop, 564,201
+  removed).
   `worker/tests/test_missed_moves_measure.py`, the measurement (both forms side by side), is
   opt-in (`ARCILOGGER_PERF_185=1`), so the default `test-perf` does not run it. G7 and the
   lookup tests are unchanged.
