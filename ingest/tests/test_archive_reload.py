@@ -1101,12 +1101,17 @@ def test_live_data_is_loaded_while_a_reload_checks_its_files(
     reload_id = queue(db_engine, DAY)
     service = world.service(db_engine, archive_seconds=0.0)
     rounds = 0
+    longest = 0.0
     archive = service._archive
 
     def counted() -> bool:
-        nonlocal rounds
+        nonlocal rounds, longest
         rounds += 1
-        return archive()
+        began = monotonic()
+        try:
+            return archive()
+        finally:
+            longest = max(longest, monotonic() - began)
 
     monkeypatch.setattr(service, "_archive", counted)
     deletes: list[str] = []
@@ -1134,6 +1139,13 @@ def test_live_data_is_loaded_while_a_reload_checks_its_files(
         assert wait_for(lambda: rounds >= held + HELD_ROUNDS, SETTLE), (
             f"{rounds - held} rounds of the loop in {monotonic() - started:.1f} s"
             f" while the reload's {step} check was held"
+        )
+        # The longest round (a day of partitions on the reset's side) for the CI logs: the
+        # Windows runners give no figure of it otherwise (#124 stage 2).
+        warnings.warn(
+            f"longest loop round during the {step} check: {longest:.3f} s",
+            UserWarning,
+            stacklevel=1,
         )
         assert not gate.open.is_set()
         assert gate.threads == [CHECK_THREAD]  # beside the loop, held all along
