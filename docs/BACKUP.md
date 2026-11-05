@@ -44,6 +44,10 @@ the evidence: they contain personal data (KVKK).
 - Task `\ARCILOGGER\Backup`, daily at 01:40 (Türkiye time), as LOCAL SERVICE; if the server is
   off at that time, it runs once it is on again. `pg_dump -Fc` with ARCILOGGER's own database role
   (password from the encrypted secret store, never on a command line).
+- The worker's database window job `db.window` (drops log rows older than `db.retention_days`)
+  runs daily after 01:00, before the backup starts, so the two do not meet; they can meet only at
+  its rare second retry (01:45) or with a dump started late, and such a run counts toward
+  `R20-db-window`.
 - File: `D:\ARCILOGGER\backups\scheduled\arcilogger-YYYYmmdd-HHMMSS.dump` with `….dump.json` next
   to it (SHA-256, size, versions, schema revision). The dump is written under a temporary name,
   checked with `pg_restore --list` and renamed only then.

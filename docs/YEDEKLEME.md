@@ -45,6 +45,10 @@ dosyalarını kanıt kadar özenle saklayın: kişisel veri içerirler (KVKK).
 - Görev `\ARCILOGGER\Backup`, her gün 01:40 (Türkiye saati), LOCAL SERVICE hesabıyla; sunucu o
   saatte kapalıysa açıldıktan sonra çalışır. `pg_dump -Fc` ile, ARCILOGGER'ın kendi veritabanı
   rolüyle (parola şifreli gizli depodan, komut satırına yazılmadan).
+- Worker'ın veritabanı penceresi işi `db.window` (`db.retention_days` günden eski log satırlarını
+  siler) her gün 01:00'den sonra, yedek başlamadan önce çalışır, böylece ikisi karşılaşmaz;
+  yalnızca işin seyrek ikinci yeniden denemesi (01:45) ya da geç başlayan bir yedek ona denk
+  gelebilir ve böyle bir çalışma `R20-db-window` uyarısına sayılır.
 - Dosya: `D:\ARCILOGGER\backups\scheduled\arcilogger-YYYYAAGG-SSDDss.dump` ve yanında
   `….dump.json` (SHA-256, boyut, sürümler, şema sürümü). Yedek geçici bir adla yazılır,
   `pg_restore --list` ile denetlenir, sonra adlandırılır.
