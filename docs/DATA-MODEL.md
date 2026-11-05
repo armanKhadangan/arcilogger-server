@@ -234,7 +234,12 @@ can be cited in an evidence package.
 
   On 1 M lines the ratios are the same; xz 6 on 2 threads seals at 8.3 MB/s (5 GB day: 603 s).
   Preset 9 gains nothing on logs (4.45 % against 4.44 %) for twice the memory, so the defaults
-  stay preset 6 on 2 threads: a 5 GB day takes about 12 minutes, a fifth of the limit.
+  stay preset 6 on 2 threads: a 5 GB day takes about 12 minutes, about a tenth of the Seal
+  task's PT2H limit (a fifth of half of it). Sealing also decompresses each file once to check
+  it against the spool: 144 MB/s measured on the 1 M line day, about 35 s more for 5 GB.
+  Memory grows with the threads: about 135 MB per thread at preset 6 and about 255 MB at preset
+  9, so the allowed maximum (preset 9 on 8 threads) needs about 2 GB; the settings keep 0–9 and
+  1–8 as an administrator's choice (`deploy/windows/arcilogger.example.toml`, `[seal]`).
 
   Showing one cited line (`/raw`, the code the API runs) on the 5 M line day:
 
