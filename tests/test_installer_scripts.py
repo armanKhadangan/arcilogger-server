@@ -6384,6 +6384,11 @@ if ($Scenario -eq 'health-port') {
     $toml = "[api]`nhost = `"0.0.0.0`"`nport = 18641`n"
     Write-Text (Join-Path $programData 'arcilogger.toml') $toml
 }
+if ($Scenario -eq 'next-steps-turktrust') {
+    # Read through the Read-ArciTomlFile stand-in below; the next steps read only an existing file.
+    $toml = "[tsa]`nprovider = `"turktrust`"`nurl = `"https://zd.turktrust.com.tr/`"`n"
+    Write-Text (Join-Path $programData 'arcilogger.toml') $toml
+}
 if ($Scenario -eq 'uninstall-desktop') {
     # What Set-ArciPower.ps1 recorded on a desktop Windows at the installation.
     Write-Text (Join-Path $programData 'install/power-state.json') '{"schema": 1, "previous": {}}'
