@@ -28,6 +28,7 @@ const NONE: Metrics = {
   sessions: 0,
   blocked: 0,
   off_hours_active_seconds: 0,
+  break_active_seconds: 0,
   first_activity: null,
   last_activity: null,
 };

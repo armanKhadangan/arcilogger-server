@@ -220,6 +220,7 @@ function emptyMetrics(): Metrics {
     sessions: 0,
     blocked: 0,
     off_hours_active_seconds: 0,
+    break_active_seconds: 0,
     first_activity: null,
     last_activity: null,
   };
@@ -234,6 +235,7 @@ function addMetrics(total: Metrics, other: Metrics): Metrics {
   total.sessions += other.sessions;
   total.blocked += other.blocked;
   total.off_hours_active_seconds += other.off_hours_active_seconds;
+  total.break_active_seconds += other.break_active_seconds;
   if (
     other.first_activity &&
     (!total.first_activity || Date.parse(other.first_activity) < Date.parse(total.first_activity))

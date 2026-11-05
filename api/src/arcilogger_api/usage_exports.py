@@ -12,8 +12,8 @@
 
 Lists are exported whole (no paging, none of the detail answers' caps); the view's filters
 apply. The users of a site or category carry only the figures kept per site — time, a site's
-raw time, off-hours and break time, volumes, sessions, a category's top sites —, never an online time of
-a category, blocked attempts or first/last activity.
+raw time, off-hours and break time, volumes, sessions, a category's top sites —, never an online
+time of a category, blocked attempts or first/last activity.
 """
 
 from __future__ import annotations
@@ -210,9 +210,7 @@ def period_rows(data: Mapping[str, Any]) -> list[list[Any]]:
         ["Bitiş", period["to"]],
         [
             "Saatler",
-            {"all": "tümü", "work": "mesai", "break": "mola", "off": "mesai dışı"}[
-                period["hours"]
-            ],
+            {"all": "tümü", "work": "mesai", "break": "mola", "off": "mesai dışı"}[period["hours"]],
         ],
         ["Hesaplanan son an", data["computed_until"]],
     ]

@@ -1133,7 +1133,8 @@ export interface DashboardSummary {
 export interface UsagePeriod {
   from: DateString;
   to: DateString;
-  hours: 'all' | 'work' | 'off';
+  /** `work` excludes the breaks of the work hours (contract W5 §6 K4); `all` is every part. */
+  hours: 'all' | 'work' | 'break' | 'off';
 }
 
 /** Usage figures: estimates computed from connection logs, never exact screen time. */
@@ -1145,6 +1146,8 @@ export interface Metrics {
   sessions: number;
   blocked: number;
   off_hours_active_seconds: number;
+  /** Active time in the breaks of the work hours (W5-K); 0 without breaks. */
+  break_active_seconds: number;
   first_activity: DateTimeString | null;
   last_activity: DateTimeString | null;
 }

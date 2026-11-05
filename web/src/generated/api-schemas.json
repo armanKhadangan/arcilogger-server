@@ -8478,6 +8478,10 @@
           "title": "Blocked",
           "type": "integer"
         },
+        "break_active_seconds": {
+          "title": "Break Active Seconds",
+          "type": "integer"
+        },
         "download_bytes": {
           "title": "Download Bytes",
           "type": "integer"
@@ -8531,6 +8535,7 @@
         "sessions",
         "blocked",
         "off_hours_active_seconds",
+        "break_active_seconds",
         "first_activity",
         "last_activity"
       ],
@@ -16081,6 +16086,7 @@
           "enum": [
             "all",
             "work",
+            "break",
             "off"
           ],
           "title": "Hours",
