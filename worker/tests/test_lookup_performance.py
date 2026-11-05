@@ -1373,21 +1373,22 @@ def _first_read(site: Engine, at: datetime) -> datetime:
 @pytest.mark.perf
 def test_the_srcmac_guard_counts_two_hours_fast(traffic_site: Engine, timer: _Timer) -> None:
     """3.8: the srcmac guard query (``trust.srcmac_ip_counts`` as the lookup calls it, for the
-    MACs of 100 candidates) over 2 h at 1 M rows a day, under 1 s; with the query for a row
-    used outside that hour (``srcmac_addresses_within``; a long session logged at its end)."""
+    MACs of 100 candidates) at 1 M rows a day, under 1 s: the sessions that overlap the 2 h
+    around the moment, also those logged up to ``lookup.max_session_seconds`` after them (#96),
+    so its scan runs a day past the hour."""
     counts: list[_Timed] = []
 
     def measure() -> None:
         counts.append(timer.time(lookup_engine, "srcmac_ip_counts"))
-        counts.append(timer.time(lookup_engine, "srcmac_addresses_within"))
 
     outcome = _guard_lookup(traffic_site, LookupRequest(at=GUARD_AT, public_ip=PUBLIC), measure)
     timer.report("srcmac guard")
     assert outcome.mode == "candidates"
     assert len(outcome.matches) == 100
     (call,) = counts[0].calls
-    _session, low, high, interfaces, _untrusted, macs = call
+    _session, low, high, interfaces, _untrusted, macs, longest = call
     assert (low, high) == (GUARD_AT - timedelta(hours=1), GUARD_AT + timedelta(hours=1))
+    assert longest == 86400
     assert set(interfaces) == {"vlan41", "vlan42"}
     assert len(macs) > 50  # the candidates on the listed interfaces (two VLANs of three)
     # The guard passed (one address per MAC): a lease chain and its srcmac agree.
