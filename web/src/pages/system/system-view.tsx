@@ -528,7 +528,14 @@ function TasksBlock({ health }: { health: SystemHealth }) {
               {task.task}
             </span>,
             scheduleText(task, lang),
-            <StateBadge key="state" style={TASK_STYLE[task.state]} />,
+            <span key="state" className="flex flex-col items-start gap-0.5">
+              <StateBadge style={TASK_STYLE[task.state]} />
+              {task.code ? (
+                <span className="text-xs text-muted">
+                  {t(`system.tasks.failure.${task.code}`, { defaultValue: task.code })}
+                </span>
+              ) : null}
+            </span>,
             dateTime(task.last_evidence_at),
             task.evidence ? (
               <span key="evidence" className="font-mono text-xs break-all">

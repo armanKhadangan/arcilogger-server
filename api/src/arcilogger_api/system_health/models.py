@@ -26,7 +26,7 @@ TaskName = Literal[
     "Renew",
     "CrlFetch",
 ]
-TaskHealthState = Literal["ok", "late", "missing", "not_used", "not_observable"]
+TaskHealthState = Literal["ok", "late", "missing", "not_used", "not_observable", "failed"]
 JobHealthState = Literal["ok", "failing", "skipped", "running", "never"]
 
 
@@ -53,6 +53,8 @@ class TaskHealth(BaseModel):
     schedule_tr: str
     schedule_en: str
     state: TaskHealthState
+    #: Why the task's latest run failed (``tasks.TaskFailure``); null unless ``failed``.
+    code: str | None
     last_evidence_at: AwareDatetime | None
     #: The file the state is judged by, relative to the data folder (empty: none).
     evidence: str

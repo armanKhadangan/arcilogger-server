@@ -31,7 +31,9 @@ system's clock is the machine's):
   (today's has not run: ``late``), ApplySystem's report and the agent's heartbeat (fresh), today's
   hourly clock samples (a 3.2 ms offset, one probe no server answered), today's Renew run
   (``state/renewal/renewal.json`` as ``renew`` writes it: nothing due) and today's CrlFetch
-  run (``state/crl/index.json``: one list of a documentation address).
+  run, which stopped on a stored list it could not read (``state/crl/index.json`` as it was
+  read, yesterday's one list of a documentation address, with the ``run_failure`` ``crl fetch``
+  records: ``failed``, #171).
 
 What the files hold: ``system.json`` ``summary`` (``GET /system``, the processor measured) and
 ``summary_first_reading`` (the first reading of a process: ``cpu_percent`` null),
@@ -194,7 +196,7 @@ TASK_STATES = {
     "Requests": "not_observable",
     "ApplySystem": "ok",
     "Renew": "ok",
-    "CrlFetch": "ok",
+    "CrlFetch": "failed",
 }
 
 
@@ -625,9 +627,12 @@ def task_evidence(capture: Capture, now: datetime, verified: list[Verified]) -> 
     run = LastRun(at=renewed, outcome="not_needed", exit_code=0)
     write_renewal_state(layout, RenewalReport.of(()), at=renewed, renew_before=180, last_run=run)
     touch(stamp_renewal_path(layout), renewed)
-    # CrlFetch (00:30) stored one list; only the index is read.
-    fetched = site_at(today, time(0, 30, 12))
-    issued = site_at(today - timedelta(days=1), time(12, 0)).astimezone(UTC)
+    # Yesterday's CrlFetch (00:30) stored one list; today's could not read a stored list and
+    # wrote the index as it read it with its run failure, as ``crl fetch`` does (#171). Only the
+    # index is read.
+    fetched = site_at(today - timedelta(days=1), time(0, 30, 9))
+    stopped = site_at(today, time(0, 30, 12))
+    issued = site_at(today - timedelta(days=2), time(12, 0)).astimezone(UTC)
     entry = {
         "file": f"{'0' * 12}-{issued:%Y%m%dT%H%M%SZ}-{'0' * 8}.crl",
         "issuer": "CN=Örnek Test TSA Kök,O=Örnek A.Ş.,C=TR",
@@ -638,8 +643,16 @@ def task_evidence(capture: Capture, now: datetime, verified: list[Verified]) -> 
         "url": "http://192.0.2.10/ornek.crl",
         "fetched_at": isoformat_site(fetched, "seconds"),
     }
-    index = {"schema": CRL_INDEX_SCHEMA, "lists": [entry], "failures": []}
-    write_json(crl_index_path(layout), index, fetched)
+    index = {
+        "schema": CRL_INDEX_SCHEMA,
+        "lists": [entry],
+        "failures": [],
+        "run_failure": {
+            "at": isoformat_site(stopped, "seconds"),
+            "error": "stored_file_unreadable",
+        },
+    }
+    write_json(crl_index_path(layout), index, stopped)
 
 
 # -- the samples ----------------------------------------------------------------------------------
@@ -741,6 +754,9 @@ def expect_health(health: dict[str, Any]) -> None:
     tasks = {task["task"]: task["state"] for task in health["tasks"]}
     if tasks != TASK_STATES:
         raise SystemExit(f"system: task states {tasks}, expected {TASK_STATES}")
+    codes = {task["task"]: task["code"] for task in health["tasks"] if task["code"] is not None}
+    if codes != {"CrlFetch": "stored_file_unreadable"}:
+        raise SystemExit(f"system: task codes {codes}")
     jobs = {job["job"]: job["state"] for job in health["jobs"]}
     wanted = {name: JOB_STATES.get(name, "ok") for name in jobs}
     if jobs != wanted:
