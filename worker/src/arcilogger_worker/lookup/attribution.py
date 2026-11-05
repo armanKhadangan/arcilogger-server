@@ -1245,10 +1245,10 @@ class Attributor:
         daily partitions in ``fg_dhcp_default`` (the guards' layout) a nested loop and a hash
         join then cost the same within the planner's 1 % fuzz, and the nested loop it took
         filtered the 5,699 rows against each of the 100 windows (about 75 ms against 25 ms). At
-        0.5 they read as some thousands and it hashes on every layout measured on plain
-        PostgreSQL 16 (TimescaleDB and Windows are not measured yet: #185's CI). An
-        overestimate costs a hash build at worst; a planner that folds the wrapper back would
-        bring the 0.005 back, so ``test_missed_moves_plan.py`` pins the plan.
+        0.5 they read as some thousands and it hashes on every layout measured (the figures,
+        Linux, Windows and TimescaleDB, are W5-G-26's). An overestimate costs a hash build at
+        worst; a planner that folds the wrapper back would bring the 0.005 back, so
+        ``test_missed_moves_plan.py`` checks that the branch takes no such nested loop.
 
         The statement reads from :attr:`reads_from` on (G7). The part of a window before it,
         ``(since, reads_from]``, is read from the moves the lease job recorded with the lease
