@@ -23,7 +23,15 @@ window comes back from the vault, exactly once.
   prompt and leaves the request to the next start; a check that fails beside the loop fails the
   request as on it; the scan of a request that ended gives up. A file cut short after its scan
   is not reset (its size is checked again right before the transaction), and the partitions
-  are made a day a round, all of them before the reset.
+  are made a day a round, all of them before the reset. A file loaded while the claim checks the
+  files is not hashed again; a request that ends during its claim's check stops the check.
+* A reset deletes its file's rows in steps (#124 stage 2): a live line is loaded between two of
+  them (also while a step waits for a lock), the file stays marked and is no stream meanwhile,
+  its counts go with the hours each step finishes, and one file is reset at a time. A crash
+  after any of its transactions, a first transaction whose answer is lost, a recount that takes
+  the mark off (``search-counts rebuild``) and a batch loaded under the mark each reset it again
+  and load it exactly once, for its request or on its own; a file that cannot be read does not
+  hold up the reset of another.
 * On TimescaleDB with compression, a reload resets and loads raw days whose chunks are
   compressed (the margin days of a day near the window's start are older than
   ``COMPRESS_AFTER``): the same rows come back, also from a reload run twice.
@@ -41,12 +49,14 @@ import os
 import threading
 from collections.abc import Callable
 from datetime import UTC, date, datetime, time, timedelta
+from itertools import pairwise
 from pathlib import Path
 from time import monotonic, sleep
 from typing import Any
 
 import pytest
 from sqlalchemy import Engine, event, select, text
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
 from arcilogger_core import sealedfile
@@ -69,7 +79,11 @@ from arcilogger_ingest.service import (
     ArchiveJob,
     CheckStoppedError,
     IngestService,
+    Reset,
+    ResetStep,
+    count_hours,
     received_outside,
+    reset_steps,
 )
 from arcilogger_ingest.testing import DAY, World, dhcp_message, fortigate_message, offsets
 
@@ -712,7 +726,7 @@ def test_a_request_waits_while_the_window_job_holds_the_partitions(
 
 @pytest.mark.parametrize("counts", ["loaded", "recounted", "uncounted"])
 def test_a_row_outside_its_days_window_is_replaced_not_doubled(
-    world: World, db_engine: Engine, counts: str
+    world: World, db_engine: Engine, monkeypatch: pytest.MonkeyPatch, counts: str
 ) -> None:
     """A spool line whose receive time is of another day (damaged, restored by hand) gives a row
     of the file far outside its ``stream_window`` and its two days' margin: one in 2001 (the
@@ -779,6 +793,10 @@ def test_a_row_outside_its_days_window_is_replaced_not_doubled(
                 text("DELETE FROM search_counts WHERE source = 'core-r1' AND raw_day = :day"),
                 {"day": DAY},
             )
+    # ``uncounted``: its window is stepped by RESET_CAPPED_STEP (W5-G-25), an hour here (the
+    # 5 minutes of the service make about 900 steps of no row; the steps' own test is
+    # test_a_resets_steps_hold_their_budget_of_lines).
+    monkeypatch.setattr(service_module, "RESET_CAPPED_STEP", timedelta(hours=1))
     for _ in range(2):
         expire(db_engine)
         drop(db_engine, DAY + timedelta(days=2))
@@ -1349,3 +1367,877 @@ def test_a_check_that_fails_beside_the_loop_fails_the_request_and_deletes_nothin
         assert day_offsets(db_engine, DAY) == stored
     else:  # the file reset before it loaded back
         assert of_source(after, "core-r1") == of_source(loaded, "core-r1")
+
+
+# -- a reset deletes its file's rows in steps (#124 stage 2, W5-G-25) -----------------------------
+
+#: The device times of :func:`spread_day`'s lines of ``DAY`` (hours apart: a step each).
+SPREAD = [datetime.combine(DAY, time(hour), tzinfo=SITE_TZ) for hour in (2, 8, 14, 20)]
+
+
+def spread_day(world: World, engine: Engine) -> datetime:
+    """``core-r1``'s file of ``DAY`` loaded while ``DAY`` is in the window: a line at each of
+    :data:`SPREAD` (a reset of :data:`~arcilogger_ingest.service.RESET_STEP_LINES` 1 deletes them
+    a step each) and one received three days before ``TODAY`` from a clock half an hour behind,
+    whose clock sample it shares with a line of that day's own file (the reset takes the file's
+    part off once). Returns that receive time."""
+    received = datetime.combine(TODAY - timedelta(days=3), time(12), tzinfo=SITE_TZ)
+    world.append(
+        "core-r1", DAY, (with_device_time(dhcp_message(i), at) for i, at in enumerate(SPREAD))
+    )
+    stray = with_device_time(dhcp_message(8), received - HALF_HOUR)
+    world.append_raw("core-r1", DAY, format_line(received, "172.20.10.1", stray))
+    world.seal(DAY)
+    shared = received + timedelta(seconds=1)
+    world.append(
+        "core-r1",
+        received.date(),
+        [with_device_time(dhcp_message(9), shared - HALF_HOUR)],
+        start=shared.time(),
+    )
+    with engine.begin() as connection:  # plain PostgreSQL: the day's partitions
+        ensure_days(connection, received.date(), received.date())
+    world.set_today(DAY + timedelta(days=1))
+    run_once(world, engine)
+    world.set_today(TODAY)
+    return received
+
+
+def fail_by_hand(engine: Engine, reload_id: int) -> None:
+    """An administrator sets a request ``failed`` (its ``error_code`` is required then)."""
+    with engine.begin() as connection:
+        connection.execute(
+            text("UPDATE archive_reloads SET status = 'failed', error_code = :code WHERE id = :id"),
+            {"code": ARCHIVE_UNREADABLE, "id": reload_id},
+        )
+
+
+def file_rows(engine: Engine, source: str, day: date) -> int:
+    """The ``messages`` rows of the file ``(source, day)``."""
+    with engine.connect() as connection:
+        return int(
+            connection.execute(
+                text("SELECT count(*) FROM messages WHERE source = :source AND raw_day = :day"),
+                {"source": source, "day": day},
+            ).scalar_one()
+        )
+
+
+def file_counts(engine: Engine, source: str, day: date) -> int:
+    """The lines ``search_counts`` holds of the file ``(source, day)``."""
+    with engine.connect() as connection:
+        return int(
+            connection.execute(
+                text(
+                    "SELECT coalesce(sum(n), 0) FROM search_counts "
+                    "WHERE source = :source AND raw_day = :day"
+                ),
+                {"source": source, "day": day},
+            ).scalar_one()
+        )
+
+
+def recount_by_hand(engine: Engine, source: str, day: date) -> None:
+    """What ``arcilogger-db search-counts rebuild`` does (``arcilogger_db.cli``): the file's
+    offsets row locked, its counts made again from its rows, its ``counts_from_line`` cleared
+    when set (the mark of a reset among them)."""
+    with engine.begin() as connection:
+        marked = connection.execute(
+            text(
+                "SELECT counts_from_line FROM ingest_offsets "
+                "WHERE source = :source AND day = :day FOR UPDATE"
+            ),
+            {"source": source, "day": day},
+        ).scalar_one()
+        rebuild_stream(connection, source, day)
+        if marked is not None:
+            connection.execute(
+                text(
+                    "UPDATE ingest_offsets SET counts_from_line = NULL "
+                    "WHERE source = :source AND day = :day"
+                ),
+                {"source": source, "day": day},
+            )
+
+
+def marker(engine: Engine, source: str, day: date) -> tuple[Any, ...]:
+    """``byte_offset``, ``counts_from_line`` and whether finished, of the file's offsets row."""
+    with engine.connect() as connection:
+        return tuple(
+            connection.execute(
+                text(
+                    "SELECT byte_offset, counts_from_line, finished_at IS NOT NULL "
+                    "FROM ingest_offsets WHERE source = :source AND day = :day"
+                ),
+                {"source": source, "day": day},
+            ).one()
+        )
+
+
+def test_a_resets_steps_hold_their_budget_of_lines() -> None:
+    """:func:`reset_steps`: consecutive steps over the whole range, each of at most the budget
+    by the hours' lines (a part of an hour counts the hour whole), an hour of more split
+    evenly; with ``longest``, none longer."""
+    start = datetime(2026, 9, 22, 20, 30, tzinfo=UTC)
+    hour = start.replace(minute=0)
+    end = hour + timedelta(hours=4)
+    lines = {hour: 3, hour + timedelta(hours=1): 25, hour + timedelta(hours=3): 1}
+    steps = reset_steps(start, end, lines, budget=10)
+    third = timedelta(minutes=20)
+    first = hour + timedelta(hours=1)
+    assert steps == [
+        (start, first),
+        (first, first + third),
+        (first + third, first + 2 * third),
+        (first + 2 * third, end),  # the hours after it: 25 / 3 + 0 + 1 lines
+    ]
+    capped = reset_steps(start, end, lines, budget=10, longest=timedelta(minutes=30))
+    assert capped[0] == (start, first)
+    assert capped[-1][1] == end
+    assert all(b - a <= timedelta(minutes=30) for a, b in capped)
+    assert all(a[1] == b[0] for a, b in pairwise(capped))
+    assert reset_steps(start, end, {}, budget=10) == [(start, end)]
+    # Each step's counts: the hours it reaches that no later step reaches (the hour split in
+    # three goes with the last of its steps, the one that reaches on to the end).
+    planned = count_hours(steps)
+    assert [(step.start, step.end) for step in planned] == steps
+    assert [step.hours for step in planned] == [
+        (hour, first),
+        (first, first),
+        (first + third, first + third),
+        (first, end),
+    ]
+    # Two ranges in one hour (the reach of two strays): the hour goes with the later one.
+    late = end + timedelta(hours=5)
+    shared = count_hours(
+        [(late, late + third), (late + 2 * third, late + 2 * third + timedelta(minutes=1))]
+    )
+    assert [step.hours for step in shared] == [(late, late), (late, late + timedelta(hours=1))]
+
+
+def test_live_data_is_loaded_while_a_reset_deletes_a_files_rows(
+    world: World, db_engine: Engine, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """G4, live data first (#124 stage 2): a file whose rows are still in the database (the
+    window's first days; no drop record here, so nothing counts as loaded) is reset in steps,
+    each a transaction of its own between rounds of the loop. Held after its second step
+    (between two rounds, the loop not held): a live line is loaded within :data:`LIVE_BOUND`;
+    for :data:`HELD_ROUNDS` the file stays marked resetting at offset 0, partly deleted, no
+    stream and its sealed file not read, the request ``loading``; a step of the window job and
+    a day's partitions do not wait for it (no transaction is open between two steps). Then the
+    rest of its steps, and the file comes back exactly once."""
+    spread_day(world, db_engine)
+    before = snapshot(db_engine)
+    key = ("core-r1", DAY)
+    assert file_rows(db_engine, *key) == file_counts(db_engine, *key) == len(SPREAD) + 1
+    monkeypatch.setattr(service_module, "RESET_STEP_LINES", 1)
+    monkeypatch.setattr(service_module, "RESET_ROUND_SECONDS", 0.0)  # one step a round
+    steps = 0
+    real_step = IngestService._reset_step
+
+    def step(*args: Any, **kwargs: Any) -> bool:
+        nonlocal steps
+        steps += 1
+        return real_step(*args, **kwargs)
+
+    gate = Gate()
+    real_round = IngestService._reset_round
+
+    def held(self: IngestService) -> None:
+        if self._reset is not None and steps >= 2 and not gate.open.is_set():
+            gate.threads.append(threading.current_thread().name)
+            gate.entered.set()
+            return  # this round makes no step: the loop goes on
+        real_round(self)
+
+    sealed, _ = sealed_file(world, DAY, "core-r1")
+    opened: list[str] = []
+
+    class Seen(VaultReader):
+        def __init__(self, path: Path, offset: int) -> None:
+            if threading.current_thread().name != CHECK_THREAD and gate.entered.is_set():
+                opened.append(path.name)
+            super().__init__(path, offset)
+
+    monkeypatch.setattr(IngestService, "_reset_step", staticmethod(step))
+    monkeypatch.setattr(IngestService, "_reset_round", held)
+    monkeypatch.setattr(service_module, "VaultReader", Seen)
+    reload_id = queue(db_engine, DAY)
+    service = world.service(db_engine, archive_seconds=0.0)
+    rounds = 0
+    archive = service._archive
+
+    def counted() -> bool:
+        nonlocal rounds
+        rounds += 1
+        return archive()
+
+    monkeypatch.setattr(service, "_archive", counted)
+    results: list[int] = []
+    runner = threading.Thread(target=lambda: results.append(service.run()))
+    runner.start()
+    try:
+        assert gate.entered.wait(SETTLE)
+        spool = world.append("fortigate", TODAY, (fortigate_message(i) for i in range(12)))
+        size = spool.stat().st_size
+
+        def live_loaded() -> bool:
+            return offsets(db_engine).get(("fortigate", TODAY), (0, 0, False))[0] == size
+
+        assert wait_for(live_loaded, LIVE_BOUND), (
+            f"a live line waited more than {LIVE_BOUND} s for the reset's steps"
+        )
+        held_at, started = rounds, monotonic()
+        assert wait_for(lambda: rounds >= held_at + HELD_ROUNDS, SETTLE), (
+            f"{rounds - held_at} rounds of the loop in {monotonic() - started:.1f} s"
+        )
+        assert steps == 2
+        assert marker(db_engine, *key) == (0, service_module.RESETTING, False)
+        assert 0 < file_rows(db_engine, *key) < len(SPREAD) + 1
+        # The counts of the hours its steps finished went with them: they tell its rows.
+        assert file_counts(db_engine, *key) == file_rows(db_engine, *key)
+        assert key in service.resetting
+        assert key not in service.streams
+        assert sealed.name not in opened
+        assert reload_row(db_engine, reload_id)["status"] == "loading"
+        with db_engine.connect() as connection:
+            files = {key: sealed_file(world, DAY, "core-r1")[1]}
+            assert IngestService.loaded_files(connection, 0, DAY, files) == frozenset()
+        # The window job's step and the daily partitions do not wait for a lock of the reset
+        # between two of its steps (a wait of a second raises 55P03; on a slow runner they may
+        # take longer than that by themselves).
+        with db_engine.begin() as connection:
+            connection.execute(text("SET LOCAL lock_timeout = '1s'"))
+            drop_before(connection, DAY - timedelta(days=4))
+        with db_engine.begin() as connection:
+            connection.execute(text("SET LOCAL lock_timeout = '1s'"))
+            later = TODAY + timedelta(days=60)  # no partition covers it yet
+            report = ensure_days(connection, later, later)
+            assert bool(report.created) == bool(report.tables)  # made on plain PostgreSQL
+    finally:
+        gate.open.set()
+        wait_for(lambda: reload_row(db_engine, reload_id)["status"] in ("ready", "failed"), SETTLE)
+        service.stop.set()
+        runner.join(WAIT)
+    assert results == [0]
+    row = reload_row(db_engine, reload_id)
+    assert row["status"] == "ready", f"the reload after {SETTLE} s: {row}"
+    assert steps > 2
+    after = snapshot(db_engine)
+    assert of_source(after, "core-r1") == of_source(before, "core-r1")
+    assert after["source_clock_samples"] == before["source_clock_samples"]
+    assert len([row for row in after["messages"] if row[-3] == TODAY]) == 12
+    assert marker(db_engine, *key)[1:] == (None, True)
+    assert in_default(db_engine, DAY) == 0
+    counts_agree(db_engine)
+
+
+def crash_points(
+    monkeypatch: pytest.MonkeyPatch, key: tuple[str, date], after: int | None
+) -> list[int]:
+    """The process dies right after the ``after``-th transaction of the reset of ``key`` (0:
+    the one that marks it, ``n``: its last step, before it is a stream; ``None``: no crash):
+    :class:`SimulatedCrashError` when the reset's next step, or its stream, comes. Returns the
+    number of steps made, as a list that fills as they are."""
+    made: list[int] = [0]
+    real_step = IngestService._reset_step
+    real_stream = IngestService._new_stream
+
+    def step(connection: Any, source: str, day: date, *args: Any, **kwargs: Any) -> bool:
+        if (source, day) == key and made[0] == after:
+            raise SimulatedCrashError
+        result = real_step(connection, source, day, *args, **kwargs)
+        made[0] += 1
+        return result
+
+    def new_stream(self: IngestService, source: str, day: date) -> Any:
+        if (source, day) == key and self._reset is None and made[0] == after and after:
+            raise SimulatedCrashError
+        return real_stream(self, source, day)
+
+    monkeypatch.setattr(IngestService, "_reset_step", staticmethod(step))
+    monkeypatch.setattr(IngestService, "_new_stream", new_stream)
+    return made
+
+
+@pytest.mark.parametrize("holder", ["request", "none"])
+def test_a_crash_after_each_step_of_a_reset_re_resets_and_loads_exactly_once(
+    world: World, db_engine: Engine, monkeypatch: pytest.MonkeyPatch, holder: str
+) -> None:
+    """W5-G-25: the service dies right after each transaction of a file's reset in turn (the
+    one that marks it, each step, the last one before the file is a stream). The next start
+    finds it marked (offset 0): it is no stream (start-up, spool, vault scan) and does not count
+    as loaded; its reset is taken up again from its first step, for the request still loading
+    or, when the request has ended meanwhile (``none``: failed by hand), on its own; and the
+    file loads exactly once: the same rows, counts and clock samples (the stray line's part is
+    taken off once, in the transaction that marks the file), its offset finished, unmarked."""
+    received = spread_day(world, db_engine)
+    before = snapshot(db_engine)
+    minute = received.astimezone(UTC)
+    assert ("core-r1", minute, -1800, 2) in before["source_clock_samples"]  # shared
+    key = ("core-r1", DAY)
+    monkeypatch.setattr(service_module, "RESET_STEP_LINES", 1)
+    with monkeypatch.context() as patch:
+        made = crash_points(patch, key, None)
+        clean = queue(db_engine, DAY)
+        run_once(world, db_engine)
+    assert reload_row(db_engine, clean)["status"] == "ready"
+    assert snapshot(db_engine) == before
+    total = made[0]
+    assert total > len(SPREAD)  # a step a line at least
+    for after in range(total + 1):
+        expire(db_engine)  # no ready reload holds the file: it is reset
+        reload_id = queue(db_engine, DAY)
+        with monkeypatch.context() as patch:
+            crash_points(patch, key, after)
+            with pytest.raises(SimulatedCrashError):
+                world.service(db_engine).run(once=True)
+        assert reload_row(db_engine, reload_id)["status"] == "loading"
+        offset, mark, finished = marker(db_engine, *key)
+        assert (offset, finished) == (0, False)
+        if after == total:
+            assert file_rows(db_engine, *key) == 0
+        with db_engine.connect() as connection:
+            files = {key: sealed_file(world, DAY, "core-r1")[1]}
+            assert IngestService.loaded_files(connection, 0, DAY, files) == frozenset()
+        restarted = world.service(db_engine)
+        restarted._load_offsets()
+        world.set_today(DAY + timedelta(days=1))  # DAY in the vault scan's horizon
+        try:
+            restarted._scan_vault()
+            restarted._add_stream(*key)
+        finally:
+            world.set_today(TODAY)
+        if after < total:
+            assert mark == service_module.RESETTING
+            assert key in restarted.resetting
+            assert key not in restarted.streams
+        else:  # unmarked by the last step: a stream at offset 0, loaded from the sealed file
+            assert mark is None
+            assert key not in restarted.resetting
+            assert restarted.streams[key].offset == 0
+        if holder == "none":
+            fail_by_hand(db_engine, reload_id)
+        run_once(world, db_engine)
+        state = f"after transaction {after} of {total}"
+        assert reload_row(db_engine, reload_id)["status"] == (
+            "ready" if holder == "request" else "failed"
+        ), state
+        assert snapshot(db_engine) == before, state
+        assert marker(db_engine, *key) == (sealed_file(world, DAY, "core-r1")[1], None, True)
+        counts_agree(db_engine)
+
+
+def test_a_reset_whose_offset_has_moved_is_not_carried_on(world: World, db_engine: Engine) -> None:
+    """A step's compare-and-set (as the loader's on the offsets, for two instances at once): a
+    file whose offset is no longer 0 (another instance finished its reset and loads it, while
+    this one's lock connection was down) is not touched: the step deletes nothing, and the loop
+    gives the reset up and reads the offsets again."""
+    spread_day(world, db_engine)
+    before = snapshot(db_engine)
+    key = ("core-r1", DAY)
+    lo, hi = stream_window(DAY)
+    whole = ResetStep(lo, hi, (lo, hi))
+    with db_engine.begin() as connection:
+        for last in (False, True):
+            assert not IngestService._reset_step(connection, *key, whole, last=last)
+    assert snapshot(db_engine) == before
+    service = world.service(db_engine)
+    try:
+        service._load_offsets()
+        service.resetting.add(key)
+        service._reset = Reset(key, [], [whole])
+        service._reset_round()
+        assert not service._archive_busy()  # no reset under way
+        assert key in service.finished
+        assert key not in service.resetting
+    finally:
+        assert service._lock is not None
+        service._lock.release()
+    assert snapshot(db_engine) == before
+
+
+def test_a_batch_loaded_under_the_mark_begins_the_reset_again(
+    world: World, db_engine: Engine, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Two instances at once (the lock connection of one was down, #124 stage 2 review S1): a
+    batch of the file committed by the other between two steps of its reset (its compare-and-set
+    finds offset 0) moves the offset under the mark. The next step finds it moved and deletes
+    nothing; the file still marked, its reset begins again (its first transaction, then every
+    step: the rows of both loads go), and it loads exactly once."""
+    spread_day(world, db_engine)
+    before = snapshot(db_engine)
+    key = ("core-r1", DAY)
+    monkeypatch.setattr(service_module, "RESET_STEP_LINES", 1)
+    calls: list[bool] = []
+    real_step = IngestService._reset_step
+    begun: list[date] = []
+    real_begin = IngestService._begin_reset
+
+    def begin(connection: Any, source: str, day: date, **kwargs: Any) -> list[ResetStep]:
+        begun.append(day)
+        return real_begin(connection, source, day, **kwargs)
+
+    def step(connection: Any, source: str, day: date, *args: Any, **kwargs: Any) -> bool:
+        if (source, day) == key and len(calls) == 2:  # the other instance's batch, before it
+            with db_engine.begin() as other:
+                other.execute(
+                    text(
+                        "UPDATE ingest_offsets SET byte_offset = 100, line_number = 1 "
+                        "WHERE source = :source AND day = :day"
+                    ),
+                    {"source": source, "day": day},
+                )
+        result = real_step(connection, source, day, *args, **kwargs)
+        calls.append(result)
+        return result
+
+    monkeypatch.setattr(IngestService, "_reset_step", staticmethod(step))
+    monkeypatch.setattr(IngestService, "_begin_reset", staticmethod(begin))
+    reload_id = queue(db_engine, DAY)
+    service = world.service(db_engine, archive_seconds=0.0)
+    results: list[int] = []
+    runner = threading.Thread(target=lambda: results.append(service.run()))
+    runner.start()
+    try:
+        assert wait_for(lambda: reload_row(db_engine, reload_id)["status"] == "ready", SETTLE)
+    finally:
+        service.stop.set()
+        runner.join(WAIT)
+    assert results == [0]
+    assert calls[:3] == [True, True, False]
+    assert begun.count(DAY) == 2
+    assert reload_row(db_engine, reload_id)["status"] == "ready"
+    assert snapshot(db_engine) == before
+    assert marker(db_engine, *key) == (sealed_file(world, DAY, "core-r1")[1], None, True)
+    counts_agree(db_engine)
+
+
+@pytest.mark.parametrize("when", ["running", "request", "none"])
+def test_a_recount_during_a_reset_does_not_load_its_file_twice(
+    world: World, db_engine: Engine, monkeypatch: pytest.MonkeyPatch, when: str
+) -> None:
+    """#124 stage 2 review M1: ``arcilogger-db search-counts rebuild`` of a file between two
+    steps of its reset counts the rows still there and takes the mark off (it clears any
+    ``counts_from_line``). While the service runs (``running``) the next step puts the mark
+    back (the offset still 0: no batch has loaded the file since). After a crash, the file at
+    offset 0 with counts not empty is a reset all the same: no stream, not loaded, and its
+    reset is taken up again (its stray line's clock sample not taken off twice), for the
+    request or on its own (``none``, failed by hand). Either way it loads exactly once."""
+    spread_day(world, db_engine)
+    before = snapshot(db_engine)
+    key = ("core-r1", DAY)
+    monkeypatch.setattr(service_module, "RESET_STEP_LINES", 1)
+    reload_id = queue(db_engine, DAY)
+    if when == "running":
+        calls: list[bool] = []
+        marks: list[tuple[Any, ...]] = []
+        real_step = IngestService._reset_step
+
+        def step(connection: Any, source: str, day: date, *args: Any, **kwargs: Any) -> bool:
+            if (source, day) == key and len(calls) == 2:
+                recount_by_hand(db_engine, source, day)
+                assert marker(db_engine, *key) == (0, None, False)
+            if (source, day) == key and len(calls) == 3:  # the step after the recount committed
+                marks.append(marker(db_engine, *key))
+            result = real_step(connection, source, day, *args, **kwargs)
+            calls.append(result)
+            return result
+
+        monkeypatch.setattr(IngestService, "_reset_step", staticmethod(step))
+        run_once(world, db_engine)
+        assert len(calls) > 3
+        assert all(calls)
+        assert marks == [(0, service_module.RESETTING, False)]  # the mark put back
+    else:
+        with monkeypatch.context() as patch:
+            crash_points(patch, key, 2)
+            with pytest.raises(SimulatedCrashError):
+                world.service(db_engine).run(once=True)
+        recount_by_hand(db_engine, *key)
+        assert marker(db_engine, *key) == (0, None, False)
+        assert 0 < file_counts(db_engine, *key) == file_rows(db_engine, *key)
+        restarted = world.service(db_engine)
+        restarted._load_offsets()
+        restarted._add_stream(*key)
+        assert key in restarted.resetting
+        assert key not in restarted.streams
+        with db_engine.connect() as connection:
+            files = {key: sealed_file(world, DAY, "core-r1")[1]}
+            assert IngestService.loaded_files(connection, 0, DAY, files) == frozenset()
+        if when == "none":
+            fail_by_hand(db_engine, reload_id)
+        run_once(world, db_engine)
+    status = reload_row(db_engine, reload_id)["status"]
+    assert status == ("failed" if when == "none" else "ready")
+    assert snapshot(db_engine) == before
+    assert marker(db_engine, *key) == (sealed_file(world, DAY, "core-r1")[1], None, True)
+    counts_agree(db_engine)
+
+
+def test_a_first_transaction_whose_answer_is_lost_is_made_again(
+    world: World, db_engine: Engine, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#124 stage 2 review S1: the first transaction of a reset commits but its answer does not
+    come (the connection drops). The file is no stream from before that transaction on (here it
+    was one, at offset 0: the service stopped after the last step of an earlier reset), so no
+    batch of it is committed under the mark; the next round makes the transaction again, which
+    finds the mark set and leaves the clock samples alone; the file loads exactly once."""
+    spread_day(world, db_engine)
+    before = snapshot(db_engine)
+    key = ("core-r1", DAY)
+    monkeypatch.setattr(service_module, "RESET_STEP_LINES", 1)
+    with monkeypatch.context() as patch:
+        made = crash_points(patch, key, None)
+        queue(db_engine, DAY)
+        run_once(world, db_engine)
+    expire(db_engine)
+    reload_id = queue(db_engine, DAY)
+    with monkeypatch.context() as patch:
+        crash_points(patch, key, made[0])  # after the last step, before the stream
+        with pytest.raises(SimulatedCrashError):
+            world.service(db_engine).run(once=True)
+    assert marker(db_engine, *key) == (0, None, False)
+    attempts: list[tuple[bool, bool]] = []
+    real_begin = IngestService._begin
+
+    def begin(self: IngestService, reset: Reset) -> None:
+        attempts.append((reset.key in self.streams, reset.key in self.resetting))
+        real_begin(self, reset)
+        if len(attempts) == 1:
+            reset.steps = None
+            raise OperationalError("COMMIT", {}, Exception("server closed the connection"))
+
+    monkeypatch.setattr(IngestService, "_begin", begin)
+    service = world.service(db_engine, archive_seconds=0.0)
+    results: list[int] = []
+    runner = threading.Thread(target=lambda: results.append(service.run()))
+    runner.start()
+    try:
+        assert wait_for(lambda: reload_row(db_engine, reload_id)["status"] == "ready", SETTLE)
+    finally:
+        service.stop.set()
+        runner.join(WAIT)
+    assert results == [0]
+    assert attempts == [(False, True), (False, True)]
+    assert snapshot(db_engine) == before
+    assert marker(db_engine, *key) == (sealed_file(world, DAY, "core-r1")[1], None, True)
+    counts_agree(db_engine)
+
+
+def test_one_unreadable_file_does_not_hold_up_another_files_reset(
+    world: World, db_engine: Engine
+) -> None:
+    """#124 stage 2 review S3: two files marked resetting that no request holds (the service
+    stopped after their first transactions). The first cannot be read (cut short in the vault):
+    it stays marked, no stream, its rows as they were, and is tried again later; the other's
+    reset is finished meanwhile and it loads exactly once."""
+    load_day(world, db_engine)
+    before = snapshot(db_engine)
+    stuck, other = ("core-r1", DAY), ("fortigate", DAY)
+    service = world.service(db_engine)
+    with db_engine.begin() as connection:
+        for source, day in (stuck, other):
+            IngestService._begin_reset(
+                connection, source, day, defaults=service._defaults(connection)
+            )
+    vault_file, _ = sealed_file(world, DAY, "core-r1")
+    good = vault_file.read_bytes()
+    unlock(vault_file)
+    vault_file.write_bytes(good[: len(good) // 2])
+    run_once(world, db_engine)
+    after = snapshot(db_engine)
+    assert of_source(after, "fortigate") == of_source(before, "fortigate")
+    assert marker(db_engine, *other) == (sealed_file(world, DAY, "fortigate")[1], None, True)
+    assert marker(db_engine, *stuck) == (0, service_module.RESETTING, False)
+    assert of_source(after, "core-r1")["messages"] == of_source(before, "core-r1")["messages"]
+    restarted = world.service(db_engine)
+    restarted._load_offsets()
+    assert restarted.resetting == {stuck}
+
+
+def test_a_file_of_a_loading_request_is_not_reset_on_its_own(
+    world: World, db_engine: Engine, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#124 stage 2 review N-b: a file marked resetting whose request is still ``loading`` (the
+    service stopped after the reset's first transaction) is reset again by that request's
+    claim, not on its own: while the window job holds the partition lock (the claim waits for
+    it, round after round), no reset of its own is begun. Then the request resets it, and it
+    loads exactly once."""
+    spread_day(world, db_engine)
+    before = snapshot(db_engine)
+    key = ("core-r1", DAY)
+    reload_id = queue(db_engine, DAY)
+    with monkeypatch.context() as patch:
+        crash_points(patch, key, 0)
+        with pytest.raises(SimulatedCrashError):
+            world.service(db_engine).run(once=True)
+    assert marker(db_engine, *key) == (0, service_module.RESETTING, False)
+    monkeypatch.setattr(service_module, "PARTITION_LOCK_TIMEOUT", "200ms")
+    scans: list[str] = []
+    real_scan = IngestService._scan
+
+    def scan(self: IngestService, what: str, *args: Any) -> Any:
+        scans.append(what)
+        return real_scan(self, what, *args)
+
+    monkeypatch.setattr(IngestService, "_scan", scan)
+    # A claim a second: rounds in between with no claim under way (a reset of its own could
+    # begin in them).
+    service = world.service(db_engine, archive_seconds=1.0)
+    rounds = 0
+    archive = service._archive
+
+    def counted() -> bool:
+        nonlocal rounds
+        rounds += 1
+        return archive()
+
+    monkeypatch.setattr(service, "_archive", counted)
+    results: list[int] = []
+    runner = threading.Thread(target=lambda: results.append(service.run()))
+    try:
+        with db_engine.connect() as job, job.begin():
+            job.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": PARTITION_LOCK_KEY})
+            runner.start()
+            assert wait_for(lambda: rounds >= HELD_ROUNDS, SETTLE)
+            assert scans == []
+            assert service._orphan is None
+            assert key in service.resetting
+        assert wait_for(lambda: reload_row(db_engine, reload_id)["status"] == "ready", SETTLE)
+    finally:
+        service.stop.set()
+        if runner.is_alive():
+            runner.join(WAIT)
+    assert results == [0]
+    assert scans == [f"archive reload {reload_id}"]
+    assert snapshot(db_engine) == before
+    counts_agree(db_engine)
+
+
+def test_one_file_is_reset_at_a_time(
+    world: World, db_engine: Engine, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#124 stage 2 review (tests): a request of several files resets them one at a time: while
+    the first one's steps are held, no other file's first transaction is made (its offsets row
+    as it was); then each file in turn, and the request loads them exactly once."""
+    load_day(world, db_engine)
+    before, stored = snapshot(db_engine), day_offsets(db_engine, DAY)
+    drop(db_engine, DAY + timedelta(days=2))
+    for day in (DAY - timedelta(days=2), DAY - timedelta(days=1)):
+        skipped(world, day)
+    monkeypatch.setattr(service_module, "RESET_STEP_LINES", 1)
+    monkeypatch.setattr(service_module, "RESET_ROUND_SECONDS", 0.0)
+    begun: list[tuple[str, date]] = []
+    real_begin = IngestService._begin_reset
+
+    def begin(connection: Any, source: str, day: date, **kwargs: Any) -> list[ResetStep]:
+        begun.append((source, day))
+        return real_begin(connection, source, day, **kwargs)
+
+    gate = Gate()
+    real_round = IngestService._reset_round
+
+    def held(self: IngestService) -> None:
+        if self._reset is not None and not gate.open.is_set():
+            gate.entered.set()
+            return
+        real_round(self)
+
+    monkeypatch.setattr(IngestService, "_begin_reset", staticmethod(begin))
+    monkeypatch.setattr(IngestService, "_reset_round", held)
+    reload_id = queue(db_engine, DAY)
+    service = world.service(db_engine, archive_seconds=0.0)
+    rounds = 0
+    archive = service._archive
+
+    def counted() -> bool:
+        nonlocal rounds
+        rounds += 1
+        return archive()
+
+    monkeypatch.setattr(service, "_archive", counted)
+    results: list[int] = []
+    runner = threading.Thread(target=lambda: results.append(service.run()))
+    runner.start()
+    try:
+        assert gate.entered.wait(SETTLE)
+        held_at = rounds
+        assert wait_for(lambda: rounds >= held_at + HELD_ROUNDS, SETTLE)
+        assert len(begun) == 1
+        first = begun[0]
+        assert [row for row in day_offsets(db_engine, DAY) if row[0] != first[0]] == [
+            row for row in stored if row[0] != first[0]
+        ]
+        gate.open.set()
+        assert wait_for(lambda: reload_row(db_engine, reload_id)["status"] == "ready", SETTLE)
+    finally:
+        gate.open.set()
+        service.stop.set()
+        runner.join(WAIT)
+    assert results == [0]
+    assert sorted(begun) == sorted(set(begun))
+    assert len(begun) == len(stored)
+    assert snapshot(db_engine) == before
+
+
+def test_a_step_waiting_for_a_lock_is_made_again_in_a_later_round(
+    world: World, db_engine: Engine, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#124 stage 2 review S2: a step waits at most ``RESET_LOCK_TIMEOUT`` for a lock (the
+    compression policy recompressing a chunk, a recount holding the file's offsets row: held
+    here), then gives up and is made again in a later round: live data is loaded meanwhile
+    within :data:`LIVE_BOUND`; once the lock is free the reset ends and the file loads exactly
+    once."""
+    spread_day(world, db_engine)
+    before = snapshot(db_engine)
+    key = ("core-r1", DAY)
+    monkeypatch.setattr(service_module, "RESET_STEP_LINES", 1)
+    monkeypatch.setattr(service_module, "RESET_ROUND_SECONDS", 0.0)
+    gate = Gate()
+    real_round = IngestService._reset_round
+
+    def held(self: IngestService) -> None:
+        if self._reset is not None and self._reset.steps and not gate.open.is_set():
+            gate.entered.set()
+            return
+        real_round(self)
+
+    monkeypatch.setattr(IngestService, "_reset_round", held)
+    reload_id = queue(db_engine, DAY)
+    service = world.service(db_engine, archive_seconds=0.0)
+    results: list[int] = []
+    runner = threading.Thread(target=lambda: results.append(service.run()))
+    runner.start()
+    holder = db_engine.connect()
+    try:
+        assert gate.entered.wait(SETTLE)
+        with holder.begin():
+            holder.execute(
+                text(
+                    "SELECT 1 FROM ingest_offsets WHERE source = :source AND day = :day FOR UPDATE"
+                ),
+                {"source": key[0], "day": key[1]},
+            )
+            gate.open.set()
+            spool = world.append("fortigate", TODAY, (fortigate_message(i) for i in range(12)))
+            size = spool.stat().st_size
+
+            def live_loaded() -> bool:
+                return offsets(db_engine).get(("fortigate", TODAY), (0, 0, False))[0] == size
+
+            assert wait_for(live_loaded, LIVE_BOUND), (
+                f"a live line waited more than {LIVE_BOUND} s for a step waiting for a lock"
+            )
+            assert marker(db_engine, *key) == (0, service_module.RESETTING, False)
+            assert service._reset is not None
+        assert wait_for(lambda: reload_row(db_engine, reload_id)["status"] == "ready", SETTLE)
+    finally:
+        holder.close()
+        gate.open.set()
+        service.stop.set()
+        runner.join(WAIT)
+    assert results == [0]
+    after = snapshot(db_engine)
+    assert of_source(after, "core-r1") == of_source(before, "core-r1")
+    assert marker(db_engine, *key)[1:] == (None, True)
+    counts_agree(db_engine)
+
+
+def test_a_file_loaded_during_the_claim_check_is_not_hashed_again(
+    world: World, db_engine: Engine, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#159 review N1: a file that finishes loading while the claim checks the request's files
+    (a stream catching up: here a day sealed after its last line was loaded) is left alone as a
+    file loaded already, not a reason to claim (and hash every file) again: each file is hashed
+    once, and the request loads only the file that was not loaded."""
+    later = DAY + timedelta(days=1)
+    world.append("core-r1", DAY, (dhcp_message(i) for i in range(10)))
+    world.seal(DAY)
+    world.append("fortigate", later, (fortigate_message(i) for i in range(10)))
+    world.seal(later)
+    world.set_today(DAY + timedelta(days=2))
+    run_once(world, db_engine)
+    world.set_today(TODAY)
+    # The window job's last cutoff, the day before: what the request keeps from the day before
+    # it on was never dropped (the file of ``later``), the core-r1 file's rows before it may be.
+    drop(db_engine, DAY - timedelta(days=1))
+    before = snapshot(db_engine)
+    with db_engine.begin() as connection:
+        connection.execute(
+            text(
+                "UPDATE ingest_offsets SET finished_at = NULL "
+                "WHERE source = 'fortigate' AND day = :day"
+            ),
+            {"day": later},
+        )
+    for day in (DAY - timedelta(days=2), DAY - timedelta(days=1)):
+        skipped(world, day)
+    hashed: list[tuple[str, date]] = []
+    gate = Gate()
+    real = IngestService._sealed_file_intact
+
+    def intact(self: IngestService, source: str, day: date, *, digest: bool = True) -> bool:
+        if digest:
+            hashed.append((source, day))
+            if len(hashed) == 1:
+                gate.hold()
+        return real(self, source, day, digest=digest)
+
+    monkeypatch.setattr(IngestService, "_sealed_file_intact", intact)
+    reload_id = queue(db_engine, DAY - timedelta(days=2), later)
+    service = world.service(db_engine, archive_seconds=0.0)
+    results: list[int] = []
+    runner = threading.Thread(target=lambda: results.append(service.run()))
+    runner.start()
+    try:
+        assert gate.entered.wait(WAIT)
+        assert wait_for(lambda: offsets(db_engine)[("fortigate", later)][2])  # finished
+        gate.open.set()
+        assert wait_for(
+            lambda: reload_row(db_engine, reload_id)["status"] in ("ready", "failed"), SETTLE
+        )
+    finally:
+        gate.open.set()
+        service.stop.set()
+        runner.join(WAIT)
+    assert results == [0]
+    assert reload_row(db_engine, reload_id)["status"] == "ready"
+    assert sorted(hashed) == [("core-r1", DAY), ("fortigate", later)]
+    assert snapshot(db_engine) == before
+    counts_agree(db_engine)
+
+
+def test_a_request_changed_during_its_claim_check_stops_reading(
+    world: World, db_engine: Engine, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#159 review N2: a request that ends while the claim checks its files (failed by hand
+    here; a file that never ends, 10 ms a read) is no longer waited for: its status is read
+    every ``ARCHIVE_PROGRESS_SECONDS``, the check gives up at its next slice and closes the file
+    (``CheckStoppedError``), and the next request is claimed."""
+    load_day(world, db_engine)
+    drop(db_engine, DAY + timedelta(days=2))
+    first = queue(db_engine, DAY)
+    second = queue(db_engine, DAY, by="ornek.analist")
+    endless = EndlessFile()
+    monkeypatch.setattr(service_module, "open_shared", lambda path: endless)
+    service = world.service(db_engine, archive_seconds=0.0)
+    results: list[int] = []
+    runner = threading.Thread(target=lambda: results.append(service.run()))
+    runner.start()
+    try:
+        assert wait_for(lambda: endless.reads >= 3)
+        claim = service._claim
+        assert claim is not None
+        assert claim.id == first
+        fail_by_hand(db_engine, first)
+        assert endless.closed.wait(WAIT)  # the check gave up within a slice
+        assert claim.check is not None
+        with pytest.raises(CheckStoppedError):
+            claim.check.result(timeout=WAIT)
+        assert wait_for(lambda: service._claim is not None and service._claim.id == second)
+    finally:
+        service.stop.set()
+        runner.join(WAIT)
+    assert results == [0]
+    assert reload_row(db_engine, second)["status"] == "queued"
