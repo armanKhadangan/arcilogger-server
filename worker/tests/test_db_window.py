@@ -4,7 +4,7 @@ gone does not), the oldest day of an active archive reload —, the expiry of re
 ``db.reload_keep_days``, the ``R20-db-window`` alert of a failed run and of a reload without
 progress (its texts, and an e-mail that names it), the audit entries of a step that dropped
 something and of the upgrade's change of ``db.retention_days``, and the job's place in the worker
-(daily after 04:00).
+(daily after 01:00, it and its first retry before the Backup task's dump; W5-G-27).
 
 The database tests run on the template's storage: plain PostgreSQL (rows of other months in the
 default partition, daily partitions made by the job) or TimescaleDB in the Linux CI job (chunks
@@ -18,6 +18,7 @@ import html
 import importlib.util
 import json
 import threading
+import xml.etree.ElementTree as ET
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from datetime import UTC, date, datetime, time, timedelta
@@ -63,7 +64,7 @@ from arcilogger_worker.db_window import (
     job_db_window,
     oldest_unsealed_day,
 )
-from arcilogger_worker.service import JobContext, Worker, default_jobs
+from arcilogger_worker.service import JobContext, Worker, default_jobs, retry_delay
 from arcilogger_worker.testing import tr
 
 #: A site day of the past: the template's monthly partition is the real current month, so every
@@ -73,6 +74,9 @@ NOW = tr(TODAY, 5)
 WINDOW = int(DEFAULT_SETTINGS["db.retention_days"])
 KEEP = int(DEFAULT_SETTINGS["db.reload_keep_days"])
 URL = "https://arcilogger.example.com"
+#: The scheduled ``pg_dump`` (ADR-0009) that ``db.window`` runs before (#188, W5-G-27).
+BACKUP_TASK = Path(__file__).resolve().parents[2] / "deploy" / "windows" / "tasks" / "Backup.xml"
+TASK_NS = {"t": "http://schemas.microsoft.com/windows/2004/02/mit/task"}
 
 
 class Clock:
@@ -219,12 +223,27 @@ def empty_engine(pg_server: TestServer) -> Iterator[Engine]:
 # -- the job's place --------------------------------------------------------------------------
 
 
-def test_the_job_runs_daily_after_four_and_is_never_gated() -> None:
+def test_the_job_runs_daily_after_one_and_is_never_gated() -> None:
     (job,) = [job for job in default_jobs(60) if job.name == "db.window"]
     assert job.func is job_db_window
-    assert (job.daily_after, job.every, job.module) == (time(4, 0), None, None)
+    assert (job.daily_after, job.every, job.module) == (time(1, 0), None, None)
     names = [job.name for job in default_jobs(60)]
     assert names.index("db.window") > names.index("partitions.ensure")
+
+
+def test_the_window_runs_and_retries_once_before_the_backup_starts() -> None:
+    # A step that meets a running dump backs off and counts toward R20-db-window (W5-G-24 (b)):
+    # the run and its first retry are due before the task's start, read from the task itself
+    # (its local time is the site's, Türkiye time), so a change of either time fails here.
+    root = ET.parse(BACKUP_TASK).getroot()  # noqa: S314 - our own repository file
+    start = root.findtext("t:Triggers/t:CalendarTrigger/t:StartBoundary", namespaces=TASK_NS)
+    assert start is not None
+    backup = datetime.combine(TODAY, datetime.fromisoformat(start).time())
+    (job,) = [job for job in default_jobs(60) if job.name == "db.window"]
+    assert job.daily_after is not None
+    first_retry = retry_delay(job, 1)
+    retried = datetime.combine(TODAY, job.daily_after) + first_retry
+    assert retried < backup, (job.daily_after, first_retry, backup.time())
 
 
 # -- the cutoff -------------------------------------------------------------------------------

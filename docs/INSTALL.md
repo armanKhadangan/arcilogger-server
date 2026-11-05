@@ -1369,9 +1369,10 @@ path in an administrator PowerShell and prints a token (section 9); the Core Net
 Core Networking's rules; Microsoft Defender's state and the two exclusions of section 2 step 4
 after the installation (`Get-MpPreference`), and the owner's decision on `spool` and `vault`
 (exclusion or scheduled scan only); the first night's `D:\ARCILOGGER\state\backup\last.json`, the
-duration and size of the nightly database dump (a dump that starts at 01:40 and runs past 04:00
-meets the `db.window` run, which then backs off and tries again at 04:15 and 04:45: a dump of
-more than about 3 hours opens `R20-db-window` every such night, contract W5-G-24) and the first
+duration and size of the nightly database dump (the dump starts at 01:40, after the `db.window`
+run at 01:00 and its first retry at 01:15; only the job's rare second retry at 01:45 or a dump
+started late can meet it, and that run then backs off and counts toward `R20-db-window`, contract
+W5-G-24 and W5-G-27) and the first
 restore drill ([BACKUP.md](BACKUP.md) sections 6 and 8); on the upgrade to the version with
 Arama, how long the schema migration with `ix_fg_web_rhost_time` takes on the real database
 (section 13) and, after the first days, `arcilogger-db search-counts verify`: the summary table

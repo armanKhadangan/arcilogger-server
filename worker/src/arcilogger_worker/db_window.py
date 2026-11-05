@@ -1,8 +1,8 @@
 """``db.window``: the database keeps the last ``db.retention_days`` days of log rows (Wave 5
 contract G3).
 
-A daily job after 04:00 (site time), and at start-up when that day's run is missing. Each step is
-one transaction:
+A daily job after 01:00 (site time, before the Backup task's dump: W5-G-27), and at start-up
+when that day's run is missing. Each step is one transaction:
 
 1. Archive reloads whose ``expires_at`` has passed (``ready_at`` + ``db.reload_keep_days``)
    become ``expired``, so their days can go again (G4).

@@ -232,7 +232,7 @@ yıl yönetici girer. Ayrıntılar: [UYUM-DURUMU.md](UYUM-DURUMU.md) bölüm 2.7
 | `alerts.filter_quiet_hours` | 24 | 6–168 | beklenen günlerde kayıtsız geçebilecek en uzun süre (saat) |
 
 **Veritabanı** grubu, ayrıştırılmış kayıtların veritabanında ne kadar kaldığını söyler. Mühürlü
-kasadaki ham kayıtlar bu ayarlardan etkilenmez. Worker işi `db.window` her gece 04:00'ten sonra
+kasadaki ham kayıtlar bu ayarlardan etkilenmez. Worker işi `db.window` her gece 01:00'den sonra
 pencereden eski günleri siler; henüz mühürlenmemiş bir gün ve etkin bir arşiv yüklemesinin günleri
 silinmez. Daha eski bir gün gerektiğinde 5651 sorgusu ve Arama onu "arşivden yeniden yükle" ile
 ister. Her iki ayar da kişisel verinin saklama süresidir: değiştirmek parolanın yeniden girilmesini

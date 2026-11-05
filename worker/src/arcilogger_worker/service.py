@@ -40,10 +40,11 @@ Jobs (``DEFAULT_JOBS``):
                             changed are rebuilt (``usage.auto_rebuild_days``)
 ``usage.requests``          every 30 seconds: rebuild requests of the web interface
 ``usage.retention``         daily after 03:30: rollups older than ``usage.retention_days``
-``db.window``               daily after 04:00: log rows older than the database window
-                            (``db.retention_days``, unsealed days and archive reloads kept)
-                            dropped as whole partitions or chunks, expired reloads marked;
-                            a failure raises ``R20-db-window`` (:mod:`.db_window`)
+``db.window``               daily after 01:00, so it and its first retry (01:15) are due
+                            before the Backup task's dump (01:40): log rows older than the
+                            database window (``db.retention_days``, unsealed days and archive
+                            reloads kept) dropped as whole partitions or chunks, expired
+                            reloads marked; a failure raises ``R20-db-window`` (:mod:`.db_window`)
 ``reports.run_due``         every minute: due report schedules queued (one run per
                             schedule after downtime), queued runs rendered (HTML, PDF,
                             Excel) and e-mailed per recipient (:mod:`.reports.runner`)
@@ -424,7 +425,8 @@ def default_jobs(interval_seconds: int) -> tuple[Job, ...]:
         ),
         # Data minimisation: personal data must still be deleted on time, licensed or not.
         Job("usage.retention", job_usage_retention, daily_after=time(3, 30)),
-        Job("db.window", job_db_window, daily_after=time(4, 0)),
+        # Before the Backup task's pg_dump (01:40, W5-G-27): a dump does not hold up its drops.
+        Job("db.window", job_db_window, daily_after=time(1, 0)),
         # Reports after the alerts: a report lists the alerts imported just before it.
         Job("reports.run_due", job_reports_run_due, every=REPORTS_EVERY, module=REPORTS_MODULE),
         Job("reports.purge", job_reports_purge, daily_after=time(3, 20)),

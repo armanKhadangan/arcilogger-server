@@ -1518,9 +1518,10 @@ delildir; silinmeleri yalnızca saklama/imha işiyle ve imha tutanağıyla olur.
   olması (`Get-MpPreference`); `spool` ve `vault` için sahibin kararı (istisna mı, zamanlanmış
   tarama mı).
 - Gece veritabanı yedeği: ilk gecenin `D:\ARCILOGGER\state\backup\last.json` sonucu, yedeğin
-  süresi ve boyutu (01:40'ta başlayıp 04:00'ü geçen bir yedek `db.window` çalışmasına denk gelir;
-  iş geri çekilir, 04:15 ve 04:45'te yeniden dener: yaklaşık 3 saatten uzun süren bir yedek böyle
-  her gece `R20-db-window` uyarısını açar, sözleşme W5-G-24), ilk geri yükleme tatbikatı
+  süresi ve boyutu (yedek 01:40'ta, `db.window` işinin 01:00'deki çalışmasından ve 01:15'teki ilk
+  yeniden denemesinden sonra başlar; yalnızca işin seyrek ikinci yeniden denemesi (01:45) ya da geç
+  başlayan bir yedek ona denk gelebilir, o çalışma geri çekilir ve `R20-db-window` uyarısına
+  sayılır, sözleşme W5-G-24 ve W5-G-27), ilk geri yükleme tatbikatı
   ([YEDEKLEME.md](YEDEKLEME.md) bölüm 6 ve 8).
 - Arama'lı sürüme yükseltmede `ix_fg_web_rhost_time` indeksiyle şema yükseltmesinin gerçek
   veritabanında ne kadar sürdüğü (bölüm 13) ve ilk günlerden sonra

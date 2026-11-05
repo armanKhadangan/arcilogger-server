@@ -1916,12 +1916,14 @@ with the codes `vault_only_before` (`from` before the oldest `messages.time`, ca
   jobs wait for it). Details `{files: [{source, day, lines, keys}], lines, waiting}` plus `more:
   true, left` when the time ended the run; `skipped` when nothing was counted and nothing is left.
 - **Command** `arcilogger-db search-counts`: `status` (keys, lines, hours held, the files still
-  marked with their lines not counted), `rebuild --source S --day YYYY-MM-DD` (locks the file's
-  `ingest_offsets` row first, so a file still being loaded can be recounted; clears
-  `counts_from_line`), `verify [--hours 2]` (0–744; one `REPEATABLE READ` read-only snapshot;
-  prints the mixed-case name counts of D6 every time; on a difference lists at most 20 keys and
-  the `rebuild` commands that repair them). Exit codes as the other commands: 0, 1 a difference,
-  2 a usage error (a bad day), 3 the database cannot be reached.
+  marked with their lines not counted; a file being reset is listed as "sıfırlanıyor
+  [resetting]"), `rebuild --source S --day YYYY-MM-DD` (locks the file's `ingest_offsets` row
+  first, so a file still being loaded can be recounted; clears `counts_from_line`; refuses a file
+  being reset, `counts_from_line = 0` and unfinished, W5-G-25: exit 1, a TR/EN text, nothing
+  written), `verify [--hours 2]` (0–744; one `REPEATABLE READ` read-only snapshot; prints the
+  mixed-case name counts of D6 every time; on a difference lists at most 20 keys and the
+  `rebuild` commands that repair them). Exit codes as the other commands: 0, 1 a difference or a
+  file being reset, 2 a usage error (a bad day), 3 the database cannot be reached.
 - `search.stats.run_stats(session, plan, from, to, labels, budget_seconds, sample_rows)`:
   **rollup** when `Plan.rollup_eligible` (only `source`, `type`, `action`, `vlan`, `department`
   and negations, no free text, VLAN subnets private IPv4 ≤ /24, range > 12 h) and

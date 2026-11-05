@@ -27,7 +27,7 @@
   zaman okunur. Ölçümler aşağıda, "Sealed files" bölümündedir.
 - Veritabanı arşivden **daha kısa** süre tutar: log kayıtlarının **son 30 gününü** (ayar
   `db.retention_days`, varsayılan 30, en az 7; revizyon `0021_db_window`'dan önce 400). Worker
-  işi `db.window` her gün 04:00'ten sonra daha eski günleri bölüm bölüm (TimescaleDB'de parça
+  işi `db.window` her gün 01:00'den sonra daha eski günleri bölüm bölüm (TimescaleDB'de parça
   parça) düşürür; henüz mühürlenmemiş bir gün (satırlarının uzandığı önceki iki günle birlikte)
   ve etkin bir arşiv yüklemesinin günleri hiçbir zaman düşürülmez. Bir şey düşüren her adım
   denetim kaydına bir `db.window` girdisi yazar: silmenin kaydı budur (veritabanındaki satırlar
@@ -112,7 +112,7 @@ partitioned by UTC day, as TimescaleDB's chunks (by month, at local midnight, be
 `0021_db_window`; those monthly partitions are never split). Every parsed row carries a raw
 reference to its line. The database keeps less than the vault: the **last 30 days** of log rows (`db.retention_days`, default 30, at least 7; 400 before
 revision `0021_db_window`), against at least 730 days (default 760) in the vault. The worker job
-`db.window` drops older days daily after 04:00, whole partitions (TimescaleDB: chunks) at a time;
+`db.window` drops older days daily after 01:00, whole partitions (TimescaleDB: chunks) at a time;
 a day not sealed yet (with the two days before it, which its rows reach into) and the days of an
 active archive reload are never dropped. An older day
 comes back from the sealed vault on request ("arşivden yeniden yükle", `archive_reloads`; only
@@ -459,7 +459,7 @@ PostgreSQL 16.
     `RAW_DAY_MARGIN` = **2 days** either side of it. The window, the cutoff and the days of a
     reload are device-time days; the margin is added wherever a raw day must stay whole or be
     loaded again.
-  - **The job** `db.window` (`arcilogger_worker.db_window`; daily after 04:00, and at the worker's
+  - **The job** `db.window` (`arcilogger_worker.db_window`; daily after 01:00, and at the worker's
     start-up when that day's run is missing; 5651 Temel, no licence gate) works in steps, each
     one transaction under the partition maintenance lock: archive reloads whose `expires_at` has
     passed become `expired`; the cutoff is read; then `partitions.maintain_window` creates the
@@ -575,7 +575,7 @@ PostgreSQL 16.
       (#126, W5-G-19). Both stay as they are (manager
       answer 3 on #121): the 30-day window is the owner's decision, and the look-back is needed
       for correct answers. Until the day's run of
-      the job (after 04:00) the database holds one day more; a cutoff held by an unsealed day or
+      the job (after 01:00) the database holds one day more; a cutoff held by an unsealed day or
       a reload keeps more, never less.
     - `POST /archive-reloads` (`{reason, first_day, last_day, lookup_id?}`, 202) queues a request;
       `GET /archive-reloads/{id}` and `GET /archive-reloads` show it (administrators see every
