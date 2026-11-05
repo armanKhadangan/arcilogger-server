@@ -8,7 +8,8 @@
       "subject": "Person / device",
       "sites": "Top sites",
       "apps": "Applications",
-      "lastSeen": "Last seen"
+      "lastSeen": "Last seen",
+      "mbps": "{{what}} (Mbit/s)"
     },
     "window": {
       "label": "Time window",
@@ -16,7 +17,7 @@
     },
     "lines": {
       "title": "Internet line",
-      "source": "Source: {{source}}",
+      "source": "Source: {{source}} · speed in Mbit/s",
       "share": "{{share}} of capacity",
       "since": "since {{time}}",
       "noSamples": "No samples yet.",
@@ -41,7 +42,7 @@
       "more": "The {{shown}} rows that download the most are shown.",
       "empty": "No traffic in this window.",
       "perMinute": "The last 60 minutes (whole company)",
-      "perMinuteHint": "Average speed per minute",
+      "perMinuteHint": "Average speed per minute, Mbit/s",
       "dataUntil": "Data as of {{time}}.",
       "noData": "No traffic logs yet.",
       "interim": "Long connections appear as FortiGate's interim logs arrive. MikroTik sends no byte counts; it does not appear here.",

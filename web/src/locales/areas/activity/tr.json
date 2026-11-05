@@ -8,7 +8,8 @@
       "subject": "Kişi / cihaz",
       "sites": "En çok kullanılan siteler",
       "apps": "Uygulamalar",
-      "lastSeen": "Son görülme"
+      "lastSeen": "Son görülme",
+      "mbps": "{{what}} (Mbit/s)"
     },
     "window": {
       "label": "Zaman aralığı",
@@ -16,7 +17,7 @@
     },
     "lines": {
       "title": "İnternet hattı",
-      "source": "Kaynak: {{source}}",
+      "source": "Kaynak: {{source}} · hız Mbit/s",
       "share": "kapasitenin {{share}}",
       "since": "{{time}} itibarıyla",
       "noSamples": "Henüz ölçüm yok.",
@@ -41,7 +42,7 @@
       "more": "En çok indiren {{shown}} satır gösteriliyor.",
       "empty": "Bu aralıkta trafik yok.",
       "perMinute": "Son 60 dakika (şirket geneli)",
-      "perMinuteHint": "Dakika başına ortalama hız",
+      "perMinuteHint": "Dakika başına ortalama hız, Mbit/s",
       "dataUntil": "Veriler {{time}} itibarıyla.",
       "noData": "Henüz trafik kaydı yok.",
       "interim": "Uzun bağlantılar FortiGate ara kayıtları geldikçe görünür. MikroTik bayt sayısı göndermez; burada görünmez.",

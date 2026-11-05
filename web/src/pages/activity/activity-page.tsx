@@ -110,7 +110,8 @@ function LineCard({ line }: { line: WanLine }) {
   const rows = useMemo(() => lineSeries(line), [line]);
   const down = capacityShare(line.download_bps, line.capacity_mbps?.down);
   const up = capacityShare(line.upload_bps, line.capacity_mbps?.up);
-  const mbps = (value: number) => `${formatNumber(value, 1, lang)} Mbit/s`;
+  // The axis keeps to a number; the unit is in the description and the table's headers.
+  const mbps = (value: number) => formatNumber(value, value < 10 ? 1 : 0, lang);
   const labels = { download: t('activity.download'), upload: t('activity.upload') };
   return (
     <ChartFrame
@@ -135,7 +136,11 @@ function LineCard({ line }: { line: WanLine }) {
         },
       ]}
       table={{
-        columns: [t('activity.columns.time'), labels.download, labels.upload],
+        columns: [
+          t('activity.columns.time'),
+          t('activity.columns.mbps', { what: labels.download }),
+          t('activity.columns.mbps', { what: labels.upload }),
+        ],
         rows: rows.map((row) => [row.time, mbps(row.download), mbps(row.upload)]),
       }}
     >
@@ -309,7 +314,7 @@ function MinuteChart({ data }: { data: Parameters<typeof minuteSeries>[0] }) {
   const { t } = useTranslation();
   const lang = currentLang();
   const rows = useMemo(() => minuteSeries(data), [data]);
-  const mbps = (value: number) => `${formatNumber(value, 1, lang)} Mbit/s`;
+  const mbps = (value: number) => formatNumber(value, value < 10 ? 1 : 0, lang);
   const labels = { download: t('activity.download'), upload: t('activity.upload') };
   return (
     <ChartFrame
@@ -320,7 +325,11 @@ function MinuteChart({ data }: { data: Parameters<typeof minuteSeries>[0] }) {
         { label: labels.upload, color: seriesColor(1) },
       ]}
       table={{
-        columns: [t('activity.columns.time'), labels.download, labels.upload],
+        columns: [
+          t('activity.columns.time'),
+          t('activity.columns.mbps', { what: labels.download }),
+          t('activity.columns.mbps', { what: labels.upload }),
+        ],
         rows: rows.map((row) => [row.time, mbps(row.download), mbps(row.upload)]),
       }}
     >
