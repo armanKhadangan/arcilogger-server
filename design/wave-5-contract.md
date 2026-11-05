@@ -1519,12 +1519,14 @@ All Wave 5 questions are answered (2026-11-02).
   a boolean expression at 0.5. The chains' ACKs (5,699 in the #179 guards' world) were
   estimated at 26 (86–91 at five times the rows), also after `ANALYZE fg_dhcp` and every
   partition; on the guards' layout (16 daily partitions, the older days in `fg_dhcp_default`,
-  which a site's late lines, reloads or first hours after an install also reach) a nested loop
+  which a site reaches only while its worker's partition step is down for more than about a
+  week, or until that step's first run after restoring an older backup; late or skewed lines,
+  reloads and an install or upgrade put no window day there) a nested loop
   and a hash join then cost the same within the planner's 1 % fuzz, and it took the nested loop,
   which filtered every ACK against each of the 100 windows (564,201 rows removed). Wrapped,
   they are estimated at about 2,870 (9,100 at five times) and the branch hashes on the MAC on
-  every plain-PostgreSQL layout measured. Medians on PostgreSQL 16.15 (Linux), before → after, MAC branch alone /
-  whole statement: guards' layout 73.5 → 23.1 / 80.2 → 26.9 ms (1 M lines a day, as loaded),
+  every plain-PostgreSQL layout measured. Medians on PostgreSQL 16.15 (Linux), before → after,
+  MAC branch alone / whole statement: guards' layout 73.5 → 23.1 / 80.2 → 26.9 ms (1 M lines a day, as loaded),
   72.2 → 20.7 / 72.1 → 25.7 ms (5 M, after `ANALYZE`); daily partitions (hash join before and
   after) 28.6 → 33.2, 23.1 → 23.4, 25.3 → 25.2, 25.4 → 27.9 ms and monthly ones 19.6 → 21.3,
   23.9 → 17.4, 19.9 → 21.4, 21.7 → 20.7 ms (1 M and 5 M, as loaded and after `ANALYZE`: within
