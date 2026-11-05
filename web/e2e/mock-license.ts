@@ -38,6 +38,8 @@ export interface LicenseOptions {
 /** Route prefixes of the licence modules (contract 1.3) and their captured 403 answers. */
 const MODULE_ROUTES: readonly [RegExp, string, LicenseErrorName][] = [
   [/^\/usage(\/|$)/, 'usage_analytics', 'module_locked_usage'],
+  // Canlı Durum's "Şu an" (W5 §6 M3); the line speed (`/activity/wan`) is base (QB1).
+  [/^\/activity\/devices$/, 'usage_analytics', 'module_locked_usage'],
   [/^\/reports(\/|$)/, 'usage_reports', 'module_locked_reports'],
   [/^\/imports(\/|$)/, 'bulk_import', 'module_locked_import'],
 ];

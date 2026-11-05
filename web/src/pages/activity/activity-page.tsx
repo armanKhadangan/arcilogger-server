@@ -12,6 +12,7 @@ import { Button } from '@/components/ui/button';
 import { KpiCard } from '@/components/ui/card';
 import { DataTable, type AnyColumnDef } from '@/components/ui/data-table';
 import { EmptyState } from '@/components/ui/empty-state';
+import { Skeleton } from '@/components/ui/skeleton';
 import type { ActivityRow, ActivityWindow, WanLine } from '@/lib/activity-types';
 import { useActivityDevices, useActivityWan, useLicense } from '@/lib/api-hooks';
 import { useAuth } from '@/lib/auth';
@@ -213,6 +214,9 @@ function NowSection({
 }) {
   const { t } = useTranslation();
   const license = useLicense();
+  // As `ModuleGate`: wait for the licence; a licence answer that failed opens the part (the API
+  // refuses a locked module anyway).
+  const known = license.data !== undefined || license.isError;
   const locked = license.data ? !moduleEnabled(license.data, 'usage_analytics') : false;
   return (
     <section aria-labelledby="activity-now" className="flex flex-col gap-3">
@@ -220,9 +224,13 @@ function NowSection({
         <h2 id="activity-now" className="text-base font-semibold text-foreground">
           {t('activity.now.title')}
         </h2>
-        {locked || privacyPending ? null : <WindowFilter value={window} onChange={onWindow} />}
+        {!known || locked || privacyPending ? null : (
+          <WindowFilter value={window} onChange={onWindow} />
+        )}
       </div>
-      {locked ? (
+      {!known ? (
+        <Skeleton className="h-64" />
+      ) : locked ? (
         <EmptyState
           icon={Lock}
           title={t('activity.now.locked')}

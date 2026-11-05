@@ -30,6 +30,7 @@ import { DevicesMock } from './mock-devices';
 import { LicenseMock, type LicenseOptions } from './mock-license';
 import { RecordsMock, type Answer, type RecordsOptions } from './mock-records';
 import { ReportsMock } from './mock-reports';
+import { ActivityMock, type ActivityOptions } from './mock-activity';
 import { UsageMock, type UsageOptions } from './mock-usage';
 import {
   ADMIN,
@@ -350,6 +351,8 @@ export interface MockOptions {
   revoke?: Partial<Record<Role, string[]>>;
   /** Usage analytics: pseudonyms for `usage.anonymous` viewers, no traffic, a failing rebuild. */
   usage?: UsageOptions;
+  /** Canlı Durum: no SNMP line, a line that does not answer (`mock-activity.ts`). */
+  activity?: ActivityOptions;
   /** The licence state at start (default: the trial, every module on). */
   license?: LicenseOptions;
   /**
@@ -426,6 +429,7 @@ export class MockApi {
   readonly reports: ReportsMock;
   /** Usage analytics (`/usage/*`): the captured day and a generated dataset. */
   readonly usage: UsageMock;
+  readonly activity: ActivityMock;
   /** The licence (`/license`), the module gates and the users limit. */
   readonly license: LicenseMock;
   /**
@@ -447,6 +451,7 @@ export class MockApi {
     this.alerts = new AlertsMock();
     this.reports = new ReportsMock();
     this.usage = new UsageMock(options.usage);
+    this.activity = new ActivityMock(options.activity);
     this.grant = options.grant ?? {};
     this.revoke = options.revoke ?? {};
     this.needsSetup = options.needsSetup ?? false;
@@ -770,6 +775,7 @@ export class MockApi {
           this.records.answer(call, this) ??
           this.devices.answer(call, this) ??
           this.usage.answer(call, this) ??
+          this.activity.answer(call, this) ??
           this.alerts.answer(call, this) ??
           this.reports.answer(call, this) ??
           this.error(404, 'not_found')
