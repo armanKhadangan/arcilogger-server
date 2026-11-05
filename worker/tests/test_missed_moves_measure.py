@@ -33,6 +33,12 @@ the MAC branch alone on one connection; the plans their executions used on the c
 more lookup (not timed; ``pg_prepared_statements``: custom and generic); and ``EXPLAIN (ANALYZE,
 BUFFERS)`` of the statement and of the MAC branch alone, run in that lookup's own transaction right
 after its statement ran, with the branch's estimate against what it read.
+
+**Twice a world** (:data:`STAGES`): as the module loads it (written, then one ``VACUUM (ANALYZE)``
+of the whole database, as the guards' ``_site`` does), and again after an explicit ``ANALYZE`` of
+``fg_dhcp`` and of every one of its partitions (``fg_dhcp_default`` included) or chunks, with the
+statistics ``fg_dhcp`` holds before each; a summary of both closes each scale. It answers whether
+the branch's misestimate is a world measured before its statistics were gathered (#185, Q1).
 """
 
 from __future__ import annotations
@@ -90,6 +96,14 @@ MONTHLY_DAYS = 400
 MARKS = ("WITH ORDINALITY", "JOIN fg_dhcp")
 #: What the API's lookup sets for its transaction (``search.sql.custom_plans_statement``).
 CUSTOM_PLANS = "SELECT set_config('plan_cache_mode', 'force_custom_plan', true)"
+#: Each world is measured at each stage, in this order (#185, Q1).
+LOADED, ANALYZED = "as loaded", "after ANALYZE"
+STAGES = {
+    LOADED: "as the module loads it: the world written, then one VACUUM (ANALYZE) of the whole "
+    "database (the guards' _site does the same)",
+    ANALYZED: "after ANALYZE fg_dhcp: the parent (its inherited statistics) and every partition, "
+    "fg_dhcp_default included (TimescaleDB: the hypertable and every chunk), on top of the above",
+}
 
 #: The other clients' ACKs of a busier site (MACs ``:64``-``:ff``, none of a chain's), spread
 #: evenly over the same 400 days.
@@ -431,12 +445,18 @@ def _reads_fg_dhcp(node: dict[str, Any]) -> bool:
     return any(str(n.get("Relation Name", "")).startswith("fg_dhcp") for n in _nodes(node))
 
 
-def _figures(plan: dict[str, Any]) -> list[str]:
-    """The MAC branch's estimate against what it read: the side of its outermost join that reads
-    ``fg_dhcp`` (an Append of the partitions, TimescaleDB's ChunkAppend, or one scan), and every
-    join with the rows its filter removed."""
+def _shape(plan: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any] | None]:
+    """The side of the MAC branch's outermost join that reads ``fg_dhcp`` (an Append of the
+    partitions, TimescaleDB's ChunkAppend, or one scan), and that join (none: one scan)."""
     join = next((node for node in _nodes(plan) if "Join Type" in node), None)
     reading = plan if join is None else next(c for c in join["Plans"] if _reads_fg_dhcp(c))
+    return reading, join
+
+
+def _figures(plan: dict[str, Any]) -> list[str]:
+    """The MAC branch's estimate against what it read: the side of its outermost join that reads
+    ``fg_dhcp``, and every join with the rows its filter removed."""
+    reading, _join = _shape(plan)
     scans = [node for node in _nodes(reading) if "Relation Name" in node]
     lines = [
         f"fg_dhcp side: {reading['Node Type']} estimated {reading['Plan Rows']} rows, actual "
@@ -451,6 +471,68 @@ def _figures(plan: dict[str, Any]) -> list[str]:
                 f"filter {node.get('Rows Removed by Join Filter', 0)}"
             )
     return lines
+
+
+def _summary(plan: dict[str, Any]) -> str:
+    """The figures of :func:`_figures` on one line: the ``fg_dhcp`` side and the outermost join."""
+    reading, join = _shape(plan)
+    found = (
+        f"fg_dhcp {reading['Node Type']} est {reading['Plan Rows']} / actual "
+        f"{reading['Actual Rows']} x {reading['Actual Loops']}"
+    )
+    if join is None:
+        return f"{found}; no join"
+    return (
+        f"{found}; {join['Node Type']}, join filter removed "
+        f"{join.get('Rows Removed by Join Filter', 0)}"
+    )
+
+
+def _children(connection: Connection) -> list[str]:
+    """``fg_dhcp``'s partitions (``fg_dhcp_default`` included) or TimescaleDB chunks, quoted."""
+    return [
+        str(name)
+        for name in connection.execute(
+            text(
+                "SELECT inhrelid::regclass::text FROM pg_inherits "
+                "WHERE inhparent = 'fg_dhcp'::regclass ORDER BY 1"
+            )
+        ).scalars()
+    ]
+
+
+def _analyze_fg_dhcp(site: Engine) -> float:
+    """``ANALYZE fg_dhcp``, then each of its partitions or chunks by name; the seconds it took."""
+    began = time.perf_counter()
+    with site.connect().execution_options(isolation_level="AUTOCOMMIT") as connection:
+        connection.execute(text("ANALYZE fg_dhcp"))
+        for child in _children(connection):
+            connection.execute(text(f"ANALYZE {child}"))
+    return time.perf_counter() - began
+
+
+def _statistics(site: Engine) -> str:
+    """What the planner has on ``fg_dhcp``: the parent's inherited column statistics and row
+    count, and how many partitions or chunks were ever analyzed (and when, the latest)."""
+    with site.connect() as connection:
+        inherited, reltuples = connection.execute(
+            text(
+                "SELECT (SELECT count(*) FROM pg_stats WHERE tablename = 'fg_dhcp' "
+                "AND inherited), (SELECT reltuples FROM pg_class WHERE oid = 'fg_dhcp'::regclass)"
+            )
+        ).one()
+        children, analyzed, latest = connection.execute(
+            text(
+                "SELECT count(*), count(coalesce(s.last_analyze, s.last_autoanalyze)), "
+                "max(greatest(s.last_analyze, s.last_autoanalyze)) "
+                "FROM pg_inherits AS i LEFT JOIN pg_stat_all_tables AS s ON s.relid = i.inhrelid "
+                "WHERE i.inhparent = 'fg_dhcp'::regclass"
+            )
+        ).one()
+    return (
+        f"statistics: fg_dhcp's inherited pg_stats on {inherited} columns, reltuples "
+        f"{reltuples:.0f}; {analyzed} of {children} partitions/chunks analyzed (latest {latest})"
+    )
 
 
 def _partitions(site: Engine) -> str:
@@ -491,6 +573,100 @@ def _show(capsys: pytest.CaptureFixture[str], lines: Sequence[str]) -> None:
         print("\n" + "\n".join(lines), flush=True)
 
 
+def _measured(
+    site: Engine,
+    capsys: pytest.CaptureFixture[str],
+    *,
+    name: str,
+    scale: str,
+    stage: str,
+) -> str:
+    """One world's measurement at one stage, printed; its summary line."""
+    g = guards()
+    factor = SCALES[scale]
+    outcome, sql, parameters = _captured(site)
+    assert len(outcome.matches) == 100
+    for match in outcome.matches:
+        chain = match.chain
+        assert chain is not None
+        assert chain.lease is not None
+        assert chain.lease.source_table == "mt_dhcp"
+        assert chain.confidence in ("high", "medium")
+    assert sql.count(" UNION ALL ") == 1
+    mac_branch = sql.split(" UNION ALL ")[0]
+    with site.begin() as connection:
+        connection.execute(text(CUSTOM_PLANS))
+        rows = connection.exec_driver_sql(sql, parameters).all()
+        branch_rows = connection.exec_driver_sql(mac_branch, parameters).all()
+        moves = connection.execute(
+            text("SELECT count(*) FROM leases WHERE moves IS NOT NULL")
+        ).scalar_one()
+    assert moves == 100
+    assert {n for n, *_ in rows} == set(range(1, 101))
+    assert {
+        (str(ip).startswith("172.20.60."), interface, held) for _n, ip, interface, _vd, held in rows
+    } == {(True, "vlan60", False)}
+    assert sorted(branch_rows) == sorted(rows)
+    with site.connect() as connection:
+        read = connection.execute(
+            text(
+                "SELECT count(*) FROM fg_dhcp WHERE mac IN (SELECT mac FROM leases "
+                "WHERE source_table = 'mt_dhcp') AND time > :low AND time < :high"
+            ),
+            {"low": g._first_read(site, g.MT_AT), "high": g.MT_AT},
+        ).scalar_one()
+
+    lookups, checks, sent = _timed_lookups(site)
+    branch = _timed_statement(site, mac_branch, parameters)
+    whole = _timed_statement(site, sql, parameters)
+    explained = _explained_lookup(site, mac_branch)
+    assert explained.plan_cache_mode == "force_custom_plan"
+    _show(
+        capsys,
+        [
+            f"===== #185 {stage}: {DESCRIPTIONS[name]}; {factor} x the guards' FortiGate "
+            f"DHCP rows ({scale} lines a day) =====",
+            f"stage: {STAGES[stage]}",
+            _server(site),
+            _partitions(site),
+            _statistics(site),
+            "world: the recorded-moves guard's (moves_site: 1,000 recorded times a "
+            "lease); the converted-row guard's event_site differs (fg_event lines, "
+            "240 more fg_dhcp rows, no recorded moves). The guards' headroom is their "
+            "own output, not these figures.",
+            f"ACKs of the 100 chains' MACs from the first of the lookup's days: {read}; "
+            f"rows returned: {len(rows)}",
+            "--- timings (each transaction: plan_cache_mode = force_custom_plan) ---",
+            lookups.line("whole lookup"),
+            checks.line("_missed_moves"),
+            sent.line("its statement, as sent"),
+            whole.line("statement alone (both)"),
+            branch.line("MAC branch alone"),
+            f"--- the plans used (pg_prepared_statements of the explained lookup's "
+            f"connection, backend {explained.backend}; the timed lookups' statement "
+            f"ran on backends {sorted(sent.backends)}) ---",
+            *explained.prepared,
+            "--- MAC branch figures (in a lookup's transaction) ---",
+            *_figures(explained.figures),
+            "--- statement (as sent; parameters bound) ---",
+            sql,
+            "--- EXPLAIN (ANALYZE, BUFFERS) of the statement, in a lookup's transaction "
+            "right after it ran ---",
+            *explained.plans,
+            "--- EXPLAIN (ANALYZE, BUFFERS) of the MAC branch alone, same transaction ---",
+            *explained.branch,
+            f"===== end of {name}, {scale}, {stage} =====",
+        ],
+    )
+    median = statistics.median
+    return (
+        f"{name:11s} {stage:13s} {_summary(explained.figures)}; MAC branch alone best "
+        f"{min(branch.seconds) * 1000:.1f} / median {median(branch.seconds) * 1000:.1f} ms; "
+        f"statement as sent median {median(sent.seconds) * 1000:.1f} ms; whole lookup median "
+        f"{median(lookups.seconds) * 1000:.1f} ms"
+    )
+
+
 @pytest.mark.perf
 @pytest.mark.parametrize("scale", sorted(SCALES))
 def test_the_missed_moves_mac_branch_is_measured(
@@ -500,86 +676,21 @@ def test_the_missed_moves_mac_branch_is_measured(
     scale: str,
 ) -> None:
     """#185 step 1: the plan and the times of the MAC branch on every layout of this server's
-    kind, printed; the lookup's answer is the guards' (100 ``mt_dhcp`` chains, none lowered),
-    the check decoded the recorded moves, and the branch read every chain's ACKs on the staff
-    Wi-Fi and nothing else."""
-    g = guards()
-    factor = SCALES[scale]
+    kind, as loaded and after ``ANALYZE fg_dhcp``, printed; the lookup's answer is the guards'
+    (100 ``mt_dhcp`` chains, none lowered), the check decoded the recorded moves, and the branch
+    read every chain's ACKs on the staff Wi-Fi and nothing else."""
+    summary: list[str] = []
     for layout in LAYOUTS:
-        with _world(pg_server, pg_template, layout, factor) as (site, timescale):
+        with _world(pg_server, pg_template, layout, SCALES[scale]) as (site, timescale):
             name = "timescaledb" if timescale else layout
-            outcome, sql, parameters = _captured(site)
-            assert len(outcome.matches) == 100
-            for match in outcome.matches:
-                chain = match.chain
-                assert chain is not None
-                assert chain.lease is not None
-                assert chain.lease.source_table == "mt_dhcp"
-                assert chain.confidence in ("high", "medium")
-            assert sql.count(" UNION ALL ") == 1
-            mac_branch = sql.split(" UNION ALL ")[0]
-            with site.begin() as connection:
-                connection.execute(text(CUSTOM_PLANS))
-                rows = connection.exec_driver_sql(sql, parameters).all()
-                branch_rows = connection.exec_driver_sql(mac_branch, parameters).all()
-                moves = connection.execute(
-                    text("SELECT count(*) FROM leases WHERE moves IS NOT NULL")
-                ).scalar_one()
-            assert moves == 100
-            assert {n for n, *_ in rows} == set(range(1, 101))
-            assert {
-                (str(ip).startswith("172.20.60."), interface, held)
-                for _n, ip, interface, _vd, held in rows
-            } == {(True, "vlan60", False)}
-            assert sorted(branch_rows) == sorted(rows)
-            with site.connect() as connection:
-                read = connection.execute(
-                    text(
-                        "SELECT count(*) FROM fg_dhcp WHERE mac IN (SELECT mac FROM leases "
-                        "WHERE source_table = 'mt_dhcp') AND time > :low AND time < :high"
-                    ),
-                    {"low": g._first_read(site, g.MT_AT), "high": g.MT_AT},
-                ).scalar_one()
-
-            lookups, checks, sent = _timed_lookups(site)
-            branch = _timed_statement(site, mac_branch, parameters)
-            whole = _timed_statement(site, sql, parameters)
-            explained = _explained_lookup(site, mac_branch)
-            assert explained.plan_cache_mode == "force_custom_plan"
-            _show(
-                capsys,
-                [
-                    f"===== #185 before: {DESCRIPTIONS[name]}; {factor} x the guards' FortiGate "
-                    f"DHCP rows ({scale} lines a day) =====",
-                    _server(site),
-                    _partitions(site),
-                    "world: the recorded-moves guard's (moves_site: 1,000 recorded times a "
-                    "lease); the converted-row guard's event_site differs (fg_event lines, "
-                    "240 more fg_dhcp rows, no recorded moves). The guards' headroom is their "
-                    "own output, not these figures.",
-                    f"ACKs of the 100 chains' MACs from the first of the lookup's days: {read}; "
-                    f"rows returned: {len(rows)}",
-                    "--- timings (each transaction: plan_cache_mode = force_custom_plan) ---",
-                    lookups.line("whole lookup"),
-                    checks.line("_missed_moves"),
-                    sent.line("its statement, as sent"),
-                    whole.line("statement alone (both)"),
-                    branch.line("MAC branch alone"),
-                    f"--- the plans used (pg_prepared_statements of the explained lookup's "
-                    f"connection, backend {explained.backend}; the timed lookups' statement "
-                    f"ran on backends {sorted(sent.backends)}) ---",
-                    *explained.prepared,
-                    "--- MAC branch figures (in a lookup's transaction) ---",
-                    *_figures(explained.figures),
-                    "--- statement (as sent; parameters bound) ---",
-                    sql,
-                    "--- EXPLAIN (ANALYZE, BUFFERS) of the statement, in a lookup's transaction "
-                    "right after it ran ---",
-                    *explained.plans,
-                    "--- EXPLAIN (ANALYZE, BUFFERS) of the MAC branch alone, same transaction ---",
-                    *explained.branch,
-                    f"===== end of {name}, {scale} =====",
-                ],
-            )
+            for stage in STAGES:
+                if stage == ANALYZED:
+                    seconds = _analyze_fg_dhcp(site)
+                    summary.append(f"{name:11s} ANALYZE fg_dhcp and its children: {seconds:.1f} s")
+                summary.append(_measured(site, capsys, name=name, scale=scale, stage=stage))
             if timescale:
                 break
+    _show(
+        capsys,
+        [f"===== #185 summary, {scale}: as loaded against after ANALYZE fg_dhcp =====", *summary],
+    )
