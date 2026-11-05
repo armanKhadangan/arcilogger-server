@@ -47,7 +47,9 @@ import gzip
 import json
 import os
 import threading
-from collections.abc import Callable
+import warnings
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from datetime import UTC, date, datetime, time, timedelta
 from itertools import pairwise
 from pathlib import Path
@@ -58,16 +60,23 @@ import pytest
 from sqlalchemy import Engine, event, select, text
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
+from sqlalchemy.pool import NullPool
 
 from arcilogger_core import sealedfile
 from arcilogger_core.immutability import unlock
 from arcilogger_core.rawlog import format_line
 from arcilogger_core.sealedfile import Compression
 from arcilogger_core.timeutil import SITE_TZ, day_window
+from arcilogger_db.engine import engine_from_url
 from arcilogger_db.models import TIME_SERIES_TABLES, Base
-from arcilogger_db.partitions import PARTITION_LOCK_KEY, drop_before, ensure_days
+from arcilogger_db.partitions import (
+    PARTITION_LOCK_KEY,
+    drop_before,
+    ensure_days,
+    partitioned_tables,
+)
 from arcilogger_db.searchcounts import rebuild_stream, stream_window, verify
-from arcilogger_db.settings import set_setting
+from arcilogger_db.settings import DEFAULT_SETTINGS, set_setting
 from arcilogger_db.testing import pause_compression_jobs
 from arcilogger_ingest import service as service_module
 from arcilogger_ingest.files import VaultReader, VaultReadError
@@ -79,6 +88,7 @@ from arcilogger_ingest.service import (
     ArchiveJob,
     CheckStoppedError,
     IngestService,
+    PendingClaim,
     Reset,
     ResetStep,
     count_hours,
@@ -714,7 +724,7 @@ def test_a_request_waits_while_the_window_job_holds_the_partitions(
     before = snapshot(db_engine)
     drop(db_engine, DAY + timedelta(days=2))
     reload_id = queue(db_engine, DAY)
-    monkeypatch.setattr(service_module, "PARTITION_LOCK_TIMEOUT", "200ms")
+    monkeypatch.setattr(service_module, "PARTITION_LOCK_TIMEOUT_MS", 200)
     with db_engine.connect() as job, job.begin():
         job.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": PARTITION_LOCK_KEY})
         run_once(world, db_engine)
@@ -1156,24 +1166,26 @@ def test_a_reloads_partitions_are_made_a_day_a_round(
     world: World, db_engine: Engine, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """G4, live data first (#124): the partitions of a reload's days are made one day a call
-    (up to 0.4 s each, 22 days for a 14-day request), and the reset waits until the last is
-    made (``_ensure_days`` is ``True`` only then): its rows land in their partitions, not in the
-    default ones."""
+    (up to 0.4 s each, 22 days for a 14-day request), one table a transaction (a stop waits for
+    one table's, #124 stage 2), and the reset waits until the last is made (``_ensure_days`` is
+    ``True`` only then): its rows land in their partitions, not in the default ones."""
     drop(db_engine, TODAY)
-    made: list[tuple[date, date]] = []
+    made: list[tuple[date, date, str]] = []
     real = ensure_days
 
-    def counted(connection: Any, first_day: date, last_day: date) -> Any:
-        made.append((first_day, last_day))
-        return real(connection, first_day, last_day)
+    def counted(connection: Any, first_day: date, last_day: date, **kwargs: Any) -> Any:
+        made.extend((first_day, last_day, table) for table in kwargs["tables"])
+        return real(connection, first_day, last_day, **kwargs)
 
     monkeypatch.setattr(service_module, "ensure_days", counted)
+    with db_engine.connect() as connection:
+        tables = partitioned_tables(connection)  # none on TimescaleDB: nothing to make
     service = world.service(db_engine)
     days = [DAY + timedelta(days=n) for n in range(3)]
     assert [service._ensure_days(days[0], days[-1]) for _ in days] == [False, False, True]
-    assert made == [(day, day) for day in days]
+    assert made == [(day, day, table) for day in days for table in tables]
     assert service._ensure_days(days[0], days[-1])  # nothing left to make
-    assert len(made) == 3
+    assert len(made) == 3 * len(tables)
 
 
 def test_a_sealed_file_gone_after_its_scan_is_not_reset(
@@ -1258,7 +1270,15 @@ def test_a_stop_during_a_reloads_check_is_prompt(
     the receive times, 10 ms a slice): the service stops at once, well within the 4.5 s of a
     Windows console stop (``WINDOWS_GRACE_SECONDS``), and the check gives up at its next slice
     and closes the file (it is not waited for). Nothing was decided or deleted: the request is
-    still ``queued`` or ``loading``, the next start carries it out exactly once."""
+    still ``queued`` or ``loading``, the next start carries it out exactly once.
+
+    The stop waits for the round under way, nothing beside it: while the reset's scan runs, a
+    round makes the partitions of the request's next day, one table a transaction with the stop
+    looked at before each (#124 stage 2: about 30 ms here; the day's in one transaction once
+    took 2.016 s of a Windows runner's stop); while the claim's check runs, a read of the
+    request's status. The time is reported as a warning, so that the CI log shows it in its
+    warnings summary on a passing run too (``-n auto`` drops a passing test's output), and named
+    when it fails."""
     load_day(world, db_engine)
     before = snapshot(db_engine)
     drop(db_engine, DAY + timedelta(days=2))
@@ -1280,8 +1300,10 @@ def test_a_stop_during_a_reloads_check_is_prompt(
             service.stop.set()
             stopped = monotonic()
             runner.join(WAIT)
+            took = monotonic() - stopped
+            warnings.warn(f"stop during the {step} check: {took:.3f} s", UserWarning, stacklevel=1)
         assert results == [0]
-        assert monotonic() - stopped < 2.0
+        assert took < 2.0, f"the stop during the {step} check took {took:.3f} s"
         assert endless.closed.wait(1.0)  # the check gave up within a slice
     assert reload_row(db_engine, reload_id)["status"] == (
         "queued" if step == "claim" else "loading"
@@ -1973,7 +1995,7 @@ def test_a_file_of_a_loading_request_is_not_reset_on_its_own(
         with pytest.raises(SimulatedCrashError):
             world.service(db_engine).run(once=True)
     assert marker(db_engine, *key) == (0, service_module.RESETTING, False)
-    monkeypatch.setattr(service_module, "PARTITION_LOCK_TIMEOUT", "200ms")
+    monkeypatch.setattr(service_module, "PARTITION_LOCK_TIMEOUT_MS", 200)
     scans: list[str] = []
     real_scan = IngestService._scan
 
@@ -2241,3 +2263,530 @@ def test_a_request_changed_during_its_claim_check_stops_reading(
         runner.join(WAIT)
     assert results == [0]
     assert reload_row(db_engine, second)["status"] == "queued"
+
+
+# -- the partition lock within half the search budget (W5-G-24), a prompt stop (#124 stage 2) --
+
+
+#: The search budget (``search.request_budget_ms``, its default): ingest waits for the partition
+#: lock and its tables half of it, 2 s (as long as :data:`PARTITION_LOCK_TIMEOUT_MS`), a search
+#: queued behind it all of it. The tests order a search behind ingest's request within that
+#: half: a smaller budget leaves a loaded runner too short a window (#124 stage 2 review).
+SEARCH_BUDGET_MS = int(DEFAULT_SETTINGS["search.request_budget_ms"])
+#: The sessions waiting for the partition lock, by mode (``ExclusiveLock``: a step,
+#: ``ShareLock``: a search or an export).
+LOCK_WAITERS = text(
+    "SELECT mode FROM pg_locks WHERE locktype = 'advisory' AND NOT granted "
+    "AND database = (SELECT oid FROM pg_database WHERE datname = current_database()) "
+    "AND CAST(classid AS bigint) = :high AND CAST(objid AS bigint) = :low AND objsubid = 1 "
+    "ORDER BY mode"
+)
+KEY_HIGH, KEY_LOW = divmod(PARTITION_LOCK_KEY % 2**64, 2**32)
+
+
+@pytest.fixture
+def outside(db_engine: Engine) -> Iterator[Engine]:
+    """Connections of an export and a search, outside the service's pool."""
+    other = engine_from_url(db_engine.url, poolclass=NullPool)
+    yield other
+    other.dispose()
+
+
+@contextmanager
+def export_holding(engine: Engine) -> Iterator[None]:
+    """The partition lock held shared at session level, as a running search export holds it
+    (``archive.service.hold_window``, W5-G-23)."""
+    with engine.connect() as holder:
+        holder.execute(text("SELECT pg_advisory_lock_shared(:key)"), {"key": PARTITION_LOCK_KEY})
+        holder.commit()
+        try:
+            yield
+        finally:
+            holder.execute(
+                text("SELECT pg_advisory_unlock_shared(:key)"), {"key": PARTITION_LOCK_KEY}
+            )
+            holder.commit()
+
+
+def search_lock(engine: Engine) -> float:
+    """A search's wait for the partition lock (W5-G-18: shared, at most its budget, else
+    ``lock_not_available``), in seconds: the statement of ``archive.service.hold_window``."""
+    with engine.connect() as search:
+        started = monotonic()
+        search.execute(
+            text(
+                "SELECT pg_advisory_lock_shared(:key) "
+                "FROM (SELECT set_config('lock_timeout', :wait, true)) AS deadline"
+            ),
+            {"key": PARTITION_LOCK_KEY, "wait": f"{SEARCH_BUDGET_MS}ms"},
+        )
+        waited = monotonic() - started
+        search.execute(text("SELECT pg_advisory_unlock_shared(:key)"), {"key": PARTITION_LOCK_KEY})
+        search.commit()
+    return waited
+
+
+def in_thread(call: Callable[[], Any]) -> tuple[threading.Thread, list[Any]]:
+    """``call`` started in a thread; its result (or exception) lands in the list."""
+    answer: list[Any] = []
+
+    def run() -> None:
+        try:
+            answer.append(call())
+        except BaseException as exc:  # the test thread re-raises it
+            answer.append(exc)
+
+    thread = threading.Thread(target=run, daemon=True)
+    thread.start()
+    return thread, answer
+
+
+def wait_for_waiters(engine: Engine, modes: list[str], thread: threading.Thread) -> None:
+    """Until the sessions waiting for the partition lock are exactly ``modes``."""
+    deadline = monotonic() + WAIT
+    with engine.connect() as watcher:
+        while monotonic() < deadline:
+            waiting = list(
+                watcher.execute(LOCK_WAITERS, {"high": KEY_HIGH, "low": KEY_LOW}).scalars()
+            )
+            watcher.rollback()
+            if waiting == modes:
+                return
+            assert thread.is_alive(), f"finished before {modes} waited ({waiting})"
+            sleep(0.02)
+    pytest.fail(f"never waiting for the partition lock: {modes}")
+
+
+def beside_an_export(outside: Engine, call: Callable[[], Any]) -> tuple[Any, float, float]:
+    """``call`` (ingest asking for the partition lock exclusively) while an export holds it
+    shared, and a search that comes while it waits and queues behind its request, ordered
+    through ``pg_locks``: the call's result, how long it took and the search's wait. The search
+    raises when it was not granted within its budget."""
+    with export_holding(outside):
+        started = monotonic()
+        step, answer = in_thread(lambda: (call(), monotonic()))
+        wait_for_waiters(outside, ["ExclusiveLock"], step)
+        search, waited = in_thread(lambda: search_lock(outside))
+        wait_for_waiters(outside, ["ExclusiveLock", "ShareLock"], search)
+        search.join(WAIT)
+        step.join(WAIT)
+    for got in (answer, waited):
+        (value,) = got
+        if isinstance(value, BaseException):
+            raise value
+    ((result, ended),) = answer
+    return result, ended - started, waited[0]
+
+
+def partitions_of(engine: Engine) -> int:
+    """How many partitions the time-series tables have (none on TimescaleDB)."""
+    with engine.connect() as connection:
+        return int(connection.execute(text("SELECT count(*) FROM pg_inherits")).scalar_one())
+
+
+def test_a_reloads_partitions_back_off_from_an_export_and_a_search_is_not_timed_out(
+    world: World, db_engine: Engine, outside: Engine, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """W5-G-24 for ingest: a day's partitions wait for the partition lock (and then the tables)
+    at most half of ``search.request_budget_ms``, as the worker's steps: a search that queues
+    behind the request while an export holds the lock is granted within its budget when ingest
+    gives up. Nothing is made, the loop goes on (``False``), and no partition is tried again
+    before ``archive_seconds`` (the next poll): no request for the lock, searches are not
+    queued round after round. Then the day is made. On TimescaleDB there is nothing to make and
+    no lock is taken."""
+    drop(db_engine, TODAY)
+    asked: list[str] = []
+    real = ensure_days
+
+    def counted(connection: Any, first_day: date, last_day: date, **kwargs: Any) -> Any:
+        asked.extend(kwargs["tables"])
+        return real(connection, first_day, last_day, **kwargs)
+
+    monkeypatch.setattr(service_module, "ensure_days", counted)
+    service = world.service(db_engine, archive_seconds=60.0)
+    with db_engine.connect() as connection:
+        tables = partitioned_tables(connection)
+    if not tables:  # TimescaleDB
+        with export_holding(outside):
+            assert service._ensure_days(DAY, DAY)
+        assert asked == []
+        return
+    before = partitions_of(db_engine)
+    made, took, waited = beside_an_export(outside, lambda: service._ensure_days(DAY, DAY))
+    assert made is False
+    assert SEARCH_BUDGET_MS / 2000 <= took < SEARCH_BUDGET_MS / 1000
+    assert waited < SEARCH_BUDGET_MS / 1000  # granted when ingest gave up
+    assert partitions_of(db_engine) == before
+    assert asked == tables[:1]
+    with export_holding(outside):  # within archive_seconds: not asked for again
+        assert service._ensure_days(DAY, DAY) is False
+    assert asked == tables[:1]
+    service._partitions_due = 0.0  # the next poll
+    assert service._ensure_days(DAY, DAY)
+    assert partitions_of(db_engine) > before
+
+
+def claimed_and_checked(
+    world: World, db_engine: Engine, monkeypatch: pytest.MonkeyPatch
+) -> tuple[IngestService, PendingClaim, Gate]:
+    """A service (no instance lock: its rounds are called by hand) whose claim of the queued
+    request has checked its files (``archive_seconds`` 60: the next poll comes when the test
+    says so); the :class:`Gate` counts the files hashed."""
+    gate = hold_check(monkeypatch, "claim")
+    service = world.service(db_engine, archive_seconds=60.0, single_instance=False)
+    assert service._claim_archive() is None  # its files are being checked
+    claim = service._claim
+    assert claim is not None
+    assert claim.check is not None
+    gate.open.set()
+    claim.check.result(timeout=WAIT)
+    return service, claim, gate
+
+
+def claim_of(service: IngestService) -> PendingClaim | None:
+    """The service's claim under way, read afresh (a round may have ended it)."""
+    return service._claim
+
+
+def test_a_claim_backs_off_from_an_export_and_a_search_is_not_timed_out(
+    world: World, db_engine: Engine, outside: Engine, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """W5-G-24 for ingest: the claim's transaction waits for the partition lock at most half of
+    ``search.request_budget_ms`` (both back ends): a search queued behind it while an export
+    holds the lock is granted within its budget. The request is not failed: still ``queued``,
+    no ``error_code``. The claim is kept with its check (review: its files are not read again
+    every poll while an export runs) and finished again after ``archive_seconds``, not before:
+    no request for the lock meanwhile. Then it is claimed without hashing its files again, and
+    it loads exactly once."""
+    load_day(world, db_engine)
+    before = snapshot(db_engine)
+    drop(db_engine, DAY + timedelta(days=2))
+    reload_id = queue(db_engine, DAY)
+    service, claim, gate = claimed_and_checked(world, db_engine, monkeypatch)
+    hashed = len(gate.threads)
+    job, took, waited = beside_an_export(outside, lambda: service._finish_claim(claim))
+    assert job is None
+    assert SEARCH_BUDGET_MS / 2000 <= took < SEARCH_BUDGET_MS / 1000
+    assert waited < SEARCH_BUDGET_MS / 1000
+    row = reload_row(db_engine, reload_id)
+    assert (row["status"], row["error_code"]) == ("queued", None)
+    assert service._claim is claim
+    assert claim.retry_at is not None
+    assert service._archive()  # the lock is free, but archive_seconds have not passed
+    assert (service._archive_job, service._claim) == (None, claim)
+    claim.retry_at = monotonic()  # the next poll
+    assert service._archive()
+    assert service._archive_job is not None
+    assert claim_of(service) is None  # claimed
+    assert len(gate.threads) == hashed  # not hashed again
+    assert reload_row(db_engine, reload_id)["status"] == "loading"
+    run_once(world, db_engine)
+    assert reload_row(db_engine, reload_id)["status"] == "ready"
+    assert snapshot(db_engine) == before
+
+
+def test_ingest_waits_half_the_search_budget_at_most_two_seconds(db_engine: Engine) -> None:
+    """W5-G-24, W5-G-25: ingest waits for the partition lock and its tables half of
+    ``search.request_budget_ms`` as the worker's steps, but never longer than the default's half
+    (2 s), whatever the budget (up to 30 s): a stop during the wait stays well within the 4.5 s
+    of a Windows console stop."""
+    assert service_module.PARTITION_LOCK_TIMEOUT_MS == SEARCH_BUDGET_MS // 2 == 2000
+    for budget, wait in ((1000, 500), (SEARCH_BUDGET_MS, 2000), (30_000, 2000)):
+        with Session(db_engine) as session:
+            set_setting(session, "search.request_budget_ms", budget, updated_by="test")
+            session.commit()
+        with db_engine.connect() as connection:
+            assert IngestService._lock_budget(connection).timeout_ms == wait
+
+
+def test_no_claim_is_begun_or_finished_once_the_service_stops(
+    world: World, db_engine: Engine, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#124 stage 2 review: once the service stops, a round neither finishes a claim whose files
+    are checked nor claims a request: both wait for the partition lock (up to the budget). The
+    request stays ``queued``; the next start claims it."""
+    load_day(world, db_engine)
+    drop(db_engine, DAY + timedelta(days=2))
+    reload_id = queue(db_engine, DAY)
+    service, claim, _ = claimed_and_checked(world, db_engine, monkeypatch)
+    service.stop.set()
+    assert service._archive()
+    assert (service._archive_job, service._claim) == (None, claim)
+    unclaimed = world.service(db_engine, archive_seconds=0.0, single_instance=False)
+    unclaimed.stop.set()
+    assert unclaimed._archive()
+    assert (unclaimed._archive_job, unclaimed._claim) == (None, None)
+    assert reload_row(db_engine, reload_id)["status"] == "queued"
+
+
+def test_a_claim_backs_off_from_its_requests_row_held(
+    world: World, db_engine: Engine, outside: Engine, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """W5-G-24 for ingest: the request's row, locked by the claim under the partition lock,
+    is waited for what is left of the same budget (an administrator's change holding it; a
+    search queues behind the partition lock meanwhile): the claim gives up within half of
+    ``search.request_budget_ms``, the request still ``queued``, the claim kept for the next
+    poll."""
+    load_day(world, db_engine)
+    drop(db_engine, DAY + timedelta(days=2))
+    reload_id = queue(db_engine, DAY)
+    service, claim, _ = claimed_and_checked(world, db_engine, monkeypatch)
+    with outside.connect() as holder:
+        holder.execute(
+            text("SELECT 1 FROM archive_reloads WHERE id = :id FOR UPDATE"), {"id": reload_id}
+        )
+        step, answer = in_thread(lambda: (monotonic(), service._finish_claim(claim), monotonic()))
+        step.join(WAIT)
+        alive = step.is_alive()
+        holder.rollback()
+    step.join(WAIT)
+    assert not alive, "the claim waits for the request's row"
+    ((started, job, ended),) = answer
+    assert job is None
+    assert ended - started < SEARCH_BUDGET_MS / 1000
+    assert reload_row(db_engine, reload_id)["status"] == "queued"
+    assert service._claim is claim
+    assert claim.retry_at is not None
+
+
+def test_a_days_tables_share_one_lock_budget(
+    world: World, db_engine: Engine, outside: Engine, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """W5-G-24 for ingest (review): a day's tables, a transaction each, share the call's one
+    budget. The first table waits for the partition lock (an export holds it) three quarters of
+    it; the export lets go and takes it again before the second table asks: that one waits
+    only what is left (0.5 s), not the whole budget again, then the call gives up. Searches
+    that hold the lock one after the other cannot keep the loop a budget a table (16 a day). On
+    TimescaleDB there is nothing to make and no lock is taken."""
+    drop(db_engine, TODAY)
+    with db_engine.connect() as connection:
+        tables = partitioned_tables(connection)
+    budget = service_module.PARTITION_LOCK_TIMEOUT_MS / 1000  # the default's half as well
+    asking, held = threading.Event(), threading.Event()
+    asked: list[str] = []
+    real = ensure_days
+
+    def gated(connection: Any, first_day: date, last_day: date, **kwargs: Any) -> Any:
+        asked.extend(kwargs["tables"])
+        if len(asked) == 2:  # the second table waits until the export holds the lock again
+            asking.set()
+            assert held.wait(WAIT)
+        return real(connection, first_day, last_day, **kwargs)
+
+    monkeypatch.setattr(service_module, "ensure_days", gated)
+    service = world.service(db_engine, archive_seconds=60.0)
+    if not tables:  # TimescaleDB
+        with export_holding(outside):
+            assert service._ensure_days(DAY, DAY)
+        assert asked == []
+        return
+    key = {"key": PARTITION_LOCK_KEY}
+    with outside.connect() as holder:
+        holder.execute(text("SELECT pg_advisory_lock_shared(:key)"), key)
+        holder.commit()
+        step, answer = in_thread(lambda: service._ensure_days(DAY, DAY))
+        wait_for_waiters(outside, ["ExclusiveLock"], step)
+        sleep(budget * 0.75)  # spends the budget; the order comes from pg_locks and the events
+        holder.execute(text("SELECT pg_advisory_unlock_shared(:key)"), key)
+        holder.commit()
+        assert asking.wait(WAIT)
+        holder.execute(text("SELECT pg_advisory_lock_shared(:key)"), key)
+        holder.commit()
+        second = monotonic()
+        held.set()
+        step.join(WAIT)
+        took = monotonic() - second
+        holder.execute(text("SELECT pg_advisory_unlock_shared(:key)"), key)
+        holder.commit()
+    assert answer == [False]
+    assert asked == tables[:2]
+    assert took < budget * 0.75  # what was left (0.5 s), 1 s of margin; the whole budget is 2 s
+    assert DAY not in service._partitioned
+
+
+@pytest.mark.parametrize("holder", ["request", "none"])
+def test_no_reset_is_begun_once_the_service_stops(
+    world: World, db_engine: Engine, monkeypatch: pytest.MonkeyPatch, holder: str
+) -> None:
+    """#124 stage 2 review: a reset's first transaction (it sweeps the default partitions and
+    waits for their locks) is not begun once the service stops. The stop comes right before
+    it, after the file's scan and partitions: for the request's next file once the file before
+    it has finished its steps (``request``: its last step and the next file's start can fall in
+    one round), or for a file marked resetting that no request holds (``none``). The service
+    stops, the file is left as it was, and the next start resets it and loads it exactly
+    once."""
+    load_day(world, db_engine)
+    before = snapshot(db_engine)
+    reload_id = None
+    if holder == "request":
+        drop(db_engine, DAY + timedelta(days=2))
+        reload_id = queue(db_engine, DAY)
+        real_next = IngestService._reset_next
+
+        def reset_next(self: IngestService, job: ArchiveJob) -> None:
+            scan = job.scan
+            # The next file's scan done, the file before it reset.
+            if self._reset is None and begun and scan and scan[0] not in begun and scan[1].done():
+                self.stop.set()
+            real_next(self, job)
+
+        monkeypatch.setattr(IngestService, "_reset_next", reset_next)
+    else:
+        with db_engine.begin() as connection:
+            IngestService._begin_reset(
+                connection, "core-r1", DAY, defaults=IngestService._defaults(connection)
+            )
+        real_days = IngestService._ensure_days
+
+        def ensure(self: IngestService, first_day: date, last_day: date) -> bool:
+            done = real_days(self, first_day, last_day)
+            if done and self._orphan is not None:
+                self.stop.set()  # its scan and partitions are done
+            return done
+
+        monkeypatch.setattr(IngestService, "_ensure_days", ensure)
+    begun: list[tuple[str, date]] = []
+    real_begin = IngestService._begin_reset
+
+    def begin(connection: Any, source: str, day: date, **kwargs: Any) -> list[ResetStep]:
+        begun.append((source, day))
+        return real_begin(connection, source, day, **kwargs)
+
+    monkeypatch.setattr(IngestService, "_begin_reset", staticmethod(begin))
+    service = world.service(db_engine, archive_seconds=0.0)
+    results: list[int] = []
+    runner = threading.Thread(target=lambda: results.append(service.run()))
+    runner.start()
+    try:
+        assert wait_for(service.stop.is_set, SETTLE)
+    finally:
+        service.stop.set()
+        runner.join(WAIT)
+    assert results == [0]
+    if reload_id is not None:
+        assert begun == [("core-r1", DAY)]
+        assert marker(db_engine, "fortigate", DAY) == (
+            sealed_file(world, DAY, "fortigate")[1],
+            None,
+            True,
+        )
+        assert reload_row(db_engine, reload_id)["status"] == "loading"
+    else:
+        assert begun == []
+        assert marker(db_engine, "core-r1", DAY) == (0, service_module.RESETTING, False)
+    monkeypatch.undo()
+    run_once(world, db_engine)
+    if reload_id is not None:
+        assert reload_row(db_engine, reload_id)["status"] == "ready"
+    assert snapshot(db_engine) == before
+    counts_agree(db_engine)
+
+
+def test_a_resets_first_transaction_waiting_for_a_lock_is_made_again_later(
+    world: World, db_engine: Engine, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#124 stage 2 review: the first transaction of a reset waits for a lock at most
+    ``RESET_LOCK_TIMEOUT`` as its steps do (a recount holding the file's offsets row here; a
+    step of the window job holding a default partition it sweeps alike): it is not taken for a
+    database failure, nothing is marked, and the next round makes it. The file loads exactly
+    once."""
+    load_day(world, db_engine)
+    before = snapshot(db_engine)
+    key = ("core-r1", DAY)
+    stored = marker(db_engine, *key)
+    monkeypatch.setattr(service_module, "RESET_LOCK_TIMEOUT", "200ms")
+    service = world.service(db_engine, single_instance=False)
+    holder = db_engine.connect()
+    try:
+        with holder.begin():
+            holder.execute(
+                text(
+                    "SELECT 1 FROM ingest_offsets WHERE source = :source AND day = :day FOR UPDATE"
+                ),
+                {"source": key[0], "day": key[1]},
+            )
+            step, answer = in_thread(lambda: service._start_reset(key, []))
+            step.join(WAIT)
+            assert not step.is_alive(), "the first transaction waits for the offsets row"
+    finally:
+        holder.close()
+    assert answer == [None]
+    reset = service._reset
+    assert reset is not None
+    assert (reset.steps, marker(db_engine, *key)) == (None, stored)  # nothing marked
+    service._reset_round()  # the next round
+    assert reset.steps is not None
+    assert marker(db_engine, *key) == (0, service_module.RESETTING, False)
+    run_once(world, db_engine)  # the next start finishes its reset
+    assert snapshot(db_engine) == before
+    counts_agree(db_engine)
+
+
+def test_a_stop_while_a_days_partitions_are_made_waits_for_one_table(
+    world: World, db_engine: Engine, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#124 stage 2: a day's partitions are made one table a transaction and the stop is looked
+    at before each, so a stop waits for one table's (about 30 ms), not for the day's (up to
+    0.4 s here, several seconds on the Windows runners). The day is not taken as made; the next
+    run makes the rest."""
+    drop(db_engine, TODAY)
+    with db_engine.connect() as connection:
+        tables = partitioned_tables(connection)
+    asked: list[str] = []
+    real = ensure_days
+    service = world.service(db_engine)
+
+    def stopping(connection: Any, first_day: date, last_day: date, **kwargs: Any) -> Any:
+        asked.extend(kwargs["tables"])
+        service.stop.set()  # the stop comes while the first table's partitions are made
+        return real(connection, first_day, last_day, **kwargs)
+
+    monkeypatch.setattr(service_module, "ensure_days", stopping)
+    if not tables:  # TimescaleDB: nothing to make
+        assert service._ensure_days(DAY, DAY)
+        assert asked == []
+        return
+    assert service._ensure_days(DAY, DAY) is False
+    assert asked == tables[:1]
+    assert DAY not in service._partitioned
+    monkeypatch.setattr(service_module, "ensure_days", real)
+    again = world.service(db_engine)
+    assert again._ensure_days(DAY, DAY)
+    assert in_default(db_engine, DAY) == 0
+
+
+def test_a_stop_during_a_resets_steps_ends_its_round(
+    world: World, db_engine: Engine, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#124 stage 2: a stop that comes during a step of a reset ends the round after that step,
+    however long the round could still run: the file stays marked, its request ``loading``, and
+    the next start resets it again and loads it exactly once."""
+    spread_day(world, db_engine)
+    before = snapshot(db_engine)
+    key = ("core-r1", DAY)
+    monkeypatch.setattr(service_module, "RESET_STEP_LINES", 1)
+    monkeypatch.setattr(service_module, "RESET_ROUND_SECONDS", WAIT)  # one round, every step
+    reload_id = queue(db_engine, DAY)
+    service = world.service(db_engine, archive_seconds=0.0)
+    made: list[tuple[str, date]] = []
+    real_step = IngestService._reset_step
+
+    def step(connection: Any, source: str, day: date, *args: Any, **kwargs: Any) -> bool:
+        made.append((source, day))
+        service.stop.set()
+        return real_step(connection, source, day, *args, **kwargs)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(IngestService, "_reset_step", staticmethod(step))
+        results: list[int] = []
+        runner = threading.Thread(target=lambda: results.append(service.run()))
+        runner.start()
+        runner.join(SETTLE)
+    assert results == [0]
+    assert made == [key]
+    assert reload_row(db_engine, reload_id)["status"] == "loading"
+    assert marker(db_engine, *key)[:2] == (0, service_module.RESETTING)
+    run_once(world, db_engine)
+    assert reload_row(db_engine, reload_id)["status"] == "ready"
+    assert snapshot(db_engine) == before
+    counts_agree(db_engine)

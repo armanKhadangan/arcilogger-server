@@ -65,9 +65,12 @@ check is made again on the loop right before the file's first transaction. The p
 request's days are made one day a round, also while a check or a reset's steps run. What still
 holds the loop up is one round of a reset's steps (:data:`RESET_ROUND_SECONDS` and the step
 that ends it: 0.1 s, up to about 1 s on a slow disk; a lock waited for up to
-:data:`RESET_LOCK_TIMEOUT`), one day's partitions (up to 0.4 s on Linux; not measured on
-Windows) and a wait for the partition lock while the window job holds it (up to
-:data:`PARTITION_LOCK_TIMEOUT`). After its last step the file is an ordinary
+:data:`RESET_LOCK_TIMEOUT`, as by its first transaction), one day's partitions (up to 0.4 s on
+Linux; not measured on Windows; one table a transaction, so that a stop does not wait for the
+day) and a wait for the partition lock while the window job or a search export holds it (half of
+``search.request_budget_ms``, at most :data:`PARTITION_LOCK_TIMEOUT_MS`, for the lock and the
+tables together; then none for ``archive_seconds``). A stop is looked at between these: none
+is begun once it has come (W5-G-25). After its last step the file is an ordinary
 stream: it is read from the sealed file by the reader above, after every newer day (live data
 first), and loaded exactly once like any other. ``bytes_done`` is Σ committed offset; the
 request is ``ready`` when every file has finished (``expires_at`` = ``ready_at`` +
@@ -151,12 +154,15 @@ from arcilogger_db.models import (
     SourceClockSample,
 )
 from arcilogger_db.partitions import (
-    PARTITION_LOCK_KEY,
     RAW_DAY_MARGIN,
+    LockBudget,
+    PartitionLockTimeoutError,
     default_partition_name,
     dropped_before,
     ensure_days,
+    lock_partitions,
     partitioned_tables,
+    step_lock_timeout_ms,
 )
 from arcilogger_db.searchcounts import COUNTS_TIME_MARGIN, stream_window
 from arcilogger_db.settings import DEFAULT_SETTINGS, get_setting
@@ -213,9 +219,14 @@ ARCHIVE_ERROR_SECONDS: Final = 60.0
 #: or a sealed file that cannot be read.
 ARCHIVE_NOT_IN_VAULT: Final = "archive_day_not_in_vault"
 ARCHIVE_UNREADABLE: Final = "archive_file_unreadable"
-#: Creating partitions waits at most this long for a table lock (a long search holds one);
-#: ingest tries again at the next round instead of holding up live data.
-PARTITION_LOCK_TIMEOUT: Final = "5s"
+#: The longest wait of the loop for the partition maintenance lock and the tables it then locks
+#: (a reload's claim, its partitions), in all: half of ``search.request_budget_ms`` as the
+#: worker's steps (W5-G-24: a search queued behind the request keeps half its budget), but never
+#: longer than this, the default's half, whatever the budget: a stop that comes during the wait
+#: stays well within the 4.5 s of a Windows console stop
+#: (:data:`~arcilogger_ingest.stopping.WINDOWS_GRACE_SECONDS`, W5-G-25). Ingest tries again
+#: later instead of holding up live data (:meth:`IngestService._lock_budget`).
+PARTITION_LOCK_TIMEOUT_MS: Final = 2000
 LOCK_NOT_AVAILABLE: Final = "55P03"
 #: The raw days around a request's days whose files are loaded with it (module text).
 RELOAD_MARGIN: Final = timedelta(days=RAW_DAY_MARGIN)
@@ -523,6 +534,10 @@ class PendingClaim:
     ended: threading.Event = field(default_factory=threading.Event)
     #: When the request's ``status`` is read again while the check runs (``monotonic``).
     next_look: float = 0.0
+    #: Set when its files were checked but the partition lock was not free in time
+    #: (:meth:`IngestService._finish_claim`): finished again from then on (``monotonic``), its
+    #: files not checked again.
+    retry_at: float | None = None
 
 
 @dataclass(frozen=True)
@@ -641,6 +656,8 @@ class IngestService:
         self._retention_days = int(DEFAULT_SETTINGS["db.retention_days"])
         #: Days whose daily partitions this run has made sure of (``ensure_days``).
         self._partitioned: set[date] = set()
+        #: No partitions are made before this (``monotonic``): the lock was not free in time.
+        self._partitions_due = 0.0
         self._archive_seconds = archive_seconds
         self._archive_error_seconds = archive_error_seconds
         self._next_archive = 0.0
@@ -751,9 +768,11 @@ class IngestService:
             log.info("ingest stopped")
 
     def _archive_busy(self) -> bool:
-        """An archive reload or a reset is under way (``--once`` runs until it is not)."""
+        """An archive reload or a reset is under way (``--once`` runs until it is not). A claim
+        that waits for the partition lock is not: ``--once`` ends, the next start claims it."""
+        claim = self._claim if self._claim is not None and self._claim.retry_at is None else None
         return any(
-            item is not None for item in (self._archive_job, self._claim, self._reset, self._orphan)
+            item is not None for item in (self._archive_job, claim, self._reset, self._orphan)
         )
 
     def _idle(self, seconds: float) -> None:
@@ -1083,31 +1102,50 @@ class IngestService:
 
     def _ensure_days(self, first_day: date, last_day: date) -> bool:
         """The daily partitions of the site days ``first_day`` … ``last_day`` (plain PostgreSQL;
-        nothing to do with TimescaleDB), one transaction a day (its device times lie in two UTC
-        days, at most 32 partitions: the lock table of PostgreSQL's defaults holds about 256),
-        and one day a call: up to 0.4 s each, so between two batches of live data the loop makes
-        sure of one day, not of the 22 of a long archive reload (4.7 s). ``False`` until every
-        day is done, or when a table lock was not free within :data:`PARTITION_LOCK_TIMEOUT`
-        (tried again later, :attr:`_partitioned` keeps the days done); other database errors are
-        raised."""
+        nothing to do with TimescaleDB), one day a call: up to 0.4 s each, so between two batches
+        of live data the loop makes sure of one day, not of the 22 of a long archive reload
+        (4.7 s). One table a transaction (its device times lie in two UTC days: two partitions,
+        about 30 ms), the stop looked at before each: a stop waits for one table's, not for the
+        day's (several seconds on the Windows CI runners). ``False`` until every day is done,
+        when the service stops, or when the partition lock and the tables were not free within
+        :meth:`_lock_budget` for the call (a search export holds the lock): then none is made for
+        the next ``archive_seconds``, live data loaded meanwhile (while the loop waits for the
+        lock, searches queue behind it). :attr:`_partitioned` keeps the days done; other database
+        errors are raised."""
         days = [first_day + timedelta(days=n) for n in range((last_day - first_day).days + 1)]
         missing = [day for day in days if day not in self._partitioned]
         if not missing:
             return True
-        day = missing[0]
-        try:
-            with self.engine.begin() as connection:
-                connection.execute(text(f"SET LOCAL lock_timeout = '{PARTITION_LOCK_TIMEOUT}'"))
-                report = ensure_days(connection, day, day)
-        except DBAPIError as exc:
-            if not _lock_not_available(exc):
-                raise
-            log.info("partitions of %s: a table is locked, trying again later", day)
+        if time.monotonic() < self._partitions_due:
             return False
-        if report.created:
-            log.info("partitions of %s created (%d)", day, len(report.created))
+        day = missing[0]
+        with self.engine.connect() as connection:
+            tables = partitioned_tables(connection)
+            budget = self._lock_budget(connection)
+        created = 0
+        for table in tables:
+            if self.stop.is_set():
+                return False
+            try:
+                with self.engine.begin() as connection:
+                    report = ensure_days(connection, day, day, tables=[table], budget=budget)
+            except PartitionLockTimeoutError as exc:
+                log.info("partitions of %s: %s, trying again later", day, exc)
+                self._partitions_due = time.monotonic() + self._archive_seconds
+                return False
+            created += len(report.created)
+        if created:
+            log.info("partitions of %s created (%d)", day, created)
         self._partitioned.add(day)
         return len(missing) == 1
+
+    @staticmethod
+    def _lock_budget(connection: Connection) -> LockBudget:
+        """How long the loop waits for the partition maintenance lock and then for the tables, in
+        all (W5-G-24): half of ``search.request_budget_ms``, as a step of the worker (a search
+        that queues behind the request keeps half its budget), at most
+        :data:`PARTITION_LOCK_TIMEOUT_MS`."""
+        return LockBudget(min(PARTITION_LOCK_TIMEOUT_MS, step_lock_timeout_ms(connection)))
 
     def _today(self) -> date:
         return site_day(self._clock())
@@ -1121,8 +1159,10 @@ class IngestService:
         it up when the request changed meanwhile, :meth:`_watch`), take the next queued request
         (at once after one ended), and else finish the reset of a file no request holds
         (:meth:`_resume_reset`). It never waits for a file check (:meth:`_beside`): the loop
-        loads live data meanwhile and looks at the check again in the next round. ``False`` when
-        the database was unavailable (everything is tried again next round)."""
+        loads live data meanwhile and looks at the check again in the next round. Once the
+        service stops, nothing that waits for a lock is begun (a claim, a reset's first
+        transaction): the next start carries it on. ``False`` when the database was unavailable
+        (everything is tried again next round)."""
         self._stepped = False
         try:
             if self._reset is not None:
@@ -1140,6 +1180,8 @@ class IngestService:
                 self._archive_job is None
                 and claim is not None
                 and (claim.check is None or claim.check.done())
+                and (claim.retry_at is None or claim.retry_at <= time.monotonic())
+                and not self.stop.is_set()
                 and self._take_lock()
             ):
                 self._claim_failed = False
@@ -1151,6 +1193,7 @@ class IngestService:
                 and self._claim is None
                 and self._orphan is None
                 and time.monotonic() >= self._next_archive
+                and not self.stop.is_set()
             ):
                 self._next_archive = time.monotonic() + self._archive_seconds
                 # A request that fails at once (not in the vault, a file changed and found so
@@ -1245,7 +1288,11 @@ class IngestService:
         moves it on; a file loaded since (a stream that finished meanwhile) is left alone too,
         not checked again. ``None`` while the check runs, when it failed, when the request or
         one of its loaded files changed meanwhile, when the check gave up (the service stops) or
-        when the lock is busy (claimed and checked again at the next poll)."""
+        when the lock or the request's row is not free within :meth:`_lock_budget` (a search
+        export or the window job holds it): the request is not failed, the claim is kept with its
+        check and finished again after ``archive_seconds`` (:attr:`PendingClaim.retry_at`; the
+        status and the loaded files are read again under the lock then), so its files are not
+        read again while an export runs."""
         if claim.check is not None and not claim.check.done():
             return None
         self._claim = None
@@ -1263,10 +1310,9 @@ class IngestService:
         r = ArchiveReload
         try:
             with self.engine.begin() as connection:
-                connection.execute(text(f"SET LOCAL lock_timeout = '{PARTITION_LOCK_TIMEOUT}'"))
-                connection.execute(
-                    text("SELECT pg_advisory_xact_lock(:key)"), {"key": PARTITION_LOCK_KEY}
-                )
+                budget = self._lock_budget(connection)
+                lock_partitions(connection, budget=budget)
+                budget.bound(connection)  # the request's row as well
                 current = connection.execute(
                     select(r.status).where(r.id == reload_id).with_for_update()
                 ).scalar_one_or_none()
@@ -1300,10 +1346,15 @@ class IngestService:
                     .where(r.id == reload_id)
                     .values(status="loading", bytes_total=job.bytes_total, bytes_done=job.written)
                 )
-        except DBAPIError as exc:
-            if not _lock_not_available(exc):
+        except (DBAPIError, PartitionLockTimeoutError) as exc:
+            if isinstance(exc, DBAPIError) and not _lock_not_available(exc):
                 raise
-            log.info("archive reloads: the window job holds the partitions, trying again later")
+            log.info(
+                "archive reloads: the partition lock is held (the window job, a search export), "
+                "trying again later"
+            )
+            claim.retry_at = time.monotonic() + self._archive_seconds
+            self._claim = claim
             return None
         # The window job may have dropped them since this run made sure of them.
         first, last = self._reload_partition_days(job)
@@ -1514,8 +1565,8 @@ class IngestService:
             return
         if not self._ensure_days(*self._reload_partition_days(job)):
             return  # the check's result is kept for the next round
-        if self._reset is not None or not self._take_lock():
-            return  # as well: the steps of the file before it first
+        if self._reset is not None or self.stop.is_set() or not self._take_lock():
+            return  # as well: the steps of the file before it first; none begun at a stop
         if not self._sealed_file_intact(source, day, digest=False):  # gone since its scan
             self._stop_resets(job, source, day)
             return
@@ -1564,8 +1615,8 @@ class IngestService:
             return
         if strays is not None and not self._ensure_days(day - RELOAD_MARGIN, day + RELOAD_MARGIN):
             return
-        if not self._take_lock():
-            return
+        if self.stop.is_set() or not self._take_lock():
+            return  # none begun at a stop: the next start finds the mark
         self._orphan = None
         if strays is None or not self._sealed_file_intact(source, day, digest=False):
             log.warning("%s %s: sealed file missing or changed; its reset waits for it", *key)
@@ -1593,18 +1644,32 @@ class IngestService:
 
     def _begin(self, reset: Reset) -> None:
         """The first transaction of ``reset``; when it raises (its answer lost, the database
-        gone), :meth:`_reset_round` makes it again: it finds the mark set, or not."""
+        gone), :meth:`_reset_round` makes it again: it finds the mark set, or not. It waits for a
+        lock at most :data:`RESET_LOCK_TIMEOUT` as a step (the window job's step holding a
+        default partition it sweeps, a recount the file's offsets row), then is made again in
+        the next round as well."""
         source, day = reset.key
-        with self.engine.begin() as connection:
-            reset.steps = self._begin_reset(
-                connection, source, day, strays=reset.strays, defaults=self._defaults(connection)
-            )
+        try:
+            with self.engine.begin() as connection:
+                connection.execute(text(f"SET LOCAL lock_timeout = '{RESET_LOCK_TIMEOUT}'"))
+                reset.steps = self._begin_reset(
+                    connection,
+                    source,
+                    day,
+                    strays=reset.strays,
+                    defaults=self._defaults(connection),
+                )
+        except DBAPIError as exc:
+            if not _lock_not_available(exc):
+                raise
+            log.info("%s %s: its reset waits for a lock, again later", source, day)
 
     def _reset_round(self) -> None:
         """The steps of the reset under way, for :data:`RESET_ROUND_SECONDS` (at least one), each
         a transaction of its own (:meth:`_reset_step`), live batches between the rounds; after
         the last one (which takes the mark off) a fresh stream at offset 0. A step that waits
-        for a lock longer than :data:`RESET_LOCK_TIMEOUT` is made again in the next round. A
+        for a lock longer than :data:`RESET_LOCK_TIMEOUT` is made again in the next round; a stop
+        ends the round after the step under way (the next start goes on from the mark). A
         file whose offset has moved meanwhile (another instance loaded it while this one's lock
         connection was down) is not touched any further: the offsets are read again, and while
         it is still marked its reset begins again (its rows deleted whole, then it loads from
@@ -1638,7 +1703,7 @@ class IngestService:
                 return
             reset.steps.pop(0)
             self._stepped = True
-            if time.monotonic() - started >= RESET_ROUND_SECONDS:
+            if time.monotonic() - started >= RESET_ROUND_SECONDS or self.stop.is_set():
                 return
         self._reset = None
         self.resetting.discard(key)
