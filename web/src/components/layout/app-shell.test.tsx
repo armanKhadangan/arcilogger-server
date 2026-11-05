@@ -43,7 +43,7 @@ describe('AppShell', () => {
     expect(within(nav).getAllByRole('link')).toHaveLength(NAV_ITEMS.length + 1);
   });
 
-  it('shows a viewer only the panel and usage, without search box or alerts bell', async () => {
+  it('shows a viewer only the panel, Canlı Durum and usage, without search box or alerts bell', async () => {
     window.localStorage.setItem('arci.sidebar.collapsed', '0');
     signedInAs('viewer');
     renderApp('/');
@@ -52,7 +52,7 @@ describe('AppShell', () => {
       within(nav)
         .getAllByRole('link')
         .map((link) => link.textContent),
-    ).toEqual(['Panel', 'Kullanım']);
+    ).toEqual(['Panel', 'Canlı Durum', 'Kullanım']);
     expect(screen.queryByRole('search')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Bildirimler' })).not.toBeInTheDocument();
   });
