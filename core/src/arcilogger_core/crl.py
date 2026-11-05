@@ -928,8 +928,9 @@ def fetch(
     """Download, verify and store the lists of D7/D8 and update ``state/crl/index.json``.
 
     ``roots``: the pinned roots (:func:`arcilogger_core.tsa.trusted_roots`). Writes only under
-    ``state/crl``, never overwrites or deletes a file there. With no URL the index is still
-    written, with the lists stored before and no fetch failure, so the run is seen (#151). A
+    ``state/crl``, never overwrites a file there, and deletes only the leftover temporary names
+    of a stopped run. With no URL the index is still written, with the lists stored before and
+    no fetch failure, so the run is seen (#151). A
     stored list whose file no longer holds its bytes (or is gone) is the failure
     ``stored_file_changed`` of its URL (C14), also when the URL serves a newer list by now: the
     file and its index entry stay as they are. Raises :class:`CrlError` when another run holds
