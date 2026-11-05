@@ -22,13 +22,29 @@ from typing import Any
 import pytest
 from cryptography.hazmat.primitives import serialization
 
-from arcilogger_core.evidence.builder import build_package
+from arcilogger_core.evidence.builder import (
+    _collect_days,
+    _Records,
+    build_package,
+    requires_critical_eku,
+)
 from arcilogger_core.evidence.model import EvidenceError, PackageInfo
-from arcilogger_core.renewal import RecordEntry, renew
+from arcilogger_core.renewal import RecordEntry, _parse_record, renew
 from arcilogger_core.seal import sha256_file
 from arcilogger_core.timeutil import utc_now
 
-from .renewal_cases import LEVELS, Built, core_verdict, entry_of, renew_day
+from .renewal_cases import (
+    DELETION_CASES,
+    LEVELS,
+    TAMPERINGS,
+    Built,
+    DeletionCase,
+    core_verdict,
+    entry_of,
+    renew_day,
+    standalone_report,
+    tampered_renewal,
+)
 from .renewal_world import CNA, DAY, REPORT_NAME, RenewalWorld, day_token_path, make_world
 from .test_evidence import findings, in_process, isolated, unlock_tree, unpack
 
@@ -288,4 +304,86 @@ def test_an_unreadable_renewal_record_stops_the_build_with_an_evidence_error(
         json.loads(path.read_bytes())
     with pytest.raises(EvidenceError, match=r"token-imprint \(yenileme\)"):
         _build(rw, [DAY], tmp_path / "out")
+    unlock_tree(tmp_path)
+
+
+@pytest.mark.parametrize("how", TAMPERINGS)
+def test_a_tampered_renewal_record_is_strict_in_all_three_readers(
+    rw: RenewalWorld, tmp_path: Path, how: str
+) -> None:
+    """#156 item 3: the core and the builder read a renewal record as the standalone verifier's
+    ``load_json`` does. A record that says relaxed only to ``json.loads`` (a key twice, the last
+    false; UTF-16), stamped in the past with a non-critical EKU under the legal root (as in the
+    test above, where the record is not tampered): the core cannot read
+    it and it does not cover the day, the builder judges its token strict and so does not take
+    the legal root for it, and the standalone verifier refuses its token (``token-eku``). A
+    package of the day with the record is refused by the builder's self-check; one in UTF-16
+    is not picked up at all (its text does not hold the day's hash in UTF-8)."""
+    record = tampered_renewal(rw, how, R1[0], R1[1], expires=R3[2])
+    raw = (rw.layout.vault / record).read_bytes()
+    built = Built(CNA - timedelta(days=90))
+    # the core
+    assert _parse_record(raw) is None
+    token = rw.of(rw.status(built.now), day_token_path())
+    assert (token.status, token.covered_by) == ("due", None)
+    assert core_verdict(rw, built).code == "renewal-due"
+    # the builder
+    records = _Records(rw.layout, rw.roots)
+    records.add(record, "renewal")
+    assert records.used_roots == set()
+    if how == "a key twice":
+        with pytest.raises(EvidenceError, match=r"token-eku \(yenileme\)"):
+            _build(rw, [DAY], tmp_path / "out")
+    else:
+        assert _records(_build(rw, [DAY], tmp_path / "out"), tmp_path / "pkg") == []
+    # the standalone verifier on the vault
+    report = standalone_report(rw, built, tmp_path)
+    found = [(f.level, f.code, f.where) for f in report.findings if f.code.startswith("token-eku")]
+    assert found == [("fail", "token-eku", "yenileme")]
+    (day,) = [f for f in report.findings if f.code in LEVELS and f.where == DAY.isoformat()]
+    assert day.code == "renewal-due"
+    unlock_tree(tmp_path)
+
+
+@pytest.mark.parametrize("case", DELETION_CASES, ids=[case.name for case in DELETION_CASES])
+def test_a_deletion_records_token_is_judged_by_the_manifest_that_lists_it(
+    tmp_path: Path, case: DeletionCase
+) -> None:
+    """#156 item 1 (W5-A-19): a deletion record's token is judged by the EKU rule of the
+    manifest that seals the record, not by any manifest of the package; a record reached only
+    through the chain anchor by the package's rule. The standalone verifier on the vault and on
+    the package gives the case's findings, and the builder takes the legal CA's root for the
+    token exactly when they are warnings (rule 5): it ships a package that passes, or its
+    self-check refuses one whose record token fails."""
+    rw = make_world(tmp_path / "site")
+    days = case.build(rw)
+    # the builder
+    collected, _ = _collect_days(rw.layout, days, rw.roots, None)
+    records = _Records(
+        rw.layout, rw.roots, require_critical_eku=requires_critical_eku(rw.layout, days)
+    )
+    records.collect(collected)
+    assert (rw.legal.fingerprint in records.used_roots) is case.relaxed
+    # the standalone verifier on the vault (the auditor's roots: the mock and the legal one)
+    report = standalone_report(rw, Built(utc_now()), tmp_path / "vault-check")
+    found = {(f.level, f.code, f.where) for f in report.findings if f.code.startswith("token-eku")}
+    assert found == case.findings
+    # and on the package
+    if not case.relaxed:
+        failures = [
+            f"token-eku ({where})" for level, _, where in sorted(case.findings) if level == "fail"
+        ]
+        with pytest.raises(EvidenceError, match="token-eku") as refused:
+            _build(rw, list(days), tmp_path / "out")
+        assert all(failure in str(refused.value) for failure in failures), refused.value
+        unlock_tree(tmp_path)
+        return
+    info = _build(rw, list(days), tmp_path / "out")
+    folder = unpack(info, tmp_path / "pkg")
+    index = json.loads((folder / "paket.json").read_bytes())
+    assert rw.legal.fingerprint in {root["sha256"] for root in index["roots"]}
+    report = in_process(folder)
+    assert report.passed, report.codes()
+    found = {(f.level, f.code, f.where) for f in report.findings if f.code.startswith("token-eku")}
+    assert found == case.findings
     unlock_tree(tmp_path)

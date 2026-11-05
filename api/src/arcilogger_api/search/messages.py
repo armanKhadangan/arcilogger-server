@@ -1,10 +1,11 @@
 """Every error code and notice of Arama, Turkish first, English beside it (ADR-0015, contract 2.20).
 
 :data:`MESSAGES` holds the error codes of the search endpoints and of saved searches with their
-HTTP status (:data:`STATUS`); :data:`NOTICES` the notices a search answer carries. Placeholders
-in braces have the same names in both languages (a test checks it) and are filled from the
-machine-readable ``params`` of the error: ``{reason}`` and ``{format}`` hold a code that is
-translated here (:data:`REASONS`, :data:`FORMATS`), every other value is shown as it is.
+HTTP status (:data:`STATUS`), :data:`VARIANTS` a second text of a code for another cause;
+:data:`NOTICES` the notices a search answer carries. Placeholders in braces have the same names
+in both languages (a test checks it) and are filled from the machine-readable ``params`` of the
+error: ``{reason}`` and ``{format}`` hold a code that is translated here (:data:`REASONS`,
+:data:`FORMATS`), every other value is shown as it is.
 
 The query parser raises :class:`SearchQueryError` for anything it refuses, with the character
 span of the offending part; :func:`query_error` turns it into the API's error and
@@ -122,6 +123,30 @@ MESSAGES: Final[Mapping[str, tuple[str, str]]] = {
     "saved_search_limit": (
         "En fazla {n} kayıtlı arama saklanabilir.",
         "At most {n} saved searches can be kept.",
+    ),
+}
+
+#: (code, variant) → (Turkish, English): another text of a code, for another cause of the same
+#: answer. ``search_timeout`` of a search (``lock``) or an export (``export_lock``) that waited
+#: for the partition lock (``ARCIPART``, held exclusively by a step of the window job, the daily
+#: partitions or a reload's load) until its budget was gone: nothing was scanned, so the text of
+#: the shortest time slice does not fit (W5-G-24).
+VARIANTS: Final[Mapping[tuple[str, str], tuple[str, str]]] = {
+    ("search_timeout", "lock"): (
+        "Arama {seconds} saniyede başlayamadı: veritabanı bakımının (eski günlerin "
+        "kaldırılması, yeni bölümlerin açılması ya da arşivden yeniden yükleme) bitmesi "
+        "beklendi. Biraz sonra yeniden deneyin.",
+        "The search could not start within {seconds} s: it waited for database maintenance "
+        "(old days being dropped, new partitions being created or archived days being loaded "
+        "again) to finish. Try again a little later.",
+    ),
+    ("search_timeout", "export_lock"): (
+        "Dışa aktarma {seconds} saniyede başlayamadı: veritabanı bakımının (eski günlerin "
+        "kaldırılması, yeni bölümlerin açılması ya da arşivden yeniden yükleme) bitmesi "
+        "beklendi. Biraz sonra yeniden deneyin.",
+        "The export could not start within {seconds} s: it waited for database maintenance "
+        "(old days being dropped, new partitions being created or archived days being loaded "
+        "again) to finish. Try again a little later.",
     ),
 }
 
@@ -327,11 +352,18 @@ def _values(params: Mapping[str, Any], language: int) -> dict[str, Any]:
 
 
 def texts(
-    code: str, params: Mapping[str, Any] | None = None, *, catalogue: str = "errors"
+    code: str,
+    params: Mapping[str, Any] | None = None,
+    *,
+    catalogue: str = "errors",
+    variant: str | None = None,
 ) -> tuple[str, str]:
-    """The Turkish and English text of an error code (``catalogue="notices"``: a notice)."""
-    table = NOTICES if catalogue == "notices" else MESSAGES
-    message_tr, message_en = table[code]
+    """The Turkish and English text of an error code (``catalogue="notices"``: a notice;
+    ``variant``: its text of :data:`VARIANTS`)."""
+    if variant is not None:
+        message_tr, message_en = VARIANTS[code, variant]
+    else:
+        message_tr, message_en = (NOTICES if catalogue == "notices" else MESSAGES)[code]
     params = params or {}
     hint = params.get("hint")
     text_tr = message_tr.format(**_values(params, 0))
@@ -349,9 +381,10 @@ def search_error(
     *,
     headers: Mapping[str, str] | None = None,
     details: Any = None,
+    variant: str | None = None,
 ) -> ApiError:
-    """The API error of ``code`` with its texts and status."""
-    message_tr, message_en = texts(code, params)
+    """The API error of ``code`` with its texts (``variant``: of :data:`VARIANTS`) and status."""
+    message_tr, message_en = texts(code, params, variant=variant)
     return ApiError(STATUS[code], code, message_tr, message_en, headers=headers, details=details)
 
 

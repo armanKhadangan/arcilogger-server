@@ -4,8 +4,10 @@ migrations' lock held for the session, the daily partitions merged back into mon
 every row, the one ``settings.change`` entry (actor ``system``) for ``db.retention_days`` 30 →
 400 in the transaction that moves alembic's version, nothing for an administrator's value, a
 second run after a failure that goes on and audits once, the upgrade's own change written first
-when the window job had not audited it yet, and the exit codes 0, 1, 2 and 3.
-Plain PostgreSQL (``[database] timescale = "off"``): on TimescaleDB there is nothing to merge."""
+when the window job had not audited it yet, and the exit codes 0, 1, 2 and 3; and (issue #164)
+the rollback to a program from ``0021`` on: down to ``0021`` only, ``leases.moves`` dropped and
+nothing else. Plain PostgreSQL (``[database] timescale = "off"``): on TimescaleDB there is
+nothing to merge."""
 
 from __future__ import annotations
 
@@ -256,6 +258,84 @@ def test_the_downgrade_merges_the_daily_partitions_and_audits_the_window_once(
     assert f"Şema zaten {BEFORE} sürümünde" in capsys.readouterr().out
     assert len(_entries(site.engine)) == len(before) + 1
     assert _revision(site.engine) == (BEFORE,)
+
+
+def _leases(engine: Engine) -> list[Any]:
+    """Every lease, each column but ``moves`` (the one ``0022_lease_moves`` adds)."""
+    with engine.connect() as connection:
+        query = text("SELECT to_jsonb(lease) - 'moves' FROM leases AS lease ORDER BY id")
+        return list(connection.execute(query).scalars())
+
+
+def _lease_columns(engine: Engine) -> set[str]:
+    with engine.connect() as connection:
+        return set(
+            connection.execute(
+                text(
+                    "SELECT column_name FROM information_schema.columns "
+                    "WHERE table_name = 'leases' AND table_schema = current_schema()"
+                )
+            ).scalars()
+        )
+
+
+def test_the_downgrade_to_0021_drops_only_the_lease_moves(
+    site: Site, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Issue #164: a rollback to a program whose revisions end at ``0021_db_window`` takes the
+    schema from the head down to ``0021`` only, through ``0022_lease_moves``' downgrade, which
+    drops ``leases.moves`` and nothing else (lossless for 5651 data, the installer's list): the
+    daily partitions, every log row, every lease with its other columns (the ``"vd"`` keys of
+    its evidence too) and ``db.retention_days`` 30 stay, no audit entry is written. Run again:
+    nothing to do. This version's upgrade (after a failed swap) brings the column back."""
+    rows = _upgraded(site, capsys)
+    daily = {table: _daily(site.engine, table) for table in TIME_SERIES_TABLES}
+    evidence = [
+        {"table": "fg_dhcp", "row_id": 7, "time": "2026-11-03T09:00:00+00:00", "raw": None}
+        | {"summary": "DHCP Ack", "vd": "root"}
+    ]
+    moves = {"truncated": False, "groups": [{"ip": "172.20.60.184", "times": [1]}]}
+    with site.engine.begin() as connection:
+        connection.execute(
+            text(
+                "INSERT INTO leases (ip, mac, start, confidence, source_table, evidence, moves) "
+                "VALUES ('172.20.60.183', '00:00:5e:00:53:46', now() - interval '1 day', "
+                "'high', 'fg_dhcp', CAST(:evidence AS jsonb), CAST(:moves AS jsonb))"
+            ),
+            {"evidence": json.dumps(evidence), "moves": json.dumps(moves)},
+        )
+    leases = _leases(site.engine)
+    assert "moves" in _lease_columns(site.engine)
+    before = _entries(site.engine)
+    assert site.run("--to", REVISION, "--json") == 0
+    assert _json_out(capsys) == {
+        "from": HEAD,
+        "to": REVISION,
+        "downgraded": True,
+        "audit_id": None,
+        "retention_days": {"before": 30, "after": 30},
+        "upgrade_audit_id": None,
+    }
+    assert _revision(site.engine) == (REVISION,)
+    assert "moves" not in _lease_columns(site.engine)
+    assert _leases(site.engine) == leases
+    with site.engine.connect() as connection:
+        assert connection.execute(text("SELECT evidence FROM leases")).scalars().all() == [evidence]
+    assert _rows(site.engine) == rows
+    for table in TIME_SERIES_TABLES:
+        assert _daily(site.engine, table) == daily[table], table
+    assert _window(site.engine) == (30, ":seed")
+    assert len(_entries(site.engine)) == len(before)
+    assert _chain_ok(site.engine) == len(before)
+
+    assert site.run("--to", REVISION) == 0  # at the target already: nothing to do
+    assert f"Şema zaten {REVISION} sürümünde" in capsys.readouterr().out
+    assert main(["upgrade", "--config", str(site.config)]) == 0
+    capsys.readouterr()
+    assert _revision(site.engine) == (HEAD,)
+    assert _leases(site.engine) == leases
+    with site.engine.connect() as connection:
+        assert connection.execute(text("SELECT moves FROM leases")).scalars().all() == [None]
 
 
 def _partitions(engine: Engine) -> list[Any]:

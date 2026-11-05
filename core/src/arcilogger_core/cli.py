@@ -926,12 +926,13 @@ class _RenewError:
 
 def _renew_cause(app: App, exc: BaseException) -> str:
     """Why the run is refused: the provider cannot be made (the causes of :func:`_sealer`), or
-    it claims legal grade while no listed root is pinned."""
+    it claims legal grade while no listed root is pinned, or the stamp's own root is not listed
+    (W5-A-13)."""
     if isinstance(exc, SecretStoreError):
         return "secret-store"
     if isinstance(exc, TsaExecutableError):
         return "executable"
-    if isinstance(exc, RenewalLegalRootsError):  # no listed root pinned (W5-A-13)
+    if isinstance(exc, RenewalLegalRootsError):  # legal-roots, before or after the stamp (W5-A-13)
         return exc.cause
     return _provider_cause(app)
 
@@ -1002,7 +1003,9 @@ def _renew_held(args: argparse.Namespace, app: App, now: datetime) -> int:
         run = renew_held(app.layout, app.config, provider, roots, now)
     except RenewalNotNeeded as exc:
         return _renew_done(args, app, "not_needed", 0, now=now, report=exc.report)
-    except TsaConfigurationError as exc:  # found only at stamp time (no Java, no client)
+    except TsaConfigurationError as exc:
+        # Found only at stamp time: no Java, no client, or legal-roots (no listed root pinned
+        # before the stamp, or the stamp's own root not listed after it; W5-A-13).
         return _renew_refused(args, app, now, roots, _renew_cause(app, exc), exc)
     except (TsaError, RenewalError, OSError, subprocess.SubprocessError) as exc:
         log.error("renew failed: %s", exc)

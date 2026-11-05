@@ -4469,10 +4469,18 @@ def test_dry_run_rollback_skips_the_lease_step_for_a_version_that_reads_fortigat
 DOWNGRADE = "database.downgrade"
 DOWNGRADE_TEXT = "[downgrading the database to the restored version's schema]"
 DOWNGRADE_NOT_NEEDED = (
-    "[database schema not downgraded: the restored version knows 0021_db_window, or this "
-    "version's schema is from before it]"
+    "[database schema not downgraded: the restored version knows this version's schema, or this "
+    "version's schema is from before 0021_db_window]"
 )
 SCHEMA_UNKNOWN = "[could not tell the restored version's database schema, nothing changed]"
+#: ... the way down crosses a revision not on the installer's list (issue #164).
+SCHEMA_LOSSY = (
+    "[the database schema cannot go down to the restored version's without loss, nothing changed]"
+)
+NOT_LISTED = "[not on the list of lossless downgrades]"
+#: The revision of the floor (#122-5) and the one after it in this repository (issue #164).
+FLOOR = "0020_fg_traffic_transip_time"
+LEASE_MOVES = "0022_lease_moves"
 SCHEMA_SKIP_DATABASE = (
     "[the database schema must go down to the restored version's: no rollback with "
     "-SkipDatabase, nothing changed]"
@@ -4484,6 +4492,62 @@ def _downgrade_detail(plan: dict[str, Any]) -> dict[str, Any]:
     return detail
 
 
+def _repo_revisions() -> list[str]:
+    """This repository's revisions, oldest first, as Alembic itself reads them."""
+    from alembic.script import ScriptDirectory
+
+    from arcilogger_db.migrate import alembic_config
+
+    script = ScriptDirectory.from_config(alembic_config())
+    return [item.revision for item in reversed(list(script.walk_revisions()))]
+
+
+def _downgrade_list(name: str) -> list[tuple[str, str]]:
+    """``$LosslessDowngrades`` or ``$LossyDowngrades`` of the installer (issue #164), in its
+    order, each entry with the comment above it."""
+    source = INSTALL_SCRIPT.read_text(encoding="utf-8-sig")
+    block = re.search(rf"(?m)^\${name} = @\(\r?\n(.*?)^\)\r?$", source, re.S)
+    assert block, f"no ${name} = @( ... ) in the installer"
+    entries: list[tuple[str, str]] = []
+    comment: list[str] = []
+    for line in block.group(1).splitlines():
+        line = line.strip()
+        if line.startswith("#"):
+            comment.append(line.lstrip("# "))
+            continue
+        match = re.fullmatch(r"'([^']+)',?", line)
+        assert match, line
+        entries.append((match.group(1), " ".join(comment)))
+        comment = []
+    assert not comment, "a comment after the last entry"
+    return entries
+
+
+def test_the_lossless_downgrades_are_this_versions_revisions_above_the_floor() -> None:
+    """Issue #164: a rollback goes down only through revisions judged lossless for 5651 data,
+    and the installer lists them. Every revision of this version above the floor (#122-5) is
+    judged once: in ``$LosslessDowngrades`` or in ``$LossyDowngrades`` (none today; a rollback
+    across one is refused), never in both, each list newest first and each entry with its
+    judgement. A new revision fails this test until it is judged and listed, so no downgrade
+    enters the rollback silently, and a lossy one has a place of its own."""
+    revisions = _repo_revisions()
+    above = revisions[revisions.index(FLOOR) + 1 :]
+    entries = _downgrade_list("LosslessDowngrades")
+    lossy = _downgrade_list("LossyDowngrades")
+    lossless = [name for name, _ in entries]
+    lossy_names = [name for name, _ in lossy]
+    assert not set(lossless) & set(lossy_names)
+    assert sorted(lossless + lossy_names) == sorted(above)
+    for names in (lossless, lossy_names):
+        assert names == [name for name in above[::-1] if name in names]
+    for name, judgement in entries + lossy:
+        assert len(judgement) > 40, (name, judgement)
+    judged = dict(entries)
+    assert "leases.moves" in judged[LEASE_MOVES]
+    assert "back NULL" in judged[LEASE_MOVES]
+    assert "every row" in judged["0021_db_window"]
+
+
 def test_dry_run_rollback_downgrades_the_schema_before_the_swap(
     engine: str, tmp_path: Path
 ) -> None:
@@ -4493,13 +4557,16 @@ def test_dry_run_rollback_downgrades_the_schema_before_the_swap(
     version's head, never below the revision 0021 revises (the revisions before it were made for
     a previous version to run on; their downgrades delete data). The heads are read from the
     revision files of both programs; the installed one has this repository's, as the wheel ships
-    them, so the reading is checked against Alembic's own head. A previous version that has
-    0021_db_window gets no downgrade, also when this version has a later revision (the issue's
-    rule: only a previous head below 0021_db_window)."""
+    them, so the reading is checked against Alembic's own head. The previous version's revisions
+    are the first ones of this version's, and one from 0021_db_window on goes down to its own
+    head, through this version's later revisions (issue #164; #122 left it at this version's)."""
     from arcilogger_db.migrate import head_revisions
 
     bundle = make_fake_bundle(tmp_path)
-    program, previous = write_rollback_programs(tmp_path, ("0001_baseline", "0016_search"))
+    revisions = _repo_revisions()
+    program, previous = write_rollback_programs(
+        tmp_path, tuple(revisions[: revisions.index("0016_search") + 1])
+    )
     shutil.rmtree(program / MIGRATIONS)
     shutil.copytree(REPO_MIGRATIONS, program / MIGRATIONS)
     (head,) = head_revisions()
@@ -4526,29 +4593,110 @@ def test_dry_run_rollback_downgrades_the_schema_before_the_swap(
         "result": None,
     }
     # A previous version at the revision 0021 revises goes back to its head, the same one.
-    write_migrations(previous, *SCHEMA[:3])
+    shutil.rmtree(previous / MIGRATIONS)
+    write_migrations(previous, *revisions[: revisions.index(FLOOR) + 1])
     result, plan = dry_run(engine, tmp_path, bundle, "-Rollback")
     assert_dry_run_exit(result, plan)
     assert _downgrade_detail(plan)["to"] == "0020_fg_traffic_transip_time"
     assert _downgrade_detail(plan)["previous_head"] == "0020_fg_traffic_transip_time"
-    # A previous version from 0021_db_window on handles daily partitions: no downgrade, also of a
-    # later revision of this version.
-    shutil.rmtree(program / MIGRATIONS)
-    write_migrations(program, *SCHEMA, "0022_example")
-    write_migrations(previous, *SCHEMA)
+    # One from 0021_db_window on (issue #164): to its head, through this version's later ones.
+    shutil.rmtree(previous / MIGRATIONS)
+    write_migrations(previous, *revisions[: revisions.index("0021_db_window") + 1])
+    result, plan = dry_run(engine, tmp_path, bundle, "-Rollback")
+    assert_dry_run_exit(result, plan)
+    detail = _downgrade_detail(plan)
+    assert (detail["needed"], detail["to"], detail["installed_head"]) == (
+        True,
+        "0021_db_window",
+        head,
+    )
+
+
+def test_dry_run_rollback_downgrades_to_a_previous_head_from_0021_on(
+    engine: str, tmp_path: Path
+) -> None:
+    """Issue #164 (#122-4 generalised): this version has 0022_lease_moves. A previous version
+    whose revisions end at 0021_db_window gets the schema down to 0021 (its own upgrade would
+    fail on a revision it does not ship), one that ends at 0020 down to 0020, one at this
+    version's head none; one below the floor goes down to the floor (#122-5), past 0022 and
+    0021."""
+    bundle = make_fake_bundle(tmp_path)
+    program, previous = write_rollback_programs(tmp_path, SCHEMA)
+    write_migrations(program, *SCHEMA, LEASE_MOVES)
+    cases = {
+        SCHEMA: ("0021_db_window", "0021_db_window"),
+        SCHEMA[:3]: (FLOOR, FLOOR),
+        SCHEMA[:2]: ("0016_search", FLOOR),
+    }
+    for revisions, (previous_head, to) in cases.items():
+        shutil.rmtree(previous / MIGRATIONS)
+        write_migrations(previous, *revisions)
+        result, plan = dry_run(engine, tmp_path, bundle, "-Rollback")
+        assert_dry_run_exit(result, plan)
+        _before(_ids(plan), "services.stop", "leases.prepare-rollback", DOWNGRADE, "program.swap")
+        step = _items(plan)[DOWNGRADE]
+        assert step["status"] == "planned", revisions
+        assert f"({LEASE_MOVES} -> {to}, arcilogger-db schema downgrade --to {to})" in step["text"]
+        detail = _downgrade_detail(plan)
+        assert (detail["needed"], detail["to"]) == (True, to), revisions
+        assert (detail["installed_head"], detail["previous_head"]) == (LEASE_MOVES, previous_head)
+    # A previous version at this version's head: nothing to take down.
+    write_migrations(previous, *SCHEMA, LEASE_MOVES)
     result, plan = dry_run(engine, tmp_path, bundle, "-Rollback")
     assert_dry_run_exit(result, plan)
     assert _items(plan)[DOWNGRADE]["status"] == "skipped"
     detail = _downgrade_detail(plan)
-    assert (detail["installed_head"], detail["previous_head"]) == ("0022_example", SCHEMA[-1])
     assert (detail["needed"], detail["to"]) == (False, None)
-    # A previous version below it goes past 0022 and 0021, down to the floor.
+    assert (detail["installed_head"], detail["previous_head"]) == (LEASE_MOVES, LEASE_MOVES)
+    # -SkipDatabase cannot take 0022 down either.
     shutil.rmtree(previous / MIGRATIONS)
-    write_migrations(previous, *SCHEMA[:2])
-    result, plan = dry_run(engine, tmp_path, bundle, "-Rollback")
+    write_migrations(previous, *SCHEMA)
+    result, plan = dry_run(engine, tmp_path, bundle, "-Rollback", "-SkipDatabase")
+    text = _assert_refused(result, plan)
+    assert SCHEMA_SKIP_DATABASE in text
+    assert f"({LEASE_MOVES} -> 0021_db_window)" in text
+
+
+def test_dry_run_rollback_refuses_a_way_down_through_a_revision_not_listed_as_lossless(
+    engine: str, tmp_path: Path
+) -> None:
+    """Issue #164: the way down from this version's head to the target crosses only revisions
+    of the installer's list of lossless downgrades; one that is not on it (here an unlisted
+    0023, or a 0022 that is not 0022_lease_moves: the ids are compared exactly) stops the
+    rollback before any change (2), names the revisions and -Rollback -RestoreDatabase, also
+    when the target is right below it. With the dump no schema is looked at."""
+    bundle = make_fake_bundle(tmp_path)
+    program, previous = write_rollback_programs(tmp_path, SCHEMA)
+    write_migrations(program, *SCHEMA, LEASE_MOVES, "0023_example")
+    cases = {
+        (*SCHEMA, LEASE_MOVES): (LEASE_MOVES, "0023_example"),
+        SCHEMA: ("0021_db_window", "0023_example"),
+        SCHEMA[:2]: (FLOOR, "0023_example"),
+    }
+    for revisions, (to, lossy) in cases.items():
+        shutil.rmtree(previous / MIGRATIONS)
+        write_migrations(previous, *revisions)
+        result, plan = dry_run(engine, tmp_path, bundle, "-Rollback")
+        text = _assert_refused(result, plan)
+        assert text.startswith("Veritabanı şeması geri alınan sürümünkine kayıpsız"), text
+        assert SCHEMA_LOSSY in text
+        assert f"(0023_example -> {to}; " in text, text
+        assert f"{NOT_LISTED}: {lossy})" in text, text
+        restore = r'-File ".*installer.Install-Arcilogger\.ps1" -Rollback -RestoreDatabase$'
+        assert re.search(restore, text), text
+        assert (_downgrade_detail(plan)["needed"], _downgrade_detail(plan)["to"]) == (True, to)
+    result, plan = dry_run(engine, tmp_path, bundle, "-Rollback", "-RestoreDatabase")
     assert_dry_run_exit(result, plan)
-    detail = _downgrade_detail(plan)
-    assert (detail["installed_head"], detail["to"]) == ("0022_example", SCHEMA[2])
+    assert DOWNGRADE not in _ids(plan)
+    # The ids are compared exactly: another 0022 is not 0022_lease_moves.
+    shutil.rmtree(program / MIGRATIONS)
+    shutil.rmtree(previous / MIGRATIONS)
+    write_migrations(previous, *SCHEMA)
+    write_migrations(program, *SCHEMA, "0022_example")
+    result, plan = dry_run(engine, tmp_path, bundle, "-Rollback")
+    text = _assert_refused(result, plan)
+    assert "(0022_example -> 0021_db_window; " in text, text
+    assert f"{NOT_LISTED}: 0022_example)" in text, text
 
 
 def test_dry_run_rollback_skips_the_downgrade_the_restored_version_does_not_need(
@@ -4652,6 +4800,48 @@ def test_dry_run_rollback_refuses_a_previous_schema_it_cannot_tell(
     assert_dry_run_exit(result, plan)
     assert DOWNGRADE not in _ids(plan)
     _before(_ids(plan), "program.swap", "database.restore")
+
+
+def test_dry_run_rollback_refuses_previous_revisions_that_are_not_the_first_of_this_versions(
+    engine: str, tmp_path: Path
+) -> None:
+    """Issue #164: the previous version's revisions must be the first ones of this version's,
+    in the same order. One that has a revision this version does not ship (another 0022 after
+    0021: its head is unknown here), lacks one this version has before its head, or names one
+    in another place has diverged: the rollback stops before any change (2), as for revisions
+    it cannot read, and names -Rollback -RestoreDatabase."""
+    bundle = make_fake_bundle(tmp_path)
+    program, previous = write_rollback_programs(tmp_path, SCHEMA)
+    write_migrations(program, *SCHEMA, LEASE_MOVES)
+    not_first = "[the previous version's revisions are not the first ones of this version's]"
+    cases = {
+        (*SCHEMA, "0022_other"): (
+            "[the previous version's head is not one of this version's revisions]: 0022_other"
+        ),
+        ("0001_baseline", FLOOR, "0021_db_window"): (
+            f"{not_first}: 2. revizyon {FLOOR}, bu sürümde 0016_search "
+            f"[revision 2 is {FLOOR}, here 0016_search]"
+        ),
+        ("0001_baseline", "0016_other", FLOOR): (
+            f"{not_first}: 2. revizyon 0016_other, bu sürümde 0016_search "
+            "[revision 2 is 0016_other, here 0016_search]"
+        ),
+        ("0016_search", "0001_baseline"): (
+            f"{not_first}: 1. revizyon 0016_search, bu sürümde 0001_baseline "
+            "[revision 1 is 0016_search, here 0001_baseline]"
+        ),
+    }
+    for revisions, reason in cases.items():
+        shutil.rmtree(previous / MIGRATIONS)
+        write_migrations(previous, *revisions)
+        result, plan = dry_run(engine, tmp_path, bundle, "-Rollback")
+        text = _assert_refused(result, plan)
+        assert text.startswith("Geri alınan sürümün veritabanı şeması anlaşılamadı"), text
+        assert SCHEMA_UNKNOWN in text
+        assert reason in text, (revisions, text)
+        restore = r'-File ".*installer.Install-Arcilogger\.ps1" -Rollback -RestoreDatabase$'
+        assert re.search(restore, text), text
+        assert _downgrade_detail(plan)["needed"] is False
 
 
 def test_dry_run_rollback_needing_the_downgrade_refuses_skip_database(
@@ -5842,6 +6032,23 @@ $schema = @('0001_baseline', '0020_fg_traffic_transip_time', '0021_db_window')
 $previousSchema = $schema
 if ($Scenario.Contains('downgrade')) { $previousSchema = $schema[0..1] }
 if ($Scenario -eq 'rollback-downgrade-unknown') { $previousSchema = @() }
+# rollback-moves-* (issue #164): this version has 0022_lease_moves (-lossy: and a later revision
+# that is not on the installer's list of lossless downgrades) and the database is at its head;
+# the version before ends at 0021_db_window (-0021, -lossy; -at-target: the database is there
+# too), at the revision before it (-0020), at this version's head (-0022), or has a 0022 of its
+# own (-diverged). Names of the simulation's own: the installer's functions call the stubs below.
+$simDatabaseHead = '0021_db_window'
+if ($Scenario.StartsWith('rollback-moves')) {
+    $schema += '0022_lease_moves'
+    if ($Scenario -eq 'rollback-moves-lossy') { $schema += '0023_example' }
+    $simDatabaseHead = $schema[-1]
+    $previousSchema = $schema[0..2]
+    if ($Scenario -eq 'rollback-moves-at-target') { $simDatabaseHead = '0021_db_window' }
+    if ($Scenario -eq 'rollback-moves-0020') { $previousSchema = $schema[0..1] }
+    if ($Scenario -eq 'rollback-moves-0022') { $previousSchema = $schema }
+    if ($Scenario -eq 'rollback-moves-diverged') { $previousSchema = $schema[0..2] + '0022_other' }
+}
+$simSchemaHead = $schema[-1]
 $revisions = $(if ($rollback) { $schema } else { @() })
 New-FakeProgram -Folder $program -Version '1.0.0' -Fingerprint ('a' * 64) `
     -Services $currentServices -Revisions $revisions
@@ -6360,12 +6567,12 @@ if ($rollback) {
     # "arcilogger-db leases prepare-rollback" (contract 2.2.1): the count it prints, or (rollback-
     # leases-down) the database cannot be reached; "arcilogger-db upgrade" after a failed swap:
     # the seed's restore, or (...-restore-fails) a database error; "arcilogger-db current": the
-    # database at 0021_db_window, (rollback-downgrade-below) at the revision before it, or
-    # (rollback-downgrade-current-down) unreachable; "arcilogger-db schema downgrade --to
-    # <revision> --json" (issue #122): its JSON, or a failure (rollback-downgrade-fails: 1,
-    # -usage: 2, -db-down: 3), an answer of exit 0 that is not it (-bad-to, -not-json), or a
-    # process that could not be started or died without an answer (-crash: Invoke-ArciProcess
-    # throws).
+    # database at 0021_db_window (rollback-moves-*: as set above), (rollback-downgrade-below) at
+    # the revision before it, or (rollback-downgrade-current-down) unreachable; "arcilogger-db
+    # schema downgrade --to <revision> --json" (issue #122): its JSON, or a failure
+    # (rollback-downgrade-fails: 1, -usage: 2, -db-down: 3), an answer of exit 0 that is not it
+    # (-bad-to, -not-json), or a process that could not be started or died without an answer
+    # (-crash: Invoke-ArciProcess throws).
     function Invoke-ArciProcess {
         param([string]$FilePath, [string[]]$ArgumentList, [string]$StdinText,
             [hashtable]$Environment, [string[]]$Redact, [switch]$AllowFailure,
@@ -6388,8 +6595,9 @@ if ($rollback) {
                 $out = "Veritabanı: 0020_fg_traffic_transip_time`nEn yeni   : 0021_db_window`n"
                 return [pscustomobject]@{ ExitCode = 1; StdOut = $out; StdErr = '' }
             }
-            $out = "Veritabanı: 0021_db_window`nEn yeni   : 0021_db_window`n"
-            return [pscustomobject]@{ ExitCode = 0; StdOut = $out; StdErr = '' }
+            $out = "Veritabanı: $simDatabaseHead`nEn yeni   : $simSchemaHead`n"
+            $code = $(if ($simDatabaseHead -eq $simSchemaHead) { 0 } else { 1 })
+            return [pscustomobject]@{ ExitCode = $code; StdOut = $out; StdErr = '' }
         }
         if (($ArgumentList[0..1] -join ' ') -eq 'schema downgrade') {
             if ($Scenario -eq 'rollback-downgrade-crash') {
@@ -6415,10 +6623,16 @@ if ($rollback) {
             }
             $to = $ArgumentList[[array]::IndexOf($ArgumentList, '--to') + 1]
             if ($Scenario -eq 'rollback-downgrade-bad-to') { $to = '0021_db_window' }
-            $json = '{{"from": "0021_db_window", "to": "{0}", "downgraded": true, ' +
+            $json = '{{"from": "{1}", "to": "{0}", "downgraded": true, ' +
             '"audit_id": 4711, "retention_days": {{"before": 30, "after": 400}}, ' +
             '"upgrade_audit_id": 4710}}'
-            return [pscustomobject]@{ ExitCode = 0; StdOut = ($json -f $to); StdErr = '' }
+            if ($Scenario.StartsWith('rollback-moves') -and $to -eq '0021_db_window') {
+                # Down to 0021 only 0022's downgrade runs: db.retention_days stays, no entry.
+                $json = '{{"from": "{1}", "to": "{0}", "downgraded": true, "audit_id": null, ' +
+                '"retention_days": {{"before": 30, "after": 30}}, "upgrade_audit_id": null}}'
+            }
+            $answer = $json -f $to, $simDatabaseHead
+            return [pscustomobject]@{ ExitCode = 0; StdOut = $answer; StdErr = '' }
         }
         if ($ArgumentList[0] -eq 'upgrade') {
             if ($Scenario.EndsWith('-restore-fails')) {
@@ -7616,6 +7830,122 @@ def test_rollback_refuses_when_the_previous_schema_cannot_be_told(
     report = simulate(engine, tmp_path, "rollback-downgrade-unknown")
     assert report["exit"] == 2
     assert SCHEMA_UNKNOWN in report["message"]
+    assert "-Rollback -RestoreDatabase" in report["message"]
+    calls = report["calls"]
+    assert not [c for c in calls if c.startswith(("stop ", "process ", "rename ", "exe "))]
+    assert _folders(report) == {"ARCILOGGER": "1.0.0", "ARCILOGGER.previous": "0.9.0"}
+    assert _running(report) == NEW_SERVICES
+    assert report["tasks"] == {"Replica": "Disabled", "Seal": "Ready", "VerifyDaily": "Ready"}
+    assert report["state"].get("last_failure") is None
+
+
+@pytest.mark.parametrize(
+    ("scenario", "to", "printed"),
+    [
+        # Down to 0021 db.retention_days stays 30: not printed (nothing changed, no entry).
+        ("rollback-moves-0021", "0021_db_window", ""),
+        ("rollback-moves-0020", FLOOR, SCHEMA_DOWNGRADED.split(FLOOR, 1)[1]),
+    ],
+    ids=["0021", "0020"],
+)
+def test_rollback_from_0022_downgrades_to_the_previous_head(
+    engine: str, tmp_path: Path, scenario: str, to: str, printed: str
+) -> None:
+    """Issue #164: the database is at 0022_lease_moves, this version's head, and the previous
+    version's revisions end at 0021_db_window (its own upgrade fails on a database at 0022:
+    "Can't locate revision") or at 0020. With the services stopped and after the lease step,
+    before the swap, the command takes the database down to that head once (to 0021 through
+    0022's downgrade only; to 0020 through 0021's too), then the rollback goes on."""
+    report = simulate(engine, tmp_path, scenario)
+    assert report["exit"] is None, report["message"]
+    calls = report["calls"]
+    step = calls.index(DOWNGRADE_CALL)
+    assert calls.count(DOWNGRADE_CALL) == 1
+    leases = calls.index("process arcilogger-db.exe leases prepare-rollback")
+    assert leases < calls.index(CURRENT_CALL) < step < _first_call(calls, "rename ")
+    assert step > max(i for i, c in enumerate(calls) if c.startswith("stop "))
+    (process,) = [p for p in report["processes"] if p["arguments"].startswith("schema ")]
+    assert re.fullmatch(
+        rf"schema downgrade --to {to} --json --config \S*arcilogger\.toml", process["arguments"]
+    ), process["arguments"]
+    item = {i["id"]: i for i in report["plan"]}[DOWNGRADE]
+    assert item["status"] == "done"
+    detail = item["detail"]
+    assert (detail["installed_head"], detail["database_head"]) == (LEASE_MOVES, LEASE_MOVES)
+    assert (detail["previous_head"], detail["to"]) == (to, to)
+    assert (detail["result"]["from"], detail["result"]["to"]) == (LEASE_MOVES, to)
+    line = _unwrapped(f"Veritabanı şeması [database schema]: {LEASE_MOVES} -> {to}{printed}")
+    stdout = _unwrapped(report["stdout"])
+    assert line in stdout
+    assert not stdout[stdout.index(line) + len(line) :].startswith((";", ",")), stdout
+    assert REUPGRADE_CALL not in calls
+    assert _folders(report)["ARCILOGGER"] == "0.9.0"
+    assert _running(report) == ALL_SERVICES
+    assert report["state"].get("last_failure") is None
+
+
+def test_rollback_to_a_version_at_this_versions_head_runs_no_downgrade(
+    engine: str, tmp_path: Path
+) -> None:
+    """Issue #164: the previous version's revisions end at 0022_lease_moves too: no command,
+    not even the read of the database's revision; the step is recorded as skipped."""
+    report = simulate(engine, tmp_path, "rollback-moves-0022")
+    assert report["exit"] is None, report["message"]
+    assert not [c for c in report["calls"] if "schema" in c or c.startswith(CURRENT_CALL)]
+    item = {i["id"]: i for i in report["plan"]}[DOWNGRADE]
+    assert item["status"] == "skipped"
+    assert item["detail"]["previous_head"] == item["detail"]["installed_head"] == LEASE_MOVES
+    assert _unwrapped(DOWNGRADE_NOT_NEEDED) in _unwrapped(report["stdout"])
+    assert _folders(report)["ARCILOGGER"] == "0.9.0"
+
+
+def test_rollback_on_a_database_at_the_target_runs_no_downgrade(
+    engine: str, tmp_path: Path
+) -> None:
+    """Issue #164: the target is 0021_db_window and the database is there already (an -Upgrade
+    -SkipDatabase left it there): the step reads the revision, runs no command, and the
+    rollback goes on."""
+    report = simulate(engine, tmp_path, "rollback-moves-at-target")
+    assert report["exit"] is None, report["message"]
+    calls = report["calls"]
+    assert CURRENT_CALL in calls
+    assert DOWNGRADE_CALL not in calls
+    assert REUPGRADE_CALL not in calls
+    item = {i["id"]: i for i in report["plan"]}[DOWNGRADE]
+    assert item["status"] == "done"
+    assert (item["detail"]["database_head"], item["detail"]["to"]) == (
+        "0021_db_window",
+        "0021_db_window",
+    )
+    assert item["detail"]["result"] is None
+    at = (
+        "[the database schema is at 0021_db_window, the target 0021_db_window or before it: not "
+        "downgraded]"
+    )
+    assert _unwrapped(at) in _unwrapped(report["stdout"])
+    assert _folders(report)["ARCILOGGER"] == "0.9.0"
+    assert _running(report) == ALL_SERVICES
+
+
+@pytest.mark.parametrize(
+    ("scenario", "reason", "named"),
+    [
+        ("rollback-moves-diverged", SCHEMA_UNKNOWN, "0022_other"),
+        ("rollback-moves-lossy", SCHEMA_LOSSY, f"{NOT_LISTED}: 0023_example"),
+    ],
+)
+def test_rollback_refuses_a_diverged_or_lossy_way_down_before_any_change(
+    engine: str, tmp_path: Path, scenario: str, reason: str, named: str
+) -> None:
+    """Issue #164: previous revisions that are not the first ones of this version's (a 0022 of
+    their own), or a way down across a revision not listed as lossless (an unlisted 0023): the
+    rollback stops (2) before any change, the services and tasks of this version run on
+    untouched, and the message names -Rollback -RestoreDatabase."""
+    report = simulate(engine, tmp_path, scenario)
+    assert report["exit"] == 2
+    message = _unwrapped(report["message"])
+    assert _unwrapped(reason) in message
+    assert _unwrapped(named) in message
     assert "-Rollback -RestoreDatabase" in report["message"]
     calls = report["calls"]
     assert not [c for c in calls if c.startswith(("stop ", "process ", "rename ", "exe "))]
@@ -8878,15 +9208,21 @@ Invoke-DatabaseRestore
 """
 
 
-def _pg_bin(tmp_path: Path) -> Path | None:
+def _pg_bin(tmp_path: Path, major: int) -> Path | None:
     """A folder with psql.exe, pg_dump.exe and pg_restore.exe as the installer runs them (on
-    Linux links to PostgreSQL's binaries): ARCILOGGER_PGBIN, /usr/lib/postgresql/16/bin (Debian
-    and Ubuntu, whose PATH has wrapper scripts), or the folder of psql on PATH."""
+    Linux links to PostgreSQL's binaries), of the server's own major version ``major``, as the
+    installer bundles them: a newer pg_dump writes settings an older server does not know
+    (``SET transaction_timeout`` from 17 on), which ``pg_restore --exit-on-error`` stops at.
+    ARCILOGGER_PGBIN, /usr/lib/postgresql/<major>/bin (Debian and Ubuntu: their PATH has
+    pg_wrapper scripts, which pick the tool by their own name and so fail behind a ``.exe``
+    link), or the folder of psql on PATH when it is that version."""
     found = os.environ.get("ARCILOGGER_PGBIN")
-    if not found and Path("/usr/lib/postgresql/16/bin/psql").is_file():
-        found = "/usr/lib/postgresql/16/bin"
+    if not found and Path(f"/usr/lib/postgresql/{major}/bin/psql").is_file():
+        found = f"/usr/lib/postgresql/{major}/bin"
     if not found and (psql := shutil.which("psql")):
-        found = str(Path(psql).parent)
+        version = subprocess.run([psql, "--version"], capture_output=True, text=True).stdout
+        if re.search(rf"\b{major}\.\d", version):
+            found = str(Path(psql).parent)
     if not found:
         return None
     if os.name == "nt":  # the binaries are the .exe files already
@@ -8951,17 +9287,21 @@ def test_database_restore_puts_a_0020_dump_in_place_of_a_0021_database(
     assert TEST_PG is not None
     timescale = server == "timescaledb"
     expected = timescale and os.environ.get("ARCILOGGER_EXPECT_TIMESCALE") == "1"
-    pg_bin = _pg_bin(tmp_path)
-    if pg_bin is None:
-        if expected:
-            pytest.fail("psql / pg_dump / pg_restore not found (ARCILOGGER_EXPECT_TIMESCALE=1)")
-        pytest.skip("psql / pg_dump / pg_restore not found")
     dsn = urllib.parse.urlsplit(TEST_PG)
     user, password = dsn.username or "postgres", dsn.password or ""
     host, port = dsn.hostname or "127.0.0.1", str(dsn.port or 5432)
     name = f"arci_t_restore_{uuid.uuid4().hex[:12]}"
     base_url = f"postgresql+psycopg://{user}:{password}@{host}:{port}"
     admin = create_engine(f"{base_url}/postgres", isolation_level="AUTOCOMMIT", poolclass=NullPool)
+    with admin.connect() as connection:
+        major = int(connection.execute(text("SHOW server_version_num")).scalar_one()) // 10000
+    pg_bin = _pg_bin(tmp_path, major)
+    if pg_bin is None:
+        admin.dispose()
+        tools = f"PostgreSQL {major}'s psql / pg_dump / pg_restore not found"
+        if expected:
+            pytest.fail(f"{tools} (ARCILOGGER_EXPECT_TIMESCALE=1)")
+        pytest.skip(tools)
     if timescale and (missing := _timescale_missing(admin)):
         admin.dispose()
         if expected:

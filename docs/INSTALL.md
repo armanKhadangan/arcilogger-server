@@ -1044,31 +1044,45 @@ with **this** version's installer, the copy in the folder it was moved to
 restore writes the dump over the live database (`pg_restore --clean`), which fails on this
 version's schema.
 
-**Rollback to a version from before the daily partitions (schema revision `0021_db_window`).** A
-version from before this revision creates and drops monthly partitions only; it does not know the
-daily partitions (`<table>_pYYYYMMDD`). So a `-Rollback` without `-RestoreDatabase`, when the
-installed version's schema has `0021_db_window` and the schema of the version returned to does
-not, takes the database down to the schema of the version returned to after the services have
-stopped and after the FortiGate lease step (below; it works on the installed version's schema),
-before the program folders are swapped: the installed version's `arcilogger-db schema downgrade
---to <revision> --json` (step `database.downgrade`). Both versions' schemas are read from the
-migration files in their program folders
-(`venv\Lib\site-packages\arcilogger_db\migrations\versions`); neither Python nor the database is
-needed for that. A version returned to that has
-`0021_db_window` too gets no downgrade, as before. The target is the head of the version returned
-to, but never below the revision `0021_db_window` revises (`0020_fg_traffic_transip_time`): the
-older revisions were made for the previous version to run on (the NAT rows and FortiGate leases
-below), and undoing them deletes data (`0017`, for example, the FortiGate DHCP table). Right
-before the command, the step reads the database's own revision (`arcilogger-db current`): a
-database from before `0021_db_window` (an `-Upgrade -SkipDatabase` left it there) has no daily
-partitions, and nothing is downgraded. The downgrade merges the daily partitions into monthly ones
-(each table and month in a transaction of its own), sets `db.retention_days` back from 30 to 400
-and writes that to the audit log as `settings.change` (actor `system`; also the upgrade's own 400
-→ 30 first, when the window job had not audited it yet); the installer prints the old and the new
-value and the audit entries' numbers, and the plan (`-PlanPath`) keeps the command's answer in
-`result`. There is no time limit: on large tables it can take long. The command waits at most
-30 seconds for a lock: a backup still running (`pg_dump`; the scheduled tasks are paused when the
-rollback starts) makes it fail; wait until the backup has finished and run `-Rollback` again.
+**Rollback to a version with an older schema (schema revisions from `0021_db_window` on).** A
+version from before `0021_db_window` creates and drops monthly partitions only; it does not know
+the daily partitions (`<table>_pYYYYMMDD`). A version that has `0021_db_window` but not a later
+revision of the installed version (`0022_lease_moves`, for example) runs on, but its own
+`arcilogger-db upgrade` (its repair run, an `-Upgrade` to another bundle) fails on a database at
+a revision it does not ship ("Can't locate revision"). So a `-Rollback` without
+`-RestoreDatabase`, when the installed version's schema has `0021_db_window` and the version
+returned to does not have the installed version's head, takes the database down to the schema of
+the version returned to after the services have stopped and after the FortiGate lease step (below;
+it works on the installed version's schema), before the program folders are swapped: the
+installed version's `arcilogger-db schema downgrade --to <revision> --json` (step
+`database.downgrade`). Both versions' schemas are read from the migration files in their program
+folders (`venv\Lib\site-packages\arcilogger_db\migrations\versions`); neither Python nor the
+database is needed for that. The revisions of the version returned to must be the first ones of
+the installed version's, in the same order. A version returned to that has the installed
+version's head (the same revisions, or more after them) gets no downgrade. The target is the head
+of the version returned to, but never below the revision `0021_db_window` revises
+(`0020_fg_traffic_transip_time`): the older revisions were made for the previous version to run
+on (the NAT rows and FortiGate leases below), and undoing them deletes data (`0017`, for example,
+the FortiGate DHCP table). The downgrade goes only through revisions whose downgrade the
+installer lists as lossless for 5651 data (raw logs, log rows, leases and the audit log keep
+every row): `0022_lease_moves` (removes only the column `leases.moves`, the recorded missed moves
+of the leases: derived data, the FortiGate DHCP raw logs keep the ACKs; they are not rebuilt:
+after a later upgrade the column is empty and the lease job records moves again from its next run
+on, so a lease's moves from before the database window are no longer in the database) and
+`0021_db_window` (below).
+Right before the command, the step reads the database's own revision (`arcilogger-db current`): a
+database at the target or before it (an `-Upgrade -SkipDatabase` left it there) is left as it is;
+one from before `0021_db_window` has no daily partitions either. Down to `0021_db_window` only
+`leases.moves` goes; down to `0020_fg_traffic_transip_time` `0021_db_window` is undone too: the
+downgrade merges the daily partitions into monthly ones (each table and month in a transaction of
+its own), removes the requests to reload days from the archive (the sealed days stay in the
+vault), sets `db.retention_days` back from 30 to 400 and writes that to the audit log as
+`settings.change` (actor `system`; also the upgrade's own 400 → 30 first, when the window job had
+not audited it yet); the installer prints the old and the new value (only when it changed) and
+the audit entries' numbers, and the plan (`-PlanPath`) keeps the command's answer in `result`.
+There is no time limit: on large tables it can take long. The command waits at most 30 seconds for a lock: a backup
+still running (`pg_dump`; the scheduled tasks are paused when the rollback starts) makes it fail;
+wait until the backup has finished and run `-Rollback` again.
 
 - **If the downgrade fails**, the rollback stops with `3` before the program folders are swapped:
   the installed version stays in place and starts again on its own schema (the merges already
@@ -1086,9 +1100,10 @@ rollback starts) makes it fail; wait until the backup has finished and run `-Rol
   `ArciWeb` run and the installer prints the command to run by hand under "manual action needed".
 - If the schema head of the version returned to cannot be told (no migrations folder or one that
   cannot be read, files that do not form one line, a head that is not one of the installed
-  version's revisions), or `-SkipDatabase` is given when the downgrade is needed, the rollback
-  stops with `2` and changes nothing. With `-RestoreDatabase` the pre-upgrade dump replaces the
-  database; no downgrade runs.
+  version's revisions, revisions that are not the first ones of the installed version's), the
+  way down crosses a revision the installer does not list as lossless, or `-SkipDatabase` is given
+  when the downgrade is needed, the rollback stops with `2` and changes nothing. With
+  `-RestoreDatabase` the pre-upgrade dump replaces the database; no downgrade runs.
 
 A rollback (and the automatic return after a failed upgrade) loads the configuration **with the
 previous version's Python** before it starts that version's services. When the previous version

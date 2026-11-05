@@ -1042,6 +1042,22 @@ All Wave 5 questions are answered (2026-11-02).
   `alerts.system.CERT_EXPIRY_WARNING` (`timedelta(days=30)`), not a setting. A revocation still
   makes it `critical`. The findings count both (`expiring`, `uncovered`, beside `revoked`).
   "The `Renew` task failed twice in a row" stays W5-E's (W5-C-7).
+- **W5-C-13: `crl_stale` leaves out ARCILOGGER's test root, as `R20-crl` does (#160; W5-E-5,
+  Q6 of #158).** A chain whose root carries ARCILOGGER's test organization has no issuer in use
+  for `crl_stale` (W5-A D5: a test stamp never counts), so a mock or trial install no longer
+  shows it beside its `provider_not_legal`. The rule is one helper,
+  `alerts.system.crl_stamp` (the newest sealed day's stamp, or none for such a chain), which
+  `check_stamp_crl` and `compute_legal_status` both pass to `crl_status` (D11); this ends the
+  difference W5-E-5 left open. Only the root decides, and only the newest sealed day's chain is
+  in use (W5-C-3): on a site that holds test days and real days, `crl_stale` holds while the
+  newest one is a real CA's and that CA has no fresh list. `certificate_revoked` still reads the
+  stamp's chain whatever its root. The legal-status tests and samples now seal through a made-up
+  CA outside the test organization (`legalstatus.testing.simulated_ca`): the samples' Kamu SM
+  cases run on a site of their own whose sealed days repeat the capture's. Tests:
+  `test_crl_stamp_leaves_out_only_a_chain_to_the_test_root`,
+  `test_crl_stale_not_for_a_mock_install`,
+  `test_crl_stale_only_for_a_root_outside_the_test_organization` and
+  `test_crl_stale_on_a_mixed_site_by_the_newest_sealed_day` (`api/tests/test_legal_status_api.py`).
 
 ## Deviations — W5-G (2026-11-03)
 
@@ -1245,7 +1261,7 @@ All Wave 5 questions are answered (2026-11-02).
   aborted transaction, a lost connection) the connection is invalidated, never returned to the
   pool holding the lock. The wait is part of `search.request_budget_ms`: the scan gets what is
   left, and a wait that uses the budget up answers 504 `search_timeout` (audited `outcome:
-  timeout`). The lookup (READ COMMITTED) keeps the lock in its transaction as before. On any
+  timeout`; since W5-G-24 with the text of a lock wait). The lookup (READ COMMITTED) keeps the lock in its transaction as before. On any
   failure of the statement that takes the lock other than its timeout (`lock_not_available`) —
   a failure after the lock was granted, a cancelled statement, an interrupt or a cancelled task
   (`BaseException`), a lost connection — `hold_window` invalidates the connection too (#126 item
@@ -1377,7 +1393,8 @@ All Wave 5 questions are answered (2026-11-02).
   byte is sent; the failure handling of W5-G-18 is the same (the connection invalidated on any
   failure but the lock's timeout). The lock is waited for at most `search.request_budget_ms`, as
   by a search; the wait is taken from `search.export_budget_seconds`, and a wait that uses either
-  up answers 504 `search_timeout` (no new code; its `{seconds}` is the budget used up). That
+  up answers 504 `search_timeout` (no new code; its `{seconds}` is the budget used up; the
+  export's text of a lock wait since W5-G-24). That
   answer writes no `search.export` entry: no file and no row left the API (the search itself is
   audited by `search.run`), and the hourly limit counts only files. Whatever takes `ARCIPART`
   exclusively (a step of the window job, the daily `partitions.ensure`, ingest's reload claim)
@@ -1387,10 +1404,8 @@ All Wave 5 questions are answered (2026-11-02).
   deadline. Searches that come while such a step waits queue behind its exclusive request and
   may answer 504 `search_timeout`; on TimescaleDB an export did not delay searches before (open
   question on #148: a `lock_timeout` for the worker's step, or a cap on how long an export holds
-  the lock). On plain PostgreSQL ingest no longer stalls behind a step that waits for an export.
-  The export still does not check the
-  database window (`archived`, G8): a drop that finished before the export began gives the rows
-  the database holds, without saying which days are gone (open question on #148). Tests
+  the lock — answered by W5-G-24). On plain PostgreSQL ingest no longer stalls behind a step
+  that waits for an export. Since #165 the export checks the window (W5-G-24). Tests
   (`api/tests/test_search_window_lock.py`, two connections ordered by polling `pg_locks`):
   `test_an_export_in_progress_is_not_changed_by_a_drop` (fails without the lock on TimescaleDB),
   `test_an_export_that_cannot_get_the_lock_in_time_times_out`,
@@ -1398,6 +1413,106 @@ All Wave 5 questions are answered (2026-11-02).
   `test_the_export_releases_the_lock_before_its_audit_entry`,
   `test_a_failed_export_does_not_keep_the_lock`; `api/tests/test_search_export.py`:
   `test_the_audit_entry_is_committed_before_the_first_byte_is_sent`.
+- **W5-G-24: the export checks the database window; the worker's steps back off from a long
+  export; a lock-wait text of `search_timeout` (#165, the open questions of W5-G-23 on #148).**
+  - **(a) The export checks the window (G8).** A step of `db.window` that finished between
+    `POST /search` and `POST /search/export` left the export the rows the database still held,
+    in a file that did not say days were missing (no `-kismi`, no `X-Arci-Export-Truncated`,
+    `truncated: null`). Now, under the shared `ARCIPART` the export holds from before its
+    snapshot (W5-G-23), in that snapshot and before its first window, the export checks its
+    search's range with the search's own G8 function (`routers.search._archived(…,
+    refuse=True)`, `check_window(held=True)`) and answers as a search of that range would now.
+    **Every day gone** (and in the vault or being loaded): the search's 409
+    `archive_reload_required`, with the same `details` and texts; no file is built and no
+    `search.export` entry is written, as for the lock's 504 (the hourly limit counts files).
+    **Some days gone:** the rows the database holds, in a file marked partial with the new
+    reason `archived` (`Truncated` = `rows` | `time` | `archived`): the name `-kismi`,
+    `X-Arci-Export-Truncated: archived`, the "Bilgi" status "Bazı günler veritabanında yok
+    (mühürlü arşivde ya da yeniden yükleniyor) / Some days are not in the database (in the sealed
+    vault or being loaded again)" and a line "Veritabanında olmayan günler / Days not in the
+    database" (`YYYY-MM-DD`, or `YYYY-MM-DD - YYYY-MM-DD` for more than one day), and the entry's
+    `truncated: "archived"`. The `search.export` entry gets a new key `archived`: the search's
+    `ArchivedRange` (`{first_day, last_day, keep_days}`), or `null`. When the reading also
+    stopped at a limit, `X-Arci-Export-Truncated` and `truncated` keep where it stopped (`rows`,
+    `time`: one value, as before, so a client that reads them is unchanged), and the new header
+    `X-Arci-Export-Archived` (`YYYY-MM-DD`, or `YYYY-MM-DD/YYYY-MM-DD`), sent whenever days are
+    gone, names them: a CSV has no "Bilgi" sheet. Days gone with nothing in the vault to reload
+    give an unmarked file, as the search answers 200 with `archived: null` there (G8 unchanged).
+    Tests (`api/tests/test_search_window_lock.py`, the drop being the real `drop_before`,
+    committed after `POST /search` and before `POST /search/export`, no concurrency):
+    `test_an_export_after_a_drop_of_its_whole_range_answers_as_the_search` (the error equals a
+    fresh search's 409; no entry; the lock free),
+    `test_an_export_after_a_drop_of_part_of_its_range_is_marked_partial` (CSV and xlsx, the
+    rows a fresh search returns, the entry's `truncated` and `archived`, and with
+    `search.export_max_rows` 1 `rows` beside `X-Arci-Export-Archived`),
+    `test_the_days_gone_are_named_once_for_one_day_and_as_a_span_for_more`;
+    `api/tests/test_search_export.py` `test_csv`, `test_xlsx` (`archived: null`, no header, no
+    line).
+  - **(b) The worker's steps wait for the lock at most half the search budget.** Since W5-G-23
+    an export holds `ARCIPART` shared for up to `search.export_budget_seconds` (at most 900 s). A
+    `db.window` step or the daily `partitions.ensure` that asked for it exclusively meanwhile
+    kept that request queued, and every search that came behind it waited for the lock and
+    answered 504 `search_timeout`. Both now wait for it at most half of
+    `search.request_budget_ms` (`partitions.step_lock_timeout_ms`: 2000 ms at the default 4000,
+    250 ms at 500, 15 s at 30000; read at every step; a value unset or outside its range reads
+    as the default), by `partitions.lock_partitions(timeout_ms=…)`, which applies `lock_timeout`
+    to the lock's statement only and restores the transaction's previous value for its other
+    lock waits. Half, because a search waits for the lock shared at most its own budget
+    (W5-G-18) and PostgreSQL queues a new shared request behind a waiting exclusive one: a search
+    queued behind a step that does not get the lock keeps at least half its budget for its
+    scan, and a step still outwaits a running search that has less than half its budget left.
+    This bounds only the step's wait for the export: when the lock comes free during the wait
+    (the export ends), the step takes it, and a search queued behind it waits for the step as
+    before W5-G-23 (its table locks after `ARCIPART`, W5-G-21's wait behind a compression). A
+    step that does not get the lock in time (`lock_not_available`, `PartitionLockTimeoutError`)
+    changes nothing (the lock comes first in the step: no reload expired, nothing dropped, its
+    transaction rolled back; earlier steps of the run stay), writes a warning line, and fails
+    the run, which the worker retries (15 min,
+    30 min, … at most 4 h). It is not recorded `skipped`: a skipped run counts as the day's and
+    would not be retried until the next day. `db.window` opens `R20-db-window` (G3's key
+    `R20-db-window:none`, medium, `details.error` `PartitionLockTimeoutError`) for such a run
+    only when it is the `alerts.job_failures`-th (default 3) failed run in a row, counted as
+    `R20-job` counts them (`db_window.failed_in_a_row`: finished runs of the last 7 days,
+    `JOB_WINDOW`; a run a person started ends the count). Three failed runs in a row (about 0,
+    15 and 45 minutes) mean the lock was held longer than one export holds it. Every other
+    failure still opens it at once (G3), and the next successful run resolves it as before;
+    `R20-job:db.window` (high) is unchanged. `partitions.ensure` has no alert of its own
+    (`R20-job` after `alerts.job_failures` failed runs, unchanged); on TimescaleDB it has no
+    partitioned table and takes no lock. Ingest's exclusive takers (the reload claim and
+    `ensure_days`, `ingest/src/arcilogger_ingest/service.py`, `PARTITION_LOCK_TIMEOUT` 5 s) are
+    not changed: their 5 s exceed the default search budget of 4 s, so a search behind them may
+    still answer 504 (open question on #165). Tests: `worker/tests/test_db_window.py`
+    `test_the_steps_wait_for_the_lock_half_the_search_budget`,
+    `test_a_step_backs_off_from_an_export_and_a_search_meanwhile_is_not_held_up` (an export's
+    shared lock, the step's exclusive request and a search queued behind it, ordered by polling
+    `pg_locks`; the search is granted when the step gives up; nothing changed; the retry 15 min
+    later does the work), `test_only_the_third_backoff_in_a_row_raises_r20_db_window`,
+    `test_the_failed_runs_in_a_row_are_counted_as_r20_job_counts_them`,
+    `test_the_partitions_job_backs_off_from_an_export`; `db/tests/test_partitions.py`
+    `test_the_lock_of_a_step_is_waited_for_its_timeout_only`.
+  - **(c) A lock-wait text of `search_timeout`** (504, the same code; approved on #165). The
+    contract's text of `search_timeout` ("Arama {seconds} saniyede en kısa zaman dilimini (5
+    dakika) bile tarayamadı. …" / "The search could not scan even the shortest time slice (5
+    minutes) within {seconds} s. …") stays for a scan that ran out. When the partition lock was
+    not granted within `search.request_budget_ms`, or its wait used the request's budget up
+    (`routers.search.LockWaitError`), nothing was scanned, and a search and its next pages answer
+    with the variant `lock` (`search.messages.VARIANTS`): "Arama {seconds} saniyede başlayamadı:
+    veritabanı bakımının (eski günlerin kaldırılması, yeni bölümlerin açılması ya da arşivden
+    yeniden yükleme) bitmesi beklendi. Biraz sonra yeniden deneyin." / "The search could not
+    start within {seconds} s: it waited for database maintenance (old days being dropped, new
+    partitions being created or archived days being loaded again) to finish. Try again a little
+    later." The export's 504 is always the variant `export_lock` (its read stops at its deadline
+    with a `time` file, so its 504 is a lock wait): "Dışa aktarma {seconds} saniyede
+    başlayamadı: veritabanı bakımının (eski günlerin kaldırılması, yeni bölümlerin açılması ya
+    da arşivden yeniden yükleme) bitmesi beklendi. Biraz sonra yeniden deneyin." / "The export
+    could not start within {seconds} s: it waited for database maintenance (old days being
+    dropped, new partitions being created or archived days being loaded again) to finish. Try
+    again a little later." `{seconds}` is the budget used up, as before; the audit of a search's
+    timeout (`outcome: timeout`) is unchanged. Tests (`api/tests/test_search_window_lock.py`):
+    `test_the_lock_wait_texts_are_turkish_and_english_with_the_same_placeholders`,
+    `test_a_scan_that_runs_out_keeps_the_text_of_the_time_slice`, and the exact texts in the
+    lock-timeout and wait-from-budget tests of the search and the export.
+
 - **W5-G-25: a reset deletes its file's rows in steps on the loop (#124 stage 2, G4 live data
   first).** The reset transaction of W5-G-6 (38.7 s for a 5 M line file whose rows are present,
   W5-G-22) is split, one file at a time. Its first transaction locks the file's
@@ -1610,6 +1725,8 @@ All Wave 5 questions are answered (2026-11-02).
   `test_a_renewal_stamped_at_its_own_not_after_verifies_but_does_not_count` (the stamp verifies
   in both verifiers, and the renewal does not count), so neither is "fixed" into the other
   unnoticed.
+  Superseded in part by W5-A-19 (answer to Q3 on #177): `VERIFIER_VERSION` is "8", not "6"
+  (W5-A-17 set "7"; W5-A-8).
 - **W5-A-6: what stays in section 5.** The existing `renewal-ok` (each record's stamp) and
   `renewal-covers` (which packaged days a record names) stay beside the five new codes, and the
   section "5. Yenileme damgaları" now appears whenever the package has a day whose token
@@ -1622,8 +1739,10 @@ All Wave 5 questions are answered (2026-11-02).
   does not verify, it was revoked) is still renewable.
 - **W5-A-8: `VERIFIER_VERSION` is "6", not §2.1.4's "5".** Addendum H4: W5-H (#130) merged into
   `wave-5` first (84e71e1) and set "5", so W5-A, merging second, sets "6" (manager on #132,
-  2026-11-03 20:51). `test_renewal_standalone.py::test_verifier_version_is_6` pins it. If #136
-  (`xz-unsupported`) merges after W5-A, it takes "7" and updates that test.
+  2026-11-03 20:51). Superseded by W5-A-17 and W5-A-19 (answer to Q8, #156 item 7): W5-A-17
+  set "7", and W5-A-19 sets "8" because #136 has not merged, which
+  `test_renewal_standalone.py::test_verifier_version_is_8` pins; #136 (`xz-unsupported`) takes
+  "9" and updates that test when it merges.
 - **W5-A-9: exit codes beyond §2.1.3's wording.** `renew` catches its own errors (`main` maps
   every `TsaError` to 1). Exit 3 also covers a new stamp that does not verify or is revoked
   (`renewal_stamp_invalid`), another run holding `state/renewal.lock` (`renewal_busy`), a lock
@@ -1709,6 +1828,33 @@ All Wave 5 questions are answered (2026-11-02).
   granted on #137, 2026-11-04T09:07Z: those two functions and the error's import).
   `test_a_legal_claim_without_a_listed_root_exits_2` pins the cause in both places and each
   text in its own language.
+  **After the stamp too (#156 item 2).** The check before the stamp sees only the pinned set:
+  with roots A (listed) and B (not listed) both pinned and the provider chaining to B, it
+  passed, every due day was stamped and the renewal never counted (D5). `_write` now also
+  checks the stamp's own root once its token verifies: when the provider claims legal grade and
+  the root its chain ended at (`details["root_sha256"]`) is not in
+  `tsa.legal_root_fingerprints`, the record and its token are removed, as C15 does for a
+  revoked certificate, and the run raises `RenewalLegalRootsError(root=, root_sha256=)`. Its
+  TR/EN texts name that root (subject and SHA-256 fingerprint) and say that the record and its
+  token were removed, and that one stamp credit was spent and every later run spends another
+  until the root is listed in `tsa.legal_root_fingerprints` or the provider is corrected (answer
+  to Q6 on #177). The command handles it as above: exit 2,
+  `legal-roots` in `error.code` and `last_run.error`, `failures_in_a_row` + 1, so `R20-renewal`
+  raises after the second run. A run stopped between the stamp and this check (in
+  `verify_token`, say) leaves a part whose token verifies, so `recover` applies it too, as it
+  applies C15 (W5-A-14): `renew_held` passes `tsa.legal_root_fingerprints` as
+  `recover(..., legal_roots=)`, and a part whose record claims legal grade while its chain ends
+  at a root that is not listed is removed with its token, with a warning in the log naming that
+  root, instead of being promoted and locked (a locked record that never counts could not be
+  removed). `legal_roots` is a required keyword argument of `recover`, without a default, so no
+  caller skips the check by leaving it out; it applies only to a record that claims legal grade
+  (answer to Q5 on #177).
+  `test_a_stamp_under_a_pinned_but_unlisted_root_is_removed` (two pinned roots, one listed; a
+  stamp under the listed one is still kept),
+  `test_a_stamp_under_a_pinned_but_unlisted_root_exits_2` (`failures_in_a_row` 1, then 2) and
+  `test_an_interrupted_stamp_under_a_pinned_but_unlisted_root_is_removed` (both places the
+  token can be, through `recover` and through the next run; `recover` without `legal_roots` is a
+  `TypeError`) pin it.
 - **W5-A-14: `recover` checks revocation as the run does (#137 item 2).** W5-A-3's `recover`
   promoted an interrupted part whose token verified, without the stored revocation lists, so a
   run stopped between the stamp and its C15 check left a record that never counts. It now
@@ -1784,6 +1930,10 @@ All Wave 5 questions are answered (2026-11-02).
   root by a relaxed record with a non-critical EKU: the legal root is bundled, and the
   standalone verifier on the package and the core on the vault find the day
   `renewal-covered` with the same texts (rule 5).
+  Superseded in part by W5-A-19 (answer to Q3 on #177): `VERIFIER_VERSION` is "8", not "7"
+  (`test_verifier_version_is_8`), and #136 takes "9", not "8" (W5-A-8); `_relaxed_eku` no longer
+  judges a deletion record that a packaged manifest lists (the manifest that lists it does), and
+  the builder picks the root for that record's token by the same rule, not the package's.
 - **W5-A-18: a package ships the renewals of its deletion records (answer to Q5 on #132, #137
   item 7).** D3 renews deletion-record tokens, but the builder's `_renewals` matched only the
   packaged days' manifest and token hashes and the report's token hash, so a package that ships
@@ -1798,6 +1948,42 @@ All Wave 5 questions are answered (2026-11-02).
   `test_a_package_with_a_deletion_record_ships_its_renewals` (`test_renewal_evidence.py`)
   covers a two-deep chain behind a deletion record, the core's status of its token, the
   auditor's verifier on the package, and that a package without the record ships none of them.
+- **W5-A-19: a deletion record's token is judged by the manifest that seals it (answer to Q5,
+  #156 item 1).** W5-A-17 left deletion records under the package's rule (`_relaxed_eku`:
+  relaxed when any manifest of the package is), so the token of a record that a strict manifest
+  lists, with a non-critical EKU, passed with a warning beside a relaxed day. The standalone
+  verifier now judges it by the `tsa.require_critical_eku` of the manifest that lists it:
+  `_check_deletions` by that day's manifest, and `_check_anchor_link` by `_deletion_eku` (strict
+  when one of the package's manifests that list the record is strict; a record that no packaged
+  manifest lists, reached only through the chain anchor, by the package's rule). The builder
+  picks the root to bundle for that token as `_deletion_eku` does (rule 5): `_Records.collect`
+  passes `add`, for a listed record and for the one `_anchor` ships, the rule of the packaged
+  manifests that list it (strict when one of them is), else the package's. A record listed by
+  two manifests with different rules (a seal run that stopped before it wrote the record's
+  `.sealed` marker, so the next manifest lists it again) is judged strict for the anchor link
+  and the builder's root, and its token still at each listing day by that day's manifest (answer
+  to Q4 on #177): such a package fails at the strict day, and the builder's self-check refuses
+  it. The packaged report's stamp keeps the package's rule (`_relaxed_eku`,
+  `requires_critical_eku`), so W5-A-17's "`_relaxed_eku` now judges deletion records and the
+  packaged report's stamp only" now reads "a deletion record that no packaged
+  manifest lists and the packaged report's stamp". The core judges no deletion record's token
+  once a manifest seals it (`renewal._Reader` reads only its hashes and certificate,
+  `chain.verify_day` does not read `deletions`; `retention` verifies a new record with the
+  site's setting at that time), so no core file changes. Retention's own check of a new record
+  (`retention.recover`, `unfinished_record`) uses the `tsa.require_critical_eku` of its day, and
+  the rule of the manifest that lists the record decides (answer to Q7 on #177). The
+  standalone verifier's output changes, so `VERIFIER_VERSION` is "8" (addendum H4): #136 has
+  not merged, so it takes "9" (W5-A-8), which replaces W5-A-17's "W5-A-8's '7' for #136
+  becomes '8'"; `test_verifier_version_is_8` pins it. The shared case table gains `DELETION_CASES`
+  (`renewal_cases.py`): a record listed by a strict manifest beside a relaxed day (`token-eku`,
+  a warning before), one listed by a relaxed manifest beside a strict day
+  (`token-eku-not-critical`), one listed by a strict manifest, one listed by a strict and by a
+  relaxed manifest (`token-eku` at the strict day, `token-eku-not-critical` at the relaxed
+  one), one only behind the chain anchor in a relaxed and in a strict package, and one behind
+  the anchor and listed by a strict manifest in a relaxed package (`token-eku` at both days).
+  `test_a_deletion_records_token_is_judged_by_the_manifest_that_lists_it`
+  (`test_renewal_evidence.py`) runs each through the builder's choice of roots, the standalone
+  verifier on the vault and on the package (built, or refused by the self-check).
 
 ## Deviations — W5-E (2026-11-04)
 
@@ -2119,6 +2305,19 @@ All Wave 5 questions are answered (2026-11-02).
   browse budget (500 ms) and the slowest request below 10 × that. In the same review A2 (an
   asynchronous spool watermark) was deferred, to be revisited with field figures from a Windows
   site (sahada doğrula), and A3 was declined (2026-11-04).
+- **#119-2: the browse guard bounds what ingest adds, not the 95th percentile itself**
+  (decided on #119, 2026-11-04; amends the budget of #119-1). `test_browse_under_concurrent_ingest`
+  times a settled series before and after the series under ingest and asserts that the 95th
+  percentile under ingest less the larger settled one stays below the browse budget (500 ms);
+  `CEILING` (5 s) bounds the slowest request of each of the three series. Reason: on a Windows
+  runner the audit spool's `os.fsync` waits for the disk's write-back (#90's case; out of scope
+  by #119 item 3) in whichever series meets it, settled ones too. Run 41875393810 (#166 at
+  `32d4d2a`, job 126733285902) failed the absolute bound: under ingest p50 124 / p95 590 / max
+  757 ms (p95: sql 23, commit 7, fsync 511 ms), settled p95 331 ms (fsync 277 ms). Its re-run
+  (job 126780370555) passed: under ingest p95 134 ms, settled p95 332 ms with one 507 ms fsync.
+  Ingest held the stated rate in both (1,984 and 2,155 lines/s loaded). The absolute browse
+  budget of a settled server stays with `test_search_perf`'s Q1 (best of rounds, 500 ms), so a
+  regression that slows browse in every series is still caught there.
 
 ## Deviations — #122 (2026-11-04)
 
@@ -2152,15 +2351,49 @@ issue fixed is kept (command, flags, exit codes 0/1/2, JSON fields); what differ
   `changed_at`, as `db.window` would, plus `audited_at_downgrade {from, to}`), in the same
   transaction, then its own. The JSON gets one more field, `upgrade_audit_id` (int or null);
   the installer prints it.
-- **#122-4: when the installer downgrades.** `-Rollback` without `-RestoreDatabase` reads both
-  programs' Alembic revisions from `venv\Lib\site-packages\arcilogger_db\migrations\versions`
-  (no Python, no database; `Get-ArciAlembicChain`, as `Test-PreviousLeaseRollbackModule`'s
-  capability check). The step `database.downgrade` runs when this version has `0021_db_window`
-  and the previous one does not (the issue's rule; a previous version from `0021` on gets no
-  downgrade, also of later revisions, as rollbacks before #122). Right before the command it
-  reads the database's revision with this version's `arcilogger-db current`: a database from
-  before `0021_db_window` (`-Upgrade -SkipDatabase`) is left as it is. The command name is one
-  variable, `$SchemaDowngradeCommand`.
+- **#122-4 (deviation, issue #164): when the installer downgrades.** `-Rollback` without
+  `-RestoreDatabase` reads both programs' Alembic revisions from
+  `venv\Lib\site-packages\arcilogger_db\migrations\versions` (no Python, no database;
+  `Get-ArciAlembicChain`, as `Test-PreviousLeaseRollbackModule`'s capability check). Nothing is
+  downgraded when this version has no `0021_db_window`, or when the previous version knows this
+  version's head (the same revisions, or this version's followed by more). Otherwise the previous
+  version's revisions must be the first ones of this version's (the same ids in the same order),
+  and the step `database.downgrade` takes the database to max(previous head,
+  `0020_fg_traffic_transip_time`) (the floor, #122-5). #122's rule was "only when the previous
+  version has no `0021`; a previous version from `0021` on gets no downgrade, also of later
+  revisions": after `0022_lease_moves` a rollback to a program with `0021` but without `0022`
+  left the database at `0022`, and that program's own `arcilogger-db upgrade` (its repair run, an
+  `-Upgrade` to another bundle without `0022`, what `arcilogger-db check`/`current` advise) fails
+  with `Can't locate revision identified by '0022_lease_moves'` (issue #164, from the review of
+  #163). The way down crosses only revisions whose downgrade is lossless for 5651 data (raw logs,
+  log rows, leases and the audit log keep every row): `$LosslessDowngrades` in the installer,
+  newest first, each with its judgement in a comment. Today `0022_lease_moves` (drops
+  `leases.moves`, the recorded missed moves, and nothing else: derived data, the FortiGate DHCP
+  raw logs keep the ACKs, while the database keeps `fg_dhcp` rows for its window only; the moves
+  are not rebuilt: a later upgrade brings the column back NULL, no backfill (#127), the lease job
+  records the moves it sees from its next run on, and a lease's moves from before the window are
+  then gone from the database; the `"vd"` keys stay in `leases.evidence`, #127) and
+  `0021_db_window` (merges the daily partitions into monthly ones with every row; drops
+  `archive_reloads`, whose sealed days stay in the vault, `db.reload_keep_days` and the window's
+  status rows; `db.retention_days` 30 → 400, a longer window, audited by the command, #122-2). A
+  revision whose downgrade loses such data goes into `$LossyDowngrades` (none today), with what it
+  loses; a rollback across it is refused (#122-7), the way back is the pre-upgrade dump. The plan
+  checks the way from this version's head (the database is not above it) down to the target.
+  `test_the_lossless_downgrades_are_this_versions_revisions_above_the_floor` asserts that every
+  revision of this version above the floor is in exactly one of the two lists, each newest first
+  and each entry with its judgement: a new revision fails it until it is judged and listed, and
+  none enters the rollback silently. Right before the command the step reads the
+  database's revision with this version's `arcilogger-db current`: a database at the target or
+  below it (`-Upgrade -SkipDatabase`; one from before `0021_db_window` has no daily partitions) is
+  left as it is. The command name is one variable, `$SchemaDowngradeCommand`. The release path
+  wave-4 (`0020`) → wave-5 → `-Rollback` is unchanged: down to `0020`, through `0022`'s drop and
+  `0021`'s merge. Tests: `test_dry_run_rollback_downgrades_to_a_previous_head_from_0021_on`,
+  `test_rollback_from_0022_downgrades_to_the_previous_head`,
+  `test_rollback_to_a_version_at_this_versions_head_runs_no_downgrade`,
+  `test_rollback_on_a_database_at_the_target_runs_no_downgrade`, and against PostgreSQL
+  `test_the_downgrade_to_0021_drops_only_the_lease_moves` (`schema downgrade --to
+  0021_db_window` from the head). `arcilogger-db schema downgrade` needed no change: it already
+  takes every revision this version ships (#122-1).
 - **#122-5 (deviation, accepted by the manager on #147): the floor.** The target is the previous
   head but never below `0020_fg_traffic_transip_time`, the revision `0021` revises. The older
   revisions were made for a previous version to run on, and their downgrades delete or rebuild
@@ -2183,8 +2416,15 @@ issue fixed is kept (command, flags, exit codes 0/1/2, JSON fields); what differ
   naming the command.
 - **#122-7: refusals before any change (exit 2).** A previous head that cannot be told (no
   folder, no revision file, an unreadable line, a duplicate, a branch, two bases, a broken
-  chain, a head not among this version's revisions), or `-SkipDatabase` when the downgrade is
-  needed. `-RestoreDatabase` skips the schema check.
+  chain, a head not among this version's revisions), previous revisions that are not the first
+  ones of this version's (#164: one missing before its head, or one in another place; the text
+  names the first that differs), a way down across a revision not on `$LosslessDowngrades`
+  (#164; the text names it), or `-SkipDatabase` when the downgrade is needed. Each is TR/EN; all
+  but the last give the command `-Rollback -RestoreDatabase`, the last says to run without
+  `-SkipDatabase` or with `-RestoreDatabase`. `-RestoreDatabase` skips the schema check. Tests:
+  `test_dry_run_rollback_refuses_previous_revisions_that_are_not_the_first_of_this_versions`,
+  `test_dry_run_rollback_refuses_a_way_down_through_a_revision_not_listed_as_lossless`,
+  `test_rollback_refuses_a_diverged_or_lossy_way_down_before_any_change`.
 - **#122-8 (deviation, accepted by the manager on #147 with the review's items 1–6):
   `-RestoreDatabase` restores into a new database.** `pg_restore --clean --single-transaction`
   into the live database cannot restore a `0020` dump over a `0021` database (`archive_reloads`'
@@ -2364,10 +2604,13 @@ issue fixed is kept (command, flags, exit codes 0/1/2, JSON fields); what differ
     (`worker/service.py:246`) reads all open leases' moves (at most 1,000 times each): their
     part outside `[lo, hi)` must be recomputed, so the incremental job's shortcut does not
     apply.
-  - **Rollback (manager decision 4 on #127):** per #122-4, `-Rollback` to a previous version
-    from `0021_db_window` on runs **no** downgrade, so after a rollback to a `0021` program the
-    `leases.moves` column stays: the `0021` program inserts leases with `moves` NULL (it does
-    not know the column) and leaves the moves of the rows it updates. Stale moves are harmless:
+  - **Rollback (manager decision 4 on #127):** changed by issue #164 (#122-4): `-Rollback` to a
+    `0021` program now downgrades to `0021_db_window`, which drops `leases.moves` only (below);
+    a later upgrade brings the column back NULL and the lease job records from its next run on.
+    The rest of this item is the decision as made on #127. Per #122-4, `-Rollback` to a
+    previous version from `0021_db_window` on runs **no** downgrade, so after a rollback to a
+    `0021` program the `leases.moves` column stays: the `0021` program inserts leases with
+    `moves` NULL (it does not know the column) and leaves the moves of the rows it updates. Stale moves are harmless:
     moves only ever add evidence (a move the `0021` program saw is simply missing), and the
     `0022` program cuts them to the lease, and bounds them, on its next write of that lease.
     When a downgrade below `0022_lease_moves` does run (#122's command to an older target), it

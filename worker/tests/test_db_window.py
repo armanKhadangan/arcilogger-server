@@ -17,9 +17,12 @@ from __future__ import annotations
 import html
 import importlib.util
 import json
-from collections.abc import Iterator
+import threading
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from datetime import UTC, date, datetime, time, timedelta
 from pathlib import Path
+from time import monotonic, sleep
 from typing import Any
 
 import pytest
@@ -35,8 +38,8 @@ from arcilogger_db.audit import verify_audit_chain
 from arcilogger_db.engine import engine_from_url, session_factory
 from arcilogger_db.migrate import upgrade
 from arcilogger_db.models import Alert, ArchiveReload, AuditLog, JobRun, MtDhcp, Setting
-from arcilogger_db.partitions import DAYS_PER_RUN
-from arcilogger_db.settings import DEFAULT_SETTINGS
+from arcilogger_db.partitions import DAYS_PER_RUN, PARTITION_LOCK_KEY, step_lock_timeout_ms
+from arcilogger_db.settings import DEFAULT_SETTINGS, set_setting
 from arcilogger_db.testing import TestServer, pause_compression_jobs
 from arcilogger_worker import db_window
 from arcilogger_worker.alerts.mail import MailItem, render_html, render_text, subject
@@ -521,6 +524,280 @@ def test_a_failure_after_the_steps_fails_the_run_and_keeps_the_drop(
     assert worker.tick() == [("db.window", "ok")]
     db_session.expire_all()
     assert len(_audit(db_session, "db.window")) == 1  # nothing left to drop
+
+
+# -- the partition lock: a step backs off from a long export (W5-G-24) --------------------------
+
+#: ``pg_locks`` names a bigint advisory key by its two 32-bit halves.
+KEY_HIGH, KEY_LOW = divmod(PARTITION_LOCK_KEY % 2**64, 2**32)
+#: The sessions waiting for the partition lock, by mode (``ExclusiveLock``: a step,
+#: ``ShareLock``: a search).
+WAITING = text(
+    "SELECT mode FROM pg_locks WHERE locktype = 'advisory' AND NOT granted "
+    "AND database = (SELECT oid FROM pg_database WHERE datname = current_database()) "
+    "AND CAST(classid AS bigint) = :high AND CAST(objid AS bigint) = :low AND objsubid = 1 "
+    "ORDER BY mode"
+)
+
+
+@pytest.fixture
+def outside(engine: Engine) -> Iterator[Engine]:
+    """Connections of the export and the search, outside the worker's pool."""
+    other = engine_from_url(engine.url, poolclass=NullPool)
+    yield other
+    other.dispose()
+
+
+@contextmanager
+def _export_holding(engine: Engine) -> Iterator[None]:
+    """The partition lock held shared at session level, as a running export holds it
+    (``archive.service.hold_window``, W5-G-23)."""
+    with engine.connect() as holder:
+        holder.execute(text("SELECT pg_advisory_lock_shared(:key)"), {"key": PARTITION_LOCK_KEY})
+        holder.commit()
+        try:
+            yield
+        finally:
+            holder.execute(
+                text("SELECT pg_advisory_unlock_shared(:key)"), {"key": PARTITION_LOCK_KEY}
+            )
+            holder.commit()
+
+
+def _in_thread(call: Callable[[], Any]) -> tuple[threading.Thread, list[Any]]:
+    """``call`` started in a thread; its result (or exception) lands in the list."""
+    answer: list[Any] = []
+
+    def run() -> None:
+        try:
+            answer.append(call())
+        except BaseException as exc:  # the test thread re-raises it
+            answer.append(exc)
+
+    thread = threading.Thread(target=run, daemon=True)
+    thread.start()
+    return thread, answer
+
+
+def _wait_for_waiters(engine: Engine, modes: list[str], thread: threading.Thread) -> None:
+    """Until the sessions waiting for the partition lock are exactly ``modes``."""
+    deadline = monotonic() + 15
+    with engine.connect() as watcher:
+        while monotonic() < deadline:
+            waiting = list(watcher.execute(WAITING, {"high": KEY_HIGH, "low": KEY_LOW}).scalars())
+            watcher.rollback()
+            if waiting == modes:
+                return
+            assert thread.is_alive(), f"finished before {modes} waited ({waiting})"
+            sleep(0.02)
+    pytest.fail(f"never waiting for the partition lock: {modes}")
+
+
+def _search_lock(engine: Engine, budget_ms: int) -> float:
+    """A search's wait for the partition lock (W5-G-18: shared, at most its budget); seconds.
+    The statement of ``archive.service.hold_window`` as raw SQL, not the API's request: the
+    worker's tests do not start the API."""
+    with engine.connect() as search:
+        started = monotonic()
+        search.execute(
+            text(
+                "SELECT pg_advisory_lock_shared(:key) "
+                "FROM (SELECT set_config('lock_timeout', :wait, true)) AS deadline"
+            ),
+            {"key": PARTITION_LOCK_KEY, "wait": f"{budget_ms}ms"},
+        )
+        waited = monotonic() - started
+        search.execute(text("SELECT pg_advisory_unlock_shared(:key)"), {"key": PARTITION_LOCK_KEY})
+        search.commit()
+    return waited
+
+
+def _tick_beside_export(worker: Worker) -> list[tuple[str, str]]:
+    """``worker.tick()`` while an export holds the lock: it must end on its own (a step that
+    waited for the export would end only when the export does)."""
+    thread, answer = _in_thread(worker.tick)
+    thread.join(30)
+    assert not thread.is_alive(), "the step waits for the export"
+    (ticked,) = answer
+    if isinstance(ticked, BaseException):
+        raise ticked
+    return list(ticked)
+
+
+def _set(engine: Engine, key: str, value: Any) -> None:
+    with Session(engine) as session:
+        set_setting(session, key, value, updated_by="test")
+        session.commit()
+
+
+def test_the_steps_wait_for_the_lock_half_the_search_budget(engine: Engine) -> None:
+    """Half of ``search.request_budget_ms`` (default 4000 ms → 2000 ms), the default when the
+    stored value is out of its range."""
+    assert DEFAULT_SETTINGS["search.request_budget_ms"] == 4000
+    with engine.connect() as connection:
+        assert step_lock_timeout_ms(connection) == 2000
+    _set(engine, "search.request_budget_ms", 500)
+    with engine.connect() as connection:
+        assert step_lock_timeout_ms(connection) == 250
+    with engine.begin() as connection:  # stored before a bound: read as the default
+        connection.execute(
+            update(Setting).where(Setting.key == "search.request_budget_ms").values(value=10)
+        )
+    with engine.connect() as connection:
+        assert step_lock_timeout_ms(connection) == 2000
+
+
+def test_a_step_backs_off_from_an_export_and_a_search_meanwhile_is_not_held_up(
+    engine: Engine, outside: Engine, db_session: Session, layout: Layout
+) -> None:
+    """An export holds the lock shared; the step asks for it exclusively and a search that
+    comes meanwhile queues behind that request. After half the search budget (2 s of 4 s) the
+    step gives up: the search gets the lock within its budget, the run fails without a change
+    (no drop, the expired reload still ``ready``, no audit entry) and opens no alert (the first
+    failed run). The next run after the export ended does the work."""
+    _sealed(layout, date(2026, 1, 1), TODAY - timedelta(days=1))
+    reload_id = _reload(
+        db_session,
+        date(2026, 4, 10),
+        date(2026, 4, 12),
+        "ready",
+        ready_at=NOW - timedelta(days=KEEP + 1),
+        expires_at=NOW - timedelta(days=1),
+    )
+    _rows(engine, [date(2026, 4, 11), TODAY])
+    budget = int(DEFAULT_SETTINGS["search.request_budget_ms"])
+    clock = Clock(NOW)
+    worker = _window_worker(engine, layout, clock)
+    with _export_holding(outside):
+        step, ran = _in_thread(lambda: (monotonic(), worker.tick(), monotonic()))
+        _wait_for_waiters(outside, ["ExclusiveLock"], step)
+        search, waited = _in_thread(lambda: _search_lock(outside, budget))
+        _wait_for_waiters(outside, ["ExclusiveLock", "ShareLock"], search)
+        search.join(30)
+        step.join(30)
+        (answer,) = waited
+        if isinstance(answer, BaseException):
+            raise answer
+        # Granted when the step gave up (2 s after it asked, before the search came): the search
+        # keeps about half its budget, 1 s of margin for a loaded runner.
+        assert answer < budget / 2000 + 1.0
+        ((started, ticked, ended),) = ran
+        assert ticked == [("db.window", "failed")]
+        assert 2.0 <= ended - started < budget / 1000
+        db_session.expire_all()
+        (run,) = db_session.scalars(select(JobRun).where(JobRun.job == "db.window")).all()
+        assert run.status == "failed"
+        assert run.details["error"] == "PartitionLockTimeoutError"
+        assert _days_left(engine) == [date(2026, 4, 11), TODAY]
+        reload = db_session.get(ArchiveReload, reload_id)
+        assert reload is not None
+        assert reload.status == "ready"
+        assert _audit(db_session, "db.window") == []
+        assert db_session.scalars(select(Alert)).all() == []
+    clock.now = worker.states["db.window"].retry_at or NOW
+    assert clock.now == NOW + timedelta(minutes=15)
+    assert worker.tick() == [("db.window", "ok")]
+    db_session.expire_all()
+    assert _days_left(engine) == [TODAY]
+    db_session.refresh(reload)
+    assert reload.status == "expired"
+    assert len(_audit(db_session, "db.window")) == 1
+
+
+def test_only_the_third_backoff_in_a_row_raises_r20_db_window(
+    engine: Engine, outside: Engine, db_session: Session, layout: Layout
+) -> None:
+    """``alerts.job_failures`` (3) runs in a row that did not get the lock open the one
+    ``R20-db-window`` alert of a failed run, as ``R20-job`` counts them; the next successful
+    run resolves it. With ``alerts.job_failures`` 1 the first backoff opens it."""
+    _sealed(layout, date(2026, 1, 1), TODAY - timedelta(days=1))
+    _rows(engine, [date(2026, 4, 11), TODAY])
+    _set(engine, "search.request_budget_ms", 500)  # the steps wait 250 ms
+    clock = Clock(NOW)
+    worker = _window_worker(engine, layout, clock)
+    with _export_holding(outside):
+        for _ in range(2):
+            assert _tick_beside_export(worker) == [("db.window", "failed")]
+            assert _window_alerts(db_session) == {}
+            clock.now = worker.states["db.window"].retry_at or NOW
+        assert _tick_beside_export(worker) == [("db.window", "failed")]
+        alert = _window_alerts(db_session)[WINDOW_KEY]
+        assert (alert.severity, alert.state) == ("medium", "open")
+        assert alert.details["error"] == "PartitionLockTimeoutError"
+        db_session.expire_all()
+        runs = db_session.scalars(select(JobRun).where(JobRun.job == "db.window")).all()
+        assert [run.details["error"] for run in runs] == ["PartitionLockTimeoutError"] * 3
+        assert _days_left(engine) == [date(2026, 4, 11), TODAY]
+    clock.now = worker.states["db.window"].retry_at or NOW
+    assert worker.tick() == [("db.window", "ok")]
+    alert = _window_alerts(db_session)[WINDOW_KEY]
+    assert alert.state == "resolved"
+    assert _days_left(engine) == [TODAY]
+
+    _set(engine, "alerts.job_failures", 1)
+    clock.now = NOW + timedelta(days=1)
+    with _export_holding(outside):
+        assert _tick_beside_export(worker) == [("db.window", "failed")]
+    assert {key: a.state for key, a in _window_alerts(db_session).items()} == {WINDOW_KEY: "open"}
+
+
+def test_the_failed_runs_in_a_row_are_counted_as_r20_job_counts_them(db_session: Session) -> None:
+    """Back from the newest finished run until one did not fail, a run a person started
+    (``details.manual``) or a run older than ``JOB_WINDOW`` (7 days); a running run is left
+    out."""
+
+    def run(status: str, age: timedelta, **details: Any) -> None:
+        at = NOW - age
+        db_session.add(
+            JobRun(job="db.window", started_at=at, finished_at=at, status=status, details=details)
+        )
+        db_session.flush()
+
+    assert db_window.failed_in_a_row(db_session, NOW) == 0
+    run("failed", timedelta(days=8))  # outside the window
+    assert db_window.failed_in_a_row(db_session, NOW) == 0
+    run("failed", timedelta(days=6))
+    run("failed", timedelta(days=5), manual=True)  # a person's run ends the count
+    run("failed", timedelta(days=4))
+    run("failed", timedelta(days=3))
+    assert db_window.failed_in_a_row(db_session, NOW) == 2
+    run("ok", timedelta(days=2))
+    run("failed", timedelta(days=1), error="PartitionLockTimeoutError")
+    run("running", timedelta(minutes=1))
+    assert db_window.failed_in_a_row(db_session, NOW) == 1
+    db_session.rollback()
+
+
+def test_the_partitions_job_backs_off_from_an_export(
+    engine: Engine, outside: Engine, db_session: Session, layout: Layout
+) -> None:
+    """``partitions.ensure`` waits for the lock the same half budget: its run fails without a
+    partition made and is retried; the next run after the export makes them. On TimescaleDB
+    it has nothing to do and takes no lock."""
+    _set(engine, "search.request_budget_ms", 500)
+    job = next(job for job in default_jobs(60) if job.name == "partitions.ensure")
+    clock = Clock(NOW)
+    worker = Worker(engine=engine, layout=layout, jobs=[job], clock=clock, config=_config(layout))
+    hypertables = _storage(engine) == "hypertables"
+    with _export_holding(outside):
+        started = monotonic()
+        ticked = _tick_beside_export(worker)
+        assert ticked == [("partitions.ensure", "ok" if hypertables else "failed")]
+        assert monotonic() - started < 2.0  # 250 ms
+    db_session.expire_all()
+    (run,) = db_session.scalars(select(JobRun).where(JobRun.job == "partitions.ensure")).all()
+    if hypertables:
+        assert run.details["created"] == []
+        return
+    assert run.details["error"] == "PartitionLockTimeoutError"
+    clock.now = worker.states["partitions.ensure"].retry_at or NOW
+    assert worker.tick() == [("partitions.ensure", "ok")]
+    db_session.expire_all()
+    last = db_session.scalars(
+        select(JobRun).where(JobRun.job == "partitions.ensure").order_by(JobRun.id.desc())
+    ).first()
+    assert last is not None
+    assert last.details["created"]
 
 
 # -- a reload without progress ------------------------------------------------------------------
