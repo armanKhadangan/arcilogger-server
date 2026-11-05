@@ -116,9 +116,10 @@ def test_work_hours_and_holidays() -> None:
     assert settings.is_off_hours(tr(wednesday, 7, 59))
     assert settings.is_off_hours(tr(date(2026, 10, 17), 10))  # Saturday
     assert settings.is_off_hours(tr(date(2026, 10, 29), 10))  # Cumhuriyet Bayramı (Thursday)
-    minutes = settings.off_hours_minutes(wednesday)
+    minutes = settings.day_parts(wednesday)
     assert len(minutes) == 1440
-    assert minutes.count(False) == 600  # 08:00-18:00
+    assert minutes.count("work") == 600  # 08:00-18:00
+    assert minutes.count("break") == 0
     # Only the fixed-date national holidays are shipped (religious ones are entered yearly).
     shipped = Holidays.parse(None)
     assert sorted(shipped.yearly) == [(1, 1), (4, 23), (5, 1), (5, 19), (7, 15), (8, 30), (10, 29)]
@@ -138,6 +139,57 @@ def test_work_hours_and_holidays() -> None:
     )
     assert broken.work_hours == UsageSettings().work_hours
     assert broken.dns_window_seconds == 600
+
+
+def test_breaks_and_per_day_hours_split_the_day_in_three_parts() -> None:
+    """W5-K (contract W5 §6 K1, K2): a break is neither work nor off hours; ``by_day`` replaces
+    one weekday's hours, and an entry without breaks has none."""
+    settings = UsageSettings.from_values(
+        {
+            "usage.work_hours": {
+                "days": [1, 2, 3, 4, 5, 6],
+                "start": "08:00",
+                "end": "18:00",
+                "breaks": [{"start": "10:30", "end": "10:45"}, {"start": "12:30", "end": "13:30"}],
+                "by_day": {"6": {"start": "09:00", "end": "13:00"}},
+            }
+        }
+    )
+    wednesday, saturday, sunday = date(2026, 10, 14), date(2026, 10, 17), date(2026, 10, 18)
+    assert settings.part_of(tr(wednesday, 12, 29)) == "work"
+    assert settings.part_of(tr(wednesday, 12, 30)) == "break"
+    assert settings.part_of(tr(wednesday, 13, 29)) == "break"
+    assert settings.part_of(tr(wednesday, 13, 30)) == "work"
+    assert settings.part_of(tr(wednesday, 18)) == "off"
+    assert not settings.is_off_hours(tr(wednesday, 12, 45))  # a break is not off hours
+    minutes = settings.day_parts(wednesday)
+    assert (minutes.count("work"), minutes.count("break"), minutes.count("off")) == (525, 75, 840)
+    # Saturday has its own hours and no break (the general ones are not inherited).
+    saturday_minutes = settings.day_parts(saturday)
+    assert saturday_minutes.count("work") == 240
+    assert saturday_minutes.count("break") == 0
+    assert settings.part_of(tr(saturday, 12, 45)) == "work"
+    assert set(settings.day_parts(sunday)) == {"off"}
+    # A holiday is off all day, breaks included.
+    assert set(settings.day_parts(date(2026, 10, 29))) == {"off"}
+    assert settings.has_breaks([wednesday])
+    assert not settings.has_breaks([saturday, sunday, date(2026, 10, 29)])
+    # Breaks and by_day change the fingerprint; without them it is the one of Wave 4, so an
+    # upgrade alone rebuilds no day.
+    assert UsageSettings().fingerprint()["work_hours"] == [[1, 2, 3, 4, 5], 480, 1080]
+    assert settings.fingerprint()["work_hours"] != UsageSettings().fingerprint()["work_hours"]
+    # A stored value the server would refuse falls back to the default.
+    overlapping = UsageSettings.from_values(
+        {
+            "usage.work_hours": {
+                "days": [1],
+                "start": "08:00",
+                "end": "18:00",
+                "breaks": [{"start": "12:00", "end": "13:00"}, {"start": "12:30", "end": "14:00"}],
+            }
+        }
+    )
+    assert overlapping.work_hours == UsageSettings().work_hours
 
 
 def test_pseudonyms_are_stable_and_keyed() -> None:
