@@ -60,7 +60,7 @@ from datetime import datetime, timedelta
 from typing import Any
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from arcilogger_core.layout import Layout
@@ -76,6 +76,7 @@ from arcilogger_db.models import (
     UsageHourly,
     UsageUrl,
 )
+from arcilogger_db.settings import set_setting
 from arcilogger_worker.correlation.leases import rebuild_days
 from arcilogger_worker.testing import Evidence, tr
 from arcilogger_worker.usage.engine import source_ips
@@ -117,7 +118,7 @@ def _rows(session: Session, model: Any, *columns: str, **where: Any) -> list[dic
 
 DAILY = (
     "subject",
-    "off_hours",
+    "period",
     "kind",
     "online_seconds",
     "active_seconds",
@@ -137,20 +138,20 @@ def test_daily_metrics_match_the_hand_computed_values(
     ayse, burak, can = f"person:{site.ayse}", f"person:{site.burak}", f"person:{site.can}"
     expected = [
         # Ayşe, work hours: 9 online minutes, 4 active, S1-S6, 3 blocked.
-        (ayse, False, "person", 540, 240, 677500, 9560, 6, 3, tr(DAY, 9), tr(DAY, 9, 4),
+        (ayse, "work", "person", 540, 240, 677500, 9560, 6, 3, tr(DAY, 9), tr(DAY, 9, 4),
          [[540, 542, "video.example"], [542, 543, "posta.example"], [543, 544, "video.example"]]),
         # Ayşe, off hours: S7 19:30-19:32.
-        (ayse, True, "person", 120, 120, 10000, 2000, 1, 0, tr(DAY, 19, 30), tr(DAY, 19, 32),
+        (ayse, "off", "person", 120, 120, 10000, 2000, 1, 0, tr(DAY, 19, 30), tr(DAY, 19, 32),
          [[1170, 1172, "haber.example"]]),
-        (burak, False, "person", 180, 180, 16000, 0, 2, 0, tr(DAY, 11), tr(DAY, 12),
+        (burak, "work", "person", 180, 180, 16000, 0, 2, 0, tr(DAY, 11), tr(DAY, 12),
          [[660, 662, "portal.example"], [719, 720, "portal.example"]]),
-        (can, False, "person", 120, 120, 7000, 0, 2, 0, tr(DAY, 12), tr(DAY, 13, 1),
+        (can, "work", "person", 120, 120, 7000, 0, 2, 0, tr(DAY, 12), tr(DAY, 13, 1),
          [[720, 721, "portal.example"], [780, 781, "portal.example"]]),
-        (f"device:{PC2_MAC}", False, "device", 360, 240, 16000, 0, 1, 0, tr(DAY, 15, 2),
+        (f"device:{PC2_MAC}", "work", "device", 360, 240, 16000, 0, 1, 0, tr(DAY, 15, 2),
          tr(DAY, 15, 6), [[902, 906, "bulut.example"]]),
-        (f"device:{PC2_MAC}", True, "device", 60, 60, 3000, 0, 1, 0, tr(DAY, 23, 59),
+        (f"device:{PC2_MAC}", "off", "device", 60, 60, 3000, 0, 1, 0, tr(DAY, 23, 59),
          tr(NEXT, 0, 0), [[1439, 1440, "muzik.example"]]),
-        (f"ip:{BARE}", False, "ip", 60, 60, 5000, 0, 1, 0, tr(DAY, 14), tr(DAY, 14, 1),
+        (f"ip:{BARE}", "work", "ip", 60, 60, 5000, 0, 1, 0, tr(DAY, 14), tr(DAY, 14, 1),
          [[840, 841, "203.0.113.110"]]),
     ]  # fmt: skip
     rows = _rows(db_session, UsageDaily, *DAILY, day=DAY)
@@ -163,7 +164,7 @@ def test_daily_metrics_match_the_hand_computed_values(
     assert next_day == dict(
         zip(
             DAILY,
-            (f"device:{PC2_MAC}", True, "device", 60, 60, 3000, 0, 1, 0, tr(NEXT, 0),
+            (f"device:{PC2_MAC}", "off", "device", 60, 60, 3000, 0, 1, 0, tr(NEXT, 0),
              tr(NEXT, 0, 1), [[0, 1, "muzik.example"]]),
             strict=True,
         )
@@ -174,7 +175,7 @@ def test_time_per_site_adds_up_to_the_active_time(db_session: Session, site: Gol
     ayse = f"person:{site.ayse}"
     columns = (
         "domain",
-        "off_hours",
+        "period",
         "kind",
         "seconds",
         "raw_seconds",
@@ -185,18 +186,18 @@ def test_time_per_site_adds_up_to_the_active_time(db_session: Session, site: Gol
         "hosts",
     )
     expected = [
-        ("video.example", False, "domain", 210.0, 300, 18600, 1860, 1, False,
+        ("video.example", "work", "domain", 210.0, 300, 18600, 1860, 1, False,
          {"www.video.example": [210.0, 20460, 1]}),
-        ("posta.example", False, "domain", 30.0, 60, 3000, 300, 1, False,
+        ("posta.example", "work", "domain", 30.0, 60, 3000, 300, 1, False,
          {"mail.posta.example": [30.0, 3300, 1]}),
-        ("windowsupdate.com", False, "domain", 0.0, 120, 600000, 6000, 1, True,
+        ("windowsupdate.com", "work", "domain", 0.0, 120, 600000, 6000, 1, True,
          {"download.windowsupdate.com": [0.0, 606000, 1]}),
-        ("reklam.example", False, "domain", 0.0, 60, 900, 300, 1, True,
+        ("reklam.example", "work", "domain", 0.0, 60, 900, 300, 1, True,
          {"tracker.reklam.example": [0.0, 1200, 1]}),
-        ("8.8.8.8", False, "ip", 0.0, 60, 5000, 100, 1, True, {"8.8.8.8": [0.0, 5100, 1]}),
-        ("Microsoft-Azure", False, "service", 0.0, 60, 50000, 1000, 1, True,
+        ("8.8.8.8", "work", "ip", 0.0, 60, 5000, 100, 1, True, {"8.8.8.8": [0.0, 5100, 1]}),
+        ("Microsoft-Azure", "work", "service", 0.0, 60, 50000, 1000, 1, True,
          {"Microsoft-Azure": [0.0, 51000, 1]}),
-        ("haber.example", True, "domain", 120.0, 120, 10000, 2000, 1, False,
+        ("haber.example", "off", "domain", 120.0, 120, 10000, 2000, 1, False,
          {"haber.example": [120.0, 12000, 1]}),
     ]  # fmt: skip
     rows = _rows(db_session, UsageDomainDaily, *columns, day=DAY, subject=ayse)
@@ -204,7 +205,7 @@ def test_time_per_site_adds_up_to_the_active_time(db_session: Session, site: Gol
         (dict(zip(columns, values, strict=True)) for values in expected),
         key=lambda item: [str(item[c]) for c in columns],
     )
-    work = [row for row in rows if not row["off_hours"]]
+    work = [row for row in rows if row["period"] == "work"]
     assert sum(row["seconds"] for row in work) == 240  # = the active time of work hours
     # Every subject: the times per site add up to its active time.
     totals: dict[str, float] = {}
@@ -219,19 +220,19 @@ def test_time_per_site_adds_up_to_the_active_time(db_session: Session, site: Gol
 def test_reassignment_splits_a_session_between_the_two_persons(
     db_session: Session, site: GoldenSite
 ) -> None:
-    columns = ("subject", "off_hours", "online_seconds", "active_seconds", "sessions")
+    columns = ("subject", "period", "online_seconds", "active_seconds", "sessions")
     rows = _rows(db_session, UsageDeviceDaily, *columns, day=DAY, mac=PC3_MAC)
     assert rows == [
         {
             "subject": f"person:{site.burak}",
-            "off_hours": False,
+            "period": "work",
             "online_seconds": 180,
             "active_seconds": 180,
             "sessions": 2,
         },
         {
             "subject": f"person:{site.can}",
-            "off_hours": False,
+            "period": "work",
             "online_seconds": 120,
             "active_seconds": 120,
             "sessions": 2,
@@ -261,7 +262,7 @@ def test_reassignment_splits_a_session_between_the_two_persons(
 def test_hourly_rows(db_session: Session, site: GoldenSite) -> None:
     columns = (
         "hour",
-        "off_hours",
+        "period",
         "online_seconds",
         "active_seconds",
         "download_bytes",
@@ -271,10 +272,10 @@ def test_hourly_rows(db_session: Session, site: GoldenSite) -> None:
     rows = _rows(db_session, UsageHourly, *columns, day=DAY, subject=f"person:{site.ayse}")
     assert rows == [
         # 09:00-09:59: S1, S2 and S3 (09:58-09:59): 7 online minutes.
-        dict(zip(columns, (tr(DAY, 9), False, 420, 240, 621600, 8160, "video.example"),
+        dict(zip(columns, (tr(DAY, 9), "work", 420, 240, 621600, 8160, "video.example"),
                  strict=True)),
-        dict(zip(columns, (tr(DAY, 10), False, 120, 0, 55900, 1400, None), strict=True)),
-        dict(zip(columns, (tr(DAY, 19), True, 120, 120, 10000, 2000, "haber.example"),
+        dict(zip(columns, (tr(DAY, 10), "work", 120, 0, 55900, 1400, None), strict=True)),
+        dict(zip(columns, (tr(DAY, 19), "off", 120, 120, 10000, 2000, "haber.example"),
                  strict=True)),
     ]  # fmt: skip
 
@@ -306,10 +307,10 @@ def test_blocked_attempts_urls_and_categories(db_session: Session, site: GoldenS
          "hostname": None, "category": "P2P", "url": None, "app": "BitTorrent"},
     ]  # fmt: skip
     # The device rows count them too (every one, not only the stored ones).
-    devices = _rows(db_session, UsageDeviceDaily, "mac", "off_hours", "blocked", subject=ayse)
+    devices = _rows(db_session, UsageDeviceDaily, "mac", "period", "blocked", subject=ayse)
     assert devices == [
-        {"mac": PC1_MAC, "off_hours": False, "blocked": 3},
-        {"mac": PC1_MAC, "off_hours": True, "blocked": 0},
+        {"mac": PC1_MAC, "period": "off", "blocked": 0},
+        {"mac": PC1_MAC, "period": "work", "blocked": 3},
     ]
     urls = _rows(
         db_session,
@@ -322,20 +323,20 @@ def test_blocked_attempts_urls_and_categories(db_session: Session, site: GoldenS
         "last_seen",
         "category",
         "blocked",
-        "off_hours",
+        "period",
         day=DAY,
         subject=ayse,
     )
     assert urls == [
         {"url": "/canli", "hostname": "bahis.example", "domain": "bahis.example", "hits": 1,
          "first_seen": tr(DAY, 11, 15), "last_seen": tr(DAY, 11, 15), "category": "Kumar",
-         "blocked": True, "off_hours": False},
+         "blocked": True, "period": "work"},
         {"url": "/gundem", "hostname": "haber.example", "domain": "haber.example", "hits": 1,
          "first_seen": tr(DAY, 19, 30), "last_seen": tr(DAY, 19, 30), "category": "Haber",
-         "blocked": False, "off_hours": True},
+         "blocked": False, "period": "off"},
         {"url": "/izle?v=42", "hostname": "www.video.example", "domain": "video.example",
          "hits": 2, "first_seen": tr(DAY, 9), "last_seen": tr(DAY, 9, 3, 30),
-         "category": "Video", "blocked": False, "off_hours": False},
+         "category": "Video", "blocked": False, "period": "work"},
     ]  # fmt: skip
     categories = {
         row.domain: (row.category, row.cat, row.source)
@@ -372,11 +373,11 @@ def test_a_device_with_blocked_attempts_only_has_a_device_row(
     db_session.commit()
     rebuild_days(db_session, DAY, NEXT, now=NOW)
     rebuild_day(db_session, DAY, now=NOW)
-    columns = ("subject", "off_hours", "ip", "vlan", "online_seconds", "sessions", "blocked")
+    columns = ("subject", "period", "ip", "vlan", "online_seconds", "sessions", "blocked")
     assert _rows(db_session, UsageDeviceDaily, *columns, mac=mac) == [
         {
             "subject": f"device:{mac}",
-            "off_hours": False,
+            "period": "work",
             "ip": ip,
             "vlan": 43,
             "online_seconds": 0,
@@ -406,19 +407,19 @@ def test_a_persons_device_with_blocked_attempts_only_keeps_its_own_address(
     db_session.commit()
     rebuild_day(db_session, DAY, now=NOW)
     ayse = f"person:{site.ayse}"
-    columns = ("mac", "off_hours", "ip", "vlan", "online_seconds", "blocked")
+    columns = ("mac", "period", "ip", "vlan", "online_seconds", "blocked")
     assert _rows(db_session, UsageDeviceDaily, *columns, subject=ayse) == [
-        {"mac": PC1_MAC, "off_hours": False, "ip": PC1, "vlan": 43, "online_seconds": 540,
-         "blocked": 3},
-        {"mac": PC1_MAC, "off_hours": True, "ip": PC1, "vlan": 43, "online_seconds": 120,
+        {"mac": PC1_MAC, "period": "off", "ip": PC1, "vlan": 43, "online_seconds": 120,
          "blocked": 0},
-        {"mac": mac, "off_hours": False, "ip": ip, "vlan": 42, "online_seconds": 0,
+        {"mac": PC1_MAC, "period": "work", "ip": PC1, "vlan": 43, "online_seconds": 540,
+         "blocked": 3},
+        {"mac": mac, "period": "work", "ip": ip, "vlan": 42, "online_seconds": 0,
          "blocked": 1},
     ]  # fmt: skip
-    rows = _rows(db_session, UsageDaily, "off_hours", "ip", "vlan", "blocked", subject=ayse)
+    rows = _rows(db_session, UsageDaily, "period", "ip", "vlan", "blocked", subject=ayse)
     assert rows == [
-        {"off_hours": False, "ip": PC1, "vlan": 43, "blocked": 4},
-        {"off_hours": True, "ip": PC1, "vlan": 43, "blocked": 0},
+        {"period": "off", "ip": PC1, "vlan": 43, "blocked": 0},
+        {"period": "work", "ip": PC1, "vlan": 43, "blocked": 4},
     ]
 
 
@@ -441,6 +442,46 @@ def test_day_bookkeeping(db_session: Session, site: GoldenSite) -> None:
     assert sorted(day.ips) == sorted([PC1, "172.20.43.81", "172.20.42.82", BARE])
     assert len(day.inputs_hash) == len(day.attribution_hash) == 64
     assert day.details["rows"]["daily"] == 7
+
+
+def test_a_break_is_split_from_the_work_hours(db_session: Session, site: GoldenSite) -> None:
+    """W5-K (contract W5 §6 K2, K3): with a lunch break 12:00-13:00, Can's 12:00 minute is a break
+    and his 13:00 minute stays work; Burak's 11:59 minute and the off hours do not move."""
+    hours = {
+        "days": [1, 2, 3, 4, 5],
+        "start": "08:00",
+        "end": "18:00",
+        "breaks": [{"start": "12:00", "end": "13:00"}],
+    }
+    set_setting(db_session, "usage.work_hours", hours, updated_by="test")
+    db_session.commit()
+    rebuild_day(db_session, DAY, now=NOW + timedelta(hours=1))
+    can, burak = f"person:{site.can}", f"person:{site.burak}"
+    columns = ("period", "online_seconds", "active_seconds", "sessions", "timeline")
+    assert _rows(db_session, UsageDaily, *columns, day=DAY, subject=can) == [
+        {"period": "break", "online_seconds": 60, "active_seconds": 60, "sessions": 1,
+         "timeline": [[720, 721, "portal.example"]]},
+        {"period": "work", "online_seconds": 60, "active_seconds": 60, "sessions": 1,
+         "timeline": [[780, 781, "portal.example"]]},
+    ]  # fmt: skip
+    assert [row["period"] for row in _rows(db_session, UsageDaily, "period", subject=burak)] == [
+        "work"
+    ]
+    hourly = _rows(db_session, UsageHourly, "hour", "period", "active_seconds", subject=can)
+    assert hourly == [
+        {"hour": tr(DAY, 12), "period": "break", "active_seconds": 60},
+        {"hour": tr(DAY, 13), "period": "work", "active_seconds": 60},
+    ]
+    domains = _rows(db_session, UsageDomainDaily, "domain", "period", "seconds", subject=can)
+    assert domains == [
+        {"domain": "portal.example", "period": "break", "seconds": 60.0},
+        {"domain": "portal.example", "period": "work", "seconds": 60.0},
+    ]
+    # Every row still adds up to the day: the break only moved Can's minute between parts.
+    totals = db_session.execute(
+        select(func.sum(UsageDaily.active_seconds)).where(UsageDaily.day == DAY)
+    ).scalar_one()
+    assert totals == 240 + 120 + 180 + 120 + 240 + 60 + 60
 
 
 def test_a_rebuild_is_idempotent(db_session: Session, site: GoldenSite) -> None:

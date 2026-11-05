@@ -81,6 +81,7 @@ def test_full_day_report_matches_the_golden_day(db_session: Session, site: Golde
         "sessions": 14,
         "blocked": 3,
         "off_hours_active_seconds": 180,
+        "break_active_seconds": 0,
     }
     assert [(s["domain"], s["seconds"]) for s in company["top_sites"]] == [
         ("portal.example", 300),
@@ -129,6 +130,7 @@ def test_full_day_report_matches_the_golden_day(db_session: Session, site: Golde
         ],
         "blocked": 3,
         "off_hours_active_seconds": 120,
+        "break_active_seconds": 0,
     }
     assert data["changes"] == []  # no rolled-up day before the 14th
     assert data["data_quality"]["unattributed_seconds"] == 60
@@ -357,7 +359,7 @@ def test_notable_changes_against_the_seven_day_average(
         UsageDaily(
             day=before,
             subject=f"person:{site.ayse}",
-            off_hours=False,
+            period="work",
             kind="person",
             person_id=site.ayse,
             vlan=43,

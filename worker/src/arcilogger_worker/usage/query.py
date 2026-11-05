@@ -1,7 +1,8 @@
 """Reading the usage rollups: the answers of ``/api/v1/usage`` and the report data.
 
 Everything works on whole site days (``Period``: ``from``/``to`` inclusive) and the part of the
-day (``hours``: ``all`` = both rows of every subject and day, ``work`` / ``off`` = one of them).
+day (``hours``: ``all`` = every row of every subject and day, ``work`` / ``break`` / ``off`` = one
+of them; the parts of ``arcilogger_worker.usage.config.PARTS``, contract W5 §6 K2-K4).
 Names, departments and categories are joined here, at read time (:class:`Directory`,
 ``domain_categories``), so they are always the current ones:
 
@@ -31,10 +32,10 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from arcilogger_core.timeutil import day_window
-from arcilogger_worker.usage.config import UNKNOWN_CATEGORY
+from arcilogger_worker.usage.config import PARTS, UNKNOWN_CATEGORY
 from arcilogger_worker.usage.pseudonyms import pseudonym, token
 
-Hours = Literal["all", "work", "off"]
+Hours = Literal["all", "work", "break", "off"]
 #: Text key of the method note in the web locales (``usage.method_note``).
 NOTICE_KEY: Final = "usage.method_note"
 #: Department of subjects without one.
@@ -78,8 +79,8 @@ class Period:
     hours: Hours = "all"
 
     @property
-    def parts(self) -> list[bool]:
-        return {"all": [False, True], "work": [False], "off": [True]}[self.hours]
+    def parts(self) -> list[str]:
+        return list(PARTS) if self.hours == "all" else [self.hours]
 
     @property
     def start(self) -> datetime:
@@ -269,6 +270,7 @@ def empty_metrics() -> dict[str, Any]:
         "sessions": 0,
         "blocked": 0,
         "off_hours_active_seconds": 0,
+        "break_active_seconds": 0,
         "first_activity": None,
         "last_activity": None,
     }
@@ -283,6 +285,7 @@ def add_metrics(total: dict[str, Any], other: Mapping[str, Any]) -> dict[str, An
         "sessions",
         "blocked",
         "off_hours_active_seconds",
+        "break_active_seconds",
     ):
         total[name] += other[name]
     for name, pick in (("first_activity", min), ("last_activity", max)):
@@ -303,10 +306,11 @@ _SUBJECTS = """
 SELECT subject, min(kind), mode() WITHIN GROUP (ORDER BY vlan), mode() WITHIN GROUP
        (ORDER BY host(ip)), max(mac::text),
        sum(online_seconds), sum(active_seconds), sum(download_bytes), sum(upload_bytes),
-       sum(sessions), sum(blocked), coalesce(sum(active_seconds) FILTER (WHERE off_hours), 0),
+       sum(sessions), sum(blocked), coalesce(sum(active_seconds) FILTER (WHERE period = 'off'), 0),
+       coalesce(sum(active_seconds) FILTER (WHERE period = 'break'), 0),
        min(first_activity), max(last_activity)
 FROM usage_daily
-WHERE day >= :first AND day <= :last AND off_hours = ANY(:parts) {extra}
+WHERE day >= :first AND day <= :last AND period = ANY(:parts) {extra}
 GROUP BY subject
 """
 
@@ -320,8 +324,8 @@ def subject_stats(
         params["subjects"] = list(subjects)
     found = {}
     for row in session.execute(text(_SUBJECTS.format(extra=extra)), params):
-        (key, kind, vlan, ip, mac, online, active, down, up, sessions, blocked, off, first,
-         last) = row  # fmt: skip
+        (key, kind, vlan, ip, mac, online, active, down, up, sessions, blocked, off, pause,
+         first, last) = row  # fmt: skip
         found[key] = SubjectStats(
             key,
             kind,
@@ -334,6 +338,7 @@ def subject_stats(
                 "sessions": int(sessions),
                 "blocked": int(blocked),
                 "off_hours_active_seconds": int(off),
+                "break_active_seconds": int(pause),
                 "first_activity": first,
                 "last_activity": last,
             },
@@ -422,7 +427,7 @@ _SITES = """
 SELECT domain, min(kind), sum(seconds), sum(raw_seconds), sum(download_bytes),
        sum(upload_bytes), sum(sessions), count(DISTINCT subject), bool_and(background)
 FROM usage_domain_daily
-WHERE day >= :first AND day <= :last AND off_hours = ANY(:parts) {extra}
+WHERE day >= :first AND day <= :last AND period = ANY(:parts) {extra}
 GROUP BY domain
 """
 
@@ -491,7 +496,7 @@ def category_users(ctx: Context, subjects: Sequence[str] | None) -> dict[str, in
         text(
             "SELECT coalesce(c.category, :unknown), count(DISTINCT d.subject) "  # noqa: S608 - fixed SQL fragments
             "FROM usage_domain_daily d LEFT JOIN domain_categories c ON c.domain = d.domain "
-            "WHERE d.day >= :first AND d.day <= :last AND d.off_hours = ANY(:parts) "
+            "WHERE d.day >= :first AND d.day <= :last AND d.period = ANY(:parts) "
             f"{extra} GROUP BY 1"
         ),
         {**params, "unknown": UNKNOWN_CATEGORY},
@@ -504,7 +509,7 @@ def app_rows(ctx: Context, subjects: Sequence[str] | None) -> list[dict[str, Any
     rows = ctx.session.execute(
         text(
             "SELECT app, max(appcat), sum(seconds), sum(bytes) FROM usage_app_daily "  # noqa: S608 - fixed SQL fragments
-            "WHERE day >= :first AND day <= :last AND off_hours = ANY(:parts) "
+            "WHERE day >= :first AND day <= :last AND period = ANY(:parts) "
             f"{scope} GROUP BY app"
         ),
         params,
@@ -530,7 +535,7 @@ def top_sites_by_subject(
     rows = ctx.session.execute(
         text(
             "SELECT subject, domain, sum(seconds) FROM usage_domain_daily "  # noqa: S608 - fixed SQL fragments
-            "WHERE day >= :first AND day <= :last AND off_hours = ANY(:parts) "
+            "WHERE day >= :first AND day <= :last AND period = ANY(:parts) "
             f"AND subject = ANY(:subjects) {extra} GROUP BY subject, domain"
         ),
         params,
@@ -608,7 +613,7 @@ def hour_points(ctx: Context, subjects: Sequence[str] | None) -> list[dict[str, 
         text(
             "SELECT hour, count(DISTINCT subject) FILTER (WHERE active_seconds > 0), "  # noqa: S608 - fixed SQL fragments
             "sum(active_seconds), sum(download_bytes), sum(upload_bytes) FROM usage_hourly "
-            "WHERE day >= :first AND day <= :last AND off_hours = ANY(:parts) "
+            "WHERE day >= :first AND day <= :last AND period = ANY(:parts) "
             f"{scope} GROUP BY hour"
         ),
         params,
@@ -772,7 +777,7 @@ def subject_detail(ctx: Context, key: str) -> dict[str, Any]:
     params = {**period.params(), "subject": key}
     stats = ctx.stats[key]
     info = ctx.infos[key]
-    where = "day >= :first AND day <= :last AND off_hours = ANY(:parts) AND subject = :subject"
+    where = "day >= :first AND day <= :last AND period = ANY(:parts) AND subject = :subject"
     # Sites with their host names.
     rows = list(
         session.execute(
@@ -896,7 +901,7 @@ def blocked_rows(
         text(
             "SELECT time, subject, domain, hostname, category, action, source, url, app, "  # noqa: S608 - fixed SQL fragments
             "mac::text FROM usage_blocked WHERE day >= :first AND day <= :last "
-            f"AND off_hours = ANY(:parts) {scope} ORDER BY time {order}, id {order} LIMIT :limit"
+            f"AND period = ANY(:parts) {scope} ORDER BY time {order}, id {order} LIMIT :limit"
         ),
         {**params, "limit": limit},
     )
@@ -922,7 +927,7 @@ def subject_hours(ctx: Context, key: str) -> list[dict[str, Any]]:
         text(
             "SELECT hour, online_seconds, active_seconds, download_bytes, upload_bytes, "
             "top_domain FROM usage_hourly WHERE day >= :first AND day <= :last "
-            "AND off_hours = ANY(:parts) AND subject = :subject"
+            "AND period = ANY(:parts) AND subject = :subject"
         ),
         {**ctx.period.params(), "subject": key},
     )
@@ -961,7 +966,7 @@ def heatmap(ctx: Context, key: str | None, *, days: int = 30) -> list[dict[str, 
     rows = ctx.session.execute(
         text(
             "SELECT day, hour, sum(active_seconds) FROM usage_hourly WHERE day >= :first "  # noqa: S608 - fixed SQL fragments
-            f"AND day <= :last AND off_hours = ANY(:parts) {extra} GROUP BY day, hour"
+            f"AND day <= :last AND period = ANY(:parts) {extra} GROUP BY day, hour"
         ),
         params,
     )
@@ -984,18 +989,31 @@ def _devices(ctx: Context, key: str) -> tuple[list[dict[str, Any]], list[dict[st
             text(
                 "SELECT mac::text, mode() WITHIN GROUP (ORDER BY host(ip)), sum(online_seconds), "
                 "sum(active_seconds), sum(download_bytes), sum(upload_bytes), sum(sessions), "
-                "sum(blocked), coalesce(sum(active_seconds) FILTER (WHERE off_hours), 0), "
+                "sum(blocked), coalesce(sum(active_seconds) FILTER (WHERE period = 'off'), 0), "
+                "coalesce(sum(active_seconds) FILTER (WHERE period = 'break'), 0), "
                 "min(first_activity), max(last_activity), jsonb_agg(top_domains) "
                 "FROM usage_device_daily WHERE day >= :first AND day <= :last "
-                "AND off_hours = ANY(:parts) AND subject = :subject GROUP BY mac"
+                "AND period = ANY(:parts) AND subject = :subject GROUP BY mac"
             ),
             {**ctx.period.params(), "subject": key},
         )
     )
     devices, per_device = [], []
-    for mac, ip, online, active, down, up, sessions, blocked, off, first, last, tops in sorted(
-        rows
-    ):
+    for (
+        mac,
+        ip,
+        online,
+        active,
+        down,
+        up,
+        sessions,
+        blocked,
+        off,
+        pause,
+        first,
+        last,
+        tops,
+    ) in sorted(rows):
         ref = device_ref(ctx.directory, mac, ip, ctx.viewer)
         seconds: dict[str, float] = defaultdict(float)
         for day_top in tops or []:
@@ -1013,6 +1031,7 @@ def _devices(ctx: Context, key: str) -> tuple[list[dict[str, Any]], list[dict[st
                     "sessions": int(sessions),
                     "blocked": int(blocked),
                     "off_hours_active_seconds": int(off),
+                    "break_active_seconds": int(pause),
                     "first_activity": first,
                     "last_activity": last,
                 },
@@ -1062,9 +1081,10 @@ def sites_page(
 
 _USERS = """
 SELECT subject, sum(seconds), sum(raw_seconds), sum(download_bytes), sum(upload_bytes),
-       sum(sessions), coalesce(sum(seconds) FILTER (WHERE off_hours), 0)
+       sum(sessions), coalesce(sum(seconds) FILTER (WHERE period = 'off'), 0),
+       coalesce(sum(seconds) FILTER (WHERE period = 'break'), 0)
 FROM usage_domain_daily
-WHERE day >= :first AND day <= :last AND off_hours = ANY(:parts) {where}
+WHERE day >= :first AND day <= :last AND period = ANY(:parts) {where}
 GROUP BY subject
 """
 _USER_SITES = """
@@ -1072,7 +1092,7 @@ SELECT subject, domain, seconds FROM (
     SELECT subject, domain, sum(seconds) AS seconds,
            row_number() OVER (PARTITION BY subject ORDER BY sum(seconds) DESC, domain) AS rank
     FROM usage_domain_daily
-    WHERE day >= :first AND day <= :last AND off_hours = ANY(:parts) {where}
+    WHERE day >= :first AND day <= :last AND period = ANY(:parts) {where}
           AND subject = ANY(:shown)
     GROUP BY subject, domain
 ) ranked
@@ -1092,7 +1112,8 @@ def _restricted_users(
     """Subject rows whose metrics are those of a site or category only, and how many there are.
 
     ``where`` selects the domains (``AND domain …``). ``active_seconds`` is the time on them,
-    ``off_hours_active_seconds`` its part off hours; ``online_seconds`` is the raw time of one
+    ``off_hours_active_seconds`` and ``break_active_seconds`` its parts off hours and in breaks;
+    ``online_seconds`` is the raw time of one
     site (``raw_is_online``: every minute with its traffic) and 0 for a category — the rollups do
     not keep the minutes with traffic on any of its sites, and the sum of their raw times would
     count a minute once per site. ``blocked`` 0 and no first/last activity: neither is kept per
@@ -1102,7 +1123,8 @@ def _restricted_users(
     values = {**base, **params}
     per: dict[str, dict[str, Any]] = {}
     statement = text(_USERS.format(where=where + " " + scope))
-    for subject, seconds, raw, down, up, sessions, off in ctx.session.execute(statement, values):
+    rows = ctx.session.execute(statement, values)
+    for subject, seconds, raw, down, up, sessions, off, pause in rows:
         if not ctx.visible(subject):
             continue
         metrics = empty_metrics()
@@ -1112,6 +1134,7 @@ def _restricted_users(
         metrics["upload_bytes"] = int(up)
         metrics["sessions"] = int(sessions)
         metrics["off_hours_active_seconds"] = round(float(off))
+        metrics["break_active_seconds"] = round(float(pause))
         per[subject] = metrics
     keys = sorted(per, key=lambda k: (-per[k]["active_seconds"], -per[k]["download_bytes"], k))
     shown = keys if limit is None else keys[:limit]
@@ -1139,7 +1162,7 @@ def site_detail(ctx: Context, domain: str, *, capped: bool = True) -> dict[str, 
         ctx.session.execute(
             text(
                 "SELECT hosts FROM usage_domain_daily WHERE day >= :first AND day <= :last "  # noqa: S608 - fixed SQL fragments
-                f"AND off_hours = ANY(:parts) AND domain = :domain {scope}"
+                f"AND period = ANY(:parts) AND domain = :domain {scope}"
             ),
             params,
         )

@@ -14,7 +14,8 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from arcilogger_api.auth.schemas import StrictModel
 
-Hours = Literal["all", "work", "off"]
+#: ``work`` excludes the breaks (contract W5 §6 K4); ``all`` is every part.
+Hours = Literal["all", "work", "break", "off"]
 SubjectKind = Literal["person", "device", "ip"]
 
 
@@ -58,6 +59,8 @@ class Metrics(BaseModel):
     sessions: int
     blocked: int
     off_hours_active_seconds: int
+    #: Active time in the breaks of the work hours (W5-K); 0 without breaks.
+    break_active_seconds: int
     first_activity: datetime | None
     last_activity: datetime | None
 

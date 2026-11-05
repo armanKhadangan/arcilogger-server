@@ -118,7 +118,8 @@ def _window_metrics(session: Session, start: datetime, end: datetime) -> dict[st
     rows = session.execute(
         text(
             "SELECT subject, sum(online_seconds), sum(active_seconds), sum(download_bytes), "
-            "sum(upload_bytes), coalesce(sum(active_seconds) FILTER (WHERE off_hours), 0) "
+            "sum(upload_bytes), coalesce(sum(active_seconds) FILTER (WHERE period = 'off'), 0), "
+            "coalesce(sum(active_seconds) FILTER (WHERE period = 'break'), 0) "
             "FROM usage_hourly WHERE hour >= :begin AND hour < :finish GROUP BY subject"
         ),
         {"begin": begin, "finish": finish},
@@ -130,8 +131,9 @@ def _window_metrics(session: Session, start: datetime, end: datetime) -> dict[st
             "download_bytes": int(down),
             "upload_bytes": int(up),
             "off_hours_active_seconds": int(off),
+            "break_active_seconds": int(pause),
         }
-        for subject, online, active, down, up, off in rows
+        for subject, online, active, down, up, off, pause in rows
     }
 
 
@@ -202,6 +204,7 @@ def _subject_metrics(
                         "download_bytes",
                         "upload_bytes",
                         "off_hours_active_seconds",
+                        "break_active_seconds",
                     ),
                     0,
                 )
@@ -257,6 +260,8 @@ def build_report_data(
         "person_level": person_level,
         "pseudonymized": pseudonymize,
         "computed_until": _iso(query.computed_until(session, period)),
+        # The work hours had breaks on a day of the report (W5-K, K5): the documents show them.
+        "breaks": settings.has_breaks(period.days()),
         "company": {
             "active_users": active_users,
             "online_seconds": company["online_seconds"],
@@ -266,6 +271,7 @@ def build_report_data(
             "sessions": company["sessions"],
             "blocked": company["blocked"],
             "off_hours_active_seconds": company["off_hours_active_seconds"],
+            "break_active_seconds": company["break_active_seconds"],
             "top_sites": [
                 {
                     "domain": row["domain"],
@@ -369,6 +375,7 @@ def _person_level(
                 ],
                 "blocked": values["blocked"],
                 "off_hours_active_seconds": values["off_hours_active_seconds"],
+                "break_active_seconds": values["break_active_seconds"],
             }
         )
     data["person_sites"] = _person_sites(ctx, persons)
@@ -835,6 +842,7 @@ def sample_report_data() -> dict[str, Any]:
             "top_categories": _sample_categories(sites),
             "blocked": 1 if label == "Mehmet Kaya" else 0,
             "off_hours_active_seconds": 900 if label == "Elif Şahin" else 0,
+            "break_active_seconds": 0,
         }
 
     ayse_sites = [
@@ -888,6 +896,7 @@ def sample_report_data() -> dict[str, Any]:
         "person_level": True,
         "pseudonymized": False,
         "computed_until": "2026-10-15T00:00:00+03:00",
+        "breaks": False,
         "company": {
             "active_users": 4,
             "online_seconds": sum(p["online_seconds"] for p in persons) + 7200,
@@ -897,6 +906,7 @@ def sample_report_data() -> dict[str, Any]:
             "sessions": sum(p["sessions"] for p in persons) + 210,
             "blocked": 3,
             "off_hours_active_seconds": 900,
+            "break_active_seconds": 0,
             "top_sites": [
                 {
                     "domain": "portal.example",

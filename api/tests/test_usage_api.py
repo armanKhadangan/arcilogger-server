@@ -105,6 +105,7 @@ def test_company_totals_match_the_golden_day(admin: TestClient) -> None:
         "sessions": 14,
         "blocked": 3,
         "off_hours_active_seconds": 180,
+        "break_active_seconds": 0,
     }
     assert metrics["first_activity"] == "2026-10-14T06:00:00Z"  # 09:00 site time
     assert len(data["hourly"]) == 24
@@ -150,6 +151,36 @@ def test_work_and_off_hours_split_the_day(admin: TestClient) -> None:
     assert (work["online_seconds"], off["online_seconds"]) == (1260, 180)
     assert off["off_hours_active_seconds"] == 180
     assert work["off_hours_active_seconds"] == 0
+
+
+def test_breaks_are_their_own_part_of_the_day(
+    admin: TestClient, db_session: Session, site: GoldenSite
+) -> None:
+    """W5-K (contract W5 §6 K4): ``hours=break`` reads the breaks only, ``work`` no longer counts
+    them, ``all`` is unchanged, and every total carries ``break_active_seconds``."""
+    before = _get(admin, "/company", hours="all")["metrics"]
+    hours = {
+        "days": [1, 2, 3, 4, 5],
+        "start": "08:00",
+        "end": "18:00",
+        "breaks": [{"start": "12:00", "end": "13:00"}],
+    }
+    set_setting(db_session, "usage.work_hours", hours, updated_by="test")
+    db_session.commit()
+    rebuild_day(db_session, DAY, now=NOW + timedelta(hours=1))
+    every = _get(admin, "/company", hours="all")["metrics"]
+    work = _get(admin, "/company", hours="work")["metrics"]
+    pause = _get(admin, "/company", hours="break")["metrics"]
+    assert {k: v for k, v in every.items() if k != "break_active_seconds"} == {
+        k: v for k, v in before.items() if k != "break_active_seconds"
+    }
+    assert every["break_active_seconds"] == pause["break_active_seconds"] == 60  # Can at 12:00
+    assert pause["active_seconds"] == 60
+    assert work["active_seconds"] == 840 - 60
+    assert work["break_active_seconds"] == 0
+    assert _get(admin, "/company", hours="break")["period"]["hours"] == "break"
+    response = admin.get(f"{API}/company", params={**PERIOD, "hours": "lunch"})
+    assert response.status_code == 422
 
 
 def test_a_period_without_an_end_runs_to_today(
@@ -386,9 +417,10 @@ def test_site_and_category_users_are_exported_whole_with_their_own_figures(
     rows = list(csv.reader(io.StringIO(response.content.decode("utf-8-sig")), delimiter=";"))
     assert rows[0] == [
         "Ad", "Tür", "Anahtar", "MAC", "IP", "Departman", "Süre (sn, tahmini)", "Ham süre (sn)",
-        "Mesai dışı süre (sn, tahmini)", "İndirilen (bayt)", "Yüklenen (bayt)", "Oturum",
+        "Mesai dışı süre (sn, tahmini)", "Mola süresi (sn, tahmini)", "İndirilen (bayt)",
+        "Yüklenen (bayt)", "Oturum",
     ]  # fmt: skip
-    assert [(row[0], row[6], row[7], row[9], row[11]) for row in rows[1:]] == [
+    assert [(row[0], row[6], row[7], row[10], row[12]) for row in rows[1:]] == [
         ("Burak Demir", "180", "180", "16000", "2"),
         ("Can Öztürk", "120", "120", "7000", "2"),
     ]
@@ -403,11 +435,11 @@ def test_site_and_category_users_are_exported_whole_with_their_own_figures(
     header, *users = ([cell.value for cell in row] for row in sheet.iter_rows())
     assert header == [
         "Ad", "Tür", "Anahtar", "MAC", "IP", "Departman", "Süre (sn, tahmini)",
-        "Mesai dışı süre (sn, tahmini)", "İndirilen (bayt)", "Yüklenen (bayt)", "Oturum",
-        "En çok kullanılan siteler",
+        "Mesai dışı süre (sn, tahmini)", "Mola süresi (sn, tahmini)", "İndirilen (bayt)",
+        "Yüklenen (bayt)", "Oturum", "En çok kullanılan siteler",
     ]  # fmt: skip
     assert [row[0] for row in users] == ["172.20.41.77", "Ayşe Yılmaz"]
-    assert users[1][6:] == [30, 0, 658900, 7700, 5, "posta.example (30 sn)"]
+    assert users[1][6:] == [30, 0, 0, 658900, 7700, 5, "posta.example (30 sn)"]
 
 
 def test_whole_lists_come_in_one_answer(admin: TestClient, site: GoldenSite) -> None:
