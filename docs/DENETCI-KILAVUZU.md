@@ -488,7 +488,7 @@ içerebilir.
 | `search.run` | Her arama (zaman aşımına uğrayan da: `outcome: "timeout"`, `search_id: null`) | `search_id`, `q`, `from`, `to`, `kinds`, `driver`, `tables`, `rows` (ilk sayfadaki satır sayısı), `complete`, `outcome`, `elapsed_ms`, `saved_id` |
 | `search.event` | Bir kaydın bütün alanları açıldığında | `table`, `id`, `time`, `raw` (kaynak, gün, satır, bayt konumu) |
 | `search.refs` | "Kanıt paketine aktar" | `search_id`, `q`, `from`, `to`, `refs` (satır sayısı), `truncated`, `complete`, `sha256` (referans listesinin kanonik JSON'unun özeti) |
-| `search.export` | CSV ya da Excel indirme (yalnızca yönetici, parolayı yeniden girerek) | `search_id`, `q`, `from`, `to`, `format`, `rows`, `truncated`, `bytes`, `sha256` (dosyanın) |
+| `search.export` | CSV ya da Excel indirme (yalnızca yönetici, parolayı yeniden girerek) | `search_id`, `q`, `from`, `to`, `format`, `rows`, `truncated` (`rows`, `time`, `archived` ya da `null`), `archived` (veritabanında olmayan günler: `{first_day, last_day, keep_days}` ya da `null`), `bytes`, `sha256` (dosyanın) |
 | `search.saved_create`, `search.saved_update` | Kayıtlı arama eklenince ya da değişince | `saved_id`, `name`, `q` |
 | `search.saved_delete` | Kayıtlı arama silinince | `saved_id`, `name` |
 | `live.open` | Canlı akış açılınca | `stream_id`, `q`, `folders` (izlenen klasörler), `backfill` |
@@ -794,8 +794,10 @@ does. `search.run` (every run, a timed-out one too with `outcome: "timeout"`): `
 `saved_id`; `search.event` (a record's fields opened): `table`, `id`, `time`, `raw`; `search.refs`
 ("Kanıt paketine aktar"): `search_id`, `q`, `from`, `to`, `refs`, `truncated`, `complete`,
 `sha256` of the reference list as canonical JSON; `search.export` (administrators, with
-re-authentication): `search_id`, `q`, `from`, `to`, `format`, `rows`, `truncated`, `bytes`,
-`sha256` of the file; `search.saved_create` and `search.saved_update`: `saved_id`, `name`, `q`;
+re-authentication): `search_id`, `q`, `from`, `to`, `format`, `rows`, `truncated` (`rows`,
+`time`, `archived` or `null`), `archived` (the days not in the database,
+`{first_day, last_day, keep_days}`, or `null`), `bytes`, `sha256` of the file;
+`search.saved_create` and `search.saved_update`: `saved_id`, `name`, `q`;
 `search.saved_delete`: `saved_id`, `name`; `live.open`: `stream_id`, `q`, `folders`, `backfill`;
 `live.close`: `stream_id`, `seconds`, `delivered`, `dropped` by reason, `reason` (`closed`,
 `lingered`, `server_stopping` or the code that ended the stream, e.g. `time_limit`,

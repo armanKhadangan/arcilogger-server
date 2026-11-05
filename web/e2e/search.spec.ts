@@ -8,6 +8,7 @@ import {
   type Theme,
 } from './fixtures';
 import { mockApi, type MockApi, type MockOptions } from './mock-api';
+import { ARCHIVE_SEARCH_REQUIRED, mockArchive } from './mock-archive';
 import { MANY_ROWS, mockSearch, type SearchMock, type SearchOptions } from './mock-search';
 import { RAW, SAMPLE_TODAY, SEARCH } from './samples';
 
@@ -475,6 +476,64 @@ test.describe('Arama', () => {
         exact: true,
       }),
     ).toBeVisible();
+  });
+
+  test('says when the exported file misses days that are not in the database', async ({ page }) => {
+    await openSearch(page, 'tolga', {
+      search: { exportTruncated: 'archived', exportArchived: '2026-10-04/2026-10-05' },
+    });
+    await runQuery(page, 'type:web');
+    await page.getByRole('button', { name: 'Dışa aktar' }).click();
+    const dialog = page.getByRole('dialog', { name: 'Arama sonuçlarını dışa aktar' });
+    const download = page.waitForEvent('download');
+    await dialog.getByRole('button', { name: 'Dışa aktar' }).click();
+    expect((await download).suggestedFilename()).toMatch(/-kismi\.xlsx$/);
+    await expect(page.getByText('Dosya kısaltıldı', { exact: true })).toBeVisible();
+    await expect(
+      page.getByText(
+        'Aramanın bazı günleri veritabanında yok (mühürlü arşivde ya da yeniden yükleniyor): ' +
+          'dosya yalnızca veritabanındaki satırları içerir. ' +
+          'Veritabanında olmayan günler: 04.10.2026 – 05.10.2026',
+        { exact: true },
+      ),
+    ).toBeVisible();
+  });
+
+  test('an export whose days are all outside the window shows the reload card, then exports', async ({
+    page,
+  }) => {
+    const { api } = await openSearch(page, 'tolga', { search: { exportRequiredNext: true } });
+    const archive = await mockArchive(page, api, { steps: ['loading'] });
+    await runQuery(page, 'type:web');
+    await page.getByRole('button', { name: 'Dışa aktar' }).click();
+    const dialog = page.getByRole('dialog', { name: 'Arama sonuçlarını dışa aktar' });
+    await dialog.getByRole('button', { name: 'Dışa aktar' }).click();
+
+    // The search's card with the API's sentence, in place of the red refusal.
+    const card = dialog.getByRole('region', { name: 'Günler mühürlü arşivde' });
+    const required = ARCHIVE_SEARCH_REQUIRED.body.error.message_tr;
+    await expect(card.getByRole('status').first()).toContainText(required);
+    await expect(page.getByRole('alert')).toHaveCount(0);
+
+    await card.getByRole('button', { name: 'Arşivden yükle' }).click();
+    const confirm = page.getByRole('dialog', { name: 'Günler arşivden yüklensin mi?' });
+    await expect(confirm).toContainText('ve 7 gün boyunca veritabanında kalır');
+    await confirm.getByRole('button', { name: 'Yükle', exact: true }).click();
+    await expect(confirm).toBeHidden();
+    expect(api.callsTo('POST', '/archive-reloads').map((call) => call.body)).toEqual([
+      { reason: 'search', first_day: '2026-10-04', last_day: '2026-10-05' },
+    ]);
+    await expect(card.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '50');
+    expect(api.callsTo('POST', '/search/export')).toHaveLength(1);
+
+    // Ready: the same export runs again, once, and its file is saved.
+    const download = page.waitForEvent('download');
+    archive.steps = ['ready'];
+    expect((await download).suggestedFilename()).toMatch(/^arama-\d{8}T\d{4}-\d{8}T\d{4}\.xlsx$/);
+    await expect(card).toBeHidden();
+    const exports = api.callsTo('POST', '/search/export').map((call) => call.body);
+    expect(exports).toHaveLength(2);
+    expect(exports[1]).toEqual(exports[0]);
   });
 
   test('the auditor searches but has neither export nor "Kanıt paketine aktar"', async ({
