@@ -68,7 +68,11 @@ days.
 A step waits for that lock at most half of ``search.request_budget_ms``
 (:func:`~arcilogger_db.partitions.step_lock_timeout_ms`, 2 s by default; W5-G-24): an export
 holds it shared for up to ``search.export_budget_seconds`` (W5-G-23), and every search that comes
-while the step waits queues behind the step's request. A step that does not get it in time does
+while the step waits queues behind the step's request. The step's table locks after it (its
+partitions, the partitions and chunks it drops) share that wait
+(:class:`~arcilogger_db.partitions.LockBudget`): a reader that takes no partition lock (a plain
+``SELECT``, a backup) holding a table would otherwise keep the step, and the searches queued
+behind its partition lock, waiting. A step that does not get them in time does
 nothing (its transaction is rolled back; earlier steps of the run stay) and fails the run with
 ``PartitionLockTimeoutError`` and a warning line; the worker tries again (15 min, 30 min, …).
 Only the ``alerts.job_failures``-th (3) failed run in a row opens ``R20-db-window`` (the threshold
@@ -110,6 +114,7 @@ from arcilogger_db.audit import append_audit
 from arcilogger_db.models import ARCHIVE_RELOAD_ACTIVE, ArchiveReload, JobRun, Setting
 from arcilogger_db.partitions import (
     RAW_DAY_MARGIN,
+    LockBudget,
     PartitionLockTimeoutError,
     PartitionReport,
     dropped_before,
@@ -336,7 +341,8 @@ def maintain(
     (``cutoff``: the limit, ``applied``: the cutoff the step reached, ``done``: nothing is left
     to create or drop)."""
     today = site_day(now)
-    lock_partitions(connection, timeout_ms=step_lock_timeout_ms(connection))
+    budget = LockBudget(step_lock_timeout_ms(connection))
+    lock_partitions(connection, budget=budget)
     expired = expire_reloads(connection, now)
     cutoff = cutoff_of(connection, config, layout or Layout(config.data_dir), now)
     details: dict[str, Any] = {
@@ -353,10 +359,10 @@ def maintain(
         "expired": expired,
     }
     if cutoff.day is None:
-        report = ensure_partitions(connection, today=today)  # the partitions, no drop
+        report = ensure_partitions(connection, today=today, budget=budget)  # no drop
         done = report.remaining == 0
     else:
-        report = maintain_window(connection, cutoff.day, today=today)
+        report = maintain_window(connection, cutoff.day, today=today, budget=budget)
         done = report.remaining == 0 and report.applied == cutoff.day
         if dropped_anything(report):
             details["audit_id"] = audit_drop(connection, cutoff, report, expired=expired)
@@ -600,8 +606,8 @@ def _back_off(ctx: JobContext, exc: PartitionLockTimeoutError) -> None:
         log.exception("the failed runs of db.window could not be read")
         failures = needed = 1
     log.warning(
-        "db.window: %s (search exports hold it); nothing done, tried again at the next run "
-        "(failed runs in a row: %d, alert from %d)",
+        "db.window: %s (a search export holds the partition lock, or a reader a table); "
+        "nothing done, tried again at the next run (failed runs in a row: %d, alert from %d)",
         exc,
         failures,
         needed,
