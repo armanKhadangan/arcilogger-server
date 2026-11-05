@@ -30,25 +30,28 @@ is the hypertables' one-day chunks, measured once): see :data:`DESCRIPTIONS`.
 
 **As the product runs it**: the API's lookup plans every statement with its values
 (``plan_cache_mode = force_custom_plan`` for its transaction, ``routers/lookup.py``), so every
-lookup and statement here runs in a transaction that sets it (psycopg prepares a statement on its
-fifth execution on a connection; without the setting PostgreSQL may then switch to a generic
-plan). Each world prints the captured statement (the MAC branch is its first ``UNION ALL`` part);
-the timings, best and median of :data:`RUNS` after a warm-up: the whole lookup, the check
-``_missed_moves`` with its Python work, its statement as the lookup sent it, and the statement and
-the MAC branch alone on one connection; the plans their executions used on the connection of one
-more lookup (not timed; ``pg_prepared_statements``: custom and generic); and ``EXPLAIN (ANALYZE,
-BUFFERS)`` of the statement and of the MAC branch alone, run in that lookup's own transaction right
-after its statement ran, with the branch's estimate against what it read.
+lookup and statement here runs in a transaction that sets it (psycopg prepares a statement on the
+execution after its ``prepare_threshold``-th on a connection, the sixth by default; without the
+setting PostgreSQL may then switch to a generic plan). Each world prints the captured statement
+(the MAC branch is its first ``UNION ALL`` part); the timings, best and median of :data:`RUNS`: the
+whole lookup, the check ``_missed_moves`` with its Python work and its statement as the lookup sent
+it, after a warm-up lookup, and the statement and the MAC branch alone on one connection, after a
+warm-up that leaves each prepared (:func:`_warmed`); the plans the executions of each form used
+on the connection of one more lookup (not timed; ``pg_prepared_statements``: custom and generic);
+and ``EXPLAIN (ANALYZE, BUFFERS)`` of the statement and of the MAC branch alone, run in that
+lookup's own transaction right after its statement ran, with the branch's estimate against what it
+read (``EXPLAIN``'s rows are a loop's average: printed with the loops, ``x``).
 
 **Old against new** (W5-G-26): the old form is the captured statement with its MAC branch's
 conversion test written back from ``CASE WHEN (<kept>) THEN true ELSE false END`` to the bare
 ``<kept>`` (``CASE ... END IS NULL``), an exact text rewrite that fails when the wrapper is not
 found once in the MAC branch (the IP branch carries the bare test as it was). Both forms' MAC
 branches return the same rows; both are explained in the explained lookup's transaction (the
-branch's estimate against what it read, its joins and the rows their filters removed, and whether
-the whole statement runs under a ``Gather``), and the MAC branch and the statement of both are
-timed on one connection in one transaction, old and new alternating over :data:`RUNS` rounds
-after a warm-up of each (:func:`_alternated`). Each world's summary has an "old → new" line.
+branch's estimate against what it read, its joins and the rows their filters removed, and the
+statement's ``Gather`` nodes, each marked when it is in an InitPlan or a SubPlan), and the MAC
+branch and the statement of both are timed on one connection in one transaction, old and new
+alternating over :data:`RUNS` rounds after a warm-up that leaves both prepared, so that neither
+is parsed in a timed round (:func:`_alternated`). Each world's summary has an "old → new" line.
 
 **Twice a world** (:data:`STAGES`): as the module loads it (written, then one ``VACUUM (ANALYZE)``
 of the whole database, as the guards' ``_site`` does), and again after an explicit ``ANALYZE`` of
@@ -117,6 +120,18 @@ WRAPPER_CLOSE = ") THEN true ELSE false END"
 BARE_OPEN, BARE_CLOSE = "CASE WHEN (", " END IS NULL"
 #: What the API's lookup sets for its transaction (``search.sql.custom_plans_statement``).
 CUSTOM_PLANS = "SELECT set_config('plan_cache_mode', 'force_custom_plan', true)"
+#: The forms of ``_missed_moves``' statement psycopg prepared on its connection (with ``$n``
+#: placeholders, found by their marks), whether each is the whole statement, and whether it is the
+#: new form (only the new one carries the wrapper's close, :func:`_forms`).
+PREPARED = (
+    "SELECT statement LIKE '%%UNION ALL%%', statement LIKE %(new)s, name, custom_plans, "
+    "generic_plans FROM pg_prepared_statements "
+    "WHERE statement LIKE %(ordinality)s AND statement LIKE %(join)s "
+    "AND statement NOT LIKE 'EXPLAIN%%'"
+)
+#: The forms :data:`PREPARED` tells apart, as the output names them.
+STATEMENT, BRANCH = "statement", "MAC branch alone"
+FORMS = (STATEMENT, BRANCH, f"old: {STATEMENT}", f"old: {BRANCH}")
 #: Each world is measured at each stage, in this order (#185, Q1).
 LOADED, ANALYZED = "as loaded", "after ANALYZE"
 STAGES = {
@@ -423,12 +438,50 @@ def _timed_lookups(site: Engine) -> tuple[_Runs, _Runs, _Runs]:
     return lookups, checks, sent
 
 
-def _timed_statement(site: Engine, sql: str, parameters: dict[str, Any]) -> _Runs:
-    """``sql`` alone on one connection, planned with its values as in the lookup."""
+def _prepared(driver: Any) -> dict[str, tuple[str, int, int]]:
+    """The forms of ``_missed_moves``' statement prepared on ``driver`` (a psycopg connection),
+    by their :data:`FORMS` name: the prepared statement's name, its custom and generic plans.
+    Fails when one form is prepared twice (the output would then show one of them at random)."""
+    with driver.cursor() as cursor:
+        cursor.execute(
+            PREPARED,
+            {
+                "new": f"%{WRAPPER_CLOSE}%",
+                "ordinality": f"%{MARKS[0]}%",
+                "join": f"%{MARKS[1]}%",
+            },
+        )
+        rows = cursor.fetchall()
+    found: dict[str, tuple[str, int, int]] = {}
+    for whole, new, name, custom, generic in rows:
+        what = ("" if new else "old: ") + (STATEMENT if whole else BRANCH)
+        assert what not in found, f"{what} prepared twice: {found[what][0]} and {name}"
+        found[what] = (name, custom, generic)
+    return found
+
+
+def _warmed(connection: Connection, forms: dict[str, str], parameters: dict[str, Any]) -> None:
+    """Each of ``forms`` (its :data:`FORMS` name: its text) executed on ``connection`` until psycopg
+    has prepared it (``prepare_threshold`` + 1 executions: a timed run is never parsed), or once
+    when the connection prepares nothing; fails unless each is then prepared."""
+    driver = connection.connection.driver_connection
+    assert driver is not None
+    threshold = driver.prepare_threshold
+    for sql in forms.values():
+        for _ in range(1 if threshold is None else threshold + 1):
+            connection.exec_driver_sql(sql, parameters).all()
+    if threshold is not None:
+        prepared = _prepared(driver)
+        assert set(forms) <= set(prepared), f"not prepared: {sorted(set(forms) - set(prepared))}"
+
+
+def _timed_statement(site: Engine, what: str, sql: str, parameters: dict[str, Any]) -> _Runs:
+    """``sql`` (``what`` of :data:`FORMS`) alone on one connection, planned with its values as in
+    the lookup, after :func:`_warmed`."""
     runs = _Runs()
     with site.begin() as connection:
         connection.execute(text(CUSTOM_PLANS))
-        connection.exec_driver_sql(sql, parameters).all()
+        _warmed(connection, {what: sql}, parameters)
         for _ in range(RUNS):
             began = time.perf_counter()
             connection.exec_driver_sql(sql, parameters).all()
@@ -437,17 +490,17 @@ def _timed_statement(site: Engine, sql: str, parameters: dict[str, Any]) -> _Run
 
 
 def _alternated(
-    site: Engine, old: str, new: str, parameters: dict[str, Any]
+    site: Engine, what: str, old: str, new: str, parameters: dict[str, Any]
 ) -> tuple[_Runs, _Runs]:
-    """``old`` and ``new`` on one connection in one transaction, planned with their values as in
-    the lookup: a warm-up of each, then :data:`RUNS` rounds of both, old first in the odd rounds
-    (the first, the third, ...) and new first in the even ones."""
+    """``old`` and ``new`` (``what`` of :data:`FORMS`, new) on one connection in one transaction,
+    planned with their values as in the lookup: :func:`_warmed` (both prepared, whatever the
+    connection ran before), then :data:`RUNS` rounds of both, old first in the odd rounds (the
+    first, the third, ...) and new first in the even ones."""
     assert old != new
     runs = {old: _Runs(), new: _Runs()}
     with site.begin() as connection:
         connection.execute(text(CUSTOM_PLANS))
-        for sql in (old, new):
-            connection.exec_driver_sql(sql, parameters).all()
+        _warmed(connection, {f"old: {what}": old, what: new}, parameters)
         for each in range(RUNS):
             for sql in (old, new) if each % 2 == 0 else (new, old):
                 began = time.perf_counter()
@@ -506,23 +559,12 @@ def _explained_lookup(site: Engine, forms: _Forms) -> _Explained:
             found.old_branch, found.old_figures = explained(forms.old_branch)
             other.execute("SELECT current_setting('plan_cache_mode')")
             found.plan_cache_mode = other.fetchone()[0]
-            # psycopg prepares it with $n placeholders: found by its marks.
-            other.execute(
-                "SELECT name, statement LIKE '%%UNION ALL%%', custom_plans, generic_plans "
-                "FROM pg_prepared_statements "
-                "WHERE statement LIKE %(ordinality)s AND statement LIKE %(join)s "
-                "AND statement NOT LIKE 'EXPLAIN%%'",
-                {"ordinality": f"%{MARKS[0]}%", "join": f"%{MARKS[1]}%"},
-            )
-            prepared = {
-                "statement" if whole else "MAC branch alone": (name, custom, generic)
-                for name, whole, custom, generic in other.fetchall()
-            }
+            prepared = _prepared(cursor.connection)
             found.prepared = [
                 f"{what} ({name}): {custom} custom, {generic} generic plans"
                 if what in prepared
                 else f"{what}: not prepared on this connection (planned at each execution)"
-                for what in ("statement", "MAC branch alone")
+                for what in FORMS
                 for name, custom, generic in [prepared.get(what, ("", 0, 0))]
             ]
 
@@ -551,13 +593,17 @@ def _shape(plan: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any] | None]
     """The side of the MAC branch's outermost join that reads ``fg_dhcp`` (an Append of the
     partitions, TimescaleDB's ChunkAppend, or one scan), and that join (none: one scan)."""
     join = next((node for node in _nodes(plan) if "Join Type" in node), None)
-    reading = plan if join is None else next(c for c in join["Plans"] if _reads_fg_dhcp(c))
+    if join is None:
+        return plan, None
+    reading = next((c for c in join["Plans"] if _reads_fg_dhcp(c)), None)
+    assert reading is not None, f"no side of the {join['Node Type']} reads a table"
     return reading, join
 
 
 def _figures(plan: dict[str, Any]) -> list[str]:
     """The MAC branch's estimate against what it read: the side of its outermost join that reads
-    ``fg_dhcp``, and every join with the rows its filter removed."""
+    ``fg_dhcp``, and every join with the rows its filter removed (``EXPLAIN``'s actual and removed
+    rows are a loop's average: x the loops is the total)."""
     reading, _join = _shape(plan)
     scans = [node for node in _nodes(reading) if "Relation Name" in node]
     lines = [
@@ -570,21 +616,30 @@ def _figures(plan: dict[str, Any]) -> list[str]:
             lines.append(
                 f"{node['Node Type']} ({node['Join Type']}): estimated {node['Plan Rows']}, "
                 f"actual {node['Actual Rows']} x {node['Actual Loops']}, rows removed by join "
-                f"filter {node.get('Rows Removed by Join Filter', 0)}"
+                f"filter {node.get('Rows Removed by Join Filter', 0)} x {node['Actual Loops']}"
             )
     return lines
 
 
 def _parallel(plan: dict[str, Any]) -> str:
-    """Whether a plan runs under a ``Gather`` (or ``Gather Merge``), with its workers."""
-    gathers = [node for node in _nodes(plan) if node["Node Type"] in ("Gather", "Gather Merge")]
-    if not gathers:
-        return "no Gather"
-    return ", ".join(
-        f"{node['Node Type']} ({node.get('Workers Launched', 0)} of "
-        f"{node.get('Workers Planned', 0)} workers)"
-        for node in gathers
-    )
+    """A plan's ``Gather`` and ``Gather Merge`` nodes with their workers, each one in an InitPlan
+    or a SubPlan (the IP branch's ``ARRAY(SELECT unnest(...))`` is one) marked as such: only the
+    others run part of the tree the statement's rows come from."""
+    found: list[str] = []
+
+    def walk(node: dict[str, Any], sub: bool) -> None:
+        sub = sub or node.get("Parent Relationship") in ("InitPlan", "SubPlan")
+        if node["Node Type"] in ("Gather", "Gather Merge"):
+            found.append(
+                f"{node['Node Type']} ({node.get('Workers Launched', 0)} of "
+                f"{node.get('Workers Planned', 0)} workers"
+                f"{', in an InitPlan/SubPlan' if sub else ''})"
+            )
+        for child in node.get("Plans", ()):
+            walk(child, sub)
+
+    walk(plan, False)
+    return ", ".join(found) if found else "no Gather"
 
 
 def _times(runs: _Runs) -> str:
@@ -603,12 +658,17 @@ def _old_new(
     def join(node: dict[str, Any] | None) -> str:
         return "no join" if node is None else f"{node['Node Type']} ({node['Join Type']})"
 
-    def removed(node: dict[str, Any] | None) -> int:
-        return 0 if node is None else int(node.get("Rows Removed by Join Filter", 0))
+    def removed(node: dict[str, Any] | None) -> str:
+        if node is None:
+            return "0"
+        return f"{node.get('Rows Removed by Join Filter', 0)} x {node['Actual Loops']}"
+
+    def actual(node: dict[str, Any]) -> str:
+        return f"{node['Actual Rows']} x {node['Actual Loops']}"
 
     return (
         f"old → new: fg_dhcp est {old_reading['Plan Rows']} → {new_reading['Plan Rows']} "
-        f"(actual {old_reading['Actual Rows']} → {new_reading['Actual Rows']}); "
+        f"(actual {actual(old_reading)} → {actual(new_reading)}); "
         f"{join(old_join)} → {join(new_join)}, join filter removed {removed(old_join)} → "
         f"{removed(new_join)}; MAC branch best/median {_times(branches[0])} → "
         f"{_times(branches[1])} ms; statement best/median {_times(statements[0])} → "
@@ -628,7 +688,7 @@ def _summary(plan: dict[str, Any]) -> str:
         return f"{found}; no join"
     return (
         f"{found}; {join['Node Type']}, join filter removed "
-        f"{join.get('Rows Removed by Join Filter', 0)}"
+        f"{join.get('Rows Removed by Join Filter', 0)} x {join['Actual Loops']}"
     )
 
 
@@ -767,10 +827,10 @@ def _measured(
         ).scalar_one()
 
     lookups, checks, sent = _timed_lookups(site)
-    branch = _timed_statement(site, mac_branch, parameters)
-    whole = _timed_statement(site, sql, parameters)
-    branches = _alternated(site, forms.old_branch, mac_branch, parameters)
-    statements = _alternated(site, forms.old_sql, sql, parameters)
+    branch = _timed_statement(site, BRANCH, mac_branch, parameters)
+    whole = _timed_statement(site, STATEMENT, sql, parameters)
+    branches = _alternated(site, BRANCH, forms.old_branch, mac_branch, parameters)
+    statements = _alternated(site, STATEMENT, forms.old_sql, sql, parameters)
     explained = _explained_lookup(site, forms)
     assert explained.plan_cache_mode == "force_custom_plan"
     old_new = _old_new(explained, branches, statements)
@@ -803,7 +863,8 @@ def _measured(
             *_figures(explained.figures),
             f"whole statement: {_parallel(explained.statement)}",
             "--- old (before W5-G-26: the MAC branch's test bare) against new (as sent): old and "
-            "new alternating on one connection, one transaction, after a warm-up of each ---",
+            "new alternating on one connection, one transaction, both prepared before the "
+            "first timed round ---",
             branches[0].line("old: MAC branch alone"),
             branches[1].line("new: MAC branch alone"),
             statements[0].line("old: statement alone"),
