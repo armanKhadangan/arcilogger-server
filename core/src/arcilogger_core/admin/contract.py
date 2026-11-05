@@ -119,7 +119,14 @@ OpKind = Literal[
     "smtp_ca_clear",
 ]
 #: The stored secrets the browser may set or delete; every other name is ``schema_invalid``.
-BrowserSecret = Literal["kamusm.customer", "kamusm.password", "smtp.password", "replica.password"]
+BrowserSecret = Literal[
+    "kamusm.customer",
+    "kamusm.password",
+    "turktrust.username",
+    "turktrust.password",
+    "smtp.password",
+    "replica.password",
+]
 UploadKind = Literal["kamusm_root", "zamane_client", "smtp_ca"]
 TaskKind = Literal["seal", "credit", "tsa_test", "replica_test"]
 KeyRole = Literal["api", "agent"]

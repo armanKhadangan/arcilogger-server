@@ -10,7 +10,8 @@ more than the stored Kamu SM credentials and without creating a file:
 * the API shows it on the Kamu SM page; the CLI's own start-up check follows the same order.
 
 Causes, in this order: ``zamane-jar`` (no client configured), ``secret-store`` (the key does not
-open the store), ``credentials`` (customer number or password not stored), ``executable`` (the
+open the store), ``credentials`` (Kamu SM's customer number and password, or TÜRKTRUST's user
+name and password, not stored), ``executable`` (the
 configured Java or client is not trusted, :mod:`arcilogger_core.execpolicy`), ``roots`` (no pinned
 root certificate). :func:`production_missing` lists what the switch to the Kamu SM production
 server still needs (contract 2.6, ``tsa_not_ready``).
@@ -32,6 +33,8 @@ from arcilogger_core.execpolicy import (
 from arcilogger_core.secretstore import (
     KAMUSM_CUSTOMER,
     KAMUSM_PASSWORD,
+    TURKTRUST_PASSWORD,
+    TURKTRUST_USERNAME,
     SecretStore,
     SecretStoreError,
 )
@@ -39,6 +42,8 @@ from arcilogger_core.tsa.base import TsaError
 from arcilogger_core.tsa.verify import load_roots_dir
 
 CREDENTIALS: Final = frozenset({KAMUSM_CUSTOMER, KAMUSM_PASSWORD})
+#: TÜRKTRUST's account (contract §2.4): without both, its provider cannot be built.
+TURKTRUST_CREDENTIALS: Final = frozenset({TURKTRUST_USERNAME, TURKTRUST_PASSWORD})
 #: Cause of a configured program that ``execpolicy`` refuses (its text: ``seal.CONFIG_CAUSES``).
 EXECUTABLE_CAUSE: Final = "executable"
 
@@ -67,21 +72,25 @@ def java_present(config: Config, anchors: TrustAnchors) -> bool:
 def _provider_cause(
     config: Config, anchors: TrustAnchors, secrets: SecretStore, stored: Collection[str] | None
 ) -> str | None:
-    if config.tsa.provider != "zamane":
+    if config.tsa.provider not in ("zamane", "turktrust"):
         return None  # the mock and RFC 3161 providers need neither credentials nor a client
-    if config.tsa.zamane_jar is None:
+    zamane = config.tsa.provider == "zamane"
+    if zamane and config.tsa.zamane_jar is None:
         return "zamane-jar"
+    needed = CREDENTIALS if zamane else TURKTRUST_CREDENTIALS
     if stored is None:
         try:
             names = set(secrets.names())
         except (OSError, ValueError, SecretStoreError):
             return "secret-store"
-        if names >= CREDENTIALS and not all(secrets.readable(name) for name in CREDENTIALS):
+        if names >= needed and not all(secrets.readable(name) for name in needed):
             return "secret-store"
     else:
         names = set(stored)
-    if not names >= CREDENTIALS:
+    if not names >= needed:
         return "credentials"
+    if not zamane:
+        return None  # TÜRKTRUST is reached over HTTPS: no program to trust
     if not executables_trusted(config, anchors):
         return EXECUTABLE_CAUSE
     return None

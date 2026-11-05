@@ -209,10 +209,16 @@ def test_section_values_and_etags(root: Path, config: Config) -> None:
         "clock.ntp_server": "172.20.10.1",
         "clock.fallback_server": "time.ume.tubitak.gov.tr",
         "clock.alert_offset_ms": 1000,
+        "network.https_proxy": "",
     }
     tsa = rules.section_values("tsa", config, frozenset({"kamusm.customer"}))
     assert tsa["kamusm.customer"] == "set"
     assert tsa["kamusm.password"] == "unset"
+    # §2.4: TÜRKTRUST's account is reported in the TSA section, never its value.
+    assert tsa["turktrust.username"] == "unset"
+    assert tsa["turktrust.password"] == "unset"
+    assert (tsa["tsa.renew_before_days"], tsa["tsa.crl_max_age_days"]) == (180, 7)
+    assert (tsa["tsa.crl_urls"], tsa["tsa.allow_plain_http"]) == ([], False)
     assert "kamusm.password" not in rules.section_values("general", config, frozenset())
     etag = rules.etag("general", config, frozenset())
     assert etag.startswith("general:")
@@ -1547,3 +1553,114 @@ def test_which_changes_need_reauthentication_or_a_hold(
     check = validate_section(section, config, body, context(root))
     assert check.ok, check.errors
     assert (check.reauth, check.guarded) == (reauth, guarded)
+
+
+# -- TÜRKTRUST and the Wave 5 keys (contract §2.4, §2.5, C5) ---------------------------------------
+
+TURKTRUST_ACCOUNT = frozenset({"turktrust.username", "turktrust.password"})
+
+
+def test_turktrust_needs_both_secrets(root: Path, config: Config) -> None:
+    check = validate_section("tsa", config, {"server": "turktrust"}, context(root))
+    assert codes(check) == ["tsa_not_ready"]
+    assert check.errors[0].details == {"missing": ["turktrust.username", "turktrust.password"]}
+    assert check.http_status == 409
+    half = context(root, stored_secrets=frozenset({"turktrust.username"}))
+    check = validate_section("tsa", config, {"server": "turktrust"}, half)
+    assert check.errors[0].details == {"missing": ["turktrust.password"]}
+
+
+def test_turktrust_with_its_account_switches_over_https(root: Path, config: Config) -> None:
+    ready = context(root, stored_secrets=TURKTRUST_ACCOUNT)
+    check = validate_section("tsa", config, {"server": "turktrust"}, ready)
+    assert check.ok, check.errors
+    assert {op["path"]: op["value"] for op in check.ops} == {
+        "tsa.provider": "turktrust",
+        "tsa.url": "https://zd.turktrust.com.tr/",
+        "tsa.port": 443,
+    }
+    assert check.reauth
+    assert rules.tsa_server("turktrust", "https://zd.turktrust.com.tr/", 443) == "turktrust"
+
+
+def test_the_account_is_given_in_the_same_change(root: Path, config: Config) -> None:
+    body = {"server": "turktrust", "turktrust_username": "ornek-as", "turktrust_password": "x" * 9}
+    check = validate_section("tsa", config, body, context(root))
+    assert check.ok, check.errors
+    assert set(check.secret_changes) == {"turktrust.username", "turktrust.password"}
+    assert check.reauth
+    assert check.alert == "high"
+
+
+def test_turktrust_over_plain_http_needs_the_setting_and_a_confirmation(
+    root: Path, config: Config
+) -> None:
+    ready = context(root, stored_secrets=TURKTRUST_ACCOUNT)
+    unconfirmed = validate_section("tsa", config, {"server": "turktrust-http"}, ready)
+    assert "tsa_confirm_required" in codes(unconfirmed)
+    without = validate_section("tsa", config, {"server": "turktrust-http", "confirm": True}, ready)
+    assert [(p.code, p.field) for p in without.errors] == [
+        ("config_invalid", "tsa.allow_plain_http")
+    ]
+    body = {"server": "turktrust-http", "confirm": True, "allow_plain_http": True}
+    check = validate_section("tsa", config, body, ready)
+    assert check.ok, check.errors
+    assert {op["path"]: op["value"] for op in check.ops} == {
+        "tsa.provider": "turktrust",
+        "tsa.url": "http://zd.turktrust.com.tr/",
+        "tsa.allow_plain_http": True,
+    }  # the port stays 80, the default
+
+
+@pytest.mark.parametrize(
+    ("body", "field"),
+    [
+        ({"renew_before_days": 29}, "tsa.renew_before_days"),
+        ({"renew_before_days": 731}, "tsa.renew_before_days"),
+        ({"crl_max_age_days": 0}, "tsa.crl_max_age_days"),
+        ({"crl_max_age_days": 61}, "tsa.crl_max_age_days"),
+        ({"crl_urls": "http://crl.example.test/a.crl"}, "tsa.crl_urls"),
+        ({"crl_urls": ["ftp://crl.example.test/a.crl"]}, "tsa.crl_urls"),
+        ({"crl_urls": ["http://user:pw@crl.example.test/a.crl"]}, "tsa.crl_urls"),
+        ({"crl_urls": ["http://crl.example.test/a.crl"] * 21}, "tsa.crl_urls"),
+        ({"allow_plain_http": "yes"}, "tsa.allow_plain_http"),
+    ],
+)
+def test_wave5_tsa_values_out_of_range(
+    root: Path, config: Config, body: Mapping[str, Any], field: str
+) -> None:
+    check = validate_section("tsa", config, body, context(root))
+    assert [(p.code, p.field) for p in check.errors] == [("config_invalid", field)]
+
+
+def test_wave5_tsa_values_are_editable_with_reauthentication(root: Path, config: Config) -> None:
+    body = {
+        "renew_before_days": 365,
+        "crl_urls": ["http://crl.example.test/root.crl"],
+        "crl_max_age_days": 14,
+    }
+    check = validate_section("tsa", config, body, context(root))
+    assert check.ok, check.errors
+    assert check.reauth
+    assert check.changes == {
+        "tsa.renew_before_days": {"old": 180, "new": 365},
+        "tsa.crl_urls": {"old": [], "new": ["http://crl.example.test/root.crl"]},
+        "tsa.crl_max_age_days": {"old": 7, "new": 14},
+    }
+
+
+def test_the_proxy_is_a_general_value_with_reauthentication(root: Path, config: Config) -> None:
+    body = {"network": {"https_proxy": "http://172.20.10.5:3128"}}
+    check = validate_section("general", config, body, context(root))
+    assert check.ok, check.errors
+    assert check.reauth
+    assert check.changes == {"network.https_proxy": {"old": "", "new": "http://172.20.10.5:3128"}}
+    strict = validate_section("general", config, body, context(root, strict_outbound=True))
+    assert "system.firewall" in strict.effects
+    for bad in ("172.20.10.5:3128", "http://172.20.10.5", "http://u:p@172.20.10.5:3128"):
+        refused = validate_section(
+            "general", config, {"network": {"https_proxy": bad}}, context(root)
+        )
+        assert [(p.code, p.field) for p in refused.errors] == [
+            ("config_invalid", "network.https_proxy")
+        ], bad

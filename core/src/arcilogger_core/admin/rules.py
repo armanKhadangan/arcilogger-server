@@ -74,8 +74,11 @@ from arcilogger_core.config import (
     KAMUSM_PRODUCTION_HOST,
     KAMUSM_TEST_HOST,
     MIN_RETENTION_DAYS,
+    TURKTRUST_PRODUCTION_HOST,
     Config,
+    NetworkConfig,
     SourceConfig,
+    TsaConfig,
     replica_target_text,
 )
 from arcilogger_core.execpolicy import TrustAnchors
@@ -115,13 +118,31 @@ EDITABLE: Final[Mapping[str, Editable]] = MappingProxyType(
             "clock.ntp_server",
             "clock.fallback_server",
             "clock.alert_offset_ms",
+            "network.https_proxy",
         ),
         **_paths("tsa", "server", True, "tsa.provider", "tsa.url", "tsa.port"),
         **_paths("tsa", "value", False, "tsa.credit_alert_threshold", "tsa.timeout_seconds"),
-        **_paths("tsa", "value", True, "tsa.java"),
+        **_paths(
+            "tsa",
+            "value",
+            True,
+            "tsa.java",
+            "tsa.allow_plain_http",
+            "tsa.renew_before_days",
+            "tsa.crl_urls",
+            "tsa.crl_max_age_days",
+        ),
         **_paths("tsa", "promotion", True, "tsa.zamane_jar"),
         **_paths("tsa", "legal_root", True, "tsa.legal_root_fingerprints"),
-        **_paths("tsa", "secret", True, "kamusm.customer", "kamusm.password"),
+        **_paths(
+            "tsa",
+            "secret",
+            True,
+            "kamusm.customer",
+            "kamusm.password",
+            "turktrust.username",
+            "turktrust.password",
+        ),
         **_paths(
             "smtp",
             "value",
@@ -152,10 +173,11 @@ EDITABLE: Final[Mapping[str, Editable]] = MappingProxyType(
         **_paths("sources", "source", False, "sources"),
     }
 )
-#: The secret of each section the browser may set (``kamusm.*`` belong to ``tsa``).
+#: The secret of each section the browser may set (``kamusm.*`` and ``turktrust.*`` belong to
+#: ``tsa``).
 SECTION_SECRETS: Final[Mapping[Section, tuple[BrowserSecret, ...]]] = MappingProxyType(
     {
-        "tsa": ("kamusm.customer", "kamusm.password"),
+        "tsa": ("kamusm.customer", "kamusm.password", "turktrust.username", "turktrust.password"),
         "smtp": ("smtp.password",),
         "replica": ("replica.password",),
     }
@@ -219,13 +241,22 @@ SECTION_PATHS: Final[Mapping[Section, tuple[str, ...]]] = MappingProxyType(
     }
 )
 
-#: The two Zamane servers the browser may choose: provider, URL, port.
+#: The time-stamp servers the browser may choose: provider, URL, port. The two Zamane servers
+#: of Kamu SM, and TÜRKTRUST over HTTPS or, only with ``tsa.allow_plain_http`` and a typed
+#: confirmation, over plain HTTP (contract §2.4; the password then travels unencrypted).
 TSA_SERVERS: Final[Mapping[str, tuple[str, str, int]]] = MappingProxyType(
     {
         "test": ("zamane", f"http://{KAMUSM_TEST_HOST}", 80),
         "production": ("zamane", f"http://{KAMUSM_PRODUCTION_HOST}", 80),
+        "turktrust": ("turktrust", f"https://{TURKTRUST_PRODUCTION_HOST}/", 443),
+        "turktrust-http": ("turktrust", f"http://{TURKTRUST_PRODUCTION_HOST}/", 80),
     }
 )
+#: The TÜRKTRUST choices, and the one that sends the password in clear text.
+TURKTRUST_SERVERS: Final = frozenset({"turktrust", "turktrust-http"})
+TURKTRUST_PLAIN_HTTP: Final = "turktrust-http"
+#: The secrets a TÜRKTRUST server needs (``tsa_not_ready`` names the missing ones).
+TURKTRUST_SECRETS: Final[tuple[BrowserSecret, ...]] = ("turktrust.username", "turktrust.password")
 #: Hosts an SMTP password may go to without encryption (a relay on this server).
 LOCAL_SMTP_HOSTS: Final = frozenset({"localhost", "127.0.0.1", "::1"})
 
@@ -534,6 +565,28 @@ def replica_user_ok(user: str) -> bool:
 
 def _integer(value: Any, low: int, high: int) -> bool:
     return isinstance(value, int) and not isinstance(value, bool) and low <= value <= high
+
+
+def _crl_urls_ok(value: Any) -> bool:
+    """``tsa.crl_urls`` as :class:`~arcilogger_core.config.TsaConfig` accepts it (§2.5, C10)."""
+    if not isinstance(value, list) or not all(isinstance(url, str) for url in value):
+        return False
+    try:
+        TsaConfig(crl_urls=tuple(value))
+    except ValidationError:
+        return False
+    return True
+
+
+def _proxy_ok(value: Any) -> bool:
+    """``network.https_proxy`` as :class:`~arcilogger_core.config.NetworkConfig` accepts it."""
+    if not isinstance(value, str):
+        return False
+    try:
+        NetworkConfig(https_proxy=value)
+    except ValidationError:
+        return False
+    return True
 
 
 def _posix(path: Path) -> str:
@@ -990,6 +1043,13 @@ def _general(run: _Run) -> None:
         run.value("clock.alert_offset_ms"), 1, 60_000
     ):
         run.error("config_invalid", "clock.alert_offset_ms")
+    if run.changed("network.https_proxy"):
+        if not _proxy_ok(run.value("network.https_proxy")):
+            run.error("config_invalid", "network.https_proxy")
+        run.reauth = True
+        run.effects |= {"reload.api", "reload.worker"}
+        if run.context.strict_outbound:
+            run.effects.add("system.firewall")
     if not any(path.startswith("clock.") for path in run.set_paths):
         return
     run.reauth = True
@@ -1027,6 +1087,24 @@ def _tsa(run: _Run) -> None:
         run.value("tsa.timeout_seconds"), 5, 600
     ):
         run.error("config_invalid", "tsa.timeout_seconds")
+    if run.changed("tsa.renew_before_days") and not _integer(
+        run.value("tsa.renew_before_days"), 30, 730
+    ):
+        run.error("config_invalid", "tsa.renew_before_days")
+    if run.changed("tsa.crl_max_age_days") and not _integer(
+        run.value("tsa.crl_max_age_days"), 1, 60
+    ):
+        run.error("config_invalid", "tsa.crl_max_age_days")
+    if run.changed("tsa.crl_urls") and not _crl_urls_ok(run.value("tsa.crl_urls")):
+        run.error("config_invalid", "tsa.crl_urls")
+    if run.changed("tsa.allow_plain_http") and not isinstance(
+        run.value("tsa.allow_plain_http"), bool
+    ):
+        run.error("config_invalid", "tsa.allow_plain_http")
+    elif after == TURKTRUST_PLAIN_HTTP and run.value("tsa.allow_plain_http") is not True:
+        # §2.4: TÜRKTRUST over plain HTTP only with tsa.allow_plain_http (the password then
+        # travels in clear text).
+        run.error("config_invalid", "tsa.allow_plain_http")
     if run.changed("tsa.java"):
         java = run.value("tsa.java")
         if (
@@ -1058,6 +1136,9 @@ def _tsa(run: _Run) -> None:
                 run.warn("production_not_tested", "tsa.provider")
         if run.context.strict_outbound:
             run.effects.add("system.firewall")
+    plain_http = run.changed("tsa.allow_plain_http") or run.changed("tsa.crl_urls")
+    if plain_http and run.context.strict_outbound:
+        run.effects.add("system.firewall")
 
 
 def _tsa_candidate(run: _Run, candidate: Config) -> None:
@@ -1066,6 +1147,10 @@ def _tsa_candidate(run: _Run, candidate: Config) -> None:
     stored = frozenset(run.secrets_after)
     before = tsa_server(run.old("tsa.provider"), run.old("tsa.url"), run.old("tsa.port"))
     after = tsa_server(candidate.tsa.provider, candidate.tsa.url, candidate.tsa.port)
+    if after in TURKTRUST_SERVERS and before not in TURKTRUST_SERVERS:
+        missing_secrets = [name for name in TURKTRUST_SECRETS if name not in stored]
+        if missing_secrets:
+            run.error("tsa_not_ready", "tsa.provider", missing=missing_secrets)
     if after == "production" and before != "production":
         missing = production_missing(
             candidate,
@@ -1386,6 +1471,13 @@ def _body_general(body: _Body, data: Mapping[str, Any]) -> None:
     if "site_name" in data:
         site = data["site_name"]
         body.set("site_name", site.strip() if isinstance(site, str) else site)
+    network = data.get("network")
+    if network is not None:
+        if not isinstance(network, Mapping):
+            body.error("config_invalid", "network")
+        elif "https_proxy" in network:
+            proxy = network["https_proxy"]
+            body.set("network.https_proxy", proxy.strip() if isinstance(proxy, str) else proxy)
     clock = data.get("clock")
     if clock is None:
         return
@@ -1416,7 +1508,20 @@ def _body_tsa(body: _Body, data: Mapping[str, Any]) -> None:
             body.set("tsa.port", port)
             if before == "production" and server == "test" and data.get("confirm") is not True:
                 body.error("tsa_confirm_required", "tsa.provider")
-    for key in ("credit_alert_threshold", "timeout_seconds"):
+            if (
+                server == TURKTRUST_PLAIN_HTTP
+                and before != TURKTRUST_PLAIN_HTTP
+                and data.get("confirm") is not True
+            ):
+                body.error("tsa_confirm_required", "tsa.provider")
+    for key in (
+        "credit_alert_threshold",
+        "timeout_seconds",
+        "allow_plain_http",
+        "renew_before_days",
+        "crl_urls",
+        "crl_max_age_days",
+    ):
         if key in data:
             body.set(f"tsa.{key}", data[key])
     if "java" in data:
@@ -1433,6 +1538,19 @@ def _body_tsa(body: _Body, data: Mapping[str, Any]) -> None:
             ("password", "kamusm.password"),
         )
         for key, name in names:
+            if data.get(key) is not None:
+                body.secret(name, data[key])
+    if data.get("clear_turktrust_credentials") is True:
+        if data.get("turktrust_username") or data.get("turktrust_password"):
+            body.error("config_invalid", "turktrust.username")
+        body.delete("turktrust.username")
+        body.delete("turktrust.password")
+    else:
+        turktrust: tuple[tuple[str, BrowserSecret], ...] = (
+            ("turktrust_username", "turktrust.username"),
+            ("turktrust_password", "turktrust.password"),
+        )
+        for key, name in turktrust:
             if data.get(key) is not None:
                 body.secret(name, data[key])
     root = data.get("root")

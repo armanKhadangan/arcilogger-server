@@ -28,7 +28,9 @@ from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.x509.oid import NameOID
 from pydantic import ValidationError
 
+from arcilogger_core.admin.contract import FALLBACK_POLICY
 from arcilogger_core.config import TURKTRUST_PRODUCTION_HOST, Config, TsaConfig
+from arcilogger_core.execpolicy import TrustAnchors
 from arcilogger_core.layout import Layout
 from arcilogger_core.secretstore import TURKTRUST_PASSWORD, TURKTRUST_USERNAME, SecretStore
 from arcilogger_core.tsa import make_provider, url_with_port
@@ -39,6 +41,7 @@ from arcilogger_core.tsa.base import (
     TsaUnavailableError,
 )
 from arcilogger_core.tsa.mock import MockFailure, MockTsa, MockTsaProvider
+from arcilogger_core.tsa.preflight import seal_preflight
 from arcilogger_core.tsa.turktrust import (
     TURKTRUST_LEGAL_GRADE,
     TurktrustHttpsProvider,
@@ -528,3 +531,16 @@ def test_url_with_port(url: str, port: int, expected: str) -> None:
 def test_errors_are_tsa_errors() -> None:
     assert issubclass(TsaConfigurationError, TsaError)
     assert issubclass(TsaUnavailableError, TsaError)
+
+
+def test_the_seal_preflight_needs_the_turktrust_account(tmp_path: Path) -> None:
+    """Without both secrets the Seal task could not build the provider: ``credentials``."""
+    config = _config(tmp_path, port=443)
+    anchors = TrustAnchors(tmp_path, FALLBACK_POLICY)
+    secrets = _store(tmp_path)
+    assert seal_preflight(config, anchors=anchors, secrets=secrets, stored=())[0] == "credentials"
+    half = frozenset({TURKTRUST_USERNAME})
+    assert seal_preflight(config, anchors=anchors, secrets=secrets, stored=half)[0] == "credentials"
+    account = frozenset({TURKTRUST_USERNAME, TURKTRUST_PASSWORD})
+    # The account is enough: no Zamane client or Java is asked for (only the roots remain).
+    assert seal_preflight(config, anchors=anchors, secrets=secrets, stored=account) == ["roots"]
