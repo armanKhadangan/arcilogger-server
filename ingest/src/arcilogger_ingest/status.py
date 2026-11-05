@@ -1,7 +1,7 @@
 """``state/ingest-status.json``: what the ingest service is doing, for the dashboard/System page.
 
-Written atomically (:func:`arcilogger_core.fsutil.atomic_write_text`) every few seconds and when
-the service stops, so a reader never sees half a file. Layout::
+Written atomically (:func:`replace_text`) every few seconds and when the service stops, so a
+reader never sees half a file. Layout::
 
     {
       "version": "0.1.0", "pid": 4242, "state": "running",   # starting | running |
@@ -45,7 +45,6 @@ import os
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from arcilogger_core.fsutil import atomic_write_text
 from arcilogger_core.timeutil import isoformat_site, utc_now
 from arcilogger_ingest import __version__
 
@@ -129,6 +128,19 @@ def build_status(service: IngestService) -> dict[str, Any]:
     return status
 
 
+def replace_text(path: Path, text: str) -> None:
+    """Write ``text`` to ``path`` atomically (``.<name>.tmp``, then renamed over it, LF line
+    endings), not durably: no fsync. The file is a report for monitoring, not evidence, and is
+    written again every status interval; one lost to a power cut is old or empty, which
+    :func:`read_status` reads as ``None``. An fsync waits for the disk's write-back, and the
+    loop writes the file in its rounds and once more when it stops (#124 stage 2: a stop that
+    waited for three writes took 1.36 s on a Windows runner, an estimated 0.45 s each)."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temp = path.with_name(f".{path.name}.tmp")
+    temp.write_bytes(text.encode("utf-8"))
+    temp.replace(path)
+
+
 class StatusWriter:
     """Writes the status file; a failed write is logged once and retried next time.
 
@@ -143,7 +155,7 @@ class StatusWriter:
     def write(self, service: IngestService) -> None:
         text = json.dumps(build_status(service), ensure_ascii=False, indent=2) + "\n"
         try:
-            atomic_write_text(self.path, text)
+            replace_text(self.path, text)
         except OSError as exc:
             if not self._failing:
                 log.warning("could not write %s: %s", self.path.name, exc)

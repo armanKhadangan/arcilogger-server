@@ -1693,12 +1693,13 @@ All Wave 5 questions are answered (2026-11-02).
   first transaction (it sweeps the default partitions, which a `db.window` step holds with its
   parent) waits for a lock at most `RESET_LOCK_TIMEOUT` (1 s) as a step does, and is made again
   in the next round. Worst case of a stop, analytically: the single unit of loop work under way
-  when it comes, then the shutdown's one batch. That unit is one of: one table's partitions
-  (about 30 ms; 1/16 of a day's) plus its wait for `ARCIPART` and the table (none, or at most
-  the lock budget of W5-G-24 (b), 2 s, while an export or the window job holds the lock or a
-  reader the table); one step or a reset's first transaction (at most 0.38 s measured, about
-  1.2 s on an I/O spike) plus its lock wait (at most `RESET_LOCK_TIMEOUT`, 1 s); the claim's
-  transaction (a few reads and writes, plus the same lock budget); or one live batch as before.
+  when it comes, then the shutdown's one batch and the last status write (no fsync, below).
+  That unit is one of: one table's partitions (about 30 ms; 1/16 of a day's) plus its wait for
+  `ARCIPART` and the table (none, or at most the lock budget of W5-G-24 (b), 2 s, while an export
+  or the window job holds the lock or a reader the table); one step or a reset's first transaction
+  (at most 0.38 s measured, about 1.2 s on an I/O spike) plus its lock wait (at most
+  `RESET_LOCK_TIMEOUT`, 1 s); the claim's transaction (a few reads and writes, plus the same lock
+  budget); one status write (no fsync, below); or one live batch as before.
   A stop does not cut short a lock wait under way (that would cancel the statement from another
   thread); the lock budget is never more than `PARTITION_LOCK_TIMEOUT_MS` (2 s) whatever
   `search.request_budget_ms` is, so the worst case is about 2.2 s and one batch, within the
@@ -1713,6 +1714,45 @@ All Wave 5 questions are answered (2026-11-02).
   stop it made every step), `test_no_reset_is_begun_once_the_service_stops` (the request's next
   file and a file marked on its own), `test_no_claim_is_begun_or_finished_once_the_service_stops`,
   `test_a_resets_first_transaction_waiting_for_a_lock_is_made_again_later`.
+
+  The status file was the rest of a stop (Windows run of `d7b6830`: the claim's stop took
+  1.359 s, the reset's 0.031 s; 0.001–0.002 s on Linux). Every write of `ingest-status.json`
+  ended in an fsync (`fsutil.atomic_write_text`; on POSIX two, the file and its folder), which
+  waits for the disk's write-back, and a stop waited for up to three of them: the write under
+  way, one more of the round (due again whenever the last took longer than the round's wait;
+  the tests' `status_interval` is 0.05 s) and the last one (`stopped`). Neither the check nor
+  the database was waited for: slower statements (30 ms each, 60 ms a `CREATE`) added only the
+  unlock's round trip (0.31 s), CPU, I/O and PostgreSQL load did not reproduce it, and with
+  every fsync 0.2 s slower on Linux the claim's stop took 1.339 s (the reset's 1.190 s), the
+  trace showing the three writes; on the Windows runner each took about 0.45 s (an inference:
+  its fsync was not measured). The status file is now replaced atomically without an fsync
+  (`status.replace_text`, the same `.ingest-status.json.tmp` renamed over it): it is a report
+  for monitoring, not evidence, written again every 5 s; one lost to a power cut is old or
+  empty, which `read_status` reads as `None` (5651 asks nothing of it). And once the service
+  stops its loop writes none of its own, only the last one. A stop now waits for no fsync:
+  with every fsync 0.2 s slower, 0.002–0.006 s (claim) and 0.009–0.027 s (reset), three runs,
+  none of the trace's fsyncs; with 2 ms a statement and 50 ms a `CREATE` too, 0.004 / 0.014 s.
+  The cost of a write on the Windows runner stays an inference until its next run: should it lie
+  in the file's close or rename (a virus scan, say) rather than in the fsync, a stop still waits
+  for two writes, the one under way and the last (on Linux with every rename 0.4 s slower,
+  0.78 s instead of 1.19 s). So both tests report beside the stop's time the status writes that
+  ended after it and the part of its time they took (`stop during the claim check: 0.012 s,
+  status writes after it: 1, 0.004 s`), which the Windows run's warnings summary shows.
+  Tests:
+  `test_a_stop_during_a_reloads_check_waits_for_no_fsync` (every fsync 1 s slower, every
+  statement 2 ms and every `CREATE`/`ALTER`/`DROP` 50 ms: less than one fsync, the status file
+  `stopped`, and as in the test above the request still `queued` or `loading`, its offsets as
+  they were and carried out exactly once at the next start; before, 5.99 s: three writes of
+  two fsyncs), and in `ingest/tests/test_reload.py`
+  `test_once_the_service_stops_its_loop_writes_no_status_but_the_last` (the stop at the loop's
+  wait, every round's write due: before, the round's write after the stop too).
+  A check whose service has stopped also opens no further file: the claim's check looks at the
+  stop before each file, not only between two slices of one, and a reset's check before its
+  file (#182 review: a check that outlived its stopped service by a file once ran into the next
+  test's patched check, two check threads on a Windows runner). Tests:
+  `test_a_claim_check_whose_service_stopped_opens_no_further_file` (the stop between two files:
+  the second is not opened; before, it was), and a module fixture that fails a test whose check
+  thread outlives it, by name.
 
   Tests
   (`ingest/tests/test_archive_reload.py`, both back ends):

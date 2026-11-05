@@ -5,6 +5,7 @@ and every line is loaded exactly once."""
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import threading
 import time
@@ -19,12 +20,11 @@ from sqlalchemy import Engine, select, text
 from sqlalchemy.orm import Session
 
 from arcilogger_core.config import load_config
-from arcilogger_core.fsutil import atomic_write_text
 from arcilogger_core.timeutil import utc_now
 from arcilogger_db.engine import engine_from_url
 from arcilogger_db.models import Alert
 from arcilogger_ingest.service import IngestService
-from arcilogger_ingest.status import read_status
+from arcilogger_ingest.status import read_status, replace_text
 from arcilogger_ingest.testing import (
     DAY,
     SOURCES,
@@ -350,9 +350,9 @@ def test_a_refused_status_write_is_tried_again_at_the_next_round(
             refuse -= 1
             refused.append(target)
             raise PermissionError(13, "Access is denied", str(target))
-        atomic_write_text(target, text)
+        replace_text(target, text)
 
-    monkeypatch.setattr("arcilogger_ingest.status.atomic_write_text", refusing)
+    monkeypatch.setattr("arcilogger_ingest.status.replace_text", refusing)
     with running(world, db_engine, config_path, status_interval=30.0):
         wait_for(lambda: status_config(world) is not None)
         refuse = 2  # two rounds in a row
@@ -372,9 +372,9 @@ def test_a_successful_status_write_still_waits_the_interval(
     def counting(target: Path, text: str) -> None:
         if target == path:
             writes.append(target)
-        atomic_write_text(target, text)
+        replace_text(target, text)
 
-    monkeypatch.setattr("arcilogger_ingest.status.atomic_write_text", counting)
+    monkeypatch.setattr("arcilogger_ingest.status.replace_text", counting)
     with running(world, db_engine, config_path, status_interval=30.0):
         wait_for(lambda: status_config(world) is not None)
         world.append("core-r1", DAY, (dhcp_message(i) for i in range(10)))
@@ -383,6 +383,32 @@ def test_a_successful_status_write_still_waits_the_interval(
         wait_for(lambda: lines_loaded(db_engine, "core-r1") == 20)
         assert writes == [path]  # only the first round's
     assert writes == [path, path]  # and the one when the service stopped
+
+
+def test_once_the_service_stops_its_loop_writes_no_status_but_the_last(
+    world: World, db_engine: Engine, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#124 stage 2: a stop waited for the status write under way, one more of the round (due
+    again, the last one being slow) and the last one, an fsync each then (1.36 s on a Windows
+    runner). Once the service stops, the loop writes none of its own, however due (here every
+    round is), only the last one (``stopped``). The stop comes in the loop's own thread, at
+    its wait between two rounds, so the round's write after it is due every time."""
+    path = world.layout.ingest_status
+    after_stop: list[str] = []
+    service = world.service(db_engine, status_interval=0.0)
+
+    def recording(target: Path, text: str) -> None:
+        if target == path and service.stop.is_set():
+            after_stop.append(json.loads(text)["state"])
+        replace_text(target, text)
+
+    def stop_at_the_wait(seconds: float) -> None:
+        service.stop.set()
+
+    monkeypatch.setattr("arcilogger_ingest.status.replace_text", recording)
+    monkeypatch.setattr(service, "_idle", stop_at_the_wait)
+    assert service.run() == 0
+    assert after_stop == ["stopped"]
 
 
 def test_without_a_watched_file_there_is_no_config_block(world: World, db_engine: Engine) -> None:

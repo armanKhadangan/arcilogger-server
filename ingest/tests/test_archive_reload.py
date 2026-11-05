@@ -95,6 +95,7 @@ from arcilogger_ingest.service import (
     received_outside,
     reset_steps,
 )
+from arcilogger_ingest.status import StatusWriter, read_status
 from arcilogger_ingest.testing import DAY, World, dhcp_message, fortigate_message, offsets
 
 #: The reloads run on this day: :data:`DAY` is 40 days old, outside the 30-day window.
@@ -114,6 +115,22 @@ def _no_compression(db_engine: Engine) -> None:
         ).scalar_one()
     if storage["storage"] == "hypertables":
         pause_compression_jobs(db_engine)
+
+
+@pytest.fixture(autouse=True)
+def _no_check_left_running() -> Iterator[None]:
+    """No file check of a test outlives it (#182 review): a check thread still running when the
+    next test patches the check would run into that test's gate. It ends within a slice once its
+    service stops (:meth:`IngestService._beside`); a test that leaves one fails here, by name."""
+    yield
+    assert wait_for(lambda: not check_threads(), WAIT), (
+        f"a file check of this test still runs after it ended: {check_threads()}"
+    )
+
+
+def check_threads() -> list[str]:
+    """The file checks beside the loop that are still running (:data:`CHECK_THREAD`)."""
+    return [t.name for t in threading.enumerate() if t.name == CHECK_THREAD and t.is_alive()]
 
 
 def run_once(world: World, engine: Engine, **kwargs: Any) -> IngestService:
@@ -1274,6 +1291,31 @@ def endless_scans(monkeypatch: pytest.MonkeyPatch, endless: EndlessFile) -> None
     monkeypatch.setattr(service_module, "VaultReader", EndlessReader)
 
 
+def timed_status_writes(monkeypatch: pytest.MonkeyPatch) -> list[tuple[float, float]]:
+    """The start and end (:func:`monotonic`) of each status write, for the report of a stop:
+    a stop's 1.36 s on a Windows runner were, as far as Linux shows, the status writes it waited
+    for (#124 stage 2), which the runner's report then names."""
+    writes: list[tuple[float, float]] = []
+    write = StatusWriter.write
+
+    def timed(self: StatusWriter, service: IngestService) -> None:
+        start = monotonic()
+        try:
+            write(self, service)
+        finally:
+            writes.append((start, monotonic()))
+
+    monkeypatch.setattr(StatusWriter, "write", timed)
+    return writes
+
+
+def writes_after(writes: list[tuple[float, float]], stopped: float) -> str:
+    """``status writes after it: 1, 0.004 s``: the writes that ended after the stop, and the
+    part of the stop's time they took (the one under way counts from the stop)."""
+    late = [end - max(start, stopped) for start, end in list(writes) if end >= stopped]
+    return f"status writes after it: {len(late)}, {sum(late):.3f} s"
+
+
 @pytest.mark.parametrize("step", ["claim", "reset"])
 def test_a_stop_during_a_reloads_check_is_prompt(
     world: World, db_engine: Engine, monkeypatch: pytest.MonkeyPatch, step: str
@@ -1290,7 +1332,9 @@ def test_a_stop_during_a_reloads_check_is_prompt(
     took 2.016 s of a Windows runner's stop); while the claim's check runs, a read of the
     request's status. The time is reported as a warning, so that the CI log shows it in its
     warnings summary on a passing run too (``-n auto`` drops a passing test's output), and named
-    when it fails."""
+    when it fails; beside it the status writes that ended after the stop and the part of its
+    time they took (:func:`writes_after`), the cause of the claim's 1.36 s on a Windows runner
+    as far as Linux shows."""
     load_day(world, db_engine)
     before = snapshot(db_engine)
     drop(db_engine, DAY + timedelta(days=2))
@@ -1302,6 +1346,7 @@ def test_a_stop_during_a_reloads_check_is_prompt(
             patch.setattr(service_module, "open_shared", lambda path: endless)
         else:
             endless_scans(patch, endless)
+        writes = timed_status_writes(patch)
         service = world.service(db_engine, archive_seconds=0.0)
         results: list[int] = []
         runner = threading.Thread(target=lambda: results.append(service.run()))
@@ -1313,10 +1358,95 @@ def test_a_stop_during_a_reloads_check_is_prompt(
             stopped = monotonic()
             runner.join(WAIT)
             took = monotonic() - stopped
-            warnings.warn(f"stop during the {step} check: {took:.3f} s", UserWarning, stacklevel=1)
+            report = f"{took:.3f} s, {writes_after(writes, stopped)}"
+            warnings.warn(f"stop during the {step} check: {report}", UserWarning, stacklevel=1)
         assert results == [0]
-        assert took < 2.0, f"the stop during the {step} check took {took:.3f} s"
+        assert took < 2.0, f"the stop during the {step} check took {report}"
         assert endless.closed.wait(1.0)  # the check gave up within a slice
+    assert reload_row(db_engine, reload_id)["status"] == (
+        "queued" if step == "claim" else "loading"
+    )
+    assert day_offsets(db_engine, DAY) == stored
+    run_once(world, db_engine)
+    assert reload_row(db_engine, reload_id)["status"] == "ready"
+    assert snapshot(db_engine) == before
+
+
+#: A Windows CI runner's disk and database as #124 stage 2 found them: an fsync waits for the
+#: disk's write-back (a stop that made three status writes took 1.36 s there, an estimated
+#: 0.45 s each),
+#: a statement takes about 2 ms more, a ``CREATE`` of a partition about 50 ms. The fsync is
+#: slower here still, so that a stop which waits for one fails the test's bound on any runner.
+SLOW_FSYNC = 1.0
+SLOW_STATEMENT = 0.002
+SLOW_DDL = 0.05
+
+
+@pytest.mark.parametrize("step", ["claim", "reset"])
+def test_a_stop_during_a_reloads_check_waits_for_no_fsync(
+    world: World, db_engine: Engine, monkeypatch: pytest.MonkeyPatch, step: str
+) -> None:
+    """The stop of :func:`test_a_stop_during_a_reloads_check_is_prompt` on a slow disk and a slow
+    database (:data:`SLOW_FSYNC`, :data:`SLOW_STATEMENT`, :data:`SLOW_DDL`): it takes less than
+    one fsync, half the 2.0 s bound there. The status file is replaced atomically, not
+    fsync'ed, and once the service stops the loop writes none of its own, only the last one
+    (``stopped``): a stop waited for three writes, the one under way, one more of the round
+    and the last, an fsync each (two on POSIX, the file and its folder; #124 stage 2). The
+    time is reported as a warning as there, and nothing was decided or deleted, as there."""
+    load_day(world, db_engine)
+    before = snapshot(db_engine)
+    drop(db_engine, DAY + timedelta(days=2))
+    stored = day_offsets(db_engine, DAY)
+    reload_id = queue(db_engine, DAY)
+    endless = EndlessFile()
+    slowed: list[str] = []
+
+    def slow(conn: Any, cursor: Any, statement: str, *args: Any) -> None:
+        ddl = statement.lstrip().upper().startswith(("CREATE", "ALTER", "DROP"))
+        slowed.append(statement)
+        sleep(SLOW_DDL if ddl else SLOW_STATEMENT)
+
+    fsync = os.fsync
+
+    def slow_fsync(fd: int) -> None:
+        sleep(SLOW_FSYNC)
+        fsync(fd)
+
+    with monkeypatch.context() as patch:
+        if step == "claim":
+            patch.setattr(service_module, "open_shared", lambda path: endless)
+        else:
+            endless_scans(patch, endless)
+        patch.setattr(os, "fsync", slow_fsync)
+        writes = timed_status_writes(patch)
+        event.listen(db_engine, "before_cursor_execute", slow)
+        try:
+            service = world.service(db_engine, archive_seconds=0.0)
+            results: list[int] = []
+            runner = threading.Thread(target=lambda: results.append(service.run()))
+            runner.start()
+            try:
+                assert wait_for(lambda: endless.reads >= 3)
+            finally:
+                service.stop.set()
+                stopped = monotonic()
+                runner.join(WAIT)
+                took = monotonic() - stopped
+                report = f"{took:.3f} s, {writes_after(writes, stopped)}"
+                warnings.warn(
+                    f"stop during the {step} check on a slow disk: {report}",
+                    UserWarning,
+                    stacklevel=1,
+                )
+        finally:
+            event.remove(db_engine, "before_cursor_execute", slow)
+        assert results == [0]
+        assert slowed, "no statement of the service was slowed"
+        assert took < SLOW_FSYNC, f"the stop during the {step} check on a slow disk took {report}"
+        assert endless.closed.wait(1.0)
+    status = read_status(world.layout.ingest_status)
+    assert status is not None
+    assert status["state"] == "stopped"  # the last status write was made all the same
     assert reload_row(db_engine, reload_id)["status"] == (
         "queued" if step == "claim" else "loading"
     )
@@ -2275,6 +2405,51 @@ def test_a_request_changed_during_its_claim_check_stops_reading(
         runner.join(WAIT)
     assert results == [0]
     assert reload_row(db_engine, second)["status"] == "queued"
+
+
+def test_a_claim_check_whose_service_stopped_opens_no_further_file(
+    world: World, db_engine: Engine, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A stop that comes between two files of the claim's check (#182 review): the check opens
+    no further file and ends (``CheckStoppedError``), rather than reading the next file whole,
+    or running into the next test's patched check, as two check threads once did on a Windows
+    runner. The request stays ``queued``; the next start claims it."""
+    load_day(world, db_engine)
+    drop(db_engine, DAY + timedelta(days=2))
+    reload_id = queue(db_engine, DAY)
+    real = IngestService._sealed_file_intact
+    between = Gate()  # the first file read, the second not yet
+    opened: list[tuple[str, date]] = []
+
+    def intact(self: IngestService, source: str, day: date, *, digest: bool = True) -> bool:
+        if not digest:
+            return real(self, source, day, digest=digest)
+        opened.append((source, day))
+        result = real(self, source, day, digest=digest)
+        if len(opened) == 1:
+            between.hold()
+        return result
+
+    monkeypatch.setattr(IngestService, "_sealed_file_intact", intact)
+    service = world.service(db_engine, archive_seconds=0.0)
+    results: list[int] = []
+    runner = threading.Thread(target=lambda: results.append(service.run()))
+    runner.start()
+    try:
+        assert between.entered.wait(WAIT)
+        claim = service._claim
+        assert claim is not None
+        assert claim.check is not None
+        assert len(claim.files or {}) >= 2, "the day needs two files for a stop between them"
+    finally:
+        service.stop.set()
+        runner.join(WAIT)
+        between.open.set()
+    assert results == [0]
+    with pytest.raises(CheckStoppedError):
+        claim.check.result(timeout=WAIT)
+    assert len(opened) == 1, f"the stopped check opened {opened}"
+    assert reload_row(db_engine, reload_id)["status"] == "queued"
 
 
 # -- the partition lock within half the search budget (W5-G-24), a prompt stop (#124 stage 2) --

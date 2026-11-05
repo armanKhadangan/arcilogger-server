@@ -1270,9 +1270,7 @@ class IngestService:
                 done = self.loaded_files(connection, reload_id, first_day, files)
             unchecked = sorted(files.keys() - done)
             if unchecked:  # the first file missing or changed ends the check
-                check = self._beside(
-                    lambda: all(self._sealed_file_intact(*key) for key in unchecked), ended=ended
-                )
+                check = self._beside(lambda: self._files_intact(unchecked), ended=ended)
         self._claim = PendingClaim(
             reload_id, first_day, last_day, status, files, done, check, ended=ended
         )
@@ -1455,6 +1453,18 @@ class IngestService:
         margin more (module text)."""
         return job.first_day - 2 * RELOAD_MARGIN, job.last_day + 2 * RELOAD_MARGIN
 
+    def _files_intact(self, keys: list[Key]) -> bool:
+        """The claim's check (beside the loop): whether every file of ``keys`` is
+        :meth:`_sealed_file_intact`, the first that is not ending it. The stop is looked at before
+        each file too, not only between two slices of one: a check whose service has stopped
+        opens no further file, so that it ends at once and never outlives its service by a
+        file's read."""
+        for key in keys:
+            _check_stopped()
+            if not self._sealed_file_intact(*key):
+                return False
+        return True
+
     def _sealed_file_intact(self, source: str, day: date, *, digest: bool = True) -> bool:
         """Whether the sealed file of ``(source, day)`` is in the vault as its manifest — read
         afresh, not from :class:`SealIndex`'s cache — describes it: its size and (``digest``)
@@ -1517,7 +1527,9 @@ class IngestService:
         """The check of a file before its reset (beside the loop): the minutes its lines were
         received in outside its day (:func:`received_outside`) when its sealed file ``path`` is
         still there as its manifest describes it (by size: the claim read it whole); ``None``
-        when it is missing, changed or cannot be read. ``what`` names the reset in the log."""
+        when it is missing, changed or cannot be read. ``what`` names the reset in the log. A
+        check that starts after its service stopped reads nothing (:func:`_check_stopped`)."""
+        _check_stopped()
         if path is None or not self._sealed_file_intact(source, day, digest=False):
             return None
         try:
@@ -2410,7 +2422,9 @@ class IngestService:
     # -- status -------------------------------------------------------------------------------
 
     def _write_status_if_due(self) -> None:
-        if time.monotonic() >= self._next_status:
+        # Once the service stops, the one written last (``stopped``, :meth:`run`) is enough: a
+        # stop waits for at most the write under way and that one (#124 stage 2).
+        if not self.stop.is_set() and time.monotonic() >= self._next_status:
             self._write_status()
 
     def _write_status(self) -> None:
