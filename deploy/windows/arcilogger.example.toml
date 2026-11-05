@@ -80,7 +80,11 @@ tcp_port = 514
 unknown_senders = "write"      # "write" (unknown-<ip> + alert) or "drop"
 
 [seal]
-gzip_level = 9
+compression = "xz"             # "xz" (default) or "gzip"; days already sealed keep their format
+xz_preset = 6                  # 0-9; above 6 gains nothing on 16 MiB streams, only memory
+xz_threads = 2                 # 1-8; memory is about 135 MB per thread at preset 6 and about
+#                              # 255 MB per thread at preset 9 (9 on 8 threads: about 2 GB)
+gzip_level = 9                 # only when compression = "gzip"
 gap_minutes = 60
 retry_minutes = [5, 15, 60, 180, 360]
 late_after_hours = 48
