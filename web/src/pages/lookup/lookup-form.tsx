@@ -56,7 +56,7 @@ function Section({ title, hint, children }: { title: string; hint?: string; chil
   return (
     <fieldset className="flex min-w-0 flex-col gap-3">
       <legend className="mb-1 text-sm font-semibold text-foreground">{title}</legend>
-      {hint ? <p className="-mt-2 text-xs text-muted">{hint}</p> : null}
+      {hint ? <p className="text-xs text-muted">{hint}</p> : null}
       {children}
     </fieldset>
   );
@@ -390,7 +390,9 @@ export function LookupForm({
           />
         ) : null}
         {failure ? <Alert tone="danger">{failure}</Alert> : null}
-        <div className="flex flex-col gap-2">
+        {/* The form is taller than most screens: "Sorgula" stays at the bottom of the window
+            while the form is scrolled, instead of waiting below the last field. */}
+        <div className="sticky bottom-0 z-10 -mx-4 -mb-4 flex flex-col gap-2 rounded-b-lg border-t border-border bg-surface px-4 pt-3 pb-4">
           <Button type="submit" size="lg" busy={run.isPending}>
             <Search aria-hidden="true" />
             {run.isPending ? t('lookup.form.running') : t('lookup.form.submit')}
