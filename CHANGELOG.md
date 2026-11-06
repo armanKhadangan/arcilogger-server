@@ -44,6 +44,13 @@ the evidence. Guides: [ZAMAN-DAMGASI.md](docs/ZAMAN-DAMGASI.md) /
   double after the second year.
 - **ARCILOGGER Durum:** a small desktop status window for the administrators signed in on the
   server ([KURULUM.md](docs/KURULUM.md) section 12.1).
+- **Canlı Durum** (`/activity`, below Canlı Akış): the internet line's speed now and over the last
+  60 minutes, read from the devices over read-only SNMPv3 (authPriv only; `[sources.snmp]`, keys
+  in the secret store, `R20-snmp`; 5651 Temel), and "Şu an": who sends and receives how much data
+  in the last 1, 5 or 15 minutes, counted from the FortiGate traffic logs by the usage engine's
+  own rules (the Usage analytics module, the KVKK notice, pseudonyms, audited as `activity.view`).
+  The page refreshes every 10 seconds while it is visible
+  ([CANLI-DURUM.md](docs/CANLI-DURUM.md)).
 - **Usage:** breaks and per-day work hours (`usage.work_hours`), a "Mola" column and filter, the
   usage of today refreshed every minute with a back-off, and "Son güncelleme" on the Kullanım page
   ([KULLANIM.md](docs/KULLANIM.md)).
