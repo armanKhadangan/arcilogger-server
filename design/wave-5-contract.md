@@ -2648,8 +2648,9 @@ All Wave 5 questions are answered (2026-11-02).
   `crl fetch` does `state\crl`.
   **Upgrade.** `renewal.state_to_read` gives the new file, or the earlier `state/renewal.json`
   while the new one is missing. The first counted run after the upgrade (every run but a busy
-  one or a dry run: while the earlier file is the only one, a dry run writes nothing) carries
-  over only the earlier file's `failures_in_a_row` (W5-E-8); from then on the new file exists
+  one or a dry run: while the earlier file is the only one, a dry run writes nothing; per W5-E-8
+  it writes no state file, but the folder and `renewal.lock` are created) carries over only the
+  earlier file's `failures_in_a_row` (W5-E-8); from then on the new file exists
   and the earlier one is never read again. Nothing writes, moves or removes the earlier
   `state/renewal.json` or `state/renewal.lock`, neither at the upgrade nor at a run (answer to
   Q3 on #158: deleting them at the upgrade would break the read below): both are left in place
