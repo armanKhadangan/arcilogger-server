@@ -904,7 +904,8 @@ def test_a_source_is_added(root: Path, config: Config) -> None:
     added = {**SOURCE, "heartbeat_minutes": 15, "expected": True, "transport": "any",
              "enabled": True, "snmp": None}  # fmt: skip
     assert check.ops == ({"op": "source_add", "source": added},)
-    assert check.changes == {"sources.fw-01": {"old": None, "new": added}}
+    journaled = {key: value for key, value in added.items() if value is not None}
+    assert check.changes == {"sources.fw-01": {"old": None, "new": journaled}}
     assert set(check.effects) == {
         "reload.collector",
         "reload.ingest",

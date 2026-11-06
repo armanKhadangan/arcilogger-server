@@ -895,9 +895,10 @@ class _Run:
     def _source_change(
         self, name: str, before: SourceConfig | None, after: SourceConfig | None
     ) -> None:
+        # exclude_none: a source without SNMP journals as before (no ``snmp: null`` row)
         self.changes[f"sources.{name}"] = {
-            "old": before.model_dump(mode="json") if before else None,
-            "new": after.model_dump(mode="json") if after else None,
+            "old": before.model_dump(mode="json", exclude_none=True) if before else None,
+            "new": after.model_dump(mode="json", exclude_none=True) if after else None,
         }
 
     def _source_gone(self, before: SourceConfig) -> None:
