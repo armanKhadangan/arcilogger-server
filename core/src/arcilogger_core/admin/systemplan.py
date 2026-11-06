@@ -19,7 +19,9 @@ clients are hashed, never opened. :func:`plan` is a pure function of :class:`Pla
   opens only after the collector knows it. Nothing applied before (the first run after the
   installer, which opened ``E(current)`` itself): ``E(current)``;
 * **outbound** (strict mode only) — one entry per host and port of the NTP, Kamu SM, SMTP and
-  replica rules;
+  replica rules, and of TÜRKTRUST's, the revocation lists' and the proxy's, as
+  ``Set-ArciFirewall.ps1`` makes them (Wave 5 contract 2.4, W5-T-3): with ``network.https_proxy``
+  set, its host and port replace the TURKTRUST and CRL rules;
 * **time** — the local source and the fallback, ``changed`` when the peer list differs from the
   one applied last (``Get-ArciTimePeerList``'s format);
 * **jars** — every staged ``zamane\\web\\<sha256>.jar`` whose recomputed SHA-256 is that name and
@@ -39,7 +41,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Final
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urlsplit
 
 from arcilogger_core.admin.contract import (
     AdminPolicy,
@@ -66,6 +68,7 @@ from arcilogger_core.config import (
 )
 from arcilogger_core.configwatch import config_status_of
 from arcilogger_core.layout import Layout
+from arcilogger_core.tsa import url_with_port
 from arcilogger_core.tsa.zamane_releases import find_release
 
 #: The collector's status file older than this: the collector is stopped (counts as current).
@@ -175,12 +178,32 @@ def _outbound(inputs: PlanInputs, problems: list[PlanProblem]) -> list[OutboundR
         add("ARCILOGGER Out NTP", server, config.clock.ntp_port)
     tsa_hosts = list(KAMUSM_HOSTS)
     url = urlparse(config.tsa.url)
-    if url.hostname and url.hostname not in tsa_hosts:
-        tsa_hosts.append(url.hostname)
-    ports = [config.tsa.port] + ([url.port] if url.port and url.port != config.tsa.port else [])
+    turktrust = config.tsa.provider == "turktrust"
+    if turktrust:
+        # TÜRKTRUST's url has its own rule below; Kamu SM's servers keep port 80.
+        ports = [80]
+    else:
+        if url.hostname and url.hostname not in tsa_hosts:
+            tsa_hosts.append(url.hostname)
+        ports = [config.tsa.port] + ([url.port] if url.port and url.port != config.tsa.port else [])
     for host in tsa_hosts:
         for port in ports:
             add("ARCILOGGER Out Kamu SM", host, port)
+    proxy = urlsplit(config.network.https_proxy) if config.network.https_proxy else None
+    if proxy is not None and proxy.port is not None:
+        # Stamps and revocation lists go through the proxy (D13); the Zamane client does not.
+        add("ARCILOGGER Out Proxy", proxy.hostname, proxy.port)
+    else:
+        if turktrust:
+            # The port the provider uses (tsa.url_with_port): the URL's own, else tsa.port
+            # unless it is 80 or 443, else the scheme's (80 with tsa.allow_plain_http).
+            target = urlsplit(url_with_port(config.tsa.url, config.tsa.port))
+            default = 443 if target.scheme == "https" else 80
+            add("ARCILOGGER Out TURKTRUST", target.hostname, target.port or default)
+        for crl_url in config.tsa.crl_urls:
+            # Signed lists (D8): plain http is safe for them, so both ports.
+            for port in (80, 443):
+                add("ARCILOGGER Out CRL", urlsplit(crl_url).hostname, port)
     smtp_targets: list[tuple[str, int]] = []
     if config.smtp.enabled and config.smtp.host:
         smtp_targets.append((config.smtp.host, config.smtp.port))

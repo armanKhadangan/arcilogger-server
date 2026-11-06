@@ -3690,6 +3690,16 @@ Recorded on #204, from the manager's answers of 2026-11-06.
     granted files are `_outbound` in `admin/systemplan.py` and the rule list in
     `ArciInstall.psm1`, with their tests. It adds the `TURKTRUST`, `CRL` and `Proxy` rules, with the
     names and ports of `Set-ArciFirewall.ps1`.
+  - **Closed by W5-T part 3 (2026-11-06).**
+    - `_outbound` plans `ARCILOGGER Out TURKTRUST` (the `[tsa] url` host on the port the provider
+      uses, `tsa.url_with_port`) and `ARCILOGGER Out CRL` (each `tsa.crl_urls` host on 80 and
+      443). With `network.https_proxy` set, it plans `ARCILOGGER Out Proxy` on the proxy's host
+      and port instead of both. With `turktrust`, the Kamu SM rule keeps only Kamu SM's servers,
+      on port 80.
+    - `OutboundRule` and `ArciInstall.psm1`'s `OutboundRulePattern` accept the three names.
+      `Set-ArciFirewall.ps1 -SyncFromConfig` sets them over TCP, and creates any that is missing.
+    - As for every outbound rule, ApplySystem never removes one. A `TURKTRUST`, `CRL` or `Proxy`
+      rule stays when its setting goes away, until the installer's firewall step runs.
 - **W5-T-4: `turktrust-http` without `confirm` has its own code, `tsa_plain_http_confirm_required`**
   (independent review of #204, point 2).
   - §2.4 and C5 named `tsa_confirm_required` for this case. That code's text is about leaving
