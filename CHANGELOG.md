@@ -261,10 +261,11 @@ setting or has a loud check (sahada doğrula; KURULUM/INSTALL section 16 is the 
   one transaction) and the count is printed and logged; a failure or `-SkipDatabase` is a warning
   that says what it means for the lookups, never a silent skip. The next `arcilogger-db upgrade`
   sets the leases the previous version left as they were back to `high`, prints how many it
-  restored and how many stay `low`, and names the days to rebuild. The step runs on every such
-  rollback, so **a rollback between two versions that both read FortiGate DHCP shows FortiGate-DHCP
-  chains `low` until the next `arcilogger-db upgrade`** (false lows only, never a wrong person;
-  ASSUMPTIONS RB1).
+  restored and how many stay `low`, and names the days to rebuild. Since Wave 4 (#81) the step is
+  skipped, with its reason, when the program returned to already reads FortiGate DHCP (it has
+  `arcilogger_db\lease_rollback.py`); when that check cannot decide, the step runs, so such a
+  rollback shows FortiGate-DHCP chains `low` until the next `arcilogger-db upgrade` (false lows
+  only, never a wrong person; ASSUMPTIONS RB1).
 - **Upgrade:** the old NAT values become exits named "Genel IP (yükseltmede aktarıldı)", "FortiGate
   WAN adresi (yükseltmede aktarıldı)" and, where needed, "Genel adresi tanımlanmamış hatlar";
   until each line's public address and interfaces are entered, lookups of an address no exit

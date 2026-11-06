@@ -13,9 +13,9 @@ before an upgrade (`D:\ARCILOGGER\backups\db`, `Install-Arcilogger.ps1` `Invoke-
 
 Part of the database is **derived** and comes back by itself: the parsed log tables (`messages`,
 `fg_*`, `mt_*`) are loaded by ingest from the spool and the sealed vault — sealed days within
-`db.retention_days` (400) are reloaded automatically when their `ingest_offsets` rows are missing
-or unfinished, older sealed days are not ("arşivden yeniden yükle" is a later feature,
-[INGEST.md](../INGEST.md)) — and the worker rebuilds the lease timeline from them
+`db.retention_days` (400 then, 30 since Wave 5) are reloaded automatically when their
+`ingest_offsets` rows are missing or unfinished, older sealed days are not (an archive reload
+brings them back on request since Wave 5, [INGEST.md](../INGEST.md)) — and the worker rebuilds the lease timeline from them
 ([CORRELATION.md](../CORRELATION.md)). The rest exists **only** in the database: users and roles
 (Argon2id password hashes, TOTP), the 5651 lookups with their request details, the records of the
 stored reports and evidence packages and their downloads, the settings operators changed,

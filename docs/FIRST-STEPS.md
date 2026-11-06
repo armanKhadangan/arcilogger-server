@@ -130,7 +130,7 @@ section 4) is for development and trial servers only: its root is trusted only w
 verify** (`R20-verify`, the monthly whole-chain check fails); there is no supported way to make
 them verifiable again.
 
-**Test account and switching to production:** the **Ayarlar → Kamu SM** wizard of the web
+**Test account and switching to production:** the **Ayarlar → Zaman damgası** wizard of the web
 interface ([SETTINGS.md](SETTINGS.md)) or, on the console, [INSTALL.md](INSTALL.md) section 10 —
 roots (fingerprint comparison), `secret set`, `credit`, `tsa-test` in that order; for production:
 buy kontör, the production credentials, `url = "http://zd.kamusm.gov.tr"`, `[tsa]
@@ -324,7 +324,7 @@ first affected day.
 - **Sealing configuration errors** (no Kamu SM credentials, no root in the `kamusm-roots` folder,
   `[tsa] zamane_jar` not set, or Java or the Zamane client not trusted: cause `executable`, e.g. a
   jar copied into `zamane\` by hand after the installation, which runs only once the installer
-  recorded it with `-ZamaneJar` or it was uploaded in Ayarlar → Kamu SM and approved,
+  recorded it with `-ZamaneJar` or it was uploaded in Ayarlar → Zaman damgası and approved,
   [INSTALL.md](INSTALL.md) section 7) stop the Seal task before sealing starts: the task's last run
   result is `0x1`, the error goes to `D:\ARCILOGGER\logs\core.log` on every run and an
   `R20-seal-config` alert is written once per day and cause.

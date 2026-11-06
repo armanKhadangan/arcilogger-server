@@ -95,10 +95,10 @@ spool/<source>/<day>.log ──► read complete lines ──► prepare (rawlog
 
 **Streams.** One per `(source, day)`: every spool file (listed every poll), every unfinished
 `ingest_offsets` row, and every source of a **sealed** day within the database retention
-(`db.retention_days`, default 400) that is not finished — the vault scan (once a minute) is how a
+(`db.retention_days`, default 30) that is not finished — the vault scan (once a minute) is how a
 day whose spool file was deleted before ingest saw it (service down over a weekend) is still
-loaded. Sealed days older than the retention are not loaded automatically (that is the later
-"arşivden yeniden yükle" feature). Newest day first, so live data is not delayed by a backlog.
+loaded. Sealed days older than the window are not loaded automatically: an archive reload
+("arşivden yeniden yükle", Wave 5 W5-G) brings them back on request. Newest day first, so live data is not delayed by a backlog.
 The sources of one day **share** each batch in rounds (equal shares; what one source cannot use
 goes to the others), so a large backlog of one source — DHCP or access points after an outage —
 does not hold back `fortigate`, which sorts after `ap-*` and `core-r1` and matters most for 5651

@@ -75,7 +75,7 @@ Windows services (automatic start, restart on failure, each under its own virtua
 | `ArciWorker` | `arcilogger_worker` | Today: lease timeline (from MikroTik or FortiGate DHCP records and MikroTik `ARP-LOG`; [CORRELATION.md](CORRELATION.md) section 1, [ADR-0016](adr/0016-fortigate-dhcp-and-internet-exits.md)), devices and IP conflicts, partitions, evidence purge, audit import, alerts (import of `alerts.jsonl`, R15/R20 checks including the lease-evidence and internet-exit checks `R20-lease` and `R20-nat`, alert e-mail; ADR-0010), usage rollups (`usage.*` jobs, estimated time per person/site/category; ADR-0011, docs/USAGE.md), the licence check (`license.check`, ADR-0013), the daily disk sample of the Sistem page (`system.sample`, Wave 4). Later: NAT index, the rule engine and its detections (M5) | — | MVP (M3); M4–M5 |
 | `ArciWeb` | Caddy | HTTPS (internal CA), serves the web interface, proxies `/api` | server address:443 | MVP (installer) |
 | `ArciAdmin` | `arcilogger_core.admin` (Python) | The administration agent of the browser administration ([ADR-0014](adr/0014-browser-administration.md)): checks the API's signed requests in `admin\inbox` again and applies them (the only writer of `arcilogger.toml` and `secrets.json`), keeps the versions, follows the services reloading, writes signed task requests (Seal now, credit query, tests) | — (no listener, no database) | Wave 1 |
-| `postgresql-x64-16` | PostgreSQL 16 (operator-installed); TimescaleDB optional, otherwise native monthly partitions ([ADR-0005](adr/0005-database-and-mvp-contracts.md)) | Derived, rebuildable data, plus users, lookups and the audit log | 127.0.0.1:5432 | MVP (M2) |
+| `postgresql-x64-16` | PostgreSQL 16 (operator-installed); TimescaleDB optional, otherwise native daily partitions (monthly ones before Wave 5; [ADR-0005](adr/0005-database-and-mvp-contracts.md)) | Derived, rebuildable data, plus users, lookups and the audit log | 127.0.0.1:5432 | MVP (M2) |
 
 Scheduled tasks (Task Scheduler folder `\ARCILOGGER\`, "run as soon as possible after a missed
 start" — the Windows equivalent of systemd's `Persistent=true`), running `arcilogger-core` (the
@@ -83,11 +83,13 @@ database backup runs `arcilogger-db`):
 
 | Task | When | Purpose | Milestone |
 |---|---|---|---|
-| `Seal` | daily 00:10 | Compress, hash, manifest, chain, Kamu SM stamp, verify, lock, replica | M1 |
+| `Seal` | daily 00:10 | Compress, hash, manifest, chain, time stamp (Kamu SM or TÜRKTRUST), verify, lock, replica | M1 |
 | `Verify` | daily; weekly (Sun 03:00, 90 days); monthly (1st, 04:00, full chain) | Chain verification | M1 |
 | `Retention` | daily 02:00 (disabled by default) | Delete days older than retention, sealed deletion record | M1 |
 | `Replica` | after `Seal`, retry daily | Copy the vault day to the replica share (`[replica] target`, e.g. a NAS) and verify hashes | M1 |
-| `Credit` | daily 06:00 | Kamu SM credit query | M1 |
+| `Credit` | daily 06:00 | Kamu SM credit query (TÜRKTRUST offers none) | M1 |
+| `CrlFetch` | daily 00:30 | Download the certificate revocation lists, store the verified ones byte for byte in `state\crl\` ([TIME-STAMPING.md](TIME-STAMPING.md) section 4) | Wave 5 |
+| `Renew` | daily 02:30 | Re-stamp the stamps whose TSA certificate comes due, one renewal record in `vault\renewals\` (section 3 of the same guide) | Wave 5 |
 | `ClockCheck` | hourly | Clock offset against `[clock] ntp_server` (else only `[clock] fallback_server`) | M1 |
 | `Backup` | daily 01:40 | `pg_dump` of the database into `backups\scheduled\`, check, retention (needs PostgreSQL, not part of the evidence path; [ADR-0009](adr/0009-database-backup.md)) | M7 |
 | `Requests` | on event 4111, and every 5 minutes | The task requests of the browser administration (credit query, time-stamp test, replica test), signed by ArciAdmin; LOCAL SERVICE like the other evidence tasks | Wave 1 |
@@ -292,7 +294,7 @@ host name, no replica target), so opening them is not audited.
 |---|---|
 | Python | 3.12 (bundled runtime on the server), uv workspace: `core`, `db`, `collector`, `ingest`, `api`, `worker` |
 | Quality | ruff, mypy `--strict`, pytest + hypothesis; CI on Windows and Linux |
-| Database | PostgreSQL 16; TimescaleDB optional (`[database] timescale = auto\|require\|off`), otherwise native monthly partitions; SQLAlchemy 2, Alembic, psycopg 3 ([ADR-0005](adr/0005-database-and-mvp-contracts.md)) |
+| Database | PostgreSQL 16; TimescaleDB optional (`[database] timescale = auto\|require\|off`), otherwise native daily partitions (monthly ones before Wave 5); SQLAlchemy 2, Alembic, psycopg 3 ([ADR-0005](adr/0005-database-and-mvp-contracts.md)) |
 | API | FastAPI, Pydantic v2; PDF reports with reportlab |
 | Web | React 18.3, TypeScript (strict), Vite 7, Tailwind CSS 4, Radix UI, TanStack Query/Table/Virtual, Recharts, react-i18next; Vitest, Playwright + axe |
 | Web server | Caddy (HTTPS with an internal CA) |

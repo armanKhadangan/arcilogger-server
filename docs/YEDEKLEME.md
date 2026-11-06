@@ -28,9 +28,10 @@ $db     = "$arci\arcilogger-db.exe"
 
 **Ham loglardan yeniden üretilebilen kısım:** ayrıştırılmış log tabloları ve kira (DHCP/ARP)
 zaman çizelgesi. Geri yüklenen veritabanında ingest, yedekten sonra gelen logları spool'dan ve
-kasadan yeniden yükler; veritabanı saklama süresi (`db.retention_days`, varsayılan 400 gün)
-içindeki mühürlü günler kendiliğinden yüklenir, daha eskiler yüklenmez ("arşivden yeniden yükle"
-sonraki bir özelliktir). Kullanıcılar, 5651 sorguları, kişi ve cihaz bilgileri, ayarlar ve
+kasadan yeniden yükler; veritabanı penceresi (`db.retention_days`, varsayılan 30 gün) içindeki
+mühürlü günler kendiliğinden yüklenir, daha eskiler yüklenmez: bir 5651 sorgusu ya da arama
+gerektiğinde onları "arşivden yeniden yükle" ile ister ([ARAMA.md](ARAMA.md),
+[CORRELATION.md](CORRELATION.md)). Kullanıcılar, 5651 sorguları, kişi ve cihaz bilgileri, ayarlar ve
 veritabanındaki denetim kaydı **yalnızca** veritabanında ve onun yedeklerinde vardır.
 
 **Yedeğin içinde ne var?** Kullanıcıların parola özetleri (Argon2id), `secret.key` ile

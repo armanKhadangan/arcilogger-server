@@ -132,7 +132,7 @@ yalnızca geliştirme ve deneme sunucuları içindir: onun kök sertifikasına y
 **doğrulanamaz** (`R20-verify`, aylık bütün zincir denetimi başarısız); onları yeniden
 doğrulanabilir kılmanın desteklenen bir yolu yoktur.
 
-**Test hesabı ve üretime geçiş:** web arayüzünde **Ayarlar → Kamu SM** sihirbazı
+**Test hesabı ve üretime geçiş:** web arayüzünde **Ayarlar → Zaman damgası** sihirbazı
 ([AYARLAR.md](AYARLAR.md)) ya da konsolda [KURULUM.md](KURULUM.md) bölüm 10 — sırasıyla kök
 sertifikalar (parmak izi karşılaştırması), `secret set`, `credit`, `tsa-test`; üretimde kontör satın
 alma, üretim kimlik bilgileri, `url = "http://zd.kamusm.gov.tr"`, `[tsa] legal_root_fingerprints`.
@@ -323,7 +323,7 @@ kiraları **hemen**, etkilenen ilk günden yeniden oluşturun.
 - **Mühürlemenin yapılandırma hataları** (Kamu SM kimlik bilgileri yok, `kamusm-roots` klasöründe
   kök yok, `[tsa] zamane_jar` ayarlı değil ya da Java veya Zamane istemcisi güvenilir değil:
   `executable` nedeni, ör. kurulumdan sonra `zamane\` içine elle kopyalanan bir jar; bu jar ancak
-  kurulum `-ZamaneJar` ile kaydedince ya da Ayarlar → Kamu SM'den yüklenip onaylanınca çalışır,
+  kurulum `-ZamaneJar` ile kaydedince ya da Ayarlar → Zaman damgası'den yüklenip onaylanınca çalışır,
   [KURULUM.md](KURULUM.md) bölüm 7) Seal görevini mühürlemeye başlamadan durdurur: görevin son
   çalışma sonucu `0x1`, hata her çalışmada `D:\ARCILOGGER\logs\core.log` dosyasına,
   `R20-seal-config` uyarısı gün ve neden başına bir kez yazılır.
