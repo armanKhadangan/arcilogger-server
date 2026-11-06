@@ -705,3 +705,77 @@ ARCILOGGER'ın görebildiğini değiştirir:
   ([ILK-ADIMLAR.md](ILK-ADIMLAR.md) bölüm 6).
 - Böyle bir ağın 5651 kapsamında nasıl ele alınacağı (ayrı kayıt, kimlik doğrulama) kuruluşun ve
   hukuk müşavirinin kararıdır.
+
+## 6. SNMPv3: internet hattı hızı (isteğe bağlı) / SNMPv3: internet line speed (optional)
+
+Canlı Durum sayfasının **İnternet hattı** bölümü ve Panel'in **İnternet hattı** kartı için
+([CANLI-DURUM.md](CANLI-DURUM.md)). ARCILOGGER cihazın WAN arayüzlerinin sayaçlarını salt okunur
+SNMPv3 ile kendisi okur. Bu bölüm yalnızca **amacı ve değerleri** verir: menü yolları ve komutlar
+cihazın yazılım sürümüne göre değişir, cihazınızın belgelerine bakın. Hepsi **sahada doğrula**
+(X-B2–X-B4).
+
+**Her cihazda (FortiGate, MikroTik):**
+
+1. **Salt okunur bir SNMPv3 kullanıcısı** oluşturun: yalnızca okuma, kimlik doğrulama **ve**
+   şifreleme (authPriv). SNMP v1/v2c'yi açmayın ya da kapatın: topluluk adı (community) ağda açık
+   metin gider ve ARCILOGGER onu kabul etmez.
+   - Kimlik doğrulama: SHA-256 (ARCILOGGER'da `auth = "sha256"`, varsayılan); cihaz desteklemiyorsa
+     SHA-512 ya da SHA-1 (`sha512`, `sha1`).
+   - Şifreleme: AES-128 (`priv = "aes128"`, varsayılan); AES-256 (`aes256`) yalnızca cihaz
+     sunuyorsa. Eski yazılımlar yalnızca SHA-1 ya da yalnızca AES-128 sunabilir (X-B3).
+   - İki anahtar 8–64 karakter; ARCILOGGER'a Kaynaklar sayfasındaki SNMP bölümünden girilir ve
+     gizli depoda saklanır. Anahtarları e-postayla ya da sohbetle göndermeyin.
+2. **Yalnızca ARCILOGGER sunucusunun adresine** (`<arcilogger>`) yanıt verilsin: cihazın SNMP
+   erişim listesine yalnızca bu adresi yazın.
+3. SNMP'yi **yalnızca bir LAN arayüzünde** açın; **hiçbir zaman bir WAN arayüzünde** açmayın.
+4. ARCILOGGER UDP 161'e (ya da `[sources.snmp] port`) gönderir. Arada bir güvenlik duvarı varsa
+   `<arcilogger>` → cihazın LAN adresi, UDP 161'e izin verin; başka bir yöne gerek yoktur.
+5. ARCILOGGER'da Ayarlar → Kaynaklar → kaynak → SNMP: kullanıcı adını, iki anahtarı ve protokolleri
+   girip **Bağlantıyı dene** ile cihazın arayüz listesini (`ifName`, durum, hız) getirin ve WAN
+   hatlarını listeden seçin (en çok 4). Arayüz adları cihazın bildirdiği gibidir; ARCILOGGER hiçbir
+   adı varsaymaz (X-B4).
+6. **Yönü denetleyin** (X-B2): bir indirme sırasında Canlı Durum'daki indirme hızı cihazın kendi
+   arayüz grafiğindeki gelen (In) trafikle aynı olmalı. Cihazın 64 bit sayaçları (`ifHCInOctets`,
+   `ifHCOutOctets`) yoksa durum `snmp_no_hc_counters` olur.
+
+**FortiGate:** SNMPv3 kullanıcısını ve erişim listesini FortiOS'un SNMP ayarlarında, SNMP
+yönetim erişimini yalnızca LAN arayüzünde açın. **MikroTik:** RouterOS'un SNMP hizmetini açın,
+SNMPv3 için kimlik doğrulama ve şifreleme protokollerini ve anahtarlarını, izin verilen adres
+olarak yalnızca `<arcilogger>` adresini ayarlayın. Her iki cihazda da tam menü yolunu ve
+seçeneklerin adlarını sürümünüzün belgelerinden alın (**sahada doğrula**).
+
+**English.** For the **İnternet hattı** part of the Canlı Durum page and the Panel's **İnternet
+hattı** card ([LIVE-STATUS.md](LIVE-STATUS.md)). ARCILOGGER reads the counters of the device's WAN
+interfaces itself, over read-only SNMPv3. This section gives **the goal and the values** only: menu
+paths and commands depend on the device's software version, so follow your device's
+documentation. All of it is **to verify on site** (X-B2–X-B4).
+
+**On each device (FortiGate, MikroTik):**
+
+1. Create a **read-only SNMPv3 user** with authentication **and** privacy (authPriv). Do not switch
+   on SNMP v1/v2c, or switch it off: their community string crosses the network in clear text and
+   ARCILOGGER refuses it.
+   - Authentication: SHA-256 (`auth = "sha256"` in ARCILOGGER, the default); SHA-512 or SHA-1
+     (`sha512`, `sha1`) if the device lacks it.
+   - Privacy: AES-128 (`priv = "aes128"`, the default); AES-256 (`aes256`) only if the device
+     offers it. Older firmware may offer only SHA-1, or only AES-128 (X-B3).
+   - Both keys 8–64 characters; they are entered in ARCILOGGER's SNMP part of the Kaynaklar page and
+     kept in the secret store. Do not send the keys by e-mail or chat.
+2. Let it answer **the ARCILOGGER server's address only** (`<arcilogger>`): put only that address
+   in the device's SNMP access list.
+3. Switch SNMP on **on a LAN interface only**; **never on a WAN interface**.
+4. ARCILOGGER sends to UDP 161 (or `[sources.snmp] port`). If a firewall is in between, allow
+   `<arcilogger>` → the device's LAN address, UDP 161; nothing in the other direction.
+5. In ARCILOGGER, Ayarlar → Kaynaklar → the source → SNMP: enter the user name, the two keys and the
+   protocols, fetch the device's interface list (`ifName`, status, speed) with **Bağlantıyı dene**
+   (Test connection) and pick the WAN lines from it (at most 4). The names are as the device reports
+   them; ARCILOGGER assumes none (X-B4).
+6. **Check the direction** (X-B2): during a download, Canlı Durum's download rate must match the
+   inbound (In) traffic on the device's own interface graph. A device without 64-bit counters
+   (`ifHCInOctets`, `ifHCOutOctets`) gets the status `snmp_no_hc_counters`.
+
+**FortiGate:** set the SNMPv3 user and its access list in FortiOS's SNMP settings, and allow SNMP
+management access on a LAN interface only. **MikroTik:** switch on RouterOS's SNMP service, set the
+SNMPv3 authentication and privacy protocols and keys, and only `<arcilogger>` as the allowed
+address. On both, take the exact menu path and option names from your version's documentation
+(**verify on site**).
