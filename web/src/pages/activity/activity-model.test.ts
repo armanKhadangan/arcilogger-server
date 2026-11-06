@@ -4,6 +4,7 @@ import {
   capacityShare,
   formatBps,
   lineSeries,
+  mbpsText,
   minuteSeries,
   shareText,
   toMbps,
@@ -11,6 +12,16 @@ import {
 } from './activity-model';
 
 describe('Canlı Durum model (W5 P3)', () => {
+  it('writes chart rates with the decimals a quiet line needs, never a column of 0,0', () => {
+    expect(mbpsText(0, 'tr')).toBe('0');
+    expect(mbpsText(0.012, 'tr')).toBe('0,012');
+    expect(mbpsText(0.25, 'tr')).toBe('0,25');
+    expect(mbpsText(0.0004, 'tr')).toBe('0,000');
+    expect(mbpsText(3.46, 'tr')).toBe('3,5');
+    expect(mbpsText(34.2, 'en')).toBe('34');
+    expect(mbpsText(0.012, 'en')).toBe('0.012');
+  });
+
   it('reads the window from the address, 5 minutes otherwise', () => {
     expect(windowFromSearch('1')).toBe(1);
     expect(windowFromSearch('15')).toBe(15);

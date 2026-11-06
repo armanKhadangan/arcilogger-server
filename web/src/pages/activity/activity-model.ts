@@ -27,6 +27,19 @@ export function toMbps(bps: number): number {
   return bps / 1_000_000;
 }
 
+/**
+ * A rate in Mbit/s as a chart shows it (axis, tooltip, table view): whole numbers from 10, one
+ * decimal from 1, and below 1 as many decimals as the first figure needs (at most 3), so a quiet
+ * line reads "0,012", not a column of "0,0".
+ */
+export function mbpsText(mbps: number, lang: Lang): string {
+  if (!Number.isFinite(mbps) || mbps <= 0) return formatNumber(0, 0, lang);
+  if (mbps >= 10) return formatNumber(mbps, 0, lang);
+  if (mbps >= 1) return formatNumber(mbps, 1, lang);
+  const decimals = Math.min(3, Math.max(1, 1 - Math.floor(Math.log10(mbps))));
+  return formatNumber(mbps, decimals, lang);
+}
+
 /** "12,4 Mbit/s", "850 kbit/s", "1,2 Gbit/s"; "—" before the first sample. */
 export function formatBps(bps: number | null, lang: Lang): string {
   if (bps === null || !Number.isFinite(bps)) return '—';

@@ -30,6 +30,7 @@ import {
   formatBps,
   lineSeries,
   minuteSeries,
+  mbpsText,
   shareText,
   windowFromSearch,
 } from './activity-model';
@@ -112,7 +113,7 @@ function LineCard({ line }: { line: WanLine }) {
   const down = capacityShare(line.download_bps, line.capacity_mbps?.down);
   const up = capacityShare(line.upload_bps, line.capacity_mbps?.up);
   // The axis keeps to a number; the unit is in the description and the table's headers.
-  const mbps = (value: number) => formatNumber(value, value < 10 ? 1 : 0, lang);
+  const mbps = (value: number) => mbpsText(value, lang);
   const labels = { download: t('activity.download'), upload: t('activity.upload') };
   return (
     <ChartFrame
@@ -324,7 +325,7 @@ function MinuteChart({ data }: { data: Parameters<typeof minuteSeries>[0] }) {
   const { t } = useTranslation();
   const lang = currentLang();
   const rows = useMemo(() => minuteSeries(data), [data]);
-  const mbps = (value: number) => formatNumber(value, value < 10 ? 1 : 0, lang);
+  const mbps = (value: number) => mbpsText(value, lang);
   const labels = { download: t('activity.download'), upload: t('activity.upload') };
   return (
     <ChartFrame
