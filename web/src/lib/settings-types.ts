@@ -181,6 +181,11 @@ export interface TsaSection {
   provider: string;
   /** `null` while the server is none of the browser's choices. */
   server: TsaServer | null;
+  /**
+   * The configuration claims legal grade: Kamu SM's production server, or TÜRKTRUST's (D12).
+   * Whether a day is legal grade also needs its chain (rule 4).
+   */
+  legal_grade?: boolean;
   credit_alert_threshold: number;
   timeout_seconds: number;
   /** TÜRKTRUST over plain HTTP is allowed (the password then travels in clear text). */

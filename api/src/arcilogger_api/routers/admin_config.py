@@ -165,6 +165,9 @@ class TsaSection(BaseModel):
     #: ``test`` / ``production`` (a Zamane server of Kamu SM), ``turktrust`` /
     #: ``turktrust-http`` (TÜRKTRUST over HTTPS or plain HTTP), else None.
     server: TsaServer | None
+    #: The configuration claims legal grade (``TsaConfig.legal_grade``: Kamu SM's production
+    #: server, or TÜRKTRUST's by D12). Whether a day is legal grade also needs its chain (rule 4).
+    legal_grade: bool = False
     credit_alert_threshold: int
     timeout_seconds: int
     #: TÜRKTRUST over plain HTTP is allowed (its password then travels in clear text).
@@ -431,6 +434,7 @@ def _tsa(
     return TsaSection(
         provider=tsa.provider,
         server=chosen,
+        legal_grade=tsa.legal_grade,
         credit_alert_threshold=tsa.credit_alert_threshold,
         timeout_seconds=tsa.timeout_seconds,
         allow_plain_http=tsa.allow_plain_http,

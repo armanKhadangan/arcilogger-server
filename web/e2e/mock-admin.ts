@@ -1619,6 +1619,9 @@ export class AdminMock {
 
   /** `readiness` and `seal_ready` of a Kamu SM section (`tsa.preflight`, simplified). */
   private refreshTsa(tsa: TsaSection = this.sections.tsa): TsaSection {
+    // `TsaConfig.legal_grade` for the browser's choices: Kamu SM's production server, or
+    // TÜRKTRUST's (zd.turktrust.com.tr, D12) over HTTPS or plain HTTP.
+    tsa.legal_grade = ['production', 'turktrust', 'turktrust-http'].includes(tsa.server ?? '');
     tsa.readiness = { production: false, missing: tsaMissing(tsa) };
     tsa.readiness.production = tsa.readiness.missing.length === 0;
     const account = TURKTRUST_SECRETS.every((name) => tsa.secrets[name]?.set);

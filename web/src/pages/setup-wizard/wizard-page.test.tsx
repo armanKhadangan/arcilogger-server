@@ -7,7 +7,13 @@ import type { AdminConfig, AdminRequestOut } from '@/lib/settings-types';
 import { errorResponse, installFetch, jsonResponse, makeMe } from '@/test/api-mock';
 import { renderApp } from '@/test/render';
 import { ADMIN, SOURCES } from '@/test/samples';
-import { capturedConfig, FRESH_PROBLEMS, freshConfig, stampTest } from '@/test/w4-fixtures';
+import {
+  capturedConfig,
+  completeConfig,
+  FRESH_PROBLEMS,
+  freshConfig,
+  stampTest,
+} from '@/test/w4-fixtures';
 
 import { STEP_LINKS } from './wizard-model';
 
@@ -224,8 +230,28 @@ describe('İlk kurulum sihirbazı', () => {
     expect(screen.queryByTestId('wizard-firewall-managed')).not.toBeInTheDocument();
   });
 
+  it('a TÜRKTRUST site shows TÜRKTRUST’s two time-stamp steps (#220)', async () => {
+    const config = completeConfig();
+    Object.assign(config.sections.tsa, {
+      provider: 'turktrust',
+      server: 'turktrust',
+      legal_grade: true,
+    });
+    serve({ config });
+    renderApp('/settings/setup?step=kamusm_production');
+    const card = await screen.findByTestId('wizard-step-kamusm_production');
+    expect(card).toHaveTextContent('TÜRKTRUST: üretim');
+    expect(card).toHaveTextContent('Tamam');
+    const list = await steps();
+    expect(list).toHaveTextContent('TÜRKTRUST: damga testi');
+    expect(list).not.toHaveTextContent('Kamu SM');
+  });
+
   it('the Kamu SM steps: a verified stamp test of the history, and the test server note', async () => {
-    serve({ config: capturedConfig(), tests: [stampTest()] });
+    // A Kamu SM site on the test server: the history's Zamane test counts (#220).
+    const config = capturedConfig();
+    Object.assign(config.sections.tsa, { provider: 'zamane', server: 'test' });
+    serve({ config, tests: [stampTest()] });
     const { router } = renderApp('/settings/setup?step=kamusm_test');
     const card = await screen.findByTestId('wizard-step-kamusm_test');
     expect(card).toHaveTextContent('Tamam');
