@@ -821,6 +821,56 @@ def sealed_with_certificate(site: Site, day: date, not_after: datetime | None) -
     )
 
 
+def test_tsa_card_names_turktrust(site: Site) -> None:
+    """#220: card 5's label names TÜRKTRUST, whose production server is legal grade by D12;
+    another TÜRKTRUST server is not, and row 1 says so with that label."""
+    turktrust = TsaConfig(provider="turktrust", url="https://zd.turktrust.com.tr/", port=443)
+    card = site.card("tsa", config=site.config.model_copy(update={"tsa": turktrust}))
+    assert facts(card)["server"] == ("TÜRKTRUST üretim", "TÜRKTRUST production")
+    assert "Kamu SM üretim sunucusundan alınmıyor" not in reason(card)[0]
+    other = TsaConfig(provider="turktrust", url="https://tsa.ornek.example/", port=443)
+    card = site.card("tsa", config=site.config.model_copy(update={"tsa": other}))
+    label = ("TÜRKTRUST, üretim sunucusu dışında", "TÜRKTRUST, not its production server")
+    assert facts(card)["server"] == label
+    assert card.tone == "error"
+    assert f"(sağlayıcı: {label[0]})" in reason(card)[0]
+
+
+def test_tsa_card_without_a_credit_query(site: Site) -> None:
+    """#220: a TÜRKTRUST production site has no credit query (C21), so card 5 never waits for a
+    reading: no sealed day → neutral, a certificate ending soon → warning, else ok, and its
+    facts carry no credit but the "not queried" line."""
+    turktrust = TsaConfig(provider="turktrust", url="https://zd.turktrust.com.tr/", port=443)
+    config = site.config.model_copy(update={"tsa": turktrust})
+    card = site.card("tsa", config=config)
+    assert card.tone == "neutral"
+    assert reason(card)[0] == "Henüz üretim sunucusuyla damgalanmış gün yok."
+    sealed_with_certificate(site, YESTERDAY - timedelta(days=1), NOW + timedelta(days=100))
+    card = site.card("tsa", config=config)
+    assert card.tone == "warning"
+    assert reason(card)[0].startswith("Son damganın TSA sertifikası ")
+    sealed_with_certificate(site, YESTERDAY, NOW + timedelta(days=400))
+    card = site.card("tsa", config=config)
+    assert card.tone == "ok"
+    assert reason(card) == (
+        "Son damganın TSA sertifikası 400 gün daha geçerli.",
+        "The TSA certificate of the newest time stamp is valid for 400 more days.",
+    )
+    until = format_date(NOW + timedelta(days=400))
+    assert facts(card) == {
+        "server": ("TÜRKTRUST üretim", "TÜRKTRUST production"),
+        "credits": (
+            "ARCILOGGER bu sağlayıcı için kontör sorgulamaz.",
+            "ARCILOGGER does not query credits for this provider.",
+        ),
+        "cert_until": (until, until),
+        "cert_days": ("400", "400"),
+    }
+    # An old credit log (from a Kamu SM time) changes nothing.
+    write_credit(site, (NOW - timedelta(days=10), 0))
+    assert site.card("tsa", config=config).tone == "ok"
+
+
 def test_tsa_card_states(site: Site) -> None:
     production = site.config.model_copy(update={"tsa": PRODUCTION})
 
@@ -858,8 +908,8 @@ def test_tsa_card_states(site: Site) -> None:
     card = site.card("tsa", config=production)
     assert card.tone == "neutral"
     assert reason(card) == (
-        "Henüz Kamu SM ile damgalanmış gün yok.",
-        "No day has been stamped with Kamu SM yet.",
+        "Henüz üretim sunucusuyla damgalanmış gün yok.",
+        "No day has been stamped by a production server yet.",
     )
 
     # all fine

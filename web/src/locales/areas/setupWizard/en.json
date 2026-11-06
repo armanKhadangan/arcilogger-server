@@ -32,6 +32,14 @@
         "title": "Kamu SM: production",
         "purpose": "The daily seals take their time stamp from the Kamu SM production server. After the switch to production, sealing must be ready; if it is not, the causes are listed below."
       },
+      "turktrust_test": {
+        "title": "TÜRKTRUST: stamp test",
+        "purpose": "A verified time stamp from TÜRKTRUST shows that the user name, the password and the root certificates work together. The test is the stamp test step of Settings → Time stamping."
+      },
+      "turktrust_production": {
+        "title": "TÜRKTRUST: production",
+        "purpose": "The daily seals take their time stamp from TÜRKTRUST's production server (zd.turktrust.com.tr). Sealing must be ready; if it is not, the causes are listed below."
+      },
       "replica": {
         "title": "Replica",
         "purpose": "Sealed days are copied to a second place, a network share. If the server's disk fails, the copies remain on the replica."
@@ -51,6 +59,7 @@
       "noEnabled": "None of the defined sources is enabled.",
       "noTest": "No stamp test succeeded and was verified.",
       "notProduction": "Time stamps do not come from the Kamu SM production server.",
+      "notTurktrustProduction": "Time stamps do not come from TÜRKTRUST's production server.",
       "sealNotReady": "Sealing is not ready.",
       "replicaOff": "The replica is switched off.",
       "smtpOff": "Sending e-mail is switched off.",
