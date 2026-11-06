@@ -3855,3 +3855,57 @@ Recorded on #104. W5-F moved to the manager on 2026-11-06 (05:50Z); part 1 is Sa
     appears for mock, rfc3161 and test servers, so the remedy holds; the guide's remedy names
     both providers.
   - The banner sections are 5.2–5.9 (Q3), as W5-D's locale keys have them.
+
+## Deviations — W5-P part P4 (2026-11-06)
+
+P4 is Gülşah's (#203, 23:40Z); it follows W5-N (#207) and the answers of 2026-11-06 07:10 on
+#203.
+
+- **W5-P-12: the SNMP section is in the source dialog of Ayarlar → Kaynaklar.** §6.6 names
+  `web/src/pages/sources/source-sheet.tsx`, but that is Kaynaklar's read-only drawer; a source
+  is changed in `web/src/pages/settings/sources-page.tsx`, where CANLI-DURUM / LIVE-STATUS §3
+  and AYARLAR / SETTINGS put the section.
+  - The model is `settings/snmp-model.ts` and the section `settings/source-snmp.tsx`, both new.
+  - The fields are N1's: the switch, user, port, `auth`, `priv` ("sahada doğrula" beside
+    `aes256`), 1 to 4 interface names typed (W5-N-7), a capacity per line in both directions
+    or neither, and the interval. The two keys are write-only, as SMTP's password; the form
+    knows only whether each is stored.
+  - The browser checks N1's rules while SNMP is on, and a typed key's 8 to 64 characters
+    (counted as the server counts them) also while it is off. The server's refusals of the
+    table are shown in the section, those of a key at the key.
+- **W5-P-13: every change of a source carries its `[sources.snmp]`.** The server reads a
+  source without `snmp` as one without SNMP. Since W5-N, a row's enable switch and the edit
+  dialog sent the source without it, so either deleted a stored table. Both now send it
+  unchanged (`sourceConfig`, `fromSourceForm`).
+- **W5-P-14: no interface list in the browser yet.** W5-N-7 says the refusal
+  `snmp_no_such_interface` lists what the device reports. The agent writes only the probe's
+  code to the request (`admin/agent.py`, the step's `code`), and the API words a step by its
+  code alone, so the browser shows the fixed text of each code in the request's steps. The
+  list is in the server's log. Question on #203: carry it on the request as a structured field,
+  or leave it to #217.
+- **W5-P-15: the Panel card N7.**
+  - It shows the lines whose source has SNMP on (`status` not `disabled`), each with download
+    and upload now, the share of the capacity when one is set, a 60-minute sparkline in each
+    direction, the reason while a line is not read and its last good reading.
+  - It sits under the health cards, the whole width, and links to Canlı Durum for those who
+    may open it.
+  - It is asked for with `dashboard.view` or `system.read` (N6), every 10 s as Canlı Durum
+    asks (`ACTIVITY_POLL_MS`), in the background, and with the Panel's "Yenile".
+  - With no line, an administrator (`sources.manage`) gets a link to Ayarlar → Kaynaklar; the
+    others see nothing. While it loads, or on an error, nothing is shown, as the disk card does.
+- **W5-P-16: P4 does not wait for P3.** #221's web job needs W5-M's `/activity/devices`.
+  P4 takes #221's hunks of `useActivityWan`, `nav.activity` and `e2e/samples.ts`
+  `ACTIVITY_WAN` word for word; only `api-hooks.ts` then differs (#221 adds the devices hook
+  beside it), and the later pull request keeps both. The rate texts of the card
+  (`formatBps`, `capacityShare`, `shareText`) repeat #221's `activity-model.ts`; once both
+  have merged, the card can import them from there. The e2e Panel routes `/activity/wan` to
+  the captured answer itself.
+- **W5-P-17: the review names the SNMP fields.** A source's change row lists its SNMP table
+  field by field ("fw-1 · SNMP: WAN arayüzleri") and names the two keys
+  (`lib/admin-requests.ts` `changeRows`, `components/admin/labels.ts` `pathLabel`).
+- **W5-P-18: the e2e admin mock answers SNMP as W5-N's rules do**: the keys' length
+  (`secret_invalid`), `snmp_source_is_network`, `snmp_secret_missing`, the probe on a changed
+  source with SNMP on or new keys, its own failure code (`nextProbeFailure`), and
+  `probe_skipped` in strict outbound mode (`strictOutbound`). Its texts are those of
+  `admin/messages.py`. Its seed TSA section reports the two `turktrust.*` secrets as W5-T's API
+  does, so `e2e/settings-kamusm.spec.ts` drops `reportTurktrust` (granted on #214).
