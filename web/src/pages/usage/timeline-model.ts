@@ -8,9 +8,10 @@
  * - The categories get the chart colours in the order of their time on that day; beyond the
  *   palette's seven colours the rest fold into "Diğer" (never re-coloured by rank elsewhere).
  * - Each segment knows the top domains of the hours it covers (hover: time + top domain).
+ * - The breaks of the work hours that day are shaded bands behind the segments (W5 P2).
  */
 
-import type { SubjectHour, TimelineSpan } from '@/lib/api-types';
+import type { BreakSpan, SubjectHour, TimelineSpan } from '@/lib/api-types';
 import { siteDateTime } from '@/lib/display';
 
 /** Colours of the chart palette before "Diğer". */
@@ -121,6 +122,32 @@ export function layoutTimeline(
     categories,
     activeMinutes: segments.reduce((sum, segment) => sum + segment.end - segment.start, 0),
   };
+}
+
+/**
+ * The breaks of the day (`SubjectDetail.breaks`, W5-K-7) as minutes 0…1440 of the site day,
+ * clipped to the day, sorted and merged: the shaded bands of the timeline (W5 P2).
+ */
+export function breakBands(
+  breaks: readonly BreakSpan[],
+  day: string,
+): { start: number; end: number }[] {
+  const origin = dayStart(day);
+  const bands = breaks
+    .map((item) => ({
+      start: Math.max(0, Math.floor((Date.parse(item.start) - origin) / 60_000)),
+      end: Math.min(DAY_MINUTES, Math.ceil((Date.parse(item.end) - origin) / 60_000)),
+    }))
+    .filter((band) => Number.isFinite(band.start) && Number.isFinite(band.end))
+    .filter((band) => band.start < band.end)
+    .sort((a, b) => a.start - b.start);
+  const merged: { start: number; end: number }[] = [];
+  for (const band of bands) {
+    const last = merged.at(-1);
+    if (last && band.start <= last.end) last.end = Math.max(last.end, band.end);
+    else merged.push({ ...band });
+  }
+  return merged;
 }
 
 /** `08:05` of a minute of the day. */

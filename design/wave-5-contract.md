@@ -3567,9 +3567,8 @@ line is W5-E-10, and what it amends in detail:
 - **W5-L-3: the back-off measures from the last refresh's start.** `usage_days` keeps the start
   of the last rollup (`computed_at`) and its `duration_ms`, measured until the day's rows are
   written (the commit after it is not included; the job's log shows the same figure). A refresh
-  starts when
-  `now ≥ computed_at + 3 × duration_ms`, which is "twice the duration after it ended" (L2); no
-  `finished_at` is stored. A `computed_at` later than now (the clock went back, or a rebuild ran
+  starts when `now ≥ computed_at + 3 × duration_ms`, which is "twice the duration after it
+  ended" (L2); no `finished_at` is stored. A `computed_at` later than now (the clock went back, or a rebuild ran
   with a later moment) never holds today back.
 - **W5-L-4: measured** (`worker/tests/test_usage_performance.py`, the same container, plain
   PostgreSQL 16; seconds for the full-day rollup, "again" in brackets):
@@ -3581,3 +3580,38 @@ line is W5-E-10, and what it amends in detail:
 
   Both loads refresh every minute. The specification's busy day (a rollup of about a minute late
   in the day) refreshes about every 3 minutes.
+
+## Deviations — W5-P parts P1 and P2 (2026-11-06)
+
+The manager took P1 and P2 (#203, comment of 2026-11-05); P3 and P4 stay with Gülşah.
+
+- **W5-P-1: the general hours are those most work days share.** The editor is a week table, so
+  the general `start`/`end`/`breaks` of the saved value are the hours that most work days have
+  (on a tie, the earliest day's). Every other work day gets a `by_day` entry; a day equal to the
+  general hours gets none (P1). A stored value reads back unchanged, and an untouched editor
+  saves nothing.
+- **W5-P-2: the browser names the day of a refusal.** It checks the server's rules (K1) before
+  saving, per day: "Salı: her mola en az 5 dakika olmalı." The server's own refusal
+  (`setting_work_hours_breaks`, `setting_work_hours_by_day`) is shown at the setting as before.
+  It is captured as `settings.json` `errors.setting_invalid_work_hours`.
+- **W5-P-3: "Mola" appears when the answer holds break time.** The usage roles cannot read the
+  work hours, so the page cannot tell whether breaks are configured. The "Mola" column (person,
+  device and department tables), tile and company card are shown when a row or the total has
+  `break_active_seconds > 0`, as the reports do (K5). The filter always offers "Mola". The
+  exports always have the column (W5-K-2).
+- **W5-P-4: the timeline's bands come from the day's rollup** (`SubjectDetail.breaks`, W5-K-7).
+  They are shaded behind the day's segments and named in the legend ("Mola (12:00–13:00)").
+  The shared bar `web/src/components/ui/timeline.tsx` gets an optional `bands` property for
+  them; it is outside §6.6's list.
+- **W5-P-5: "Son güncelleme" only for today.** "Son güncelleme 14:36 (veriler 14:35'e kadar)"
+  is shown when the period ends today. An earlier day keeps "Veriler … sonuna kadar işlendi":
+  its last update says nothing new.
+- **W5-P-6: the e2e usage mock has a break hour** (`UsageOptions.breakHour`), so the generated
+  days split one hour of the work hours as the engine does. Its exports have the API's break
+  columns (W5-K-2).
+- **W5-P-7: files outside §6.6's list:**
+  - `web/src/components/ui/timeline.tsx` (W5-P-4);
+  - `web/src/pages/dashboard/dashboard-page.test.tsx`: the Panel's usage refresh, now
+    `USAGE_POLL_MS` = 60 s;
+  - `web/scripts/capture_api_samples.py`: the captured refusal of W5-P-2.
+

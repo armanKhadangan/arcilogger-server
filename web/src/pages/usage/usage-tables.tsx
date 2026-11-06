@@ -167,16 +167,23 @@ function textColumn<T>(
   };
 }
 
+/** Some row has time in the breaks of the work hours: the tables show the "Mola" column. */
+function hasBreakTime<T>(rows: readonly T[], get: (row: T) => Metrics): boolean {
+  return rows.some((row) => get(row).break_active_seconds > 0);
+}
+
 /**
  * The metric columns of the subject and department tables. `site`: the figures of one site or
  * category (its time, off-hours part, volumes, sessions; no online time, blocked attempts or
- * first/last activity: the rollups keep none of them per site).
+ * first/last activity: the rollups keep none of them per site). `breaks`: the "Mola" column
+ * beside "Mesai dışı" (W5 P2), shown when the rows hold break time.
  */
 function metricColumns<T>(
   get: (row: T) => Metrics,
   t: TFunction,
   lang: Lang,
   variant: 'full' | 'site' = 'full',
+  breaks = false,
 ): AnyColumnDef<T>[] {
   const span: AnyColumnDef<T> = {
     id: 'span',
@@ -204,6 +211,17 @@ function metricColumns<T>(
     lang,
     92,
   );
+  const pauses = breaks
+    ? [
+        durationColumn(
+          'break',
+          t('usage.metrics.breaks'),
+          (row: T) => get(row).break_active_seconds,
+          lang,
+          84,
+        ),
+      ]
+    : [];
   const volumes = [
     bytesColumn(
       'download',
@@ -215,7 +233,7 @@ function metricColumns<T>(
     bytesColumn('upload', t('usage.metrics.upload'), (row: T) => get(row).upload_bytes, lang, 88),
     countColumn('sessions', t('usage.metrics.sessions'), (row: T) => get(row).sessions, lang, 74),
   ];
-  if (variant === 'site') return [active, offHours, ...volumes];
+  if (variant === 'site') return [active, offHours, ...pauses, ...volumes];
   return [
     active,
     durationColumn(
@@ -228,6 +246,7 @@ function metricColumns<T>(
     ...volumes,
     countColumn('blocked', t('usage.metrics.blocked'), (row: T) => get(row).blocked, lang, 84),
     offHours,
+    ...pauses,
     span,
   ];
 }
@@ -275,6 +294,7 @@ export function SubjectTable({
 }) {
   const { t } = useTranslation();
   const lang = currentLang();
+  const breaks = hasBreakTime(rows, (row) => row.metrics);
   const columns = useMemo<AnyColumnDef<SubjectRow>[]>(() => {
     const list: AnyColumnDef<SubjectRow>[] = [
       {
@@ -318,6 +338,7 @@ export function SubjectTable({
         t,
         lang,
         variant === 'site' ? 'site' : 'full',
+        breaks,
       ),
     ];
     if (variant === 'list')
@@ -344,7 +365,7 @@ export function SubjectTable({
         },
       });
     return list;
-  }, [t, lang, onOpen, subjectLabel, variant, hideDepartment]);
+  }, [t, lang, onOpen, subjectLabel, variant, hideDepartment, breaks]);
   return (
     <DataTable
       data={rows}
@@ -368,6 +389,7 @@ export function DepartmentTable({
 }: TableFrame & { rows: DepartmentRow[]; onOpen: (department: string) => void }) {
   const { t } = useTranslation();
   const lang = currentLang();
+  const breaks = hasBreakTime(rows, (row) => row.metrics);
   const columns = useMemo<AnyColumnDef<DepartmentRow>[]>(
     () => [
       {
@@ -409,9 +431,9 @@ export function DepartmentTable({
         lang,
         100,
       ),
-      ...metricColumns<DepartmentRow>((row) => row.metrics, t, lang),
+      ...metricColumns<DepartmentRow>((row) => row.metrics, t, lang, 'full', breaks),
     ],
-    [t, lang, onOpen],
+    [t, lang, onOpen, breaks],
   );
   return (
     <DataTable
@@ -759,6 +781,7 @@ export function HostnameTable({
 export function DeviceUsageTable({ rows, ...frame }: TableFrame & { rows: DeviceUsage[] }) {
   const { t } = useTranslation();
   const lang = currentLang();
+  const breaks = hasBreakTime(rows, (row) => row.metrics);
   const columns = useMemo<AnyColumnDef<DeviceUsage>[]>(
     () => [
       {
@@ -782,7 +805,7 @@ export function DeviceUsageTable({ rows, ...frame }: TableFrame & { rows: Device
           );
         },
       },
-      ...metricColumns<DeviceUsage>((row) => row.metrics, t, lang),
+      ...metricColumns<DeviceUsage>((row) => row.metrics, t, lang, 'full', breaks),
       {
         id: 'top_sites',
         accessorFn: (row) => topSitesText(row.top_sites, lang),
@@ -801,7 +824,7 @@ export function DeviceUsageTable({ rows, ...frame }: TableFrame & { rows: Device
         ),
       },
     ],
-    [t, lang],
+    [t, lang, breaks],
   );
   return (
     <DataTable

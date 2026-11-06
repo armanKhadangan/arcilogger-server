@@ -791,9 +791,10 @@ describe('Panel — polling', () => {
     );
   }
 
-  it('refreshes the live blocks every 30 s and the usage every 5 min, in the background', async () => {
+  it('refreshes the live blocks every 30 s and the usage every minute, in the background', async () => {
     expect(DASHBOARD_POLL_MS).toBe(30_000);
-    expect(USAGE_POLL_MS).toBe(300_000);
+    // Today's usage is recomputed every minute (W5 §6 L1, P2).
+    expect(USAGE_POLL_MS).toBe(60_000);
     const calls = serveBoth();
     renderHook(
       () => {
@@ -810,9 +811,13 @@ describe('Panel — polling', () => {
     expect(count(calls, '/dashboard/summary')).toHaveLength(2);
     expect(count(calls, '/usage/company')).toHaveLength(1);
 
-    await act(() => vi.advanceTimersByTimeAsync(270_000));
-    expect(count(calls, '/dashboard/summary')).toHaveLength(11);
+    await act(() => vi.advanceTimersByTimeAsync(30_000));
+    expect(count(calls, '/dashboard/summary')).toHaveLength(3);
     expect(count(calls, '/usage/company')).toHaveLength(2);
+
+    await act(() => vi.advanceTimersByTimeAsync(240_000));
+    expect(count(calls, '/dashboard/summary')).toHaveLength(11);
+    expect(count(calls, '/usage/company')).toHaveLength(6);
 
     // The first load is the user's; every refresh after it is a background request.
     const summary = count(calls, '/dashboard/summary');

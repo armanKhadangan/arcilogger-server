@@ -77,6 +77,25 @@
       "headers": {},
       "status": 422
     },
+    "setting_invalid_work_hours": {
+      "body": {
+        "error": {
+          "code": "setting_invalid",
+          "details": [
+            {
+              "code": "setting_work_hours_breaks",
+              "key": "usage.work_hours",
+              "message_en": "Breaks must be given as HH:MM, last at least 5 minutes, lie inside the work hours, not overlap, and number at most 6 a day.",
+              "message_tr": "Molalar SS:DD biçiminde, en az 5 dakika, mesai saatleri içinde, birbiriyle çakışmayan ve günde en çok 6 tane olmalı."
+            }
+          ],
+          "message_en": "Some setting values are invalid; correct the marked settings.",
+          "message_tr": "Bazı ayar değerleri geçersiz; işaretli ayarları düzeltin."
+        }
+      },
+      "headers": {},
+      "status": 422
+    },
     "setting_locked": {
       "body": {
         "error": {
@@ -538,7 +557,7 @@
             "min": 1,
             "reauth": false,
             "type": "integer",
-            "updated_at": "2026-11-05T21:56:10.368955Z",
+            "updated_at": "2026-11-05T22:44:12.153742Z",
             "updated_by": "capture",
             "value": 100
           },
@@ -572,7 +591,7 @@
             "min": 1,
             "reauth": false,
             "type": "integer",
-            "updated_at": "2026-11-05T21:56:13.008177Z",
+            "updated_at": "2026-11-05T22:44:14.667509Z",
             "updated_by": "capture",
             "value": 5
           },
@@ -606,7 +625,7 @@
             "min": null,
             "reauth": false,
             "type": "boolean",
-            "updated_at": "2026-11-05T21:56:11.287899Z",
+            "updated_at": "2026-11-05T22:44:12.992624Z",
             "updated_by": "capture",
             "value": false
           },
@@ -674,7 +693,7 @@
             "min": null,
             "reauth": false,
             "type": "object",
-            "updated_at": "2026-11-05T21:56:07.671542Z",
+            "updated_at": "2026-11-05T22:44:09.617908Z",
             "updated_by": "example",
             "value": {
               "dhcp61": 3600
@@ -1729,7 +1748,7 @@
             "min": 1,
             "reauth": false,
             "type": "integer",
-            "updated_at": "2026-11-05T21:56:18.121058Z",
+            "updated_at": "2026-11-05T22:44:19.903642Z",
             "updated_by": "capture",
             "value": 2
           },
@@ -2428,7 +2447,7 @@
             "min": 1,
             "reauth": false,
             "type": "integer",
-            "updated_at": "2026-11-05T21:56:29.602402Z",
+            "updated_at": "2026-11-05T22:44:29.971034Z",
             "updated_by": "tolga",
             "value": 150
           },
@@ -2462,7 +2481,7 @@
             "min": 1,
             "reauth": false,
             "type": "integer",
-            "updated_at": "2026-11-05T21:56:13.008177Z",
+            "updated_at": "2026-11-05T22:44:14.667509Z",
             "updated_by": "capture",
             "value": 5
           },
@@ -2496,7 +2515,7 @@
             "min": null,
             "reauth": false,
             "type": "boolean",
-            "updated_at": "2026-11-05T21:56:11.287899Z",
+            "updated_at": "2026-11-05T22:44:12.992624Z",
             "updated_by": "capture",
             "value": false
           },
@@ -2564,7 +2583,7 @@
             "min": null,
             "reauth": false,
             "type": "object",
-            "updated_at": "2026-11-05T21:56:07.671542Z",
+            "updated_at": "2026-11-05T22:44:09.617908Z",
             "updated_by": "example",
             "value": {
               "dhcp61": 3600
@@ -3619,7 +3638,7 @@
             "min": 1,
             "reauth": false,
             "type": "integer",
-            "updated_at": "2026-11-05T21:56:18.121058Z",
+            "updated_at": "2026-11-05T22:44:19.903642Z",
             "updated_by": "capture",
             "value": 2
           },
@@ -3886,7 +3905,7 @@
     ]
   },
   "meta": {
-    "captured_at": "2026-10-13T04:01:40.186093+00:00",
+    "captured_at": "2026-10-13T04:01:35.980242+00:00",
     "clock": "2026-10-13T07:00:00+03:00",
     "info": "captured by web/scripts/capture_api_samples.py; do not edit",
     "site_day": "2026-10-09",

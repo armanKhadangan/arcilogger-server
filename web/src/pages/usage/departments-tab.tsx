@@ -78,7 +78,11 @@ function DepartmentDetail({
           </Badge>
         ))}
       </div>
-      <DataNote computedUntil={departments.data?.computed_until} noticeKey={noticeKey} />
+      <DataNote
+        computedUntil={departments.data?.computed_until}
+        updatedAt={departments.data?.updated_at}
+        noticeKey={noticeKey}
+      />
       <QueryState
         query={departments}
         empty={rows.length === 0 || noTraffic(metrics)}
@@ -234,7 +238,11 @@ export function DepartmentsTab({
 
   return (
     <div className="flex flex-col gap-4">
-      <DataNote computedUntil={list.data?.computed_until} noticeKey={list.data?.notice_key} />
+      <DataNote
+        computedUntil={list.data?.computed_until}
+        updatedAt={list.data?.updated_at}
+        noticeKey={list.data?.notice_key}
+      />
       <QueryState query={list} skeleton="table" empty={list.isSuccess && rows.length === 0}>
         {() => (
           <DepartmentTable

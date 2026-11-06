@@ -106,7 +106,11 @@ export function SubjectsTab({
 
   return (
     <div className="flex flex-col gap-4">
-      <DataNote computedUntil={list.data?.computed_until} noticeKey={list.data?.notice_key} />
+      <DataNote
+        computedUntil={list.data?.computed_until}
+        updatedAt={list.data?.updated_at}
+        noticeKey={list.data?.notice_key}
+      />
       <QueryState query={list} skeleton="table" empty={list.isSuccess && rows.length === 0}>
         {() => (
           <SubjectTable
