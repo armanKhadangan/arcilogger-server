@@ -197,7 +197,13 @@ class _Metrics:
 
 
 class DayBuilder:
-    """Accumulates one day; :meth:`finish` turns the buckets into table rows."""
+    """Accumulates one day; :meth:`finish` turns the buckets into table rows.
+
+    With ``window`` (``[lo, hi)``, whole minutes) the buckets cover that range instead of the
+    site day ``day``: Canlı Durum's last minutes (W5-M, contract §6.2 M2), which can cross
+    midnight. Each minute's part is then that of its own site day (K2). Such a builder is read
+    from (``cells``, ``flow_list``, ``flow_sessions``, ``subjects``, ``newest``), not finished.
+    """
 
     def __init__(
         self,
@@ -205,17 +211,27 @@ class DayBuilder:
         settings: UsageSettings,
         namer: DomainNamer,
         rules: BackgroundRules,
+        *,
+        window: tuple[datetime, datetime] | None = None,
     ) -> None:
         self.day = day
         self.settings = settings
         self.namer = namer
         self.rules = rules
-        lo, hi = day_window(day)
+        lo, hi = day_window(day) if window is None else window
         self.lo, self.hi = lo.astimezone(UTC), hi.astimezone(UTC)
         self.lo_ts, self.hi_ts = _ts(self.lo), _ts(self.hi)
         self.buckets = int((self.hi_ts - self.lo_ts) // BUCKET)
-        #: The part (work / break / off, contract W5 §6 K2) of every minute of the day.
-        self.parts = settings.day_parts(day)
+        #: The part (work / break / off, contract W5 §6 K2) of every minute of the day (of the
+        #: window: each minute by its own day's hours and breaks).
+        self.parts = (
+            settings.day_parts(day)
+            if window is None
+            else [
+                settings.part_of(self.lo + timedelta(seconds=index * BUCKET))
+                for index in range(self.buckets)
+            ]
+        )
         self.flows: dict[Flow, int] = {}
         self.flow_list: list[Flow] = []
         self.subjects: dict[str, Subject] = {}
@@ -1043,6 +1059,29 @@ def compute_day(
         settings.background_domains, settings.background_appcats, settings.background_ports
     )
     builder = DayBuilder(day, settings, namer, rules)
+    ips, timelines = read_range(session, builder, settings=settings)
+    result = DayResult(
+        day=day,
+        lo=builder.lo,
+        hi=builder.hi,
+        ips=ips,
+        attribution_hash=timelines_hash(timelines),
+        computed_until=None,
+    )
+    builder.finish(result)
+    result.stats["psl"] = namer.source
+    if namer.warning:
+        result.stats["psl_warning"] = namer.warning
+    return result
+
+
+def read_range(
+    session: Session, builder: DayBuilder, *, settings: UsageSettings
+) -> tuple[list[str], dict[str, IpTimeline]]:
+    """Read the logs of the builder's ``[lo, hi)`` (a site day, or a window) into it: the
+    internal source addresses, their attribution timelines, and per group of addresses their
+    traffic, web filter, application and DNS rows, with the session overlap and the DNS window
+    around the range (module text). Returns the addresses and their timelines."""
     lo, hi = builder.lo, builder.hi
     overlap = timedelta(seconds=settings.session_overlap_seconds)
     window = timedelta(seconds=settings.dns_window_seconds)
@@ -1067,16 +1106,4 @@ def compute_day(
                 [*app_before.get(ip, ()), *app.get(ip, ())],
                 [*dns_before.get(ip, ()), *dns.get(ip, ())],
             )
-    result = DayResult(
-        day=day,
-        lo=lo,
-        hi=hi,
-        ips=ips,
-        attribution_hash=timelines_hash(timelines),
-        computed_until=None,
-    )
-    builder.finish(result)
-    result.stats["psl"] = namer.source
-    if namer.warning:
-        result.stats["psl_warning"] = namer.warning
-    return result
+    return ips, timelines
