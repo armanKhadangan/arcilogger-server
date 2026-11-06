@@ -486,6 +486,26 @@ def test_switching_snmp_off_marks_the_lines_disabled(tmp_path: Path, layout: Lay
     assert read_state(layout.wan_rates).sources == {}
 
 
+def test_idle_while_nothing_is_due_or_left_to_clear(tmp_path: Path, layout: Layout) -> None:
+    """The worker writes no ``job_runs`` row for an idle check (most sites have no SNMP)."""
+    _store(tmp_path)
+    on, off, fake = _config(tmp_path), _config(tmp_path, enabled=False), agent()
+    assert snmp_job.idle(layout, off, now=T0)
+    assert not snmp_job.idle(layout, on, now=T0)  # never polled
+    snmp_job.poll_due(layout, on, now=T0, sessions=None, client=fake)
+    assert snmp_job.idle(layout, on, now=T0 + timedelta(seconds=5))
+    assert not snmp_job.idle(layout, on, now=T0 + timedelta(seconds=12.5))
+    assert not snmp_job.idle(layout, off, now=T0)  # its lines are to be marked disabled
+    snmp_job.poll_due(layout, off, now=T0, sessions=None, client=fake)
+    assert snmp_job.idle(layout, off, now=T0 + timedelta(hours=1))
+    removed = Config.model_validate(
+        {"data_dir": str(tmp_path / "data"), "secrets_dir": str(tmp_path / "secrets")}
+    )
+    assert not snmp_job.idle(layout, removed, now=T0)  # its state is to be dropped
+    snmp_job.poll_due(layout, removed, now=T0, sessions=None, client=fake)
+    assert snmp_job.idle(layout, removed, now=T0)
+
+
 def _snmp_alerts(session: Session) -> list[Alert]:
     return list(session.query(Alert).filter(Alert.rule == "R20-snmp").order_by(Alert.id))
 

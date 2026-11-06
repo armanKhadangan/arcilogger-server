@@ -3,7 +3,8 @@
 Every :data:`SNMP_POLL_EVERY` it polls each SNMP-enabled source whose
 ``interval_seconds`` is due, all of them at once, writes ``state/wan-rates.json`` and opens or
 resolves ``R20-snmp:<source>`` (low): a source with an interface that has had no good read for
-:data:`ALERT_AFTER` is reported, and the next good read of every interface resolves it.
+:data:`ALERT_AFTER` is reported, and the next good read of every interface resolves it. A check
+with nothing due is :func:`idle`: it writes no ``job_runs`` row.
 """
 
 from __future__ import annotations
@@ -234,6 +235,31 @@ def _alerts(
             resolve(alert, reason=reason, now=now, facts={"at": isoformat_site(now, "seconds")})
             report.resolved.append(source)
         session.commit()
+
+
+def idle(layout: Layout, config: Config, *, now: datetime) -> bool:
+    """Nothing for :func:`poll_due` to do: no SNMP source is due and the state file has nothing
+    left to clear (a source switched off whose lines are not yet ``disabled``, or a removed one).
+    The worker then records no ``job_runs`` row (most installations have no SNMP source)."""
+    sources = snmp_sources(config)
+    wan = read_state(layout.wan_rates) if sources or layout.wan_rates.exists() else None
+    if wan is None:
+        return True
+    if any(_due(source, wan.sources.get(source.name), now) for source in sources):
+        return False
+    enabled = {source.name for source in sources}
+    configured = {source.name for source in config.sources}
+    return all(
+        name in enabled
+        or (name in configured and all(line.status == "disabled" for line in state.lines.values()))
+        for name, state in wan.sources.items()
+    )
+
+
+def job_snmp_idle(ctx: JobContext) -> bool:
+    from arcilogger_worker.service import job_config
+
+    return idle(ctx.layout, job_config(ctx), now=ctx.now)
 
 
 def job_snmp_poll(ctx: JobContext) -> Mapping[str, Any]:
