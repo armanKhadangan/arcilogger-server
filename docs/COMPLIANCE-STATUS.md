@@ -297,7 +297,7 @@ production server?); the credit history `state\credit.jsonl` (the Credit task da
 
 | Row | State | Condition | Reason |
 |---|---|---|---|
-| 1 | Problem | The time stamps are not taken from the Kamu SM production server (trial, RFC 3161 or the Kamu SM test server) | "Time stamps are not taken from the Kamu SM production server (provider: {provider}). Complete the Kamu SM connection in Settings → Kamu SM." |
+| 1 | Problem | The time stamps are not taken from the Kamu SM production server (trial, RFC 3161 or the Kamu SM test server) | "Time stamps are not taken from the Kamu SM production server (provider: {provider}). Complete the Kamu SM connection in Settings → Time stamping." |
 | 2 | Problem | The newest known credit is 0 or less | "The Kamu SM credit is used up." |
 | 3 | Problem | The TSA certificate of the newest time stamp has expired | "The TSA certificate of the newest time stamp expired on {date}." |
 | 4 | Attention | The credit is at or below the threshold | "{credits} credits left; threshold {threshold}. Estimated to last {days} days." |
@@ -318,10 +318,10 @@ the format on site." ([kamusm.md](kamusm.md) section 3, K4; section 6.)
 
 **What to do.**
 
-- Not the production server (row 1): complete the Settings → Kamu SM wizard: a trial with the test
-  server, comparing the root certificate fingerprints with the values Kamu SM publishes, then
-  **Üretime geç** (Switch to production) ([kamusm.md](kamusm.md), [INSTALL.md](INSTALL.md)
-  section 10).
+- Not the production server (row 1): complete the Kamu SM wizard under Settings → Time stamping: a
+  trial with the test server, comparing the root certificate fingerprints with the values Kamu SM
+  publishes, then **Üretime geç** (Switch to production) ([kamusm.md](kamusm.md),
+  [INSTALL.md](INSTALL.md) section 10).
 - Credit used up or low (rows 2, 4): buy credit ([kamusm.md](kamusm.md) section 1). Without credit
   no day can be sealed; card 2 and `R20-seal` show it.
 - Credit unknown (row 5): read it with **Kontör sorgula** on the Mühürleme page (`seal.manage`);
@@ -784,8 +784,8 @@ in Settings).
 | Administrator and two-step verification | always (the user is signed in) | — |
 | Site settings | no configuration problem of level error about `site_name` or `clock.*` | Settings → General |
 | Log sources | at least one enabled, configured source | Settings → Sources |
-| Kamu SM: test server | a successful "Damga testi" (Stamp test) in the request history, or the production server is selected | Settings → Kamu SM (test step) |
-| Kamu SM: production | the production server is selected and sealing is ready | Settings → Kamu SM (production step) |
+| Kamu SM: test server | a successful "Damga testi" (Stamp test) in the request history, or the production server is selected | Settings → Time stamping (test step) |
+| Kamu SM: production | the production server is selected and sealing is ready | Settings → Time stamping (production step) |
 | Replica | the replica is on | Settings → Replica |
 | E-mail | sending e-mail is switched on, SMTP server and sender are set | Settings → E-mail |
 | Summary | — | — |

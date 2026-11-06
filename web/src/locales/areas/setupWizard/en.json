@@ -26,7 +26,7 @@
       },
       "kamusm_test": {
         "title": "Kamu SM: test server",
-        "purpose": "A time stamp from the test server shows that Java, the Zamane client, the root certificates and the customer credentials work together. The test is the stamp test step of Settings → Kamu SM."
+        "purpose": "A time stamp from the test server shows that Java, the Zamane client, the root certificates and the customer credentials work together. The test is the stamp test step of Settings → Time stamping."
       },
       "kamusm_production": {
         "title": "Kamu SM: production",

@@ -52,7 +52,7 @@ export function isWizardStep(value: string | null): value is WizardStepId {
 
 /**
  * What a step still lacks: a text key with its values (`setupWizard.missing.*`, or a sealing
- * cause's text of Ayarlar → Kamu SM).
+ * cause's text of Ayarlar → Zaman damgası).
  */
 export interface Missing {
   key: string;
@@ -72,7 +72,7 @@ export interface WizardInput {
 }
 
 /**
- * A "Damga testi" of the history that succeeded and was verified, as Ayarlar → Kamu SM counts it
+ * A "Damga testi" of the history that succeeded and was verified, as Ayarlar → Zaman damgası counts it
  * (`useTested` of kamusm-page.tsx).
  */
 export function verifiedStampTest(requests: readonly AdminRequestOut[]): boolean {
@@ -91,7 +91,7 @@ export function siteProblems(problems: readonly SetupProblem[]): SetupProblem[] 
 
 const missing = (key: string): Missing => ({ key: `setupWizard.missing.${key}` });
 
-/** A sealing cause in the words of Ayarlar → Kamu SM (an unknown one shows its code). */
+/** A sealing cause in the words of Ayarlar → Zaman damgası (an unknown one shows its code). */
 const missingCause = (cause: string): Missing => ({
   key: causeKey(cause),
   values: { defaultValue: cause },
