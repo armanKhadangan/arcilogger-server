@@ -111,6 +111,12 @@ class Layout:
         return self.state / "activity.json"
 
     @property
+    def wan_rates(self) -> Path:
+        """The internet line's rates over SNMP (Wave 5 §6 N4, the worker job ``snmp.poll``):
+        interface names, counters and bit rates only, no secret."""
+        return self.state / "wan-rates.json"
+
+    @property
     def requests(self) -> Path:
         """Signed task requests (``arcilogger_core.admin.contract.TaskRequest``): the
         administration agent writes them, the LOCAL SERVICE tasks run and delete them."""

@@ -2310,20 +2310,20 @@ function Show-NextSteps {
     }
     if ($provider -eq 'turktrust') {
         Write-Host '   3. TÜRKTRUST zaman damgası hesabı [time-stamp account]:'
-        Write-Host '      Kullanıcı adı ve parolayı web arayüzünde Ayarlar → Zaman damgası''nda girin; konsoldan da girilebilir [enter the user name and password under Settings → Time stamp in the web interface; or at the console] (docs\AYARLAR.md):'
+        Write-Host '      Kullanıcı adı ve parolayı web arayüzünde Ayarlar → Zaman damgası''nda girin; konsoldan da girilebilir [enter the user name and password under Settings → Time stamping in the web interface; or at the console] (docs\AYARLAR.md):'
         if (-not $browserAdministration) {
             Write-Host '      Tarayıcı yönetimi kapalı: yalnız konsoldan [browser administration is off: at the console only].'
         }
         Write-Host ('      & "{0}" secret set turktrust.username' -f $CoreExe)
         Write-Host ('      & "{0}" secret set turktrust.password' -f $CoreExe)
         Write-Host ('      & "{0}"   # secret set / secret delete sonrası: ArciAdmin''in secrets.json hakkı geri gelir [after a console secret set / secret delete: gives ArciAdmin its right on secrets.json back]' -f (Join-Path $InstallDir 'scripts\Set-ArciVaultAcl.ps1'))
-        Write-Host ('      Kök sertifikalar [roots]: TÜRKTRUST''un kök sertifikalarını TÜRKTRUST''tan alın; Ayarlar → Zaman damgası''ndan yükleyin ya da {0} içine koyun, SHA-256 parmak izlerini TÜRKTRUST''un yayımladığı değerlerle karşılaştırın [get TÜRKTRUST''s root certificates from TÜRKTRUST; upload them under Settings → Time stamp or put them in {0}, and compare the fingerprints with the values TÜRKTRUST publishes].' -f (Join-Path $ProgramDataDir 'kamusm-roots'))
+        Write-Host ('      Kök sertifikalar [roots]: TÜRKTRUST''un kök sertifikalarını TÜRKTRUST''tan alın; Ayarlar → Zaman damgası''ndan yükleyin ya da {0} içine koyun, SHA-256 parmak izlerini TÜRKTRUST''un yayımladığı değerlerle karşılaştırın [get TÜRKTRUST''s root certificates from TÜRKTRUST; upload them under Settings → Time stamping or put them in {0}, and compare the fingerprints with the values TÜRKTRUST publishes].' -f (Join-Path $ProgramDataDir 'kamusm-roots'))
         Write-Host ('      & "{0}" tsa-test   # damgayı bu köklerle doğrular [verifies the stamp with these roots]' -f $CoreExe)
     }
     else {
         Write-Host '   3. Kamu SM test hesabı [test account]:'
         if ($browserAdministration) {
-            Write-Host '      Web arayüzünde Ayarlar → Kamu SM sihirbazı bunu adım adım yapar (Java, Zamane istemcisi, kök sertifikalar, müşteri bilgileri, damga testi); konsoldan da yapılabilir [the Kamu SM wizard under Settings in the web interface does it step by step; or at the console] (docs\AYARLAR.md):'
+            Write-Host '      Web arayüzünde Ayarlar → Zaman damgası sayfasındaki Kamu SM sihirbazı bunu adım adım yapar (Java, Zamane istemcisi, kök sertifikalar, müşteri bilgileri, damga testi); konsoldan da yapılabilir [the Kamu SM wizard under Settings → Time stamping in the web interface does it step by step; or at the console] (docs\AYARLAR.md):'
         }
         Write-Host ('      Önce kök sertifikalar [roots first]: Kamu SM kök sertifikalarını {0} içine koyun, SHA-256 parmak izlerini Kamu SM''nin yayımladığı değerlerle karşılaştırın [compare the fingerprints] (docs\KURULUM.md bölüm 10).' -f (Join-Path $ProgramDataDir 'kamusm-roots'))
         Write-Host '      tsa-test 1 kontör harcar ve damgayı bu köklerle doğrular [tsa-test spends 1 credit, then verifies with these roots].'
@@ -2339,7 +2339,7 @@ function Show-NextSteps {
     # Renew and CrlFetch tasks run by themselves; strict outbound mode needs the lists' addresses.
     Write-Host '      Yeniden damgalama ve iptal listeleri [re-stamping and revocation lists]: Renew görevi (her gün 02:30) zaman damgası sertifikası sona ermeden tsa.renew_before_days gün önce (varsayılan 180) damgaları yeniden damgalar; CrlFetch görevi (her gün 00:30) iptal listelerini (SİL) indirip doğrular. Durumları web arayüzünde Sistem sayfasında ve R20-renewal, R20-cert, R20-crl uyarılarında görünür [the Renew task (daily 02:30) re-stamps tsa.renew_before_days days (default 180) before the time-stamp certificate ends; the CrlFetch task (daily 00:30) downloads and verifies the revocation lists; see the Sistem page and the R20-renewal, R20-cert and R20-crl alerts] (docs\ILK-ADIMLAR.md bölüm 9).'
     Write-Host ('      Damga almadan neyin yeniden damgalanacağını görmek için [to see what is due without a stamp]: & "{0}" renew --dry-run' -f $CoreExe)
-    Write-Host '      Sıkı giden kipte (-StrictOutbound) iptal listelerinin adreslerini tsa.crl_urls ayarına girin (Ayarlar → Zaman damgası): güvenlik duvarı yalnızca bu adreslerin sunucularını açar (TCP 80 ve 443); yoksa CrlFetch listeleri indiremez ve R20-crl açılır [in strict outbound mode enter the lists'' addresses in tsa.crl_urls (Settings → Time stamp): the firewall opens only their hosts (TCP 80 and 443); otherwise CrlFetch cannot download the lists and R20-crl opens].'
+    Write-Host '      Sıkı giden kipte (-StrictOutbound) iptal listelerinin adreslerini tsa.crl_urls ayarına girin (Ayarlar → Zaman damgası): güvenlik duvarı yalnızca bu adreslerin sunucularını açar (TCP 80 ve 443); yoksa CrlFetch listeleri indiremez ve R20-crl açılır [in strict outbound mode enter the lists'' addresses in tsa.crl_urls (Settings → Time stamping): the firewall opens only their hosts (TCP 80 and 443); otherwise CrlFetch cannot download the lists and R20-crl opens].'
     Write-Host '   4. Cihaz ayarları [device setup]: docs\DEVICE-SETUP.md'
     if ($script:SourceCount -eq 0) {
         Write-Host ('      Log kaynağı yok [no log source yet]: güvenlik duvarınızın ve ana yönlendiricinizin (DHCP sunucusu) [[sources]] kayıtlarını {0} dosyasına ekleyin; dosyadaki örnekler yorum satırıdır (docs\DEVICE-SETUP.md bölüm 4) [add the [[sources]] of your firewall and core router (the DHCP server) to this file; its examples are commented out].' -f $ConfigPath)

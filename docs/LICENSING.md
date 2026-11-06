@@ -115,9 +115,9 @@ licence state.
 | `/compliance` | Uyum Durumu: the ten check cards, the status report (PDF), the configuration backup confirmation | 5651 Core |
 | `/legal-status` | Legal-validity status: the banner on every page (every signed-in user) | 5651 Core |
 | `/system` | System page: resource use, disk forecast, database size, services, scheduled tasks, clock | 5651 Core |
+| `/activity` | Canlı Durum: `/activity/wan`, the internet line's speed (the WAN interface counters read over SNMPv3; no person data), is base product; `/activity/devices`, who is sending and receiving data now (per person), is Usage analytics | 5651 Core (`/wan`); Usage analytics (`/devices`) |
 | `/archive-reloads` | Archive reload: days older than the database window asked back from the sealed vault, and their progress | 5651 Core |
 | `/usage` | The data of the Kullanım page, exports, rebuilds | Usage analytics |
-| `/activity` | Canlı Durum: who is sending and receiving data now (`GET /activity/devices`, per person) | Usage analytics |
 | `/reports` | Scheduled reports, runs, preview | Scheduled usage reports |
 | `/imports` | CSV import and its templates | Bulk import (CSV) |
 
@@ -152,6 +152,7 @@ data of a module that is off is not deleted.
 | `reports.run_due` | Scheduled usage reports | skipped |
 | `reports.purge` | — (deletion of report files) | always runs |
 | `system.sample` | 5651 Core | always runs |
+| `snmp.poll` | 5651 Core | always runs |
 | `search.counts_backfill` | 5651 Core | always runs |
 
 On the command line only `arcilogger-worker usage rebuild` is refused while Usage analytics is off

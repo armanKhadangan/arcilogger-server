@@ -60,7 +60,7 @@ EXPECTED_ROUTERS = {
     "/archive-reloads": "archive",
     # The legal-validity status, the banner on every page (Wave 5 contract 2.3.1; C1).
     "/legal-status": "legal-status",
-    # Canlı Durum (Wave 5 contract §6.2 M2; W5-N's /activity/wan joins it).
+    # Canlı Durum (Wave 5 contract §6.2 M2, §6 N6: /activity/devices and /activity/wan).
     "/activity": "activity",
 }
 

@@ -35,7 +35,7 @@ from typing import Annotated, Any, Final, Literal, cast, get_args
 
 from fastapi import APIRouter, Depends, Query, Request, Response, status
 from fastapi import Path as PathParam
-from pydantic import BaseModel, ConfigDict, JsonValue
+from pydantic import BaseModel, ConfigDict, Field, JsonValue
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -235,6 +235,30 @@ class BackupSection(BaseModel):
     min_free_gb: int
 
 
+class SnmpCapacityIo(BaseModel):
+    """A WAN line's capacity in whole Mbit/s (``capacity_mbps``, Wave 5 §6 N1)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    down: int
+    up: int
+
+
+class SnmpOut(BaseModel):
+    """``[sources.snmp]`` of a source (Wave 5 §6 N1); the two keys only as set/unset."""
+
+    enabled: bool
+    port: int
+    user: str
+    auth: Literal["sha1", "sha256", "sha512"]
+    priv: Literal["aes128", "aes256"]
+    interfaces: list[str]
+    capacity_mbps: dict[str, SnmpCapacityIo]
+    interval_seconds: int
+    auth_key: Literal["set", "unset"]
+    priv_key: Literal["set", "unset"]
+
+
 class SourceOut(BaseModel):
     name: str
     type: Literal["fortigate", "mikrotik", "generic"]
@@ -244,6 +268,8 @@ class SourceOut(BaseModel):
     expected: bool
     transport: Literal["any", "udp", "tcp"]
     enabled: bool
+    #: The internet line's speed over SNMPv3 (W5-N); ``None``: no SNMP table.
+    snmp: SnmpOut | None
     #: The syslog rule: ``open`` (lets it in), ``closed``, ``pending`` (ApplySystem has not
     #: caught up yet), ``not_managed`` (ApplySystem keeps no firewall rule: ``-SkipFirewall``,
     #: or browser administration off).
@@ -446,7 +472,9 @@ def _canonical(address: str) -> str:
     return str(ipaddress.ip_address(address))
 
 
-def _sources(channel: Channel, db: Session, config: Config) -> list[SourceOut]:
+def _sources(
+    channel: Channel, db: Session, config: Config, stored: frozenset[str]
+) -> list[SourceOut]:
     """The configured sources with their syslog rule as ApplySystem last reported it. Before its
     first report the firewall counts as managed (an installation manages it unless
     ``-SkipFirewall``, which that report then says): an enabled source is ``pending``. With
@@ -466,11 +494,15 @@ def _sources(channel: Channel, db: Session, config: Config) -> list[SourceOut]:
             firewall = "open" if present else "pending"
         else:
             firewall = "pending" if present else "closed"
-        found.append(
-            SourceOut(
-                **source.model_dump(mode="json"), firewall=firewall, last_seen=seen.get(source.name)
-            )
-        )
+        fields = source.model_dump(mode="json")
+        if source.snmp is not None:
+            auth, priv = rules.snmp_keys(source.name)
+            fields["snmp"] = {
+                **fields["snmp"],
+                "auth_key": rules.secret_state(auth, stored),
+                "priv_key": rules.secret_state(priv, stored),
+            }
+        found.append(SourceOut(**fields, firewall=firewall, last_seen=seen.get(source.name)))
     return found
 
 
@@ -569,7 +601,7 @@ def get_config(db: DbSession, user: SettingsDep, channel: ChannelDep) -> AdminCo
             keep_monthly=config.backup.keep_monthly,
             min_free_gb=config.backup.min_free_gb,
         ),
-        sources=_sources(channel, db, config),
+        sources=_sources(channel, db, config, files.stored),
     )
     return AdminConfig(
         config_sha256=files.sha256 or "",
@@ -1208,6 +1240,22 @@ async def upload(
 # -- log sources ----------------------------------------------------------------------------------
 
 
+class SnmpIn(BaseModel):
+    """``[sources.snmp]`` as the browser edits it (Wave 5 §6 N1; the rules check the values, the
+    keys come separately and write-only)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = False
+    port: int = 161
+    user: str = ""
+    auth: Literal["sha1", "sha256", "sha512"] = "sha256"
+    priv: Literal["aes128", "aes256"] = "aes128"
+    interfaces: list[str] = Field(default_factory=list)
+    capacity_mbps: dict[str, SnmpCapacityIo] = Field(default_factory=dict)
+    interval_seconds: int = 15
+
+
 class SourceIn(BaseModel):
     """A ``[[sources]]`` table as the browser edits it (the rules check the values)."""
 
@@ -1221,13 +1269,21 @@ class SourceIn(BaseModel):
     expected: bool = True
     transport: Literal["any", "udp", "tcp"] = "any"
     enabled: bool = True
+    snmp: SnmpIn | None = None
 
 
 class SourceBody(Body):
     source: SourceIn
+    #: The SNMPv3 keys (W5-N, 8 to 64 characters): write-only, left out to keep the stored ones.
+    snmp_auth_key: str | None = None
+    snmp_priv_key: str | None = None
 
     def form(self) -> dict[str, Any]:
-        return {"source": self.source.model_dump(mode="json")}
+        form: dict[str, Any] = {"source": self.source.model_dump(mode="json")}
+        for key in ("snmp_auth_key", "snmp_priv_key"):
+            if getattr(self, key) is not None:
+                form[key] = getattr(self, key)
+        return form
 
 
 class SourceCheckBody(SourceBody):

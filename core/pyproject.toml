@@ -16,6 +16,12 @@ dependencies = [
   "pydantic>=2.14.1",
   # AES-256 (WinZip AES) password-protected evidence packages (MIT; uses pycryptodomex, BSD).
   "pyzipper>=0.4.0",
+  # The internet line's speed (W5-N, arcilogger_core.snmp): read-only SNMPv3 (authPriv) GETs and
+  # ifName walks of the WAN interface counters, for the worker's poller and the admin probe.
+  # pysnmp and its one dependency pyasn1 are BSD-2-Clause. Pinned: a new release comes with a
+  # deliberate upgrade. Imported only inside arcilogger_core.snmp (collector and ingest never).
+  "pysnmp==7.1.30",
+  "pyasn1==0.6.5",
 ]
 
 [project.scripts]

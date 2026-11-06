@@ -136,6 +136,7 @@ from arcilogger_worker.evidence_jobs import import_job_events, purge_evidence
 from arcilogger_worker.licensing import StatusCache, job_license_check, module_gate
 from arcilogger_worker.reports.runner import purge_reports, resolve_while_unlicensed, run_due
 from arcilogger_worker.search_jobs import backfill_counts
+from arcilogger_worker.snmp.job import SNMP_POLL_EVERY, job_snmp_idle, job_snmp_poll
 from arcilogger_worker.system_jobs import job_system_sample
 from arcilogger_worker.usage import jobs as usage_jobs
 
@@ -191,10 +192,15 @@ class Job:
     daily_after: time | None = None
     #: Paid module the job belongs to (licensing contract 1.4): skipped while it is off.
     module: str | None = None
+    #: Interval job: ``True`` when a due run has nothing to do. It then neither runs nor writes
+    #: a ``job_runs`` row, and is due again ``every`` later.
+    idle: Callable[[JobContext], bool] | None = None
 
     def __post_init__(self) -> None:
         if (self.every is None) == (self.daily_after is None):
             raise ValueError(f"job {self.name}: give exactly one of every / daily_after")
+        if self.idle is not None and self.every is None:
+            raise ValueError(f"job {self.name}: only an interval job can be idle")
 
     @property
     def daily_time(self) -> time:
@@ -444,6 +450,7 @@ def default_jobs(interval_seconds: int) -> tuple[Job, ...]:
         # The disk forecast of Sistem and the Panel: one sample of the drives a day (Wave 4
         # contract 2.5.2).
         Job("system.sample", job_system_sample, daily_after=time(0, 30)),
+        Job("snmp.poll", job_snmp_poll, every=SNMP_POLL_EVERY, idle=job_snmp_idle),
         # Last: it may take a minute, and nothing waits for it (statistics count directly until
         # a file is counted).
         Job("search.counts_backfill", job_search_counts_backfill, every=SEARCH_COUNTS_EVERY),
@@ -469,6 +476,12 @@ class JobState:
     retry_at: datetime | None = None
     #: Site day of the last ``skipped`` row written by the licence gate (one per day).
     skip_day: date | None = None
+    #: The last time the job was due and :attr:`Job.idle` (no run, no row).
+    idle_at: datetime | None = None
+
+    def since(self) -> datetime | None:
+        """The start of the current interval: the last run or idle check."""
+        return max((at for at in (self.last_started, self.idle_at) if at), default=None)
 
     def as_json(self) -> dict[str, Any]:
         def iso(value: datetime | None) -> str | None:
@@ -576,14 +589,16 @@ class Worker:
         if state.retry_at is not None and now < state.retry_at:
             return False
         if job.every is not None:
-            return state.last_started is None or now >= state.last_started + job.every
+            since = state.since()
+            return since is None or now >= since + job.every
         local = to_site(now)
         return state.done_day != local.date() and local.time() >= job.daily_time
 
     def next_due(self, job: Job, now: datetime) -> datetime:
         state = self.states[job.name]
         if job.every is not None:
-            due = now if state.last_started is None else state.last_started + job.every
+            since = state.since()
+            due = now if since is None else since + job.every
         else:
             local = to_site(now)
             today = datetime.combine(local.date(), job.daily_time, tzinfo=SITE_TZ)
@@ -625,6 +640,9 @@ class Worker:
             now = self.clock()
             if not self.due(job, now):
                 continue
+            if self.idle(job, now):
+                self.states[job.name].idle_at = now
+                continue
             gate = self.gate(job, now) if job.module is not None else None
             if gate is not None:
                 done.append((job.name, self.skip_job(job, now, gate)))
@@ -634,6 +652,16 @@ class Worker:
         for job in self.jobs:
             self.states[job.name].next_due = self.next_due(job, now)
         return done
+
+    def idle(self, job: Job, now: datetime) -> bool:
+        """Whether a due ``job`` has nothing to do (:attr:`Job.idle`); a failing check runs it."""
+        if job.idle is None:
+            return False
+        try:
+            return job.idle(self.context(now))
+        except Exception:  # the run then records what is wrong
+            log.exception("job %s: the idle check failed", job.name)
+            return False
 
     def context(self, now: datetime) -> JobContext:
         return JobContext(

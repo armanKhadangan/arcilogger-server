@@ -24,7 +24,7 @@ from arcilogger_core.admin.tomledit import (
     source_table,
     toml_string,
 )
-from arcilogger_core.config import SourceConfig, parse_config
+from arcilogger_core.config import SnmpCapacity, SnmpConfig, SourceConfig, parse_config
 
 EXAMPLE = Path(__file__).parents[2] / "deploy" / "windows" / "arcilogger.example.toml"
 WHERE = Path("C:/ProgramData/ARCILOGGER/arcilogger.toml")
@@ -229,6 +229,62 @@ def test_the_block_is_replaced_in_place_and_can_be_emptied() -> None:
     assert "sources" not in tomllib.loads(empty)
     again = edit(empty.encode(), [SetSources((SWITCH,))], path=WHERE)
     assert again == first
+
+
+def test_a_source_with_snmp_gets_its_sub_tables_in_the_block() -> None:
+    """``[sources.snmp]`` (Wave 5 §6 N1, W5-N): a sub-table after its ``[[sources]]`` table,
+    defaults left out, each capacity a table of its own; read back the same and edited again."""
+    snmp = SnmpConfig(
+        enabled=True,
+        user="arcilogger",
+        priv="aes256",
+        interfaces=("wan1", "port1/WAN"),
+        capacity_mbps={"port1/WAN": SnmpCapacity(down=100, up=20)},
+    )
+    firewall = SourceConfig(name="fw-1", type="fortigate", address="172.20.0.1", snmp=snmp)
+    new = edit(example(), [SetSources((firewall, SWITCH))], path=WHERE).decode()
+    block = new[new.index(MANAGED_BEGIN) : new.index(MANAGED_END) + len(MANAGED_END)]
+    assert block == "\n".join(
+        [
+            MANAGED_BEGIN,
+            "[[sources]]",
+            'name = "fw-1"',
+            'type = "fortigate"',
+            'address = "172.20.0.1"',
+            "[sources.snmp]",
+            "enabled = true",
+            'user = "arcilogger"',
+            'priv = "aes256"',
+            'interfaces = ["wan1", "port1/WAN"]',
+            '[sources.snmp.capacity_mbps."port1/WAN"]',
+            "down = 100",
+            "up = 20",
+            "",
+            "[[sources]]",
+            'name = "switch-2"',
+            'type = "mikrotik"',
+            'address = "172.20.10.22"',
+            MANAGED_END,
+        ]
+    )
+    assert parse_config(new.encode(), WHERE).sources == (firewall, SWITCH)
+    assert _installer_sources(new) == (2, ["172.20.0.1", "172.20.10.22"])
+    off = firewall.model_copy(update={"snmp": snmp.model_copy(update={"enabled": False})})
+    again = edit(new.encode(), [SetSources((off,))], path=WHERE)
+    assert parse_config(again, WHERE).sources == (off,)
+    assert '[sources.snmp]\nuser = "arcilogger"' in again.decode()  # enabled = false: a default
+    plain = edit(again, [SetSources((SWITCH,))], path=WHERE).decode()
+    assert "[sources.snmp" not in plain
+
+
+def test_a_hand_written_snmp_table_outside_the_block_is_refused() -> None:
+    old = (
+        b'site_name = "x"\n'
+        b'[[sources]]\nname = "fw-1"\ntype = "fortigate"\naddress = "172.20.0.1"\n'
+        b"[sources.snmp]\nenabled = false\n"
+    )
+    with pytest.raises(TomlEditError, match="sub-table"):
+        edit(old, [SetSources((SWITCH,))], path=WHERE)
 
 
 def test_existing_source_tables_become_the_block() -> None:

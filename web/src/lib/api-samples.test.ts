@@ -5,7 +5,7 @@
  * every sample is checked field by field against the interfaces of `api-types.ts`,
  * `lookup-types.ts`, `seal-types.ts`, `settings-types.ts`, `search-types.ts`, `live-types.ts`,
  * `sources-types.ts`, `compliance-types.ts`, `system-types.ts`, `system-health-types.ts`,
- * `legal-status-types.ts` and `archive-reload-types.ts` — required fields present, no unknown
+ * `legal-status-types.ts`, `archive-reload-types.ts` and `activity-types.ts` — required fields present, no unknown
  * fields, value types and string literal unions as declared.
  * The untyped parts of the OpenAPI document (`outcome`, `query`, the seal day detail, the
  * `result` of an administration request, the events of a live stream) are covered only here.
@@ -42,6 +42,7 @@ for (const file of [
   'legal-status-types.ts',
   'activity-types.ts',
   'archive-reload-types.ts',
+  'activity-types.ts',
 ]) {
   const path = join(LIB, file);
   const source = ts.createSourceFile(
@@ -728,6 +729,14 @@ const RULES: Record<string, Record<string, Rule>> = {
         'LegalStatus',
       ]),
     ),
+    errors,
+  },
+  // The internet line's speed (Wave 5 contract §6 N6): the last hour, the last day as minute
+  // averages, no source with SNMP on.
+  'activity-wan': {
+    hour: 'WanRates',
+    day: 'WanRates',
+    empty: 'WanRates',
     errors,
   },
   // Arşivden yeniden yükleme (Wave 5 contract §5): the lookup's and the search's 409 with what a

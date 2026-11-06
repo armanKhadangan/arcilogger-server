@@ -196,6 +196,65 @@ def test_outbound_rules_are_planned_in_strict_mode_only() -> None:
     assert planned.problems == ()
 
 
+SNMP_SOURCES = """\
+[[sources]]
+name = "fw-1"
+type = "fortigate"
+address = "172.20.0.1"
+[sources.snmp]
+enabled = true
+user = "arcilogger"
+interfaces = ["wan1"]
+
+[[sources]]
+name = "fw-2"
+type = "fortigate"
+address = "172.20.0.2"
+[sources.snmp]
+enabled = true
+port = 1161
+user = "arcilogger"
+interfaces = ["wan1", "wan2"]
+
+[[sources]]
+name = "fw-off"
+type = "fortigate"
+address = "172.20.0.3"
+[sources.snmp]
+enabled = false
+user = "arcilogger"
+interfaces = ["wan1"]
+
+[[sources]]
+name = "fw-disabled"
+type = "fortigate"
+address = "172.20.0.4"
+enabled = false
+[sources.snmp]
+enabled = true
+user = "arcilogger"
+interfaces = ["wan1"]
+"""
+
+
+def test_snmp_sources_get_a_udp_rule_each_in_strict_mode() -> None:
+    """Wave 5 §6 N3: ``ARCILOGGER SNMP <source>`` to the source's own address and SNMP port,
+    only for an enabled single-address source with SNMP on, only in strict outbound mode."""
+    current = config_of("172.20.10.1", extra=SNMP_SOURCES)
+    assert plan(inputs(current, firewall_managed=True)).firewall.outbound == ()
+    planned = plan(inputs(current, firewall_managed=True, strict_outbound=True))
+    snmp = [
+        (rule.rule, rule.host, rule.port)
+        for rule in planned.firewall.outbound
+        if rule.rule.startswith("ARCILOGGER SNMP ")
+    ]
+    assert snmp == [
+        ("ARCILOGGER SNMP fw-1", "172.20.0.1", 161),
+        ("ARCILOGGER SNMP fw-2", "172.20.0.2", 1161),
+    ]
+    assert planned.problems == ()
+
+
 TURKTRUST = """\
 [tsa]
 provider = "turktrust"

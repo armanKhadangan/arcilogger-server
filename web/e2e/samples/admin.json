@@ -12,10 +12,10 @@
       "reload.worker"
     ],
     "guarded": false,
-    "request_id": "50de4c5128527ab6ef3ac4eac73a3a0a",
-    "short_id": "50de4c51",
+    "request_id": "4d316114c8394a4b08469c207b15a308",
+    "short_id": "4d316114",
     "state": "queued",
-    "status_url": "/api/v1/admin/requests/50de4c5128527ab6ef3ac4eac73a3a0a",
+    "status_url": "/api/v1/admin/requests/4d316114c8394a4b08469c207b15a308",
     "warnings": []
   },
   "check_clock": {
@@ -55,14 +55,14 @@
     "warnings": []
   },
   "config": {
-    "config_sha256": "7dd42276b5d850357b5907a7d8c374d0c9f81b37214c549e69757137fff17a92",
+    "config_sha256": "b5ee33ae97a57aa50b5c41223ece41c46066fdf55f67ecea995113d354fbbf73",
     "etags": {
       "backup": "backup:0ab481e774ecb6c0b1e7ae04e00d26743f21d40d423422ee36243d3a52ec6dfb",
       "general": "general:28599e577c2249ad859f52e667b4f79fbf9072180d7516a943b1ec16a32dc832",
-      "replica": "replica:41eab72fae20e9faf8c13ca404a09ccccb3383237ed1a4600803ed0ca95ece4d",
+      "replica": "replica:72f382c6d57b8dfb552e250d9a0ea456eb5431a6e3357c6e9e6b9624a4e6f605",
       "retention": "retention:9e0f52160a0b0bf3741420822b9fc29e74c1d36b862eba7f46bc8b48fc411d9a",
       "smtp": "smtp:7cb0ab6789535c7632dc21d2460a8c1f9026de68d17e7089b974a89c6cc264f7",
-      "sources": "sources:1b04f72958855af408acf2b790098dd632f9e8b8edc840c5a095ce5511c6c267",
+      "sources": "sources:60fe87c90c5bf986b95db1b41111c4d1308f1add9cac799d056c9b1e7f4235c9",
       "tsa": "tsa:c9eb582079e4e2c5bbf2e8578afb62117508754f9d2c9e1e92eb89f566c088c9"
     },
     "locked": [
@@ -164,6 +164,10 @@
       },
       {
         "path": "tsa.require_critical_eku",
+        "reason": "expert"
+      },
+      {
+        "path": "retention.batch_days",
         "reason": "expert"
       },
       {
@@ -351,8 +355,9 @@
           "expected": true,
           "firewall": "open",
           "heartbeat_minutes": 15,
-          "last_seen": "2026-10-13T04:00:04.449614Z",
+          "last_seen": "2026-10-13T04:00:05.369253Z",
           "name": "fortigate",
+          "snmp": null,
           "transport": "any",
           "type": "fortigate"
         },
@@ -362,8 +367,9 @@
           "expected": true,
           "firewall": "open",
           "heartbeat_minutes": 15,
-          "last_seen": "2026-10-13T03:58:16.449614Z",
+          "last_seen": "2026-10-13T03:58:17.369253Z",
           "name": "core-r1",
+          "snmp": null,
           "transport": "any",
           "type": "mikrotik"
         }
@@ -823,14 +829,14 @@
         "error": {
           "code": "tsa_test_limit",
           "details": {
-            "retry_after": 61176
+            "retry_after": 61175
           },
           "message_en": "Today's stamp test limit has been reached.",
           "message_tr": "Bugünkü damga testi sınırına ulaşıldı."
         }
       },
       "headers": {
-        "retry-after": "61176"
+        "retry-after": "61175"
       },
       "status": 429
     },
@@ -888,18 +894,18 @@
       "effective_at": null,
       "effects": [],
       "guarded": false,
-      "request_id": "1eed6ae9e126fc467f4360c27a19f64a",
-      "short_id": "1eed6ae9",
+      "request_id": "1c8eb07eb78fe4c78e5bacc64ffc9386",
+      "short_id": "1c8eb07e",
       "state": "queued",
-      "status_url": "/api/v1/admin/requests/1eed6ae9e126fc467f4360c27a19f64a",
+      "status_url": "/api/v1/admin/requests/1c8eb07eb78fe4c78e5bacc64ffc9386",
       "warnings": []
     },
     "cancel_held_done": {
       "changes": {},
-      "created_at": "2026-10-13T04:00:28.566714Z",
+      "created_at": "2026-10-13T04:00:29.560566Z",
       "effective_at": null,
       "error": null,
-      "id": "1eed6ae9e126fc467f4360c27a19f64a",
+      "id": "1c8eb07eb78fe4c78e5bacc64ffc9386",
       "kind": "config.cancel",
       "label_en": "Done",
       "label_tr": "Tamamlandı",
@@ -909,11 +915,11 @@
       "result": null,
       "rolled_back": false,
       "section": null,
-      "short_id": "1eed6ae9",
+      "short_id": "1c8eb07e",
       "state": "succeeded",
       "steps": [
         {
-          "at": "2026-10-13T07:00:28.614277+03:00",
+          "at": "2026-10-13T07:00:29.609222+03:00",
           "code": null,
           "message_en": null,
           "message_tr": null,
@@ -921,7 +927,7 @@
           "step": "received"
         },
         {
-          "at": "2026-10-13T07:00:28.616088+03:00",
+          "at": "2026-10-13T07:00:29.611178+03:00",
           "code": null,
           "message_en": null,
           "message_tr": null,
@@ -930,7 +936,7 @@
         }
       ],
       "terminal": true,
-      "updated_at": "2026-10-13T07:00:28.654277+03:00",
+      "updated_at": "2026-10-13T07:00:29.645059+03:00",
       "version": null,
       "warnings": []
     },
@@ -946,10 +952,10 @@
         "task.next_run:Backup"
       ],
       "guarded": false,
-      "request_id": "109936570c6e7a1b29745fbb5ebc31bf",
-      "short_id": "10993657",
+      "request_id": "4dc23a4c8b9fdb9b5c2abf9e1f26d98a",
+      "short_id": "4dc23a4c",
       "state": "cancelled",
-      "status_url": "/api/v1/admin/requests/109936570c6e7a1b29745fbb5ebc31bf",
+      "status_url": "/api/v1/admin/requests/4dc23a4c8b9fdb9b5c2abf9e1f26d98a",
       "warnings": []
     },
     "cancelled_queued": {
@@ -959,10 +965,10 @@
           "old": 8
         }
       },
-      "created_at": "2026-10-13T04:00:28.179977Z",
+      "created_at": "2026-10-13T04:00:29.168980Z",
       "effective_at": null,
       "error": null,
-      "id": "109936570c6e7a1b29745fbb5ebc31bf",
+      "id": "4dc23a4c8b9fdb9b5c2abf9e1f26d98a",
       "kind": "config.apply",
       "label_en": "Cancelled",
       "label_tr": "İptal edildi",
@@ -972,11 +978,11 @@
       "result": null,
       "rolled_back": false,
       "section": "backup",
-      "short_id": "10993657",
+      "short_id": "4dc23a4c",
       "state": "cancelled",
       "steps": [],
       "terminal": true,
-      "updated_at": "2026-10-13T04:00:28.244994Z",
+      "updated_at": "2026-10-13T04:00:29.245136Z",
       "version": null,
       "warnings": []
     },
@@ -987,16 +993,16 @@
           "old": true
         }
       },
-      "effective_at": "2026-10-13T19:00:28.423256+03:00",
+      "effective_at": "2026-10-13T19:00:29.413625+03:00",
       "effects": [
         "reload.worker",
         "task.next_run:Replica"
       ],
       "guarded": true,
-      "request_id": "ff71fb410b20746acc0079b901734145",
-      "short_id": "ff71fb41",
+      "request_id": "20d40f6f2af36e8447b2342421f2ae5f",
+      "short_id": "20d40f6f",
       "state": "queued",
-      "status_url": "/api/v1/admin/requests/ff71fb410b20746acc0079b901734145",
+      "status_url": "/api/v1/admin/requests/20d40f6f2af36e8447b2342421f2ae5f",
       "warnings": []
     },
     "held_cancelled": {
@@ -1006,10 +1012,10 @@
           "old": true
         }
       },
-      "created_at": "2026-10-13T04:00:28.423256Z",
+      "created_at": "2026-10-13T04:00:29.413625Z",
       "effective_at": null,
       "error": null,
-      "id": "ff71fb410b20746acc0079b901734145",
+      "id": "20d40f6f2af36e8447b2342421f2ae5f",
       "kind": "config.apply",
       "label_en": "Cancelled",
       "label_tr": "İptal edildi",
@@ -1019,11 +1025,11 @@
       "result": null,
       "rolled_back": false,
       "section": "replica",
-      "short_id": "ff71fb41",
+      "short_id": "20d40f6f",
       "state": "cancelled",
       "steps": [
         {
-          "at": "2026-10-13T07:00:28.478122+03:00",
+          "at": "2026-10-13T07:00:29.466604+03:00",
           "code": null,
           "message_en": null,
           "message_tr": null,
@@ -1031,7 +1037,7 @@
           "step": "received"
         },
         {
-          "at": "2026-10-13T07:00:28.483944+03:00",
+          "at": "2026-10-13T07:00:29.472246+03:00",
           "code": null,
           "message_en": null,
           "message_tr": null,
@@ -1039,7 +1045,7 @@
           "step": "validate"
         },
         {
-          "at": "2026-10-13T07:00:28.614931+03:00",
+          "at": "2026-10-13T07:00:29.609904+03:00",
           "code": null,
           "message_en": null,
           "message_tr": null,
@@ -1048,7 +1054,7 @@
         }
       ],
       "terminal": true,
-      "updated_at": "2026-10-13T07:00:28.688503+03:00",
+      "updated_at": "2026-10-13T07:00:29.680294+03:00",
       "version": null,
       "warnings": []
     },
@@ -1059,10 +1065,10 @@
           "old": true
         }
       },
-      "created_at": "2026-10-13T04:00:28.423256Z",
-      "effective_at": "2026-10-13T19:00:28.484093+03:00",
+      "created_at": "2026-10-13T04:00:29.413625Z",
+      "effective_at": "2026-10-13T19:00:29.472378+03:00",
       "error": null,
-      "id": "ff71fb410b20746acc0079b901734145",
+      "id": "20d40f6f2af36e8447b2342421f2ae5f",
       "kind": "config.apply",
       "label_en": "Held",
       "label_tr": "Bekletiliyor",
@@ -1072,11 +1078,11 @@
       "result": null,
       "rolled_back": false,
       "section": "replica",
-      "short_id": "ff71fb41",
+      "short_id": "20d40f6f",
       "state": "pending",
       "steps": [
         {
-          "at": "2026-10-13T07:00:28.478122+03:00",
+          "at": "2026-10-13T07:00:29.466604+03:00",
           "code": null,
           "message_en": null,
           "message_tr": null,
@@ -1084,7 +1090,7 @@
           "step": "received"
         },
         {
-          "at": "2026-10-13T07:00:28.483944+03:00",
+          "at": "2026-10-13T07:00:29.472246+03:00",
           "code": null,
           "message_en": null,
           "message_tr": null,
@@ -1092,7 +1098,7 @@
           "step": "validate"
         },
         {
-          "at": "2026-10-13T07:00:28.485311+03:00",
+          "at": "2026-10-13T07:00:29.473541+03:00",
           "code": null,
           "message_en": null,
           "message_tr": null,
@@ -1101,7 +1107,7 @@
         }
       ],
       "terminal": false,
-      "updated_at": "2026-10-13T07:00:28.521013+03:00",
+      "updated_at": "2026-10-13T07:00:29.510109+03:00",
       "version": null,
       "warnings": [
         {
@@ -1115,10 +1121,10 @@
       "items": [
         {
           "changes": {},
-          "created_at": "2026-10-13T04:00:28.566714Z",
+          "created_at": "2026-10-13T04:00:29.560566Z",
           "effective_at": null,
           "error": null,
-          "id": "1eed6ae9e126fc467f4360c27a19f64a",
+          "id": "1c8eb07eb78fe4c78e5bacc64ffc9386",
           "kind": "config.cancel",
           "label_en": "Done",
           "label_tr": "Tamamlandı",
@@ -1128,11 +1134,11 @@
           "result": null,
           "rolled_back": false,
           "section": null,
-          "short_id": "1eed6ae9",
+          "short_id": "1c8eb07e",
           "state": "succeeded",
           "steps": [
             {
-              "at": "2026-10-13T07:00:28.614277+03:00",
+              "at": "2026-10-13T07:00:29.609222+03:00",
               "code": null,
               "message_en": null,
               "message_tr": null,
@@ -1140,7 +1146,7 @@
               "step": "received"
             },
             {
-              "at": "2026-10-13T07:00:28.616088+03:00",
+              "at": "2026-10-13T07:00:29.611178+03:00",
               "code": null,
               "message_en": null,
               "message_tr": null,
@@ -1149,7 +1155,7 @@
             }
           ],
           "terminal": true,
-          "updated_at": "2026-10-13T04:00:28.654277Z",
+          "updated_at": "2026-10-13T04:00:29.645059Z",
           "version": null,
           "warnings": []
         },
@@ -1160,10 +1166,10 @@
               "old": true
             }
           },
-          "created_at": "2026-10-13T04:00:28.423256Z",
+          "created_at": "2026-10-13T04:00:29.413625Z",
           "effective_at": null,
           "error": null,
-          "id": "ff71fb410b20746acc0079b901734145",
+          "id": "20d40f6f2af36e8447b2342421f2ae5f",
           "kind": "config.apply",
           "label_en": "Cancelled",
           "label_tr": "İptal edildi",
@@ -1173,11 +1179,11 @@
           "result": null,
           "rolled_back": false,
           "section": "replica",
-          "short_id": "ff71fb41",
+          "short_id": "20d40f6f",
           "state": "cancelled",
           "steps": [
             {
-              "at": "2026-10-13T07:00:28.478122+03:00",
+              "at": "2026-10-13T07:00:29.466604+03:00",
               "code": null,
               "message_en": null,
               "message_tr": null,
@@ -1185,7 +1191,7 @@
               "step": "received"
             },
             {
-              "at": "2026-10-13T07:00:28.483944+03:00",
+              "at": "2026-10-13T07:00:29.472246+03:00",
               "code": null,
               "message_en": null,
               "message_tr": null,
@@ -1193,7 +1199,7 @@
               "step": "validate"
             },
             {
-              "at": "2026-10-13T07:00:28.614931+03:00",
+              "at": "2026-10-13T07:00:29.609904+03:00",
               "code": null,
               "message_en": null,
               "message_tr": null,
@@ -1202,7 +1208,7 @@
             }
           ],
           "terminal": true,
-          "updated_at": "2026-10-13T04:00:28.688503Z",
+          "updated_at": "2026-10-13T04:00:29.680294Z",
           "version": null,
           "warnings": []
         },
@@ -1213,10 +1219,10 @@
               "old": 8
             }
           },
-          "created_at": "2026-10-13T04:00:28.179977Z",
+          "created_at": "2026-10-13T04:00:29.168980Z",
           "effective_at": null,
           "error": null,
-          "id": "109936570c6e7a1b29745fbb5ebc31bf",
+          "id": "4dc23a4c8b9fdb9b5c2abf9e1f26d98a",
           "kind": "config.apply",
           "label_en": "Cancelled",
           "label_tr": "İptal edildi",
@@ -1226,11 +1232,11 @@
           "result": null,
           "rolled_back": false,
           "section": "backup",
-          "short_id": "10993657",
+          "short_id": "4dc23a4c",
           "state": "cancelled",
           "steps": [],
           "terminal": true,
-          "updated_at": "2026-10-13T04:00:28.244994Z",
+          "updated_at": "2026-10-13T04:00:29.245136Z",
           "version": null,
           "warnings": []
         },
@@ -1245,10 +1251,10 @@
               "old": 20
             }
           },
-          "created_at": "2026-10-13T04:00:27.992517Z",
+          "created_at": "2026-10-13T04:00:28.977121Z",
           "effective_at": null,
           "error": null,
-          "id": "f22a3547b36f07362f152bb784d23292",
+          "id": "33f5ffc2e2ad5b972345c91a858a976b",
           "kind": "config.revert",
           "label_en": "Applied",
           "label_tr": "Uygulandı",
@@ -1258,11 +1264,11 @@
           "result": null,
           "rolled_back": false,
           "section": "backup",
-          "short_id": "f22a3547",
+          "short_id": "33f5ffc2",
           "state": "active",
           "steps": [
             {
-              "at": "2026-10-13T07:00:28.046342+03:00",
+              "at": "2026-10-13T07:00:29.029467+03:00",
               "code": null,
               "message_en": null,
               "message_tr": null,
@@ -1270,7 +1276,7 @@
               "step": "received"
             },
             {
-              "at": "2026-10-13T07:00:28.051654+03:00",
+              "at": "2026-10-13T07:00:29.035073+03:00",
               "code": null,
               "message_en": null,
               "message_tr": null,
@@ -1278,7 +1284,7 @@
               "step": "validate"
             },
             {
-              "at": "2026-10-13T07:00:28.051695+03:00",
+              "at": "2026-10-13T07:00:29.035113+03:00",
               "code": null,
               "message_en": null,
               "message_tr": null,
@@ -1286,7 +1292,7 @@
               "step": "hold"
             },
             {
-              "at": "2026-10-13T07:00:28.059903+03:00",
+              "at": "2026-10-13T07:00:29.047584+03:00",
               "code": null,
               "message_en": null,
               "message_tr": null,
@@ -1294,7 +1300,7 @@
               "step": "backup"
             },
             {
-              "at": "2026-10-13T07:00:28.059922+03:00",
+              "at": "2026-10-13T07:00:29.047606+03:00",
               "code": null,
               "message_en": null,
               "message_tr": null,
@@ -1302,7 +1308,7 @@
               "step": "write_secrets"
             },
             {
-              "at": "2026-10-13T07:00:28.059928+03:00",
+              "at": "2026-10-13T07:00:29.047613+03:00",
               "code": null,
               "message_en": null,
               "message_tr": null,
@@ -1310,7 +1316,7 @@
               "step": "write_config"
             },
             {
-              "at": "2026-10-13T07:00:28.059933+03:00",
+              "at": "2026-10-13T07:00:29.047617+03:00",
               "code": null,
               "message_en": null,
               "message_tr": null,
@@ -1318,7 +1324,7 @@
               "step": "install_files"
             },
             {
-              "at": "2026-10-13T07:00:28.059937+03:00",
+              "at": "2026-10-13T07:00:29.047621+03:00",
               "code": null,
               "message_en": null,
               "message_tr": null,
@@ -1326,7 +1332,7 @@
               "step": "verify"
             },
             {
-              "at": "2026-10-13T07:00:28.060477+03:00",
+              "at": "2026-10-13T07:00:29.048285+03:00",
               "code": null,
               "message_en": null,
               "message_tr": null,
@@ -1335,20 +1341,20 @@
             }
           ],
           "terminal": true,
-          "updated_at": "2026-10-13T04:00:28.103696Z",
+          "updated_at": "2026-10-13T04:00:29.091071Z",
           "version": {
-            "from": "29a5060ba977b0fce72b9a065d7bf6f7ddd89db3514a139546b2941f3334b3f1",
+            "from": "5fcc71c8582fd2dcd59405a5043df5db2be636071c4ff661212df5397f84f85d",
             "number": 11,
-            "to": "01b301ebd9ba40f6d7db4a26b41831b5a3bd9f0235c868088020f32e976598c4"
+            "to": "5d20fbbea50075809589fcdb716ab9b82ce10d498b9273c05f6f2ab0ccc628a3"
           },
           "warnings": []
         },
         {
           "changes": {},
-          "created_at": "2026-10-13T04:00:27.504203Z",
+          "created_at": "2026-10-13T04:00:28.486156Z",
           "effective_at": null,
           "error": null,
-          "id": "48a9377f21e07542687c29ca8c0f2520",
+          "id": "41ba30ff022c29b2fddc47136277ab01",
           "kind": "worker.lease_rebuild",
           "label_en": "Done",
           "label_tr": "Tamamlandı",
@@ -1362,20 +1368,20 @@
           },
           "rolled_back": false,
           "section": null,
-          "short_id": "48a9377f",
+          "short_id": "41ba30ff",
           "state": "succeeded",
           "steps": [],
           "terminal": true,
-          "updated_at": "2026-11-05T20:44:59.191743Z",
+          "updated_at": "2026-11-06T06:01:17.047313Z",
           "version": null,
           "warnings": []
         },
         {
           "changes": {},
-          "created_at": "2026-10-13T04:00:27.307192Z",
+          "created_at": "2026-10-13T04:00:28.286433Z",
           "effective_at": null,
           "error": null,
-          "id": "dfcb352e8badfc1764f71fe9ccb6849e",
+          "id": "ff481c0f007447c6e3b3bea134caac42",
           "kind": "action.replica_test",
           "label_en": "Done",
           "label_tr": "Tamamlandı",
@@ -1388,11 +1394,11 @@
           },
           "rolled_back": false,
           "section": null,
-          "short_id": "dfcb352e",
+          "short_id": "ff481c0f",
           "state": "succeeded",
           "steps": [
             {
-              "at": "2026-10-13T07:00:27.357366+03:00",
+              "at": "2026-10-13T07:00:28.338035+03:00",
               "code": null,
               "message_en": null,
               "message_tr": null,
@@ -1400,7 +1406,7 @@
               "step": "received"
             },
             {
-              "at": "2026-10-13T07:00:27.358640+03:00",
+              "at": "2026-10-13T07:00:28.339544+03:00",
               "code": null,
               "message_en": null,
               "message_tr": null,
@@ -1408,7 +1414,7 @@
               "step": "dispatch"
             },
             {
-              "at": "2026-10-13T07:00:27.370455+03:00",
+              "at": "2026-10-13T07:00:28.348942+03:00",
               "code": null,
               "message_en": null,
               "message_tr": null,
@@ -1417,7 +1423,7 @@
             }
           ],
           "terminal": true,
-          "updated_at": "2026-10-13T04:00:27.405666Z",
+          "updated_at": "2026-10-13T04:00:28.386901Z",
           "version": null,
           "warnings": []
         },
@@ -1432,10 +1438,10 @@
               "old": 10
             }
           },
-          "created_at": "2026-10-13T04:00:27.158733Z",
+          "created_at": "2026-10-13T04:00:28.144849Z",
           "effective_at": null,
           "error": null,
-          "id": "f319d9e812fe04fea6bccadf19817309",
+          "id": "7650a07deb2f4c0817b6cf528a606fe3",
           "kind": "config.apply",
           "label_en": "Applied",
           "label_tr": "Uygulandı",
@@ -1445,11 +1451,11 @@
           "result": null,
           "rolled_back": false,
           "section": "backup",
-          "short_id": "f319d9e8",
+          "short_id": "7650a07d",
           "state": "active",
           "steps": [
             {
-              "at": "2026-10-13T07:00:27.216529+03:00",
+              "at": "2026-10-13T07:00:28.198551+03:00",
               "code": null,
               "message_en": null,
               "message_tr": null,
@@ -1457,7 +1463,7 @@
               "step": "received"
             },
             {
-              "at": "2026-10-13T07:00:27.221899+03:00",
+              "at": "2026-10-13T07:00:28.203638+03:00",
               "code": null,
               "message_en": null,
               "message_tr": null,
@@ -1465,7 +1471,7 @@
               "step": "validate"
             },
             {
-              "at": "2026-10-13T07:00:27.221940+03:00",
+              "at": "2026-10-13T07:00:28.203676+03:00",
               "code": null,
               "message_en": null,
               "message_tr": null,
@@ -1473,7 +1479,7 @@
               "step": "hold"
             },
             {
-              "at": "2026-10-13T07:00:27.231666+03:00",
+              "at": "2026-10-13T07:00:28.211851+03:00",
               "code": null,
               "message_en": null,
               "message_tr": null,
@@ -1481,7 +1487,7 @@
               "step": "backup"
             },
             {
-              "at": "2026-10-13T07:00:27.231686+03:00",
+              "at": "2026-10-13T07:00:28.211871+03:00",
               "code": null,
               "message_en": null,
               "message_tr": null,
@@ -1489,7 +1495,7 @@
               "step": "write_secrets"
             },
             {
-              "at": "2026-10-13T07:00:27.231692+03:00",
+              "at": "2026-10-13T07:00:28.211877+03:00",
               "code": null,
               "message_en": null,
               "message_tr": null,
@@ -1497,7 +1503,7 @@
               "step": "write_config"
             },
             {
-              "at": "2026-10-13T07:00:27.231696+03:00",
+              "at": "2026-10-13T07:00:28.211882+03:00",
               "code": null,
               "message_en": null,
               "message_tr": null,
@@ -1505,7 +1511,7 @@
               "step": "install_files"
             },
             {
-              "at": "2026-10-13T07:00:27.231700+03:00",
+              "at": "2026-10-13T07:00:28.211886+03:00",
               "code": null,
               "message_en": null,
               "message_tr": null,
@@ -1513,7 +1519,7 @@
               "step": "verify"
             },
             {
-              "at": "2026-10-13T07:00:27.232787+03:00",
+              "at": "2026-10-13T07:00:28.212302+03:00",
               "code": null,
               "message_en": null,
               "message_tr": null,
@@ -1522,11 +1528,11 @@
             }
           ],
           "terminal": true,
-          "updated_at": "2026-10-13T04:00:27.269075Z",
+          "updated_at": "2026-10-13T04:00:28.249236Z",
           "version": {
-            "from": "914bb72ecbb0b0d48fc3e69bf791516b15142e61df2a005028ff00485cc62b6f",
+            "from": "d0db46bbeed53e9e51600a28f8e1d7373b92267358a6e9c0b9e6c32aba1d50e8",
             "number": 10,
-            "to": "29a5060ba977b0fce72b9a065d7bf6f7ddd89db3514a139546b2941f3334b3f1"
+            "to": "5fcc71c8582fd2dcd59405a5043df5db2be636071c4ff661212df5397f84f85d"
           },
           "warnings": []
         },
@@ -1537,10 +1543,10 @@
               "old": false
             }
           },
-          "created_at": "2026-10-13T04:00:26.924348Z",
+          "created_at": "2026-10-13T04:00:27.903330Z",
           "effective_at": null,
           "error": null,
-          "id": "77c3cb456872fa27dfd17c7f54b4bcbe",
+          "id": "f8bd3efaad8c5c507a48a407d4357ff3",
           "kind": "config.apply",
           "label_en": "Applied",
           "label_tr": "Uygulandı",
@@ -1550,11 +1556,11 @@
           "result": null,
           "rolled_back": false,
           "section": "retention",
-          "short_id": "77c3cb45",
+          "short_id": "f8bd3efa",
           "state": "active",
           "steps": [
             {
-              "at": "2026-10-13T07:00:26.981331+03:00",
+              "at": "2026-10-13T07:00:27.962786+03:00",
               "code": null,
               "message_en": null,
               "message_tr": null,
@@ -1562,7 +1568,7 @@
               "step": "received"
             },
             {
-              "at": "2026-10-13T07:00:26.986788+03:00",
+              "at": "2026-10-13T07:00:27.969550+03:00",
               "code": null,
               "message_en": null,
               "message_tr": null,
@@ -1570,7 +1576,7 @@
               "step": "validate"
             },
             {
-              "at": "2026-10-13T07:00:26.986826+03:00",
+              "at": "2026-10-13T07:00:27.969595+03:00",
               "code": null,
               "message_en": null,
               "message_tr": null,
@@ -1578,7 +1584,7 @@
               "step": "hold"
             },
             {
-              "at": "2026-10-13T07:00:26.997965+03:00",
+              "at": "2026-10-13T07:00:27.977773+03:00",
               "code": null,
               "message_en": null,
               "message_tr": null,
@@ -1586,7 +1592,7 @@
               "step": "backup"
             },
             {
-              "at": "2026-10-13T07:00:26.997987+03:00",
+              "at": "2026-10-13T07:00:27.977795+03:00",
               "code": null,
               "message_en": null,
               "message_tr": null,
@@ -1594,7 +1600,7 @@
               "step": "write_secrets"
             },
             {
-              "at": "2026-10-13T07:00:26.997993+03:00",
+              "at": "2026-10-13T07:00:27.977801+03:00",
               "code": null,
               "message_en": null,
               "message_tr": null,
@@ -1602,7 +1608,7 @@
               "step": "write_config"
             },
             {
-              "at": "2026-10-13T07:00:26.997997+03:00",
+              "at": "2026-10-13T07:00:27.977806+03:00",
               "code": null,
               "message_en": null,
               "message_tr": null,
@@ -1610,7 +1616,7 @@
               "step": "install_files"
             },
             {
-              "at": "2026-10-13T07:00:26.998002+03:00",
+              "at": "2026-10-13T07:00:27.977811+03:00",
               "code": null,
               "message_en": null,
               "message_tr": null,
@@ -1618,7 +1624,7 @@
               "step": "verify"
             },
             {
-              "at": "2026-10-13T07:00:26.998767+03:00",
+              "at": "2026-10-13T07:00:27.978307+03:00",
               "code": null,
               "message_en": null,
               "message_tr": null,
@@ -1626,7 +1632,7 @@
               "step": "journal"
             },
             {
-              "at": "2026-10-13T07:00:28.723622+03:00",
+              "at": "2026-10-13T07:00:29.718520+03:00",
               "code": null,
               "message_en": null,
               "message_tr": null,
@@ -1635,11 +1641,11 @@
             }
           ],
           "terminal": true,
-          "updated_at": "2026-10-13T04:00:27.041002Z",
+          "updated_at": "2026-10-13T04:00:28.019775Z",
           "version": {
-            "from": "17b9373a9c8bea51c08cd260b4ba447d39125d639a6ebba9d8cd960b41a9557d",
+            "from": "264a8812e7336d992b418c636bc32f826fb03d307bd14290aaec9b624ccf6c6d",
             "number": 9,
-            "to": "914bb72ecbb0b0d48fc3e69bf791516b15142e61df2a005028ff00485cc62b6f"
+            "to": "d0db46bbeed53e9e51600a28f8e1d7373b92267358a6e9c0b9e6c32aba1d50e8"
           },
           "warnings": []
         },
@@ -1660,10 +1666,10 @@
               "old": null
             }
           },
-          "created_at": "2026-10-13T04:00:26.551651Z",
+          "created_at": "2026-10-13T04:00:27.506711Z",
           "effective_at": null,
           "error": null,
-          "id": "fc0f9eba1c5d1ebd5f5096f1a55d55dd",
+          "id": "90a956605187e00c3892500ae6bdef47",
           "kind": "config.apply",
           "label_en": "Applied",
           "label_tr": "Uygulandı",
@@ -1673,11 +1679,11 @@
           "result": null,
           "rolled_back": false,
           "section": "replica",
-          "short_id": "fc0f9eba",
+          "short_id": "90a95660",
           "state": "active",
           "steps": [
             {
-              "at": "2026-10-13T07:00:26.603466+03:00",
+              "at": "2026-10-13T07:00:27.560379+03:00",
               "code": null,
               "message_en": null,
               "message_tr": null,
@@ -1685,7 +1691,7 @@
               "step": "received"
             },
             {
-              "at": "2026-10-13T07:00:26.609476+03:00",
+              "at": "2026-10-13T07:00:27.567316+03:00",
               "code": null,
               "message_en": null,
               "message_tr": null,
@@ -1693,7 +1699,7 @@
               "step": "validate"
             },
             {
-              "at": "2026-10-13T07:00:26.613088+03:00",
+              "at": "2026-10-13T07:00:27.570961+03:00",
               "code": null,
               "message_en": null,
               "message_tr": null,
@@ -1701,7 +1707,7 @@
               "step": "probe"
             },
             {
-              "at": "2026-10-13T07:00:26.613189+03:00",
+              "at": "2026-10-13T07:00:27.571020+03:00",
               "code": null,
               "message_en": null,
               "message_tr": null,
@@ -1709,7 +1715,7 @@
               "step": "hold"
             },
             {
-              "at": "2026-10-13T07:00:26.624410+03:00",
+              "at": "2026-10-13T07:00:27.581171+03:00",
               "code": null,
               "message_en": null,
               "message_tr": null,
@@ -1717,7 +1723,7 @@
               "step": "backup"
             },
             {
-              "at": "2026-10-13T07:00:26.624432+03:00",
+              "at": "2026-10-13T07:00:27.581192+03:00",
               "code": null,
               "message_en": null,
               "message_tr": null,
@@ -1725,7 +1731,7 @@
               "step": "write_secrets"
             },
             {
-              "at": "2026-10-13T07:00:26.624438+03:00",
+              "at": "2026-10-13T07:00:27.581198+03:00",
               "code": null,
               "message_en": null,
               "message_tr": null,
@@ -1733,7 +1739,7 @@
               "step": "write_config"
             },
             {
-              "at": "2026-10-13T07:00:26.624442+03:00",
+              "at": "2026-10-13T07:00:27.581203+03:00",
               "code": null,
               "message_en": null,
               "message_tr": null,
@@ -1741,7 +1747,7 @@
               "step": "install_files"
             },
             {
-              "at": "2026-10-13T07:00:26.624445+03:00",
+              "at": "2026-10-13T07:00:27.581218+03:00",
               "code": null,
               "message_en": null,
               "message_tr": null,
@@ -1749,7 +1755,7 @@
               "step": "verify"
             },
             {
-              "at": "2026-10-13T07:00:26.625052+03:00",
+              "at": "2026-10-13T07:00:27.581694+03:00",
               "code": null,
               "message_en": null,
               "message_tr": null,
@@ -1757,7 +1763,7 @@
               "step": "journal"
             },
             {
-              "at": "2026-10-13T07:00:28.723622+03:00",
+              "at": "2026-10-13T07:00:29.718520+03:00",
               "code": null,
               "message_en": null,
               "message_tr": null,
@@ -1766,25 +1772,25 @@
             }
           ],
           "terminal": true,
-          "updated_at": "2026-10-13T04:00:26.670157Z",
+          "updated_at": "2026-10-13T04:00:27.624226Z",
           "version": {
-            "from": "d60796372b1fc65b902d556fafb63f710b7d9a3baa2bcf7d032069042ca7eccd",
+            "from": "0fa23c12a58389efcd0da5d2a32e410d79ea51ab108aea667f246bf3ee8cbd34",
             "number": 8,
-            "to": "17b9373a9c8bea51c08cd260b4ba447d39125d639a6ebba9d8cd960b41a9557d"
+            "to": "264a8812e7336d992b418c636bc32f826fb03d307bd14290aaec9b624ccf6c6d"
           },
           "warnings": []
         },
         {
           "changes": {
             "smtp.ca_file": {
-              "new": "smtp-ca/bfc70b68684fa14fa3f24ae082bb413dbefdf9fac0e96b51b16e7c1364d455ec.pem",
+              "new": "smtp-ca/d65f881d704206b100aca911be668e02a5babbc23a291e90aca16d1849e9a2bf.pem",
               "old": null
             }
           },
-          "created_at": "2026-10-13T04:00:26.256753Z",
+          "created_at": "2026-10-13T04:00:27.202794Z",
           "effective_at": null,
           "error": null,
-          "id": "c27ce728de7bc35339ec9f1adfc8dc08",
+          "id": "b46194a26223a88d8d3448849dd3ad02",
           "kind": "config.apply",
           "label_en": "Applied",
           "label_tr": "Uygulandı",
@@ -1794,11 +1800,11 @@
           "result": null,
           "rolled_back": false,
           "section": "smtp",
-          "short_id": "c27ce728",
+          "short_id": "b46194a2",
           "state": "active",
           "steps": [
             {
-              "at": "2026-10-13T07:00:26.309382+03:00",
+              "at": "2026-10-13T07:00:27.257674+03:00",
               "code": null,
               "message_en": null,
               "message_tr": null,
@@ -1806,7 +1812,7 @@
               "step": "received"
             },
             {
-              "at": "2026-10-13T07:00:26.314665+03:00",
+              "at": "2026-10-13T07:00:27.263203+03:00",
               "code": null,
               "message_en": null,
               "message_tr": null,
@@ -1814,7 +1820,7 @@
               "step": "validate"
             },
             {
-              "at": "2026-10-13T07:00:26.318224+03:00",
+              "at": "2026-10-13T07:00:27.266864+03:00",
               "code": null,
               "message_en": null,
               "message_tr": null,
@@ -1822,7 +1828,7 @@
               "step": "probe"
             },
             {
-              "at": "2026-10-13T07:00:26.318275+03:00",
+              "at": "2026-10-13T07:00:27.266910+03:00",
               "code": null,
               "message_en": null,
               "message_tr": null,
@@ -1830,7 +1836,7 @@
               "step": "hold"
             },
             {
-              "at": "2026-10-13T07:00:26.330252+03:00",
+              "at": "2026-10-13T07:00:27.277359+03:00",
               "code": null,
               "message_en": null,
               "message_tr": null,
@@ -1838,7 +1844,7 @@
               "step": "backup"
             },
             {
-              "at": "2026-10-13T07:00:26.330274+03:00",
+              "at": "2026-10-13T07:00:27.277379+03:00",
               "code": null,
               "message_en": null,
               "message_tr": null,
@@ -1846,7 +1852,7 @@
               "step": "write_secrets"
             },
             {
-              "at": "2026-10-13T07:00:26.330279+03:00",
+              "at": "2026-10-13T07:00:27.277385+03:00",
               "code": null,
               "message_en": null,
               "message_tr": null,
@@ -1854,7 +1860,7 @@
               "step": "write_config"
             },
             {
-              "at": "2026-10-13T07:00:26.330283+03:00",
+              "at": "2026-10-13T07:00:27.277389+03:00",
               "code": null,
               "message_en": null,
               "message_tr": null,
@@ -1862,7 +1868,7 @@
               "step": "install_files"
             },
             {
-              "at": "2026-10-13T07:00:26.330286+03:00",
+              "at": "2026-10-13T07:00:27.277392+03:00",
               "code": null,
               "message_en": null,
               "message_tr": null,
@@ -1870,7 +1876,7 @@
               "step": "verify"
             },
             {
-              "at": "2026-10-13T07:00:26.330838+03:00",
+              "at": "2026-10-13T07:00:27.277848+03:00",
               "code": null,
               "message_en": null,
               "message_tr": null,
@@ -1878,7 +1884,7 @@
               "step": "journal"
             },
             {
-              "at": "2026-10-13T07:00:28.723622+03:00",
+              "at": "2026-10-13T07:00:29.718520+03:00",
               "code": null,
               "message_en": null,
               "message_tr": null,
@@ -1887,11 +1893,11 @@
             }
           ],
           "terminal": true,
-          "updated_at": "2026-10-13T04:00:26.369639Z",
+          "updated_at": "2026-10-13T04:00:27.320769Z",
           "version": {
-            "from": "d0509008e11d73f0ffe4c4ec949a3fa8a2960508ea2f170d523d28e1c91ba372",
+            "from": "64ba3d498eb3c6023182701e8c064f8f29f971bf65234604303adc60d5882670",
             "number": 7,
-            "to": "d60796372b1fc65b902d556fafb63f710b7d9a3baa2bcf7d032069042ca7eccd"
+            "to": "0fa23c12a58389efcd0da5d2a32e410d79ea51ab108aea667f246bf3ee8cbd34"
           },
           "warnings": [
             {
@@ -1902,7 +1908,7 @@
           ]
         }
       ],
-      "next_cursor": "c27ce728de7bc35339ec9f1adfc8dc08"
+      "next_cursor": "b46194a26223a88d8d3448849dd3ad02"
     },
     "revert_accepted": {
       "changes": {
@@ -1920,10 +1926,10 @@
         "task.next_run:Backup"
       ],
       "guarded": false,
-      "request_id": "f22a3547b36f07362f152bb784d23292",
-      "short_id": "f22a3547",
+      "request_id": "33f5ffc2e2ad5b972345c91a858a976b",
+      "short_id": "33f5ffc2",
       "state": "queued",
-      "status_url": "/api/v1/admin/requests/f22a3547b36f07362f152bb784d23292",
+      "status_url": "/api/v1/admin/requests/33f5ffc2e2ad5b972345c91a858a976b",
       "warnings": []
     },
     "revert_done": {
@@ -1937,10 +1943,10 @@
           "old": 20
         }
       },
-      "created_at": "2026-10-13T04:00:27.992517Z",
+      "created_at": "2026-10-13T04:00:28.977121Z",
       "effective_at": null,
       "error": null,
-      "id": "f22a3547b36f07362f152bb784d23292",
+      "id": "33f5ffc2e2ad5b972345c91a858a976b",
       "kind": "config.revert",
       "label_en": "Applied",
       "label_tr": "Uygulandı",
@@ -1950,11 +1956,11 @@
       "result": null,
       "rolled_back": false,
       "section": "backup",
-      "short_id": "f22a3547",
+      "short_id": "33f5ffc2",
       "state": "active",
       "steps": [
         {
-          "at": "2026-10-13T07:00:28.046342+03:00",
+          "at": "2026-10-13T07:00:29.029467+03:00",
           "code": null,
           "message_en": null,
           "message_tr": null,
@@ -1962,7 +1968,7 @@
           "step": "received"
         },
         {
-          "at": "2026-10-13T07:00:28.051654+03:00",
+          "at": "2026-10-13T07:00:29.035073+03:00",
           "code": null,
           "message_en": null,
           "message_tr": null,
@@ -1970,7 +1976,7 @@
           "step": "validate"
         },
         {
-          "at": "2026-10-13T07:00:28.051695+03:00",
+          "at": "2026-10-13T07:00:29.035113+03:00",
           "code": null,
           "message_en": null,
           "message_tr": null,
@@ -1978,7 +1984,7 @@
           "step": "hold"
         },
         {
-          "at": "2026-10-13T07:00:28.059903+03:00",
+          "at": "2026-10-13T07:00:29.047584+03:00",
           "code": null,
           "message_en": null,
           "message_tr": null,
@@ -1986,7 +1992,7 @@
           "step": "backup"
         },
         {
-          "at": "2026-10-13T07:00:28.059922+03:00",
+          "at": "2026-10-13T07:00:29.047606+03:00",
           "code": null,
           "message_en": null,
           "message_tr": null,
@@ -1994,7 +2000,7 @@
           "step": "write_secrets"
         },
         {
-          "at": "2026-10-13T07:00:28.059928+03:00",
+          "at": "2026-10-13T07:00:29.047613+03:00",
           "code": null,
           "message_en": null,
           "message_tr": null,
@@ -2002,7 +2008,7 @@
           "step": "write_config"
         },
         {
-          "at": "2026-10-13T07:00:28.059933+03:00",
+          "at": "2026-10-13T07:00:29.047617+03:00",
           "code": null,
           "message_en": null,
           "message_tr": null,
@@ -2010,7 +2016,7 @@
           "step": "install_files"
         },
         {
-          "at": "2026-10-13T07:00:28.059937+03:00",
+          "at": "2026-10-13T07:00:29.047621+03:00",
           "code": null,
           "message_en": null,
           "message_tr": null,
@@ -2018,7 +2024,7 @@
           "step": "verify"
         },
         {
-          "at": "2026-10-13T07:00:28.060477+03:00",
+          "at": "2026-10-13T07:00:29.048285+03:00",
           "code": null,
           "message_en": null,
           "message_tr": null,
@@ -2027,39 +2033,39 @@
         }
       ],
       "terminal": true,
-      "updated_at": "2026-10-13T07:00:28.103696+03:00",
+      "updated_at": "2026-10-13T07:00:29.091071+03:00",
       "version": {
-        "from": "29a5060ba977b0fce72b9a065d7bf6f7ddd89db3514a139546b2941f3334b3f1",
+        "from": "5fcc71c8582fd2dcd59405a5043df5db2be636071c4ff661212df5397f84f85d",
         "number": 11,
-        "to": "01b301ebd9ba40f6d7db4a26b41831b5a3bd9f0235c868088020f32e976598c4"
+        "to": "5d20fbbea50075809589fcdb716ab9b82ce10d498b9273c05f6f2ab0ccc628a3"
       },
       "warnings": []
     },
     "versions": [
       {
         "actor": "tolga",
-        "at": "2026-10-13T07:00:27.231717+03:00",
+        "at": "2026-10-13T07:00:28.211900+03:00",
         "has_secrets": false,
         "n": 10,
         "paths": [
           "backup.keep_daily",
           "backup.min_free_gb"
         ],
-        "request_id": "f319d9e812fe04fea6bccadf19817309"
+        "request_id": "7650a07deb2f4c0817b6cf528a606fe3"
       },
       {
         "actor": "tolga",
-        "at": "2026-10-13T07:00:26.998018+03:00",
+        "at": "2026-10-13T07:00:27.977828+03:00",
         "has_secrets": false,
         "n": 9,
         "paths": [
           "retention.enabled"
         ],
-        "request_id": "77c3cb456872fa27dfd17c7f54b4bcbe"
+        "request_id": "f8bd3efaad8c5c507a48a407d4357ff3"
       },
       {
         "actor": "tolga",
-        "at": "2026-10-13T07:00:26.624461+03:00",
+        "at": "2026-10-13T07:00:27.581233+03:00",
         "has_secrets": true,
         "n": 8,
         "paths": [
@@ -2067,21 +2073,21 @@
           "replica.target",
           "replica.user"
         ],
-        "request_id": "fc0f9eba1c5d1ebd5f5096f1a55d55dd"
+        "request_id": "90a956605187e00c3892500ae6bdef47"
       },
       {
         "actor": "tolga",
-        "at": "2026-10-13T07:00:26.330304+03:00",
+        "at": "2026-10-13T07:00:27.277408+03:00",
         "has_secrets": false,
         "n": 7,
         "paths": [
           "smtp.ca_file"
         ],
-        "request_id": "c27ce728de7bc35339ec9f1adfc8dc08"
+        "request_id": "b46194a26223a88d8d3448849dd3ad02"
       },
       {
         "actor": "tolga",
-        "at": "2026-10-13T07:00:25.489947+03:00",
+        "at": "2026-10-13T07:00:26.444850+03:00",
         "has_secrets": false,
         "n": 6,
         "paths": [
@@ -2092,60 +2098,60 @@
           "smtp.security",
           "smtp.timeout_seconds"
         ],
-        "request_id": "e465f453902551c347b315b666108e03"
+        "request_id": "98445f8388df8f34cf167ea50c33da69"
       },
       {
         "actor": "tolga",
-        "at": "2026-10-13T07:00:25.068932+03:00",
+        "at": "2026-10-13T07:00:26.032905+03:00",
         "has_secrets": false,
         "n": 5,
         "paths": [
           "sources.erisim-noktalari"
         ],
-        "request_id": "82b47f76c89ff6386bb280470faa2683"
+        "request_id": "3de62b69997d43d384e654c32f725fe6"
       },
       {
         "actor": "tolga",
-        "at": "2026-10-13T07:00:24.600272+03:00",
+        "at": "2026-10-13T07:00:25.596068+03:00",
         "has_secrets": false,
         "n": 4,
         "paths": [
           "sources.erisim-noktalari"
         ],
-        "request_id": "f3badcb964bf6dbf8a5095a070c18180"
+        "request_id": "cf1849b7b9ae8a518961d4d0077bddbb"
       },
       {
         "actor": "tolga",
-        "at": "2026-10-13T07:00:23.635768+03:00",
+        "at": "2026-10-13T07:00:24.626942+03:00",
         "has_secrets": false,
         "n": 3,
         "paths": [
           "tsa.legal_root_fingerprints",
-          "tsa.roots.3bfc0277229e79092389f2b3c2ec697de0e464e11fd5c8790c8006cada2b9d37",
+          "tsa.roots.96cd6eb3474957df5c314153765377bab130354286a9127f946345b60b75a8e2",
           "tsa.roots_dir"
         ],
-        "request_id": "be86cc41e4ccff5d8ed66a84b09aad09"
+        "request_id": "3519ede5f88e83e64e04b8cde6f21b4b"
       },
       {
         "actor": "tolga",
-        "at": "2026-10-13T07:00:23.259828+03:00",
+        "at": "2026-10-13T07:00:24.269032+03:00",
         "has_secrets": true,
         "n": 2,
         "paths": [
           "kamusm.customer",
           "kamusm.password"
         ],
-        "request_id": "7599f1d56cf59e0320bd11f7038ae1a1"
+        "request_id": "b685148de4701ad6bbd9a4ee753e4597"
       },
       {
         "actor": "tolga",
-        "at": "2026-10-13T07:00:22.590347+03:00",
+        "at": "2026-10-13T07:00:23.646274+03:00",
         "has_secrets": false,
         "n": 1,
         "paths": [
           "site_name"
         ],
-        "request_id": "50de4c5128527ab6ef3ac4eac73a3a0a"
+        "request_id": "4d316114c8394a4b08469c207b15a308"
       }
     ]
   },
@@ -2184,15 +2190,15 @@
       "warnings": []
     },
     "config": {
-      "config_sha256": "076b9798118249d98343e26956378253268860a51ac6d47d939dcf0a55387578",
+      "config_sha256": "74466ccd15519a577df1f2f5c609d9a8fbabff7e1ccb0b17bfe339ee0f4f2801",
       "etags": {
         "backup": "backup:0ab481e774ecb6c0b1e7ae04e00d26743f21d40d423422ee36243d3a52ec6dfb",
         "general": "general:38567353cb092eafe3c1df9b3e31212622d3f2a1fb8ea9835db22a645bdae3ce",
-        "replica": "replica:41eab72fae20e9faf8c13ca404a09ccccb3383237ed1a4600803ed0ca95ece4d",
+        "replica": "replica:72f382c6d57b8dfb552e250d9a0ea456eb5431a6e3357c6e9e6b9624a4e6f605",
         "retention": "retention:9e0f52160a0b0bf3741420822b9fc29e74c1d36b862eba7f46bc8b48fc411d9a",
         "smtp": "smtp:7cb0ab6789535c7632dc21d2460a8c1f9026de68d17e7089b974a89c6cc264f7",
-        "sources": "sources:1b04f72958855af408acf2b790098dd632f9e8b8edc840c5a095ce5511c6c267",
-        "tsa": "tsa:800e02917c2dac6e0225f4424a756c2ea2a18e9acc915c4f0def7600874fac58"
+        "sources": "sources:60fe87c90c5bf986b95db1b41111c4d1308f1add9cac799d056c9b1e7f4235c9",
+        "tsa": "tsa:4249e4993440103b68932188c5484fccb1637e8d338baec5f308c759f06f5581"
       },
       "locked": [
         {
@@ -2296,6 +2302,10 @@
           "reason": "expert"
         },
         {
+          "path": "retention.batch_days",
+          "reason": "expert"
+        },
+        {
           "path": "clock.ntp_port",
           "reason": "expert"
         },
@@ -2390,8 +2400,8 @@
       ],
       "pending": [
         {
-          "effective_at": "2026-10-14T04:00:23.944167Z",
-          "request_id": "64c5c21d9cf2615c8fb2e783bb6df40b",
+          "effective_at": "2026-10-14T04:00:24.935584Z",
+          "request_id": "042cd6f003d2b8d4873756b06511c2c4",
           "section": "tsa"
         }
       ],
@@ -2486,8 +2496,9 @@
             "expected": true,
             "firewall": "open",
             "heartbeat_minutes": 15,
-            "last_seen": "2026-10-13T04:00:04.449614Z",
+            "last_seen": "2026-10-13T04:00:05.369253Z",
             "name": "fortigate",
+            "snmp": null,
             "transport": "any",
             "type": "fortigate"
           },
@@ -2497,8 +2508,9 @@
             "expected": true,
             "firewall": "open",
             "heartbeat_minutes": 15,
-            "last_seen": "2026-10-13T03:58:16.449614Z",
+            "last_seen": "2026-10-13T03:58:17.369253Z",
             "name": "core-r1",
+            "snmp": null,
             "transport": "any",
             "type": "mikrotik"
           }
@@ -2521,8 +2533,8 @@
           "roots": [
             {
               "legal": true,
-              "not_after": "2036-10-09T04:00:23Z",
-              "sha256": "3bfc0277229e79092389f2b3c2ec697de0e464e11fd5c8790c8006cada2b9d37",
+              "not_after": "2036-10-09T04:00:24Z",
+              "sha256": "96cd6eb3474957df5c314153765377bab130354286a9127f946345b60b75a8e2",
               "source": "web",
               "subject": "CN=Örnek Test Kök Sertifikası"
             }
@@ -2533,12 +2545,12 @@
           },
           "secrets": {
             "kamusm.customer": {
-              "changed_at": "2026-10-13T07:00:23.261844+03:00",
+              "changed_at": "2026-10-13T07:00:24.271002+03:00",
               "changed_by": "web:tolga",
               "set": true
             },
             "kamusm.password": {
-              "changed_at": "2026-10-13T07:00:23.261844+03:00",
+              "changed_at": "2026-10-13T07:00:24.271002+03:00",
               "changed_by": "web:tolga",
               "set": true
             },
@@ -2561,8 +2573,8 @@
             "sha256": null,
             "staged": [
               {
-                "effective_at": "2026-10-14T04:00:23.944167Z",
-                "sha256": "d108d421cbaf12636f3a9b6b0b6dc776d4390ce494a087a77afe5ac4fb3b11fb"
+                "effective_at": "2026-10-14T04:00:24.935584Z",
+                "sha256": "bf8105aa526f269cda8502537d9780ea0a65341f32cfe734e6c07e9fb1cef54f"
               }
             ],
             "trusted": false
@@ -2592,10 +2604,10 @@
         "task.next_run:Seal"
       ],
       "guarded": false,
-      "request_id": "7599f1d56cf59e0320bd11f7038ae1a1",
-      "short_id": "7599f1d5",
+      "request_id": "b685148de4701ad6bbd9a4ee753e4597",
+      "short_id": "b685148d",
       "state": "queued",
-      "status_url": "/api/v1/admin/requests/7599f1d56cf59e0320bd11f7038ae1a1",
+      "status_url": "/api/v1/admin/requests/b685148de4701ad6bbd9a4ee753e4597",
       "warnings": []
     },
     "credentials_active": {
@@ -2613,10 +2625,10 @@
           "secret": true
         }
       },
-      "created_at": "2026-10-13T04:00:23.193173Z",
+      "created_at": "2026-10-13T04:00:24.200350Z",
       "effective_at": null,
       "error": null,
-      "id": "7599f1d56cf59e0320bd11f7038ae1a1",
+      "id": "b685148de4701ad6bbd9a4ee753e4597",
       "kind": "config.apply",
       "label_en": "Applied",
       "label_tr": "Uygulandı",
@@ -2626,11 +2638,11 @@
       "result": null,
       "rolled_back": false,
       "section": "tsa",
-      "short_id": "7599f1d5",
+      "short_id": "b685148d",
       "state": "active",
       "steps": [
         {
-          "at": "2026-10-13T07:00:23.247121+03:00",
+          "at": "2026-10-13T07:00:24.255460+03:00",
           "code": null,
           "message_en": null,
           "message_tr": null,
@@ -2638,7 +2650,7 @@
           "step": "received"
         },
         {
-          "at": "2026-10-13T07:00:23.250580+03:00",
+          "at": "2026-10-13T07:00:24.258562+03:00",
           "code": null,
           "message_en": null,
           "message_tr": null,
@@ -2646,7 +2658,7 @@
           "step": "validate"
         },
         {
-          "at": "2026-10-13T07:00:23.250655+03:00",
+          "at": "2026-10-13T07:00:24.258640+03:00",
           "code": null,
           "message_en": null,
           "message_tr": null,
@@ -2654,7 +2666,7 @@
           "step": "hold"
         },
         {
-          "at": "2026-10-13T07:00:23.259775+03:00",
+          "at": "2026-10-13T07:00:24.268977+03:00",
           "code": null,
           "message_en": null,
           "message_tr": null,
@@ -2662,7 +2674,7 @@
           "step": "backup"
         },
         {
-          "at": "2026-10-13T07:00:23.259796+03:00",
+          "at": "2026-10-13T07:00:24.269000+03:00",
           "code": null,
           "message_en": null,
           "message_tr": null,
@@ -2670,7 +2682,7 @@
           "step": "write_secrets"
         },
         {
-          "at": "2026-10-13T07:00:23.259802+03:00",
+          "at": "2026-10-13T07:00:24.269006+03:00",
           "code": null,
           "message_en": null,
           "message_tr": null,
@@ -2678,7 +2690,7 @@
           "step": "write_config"
         },
         {
-          "at": "2026-10-13T07:00:23.259807+03:00",
+          "at": "2026-10-13T07:00:24.269011+03:00",
           "code": null,
           "message_en": null,
           "message_tr": null,
@@ -2686,7 +2698,7 @@
           "step": "install_files"
         },
         {
-          "at": "2026-10-13T07:00:23.259810+03:00",
+          "at": "2026-10-13T07:00:24.269015+03:00",
           "code": null,
           "message_en": null,
           "message_tr": null,
@@ -2694,7 +2706,7 @@
           "step": "verify"
         },
         {
-          "at": "2026-10-13T07:00:23.260365+03:00",
+          "at": "2026-10-13T07:00:24.269667+03:00",
           "code": null,
           "message_en": null,
           "message_tr": null,
@@ -2702,7 +2714,7 @@
           "step": "journal"
         },
         {
-          "at": "2026-10-13T07:00:23.296335+03:00",
+          "at": "2026-10-13T07:00:24.305693+03:00",
           "code": null,
           "message_en": null,
           "message_tr": null,
@@ -2710,7 +2722,7 @@
           "step": "reload.worker"
         },
         {
-          "at": "2026-10-13T07:00:23.296335+03:00",
+          "at": "2026-10-13T07:00:24.305693+03:00",
           "code": null,
           "message_en": null,
           "message_tr": null,
@@ -2719,11 +2731,11 @@
         }
       ],
       "terminal": true,
-      "updated_at": "2026-10-13T07:00:23.296335+03:00",
+      "updated_at": "2026-10-13T07:00:24.305693+03:00",
       "version": {
-        "from": "31b5fdd8ba0940042b9ff86f6d4863ee2e705db68db2230759e1421cc945f565",
+        "from": "cc961c3f1a62dd5aa2c06cac5de2d2b1e317c0d7041a59764f2612b1bfa7ab24",
         "number": 2,
-        "to": "31b5fdd8ba0940042b9ff86f6d4863ee2e705db68db2230759e1421cc945f565"
+        "to": "cc961c3f1a62dd5aa2c06cac5de2d2b1e317c0d7041a59764f2612b1bfa7ab24"
       },
       "warnings": []
     },
@@ -2731,11 +2743,11 @@
       "changes": {
         "tsa.legal_root_fingerprints": {
           "new": [
-            "3bfc0277229e79092389f2b3c2ec697de0e464e11fd5c8790c8006cada2b9d37"
+            "96cd6eb3474957df5c314153765377bab130354286a9127f946345b60b75a8e2"
           ],
           "old": []
         },
-        "tsa.roots.3bfc0277229e79092389f2b3c2ec697de0e464e11fd5c8790c8006cada2b9d37": {
+        "tsa.roots.96cd6eb3474957df5c314153765377bab130354286a9127f946345b60b75a8e2": {
           "new": "installed",
           "old": null
         },
@@ -2751,21 +2763,21 @@
         "task.next_run:Seal"
       ],
       "guarded": false,
-      "request_id": "be86cc41e4ccff5d8ed66a84b09aad09",
-      "short_id": "be86cc41",
+      "request_id": "3519ede5f88e83e64e04b8cde6f21b4b",
+      "short_id": "3519ede5",
       "state": "queued",
-      "status_url": "/api/v1/admin/requests/be86cc41e4ccff5d8ed66a84b09aad09",
+      "status_url": "/api/v1/admin/requests/3519ede5f88e83e64e04b8cde6f21b4b",
       "warnings": []
     },
     "root_active": {
       "changes": {
         "tsa.legal_root_fingerprints": {
           "new": [
-            "3bfc0277229e79092389f2b3c2ec697de0e464e11fd5c8790c8006cada2b9d37"
+            "96cd6eb3474957df5c314153765377bab130354286a9127f946345b60b75a8e2"
           ],
           "old": []
         },
-        "tsa.roots.3bfc0277229e79092389f2b3c2ec697de0e464e11fd5c8790c8006cada2b9d37": {
+        "tsa.roots.96cd6eb3474957df5c314153765377bab130354286a9127f946345b60b75a8e2": {
           "new": "installed",
           "old": null
         },
@@ -2774,10 +2786,10 @@
           "old": null
         }
       },
-      "created_at": "2026-10-13T04:00:23.564080Z",
+      "created_at": "2026-10-13T04:00:24.552413Z",
       "effective_at": null,
       "error": null,
-      "id": "be86cc41e4ccff5d8ed66a84b09aad09",
+      "id": "3519ede5f88e83e64e04b8cde6f21b4b",
       "kind": "config.apply",
       "label_en": "Applied",
       "label_tr": "Uygulandı",
@@ -2787,11 +2799,11 @@
       "result": null,
       "rolled_back": false,
       "section": "tsa",
-      "short_id": "be86cc41",
+      "short_id": "3519ede5",
       "state": "active",
       "steps": [
         {
-          "at": "2026-10-13T07:00:23.620135+03:00",
+          "at": "2026-10-13T07:00:24.613422+03:00",
           "code": null,
           "message_en": null,
           "message_tr": null,
@@ -2799,7 +2811,7 @@
           "step": "received"
         },
         {
-          "at": "2026-10-13T07:00:23.624568+03:00",
+          "at": "2026-10-13T07:00:24.617889+03:00",
           "code": null,
           "message_en": null,
           "message_tr": null,
@@ -2807,7 +2819,7 @@
           "step": "validate"
         },
         {
-          "at": "2026-10-13T07:00:23.624609+03:00",
+          "at": "2026-10-13T07:00:24.617930+03:00",
           "code": null,
           "message_en": null,
           "message_tr": null,
@@ -2815,7 +2827,7 @@
           "step": "hold"
         },
         {
-          "at": "2026-10-13T07:00:23.635715+03:00",
+          "at": "2026-10-13T07:00:24.626889+03:00",
           "code": null,
           "message_en": null,
           "message_tr": null,
@@ -2823,7 +2835,7 @@
           "step": "backup"
         },
         {
-          "at": "2026-10-13T07:00:23.635738+03:00",
+          "at": "2026-10-13T07:00:24.626911+03:00",
           "code": null,
           "message_en": null,
           "message_tr": null,
@@ -2831,7 +2843,7 @@
           "step": "write_secrets"
         },
         {
-          "at": "2026-10-13T07:00:23.635744+03:00",
+          "at": "2026-10-13T07:00:24.626917+03:00",
           "code": null,
           "message_en": null,
           "message_tr": null,
@@ -2839,7 +2851,7 @@
           "step": "write_config"
         },
         {
-          "at": "2026-10-13T07:00:23.635748+03:00",
+          "at": "2026-10-13T07:00:24.626922+03:00",
           "code": null,
           "message_en": null,
           "message_tr": null,
@@ -2847,7 +2859,7 @@
           "step": "install_files"
         },
         {
-          "at": "2026-10-13T07:00:23.635752+03:00",
+          "at": "2026-10-13T07:00:24.626926+03:00",
           "code": null,
           "message_en": null,
           "message_tr": null,
@@ -2855,7 +2867,7 @@
           "step": "verify"
         },
         {
-          "at": "2026-10-13T07:00:23.636326+03:00",
+          "at": "2026-10-13T07:00:24.627383+03:00",
           "code": null,
           "message_en": null,
           "message_tr": null,
@@ -2863,7 +2875,7 @@
           "step": "journal"
         },
         {
-          "at": "2026-10-13T07:00:23.674161+03:00",
+          "at": "2026-10-13T07:00:24.665314+03:00",
           "code": null,
           "message_en": null,
           "message_tr": null,
@@ -2871,7 +2883,7 @@
           "step": "reload.worker"
         },
         {
-          "at": "2026-10-13T07:00:23.674161+03:00",
+          "at": "2026-10-13T07:00:24.665314+03:00",
           "code": null,
           "message_en": null,
           "message_tr": null,
@@ -2880,11 +2892,11 @@
         }
       ],
       "terminal": true,
-      "updated_at": "2026-10-13T07:00:23.674161+03:00",
+      "updated_at": "2026-10-13T07:00:24.665314+03:00",
       "version": {
-        "from": "31b5fdd8ba0940042b9ff86f6d4863ee2e705db68db2230759e1421cc945f565",
+        "from": "cc961c3f1a62dd5aa2c06cac5de2d2b1e317c0d7041a59764f2612b1bfa7ab24",
         "number": 3,
-        "to": "076b9798118249d98343e26956378253268860a51ac6d47d939dcf0a55387578"
+        "to": "74466ccd15519a577df1f2f5c609d9a8fbabff7e1ccb0b17bfe339ee0f4f2801"
       },
       "warnings": []
     },
@@ -2893,18 +2905,18 @@
       "effective_at": null,
       "effects": [],
       "guarded": false,
-      "request_id": "db883a00859867ec0b9168cc14922f33",
-      "short_id": "db883a00",
+      "request_id": "5edfe8d1791df1aeddd971dbed1440dd",
+      "short_id": "5edfe8d1",
       "state": "queued",
-      "status_url": "/api/v1/admin/requests/db883a00859867ec0b9168cc14922f33",
+      "status_url": "/api/v1/admin/requests/5edfe8d1791df1aeddd971dbed1440dd",
       "warnings": []
     },
     "tsa_test_done": {
       "changes": {},
-      "created_at": "2026-10-13T04:00:24.082953Z",
+      "created_at": "2026-10-13T04:00:25.072298Z",
       "effective_at": null,
       "error": null,
-      "id": "db883a00859867ec0b9168cc14922f33",
+      "id": "5edfe8d1791df1aeddd971dbed1440dd",
       "kind": "action.tsa_test",
       "label_en": "Done",
       "label_tr": "Tamamlandı",
@@ -2914,7 +2926,7 @@
       "result": {
         "container": "TimeStampResp",
         "errors": [],
-        "gen_time": "2026-10-13T04:00:24.169308Z",
+        "gen_time": "2026-10-13T04:00:25.163798Z",
         "legal_grade": false,
         "legal_grade_claimed": false,
         "provider": "mock",
@@ -2928,11 +2940,11 @@
       },
       "rolled_back": false,
       "section": null,
-      "short_id": "db883a00",
+      "short_id": "5edfe8d1",
       "state": "succeeded",
       "steps": [
         {
-          "at": "2026-10-13T07:00:24.162303+03:00",
+          "at": "2026-10-13T07:00:25.157831+03:00",
           "code": null,
           "message_en": null,
           "message_tr": null,
@@ -2940,7 +2952,7 @@
           "step": "received"
         },
         {
-          "at": "2026-10-13T07:00:24.164206+03:00",
+          "at": "2026-10-13T07:00:25.159227+03:00",
           "code": null,
           "message_en": null,
           "message_tr": null,
@@ -2948,7 +2960,7 @@
           "step": "dispatch"
         },
         {
-          "at": "2026-10-13T07:00:24.173693+03:00",
+          "at": "2026-10-13T07:00:25.168946+03:00",
           "code": null,
           "message_en": null,
           "message_tr": null,
@@ -2957,7 +2969,7 @@
         }
       ],
       "terminal": true,
-      "updated_at": "2026-10-13T07:00:24.203276+03:00",
+      "updated_at": "2026-10-13T07:00:25.199516+03:00",
       "version": null,
       "warnings": []
     },
@@ -2967,30 +2979,30 @@
         "is_ca": true,
         "issuer": "CN=Örnek Test Kök Sertifikası",
         "key": "EC P-256",
-        "not_after": "2036-10-09T04:00:23Z",
-        "not_before": "2026-10-12T04:00:23Z",
+        "not_after": "2036-10-09T04:00:24Z",
+        "not_before": "2026-10-12T04:00:24Z",
         "self_signed": true,
         "subject": "CN=Örnek Test Kök Sertifikası",
         "warnings": []
       },
-      "expires_at": "2026-10-13T07:30:23.388826+03:00",
+      "expires_at": "2026-10-13T07:30:24.383601+03:00",
       "kind": "kamusm_root",
-      "sha256": "f3cb316ac96e080d4ffec8931a15aaead56d33ea0a0230d7724142c5ba8cb007",
+      "sha256": "c1f79b210c9494d4feb26974b10d5c03c85e3747171b4698dbdadd603d2d5c51",
       "size": 546,
-      "upload_id": "2f84f59be3d24d23c1079825e5c233fe",
+      "upload_id": "b1280d638146e1db3c0c9ca089fb06f2",
       "zamane": null
     },
     "upload_zamane": {
       "certificate": null,
-      "expires_at": "2026-10-13T07:30:23.712708+03:00",
+      "expires_at": "2026-10-13T07:30:24.703110+03:00",
       "kind": "zamane_client",
-      "sha256": "d108d421cbaf12636f3a9b6b0b6dc776d4390ce494a087a77afe5ac4fb3b11fb",
+      "sha256": "bf8105aa526f269cda8502537d9780ea0a65341f32cfe734e6c07e9fb1cef54f",
       "size": 285,
-      "upload_id": "57d37a40ce16a418c7cd7d45db83449f",
+      "upload_id": "509d5962db0011c59cb34eb2d010fb98",
       "zamane": {
         "accepted": true,
         "jar_name": null,
-        "jar_sha256": "d108d421cbaf12636f3a9b6b0b6dc776d4390ce494a087a77afe5ac4fb3b11fb",
+        "jar_sha256": "bf8105aa526f269cda8502537d9780ea0a65341f32cfe734e6c07e9fb1cef54f",
         "kind": "jar",
         "known": false,
         "reason": "unknown_jar_held",
@@ -3000,11 +3012,11 @@
     "zamane_accepted": {
       "changes": {
         "tsa.zamane_jar": {
-          "new": "zamane/approved/d108d421cbaf12636f3a9b6b0b6dc776d4390ce494a087a77afe5ac4fb3b11fb.jar",
+          "new": "zamane/approved/bf8105aa526f269cda8502537d9780ea0a65341f32cfe734e6c07e9fb1cef54f.jar",
           "old": null
         }
       },
-      "effective_at": "2026-10-14T07:00:23.883533+03:00",
+      "effective_at": "2026-10-14T07:00:24.875306+03:00",
       "effects": [
         "jar.promotion",
         "reload.api",
@@ -3012,10 +3024,10 @@
         "task.next_run:Seal"
       ],
       "guarded": true,
-      "request_id": "64c5c21d9cf2615c8fb2e783bb6df40b",
-      "short_id": "64c5c21d",
+      "request_id": "042cd6f003d2b8d4873756b06511c2c4",
+      "short_id": "042cd6f0",
       "state": "queued",
-      "status_url": "/api/v1/admin/requests/64c5c21d9cf2615c8fb2e783bb6df40b",
+      "status_url": "/api/v1/admin/requests/042cd6f003d2b8d4873756b06511c2c4",
       "warnings": [
         {
           "code": "unknown_jar_held",
@@ -3027,14 +3039,14 @@
     "zamane_pending": {
       "changes": {
         "tsa.zamane_jar": {
-          "new": "zamane/approved/d108d421cbaf12636f3a9b6b0b6dc776d4390ce494a087a77afe5ac4fb3b11fb.jar",
+          "new": "zamane/approved/bf8105aa526f269cda8502537d9780ea0a65341f32cfe734e6c07e9fb1cef54f.jar",
           "old": null
         }
       },
-      "created_at": "2026-10-13T04:00:23.883533Z",
-      "effective_at": "2026-10-14T07:00:23.944167+03:00",
+      "created_at": "2026-10-13T04:00:24.875306Z",
+      "effective_at": "2026-10-14T07:00:24.935584+03:00",
       "error": null,
-      "id": "64c5c21d9cf2615c8fb2e783bb6df40b",
+      "id": "042cd6f003d2b8d4873756b06511c2c4",
       "kind": "config.apply",
       "label_en": "Held",
       "label_tr": "Bekletiliyor",
@@ -3044,11 +3056,11 @@
       "result": null,
       "rolled_back": false,
       "section": "tsa",
-      "short_id": "64c5c21d",
+      "short_id": "042cd6f0",
       "state": "pending",
       "steps": [
         {
-          "at": "2026-10-13T07:00:23.939780+03:00",
+          "at": "2026-10-13T07:00:24.930893+03:00",
           "code": null,
           "message_en": null,
           "message_tr": null,
@@ -3056,7 +3068,7 @@
           "step": "received"
         },
         {
-          "at": "2026-10-13T07:00:23.943677+03:00",
+          "at": "2026-10-13T07:00:24.935032+03:00",
           "code": null,
           "message_en": null,
           "message_tr": null,
@@ -3064,7 +3076,7 @@
           "step": "validate"
         },
         {
-          "at": "2026-10-13T07:00:23.945652+03:00",
+          "at": "2026-10-13T07:00:24.936472+03:00",
           "code": null,
           "message_en": null,
           "message_tr": null,
@@ -3072,7 +3084,7 @@
           "step": "hold"
         },
         {
-          "at": "2026-10-13T07:00:23.945686+03:00",
+          "at": "2026-10-13T07:00:24.936513+03:00",
           "code": null,
           "message_en": null,
           "message_tr": null,
@@ -3081,7 +3093,7 @@
         }
       ],
       "terminal": false,
-      "updated_at": "2026-10-13T07:00:23.984140+03:00",
+      "updated_at": "2026-10-13T07:00:24.973684+03:00",
       "version": null,
       "warnings": [
         {
@@ -3093,7 +3105,7 @@
     }
   },
   "meta": {
-    "captured_at": "2026-10-13T04:01:39.602500+00:00",
+    "captured_at": "2026-10-13T04:01:41.345850+00:00",
     "clock": "2026-10-13T07:00:00+03:00",
     "info": "captured by web/scripts/capture_api_samples.py; do not edit",
     "site_day": "2026-10-09",
@@ -3107,10 +3119,10 @@
         "old": "Örnek A.Ş."
       }
     },
-    "created_at": "2026-10-13T04:00:22.442431Z",
+    "created_at": "2026-10-13T04:00:23.499811Z",
     "effective_at": null,
     "error": null,
-    "id": "50de4c5128527ab6ef3ac4eac73a3a0a",
+    "id": "4d316114c8394a4b08469c207b15a308",
     "kind": "config.apply",
     "label_en": "Applied",
     "label_tr": "Uygulandı",
@@ -3120,11 +3132,11 @@
     "result": null,
     "rolled_back": false,
     "section": "general",
-    "short_id": "50de4c51",
+    "short_id": "4d316114",
     "state": "active",
     "steps": [
       {
-        "at": "2026-10-13T07:00:22.576291+03:00",
+        "at": "2026-10-13T07:00:23.630637+03:00",
         "code": null,
         "message_en": null,
         "message_tr": null,
@@ -3132,7 +3144,7 @@
         "step": "received"
       },
       {
-        "at": "2026-10-13T07:00:22.582287+03:00",
+        "at": "2026-10-13T07:00:23.636017+03:00",
         "code": null,
         "message_en": null,
         "message_tr": null,
@@ -3140,7 +3152,7 @@
         "step": "validate"
       },
       {
-        "at": "2026-10-13T07:00:22.582337+03:00",
+        "at": "2026-10-13T07:00:23.636069+03:00",
         "code": null,
         "message_en": null,
         "message_tr": null,
@@ -3148,7 +3160,7 @@
         "step": "hold"
       },
       {
-        "at": "2026-10-13T07:00:22.590292+03:00",
+        "at": "2026-10-13T07:00:23.646222+03:00",
         "code": null,
         "message_en": null,
         "message_tr": null,
@@ -3156,7 +3168,7 @@
         "step": "backup"
       },
       {
-        "at": "2026-10-13T07:00:22.590314+03:00",
+        "at": "2026-10-13T07:00:23.646242+03:00",
         "code": null,
         "message_en": null,
         "message_tr": null,
@@ -3164,7 +3176,7 @@
         "step": "write_secrets"
       },
       {
-        "at": "2026-10-13T07:00:22.590321+03:00",
+        "at": "2026-10-13T07:00:23.646249+03:00",
         "code": null,
         "message_en": null,
         "message_tr": null,
@@ -3172,7 +3184,7 @@
         "step": "write_config"
       },
       {
-        "at": "2026-10-13T07:00:22.590325+03:00",
+        "at": "2026-10-13T07:00:23.646253+03:00",
         "code": null,
         "message_en": null,
         "message_tr": null,
@@ -3180,7 +3192,7 @@
         "step": "install_files"
       },
       {
-        "at": "2026-10-13T07:00:22.590329+03:00",
+        "at": "2026-10-13T07:00:23.646257+03:00",
         "code": null,
         "message_en": null,
         "message_tr": null,
@@ -3188,7 +3200,7 @@
         "step": "verify"
       },
       {
-        "at": "2026-10-13T07:00:22.591310+03:00",
+        "at": "2026-10-13T07:00:23.646930+03:00",
         "code": null,
         "message_en": null,
         "message_tr": null,
@@ -3196,7 +3208,7 @@
         "step": "journal"
       },
       {
-        "at": "2026-10-13T07:00:22.630695+03:00",
+        "at": "2026-10-13T07:00:23.680444+03:00",
         "code": null,
         "message_en": null,
         "message_tr": null,
@@ -3204,7 +3216,7 @@
         "step": "reload.worker"
       },
       {
-        "at": "2026-10-13T07:00:22.630695+03:00",
+        "at": "2026-10-13T07:00:23.680444+03:00",
         "code": null,
         "message_en": null,
         "message_tr": null,
@@ -3213,11 +3225,11 @@
       }
     ],
     "terminal": true,
-    "updated_at": "2026-10-13T07:00:22.630695+03:00",
+    "updated_at": "2026-10-13T07:00:23.680444+03:00",
     "version": {
-      "from": "7dd42276b5d850357b5907a7d8c374d0c9f81b37214c549e69757137fff17a92",
+      "from": "b5ee33ae97a57aa50b5c41223ece41c46066fdf55f67ecea995113d354fbbf73",
       "number": 1,
-      "to": "31b5fdd8ba0940042b9ff86f6d4863ee2e705db68db2230759e1421cc945f565"
+      "to": "cc961c3f1a62dd5aa2c06cac5de2d2b1e317c0d7041a59764f2612b1bfa7ab24"
     },
     "warnings": []
   },
@@ -3228,10 +3240,10 @@
         "old": "Örnek A.Ş."
       }
     },
-    "created_at": "2026-10-13T04:00:22.442431Z",
+    "created_at": "2026-10-13T04:00:23.499811Z",
     "effective_at": null,
     "error": null,
-    "id": "50de4c5128527ab6ef3ac4eac73a3a0a",
+    "id": "4d316114c8394a4b08469c207b15a308",
     "kind": "config.apply",
     "label_en": "Queued",
     "label_tr": "Sırada",
@@ -3241,11 +3253,11 @@
     "result": null,
     "rolled_back": false,
     "section": "general",
-    "short_id": "50de4c51",
+    "short_id": "4d316114",
     "state": "queued",
     "steps": [],
     "terminal": false,
-    "updated_at": "2026-10-13T04:00:22.442431Z",
+    "updated_at": "2026-10-13T04:00:23.499811Z",
     "version": null,
     "warnings": []
   },
@@ -3258,10 +3270,10 @@
             "old": "Örnek A.Ş."
           }
         },
-        "created_at": "2026-10-13T04:00:22.442431Z",
+        "created_at": "2026-10-13T04:00:23.499811Z",
         "effective_at": null,
         "error": null,
-        "id": "50de4c5128527ab6ef3ac4eac73a3a0a",
+        "id": "4d316114c8394a4b08469c207b15a308",
         "kind": "config.apply",
         "label_en": "Applied",
         "label_tr": "Uygulandı",
@@ -3271,11 +3283,11 @@
         "result": null,
         "rolled_back": false,
         "section": "general",
-        "short_id": "50de4c51",
+        "short_id": "4d316114",
         "state": "active",
         "steps": [
           {
-            "at": "2026-10-13T07:00:22.576291+03:00",
+            "at": "2026-10-13T07:00:23.630637+03:00",
             "code": null,
             "message_en": null,
             "message_tr": null,
@@ -3283,7 +3295,7 @@
             "step": "received"
           },
           {
-            "at": "2026-10-13T07:00:22.582287+03:00",
+            "at": "2026-10-13T07:00:23.636017+03:00",
             "code": null,
             "message_en": null,
             "message_tr": null,
@@ -3291,7 +3303,7 @@
             "step": "validate"
           },
           {
-            "at": "2026-10-13T07:00:22.582337+03:00",
+            "at": "2026-10-13T07:00:23.636069+03:00",
             "code": null,
             "message_en": null,
             "message_tr": null,
@@ -3299,7 +3311,7 @@
             "step": "hold"
           },
           {
-            "at": "2026-10-13T07:00:22.590292+03:00",
+            "at": "2026-10-13T07:00:23.646222+03:00",
             "code": null,
             "message_en": null,
             "message_tr": null,
@@ -3307,7 +3319,7 @@
             "step": "backup"
           },
           {
-            "at": "2026-10-13T07:00:22.590314+03:00",
+            "at": "2026-10-13T07:00:23.646242+03:00",
             "code": null,
             "message_en": null,
             "message_tr": null,
@@ -3315,7 +3327,7 @@
             "step": "write_secrets"
           },
           {
-            "at": "2026-10-13T07:00:22.590321+03:00",
+            "at": "2026-10-13T07:00:23.646249+03:00",
             "code": null,
             "message_en": null,
             "message_tr": null,
@@ -3323,7 +3335,7 @@
             "step": "write_config"
           },
           {
-            "at": "2026-10-13T07:00:22.590325+03:00",
+            "at": "2026-10-13T07:00:23.646253+03:00",
             "code": null,
             "message_en": null,
             "message_tr": null,
@@ -3331,7 +3343,7 @@
             "step": "install_files"
           },
           {
-            "at": "2026-10-13T07:00:22.590329+03:00",
+            "at": "2026-10-13T07:00:23.646257+03:00",
             "code": null,
             "message_en": null,
             "message_tr": null,
@@ -3339,7 +3351,7 @@
             "step": "verify"
           },
           {
-            "at": "2026-10-13T07:00:22.591310+03:00",
+            "at": "2026-10-13T07:00:23.646930+03:00",
             "code": null,
             "message_en": null,
             "message_tr": null,
@@ -3347,7 +3359,7 @@
             "step": "journal"
           },
           {
-            "at": "2026-10-13T07:00:22.671448+03:00",
+            "at": "2026-10-13T07:00:23.720581+03:00",
             "code": null,
             "message_en": null,
             "message_tr": null,
@@ -3355,7 +3367,7 @@
             "step": "reload.worker"
           },
           {
-            "at": "2026-10-13T07:00:22.671448+03:00",
+            "at": "2026-10-13T07:00:23.720581+03:00",
             "code": null,
             "message_en": null,
             "message_tr": null,
@@ -3364,20 +3376,20 @@
           }
         ],
         "terminal": true,
-        "updated_at": "2026-10-13T04:00:22.630695Z",
+        "updated_at": "2026-10-13T04:00:23.680444Z",
         "version": {
-          "from": "7dd42276b5d850357b5907a7d8c374d0c9f81b37214c549e69757137fff17a92",
+          "from": "b5ee33ae97a57aa50b5c41223ece41c46066fdf55f67ecea995113d354fbbf73",
           "number": 1,
-          "to": "31b5fdd8ba0940042b9ff86f6d4863ee2e705db68db2230759e1421cc945f565"
+          "to": "cc961c3f1a62dd5aa2c06cac5de2d2b1e317c0d7041a59764f2612b1bfa7ab24"
         },
         "warnings": []
       },
       {
         "changes": {},
-        "created_at": "2026-10-13T04:00:13.526849Z",
+        "created_at": "2026-10-13T04:00:14.511146Z",
         "effective_at": null,
         "error": null,
-        "id": "04ded261cabea80b711dce9773416e5d",
+        "id": "d323a6ac8a3dba88a0a011f95fbfb45e",
         "kind": "action.credit",
         "label_en": "Done",
         "label_tr": "Tamamlandı",
@@ -3391,11 +3403,11 @@
         },
         "rolled_back": false,
         "section": null,
-        "short_id": "04ded261",
+        "short_id": "d323a6ac",
         "state": "succeeded",
         "steps": [
           {
-            "at": "2026-10-13T07:00:13.614938+03:00",
+            "at": "2026-10-13T07:00:14.596225+03:00",
             "code": null,
             "message_en": null,
             "message_tr": null,
@@ -3403,7 +3415,7 @@
             "step": "received"
           },
           {
-            "at": "2026-10-13T07:00:13.616690+03:00",
+            "at": "2026-10-13T07:00:14.600095+03:00",
             "code": null,
             "message_en": null,
             "message_tr": null,
@@ -3411,7 +3423,7 @@
             "step": "dispatch"
           },
           {
-            "at": "2026-10-13T07:00:13.627465+03:00",
+            "at": "2026-10-13T07:00:14.608510+03:00",
             "code": null,
             "message_en": null,
             "message_tr": null,
@@ -3420,16 +3432,16 @@
           }
         ],
         "terminal": true,
-        "updated_at": "2026-10-13T04:00:13.668628Z",
+        "updated_at": "2026-10-13T04:00:14.638579Z",
         "version": null,
         "warnings": []
       },
       {
         "changes": {},
-        "created_at": "2026-10-13T04:00:13.304046Z",
+        "created_at": "2026-10-13T04:00:14.275140Z",
         "effective_at": null,
         "error": null,
-        "id": "414982a7fa3acc7086ddb6f150faf2c1",
+        "id": "5f2fbe98734cd11b14ec5ffaedc4483f",
         "kind": "action.seal",
         "label_en": "Done",
         "label_tr": "Tamamlandı",
@@ -3445,11 +3457,11 @@
         },
         "rolled_back": false,
         "section": null,
-        "short_id": "414982a7",
+        "short_id": "5f2fbe98",
         "state": "succeeded",
         "steps": [
           {
-            "at": "2026-10-13T07:00:13.430442+03:00",
+            "at": "2026-10-13T07:00:14.401862+03:00",
             "code": null,
             "message_en": null,
             "message_tr": null,
@@ -3457,7 +3469,7 @@
             "step": "received"
           },
           {
-            "at": "2026-10-13T07:00:13.431857+03:00",
+            "at": "2026-10-13T07:00:14.403218+03:00",
             "code": null,
             "message_en": null,
             "message_tr": null,
@@ -3465,7 +3477,7 @@
             "step": "dispatch"
           },
           {
-            "at": "2026-10-13T07:00:13.440790+03:00",
+            "at": "2026-10-13T07:00:14.421276+03:00",
             "code": null,
             "message_en": null,
             "message_tr": null,
@@ -3474,7 +3486,7 @@
           }
         ],
         "terminal": true,
-        "updated_at": "2026-10-13T04:00:13.467533Z",
+        "updated_at": "2026-10-13T04:00:14.452670Z",
         "version": null,
         "warnings": []
       }
@@ -3498,10 +3510,10 @@
         "task.next_run:Backup"
       ],
       "guarded": false,
-      "request_id": "f319d9e812fe04fea6bccadf19817309",
-      "short_id": "f319d9e8",
+      "request_id": "7650a07deb2f4c0817b6cf528a606fe3",
+      "short_id": "7650a07d",
       "state": "queued",
-      "status_url": "/api/v1/admin/requests/f319d9e812fe04fea6bccadf19817309",
+      "status_url": "/api/v1/admin/requests/7650a07deb2f4c0817b6cf528a606fe3",
       "warnings": []
     },
     "backup_done": {
@@ -3515,10 +3527,10 @@
           "old": 10
         }
       },
-      "created_at": "2026-10-13T04:00:27.158733Z",
+      "created_at": "2026-10-13T04:00:28.144849Z",
       "effective_at": null,
       "error": null,
-      "id": "f319d9e812fe04fea6bccadf19817309",
+      "id": "7650a07deb2f4c0817b6cf528a606fe3",
       "kind": "config.apply",
       "label_en": "Applied",
       "label_tr": "Uygulandı",
@@ -3528,11 +3540,11 @@
       "result": null,
       "rolled_back": false,
       "section": "backup",
-      "short_id": "f319d9e8",
+      "short_id": "7650a07d",
       "state": "active",
       "steps": [
         {
-          "at": "2026-10-13T07:00:27.216529+03:00",
+          "at": "2026-10-13T07:00:28.198551+03:00",
           "code": null,
           "message_en": null,
           "message_tr": null,
@@ -3540,7 +3552,7 @@
           "step": "received"
         },
         {
-          "at": "2026-10-13T07:00:27.221899+03:00",
+          "at": "2026-10-13T07:00:28.203638+03:00",
           "code": null,
           "message_en": null,
           "message_tr": null,
@@ -3548,7 +3560,7 @@
           "step": "validate"
         },
         {
-          "at": "2026-10-13T07:00:27.221940+03:00",
+          "at": "2026-10-13T07:00:28.203676+03:00",
           "code": null,
           "message_en": null,
           "message_tr": null,
@@ -3556,7 +3568,7 @@
           "step": "hold"
         },
         {
-          "at": "2026-10-13T07:00:27.231666+03:00",
+          "at": "2026-10-13T07:00:28.211851+03:00",
           "code": null,
           "message_en": null,
           "message_tr": null,
@@ -3564,7 +3576,7 @@
           "step": "backup"
         },
         {
-          "at": "2026-10-13T07:00:27.231686+03:00",
+          "at": "2026-10-13T07:00:28.211871+03:00",
           "code": null,
           "message_en": null,
           "message_tr": null,
@@ -3572,7 +3584,7 @@
           "step": "write_secrets"
         },
         {
-          "at": "2026-10-13T07:00:27.231692+03:00",
+          "at": "2026-10-13T07:00:28.211877+03:00",
           "code": null,
           "message_en": null,
           "message_tr": null,
@@ -3580,7 +3592,7 @@
           "step": "write_config"
         },
         {
-          "at": "2026-10-13T07:00:27.231696+03:00",
+          "at": "2026-10-13T07:00:28.211882+03:00",
           "code": null,
           "message_en": null,
           "message_tr": null,
@@ -3588,7 +3600,7 @@
           "step": "install_files"
         },
         {
-          "at": "2026-10-13T07:00:27.231700+03:00",
+          "at": "2026-10-13T07:00:28.211886+03:00",
           "code": null,
           "message_en": null,
           "message_tr": null,
@@ -3596,7 +3608,7 @@
           "step": "verify"
         },
         {
-          "at": "2026-10-13T07:00:27.232787+03:00",
+          "at": "2026-10-13T07:00:28.212302+03:00",
           "code": null,
           "message_en": null,
           "message_tr": null,
@@ -3605,11 +3617,11 @@
         }
       ],
       "terminal": true,
-      "updated_at": "2026-10-13T07:00:27.269075+03:00",
+      "updated_at": "2026-10-13T07:00:28.249236+03:00",
       "version": {
-        "from": "914bb72ecbb0b0d48fc3e69bf791516b15142e61df2a005028ff00485cc62b6f",
+        "from": "d0db46bbeed53e9e51600a28f8e1d7373b92267358a6e9c0b9e6c32aba1d50e8",
         "number": 10,
-        "to": "29a5060ba977b0fce72b9a065d7bf6f7ddd89db3514a139546b2941f3334b3f1"
+        "to": "5fcc71c8582fd2dcd59405a5043df5db2be636071c4ff661212df5397f84f85d"
       },
       "warnings": []
     },
@@ -3701,7 +3713,7 @@
           "old": null
         },
         "smtp.port": {
-          "new": 44241,
+          "new": 43127,
           "old": 587
         },
         "smtp.security": {
@@ -3730,15 +3742,15 @@
       ]
     },
     "config": {
-      "config_sha256": "29a5060ba977b0fce72b9a065d7bf6f7ddd89db3514a139546b2941f3334b3f1",
+      "config_sha256": "5fcc71c8582fd2dcd59405a5043df5db2be636071c4ff661212df5397f84f85d",
       "etags": {
         "backup": "backup:cf8c5740f9532bb1a6f3dd8d45004502f3594c149c98855fa7b682c8bb69fb46",
         "general": "general:38567353cb092eafe3c1df9b3e31212622d3f2a1fb8ea9835db22a645bdae3ce",
         "replica": "replica:86d57f79c1ce57fcf9f4cbdf909b46d64cee998b343a01f5c7fb96c1f7be89d5",
         "retention": "retention:5a48224027aafb1f9a47c4f3163304645e7a178267dbfe217661b68b1dee78fb",
-        "smtp": "smtp:4438464b75adaf36dcb27257acc138bda36f08f74c478fbf8a867476960f31fc",
-        "sources": "sources:1b04f72958855af408acf2b790098dd632f9e8b8edc840c5a095ce5511c6c267",
-        "tsa": "tsa:800e02917c2dac6e0225f4424a756c2ea2a18e9acc915c4f0def7600874fac58"
+        "smtp": "smtp:5f81f42b15a090c04d0dcd72fac600fdd11a0a53297ae2a21c6adc2012d86acb",
+        "sources": "sources:60fe87c90c5bf986b95db1b41111c4d1308f1add9cac799d056c9b1e7f4235c9",
+        "tsa": "tsa:4249e4993440103b68932188c5484fccb1637e8d338baec5f308c759f06f5581"
       },
       "locked": [
         {
@@ -3842,6 +3854,10 @@
           "reason": "expert"
         },
         {
+          "path": "retention.batch_days",
+          "reason": "expert"
+        },
+        {
           "path": "clock.ntp_port",
           "reason": "expert"
         },
@@ -3936,8 +3952,8 @@
       ],
       "pending": [
         {
-          "effective_at": "2026-10-14T04:00:23.944167Z",
-          "request_id": "64c5c21d9cf2615c8fb2e783bb6df40b",
+          "effective_at": "2026-10-14T04:00:24.935584Z",
+          "request_id": "042cd6f003d2b8d4873756b06511c2c4",
           "section": "tsa"
         }
       ],
@@ -3986,7 +4002,7 @@
           "enabled": true,
           "secrets": {
             "replica.password": {
-              "changed_at": "2026-10-13T07:00:26.629091+03:00",
+              "changed_at": "2026-10-13T07:00:27.582997+03:00",
               "changed_by": "web:tolga",
               "set": true
             }
@@ -4008,12 +4024,12 @@
         },
         "smtp": {
           "ca": {
-            "sha256": "bfc70b68684fa14fa3f24ae082bb413dbefdf9fac0e96b51b16e7c1364d455ec"
+            "sha256": "d65f881d704206b100aca911be668e02a5babbc23a291e90aca16d1849e9a2bf"
           },
           "enabled": true,
           "from_address": "arcilogger@ornek.example",
           "host": "127.0.0.1",
-          "port": 44241,
+          "port": 43127,
           "secrets": {
             "smtp.password": {
               "changed_at": null,
@@ -4032,8 +4048,9 @@
             "expected": true,
             "firewall": "open",
             "heartbeat_minutes": 15,
-            "last_seen": "2026-10-13T04:00:04.449614Z",
+            "last_seen": "2026-10-13T04:00:05.369253Z",
             "name": "fortigate",
+            "snmp": null,
             "transport": "any",
             "type": "fortigate"
           },
@@ -4043,8 +4060,9 @@
             "expected": true,
             "firewall": "open",
             "heartbeat_minutes": 15,
-            "last_seen": "2026-10-13T03:58:16.449614Z",
+            "last_seen": "2026-10-13T03:58:17.369253Z",
             "name": "core-r1",
+            "snmp": null,
             "transport": "any",
             "type": "mikrotik"
           }
@@ -4067,8 +4085,8 @@
           "roots": [
             {
               "legal": true,
-              "not_after": "2036-10-09T04:00:23Z",
-              "sha256": "3bfc0277229e79092389f2b3c2ec697de0e464e11fd5c8790c8006cada2b9d37",
+              "not_after": "2036-10-09T04:00:24Z",
+              "sha256": "96cd6eb3474957df5c314153765377bab130354286a9127f946345b60b75a8e2",
               "source": "web",
               "subject": "CN=Örnek Test Kök Sertifikası"
             }
@@ -4079,12 +4097,12 @@
           },
           "secrets": {
             "kamusm.customer": {
-              "changed_at": "2026-10-13T07:00:23.261844+03:00",
+              "changed_at": "2026-10-13T07:00:24.271002+03:00",
               "changed_by": "web:tolga",
               "set": true
             },
             "kamusm.password": {
-              "changed_at": "2026-10-13T07:00:23.261844+03:00",
+              "changed_at": "2026-10-13T07:00:24.271002+03:00",
               "changed_by": "web:tolga",
               "set": true
             },
@@ -4107,8 +4125,8 @@
             "sha256": null,
             "staged": [
               {
-                "effective_at": "2026-10-14T04:00:23.944167Z",
-                "sha256": "d108d421cbaf12636f3a9b6b0b6dc776d4390ce494a087a77afe5ac4fb3b11fb"
+                "effective_at": "2026-10-14T04:00:24.935584Z",
+                "sha256": "bf8105aa526f269cda8502537d9780ea0a65341f32cfe734e6c07e9fb1cef54f"
               }
             ],
             "trusted": false
@@ -4121,18 +4139,18 @@
       "effective_at": null,
       "effects": [],
       "guarded": false,
-      "request_id": "48a9377f21e07542687c29ca8c0f2520",
-      "short_id": "48a9377f",
+      "request_id": "41ba30ff022c29b2fddc47136277ab01",
+      "short_id": "41ba30ff",
       "state": "queued",
-      "status_url": "/api/v1/admin/requests/48a9377f21e07542687c29ca8c0f2520",
+      "status_url": "/api/v1/admin/requests/41ba30ff022c29b2fddc47136277ab01",
       "warnings": []
     },
     "lease_rebuild_done": {
       "changes": {},
-      "created_at": "2026-10-13T04:00:27.504203Z",
+      "created_at": "2026-10-13T04:00:28.486156Z",
       "effective_at": null,
       "error": null,
-      "id": "48a9377f21e07542687c29ca8c0f2520",
+      "id": "41ba30ff022c29b2fddc47136277ab01",
       "kind": "worker.lease_rebuild",
       "label_en": "Done",
       "label_tr": "Tamamlandı",
@@ -4146,11 +4164,11 @@
       },
       "rolled_back": false,
       "section": null,
-      "short_id": "48a9377f",
+      "short_id": "41ba30ff",
       "state": "succeeded",
       "steps": [],
       "terminal": true,
-      "updated_at": "2026-11-05T20:44:59.191743Z",
+      "updated_at": "2026-11-06T06:01:17.047313Z",
       "version": null,
       "warnings": []
     },
@@ -4177,10 +4195,10 @@
         "task.next_run:Replica"
       ],
       "guarded": false,
-      "request_id": "fc0f9eba1c5d1ebd5f5096f1a55d55dd",
-      "short_id": "fc0f9eba",
+      "request_id": "90a956605187e00c3892500ae6bdef47",
+      "short_id": "90a95660",
       "state": "queued",
-      "status_url": "/api/v1/admin/requests/fc0f9eba1c5d1ebd5f5096f1a55d55dd",
+      "status_url": "/api/v1/admin/requests/90a956605187e00c3892500ae6bdef47",
       "warnings": []
     },
     "replica_done": {
@@ -4200,10 +4218,10 @@
           "old": null
         }
       },
-      "created_at": "2026-10-13T04:00:26.551651Z",
+      "created_at": "2026-10-13T04:00:27.506711Z",
       "effective_at": null,
       "error": null,
-      "id": "fc0f9eba1c5d1ebd5f5096f1a55d55dd",
+      "id": "90a956605187e00c3892500ae6bdef47",
       "kind": "config.apply",
       "label_en": "Applied",
       "label_tr": "Uygulandı",
@@ -4213,11 +4231,11 @@
       "result": null,
       "rolled_back": false,
       "section": "replica",
-      "short_id": "fc0f9eba",
+      "short_id": "90a95660",
       "state": "active",
       "steps": [
         {
-          "at": "2026-10-13T07:00:26.603466+03:00",
+          "at": "2026-10-13T07:00:27.560379+03:00",
           "code": null,
           "message_en": null,
           "message_tr": null,
@@ -4225,7 +4243,7 @@
           "step": "received"
         },
         {
-          "at": "2026-10-13T07:00:26.609476+03:00",
+          "at": "2026-10-13T07:00:27.567316+03:00",
           "code": null,
           "message_en": null,
           "message_tr": null,
@@ -4233,7 +4251,7 @@
           "step": "validate"
         },
         {
-          "at": "2026-10-13T07:00:26.613088+03:00",
+          "at": "2026-10-13T07:00:27.570961+03:00",
           "code": null,
           "message_en": null,
           "message_tr": null,
@@ -4241,7 +4259,7 @@
           "step": "probe"
         },
         {
-          "at": "2026-10-13T07:00:26.613189+03:00",
+          "at": "2026-10-13T07:00:27.571020+03:00",
           "code": null,
           "message_en": null,
           "message_tr": null,
@@ -4249,7 +4267,7 @@
           "step": "hold"
         },
         {
-          "at": "2026-10-13T07:00:26.624410+03:00",
+          "at": "2026-10-13T07:00:27.581171+03:00",
           "code": null,
           "message_en": null,
           "message_tr": null,
@@ -4257,7 +4275,7 @@
           "step": "backup"
         },
         {
-          "at": "2026-10-13T07:00:26.624432+03:00",
+          "at": "2026-10-13T07:00:27.581192+03:00",
           "code": null,
           "message_en": null,
           "message_tr": null,
@@ -4265,7 +4283,7 @@
           "step": "write_secrets"
         },
         {
-          "at": "2026-10-13T07:00:26.624438+03:00",
+          "at": "2026-10-13T07:00:27.581198+03:00",
           "code": null,
           "message_en": null,
           "message_tr": null,
@@ -4273,7 +4291,7 @@
           "step": "write_config"
         },
         {
-          "at": "2026-10-13T07:00:26.624442+03:00",
+          "at": "2026-10-13T07:00:27.581203+03:00",
           "code": null,
           "message_en": null,
           "message_tr": null,
@@ -4281,7 +4299,7 @@
           "step": "install_files"
         },
         {
-          "at": "2026-10-13T07:00:26.624445+03:00",
+          "at": "2026-10-13T07:00:27.581218+03:00",
           "code": null,
           "message_en": null,
           "message_tr": null,
@@ -4289,7 +4307,7 @@
           "step": "verify"
         },
         {
-          "at": "2026-10-13T07:00:26.625052+03:00",
+          "at": "2026-10-13T07:00:27.581694+03:00",
           "code": null,
           "message_en": null,
           "message_tr": null,
@@ -4297,7 +4315,7 @@
           "step": "journal"
         },
         {
-          "at": "2026-10-13T07:00:26.670157+03:00",
+          "at": "2026-10-13T07:00:27.624226+03:00",
           "code": null,
           "message_en": null,
           "message_tr": null,
@@ -4306,11 +4324,11 @@
         }
       ],
       "terminal": true,
-      "updated_at": "2026-10-13T07:00:26.670157+03:00",
+      "updated_at": "2026-10-13T07:00:27.624226+03:00",
       "version": {
-        "from": "d60796372b1fc65b902d556fafb63f710b7d9a3baa2bcf7d032069042ca7eccd",
+        "from": "0fa23c12a58389efcd0da5d2a32e410d79ea51ab108aea667f246bf3ee8cbd34",
         "number": 8,
-        "to": "17b9373a9c8bea51c08cd260b4ba447d39125d639a6ebba9d8cd960b41a9557d"
+        "to": "264a8812e7336d992b418c636bc32f826fb03d307bd14290aaec9b624ccf6c6d"
       },
       "warnings": []
     },
@@ -4319,18 +4337,18 @@
       "effective_at": null,
       "effects": [],
       "guarded": false,
-      "request_id": "dfcb352e8badfc1764f71fe9ccb6849e",
-      "short_id": "dfcb352e",
+      "request_id": "ff481c0f007447c6e3b3bea134caac42",
+      "short_id": "ff481c0f",
       "state": "queued",
-      "status_url": "/api/v1/admin/requests/dfcb352e8badfc1764f71fe9ccb6849e",
+      "status_url": "/api/v1/admin/requests/ff481c0f007447c6e3b3bea134caac42",
       "warnings": []
     },
     "replica_test_done": {
       "changes": {},
-      "created_at": "2026-10-13T04:00:27.307192Z",
+      "created_at": "2026-10-13T04:00:28.286433Z",
       "effective_at": null,
       "error": null,
-      "id": "dfcb352e8badfc1764f71fe9ccb6849e",
+      "id": "ff481c0f007447c6e3b3bea134caac42",
       "kind": "action.replica_test",
       "label_en": "Done",
       "label_tr": "Tamamlandı",
@@ -4343,11 +4361,11 @@
       },
       "rolled_back": false,
       "section": null,
-      "short_id": "dfcb352e",
+      "short_id": "ff481c0f",
       "state": "succeeded",
       "steps": [
         {
-          "at": "2026-10-13T07:00:27.357366+03:00",
+          "at": "2026-10-13T07:00:28.338035+03:00",
           "code": null,
           "message_en": null,
           "message_tr": null,
@@ -4355,7 +4373,7 @@
           "step": "received"
         },
         {
-          "at": "2026-10-13T07:00:27.358640+03:00",
+          "at": "2026-10-13T07:00:28.339544+03:00",
           "code": null,
           "message_en": null,
           "message_tr": null,
@@ -4363,7 +4381,7 @@
           "step": "dispatch"
         },
         {
-          "at": "2026-10-13T07:00:27.370455+03:00",
+          "at": "2026-10-13T07:00:28.348942+03:00",
           "code": null,
           "message_en": null,
           "message_tr": null,
@@ -4372,7 +4390,7 @@
         }
       ],
       "terminal": true,
-      "updated_at": "2026-10-13T07:00:27.405666+03:00",
+      "updated_at": "2026-10-13T07:00:28.386901+03:00",
       "version": null,
       "warnings": []
     },
@@ -4389,10 +4407,10 @@
         "task.next_run:Retention"
       ],
       "guarded": false,
-      "request_id": "77c3cb456872fa27dfd17c7f54b4bcbe",
-      "short_id": "77c3cb45",
+      "request_id": "f8bd3efaad8c5c507a48a407d4357ff3",
+      "short_id": "f8bd3efa",
       "state": "queued",
-      "status_url": "/api/v1/admin/requests/77c3cb456872fa27dfd17c7f54b4bcbe",
+      "status_url": "/api/v1/admin/requests/f8bd3efaad8c5c507a48a407d4357ff3",
       "warnings": []
     },
     "retention_done": {
@@ -4402,10 +4420,10 @@
           "old": false
         }
       },
-      "created_at": "2026-10-13T04:00:26.924348Z",
+      "created_at": "2026-10-13T04:00:27.903330Z",
       "effective_at": null,
       "error": null,
-      "id": "77c3cb456872fa27dfd17c7f54b4bcbe",
+      "id": "f8bd3efaad8c5c507a48a407d4357ff3",
       "kind": "config.apply",
       "label_en": "Applied",
       "label_tr": "Uygulandı",
@@ -4415,11 +4433,11 @@
       "result": null,
       "rolled_back": false,
       "section": "retention",
-      "short_id": "77c3cb45",
+      "short_id": "f8bd3efa",
       "state": "active",
       "steps": [
         {
-          "at": "2026-10-13T07:00:26.981331+03:00",
+          "at": "2026-10-13T07:00:27.962786+03:00",
           "code": null,
           "message_en": null,
           "message_tr": null,
@@ -4427,7 +4445,7 @@
           "step": "received"
         },
         {
-          "at": "2026-10-13T07:00:26.986788+03:00",
+          "at": "2026-10-13T07:00:27.969550+03:00",
           "code": null,
           "message_en": null,
           "message_tr": null,
@@ -4435,7 +4453,7 @@
           "step": "validate"
         },
         {
-          "at": "2026-10-13T07:00:26.986826+03:00",
+          "at": "2026-10-13T07:00:27.969595+03:00",
           "code": null,
           "message_en": null,
           "message_tr": null,
@@ -4443,7 +4461,7 @@
           "step": "hold"
         },
         {
-          "at": "2026-10-13T07:00:26.997965+03:00",
+          "at": "2026-10-13T07:00:27.977773+03:00",
           "code": null,
           "message_en": null,
           "message_tr": null,
@@ -4451,7 +4469,7 @@
           "step": "backup"
         },
         {
-          "at": "2026-10-13T07:00:26.997987+03:00",
+          "at": "2026-10-13T07:00:27.977795+03:00",
           "code": null,
           "message_en": null,
           "message_tr": null,
@@ -4459,7 +4477,7 @@
           "step": "write_secrets"
         },
         {
-          "at": "2026-10-13T07:00:26.997993+03:00",
+          "at": "2026-10-13T07:00:27.977801+03:00",
           "code": null,
           "message_en": null,
           "message_tr": null,
@@ -4467,7 +4485,7 @@
           "step": "write_config"
         },
         {
-          "at": "2026-10-13T07:00:26.997997+03:00",
+          "at": "2026-10-13T07:00:27.977806+03:00",
           "code": null,
           "message_en": null,
           "message_tr": null,
@@ -4475,7 +4493,7 @@
           "step": "install_files"
         },
         {
-          "at": "2026-10-13T07:00:26.998002+03:00",
+          "at": "2026-10-13T07:00:27.977811+03:00",
           "code": null,
           "message_en": null,
           "message_tr": null,
@@ -4483,7 +4501,7 @@
           "step": "verify"
         },
         {
-          "at": "2026-10-13T07:00:26.998767+03:00",
+          "at": "2026-10-13T07:00:27.978307+03:00",
           "code": null,
           "message_en": null,
           "message_tr": null,
@@ -4491,7 +4509,7 @@
           "step": "journal"
         },
         {
-          "at": "2026-10-13T07:00:27.041002+03:00",
+          "at": "2026-10-13T07:00:28.019775+03:00",
           "code": null,
           "message_en": null,
           "message_tr": null,
@@ -4500,11 +4518,11 @@
         }
       ],
       "terminal": true,
-      "updated_at": "2026-10-13T07:00:27.041002+03:00",
+      "updated_at": "2026-10-13T07:00:28.019775+03:00",
       "version": {
-        "from": "17b9373a9c8bea51c08cd260b4ba447d39125d639a6ebba9d8cd960b41a9557d",
+        "from": "264a8812e7336d992b418c636bc32f826fb03d307bd14290aaec9b624ccf6c6d",
         "number": 9,
-        "to": "914bb72ecbb0b0d48fc3e69bf791516b15142e61df2a005028ff00485cc62b6f"
+        "to": "d0db46bbeed53e9e51600a28f8e1d7373b92267358a6e9c0b9e6c32aba1d50e8"
       },
       "warnings": []
     },
@@ -4523,7 +4541,7 @@
           "old": null
         },
         "smtp.port": {
-          "new": 44241,
+          "new": 43127,
           "old": 587
         },
         "smtp.security": {
@@ -4540,10 +4558,10 @@
         "reload.worker"
       ],
       "guarded": false,
-      "request_id": "e465f453902551c347b315b666108e03",
-      "short_id": "e465f453",
+      "request_id": "98445f8388df8f34cf167ea50c33da69",
+      "short_id": "98445f83",
       "state": "queued",
-      "status_url": "/api/v1/admin/requests/e465f453902551c347b315b666108e03",
+      "status_url": "/api/v1/admin/requests/98445f8388df8f34cf167ea50c33da69",
       "warnings": [
         {
           "code": "smtp_plaintext",
@@ -4555,7 +4573,7 @@
     "smtp_ca_accepted": {
       "changes": {
         "smtp.ca_file": {
-          "new": "smtp-ca/bfc70b68684fa14fa3f24ae082bb413dbefdf9fac0e96b51b16e7c1364d455ec.pem",
+          "new": "smtp-ca/d65f881d704206b100aca911be668e02a5babbc23a291e90aca16d1849e9a2bf.pem",
           "old": null
         }
       },
@@ -4564,10 +4582,10 @@
         "reload.worker"
       ],
       "guarded": false,
-      "request_id": "c27ce728de7bc35339ec9f1adfc8dc08",
-      "short_id": "c27ce728",
+      "request_id": "b46194a26223a88d8d3448849dd3ad02",
+      "short_id": "b46194a2",
       "state": "queued",
-      "status_url": "/api/v1/admin/requests/c27ce728de7bc35339ec9f1adfc8dc08",
+      "status_url": "/api/v1/admin/requests/b46194a26223a88d8d3448849dd3ad02",
       "warnings": [
         {
           "code": "smtp_plaintext",
@@ -4579,14 +4597,14 @@
     "smtp_ca_done": {
       "changes": {
         "smtp.ca_file": {
-          "new": "smtp-ca/bfc70b68684fa14fa3f24ae082bb413dbefdf9fac0e96b51b16e7c1364d455ec.pem",
+          "new": "smtp-ca/d65f881d704206b100aca911be668e02a5babbc23a291e90aca16d1849e9a2bf.pem",
           "old": null
         }
       },
-      "created_at": "2026-10-13T04:00:26.256753Z",
+      "created_at": "2026-10-13T04:00:27.202794Z",
       "effective_at": null,
       "error": null,
-      "id": "c27ce728de7bc35339ec9f1adfc8dc08",
+      "id": "b46194a26223a88d8d3448849dd3ad02",
       "kind": "config.apply",
       "label_en": "Applied",
       "label_tr": "Uygulandı",
@@ -4596,11 +4614,11 @@
       "result": null,
       "rolled_back": false,
       "section": "smtp",
-      "short_id": "c27ce728",
+      "short_id": "b46194a2",
       "state": "active",
       "steps": [
         {
-          "at": "2026-10-13T07:00:26.309382+03:00",
+          "at": "2026-10-13T07:00:27.257674+03:00",
           "code": null,
           "message_en": null,
           "message_tr": null,
@@ -4608,7 +4626,7 @@
           "step": "received"
         },
         {
-          "at": "2026-10-13T07:00:26.314665+03:00",
+          "at": "2026-10-13T07:00:27.263203+03:00",
           "code": null,
           "message_en": null,
           "message_tr": null,
@@ -4616,7 +4634,7 @@
           "step": "validate"
         },
         {
-          "at": "2026-10-13T07:00:26.318224+03:00",
+          "at": "2026-10-13T07:00:27.266864+03:00",
           "code": null,
           "message_en": null,
           "message_tr": null,
@@ -4624,7 +4642,7 @@
           "step": "probe"
         },
         {
-          "at": "2026-10-13T07:00:26.318275+03:00",
+          "at": "2026-10-13T07:00:27.266910+03:00",
           "code": null,
           "message_en": null,
           "message_tr": null,
@@ -4632,7 +4650,7 @@
           "step": "hold"
         },
         {
-          "at": "2026-10-13T07:00:26.330252+03:00",
+          "at": "2026-10-13T07:00:27.277359+03:00",
           "code": null,
           "message_en": null,
           "message_tr": null,
@@ -4640,7 +4658,7 @@
           "step": "backup"
         },
         {
-          "at": "2026-10-13T07:00:26.330274+03:00",
+          "at": "2026-10-13T07:00:27.277379+03:00",
           "code": null,
           "message_en": null,
           "message_tr": null,
@@ -4648,7 +4666,7 @@
           "step": "write_secrets"
         },
         {
-          "at": "2026-10-13T07:00:26.330279+03:00",
+          "at": "2026-10-13T07:00:27.277385+03:00",
           "code": null,
           "message_en": null,
           "message_tr": null,
@@ -4656,7 +4674,7 @@
           "step": "write_config"
         },
         {
-          "at": "2026-10-13T07:00:26.330283+03:00",
+          "at": "2026-10-13T07:00:27.277389+03:00",
           "code": null,
           "message_en": null,
           "message_tr": null,
@@ -4664,7 +4682,7 @@
           "step": "install_files"
         },
         {
-          "at": "2026-10-13T07:00:26.330286+03:00",
+          "at": "2026-10-13T07:00:27.277392+03:00",
           "code": null,
           "message_en": null,
           "message_tr": null,
@@ -4672,7 +4690,7 @@
           "step": "verify"
         },
         {
-          "at": "2026-10-13T07:00:26.330838+03:00",
+          "at": "2026-10-13T07:00:27.277848+03:00",
           "code": null,
           "message_en": null,
           "message_tr": null,
@@ -4680,7 +4698,7 @@
           "step": "journal"
         },
         {
-          "at": "2026-10-13T07:00:26.369639+03:00",
+          "at": "2026-10-13T07:00:27.320769+03:00",
           "code": null,
           "message_en": null,
           "message_tr": null,
@@ -4689,11 +4707,11 @@
         }
       ],
       "terminal": true,
-      "updated_at": "2026-10-13T07:00:26.369639+03:00",
+      "updated_at": "2026-10-13T07:00:27.320769+03:00",
       "version": {
-        "from": "d0509008e11d73f0ffe4c4ec949a3fa8a2960508ea2f170d523d28e1c91ba372",
+        "from": "64ba3d498eb3c6023182701e8c064f8f29f971bf65234604303adc60d5882670",
         "number": 7,
-        "to": "d60796372b1fc65b902d556fafb63f710b7d9a3baa2bcf7d032069042ca7eccd"
+        "to": "0fa23c12a58389efcd0da5d2a32e410d79ea51ab108aea667f246bf3ee8cbd34"
       },
       "warnings": [
         {
@@ -4718,7 +4736,7 @@
           "old": null
         },
         "smtp.port": {
-          "new": 44241,
+          "new": 43127,
           "old": 587
         },
         "smtp.security": {
@@ -4730,10 +4748,10 @@
           "old": 30
         }
       },
-      "created_at": "2026-10-13T04:00:25.415345Z",
+      "created_at": "2026-10-13T04:00:26.370964Z",
       "effective_at": null,
       "error": null,
-      "id": "e465f453902551c347b315b666108e03",
+      "id": "98445f8388df8f34cf167ea50c33da69",
       "kind": "config.apply",
       "label_en": "Applied",
       "label_tr": "Uygulandı",
@@ -4743,11 +4761,11 @@
       "result": null,
       "rolled_back": false,
       "section": "smtp",
-      "short_id": "e465f453",
+      "short_id": "98445f83",
       "state": "active",
       "steps": [
         {
-          "at": "2026-10-13T07:00:25.470038+03:00",
+          "at": "2026-10-13T07:00:26.427883+03:00",
           "code": null,
           "message_en": null,
           "message_tr": null,
@@ -4755,7 +4773,7 @@
           "step": "received"
         },
         {
-          "at": "2026-10-13T07:00:25.476197+03:00",
+          "at": "2026-10-13T07:00:26.432833+03:00",
           "code": null,
           "message_en": null,
           "message_tr": null,
@@ -4763,7 +4781,7 @@
           "step": "validate"
         },
         {
-          "at": "2026-10-13T07:00:25.480198+03:00",
+          "at": "2026-10-13T07:00:26.436081+03:00",
           "code": null,
           "message_en": null,
           "message_tr": null,
@@ -4771,7 +4789,7 @@
           "step": "probe"
         },
         {
-          "at": "2026-10-13T07:00:25.480250+03:00",
+          "at": "2026-10-13T07:00:26.436127+03:00",
           "code": null,
           "message_en": null,
           "message_tr": null,
@@ -4779,7 +4797,7 @@
           "step": "hold"
         },
         {
-          "at": "2026-10-13T07:00:25.489895+03:00",
+          "at": "2026-10-13T07:00:26.444801+03:00",
           "code": null,
           "message_en": null,
           "message_tr": null,
@@ -4787,7 +4805,7 @@
           "step": "backup"
         },
         {
-          "at": "2026-10-13T07:00:25.489915+03:00",
+          "at": "2026-10-13T07:00:26.444820+03:00",
           "code": null,
           "message_en": null,
           "message_tr": null,
@@ -4795,7 +4813,7 @@
           "step": "write_secrets"
         },
         {
-          "at": "2026-10-13T07:00:25.489921+03:00",
+          "at": "2026-10-13T07:00:26.444827+03:00",
           "code": null,
           "message_en": null,
           "message_tr": null,
@@ -4803,7 +4821,7 @@
           "step": "write_config"
         },
         {
-          "at": "2026-10-13T07:00:25.489926+03:00",
+          "at": "2026-10-13T07:00:26.444831+03:00",
           "code": null,
           "message_en": null,
           "message_tr": null,
@@ -4811,7 +4829,7 @@
           "step": "install_files"
         },
         {
-          "at": "2026-10-13T07:00:25.489931+03:00",
+          "at": "2026-10-13T07:00:26.444835+03:00",
           "code": null,
           "message_en": null,
           "message_tr": null,
@@ -4819,7 +4837,7 @@
           "step": "verify"
         },
         {
-          "at": "2026-10-13T07:00:25.490487+03:00",
+          "at": "2026-10-13T07:00:26.445368+03:00",
           "code": null,
           "message_en": null,
           "message_tr": null,
@@ -4827,7 +4845,7 @@
           "step": "journal"
         },
         {
-          "at": "2026-10-13T07:00:25.529207+03:00",
+          "at": "2026-10-13T07:00:26.480647+03:00",
           "code": null,
           "message_en": null,
           "message_tr": null,
@@ -4836,11 +4854,11 @@
         }
       ],
       "terminal": true,
-      "updated_at": "2026-10-13T07:00:25.529207+03:00",
+      "updated_at": "2026-10-13T07:00:26.480647+03:00",
       "version": {
-        "from": "84984ac2eddedd621c23c8ffdcc4d505a4362bf011bdb285fd7401cc45577025",
+        "from": "f1e9c2cf9587727064622e480f61f26177354f717673d051e285e883c95c939e",
         "number": 6,
-        "to": "d0509008e11d73f0ffe4c4ec949a3fa8a2960508ea2f170d523d28e1c91ba372"
+        "to": "64ba3d498eb3c6023182701e8c064f8f29f971bf65234604303adc60d5882670"
       },
       "warnings": [
         {
@@ -4855,18 +4873,18 @@
       "effective_at": null,
       "effects": [],
       "guarded": false,
-      "request_id": "cd3fb3b560d2d385ed2b43186ecdab96",
-      "short_id": "cd3fb3b5",
+      "request_id": "c621fec4a292d88522a4f4ad5744f8b4",
+      "short_id": "c621fec4",
       "state": "queued",
-      "status_url": "/api/v1/admin/requests/cd3fb3b560d2d385ed2b43186ecdab96",
+      "status_url": "/api/v1/admin/requests/c621fec4a292d88522a4f4ad5744f8b4",
       "warnings": []
     },
     "test_email_done": {
       "changes": {},
-      "created_at": "2026-10-13T04:00:25.566524Z",
+      "created_at": "2026-10-13T04:00:26.518111Z",
       "effective_at": null,
       "error": null,
-      "id": "cd3fb3b560d2d385ed2b43186ecdab96",
+      "id": "c621fec4a292d88522a4f4ad5744f8b4",
       "kind": "worker.test_email",
       "label_en": "Done",
       "label_tr": "Tamamlandı",
@@ -4881,11 +4899,11 @@
       },
       "rolled_back": false,
       "section": null,
-      "short_id": "cd3fb3b5",
+      "short_id": "c621fec4",
       "state": "succeeded",
       "steps": [],
       "terminal": true,
-      "updated_at": "2026-11-05T20:44:57.137238Z",
+      "updated_at": "2026-11-06T06:01:14.943834Z",
       "version": null,
       "warnings": []
     },
@@ -4895,17 +4913,17 @@
         "is_ca": true,
         "issuer": "CN=Örnek Test Kök Sertifikası",
         "key": "EC P-256",
-        "not_after": "2036-10-09T04:00:26Z",
-        "not_before": "2026-10-12T04:00:26Z",
+        "not_after": "2036-10-09T04:00:27Z",
+        "not_before": "2026-10-12T04:00:27Z",
         "self_signed": true,
         "subject": "CN=Örnek Test Kök Sertifikası",
         "warnings": []
       },
-      "expires_at": "2026-10-13T07:30:26.157314+03:00",
+      "expires_at": "2026-10-13T07:30:27.101939+03:00",
       "kind": "smtp_ca",
-      "sha256": "bfc70b68684fa14fa3f24ae082bb413dbefdf9fac0e96b51b16e7c1364d455ec",
+      "sha256": "d65f881d704206b100aca911be668e02a5babbc23a291e90aca16d1849e9a2bf",
       "size": 546,
-      "upload_id": "6182393432cf0808600563573e33af52",
+      "upload_id": "a9d223d72ff7bbae2cd530ac3abc8e4d",
       "zamane": null
     }
   },
@@ -4933,10 +4951,10 @@
         "system.firewall"
       ],
       "guarded": false,
-      "request_id": "f3badcb964bf6dbf8a5095a070c18180",
-      "short_id": "f3badcb9",
+      "request_id": "cf1849b7b9ae8a518961d4d0077bddbb",
+      "short_id": "cf1849b7",
       "state": "queued",
-      "status_url": "/api/v1/admin/requests/f3badcb964bf6dbf8a5095a070c18180",
+      "status_url": "/api/v1/admin/requests/cf1849b7b9ae8a518961d4d0077bddbb",
       "warnings": []
     },
     "add_active": {
@@ -4954,10 +4972,10 @@
           "old": null
         }
       },
-      "created_at": "2026-10-13T04:00:24.530160Z",
+      "created_at": "2026-10-13T04:00:25.527726Z",
       "effective_at": null,
       "error": null,
-      "id": "f3badcb964bf6dbf8a5095a070c18180",
+      "id": "cf1849b7b9ae8a518961d4d0077bddbb",
       "kind": "config.apply",
       "label_en": "Applied",
       "label_tr": "Uygulandı",
@@ -4967,11 +4985,11 @@
       "result": null,
       "rolled_back": false,
       "section": "sources",
-      "short_id": "f3badcb9",
+      "short_id": "cf1849b7",
       "state": "active",
       "steps": [
         {
-          "at": "2026-10-13T07:00:24.586688+03:00",
+          "at": "2026-10-13T07:00:25.583510+03:00",
           "code": null,
           "message_en": null,
           "message_tr": null,
@@ -4979,7 +4997,7 @@
           "step": "received"
         },
         {
-          "at": "2026-10-13T07:00:24.591913+03:00",
+          "at": "2026-10-13T07:00:25.588168+03:00",
           "code": null,
           "message_en": null,
           "message_tr": null,
@@ -4987,7 +5005,7 @@
           "step": "validate"
         },
         {
-          "at": "2026-10-13T07:00:24.592054+03:00",
+          "at": "2026-10-13T07:00:25.588207+03:00",
           "code": null,
           "message_en": null,
           "message_tr": null,
@@ -4995,7 +5013,7 @@
           "step": "hold"
         },
         {
-          "at": "2026-10-13T07:00:24.600219+03:00",
+          "at": "2026-10-13T07:00:25.596017+03:00",
           "code": null,
           "message_en": null,
           "message_tr": null,
@@ -5003,7 +5021,7 @@
           "step": "backup"
         },
         {
-          "at": "2026-10-13T07:00:24.600240+03:00",
+          "at": "2026-10-13T07:00:25.596037+03:00",
           "code": null,
           "message_en": null,
           "message_tr": null,
@@ -5011,7 +5029,7 @@
           "step": "write_secrets"
         },
         {
-          "at": "2026-10-13T07:00:24.600245+03:00",
+          "at": "2026-10-13T07:00:25.596043+03:00",
           "code": null,
           "message_en": null,
           "message_tr": null,
@@ -5019,7 +5037,7 @@
           "step": "write_config"
         },
         {
-          "at": "2026-10-13T07:00:24.600250+03:00",
+          "at": "2026-10-13T07:00:25.596048+03:00",
           "code": null,
           "message_en": null,
           "message_tr": null,
@@ -5027,7 +5045,7 @@
           "step": "install_files"
         },
         {
-          "at": "2026-10-13T07:00:24.600254+03:00",
+          "at": "2026-10-13T07:00:25.596052+03:00",
           "code": null,
           "message_en": null,
           "message_tr": null,
@@ -5035,7 +5053,7 @@
           "step": "verify"
         },
         {
-          "at": "2026-10-13T07:00:24.601091+03:00",
+          "at": "2026-10-13T07:00:25.596518+03:00",
           "code": null,
           "message_en": null,
           "message_tr": null,
@@ -5043,7 +5061,7 @@
           "step": "journal"
         },
         {
-          "at": "2026-10-13T07:00:24.695602+03:00",
+          "at": "2026-10-13T07:00:25.688914+03:00",
           "code": null,
           "message_en": null,
           "message_tr": null,
@@ -5051,7 +5069,7 @@
           "step": "reload.collector"
         },
         {
-          "at": "2026-10-13T07:00:24.695602+03:00",
+          "at": "2026-10-13T07:00:25.688914+03:00",
           "code": null,
           "message_en": null,
           "message_tr": null,
@@ -5059,7 +5077,7 @@
           "step": "reload.ingest"
         },
         {
-          "at": "2026-10-13T07:00:24.695602+03:00",
+          "at": "2026-10-13T07:00:25.688914+03:00",
           "code": null,
           "message_en": null,
           "message_tr": null,
@@ -5067,7 +5085,7 @@
           "step": "reload.api"
         },
         {
-          "at": "2026-10-13T07:00:24.695602+03:00",
+          "at": "2026-10-13T07:00:25.688914+03:00",
           "code": null,
           "message_en": null,
           "message_tr": null,
@@ -5076,11 +5094,11 @@
         }
       ],
       "terminal": true,
-      "updated_at": "2026-10-13T07:00:24.695602+03:00",
+      "updated_at": "2026-10-13T07:00:25.688914+03:00",
       "version": {
-        "from": "076b9798118249d98343e26956378253268860a51ac6d47d939dcf0a55387578",
+        "from": "74466ccd15519a577df1f2f5c609d9a8fbabff7e1ccb0b17bfe339ee0f4f2801",
         "number": 4,
-        "to": "76a1507c2def5e619f2afb4a761763cbaab3614f1499f66784a5717982086eb7"
+        "to": "3f42eb9091162dd46d3c820ad0ae95c5bbec1b4501c03905293430f417649ab7"
       },
       "warnings": []
     },
@@ -5099,10 +5117,10 @@
           "old": null
         }
       },
-      "created_at": "2026-10-13T04:00:24.530160Z",
+      "created_at": "2026-10-13T04:00:25.527726Z",
       "effective_at": null,
       "error": null,
-      "id": "f3badcb964bf6dbf8a5095a070c18180",
+      "id": "cf1849b7b9ae8a518961d4d0077bddbb",
       "kind": "config.apply",
       "label_en": "Written, services loading",
       "label_tr": "Yazıldı, hizmetler yüklüyor",
@@ -5112,11 +5130,11 @@
       "result": null,
       "rolled_back": false,
       "section": "sources",
-      "short_id": "f3badcb9",
+      "short_id": "cf1849b7",
       "state": "applied",
       "steps": [
         {
-          "at": "2026-10-13T07:00:24.586688+03:00",
+          "at": "2026-10-13T07:00:25.583510+03:00",
           "code": null,
           "message_en": null,
           "message_tr": null,
@@ -5124,7 +5142,7 @@
           "step": "received"
         },
         {
-          "at": "2026-10-13T07:00:24.591913+03:00",
+          "at": "2026-10-13T07:00:25.588168+03:00",
           "code": null,
           "message_en": null,
           "message_tr": null,
@@ -5132,7 +5150,7 @@
           "step": "validate"
         },
         {
-          "at": "2026-10-13T07:00:24.592054+03:00",
+          "at": "2026-10-13T07:00:25.588207+03:00",
           "code": null,
           "message_en": null,
           "message_tr": null,
@@ -5140,7 +5158,7 @@
           "step": "hold"
         },
         {
-          "at": "2026-10-13T07:00:24.600219+03:00",
+          "at": "2026-10-13T07:00:25.596017+03:00",
           "code": null,
           "message_en": null,
           "message_tr": null,
@@ -5148,7 +5166,7 @@
           "step": "backup"
         },
         {
-          "at": "2026-10-13T07:00:24.600240+03:00",
+          "at": "2026-10-13T07:00:25.596037+03:00",
           "code": null,
           "message_en": null,
           "message_tr": null,
@@ -5156,7 +5174,7 @@
           "step": "write_secrets"
         },
         {
-          "at": "2026-10-13T07:00:24.600245+03:00",
+          "at": "2026-10-13T07:00:25.596043+03:00",
           "code": null,
           "message_en": null,
           "message_tr": null,
@@ -5164,7 +5182,7 @@
           "step": "write_config"
         },
         {
-          "at": "2026-10-13T07:00:24.600250+03:00",
+          "at": "2026-10-13T07:00:25.596048+03:00",
           "code": null,
           "message_en": null,
           "message_tr": null,
@@ -5172,7 +5190,7 @@
           "step": "install_files"
         },
         {
-          "at": "2026-10-13T07:00:24.600254+03:00",
+          "at": "2026-10-13T07:00:25.596052+03:00",
           "code": null,
           "message_en": null,
           "message_tr": null,
@@ -5180,7 +5198,7 @@
           "step": "verify"
         },
         {
-          "at": "2026-10-13T07:00:24.601091+03:00",
+          "at": "2026-10-13T07:00:25.596518+03:00",
           "code": null,
           "message_en": null,
           "message_tr": null,
@@ -5188,7 +5206,7 @@
           "step": "journal"
         },
         {
-          "at": "2026-10-13T07:00:24.640183+03:00",
+          "at": "2026-10-13T07:00:25.635022+03:00",
           "code": null,
           "message_en": null,
           "message_tr": null,
@@ -5196,7 +5214,7 @@
           "step": "reload.collector"
         },
         {
-          "at": "2026-10-13T07:00:24.640183+03:00",
+          "at": "2026-10-13T07:00:25.635022+03:00",
           "code": null,
           "message_en": null,
           "message_tr": null,
@@ -5204,7 +5222,7 @@
           "step": "reload.ingest"
         },
         {
-          "at": "2026-10-13T07:00:24.640183+03:00",
+          "at": "2026-10-13T07:00:25.635022+03:00",
           "code": null,
           "message_en": null,
           "message_tr": null,
@@ -5212,7 +5230,7 @@
           "step": "reload.api"
         },
         {
-          "at": "2026-10-13T07:00:24.640183+03:00",
+          "at": "2026-10-13T07:00:25.635022+03:00",
           "code": null,
           "message_en": null,
           "message_tr": null,
@@ -5221,11 +5239,11 @@
         }
       ],
       "terminal": false,
-      "updated_at": "2026-10-13T07:00:24.640183+03:00",
+      "updated_at": "2026-10-13T07:00:25.635022+03:00",
       "version": {
-        "from": "076b9798118249d98343e26956378253268860a51ac6d47d939dcf0a55387578",
+        "from": "74466ccd15519a577df1f2f5c609d9a8fbabff7e1ccb0b17bfe339ee0f4f2801",
         "number": 4,
-        "to": "76a1507c2def5e619f2afb4a761763cbaab3614f1499f66784a5717982086eb7"
+        "to": "3f42eb9091162dd46d3c820ad0ae95c5bbec1b4501c03905293430f417649ab7"
       },
       "warnings": []
     },
@@ -5316,10 +5334,10 @@
         "system.firewall"
       ],
       "guarded": false,
-      "request_id": "82b47f76c89ff6386bb280470faa2683",
-      "short_id": "82b47f76",
+      "request_id": "3de62b69997d43d384e654c32f725fe6",
+      "short_id": "3de62b69",
       "state": "queued",
-      "status_url": "/api/v1/admin/requests/82b47f76c89ff6386bb280470faa2683",
+      "status_url": "/api/v1/admin/requests/3de62b69997d43d384e654c32f725fe6",
       "warnings": []
     },
     "remove_active": {
@@ -5337,10 +5355,10 @@
           }
         }
       },
-      "created_at": "2026-10-13T04:00:24.998814Z",
+      "created_at": "2026-10-13T04:00:25.972142Z",
       "effective_at": null,
       "error": null,
-      "id": "82b47f76c89ff6386bb280470faa2683",
+      "id": "3de62b69997d43d384e654c32f725fe6",
       "kind": "config.apply",
       "label_en": "Applied",
       "label_tr": "Uygulandı",
@@ -5350,11 +5368,11 @@
       "result": null,
       "rolled_back": false,
       "section": "sources",
-      "short_id": "82b47f76",
+      "short_id": "3de62b69",
       "state": "active",
       "steps": [
         {
-          "at": "2026-10-13T07:00:25.050968+03:00",
+          "at": "2026-10-13T07:00:26.022211+03:00",
           "code": null,
           "message_en": null,
           "message_tr": null,
@@ -5362,7 +5380,7 @@
           "step": "received"
         },
         {
-          "at": "2026-10-13T07:00:25.056056+03:00",
+          "at": "2026-10-13T07:00:26.026607+03:00",
           "code": null,
           "message_en": null,
           "message_tr": null,
@@ -5370,7 +5388,7 @@
           "step": "validate"
         },
         {
-          "at": "2026-10-13T07:00:25.056123+03:00",
+          "at": "2026-10-13T07:00:26.026643+03:00",
           "code": null,
           "message_en": null,
           "message_tr": null,
@@ -5378,7 +5396,7 @@
           "step": "hold"
         },
         {
-          "at": "2026-10-13T07:00:25.068881+03:00",
+          "at": "2026-10-13T07:00:26.032825+03:00",
           "code": null,
           "message_en": null,
           "message_tr": null,
@@ -5386,7 +5404,7 @@
           "step": "backup"
         },
         {
-          "at": "2026-10-13T07:00:25.068901+03:00",
+          "at": "2026-10-13T07:00:26.032843+03:00",
           "code": null,
           "message_en": null,
           "message_tr": null,
@@ -5394,7 +5412,7 @@
           "step": "write_secrets"
         },
         {
-          "at": "2026-10-13T07:00:25.068907+03:00",
+          "at": "2026-10-13T07:00:26.032849+03:00",
           "code": null,
           "message_en": null,
           "message_tr": null,
@@ -5402,7 +5420,7 @@
           "step": "write_config"
         },
         {
-          "at": "2026-10-13T07:00:25.068911+03:00",
+          "at": "2026-10-13T07:00:26.032853+03:00",
           "code": null,
           "message_en": null,
           "message_tr": null,
@@ -5410,7 +5428,7 @@
           "step": "install_files"
         },
         {
-          "at": "2026-10-13T07:00:25.068916+03:00",
+          "at": "2026-10-13T07:00:26.032857+03:00",
           "code": null,
           "message_en": null,
           "message_tr": null,
@@ -5418,7 +5436,7 @@
           "step": "verify"
         },
         {
-          "at": "2026-10-13T07:00:25.069406+03:00",
+          "at": "2026-10-13T07:00:26.033318+03:00",
           "code": null,
           "message_en": null,
           "message_tr": null,
@@ -5426,7 +5444,7 @@
           "step": "journal"
         },
         {
-          "at": "2026-10-13T07:00:25.121844+03:00",
+          "at": "2026-10-13T07:00:26.082112+03:00",
           "code": null,
           "message_en": null,
           "message_tr": null,
@@ -5434,7 +5452,7 @@
           "step": "reload.collector"
         },
         {
-          "at": "2026-10-13T07:00:25.121844+03:00",
+          "at": "2026-10-13T07:00:26.082112+03:00",
           "code": null,
           "message_en": null,
           "message_tr": null,
@@ -5442,7 +5460,7 @@
           "step": "reload.ingest"
         },
         {
-          "at": "2026-10-13T07:00:25.121844+03:00",
+          "at": "2026-10-13T07:00:26.082112+03:00",
           "code": null,
           "message_en": null,
           "message_tr": null,
@@ -5450,7 +5468,7 @@
           "step": "reload.api"
         },
         {
-          "at": "2026-10-13T07:00:25.121844+03:00",
+          "at": "2026-10-13T07:00:26.082112+03:00",
           "code": null,
           "message_en": null,
           "message_tr": null,
@@ -5459,18 +5477,18 @@
         }
       ],
       "terminal": true,
-      "updated_at": "2026-10-13T07:00:25.121844+03:00",
+      "updated_at": "2026-10-13T07:00:26.082112+03:00",
       "version": {
-        "from": "76a1507c2def5e619f2afb4a761763cbaab3614f1499f66784a5717982086eb7",
+        "from": "3f42eb9091162dd46d3c820ad0ae95c5bbec1b4501c03905293430f417649ab7",
         "number": 5,
-        "to": "84984ac2eddedd621c23c8ffdcc4d505a4362bf011bdb285fd7401cc45577025"
+        "to": "f1e9c2cf9587727064622e480f61f26177354f717673d051e285e883c95c939e"
       },
       "warnings": []
     }
   },
   "status": {
     "agent": {
-      "heartbeat_at": "2026-10-13T07:00:21.966033+03:00",
+      "heartbeat_at": "2026-10-13T07:00:23.079164+03:00",
       "java_candidates": [],
       "pending": [],
       "queue": 0,
@@ -5480,22 +5498,22 @@
       },
       "state": "ok",
       "system_task": {
-        "checked_at": "2026-10-13T07:00:13.447159+03:00",
+        "checked_at": "2026-10-13T07:00:14.429559+03:00",
         "error": null,
         "ok": true
       },
       "version": "0.1.0"
     },
     "config_origin": "outside",
-    "config_sha256": "7dd42276b5d850357b5907a7d8c374d0c9f81b37214c549e69757137fff17a92",
+    "config_sha256": "b5ee33ae97a57aa50b5c41223ece41c46066fdf55f67ecea995113d354fbbf73",
     "restart_required": false,
     "services": {
       "ArciApi": {
         "error": null,
-        "loaded_at": "2026-10-13T04:00:00.307200Z",
+        "loaded_at": "2026-10-13T04:00:00.370357Z",
         "restart_keys": [],
         "running": true,
-        "sha256": "7dd42276b5d850357b5907a7d8c374d0c9f81b37214c549e69757137fff17a92"
+        "sha256": "b5ee33ae97a57aa50b5c41223ece41c46066fdf55f67ecea995113d354fbbf73"
       },
       "ArciCollector": {
         "error": null,
@@ -5520,8 +5538,8 @@
       }
     },
     "system": {
-      "applied_config_sha256": "7dd42276b5d850357b5907a7d8c374d0c9f81b37214c549e69757137fff17a92",
-      "at": "2026-10-13T04:00:13.633252Z",
+      "applied_config_sha256": "b5ee33ae97a57aa50b5c41223ece41c46066fdf55f67ecea995113d354fbbf73",
+      "at": "2026-10-13T04:00:14.613547Z",
       "code": null,
       "firewall": {
         "managed": true,
@@ -5539,7 +5557,7 @@
   },
   "status_after": {
     "agent": {
-      "heartbeat_at": "2026-10-13T07:00:22.607526+03:00",
+      "heartbeat_at": "2026-10-13T07:00:23.658453+03:00",
       "java_candidates": [],
       "pending": [],
       "queue": 0,
@@ -5549,22 +5567,22 @@
       },
       "state": "ok",
       "system_task": {
-        "checked_at": "2026-10-13T07:00:13.447159+03:00",
+        "checked_at": "2026-10-13T07:00:14.429559+03:00",
         "error": null,
         "ok": true
       },
       "version": "0.1.0"
     },
     "config_origin": "browser",
-    "config_sha256": "31b5fdd8ba0940042b9ff86f6d4863ee2e705db68db2230759e1421cc945f565",
+    "config_sha256": "cc961c3f1a62dd5aa2c06cac5de2d2b1e317c0d7041a59764f2612b1bfa7ab24",
     "restart_required": false,
     "services": {
       "ArciApi": {
         "error": null,
-        "loaded_at": "2026-10-13T04:00:22.611937Z",
+        "loaded_at": "2026-10-13T04:00:23.663314Z",
         "restart_keys": [],
         "running": true,
-        "sha256": "31b5fdd8ba0940042b9ff86f6d4863ee2e705db68db2230759e1421cc945f565"
+        "sha256": "cc961c3f1a62dd5aa2c06cac5de2d2b1e317c0d7041a59764f2612b1bfa7ab24"
       },
       "ArciCollector": {
         "error": null,
@@ -5589,8 +5607,8 @@
       }
     },
     "system": {
-      "applied_config_sha256": "31b5fdd8ba0940042b9ff86f6d4863ee2e705db68db2230759e1421cc945f565",
-      "at": "2026-10-13T04:00:22.605657Z",
+      "applied_config_sha256": "cc961c3f1a62dd5aa2c06cac5de2d2b1e317c0d7041a59764f2612b1bfa7ab24",
+      "at": "2026-10-13T04:00:23.656055Z",
       "code": null,
       "firewall": {
         "managed": true,
@@ -5618,15 +5636,15 @@
       "version": null
     },
     "config_origin": "browser",
-    "config_sha256": "31b5fdd8ba0940042b9ff86f6d4863ee2e705db68db2230759e1421cc945f565",
+    "config_sha256": "cc961c3f1a62dd5aa2c06cac5de2d2b1e317c0d7041a59764f2612b1bfa7ab24",
     "restart_required": false,
     "services": {
       "ArciApi": {
         "error": null,
-        "loaded_at": "2026-10-13T04:00:22.611937Z",
+        "loaded_at": "2026-10-13T04:00:23.663314Z",
         "restart_keys": [],
         "running": true,
-        "sha256": "31b5fdd8ba0940042b9ff86f6d4863ee2e705db68db2230759e1421cc945f565"
+        "sha256": "cc961c3f1a62dd5aa2c06cac5de2d2b1e317c0d7041a59764f2612b1bfa7ab24"
       },
       "ArciCollector": {
         "error": null,
@@ -5651,8 +5669,8 @@
       }
     },
     "system": {
-      "applied_config_sha256": "31b5fdd8ba0940042b9ff86f6d4863ee2e705db68db2230759e1421cc945f565",
-      "at": "2026-10-13T04:00:22.605657Z",
+      "applied_config_sha256": "cc961c3f1a62dd5aa2c06cac5de2d2b1e317c0d7041a59764f2612b1bfa7ab24",
+      "at": "2026-10-13T04:00:23.656055Z",
       "code": null,
       "firewall": {
         "managed": true,
@@ -5670,7 +5688,7 @@
   },
   "status_disabled": {
     "agent": {
-      "heartbeat_at": "2026-10-13T07:00:22.607526+03:00",
+      "heartbeat_at": "2026-10-13T07:00:23.658453+03:00",
       "java_candidates": [],
       "pending": [],
       "queue": 0,
@@ -5680,22 +5698,22 @@
       },
       "state": "disabled",
       "system_task": {
-        "checked_at": "2026-10-13T07:00:13.447159+03:00",
+        "checked_at": "2026-10-13T07:00:14.429559+03:00",
         "error": null,
         "ok": true
       },
       "version": "0.1.0"
     },
     "config_origin": "browser",
-    "config_sha256": "31b5fdd8ba0940042b9ff86f6d4863ee2e705db68db2230759e1421cc945f565",
+    "config_sha256": "cc961c3f1a62dd5aa2c06cac5de2d2b1e317c0d7041a59764f2612b1bfa7ab24",
     "restart_required": false,
     "services": {
       "ArciApi": {
         "error": null,
-        "loaded_at": "2026-10-13T04:00:22.611937Z",
+        "loaded_at": "2026-10-13T04:00:23.663314Z",
         "restart_keys": [],
         "running": true,
-        "sha256": "31b5fdd8ba0940042b9ff86f6d4863ee2e705db68db2230759e1421cc945f565"
+        "sha256": "cc961c3f1a62dd5aa2c06cac5de2d2b1e317c0d7041a59764f2612b1bfa7ab24"
       },
       "ArciCollector": {
         "error": null,
@@ -5720,8 +5738,8 @@
       }
     },
     "system": {
-      "applied_config_sha256": "31b5fdd8ba0940042b9ff86f6d4863ee2e705db68db2230759e1421cc945f565",
-      "at": "2026-10-13T04:00:22.605657Z",
+      "applied_config_sha256": "cc961c3f1a62dd5aa2c06cac5de2d2b1e317c0d7041a59764f2612b1bfa7ab24",
+      "at": "2026-10-13T04:00:23.656055Z",
       "code": null,
       "firewall": {
         "managed": true,

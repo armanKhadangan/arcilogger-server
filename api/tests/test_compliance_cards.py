@@ -834,9 +834,9 @@ def test_tsa_card_states(site: Site) -> None:
         assert card.tone == "error"
         assert reason(card) == (
             f"Damgalar Kamu SM üretim sunucusundan alınmıyor (sağlayıcı: {label[0]}). Kamu SM "
-            "bağlantısını Ayarlar → Kamu SM'de tamamlayın.",
+            "bağlantısını Ayarlar → Zaman damgası'nda tamamlayın.",
             f"Time stamps are not taken from the Kamu SM production server (provider: "
-            f"{label[1]}). Complete the Kamu SM connection in Settings → Kamu SM.",
+            f"{label[1]}). Complete the Kamu SM connection in Settings → Time stamping.",
         )
         assert facts(card)["server"] == label
     assert card.verify_on_site_tr == (

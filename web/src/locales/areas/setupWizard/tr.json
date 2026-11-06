@@ -26,7 +26,7 @@
       },
       "kamusm_test": {
         "title": "Kamu SM: test sunucusu",
-        "purpose": "Test sunucusundan alınan bir zaman damgası Java'nın, Zamane istemcisinin, kök sertifikaların ve müşteri bilgilerinin birlikte çalıştığını gösterir. Test, Ayarlar → Kamu SM sayfasının damga testi adımında yapılır."
+        "purpose": "Test sunucusundan alınan bir zaman damgası Java'nın, Zamane istemcisinin, kök sertifikaların ve müşteri bilgilerinin birlikte çalıştığını gösterir. Test, Ayarlar → Zaman damgası sayfasının damga testi adımında yapılır."
       },
       "kamusm_production": {
         "title": "Kamu SM: üretim",

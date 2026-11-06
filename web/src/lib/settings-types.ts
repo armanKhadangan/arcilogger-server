@@ -251,6 +251,41 @@ export interface BackupSection {
 
 export type SourceType = 'fortigate' | 'mikrotik' | 'generic';
 export type SourceTransport = 'any' | 'udp' | 'tcp';
+export type SnmpAuth = 'sha1' | 'sha256' | 'sha512';
+/** `aes256` is "sahada doğrula" (X-B3): older firmware may not offer it. */
+export type SnmpPriv = 'aes128' | 'aes256';
+
+/** A WAN line's capacity in whole Mbit/s (Wave 5 §6 N1). */
+export interface SnmpCapacityIo {
+  down: number;
+  up: number;
+}
+
+/** `[sources.snmp]` of a source (Wave 5 §6 N1); the two keys only as set/unset. */
+export interface SnmpOut {
+  enabled: boolean;
+  port: number;
+  user: string;
+  auth: SnmpAuth;
+  priv: SnmpPriv;
+  interfaces: string[]; // ifName of each WAN line, 1 to 4
+  capacity_mbps: Record<string, SnmpCapacityIo>;
+  interval_seconds: number;
+  auth_key: 'set' | 'unset';
+  priv_key: 'set' | 'unset';
+}
+
+/** `[sources.snmp]` in a change body: a field left out takes the server's default. */
+export interface SnmpIn {
+  enabled?: boolean;
+  port?: number;
+  user?: string;
+  auth?: SnmpAuth;
+  priv?: SnmpPriv;
+  interfaces?: string[];
+  capacity_mbps?: Record<string, SnmpCapacityIo>;
+  interval_seconds?: number;
+}
 export type FirewallState = 'open' | 'closed' | 'pending' | 'not_managed';
 
 /** A `[[sources]]` table as the browser edits it (every field of {@link SourceIn}). */
@@ -274,9 +309,11 @@ export interface SourceIn {
   expected?: boolean;
   transport?: SourceTransport;
   enabled?: boolean;
+  snmp?: SnmpIn | null; // left out: no SNMP
 }
 
 export interface SourceOut extends SourceConfig {
+  snmp: SnmpOut | null; // the internet line's speed over SNMPv3 (W5-N)
   firewall: FirewallState;
   last_seen: DateTimeString | null;
 }
@@ -704,6 +741,9 @@ export interface BackupBody {
 export interface SourceBody {
   etag: string;
   source: SourceIn;
+  /** The SNMPv3 keys (8 to 64 characters): write-only; left out keeps the stored ones. */
+  snmp_auth_key?: string | null;
+  snmp_priv_key?: string | null;
 }
 
 /**

@@ -3784,9 +3784,11 @@ The manager took P1 and P2 (#203, comment of 2026-11-05); P3 and P4 stay with G�
   (sessions, last seen, the snapshot, the warm-up and late logs; W5-F-3, asked on #201 07:08Z);
   `api/tests/test_license_routes.py` and LISANS/LICENSING §1 and §2.2 (`/activity` and the
   `usage_analytics` row, granted on #201, 01:19Z); `web/src/lib/api-types.test.ts` and
-  `api-samples.test.ts` (`activity-types.ts` in `TYPES_FILES`, the four `Wan*` interfaces in
-  `NOT_SCHEMAS` until W5-N mounts `GET /activity/wan`, the `activity` samples);
-  `web/scripts/capture_api_samples.py` (`activity.json`).
+  `api-samples.test.ts` (`activity-types.ts` in `TYPES_FILES`, the `activity` samples; with
+  W5-N merged, no activity interface is left in `NOT_SCHEMAS`); `web/scripts/capture_api_samples.py`
+  (`activity.json`); after W5-N, `api/src/arcilogger_api/routers/activity.py` mounts both routes
+  (`/devices` with the module gate on the route, `/wan` without) and LISANS/LICENSING §2.2 have
+  one `/activity` row with both halves.
 
 ## Deviations — W5-T (2026-11-06)
 
@@ -3833,6 +3835,112 @@ Recorded on #204, from the manager's answers of 2026-11-06.
   - The new code's TR/EN text says that the TÜRKTRUST user name and password travel unencrypted.
     It lives in `api/src/arcilogger_api/admin_channel.py`, granted for this one code. It is
     answered with HTTP 422, like `tsa_confirm_required`.
+
+## Deviations — W5-N (2026-11-05)
+
+- **W5-N-1: the SNMP client lives in core** (answer to Q4 on #202, 2026-11-05 23:19).
+  - **Where:** the library boundary is a new `core/src/arcilogger_core/snmp.py`, outside §6.6's
+    list: the authPriv-only `Target`, the GET/walk client and the status mapping. The N5 probe
+    runs in the administration agent's child process, which is core and never imports the worker
+    (SMTP is the precedent, `core/smtp.py`).
+  - **The dependency:** `pysnmp==7.1.30` and `pyasn1==0.6.5`, both BSD-2-Clause, are pinned in
+    `core/pyproject.toml`.
+  - **Imported only there:** pysnmp is imported only inside the client's methods.
+    `core/tests/test_snmp_import.py` proves that `arcilogger_core.config`,
+    `arcilogger_core.snmp`, the collector and ingest load without it.
+  - **Unchanged:** the poller, the state file, the job and `R20-snmp` are in
+    `worker/src/arcilogger_worker/snmp/`.
+- **W5-N-2: `Layout.wan_rates` is a property**, like the other status files of `Layout`;
+  §6.2 N4 writes `Layout.wan_rates()`.
+- **W5-N-3: `[sources.snmp]` is a model in `config.py`; the adapter is gone** (Q3 on #202).
+  Until W5-T merged, an adapter applied N1's rules; it was removed in the same PR.
+  - **The model:** `SnmpConfig` on `SourceConfig.snmp` (`None`: no SNMP), with the defaults and
+    bounds of §6.3. Only authPriv: there is no `version` field and no community string, so either
+    is refused as an unknown field (`extra_forbidden`). `auth`/`priv` have no "none".
+  - **Interfaces:** `ifName` values must be distinct; a capacity may name only a listed interface.
+    Capacities are whole Mbit/s, so the browser's TOML writer needs no floats.
+  - **Refusals:** an enabled SNMP needs a user and 1 to 4 interfaces. Refused values give the
+    error texts `snmp_setting_invalid: …` and `snmp_source_is_network: …`. Refused input is never
+    repeated (`hide_input_in_errors`).
+  - **The keys:** `secretstore.snmp_auth_key()`/`snmp_priv_key()` name them, and
+    `check_secret_value` refuses one outside 8 to 64 characters. A missing or bad key at poll
+    time is `snmp_secret_missing`: the source is polled as `auth_failed` without a request.
+- **W5-N-4: the statuses N4 leaves open, and "a good sample".**
+  - **Failures:** a USM refusal (unknown user, wrong digest, decryption, unsupported level or
+    protocol, not in the time window) is `auth_failed`. Any other request failure is `timeout`:
+    no answer, a malformed answer, an error-status, or an exception of pysnmp itself, named by
+    its type only. One source's failure never stops the others.
+  - **A good sample** is a read of a line's 64-bit counters. The first read after a start or a
+    reset is good, but gives no rate yet. `updated_at` is its time.
+  - **The 10 minutes of `R20-snmp`** count from the later of a line's last good read and the
+    start of its watch: when SNMP was switched on, or when the interface was added.
+  - **The alert:** `R20-snmp:<source>` opens when one line of a source has had no good read for
+    10 minutes, and resolves when every line has. Its title names the source, the lines and the
+    reasons; the e-mail names only the source, the number of lines and the reasons.
+- **W5-N-5: mounting.** W5-N's PR merged before W5-M's routes, so it created
+  `api/src/arcilogger_api/routers/activity.py`: one `/activity` router (prefixes must be unique)
+  that includes `activity/wan.py`. W5-M includes its devices router there.
+  - **Samples:** `web/scripts/samples_activity_wan.py` captures `activity-wan.json`, entered in
+    `capture_api_samples.py`'s `SAMPLE_MODULES`.
+  - **Web tests:** `activity-types.ts` joins the type lists of `web/src/lib/api-types.test.ts`
+    and `api-samples.test.ts`, as C1 asks of a package that mounts a route.
+- **W5-N-6: the browser, the probe and the firewall rule** (N1, N3, N5 after W5-T).
+  - **The keys in a request:** a source's keys are `secret_set`/`secret_delete` ops of
+    `snmp.<source>.auth_key`/`priv_key` in the `sources` section. The contract's `SnmpKeyName`
+    accepts these names next to `BrowserSecret`.
+  - **The form:** the keys are the write-only `snmp_auth_key`/`snmp_priv_key` fields of the
+    sources form. Removing a source deletes its keys.
+  - **Refusals:** switching SNMP on without both keys, stored or set in the same request, is
+    `snmp_secret_missing`; on a network source it is `snmp_source_is_network`. Both have TR/EN
+    texts in `admin/messages.py`.
+  - **The answer:** the sources etag follows the keys' set/unset state, and `GET /admin/config`
+    gives each source's `snmp` with its keys as set/unset. A source's change rows leave `None`
+    out, so a source without SNMP journals as before.
+  - **Writing the TOML:** `admin/tomledit.py` writes `[sources.snmp]` after its `[[sources]]`
+    table, defaults left out, and each capacity as `[sources.snmp.capacity_mbps."<ifName>"]`.
+    It does so only inside the managed block; a hand-written sub-table outside it is still
+    refused.
+  - **The probe (N5):** it runs on the request whenever a change switches SNMP on, edits its
+    settings or sets its keys, before anything is written.
+    - **Strict outbound mode:** `ARCILOGGER SNMP <source>` exists only after ApplySystem. So a
+      change that switches SNMP on, or moves its address or port, warns `probe_skipped` at
+      `sources.<name>.snmp` instead, as the clock and the replica do. New keys for the same
+      device are still probed.
+    - **How:** an `snmp` probe of `admin/probe.py`, through `arcilogger_core.snmp.list_interfaces`.
+    - **The list:** its message lists the interfaces the device reports (name, status, Mbit/s).
+    - **A failure** gives N4's reason as its code: `snmp_timeout`, `snmp_auth_failed`,
+      `snmp_no_such_interface` or `snmp_no_hc_counters`. The child passes the code through,
+      and each has TR/EN text.
+    - **Not here:** a separate "Bağlantıyı dene" action that returns the list as JSON
+      (W5-N-7).
+  - **The rule (N3):** `ARCILOGGER SNMP <source>`, without "Out", as N3 names it. UDP to the
+    source's address and SNMP port.
+    - **Where:** `OutboundRule`'s pattern and the installer's `OutboundRulePattern` accept the
+      name. The system plan adds the rule, and `Set-ArciFirewall.ps1` adds it in full strict
+      mode and applies it as UDP in a sync.
+    - **A left-over rule** (accepted, Q7 on #207): after a source's SNMP is switched off, its
+      rule stays until the installer's firewall step rebuilds the group, as W5-T-3 does for
+      TURKTRUST, CRL and Proxy. ApplySystem never removes an outbound rule, and this one only
+      allows UDP from the server to a LAN device.
+- **W5-N-7: N5's "pick from a list" is the probe's refusal in Wave 5** (Q6 on #207).
+  - A change is probed when it is saved. A wrong interface name fails with
+    `snmp_no_such_interface`, whose message lists what the device reports (name, status,
+    Mbit/s). P4's form takes the names as typed fields and shows that text.
+  - A pre-save action that returns the list as JSON (its own task kind, route and types) is a
+    Wave 6 follow-up: #217.
+- **W5-N-8: the review of #207.**
+  - **IPv4 only:** an enabled SNMP on an IPv6 address is refused as `source_ipv6_unsupported`
+    (pysnmp's UDP transport is IPv4). The browser shows it at `sources.<name>.address`.
+  - **The keys** go to pysnmp as their UTF-8 octets, so a key outside Latin-1 works.
+  - **No row for an idle poll:** a `Job` may carry an `idle` check that the worker asks before
+    it writes a `job_runs` row. `snmp.poll` is idle while no source is due and the state file
+    has nothing left to clear: it then neither runs nor records, and is due 5 s later. An
+    installation without SNMP writes no `snmp.poll` rows.
+  - **Δt** of a rate is the change of `sysUpTime` (same GET) when it moved forward, else the
+    time between the two polls.
+  - **The state file** is written compact (one line). A write that fails (on Windows while the
+    API reads it) is logged and written again at the next poll.
+  - **A source whose SNMP is switched off** resolves its `R20-snmp` as `not_polled`.
 
 ## Deviations — W5-F (2026-11-06)
 

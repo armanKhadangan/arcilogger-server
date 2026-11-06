@@ -67,11 +67,6 @@ const NOT_SCHEMAS = new Set([
   'SourceConfig',
   // archive-reload-types.ts: the `details` of 409 `archive_reload_required`.
   'ArchiveReloadRequired',
-  // activity-types.ts: the answer of `GET /activity/wan` (W5-N, #207), not mounted yet.
-  'WanCapacity',
-  'WanPoint',
-  'WanLine',
-  'WanRates',
 ]);
 /** OpenAPI schemas the web app does not use. */
 const UNUSED_SCHEMAS = new Set(['HTTPValidationError', 'ValidationError', 'Health']);

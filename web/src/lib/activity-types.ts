@@ -77,7 +77,7 @@ export interface WanCapacity {
   up: number;
 }
 export interface WanPoint {
-  time: string;
+  time: DateTimeString;
   download_bps: number;
   upload_bps: number;
 }
@@ -90,11 +90,11 @@ export interface WanLine {
   capacity_mbps: WanCapacity | null;
   series: WanPoint[]; // 60m: full resolution; 24h: 1-minute averages; oldest first
   status: WanStatus;
-  updated_at: string | null; // newest good sample
-  last_error_at: string | null;
+  updated_at: DateTimeString | null; // newest good sample
+  last_error_at: DateTimeString | null;
 }
 export interface WanRates {
   range: WanRange;
   lines: WanLine[];
-  generated_at: string;
+  generated_at: DateTimeString;
 }

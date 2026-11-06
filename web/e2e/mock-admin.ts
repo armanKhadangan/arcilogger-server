@@ -2065,6 +2065,7 @@ export class AdminMock {
       next: () => {
         const row: SourceOut = {
           ...source,
+          snmp: existing?.snmp ?? null, // the SNMP part is edited by W5-P's form
           firewall: source.enabled ? 'open' : 'closed',
           last_seen: existing?.last_seen ?? null,
         };

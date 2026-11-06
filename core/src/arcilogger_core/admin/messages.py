@@ -90,6 +90,28 @@ MESSAGES: Final[Mapping[str, tuple[str, str]]] = MappingProxyType(
             "Replika paylaşımına bağlanılamadı.",
             "The replica share could not be reached.",
         ),
+        # The SNMP probe (Wave 5 §6 N5): N4's reasons.
+        "snmp_timeout": (
+            "Cihaz SNMP isteğine yanıt vermedi: adresi, portu, cihazdaki SNMP'yi ve güvenlik "
+            "duvarını denetleyin.",
+            "The device did not answer the SNMP request: check the address, the port, SNMP on "
+            "the device and the firewall.",
+        ),
+        "snmp_auth_failed": (
+            "SNMPv3 kimlik doğrulaması başarısız: kullanıcıyı, protokolleri ve anahtarları "
+            "cihazdaki ayarlarla karşılaştırın.",
+            "SNMPv3 authentication failed: compare the user, the protocols and the keys with the "
+            "device's settings.",
+        ),
+        "snmp_no_such_interface": (
+            "Cihaz bu arayüz adını bildirmiyor; cihazın bildirdiği arayüzlerden WAN hattını seçin.",
+            "The device reports no interface of this name; pick the WAN line from the interfaces "
+            "the device reports.",
+        ),
+        "snmp_no_hc_counters": (
+            "Cihaz bu arayüz için 64 bit sayaç (ifHCInOctets) vermiyor.",
+            "The device gives no 64-bit counters (ifHCInOctets) for this interface.",
+        ),
         "credit_query_failed": (
             "Kamu SM kontör sorgusu başarısız (müşteri numarası, parola ya da bağlantı).",
             "The Kamu SM credit query failed (customer number, password or connection).",
@@ -262,6 +284,19 @@ MESSAGES: Final[Mapping[str, tuple[str, str]]] = MappingProxyType(
         "source_limit": (
             "Kaynak sayısı üst sınırına ulaşıldı.",
             "The maximum number of sources has been reached.",
+        ),
+        # The internet line's speed over SNMPv3 (Wave 5 §6 N1).
+        "snmp_secret_missing": (
+            "SNMP'yi açmak için SNMPv3 kimlik doğrulama ve şifreleme anahtarlarının ikisi de "
+            "gerekir (8-64 karakter).",
+            "Switching SNMP on needs both the SNMPv3 authentication and privacy keys (8 to 64 "
+            "characters).",
+        ),
+        "snmp_source_is_network": (
+            "SNMP yalnızca tek bir adresi olan kaynakta açılabilir; bir ağ adresine istek "
+            "gönderilmez.",
+            "SNMP can only be switched on for a source with a single address; no request goes "
+            "to a network.",
         ),
         "secret_invalid": (
             "Girilen gizli bilgi geçersiz (boş, çok uzun ya da kontrol karakteri içeriyor).",
