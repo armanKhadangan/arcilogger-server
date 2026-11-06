@@ -3623,26 +3623,65 @@ The manager took P1 and P2 (#203, comment of 2026-11-05); P3 and P4 stay with G�
   day's hours and breaks (a window across midnight); and `read_range(session, builder, *,
   settings)`, `compute_day`'s reading loop, which `compute_day` now calls. They are a refactor of
   `compute_day` for M2, not a new counting rule: the usage golden, break and API tests pass
-  unchanged. `api/src/arcilogger_api/activity/devices.py` reads a window's `cells`, `flow_list`,
-  `flow_sessions`, `subjects` and `newest`.
+  unchanged. A window is whole minutes (`ValueError` otherwise). The worker's snapshot
+  (`arcilogger_worker.activity`, W5-M-4) reads a window's `cells`, `flow_list`, `subjects`,
+  `subject_ips` and `newest`.
 - **W5-M-2: the shapes M2 does not name** (the questions of #205, accepted at its review):
   `top_domains` are `{domain, kind, bytes}` and `top_apps` `{app, bytes}` (download plus upload in
   the window); the rates are bits per second as numbers; `totals` has the bytes, rates, `sessions`
   and `subjects` (subjects with traffic, persons left out of the rows included); `per_minute` is
-  `{minute, download_bytes, upload_bytes}`, oldest first. `sessions` are the sessions open in the
-  window, each counted once (the engine counts a session at its first minute in its range).
-  `last_seen` is the end of the subject's newest minute with traffic, at most `data_until`: the
-  engine keeps no newest row per subject.
-- **W5-M-3: two ranges per request.** The last `window` minutes give the rows and totals, the last
-  60 minutes `per_minute`, both ending with the minute under way: a session counts once at its first
-  minute in its range, so the window's own range is needed for `sessions`.
-- **W5-M-4: M4 is not met by M2's counting; an owner question.** At 2,000 lines/s the engine's
-  reading of a range cannot answer in under 1 s: `docs/USAGE.md` §8 measures about 13 µs a line
-  (450,182 lines in 6.0 s), and a 15-minute window reads 75 minutes with the 30-minute session
-  overlap, about 9 million lines. The guard is not written yet; the choice of design is asked on
-  #201.
+  `{minute, download_bytes, upload_bytes}`, oldest first. `sessions` are the sessions started in
+  the window, each counted once, for the subject of the minute it started in. `last_seen` is the
+  end of the subject's newest minute with traffic, at most `data_until`: the snapshot keeps no
+  newest row per subject. `warming_up` (new, `true` while the worker's snapshot does not cover
+  the last 60 minutes yet, and while there is no snapshot) tells the page that the numbers are
+  still incomplete.
+- **W5-M-3: one snapshot for every window.** The rows, totals and `per_minute` are sums of the
+  snapshot's minutes: the last `window` minutes, and the last 60, both ending with the minute
+  under way. Persons with `usage_excluded`, access, the KVKK notice and pseudonyms are applied
+  when the API answers, never in the file.
+- **W5-M-4: M2 counts through an incremental snapshot; M4's guard redefined** (the owner's
+  decision on #201, 2026-11-06 02:07Z). A request that read its range would read 75 minutes of
+  logs at 2,000 lines/s, about 9 million lines. Instead the worker job `activity.tick` (every
+  10 s, module `usage_analytics`) keeps `state/activity.json` (`Layout.activity`): per minute and
+  subject of the last 60 minutes the bytes, the largest destinations and applications, and the
+  sessions started, counted by the engine (`DayBuilder(..., window=...)`, `add_ip`), so the
+  increment rule, attribution, names and background rules are Kullanım's.
+  - Rows are read by id, in pages, above the table's highest id of 5 s before (`ID_MARGIN`, ten
+    times ingest's 0.5 s flush; from the id sequence, not `max(id)`), and each id is counted
+    once: a batch committed late is not lost.
+  - A session's logs are kept while it can still log (its newest an interim log younger than
+    `usage.session_overlap_seconds`); it is counted again when logs come for it, and counted
+    whole once more when it ends. Over a whole day the snapshot's bytes per subject and hour, and
+    per destination, equal `compute_day`'s (`worker/tests/test_activity.py`). A session's web
+    filter and application logs are read when it is first counted, its DNS answers (the newest
+    for its address before its start) only when no such log names it.
+  - A tick reads and sorts the new rows, then counts in chunks within one budget (1.5 s, the
+    file's write set aside): the sessions that ended, the warm-up slices (5 s of logs each, over
+    the last 60 minutes and the overlap after a start), the open sessions whose logs changed.
+    Until all is counted the answer says `warming_up`.
+  - The file holds subject keys, their VLAN, MAC and address, and per minute the whole bytes, the
+    sessions started and the 5 largest destinations (a registrable domain, a service or an
+    address) and applications through name tables: no name, user, URL or raw line. It is sparse,
+    replaced whole through a renamed temporary file (not fsynced: rewritten every tick and
+    rebuilt from the logs after a restart), only when it changed, and only the subject-minutes
+    whose totals changed are put together again.
+  - The guard: (a) a request answers from the snapshot in under 1 s
+    (`api/tests/test_activity_performance.py`): 0.25 s at 200 subjects, 0.98 s at 1,000; (b) one
+    tick of 10 s of new rows at 2,000 lines/s takes under 2 s and (c) no warm-up tick more than
+    about 2 s (`worker/tests/test_activity_performance.py`, a synthetic load shaped like
+    `tools/loadgen`, 1,000 devices, ≈575 sessions/s, ≈30,700 open at once). Measured on the cloud
+    container (4 shared cores): at the default load (3 lines/s) a tick ≤ 0.015 s, a warm-up tick
+    ≤ 1.45 s, the file 89 KB written in 0.01 s; at 2,000 lines/s a tick 1.8–2.4 s and a warm-up
+    tick 1.9–2.4 s, the file 5.8 MB written in ≤ 0.6 s. The work per 10 s at 2,000 lines/s is
+    1.6–1.9 s, so (b) and (c) are not met yet: asked on #201 (2026-11-06, "M4 guard (b)/(c) at
+    2,000 lines/s"), with the snapshot outside the worker's job loop as the recommendation.
 - **W5-M-5: files outside the ownership of §6.6.** `worker/src/arcilogger_worker/usage/engine.py`
   (W5-M-1); `worker/tests/test_usage_window.py` (the window across midnight);
+  `core/src/arcilogger_core/layout.py` (`Layout.activity`, as W5-N's `wan_rates`), the
+  `activity.tick` line of `worker/src/arcilogger_worker/service.py`, the pinned job lists of
+  `worker/tests/test_service.py`, and the job's rows in CORRELATION and LISANS/LICENSING §2.3
+  (granted on #201, 02:07Z);
   `api/tests/test_license_routes.py` and LISANS/LICENSING §1 and §2.2 (`/activity` and the
   `usage_analytics` row, granted on #201, 01:19Z); `web/src/lib/api-types.test.ts` and
   `api-samples.test.ts` (`activity-types.ts` in `TYPES_FILES`, the four `Wan*` interfaces in
