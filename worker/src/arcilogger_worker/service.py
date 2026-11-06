@@ -771,6 +771,9 @@ class Worker:
     # -- status and loop --------------------------------------------------------------------------
 
     def write_status(self) -> None:
+        jobs = {name: state.as_json() for name, state in self.states.items()}
+        if self.activity_runner is not None:
+            jobs[activity.JOB_NAME] = self.activity_runner.status()
         data = {
             "service": "arcilogger-worker",
             "version": __version__,
@@ -779,10 +782,8 @@ class Worker:
             "started_at": None if self.started_at is None else self.started_at.isoformat(),
             "updated_at": self.clock().isoformat(),
             "database": {None: "unknown", True: "ok", False: "unreachable"}[self.database_ok],
-            "jobs": {name: state.as_json() for name, state in self.states.items()},
+            "jobs": jobs,
         }
-        if self.activity_runner is not None:
-            data["jobs"][activity.JOB_NAME] = self.activity_runner.status()
         if self.config_watch is not None:  # the configuration in use (contract 2.4.12)
             data["config"] = self.config_watch.status_block()
         self._status_due = False

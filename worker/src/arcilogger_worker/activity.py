@@ -798,7 +798,7 @@ class Runner:
         if window is None or (final and not window.ticks):
             return
         last = window.last
-        details = {
+        details: dict[str, Any] = {
             "ticks": window.ticks,
             "failed": window.failed,
             "rows": window.rows,
