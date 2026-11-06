@@ -38,6 +38,7 @@ import {
 } from '@tanstack/react-query';
 import { useCallback, useRef, useState } from 'react';
 
+import type { WanRange, WanRates } from './activity-types';
 import { AGENT_STATUS_POLL_MS, requestPollInterval } from './admin-requests';
 import { api, type QueryValue } from './api';
 import type {
@@ -201,6 +202,7 @@ export const queryKeys = {
   rebuild: (jobId: number) => ['usage-rebuild', jobId] as const,
   dashboard: ['dashboard', 'summary'] as const,
   todayUsage: ['usage', 'company', 'today'] as const,
+  activityWan: (range: WanRange) => ['activity', 'wan', range] as const,
   alerts: (filters: AlertFilters) => ['alerts', 'list', filters] as const,
   alert: (id: number) => ['alerts', 'one', id] as const,
   alertSummary: ['alerts', 'summary'] as const,
@@ -898,6 +900,22 @@ export function useTodayCompanyUsage(enabled = true) {
     queryKey: queryKeys.todayUsage,
     path: '/usage/company',
     intervalMs: USAGE_POLL_MS,
+    enabled,
+  });
+}
+
+// -- Canlı Durum ----------------------------------------------------------------------------------
+
+/** Canlı Durum polls every 10 s while the page is visible (W5 §6 M3). */
+export const ACTIVITY_POLL_MS = 10_000;
+
+/** `GET /activity/wan`: the internet lines' speed over SNMP (W5-N). */
+export function useActivityWan(range: WanRange, enabled = true) {
+  return usePollingQuery<WanRates>({
+    queryKey: queryKeys.activityWan(range),
+    path: '/activity/wan',
+    params: { range },
+    intervalMs: ACTIVITY_POLL_MS,
     enabled,
   });
 }

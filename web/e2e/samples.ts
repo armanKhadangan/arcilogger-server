@@ -47,6 +47,7 @@ import type {
   VerifyResult,
   VlanOut,
 } from '../src/lib/api-types';
+import type { WanRates } from '../src/lib/activity-types';
 import type { ComplianceStatus, ConfigBackupOut } from '../src/lib/compliance-types';
 import type { LiveStatus, LiveStreamOut } from '../src/lib/live-types';
 import type {
@@ -551,6 +552,18 @@ export const SYSTEM_DISK = load('system-disk') as {
 export const SYSTEM_HEALTH = load('system-health') as {
   meta: SampleMeta;
   health: SystemHealth;
+  errors: Record<string, ErrorSample>;
+};
+
+/**
+ * Canlı Durum's internet lines (captured, Wave 5 contract §6 N6): the last hour (a line `ok` with
+ * its capacity, one `timeout`, one `disabled`), the day as 1-minute averages, and no SNMP source.
+ */
+export const ACTIVITY_WAN = load('activity-wan') as {
+  meta: SampleMeta;
+  hour: WanRates;
+  day: WanRates;
+  empty: WanRates;
   errors: Record<string, ErrorSample>;
 };
 

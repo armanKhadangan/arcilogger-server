@@ -59,6 +59,27 @@
         "capacity_mbps": "capacity (Mbps)",
         "interval_seconds": "polling interval (s)"
       }
+    },
+    "card": {
+      "title": "Internet line",
+      "lines": "Internet lines",
+      "download": "Download",
+      "upload": "Upload",
+      "share": "{{share}} of capacity",
+      "spark": "{{line}} {{what}}, last 60 minutes",
+      "updated": "Last read {{time}}",
+      "noSample": "No good reading yet",
+      "operDown": "Interface: {{state}}",
+      "status": {
+        "ok": "Being read",
+        "timeout": "No answer",
+        "auth_failed": "Authentication failed",
+        "no_such_interface": "Interface not found",
+        "snmp_no_hc_counters": "No 64-bit counters",
+        "disabled": "Off"
+      },
+      "setup": "The line speed is not read yet. Once SNMP is switched on in a log source, its download and upload speed show here.",
+      "setupLink": "Switch SNMP on in Settings → Sources"
     }
   }
 }

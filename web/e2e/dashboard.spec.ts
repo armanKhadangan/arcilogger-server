@@ -1,10 +1,12 @@
 import { expect, test, type Page } from '@playwright/test';
 
+import type { WanRates } from '../src/lib/activity-types';
+
 import { expectNoA11yViolations, usePreferences, useSampleClock, type Theme } from './fixtures';
 import { mockApi, type MockOptions } from './mock-api';
 import { mockSources } from './mock-sources';
 import { mockW4 } from './mock-w4';
-import { copy, DASHBOARD, RAW, SAMPLE_TODAY, SOURCES, SYSTEM_DISK } from './samples';
+import { ACTIVITY_WAN, copy, DASHBOARD, RAW, SAMPLE_TODAY, SOURCES, SYSTEM_DISK } from './samples';
 
 /** The Panel's blocks (spec 12.3 item 2) by their test ids, in page order. */
 const ALL = [
@@ -470,6 +472,88 @@ for (const theme of ['light', 'dark'] as Theme[]) {
     await expect(page.getByTestId('card-parse-failures')).toContainText('fortigate.kv');
     await expect(page.getByTestId('card-usage')).toContainText('Aktif kullanıcı');
     await expect(page.getByTestId('card-disk')).toBeVisible();
+    await expectNoA11yViolations(page);
+  });
+}
+
+/**
+ * `GET /activity/wan` answering W5-N's captured `activity-wan.json` (`dashboard.view` or
+ * `system.read`, N6); the calls it answered.
+ */
+async function routeWan(page: Page, rates: WanRates = ACTIVITY_WAN.hour) {
+  const calls: string[] = [];
+  await page.route('**/api/v1/activity/wan?*', async (route) => {
+    calls.push(new URL(route.request().url()).searchParams.get('range') ?? '');
+    await route.fulfill({ json: copy(rates) });
+  });
+  return calls;
+}
+
+/**
+ * The card "İnternet hattı" (Wave 5 contract §6 N7, P4): W5-N's captured `activity-wan.json` —
+ * a line read with its capacity, one without an answer and a source whose SNMP is off (left
+ * out); without any SNMP source, the way to Kaynaklar for an administrator.
+ */
+test.describe('Panel — İnternet hattı', () => {
+  test.beforeEach(async ({ page }) => {
+    await useSampleClock(page, SAMPLE_TODAY);
+  });
+
+  test('administrator: each line now, the one not read says so', async ({ page }) => {
+    await panel(page, { signedInAs: 'tolga' });
+    const calls = await routeWan(page);
+    await page.goto('/');
+    const card = page.getByTestId('card-wan');
+    const lines = card.getByTestId('wan-line');
+    await expect(lines).toHaveCount(2);
+    await expect(lines.nth(0)).toContainText('wan1');
+    await expect(lines.nth(0)).toContainText('34,0 Mbit/s');
+    await expect(lines.nth(0)).toContainText('kapasite: %34');
+    await expect(lines.nth(1)).toContainText('Yanıt yok');
+    await expect(card).not.toContainText('ether1');
+    expect(calls[0]).toBe('60m');
+  });
+
+  test('no SNMP source: the administrator is shown Kaynaklar, the auditor nothing', async ({
+    page,
+  }) => {
+    await panel(page, { signedInAs: 'tolga' });
+    await routeWan(page, ACTIVITY_WAN.empty);
+    await page.goto('/');
+    const setup = page.getByTestId('card-wan-setup');
+    await expect(setup).toContainText('Hat hızı henüz okunmuyor.');
+    await expect(page.getByTestId('card-wan')).toHaveCount(0);
+    await setup.getByRole('link', { name: "Ayarlar → Kaynaklar'da SNMP'yi aç" }).click();
+    await expect(page).toHaveURL(/\/settings\/sources$/);
+  });
+
+  test('auditor: asks for the lines, never sees the way to Kaynaklar', async ({ page }) => {
+    await panel(page, { signedInAs: 'ayse.yilmaz' });
+    const calls = await routeWan(page, ACTIVITY_WAN.empty);
+    await page.goto('/');
+    await expect(page.getByTestId('card-seal')).toBeVisible();
+    await expect.poll(() => calls.length).toBeGreaterThan(0);
+    await expect(page.getByTestId('card-wan-setup')).toHaveCount(0);
+  });
+
+  test('HR (no dashboard.view, no system.read): never asks for the lines', async ({ page }) => {
+    await panel(page, { signedInAs: 'mehmet.kaya' });
+    const calls = await routeWan(page);
+    await page.goto('/');
+    await expect(page.getByTestId('card-usage')).toBeVisible();
+    await expect(page.getByTestId('card-wan')).toHaveCount(0);
+    expect(calls).toEqual([]);
+  });
+});
+
+for (const theme of ['light', 'dark'] as Theme[]) {
+  test(`Panel with the internet line card: accessibility — ${theme}`, async ({ page }) => {
+    await usePreferences(page, { theme });
+    await useSampleClock(page, SAMPLE_TODAY);
+    await panel(page, { signedInAs: 'tolga' });
+    await routeWan(page);
+    await page.goto('/');
+    await expect(page.getByTestId('card-wan').getByTestId('wan-line')).toHaveCount(2);
     await expectNoA11yViolations(page);
   });
 }

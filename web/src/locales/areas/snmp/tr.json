@@ -59,6 +59,27 @@
         "capacity_mbps": "kapasite (Mbps)",
         "interval_seconds": "okuma aralığı (sn)"
       }
+    },
+    "card": {
+      "title": "İnternet hattı",
+      "lines": "İnternet hatları",
+      "download": "İndirme",
+      "upload": "Yükleme",
+      "share": "kapasite: {{share}}",
+      "spark": "{{line}} {{what}}, son 60 dakika",
+      "updated": "Son okuma {{time}}",
+      "noSample": "Henüz iyi bir okuma yok",
+      "operDown": "Arayüz: {{state}}",
+      "status": {
+        "ok": "Okunuyor",
+        "timeout": "Yanıt yok",
+        "auth_failed": "Kimlik doğrulama başarısız",
+        "no_such_interface": "Arayüz bulunamadı",
+        "snmp_no_hc_counters": "64 bit sayaç yok",
+        "disabled": "Kapalı"
+      },
+      "setup": "Hat hızı henüz okunmuyor. Bir log kaynağının SNMP bölümünü açınca indirme ve yükleme hızı burada görünür.",
+      "setupLink": "Ayarlar → Kaynaklar'da SNMP'yi aç"
     }
   }
 }
