@@ -303,7 +303,7 @@ production server?); the credit history `state\credit.jsonl` (the Credit task da
 | 4 | Attention | The credit is at or below the threshold | "{credits} credits left; threshold {threshold}. Estimated to last {days} days." |
 | 5 | Attention | No credit reading at all, or the last one is more than two days old | "The credit is unknown or the last reading ({at}) is more than two days old." |
 | 6 | Attention | The certificate expires in 180 days or less | "The TSA certificate of the newest time stamp expires on {date} ({days} days left)." |
-| 7 | No data | No sealed day yet | "No day has been stamped with Kamu SM yet." |
+| 7 | No data | No sealed day yet | "No day has been stamped by a production server yet." |
 | 8 | OK | — | "{credits} credits left (threshold {threshold}); the TSA certificate of the newest time stamp is valid for {days} more days." |
 
 Row 2 also counts a negative reading in the credit log as used up. A new installation shows
@@ -313,6 +313,9 @@ daily Credit task; the 180 days are the specification's number. Time-stamp serve
 production", "Kamu SM test", "TÜRKTRUST production" (legal grade by D12), "TÜRKTRUST, not its
 production server", "Trial (mock)", "RFC 3161". Facts: time-stamp server, credits left,
 estimated days, threshold, last reading, TSA certificate expires, days left.
+For a provider without a credit query (TÜRKTRUST; C21) rows 2, 4 and 5 do not apply, the credit
+facts become "ARCILOGGER does not query credits for this provider.", and row 8 reads "The TSA
+certificate of the newest time stamp is valid for {days} more days."
 
 **Verify on site** (the card's note): "The credit is read from the Kamu SM client's output; verify
 the format on site." ([kamusm.md](kamusm.md) section 3, K4; section 6.)

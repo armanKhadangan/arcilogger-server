@@ -297,7 +297,7 @@ aşağıdaki koşullar belirler.
 | 4 | Dikkat | Kontör eşiğe eşit ya da altında | "Kalan kontör {kontör}; eşik {eşik}. Tahmini {gün} gün yeter." |
 | 5 | Dikkat | Hiç kontör okuması yok ya da son okuma iki günden eski | "Kontör bilinmiyor ya da son okuma ({zaman}) iki günden eski." |
 | 6 | Dikkat | Sertifikanın bitmesine 180 gün ya da daha az var | "Son damganın TSA sertifikası {tarih} tarihinde doluyor ({gün} gün kaldı)." |
-| 7 | Bilgi yok | Henüz mühürlü gün yok | "Henüz Kamu SM ile damgalanmış gün yok." |
+| 7 | Bilgi yok | Henüz mühürlü gün yok | "Henüz üretim sunucusuyla damgalanmış gün yok." |
 | 8 | Tamam | — | "Kalan kontör {kontör} (eşik {eşik}); son damganın TSA sertifikası {gün} gün daha geçerli." |
 
 Satır 2 kontör günlüğündeki eksi bir okumayı da "bitti" sayar. Yeni bir kurulum, Kamu SM üretim
@@ -307,6 +307,9 @@ bağlantısı tamamlanana kadar bu kartta **Sorun** gösterir (satır 1); aynı 
 "TÜRKTRUST üretim" (D12 gereği yasal nitelikli), "TÜRKTRUST, üretim sunucusu dışında", "Deneme
 (mock)", "RFC 3161". Bilgiler: damga sunucusu, kalan kontör, tahmini gün, eşik, son okuma,
 TSA sertifikası bitişi, kalan gün.
+Kontör sorgusu olmayan bir sağlayıcıda (TÜRKTRUST; C21) satır 2, 4 ve 5 uygulanmaz, kontör
+bilgilerinin yerine "ARCILOGGER bu sağlayıcı için kontör sorgulamaz." yazar ve satır 8 "Son damganın
+TSA sertifikası {gün} gün daha geçerli." olur.
 
 **Sahada doğrulayın** (kartın notu): "Kontör değeri Kamu SM istemcisinin çıktısından okunur; okuma
 biçimi sahada doğrulanmalıdır." ([kamusm.md](kamusm.md) bölüm 3, K4; bölüm 6.)

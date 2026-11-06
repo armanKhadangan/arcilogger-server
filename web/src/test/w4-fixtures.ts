@@ -473,8 +473,8 @@ export const COMPLIANCE_REASONS: Record<ComplianceCardId, Record<ComplianceTone,
     ],
     error: ['Kamu SM kontörü bitti.', 'The Kamu SM credit is used up.'],
     neutral: [
-      'Henüz Kamu SM ile damgalanmış gün yok.',
-      'No day has been stamped with Kamu SM yet.',
+      'Henüz üretim sunucusuyla damgalanmış gün yok.',
+      'No day has been stamped by a production server yet.',
     ],
   },
   clock: {

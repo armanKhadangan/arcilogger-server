@@ -246,14 +246,23 @@ TSA_CERT_SOON: Final[Text] = (
     "The TSA certificate of the newest time stamp expires on {date} ({days} days left).",
 )
 TSA_NONE: Final[Text] = (
-    "Henüz Kamu SM ile damgalanmış gün yok.",
-    "No day has been stamped with Kamu SM yet.",
+    "Henüz üretim sunucusuyla damgalanmış gün yok.",
+    "No day has been stamped by a production server yet.",
 )
 TSA_OK: Final[Text] = (
     "Kalan kontör {credits} (eşik {threshold}); son damganın TSA sertifikası {days} gün daha "
     "geçerli.",
     "{credits} credits left (threshold {threshold}); the TSA certificate of the newest time "
     "stamp is valid for {days} more days.",
+)
+TSA_OK_NO_CREDIT: Final[Text] = (
+    "Son damganın TSA sertifikası {days} gün daha geçerli.",
+    "The TSA certificate of the newest time stamp is valid for {days} more days.",
+)
+#: The ``credits`` fact of a provider without a credit query (C21; nothing about its own systems).
+TSA_CREDIT_NOT_QUERIED: Final[Text] = (
+    "ARCILOGGER bu sağlayıcı için kontör sorgulamaz.",
+    "ARCILOGGER does not query credits for this provider.",
 )
 
 # -- card 6 clock ---------------------------------------------------------------------------------

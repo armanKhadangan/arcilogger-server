@@ -54,6 +54,7 @@ from arcilogger_api.sealinfo import (
 )
 from arcilogger_core.chain import sealed_days
 from arcilogger_core.config import MIN_RETENTION_DAYS, Config
+from arcilogger_core.credit import credit_query
 from arcilogger_core.fmt import Lang, format_bytes, format_date, format_datetime, format_number
 from arcilogger_core.layout import Layout
 from arcilogger_core.timeutil import SITE_TZ, site_day, to_site
@@ -538,41 +539,46 @@ def card_tsa(ctx: CardContext) -> ComplianceCard:
     credits = number(remaining) if remaining is not None else same(texts.NONE)
     estimate = number(credit.estimated_days) if credit.estimated_days is not None else texts.NONE
     cert_date = format_date(cert) if cert else texts.NONE
+    days = texts.NONE if left is None else left
+    # A provider without a credit query (C21, TÜRKTRUST) never has a reading: the three credit
+    # rows and facts are left out for it (#220), the rest of the card stays.
+    queried = credit_query(tsa.provider)
     if not tsa.legal_grade:
         verdict = Verdict(
             "error", fill(texts.TSA_NOT_PRODUCTION, provider=server_label(ctx.config))
         )
-    elif remaining is not None and remaining <= 0:
+    elif queried and remaining is not None and remaining <= 0:
         verdict = Verdict("error", texts.TSA_NO_CREDIT)
     elif cert is not None and cert < ctx.now:
         verdict = Verdict("error", fill(texts.TSA_CERT_EXPIRED, date=cert_date))
-    elif remaining is not None and remaining <= threshold:
+    elif queried and remaining is not None and remaining <= threshold:
         verdict = Verdict(
             "warning",
             fill(texts.TSA_LOW, credits=credits, threshold=number(threshold), days=estimate),
         )
-    elif read_at is None or ctx.now - read_at > CREDIT_FRESH:
+    elif queried and (read_at is None or ctx.now - read_at > CREDIT_FRESH):
         verdict = Verdict("warning", fill(texts.TSA_UNKNOWN, at=when(read_at)))
     elif cert is not None and cert - ctx.now <= CERT_WARNING:
         verdict = Verdict("warning", fill(texts.TSA_CERT_SOON, date=cert_date, days=left))
     elif not ctx.sealed:
         verdict = Verdict("neutral", texts.TSA_NONE)
-    else:
+    elif queried:
         verdict = Verdict(
-            "ok",
-            fill(
-                texts.TSA_OK,
-                credits=credits,
-                threshold=number(threshold),
-                days=texts.NONE if left is None else left,
-            ),
+            "ok", fill(texts.TSA_OK, credits=credits, threshold=number(threshold), days=days)
         )
-    facts = [
-        fact("tsa", "server", server_label(ctx.config)),
-        fact("tsa", "credits", credits),
-        fact("tsa", "estimated_days", estimate),
-        fact("tsa", "threshold", number(threshold)),
-        fact("tsa", "credit_at", when(read_at)),
+    else:
+        verdict = Verdict("ok", fill(texts.TSA_OK_NO_CREDIT, days=days))
+    facts = [fact("tsa", "server", server_label(ctx.config))]
+    if queried:
+        facts += [
+            fact("tsa", "credits", credits),
+            fact("tsa", "estimated_days", estimate),
+            fact("tsa", "threshold", number(threshold)),
+            fact("tsa", "credit_at", when(read_at)),
+        ]
+    else:
+        facts.append(fact("tsa", "credits", texts.TSA_CREDIT_NOT_QUERIED))
+    facts += [
         fact("tsa", "cert_until", cert_date),
         fact("tsa", "cert_days", texts.NONE if left is None else str(left)),
     ]
