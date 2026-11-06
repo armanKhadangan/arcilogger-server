@@ -3690,7 +3690,7 @@ The manager took P1 and P2 (#203, comment of 2026-11-05); P3 and P4 stay with G�
   when the API answers, never in the file.
 - **W5-M-4: M2 counts through an incremental snapshot; M4's guard redefined** (the owner's
   decision on #201, 2026-11-06 02:07Z). A request that read its range would read 75 minutes of
-  logs at 2,000 lines/s, about 9 million lines. Instead the worker job `activity.tick` (every
+  logs at 2,000 lines/s, about 9 million lines. Instead the worker's `activity.tick` (every
   10 s, module `usage_analytics`) keeps `state/activity.json` (`Layout.activity`): per minute and
   subject of the last 60 minutes the bytes, the largest destinations and applications, and the
   sessions started, counted by the engine (`DayBuilder(..., window=...)`, `add_ip`), so the
@@ -3704,32 +3704,58 @@ The manager took P1 and P2 (#203, comment of 2026-11-05); P3 and P4 stay with G�
     per destination, equal `compute_day`'s (`worker/tests/test_activity.py`). A session's web
     filter and application logs are read when it is first counted, its DNS answers (the newest
     for its address before its start) only when no such log names it.
-  - A tick reads and sorts the new rows, then counts in chunks within one budget (1.5 s, the
-    file's write set aside): the sessions that ended, the warm-up slices (5 s of logs each, over
-    the last 60 minutes and the overlap after a start), the open sessions whose logs changed.
-    Until all is counted the answer says `warming_up`.
+  - **Its own thread** (the owner's decision on #201, 2026-11-06 07:08Z): `activity.tick` is not
+    a job of the loop but a thread of the worker process (`activity.Runner`) with its own
+    database engine, so no job waits on it. It starts and stops with the service; on the stop
+    event the tick under way ends after its current chunk and the file is still written whole.
+    While `usage_analytics` is off it idles and asks again at each tick (one `skipped` row a
+    site day, LISANS §2.3); the API's gate stays. Its ticks are recorded in `job_runs` as
+    `activity.tick` at most once a minute (`ok`, or `failed` when the last tick failed, with the
+    ticks, the newest tick's seconds and the sessions waiting), and it shows in
+    `worker-status.json` (`"thread": true`), so the Sistem page and `R20-job` see a stuck or
+    failing tick. A failed tick is logged; the next one waits longer (up to 5 minutes).
+  - A tick reads and sorts the new rows, then counts in chunks for up to 5 s: the sessions that
+    ended, the warm-up slices (5 s of logs each, over the last 60 minutes and the overlap after a
+    start), the open sessions whose logs changed. Until all is counted the answer says
+    `warming_up`.
   - The file holds subject keys, their VLAN, MAC and address, and per minute the whole bytes, the
     sessions started and the 5 largest destinations (a registrable domain, a service or an
     address) and applications through name tables: no name, user, URL or raw line. It is sparse,
     replaced whole through a renamed temporary file (not fsynced: rewritten every tick and
     rebuilt from the logs after a restart), only when it changed, and only the subject-minutes
     whose totals changed are put together again.
-  - The guard: (a) a request answers from the snapshot in under 1 s
-    (`api/tests/test_activity_performance.py`): 0.25 s at 200 subjects, 0.98 s at 1,000; (b) one
-    tick of 10 s of new rows at 2,000 lines/s takes under 2 s and (c) no warm-up tick more than
-    about 2 s (`worker/tests/test_activity_performance.py`, a synthetic load shaped like
-    `tools/loadgen`, 1,000 devices, ≈575 sessions/s, ≈30,700 open at once). Measured on the cloud
-    container (4 shared cores): at the default load (3 lines/s) a tick ≤ 0.015 s, a warm-up tick
-    ≤ 1.45 s, the file 89 KB written in 0.01 s; at 2,000 lines/s a tick 1.8–2.4 s and a warm-up
-    tick 1.9–2.4 s, the file 5.8 MB written in ≤ 0.6 s. The work per 10 s at 2,000 lines/s is
-    1.6–1.9 s, so (b) and (c) are not met yet: asked on #201 (2026-11-06, "M4 guard (b)/(c) at
-    2,000 lines/s"), with the snapshot outside the worker's job loop as the recommendation.
+  - **M4's guard, as redefined with the thread** (`perf` tests, measured on the cloud container
+    and in the CI perf job):
+    - (a) a request answers from the snapshot in under 1 s at the default subject count
+      (`api/tests/test_activity_performance.py`);
+    - (b) at 2,000 lines/s for 30 ticks, the sessions waiting to be counted at the end are no
+      more than after the warm-up, and `data_until` is never more than 30 s behind the newest
+      traffic row;
+    - (c) while the thread counts at that load, a probe job of the loop (due every 2 s) starts
+      within 2 s of when it is due, at every tick (`worker/tests/test_activity_performance.py`;
+      the ticks are paced to the probe's 2 s, faster than the 10 s they cover).
+  - The load is synthetic, shaped like `tools/loadgen` (its sites, durations and 120 s interim
+    interval): 1,000 devices, about 575 sessions/s, about 30,700 sessions open at once.
+  - Measured on the cloud container (4 shared cores, PostgreSQL on the same machine):
+
+    | | default load (3 lines/s, 100 devices) | 2,000 lines/s |
+    |---|---|---|
+    | (a) answer from the snapshot | 0.25 s at 200 subjects (0.98 s at 1,000) | — |
+    | (b) sessions waiting after 30 ticks / after warm-up | 0 / 0 | 0 / 0 |
+    | (b) `data_until` behind the newest row | 0 s | 0 s |
+    | (c) the probe job late, at most | 0.02 s | 1.53 s |
+    | a tick: mean / max | 0.02 s / 0.03 s | 2.05 s / 3.47 s |
+    | warm-up: ticks / longest | 1 / 2.2 s | 16 / 5.9 s |
+    | snapshot file / longest write | 104 KB / 0.01 s | 5.8 MB / 1.1 s |
+
+    Before the thread (the 06:10Z question on #201), at 2,000 lines/s the work of 10 s of logs
+    was 1.6–1.9 s of the loop's time: ticks in the loop took 1.8–2.4 s.
 - **W5-M-5: files outside the ownership of §6.6.** `worker/src/arcilogger_worker/usage/engine.py`
   (W5-M-1); `worker/tests/test_usage_window.py` (the window across midnight);
-  `core/src/arcilogger_core/layout.py` (`Layout.activity`, as W5-N's `wan_rates`), the
-  `activity.tick` line of `worker/src/arcilogger_worker/service.py`, the pinned job lists of
-  `worker/tests/test_service.py`, and the job's rows in CORRELATION and LISANS/LICENSING §2.3
-  (granted on #201, 02:07Z);
+  `core/src/arcilogger_core/layout.py` (`Layout.activity`, as W5-N's `wan_rates`), the job's
+  rows in CORRELATION and LISANS/LICENSING §2.3 (granted on #201, 02:07Z), and the thread's
+  start/stop hunk of `worker/src/arcilogger_worker/service.py` and
+  `worker/tests/test_service.py` (granted on #201, 07:08Z);
   `api/tests/test_license_routes.py` and LISANS/LICENSING §1 and §2.2 (`/activity` and the
   `usage_analytics` row, granted on #201, 01:19Z); `web/src/lib/api-types.test.ts` and
   `api-samples.test.ts` (`activity-types.ts` in `TYPES_FILES`, the four `Wan*` interfaces in

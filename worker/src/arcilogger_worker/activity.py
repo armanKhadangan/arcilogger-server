@@ -717,6 +717,8 @@ class Runner:
         self.last_finished: datetime | None = None
         self.last_status: str | None = None
         self.last_error: str | None = None
+        #: The newest tick's details.
+        self.details: dict[str, Any] = {}
         self._window: Window | None = None
         self._skip_day: date | None = None
 
@@ -749,7 +751,7 @@ class Runner:
             status, self.failures = "failed", self.failures + 1
             self.last_error = f"{type(exc).__name__}: {str(exc)[:200]}"
             details = {"error": type(exc).__name__, "message": str(exc)[:500]}
-        self.last_finished, self.last_status = self.clock(), status
+        self.last_finished, self.last_status, self.details = self.clock(), status, details
         window = self._window or Window(started=now)
         self._window = window
         window.ticks += 1

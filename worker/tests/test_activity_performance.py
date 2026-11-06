@@ -1,6 +1,9 @@
-"""Canlı Durum's snapshot under load (the M4 guards of #201, Wave 5 contract §6.2 M4 as amended by
-deviation W5-M-4): one tick of 10 s of new rows at 2,000 lines per second takes under
-:data:`TICK_BUDGET`, and no warm-up slice more than :data:`SLICE_BUDGET`.
+"""Canlı Durum's snapshot under load (the M4 guards of #201, Wave 5 contract §6.2 M4 as redefined
+by the owner on #201, 2026-11-06 07:08Z, deviation W5-M-4): the snapshot's thread keeps up with
+2,000 lines per second (after :data:`TICKS` ticks no more sessions wait to be counted than after
+the warm-up, and ``data_until`` is never more than :data:`LAG_LIMIT` behind the newest traffic
+row), and while it counts, a probe job in the worker's loop starts within :data:`PROBE_LATE` of
+when it is due, every time.
 
 The load is synthetic, shaped like the load generator's browsing (``tools/loadgen``: its sites,
 their typical durations and volumes, lognormal spread, an interim log every 120 s): per session a
@@ -8,20 +11,24 @@ DNS answer, a web filter log with the host name and the traffic logs, from devic
 lease (``ip:`` subjects). The rows are written straight into the tables. Before "now" (11:00)
 the last three minutes are written whole (the warm-up's last slices read them at full density)
 together with every session still open at 11:00 and a tenth of the older closed sessions (they
-fill the snapshot's earlier minutes); then each tick's 10 s of rows are written and the tick is
-timed. ``ARCILOGGER_ACTIVITY_PERF``: ``1`` (default) both loads, ``0`` skips. Run with ``-s`` to
-see the figures (recorded on #211).
+fill the snapshot's earlier minutes); then each tick's 10 s of rows are written and the thread's
+tick runs, while the loop runs its probe. ``ARCILOGGER_ACTIVITY_PERF``: ``1`` (default) both
+loads, ``0`` skips. Run with ``-s`` to see the figures (recorded on #211 and in W5-M-4).
 """
 
 from __future__ import annotations
 
 import importlib.util
+import itertools
+import json
 import math
 import os
 import random
 import sys
+import threading
+import time
 from dataclasses import dataclass, field
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from functools import cache
 from pathlib import Path
 from types import ModuleType
@@ -29,12 +36,13 @@ from typing import Any
 
 import pytest
 from sqlalchemy import Engine, insert
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, sessionmaker
 
 from arcilogger_core.layout import Layout
 from arcilogger_db.models import FgDns, FgTraffic, FgWeb
 from arcilogger_db.partitions import ensure_partitions
-from arcilogger_worker.activity import Snapshot
+from arcilogger_worker.activity import Runner
+from arcilogger_worker.service import Job, JobContext, Worker
 from arcilogger_worker.testing import tr
 
 pytestmark = [
@@ -46,11 +54,13 @@ pytestmark = [
 LOADGEN = Path(__file__).resolve().parents[2] / "tools" / "loadgen" / "arcilogger_loadgen.py"
 DAY = date(2026, 10, 14)
 NOW = tr(DAY, 11)
-#: Seconds one tick of new rows may take, and one warm-up slice (M4 guards (b) and (c)).
-TICK_BUDGET = 2.0
-SLICE_BUDGET = 2.0
+#: M4 guards (b) and (c): ``data_until`` behind the newest traffic row at most this much, and
+#: the loop's probe job, due every :data:`PROBE_EVERY`, started at most this late.
+LAG_LIMIT = timedelta(seconds=30)
+PROBE_EVERY = timedelta(seconds=2)
+PROBE_LATE = timedelta(seconds=2)
 TICK = timedelta(seconds=10)
-TICKS = 12
+TICKS = 30
 INTERIM = 120
 #: Written whole before "now" (the warm-up's dense slices), and the share of older sessions.
 DENSE = timedelta(minutes=3)
@@ -206,6 +216,19 @@ def write(session: Session, lines: list[Line]) -> int:
     return len(lines)
 
 
+class Clock:
+    def __init__(self, now: datetime) -> None:
+        self.now = now
+
+    def __call__(self) -> datetime:
+        return self.now
+
+
+def backlog(details: dict[str, Any]) -> int:
+    """Sessions waiting to be counted: ended, and open ones whose logs changed."""
+    return int(details["ended_waiting"]) + int(details["stale_sessions"])
+
+
 @pytest.mark.parametrize(
     ("rate", "devices"),
     [
@@ -213,8 +236,13 @@ def write(session: Session, lines: list[Line]) -> int:
         pytest.param(2000.0, 1000, id="2000-lines-per-second"),
     ],
 )
-def test_ticks_and_warm_up_slices_stay_within_budget(
-    db_engine: Engine, db_session: Session, layout: Layout, rate: float, devices: int
+def test_the_snapshot_keeps_up_and_the_loop_is_not_held(
+    db_engine: Engine,
+    db_session: Session,
+    db_session_factory: sessionmaker[Session],
+    layout: Layout,
+    rate: float,
+    devices: int,
 ) -> None:
     with db_engine.begin() as connection:
         ensure_partitions(connection, today=DAY)
@@ -229,33 +257,66 @@ def test_ticks_and_warm_up_slices_stay_within_budget(
     }
     load.before.clear()
 
-    snapshot = Snapshot(layout.activity)
-    slices = []
+    clock = Clock(NOW)
+    runner = Runner(db_engine, layout.activity, gate=lambda now: None, clock=clock)
+    warm = []
     while True:
-        details = snapshot.tick(db_session, NOW)
-        slices.append(details)
-        if not details["warming_up"]:
+        assert runner.once() == "ok"
+        warm.append(runner.details)
+        if not runner.details["warming_up"]:
             break
-    figures["slices"] = len(slices)
-    figures["slice_max_s"] = max(details["seconds"] for details in slices)
-    figures["slice_rows_max"] = max(details["rows"] for details in slices)
-    ticks = []
-    for index in range(1, TICKS + 1):
-        lo, hi = NOW + TICK * (index - 1), NOW + TICK * index
-        written = write(db_session, [line for line in later if lo <= line[1]["time"] < hi])
-        details = snapshot.tick(db_session, hi)
-        ticks.append({**details, "lines": written})
+    figures["warm_up_ticks"] = len(warm)
+    figures["warm_up_tick_max_s"] = max(details["seconds"] for details in warm)
+    figures["backlog_after_warm_up"] = backlog(warm[-1])
+
+    # The worker's loop beside the thread, with a probe job: when does it start?
+    starts: list[float] = []
+
+    def probe(ctx: JobContext) -> dict[str, Any]:
+        starts.append(time.monotonic())
+        return {}
+
+    worker = Worker(
+        engine=db_engine,
+        layout=layout,
+        jobs=[Job("probe", probe, every=PROBE_EVERY)],
+        activity=False,
+    )
+    stop = threading.Event()
+    loop = threading.Thread(target=worker.run, args=(stop,))
+    loop.start()
+    ticks, lags = [], []
+    try:
+        with db_session_factory() as writer:
+            for index in range(1, TICKS + 1):
+                lo, hi = NOW + TICK * (index - 1), NOW + TICK * index
+                lines = [line for line in later if lo <= line[1]["time"] < hi]
+                write(writer, lines)
+                clock.now = hi
+                began = time.monotonic()
+                assert runner.once() == "ok"
+                ticks.append(runner.details)
+                newest = max(row["time"] for table, row in lines if table is FgTraffic)
+                until = json.loads(layout.activity.read_text(encoding="utf-8"))["data_until"]
+                lags.append((newest - datetime.fromisoformat(until)).total_seconds())
+                # Each tick takes at least the probe's interval: the loop runs its probe at every
+                # tick (10 s of logs in this time is more than the thread would count for real).
+                stop.wait(max(0.0, PROBE_EVERY.total_seconds() - (time.monotonic() - began)))
+    finally:
+        stop.set()
+        loop.join(timeout=30)
+    late = [b - a - PROBE_EVERY.total_seconds() for a, b in itertools.pairwise(starts)]
     figures["tick_max_s"] = max(details["seconds"] for details in ticks)
-    figures["tick_rows_min"] = min(details["rows"] for details in ticks)
+    figures["tick_mean_s"] = round(sum(details["seconds"] for details in ticks) / len(ticks), 3)
+    figures["write_max_s"] = max(details["write_seconds"] for details in [*warm, *ticks])
+    figures["backlog"] = [backlog(details) for details in ticks]
+    figures["data_until_lag_max_s"] = max(lags)
+    figures["probe_runs"] = len(starts)
+    figures["probe_late_max_s"] = round(max(late, default=0.0), 3)
     figures["open_sessions"] = ticks[-1]["open_sessions"]
-    figures["write_max_s"] = max(details["write_seconds"] for details in [*slices, *ticks])
     figures["file_bytes"] = layout.activity.stat().st_size
-    phases = ("read_seconds", "count_seconds", "write_seconds")
-    figures["slice_phases_max"] = {name: max(d[name] for d in slices) for name in phases}
-    figures["tick_phases_max"] = {name: max(d[name] for d in ticks) for name in phases}
-    figures["stale_after_ticks"] = [details["stale_sessions"] for details in ticks]
-    figures["recounted"] = [details["recounted"] for details in ticks]
-    figures["ended_waiting"] = [details["ended_waiting"] for details in ticks]
     print(f"\nactivity snapshot at {rate:g} lines/s, {devices} devices: {figures}")
-    assert figures["slice_max_s"] < SLICE_BUDGET
-    assert figures["tick_max_s"] < TICK_BUDGET
+    assert backlog(ticks[-1]) <= figures["backlog_after_warm_up"]
+    assert figures["data_until_lag_max_s"] <= LAG_LIMIT.total_seconds()
+    assert len(starts) >= TICKS
+    assert figures["probe_late_max_s"] < PROBE_LATE.total_seconds()

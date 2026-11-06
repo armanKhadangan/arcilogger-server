@@ -142,7 +142,7 @@ data of a module that is off is not deleted.
 | `usage.requests` | Usage analytics | skipped |
 | `usage.daily` | Usage analytics | skipped |
 | `usage.today` | Usage analytics | skipped |
-| `activity.tick` | Usage analytics (Canlı Durum's table of who sends and receives) | skipped |
+| `activity.tick` (a thread of the worker, recorded in `job_runs`) | Usage analytics (Canlı Durum's table of who sends and receives) | idles; one `skipped` row a day |
 | `usage.reattribute` | Usage analytics | skipped |
 | `usage.retention` | — (deletion of personal data) | always runs |
 | `db.window` | 5651 Core (the database window: log rows older than it dropped) | always runs |
