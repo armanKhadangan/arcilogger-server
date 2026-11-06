@@ -22,7 +22,7 @@ from sqlalchemy.orm import Session
 from arcilogger_api.activity.devices import devices_now
 from arcilogger_api.activity.models import ActivityDevices, ActivityWindow
 from arcilogger_api.audit import record_audit
-from arcilogger_api.deps import ConfigDep, DbSession
+from arcilogger_api.deps import ConfigDep, DbSession, LayoutDep
 from arcilogger_api.errors import ApiError
 from arcilogger_api.licensing import require_module
 from arcilogger_api.routers.usage import UsageReader, viewer_for
@@ -80,6 +80,7 @@ def devices(
     db: DbSession,
     user: UsageReader,
     config: ConfigDep,
+    layout: LayoutDep,
     window: Annotated[
         str | None,
         Query(description="Minutes: 1, 5 or 15 (default 5).", examples=["5"]),
@@ -89,7 +90,7 @@ def devices(
     minutes = window_of(window)
     viewer = viewer_for(db, user, config)
     now = utc_now()
-    answer = devices_now(db, viewer, minutes, now)
+    answer = devices_now(db, viewer, minutes, now, layout.activity)
     if audit_due(db, user, now):
         record_audit(
             db,

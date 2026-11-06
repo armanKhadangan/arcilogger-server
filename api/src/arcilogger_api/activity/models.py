@@ -98,6 +98,9 @@ class ActivityDevices(BaseModel):
     per_minute: list[ActivityMinute]
     #: The newest traffic row (null with none).
     data_until: datetime | None
+    #: The worker's snapshot does not cover the last 60 minutes yet (after a start, or none
+    #: written): the figures are partial.
+    warming_up: bool
     generated_at: datetime
 
 

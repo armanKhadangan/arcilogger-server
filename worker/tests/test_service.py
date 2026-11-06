@@ -178,6 +178,7 @@ def test_default_jobs_run_against_the_database(
         ("usage.requests", "skipped"),  # no rebuild request
         ("usage.daily", "ok"),
         ("usage.today", "ok"),
+        ("activity.tick", "ok"),
         ("usage.reattribute", "skipped"),  # nothing changed
         ("usage.retention", "ok"),
         ("db.window", "ok"),  # after 01:00; nothing sealed yet, so only the partitions
@@ -200,6 +201,7 @@ def test_default_jobs_run_against_the_database(
         ("alerts.notify", "skipped"),
         ("usage.requests", "skipped"),
         ("usage.today", "ok"),
+        ("activity.tick", "ok"),
         ("usage.reattribute", "skipped"),
         ("reports.run_due", "ok"),
         ("search.counts_backfill", "skipped"),

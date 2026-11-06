@@ -39,6 +39,9 @@ Jobs (``DEFAULT_JOBS``):
 ``usage.reattribute``       every 10 minutes: recent days whose inputs or device owners
                             changed are rebuilt (``usage.auto_rebuild_days``)
 ``usage.requests``          every 30 seconds: rebuild requests of the web interface
+``activity.tick``           every 10 seconds: the new traffic logs counted into Canlı Durum's
+                            snapshot of the last 60 minutes, ``state/activity.json``
+                            (subject keys and per-minute bytes; :mod:`.activity`, W5-M)
 ``usage.retention``         daily after 03:30: rollups older than ``usage.retention_days``
 ``db.window``               daily after 01:00, so it and its first retry (01:15) are due
                             before the Backup task's dump (01:40): log rows older than the
@@ -115,7 +118,7 @@ from arcilogger_core.timeutil import SITE_TZ, site_day, to_site, utc_now
 from arcilogger_db.engine import session_factory
 from arcilogger_db.models import JobRun
 from arcilogger_db.partitions import LockBudget, ensure_partitions, step_lock_timeout_ms
-from arcilogger_worker import __version__
+from arcilogger_worker import __version__, activity
 from arcilogger_worker.admin_jobs import import_admin_events, process_requests
 from arcilogger_worker.alerts.importer import import_alerts
 from arcilogger_worker.alerts.notify import run_notify
@@ -219,6 +222,8 @@ ALERTS_SYSTEM_EVERY: Final = timedelta(minutes=5)
 #: Area U (spec 10.4): today's usage every minute (contract W5 §6 L1; the job backs off on a busy
 #: site, :func:`.usage.jobs.refresh_today`), re-attribution every 10 minutes, requests every 30 s.
 USAGE_TODAY_EVERY: Final = timedelta(minutes=1)
+#: ``activity.tick`` reads the new traffic logs for Canlı Durum's snapshot (W5-M) this often.
+ACTIVITY_EVERY: Final = timedelta(seconds=10)
 USAGE_REATTRIBUTE_EVERY: Final = timedelta(minutes=10)
 USAGE_REQUESTS_EVERY: Final = timedelta(seconds=30)
 #: ``reports.run_due`` looks for due schedules and queued runs every minute.
@@ -348,6 +353,11 @@ def job_usage_today(ctx: JobContext) -> Mapping[str, Any]:
     return details
 
 
+def job_activity_tick(ctx: JobContext) -> Mapping[str, Any]:
+    """Canlı Durum's rolling snapshot (``state/activity.json``): the new traffic logs counted."""
+    return activity.tick_job(ctx.sessions, ctx.layout.activity, ctx.now)
+
+
 def job_usage_daily(ctx: JobContext) -> Mapping[str, Any]:
     """Yesterday's usage rollup, final."""
     return usage_jobs.finalize_yesterday(ctx.sessions, now=ctx.now)
@@ -421,6 +431,7 @@ def default_jobs(interval_seconds: int) -> tuple[Job, ...]:
         Job("usage.requests", job_usage_requests, every=USAGE_REQUESTS_EVERY, module=USAGE_MODULE),
         Job("usage.daily", job_usage_daily, daily_after=time(0, 45), module=USAGE_MODULE),
         Job("usage.today", job_usage_today, every=USAGE_TODAY_EVERY, module=USAGE_MODULE),
+        Job("activity.tick", job_activity_tick, every=ACTIVITY_EVERY, module=USAGE_MODULE),
         Job(
             "usage.reattribute",
             job_usage_reattribute,

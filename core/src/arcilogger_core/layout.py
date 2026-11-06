@@ -105,6 +105,12 @@ class Layout:
         return self.state / "system-history.json"
 
     @property
+    def activity(self) -> Path:
+        """Canlı Durum's rolling snapshot of the last 60 minutes (the worker job
+        ``activity.tick``, W5-M): subject keys and per-minute bytes, never a name."""
+        return self.state / "activity.json"
+
+    @property
     def requests(self) -> Path:
         """Signed task requests (``arcilogger_core.admin.contract.TaskRequest``): the
         administration agent writes them, the LOCAL SERVICE tasks run and delete them."""

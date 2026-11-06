@@ -41,7 +41,7 @@ from pathlib import Path
 from typing import Any, Final
 
 from sqlalchemy import text
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, sessionmaker
 
 from arcilogger_core.fsutil import atomic_write_text
 from arcilogger_core.timeutil import site_day
@@ -383,6 +383,17 @@ class Snapshot:
         atomic_write_text(self.path, json.dumps(document, sort_keys=True, separators=(",", ":")))
         self.written = content
         return True
+
+
+#: The snapshot of each data directory, kept by the worker process between its ticks.
+_SNAPSHOTS: dict[Path, Snapshot] = {}
+
+
+def tick_job(sessions: sessionmaker[Session], path: Path, now: datetime) -> dict[str, Any]:
+    """The job ``activity.tick``: one tick of the snapshot written to ``path``."""
+    snapshot = _SNAPSHOTS.setdefault(path, Snapshot(path))
+    with sessions() as session:
+        return snapshot.tick(session, now)
 
 
 def _iso(moment: float) -> str:

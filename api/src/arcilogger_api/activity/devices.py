@@ -1,28 +1,23 @@
-"""Who is sending and receiving data now (Wave 5 contract §6.2, M2), from the FortiGate traffic
-logs, counted by the usage engine itself (:mod:`arcilogger_worker.usage.engine`).
+"""Who is sending and receiving data now (Wave 5 contract §6.2, M2), answered from the worker's
+rolling snapshot (``state/activity.json``, :mod:`arcilogger_worker.activity`; the M4 decision on
+#201): per minute and subject the bytes, the destinations and applications and the sessions
+started, counted by the usage engine.
 
-The engine reads a range instead of a site day (:func:`~arcilogger_worker.usage.engine.read_range`
-into a :class:`~arcilogger_worker.usage.engine.DayBuilder` with a ``window``): its increment
-rule (an interim log's deltas at its own time, the final log only the rest), its spreading of
-each increment over the minutes it covers, its attribution of an address to a person, device or
-address, and its destinations and background rules are those of Kullanım, so a day of this
-counting adds up to the day's usage rollup. Two ranges are read: the last ``window`` minutes for
-the subjects and the totals (a session counts once, at its first minute in the range), and the
-last :data:`PER_MINUTE` minutes for the company's minute-by-minute chart. Both end with the
-minute under way.
-
-Subjects as in ``/usage`` (:class:`~arcilogger_worker.usage.query.Directory`,
-:func:`~arcilogger_worker.usage.query.subject_ref`): names or pseudonyms by the viewer; a person
-with ``usage_excluded`` is not a row, but their traffic counts in the company's totals and
-minutes.
+At answer time, as ``/usage``: subjects resolved by
+:class:`~arcilogger_worker.usage.query.Directory` and shown by
+:func:`~arcilogger_worker.usage.query.subject_ref` (names, or pseudonyms for the viewer); a
+person with ``usage_excluded`` is not a row, but their traffic counts in the company's totals and
+minutes. The window and the chart both end with the minute under way.
 """
 
 from __future__ import annotations
 
-from collections import Counter, defaultdict
+import json
+from collections import defaultdict
 from collections.abc import Mapping
 from datetime import UTC, datetime, timedelta
-from typing import Final
+from pathlib import Path
+from typing import Any, Final
 
 from sqlalchemy.orm import Session
 
@@ -36,10 +31,6 @@ from arcilogger_api.activity.models import (
     ActivityWindow,
 )
 from arcilogger_api.usage_models import SubjectRef
-from arcilogger_core.timeutil import site_day
-from arcilogger_worker.usage.config import UsageSettings
-from arcilogger_worker.usage.domains import BackgroundRules, DomainNamer
-from arcilogger_worker.usage.engine import BUCKET, DayBuilder, read_range
 from arcilogger_worker.usage.query import Directory, Viewer, subject_ref
 
 #: Minutes of the company's chart (``per_minute``).
@@ -48,79 +39,62 @@ PER_MINUTE: Final = 60
 MAX_ROWS: Final = 200
 #: Most entries of ``top_domains`` and ``top_apps``.
 TOP: Final = 3
+MINUTE: Final = timedelta(minutes=1)
 
 
-def count_range(
-    db: Session, lo: datetime, hi: datetime, *, settings: UsageSettings | None = None
-) -> DayBuilder:
-    """The usage engine's buckets of ``[lo, hi)`` (whole minutes), read from the logs."""
-    settings = settings or UsageSettings.load(db)
-    namer = DomainNamer(settings.psl_file, settings.psl_private_suffixes)
-    rules = BackgroundRules.create(
-        settings.background_domains, settings.background_appcats, settings.background_ports
-    )
-    builder = DayBuilder(
-        site_day(hi - timedelta(seconds=BUCKET)), settings, namer, rules, window=(lo, hi)
-    )
-    read_range(db, builder, settings=settings)
-    return builder
-
-
-def _moment(builder: DayBuilder, index: int) -> datetime:
-    return datetime.fromtimestamp(builder.lo_ts + index * BUCKET, UTC)
+def read_snapshot(path: Path) -> dict[str, Any] | None:
+    """The snapshot, or ``None`` while there is none (the worker has not written it yet)."""
+    try:
+        data = json.loads(path.read_bytes())
+    except (OSError, ValueError):
+        return None
+    return data if isinstance(data, dict) else None
 
 
 def devices_now(
-    db: Session, viewer: Viewer, minutes: ActivityWindow, now: datetime
+    db: Session, viewer: Viewer, minutes: ActivityWindow, now: datetime, snapshot_path: Path
 ) -> ActivityDevices:
     """``GET /activity/devices`` for the last ``minutes`` minutes before ``now``."""
-    settings = UsageSettings.load(db)
-    end = now.astimezone(UTC).replace(second=0, microsecond=0) + timedelta(seconds=BUCKET)
-    recent = count_range(db, end - timedelta(minutes=minutes), end, settings=settings)
-    hour = count_range(db, end - timedelta(minutes=PER_MINUTE), end, settings=settings)
-    seconds = minutes * 60
+    end = now.astimezone(UTC).replace(second=0, microsecond=0) + MINUTE
+    window_from = end - minutes * MINUTE
+    snapshot = read_snapshot(snapshot_path) or {}
+    by_minute: dict[datetime, Mapping[str, Any]] = {}
+    for entry in snapshot.get("minutes", []):
+        moment = datetime.fromisoformat(entry["minute"])
+        if end - PER_MINUTE * MINUTE <= moment < end:
+            by_minute[moment] = entry["subjects"]
 
     down: defaultdict[str, float] = defaultdict(float)
     up: defaultdict[str, float] = defaultdict(float)
+    sessions: defaultdict[str, int] = defaultdict(int)
     domains: dict[str, defaultdict[tuple[str, str], float]] = {}
     apps: dict[str, defaultdict[str, float]] = {}
-    last: dict[str, int] = {}
-    for key, buckets in recent.cells.items():
-        for index, cell in buckets.items():
-            for flow_id, (_, received, sent) in cell.items():
-                if not received and not sent:
-                    continue
-                down[key] += received
-                up[key] += sent
-                last[key] = max(last.get(key, index), index)
-                flow = recent.flow_list[flow_id]
-                if not flow.background:
-                    domains.setdefault(key, defaultdict(float))[(flow.domain, flow.kind)] += (
-                        received + sent
-                    )
-                if flow.app:
-                    apps.setdefault(key, defaultdict(float))[flow.app] += received + sent
-    sessions = {key: sum(counter.values()) for key, counter in recent.flow_sessions.items()}
+    last: dict[str, datetime] = {}
+    for moment, subjects in by_minute.items():
+        if moment < window_from:
+            continue
+        for key, cell in subjects.items():
+            down[key] += cell["down"]
+            up[key] += cell["up"]
+            sessions[key] += cell["sessions"]
+            if cell["down"] or cell["up"]:
+                last[key] = max(last.get(key, moment), moment)
+            for domain, kind, volume in cell["domains"]:
+                domains.setdefault(key, defaultdict(float))[(domain, kind)] += volume
+            for app, volume in cell["apps"]:
+                apps.setdefault(key, defaultdict(float))[app] += volume
     active = sorted(
-        {key for key in down if down[key] + up[key] > 0} | {k for k, n in sessions.items() if n}
+        key for key in set(down) | set(sessions) if down[key] + up[key] or sessions[key]
     )
-
-    hints = {
-        key: {
-            "kind": recent.subjects[key].kind,
-            "vlan": recent.subjects[key].vlan,
-            "mac": recent.subjects[key].mac,
-            "ip": _most(recent.subject_ips.get(key)),
-        }
-        for key in active
-    }
-    infos = Directory(db).resolve(hints)
-    data_until = None if hour.newest is None else datetime.fromtimestamp(hour.newest, UTC)
+    hints = snapshot.get("subjects", {})
+    infos = Directory(db).resolve({key: hints.get(key, {}) for key in active})
+    data_until = _moment(snapshot.get("data_until"))
     visible = [key for key in active if not infos[key].excluded]
     visible.sort(key=lambda key: (-down[key], -up[key], key))
+    seconds = minutes * 60
     rows = []
     for key in visible[:MAX_ROWS]:
-        newest = _moment(recent, last.get(key, 0) + 1)
+        newest = last.get(key, window_from) + MINUTE
         rows.append(
             ActivityRow(
                 subject=SubjectRef.model_validate(subject_ref(infos[key], viewer)),
@@ -128,7 +102,7 @@ def devices_now(
                 upload_bytes=round(up[key]),
                 download_bps=down[key] * 8 / seconds,
                 upload_bps=up[key] * 8 / seconds,
-                sessions=sessions.get(key, 0),
+                sessions=sessions[key],
                 top_domains=[
                     ActivityDomain.model_validate(
                         {"domain": domain, "kind": kind, "bytes": round(volume)}
@@ -141,21 +115,18 @@ def devices_now(
                 last_seen=newest if data_until is None else min(newest, data_until),
             )
         )
-    total_down, total_up = sum(down.values()), sum(up.values())
     per_minute = []
     for index in range(PER_MINUTE):
-        received = sent = 0.0
-        for buckets in hour.cells.values():
-            for _, r, s in buckets.get(index, {}).values():
-                received += r
-                sent += s
+        moment = end - (PER_MINUTE - index) * MINUTE
+        cells = by_minute.get(moment, {})
         per_minute.append(
             ActivityMinute(
-                minute=_moment(hour, index),
-                download_bytes=round(received),
-                upload_bytes=round(sent),
+                minute=moment,
+                download_bytes=round(sum(cell["down"] for cell in cells.values())),
+                upload_bytes=round(sum(cell["up"] for cell in cells.values())),
             )
         )
+    total_down, total_up = sum(down.values()), sum(up.values())
     return ActivityDevices(
         window=minutes,
         rows=rows,
@@ -170,15 +141,16 @@ def devices_now(
         ),
         per_minute=per_minute,
         data_until=data_until,
+        warming_up=bool(snapshot.get("warming_up", True)),
         generated_at=now,
     )
+
+
+def _moment(value: Any) -> datetime | None:
+    return datetime.fromisoformat(value) if isinstance(value, str) else None
 
 
 def _top[T](counter: Mapping[T, float] | None) -> list[tuple[T, float]]:
     if not counter:
         return []
     return sorted(counter.items(), key=lambda item: (-item[1], str(item[0])))[:TOP]
-
-
-def _most(counter: Counter[str] | None) -> str | None:
-    return counter.most_common(1)[0][0] if counter else None

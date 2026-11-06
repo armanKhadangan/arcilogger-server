@@ -64,6 +64,11 @@ export interface ActivityDevices {
   per_minute: ActivityMinute[];
   /** The newest traffic row (null with none). */
   data_until: DateTimeString | null;
+  /**
+   * The worker's snapshot does not cover the last 60 minutes yet (after a start, or none
+   * written): the figures are partial.
+   */
+  warming_up: boolean;
   generated_at: DateTimeString;
 }
 
