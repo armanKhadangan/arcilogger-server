@@ -25,6 +25,7 @@ import pytest
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from cryptography.hazmat.primitives.serialization import load_pem_private_key
 
+import arcilogger_core
 from arcilogger_core.license import keys, revoked
 from arcilogger_core.license.document import LICENSE_ID_PATTERN, load_license
 from arcilogger_core.license.fingerprint import ServerIdentity, server_id_of
@@ -370,7 +371,7 @@ def test_the_registry_gets_one_row_per_licence_and_one_header(owner: Owner) -> N
     assert one["payload_sha256"] == a.payload_sha256
     assert one["request_sha256"] == a.payload.request_sha256
     assert one["supersedes"] == ""
-    assert one["product_version"] == "0.1.0"
+    assert one["product_version"] == arcilogger_core.__version__  # the request's own version
     assert one["issued_at"].endswith("Z")
     assert two["licensee"] == "Başka Kurum"
     assert two["note"] == "'=cmd|' /C calc'!A0"  # a formula is never a formula in Excel

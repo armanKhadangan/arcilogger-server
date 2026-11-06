@@ -14,6 +14,7 @@ from typing import Any
 
 import pytest
 
+import arcilogger_core
 from arcilogger_core.license import keys, revoked
 from arcilogger_core.license.errors import HTTP_STATUS, MESSAGES, LicenseError
 from arcilogger_core.license.modules import CORE_MODULE, MODULES, module, module_keys
@@ -607,16 +608,17 @@ def test_check_applicable_messages_in_both_languages() -> None:
     assert error.details == {"valid_until": "2026-10-01"}
 
     error = _applicable(_document(maintenance_until=date(2026, 10, 19)))
+    version = arcilogger_core.__version__
     assert error.message_tr == (
-        "Bu sürüm (0.1.0, yayın tarihi 20.10.2026) lisansın bakım süresinden (19.10.2026 "
+        f"Bu sürüm ({version}, yayın tarihi 20.10.2026) lisansın bakım süresinden (19.10.2026 "
         "tarihine kadar) sonra yayımlandı."
     )
     assert error.message_en == (
-        "This version (0.1.0, released 2026-10-20) was released after the licence's maintenance "
-        "period (until 2026-10-19)."
+        f"This version ({version}, released 2026-10-20) was released after the licence's "
+        "maintenance period (until 2026-10-19)."
     )
     assert error.details == {
-        "version": "0.1.0",
+        "version": version,
         "release_date": "2026-10-20",
         "maintenance_until": "2026-10-19",
     }
