@@ -101,6 +101,15 @@ ENDED_CHUNK: Final = 500
 RECOUNT_CHUNK: Final = 500
 #: New rows are read in pages of this many.
 MAX_ROWS: Final = 20_000
+#: A row committed this long after its time is not read by id (the warm-up's slices read it
+#: when its time is not covered yet): a live view, the day's rollup counts it. Each tick's read
+#: covers only these minutes, not the whole range.
+LATE_ROWS: Final = timedelta(minutes=5)
+#: A new session whose first row says it ran this long may have logged before: its earlier
+#: logs are looked up, and if they were counted, taken back and counted with it.
+EARLIER_SECONDS: Final = 60
+#: The most ended sessions waiting to be counted; beyond it the oldest are dropped (logged).
+ENDED_LIMIT: Final = 200_000
 SNAPSHOT_VERSION: Final = 1
 #: Destinations and applications kept per subject and minute (the answer shows 3 per window).
 TOP_PER_MINUTE: Final = 5
@@ -108,8 +117,9 @@ TOP_PER_MINUTE: Final = 5
 DNS_CANDIDATES: Final = 4
 #: Bytes below this after a session's count was taken back are rounding: the cell is removed.
 EPSILON: Final = 1e-6
-#: The file's tables of names start again when they grow past this (names leave the window).
-NAMES_LIMIT: Final = 20_000
+#: The file's tables of names start again when they hold this many more names than the
+#: snapshot uses (names leave the window).
+NAMES_SPARE: Final = 5_000
 
 #: Columns as the engine reads them (``engine._TRAFFIC`` without ``srcip``).
 _TRAFFIC_COLUMNS: Final = (
@@ -126,6 +136,12 @@ _NEW_ROWS = text(
 _SLICE_ROWS = text(
     f"SELECT id, host(srcip), {_TRAFFIC_COLUMNS} FROM fg_traffic "  # noqa: S608 - fixed text
     f"WHERE time >= :lo AND time < :hi AND {_FORWARD} ORDER BY time, id"
+)
+#: The earlier logs of sessions (by address and session id) that a new row continues.
+_EARLIER_ROWS = text(
+    f"SELECT id, host(srcip), {_TRAFFIC_COLUMNS} FROM fg_traffic "  # noqa: S608 - fixed text
+    "WHERE sessionid = ANY(:sessions) AND srcip = ANY(CAST(:ips AS inet[])) AND time >= :lo "
+    f"AND {_FORWARD}"
 )
 #: The highest id handed out (committed or not): the sequence, not ``max(id)`` (no index).
 _LAST_ID = text(
@@ -169,7 +185,7 @@ class Counted:
     cells: Cells = field(default_factory=dict)
     #: minute → subject key → sessions started
     sessions: dict[int, dict[str, int]] = field(default_factory=dict)
-    #: subject key → {"kind", "vlan", "mac", "ip"}
+    #: person or device subject key → {"ip": its main address}
     subjects: dict[str, dict[str, Any]] = field(default_factory=dict)
     #: The newest traffic log counted (epoch seconds).
     newest: float | None = None
@@ -181,12 +197,16 @@ class OpenSession:
 
     ip: str
     rows: list[tuple[Any, ...]] = field(default_factory=list)
+    #: The ids of ``rows`` in ``fg_traffic``.
+    ids: set[int] = field(default_factory=set)
     #: The newest log's time (epoch seconds).
     newest: float = 0.0
     #: The engine's count of ``rows`` as last taken (in the open sum until it is taken again).
     counted: Counted | None = None
     #: Logs came (or dropped out) since: to be counted again.
     stale: bool = True
+    #: Its final log came (a late interim log does not open it again).
+    final: bool = False
     #: The DNS answers that can name it (read once: they come before the session starts).
     dns: list[tuple[Any, ...]] | None = None
     #: Its web filter and application logs as last read (an open session counted again uses
@@ -194,7 +214,7 @@ class OpenSession:
     names: tuple[list[tuple[Any, ...]], list[tuple[Any, ...]]] | None = None
 
     def start(self) -> float:
-        return float(min(row[3].timestamp() - (row[4] or 0) for row in self.rows))
+        return float(min((row[3].timestamp() - (row[4] or 0) for row in self.rows), default=0.0))
 
 
 class Snapshot:
@@ -237,9 +257,12 @@ class Snapshot:
         self._names: tuple[Any, DomainNamer, BackgroundRules] | None = None
         #: The addresses' attribution over this tick's minutes (read once a tick).
         self._timelines: tuple[tuple[datetime, datetime], dict[str, IpTimeline]] | None = None
+        #: The first minute the last prune kept.
+        self._pruned = 0
         #: The file: per minute its JSON and its subjects, the minutes whose totals changed
         #: since, and the tables of destinations and applications the minutes refer to.
-        self._pieces: dict[int, dict[str, str]] = {}
+        #: minute → subject → (its JSON, the destination and application ids it names)
+        self._pieces: dict[int, dict[str, tuple[str, frozenset[int], frozenset[int]]]] = {}
         self._fragments: dict[int, str] = {}
         self._dirty: set[tuple[int, str]] = set()
         self._destinations: dict[tuple[str, str], int] = {}
@@ -264,27 +287,33 @@ class Snapshot:
             self.started = True
             self.marks = [(began, last_id)]
             self.warm_from = lo - overlap
-        counts = {"rows": 0, "ended": 0, "closed_sessions": 0, "slices": 0, "recounted": 0}
-        # The rows committed since: up to the time the warm-up has read, all of it after.
+        counts = dict.fromkeys(
+            ("rows", "ended", "closed_sessions", "slices", "recounted", "reopened", "dropped"), 0
+        )
+        # The rows committed since (their time at most LATE_ROWS back): up to the time the
+        # warm-up has read, all of it after.
         covered = end if self.warm_from is None else self.warm_from
-        after = self._after(began)
-        while True:
+        after = mark = self._after(began)
+        new: dict[Key, OpenSession] = {}
+        while stop is None or not stop.is_set():
             rows = session.execute(
                 _NEW_ROWS,
                 {
                     "after": after,
-                    "lo": lo - overlap,
+                    "lo": max(lo - overlap, end - LATE_ROWS),
                     "hi": covered if self.warm_from is not None else end + overlap,
                     "limit": MAX_ROWS,
                     "refused": list(REFUSED_ACTIONS),
                 },
             ).all()
-            self._sort(rows, overlap, covered, counts)
+            self._sort(rows, overlap, covered, counts, new)
             if len(rows) < MAX_ROWS:
                 break
             after = rows[-1][0]
+        front = covered if self.warm_from is not None else end + overlap
+        self._reopen(session, settings, lo, end, overlap, new, mark, front, counts)
         self._mark(began, last_id)
-        self._prune(lo, overlap)
+        self._prune(lo, overlap, counts)
         read = time.monotonic()
         while True:
             step = time.monotonic()
@@ -297,7 +326,9 @@ class Snapshot:
                     {"lo": self.warm_from, "hi": until, "refused": list(REFUSED_ACTIONS)},
                 ).all()
                 self.warm_from = None if until >= end else until
-                self._sort(rows, overlap, until, counts)
+                new = {}
+                self._sort(rows, overlap, until, counts, new)
+                self._reopen(session, settings, lo, end, overlap, new, mark, until, counts)
                 counts["slices"] += 1
             elif any(known.stale for known in self.open.values()):
                 counts["recounted"] += self._recount(session, settings, lo, end, overlap)
@@ -355,10 +386,13 @@ class Snapshot:
         overlap: timedelta,
         until: datetime,
         counts: dict[str, int],
+        new: dict[Key, OpenSession],
     ) -> None:
-        """Sort the rows not read before into the sessions: an interim log keeps a session open,
-        a final log ends it, and so does no log for the overlap before ``until`` (the end of
-        the rows read). The sessions that ended wait in ``ended`` to be counted."""
+        """Sort the rows not read before into the sessions: an interim log keeps a session open
+        unless its final log came, a final log ends it, and so does no log for the overlap
+        before ``until`` (the end of the rows read). The sessions that ended wait in ``ended``
+        to be counted. A session first seen here whose row says it ran for a while goes into
+        ``new``, to look for its earlier logs."""
         for row in rows:
             if row[0] in self.seen:
                 continue
@@ -368,19 +402,100 @@ class Snapshot:
             key: Key = (
                 (ip, values[0], values[1], values[2]) if values[0] is not None else (ip, row[0])
             )
-            known = self.open.pop(key, None) or self.ended.pop(key, None) or OpenSession(ip)
+            known = self.open.pop(key, None) or self.ended.pop(key, None)
+            if known is None:
+                known = OpenSession(ip)
+                if values[0] is not None and (values[4] or 0) >= EARLIER_SECONDS:
+                    new[key] = known
             known.stale = True
             known.rows.append(values)
+            known.ids.add(int(row[0]))
             known.newest = max(known.newest, values[3].timestamp())
-            if values[10] and values[0] is not None:  # an interim log: the session goes on
-                self.open[key] = known
-            else:
+            known.final = known.final or not values[10] or values[0] is None
+            if known.final:
                 self.ended[key] = known
                 counts["ended"] += 1
+            else:  # an interim log: the session goes on
+                self.open[key] = known
         horizon = until.timestamp() - overlap.total_seconds()
         for key in [key for key, known in self.open.items() if known.newest < horizon]:
             self.ended[key] = self.open.pop(key)  # no log for the overlap: it is over
             counts["ended"] += 1
+        excess = len(self.ended) - ENDED_LIMIT
+        if excess > 0:
+            for key in list(itertools.islice(self.ended, excess)):
+                self._forget(self.ended.pop(key))
+            counts["dropped"] += excess
+            log.warning(
+                "activity.tick falls behind: %s ended sessions dropped uncounted (more than %s "
+                "waiting)",
+                excess,
+                ENDED_LIMIT,
+            )
+
+    def _forget(self, known: OpenSession) -> None:
+        """Take a session's open count out of the open sum."""
+        if known.counted is not None:
+            self._dirty |= _pairs(known.counted)
+            _add(self.opened, known.counted, sign=-1)
+            known.counted = None
+
+    def _reopen(
+        self,
+        session: Session,
+        settings: UsageSettings,
+        lo: datetime,
+        end: datetime,
+        overlap: timedelta,
+        new: dict[Key, OpenSession],
+        mark: int,
+        front: datetime,
+        counts: dict[str, int],
+    ) -> None:
+        """Sessions first seen this tick that logged before: a pause longer than the overlap
+        ended them, or a log committed late came after their final log was counted. Their
+        earlier logs (read already: before ``front``, the end of the times read, and at most
+        ``mark`` or seen) were counted as an ended session; that count is taken back out of the closed minutes, and the session goes on
+        with all of its logs, so nothing is counted twice."""
+        if not new:
+            return
+        found = session.execute(
+            _EARLIER_ROWS,
+            {
+                "sessions": sorted({key[1] for key in new}),
+                "ips": sorted({key[0] for key in new}),
+                "lo": lo - overlap,
+                "refused": list(REFUSED_ACTIONS),
+            },
+        )
+        earlier: dict[Key, OpenSession] = {}
+        for row in found:
+            ip, values = str(row[1]), tuple(row[2:])
+            key = (ip, values[0], values[1], values[2])
+            known = new.get(key)
+            if known is None or row[0] in known.ids:
+                continue
+            if row[5] >= front or (row[0] > mark and row[0] not in self.seen):
+                continue  # not read yet: it comes as a new row
+            old = earlier.setdefault(key, OpenSession(ip))
+            old.rows.append(values)
+            old.ids.add(int(row[0]))
+        if not earlier:
+            return
+        olds = list(earlier.values())
+        for counted in self._counts(session, settings, [[old] for old in olds], lo, end, overlap):
+            self._dirty |= _pairs(counted)
+            _add(self.closed, counted, sign=-1)
+        for key, old in earlier.items():
+            known = new[key]
+            known.rows = old.rows + known.rows
+            known.ids |= old.ids
+            known.newest = max(known.newest, *(row[3].timestamp() for row in old.rows))
+            known.final = known.final or any(not row[10] for row in old.rows)
+            known.dns = known.names = None
+            if known.final and self.open.pop(key, None) is not None:
+                self.ended[key] = known
+            counts["reopened"] += 1
 
     def _close(
         self,
@@ -393,7 +508,7 @@ class Snapshot:
         """Count :data:`ENDED_CHUNK` of the sessions that ended into the closed minutes, their
         open count taken out of the open sum. Returns how many."""
         keys = list(itertools.islice(self.ended, ENDED_CHUNK))
-        chunk = [self.ended.pop(key) for key in keys]
+        chunk = [self.ended[key] for key in keys]
         # A session never counted while open adds only new subject-minutes; one that was is
         # counted whole again, and only the difference from its open count changes the file.
         new = [known for known in chunk if known.counted is None]
@@ -408,6 +523,8 @@ class Snapshot:
             _add(self.opened, counted, sign=-1)
         _add(self.closed, fresh)
         _add(self.closed, again)
+        for key in keys:  # only now: a failed count leaves them waiting
+            self.ended.pop(key, None)
         return len(chunk)
 
     def _recount(
@@ -537,19 +654,35 @@ class Snapshot:
             known.update(build_timelines(session, missing, lo, end))
         return known
 
-    def _prune(self, lo: datetime, overlap: timedelta) -> None:
-        """Drop the minutes before ``lo``, and the logs of open sessions older than the
-        engine reads before its range (``lo`` less the overlap)."""
+    def _prune(self, lo: datetime, overlap: timedelta, counts: dict[str, int]) -> None:
+        """Drop the minutes before ``lo`` and the subjects no minute holds any more, and the logs
+        of open sessions older than the engine reads before its range (``lo`` less the
+        overlap): a session left without logs is over (its open count taken out)."""
         first = int(lo.timestamp())
-        for counted in (self.closed, self.opened):
-            for table in (counted.cells, counted.sessions):
-                for minute in [minute for minute in table if minute < first]:
-                    del table[minute]
+        if first != self._pruned:
+            self._pruned = first
+            for counted in (self.closed, self.opened):
+                for table in (counted.cells, counted.sessions):
+                    for minute in [minute for minute in table if minute < first]:
+                        del table[minute]
+            used = {
+                key
+                for counted in (self.closed, self.opened)
+                for table in (counted.cells, counted.sessions)
+                for found in table.values()
+                for key in found
+            }
+            for counted in (self.closed, self.opened):
+                counted.subjects = {k: v for k, v in counted.subjects.items() if k in used}
         oldest = lo - overlap
-        for known in self.open.values():
-            if known.rows[0][3] < oldest:
-                known.stale = True
+        for key, known in list(self.open.items()):
+            if any(row[3] < oldest for row in known.rows):
                 known.rows = [row for row in known.rows if row[3] >= oldest]
+                known.stale = True
+                if not known.rows:
+                    del self.open[key]
+                    self._forget(known)
+                    counts["dropped"] += 1
 
     # -- the file ---------------------------------------------------------------------------------
 
@@ -562,38 +695,33 @@ class Snapshot:
 
     def _write(self, now: datetime, lo: datetime, end: datetime) -> bool:
         """Write the snapshot when its content changed; whether it was written. Only the
-        subject-minutes whose totals changed are put together again."""
+        subject-minutes whose totals changed are put together again, and only the names the
+        minutes use are in the file."""
         first, last = int(lo.timestamp()), int(end.timestamp())
-        if len(self._destinations) + len(self._apps) > NAMES_LIMIT:
-            self._destinations.clear()
-            self._apps.clear()
-            self._dirty |= {(m, key) for m, pieces in self._pieces.items() for key in pieces}
-            self._pieces.clear()
-            self._fragments.clear()
         for minute in [minute for minute in self._pieces if not first <= minute < last]:
             del self._pieces[minute]
             self._fragments.pop(minute, None)
         building = time.monotonic()
-        touched: set[int] = set()
-        for minute, key in self._dirty:
-            if not first <= minute < last:
-                continue
-            touched.add(minute)
-            piece = self._piece(minute, key)
-            pieces = self._pieces.setdefault(minute, {})
-            if piece is None:
-                pieces.pop(key, None)
-            else:
-                pieces[key] = piece
         dirty = len(self._dirty)
-        self._dirty.clear()
+        touched = self._build(first, last)
+        used_destinations = {i for p in self._pieces.values() for _, d, _ in p.values() for i in d}
+        used_apps = {i for p in self._pieces.values() for _, _, a in p.values() for i in a}
+        spare = len(self._destinations) + len(self._apps) - len(used_destinations) - len(used_apps)
+        if spare > NAMES_SPARE:  # the tables start again: every piece is built again
+            self._destinations.clear()
+            self._apps.clear()
+            self._dirty = {(m, key) for m, pieces in self._pieces.items() for key in pieces}
+            self._pieces.clear()
+            touched |= self._build(first, last)
+            used_destinations = set(self._destinations.values())
+            used_apps = set(self._apps.values())
         for minute in touched:
             entries = self._pieces.get(minute)
             if not entries:
                 self._pieces.pop(minute, None)
                 self._fragments.pop(minute, None)
                 continue
-            joined = ",".join(entries[key] for key in sorted(entries))
+            joined = ",".join(entries[key][0] for key in sorted(entries))
             self._fragments[minute] = f'{{"minute":"{_iso(minute)}","subjects":{{{joined}}}}}'
         self._pieces_seconds = time.monotonic() - building
         if dirty:
@@ -611,9 +739,13 @@ class Snapshot:
                 "until": _iso(last),
                 "warming_up": not self.settled,
                 "data_until": None if newest is None else _iso(newest),
-                "subjects": {key: info[key] for key in sorted(used) if key in info},
-                "destinations": [list(name) for name in self._destinations],
-                "apps": list(self._apps),
+                "subjects": {key: info[key] for key in sorted(used) if info.get(key)},
+                "destinations": {
+                    str(i): list(name)
+                    for name, i in self._destinations.items()
+                    if i in used_destinations
+                },
+                "apps": {str(i): name for name, i in self._apps.items() if i in used_apps},
             },
             sort_keys=True,
             separators=(",", ":"),
@@ -628,9 +760,26 @@ class Snapshot:
         self.written = content
         return True
 
-    def _piece(self, minute: int, key: str) -> str | None:
+    def _build(self, first: int, last: int) -> set[int]:
+        """Build the pieces of the changed subject-minutes; the minutes touched."""
+        touched: set[int] = set()
+        for minute, key in self._dirty:
+            if not first <= minute < last:
+                continue
+            touched.add(minute)
+            piece = self._piece(minute, key)
+            pieces = self._pieces.setdefault(minute, {})
+            if piece is None:
+                pieces.pop(key, None)
+            else:
+                pieces[key] = piece
+        self._dirty.clear()
+        return touched
+
+    def _piece(self, minute: int, key: str) -> tuple[str, frozenset[int], frozenset[int]] | None:
         """One subject's entry of a minute (``None`` without traffic): ``"key":[download,
-        upload, sessions, [[destination, bytes]], [[application, bytes]]]``, whole bytes."""
+        upload, sessions, [[destination, bytes]], [[application, bytes]]]``, whole bytes, with
+        the destination and application ids it names."""
         down = up = 0.0
         volumes: dict[tuple[str, str], float] = defaultdict(float)
         by_app: dict[str, float] = defaultdict(float)
@@ -646,24 +795,24 @@ class Snapshot:
                 volumes[name] += volume
             for name, volume in cell[3].items():
                 by_app[name] += volume
-        if round(down) == 0 and round(up) == 0 and not sessions:
+        if round(down) <= 0 and round(up) <= 0 and sessions <= 0:
             return None
-        entry = [
-            round(down),
-            round(up),
-            sessions,
-            [
-                [self._destinations.setdefault(name, len(self._destinations)), round(volume)]
-                for name, volume in _top(volumes, TOP_PER_MINUTE)
-                if round(volume)
-            ],
-            [
-                [self._apps.setdefault(name, len(self._apps)), round(volume)]
-                for name, volume in _top(by_app, TOP_PER_MINUTE)
-                if round(volume)
-            ],
+        destinations = [
+            [self._destinations.setdefault(name, len(self._destinations)), round(volume)]
+            for name, volume in _top(volumes, TOP_PER_MINUTE)
+            if round(volume) > 0
         ]
-        return f"{json.dumps(key)}:{json.dumps(entry, separators=(',', ':'))}"
+        apps = [
+            [self._apps.setdefault(name, len(self._apps)), round(volume)]
+            for name, volume in _top(by_app, TOP_PER_MINUTE)
+            if round(volume) > 0
+        ]
+        entry = [max(round(down), 0), max(round(up), 0), max(sessions, 0), destinations, apps]
+        return (
+            f"{json.dumps(key)}:{json.dumps(entry, separators=(',', ':'))}",
+            frozenset(i for i, _ in destinations),
+            frozenset(i for i, _ in apps),
+        )
 
 
 # -- the thread -----------------------------------------------------------------------------------
@@ -686,8 +835,9 @@ class Runner:
     2026-11-06 07:08Z): a tick every :data:`ACTIVITY_EVERY`, with its own database engine, so the
     job loop never waits on it.
 
-    * **Licence:** while ``usage_analytics`` is off (``gate`` returns the job loop's skip
-      details) it idles and asks again at the next tick; one ``skipped`` row per site day.
+    * **Licence:** while ``usage_analytics`` is off (``gate``, given this thread's engine,
+      returns the job loop's skip details) it idles and asks again at the next tick; one
+      ``skipped`` row per site day. A failing gate is a failed tick.
     * **Visible like a job:** a ``job_runs`` row ``activity.tick`` at most every
       :data:`RECORD_EVERY` (``ok``, or ``failed`` when its last tick failed) with the ticks, the
       newest tick's seconds and the sessions waiting, and :meth:`status` for the worker's status
@@ -701,11 +851,12 @@ class Runner:
         engine: Engine,
         path: Path,
         *,
-        gate: Callable[[datetime], Mapping[str, Any] | None],
+        gate: Callable[[datetime, Engine], Mapping[str, Any] | None],
         clock: Callable[[], datetime] = utc_now,
         every: timedelta = ACTIVITY_EVERY,
         budget: float = THREAD_BUDGET,
     ) -> None:
+        self.engine = engine
         self.sessions = session_factory(engine)
         self.snapshot = Snapshot(path, budget=budget)
         self.gate = gate
@@ -738,11 +889,11 @@ class Runner:
         """One tick (or its skip while the module is off); its status."""
         now = self.clock()
         self.last_started, self.runs = now, self.runs + 1
-        gate = self.gate(now)
-        if gate is not None:
-            self._skipped(now, gate)
-            return "skipped"
         try:
+            gate = self.gate(now, self.engine)  # the licence, read through this thread's engine
+            if gate is not None:
+                self._skipped(now, gate)
+                return "skipped"
             with self.sessions() as session:
                 details = self.snapshot.tick(session, now, stop)
             status, self.failures, self.last_error = "ok", 0, None
@@ -949,13 +1100,10 @@ def _lookup(
 def _harvest(builder: DayBuilder, counted: Counted) -> None:
     """Move the builder's cells into ``counted`` (the builder goes on with the next group)."""
     for key, buckets in builder.cells.items():
-        subject = builder.subjects[key]
-        counted.subjects[key] = {
-            "kind": subject.kind,
-            "vlan": subject.vlan,
-            "mac": subject.mac,
-            "ip": _most(builder.subject_ips.get(key)),
-        }
+        if builder.subjects[key].kind in ("person", "device"):
+            # The one hint the answer needs: the address its row shows (``Directory.resolve``
+            # takes the kind and MAC from the key, and the row has no department).
+            counted.subjects[key] = {"ip": _most(builder.subject_ips.get(key))}
         for index, flows in buckets.items():
             minute = int(builder.lo_ts + index * BUCKET)
             cell = counted.cells.setdefault(minute, {}).get(key)

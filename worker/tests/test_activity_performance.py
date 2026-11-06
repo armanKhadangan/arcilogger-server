@@ -258,7 +258,7 @@ def test_the_snapshot_keeps_up_and_the_loop_is_not_held(
     load.before.clear()
 
     clock = Clock(NOW)
-    runner = Runner(db_engine, layout.activity, gate=lambda now: None, clock=clock)
+    runner = Runner(db_engine, layout.activity, gate=lambda now, engine: None, clock=clock)
     warm = []
     while True:
         assert runner.once() == "ok"

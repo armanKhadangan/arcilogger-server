@@ -13,6 +13,7 @@ minutes. The window and the chart both end with the minute under way.
 from __future__ import annotations
 
 import json
+import time
 from collections import defaultdict
 from collections.abc import Mapping
 from datetime import UTC, datetime, timedelta
@@ -40,15 +41,27 @@ MAX_ROWS: Final = 200
 #: Most entries of ``top_domains`` and ``top_apps``.
 TOP: Final = 3
 MINUTE: Final = timedelta(minutes=1)
+#: A snapshot older than this is not current (the worker or its thread stopped): the answer
+#: says ``warming_up``.
+STALE: Final = timedelta(seconds=60)
+#: The pause before reading the snapshot a second time.
+RETRY_SECONDS: Final = 0.05
 
 
 def read_snapshot(path: Path) -> dict[str, Any] | None:
-    """The snapshot, or ``None`` while there is none (the worker has not written it yet)."""
-    try:
-        data = json.loads(path.read_bytes())
-    except (OSError, ValueError):
-        return None
-    return data if isinstance(data, dict) else None
+    """The snapshot, or ``None`` while there is none (the worker has not written it yet). A read
+    that meets the worker's replace of the file (Windows) is tried once more."""
+    for attempt in range(2):
+        try:
+            data = json.loads(path.read_bytes())
+        except FileNotFoundError:
+            return None
+        except (OSError, ValueError):
+            if attempt == 0:
+                time.sleep(RETRY_SECONDS)
+            continue
+        return data if isinstance(data, dict) else None
+    return None
 
 
 def devices_now(
@@ -58,8 +71,8 @@ def devices_now(
     end = now.astimezone(UTC).replace(second=0, microsecond=0) + MINUTE
     window_from = end - minutes * MINUTE
     snapshot = read_snapshot(snapshot_path) or {}
-    names = [tuple(name) for name in snapshot.get("destinations", [])]
-    app_names = list(snapshot.get("apps", []))
+    names = {int(i): tuple(name) for i, name in snapshot.get("destinations", {}).items()}
+    app_names = {int(i): str(name) for i, name in snapshot.get("apps", {}).items()}
     #: minute → subject → [download, upload, sessions, [[destination, bytes]], [[app, bytes]]]
     by_minute: dict[datetime, Mapping[str, Any]] = {}
     for entry in snapshot.get("minutes", []):
@@ -145,9 +158,14 @@ def devices_now(
         ),
         per_minute=per_minute,
         data_until=data_until,
-        warming_up=bool(snapshot.get("warming_up", True)),
+        warming_up=bool(snapshot.get("warming_up", True)) or _stale(snapshot, now),
         generated_at=now,
     )
+
+
+def _stale(snapshot: Mapping[str, Any], now: datetime) -> bool:
+    written = _moment(snapshot.get("generated_at"))
+    return written is None or now.astimezone(UTC) - written > STALE
 
 
 def _moment(value: Any) -> datetime | None:

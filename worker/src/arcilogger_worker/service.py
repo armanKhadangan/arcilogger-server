@@ -102,7 +102,7 @@ import logging
 import os
 import threading
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import date, datetime, time, timedelta
 from pathlib import Path
 from typing import Any, Final
@@ -152,6 +152,8 @@ DAILY_RETRY_FIRST: Final = timedelta(minutes=15)
 DAILY_RETRY_MAX: Final = timedelta(hours=4)
 #: Longest retry delay of a failing interval job (its interval doubles per failure up to this).
 INTERVAL_RETRY_MAX: Final = timedelta(minutes=30)
+#: The seconds the service waits for Canlı Durum's thread to stop (WinSW allows 30 s).
+ACTIVITY_JOIN: Final = 20.0
 #: Retry delay while the database is unreachable (no ``job_runs`` row can be written).
 DATABASE_RETRY: Final = timedelta(minutes=1)
 
@@ -813,7 +815,12 @@ class Worker:
         finally:
             stop.set()
             if thread is not None:
-                thread.join()  # it ends its tick after the chunk under way
+                thread.join(ACTIVITY_JOIN)  # it ends its tick after the chunk under way
+                if thread.is_alive():
+                    log.warning(
+                        "activity.tick did not stop within %s s; the service stops without it",
+                        ACTIVITY_JOIN,
+                    )
             if self._activity_engine is not None:
                 self._activity_engine.dispose()
             self.state = "stopped"
@@ -832,7 +839,10 @@ class Worker:
         self.activity_runner = activity.Runner(
             self._activity_engine,
             self.layout.activity,
-            gate=lambda now: module_gate(self.context(now), USAGE_MODULE),
+            gate=lambda now, engine: module_gate(
+                replace(self.context(now), engine=engine, sessions=session_factory(engine)),
+                USAGE_MODULE,
+            ),
             clock=self.clock,
         )
         thread = threading.Thread(
