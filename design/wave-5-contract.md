@@ -3715,19 +3715,19 @@ Recorded on #204, from the manager's answers of 2026-11-06.
     `worker/src/arcilogger_worker/snmp/`.
 - **W5-N-2: `Layout.wan_rates` is a property**, like the other status files of `Layout`;
   §6.2 N4 writes `Layout.wan_rates()`.
-- **W5-N-3: until W5-T merges, `[sources.snmp]` is read by an adapter** (Q3 on #202, as C9 did).
-  - **What it does:** `worker/src/arcilogger_worker/snmp/settings.py` reads it through `getattr`
-    with N1's defaults and applies N1's rules.
-  - **What is not polled,** with the code the job's details name (logged once per process):
-    - a network address: `snmp_source_is_network`;
-    - a community string, a version other than 3, or a missing or unknown `auth`/`priv`
-      protocol, so no v1/v2c, noAuthNoPriv or authNoPriv: `snmp_auth_priv_required`;
-    - a port, interval, user, interface list or capacity outside N1's bounds:
-      `snmp_setting_invalid`.
-  - **A key** that is missing or not 8 to 64 characters is `snmp_secret_missing`. The source is
-    then polled as `auth_failed` without a request.
-  - **After W5-T:** the model in `config.py` replaces the adapter in the same PR. The two codes
-    not named in N1 then become the model's validation errors.
+- **W5-N-3: `[sources.snmp]` is a model in `config.py`; the adapter is gone** (Q3 on #202).
+  Until W5-T merged, an adapter applied N1's rules; it was removed in the same PR.
+  - **The model:** `SnmpConfig` on `SourceConfig.snmp` (`None`: no SNMP), with the defaults and
+    bounds of §6.3. Only authPriv: there is no `version` field and no community string, so either
+    is refused as an unknown field (`extra_forbidden`). `auth`/`priv` have no "none".
+  - **Interfaces:** `ifName` values must be distinct; a capacity may name only a listed interface.
+    Capacities are whole Mbit/s, so the browser's TOML writer needs no floats.
+  - **Refusals:** an enabled SNMP needs a user and 1 to 4 interfaces. Refused values give the
+    error texts `snmp_setting_invalid: …` and `snmp_source_is_network: …`. Refused input is never
+    repeated (`hide_input_in_errors`).
+  - **The keys:** `secretstore.snmp_auth_key()`/`snmp_priv_key()` name them, and
+    `check_secret_value` refuses one outside 8 to 64 characters. A missing or bad key at poll
+    time is `snmp_secret_missing`: the source is polled as `auth_failed` without a request.
 - **W5-N-4: the statuses N4 leaves open, and "a good sample".**
   - **Failures:** a USM refusal (unknown user, wrong digest, decryption, unsupported level or
     protocol, not in the time window) is `auth_failed`. Any other request failure is `timeout`:
@@ -3745,3 +3745,35 @@ Recorded on #204, from the manager's answers of 2026-11-06.
     `capture_api_samples.py`'s `SAMPLE_MODULES`.
   - **Web tests:** `activity-types.ts` joins the type lists of `web/src/lib/api-types.test.ts`
     and `api-samples.test.ts`, as C1 asks of a package that mounts a route.
+- **W5-N-6: the browser, the probe and the firewall rule** (N1, N3, N5 after W5-T).
+  - **The keys in a request:** a source's keys are `secret_set`/`secret_delete` ops of
+    `snmp.<source>.auth_key`/`priv_key` in the `sources` section. The contract's `SnmpKeyName`
+    accepts these names next to `BrowserSecret`.
+  - **The form:** the keys are the write-only `snmp_auth_key`/`snmp_priv_key` fields of the
+    sources form. Removing a source deletes its keys.
+  - **Refusals:** switching SNMP on without both keys, stored or set in the same request, is
+    `snmp_secret_missing`; on a network source it is `snmp_source_is_network`. Both have TR/EN
+    texts in `admin/messages.py`.
+  - **The answer:** the sources etag follows the keys' set/unset state, and `GET /admin/config`
+    gives each source's `snmp` with its keys as set/unset. A source's change rows leave `None`
+    out, so a source without SNMP journals as before.
+  - **Writing the TOML:** `admin/tomledit.py` writes `[sources.snmp]` after its `[[sources]]`
+    table, defaults left out, and each capacity as `[sources.snmp.capacity_mbps."<ifName>"]`.
+    It does so only inside the managed block; a hand-written sub-table outside it is still
+    refused.
+  - **The probe (N5):** it runs on the request whenever a change switches SNMP on, edits its
+    settings or sets its keys, before anything is written.
+    - **How:** an `snmp` probe of `admin/probe.py`, through `arcilogger_core.snmp.list_interfaces`.
+    - **The list:** its message lists the interfaces the device reports (name, status, Mbit/s).
+    - **A failure** gives N4's reason as its code: `snmp_timeout`, `snmp_auth_failed`,
+      `snmp_no_such_interface` or `snmp_no_hc_counters`. The child passes the code through,
+      and each has TR/EN text.
+    - **Not here:** a separate "Bağlantıyı dene" action that returns the list as JSON
+      (question on #207).
+  - **The rule (N3):** `ARCILOGGER SNMP <source>`, without "Out", as N3 names it. UDP to the
+    source's address and SNMP port.
+    - **Where:** `OutboundRule`'s pattern and the installer's `OutboundRulePattern` accept the
+      name. The system plan adds the rule, and `Set-ArciFirewall.ps1` adds it in full strict
+      mode and applies it as UDP in a sync.
+    - **Not here:** a rule left over after a source's SNMP is switched off stays until the next
+      full run (question on #207).
