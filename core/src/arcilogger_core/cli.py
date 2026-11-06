@@ -244,15 +244,19 @@ def cmd_info(_: argparse.Namespace) -> int:
 def _provider_cause(app: App) -> str:
     """Why :func:`arcilogger_core.tsa.make_provider` refused the configuration."""
     tsa = app.config.tsa
-    if tsa.provider != "zamane":
+    if tsa.provider == "zamane":
+        if tsa.zamane_jar is None:
+            return "zamane-jar"
+        needed = {KAMUSM_CUSTOMER, KAMUSM_PASSWORD}
+    elif tsa.provider == "turktrust":  # as tsa.preflight says for TÜRKTRUST's account
+        needed = {TURKTRUST_USERNAME, TURKTRUST_PASSWORD}
+    else:
         return "provider"
-    if tsa.zamane_jar is None:
-        return "zamane-jar"
     try:
         stored = set(app.secrets.names())
     except (OSError, ValueError, SecretStoreError):
         return "secret-store"
-    return "credentials" if not {KAMUSM_CUSTOMER, KAMUSM_PASSWORD} <= stored else "provider"
+    return "credentials" if not needed <= stored else "provider"
 
 
 def _sealer(app: App) -> Sealer:
