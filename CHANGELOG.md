@@ -5,6 +5,12 @@ versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.2.0] — 2026-11-06
+
+The first tagged release, version 0.2.0 (`v0.2.0`): its Windows setup program is built by the
+release job of `.github/workflows/installer.yml`. It carries everything listed below, from M0 to
+Wave 5; 0.1.0 was the MVP's version number and was never tagged.
+
 ### Time stamping, re-stamping, revocation lists and the database window (Wave 5)
 
 Stamps stay verifiable after their TSA certificate expires, revoked certificates are noticed, a
