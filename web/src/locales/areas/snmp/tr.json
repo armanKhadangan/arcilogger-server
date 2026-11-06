@@ -1,0 +1,49 @@
+{
+  "snmp": {
+    "form": {
+      "title": "İnternet hattı (SNMPv3)",
+      "enabled": "Hat hızını SNMPv3 ile oku",
+      "enabledHint": "ARCILOGGER cihazın WAN arayüzlerinin sayaçlarını okur; hız Panel'de ve Canlı Durum'da görünür. Yalnızca kimlik doğrulamalı ve şifreli SNMPv3 (authPriv); v1/v2c kabul edilmez. Hedef kaynağın kendi adresidir.",
+      "user": "SNMPv3 kullanıcısı",
+      "userHint": "Cihazdaki salt okunur kullanıcı; gizli değildir.",
+      "port": "Port (UDP)",
+      "portHint": "1–65535; çoğu cihazda 161.",
+      "auth": "Kimlik doğrulama",
+      "auths": {
+        "sha1": "SHA-1",
+        "sha256": "SHA-256",
+        "sha512": "SHA-512"
+      },
+      "priv": "Şifreleme",
+      "privHint": "AES-256'yı her cihaz sunmaz (sahada doğrula).",
+      "privs": {
+        "aes128": "AES-128",
+        "aes256": "AES-256"
+      },
+      "authKey": "Kimlik doğrulama anahtarı",
+      "privKey": "Şifreleme anahtarı",
+      "keyHint": "8–64 karakter. Gizli depoda saklanır; tarayıcıya, ayar dosyasına ve loglara hiçbir zaman yazılmaz.",
+      "lines": "WAN hatları",
+      "linesHint": "Her hat için cihazın bildirdiği arayüz adı (ifName), en çok 4 hat. Kapasite isteğe bağlıdır; girilirse hızın kapasiteye oranı gösterilir.",
+      "line": "Arayüz {{number}}",
+      "down": "İndirme (Mbps)",
+      "up": "Yükleme (Mbps)",
+      "removeLine": "Arayüz {{number}}'i kaldır",
+      "capacityHint": "Kapasite tam sayı Mbps'dir (1–1.000.000); bir hat için ikisi birlikte girilir.",
+      "addLine": "Hat ekle",
+      "interval": "Okuma aralığı (saniye)",
+      "intervalHint": "10–60 saniye.",
+      "probeNote": "Kaydederken ARCILOGGER bu değerlerle cihaza bağlanır ve arayüzleri okur; bağlantı başarısız olursa hiçbir şey değişmez ve neden istek adımlarında gösterilir. Sıkı giden trafik modunda yeni adres ya da port, güvenlik duvarı kuralı ApplySystem'den sonra açıldığı için denenmeden kaydedilir.",
+      "errors": {
+        "keyLength": "Anahtar 8–64 karakter olmalı.",
+        "keyMissing": "SNMP açıkken iki anahtar da gerekli.",
+        "network": "Adresi bir ağ olan kaynakta SNMP açılamaz: hedef tek bir cihaz adresi olmalı.",
+        "tooLong": "En çok 64 karakter.",
+        "lineTwice": "Bu arayüz zaten listede.",
+        "capacityBoth": "İndirme ve yükleme birlikte girilir.",
+        "noLine": "En az bir WAN arayüzü girin.",
+        "tooManyLines": "En çok 4 WAN hattı."
+      }
+    }
+  }
+}

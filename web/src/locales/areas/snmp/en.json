@@ -1,0 +1,49 @@
+{
+  "snmp": {
+    "form": {
+      "title": "Internet line (SNMPv3)",
+      "enabled": "Read the line speed over SNMPv3",
+      "enabledHint": "ARCILOGGER reads the counters of the device's WAN interfaces; the speed shows on the Dashboard and on Live status. Only SNMPv3 with authentication and privacy (authPriv); v1/v2c are refused. The target is the source's own address.",
+      "user": "SNMPv3 user",
+      "userHint": "The read-only user on the device; not a secret.",
+      "port": "Port (UDP)",
+      "portHint": "1–65535; 161 on most devices.",
+      "auth": "Authentication",
+      "auths": {
+        "sha1": "SHA-1",
+        "sha256": "SHA-256",
+        "sha512": "SHA-512"
+      },
+      "priv": "Privacy",
+      "privHint": "Not every device offers AES-256 (verify on site).",
+      "privs": {
+        "aes128": "AES-128",
+        "aes256": "AES-256"
+      },
+      "authKey": "Authentication key",
+      "privKey": "Privacy key",
+      "keyHint": "8–64 characters. Kept in the secret store; never sent to the browser or written to the configuration file or the logs.",
+      "lines": "WAN lines",
+      "linesHint": "For each line, the interface name the device reports (ifName), at most 4 lines. The capacity is optional; when given, the speed is also shown as a share of it.",
+      "line": "Interface {{number}}",
+      "down": "Download (Mbps)",
+      "up": "Upload (Mbps)",
+      "removeLine": "Remove interface {{number}}",
+      "capacityHint": "Capacities are whole Mbps (1–1,000,000); a line takes both or neither.",
+      "addLine": "Add a line",
+      "interval": "Polling interval (seconds)",
+      "intervalHint": "10–60 seconds.",
+      "probeNote": "On saving, ARCILOGGER connects to the device with these values and reads its interfaces; if that fails, nothing changes and the reason is shown in the request's steps. In strict outbound mode a new address or port is saved without the test, because its firewall rule opens only after ApplySystem.",
+      "errors": {
+        "keyLength": "A key has 8–64 characters.",
+        "keyMissing": "Both keys are needed while SNMP is on.",
+        "network": "SNMP cannot be switched on for a source whose address is a network: the target must be a single device address.",
+        "tooLong": "At most 64 characters.",
+        "lineTwice": "This interface is already listed.",
+        "capacityBoth": "Download and upload are given together.",
+        "noLine": "Enter at least one WAN interface.",
+        "tooManyLines": "At most 4 WAN lines."
+      }
+    }
+  }
+}

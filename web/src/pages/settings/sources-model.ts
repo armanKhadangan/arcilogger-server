@@ -7,13 +7,17 @@
 
 import type {
   AdminPolicyOut,
+  SnmpOut,
+  SourceBody,
   SourceConfig,
+  SourceIn,
   SourceTransport,
   SourceType,
 } from '@/lib/settings-types';
 import type { FieldErrors } from '@/lib/validation';
 
 import { integerError, parseInteger } from './settings-validation';
+import { fromSnmpForm, NEW_SNMP, snmpIn, toSnmpForm, typedKey, type SnmpForm } from './snmp-model';
 
 export const SOURCE_TYPES: readonly SourceType[] = ['fortigate', 'mikrotik', 'generic'];
 export const TRANSPORTS: readonly SourceTransport[] = ['any', 'udp', 'tcp'];
@@ -21,7 +25,7 @@ export const NAME_PATTERN = /^[a-z0-9][a-z0-9-]{0,62}$/;
 export const HEARTBEAT_MIN = 1;
 export const HEARTBEAT_MAX = 1440;
 
-/** The form of a source: the heartbeat as typed. */
+/** The form of a source: the heartbeat as typed, and its SNMP section (Wave 5 §6 P4). */
 export interface SourceForm {
   name: string;
   type: SourceType;
@@ -30,7 +34,11 @@ export interface SourceForm {
   expected: boolean;
   transport: SourceTransport;
   enabled: boolean;
+  snmp: SnmpForm;
 }
+
+/** A source with its `[sources.snmp]` as the API gives it (`null`: none). */
+export type SourceWithSnmp = SourceConfig & { snmp?: SnmpOut | null };
 
 export type SourceField = 'name' | 'address' | 'heartbeat';
 
@@ -42,9 +50,10 @@ export const NEW_SOURCE: SourceForm = {
   expected: true,
   transport: 'any',
   enabled: true,
+  snmp: NEW_SNMP,
 };
 
-export function toSourceForm(source: SourceConfig): SourceForm {
+export function toSourceForm(source: SourceWithSnmp): SourceForm {
   return {
     name: source.name,
     type: source.type,
@@ -53,10 +62,16 @@ export function toSourceForm(source: SourceConfig): SourceForm {
     expected: source.expected,
     transport: source.transport,
     enabled: source.enabled,
+    snmp: toSnmpForm(source.snmp),
   };
 }
 
-export function fromSourceForm(form: SourceForm): SourceConfig {
+/**
+ * The typed source for a change body. Its `[sources.snmp]` always goes with it: the server
+ * reads a source without `snmp` as one without SNMP, so leaving it out would delete the table.
+ */
+export function fromSourceForm(form: SourceForm): SourceIn {
+  const snmp = fromSnmpForm(form.snmp);
   return {
     name: form.name.trim(),
     type: form.type,
@@ -65,11 +80,27 @@ export function fromSourceForm(form: SourceForm): SourceConfig {
     expected: form.expected,
     transport: form.transport,
     enabled: form.enabled,
+    ...(snmp ? { snmp } : {}),
   };
 }
 
-/** Only the fields of `SourceConfig` (the table rows carry the firewall state and last message). */
-export function sourceConfig(source: SourceConfig): SourceConfig {
+/** The change body of the typed source, with the SNMP keys typed in the form (write-only). */
+export function sourceBody(form: SourceForm, etag: string): SourceBody {
+  const authKey = typedKey(form.snmp.authKey);
+  const privKey = typedKey(form.snmp.privKey);
+  return {
+    etag,
+    source: fromSourceForm(form),
+    ...(authKey !== undefined ? { snmp_auth_key: authKey } : {}),
+    ...(privKey !== undefined ? { snmp_priv_key: privKey } : {}),
+  };
+}
+
+/**
+ * Only the fields of `SourceIn` (the table rows carry the firewall state and last message), with
+ * the stored `[sources.snmp]` unchanged: a row's enable switch must not delete it.
+ */
+export function sourceConfig(source: SourceWithSnmp): SourceIn {
   return {
     name: source.name,
     type: source.type,
@@ -78,6 +109,7 @@ export function sourceConfig(source: SourceConfig): SourceConfig {
     expected: source.expected,
     transport: source.transport,
     enabled: source.enabled,
+    ...(source.snmp ? { snmp: snmpIn(source.snmp) } : {}),
   };
 }
 
@@ -107,6 +139,12 @@ export function parseNetwork(text: string): (Network & { hostBits: boolean }) | 
   const size = 2 ** (32 - prefix);
   const base = Math.floor(value / size) * size;
   return { base, prefix, hostBits: base !== value };
+}
+
+/** The address is a network (`/24`, …), whose SNMP the server refuses (`snmp_source_is_network`). */
+export function isNetworkAddress(text: string): boolean {
+  const network = parseNetwork(text);
+  return network !== null && network.prefix < 32;
 }
 
 function contains(outer: Network, inner: Network): boolean {
