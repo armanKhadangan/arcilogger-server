@@ -60,10 +60,12 @@ bölümü yalnızca onu görmeye yetkili roller görür (bölüm 4).
   yeni trafik kayıtlarını her 10 saniyede kendi iş parçacığında sayar (`activity.tick`,
   [CORRELATION.md](CORRELATION.md)); sayfa bu özeti okur. Özette özne anahtarları ve dakika başına
   baytlar vardır; ad, URL ya da kayıt satırı yoktur. Adlar ve takma adlar sayfa sorduğunda eklenir.
-- **Worker başladıktan sonra** önce son bir saati yeniden okur; bitirene kadar ve özet 60
-  saniyeden eskiyse (worker durmuşsa) sayfa rakamların eksik olduğunu söyler (`warming_up`).
+- **Worker başladıktan sonra** önce son bir saati yeniden okur; bitirene kadar ve özet 2
+  dakikadan eskiyse (worker durmuşsa) sayfa rakamların eksik olduğunu söyler (`warming_up`).
 - Veritabanına zamanından 5 dakikadan geç ulaşan bir trafik kaydı tabloya eklenmez; kullanım
-  raporları onu sayar.
+  raporları onu sayar. Saati 5 dakikadan fazla geri olan bir cihaz bu yüzden "Şu an" tablosunda
+  görünmez; kullanım raporları onu sayar. Cihaz saatlerini NTP ile eşitleyin
+  ([DEVICE-SETUP.md](DEVICE-SETUP.md), "Saat (NTP)").
 
 ## 3. İnternet hattı (SNMPv3)
 

@@ -65,10 +65,12 @@ not ask. Each part is shown only to the roles allowed to see it (section 4).
   subject keys and per-minute bytes, never a name, a URL or a log line; names and pseudonyms are
   added when the page asks.
 - **After the worker starts** it reads the last hour again first; until it has, and when the
-  snapshot is more than 60 seconds old (the worker stopped), the page says the figures are
+  snapshot is more than 2 minutes old (the worker stopped), the page says the figures are
   incomplete (`warming_up`).
 - A traffic log that reaches the database more than 5 minutes after its time is not added to the
-  table; the usage reports count it.
+  table; the usage reports count it. So a device whose clock is more than 5 minutes behind does
+  not appear in "Şu an"; the usage reports count it. Sync device clocks with NTP
+  ([DEVICE-SETUP.md](DEVICE-SETUP.md)).
 
 ## 3. The internet line (SNMPv3)
 

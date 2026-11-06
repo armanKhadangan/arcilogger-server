@@ -42,8 +42,9 @@ MAX_ROWS: Final = 200
 TOP: Final = 3
 MINUTE: Final = timedelta(minutes=1)
 #: A snapshot older than this is not current (the worker or its thread stopped): the answer
-#: says ``warming_up``.
-STALE: Final = timedelta(seconds=60)
+#: says ``warming_up``. On a quiet site the file is rewritten only when the minute rolls, so
+#: it is up to a minute and a tick old in normal running.
+STALE: Final = timedelta(seconds=120)
 #: The pause before reading the snapshot a second time.
 RETRY_SECONDS: Final = 0.05
 

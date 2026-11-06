@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from arcilogger_core.layout import Layout
 from arcilogger_db.models import FgTraffic, JobRun, Person
+from arcilogger_db.settings import set_setting
 from arcilogger_worker.activity import Runner, Snapshot
 from arcilogger_worker.testing import Evidence, tr
 from arcilogger_worker.usage.engine import compute_day
@@ -550,3 +551,37 @@ def test_a_golden_day_tick_by_tick_is_compute_day(db_session: Session, layout: L
         key: volume for key, volume in expected_domains.items() if volume
     }
     assert total(snapshot, f"ip:{LONE}") == (18600, 1860)
+
+
+def test_a_pause_longer_than_a_short_overlap_is_counted_once(
+    db_session: Session, layout: Layout
+) -> None:
+    """The re-review of #211: with ``usage.session_overlap_seconds`` at 30 s, a session that
+    pauses 45 s ended at the pause; its next log (55 s into the session, under the 60 s of
+    ``EARLIER_SECONDS``) is looked up all the same, so its bytes are counted once."""
+    set_setting(db_session, "usage.session_overlap_seconds", 30, updated_by="test")
+    evidence = Evidence(db_session, layout)
+    snapshot = Snapshot(layout.activity)
+    common: dict[str, Any] = {"sessionid": 8006, "dstip": "203.0.113.10"}
+    evidence.traffic(
+        tr(DAY, 9, 2), LONE, 50006, interim=True, duration=10, durationdelta=10,
+        rcvdbyte=1000, sentbyte=100, rcvddelta=1000, sentdelta=100, **common,
+    )  # fmt: skip
+    db_session.commit()
+    ticks(snapshot, db_session, tr(DAY, 9, 2, 5), tr(DAY, 9, 2, 45), timedelta(seconds=10))
+    assert not snapshot.open, "no log for the 30 s overlap: the session ended"
+    evidence.traffic(
+        tr(DAY, 9, 2, 45), LONE, 50006, duration=55, rcvdbyte=3000, sentbyte=300,
+        action="close", **common,
+    )  # fmt: skip
+    db_session.commit()
+    ticks(snapshot, db_session, tr(DAY, 9, 2, 55), tr(DAY, 9, 3, 15), timedelta(seconds=10))
+    expected = [row for row in compute_day(db_session, DAY).daily if row["subject"] == f"ip:{LONE}"]
+    assert (
+        total(snapshot, f"ip:{LONE}")
+        == (
+            sum(row["download_bytes"] for row in expected),
+            sum(row["upload_bytes"] for row in expected),
+        )
+        == (3000, 300)
+    )

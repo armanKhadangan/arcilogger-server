@@ -3683,8 +3683,9 @@ The manager took P1 and P2 (#203, comment of 2026-11-05); P3 and P4 stay with GÃ
   the window, each counted once, for the subject of the minute it started in. `last_seen` is the
   end of the subject's newest minute with traffic, at most `data_until`: the snapshot keeps no
   newest row per subject. `warming_up` (new, `true` while the worker's snapshot does not cover
-  the last 60 minutes yet, while there is no snapshot, and while it is more than 60 s old) tells
-  the page that the numbers are still incomplete. The top domains and applications are summed
+  the last 60 minutes yet, while there is no snapshot, and while it is more than 2 minutes old:
+  a quiet site's file is rewritten when the minute rolls) tells the page that the numbers are
+  still incomplete. The top domains and applications are summed
   from each minute's 5 largest, so they are approximate. The snapshot keeps, per person or
   device subject, only the address its row shows (`subject.ip`): `Directory.resolve` takes the
   kind and the MAC from the key, and the row has no department, so the VLAN is not kept.
@@ -3705,7 +3706,9 @@ The manager took P1 and P2 (#203, comment of 2026-11-05); P3 and P4 stay with GÃ
     once: a batch committed late is not lost. Each tick's read covers the rows of the last
     5 minutes (`LATE_ROWS`), not the whole range: a row committed more than 5 minutes after its
     time is left to the day's rollup (the warm-up's slices read it when its time is not yet
-    covered).
+    covered). So a device whose clock is more than 5 minutes behind does not appear in "Åžu an";
+    the usage reports count it; device clocks are synced with NTP (DEVICE-SETUP). The bound stays
+    for Wave 5 (the owner's re-review of #211, 2026-11-06): an id-only read needs a new index.
   - A session's logs are kept while it can still log (its newest an interim log younger than
     `usage.session_overlap_seconds`); it is counted again when logs come for it, and counted
     whole once more when it ends. A session that logs again after it ended (a pause longer than

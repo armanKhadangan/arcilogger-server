@@ -262,3 +262,13 @@ def test_the_view_is_audited_at_most_every_15_minutes(
     later = entries()
     assert len(later) == 2
     assert later[1].details["window"] == 15
+
+
+def test_an_old_snapshot_is_warming_up(admin: TestClient, now: list[datetime]) -> None:
+    """The worker rewrites a quiet site's snapshot when the minute rolls: a minute and a tick
+    old is current; after 2 minutes (the worker stopped) the figures are flagged as incomplete."""
+    written = NOW.astimezone(UTC)  # the fixture's snapshot was written at NOW
+    now[0] = written + timedelta(seconds=90)
+    assert _get(admin, window="5")["warming_up"] is False
+    now[0] = written + timedelta(seconds=121)
+    assert _get(admin, window="5")["warming_up"] is True

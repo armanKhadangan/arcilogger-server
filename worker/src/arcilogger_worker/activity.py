@@ -105,8 +105,9 @@ MAX_ROWS: Final = 20_000
 #: when its time is not covered yet): a live view, the day's rollup counts it. Each tick's read
 #: covers only these minutes, not the whole range.
 LATE_ROWS: Final = timedelta(minutes=5)
-#: A new session whose first row says it ran this long may have logged before: its earlier
-#: logs are looked up, and if they were counted, taken back and counted with it.
+#: A new session whose first row says it ran this long (or ``usage.session_overlap_seconds``,
+#: when shorter) may have logged before: its earlier logs are looked up, and if they were
+#: counted, taken back and counted with it.
 EARLIER_SECONDS: Final = 60
 #: The most ended sessions waiting to be counted; beyond it the oldest are dropped (logged).
 ENDED_LIMIT: Final = 200_000
@@ -280,7 +281,8 @@ class Snapshot:
         began = time.monotonic()
         settings = UsageSettings.load(session)
         overlap = timedelta(seconds=settings.session_overlap_seconds)
-        end = now.astimezone(UTC).replace(second=0, microsecond=0) + timedelta(seconds=BUCKET)
+        now_utc = now.astimezone(UTC)
+        end = now_utc.replace(second=0, microsecond=0) + timedelta(seconds=BUCKET)
         lo = end - timedelta(minutes=self.minutes)
         last_id = int(session.execute(_LAST_ID).scalar_one())
         if not self.started:
@@ -288,7 +290,17 @@ class Snapshot:
             self.marks = [(began, last_id)]
             self.warm_from = lo - overlap
         counts = dict.fromkeys(
-            ("rows", "ended", "closed_sessions", "slices", "recounted", "reopened", "dropped"), 0
+            (
+                "rows",
+                "ended",
+                "closed_sessions",
+                "slices",
+                "recounted",
+                "reopened",
+                "dropped",
+                "ended_dropped",
+            ),
+            0,
         )
         # The rows committed since (their time at most LATE_ROWS back): up to the time the
         # warm-up has read, all of it after.
@@ -306,7 +318,9 @@ class Snapshot:
                     "refused": list(REFUSED_ACTIONS),
                 },
             ).all()
-            self._sort(rows, overlap, covered, counts, new)
+            # A session is over after the overlap without a log, counted back from now (or from
+            # the time the warm-up has read).
+            self._sort(rows, overlap, now_utc if self.warm_from is None else covered, counts, new)
             if len(rows) < MAX_ROWS:
                 break
             after = rows[-1][0]
@@ -407,7 +421,10 @@ class Snapshot:
             known = self.open.pop(key, None) or self.ended.pop(key, None)
             if known is None:
                 known = OpenSession(ip)
-                if values[0] is not None and (values[4] or 0) >= EARLIER_SECONDS:
+                # A session ends after the overlap without a log, so one that ran at least that
+                # long (EARLIER_SECONDS at most) may have logged before.
+                earlier = min(EARLIER_SECONDS, overlap.total_seconds())
+                if values[0] is not None and (values[4] or 0) >= earlier:
                     new[key] = known
             known.stale = True
             known.rows.append(values)
@@ -425,9 +442,11 @@ class Snapshot:
             counts["ended"] += 1
         excess = len(self.ended) - ENDED_LIMIT
         if excess > 0:
+            # Overload only. A dropped session that logs again later has a count taken back
+            # that never went into the closed minutes; a piece never shows less than 0.
             for key in list(itertools.islice(self.ended, excess)):
                 self._forget(self.ended.pop(key))
-            counts["dropped"] += excess
+            counts["ended_dropped"] += excess
             log.warning(
                 "activity.tick falls behind: %s ended sessions dropped uncounted (more than %s "
                 "waiting)",
@@ -829,6 +848,8 @@ class Window:
     ticks: int = 0
     failed: int = 0
     rows: int = 0
+    #: Ended sessions dropped uncounted (more than ``ENDED_LIMIT`` waiting).
+    ended_dropped: int = 0
     max_seconds: float = 0.0
     last: dict[str, Any] = field(default_factory=dict)
 
@@ -911,6 +932,7 @@ class Runner:
         window.ticks += 1
         window.failed += status == "failed"
         window.rows += int(details.get("rows", 0))
+        window.ended_dropped += int(details.get("ended_dropped", 0))
         window.max_seconds = max(window.max_seconds, float(details.get("seconds", 0.0)))
         window.last = details
         if self.last_finished - window.started >= RECORD_EVERY:
@@ -956,6 +978,7 @@ class Runner:
             "ticks": window.ticks,
             "failed": window.failed,
             "rows": window.rows,
+            "ended_dropped": window.ended_dropped,
             "max_seconds": round(window.max_seconds, 3),
             **{
                 key: last[key]

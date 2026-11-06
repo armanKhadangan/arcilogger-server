@@ -99,7 +99,7 @@ class ActivityDevices(BaseModel):
     #: The newest traffic row (null with none).
     data_until: datetime | None
     #: The worker's snapshot does not cover the last 60 minutes yet (after a start, or none
-    #: written), or it is more than 60 s old (the worker stopped): the figures are partial.
+    #: written), or it is more than 2 minutes old (the worker stopped): the figures are partial.
     warming_up: bool
     generated_at: datetime
 
