@@ -1,0 +1,1446 @@
+{
+  "devices_1": {
+    "data_until": "2026-10-12T06:02:00Z",
+    "generated_at": "2026-10-12T06:02:30Z",
+    "more": false,
+    "per_minute": [
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:03:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:04:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:05:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:06:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:07:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:08:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:09:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:10:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:11:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:12:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:13:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:14:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:15:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:16:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:17:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:18:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:19:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:20:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:21:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:22:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:23:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:24:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:25:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:26:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:27:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:28:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:29:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:30:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:31:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:32:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:33:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:34:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:35:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:36:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:37:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:38:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:39:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:40:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:41:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:42:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:43:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:44:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:45:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:46:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:47:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:48:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:49:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:50:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:51:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:52:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:53:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:54:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:55:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:56:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:57:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:58:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:59:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 6000,
+        "minute": "2026-10-12T06:00:00Z",
+        "upload_bytes": 600
+      },
+      {
+        "download_bytes": 6000,
+        "minute": "2026-10-12T06:01:00Z",
+        "upload_bytes": 600
+      },
+      {
+        "download_bytes": 6000,
+        "minute": "2026-10-12T06:02:00Z",
+        "upload_bytes": 600
+      }
+    ],
+    "rows": [
+      {
+        "download_bps": 800.0,
+        "download_bytes": 6000,
+        "last_seen": "2026-10-12T06:02:00Z",
+        "sessions": 2,
+        "subject": {
+          "hostname": null,
+          "ip": "172.20.43.37",
+          "key": "person:1",
+          "kind": "person",
+          "label": "Ayşe Yılmaz",
+          "mac": null,
+          "pseudonymous": false
+        },
+        "top_apps": [
+          {
+            "app": "SSL_TLSv1.3.PQC",
+            "bytes": 3300
+          }
+        ],
+        "top_domains": [
+          {
+            "bytes": 3300,
+            "domain": "posta.example",
+            "kind": "domain"
+          },
+          {
+            "bytes": 3300,
+            "domain": "video.example",
+            "kind": "domain"
+          }
+        ],
+        "upload_bps": 80.0,
+        "upload_bytes": 600
+      }
+    ],
+    "totals": {
+      "download_bps": 800.0,
+      "download_bytes": 6000,
+      "sessions": 2,
+      "subjects": 1,
+      "upload_bps": 80.0,
+      "upload_bytes": 600
+    },
+    "window": 1
+  },
+  "devices_15": {
+    "data_until": "2026-10-12T06:02:00Z",
+    "generated_at": "2026-10-12T06:02:30Z",
+    "more": false,
+    "per_minute": [
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:03:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:04:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:05:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:06:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:07:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:08:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:09:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:10:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:11:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:12:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:13:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:14:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:15:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:16:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:17:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:18:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:19:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:20:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:21:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:22:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:23:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:24:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:25:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:26:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:27:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:28:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:29:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:30:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:31:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:32:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:33:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:34:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:35:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:36:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:37:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:38:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:39:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:40:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:41:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:42:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:43:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:44:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:45:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:46:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:47:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:48:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:49:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:50:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:51:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:52:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:53:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:54:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:55:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:56:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:57:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:58:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:59:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 6000,
+        "minute": "2026-10-12T06:00:00Z",
+        "upload_bytes": 600
+      },
+      {
+        "download_bytes": 6000,
+        "minute": "2026-10-12T06:01:00Z",
+        "upload_bytes": 600
+      },
+      {
+        "download_bytes": 6000,
+        "minute": "2026-10-12T06:02:00Z",
+        "upload_bytes": 600
+      }
+    ],
+    "rows": [
+      {
+        "download_bps": 160.0,
+        "download_bytes": 18000,
+        "last_seen": "2026-10-12T06:02:00Z",
+        "sessions": 2,
+        "subject": {
+          "hostname": null,
+          "ip": "172.20.43.37",
+          "key": "person:1",
+          "kind": "person",
+          "label": "Ayşe Yılmaz",
+          "mac": null,
+          "pseudonymous": false
+        },
+        "top_apps": [
+          {
+            "app": "SSL_TLSv1.3.PQC",
+            "bytes": 16500
+          }
+        ],
+        "top_domains": [
+          {
+            "bytes": 16500,
+            "domain": "video.example",
+            "kind": "domain"
+          },
+          {
+            "bytes": 3300,
+            "domain": "posta.example",
+            "kind": "domain"
+          }
+        ],
+        "upload_bps": 16.0,
+        "upload_bytes": 1800
+      }
+    ],
+    "totals": {
+      "download_bps": 160.0,
+      "download_bytes": 18000,
+      "sessions": 2,
+      "subjects": 1,
+      "upload_bps": 16.0,
+      "upload_bytes": 1800
+    },
+    "window": 15
+  },
+  "devices_5": {
+    "data_until": "2026-10-12T06:02:00Z",
+    "generated_at": "2026-10-12T06:02:30Z",
+    "more": false,
+    "per_minute": [
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:03:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:04:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:05:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:06:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:07:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:08:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:09:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:10:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:11:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:12:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:13:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:14:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:15:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:16:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:17:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:18:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:19:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:20:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:21:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:22:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:23:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:24:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:25:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:26:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:27:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:28:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:29:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:30:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:31:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:32:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:33:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:34:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:35:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:36:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:37:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:38:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:39:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:40:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:41:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:42:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:43:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:44:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:45:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:46:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:47:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:48:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:49:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:50:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:51:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:52:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:53:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:54:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:55:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:56:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:57:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:58:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:59:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 6000,
+        "minute": "2026-10-12T06:00:00Z",
+        "upload_bytes": 600
+      },
+      {
+        "download_bytes": 6000,
+        "minute": "2026-10-12T06:01:00Z",
+        "upload_bytes": 600
+      },
+      {
+        "download_bytes": 6000,
+        "minute": "2026-10-12T06:02:00Z",
+        "upload_bytes": 600
+      }
+    ],
+    "rows": [
+      {
+        "download_bps": 480.0,
+        "download_bytes": 18000,
+        "last_seen": "2026-10-12T06:02:00Z",
+        "sessions": 2,
+        "subject": {
+          "hostname": null,
+          "ip": "172.20.43.37",
+          "key": "person:1",
+          "kind": "person",
+          "label": "Ayşe Yılmaz",
+          "mac": null,
+          "pseudonymous": false
+        },
+        "top_apps": [
+          {
+            "app": "SSL_TLSv1.3.PQC",
+            "bytes": 16500
+          }
+        ],
+        "top_domains": [
+          {
+            "bytes": 16500,
+            "domain": "video.example",
+            "kind": "domain"
+          },
+          {
+            "bytes": 3300,
+            "domain": "posta.example",
+            "kind": "domain"
+          }
+        ],
+        "upload_bps": 48.0,
+        "upload_bytes": 1800
+      }
+    ],
+    "totals": {
+      "download_bps": 480.0,
+      "download_bytes": 18000,
+      "sessions": 2,
+      "subjects": 1,
+      "upload_bps": 48.0,
+      "upload_bytes": 1800
+    },
+    "window": 5
+  },
+  "errors": {
+    "notice_required": {
+      "body": {
+        "error": {
+          "code": "privacy_notice_required",
+          "message_en": "Read and accept the KVKK privacy notice before opening this section with personal data.",
+          "message_tr": "Kişisel veri içeren bu bölümü açmadan önce KVKK bilgilendirme metnini okuyup onaylamanız gerekiyor."
+        }
+      },
+      "headers": {},
+      "status": 403
+    },
+    "window_invalid": {
+      "body": {
+        "error": {
+          "code": "activity_window_invalid",
+          "message_en": "Invalid window: it can be 1, 5 or 15 minutes.",
+          "message_tr": "Zaman aralığı geçersiz: 1, 5 ya da 15 dakika olabilir."
+        }
+      },
+      "headers": {},
+      "status": 422
+    }
+  },
+  "meta": {
+    "captured_at": "2026-10-13T04:01:39.628862+00:00",
+    "clock": "2026-10-13T07:00:00+03:00",
+    "info": "captured by web/scripts/capture_api_samples.py; do not edit",
+    "site_day": "2026-10-09",
+    "site_today": "2026-10-13",
+    "tsa": "mock (never legally valid)"
+  },
+  "viewer_devices_pseudonymous": {
+    "data_until": "2026-10-12T06:02:00Z",
+    "generated_at": "2026-10-12T06:02:30Z",
+    "more": false,
+    "per_minute": [
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:03:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:04:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:05:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:06:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:07:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:08:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:09:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:10:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:11:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:12:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:13:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:14:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:15:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:16:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:17:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:18:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:19:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:20:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:21:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:22:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:23:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:24:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:25:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:26:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:27:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:28:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:29:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:30:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:31:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:32:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:33:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:34:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:35:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:36:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:37:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:38:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:39:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:40:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:41:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:42:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:43:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:44:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:45:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:46:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:47:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:48:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:49:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:50:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:51:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:52:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:53:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:54:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:55:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:56:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:57:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:58:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 0,
+        "minute": "2026-10-12T05:59:00Z",
+        "upload_bytes": 0
+      },
+      {
+        "download_bytes": 6000,
+        "minute": "2026-10-12T06:00:00Z",
+        "upload_bytes": 600
+      },
+      {
+        "download_bytes": 6000,
+        "minute": "2026-10-12T06:01:00Z",
+        "upload_bytes": 600
+      },
+      {
+        "download_bytes": 6000,
+        "minute": "2026-10-12T06:02:00Z",
+        "upload_bytes": 600
+      }
+    ],
+    "rows": [
+      {
+        "download_bps": 800.0,
+        "download_bytes": 6000,
+        "last_seen": "2026-10-12T06:02:00Z",
+        "sessions": 2,
+        "subject": {
+          "hostname": null,
+          "ip": null,
+          "key": "p:d3648b10d647ade3",
+          "kind": "person",
+          "label": "Kullanıcı-D364",
+          "mac": null,
+          "pseudonymous": true
+        },
+        "top_apps": [
+          {
+            "app": "SSL_TLSv1.3.PQC",
+            "bytes": 3300
+          }
+        ],
+        "top_domains": [
+          {
+            "bytes": 3300,
+            "domain": "posta.example",
+            "kind": "domain"
+          },
+          {
+            "bytes": 3300,
+            "domain": "video.example",
+            "kind": "domain"
+          }
+        ],
+        "upload_bps": 80.0,
+        "upload_bytes": 600
+      }
+    ],
+    "totals": {
+      "download_bps": 800.0,
+      "download_bytes": 6000,
+      "sessions": 2,
+      "subjects": 1,
+      "upload_bps": 80.0,
+      "upload_bytes": 600
+    },
+    "window": 1
+  }
+}

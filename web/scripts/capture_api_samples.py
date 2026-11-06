@@ -35,7 +35,9 @@ How the samples are made (everything is the production code, in this process):
    reassigned at noon, background traffic, blocked attempts, an evening session, a session over
    midnight), rolled up by the worker's own job; company, subjects, one subject, sites,
    categories (also filtered by department), CSV and Excel exports, rebuild requests, the
-   optional pseudonyms and the refusals.
+   optional pseudonyms and the refusals; on the same site Canlı Durum (``activity.json``,
+   Wave 5 contract §6.2 M2): ``GET /activity/devices`` at 09:02:30 for each window, the
+   pseudonymous answer and the refusals.
 6. last the Security page and the dashboard: alerts as the worker writes them (the failed
    sealing of 11.10 imported from ``alerts.jsonl``, R15 of a silent switch from the real check,
    the site's IP conflict, disk, new log source, a credit alert the check resolved) and the
@@ -131,6 +133,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import NullPool
 
 from arcilogger_api import deps, evidence_limits, rawlines
+from arcilogger_api.activity import routes as activity_routes
 from arcilogger_api.app import create_app
 from arcilogger_api.auth.accounts import accept_privacy, privacy_version
 from arcilogger_api.deps import AppState
@@ -1596,6 +1599,27 @@ def capture_usage(server: TestServer, template: str, root: Path) -> dict[str, An
                 admin.get(f"{usage}/rebuild/{requested['job_id']}"), 200
             )
 
+            # Canlı Durum (M2) at 09:02:30: the first interim log of the 09:00-09:05 session
+            # has come, its next one and its final log not yet. Only the route's clock is set
+            # (the sessions keep the capture's own, or they would read as idle afterwards).
+            activity: dict[str, Any] = {}
+            devices = f"{API}/activity/devices"
+            moment = _local(USAGE_DAY, 9, 2, 30).astimezone(UTC)
+            with mock.patch.object(activity_routes, "utc_now", lambda: moment):
+                for window in ("1", "5", "15"):
+                    activity[f"devices_{window}"] = capture.json(
+                        hr.get(devices, params={"window": window}), 200
+                    )
+                activity["errors"] = {
+                    "window_invalid": capture.error(
+                        hr.get(devices, params={"window": "2"}), 422, "activity_window_invalid"
+                    ),
+                    "notice_required": capture.error(
+                        newcomer.get(devices), 403, "privacy_notice_required"
+                    ),
+                }
+            out["activity"] = activity
+
             # Names by default (owner decision 2026-10-20), pseudonyms only on request.
             out["viewer_subjects"] = get(viewer, "/subjects", kind="person")
             out["viewer_company"] = get(viewer, "/company")
@@ -1618,6 +1642,10 @@ def capture_usage(server: TestServer, template: str, root: Path) -> dict[str, An
             out["viewer_subject_pseudonymous"] = get(viewer, f"/subjects/{token}")
             out["viewer_sites_pseudonymous"] = get(viewer, "/sites/portal.example")
             out["hr_subjects_with_pseudonyms_on"] = get(hr, "/subjects", kind="person")
+            with mock.patch.object(activity_routes, "utc_now", lambda: moment):
+                out["activity"]["viewer_devices_pseudonymous"] = capture.json(
+                    viewer.get(devices, params={"window": "1"}), 200
+                )
             out["pseudonyms"] = capture.json(admin.get(f"{usage}/pseudonyms"), 200)
             out["pseudonyms_search"] = capture.json(
                 admin.get(f"{usage}/pseudonyms", params={"q": "can"}), 200
@@ -3162,7 +3190,9 @@ def capture_site(capture: Capture, server: TestServer, template: str, root: Path
             if data:
                 capture.samples[name] = data
     vault.unlock_all()
-    capture.samples["usage"] = capture_usage(server, template, root)
+    usage = capture_usage(server, template, root)
+    capture.samples["activity"] = usage.pop("activity")
+    capture.samples["usage"] = usage
     capture_lookup_site(capture, server, template, root)
 
 

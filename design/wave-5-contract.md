@@ -3615,3 +3615,36 @@ The manager took P1 and P2 (#203, comment of 2026-11-05); P3 and P4 stay with G�
     `USAGE_POLL_MS` = 60 s;
   - `web/scripts/capture_api_samples.py`: the captured refusal of W5-P-2.
 
+## Deviations — W5-M (2026-11-06)
+
+- **W5-M-1: the engine reads a range (granted on #201, 2026-11-06 01:17Z).**
+  `worker/src/arcilogger_worker/usage/engine.py` gets two entry points: `DayBuilder(..., window=(lo,
+  hi))`, whose buckets cover `[lo, hi)` instead of a site day, each minute's part (K2) from its own
+  day's hours and breaks (a window across midnight); and `read_range(session, builder, *,
+  settings)`, `compute_day`'s reading loop, which `compute_day` now calls. They are a refactor of
+  `compute_day` for M2, not a new counting rule: the usage golden, break and API tests pass
+  unchanged. `api/src/arcilogger_api/activity/devices.py` reads a window's `cells`, `flow_list`,
+  `flow_sessions`, `subjects` and `newest`.
+- **W5-M-2: the shapes M2 does not name** (the questions of #205, accepted at its review):
+  `top_domains` are `{domain, kind, bytes}` and `top_apps` `{app, bytes}` (download plus upload in
+  the window); the rates are bits per second as numbers; `totals` has the bytes, rates, `sessions`
+  and `subjects` (subjects with traffic, persons left out of the rows included); `per_minute` is
+  `{minute, download_bytes, upload_bytes}`, oldest first. `sessions` are the sessions open in the
+  window, each counted once (the engine counts a session at its first minute in its range).
+  `last_seen` is the end of the subject's newest minute with traffic, at most `data_until`: the
+  engine keeps no newest row per subject.
+- **W5-M-3: two ranges per request.** The last `window` minutes give the rows and totals, the last
+  60 minutes `per_minute`, both ending with the minute under way: a session counts once at its first
+  minute in its range, so the window's own range is needed for `sessions`.
+- **W5-M-4: M4 is not met by M2's counting; an owner question.** At 2,000 lines/s the engine's
+  reading of a range cannot answer in under 1 s: `docs/USAGE.md` §8 measures about 13 µs a line
+  (450,182 lines in 6.0 s), and a 15-minute window reads 75 minutes with the 30-minute session
+  overlap, about 9 million lines. The guard is not written yet; the choice of design is asked on
+  #201.
+- **W5-M-5: files outside the ownership of §6.6.** `worker/src/arcilogger_worker/usage/engine.py`
+  (W5-M-1); `worker/tests/test_usage_window.py` (the window across midnight);
+  `api/tests/test_license_routes.py` and LISANS/LICENSING §1 and §2.2 (`/activity` and the
+  `usage_analytics` row, granted on #201, 01:19Z); `web/src/lib/api-types.test.ts` and
+  `api-samples.test.ts` (`activity-types.ts` in `TYPES_FILES`, the four `Wan*` interfaces in
+  `NOT_SCHEMAS` until W5-N mounts `GET /activity/wan`, the `activity` samples);
+  `web/scripts/capture_api_samples.py` (`activity.json`).

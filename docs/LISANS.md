@@ -39,7 +39,7 @@ Fiyatlar üründe yer almaz.
 | Anahtar | Modül | English | Ne içerir | Gerekir |
 |---|---|---|---|---|
 | `core_5651` | 5651 Temel | 5651 Core | Log toplama, mühürleme, saklama, 5651 sorgusu, kanıt paketleri, cihazlar ve kişiler, uyarılar, denetim kaydı | — (her zaman açık) |
-| `usage_analytics` | Kullanım analizi | Usage analytics | Kişi, cihaz, site ve kategori bazında tahmini kullanım süreleri ve dışa aktarma: **Kullanım** sayfası ve paneldeki kullanım bölümleri | — |
+| `usage_analytics` | Kullanım analizi | Usage analytics | Kişi, cihaz, site ve kategori bazında tahmini kullanım süreleri ve dışa aktarma: **Kullanım** sayfası, paneldeki kullanım bölümleri ve **Canlı Durum**'daki şu an veri gönderip alanlar tablosu | — |
 | `usage_reports` | Zamanlanmış kullanım raporları | Scheduled usage reports | Kullanım raporlarının zamanlanmış olarak üretilip e-postayla gönderilmesi: **Raporlar** sayfası | Kullanım analizi |
 | `bulk_import` | Toplu içe aktarma (CSV) | Bulk import (CSV) | Kişilerin ve cihaz atamalarının CSV dosyasından toplu içe aktarılması (Cihazlar ve Kişiler → **Aktarım** sekmesinin içe aktarma bölümü); elle giriş ve CSV dışa aktarma her zaman açıktır | — |
 
@@ -115,6 +115,7 @@ vermez.
 | `/system` | Sistem sayfası: kaynak kullanımı, disk tahmini, veritabanı boyutu, hizmetler, zamanlanmış görevler, saat | 5651 Temel |
 | `/archive-reloads` | Arşivden yeniden yükleme: veritabanı penceresinden eski günlerin mühürlü kasadan geri istenmesi ve ilerlemesi | 5651 Temel |
 | `/usage` | Kullanım sayfasının verileri, dışa aktarma, yeniden hesaplama | Kullanım analizi |
+| `/activity` | Canlı Durum: şu an kim veri gönderip alıyor (`GET /activity/devices`, kişi bazında) | Kullanım analizi |
 | `/reports` | Zamanlanmış raporlar, çalıştırmalar, önizleme | Zamanlanmış kullanım raporları |
 | `/imports` | CSV içe aktarma ve şablonları | Toplu içe aktarma (CSV) |
 

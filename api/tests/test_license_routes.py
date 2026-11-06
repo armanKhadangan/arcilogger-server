@@ -42,7 +42,7 @@ V = "/api/v1"
 
 #: Every route (method, OpenAPI path) → the module that gates it, ``None`` for 5651 Temel.
 ROUTES: dict[tuple[str, str], str | None] = {
-    # Module usage_analytics: 12 routes
+    # Module usage_analytics: 13 routes
     ("GET", f"{V}/usage/company"): UA,
     ("GET", f"{V}/usage/subjects"): UA,
     ("GET", f"{V}/usage/subjects/{{key}}"): UA,
@@ -55,6 +55,8 @@ ROUTES: dict[tuple[str, str], str | None] = {
     ("POST", f"{V}/usage/rebuild"): UA,
     ("GET", f"{V}/usage/rebuild/{{job_id}}"): UA,
     ("GET", f"{V}/usage/pseudonyms"): UA,
+    # Canlı Durum's per-person table (Wave 5 contract §6.2 M3, QB1).
+    ("GET", f"{V}/activity/devices"): UA,
     # Module usage_reports: 9 routes
     ("GET", f"{V}/reports/schedules"): UR,
     ("POST", f"{V}/reports/schedules"): UR,
@@ -270,7 +272,7 @@ def test_every_route_is_classified(app: FastAPI) -> None:
     found = sorted((method.upper(), path) for path, ops in paths.items() for method in ops)
     assert found == sorted(ROUTES)
     gated = [key for key, module in ROUTES.items() if module is not None]
-    assert len(gated) == 23
+    assert len(gated) == 24
     assert len(ROUTES) - len(gated) == 133
 
 

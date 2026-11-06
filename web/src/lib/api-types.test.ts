@@ -31,6 +31,7 @@ const TYPES_FILES = [
   'system-health-types.ts',
   'archive-reload-types.ts',
   'legal-status-types.ts',
+  'activity-types.ts',
 ].map((name) => join(SRC, 'lib', name));
 
 /**
@@ -66,6 +67,11 @@ const NOT_SCHEMAS = new Set([
   'SourceConfig',
   // archive-reload-types.ts: the `details` of 409 `archive_reload_required`.
   'ArchiveReloadRequired',
+  // activity-types.ts: the answer of `GET /activity/wan` (W5-N, #207), not mounted yet.
+  'WanCapacity',
+  'WanPoint',
+  'WanLine',
+  'WanRates',
 ]);
 /** OpenAPI schemas the web app does not use. */
 const UNUSED_SCHEMAS = new Set(['HTTPValidationError', 'ValidationError', 'Health']);

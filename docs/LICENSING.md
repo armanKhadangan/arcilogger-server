@@ -39,7 +39,7 @@ in every state. Prices are not part of the product.
 | Key | Module | Türkçe | Content | Needs |
 |---|---|---|---|---|
 | `core_5651` | 5651 Core | 5651 Temel | Log collection, sealing, retention, 5651 lookups, evidence packages, devices and persons, alerts, audit log | — (always on) |
-| `usage_analytics` | Usage analytics | Kullanım analizi | Estimated usage time per person, device, site and category, with exports: the **Kullanım** page and the dashboard's usage sections | — |
+| `usage_analytics` | Usage analytics | Kullanım analizi | Estimated usage time per person, device, site and category, with exports: the **Kullanım** page, the dashboard's usage sections and **Canlı Durum**'s table of who is sending and receiving data now | — |
 | `usage_reports` | Scheduled usage reports | Zamanlanmış kullanım raporları | Scheduled usage reports made and e-mailed by the server: the **Raporlar** page | Usage analytics |
 | `bulk_import` | Bulk import (CSV) | Toplu içe aktarma (CSV) | Bulk import of persons and device assignments from CSV files (Cihazlar ve Kişiler → the import part of the **Aktarım** tab); manual entry and the CSV exports are always available | — |
 
@@ -114,6 +114,7 @@ licence state.
 | `/system` | System page: resource use, disk forecast, database size, services, scheduled tasks, clock | 5651 Core |
 | `/archive-reloads` | Archive reload: days older than the database window asked back from the sealed vault, and their progress | 5651 Core |
 | `/usage` | The data of the Kullanım page, exports, rebuilds | Usage analytics |
+| `/activity` | Canlı Durum: who is sending and receiving data now (`GET /activity/devices`, per person) | Usage analytics |
 | `/reports` | Scheduled reports, runs, preview | Scheduled usage reports |
 | `/imports` | CSV import and its templates | Bulk import (CSV) |
 
