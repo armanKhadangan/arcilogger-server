@@ -59,7 +59,7 @@ async function applied(page: Page) {
   );
 }
 
-test.describe('Ayarlar → Kamu SM', () => {
+test.describe('Ayarlar → Zaman damgası', () => {
   test('the steps with their state, the sealing view read-only', async ({ page }) => {
     await mockApi(page, { signedInAs: 'tolga' });
     await page.goto('/settings');

@@ -291,7 +291,7 @@ aşağıdaki koşullar belirler.
 
 | Sıra | Durum | Koşul | Gerekçe |
 |---|---|---|---|
-| 1 | Sorun | Damgalar Kamu SM üretim sunucusundan alınmıyor (deneme, RFC 3161 ya da Kamu SM test sunucusu) | "Damgalar Kamu SM üretim sunucusundan alınmıyor (sağlayıcı: {sağlayıcı}). Kamu SM bağlantısını Ayarlar → Kamu SM'de tamamlayın." |
+| 1 | Sorun | Damgalar Kamu SM üretim sunucusundan alınmıyor (deneme, RFC 3161 ya da Kamu SM test sunucusu) | "Damgalar Kamu SM üretim sunucusundan alınmıyor (sağlayıcı: {sağlayıcı}). Kamu SM bağlantısını Ayarlar → Zaman damgası'nda tamamlayın." |
 | 2 | Sorun | En son bilinen kontör 0 ya da daha az | "Kamu SM kontörü bitti." |
 | 3 | Sorun | En yeni damganın TSA sertifikasının süresi dolmuş | "Son damganın TSA sertifikasının süresi {tarih} tarihinde doldu." |
 | 4 | Dikkat | Kontör eşiğe eşit ya da altında | "Kalan kontör {kontör}; eşik {eşik}. Tahmini {gün} gün yeter." |
@@ -312,9 +312,9 @@ biçimi sahada doğrulanmalıdır." ([kamusm.md](kamusm.md) bölüm 3, K4; böl�
 
 **Ne yapmalı?**
 
-- Üretim sunucusu değil (satır 1): Ayarlar → Kamu SM sihirbazını tamamlayın: test sunucusuyla
-  deneme, kök sertifika parmak izlerinin Kamu SM'nin yayımladığı değerlerle karşılaştırılması, sonra
-  **Üretime geç** ([kamusm.md](kamusm.md), [KURULUM.md](KURULUM.md) bölüm 10).
+- Üretim sunucusu değil (satır 1): Ayarlar → Zaman damgası sayfasındaki Kamu SM sihirbazını
+  tamamlayın: test sunucusuyla deneme, kök sertifika parmak izlerinin Kamu SM'nin yayımladığı
+  değerlerle karşılaştırılması, sonra **Üretime geç** ([kamusm.md](kamusm.md), [KURULUM.md](KURULUM.md) bölüm 10).
 - Kontör bitti ya da azaldı (satır 2, 4): kontör satın alın ([kamusm.md](kamusm.md) bölüm 1).
   Kontör biterse günler mühürlenemez; kart 2 ve `R20-seal` bunu gösterir.
 - Kontör bilinmiyor (satır 5): Mühürleme sayfasında **Kontör sorgula** (`seal.manage`) ile okuyun;
@@ -765,8 +765,8 @@ sihirbazı — Girişten sonra, Ayarlar'da" gösterir.
 | Yönetici ve iki adımlı doğrulama | her zaman (kullanıcı oturum açmıştır) | — |
 | Site ayarları | `site_name` ya da `clock.*` ile ilgili hata düzeyinde bir yapılandırma sorunu yok | Ayarlar → Genel |
 | Log kaynakları | en az bir etkin, yapılandırılmış kaynak var | Ayarlar → Kaynaklar |
-| Kamu SM: test sunucusu | istek geçmişinde başarılı bir "Damga testi" var ya da üretim sunucusu seçili | Ayarlar → Kamu SM (test adımı) |
-| Kamu SM: üretim | üretim sunucusu seçili ve mühürleme hazır | Ayarlar → Kamu SM (üretim adımı) |
+| Kamu SM: test sunucusu | istek geçmişinde başarılı bir "Damga testi" var ya da üretim sunucusu seçili | Ayarlar → Zaman damgası (test adımı) |
+| Kamu SM: üretim | üretim sunucusu seçili ve mühürleme hazır | Ayarlar → Zaman damgası (üretim adımı) |
 | Replika | replika açık | Ayarlar → Replika |
 | E-posta | e-posta gönderimi açık, SMTP sunucusu ve gönderen ayarlı | Ayarlar → E-posta |
 | Özet | — | — |

@@ -219,9 +219,9 @@ RETENTION_ON: Final[Text] = ("açık, {days} gün", "on, {days} days")
 
 TSA_NOT_PRODUCTION: Final[Text] = (
     "Damgalar Kamu SM üretim sunucusundan alınmıyor (sağlayıcı: {provider}). Kamu SM "
-    "bağlantısını Ayarlar → Kamu SM'de tamamlayın.",
+    "bağlantısını Ayarlar → Zaman damgası'nda tamamlayın.",
     "Time stamps are not taken from the Kamu SM production server (provider: {provider}). "
-    "Complete the Kamu SM connection in Settings → Kamu SM.",
+    "Complete the Kamu SM connection in Settings → Time stamping.",
 )
 TSA_NO_CREDIT: Final[Text] = ("Kamu SM kontörü bitti.", "The Kamu SM credit is used up.")
 TSA_CERT_EXPIRED: Final[Text] = (

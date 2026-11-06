@@ -779,8 +779,8 @@ dön** olur), **Bu adımı şimdilik atla** sonraki adıma geçer ve atlanan ad�
 | Yönetici ve iki adımlı doğrulama | her zaman (yukarıdaki 1–3. adımlar) | — |
 | Site ayarları | kuruluş adı ve saat sunucuları için hata düzeyinde bir yapılandırma sorunu yok | Ayarlar → Genel (bölüm 1.3, 7.1) |
 | Log kaynakları | en az bir etkin kaynak tanımlı | Ayarlar → Kaynaklar (bölüm 11) |
-| Kamu SM: test sunucusu | istek geçmişinde başarılı ve doğrulanmış bir damga testi var ya da üretim sunucusu seçili | Ayarlar → Kamu SM, test adımı (bölüm 10) |
-| Kamu SM: üretim | üretim sunucusu seçili ve mühürleme hazır | Ayarlar → Kamu SM, üretim adımı (bölüm 10, "Üretime geçiş") |
+| Kamu SM: test sunucusu | istek geçmişinde başarılı ve doğrulanmış bir damga testi var ya da üretim sunucusu seçili | Ayarlar → Zaman damgası, test adımı (bölüm 10) |
+| Kamu SM: üretim | üretim sunucusu seçili ve mühürleme hazır | Ayarlar → Zaman damgası, üretim adımı (bölüm 10, "Üretime geçiş") |
 | Replika | replika açık | Ayarlar → Replika (bölüm 10, "Replika") |
 | E-posta | e-posta gönderimi açık, SMTP sunucusu ve gönderen adresi ayarlı | Ayarlar → E-posta |
 

@@ -8510,7 +8510,7 @@ def test_next_steps_follow_the_time_stamp_provider(engine: str, tmp_path: Path) 
     step = stdout[stdout.index("   3. ") : stdout.index("   4. ")]
     assert step.startswith("   3. TÜRKTRUST zaman damgası hesabı [time-stamp account]:")
     assert "Ayarlar → Zaman damgası" in step
-    assert "[enter the user name and password under Settings → Time stamp" in step
+    assert "[enter the user name and password under Settings → Time stamping" in step
     assert "secret set turktrust.username" in step
     assert "secret set turktrust.password" in step
     assert "TÜRKTRUST'un kök sertifikalarını TÜRKTRUST'tan alın" in step

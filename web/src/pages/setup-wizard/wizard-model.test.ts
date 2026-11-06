@@ -126,7 +126,7 @@ describe('every step’s state from the configuration', () => {
     expect(stepState('kamusm_test', { config, tested: false }).done).toBe(true);
   });
 
-  it('a stamp test counts as Ayarlar → Kamu SM counts it: succeeded and verified', () => {
+  it('a stamp test counts as Ayarlar → Zaman damgası counts it: succeeded and verified', () => {
     expect(verifiedStampTest([])).toBe(false);
     expect(verifiedStampTest([stampTest()])).toBe(true);
     expect(verifiedStampTest([stampTest('succeeded', false)])).toBe(false);
