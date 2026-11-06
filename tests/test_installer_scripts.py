@@ -6384,6 +6384,11 @@ if ($Scenario -eq 'health-port') {
     $toml = "[api]`nhost = `"0.0.0.0`"`nport = 18641`n"
     Write-Text (Join-Path $programData 'arcilogger.toml') $toml
 }
+if ($Scenario -eq 'next-steps-turktrust') {
+    # Read through the Read-ArciTomlFile stand-in below; the next steps read only an existing file.
+    $toml = "[tsa]`nprovider = `"turktrust`"`nurl = `"https://zd.turktrust.com.tr/`"`n"
+    Write-Text (Join-Path $programData 'arcilogger.toml') $toml
+}
 if ($Scenario -eq 'uninstall-desktop') {
     # What Set-ArciPower.ps1 recorded on a desktop Windows at the installation.
     Write-Text (Join-Path $programData 'install/power-state.json') '{"schema": 1, "previous": {}}'
@@ -6686,7 +6691,12 @@ function Test-JavaForZamane { }
 # arcilogger.toml as the venv's tomllib would read it (the stub python.exe cannot run).
 function Read-ArciTomlFile {
     param([string]$Python, [string]$ConfigPath)
-    [pscustomobject]@{ api = [pscustomobject]@{ host = '0.0.0.0'; port = 18641 } }
+    $config = [pscustomobject]@{ api = [pscustomobject]@{ host = '0.0.0.0'; port = 18641 } }
+    if ($Scenario -eq 'next-steps-turktrust') {
+        $tsa = [pscustomobject]@{ provider = 'turktrust'; url = 'https://zd.turktrust.com.tr/' }
+        $config | Add-Member -NotePropertyName tsa -NotePropertyValue $tsa
+    }
+    $config
 }
 function Get-DatabaseSettings {
     [pscustomobject]@{ host = '127.0.0.1'; port = 5432; name = 'arcilogger'; user = 'arcilogger' }
@@ -6975,6 +6985,7 @@ try {
         'health-api-down' { Invoke-HealthCheck }
         'health-port' { Invoke-HealthCheck }
         'next-steps' { Show-NextSteps }
+        'next-steps-turktrust' { Show-NextSteps }
         # A configuration without [[sources]] (Invoke-SourcesPreflight counted none); the harness
         # runs with -SkipFirewall, the last scenario as if the firewall step had run.
         'next-steps-no-sources' { $script:SourceCount = 0; Show-NextSteps }
@@ -8484,6 +8495,40 @@ def test_next_steps_print_the_setup_token_command(engine: str, tmp_path: Path) -
     assert "$Venv = Join-Path $InstallDir 'venv'" in script
     assert "Join-Path $env:ProgramFiles 'ARCILOGGER'" in script
     assert "$ConfigPath = Join-Path $ProgramDataDir 'arcilogger.toml'" in script
+
+
+def test_next_steps_follow_the_time_stamp_provider(engine: str, tmp_path: Path) -> None:
+    """Contract 2.4: with TÜRKTRUST, step 3 says where its account and its roots go; Kamu SM's
+    Java, Zamane client and credit lines stay with Kamu SM. No secret is asked or shown."""
+    kamusm = simulate(engine, tmp_path, "next-steps")["stdout"]
+    assert "3. Kamu SM test hesabı [test account]:" in kamusm
+    assert "secret set kamusm.customer" in kamusm
+    assert "TÜRKTRUST" not in kamusm
+    run = tmp_path / "turktrust"
+    run.mkdir()
+    stdout = simulate(engine, run, "next-steps-turktrust")["stdout"]
+    step = stdout[stdout.index("   3. ") : stdout.index("   4. ")]
+    assert step.startswith("   3. TÜRKTRUST zaman damgası hesabı [time-stamp account]:")
+    assert "Ayarlar → Zaman damgası" in step
+    assert "[enter the user name and password under Settings → Time stamp" in step
+    assert "secret set turktrust.username" in step
+    assert "secret set turktrust.password" in step
+    assert "TÜRKTRUST'un kök sertifikalarını TÜRKTRUST'tan alın" in step
+    roots = run / "sim" / "programdata" / "ARCILOGGER" / "kamusm-roots"
+    shown = re.search(r"ya da (.+) içine koyun", step)
+    assert shown is not None, step
+    assert Path(shown.group(1).replace("\\", "/")) == roots
+    for word in ("Kamu SM", "kamusm.", "Java", "Zamane", "kontör", "credit"):
+        assert word not in step, word
+
+
+def test_the_java_check_is_for_zamane_only() -> None:
+    """Contract 2.4: the Java and Zamane-jar warnings return before any check for another
+    provider (turktrust, rfc3161, mock)."""
+    check = _function(INSTALL_SCRIPT.read_text(encoding="utf-8-sig"), "Test-JavaForZamane")
+    guard = "-Path 'tsa.provider' -Default 'mock') -ne 'zamane') { return }"
+    assert guard in check
+    assert check.index(guard) < check.index("tsa.java")
 
 
 def test_next_steps_say_which_sources_to_add(engine: str, tmp_path: Path) -> None:
@@ -11103,6 +11148,88 @@ def test_firewall_strict_outbound_follows_the_tsa_settings(engine: str, tmp_path
     kamusm = next(r for r in plan["rules"] if r["name"] == "ARCILOGGER Out Kamu SM")
     assert kamusm["remote_address"] == ["10.0.0.1", "10.0.0.7"]
     assert kamusm["ports"] == ["8080"]
+
+
+TURKTRUST_CONFIG = (
+    '[tsa]\nprovider = "turktrust"\nurl = "https://10.0.0.11/"\nport = 443\n'
+    'crl_urls = ["http://10.0.0.12/root.crl", "https://10.0.0.13/tsa.crl", '
+    '"http://10.0.0.12/sub.crl"]\n'
+)
+
+
+def _outbound(plan: dict[str, Any] | None) -> dict[str, dict[str, Any]]:
+    assert plan is not None
+    return {r["name"]: r for r in plan["rules"] if r["direction"] == "Outbound"}
+
+
+def test_firewall_strict_outbound_opens_turktrust_and_the_crl_hosts(
+    engine: str, tmp_path: Path
+) -> None:
+    """Wave 5 contract 2.4, #98: TÜRKTRUST's host on 443 and the hosts of [tsa] crl_urls on 80
+    and 443 (signed lists, D8); Kamu SM's rules stay, without the TÜRKTRUST host."""
+    result, plan = _firewall(
+        engine, tmp_path, STRICT_CONFIG + TURKTRUST_CONFIG, "-StrictOutbound", *STRICT_ARGS
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    outbound = _outbound(plan)
+    assert outbound["ARCILOGGER Out TURKTRUST"]["remote_address"] == ["10.0.0.11"]
+    assert outbound["ARCILOGGER Out TURKTRUST"]["ports"] == ["443"]
+    assert outbound["ARCILOGGER Out CRL"]["remote_address"] == ["10.0.0.12", "10.0.0.13"]
+    assert outbound["ARCILOGGER Out CRL"]["ports"] == ["80", "443"]
+    assert outbound["ARCILOGGER Out Kamu SM"]["remote_address"] == ["10.0.0.1"]
+    assert outbound["ARCILOGGER Out Kamu SM"]["ports"] == ["80"]
+    assert "ARCILOGGER Out Proxy" not in outbound
+
+
+def test_firewall_strict_outbound_turktrust_over_plain_http(engine: str, tmp_path: Path) -> None:
+    """TCP 80 instead of 443 with [tsa] allow_plain_http (contract 2.4)."""
+    text = STRICT_CONFIG + (
+        '[tsa]\nprovider = "turktrust"\nurl = "http://10.0.0.11/"\nport = 80\n'
+        "allow_plain_http = true\n"
+    )
+    result, plan = _firewall(engine, tmp_path, text, "-StrictOutbound", *STRICT_ARGS)
+    assert result.returncode == 0, result.stdout + result.stderr
+    outbound = _outbound(plan)
+    assert outbound["ARCILOGGER Out TURKTRUST"]["ports"] == ["80"]
+    assert "ARCILOGGER Out CRL" not in outbound  # no crl_urls: nothing is opened by itself
+
+
+def test_firewall_strict_outbound_the_proxy_replaces_turktrust_and_the_crls(
+    engine: str, tmp_path: Path
+) -> None:
+    """With [network] https_proxy, its host:port replaces the TÜRKTRUST and CRL rules (D13);
+    the Zamane client takes no proxy, so the Kamu SM rules stay."""
+    text = STRICT_CONFIG + TURKTRUST_CONFIG + '[network]\nhttps_proxy = "http://10.0.0.14:3128"\n'
+    result, plan = _firewall(engine, tmp_path, text, "-StrictOutbound", *STRICT_ARGS)
+    assert result.returncode == 0, result.stdout + result.stderr
+    outbound = _outbound(plan)
+    assert outbound["ARCILOGGER Out Proxy"]["remote_address"] == ["10.0.0.14"]
+    assert outbound["ARCILOGGER Out Proxy"]["ports"] == ["3128"]
+    assert "ARCILOGGER Out TURKTRUST" not in outbound
+    assert "ARCILOGGER Out CRL" not in outbound
+    assert outbound["ARCILOGGER Out Kamu SM"]["remote_address"] == ["10.0.0.1"]
+
+
+def test_firewall_strict_outbound_warns_when_the_proxy_does_not_resolve(
+    engine: str, tmp_path: Path
+) -> None:
+    """#204 review: a proxy host that does not resolve leaves no path for stamps and revocation
+    lists (no Proxy, TURKTRUST or CRL rule); the script says so instead of staying silent."""
+    text = (
+        STRICT_CONFIG
+        + TURKTRUST_CONFIG
+        + '[network]\nhttps_proxy = "http://proxy.ornek.invalid:3128"\n'
+    )
+    result, plan = _firewall(engine, tmp_path, text, "-StrictOutbound", *STRICT_ARGS)
+    output = result.stdout + result.stderr
+    assert result.returncode == 0, output
+    outbound = _outbound(plan)
+    for name in ("ARCILOGGER Out Proxy", "ARCILOGGER Out TURKTRUST", "ARCILOGGER Out CRL"):
+        assert name not in outbound, name
+    # Windows PowerShell 5.1 wraps warnings at the console width: compare the words.
+    words = " ".join(output.split())
+    assert "Vekil sunucu (proxy.ornek.invalid) çözümlenemedi" in words
+    assert "[the proxy host does not resolve: in strict outbound mode no path is opened" in words
 
 
 SMTP_CONFIG = '[smtp]\nenabled = true\nhost = "10.0.0.8"\nport = 465\nsecurity = "ssl"\n'

@@ -47,6 +47,7 @@ import {
 
 const JAVA = 'C:/Program Files/Eclipse Adoptium/jre-8.0.432.6-hotspot/bin/java.exe';
 
+/** A section as an API before W5-T reported it: without the §2.5 keys (asserted, W5-T). */
 function tsa(overrides: Partial<TsaSection> = {}): TsaSection {
   return {
     provider: 'zamane',
@@ -78,7 +79,7 @@ function tsa(overrides: Partial<TsaSection> = {}): TsaSection {
     readiness: { production: true, missing: [] },
     seal_ready: { ok: true, causes: [] },
     ...overrides,
-  };
+  } as TsaSection;
 }
 
 const KEPT: Credentials = { customer: SECRET_KEPT, password: SECRET_KEPT, clear: false };
@@ -98,7 +99,7 @@ function turktrustSite(overrides: Partial<TsaSection> = {}): TsaSection {
       'kamusm.password': { set: false, changed_at: null, changed_by: null },
       'turktrust.username': { set: true, changed_at: null, changed_by: 'web:tolga' },
       'turktrust.password': { set: true, changed_at: null, changed_by: 'web:tolga' },
-    } as TsaSection['secrets'],
+    },
     readiness: { production: false, missing: ['zamane_jar', 'java'] },
     ...overrides,
   });
@@ -113,7 +114,7 @@ function withTurktrust(overrides: Partial<TsaSection> = {}): TsaSection {
       ...section.secrets,
       'turktrust.username': { set: false, changed_at: null, changed_by: null },
       'turktrust.password': { set: false, changed_at: null, changed_by: null },
-    } as TsaSection['secrets'],
+    },
   };
 }
 
@@ -508,7 +509,7 @@ describe('Ayarlar → Zaman damgası: the server choice and TÜRKTRUST (Wave 5 c
         'kamusm.customer': { set: true, changed_at: null, changed_by: null },
         'kamusm.password': { set: true, changed_at: null, changed_by: null },
         'turktrust.username': { set: true, changed_at: null, changed_by: null },
-      } as TsaSection['secrets'],
+      },
     });
     expect(stepStatus('credentials', unset, false)).toBe('missing');
     expect(firstOpen(unset, false)).toBe('credentials');
@@ -612,7 +613,7 @@ describe('Ayarlar → Zaman damgası: re-stamping and revocation lists (Wave 5 c
       crl_urls: [CRL_A],
       crl_max_age_days: 7,
       ...overrides,
-    } as TsaSection;
+    };
   }
 
   it('reads the keys only when the server reports them all', () => {

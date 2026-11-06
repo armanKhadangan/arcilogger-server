@@ -485,7 +485,7 @@ def test_the_observed_endpoint_stops_at_its_deadline(
     nat_site: datetime,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    def slow(session: Session, hours: int, now: datetime) -> dict[str, Any]:
+    def slow(session: Session, hours: int, now: datetime, **_: Any) -> dict[str, Any]:
         session.execute(text("SELECT pg_sleep(30)"))
         raise AssertionError("the statement deadline did not stop the count")
 

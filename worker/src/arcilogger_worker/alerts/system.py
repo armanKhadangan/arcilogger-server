@@ -1733,7 +1733,12 @@ def _srcmac_shared(check: _LeaseCheck) -> None:
         return
     limit = check.settings.srcmac_max_ips
     counts = trust.srcmac_ip_counts(
-        check.session, check.now - TRAFFIC_WINDOW, check.now, interfaces, check.untrusted
+        check.session,
+        check.now - TRAFFIC_WINDOW,
+        check.now,
+        interfaces,
+        check.untrusted,
+        max_session_seconds=check.settings.max_session_seconds,
     )
     for interface in sorted(set(interfaces)):
         over = [n for (name, _mac), n in counts.items() if name == interface and n > limit]

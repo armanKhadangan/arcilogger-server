@@ -2296,20 +2296,45 @@ function Show-NextSteps {
     Write-Host '      Yönetici PowerShell''inde tek kullanımlık, 24 saat geçerli kurulum anahtarı alın [one-time setup token, 24 h]:'
     Write-Host ('      & "{0}" setup-token --config "{1}"' -f $ApiExe, $ConfigPath)
     Write-Host ('      Sonra {0}/setup adresini açıp anahtarı, kullanıcı adını ve parolayı girin [then open {0}/setup].' -f $url)
-    Write-Host '   3. Kamu SM test hesabı [test account]:'
     $browserAdministration = ($null -eq $script:AdminPolicyChoice) -or $script:AdminPolicyChoice.Enabled
-    if ($browserAdministration) {
-        Write-Host '      Web arayüzünde Ayarlar → Kamu SM sihirbazı bunu adım adım yapar (Java, Zamane istemcisi, kök sertifikalar, müşteri bilgileri, damga testi); konsoldan da yapılabilir [the Kamu SM wizard under Settings in the web interface does it step by step; or at the console] (docs\AYARLAR.md):'
+    # Step 3 follows the configured provider (contract 2.4): TÜRKTRUST's account needs no Java
+    # and no Zamane client. An unreadable configuration keeps Kamu SM's text, a new
+    # installation's. The secrets are never asked here and never written into the log.
+    $provider = $null
+    if ((Test-Path -LiteralPath $VenvPython) -and (Test-Path -LiteralPath $ConfigPath)) {
+        try {
+            $config = Read-ArciTomlFile -Python $VenvPython -ConfigPath $ConfigPath
+            $provider = Get-ArciConfigValue -Config $config -Path 'tsa.provider' -Default 'mock'
+        }
+        catch { $provider = $null }
     }
-    Write-Host ('      Önce kök sertifikalar [roots first]: Kamu SM kök sertifikalarını {0} içine koyun, SHA-256 parmak izlerini Kamu SM''nin yayımladığı değerlerle karşılaştırın [compare the fingerprints] (docs\KURULUM.md bölüm 10).' -f (Join-Path $ProgramDataDir 'kamusm-roots'))
-    Write-Host '      tsa-test 1 kontör harcar ve damgayı bu köklerle doğrular [tsa-test spends 1 credit, then verifies with these roots].'
-    if ($atConsole) {
-        Write-Host '      Müşteri numarası ve parola, günlük kapandıktan sonra bu pencerede de girilebilir [can also be entered in this window once the log is closed]:'
+    if ($provider -eq 'turktrust') {
+        Write-Host '   3. TÜRKTRUST zaman damgası hesabı [time-stamp account]:'
+        Write-Host '      Kullanıcı adı ve parolayı web arayüzünde Ayarlar → Zaman damgası''nda girin; konsoldan da girilebilir [enter the user name and password under Settings → Time stamp in the web interface; or at the console] (docs\AYARLAR.md):'
+        if (-not $browserAdministration) {
+            Write-Host '      Tarayıcı yönetimi kapalı: yalnız konsoldan [browser administration is off: at the console only].'
+        }
+        Write-Host ('      & "{0}" secret set turktrust.username' -f $CoreExe)
+        Write-Host ('      & "{0}" secret set turktrust.password' -f $CoreExe)
+        Write-Host ('      & "{0}"   # secret set / secret delete sonrası: ArciAdmin''in secrets.json hakkı geri gelir [after a console secret set / secret delete: gives ArciAdmin its right on secrets.json back]' -f (Join-Path $InstallDir 'scripts\Set-ArciVaultAcl.ps1'))
+        Write-Host ('      Kök sertifikalar [roots]: TÜRKTRUST''un kök sertifikalarını TÜRKTRUST''tan alın; Ayarlar → Zaman damgası''ndan yükleyin ya da {0} içine koyun, SHA-256 parmak izlerini TÜRKTRUST''un yayımladığı değerlerle karşılaştırın [get TÜRKTRUST''s root certificates from TÜRKTRUST; upload them under Settings → Time stamp or put them in {0}, and compare the fingerprints with the values TÜRKTRUST publishes].' -f (Join-Path $ProgramDataDir 'kamusm-roots'))
+        Write-Host ('      & "{0}" tsa-test   # damgayı bu köklerle doğrular [verifies the stamp with these roots]' -f $CoreExe)
     }
-    Write-Host ('      & "{0}" secret set kamusm.customer' -f $CoreExe)
-    Write-Host ('      & "{0}" secret set kamusm.password' -f $CoreExe)
-    Write-Host ('      & "{0}"   # secret set / secret delete sonrası: ArciAdmin''in secrets.json hakkı geri gelir [after a console secret set / secret delete: gives ArciAdmin its right on secrets.json back]' -f (Join-Path $InstallDir 'scripts\Set-ArciVaultAcl.ps1'))
-    Write-Host ('      & "{0}" credit ; & "{0}" tsa-test' -f $CoreExe)
+    else {
+        Write-Host '   3. Kamu SM test hesabı [test account]:'
+        if ($browserAdministration) {
+            Write-Host '      Web arayüzünde Ayarlar → Kamu SM sihirbazı bunu adım adım yapar (Java, Zamane istemcisi, kök sertifikalar, müşteri bilgileri, damga testi); konsoldan da yapılabilir [the Kamu SM wizard under Settings in the web interface does it step by step; or at the console] (docs\AYARLAR.md):'
+        }
+        Write-Host ('      Önce kök sertifikalar [roots first]: Kamu SM kök sertifikalarını {0} içine koyun, SHA-256 parmak izlerini Kamu SM''nin yayımladığı değerlerle karşılaştırın [compare the fingerprints] (docs\KURULUM.md bölüm 10).' -f (Join-Path $ProgramDataDir 'kamusm-roots'))
+        Write-Host '      tsa-test 1 kontör harcar ve damgayı bu köklerle doğrular [tsa-test spends 1 credit, then verifies with these roots].'
+        if ($atConsole) {
+            Write-Host '      Müşteri numarası ve parola, günlük kapandıktan sonra bu pencerede de girilebilir [can also be entered in this window once the log is closed]:'
+        }
+        Write-Host ('      & "{0}" secret set kamusm.customer' -f $CoreExe)
+        Write-Host ('      & "{0}" secret set kamusm.password' -f $CoreExe)
+        Write-Host ('      & "{0}"   # secret set / secret delete sonrası: ArciAdmin''in secrets.json hakkı geri gelir [after a console secret set / secret delete: gives ArciAdmin its right on secrets.json back]' -f (Join-Path $InstallDir 'scripts\Set-ArciVaultAcl.ps1'))
+        Write-Host ('      & "{0}" credit ; & "{0}" tsa-test' -f $CoreExe)
+    }
     Write-Host '   4. Cihaz ayarları [device setup]: docs\DEVICE-SETUP.md'
     if ($script:SourceCount -eq 0) {
         Write-Host ('      Log kaynağı yok [no log source yet]: güvenlik duvarınızın ve ana yönlendiricinizin (DHCP sunucusu) [[sources]] kayıtlarını {0} dosyasına ekleyin; dosyadaki örnekler yorum satırıdır (docs\DEVICE-SETUP.md bölüm 4) [add the [[sources]] of your firewall and core router (the DHCP server) to this file; its examples are commented out].' -f $ConfigPath)

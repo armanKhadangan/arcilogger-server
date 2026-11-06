@@ -6179,6 +6179,16 @@
           "title": "Etag",
           "type": "string"
         },
+        "network": {
+          "anyOf": [
+            {
+              "$ref": "#/components/schemas/NetworkBody"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "probe": {
           "default": true,
           "title": "Probe",
@@ -6207,6 +6217,9 @@
         "clock": {
           "$ref": "#/components/schemas/ClockSection"
         },
+        "network": {
+          "$ref": "#/components/schemas/NetworkSection"
+        },
         "site_name": {
           "title": "Site Name",
           "type": "string"
@@ -6214,7 +6227,8 @@
       },
       "required": [
         "site_name",
-        "clock"
+        "clock",
+        "network"
       ],
       "title": "GeneralSection",
       "type": "object"
@@ -8663,6 +8677,37 @@
         "count"
       ],
       "title": "MinuteCount",
+      "type": "object"
+    },
+    "NetworkBody": {
+      "additionalProperties": false,
+      "properties": {
+        "https_proxy": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Https Proxy"
+        }
+      },
+      "title": "NetworkBody",
+      "type": "object"
+    },
+    "NetworkSection": {
+      "properties": {
+        "https_proxy": {
+          "title": "Https Proxy",
+          "type": "string"
+        }
+      },
+      "required": [
+        "https_proxy"
+      ],
+      "title": "NetworkSection",
       "type": "object"
     },
     "Notice": {
@@ -15878,6 +15923,17 @@
     "TsaBody": {
       "additionalProperties": false,
       "properties": {
+        "allow_plain_http": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Allow Plain Http"
+        },
         "clear_credentials": {
           "default": false,
           "title": "Clear Credentials",
@@ -15898,6 +15954,31 @@
             }
           ],
           "title": "Credit Alert Threshold"
+        },
+        "crl_max_age_days": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Crl Max Age Days"
+        },
+        "crl_urls": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Crl Urls"
         },
         "customer": {
           "anyOf": [
@@ -15941,6 +16022,17 @@
           "title": "Probe",
           "type": "boolean"
         },
+        "renew_before_days": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Renew Before Days"
+        },
         "server": {
           "anyOf": [
             {
@@ -15962,6 +16054,28 @@
             }
           ],
           "title": "Timeout Seconds"
+        },
+        "turktrust_password": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Turktrust Password"
+        },
+        "turktrust_username": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Turktrust Username"
         }
       },
       "required": [
@@ -15972,9 +16086,24 @@
     },
     "TsaSection": {
       "properties": {
+        "allow_plain_http": {
+          "title": "Allow Plain Http",
+          "type": "boolean"
+        },
         "credit_alert_threshold": {
           "title": "Credit Alert Threshold",
           "type": "integer"
+        },
+        "crl_max_age_days": {
+          "title": "Crl Max Age Days",
+          "type": "integer"
+        },
+        "crl_urls": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Crl Urls",
+          "type": "array"
         },
         "java": {
           "anyOf": [
@@ -16001,6 +16130,10 @@
         "readiness": {
           "$ref": "#/components/schemas/Readiness"
         },
+        "renew_before_days": {
+          "title": "Renew Before Days",
+          "type": "integer"
+        },
         "roots": {
           "items": {
             "$ref": "#/components/schemas/RootCertificate"
@@ -16023,7 +16156,9 @@
             {
               "enum": [
                 "test",
-                "production"
+                "production",
+                "turktrust",
+                "turktrust-http"
               ],
               "type": "string"
             },
@@ -16046,6 +16181,10 @@
         "server",
         "credit_alert_threshold",
         "timeout_seconds",
+        "allow_plain_http",
+        "renew_before_days",
+        "crl_urls",
+        "crl_max_age_days",
         "java",
         "java_choices",
         "zamane",

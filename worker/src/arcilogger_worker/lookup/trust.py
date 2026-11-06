@@ -23,10 +23,10 @@ from __future__ import annotations
 
 import ipaddress
 from collections.abc import Collection
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Final
 
-from sqlalchemy import ColumnElement, Text, case, cast, distinct, func, null, select, true
+from sqlalchemy import ColumnElement, Text, case, cast, distinct, func, null, or_, select, true
 from sqlalchemy.dialects.postgresql import ARRAY, CIDR
 from sqlalchemy.orm import Session
 
@@ -209,16 +209,29 @@ def srcmac_ip_counts(
     interfaces: Collection[str] | None,
     untrusted: Collection[str],
     macs: Collection[str] | None = None,
+    *,
+    max_session_seconds: int = 0,
 ) -> dict[tuple[str, str], int]:
     """Per ``(srcintf, srcmac)``, the distinct IPv4 source addresses of trusted ``fg_traffic``
-    rows in ``[low, high]`` (``interfaces`` ``None``: every interface; ``macs``: only these):
-    the one query of the lookup's router guard, the srcmac alert and the observed endpoint.
+    rows whose session overlaps ``[low, high]`` (``interfaces`` ``None``: every interface;
+    ``macs``: only these): the one query of the lookup's router guard, the srcmac alert and the
+    observed endpoint.
+
+    A row overlaps when it was logged at ``low`` or later and its session started at ``high`` or
+    earlier (``time - duration``, as the session probes compute it; a row without a duration
+    started when it was logged). So a long session that started in the hour and was logged after
+    it counts too (#96, #40 item 7); the scan stops ``max_session_seconds``
+    (``lookup.max_session_seconds``) after ``high``, as the probes' does. For a window that ends
+    now nothing was logged later, and the count is that of the rows logged in it.
 
     IPv6 sources are not counted (a dual-stack client uses IPv6 and temporary IPv6 addresses
     with the same MAC), nor rows without an interface; ``untrusted`` senders' rows never count.
     """
     if (interfaces is not None and not interfaces) or (macs is not None and not macs):
         return {}
+    started = FgTraffic.time - func.make_interval(
+        0, 0, 0, 0, 0, 0, func.coalesce(FgTraffic.duration, 0)
+    )
     query = (
         select(
             FgTraffic.srcintf,
@@ -227,7 +240,8 @@ def srcmac_ip_counts(
         )
         .where(
             FgTraffic.time >= low,
-            FgTraffic.time <= high,
+            FgTraffic.time <= high + timedelta(seconds=max_session_seconds),
+            or_(FgTraffic.time <= high, started <= high),
             FgTraffic.srcmac.is_not(None),
             FgTraffic.srcintf.is_not(None),
             func.family(FgTraffic.srcip) == 4,
