@@ -113,7 +113,8 @@ export function stampTest(
     kind: 'action.tsa_test',
     state,
     terminal: true,
-    result: { verified, errors: [], warnings: [] },
+    // `provider`: the wizard counts a test of the provider in use only (#220).
+    result: { provider: 'zamane', verified, errors: [], warnings: [] },
   };
 }
 

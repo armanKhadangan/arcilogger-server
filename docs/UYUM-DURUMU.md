@@ -304,7 +304,8 @@ Satır 2 kontör günlüğündeki eksi bir okumayı da "bitti" sayar. Yeni bir k
 bağlantısı tamamlanana kadar bu kartta **Sorun** gösterir (satır 1); aynı durumda kart 2 yalnızca
 **Dikkat** gösterir (bölüm 2.2 satır 7). "İki gün", günlük Credit görevinin iki kez kaçırılmasıdır;
 180 gün, şartnamenin öngördüğü süredir. Damga sunucusu adları: "Kamu SM üretim", "Kamu SM test",
-"Deneme (mock)", "RFC 3161". Bilgiler: damga sunucusu, kalan kontör, tahmini gün, eşik, son okuma,
+"TÜRKTRUST üretim" (D12 gereği yasal nitelikli), "TÜRKTRUST, üretim sunucusu dışında", "Deneme
+(mock)", "RFC 3161". Bilgiler: damga sunucusu, kalan kontör, tahmini gün, eşik, son okuma,
 TSA sertifikası bitişi, kalan gün.
 
 **Sahada doğrulayın** (kartın notu): "Kontör değeri Kamu SM istemcisinin çıktısından okunur; okuma
@@ -765,8 +766,10 @@ sihirbazı — Girişten sonra, Ayarlar'da" gösterir.
 | Yönetici ve iki adımlı doğrulama | her zaman (kullanıcı oturum açmıştır) | — |
 | Site ayarları | `site_name` ya da `clock.*` ile ilgili hata düzeyinde bir yapılandırma sorunu yok | Ayarlar → Genel |
 | Log kaynakları | en az bir etkin, yapılandırılmış kaynak var | Ayarlar → Kaynaklar |
-| Kamu SM: test sunucusu | istek geçmişinde başarılı bir "Damga testi" var ya da üretim sunucusu seçili | Ayarlar → Zaman damgası (test adımı) |
+| Kamu SM: test sunucusu | istek geçmişinde kullanılan sağlayıcının başarılı ve doğrulanmış bir "Damga testi" var ya da üretim sunucusu seçili | Ayarlar → Zaman damgası (test adımı) |
 | Kamu SM: üretim | üretim sunucusu seçili ve mühürleme hazır | Ayarlar → Zaman damgası (üretim adımı) |
+| TÜRKTRUST: damga testi (TÜRKTRUST seçiliyse, Kamu SM'nin test adımı yerine) | istek geçmişinde TÜRKTRUST'ın başarılı ve doğrulanmış bir "Damga testi" var ya da TÜRKTRUST'ın üretim sunucusu seçili | Ayarlar → Zaman damgası (test adımı) |
+| TÜRKTRUST: üretim (TÜRKTRUST seçiliyse, Kamu SM'nin üretim adımı yerine) | TÜRKTRUST'ın üretim sunucusu (`zd.turktrust.com.tr`, yasal nitelikli, D12) seçili ve mühürleme hazır | Ayarlar → Zaman damgası (üretim adımı) |
 | Replika | replika açık | Ayarlar → Replika |
 | E-posta | e-posta gönderimi açık, SMTP sunucusu ve gönderen ayarlı | Ayarlar → E-posta |
 | Özet | — | — |

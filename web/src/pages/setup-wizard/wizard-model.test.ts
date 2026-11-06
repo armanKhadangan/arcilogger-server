@@ -11,6 +11,7 @@ import {
   nextStep,
   STEP_LINKS,
   stepState,
+  stepTextKey,
   verifiedStampTest,
   WIZARD_STEPS,
   wizardStates,
@@ -154,6 +155,58 @@ describe('every step’s state from the configuration', () => {
     expect(stepState('kamusm_production', { config, tested: true }).missing).toEqual([
       { key: 'setupWizard.missing.notProduction' },
     ]);
+  });
+
+  it('TÜRKTRUST (#220): the test and production steps follow the provider in use', () => {
+    const config = completeConfig();
+    Object.assign(config.sections.tsa, {
+      provider: 'turktrust',
+      server: 'turktrust',
+      legal_grade: true,
+      seal_ready: { ok: true, causes: [] },
+    });
+    // Its production server is legal grade by D12: both steps are done, without Kamu SM's.
+    expect(stepState('kamusm_production', { config, tested: false }).done).toBe(true);
+    expect(stepState('kamusm_test', { config, tested: false }).done).toBe(true);
+    // Another TÜRKTRUST server claims no legal grade: production lacks TÜRKTRUST's server,
+    // and the test step needs a verified test of TÜRKTRUST.
+    config.sections.tsa.server = null;
+    config.sections.tsa.legal_grade = false;
+    expect(stepState('kamusm_production', { config, tested: true }).missing).toEqual([
+      { key: 'setupWizard.missing.notTurktrustProduction' },
+    ]);
+    expect(stepState('kamusm_test', { config, tested: false }).missing).toEqual([
+      { key: 'setupWizard.missing.noTest' },
+    ]);
+    expect(stepState('kamusm_test', { config, tested: true }).done).toBe(true);
+    // A Kamu SM site is unchanged: the claim alone is not Kamu SM's production server.
+    const kamusm = completeConfig();
+    Object.assign(kamusm.sections.tsa, { server: 'test', legal_grade: true });
+    expect(stepState('kamusm_production', { config: kamusm, tested: true }).missing).toEqual([
+      { key: 'setupWizard.missing.notProduction' },
+    ]);
+  });
+
+  it('a stamp test counts for the provider in use only (#220)', () => {
+    const of = (provider: string) => ({
+      ...stampTest(),
+      result: { ...(stampTest().result as object), provider },
+    });
+    expect(verifiedStampTest([of('zamane')], 'zamane')).toBe(true);
+    expect(verifiedStampTest([of('zamane')], 'turktrust')).toBe(false);
+    expect(verifiedStampTest([of('zamane'), of('turktrust')], 'turktrust')).toBe(true);
+    expect(verifiedStampTest([{ ...of('turktrust'), state: 'failed' }], 'turktrust')).toBe(false);
+  });
+
+  it('the two time-stamp steps take TÜRKTRUST’s texts when it is in use (#220)', () => {
+    const config = completeConfig();
+    expect(stepTextKey('kamusm_test', config)).toBe('kamusm_test');
+    expect(stepTextKey('kamusm_production', config)).toBe('kamusm_production');
+    expect(stepTextKey('kamusm_test')).toBe('kamusm_test');
+    config.sections.tsa.provider = 'turktrust';
+    expect(stepTextKey('kamusm_test', config)).toBe('turktrust_test');
+    expect(stepTextKey('kamusm_production', config)).toBe('turktrust_production');
+    expect(stepTextKey('replica', config)).toBe('replica');
   });
 
   it('replica: switched on', () => {

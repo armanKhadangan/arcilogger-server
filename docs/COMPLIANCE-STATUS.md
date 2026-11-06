@@ -310,7 +310,8 @@ Row 2 also counts a negative reading in the credit log as used up. A new install
 **Problem** on this card until the Kamu SM production connection is complete (row 1); in the same
 situation card 2 shows only **Attention** (section 2.2 row 7). "Two days" are two missed runs of the
 daily Credit task; the 180 days are the specification's number. Time-stamp server names: "Kamu SM
-production", "Kamu SM test", "Trial (mock)", "RFC 3161". Facts: time-stamp server, credits left,
+production", "Kamu SM test", "TÜRKTRUST production" (legal grade by D12), "TÜRKTRUST, not its
+production server", "Trial (mock)", "RFC 3161". Facts: time-stamp server, credits left,
 estimated days, threshold, last reading, TSA certificate expires, days left.
 
 **Verify on site** (the card's note): "The credit is read from the Kamu SM client's output; verify
@@ -784,8 +785,10 @@ in Settings).
 | Administrator and two-step verification | always (the user is signed in) | — |
 | Site settings | no configuration problem of level error about `site_name` or `clock.*` | Settings → General |
 | Log sources | at least one enabled, configured source | Settings → Sources |
-| Kamu SM: test server | a successful "Damga testi" (Stamp test) in the request history, or the production server is selected | Settings → Time stamping (test step) |
+| Kamu SM: test server | a successful and verified "Damga testi" (Stamp test) of the provider in use in the request history, or the production server is selected | Settings → Time stamping (test step) |
 | Kamu SM: production | the production server is selected and sealing is ready | Settings → Time stamping (production step) |
+| TÜRKTRUST: stamp test (with TÜRKTRUST, in place of Kamu SM's test step) | a successful and verified "Damga testi" (Stamp test) of TÜRKTRUST in the request history, or TÜRKTRUST's production server is selected | Settings → Time stamping (test step) |
+| TÜRKTRUST: production (with TÜRKTRUST, in place of Kamu SM's production step) | TÜRKTRUST's production server (`zd.turktrust.com.tr`, legal grade by D12) is selected and sealing is ready | Settings → Time stamping (production step) |
 | Replica | the replica is on | Settings → Replica |
 | E-mail | sending e-mail is switched on, SMTP server and sender are set | Settings → E-mail |
 | Summary | — | — |
