@@ -105,6 +105,12 @@ class Layout:
         return self.state / "system-history.json"
 
     @property
+    def activity(self) -> Path:
+        """Canlı Durum's rolling snapshot of the last 60 minutes (the worker job
+        ``activity.tick``, W5-M): subject keys and per-minute bytes, never a name."""
+        return self.state / "activity.json"
+
+    @property
     def wan_rates(self) -> Path:
         """The internet line's rates over SNMP (Wave 5 §6 N4, the worker job ``snmp.poll``):
         interface names, counters and bit rates only, no secret."""

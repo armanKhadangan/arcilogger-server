@@ -1,5 +1,5 @@
 /** Mirror of api/src/arcilogger_api/activity/models.py (Wave 5 contract §6.2, M2 and N6). */
-import type { DateTimeString, SubjectRef } from './api-types';
+import type { DateTimeString, Float, SubjectRef } from './api-types';
 
 export type ActivityWindow = 1 | 5 | 15; // minutes; default 5
 export type WanRange = '60m' | '24h';
@@ -9,46 +9,67 @@ export type OperStatus =
   'up' | 'down' | 'testing' | 'unknown' | 'dormant' | 'not_present' | 'lower_layer_down'; // ifOperStatus (RFC 2863), by name
 
 export interface ActivityDomain {
-  domain: string; // as in /usage: registrable domain, FortiGuard service or address
+  /** As in /usage: a registrable domain, a FortiGuard service name or an address. */
+  domain: string;
   kind: 'domain' | 'service' | 'ip';
-  bytes: number; // download + upload in the window
+  /** Download and upload in the window. */
+  bytes: number;
 }
 export interface ActivityApp {
   app: string;
-  bytes: number; // download + upload in the window
+  /** Download and upload in the window. */
+  bytes: number;
 }
 export interface ActivityRow {
   subject: SubjectRef;
   download_bytes: number;
   upload_bytes: number;
-  download_bps: number; // bytes * 8 / window seconds
-  upload_bps: number;
-  sessions: number; // traffic log rows in the window
-  top_domains: ActivityDomain[]; // ≤ 3 by bytes, background excluded
-  top_apps: ActivityApp[]; // ≤ 3 by bytes
-  last_seen: string; // newest traffic row of the subject
+  /** Bytes × 8 / the window's seconds. */
+  download_bps: Float;
+  upload_bps: Float;
+  /** Sessions started in the window, each counted once. */
+  sessions: number;
+  /** At most 3, by bytes; background traffic excluded. */
+  top_domains: ActivityDomain[];
+  /** At most 3, by bytes. */
+  top_apps: ActivityApp[];
+  /** The end of the subject's newest minute with traffic (at most `data_until`). */
+  last_seen: DateTimeString;
 }
 export interface ActivityTotals {
-  download_bytes: number; // every subject, also beyond the 200 rows
+  /** Every subject, also those beyond the 200 rows (and persons left out of the rows). */
+  download_bytes: number;
   upload_bytes: number;
-  download_bps: number;
-  upload_bps: number;
+  download_bps: Float;
+  upload_bps: Float;
   sessions: number;
-  subjects: number; // subjects with traffic in the window
+  /** Subjects with traffic in the window. */
+  subjects: number;
 }
 export interface ActivityMinute {
-  minute: string; // the minute's start
+  /** The minute's start. */
+  minute: DateTimeString;
   download_bytes: number;
   upload_bytes: number;
 }
 export interface ActivityDevices {
-  window: ActivityWindow;
-  rows: ActivityRow[]; // sorted by download, at most 200
+  /** Minutes: 1, 5 or 15 (`ActivityWindow`). */
+  window: number;
+  /** Sorted by download, at most 200. */
+  rows: ActivityRow[];
+  /** More subjects had traffic than `rows` holds. */
   more: boolean;
   totals: ActivityTotals;
-  per_minute: ActivityMinute[]; // the last 60 minutes, oldest first
-  data_until: string | null; // newest traffic row
-  generated_at: string;
+  /** Each of the last 60 minutes, oldest first. */
+  per_minute: ActivityMinute[];
+  /** The newest traffic row (null with none). */
+  data_until: DateTimeString | null;
+  /**
+   * The worker's snapshot does not cover the last 60 minutes yet (after a start, or none
+   * written), or it is more than 2 minutes old (the worker stopped): the figures are partial.
+   */
+  warming_up: boolean;
+  generated_at: DateTimeString;
 }
 
 export interface WanCapacity {

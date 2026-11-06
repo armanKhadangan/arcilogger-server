@@ -40,6 +40,7 @@ for (const file of [
   'system-types.ts',
   'system-health-types.ts',
   'legal-status-types.ts',
+  'activity-types.ts',
   'archive-reload-types.ts',
   'activity-types.ts',
 ]) {
@@ -710,6 +711,15 @@ const RULES: Record<string, Record<string, Rule>> = {
   },
   'system-health': {
     health: 'SystemHealth',
+    errors,
+  },
+  // Canlı Durum (Wave 5 contract §6.2 M2) on the golden usage site at 09:02:30: each window, the
+  // pseudonymous answer and the refusals.
+  activity: {
+    devices_1: 'ActivityDevices',
+    devices_5: 'ActivityDevices',
+    devices_15: 'ActivityDevices',
+    viewer_devices_pseudonymous: 'ActivityDevices',
     errors,
   },
   // The legal-validity banner (Wave 5 contract 2.3.1): the cases of `samples_legal_status.py`.
