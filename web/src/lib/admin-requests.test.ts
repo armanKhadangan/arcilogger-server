@@ -368,6 +368,44 @@ describe("the API's answers", () => {
     );
   });
 
+  it("lists a source's SNMP table field by field too, and a key change as it is (W5 §6 N1)", () => {
+    const table = {
+      name: 'fw-merkez',
+      type: 'fortigate',
+      address: '172.20.10.1',
+      enabled: true,
+    };
+    const snmp = {
+      enabled: true,
+      port: 161,
+      user: 'arcilogger',
+      interfaces: ['wan1'],
+      interval_seconds: 15,
+    };
+    const key = { secret: true as const, old: 'unset', new: 'set', changed: true };
+    expect(
+      changeRows({
+        'sources.fw-merkez': { old: table, new: { ...table, snmp } },
+        'snmp.fw-merkez.auth_key': key,
+      }),
+    ).toEqual([
+      ['sources.fw-merkez.snmp.enabled', { old: null, new: true }],
+      ['sources.fw-merkez.snmp.port', { old: null, new: 161 }],
+      ['sources.fw-merkez.snmp.user', { old: null, new: 'arcilogger' }],
+      ['sources.fw-merkez.snmp.interfaces', { old: null, new: ['wan1'] }],
+      ['sources.fw-merkez.snmp.interval_seconds', { old: null, new: 15 }],
+      ['snmp.fw-merkez.auth_key', key],
+    ]);
+    expect(
+      changeRows({
+        'sources.fw-merkez': {
+          old: { ...table, snmp },
+          new: { ...table, snmp: { ...snmp, interfaces: ['wan1', 'wan2'] } },
+        },
+      }),
+    ).toEqual([['sources.fw-merkez.snmp.interfaces', { old: ['wan1'], new: ['wan1', 'wan2'] }]]);
+  });
+
   it('writes values of a change list as text', () => {
     expect(changeValueText(null)).toBe('—');
     expect(changeValueText(['a', 'b'])).toBe('a, b');

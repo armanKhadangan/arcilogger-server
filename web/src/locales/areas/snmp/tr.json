@@ -44,6 +44,21 @@
         "noLine": "En az bir WAN arayüzü girin.",
         "tooManyLines": "En çok 4 WAN hattı."
       }
+    },
+    "review": {
+      "field": "{{name}} · SNMP: {{field}}",
+      "authKey": "{{name}} · SNMP kimlik doğrulama anahtarı",
+      "privKey": "{{name}} · SNMP şifreleme anahtarı",
+      "fields": {
+        "enabled": "açık",
+        "port": "port",
+        "user": "kullanıcı",
+        "auth": "kimlik doğrulama",
+        "priv": "şifreleme",
+        "interfaces": "WAN arayüzleri",
+        "capacity_mbps": "kapasite (Mbps)",
+        "interval_seconds": "okuma aralığı (sn)"
+      }
     }
   }
 }

@@ -64,8 +64,11 @@ import type {
   SmtpCaBody,
   SmtpCaClear,
   SmtpSection,
+  SnmpIn,
+  SnmpOut,
   SourceCheckBody,
   SourceConfig,
+  SourceIn,
   SourceOut,
   StepState,
   TestEmailBody,
@@ -78,6 +81,7 @@ import type {
   UploadPreview,
   ZamaneBody,
 } from '../src/lib/settings-types';
+import { codePointLength } from '../src/lib/validation';
 import { validateEgresses } from '../src/pages/settings/egress-model';
 
 import type { MockUser, RecordedCall } from './mock-api';
@@ -139,6 +143,16 @@ const HTTP: Record<string, [number, string, string]> = {
     422,
     'Kaynak adı sonradan değiştirilemez (ham log klasörünün adıdır); yeni bir kaynak ekleyin.',
     'A source name cannot be changed (it names the raw log folder); add a new source instead.',
+  ],
+  snmp_secret_missing: [
+    422,
+    "SNMP'yi açmak için SNMPv3 kimlik doğrulama ve şifreleme anahtarlarının ikisi de gerekir (8-64 karakter).",
+    'Switching SNMP on needs both the SNMPv3 authentication and privacy keys (8 to 64 characters).',
+  ],
+  snmp_source_is_network: [
+    422,
+    'SNMP yalnızca tek bir adresi olan kaynakta açılabilir; bir ağ adresine istek gönderilmez.',
+    'SNMP can only be switched on for a source with a single address; no request goes to a network.',
   ],
   source_ipv6_unsupported: [
     422,
@@ -296,6 +310,23 @@ const MESSAGES: Record<string, [string, string]> = {
     'The connection test with the new values failed; nothing changed.',
   ],
   ntp_unreachable: ['Saat sunucusu yanıt vermedi.', 'The time server did not answer.'],
+  // The SNMP probe (Wave 5 §6 N5): N4's reasons.
+  snmp_timeout: [
+    "Cihaz SNMP isteğine yanıt vermedi: adresi, portu, cihazdaki SNMP'yi ve güvenlik duvarını denetleyin.",
+    'The device did not answer the SNMP request: check the address, the port, SNMP on the device and the firewall.',
+  ],
+  snmp_auth_failed: [
+    'SNMPv3 kimlik doğrulaması başarısız: kullanıcıyı, protokolleri ve anahtarları cihazdaki ayarlarla karşılaştırın.',
+    "SNMPv3 authentication failed: compare the user, the protocols and the keys with the device's settings.",
+  ],
+  snmp_no_such_interface: [
+    'Cihaz bu arayüz adını bildirmiyor; cihazın bildirdiği arayüzlerden WAN hattını seçin.',
+    'The device reports no interface of this name; pick the WAN line from the interfaces the device reports.',
+  ],
+  snmp_no_hc_counters: [
+    'Cihaz bu arayüz için 64 bit sayaç (ifHCInOctets) vermiyor.',
+    'The device gives no 64-bit counters (ifHCInOctets) for this interface.',
+  ],
   smtp_test_failed: ['Deneme e-postası gönderilemedi.', 'The trial e-mail could not be sent.'],
   replica_test_failed: [
     'Replika paylaşımına bağlanılamadı.',
@@ -736,7 +767,13 @@ function startConfig(options: AdminOptions): AdminConfig['sections'] {
             source: 'installer',
           },
         ],
-        secrets: { 'kamusm.customer': { ...stored }, 'kamusm.password': { ...stored } },
+        // As W5-T's API reports them (`samples/admin.json`): TÜRKTRUST's two known, not stored.
+        secrets: {
+          'kamusm.customer': { ...stored },
+          'kamusm.password': { ...stored },
+          'turktrust.username': { set: false, changed_at: null, changed_by: null },
+          'turktrust.password': { set: false, changed_at: null, changed_by: null },
+        },
       };
   sections.smtp = {
     ...sections.smtp,
@@ -770,7 +807,8 @@ function diff(prefix: string, before: Record<string, unknown>, after: Record<str
 }
 
 /** The `[[sources]]` table of a source (what a change list holds: the whole table). */
-function sourceTable(source: SourceConfig): SourceConfig {
+/** A source's table as the change rows show it: `snmp` only when it has one (W5-N-6). */
+function sourceTable(source: SourceConfig & { snmp?: SnmpIn | SnmpOut | null }): SourceIn {
   return {
     name: source.name,
     type: source.type,
@@ -779,6 +817,21 @@ function sourceTable(source: SourceConfig): SourceConfig {
     expected: source.expected,
     transport: source.transport,
     enabled: source.enabled,
+    ...(source.snmp ? { snmp: snmpTable(source.snmp) } : {}),
+  };
+}
+
+/** `[sources.snmp]` with the server's defaults for a field left out (§6.3), without the keys. */
+function snmpTable(snmp: SnmpIn | SnmpOut): Required<SnmpIn> {
+  return {
+    enabled: snmp.enabled ?? false,
+    port: snmp.port ?? 161,
+    user: snmp.user ?? '',
+    auth: snmp.auth ?? 'sha256',
+    priv: snmp.priv ?? 'aes128',
+    interfaces: [...(snmp.interfaces ?? [])],
+    capacity_mbps: { ...(snmp.capacity_mbps ?? {}) },
+    interval_seconds: snmp.interval_seconds ?? 15,
   };
 }
 
@@ -792,6 +845,10 @@ export class AdminMock {
   readonly requests = new Map<string, MockRequest>();
   /** The next configuration change ends like this (then back to `active`). */
   nextOutcome: Outcome | null = null;
+  /** The code of the next failed probe (`snmp_no_such_interface`, …; then back to `probe_failed`). */
+  nextProbeFailure: string | null = null;
+  /** Strict outbound mode: a new SNMP address or port is not tried before ApplySystem (W5-N-6). */
+  strictOutbound = false;
   /** The next action ends like this (then back to `succeeded`). */
   nextAction: ActionOutcome | null = null;
   /** Days "Şimdi mühürle" sealed, with the Seal task's outcome. */
@@ -987,7 +1044,7 @@ export class AdminMock {
         applied_config_sha256: sha,
         firewall: {
           managed: true,
-          strict_outbound: false,
+          strict_outbound: this.strictOutbound,
           syslog_addresses: this.sections.sources
             .filter((item) => item.enabled)
             .map((item) => item.address),
@@ -1175,13 +1232,15 @@ export class AdminMock {
     let final: Final = { state: action ? 'succeeded' : 'active', steps: list };
     let apply = true;
     if (outcome === 'probe_failed' && list.includes('probe')) {
-      // The agent stops at the probe: nothing after it runs.
+      // The agent stops at the probe: nothing after it runs. The code is the probe's own.
+      const code = this.nextProbeFailure ?? 'probe_failed';
+      this.nextProbeFailure = null;
       list = list.slice(0, list.indexOf('probe') + 1);
       final = {
         state: 'probe_failed',
-        error: 'probe_failed',
+        error: code,
         steps: list,
-        ends: { probe: { state: 'failed', code: 'probe_failed' } },
+        ends: { probe: { state: 'failed', code } },
       };
       apply = false;
     } else if (outcome === 'conflict') {
@@ -2030,14 +2089,16 @@ export class AdminMock {
     if (Array.isArray(account)) return account;
     const refusal = this.stale('sources', body.etag, mode === 'check');
     if (refusal) return refusal;
-    // A field left out takes the `SourceConfig` default.
+    // A field left out takes the `SourceConfig` default; no `snmp`: the source has no SNMP.
+    const { snmp: snmpBody, ...fields } = body.source;
     const source: SourceConfig = {
       heartbeat_minutes: 15,
       expected: true,
       transport: 'any',
       enabled: true,
-      ...body.source,
+      ...fields,
     };
+    const snmp = snmpBody ? snmpTable(snmpBody) : null;
     if (operation === 'update') {
       if (!existing) return this.refused([problem('sources', 'source_not_found')]);
       if (source.name !== existing.name)
@@ -2047,25 +2108,73 @@ export class AdminMock {
     }
     const editing = operation === 'add' ? null : (existing?.name ?? null);
     const problems = this.sourceProblems(source, editing);
+    // The SNMP part (W5-N-6): the keys (8 to 64 characters) are write-only; an enabled table
+    // needs a single address and both keys, stored or given here.
+    const keys = { auth_key: body.snmp_auth_key ?? null, priv_key: body.snmp_priv_key ?? null };
+    const stored = {
+      auth_key: existing?.snmp?.auth_key === 'set',
+      priv_key: existing?.snmp?.priv_key === 'set',
+    };
+    for (const [key, value] of Object.entries(keys))
+      if (value !== null && (codePointLength(value) < 8 || codePointLength(value) > 64))
+        problems.push(problem(`snmp.${source.name}.${key}`, 'secret_invalid'));
+    if (snmp?.enabled) {
+      if ((networkOf(source.address)?.prefix ?? 32) < 32)
+        problems.push(problem(`sources.${source.name}.snmp`, 'snmp_source_is_network'));
+      else if (
+        (keys.auth_key === null && !stored.auth_key) ||
+        (keys.priv_key === null && !stored.priv_key)
+      )
+        problems.push(problem(`sources.${source.name}.snmp`, 'snmp_secret_missing'));
+    }
     if (problems.length > 0) return this.refused(problems);
     const before = editing === null || !existing ? null : sourceTable(existing);
-    const after = sourceTable(source);
+    const after = sourceTable({ ...source, snmp });
     const changes: Record<string, Change> =
       JSON.stringify(before) === JSON.stringify(after)
         ? {}
         : { [`sources.${source.name}`]: { old: before, new: after } };
+    for (const [key, value] of Object.entries(keys))
+      if (value !== null)
+        changes[`snmp.${source.name}.${key}`] = {
+          secret: true,
+          old: stored[key as keyof typeof stored] ? 'set' : 'unset',
+          new: 'set',
+          changed: true,
+        };
     const disabling = existing !== null && existing.enabled && !source.enabled;
+    // N5 (`rules._snmp_keys`): a changed source whose SNMP is on, or new keys for it, is tried
+    // before anything is written; in strict outbound mode a new device address or port only
+    // after ApplySystem.
+    const tried =
+      snmp?.enabled === true &&
+      (`sources.${source.name}` in changes || keys.auth_key !== null || keys.priv_key !== null);
+    const reached =
+      existing?.snmp?.enabled === true &&
+      existing.address === source.address &&
+      existing.snmp.port === snmp?.port;
+    const skipped = tried && this.strictOutbound && !reached;
     return this.change(call, host, mode === 'check', account, {
       section: 'sources',
       changes,
-      warnings: disabling && existing.expected ? ['source_disable_gaps'] : [],
+      warnings: [
+        ...(disabling && existing.expected ? ['source_disable_gaps'] : []),
+        ...(skipped ? ['probe_skipped'] : []),
+      ],
       effects: ['reload.api', 'reload.collector', 'reload.ingest', 'system.firewall'],
       reauth: disabling,
-      probe: false,
+      probe: tried && !skipped,
+      secrets: keys.auth_key !== null || keys.priv_key !== null,
       next: () => {
         const row: SourceOut = {
           ...source,
-          snmp: existing?.snmp ?? null, // the SNMP part is edited by W5-P's form
+          snmp: snmp
+            ? {
+                ...snmp,
+                auth_key: keys.auth_key !== null || stored.auth_key ? 'set' : 'unset',
+                priv_key: keys.priv_key !== null || stored.priv_key ? 'set' : 'unset',
+              }
+            : null,
           firewall: source.enabled ? 'open' : 'closed',
           last_seen: existing?.last_seen ?? null,
         };

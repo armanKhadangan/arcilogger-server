@@ -44,6 +44,21 @@
         "noLine": "Enter at least one WAN interface.",
         "tooManyLines": "At most 4 WAN lines."
       }
+    },
+    "review": {
+      "field": "{{name}} · SNMP: {{field}}",
+      "authKey": "{{name}} · SNMP authentication key",
+      "privKey": "{{name}} · SNMP privacy key",
+      "fields": {
+        "enabled": "on",
+        "port": "port",
+        "user": "user",
+        "auth": "authentication",
+        "priv": "privacy",
+        "interfaces": "WAN interfaces",
+        "capacity_mbps": "capacity (Mbps)",
+        "interval_seconds": "polling interval (s)"
+      }
     }
   }
 }

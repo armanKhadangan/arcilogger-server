@@ -12,6 +12,16 @@ const SOURCE_FIELDS: Record<string, string> = {
 
 /** The label of a configuration path (`clock.ntp_server`), else the path itself. */
 export function pathLabel(path: string, t: TFunction): string {
+  // A source's SNMP table and its two keys (Wave 5 §6 N1).
+  const snmp = /^sources\.([^.]+)\.snmp\.([a-z_]+)$/.exec(path);
+  if (snmp)
+    return t('snmp.review.field', {
+      name: snmp[1],
+      field: t(`snmp.review.fields.${snmp[2] ?? ''}`, { defaultValue: snmp[2] }),
+    });
+  const key = /^snmp\.([^.]+)\.(auth_key|priv_key)$/.exec(path);
+  if (key)
+    return t(`snmp.review.${key[2] === 'auth_key' ? 'authKey' : 'privKey'}`, { name: key[1] });
   if (path.startsWith('sources.')) {
     const rest = path.slice('sources.'.length);
     const dot = rest.lastIndexOf('.');
