@@ -38,12 +38,23 @@ export interface NavItem {
    * asking the API (licensing contract 8.4); the API refuses the module's routes anyway.
    */
   module?: ModuleKey;
+  /** The menu group the entry is listed under (`NAV_GROUPS`; the order of the menu is kept). */
+  group: NavGroup;
 }
+
+/**
+ * The menu's groups, in order: each is a labelled list in the sidebar ("nav.groups.*") and a
+ * heading in the "Sayfaya git" palette. The groups follow the menu's order (spec 12.2), so a
+ * group never changes where an entry sits.
+ */
+export const NAV_GROUPS = ['overview', 'investigation', 'evidence', 'oversight', 'admin'] as const;
+export type NavGroup = (typeof NAV_GROUPS)[number];
 
 /** Main menu, in the order of the build specification (section 12.2). */
 export const NAV_ITEMS: readonly NavItem[] = [
   {
     key: 'dashboard',
+    group: 'overview',
     path: '/',
     icon: LayoutDashboard,
     // hr: "Panel ✔ (usage only)"
@@ -51,23 +62,38 @@ export const NAV_ITEMS: readonly NavItem[] = [
   },
   {
     key: 'sources',
+    group: 'overview',
     path: '/sources',
     icon: Server,
     permissions: ['sources.read'],
   },
-  { key: 'live', path: '/live', icon: Activity, permissions: ['search.read'] },
+  { key: 'live', path: '/live', icon: Activity, permissions: ['search.read'], group: 'overview' },
   {
     // Canlı Durum (W5 §6 M1): the lines need `dashboard.view` or `system.read` and are in the
     // base product; "Şu an" needs a usage permission and the module, checked on the page.
     key: 'activity',
+    group: 'overview',
     path: '/activity',
     icon: Gauge,
     permissions: ['dashboard.view', 'system.read', 'usage.person', 'usage.anonymous'],
   },
-  { key: 'search', path: '/search', icon: Search, permissions: ['search.read'] },
-  { key: 'lookup', path: '/lookup', icon: Scale, permissions: ['lookup.run'] },
+  {
+    key: 'search',
+    path: '/search',
+    icon: Search,
+    permissions: ['search.read'],
+    group: 'investigation',
+  },
+  {
+    key: 'lookup',
+    path: '/lookup',
+    icon: Scale,
+    permissions: ['lookup.run'],
+    group: 'investigation',
+  },
   {
     key: 'usage',
+    group: 'investigation',
     path: '/usage',
     icon: Clock3,
     permissions: ['usage.person', 'usage.anonymous'],
@@ -75,25 +101,29 @@ export const NAV_ITEMS: readonly NavItem[] = [
   },
   {
     key: 'security',
+    group: 'investigation',
     path: '/security',
     icon: ShieldAlert,
     permissions: ['alerts.read'],
   },
-  { key: 'sealing', path: '/sealing', icon: Stamp, permissions: ['seal.read'] },
+  { key: 'sealing', path: '/sealing', icon: Stamp, permissions: ['seal.read'], group: 'evidence' },
   {
     key: 'evidence',
+    group: 'evidence',
     path: '/evidence',
     icon: Package,
     permissions: ['evidence.read'],
   },
   {
     key: 'devices',
+    group: 'evidence',
     path: '/devices',
     icon: MonitorSmartphone,
     permissions: ['devices.read'],
   },
   {
     key: 'reports',
+    group: 'oversight',
     path: '/reports',
     icon: FileText,
     permissions: ['reports.manage'],
@@ -101,19 +131,28 @@ export const NAV_ITEMS: readonly NavItem[] = [
   },
   {
     key: 'compliance',
+    group: 'oversight',
     path: '/compliance',
     icon: ClipboardCheck,
     permissions: ['compliance.read'],
   },
-  { key: 'audit', path: '/audit', icon: ScrollText, permissions: ['audit.read'] },
+  {
+    key: 'audit',
+    path: '/audit',
+    icon: ScrollText,
+    permissions: ['audit.read'],
+    group: 'oversight',
+  },
   {
     key: 'settings',
+    group: 'admin',
     path: '/settings',
     icon: Settings,
     permissions: ['settings.manage', 'users.manage'],
   },
   {
     key: 'system',
+    group: 'admin',
     path: '/system',
     icon: HeartPulse,
     permissions: ['system.read'],
@@ -151,6 +190,7 @@ export const BUILT_PAGES: ReadonlySet<string> = new Set([
 export const UI_KIT_ITEM: NavItem | null = __UI_KIT__
   ? {
       key: 'uiKit',
+      group: 'admin',
       path: '/ui-kit',
       icon: Palette,
       permissions: ['settings.manage'],

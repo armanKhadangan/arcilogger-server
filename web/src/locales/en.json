@@ -25,7 +25,14 @@
     "collapse": "Collapse menu",
     "expand": "Expand menu",
     "skipToContent": "Skip to content",
-    "version": "Version"
+    "version": "Version",
+    "groups": {
+      "overview": "Overview",
+      "investigation": "Investigation",
+      "evidence": "Evidence",
+      "oversight": "Reports and audit",
+      "admin": "Administration"
+    }
   },
   "topbar": {
     "searchPlaceholder": "Search IP, MAC, person, domain…",
@@ -42,7 +49,20 @@
     "language": "Language",
     "logout": "Sign out",
     "sessionNote": "The session closes after {{minutes}} min of inactivity.",
-    "userMenuFor": "User menu: {{name}}"
+    "userMenuFor": "User menu: {{name}}",
+    "alertsOpen_one": "Security alerts: {{count}} open alert",
+    "alertsOpen_other": "Security alerts: {{count}} open alerts",
+    "alertsNone": "Security alerts: no open alert",
+    "searchShortcut": "Shortcut: /"
+  },
+  "palette": {
+    "title": "Go to",
+    "open": "Go to page",
+    "description": "Type to filter, choose with the arrow keys, open with Enter.",
+    "placeholder": "Type a page or setting…",
+    "empty": "No matching page.",
+    "searchLogs": "Search the logs for “{{query}}”",
+    "keys": "↑ ↓ to choose · Enter to open · Esc to close"
   },
   "notFound": {
     "title": "Page not found",

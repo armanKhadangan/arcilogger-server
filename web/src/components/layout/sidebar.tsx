@@ -8,7 +8,7 @@ import { useLicense } from '@/lib/api-hooks';
 import { useAuth } from '@/lib/auth';
 import { moduleEnabled } from '@/lib/license';
 import { cn } from '@/lib/utils';
-import { UI_KIT_ITEM, visibleNavItems, type NavItem } from '@/nav';
+import { NAV_GROUPS, UI_KIT_ITEM, visibleNavItems, type NavItem } from '@/nav';
 
 interface SidebarProps {
   collapsed: boolean;
@@ -45,7 +45,7 @@ function SidebarLink({
       aria-label={collapsed ? (locked ? `${label} (${lockText})` : label) : undefined}
       data-locked={locked ? 'true' : undefined}
       className={cn(
-        'relative flex h-9 items-center gap-3 rounded-md px-3 text-sm text-sidebar-text transition-colors hover:bg-sidebar-hover hover:text-white',
+        'relative flex h-8 items-center gap-3 rounded-md px-3 text-sm text-sidebar-text transition-colors hover:bg-sidebar-hover hover:text-white',
         collapsed && 'justify-center px-0',
         isActive && 'bg-sidebar-active font-medium text-white hover:bg-sidebar-active',
       )}
@@ -117,16 +117,44 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
         <Logo collapsed={collapsed} caption={me.site_name.trim()} />
       </div>
       <nav aria-label={t('nav.label')} className="flex-1 overflow-y-auto px-2 py-2">
-        <ul className="flex flex-col gap-0.5">
-          {items.map((item) => (
-            <SidebarLink
-              key={item.key}
-              item={item}
-              collapsed={collapsed}
-              locked={item.module !== undefined && !moduleEnabled(license.data, item.module)}
-            />
-          ))}
-        </ul>
+        {NAV_GROUPS.map((group, index) => {
+          const entries = items.filter((item) => item.group === group);
+          if (entries.length === 0) return null;
+          const headingId = `nav-group-${group}`;
+          return (
+            <div key={group} className={cn(index > 0 && (collapsed ? 'mt-2' : 'mt-3'))}>
+              {collapsed ? (
+                // The rail has no room for words: a thin line between the groups, and the list
+                // keeps its name for screen readers.
+                index > 0 ? (
+                  <div aria-hidden="true" className="mx-3 mb-2 h-px bg-sidebar-hover" />
+                ) : null
+              ) : (
+                <p
+                  id={headingId}
+                  className="mb-1 px-3 text-[11px] font-semibold tracking-wider text-sidebar-muted uppercase"
+                >
+                  {t(`nav.groups.${group}`)}
+                </p>
+              )}
+              <ul
+                className="flex flex-col gap-0.5"
+                {...(collapsed
+                  ? { 'aria-label': t(`nav.groups.${group}`) }
+                  : { 'aria-labelledby': headingId })}
+              >
+                {entries.map((item) => (
+                  <SidebarLink
+                    key={item.key}
+                    item={item}
+                    collapsed={collapsed}
+                    locked={item.module !== undefined && !moduleEnabled(license.data, item.module)}
+                  />
+                ))}
+              </ul>
+            </div>
+          );
+        })}
         {UI_KIT_ITEM && canAny(UI_KIT_ITEM.permissions) ? (
           <>
             <div className="my-3 h-px bg-sidebar-hover" />

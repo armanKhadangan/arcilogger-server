@@ -25,7 +25,14 @@
     "collapse": "Menüyü daralt",
     "expand": "Menüyü genişlet",
     "skipToContent": "İçeriğe atla",
-    "version": "Sürüm"
+    "version": "Sürüm",
+    "groups": {
+      "overview": "Genel bakış",
+      "investigation": "İnceleme",
+      "evidence": "Kanıt",
+      "oversight": "Rapor ve denetim",
+      "admin": "Yönetim"
+    }
   },
   "topbar": {
     "searchPlaceholder": "IP, MAC, kişi, alan adı ara…",
@@ -42,7 +49,20 @@
     "language": "Dil",
     "logout": "Çıkış yap",
     "sessionNote": "Oturum {{minutes}} dk hareketsizlikte kapanır.",
-    "userMenuFor": "Kullanıcı menüsü: {{name}}"
+    "userMenuFor": "Kullanıcı menüsü: {{name}}",
+    "alertsOpen_one": "Güvenlik uyarıları: {{count}} açık uyarı",
+    "alertsOpen_other": "Güvenlik uyarıları: {{count}} açık uyarı",
+    "alertsNone": "Güvenlik uyarıları: açık uyarı yok",
+    "searchShortcut": "Kısayol: /"
+  },
+  "palette": {
+    "title": "Sayfaya git",
+    "open": "Sayfaya git",
+    "description": "Yazarak süzün, ok tuşlarıyla seçin, Enter ile açın.",
+    "placeholder": "Sayfa ya da ayar adı yazın…",
+    "empty": "Eşleşen sayfa yok.",
+    "searchLogs": "Kayıtlarda ara: “{{query}}”",
+    "keys": "↑ ↓ seçmek · Enter açmak · Esc kapatmak için"
   },
   "notFound": {
     "title": "Sayfa bulunamadı",
