@@ -371,7 +371,8 @@ describe('Ayarlar → Zaman damgası: the server choice and TÜRKTRUST (Wave 5 c
     expect(serverChoices(withTurktrust())).toEqual(SERVER_CHOICES);
     expect(serverChoices(turktrustSite())).toEqual(SERVER_CHOICES);
     // Only one of the two reported: the gate stays closed.
-    const { 'turktrust.password': _password, ...oneOnly } = withTurktrust().secrets;
+    const oneOnly = { ...withTurktrust().secrets };
+    delete oneOnly['turktrust.password'];
     expect(turktrustSupported(tsa({ secrets: oneOnly }))).toBe(false);
   });
 
