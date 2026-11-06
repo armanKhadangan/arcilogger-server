@@ -14,12 +14,14 @@ from typing import Any
 
 import pytest
 
-from arcilogger_core.admin import rules
+from arcilogger_core.admin import messages, rules
 from arcilogger_core.admin.contract import FALLBACK_POLICY
-from arcilogger_core.admin.rules import RuleContext, SectionCheck, validate_section
+from arcilogger_core.admin.probe import ChildProber, ProbeResult, probe_snmp
+from arcilogger_core.admin.rules import Probe, RuleContext, SectionCheck, validate_section
 from arcilogger_core.admin.tomledit import SetSources, edit
 from arcilogger_core.config import Config, SnmpConfig, parse_config
 from arcilogger_core.execpolicy import TrustAnchors
+from arcilogger_core.snmp import IF_HC_IN_OCTETS, IF_HIGH_SPEED, IF_OPER_STATUS, SnmpError, Target
 from arcilogger_core.timeutil import SITE_TZ
 
 POLICY = FALLBACK_POLICY.model_copy(update={"enabled": True})
@@ -183,3 +185,89 @@ def test_the_sources_etag_follows_the_keys(root: Path, config: Config) -> None:
     assert before != after
     assert rules.section_secrets("sources", snmp_config) == rules.snmp_keys("fw-01")
     assert rules.section_secrets("sources", config) == ()
+
+
+# -- the probe (N5) --------------------------------------------------------------------------------
+
+
+class _Agent:
+    """A device at the library boundary: ifName → (ifIndex, oper, speed, 64-bit counters)."""
+
+    def __init__(self, interfaces: dict[str, tuple[int, int, int, bool]], error: Any = None):
+        self.interfaces = interfaces
+        self.error = error
+
+    async def walk(self, target: Target, oid: str) -> dict[str, str]:
+        if self.error:
+            raise SnmpError(self.error, "WrongDigest")
+        return {f"{oid}.{index}": name for name, (index, *_rest) in self.interfaces.items()}
+
+    async def get(self, target: Target, oids: Any) -> dict[str, Any]:
+        by_index = {index: (oper, speed, hc) for index, oper, speed, hc in self.interfaces.values()}
+        values: dict[str, Any] = {}
+        for oid in oids:
+            column, index = oid.rsplit(".", 1)
+            oper, speed, hc = by_index.get(int(index), (None, None, False))
+            values[oid] = {
+                IF_OPER_STATUS: oper,
+                IF_HIGH_SPEED: speed,
+                IF_HC_IN_OCTETS: 123 if hc else None,
+            }.get(column)
+        return values
+
+
+PARAMS = {
+    "host": "172.20.10.22",
+    "port": 161,
+    "user": "arcilogger",
+    "auth": "sha256",
+    "priv": "aes128",
+    "interfaces": ["wan1"],
+}
+SECRETS = {"auth_key": "authkeyauthkey", "priv_key": "privkeyprivkey"}
+
+
+def test_the_probe_lists_the_interfaces() -> None:
+    agent = _Agent({"wan1": (3, 1, 1000, True), "lan": (4, 2, 100, False)})
+    result = probe_snmp(PARAMS, SECRETS, client=agent)
+    assert result == ProbeResult(True, None, "wan1: up, 1000 Mbit/s; lan: down, 100 Mbit/s")
+
+
+@pytest.mark.parametrize(
+    ("agent", "code"),
+    [
+        (_Agent({"lan": (4, 1, 100, True)}), "snmp_no_such_interface"),
+        (_Agent({"wan1": (3, 1, 1000, False)}), "snmp_no_hc_counters"),
+        (_Agent({}, error="auth_failed"), "snmp_auth_failed"),
+        (_Agent({}, error="timeout"), "snmp_timeout"),
+    ],
+)
+def test_the_probe_names_n4s_reason(agent: _Agent, code: str) -> None:
+    result = probe_snmp(PARAMS, SECRETS, client=agent)
+    assert (result.ok, result.code) == (False, code)
+    assert code in messages.MESSAGES  # each reason has TR/EN text (N5)
+    assert "authkeyauthkey" not in result.message
+
+
+def test_the_child_passes_the_reason_through(tmp_path: Path) -> None:
+    """The probe runs in ``python -I -m arcilogger_core.admin.probe``: a port without an agent is
+    ``snmp_timeout``, and the keys never come back."""
+    import socket
+
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as probe:
+        probe.bind(("127.0.0.1", 0))
+        port = probe.getsockname()[1]
+    params = {**PARAMS, "host": "127.0.0.1", "port": port}
+    result = ChildProber().run("snmp", params, SECRETS)
+    assert (result.ok, result.code) == (False, "snmp_timeout")
+    assert "authkeyauthkey" not in result.message
+
+
+def test_switching_snmp_on_probes_the_source(root: Path, config: Config) -> None:
+    check = validate_section("sources", config, update(SNMP, **KEYS), context(root))
+    assert check.probes == (Probe("snmp", "fw-01"),)
+    stored = frozenset(rules.snmp_keys("fw-01"))
+    off = validate_section(
+        "sources", config, update({**SNMP, "enabled": False}), context(root, stored)
+    )
+    assert off.probes == ()

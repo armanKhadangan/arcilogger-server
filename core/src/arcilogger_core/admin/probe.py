@@ -7,7 +7,13 @@ written, the agent tests it with exactly the values it would write:
 * ``credit`` — the Zamane client's credit query ``-k`` (90 s; it costs no credit);
 * ``smtp`` — the trial e-mail (``arcilogger_core.smtp``) to the recipient the user chose;
 * ``replica`` — the share connected with the candidate user (``smbshare.connected``) and the
-  write, read and remove test of ``replica.probe`` (60 s).
+  write, read and remove test of ``replica.probe`` (60 s);
+* ``snmp`` — a walk of ``ifName`` with a source's candidate SNMPv3 settings and keys, then the
+  operational status, speed and 64-bit counters of the configured WAN interfaces
+  (:mod:`arcilogger_core.snmp`, 15 s; Wave 5 §6 N5). Its message lists the interfaces the device
+  reports (name, ``ifOperStatus``, ``ifHighSpeed``), so the administrator can pick the WAN lines;
+  a failure names its N4 reason (``snmp_timeout``, ``snmp_auth_failed``,
+  ``snmp_no_such_interface``, ``snmp_no_hc_counters``).
 
 Each runs in a child process (``python -I -m arcilogger_core.admin.probe``,
 :class:`ChildProber`): a hanging client or share is killed at its timeout and leaves nothing in
@@ -36,20 +42,35 @@ from arcilogger_core.config import SmtpConfig
 from arcilogger_core.replica import probe as replica_probe
 from arcilogger_core.smbshare import ShareApi, connected
 from arcilogger_core.smtp import SmtpSender, SmtpSendError, trial_message
+from arcilogger_core.snmp import PysnmpClient, SnmpClient, SnmpError, Target, list_interfaces
 from arcilogger_core.timeutil import utc_now
 from arcilogger_core.tsa.base import TsaError
 from arcilogger_core.tsa.zamane import ZamaneCliProvider
 
-ProbeKind = Literal["sntp", "credit", "smtp", "replica"]
+ProbeKind = Literal["sntp", "credit", "smtp", "replica", "snmp"]
 #: The failure code of each probe (contract 2.12).
 FAILURE_CODES: Final[Mapping[str, str]] = {
     "sntp": "ntp_unreachable",
     "credit": "credit_query_failed",
     "smtp": "smtp_test_failed",
     "replica": "replica_test_failed",
+    "snmp": "snmp_timeout",
+}
+#: The SNMP probe's failure codes: N4's reasons (Wave 5 §6 N5), each with TR/EN text.
+SNMP_CODES: Final[Mapping[str, str]] = {
+    "timeout": "snmp_timeout",
+    "auth_failed": "snmp_auth_failed",
+    "no_such_interface": "snmp_no_such_interface",
+    "snmp_no_hc_counters": "snmp_no_hc_counters",
 }
 #: Seconds each probe may take (the child is killed a little later).
-TIMEOUTS: Final[Mapping[str, float]] = {"sntp": 5, "credit": 90, "smtp": 60, "replica": 60}
+TIMEOUTS: Final[Mapping[str, float]] = {
+    "sntp": 5,
+    "credit": 90,
+    "smtp": 60,
+    "replica": 60,
+    "snmp": 15,
+}
 CHILD_MARGIN: Final = 10.0
 #: Bytes read from the child, characters kept of a message.
 MAX_OUTPUT: Final = 64 * 1024
@@ -160,6 +181,42 @@ def probe_replica(
     return ProbeResult(True, None, message)
 
 
+def probe_snmp(
+    params: Mapping[str, Any], secrets: Mapping[str, str], *, client: SnmpClient | None = None
+) -> ProbeResult:
+    """The candidate ``[sources.snmp]`` of one source against its device (N5)."""
+    import asyncio
+
+    target = Target(
+        host=str(params["host"]),
+        port=int(params["port"]),
+        user=str(params["user"]),
+        auth=params["auth"],
+        priv=params["priv"],
+        auth_key=secrets.get("auth_key", ""),
+        priv_key=secrets.get("priv_key", ""),
+    )
+    wanted = [str(name) for name in params.get("interfaces", ())]
+    try:
+        interfaces = asyncio.run(list_interfaces(client or PysnmpClient(), target, wanted))
+    except SnmpError as exc:
+        return ProbeResult(False, SNMP_CODES.get(exc.status, "snmp_timeout"), exc.detail)
+    found = "; ".join(
+        f"{item.name}: {item.oper_status or '?'}, "
+        f"{'?' if item.speed_mbps is None else item.speed_mbps} Mbit/s"
+        for item in interfaces
+    )
+    names = {item.name: item for item in interfaces}
+    missing = [name for name in wanted if name not in names]
+    if missing:
+        return ProbeResult(
+            False, "snmp_no_such_interface", f"not found: {', '.join(missing)}. found: {found}"
+        )
+    if any(not names[name].counters for name in wanted):
+        return ProbeResult(False, "snmp_no_hc_counters", found)
+    return ProbeResult(True, None, found)
+
+
 def run_probe(kind: str, params: Mapping[str, Any], secrets: Mapping[str, str]) -> ProbeResult:
     """One probe in this process (the child's work)."""
     if kind == "sntp":
@@ -170,6 +227,8 @@ def run_probe(kind: str, params: Mapping[str, Any], secrets: Mapping[str, str]) 
         return probe_smtp(params, secrets)
     if kind == "replica":
         return probe_replica(params, secrets)
+    if kind == "snmp":
+        return probe_snmp(params, secrets)
     raise ValueError(f"unknown probe {kind!r}")
 
 
@@ -219,6 +278,9 @@ class ChildProber:
         message = redact(str(answer.get("message", "")), secrets)
         if answer["ok"]:
             return ProbeResult(True, None, message)
+        code = answer.get("code")
+        if kind == "snmp" and code in SNMP_CODES.values():
+            return ProbeResult(False, str(code), message)  # N4's reason, not one generic code
         return ProbeResult(False, FAILURE_CODES[kind], message)
 
 

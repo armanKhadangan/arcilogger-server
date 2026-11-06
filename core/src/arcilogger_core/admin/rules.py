@@ -314,13 +314,13 @@ class Problem:
         return HTTP_STATUS.get(self.code, 422)
 
 
-Probes = Literal["sntp", "credit", "smtp", "replica"]
+Probes = Literal["sntp", "credit", "smtp", "replica", "snmp"]
 
 
 @dataclass(frozen=True)
 class Probe:
     """A connection test with the candidate values (``probe.py``): the SNTP server to ask, or
-    the credit query, the trial e-mail, the replica share."""
+    the credit query, the trial e-mail, the replica share, a source's SNMP (its name)."""
 
     kind: Probes
     target: str | None = None
@@ -939,6 +939,12 @@ class _Run:
                 continue
             if any(key not in self.secrets_after for key in snmp_keys(name)):
                 self.error("snmp_secret_missing", f"sources.{name}.snmp")
+            else:
+                self.probe("snmp", name)  # N5: the device answers with these settings and keys
+        for key in self.secret_changes:
+            keyed = after.get(key.split(".")[1]) if is_snmp_key(key) else None
+            if keyed is not None and keyed.snmp is not None and keyed.snmp.enabled:
+                self.probe("snmp", keyed.name)  # new keys for an SNMP that stays on
 
     # -- result ----------------------------------------------------------------------------------
 

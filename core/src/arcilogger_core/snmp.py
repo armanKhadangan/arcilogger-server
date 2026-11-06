@@ -201,3 +201,54 @@ def _value(value: Any) -> Value:
     if isinstance(value, univ.OctetString):
         return bytes(value.asOctets()).decode("utf-8", "replace")
     return int(value)
+
+
+@dataclass(frozen=True)
+class Interface:
+    """One interface as the device reports it (the probe's list, N5)."""
+
+    name: str
+    index: int
+    oper_status: str | None
+    speed_mbps: int | None
+    #: Whether ``ifHCInOctets`` answers (asked only for the interfaces looked for).
+    counters: bool
+
+
+#: Interfaces listed by the probe at most, and objects asked in one GET.
+MAX_LISTED: Final = 64
+GET_BATCH: Final = 24
+
+
+async def list_interfaces(
+    client: SnmpClient, target: Target, wanted: Sequence[str] = ()
+) -> list[Interface]:
+    """``ifName`` walked, then each interface's ``ifOperStatus`` and ``ifHighSpeed``, and for the
+    ``wanted`` names whether ``ifHCInOctets`` answers (the first index of a repeated name)."""
+    indexes: dict[str, int] = {}
+    for oid, name in (await client.walk(target, IF_NAME)).items():
+        last = oid.rsplit(".", 1)[-1]
+        if last.isdigit():
+            indexes.setdefault(name, int(last))
+    listed = sorted(indexes.items(), key=lambda item: item[1])[:MAX_LISTED]
+    oids = [
+        f"{column}.{index}" for _, index in listed for column in (IF_OPER_STATUS, IF_HIGH_SPEED)
+    ]
+    oids += [f"{IF_HC_IN_OCTETS}.{indexes[name]}" for name in wanted if name in indexes]
+    values: dict[str, Value] = {}
+    for start in range(0, len(oids), GET_BATCH):
+        values.update(await client.get(target, oids[start : start + GET_BATCH]))
+    found = []
+    for name, index in listed:
+        oper = values.get(f"{IF_OPER_STATUS}.{index}")
+        speed = values.get(f"{IF_HIGH_SPEED}.{index}")
+        found.append(
+            Interface(
+                name=name,
+                index=index,
+                oper_status=OPER_STATUS.get(oper) if isinstance(oper, int) else None,
+                speed_mbps=speed if isinstance(speed, int) else None,
+                counters=isinstance(values.get(f"{IF_HC_IN_OCTETS}.{index}"), int),
+            )
+        )
+    return found
