@@ -6,17 +6,18 @@ and its file holds no name and no URL."""
 from __future__ import annotations
 
 import json
+import threading
 from collections import defaultdict
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import Engine, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from arcilogger_core.layout import Layout
-from arcilogger_db.models import Person
-from arcilogger_worker.activity import Snapshot
+from arcilogger_db.models import JobRun, Person
+from arcilogger_worker.activity import Runner, Snapshot
 from arcilogger_worker.testing import Evidence, tr
 from arcilogger_worker.usage.engine import compute_day
 from arcilogger_worker.usage.testing import DAY, NEXT, PC1, build_golden_site
@@ -248,3 +249,85 @@ def test_the_warm_up_reads_in_slices_and_then_the_new_rows(
     assert data["warming_up"] is False
     assert counts(data, f"ip:{LONE}", tr(DAY, 11, 9)) == (1000, 100, 1)
     assert counts(data, f"ip:{LONE}", tr(DAY, 11, 29)) == (2000, 200, 1)
+
+
+class Clock:
+    def __init__(self, now: datetime) -> None:
+        self.now = now
+
+    def __call__(self) -> datetime:
+        return self.now
+
+
+def runs(session: Session) -> list[JobRun]:
+    session.expire_all()
+    return list(session.scalars(select(JobRun).where(JobRun.job == "activity.tick")))
+
+
+def test_the_thread_records_its_ticks_once_a_minute(
+    db_engine: Engine, db_session: Session, layout: Layout
+) -> None:
+    """The owner's decision on #201 (07:08Z): a ``job_runs`` row at most once a minute, with
+    the ticks and the sessions waiting; a failed tick is logged and recorded, and the thread
+    waits longer before the next one."""
+    clock = Clock(tr(DAY, 12))
+    runner = Runner(db_engine, layout.activity, gate=lambda now: None, clock=clock)
+    for second in range(0, 60, 10):
+        clock.now = tr(DAY, 12, 0, second)
+        assert runner.once() == "ok"
+    assert runs(db_session) == []
+    clock.now = tr(DAY, 12, 1)
+    runner.once()
+    (row,) = runs(db_session)
+    assert (row.status, row.details["ticks"], row.details["failed"]) == ("ok", 7, 0)
+    assert {"seconds", "ended_waiting", "stale_sessions", "warming_up"} <= set(row.details)
+    assert runner.status()["thread"] is True
+
+    def broken(*args: object, **kwargs: object) -> dict[str, Any]:
+        raise RuntimeError("the database went away")
+
+    runner.snapshot.tick = broken  # type: ignore[method-assign]
+    clock.now = tr(DAY, 12, 1, 10)
+    assert runner.once() == "failed"
+    clock.now = tr(DAY, 12, 2, 20)
+    runner.once()
+    assert (runner.failures, runs(db_session)[-1].status) == (2, "failed")
+    assert runs(db_session)[-1].details["error"] == "RuntimeError"
+    assert runner.last_error == "RuntimeError: the database went away"
+
+
+def test_the_thread_idles_while_the_module_is_off(
+    db_engine: Engine, db_session: Session, layout: Layout
+) -> None:
+    """As a job of a locked module: no tick, one ``skipped`` row per site day."""
+    clock = Clock(tr(DAY, 12))
+    skipped = {"_skipped": True, "license": {"module": "usage_analytics", "status": "expired"}}
+    runner = Runner(db_engine, layout.activity, gate=lambda now: skipped, clock=clock)
+    for minute in range(3):
+        clock.now = tr(DAY, 12, minute)
+        assert runner.once() == "skipped"
+    (row,) = runs(db_session)
+    assert (row.status, row.details) == (
+        "skipped",
+        {"license": {"module": "usage_analytics", "status": "expired"}},
+    )
+    assert not layout.activity.exists()
+    clock.now = tr(NEXT, 12)
+    runner.once()
+    assert len(runs(db_session)) == 2
+
+
+def test_the_thread_stops_with_the_service(db_engine: Engine, layout: Layout) -> None:
+    stop = threading.Event()
+    runner = Runner(db_engine, layout.activity, gate=lambda now: None, every=timedelta(seconds=1))
+    thread = threading.Thread(target=runner.run, args=(stop,))
+    thread.start()
+    for _ in range(200):
+        if runner.runs:
+            break
+        threading.Event().wait(0.02)
+    stop.set()
+    thread.join(timeout=10)
+    assert not thread.is_alive()
+    assert runner.last_status == "ok"
+    assert layout.activity.exists()

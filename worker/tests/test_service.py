@@ -127,6 +127,12 @@ def test_status_file_and_stop(db_engine: Engine, layout: Layout) -> None:
     assert status["jobs"]["job"]["last_status"] == "ok"
     assert status["jobs"]["job"]["next_due"] == (tr(DAY, 13)).isoformat()
     assert worker.status_path == layout.state / "worker-status.json"
+    # Canlı Durum's snapshot ran beside the loop, in its own thread, and stopped with it.
+    assert not any(t.name == "activity.tick" for t in threading.enumerate())
+    tick = status["jobs"]["activity.tick"]
+    assert tick["thread"] is True
+    assert tick["runs"] >= 1
+    assert tick["last_status"] in {"ok", "skipped"}
 
 
 def test_database_outage_does_not_stop_the_loop(layout: Layout) -> None:
@@ -178,7 +184,6 @@ def test_default_jobs_run_against_the_database(
         ("usage.requests", "skipped"),  # no rebuild request
         ("usage.daily", "ok"),
         ("usage.today", "ok"),
-        ("activity.tick", "ok"),
         ("usage.reattribute", "skipped"),  # nothing changed
         ("usage.retention", "ok"),
         ("db.window", "ok"),  # after 01:00; nothing sealed yet, so only the partitions
@@ -201,7 +206,6 @@ def test_default_jobs_run_against_the_database(
         ("alerts.notify", "skipped"),
         ("usage.requests", "skipped"),
         ("usage.today", "ok"),
-        ("activity.tick", "ok"),
         ("usage.reattribute", "skipped"),
         ("reports.run_due", "ok"),
         ("search.counts_backfill", "skipped"),

@@ -48,18 +48,23 @@ from __future__ import annotations
 
 import itertools
 import json
+import logging
+import threading
 import time
 from collections import defaultdict
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any, Final
 
-from sqlalchemy import text
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy import Engine, text
+from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.orm import Session
 
-from arcilogger_core.timeutil import site_day
+from arcilogger_core.timeutil import site_day, utc_now
+from arcilogger_db.engine import session_factory
+from arcilogger_db.models import JobRun
 from arcilogger_worker.usage.config import UsageSettings
 from arcilogger_worker.usage.domains import BackgroundRules, DomainNamer, normalize_hostname
 from arcilogger_worker.usage.engine import (
@@ -71,6 +76,15 @@ from arcilogger_worker.usage.engine import (
 )
 from arcilogger_worker.usage.subjects import IpTimeline, build_timelines
 
+#: The job's name in ``job_runs`` and the worker's status file.
+JOB_NAME: Final = "activity.tick"
+#: The thread ticks this often, records its ticks in ``job_runs`` at most this often, and
+#: after failures waits up to this long.
+ACTIVITY_EVERY: Final = timedelta(seconds=10)
+RECORD_EVERY: Final = timedelta(minutes=1)
+BACKOFF_MAX: Final = timedelta(minutes=5)
+#: The seconds one tick of the thread may count (the job loop does not wait on it).
+THREAD_BUDGET: Final = 5.0
 #: Minutes of the snapshot.
 MINUTES: Final = 60
 #: Rows committed late: each tick reads the ids above the table's highest id of this long ago,
@@ -138,6 +152,8 @@ _DNS = text(
     "WHERE srcip = k.ip AND time >= k.lo AND time <= k.hi AND answers @> ARRAY[k.address] "
     "ORDER BY time DESC, id DESC LIMIT :limit) AS d"
 )
+
+log = logging.getLogger(__name__)
 
 Key = tuple[Any, ...]
 #: [download, upload, (destination, kind) → foreground bytes, application → bytes]
@@ -231,7 +247,9 @@ class Snapshot:
 
     # -- the tick ---------------------------------------------------------------------------------
 
-    def tick(self, session: Session, now: datetime) -> dict[str, Any]:
+    def tick(
+        self, session: Session, now: datetime, stop: threading.Event | None = None
+    ) -> dict[str, Any]:
         """Read what came since the last tick and sort it into sessions, then count, as long as
         the tick's budget lasts: the sessions that ended, the next warm-up slices, the open
         sessions whose logs changed. Write the snapshot when it changed. Returns the job's
@@ -286,7 +304,7 @@ class Snapshot:
             else:
                 break
             self._step_cost = max(self._step_cost * 0.8, time.monotonic() - step)
-            if self._left(began) < self._step_cost:
+            if self._left(began) < self._step_cost or (stop is not None and stop.is_set()):
                 break
         stale = sum(1 for known in self.open.values() if known.stale)
         if self.warm_from is None and not self.ended and not stale:
@@ -648,15 +666,177 @@ class Snapshot:
         return f"{json.dumps(key)}:{json.dumps(entry, separators=(',', ':'))}"
 
 
-#: The snapshot of each data directory, kept by the worker process between its ticks.
-_SNAPSHOTS: dict[Path, Snapshot] = {}
+# -- the thread -----------------------------------------------------------------------------------
 
 
-def tick_job(sessions: sessionmaker[Session], path: Path, now: datetime) -> dict[str, Any]:
-    """The job ``activity.tick``: one tick of the snapshot written to ``path``."""
-    snapshot = _SNAPSHOTS.setdefault(path, Snapshot(path))
-    with sessions() as session:
-        return snapshot.tick(session, now)
+@dataclass
+class Window:
+    """What the thread's ticks did since its last ``job_runs`` row."""
+
+    started: datetime
+    ticks: int = 0
+    failed: int = 0
+    rows: int = 0
+    max_seconds: float = 0.0
+    last: dict[str, Any] = field(default_factory=dict)
+
+
+class Runner:
+    """``activity.tick`` in its own thread of the worker (the owner's decision on #201,
+    2026-11-06 07:08Z): a tick every :data:`ACTIVITY_EVERY`, with its own database engine, so the
+    job loop never waits on it.
+
+    * **Licence:** while ``usage_analytics`` is off (``gate`` returns the job loop's skip
+      details) it idles and asks again at the next tick; one ``skipped`` row per site day.
+    * **Visible like a job:** a ``job_runs`` row ``activity.tick`` at most every
+      :data:`RECORD_EVERY` (``ok``, or ``failed`` when its last tick failed) with the ticks, the
+      newest tick's seconds and the sessions waiting, and :meth:`status` for the worker's status
+      file; an exception is logged and the next tick waits longer (up to :data:`BACKOFF_MAX`).
+    * **Stop:** the service's stop event ends the tick under way after its current chunk (the
+      snapshot is still written whole) and then the thread.
+    """
+
+    def __init__(
+        self,
+        engine: Engine,
+        path: Path,
+        *,
+        gate: Callable[[datetime], Mapping[str, Any] | None],
+        clock: Callable[[], datetime] = utc_now,
+        every: timedelta = ACTIVITY_EVERY,
+        budget: float = THREAD_BUDGET,
+    ) -> None:
+        self.sessions = session_factory(engine)
+        self.snapshot = Snapshot(path, budget=budget)
+        self.gate = gate
+        self.clock = clock
+        self.every = every
+        self.failures = 0
+        self.runs = 0
+        self.last_started: datetime | None = None
+        self.last_finished: datetime | None = None
+        self.last_status: str | None = None
+        self.last_error: str | None = None
+        self._window: Window | None = None
+        self._skip_day: date | None = None
+
+    def run(self, stop: threading.Event) -> None:
+        """Tick until ``stop`` is set."""
+        while not stop.is_set():
+            began = time.monotonic()
+            self.once(stop)
+            if self.failures:
+                wait = min(self.every * 2**self.failures, BACKOFF_MAX).total_seconds()
+            else:
+                wait = self.every.total_seconds() - (time.monotonic() - began)
+            stop.wait(max(wait, 0.0))
+        self._record(self.clock(), final=True)
+
+    def once(self, stop: threading.Event | None = None) -> str:
+        """One tick (or its skip while the module is off); its status."""
+        now = self.clock()
+        self.last_started, self.runs = now, self.runs + 1
+        gate = self.gate(now)
+        if gate is not None:
+            self._skipped(now, gate)
+            return "skipped"
+        try:
+            with self.sessions() as session:
+                details = self.snapshot.tick(session, now, stop)
+            status, self.failures, self.last_error = "ok", 0, None
+        except Exception as exc:  # a failing tick must never end the thread
+            log.exception("job activity.tick failed")
+            status, self.failures = "failed", self.failures + 1
+            self.last_error = f"{type(exc).__name__}: {str(exc)[:200]}"
+            details = {"error": type(exc).__name__, "message": str(exc)[:500]}
+        self.last_finished, self.last_status = self.clock(), status
+        window = self._window or Window(started=now)
+        self._window = window
+        window.ticks += 1
+        window.failed += status == "failed"
+        window.rows += int(details.get("rows", 0))
+        window.max_seconds = max(window.max_seconds, float(details.get("seconds", 0.0)))
+        window.last = details
+        if self.last_finished - window.started >= RECORD_EVERY:
+            self._record(self.last_finished)
+        return status
+
+    def status(self) -> dict[str, Any]:
+        """The thread's state for the worker's status file (as a job's)."""
+
+        def iso(value: datetime | None) -> str | None:
+            return None if value is None else value.isoformat()
+
+        return {
+            "last_started": iso(self.last_started),
+            "last_finished": iso(self.last_finished),
+            "last_status": self.last_status,
+            "last_error": self.last_error,
+            "done_day": None,
+            "next_due": None,
+            "runs": self.runs,
+            "failures": self.failures,
+            "retry_at": None,
+            "thread": True,
+        }
+
+    def _skipped(self, now: datetime, gate: Mapping[str, Any]) -> None:
+        self.last_finished, self.last_status, self.last_error = now, "skipped", None
+        self.failures = 0
+        day = site_day(now)
+        if self._skip_day == day:
+            return
+        details = {key: value for key, value in gate.items() if key != "_skipped"}
+        if self._insert(now, now, "skipped", details):
+            self._skip_day = day
+
+    def _record(self, now: datetime, *, final: bool = False) -> None:
+        """The ticks since the last row as one ``job_runs`` row."""
+        window, self._window = self._window, None
+        if window is None or (final and not window.ticks):
+            return
+        last = window.last
+        details = {
+            "ticks": window.ticks,
+            "failed": window.failed,
+            "rows": window.rows,
+            "max_seconds": round(window.max_seconds, 3),
+            **{
+                key: last[key]
+                for key in (
+                    "seconds",
+                    "ended_waiting",
+                    "stale_sessions",
+                    "open_sessions",
+                    "warming_up",
+                    "error",
+                    "message",
+                )
+                if key in last
+            },
+        }
+        status = "failed" if "error" in last else "ok"
+        self._insert(window.started, now, status, details)
+
+    def _insert(
+        self, started: datetime, finished: datetime, status: str, details: Mapping[str, Any]
+    ) -> bool:
+        try:
+            with self.sessions() as session:
+                session.add(
+                    JobRun(
+                        job=JOB_NAME,
+                        started_at=started,
+                        finished_at=finished,
+                        status=status,
+                        details=json.loads(json.dumps(details, default=str)),
+                    )
+                )
+                session.commit()
+        except SQLAlchemyError as exc:
+            log.warning("job activity.tick: its run is not recorded (%s)", type(exc).__name__)
+            return False
+        return True
 
 
 def _replace(path: Path, content: str) -> bool:

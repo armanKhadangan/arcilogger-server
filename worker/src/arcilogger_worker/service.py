@@ -39,9 +39,11 @@ Jobs (``DEFAULT_JOBS``):
 ``usage.reattribute``       every 10 minutes: recent days whose inputs or device owners
                             changed are rebuilt (``usage.auto_rebuild_days``)
 ``usage.requests``          every 30 seconds: rebuild requests of the web interface
-``activity.tick``           every 10 seconds: the new traffic logs counted into Canlı Durum's
-                            snapshot of the last 60 minutes, ``state/activity.json``
-                            (subject keys and per-minute bytes; :mod:`.activity`, W5-M)
+``activity.tick``           its own thread, not the loop (W5-M; :class:`.activity.Runner`):
+                            every 10 seconds the new traffic logs counted into Canlı
+                            Durum's snapshot of the last 60 minutes, ``state/activity.json``;
+                            a ``job_runs`` row at most once a minute, idle while
+                            ``usage_analytics`` is off
 ``usage.retention``         daily after 03:30: rollups older than ``usage.retention_days``
 ``db.window``               daily after 01:00, so it and its first retry (01:15) are due
                             before the Backup task's dump (01:40): log rows older than the
@@ -115,7 +117,7 @@ from arcilogger_core.configwatch import WORKER_HOT, ConfigWatch, ConfigWatcher
 from arcilogger_core.fsutil import atomic_write_text
 from arcilogger_core.layout import Layout
 from arcilogger_core.timeutil import SITE_TZ, site_day, to_site, utc_now
-from arcilogger_db.engine import session_factory
+from arcilogger_db.engine import engine_from_url, make_engine, session_factory
 from arcilogger_db.models import JobRun
 from arcilogger_db.partitions import LockBudget, ensure_partitions, step_lock_timeout_ms
 from arcilogger_worker import __version__, activity
@@ -222,8 +224,6 @@ ALERTS_SYSTEM_EVERY: Final = timedelta(minutes=5)
 #: Area U (spec 10.4): today's usage every minute (contract W5 §6 L1; the job backs off on a busy
 #: site, :func:`.usage.jobs.refresh_today`), re-attribution every 10 minutes, requests every 30 s.
 USAGE_TODAY_EVERY: Final = timedelta(minutes=1)
-#: ``activity.tick`` reads the new traffic logs for Canlı Durum's snapshot (W5-M) this often.
-ACTIVITY_EVERY: Final = timedelta(seconds=10)
 USAGE_REATTRIBUTE_EVERY: Final = timedelta(minutes=10)
 USAGE_REQUESTS_EVERY: Final = timedelta(seconds=30)
 #: ``reports.run_due`` looks for due schedules and queued runs every minute.
@@ -353,11 +353,6 @@ def job_usage_today(ctx: JobContext) -> Mapping[str, Any]:
     return details
 
 
-def job_activity_tick(ctx: JobContext) -> Mapping[str, Any]:
-    """Canlı Durum's rolling snapshot (``state/activity.json``): the new traffic logs counted."""
-    return activity.tick_job(ctx.sessions, ctx.layout.activity, ctx.now)
-
-
 def job_usage_daily(ctx: JobContext) -> Mapping[str, Any]:
     """Yesterday's usage rollup, final."""
     return usage_jobs.finalize_yesterday(ctx.sessions, now=ctx.now)
@@ -431,7 +426,6 @@ def default_jobs(interval_seconds: int) -> tuple[Job, ...]:
         Job("usage.requests", job_usage_requests, every=USAGE_REQUESTS_EVERY, module=USAGE_MODULE),
         Job("usage.daily", job_usage_daily, daily_after=time(0, 45), module=USAGE_MODULE),
         Job("usage.today", job_usage_today, every=USAGE_TODAY_EVERY, module=USAGE_MODULE),
-        Job("activity.tick", job_activity_tick, every=ACTIVITY_EVERY, module=USAGE_MODULE),
         Job(
             "usage.reattribute",
             job_usage_reattribute,
@@ -513,6 +507,9 @@ class Worker:
     #: test with a configuration of its own).
     config_path: Path | None = None
     reload_seconds: float = RELOAD_SECONDS
+    #: Canlı Durum's snapshot runs in its own thread while :meth:`run` runs (W5-M; a test of
+    #: the loop turns it off).
+    activity: bool = True
 
     def __post_init__(self) -> None:
         self.sessions = session_factory(self.engine)
@@ -549,6 +546,9 @@ class Worker:
             self.config = self.config_watch.config
         #: The status file is rewritten at the next loop (a new ``config`` block).
         self._status_due = False
+        #: Canlı Durum's thread while :meth:`run` runs, and its engine.
+        self.activity_runner: activity.Runner | None = None
+        self._activity_engine: Engine | None = None
 
     @property
     def status_path(self) -> Path:
@@ -781,6 +781,8 @@ class Worker:
             "database": {None: "unknown", True: "ok", False: "unreachable"}[self.database_ok],
             "jobs": {name: state.as_json() for name, state in self.states.items()},
         }
+        if self.activity_runner is not None:
+            data["jobs"][activity.JOB_NAME] = self.activity_runner.status()
         if self.config_watch is not None:  # the configuration in use (contract 2.4.12)
             data["config"] = self.config_watch.status_block()
         self._status_due = False
@@ -796,6 +798,7 @@ class Worker:
         self.state = "running"
         log.info("ARCILOGGER worker %s started", __version__)
         written: datetime | None = None
+        thread = self._start_activity(stop)
         try:
             while not stop.is_set():
                 ran = self.tick()
@@ -807,6 +810,32 @@ class Worker:
                 # handler only runs between them.
                 stop.wait(SLEEP_SECONDS)
         finally:
+            stop.set()
+            if thread is not None:
+                thread.join()  # it ends its tick after the chunk under way
+            if self._activity_engine is not None:
+                self._activity_engine.dispose()
             self.state = "stopped"
             self.write_status()
             log.info("ARCILOGGER worker stopped")
+
+    def _start_activity(self, stop: threading.Event) -> threading.Thread | None:
+        """Canlı Durum's thread, with its own database engine (the owner's decision on #201)."""
+        if not self.activity:
+            return None
+        self._activity_engine = (
+            make_engine(self.config, application="worker-activity", pool_size=2)
+            if self.config is not None
+            else engine_from_url(self.engine.url, application="worker-activity", pool_size=2)
+        )
+        self.activity_runner = activity.Runner(
+            self._activity_engine,
+            self.layout.activity,
+            gate=lambda now: module_gate(self.context(now), USAGE_MODULE),
+            clock=self.clock,
+        )
+        thread = threading.Thread(
+            target=self.activity_runner.run, args=(stop,), name=activity.JOB_NAME, daemon=True
+        )
+        thread.start()
+        return thread
