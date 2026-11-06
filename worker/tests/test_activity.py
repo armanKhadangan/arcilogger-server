@@ -1,0 +1,253 @@
+"""Canlı Durum's rolling snapshot (:mod:`arcilogger_worker.activity`; Wave 5 contract §6.2 M2, the
+M4 decision on #201) on the golden usage site (:mod:`arcilogger_worker.usage.testing`): it counts
+as the usage engine does, an interim log's delta at its own minute, a row committed late once,
+and its file holds no name and no URL."""
+
+from __future__ import annotations
+
+import json
+from collections import defaultdict
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
+from typing import Any
+
+from sqlalchemy import select
+from sqlalchemy.orm import Session, sessionmaker
+
+from arcilogger_core.layout import Layout
+from arcilogger_db.models import Person
+from arcilogger_worker.activity import MINUTES, WARMUP_SLICE, Snapshot
+from arcilogger_worker.testing import Evidence, tr
+from arcilogger_worker.usage.engine import compute_day
+from arcilogger_worker.usage.testing import DAY, NEXT, PC1, build_golden_site
+
+#: An address without a lease: its subject is ``ip:<address>``.
+LONE = "172.20.43.50"
+
+
+def warm(snapshot: Snapshot, session: Session, now: datetime) -> list[dict[str, Any]]:
+    """Ticks at ``now`` until the warm-up has covered the snapshot; their details."""
+    ticks = []
+    for _ in range(2000):
+        ticks.append(snapshot.tick(session, now))
+        if not ticks[-1]["warming_up"]:
+            return ticks
+    raise AssertionError("the snapshot never covered its minutes")
+
+
+def read(path: Path) -> dict[str, Any]:
+    return json.loads(path.read_text(encoding="utf-8"))  # type: ignore[no-any-return]
+
+
+def cell(data: dict[str, Any], key: str, moment: datetime) -> dict[str, Any] | None:
+    """The subject's cell of the minute starting at ``moment``."""
+    for entry in data["minutes"]:
+        if datetime.fromisoformat(entry["minute"]) == moment.astimezone(UTC):
+            return entry["subjects"].get(key)  # type: ignore[no-any-return]
+    return None
+
+
+def counts(data: dict[str, Any], key: str, moment: datetime) -> tuple[Any, ...] | None:
+    """The subject's download, upload and sessions started in the minute at ``moment``."""
+    found = cell(data, key, moment)
+    return None if found is None else (found["down"], found["up"], found["sessions"])
+
+
+def test_over_a_whole_day_the_bytes_are_compute_days(db_session: Session, layout: Layout) -> None:
+    """The snapshot over the golden day (and the half hour after it, where the session over
+    midnight ends) has, per subject and hour, the bytes of the day's rollup, and per subject the
+    bytes of each foreground destination."""
+    build_golden_site(db_session, layout)
+    db_session.commit()
+    snapshot = Snapshot(layout.activity, minutes=24 * 60 + 31, warmup_slice=timedelta(hours=1))
+    warm(snapshot, db_session, tr(NEXT, 0, 30))
+    data = read(layout.activity)
+    result = compute_day(db_session, DAY)
+    lo, hi = result.lo, result.hi
+
+    hourly: defaultdict[tuple[str, datetime], list[float]] = defaultdict(lambda: [0.0, 0.0])
+    domains: defaultdict[tuple[str, str], float] = defaultdict(float)
+    for entry in data["minutes"]:
+        moment = datetime.fromisoformat(entry["minute"])
+        if not lo <= moment < hi:
+            continue
+        hour = moment.replace(minute=0)
+        for key, values in entry["subjects"].items():
+            hourly[(key, hour)][0] += values["down"]
+            hourly[(key, hour)][1] += values["up"]
+            for domain, _, volume in values["domains"]:
+                domains[(key, domain)] += volume
+    expected_hourly: defaultdict[tuple[str, datetime], list[int]] = defaultdict(lambda: [0, 0])
+    for row in result.hourly:
+        expected_hourly[(row["subject"], row["hour"])][0] += row["download_bytes"]
+        expected_hourly[(row["subject"], row["hour"])][1] += row["upload_bytes"]
+    expected_domains: defaultdict[tuple[str, str], int] = defaultdict(int)
+    for row in result.domains:
+        if not row["background"]:
+            expected_domains[(row["subject"], row["domain"])] += (
+                row["download_bytes"] + row["upload_bytes"]
+            )
+
+    assert {key: [round(v) for v in values] for key, values in hourly.items() if any(values)} == {
+        key: values for key, values in expected_hourly.items() if any(values)
+    }
+    assert {key: round(volume) for key, volume in domains.items()} == dict(expected_domains)
+    assert sum(values[0] for values in hourly.values()) == 734500  # the golden company's download
+
+
+def test_an_interim_delta_lands_at_its_own_minute(db_session: Session, layout: Layout) -> None:
+    """A session's logs come one by one, as in the golden video session: the first interim log
+    (09:02) puts 12 000 / 1 200 bytes over 09:00-09:02 while the session is open, the second
+    (09:04) 6 000 / 600 over 09:02-09:04, the final log (09:05) only the rest over 09:04-09:05;
+    the minutes already counted stay as they were."""
+    evidence = Evidence(db_session, layout)
+    snapshot = Snapshot(layout.activity)
+    key = f"ip:{LONE}"
+    warm(snapshot, db_session, tr(DAY, 9, 0, 30))
+    common: dict[str, Any] = {"sessionid": 7001, "dstip": "203.0.113.10"}
+
+    evidence.traffic(
+        tr(DAY, 9, 2),
+        LONE,
+        50001,
+        interim=True,
+        duration=120,
+        durationdelta=120,
+        rcvdbyte=12000,
+        sentbyte=1200,
+        rcvddelta=12000,
+        sentdelta=1200,
+        **common,
+    )
+    db_session.commit()
+    assert snapshot.tick(db_session, tr(DAY, 9, 2, 30))["open_sessions"] == 1
+    data = read(layout.activity)
+    assert counts(data, key, tr(DAY, 9)) == (6000, 600, 1)
+    assert counts(data, key, tr(DAY, 9, 1)) == (6000, 600, 0)
+    assert counts(data, key, tr(DAY, 9, 2)) is None
+    assert datetime.fromisoformat(data["data_until"]) == tr(DAY, 9, 2).astimezone(UTC)
+
+    evidence.traffic(
+        tr(DAY, 9, 4),
+        LONE,
+        50001,
+        interim=True,
+        duration=240,
+        durationdelta=120,
+        rcvdbyte=18000,
+        sentbyte=1800,
+        rcvddelta=6000,
+        sentdelta=600,
+        **common,
+    )
+    db_session.commit()
+    snapshot.tick(db_session, tr(DAY, 9, 4, 30))
+    evidence.traffic(
+        tr(DAY, 9, 5),
+        LONE,
+        50001,
+        duration=300,
+        rcvdbyte=18600,
+        sentbyte=1860,
+        action="close",
+        **common,
+    )
+    db_session.commit()
+    assert snapshot.tick(db_session, tr(DAY, 9, 5, 30))["open_sessions"] == 0
+    data = read(layout.activity)
+    assert {minute: counts(data, key, tr(DAY, 9, minute)) for minute in range(6)} == {
+        0: (6000, 600, 1),
+        1: (6000, 600, 0),
+        2: (3000, 300, 0),
+        3: (3000, 300, 0),
+        4: (600, 60, 0),
+        5: None,
+    }
+
+
+def test_a_row_committed_late_is_counted_once(
+    db_session: Session, db_session_factory: sessionmaker[Session], layout: Layout
+) -> None:
+    """Ingest's batches commit out of id order: a row with a lower id, committed after a tick
+    has counted a higher one, is still read (the id margin), and neither is counted twice. (The
+    two rows are either side of midnight, so their writers do not share a spool day.)"""
+    now = tr(NEXT, 0, 1, 30)
+    snapshot = Snapshot(layout.activity)
+    warm(snapshot, db_session, now)
+    db_session.commit()
+    with db_session_factory() as early, db_session_factory() as late:
+        slow = Evidence(early, layout).traffic(
+            tr(DAY, 23, 59, 50), LONE, 40001, rcvdbyte=1000, sentbyte=100, duration=30
+        )
+        fast = Evidence(late, layout).traffic(
+            tr(NEXT, 0, 0, 40), LONE, 40002, rcvdbyte=2000, sentbyte=200, duration=30
+        )
+        assert slow < fast
+        late.commit()
+        assert snapshot.tick(db_session, now)["rows"] == 1
+        db_session.commit()
+        early.commit()
+    assert snapshot.tick(db_session, now)["rows"] == 1
+    db_session.commit()
+    assert snapshot.tick(db_session, now)["rows"] == 0
+    data = read(layout.activity)
+    assert counts(data, f"ip:{LONE}", tr(DAY, 23, 59)) == (1000, 100, 1)
+    assert counts(data, f"ip:{LONE}", tr(NEXT, 0)) == (2000, 200, 1)
+
+
+def test_the_file_holds_no_name_and_no_url(db_session: Session, layout: Layout) -> None:
+    build_golden_site(db_session, layout)
+    db_session.commit()
+    warm(Snapshot(layout.activity), db_session, tr(DAY, 9, 30))
+    content = layout.activity.read_text(encoding="utf-8")
+    data = json.loads(content)
+    assert data["minutes"], "the window has traffic"
+    names = list(db_session.scalars(select(Person.name)))
+    assert names
+    for forbidden in [*names, "izle", "www.", "http"]:
+        assert forbidden not in content
+    for key, subject in data["subjects"].items():
+        assert key.split(":")[0] in {"person", "device", "ip"}
+        assert set(subject) == {"kind", "vlan", "mac", "ip"}
+    assert data["subjects"][next(iter(data["subjects"]))]["ip"] == PC1
+
+
+def test_an_unchanged_snapshot_is_not_written_again(db_session: Session, layout: Layout) -> None:
+    build_golden_site(db_session, layout)
+    db_session.commit()
+    snapshot = Snapshot(layout.activity)
+    now = tr(DAY, 9, 30)
+    warm(snapshot, db_session, now)
+    layout.activity.write_text("{}", encoding="utf-8")  # changed behind its back: not looked at
+    assert snapshot.tick(db_session, now + timedelta(seconds=10))["written"] is False
+    assert layout.activity.read_text(encoding="utf-8") == "{}"
+    # The next minute moves the snapshot's range: it is written.
+    assert snapshot.tick(db_session, now + timedelta(minutes=1))["written"] is True
+    assert read(layout.activity)["warming_up"] is False
+
+
+def test_the_warm_up_reads_in_slices_and_then_the_new_rows(
+    db_session: Session, layout: Layout
+) -> None:
+    """After a start, the last hour and the session overlap before it are read
+    :data:`WARMUP_SLICE` at a time; a row that comes meanwhile, in a slice already read, is
+    counted once the warm-up is over."""
+    now = tr(DAY, 12, 0, 30)
+    evidence = Evidence(db_session, layout)
+    evidence.traffic(tr(DAY, 11, 10), LONE, 40001, rcvdbyte=1000, sentbyte=100, duration=30)
+    db_session.commit()
+    snapshot = Snapshot(layout.activity)
+    first = snapshot.tick(db_session, now)
+    assert first["warming_up"] is True
+    assert read(layout.activity)["warming_up"] is True
+    evidence.traffic(tr(DAY, 11, 30), LONE, 40002, rcvdbyte=2000, sentbyte=200, duration=30)
+    db_session.commit()
+    ticks = [first, *warm(snapshot, db_session, now)]
+    overlap = 30  # usage.session_overlap_seconds 1800, in minutes
+    assert len(ticks) == -(-(MINUTES + overlap) // int(WARMUP_SLICE.total_seconds() // 60))
+    assert ticks[-1]["warming_up"] is False
+    snapshot.tick(db_session, now)
+    data = read(layout.activity)
+    assert data["warming_up"] is False
+    assert counts(data, f"ip:{LONE}", tr(DAY, 11, 9)) == (1000, 100, 1)
+    assert counts(data, f"ip:{LONE}", tr(DAY, 11, 29)) == (2000, 200, 1)

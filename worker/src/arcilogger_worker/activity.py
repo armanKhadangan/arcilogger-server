@@ -128,8 +128,13 @@ class Counted:
 class Snapshot:
     """The worker's rolling snapshot: kept in memory by the process, written to ``path``."""
 
-    def __init__(self, path: Path) -> None:
+    def __init__(
+        self, path: Path, *, minutes: int = MINUTES, warmup_slice: timedelta = WARMUP_SLICE
+    ) -> None:
         self.path = path
+        #: Minutes kept, and the part of the start-up's read one tick takes (the tests set them).
+        self.minutes = minutes
+        self.warmup_slice = warmup_slice
         self.closed = Counted()
         self.open: dict[Key, OpenSession] = {}
         #: Ids read in the last :data:`ID_MARGIN`, and the highest id seen at each tick.
@@ -151,7 +156,7 @@ class Snapshot:
         settings = UsageSettings.load(session)
         overlap = timedelta(seconds=settings.session_overlap_seconds)
         end = now.astimezone(UTC).replace(second=0, microsecond=0) + timedelta(seconds=BUCKET)
-        lo = end - timedelta(minutes=MINUTES)
+        lo = end - timedelta(minutes=self.minutes)
         refused = list(REFUSED_ACTIONS)
         if not self.started:
             self.started = True
@@ -161,7 +166,7 @@ class Snapshot:
             self.warm_from = lo - overlap
         until = end
         if self.warm_from is not None:
-            until = min(self.warm_from + WARMUP_SLICE, end)
+            until = min(self.warm_from + self.warmup_slice, end)
             rows = session.execute(
                 _SLICE_ROWS,
                 {"upto": self.warm_upto, "lo": self.warm_from, "hi": until, "refused": refused},
