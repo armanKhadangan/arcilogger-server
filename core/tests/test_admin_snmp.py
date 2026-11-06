@@ -45,6 +45,9 @@ address = "172.20.20.0/24"
 """
 SNMP = {"enabled": True, "user": "arcilogger", "interfaces": ["wan1"]}
 KEYS = {"snmp_auth_key": "authkeyauthkey", "snmp_priv_key": "privkeyprivkey"}
+#: The two keys of fw-01 and the path of its SNMP table, named once.
+AUTH_NAME, PRIV_NAME = rules.snmp_keys("fw-01")
+SNMP_PATH = "sources." + "fw-01" + ".snmp"
 OFF = SnmpConfig(enabled=False, user="arcilogger", interfaces=("wan1",))
 
 
@@ -89,10 +92,10 @@ def test_snmp_on_with_both_keys(root: Path, config: Config) -> None:
     kinds = [(op["op"], op.get("name")) for op in check.ops]
     assert kinds == [
         ("source_update", "fw-01"),
-        ("secret_set", "snmp.fw-01.auth_key"),
-        ("secret_set", "snmp.fw-01.priv_key"),
+        ("secret_set", AUTH_NAME),
+        ("secret_set", PRIV_NAME),
     ]
-    assert check.changes["snmp.fw-01.auth_key"] == {
+    assert check.changes[AUTH_NAME] == {
         "secret": True,
         "old": "unset",
         "new": "set",
@@ -108,11 +111,11 @@ def test_snmp_on_with_both_keys(root: Path, config: Config) -> None:
 
 def test_snmp_on_without_keys_is_refused(root: Path, config: Config) -> None:
     check = validate_section("sources", config, update(SNMP), context(root))
-    assert codes(check) == [("snmp_secret_missing", "sources.fw-01.snmp")]
+    assert codes(check) == [("snmp_secret_missing", SNMP_PATH)]
     one = validate_section(
         "sources", config, update(SNMP, snmp_auth_key="authkeyauthkey"), context(root)
     )
-    assert codes(one) == [("snmp_secret_missing", "sources.fw-01.snmp")]
+    assert codes(one) == [("snmp_secret_missing", SNMP_PATH)]
 
 
 def test_stored_keys_are_enough(root: Path, config: Config) -> None:
@@ -133,7 +136,7 @@ def test_a_key_outside_8_to_64_characters_is_refused(root: Path, config: Config,
     check = validate_section(
         "sources", config, update(SNMP, snmp_auth_key=key, snmp_priv_key=key), context(root)
     )
-    assert ("secret_invalid", "snmp.fw-01.auth_key") in codes(check)
+    assert ("secret_invalid", AUTH_NAME) in codes(check)
 
 
 def test_snmp_on_a_network_source_is_refused(root: Path, config: Config) -> None:
@@ -160,8 +163,8 @@ def test_removing_a_source_deletes_its_keys(root: Path, config: Config) -> None:
     assert check.ok, check.errors
     assert [(op["op"], op.get("name")) for op in check.ops] == [
         ("source_remove", "fw-01"),
-        ("secret_delete", "snmp.fw-01.auth_key"),
-        ("secret_delete", "snmp.fw-01.priv_key"),
+        ("secret_delete", AUTH_NAME),
+        ("secret_delete", PRIV_NAME),
     ]
 
 
@@ -181,7 +184,7 @@ def test_the_sources_etag_follows_the_keys(root: Path, config: Config) -> None:
     )
     snmp_config = parse_config(with_snmp, path)
     before = rules.etag("sources", snmp_config, frozenset())
-    after = rules.etag("sources", snmp_config, frozenset({"snmp.fw-01.auth_key"}))
+    after = rules.etag("sources", snmp_config, frozenset({AUTH_NAME}))
     assert before != after
     assert rules.section_secrets("sources", snmp_config) == rules.snmp_keys("fw-01")
     assert rules.section_secrets("sources", config) == ()

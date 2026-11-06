@@ -1749,11 +1749,12 @@ def _body_sources(body: _Body, data: Mapping[str, Any]) -> None:
         label = fields.get("name")
         known = isinstance(label, str) and _SOURCE_NAME.fullmatch(label) is not None
         for error in exc.errors(include_input=False, include_url=False):
-            key = str(error["loc"][0]) if error["loc"] else ""
+            part = str(error["loc"][0]) if error["loc"] else ""
             code = "source_invalid"
             if "snmp_source_is_network" in str(error.get("msg", "")):
-                code, key = "snmp_source_is_network", "snmp"  # N1: a single address only
-            body.error(code, f"sources.{label}.{key}" if known and key else "sources")
+                code = "snmp_source_is_network"  # N1: a single address only
+                part = "snmp"
+            body.error(code, f"sources.{label}.{part}" if known and part else "sources")
         return
     if name is None:
         body.ops.append(SourceAddOp(op="source_add", source=source))

@@ -58,10 +58,13 @@ FAILURE_CODES: Final[Mapping[str, str]] = {
 }
 #: The SNMP probe's failure codes: N4's reasons (Wave 5 §6 N5), each with TR/EN text.
 SNMP_CODES: Final[Mapping[str, str]] = {
-    "timeout": "snmp_timeout",
-    "auth_failed": "snmp_auth_failed",
-    "no_such_interface": "snmp_no_such_interface",
-    "snmp_no_hc_counters": "snmp_no_hc_counters",
+    status: status if status.startswith("snmp_") else f"snmp_{status}"
+    for status in (
+        "timeout",
+        "auth_failed",
+        "no_such_interface",
+        "snmp_no_hc_counters",
+    )
 }
 #: Seconds each probe may take (the child is killed a little later).
 TIMEOUTS: Final[Mapping[str, float]] = {
