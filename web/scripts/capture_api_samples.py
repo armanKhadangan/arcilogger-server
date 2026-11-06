@@ -35,7 +35,9 @@ How the samples are made (everything is the production code, in this process):
    reassigned at noon, background traffic, blocked attempts, an evening session, a session over
    midnight), rolled up by the worker's own job; company, subjects, one subject, sites,
    categories (also filtered by department), CSV and Excel exports, rebuild requests, the
-   optional pseudonyms and the refusals.
+   optional pseudonyms and the refusals; on the same site Canlı Durum (``activity.json``,
+   Wave 5 contract §6.2 M2): the worker's snapshot written at 09:02:30, then
+   ``GET /activity/devices`` for each window, the pseudonymous answer and the refusals.
 6. last the Security page and the dashboard: alerts as the worker writes them (the failed
    sealing of 11.10 imported from ``alerts.jsonl``, R15 of a silent switch from the real check,
    the site's IP conflict, disk, new log source, a credit alert the check resolved) and the
@@ -71,6 +73,13 @@ file whose data is empty is not written. The Uyum Durumu and Sistem samples (``c
 ``system.json``, ``system-disk.json``, ``system-health.json``; Wave 4 contract 2.3, 2.5, 2.6)
 come from ``samples_compliance.py`` and ``samples_system.py``, run on the main site after the
 others (the cards read the whole site; the Sistem samples fix what the host would say). The
+legal-validity samples (``legal-status.json``; Wave 5 contract 2.3.1) come from
+``samples_legal_status.py``, run after the Sistem samples and before the archive's, with a
+configuration and state files of their own for each case, put back afterwards. The internet
+line's speed samples (``activity-wan.json``; Wave 5 §6 N6) come from ``samples_activity_wan.py``,
+run after them with a ``state/wan-rates.json`` of their own, put back afterwards. The
+archive reload samples (``archive.json``; Wave 5 contract §5) come from ``samples_archive.py``,
+run last on the main site with the database window narrowed for their time. The
 Wave 3 lookups (FortiGate DHCP alone, srcmac, the internet exits' cases, a source clock, an
 unconverted DHCP line, an unconfigured sender; ``samples_lookups.py``) run last, on a second
 lookup site with a database and data directory of its own, and are merged into ``lookups.json``
@@ -125,7 +134,9 @@ from sqlalchemy import Engine, event, inspect, select, text, update
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import NullPool
 
+import arcilogger_core
 from arcilogger_api import deps, evidence_limits, rawlines
+from arcilogger_api.activity import routes as activity_routes
 from arcilogger_api.app import create_app
 from arcilogger_api.auth.accounts import accept_privacy, privacy_version
 from arcilogger_api.deps import AppState
@@ -137,10 +148,11 @@ from arcilogger_api.routers import lookup as lookup_router
 from arcilogger_api.routers.evidence import STATUS_LABELS
 from arcilogger_api.security import hash_token
 from arcilogger_api.testing import LoggedIn, login, make_user
-import arcilogger_core
 from arcilogger_core import timeutil
+from arcilogger_core.admin.contract import ProbeInterface
+from arcilogger_core.admin.probe import ProbeResult
 from arcilogger_core.admin.testing import FakeAgent, SmtpTestServer, make_installation
-from arcilogger_core.config import Config, load_config
+from arcilogger_core.config import load_config
 from arcilogger_core.credit import check_credit
 from arcilogger_core.layout import Layout
 from arcilogger_core.license import revoked as license_revoked
@@ -156,8 +168,8 @@ from arcilogger_core.license.testing import (
     trusted_test_keys,
 )
 from arcilogger_core.rawlog import format_line
-from arcilogger_core.secretstore import USAGE_PSEUDONYM_KEY, SecretStore
 from arcilogger_core.replica import replicate_day
+from arcilogger_core.secretstore import USAGE_PSEUDONYM_KEY, SecretStore
 from arcilogger_core.timeutil import SITE_TZ, site_day, utc_now
 from arcilogger_core.tsa.base import TsaUnavailableError
 from arcilogger_core.tsa.mock import MockFailure, MockTsaProvider
@@ -183,21 +195,22 @@ from arcilogger_db.models import (
 from arcilogger_db.seed import seed
 from arcilogger_db.settings import get_setting, set_setting
 from arcilogger_db.testing import TestServer, admin_dsn_from_env
+from arcilogger_worker.activity import Snapshot as ActivitySnapshot
 from arcilogger_worker.admin_jobs import process_requests as process_admin_requests
 from arcilogger_worker.alerts.importer import import_alerts
+from arcilogger_worker.alerts.mail import SmtpSendError
 from arcilogger_worker.alerts.r15 import check_silent_sources
 from arcilogger_worker.alerts.store import open_alert, resolve
-from arcilogger_worker.alerts.mail import SmtpSendError
 from arcilogger_worker.correlation.leases import rebuild_day
 from arcilogger_worker.licensing import job_license_check
 from arcilogger_worker.reports import runner as report_runner
 from arcilogger_worker.reports.testing import report_sample
 from arcilogger_worker.service import JobContext
 from arcilogger_worker.testing import FIREWALL, Evidence, tr
+from arcilogger_worker.usage import report_data
 from arcilogger_worker.usage.jobs import process_requests
 from arcilogger_worker.usage.jobs import rebuild_day as rebuild_usage_day
 from arcilogger_worker.usage.testing import build_golden_site
-from arcilogger_worker.usage import report_data
 from arcilogger_worker.vaulttesting import SealedVault, at_site, make_vault
 
 # The sample modules next to this script: on the path when it runs as a script, not when a test
@@ -205,7 +218,10 @@ from arcilogger_worker.vaulttesting import SealedVault, at_site, make_vault
 _SCRIPTS = str(Path(__file__).resolve().parent)
 if _SCRIPTS not in sys.path:
     sys.path.insert(0, _SCRIPTS)
+import samples_activity_wan  # noqa: E402
+import samples_archive  # noqa: E402
 import samples_compliance  # noqa: E402
+import samples_legal_status  # noqa: E402
 import samples_live_sources  # noqa: E402
 import samples_lookups  # noqa: E402
 import samples_network  # noqa: E402
@@ -215,13 +231,18 @@ import samples_system  # noqa: E402
 #: The pages whose samples a module of their own captures (module text), in this order:
 #: ``samples_network`` writes sessions of the day before "now", after the pages before it
 #: captured; the Wave 4 pages (``samples_compliance``, ``samples_system``) read the whole site as
-#: every other page left it, so they come last and change no earlier sample.
+#: every other page left it, so they come last and change no earlier sample, then the
+#: legal-validity status reads the whole site; ``samples_archive`` narrows the database window for
+#: its own capture, after all of them.
 SAMPLE_MODULES = (
     samples_search,
     samples_live_sources,
     samples_network,
     samples_compliance,
     samples_system,
+    samples_legal_status,
+    samples_activity_wan,
+    samples_archive,
 )
 
 OUT_DIR = Path(__file__).resolve().parent.parent / "e2e" / "samples"
@@ -1585,6 +1606,32 @@ def capture_usage(server: TestServer, template: str, root: Path) -> dict[str, An
                 admin.get(f"{usage}/rebuild/{requested['job_id']}"), 200
             )
 
+            # Canlı Durum (M2) at 09:02:30: the first interim log of the 09:00-09:05 session
+            # has come, its next one and its final log not yet. The worker's snapshot is written
+            # at that moment (its warm-up reads only the logs before it), then only the route's
+            # clock is set (the sessions keep the capture's own, or they would read as idle).
+            activity: dict[str, Any] = {}
+            devices = f"{API}/activity/devices"
+            moment = _local(USAGE_DAY, 9, 2, 30).astimezone(UTC)
+            snapshot = ActivitySnapshot(capture.layout.activity)
+            with capture.factory() as session:
+                while snapshot.tick(session, moment)["warming_up"]:
+                    pass
+            with mock.patch.object(activity_routes, "utc_now", lambda: moment):
+                for window in ("1", "5", "15"):
+                    activity[f"devices_{window}"] = capture.json(
+                        hr.get(devices, params={"window": window}), 200
+                    )
+                activity["errors"] = {
+                    "window_invalid": capture.error(
+                        hr.get(devices, params={"window": "2"}), 422, "activity_window_invalid"
+                    ),
+                    "notice_required": capture.error(
+                        newcomer.get(devices), 403, "privacy_notice_required"
+                    ),
+                }
+            out["activity"] = activity
+
             # Names by default (owner decision 2026-10-20), pseudonyms only on request.
             out["viewer_subjects"] = get(viewer, "/subjects", kind="person")
             out["viewer_company"] = get(viewer, "/company")
@@ -1607,6 +1654,10 @@ def capture_usage(server: TestServer, template: str, root: Path) -> dict[str, An
             out["viewer_subject_pseudonymous"] = get(viewer, f"/subjects/{token}")
             out["viewer_sites_pseudonymous"] = get(viewer, "/sites/portal.example")
             out["hr_subjects_with_pseudonyms_on"] = get(hr, "/subjects", kind="person")
+            with mock.patch.object(activity_routes, "utc_now", lambda: moment):
+                out["activity"]["viewer_devices_pseudonymous"] = capture.json(
+                    viewer.get(devices, params={"window": "5"}), 200
+                )
             out["pseudonyms"] = capture.json(admin.get(f"{usage}/pseudonyms"), 200)
             out["pseudonyms_search"] = capture.json(
                 admin.get(f"{usage}/pseudonyms", params={"q": "can"}), 200
@@ -2667,6 +2718,18 @@ def capture_settings(capture: Capture, admin: Any, auditor: Any) -> None:
     detail = errors["setting_invalid_egress"]["body"]["error"]["details"][0]
     if detail["code"] != "setting_egress_public_private":
         raise SystemExit(f"the private public address was refused with {detail}")
+    # Overlapping breaks of the work hours (W5 §6 K1): the text the editor shows at the setting.
+    hours = {"days": [1, 2, 3, 4, 5], "start": "08:00", "end": "18:00"}
+    lunch = [{"start": "12:00", "end": "13:00"}, {"start": "12:30", "end": "13:30"}]
+    overlap = {
+        "changes": [{"key": "usage.work_hours", "old": hours, "value": {**hours, "breaks": lunch}}]
+    }
+    errors["setting_invalid_work_hours"] = capture.error(
+        admin.patch(url, json=overlap), 422, "setting_invalid"
+    )
+    detail = errors["setting_invalid_work_hours"]["body"]["error"]["details"][0]
+    if detail["code"] != "setting_work_hours_breaks":
+        raise SystemExit(f"the overlapping breaks were refused with {detail}")
     idle = {"changes": [{"key": "auth.idle_minutes", "old": 15, "value": 20}]}
     capture.recent(admin, minutes_ago=10)
     errors["reauth_required"] = capture.error(admin.patch(url, json=idle), 403, "reauth_required")
@@ -2935,6 +2998,25 @@ def capture_admin_sources(capture: Capture, admin: Any) -> None:
     collector_loads(capture)
     agent.process()
     out["remove_active"] = capture.json(admin.get(removed["status_url"]), 200)
+    # SNMP switched on with an interface the device does not have: the probe's refusal lists
+    # what it reports (W5-N-9), and nothing is written
+    listed = (
+        ProbeInterface(name="wan2", oper_status="up", speed_mbps=1000),
+        ProbeInterface(name="lan", oper_status="up", speed_mbps=1000),
+        ProbeInterface(name="dmz", oper_status="down", speed_mbps=100),
+        ProbeInterface(name="tunnel-1", oper_status="unknown", speed_mbps=None),
+    )
+    agent.prober.results["snmp"] = ProbeResult(
+        False, "snmp_no_such_interface", "not found: wan1", listed
+    )
+    snmp = {"enabled": True, "user": "arcilogger", "interfaces": ["wan1"]}
+    keys = {"snmp_auth_key": "Örnek-SNMP-Kimlik-1", "snmp_priv_key": "Örnek-SNMP-Gizlilik-1"}
+    device = {"name": "fw-sube", "type": "fortigate", "address": "172.20.30.1", "snmp": snmp}
+    capture.recent(admin)
+    refused = capture.json(admin.post(url, json={"etag": tag(), "source": device, **keys}), 202)
+    agent.process()
+    out["snmp_probe_failed"] = capture.json(admin.get(refused["status_url"]), 200)
+    del agent.prober.results["snmp"]
 
 
 def capture_admin_sections(capture: Capture, admin: Any) -> None:
@@ -3139,7 +3221,9 @@ def capture_site(capture: Capture, server: TestServer, template: str, root: Path
             if data:
                 capture.samples[name] = data
     vault.unlock_all()
-    capture.samples["usage"] = capture_usage(server, template, root)
+    usage = capture_usage(server, template, root)
+    capture.samples["activity"] = usage.pop("activity")
+    capture.samples["usage"] = usage
     capture_lookup_site(capture, server, template, root)
 
 

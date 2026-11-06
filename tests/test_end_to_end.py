@@ -9,7 +9,6 @@ for byte, what was sent.
 from __future__ import annotations
 
 import asyncio
-import gzip
 import socket
 from collections.abc import Iterator
 from datetime import UTC, date, datetime, time, timedelta
@@ -18,6 +17,7 @@ from pathlib import Path
 import pytest
 
 from arcilogger_collector.service import Collector
+from arcilogger_core import sealedfile
 from arcilogger_core.chain import verify_range
 from arcilogger_core.config import Config
 from arcilogger_core.immutability import is_locked, unlock
@@ -101,8 +101,11 @@ def test_messages_survive_collection_sealing_and_verification(tmp_path: Path) ->
     assert [c.errors for c in checks] == [[], [], []]
 
     for day in DAYS:
-        vault = layout.vault_day(day) / "local.log.gz"
-        records = [parse_line(line) for line in gzip.decompress(vault.read_bytes()).splitlines()]
+        vault = sealedfile.find_log(layout, day, "local")
+        assert vault is not None
+        assert sealedfile.format_of(vault) == "xz"  # the default format (W5-H)
+        with sealedfile.open_sequential(vault) as handle:
+            records = [parse_line(line) for line in handle.read().splitlines()]
         assert [r.message for r in records] == sent[day]
         assert {r.sender for r in records} == {"127.0.0.1"}
         assert all(r.received.astimezone(SITE_TZ).date() == day for r in records)

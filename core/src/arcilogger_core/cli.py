@@ -13,11 +13,15 @@ or the web application::
     arcilogger-core requests run                     the browser administration's signed
                                                      requests: credit query, TSA test,
                                                      replica test (ADR-0014)
-    arcilogger-core secret init|set|list|delete      encrypted credentials (Kamu SM, database,
-                                                     replica, SMTP)
+    arcilogger-core secret init|set|list|delete      encrypted credentials (Kamu SM, TÜRKTRUST,
+                                                     database, replica, SMTP)
     arcilogger-core status                           summary for monitoring
     arcilogger-core config-check [--json]            what a production configuration still
                                                      lacks (organisation name, time source)
+    arcilogger-core crl fetch [--json] | crl status  revocation lists (SİL) of the time-stamp
+                                                     certificates: download, verify, store
+    arcilogger-core renew [--dry-run] [--json]       re-stamp the time stamps whose TSA
+                                                     certificate comes due (the Renew task)
     arcilogger-core evidence build --from D --to D [--source S …] [--extract FILE.json]
                     [--password] [--out DIR] [--pdf FILE] [--include-audit-log]
                                                      evidence package (Kanıt Paketi)
@@ -29,7 +33,8 @@ or the web application::
 command refuses a configuration whose ``secrets_dir`` or ``data_dir`` is not the installation's
 own folder (:func:`arcilogger_core.config.check_fixed_location`).
 
-Exit codes: 0 success, 1 a problem that needs attention, 2 usage or configuration error.
+Exit codes: 0 success, 1 a problem that needs attention, 2 usage or configuration error;
+``renew`` also 3: the time-stamp server failed (retryable).
 """
 
 from __future__ import annotations
@@ -40,6 +45,7 @@ import json
 import logging
 import platform
 import secrets as pysecrets
+import subprocess
 import sys
 import tempfile
 import zipfile
@@ -48,7 +54,7 @@ from dataclasses import asdict, dataclass
 from datetime import date, datetime, timedelta
 from functools import cached_property
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from pydantic import ValidationError
 
@@ -76,6 +82,15 @@ from arcilogger_core.config import (
     setup_problems,
 )
 from arcilogger_core.credit import check_credit
+from arcilogger_core.crl import (
+    CRL_SUFFIX,
+    Crl,
+    CrlError,
+    crl_options,
+    fetch,
+    load_stored,
+    read_index,
+)
 from arcilogger_core.evidence import (
     DEFAULT_KEEP_DAYS,
     EvidenceError,
@@ -91,6 +106,23 @@ from arcilogger_core.execpolicy import TrustAnchors
 from arcilogger_core.fmt import format_bytes, format_datetime
 from arcilogger_core.fsutil import atomic_write_text
 from arcilogger_core.layout import Layout
+from arcilogger_core.renewal import (
+    LastRun,
+    Outcome,
+    RenewalBusyError,
+    RenewalError,
+    RenewalLegalRootsError,
+    RenewalLockError,
+    RenewalNotNeeded,
+    RenewalReport,
+    RenewalRun,
+    RenewalStampInvalidError,
+    one_run,
+    renew_before_days,
+    renew_held,
+    renewal_status,
+    write_state,
+)
 from arcilogger_core.replica import probe, replicate_day, replicate_due
 from arcilogger_core.retention import run_retention
 from arcilogger_core.seal import DELETED, SEALED, SKIPPED, Sealer, SealOutcome, config_alert
@@ -100,6 +132,8 @@ from arcilogger_core.secretstore import (
     KAMUSM_PASSWORD,
     REPLICA_PASSWORD,
     SMTP_PASSWORD,
+    TURKTRUST_PASSWORD,
+    TURKTRUST_USERNAME,
     USAGE_PSEUDONYM_KEY,
     SecretStore,
     SecretStoreError,
@@ -109,12 +143,21 @@ from arcilogger_core.smbshare import connected, unc_root
 from arcilogger_core.taskrequests import clean, finish, take, task_result
 from arcilogger_core.timeutil import SITE_TZ_NAME, isoformat_site, site_day, utc_now
 from arcilogger_core.tsa import TsaExecutableError, make_provider, trusted_roots
-from arcilogger_core.tsa.base import TsaConfigurationError, TsaError
+from arcilogger_core.tsa.base import (
+    TsaConfigurationError,
+    TsaError,
+    TsaNoCreditError,
+    TsaRejectedError,
+    TsaResponseError,
+    TsaUnavailableError,
+)
 from arcilogger_core.tsa.verify import confirmed_legal_grade, verify_token
 
 SECRET_NAMES = (
     KAMUSM_CUSTOMER,
     KAMUSM_PASSWORD,
+    TURKTRUST_USERNAME,
+    TURKTRUST_PASSWORD,
     DATABASE_PASSWORD,
     REPLICA_PASSWORD,
     SMTP_PASSWORD,
@@ -201,15 +244,19 @@ def cmd_info(_: argparse.Namespace) -> int:
 def _provider_cause(app: App) -> str:
     """Why :func:`arcilogger_core.tsa.make_provider` refused the configuration."""
     tsa = app.config.tsa
-    if tsa.provider != "zamane":
+    if tsa.provider == "zamane":
+        if tsa.zamane_jar is None:
+            return "zamane-jar"
+        needed = {KAMUSM_CUSTOMER, KAMUSM_PASSWORD}
+    elif tsa.provider == "turktrust":  # as tsa.preflight says for TÜRKTRUST's account
+        needed = {TURKTRUST_USERNAME, TURKTRUST_PASSWORD}
+    else:
         return "provider"
-    if tsa.zamane_jar is None:
-        return "zamane-jar"
     try:
         stored = set(app.secrets.names())
     except (OSError, ValueError, SecretStoreError):
         return "secret-store"
-    return "credentials" if not {KAMUSM_CUSTOMER, KAMUSM_PASSWORD} <= stored else "provider"
+    return "credentials" if not needed <= stored else "provider"
 
 
 def _sealer(app: App) -> Sealer:
@@ -486,11 +533,17 @@ def run_tsa_test(app: App) -> TsaTest:
         stamp = provider.stamp(sample)
     except TsaError as exc:
         return TsaTest(None, str(exc))
+    try:  # C19: a TSA certificate already on a stored list shows here as crl-revoked
+        crls: Sequence[Crl] | None = load_stored(app.layout)
+    except CrlError as exc:
+        log.warning("tsa-test: revocation not checked: %s", exc)
+        crls = None
     result = verify_token(
         stamp.token_path.read_bytes(),
         roots=app.roots(),
         file_path=sample,
         require_critical_eku=app.config.tsa.require_critical_eku,
+        crls=crls,
     )
     info = result.info
     return TsaTest(
@@ -769,6 +822,367 @@ def cmd_config_check(args: argparse.Namespace, app: App) -> int:
     return 1 if failed else 0
 
 
+def cmd_crl(args: argparse.Namespace, app: App) -> int:
+    """``crl fetch``: download, verify and store the revocation lists (the ``CrlFetch`` task;
+    exit 0 all stored, 1 some failed and are recorded in the index, 2 no URL known).
+    ``crl status``: the index and how many lists the folder holds (none is ever deleted)."""
+    if args.crl_command == "status":
+        return _crl_status(app)
+    try:
+        options = crl_options(app.config)
+    except CrlError as exc:
+        print(f"Yapılandırma hatası [configuration error]: {exc}", file=sys.stderr)
+        return 2
+    try:
+        roots = app.roots()
+    except TsaConfigurationError:  # no pinned root: no list can verify, the URLs are still tried
+        roots = []
+    try:
+        run = fetch(options, app.layout, roots, utc_now())
+    except CrlError as exc:
+        print(f"Hata [error]: {exc}", file=sys.stderr)
+        return 1
+    if args.json:
+        _print_json(run.as_json())
+        return run.exit_code
+    if not run.urls:
+        print(
+            "Bilinen SİL adresi yok: tsa.crl_urls boş ve sertifikalarda http/https dağıtım "
+            "noktası yok [no CRL URL known: tsa.crl_urls is empty and no certificate names an "
+            "http/https distribution point]."
+        )
+    for entry in run.lists:
+        print(f"SİL doğrulandı, saklandı [CRL verified, stored]: {entry['url']} → {entry['file']}")
+    for failure in run.failures:
+        print(f"SİL alınamadı [CRL failed]: {failure.url} ({failure.error})")
+    return run.exit_code
+
+
+def _crl_status(app: App) -> int:
+    """The index of ``state/crl`` with the count and total size of the stored lists (Q4)."""
+    try:
+        index = read_index(app.layout)
+    except CrlError as exc:
+        print(f"Hata [error]: {exc}", file=sys.stderr)
+        return 1
+    folder = app.layout.crl_dir
+    files = sorted(folder.glob(f"*{CRL_SUFFIX}")) if folder.is_dir() else []
+    size = sum(path.stat().st_size for path in files)
+    _print_json(
+        {
+            "index": index,
+            "files": len(files),
+            "bytes": size,
+            "size": f"{format_bytes(size)} ({format_bytes(size, 'en')})",
+        }
+    )
+    return 0
+
+
+#: ``last_run.error`` of ``state/renewal/renewal.json`` for a time-stamp server error without a
+#: code of its own (the renewal errors carry theirs: ``renewal_stamp_invalid``,
+#: ``renewal_lock_failed``).
+_TSA_ERROR_CODES: tuple[tuple[type[TsaError], str], ...] = (
+    (TsaUnavailableError, "tsa_unavailable"),
+    (TsaNoCreditError, "tsa_no_credit"),
+    (TsaRejectedError, "tsa_rejected"),
+    (TsaResponseError, "tsa_response"),
+)
+
+
+@dataclass(frozen=True)
+class _RenewError:
+    """Why a ``renew`` run stopped: a code (``last_run.error``) and the TR/EN texts."""
+
+    code: str
+    message_tr: str
+    message_en: str
+
+    @classmethod
+    def of(cls, exc: BaseException) -> _RenewError:
+        if isinstance(exc, RenewalError | RenewalStampInvalidError):
+            return cls(exc.code, exc.message_tr, exc.message_en)
+        if isinstance(exc, TsaError):
+            code = next((code for kind, code in _TSA_ERROR_CODES if isinstance(exc, kind)), "tsa")
+            return cls(
+                code,
+                f"Zaman damgası alınamadı; kayıt yazılmadı: {exc}",
+                f"The time stamp could not be taken; no record was written: {exc}",
+            )
+        return cls(
+            "io_error",
+            "Yeniden damgalama bir dosya hatasıyla durdu; sonraki çalışma yarım kalanı "
+            f"toplar: {exc}",
+            f"Re-stamping stopped on a file error; the next run tidies what is left: {exc}",
+        )
+
+    @classmethod
+    def refused(cls, cause: str, exc: BaseException) -> _RenewError:
+        # An error with texts of its own gives each language its own (its str() is "TR [EN]").
+        text_tr = text_en = str(exc)
+        if isinstance(exc, RenewalLegalRootsError):
+            text_tr, text_en = exc.message_tr, exc.message_en
+        return cls(
+            cause,
+            f"Yapılandırma yeniden damgalamaya izin vermiyor ({cause}): {text_tr}",
+            f"The configuration refuses re-stamping ({cause}): {text_en}",
+        )
+
+    def as_json(self) -> dict[str, str]:
+        return asdict(self)
+
+
+def _renew_cause(app: App, exc: BaseException) -> str:
+    """Why the run is refused: the provider cannot be made (the causes of :func:`_sealer`), or
+    it claims legal grade while no listed root is pinned, or the stamp's own root is not listed
+    (W5-A-13)."""
+    if isinstance(exc, SecretStoreError):
+        return "secret-store"
+    if isinstance(exc, TsaExecutableError):
+        return "executable"
+    if isinstance(exc, RenewalLegalRootsError):  # legal-roots, before or after the stamp (W5-A-13)
+        return exc.cause
+    return _provider_cause(app)
+
+
+def _fresh_status(app: App, roots: Sequence[Any] | None, now: datetime) -> RenewalReport | None:
+    """The statuses after a run that wrote nothing: computed afresh when the roots are known
+    (time passes while the server fails: a token turns uncovered), else None (the last known
+    ones are kept)."""
+    if roots is None:
+        return None
+    try:
+        return renewal_status(app.layout, app.config, roots, now)
+    except OSError as exc:
+        log.warning("renew: the statuses cannot be computed: %s", exc)
+        return None
+
+
+def _due(report: RenewalReport | None) -> list[str]:
+    tokens = report.tokens if report is not None else ()
+    return [token.path for token in tokens if token.status in ("due", "uncovered")]
+
+
+def cmd_renew(args: argparse.Namespace, app: App) -> int:
+    """``renew``: re-stamp every time stamp that is due with one renewal record (the ``Renew``
+    task, contract 2.1.3). Exit 0: renewed, or nothing was due; 1: renewed, but some token is
+    still ``uncovered``; 2: the configuration refused (no provider credentials, no usable pinned
+    root, a provider that cannot run); 3: the time-stamp server failed, or the run did
+    (retryable; also when another run holds ``state/renewal/renewal.lock``). ``--dry-run`` takes
+    no stamp and writes no record: it computes the statuses and exits 0 or 1 by the same rule.
+
+    Every run but a busy one writes ``state/renewal/renewal.json`` (W5-A-2), also after a
+    failure: ``last_run`` and ``failures_in_a_row`` are what W5-E's "Renew failed twice in a row"
+    reads. A dry run writes the statuses and keeps ``last_run``; while only an earlier release's
+    ``state/renewal.json`` exists it writes nothing (W5-E-8). The whole run, the state write
+    included, holds ``state/renewal/renewal.lock``, so two runs never write the file over each
+    other; a run that finds the lock held writes nothing. The errors are caught here: ``main``
+    would turn every :class:`TsaError` into exit 1.
+    """
+    now = utc_now()
+    try:
+        with one_run(app.layout):
+            return _renew_held(args, app, now)
+    except RenewalBusyError as exc:
+        return _renew_done(args, app, "busy", 3, now=now, error=_RenewError.of(exc))
+    except RenewalLockError as exc:
+        # No run can hold the lock: the failure is still recorded for the alerts.
+        return _renew_done(args, app, "failed", 3, now=now, error=_RenewError.of(exc))
+
+
+def _renew_held(args: argparse.Namespace, app: App, now: datetime) -> int:
+    """:func:`cmd_renew` while it holds ``state/renewal/renewal.lock``."""
+    try:
+        roots = app.roots()
+    except (TsaConfigurationError, ValueError, OSError) as exc:  # none pinned, or unreadable
+        return _renew_refused(args, app, now, None, "roots", exc)
+    if args.dry_run:
+        try:
+            report = renewal_status(app.layout, app.config, roots, now)
+        except OSError as exc:
+            return _renew_done(args, app, "failed", 3, now=now, error=_RenewError.of(exc))
+        code = 1 if report.totals["uncovered"] else 0
+        return _renew_done(args, app, "dry_run", code, now=now, report=report, due=_due(report))
+    try:
+        provider = app.provider()
+    except (SecretStoreError, TsaConfigurationError) as exc:
+        return _renew_refused(args, app, now, roots, _renew_cause(app, exc), exc)
+    try:
+        run = renew_held(app.layout, app.config, provider, roots, now)
+    except RenewalNotNeeded as exc:
+        return _renew_done(args, app, "not_needed", 0, now=now, report=exc.report)
+    except TsaConfigurationError as exc:
+        # Found only at stamp time: no Java, no client, or legal-roots (no listed root pinned
+        # before the stamp, or the stamp's own root not listed after it; W5-A-13).
+        return _renew_refused(args, app, now, roots, _renew_cause(app, exc), exc)
+    except (TsaError, RenewalError, OSError, subprocess.SubprocessError) as exc:
+        log.error("renew failed: %s", exc)
+        fresh = _fresh_status(app, roots, now)
+        return _renew_done(
+            args,
+            app,
+            "failed",
+            3,
+            now=now,
+            report=fresh,
+            due=_due(fresh),
+            error=_RenewError.of(exc),
+        )
+    code = 1 if run.report_after.totals["uncovered"] else 0
+    return _renew_done(
+        args,
+        app,
+        "renewed",
+        code,
+        now=now,
+        report=run.report_after,
+        due=_due(run.report_before),
+        run=run,
+    )
+
+
+def _renew_refused(
+    args: argparse.Namespace,
+    app: App,
+    now: datetime,
+    roots: Sequence[Any] | None,
+    cause: str,
+    exc: BaseException,
+) -> int:
+    report = _fresh_status(app, roots, now)
+    return _renew_done(
+        args,
+        app,
+        "refused",
+        2,
+        now=now,
+        report=report,
+        due=_due(report),
+        error=_RenewError.refused(cause, exc),
+    )
+
+
+def _renew_done(
+    args: argparse.Namespace,
+    app: App,
+    outcome: str,
+    code: int,
+    *,
+    now: datetime,
+    report: RenewalReport | None = None,
+    due: Sequence[str] = (),
+    run: RenewalRun | None = None,
+    error: _RenewError | None = None,
+) -> int:
+    """Write ``state/renewal/renewal.json``, print the outcome and return the exit code.
+
+    A busy run writes nothing (the run holding the lock writes the file), nor does a dry run
+    without statuses or while only an earlier release's file exists (W5-E-8); every other call
+    holds ``state/renewal/renewal.lock`` (or found it unusable). A state file that cannot be
+    written fails the run (exit 3): the alerts and the Sistem page judge from it."""
+    written = False
+    dry_run = bool(args.dry_run)
+    if outcome != "busy" and (report is not None or not dry_run):
+        last_run = None
+        if not dry_run:
+            last_run = LastRun(
+                at=now,
+                outcome=cast(Outcome, outcome),  # never "busy" or "dry_run" here
+                exit_code=code,
+                record=run.record_path if run is not None else None,
+                error=error.code if error is not None else None,
+            )
+        try:
+            state = write_state(
+                app.layout,
+                report,
+                at=now,
+                renew_before=renew_before_days(app.config),
+                last_run=last_run,
+            )
+            written = state is not None
+        except OSError as exc:
+            log.error("renew: state/renewal/renewal.json not written: %s", exc)
+            print(
+                f"Hata [error]: state/renewal/renewal.json yazılamadı [cannot be written]: {exc}",
+                file=sys.stderr,
+            )
+            code = 3
+    if error is not None:
+        print(f"Hata [error]: {error.message_tr} [{error.message_en}]", file=sys.stderr)
+    if args.json:
+        _print_json(
+            {
+                "outcome": outcome,
+                "exit_code": code,
+                "dry_run": dry_run,
+                "record": run.record_path if run is not None else None,
+                "reason": run.reason if run is not None else None,
+                "due": list(due),
+                "renewed": list(run.renewed) if run is not None else [],
+                "discarded": list(run.discarded) if run is not None else [],
+                "error": error.as_json() if error is not None else None,
+                "state_written": written,
+                "report": report.as_json() if report is not None else None,
+            }
+        )
+    else:
+        _print_renewal(outcome, report, due, run)
+    return code
+
+
+def _print_renewal(
+    outcome: str, report: RenewalReport | None, due: Sequence[str], run: RenewalRun | None
+) -> None:
+    if outcome == "dry_run":
+        print(
+            "Deneme: damga alınmadı, kayıt yazılmadı [dry run: no stamp taken, no record written]."
+        )
+        if due:
+            print(f"Yeniden damgalanacak damgalar [stamps to re-stamp] ({len(due)}):")
+            for path in due:
+                print(f"  {path}")
+    if run is not None:
+        print(
+            f"Yenileme kaydı yazıldı [renewal record written]: {run.record_path} "
+            f"({len(run.renewed)} damga [stamp(s)])"
+        )
+        if run.reason == "test":
+            print(
+                "UYARI [WARNING]: sağlayıcı yasal geçerli damga beyan etmiyor; bu kayıt yeniden "
+                "damgalama sayılmaz (reason: test) [the provider does not claim legal grade; this "
+                "record never counts as re-stamping]."
+            )
+    if report is None:
+        return
+    if outcome in ("not_needed", "dry_run") and not due:
+        print("Yeniden damgalanması gereken damga yok [no time stamp is due for re-stamping].")
+    totals = ", ".join(f"{status} {count}" for status, count in report.totals.items())
+    print(f"Durum [status]: {totals}")
+    uncovered = [token.path for token in report.tokens if token.status == "uncovered"]
+    if uncovered:
+        count = len(uncovered)
+        print(
+            f"UYARI [WARNING]: {count} damganın sertifikası yeniden damgalanmadan sona erdi; "
+            "damgalar geçerliliğini korur, ancak uzun süreli kanıt için yeniden damgalama "
+            f"önerilir. [{count} stamp certificate(s) expired without re-stamping; the stamps "
+            "stay valid, but re-stamping is recommended for long-term evidence.]"
+        )
+        for path in uncovered:
+            print(f"  {path}")
+    for label, paths in (
+        ("okunamayan damgalar [unreadable stamps]", report.unreadable),
+        (
+            "damgaladığı dosyayla eşleşmeyen damgalar [stamps that do not match their file]",
+            report.mismatched,
+        ),
+    ):
+        if paths:
+            print(f"UYARI [WARNING]: {label}: {', '.join(paths)}")
+    for note in report.notes:
+        print(f"NOT [NOTE]: {note.message_tr} [{note.message_en}]")
+
+
 def _operator() -> str:
     try:
         return f"cli:{getpass.getuser()}"
@@ -800,7 +1214,7 @@ def cmd_evidence(args: argparse.Namespace, app: App) -> int:
             lookup_id=args.lookup_id,
             reference=args.reference,
             site_name=app.config.site_name,
-            crl_dir=args.crl_dir or app.layout.state / "crl",
+            crl_dir=args.crl_dir or app.layout.crl_dir,
             include_audit_log=args.include_audit_log,
             legal_root_fingerprints=app.config.tsa.legal_root_fingerprints,
         )
@@ -920,6 +1334,18 @@ def _build_parser() -> argparse.ArgumentParser:
         "config-check", help="what a production configuration still lacks (exit 1: incomplete)"
     )
     config_check.add_argument("--json", action="store_true")
+    crl = commands.add_parser("crl", help="revocation lists (SİL/CRL) of the time stamps")
+    crl_commands = crl.add_subparsers(dest="crl_command", required=True)
+    crl_fetch = crl_commands.add_parser("fetch", help="download, verify and store the lists")
+    crl_fetch.add_argument("--json", action="store_true")
+    crl_commands.add_parser("status", help="the index, and the count and size of the lists")
+    renew_cmd = commands.add_parser(
+        "renew", help="re-stamp the time stamps whose TSA certificate comes due (Renew task)"
+    )
+    renew_cmd.add_argument(
+        "--dry-run", action="store_true", help="only the statuses: no stamp, no record"
+    )
+    renew_cmd.add_argument("--json", action="store_true")
 
     secret = commands.add_parser("secret", help="encrypted credentials")
     secret_commands = secret.add_subparsers(dest="secret_command", required=True)
@@ -986,6 +1412,8 @@ HANDLERS = {
     "secret": cmd_secret,
     "status": cmd_status,
     "config-check": cmd_config_check,
+    "crl": cmd_crl,
+    "renew": cmd_renew,
     "evidence": cmd_evidence,
 }
 

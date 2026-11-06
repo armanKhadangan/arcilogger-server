@@ -24,11 +24,11 @@ endpoints the pages use are in section 10.
 |---|---|---|
 | **General** (`/settings/general`) | organisation name (`site_name`), local and fallback time source (`[clock] ntp_server`, `[clock] fallback_server`), clock offset alert threshold (`[clock] alert_offset_ms`); the last measured offset is shown, a new time server is tried before it is saved | `[clock] ntp_port` |
 | **Application settings** (`/settings/application`) | the database settings by group (alerts and e-mail, 5651 lookup and lease timeline, search and live tail, usage analytics with the work hours and holidays, usage reports, evidence packages, sessions, passwords and privacy, database); in the 5651 lookup group the **Internet exits (NAT)** editor, under it the "Kayıtlarda görülen NAT adresleri" (NAT addresses seen in the logs) panel, and **Rebuild the leases** (at most 31 days) | `devices.oui_file`, `usage.psl_file`, which name files |
-| **Kamu SM** (`/settings/kamusm`) | a wizard: Java (one of those the administration service found on the server), Zamane client (upload), root certificates (add) and legal root fingerprints (installed roots only), customer number and password (tried with a credit query when saved), **Stamp test (uses 1 credit)**, **Switch to production** (and back to test), credit alert threshold and timeout; `[seal]` read-only | the mock or another provider, a free URL or port, the digest, removing a root or a fingerprint, a free `java` path, approving an unknown Zamane release (`approve-jar`, section 4) |
-| **Sources** (`/settings/sources`) | add a log source, edit it (the name is fixed), switch it on or off (`[[sources]] enabled`), remove it (typing its name); the table shows the last message and the firewall state | the whole `[collector]` section (bind address, ports, TLS, `unknown_senders`) |
+| **Zaman damgası** (Time stamping, `/settings/kamusm`) | a wizard: Java (one of those the administration service found on the server), Zamane client (upload), root certificates (add) and legal root fingerprints (installed roots only), customer number and password (tried with a credit query when saved), **Stamp test (uses 1 credit)**, **Switch to production** (and back to test), credit alert threshold and timeout; four server choices: Kamu SM test, Kamu SM production, TÜRKTRUST (HTTPS) and TÜRKTRUST over plain HTTP (confirmed only by typing `HTTP`; [turktrust.md](turktrust.md)), the TÜRKTRUST username and password; the re-stamping and revocation-list settings (`[tsa] renew_before_days`, `[tsa] crl_urls`, `[tsa] crl_max_age_days`; [TIME-STAMPING.md](TIME-STAMPING.md) section 7); `[seal]` read-only | the mock or another provider, a free URL or port (another TÜRKTRUST URL path included, T1), the digest, removing a root or a fingerprint, a free `java` path, approving an unknown Zamane release (`approve-jar`, section 4), clearing the TÜRKTRUST account (`secret delete turktrust.username` / `turktrust.password`) |
+| **Sources** (`/settings/sources`) | add a log source, edit it (the name is fixed), switch it on or off (`[[sources]] enabled`), remove it (typing its name); the table shows the last message and the firewall state; the source's SNMP part (`[sources.snmp]`: on/off, port, SNMPv3 user, protocols, WAN interfaces, capacity, read interval; the two keys `snmp.<source>.auth_key` and `snmp.<source>.priv_key` in the secret store), the connection is tried when saving, and the refusal of a wrong interface name lists the device's interfaces ([LIVE-STATUS.md](LIVE-STATUS.md) section 3) | the whole `[collector]` section (bind address, ports, TLS, `unknown_senders`) |
 | **E-mail** (`/settings/email`) | `[smtp]` (on/off, server, port, security, user, sender, timeout), the SMTP password, a CA file for the server's certificate (upload, or back to the Windows certificate store), the alert e-mail settings (`alerts.email_*`: recipients, lowest severity, hourly limit …); a trial e-mail before saving; **Send a test e-mail** (with the saved settings, at most 5 an hour) | — |
 | **Replica** (`/settings/replica`) | on/off, target (`\\SERVER\share` only), user, password; the connection is tried when saving; **Test the connection** (the saved target, at most once a minute) | a local folder as target |
-| **Retention** (`/settings/retention`) | deleting expired days on/off, the retention period (at least 730 days); the number of days it deletes is shown first and typed to confirm | — |
+| **Retention** (`/settings/retention`) | deleting expired days on/off, the retention period (at least 730 days); the number of days it deletes is shown first and typed to confirm. Only in `arcilogger.toml`: `[retention] batch_days` (default 30, 1–180), the days the oldest expired day waits before every expired day is deleted under one stamped record, so expired days go at the first run that finds the batch due, not always the next one | — |
 | **Backup** (`/settings/backup`) | on/off, `[backup] keep_daily`, `[backup] keep_weekly`, `[backup] keep_monthly`, `[backup] min_free_gb`; this version does not show the last backup's details on the page, a failed backup is an `R20-backup` alert | `[backup] dir`, `[backup] pg_dump`, `[backup] pg_restore` |
 | **Change history** (`/settings/history`) | the requests, their states and changes, a link to the audit log; **Cancel**, **Revert**; the configuration versions; **Download the diagnostics package** (a ZIP for support, no secrets) | restoring a version (`versions restore`, the page shows the command) |
 | **First-run wizard** (`/settings/setup`) | changes no value itself: it shows the steps after the installation in order and opens one of the pages above in each step (below) | — |
@@ -43,6 +43,45 @@ administrator.
 change that breaks this. When you lower the interval below 300 seconds, change both settings in
 one save. A time written outside this rule (by hand in SQL) is read by the lease job as the
 default (300 seconds, at most the interval), with a warning in the worker log.
+
+**The days a lookup reads** (same group): the days a 5651 lookup reads (reloaded from the archive
+when the database no longer has them) grow with the longest session, the DNS look-back and the
+longest lease timeout; one reload holds at most 14 days. These settings therefore have upper
+bounds, so that every lookup's days fit one reload:
+
+| Setting | Default | Bounds |
+|---|---|---|
+| `lookup.max_session_seconds` | 86400 (1 day) | 60–172800 (2 days) |
+| `lookup.dns_lookback_seconds` | 3600 | 0–604800 (7 days) |
+| `lease.default_seconds` | 86400 (1 day) | 60–604800 (7 days, FortiOS's default `lease-time`, [DEVICE-SETUP.md](DEVICE-SETUP.md) section 2.4) |
+| `lease.server_seconds` | `{}` | each server 60–604800 (7 days) |
+| `lease.timeout_percent` | 110 | 100–125 |
+| `arp.interval_seconds` | 3600 | 60–604800 (7 days) |
+
+The browser and the console both refuse a value of these settings above its bound (for example
+"Must be between 60 and 604800."); a server time above 604800 seconds in `lease.server_seconds` is
+refused by the API when it is saved ("Each DHCP server needs a time between 60 and 604800 seconds
+(7 days)."). For a server whose lease time is longer than 7 days, at most 7 days can be entered;
+ARCILOGGER then closes that server's leases 7 days × `lease.timeout_percent` after their last
+evidence. The logged lease time of FortiGate leases (`dhcp.fortigate_use_logged_lease`) is not
+bound by it. MikroTik's own default lease time is not stated in these documents (**sahada
+doğrula**, verify on site): the bounds lie above ARCILOGGER's defaults (a 1-day lease, ARP-LOG
+every hour). The 2-day bound of `lookup.max_session_seconds` is to be verified on site against
+the FortiGate's session times as well.
+
+A value stored before these bounds is read as it is: while a lookup's days are in the database
+the lookup answers, and when the days it needs back from the archive fit one reload (14 days) it
+asks for them with 409 `archive_reload_required`. A lookup that needs more than 14 days back is
+refused with 503 `lookup_settings_invalid`, whose text names the setting above its bound and the
+days: bring the value within the bounds.
+
+**When is an archive reload needed?** The database keeps the last 30 days (`db.retention_days`),
+and with the default settings a lookup also reads up to 8 days before the moment asked for (the
+longest lease timeout: 7 days × `lease.timeout_percent`). So for a moment older than about
+**22 days** a 5651 lookup first asks for those days to be reloaded from the archive (409
+`archive_reload_required`; the lookup page shows the archive card, and once the reload is ready
+the same lookup runs again, [CORRELATION.md](CORRELATION.md)).
+Reloaded days are dropped again `db.reload_keep_days` (7) days later.
 
 The **first-run wizard** ("İlk kurulum sihirbazı", `/settings/setup`) shows what is left to do after
 the installation as a checklist: Administrator and two-step verification, Site settings, Log
@@ -68,7 +107,8 @@ counts for the licence's source number. A **removed** source closes the same way
 the database for the history, switched off and no longer expected, so R15 and the dashboard stop
 waiting for it.
 
-**Secret values** (the Kamu SM customer number and password, the SMTP and replica passwords)
+**Secret values** (the Kamu SM customer number and password, the TÜRKTRUST username and password,
+the SNMPv3 keys, the SMTP and replica passwords)
 never reach the screen: the fields show "Stored ✓" and the time of the last change; **Change**
 writes a new one. The password is asked again (within the last 5 minutes) for the Kamu SM settings
 (except the credit threshold and the timeout; the customer number and password included), every
@@ -202,6 +242,20 @@ administrator enters the dates of the religious holidays every year. Details:
 | `alerts.filter_days` | `[1,2,3,4,5,6,7]` (every day) | each 1–7 (1 = Monday, 7 = Sunday), stored sorted without duplicates; may be empty (no day expected) | the ISO weekdays on which content filter records are expected; one day number per line on the page |
 | `alerts.filter_skip_holidays` | on | — | on: no record is expected on the days of `usage.holidays`; off: public holidays count as expected days |
 | `alerts.filter_quiet_hours` | 24 | 6–168 | the longest time without a record on expected days (hours) |
+
+The **Database** group says how long the parsed records stay in the database. The raw records in
+the sealed vault are not affected. The worker job `db.window` drops the days older than the
+window every night after 01:00; a day not sealed yet and the days of an active archive reload are
+never dropped. When an older day is needed, the 5651 lookup and Search ask for it with "arşivden
+yeniden yükle" (reload from the archive). Both settings are retention periods of personal data:
+a change needs the password again and is audited as `settings.change`. Details:
+[DATA-MODEL.md](DATA-MODEL.md) "Retention",
+[legal/saklama-imha-politikasi-taslak.md](legal/saklama-imha-politikasi-taslak.md).
+
+| Setting | Default | Bounds | Meaning |
+|---|---|---|---|
+| `db.retention_days` | 30 (400 in earlier versions; the upgrade changes a 400 to 30 and a value below 7 to 7, and keeps any other value) | at least 7 | the days of logs the database keeps; older days are dropped every night and reloaded from the sealed vault on request |
+| `db.reload_keep_days` | 7 | 1–30 | how many days the days reloaded from the archive stay in the database after their reload finished; then they are dropped again. These days contain personal data |
 
 ## 2. How it works
 

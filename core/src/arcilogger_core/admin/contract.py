@@ -68,6 +68,7 @@ from pydantic import (
 from arcilogger_core.admin.messages import MESSAGES, WARNINGS
 from arcilogger_core.config import EMAIL_ADDRESS, SourceConfig
 from arcilogger_core.layout import RequestQueue
+from arcilogger_core.secretstore import is_snmp_key
 
 # -- schemas ------------------------------------------------------------------------------------
 
@@ -119,7 +120,19 @@ OpKind = Literal[
     "smtp_ca_clear",
 ]
 #: The stored secrets the browser may set or delete; every other name is ``schema_invalid``.
-BrowserSecret = Literal["kamusm.customer", "kamusm.password", "smtp.password", "replica.password"]
+BrowserSecret = Literal[
+    "kamusm.customer",
+    "kamusm.password",
+    "turktrust.username",
+    "turktrust.password",
+    "smtp.password",
+    "replica.password",
+]
+#: A source's two SNMPv3 keys (Wave 5 §6 N1: ``snmp.<source>.auth_key`` and ``.priv_key``), set or
+#: deleted with the ``sources`` section.
+SnmpKeyName = Annotated[
+    str, StringConstraints(pattern=r"^snmp\.[a-z0-9][a-z0-9-]{0,62}\.(?:auth|priv)_key$")
+]
 UploadKind = Literal["kamusm_root", "zamane_client", "smtp_ca"]
 TaskKind = Literal["seal", "credit", "tsa_test", "replica_test"]
 KeyRole = Literal["api", "agent"]
@@ -564,7 +577,7 @@ class SetOp(_Model):
 
 class SecretSetOp(_Model):
     op: Literal["secret_set"]
-    name: BrowserSecret
+    name: BrowserSecret | SnmpKeyName
     expect: Literal["set", "unset"]
     #: ``SecretStore.encrypt_value(plaintext)``: the same format as a value of secrets.json.
     token: FernetToken
@@ -572,7 +585,7 @@ class SecretSetOp(_Model):
 
 class SecretDeleteOp(_Model):
     op: Literal["secret_delete"]
-    name: BrowserSecret
+    name: BrowserSecret | SnmpKeyName
     expect: Literal["set", "unset"]
 
 
@@ -907,16 +920,52 @@ class VersionRef(_Model):
     to: Sha256
 
 
+#: ``ifOperStatus`` (RFC 2863) by name, as ``OperStatus`` of ``activity-types.ts``.
+OperStatusName = Literal[
+    "up", "down", "testing", "unknown", "dormant", "not_present", "lower_layer_down"
+]
+#: The ``snmp`` probe's interface list in a request status: at most this many entries …
+PROBE_INTERFACES_MAX: Final = 256
+#: … each name at most this long (W5-N-9).
+PROBE_INTERFACE_NAME_MAX: Final = 64
+#: The failures of the ``snmp`` probe that come with the device's interface list.
+INTERFACE_CODES: Final = frozenset({"snmp_no_such_interface", "snmp_no_hc_counters"})
+
+
+class ProbeInterface(_Model):
+    """One interface the device reported to the ``snmp`` probe (``ifName``, W5-N-9): the
+    browser offers these names when the configured one is not found. No person data, no key."""
+
+    name: Annotated[str, StringConstraints(min_length=1, max_length=PROBE_INTERFACE_NAME_MAX)]
+    oper_status: OperStatusName | None
+    speed_mbps: Annotated[int, Field(ge=0)] | None
+
+    @field_validator("name")
+    @classmethod
+    def _printable(cls, name: str) -> str:
+        if not name.isprintable():
+            raise ValueError("an interface name has only printable characters")
+        return name
+
+
 class ErrorRef(_Model):
     code: str
     #: The configuration path the code is about, when there is one.
     field: ConfigPath | None = None
+    #: What the device reported, for :data:`INTERFACE_CODES` only (W5-N-9).
+    interfaces: Annotated[tuple[ProbeInterface, ...], Field(max_length=PROBE_INTERFACES_MAX)] = ()
 
     @field_validator("code")
     @classmethod
     def _code(cls, code: str) -> str:
         _known_code(code, MESSAGES)
         return code
+
+    @model_validator(mode="after")
+    def _interfaces_of_snmp(self) -> ErrorRef:
+        if self.interfaces and self.code not in INTERFACE_CODES:
+            raise ValueError(f"interfaces come only with {sorted(INTERFACE_CODES)}")
+        return self
 
 
 class WarningRef(_Model):
@@ -1016,7 +1065,7 @@ class SecretChange(_Model):
 class SecretRecord(_Model):
     """One ``settings.secret_change`` audit entry (``operator: "web:<username>"``)."""
 
-    name: BrowserSecret
+    name: BrowserSecret | SnmpKeyName
     action: Literal["set", "delete", "restore"]
     #: ``stored``, ``deleted``, ``absent`` (as ``secretstore.record_change``).
     result: Annotated[str, StringConstraints(pattern=r"^[a-z_]{1,32}$")]
@@ -1054,7 +1103,9 @@ class JournalLine(_Model):
     @model_validator(mode="after")
     def _secrets_masked(self) -> JournalLine:
         for path, change in self.changes.items():
-            if path in BROWSER_SECRETS and not isinstance(change, SecretChange):
+            if (path in BROWSER_SECRETS or is_snmp_key(path)) and not isinstance(
+                change, SecretChange
+            ):
                 raise ValueError(f"{path} is a secret: only set/unset may be journaled")
         _check_unverified(self.state, self.kind, self.section, self.code)
         if self.kind is not None and self.requested_by is None:
@@ -1209,12 +1260,21 @@ def _syslog_sender(value: str) -> str:
     return value
 
 
+#: The strict outbound rule of a source's SNMP (Wave 5 §6 N3): ``ARCILOGGER SNMP <source>``, UDP.
+SNMP_RULE_PREFIX: Final = "ARCILOGGER SNMP "
+
+
 class OutboundRule(_Model):
     """One host of a strict outbound rule; a rule with several hosts or ports has one entry
-    each (``Set-ArciFirewall.ps1`` names the rules)."""
+    each (``Set-ArciFirewall.ps1`` names the rules; TURKTRUST, CRL and Proxy: Wave 5 W5-T-3; NTP
+    and SNMP are UDP, the others TCP)."""
 
     rule: Annotated[
-        str, StringConstraints(pattern=r"^ARCILOGGER Out (NTP|Kamu SM|SMTP( [2-9])?|Replica)$")
+        str,
+        StringConstraints(
+            pattern=r"^ARCILOGGER (Out (NTP|Kamu SM|SMTP( [2-9])?|Replica|TURKTRUST|CRL|Proxy)"
+            r"|SNMP [a-z0-9][a-z0-9-]{0,62})$"
+        ),
     ]
     host: HostName
     port: int = Field(ge=1, le=65535)

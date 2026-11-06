@@ -85,9 +85,9 @@ departmanlar ve sunucu ayarları kurulumdan sonra web arayüzünde tanımlanır
 
 ## Durum
 
-Bu sürüm (0.1.0, **MVP**): M2/M3'ün temel parçaları, kimlik doğrulama ve denetim kaydı (M6'dan)
-ve Windows kurulum programı (M7'den). Tablo, 0.1.0'dan sonra eklenenleri de gösterir
-([CHANGELOG.md](CHANGELOG.md), "Unreleased").
+Bu sürüm (0.2.0, ilk etiketli sürüm): MVP (M2/M3'ün temel parçaları, kimlik doğrulama ve
+denetim kaydı (M6'dan), Windows kurulum programı (M7'den)) ve ardından eklenenler (Wave 0–5).
+Tablo her aşamanın bugünkü durumunu gösterir ([CHANGELOG.md](CHANGELOG.md), "0.2.0").
 
 | Aşama | Kapsam | Durum |
 |---|---|---|

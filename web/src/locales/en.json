@@ -9,6 +9,7 @@
     "dashboard": "Dashboard",
     "sources": "Sources",
     "live": "Live tail",
+    "activity": "Live status",
     "search": "Search",
     "lookup": "5651 lookup",
     "usage": "Usage",
@@ -377,7 +378,7 @@
     "sections": {
       "general": "General",
       "sources": "Sources",
-      "kamusm": "Kamu SM",
+      "kamusm": "Time stamping",
       "sealing": "Sealing",
       "retention": "Retention",
       "replica": "Replica",
@@ -394,7 +395,7 @@
       "general": "The organisation's name, the time sources and the clock offset alert threshold.",
       "application": "Alerts, 5651 lookup, usage (work hours and holidays), reports, sessions and privacy.",
       "history": "Changes and actions made in the browser, with their state.",
-      "kamusm": "Kamu SM time stamps: Java, the Zamane client, root certificates, customer credentials, test and production server.",
+      "kamusm": "Time stamping (Kamu SM Zamane or TÜRKTRUST): the server, root certificates, credentials, a stamp test; Java and the Zamane client for Kamu SM.",
       "sources": "Devices that send logs: address, type, expected heartbeat and firewall state.",
       "email": "The SMTP server of the alert e-mails, the recipients and a test e-mail.",
       "replica": "The network share the sealed days are copied to, with a connection test.",
@@ -479,15 +480,37 @@
       "addServer": "Add a server",
       "errors": {
         "workDays": "Choose at least one work day.",
-        "workTime": "Enter the times as HH:MM (e.g. 08:00).",
-        "workOrder": "Work must start before it ends.",
+        "workTime": "$t(settings.application.weekdays.{{day}}): enter the times as HH:MM (e.g. 08:00).",
+        "workOrder": "$t(settings.application.weekdays.{{day}}): work must start before it ends.",
         "holiday": "Enter the date as MM-DD or YYYY-MM-DD.",
         "totpRoles": "Two-factor authentication is mandatory for the administrator and auditor roles.",
         "serverName": "The DHCP server's name cannot be empty.",
-        "serverSeconds": "The lease time must be at least 60 seconds.",
+        "serverSeconds": "Each DHCP server needs a lease time between {{min}} and {{max}} seconds.",
+        "serverSecondsMin": "The lease time must be at least {{min}} seconds.",
         "integerList": "Write one whole number of 0 or more per line.",
-        "object": "Enter a valid JSON object."
-      }
+        "object": "Enter a valid JSON object.",
+        "breakCount": "$t(settings.application.weekdays.{{day}}): at most {{max}} breaks a day.",
+        "breakTime": "$t(settings.application.weekdays.{{day}}): enter the break times as HH:MM (e.g. 12:30).",
+        "breakShort": "$t(settings.application.weekdays.{{day}}): each break must last at least {{min}} minutes.",
+        "breakOutside": "$t(settings.application.weekdays.{{day}}): breaks must be inside the work hours.",
+        "breakOverlap": "$t(settings.application.weekdays.{{day}}): breaks must not overlap."
+      },
+      "workDay": "Day",
+      "breaks": "Breaks",
+      "preview": "Preview",
+      "applyAll": "Apply to all days",
+      "applyAllFrom": "Apply to all days ({{day}}'s hours)",
+      "dayStart": "{{day}}: work starts",
+      "dayEnd": "{{day}}: work ends",
+      "breakStart": "{{day}}: break {{number}} starts",
+      "breakEnd": "{{day}}: break {{number}} ends",
+      "removeBreak": "Remove break {{number}} of {{day}}",
+      "addBreak": "Add a break",
+      "addBreakFor": "Add a break on {{day}}",
+      "stripOff": "{{day}}: no work",
+      "stripInvalid": "{{day}}: the hours are not valid",
+      "stripWork": "{{day}}: work {{hours}}, no breaks",
+      "stripBreaks": "{{day}}: work {{hours}}, breaks {{breaks}}"
     },
     "history": {
       "title": "Change history",
@@ -540,9 +563,9 @@
       }
     },
     "kamusm": {
-      "title": "Kamu SM time stamps",
-      "description": "Setting up the Kamu SM Zamane time-stamp service used for the daily sealing, step by step. A change that would stop sealing is not applied.",
-      "provider": "The time-stamp provider in use: {{provider}}. Every change saved on this page switches to the Kamu SM Zamane server; a change that would stop sealing is not applied.",
+      "title": "Time stamping",
+      "description": "Setting up the time-stamp service used for the daily sealing (Kamu SM Zamane or TÜRKTRUST), step by step. A change that would stop sealing is not applied.",
+      "provider": "The time-stamp provider in use: {{provider}}. Every change saved on this page switches to the Kamu SM Zamane test server; the Kamu SM production server or TÜRKTRUST is chosen in the \"Switch to production\" step. A change that would stop sealing is not applied.",
       "stepsLabel": "Setup steps",
       "probing": "Connecting to Kamu SM…",
       "unsaved": "Other steps have unsaved changes; save them on their step or discard them.",
@@ -576,7 +599,7 @@
         },
         "production": {
           "title": "Switch to production",
-          "description": "Once everything is in place, switch to the production server. Switching back to the test server stops production stamps."
+          "description": "Once everything is in place, switch to the Kamu SM production server or to TÜRKTRUST. Switching back to the test server stops production stamps."
         },
         "credit": {
           "title": "Credit alert threshold",
@@ -1304,7 +1327,7 @@
       "timestamp": {
         "notRequested": "No time stamp was requested for the report (Settings: lookup.report_timestamp off).",
         "failedTitle": "The report could not be time-stamped",
-        "notLegal": "The report hash was stamped by the provider {{provider}}; it is not the Kamu SM production server, so the stamp has no legal validity. For trials only.",
+        "notLegal": "The report hash was stamped by the provider {{provider}}; it is neither the Kamu SM nor the TÜRKTRUST production server, so the stamp has no legal validity. For trials only.",
         "status": "Time stamp",
         "stampedVerified": "Stamped and verified",
         "stampedUnverified": "Stamped, not verified",
@@ -1494,8 +1517,7 @@
     }
   },
   "sealing": {
-    "description": "Every day is sealed at night: its files are compressed, hashed with SHA-256, chained to the previous day, and the daily manifest is time-stamped by Kamu SM.",
-    "providerNotLegal": "The configured time-stamp provider ({{provider}}) is not the Kamu SM production server: its stamps have no legal validity. Production must use the Kamu SM production server only.",
+    "description": "Every day is sealed at night: its files are compressed, hashed with SHA-256, chained to the previous day, and the daily manifest is time-stamped (Kamu SM or TÜRKTRUST).",
     "calendarTitle": "Seal calendar",
     "counts": "Days of this month",
     "replicaDisabled": "Second copy (replica) disabled",
@@ -1539,7 +1561,6 @@
       "title": "{{day}}",
       "overdue": "Overdue",
       "sealedOk": "{{day}} was sealed and verified.",
-      "notLegal": "This day's time stamp was issued by the provider {{provider}} and has no legal validity (test/mock). In production only stamps of the Kamu SM production server are valid.",
       "rootUnconfirmed": "This day's manifest says its time stamp comes from the Kamu SM production server ({{provider}}). The day is not shown as legally valid because the root certificate's SHA-256 fingerprint is not listed in tsa.legal_root_fingerprints, or the stamp did not verify. Compare the root's fingerprint with the value Kamu SM publishes."
     },
     "verify": {
@@ -2171,11 +2192,13 @@
       "label": "Hours",
       "all": "All hours",
       "work": "Work hours",
+      "break": "Breaks",
       "off": "Off hours",
-      "hint": "Work hours come from the server settings (default Monday–Friday 08:00–18:00)."
+      "hint": "Work hours and breaks come from the server settings (Settings → Application settings; default Monday–Friday 08:00–18:00, no breaks)."
     },
     "computed": {
       "today": "Data processed up to {{time}}",
+      "updated": "Last update {{updated}} (data up to {{time}})",
       "other": "Data processed up to {{date}} {{time}}",
       "endOfDay": "Data processed up to the end of {{date}}",
       "none": "The usage data has not been computed yet"
@@ -2191,6 +2214,7 @@
       "sessions": "Sessions",
       "blocked": "Blocked",
       "offHours": "Off hours",
+      "breaks": "Breaks",
       "firstLast": "First / last activity",
       "firstLastShort": "First – last",
       "time": "Time",
@@ -2207,6 +2231,8 @@
       "perUser": "Average per user {{value}}",
       "offHours": "Active time outside work hours",
       "offHoursShare": "Share of the active time: {{share}}",
+      "breaks": "Active time in the breaks of the work hours",
+      "breaksShare": "Share of the active time: {{share}}",
       "sessions": "Separate connection sessions",
       "blocked": "Web, DNS and application filter",
       "firstLast": "First and last active minute",
@@ -3213,7 +3239,7 @@
     },
     "sections": {
       "general": "General",
-      "tsa": "Kamu SM",
+      "tsa": "Time stamping",
       "smtp": "E-mail (SMTP)",
       "replica": "Replica",
       "retention": "Retention",

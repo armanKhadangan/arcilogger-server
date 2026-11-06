@@ -74,12 +74,21 @@ from arcilogger_core.config import (
     KAMUSM_PRODUCTION_HOST,
     KAMUSM_TEST_HOST,
     MIN_RETENTION_DAYS,
+    TURKTRUST_PRODUCTION_HOST,
     Config,
+    NetworkConfig,
     SourceConfig,
+    TsaConfig,
     replica_target_text,
 )
 from arcilogger_core.execpolicy import TrustAnchors
-from arcilogger_core.secretstore import SecretValueError, check_secret_value
+from arcilogger_core.secretstore import (
+    SecretValueError,
+    check_secret_value,
+    is_snmp_key,
+    snmp_auth_key,
+    snmp_priv_key,
+)
 from arcilogger_core.smbshare import unc_root
 from arcilogger_core.tsa.preflight import executables_trusted, production_missing
 from arcilogger_core.tsa.zamane_releases import find_release
@@ -115,13 +124,31 @@ EDITABLE: Final[Mapping[str, Editable]] = MappingProxyType(
             "clock.ntp_server",
             "clock.fallback_server",
             "clock.alert_offset_ms",
+            "network.https_proxy",
         ),
         **_paths("tsa", "server", True, "tsa.provider", "tsa.url", "tsa.port"),
         **_paths("tsa", "value", False, "tsa.credit_alert_threshold", "tsa.timeout_seconds"),
-        **_paths("tsa", "value", True, "tsa.java"),
+        **_paths(
+            "tsa",
+            "value",
+            True,
+            "tsa.java",
+            "tsa.allow_plain_http",
+            "tsa.renew_before_days",
+            "tsa.crl_urls",
+            "tsa.crl_max_age_days",
+        ),
         **_paths("tsa", "promotion", True, "tsa.zamane_jar"),
         **_paths("tsa", "legal_root", True, "tsa.legal_root_fingerprints"),
-        **_paths("tsa", "secret", True, "kamusm.customer", "kamusm.password"),
+        **_paths(
+            "tsa",
+            "secret",
+            True,
+            "kamusm.customer",
+            "kamusm.password",
+            "turktrust.username",
+            "turktrust.password",
+        ),
         **_paths(
             "smtp",
             "value",
@@ -152,10 +179,11 @@ EDITABLE: Final[Mapping[str, Editable]] = MappingProxyType(
         **_paths("sources", "source", False, "sources"),
     }
 )
-#: The secret of each section the browser may set (``kamusm.*`` belong to ``tsa``).
+#: The secret of each section the browser may set (``kamusm.*`` and ``turktrust.*`` belong to
+#: ``tsa``).
 SECTION_SECRETS: Final[Mapping[Section, tuple[BrowserSecret, ...]]] = MappingProxyType(
     {
-        "tsa": ("kamusm.customer", "kamusm.password"),
+        "tsa": ("kamusm.customer", "kamusm.password", "turktrust.username", "turktrust.password"),
         "smtp": ("smtp.password",),
         "replica": ("replica.password",),
     }
@@ -219,13 +247,22 @@ SECTION_PATHS: Final[Mapping[Section, tuple[str, ...]]] = MappingProxyType(
     }
 )
 
-#: The two Zamane servers the browser may choose: provider, URL, port.
+#: The time-stamp servers the browser may choose: provider, URL, port. The two Zamane servers
+#: of Kamu SM, and TÜRKTRUST over HTTPS or, only with ``tsa.allow_plain_http`` and a typed
+#: confirmation, over plain HTTP (contract §2.4; the password then travels unencrypted).
 TSA_SERVERS: Final[Mapping[str, tuple[str, str, int]]] = MappingProxyType(
     {
         "test": ("zamane", f"http://{KAMUSM_TEST_HOST}", 80),
         "production": ("zamane", f"http://{KAMUSM_PRODUCTION_HOST}", 80),
+        "turktrust": ("turktrust", f"https://{TURKTRUST_PRODUCTION_HOST}/", 443),
+        "turktrust-http": ("turktrust", f"http://{TURKTRUST_PRODUCTION_HOST}/", 80),
     }
 )
+#: The TÜRKTRUST choices, and the one that sends the password in clear text.
+TURKTRUST_SERVERS: Final = frozenset({"turktrust", "turktrust-http"})
+TURKTRUST_PLAIN_HTTP: Final = "turktrust-http"
+#: The secrets a TÜRKTRUST server needs (``tsa_not_ready`` names the missing ones).
+TURKTRUST_SECRETS: Final[tuple[BrowserSecret, ...]] = ("turktrust.username", "turktrust.password")
 #: Hosts an SMTP password may go to without encryption (a relay on this server).
 LOCAL_SMTP_HOSTS: Final = frozenset({"localhost", "127.0.0.1", "::1"})
 
@@ -277,13 +314,13 @@ class Problem:
         return HTTP_STATUS.get(self.code, 422)
 
 
-Probes = Literal["sntp", "credit", "smtp", "replica"]
+Probes = Literal["sntp", "credit", "smtp", "replica", "snmp"]
 
 
 @dataclass(frozen=True)
 class Probe:
     """A connection test with the candidate values (``probe.py``): the SNTP server to ask, or
-    the credit query, the trial e-mail, the replica share."""
+    the credit query, the trial e-mail, the replica share, a source's SNMP (its name)."""
 
     kind: Probes
     target: str | None = None
@@ -423,6 +460,27 @@ def secret_state(name: str, stored: frozenset[str]) -> Literal["set", "unset"]:
     return "set" if name in stored else "unset"
 
 
+def _polled_differently(before: SourceConfig | None, after: SourceConfig) -> bool:
+    """``after`` is polled differently from ``before``: a new source, or its ``[sources.snmp]``
+    table (switched on, user, protocols, port, interfaces, capacities) or address changed."""
+    return before is None or before.snmp != after.snmp or before.address != after.address
+
+
+def snmp_keys(source: str) -> tuple[str, str]:
+    """A source's two SNMPv3 keys in the secret store (Wave 5 §6 N1)."""
+    return snmp_auth_key(source), snmp_priv_key(source)
+
+
+def section_secrets(section: Section, config: Config) -> tuple[str, ...]:
+    """The secrets a section shows as set/unset: its fixed ones, and for ``sources`` the SNMP keys
+    of every source with an ``[sources.snmp]`` table."""
+    if section == "sources":
+        return tuple(
+            name for source in config.sources if source.snmp for name in snmp_keys(source.name)
+        )
+    return SECTION_SECRETS.get(section, ())
+
+
 def tsa_server(provider: Any, url: Any, port: Any) -> str:
     """``test``, ``production``, ``mock`` or ``custom`` (an RFC 3161 server, another URL)."""
     for name, server in TSA_SERVERS.items():
@@ -436,7 +494,11 @@ def section_values(
 ) -> dict[str, JsonValue]:
     """The values of a section the browser edits (secrets as ``set``/``unset``)."""
     if section == "sources":
-        return {"sources": [source.model_dump(mode="json") for source in config.sources]}
+        return {
+            "sources": [source.model_dump(mode="json") for source in config.sources],
+            # the SNMP keys as set/unset: setting one changes the section's etag too
+            **{name: secret_state(name, stored) for name in section_secrets(section, config)},
+        }
     values = {path: current_value(config, path) for path in SECTION_PATHS[section]}
     for name in SECTION_SECRETS.get(section, ()):
         values[name] = secret_state(name, stored)
@@ -534,6 +596,28 @@ def replica_user_ok(user: str) -> bool:
 
 def _integer(value: Any, low: int, high: int) -> bool:
     return isinstance(value, int) and not isinstance(value, bool) and low <= value <= high
+
+
+def _crl_urls_ok(value: Any) -> bool:
+    """``tsa.crl_urls`` as :class:`~arcilogger_core.config.TsaConfig` accepts it (§2.5, C10)."""
+    if not isinstance(value, list) or not all(isinstance(url, str) for url in value):
+        return False
+    try:
+        TsaConfig(crl_urls=tuple(value))
+    except ValidationError:
+        return False
+    return True
+
+
+def _proxy_ok(value: Any) -> bool:
+    """``network.https_proxy`` as :class:`~arcilogger_core.config.NetworkConfig` accepts it."""
+    if not isinstance(value, str):
+        return False
+    try:
+        NetworkConfig(https_proxy=value)
+    except ValidationError:
+        return False
+    return True
 
 
 def _posix(path: Path) -> str:
@@ -665,7 +749,8 @@ class _Run:
         self._put(op.path, op.value)
 
     def _secret(self, op: SecretSetOp | SecretDeleteOp) -> None:
-        if not self._in_section(EDITABLE[op.name].section, op.name):
+        section: Section = "sources" if is_snmp_key(op.name) else EDITABLE[op.name].section
+        if not self._in_section(section, op.name):
             return
         if op.name in self.secret_changes:
             self.error("config_invalid", op.name)
@@ -816,9 +901,10 @@ class _Run:
     def _source_change(
         self, name: str, before: SourceConfig | None, after: SourceConfig | None
     ) -> None:
+        # exclude_none: a source without SNMP journals as before (no ``snmp: null`` row)
         self.changes[f"sources.{name}"] = {
-            "old": before.model_dump(mode="json") if before else None,
-            "new": after.model_dump(mode="json") if after else None,
+            "old": before.model_dump(mode="json", exclude_none=True) if before else None,
+            "new": after.model_dump(mode="json", exclude_none=True) if after else None,
         }
 
     def _source_gone(self, before: SourceConfig) -> None:
@@ -844,6 +930,53 @@ class _Run:
             return False
         return True
 
+    def _snmp_keys(self) -> None:
+        """A source whose SNMP this request switches on needs both keys, stored or set here
+        (``snmp_secret_missing``); a key is set only for a source that is there afterwards.
+
+        The device is probed (N5) only when the change reaches it differently (SNMP switched
+        on, its settings, the device's address or its keys) and only for a source that stays
+        switched on. The browser sends a source's stored ``[sources.snmp]`` with every change of
+        it (W5-P-13): switching off a source whose device is down, or editing its heartbeat,
+        must not wait for the device to answer."""
+        after = {source.name: source for source in (self.sources or self.current.sources)}
+        before = {source.name: source for source in self.current.sources}
+        for key, token in self.secret_changes.items():
+            if is_snmp_key(key) and token is not None:
+                owner = key.split(".")[1]
+                if owner not in after:
+                    self.error("source_not_found", f"sources.{owner}")
+        for path in list(self.changes):
+            name = path.removeprefix("sources.")
+            changed = after.get(name) if path.startswith("sources.") else None
+            if changed is None or changed.snmp is None or not changed.snmp.enabled:
+                continue
+            if any(key not in self.secrets_after for key in snmp_keys(name)):
+                self.error("snmp_secret_missing", f"sources.{name}.snmp")
+            elif changed.enabled and _polled_differently(before.get(name), changed):
+                self._snmp_probe(changed)  # N5: the device answers with these settings and keys
+        for key in self.secret_changes:
+            keyed = after.get(key.split(".")[1]) if is_snmp_key(key) else None
+            if keyed is not None and keyed.enabled and keyed.snmp and keyed.snmp.enabled:
+                self._snmp_probe(keyed)  # new keys for an SNMP that stays on
+
+    def _snmp_probe(self, source: SourceConfig) -> None:
+        """The ``snmp`` probe of N5; in strict outbound mode ``ARCILOGGER SNMP <source>`` exists
+        only after ApplySystem, so a new device address or port is not probed before then."""
+        before = {old.name: old for old in self.current.sources}.get(source.name)
+        reached = (
+            before is not None
+            and before.snmp is not None
+            and source.snmp is not None
+            and before.snmp.enabled
+            and before.address == source.address
+            and before.snmp.port == source.snmp.port
+        )
+        if self.context.strict_outbound and not reached:
+            self.warn("probe_skipped", f"sources.{source.name}.snmp")
+        else:
+            self.probe("snmp", source.name)
+
     # -- result ----------------------------------------------------------------------------------
 
     def result(self, ops: Sequence[Op], options: Mapping[str, JsonValue]) -> SectionCheck:
@@ -860,6 +993,7 @@ class _Run:
                 "new": "set" if token is not None else "deleted",
                 "changed": True,
             }
+        self._snmp_keys()
         candidate = None
         edits: list[Edit] = []
         if not self.errors:
@@ -990,6 +1124,13 @@ def _general(run: _Run) -> None:
         run.value("clock.alert_offset_ms"), 1, 60_000
     ):
         run.error("config_invalid", "clock.alert_offset_ms")
+    if run.changed("network.https_proxy"):
+        if not _proxy_ok(run.value("network.https_proxy")):
+            run.error("config_invalid", "network.https_proxy")
+        run.reauth = True
+        run.effects |= {"reload.api", "reload.worker"}
+        if run.context.strict_outbound:
+            run.effects.add("system.firewall")
     if not any(path.startswith("clock.") for path in run.set_paths):
         return
     run.reauth = True
@@ -1027,6 +1168,24 @@ def _tsa(run: _Run) -> None:
         run.value("tsa.timeout_seconds"), 5, 600
     ):
         run.error("config_invalid", "tsa.timeout_seconds")
+    if run.changed("tsa.renew_before_days") and not _integer(
+        run.value("tsa.renew_before_days"), 30, 730
+    ):
+        run.error("config_invalid", "tsa.renew_before_days")
+    if run.changed("tsa.crl_max_age_days") and not _integer(
+        run.value("tsa.crl_max_age_days"), 1, 60
+    ):
+        run.error("config_invalid", "tsa.crl_max_age_days")
+    if run.changed("tsa.crl_urls") and not _crl_urls_ok(run.value("tsa.crl_urls")):
+        run.error("config_invalid", "tsa.crl_urls")
+    if run.changed("tsa.allow_plain_http") and not isinstance(
+        run.value("tsa.allow_plain_http"), bool
+    ):
+        run.error("config_invalid", "tsa.allow_plain_http")
+    elif after == TURKTRUST_PLAIN_HTTP and run.value("tsa.allow_plain_http") is not True:
+        # §2.4: TÜRKTRUST over plain HTTP only with tsa.allow_plain_http (the password then
+        # travels in clear text).
+        run.error("config_invalid", "tsa.allow_plain_http")
     if run.changed("tsa.java"):
         java = run.value("tsa.java")
         if (
@@ -1058,6 +1217,9 @@ def _tsa(run: _Run) -> None:
                 run.warn("production_not_tested", "tsa.provider")
         if run.context.strict_outbound:
             run.effects.add("system.firewall")
+    plain_http = run.changed("tsa.allow_plain_http") or run.changed("tsa.crl_urls")
+    if plain_http and run.context.strict_outbound:
+        run.effects.add("system.firewall")
 
 
 def _tsa_candidate(run: _Run, candidate: Config) -> None:
@@ -1066,6 +1228,10 @@ def _tsa_candidate(run: _Run, candidate: Config) -> None:
     stored = frozenset(run.secrets_after)
     before = tsa_server(run.old("tsa.provider"), run.old("tsa.url"), run.old("tsa.port"))
     after = tsa_server(candidate.tsa.provider, candidate.tsa.url, candidate.tsa.port)
+    if after in TURKTRUST_SERVERS and before not in TURKTRUST_SERVERS:
+        missing_secrets = [name for name in TURKTRUST_SECRETS if name not in stored]
+        if missing_secrets:
+            run.error("tsa_not_ready", "tsa.provider", missing=missing_secrets)
     if after == "production" and before != "production":
         missing = production_missing(
             candidate,
@@ -1343,7 +1509,7 @@ class _Body:
         if value != expect or type(value) is not type(expect):  # 1 is no "true", 800.0 no 800
             self.ops.append(SetOp(op="set", path=path, expect=expect, value=value))
 
-    def secret(self, name: BrowserSecret, value: Any) -> None:
+    def secret(self, name: str, value: Any) -> None:
         if not isinstance(value, str):
             self.error("secret_invalid", name)
             return
@@ -1359,7 +1525,7 @@ class _Body:
             )
         )
 
-    def delete(self, name: BrowserSecret) -> None:
+    def delete(self, name: str) -> None:
         if name in self.stored and not any(
             isinstance(op, SecretSetOp | SecretDeleteOp) and op.name == name for op in self.ops
         ):
@@ -1386,6 +1552,13 @@ def _body_general(body: _Body, data: Mapping[str, Any]) -> None:
     if "site_name" in data:
         site = data["site_name"]
         body.set("site_name", site.strip() if isinstance(site, str) else site)
+    network = data.get("network")
+    if network is not None:
+        if not isinstance(network, Mapping):
+            body.error("config_invalid", "network")
+        elif "https_proxy" in network:
+            proxy = network["https_proxy"]
+            body.set("network.https_proxy", proxy.strip() if isinstance(proxy, str) else proxy)
     clock = data.get("clock")
     if clock is None:
         return
@@ -1416,7 +1589,21 @@ def _body_tsa(body: _Body, data: Mapping[str, Any]) -> None:
             body.set("tsa.port", port)
             if before == "production" and server == "test" and data.get("confirm") is not True:
                 body.error("tsa_confirm_required", "tsa.provider")
-    for key in ("credit_alert_threshold", "timeout_seconds"):
+            if (
+                server == TURKTRUST_PLAIN_HTTP
+                and before != TURKTRUST_PLAIN_HTTP
+                and data.get("confirm") is not True
+            ):
+                # Its own code (#204): the reason is the account in clear text, not production.
+                body.error("tsa_plain_http_confirm_required", "tsa.provider")
+    for key in (
+        "credit_alert_threshold",
+        "timeout_seconds",
+        "allow_plain_http",
+        "renew_before_days",
+        "crl_urls",
+        "crl_max_age_days",
+    ):
         if key in data:
             body.set(f"tsa.{key}", data[key])
     if "java" in data:
@@ -1435,6 +1622,13 @@ def _body_tsa(body: _Body, data: Mapping[str, Any]) -> None:
         for key, name in names:
             if data.get(key) is not None:
                 body.secret(name, data[key])
+    turktrust: tuple[tuple[str, BrowserSecret], ...] = (
+        ("turktrust_username", "turktrust.username"),
+        ("turktrust_password", "turktrust.password"),
+    )
+    for key, name in turktrust:
+        if data.get(key) is not None:
+            body.secret(name, data[key])
     root = data.get("root")
     if root is not None:
         info = body.upload(root, "kamusm_root")
@@ -1569,6 +1763,8 @@ def _body_sources(body: _Body, data: Mapping[str, Any]) -> None:
         if data.get("confirm") != name:
             body.error("source_confirm_mismatch", f"sources.{name}")
         body.ops.append(SourceRemoveOp(op="source_remove", name=name, expect=current[name]))
+        for key in snmp_keys(name):  # a removed source's SNMP keys go with it
+            body.delete(key)
         return
     raw = data.get("source")
     if not isinstance(raw, Mapping):
@@ -1583,8 +1779,15 @@ def _body_sources(body: _Body, data: Mapping[str, Any]) -> None:
         label = fields.get("name")
         known = isinstance(label, str) and _SOURCE_NAME.fullmatch(label) is not None
         for error in exc.errors(include_input=False, include_url=False):
-            key = str(error["loc"][0]) if error["loc"] else ""
-            body.error("source_invalid", f"sources.{label}.{key}" if known and key else "sources")
+            part = str(error["loc"][0]) if error["loc"] else ""
+            code = "source_invalid"
+            if "snmp_source_is_network" in str(error.get("msg", "")):
+                code = "snmp_source_is_network"  # N1: a single address only
+                part = "snmp"
+            elif "source_ipv6_unsupported" in str(error.get("msg", "")):
+                code = "source_ipv6_unsupported"  # the SNMP transport is IPv4 only
+                part = "address"
+            body.error(code, f"sources.{label}.{part}" if known and part else "sources")
         return
     if name is None:
         body.ops.append(SourceAddOp(op="source_add", source=source))
@@ -1594,6 +1797,10 @@ def _body_sources(body: _Body, data: Mapping[str, Any]) -> None:
         body.ops.append(
             SourceUpdateOp(op="source_update", name=name, expect=current[name], source=source)
         )
+    # The SNMPv3 keys (N1): write-only, never in the source itself or in an answer.
+    for given, key in zip(("snmp_auth_key", "snmp_priv_key"), snmp_keys(source.name), strict=True):
+        if data.get(given) is not None:
+            body.secret(key, data[given])
 
 
 _BODIES: Final[Mapping[Section, Callable[[_Body, Mapping[str, Any]], None]]] = MappingProxyType(

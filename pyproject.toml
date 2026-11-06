@@ -1,6 +1,6 @@
 [project]
 name = "arcilogger-workspace"
-version = "0.1.0"
+version = "0.2.0"
 description = "ARCILOGGER monorepo (uv workspace root, not a distributable package)"
 requires-python = ">=3.12"
 readme = "README.md"
@@ -120,6 +120,11 @@ ignore_missing_imports = true
 [[tool.mypy.overrides]]
 # openpyxl (usage Excel exports) ships no type information.
 module = ["openpyxl", "openpyxl.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# pysnmp and pyasn1 (W5-N: the internet line's speed over SNMPv3) ship no type information.
+module = ["pysnmp", "pysnmp.*", "pyasn1", "pyasn1.*"]
 ignore_missing_imports = true
 
 # ---------------------------------------------------------------------------------------------

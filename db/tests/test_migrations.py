@@ -30,7 +30,7 @@ from arcilogger_db.testing import TestServer
 
 BASELINE = "0001_baseline"
 #: Newest revision (re-chained by the orchestrator when parallel revisions are merged).
-HEAD = "0020_fg_traffic_transip_time"
+HEAD = "0023_usage_period"
 
 
 @pytest.fixture
@@ -266,7 +266,9 @@ def test_lease_times_an_earlier_version_seeded_survive_the_new_empty_default(
     empty_engine: Engine, author: str, kept_by: str
 ) -> None:
     """0013: a guest server's lease time seeded by an earlier version is not reset to ``{}``."""
-    upgrade(empty_engine, revision="0012_alert_events")
+    # One month back, not the 400-day window's: the downgrade through 0021_db_window merges the
+    # daily partitions month by month, and fewer of them keep this test short.
+    upgrade(empty_engine, revision="0012_alert_events", months_back=1)
     with empty_engine.begin() as connection:
         connection.execute(
             text(

@@ -10,6 +10,7 @@ import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
+import arcilogger_core
 from arcilogger_core.canonical import canonical_json
 from arcilogger_core.license.codec import (
     CROCKFORD_ALPHABET,
@@ -41,10 +42,20 @@ NOW = datetime(2026, 10, 20, 9, 30, 15, tzinfo=UTC)
 TURKISH = "Örnek Ağ Şirketi İçin Çalışma ığüşöç ĞÜŞİÖÇ"
 
 
+#: A fixed product version, so the published payload below does not change with each release.
+VERSION = "0.1.0"
+
+
 def request(
     identity: ServerIdentity = WINDOWS, organization: str = "Örnek A.Ş.", now: datetime = NOW
 ) -> LicenseRequest:
-    return new_request(identity, installation_id=INSTALLATION, organization=organization, now=now)
+    return new_request(
+        identity,
+        installation_id=INSTALLATION,
+        organization=organization,
+        now=now,
+        product_version=VERSION,
+    )
 
 
 def code_of(text: str) -> str:
@@ -92,6 +103,11 @@ def test_the_published_payload_and_encoding() -> None:
     data = crockford_decode(data_part(code))
     assert data == body + hashlib.sha256(body).digest()[:5]
     assert request_sha256(req) == hashlib.sha256(body).hexdigest()
+
+
+def test_a_new_request_names_the_running_version() -> None:
+    req = new_request(WINDOWS, installation_id=INSTALLATION, organization="", now=NOW)
+    assert req.product_version == arcilogger_core.__version__
 
 
 @pytest.mark.parametrize("identity", [WINDOWS, WINDOWS_WITHOUT_SMBIOS, LINUX])

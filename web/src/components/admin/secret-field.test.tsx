@@ -94,5 +94,13 @@ describe('labels of change paths', () => {
     expect(pathLabel('kamusm.customer', t)).toBe('Kamu SM müşteri numarası');
     expect(pathLabel('tsa.server', t)).toBe('Zaman damgası sunucusu');
     expect(pathLabel('tsa.unknown_key', t)).toBe('tsa.unknown_key');
+    // A source's SNMP table and its two keys (Wave 5 §6 N1).
+    expect(pathLabel('sources.fw-merkez.snmp.interfaces', t)).toBe(
+      'fw-merkez · SNMP: WAN arayüzleri',
+    );
+    expect(pathLabel('snmp.fw-merkez.auth_key', t)).toBe(
+      'fw-merkez · SNMP kimlik doğrulama anahtarı',
+    );
+    expect(pathLabel('snmp.fw-merkez.priv_key', t)).toBe('fw-merkez · SNMP şifreleme anahtarı');
   });
 });

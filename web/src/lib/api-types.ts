@@ -548,6 +548,11 @@ export interface CreditCheck {
 export interface Credits {
   provider: string;
   legal_grade: boolean;
+  /**
+   * `false`: the provider offers no credit query (`rfc3161`, `turktrust`; Wave 5 contract 2.4,
+   * C3, C21). The card then shows the neutral text of 2.6 instead of a number.
+   */
+  supported: boolean;
   threshold: number;
   latest: CreditCheck | null;
   /** The last known number (the newest check that returned one). */
@@ -1028,10 +1033,23 @@ export interface SealCalendarDay {
   status: SealDayState;
 }
 
+/**
+ * A closed day without a time stamp longer than `seal.late_after_hours` after its end (Wave 5
+ * contract 2.3.1, decision 11): the Panel's blocking card.
+ */
+export interface SealBlocking {
+  /** The oldest such day (it can be older than the calendar's 30 days). */
+  oldest_unstamped_day: DateString;
+  /** Whole hours since the end of that day. */
+  hours_late: number;
+}
+
 /** "Dünkü mühür" and the 30 days ending yesterday (`seal.read`). */
 export interface DashboardSeal {
   yesterday: SealYesterday;
   calendar: SealCalendarDay[];
+  /** `null` when no closed day is late, or when the spool cannot be listed (unknown). */
+  blocking: SealBlocking | null;
 }
 
 /** "Kontör" (`seal.read`). */
@@ -1115,7 +1133,8 @@ export interface DashboardSummary {
 export interface UsagePeriod {
   from: DateString;
   to: DateString;
-  hours: 'all' | 'work' | 'off';
+  /** `work` excludes the breaks of the work hours (contract W5 §6 K4); `all` is every part. */
+  hours: 'all' | 'work' | 'break' | 'off';
 }
 
 /** Usage figures: estimates computed from connection logs, never exact screen time. */
@@ -1127,6 +1146,8 @@ export interface Metrics {
   sessions: number;
   blocked: number;
   off_hours_active_seconds: number;
+  /** Active time in the breaks of the work hours (W5-K); 0 without breaks. */
+  break_active_seconds: number;
   first_activity: DateTimeString | null;
   last_activity: DateTimeString | null;
 }
@@ -1185,6 +1206,8 @@ export interface CompanyUsage {
   estimated: boolean;
   /** How far the rollups have processed traffic. */
   computed_until: DateTimeString | null;
+  /** When the newest rollup of the period was computed (W5-L): "Son güncelleme". */
+  updated_at: DateTimeString | null;
   /** Locale key of the method note (`usage.method_note`). */
   notice_key: string;
   active_users: number;
@@ -1370,6 +1393,12 @@ export interface BlockedRow {
 }
 
 /** Merged active minutes of one day. */
+/** A break of the work hours (instants, end exclusive). */
+export interface BreakSpan {
+  start: DateTimeString;
+  end: DateTimeString;
+}
+
 export interface TimelineSpan {
   start: DateTimeString;
   end: DateTimeString;
@@ -1411,6 +1440,8 @@ export interface SubjectPage {
   period: UsagePeriod;
   estimated: boolean;
   computed_until: DateTimeString | null;
+  /** When the newest rollup of the period was computed (W5-L): "Son güncelleme". */
+  updated_at: DateTimeString | null;
   notice_key: string;
 }
 
@@ -1423,6 +1454,8 @@ export interface DepartmentPage {
   period: UsagePeriod;
   estimated: boolean;
   computed_until: DateTimeString | null;
+  /** When the newest rollup of the period was computed (W5-L): "Son güncelleme". */
+  updated_at: DateTimeString | null;
   notice_key: string;
 }
 
@@ -1469,6 +1502,8 @@ export interface SubjectDetail {
   period: UsagePeriod;
   estimated: boolean;
   computed_until: DateTimeString | null;
+  /** When the newest rollup of the period was computed (W5-L): "Son güncelleme". */
+  updated_at: DateTimeString | null;
   notice_key: string;
   subject: SubjectRef;
   department: string | null;
@@ -1477,6 +1512,8 @@ export interface SubjectDetail {
   metrics: Metrics;
   /** Only for a single day (`from == to`), else empty. */
   timeline: TimelineSpan[];
+  /** The breaks of the day as its rollup counted them (one-day periods only, W5-K); empty without. */
+  breaks: BreakSpan[];
   sites: SiteRow[];
   categories: CategoryRow[];
   apps: AppRow[];
@@ -1501,6 +1538,8 @@ export interface SitePage {
   period: UsagePeriod;
   estimated: boolean;
   computed_until: DateTimeString | null;
+  /** When the newest rollup of the period was computed (W5-L): "Son güncelleme". */
+  updated_at: DateTimeString | null;
   notice_key: string;
 }
 
@@ -1519,6 +1558,8 @@ export interface SiteDetail {
   period: UsagePeriod;
   estimated: boolean;
   computed_until: DateTimeString | null;
+  /** When the newest rollup of the period was computed (W5-L): "Son güncelleme". */
+  updated_at: DateTimeString | null;
   notice_key: string;
   domain: string;
   category: string | null;
@@ -1536,6 +1577,8 @@ export interface CategoryList {
   period: UsagePeriod;
   estimated: boolean;
   computed_until: DateTimeString | null;
+  /** When the newest rollup of the period was computed (W5-L): "Son güncelleme". */
+  updated_at: DateTimeString | null;
   notice_key: string;
   items: CategoryRow[];
 }
@@ -1548,6 +1591,8 @@ export interface CategoryDetail {
   period: UsagePeriod;
   estimated: boolean;
   computed_until: DateTimeString | null;
+  /** When the newest rollup of the period was computed (W5-L): "Son güncelleme". */
+  updated_at: DateTimeString | null;
   notice_key: string;
   category: string;
   totals: CategoryRow;

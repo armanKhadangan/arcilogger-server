@@ -6,6 +6,7 @@ import {
 
 import {
   addClause,
+  archivedDaysOf,
   completions,
   evidenceHandoff,
   fieldNames,
@@ -17,6 +18,7 @@ import {
   scanState,
   splitClauses,
   termToQuery,
+  truncationOf,
 } from './search-model';
 import { CATALOGUE, EMPTY, page, row, stats } from './test-data';
 
@@ -269,5 +271,31 @@ describe('the hand-over to the evidence wizard', () => {
       sha256: 'b'.repeat(64),
     });
     expect([handed.from_day, handed.to_day]).toEqual(['2026-10-09', '2026-10-09']);
+  });
+});
+
+describe('the export file', () => {
+  const file = (headers: Record<string, string>) => ({ headers: new Headers(headers) });
+
+  it('is partial at the row limit, the time budget or for days not in the database', () => {
+    expect(truncationOf(file({ 'X-Arci-Export-Truncated': 'rows' }))).toBe('rows');
+    expect(truncationOf(file({ 'X-Arci-Export-Truncated': 'time' }))).toBe('time');
+    expect(truncationOf(file({ 'X-Arci-Export-Truncated': 'archived' }))).toBe('archived');
+    expect(truncationOf(file({ 'X-Arci-Export-Truncated': 'days' }))).toBeNull();
+    expect(truncationOf(file({}))).toBeNull();
+  });
+
+  it('names the days not in the database: one day or a span, nothing for another form', () => {
+    expect(archivedDaysOf(file({ 'X-Arci-Export-Archived': '2026-10-04' }))).toEqual({
+      first_day: '2026-10-04',
+      last_day: '2026-10-04',
+    });
+    expect(archivedDaysOf(file({ 'X-Arci-Export-Archived': '2026-10-04/2026-10-05' }))).toEqual({
+      first_day: '2026-10-04',
+      last_day: '2026-10-05',
+    });
+    for (const value of ['2026-10-04 - 2026-10-05', '2026-10-04/', '04.10.2026', ''])
+      expect(archivedDaysOf(file({ 'X-Arci-Export-Archived': value }))).toBeNull();
+    expect(archivedDaysOf(file({ 'X-Arci-Export-Truncated': 'rows' }))).toBeNull();
   });
 });

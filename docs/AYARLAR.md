@@ -24,11 +24,11 @@ değiştirilebilir", bölüm 5). Sayfaların kullandığı API uçları bölüm 
 |---|---|---|
 | **Genel** (`/settings/general`) | kuruluş adı (`site_name`), yerel ve yedek saat kaynağı (`[clock] ntp_server`, `[clock] fallback_server`), saat sapması uyarı eşiği (`[clock] alert_offset_ms`); son ölçülen sapma gösterilir, yeni saat sunucusu kaydetmeden önce denenir | `[clock] ntp_port` |
 | **Uygulama ayarları** (`/settings/application`) | veritabanındaki ayarlar, gruplarıyla (uyarılar ve e-posta, 5651 sorgu ve kira zaman çizelgesi, arama ve canlı akış, kullanım analizi ile mesai saatleri ve tatiller, kullanım raporları, kanıt paketleri, oturum, parola ve gizlilik, veritabanı); 5651 sorgu grubunda **İnternet çıkışları (NAT)** düzenleyicisi, altında "Kayıtlarda görülen NAT adresleri" paneli ve **Kiraları yeniden oluştur** (en çok 31 gün) | dosya yolu veren `devices.oui_file`, `usage.psl_file` |
-| **Kamu SM** (`/settings/kamusm`) | sihirbaz: Java (yönetim hizmetinin sunucuda bulduklarından biri), Zamane istemcisi (yükleme), kök sertifikalar (ekleme) ve yasal kök parmak izleri (yalnızca kurulu kökler için), müşteri numarası ve parola (kaydederken kontör sorgusuyla denenir), **Damga testi (1 kontör harcar)**, **Üretime geç** (ve teste dönüş), kontör uyarı eşiği ve zaman aşımı; `[seal]` yalnızca okunur | deneme (`mock`) ya da başka bir sağlayıcı, serbest adres veya port, özet algoritması, bir kökü ya da parmak izini kaldırmak, serbest bir `java` yolu, bilinmeyen bir Zamane sürümünün onayı (`approve-jar`, bölüm 4) |
-| **Kaynaklar** (`/settings/sources`) | log kaynağı ekleme, düzenleme (ad değişmez), açma/kapama (`[[sources]] enabled`), silme (adı yazılarak); tabloda son kayıt ve güvenlik duvarı durumu | `[collector]` bölümünün tamamı (dinleme adresi, portlar, TLS, `unknown_senders`) |
+| **Zaman damgası** (`/settings/kamusm`) | sihirbaz: Java (yönetim hizmetinin sunucuda bulduklarından biri), Zamane istemcisi (yükleme), kök sertifikalar (ekleme) ve yasal kök parmak izleri (yalnızca kurulu kökler için), müşteri numarası ve parola (kaydederken kontör sorgusuyla denenir), **Damga testi (1 kontör harcar)**, **Üretime geç** (ve teste dönüş), kontör uyarı eşiği ve zaman aşımı; sunucu seçiminde dört seçenek: Kamu SM test, Kamu SM üretim, TÜRKTRUST (HTTPS) ve TÜRKTRUST düz HTTP (yalnızca `HTTP` yazılarak onaylanır; [turktrust.md](turktrust.md)), TÜRKTRUST kullanıcı adı ve parolası; yeniden damgalama ve iptal listesi ayarları (`[tsa] renew_before_days`, `[tsa] crl_urls`, `[tsa] crl_max_age_days`; [ZAMAN-DAMGASI.md](ZAMAN-DAMGASI.md) bölüm 7); `[seal]` yalnızca okunur | deneme (`mock`) ya da başka bir sağlayıcı, serbest adres veya port (TÜRKTRUST'ın başka bir adres yolu dahil, T1), özet algoritması, bir kökü ya da parmak izini kaldırmak, serbest bir `java` yolu, bilinmeyen bir Zamane sürümünün onayı (`approve-jar`, bölüm 4), TÜRKTRUST hesabını silmek (`secret delete turktrust.username` / `turktrust.password`) |
+| **Kaynaklar** (`/settings/sources`) | log kaynağı ekleme, düzenleme (ad değişmez), açma/kapama (`[[sources]] enabled`), silme (adı yazılarak); tabloda son kayıt ve güvenlik duvarı durumu; kaynağın SNMP bölümü (`[sources.snmp]`: açık/kapalı, port, SNMPv3 kullanıcısı, protokoller, WAN arayüzleri, kapasite, okuma aralığı; iki anahtar `snmp.<kaynak>.auth_key` ve `snmp.<kaynak>.priv_key` gizli depoda), kaydederken cihaza bağlantı denenir, yanlış bir arayüz adının ret iletisi cihazın arayüzlerini listeler ([CANLI-DURUM.md](CANLI-DURUM.md) bölüm 3) | `[collector]` bölümünün tamamı (dinleme adresi, portlar, TLS, `unknown_senders`) |
 | **E-posta** (`/settings/email`) | `[smtp]` (açık/kapalı, sunucu, port, güvenlik, kullanıcı, gönderen, zaman aşımı), SMTP parolası, sunucu sertifikası için CA dosyası (yükleme ya da Windows sertifika deposuna dönüş), uyarı e-postası ayarları (`alerts.email_*`: alıcılar, en düşük önem, saatlik sınır …); kaydetmeden önce deneme e-postası; **Test e-postası gönder** (kayıtlı ayarlarla, saatte en çok 5) | — |
 | **Replika** (`/settings/replica`) | açık/kapalı, hedef (yalnızca `\\SUNUCU\paylaşım`), kullanıcı, parola; kaydederken bağlantı denenir; **Bağlantıyı test et** (kayıtlı hedefle, dakikada en çok 1) | yerel bir klasör hedefi |
-| **Saklama** (`/settings/retention`) | süresi dolan günleri silme açık/kapalı, saklama süresi (en az 730 gün); silinecek gün sayısı önceden gösterilir ve yazılarak onaylanır | — |
+| **Saklama** (`/settings/retention`) | süresi dolan günleri silme açık/kapalı, saklama süresi (en az 730 gün); silinecek gün sayısı önceden gösterilir ve yazılarak onaylanır. Yalnızca `arcilogger.toml`'da: `[retention] batch_days` (varsayılan 30, 1–180), süresi dolan en eski günün bekleyeceği gün sayısı; sonra süresi dolan bütün günler tek bir damgalı tutanakla silinir, yani günler bir sonraki çalışmada değil, toplu imhanın vakti gelen ilk çalışmada silinir | — |
 | **Yedekleme** (`/settings/backup`) | açık/kapalı, `[backup] keep_daily`, `[backup] keep_weekly`, `[backup] keep_monthly`, `[backup] min_free_gb`; son yedeğin ayrıntıları bu sürümde sayfada gösterilmez, başarısız bir yedek `R20-backup` uyarısıdır | `[backup] dir`, `[backup] pg_dump`, `[backup] pg_restore` |
 | **Değişiklik geçmişi** (`/settings/history`) | isteklerin listesi ve durumları, değişiklikleri, denetim kaydına bağlantı; **İptal et**, **Geri al**; yapılandırma sürümleri; **Tanılama paketini indir** (destek için ZIP, gizli bilgi içermez) | bir sürümü geri yüklemek (`versions restore`, sayfa komutu gösterir) |
 | **İlk kurulum sihirbazı** (`/settings/setup`) | kendisi hiçbir değeri değiştirmez: kurulumdan sonraki adımları sırayla gösterir ve her adımda yukarıdaki sayfalardan birini açar (aşağıda) | — |
@@ -43,6 +43,44 @@ yok say" (`arp.ignore_after_release_seconds`, 300 saniye) "ARP kaydı aralığı
 bozan değişikliği reddeder. Aralığı 300 saniyenin altına indirirken iki ayarı aynı kayıtta
 değiştirin. Bu kuralın dışında (elle SQL ile) yazılmış bir süreyi kira işi varsayılan olarak
 (300 saniye, en çok aralık kadar) okur ve worker günlüğüne bir uyarı yazar.
+
+**Sorgunun okuduğu günler** (aynı grup): bir 5651 sorgusunun okuduğu günler (veritabanında
+yoksa arşivden yeniden yüklenen günler) en uzun oturumla, DNS geriye bakışıyla ve en uzun kira
+zaman aşımıyla büyür; bir yükleme en çok 14 gün alır. Bu yüzden şu ayarların üst sınırı vardır,
+böylece her sorgunun günleri tek bir yüklemeye sığar:
+
+| Ayar | Varsayılan | Sınırlar |
+|---|---|---|
+| `lookup.max_session_seconds` | 86400 (1 gün) | 60–172800 (2 gün) |
+| `lookup.dns_lookback_seconds` | 3600 | 0–604800 (7 gün) |
+| `lease.default_seconds` | 86400 (1 gün) | 60–604800 (7 gün, FortiOS'un varsayılan `lease-time` değeri, [DEVICE-SETUP.md](DEVICE-SETUP.md) bölüm 2.4) |
+| `lease.server_seconds` | `{}` | her sunucu 60–604800 (7 gün) |
+| `lease.timeout_percent` | 110 | 100–125 |
+| `arp.interval_seconds` | 3600 | 60–604800 (7 gün) |
+
+Tarayıcı da konsol da bu ayarlarda sınırın üstündeki değeri reddeder (ör. "60 ile 604800
+arasında olmalı."); `lease.server_seconds` içinde 604800 saniyeden uzun bir sunucu süresini
+kaydederken API reddeder ("Her DHCP sunucusu için 60 ile 604800 saniye (7 gün) arasında bir süre
+gerekir."). 7 günden uzun kira süresi kullanan bir sunucu için en çok 7 gün girilebilir; o
+sunucunun kirası ARCILOGGER'da son kanıttan 7 gün × `lease.timeout_percent` sonra kapanır.
+FortiGate kiralarında kayıttaki kira süresi (`dhcp.fortigate_use_logged_lease`) bu sınıra bağlı
+değildir. MikroTik'in kendi varsayılan kira süresi bu belgelerde yoktur (**sahada doğrula**):
+sınırlar ARCILOGGER'ın varsayılanlarının (1 günlük kira, saatlik ARP-LOG) üstündedir. 2 günlük
+`lookup.max_session_seconds` sınırı da FortiGate oturum süreleriyle sahada doğrulanmalıdır.
+
+Bu sınırlardan önce kaydedilmiş bir değer olduğu gibi okunur: sorgunun günleri veritabanındaysa
+sorgu yanıt verir, arşivden geri getirilmesi gereken günleri tek bir yüklemeye (14 gün) sığıyorsa
+409 `archive_reload_required` ile o günleri ister. Geri getirilmesi gereken günleri 14'ten fazla
+olan bir sorgu ise 503 `lookup_settings_invalid` ile reddedilir; metin sınırın üstündeki ayarı ve
+günleri söyler: değeri sınırların içine çekin.
+
+**Ne zaman arşivden yükleme gerekir?** Veritabanı son 30 günü tutar (`db.retention_days`) ve
+varsayılan ayarlarla bir sorgu, istenen anın 8 güne kadar öncesini de okur (en uzun kira zaman
+aşımı: 7 gün × `lease.timeout_percent`). Bu yüzden yaklaşık **22 günden eski** bir an için 5651
+sorgusu önce o günlerin arşivden yeniden yüklenmesini ister (409 `archive_reload_required`; sorgu
+sayfası arşiv kartını gösterir, yükleme hazır olunca aynı sorgu yeniden çalışır,
+[CORRELATION.md](CORRELATION.md)). Yüklenen günler `db.reload_keep_days`
+(7) gün sonra yine silinir.
 
 **İlk kurulum sihirbazı** (`/settings/setup`) kurulumdan sonra yapılacakları bir denetim listesi
 olarak gösterir: Yönetici ve iki adımlı doğrulama, Site ayarları, Log kaynakları, Kamu SM: test
@@ -66,7 +104,8 @@ yine de gelen bir ileti **kaydedilir** (ham kayıt hiçbir zaman atılmaz). Kapa
 kaynak sayısında sayılmaya devam eder. **Silinen** bir kaynak da aynı biçimde kapanır; veritabanındaki
 satırı geçmiş için kalır, kapalı ve artık beklenmeyen olarak: R15 ve pano onu beklemez.
 
-**Gizli değerler** (Kamu SM müşteri numarası ve parolası, SMTP ve replika parolası) hiçbir zaman
+**Gizli değerler** (Kamu SM müşteri numarası ve parolası, TÜRKTRUST kullanıcı adı ve parolası,
+SNMPv3 anahtarları, SMTP ve replika parolası) hiçbir zaman
 ekrana gelmez: alanlar "Kayıtlı ✓" ve son değişiklik zamanını gösterir, **Değiştir** ile yenisi
 yazılır. Son 5 dakika içinde parolanın yeniden girilmesi şunlar için istenir: Kamu SM ayarları
 (kontör eşiği ve zaman aşımı dışında; müşteri numarası ve parola dahil), her SMTP, replika,
@@ -200,6 +239,19 @@ yıl yönetici girer. Ayrıntılar: [UYUM-DURUMU.md](UYUM-DURUMU.md) bölüm 2.7
 | `alerts.filter_days` | `[1,2,3,4,5,6,7]` (her gün) | her biri 1–7 (1 = Pazartesi, 7 = Pazar), sıralı ve tekrarsız saklanır; boş olabilir (hiçbir gün beklenmez) | içerik filtresi kaydı beklenen ISO hafta günleri; sayfada her satıra bir gün numarası |
 | `alerts.filter_skip_holidays` | açık | — | açıkken `usage.holidays` listesindeki günlerde kayıt beklenmez; kapalıyken resmî tatiller de beklenen gün sayılır |
 | `alerts.filter_quiet_hours` | 24 | 6–168 | beklenen günlerde kayıtsız geçebilecek en uzun süre (saat) |
+
+**Veritabanı** grubu, ayrıştırılmış kayıtların veritabanında ne kadar kaldığını söyler. Mühürlü
+kasadaki ham kayıtlar bu ayarlardan etkilenmez. Worker işi `db.window` her gece 01:00'den sonra
+pencereden eski günleri siler; henüz mühürlenmemiş bir gün ve etkin bir arşiv yüklemesinin günleri
+silinmez. Daha eski bir gün gerektiğinde 5651 sorgusu ve Arama onu "arşivden yeniden yükle" ile
+ister. Her iki ayar da kişisel verinin saklama süresidir: değiştirmek parolanın yeniden girilmesini
+ister ve denetim kaydına `settings.change` olarak yazılır. Ayrıntı: [DATA-MODEL.md](DATA-MODEL.md)
+"Retention", [legal/saklama-imha-politikasi-taslak.md](legal/saklama-imha-politikasi-taslak.md).
+
+| Ayar | Varsayılan | Sınırlar | Anlamı |
+|---|---|---|---|
+| `db.retention_days` | 30 (önceki sürümlerde 400; yükseltme 400'ü 30'a, 7'nin altındaki bir değeri 7'ye çevirir, başka değerleri korur) | en az 7 | veritabanının tuttuğu log günleri; daha eski günler her gece silinir ve istendiğinde mühürlü kasadan yeniden yüklenir |
+| `db.reload_keep_days` | 7 | 1–30 | arşivden yeniden yüklenen günlerin, yükleme bittikten sonra veritabanında kaldığı gün sayısı; sonra yine silinir. Bu günler kişisel veri içerir |
 
 ## 2. Nasıl çalışır?
 

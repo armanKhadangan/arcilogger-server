@@ -17,10 +17,29 @@
       <data>\vault                        LOCAL SERVICE modify (seal, retention); ArciApi, ArciWorker,
                                           ArciIngest read; auditing (SACL) of every write/delete/permission change
       <data>\state                        collector, ingest, worker, tasks modify (status, alerts);
-                                          ArciApi read
+                                          ArciApi read; ArciAdmin read (which configuration each service
+                                          loaded); neither reaches the protected folders below
       <data>\state\seal, \replica,        protected: LOCAL SERVICE modify (only the evidence jobs write
         \verify, \clock                   them); ArciApi, ArciWorker read (ArciIngest also state\seal)
+      <data>\state\crl                    protected: LOCAL SERVICE modify (the CrlFetch task stores the
+                                          revocation lists as evidence); ArciApi, ArciWorker read;
+                                          nothing for the collector or ingest. Owner: Administrators,
+                                          of the folder and of everything below it, and the items
+                                          below keep the inherited entries only (a service may have
+                                          created them before the upgrade); OWNER RIGHTS read
+                                          permissions (no owner can change them)
+      <data>\state\renewal                protected: LOCAL SERVICE modify (the Renew task's renewal.json
+                                          and renewal.lock); ArciApi, ArciWorker read; nothing for the
+                                          collector or ingest (they could silence the re-stamping alerts
+                                          or hold the lock); owner, items below and OWNER RIGHTS as
+                                          for state\crl
+      <data>\state\requests               protected: ArciAdmin read, create and write (signed task
+                                          requests, ADR-0014; it deletes only its own); LOCAL SERVICE
+                                          modify (the tasks take, answer and delete them); nothing for
+                                          the collector, ingest, ArciApi or ArciWorker
       <data>\exports                      ArciApi, ArciWorker modify
+      <data>\exports\reports              LOCAL SERVICE read (the Renew task re-stamps the tokens of the
+                                          stored reports); ArciApi, ArciWorker keep the modify of exports
       <data>\logs                         every ARCILOGGER account modify
       <data>\backups, \backups\db         administrators only (the installer's dumps before upgrades)
       <data>\backups\scheduled            protected: LOCAL SERVICE modify (the Backup task writes and
@@ -37,7 +56,15 @@
 
     Sealed files keep the deny entries that arcilogger_core.immutability puts on them (ADR-0003):
     only the explicit entries of the folders listed above are replaced; Windows recomputes the
-    inherited entries of the files below them. File contents are never touched.
+    inherited entries of the files below them. Below state\crl and state\renewal alone, every
+    item also loses its explicit entries and gets Administrators as its owner (contract W5-E-9).
+    A link there (a reparse point such as a junction, or a hard link) stops the script before
+    any entry is written: both folders and everything below them are checked first, since the
+    entries of state reach a folder below that is not protected yet (contract W5-E-11), and
+    each again before it is changed. An item whose entries leave Administrators out is taken
+    over all the same; one that still cannot be (a policy that took the take-ownership privilege
+    away) stops it with an error naming the item (takeown /A /R /F <folder> takes it over by
+    hand). File contents are never touched.
 
     Run again at any time (idempotent), e.g. after restoring the server.
 
@@ -105,6 +132,7 @@ foreach ($entry in $plan) {
         Write-ArciInfo ("{0,-28} {1}{2}" -f $ace.Who, $ace.Rights, $scope)
     }
     if ($entry.Audit) { Write-ArciInfo 'Denetim: yazma/silme/izin değişikliği [audit: write/delete/permission change]' }
+    if ($entry.ResetOwner) { Write-ArciInfo 'Sahip: Yöneticiler grubu, içindekiler yalnızca kalıtılan izinlerle [owner: Administrators, the items below keep inherited entries only]' }
 }
 
 if ($PlanOnly) {
@@ -115,6 +143,16 @@ if ($PlanOnly) {
 if (-not (Test-ArciWindows)) { throw 'Bu betik yalnızca Windows üzerinde çalışır [Windows only].' }
 if (-not (Test-ArciAdministrator)) { throw 'Yönetici olarak çalıştırın [run as Administrator].' }
 
+# Links first, before any entry is written (contract W5-E-11): state, written before state\crl
+# and state\renewal, passes its inheritable entries on to either folder while it is not
+# protected yet, and through a hard link in it to the file it names elsewhere.
+# Set-ArciAclEntry -ResetOwner checks each folder again just before it changes it.
+foreach ($entry in @($plan | Where-Object { $_.ResetOwner })) {
+    if (Test-Path -LiteralPath $entry.Path) {
+        Confirm-ArciNoLink -Item (Get-Item -LiteralPath $entry.Path -Force) -Folder $entry.Path -Below
+    }
+}
+
 foreach ($entry in $plan) {
     if (-not (Test-Path -LiteralPath $entry.Path)) {
         if ($entry.Kind -eq 'File') {
@@ -123,7 +161,8 @@ foreach ($entry in $plan) {
         }
         [void](New-Item -ItemType Directory -Path $entry.Path -Force)
     }
-    Set-ArciAclEntry -Entry $entry
+    # Only state\crl and state\renewal carry ResetOwner (Get-ArciAclPlan).
+    Set-ArciAclEntry -Entry $entry -ResetOwner:$entry.ResetOwner
 }
 
 if (-not $SkipAudit) {

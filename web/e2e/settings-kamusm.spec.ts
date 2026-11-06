@@ -6,12 +6,14 @@ import { confirmReauth, expectNoA11yViolations, usePreferences, type Theme } fro
 import { mockApi } from './mock-api';
 
 /**
- * Ayarlar → Kamu SM (contract 2.17): the wizard with the state of each step, the write-only
- * credentials (never pre-filled) with the re-authentication, the Zamane client (a known release
- * and one held for the console's approval), the root certificates and the legal roots, the
- * stamp test, the switch to production and back, the credit threshold, the server's refusal of
- * a change that would stop a working sealer, a held client on a later visit, and a sealing cause
- * that no step shows. The API is `mock-admin.ts`.
+ * Ayarlar → Zaman damgası with Kamu SM in use (contract 2.17): the wizard with the state of each
+ * step, the write-only credentials (never pre-filled) with the re-authentication, the Zamane
+ * client (a known release and one held for the console's approval), the root certificates and
+ * the legal roots, the stamp test, the switch to production and back, the credit threshold, the
+ * re-stamping and revocation-list keys (Wave 5 contract 2.5), TÜRKTRUST over HTTPS and over
+ * plain HTTP with its typed confirmation (Wave 5 contract 2.4, C5), the server's refusal of a
+ * change that would stop a working sealer, a held client on a later visit, and a sealing cause
+ * that no step shows. The API is `mock-admin.ts`, W5-T's.
  */
 
 const PEM = [
@@ -46,11 +48,12 @@ async function applied(page: Page) {
   );
 }
 
-test.describe('Ayarlar → Kamu SM', () => {
+test.describe('Ayarlar → Zaman damgası', () => {
   test('the steps with their state, the sealing view read-only', async ({ page }) => {
     await mockApi(page, { signedInAs: 'tolga' });
     await page.goto('/settings');
-    await page.getByRole('link', { name: /^Kamu SM/ }).click();
+    // The section is "Zaman damgası" in Ayarlar (Wave 5); the page's title names Kamu SM in use.
+    await page.getByRole('link', { name: /^Zaman damgası/ }).click();
     await expect(page).toHaveURL(/\/settings\/kamusm$/);
     await expect(
       page.getByRole('heading', { level: 1, name: 'Kamu SM zaman damgası' }),
@@ -121,9 +124,9 @@ test.describe('Ayarlar → Kamu SM', () => {
     await applied(page);
 
     const put = api.callsTo('PUT', '/admin/config/tsa');
+    // No server chosen: none is sent, the test server in use stays.
     expect(put.at(-1)?.body).toEqual({
       etag: expect.stringMatching(/^tsa:[0-9a-f]{64}$/) as unknown,
-      server: 'test',
       credit_alert_threshold: 500,
       timeout_seconds: 60,
       java: 'C:/Program Files/Eclipse Adoptium/jre-8.0.432.6-hotspot/bin/java.exe',
@@ -442,6 +445,100 @@ test.describe('Ayarlar → Kamu SM', () => {
     expect(put.at(-1)?.body).toMatchObject({ server: 'test', confirm: true });
   });
 
+  test('a TÜRKTRUST username left behind is neither checked nor sent with a switch to Kamu SM production', async ({
+    page,
+  }) => {
+    const api = await mockApi(page, { signedInAs: 'tolga', staleReauth: true });
+    await page.goto('/settings/kamusm?step=production');
+    await page.getByRole('radio', { name: 'TÜRKTRUST (HTTPS)' }).check();
+    const fields = page.getByTestId('turktrust-credentials');
+    await fields.getByRole('button', { name: 'Gir' }).first().click();
+    await page.getByLabel('TÜRKTRUST kullanıcı adı').fill('ornek-as');
+    // Without the password the switch to TÜRKTRUST waits.
+    await expect(page.getByRole('button', { name: 'TÜRKTRUST sunucusuna geç' })).toBeDisabled();
+
+    await page.getByRole('radio', { name: 'Kamu SM üretim sunucusu' }).check();
+    await expect(fields).toHaveCount(0);
+    await page.getByRole('button', { name: 'Üretim sunucusuna geç' }).click();
+    await page
+      .getByRole('dialog', { name: 'Üretim sunucusuna geçilsin mi?' })
+      .getByRole('button', { name: 'Üretim sunucusuna geç' })
+      .click();
+    const review = page.getByRole('dialog', { name: 'Değişiklikleri onaylayın' });
+    await review.getByRole('button', { name: 'Onayla ve kaydet' }).click();
+    await confirmReauth(page);
+    await applied(page);
+    await expect(page.getByTestId('tsa-server')).toHaveText(
+      'Şu an Kamu SM üretim sunucusu kullanılıyor.',
+    );
+    // The check and the change (sent again after the password confirmation): Kamu SM only.
+    const sent = [
+      ...api.callsTo('POST', '/admin/config/tsa/check'),
+      ...api.callsTo('PUT', '/admin/config/tsa'),
+    ];
+    expect(sent.length).toBeGreaterThan(1);
+    for (const call of sent) {
+      expect(call.body).toMatchObject({ server: 'production' });
+      expect(call.body).not.toHaveProperty('turktrust_username');
+      expect(call.body).not.toHaveProperty('allow_plain_http');
+    }
+  });
+
+  test('TÜRKTRUST chosen in step 6 stays chosen across steps, and "Kaydet" stores its typed credentials', async ({
+    page,
+  }) => {
+    const api = await mockApi(page, { signedInAs: 'tolga' });
+    await page.goto('/settings/kamusm?step=production');
+    await page.getByRole('radio', { name: 'TÜRKTRUST (HTTPS)' }).check();
+    const fields = page.getByTestId('turktrust-credentials');
+    await fields.getByRole('button', { name: 'Gir' }).first().click();
+    await page.getByLabel('TÜRKTRUST kullanıcı adı').fill('ornek-as');
+    await fields.getByRole('button', { name: 'Gir' }).click();
+    await page.getByLabel('TÜRKTRUST parolası').fill('deneme-parola'); // gitleaks:allow — fake test value
+
+    // Another step and back: the choice and the typed values are still there.
+    await openStep(page, /^7\. Kontör uyarı eşiği/);
+    await openStep(page, /^6\. /);
+    await expect(page.getByRole('radio', { name: 'TÜRKTRUST (HTTPS)' })).toBeChecked();
+    await expect(page.getByLabel('TÜRKTRUST kullanıcı adı')).toHaveValue('ornek-as');
+    await expect(page.getByRole('button', { name: 'TÜRKTRUST sunucusuna geç' })).toBeEnabled();
+
+    // "Kaydet" before the switch stores them; it switches nothing.
+    await page.getByRole('button', { name: 'Kaydet' }).click();
+    await expect
+      .poll(() => api.callsTo('POST', '/admin/config/tsa/check').length)
+      .toBeGreaterThan(0);
+    const check = api.callsTo('POST', '/admin/config/tsa/check').at(0)?.body;
+    expect(check).toMatchObject({
+      turktrust_username: 'ornek-as',
+      turktrust_password: 'deneme-parola',
+    });
+    expect(check).not.toHaveProperty('server');
+    expect(check).not.toHaveProperty('allow_plain_http');
+  });
+
+  test('"Kontör sorgula" only for a provider with a credit query (C21)', async ({ page }) => {
+    await mockApi(page, { signedInAs: 'tolga' });
+    await page.route('**/api/v1/credits', (route) =>
+      route.fulfill({
+        json: {
+          provider: 'rfc3161',
+          legal_grade: false,
+          supported: false,
+          threshold: 500,
+          latest: null,
+          remaining: null,
+          below_threshold: false,
+          history: [],
+          unreadable_lines: 0,
+        },
+      }),
+    );
+    await page.goto('/settings/kamusm?step=credit');
+    await expect(page.getByLabel('Kontör uyarı eşiği', { exact: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Kontör sorgula' })).toHaveCount(0);
+  });
+
   test('the threshold and the time limit: checked, saved without re-authentication', async ({
     page,
   }) => {
@@ -462,6 +559,115 @@ test.describe('Ayarlar → Kamu SM', () => {
     expect(api.callsTo('POST', '/auth/reauth')).toHaveLength(0);
     expect(api.admin.sections.tsa.credit_alert_threshold).toBe(300);
     await expect(page.getByRole('button', { name: 'Kontör sorgula' })).toBeVisible();
+    // W5-T's API reports the re-stamping and revocation-list keys: their fields are shown.
+    await expect(page.getByTestId('tsa-evidence')).toHaveCount(1);
+  });
+
+  test('re-stamping and revocation lists (Wave 5 contract 2.5): checked, sent only when changed', async ({
+    page,
+  }) => {
+    const api = await mockApi(page, { signedInAs: 'tolga', staleReauth: true });
+    await page.goto('/settings/kamusm?step=credit');
+    const group = page.getByRole('region', { name: 'Yeniden damgalama ve iptal listeleri' });
+    const renew = group.getByLabel('Yeniden damgalama süresi (gün)');
+    const age = group.getByLabel('İptal listesinin en büyük yaşı (gün)');
+    const urls = group.getByLabel('İptal listesi adresleri');
+    await expect(renew).toHaveValue('180');
+    await expect(age).toHaveValue('7');
+    await expect(urls).toHaveValue('');
+    await expect(page.getByTestId('tsa-crl-note')).toContainText('Sahada doğrula');
+    await expect(group).not.toContainText('parolanız yeniden sorulur');
+
+    await renew.fill('20');
+    await age.fill('61');
+    await urls.fill('http://192.0.2.10/kok.crl\nftp://192.0.2.11/ara.crl');
+    await expect(group).toContainText('Bu ayarların değişikliği için parolanız yeniden sorulur.');
+    await page.getByRole('button', { name: 'Kaydet' }).click();
+    await expect(group.getByText('En az 30 olmalı.')).toBeVisible();
+    await expect(group.getByText('En çok 60 olmalı.')).toBeVisible();
+    await expect(urls).toHaveAccessibleDescription(
+      'Her satır http:// ya da https:// ile başlayan ve bir sunucu adı içeren bir adres olmalı; kullanıcı adı ya da parola içeremez.',
+    );
+    await expect(renew).toBeFocused();
+    await expectNoA11yViolations(page);
+    await urls.fill(
+      Array.from({ length: 21 }, (_, index) => `https://192.0.2.${String(index + 1)}/kok.crl`).join(
+        '\n',
+      ),
+    );
+    await page.getByRole('button', { name: 'Kaydet' }).click();
+    await expect(urls).toHaveAccessibleDescription('En çok 20 adres girilebilir.');
+    expect(api.callsTo('POST', '/admin/config/tsa/check')).toHaveLength(0);
+
+    // Back to the stored values (reformatted): a change of the threshold sends none of the keys.
+    await renew.fill(' 180 ');
+    await age.fill('7');
+    await urls.fill('\n  \n');
+    await expect(group).not.toContainText('parolanız yeniden sorulur');
+    await page.getByLabel('Kontör uyarı eşiği', { exact: true }).fill('300');
+    await page.getByRole('button', { name: 'Kaydet' }).click();
+    const review = page.getByRole('dialog', { name: 'Değişiklikleri onaylayın' });
+    await review.getByRole('button', { name: 'Onayla ve kaydet' }).click();
+    await applied(page);
+    const put = api.callsTo('PUT', '/admin/config/tsa').at(-1)?.body;
+    expect(put).toMatchObject({ credit_alert_threshold: 300 });
+    for (const key of ['renew_before_days', 'crl_urls', 'crl_max_age_days'])
+      expect(put).not.toHaveProperty(key);
+
+    // A changed key is sent, alone, after the password is confirmed again (C5).
+    await renew.fill('365');
+    await page.getByRole('button', { name: 'Kaydet' }).click();
+    await review.getByRole('button', { name: 'Onayla ve kaydet' }).click();
+    await confirmReauth(page);
+    await applied(page);
+    const changed = api.callsTo('PUT', '/admin/config/tsa').at(-1)?.body;
+    expect(changed).toMatchObject({ renew_before_days: 365 });
+    for (const key of ['crl_urls', 'crl_max_age_days']) expect(changed).not.toHaveProperty(key);
+    await expect(renew).toHaveValue('365');
+  });
+
+  test('TÜRKTRUST over plain HTTP: the warning, the typed HTTP, then the switch with its credentials', async ({
+    page,
+  }) => {
+    const api = await mockApi(page, { signedInAs: 'tolga', staleReauth: true });
+    await page.goto('/settings/kamusm?step=production');
+    await page.getByRole('radio', { name: 'TÜRKTRUST (düz HTTP)' }).check();
+    await expect(page.getByTestId('tsa-plain-http')).toContainText('şifrelenmeden');
+    const fields = page.getByTestId('turktrust-credentials');
+    await fields.getByRole('button', { name: 'Gir' }).first().click();
+    await page.getByLabel('TÜRKTRUST kullanıcı adı').fill('ornek-as');
+    await fields.getByRole('button', { name: 'Gir' }).click();
+    await page.getByLabel('TÜRKTRUST parolası').fill('deneme-parola'); // gitleaks:allow — fake test value
+    await page.getByRole('button', { name: 'TÜRKTRUST sunucusuna düz HTTP ile geç' }).click();
+
+    const ask = page.getByRole('dialog', {
+      name: 'TÜRKTRUST sunucusuna düz HTTP ile geçilsin mi?',
+    });
+    const go = ask.getByRole('button', { name: 'TÜRKTRUST sunucusuna düz HTTP ile geç' });
+    await expect(go).toBeDisabled();
+    await ask.getByLabel('Onaylamak için HTTP yazın').fill('http');
+    await expect(go).toBeDisabled();
+    await ask.getByLabel('Onaylamak için HTTP yazın').fill('HTTP');
+    await go.click();
+    // Nothing was sent before the typed confirmation; then the check and the change.
+    const review = page.getByRole('dialog', { name: 'Değişiklikleri onaylayın' });
+    await review.getByRole('button', { name: 'Onayla ve kaydet' }).click();
+    await confirmReauth(page);
+    await applied(page);
+    await expect(page.getByTestId('tsa-server')).toContainText('düz HTTP');
+    const sent = [
+      ...api.callsTo('POST', '/admin/config/tsa/check'),
+      ...api.callsTo('PUT', '/admin/config/tsa'),
+    ];
+    expect(sent.length).toBeGreaterThan(1);
+    for (const call of sent)
+      expect(call.body).toMatchObject({
+        server: 'turktrust-http',
+        allow_plain_http: true,
+        confirm: true,
+        turktrust_username: 'ornek-as',
+        turktrust_password: 'deneme-parola',
+      });
   });
 
   test('first setup: a change that would stop the working sealer is refused with its causes', async ({
@@ -541,6 +747,21 @@ for (const theme of ['light', 'dark'] as Theme[]) {
     await page.getByRole('button', { name: 'Üretim sunucusuna geç' }).click();
     await expect(
       page.getByRole('dialog', { name: 'Üretim sunucusuna geçilsin mi?' }),
+    ).toBeVisible();
+    await expectNoA11yViolations(page);
+    await page.getByRole('button', { name: 'İptal' }).click();
+    // TÜRKTRUST's form over plain HTTP, with its warning, and its typed confirmation.
+    await page.getByRole('radio', { name: 'TÜRKTRUST (düz HTTP)' }).check();
+    const fields = page.getByTestId('turktrust-credentials');
+    await fields.getByRole('button', { name: 'Gir' }).first().click();
+    await page.getByLabel('TÜRKTRUST kullanıcı adı').fill('ornek-as');
+    await fields.getByRole('button', { name: 'Gir' }).click();
+    await page.getByLabel('TÜRKTRUST parolası').fill('deneme-parola'); // gitleaks:allow — fake test value
+    await expect(page.getByTestId('tsa-plain-http')).toBeVisible();
+    await expectNoA11yViolations(page);
+    await page.getByRole('button', { name: 'TÜRKTRUST sunucusuna düz HTTP ile geç' }).click();
+    await expect(
+      page.getByRole('dialog', { name: 'TÜRKTRUST sunucusuna düz HTTP ile geçilsin mi?' }),
     ).toBeVisible();
     await expectNoA11yViolations(page);
   });

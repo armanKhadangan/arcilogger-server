@@ -130,10 +130,11 @@ class SealedVault:
         finally:
             self.tsa.failure = MockFailure.NONE
 
-    def retention(self, now: datetime, *, days: int = 730) -> RetentionResult:
-        """Run retention as the scheduled task would at ``now``."""
+    def retention(self, now: datetime, *, days: int = 730, batch_days: int = 1) -> RetentionResult:
+        """Run retention as the scheduled task would at ``now`` (by default deleting each day as
+        it expires, ``batch_days`` 1; batching has its own tests in core, #195)."""
         config = self.config.model_copy(
-            update={"retention": RetentionConfig(enabled=True, days=days)}
+            update={"retention": RetentionConfig(enabled=True, days=days, batch_days=batch_days)}
         )
         self.tsa_clock.now = now + timedelta(seconds=5)
         return run_retention(
@@ -194,7 +195,7 @@ def make_vault(data_dir: Path, *, root: Path | None = None, tsa_now: datetime) -
             "data_dir": str(data_dir),
             "secrets_dir": str(base),
             "sources": list(SOURCES),
-            "seal": {"quiet_seconds": 0, "gzip_level": 6},
+            "seal": {"quiet_seconds": 0, "compression": "gzip", "gzip_level": 6},
             "tsa": {"provider": "mock"},
         }
     )

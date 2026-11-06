@@ -101,7 +101,10 @@ USAGE_SUBJECT_KINDS: Final = ("person", "device", "ip")
 #: How a session's destination was named (spec 10.2): a host name (web filter, application
 #: control / SSL, DNS answer), a FortiGuard ISDB service (``dstinetsvc``) or only the address.
 USAGE_DOMAIN_KINDS: Final = ("domain", "service", "ip")
-#: ``partial``: today (refreshed every 5 minutes); ``final``: rebuilt after the day ended.
+#: The part of the day a usage row covers (contract W5 §6 K2, revision ``0023_usage_period``):
+#: work hours, a break inside them ("mola"), or off hours (holidays and days off included).
+USAGE_PARTS: Final = ("work", "break", "off")
+#: ``partial``: today (refreshed every minute, W5-L); ``final``: rebuilt after the day ended.
 USAGE_DAY_STATUSES: Final = ("partial", "final")
 USAGE_BLOCKED_SOURCES: Final = ("web", "dns", "app")
 USAGE_REBUILD_STATUSES: Final = ("queued", "running", "done", "failed")
@@ -145,6 +148,12 @@ SAVED_SEARCH_PRESETS: Final = ("15m", "1h", "24h", "today", "yesterday", "7d", "
 SAVED_SEARCH_NAME_MAX: Final = 80
 #: The longest query text (the search request's ``q`` has the same limit).
 SAVED_SEARCH_QUERY_MAX: Final = 1000
+#: Archive reload (Wave 5 contract G4, revision ``0021_db_window``): the function that asked and
+#: the states of a request. ``ARCHIVE_RELOAD_ACTIVE`` are the requests whose days the window job
+#: keeps (G3).
+ARCHIVE_RELOAD_REASONS: Final = ("lookup", "search")
+ARCHIVE_RELOAD_STATUSES: Final = ("queued", "loading", "ready", "failed", "expired")
+ARCHIVE_RELOAD_ACTIVE: Final = ("queued", "loading", "ready")
 
 
 def _in(column: str, values: tuple[str, ...]) -> str:
@@ -715,6 +724,12 @@ class IngestOffset(Base):
     #: ``NULL``: every loaded line of the file is in ``search_counts``. A number: the lines before
     #: it were loaded before revision ``0016_search`` and are not counted yet (the worker job
     #: ``search.counts_backfill`` recounts the file once it is finished, then clears this).
+    #: ``0`` (a value no file has otherwise: a file loaded before ``0016_search`` is marked from
+    #: line 2 on): an unfinished file whose reset is under way, offset 0 and its rows deleted in
+    #: steps, then loaded again if its file is in the vault (ingest's ``RESETTING``, contract
+    #: W5-G-25; the offsets row of a file whose day vault retention deleted goes with its last
+    #: step): a search counts its hours from the rows, ``search.counts_backfill`` waits for it,
+    #: and ``arcilogger-db search-counts rebuild`` refuses it (``status`` shows it as resetting).
     counts_from_line: Mapped[int | None] = mapped_column(Integer)
 
 
@@ -916,9 +931,26 @@ class Lease(Base):
     #: other lease (configured or fallback time). Revision ``0017_fortigate_dhcp``.
     lease_seconds: Mapped[int | None] = mapped_column(Integer)
     #: Evidence references: a list of ``arcilogger_worker.lookup.EvidenceRef.to_dict()`` objects,
-    #: ``{"table", "row_id", "time", "raw": {source, day, line, offset} | null, "summary"}``.
+    #: ``{"table", "row_id", "time", "raw": {source, day, line, offset} | null, "summary"}``; an
+    #: ``fg_dhcp`` ref the lease job wrote from revision ``0022_lease_moves`` on also carries
+    #: ``"vd"``, the VDOM of its row (``null`` without one; issue #127).
     evidence: Mapped[list[Any]] = mapped_column(
         JSONB, nullable=False, server_default=text("'[]'::jsonb")
+    )
+    #: The kept FortiGate ACKs of the lease's MAC for another address that the build saw and did
+    #: not apply (the missed moves of ADR-0016 D33, round 7 of the lookup; issue #127):
+    #: ``{"truncated": bool, "groups": [{"ip", "interface", "vd", "source", "logid", "dhcp_msg",
+    #: "times": [epoch µs, …]}, …]}`` (``arcilogger_worker.lookup.refs.moves_json``). Bounded
+    #: (rows are never dropped): only the times in the 100 days before the lease's end (its
+    #: newest move while it is open), at most 1,000, the newest; ``truncated`` says the job
+    #: dropped one. Positive evidence only: the check applies today's rules to them again and a
+    #: hit only lowers a chain, so a value that lacks a move, truncated or not, misses it,
+    #: nothing more. NULL: not recorded (a lease written before revision ``0022_lease_moves``,
+    #: an ARP interval); ``"groups": []``: recorded, none. Deferred, and loading it by accident
+    #: raises: only the lease job and the missed-move check read it, by
+    #: ``select(Lease.id, Lease.moves)``.
+    moves: Mapped[dict[str, Any] | None] = mapped_column(
+        JSONB(none_as_null=True), deferred=True, deferred_raiseload=True
     )
     created_at: Mapped[datetime] = _created()
     updated_at: Mapped[datetime] = _updated()
@@ -1375,12 +1407,13 @@ class AlertDelivery(Base):
 #
 # Derived data, rebuilt per site day by ``arcilogger_worker.usage`` (a day is deleted and written
 # again in one transaction). Every table is keyed by the site day (Europe/Istanbul) and the
-# subject (``person:<id>``, ``device:<mac>``, ``ip:<address>``) and split by ``off_hours`` (the
-# part of the day outside the work hours setting, holidays included), so "work hours" and "off
-# hours" views are a filter and "all" is the sum of both rows. Names, departments and categories
-# are joined when read (``persons``, ``vlans``, ``domain_categories``): renaming a person or
-# moving them to another department needs no rebuild. Plain tables, not time series: they hold
-# per subject and day aggregates (ADR-0011 sizing), and retention deletes whole days.
+# subject (``person:<id>``, ``device:<mac>``, ``ip:<address>``) and split by ``period``
+# (:data:`USAGE_PARTS`: the work hours, their breaks, and the rest of the day with the holidays;
+# revision ``0023_usage_period``, before it a boolean ``off_hours``), so "work hours", "breaks"
+# and "off hours" views are a filter and "all" is the sum of the rows. Names, departments and
+# categories are joined when read (``persons``, ``vlans``, ``domain_categories``): renaming a
+# person or moving them to another department needs no rebuild. Plain tables, not time series:
+# they hold per subject and day aggregates (ADR-0011 sizing), and retention deletes whole days.
 
 
 def _seconds() -> Mapped[int]:
@@ -1420,11 +1453,12 @@ class UsageDay(Base):
 
 
 class UsageDaily(Base):
-    """Metrics of one subject on one site day (part: work hours / off hours)."""
+    """Metrics of one subject on one site day and part (work hours, breaks, off hours)."""
 
     __tablename__ = "usage_daily"
     __table_args__ = (
-        PrimaryKeyConstraint("day", "subject", "off_hours", name="pk_usage_daily"),
+        PrimaryKeyConstraint("day", "subject", "period", name="pk_usage_daily"),
+        CheckConstraint(_in("period", USAGE_PARTS), name="period"),
         CheckConstraint(_in("kind", USAGE_SUBJECT_KINDS), name="kind"),
         Index("ix_usage_daily_subject_day", "subject", "day"),
         {"comment": "Usage per subject and day: online/active time, bytes, sessions, timeline."},
@@ -1433,7 +1467,8 @@ class UsageDaily(Base):
     day: Mapped[date] = mapped_column(Date, nullable=False)
     #: ``person:<id>``, ``device:<mac>`` or ``ip:<address>``.
     subject: Mapped[str] = mapped_column(Text, nullable=False)
-    off_hours: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    #: :data:`USAGE_PARTS`.
+    period: Mapped[str] = mapped_column(Text, nullable=False)
     kind: Mapped[str] = mapped_column(Text, nullable=False)
     person_id: Mapped[int | None] = mapped_column(BigInteger)
     mac: Mapped[str | None] = mapped_column(MACADDR)
@@ -1462,7 +1497,8 @@ class UsageDeviceDaily(Base):
 
     __tablename__ = "usage_device_daily"
     __table_args__ = (
-        PrimaryKeyConstraint("day", "mac", "subject", "off_hours", name="pk_usage_device_daily"),
+        PrimaryKeyConstraint("day", "mac", "subject", "period", name="pk_usage_device_daily"),
+        CheckConstraint(_in("period", USAGE_PARTS), name="period"),
         Index("ix_usage_device_daily_subject_day", "subject", "day"),
         {"comment": "Usage per device (MAC), subject and day (per-device breakdown)."},
     )
@@ -1470,7 +1506,8 @@ class UsageDeviceDaily(Base):
     day: Mapped[date] = mapped_column(Date, nullable=False)
     mac: Mapped[str] = mapped_column(MACADDR, nullable=False)
     subject: Mapped[str] = mapped_column(Text, nullable=False)
-    off_hours: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    #: :data:`USAGE_PARTS`.
+    period: Mapped[str] = mapped_column(Text, nullable=False)
     #: Address with the most online minutes, and its VLAN.
     ip: Mapped[str | None] = mapped_column(INET)
     vlan: Mapped[int | None] = mapped_column(Integer)
@@ -1494,7 +1531,8 @@ class UsageDomainDaily(Base):
 
     __tablename__ = "usage_domain_daily"
     __table_args__ = (
-        PrimaryKeyConstraint("day", "subject", "domain", "off_hours", name="pk_usage_domain_daily"),
+        PrimaryKeyConstraint("day", "subject", "domain", "period", name="pk_usage_domain_daily"),
+        CheckConstraint(_in("period", USAGE_PARTS), name="period"),
         CheckConstraint(_in("kind", USAGE_DOMAIN_KINDS), name="kind"),
         Index("ix_usage_domain_daily_domain_day", "domain", "day"),
         Index("ix_usage_domain_daily_subject_day", "subject", "day"),
@@ -1505,7 +1543,8 @@ class UsageDomainDaily(Base):
     subject: Mapped[str] = mapped_column(Text, nullable=False)
     #: Registrable domain (``youtube.com``), FortiGuard service label or IP address.
     domain: Mapped[str] = mapped_column(Text, nullable=False)
-    off_hours: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    #: :data:`USAGE_PARTS`.
+    period: Mapped[str] = mapped_column(Text, nullable=False)
     kind: Mapped[str] = mapped_column(Text, nullable=False)
     #: Share of the active minutes (60 s split by bytes): the per-site times add up to the
     #: active time.
@@ -1528,14 +1567,16 @@ class UsageAppDaily(Base):
 
     __tablename__ = "usage_app_daily"
     __table_args__ = (
-        PrimaryKeyConstraint("day", "subject", "app", "off_hours", name="pk_usage_app_daily"),
+        PrimaryKeyConstraint("day", "subject", "app", "period", name="pk_usage_app_daily"),
+        CheckConstraint(_in("period", USAGE_PARTS), name="period"),
         {"comment": "Usage per subject, application and day."},
     )
 
     day: Mapped[date] = mapped_column(Date, nullable=False)
     subject: Mapped[str] = mapped_column(Text, nullable=False)
     app: Mapped[str] = mapped_column(Text, nullable=False)
-    off_hours: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    #: :data:`USAGE_PARTS`.
+    period: Mapped[str] = mapped_column(Text, nullable=False)
     appcat: Mapped[str | None] = mapped_column(Text)
     seconds: Mapped[float] = mapped_column(DOUBLE_PRECISION, nullable=False, server_default="0")
     bytes: Mapped[int] = mapped_column(BigInteger, nullable=False, server_default="0")
@@ -1547,7 +1588,8 @@ class UsageHourly(Base):
 
     __tablename__ = "usage_hourly"
     __table_args__ = (
-        PrimaryKeyConstraint("hour", "subject", "off_hours", name="pk_usage_hourly"),
+        PrimaryKeyConstraint("hour", "subject", "period", name="pk_usage_hourly"),
+        CheckConstraint(_in("period", USAGE_PARTS), name="period"),
         Index("ix_usage_hourly_day", "day"),
         Index("ix_usage_hourly_subject_hour", "subject", "hour"),
         {"comment": "Usage per subject and hour (online/active time, bytes, top domain)."},
@@ -1556,7 +1598,8 @@ class UsageHourly(Base):
     #: Start of the hour.
     hour: Mapped[datetime] = mapped_column(TZ, nullable=False)
     subject: Mapped[str] = mapped_column(Text, nullable=False)
-    off_hours: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    #: :data:`USAGE_PARTS`.
+    period: Mapped[str] = mapped_column(Text, nullable=False)
     day: Mapped[date] = mapped_column(Date, nullable=False)
     online_seconds: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
     active_seconds: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
@@ -1572,6 +1615,7 @@ class UsageBlocked(Base):
     __tablename__ = "usage_blocked"
     __table_args__ = (
         CheckConstraint(_in("source", USAGE_BLOCKED_SOURCES), name="source"),
+        CheckConstraint(_in("period", USAGE_PARTS), name="period"),
         Index("ix_usage_blocked_day_time", "day", "time"),
         Index("ix_usage_blocked_subject_day", "subject", "day"),
         {"comment": "Blocked attempts per subject (web, DNS, application control)."},
@@ -1581,7 +1625,8 @@ class UsageBlocked(Base):
     day: Mapped[date] = mapped_column(Date, nullable=False)
     time: Mapped[datetime] = mapped_column(TZ, nullable=False)
     subject: Mapped[str] = mapped_column(Text, nullable=False)
-    off_hours: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    #: :data:`USAGE_PARTS`.
+    period: Mapped[str] = mapped_column(Text, nullable=False)
     #: The device (lease MAC) of the attempt; NULL for a bare address.
     mac: Mapped[str | None] = mapped_column(MACADDR)
     source: Mapped[str] = mapped_column(Text, nullable=False)
@@ -1598,6 +1643,7 @@ class UsageUrl(Base):
 
     __tablename__ = "usage_urls"
     __table_args__ = (
+        CheckConstraint(_in("period", USAGE_PARTS), name="period"),
         Index("ix_usage_urls_subject_day", "subject", "day"),
         Index("ix_usage_urls_day", "day"),
         {"comment": "URLs per subject and day from the web filter log (newest kept)."},
@@ -1606,7 +1652,8 @@ class UsageUrl(Base):
     id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
     day: Mapped[date] = mapped_column(Date, nullable=False)
     subject: Mapped[str] = mapped_column(Text, nullable=False)
-    off_hours: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    #: :data:`USAGE_PARTS`.
+    period: Mapped[str] = mapped_column(Text, nullable=False)
     url: Mapped[str] = mapped_column(Text, nullable=False)
     hostname: Mapped[str | None] = mapped_column(Text)
     domain: Mapped[str | None] = mapped_column(Text)
@@ -2158,6 +2205,70 @@ class LicenseEvent(Base):
 
 #: The append-only licence tables (migration 0014_license).
 LICENSE_TABLES: Final = ("license_installation", "license_files", "license_events")
+
+
+# =================================================================================================
+# Archive reload (Wave 5 contract G4; revision 0021_db_window)
+# =================================================================================================
+
+
+class ArchiveReload(Base):
+    """A request to bring sealed days older than the database window (``db.retention_days``)
+    back from the vault ("arşivden yeniden yükle").
+
+    The API inserts the row as ``queued`` after it wrote ``archive.reload`` to the audit log (G6);
+    ArciIngest, the only writer of log rows, loads one request at a time (``loading``; the
+    partial unique index allows one) through its sealed-file reader and sets ``ready`` when
+    every stream has finished. ``bytes_total`` is Σ ``bytes_uncompressed`` of the days' sealed
+    files, ``bytes_done`` Σ their committed ingest offsets. ``expires_at`` = ``ready_at`` +
+    ``db.reload_keep_days``; afterwards the window job (``db.window``) drops the days again and
+    the request becomes ``expired``. ``error_code`` is set exactly when ``status`` is ``failed``
+    (a code, never log content).
+    """
+
+    __tablename__ = "archive_reloads"
+    __table_args__ = (
+        CheckConstraint(_in("reason", ARCHIVE_RELOAD_REASONS), name="reason"),
+        CheckConstraint(_in("status", ARCHIVE_RELOAD_STATUSES), name="status"),
+        CheckConstraint("last_day >= first_day", name="range"),
+        CheckConstraint("btrim(requested_by) <> ''", name="requested_by"),
+        CheckConstraint("lookup_id IS NULL OR reason = 'lookup'", name="lookup"),
+        CheckConstraint("bytes_total >= 0 AND bytes_done >= 0", name="bytes"),
+        CheckConstraint("(status = 'failed') = (error_code IS NOT NULL)", name="error_code"),
+        CheckConstraint(
+            "status NOT IN ('ready', 'expired') "
+            "OR (ready_at IS NOT NULL AND expires_at IS NOT NULL)",
+            name="ready",
+        ),
+        Index("ix_archive_reloads_status_id", "status", "id"),
+        Index(
+            "uq_archive_reloads_loading",
+            "status",
+            unique=True,
+            postgresql_where=text("status = 'loading'"),
+        ),
+        {"comment": "Archive reloads: sealed days loaded back into the database on request."},
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    #: User name of the person who asked.
+    requested_by: Mapped[str] = mapped_column(Text, nullable=False)
+    requested_at: Mapped[datetime] = mapped_column(TZ, nullable=False, server_default=func.now())
+    #: ``lookup`` or ``search``: whose permission the request needed (G6).
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    #: The lookup that asked (``reason`` ``lookup``).
+    lookup_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("lookups.id", ondelete="SET NULL")
+    )
+    #: Site days, both included.
+    first_day: Mapped[date] = mapped_column(Date, nullable=False)
+    last_day: Mapped[date] = mapped_column(Date, nullable=False)
+    status: Mapped[str] = mapped_column(Text, nullable=False, server_default="queued")
+    bytes_total: Mapped[int] = mapped_column(BigInteger, nullable=False, server_default="0")
+    bytes_done: Mapped[int] = mapped_column(BigInteger, nullable=False, server_default="0")
+    error_code: Mapped[str | None] = mapped_column(Text)
+    ready_at: Mapped[datetime | None] = mapped_column(TZ)
+    expires_at: Mapped[datetime | None] = mapped_column(TZ)
 
 
 #: Time-series tables (hypertables when TimescaleDB is available), in creation order.

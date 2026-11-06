@@ -30,6 +30,7 @@ from arcilogger_api.rawlines import (
     scan_file,
     valid_source_name,
 )
+from arcilogger_core import sealedfile
 from arcilogger_core.layout import Layout
 from arcilogger_ingest.files import open_shared
 
@@ -395,6 +396,207 @@ def test_vault_checkpoints_shorten_later_lookups(
     assert len(index) == 0
 
 
+# -- sealed xz files (Wave 5 W5-H) -----------------------------------------------------------------
+
+
+def _xz_vault(
+    layout: Layout, lines: list[bytes], source: str = "fortigate", tail: bytes = b""
+) -> Path:
+    """The sealed xz file of ``lines``, written by the sealer's own writer (streams as small as
+    the test patched :data:`sealedfile.STREAM_BYTES` to)."""
+    path = layout.vault_day(DAY) / sealedfile.log_name(source, "xz")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    plain = path.with_name(f"{source}.plain")
+    plain.write_bytes(b"".join(line + b"\n" for line in lines) + tail)
+    sealedfile.write(plain, path)
+    plain.unlink()
+    return path
+
+
+@settings(max_examples=150, deadline=None)
+@given(
+    lines=st.lists(LINE, min_size=1, max_size=60),
+    stream_bytes=st.integers(min_value=1, max_value=200),
+    reads=st.lists(st.integers(min_value=1, max_value=65), min_size=1, max_size=8),
+    shift=st.integers(min_value=-2, max_value=2),
+)
+def test_xz_lookups_match_a_naive_split_and_check_the_line_number(
+    lines: list[bytes], stream_bytes: int, reads: list[int], shift: int
+) -> None:
+    """Any stream size, any order of views: the line at a reference's offset is shown only when
+    the offset starts a line and that line has the reference's number, also on the first view."""
+    with tempfile.TemporaryDirectory() as folder, pytest.MonkeyPatch.context() as patch:
+        patch.setattr(sealedfile, "STREAM_BYTES", stream_bytes)
+        patch.setattr(rawlines, "VAULT_INDEX", rawlines.VaultIndex())
+        layout = Layout(Path(folder))
+        _xz_vault(layout, lines)
+        expected = _expected(lines, list(range(1, len(lines) + 1)))
+        for number in reads:
+            if number > len(lines):
+                with pytest.raises(RawReferenceError) as raised:
+                    read_line(layout, "fortigate", DAY, number)
+                assert raised.value.code == "raw_not_found"
+                continue
+            offset, data = expected[number]
+            other = number + shift
+            if shift and 1 <= other <= len(lines) and expected[other][0] != offset:
+                with pytest.raises(RawReferenceError) as raised:
+                    read_line(layout, "fortigate", DAY, other, offset)
+                assert raised.value.code == "raw_reference_mismatch"
+            found = read_line(layout, "fortigate", DAY, number, offset)
+            assert (found.offset, found.data, found.origin) == (offset, data, "vault")
+            assert read_line(layout, "fortigate", DAY, number).data == data  # without offset
+
+
+def test_xz_views_decompress_one_stream_once_the_file_is_counted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The first view of a late line counts the streams before it (each once); later views
+    decompress only the stream holding the line. A wrong line number is refused on the first
+    view of a file too, an offset inside a line always."""
+    monkeypatch.setattr(sealedfile, "STREAM_BYTES", 1000)
+    monkeypatch.setattr(rawlines, "VAULT_INDEX", rawlines.VaultIndex())
+    layout = Layout(tmp_path)
+    lines = [b"line %05d %s" % (n, b"x" * (n % 50)) for n in range(1, 801)]
+    path = _xz_vault(layout, lines)
+    streams = sealedfile.xz_streams(path)
+    assert len(streams) > 20
+    expected = _expected(lines, list(range(1, 801)))
+
+    with pytest.raises(RawReferenceError) as raised:  # a cold file: the number is still checked
+        read_line(layout, "fortigate", DAY, 701, expected[700][0])
+    assert raised.value.code == "raw_reference_mismatch"
+    with pytest.raises(RawReferenceError) as raised:
+        read_line(layout, "fortigate", DAY, 700, expected[700][0] + 1)
+    assert raised.value.code == "raw_reference_mismatch"
+
+    decoded: list[int] = []
+    real = sealedfile.xz_stream_chunks
+
+    def counting(raw: Any, stream: sealedfile.XzStream) -> Iterator[bytes]:
+        decoded.append(streams.index(stream))
+        return real(raw, stream)
+
+    monkeypatch.setattr(sealedfile, "xz_stream_chunks", counting)
+    monkeypatch.setattr(rawlines, "VAULT_INDEX", rawlines.VaultIndex())
+    late = read_line(layout, "fortigate", DAY, 790, expected[790][0])
+    assert late.data == lines[789]
+    target = sealedfile.stream_of(streams, expected[790][0])
+    assert sorted(set(decoded)) == list(range(target + 1))  # counted up to its stream
+    assert len(decoded) <= target + 3  # each earlier stream once (plus the line's own)
+    decoded.clear()
+    middle = read_line(layout, "fortigate", DAY, 400, expected[400][0])
+    assert middle.data == lines[399]
+    assert len(set(decoded)) <= 2  # its stream (and the previous one's last byte)
+    decoded.clear()
+    assert read_line(layout, "fortigate", DAY, 795, expected[795][0]).data == lines[794]
+    assert len(set(decoded)) <= 2
+
+
+def test_xz_torn_last_line_and_damage(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(sealedfile, "STREAM_BYTES", 500)
+    monkeypatch.setattr(rawlines, "VAULT_INDEX", rawlines.VaultIndex())
+    layout = Layout(tmp_path)
+    lines = [b"line %04d" % n for n in range(1, 301)]
+    path = _xz_vault(layout, lines, tail=b"torn")
+    size = sum(len(line) + 1 for line in lines)
+    with pytest.raises(RawReferenceError) as raised:  # a torn last line is not a line
+        read_line(layout, "fortigate", DAY, 301, size)
+    assert raised.value.code == "raw_not_found"
+    scan = scan_file("vault", path, [2, 300], hash_file=True)
+    assert scan.error is None
+    assert scan.found == {2: (10, lines[1]), 300: (size - 10, lines[299])}
+
+    streams = sealedfile.xz_streams(path)
+    data = bytearray(path.read_bytes())
+    data[streams[-2].compressed_start + 20] ^= 0x55  # inside a later stream's data
+    path.write_bytes(bytes(data))
+    rawlines.VAULT_INDEX.clear()
+    assert read_line(layout, "fortigate", DAY, 1, 0).data == lines[0]  # before the damage
+    with pytest.raises(RawReferenceError) as raised:
+        read_line(layout, "fortigate", DAY, 300, size - 10)
+    assert raised.value.code == "raw_unreadable"
+    assert "damaged xz data" in str(raised.value)
+    scan = scan_file("vault", path, [300], hash_file=True)
+    assert scan.error is not None
+    assert scan.error.startswith("fortigate.log.xz: damaged xz data")
+    assert scan.sha256 == hashlib.sha256(bytes(data)).hexdigest()  # still hashed completely
+    path.write_bytes(bytes(data[:-30]))  # truncated: no index in the footer
+    rawlines.VAULT_INDEX.clear()
+    with pytest.raises(RawReferenceError) as raised:
+        read_line(layout, "fortigate", DAY, 1, 0)
+    assert raised.value.code == "raw_unreadable"
+
+
+def test_xz_damage_before_the_line_in_its_own_stream_is_found(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The view decompresses the rest of the line's stream, so the stream's CRC64 is checked:
+    a corrupted check value (the data still decompresses) refuses the line, with and without
+    its offset, instead of showing it unchecked. An empty file is damage, not an empty day.
+    (Small output pieces, as a 16 MiB stream has in 1 MiB pieces: a line is found long before
+    the stream's end.)"""
+    monkeypatch.setattr(sealedfile, "CHUNK", 64)
+    monkeypatch.setattr(rawlines, "VAULT_INDEX", rawlines.VaultIndex())
+    layout = Layout(tmp_path)
+    lines = [b"line %04d" % n for n in range(1, 401)]
+    path = _xz_vault(layout, lines)
+    assert len(sealedfile.xz_streams(path)) == 1
+    data = bytearray(path.read_bytes())
+    index_size = (int.from_bytes(data[-8:-4], "little") + 1) * 4  # the footer's backward size
+    data[len(data) - 12 - index_size - 8] ^= 0x01  # the last byte of the block's CRC64
+    replacement = path.with_name("damaged.xz")
+    replacement.write_bytes(bytes(data))
+    replacement.replace(path)
+    for offset in (0, None):
+        rawlines.VAULT_INDEX.clear()
+        with pytest.raises(RawReferenceError) as raised:
+            read_line(layout, "fortigate", DAY, 1, offset)
+        assert raised.value.code == "raw_unreadable"
+
+    path.write_bytes(b"")
+    rawlines.VAULT_INDEX.clear()
+    with pytest.raises(RawReferenceError) as raised:
+        read_line(layout, "fortigate", DAY, 1, 0)
+    assert raised.value.code == "raw_unreadable"
+
+
+def test_a_wrong_reference_gets_the_same_answer_from_gzip_and_xz(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The manager's rule on #111: an xz mismatch raises what a .gz mismatch raises. The same
+    lines sealed in both formats, the same wrong references: the same code and message."""
+    monkeypatch.setattr(sealedfile, "STREAM_BYTES", 100)
+    monkeypatch.setattr(rawlines, "VAULT_INDEX", rawlines.VaultIndex())
+    lines = [b"line %03d" % n for n in range(1, 101)]
+    expected = _expected(lines, list(range(1, 101)))
+    size = sum(len(line) + 1 for line in lines)
+    answers: dict[str, list[tuple[str, str]]] = {}
+    for kind in ("gzip", "xz"):
+        layout = Layout(tmp_path / kind)
+        if kind == "gzip":
+            _vault(layout, lines)
+        else:
+            _xz_vault(layout, lines)
+        answers[kind] = []
+        for line, offset in (
+            (50, size + 10),  # past the end of the file
+            (50, size),  # the end of the file
+            (50, expected[50][0] + 3),  # inside the line
+            (50, expected[60][0]),  # another line's start
+            (150, expected[60][0]),  # a line the file does not have
+            (150, size + 10),
+        ):
+            rawlines.VAULT_INDEX.clear()
+            with pytest.raises(RawReferenceError) as raised:
+                read_line(layout, "fortigate", DAY, line, offset)
+            answers[kind].append((raised.value.code, str(raised.value)))
+    assert answers["xz"] == [
+        (code, message.replace(".log.gz", ".log.xz")) for code, message in answers["gzip"]
+    ]
+    assert {code for code, _ in answers["xz"]} == {"raw_reference_mismatch", "raw_not_found"}
+
+
 # -- files that exist but cannot be read ----------------------------------------------------------
 
 
@@ -447,7 +649,7 @@ def test_other_read_errors_are_io_errors(tmp_path: Path, monkeypatch: pytest.Mon
         read_line(layout, "fortigate", DAY, 1)
     assert (raised.value.code, str(raised.value)) == (
         "raw_io_error",
-        "fortigate.log.gz: Input/output error",
+        "fortigate.log: Input/output error",  # the format is not known before the file is
     )
     assert regular_file(tmp_path / "nothing" / "here") is False
 

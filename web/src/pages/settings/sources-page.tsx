@@ -55,19 +55,22 @@ import type {
 } from '@/lib/settings-types';
 import { focusFirstError, hasErrors, type FieldErrors } from '@/lib/validation';
 
+import { ProbeInterfaces, SnmpSection } from './source-snmp';
 import {
   HEARTBEAT_MAX,
   HEARTBEAT_MIN,
   NEW_SOURCE,
   SOURCE_TYPES,
   TRANSPORTS,
-  fromSourceForm,
+  isNetworkAddress,
+  sourceBody,
   sourceConfig,
   toSourceForm,
   validateSource,
   type SourceField,
   type SourceForm,
 } from './sources-model';
+import { snmpBounds, snmpId, snmpPaths, validateSnmp, type SnmpField } from './snmp-model';
 
 const PERMISSION = 'sources.manage';
 
@@ -119,6 +122,7 @@ function SourceDialog({
   onClose,
   onSubmit,
   errors,
+  snmpMessage,
   busy,
   problemMessage,
 }: {
@@ -127,6 +131,7 @@ function SourceDialog({
   onClose: () => void;
   onSubmit: () => void;
   errors: Record<SourceField, string | undefined>;
+  snmpMessage: (field: SnmpField) => string | undefined;
   busy: boolean;
   problemMessage: string | null;
 }) {
@@ -271,6 +276,13 @@ function SourceDialog({
               set({ enabled });
             }}
           />
+          <SnmpSection
+            values={values.snmp}
+            message={snmpMessage}
+            onChange={(snmp) => {
+              set({ snmp });
+            }}
+          />
           {problemMessage ? <Alert tone="danger">{problemMessage}</Alert> : null}
           <DialogFooter>
             <Button variant="secondary" onClick={onClose}>
@@ -326,7 +338,12 @@ export function SourcesPage() {
     ),
     fields: useCallback(
       (body: SourceChange) =>
-        body.dialog ? Object.values(sourcePaths(body.body.source.name)).flat() : [],
+        body.dialog
+          ? [
+              ...Object.values(sourcePaths(body.body.source.name)).flat(),
+              ...Object.values(snmpPaths(body.body.source.name)).flat(),
+            ]
+          : [],
       [],
     ),
   });
@@ -336,6 +353,7 @@ export function SourcesPage() {
   });
   const [editing, setEditing] = useState<Editing | null>(null);
   const [errors, setErrors] = useState<FieldErrors<SourceField>>({});
+  const [snmpErrors, setSnmpErrors] = useState<FieldErrors<SnmpField>>({});
   const [typed, setTyped] = useState('');
   const [last, setLast] = useState<'change' | 'remove'>('change');
   const [prefill, setPrefill] = useState<SourcePrefill | null>(null);
@@ -382,6 +400,7 @@ export function SourcesPage() {
     change.reset();
     removal.reset();
     setErrors({});
+    setSnmpErrors({});
     setEditing(next);
   }
 
@@ -390,15 +409,22 @@ export function SourcesPage() {
     const found = validateSource(editing.values, sources, policy, editing.name);
     if (editing.mode === 'add' && policy && sources.length >= policy.max_sources)
       found.name = 'settings.sources.errors.limit';
+    const snmpFound = validateSnmp(editing.values.snmp, isNetworkAddress(editing.values.address));
     setErrors(found);
-    if (hasErrors(found)) {
-      focusFirstError(found, (field) => `source-${field}`);
+    setSnmpErrors(snmpFound);
+    if (hasErrors(found) || hasErrors(snmpFound)) {
+      // One focus for both parts: the first refused control in the dialog's order.
+      const ids: FieldErrors<string> = {};
+      for (const [field, error] of Object.entries(found)) ids[`source-${field}`] = error;
+      for (const [field, error] of Object.entries(snmpFound))
+        ids[snmpId(field as SnmpField)] = error;
+      focusFirstError(ids, (id) => id);
       return;
     }
     setLast('change');
     void change.start({
       mode: editing.mode,
-      body: { etag, source: fromSourceForm(editing.values) },
+      body: sourceBody(editing.values, etag),
       dialog: true,
     });
   }
@@ -426,6 +452,12 @@ export function SourcesPage() {
         max: HEARTBEAT_MAX,
       },
     );
+  const snmpMessage = (field: SnmpField) => {
+    const paths = snmpPaths(editing?.values.name ?? '');
+    const server =
+      field === 'snmp' || field === 'auth_key' || field === 'priv_key' ? paths[field] : [];
+    return fieldMessage(t, change.problems, snmpErrors[field], server, snmpBounds(field));
+  };
   // The dialog stays open while the change is checked and comes back after a refusal.
   const dialogOpen =
     editing !== null &&
@@ -638,6 +670,9 @@ export function SourcesPage() {
                 }}
               />
             ) : null}
+            {last === 'change' && change.request?.error?.interfaces?.length ? (
+              <ProbeInterfaces interfaces={change.request.error.interfaces} />
+            ) : null}
             {last === 'remove' && removal.requestId ? (
               <RequestProgress requestId={removal.requestId} />
             ) : null}
@@ -657,11 +692,13 @@ export function SourcesPage() {
             address: message('address'),
             heartbeat: message('heartbeat'),
           }}
+          snmpMessage={snmpMessage}
           busy={change.phase === 'checking'}
           problemMessage={change.failure ? errorMessage(change.failure) : null}
           onChange={(values) => {
             setEditing({ ...editing, values });
             setErrors({});
+            setSnmpErrors({});
             change.edit();
           }}
           onClose={() => {

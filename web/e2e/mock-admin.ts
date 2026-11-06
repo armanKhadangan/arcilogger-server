@@ -64,19 +64,25 @@ import type {
   SmtpCaBody,
   SmtpCaClear,
   SmtpSection,
+  ProbeInterface,
+  SnmpIn,
+  SnmpOut,
   SourceCheckBody,
   SourceConfig,
+  SourceIn,
   SourceOut,
   StepState,
   TestEmailBody,
   TestEmailResult,
   TsaBody,
   TsaSection,
+  TsaServer,
   TsaTestBody,
   TsaTestResult,
   UploadPreview,
   ZamaneBody,
 } from '../src/lib/settings-types';
+import { codePointLength } from '../src/lib/validation';
 import { validateEgresses } from '../src/pages/settings/egress-model';
 
 import type { MockUser, RecordedCall } from './mock-api';
@@ -139,6 +145,16 @@ const HTTP: Record<string, [number, string, string]> = {
     'Kaynak adı sonradan değiştirilemez (ham log klasörünün adıdır); yeni bir kaynak ekleyin.',
     'A source name cannot be changed (it names the raw log folder); add a new source instead.',
   ],
+  snmp_secret_missing: [
+    422,
+    "SNMP'yi açmak için SNMPv3 kimlik doğrulama ve şifreleme anahtarlarının ikisi de gerekir (8-64 karakter).",
+    'Switching SNMP on needs both the SNMPv3 authentication and privacy keys (8 to 64 characters).',
+  ],
+  snmp_source_is_network: [
+    422,
+    'SNMP yalnızca tek bir adresi olan kaynakta açılabilir; bir ağ adresine istek gönderilmez.',
+    'SNMP can only be switched on for a source with a single address; no request goes to a network.',
+  ],
   source_ipv6_unsupported: [
     422,
     'Şimdilik yalnızca IPv4 adresleri ve ağları desteklenir.',
@@ -196,18 +212,23 @@ const HTTP: Record<string, [number, string, string]> = {
   ],
   tsa_server_invalid: [
     422,
-    'Zaman damgası sunucusu "test" ya da "production" olmalı.',
-    'The time-stamp server must be "test" or "production".',
+    'Zaman damgası sunucusu "test", "production", "turktrust" ya da "turktrust-http" olmalı.',
+    'The time-stamp server must be "test", "production", "turktrust" or "turktrust-http".',
   ],
   tsa_not_ready: [
     409,
-    'Üretim sunucusuna geçmeden önce eksikleri tamamlayın: kimlik bilgileri, onaylı Zamane istemcisi, Java ve en az bir kök sertifika.',
-    'Complete the missing items before switching to the production server: credentials, an approved Zamane client, Java and at least one root certificate.',
+    'Bu zaman damgası sunucusuna geçmeden önce eksikleri tamamlayın; hiçbir şey değişmedi. Eksikler aşağıda.',
+    'Complete the missing items before switching to this time-stamp server; nothing changed. The missing items are below.',
   ],
   tsa_confirm_required: [
     422,
     'Üretimden test sunucusuna geçiş üretim damgalarını durdurur; onaylayın.',
     'Switching from production to the test server stops production stamps; confirm to continue.',
+  ],
+  tsa_plain_http_confirm_required: [
+    422,
+    'Düz HTTP ile TÜRKTRUST kullanıcı adı ve parolası ağda şifrelenmeden gider; onaylayın.',
+    'Over plain HTTP the TÜRKTRUST user name and password travel unencrypted on the network; confirm to continue.',
   ],
   java_not_detected: [
     422,
@@ -290,6 +311,23 @@ const MESSAGES: Record<string, [string, string]> = {
     'The connection test with the new values failed; nothing changed.',
   ],
   ntp_unreachable: ['Saat sunucusu yanıt vermedi.', 'The time server did not answer.'],
+  // The SNMP probe (Wave 5 §6 N5): N4's reasons.
+  snmp_timeout: [
+    "Cihaz SNMP isteğine yanıt vermedi: adresi, portu, cihazdaki SNMP'yi ve güvenlik duvarını denetleyin.",
+    'The device did not answer the SNMP request: check the address, the port, SNMP on the device and the firewall.',
+  ],
+  snmp_auth_failed: [
+    'SNMPv3 kimlik doğrulaması başarısız: kullanıcıyı, protokolleri ve anahtarları cihazdaki ayarlarla karşılaştırın.',
+    "SNMPv3 authentication failed: compare the user, the protocols and the keys with the device's settings.",
+  ],
+  snmp_no_such_interface: [
+    'Cihaz bu arayüz adını bildirmiyor; cihazın bildirdiği arayüzlerden WAN hattını seçin.',
+    'The device reports no interface of this name; pick the WAN line from the interfaces the device reports.',
+  ],
+  snmp_no_hc_counters: [
+    'Cihaz bu arayüz için 64 bit sayaç (ifHCInOctets) vermiyor.',
+    'The device gives no 64-bit counters (ifHCInOctets) for this interface.',
+  ],
   smtp_test_failed: ['Deneme e-postası gönderilemedi.', 'The trial e-mail could not be sent.'],
   replica_test_failed: [
     'Replika paylaşımına bağlanılamadı.',
@@ -547,6 +585,8 @@ interface Final {
   ends?: Partial<Record<RequestStep, StepEnd>>;
   rolledBack?: boolean;
   manual?: [string, string];
+  /** The device's interfaces of a failed SNMP probe (W5-N-9). */
+  interfaces?: ProbeInterface[];
   warnings?: string[];
 }
 
@@ -643,6 +683,34 @@ function validHost(text: string): boolean {
   return /^[\d.]+$/.test(text) ? IPV4.test(text) : HOST.test(text);
 }
 
+/** The browser's time-stamp server choices (`rules.TSA_SERVERS`). */
+const TSA_SERVERS: readonly TsaServer[] = ['test', 'production', 'turktrust', 'turktrust-http'];
+/** TÜRKTRUST's account (contract §2.4). */
+const TURKTRUST_SECRETS = ['turktrust.username', 'turktrust.password'] as const;
+
+/** A revocation list URL as `config.TsaConfig` accepts it: http(s), a host, no user info (C10). */
+function validCrlUrl(value: unknown): boolean {
+  if (typeof value !== 'string') return false;
+  try {
+    const url = new URL(value);
+    return (
+      (url.protocol === 'http:' || url.protocol === 'https:') &&
+      url.hostname !== '' &&
+      url.username === '' &&
+      url.password === ''
+    );
+  } catch {
+    return false;
+  }
+}
+
+/** `network.https_proxy` as `config.NetworkConfig` accepts it: empty or `http://host:port`. */
+function validProxy(value: unknown): boolean {
+  if (value === '') return true;
+  if (typeof value !== 'string') return false;
+  return /^http:\/\/[A-Za-z0-9.-]+:\d{1,5}\/?$/.test(value);
+}
+
 /** A text field of a change body: trimmed, `null` when empty. */
 function text(value: unknown): string | null {
   return typeof value === 'string' && value.trim() ? value.trim() : null;
@@ -702,7 +770,13 @@ function startConfig(options: AdminOptions): AdminConfig['sections'] {
             source: 'installer',
           },
         ],
-        secrets: { 'kamusm.customer': { ...stored }, 'kamusm.password': { ...stored } },
+        // As W5-T's API reports them (`samples/admin.json`): TÜRKTRUST's two known, not stored.
+        secrets: {
+          'kamusm.customer': { ...stored },
+          'kamusm.password': { ...stored },
+          'turktrust.username': { set: false, changed_at: null, changed_by: null },
+          'turktrust.password': { set: false, changed_at: null, changed_by: null },
+        },
       };
   sections.smtp = {
     ...sections.smtp,
@@ -736,7 +810,8 @@ function diff(prefix: string, before: Record<string, unknown>, after: Record<str
 }
 
 /** The `[[sources]]` table of a source (what a change list holds: the whole table). */
-function sourceTable(source: SourceConfig): SourceConfig {
+/** A source's table as the change rows show it: `snmp` only when it has one (W5-N-6). */
+function sourceTable(source: SourceConfig & { snmp?: SnmpIn | SnmpOut | null }): SourceIn {
   return {
     name: source.name,
     type: source.type,
@@ -745,6 +820,21 @@ function sourceTable(source: SourceConfig): SourceConfig {
     expected: source.expected,
     transport: source.transport,
     enabled: source.enabled,
+    ...(source.snmp ? { snmp: snmpTable(source.snmp) } : {}),
+  };
+}
+
+/** `[sources.snmp]` with the server's defaults for a field left out (§6.3), without the keys. */
+function snmpTable(snmp: SnmpIn | SnmpOut): Required<SnmpIn> {
+  return {
+    enabled: snmp.enabled ?? false,
+    port: snmp.port ?? 161,
+    user: snmp.user ?? '',
+    auth: snmp.auth ?? 'sha256',
+    priv: snmp.priv ?? 'aes128',
+    interfaces: [...(snmp.interfaces ?? [])],
+    capacity_mbps: { ...(snmp.capacity_mbps ?? {}) },
+    interval_seconds: snmp.interval_seconds ?? 15,
   };
 }
 
@@ -758,6 +848,10 @@ export class AdminMock {
   readonly requests = new Map<string, MockRequest>();
   /** The next configuration change ends like this (then back to `active`). */
   nextOutcome: Outcome | null = null;
+  /** The code of the next failed probe (`snmp_no_such_interface`, …; then back to `probe_failed`). */
+  nextProbeFailure: string | null = null;
+  /** Strict outbound mode: a new SNMP address or port is not tried before ApplySystem (W5-N-6). */
+  strictOutbound = false;
   /** The next action ends like this (then back to `succeeded`). */
   nextAction: ActionOutcome | null = null;
   /** Days "Şimdi mühürle" sealed, with the Seal task's outcome. */
@@ -953,7 +1047,7 @@ export class AdminMock {
         applied_config_sha256: sha,
         firewall: {
           managed: true,
-          strict_outbound: false,
+          strict_outbound: this.strictOutbound,
           syslog_addresses: this.sections.sources
             .filter((item) => item.enabled)
             .map((item) => item.address),
@@ -1079,7 +1173,13 @@ export class AdminMock {
     );
     if (final.error) {
       const { code, message_tr, message_en } = message(final.error);
-      out.error = { code, message_tr, message_en, field: null };
+      out.error = {
+        code,
+        message_tr,
+        message_en,
+        field: null,
+        ...(final.interfaces ? { interfaces: final.interfaces } : {}),
+      };
     }
     // A task or the worker reports its outcome also when it failed (`{ok: false, …}`).
     if (item.result) out.result = copy(item.result);
@@ -1141,13 +1241,19 @@ export class AdminMock {
     let final: Final = { state: action ? 'succeeded' : 'active', steps: list };
     let apply = true;
     if (outcome === 'probe_failed' && list.includes('probe')) {
-      // The agent stops at the probe: nothing after it runs.
+      // The agent stops at the probe: nothing after it runs. The code is the probe's own.
+      const code = this.nextProbeFailure ?? 'probe_failed';
+      this.nextProbeFailure = null;
       list = list.slice(0, list.indexOf('probe') + 1);
       final = {
         state: 'probe_failed',
-        error: 'probe_failed',
+        error: code,
         steps: list,
-        ends: { probe: { state: 'failed', code: 'probe_failed' } },
+        ends: { probe: { state: 'failed', code } },
+        // W5-N-9: the captured list of what the device reports, for these two codes only.
+        ...(code === 'snmp_no_such_interface' || code === 'snmp_no_hc_counters'
+          ? { interfaces: copy(ADMIN.sources.snmp_probe_failed.error?.interfaces ?? []) }
+          : {}),
       };
       apply = false;
     } else if (outcome === 'conflict') {
@@ -1457,6 +1563,11 @@ export class AdminMock {
         ? clock.fallback_server.trim()
         : current.clock.fallback_server;
     const offset = clock.alert_offset_ms ?? current.clock.alert_offset_ms;
+    const proxy =
+      typeof body.network?.https_proxy === 'string'
+        ? body.network.https_proxy.trim()
+        : current.network.https_proxy;
+    if (!validProxy(proxy)) problems.push(problem('network.https_proxy', 'config_invalid'));
     if (ntp && !validHost(ntp)) problems.push(problem('clock.ntp_server', 'host_invalid'));
     if (fallback && !validHost(fallback))
       problems.push(problem('clock.fallback_server', 'host_invalid'));
@@ -1468,21 +1579,24 @@ export class AdminMock {
     const next = {
       site_name: name,
       clock: { ntp_server: ntp, fallback_server: fallback, alert_offset_ms: offset },
+      network: { https_proxy: proxy },
     };
     const changes = {
       ...diff('', { site_name: current.site_name }, { site_name: next.site_name }),
       ...diff('clock', { ...current.clock }, next.clock),
+      ...diff('network', { ...current.network }, next.network),
     };
     const clockChanged = Object.keys(changes).some((path) => path.startsWith('clock.'));
+    const proxyChanged = 'network.https_proxy' in changes;
     return this.change(call, host, dryRun, account, {
       section: 'general',
       changes,
       warnings: !ntp && fallback && clockChanged ? ['ntp_server_empty'] : [],
       effects: [
-        ...(changes.site_name ? ['reload.api', 'reload.worker'] : []),
+        ...(changes.site_name || proxyChanged ? ['reload.api', 'reload.worker'] : []),
         ...(clockChanged ? ['system.time', 'task.next_run:ClockCheck'] : []),
       ],
-      reauth: clockChanged,
+      reauth: clockChanged || proxyChanged,
       probe: clockChanged && body.probe !== false && Boolean(ntp),
       next: () => {
         this.sections.general = next;
@@ -1573,9 +1687,18 @@ export class AdminMock {
 
   /** `readiness` and `seal_ready` of a Kamu SM section (`tsa.preflight`, simplified). */
   private refreshTsa(tsa: TsaSection = this.sections.tsa): TsaSection {
+    // `TsaConfig.legal_grade` for the browser's choices: Kamu SM's production server, or
+    // TÜRKTRUST's (zd.turktrust.com.tr, D12) over HTTPS or plain HTTP.
+    tsa.legal_grade = ['production', 'turktrust', 'turktrust-http'].includes(tsa.server ?? '');
     tsa.readiness = { production: false, missing: tsaMissing(tsa) };
     tsa.readiness.production = tsa.readiness.missing.length === 0;
-    const causes = tsa.provider === 'zamane' ? tsa.readiness.missing.map(causeOf) : [];
+    const account = TURKTRUST_SECRETS.every((name) => tsa.secrets[name]?.set);
+    const causes =
+      tsa.provider === 'zamane'
+        ? tsa.readiness.missing.map(causeOf)
+        : tsa.provider === 'turktrust' && !account
+          ? ['credentials']
+          : [];
     tsa.seal_ready = { ok: causes.length === 0, causes };
     return tsa;
   }
@@ -1595,14 +1718,28 @@ export class AdminMock {
     const current = this.sections.tsa;
     const server = body.server ?? current.server;
     if (server === 'mock') return this.refused([problem('tsa.provider', 'tsa_mock_refused')]);
-    if (server !== 'test' && server !== 'production')
+    if (!TSA_SERVERS.includes(server as TsaServer))
       return this.refused([problem('tsa.provider', 'tsa_server_invalid')]);
+    const turktrust = server === 'turktrust' || server === 'turktrust-http';
     const problems: FieldProblem[] = [];
     const threshold = body.credit_alert_threshold ?? current.credit_alert_threshold;
     if (!integer(threshold, 0, 1_000_000))
       problems.push(problem('tsa.credit_alert_threshold', 'config_invalid'));
     const timeout = body.timeout_seconds ?? current.timeout_seconds;
     if (!integer(timeout, 5, 600)) problems.push(problem('tsa.timeout_seconds', 'config_invalid'));
+    // Contract §2.5 and C10, as config.py checks them.
+    const renew = body.renew_before_days ?? current.renew_before_days;
+    if (!integer(renew, 30, 730)) problems.push(problem('tsa.renew_before_days', 'config_invalid'));
+    const maxAge = body.crl_max_age_days ?? current.crl_max_age_days;
+    if (!integer(maxAge, 1, 60)) problems.push(problem('tsa.crl_max_age_days', 'config_invalid'));
+    const crlUrls = body.crl_urls ?? current.crl_urls;
+    if (!Array.isArray(crlUrls) || crlUrls.length > 20 || !crlUrls.every(validCrlUrl))
+      problems.push(problem('tsa.crl_urls', 'config_invalid'));
+    const plainHttp = body.allow_plain_http ?? current.allow_plain_http;
+    if (typeof plainHttp !== 'boolean')
+      problems.push(problem('tsa.allow_plain_http', 'config_invalid'));
+    else if (server === 'turktrust-http' && !plainHttp)
+      problems.push(problem('tsa.allow_plain_http', 'config_invalid'));
     const java = body.java === undefined ? current.java : body.java;
     if (java !== null && !JAVA_CHOICES.includes(java))
       problems.push(problem('tsa.java', 'java_not_detected'));
@@ -1612,25 +1749,37 @@ export class AdminMock {
       problems.push(problem('kamusm.customer', 'secret_invalid'));
     if (password !== null && !/^[^\p{Cc}\p{Cf}]{1,128}$/u.test(password))
       problems.push(problem('kamusm.password', 'secret_invalid'));
+    const username = typeof body.turktrust_username === 'string' ? body.turktrust_username : null;
+    const secret = typeof body.turktrust_password === 'string' ? body.turktrust_password : null;
+    if (username !== null && !/^[^\p{Cc}\p{Cf}]{1,128}$/u.test(username))
+      problems.push(problem('turktrust.username', 'secret_invalid'));
+    if (secret !== null && !/^[^\p{Cc}\p{Cf}]{1,256}$/u.test(secret))
+      problems.push(problem('turktrust.password', 'secret_invalid'));
     if (problems.length > 0) return this.refused(problems);
     const clear = body.clear_credentials === true;
     const candidate = copy(current);
-    candidate.provider = 'zamane';
-    candidate.server = server;
+    candidate.provider = turktrust ? 'turktrust' : 'zamane';
+    candidate.server = server as TsaServer;
     candidate.java = java;
     candidate.credit_alert_threshold = threshold;
     candidate.timeout_seconds = timeout;
+    candidate.renew_before_days = renew;
+    candidate.crl_max_age_days = maxAge;
+    candidate.crl_urls = [...crlUrls];
+    candidate.allow_plain_http = plainHttp;
     const by = `web:${account.username}`;
     const secretChanges: Record<string, Change> = {};
     for (const [name, value] of [
       ['kamusm.customer', customer],
       ['kamusm.password', password],
+      ['turktrust.username', username],
+      ['turktrust.password', secret],
     ] as const) {
       const was = current.secrets[name]?.set ? 'set' : 'unset';
-      if (clear && was === 'set') {
+      if (clear && name.startsWith('kamusm.') && was === 'set') {
         candidate.secrets[name] = { set: false, changed_at: this.iso(), changed_by: by };
         secretChanges[name] = { secret: true, old: was, new: 'deleted', changed: true };
-      } else if (!clear && value !== null) {
+      } else if ((!clear || name.startsWith('turktrust.')) && value !== null) {
         candidate.secrets[name] = { set: true, changed_at: this.iso(), changed_by: by };
         secretChanges[name] = { secret: true, old: was, new: 'set', changed: true };
       }
@@ -1643,6 +1792,14 @@ export class AdminMock {
       });
     if (production && server === 'test' && body.confirm !== true)
       return this.refused([problem('tsa.provider', 'tsa_confirm_required')]);
+    if (server === 'turktrust-http' && current.server !== server && body.confirm !== true)
+      return this.refused([problem('tsa.provider', 'tsa_plain_http_confirm_required')]);
+    const wasTurktrust = current.server === 'turktrust' || current.server === 'turktrust-http';
+    const missingAccount = TURKTRUST_SECRETS.filter((name) => !candidate.secrets[name]?.set);
+    if (turktrust && !wasTurktrust && missingAccount.length > 0)
+      return this.refused([problem('tsa.provider', 'tsa_not_ready')], {
+        missing: [...missingAccount],
+      });
     if (current.seal_ready.ok && !candidate.seal_ready.ok)
       return this.refused([problem('tsa.provider', 'tsa_would_break')], {
         causes: candidate.seal_ready.causes,
@@ -1652,6 +1809,10 @@ export class AdminMock {
       server: tsa.server,
       credit_alert_threshold: tsa.credit_alert_threshold,
       timeout_seconds: tsa.timeout_seconds,
+      allow_plain_http: tsa.allow_plain_http,
+      renew_before_days: tsa.renew_before_days,
+      crl_urls: tsa.crl_urls,
+      crl_max_age_days: tsa.crl_max_age_days,
       java: tsa.java,
     });
     const changes: Record<string, Change> = {
@@ -1944,14 +2105,16 @@ export class AdminMock {
     if (Array.isArray(account)) return account;
     const refusal = this.stale('sources', body.etag, mode === 'check');
     if (refusal) return refusal;
-    // A field left out takes the `SourceConfig` default.
+    // A field left out takes the `SourceConfig` default; no `snmp`: the source has no SNMP.
+    const { snmp: snmpBody, ...fields } = body.source;
     const source: SourceConfig = {
       heartbeat_minutes: 15,
       expected: true,
       transport: 'any',
       enabled: true,
-      ...body.source,
+      ...fields,
     };
+    const snmp = snmpBody ? snmpTable(snmpBody) : null;
     if (operation === 'update') {
       if (!existing) return this.refused([problem('sources', 'source_not_found')]);
       if (source.name !== existing.name)
@@ -1961,24 +2124,73 @@ export class AdminMock {
     }
     const editing = operation === 'add' ? null : (existing?.name ?? null);
     const problems = this.sourceProblems(source, editing);
+    // The SNMP part (W5-N-6): the keys (8 to 64 characters) are write-only; an enabled table
+    // needs a single address and both keys, stored or given here.
+    const keys = { auth_key: body.snmp_auth_key ?? null, priv_key: body.snmp_priv_key ?? null };
+    const stored = {
+      auth_key: existing?.snmp?.auth_key === 'set',
+      priv_key: existing?.snmp?.priv_key === 'set',
+    };
+    for (const [key, value] of Object.entries(keys))
+      if (value !== null && (codePointLength(value) < 8 || codePointLength(value) > 64))
+        problems.push(problem(`snmp.${source.name}.${key}`, 'secret_invalid'));
+    if (snmp?.enabled) {
+      if ((networkOf(source.address)?.prefix ?? 32) < 32)
+        problems.push(problem(`sources.${source.name}.snmp`, 'snmp_source_is_network'));
+      else if (
+        (keys.auth_key === null && !stored.auth_key) ||
+        (keys.priv_key === null && !stored.priv_key)
+      )
+        problems.push(problem(`sources.${source.name}.snmp`, 'snmp_secret_missing'));
+    }
     if (problems.length > 0) return this.refused(problems);
     const before = editing === null || !existing ? null : sourceTable(existing);
-    const after = sourceTable(source);
+    const after = sourceTable({ ...source, snmp });
     const changes: Record<string, Change> =
       JSON.stringify(before) === JSON.stringify(after)
         ? {}
         : { [`sources.${source.name}`]: { old: before, new: after } };
+    for (const [key, value] of Object.entries(keys))
+      if (value !== null)
+        changes[`snmp.${source.name}.${key}`] = {
+          secret: true,
+          old: stored[key as keyof typeof stored] ? 'set' : 'unset',
+          new: 'set',
+          changed: true,
+        };
     const disabling = existing !== null && existing.enabled && !source.enabled;
+    // N5 (`rules._snmp_keys`): a changed source whose SNMP is on, or new keys for it, is tried
+    // before anything is written; in strict outbound mode a new device address or port only
+    // after ApplySystem.
+    const tried =
+      snmp?.enabled === true &&
+      (`sources.${source.name}` in changes || keys.auth_key !== null || keys.priv_key !== null);
+    const reached =
+      existing?.snmp?.enabled === true &&
+      existing.address === source.address &&
+      existing.snmp.port === snmp?.port;
+    const skipped = tried && this.strictOutbound && !reached;
     return this.change(call, host, mode === 'check', account, {
       section: 'sources',
       changes,
-      warnings: disabling && existing.expected ? ['source_disable_gaps'] : [],
+      warnings: [
+        ...(disabling && existing.expected ? ['source_disable_gaps'] : []),
+        ...(skipped ? ['probe_skipped'] : []),
+      ],
       effects: ['reload.api', 'reload.collector', 'reload.ingest', 'system.firewall'],
       reauth: disabling,
-      probe: false,
+      probe: tried && !skipped,
+      secrets: keys.auth_key !== null || keys.priv_key !== null,
       next: () => {
         const row: SourceOut = {
           ...source,
+          snmp: snmp
+            ? {
+                ...snmp,
+                auth_key: keys.auth_key !== null || stored.auth_key ? 'set' : 'unset',
+                priv_key: keys.priv_key !== null || stored.priv_key ? 'set' : 'unset',
+              }
+            : null,
           firewall: source.enabled ? 'open' : 'closed',
           last_seen: existing?.last_seen ?? null,
         };

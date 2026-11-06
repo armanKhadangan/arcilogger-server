@@ -26,11 +26,19 @@
       },
       "kamusm_test": {
         "title": "Kamu SM: test sunucusu",
-        "purpose": "Test sunucusundan alınan bir zaman damgası Java'nın, Zamane istemcisinin, kök sertifikaların ve müşteri bilgilerinin birlikte çalıştığını gösterir. Test, Ayarlar → Kamu SM sayfasının damga testi adımında yapılır."
+        "purpose": "Test sunucusundan alınan bir zaman damgası Java'nın, Zamane istemcisinin, kök sertifikaların ve müşteri bilgilerinin birlikte çalıştığını gösterir. Test, Ayarlar → Zaman damgası sayfasının damga testi adımında yapılır."
       },
       "kamusm_production": {
         "title": "Kamu SM: üretim",
         "purpose": "Günlük mühürler zaman damgasını Kamu SM'nin üretim sunucusundan alır. Üretime geçtikten sonra mühürleme hazır olmalıdır; hazır değilse nedenleri aşağıda listelenir."
+      },
+      "turktrust_test": {
+        "title": "TÜRKTRUST: damga testi",
+        "purpose": "TÜRKTRUST'tan alınan, doğrulanmış bir zaman damgası kullanıcı adının, parolanın ve kök sertifikaların birlikte çalıştığını gösterir. Test, Ayarlar → Zaman damgası sayfasının damga testi adımında yapılır."
+      },
+      "turktrust_production": {
+        "title": "TÜRKTRUST: üretim",
+        "purpose": "Günlük mühürler zaman damgasını TÜRKTRUST'ın üretim sunucusundan (zd.turktrust.com.tr) alır. Mühürleme hazır olmalıdır; hazır değilse nedenleri aşağıda listelenir."
       },
       "replica": {
         "title": "Replika",
@@ -51,6 +59,7 @@
       "noEnabled": "Tanımlı kaynakların hiçbiri etkin değil.",
       "noTest": "Başarılı ve doğrulanmış bir damga testi yok.",
       "notProduction": "Zaman damgası Kamu SM'nin üretim sunucusundan alınmıyor.",
+      "notTurktrustProduction": "Zaman damgası TÜRKTRUST'ın üretim sunucusundan alınmıyor.",
       "sealNotReady": "Mühürleme hazır değil.",
       "replicaOff": "Replika kapalı.",
       "smtpOff": "E-posta gönderimi kapalı.",

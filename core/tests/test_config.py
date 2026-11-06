@@ -55,6 +55,22 @@ def test_retention_below_two_years_is_refused(tmp_path: Path) -> None:
         load_config(_write(tmp_path, MINIMAL + "\n[retention]\ndays = 365\n"))
 
 
+@pytest.mark.parametrize("batch_days", [0, -1, 181, 365])
+def test_retention_batch_days_outside_1_to_180_is_refused(tmp_path: Path, batch_days: int) -> None:
+    """``retention.batch_days`` (#195): 1 deletes each day as it expires; 180, six months, is the
+    ceiling."""
+    with pytest.raises(ValidationError, match="batch_days"):
+        load_config(_write(tmp_path, MINIMAL + f"\n[retention]\nbatch_days = {batch_days}\n"))
+
+
+@pytest.mark.parametrize(
+    ("text", "batch_days"), [("", 30), ("batch_days = 1\n", 1), ("batch_days = 180\n", 180)]
+)
+def test_retention_batch_days_defaults_to_30(tmp_path: Path, text: str, batch_days: int) -> None:
+    config = load_config(_write(tmp_path, MINIMAL + "\n[retention]\n" + text))
+    assert config.retention.batch_days == batch_days
+
+
 def test_replica_needs_a_target(tmp_path: Path) -> None:
     with pytest.raises(ValidationError, match=r"replica\.target"):
         load_config(_write(tmp_path, MINIMAL + "\n[replica]\nenabled = true\n"))
@@ -333,3 +349,107 @@ def test_parse_config_reads_bytes_as_load_config_reads_the_file(tmp_path: Path) 
     assert parse_config(path.read_bytes(), path) == load_config(path)
     with pytest.raises(ValueError, match="utf-8"):
         parse_config(MINIMAL.encode("utf-16"), path)
+
+
+def test_seal_compression_keys(tmp_path: Path) -> None:
+    """Wave 5 H1: xz by default, preset 6 and 2 threads; gzip stays a choice."""
+    seal = load_config(_write(tmp_path, MINIMAL)).seal
+    assert (seal.compression, seal.xz_preset, seal.xz_threads, seal.gzip_level) == ("xz", 6, 2, 9)
+    chosen = load_config(_write(tmp_path, MINIMAL + '\n[seal]\ncompression = "gzip"\n')).seal
+    assert chosen.compression == "gzip"
+    for section, message in (
+        ('compression = "zstd"', "compression"),
+        ("xz_preset = 10", "less than or equal to 9"),
+        ("xz_preset = -1", "greater than or equal to 0"),
+        ("xz_threads = 0", "greater than or equal to 1"),
+        ("xz_threads = 9", "less than or equal to 8"),
+    ):
+        with pytest.raises(ValidationError, match=message):
+            load_config(_write(tmp_path, MINIMAL + "\n[seal]\n" + section + "\n"))
+
+
+def test_wave5_keys_have_the_contract_defaults(tmp_path: Path) -> None:
+    """Contract §2.5: the five keys W5-T adds, with their defaults."""
+    config = load_config(_write(tmp_path, MINIMAL))
+    assert config.tsa.renew_before_days == 180
+    assert config.tsa.crl_urls == ()
+    assert config.tsa.crl_max_age_days == 7
+    assert config.tsa.allow_plain_http is False
+    assert config.network.https_proxy == ""
+
+
+def test_wave5_keys_are_read_from_the_file(tmp_path: Path) -> None:
+    extra = (
+        "\n[tsa]\nrenew_before_days = 365\n"
+        'crl_urls = ["http://crl.example.test/root.crl", "https://203.0.113.10:8443/tsa.crl"]\n'
+        "crl_max_age_days = 30\nallow_plain_http = true\n"
+        '\n[network]\nhttps_proxy = "http://172.20.10.5:3128"\n'
+    )
+    config = load_config(_write(tmp_path, MINIMAL + extra))
+    assert config.tsa.renew_before_days == 365
+    assert config.tsa.crl_urls == (
+        "http://crl.example.test/root.crl",
+        "https://203.0.113.10:8443/tsa.crl",
+    )
+    assert config.tsa.crl_max_age_days == 30
+    assert config.tsa.allow_plain_http is True
+    assert config.network.https_proxy == "http://172.20.10.5:3128"
+
+
+@pytest.mark.parametrize(
+    ("section", "message"),
+    [
+        ("[tsa]\nrenew_before_days = 29", "greater than or equal to 30"),
+        ("[tsa]\nrenew_before_days = 731", "less than or equal to 730"),
+        ("[tsa]\ncrl_max_age_days = 0", "greater than or equal to 1"),
+        ("[tsa]\ncrl_max_age_days = 61", "less than or equal to 60"),
+        ("[tsa]\ncrl_urls = [" + ", ".join(['"http://crl.example.test/a.crl"'] * 21) + "]", "20"),
+        ('[tsa]\ncrl_urls = ["ftp://crl.example.test/a.crl"]', "not an http or https URL"),
+        ('[tsa]\ncrl_urls = ["crl.example.test/a.crl"]', "not an http or https URL"),
+        ('[tsa]\ncrl_urls = ["http://crl.example.test:port/a.crl"]', "not an http or https URL"),
+        # C10: a URL with user information is refused (no credentials in the file).
+        ('[tsa]\ncrl_urls = ["http://user:pw@crl.example.test/a.crl"]', "no user name or password"),
+        ('[tsa]\ncrl_urls = ["https://user@crl.example.test/a.crl"]', "no user name or password"),
+        ('[tsa]\nallow_plain_http = "maybe"', "allow_plain_http"),
+        # C10: http://host:port with a numeric port, and nothing else.
+        ('[network]\nhttps_proxy = "172.20.10.5:3128"', "http://host:port"),
+        ('[network]\nhttps_proxy = "http://172.20.10.5"', "http://host:port"),
+        ('[network]\nhttps_proxy = "http://proxy.example.test:port"', "http://host:port"),
+        ('[network]\nhttps_proxy = "https://proxy.example.test:3128"', "http://host:port"),
+        ('[network]\nhttps_proxy = "http://u:p@proxy.example.test:3128"', "http://host:port"),
+        ('[network]\nhttps_proxy = "http://proxy.example.test:3128/path"', "http://host:port"),
+        ('[network]\nproxy = "http://proxy.example.test:3128"', "Extra inputs are not permitted"),
+    ],
+)
+def test_invalid_wave5_keys_are_refused(tmp_path: Path, section: str, message: str) -> None:
+    with pytest.raises(ValidationError, match=message):
+        load_config(_write(tmp_path, MINIMAL + "\n" + section + "\n"))
+
+
+@pytest.mark.parametrize("provider", ["mock", "rfc3161", "zamane", "turktrust"])
+@pytest.mark.parametrize(
+    "url", ["https://ornek:Gizli-Parola-7@zd.turktrust.com.tr/", "https://ornek@tsa.example.test/"]
+)
+def test_a_tsa_url_with_an_account_is_refused(tmp_path: Path, provider: str, url: str) -> None:
+    """#204: an account inside tsa.url is refused for every provider (it would reach repr, logs
+    and errors), and the refusal does not repeat the URL."""
+    section = f'[tsa]\nprovider = "{provider}"\nurl = "{url}"'
+    with pytest.raises(ValidationError, match="cannot carry a user name or password") as e:
+        load_config(_write(tmp_path, MINIMAL + "\n" + section + "\n"))
+    assert "kullanıcı adı ya da parola içeremez" in str(e.value)
+    assert "Gizli-Parola-7" not in str(e.value)
+    assert "ornek" not in str(e.value)
+
+
+@pytest.mark.parametrize(
+    "section",
+    [
+        '[tsa]\ncrl_urls = ["http://ornek:Gizli-Parola-7@crl.example.test/a.crl"]',
+        '[network]\nhttps_proxy = "http://ornek:Gizli-Parola-7@proxy.example.test:3128"',
+    ],
+)
+def test_a_refused_url_is_not_repeated(tmp_path: Path, section: str) -> None:
+    """#204: the error text of a refused URL never carries its password."""
+    with pytest.raises(ValidationError) as raised:
+        load_config(_write(tmp_path, MINIMAL + "\n" + section + "\n"))
+    assert "Gizli-Parola-7" not in str(raised.value)

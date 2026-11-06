@@ -25,7 +25,11 @@
     Outbound (-StrictOutbound, optional; default action becomes Block):
       NTP (UDP 123) to [clock] ntp_server and fallback_server, DNS (53) to the configured DNS
       servers, Kamu SM (zd/tzd.kamusm.gov.tr and the host of [tsa] url, on [tsa] port; root
-      certificates and CRLs from sertifikalar.kamusm.gov.tr TCP 80/443, docs/kamusm.md), SMTP (the
+      certificates and CRLs from sertifikalar.kamusm.gov.tr TCP 80/443, docs/kamusm.md),
+      TÜRKTRUST (the host of [tsa] url when [tsa] provider = "turktrust", TCP 443, or 80 with
+      [tsa] allow_plain_http), the revocation lists (the hosts of [tsa] crl_urls, TCP 80/443) -
+      or, when [network] https_proxy is set, the proxy's host and port in place of TÜRKTRUST and
+      the revocation lists -, SMTP (the
       server of [smtp] in arcilogger.toml when enabled = true and host is set, on [smtp] port,
       default 587; and the host:port of -SmtpServer, if given, as a rule of its own) and the
       replica share (TCP 445 to the [replica] target host). Enabled outbound
@@ -53,9 +57,10 @@
     in and the widest network) before anything changes. It then updates the two syslog rules in
     place (Set-NetFirewallAddressFilter), creates them when the first sender appears and removes
     them when the last one goes (an empty RemoteAddress would mean any address), and in strict
-    mode updates the Out NTP / Kamu SM / SMTP / Replica rules in place (a host that does not
-    resolve keeps its rule as it is). It never disables or removes another rule, never changes a
-    profile, needs no -AdminAddress, skips the remote desktop check and never prompts. Exit codes:
+    mode updates the Out NTP / Kamu SM / SMTP / Replica / TURKTRUST / CRL / Proxy and SNMP <source>
+    rules in place, creating one that is missing (a host that does not resolve keeps its rule as it
+    is). It never disables or removes another rule, never changes a profile, needs no
+    -AdminAddress, skips the remote desktop check and never prompts. Exit codes:
     0 done, 2 refused (nothing changed), 3 not managed (no state file: an installation with
     -SkipFirewall). The full mode above stays for the installer and the console.
     -KeepSourceAddress: enabled sources the policy leaves out (system-plan's
@@ -228,8 +233,9 @@ function Invoke-SyncFromConfig {
     (-PolicyPath) before any change, and a refused one changes nothing. The two syslog rules are
     updated in place (Set-NetFirewallAddressFilter), created when the list becomes non-empty and
     removed when it becomes empty (an empty RemoteAddress would mean any address); in strict mode
-    the Out NTP / Kamu SM / SMTP / Replica rules of the plan are updated in place, a rule whose
-    host does not resolve now keeps its addresses. Nothing else is touched: no other rule is
+    the Out NTP / Kamu SM / SMTP / Replica / TURKTRUST / CRL / Proxy and SNMP <source> (UDP, Wave 5
+    §6 N3) rules of the plan are updated in place (created when missing), a rule whose host does not
+    resolve now keeps its addresses. Nothing else is touched: no other rule is
     disabled or removed, no profile changes, the 443, 3389 and 5985 rules and the operator's
     choices of the state file stay as they are. Never prompts. Returns the exit code: 0 done,
     2 refused (nothing changed), 3 not managed (no state file: -SkipFirewall).
@@ -286,7 +292,8 @@ function Invoke-SyncFromConfig {
                 if (@($found).Count -eq 0) { $unresolved += $target }
                 Add-Unique $addresses @($found)
             }
-            $protocol = $(if ($name -eq 'ARCILOGGER Out NTP') { 'UDP' } else { 'TCP' })
+            # NTP and a source's SNMP (Wave 5 §6 N3, ARCILOGGER SNMP <source>) are UDP.
+            $protocol = $(if ($name -eq 'ARCILOGGER Out NTP' -or $name.StartsWith('ARCILOGGER SNMP ')) { 'UDP' } else { 'TCP' })
             $change = [pscustomobject]@{ rule = $name; direction = 'Outbound'; protocol = $protocol; ports = $ports; remote_address = $addresses.ToArray(); hosts = $hosts; operation = 'set'; reason = $null }
             if ($unresolved.Count -gt 0) {
                 # Offline DNS: the rule keeps the addresses it has (contract 2.18 R8).
@@ -444,22 +451,62 @@ if (-not $Remove) {
         }
 
         # Kamu SM: both servers (test and production, so switching [tsa] url needs no firewall
-        # change) plus whatever [tsa] url names, on the port the time-stamp client uses.
+        # change) plus whatever [tsa] url names, on the port the time-stamp client uses. A
+        # TÜRKTRUST url has its own rule below (Wave 5 contract 2.4).
+        $provider = [string](Get-ArciConfigValue -Config $config -Path 'tsa.provider' -Default 'mock')
         $tsaHosts = New-Object System.Collections.Generic.List[string]
         Add-Unique $tsaHosts $KamuSmHost
         $tsaPorts = New-Object System.Collections.Generic.List[string]
         $tsaUrl = [string](Get-ArciConfigValue -Config $config -Path 'tsa.url' -Default '')
+        $tsaPort = [int](Get-ArciConfigValue -Config $config -Path 'tsa.port' -Default 80)
         $uri = $null
-        if ($tsaUrl -and [System.Uri]::TryCreate($tsaUrl, [System.UriKind]::Absolute, [ref]$uri) -and $uri.Host) {
-            Add-Unique $tsaHosts @($uri.Host)
-            Add-Unique $tsaPorts @([string]$uri.Port)
+        $tsaUri = $null
+        if ($tsaUrl -and [System.Uri]::TryCreate($tsaUrl, [System.UriKind]::Absolute, [ref]$uri) -and $uri.Host) { $tsaUri = $uri }
+        if ($tsaUri -and $provider -ne 'turktrust') {
+            Add-Unique $tsaHosts @($tsaUri.Host)
+            Add-Unique $tsaPorts @([string]$tsaUri.Port)
         }
-        Add-Unique $tsaPorts @([string](Get-ArciConfigValue -Config $config -Path 'tsa.port' -Default 80))
+        Add-Unique $tsaPorts @([string]$(if ($provider -eq 'turktrust') { 80 } else { $tsaPort }))
         $kamusm = New-Object System.Collections.Generic.List[string]
         foreach ($name in $tsaHosts) { Add-Unique $kamusm (Resolve-HostAddresses $name) }
         if ($kamusm.Count -gt 0) { $rules.Add((New-RuleSpec 'ARCILOGGER Out Kamu SM' 'Outbound' 'TCP' $tsaPorts.ToArray() $kamusm.ToArray() 'time stamps (hash only)')) }
         $certificates = Resolve-HostAddresses $KamuSmCertificateHost
         if (@($certificates).Count -gt 0) { $rules.Add((New-RuleSpec 'ARCILOGGER Out Kamu SM certificates' 'Outbound' 'TCP' @('80', '443') $certificates 'roots and CRLs')) }
+
+        # TÜRKTRUST and the revocation lists (Wave 5 contract 2.4, D13): the host of [tsa] url
+        # with the provider turktrust, on its port (443; 80 with [tsa] allow_plain_http), and the
+        # hosts of [tsa] crl_urls on TCP 80 and 443 (the lists are signed, D8, so plain http is
+        # safe for them). Distribution points named in certificates are never opened by
+        # themselves: list them in crl_urls. With [network] https_proxy set, both go through the
+        # proxy, so one rule to its host:port replaces them (the Zamane client takes no proxy,
+        # D13: the Kamu SM rules above stay).
+        $proxy = ([string](Get-ArciConfigValue -Config $config -Path 'network.https_proxy' -Default '')).Trim()
+        $proxyUri = $null
+        if ($proxy -and [System.Uri]::TryCreate($proxy, [System.UriKind]::Absolute, [ref]$proxyUri) -and $proxyUri.Host) {
+            $proxyAddresses = Resolve-HostAddresses $proxyUri.Host
+            if (@($proxyAddresses).Count -gt 0) { $rules.Add((New-RuleSpec 'ARCILOGGER Out Proxy' 'Outbound' 'TCP' @([string]$proxyUri.Port) $proxyAddresses 'HTTPS proxy ([network] https_proxy)')) }
+            else {
+                # No proxy rule, and no TURKTRUST or CRL rule either (they go through the proxy):
+                # in strict mode nothing reaches the stamps or the revocation lists, so say so.
+                Write-ArciWarn ("Vekil sunucu ({0}) çözümlenemedi: sıkı giden kipte zaman damgası ve iptal listeleri için yol açılmadı. [network] https_proxy ayarını düzeltip bu betiği yeniden çalıştırın [the proxy host does not resolve: in strict outbound mode no path is opened for time stamps and revocation lists; fix [network] https_proxy and run this script again]." -f $proxyUri.Host)
+            }
+        }
+        else {
+            if ($provider -eq 'turktrust' -and $tsaUri) {
+                # tsa.port 80 or 443 leaves the URL's own port in force (arcilogger_core.tsa.url_with_port).
+                $port = $(if (-not $tsaUri.IsDefaultPort -or $tsaPort -eq 80 -or $tsaPort -eq 443) { $tsaUri.Port } else { $tsaPort })
+                $turktrust = Resolve-HostAddresses $tsaUri.Host
+                if (@($turktrust).Count -gt 0) { $rules.Add((New-RuleSpec 'ARCILOGGER Out TURKTRUST' 'Outbound' 'TCP' @([string]$port) $turktrust 'time stamps (hash only)')) }
+            }
+            $crlHosts = New-Object System.Collections.Generic.List[string]
+            foreach ($url in @(Get-ArciConfigValue -Config $config -Path 'tsa.crl_urls' -Default @())) {
+                $crlUri = $null
+                if ($url -and [System.Uri]::TryCreate([string]$url, [System.UriKind]::Absolute, [ref]$crlUri) -and $crlUri.Host) { Add-Unique $crlHosts @($crlUri.Host) }
+            }
+            $crl = New-Object System.Collections.Generic.List[string]
+            foreach ($name in $crlHosts) { Add-Unique $crl (Resolve-HostAddresses $name) }
+            if ($crl.Count -gt 0) { $rules.Add((New-RuleSpec 'ARCILOGGER Out CRL' 'Outbound' 'TCP' @('80', '443') $crl.ToArray() 'revocation lists ([tsa] crl_urls)')) }
+        }
 
         # SMTP: the server the alert e-mail uses ([smtp] of arcilogger.toml, read on every run, so
         # an upgrade keeps the rule) and the host:port of -SmtpServer (remembered). One rule per
@@ -494,6 +541,19 @@ if (-not $Remove) {
             $replicaHost = $target.Split('/')[0]
             $replica = Resolve-HostAddresses $replicaHost
             if (@($replica).Count -gt 0) { $rules.Add((New-RuleSpec 'ARCILOGGER Out Replica' 'Outbound' 'TCP' @('445') $replica 'second copy (SMB)')) }
+        }
+
+        # The internet line's speed (Wave 5 §6 N3): UDP to each enabled single-address source
+        # with [sources.snmp] enabled, its own address and SNMP port only; nothing inbound.
+        foreach ($source in @(Get-ArciConfigValue -Config $config -Path 'sources' -Default @())) {
+            $snmp = Get-ArciConfigValue -Config $source -Path 'snmp'
+            if ($null -eq $snmp -or (Get-ArciConfigValue -Config $snmp -Path 'enabled' -Default $false) -ne $true) { continue }
+            if ((Get-ArciConfigValue -Config $source -Path 'enabled' -Default $true) -ne $true) { continue }
+            $address = [string](Get-ArciConfigValue -Config $source -Path 'address' -Default '')
+            if (-not $address -or $address.Contains('/')) { continue }
+            $snmpPort = [string](Get-ArciConfigValue -Config $snmp -Path 'port' -Default 161)
+            $name = 'ARCILOGGER SNMP {0}' -f [string](Get-ArciConfigValue -Config $source -Path 'name' -Default '')
+            $rules.Add((New-RuleSpec $name 'Outbound' 'UDP' @($snmpPort) @($address) 'the internet line speed (SNMPv3, read only)'))
         }
     }
 }

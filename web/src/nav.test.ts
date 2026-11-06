@@ -11,10 +11,13 @@ describe('permission-filtered menu (docs/MVP-CONTRACTS.md section 6)', () => {
     expect(menuFor('admin')).toEqual(NAV_ITEMS.map((item) => item.key));
   });
 
-  it('auditor: panel, live tail, search, lookup, usage (anonymous), sealing, evidence, compliance status, audit', () => {
+  // Canlı Durum (W5 §6 M3, N6): every role that sees the Panel or usage figures sees the page;
+  // each of its parts is checked again on the page and by the API.
+  it('auditor: panel, live tail, Canlı Durum, search, lookup, usage (anonymous), sealing, evidence, compliance status, audit', () => {
     expect(menuFor('auditor')).toEqual([
       'dashboard',
       'live',
+      'activity',
       'search',
       'lookup',
       'usage',
@@ -25,12 +28,12 @@ describe('permission-filtered menu (docs/MVP-CONTRACTS.md section 6)', () => {
     ]);
   });
 
-  it('hr: panel (usage) and usage reports only', () => {
-    expect(menuFor('hr')).toEqual(['dashboard', 'usage']);
+  it('hr: panel (usage), Canlı Durum and usage only', () => {
+    expect(menuFor('hr')).toEqual(['dashboard', 'activity', 'usage']);
   });
 
-  it('viewer: panel and anonymous usage only', () => {
-    expect(menuFor('viewer')).toEqual(['dashboard', 'usage']);
+  it('viewer: panel, Canlı Durum and anonymous usage only', () => {
+    expect(menuFor('viewer')).toEqual(['dashboard', 'activity', 'usage']);
   });
 
   it('shows nothing without permissions and hides the UI kit from non-admins', () => {
@@ -59,11 +62,15 @@ describe('pages with content', () => {
     expect([...BUILT_PAGES].filter((key) => !keys.has(key))).toEqual([]);
   });
 
-  it('keeps Kaynaklar, Canlı Akış and Arama in 5651 Temel: no licence module locks them', () => {
-    const pages = NAV_ITEMS.filter((item) => ['sources', 'live', 'search'].includes(item.key));
+  it('keeps Kaynaklar, Canlı Akış, Canlı Durum and Arama in 5651 Temel: no licence module locks them', () => {
+    // Canlı Durum's "Şu an" table checks `usage_analytics` itself; the line speed is base (QB1).
+    const pages = NAV_ITEMS.filter((item) =>
+      ['sources', 'live', 'activity', 'search'].includes(item.key),
+    );
     expect(pages.map((item) => [item.key, item.path, item.module])).toEqual([
       ['sources', '/sources', undefined],
       ['live', '/live', undefined],
+      ['activity', '/activity', undefined],
       ['search', '/search', undefined],
     ]);
   });

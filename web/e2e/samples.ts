@@ -47,6 +47,7 @@ import type {
   VerifyResult,
   VlanOut,
 } from '../src/lib/api-types';
+import type { ActivityDevices, WanRates } from '../src/lib/activity-types';
 import type { ComplianceStatus, ConfigBackupOut } from '../src/lib/compliance-types';
 import type { LiveStatus, LiveStreamOut } from '../src/lib/live-types';
 import type {
@@ -211,6 +212,8 @@ export const ADMIN = load('admin') as {
     add_active: AdminRequestOut;
     remove_accepted: AdminAccepted;
     remove_active: AdminRequestOut;
+    /** A failed SNMP probe with the device's interfaces in `error.interfaces` (W5-N-9). */
+    snmp_probe_failed: AdminRequestOut;
   };
   sections: {
     config: AdminConfig;
@@ -544,13 +547,39 @@ export const SYSTEM_DISK = load('system-disk') as {
 
 /**
  * Services, scheduled tasks, worker jobs and the clock (captured, Wave 4 contract 2.6): the
- * tasks `ok`, `late`, `missing`, `not_used` and `not_observable`, the jobs `ok`, `failing`,
- * `skipped`, `running` and `never`, the clock samples of today (one probe no server answered),
- * and the auditor's refusal.
+ * tasks `ok`, `late`, `missing`, `not_used`, `not_observable` and `failed` (CrlFetch, code
+ * `stored_file_unreadable`), the jobs `ok`, `failing`, `skipped`, `running` and `never`, the
+ * clock samples of today (one probe no server answered), and the auditor's refusal.
  */
 export const SYSTEM_HEALTH = load('system-health') as {
   meta: SampleMeta;
   health: SystemHealth;
+  errors: Record<string, ErrorSample>;
+};
+
+/**
+ * Canlı Durum's "Şu an" (captured, Wave 5 contract §6 M2, W5-M): the windows 1, 5 and 15 from the
+ * worker's snapshot on the golden usage site (window 1 empty: no minute of it has traffic), the
+ * pseudonymous viewer's window 5, and the refusals.
+ */
+export const ACTIVITY = load('activity') as {
+  meta: SampleMeta;
+  devices_1: ActivityDevices;
+  devices_5: ActivityDevices;
+  devices_15: ActivityDevices;
+  viewer_devices_pseudonymous: ActivityDevices;
+  errors: Record<string, ErrorSample>;
+};
+
+/**
+ * Canlı Durum's internet lines (captured, Wave 5 contract §6 N6): the last hour (a line `ok` with
+ * its capacity, one `timeout`, one `disabled`), the day as 1-minute averages, and no SNMP source.
+ */
+export const ACTIVITY_WAN = load('activity-wan') as {
+  meta: SampleMeta;
+  hour: WanRates;
+  day: WanRates;
+  empty: WanRates;
   errors: Record<string, ErrorSample>;
 };
 

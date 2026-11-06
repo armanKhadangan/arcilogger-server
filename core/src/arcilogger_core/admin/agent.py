@@ -57,6 +57,7 @@ from arcilogger_core.admin.apply import Applier, ApplyOutcome, ChangePlan
 from arcilogger_core.admin.contract import (
     ACTION_TASKS,
     HEARTBEAT_INTERVAL,
+    INTERFACE_CODES,
     JOURNAL_DAYS,
     MAX_REQUEST_BYTES,
     MAX_SEAL_REQUEST_VALIDITY,
@@ -78,6 +79,7 @@ from arcilogger_core.admin.contract import (
     JournalState,
     KeysFile,
     PendingRequest,
+    ProbeInterface,
     Requester,
     RequestKind,
     RequestStatus,
@@ -350,6 +352,7 @@ class _Progress:
         result: Any = None,
         warnings: Iterable[str] = (),
         rolled_back: bool = False,
+        interfaces: Sequence[ProbeInterface] = (),
     ) -> RequestStatus:
         status = RequestStatus(
             id=self.id,
@@ -360,7 +363,11 @@ class _Progress:
             version=version,
             effective_at=effective_at,
             result=result,
-            error=ErrorRef(code=error, field=_field(field_path)) if error else None,
+            error=(
+                ErrorRef(code=error, field=_field(field_path), interfaces=tuple(interfaces))
+                if error
+                else None
+            ),
             warnings=tuple(
                 WarningRef(code=code) for code in dict.fromkeys(warnings) if code in WARNINGS
             ),
@@ -956,8 +963,14 @@ class Agent:
         if pending is None:
             progress.write("received")
 
-        def fail(state: JournalState, status_state: State, code: str, path: str | None) -> bool:
-            progress.write(status_state, error=code, field_path=path)
+        def fail(
+            state: JournalState,
+            status_state: State,
+            code: str,
+            path: str | None,
+            interfaces: Sequence[ProbeInterface] = (),
+        ) -> bool:
+            progress.write(status_state, error=code, field_path=path, interfaces=interfaces)
             self._journal(
                 request.id,
                 state,
@@ -1022,7 +1035,10 @@ class Agent:
                 if failure is not None:
                     progress.step("probe", "failed", failure.code)
                     log.warning("request %s: probe failed: %s", request.id, failure.message)
-                    return fail("failed", "probe_failed", failure.code or "probe_failed", None)
+                    code = failure.code or "probe_failed"
+                    # the step stays a code; the device's interface list goes with the error
+                    listed = failure.interfaces if code in INTERFACE_CODES else ()
+                    return fail("failed", "probe_failed", code, None, listed)
                 progress.step("probe", "done")
             elif check.probes:
                 progress.step("probe", "skipped", "probe_skipped")
@@ -1215,6 +1231,24 @@ class Agent:
                 password = secret("smtp.password")
                 if password:
                     secrets["smtp.password"] = password
+            elif probe.kind == "snmp":
+                source = next(s for s in candidate.sources if s.name == probe.target)
+                snmp = source.snmp
+                if snmp is None:  # the rules probe only a source with SNMP on
+                    continue
+                params = {
+                    "host": source.address,
+                    "port": snmp.port,
+                    "user": snmp.user,
+                    "auth": snmp.auth,
+                    "priv": snmp.priv,
+                    "interfaces": list(snmp.interfaces),
+                }
+                keys = rules.snmp_keys(source.name)
+                for role, name in zip(("auth_key", "priv_key"), keys, strict=True):
+                    value = secret(name)
+                    if value:
+                        secrets[role] = value
             else:
                 params = {
                     "target": candidate.replica.target_text,
@@ -1225,7 +1259,9 @@ class Agent:
                     secrets["replica.password"] = password
             result = self.prober.run(probe.kind, params, secrets)
             if not result.ok:  # its message is logged: never with a value the probe was given
-                return ProbeResult(False, result.code, redact(result.message, secrets))
+                # (the parent's interface names are bounded and redacted already, W5-N-9)
+                message = redact(result.message, secrets)
+                return ProbeResult(False, result.code, message, result.interfaces)
         return None
 
     def _finish(

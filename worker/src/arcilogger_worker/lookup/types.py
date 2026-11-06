@@ -41,6 +41,7 @@ from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any, Final, Literal, cast
 
+from arcilogger_core import sealedfile
 from arcilogger_core.iputil import canonical_ip
 from arcilogger_core.layout import Layout
 from arcilogger_db.egress import Egress, EgressMode, PortPreservation, parse_egresses
@@ -284,8 +285,8 @@ class LookupRequest:
 
 @dataclass(frozen=True)
 class RawRef:
-    """Line ``line`` (1-based) of ``spool/<source>/<day>.log`` = the same line of the sealed
-    ``vault/<Y>/<M>/<D>/<source>.log.gz`` after decompression; ``offset`` = byte offset."""
+    """Line ``line`` (1-based) of ``spool/<source>/<day>.log`` = the same line of the day's sealed
+    file in the vault (xz or gzip) after decompression; ``offset`` = byte offset."""
 
     source: str
     day: date
@@ -295,8 +296,9 @@ class RawRef:
     def spool_path(self, layout: Layout) -> Path:
         return layout.spool_file(self.source, self.day)
 
-    def vault_path(self, layout: Layout) -> Path:
-        return layout.vault_day(self.day) / f"{self.source}.log.gz"
+    def vault_path(self, layout: Layout) -> Path | None:
+        """The day's sealed file of the source in whichever format it has, or ``None``."""
+        return sealedfile.find_log(layout, self.day, self.source)
 
     def to_dict(self) -> dict[str, Any]:
         return cast(dict[str, Any], _encode(self))

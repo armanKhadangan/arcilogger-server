@@ -39,7 +39,7 @@ Fiyatlar üründe yer almaz.
 | Anahtar | Modül | English | Ne içerir | Gerekir |
 |---|---|---|---|---|
 | `core_5651` | 5651 Temel | 5651 Core | Log toplama, mühürleme, saklama, 5651 sorgusu, kanıt paketleri, cihazlar ve kişiler, uyarılar, denetim kaydı | — (her zaman açık) |
-| `usage_analytics` | Kullanım analizi | Usage analytics | Kişi, cihaz, site ve kategori bazında tahmini kullanım süreleri ve dışa aktarma: **Kullanım** sayfası ve paneldeki kullanım bölümleri | — |
+| `usage_analytics` | Kullanım analizi | Usage analytics | Kişi, cihaz, site ve kategori bazında tahmini kullanım süreleri ve dışa aktarma: **Kullanım** sayfası, paneldeki kullanım bölümleri ve **Canlı Durum**'daki şu an veri gönderip alanlar tablosu | — |
 | `usage_reports` | Zamanlanmış kullanım raporları | Scheduled usage reports | Kullanım raporlarının zamanlanmış olarak üretilip e-postayla gönderilmesi: **Raporlar** sayfası | Kullanım analizi |
 | `bulk_import` | Toplu içe aktarma (CSV) | Bulk import (CSV) | Kişilerin ve cihaz atamalarının CSV dosyasından toplu içe aktarılması (Cihazlar ve Kişiler → **Aktarım** sekmesinin içe aktarma bölümü); elle giriş ve CSV dışa aktarma her zaman açıktır | — |
 
@@ -59,12 +59,15 @@ görmek için de kullanılabilir.
 
 Lisans durumu ne olursa olsun şunlar çalışır ve hiçbir lisans durumu bunları kapatmaz: syslog
 toplayıcı ve ham log dosyaları (spool), ayrıştırma ve veritabanına yükleme, gece mühürlemesi (Kamu
-SM zaman damgası), zincir doğrulaması, saklama ve imha, replika, veritabanı yedeği; 5651 sorgusu,
+SM ya da TÜRKTRUST zaman damgası), TSA sertifikası sona ermeden yeniden damgalama (`Renew` görevi),
+iptal listelerinin indirilmesi (`CrlFetch` görevi), her sayfanın üstündeki yasal geçerlilik uyarı
+şeridi ([ZAMAN-DAMGASI.md](ZAMAN-DAMGASI.md)), zincir doğrulaması, saklama ve imha, replika,
+veritabanı yedeği; 5651 sorgusu,
 resmi PDF raporu ve zaman damgası, ham satırlar, kanıt paketleri ve bağımsız doğrulayıcı;
 Mühürleme sayfası ve kontör; zincirli denetim kaydı ve doğrulaması; giriş, iki adımlı doğrulama,
 kullanıcılar ve roller; cihazlar, kişiler, departmanlar, VLAN'lar ve cihaz-kişi atamaları (elle);
 işletim uyarıları (sessiz kaynak, disk, mühürleme, kontör, saat, replika, yedek, uyarı e-postası,
-Güvenlik sayfası); panelin sağlık kutuları (log alımı, mühür, kontör, saat, uyarılar) ve lisans
+yeniden damgalama, damga sertifikası, iptal listesi, Güvenlik sayfası); panelin sağlık kutuları (log alımı, mühür, kontör, saat, uyarılar) ve lisans
 sayfası.
 
 Yalnızca bir uyarı kodu ücretli bir modüle aittir: `R20-report` (zamanlanmış bir rapor
@@ -111,7 +114,10 @@ vermez.
 | `/admin` | Ayarlar: sunucu yapılandırması, yönetim hizmetinin durumu, değişiklik istekleri ve geçmişi | 5651 Temel |
 | `/settings` | Uygulama ayarları (veritabanı ayarları) | 5651 Temel |
 | `/compliance` | Uyum Durumu: on denetim kartı, Uyum Durumu Raporu (PDF), yapılandırma yedeği onayı | 5651 Temel |
+| `/legal-status` | Yasal geçerlilik durumu: her sayfadaki uyarı bandı (oturum açmış her kullanıcı) | 5651 Temel |
 | `/system` | Sistem sayfası: kaynak kullanımı, disk tahmini, veritabanı boyutu, hizmetler, zamanlanmış görevler, saat | 5651 Temel |
+| `/activity` | Canlı Durum: `GET /activity/devices`, şu an kim veri gönderip alıyor (kişi bazında). `GET /activity/wan`, internet hattının hızı (SNMPv3 ile okunan WAN arayüz sayaçları; kişi verisi yok), kilitli değildir: temel üründür (5651 Temel) | Kullanım analizi |
+| `/archive-reloads` | Arşivden yeniden yükleme: veritabanı penceresinden eski günlerin mühürlü kasadan geri istenmesi ve ilerlemesi | 5651 Temel |
 | `/usage` | Kullanım sayfasının verileri, dışa aktarma, yeniden hesaplama | Kullanım analizi |
 | `/reports` | Zamanlanmış raporlar, çalıştırmalar, önizleme | Zamanlanmış kullanım raporları |
 | `/imports` | CSV içe aktarma ve şablonları | Toplu içe aktarma (CSV) |
@@ -140,11 +146,14 @@ uyarısı açmaz. Kapalı modülün verileri silinmez.
 | `usage.requests` | Kullanım analizi | atlanır |
 | `usage.daily` | Kullanım analizi | atlanır |
 | `usage.today` | Kullanım analizi | atlanır |
+| `activity.tick` (worker'ın bir iş parçacığı, `job_runs`'a kaydedilir) | Kullanım analizi (Canlı Durum'un kim gönderip alıyor tablosu) | bekler; günde bir `skipped` satırı |
 | `usage.reattribute` | Kullanım analizi | atlanır |
 | `usage.retention` | — (kişisel verilerin silinmesi) | her zaman çalışır |
+| `db.window` | 5651 Temel (veritabanı penceresi: pencereden eski log satırlarının düşürülmesi) | her zaman çalışır |
 | `reports.run_due` | Zamanlanmış kullanım raporları | atlanır |
 | `reports.purge` | — (rapor dosyalarının silinmesi) | her zaman çalışır |
 | `system.sample` | 5651 Temel | her zaman çalışır |
+| `snmp.poll` | 5651 Temel | her zaman çalışır |
 | `search.counts_backfill` | 5651 Temel | her zaman çalışır |
 
 Komut satırında yalnızca `arcilogger-worker usage rebuild` Kullanım analizi kapalıyken reddedilir

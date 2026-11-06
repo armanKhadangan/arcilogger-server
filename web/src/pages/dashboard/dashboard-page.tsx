@@ -10,7 +10,12 @@ import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/ui/empty-state';
 import { Skeleton } from '@/components/ui/skeleton';
 import { errorMessage } from '@/lib/api';
-import { useDashboardSummary, useLicense, useTodayCompanyUsage } from '@/lib/api-hooks';
+import {
+  useActivityWan,
+  useDashboardSummary,
+  useLicense,
+  useTodayCompanyUsage,
+} from '@/lib/api-hooks';
 import { useAuth } from '@/lib/auth';
 import { formatTime } from '@/lib/format';
 import { moduleEnabled, type ModuleKey } from '@/lib/license';
@@ -19,7 +24,14 @@ import { useSystemDisk } from '@/lib/system-hooks';
 import { cn } from '@/lib/utils';
 
 import { AlertsCard, SealStripCard } from './dashboard-alerts';
-import { ClockCard, CreditCard, IngestCard, ParseFailuresCard, SealCard } from './dashboard-cards';
+import {
+  BlockingCard,
+  ClockCard,
+  CreditCard,
+  IngestCard,
+  ParseFailuresCard,
+  SealCard,
+} from './dashboard-cards';
 import {
   dashboardRequests,
   diskRequested,
@@ -31,17 +43,21 @@ import {
 } from './dashboard-model';
 import { CategoriesCard, SitesCard, UsageCard } from './dashboard-usage';
 import { DiskCard } from './disk-card';
+import { WanCard, WanSetupCard } from './wan-card';
+import { wanCardState, wanRequested } from './wan-model';
 
 /** The usage widgets belong to "Kullanım analizi"; the health boxes never depend on a licence. */
 const USAGE_MODULE: ModuleKey = 'usage_analytics';
 
 /**
- * Panel (spec 12.3 item 2; `dashboard.view` or `dashboard.usage`): log intake and today's parse
- * failures, yesterday's seal, Kamu SM credit and clock offset, the disks (`system.read`), today's
- * company usage, open security alerts, the most visited sites, categories and the last 30 days of
- * sealing. Each block appears only for those who may see it (the API leaves the others out); each
- * links to its page when the user may open that. The disk card shows only with an answer: not
- * while it loads and not on an error (the Sistem page shows that).
+ * Panel (spec 12.3 item 2; `dashboard.view` or `dashboard.usage`): a blocking card at the top
+ * while a closed day is unstamped for too long (Wave 5 contract 2.3.1, `seal.read`), log intake
+ * and today's parse failures, yesterday's seal, Kamu SM credit and clock offset, the disks
+ * (`system.read`), today's company usage, open security alerts, the most visited sites,
+ * categories and the last 30 days of sealing. Each block appears only for those who may see it
+ * (the API leaves the others out); each links to its page when the user may open that. The disk
+ * card shows only with an answer: not while it loads and not on an error (the Sistem page shows
+ * that).
  *
  * The live blocks refresh every 30 s, the usage figures every 5 minutes, both in the background
  * (`X-Arci-Background`: an unattended Panel does not keep the session alive) and only while the
@@ -63,6 +79,10 @@ export function DashboardPage() {
   const usage = useTodayCompanyUsage(asked.usage && usageLicensed);
   const askDisk = diskRequested(permissions);
   const disk = useSystemDisk(askDisk);
+  // The internet lines (Wave 5 §6 N7): no person data, no licence module.
+  const askWan = wanRequested(permissions);
+  const wan = useActivityWan('60m', askWan);
+  const wanState = wanCardState(wan.isError ? undefined : wan.data, permissions);
   const blocks = visibleBlocks(
     permissions,
     summary.data,
@@ -81,6 +101,7 @@ export function DashboardPage() {
     to: linkTarget('usage', permissions),
   };
   const sealing = linkTarget('sealing', permissions);
+  const blocking = blocks.has('blocking') ? (data?.seal?.blocking ?? null) : null;
   const security = linkTarget('security', permissions);
   const summaryLoading = asked.summary && summary.isPending;
   const usageLoading =
@@ -90,6 +111,7 @@ export function DashboardPage() {
     summary.dataUpdatedAt,
     usageLicensed ? usage.dataUpdatedAt : 0,
     askDisk ? disk.dataUpdatedAt : 0,
+    askWan ? wan.dataUpdatedAt : 0,
   );
   const summaryFailed = asked.summary && summary.isError && !isRefusal(summary.error);
   const [raw, setRaw] = useState<RawLineTarget | null>(null);
@@ -141,7 +163,12 @@ export function DashboardPage() {
   ) : null;
   const showAlerts = blocks.has('alerts') && data?.alerts;
   const nothing =
-    !summaryLoading && !usageLoading && !summaryFailed && blocks.size === 0 && !usageCard;
+    !summaryLoading &&
+    !usageLoading &&
+    !summaryFailed &&
+    blocks.size === 0 &&
+    !usageCard &&
+    wanState === 'hidden';
 
   return (
     <div className="flex flex-col gap-4">
@@ -163,6 +190,7 @@ export function DashboardPage() {
                 // `refresh()` would fetch even a disabled query: never while the module is off.
                 if (asked.usage && usageLicensed) void usage.refresh();
                 if (askDisk) void disk.refresh();
+                if (askWan) void wan.refresh();
               }}
             >
               <RefreshCw aria-hidden="true" />
@@ -171,6 +199,13 @@ export function DashboardPage() {
           </>
         }
       />
+
+      {blocking ? (
+        <BlockingCard
+          blocking={blocking}
+          to={sealing ? sealDayHref(sealing, blocking.oldest_unstamped_day) : null}
+        />
+      ) : null}
 
       {summaryFailed ? (
         <Alert tone="danger" title={t('dashboard.loadFailed')}>
@@ -209,6 +244,12 @@ export function DashboardPage() {
         >
           {top}
         </div>
+      ) : null}
+
+      {wanState === 'lines' && wan.data ? (
+        <WanCard rates={wan.data} to={linkTarget('activity', permissions)} />
+      ) : wanState === 'setup' ? (
+        <WanSetupCard />
       ) : null}
 
       {showUsage || showAlerts || usageCard ? (

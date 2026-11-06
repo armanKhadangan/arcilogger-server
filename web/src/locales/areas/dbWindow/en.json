@@ -1,0 +1,6 @@
+{
+  "auditActions": {
+    "archive_reload": "Archive reload requested",
+    "db_window": "Database window: older days dropped from the database"
+  }
+}

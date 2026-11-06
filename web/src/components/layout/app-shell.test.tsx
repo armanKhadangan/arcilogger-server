@@ -5,6 +5,8 @@ import { setLanguage } from '@/lib/i18n';
 import { BUILT_PAGES, NAV_ITEMS } from '@/nav';
 import { errorResponse, installFetch, jsonResponse, makeMe } from '@/test/api-mock';
 import { renderApp } from '@/test/render';
+import { licenseSample } from '@/test/samples';
+import { LEGAL_PROVIDER_NOT_LEGAL } from '@/test/w5-fixtures';
 
 function signedInAs(role: Role) {
   return installFetch((request) =>
@@ -41,7 +43,7 @@ describe('AppShell', () => {
     expect(within(nav).getAllByRole('link')).toHaveLength(NAV_ITEMS.length + 1);
   });
 
-  it('shows a viewer only the panel and usage, without search box or alerts bell', async () => {
+  it('shows a viewer only the panel, Canlı Durum and usage, without search box or alerts bell', async () => {
     window.localStorage.setItem('arci.sidebar.collapsed', '0');
     signedInAs('viewer');
     renderApp('/');
@@ -50,7 +52,7 @@ describe('AppShell', () => {
       within(nav)
         .getAllByRole('link')
         .map((link) => link.textContent),
-    ).toEqual(['Panel', 'Kullanım']);
+    ).toEqual(['Panel', 'Canlı Durum', 'Kullanım']);
     expect(screen.queryByRole('search')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Bildirimler' })).not.toBeInTheDocument();
   });
@@ -141,5 +143,23 @@ describe('AppShell', () => {
     renderApp('/');
     const trigger = await screen.findByRole('button', { name: 'Kullanıcı menüsü: Tolga Yılmaz' });
     expect(within(trigger).getByText('TY')).toBeInTheDocument();
+  });
+
+  it('puts the legal-validity banner under the licence banners, above the page (Wave 5 2.3.2)', async () => {
+    installFetch((request) => {
+      if (request.path === '/api/v1/auth/me') return jsonResponse(200, makeMe('admin'));
+      if (request.path === '/api/v1/license') return jsonResponse(200, licenseSample('trial'));
+      if (request.path === '/api/v1/legal-status')
+        return jsonResponse(200, LEGAL_PROVIDER_NOT_LEGAL);
+      return errorResponse(404, 'not_found');
+    });
+    renderApp('/usage');
+    const legal = await screen.findByTestId('legal-banner');
+    const license = await screen.findByTestId('license-banners');
+    const heading = await screen.findByRole('heading', { level: 1 });
+    const main = document.getElementById('content');
+    expect(main).toContainElement(legal);
+    expect(license.nextElementSibling).toBe(legal);
+    expect(legal.compareDocumentPosition(heading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 });

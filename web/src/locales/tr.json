@@ -9,6 +9,7 @@
     "dashboard": "Panel",
     "sources": "Kaynaklar",
     "live": "Canlı Akış",
+    "activity": "Canlı Durum",
     "search": "Arama",
     "lookup": "5651 Sorgu",
     "usage": "Kullanım",
@@ -377,7 +378,7 @@
     "sections": {
       "general": "Genel",
       "sources": "Kaynaklar",
-      "kamusm": "Kamu SM",
+      "kamusm": "Zaman damgası",
       "sealing": "Mühürleme",
       "retention": "Saklama",
       "replica": "Replika",
@@ -394,7 +395,7 @@
       "general": "Kuruluş adı, saat kaynakları ve saat sapması uyarı eşiği.",
       "application": "Uyarılar, 5651 sorgu, kullanım (mesai saatleri ve tatiller), raporlar, oturum ve gizlilik.",
       "history": "Tarayıcıdan yapılan değişiklikler ve işlemler, durumlarıyla.",
-      "kamusm": "Kamu SM zaman damgası: Java, Zamane istemcisi, kök sertifikalar, müşteri bilgileri, test ve üretim sunucusu.",
+      "kamusm": "Zaman damgası (Kamu SM Zamane ya da TÜRKTRUST): sunucu seçimi, kök sertifikalar, kimlik bilgileri, damga testi; Kamu SM için Java ve Zamane istemcisi.",
       "sources": "Log gönderen cihazlar: adres, tür, beklenen sinyal aralığı ve güvenlik duvarı durumu.",
       "email": "Uyarı e-postalarının SMTP sunucusu, alıcılar ve test e-postası.",
       "replica": "Mühürlü günlerin kopyalandığı ağ paylaşımı ve bağlantı testi.",
@@ -479,15 +480,37 @@
       "addServer": "Sunucu ekle",
       "errors": {
         "workDays": "En az bir mesai günü seçin.",
-        "workTime": "Saatleri SS:DD biçiminde girin (ör. 08:00).",
-        "workOrder": "Mesai başlangıcı bitişten önce olmalı.",
+        "workTime": "$t(settings.application.weekdays.{{day}}): saatleri SS:DD biçiminde girin (ör. 08:00).",
+        "workOrder": "$t(settings.application.weekdays.{{day}}): mesai başlangıcı bitişten önce olmalı.",
         "holiday": "Tarihi AA-GG ya da YYYY-AA-GG biçiminde girin.",
         "totpRoles": "Yönetici ve denetçi rolleri için iki adımlı doğrulama zorunludur.",
         "serverName": "DHCP sunucusunun adı boş olamaz.",
-        "serverSeconds": "Kira süresi en az 60 saniye olmalı.",
+        "serverSeconds": "Her DHCP sunucusu için {{min}} ile {{max}} saniye arasında bir kira süresi gerekir.",
+        "serverSecondsMin": "Kira süresi en az {{min}} saniye olmalı.",
         "integerList": "Her satıra 0 ya da daha büyük bir tam sayı yazın.",
-        "object": "Geçerli bir JSON nesnesi girin."
-      }
+        "object": "Geçerli bir JSON nesnesi girin.",
+        "breakCount": "$t(settings.application.weekdays.{{day}}): bir günde en çok {{max}} mola olabilir.",
+        "breakTime": "$t(settings.application.weekdays.{{day}}): mola saatlerini SS:DD biçiminde girin (ör. 12:30).",
+        "breakShort": "$t(settings.application.weekdays.{{day}}): her mola en az {{min}} dakika olmalı.",
+        "breakOutside": "$t(settings.application.weekdays.{{day}}): molalar mesai saatleri içinde olmalı.",
+        "breakOverlap": "$t(settings.application.weekdays.{{day}}): molalar birbiriyle çakışmamalı."
+      },
+      "workDay": "Gün",
+      "breaks": "Molalar",
+      "preview": "Önizleme",
+      "applyAll": "Tüm günlere uygula",
+      "applyAllFrom": "{{day}} saatlerini tüm günlere uygula",
+      "dayStart": "{{day}} mesai başlangıcı",
+      "dayEnd": "{{day}} mesai bitişi",
+      "breakStart": "{{day}} {{number}}. mola başlangıcı",
+      "breakEnd": "{{day}} {{number}}. mola bitişi",
+      "removeBreak": "{{day}} {{number}}. molayı kaldır",
+      "addBreak": "Mola ekle",
+      "addBreakFor": "{{day}} için mola ekle",
+      "stripOff": "{{day}}: mesai yok",
+      "stripInvalid": "{{day}}: saatler geçersiz",
+      "stripWork": "{{day}}: mesai {{hours}}, mola yok",
+      "stripBreaks": "{{day}}: mesai {{hours}}, mola {{breaks}}"
     },
     "history": {
       "title": "Değişiklik geçmişi",
@@ -540,9 +563,9 @@
       }
     },
     "kamusm": {
-      "title": "Kamu SM zaman damgası",
-      "description": "Günlük mühürlemede kullanılan Kamu SM Zamane zaman damgası hizmetinin kurulumu, adım adım. Mühürlemeyi durduracak bir değişiklik uygulanmaz.",
-      "provider": "Şu an kullanılan zaman damgası sağlayıcısı: {{provider}}. Bu sayfadan kaydedilen her değişiklik Kamu SM Zamane sunucusuna geçer; mühürlemeyi durduracak bir değişiklik uygulanmaz.",
+      "title": "Zaman damgası",
+      "description": "Günlük mühürlemede kullanılan zaman damgası hizmetinin (Kamu SM Zamane ya da TÜRKTRUST) kurulumu, adım adım. Mühürlemeyi durduracak bir değişiklik uygulanmaz.",
+      "provider": "Şu an kullanılan zaman damgası sağlayıcısı: {{provider}}. Bu sayfadan kaydedilen her değişiklik Kamu SM Zamane test sunucusuna geçer; Kamu SM üretim sunucusu ya da TÜRKTRUST \"Üretime geç\" adımında seçilir. Mühürlemeyi durduracak bir değişiklik uygulanmaz.",
       "stepsLabel": "Kurulum adımları",
       "probing": "Kamu SM ile bağlantı deneniyor…",
       "unsaved": "Diğer adımlarda kaydedilmemiş değişiklikler var; o adımda kaydedin ya da bırakın.",
@@ -576,7 +599,7 @@
         },
         "production": {
           "title": "Üretime geç",
-          "description": "Eksikler tamamlandığında üretim sunucusuna geçilir. Test sunucusuna dönüş üretim damgalarını durdurur."
+          "description": "Eksikler tamamlandığında Kamu SM üretim sunucusuna ya da TÜRKTRUST'a geçilir. Test sunucusuna dönüş üretim damgalarını durdurur."
         },
         "credit": {
           "title": "Kontör uyarı eşiği",
@@ -1304,7 +1327,7 @@
       "timestamp": {
         "notRequested": "Rapora zaman damgası alınmadı (Ayarlar: lookup.report_timestamp kapalı).",
         "failedTitle": "Rapora zaman damgası alınamadı",
-        "notLegal": "Rapor özetinin zaman damgası {{provider}} sağlayıcısından alındı; bu Kamu SM üretim sunucusu olmadığı için yasal geçerliliği yoktur. Yalnızca deneme amaçlıdır.",
+        "notLegal": "Rapor özetinin zaman damgası {{provider}} sağlayıcısından alındı; bu Kamu SM ya da TÜRKTRUST üretim sunucusu olmadığı için yasal geçerliliği yoktur. Yalnızca deneme amaçlıdır.",
         "status": "Zaman damgası",
         "stampedVerified": "Damgalandı ve doğrulandı",
         "stampedUnverified": "Damgalandı, doğrulanamadı",
@@ -1494,8 +1517,7 @@
     }
   },
   "sealing": {
-    "description": "Her gün gece mühürlenir: dosyalar sıkıştırılır, SHA-256 ile özetlenir, bir önceki güne zincirlenir ve günlük manifest Kamu SM zaman damgasıyla damgalanır.",
-    "providerNotLegal": "Yapılandırılan zaman damgası sağlayıcısı ({{provider}}) Kamu SM üretim sunucusu değil: alınan damgaların yasal geçerliliği yoktur. Üretimde yalnızca Kamu SM üretim sunucusu kullanılmalıdır.",
+    "description": "Her gün gece mühürlenir: dosyalar sıkıştırılır, SHA-256 ile özetlenir, bir önceki güne zincirlenir ve günlük manifest zaman damgasıyla (Kamu SM ya da TÜRKTRUST) damgalanır.",
     "calendarTitle": "Mühür takvimi",
     "counts": "Bu aydaki günler",
     "replicaDisabled": "İkinci kopya (replika) kapalı",
@@ -1539,7 +1561,6 @@
       "title": "{{day}}",
       "overdue": "Gecikti",
       "sealedOk": "{{day}} günü mühürlendi ve doğrulandı.",
-      "notLegal": "Bu günün zaman damgası {{provider}} sağlayıcısından alındı ve yasal geçerliliği yoktur (test/mock). Üretimde yalnızca Kamu SM üretim sunucusunun damgası geçerlidir.",
       "rootUnconfirmed": "Bu günün manifesti, zaman damgasının Kamu SM üretim sunucusundan ({{provider}}) alındığını belirtiyor. Kök sertifikanın SHA-256 parmak izi tsa.legal_root_fingerprints ayarında tanımlı olmadığı ya da damga doğrulanamadığı için gün yasal geçerli olarak gösterilmiyor. Kökün parmak izini Kamu SM'nin yayımladığı değerle karşılaştırın."
     },
     "verify": {
@@ -2171,11 +2192,13 @@
       "label": "Saatler",
       "all": "Tüm saatler",
       "work": "Mesai içi",
+      "break": "Mola",
       "off": "Mesai dışı",
-      "hint": "Mesai saatleri sunucu ayarlarından gelir (varsayılan Pazartesi–Cuma 08:00–18:00)."
+      "hint": "Mesai saatleri ve molalar sunucu ayarlarından gelir (Ayarlar → Uygulama ayarları; varsayılan Pazartesi–Cuma 08:00–18:00, molasız)."
     },
     "computed": {
       "today": "Veriler {{time}}{{suffix}} kadar işlendi",
+      "updated": "Son güncelleme {{updated}} (veriler {{time}}{{suffix}} kadar)",
       "other": "Veriler {{date}} {{time}}{{suffix}} kadar işlendi",
       "endOfDay": "Veriler {{date}} sonuna kadar işlendi",
       "none": "Kullanım verileri henüz hesaplanmadı"
@@ -2191,6 +2214,7 @@
       "sessions": "Oturum",
       "blocked": "Engellenen",
       "offHours": "Mesai dışı",
+      "breaks": "Mola",
       "firstLast": "İlk / son etkinlik",
       "firstLastShort": "İlk – son",
       "time": "Süre",
@@ -2207,6 +2231,8 @@
       "perUser": "Kullanıcı başına ort. {{value}}",
       "offHours": "Mesai saatleri dışındaki aktif süre",
       "offHoursShare": "Aktif sürede payı: {{share}}",
+      "breaks": "Mesai içindeki molalarda geçen aktif süre",
+      "breaksShare": "Aktif sürede payı: {{share}}",
       "sessions": "Ayrı bağlantı oturumları",
       "blocked": "Web, DNS ve uygulama filtresi",
       "firstLast": "İlk ve son etkin dakika",
@@ -3213,7 +3239,7 @@
     },
     "sections": {
       "general": "Genel",
-      "tsa": "Kamu SM",
+      "tsa": "Zaman damgası",
       "smtp": "E-posta (SMTP)",
       "replica": "Replika",
       "retention": "Saklama",

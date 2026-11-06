@@ -291,30 +291,34 @@ aşağıdaki koşullar belirler.
 
 | Sıra | Durum | Koşul | Gerekçe |
 |---|---|---|---|
-| 1 | Sorun | Damgalar Kamu SM üretim sunucusundan alınmıyor (deneme, RFC 3161 ya da Kamu SM test sunucusu) | "Damgalar Kamu SM üretim sunucusundan alınmıyor (sağlayıcı: {sağlayıcı}). Kamu SM bağlantısını Ayarlar → Kamu SM'de tamamlayın." |
+| 1 | Sorun | Damgalar Kamu SM üretim sunucusundan alınmıyor (deneme, RFC 3161 ya da Kamu SM test sunucusu) | "Damgalar Kamu SM üretim sunucusundan alınmıyor (sağlayıcı: {sağlayıcı}). Kamu SM bağlantısını Ayarlar → Zaman damgası'nda tamamlayın." |
 | 2 | Sorun | En son bilinen kontör 0 ya da daha az | "Kamu SM kontörü bitti." |
 | 3 | Sorun | En yeni damganın TSA sertifikasının süresi dolmuş | "Son damganın TSA sertifikasının süresi {tarih} tarihinde doldu." |
 | 4 | Dikkat | Kontör eşiğe eşit ya da altında | "Kalan kontör {kontör}; eşik {eşik}. Tahmini {gün} gün yeter." |
 | 5 | Dikkat | Hiç kontör okuması yok ya da son okuma iki günden eski | "Kontör bilinmiyor ya da son okuma ({zaman}) iki günden eski." |
 | 6 | Dikkat | Sertifikanın bitmesine 180 gün ya da daha az var | "Son damganın TSA sertifikası {tarih} tarihinde doluyor ({gün} gün kaldı)." |
-| 7 | Bilgi yok | Henüz mühürlü gün yok | "Henüz Kamu SM ile damgalanmış gün yok." |
+| 7 | Bilgi yok | Henüz mühürlü gün yok | "Henüz üretim sunucusuyla damgalanmış gün yok." |
 | 8 | Tamam | — | "Kalan kontör {kontör} (eşik {eşik}); son damganın TSA sertifikası {gün} gün daha geçerli." |
 
 Satır 2 kontör günlüğündeki eksi bir okumayı da "bitti" sayar. Yeni bir kurulum, Kamu SM üretim
 bağlantısı tamamlanana kadar bu kartta **Sorun** gösterir (satır 1); aynı durumda kart 2 yalnızca
 **Dikkat** gösterir (bölüm 2.2 satır 7). "İki gün", günlük Credit görevinin iki kez kaçırılmasıdır;
 180 gün, şartnamenin öngördüğü süredir. Damga sunucusu adları: "Kamu SM üretim", "Kamu SM test",
-"Deneme (mock)", "RFC 3161". Bilgiler: damga sunucusu, kalan kontör, tahmini gün, eşik, son okuma,
+"TÜRKTRUST üretim" (D12 gereği yasal nitelikli), "TÜRKTRUST, üretim sunucusu dışında", "Deneme
+(mock)", "RFC 3161". Bilgiler: damga sunucusu, kalan kontör, tahmini gün, eşik, son okuma,
 TSA sertifikası bitişi, kalan gün.
+Kontör sorgusu olmayan bir sağlayıcıda (TÜRKTRUST; C21) satır 2, 4 ve 5 uygulanmaz, kontör
+bilgilerinin yerine "ARCILOGGER bu sağlayıcı için kontör sorgulamaz." yazar ve satır 8 "Son damganın
+TSA sertifikası {gün} gün daha geçerli." olur.
 
 **Sahada doğrulayın** (kartın notu): "Kontör değeri Kamu SM istemcisinin çıktısından okunur; okuma
 biçimi sahada doğrulanmalıdır." ([kamusm.md](kamusm.md) bölüm 3, K4; bölüm 6.)
 
 **Ne yapmalı?**
 
-- Üretim sunucusu değil (satır 1): Ayarlar → Kamu SM sihirbazını tamamlayın: test sunucusuyla
-  deneme, kök sertifika parmak izlerinin Kamu SM'nin yayımladığı değerlerle karşılaştırılması, sonra
-  **Üretime geç** ([kamusm.md](kamusm.md), [KURULUM.md](KURULUM.md) bölüm 10).
+- Üretim sunucusu değil (satır 1): Ayarlar → Zaman damgası sayfasındaki Kamu SM sihirbazını
+  tamamlayın: test sunucusuyla deneme, kök sertifika parmak izlerinin Kamu SM'nin yayımladığı
+  değerlerle karşılaştırılması, sonra **Üretime geç** ([kamusm.md](kamusm.md), [KURULUM.md](KURULUM.md) bölüm 10).
 - Kontör bitti ya da azaldı (satır 2, 4): kontör satın alın ([kamusm.md](kamusm.md) bölüm 1).
   Kontör biterse günler mühürlenemez; kart 2 ve `R20-seal` bunu gösterir.
 - Kontör bilinmiyor (satır 5): Mühürleme sayfasında **Kontör sorgula** (`seal.manage`) ile okuyun;
@@ -684,8 +688,11 @@ sayfası her yapılandırılmış kaynağı listeler).
 `deploy\windows\tasks\` içindeki her görev için bir satır. Durum görevin **kanıt dosyasından**
 çıkarılır (yollar veri klasörüne göredir): "Zamanında"; "Gecikti" (kanıt, sınırdan eski); "Kanıt
 yok" (henüz kanıt yok); "Kullanılmıyor" (görev bu yapılandırmada iş yapmaz); "İzlenemiyor"
-(ArciApi'nin okuyabileceği bir kanıt yok). Sınırlar görevin çalışma sıklığı artı bir paydır; ayar
-değildir.
+(ArciApi'nin okuyabileceği bir kanıt yok); "Başarısız" (kanıt dosyası görevin son çalışmasının
+başarısız olduğunu gösteriyor; ne kadar eski olursa olsun bir sonraki tamamlanan çalışmaya kadar
+sürer; yanıt hata metnini değil yalnızca bir kodu taşır: `backup_failed`, `index_unreadable`,
+`stored_file_unreadable`, `renew_failed`, `renew_refused`). Sınırlar görevin çalışma sıklığı artı
+bir paydır; ayar değildir.
 
 | Görev | Çalışma | Kanıt | Gecikti | Kullanılmıyor |
 |---|---|---|---|---|
@@ -697,7 +704,7 @@ değildir.
 | Retention | Her gün 02:00 | okunabilir kanıt yok → "İzlenemiyor" | — | `[retention] enabled = false` |
 | Credit | Her gün 06:00 | `state\credit.jsonl` içindeki en yeni `time` | 26 saat | `[tsa] provider` `zamane` değil |
 | ClockCheck | Saatte bir, 00:05'ten | bugünün ve dünün `state\clock\<gün>.jsonl` dosyalarındaki en yeni `time` | 2 saat | — |
-| Backup | Her gün 01:40 | `state\backup\last.json` içindeki `finished` | 26 saat | `[backup] enabled = false` |
+| Backup | Her gün 01:40 | `state\backup\last.json` içindeki `finished`; `ok` değeri `true` değilse "Başarısız" (`backup_failed`) | 26 saat | `[backup] enabled = false` |
 | Requests | Olayla ve 5 dakikada bir | ArciApi `state\requests` klasörünü okuyamaz → "İzlenemiyor" | — | — |
 | ApplySystem | Olayla ve 5 dakikada bir | `admin\system\status.json` içindeki `at` | 15 dakika | tarayıcıdan yönetim kapalı |
 
@@ -762,8 +769,10 @@ sihirbazı — Girişten sonra, Ayarlar'da" gösterir.
 | Yönetici ve iki adımlı doğrulama | her zaman (kullanıcı oturum açmıştır) | — |
 | Site ayarları | `site_name` ya da `clock.*` ile ilgili hata düzeyinde bir yapılandırma sorunu yok | Ayarlar → Genel |
 | Log kaynakları | en az bir etkin, yapılandırılmış kaynak var | Ayarlar → Kaynaklar |
-| Kamu SM: test sunucusu | istek geçmişinde başarılı bir "Damga testi" var ya da üretim sunucusu seçili | Ayarlar → Kamu SM (test adımı) |
-| Kamu SM: üretim | üretim sunucusu seçili ve mühürleme hazır | Ayarlar → Kamu SM (üretim adımı) |
+| Kamu SM: test sunucusu | istek geçmişinde kullanılan sağlayıcının başarılı ve doğrulanmış bir "Damga testi" var ya da üretim sunucusu seçili | Ayarlar → Zaman damgası (test adımı) |
+| Kamu SM: üretim | üretim sunucusu seçili ve mühürleme hazır | Ayarlar → Zaman damgası (üretim adımı) |
+| TÜRKTRUST: damga testi (TÜRKTRUST seçiliyse, Kamu SM'nin test adımı yerine) | istek geçmişinde TÜRKTRUST'ın başarılı ve doğrulanmış bir "Damga testi" var ya da TÜRKTRUST'ın üretim sunucusu seçili | Ayarlar → Zaman damgası (test adımı) |
+| TÜRKTRUST: üretim (TÜRKTRUST seçiliyse, Kamu SM'nin üretim adımı yerine) | TÜRKTRUST'ın üretim sunucusu (`zd.turktrust.com.tr`, yasal nitelikli, D12) seçili ve mühürleme hazır | Ayarlar → Zaman damgası (üretim adımı) |
 | Replika | replika açık | Ayarlar → Replika |
 | E-posta | e-posta gönderimi açık, SMTP sunucusu ve gönderen ayarlı | Ayarlar → E-posta |
 | Özet | — | — |

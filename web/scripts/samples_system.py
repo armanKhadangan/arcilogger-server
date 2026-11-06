@@ -29,7 +29,11 @@ system's clock is the machine's):
   sealed day; minutes ago for the day Seal retries), the daily and the weekly (Sunday 11.10)
   verification results (the monthly full check has not run yet: ``missing``), yesterday's backup
   (today's has not run: ``late``), ApplySystem's report and the agent's heartbeat (fresh), today's
-  hourly clock samples (a 3.2 ms offset, one probe no server answered).
+  hourly clock samples (a 3.2 ms offset, one probe no server answered), today's Renew run
+  (``state/renewal/renewal.json`` as ``renew`` writes it: nothing due) and today's CrlFetch
+  run, which stopped on a stored list it could not read (``state/crl/index.json`` as it was
+  read, yesterday's one list of a documentation address, with the ``run_failure`` ``crl fetch``
+  records: ``failed``, #171).
 
 What the files hold: ``system.json`` ``summary`` (``GET /system``, the processor measured) and
 ``summary_first_reading`` (the first reading of a process: ``cpu_percent`` null),
@@ -49,7 +53,7 @@ import shutil
 from collections.abc import Callable, Iterator
 from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass
-from datetime import date, datetime, time, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, NamedTuple
 from unittest import mock
@@ -64,10 +68,13 @@ from arcilogger_api.system.models import DatabaseInfo, TableSize
 from arcilogger_api.system_health.tasks import verify_state
 from arcilogger_core import hostinfo
 from arcilogger_core.admin.contract import SystemStatus, dump_document, parse_document
+from arcilogger_core.crl import INDEX_SCHEMA as CRL_INDEX_SCHEMA
+from arcilogger_core.renewal import LastRun, RenewalReport
+from arcilogger_core.renewal import write_state as write_renewal_state
 from arcilogger_core.seal import SEALED
 from arcilogger_core.timeutil import SITE_TZ, isoformat_site, site_day, utc_now
 from arcilogger_db.models import Base, JobRun
-from arcilogger_worker.alerts.system import backup_state_path
+from arcilogger_worker.alerts.system import backup_state_path, crl_index_path, stamp_renewal_path
 from arcilogger_worker.service import JobState, default_jobs
 from arcilogger_worker.system_jobs import HISTORY_SCHEMA
 
@@ -188,6 +195,8 @@ TASK_STATES = {
     "Backup": "late",
     "Requests": "not_observable",
     "ApplySystem": "ok",
+    "Renew": "ok",
+    "CrlFetch": "failed",
 }
 
 
@@ -613,6 +622,38 @@ def task_evidence(capture: Capture, now: datetime, verified: list[Verified]) -> 
     clock.write_text("".join(lines), encoding="utf-8")
     touch(clock, now - timedelta(minutes=CLOCK[0][0]))
 
+    # Renew (02:30) found nothing due; the Sistem page reads only when it ran (``last_run.at``).
+    renewed = site_at(today, time(2, 31, 4))
+    run = LastRun(at=renewed, outcome="not_needed", exit_code=0)
+    write_renewal_state(layout, RenewalReport.of(()), at=renewed, renew_before=180, last_run=run)
+    touch(stamp_renewal_path(layout), renewed)
+    # Yesterday's CrlFetch (00:30) stored one list; today's could not read a stored list and
+    # wrote the index as it read it with its run failure, as ``crl fetch`` does (#171). Only the
+    # index is read.
+    fetched = site_at(today - timedelta(days=1), time(0, 30, 9))
+    stopped = site_at(today, time(0, 30, 12))
+    issued = site_at(today - timedelta(days=2), time(12, 0)).astimezone(UTC)
+    entry = {
+        "file": f"{'0' * 12}-{issued:%Y%m%dT%H%M%SZ}-{'0' * 8}.crl",
+        "issuer": "CN=Örnek Test TSA Kök,O=Örnek A.Ş.,C=TR",
+        "issuer_sha256": "0" * 64,
+        "this_update": issued.isoformat(),
+        "next_update": (issued + timedelta(days=7)).isoformat(),
+        "sha256": "0" * 64,
+        "url": "http://192.0.2.10/ornek.crl",
+        "fetched_at": isoformat_site(fetched, "seconds"),
+    }
+    index = {
+        "schema": CRL_INDEX_SCHEMA,
+        "lists": [entry],
+        "failures": [],
+        "run_failure": {
+            "at": isoformat_site(stopped, "seconds"),
+            "error": "stored_file_unreadable",
+        },
+    }
+    write_json(crl_index_path(layout), index, stopped)
+
 
 # -- the samples ----------------------------------------------------------------------------------
 
@@ -632,6 +673,8 @@ def capture(capture: Capture, admin: Any, auditor: Any, newcomer: Any) -> dict[s
         layout.system_history,
         layout.clock_samples(today),
         backup_state_path(layout),
+        stamp_renewal_path(layout),
+        crl_index_path(layout),
         capture.installed.layout.system_status,
         *(result.path for result in verified),
     )
@@ -711,6 +754,9 @@ def expect_health(health: dict[str, Any]) -> None:
     tasks = {task["task"]: task["state"] for task in health["tasks"]}
     if tasks != TASK_STATES:
         raise SystemExit(f"system: task states {tasks}, expected {TASK_STATES}")
+    codes = {task["task"]: task["code"] for task in health["tasks"] if task["code"] is not None}
+    if codes != {"CrlFetch": "stored_file_unreadable"}:
+        raise SystemExit(f"system: task codes {codes}")
     jobs = {job["job"]: job["state"] for job in health["jobs"]}
     wanted = {name: JOB_STATES.get(name, "ok") for name in jobs}
     if jobs != wanted:

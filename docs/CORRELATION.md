@@ -86,7 +86,14 @@
   adresin başka bir istemciye verilmesi) MikroTik kirası için en çok 100 gün (8.640.000 sn)
   geriye bakar. 7 günlük sınırın kalan riski: başka bir cihazın trafiğiyle açık kalan eski bir
   MikroTik kirası, istemcisini başka bir adrese taşıyan çevrilmemiş bir satırdan 7 günden fazla
-  sonra o istemciyi uyarısız gösterebilir.
+  sonra o istemciyi uyarısız gösterebilir. Bir 5651 sorgusu kendi günlerinin dışında log satırı
+  okumaz: ilk günden daha geriye bakan bir denetim o günden okur ve yanıt bunu söyler
+  (`lookback_clamped_to_window`); çevrilmiş kayıtlarla denetim ilk günden önceki kısım için kira
+  işinin kirayla birlikte kaydettiği taşınmaları okur (`leases.moves`: kiranın bitişinden, açık
+  kirada en yeni taşınmasından önceki 100 günün en çok 1.000 zamanı, en yenileri; iş bir zamanı
+  attığında `truncated` olarak işaretlenir), bunlar yalnızca güveni düşürebilir ve not yine
+  verilir; iki DHCP kaynağı denetimi (D27) **sorgunun son gününün sonuna
+  kadar okur**, bu bir yöntem kuralıdır ve yanıtta açıklama olarak yer almaz (bölüm 3).
 - Ölçüm: günde 3.000.000 trafik satırında (iki ardışık gün) ±60 sn aday araması **1,2–1,3 sn**,
   alan adıyla **1,1–1,5 sn**, hedef IP + port ile **0,04 sn** (hedef < 5 sn). Bu, sıkıştırılmamış
   veridir; TimescaleDB'nin sıkıştırdığı 7 günden eski bölümlerde (5651 taleplerinin çoğu bu
@@ -404,8 +411,9 @@ a person resolved or dismissed are never changed. The incremental job only raise
   - `dhcp_sources_overlap`: the chain's network has usable DHCP rows of two origins (`MikroTik
     DHCP`, `FortiGate DHCP (VDOM <vd>)`) within W of the moment on either side, W the covering
     lease's alive window and at least the longest configured DHCP window (D27, alert
-    `R20-lease:dhcp-sources-overlap`); for an address in no configured network the address
-    itself stands for its network;
+    `R20-lease:dhcp-sources-overlap`), in a lookup only within the lookup's days: D27 reads up
+    to the end of the lookup's last day (section 3, "Data window"); for an address in no
+    configured network the address itself stands for its network;
   - `fortigate_dhcp_not_converted_since_lease` (an `mt_dhcp` or `fg_dhcp` chain still `high` or
     `medium` after the steps above): after the lease's last DHCP record and before the moment
     there is a FortiGate DHCP record of the chain's IP or MAC that the lease timeline did not
@@ -461,10 +469,14 @@ identification on a FortiGate interface ([DEVICE-SETUP.md](DEVICE-SETUP.md) sect
 session records carry the client's MAC (`srcmac`). The lookup uses it only when the session row's
 `srcintf` is listed in `lookup.srcmac_interfaces` (default `[]`: off), the MAC is no
 infrastructure MAC, it was seen with at most `lookup.srcmac_max_ips` (default 1) distinct IPv4
-source addresses on that interface within ±1 hour of the moment (a router's or switch's MAC is
-seen with many; a dual-stack client's IPv6 addresses are not counted; a used row logged outside
-that hour, such as a long session logged at its end, adds its own address), no lease of that MAC
-on another IP covers a moment of that hour, and the row comes from a configured FortiGate source.
+source addresses on that interface in the sessions that overlap ±1 hour of the moment (a router's
+or switch's MAC is seen with many; a dual-stack client's IPv6 addresses are not counted). A
+session overlaps when it was logged in the hour or later and started (its time minus its
+`duration`) in the hour or earlier, so a long session of another address that started in the hour
+and was logged at its end counts too; the scan stops `lookup.max_session_seconds` after the hour,
+as the session probes' does (#96). The `R20-lease:srcmac-shared` alert and the interface list's
+observed counts count the same way. Further, no lease of that MAC on another IP covers a moment
+of that hour, and the row comes from a configured FortiGate source.
 `TrafficInfo.srcmac` of a stored outcome is filled only for listed interfaces.
 
 - A match or an internal IP **without a lease**: the MAC, device and person come from that row,
@@ -626,7 +638,17 @@ session id, row id — deterministic. At most `lookup.max_candidates` (100) matc
 has rows, whether its sealed manifest exists. Explanations: `not_in_database` /
 `only_in_vault` / `no_data_for_day`, `older_than_db_retention` (`db.retention_days`),
 `future_time`, and `lease_timeline_behind` when the requested window is after the lease
-watermark. Re-ingesting a sealed day ("arşivden yeniden yükle") is a later feature.
+watermark. A day the database window dropped comes back from the vault on request ("arşivden
+yeniden yükle", 409 `archive_reload_required`; docs/DATA-MODEL.md "Retention"). A lookup reads no
+log row outside its days (`lookup.days.lookup_days`, the days that 409 checks): a look-back of a
+lease check cut at the first of them adds `lookback_clamped_to_window` (`day`, `last`; section 7,
+"Windows of the FortiGate DHCP checks"). **D27 reads up to the end of the lookup's last day**
+(`lookup.days.reads_until`): its read past the moment (`T + W`) ends there, a method rule with no
+explanation in the answer. It cuts nearly every FortiGate lookup (with FortiOS's default lease
+W is at least 7 days) and a MikroTik lookup after about 21:36 (W is 1.1 days with the defaults,
+past the end of the next day); the cut depends only on the request and the settings, so the
+answer is the same before a drop and after the reload and never changes silently (Wave 5
+contract W5-G deviations, #126).
 
 **FortiGate DHCP lines that did not become lease evidence** (D8). When no lease chain could be
 built (an internal lookup with `no_lease` or `no_lease_for_mac`; a match with `chain_missing`, or
@@ -668,15 +690,18 @@ All explanation texts (Turkish and English, no legal claims) are in `lookup/text
 | `usage.requests` | every 30 seconds — usage rebuild requests of the web interface (`usage_rebuilds`, `POST /api/v1/usage/rebuild`; ADR-0011, docs/USAGE.md) |
 | `usage.daily` | daily after 00:45 — yesterday's usage rollup rebuilt as `final` |
 | `usage.today` | every 5 minutes — today's usage rollup from the logs loaded so far (`partial`) |
+| `activity.tick` | a thread of the worker beside the job loop (no job waits on it), with its own database connection; every 10 seconds — Canlı Durum's snapshot `state/activity.json`: per minute and subject of the last 60 minutes the bytes, destinations, applications and sessions started, counted by the usage engine from the traffic rows that came since the last tick (read by id, again over a 5-second margin, each row once; a row committed more than 5 minutes after its time is left to the day's rollup); after a start the last 60 minutes and the session overlap are read in slices, and the snapshot says `warming_up` until all is counted (`arcilogger_worker.activity`; Wave 5 contract §6.2 M2, W5-M-4). Its ticks are recorded in `job_runs` as `activity.tick` at most once a minute (`ok`, or `failed` when the last tick failed; details `{"ticks", "failed", "rows", "max_seconds", "seconds", "ended_waiting", "stale_sessions", "open_sessions", "warming_up", "ended_dropped"}`; `ended_dropped`: ended sessions dropped uncounted when more than 200,000 wait), so `R20-job` and the Sistem page see it; it shows in `worker-status.json` with `"thread": true`. A failing tick is logged and the next one waits longer (up to 5 minutes). It stops with the service, after the chunk under way (the service waits for it at most 20 s) |
 | `usage.reattribute` | every 10 minutes — any of the last `usage.auto_rebuild_days` days whose device owners or leases (who an address belonged to when), late logs, `usage.*` settings or engine changed, or that is missing or still partial, is rebuilt; uses the attribution chain of section 2 at every moment the owner can change |
 | `usage.retention` | daily after 03:30 — usage rollups older than `usage.retention_days` (400) |
+| `db.window` | daily after 01:00, before the Backup task's `pg_dump` at 01:40 (the run and its first retry, 01:15, are due before it; W5-G-27) — the database window (Wave 5 contract G3, `arcilogger_worker.db_window`, docs/DATA-MODEL.md "Retention"): log rows older than the cutoff dropped as whole partitions or chunks, in steps of 16 days; the cutoff is the earliest of today − `db.retention_days` (30), the oldest day not sealed yet less 2 days, and the oldest day of an active archive reload; expired archive reloads marked `expired`; a failed run raises `R20-db-window` |
 | `reports.run_due` | every minute — scheduled usage reports: due schedules queued (one run for the newest occurrence after downtime, `reports.catch_up`), queued runs rendered (HTML, PDF, Excel into `exports/usage-reports/`) and e-mailed one per recipient (`report_runs`; ADR-0012, docs/USAGE-REPORTS.md) |
 | `reports.purge` | daily after 03:20 — deletes the files of report runs older than `reports.keep_days` (400 days); the run rows and the hashes stay |
 | `system.sample` | daily after 00:30 — one sample of the data and system drive (total and used bytes) into `state\system-history.json` (the newest 120 days) for the disk forecast of the Sistem page and the Panel; details `{"day", "drives"}` |
+| `snmp.poll` | every 5 seconds — each log source with `[sources.snmp] enabled` whose `interval_seconds` (15) is due: one read-only SNMPv3 GET (authPriv) of `sysUpTime` and, per WAN interface, `ifHCInOctets`, `ifHCOutOctets`, `ifOperStatus` and `ifHighSpeed` (`ifName` walked at start, after a name went missing and after the device restarted); the download and upload rates go to `state\wan-rates.json` (60 minutes, and 24 hours of 1-minute averages) for Canlı Durum; `R20-snmp` after 10 minutes without a good read. No `job_runs` row while no source is due and nothing is left to clear (an installation without SNMP writes none). Details `{"polled", "failing", "opened", "resolved", "refused"}` (Wave 5 contract §6, N2/N4) |
 | `search.counts_backfill` | every 10 minutes, no new file after 60 s — the finished spool files loaded before revision `0016_search` (`ingest_offsets.counts_from_line` set) are counted into Arama's summary table `search_counts`, newest day first, one transaction per file: its `ingest_offsets` row locked and read again, `arcilogger_db.searchcounts.rebuild_stream`, the mark cleared (a second worker or `arcilogger-db search-counts rebuild` running at the same time waits and then finds the file done). A file still being loaded waits until it is finished (`waiting`); meanwhile the statistics of its days are counted directly. `skipped` when nothing is to count (a fresh installation never has anything). Details `{"files": [{"source", "day", "lines", "keys"}], "lines", "waiting", "more", "left"}` (docs/INGEST.md "Search counts", ADR-0015) |
 
 **Licence gates** (ADR-0013, docs/LICENSING.md section 2.3): the jobs of a paid module —
-`usage.requests`, `usage.daily`, `usage.today`, `usage.reattribute` (Kullanım analizi,
+`usage.requests`, `usage.daily`, `usage.today`, `activity.tick`, `usage.reattribute` (Kullanım analizi,
 `usage_analytics`) and `reports.run_due` (Zamanlanmış kullanım raporları, `usage_reports`) — ask
 the licence before their `running` row is written. While the module is off the job does not run:
 its first skip of a site day is one `skipped` row with the details `{"license": {"module",
@@ -710,18 +735,21 @@ traffic bucket), 3 database unreachable. A failed day is recorded as a `failed`
 
 ## 5. Settings used
 
-Shipped (`arcilogger_db.settings.DEFAULT_SETTINGS`): `lookup.tolerance_seconds` (`60`),
-`lookup.max_candidates` (`100`), `lookup.max_session_seconds` (`86400`),
-`lookup.dns_lookback_seconds` (`3600`), `lease.default_seconds` (`86400`),
-`lease.server_seconds` (`{}`), `lease.timeout_percent` (`110`), `dhcp.server_vlan_regex`,
-`arp.interval_seconds` (`3600`), `arp.ignore_after_release_seconds` (`300`; 0 switches the rule
+Shipped (`arcilogger_db.settings.DEFAULT_SETTINGS`): `lookup.tolerance_seconds` (`60`; at most
+3600), `lookup.max_candidates` (`100`), `lookup.max_session_seconds` (`86400`; at most 172800),
+`lookup.dns_lookback_seconds` (`3600`; at most 604800), `lease.default_seconds` (`86400`; at most
+604800), `lease.server_seconds` (`{}`; each server 60 to 604800), `lease.timeout_percent` (`110`;
+100 to 125), `dhcp.server_vlan_regex`, `arp.interval_seconds` (`3600`; at most 604800; the upper
+bounds of these keep every lookup's days within one archive reload, #126, [SETTINGS.md](SETTINGS.md)
+section 1), `arp.ignore_after_release_seconds` (`300`; 0 switches the rule
 off; at most `arp.interval_seconds`), `devices.infrastructure_macs`, `devices.oui_file` (`""`),
-`worker.leases_lag_seconds` (`120`), `db.retention_days` (`400`), and the keys of ADR-0016 in the
-table below. Internal, written by the worker (author `:system`; not settings, not for editing):
+`worker.leases_lag_seconds` (`120`), `db.retention_days` (`30`, the database window; at least
+7), `db.reload_keep_days` (`7`, how long an archive reload's days stay), and the keys of
+ADR-0016 in the table below. Internal, written by the worker (author `:system`; not settings, not for editing):
 `worker.leases_watermark`, `worker.leases_ingest_seen`. Status rows (not settings, never listed):
 `nat.egresses_migration` (the upgrade's conversion of the old NAT settings), `nat.egresses_changes`
-(the last content change of each exit, section 3) and `leases.rollback_lowered` (the rollback
-step, section 7).
+(the last content change of each exit, section 3), `leases.rollback_lowered` (the rollback
+step, section 7) and `db.window_dropped_before` (the newest cutoff the database window applied).
 
 **Changing a setting:** on **Ayarlar → Uygulama ayarları** (Settings → Application settings,
 [SETTINGS.md](SETTINGS.md) section 1), or on the server console with
@@ -918,7 +946,21 @@ WHERE duration >= 300` and split the scan into "logged within 5 minutes of the w
     lease's last DHCP record as well, at most 100 days (8,640,000 s) back for a MikroTik lease;
   - the residual of the 7-day fallback: an old MikroTik lease kept open by another device's
     traffic can be named, at its own confidence and without a warning, more than 7 days after an
-    unconverted line that moved its client.
+    unconverted line that moved its client;
+  - none of them, nor the lease's newest record read from its row or the two-origin check (D27,
+    also its read past the moment), reads a log row outside the lookup's days
+    (`lookup.days.reads_from` to `reads_until`; with the defaults `T`'s day − 12 to + 1, as many
+    days as one archive reload holds): a look-back cut at the first day gives
+    `lookback_clamped_to_window`, and D27's read past the moment ends with the last day without
+    it (D27 reads up to the end of the lookup's last day, a method rule; section 3), so the
+    answer is the same before the database window drops those days and after their reload
+    (Wave 5 contract G7, W5-G-17). With the defaults the converted-row check reads rows about
+    12 days back, not 100; before the first day it reads the moves the lease job recorded with
+    the lease (`leases.moves`, issue #127: at most 1,000 times in the 100 days before the
+    lease's end, or its newest move while it is open, the newest kept and the value marked
+    `truncated` once the job dropped one), which can only lower a chain, and the cut look-back
+    is still noted. The post-lease check of a FortiGate lease starts no earlier than the first
+    day.
 - **Rows loaded before the upgrade.** FortiGate DHCP lines loaded before the upgrade are not
   converted (D8; the lookup names them, sections 2 and 3), and for each client no chain is built
   until its first Ack under the new version, up to half its lease (3.5 days with the FortiOS
@@ -934,9 +976,11 @@ WHERE duration >= 300` and split the scan into "logged within 5 minutes of the w
   the step's time and count, and the count is printed into the installation log (raw and sealed
   data are not touched; with `-RestoreDatabase` the step is skipped; a failure of the step does
   not stop the rollback, and the installer then warns). Every FortiGate-DHCP chain of the
-  previous version is therefore `low`. The step is unconditional: after a rollback between two
-  versions that both read FortiGate DHCP, FortiGate-DHCP chains are `low` as well, until the next
-  `arcilogger-db upgrade` (false lows only, never a wrong person). **The restore:** the seed of
+  previous version is therefore `low`. Since Wave 4 (#81, ASSUMPTIONS RB1) the step runs only
+  when the previous program may not read FortiGate DHCP: one that has
+  `arcilogger_db\lease_rollback.py` already reads it, so the step is skipped with its reason and the
+  leases stay as they are. When that check cannot decide, the step runs, and FortiGate-DHCP chains
+  are `low` until the next `arcilogger-db upgrade` (false lows only, never a wrong person). **The restore:** the seed of
   `arcilogger-db upgrade` sets the `fg_dhcp` leases that still carry the step's time back to
   `high`, deletes the status row and prints how many were restored, how many stay `low` and the
   days to rebuild: from the rollback day minus the longest FortiGate lease (604,800 s when none

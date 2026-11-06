@@ -13,7 +13,9 @@ export type TaskName =
   | 'ClockCheck'
   | 'Backup'
   | 'Requests'
-  | 'ApplySystem';
+  | 'ApplySystem'
+  | 'Renew'
+  | 'CrlFetch';
 
 export interface ServiceHealth {
   name: ServiceName;
@@ -36,7 +38,8 @@ export interface TaskHealth {
   task: TaskName;
   schedule_tr: string;
   schedule_en: string;
-  state: 'ok' | 'late' | 'missing' | 'not_used' | 'not_observable';
+  state: 'ok' | 'late' | 'missing' | 'not_used' | 'not_observable' | 'failed';
+  code: string | null;
   last_evidence_at: DateTimeString | null;
   evidence: string;
 }

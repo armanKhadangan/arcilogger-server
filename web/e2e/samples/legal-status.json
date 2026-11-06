@@ -1,0 +1,134 @@
+{
+  "errors": {
+    "not_authenticated": {
+      "body": {
+        "error": {
+          "code": "not_authenticated",
+          "message_en": "You need to sign in.",
+          "message_tr": "Oturum açmanız gerekiyor."
+        }
+      },
+      "headers": {},
+      "status": 401
+    }
+  },
+  "meta": {
+    "captured_at": "2026-10-13T04:01:37.986858+00:00",
+    "clock": "2026-10-13T07:00:00+03:00",
+    "info": "captured by web/scripts/capture_api_samples.py; do not edit",
+    "site_day": "2026-10-09",
+    "site_today": "2026-10-13",
+    "tsa": "mock (never legally valid)"
+  },
+  "mixed": {
+    "checked_at": "2026-10-13T07:01:17+03:00",
+    "level": "danger",
+    "provider": "zamane",
+    "provider_label": "Kamu SM",
+    "reasons": [
+      {
+        "code": "legal_root_missing",
+        "count": null,
+        "level": "danger",
+        "link": "settings-tsa",
+        "message_en": "No legal root fingerprint is set; no day can be shown as legal grade.",
+        "message_tr": "Kök sertifika parmak izi tanımlı değil; hiçbir gün yasal nitelikli gösterilemez.",
+        "since": null
+      },
+      {
+        "code": "unstamped_days",
+        "count": 1,
+        "level": "danger",
+        "link": "sealing",
+        "message_en": "1 closed day(s) have not been time-stamped for more than 24 hours.",
+        "message_tr": "1 kapanmış gün 24 saatten uzun süredir damgalanmadı.",
+        "since": "2026-10-13T00:00:00+03:00"
+      },
+      {
+        "code": "crl_stale",
+        "count": null,
+        "level": "warning",
+        "link": "settings-tsa",
+        "message_en": "No verified revocation list newer than 7 days.",
+        "message_tr": "7 günden yeni doğrulanmış bir iptal listesi (SİL) yok.",
+        "since": "2026-10-11T07:01:16+03:00"
+      },
+      {
+        "code": "renewal_due",
+        "count": 7,
+        "level": "warning",
+        "link": "sealing",
+        "message_en": "7 stamp certificate(s) expire within 180 days; re-stamping is due.",
+        "message_tr": "7 damganın sertifikası 180 gün içinde sona eriyor; yeniden damgalama bekleniyor.",
+        "since": "2026-09-02T12:00:00+03:00"
+      }
+    ]
+  },
+  "ok": {
+    "checked_at": "2026-10-13T07:01:16+03:00",
+    "level": "ok",
+    "provider": "zamane",
+    "provider_label": "Kamu SM",
+    "reasons": []
+  },
+  "provider_not_legal": {
+    "checked_at": "2026-10-13T07:01:16+03:00",
+    "level": "danger",
+    "provider": "mock",
+    "provider_label": "Deneme (mock)",
+    "reasons": [
+      {
+        "code": "provider_not_legal",
+        "count": null,
+        "level": "danger",
+        "link": "settings-tsa",
+        "message_en": "Time stamps come from a trial or test provider and have no legal validity. Choose the Kamu SM production server under Settings → Time stamping.",
+        "message_tr": "Zaman damgaları deneme ya da test sağlayıcısından alınıyor; bu damgaların yasal geçerliliği yoktur. Ayarlar → Zaman damgası'ndan Kamu SM üretim sunucusunu seçin.",
+        "since": null
+      }
+    ]
+  },
+  "revoked": {
+    "checked_at": "2026-10-13T07:01:17+03:00",
+    "level": "danger",
+    "provider": "zamane",
+    "provider_label": "Kamu SM",
+    "reasons": [
+      {
+        "code": "certificate_revoked",
+        "count": null,
+        "level": "danger",
+        "link": "sealing",
+        "message_en": "A time-stamp certificate is on a revocation list: Örnek Simulated TSA tsa. Contact the provider; legal review is recommended.",
+        "message_tr": "Zaman damgası sertifikası iptal listesinde: Örnek Simulated TSA tsa. Zaman damgası sağlayıcısıyla görüşün; hukuki inceleme önerilir.",
+        "since": "2026-10-10T00:30:05+03:00"
+      }
+    ]
+  },
+  "warning_only": {
+    "checked_at": "2026-10-13T07:01:17+03:00",
+    "level": "warning",
+    "provider": "zamane",
+    "provider_label": "Kamu SM",
+    "reasons": [
+      {
+        "code": "crl_stale",
+        "count": null,
+        "level": "warning",
+        "link": "settings-tsa",
+        "message_en": "No verified revocation list newer than 7 days.",
+        "message_tr": "7 günden yeni doğrulanmış bir iptal listesi (SİL) yok.",
+        "since": "2026-10-11T07:01:16+03:00"
+      },
+      {
+        "code": "renewal_due",
+        "count": 7,
+        "level": "warning",
+        "link": "sealing",
+        "message_en": "7 stamp certificate(s) expire within 180 days; re-stamping is due.",
+        "message_tr": "7 damganın sertifikası 180 gün içinde sona eriyor; yeniden damgalama bekleniyor.",
+        "since": "2026-09-02T12:00:00+03:00"
+      }
+    ]
+  }
+}

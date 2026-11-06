@@ -1464,6 +1464,7 @@ TONES_BEFORE = {
     "only_in_vault": "warning",
     "not_in_database": "warning",
     "older_than_db_retention": "warning",
+    "lookback_clamped_to_window": "warning",
     "no_data_for_day": "warning",
     "lease_timeline_behind": "warning",
     "future_time": "warning",

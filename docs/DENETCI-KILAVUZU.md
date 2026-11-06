@@ -30,7 +30,7 @@
 FortiGate / MikroTik ── syslog ──► ArciCollector ──► spool\<kaynak>\<gün>.log      (1) ham kayıt
                                                           │  gün bitince (00:10)
                                                           ▼
-                     vault\YYYY\MM\DD\<kaynak>.log.gz  + SHA-256                    (2) mühürlü dosya
+                     vault\YYYY\MM\DD\<kaynak>.log.xz  + SHA-256                    (2) mühürlü dosya
                                                           │
                      manifest-YYYY-MM-DD.json  (dosya özetleri + önceki günün özeti) (3) manifest, zincir
                                                           │  yalnızca SHA-256 özeti
@@ -46,8 +46,15 @@ FortiGate / MikroTik ── syslog ──► ArciCollector ──► spool\<kayn
    diğer bütün baytlar — UTF-8 olmayanlar dahil — cihazdan geldiği gibidir. Böylece bir mesaj asla
    iki satıra bölünmez ve orijinal baytlar birebir geri elde edilebilir.
 2. **Mühürleme.** Gün (Türkiye saatiyle 00:00–24:00, alınma zamanına göre) kapandıktan sonra her
-   kaynak dosyası belirlenimci olarak sıkıştırılır (`gzip -n`: dosya adı ve zaman yok), sıkıştırılmış
-   ve açılmış halinin SHA-256 özetleri ve satır sayısı hesaplanır.
+   kaynak dosyası belirlenimci olarak sıkıştırılır, sıkıştırılmış ve açılmış halinin SHA-256
+   özetleri ve satır sayısı hesaplanır. Biçim `xz`'dir (`<kaynak>.log.xz`, `audit.jsonl.xz`):
+   dosya, her biri 16 MiB açılmış veri taşıyan bağımsız xz akışlarının art arda eklenmesidir.
+   ARCILOGGER bir dosyadan ilk kez satır gösterirken satır numarasını denetlemek için önceki
+   akışları bir kez açıp sayar; sonraki gösterimlerde yalnızca satırın akışını açar. Bu biçimden önce
+   mühürlenmiş günler `gzip -n` (dosya adı ve zaman yok) ile `.gz` olarak kalır ve hiçbir zaman
+   yeniden sıkıştırılmaz (ham kayıt delildir); bir kasada iki biçim yan yana bulunabilir.
+   Manifestteki `path` uzantısı biçimi söyler. Dosyaları açmak için bölüm 5'teki "Mühürlü
+   dosyaları açmak" başlığına bakın.
 3. **Manifest.** Günün bütün dosyaları, ARCILOGGER denetim kaydı, kesintiler (bir kaynaktan uzun
    süre kayıt gelmemesi), saat eşitleme bilgisi ve **bir önceki günün manifest ve zaman damgası
    özetleri** kanonik JSON (RFC 8785) olarak `manifest-YYYY-MM-DD.json` dosyasına yazılır. Her gün
@@ -73,7 +80,7 @@ Manifestin alanları:
 | `audit_log` | ARCILOGGER denetim kaydının o günkü dosyası ve özeti (dosyanın kendisi kanıt paketine varsayılan olarak alınmaz, bkz. bölüm 4) |
 | `gaps` | Beklenen bir kaynaktan uzun süre kayıt gelmeyen aralıklar (bilgi); `kind: "unsealed_empty_days"` kaydı, hiç log olmadığı için tek tek damgalanmamış uzun bir gün dizisini (`first_day` … `last_day`) listeler — bu günün `previous` bağlantısı o dizinin öncesindeki mühürlü güne gider |
 | `clock` | Saat eşitleme örnekleri ve en büyük sapma |
-| `tsa` | Zaman damgası sağlayıcısı ve `legal_grade`: manifestin kendi beyanı (yapılandırma Kamu SM üretim sunucusunu gösteriyordu). ARCILOGGER bir günü ancak doğrulanan damga zinciri yapılandırmadaki bir Kamu SM köküne (`tsa.legal_root_fingerprints`) ulaşıyorsa "yasal sınıf" gösterir. `require_critical_eku: false` varsa kurum, Kamu SM'nin EKU uzantısını kritik işaretlemeyen sertifika profilini kabul etmiştir (K6) |
+| `tsa` | Zaman damgası sağlayıcısı ve `legal_grade`: manifestin kendi beyanı (yapılandırma Kamu SM ya da TÜRKTRUST üretim sunucusunu gösteriyordu; TÜRKTRUST ürün sahibinin kararıyla, [ZAMAN-DAMGASI.md](ZAMAN-DAMGASI.md) bölüm 2). ARCILOGGER bir günü ancak doğrulanan damga zinciri yapılandırmadaki bir köke (`[tsa] legal_root_fingerprints`) ulaşıyorsa "yasal sınıf" gösterir. `require_critical_eku: false` varsa kurum, Kamu SM'nin EKU uzantısını kritik işaretlemeyen sertifika profilini kabul etmiştir (K6) |
 | `previous` | Önceki günün manifest ve damga dosyalarının SHA-256 özetleri |
 | `deletions` | Saklama süresi dolduğu için silinen günlerin damgalı imha tutanakları |
 | `stamped_late`, `created_at` | Geç mühürleme notu, manifestin oluşturulma zamanı |
@@ -85,13 +92,14 @@ Manifestin alanları:
 | Günün ham kayıtları (yazılmakta olan) | `D:\ARCILOGGER\spool\` | Gün mühürlenip kasadaki kopya doğrulanınca silinir |
 | Mühürlü günler (ham kayıt, denetim kaydı, manifest, damga) | `D:\ARCILOGGER\vault\YYYY\MM\DD\` | Varsayılan **760 gün**; ayar 730 günün (2 yıl) altına indirilemez |
 | İmha tutanakları ve zincir çapası | `vault\deletions\` | Süresiz (silinen günlerin özetlerini ve zinciri korur) |
-| Yenileme damgaları (TSA sertifikası bitmeden yeniden damgalama) | `vault\renewals\` | Süresiz (M6'da etkinleşir) |
+| Yenileme damgaları (TSA sertifikası bitmeden yeniden damgalama, `Renew` görevi) | `vault\renewals\` | Süresiz |
+| İptal listeleri (SİL; `CrlFetch` görevi) | `D:\ARCILOGGER\state\crl\` | Süresiz: hiçbir liste silinmez (bir sertifika otoritesi süresi dolan sertifikayı sonraki listelerden çıkarabilir) |
 | İkinci kopya | Replika hedefindeki WORM klasörü (`[replica] target`, ör. bir NAS) | Kasa ile aynı |
 | Kanıt paketleri | `D:\ARCILOGGER\exports\` | **30 gün** (`evidence.keep_days`; worker her gece siler, elle: `arcilogger-core evidence purge`) |
 | Resmi 5651 raporları (PDF ve `.zd` damgası) | `D:\ARCILOGGER\exports\reports\` | Sorguyla birlikte kalır; **henüz süre sınırı ve silme işi yok** |
 | 5651 sorguları (talep bilgileri, sorgu, sonuç) | PostgreSQL `lookups` | **Henüz süre sınırı yok** |
-| ARCILOGGER denetim kaydı | PostgreSQL `audit_log` + günlük dosyası kasada (`audit.jsonl.gz`) | Veritabanındaki kayıt süresiz (silinmesi tetikleyiciyle engellenir); kasadaki günlük dosyası günüyle birlikte saklanır ve imha edilir |
-| Ayrıştırılmış kayıtlar (arama, sorgu) | PostgreSQL | Türetilmiş veridir; ham kayıtlardan yeniden üretilebilir. Hedef 400 gün (`db.retention_days`), ancak bu sürümde bu tabloların **imha işi yoktur**: ayrıştırılmış kayıtlardan hiçbir şey silinmez |
+| ARCILOGGER denetim kaydı | PostgreSQL `audit_log` + günlük dosyası kasada (`audit.jsonl.xz`; eski günlerde `.gz`) | Veritabanındaki kayıt süresiz (silinmesi tetikleyiciyle engellenir); kasadaki günlük dosyası günüyle birlikte saklanır ve imha edilir |
+| Ayrıştırılmış kayıtlar (arama, sorgu) | PostgreSQL | Türetilmiş veridir; ham kayıtlardan yeniden üretilebilir. Veritabanı son **30 günü** tutar (`db.retention_days`, en az 7): worker işi `db.window` her gece 01:00'den sonra daha eski günleri siler; henüz mühürlenmemiş bir gün ve etkin bir arşiv yüklemesinin günleri silinmez. Daha eski bir gün gerektiğinde 5651 sorgusu ve Arama onu mühürlü kasadan yeniden yükler; yüklenen günler `db.reload_keep_days` (varsayılan 7) gün sonra yine silinir. Kasadaki ham kayıtlar bu işten etkilenmez. İmha tutanağı tutulmaz; silinen günler işin çalışma kaydına yazılır |
 | Kullanım özetleri (kişi, cihaz ve departman bazında, adlarla: siteler, URL'ler, engellenen denemeler, saatlik satırlar) | PostgreSQL `usage_*` tabloları, `domain_categories` | **400 gün** (`usage.retention_days`): worker işi `usage.retention` her gece 03:30'dan sonra daha eski günleri siler; biten yeniden hesaplama istekleri (`usage_rebuilds`) 90 gün sonra silinir. İmha tutanağı tutulmaz, silinen satır sayıları işin çalışma kaydına (`job_runs`) yazılır. Ayrıştırılmış kayıtlar veritabanında durdukça yeniden hesaplanabilir |
 | Kayıtlı aramalar (ad, sorgu, zaman aralığı; yalnızca sahibine görünür) | PostgreSQL `saved_searches` | Sahibi silene ya da kullanıcı silinene kadar |
 | Arama dışa aktarımları (CSV, Excel) ve canlı akış satırları | Sunucuda dosya olarak saklanmaz: dışa aktarma bellekte hazırlanıp indirilir, canlı akış son satırları yalnızca bellekte tutar | Dışa aktarmanın boyutu ve SHA-256 özeti denetim kaydındadır (`search.export`, bölüm 9) |
@@ -101,8 +109,11 @@ Saklama ve imha kararları için hukuk müşavirine verilecek taslaklar:
 [legal/saklama-imha-politikasi-taslak.md](legal/saklama-imha-politikasi-taslak.md),
 [legal/aydinlatma-metni-taslak.md](legal/aydinlatma-metni-taslak.md).
 
-Kasadan silme yalnızca saklama görevi (`retention`, varsayılan **kapalı**) tarafından yapılır:
-süresi dolan gün önce yeniden doğrulanır, silinen günlerin listesi ve özetleri bir **imha
+Kasadan silme yalnızca saklama görevi (`retention`, varsayılan **kapalı**) tarafından yapılır.
+Görev her gün çalışır ama toplu siler: süresi dolan en eski gün `retention.batch_days` gündür
+(varsayılan 30, 1–180) süresi dolmuşsa süresi dolan bütün günler tek bir imha tutanağıyla silinir;
+bir gün bu yüzden süresi dolduktan sonra en çok `batch_days` gün daha kasada kalabilir. Silinecek
+her gün önce yeniden doğrulanır, silinen günlerin listesi ve özetleri bir **imha
 tutanağına** yazılır, tutanak zaman damgasıyla mühürlenir, son silinen günün özetleri **zincir
 çapası** olarak saklanır ve tutanak ertesi günün manifestine eklenir. Böylece zincir, kalan en eski
 günden itibaren doğrulanabilir kalır.
@@ -140,7 +151,7 @@ $core = "C:\Program Files\ARCILOGGER\venv\Scripts\arcilogger-core.exe"
 | Paket içeriği | Açıklama |
 |---|---|
 | `paket.json` | Paket dizini (kanonik JSON): her dosyanın boyutu ve SHA-256 özeti, kapsam (günler, kaynaklar, alıntılanan satırlar, sorgu no, oluşturan, zaman), kök sertifika parmak izleri, ARCILOGGER sürümü |
-| `vault/YYYY/MM/DD/…` | Mühürlü günler, sunucudaki yapıyla aynı: kaynak dosyaları (**her zaman dosyanın tamamı**: 5651 sorgusundan oluşturulan pakette varsayılan olarak alıntılanan günlerin **bütün** kaynakları — bölüm 4.1; aksi hâlde seçilen kaynaklar), manifest, `.zd` damga; günün ARCILOGGER denetim kaydı (`audit.jsonl.gz`) yalnızca yönetici açıkça istediyse (`--include-audit-log`; web arayüzünde yalnızca yöneticinin işaretleyebildiği, varsayılan olarak boş kutu) — yoksa `paket.json`'da `excluded` altında nedeni ve SHA-256 değeriyle listelenir |
+| `vault/YYYY/MM/DD/…` | Mühürlü günler, sunucudaki yapıyla aynı: kaynak dosyaları (**her zaman dosyanın tamamı**: 5651 sorgusundan oluşturulan pakette varsayılan olarak alıntılanan günlerin **bütün** kaynakları — bölüm 4.1; aksi hâlde seçilen kaynaklar), manifest, `.zd` damga; günün ARCILOGGER denetim kaydı (`audit.jsonl.xz`, eski günlerde `.gz`) yalnızca yönetici açıkça istediyse (`--include-audit-log`; web arayüzünde yalnızca yöneticinin işaretleyebildiği, varsayılan olarak boş kutu) — yoksa `paket.json`'da `excluded` altında nedeni ve SHA-256 değeriyle listelenir |
 | `vault/deletions/`, `vault/renewals/` | Gerektiğinde imha tutanakları, zincir çapası, yenileme damgaları |
 | `extract/GÜN/<kaynak>.txt` | İsteğe bağlı: sorguyla ilgili ham satırlar, her biri `<satır no><TAB><ham satır>` biçiminde, bayt bayt aynı |
 | `sertifikalar/kokler/`, `sertifikalar/kokler.pem` | Paketteki damgaların gerçekten bağlandığı kök sertifikalar (yalnızca onlar; `tsa.roots_dir`'dan) |
@@ -242,7 +253,7 @@ en az ikisinin kullanılması önerilir.
 yalnızca `verify.py` dosyasındaki koda dayanır. `verify.py` ağa bağlanmaz ve dosya yazmaz.
 
 Seçenekler: `--kokler KLASÖR` (yalnızca bu klasördeki köklere güven — örneğin Kamu SM'den kendi
-indirdikleriniz; paketteki kökler kullanılmaz), `--hizli` (gzip dosyalarını açmadan yalnızca
+indirdikleriniz; paketteki kökler kullanılmaz), `--hizli` (sıkıştırılmış dosyaları açmadan yalnızca
 özetler), `--json` (makine tarafından okunabilir çıktı). `verify.py`, paket olmadan **kasanın bir
 kopyasını** (örneğin bir NAS'taki replika) da doğrulayabilir:
 `python -I -S verify.py \\<NAS>\arcilogger-worm --kokler KLASÖR`. Klasörde `paket.json`, `verify.py` ya da `vault/` yoksa
@@ -296,16 +307,43 @@ yalnızca damgayı kontrol eder (dosyalar, zincir ve alıntı için Yöntem C'ni
    Beklenen çıktı `Verification: OK`. `-attime` sertifikaları damga anında kontrol ettirir (TSA
    sertifikasının süresi sonradan dolsa da çalışır). `.zd` dosyası yalın belirteçse `-token_in`
    eklenir. Bu adım manifestin damga anından beri değişmediğini gösterir.
-2. **C2 — dosyalar:** `sha256sum vault/2026/10/12/*.gz` (PowerShell: `Get-FileHash -Algorithm SHA256
-   vault\2026\10\12\*.gz`, cmd: `certutil -hashfile <dosya> SHA256`); her değer, aynı günün
+2. **C2 — dosyalar:** `sha256sum vault/2026/10/12/*.xz` (eski günlerde `*.gz`; PowerShell:
+   `Get-FileHash -Algorithm SHA256 vault\2026\10\12\*.xz`, cmd: `certutil -hashfile <dosya>
+   SHA256`); her değer, aynı günün
    manifestindeki `files[].sha256` ya da `audit_log.sha256` ile aynı olmalı. Manifestte olup klasörde
    olmayan ya da klasörde olup manifestte olmayan dosya, paketin eksik ya da eklenmiş olduğunu gösterir
    — ARCILOGGER denetim kaydı (`audit_log`) hariç: varsayılan olarak pakete alınmaz ve `paket.json`
    `excluded` altında listelenir.
 3. **C3 — zincir:** önceki günün `manifest-…json` ve `.zd` dosyalarının SHA-256 özetleri, sonraki
    günün manifestindeki `previous.manifest_sha256` ve `previous.token_sha256` ile aynı olmalı.
-4. **C4 — alıntı:** `gzip -dc vault/2026/10/12/<kaynak>.log.gz | sed -n 'Np'` çıktısı, alıntı
-   dosyasındaki `N<TAB>…` satırıyla bayt bayt aynı olmalı (Windows'ta Git Bash ya da WSL ile).
+4. **C4 — alıntı:** `xz -dc vault/2026/10/12/<kaynak>.log.xz | sed -n 'Np'` (eski günlerde
+   `gzip -dc vault/2026/10/12/<kaynak>.log.gz | sed -n 'Np'`) çıktısı, alıntı dosyasındaki
+   `N<TAB>…` satırıyla bayt bayt aynı olmalı (Windows'ta Git Bash ya da WSL ile).
+
+### Mühürlü dosyaları açmak
+
+`.xz` dosyaları art arda eklenmiş bağımsız akışlardır; her xz aracı bütün akışları sırayla açar ve
+sonuç, manifestteki `sha256_uncompressed` özetine sahip tek dosyadır. `.gz` dosyaları eski
+günlerindir ve aynı şekilde açılır.
+
+- **Windows, 7-Zip:** dosyaya sağ tıklayıp "7-Zip → Buraya çıkar", ya da komut satırında
+  `7z e <kaynak>.log.xz` (açılmış `<kaynak>.log` dosyasını bulunduğunuz klasöre yazar).
+  Çıktıyı `>` ile bir dosyaya yönlendirmeyin: Windows PowerShell 5.1 yönlendirilen baytları
+  metne çevirir (UTF-16, CRLF) ve özet tutmaz. 7-Zip'in çok akışlı bir dosyanın tamamını açtığı
+  ARCILOGGER'ın Windows testlerinde sınanır; kurumdaki 7-Zip sürümüyle bir kez denenmesi önerilir
+  (sahada doğrula X1): açılan dosyanın SHA-256 özeti manifestteki `sha256_uncompressed` ile aynı
+  olmalıdır.
+- **Linux/macOS, xz:** `xz -dc <kaynak>.log.xz > <kaynak>.log` (dosyayı yerinde bırakır);
+  `xz -t <dosya>` yalnızca bütünlüğü sınar. Eski günler için `gzip -dc <kaynak>.log.gz`.
+- **Python:** `lzma.open` sonraki bir akış bozuksa hata vermeden durabilir ve bozuk bir dosyayı
+  daha kısa bir çıktı olarak açar; bu yüzden kılavuz Python ile açma komutu vermez. Önce C2'yi
+  (SHA-256 kontrolü) yapın, ya da 7-Zip, `xz -dc` veya `verify.py` kullanın: bu üçü hasarda hata
+  verir.
+
+`verify.py` iki biçimi de yalnızca Python'un standart kitaplığıyla okur ve her akışı sırayla,
+hasarda hata vererek açar. Python `lzma` modülü olmadan derlenmişse `.xz` dosyaları için
+`xz-unsupported` (HATA) yazar: bu, dosyanın değiştirildiği anlamına gelmez, denetimin
+yapılamadığını söyler (bölüm 7); `.gz` günleri yine doğrulanır.
 
 ### Kök sertifikalar
 
@@ -346,12 +384,13 @@ aynı olduğunu; her günün gün bitiminden ne kadar sonra damgalandığını.
 
 Tablo, `verify.py`'nin yazabileceği **bütün** kodları listeler (`--json` çıktısındaki `code`
 alanı); ekrandaki her satır ayrıca Türkçe ve İngilizce açıklamasını taşır. Bir HATA paketi
-"DOĞRULANAMADI" yapar; UYARI incelenmelidir; BİLGİ ve OK yalnızca bilgi verir.
+"DOĞRULANAMADI" yapar; UYARI incelenmelidir; BİLGİ ve TAMAM yalnızca bilgi verir.
 
 | Kod | Düzey | Anlamı |
 |---|---|---|
 | (çıkış kodu 2) | — | Paket okunamadı: şifreli, bozuk ZIP, güvenli olmayan ya da (büyük/küçük harf farkıyla) çakışan dosya adları |
 | `file-hash-mismatch`, `file-size-mismatch`, `file-content-mismatch` | HATA | Kayıt dosyası mühürlendikten sonra değiştirilmiş |
+| `xz-unsupported` | HATA | Bu Python `lzma` modülü olmadan derlenmiş: `.xz` dosyasının açılmış içeriği ya da ondan alınan alıntı denetlenemedi (dosyanın kendisi `file-ok` ile ayrıca sınanır). Dosyanın değiştirildiğini göstermez; `verify.py`'yi `lzma` modülü olan bir Python ile (python.org sürümleri) yeniden çalıştırın |
 | `file-not-sealed` | HATA | Gün klasöründe manifestte olmayan, yani hiç mühürlenmemiş bir dosya var |
 | `file-unexpected` | HATA (kasa kopyasında UYARI) | Paketin bilinen bir parçası olmayan dosya |
 | `file-missing`, `index-file-missing`, `manifest-missing` | HATA | Dosya ya da (kapsamdaki) bir gün eksik |
@@ -364,7 +403,7 @@ alanı); ekrandaki her satır ayrıca Türkçe ve İngilizce açıklamasını ta
 | `token-swapped` | HATA | Damga dosyaları günler arasında yer değiştirmiş |
 | `token-signature`, `token-message-digest`, `token-content-type`, `token-ess` | HATA | Damganın imzası ya da imzalı öznitelikleri geçersiz |
 | `token-eku` | HATA | TSA sertifikası zaman damgası için yetkili değil |
-| `token-eku-not-critical` | UYARI | EKU uzantısı kritik değil; kurum bunu mühürlü manifestte kabul etmiş (`tsa.require_critical_eku = false`, K6). OpenSSL `ts -verify` böyle bir damgayı "unsuitable certificate purpose" diyerek reddeder |
+| `token-eku-not-critical` | UYARI | EKU uzantısı kritik değil; kurum bunu mühürlü manifestte ya da (yenileme damgası için) yenileme kaydında kabul etmiş (`tsa.require_critical_eku = false`, K6). OpenSSL `ts -verify` böyle bir damgayı "unsuitable certificate purpose" diyerek reddeder |
 | `chain-skip-invalid` | HATA | Manifestteki boş gün dizisi geçersiz ya da bu günden hemen önce bitmiyor |
 | `summary-several-roots` | UYARI | Paketteki damgalar birden çok köke bağlanıyor; her kökün parmak izini ayrı karşılaştırın |
 | `token-chain`, `token-not-ca` | HATA | Sertifika zinciri güvenilen bir köke ulaşmıyor |
@@ -372,7 +411,8 @@ alanı); ekrandaki her satır ayrıca Türkçe ve İngilizce açıklamasını ta
 | `crl-revoked` | HATA | Bir sertifika damgadan önce iptal edilmiş |
 | `chain-broken`, `chain-not-previous-day` | HATA | Önceki gün sonradan değiştirilmiş ya da bağlantı yanlış |
 | `index-hash-mismatch`, `index-not-canonical` | HATA | `paket.json` ya da listelediği bir dosya değiştirilmiş |
-| `extract-mismatch`, `extract-unknown` | HATA | Alıntı satırı mühürlü dosyadakiyle aynı değil; alıntı klasöründe beklenmeyen dosya |
+| `extract-mismatch` | HATA | Alıntı satırı mühürlü dosyadakiyle aynı değil |
+| `extract-unknown` | HATA (kasa kopyasında UYARI) | Alıntı klasöründe beklenmeyen dosya |
 | `legal-claim-mismatch` | HATA | Manifest yasal damga diyor, damga test TSA'sından |
 | `manifest-day-mismatch`, `manifest-misplaced` | HATA | Manifest başka bir güne ait ya da yanlış gün klasöründe |
 | `file-unreadable`, `file-path-invalid` | HATA | Dosya okunamadı; manifestteki yol geçersiz (`..`, mutlak yol vb.) |
@@ -417,10 +457,15 @@ alanı); ekrandaki her satır ayrıca Türkçe ve İngilizce açıklamasını ta
 | `index-hash`, `index-scope` | BİLGİ | `paket.json`'ın SHA-256 özeti (denetim kaydıyla karşılaştırın); paket no, oluşturan, zaman, günler, kaynaklar, sorgu |
 | `manifest`, `root`, `root-trust`, `roots-external` | BİLGİ | Manifest dosyası ve özeti; kök sertifika ve parmak izleri; parmak izlerini Kamu SM'nin yayımladığı değerlerle karşılaştırma hatırlatması; yalnızca `--kokler` ile verilen köklere güveniliyor |
 | `renewal-covers` | BİLGİ | Yenileme damgasının kapsadığı günler |
+| `renewal-not-due` | BİLGİ | Günün damgası için yeniden damgalama henüz gerekmiyor: TSA sertifikası 180 günden uzun süre daha geçerli (paket kurumun ayarını taşımaz; varsayılan 180 gün kullanılır) |
+| `renewal-covered` | TAMAM | Günün damgası, sertifikası sona ermeden yeniden damgalanmış; sayılan yenileme kaydının adı verilir. Test (mock) damgalı, `reason: "test"` yazılmış ya da paketteki SİL'e göre iptal edilmiş bir yenileme sayılmaz |
+| `renewal-due` | UYARI | Damga sertifikası 180 gün içinde sona eriyor ve sayılan bir yenileme yok; yeniden damgalama bekleniyor |
+| `renewal-late` | UYARI | Yeniden damgalama, eski sertifikanın süresi dolduktan sonra yapılmış (verilen tarih yeniden damgalama zamanıdır) |
+| `renewal-uncovered` | UYARI | Damga sertifikasının süresi dolmuş ve yeniden damgalama yok; damga, alındığı an için geçerlidir. Uzun süreli kanıt için yeniden damgalama önerilir |
 | `report-hash` | BİLGİ | Raporun SHA-256 özeti: ARCILOGGER'daki sorgu kaydı ve denetim kaydıyla (`lookup.report`) aynı olmalı |
 | `report-not-stamped` | BİLGİ | Rapora ayrıca zaman damgası alınmamış (isteğe bağlı ayar) |
 | `summary-days`, `summary-root` | BİLGİ | Özet: incelenen günler; damgaların bağlandığı kök (Kamu SM'nin yayımladığı parmak iziyle karşılaştırın) |
-| `file-ok`, `token-ok`, `chain-ok`, `chain-anchor`, `contents-ok`, `crl-ok`, `extract-ok`, `index-files`, `deletion-ok`, `renewal-ok`, `report-ok` | OK | İlgili kontrol geçti (dosya, damga, zincir bağlantısı, imha edilmiş önceki gün için zincir çapası, paket içeriği, SİL, alıntı, paket dizini, imha tutanağı, yenileme ve rapor damgası) |
+| `file-ok`, `token-ok`, `chain-ok`, `chain-anchor`, `contents-ok`, `crl-ok`, `extract-ok`, `index-files`, `deletion-ok`, `renewal-ok`, `report-ok` | TAMAM | İlgili kontrol geçti (dosya, damga, zincir bağlantısı, imha edilmiş önceki gün için zincir çapası, paket içeriği, SİL, alıntı, paket dizini, imha tutanağı, yenileme ve rapor damgası) |
 
 ## 8. Sahada netleşecek konular
 
@@ -454,7 +499,7 @@ içerebilir.
 | `search.run` | Her arama (zaman aşımına uğrayan da: `outcome: "timeout"`, `search_id: null`) | `search_id`, `q`, `from`, `to`, `kinds`, `driver`, `tables`, `rows` (ilk sayfadaki satır sayısı), `complete`, `outcome`, `elapsed_ms`, `saved_id` |
 | `search.event` | Bir kaydın bütün alanları açıldığında | `table`, `id`, `time`, `raw` (kaynak, gün, satır, bayt konumu) |
 | `search.refs` | "Kanıt paketine aktar" | `search_id`, `q`, `from`, `to`, `refs` (satır sayısı), `truncated`, `complete`, `sha256` (referans listesinin kanonik JSON'unun özeti) |
-| `search.export` | CSV ya da Excel indirme (yalnızca yönetici, parolayı yeniden girerek) | `search_id`, `q`, `from`, `to`, `format`, `rows`, `truncated`, `bytes`, `sha256` (dosyanın) |
+| `search.export` | CSV ya da Excel indirme (yalnızca yönetici, parolayı yeniden girerek) | `search_id`, `q`, `from`, `to`, `format`, `rows`, `truncated` (`rows`, `time`, `archived` ya da `null`), `archived` (veritabanında olmayan günler: `{first_day, last_day, keep_days}` ya da `null`), `bytes`, `sha256` (dosyanın) |
 | `search.saved_create`, `search.saved_update` | Kayıtlı arama eklenince ya da değişince | `saved_id`, `name`, `q` |
 | `search.saved_delete` | Kayıtlı arama silinince | `saved_id`, `name` |
 | `live.open` | Canlı akış açılınca | `stream_id`, `q`, `folders` (izlenen klasörler), `backfill` |
@@ -471,16 +516,17 @@ gösterilir). Bir satırın tamamı üç sayfada da `GET /raw` ile açılır ve 
 **Bir `raw.tail` girdisini yeniden hesaplamak.** `range_sha256`, kaynağın o günkü dosyasının
 `[from_offset, to_offset)` bayt aralığının (gösterilen satırlar, satır sonlarıyla birlikte) SHA-256
 özetidir. Gün mühürlenmeden önce bu baytlar `D:\ARCILOGGER\spool\<kaynak>\<gün>.log`
-dosyasında, mühürlendikten sonra kasadaki `vault\YYYY\MM\DD\<kaynak>.log.gz` dosyasının açılmış
+dosyasında, mühürlendikten sonra kasadaki `vault\YYYY\MM\DD\<kaynak>.log.xz` (eski günlerde `.log.gz`) dosyasının açılmış
 içeriğinde ve o günün o kaynağını içeren her kanıt paketindedir (dosyalar mühürlenirken
 değiştirilmez). Python ile (örnekte `from_offset` 0, `to_offset` 498):
 
 ```powershell
-python -I -c "import gzip,hashlib,sys; d=gzip.open(sys.argv[1]).read(); print(hashlib.sha256(d[int(sys.argv[2]):int(sys.argv[3])]).hexdigest())" core-r1.log.gz 0 498
+python -I -c "import lzma,hashlib,sys; d=lzma.open(sys.argv[1]).read(); print(hashlib.sha256(d[int(sys.argv[2]):int(sys.argv[3])]).hexdigest())" core-r1.log.xz 0 498
 ```
 
 Çıkan değer girdideki `range_sha256` ile aynı olmalıdır; satır sayısı `to_line - from_line + 1`,
-yani `count` olmalıdır. Spool dosyası için `gzip.open` yerine `open(sys.argv[1], 'rb')` kullanın.
+yani `count` olmalıdır. Eski bir `.gz` gün için `lzma` yerine `gzip`, spool dosyası için
+`lzma.open` yerine `open(sys.argv[1], 'rb')` kullanın.
 
 **Dışa aktarma ve aramadan kanıt paketi.** `search.export` girdisindeki `sha256`, indirilen
 dosyanın özetidir (`Get-FileHash -Algorithm SHA256 <dosya>` aynı değeri verir; yanıt da
@@ -643,13 +689,41 @@ manifest's SHA-256 is sent to TÜBİTAK BİLGEM Kamu SM, which returns an RFC 31
 (`.zd`). ARCILOGGER verifies the token and all hashes before it marks a day sealed, makes the files
 read-only and copies them to the WORM share of the replica (e.g. on a NAS).
 
+**Sealed file formats.** Days are sealed as xz (`<source>.log.xz`, `audit.jsonl.xz`): a
+concatenation of independent xz streams of 16 MiB of uncompressed data each: the first view of a
+line in a file counts the earlier streams (to check its line number); later views open one stream.
+Days sealed before this format stay `.gz` (`gzip -n`)
+and are never re-encoded (raw logs are evidence); one vault can hold both. The `path` suffix in
+the manifest tells the format. Every xz tool decompresses all streams in order into the file whose
+SHA-256 is the manifest's `sha256_uncompressed`: on Windows 7-Zip ("7-Zip → Extract here", or
+`7z e <source>.log.xz`, which writes `<source>.log` itself; do not redirect output with `>`:
+Windows PowerShell 5.1 turns the bytes into UTF-16 text; ARCILOGGER's Windows tests check that 7-Zip reads the
+whole multi-stream file, and a one-time check with the site's 7-Zip version is recommended: field
+check X1), on Linux/macOS `xz -dc <source>.log.xz > <source>.log` (`xz -t` tests only); days
+sealed as gzip (`.gz`) with `gzip -dc` / `gzip.open`. Python's `lzma.open` can stop without an
+error at a damaged later stream and give a shorter output, so this guide gives no Python command
+for xz: run C2 (the SHA-256 check) first, or use 7-Zip, `xz -dc` or `verify.py`, which fail on
+damage. `verify.py` reads both formats with the
+standard library, every stream in order; a Python built without `lzma` reports `.xz` files as
+`xz-unsupported` (a failure that says the check could not be done, not that the file was changed)
+and still verifies `.gz` days. In the manual checks of section 5 use `*.xz` (old days `*.gz`) for C2 and
+`xz -dc … | sed -n 'Np'` (old days `gzip -dc`) for C4.
+
 **Retention.** Spool: until the day is sealed. Vault: 760 days by default, never below 730; the
 retention job is off by default. Vault days are deleted only by the retention job, with a
-time-stamped deletion record and a chain anchor. Evidence packages in `exports/`: 30 days. Stored
+time-stamped deletion record and a chain anchor. The job runs daily but deletes in batches: once
+the oldest expired day has been expired for `retention.batch_days` days (default 30, 1–180), every
+expired day goes under one deletion record, so a day may stay in the vault up to `batch_days`
+days after it expired. Evidence packages in `exports/`: 30 days. Stored
 official 5651 reports (`exports\reports\`) and the 5651 lookups: no expiry yet. ARCILOGGER's audit
 log: no expiry in the database; its daily file is sealed with the day. Parsed records in the
-database: derived and rebuildable from the vault; intended 400 days, but no deletion job exists yet
-for them. Usage rollups in the database (per person, device and department with names: sites,
+database: derived and rebuildable from the vault; the database keeps the last 30 days
+(`db.retention_days`, at least 7): the worker job `db.window` drops older days every night after
+01:00, never a day not sealed yet or a day of an active archive reload; an older day is reloaded
+from the sealed vault when a 5651 lookup or a search needs it, and dropped again
+`db.reload_keep_days` (default 7) days later. The raw logs in the vault are untouched; no deletion
+record is kept, the job's run lists the dropped days. Revocation lists (`state\crl\`, the
+`CrlFetch` task): never deleted. Usage rollups in the database (per person, device and department with names: sites,
 URLs, blocked attempts, hourly rows; `usage_*` tables, `domain_categories`): 400 days
 (`usage.retention_days`), deleted every night after 03:30 by the worker job `usage.retention`,
 finished rebuild requests (`usage_rebuilds`) after 90 days; no deletion record is kept, the job's
@@ -671,7 +745,7 @@ Building twice from the same inputs gives the same bytes except the creation tim
 only read; a day whose token or hashes do not verify, or a broken chain link between included
 days, is refused, and the finished ZIP is checked with the standalone verifier's own code before
 it is handed out. The build also prints the SHA-256 of `verify.py`: give it to the recipient
-through a channel separate from the package. ARCILOGGER's own audit log (`audit.jsonl.gz`) is left
+through a channel separate from the package. ARCILOGGER's own audit log (`audit.jsonl.xz`, `.gz` for old days) is left
 out unless asked for (it holds other requests and staff data); `paket.json` lists it under
 `excluded` with its sealed SHA-256 and `verify.py` reports `audit-log-excluded` (information, not a
 failure; `audit-log-absent` when the package has no readable `paket.json`). A torn last line
@@ -681,8 +755,9 @@ day, and the chain links past it (`chain-skipped-days`; an invalid run is `chain
 Stamps chaining to more than one root give `summary-several-roots`; a TSA certificate whose
 extended key usage is not critical gives `token-eku-not-critical` (a warning) only where the site
 accepted that profile (`tsa.require_critical_eku = false`, K6), otherwise `token-eku`. A day is
-shown as legal grade only when its manifest claims the Kamu SM production server and the verified
-chain reaches a root listed in `tsa.legal_root_fingerprints`.
+shown as legal grade only when its manifest claims a legal-grade production server (Kamu SM's,
+or TÜRKTRUST's by the product owner's decision, [TIME-STAMPING.md](TIME-STAMPING.md) section 2)
+and the verified chain reaches a root listed in `[tsa] legal_root_fingerprints`.
 
 **Packages from the web interface and the 5651 report (section 4.1).** Administrators create
 packages in the web interface (re-authentication); auditors download those they may see. Web
@@ -723,6 +798,20 @@ without the licensee name or server ids.
 - Compare the root fingerprints with the values Kamu SM publishes at `sertifikalar.kamusm.gov.tr`;
   no software can prove on its own that a root in the package is Kamu SM's.
 
+**Re-stamping (section 7).** A time stamp stays valid for the moment it was made, but its TSA
+certificate expires. Before it does, the `Renew` task stamps a renewal record that lists the hashes
+of the stamps due (`vault/renewals/`); a package ships the records that cover its days.
+`verify.py` adds one finding per day stamp, computed from the package alone with "now" being the
+moment of verification:
+`renewal-not-due` (INFO: "Re-stamping is not due yet (certificate valid until {date})."),
+`renewal-covered` (OK: "Re-stamped before its certificate expired: {renewal}."; a test, mock or
+revoked renewal never counts), `renewal-due` (WARN: "The stamp certificate expires on {date};
+re-stamping is due."), `renewal-late` (WARN: "Re-stamped after the old certificate had expired
+({date})."; the date is the re-stamping's time) and `renewal-uncovered` (WARN: "The stamp
+certificate expired on {date} with no re-stamping; the stamp is valid for the moment it was
+made."). None of them is a failure. The package does not carry the site's lead time, so
+`verify.py` uses the default of 180 days. Details: [TIME-STAMPING.md](TIME-STAMPING.md) section 3.
+
 **What verification shows and what it does not.** It shows that each manifest existed at its stamp
 time and is unchanged, that the packaged log files match their sealed hashes and that no unsealed
 log file is in the package, that consecutive days are chained (missing days are warnings), that
@@ -744,8 +833,10 @@ does. `search.run` (every run, a timed-out one too with `outcome: "timeout"`): `
 `saved_id`; `search.event` (a record's fields opened): `table`, `id`, `time`, `raw`; `search.refs`
 ("Kanıt paketine aktar"): `search_id`, `q`, `from`, `to`, `refs`, `truncated`, `complete`,
 `sha256` of the reference list as canonical JSON; `search.export` (administrators, with
-re-authentication): `search_id`, `q`, `from`, `to`, `format`, `rows`, `truncated`, `bytes`,
-`sha256` of the file; `search.saved_create` and `search.saved_update`: `saved_id`, `name`, `q`;
+re-authentication): `search_id`, `q`, `from`, `to`, `format`, `rows`, `truncated` (`rows`,
+`time`, `archived` or `null`), `archived` (the days not in the database,
+`{first_day, last_day, keep_days}`, or `null`), `bytes`, `sha256` of the file;
+`search.saved_create` and `search.saved_update`: `saved_id`, `name`, `q`;
 `search.saved_delete`: `saved_id`, `name`; `live.open`: `stream_id`, `q`, `folders`, `backfill`;
 `live.close`: `stream_id`, `seconds`, `delivered`, `dropped` by reason, `reason` (`closed`,
 `lingered`, `server_stopping` or the code that ended the stream, e.g. `time_limit`,
@@ -757,11 +848,11 @@ opens through `GET /raw` on all three pages and is audited as `raw.view`.
 
 `range_sha256` is the SHA-256 of the bytes `[from_offset, to_offset)` of the source's file of that
 day (the lines shown, with their line feeds): before sealing in `D:\ARCILOGGER\spool\<source>\<day>.log`,
-after sealing in the decompressed `vault\YYYY\MM\DD\<source>.log.gz` and in every evidence
+after sealing in the decompressed `vault\YYYY\MM\DD\<source>.log.xz` (`.log.gz` for old days) and in every evidence
 package holding that day of that source (sealing does not change the bytes). Recompute it with
-`python -I -c "import gzip,hashlib,sys; d=gzip.open(sys.argv[1]).read();
-print(hashlib.sha256(d[int(sys.argv[2]):int(sys.argv[3])]).hexdigest())" <source>.log.gz <from_offset>
-<to_offset>` (`open(path, 'rb')` for the spool file); `count` is `to_line - from_line + 1`. The
+`python -I -c "import lzma,hashlib,sys; d=lzma.open(sys.argv[1]).read();
+print(hashlib.sha256(d[int(sys.argv[2]):int(sys.argv[3])]).hexdigest())" <source>.log.xz <from_offset>
+<to_offset>` (`gzip` instead of `lzma` for an old `.gz` day, `open(path, 'rb')` for the spool file); `count` is `to_line - from_line + 1`. The
 `sha256` of `search.export` is the downloaded file's (`Get-FileHash -Algorithm SHA256`; the answer
 carries it as `Repr-Digest`); an export is not sealed, as its "Bilgi" sheet says: the evidence
 package is the integrity proof. A package built from a search shows `search.refs`, then the same

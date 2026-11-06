@@ -16,6 +16,7 @@
  * in a change list `{secret: true, old: "set"|"unset", new: …}`.
  */
 
+import type { OperStatus } from './activity-types';
 import type { DateString, DateTimeString } from './api-types';
 
 // -- names (`arcilogger_core.admin.contract`) -----------------------------------------------------
@@ -85,7 +86,12 @@ export type StepState = 'pending' | 'running' | 'done' | 'skipped' | 'warning' |
 
 /** The secrets the browser may set (write-only fields). */
 export type BrowserSecret =
-  'kamusm.customer' | 'kamusm.password' | 'smtp.password' | 'replica.password';
+  | 'kamusm.customer'
+  | 'kamusm.password'
+  | 'turktrust.username'
+  | 'turktrust.password'
+  | 'smtp.password'
+  | 'replica.password';
 
 export type UploadKind = 'kamusm_root' | 'zamane_client' | 'smtp_ca';
 
@@ -118,12 +124,19 @@ export interface ClockSection {
   alert_offset_ms: number;
 }
 
+/** `[network] https_proxy`: `http://host:port`, or empty for a direct connection. */
+export interface NetworkSection {
+  https_proxy: string;
+}
+
 export interface GeneralSection {
   site_name: string;
   clock: ClockSection;
+  network: NetworkSection;
 }
 
-export type TsaServer = 'test' | 'production';
+/** Kamu SM's Zamane servers, or TÜRKTRUST over HTTPS or plain HTTP (contract §2.4). */
+export type TsaServer = 'test' | 'production' | 'turktrust' | 'turktrust-http';
 
 export interface StagedJar {
   sha256: string;
@@ -164,12 +177,22 @@ export interface SealReady {
 }
 
 export interface TsaSection {
-  /** `mock`, `rfc3161` or `zamane` (only Zamane can be chosen in the browser). */
+  /** `mock`, `rfc3161`, `zamane` or `turktrust` (Zamane and TÜRKTRUST can be chosen). */
   provider: string;
-  /** `null` while the provider is not Zamane. */
+  /** `null` while the server is none of the browser's choices. */
   server: TsaServer | null;
+  /**
+   * The configuration claims legal grade: Kamu SM's production server, or TÜRKTRUST's (D12).
+   * Whether a day is legal grade also needs its chain (rule 4).
+   */
+  legal_grade?: boolean;
   credit_alert_threshold: number;
   timeout_seconds: number;
+  /** TÜRKTRUST over plain HTTP is allowed (the password then travels in clear text). */
+  allow_plain_http: boolean;
+  renew_before_days: number;
+  crl_urls: string[];
+  crl_max_age_days: number;
   java: string | null;
   /** The Java 8 installations the administration service found (`agent.json`). */
   java_choices: string[];
@@ -234,6 +257,41 @@ export interface BackupSection {
 
 export type SourceType = 'fortigate' | 'mikrotik' | 'generic';
 export type SourceTransport = 'any' | 'udp' | 'tcp';
+export type SnmpAuth = 'sha1' | 'sha256' | 'sha512';
+/** `aes256` is "sahada doğrula" (X-B3): older firmware may not offer it. */
+export type SnmpPriv = 'aes128' | 'aes256';
+
+/** A WAN line's capacity in whole Mbit/s (Wave 5 §6 N1). */
+export interface SnmpCapacityIo {
+  down: number;
+  up: number;
+}
+
+/** `[sources.snmp]` of a source (Wave 5 §6 N1); the two keys only as set/unset. */
+export interface SnmpOut {
+  enabled: boolean;
+  port: number;
+  user: string;
+  auth: SnmpAuth;
+  priv: SnmpPriv;
+  interfaces: string[]; // ifName of each WAN line, 1 to 4
+  capacity_mbps: Record<string, SnmpCapacityIo>;
+  interval_seconds: number;
+  auth_key: 'set' | 'unset';
+  priv_key: 'set' | 'unset';
+}
+
+/** `[sources.snmp]` in a change body: a field left out takes the server's default. */
+export interface SnmpIn {
+  enabled?: boolean;
+  port?: number;
+  user?: string;
+  auth?: SnmpAuth;
+  priv?: SnmpPriv;
+  interfaces?: string[];
+  capacity_mbps?: Record<string, SnmpCapacityIo>;
+  interval_seconds?: number;
+}
 export type FirewallState = 'open' | 'closed' | 'pending' | 'not_managed';
 
 /** A `[[sources]]` table as the browser edits it (every field of {@link SourceIn}). */
@@ -257,9 +315,11 @@ export interface SourceIn {
   expected?: boolean;
   transport?: SourceTransport;
   enabled?: boolean;
+  snmp?: SnmpIn | null; // left out: no SNMP
 }
 
 export interface SourceOut extends SourceConfig {
+  snmp: SnmpOut | null; // the internet line's speed over SNMPv3 (W5-N)
   firewall: FirewallState;
   last_seen: DateTimeString | null;
 }
@@ -491,8 +551,17 @@ export interface RequestVersion {
   to: string;
 }
 
+/** One interface the device reported to the `snmp` probe (W5-N-9). */
+export interface ProbeInterface {
+  name: string;
+  oper_status: OperStatus | null;
+  speed_mbps: number | null;
+}
+
 export interface RequestError extends CodeMessage {
   field?: string | null;
+  /** With `snmp_no_such_interface` and `snmp_no_hc_counters` only: what the device reports. */
+  interfaces?: ProbeInterface[];
 }
 
 /** `action.seal` (`SealOutcome` of the Seal task). */
@@ -604,25 +673,39 @@ export interface ClockBody {
   alert_offset_ms?: number | null;
 }
 
+/** The proxy of a general change (sent as `null` it stays as it is). */
+export interface NetworkBody {
+  https_proxy?: string | null;
+}
+
 export interface GeneralBody {
   etag: string;
   site_name?: string | null;
   clock?: ClockBody | null;
+  network?: NetworkBody | null;
   /** Test a changed time server first (SNTP); `true` when left out. */
   probe?: boolean;
 }
 
 export interface TsaBody {
   etag: string;
-  /** `test` or `production` (`mock`: 422 `tsa_mock_refused`). */
+  /** `test`, `production`, `turktrust` or `turktrust-http` (`mock`: 422 `tsa_mock_refused`). */
   server?: string | null;
   credit_alert_threshold?: number | null;
   timeout_seconds?: number | null;
+  /** `turktrust-http` needs it, with `confirm`. */
+  allow_plain_http?: boolean | null;
+  renew_before_days?: number | null;
+  crl_urls?: string[] | null;
+  crl_max_age_days?: number | null;
   java?: string | null;
   customer?: string | null;
   password?: string | null;
+  turktrust_username?: string | null;
+  turktrust_password?: string | null;
   clear_credentials?: boolean;
-  /** Production to test stops production stamps: the user said so. */
+  /** Production to test stops production stamps, `turktrust-http` sends the password in clear
+   * text: the user said so. */
   confirm?: boolean;
   probe?: boolean;
 }
@@ -673,6 +756,9 @@ export interface BackupBody {
 export interface SourceBody {
   etag: string;
   source: SourceIn;
+  /** The SNMPv3 keys (8 to 64 characters): write-only; left out keeps the stored ones. */
+  snmp_auth_key?: string | null;
+  snmp_priv_key?: string | null;
 }
 
 /**

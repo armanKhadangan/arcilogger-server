@@ -113,7 +113,8 @@ export function stampTest(
     kind: 'action.tsa_test',
     state,
     terminal: true,
-    result: { verified, errors: [], warnings: [] },
+    // `provider`: the wizard counts a test of the provider in use only (#220).
+    result: { provider: 'zamane', verified, errors: [], warnings: [] },
   };
 }
 
@@ -472,8 +473,8 @@ export const COMPLIANCE_REASONS: Record<ComplianceCardId, Record<ComplianceTone,
     ],
     error: ['Kamu SM kontörü bitti.', 'The Kamu SM credit is used up.'],
     neutral: [
-      'Henüz Kamu SM ile damgalanmış gün yok.',
-      'No day has been stamped with Kamu SM yet.',
+      'Henüz üretim sunucusuyla damgalanmış gün yok.',
+      'No day has been stamped by a production server yet.',
     ],
   },
   clock: {
@@ -927,7 +928,9 @@ export function applySystemHealth(state: ApplySystemHealth['state'] = 'ok'): App
 /**
  * One row per `TaskName` in the server's order, texts as `system_health/tasks.py` has them; every
  * state: Replica `late`, Retention `not_used` (retention off), Backup `missing` (its state file is
- * unreadable), Requests `not_observable`.
+ * unreadable), Requests `not_observable`. Renew and CrlFetch as the captured sample has them
+ * (W5-E): CrlFetch `failed`, its last run stopped at a stored list it could not read (#171).
+ * `w4-fixtures.test.ts` keeps the list and the order in step with `TaskName` and the API.
  */
 export const TASKS: readonly TaskHealth[] = [
   {
@@ -935,6 +938,7 @@ export const TASKS: readonly TaskHealth[] = [
     schedule_tr: "Her gün 00:10'dan sonra 5 dakikada bir",
     schedule_en: 'Every 5 minutes from 00:10',
     state: 'ok',
+    code: null,
     last_evidence_at: '2026-10-13T00:10:37+03:00',
     evidence: 'state\\seal\\<YYYY-MM-DD>.json',
   },
@@ -943,6 +947,7 @@ export const TASKS: readonly TaskHealth[] = [
     schedule_tr: 'Her gün 01:00',
     schedule_en: 'Daily at 01:00',
     state: 'ok',
+    code: null,
     last_evidence_at: '2026-10-13T01:00:41+03:00',
     evidence: 'state\\verify\\last-last-1.json, last-last-2.json',
   },
@@ -951,6 +956,7 @@ export const TASKS: readonly TaskHealth[] = [
     schedule_tr: 'Pazar 03:00',
     schedule_en: 'Sundays at 03:00',
     state: 'ok',
+    code: null,
     last_evidence_at: '2026-10-11T03:02:15+03:00',
     evidence: 'state\\verify\\last-last-<N>.json (N ≥ 3)',
   },
@@ -959,6 +965,7 @@ export const TASKS: readonly TaskHealth[] = [
     schedule_tr: "Ayın 1'i 04:00",
     schedule_en: '1st of the month at 04:00',
     state: 'ok',
+    code: null,
     last_evidence_at: '2026-10-01T04:00:12+03:00',
     evidence: 'state\\verify\\last-full.json',
   },
@@ -967,6 +974,7 @@ export const TASKS: readonly TaskHealth[] = [
     schedule_tr: "Saatte bir, 00:40'tan",
     schedule_en: 'Hourly from 00:40',
     state: 'late',
+    code: null,
     last_evidence_at: '2026-10-12T00:41:09+03:00',
     evidence: 'state\\replica\\<YYYY-MM-DD>.json',
   },
@@ -975,6 +983,7 @@ export const TASKS: readonly TaskHealth[] = [
     schedule_tr: 'Her gün 02:00',
     schedule_en: 'Daily at 02:00',
     state: 'not_used',
+    code: null,
     last_evidence_at: null,
     evidence: '',
   },
@@ -983,6 +992,7 @@ export const TASKS: readonly TaskHealth[] = [
     schedule_tr: 'Her gün 06:00',
     schedule_en: 'Daily at 06:00',
     state: 'ok',
+    code: null,
     last_evidence_at: '2026-10-13T06:00:04+03:00',
     evidence: 'state\\credit.jsonl',
   },
@@ -991,6 +1001,7 @@ export const TASKS: readonly TaskHealth[] = [
     schedule_tr: "Saatte bir, 00:05'ten",
     schedule_en: 'Hourly from 00:05',
     state: 'ok',
+    code: null,
     last_evidence_at: '2026-10-13T06:05:02+03:00',
     evidence: 'state\\clock\\<YYYY-MM-DD>.jsonl',
   },
@@ -999,6 +1010,7 @@ export const TASKS: readonly TaskHealth[] = [
     schedule_tr: 'Her gün 01:40',
     schedule_en: 'Daily at 01:40',
     state: 'missing',
+    code: null,
     last_evidence_at: null,
     evidence: 'state\\backup\\last.json',
   },
@@ -1007,6 +1019,7 @@ export const TASKS: readonly TaskHealth[] = [
     schedule_tr: 'Olayla ve 5 dakikada bir',
     schedule_en: 'On event and every 5 minutes',
     state: 'not_observable',
+    code: null,
     last_evidence_at: null,
     evidence: 'state\\requests',
   },
@@ -1015,8 +1028,27 @@ export const TASKS: readonly TaskHealth[] = [
     schedule_tr: 'Olayla ve 5 dakikada bir',
     schedule_en: 'On event and every 5 minutes',
     state: 'ok',
+    code: null,
     last_evidence_at: '2026-10-13T06:55:03+03:00',
     evidence: 'admin\\system\\status.json',
+  },
+  {
+    task: 'Renew',
+    schedule_tr: 'Her gün 02:30',
+    schedule_en: 'Daily at 02:30',
+    state: 'ok',
+    code: null,
+    last_evidence_at: '2026-10-13T02:31:04+03:00',
+    evidence: 'state\\renewal\\renewal.json',
+  },
+  {
+    task: 'CrlFetch',
+    schedule_tr: 'Her gün 00:30',
+    schedule_en: 'Daily at 00:30',
+    state: 'failed',
+    code: 'stored_file_unreadable',
+    last_evidence_at: '2026-10-13T00:30:12+03:00',
+    evidence: 'state\\crl\\index.json',
   },
 ];
 

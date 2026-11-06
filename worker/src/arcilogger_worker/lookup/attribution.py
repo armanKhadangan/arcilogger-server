@@ -66,13 +66,18 @@ closed the lease on with today's networks (round 7), or a converted ACK gives it
 MAC (to any MAC for a MikroTik lease, D5) that the build refused and today's settings accept
 (deviation c2: a sender or HA member configured later, a logid mapped later). A MAC on another
 address counts unless both addresses lie in configured networks and those differ (D33's key).
-Nothing of those rows is cited or copied into the outcome: they may be another client's (KVKK).
+Before the lookup's days, where no row is read, the MAC moves the lease job recorded with the
+lease (``leases.moves``, issue #127) stand in for the rows, tested again with today's settings
+and networks; they only ever add a move (the job keeps them bounded and drops the oldest), so
+the look-back still says it was cut. Nothing of
+those rows or moves is cited or copied into the outcome: they may be another client's (KVKK).
 """
 
 from __future__ import annotations
 
 import ipaddress
 import re
+import string
 from collections import defaultdict
 from collections.abc import Collection, Iterable, Sequence
 from dataclasses import dataclass, replace
@@ -116,12 +121,25 @@ from arcilogger_worker.lookup.refs import (
     ARP_TABLE,
     DHCP_TABLES,
     FG_DHCP_TABLE,
+    MoveGroup,
     arp_ref,
     dhcp_action,
+    epoch_us,
     last_dhcp_evidence,
+    parse_moves,
+    ref_vds,
 )
 from arcilogger_worker.lookup.texts import explain
-from arcilogger_worker.lookup.trust import UNKNOWN_PREFIX, ZERO_MAC, kept, usable_dhcp_origins
+from arcilogger_worker.lookup.trust import (
+    EXCLUDED,
+    UNEXPECTED_MSG,
+    UNKNOWN_PREFIX,
+    UNMAPPED,
+    UNTRUSTED_SOURCE,
+    ZERO_MAC,
+    kept,
+    usable_dhcp_origins,
+)
 from arcilogger_worker.lookup.types import (
     CONFIDENCE_ORDER,
     AttributionChain,
@@ -146,7 +164,10 @@ _REF_LEASE: Final = re.compile(r", lease (\d+)\)$")
 #: (deviation c2).
 UNCONVERTED_WINDOW: Final = timedelta(seconds=604_800)
 #: The cap of the converted-row check of a MikroTik lease (2.7, round 7): the 100 days of 2.7,
-#: not the fallback above; it reads ``fg_dhcp`` on ``ix_fg_dhcp_mac_time``.
+#: not the fallback above; it reads ``fg_dhcp`` on ``ix_fg_dhcp_mac_time`` inside the lookup's
+#: days and the moves recorded with the lease before them (issue #127), so a lease without
+#: recorded moves reads only its part inside the days. The lease job keeps a lease's moves for
+#: as long before its newest moment (``correlation.leases``).
 MISSED_MOVE_WINDOW: Final = timedelta(seconds=8_640_000)
 #: The chains the post-lease check looks at (a ``low`` chain is warned already).
 _CHECKED: Final = ("high", "medium")
@@ -162,6 +183,8 @@ _VD_CUT: Final = 32
 _READABLE_MAC: Final = "^[0-9a-f]{2}(:[0-9a-f]{2}){5}$"
 #: The second hex digit of a MAC whose first octet has the multicast bit set (as ``trust``).
 _MULTICAST_HEX: Final = ("1", "3", "5", "7", "9", "b", "d", "f")
+#: PostgreSQL's ``lower()`` under the C locale: ASCII letters only (:func:`stored_refusal`).
+_ASCII_LOWER: Final = str.maketrans(string.ascii_uppercase, string.ascii_lowercase)
 
 
 def usable_lease(settings: LookupSettings, lease: int | None) -> int | None:
@@ -206,6 +229,38 @@ def event_kept(settings: LookupSettings) -> ColumnElement[bool]:
     return and_(true(), *clauses)
 
 
+def stored_refusal(
+    settings: LookupSettings,
+    untrusted: Collection[str],
+    *,
+    source: str,
+    interface: str | None,
+    logid: str | None,
+    dhcp_msg: str | None,
+) -> str | None:
+    """The code of the first of :func:`.trust.refusal`'s rules 1, 2, 4 and 5 that refuses a row
+    with these fields, ``None`` for none: the rules a move recorded with a lease (issue #127) is
+    tested on again with today's settings. Its own copy for Python (``trust.refusal`` is SQL;
+    a test keeps the two equal). Rules 3, 6 and 7 (an IPv6 address, the receive time, a bad
+    MAC) are properties of the row that no setting changes: the job records a move only from a
+    row the build kept, so a recorded move never fails them. Rule 5 lowers the recorded message
+    as PostgreSQL's ``lower()`` does under the database's C locale (the installer's): ASCII
+    letters only."""
+    if source in untrusted:
+        return UNTRUSTED_SOURCE
+    if interface is not None and interface in settings.fortigate_interfaces_excluded:
+        return EXCLUDED
+    if logid is None or logid not in settings.fortigate_logids:
+        return UNMAPPED
+    messages = settings.fortigate_dhcp_msgs.get(logid)
+    if messages is not None and (
+        dhcp_msg is None
+        or dhcp_msg.translate(_ASCII_LOWER) not in {message.lower() for message in messages}
+    ):
+        return UNEXPECTED_MSG
+    return None
+
+
 def _selected(addresses: Sequence[str]) -> ColumnElement[Any]:
     """``ARRAY(SELECT unnest(:addresses))``: a list of addresses the planner does not estimate
     per partition or chunk, as it does a constant ``IN``/``= ANY`` list, and which an index scan
@@ -236,6 +291,10 @@ class StoredLease:
     #: ``False``: an ARP interval the lookup read from the rows after a RELEASE mapped after
     #: the build (:meth:`Attributor.covering`): no ``leases`` row, so no ``lease_id``.
     stored: bool = True
+    #: ``(known, vd)`` of each of :attr:`evidence`, in its order: the VDOM the lease job stored
+    #: with an ``fg_dhcp`` ref (:func:`.refs.ref_vds`; not known for another table's ref or one
+    #: stored before revision ``0022_lease_moves``).
+    ref_vds: tuple[tuple[bool, str | None], ...] = ()
 
     @classmethod
     def from_row(cls, row: Lease) -> StoredLease:
@@ -254,6 +313,7 @@ class StoredLease:
             last_evidence=row.last_evidence,
             evidence=tuple(EvidenceRef.from_dict(item) for item in row.evidence or ()),
             lease_seconds=row.lease_seconds,
+            ref_vds=ref_vds(row.evidence or ()),
         )
 
     def info(
@@ -284,14 +344,15 @@ class StoredLease:
 class _Record:
     """A lease's own newest DHCP record at or before a moment (2.7): its time, its meaning
     (``assigned``/``deassigned``) and the usable lease it logged (``None``: none, or out of
-    range); ``row``: read from the ``fg_dhcp`` row itself, which also gives its VDOM ``vd``
-    (not from the stored refs)."""
+    range). ``vd`` is its VDOM when ``vd_known``: always for the ``fg_dhcp`` row itself, for a
+    stored ref when the lease job stored it with the ref (issue #127; ``None`` with it: a row
+    without a VDOM)."""
 
     time: datetime
     action: str | None
     lease: int | None
-    row: bool = False
     vd: str | None = None
+    vd_known: bool = False
 
 
 #: A usable srcmac of a session (2.9): the MAC, the session record it was read from and the
@@ -314,6 +375,11 @@ class Attributor:
     each ``fg_dhcp`` chain's record at the moment from the rows (one query per chain); the usage
     rollups leave it off and use the stored refs. ``format_verified``: the time and author of
     the ``dhcp.fortigate_format_verified`` settings row, which :func:`.engine.run_lookup` reads.
+    ``reads_from`` and ``reads_until``: the earliest and the latest device time of a log row a
+    lookup reads (:func:`.days.reads_from`, :func:`.days.reads_until`); a read reaching past
+    either reads up to it. A look-back cut at ``reads_from`` sets :attr:`clamped`
+    (``lookback_clamped_to_window``); D27's read past the moment ends at ``reads_until`` without
+    it, a method rule (docs/CORRELATION.md, W5-G deviations).
     """
 
     def __init__(
@@ -324,12 +390,20 @@ class Attributor:
         *,
         lookup: bool = False,
         format_verified: tuple[datetime | None, str | None] = (None, None),
+        reads_from: datetime | None = None,
+        reads_until: datetime | None = None,
     ) -> None:
         self.session = session
         self.settings = settings
         self.untrusted = frozenset(untrusted)
         self.lookup = lookup
         self.format_verified = format_verified
+        self.reads_from = reads_from
+        self.reads_until = reads_until
+        #: A look-back cut at :attr:`reads_from` (the rows before were not read). The forward
+        #: cut at :attr:`reads_until` (D27) does not set it: it fires on most lookups, the same
+        #: way before a drop and after the reload, and says nothing about the case.
+        self.clamped = False
         self._kept: ColumnElement[bool] | None = None
         #: Per ``(lease id, moment)`` the lease's own newest DHCP record (``None``: none).
         self._records: dict[tuple[int, datetime], _Record | None] = {}
@@ -489,12 +563,13 @@ class Attributor:
     def _row_record(self, lease: StoredLease, at: datetime) -> _Record | None:
         if self._kept is None:
             self._kept = kept(self.settings, self.untrusted)
+        since = self._from(lease.start)
         row = self.session.execute(
             select(FgDhcp.time, FgDhcp.logid, FgDhcp.lease, FgDhcp.extra["vd"].astext)
             .where(
                 FgDhcp.ip == lease.ip,
                 FgDhcp.mac == lease.mac,
-                FgDhcp.time >= lease.start,
+                FgDhcp.time >= since,
                 FgDhcp.time <= at,
                 self._kept,
             )
@@ -502,10 +577,16 @@ class Attributor:
             .limit(1)
         ).first()
         if row is None:
+            # A newest row before the lookup's days is not read: the stored refs decide.
+            self.clamped |= since > lease.start
             return None
         action = self.settings.fortigate_logids.get(str(row.logid))
         return _Record(
-            row.time, action, usable_lease(self.settings, row.lease), row=True, vd=row[3]
+            row.time,
+            action,
+            usable_lease(self.settings, row.lease),
+            vd=row[3],
+            vd_known=True,
         )
 
     @property
@@ -524,15 +605,36 @@ class Attributor:
         last = last_dhcp_evidence(lease.evidence, lease.end, lease.end_reason, at)
         if last is None:
             return None
-        ref = next(
-            ref for ref in reversed(lease.evidence) if ref.table in DHCP_TABLES and ref.time == last
+        index, ref = next(
+            (index, ref)
+            for index, ref in reversed(list(enumerate(lease.evidence)))
+            if ref.table in DHCP_TABLES and ref.time == last
         )
         logged = _REF_LEASE.search(ref.summary) if ref.table == FG_DHCP_TABLE else None
+        known, vd = lease.ref_vds[index] if index < len(lease.ref_vds) else (False, None)
         return _Record(
             last,
             dhcp_action(ref),
             usable_lease(self.settings, int(logged.group(1)) if logged else None),
+            vd=vd,
+            vd_known=known,
         )
+
+    def _from(self, low: datetime, *, mark: bool = False) -> datetime:
+        """``low``, no earlier than :attr:`reads_from` (a lookup reads no log row before its
+        days, G7); with ``mark``, :attr:`clamped` when it was earlier."""
+        if self.reads_from is None or low >= self.reads_from:
+            return low
+        self.clamped |= mark
+        return self.reads_from
+
+    def _until(self, high: datetime) -> datetime:
+        """``high``, no later than :attr:`reads_until` (a lookup reads no log row after its
+        days, G7). Not :attr:`clamped`: D27 reads up to the end of the lookup's last day, a
+        method rule, not a note on the answer (docs/CORRELATION.md)."""
+        if self.reads_until is None or high <= self.reads_until:
+            return high
+        return self.reads_until
 
     def _released(self, lease: StoredLease, at: datetime) -> datetime | None:
         """The time of the RELEASE that is the lease's own record at ``at`` (lookups of an
@@ -560,6 +662,10 @@ class Attributor:
         self, lease: StoredLease, released: datetime, at: datetime
     ) -> StoredLease | None:
         grace = timedelta(seconds=self.settings.arp_release_grace_seconds)
+        # A late-mapped RELEASE is known from its row only (:meth:`_row_record`, never before
+        # :attr:`reads_from`; one the build mapped ended the lease and opened the ARP interval
+        # itself), so no test reaches this bound; it keeps every read inside the days anyway.
+        since = self._from(released + grace, mark=True)
         rows = self.session.execute(
             select(
                 MtArp.id,
@@ -575,7 +681,7 @@ class Attributor:
             .where(
                 MtArp.ip == lease.ip,
                 MtArp.mac == lease.mac,
-                MtArp.time > released + grace,
+                MtArp.time > since,
                 MtArp.time <= at,
             )
             .order_by(MtArp.time.desc(), MtArp.id.desc())
@@ -1005,8 +1111,8 @@ class Attributor:
             self.settings,
             self.untrusted,
             sorted({subnet for subnet, _ in scopes.values()}),
-            min(moments) - width,
-            max(moments) + width,
+            self._from(min(moments) - width, mark=True),
+            self._until(max(moments) + width),
         )
         for group in groups:
             for index, chain in enumerate(group):
@@ -1035,14 +1141,14 @@ class Attributor:
             return str(vlan.subnet), f"VLAN {vlan.vlan_id}"
         return str(vlan.subnet), f"{vlan.name_tr} ({vlan.subnet})"
 
-    def _targets(
+    def _candidates(
         self, groups: list[list[AttributionChain]], cap: timedelta
     ) -> list[tuple[list[AttributionChain], AttributionChain, StoredLease, datetime]]:
         """The chains the post-lease check looks at: a DHCP lease, still ``high`` or ``medium``;
-        each with its group and the lower end of its window: the lease's last DHCP record at
-        or before the moment (its start without one), for a MikroTik lease no earlier than
+        each with its group and the lower end of its whole window: the lease's last DHCP record
+        at or before the moment (its start without one), for a MikroTik lease no earlier than
         ``cap`` before the moment."""
-        targets = []
+        candidates = []
         for group in groups:
             for chain in group:
                 lease = self._stored_lease(chain)
@@ -1053,8 +1159,18 @@ class Attributor:
                 since = self._last_record(lease, chain.at)
                 if lease.source_table != FG_DHCP_TABLE:
                     since = max(since, chain.at - cap)
-                targets.append((group, chain, lease, since))
-        return targets
+                candidates.append((group, chain, lease, since))
+        return candidates
+
+    def _targets(
+        self, groups: list[list[AttributionChain]], cap: timedelta
+    ) -> list[tuple[list[AttributionChain], AttributionChain, StoredLease, datetime]]:
+        """:meth:`_candidates` with the lower end of the window the rows are read in: never
+        before :attr:`reads_from` (the lookup's days; :attr:`clamped` when it was)."""
+        return [
+            (group, chain, lease, self._from(since, mark=True))
+            for group, chain, lease, since in self._candidates(groups, cap)
+        ]
 
     def _last_record(self, lease: StoredLease, at: datetime) -> datetime:
         record = self.record(lease, at)
@@ -1065,9 +1181,9 @@ class Attributor:
         mapped FortiGate DHCP lines of trusted senders that name a target's IP or MAC and that
         D25 and D28 do not refuse (:func:`event_kept`), matched to each target's own window
         ``(since, at]`` in memory."""
-        targets = self._targets(groups, UNCONVERTED_WINDOW)
         logids = sorted(self.settings.fortigate_logids)
-        if not targets or not logids:
+        targets = self._targets(groups, UNCONVERTED_WINDOW) if logids else []
+        if not targets:
             return
         ip = FgEvent.extra["ip"].astext
         mac = func.lower(func.replace(FgEvent.extra["mac"].astext, "-", ":"))
@@ -1107,7 +1223,7 @@ class Attributor:
 
         * ``ix_fg_dhcp_mac_time``: the target's MAC for another IP, each address, interface and
           VDOM once per target; in memory, for an ``fg_dhcp`` lease its interface and (when its
-          record is a row) its VDOM, and D33's key;
+          record's VDOM is known) its VDOM, and D33's key;
         * ``ix_fg_dhcp_ip_time``: the target's IP for another MAC (an ``fg_dhcp`` lease) or for
           any MAC (an ``mt_dhcp`` lease, D5), once per target and without any value of the row:
           the build supersedes every open lease of an address at such an ACK, so it is one the
@@ -1120,15 +1236,43 @@ class Attributor:
         branch, which a healthy site answers with no row, on its index. The MAC branch keeps
         its constant list, which tests each row by a hash: it reads every row of the MACs, and
         in the same form it was slower on monthly partitions (3.8, measured with daily ones).
+
+        Its conversion test is ``CASE WHEN <kept> THEN true ELSE false END``, the same rows as
+        the bare :func:`.trust.kept` (``CASE ... END IS NULL`` is never NULL), for the planner
+        (issue #185, W5-G-26): it has no statistics on either and estimates ``IS NULL`` of an
+        expression at 0.005 and a boolean one at 0.5. At 0.005 the MACs' rows read as about 26
+        (5,699 in the #179 guards' world, also after ``ANALYZE``); with the days before the 16
+        daily partitions in ``fg_dhcp_default`` (the guards' layout) a nested loop and a hash
+        join then cost the same within the planner's 1 % fuzz, and the nested loop it took
+        filtered the 5,699 rows against each of the 100 windows (about 75 ms against 25 ms). At
+        0.5 they read as some thousands and it hashes on every layout measured (the figures,
+        Linux, Windows and TimescaleDB, are W5-G-26's). An overestimate costs a hash build at
+        worst; a planner that folds the wrapper back would bring the 0.005 back, so
+        ``test_missed_moves_plan.py`` checks that the branch takes no such nested loop.
+
+        The statement reads from :attr:`reads_from` on (G7). The part of a window before it,
+        ``(since, reads_from]``, is read from the moves the lease job recorded with the lease
+        (``leases.moves``, issue #127; :meth:`_recorded_moves`, one more query): tested again
+        with today's settings (:func:`stored_refusal`, the mapping to ``assigned``), the same
+        interface and VDOM rule and D33's key, a recorded move lowers the chain as a row does.
+        They are positive evidence only: a lease without them (written before the upgrade, a
+        move the build never saw, a time the job dropped to keep the value bounded) reads only
+        its rows, and the cut look-back is still noted (``lookback_clamped_to_window``). The c2
+        branch has no recorded counterpart (the build never keeps the rows it refused) and reads
+        the lookup's days only.
         """
-        targets = self._targets(groups, MISSED_MOVE_WINDOW)
         assigned = sorted(
             logid
             for logid, meaning in self.settings.fortigate_logids.items()
             if meaning == "assigned"
         )
-        if not targets or not assigned:
+        candidates = self._candidates(groups, MISSED_MOVE_WINDOW) if assigned else []
+        if not candidates:
             return
+        targets = [
+            (group, chain, lease, self._from(since, mark=True))
+            for group, chain, lease, since in candidates
+        ]
         if self._kept is None:
             self._kept = kept(self.settings, self.untrusted)
         windows = (
@@ -1153,7 +1297,6 @@ class Attributor:
             FgDhcp.time > low,
             FgDhcp.time < high,
             FgDhcp.logid.in_(assigned),
-            self._kept,
         )
         moves = (
             select(
@@ -1167,7 +1310,12 @@ class Attributor:
             .join_from(
                 windows, FgDhcp, and_(FgDhcp.mac == windows.c.mac, FgDhcp.ip != windows.c.ip)
             )
-            .where(FgDhcp.mac.in_(sorted({lease.mac for _, _, lease, _ in targets})), inside)
+            .where(
+                FgDhcp.mac.in_(sorted({lease.mac for _, _, lease, _ in targets})),
+                inside,
+                # The same test, estimated at a half (#185, see above).
+                case((self._kept, true()), else_=false()),
+            )
         )
         held = (
             select(
@@ -1189,10 +1337,12 @@ class Attributor:
             .where(
                 FgDhcp.ip == any_(_selected(sorted({c.internal_ip for _, c, _, _ in targets}))),
                 inside,
+                self._kept,
             )
         )
         rows = self.session.execute(union_all(moves, held)).all()
-        if not rows:
+        recorded = self._recorded_moves(candidates)
+        if not rows and not recorded:
             return
         found: dict[int, list[tuple[str, str | None, str | None]]] = defaultdict(list)
         superseded: set[int] = set()
@@ -1201,21 +1351,99 @@ class Attributor:
                 superseded.add(n - 1)
             else:
                 found[n - 1].append((address, interface, vd))
-        self._load_subnets(address for _n, address, _i, _vd, by_address in rows if not by_address)
-        for index, (group, chain, lease, _since) in enumerate(targets):
+        self._load_subnets(
+            [
+                *(address for _n, address, _i, _vd, by_address in rows if not by_address),
+                *(move.ip for moved in recorded.values() for move in moved),
+            ]
+        )
+        for index, (group, chain, lease, since) in enumerate(candidates):
             if index in superseded:
                 self._lower(group)
                 continue
             record = self.record(lease, chain.at)
-            for address, interface, vd in found.get(index, ()):
-                if lease.source_table == FG_DHCP_TABLE:
-                    if interface != lease.server:
-                        continue
-                    if record is not None and record.row and vd != record.vd:
-                        continue
-                if self._move_counts(chain.internal_ip, address):
-                    self._lower(group)
-                    break
+            if any(
+                self._bears(chain, lease, record, address, interface, vd)
+                for address, interface, vd in found.get(index, ())
+            ) or self._recorded_move(chain, lease, record, since, recorded.get(lease.id, ())):
+                self._lower(group)
+
+    def _recorded_moves(
+        self, candidates: Sequence[tuple[Any, AttributionChain, StoredLease, datetime]]
+    ) -> dict[int, tuple[MoveGroup, ...]]:
+        """The moves recorded with each lease whose window starts before :attr:`reads_from`, by
+        lease id, in one query (``leases.moves`` only: the column is never loaded with a
+        lease); a lease without any (NULL: not recorded; none recorded) is left out. A value the
+        job truncated (``truncated``: older times dropped to keep it bounded) is read as any
+        other: it lacks moves and never holds a wrong one, and a miss was never evidence."""
+        if self.reads_from is None:
+            return {}
+        reads_from = self.reads_from
+        wanted = sorted({lease.id for _, _, lease, since in candidates if since < reads_from})
+        if not wanted:
+            return {}
+        query = select(Lease.id, Lease.moves).where(Lease.id.in_(wanted), Lease.moves.is_not(None))
+        recorded = {}
+        for lease_id, value in self.session.execute(query):
+            moved = parse_moves(value)
+            if moved is not None and moved.groups:
+                recorded[lease_id] = moved.groups
+        return recorded
+
+    def _recorded_move(
+        self,
+        chain: AttributionChain,
+        lease: StoredLease,
+        record: _Record | None,
+        since: datetime,
+        moved: Sequence[MoveGroup],
+    ) -> bool:
+        """Whether a move recorded with the lease lies in ``(since, reads_from]`` (before the
+        moment), the part of the window the statement does not read, and bears on the chain
+        under today's settings: a trusted sender, an interface not excluded, a logid mapped to
+        ``assigned`` and a listed ``dhcp_msg`` (:func:`stored_refusal`), then :meth:`_bears`."""
+        if self.reads_from is None or not moved:
+            return False
+        after = epoch_us(since)
+        until = min(epoch_us(self.reads_from), epoch_us(chain.at) - 1)
+        return any(
+            move.seen_in(after, until)
+            and move.ip != chain.internal_ip
+            and move.logid is not None
+            and self.settings.fortigate_logids.get(move.logid) == "assigned"
+            and stored_refusal(
+                self.settings,
+                self.untrusted,
+                source=move.source,
+                interface=move.interface,
+                logid=move.logid,
+                dhcp_msg=move.dhcp_msg,
+            )
+            is None
+            and self._bears(chain, lease, record, move.ip, move.interface, move.vd)
+            for move in moved
+        )
+
+    def _bears(
+        self,
+        chain: AttributionChain,
+        lease: StoredLease,
+        record: _Record | None,
+        address: str | None,
+        interface: str | None,
+        vd: str | None,
+    ) -> bool:
+        """Whether an ACK of the chain's MAC for ``address``, logged on ``interface`` in ``vd``,
+        is a move the build would have closed the lease on: for an ``fg_dhcp`` lease only one
+        on its interface and, when the VDOM of its record is known, in that VDOM (a stored ref
+        written before revision ``0022_lease_moves`` has none: any VDOM); then D33's key
+        (:meth:`_move_counts`)."""
+        if lease.source_table == FG_DHCP_TABLE:
+            if interface != lease.server:
+                return False
+            if record is not None and record.vd_known and vd != record.vd:
+                return False
+        return self._move_counts(chain.internal_ip, address)
 
     def _move_counts(self, ip: str, other: str | None) -> bool:
         """Whether a row of the chain's MAC for address ``other`` bears on the chain of ``ip``:

@@ -127,6 +127,12 @@ def test_status_file_and_stop(db_engine: Engine, layout: Layout) -> None:
     assert status["jobs"]["job"]["last_status"] == "ok"
     assert status["jobs"]["job"]["next_due"] == (tr(DAY, 13)).isoformat()
     assert worker.status_path == layout.state / "worker-status.json"
+    # Canlı Durum's snapshot ran beside the loop, in its own thread, and stopped with it.
+    assert not any(t.name == "activity.tick" for t in threading.enumerate())
+    tick = status["jobs"]["activity.tick"]
+    assert tick["thread"] is True
+    assert tick["runs"] >= 1
+    assert tick["last_status"] in {"ok", "skipped"}
 
 
 def test_database_outage_does_not_stop_the_loop(layout: Layout) -> None:
@@ -152,6 +158,39 @@ def test_job_definitions_are_checked() -> None:
         Job("bad", recorder([], "bad"))
     with pytest.raises(ValueError, match="exactly one"):
         Job("bad", recorder([], "bad"), every=timedelta(1), daily_after=time(1))
+    with pytest.raises(ValueError, match="interval job"):
+        Job("bad", recorder([], "bad"), daily_after=time(1), idle=lambda ctx: True)
+
+
+def test_an_idle_job_neither_runs_nor_writes_a_row(
+    db_engine: Engine, db_session: Session, layout: Layout
+) -> None:
+    """A due job whose ``idle`` check is true does nothing and is due again ``every`` later;
+    a failing check runs the job."""
+    calls: list[str] = []
+    state: dict[str, bool | None] = {"idle": True}
+
+    def idle(ctx: JobContext) -> bool:
+        if state["idle"] is None:
+            raise RuntimeError("cannot tell")
+        return bool(state["idle"])
+
+    clock = Clock(tr(DAY, 9))
+    jobs = [Job("poll", recorder(calls, "poll"), every=timedelta(seconds=5), idle=idle)]
+    worker = Worker(engine=db_engine, layout=layout, jobs=jobs, clock=clock)
+    assert worker.tick() == []
+    assert worker.states["poll"].next_due == tr(DAY, 9) + timedelta(seconds=5)
+    clock.advance(seconds=2)
+    state["idle"] = False
+    assert worker.tick() == []  # not due before its interval
+    clock.advance(seconds=3)
+    assert worker.tick() == [("poll", "ok")]
+    clock.advance(seconds=5)
+    state["idle"] = None
+    assert worker.tick() == [("poll", "ok")]
+    assert calls == ["poll", "poll"]
+    assert runs(db_session) == [("poll", "ok"), ("poll", "ok")]
+    assert worker.states["poll"].last_started == clock.now
 
 
 def test_default_jobs_run_against_the_database(
@@ -180,9 +219,11 @@ def test_default_jobs_run_against_the_database(
         ("usage.today", "ok"),
         ("usage.reattribute", "skipped"),  # nothing changed
         ("usage.retention", "ok"),
+        ("db.window", "ok"),  # after 01:00; nothing sealed yet, so only the partitions
         ("reports.run_due", "ok"),
         ("reports.purge", "ok"),
         ("system.sample", "ok"),
+        # snmp.poll is idle: no source has SNMP on, so it neither runs nor writes a row
         ("search.counts_backfill", "skipped"),  # no file loaded before the summary table
     ]
     clock.now = tr(DAY, 9)
@@ -203,6 +244,7 @@ def test_default_jobs_run_against_the_database(
         ("reports.run_due", "ok"),
         ("search.counts_backfill", "skipped"),
     ]
+    assert not any(job == "snmp.poll" for job, _ in runs(db_session))
     lease = db_session.scalars(select(Lease)).one()
     assert lease.start == tr(DAY, 8)
     incremental = db_session.scalars(

@@ -27,8 +27,10 @@ $db     = "$arci\arcilogger-db.exe"
 
 **What the raw logs can rebuild:** the parsed log tables and the lease (DHCP/ARP) timeline. In a
 restored database ingest loads the logs that arrived after the dump again from the spool and the
-vault; sealed days within the database retention (`db.retention_days`, default 400 days) are
-loaded automatically, older ones are not ("arşivden yeniden yükle" is a later feature). Users,
+vault; sealed days within the database window (`db.retention_days`, default 30 days) are loaded
+automatically, older ones are not: a 5651 lookup or a search that needs them asks for them with
+"arşivden yeniden yükle" (archive reload; [SEARCH.md](SEARCH.md),
+[CORRELATION.md](CORRELATION.md)). Users,
 5651 lookups, person and device details, settings and the audit log of the database exist
 **only** in the database and its backups.
 
@@ -44,6 +46,10 @@ the evidence: they contain personal data (KVKK).
 - Task `\ARCILOGGER\Backup`, daily at 01:40 (Türkiye time), as LOCAL SERVICE; if the server is
   off at that time, it runs once it is on again. `pg_dump -Fc` with ARCILOGGER's own database role
   (password from the encrypted secret store, never on a command line).
+- The worker's database window job `db.window` (drops log rows older than `db.retention_days`)
+  runs daily after 01:00, before the backup starts, so the two do not meet; they can meet only at
+  its rare second retry (01:45) or with a dump started late, and such a run counts toward
+  `R20-db-window`.
 - File: `D:\ARCILOGGER\backups\scheduled\arcilogger-YYYYmmdd-HHMMSS.dump` with `….dump.json` next
   to it (SHA-256, size, versions, schema revision). The dump is written under a temporary name,
   checked with `pg_restore --list` and renamed only then.
@@ -257,6 +263,55 @@ so in its output.
 the dump. The entries written after it stay in the vault's sealed daily audit files and today's
 `spool\_audit` file; the restored chain continues from the dump's last entry. Record every
 restore (date, file, reason, who) in a written report.
+
+**Version rollback and schema downgrade:** `Install-Arcilogger.ps1 -Rollback` without
+`-RestoreDatabase`, going back to a version that does not have the installed version's schema head
+(when the installed version has `0021_db_window` or later; [INSTALL.md](INSTALL.md) section 13),
+runs `& $db schema downgrade --to <revision> --json` after the services stop and before the program
+is swapped: down to the previous version's head, never below `0020_fg_traffic_transip_time` (the
+revision `0021_db_window` revises), and only through the revisions the installer lists as lossless
+(`$LosslessDowngrades`: `0022_lease_moves`, `0021_db_window`). Down to `0021_db_window` only the
+column `leases.moves` goes. Down to `0020_fg_traffic_transip_time` the command merges the daily
+partitions back into monthly ones (each month of each table in its own transaction); a
+`db.retention_days` of 30 written by the installation or the upgrade goes back to 400, and one
+`settings.change` audit entry (`system`) records it; a value an administrator set stays, and no
+entry is written. When the window job had not yet audited the upgrade's own change (400 → 30), the
+command writes that entry first, in the same transaction. When it fails (`1`) the months merged so
+far stay merged and the schema revision does not change; running the command again goes on where it
+stopped. At that schema already it does nothing (`0`); a revision this version does not know, or one
+newer than the database's, is refused with `2`; `3` means the database cannot be reached. When
+running it again fails too, the way back is a restore (a dump from before the rollback, or
+`-Rollback -RestoreDatabase`).
+
+**`-Rollback -RestoreDatabase`** follows the rule of this section too: the installer restores the
+pre-upgrade dump into a new database (`<name>_restore_<time>`, with the owner, locale, settings
+and rights of the current one; one transaction per object, stopping at the first error, as
+`arcilogger-db restore`: a single transaction would hold a lock on every table and chunk) and
+only then renames it into the current one's place; the replaced database is kept as
+`<name>_replaced_<time>` and listed in `install\state.json` (`replaced_databases`, every
+restore's). The restore needs the current database's size (`pg_database_size`), a quarter more and
+`max_wal_size` free on the PostgreSQL data drive, since both databases stay and `pg_restore` writes
+its WAL there (the quarter is a margin: TimescaleDB chunks compressed since the dump come back
+uncompressed; verify on site); the installer checks it before any change and refuses otherwise
+(only a warning when the free space cannot be read or PostgreSQL runs on another server). The new
+database is created in the default tablespace (`pg_default`), where the installer puts its
+database too. The rows written between the dump and the restore are only in the replaced
+database; it takes disk space until you remove it, which is the owner's decision (as in step 4
+above). A failed restore leaves the current database as it was. After a rollback's swap the
+database services (`ArciIngest`, `ArciApi`, `ArciWorker`, `ArciAdmin`) stay stopped after any
+failed restore: the previous version must not run on this version's database. Without
+`ARCILOGGER.previous` (database only) they stay stopped too once the restore has begun to change
+the database (the current database's `timescaledb_pre_restore()` or `CREATE DATABASE`); a restore
+refused before that (answered `H`, dump not found, PostgreSQL not reachable, a locale that is not
+libc, too little free space) changed nothing, and the services are put back as they were: those
+that ran on automatic start are set to automatic (delayed) start again and started, one that ran
+on manual start is started and keeps it, those that were stopped on manual start (after a failed
+upgrade) stay so; the installer says so, or names a service it could not put back with the
+command that does it. On TimescaleDB the replaced
+database stays in TimescaleDB's restore mode (`timescaledb.restoring = on`, set by
+`timescaledb_pre_restore()` and kept by the rename; its background jobs do not run): run
+`SELECT timescaledb_post_restore();` in it before putting it back (renaming it into place or
+reading it with ARCILOGGER); the installer does not run it, since that would start its jobs.
 
 **On a new server (after a disaster):** (1) install PostgreSQL and ARCILOGGER's prerequisites as
 in [INSTALL.md](INSTALL.md); (2) copy `arcilogger.toml`, `secret.key` (and `secrets.json` if you

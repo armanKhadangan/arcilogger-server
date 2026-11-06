@@ -95,10 +95,10 @@ spool/<source>/<day>.log ──► read complete lines ──► prepare (rawlog
 
 **Streams.** One per `(source, day)`: every spool file (listed every poll), every unfinished
 `ingest_offsets` row, and every source of a **sealed** day within the database retention
-(`db.retention_days`, default 400) that is not finished — the vault scan (once a minute) is how a
+(`db.retention_days`, default 30) that is not finished — the vault scan (once a minute) is how a
 day whose spool file was deleted before ingest saw it (service down over a weekend) is still
-loaded. Sealed days older than the retention are not loaded automatically (that is the later
-"arşivden yeniden yükle" feature). Newest day first, so live data is not delayed by a backlog.
+loaded. Sealed days older than the window are not loaded automatically: an archive reload
+("arşivden yeniden yükle", Wave 5 W5-G) brings them back on request. Newest day first, so live data is not delayed by a backlog.
 The sources of one day **share** each batch in rounds (equal shares; what one source cannot use
 goes to the others), so a large backlog of one source — DHCP or access points after an outage —
 does not hold back `fortigate`, which sorts after `ap-*` and `core-r1` and matters most for 5651
@@ -197,7 +197,14 @@ transaction, from exactly the lines whose rows loaded in it:
   status` lists the files still to count, `rebuild --source S --day YYYY-MM-DD` recounts one at
   once (also one still being loaded: it locks the file's `ingest_offsets` row, so ingest's next
   batch of that file waits until the recount commits), `verify --hours 2` recounts the recent
-  hours from the rows and exits 1 on a difference. A recount reads every row of its file through
+  hours from the rows and exits 1 on a difference. While an archive reload resets a file its
+  `counts_from_line` is `0` (offset 0, its rows deleted in steps; contract W5-G-25; no file has
+  `0` otherwise), and `status` lists it as "sıfırlanıyor [resetting]". A `rebuild` of such a
+  file is refused (exit 1, nothing written: it only waits for the file's `ingest_offsets` row),
+  so only the reset's last step takes the mark off. A mark taken off by hand in SQL is caught
+  as a second line of defence: ingest still treats an unfinished file at offset 0 that has
+  counts as being reset (no stream, not loaded), and its next step puts the mark back.
+  A recount reads every row of its file through
   a cursor planned for all its rows and never as a nested loop (`searchcounts.RECOUNT_PLANNER`):
   a quiet day beside a busy one is recounted as fast as any other, guarded by
   `worker/tests/test_search_counts_performance.py` (`perf`: the plan and the time).

@@ -11,6 +11,7 @@ import type {
   FirewallState,
   SetupProblem,
   SourceOut,
+  TsaSection,
   TsaTestResult,
 } from '@/lib/settings-types';
 import type { SourceHealth } from '@/lib/sources-types';
@@ -51,8 +52,29 @@ export function isWizardStep(value: string | null): value is WizardStepId {
 }
 
 /**
+ * The texts of a step (`setupWizard.steps.<key>`). The two time-stamp steps follow the provider
+ * in use (#220): TÜRKTRUST's texts when it is chosen, Kamu SM's otherwise. Their ids stay
+ * `kamusm_test` and `kamusm_production`, so no stored link or `?step=` changes.
+ */
+export function stepTextKey(step: WizardStepId, config?: AdminConfig): string {
+  if (config?.sections.tsa.provider === 'turktrust') {
+    if (step === 'kamusm_test') return 'turktrust_test';
+    if (step === 'kamusm_production') return 'turktrust_production';
+  }
+  return step;
+}
+
+/**
+ * The production server is in use: TÜRKTRUST's when its configuration claims legal grade (D12),
+ * Kamu SM's production server for every other provider.
+ */
+function productionServer(tsa: TsaSection): boolean {
+  return tsa.provider === 'turktrust' ? tsa.legal_grade === true : tsa.server === 'production';
+}
+
+/**
  * What a step still lacks: a text key with its values (`setupWizard.missing.*`, or a sealing
- * cause's text of Ayarlar → Kamu SM).
+ * cause's text of Ayarlar → Zaman damgası).
  */
 export interface Missing {
   key: string;
@@ -67,21 +89,28 @@ export interface StepState {
 /** What the states are derived from. */
 export interface WizardInput {
   config: AdminConfig;
-  /** A stamp test succeeded and was verified ({@link verifiedStampTest}). */
+  /** A stamp test of the provider in use succeeded and was verified ({@link verifiedStampTest}). */
   tested: boolean;
 }
 
 /**
- * A "Damga testi" of the history that succeeded and was verified, as Ayarlar → Kamu SM counts it
- * (`useTested` of kamusm-page.tsx).
+ * A "Damga testi" of the history that succeeded and was verified, as Ayarlar → Zaman damgası
+ * counts it (`useTested` of kamusm-page.tsx); with `provider`, only a test of that provider
+ * (#220: a Kamu SM test does not count for TÜRKTRUST, nor the other way round).
  */
-export function verifiedStampTest(requests: readonly AdminRequestOut[]): boolean {
-  return requests.some(
-    (item) =>
+export function verifiedStampTest(
+  requests: readonly AdminRequestOut[],
+  provider?: string,
+): boolean {
+  return requests.some((item) => {
+    const result = item.result as TsaTestResult | null;
+    return (
       item.kind === 'action.tsa_test' &&
       item.state === 'succeeded' &&
-      (item.result as TsaTestResult | null)?.verified === true,
-  );
+      result?.verified === true &&
+      (provider === undefined || result.provider === provider)
+    );
+  });
 }
 
 /** The problems of the site step: the site name and the time servers (`site_name`, `clock.*`). */
@@ -91,7 +120,7 @@ export function siteProblems(problems: readonly SetupProblem[]): SetupProblem[] 
 
 const missing = (key: string): Missing => ({ key: `setupWizard.missing.${key}` });
 
-/** A sealing cause in the words of Ayarlar → Kamu SM (an unknown one shows its code). */
+/** A sealing cause in the words of Ayarlar → Zaman damgası (an unknown one shows its code). */
 const missingCause = (cause: string): Missing => ({
   key: causeKey(cause),
   values: { defaultValue: cause },
@@ -120,11 +149,13 @@ export function stepState(step: CheckedStepId, { config, tested }: WizardInput):
       if (sections.sources.length === 0) return state([missing('noSource')]);
       return state(sections.sources.some((item) => item.enabled) ? [] : [missing('noEnabled')]);
     case 'kamusm_test':
-      return state(tested || sections.tsa.server === 'production' ? [] : [missing('noTest')]);
+      return state(tested || productionServer(sections.tsa) ? [] : [missing('noTest')]);
     case 'kamusm_production': {
       const tsa = sections.tsa;
+      const notProduction =
+        tsa.provider === 'turktrust' ? 'notTurktrustProduction' : 'notProduction';
       return state([
-        ...(tsa.server === 'production' ? [] : [missing('notProduction')]),
+        ...(productionServer(tsa) ? [] : [missing(notProduction)]),
         ...(tsa.seal_ready.ok
           ? []
           : tsa.seal_ready.causes.length > 0

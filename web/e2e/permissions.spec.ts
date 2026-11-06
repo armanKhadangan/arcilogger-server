@@ -14,6 +14,7 @@ const MENUS: [string, string, string[]][] = [
       'Panel',
       'Kaynaklar',
       'Canlı Akış',
+      'Canlı Durum',
       'Arama',
       '5651 Sorgu',
       'Kullanım',
@@ -35,6 +36,7 @@ const MENUS: [string, string, string[]][] = [
     [
       'Panel',
       'Canlı Akış',
+      'Canlı Durum',
       'Arama',
       '5651 Sorgu',
       'Kullanım',
@@ -44,8 +46,8 @@ const MENUS: [string, string, string[]][] = [
       'Denetim Kaydı',
     ],
   ],
-  ['İK Raporları', 'mehmet.kaya', ['Panel', 'Kullanım']],
-  ['Rapor İzleyici', 'zeynep', ['Panel', 'Kullanım']],
+  ['İK Raporları', 'mehmet.kaya', ['Panel', 'Canlı Durum', 'Kullanım']],
+  ['Rapor İzleyici', 'zeynep', ['Panel', 'Canlı Durum', 'Kullanım']],
 ];
 
 for (const [role, username, menu] of MENUS) {

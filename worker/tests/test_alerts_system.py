@@ -21,7 +21,7 @@ from arcilogger_db.models import Alert, JobRun, Message, SealVerification
 from arcilogger_db.settings import set_setting
 from arcilogger_worker.alerts import system
 from arcilogger_worker.alerts.importer import import_alerts
-from arcilogger_worker.alerts.system import CheckError, drives, run_system_checks
+from arcilogger_worker.alerts.system import CRL_KEY, CheckError, drives, run_system_checks
 from arcilogger_worker.service import Worker, default_jobs
 from arcilogger_worker.vaulttesting import SealedVault, at_site, make_vault
 
@@ -205,7 +205,11 @@ def test_no_seal_alert_when_every_closed_day_is_sealed(
     vault.seal_days(DAYS)
     report = run(sessions, layout, vault.config, at_site(DAYS[2] + timedelta(days=1), 10))
     assert report.checks["seal"]["found"] == []
-    assert active(db_session) == {}
+    # No alert at all: the sealed days' stamps chain to the mock root, which publishes no
+    # revocation list (no state/crl), and ARCILOGGER's test root is no issuer in use, so a mock
+    # install raises no R20-crl (W5-E-5); the legal checks are tested in test_alerts_legal.py.
+    assert CRL_KEY not in active(db_session)
+    assert set(active(db_session)) == set()
 
 
 def test_seal_overdue_hour_is_a_setting(
@@ -324,6 +328,35 @@ def test_credit_below_the_threshold(
     credit_line(layout, 5000)  # credit bought
     run(sessions, layout, config)
     assert resolved(db_session, "R20-credit").details["auto_resolved"]["reason"] == "credit_ok"
+
+
+@pytest.mark.parametrize(
+    ("provider", "answer"),
+    [("turktrust", {"supported": False}), ("rfc3161", {"credits": None})],
+    ids=["turktrust", "rfc3161"],
+)
+def test_credit_alert_never_raised_for_a_provider_without_credits(
+    sessions: sessionmaker[Session],
+    layout: Layout,
+    config: Config,
+    db_session: Session,
+    provider: str,
+    answer: dict[str, Any],
+) -> None:
+    """Wave 5 contract 2.4, C21: the Credit task writes ``"supported": false`` for TÜRKTRUST and
+    ``"credits": null`` for an RFC 3161 server (``Rfc3161Client.credits()`` is ``None``); neither
+    line has a credit count, so no R20-credit."""
+    without = config.model_copy(
+        update={"tsa": config.tsa.model_copy(update={"provider": provider})}
+    )
+    layout.credit_log.parent.mkdir(parents=True, exist_ok=True)
+    entry = {"time": isoformat_site(NOW, "seconds"), "provider": provider, **answer}
+    layout.credit_log.write_text(json.dumps(entry) + "\n", encoding="utf-8")
+    run(sessions, layout, without)
+    assert "R20-credit" not in active(db_session)
+    credit_line(layout, 0)  # positive control: a zero count from a provider with credits
+    run(sessions, layout, config)
+    assert "R20-credit" in active(db_session)
 
 
 # -- replica --------------------------------------------------------------------------------------

@@ -7,10 +7,14 @@
     vault/<YYYY>/<MM>/<DD>/audit.jsonl.gz      ARCILOGGER audit log of the day
     vault/<YYYY>/<MM>/<DD>/manifest-<day>.json and manifest-<day>.json.zd
     vault/deletions/                           sealed deletion records and the chain anchor
+    vault/renewals/                            renewal records and their tokens (re-stamping)
     exports/                                   evidence packages
     state/                                     job state, service status files, clock samples
     state/requests/                            signed task requests of the browser
                                                administration and their results (ADR-0014)
+    state/crl/                                 verified revocation lists (SİL/CRL) and their
+                                               index.json, never deleted
+    state/renewal/                             renewal.json and renewal.lock of the Renew task
     logs/                                      service logs
 """
 
@@ -101,6 +105,18 @@ class Layout:
         return self.state / "system-history.json"
 
     @property
+    def activity(self) -> Path:
+        """Canlı Durum's rolling snapshot of the last 60 minutes (the worker job
+        ``activity.tick``, W5-M): subject keys and per-minute bytes, never a name."""
+        return self.state / "activity.json"
+
+    @property
+    def wan_rates(self) -> Path:
+        """The internet line's rates over SNMP (Wave 5 §6 N4, the worker job ``snmp.poll``):
+        interface names, counters and bit rates only, no secret."""
+        return self.state / "wan-rates.json"
+
+    @property
     def requests(self) -> Path:
         """Signed task requests (``arcilogger_core.admin.contract.TaskRequest``): the
         administration agent writes them, the LOCAL SERVICE tasks run and delete them."""
@@ -134,6 +150,18 @@ class Layout:
         never a value). In ``state\\seal``, which only administrators and the evidence tasks may
         write (ADR-0007); the worker reads it into the audit log (``settings.secret_change``)."""
         return self.state / "seal" / "secret-changes.jsonl"
+
+    @property
+    def renewals_dir(self) -> Path:
+        """Renewal records ``<YYYY-MM-DD>-<seq>.json`` and their tokens (re-stamping, Wave 5
+        D1): new files only, a day folder is never touched."""
+        return self.vault / "renewals"
+
+    @property
+    def crl_dir(self) -> Path:
+        """Verified revocation lists stored byte for byte and their ``index.json``
+        (:mod:`arcilogger_core.crl`, Wave 5 D8). Nothing here is ever deleted."""
+        return self.state / "crl"
 
     @property
     def chain_anchor(self) -> Path:

@@ -1,6 +1,6 @@
 import type { SubjectHour, TimelineSpan } from '@/lib/api-types';
 
-import { clockOfMinute, layoutTimeline } from './timeline-model';
+import { breakBands, clockOfMinute, layoutTimeline } from './timeline-model';
 
 const DAY = '2026-10-13';
 const LABELS = { unknown: 'Bilinmiyor', other: 'Diğer' };
@@ -101,5 +101,27 @@ describe('day timeline layout', () => {
     expect(clockOfMinute(0)).toBe('00:00');
     expect(clockOfMinute(545)).toBe('09:05');
     expect(clockOfMinute(1440)).toBe('24:00');
+  });
+});
+
+describe('break bands (W5 P2)', () => {
+  it("turns the day's breaks into minutes of the site day, clipped and merged", () => {
+    const day = '2026-10-14';
+    expect(
+      breakBands(
+        [
+          { start: '2026-10-14T12:30:00Z', end: '2026-10-14T12:45:00Z' }, // 15:30-15:45
+          { start: '2026-10-14T09:00:00Z', end: '2026-10-14T10:00:00Z' }, // 12:00-13:00
+          { start: '2026-10-14T10:00:00Z', end: '2026-10-14T10:15:00Z' }, // touching: merged
+          { start: '2026-10-14T20:30:00Z', end: '2026-10-14T21:30:00Z' }, // over midnight
+        ],
+        day,
+      ),
+    ).toEqual([
+      { start: 720, end: 795 },
+      { start: 930, end: 945 },
+      { start: 1410, end: 1440 },
+    ]);
+    expect(breakBands([], day)).toEqual([]);
   });
 });

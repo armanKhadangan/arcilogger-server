@@ -132,7 +132,7 @@ yalnızca geliştirme ve deneme sunucuları içindir: onun kök sertifikasına y
 **doğrulanamaz** (`R20-verify`, aylık bütün zincir denetimi başarısız); onları yeniden
 doğrulanabilir kılmanın desteklenen bir yolu yoktur.
 
-**Test hesabı ve üretime geçiş:** web arayüzünde **Ayarlar → Kamu SM** sihirbazı
+**Test hesabı ve üretime geçiş:** web arayüzünde **Ayarlar → Zaman damgası** sihirbazı
 ([AYARLAR.md](AYARLAR.md)) ya da konsolda [KURULUM.md](KURULUM.md) bölüm 10 — sırasıyla kök
 sertifikalar (parmak izi karşılaştırması), `secret set`, `credit`, `tsa-test`; üretimde kontör satın
 alma, üretim kimlik bilgileri, `url = "http://zd.kamusm.gov.tr"`, `[tsa] legal_root_fingerprints`.
@@ -323,7 +323,7 @@ kiraları **hemen**, etkilenen ilk günden yeniden oluşturun.
 - **Mühürlemenin yapılandırma hataları** (Kamu SM kimlik bilgileri yok, `kamusm-roots` klasöründe
   kök yok, `[tsa] zamane_jar` ayarlı değil ya da Java veya Zamane istemcisi güvenilir değil:
   `executable` nedeni, ör. kurulumdan sonra `zamane\` içine elle kopyalanan bir jar; bu jar ancak
-  kurulum `-ZamaneJar` ile kaydedince ya da Ayarlar → Kamu SM'den yüklenip onaylanınca çalışır,
+  kurulum `-ZamaneJar` ile kaydedince ya da Ayarlar → Zaman damgası'den yüklenip onaylanınca çalışır,
   [KURULUM.md](KURULUM.md) bölüm 7) Seal görevini mühürlemeye başlamadan durdurur: görevin son
   çalışma sonucu `0x1`, hata her çalışmada `D:\ARCILOGGER\logs\core.log` dosyasına,
   `R20-seal-config` uyarısı gün ve neden başına bir kez yazılır.
@@ -417,6 +417,11 @@ Her gün:
   | `R20-lease` | Kira kanıtı sorunu: kira kanıtı (FortiGate DHCP, MikroTik DHCP ya da ARP-LOG) kesildi, FortiGate DHCP kayıtları kullanılmıyor ya da çevrilemedi, yenilemeler görünmüyor, aynı ağda iki DHCP kaynağı, bir kaynağın saati kayık ya da bir ayar sahada doğrulanmadı; neden ve ne yapılacağı uyarının ayrıntısındadır (Kaynaklar → Kira kanıtı; [UYARILAR.md](UYARILAR.md) bölüm 2) |
   | `R20-nat` | İnternet çıkışı tanımı sorunu: eski NAT ayarları aktarılamadı, çıkışlar ayarı okunamıyor, geri almada eski bir NAT ayarı değişti ya da hiçbir çıkışa tanımlı olmayan bir NAT adresi kullanılıyor (Ayarlar → Uygulama ayarları → 5651 sorgu ve kira zaman çizelgesi → İnternet çıkışları (NAT)) |
   | `R20-filter` | Beklenen bir günde 24 saattir web ya da DNS filtresi kaydı gelmiyor (`alerts.filter_quiet_hours`, `alerts.filter_days`; Uyum Durumu kart 7) |
+  | `R20-db-window` | Veritabanı penceresi işi (`db.window`, her gün 01:00'den sonra) çalışamadı: pencereden (`db.retention_days`, 30 gün) eski günler silinmedi; worker işi yeniden dener, sonraki başarılı çalıştırma uyarıyı çözer (orta). Ya da bir arşivden yeniden yükleme önceki çalıştırmadan beri ilerlemedi (`R20-db-window:reload-<numara>`, orta; numarası ve günleriyle): `loading` durumundaki bir yükleme ya da hiçbir yükleme `loading` değilken ve sıra ilerlemezken `queued` bekleyen bir yükleme; ilerleyen bir yüklemenin arkasında sırada bekleyen yükleme uyarı vermez: yüklenen günler hiç silinmez, veritabanı o sürede pencereden büyür; ArciIngest'i denetleyin (`Get-Service ArciIngest`). Yükleme ya da önündeki sıra ilerleyince, ya da yükleme bitince kendiliğinden çözülür |
+  | `R20-renewal` | Yeniden damgalama gerekiyor (yüksek): `state\renewal\renewal.json` raporunda yeniden damgalama zamanı gelmiş (`due`) ya da sertifikası yeniden damgalanmadan sona ermiş (`uncovered`) bir damga var, ya da `Renew` görevi art arda iki kez başarısız oldu (`failures_in_a_row` ≥ 2; reddedilen bir çalıştırma da sayılır, örneğin sabitlenmiş kök sertifika yokken). Sistem sayfasında `Renew` görevini denetleyin; neyin yeniden damgalanacağını damga almadan görmek için `& $core renew --dry-run`. Rapor böyle bir damga göstermeyince ve görev art arda iki kez başarısız olmamışken kendiliğinden çözülür. Damgalar alındıkları an için geçerli kalır |
+  | `R20-cert` | Zaman damgası sertifikası sorunu: kullanılan bir sertifika iptal listesinde (`crl-revoked`, kritik; zaman damgası sağlayıcısıyla görüşün, hukuki inceleme önerilir) ya da yeniden damgalanmamış bir damganın sertifikası 30 gün içinde sona eriyor veya yeniden damgalanmadan sona erdi (yüksek). Yalnızca bütün girdiler (yeniden damgalama raporu, zamanlanmış doğrulamalar, son mühürlü günün damgası, iptal listeleri) okunabilince çözülür |
+  | `R20-crl` | İptal listesi (SİL) güncel değil (orta): kullanılan bir sertifika veren için son `tsa.crl_max_age_days` (7) gün içinde indirilip doğrulanmış ve kendi `nextUpdate` zamanı geçmemiş bir liste yok; yalnızca `state\crl` klasöründen değerlendirilir. Sistem sayfasında `CrlFetch` görevini ve `state\crl\index.json` içindeki `failures` kayıtlarını denetleyin (`& $core crl status`); değişen ya da silinen bir saklı liste de sayılır. Kamu SM'nin ve TÜRKTRUST'ın liste yayın aralıkları sahada doğrulanmalıdır (K10/T4). Güncel bir liste gelince kendiliğinden çözülür |
+  | `R20-snmp` | İnternet hattı hızı okunamıyor (düşük, kaynak başına bir uyarı): SNMP'si açık bir log kaynağının bir WAN hattı 10 dakikadan uzun süredir okunamadı (`snmp.poll`); ayrıntılarda neden (yanıt yok, kimlik doğrulama başarısız, arayüz bulunamadı, 64 bit sayaç yok). Kaynaklar'da kaynağın SNMP ayarlarını ve Bağlantıyı dene'yi, sıkı giden modda `ARCILOGGER SNMP <kaynak>` güvenlik duvarı kuralını denetleyin; SNMP cihazda yalnızca ARCILOGGER sunucusuna, bir LAN arayüzünde açık olmalıdır. Loglar ve 5651 işlevleri etkilenmez. Hattın sonraki iyi okumasında kendiliğinden çözülür |
   | `new-log-source` | Yapılandırmada olmayan bir gönderici (güvenlik duvarı izin verdiyse) |
   | `wrong-transport` | Bir kaynaktan izin verilmeyen taşıma yoluyla mesaj geldi (`[[sources]] transport`); taklit edilmiş bir UDP gönderimi ya da yanlış cihaz ayarı olabilir, mesaj kaydedilmedi |
 

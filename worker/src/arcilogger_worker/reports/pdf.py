@@ -59,6 +59,13 @@ WIDTH: Final = A4[0] - 2 * MARGIN
 MAX_BLOCKED_PER_PERSON: Final = 100
 #: Sites per person (contract: top 20 with time).
 TOP_SITES: Final = 20
+#: Column widths (mm) of the persons table: (dated first/last activity, a "Mola" column).
+_PERSON_WIDTHS: Final = {
+    (True, False): [27, 16, 16, 17, 15, 13, 14, 13, 11, 16],
+    (False, False): [34, 10, 10, 20, 18, 16, 16, 14, 12, 18],
+    (True, True): [23, 16, 16, 16, 14, 13, 13, 12, 10, 13, 12],
+    (False, True): [32, 10, 10, 18, 17, 15, 15, 14, 12, 12, 13],
+}
 
 
 @dataclass(frozen=True)
@@ -245,6 +252,17 @@ class _Builder:
                         "Mesai dışı aktif süre (tahmini)",
                         "Off-hours active time",
                         t.duration(company.get("off_hours_active_seconds")),
+                    ),
+                    *(
+                        [
+                            (
+                                "Moladaki aktif süre (tahmini)",
+                                "Active time in breaks",
+                                t.duration(company.get("break_active_seconds")),
+                            )
+                        ]
+                        if self.data.get("breaks")
+                        else []
                     ),
                     ("İndirilen", "Downloaded", t.volume(company.get("download_bytes"))),
                     ("Yüklenen", "Uploaded", t.volume(company.get("upload_bytes"))),
@@ -440,6 +458,7 @@ class _Builder:
                     )
                 )
         self.heading(f"Kişiler ({len(persons)})", "Persons")
+        breaks = bool(self.data.get("breaks"))
         self.add(
             self.table(
                 [
@@ -453,6 +472,7 @@ class _Builder:
                     "Oturum",
                     "Engel.",
                     "Mesai dışı",
+                    *(["Mola"] if breaks else []),
                 ],
                 [
                     [
@@ -466,14 +486,14 @@ class _Builder:
                         t.number(person.get("sessions")),
                         t.number(person.get("blocked")),
                         t.duration(person.get("off_hours_active_seconds")),
+                        *([t.duration(person.get("break_active_seconds"))] if breaks else []),
                     ]
                     for person in persons
                 ],
-                # Dated first and last activity need wider columns (a date is not split).
-                [27, 16, 16, 17, 15, 13, 14, 13, 11, 16]
-                if self.dated
-                else [34, 10, 10, 20, 18, 16, 16, 14, 12, 18],
-                right=(3, 4, 5, 6, 7, 8, 9),
+                # Dated first and last activity need wider columns (a date is not split); a
+                # "Mola" column (W5-K) takes its room from the others.
+                _PERSON_WIDTHS[(self.dated, breaks)],
+                right=(3, 4, 5, 6, 7, 8, 9, 10) if breaks else (3, 4, 5, 6, 7, 8, 9),
             )
         )
         for person in persons:
@@ -515,6 +535,17 @@ class _Builder:
                             "Mesai dışı aktif süre",
                             "Off-hours active time",
                             t.duration(person.get("off_hours_active_seconds")),
+                        ),
+                        *(
+                            [
+                                (
+                                    "Moladaki aktif süre",
+                                    "Active time in breaks",
+                                    t.duration(person.get("break_active_seconds")),
+                                )
+                            ]
+                            if self.data.get("breaks")
+                            else []
                         ),
                         (
                             "İndirilen / yüklenen",

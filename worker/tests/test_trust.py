@@ -236,3 +236,44 @@ def test_srcmac_ip_counts(db_session: Session, evidence: Evidence) -> None:
         trust.srcmac_ip_counts(db_session, tr(DAY, 8), tr(DAY, 10), None, frozenset({"fortigate"}))
         == {}
     )
+
+
+def test_srcmac_ip_counts_sessions_that_overlap_the_window(
+    db_session: Session, evidence: Evidence
+) -> None:
+    """#96 (#40 item 7): a long session of another address that started in the window and was
+    logged after it counts (the scan reaches ``max_session_seconds`` beyond the window); a
+    session logged after the window that started after it, one that ended before it, and one
+    logged after the scan's end do not."""
+    router = "00:00:5e:00:53:10"
+    low, high = tr(DAY, 8), tr(DAY, 10)
+    evidence.traffic(tr(DAY, 9), "172.20.42.57", 50001, srcintf="vlan42", srcmac=router)
+    # Started 09:50, logged 10:40 at its end: overlaps the window.
+    evidence.traffic(
+        tr(DAY, 10, 40), "172.20.42.58", 50002, srcintf="vlan42", srcmac=router, duration=3000
+    )
+    # Started 10:30, after the window.
+    evidence.traffic(
+        tr(DAY, 10, 40), "172.20.42.59", 50003, srcintf="vlan42", srcmac=router, duration=600
+    )
+    # Ended 07:50, before the window (logged then).
+    evidence.traffic(
+        tr(DAY, 7, 50), "172.20.42.60", 50004, srcintf="vlan42", srcmac=router, duration=7200
+    )
+    # Started 09:00, logged 13:00: beyond the scan of a 2-hour longest session.
+    evidence.traffic(
+        tr(DAY, 13), "172.20.42.61", 50005, srcintf="vlan42", srcmac=router, duration=14400
+    )
+    # Logged after the window without a duration: started then, so no overlap.
+    evidence.traffic(
+        tr(DAY, 10, 5), "172.20.42.62", 50006, srcintf="vlan42", srcmac=router, duration=None
+    )
+    counts = trust.srcmac_ip_counts(
+        db_session, low, high, None, frozenset(), max_session_seconds=7200
+    )
+    assert counts == {("vlan42", router): 2}
+    # Without the longest session (the count before #96, and a window that ends now) only the
+    # rows logged in the window count.
+    assert trust.srcmac_ip_counts(db_session, low, high, None, frozenset()) == {
+        ("vlan42", router): 1
+    }

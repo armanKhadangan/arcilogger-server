@@ -133,9 +133,10 @@ The constraints:
   services, the agent's heartbeat, ApplySystem's status, the evidence files of the scheduled tasks,
   `job_runs`, the clock samples. No Service Control Manager or Task Scheduler query (owner question
   Q19). A task is `ok`, `late` (evidence older than its cadence plus a grace), `missing` (no
-  evidence yet), `not_used` (switched off in the configuration) or `not_observable` (Retention and
-  Requests leave nothing ArciApi may read). *Alternative:* a SYSTEM-written status file of the
-  services and tasks (an installer, ACL and PowerShell change).
+  evidence yet), `not_used` (switched off in the configuration), `not_observable` (Retention and
+  Requests leave nothing ArciApi may read) or, since #171, `failed` (the evidence file shows that
+  the latest run failed; the answer carries a `code`, never the error text). *Alternative:* a
+  SYSTEM-written status file of the services and tasks (an installer, ACL and PowerShell change).
 - **D10 CPU and memory through the standard library** in `arcilogger_core.hostinfo` (`ctypes` on
   Windows, `/proc` on Linux); the CPU percentage is computed between two readings kept in the API
   process, so the first request answers `null` ("ölçülüyor"). No `psutil` (owner question Q16):

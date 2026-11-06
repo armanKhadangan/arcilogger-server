@@ -12,18 +12,23 @@ Verification never trusts the provider that produced the token. For a token and 
    the token's ``genTime``, each issuer a CA allowed to sign certificates within its
    pathLenConstraint;
 6. that the token's message imprint equals the hash of the file, made with SHA-256 or stronger
-   (also for the signature), with no signed attribute given twice.
-
-Revocation (CRL) checking is added when the Kamu SM CRL locations are confirmed (see kamusm.md).
+   (also for the signature), with no signed attribute given twice;
+7. when the caller passes revocation lists (``crls``, the verified lists of ``state/crl``,
+   :mod:`arcilogger_core.crl`): every certificate of the chain below the root against them, with
+   the codes and levels of the standalone verifier's ``check_revocation`` (Wave 5 D10). The
+   result is ``details["crl"]``; the caller decides what a ``crl-revoked`` means for a day
+   (:func:`arcilogger_core.chain.verify_day` fails it), as the standalone verifier does. A
+   ``crl-revoked`` stamp is not legal grade (:func:`confirmed_legal_grade`, C15).
 """
 
 from __future__ import annotations
 
 import hashlib
 from collections.abc import Collection, Iterable, Sequence
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any, Literal
 
 from asn1crypto import x509 as asn1_x509
 from cryptography import x509
@@ -41,6 +46,9 @@ from arcilogger_core.tsa.asn1 import (
     tst_info,
 )
 from arcilogger_core.tsa.base import TokenInfo, TsaError, VerifyResult
+
+if TYPE_CHECKING:  # arcilogger_core.crl imports this module
+    from arcilogger_core.crl import Crl
 
 _HASHES: dict[str, type[hashes.HashAlgorithm]] = {
     "sha1": hashes.SHA1,
@@ -68,11 +76,17 @@ def confirmed_legal_grade(
     """Whether a stamp counts as legal grade (shown so in the PDF, the calendar, packages).
 
     All of: the manifest (or the provider) says it came from the Kamu SM production server
-    (``claimed``), the token verified, and its chain ends at a root whose SHA-256 fingerprint
-    the site listed in ``tsa.legal_root_fingerprints``. A flag in a manifest alone never is.
+    (``claimed``), the token verified, its chain ends at a root whose SHA-256 fingerprint the
+    site listed in ``tsa.legal_root_fingerprints``, and no certificate of the chain was revoked
+    at or before the stamp (``details["crl"]`` is not ``crl-revoked``; Wave 5 C15). A flag in a
+    manifest alone never is. Only a result checked with revocation lists (``crls``) can say
+    revoked: without them the revocation is not known here.
     """
     root = result.details.get("root_sha256") or ""
-    return bool(claimed and result.ok and root and root in set(legal_root_fingerprints))
+    revoked = result.details.get("crl") == "crl-revoked"
+    return bool(
+        claimed and result.ok and root and root in set(legal_root_fingerprints) and not revoked
+    )
 
 
 def load_certificates(paths: Iterable[Path]) -> list[x509.Certificate]:
@@ -231,16 +245,19 @@ def _check_chain(
     pool: Sequence[x509.Certificate],
     roots: Sequence[x509.Certificate],
     moment: datetime,
-) -> tuple[list[str], x509.Certificate | None]:
+) -> tuple[list[str], list[x509.Certificate]]:
+    """The errors, and the chain from the TSA certificate to the pinned root it reaches (empty
+    when it reaches none)."""
     root_ders = {root.public_bytes(Encoding.DER) for root in roots}
     candidates = [*pool, *roots]
+    chain = [signer]
     current = signer
     below = 0  # intermediate CA certificates between the issuer and the TSA certificate
     for _ in range(MAX_CHAIN_DEPTH):
         if not _valid_at(current, moment):
-            return [f"certificate {current.subject.rfc4514_string()} not valid at genTime"], None
+            return [f"certificate {current.subject.rfc4514_string()} not valid at genTime"], []
         if current.public_bytes(Encoding.DER) in root_ders:
-            return [], current
+            return [], chain
         issuer = None
         for candidate in candidates:
             if candidate.subject != current.issuer or candidate == current:
@@ -252,13 +269,14 @@ def _check_chain(
             issuer = candidate
             break
         if issuer is None:
-            return ["certificate chain does not reach a pinned root certificate"], None
+            return ["certificate chain does not reach a pinned root certificate"], []
         problem = _issuer_problem(issuer, below)
         if problem is not None:
-            return [problem], None
+            return [problem], []
         below += 1
+        chain.append(issuer)
         current = issuer
-    return ["certificate chain too long"], None
+    return ["certificate chain too long"], []
 
 
 def _issuer_problem(issuer: x509.Certificate, below: int) -> str | None:
@@ -281,6 +299,128 @@ def _issuer_problem(issuer: x509.Certificate, below: int) -> str | None:
     if constraints.path_length is not None and below > constraints.path_length:
         return f"the chain exceeds the pathLenConstraint of {name}"
     return None
+
+
+RevocationLevel = Literal["fail", "warn", "info", "ok"]
+
+#: The revocation codes and their levels, as the standalone verifier's ``check_revocation``
+#: reports them (Wave 5 D10, ADR-0006: two verifiers, one verdict).
+CRL_LEVELS: dict[str, RevocationLevel] = {
+    "crl-revoked": "fail",
+    "crl-revoked-later": "warn",
+    "crl-hold": "warn",
+    "crl-none": "info",
+    "crl-stale": "info",
+    "crl-ok": "ok",
+}
+_SEVERITY: tuple[RevocationLevel, ...] = ("ok", "info", "warn", "fail")
+#: CRLReason codes (RFC 5280 5.3.1) the revocation check treats specially: certificateHold and
+#: removeFromCRL (an entry that lifts a hold, in a delta list).
+CRL_REASON_HOLD, CRL_REASON_REMOVE = 6, 8
+
+
+@dataclass(frozen=True)
+class Revocation:
+    """What the revocation lists say about one certificate of a token's chain."""
+
+    code: str
+    #: The certificate's subject (RFC 4514).
+    subject: str
+    #: The revocation date (``crl-revoked``, ``crl-revoked-later``, ``crl-hold``) or the newest
+    #: list's thisUpdate (``crl-ok``, ``crl-stale``); None for ``crl-none``.
+    at: datetime | None = None
+
+    @property
+    def level(self) -> RevocationLevel:
+        return CRL_LEVELS[self.code]
+
+
+def check_revocation(
+    chain: Sequence[x509.Certificate], crls: Sequence[Crl], moment: datetime
+) -> list[Revocation]:
+    """Look up each certificate of the chain (except the root) in ``crls``.
+
+    The rules of the standalone verifier's ``check_revocation``: a list counts for a certificate
+    when it names the certificate's issuer and the key of the issuer from the chain verifies its
+    signature. Every such list is consulted (a CA may drop an expired certificate from later
+    lists; removeFromCRL entries do not count). A revocation (any reason but certificateHold)
+    dated at or before ``moment`` (the stamp time) is ``crl-revoked``, also when an earlier hold
+    precedes it (C6). Otherwise the earliest entry decides: certificateHold is ``crl-hold``, a
+    revocation after ``moment`` ``crl-revoked-later``. Without an entry, ``crl-ok`` needs a list
+    issued at or after the stamp time (an older one cannot know about revocations in between:
+    ``crl-stale``); no usable list is ``crl-none``.
+    """
+    findings = []
+    for position, certificate in enumerate(chain[:-1]):
+        issuer = chain[position + 1]
+        name = certificate.issuer.public_bytes()
+        usable = [
+            crl for crl in crls if crl.issuer_name.public_bytes() == name and crl.signed_by(issuer)
+        ]
+        subject = certificate.subject.rfc4514_string()
+        if not usable:
+            findings.append(Revocation("crl-none", subject))
+            continue
+        serial = certificate.serial_number
+        entries = sorted(
+            (
+                (crl.revoked[serial], crl.reasons.get(serial))
+                for crl in usable
+                if serial in crl.revoked and crl.reasons.get(serial) != CRL_REASON_REMOVE
+            ),
+            # Of two entries of the same date, one without a reason comes first, then by reason
+            # code. Only entries after the stamp time still depend on this order (C6 decides
+            # those at or before it): a revocation without a reason, or with a code below 6, comes
+            # before a hold of its date.
+            key=lambda entry: (entry[0], -1 if entry[1] is None else entry[1]),
+        )
+        latest = max(usable, key=lambda crl: crl.this_update)
+        # C6: a revocation at or before the stamp time outranks an earlier hold.
+        before = [entry for entry in entries if entry[1] != CRL_REASON_HOLD and entry[0] <= moment]
+        if entries:
+            revoked_at, reason = (before or entries)[0]
+            if reason == CRL_REASON_HOLD:
+                findings.append(Revocation("crl-hold", subject, revoked_at))
+            elif revoked_at <= moment:
+                findings.append(Revocation("crl-revoked", subject, revoked_at))
+            else:
+                findings.append(Revocation("crl-revoked-later", subject, revoked_at))
+        elif latest.this_update >= moment:
+            findings.append(Revocation("crl-ok", subject, latest.this_update))
+        else:
+            findings.append(Revocation("crl-stale", subject, latest.this_update))
+    return findings
+
+
+def token_chain(data: bytes, roots: Sequence[x509.Certificate]) -> list[x509.Certificate]:
+    """The chain :func:`verify_token` checks a token's revocation along: its TSA certificate,
+    the intermediates from the token and the pinned root it reaches at genTime (empty when the
+    token cannot be read or reaches no root)."""
+    try:
+        token, container = parse_container(data)
+        signer_infos = token["content"]["signer_infos"]
+        signer = _find_signer(token, signer_infos[0]) if len(signer_infos) == 1 else None
+        if signer is None:
+            return []
+        moment = _info(token, container, signer).gen_time
+    except TsaError:
+        return []
+    pool = [cert for _, cert in _token_certificates(token)]
+    return _check_chain(signer, pool, roots, moment)[1]
+
+
+def _revocation_details(findings: Sequence[Revocation]) -> dict[str, str]:
+    """``details["crl"]`` and its companions: the most severe finding (the first one of the
+    chain among equals), or ``"not checked"`` when the chain has nothing below its root."""
+    if not findings:
+        return {"crl": "not checked"}
+    worst = max(findings, key=lambda finding: _SEVERITY.index(finding.level))
+    return {
+        "crl": worst.code,
+        "crl_level": worst.level,
+        "crl_subject": worst.subject,
+        "crl_at": worst.at.isoformat() if worst.at is not None else "",
+    }
 
 
 def _info(token: Any, container: str, signer: x509.Certificate | None) -> TokenInfo:
@@ -315,12 +455,21 @@ def verify_token(
     digest: bytes | None = None,
     now: datetime | None = None,
     require_critical_eku: bool = True,
+    crls: Sequence[Crl] | None = None,
 ) -> VerifyResult:
     """Verify a token against a file (or a precomputed digest of it) and the pinned roots.
 
     The same rules as the standalone verifier that goes into evidence packages (ADR-0006: two
     independent implementations, one verdict): a token accepted here is never refused there.
     ``require_critical_eku`` false accepts a non-critical EKU extension with a warning.
+
+    ``crls``: the revocation lists to check the chain against (:func:`check_revocation`). A
+    token that otherwise verifies gets the most severe code in ``details["crl"]``, its level in
+    ``details["crl_level"]``, the certificate in ``details["crl_subject"]`` and the date in
+    ``details["crl_at"]``; an empty sequence gives ``crl-none``. Revocation never changes
+    ``ok``, the errors or the root; a ``crl-revoked`` result is not legal grade
+    (:func:`confirmed_legal_grade`). With ``crls`` None, or for a token that does not verify,
+    ``details["crl"]`` is ``"not checked"``.
     """
     errors: list[str] = []
     warnings: list[str] = []
@@ -392,8 +541,9 @@ def verify_token(
     errors += eku_errors + _check_key_usage(signer)
     warnings += eku_warnings
     pool = [cert for _, cert in _token_certificates(token)]
-    chain_errors, anchor = _check_chain(signer, pool, roots, info.gen_time)
+    chain_errors, chain = _check_chain(signer, pool, roots, info.gen_time)
     errors += chain_errors
+    anchor = chain[-1] if chain else None
 
     # 4. time sanity
     if info.gen_time > (now or datetime.now(UTC)) + CLOCK_SKEW:
@@ -407,6 +557,9 @@ def verify_token(
         "root_sha256": fingerprint(anchor) if anchor is not None and not errors else "",
         "crl": "not checked",
     }
+    # 5. revocation, of a token that verifies (as the standalone verifier does)
+    if crls is not None and chain and not errors:
+        details.update(_revocation_details(check_revocation(chain, crls, info.gen_time)))
     return VerifyResult(
         ok=not errors,
         errors=tuple(errors),

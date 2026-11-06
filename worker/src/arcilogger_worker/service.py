@@ -9,8 +9,9 @@ Jobs (``DEFAULT_JOBS``):
 ``leases.late_evidence``    every 10 minutes: rebuild older days whose evidence arrived
                             after their rebuild (ingest backlog; ``correlation.late``)
 ``leases.nightly``          daily after 00:05 (site time): rebuild yesterday and today
-``partitions.ensure``       daily after 00:15 and at start-up: monthly partitions ahead
-                            (``arcilogger_db.partitions``; no-op with TimescaleDB)
+``partitions.ensure``       daily after 00:15 and at start-up: daily partitions of the
+                            window and ahead (``arcilogger_db.partitions``; no-op with
+                            TimescaleDB)
 ``license.check``           every 5 minutes: the licence state recomputed; state changes and
                             limit crossings audited once, the ``R20-license`` alerts opened
                             and resolved (:mod:`.alerts.license`),
@@ -33,12 +34,22 @@ Jobs (``DEFAULT_JOBS``):
 ``alerts.system``           every 5 minutes: the R20 system checks (:mod:`.alerts.system`)
 ``alerts.notify``           every minute: alert e-mail through ``[smtp]``
                             (:mod:`.alerts.notify`)
-``usage.today``             every 5 minutes: today's usage rollup (:mod:`.usage.jobs`)
+``usage.today``             every minute, with back-off: today's usage rollup (:mod:`.usage.jobs`)
 ``usage.daily``             daily after 00:45: yesterday's usage rollup, final
 ``usage.reattribute``       every 10 minutes: recent days whose inputs or device owners
                             changed are rebuilt (``usage.auto_rebuild_days``)
 ``usage.requests``          every 30 seconds: rebuild requests of the web interface
+``activity.tick``           its own thread, not the loop (W5-M; :class:`.activity.Runner`):
+                            every 10 seconds the new traffic logs counted into Canlı
+                            Durum's snapshot of the last 60 minutes, ``state/activity.json``;
+                            a ``job_runs`` row at most once a minute, idle while
+                            ``usage_analytics`` is off
 ``usage.retention``         daily after 03:30: rollups older than ``usage.retention_days``
+``db.window``               daily after 01:00, so it and its first retry (01:15) are due
+                            before the Backup task's dump (01:40): log rows older than the
+                            database window (``db.retention_days``, unsealed days and archive
+                            reloads kept) dropped as whole partitions or chunks, expired
+                            reloads marked; a failure raises ``R20-db-window`` (:mod:`.db_window`)
 ``reports.run_due``         every minute: due report schedules queued (one run per
                             schedule after downtime), queued runs rendered (HTML, PDF,
                             Excel) and e-mailed per recipient (:mod:`.reports.runner`)
@@ -91,7 +102,7 @@ import logging
 import os
 import threading
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import date, datetime, time, timedelta
 from pathlib import Path
 from typing import Any, Final
@@ -106,10 +117,10 @@ from arcilogger_core.configwatch import WORKER_HOT, ConfigWatch, ConfigWatcher
 from arcilogger_core.fsutil import atomic_write_text
 from arcilogger_core.layout import Layout
 from arcilogger_core.timeutil import SITE_TZ, site_day, to_site, utc_now
-from arcilogger_db.engine import session_factory
+from arcilogger_db.engine import engine_from_url, make_engine, session_factory
 from arcilogger_db.models import JobRun
-from arcilogger_db.partitions import ensure_partitions
-from arcilogger_worker import __version__
+from arcilogger_db.partitions import LockBudget, ensure_partitions, step_lock_timeout_ms
+from arcilogger_worker import __version__, activity
 from arcilogger_worker.admin_jobs import import_admin_events, process_requests
 from arcilogger_worker.alerts.importer import import_alerts
 from arcilogger_worker.alerts.notify import run_notify
@@ -120,10 +131,12 @@ from arcilogger_worker.correlation.leases import (
     run_incremental,
     run_late_evidence,
 )
+from arcilogger_worker.db_window import job_db_window
 from arcilogger_worker.evidence_jobs import import_job_events, purge_evidence
 from arcilogger_worker.licensing import StatusCache, job_license_check, module_gate
 from arcilogger_worker.reports.runner import purge_reports, resolve_while_unlicensed, run_due
 from arcilogger_worker.search_jobs import backfill_counts
+from arcilogger_worker.snmp.job import SNMP_POLL_EVERY, job_snmp_idle, job_snmp_poll
 from arcilogger_worker.system_jobs import job_system_sample
 from arcilogger_worker.usage import jobs as usage_jobs
 
@@ -140,6 +153,8 @@ DAILY_RETRY_FIRST: Final = timedelta(minutes=15)
 DAILY_RETRY_MAX: Final = timedelta(hours=4)
 #: Longest retry delay of a failing interval job (its interval doubles per failure up to this).
 INTERVAL_RETRY_MAX: Final = timedelta(minutes=30)
+#: The seconds the service waits for Canlı Durum's thread to stop (WinSW allows 30 s).
+ACTIVITY_JOIN: Final = 20.0
 #: Retry delay while the database is unreachable (no ``job_runs`` row can be written).
 DATABASE_RETRY: Final = timedelta(minutes=1)
 
@@ -177,10 +192,15 @@ class Job:
     daily_after: time | None = None
     #: Paid module the job belongs to (licensing contract 1.4): skipped while it is off.
     module: str | None = None
+    #: Interval job: ``True`` when a due run has nothing to do. It then neither runs nor writes
+    #: a ``job_runs`` row, and is due again ``every`` later.
+    idle: Callable[[JobContext], bool] | None = None
 
     def __post_init__(self) -> None:
         if (self.every is None) == (self.daily_after is None):
             raise ValueError(f"job {self.name}: give exactly one of every / daily_after")
+        if self.idle is not None and self.every is None:
+            raise ValueError(f"job {self.name}: only an interval job can be idle")
 
     @property
     def daily_time(self) -> time:
@@ -209,8 +229,9 @@ ADMIN_REQUESTS_EVERY: Final = timedelta(seconds=15)
 #: every 5 minutes (they read more files).
 ALERTS_EVERY: Final = timedelta(minutes=1)
 ALERTS_SYSTEM_EVERY: Final = timedelta(minutes=5)
-#: Area U (spec 10.4): today's usage every 5 minutes, re-attribution every 10, requests every 30 s.
-USAGE_TODAY_EVERY: Final = timedelta(minutes=5)
+#: Area U (spec 10.4): today's usage every minute (contract W5 §6 L1; the job backs off on a busy
+#: site, :func:`.usage.jobs.refresh_today`), re-attribution every 10 minutes, requests every 30 s.
+USAGE_TODAY_EVERY: Final = timedelta(minutes=1)
 USAGE_REATTRIBUTE_EVERY: Final = timedelta(minutes=10)
 USAGE_REQUESTS_EVERY: Final = timedelta(seconds=30)
 #: ``reports.run_due`` looks for due schedules and queued runs every minute.
@@ -254,8 +275,15 @@ def job_leases_nightly(ctx: JobContext) -> Mapping[str, Any]:
 
 
 def job_partitions(ctx: JobContext) -> Mapping[str, Any]:
+    """The daily partitions; the partition lock and the tables are waited for at most half of
+    ``search.request_budget_ms`` in all (W5-G-24: a search export holds it shared), else the run
+    fails and is retried (``R20-job`` after ``alerts.job_failures`` failed runs in a row)."""
     with ctx.engine.begin() as connection:
-        report = ensure_partitions(connection, today=site_day(ctx.now))
+        report = ensure_partitions(
+            connection,
+            today=site_day(ctx.now),
+            budget=LockBudget(step_lock_timeout_ms(connection)),
+        )
     return {"tables": len(report.tables), "created": report.created, "moved": report.moved}
 
 
@@ -326,8 +354,11 @@ def job_alerts_notify(ctx: JobContext) -> Mapping[str, Any]:
 
 
 def job_usage_today(ctx: JobContext) -> Mapping[str, Any]:
-    """Today's usage rollup (partial) from the logs loaded so far."""
-    return usage_jobs.refresh_today(ctx.sessions, now=ctx.now)
+    """Today's usage rollup (partial) from the logs so far; ``skipped`` while it backs off."""
+    details = usage_jobs.refresh_today(ctx.sessions, now=ctx.now)
+    if details.get("reason") == "backoff":
+        details[SKIPPED] = True
+    return details
 
 
 def job_usage_daily(ctx: JobContext) -> Mapping[str, Any]:
@@ -411,12 +442,15 @@ def default_jobs(interval_seconds: int) -> tuple[Job, ...]:
         ),
         # Data minimisation: personal data must still be deleted on time, licensed or not.
         Job("usage.retention", job_usage_retention, daily_after=time(3, 30)),
+        # Before the Backup task's pg_dump (01:40, W5-G-27): a dump does not hold up its drops.
+        Job("db.window", job_db_window, daily_after=time(1, 0)),
         # Reports after the alerts: a report lists the alerts imported just before it.
         Job("reports.run_due", job_reports_run_due, every=REPORTS_EVERY, module=REPORTS_MODULE),
         Job("reports.purge", job_reports_purge, daily_after=time(3, 20)),
         # The disk forecast of Sistem and the Panel: one sample of the drives a day (Wave 4
         # contract 2.5.2).
         Job("system.sample", job_system_sample, daily_after=time(0, 30)),
+        Job("snmp.poll", job_snmp_poll, every=SNMP_POLL_EVERY, idle=job_snmp_idle),
         # Last: it may take a minute, and nothing waits for it (statistics count directly until
         # a file is counted).
         Job("search.counts_backfill", job_search_counts_backfill, every=SEARCH_COUNTS_EVERY),
@@ -442,6 +476,12 @@ class JobState:
     retry_at: datetime | None = None
     #: Site day of the last ``skipped`` row written by the licence gate (one per day).
     skip_day: date | None = None
+    #: The last time the job was due and :attr:`Job.idle` (no run, no row).
+    idle_at: datetime | None = None
+
+    def since(self) -> datetime | None:
+        """The start of the current interval: the last run or idle check."""
+        return max((at for at in (self.last_started, self.idle_at) if at), default=None)
 
     def as_json(self) -> dict[str, Any]:
         def iso(value: datetime | None) -> str | None:
@@ -482,6 +522,9 @@ class Worker:
     #: test with a configuration of its own).
     config_path: Path | None = None
     reload_seconds: float = RELOAD_SECONDS
+    #: Canlı Durum's snapshot runs in its own thread while :meth:`run` runs (W5-M; a test of
+    #: the loop turns it off).
+    activity: bool = True
 
     def __post_init__(self) -> None:
         self.sessions = session_factory(self.engine)
@@ -518,6 +561,9 @@ class Worker:
             self.config = self.config_watch.config
         #: The status file is rewritten at the next loop (a new ``config`` block).
         self._status_due = False
+        #: Canlı Durum's thread while :meth:`run` runs, and its engine.
+        self.activity_runner: activity.Runner | None = None
+        self._activity_engine: Engine | None = None
 
     @property
     def status_path(self) -> Path:
@@ -543,14 +589,16 @@ class Worker:
         if state.retry_at is not None and now < state.retry_at:
             return False
         if job.every is not None:
-            return state.last_started is None or now >= state.last_started + job.every
+            since = state.since()
+            return since is None or now >= since + job.every
         local = to_site(now)
         return state.done_day != local.date() and local.time() >= job.daily_time
 
     def next_due(self, job: Job, now: datetime) -> datetime:
         state = self.states[job.name]
         if job.every is not None:
-            due = now if state.last_started is None else state.last_started + job.every
+            since = state.since()
+            due = now if since is None else since + job.every
         else:
             local = to_site(now)
             today = datetime.combine(local.date(), job.daily_time, tzinfo=SITE_TZ)
@@ -592,6 +640,9 @@ class Worker:
             now = self.clock()
             if not self.due(job, now):
                 continue
+            if self.idle(job, now):
+                self.states[job.name].idle_at = now
+                continue
             gate = self.gate(job, now) if job.module is not None else None
             if gate is not None:
                 done.append((job.name, self.skip_job(job, now, gate)))
@@ -601,6 +652,16 @@ class Worker:
         for job in self.jobs:
             self.states[job.name].next_due = self.next_due(job, now)
         return done
+
+    def idle(self, job: Job, now: datetime) -> bool:
+        """Whether a due ``job`` has nothing to do (:attr:`Job.idle`); a failing check runs it."""
+        if job.idle is None:
+            return False
+        try:
+            return job.idle(self.context(now))
+        except Exception:  # the run then records what is wrong
+            log.exception("job %s: the idle check failed", job.name)
+            return False
 
     def context(self, now: datetime) -> JobContext:
         return JobContext(
@@ -740,6 +801,9 @@ class Worker:
     # -- status and loop --------------------------------------------------------------------------
 
     def write_status(self) -> None:
+        jobs = {name: state.as_json() for name, state in self.states.items()}
+        if self.activity_runner is not None:
+            jobs[activity.JOB_NAME] = self.activity_runner.status()
         data = {
             "service": "arcilogger-worker",
             "version": __version__,
@@ -748,7 +812,7 @@ class Worker:
             "started_at": None if self.started_at is None else self.started_at.isoformat(),
             "updated_at": self.clock().isoformat(),
             "database": {None: "unknown", True: "ok", False: "unreachable"}[self.database_ok],
-            "jobs": {name: state.as_json() for name, state in self.states.items()},
+            "jobs": jobs,
         }
         if self.config_watch is not None:  # the configuration in use (contract 2.4.12)
             data["config"] = self.config_watch.status_block()
@@ -765,6 +829,7 @@ class Worker:
         self.state = "running"
         log.info("ARCILOGGER worker %s started", __version__)
         written: datetime | None = None
+        thread = self._start_activity(stop)
         try:
             while not stop.is_set():
                 ran = self.tick()
@@ -776,6 +841,40 @@ class Worker:
                 # handler only runs between them.
                 stop.wait(SLEEP_SECONDS)
         finally:
+            stop.set()
+            if thread is not None:
+                thread.join(ACTIVITY_JOIN)  # it ends its tick after the chunk under way
+                if thread.is_alive():
+                    log.warning(
+                        "activity.tick did not stop within %s s; the service stops without it",
+                        ACTIVITY_JOIN,
+                    )
+            if self._activity_engine is not None:
+                self._activity_engine.dispose()
             self.state = "stopped"
             self.write_status()
             log.info("ARCILOGGER worker stopped")
+
+    def _start_activity(self, stop: threading.Event) -> threading.Thread | None:
+        """Canlı Durum's thread, with its own database engine (the owner's decision on #201)."""
+        if not self.activity:
+            return None
+        self._activity_engine = (
+            make_engine(self.config, application="worker-activity", pool_size=2)
+            if self.config is not None
+            else engine_from_url(self.engine.url, application="worker-activity", pool_size=2)
+        )
+        self.activity_runner = activity.Runner(
+            self._activity_engine,
+            self.layout.activity,
+            gate=lambda now, engine: module_gate(
+                replace(self.context(now), engine=engine, sessions=session_factory(engine)),
+                USAGE_MODULE,
+            ),
+            clock=self.clock,
+        )
+        thread = threading.Thread(
+            target=self.activity_runner.run, args=(stop,), name=activity.JOB_NAME, daemon=True
+        )
+        thread.start()
+        return thread

@@ -126,17 +126,26 @@ test.describe('Ayarlar → Uygulama ayarları', () => {
     await expect(hours.getByRole('checkbox', { name: 'Cuma', exact: true })).toBeChecked();
     await expect(hours.getByRole('checkbox', { name: 'Cumartesi' })).not.toBeChecked();
     await hours.getByRole('checkbox', { name: 'Cuma', exact: true }).click();
-    await hours.getByLabel('Mesai bitişi').fill('07:00');
+    await hours.getByLabel('Pazartesi mesai bitişi').fill('07:00');
     await usage.getByRole('button', { name: 'Kaydet' }).click();
-    await expect(usage.getByText('Mesai başlangıcı bitişten önce olmalı.')).toBeVisible();
-    await hours.getByLabel('Mesai bitişi').fill('17:30');
+    await expect(
+      usage.getByText('Pazartesi: mesai başlangıcı bitişten önce olmalı.'),
+    ).toBeVisible();
+    // W5 P1: Monday ends at 17:30 with a lunch break, then every day takes Monday's hours.
+    await hours.getByLabel('Pazartesi mesai bitişi').fill('17:30');
+    await hours.getByRole('button', { name: 'Pazartesi için mola ekle' }).click();
+    await expect(
+      hours.getByRole('img', { name: 'Pazartesi: mesai 08:00–17:30, mola 12:00–13:00' }),
+    ).toBeVisible();
+    await hours.getByRole('button', { name: 'Pazartesi saatlerini tüm günlere uygula' }).click();
+    await expect(hours.getByLabel('Perşembe 1. mola başlangıcı')).toHaveValue('12:00');
 
     const holidays = usage.getByRole('list', { name: 'Tatil günleri' });
     await expect(holidays.getByRole('listitem')).toHaveCount(7);
     await expect(holidays).toContainText('29 Ekim (her yıl)');
     const add = usage.getByLabel('Tatil günü ekle');
     await add.fill('2026-02-30');
-    await usage.getByRole('button', { name: 'Ekle' }).click();
+    await usage.getByRole('button', { name: 'Ekle', exact: true }).click();
     await expect(usage.getByText('Tarihi AA-GG ya da YYYY-AA-GG biçiminde girin.')).toBeVisible();
     await add.fill('2026-03-20');
     await add.press('Enter');
@@ -152,7 +161,12 @@ test.describe('Ayarlar → Uygulama ayarları', () => {
         {
           key: 'usage.work_hours',
           old: { days: [1, 2, 3, 4, 5], start: '08:00', end: '18:00' },
-          value: { days: [1, 2, 3, 4], start: '08:00', end: '17:30' },
+          value: {
+            days: [1, 2, 3, 4],
+            start: '08:00',
+            end: '17:30',
+            breaks: [{ start: '12:00', end: '13:00' }],
+          },
         },
         {
           key: 'usage.holidays',
@@ -292,7 +306,11 @@ for (const theme of ['light', 'dark'] as Theme[]) {
     await expect(alerts.getByText('En az 1 olmalı.')).toBeVisible();
     await expectNoA11yViolations(page);
     await openTab(page, 'Kullanım analizi');
-    await expect(group(page, 'usage').getByRole('group', { name: 'Mesai saatleri' })).toBeVisible();
+    const hours = group(page, 'usage').getByRole('group', { name: 'Mesai saatleri' });
+    await expect(hours).toBeVisible();
+    // The week table with a break row and its strip (W5 P1).
+    await hours.getByRole('button', { name: 'Pazartesi için mola ekle' }).click();
+    await expect(hours.getByLabel('Pazartesi 1. mola bitişi')).toHaveValue('13:00');
     await expectNoA11yViolations(page);
     await openTab(page, '5651 sorgu ve kira zaman çizelgesi');
     await expect(group(page, 'lookup').getByTestId('setting-devices.oui_file')).toBeVisible();

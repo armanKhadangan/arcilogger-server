@@ -22,7 +22,7 @@ from dataclasses import dataclass
 from datetime import date
 from pathlib import Path, PureWindowsPath
 from typing import Literal
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urlsplit
 
 from pydantic import (
     BaseModel,
@@ -35,13 +35,66 @@ from pydantic import (
 
 MIN_RETENTION_DAYS = 730  # two years: İnternet Toplu Kullanım Sağlayıcıları Yönetmeliği md. 4/1-b
 DEFAULT_RETENTION_DAYS = 760  # two years plus a margin
+#: Retention deletes in batches (#195): one stamped deletion record for about a month of days,
+#: not one a day. 1 deletes each day as it expires; 180, six months, is the ceiling of KVKK's
+#: periodic destruction (sahada doğrula: legal review, not a legal claim).
+DEFAULT_RETENTION_BATCH_DAYS = 30
+MAX_RETENTION_BATCH_DAYS = 180
 
 KAMUSM_PRODUCTION_HOST = "zd.kamusm.gov.tr"
 KAMUSM_TEST_HOST = "tzd.kamusm.gov.tr"
+#: TÜRKTRUST's time-stamp server (contract T1: the host is from TÜRKTRUST's e-mail, the path is
+#: to be confirmed on site).
+TURKTRUST_PRODUCTION_HOST = "zd.turktrust.com.tr"
 
 
 class _Model(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True)
+    # hide_input_in_errors: a refused value (a URL with a password in it, #204) is never repeated
+    # in the error text that the console, a task's log or an answer shows.
+    model_config = ConfigDict(extra="forbid", frozen=True, hide_input_in_errors=True)
+
+
+class SnmpCapacity(_Model):
+    """A WAN line's capacity as configured, in whole Mbit/s (``capacity_mbps``, N1)."""
+
+    down: int = Field(ge=1, le=1_000_000)
+    up: int = Field(ge=1, le=1_000_000)
+
+
+class SnmpConfig(_Model):
+    """``[sources.snmp]``: the internet line's speed over read-only SNMPv3 (Wave 5 §6 N1).
+
+    Only SNMPv3 with authentication and privacy (authPriv): there is no ``version`` and no
+    community string (v1/v2c send it in clear text), and ``auth``/``priv`` have no "none". The
+    target is always the source's own single ``address`` (``snmp_source_is_network``). The two
+    keys, ``snmp.<source>.auth_key`` and ``snmp.<source>.priv_key`` (8 to 64 characters), are in
+    the secret store only (``snmp_secret_missing``), never here.
+    """
+
+    enabled: bool = False
+    port: int = Field(default=161, ge=1, le=65535)
+    #: The SNMPv3 user name (not a secret).
+    user: str = Field(default="", max_length=64)
+    auth: Literal["sha1", "sha256", "sha512"] = "sha256"
+    #: ``aes256`` is "sahada doğrula" (X-B3): older firmware may not offer it.
+    priv: Literal["aes128", "aes256"] = "aes128"
+    #: ``ifName`` of each WAN line (X-B4: the probe lists them, nothing is assumed).
+    interfaces: tuple[str, ...] = Field(default=(), max_length=4)
+    capacity_mbps: dict[str, SnmpCapacity] = Field(default_factory=dict)
+    interval_seconds: int = Field(default=15, ge=10, le=60)
+
+    @model_validator(mode="after")
+    def _complete(self) -> SnmpConfig:
+        names = [name.strip() for name in self.interfaces]
+        if any(not name or len(name) > 64 for name in names) or len(set(names)) != len(names):
+            raise ValueError("snmp_setting_invalid: interfaces must be distinct ifName values")
+        if set(self.capacity_mbps) - set(names):
+            raise ValueError("snmp_setting_invalid: capacity_mbps names an interface not listed")
+        if self.enabled and (not self.user.strip() or not names):
+            raise ValueError(
+                "snmp_setting_invalid: an enabled SNMP needs a user and 1 to 4 interfaces"
+            )
+        return self
 
 
 class SourceConfig(_Model):
@@ -68,6 +121,8 @@ class SourceConfig(_Model):
     #: under the source's name as before (raw logs are never dropped), and the source still
     #: counts for the licence's log-source limit (ADR-0013).
     enabled: bool = True
+    #: The internet line's speed over SNMPv3 (Wave 5 §6 N1); ``None``: no SNMP.
+    snmp: SnmpConfig | None = None
 
     @field_validator("address")
     @classmethod
@@ -75,6 +130,16 @@ class SourceConfig(_Model):
         if "/" in value:
             return str(ipaddress.ip_network(value, strict=False))
         return str(ipaddress.ip_address(value))
+
+    @model_validator(mode="after")
+    def _snmp_single_address(self) -> SourceConfig:
+        if self.snmp is None or not self.snmp.enabled:
+            return self
+        if self.is_network:
+            raise ValueError("snmp_source_is_network: SNMP is read from a single address only")
+        if ipaddress.ip_address(self.address).version != 4:  # the UDP transport is IPv4 only
+            raise ValueError("source_ipv6_unsupported: SNMP is read from an IPv4 address only")
+        return self
 
     @property
     def is_network(self) -> bool:
@@ -94,7 +159,14 @@ class CollectorConfig(_Model):
 
 
 class SealConfig(_Model):
+    #: Format of every file sealed from now on (Wave 5 H1): ``xz`` (seekable xz, the default) or
+    #: ``gzip``. A sealed day is never re-encoded, so days sealed before keep their format.
+    compression: Literal["gzip", "xz"] = "xz"
     gzip_level: int = Field(default=9, ge=1, le=9)
+    #: xz preset (H2): 0 (fast) to 9 (small).
+    xz_preset: int = Field(default=6, ge=0, le=9)
+    #: Threads that compress the independent 16 MiB xz streams; the bytes do not depend on it.
+    xz_threads: int = Field(default=2, ge=1, le=8)
     #: A closed day is sealed only when its spool files were not written for this long.
     quiet_seconds: int = Field(default=30, ge=0)
     #: No message from an expected source for longer than this is recorded as a gap.
@@ -119,7 +191,7 @@ class SealConfig(_Model):
 
 
 class TsaConfig(_Model):
-    provider: Literal["mock", "rfc3161", "zamane"] = "mock"
+    provider: Literal["mock", "rfc3161", "zamane", "turktrust"] = "mock"
     #: Time-stamp server URL (Zamane: address passed to the console client).
     url: str = f"http://{KAMUSM_TEST_HOST}"
     port: int = Field(default=80, ge=1, le=65535)
@@ -145,6 +217,63 @@ class TsaConfig(_Model):
     #: docs/kamusm.md: set false only after the Kamu SM certificate profile is confirmed to
     #: mark it non-critical; the choice is sealed into every manifest.
     require_critical_eku: bool = True
+    #: Re-stamping (W5-A): a token whose TSA certificate expires within this many days is
+    #: renewed.
+    renew_before_days: int = Field(default=180, ge=30, le=730)
+    #: Revocation lists (W5-B, D7): where ``CrlFetch`` downloads them from. Empty (the default):
+    #: the http/https distribution points named in the pinned certificates. Each is an http or
+    #: https URL without a user name or password.
+    crl_urls: tuple[str, ...] = Field(default=(), max_length=20)
+    #: An issuer's newest revocation list fetched longer ago than this is stale (C22).
+    crl_max_age_days: int = Field(default=7, ge=1, le=60)
+    #: Lets ``provider = "turktrust"`` use a plain ``http://`` URL. The user name and password
+    #: then cross the network in clear text, so it is off by default and only meaningful for
+    #: ``turktrust`` (§2.4).
+    allow_plain_http: bool = False
+
+    @field_validator("crl_urls")
+    @classmethod
+    def _crl_urls(cls, values: tuple[str, ...]) -> tuple[str, ...]:
+        for value in values:
+            parts = urlsplit(value)
+            if parts.username is not None or parts.password is not None:
+                # Not repeated: the value carries the password.
+                raise ValueError("no user name or password in a revocation list URL")
+            try:
+                port = parts.port
+            except ValueError:  # not a number, or out of range
+                port = -1
+            if parts.scheme not in ("http", "https") or not parts.hostname or port == -1:
+                raise ValueError(f"not an http or https URL: {value!r}")
+        return values
+
+    @field_validator("url")
+    @classmethod
+    def _url(cls, value: str) -> str:
+        parts = urlsplit(value)
+        if parts.username is not None or parts.password is not None:
+            # Every provider (#204): the account goes into the secret store, and the URL reaches
+            # logs, errors and repr(). Not repeated here, since it carries the password.
+            raise ValueError(
+                "tsa.url kullanıcı adı ya da parola içeremez; hesap gizli depoya girilir "
+                "[tsa.url cannot carry a user name or password; the account goes into the "
+                "secret store]"
+            )
+        return value
+
+    @model_validator(mode="after")
+    def _turktrust_https(self) -> TsaConfig:
+        if self.provider != "turktrust":
+            return self
+        scheme = urlsplit(self.url).scheme
+        if scheme == "http" and not self.allow_plain_http:
+            raise ValueError(
+                "provider turktrust needs an https:// url: over http:// the TÜRKTRUST user name "
+                "and password travel in clear text (set tsa.allow_plain_http = true to accept it)"
+            )
+        if scheme not in ("http", "https"):
+            raise ValueError("provider turktrust needs an https:// url")
+        return self
 
     @field_validator("legal_root_fingerprints")
     @classmethod
@@ -163,16 +292,60 @@ class TsaConfig(_Model):
 
     @property
     def legal_grade(self) -> bool:
-        """Whether the configuration points at the Kamu SM production server (Zamane client,
-        zd.kamusm.gov.tr). This is only what the site **claims**: a day counts as legal grade
-        when its verified token also chains to a root of ``legal_root_fingerprints``
+        """Whether the configuration points at a production server whose stamps count as legal
+        grade: Kamu SM's (Zamane client, zd.kamusm.gov.tr), or TÜRKTRUST's (zd.turktrust.com.tr)
+        while the product constant
+        :data:`arcilogger_core.tsa.turktrust.TURKTRUST_LEGAL_GRADE` is true (D12). This is only
+        what the site **claims**: a day counts as legal grade when its verified token also
+        chains to a root of ``legal_root_fingerprints``
         (:func:`arcilogger_core.tsa.verify.confirmed_legal_grade`)."""
-        return self.provider == "zamane" and self.host == KAMUSM_PRODUCTION_HOST
+        if self.provider == "zamane":
+            return self.host == KAMUSM_PRODUCTION_HOST
+        if self.provider == "turktrust":
+            # Imported here: arcilogger_core.tsa imports this module.
+            from arcilogger_core.tsa.turktrust import TURKTRUST_LEGAL_GRADE
+
+            return TURKTRUST_LEGAL_GRADE and self.host == TURKTRUST_PRODUCTION_HOST
+        return False
+
+
+class NetworkConfig(_Model):
+    #: Outbound HTTP proxy for the time-stamp server and the revocation lists:
+    #: ``http://host:port`` (a numeric port, no user name or password), or empty for a direct
+    #: connection.
+    https_proxy: str = ""
+
+    @field_validator("https_proxy")
+    @classmethod
+    def _proxy(cls, value: str) -> str:
+        if not value:
+            return value
+        parts = urlsplit(value)
+        try:
+            port = parts.port
+        except ValueError:  # not a number, or out of range
+            port = None
+        if (
+            parts.scheme != "http"
+            or not parts.hostname
+            or port is None
+            or parts.username is not None
+            or parts.password is not None
+            or parts.path not in ("", "/")
+            or parts.query
+            or parts.fragment
+        ):
+            # Not repeated: a refused value may carry a password.
+            raise ValueError("https_proxy must be http://host:port (no credentials)")
+        return value
 
 
 class RetentionConfig(_Model):
     enabled: bool = False
     days: int = Field(default=DEFAULT_RETENTION_DAYS, ge=MIN_RETENTION_DAYS)
+    #: A run deletes only once the oldest expired day has been expired this many days, and then
+    #: every expired day in one record (:func:`arcilogger_core.retention.due_day`).
+    batch_days: int = Field(default=DEFAULT_RETENTION_BATCH_DAYS, ge=1, le=MAX_RETENTION_BATCH_DAYS)
 
 
 def replica_target_text(target: Path | str) -> str:
@@ -370,6 +543,7 @@ class Config(_Model):
     retention: RetentionConfig = RetentionConfig()
     replica: ReplicaConfig = ReplicaConfig()
     clock: ClockConfig = ClockConfig()
+    network: NetworkConfig = NetworkConfig()
     database: DatabaseConfig = DatabaseConfig()
     api: ApiConfig = ApiConfig()
     ingest: IngestConfig = IngestConfig()

@@ -164,7 +164,7 @@ def seal_vault(root: Path, key_type: KeyType, days: list[date] = DAYS) -> Vault:
             "secrets_dir": str(root),
             "site_name": SITE_NAME,
             "sources": SOURCES,
-            "seal": {"quiet_seconds": 0, "gzip_level": 6},
+            "seal": {"quiet_seconds": 0, "compression": "gzip", "gzip_level": 6},
             "tsa": {"provider": "mock"},
         }
     )
@@ -617,8 +617,8 @@ def test_guides_name_the_files_and_make_no_compliance_claim(ec_built: Built) -> 
     assert "Yöntem C verify.py'ye dayanmaz" in text
     assert ec_built.info.verifier_sha256 in english.decode("utf-8-sig")
     # the audit log is left out on purpose, and both guides say so
-    assert "denetim kaydı (audit.jsonl.gz) bilinçli olarak pakete" in text
-    assert "audit.jsonl.gz) is left out on purpose" in english.decode("utf-8-sig")
+    assert "denetim kaydı (audit.jsonl) bilinçli olarak pakete" in text
+    assert "audit log (audit.jsonl) is left out on purpose" in english.decode("utf-8-sig")
 
     for day in DAYS:
         assert f"sha256sum vault/{day:%Y/%m/%d}/*.gz" in text  # C2
@@ -701,7 +701,7 @@ def test_the_audit_log_goes_in_only_when_asked_for(ec_built: Built, tmp_path: Pa
     assert index["days"][0]["excluded"] == []
     assert {e["role"] for e in index["files"] if e["path"].endswith("audit.jsonl.gz")} == {"audit"}
     text = (folder / "DOGRULAMA.txt").read_text(encoding="utf-8-sig")
-    assert "audit.jsonl.gz           ARCILOGGER'ın o günkü denetim kaydı" in text
+    assert "audit.jsonl.xz/.gz       ARCILOGGER'ın o günkü denetim kaydı" in text
     assert "bilinçli olarak pakete" not in text
     code, report = isolated(folder)
     assert code == 0, codes(report)
@@ -955,7 +955,9 @@ def test_refuses_an_inconsistent_vault(tmp_path: Path) -> None:
     vault = seal_vault(tmp_path, "ec")
     vault.config = vault.config.model_copy(
         update={
-            "retention": vault.config.retention.model_copy(update={"enabled": True, "days": 730})
+            "retention": vault.config.retention.model_copy(
+                update={"enabled": True, "days": 730, "batch_days": 1}
+            )
         }
     )
     later = datetime.combine(DAYS[0] + timedelta(days=731), time(2, 0), tzinfo=SITE_TZ)
@@ -1194,7 +1196,9 @@ def test_deletion_record_and_chain_anchor_are_shipped_and_verified(tmp_path: Pat
     vault = seal_vault(tmp_path, "ec")
     retention_config = vault.config.model_copy(
         update={
-            "retention": vault.config.retention.model_copy(update={"enabled": True, "days": 730})
+            "retention": vault.config.retention.model_copy(
+                update={"enabled": True, "days": 730, "batch_days": 1}
+            )
         }
     )
     vault.config = retention_config
@@ -1795,7 +1799,9 @@ def test_tamper_deletion_records(tmp_path: Path) -> None:
     vault = seal_vault(tmp_path, "ec")
     vault.config = vault.config.model_copy(
         update={
-            "retention": vault.config.retention.model_copy(update={"enabled": True, "days": 730})
+            "retention": vault.config.retention.model_copy(
+                update={"enabled": True, "days": 730, "batch_days": 1}
+            )
         }
     )
     later = datetime.combine(DAYS[0] + timedelta(days=731), time(2, 0), tzinfo=SITE_TZ)

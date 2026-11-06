@@ -147,7 +147,7 @@
         "xlsx": "Sheets “Sonuçlar” and “Bilgi” (query, range, row count); every cell is text.",
         "csvSemicolons": "UTF-8, separated by semicolons; opens in Excel."
       },
-      "limit": "The file holds at most the rows (default 100,000) or the time the settings allow; a file cut short has a name ending in “-kismi”.",
+      "limit": "The file holds at most the rows (default 100,000) or the time the settings allow; a file cut short, or missing days that are not in the database, has a name ending in “-kismi”.",
       "privacy": "The file contains personal data: keep it only as long as needed and do not share it. The export is written to the audit log.",
       "notSealed": "This file is not sealed; use an evidence package for integrity.",
       "reauth": "Exporting needs your password confirmed within the last {{minutes}} minutes.",
@@ -156,7 +156,12 @@
       "truncatedTitle": "The file was cut short",
       "truncated": {
         "rows": "The row limit was reached: the file holds only the first rows of the search.",
-        "time": "The time limit was reached: the file holds only part of the search."
+        "time": "The time limit was reached: the file holds only part of the search.",
+        "archived": "Some days of the search are not in the database (in the sealed vault or being loaded again): the file holds only the rows the database has."
+      },
+      "archivedDays": {
+        "one": "Day not in the database: {{day}}",
+        "span": "Days not in the database: {{first}} – {{last}}"
       }
     },
     "evidence": {

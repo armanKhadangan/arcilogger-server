@@ -681,7 +681,7 @@ def test_status_json_and_status_file(
         "maintenance_until": "2099-12-31",
         "valid_until": None,
         "modules": ["core_5651", "usage_analytics"],
-        "version": "0.1.0",
+        "version": arcilogger_db.__version__,
         "release_date": status.release_date.isoformat(),
     }
 

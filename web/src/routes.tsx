@@ -73,6 +73,18 @@ export const routes: RouteObject[] = [
             ],
           },
           {
+            // Canlı Durum: each part checks its own permission and module (W5 §6 M3, N6).
+            element: <PermissionGate anyOf={navItem('activity').permissions} />,
+            children: [
+              {
+                path: 'activity',
+                lazy: async () => ({
+                  Component: (await import('@/pages/activity/activity-page')).ActivityPage,
+                }),
+              },
+            ],
+          },
+          {
             element: <PermissionGate anyOf={navItem('search').permissions} />,
             children: [
               {

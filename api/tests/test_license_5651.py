@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import gzip
 import json
+import lzma
 import zipfile
 from collections.abc import Callable, Iterator
 from datetime import UTC, date, datetime, timedelta
@@ -32,6 +33,7 @@ from arcilogger_api.evidence_jobs import EvidenceBuilder
 from arcilogger_api.lookup_testing import AT, DAY, PC, build_site, iso, seal_day
 from arcilogger_api.pdftext import pdf_text
 from arcilogger_api.testing import LoggedIn
+from arcilogger_core import sealedfile
 from arcilogger_core.admin.testing import FakeAgent, Installed
 from arcilogger_core.config import Config
 from arcilogger_core.immutability import is_locked, unlock
@@ -285,13 +287,15 @@ def test_browser_administration_works_in_every_locked_state(
 
 
 def _texts_of(path: Path) -> dict[str, bytes]:
-    """Every member of a package, decompressed when it is gzip."""
+    """Every member of a package, decompressed when it is a sealed file of either format."""
     found: dict[str, bytes] = {}
     with zipfile.ZipFile(path) as archive:
         for name in archive.namelist():
             data = archive.read(name)
-            if name.endswith(".gz"):
+            if name.endswith(sealedfile.SUFFIXES["gzip"]):
                 data = gzip.decompress(data)
+            elif name.endswith(sealedfile.SUFFIXES["xz"]):
+                data = lzma.decompress(data)
             found[name] = data
     return found
 
@@ -350,7 +354,7 @@ def test_no_licence_mark_in_evidence(
             assert value not in content, (name, value)
     with_audit = build_package(client, app, include_audit_log=True)
     members = _texts_of(layout.exports / with_audit["file"])
-    audit_log = f"vault/{DAY.year}/{DAY.month:02d}/{DAY.day:02d}/audit.jsonl.gz"
+    audit_log = f"vault/{DAY.year}/{DAY.month:02d}/{DAY.day:02d}/{sealedfile.audit_name('xz')}"
     assert marks["license_id"] in members[audit_log]  # only the audit log names the licence
     for name, content in members.items():
         assert marks["licensee"] not in content, name

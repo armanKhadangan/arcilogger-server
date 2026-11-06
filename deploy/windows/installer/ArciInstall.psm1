@@ -1487,6 +1487,56 @@ function Get-ArciProgramFolderState {
     'foreign'
 }
 
+function Get-ArciAlembicChain {
+    <#
+    .SYNOPSIS
+        The Alembic revisions of a program's migrations folder (arcilogger_db\migrations\versions
+        in its venv), oldest first, read from the files: no Python and no database (issue #122).
+    .DESCRIPTION
+        Every revision file names itself and the revision it revises ('revision: str = "..."',
+        'down_revision: ... = "..."' or None). They must form one line from one base to one
+        head; anything else throws (no folder, no revision file, a file without both lines, the
+        same revision twice, a merge or a branch, a revision revising one that is not there), so
+        a caller never guesses a head.
+    #>
+    [CmdletBinding()]
+    [OutputType([string[]])]
+    param([Parameter(Mandatory = $true)][string]$Folder)
+    if (-not (Test-Path -LiteralPath $Folder -PathType Container)) {
+        throw ('Geçiş klasörü bulunamadı ya da okunamadı [migrations folder not found or not readable]: {0}' -f $Folder)
+    }
+    $revises = @{}
+    foreach ($file in @(Get-ChildItem -LiteralPath $Folder -Filter '*.py' -File | Where-Object { $_.Extension -eq '.py' -and $_.Name -ne '__init__.py' })) {
+        $text = [System.IO.File]::ReadAllText($file.FullName, [System.Text.Encoding]::UTF8)
+        $revision = [regex]::Match($text, '(?m)^revision(?:\s*:[^=\r\n]*)?\s*=\s*[''"]([^''"\r\n]+)[''"]\s*$')
+        $parent = [regex]::Match($text, '(?m)^down_revision(?:\s*:[^=\r\n]*)?\s*=\s*(?:None|[''"]([^''"\r\n]+)[''"])\s*$')
+        if (-not $revision.Success -or -not $parent.Success) {
+            throw ('Geçiş dosyasında revision ya da down_revision okunamadı [revision or down_revision not readable]: {0}' -f $file.FullName)
+        }
+        $name = $revision.Groups[1].Value
+        if ($revises.ContainsKey($name)) { throw ('Geçiş iki kez var [revision found twice]: {0}' -f $name) }
+        $revises[$name] = $(if ($parent.Groups[1].Success) { $parent.Groups[1].Value } else { $null })
+    }
+    if ($revises.Count -eq 0) { throw ('Geçiş dosyası yok [no revision file]: {0}' -f $Folder) }
+    $next = @{}
+    $bases = @()
+    foreach ($name in $revises.Keys) {
+        $parent = $revises[$name]
+        if ($null -eq $parent) { $bases += $name; continue }
+        if ($next.ContainsKey($parent)) { throw ('Geçişler dallanıyor [the revisions branch] ({0}): {1}' -f $Folder, $parent) }
+        $next[$parent] = $name
+    }
+    if ($bases.Count -ne 1) { throw ('Geçişlerin tek bir başlangıcı yok [not one base revision]: {0}' -f $Folder) }
+    $chain = New-Object System.Collections.Generic.List[string]
+    $at = $bases[0]
+    while ($null -ne $at) {
+        $chain.Add($at)
+        $at = $(if ($next.ContainsKey($at)) { $next[$at] } else { $null })
+    }
+    if ($chain.Count -ne $revises.Count) { throw ('Geçişler tek bir sıra oluşturmuyor [the revisions do not form one line]: {0}' -f $Folder) }
+    , $chain.ToArray()
+}
+
 # --- licence (advisory checks without Python) -----------------------------------------------------
 #
 # The installer reads a licence file (-LicenseFile) and the status file the product writes
@@ -1831,7 +1881,8 @@ function Get-ArciAclPlan {
         Who may do what in the ARCILOGGER folders (least privilege, docs/adr/0007, docs/adr/0014).
     .DESCRIPTION
         Returns one entry per path: Path, Kind (Directory/File), Protect (inheritance from the
-        parent disabled), Aces and Audit. Pure data, no system calls: the dry run prints it and the
+        parent disabled), Aces, Audit and ResetOwner (Set-ArciAclEntry -ResetOwner, for state\crl
+        and state\renewal only). Pure data, no system calls: the dry run prints it and the
         tests check it on any platform. Parents come before their children (Set-ArciVaultAcl.ps1
         creates a missing folder in this order). "Read" of a folder is ReadAndExecute (list and
         traverse), of a file Read. The entries go down the pipeline one by one, so
@@ -1841,11 +1892,25 @@ function Get-ArciAclPlan {
         - Collector (the only network-facing Python service): reads and writes the spool but has no
           Delete right there, so it cannot delete or rename raw evidence (it can write into a
           file it opens; the nightly seal is what proves the content). It has no access to the
-          audit spool, to the sealing/replica/verify/clock state, to the vault or to secret.key.
+          audit spool, to the sealing/replica/verify/clock/CRL/re-stamping state, to the vault
+          or to secret.key.
         - Scheduled tasks (LOCAL SERVICE, see deploy/windows/tasks): seal (read + delete closed
           spool days, write and lock the vault), retention (delete expired vault days), replica,
-          verify and clock check; only they write state\seal, state\replica, state\verify and
-          state\clock (core seal.py trusts state\seal\<day>.json when it decides a day is sealed).
+          verify, clock check, the revocation lists (CrlFetch) and re-stamping (Renew); only
+          they write state\seal, state\replica, state\verify, state\clock, state\crl and
+          state\renewal (core seal.py trusts state\seal\<day>.json when it decides a day is
+          sealed; the CRL job writes only under state\crl; a service that could write
+          state\renewal could silence the re-stamping alerts or hold the run's lock). Renew adds
+          its records to vault\renewals through the inherited Modify of vault, and keeps
+          renewal.json and renewal.lock in state\renewal: every run replaces renewal.json with a
+          new file (atomic write), which gets the folder's inherited entries. A service could
+          have created state\crl or state\renewal, and items in them, under an earlier release
+          (its Modify on state allowed it): both carry ResetOwner, so Administrators become the
+          owner of the folder and of everything below it, and the items below keep the
+          inherited entries only; OWNER RIGHTS gets ReadPermissions only there, so no owner can
+          change the permissions. Renew reads the day and deletion-record tokens (sealed files keep
+          their deny entries, so no task changes them), state\crl, and the stored reports and
+          their tokens in exports\reports (read only).
           The database backup (Backup task, ADR-0009) writes and prunes backups\scheduled, which
           no service can read; backups and backups\db stay administrators-only. The tasks take
           their signed requests from state\requests (ADR-0014) and read admin\keys\keys.json,
@@ -1895,6 +1960,9 @@ function Get-ArciAclPlan {
     $admins = $script:WellKnownSid.Administrators
     $localService = $script:WellKnownSid.LocalService
     $creatorOwner = $script:WellKnownSid.CreatorOwner
+    # OWNER RIGHTS: an entry for it replaces the implicit rights of whoever owns the path (read
+    # and change its permissions) with the entry's own.
+    $ownerRights = 'S-1-3-4'
     $collector = Get-ArciServiceSid 'ArciCollector'
     $ingest = Get-ArciServiceSid 'ArciIngest'
     $api = Get-ArciServiceSid 'ArciApi'
@@ -1906,14 +1974,17 @@ function Get-ArciAclPlan {
     $modify = 'Modify'
     $appendOnly = 'ReadAndExecute, Write'
     $listOnly = 'ListDirectory, ReadAttributes, Traverse'
+    # What the owner of a protected state folder keeps (OWNER RIGHTS): reading its permissions,
+    # never changing them.
+    $ownerOnly = 'ReadPermissions'
     # The API's right on the inbox: create a request file and write it, read it back, list the
     # folder (quotas); deleting is left to CREATOR OWNER (its own temporary files).
     $inboxWriter = 'CreateFiles, WriteData, ReadData, ReadAttributes, ListDirectory'
     # The agent's right on state\requests: read, create a task request and write it.
     $requestWriter = 'ReadAndExecute, CreateFiles, WriteData'
 
-    function New-Entry([string]$Path, [string]$Kind, [bool]$Protect, [object[]]$Aces, [bool]$Audit = $false) {
-        [pscustomobject]@{ Path = $Path; Kind = $Kind; Protect = $Protect; Aces = @($Aces); Audit = $Audit }
+    function New-Entry([string]$Path, [string]$Kind, [bool]$Protect, [object[]]$Aces, [bool]$Audit = $false, [bool]$ResetOwner = $false) {
+        [pscustomobject]@{ Path = $Path; Kind = $Kind; Protect = $Protect; Aces = @($Aces); Audit = $Audit; ResetOwner = $ResetOwner }
     }
     $owners = @(
         (New-ArciAce -Sid $system -Who 'SYSTEM' -Rights $full),
@@ -2112,6 +2183,30 @@ function Get-ArciAclPlan {
                     (New-ArciAce -Sid $localService -Who 'LOCAL SERVICE (tasks)' -Rights $modify),
                     (New-ArciAce -Sid $api -Who 'NT SERVICE\ArciApi' -Rights $read),
                     (New-ArciAce -Sid $worker -Who 'NT SERVICE\ArciWorker' -Rights $read)))),
+        # Revocation lists (CrlFetch, contract D8): stored byte for byte as evidence, so only the
+        # tasks write them; the API (legal status, day page, evidence packages) and the worker
+        # (R20-crl, R20-cert) read them. Both state\crl and state\renewal are new in Wave 5: a
+        # service could have created either with its Modify on state before the upgrade, and
+        # items in it (a renewal.lock with its own Modify would hold every Renew run).
+        # ResetOwner makes Administrators the owner of the folder and of everything below it
+        # and leaves the items below with the inherited entries only; OWNER RIGHTS takes the
+        # owner's implicit right to change the permissions (contract W5-E-9).
+        (New-Entry ($DataRoot + $p + 'state' + $p + 'crl') 'Directory' $true ($owners + @(
+                    (New-ArciAce -Sid $localService -Who 'LOCAL SERVICE (tasks)' -Rights $modify),
+                    (New-ArciAce -Sid $api -Who 'NT SERVICE\ArciApi' -Rights $read),
+                    (New-ArciAce -Sid $worker -Who 'NT SERVICE\ArciWorker' -Rights $read),
+                    (New-ArciAce -Sid $ownerRights -Who 'OWNER RIGHTS (whoever owns it)' -Rights $ownerOnly))) -ResetOwner $true),
+        # Re-stamping state (Renew): renewal.json, from which R20-renewal, R20-cert and the
+        # legal status judge, and renewal.lock, one run at a time. Protected, so a service that
+        # could write it cannot silence those alerts or hold the lock; renewal.json is replaced
+        # on every run and gets these entries by inheritance. The API (Sistem page, legal
+        # status, day page) and the worker (the alerts) read it. ResetOwner and OWNER RIGHTS as
+        # for state\crl.
+        (New-Entry ($DataRoot + $p + 'state' + $p + 'renewal') 'Directory' $true ($owners + @(
+                    (New-ArciAce -Sid $localService -Who 'LOCAL SERVICE (tasks)' -Rights $modify),
+                    (New-ArciAce -Sid $api -Who 'NT SERVICE\ArciApi' -Rights $read),
+                    (New-ArciAce -Sid $worker -Who 'NT SERVICE\ArciWorker' -Rights $read),
+                    (New-ArciAce -Sid $ownerRights -Who 'OWNER RIGHTS (whoever owns it)' -Rights $ownerOnly))) -ResetOwner $true),
         # Signed task requests (seal now, credit query, TSA and replica test; ADR-0014): ArciAdmin
         # writes them and deletes only its own, the tasks take, answer and delete them. No service
         # but the agent can put a request here; the signature is the authority.
@@ -2122,6 +2217,10 @@ function Get-ArciAclPlan {
         (New-Entry ($DataRoot + $p + 'exports') 'Directory' $false @(
                 (New-ArciAce -Sid $api -Who 'NT SERVICE\ArciApi' -Rights $modify),
                 (New-ArciAce -Sid $worker -Who 'NT SERVICE\ArciWorker' -Rights $modify))),
+        # Stored official reports: the Renew task reads them and their tokens to re-stamp the
+        # tokens (contract D3), read only; the API and the worker keep the rights of exports.
+        (New-Entry ($DataRoot + $p + 'exports' + $p + 'reports') 'Directory' $false @(
+                (New-ArciAce -Sid $localService -Who 'LOCAL SERVICE (tasks)' -Rights $read))),
         (New-Entry ($DataRoot + $p + 'logs') 'Directory' $false @(
                 (New-ArciAce -Sid $collector -Who 'NT SERVICE\ArciCollector' -Rights $modify),
                 (New-ArciAce -Sid $ingest -Who 'NT SERVICE\ArciIngest' -Rights $modify),
@@ -2177,8 +2276,12 @@ function Get-ArciAccessControl {
 
 function Set-ArciAccessControl {
     param([Parameter(Mandatory = $true)][System.IO.FileSystemInfo]$Item, [Parameter(Mandatory = $true)]$Security)
-    # Only the changed sections are written (never the owner), which avoids Set-Acl's
-    # "not allowed to be the owner" failure on folders created by another account.
+    # Only the changed sections are written. The owner only where Set-ArciAclEntry -ResetOwner
+    # sets it (state\crl and state\renewal, to Administrators); everywhere else it stays as it
+    # is, which avoids Set-Acl's "not allowed to be the owner" failure on folders created by
+    # another account and keeps what owners rely on: the tasks lock the sealed files they
+    # create, and unlock them for retention, by the owner's right to change their entries (their
+    # Modify has no ChangePermissions; arcilogger_core.immutability).
     if ($Item.PSObject.Methods.Name -contains 'SetAccessControl') { $Item.SetAccessControl($Security); return }
     if ($Item -is [System.IO.DirectoryInfo]) {
         [System.IO.FileSystemAclExtensions]::SetAccessControl([System.IO.DirectoryInfo]$Item, [System.Security.AccessControl.DirectorySecurity]$Security)
@@ -2187,30 +2290,194 @@ function Set-ArciAccessControl {
     [System.IO.FileSystemAclExtensions]::SetAccessControl([System.IO.FileInfo]$Item, [System.Security.AccessControl.FileSecurity]$Security)
 }
 
+function Get-ArciTakeOverError([string]$Folder, [System.IO.FileSystemInfo]$Taken, $ErrorRecord) {
+    # Access denied on an item names no path: name the item and the remedy (Confirm-ArciNoLink,
+    # Set-ArciAclEntry -ResetOwner).
+    "Sahiplik alınamadı, yükseltilmiş PowerShell'de takeown /A /R /F {0} ile elle devralın [could not take ownership, take it over by hand with takeown /A /R /F {0} in an elevated PowerShell]: {1}: {2}" -f $Folder, $Taken.FullName, $ErrorRecord.Exception.Message
+}
+
+function Test-ArciItemGone([System.IO.FileSystemInfo]$Item, $ErrorRecord) {
+    # True when the error says an item was not found and $Item is indeed gone: removed between
+    # its listing and its check or reset (Confirm-ArciNoLink, Set-ArciAclEntry -ResetOwner),
+    # renewal.json replaced in one step or the ".<random>.tmp" name a CrlFetch run removes once
+    # its list has its final name (#170 N2). The cause may come wrapped (a .NET call's
+    # MethodInvocationException, a property's GetValueInvocationException). A not-found error
+    # while the item is still there (an assembly that cannot be loaded, a name Windows cannot
+    # open by its path) is not one: it stands.
+    $notFound = $false
+    for ($exception = $ErrorRecord.Exception; $null -ne $exception; $exception = $exception.InnerException) {
+        if ($exception -is [System.IO.FileNotFoundException] -or $exception -is [System.IO.DirectoryNotFoundException] -or $exception -is [System.Management.Automation.ItemNotFoundException]) { $notFound = $true }
+        # ERROR_FILE_NOT_FOUND and ERROR_PATH_NOT_FOUND, as PowerShell's LinkType reports them.
+        if ($exception -is [System.ComponentModel.Win32Exception] -and @(2, 3) -contains $exception.NativeErrorCode) { $notFound = $true }
+    }
+    $notFound -and -not (Test-ArciItemListed $Item)
+}
+
+function Test-ArciItemListed([System.IO.FileSystemInfo]$Item) {
+    # True while the folder of $Item still lists its exact name (Test-ArciItemGone). Not
+    # Test-Path: Windows drops a trailing dot or space from a path, so an item named so through
+    # \\?\ would read as gone while it is still there (#170, review). A folder that cannot be
+    # listed because it is gone itself lists nothing; any other failure, or no folder above (a
+    # drive root), counts as listed: the error stands.
+    if ($Item -is [System.IO.DirectoryInfo]) { $folder = $Item.Parent } else { $folder = $Item.Directory }
+    if ($null -eq $folder) { return $true }
+    try { $names = @(foreach ($listed in @($folder.GetFileSystemInfos())) { $listed.Name }) }
+    catch { return (-not (Test-ArciItemGone $folder $_)) }
+    $names -contains $Item.Name
+}
+
+function Confirm-ArciNoLink {
+    <#
+    .SYNOPSIS
+        Stop at a link in a protected state folder: a reparse point (a junction, a symbolic
+        link) or a hard link (a file with another name elsewhere), at -Item and, with -Below, at
+        every item below it too (contract W5-E-9, W5-E-11). Changes nothing.
+    .DESCRIPTION
+        Set-ArciVaultAcl.ps1 runs it on state\crl and state\renewal (the plan's ResetOwner
+        entries) before it writes any entry: the entries of state, written before them, reach a
+        folder below that is not protected yet, and through a hard link in it the file it names
+        elsewhere. Set-ArciAclEntry -ResetOwner runs it again on the folder before its entries
+        are written and on each item below before that item's reset. Listing needs only the
+        access Administrators inherit from state; an item removed since it was listed is
+        skipped (Test-ArciItemGone), and one that cannot be read or listed stops it with the
+        take-over error that names -Folder. A name that Windows cannot open by its path (a
+        trailing dot or space, which it drops, or a device name such as NUL, made through the
+        \\?\ prefix) stops it too, before anything of it is read: its path reaches another
+        item, or none, so it can be neither checked nor reset.
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory = $true)][System.IO.FileSystemInfo]$Item, [Parameter(Mandatory = $true)][string]$Folder, [switch]$Below)
+    $items = New-Object System.Collections.Generic.List[object]
+    $items.Add($Item)
+    for ($i = 0; $i -lt $items.Count; $i++) {
+        $checked = $items[$i]
+        # The listed name first: where it ends in a dot or a space, which Windows drops from a
+        # path, or is a device name (NUL, also with an extension, which Windows maps to the
+        # device where it still does), its path opens another item or none, so nothing read by
+        # it would be this item's. The attributes come with the listing. LinkType (PowerShell's
+        # own property) opens the file and is HardLink for a file with more than one name.
+        if ($checked.Name -match '[. ]$' -or $checked.Name -match '^(CON|PRN|AUX|NUL|COM[0-9¹²³]|LPT[0-9¹²³]|CONIN\$|CONOUT\$) *(\.|$)') {
+            throw ("Korunan durum klasöründe Windows'un yolundan açamadığı bir ad var (sonda nokta ya da boşluk, NUL gibi bir aygıt adı), \\?\ önekiyle elle kaldırın [a name in a protected state folder that Windows cannot open by its path (a trailing dot or space, a device name such as NUL), remove it by hand with the \\?\ prefix]: {0}" -f $checked.FullName)
+        }
+        try {
+            $reparse = [bool]($checked.Attributes -band [System.IO.FileAttributes]::ReparsePoint)
+            $hardLink = -not $reparse -and $checked -is [System.IO.FileInfo] -and $checked.LinkType -eq 'HardLink'
+        }
+        catch {
+            # Removed since it was listed: nothing left to check, nothing below it.
+            if (Test-ArciItemGone $checked $_) { continue }
+            throw (Get-ArciTakeOverError $Folder $checked $_)
+        }
+        if ($reparse -or $hardLink) {
+            $message = "Korunan durum klasöründe bir bağlantı var, elle kaldırın [a link (reparse point or hard link) in a protected state folder, remove it by hand]: {0}" -f $checked.FullName
+            if ($hardLink) {
+                # crl._store_new links a new list to its final name from a ".<random>.tmp" name in
+                # the same folder and then removes that name: a run stopped in between leaves both.
+                $message += " (state\crl içinde aynı klasördeki '.<rastgele>.tmp' adı bir CrlFetch çalıştırmasının bıraktığı geçici addır: yalnızca o .tmp adını silin, kanıt olan .crl dosyasını asla silmeyin [in state\crl a '.<random>.tmp' name in the same folder is a temporary name a CrlFetch run left behind: delete only that .tmp name, never a .crl file, which is evidence])"
+            }
+            throw $message
+        }
+        if ($Below -and $checked -is [System.IO.DirectoryInfo]) {
+            try { foreach ($child in @($checked.GetFileSystemInfos())) { $items.Add($child) } }
+            catch { if (-not (Test-ArciItemGone $checked $_)) { throw (Get-ArciTakeOverError $Folder $checked $_) } }
+        }
+    }
+}
+
 function Set-ArciAclEntry {
     <#
     .SYNOPSIS
         Make the explicit ACL of one path exactly the planned one. Explicit entries on children
         (for example the deny entries that arcilogger_core.immutability puts on sealed files) are
         not touched; inherited entries are recomputed by Windows.
+    .DESCRIPTION
+        -ResetOwner (the entry's ResetOwner: state\crl and state\renewal only, contract W5-E-9)
+        also makes BUILTIN\Administrators the owner of the path and of every item below it, and
+        leaves each item below with the inherited entries only (what icacls /reset /T does).
+        A service could create those folders before the upgrade and put items of its own in
+        them, a renewal.lock with its own Modify that holds every Renew run for example, and an
+        owner can always change the entries of what it owns. A link there (a reparse point, or
+        a hard link: a file with another name elsewhere) stops the step before the folder's own
+        entries are written, since writing them also writes the inherited entries of what is
+        below, and resetting a link would take over whatever it points to (Confirm-ArciNoLink;
+        Set-ArciVaultAcl.ps1 runs it on both folders before it writes any entry). In state\crl a
+        hard-linked ".<random>.tmp" is a temporary name a CrlFetch run left behind (it links the
+        new list to its final name, then removes the temporary one): delete only that .tmp
+        name, never a .crl file, which is evidence. An item below that is removed between its
+        listing and its check or reset (renewal.json replaced in one step, a CrlFetch temporary
+        name) is skipped, with what was below it (Test-ArciItemGone: its folder no longer lists
+        its name); a name that Windows cannot open by its path (a trailing dot or space, a
+        device name) stops the step at its check; any other failure stops the step as follows.
+        An item whose entries give Administrators no right to read or take it over is taken
+        over all the same by the elevated step (the Windows CI runner shows it); where that
+        fails (a policy that took the take-ownership privilege away), the step stops with an
+        error naming the item, and "takeown /A /R /F <folder>" in an elevated PowerShell takes
+        it over by hand.
     #>
     [CmdletBinding()]
-    param([Parameter(Mandatory = $true)]$Entry)
+    param([Parameter(Mandatory = $true)]$Entry, [switch]$ResetOwner)
     $item = Get-Item -LiteralPath $Entry.Path -Force
-    $security = Get-ArciAccessControl -Item $item
-    $security.SetAccessRuleProtection([bool]$Entry.Protect, $false)
-    $explicit = $security.GetAccessRules($true, $false, [System.Security.Principal.SecurityIdentifier])
-    foreach ($rule in @($explicit)) { [void]$security.RemoveAccessRuleSpecific($rule) }
-    foreach ($ace in $Entry.Aces) {
-        $sid = New-Object System.Security.Principal.SecurityIdentifier -ArgumentList $ace.Sid
-        $rights = [System.Security.AccessControl.FileSystemRights]$ace.Rights
-        $flags = Get-ArciAceFlags -Kind $Entry.Kind -Ace $ace
-        $inherit = [System.Security.AccessControl.InheritanceFlags]$flags.Inheritance
-        $propagation = [System.Security.AccessControl.PropagationFlags]$flags.Propagation
-        $rule = New-Object System.Security.AccessControl.FileSystemAccessRule -ArgumentList $sid, $rights, $inherit, $propagation, ([System.Security.AccessControl.AccessControlType]::Allow)
-        $security.AddAccessRule($rule)
+    $admins = New-Object System.Security.Principal.SecurityIdentifier -ArgumentList $script:WellKnownSid.Administrators
+    function Get-TakeOverError([System.IO.FileSystemInfo]$Taken, $ErrorRecord) { Get-ArciTakeOverError $item.FullName $Taken $ErrorRecord }
+    function Get-ItemBelow([System.IO.DirectoryInfo]$Folder) {
+        # A folder removed since it was listed has nothing below it.
+        try { $Folder.GetFileSystemInfos() }
+        catch { if (-not (Test-ArciItemGone $Folder $_)) { throw (Get-TakeOverError $Folder $_) } }
     }
-    Set-ArciAccessControl -Item $item -Security $security
+    if ($ResetOwner) {
+        # Every item below is checked before the folder's own entries are written: Windows then
+        # writes the inherited entries of everything below too, and a hard link shares its
+        # entries with the file it names elsewhere. Set-ArciVaultAcl.ps1 checked both folders
+        # before its first entry; this check also covers an item made since then, and any other
+        # caller.
+        Confirm-ArciNoLink -Item $item -Folder $item.FullName -Below
+    }
+    try {
+        $security = Get-ArciAccessControl -Item $item
+        $security.SetAccessRuleProtection([bool]$Entry.Protect, $false)
+        $explicit = $security.GetAccessRules($true, $false, [System.Security.Principal.SecurityIdentifier])
+        foreach ($rule in @($explicit)) { [void]$security.RemoveAccessRuleSpecific($rule) }
+        foreach ($ace in $Entry.Aces) {
+            $sid = New-Object System.Security.Principal.SecurityIdentifier -ArgumentList $ace.Sid
+            $rights = [System.Security.AccessControl.FileSystemRights]$ace.Rights
+            $flags = Get-ArciAceFlags -Kind $Entry.Kind -Ace $ace
+            $inherit = [System.Security.AccessControl.InheritanceFlags]$flags.Inheritance
+            $propagation = [System.Security.AccessControl.PropagationFlags]$flags.Propagation
+            $rule = New-Object System.Security.AccessControl.FileSystemAccessRule -ArgumentList $sid, $rights, $inherit, $propagation, ([System.Security.AccessControl.AccessControlType]::Allow)
+            $security.AddAccessRule($rule)
+        }
+        if ($ResetOwner) { $security.SetOwner($admins) }
+        Set-ArciAccessControl -Item $item -Security $security
+    }
+    catch {
+        if ($ResetOwner) { throw (Get-TakeOverError $item $_) }
+        throw
+    }
+    if (-not $ResetOwner -or $item -isnot [System.IO.DirectoryInfo]) { return }
+    # Then the items below, listed again after the folder's own entries are reset (they now give
+    # Administrators the inherited full control), so that one made since the check is reset too.
+    $sidType = [System.Security.Principal.SecurityIdentifier]
+    $below = New-Object System.Collections.Generic.List[object]
+    foreach ($child in @(Get-ItemBelow $item)) { $below.Add($child) }
+    for ($i = 0; $i -lt $below.Count; $i++) {
+        $child = $below[$i]
+        Confirm-ArciNoLink -Item $child -Folder $item.FullName
+        try {
+            $childSecurity = Get-ArciAccessControl -Item $child
+            $childSecurity.SetAccessRuleProtection($false, $false)
+            foreach ($rule in @($childSecurity.GetAccessRules($true, $false, $sidType))) { [void]$childSecurity.RemoveAccessRuleSpecific($rule) }
+            $childSecurity.SetOwner($admins)
+            Set-ArciAccessControl -Item $child -Security $childSecurity
+        }
+        catch {
+            # Removed since the listing: skipped, and what was below it with it.
+            if (Test-ArciItemGone $child $_) { continue }
+            throw (Get-TakeOverError $child $_)
+        }
+        if ($child -is [System.IO.DirectoryInfo]) {
+            foreach ($grandchild in @(Get-ItemBelow $child)) { $below.Add($grandchild) }
+        }
+    }
 }
 
 function Set-ArciVaultAudit {
@@ -2262,7 +2529,7 @@ $script:FileWriteMask = [int64](0x2 -bor 0x4 -bor 0x10 -bor 0x100 -bor 0x10000 -
 $script:FolderWriteMask = [int64](0x2 -bor 0x4 -bor 0x40 -bor 0x10000 -bor 0x40000 -bor 0x80000 -bor 0x10000000 -bor 0x40000000)
 $script:AncestorWriteMask = [int64](0x40 -bor 0x10000 -bor 0x40000 -bor 0x80000 -bor 0x10000000)
 # What the system plan may name (arcilogger_core.admin.contract: OutboundRule, HostName).
-$script:OutboundRulePattern = '^ARCILOGGER Out (NTP|Kamu SM|SMTP( [2-9])?|Replica)$'
+$script:OutboundRulePattern = '^ARCILOGGER (Out (NTP|Kamu SM|SMTP( [2-9])?|Replica|TURKTRUST|CRL|Proxy)|SNMP [a-z0-9][a-z0-9-]{0,62})$'
 $script:HostNamePattern = '^[A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?$'
 
 function Get-ArciDefaultSourceNetworks {
@@ -2552,8 +2819,9 @@ function Get-ArciOutboundProblem {
     .SYNOPSIS
         Why an outbound entry of the system plan (Rule, HostName, Port) may not be applied in
         strict outbound mode, or $null: the rule is one ApplySystem updates (ARCILOGGER Out NTP,
-        Out Kamu SM, Out SMTP, Out SMTP 2-9, Out Replica), the host a plain host name or IPv4
-        address, the port 1-65535 (contract 2.8.3 step 3).
+        Out Kamu SM, Out SMTP, Out SMTP 2-9, Out Replica, Out TURKTRUST, Out CRL, Out Proxy,
+        SNMP <source>), the host a plain host name or IPv4 address, the port 1-65535 (contract
+        2.8.3 step 3).
     #>
     [CmdletBinding()]
     [OutputType([string])]
@@ -3337,11 +3605,11 @@ Export-ModuleMember -Function @(
     'Get-ArciTimePeerList', 'Read-ArciAdminAddress',
     'ConvertTo-ArciNetwork', 'Test-ArciAddressSpec', 'Test-ArciAddressInNetwork', 'Get-ArciForeignRdpSession',
     'Get-ArciNetworkFacts', 'Get-ArciLocalAddresses', 'Select-ArciServerAddress', 'Get-ArciCollectorBind', 'Test-ArciBindAddress',
-    'Get-ArciInstallMarkerName', 'Get-ArciProgramFolderState',
+    'Get-ArciInstallMarkerName', 'Get-ArciProgramFolderState', 'Get-ArciAlembicChain',
     'ConvertTo-ArciIsoDate', 'Get-ArciJsonField', 'Read-ArciLicenseFile', 'Read-ArciLicenseStatus', 'Test-ArciMaintenanceCovers',
     'Get-ArciProductReleaseDate', 'Get-ArciSiteToday', 'Get-ArciSiteTimestamp', 'Get-ArciOldestVaultDay', 'Get-ArciDaysBetween', 'Get-ArciWheelTestHelpers',
     'New-ArciAce', 'Get-ArciAclPlan', 'Get-ArciAceFlags',
-    'Get-ArciAccessControl', 'Set-ArciAccessControl', 'Set-ArciAclEntry', 'Set-ArciVaultAudit',
+    'Get-ArciAccessControl', 'Set-ArciAccessControl', 'Confirm-ArciNoLink', 'Set-ArciAclEntry', 'Set-ArciVaultAudit',
     'Get-ArciDefaultSourceNetworks', 'ConvertTo-ArciSourceNetwork', 'New-ArciAdminPolicy', 'Read-ArciAdminPolicy',
     'ConvertTo-ArciSyslogSender', 'Get-ArciSyslogSenderProblem', 'Get-ArciOutboundProblem', 'Test-ArciHostName',
     'Get-ArciEventLogApi', 'Register-ArciEventSource', 'Unregister-ArciEventSource', 'Write-ArciEvent', 'Test-ArciProgramConfig', 'Test-ArciPathBelow',

@@ -38,7 +38,7 @@ session of it is open, *active* in every minute in which its non-background byte
 ``usage.active_bytes_threshold``. The 60 seconds of an active minute are split between the
 domains (host names, applications) by their non-background bytes in that minute, so the time per
 site adds up to the active time ("raw" time: 60 s for every minute with any traffic of the
-domain). A session counts once for each subject, in the part (work hours / off hours) of its
+domain). A session counts once for each subject, in the part (work hours, a break, off hours) of its
 first minute. Device rows (per MAC) apply the same rules to that device's traffic alone, and
 count every blocked attempt of the device (``usage.blocked_per_day`` limits only the stored
 attempts), so the devices of a person add up to the person's count. A subject's VLAN and address
@@ -60,7 +60,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from arcilogger_core.timeutil import day_window
-from arcilogger_worker.usage.config import UsageSettings
+from arcilogger_worker.usage.config import PARTS, Part, UsageSettings
 from arcilogger_worker.usage.domains import (
     BackgroundRules,
     DomainNamer,
@@ -155,6 +155,16 @@ def _ts(value: datetime) -> float:
     return value.timestamp()
 
 
+def _whole_minutes(lo: datetime, hi: datetime) -> bool:
+    """A window's bounds: on a minute boundary, ``lo < hi``, so its buckets meet their parts."""
+    return (
+        hi > lo
+        and _ts(lo) % BUCKET == 0
+        and _ts(hi) % BUCKET == 0
+        and (_ts(hi) - _ts(lo)) % BUCKET == 0
+    )
+
+
 def _chunks(items: Sequence[str], size: int) -> Iterator[list[str]]:
     for start in range(0, len(items), size):
         yield list(items[start : start + size])
@@ -197,7 +207,13 @@ class _Metrics:
 
 
 class DayBuilder:
-    """Accumulates one day; :meth:`finish` turns the buckets into table rows."""
+    """Accumulates one day; :meth:`finish` turns the buckets into table rows.
+
+    With ``window`` (``[lo, hi)``, whole minutes) the buckets cover that range instead of the
+    site day ``day``: Canlı Durum's last minutes (W5-M, contract §6.2 M2), which can cross
+    midnight. Each minute's part is then that of its own site day (K2). Such a builder is read
+    from (``cells``, ``flow_list``, ``flow_sessions``, ``subjects``, ``newest``), not finished.
+    """
 
     def __init__(
         self,
@@ -205,16 +221,31 @@ class DayBuilder:
         settings: UsageSettings,
         namer: DomainNamer,
         rules: BackgroundRules,
+        *,
+        window: tuple[datetime, datetime] | None = None,
     ) -> None:
         self.day = day
         self.settings = settings
         self.namer = namer
         self.rules = rules
-        lo, hi = day_window(day)
+        lo, hi = day_window(day) if window is None else window
+        if window is not None and not _whole_minutes(lo, hi):
+            raise ValueError(
+                f"a window is whole minutes, lo < hi: {lo.isoformat()}, {hi.isoformat()}"
+            )
         self.lo, self.hi = lo.astimezone(UTC), hi.astimezone(UTC)
         self.lo_ts, self.hi_ts = _ts(self.lo), _ts(self.hi)
         self.buckets = int((self.hi_ts - self.lo_ts) // BUCKET)
-        self.off = settings.off_hours_minutes(day)
+        #: The part (work / break / off, contract W5 §6 K2) of every minute of the day (of the
+        #: window: each minute by its own day's hours and breaks).
+        self.parts = (
+            settings.day_parts(day)
+            if window is None
+            else [
+                settings.part_of(self.lo + timedelta(seconds=index * BUCKET))
+                for index in range(self.buckets)
+            ]
+        )
         self.flows: dict[Flow, int] = {}
         self.flow_list: list[Flow] = []
         self.subjects: dict[str, Subject] = {}
@@ -233,16 +264,16 @@ class DayBuilder:
         self.event_ips: dict[str, Counter[str]] = defaultdict(Counter)
         self.event_device_vlans: dict[tuple[str, str], Counter[int]] = defaultdict(Counter)
         self.event_device_ips: dict[tuple[str, str], Counter[str]] = defaultdict(Counter)
-        self.sessions: Counter[tuple[str, bool]] = Counter()
+        self.sessions: Counter[tuple[str, Part]] = Counter()
         #: subject → (part, flow id) → sessions
-        self.flow_sessions: dict[str, Counter[tuple[bool, int]]] = defaultdict(Counter)
-        self.device_sessions: Counter[tuple[str, str, bool]] = Counter()
+        self.flow_sessions: dict[str, Counter[tuple[Part, int]]] = defaultdict(Counter)
+        self.device_sessions: Counter[tuple[str, str, Part]] = Counter()
         self.blocked_events: dict[str, list[dict[str, Any]]] = defaultdict(list)
-        self.blocked_counts: Counter[tuple[str, bool]] = Counter()
+        self.blocked_counts: Counter[tuple[str, Part]] = Counter()
         #: subject → (MAC, part) → blocked attempts (every one; ``usage_blocked`` keeps the newest)
-        self.device_blocked: dict[str, Counter[tuple[str, bool]]] = defaultdict(Counter)
+        self.device_blocked: dict[str, Counter[tuple[str, Part]]] = defaultdict(Counter)
         #: subject → (part, url, host) → [hits, first, last, category, blocked]
-        self.urls: dict[str, dict[tuple[bool, str, str | None], list[Any]]] = defaultdict(dict)
+        self.urls: dict[str, dict[tuple[Part, str, str | None], list[Any]]] = defaultdict(dict)
         self.categories: dict[str, Counter[tuple[str, int | None, str]]] = defaultdict(Counter)
         self.newest: float | None = None
         self.counts: Counter[str] = Counter()
@@ -252,9 +283,9 @@ class DayBuilder:
     def bucket_of(self, moment: float) -> int:
         return int((moment - self.lo_ts) // BUCKET)
 
-    def part(self, moment: float) -> bool:
+    def part(self, moment: float) -> Part:
         index = self.bucket_of(moment)
-        return self.off[min(max(index, 0), self.buckets - 1)]
+        return self.parts[min(max(index, 0), self.buckets - 1)]
 
     def _flow(self, flow: Flow) -> int:
         known = self.flows.get(flow)
@@ -329,7 +360,7 @@ class DayBuilder:
         self.blocked_events[key].append(
             {
                 "time": moment,
-                "off_hours": part,
+                "period": part,
                 "mac": subject.mac,
                 "source": source,
                 "action": action,
@@ -544,7 +575,7 @@ class DayBuilder:
                     self.device_vlans[pair][subject.vlan] += 1
             if key not in seen:
                 seen.add(key)
-                part = self.off[index]
+                part = self.parts[index]
                 self.sessions[(key, part)] += 1
                 self.flow_sessions[key][(part, flow_for(subject))] += 1
                 if subject.mac is not None:
@@ -604,7 +635,23 @@ class DayBuilder:
             "flows": len(self.flow_list),
             **dict(sorted(self.counts.items())),
         }
+        breaks = self._break_runs()
+        if breaks:
+            result.stats["breaks"] = breaks
         return result
+
+    def _break_runs(self) -> list[list[int]]:
+        """The breaks of the day as ``[first, end)`` minute pairs: what the rollup counted as
+        break time, kept with the day for the person timeline's bands (W5-P)."""
+        runs: list[list[int]] = []
+        for index, part in enumerate(self.parts):
+            if part != "break":
+                continue
+            if runs and runs[-1][1] == index:
+                runs[-1][1] = index + 1
+            else:
+                runs.append([index, index + 1])
+        return runs
 
     def _moment(self, index: int) -> datetime:
         return datetime.fromtimestamp(self.lo_ts + index * BUCKET, UTC)
@@ -614,29 +661,29 @@ class DayBuilder:
         cells = self.cells.get(key, {})
         online = self.online.get(key, set())
         threshold = self.settings.active_bytes_threshold
-        metrics = {False: _Metrics(), True: _Metrics()}
+        metrics = {part: _Metrics() for part in PARTS}
         for index in online:
-            metrics[self.off[index]].online += 1
-        domains: dict[tuple[bool, str], dict[str, Any]] = {}
-        apps: dict[tuple[bool, str], list[Any]] = {}
-        hourly: dict[tuple[int, bool], list[Any]] = {}
-        runs: dict[bool, list[list[Any]]] = {False: [], True: []}
-        devices: dict[tuple[str, bool], _Metrics] = {}
-        device_domains: dict[tuple[str, bool], dict[str, float]] = defaultdict(
+            metrics[self.parts[index]].online += 1
+        domains: dict[tuple[Part, str], dict[str, Any]] = {}
+        apps: dict[tuple[Part, str], list[Any]] = {}
+        hourly: dict[tuple[int, Part], list[Any]] = {}
+        runs: dict[Part, list[list[Any]]] = {part: [] for part in PARTS}
+        devices: dict[tuple[str, Part], _Metrics] = {}
+        device_domains: dict[tuple[str, Part], dict[str, float]] = defaultdict(
             lambda: defaultdict(float)
         )
         for index in online:
-            hour = hourly.setdefault((index // 60, self.off[index]), [0, 0, 0.0, 0.0, Counter()])
+            hour = hourly.setdefault((index // 60, self.parts[index]), [0, 0, 0.0, 0.0, Counter()])
             hour[0] += 1
         for mac, minutes in self.online_device.get(key, {}).items():
             for index in minutes:
-                devices.setdefault((mac, self.off[index]), _Metrics()).online += 1
+                devices.setdefault((mac, self.parts[index]), _Metrics()).online += 1
         device_blocked = self.device_blocked.get(key, Counter())
         for device_part in device_blocked:  # a device with blocked attempts only has a row too
             devices.setdefault(device_part, _Metrics())
         for index in sorted(cells):
             flows = cells[index]
-            part = self.off[index]
+            part = self.parts[index]
             total = metrics[part]
             hour = hourly.setdefault((index // 60, part), [0, 0, 0.0, 0.0, Counter()])
             nonbg = 0.0
@@ -735,7 +782,7 @@ class DayBuilder:
         # blocked attempts or URLs that day) those of the filter events.
         vlan = _most(self.vlans.get(key) or self.event_vlans.get(key))
         main_ip = _most(self.subject_ips.get(key) or self.event_ips.get(key))
-        for part in (False, True):
+        for part in PARTS:
             values = metrics[part]
             blocked = self.blocked_counts.get((key, part), 0)
             sessions = self.sessions.get((key, part), 0)
@@ -746,7 +793,7 @@ class DayBuilder:
                 {
                     "day": self.day,
                     "subject": key,
-                    "off_hours": part,
+                    "period": part,
                     "kind": subject.kind,
                     "person_id": subject.person_id,
                     "mac": subject.mac if subject.kind == "device" else None,
@@ -769,7 +816,7 @@ class DayBuilder:
                     "day": self.day,
                     "subject": key,
                     "domain": domain,
-                    "off_hours": part,
+                    "period": part,
                     "kind": row["kind"],
                     "seconds": row["seconds"],
                     "raw_seconds": row["raw"],
@@ -789,7 +836,7 @@ class DayBuilder:
                     "day": self.day,
                     "subject": key,
                     "app": app_name,
-                    "off_hours": part,
+                    "period": part,
                     "appcat": appcat,
                     "seconds": seconds,
                     "bytes": round(volume),
@@ -801,7 +848,7 @@ class DayBuilder:
                 {
                     "hour": datetime.fromtimestamp(self.lo_ts + hour_index * 3600, UTC),
                     "subject": key,
-                    "off_hours": part,
+                    "period": part,
                     "day": self.day,
                     "online_seconds": online_minutes * BUCKET,
                     "active_seconds": active * BUCKET,
@@ -823,7 +870,7 @@ class DayBuilder:
                     "day": self.day,
                     "mac": mac,
                     "subject": key,
-                    "off_hours": part,
+                    "period": part,
                     "ip": device_ip,
                     "vlan": device_vlan,
                     "online_seconds": values.online * BUCKET,
@@ -860,7 +907,7 @@ class DayBuilder:
                     {
                         "day": self.day,
                         "subject": key,
-                        "off_hours": part,
+                        "period": part,
                         "url": url,
                         "hostname": host,
                         "domain": self.namer.registrable(host) if host else None,
@@ -1026,6 +1073,29 @@ def compute_day(
         settings.background_domains, settings.background_appcats, settings.background_ports
     )
     builder = DayBuilder(day, settings, namer, rules)
+    ips, timelines = read_range(session, builder, settings=settings)
+    result = DayResult(
+        day=day,
+        lo=builder.lo,
+        hi=builder.hi,
+        ips=ips,
+        attribution_hash=timelines_hash(timelines),
+        computed_until=None,
+    )
+    builder.finish(result)
+    result.stats["psl"] = namer.source
+    if namer.warning:
+        result.stats["psl_warning"] = namer.warning
+    return result
+
+
+def read_range(
+    session: Session, builder: DayBuilder, *, settings: UsageSettings
+) -> tuple[list[str], dict[str, IpTimeline]]:
+    """Read the logs of the builder's ``[lo, hi)`` (a site day, or a window) into it: the
+    internal source addresses, their attribution timelines, and per group of addresses their
+    traffic, web filter, application and DNS rows, with the session overlap and the DNS window
+    around the range (module text). Returns the addresses and their timelines."""
     lo, hi = builder.lo, builder.hi
     overlap = timedelta(seconds=settings.session_overlap_seconds)
     window = timedelta(seconds=settings.dns_window_seconds)
@@ -1050,16 +1120,4 @@ def compute_day(
                 [*app_before.get(ip, ()), *app.get(ip, ())],
                 [*dns_before.get(ip, ()), *dns.get(ip, ())],
             )
-    result = DayResult(
-        day=day,
-        lo=lo,
-        hi=hi,
-        ips=ips,
-        attribution_hash=timelines_hash(timelines),
-        computed_until=None,
-    )
-    builder.finish(result)
-    result.stats["psl"] = namer.source
-    if namer.warning:
-        result.stats["psl_warning"] = namer.warning
-    return result
+    return ips, timelines

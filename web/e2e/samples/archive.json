@@ -1,0 +1,362 @@
+{
+  "created": {
+    "bytes_done": 0,
+    "bytes_total": 64992,
+    "error_code": null,
+    "expires_at": null,
+    "first_day": "2026-10-04",
+    "id": 1,
+    "last_day": "2026-10-05",
+    "lookup_id": null,
+    "ready_at": null,
+    "reason": "lookup",
+    "requested_at": "2026-10-13T04:01:07.210378Z",
+    "requested_by": "ayse.yilmaz",
+    "status": "queued"
+  },
+  "errors": {
+    "disk_low": {
+      "body": {
+        "error": {
+          "code": "archive_reload_disk_low",
+          "details": {
+            "drive": "data",
+            "estimated_bytes": 168980,
+            "free_bytes": 80530636800,
+            "total_bytes": 536870912000
+          },
+          "message_en": "The reload would take about 165 KB on the database drive and leave less than 15 % free on data. Choose a shorter range or tell the administrator.",
+          "message_tr": "Yükleme veritabanı diskinde (yaklaşık 165 KB) yer kaplar ve data sürücüsünde boş alan %15 altına iner. Daha kısa bir aralık seçin veya sistem yöneticisine bildirin."
+        }
+      },
+      "headers": {},
+      "status": 422
+    },
+    "forbidden": {
+      "body": {
+        "error": {
+          "code": "forbidden",
+          "message_en": "You do not have permission for this action.",
+          "message_tr": "Bu işlem için yetkiniz yok."
+        }
+      },
+      "headers": {},
+      "status": 403
+    },
+    "in_window": {
+      "body": {
+        "error": {
+          "code": "validation_error",
+          "details": [
+            {
+              "loc": [
+                "body",
+                "first_day"
+              ],
+              "msg": "in the database window, nothing to reload: 2026-10-06",
+              "type": "value_error"
+            }
+          ],
+          "message_en": "The submitted data is invalid.",
+          "message_tr": "Gönderilen veriler geçersiz."
+        }
+      },
+      "headers": {},
+      "status": 422
+    },
+    "not_found": {
+      "body": {
+        "error": {
+          "code": "not_found",
+          "message_en": "Not found.",
+          "message_tr": "Kayıt bulunamadı."
+        }
+      },
+      "headers": {},
+      "status": 404
+    },
+    "not_in_vault": {
+      "body": {
+        "error": {
+          "code": "archive_day_not_in_vault",
+          "details": {
+            "days": [
+              "2026-10-03"
+            ]
+          },
+          "message_en": "The sealed archive holds no record of these days (not sealed yet, or removed by retention): 2026-10-03. They cannot be reloaded.",
+          "message_tr": "Şu günlerin mühürlü arşivde kaydı yok (henüz mühürlenmedi veya saklama süresi doldu): 03.10.2026. Bu günler yeniden yüklenemez."
+        }
+      },
+      "headers": {},
+      "status": 422
+    },
+    "privacy_notice_required": {
+      "body": {
+        "error": {
+          "code": "privacy_notice_required",
+          "message_en": "Read and accept the KVKK privacy notice before opening this section with personal data.",
+          "message_tr": "Kişisel veri içeren bu bölümü açmadan önce KVKK bilgilendirme metnini okuyup onaylamanız gerekiyor."
+        }
+      },
+      "headers": {},
+      "status": 403
+    },
+    "too_large": {
+      "body": {
+        "error": {
+          "code": "archive_reload_too_large",
+          "details": {
+            "days": 15,
+            "max_days": 14
+          },
+          "message_en": "One reload may ask for at most 14 days; this request has 15. Narrow the range or split it into several reloads.",
+          "message_tr": "Bir yüklemede en fazla 14 gün istenebilir; bu istek 15 gün. Aralığı daraltın veya birkaç yüklemeye bölün."
+        }
+      },
+      "headers": {},
+      "status": 422
+    },
+    "validation": {
+      "body": {
+        "error": {
+          "code": "validation_error",
+          "details": [
+            {
+              "loc": [
+                "body",
+                "last_day"
+              ],
+              "msg": "last_day is before first_day",
+              "type": "value_error"
+            }
+          ],
+          "message_en": "The submitted data is invalid.",
+          "message_tr": "Gönderilen veriler geçersiz."
+        }
+      },
+      "headers": {},
+      "status": 422
+    }
+  },
+  "existing": {
+    "bytes_done": 64992,
+    "bytes_total": 64992,
+    "error_code": null,
+    "expires_at": "2026-10-20T04:01:07.261880Z",
+    "first_day": "2026-10-04",
+    "id": 1,
+    "last_day": "2026-10-05",
+    "lookup_id": null,
+    "ready_at": "2026-10-13T04:01:07.261880Z",
+    "reason": "lookup",
+    "requested_at": "2026-10-13T04:01:07.210378Z",
+    "requested_by": "ayse.yilmaz",
+    "status": "ready"
+  },
+  "failed": {
+    "bytes_done": 0,
+    "bytes_total": 64992,
+    "error_code": "archive_file_unreadable",
+    "expires_at": null,
+    "first_day": "2026-10-05",
+    "id": 2,
+    "last_day": "2026-10-05",
+    "lookup_id": null,
+    "ready_at": null,
+    "reason": "search",
+    "requested_at": "2026-10-13T04:01:07.380293Z",
+    "requested_by": "tolga",
+    "status": "failed"
+  },
+  "list": {
+    "items": [
+      {
+        "bytes_done": 0,
+        "bytes_total": 48744,
+        "error_code": null,
+        "expires_at": null,
+        "first_day": "2026-10-04",
+        "id": 3,
+        "last_day": "2026-10-04",
+        "lookup_id": null,
+        "ready_at": null,
+        "reason": "search",
+        "requested_at": "2026-10-13T04:01:07.461110Z",
+        "requested_by": "tolga",
+        "status": "queued"
+      },
+      {
+        "bytes_done": 0,
+        "bytes_total": 64992,
+        "error_code": "archive_file_unreadable",
+        "expires_at": null,
+        "first_day": "2026-10-05",
+        "id": 2,
+        "last_day": "2026-10-05",
+        "lookup_id": null,
+        "ready_at": null,
+        "reason": "search",
+        "requested_at": "2026-10-13T04:01:07.380293Z",
+        "requested_by": "tolga",
+        "status": "failed"
+      },
+      {
+        "bytes_done": 64992,
+        "bytes_total": 64992,
+        "error_code": null,
+        "expires_at": "2026-10-20T04:01:07.261880Z",
+        "first_day": "2026-10-04",
+        "id": 1,
+        "last_day": "2026-10-05",
+        "lookup_id": null,
+        "ready_at": "2026-10-13T04:01:07.261880Z",
+        "reason": "lookup",
+        "requested_at": "2026-10-13T04:01:07.210378Z",
+        "requested_by": "ayse.yilmaz",
+        "status": "expired"
+      }
+    ]
+  },
+  "loading": {
+    "bytes_done": 32496,
+    "bytes_total": 64992,
+    "error_code": null,
+    "expires_at": null,
+    "first_day": "2026-10-04",
+    "id": 1,
+    "last_day": "2026-10-05",
+    "lookup_id": null,
+    "ready_at": null,
+    "reason": "lookup",
+    "requested_at": "2026-10-13T04:01:07.210378Z",
+    "requested_by": "ayse.yilmaz",
+    "status": "loading"
+  },
+  "lookup_required": {
+    "body": {
+      "error": {
+        "code": "archive_reload_required",
+        "details": {
+          "bytes_total": 64992,
+          "estimated_bytes": 168980,
+          "first_day": "2026-10-04",
+          "keep_days": 7,
+          "last_day": "2026-10-05"
+        },
+        "message_en": "The days these records need (2026-10-04 - 2026-10-05) are not in the database: it keeps the records of the last 7 days. They can be reloaded from the sealed archive (about 165 KB); the reload is written to the audit log. No answer is given without them.",
+        "message_tr": "İstenen kayıtlar için gereken günler (04.10.2026 - 05.10.2026) veritabanında değil: veritabanı son 7 günün kayıtlarını tutar. Bu günler mühürlü arşivden yeniden yüklenebilir (yaklaşık 165 KB); yükleme denetim kaydına yazılır. Bu günler okunmadan sonuç verilmez."
+      }
+    },
+    "headers": {},
+    "status": 409
+  },
+  "meta": {
+    "captured_at": "2026-10-13T04:01:23.566833+00:00",
+    "clock": "2026-10-13T07:00:00+03:00",
+    "info": "captured by web/scripts/capture_api_samples.py; do not edit",
+    "site_day": "2026-10-09",
+    "site_today": "2026-10-13",
+    "tsa": "mock (never legally valid)"
+  },
+  "ready": {
+    "bytes_done": 64992,
+    "bytes_total": 64992,
+    "error_code": null,
+    "expires_at": "2026-10-20T04:01:07.261880Z",
+    "first_day": "2026-10-04",
+    "id": 1,
+    "last_day": "2026-10-05",
+    "lookup_id": null,
+    "ready_at": "2026-10-13T04:01:07.261880Z",
+    "reason": "lookup",
+    "requested_at": "2026-10-13T04:01:07.210378Z",
+    "requested_by": "ayse.yilmaz",
+    "status": "ready"
+  },
+  "search_archived": {
+    "archived": {
+      "first_day": "2026-10-04",
+      "keep_days": 7,
+      "last_day": "2026-10-05"
+    },
+    "expires_at": "2026-10-13T04:31:07.086978Z",
+    "items": [],
+    "next_cursor": null,
+    "notices": [
+      {
+        "code": "vault_only_before",
+        "message_en": "Records before 09.10.2026 are not in the database; raw lines of those days, if any, are in the sealed vault (available through an evidence package).",
+        "message_tr": "09.10.2026 öncesine ait kayıtlar veritabanında yok; o günlerin ham kayıtları varsa mühürlü arşivdedir (Kanıt Paketi ile alınabilir).",
+        "params": {
+          "date": "2026-10-09"
+        }
+      }
+    ],
+    "plan": {
+      "driver": "messages",
+      "kinds": [
+        "traffic",
+        "web",
+        "dns",
+        "app",
+        "ips",
+        "virus",
+        "utm",
+        "event",
+        "dhcp",
+        "arp",
+        "fw",
+        "account",
+        "interface",
+        "config",
+        "wifi",
+        "heartbeat",
+        "log",
+        "syslog",
+        "unknown",
+        "other"
+      ],
+      "rollup_eligible": true,
+      "selective": true,
+      "tables": [
+        "messages"
+      ]
+    },
+    "query": {
+      "clauses": [],
+      "normalized": "",
+      "text": []
+    },
+    "range": {
+      "from": "2026-10-04T00:00:00+03:00",
+      "to": "2026-10-08T00:00:00+03:00"
+    },
+    "scan": {
+      "complete": true,
+      "elapsed_ms": 14,
+      "scanned_from": "2026-10-04T00:00:00+03:00",
+      "scanned_to": "2026-10-08T00:00:00+03:00",
+      "windows": 7
+    },
+    "search_id": "4d2Ch0KzNhgmTma1kTklnw"
+  },
+  "search_required": {
+    "body": {
+      "error": {
+        "code": "archive_reload_required",
+        "details": {
+          "bytes_total": 64992,
+          "estimated_bytes": 168980,
+          "first_day": "2026-10-04",
+          "keep_days": 7,
+          "last_day": "2026-10-05"
+        },
+        "message_en": "The days these records need (2026-10-04 - 2026-10-05) are not in the database: it keeps the records of the last 7 days. They can be reloaded from the sealed archive (about 165 KB); the reload is written to the audit log. No answer is given without them.",
+        "message_tr": "İstenen kayıtlar için gereken günler (04.10.2026 - 05.10.2026) veritabanında değil: veritabanı son 7 günün kayıtlarını tutar. Bu günler mühürlü arşivden yeniden yüklenebilir (yaklaşık 165 KB); yükleme denetim kaydına yazılır. Bu günler okunmadan sonuç verilmez."
+      }
+    },
+    "headers": {},
+    "status": 409
+  }
+}

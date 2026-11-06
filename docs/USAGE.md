@@ -28,12 +28,13 @@ counsel about the rules for processing personal data
 | **Time per site (estimated)** | The 60 s of each active bucket are split between the sites of that bucket by their non-background bytes: the site times add up to the active time. **Raw time**: 60 s for every bucket with any traffic of the site (not split; drill-down) |
 | **Time per category** | Site times summed by FortiGuard category; sites without a category are **Bilinmiyor** |
 | **Download / upload** | `rcvdbyte` / `sentbyte`: interim deltas plus the final remainder, never counted twice (background included) |
-| **Sessions** | Distinct FortiGate sessions; counted once per subject, in the part (work / off hours) of its first minute; a session over midnight counts on both days |
+| **Sessions** | Distinct FortiGate sessions; counted once per subject, in the part (work hours, break, off hours) of its first minute; a session over midnight counts on both days |
 | **Blocked attempts** | Every web filter `blocked`, DNS filter `block` and application control `block`/`reset` event, with its category; in a person's device breakdown every device counts all of its own attempts. A device with only blocked attempts that day is listed too (also on the report's Cihazlar sheet), with the IP and VLAN of those attempts |
 | **First / last activity** | Start of the first / end of the last active minute |
 | **Hourly heat map** | Day × hour, colour = active minutes of the hour (30 days ending on the selected day) |
 | **Applications** | Time and bytes by FortiGate `app` / `appcat` |
 | **Off-hours use** | Active time outside the work hours (and on holidays) |
+| **Use in breaks** | Active time in the breaks inside the work hours (`usage.work_hours` `breaks`); neither work-hour nor off-hour use |
 | **URLs** | URLs the web filter logged (`fg_web.url`), the newest `usage.urls_per_day` (1000) per subject and day; with certificate inspection HTTPS mostly shows `/` only |
 
 "Active users" counts the subjects (person, else device, else IP) with active time.
@@ -122,7 +123,21 @@ needed.
 ### 2.5 Work hours and holidays
 
 Every minute outside `usage.work_hours` (default Monday-Friday 08:00-18:00) and on the days of
-`usage.holidays` is **off hours**. ARCILOGGER ships only the **fixed-date national holidays** of
+`usage.holidays` is **off hours**. **Breaks** inside the work hours (`breaks`, e.g. lunch
+12:30-13:30) are a part of their own: use in a break is shown as "Mola" (breaks) and is not mixed
+into the work-hour use (filter of the Kullanım page: all hours / work hours / breaks / off hours).
+At most 6 breaks a day, each at least 5 minutes, inside the work hours and not overlapping. When a
+work day has other hours (e.g. Saturday 09:00-13:00), `by_day` gives that day its own hours and
+breaks; a `by_day` entry without breaks has none (the general breaks are not inherited). A change
+rebuilds the last `usage.auto_rebuild_days` days by itself; days older than the database window
+(30 days) are split by break only when their logs are reloaded from the archive and rebuilt.
+Use in a break is personal data too (the same roles, notice and audit record); naming the
+measurement of break-time use in the employee information text is recommended, with a review by
+your legal adviser. A rollback (`-Rollback`) to a version before breaks deletes the usage
+rollups of the days that have break rows; the older version rebuilds only the last
+`usage.auto_rebuild_days` of them by itself, so request a rebuild for the older days (for days
+older than the database window, reload their logs from the archive first). Raw logs and 5651 data
+are not affected. ARCILOGGER ships only the **fixed-date national holidays** of
 Türkiye: 1 January, 23 April, 1 May, 19 May, 15 July, 30 August, 29 October. **The religious
 holidays (Ramazan and Kurban Bayramı) move every year; the administrator enters their dates every
 year as `YYYY-MM-DD`.** Half days (eves, the afternoon of 28 October) cannot be expressed in this
@@ -131,6 +146,7 @@ version: a day is a holiday or it is not.
 ```powershell
 '["01-01", "04-23", "05-01", "05-19", "07-15", "08-30", "10-29", "2027-03-20", "2027-03-21"]' | & $db settings set usage.holidays - --by tolga
 '{"days": [1, 2, 3, 4, 5], "start": "08:30", "end": "18:00"}' | & $db settings set usage.work_hours - --by tolga
+'{"days": [1, 2, 3, 4, 5, 6], "start": "08:00", "end": "18:00", "breaks": [{"start": "12:30", "end": "13:30"}], "by_day": {"6": {"start": "09:00", "end": "13:00"}}}' | & $db settings set usage.work_hours - --by tolga
 ```
 
 (The 2027 dates of the example are placeholders, not real dates; take the year's dates from the
@@ -169,7 +185,7 @@ days by hand.
 | `usage.background_domains` | spec 10.3 list | Background host name patterns (`*`, `?`) |
 | `usage.background_appcats` | `["Update", "Network.Service"]` | Background application categories (sessions without a host name) |
 | `usage.background_ports` | `[53, 123, 853]` | Background destination ports |
-| `usage.work_hours` | Mon-Fri 08:00-18:00 | `{"days": [1..7], "start": "HH:MM", "end": "HH:MM"}` (end exclusive) |
+| `usage.work_hours` | Mon-Fri 08:00-18:00, no breaks | `{"days": [1..7], "start": "HH:MM", "end": "HH:MM", "breaks"?: [{"start", "end"}], "by_day"?: {"1".."7": {"start", "end", "breaks"?}}}` (end exclusive; §2.5) |
 | `usage.holidays` | 7 fixed national holidays | `MM-DD` every year, `YYYY-MM-DD` once |
 | `usage.psl_file` | `""` | Path of a newer `public_suffix_list.dat` (empty: the bundled one) |
 | `usage.psl_private_suffixes` | `false` | Also honour the private section of the list |
@@ -188,7 +204,7 @@ Jobs of the `ArciWorker` service ([CORRELATION.md](CORRELATION.md) section 4):
 
 | Job | When | What |
 |---|---|---|
-| `usage.today` | every 5 minutes | Recomputes today from the logs loaded so far (`partial`) |
+| `usage.today` | every minute (with back-off, §8) | Recomputes today from the logs loaded so far (`partial`); waits twice the last refresh's duration after it ended |
 | `usage.daily` | daily after 00:45 | Rebuilds yesterday as `final` |
 | `usage.reattribute` | every 10 minutes | Rebuilds any of the last `usage.auto_rebuild_days` days whose inputs changed: a device was (re)assigned or the lease timeline changed, late logs were loaded (also while the day was being computed), the `usage.*` settings changed; also missing or still `partial` days |
 | `usage.requests` | every 30 seconds | Rebuilds requested in the web interface (`POST /api/v1/usage/rebuild`) |
@@ -209,9 +225,11 @@ A rebuild needs the day's logs: the web interface (API) refuses a range that sta
 day of the oldest log in the database (before today while there is none; 422
 `usage_rebuild_no_logs`, the answer names the earliest day); a day without logs would be computed
 empty and its rollups replaced by an empty day, so those days keep their rollups (the server
-command `usage rebuild` does not check this). The database's log retention is the setting
-`db.retention_days` (400 days); this release deletes no logs from the database
-([DATA-MODEL.md](DATA-MODEL.md)).
+command `usage rebuild` does not check this). The database keeps the logs for
+`db.retention_days` (30 days); the worker job `db.window` drops older days every night, and the
+raw logs stay in the vault ([DATA-MODEL.md](DATA-MODEL.md)). A rebuild is therefore possible only
+for days whose logs are still in the database; the usage rollups stay for `usage.retention_days`
+(400 days).
 
 ## 6. Privacy and audit
 
@@ -305,6 +323,15 @@ load generator, 50 people (100 user devices plus infrastructure):
 Budget (`worker/tests/test_usage_performance.py`, heavy load with `ARCILOGGER_USAGE_PERF=heavy`):
 30 s and 120 s. Linear extrapolation to the specification's busy day (5 million messages a day,
 ~1.4 million traffic rows): a bit more than one minute per rollup late in the day.
+
+**Refresh every minute (W5-L).** `usage.today` runs every minute, but starts a new refresh only
+when twice the last refresh's duration has passed since that refresh ended. The refresh interval
+is therefore at least one minute and at most three times the last duration: every minute at both
+loads above (2 s and 6 s), about every 3 minutes late on the specification's busy day. A held run
+shows as `skipped` (`reason: backoff`) in the job log; yesterday's final rollup (`usage.daily`) and
+rebuild requests never wait. The page shows "Son güncelleme" (`updated_at`) and how far the logs
+were processed (`computed_until`). A long session's bytes appear only when FortiGate logs them
+(an interim or the final log, §9).
 
 ## 9. Verify on site
 

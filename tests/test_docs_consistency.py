@@ -49,6 +49,7 @@ from arcilogger_core.admin.contract import EVENT_SOURCE, Event
 from arcilogger_core.cli import _build_parser as core_parser
 from arcilogger_core.cli import main as core_main
 from arcilogger_core.config import BackupConfig, Config, IngestConfig, WorkerConfig
+from arcilogger_core.evidence.standalone.verify import LEVEL_LABELS
 from arcilogger_core.license import LICENSOR_EMAIL, LICENSOR_NAME, TRIAL_DAYS
 from arcilogger_core.license.errors import HTTP_STATUS, MESSAGES
 from arcilogger_core.license.modules import CORE_MODULE, MODULES
@@ -221,8 +222,8 @@ def test_offline_bundle_ships_the_whole_docs_tree() -> None:
     # The installer copies the bundle's docs folder with its subfolders.
     install = _read(INSTALLER / "Install-Arcilogger.ps1")
     assert (
-        "foreach ($folder in @('installer', 'scripts', 'tasks', 'config', 'docs', 'licenses'))"
-        in install
+        "foreach ($folder in @('installer', 'scripts', 'tasks', 'desktop', 'config', 'docs', "
+        "'licenses'))" in install
     )
     assert "Copy-Item -LiteralPath $source -Destination $InstallDir -Recurse -Force" in install
 
@@ -831,6 +832,91 @@ def test_auditor_guide_explains_every_verifier_code() -> None:
     assert sorted(codes - documented) == [], "add these codes to DENETCI-KILAVUZU.md section 7"
 
 
+def _verifier_levels() -> tuple[dict[str, set[str]], set[str]]:
+    """The levels verify.py writes out for each code (a level method or ``add`` with a constant
+    level, a ``(level, code, ...)`` tuple, the f-string codes of such calls), and the codes it also
+    reports with a level known only at run time (``CheckError``, ``add(level, ...)``)."""
+    tree = ast.parse(_read(VERIFY_PY))
+    literals = {
+        node.value
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Constant) and isinstance(node.value, str)
+    }
+    levels: dict[str, set[str]] = {}
+    computed: set[str] = set()
+    templates: dict[str, set[str]] = {}
+    for node in ast.walk(tree):
+        pair: list[ast.expr] = []
+        if isinstance(node, ast.Call):
+            func = node.func
+            name = func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", None)
+            if name in LEVELS and node.args:
+                pair = [ast.Constant(name), node.args[0]]
+            elif name == "add" and len(node.args) >= 2:
+                pair = node.args[:2]
+            elif name == "CheckError" and node.args:  # a failure or a warning, as its caller says
+                pair = [func, node.args[0]]
+        elif isinstance(node, ast.Tuple) and len(node.elts) in (2, 4):  # (level, code[, tr, en])
+            pair = node.elts[:2]
+        if not pair:
+            continue
+        level_node, code_node = pair
+        level: str | None = None
+        if isinstance(level_node, ast.Constant):
+            if level_node.value not in LEVELS:
+                continue  # a tuple that is not a finding
+            level = str(level_node.value)
+        code = code_node.value if isinstance(code_node, ast.Constant) else None
+        if isinstance(code, str):
+            if level is None:
+                computed.add(code)
+            else:
+                levels.setdefault(code, set()).add(level)
+        elif isinstance(code_node, ast.JoinedStr) and level is not None:
+            templates.setdefault(_template(code_node), set()).add(level)
+    # A code that is nowhere a literal comes from an f-string ("{kind}-ok"): its template's levels.
+    built = _verifier_codes() - literals
+    for template, template_levels in templates.items():
+        pattern = "[a-z-]+".join(re.escape(part) for part in re.split(r"\{[^}]*\}", template))
+        for name in built:
+            if re.fullmatch(pattern, name):
+                levels.setdefault(name, set()).update(template_levels)
+    return levels, computed
+
+
+def test_auditor_guide_gives_each_code_the_level_the_verifier_prints() -> None:
+    # Q7 of #156: the Düzey column names the labels verify.py prints (LEVEL_LABELS); a vault copy
+    # lowers some package failures to warnings.
+    allowed = {label: {level} for level, label in LEVEL_LABELS.items()}
+    allowed["HATA (kasa kopyasında UYARI)"] = {"fail", "warn"}
+    levels, computed = _verifier_levels()
+    table = _section(_doc("DENETCI-KILAVUZU.md"), "## 7. Doğrulayıcı", "## 8. ")
+    rows = re.findall(r"^\| ([^|]+) \| ([^|]+) \|", table, flags=re.MULTILINE)
+    assert len(rows) > 50, "the section 7 table was not found"
+    wrong: list[str] = []
+    fixed: set[str] = set()
+    for cell, label in rows[1:]:  # after the "Kod | Düzey" header
+        codes = re.findall(r"`([a-z0-9-]+)`", cell)
+        if not codes:
+            if (cell, label) != ("(çıkış kodu 2)", "—"):
+                wrong.append(f"{cell}: no code")
+            continue
+        if label not in allowed:
+            wrong.append(f"{cell}: {label!r} is not a level verify.py prints")
+            continue
+        for code in codes:
+            found = levels.get(code, set())
+            if found and code not in computed:  # a fixed level: the row's level
+                fixed.add(code)
+                matches = found == allowed[label]
+            else:  # computed at run time: the levels the source shows are among the row's
+                matches = found <= allowed[label]
+            if not matches:
+                wrong.append(f"{code}: {label}, verify.py says {sorted(found)}")
+    assert wrong == [], "fix the Düzey column of DENETCI-KILAVUZU.md section 7"
+    assert {"index-missing", "file-not-sealed", "renewal-covered", "report-missing"} <= fixed
+
+
 def test_auditor_guide_covers_web_packages_and_the_report() -> None:
     guide = _flat(_doc("DENETCI-KILAVUZU.md"))
     assert "yazılacak (web arayüzü ile, M6)" not in guide
@@ -839,20 +925,24 @@ def test_auditor_guide_covers_web_packages_and_the_report() -> None:
 
 
 def test_auditor_guide_states_what_the_database_deletes() -> None:
-    """Retention and KVKK decisions are taken on this section: the parsed log tables have no
-    deletion job yet, but the usage rollups (names, sites, URLs) are deleted after
-    ``usage.retention_days`` by the worker job ``usage.retention`` — in both languages."""
-    assert "usage.retention" in {job.name for job in default_jobs(60)}
+    """Retention and KVKK decisions are taken on this section: the parsed log tables keep the
+    database window (``db.retention_days``, the worker job ``db.window``, Wave 5 W5-G) and the
+    usage rollups (names, sites, URLs) are deleted after ``usage.retention_days`` by the worker job
+    ``usage.retention`` — in both languages."""
+    jobs = {job.name for job in default_jobs(60)}
+    assert {"usage.retention", "db.window"} <= jobs
     days = DEFAULT_SETTINGS["usage.retention_days"]
     turkish, _, english = _doc("DENETCI-KILAVUZU.md").partition('<a id="english"></a>')
     tr = _flat(_section(turkish, "## 2. Ne saklanır", "## 3. "))
     en = _flat(_section(english, "**Retention.**", "**Evidence package.**"))
     assert f"**{days} gün** (`usage.retention_days`)" in tr
     assert f"{days} days (`usage.retention_days`)" in en
+    window = DEFAULT_SETTINGS["db.retention_days"]
+    assert f"son **{window} günü** tutar (`db.retention_days`" in tr
+    assert f"keeps the last {window} days (`db.retention_days`" in en
     for text in (tr, en):
         assert "`usage.retention`" in text
-    assert "ayrıştırılmış kayıtlardan hiçbir şey silinmez" in tr
-    assert "no deletion job exists yet for them" in en
+        assert "`db.window`" in text
 
 
 # -- legal wording (spec 0 rule 6, spec 3.3) ------------------------------------------------------
@@ -884,7 +974,13 @@ def test_retention_draft_states_what_the_system_really_keeps() -> None:
     text = _doc("legal/saklama-imha-politikasi-taslak.md")
     for fact in ("730", "760", "`[retention] enabled = false`", "30 gün", "exports\\reports\\"):
         assert fact in text, fact
-    assert "veritabanı imha işi yoktur" in _flat(text)
+    flat = _flat(text)
+    # Wave 5 G1-G4: the database keeps the window, the job drops the rest, reloads stay a while.
+    assert f"**Son {DEFAULT_SETTINGS['db.retention_days']} gün** (`db.retention_days`" in flat
+    assert f"**{DEFAULT_SETTINGS['db.reload_keep_days']} gün** (`db.reload_keep_days`" in flat
+    assert "`db.window`" in text
+    assert "imha tutanağı tutulmaz" in flat
+    assert "veritabanı imha işi yoktur" not in flat
 
 
 def test_legal_drafts_are_linked_where_people_look() -> None:
@@ -1573,7 +1669,7 @@ def test_licence_guides_classify_every_api_area(name: str) -> None:
     assert areas["/imports"] == "bulk_import"
     assert areas["/lookup"] is None
     assert areas["/license"] is None
-    rows = _table_rows(_section(_doc(name), "### 2.2", "### 2.3"), r"`(/[a-z]+)`")
+    rows = _table_rows(_section(_doc(name), "### 2.2", "### 2.3"), r"`(/[a-z-]+)`")
     assert sorted(rows) == sorted(areas)
     for area, module_key in areas.items():
         assert rows[area][-1] == _module_name(module_key, language), area

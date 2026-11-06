@@ -1,0 +1,10 @@
+title = "ARCILOGGER gitleaks configuration: the default rules, plus one allowlist"
+
+[extend]
+useDefault = true
+
+# Every new allowlist entry needs the manager's review in its pull request.
+[[allowlists]]
+description = "token_sha256 fields in JSON (vault manifests, deletion and renewal records) are SHA-256 digests of token files, not secrets"
+regexTarget = "match"
+regexes = ['''token_sha256"\s*:\s*"[0-9a-f]{64}"''']

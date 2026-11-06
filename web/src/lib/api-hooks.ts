@@ -38,6 +38,7 @@ import {
 } from '@tanstack/react-query';
 import { useCallback, useRef, useState } from 'react';
 
+import type { ActivityDevices, ActivityWindow, WanRange, WanRates } from './activity-types';
 import { AGENT_STATUS_POLL_MS, requestPollInterval } from './admin-requests';
 import { api, type QueryValue } from './api';
 import type {
@@ -201,6 +202,8 @@ export const queryKeys = {
   rebuild: (jobId: number) => ['usage-rebuild', jobId] as const,
   dashboard: ['dashboard', 'summary'] as const,
   todayUsage: ['usage', 'company', 'today'] as const,
+  activityDevices: (window: ActivityWindow) => ['activity', 'devices', window] as const,
+  activityWan: (range: WanRange) => ['activity', 'wan', range] as const,
   alerts: (filters: AlertFilters) => ['alerts', 'list', filters] as const,
   alert: (id: number) => ['alerts', 'one', id] as const,
   alertSummary: ['alerts', 'summary'] as const,
@@ -879,8 +882,8 @@ export function useImportCsv() {
 
 /** Live widgets of the dashboard (ingest, seal, credit, clock, alerts): spec 12.3 item 2. */
 export const DASHBOARD_POLL_MS = 30_000;
-/** Usage figures change slowly (the rollups run every few minutes): spec 12.3 item 2. */
-export const USAGE_POLL_MS = 300_000;
+/** Today's usage is recomputed every minute (W5 §6 L1, P2); the pages read it as often. */
+export const USAGE_POLL_MS = 60_000;
 
 /** `GET /dashboard/summary` (`dashboard.view`); every block is `null` without its permission. */
 export function useDashboardSummary(enabled = true) {
@@ -898,6 +901,34 @@ export function useTodayCompanyUsage(enabled = true) {
     queryKey: queryKeys.todayUsage,
     path: '/usage/company',
     intervalMs: USAGE_POLL_MS,
+    enabled,
+  });
+}
+
+// -- Canlı Durum ----------------------------------------------------------------------------------
+
+/** Canlı Durum polls every 10 s while the page is visible (W5 §6 M3). */
+export const ACTIVITY_POLL_MS = 10_000;
+
+/** `GET /activity/devices`: who sends and receives in the last `window` minutes (W5-M). */
+export function useActivityDevices(window: ActivityWindow, enabled = true) {
+  return usePollingQuery<ActivityDevices>({
+    queryKey: queryKeys.activityDevices(window),
+    path: '/activity/devices',
+    params: { window },
+    intervalMs: ACTIVITY_POLL_MS,
+    enabled,
+    keepPrevious: true,
+  });
+}
+
+/** `GET /activity/wan`: the internet lines' speed over SNMP (W5-N). */
+export function useActivityWan(range: WanRange, enabled = true) {
+  return usePollingQuery<WanRates>({
+    queryKey: queryKeys.activityWan(range),
+    path: '/activity/wan',
+    params: { range },
+    intervalMs: ACTIVITY_POLL_MS,
     enabled,
   });
 }

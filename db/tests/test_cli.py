@@ -6,6 +6,8 @@ import io
 import json
 import subprocess
 import sys
+import threading
+import time
 from collections import Counter
 from collections.abc import Iterator
 from datetime import UTC, date, datetime, timedelta
@@ -25,7 +27,7 @@ from arcilogger_db.cli import main
 from arcilogger_db.engine import make_engine
 from arcilogger_db.migrate import head_revisions
 from arcilogger_db.models import AuditLog, IngestOffset, Message, Setting
-from arcilogger_db.partitions import add_months, month_of, months_back_for, partition_name
+from arcilogger_db.partitions import DAYS_AHEAD, DAYS_PER_RUN, day_partition_name
 from arcilogger_db.searchcounts import count_key, hour_of, upsert_counts
 from arcilogger_db.settings import DEFAULT_SETTINGS
 from arcilogger_db.testing import TestServer
@@ -125,34 +127,46 @@ def test_partitions_command_and_missing_horizon_warning(
     setup: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     # One mid-month moment for the CLI (upgrade, partitions, check) and this test: on the real
-    # clock a site midnight on a 1st (or on a day whose today-400 is a 1st) passing between
-    # `upgrade` and the recomputation below changed the expected count and the months dropped.
+    # clock a site midnight passing between `upgrade` and the recomputation below moved the
+    # window by a day.
     now = datetime(2026, 10, 15, 9, tzinfo=UTC)
     monkeypatch.setattr("arcilogger_db.partitions.utc_now", lambda: now)
     monkeypatch.setattr("arcilogger_db.cli.utc_now", lambda: now)
     config = str(setup)
     assert main(["upgrade", "--config", config]) == 0
     out = capsys.readouterr().out
-    assert main(["partitions", "--config", config]) == 0
-    second = capsys.readouterr().out
-    if "Aylık bölümler" not in out:  # TimescaleDB: hypertables, nothing to partition
-        assert "TimescaleDB hypertable" in second
+    if "Bölümler" not in out:  # TimescaleDB: hypertables, nothing to partition
+        assert main(["partitions", "--config", config]) == 0
+        assert "TimescaleDB hypertable" in capsys.readouterr().out
         return
-    back = months_back_for(site_day(now), 400)  # the db.retention_days window
-    assert f"16 tablo, {16 * (back + 1 + 3)} yeni bölüm" in out  # … + current + 3 ahead
-    assert "16 tablo, 0 yeni bölüm" in second  # idempotent
-    # Without next month's partitions `check` asks for attention.
+    # Today, the days ahead and the newest past days of the window, then the rest of it.
+    assert f"16 tablo, {16 * DAYS_PER_RUN} yeni bölüm" in out
+    # UTC days: the window's site days and the UTC day of its first local midnight.
+    window = int(DEFAULT_SETTINGS["db.retention_days"]) + DAYS_AHEAD + 2
+    assert main(["partitions", "--config", config]) == 0
+    assert f"16 tablo, {16 * DAYS_PER_RUN} yeni bölüm" in capsys.readouterr().out
+    assert main(["partitions", "--config", config]) == 0
+    third = capsys.readouterr().out
+    assert f"16 tablo, {16 * (window - 2 * DAYS_PER_RUN)} yeni bölüm" in third
+    today = site_day(now)
+    assert f"Kapsanan son gün: {today + timedelta(days=DAYS_AHEAD):%Y-%m-%d}" in third
+    assert main(["partitions", "--config", config]) == 0
+    assert "16 tablo, 0 yeni bölüm" in capsys.readouterr().out  # idempotent
+    assert main(["check", "--config", config]) == 0
+    capsys.readouterr()
+    # Without the partitions of the next days `check` asks for attention.
     engine = make_engine(load_config(setup))
-    future = [add_months(month_of(site_day(now)), n) for n in (1, 2, 3)]
     with engine.begin() as connection:
-        for month in future:
-            connection.execute(text(f'DROP TABLE "{partition_name("mt_dhcp", month)}"'))
+        for days in range(1, DAYS_AHEAD + 1):
+            name = day_partition_name("mt_dhcp", today + timedelta(days=days))
+            connection.execute(text(f'DROP TABLE "{name}"'))
     engine.dispose()
     assert main(["check", "--config", config]) == 1
     report = json.loads(capsys.readouterr().out)
+    assert report["partitions"]["covered_until"] == f"{today:%Y-%m-%d}"
     assert any("arcilogger-db partitions" in w for w in report["warnings"])
     assert main(["partitions", "--config", config]) == 0
-    assert "16 tablo, 3 yeni bölüm" in capsys.readouterr().out
+    assert f"16 tablo, {DAYS_AHEAD} yeni bölüm" in capsys.readouterr().out
 
 
 def test_check_warns_when_timescaledb_is_installed_but_unused(
@@ -528,6 +542,148 @@ def test_search_counts_status_rebuild_and_verify(
     assert main([*args, "--config", config]) == 0  # the repair it names
     assert "Yükseltmeden" not in capsys.readouterr().out
     assert main(["search-counts", "verify", "--config", config]) == 0
+
+
+def _rows(path: Path, statement: str) -> list[tuple[Any, ...]]:
+    engine = make_engine(load_config(path))
+    try:
+        with engine.connect() as connection:
+            return [tuple(row) for row in connection.execute(text(statement))]
+    finally:
+        engine.dispose()
+
+
+def test_search_counts_rebuild_refuses_a_file_being_reset(
+    setup: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """#182 review Q1 (W5-G-25): a file whose reset is under way (``counts_from_line = 0``,
+    offset 0, unfinished; ingest deletes its rows in steps, then loads it again) is not
+    recounted: a recount would take the mark off between two steps. Nothing is written, and
+    ``status`` shows the file as resetting beside a file still loading."""
+    config = str(setup)
+    assert main(["upgrade", "--config", config]) == 0
+    day = site_day(utc_now())
+    _half_counted_file(setup, "fortigate", day, 4)
+    _half_counted_file(setup, "core-r1", day, 3)
+    # The reset's first transaction: offset 0, marked; its rows and counts not deleted yet.
+    _sql(
+        setup,
+        "UPDATE ingest_offsets SET byte_offset = 0, line_number = 0, counts_from_line = 0 "
+        "WHERE source = 'fortigate'",
+    )
+    offsets = "SELECT * FROM ingest_offsets ORDER BY source"
+    counts = "SELECT * FROM search_counts ORDER BY id"
+    before = _rows(setup, offsets), _rows(setup, counts)
+    capsys.readouterr()
+
+    args = ["search-counts", "rebuild", "--source", "fortigate", "--day", day.isoformat()]
+    assert main([*args, "--config", config]) == 1
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert (
+        f"fortigate {day}: dosya sıfırlanıyor, yeniden sayılmadı [the file is being reset, not "
+        "recounted]." in captured.err
+    )
+    assert "[Ingest is deleting its rows step by step" in captured.err
+    assert (_rows(setup, offsets), _rows(setup, counts)) == before
+
+    assert main(["search-counts", "status", "--config", config]) == 0
+    out = capsys.readouterr().out
+    assert (
+        "Sayılmayı bekleyen dosyalar [files waiting to be counted]: 2 (0 bitmiş, worker işi "
+        "search.counts_backfill sayar [finished, counted by the worker job]; 1 hâlâ yükleniyor "
+        "[still loading]; 1 sıfırlanıyor [resetting])." in out
+    )
+    assert (
+        f"  fortigate {day}: sıfırlanıyor [resetting], satırları silinir, dosya kasadaysa "
+        "yeniden yüklenir [its rows are deleted, then loaded again if its file is in the vault]\n"
+        in out
+    )
+    assert f"  core-r1 {day}: ilk 2 satır sayılmadı [lines not counted], yükleniyor" in out
+
+    # The file still loading is recounted as before; the reset's last step takes the mark off,
+    # and then its file is recounted too.
+    assert (
+        main(
+            [
+                "search-counts",
+                "rebuild",
+                "--source",
+                "core-r1",
+                "--day",
+                day.isoformat(),
+                "--config",
+                config,
+            ]
+        )
+        == 0
+    )
+    _sql(setup, "UPDATE ingest_offsets SET counts_from_line = NULL WHERE source = 'fortigate'")
+    capsys.readouterr()
+    assert main([*args, "--config", config]) == 0
+    assert f"fortigate {day}: 4 satır yeniden sayıldı" in capsys.readouterr().out
+
+
+def _waits_for_a_lock(path: Path, seconds: float = 30.0) -> bool:
+    """Whether another session of the test database comes to wait for a lock within ``seconds``."""
+    engine = make_engine(load_config(path))
+    try:
+        deadline = time.monotonic() + seconds
+        while time.monotonic() < deadline:
+            with engine.connect() as connection:
+                if connection.execute(
+                    text(
+                        "SELECT 1 FROM pg_stat_activity WHERE datname = current_database() "
+                        "AND pid <> pg_backend_pid() AND wait_event_type = 'Lock'"
+                    )
+                ).first():
+                    return True
+            time.sleep(0.05)
+        return False
+    finally:
+        engine.dispose()
+
+
+def test_search_counts_rebuild_waits_for_the_offsets_row_and_then_refuses_a_reset(
+    setup: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """#182 review round 2: the refusal has no race because the rebuild locks the file's
+    ``ingest_offsets`` row (``FOR UPDATE``) before it reads the mark, the row ingest locks in
+    every transaction of a reset (READ COMMITTED). A reset's first transaction that holds the
+    row while the rebuild starts: the rebuild waits for it, then reads the mark that
+    transaction committed and refuses; ``search_counts`` stays as it was."""
+    config = str(setup)
+    assert main(["upgrade", "--config", config]) == 0
+    day = site_day(utc_now())
+    _half_counted_file(setup, "fortigate", day, 4)
+    counts = "SELECT * FROM search_counts ORDER BY id"
+    before = _rows(setup, counts)
+    capsys.readouterr()
+    args = ["search-counts", "rebuild", "--source", "fortigate", "--day", day.isoformat()]
+    results: list[int] = []
+    runner = threading.Thread(target=lambda: results.append(main([*args, "--config", config])))
+    engine = make_engine(load_config(setup))
+    try:
+        with engine.begin() as reset:  # its first transaction, as ingest's _begin_reset
+            reset.execute(
+                text("SELECT 1 FROM ingest_offsets WHERE source = 'fortigate' FOR UPDATE")
+            )
+            runner.start()
+            assert _waits_for_a_lock(setup)
+            reset.execute(
+                text(
+                    "UPDATE ingest_offsets SET byte_offset = 0, line_number = 0, "
+                    "counts_from_line = 0 WHERE source = 'fortigate'"
+                )
+            )
+    finally:
+        runner.join(30.0)
+        engine.dispose()
+    assert results == [1]
+    assert f"fortigate {day}: dosya sıfırlanıyor" in capsys.readouterr().err
+    assert _rows(setup, counts) == before
+    marked = "SELECT counts_from_line FROM ingest_offsets WHERE source = 'fortigate'"
+    assert _rows(setup, marked) == [(0,)]
 
 
 def test_search_counts_refuses_bad_input_and_needs_the_database(

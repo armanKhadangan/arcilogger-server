@@ -1871,7 +1871,7 @@ travels in a URL.
 | `GET /search/fields` | → `FieldCatalogue` (`search.read` only) | — |
 | `GET /search/event` | `?table=&time=&id=` → `SearchEvent` (unknown table or row: 404 `search_event_not_found`; a read that ran out of time: 504 `search_event_timeout`; `extra` display-safe) | `search.event` |
 | `POST /search/refs` | `{search_id, limit: 1..10000}` → `SearchRefs` (+ `evidence.create`) | `search.refs` |
-| `POST /search/export` | `{search_id, format: "csv" \| "xlsx"}` → file (+ `search.export`, re-authentication within 5 min) | `search.export` |
+| `POST /search/export` | `{search_id, format: "csv" \| "xlsx"}` → file (+ `search.export`, re-authentication within 5 min; every day of the range gone from the database: 409 `archive_reload_required` with the search's `details`; a lock wait: 504 `search_timeout`, `export_lock` text) | `search.export` |
 | `GET /search/saved` | → `{items: SavedSearch[]}` (own only) | — |
 | `POST /search/saved` | `SavedSearchIn {name 1..80, q ≤ 1000, range: {preset} \| {from, to}}` → 201 `SavedSearch` | `search.saved_create` |
 | `PUT /search/saved/{id}` | `SavedSearchIn` → `SavedSearch` | `search.saved_update` |
@@ -1916,12 +1916,14 @@ with the codes `vault_only_before` (`from` before the oldest `messages.time`, ca
   jobs wait for it). Details `{files: [{source, day, lines, keys}], lines, waiting}` plus `more:
   true, left` when the time ended the run; `skipped` when nothing was counted and nothing is left.
 - **Command** `arcilogger-db search-counts`: `status` (keys, lines, hours held, the files still
-  marked with their lines not counted), `rebuild --source S --day YYYY-MM-DD` (locks the file's
-  `ingest_offsets` row first, so a file still being loaded can be recounted; clears
-  `counts_from_line`), `verify [--hours 2]` (0–744; one `REPEATABLE READ` read-only snapshot;
-  prints the mixed-case name counts of D6 every time; on a difference lists at most 20 keys and
-  the `rebuild` commands that repair them). Exit codes as the other commands: 0, 1 a difference,
-  2 a usage error (a bad day), 3 the database cannot be reached.
+  marked with their lines not counted; a file being reset is listed as "sıfırlanıyor
+  [resetting]"), `rebuild --source S --day YYYY-MM-DD` (locks the file's `ingest_offsets` row
+  first, so a file still being loaded can be recounted; clears `counts_from_line`; refuses a file
+  being reset, `counts_from_line = 0` and unfinished, W5-G-25: exit 1, a TR/EN text, nothing
+  written), `verify [--hours 2]` (0–744; one `REPEATABLE READ` read-only snapshot; prints the
+  mixed-case name counts of D6 every time; on a difference lists at most 20 keys and the
+  `rebuild` commands that repair them). Exit codes as the other commands: 0, 1 a difference or a
+  file being reset, 2 a usage error (a bad day), 3 the database cannot be reached.
 - `search.stats.run_stats(session, plan, from, to, labels, budget_seconds, sample_rows)`:
   **rollup** when `Plan.rollup_eligible` (only `source`, `type`, `action`, `vlan`, `department`
   and negations, no free text, VLAN subnets private IPv4 ≤ /24, range > 12 h) and
@@ -1945,12 +1947,16 @@ with the codes `vault_only_before` (`from` before the oldest `messages.time`, ca
   `last_run_at`.
 - **Export** (`search.export`): the plan's rows by the window loop in chunks until
   `search.export_max_rows` or `search.export_budget_seconds`, the fill-in queries under the
-  budget left (then `truncated` = `rows` | `time`, a fill-in timeout too, never empty columns:
-  file name `arama-<from>-<to>-kismi.<ext>`, header `X-Arci-Export-Truncated`, the "Bilgi"
-  sheet). CSV: UTF-8 BOM, `;`, CRLF, `csvfiles.neutralise` on every cell; XLSX: write-only,
-  every cell text, sheets "Sonuçlar" and "Bilgi" (query, range, user, time, rows, status and
-  "Bu dosya mühürlü değildir; bütünlük için Kanıt Paketi'ni kullanın."). Built in a
-  `SpooledTemporaryFile` (16 MB), hashed, audited and committed before it is streamed with
+  budget left (then `truncated` = `rows` | `time`, a fill-in timeout too, never empty columns),
+  or days of the range gone from the database (G8, W5-G-24: `truncated` = `archived`; `rows` or
+  `time` wins when both apply): file name `arama-<from>-<to>-kismi.<ext>`, header
+  `X-Arci-Export-Truncated`, the "Bilgi" sheet; whenever days are gone, also header
+  `X-Arci-Export-Archived` (`YYYY-MM-DD` or `YYYY-MM-DD/YYYY-MM-DD`) and the "Bilgi" line
+  "Veritabanında olmayan günler / Days not in the database". CSV: UTF-8 BOM, `;`, CRLF,
+  `csvfiles.neutralise` on every cell; XLSX: write-only, every cell text, sheets "Sonuçlar" and
+  "Bilgi" (query, range, user, time, rows, status and "Bu dosya mühürlü değildir; bütünlük
+  için Kanıt Paketi'ni kullanın."). Built in a `SpooledTemporaryFile` (16 MB), hashed, audited
+  and committed before it is streamed with
   `Content-Length`, `Repr-Digest: sha-256=:…:` and `Cache-Control: no-store`. One export per user
   (409 `search_export_running`); `search.export_max_per_hour` counted from `audit_log` (429
   `search_export_rate_limited`, `Retry-After`).
@@ -2107,8 +2113,9 @@ with the codes `vault_only_before` (`from` before the oldest `messages.time`, ca
   (`search_id`, `q` normalised, `from`, `to`, `kinds`, `driver`, `tables`, `rows`, `complete`,
   `outcome`, `elapsed_ms`, `saved_id`), `search.event` (`table`, `id`, `time`, `raw`),
   `search.refs` (`search_id`, `q`, `from`, `to`, `refs`, `truncated`, `complete`, `sha256`),
-  `search.export` (`search_id`, `q`, `from`, `to`, `format`, `rows`, `truncated`, `bytes`,
-  `sha256`), `search.saved_create` / `_update` (`saved_id`, `name`, `q`), `search.saved_delete`
+  `search.export` (`search_id`, `q`, `from`, `to`, `format`, `rows`, `truncated`, `archived`
+  (`{first_day, last_day, keep_days}` or `null`), `bytes`, `sha256`), `search.saved_create` /
+  `_update` (`saved_id`, `name`, `q`), `search.saved_delete`
   (`saved_id`, `name`), `live.open` (`stream_id`, `q`, `folders`, `backfill`), `live.close`
   (`stream_id`, `seconds`, `delivered`, `dropped`, `reason`, `ranges`), `raw.tail` (`source`,
   `day`, `origin`, `from_line`, `to_line`, `from_offset`, `to_offset`, `count`,
@@ -2781,14 +2788,15 @@ W4F-1, 19.8):
 "stale" | "missing", updated_at | null}], agent: AgentHealth {state: "ok" | "stale" | "missing" |
 "disabled", heartbeat_at | null}, apply_system: ApplySystemHealth {state: "ok" | "failed" |
 "never" | "disabled", at | null, code | null}, tasks: [TaskHealth {task, schedule_tr,
-schedule_en, state: "ok" | "late" | "missing" | "not_used" | "not_observable", last_evidence_at
-| null, evidence}], jobs: [JobHealth {job, schedule_tr, schedule_en, module | null, state: "ok" |
-"failing" | "skipped" | "running" | "never", last_status | null, last_started | null,
-last_finished | null, duration_ms | null, failures, next_due | null}], time: TimeHealth
-{ntp_server | null, fallback_server | null, alert_offset_ms, applied_peers | null, applied_at |
-null, samples: [ClockSampleOut {time, server | null, ok, offset_ms | null, delay_ms | null,
-stratum | null}]}}`. `task` is one of `Seal`, `VerifyDaily`, `VerifyWeekly`, `VerifyMonthly`,
-`Replica`, `Retention`, `Credit`, `ClockCheck`, `Backup`, `Requests`, `ApplySystem`.
+schedule_en, state: "ok" | "late" | "missing" | "not_used" | "not_observable" | "failed", code |
+null, last_evidence_at | null, evidence}], jobs: [JobHealth {job, schedule_tr, schedule_en, module
+| null, state: "ok" | "failing" | "skipped" | "running" | "never", last_status | null,
+last_started | null, last_finished | null, duration_ms | null, failures, next_due | null}], time:
+TimeHealth {ntp_server | null, fallback_server | null, alert_offset_ms, applied_peers | null,
+applied_at | null, samples: [ClockSampleOut {time, server | null, ok, offset_ms | null, delay_ms |
+null, stratum | null}]}}`. `task` is one of `Seal`, `VerifyDaily`, `VerifyWeekly`,
+`VerifyMonthly`, `Replica`, `Retention`, `Credit`, `ClockCheck`, `Backup`, `Requests`,
+`ApplySystem`.
 
 - **Services:** ArciCollector, ArciIngest, ArciWorker from their status files (`updated_at`, else
   the file's modification time; `running` within 2 minutes); ArciApi is always `running` (it
@@ -2797,8 +2805,12 @@ stratum | null}]}}`. `task` is one of `Seal`, `VerifyDaily`, `VerifyWeekly`, `Ve
   `admin\system\status.json`, `failed` when its `ok` is false, else `ok`.
 - **Tasks** (`system_health/tasks.py`, one row per file of `deploy/windows/tasks/`; no Task
   Scheduler or service-manager query, owner question Q19). `missing` = no evidence yet, `late` =
-  evidence older than the limit (each task's cadence plus a grace, not a setting); a file that
-  cannot be read is no evidence and never fails the request:
+  evidence older than the limit (each task's cadence plus a grace, not a setting), `failed` = the
+  evidence file shows that the latest run failed, until the next completed run however old, with
+  `code` `backup_failed`, `index_unreadable`, `stored_file_unreadable`, `renew_failed` or
+  `renew_refused` (null in every other state; never the error text) and the failure's time as
+  `last_evidence_at` (#171); a file that cannot be read is no evidence and never fails the
+  request:
 
   | `task` | `schedule_tr` / `schedule_en` | Evidence (below the data folder) | Late after | `not_used` when |
   |---|---|---|---|---|
@@ -2810,7 +2822,7 @@ stratum | null}]}}`. `task` is one of `Seal`, `VerifyDaily`, `VerifyWeekly`, `Ve
   | Retention | Her gün 02:00 / Daily at 02:00 | none readable: `not_observable` | — | `[retention] enabled = false` |
   | Credit | Her gün 06:00 / Daily at 06:00 | newest `time` of `state\credit.jsonl` | 26 h | `[tsa] provider` ≠ `zamane` |
   | ClockCheck | Saatte bir, 00:05'ten / Hourly from 00:05 | newest `time` of `state\clock\<day>.jsonl` (today, yesterday) | 2 h | — |
-  | Backup | Her gün 01:40 / Daily at 01:40 | `finished` of `state\backup\last.json` | 26 h | `[backup] enabled = false` |
+  | Backup | Her gün 01:40 / Daily at 01:40 | `finished` of `state\backup\last.json`; `failed` (`backup_failed`) when its `ok` is not `true` | 26 h | `[backup] enabled = false` |
   | Requests | Olayla ve 5 dakikada bir / On event and every 5 minutes | `state\requests`, not readable by ArciApi: `not_observable` | — | — |
   | ApplySystem | Olayla ve 5 dakikada bir / On event and every 5 minutes | `at` of `admin\system\status.json` | 15 min | browser administration off |
 

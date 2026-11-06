@@ -31,11 +31,11 @@ import zipfile
 from collections.abc import Mapping, Sequence
 from datetime import date, datetime, timedelta
 from pathlib import Path
-from typing import Annotated, Any, Final, Literal
+from typing import Annotated, Any, Final, Literal, cast, get_args
 
 from fastapi import APIRouter, Depends, Query, Request, Response, status
 from fastapi import Path as PathParam
-from pydantic import BaseModel, ConfigDict, JsonValue
+from pydantic import BaseModel, ConfigDict, Field, JsonValue
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -104,9 +104,15 @@ class ClockSection(BaseModel):
     alert_offset_ms: int
 
 
+class NetworkSection(BaseModel):
+    #: ``[network] https_proxy``: ``http://host:port``, or empty for a direct connection.
+    https_proxy: str
+
+
 class GeneralSection(BaseModel):
     site_name: str
     clock: ClockSection
+    network: NetworkSection
 
 
 class StagedJar(BaseModel):
@@ -149,13 +155,29 @@ class SealReady(BaseModel):
     causes: list[str]
 
 
+TsaServer = Literal["test", "production", "turktrust", "turktrust-http"]
+
+
 class TsaSection(BaseModel):
-    #: ``mock``, ``rfc3161`` or ``zamane`` (only Zamane can be chosen in the browser).
+    #: ``mock``, ``rfc3161``, ``zamane`` or ``turktrust`` (Zamane and TÜRKTRUST can be chosen
+    #: in the browser).
     provider: str
-    #: ``test`` / ``production`` (a Zamane server of Kamu SM), else None.
-    server: Literal["test", "production"] | None
+    #: ``test`` / ``production`` (a Zamane server of Kamu SM), ``turktrust`` /
+    #: ``turktrust-http`` (TÜRKTRUST over HTTPS or plain HTTP), else None.
+    server: TsaServer | None
+    #: The configuration claims legal grade (``TsaConfig.legal_grade``: Kamu SM's production
+    #: server, or TÜRKTRUST's by D12). Whether a day is legal grade also needs its chain (rule 4).
+    legal_grade: bool = False
     credit_alert_threshold: int
     timeout_seconds: int
+    #: TÜRKTRUST over plain HTTP is allowed (its password then travels in clear text).
+    allow_plain_http: bool
+    #: Re-stamping: a token whose TSA certificate expires within this many days is renewed.
+    renew_before_days: int
+    #: Where the revocation lists are fetched from (empty: the certificates' distribution points).
+    crl_urls: list[str]
+    #: A revocation list fetched longer ago than this is stale.
+    crl_max_age_days: int
     java: str | None
     #: The Java 8 installations the administration service found (its heartbeat).
     java_choices: list[str]
@@ -216,6 +238,30 @@ class BackupSection(BaseModel):
     min_free_gb: int
 
 
+class SnmpCapacityIo(BaseModel):
+    """A WAN line's capacity in whole Mbit/s (``capacity_mbps``, Wave 5 §6 N1)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    down: int
+    up: int
+
+
+class SnmpOut(BaseModel):
+    """``[sources.snmp]`` of a source (Wave 5 §6 N1); the two keys only as set/unset."""
+
+    enabled: bool
+    port: int
+    user: str
+    auth: Literal["sha1", "sha256", "sha512"]
+    priv: Literal["aes128", "aes256"]
+    interfaces: list[str]
+    capacity_mbps: dict[str, SnmpCapacityIo]
+    interval_seconds: int
+    auth_key: Literal["set", "unset"]
+    priv_key: Literal["set", "unset"]
+
+
 class SourceOut(BaseModel):
     name: str
     type: Literal["fortigate", "mikrotik", "generic"]
@@ -225,6 +271,8 @@ class SourceOut(BaseModel):
     expected: bool
     transport: Literal["any", "udp", "tcp"]
     enabled: bool
+    #: The internet line's speed over SNMPv3 (W5-N); ``None``: no SNMP table.
+    snmp: SnmpOut | None
     #: The syslog rule: ``open`` (lets it in), ``closed``, ``pending`` (ApplySystem has not
     #: caught up yet), ``not_managed`` (ApplySystem keeps no firewall rule: ``-SkipFirewall``,
     #: or browser administration off).
@@ -370,9 +418,7 @@ def _tsa(
     config = files.config
     tsa = config.tsa
     server = rules.tsa_server(tsa.provider, tsa.url, tsa.port)
-    chosen: Literal["test", "production"] | None = (
-        "test" if server == "test" else "production" if server == "production" else None
-    )
+    chosen = cast(TsaServer, server) if server in get_args(TsaServer) else None
     roots = channel.roots(config)
     legal = set(tsa.legal_root_fingerprints)
     anchors = channel.anchors()
@@ -388,8 +434,13 @@ def _tsa(
     return TsaSection(
         provider=tsa.provider,
         server=chosen,
+        legal_grade=tsa.legal_grade,
         credit_alert_threshold=tsa.credit_alert_threshold,
         timeout_seconds=tsa.timeout_seconds,
+        allow_plain_http=tsa.allow_plain_http,
+        renew_before_days=tsa.renew_before_days,
+        crl_urls=list(tsa.crl_urls),
+        crl_max_age_days=tsa.crl_max_age_days,
         java=tsa.java[0] if tsa.java else None,
         java_choices=list(agent.java_candidates) if agent else [],
         zamane=_zamane(channel, config, staged),
@@ -425,7 +476,9 @@ def _canonical(address: str) -> str:
     return str(ipaddress.ip_address(address))
 
 
-def _sources(channel: Channel, db: Session, config: Config) -> list[SourceOut]:
+def _sources(
+    channel: Channel, db: Session, config: Config, stored: frozenset[str]
+) -> list[SourceOut]:
     """The configured sources with their syslog rule as ApplySystem last reported it. Before its
     first report the firewall counts as managed (an installation manages it unless
     ``-SkipFirewall``, which that report then says): an enabled source is ``pending``. With
@@ -445,11 +498,15 @@ def _sources(channel: Channel, db: Session, config: Config) -> list[SourceOut]:
             firewall = "open" if present else "pending"
         else:
             firewall = "pending" if present else "closed"
-        found.append(
-            SourceOut(
-                **source.model_dump(mode="json"), firewall=firewall, last_seen=seen.get(source.name)
-            )
-        )
+        fields = source.model_dump(mode="json")
+        if source.snmp is not None:
+            auth, priv = rules.snmp_keys(source.name)
+            fields["snmp"] = {
+                **fields["snmp"],
+                "auth_key": rules.secret_state(auth, stored),
+                "priv_key": rules.secret_state(priv, stored),
+            }
+        found.append(SourceOut(**fields, firewall=firewall, last_seen=seen.get(source.name)))
     return found
 
 
@@ -510,6 +567,7 @@ def get_config(db: DbSession, user: SettingsDep, channel: ChannelDep) -> AdminCo
                 fallback_server=config.clock.fallback_server,
                 alert_offset_ms=config.clock.alert_offset_ms,
             ),
+            network=NetworkSection(https_proxy=config.network.https_proxy),
         ),
         tsa=_tsa(channel, files, meta, _staged(db)),
         smtp=SmtpSection(
@@ -547,7 +605,7 @@ def get_config(db: DbSession, user: SettingsDep, channel: ChannelDep) -> AdminCo
             keep_monthly=config.backup.keep_monthly,
             min_free_gb=config.backup.min_free_gb,
         ),
-        sources=_sources(channel, db, config),
+        sources=_sources(channel, db, config, files.stored),
     )
     return AdminConfig(
         config_sha256=files.sha256 or "",
@@ -763,17 +821,26 @@ class ClockBody(BaseModel):
     alert_offset_ms: int | None = None
 
 
+class NetworkBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    https_proxy: str | None = None
+
+
 class GeneralBody(Body):
     site_name: str | None = None
     clock: ClockBody | None = None
+    #: ``[network] https_proxy`` (re-authentication).
+    network: NetworkBody | None = None
     #: Test a changed time server first (SNTP).
     probe: bool = True
 
     def form(self) -> dict[str, Any]:
         data = super().form()
-        clock = data.get("clock")
-        if isinstance(clock, dict):
-            data["clock"] = {key: value for key, value in clock.items() if value is not None}
+        for nested in ("clock", "network"):
+            values = data.get(nested)
+            if isinstance(values, dict):
+                data[nested] = {key: value for key, value in values.items() if value is not None}
         return data
 
 
@@ -943,17 +1010,28 @@ def files_of(ops: Sequence[Mapping[str, JsonValue]]) -> list[dict[str, JsonValue
 
 
 class TsaBody(Body):
-    #: ``test`` or ``production`` (a Zamane server of Kamu SM; ``mock``: 422 ``tsa_mock_refused``).
+    #: ``test`` or ``production`` (a Zamane server of Kamu SM), ``turktrust`` or
+    #: ``turktrust-http`` (needs ``allow_plain_http`` and ``confirm``); ``mock``: 422
+    #: ``tsa_mock_refused``.
     server: str | None = None
     credit_alert_threshold: int | None = None
     timeout_seconds: int | None = None
+    #: TÜRKTRUST over plain HTTP (the password then travels in clear text; re-authentication).
+    allow_plain_http: bool | None = None
+    renew_before_days: int | None = None
+    crl_urls: list[str] | None = None
+    crl_max_age_days: int | None = None
+    #: Write-only: TÜRKTRUST's user name and password (Fernet tokens to the agent).
+    turktrust_username: str | None = None
+    turktrust_password: str | None = None
     #: One of the Java installations of ``java_choices``.
     java: str | None = None
     #: Write-only: the Kamu SM customer number and password (Fernet tokens to the agent).
     customer: str | None = None
     password: str | None = None
     clear_credentials: bool = False
-    #: Production to test stops production stamps: say so.
+    #: Production to test stops production stamps, and turktrust-http sends the password in clear
+    #: text: say so.
     confirm: bool = False
     #: Test new credentials or a new server first (a credit query with the candidate values).
     probe: bool = True
@@ -1166,6 +1244,22 @@ async def upload(
 # -- log sources ----------------------------------------------------------------------------------
 
 
+class SnmpIn(BaseModel):
+    """``[sources.snmp]`` as the browser edits it (Wave 5 §6 N1; the rules check the values, the
+    keys come separately and write-only)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = False
+    port: int = 161
+    user: str = ""
+    auth: Literal["sha1", "sha256", "sha512"] = "sha256"
+    priv: Literal["aes128", "aes256"] = "aes128"
+    interfaces: list[str] = Field(default_factory=list)
+    capacity_mbps: dict[str, SnmpCapacityIo] = Field(default_factory=dict)
+    interval_seconds: int = 15
+
+
 class SourceIn(BaseModel):
     """A ``[[sources]]`` table as the browser edits it (the rules check the values)."""
 
@@ -1179,13 +1273,21 @@ class SourceIn(BaseModel):
     expected: bool = True
     transport: Literal["any", "udp", "tcp"] = "any"
     enabled: bool = True
+    snmp: SnmpIn | None = None
 
 
 class SourceBody(Body):
     source: SourceIn
+    #: The SNMPv3 keys (W5-N, 8 to 64 characters): write-only, left out to keep the stored ones.
+    snmp_auth_key: str | None = None
+    snmp_priv_key: str | None = None
 
     def form(self) -> dict[str, Any]:
-        return {"source": self.source.model_dump(mode="json")}
+        form: dict[str, Any] = {"source": self.source.model_dump(mode="json")}
+        for key in ("snmp_auth_key", "snmp_priv_key"):
+            if getattr(self, key) is not None:
+                form[key] = getattr(self, key)
+        return form
 
 
 class SourceCheckBody(SourceBody):

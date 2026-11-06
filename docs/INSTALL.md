@@ -259,7 +259,7 @@ Added after ARCILOGGER? Run
 ## 3. Java 8 (Kamu SM Zamane client)
 
 ```powershell
-msiexec /i C:\Kurulum\ARCILOGGER-0.1.0\operator-installers\temurin8-jre\OpenJDK8U-jre_x64_windows_hotspot_8u502b07.msi INSTALLDIR="C:\Program Files\Eclipse Adoptium\jre-8\" /qn /norestart /l*v C:\Windows\Temp\temurin8.log
+msiexec /i C:\Kurulum\ARCILOGGER-0.2.0\operator-installers\temurin8-jre\OpenJDK8U-jre_x64_windows_hotspot_8u502b07.msi INSTALLDIR="C:\Program Files\Eclipse Adoptium\jre-8\" /qn /norestart /l*v C:\Windows\Temp\temurin8.log
 & "C:\Program Files\Eclipse Adoptium\jre-8\bin\java.exe" -version
 ```
 
@@ -291,7 +291,7 @@ the values are in `SHA256SUMS.txt`, in the release notes and in the job summary 
 *Summary*):
 
 ```powershell
-Get-FileHash .\ARCILOGGER-Setup-0.1.0.exe, .\ARCILOGGER-0.1.0.zip -Algorithm SHA256 | Format-List Hash, Path
+Get-FileHash .\ARCILOGGER-Setup-0.2.0.exe, .\ARCILOGGER-0.2.0.zip -Algorithm SHA256 | Format-List Hash, Path
 Get-Content .\SHA256SUMS.txt
 ```
 
@@ -330,11 +330,11 @@ repository or the bundle.
 
 ## 6. Copy and verify
 
-Copy the folder to e.g. `C:\Kurulum\ARCILOGGER-0.1.0` (not into `D:\ARCILOGGER`), with the jar:
+Copy the folder to e.g. `C:\Kurulum\ARCILOGGER-0.2.0` (not into `D:\ARCILOGGER`), with the jar:
 
 ```powershell
 Get-ChildItem -Recurse C:\Kurulum | Unblock-File
-Get-FileHash C:\Kurulum\ARCILOGGER-0.1.0\SHA256SUMS -Algorithm SHA256   # = bundle fingerprint
+Get-FileHash C:\Kurulum\ARCILOGGER-0.2.0\SHA256SUMS -Algorithm SHA256   # = bundle fingerprint
 ```
 
 Copying only `ARCILOGGER-Setup-<version>.exe`? Compare its `Get-FileHash` with `SHA256SUMS.txt` on
@@ -343,7 +343,7 @@ the server too; the setup window prints the bundle fingerprint again.
 ## 7. Install
 
 ```powershell
-cd C:\Kurulum\ARCILOGGER-0.1.0
+cd C:\Kurulum\ARCILOGGER-0.2.0
 powershell -ExecutionPolicy Bypass -File .\installer\Install-Arcilogger.ps1 -DryRun `
     -SiteName "<organisation name>" -NtpServer <local time source> -AdminAddress <admin PC>
 powershell -ExecutionPolicy Bypass -File .\installer\Install-Arcilogger.ps1 `
@@ -363,7 +363,7 @@ cause `executable`. Add the client with the script of the bundle,
 `powershell -ExecutionPolicy Bypass -File .\installer\Install-Arcilogger.ps1 -Upgrade -ZamaneJar
 C:\Kurulum\tss-client-console-3.1.33.jar -ZamaneJarSha256 <value from Kamu SM>` (it compares the
 SHA-256, copies and records the file; `[tsa] zamane_jar` must name that file), or upload it in
-**Ayarlar → Kamu SM**: this version knows no Zamane release, so an uploaded client waits for
+**Ayarlar → Zaman damgası**: this version knows no Zamane release, so an uploaded client waits for
 `approve-jar` on the console, at the earliest after `jar_hold_hours` (default 24, section 7.2).)
 
 The setup `.exe` passes the two licence options on to the script; give them from an
@@ -472,7 +472,9 @@ which need no database, start right away; ArciAdmin starts last and stops first;
 interpreter **isolated**, `venv\Scripts\python.exe -I -X utf8 -u -m arcilogger_<package> …`, so no
 environment variable — `PYTHONPATH`, `PYTHONSTARTUP`, machine-wide or the service's own — can make
 them load another module; `ARCILOGGER_CONFIG` still applies) → time sync, on desktop Windows
-the power settings (`Set-ArciPower.ps1`, section 17), firewall, scheduled tasks (including the nightly database dump at
+the power settings (`Set-ArciPower.ps1`, section 17), firewall, scheduled tasks (including the
+revocation-list download `CrlFetch` at 00:30 and the re-stamping `Renew` at 02:30 every day,
+[TIME-STAMPING.md](TIME-STAMPING.md) sections 3 and 4, and the nightly database dump at
 01:40, [BACKUP.md](BACKUP.md), the task requests of the browser in `Requests` (LOCAL SERVICE) and
 `ApplySystem` (SYSTEM), which keeps the firewall and Windows Time in step with the configuration;
 a task you switched off stays off; the tasks run Python isolated too,
@@ -671,8 +673,10 @@ the next step and the skipped step stays "Eksik".
 | Administrator and two-step verification | always (steps 1–3 above) | — |
 | Site settings | no configuration problem of level error about the organisation name or the time servers | Ayarlar → Genel (sections 1, 7.1) |
 | Log sources | at least one enabled source is defined | Ayarlar → Kaynaklar (section 11) |
-| Kamu SM: test server | a successful and verified stamp test in the request history, or the production server is selected | Ayarlar → Kamu SM, test step (section 10) |
-| Kamu SM: production | the production server is selected and sealing is ready | Ayarlar → Kamu SM, production step (section 10, "Switching to production") |
+| Kamu SM: test server | a successful and verified stamp test of the provider in use in the request history, or the production server is selected | Ayarlar → Zaman damgası, test step (section 10) |
+| Kamu SM: production | the production server is selected and sealing is ready | Ayarlar → Zaman damgası, production step (section 10, "Switching to production") |
+| TÜRKTRUST: stamp test (with TÜRKTRUST, in place of Kamu SM's test step) | a successful and verified stamp test of TÜRKTRUST in the request history, or TÜRKTRUST's production server is selected | Ayarlar → Zaman damgası, test step |
+| TÜRKTRUST: production (with TÜRKTRUST, in place of Kamu SM's production step) | TÜRKTRUST's production server (`zd.turktrust.com.tr`, legal grade by D12) is selected and sealing is ready | Ayarlar → Zaman damgası, production step |
 | Replica | the replica is on | Ayarlar → Replika (section 10, "Replica") |
 | E-mail | sending e-mail is switched on, an SMTP server and a sender address are set | Ayarlar → E-posta |
 
@@ -691,7 +695,7 @@ Other users (the auditor etc.) and what comes next: [FIRST-STEPS.md](FIRST-STEPS
 
 ## 10. Kamu SM connection (test → production)
 
-The **Ayarlar → Kamu SM** wizard of the web interface does the steps below in the same order
+The **Ayarlar → Zaman damgası** wizard of the web interface does the steps below in the same order
 (Java, the Zamane client, roots and fingerprints, the customer data with a credit query, the stamp
 test, the switch to production; [SETTINGS.md](SETTINGS.md)). The console path:
 
@@ -748,10 +752,29 @@ Decide **beforehand** whether the Seal task may seal days with test stamps durin
 5. Check with `& $core credit` and `& $core status` (`legal_grade`); the red banner on the sealing
    page must be gone.
 
-ARCILOGGER marks as legal grade only stamps of Kamu SM's production server whose chain reaches a
-root listed in `legal_root_fingerprints`; stamps of the test server have no legal validity (Kamu
-SM). Have the stamps and the record keeping reviewed by a
-lawyer.
+ARCILOGGER marks as legal grade only stamps of Kamu SM's production server (or, by the product
+owner's decision, of TÜRKTRUST's production server) whose chain reaches a root listed in
+`legal_root_fingerprints`; stamps of the test server have no legal validity (Kamu SM). Have the
+stamps and the record keeping reviewed by a lawyer.
+
+### TÜRKTRUST (optional, instead of Kamu SM)
+
+A site that wants its time stamps from TÜRKTRUST chooses the TÜRKTRUST server under Ayarlar →
+Zaman damgası, enters the username and password TÜRKTRUST gave and runs the stamp test. Opening the
+account, comparing the root certificate's fingerprint, the items to verify on site (T1–T5) and the
+manual checklist: [turktrust.md](turktrust.md). TÜRKTRUST offers no credit query; watch the
+balance in its portal. The installer does not ask for the TÜRKTRUST credentials. The rules strict
+outbound opens for TÜRKTRUST, the revocation lists or a proxy: section 12.
+
+### Re-stamping and revocation lists
+
+Before a stamp's TSA certificate expires, the `Renew` task re-stamps it (by default 180 days
+before, `[tsa] renew_before_days`); the `CrlFetch` task downloads the certificate revocation lists
+every day and stores those that verify. The installer registers both; neither needs a hand step.
+**With strict outbound**, write the revocation-list addresses into `[tsa] crl_urls`: the firewall
+opens only the hosts of that list (Kamu SM's CRL addresses are K10, TÜRKTRUST's T4: **verify on
+site**). Details, the alerts (`R20-renewal`, `R20-cert`, `R20-crl`) and the banner:
+[TIME-STAMPING.md](TIME-STAMPING.md).
 
 Credential changes (`secret set` / `secret delete`) are recorded without their values in
 `D:\ARCILOGGER\state\seal\secret-changes.jsonl`; the worker copies them into the audit log
@@ -840,9 +863,15 @@ Firewall (`Set-ArciFirewall.ps1`):
   TCP 5985 from the admin PC only; `-KeepRule '<rule name>'` keeps a rule a monitoring or backup
   agent needs.
 - **Outbound (optional):** `-StrictOutbound`: default Block; NTP, DNS, Kamu SM (zd/tzd and the
-  `[tsa]` host on `[tsa] port`), the Kamu SM certificate host, SMTP and the replica only; Windows'
-  other enabled outbound allow rules (except Core Networking) are disabled too. Switch it off for
-  Windows Update with `-StrictOutbound:$false`.
+  `[tsa]` host on `[tsa] port`; with the provider `turktrust`, zd/tzd on port 80 only), the Kamu SM
+  certificate host, SMTP and the replica only, plus, with the provider `turktrust`, the TÜRKTRUST
+  server (`ARCILOGGER Out TURKTRUST`), the hosts of `[tsa] crl_urls` (`ARCILOGGER Out CRL`, TCP 80
+  and 443) or, with `[network] https_proxy` set, the proxy in place of those two (`ARCILOGGER Out
+  Proxy`), and the address of every log source with SNMP on (`ARCILOGGER SNMP <source>`, UDP, the
+  source's SNMP port, 161 by default; the internet line speed of Canlı Durum,
+  [LIVE-STATUS.md](LIVE-STATUS.md)); Windows' other enabled outbound allow rules (except Core
+  Networking) are disabled too. The rules' ports: [TIME-STAMPING.md](TIME-STAMPING.md) section 1.
+  Switch it off for Windows Update with `-StrictOutbound:$false`.
 - **SMTP (alert e-mail), strict outbound mode only:** with `-StrictOutbound`, and with
   `enabled = true` and a `host` in the `[smtp]` section of `arcilogger.toml`, the script adds the
   outbound rule to that server on the section's `port` (default 587) itself, on every run
@@ -863,7 +892,9 @@ Firewall (`Set-ArciFirewall.ps1`):
 - Changes of `[[sources]]` (on Ayarlar → Kaynaklar or by hand) are loaded by the collector and
   ingest within 5 seconds; the `ApplySystem` task updates the syslog rules in place (only
   `ARCILOGGER Syslog UDP/TCP` and, in strict outbound mode, the `ARCILOGGER Out …` rules; no other
-  rule, no profile, nor 443, 3389, 5985), after a hand edit within 5 minutes. Run the script
+  rule, no profile, nor 443, 3389, 5985), after a hand edit within 5 minutes. It updates the
+  outbound rules, or creates one that is missing, and removes none: an `ARCILOGGER Out TURKTRUST`,
+  `Out CRL` or `Out Proxy` rule whose setting went away stays until the script runs again. Run the script
   yourself when the browser administration is off (`-DisableBrowserAdministration`) or when the
   `[tsa]` URL/port or the admin addresses changed. Restart the services after a change of
   `[collector]`, `[api]`, `[ingest]`, `[worker]` or `[database]` (UDP syslog sent while the
@@ -879,6 +910,63 @@ Firewall (`Set-ArciFirewall.ps1`):
   administration off, run the script above yourself after a change of the sources.
 - `-Remove` (run by the uninstaller) deletes ARCILOGGER's rules and restores the disabled rules
   and the profile settings found before the first run.
+
+### 12.1 Status window (ARCILOGGER Durum)
+
+When a member of the Administrators group logs on to the server, a small **ARCILOGGER Durum**
+window opens by itself. It shows whether ARCILOGGER runs without opening the web interface, and
+it looks again every 10 seconds.
+
+- **Services:** the state of the six Windows services (ArciCollector, ArciIngest, ArciApi,
+  ArciWorker, ArciWeb, ArciAdmin), and whether the API answers.
+- **Log flow:**
+  - the time of the last message;
+  - silent sources: the enabled, expected `[[sources]]` entries with no message for longer
+    than `[seal] gap_minutes` (one that sent nothing since the collector restarted counts too);
+  - a red warning when raw logs cannot be written to disk.
+- **Database loading:** whether the database can be written, and how far loading is behind.
+- **Sealing:**
+  - the last sealed day and its provider;
+  - orange for a failed attempt, with its error;
+  - orange when yesterday is not sealed by 03:00;
+  - red when the seal is later than `[seal] late_after_hours` (48 hours).
+- **Alerts:** the evidence-path alerts of the last 24 hours (`state\alerts.jsonl`). Every alert
+  is on the web interface's Uyarılar page.
+- **Data drive:** the free space of the data folder's drive. It turns orange below 15 % and red
+  below 5 %.
+
+Colours: green "running", orange "attention", red "problem", grey "cannot be read". When the state
+turns red, the taskbar button flashes. There is no sound, and the window does not jump to the
+front.
+
+The window is **read-only**:
+
+- it starts or stops no service and changes no setting;
+- it does not connect to the database;
+- it does not use the network: the API health check goes only to the API on this machine
+  (`[api] host`, by default `127.0.0.1`);
+- it sends no telemetry.
+
+"Web arayüzünü aç" opens `https://localhost/`. Without the root certificate on the server, the
+browser shows a certificate warning (section 8).
+
+- **Start:**
+  - the scheduled task `\ARCILOGGER\Desktop\StatusWindow` opens the window at every logon of a
+    member of Administrators, with the highest rights. There is no UAC prompt. The rights are
+    needed because only administrators may read `state\` of the data folder.
+  - A closed window opens again from the Start menu: **ARCILOGGER → ARCILOGGER Durum**. That
+    shortcut asks for UAC consent.
+  - Without consent, the window shows only the services and the API (on the default port 8000).
+    The configuration and the data folder are open to administrators only, so the other rows
+    say "cannot be read".
+- One window per session. A second start brings the open one to the front (the shortcut asks
+  for UAC consent for that too).
+- An upgrade and the removal close the window. After an upgrade it opens again at the next logon,
+  or from the shortcut.
+- One look from the command line (elevated PowerShell):
+  ```powershell
+  & "C:\Program Files\ARCILOGGER\venv\Scripts\python.exe" -I -m arcilogger_core.desktop --print
+  ```
 
 ## 13. Upgrade and rollback
 
@@ -951,13 +1039,102 @@ any change. If a step fails (exit code `3`):
   against it. The previous program folder is back but only `ArciCollector`, `ArciWeb` and the
   scheduled evidence jobs run (none needs the database: no syslog is lost, sealing goes on);
   `ArciIngest`, `ArciApi` and `ArciWorker` are set to manual start. The installer prints the exact
-  `-Rollback -RestoreDatabase -DatabaseDump <dump>` command (or fix the cause and run `-Upgrade`
-  again);
+  `-Rollback -RestoreDatabase -DatabaseDump <dump>` command with **this** version's installer, the
+  copy in the folder set aside (`C:\Program Files\ARCILOGGER.failed-<time>\installer\`), not the
+  one in `C:\Program Files\ARCILOGGER\installer\`: after the swap-back that is the previous
+  version's again, whose restore writes the dump over the live database (`pg_restore --clean`)
+  and fails on the schema from `0021_db_window` on (or fix the cause and run `-Upgrade` again);
 - whatever could not be put back automatically is listed under "manual action needed".
 
 Manual rollback: `Install-Arcilogger.ps1 -Rollback` (add `-RestoreDatabase` to restore the last
-pre-upgrade dump too; the restore is one transaction). Without `ARCILOGGER.previous`,
+pre-upgrade dump too). The dump is restored into a new database (`<name>_restore_<time>`, with the
+current database's owner, locale, settings and rights; one transaction per object, stopping at the
+first error), which then takes the current one's place by renaming; a failed restore leaves the
+current database as it was. The PostgreSQL data drive needs the current database's size
+(`pg_database_size`), a quarter more and `max_wal_size` free; the installer checks this first and
+refuses otherwise (only a warning when the free space cannot be read or PostgreSQL runs on another
+server). The replaced database is kept as `<name>_replaced_<time>`: the rows written after the dump
+are only there, and it takes disk space until an administrator removes it ([BACKUP.md](BACKUP.md)
+section 5); every restore's replaced database is listed in `install\state.json`
+(`replaced_databases`). The rename needs no other session on the database: close pgAdmin and psql
+windows first (the installer names a session that is still open). Without `ARCILOGGER.previous`,
 `-Rollback -RestoreDatabase` restores only the database while the collector keeps running.
+
+If the restore fails after the program folders were swapped (or without `ARCILOGGER.previous`),
+the database services stay stopped and the installer prints the command to run again. Without
+`ARCILOGGER.previous`, a restore refused before it began to change the database (answered `H`, no
+dump, PostgreSQL not reachable, the locale or the free-space refusal) puts the database services
+back as they were: those that ran start again, those stopped on manual start stay so
+([BACKUP.md](BACKUP.md) section 5). If a step fails
+after the rename has committed, it says so: do not run the restore again (it would replace the
+restored database once more); on TimescaleDB, when `timescaledb_post_restore()` did not run, it
+prints that command and the one that starts the database services. Run the command to run again
+with **this** version's installer, the copy in the folder it was moved to
+(`C:\Program Files\ARCILOGGER.rolled-back-<time>\installer\`), as printed; not the one in
+`C:\Program Files\ARCILOGGER\installer\`: after the swap that is the previous version's, whose
+restore writes the dump over the live database (`pg_restore --clean`), which fails on this
+version's schema.
+
+**Rollback to a version with an older schema (schema revisions from `0021_db_window` on).** A
+version from before `0021_db_window` creates and drops monthly partitions only; it does not know
+the daily partitions (`<table>_pYYYYMMDD`). A version that has `0021_db_window` but not a later
+revision of the installed version (`0022_lease_moves`, for example) runs on, but its own
+`arcilogger-db upgrade` (its repair run, an `-Upgrade` to another bundle) fails on a database at
+a revision it does not ship ("Can't locate revision"). So a `-Rollback` without
+`-RestoreDatabase`, when the installed version's schema has `0021_db_window` and the version
+returned to does not have the installed version's head, takes the database down to the schema of
+the version returned to after the services have stopped and after the FortiGate lease step (below;
+it works on the installed version's schema), before the program folders are swapped: the
+installed version's `arcilogger-db schema downgrade --to <revision> --json` (step
+`database.downgrade`). Both versions' schemas are read from the migration files in their program
+folders (`venv\Lib\site-packages\arcilogger_db\migrations\versions`); neither Python nor the
+database is needed for that. The revisions of the version returned to must be the first ones of
+the installed version's, in the same order. A version returned to that has the installed
+version's head (the same revisions, or more after them) gets no downgrade. The target is the head
+of the version returned to, but never below the revision `0021_db_window` revises
+(`0020_fg_traffic_transip_time`): the older revisions were made for the previous version to run
+on (the NAT rows and FortiGate leases below), and undoing them deletes data (`0017`, for example,
+the FortiGate DHCP table). The downgrade goes only through revisions whose downgrade the
+installer lists as lossless for 5651 data (raw logs, log rows, leases and the audit log keep
+every row): `0022_lease_moves` (removes only the column `leases.moves`, the recorded missed moves
+of the leases: derived data, the FortiGate DHCP raw logs keep the ACKs; they are not rebuilt:
+after a later upgrade the column is empty and the lease job records moves again from its next run
+on, so a lease's moves from before the database window are no longer in the database) and
+`0021_db_window` (below).
+Right before the command, the step reads the database's own revision (`arcilogger-db current`): a
+database at the target or before it (an `-Upgrade -SkipDatabase` left it there) is left as it is;
+one from before `0021_db_window` has no daily partitions either. Down to `0021_db_window` only
+`leases.moves` goes; down to `0020_fg_traffic_transip_time` `0021_db_window` is undone too: the
+downgrade merges the daily partitions into monthly ones (each table and month in a transaction of
+its own), removes the requests to reload days from the archive (the sealed days stay in the
+vault), sets `db.retention_days` back from 30 to 400 and writes that to the audit log as
+`settings.change` (actor `system`; also the upgrade's own 400 → 30 first, when the window job had
+not audited it yet); the installer prints the old and the new value (only when it changed) and
+the audit entries' numbers, and the plan (`-PlanPath`) keeps the command's answer in `result`.
+There is no time limit: on large tables it can take long. The command waits at most 30 seconds for a lock: a backup
+still running (`pg_dump`; the scheduled tasks are paused when the rollback starts) makes it fail;
+wait until the backup has finished and run `-Rollback` again.
+
+- **If the downgrade fails**, the rollback stops with `3` before the program folders are swapped:
+  the installed version stays in place and starts again on its own schema (the merges already
+  committed leave a valid layout of that schema; its `arcilogger-db upgrade` runs first, in case
+  the command ended after moving the schema revision), and the FortiGate leases set to low
+  confidence come back. Run `-Rollback` again: the downgrade goes on where it stopped. If it keeps
+  failing (or the command refused the revision, exit code `2`), restore the database from the
+  pre-upgrade dump ([BACKUP.md](BACKUP.md) section 5):
+
+  ```powershell
+  powershell -ExecutionPolicy Bypass -File "C:\Program Files\ARCILOGGER\installer\Install-Arcilogger.ps1" -Rollback -RestoreDatabase
+  ```
+- If the downgrade succeeded and the program folders cannot be swapped, the installed version's
+  `arcilogger-db upgrade` brings its schema back; if that fails too, only `ArciCollector` and
+  `ArciWeb` run and the installer prints the command to run by hand under "manual action needed".
+- If the schema head of the version returned to cannot be told (no migrations folder or one that
+  cannot be read, files that do not form one line, a head that is not one of the installed
+  version's revisions, revisions that are not the first ones of the installed version's), the
+  way down crosses a revision the installer does not list as lossless, or `-SkipDatabase` is given
+  when the downgrade is needed, the rollback stops with `2` and changes nothing. With
+  `-RestoreDatabase` the pre-upgrade dump replaces the database; no downgrade runs.
 
 A rollback (and the automatic return after a failed upgrade) loads the configuration **with the
 previous version's Python** before it starts that version's services. When the previous version
@@ -1071,19 +1248,22 @@ exits stay empty and the alert `R20-nat:conversion-failed` opens.
   FortiGate's NAT towards a DMZ, another VLAN, a VPN or a branch with the type "Not an internet
   exit".
 
-**Rollback:** the old NAT rows are kept, unread, in this version; `-Rollback` runs no schema
-downgrade, and the previous version reads these rows, that is the NAT values from **before the
-upgrade**. If you changed the internet exits after the upgrade, then after the rollback compare
-the previous version's `nat.public_ips` and `nat.wan_transip` values in Settings → Application
-settings with the change you made in this version and enter them by hand (the changes are in the
-audit log as `settings.change`); do not restore the database for this: `-RestoreDatabase`
-deletes every record made after the upgrade (audit, lookups, reports, alerts, device and person
-assignments). Before running `-Rollback`, download the official reports (PDF) of the lookups
-made in this version: a report is rendered once, on its first download, and the previous
-version does not print the rows this version adds (the unconfigured-sender warning, the "Kısmi
-kanıt [partial evidence]" label, the exit and FortiGate lease rows). On an installation that
-uses FortiGate DHCP the previous version cannot read the FortiGate DHCP records: it may keep a
-FortiGate lease open after the address was released or given to another client. So, before the
+**Rollback:** the old NAT rows are kept, unread, in this version; `-Rollback` does not undo this
+revision (it takes the schema down only to the revision before `0021_db_window`, above), and the
+previous version reads these rows, that is the NAT values from **before the upgrade**. If you
+changed the internet exits after the upgrade, then after the rollback compare the previous
+version's `nat.public_ips` and `nat.wan_transip` values in Settings → Application settings with
+the change you made in this version and enter them by hand (the changes are in the
+audit log as `settings.change`); do not restore the database for this: after `-RestoreDatabase`
+the database in use holds none of the records made after the upgrade (audit, lookups, reports,
+alerts, device and person assignments): they are only in the replaced database,
+`<name>_replaced_<time>` ([BACKUP.md](BACKUP.md) section 5). Before running `-Rollback`,
+download the official reports (PDF) of the lookups made in this version: a report is rendered
+once, on its first download, and the previous version does not print the rows this version adds
+(the unconfigured-sender warning, the "Kısmi kanıt [partial evidence]" label, the exit and
+FortiGate lease rows). On an installation that uses FortiGate DHCP the previous version cannot
+read the FortiGate DHCP records: it may keep a FortiGate lease open
+after the address was released or given to another client. So, before the
 program is swapped, `-Rollback` sets every FortiGate lease to **low confidence**; it prints how
 many and writes the count to the installation log (only derived lease rows change; raw records
 and seals are not touched; with `-RestoreDatabase` this step is skipped). Every chain that rests
@@ -1204,7 +1384,14 @@ The WinSW virtual-account setup (`sc.exe qc ArciCollector`) and "Log on as a ser
 `NT SERVICE\ALL SERVICES`; the EDB installer's rights on `D:\ARCILOGGER\db` and `pg_hba.conf`
 (`127.0.0.1/32 scram-sha-256`); the `auditpol` "File System" subcategory GUID; the Temurin MSI
 `INSTALLDIR` property; TimescaleDB `setup.exe` with the installed 16.x and
-`timescaledb_pre_restore()` / `timescaledb_post_restore()` around a restore; Inno Setup's
+`timescaledb_pre_restore()` / `timescaledb_post_restore()` around a restore; with
+`-Rollback -RestoreDatabase` on TimescaleDB, the rename right after `timescaledb_pre_restore()`
+(no background worker keeps the database open) and the restore of the real chunk count (the
+CI tests restore about ten chunks against TimescaleDB 2.30.2; a site after 400 days has
+thousands: its duration and that it completes), whether the free space it asks for (the current
+database's size, a quarter more and `max_wal_size`) suffices when chunks compressed since the
+dump come back uncompressed, and a TimescaleDB updated between the dump and the rollback (the new
+database gets the current database's extension version); Inno Setup's
 `Turkish.isl`; `arcilogger-api serve` on 127.0.0.1:8000 and that `setup-token` runs by its full
 path in an administrator PowerShell and prints a token (section 9); the Core Networking rule group
 (`Get-NetFirewallRule -DisplayGroup 'Core Networking' | Select-Object -First 1 Group` should print
@@ -1213,11 +1400,15 @@ path in an administrator PowerShell and prints a token (section 9); the Core Net
 Core Networking's rules; Microsoft Defender's state and the two exclusions of section 2 step 4
 after the installation (`Get-MpPreference`), and the owner's decision on `spool` and `vault`
 (exclusion or scheduled scan only); the first night's `D:\ARCILOGGER\state\backup\last.json`, the
-duration and size of the nightly database dump and the first restore drill ([BACKUP.md](BACKUP.md)
-sections 6 and 8); on the upgrade to the version with Arama, how long the schema migration with
-`ix_fg_web_rhost_time` takes on the real database (section 13) and, after the first days,
-`arcilogger-db search-counts verify`: the summary table must match the rows and the counts of
-names not stored in lower case (`fg_dns.qname`, `fg_web.hostname`) must be 0; that the Python
+duration and size of the nightly database dump (the dump starts at 01:40, after the `db.window`
+run at 01:00 and its first retry at 01:15; only the job's rare second retry at 01:45 or a dump
+started late can meet it, and that run then backs off and counts toward `R20-db-window`, contract
+W5-G-24 and W5-G-27) and the first
+restore drill ([BACKUP.md](BACKUP.md) sections 6 and 8); on the upgrade to the version with
+Arama, how long the schema migration with `ix_fg_web_rhost_time` takes on the real database
+(section 13) and, after the first days, `arcilogger-db search-counts verify`: the summary table
+must match the rows and the counts of names not stored in lower case (`fg_dns.qname`,
+`fg_web.hostname`) must be 0; that the Python
 services start with the isolated interpreter (`Get-CimInstance
 Win32_Process -Filter "Name = 'python.exe'" | Format-List CommandLine`: `python.exe -I -X utf8 -u
 -m arcilogger_api serve …`; `sc.exe qc` shows the service wrapper) and that the server id reads the
@@ -1228,7 +1419,29 @@ id on Settings → Licence must equal the one of `arcilogger-db license status`;
 change of the file (`Get-Acl`), that ArciAdmin can add and delete only its own files in
 `kamusm-roots`, that the `ARCILOGGER-Admin` events wake the `Requests`, `Seal` and `ApplySystem`
 tasks (`Get-WinEvent`, the Task Scheduler history), and that no syslog message is lost while a
-firewall rule is updated in place.
+firewall rule is updated in place; for an archive reload of days whose rows are still in the
+database (the window's first days), that while its files are reset in steps (at most 10,000
+lines each; about 0.1 s a step on Linux, measured) the delay on the Live page stays under
+5 seconds and the ingest lag alert does not open, that the ingest log does not repeat "a step of
+its reset waits for a lock" for minutes (on TimescaleDB a step waits while the compression policy
+recompresses a chunk), and how long a round of a reload's partitions takes (one table of a day a
+round: about 30 ms on Linux; a whole day's 16 tables took 0.3–0.45 s on Linux and 0.84 s on a
+Windows CI machine; one table's round not measured on Windows or a spinning disk, contract
+W5-G-25).
+Time stamping: with TÜRKTRUST, [turktrust.md](turktrust.md) sections 2 and 3 (T1–T5 and the manual
+checklist); Kamu SM's revocation-list addresses (K10, [kamusm.md](kamusm.md)). After the first
+`CrlFetch` run `& $core crl status` must show every address downloaded and verified, and after the
+first `Renew` run Sistem → Zamanlanmış görevler must show the task's result; with strict outbound
+`[tsa] crl_urls` must be filled (section 10). How the Zamane console client takes a proxy is not
+known (it does not use `[network] https_proxy` in this release).
+The days a 5651 lookup reads ([SETTINGS.md](SETTINGS.md) section 1): compare the 2-day cap on
+`lookup.max_session_seconds` with FortiGate's longest sessions; MikroTik's own default DHCP lease
+time is not stated in the repository; record the DHCP lease times the site really uses (the lease
+settings are capped at 7 days so that every lookup's days fit one 14-day reload; for a server that
+gives longer leases, enter at most 7 days).
+Canlı Durum ([LIVE-STATUS.md](LIVE-STATUS.md) section 6): how often FortiGate sends interim traffic
+logs (X-B1), the In/Out direction on the WAN interface (X-B2), the SNMPv3 protocols the device
+accepts (X-B3) and the interface names of the WAN lines (X-B4).
 On desktop Windows 11 Pro all of the above plus the power settings, Smart App Control and a
 forced update restart, step by step:
 [KABUL-TESTI-WINDOWS11.md](KABUL-TESTI-WINDOWS11.md).
@@ -1241,7 +1454,7 @@ outcome and the date of the check. Repeat the checks **after every FortiOS upgra
 fields may change between releases) and add the new outcome with its date; do not delete the old
 one. When an outcome differs from what is expected, correct the setting by the branches of
 [DEVICE-SETUP.md](DEVICE-SETUP.md) section 2.4. Without FortiGate DHCP, write "not used" in the
-rows V1–V6, V14 and V17.
+rows V1–V6, V14, V17 and V18.
 
 | # | To verify | How | Outcome to record | Outcome | Date |
 |---|---|---|---|---|---|
@@ -1257,6 +1470,7 @@ rows V1–V6, V14 and V17.
 | V15 | Whether each line's public IP address is static | DEVICE-SETUP.md section 2.6: ask the ISP; a line whose address may change is marked `public_dynamic` (on an ISP NAT exit; a direct line's changing address is found from the logs, DEVICE-SETUP.md section 2.6) | per line static / may change; the ISP's answer | | |
 | V16 | That FortiGate DHCP records carry a usable device time and the FortiGate's clock is right to within minutes: the FortiGate syncs with NTP | DEVICE-SETUP.md section 2.1 (the NTP step); on the FortiGate `diagnose sys ntp status` lists the NTP servers' information; the alert `R20-lease:source-clock` must not be open | FortiGate syncs with NTP: yes / no; the NTP server in the output of `diagnose sys ntp status` | | |
 | V17 | Whether FortiOS logs a DHCPDECLINE or checks an address before it offers it; that a client holds one lease per server interface and network | there is no separate trial: static devices are kept out of the DHCP range (DEVICE-SETUP.md section 2.4 step 8); the alert `R20-lease:fortigate-decline:<net>` | whether the alert opened; if so, the network and the correction made (address reserved or device moved) | | |
+| V18 | Whether two configured networks were merged later, or one taken off the network list | The lease job does not record with a lease a FortiGate DHCP Ack of its MAC for an address in **another configured network** than the lease's (D33: a laptop or a NAS with an address in each of two networks is no move; issue #127). Once the networks are merged, or one is taken off, today's networks make that Ack a move, but for a moment before a 5651 lookup's days it is recorded nowhere: the missed-move check does not see it for that moment (inside the lookup's days the rows are checked again with today's networks). Before merging two networks or deleting one on the Departmanlar ve VLAN'lar tab: in Search, `type:event logid:0100026001 ip:<network>` for each of the two networks (e.g. `ip:172.20.41.0/24`) and `type:event mac:<MAC>` for the clients found (the days in the database); whether a MAC took an address in both networks before the change | the network change and its date; whether a client took an address in both networks (if so, the MAC addresses): for their moments before that date, the missed-move check reads the lookup's days only | | |
 
 ## 17. Desktop Windows 11 Pro
 

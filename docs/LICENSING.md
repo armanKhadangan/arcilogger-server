@@ -39,7 +39,7 @@ in every state. Prices are not part of the product.
 | Key | Module | Türkçe | Content | Needs |
 |---|---|---|---|---|
 | `core_5651` | 5651 Core | 5651 Temel | Log collection, sealing, retention, 5651 lookups, evidence packages, devices and persons, alerts, audit log | — (always on) |
-| `usage_analytics` | Usage analytics | Kullanım analizi | Estimated usage time per person, device, site and category, with exports: the **Kullanım** page and the dashboard's usage sections | — |
+| `usage_analytics` | Usage analytics | Kullanım analizi | Estimated usage time per person, device, site and category, with exports: the **Kullanım** page, the dashboard's usage sections and **Canlı Durum**'s table of who is sending and receiving data now | — |
 | `usage_reports` | Scheduled usage reports | Zamanlanmış kullanım raporları | Scheduled usage reports made and e-mailed by the server: the **Raporlar** page | Usage analytics |
 | `bulk_import` | Bulk import (CSV) | Toplu içe aktarma (CSV) | Bulk import of persons and device assignments from CSV files (Cihazlar ve Kişiler → the import part of the **Aktarım** tab); manual entry and the CSV exports are always available | — |
 
@@ -58,12 +58,15 @@ also shows the result on your own network.
 
 Whatever the licence state, these work and no licence state switches them off: the syslog
 collector and the raw log files (spool), parsing and loading into the database, the nightly
-sealing (Kamu SM time stamp), chain verification, retention and deletion, the replica, the
-database backup; the 5651 lookup, its official PDF report and time stamp, raw lines, evidence
+sealing (Kamu SM or TÜRKTRUST time stamp), re-stamping before a TSA certificate expires (the
+`Renew` task), downloading the revocation lists (the `CrlFetch` task), the legal-validity banner
+on every page ([TIME-STAMPING.md](TIME-STAMPING.md)), chain verification, retention and deletion,
+the replica, the database backup; the 5651 lookup, its official PDF report and time stamp, raw lines, evidence
 packages and the standalone verifier; the sealing page and the credit; the hash-chained audit log
 and its verification; sign-in, two-factor authentication, users and roles; devices, persons,
 departments, VLANs and device-person assignments (by hand); the operational alerts (silent
-source, disk, sealing, credit, clock, replica, backup, alert e-mail, the Güvenlik page); the
+source, disk, sealing, credit, clock, replica, backup, alert e-mail, re-stamping, stamp
+certificate, revocation list, the Güvenlik page); the
 dashboard's health boxes (log intake, seal, credit, clock, alerts) and the licence page.
 
 Only one alert code belongs to a paid module: `R20-report` (a scheduled report could not be sent)
@@ -110,7 +113,10 @@ licence state.
 | `/admin` | Settings: the machine configuration, the administration service's state, change requests and their history | 5651 Core |
 | `/settings` | Application settings (the database settings) | 5651 Core |
 | `/compliance` | Uyum Durumu: the ten check cards, the status report (PDF), the configuration backup confirmation | 5651 Core |
+| `/legal-status` | Legal-validity status: the banner on every page (every signed-in user) | 5651 Core |
 | `/system` | System page: resource use, disk forecast, database size, services, scheduled tasks, clock | 5651 Core |
+| `/activity` | Canlı Durum: `GET /activity/devices`, who is sending and receiving data now (per person). `GET /activity/wan`, the internet line's speed (the WAN interface counters read over SNMPv3; no person data), is not gated: base product (5651 Core) | Usage analytics |
+| `/archive-reloads` | Archive reload: days older than the database window asked back from the sealed vault, and their progress | 5651 Core |
 | `/usage` | The data of the Kullanım page, exports, rebuilds | Usage analytics |
 | `/reports` | Scheduled reports, runs, preview | Scheduled usage reports |
 | `/imports` | CSV import and its templates | Bulk import (CSV) |
@@ -139,11 +145,14 @@ data of a module that is off is not deleted.
 | `usage.requests` | Usage analytics | skipped |
 | `usage.daily` | Usage analytics | skipped |
 | `usage.today` | Usage analytics | skipped |
+| `activity.tick` (a thread of the worker, recorded in `job_runs`) | Usage analytics (Canlı Durum's table of who sends and receives) | idles; one `skipped` row a day |
 | `usage.reattribute` | Usage analytics | skipped |
 | `usage.retention` | — (deletion of personal data) | always runs |
+| `db.window` | 5651 Core (the database window: log rows older than it dropped) | always runs |
 | `reports.run_due` | Scheduled usage reports | skipped |
 | `reports.purge` | — (deletion of report files) | always runs |
 | `system.sample` | 5651 Core | always runs |
+| `snmp.poll` | 5651 Core | always runs |
 | `search.counts_backfill` | 5651 Core | always runs |
 
 On the command line only `arcilogger-worker usage rebuild` is refused while Usage analytics is off

@@ -68,6 +68,7 @@ from arcilogger_core.admin.contract import (
     EXPIRED_GRACE,
     INBOX_MAX_BYTES,
     INBOX_MAX_REQUESTS,
+    INTERFACE_CODES,
     MAX_REQUEST_VALIDITY,
     QUEUED_WAIT,
     SERVICE_FRESH,
@@ -80,6 +81,7 @@ from arcilogger_core.admin.contract import (
     DocumentError,
     JarsFile,
     JournalLine,
+    ProbeInterface,
     RequestKind,
     RequestStatus,
     SystemStatus,
@@ -189,6 +191,11 @@ TEXTS: Final[Mapping[str, tuple[str, str]]] = {
         "Üretimden test sunucusuna geçiş üretim damgalarını durdurur; onaylayın.",
         "Switching from production to the test server stops production stamps; confirm to "
         "continue.",
+    ),
+    "tsa_plain_http_confirm_required": (
+        "Düz HTTP ile TÜRKTRUST kullanıcı adı ve parolası ağda şifrelenmeden gider; onaylayın.",
+        "Over plain HTTP the TÜRKTRUST user name and password travel unencrypted on the "
+        "network; confirm to continue.",
     ),
     "legal_root_confirm_required": (
         "Parmak izini Kamu SM'nin yayımladığı değerle karşılaştırdığınızı onaylayın.",
@@ -368,6 +375,9 @@ class RequestError(BaseModel):
     message_tr: str
     message_en: str
     field: str | None = None
+    #: What the device reported to the ``snmp`` probe, with ``snmp_no_such_interface`` and
+    #: ``snmp_no_hc_counters`` only (W5-N-9); no person data, no secret.
+    interfaces: list[ProbeInterface] = Field(default_factory=list)
 
 
 class AdminRequestOut(BaseModel):
@@ -1281,10 +1291,13 @@ class Channel:
         result = status.result.model_dump(mode="json") if status and status.result else None
         error = status.error.code if status is not None and status.error is not None else None
         field_path = status.error.field if status is not None and status.error is not None else None
+        interfaces = status.error.interfaces if status is not None and status.error else ()
         if row.terminal and row.error_code and error is None:
             error = row.error_code
         self._mirror(db, row, state, status, result, error)
-        return self._out(row, state, steps, version, result, error, warnings, field_path)
+        return self._out(
+            row, state, steps, version, result, error, warnings, field_path, interfaces
+        )
 
     def _unclaimed(self, row: AdminRequestRow) -> str:
         if row.expires_at is not None and self.now > row.expires_at + EXPIRED_GRACE:
@@ -1414,6 +1427,7 @@ class Channel:
         error: str | None,
         warnings: Sequence[str],
         field_path: str | None,
+        interfaces: Sequence[ProbeInterface] = (),
     ) -> AdminRequestOut:
         label_tr, label_en = STATE_LABELS.get(state, (state, state))
         for item in steps:
@@ -1423,7 +1437,11 @@ class Channel:
         if error is not None:
             message_tr, message_en = texts(error)
             problem = RequestError(
-                code=error, message_tr=message_tr, message_en=message_en, field=field_path
+                code=error,
+                message_tr=message_tr,
+                message_en=message_en,
+                field=field_path,
+                interfaces=list(interfaces) if error in INTERFACE_CODES else [],
             )
         manual_tr, manual_en = (
             manual_steps(version.number if version else None, error)

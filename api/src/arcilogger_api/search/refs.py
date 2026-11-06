@@ -24,6 +24,7 @@ from sqlalchemy.orm import Session
 from arcilogger_api.search.cursor import Cursor
 from arcilogger_api.search.planner import Plan
 from arcilogger_api.search.windows import Clock, SearchTimeoutError, WindowHook, run_page
+from arcilogger_core import sealedfile
 from arcilogger_core.canonical import canonical_json
 from arcilogger_core.layout import Layout
 
@@ -99,6 +100,11 @@ def refs_sha256(refs: Sequence[dict[str, Any]]) -> str:
 def unsealed_days(layout: Layout, refs: Sequence[dict[str, Any]]) -> list[date]:
     """Days of ``refs`` with a file that is not in the vault yet."""
     files = {(ref["day"], ref["source"]) for ref in refs}
-    return sorted(
-        {day for day, source in files if not (layout.vault_day(day) / f"{source}.log.gz").is_file()}
-    )
+    return sorted({day for day, source in files if not _sealed(layout, day, source)})
+
+
+def _sealed(layout: Layout, day: date, source: str) -> bool:
+    try:
+        return sealedfile.find_log(layout, day, source) is not None
+    except sealedfile.SealedFileError:
+        return True  # in the vault, in both formats: sealed, not pending

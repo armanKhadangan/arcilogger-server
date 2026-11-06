@@ -1,12 +1,16 @@
 import type { SettingOut } from '@/lib/settings-types';
 
 import {
+  dayParts,
   fromDraft,
   sameValue,
   settingControlId,
   toDraft,
   validHoliday,
   valueText,
+  withServerBounds,
+  type WorkDayDraft,
+  type WorkWeek,
 } from './setting-values';
 import { integerError, validateClock, validateHost, validateSiteName } from './settings-validation';
 
@@ -82,26 +86,207 @@ describe('database settings as drafts and back (contract 2.13)', () => {
     });
   });
 
-  it('work hours: days, times in order', () => {
+  it('work hours: a week of rows, back to the general hours and by_day (W5 P1)', () => {
     const hours = setting({
       key: 'usage.work_hours',
       type: 'object',
       value: { days: [1, 2, 3, 4, 5], start: '08:00', end: '18:00' },
     });
-    const draft = toDraft(hours);
-    expect(draft).toEqual({ days: [1, 2, 3, 4, 5], start: '08:00', end: '18:00' });
-    expect(fromDraft(hours, { days: [5, 1, 1], start: '08:30', end: '17:00' })).toEqual({
-      value: { days: [1, 5], start: '08:30', end: '17:00' },
+    const draft = toDraft(hours) as WorkWeek;
+    expect(draft.week).toHaveLength(7);
+    expect(draft.week[0]).toEqual({ work: true, start: '08:00', end: '18:00', breaks: [] });
+    // A day off shows the general hours, ready for when it becomes a work day.
+    expect(draft.week[5]).toEqual({ work: false, start: '08:00', end: '18:00', breaks: [] });
+    // Unchanged: the stored three fields come back as they were.
+    expect(fromDraft(hours, draft)).toEqual({
+      value: { days: [1, 2, 3, 4, 5], start: '08:00', end: '18:00' },
     });
-    expect(fromDraft(hours, { days: [], start: '08:00', end: '18:00' })).toEqual({
+  });
+
+  it('work hours: the hours most days share are the general ones, the rest by_day', () => {
+    const hours = setting({
+      key: 'usage.work_hours',
+      type: 'object',
+      value: {
+        days: [1, 2, 3, 4, 5, 6],
+        start: '08:00',
+        end: '18:00',
+        breaks: [{ start: '12:30', end: '13:30' }],
+        by_day: { '6': { start: '09:00', end: '13:00' } },
+      },
+    });
+    const draft = toDraft(hours) as WorkWeek;
+    expect(draft.week[0]?.breaks).toEqual([{ start: '12:30', end: '13:30' }]);
+    // A by_day entry without breaks has none (the general ones are not inherited).
+    expect(draft.week[5]).toEqual({ work: true, start: '09:00', end: '13:00', breaks: [] });
+    expect(fromDraft(hours, draft)).toEqual({ value: hours.value });
+    // Friday ends at 15:00: its own entry; the breaks are sorted on save.
+    const friday = {
+      work: true,
+      start: '08:00',
+      end: '15:00',
+      breaks: [
+        { start: '12:30', end: '13:30' },
+        { start: '10:00', end: '10:15' },
+      ],
+    };
+    const edited = { week: draft.week.map((row, index) => (index === 4 ? friday : row)) };
+    expect(fromDraft(hours, edited)).toEqual({
+      value: {
+        days: [1, 2, 3, 4, 5, 6],
+        start: '08:00',
+        end: '18:00',
+        breaks: [{ start: '12:30', end: '13:30' }],
+        by_day: {
+          '5': {
+            start: '08:00',
+            end: '15:00',
+            breaks: [
+              { start: '10:00', end: '10:15' },
+              { start: '12:30', end: '13:30' },
+            ],
+          },
+          '6': { start: '09:00', end: '13:00' },
+        },
+      },
+    });
+    // A day put back to the general hours loses its by_day entry.
+    const back = {
+      week: draft.week.map((row, index) =>
+        index === 5
+          ? { ...row, start: '08:00', end: '18:00', breaks: [{ start: '12:30', end: '13:30' }] }
+          : row,
+      ),
+    };
+    expect(fromDraft(hours, back)).toEqual({
+      value: {
+        days: [1, 2, 3, 4, 5, 6],
+        start: '08:00',
+        end: '18:00',
+        breaks: [{ start: '12:30', end: '13:30' }],
+      },
+    });
+  });
+
+  it('work hours: a value written outside the editor keeps its shape when one day changes', () => {
+    // Set with `arcilogger-db settings set`: the general hours are not those most days have, and
+    // Thursday's by_day entry equals them (the server accepts both).
+    const stored = {
+      days: [1, 2, 3, 4, 5],
+      start: '09:00',
+      end: '17:00',
+      by_day: {
+        '1': { start: '08:00', end: '18:00' },
+        '2': { start: '08:00', end: '18:00' },
+        '3': { start: '08:00', end: '18:00' },
+        '4': { start: '09:00', end: '17:00' },
+      },
+    };
+    const hours = setting({ key: 'usage.work_hours', type: 'object', value: stored });
+    const draft = toDraft(hours) as WorkWeek;
+    expect(fromDraft(hours, draft)).toEqual({ value: stored });
+    // Friday ends at 15:00: only Friday changes in the saved value (and its audit entry).
+    const edited = {
+      week: draft.week.map((row, index) => (index === 4 ? { ...row, end: '15:00' } : row)),
+    };
+    expect(fromDraft(hours, edited)).toEqual({
+      value: { ...stored, by_day: { ...stored.by_day, '5': { start: '09:00', end: '15:00' } } },
+    });
+    // No work day keeps the stored general hours any more: those most days have take over.
+    const moved = {
+      week: draft.week.map((row, index) =>
+        index === 3 || index === 4 ? { ...row, start: '08:00', end: '18:00' } : row,
+      ),
+    };
+    expect(fromDraft(hours, moved)).toEqual({
+      value: { days: [1, 2, 3, 4, 5], start: '08:00', end: '18:00' },
+    });
+  });
+
+  it('work hours: the checks of the server, naming the day', () => {
+    const hours = setting({
+      key: 'usage.work_hours',
+      type: 'object',
+      value: { days: [1], start: '08:00', end: '18:00' },
+    });
+    const week = (monday: Partial<WorkDayDraft>): WorkWeek => ({
+      week: [1, 2, 3, 4, 5, 6, 7].map((day) => ({
+        work: day === 1,
+        start: '08:00',
+        end: '18:00',
+        breaks: [],
+        ...(day === 1 ? monday : {}),
+      })),
+    });
+    const day = { day: 1 };
+    expect(fromDraft(hours, week({ work: false }))).toEqual({
       error: 'settings.application.errors.workDays',
     });
-    expect(fromDraft(hours, { days: [1], start: '8:00', end: '18:00' })).toEqual({
+    expect(fromDraft(hours, week({ start: '8:00' }))).toEqual({
       error: 'settings.application.errors.workTime',
+      params: day,
     });
-    expect(fromDraft(hours, { days: [1], start: '18:00', end: '08:00' })).toEqual({
+    expect(fromDraft(hours, week({ start: '18:00', end: '08:00' }))).toEqual({
       error: 'settings.application.errors.workOrder',
+      params: day,
     });
+    const pause = (start: string, end: string) => ({ start, end });
+    expect(fromDraft(hours, week({ breaks: [pause('12:00', '')] }))).toEqual({
+      error: 'settings.application.errors.breakTime',
+      params: day,
+    });
+    expect(fromDraft(hours, week({ breaks: [pause('12:00', '12:04')] }))).toEqual({
+      error: 'settings.application.errors.breakShort',
+      params: { day: 1, min: 5 },
+    });
+    expect(fromDraft(hours, week({ breaks: [pause('07:30', '08:30')] }))).toEqual({
+      error: 'settings.application.errors.breakOutside',
+      params: day,
+    });
+    expect(
+      fromDraft(hours, week({ breaks: [pause('12:00', '13:00'), pause('12:30', '13:30')] })),
+    ).toEqual({ error: 'settings.application.errors.breakOverlap', params: day });
+    // Touching breaks are allowed, as on the server; a seventh is refused.
+    expect(
+      fromDraft(hours, week({ breaks: [pause('12:00', '12:30'), pause('12:30', '13:00')] })),
+    ).toEqual({
+      value: {
+        days: [1],
+        start: '08:00',
+        end: '18:00',
+        breaks: [pause('12:00', '12:30'), pause('12:30', '13:00')],
+      },
+    });
+    const seven = Array.from({ length: 7 }, (_, at) => pause(`1${at}:00`, `1${at}:10`));
+    expect(fromDraft(hours, week({ breaks: seven }))).toEqual({
+      error: 'settings.application.errors.breakCount',
+      params: { day: 1, max: 6 },
+    });
+  });
+
+  it('work hours: the strip of a day and the one-line text', () => {
+    const row = {
+      work: true,
+      start: '08:00',
+      end: '18:00',
+      breaks: [{ start: '12:00', end: '13:00' }],
+    };
+    expect(dayParts(row)).toEqual([
+      { start: 480, end: 720, part: 'work' },
+      { start: 720, end: 780, part: 'break' },
+      { start: 780, end: 1080, part: 'work' },
+    ]);
+    expect(dayParts({ ...row, work: false })).toEqual([]);
+    expect(dayParts({ ...row, end: '07:00' })).toEqual([]);
+    expect(
+      valueText({
+        days: [1, 2, 3, 4, 5, 6],
+        start: '08:00',
+        end: '18:00',
+        breaks: [{ start: '12:00', end: '13:00' }],
+        by_day: { '6': { start: '09:00', end: '13:00' } },
+      }),
+    ).toBe('1,2,3,4,5,6 08:00–18:00 (12:00–13:00); 6: 09:00–13:00');
   });
 
   it('holidays: MM-DD every year or YYYY-MM-DD once, real dates only, sorted', () => {
@@ -121,6 +306,54 @@ describe('database settings as drafts and back (contract 2.13)', () => {
     });
   });
 
+  it('W5-G-19: the bounds of the API refuse a value above them, a server row those of the default lease', () => {
+    const session = setting({
+      key: 'lookup.max_session_seconds',
+      type: 'integer',
+      value: 3600,
+      min: 60,
+      max: 172_800,
+    });
+    expect(fromDraft(session, '172800')).toEqual({ value: 172_800 });
+    expect(fromDraft(session, '172801')).toEqual({ error: 'admin.errors.max' });
+    const percent = setting({
+      key: 'lease.timeout_percent',
+      type: 'integer',
+      value: 110,
+      min: 100,
+      max: 125,
+    });
+    expect(fromDraft(percent, '126')).toEqual({ error: 'admin.errors.max' });
+    expect(fromDraft(percent, '99')).toEqual({ error: 'admin.errors.min' });
+    const lease = setting({
+      key: 'lease.default_seconds',
+      type: 'integer',
+      value: 86_400,
+      min: 60,
+      max: 604_800,
+    });
+    const perServer = setting({
+      key: 'lease.server_seconds',
+      type: 'object',
+      value: { dhcp61: 3600 },
+    });
+    const [, servers] = withServerBounds([lease, perServer]);
+    if (!servers) throw new Error('lease.server_seconds missing');
+    expect(servers).toMatchObject({ key: 'lease.server_seconds', min: 60, max: 604_800 });
+    expect(fromDraft(servers, [{ server: 'dhcp61', seconds: '604800' }])).toEqual({
+      value: { dhcp61: 604_800 },
+    });
+    const refused = {
+      error: 'settings.application.errors.serverSeconds',
+      params: { min: 60, max: 604_800 },
+    };
+    expect(fromDraft(servers, [{ server: 'dhcp61', seconds: '604801' }])).toEqual(refused);
+    expect(fromDraft(servers, [{ server: 'dhcp61', seconds: '59' }])).toEqual(refused);
+    // A group without `lease.default_seconds` is taken as it is.
+    expect(withServerBounds([perServer])).toEqual([perServer]);
+    expect(withServerBounds([lease])).toEqual([lease]);
+  });
+
   it('lease time per DHCP server and the two-factor roles', () => {
     const servers = setting({
       key: 'lease.server_seconds',
@@ -131,8 +364,10 @@ describe('database settings as drafts and back (contract 2.13)', () => {
     expect(fromDraft(servers, [{ server: ' dhcp70 ', seconds: '7200' }])).toEqual({
       value: { dhcp70: 7200 },
     });
+    // Without the bounds of `lease.default_seconds` beside it, only the least time is known.
     expect(fromDraft(servers, [{ server: 'dhcp70', seconds: '30' }])).toEqual({
-      error: 'settings.application.errors.serverSeconds',
+      error: 'settings.application.errors.serverSecondsMin',
+      params: { min: 60 },
     });
     expect(fromDraft(servers, [{ server: '', seconds: '3600' }])).toEqual({
       error: 'settings.application.errors.serverName',

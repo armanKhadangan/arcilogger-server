@@ -202,6 +202,11 @@ def _summary(sheets: _Sheets, document: Mapping[str, Any]) -> None:
         ("Çevrimiçi süre (toplam)", "online_seconds", "duration"),
         ("Aktif süre (toplam)", "active_seconds", "duration"),
         ("Mesai dışı aktif süre", "off_hours_active_seconds", "duration"),
+        *(
+            (("Moladaki aktif süre", "break_active_seconds", "duration"),)
+            if data.get("breaks")
+            else ()
+        ),
         ("İndirilen (bayt)", "download_bytes", "bytes"),
         ("Yüklenen (bayt)", "upload_bytes", "bytes"),
         ("Oturum", "sessions", "int"),
@@ -276,6 +281,7 @@ def _blocked_note(data: Mapping[str, Any]) -> str | None:
 def render_xlsx(document: Mapping[str, Any]) -> bytes:
     """The workbook of ``document``."""
     data = document["data"]
+    breaks = bool(data.get("breaks"))
     sheets = _Sheets()
     sheets.book.properties.creator = t.PRODUCT
     sheets.book.properties.title = f"{t.PRODUCT} kullanım raporu — {document['report']['name']}"
@@ -316,6 +322,7 @@ def render_xlsx(document: Mapping[str, Any]) -> bytes:
             Column("Çevrimiçi süre", 14, "duration"),
             Column("Aktif süre", 14, "duration"),
             Column("Mesai dışı aktif süre", 14, "duration"),
+            *((Column("Moladaki aktif süre", 14, "duration"),) if breaks else ()),
             Column("İndirilen (bayt)", 18, "bytes"),
             Column("Yüklenen (bayt)", 18, "bytes"),
             Column("Oturum", 10, "int"),
@@ -332,6 +339,7 @@ def render_xlsx(document: Mapping[str, Any]) -> bytes:
                 person.get("online_seconds"),
                 person.get("active_seconds"),
                 person.get("off_hours_active_seconds"),
+                *((person.get("break_active_seconds"),) if breaks else ()),
                 person.get("download_bytes"),
                 person.get("upload_bytes"),
                 person.get("sessions"),

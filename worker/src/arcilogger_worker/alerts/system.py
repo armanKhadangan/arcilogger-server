@@ -80,6 +80,21 @@ Key                              Problem (setting)
                                  :mod:`~arcilogger_worker.compliance_filter`, card 7 of Uyum
                                  Durumu) — high; resolved once a record arrives or the window is
                                  no longer expected
+``R20-renewal:none``             ``state/renewal/renewal.json`` has a token due for re-stamping
+                                 or one whose certificate expired without it, or says the ``Renew``
+                                 task failed twice in a row (``failures_in_a_row``, A4) — high;
+                                 resolved by a readable report without such a token and without
+                                 those failures (Wave 5 contract 2.3.1, :data:`LEGAL_CHECKS`)
+``R20-cert:none``                a time-stamp certificate on a revocation list at or before a
+                                 stamp — critical; a token due for re-stamping whose certificate
+                                 expires within 30 days (:data:`CERT_EXPIRY_WARNING`), or one
+                                 whose certificate expired uncovered — high
+                                 (:data:`LEGAL_CHECKS`)
+``R20-crl:none``                 no stored revocation list fetched in the last
+                                 ``tsa.crl_max_age_days`` (7) days and not past its own
+                                 ``nextUpdate`` (C22) for an issuer of the newest sealed day's
+                                 chain (none for ARCILOGGER's test root), judged from
+                                 ``state/crl`` only — medium (:data:`LEGAL_CHECKS`)
 ===============================  ==============================================================
 
 A check that fails (an unreadable folder, a database error) is reported in the job's details and
@@ -95,13 +110,14 @@ import re
 import shutil
 import sys
 from collections import Counter, defaultdict
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
-from datetime import date, datetime, time, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 from ipaddress import IPv4Network, IPv6Network, ip_address, ip_network
 from pathlib import Path
-from typing import Any, Final
+from typing import Any, Final, Literal, TypeGuard, get_args
 
+from cryptography import x509
 from sqlalchemy import (
     ColumnElement,
     Text,
@@ -118,6 +134,7 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import CIDR, array
 from sqlalchemy.orm import Session, sessionmaker
 
+from arcilogger_core import crl
 from arcilogger_core.admin.contract import (
     AdminLayout,
     AdminPolicy,
@@ -126,12 +143,25 @@ from arcilogger_core.admin.contract import (
     heartbeat_state,
     parse_document,
 )
+from arcilogger_core.chain import sealed_days
 from arcilogger_core.config import Config
+from arcilogger_core.crl import Crl, CrlError, CrlOptions, StoredLists, crl_options, load_stored
 from arcilogger_core.fmt import format_date
 from arcilogger_core.layout import Layout
+from arcilogger_core.renewal import state_path as renewal_state_path
+from arcilogger_core.renewal import state_to_read as renewal_state_to_read
 from arcilogger_core.seal import Sealer
 from arcilogger_core.timeutil import SITE_TZ, day_window, isoformat_site, site_day
 from arcilogger_core.tsa.base import StampResult, TsaError
+from arcilogger_core.tsa.verify import (
+    check_revocation,
+    fingerprint,
+    inspect_token,
+    is_test_stamp,
+    load_certificates,
+    load_roots_dir,
+    token_chain,
+)
 from arcilogger_db import clocksamples
 from arcilogger_db.egress import (
     LEGACY_KEYS,
@@ -173,6 +203,7 @@ from arcilogger_worker.alerts.texts import (
     NAT_TEXTS,
     REFUSAL_REASONS,
     REFUSED_HIGH_TITLE,
+    RENEW_FAILED_TITLE,
 )
 from arcilogger_worker.compliance_filter import filter_evidence
 from arcilogger_worker.lookup import trust
@@ -251,10 +282,14 @@ class SystemReport:
 
 
 def _read_json(path: Path) -> Any:
+    """The JSON of ``path``, ``None`` when it is missing. Raises ``OSError``, or ``ValueError``
+    also for a document nested too deeply to parse (a damaged file never fails a check)."""
     try:
         return json.loads(path.read_bytes())
     except FileNotFoundError:
         return None
+    except RecursionError as exc:
+        raise ValueError(f"{path.name} is nested too deeply") from exc
 
 
 def _time(value: Any) -> datetime | None:
@@ -277,7 +312,7 @@ def _seal_states(layout: Layout) -> dict[date, dict[str, Any]]:
         try:
             day = date.fromisoformat(path.stem)
             data = json.loads(path.read_bytes())
-        except (OSError, ValueError):
+        except (OSError, ValueError, RecursionError):
             continue
         if isinstance(data, dict):
             states[day] = data
@@ -382,14 +417,15 @@ def check_disk(ctx: CheckContext) -> Outcome:
 # -- sealing --------------------------------------------------------------------------------------
 
 
-class _NoStamps:
-    """The sealer only answers which days are pending here; it never stamps."""
+class NoStamps:
+    """A provider for a :class:`~arcilogger_core.seal.Sealer` that only answers which days are
+    pending (the alert checks, the API); it never stamps."""
 
     name = "none"
     legal_grade = False
 
     def stamp(self, file_path: Path) -> StampResult:  # pragma: no cover - never called
-        raise TsaError("the alert check does not stamp")
+        raise TsaError("this reader does not stamp")
 
     def credits(self) -> int | None:  # pragma: no cover - never called
         return None
@@ -404,7 +440,7 @@ def _seal_day(key: str) -> date | None:
 
 def check_seal(ctx: CheckContext) -> Outcome:
     hour = ctx.setting("alerts.seal_overdue_hour", 9)
-    sealer = Sealer(ctx.config, provider=_NoStamps(), roots=[], clock=lambda: ctx.now)
+    sealer = Sealer(ctx.config, provider=NoStamps(), roots=[], clock=lambda: ctx.now)
     try:
         pending = set(sealer.closed_unsealed_days())
     except OSError as exc:
@@ -466,6 +502,52 @@ def check_seal(ctx: CheckContext) -> Outcome:
 # -- verification ---------------------------------------------------------------------------------
 
 
+@dataclass(frozen=True)
+class ScheduledCheck:
+    """A day's result in a scheduled verification (``state/verify/last-*.json``)."""
+
+    at: datetime
+    ok: bool
+    errors: tuple[str, ...]
+
+
+def scheduled_verifications(layout: Layout) -> dict[date, ScheduledCheck]:
+    """Newest scheduled verification per day (``state/verify/last-*.json``, files only)."""
+    return read_scheduled_verifications(layout)[0]
+
+
+def read_scheduled_verifications(layout: Layout) -> tuple[dict[date, ScheduledCheck], bool]:
+    """:func:`scheduled_verifications`, and whether every ``last-*.json`` could be read: a file
+    that cannot be read, or holds no verification, is left out and makes it ``False``."""
+    newest: dict[date, ScheduledCheck] = {}
+    readable = True
+    folder = layout.state / "verify"
+    for path in sorted(folder.glob("last-*.json")) if folder.is_dir() else []:
+        try:
+            data = _read_json(path)
+        except (OSError, ValueError):
+            readable = False
+            continue
+        at = _time(data.get("at")) if isinstance(data, dict) else None
+        checks = data.get("checks") if isinstance(data, dict) else None
+        if at is None or not isinstance(checks, list):
+            readable = False
+            continue
+        for check in checks:
+            try:
+                day = date.fromisoformat(str(check["day"]))
+            except (KeyError, TypeError, ValueError):
+                continue
+            if day not in newest or newest[day].at < at:
+                errors = check.get("errors")
+                newest[day] = ScheduledCheck(
+                    at=at,
+                    ok=bool(check.get("ok")),
+                    errors=tuple(str(e) for e in errors) if isinstance(errors, list) else (),
+                )
+    return newest, readable
+
+
 def _newest_verifications(ctx: CheckContext) -> dict[date, tuple[datetime, bool]]:
     """Newest verification per day: scheduled (``state/verify/last-*.json``) or on demand."""
     newest: dict[date, tuple[datetime, bool]] = {}
@@ -474,20 +556,8 @@ def _newest_verifications(ctx: CheckContext) -> dict[date, tuple[datetime, bool]
         if day not in newest or newest[day][0] < at:
             newest[day] = (at, ok)
 
-    folder = ctx.layout.state / "verify"
-    for path in sorted(folder.glob("last-*.json")) if folder.is_dir() else []:
-        try:
-            data = _read_json(path)
-        except (OSError, ValueError):
-            continue
-        at = _time(data.get("at")) if isinstance(data, dict) else None
-        if at is None:
-            continue
-        for check in data.get("checks") or []:
-            try:
-                offer(date.fromisoformat(str(check["day"])), at, bool(check.get("ok")))
-            except (KeyError, TypeError, ValueError):
-                continue
+    for day, check in scheduled_verifications(ctx.layout).items():
+        offer(day, check.at, check.ok)
     rows = ctx.session.execute(
         select(SealVerification.day, SealVerification.finished_at, SealVerification.outcome).where(
             SealVerification.outcome.in_(("ok", "failed"))
@@ -1663,7 +1733,12 @@ def _srcmac_shared(check: _LeaseCheck) -> None:
         return
     limit = check.settings.srcmac_max_ips
     counts = trust.srcmac_ip_counts(
-        check.session, check.now - TRAFFIC_WINDOW, check.now, interfaces, check.untrusted
+        check.session,
+        check.now - TRAFFIC_WINDOW,
+        check.now,
+        interfaces,
+        check.untrusted,
+        max_session_seconds=check.settings.max_session_seconds,
     )
     for interface in sorted(set(interfaces)):
         over = [n for (name, _mac), n in counts.items() if name == interface and n > limit]
@@ -1825,6 +1900,715 @@ def check_filter(ctx: CheckContext) -> Outcome:
     return Outcome([finding], _filter_key)
 
 
+# -- legal-validity state (Wave 5 contract 2.3; read by /legal-status and the R20 checks) --------
+#
+# One reader per state file, so the banner, the Panel, the Mühürleme page and the alerts judge
+# from the same values (D11). The API imports these; the worker never imports the API.
+
+#: What ``state/renewal/renewal.json`` says of a token (Wave 5 contract 2.1.2).
+StampRenewalStatus = Literal["not_due", "due", "covered", "late", "uncovered"]
+STAMP_RENEWAL_STATUSES: Final[frozenset[str]] = frozenset(get_args(StampRenewalStatus))
+CRL_INDEX_SCHEMA: Final = crl.INDEX_SCHEMA
+#: The day-check error of a stamp whose certificate is revoked at or before the stamp (the
+#: English text of ``certificate_revoked``, Wave 5 contract 2.6).
+REVOKED_DAY_TEXT: Final = re.compile(
+    r"^A time-stamp certificate is on a revocation list: (?P<name>.+)\. Contact the provider; "
+    r"legal review is recommended\.$"
+)
+
+
+@dataclass(frozen=True)
+class StampRenewal:
+    """One token of the re-stamping report."""
+
+    #: Vault-relative POSIX path, e.g. ``2026/10/01/manifest-2026-10-01.json.zd``.
+    path: str
+    kind: str
+    cert_not_after: datetime
+    status: StampRenewalStatus
+    #: Vault-relative path of the renewal record that counts, or ``None``.
+    covered_by: str | None
+    #: When that renewal was stamped, if the report says so.
+    renewed_at: datetime | None
+
+
+def stamp_renewal_path(layout: Layout) -> Path:
+    """``state/renewal/renewal.json``, where the ``Renew`` task writes the re-stamping report
+    (``renewal.state_path``): a folder only the tasks write (contract W5-E-4). The readers read
+    :func:`arcilogger_core.renewal.state_to_read`: this file, or while it is missing the
+    ``state/renewal.json`` of an earlier release, until the first run after the upgrade."""
+    return renewal_state_path(layout)
+
+
+def read_stamp_renewals(layout: Layout) -> tuple[StampRenewal, ...] | None:
+    """The tokens of the re-stamping report (:func:`stamp_renewal_path`): empty when the Renew
+    task has not written it yet, ``None`` (unknown) when it cannot be read. The statuses are
+    counted from the tokens, never from the report's totals; an entry this reader does not
+    understand is left out."""
+    path = renewal_state_to_read(layout)
+    try:
+        data = _read_json(path)
+    except (OSError, ValueError) as exc:
+        log.info("re-stamping report %s unknown: %s", path, exc)
+        return None
+    if data is None:
+        return ()
+    entries = data.get("tokens") if isinstance(data, dict) else data
+    if not isinstance(entries, list):
+        log.info("re-stamping report %s unknown: no token list", path)
+        return None
+    found = []
+    for entry in entries:
+        renewal = _stamp_renewal(entry)
+        if renewal is None:
+            log.info("re-stamping report %s: entry left out: %r", path, entry)
+            continue
+        found.append(renewal)
+    return tuple(found)
+
+
+def _renewal_status(value: Any) -> TypeGuard[StampRenewalStatus]:
+    # a list or an object is no status (and cannot be looked up in a set)
+    return isinstance(value, str) and value in STAMP_RENEWAL_STATUSES
+
+
+#: The last moment the site calendar can show (+03:00): a later UTC time cannot be converted.
+_LAST_SITE_MOMENT: Final = datetime.max.replace(tzinfo=SITE_TZ).astimezone(UTC)
+
+
+def _calendar_time(value: Any) -> datetime | None:
+    """:func:`_time`, ``None`` for a time at the edge of the calendar that cannot be shown in
+    UTC or in site time (from 9999-12-31T21:00Z on, RFC 5280's "no well-defined expiration"
+    ``99991231235959Z`` included): the readers leave it out and never fail on it."""
+    moment = _time(value)
+    try:
+        return moment if moment is None or moment.astimezone(UTC) <= _LAST_SITE_MOMENT else None
+    except OverflowError:
+        return None
+
+
+def _stamp_renewal(entry: Any) -> StampRenewal | None:
+    if not isinstance(entry, dict):
+        return None
+    path, status, not_after = (
+        entry.get("path"),
+        entry.get("status"),
+        _calendar_time(entry.get("cert_not_after")),
+    )
+    if not isinstance(path, str) or not path or not _renewal_status(status) or not_after is None:
+        return None
+    covered_by = entry.get("covered_by")
+    return StampRenewal(
+        path=path,
+        kind=str(entry.get("kind") or ""),
+        cert_not_after=not_after.astimezone(UTC),
+        status=status,
+        covered_by=covered_by if isinstance(covered_by, str) and covered_by else None,
+        renewed_at=_calendar_time(entry.get("renewed_at")),
+    )
+
+
+@dataclass(frozen=True)
+class RenewRuns:
+    """The runs of the ``Renew`` task as ``state/renewal/renewal.json`` keeps them
+    (``last_run``, ``failures_in_a_row``; W5-A's A4). A dry run changes neither."""
+
+    #: When the last run started (None: no run yet, or a time this reader leaves out).
+    last_run_at: datetime | None = None
+    #: How it ended: ``renewed``, ``not_needed``, ``failed`` or ``refused`` (None: no run yet,
+    #: or not a text).
+    outcome: str | None = None
+    #: Failed and refused runs in a row (None: unknown).
+    failures_in_a_row: int | None = 0
+
+
+def read_renew_runs(layout: Layout) -> RenewRuns | None:
+    """The ``Renew`` task's runs from the re-stamping report (:func:`stamp_renewal_path`): no
+    run and no failure when the task has not written it yet, ``None`` (unknown) when it cannot
+    be read. Judged from this file,
+    never from the task's exit code (C12). A file without ``failures_in_a_row`` records no
+    failure, as the writer reads it (``renewal.write_state``); one that is not a count is
+    unknown."""
+    path = renewal_state_to_read(layout)
+    try:
+        data = _read_json(path)
+    except (OSError, ValueError) as exc:
+        log.info("re-stamping runs %s unknown: %s", path, exc)
+        return None
+    if data is None:
+        return RenewRuns()
+    if not isinstance(data, dict):
+        log.info("re-stamping runs %s unknown: not an object", path)
+        return None
+    last_run = data.get("last_run")
+    last_run = last_run if isinstance(last_run, dict) else {}
+    outcome = last_run.get("outcome")
+    failures = data.get("failures_in_a_row", 0)
+    return RenewRuns(
+        last_run_at=_calendar_time(last_run.get("at")),
+        outcome=outcome if isinstance(outcome, str) else None,
+        # bool is an int to Python, not a count
+        failures_in_a_row=(
+            failures
+            if isinstance(failures, int) and not isinstance(failures, bool) and failures >= 0
+            else None
+        ),
+    )
+
+
+@dataclass(frozen=True)
+class CrlListEntry:
+    """A stored revocation list as ``state/crl/index.json`` lists it."""
+
+    #: The list issuer's name (RFC 4514 text).
+    issuer: str
+    #: SHA-256 fingerprint of the certificate that verified the list.
+    issuer_sha256: str
+    this_update: datetime
+    next_update: datetime | None
+    file: str
+    fetched_at: datetime
+
+
+@dataclass(frozen=True)
+class CrlFailureEntry:
+    """A list URL the latest fetch could not store."""
+
+    url: str
+    at: datetime
+    error: str
+
+
+@dataclass(frozen=True)
+class CrlIndexState:
+    lists: tuple[CrlListEntry, ...] = ()
+    failures: tuple[CrlFailureEntry, ...] = ()
+    #: The last successful fetch of any list.
+    newest_fetched_at: datetime | None = None
+    #: ``False``: the index exists but is not an index this reader knows (nothing is decided
+    #: from it, and nothing fails).
+    readable: bool = True
+
+
+def crl_index_path(layout: Layout) -> Path:
+    return layout.crl_dir / crl.INDEX_NAME
+
+
+def read_crl_index(layout: Layout) -> CrlIndexState:
+    """``state/crl/index.json`` as the CrlFetch task writes it (Wave 5 contract 2.2): an empty
+    index before the first fetch. What the fetch did (its ``failures`` and newest
+    ``fetched_at``) is read from this file only, never from the task's exit code (C12); whether
+    a list counts is :func:`stored_lists`'s question."""
+    path = crl_index_path(layout)
+    try:
+        data = _read_json(path)
+    except (OSError, ValueError) as exc:
+        log.info("revocation list index %s unreadable: %s", path, exc)
+        return CrlIndexState(readable=False)
+    if data is None:
+        return CrlIndexState()
+    if (
+        not isinstance(data, dict)
+        or data.get("schema") != CRL_INDEX_SCHEMA
+        or not isinstance(data.get("lists"), list)
+        or not isinstance(data.get("failures"), list)
+    ):
+        log.info("revocation list index %s is not an %s index", path, CRL_INDEX_SCHEMA)
+        return CrlIndexState(readable=False)
+    lists = tuple(entry for item in data["lists"] if (entry := _crl_list(item)) is not None)
+    failures = tuple(failure for item in data["failures"] if (failure := _crl_failure(item)))
+    return CrlIndexState(
+        lists=lists,
+        failures=failures,
+        newest_fetched_at=max((entry.fetched_at for entry in lists), default=None),
+    )
+
+
+def _crl_list(item: Any) -> CrlListEntry | None:
+    if not isinstance(item, dict):
+        return None
+    # fetched_at is shown in site time; the list's own times are only compared
+    this_update, fetched_at = _time(item.get("this_update")), _calendar_time(item.get("fetched_at"))
+    next_update = _time(item.get("next_update"))
+    issuer_sha256 = item.get("issuer_sha256")
+    if this_update is None or fetched_at is None or not isinstance(issuer_sha256, str):
+        return None
+    if item.get("next_update") is not None and next_update is None:
+        return None
+    return CrlListEntry(
+        issuer=str(item.get("issuer") or ""),
+        issuer_sha256=issuer_sha256.lower(),
+        this_update=this_update,
+        next_update=next_update,
+        file=str(item.get("file") or ""),
+        fetched_at=fetched_at,
+    )
+
+
+def _crl_failure(item: Any) -> CrlFailureEntry | None:
+    at = _calendar_time(item.get("at")) if isinstance(item, dict) else None
+    if at is None:
+        return None
+    return CrlFailureEntry(
+        url=str(item.get("url") or ""), at=at, error=str(item.get("error") or "")
+    )
+
+
+def pinned_roots(config: Config, layout: Layout) -> list[x509.Certificate]:
+    """The roots a day token may chain to, read only (the rule of
+    :func:`arcilogger_core.tsa.trusted_roots`): ``tsa.roots_dir``, and the mock TSA's test root
+    only while ``tsa.provider`` is ``mock``. Empty when none can be read."""
+    roots: list[x509.Certificate] = []
+    try:
+        if config.tsa.roots_dir is not None and config.tsa.roots_dir.is_dir():
+            roots += load_roots_dir(config.tsa.roots_dir)
+        mock_root = layout.state / "mock-tsa" / "root.pem"
+        if config.tsa.provider == "mock" and mock_root.is_file():
+            roots += load_certificates([mock_root])
+    except (OSError, ValueError) as exc:
+        log.info("pinned roots unreadable: %s", exc)
+    return roots
+
+
+@dataclass(frozen=True)
+class StampInUse:
+    """The time stamp of the newest sealed day: the certificates in use now."""
+
+    day: date
+    #: Its TSA certificate first, the pinned root it reaches last (``token_chain``).
+    chain: tuple[x509.Certificate, ...]
+    gen_time: datetime
+
+
+def stamp_in_use(layout: Layout, roots: Sequence[x509.Certificate]) -> StampInUse | None:
+    """The newest sealed day's stamp and its verified chain; ``None`` before the first sealed
+    day, or when that day's token cannot be read or reaches no pinned root (the day check says
+    why)."""
+    return _newest_stamp(layout, roots)[0]
+
+
+def crl_stamp(stamp: StampInUse | None) -> StampInUse | None:
+    """The stamp whose issuers need a revocation list (``R20-crl``, ``crl_stale``): none for a
+    chain to ARCILOGGER's test root (W5-A D5; deviation W5-E-5)."""
+    if stamp is not None and is_test_stamp("", stamp.chain[-1].subject.rfc4514_string()):
+        return None
+    return stamp
+
+
+def _newest_stamp(
+    layout: Layout, roots: Sequence[x509.Certificate]
+) -> tuple[StampInUse | None, bool]:
+    """:func:`stamp_in_use`, and whether it is known: ``False`` when the newest sealed day's
+    token cannot be read or reaches no pinned root (``True`` before the first sealed day)."""
+    for day in reversed(sealed_days(layout)):
+        try:
+            data = layout.token(day).read_bytes()
+        except FileNotFoundError:
+            continue  # a failed attempt leaves a manifest without a token: never sealed
+        except OSError as exc:
+            log.info("token of %s unreadable: %s", day, exc)
+            return None, False
+        try:
+            chain = token_chain(data, roots)
+            gen_time = inspect_token(data).gen_time
+        except (TsaError, ValueError, TypeError, KeyError) as exc:
+            log.info("token of %s unreadable: %s", day, exc)
+            return None, False
+        return (StampInUse(day, tuple(chain), gen_time), True) if chain else (None, False)
+    return None, True
+
+
+def issuers_in_use(stamp: StampInUse | None) -> frozenset[str]:
+    """SHA-256 fingerprints of the issuers whose lists must stay fresh: the certificates of the
+    newest sealed day's chain that sign another one of it (its CA certificates and its root)."""
+    if stamp is None:
+        return frozenset()
+    return frozenset(fingerprint(certificate) for certificate in stamp.chain[1:])
+
+
+def stored_lists(layout: Layout) -> StoredLists | None:
+    """The stored lists that count (:func:`arcilogger_core.crl.load_stored`): a list whose file
+    is gone or changed is left out (C14, C20). ``None``: ``state/crl`` cannot be read."""
+    try:
+        return load_stored(layout)
+    except (CrlError, RecursionError) as exc:
+        log.info("stored revocation lists unreadable: %s", exc)
+        return None
+
+
+def crl_fetch_times(index: CrlIndexState) -> dict[str, datetime]:
+    """The last successful fetch of each stored list (its index ``fetched_at``), by its stored
+    name."""
+    fetched: dict[str, datetime] = {}
+    for entry in index.lists:
+        if entry.file not in fetched or fetched[entry.file] < entry.fetched_at:
+            fetched[entry.file] = entry.fetched_at
+    return fetched
+
+
+def crl_stale_issuers(
+    lists: Sequence[Crl],
+    fetched: Mapping[str, datetime],
+    in_use: Iterable[str],
+    now: datetime,
+    max_age_days: int,
+) -> list[str]:
+    """The issuers in use without a fresh stored list (C22), an issuer without any list
+    included. ``fetched`` holds the lists' fetch times by stored name (:func:`crl_fetch_times`)."""
+    fresh = _fresh_until(lists, fetched, now, max_age_days)
+    return [issuer for issuer in sorted(set(in_use)) if issuer not in fresh or fresh[issuer] <= now]
+
+
+def _fresh_until(
+    lists: Sequence[Crl], fetched: Mapping[str, datetime], now: datetime, max_age_days: int
+) -> dict[str, datetime]:
+    """Until when each issuer's stored lists keep it fresh, by the issuer's fingerprint (C22): a
+    list until its last fetch is ``max_age_days`` old or its own ``nextUpdate``, whichever comes
+    first, and the issuer's best list counts. ``thisUpdate`` is not a measure: a root CA may
+    publish only every few months. A list the index gives no fetch time counts for nothing, and
+    so does one fetched later than ``now``: a skewed clock must not keep a list fresh (the clock
+    check reports the skew itself)."""
+    until: dict[str, datetime] = {}
+    for found in lists:
+        fetched_at = fetched.get(found.path.name if found.path is not None else found.file_name)
+        if fetched_at is None or fetched_at > now:
+            continue
+        fresh = shifted(fetched_at, timedelta(days=max_age_days))
+        if fresh is None:
+            continue
+        if found.next_update is not None:
+            fresh = min(fresh, found.next_update)
+        issuer = found.issuer_sha256.lower()
+        if issuer not in until or until[issuer] < fresh:
+            until[issuer] = fresh
+    return until
+
+
+@dataclass(frozen=True)
+class CrlStatus:
+    """The revocation lists of the issuers in use (``crl_stale``, ``R20-crl``)."""
+
+    in_use: frozenset[str] = frozenset()
+    #: The issuers in use without a fresh list (C22): all of them when the stored lists cannot
+    #: be read.
+    stale: tuple[str, ...] = ()
+    #: When the first stale issuer that has a list went stale; ``None`` when none has one.
+    since: datetime | None = None
+    #: ``False``: ``state/crl`` cannot be read (nothing is resolved from it).
+    readable: bool = True
+    #: Index entries whose file is gone or changed (C14): the lists are evidence.
+    mismatched: tuple[str, ...] = ()
+
+
+def crl_status(
+    lists: StoredLists | None,
+    index: CrlIndexState,
+    stamp: StampInUse | None,
+    now: datetime,
+    max_age_days: int,
+) -> CrlStatus:
+    """Whether the issuers of the stamp in use have a fresh verified list (Wave 5 contract
+    2.3.1, C22): judged from the stored lists and their fetch times in ``index``
+    (:func:`read_crl_index`) only, never from the CrlFetch task's exit code (C12)."""
+    in_use = issuers_in_use(stamp)
+    usable: Sequence[Crl] = lists if lists is not None else ()
+    fetched = crl_fetch_times(index)
+    stale = crl_stale_issuers(usable, fetched, in_use, now, max_age_days)
+    until = _fresh_until(usable, fetched, now, max_age_days)
+    return CrlStatus(
+        in_use=in_use,
+        stale=tuple(stale),
+        since=min((until[issuer] for issuer in stale if issuer in until), default=None),
+        readable=lists is not None,
+        mismatched=lists.mismatched if lists is not None else (),
+    )
+
+
+def shifted(moment: datetime, delta: timedelta) -> datetime | None:
+    """``moment + delta``, ``None`` beyond the calendar or the last moment site time can show
+    (a time no reader should fail on)."""
+    try:
+        moved = moment + delta
+        return moved if moved.astimezone(UTC) <= _LAST_SITE_MOMENT else None
+    except OverflowError:
+        return None
+
+
+@dataclass(frozen=True)
+class RevokedCertificate:
+    #: The certificate's subject (RFC 4514 text).
+    name: str
+    #: When it was revoked, if known.
+    since: datetime | None
+
+
+def revoked_certificates(
+    layout: Layout,
+    stamp: StampInUse | None = None,
+    lists: Sequence[Crl] | None = None,
+    verifications: Mapping[date, ScheduledCheck] | None = None,
+) -> list[RevokedCertificate]:
+    """The time-stamp certificates revoked at or before a stamp (``crl-revoked``), each once:
+    those of the newest scheduled verification of each day that is not deleted, oldest day
+    first (``verifications``, read from ``state/verify`` when not given), then those of the
+    newest sealed day's chain against the stored lists (``stamp`` and ``lists``), which also
+    sees a revocation before the next verification runs."""
+    states = _seal_states(layout)
+    found: dict[str, RevokedCertificate] = {}
+    if verifications is None:
+        verifications = scheduled_verifications(layout)
+    for day, check in sorted(verifications.items()):
+        if states.get(day, {}).get("status") == "deleted":
+            continue
+        for error in check.errors:
+            if (match := REVOKED_DAY_TEXT.match(error)) is not None:
+                name = match["name"]
+                found.setdefault(name, RevokedCertificate(name=name, since=None))
+    if stamp is not None and lists is not None:
+        for finding in check_revocation(list(stamp.chain), lists, stamp.gen_time):
+            if finding.code == "crl-revoked":
+                known = found.get(finding.subject)
+                if known is None or known.since is None:
+                    found[finding.subject] = RevokedCertificate(finding.subject, finding.at)
+    return list(found.values())
+
+
+def crl_max_age_days(config: Config) -> int:
+    """``tsa.crl_max_age_days`` (Wave 5 contract 2.5, default 7), read where every CRL setting
+    is read (:func:`arcilogger_core.crl.crl_options`). A proxy setting the fetch refuses gives
+    the default here: the status is never a server error."""
+    try:
+        return crl_options(config).max_age_days
+    except CrlError as exc:
+        log.warning("CRL settings refused (%s); tsa.crl_max_age_days taken as its default", exc)
+        return CrlOptions.max_age_days
+
+
+# -- re-stamping, certificates and revocation lists (Wave 5 contract 2.3.1) ------------------------
+#
+# Switched on by W5-E (D14): the codes, their catalogue texts (alerts.texts) and their rows in the
+# first-steps guide came together, and LEGAL_CHECKS is part of CHECKS. The findings carry counts
+# only: no certificate name, no person, no log line.
+
+RENEWAL_RULE: Final = "R20-renewal"
+CERT_RULE: Final = "R20-cert"
+CRL_RULE: Final = "R20-crl"
+RENEWAL_KEY: Final = f"{RENEWAL_RULE}:none"
+CERT_KEY: Final = f"{CERT_RULE}:none"
+CRL_KEY: Final = f"{CRL_RULE}:none"
+#: A token due for re-stamping is ``high`` for R20-cert when its certificate expires this soon
+#: (at most 30 days left; an ``uncovered`` one always is). Manager answer on #117, W5-C-12.
+CERT_EXPIRY_WARNING: Final = timedelta(days=30)
+#: "The Renew task failed twice in a row" (contract 2.3.1): ``failures_in_a_row`` of
+#: ``state/renewal/renewal.json`` at least this (failed and refused runs, A4).
+RENEW_FAILURES_ALERT: Final = 2
+
+
+def _rule_of(key: str) -> str:
+    """The alert code of a dedup key ``<code>:<what>``."""
+    return key.partition(":")[0]
+
+
+def _owned(key: str) -> Callable[[str], bool]:
+    return lambda candidate: candidate == key
+
+
+def _keep(alert: Alert) -> str | None:
+    return None
+
+
+def check_stamp_renewal(ctx: CheckContext) -> Outcome:
+    """``R20-renewal:none``: a token of the re-stamping report is ``due``, or its certificate
+    expired ``uncovered``, or the ``Renew`` task failed twice in a row (``failures_in_a_row`` of
+    the same file, failed and refused runs; A4), judged from ``state/renewal/renewal.json``,
+    never from the task's exit code (C12). The failures raise it also while the token list is
+    unknown (a refused run without pinned roots writes none, W5-A-2); raised by the failures
+    alone, its title says the task failed (W5-E-7). Resolved by a readable report without such a
+    token and without those failures; what cannot be read decides nothing."""
+    # Two reads of the same file: a run that replaces it in between can pair the previous
+    # tokens with the new count. Each half is true of one file the task wrote, and the next pass
+    # reads them alike.
+    renewals = read_stamp_renewals(ctx.layout)
+    runs = read_renew_runs(ctx.layout)
+    failures = runs.failures_in_a_row if runs is not None else None
+    failing = failures is not None and failures >= RENEW_FAILURES_ALERT
+    if renewals is None and not failing:
+        return Outcome([], _owned(RENEWAL_KEY), _keep)
+    counts = Counter(renewal.status for renewal in renewals or ())
+    due, uncovered = counts["due"], counts["uncovered"]
+    parts_tr, parts_en = [], []
+    if due or uncovered:
+        parts_tr.append(
+            f"{due} damganın zamanı geldi, {uncovered} damga yeniden damgalanmadan sona erdi"
+        )
+        parts_en.append(f"{due} stamp(s) due, {uncovered} expired without re-stamping")
+    if failing:
+        parts_tr.append(f"Renew görevi art arda {failures} kez başarısız oldu")
+        parts_en.append(f"the Renew task failed {failures} times in a row")
+    findings = []
+    if parts_tr:
+        title_tr = f"Yeniden damgalama gerekiyor: {'; '.join(parts_tr)}"
+        title_en = f"Re-stamping needed: {'; '.join(parts_en)}"
+        if not (due or uncovered):
+            # the failures alone (nothing due, or the token list unknown) name the task (W5-E-7)
+            title_tr, title_en = (title.format(failures=failures) for title in RENEW_FAILED_TITLE)
+        findings.append(
+            Finding(
+                key=RENEWAL_KEY,
+                rule=RENEWAL_RULE,
+                severity="high",
+                title=title_tr,
+                details={
+                    # unknown (None) while the report has no token list
+                    "due": due if renewals is not None else None,
+                    "uncovered": uncovered if renewals is not None else None,
+                    "failures_in_a_row": failures,
+                    "title_en": title_en,
+                },
+            )
+        )
+
+    def clear(alert: Alert) -> str | None:
+        # the token list known (the early return) and the failures known and too few
+        return "renewal_ok" if failures is not None else None
+
+    return Outcome(findings, _owned(RENEWAL_KEY), clear)
+
+
+def check_stamp_cert(ctx: CheckContext) -> Outcome:
+    """``R20-cert:none``: a time-stamp certificate is on a revocation list at or before a stamp
+    (``critical``); or a token due for re-stamping, not covered yet, has a certificate that
+    expires within :data:`CERT_EXPIRY_WARNING`, or a token's certificate expired with no renewal
+    that counts (``uncovered``) (``high``). Resolved when none holds and every input can be
+    read: the re-stamping report, the scheduled verifications, the newest sealed day's stamp
+    (reaching a pinned root) and, once a day is sealed, every stored list (none changed or
+    gone, C14). An unreadable one decides nothing: a revocation it raised stays open."""
+    stamp, stamp_known = _newest_stamp(ctx.layout, pinned_roots(ctx.config, ctx.layout))
+    lists = stored_lists(ctx.layout)
+    verifications, verifications_known = read_scheduled_verifications(ctx.layout)
+    revoked = revoked_certificates(ctx.layout, stamp, lists, verifications)
+    renewals = read_stamp_renewals(ctx.layout)
+    expiring = sum(
+        1
+        for renewal in renewals or ()
+        if renewal.status == "due" and renewal.cert_not_after - ctx.now <= CERT_EXPIRY_WARNING
+    )
+    uncovered = sum(1 for renewal in renewals or () if renewal.status == "uncovered")
+    findings = []
+    if revoked:
+        findings.append(
+            Finding(
+                key=CERT_KEY,
+                rule=CERT_RULE,
+                severity="critical",
+                title=f"Zaman damgası sertifikası iptal listesinde: {len(revoked)} sertifika",
+                details={
+                    "revoked": len(revoked),
+                    "expiring": expiring,
+                    "uncovered": uncovered,
+                    "title_en": (
+                        f"Time-stamp certificate on a revocation list: {len(revoked)} "
+                        "certificate(s)"
+                    ),
+                },
+            )
+        )
+    elif expiring or uncovered:
+        days = CERT_EXPIRY_WARNING.days
+        findings.append(
+            Finding(
+                key=CERT_KEY,
+                rule=CERT_RULE,
+                severity="high",
+                title=(
+                    f"Zaman damgası sertifikası: {expiring} damganın sertifikası {days} gün "
+                    f"içinde sona eriyor, {uncovered} damganınki yeniden damgalanmadan sona erdi"
+                ),
+                details={
+                    "revoked": 0,
+                    "expiring": expiring,
+                    "uncovered": uncovered,
+                    "title_en": (
+                        f"Time-stamp certificate: {expiring} stamp(s) expire within {days} "
+                        f"days, {uncovered} expired without re-stamping"
+                    ),
+                },
+            )
+        )
+
+    # nothing sealed yet: no chain to check the lists against, and no list is needed
+    lists_known = stamp is None or lists is not None
+    lists_intact = stamp is None or (lists is not None and not lists.mismatched)
+    readable = renewals is not None and verifications_known and stamp_known and lists_known
+
+    def clear(alert: Alert) -> str | None:
+        if not readable:
+            return None
+        # A changed or deleted list (C14/C20) keeps its index entry for good, so it holds open
+        # only an alert that carries a revocation; an expiry alert resolves on renewal.json
+        # (the damage itself is reported by CrlFetch's stored_file_changed and the day page).
+        if not lists_intact and _carries_revocation(alert):
+            return None
+        return "certificate_ok"
+
+    return Outcome(findings, _owned(CERT_KEY), clear)
+
+
+def _carries_revocation(alert: Alert) -> bool:
+    """Whether an open ``R20-cert`` alert was raised for a revocation: its ``revoked`` count,
+    or its severity (the store keeps the highest severity an alert reached, while a later
+    expiry-only finding writes ``revoked`` 0 into its details)."""
+    revoked = (alert.details or {}).get("revoked")
+    return alert.severity == "critical" or (isinstance(revoked, int) and revoked > 0)
+
+
+def check_stamp_crl(ctx: CheckContext) -> Outcome:
+    """``R20-crl:none``: an issuer of the newest sealed day's chain has no fresh stored
+    revocation list (C22: fetched in the last ``tsa.crl_max_age_days`` days, not past its
+    ``nextUpdate``, still matching its index entry), or ``state/crl`` cannot be read while one
+    is in use. Judged from the stored lists and ``state/crl/index.json``, never from the
+    CrlFetch task's exit code (C12); lists that cannot be read resolve nothing. A chain to
+    ARCILOGGER's test root has no issuer in use: the mock TSA publishes no list, and a test stamp
+    never counts (W5-A D5; deviation W5-E-5)."""
+    max_age = crl_max_age_days(ctx.config)
+    stamp = crl_stamp(stamp_in_use(ctx.layout, pinned_roots(ctx.config, ctx.layout)))
+    index = read_crl_index(ctx.layout)
+    status = crl_status(stored_lists(ctx.layout), index, stamp, ctx.now, max_age)
+    findings = []
+    if status.stale:
+        newest = index.newest_fetched_at
+        findings.append(
+            Finding(
+                key=CRL_KEY,
+                rule=CRL_RULE,
+                severity="medium",
+                title=f"{max_age} günden yeni doğrulanmış bir iptal listesi (SİL) yok",
+                details={
+                    "stale_issuers": len(status.stale),
+                    "failures": len(index.failures),
+                    # C14: stored lists left out because their file is gone or changed
+                    "changed_files": len(status.mismatched),
+                    "newest_fetched_at": isoformat_site(newest, "seconds") if newest else None,
+                    "max_age_days": max_age,
+                    "title_en": f"No verified revocation list newer than {max_age} days",
+                },
+            )
+        )
+
+    def clear(alert: Alert) -> str | None:
+        return "crl_fresh" if status.readable else None
+
+    return Outcome(findings, _owned(CRL_KEY), clear)
+
+
+#: The checks of Wave 5 contract 2.3.1, the last ones of :data:`CHECKS`.
+LEGAL_CHECKS: Final[tuple[tuple[str, Callable[[CheckContext], Outcome]], ...]] = (
+    ("stamp_renewal", check_stamp_renewal),
+    ("stamp_cert", check_stamp_cert),
+    ("stamp_crl", check_stamp_crl),
+)
+
+
 CHECKS: Final[tuple[tuple[str, Callable[[CheckContext], Outcome]], ...]] = (
     ("disk", check_disk),
     ("seal", check_seal),
@@ -1841,6 +2625,8 @@ CHECKS: Final[tuple[tuple[str, Callable[[CheckContext], Outcome]], ...]] = (
     ("lease_evidence", check_lease_evidence),
     ("nat_exits", check_nat_exits),
     ("filter", check_filter),
+    # Wave 5 contract 2.3.1 (D14): re-stamping, the time-stamp certificate, revocation lists.
+    *LEGAL_CHECKS,
 )
 
 

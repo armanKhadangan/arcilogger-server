@@ -17,7 +17,7 @@ import {
   sealStatus,
   visibleBlocks,
 } from './dashboard-model';
-import { withParseFailures } from './test-data';
+import { BLOCKING, withBlocking, withParseFailures } from './test-data';
 
 function granted(role: string): Set<string> {
   return new Set(ROLES.find((item) => item.id === role)?.permissions ?? []);
@@ -128,6 +128,34 @@ describe('visible blocks', () => {
         'usage',
       ),
     ).toBe(true);
+  });
+
+  it('a blocking day adds the blocking card, only beside the seal box', () => {
+    const admin = withBlocking(summaryFor('admin'));
+    expect(admin.seal?.blocking).toEqual(BLOCKING);
+    expect(visibleBlocks(granted('admin'), admin, usage).has('blocking')).toBe(true);
+    expect(
+      visibleBlocks(granted('auditor'), withBlocking(summaryFor('auditor')), usage).has('blocking'),
+    ).toBe(true);
+    // The other blocks stay as they were.
+    expect(
+      [...visibleBlocks(granted('admin'), admin, usage)].filter((b) => b !== 'blocking'),
+    ).toEqual([...visibleBlocks(granted('admin'), summaryFor('admin'), usage)]);
+    // The viewer's summary has no seal box: nothing to block on.
+    const viewer = withBlocking(summaryFor('viewer'));
+    expect(viewer.seal).toBeNull();
+    expect(visibleBlocks(granted('viewer'), viewer, usage).has('blocking')).toBe(false);
+    // HR never asks the summary, even a stray one with a blocking day is ignored.
+    expect(visibleBlocks(granted('hr'), admin, usage).has('blocking')).toBe(false);
+  });
+
+  it('no blocking card for `null`, nor from an API without the field', () => {
+    const none = withBlocking(summaryFor('admin'), null);
+    expect(none.seal?.blocking).toBeNull();
+    expect(visibleBlocks(granted('admin'), none, usage).has('blocking')).toBe(false);
+    const older = summaryFor('admin');
+    if (older.seal) delete (older.seal as { blocking?: unknown }).blocking;
+    expect(visibleBlocks(granted('admin'), older, usage).has('blocking')).toBe(false);
   });
 
   it('links only to pages the user may open', () => {

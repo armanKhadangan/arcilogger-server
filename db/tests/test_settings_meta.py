@@ -25,7 +25,7 @@ GROUP_PREFIXES = {
     "reports": ("reports.",),
     "evidence": ("evidence.",),
     "security": ("auth.", "privacy."),
-    "database": ("db.retention_days",),
+    "database": ("db.retention_days", "db.reload_keep_days"),
 }
 #: Words that would claim legal compliance (the wording rule of the product).
 OVERSTATEMENT = re.compile(r"uyumlu|uyumu|garanti|complian|guarantee", re.IGNORECASE)

@@ -10,15 +10,15 @@ day's rollup depends on: when it changes, the recent days are rebuilt (:mod:`.jo
 from __future__ import annotations
 
 import re
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
-from typing import Any, Final
+from typing import Any, Final, Literal
 
 from sqlalchemy.orm import Session
 
 from arcilogger_core.timeutil import day_window, to_site
-from arcilogger_db.settings import DEFAULT_SETTINGS, get_settings
+from arcilogger_db.settings import DEFAULT_SETTINGS, get_settings, validate_setting
 
 #: Label of a domain without a category (spec 10.2).
 UNKNOWN_CATEGORY: Final = "Bilinmiyor"
@@ -45,28 +45,90 @@ def _minutes(text: str) -> int | None:
     return None if match is None else int(match.group(1)) * 60 + int(match.group(2))
 
 
+#: The part of the day a minute belongs to (contract W5 §6 K2): work hours, a break inside them
+#: ("mola"), or off hours (outside them, a day off or a holiday).
+Part = Literal["work", "break", "off"]
+PARTS: Final[tuple[Part, ...]] = ("work", "break", "off")
+#: Breaks of a day: ``[start, end)`` in minutes after local midnight, sorted.
+Breaks = tuple[tuple[int, int], ...]
+
+
+@dataclass(frozen=True)
+class DayHours:
+    """The hours of one work day: ``[start, end)`` in minutes after local midnight, and breaks."""
+
+    start: int
+    end: int
+    breaks: Breaks = ()
+
+    def part(self, minute: int) -> Part:
+        if not self.start <= minute < self.end:
+            return "off"
+        return "break" if any(first <= minute < last for first, last in self.breaks) else "work"
+
+
 @dataclass(frozen=True)
 class WorkHours:
-    """Work hours: ISO weekdays and ``[start, end)`` in minutes after local midnight."""
+    """Work hours: ISO weekdays, ``[start, end)`` in minutes after local midnight, the breaks
+    and the weekdays with their own hours (``by_day``, sorted by weekday)."""
 
     days: frozenset[int]
     start: int
     end: int
+    breaks: Breaks = ()
+    by_day: tuple[tuple[int, DayHours], ...] = ()
 
     @classmethod
     def parse(cls, value: Any) -> WorkHours:
-        default = DEFAULT_SETTINGS["usage.work_hours"]
-        for candidate in (value, default):
+        """The stored value, checked by the server's own rules; the shipped default if it
+        breaks one (a damaged row never stops the rollups)."""
+        for candidate in (value, DEFAULT_SETTINGS["usage.work_hours"]):
             if not isinstance(candidate, dict):
                 continue
-            days, start, end = candidate.get("days"), candidate.get("start"), candidate.get("end")
-            if not isinstance(days, list) or not isinstance(start, str) or not isinstance(end, str):
+            try:
+                checked = validate_setting("usage.work_hours", candidate)
+            except ValueError:
                 continue
-            first, last = _minutes(start), _minutes(end)
-            if first is None or last is None or first >= last:
-                continue
-            return cls(frozenset(d for d in days if type(d) is int and 1 <= d <= 7), first, last)
+            by_day = tuple(
+                (int(weekday), _day_hours(hours))
+                for weekday, hours in checked.get("by_day", {}).items()
+            )
+            general = _day_hours(checked)
+            return cls(
+                frozenset(checked["days"]), general.start, general.end, general.breaks, by_day
+            )
         raise AssertionError("the shipped usage.work_hours default is invalid")  # pragma: no cover
+
+    def hours(self, weekday: int) -> DayHours | None:
+        """The hours of ISO weekday ``weekday``; ``None`` on a day off."""
+        if weekday not in self.days:
+            return None
+        for day, hours in self.by_day:
+            if day == weekday:
+                return hours
+        return DayHours(self.start, self.end, self.breaks)
+
+    def fingerprint(self) -> list[Any]:
+        """For :meth:`UsageSettings.fingerprint`: unchanged for a value without breaks and
+        ``by_day``, so an upgrade alone rebuilds no day."""
+        result: list[Any] = [sorted(self.days), self.start, self.end]
+        if self.breaks or self.by_day:
+            result.append([list(item) for item in self.breaks])
+            result.append(
+                [
+                    [day, hours.start, hours.end, [list(item) for item in hours.breaks]]
+                    for day, hours in self.by_day
+                ]
+            )
+        return result
+
+
+def _day_hours(value: Mapping[str, Any]) -> DayHours:
+    breaks = tuple(
+        (_minutes(item["start"]) or 0, _minutes(item["end"]) or 0)
+        for item in value.get("breaks", [])
+    )
+    return DayHours(_minutes(value["start"]) or 0, _minutes(value["end"]) or 0, breaks)
 
 
 @dataclass(frozen=True)
@@ -162,19 +224,29 @@ class UsageSettings:
 
     # -- work hours -------------------------------------------------------------------------------
 
-    def is_off_hours(self, moment: datetime) -> bool:
-        """Outside the work hours (or on a holiday) at ``moment`` (site time)."""
+    def part_of(self, moment: datetime) -> Part:
+        """The part of the day of ``moment`` (site time): ``work``, ``break`` or ``off``."""
         local = to_site(moment)
-        if local.date() in self.holidays or local.isoweekday() not in self.work_hours.days:
-            return True
-        minute = local.hour * 60 + local.minute
-        return not self.work_hours.start <= minute < self.work_hours.end
+        hours = None if local.date() in self.holidays else self.work_hours.hours(local.isoweekday())
+        return "off" if hours is None else hours.part(local.hour * 60 + local.minute)
 
-    def off_hours_minutes(self, day: date) -> list[bool]:
-        """For every minute of the site day ``day``: outside the work hours?"""
+    def is_off_hours(self, moment: datetime) -> bool:
+        """Outside the work hours (or on a holiday) at ``moment`` (site time); a break is not."""
+        return self.part_of(moment) == "off"
+
+    def has_breaks(self, days: Iterable[date]) -> bool:
+        """Whether a work day among ``days`` (not a holiday) has a break."""
+        for day in days:
+            hours = None if day in self.holidays else self.work_hours.hours(day.isoweekday())
+            if hours is not None and hours.breaks:
+                return True
+        return False
+
+    def day_parts(self, day: date) -> list[Part]:
+        """For every minute of the site day ``day``: its part (:data:`PARTS`)."""
         start, end = day_window(day)
         count = int((end - start).total_seconds() // 60)
-        return [self.is_off_hours(start + timedelta(minutes=k)) for k in range(count)]
+        return [self.part_of(start + timedelta(minutes=k)) for k in range(count)]
 
     def fingerprint(self) -> dict[str, Any]:
         """What a day's rollup depends on (the reporting thresholds are left out)."""
@@ -186,11 +258,7 @@ class UsageSettings:
             "background_domains": list(self.background_domains),
             "background_appcats": list(self.background_appcats),
             "background_ports": list(self.background_ports),
-            "work_hours": [
-                sorted(self.work_hours.days),
-                self.work_hours.start,
-                self.work_hours.end,
-            ],
+            "work_hours": self.work_hours.fingerprint(),
             "holidays": sorted(f"{m:02d}-{d:02d}" for m, d in self.holidays.yearly)
             + sorted(day.isoformat() for day in self.holidays.dates),
             "psl_file": self.psl_file,

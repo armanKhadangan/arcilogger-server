@@ -270,10 +270,35 @@ function isTable(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
+/** The fields of two tables that differ, each as `<path>.<field>: {old, new}`. */
+function fieldRows(
+  path: string,
+  old: Record<string, unknown> | null,
+  next: Record<string, unknown> | null,
+): [string, Change][] {
+  const fields = [...new Set([...Object.keys(old ?? {}), ...Object.keys(next ?? {})])];
+  return fields
+    .filter((field) => field !== 'name')
+    .filter((field) => JSON.stringify(old?.[field]) !== JSON.stringify(next?.[field]))
+    .flatMap((field): [string, Change][] => {
+      const before = old?.[field] ?? null;
+      const after = next?.[field] ?? null;
+      // A source's `[sources.snmp]` (Wave 5 §6 N1) is listed field by field too.
+      if (field === 'snmp' && (isTable(before) || isTable(after)))
+        return fieldRows(
+          `${path}.snmp`,
+          isTable(before) ? before : null,
+          isTable(after) ? after : null,
+        );
+      return [[`${path}.${field}`, { old: before, new: after }]];
+    });
+}
+
 /**
  * A change list as the review shows it: a source is changed as its whole `[[sources]]` table
  * (`sources.<name>: {old, new}`, `null` for an addition or a removal); its fields are listed one
- * by one (`sources.<name>.<field>`), only those that change, the name not at all.
+ * by one (`sources.<name>.<field>`, its SNMP table's as `sources.<name>.snmp.<field>`), only
+ * those that change, the name not at all.
  */
 export function changeRows(changes: Record<string, Change>): [string, Change][] {
   return Object.entries(changes).flatMap(([path, change]): [string, Change][] => {
@@ -281,14 +306,7 @@ export function changeRows(changes: Record<string, Change>): [string, Change][] 
     const old = isTable(change.old) ? change.old : null;
     const next = isTable(change.new) ? change.new : null;
     if (!old && !next) return [[path, change]];
-    const fields = [...new Set([...Object.keys(old ?? {}), ...Object.keys(next ?? {})])];
-    return fields
-      .filter((field) => field !== 'name')
-      .filter((field) => JSON.stringify(old?.[field]) !== JSON.stringify(next?.[field]))
-      .map((field) => [
-        `${path}.${field}`,
-        { old: old?.[field] ?? null, new: next?.[field] ?? null },
-      ]);
+    return fieldRows(path, old, next);
   });
 }
 

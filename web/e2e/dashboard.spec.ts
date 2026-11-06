@@ -1,10 +1,12 @@
 import { expect, test, type Page } from '@playwright/test';
 
+import type { WanRates } from '../src/lib/activity-types';
+
 import { expectNoA11yViolations, usePreferences, useSampleClock, type Theme } from './fixtures';
 import { mockApi, type MockOptions } from './mock-api';
 import { mockSources } from './mock-sources';
 import { mockW4 } from './mock-w4';
-import { DASHBOARD, RAW, SAMPLE_TODAY, SOURCES, SYSTEM_DISK } from './samples';
+import { ACTIVITY_WAN, copy, DASHBOARD, RAW, SAMPLE_TODAY, SOURCES, SYSTEM_DISK } from './samples';
 
 /** The Panel's blocks (spec 12.3 item 2) by their test ids, in page order. */
 const ALL = [
@@ -322,6 +324,117 @@ async function titlesFit(page: Page): Promise<string[]> {
   });
 }
 
+/**
+ * The Panel's blocking day (Wave 5 contract 2.3.1 `DashboardSeal.blocking`): the captured
+ * summaries have none (`blocking: null`), so it is hand-built: the capture's failed 11.10.2026,
+ * 51 hours late.
+ */
+const BLOCKING = { oldest_unstamped_day: '2026-10-11', hours_late: 51 };
+
+/** `GET /dashboard/summary` as the API answered `role`, with {@link BLOCKING} in its seal box. */
+async function blockingSummary(page: Page, role: 'admin' | 'auditor' | 'viewer') {
+  const summary = copy(DASHBOARD[role]);
+  const json = summary.seal
+    ? { ...summary, seal: { ...summary.seal, blocking: BLOCKING } }
+    : summary;
+  await page.route('**/api/v1/dashboard/summary', (route) => route.fulfill({ json }));
+}
+
+const BLOCKING_TEXT =
+  'En eski damgalanmamış gün 11.10.2026; damgası 51 saat gecikti. (ZAMAN-DAMGASI.md bölüm 5.5)';
+
+test.describe('Panel — blocking card', () => {
+  test.beforeEach(async ({ page }) => {
+    await useSampleClock(page, SAMPLE_TODAY);
+  });
+
+  test('administrator: red at the top, the health cards unchanged, opens that day', async ({
+    page,
+  }) => {
+    await panel(page, { signedInAs: 'tolga' });
+    await blockingSummary(page, 'admin');
+    await page.goto('/');
+    const card = page.getByTestId('dashboard-blocking');
+    await expect(card).toContainText('Kapanmış günler zaman damgası bekliyor');
+    await expect(card).toContainText(BLOCKING_TEXT);
+    await expect(card).toHaveAttribute('role', 'status');
+    await expect(card.locator('svg').first()).toBeVisible();
+    await expect(card.locator('h3')).toHaveCount(0);
+    await expect(page.getByTestId('card-disk')).toBeVisible();
+    expect(await pageOrder(page)).toEqual(ALL);
+    // Full width, above the first health card.
+    const [cardBox, ingestBox, calendarBox] = await Promise.all([
+      card.boundingBox(),
+      page.getByTestId('card-ingest').boundingBox(),
+      page.getByTestId('card-calendar').boundingBox(),
+    ]);
+    expect((cardBox?.y ?? 0) + (cardBox?.height ?? 0)).toBeLessThanOrEqual(ingestBox?.y ?? 0);
+    expect(cardBox?.width ?? 0).toBeGreaterThan((calendarBox?.width ?? 0) * 2);
+
+    await card.getByRole('link', { name: 'Günü Mühürleme sayfasında aç' }).click();
+    await expect(page).toHaveURL(/\/sealing\?month=2026-10&day=2026-10-11$/);
+    await expect(page.getByRole('heading', { level: 1, name: 'Mühürleme' })).toBeVisible();
+  });
+
+  test('English: the same card in English', async ({ page }) => {
+    await usePreferences(page, { lang: 'en' });
+    await panel(page, { signedInAs: 'tolga' });
+    await blockingSummary(page, 'admin');
+    await page.goto('/');
+    const card = page.getByTestId('dashboard-blocking');
+    await expect(card).toContainText('Closed days are waiting for a time stamp');
+    await expect(card).toContainText(
+      'The oldest unstamped day is 11.10.2026; its time stamp is 51 hours late. (TIME-STAMPING.md section 5.5)',
+    );
+    await expect(
+      card.getByRole('link', { name: 'Open the day on the sealing page' }),
+    ).toBeVisible();
+  });
+
+  test('auditor: the card and its link (seal.read)', async ({ page }) => {
+    await panel(page, { signedInAs: 'ayse.yilmaz' });
+    await blockingSummary(page, 'auditor');
+    await page.goto('/');
+    const card = page.getByTestId('dashboard-blocking');
+    await expect(card).toContainText(BLOCKING_TEXT);
+    await expect(card.getByRole('link')).toHaveAttribute(
+      'href',
+      '/sealing?month=2026-10&day=2026-10-11',
+    );
+  });
+
+  test('report viewer: no seal box, no card', async ({ page }) => {
+    await panel(page, { signedInAs: 'zeynep' });
+    await blockingSummary(page, 'viewer');
+    await page.goto('/');
+    await expect(page.getByTestId('card-ingest')).toBeVisible();
+    await expect(page.getByTestId('card-usage')).toBeVisible();
+    await expect(page.getByTestId('dashboard-blocking')).toHaveCount(0);
+  });
+
+  test('no card from the captured summary (nothing blocking)', async ({ page }) => {
+    await panel(page, { signedInAs: 'tolga' });
+    await page.goto('/');
+    await expect(page.getByTestId('card-seal')).toBeVisible();
+    await expect(page.getByTestId('card-disk')).toBeVisible();
+    await expect(page.getByTestId('dashboard-blocking')).toHaveCount(0);
+  });
+});
+
+for (const theme of ['light', 'dark'] as Theme[]) {
+  test(`Panel with the blocking card: accessibility — ${theme}`, async ({ page }) => {
+    await usePreferences(page, { theme });
+    await useSampleClock(page, SAMPLE_TODAY);
+    await panel(page, { signedInAs: 'tolga' });
+    await blockingSummary(page, 'admin');
+    await page.goto('/');
+    await expect(page.getByTestId('dashboard-blocking')).toContainText(BLOCKING_TEXT);
+    await expect(page.getByTestId('card-usage')).toContainText('Aktif kullanıcı');
+    await expect(page.getByTestId('card-disk')).toBeVisible();
+    await expectNoA11yViolations(page);
+  });
+}
+
 for (const lang of ['tr', 'en'] as const) {
   for (const width of [1280, 1440, 1920]) {
     test(`no card title is cut at ${width} px (${lang})`, async ({ page }) => {
@@ -359,6 +472,88 @@ for (const theme of ['light', 'dark'] as Theme[]) {
     await expect(page.getByTestId('card-parse-failures')).toContainText('fortigate.kv');
     await expect(page.getByTestId('card-usage')).toContainText('Aktif kullanıcı');
     await expect(page.getByTestId('card-disk')).toBeVisible();
+    await expectNoA11yViolations(page);
+  });
+}
+
+/**
+ * `GET /activity/wan` answering W5-N's captured `activity-wan.json` (`dashboard.view` or
+ * `system.read`, N6); the calls it answered.
+ */
+async function routeWan(page: Page, rates: WanRates = ACTIVITY_WAN.hour) {
+  const calls: string[] = [];
+  await page.route('**/api/v1/activity/wan?*', async (route) => {
+    calls.push(new URL(route.request().url()).searchParams.get('range') ?? '');
+    await route.fulfill({ json: copy(rates) });
+  });
+  return calls;
+}
+
+/**
+ * The card "İnternet hattı" (Wave 5 contract §6 N7, P4): W5-N's captured `activity-wan.json` —
+ * a line read with its capacity, one without an answer and a source whose SNMP is off (left
+ * out); without any SNMP source, the way to Kaynaklar for an administrator.
+ */
+test.describe('Panel — İnternet hattı', () => {
+  test.beforeEach(async ({ page }) => {
+    await useSampleClock(page, SAMPLE_TODAY);
+  });
+
+  test('administrator: each line now, the one not read says so', async ({ page }) => {
+    await panel(page, { signedInAs: 'tolga' });
+    const calls = await routeWan(page);
+    await page.goto('/');
+    const card = page.getByTestId('card-wan');
+    const lines = card.getByTestId('wan-line');
+    await expect(lines).toHaveCount(2);
+    await expect(lines.nth(0)).toContainText('wan1');
+    await expect(lines.nth(0)).toContainText('34,0 Mbit/s');
+    await expect(lines.nth(0)).toContainText('kapasite: %34');
+    await expect(lines.nth(1)).toContainText('Yanıt yok');
+    await expect(card).not.toContainText('ether1');
+    expect(calls[0]).toBe('60m');
+  });
+
+  test('no SNMP source: the administrator is shown Kaynaklar, the auditor nothing', async ({
+    page,
+  }) => {
+    await panel(page, { signedInAs: 'tolga' });
+    await routeWan(page, ACTIVITY_WAN.empty);
+    await page.goto('/');
+    const setup = page.getByTestId('card-wan-setup');
+    await expect(setup).toContainText('Hat hızı henüz okunmuyor.');
+    await expect(page.getByTestId('card-wan')).toHaveCount(0);
+    await setup.getByRole('link', { name: "Ayarlar → Kaynaklar'da SNMP'yi aç" }).click();
+    await expect(page).toHaveURL(/\/settings\/sources$/);
+  });
+
+  test('auditor: asks for the lines, never sees the way to Kaynaklar', async ({ page }) => {
+    await panel(page, { signedInAs: 'ayse.yilmaz' });
+    const calls = await routeWan(page, ACTIVITY_WAN.empty);
+    await page.goto('/');
+    await expect(page.getByTestId('card-seal')).toBeVisible();
+    await expect.poll(() => calls.length).toBeGreaterThan(0);
+    await expect(page.getByTestId('card-wan-setup')).toHaveCount(0);
+  });
+
+  test('HR (no dashboard.view, no system.read): never asks for the lines', async ({ page }) => {
+    await panel(page, { signedInAs: 'mehmet.kaya' });
+    const calls = await routeWan(page);
+    await page.goto('/');
+    await expect(page.getByTestId('card-usage')).toBeVisible();
+    await expect(page.getByTestId('card-wan')).toHaveCount(0);
+    expect(calls).toEqual([]);
+  });
+});
+
+for (const theme of ['light', 'dark'] as Theme[]) {
+  test(`Panel with the internet line card: accessibility — ${theme}`, async ({ page }) => {
+    await usePreferences(page, { theme });
+    await useSampleClock(page, SAMPLE_TODAY);
+    await panel(page, { signedInAs: 'tolga' });
+    await routeWan(page);
+    await page.goto('/');
+    await expect(page.getByTestId('card-wan').getByTestId('wan-line')).toHaveCount(2);
     await expectNoA11yViolations(page);
   });
 }
