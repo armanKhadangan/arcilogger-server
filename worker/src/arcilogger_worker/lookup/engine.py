@@ -159,7 +159,6 @@ from arcilogger_worker.lookup.sessions import (
     fetch_rows,
     find_domain,
     group_sessions,
-    srcmac_addresses_within,
     srcmac_rows_of_mac,
     srcmac_sightings,
     time_points,
@@ -710,10 +709,11 @@ class _SrcmacGuard:
     interface within an hour of the moment (``srcmac_shared``; one
     :func:`.trust.srcmac_ip_counts` query per lookup, the one the alert and the observed
     endpoint count with), and holds no lease of another address there
-    (``srcmac_other_lease``). A considered row outside that hour (a session overlapping the
-    lookup window, logged at its end) adds its own address to its MAC's count unless the hour
-    shows it already, so a row used is always counted; no row widens the hour of another MAC.
-    A refusal adds its explanation to ``notes``."""
+    (``srcmac_other_lease``). The count takes every session that overlaps the hour, also one
+    logged after it (#96): a considered row overlaps the lookup window, which lies inside the
+    hour (the tolerance is at most an hour), so a row used is always counted, once; a session
+    that does not overlap the hour widens no MAC's count. A refusal adds its explanation to
+    ``notes``."""
 
     def __init__(
         self,
@@ -742,18 +742,14 @@ class _SrcmacGuard:
         macs = {str(row.srcmac) for row in rows}
         interfaces = self.settings.srcmac_interfaces
         self._counts = srcmac_ip_counts(
-            self.session, self.low, self.high, interfaces, self.untrusted, macs
+            self.session,
+            self.low,
+            self.high,
+            interfaces,
+            self.untrusted,
+            macs,
+            max_session_seconds=self.settings.max_session_seconds,
         )
-        outside = {
-            (str(row.srcintf), str(row.srcmac), row.srcip)
-            for row in rows
-            if not self.low <= row.time <= self.high
-        }
-        within = srcmac_addresses_within(
-            self.session, keys=outside, low=self.low, high=self.high, untrusted=self.untrusted
-        )
-        for interface, mac, _ip in outside - within:
-            self._counts[interface, mac] = self._counts.get((interface, mac), 0) + 1
         self._leases = self.attributor.leases_of_macs(macs, self.low, self.high)
         self.attributor.prefetch_devices(macs)
 

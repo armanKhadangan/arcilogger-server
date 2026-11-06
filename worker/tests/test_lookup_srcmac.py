@@ -508,6 +508,28 @@ def test_a_shared_mac_logged_after_the_guard_window_is_still_counted(
     assert note(outcome, "srcmac_shared") == {"mac": ROUTER_MAC, "at": iso(AT), "count": 2}
 
 
+def test_a_long_session_of_another_address_that_overlaps_the_hour_makes_the_mac_shared(
+    db_session: Session, evidence: Evidence
+) -> None:
+    """#96 (#40 item 7): the router's MAC on .58 too, in a session that started 30 minutes
+    after the moment and was logged at its end, three hours after it (outside the guard's hour,
+    and no candidate of the lookup). It overlaps the hour, so it is counted:
+    ``srcmac_shared`` and no srcmac chain. Before #96 only rows logged in the hour counted, the
+    MAC looked unshared and .57 got the ``low`` srcmac chain."""
+    session_of(evidence, mac=ROUTER_MAC)
+    session_of(evidence, "172.20.42.58", ROUTER_MAC, at=AT + timedelta(hours=3), port=51002,
+               duration=int(2.5 * 3600))  # fmt: skip
+    build(db_session, DAY, DAY)
+    listed(db_session, ["vlan42"])
+    found = candidates(db_session)
+    assert [m.traffic.srcip for m in found.matches] == [PC]
+    assert found.matches[0].chain is None
+    assert note(found, "srcmac_shared") == {"mac": ROUTER_MAC, "at": iso(AT), "count": 2}
+    outcome = internal(db_session)
+    assert (outcome.mode, outcome.attribution) == ("none", None)
+    assert note(outcome, "srcmac_shared") == {"mac": ROUTER_MAC, "at": iso(AT), "count": 2}
+
+
 def test_another_long_session_does_not_widen_the_guard_of_a_mac(
     db_session: Session, evidence: Evidence, selin: int
 ) -> None:
