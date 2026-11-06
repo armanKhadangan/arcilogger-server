@@ -155,6 +155,16 @@ def _ts(value: datetime) -> float:
     return value.timestamp()
 
 
+def _whole_minutes(lo: datetime, hi: datetime) -> bool:
+    """A window's bounds: on a minute boundary, ``lo < hi``, so its buckets meet their parts."""
+    return (
+        hi > lo
+        and _ts(lo) % BUCKET == 0
+        and _ts(hi) % BUCKET == 0
+        and (_ts(hi) - _ts(lo)) % BUCKET == 0
+    )
+
+
 def _chunks(items: Sequence[str], size: int) -> Iterator[list[str]]:
     for start in range(0, len(items), size):
         yield list(items[start : start + size])
@@ -219,6 +229,10 @@ class DayBuilder:
         self.namer = namer
         self.rules = rules
         lo, hi = day_window(day) if window is None else window
+        if window is not None and not _whole_minutes(lo, hi):
+            raise ValueError(
+                f"a window is whole minutes, lo < hi: {lo.isoformat()}, {hi.isoformat()}"
+            )
         self.lo, self.hi = lo.astimezone(UTC), hi.astimezone(UTC)
         self.lo_ts, self.hi_ts = _ts(self.lo), _ts(self.hi)
         self.buckets = int((self.hi_ts - self.lo_ts) // BUCKET)

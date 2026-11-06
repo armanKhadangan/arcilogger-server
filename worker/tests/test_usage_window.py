@@ -4,7 +4,9 @@ can cross midnight; each minute then takes its part (K2) from its own day's hour
 
 from __future__ import annotations
 
-from datetime import UTC, date
+from datetime import UTC, date, timedelta
+
+import pytest
 
 from arcilogger_core.timeutil import day_window
 from arcilogger_worker.testing import tr
@@ -61,3 +63,17 @@ def test_a_window_of_a_whole_day_is_the_day() -> None:
     window = builder(settings, WEDNESDAY, window=(lo, hi))
     assert (window.lo, window.hi, window.buckets) == (day.lo, day.hi, day.buckets)
     assert window.parts == day.parts
+
+
+def test_a_window_off_the_minute_is_refused() -> None:
+    """A window must be whole minutes, or every bucket would shift against its part (K2)."""
+    settings = UsageSettings()
+    lo = tr(WEDNESDAY, 9).astimezone(UTC)
+    for start, end in (
+        (lo + timedelta(seconds=30), lo + timedelta(minutes=5)),
+        (lo, lo + timedelta(minutes=5, seconds=1)),
+        (lo, lo),
+        (lo + timedelta(minutes=5), lo),
+    ):
+        with pytest.raises(ValueError, match="whole minutes"):
+            builder(settings, WEDNESDAY, window=(start, end))
