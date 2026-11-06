@@ -16,6 +16,7 @@
  * in a change list `{secret: true, old: "set"|"unset", new: …}`.
  */
 
+import type { OperStatus } from './activity-types';
 import type { DateString, DateTimeString } from './api-types';
 
 // -- names (`arcilogger_core.admin.contract`) -----------------------------------------------------
@@ -550,8 +551,17 @@ export interface RequestVersion {
   to: string;
 }
 
+/** One interface the device reported to the `snmp` probe (W5-N-9). */
+export interface ProbeInterface {
+  name: string;
+  oper_status: OperStatus | null;
+  speed_mbps: number | null;
+}
+
 export interface RequestError extends CodeMessage {
   field?: string | null;
+  /** With `snmp_no_such_interface` and `snmp_no_hc_counters` only: what the device reports. */
+  interfaces?: ProbeInterface[];
 }
 
 /** `action.seal` (`SealOutcome` of the Seal task). */

@@ -296,6 +296,10 @@ const MESSAGES: Record<string, [string, string]> = {
     'The connection test with the new values failed; nothing changed.',
   ],
   ntp_unreachable: ['Saat sunucusu yanıt vermedi.', 'The time server did not answer.'],
+  snmp_no_such_interface: [
+    'Cihaz bu arayüz adını bildirmiyor; cihazın bildirdiği arayüzlerden WAN hattını seçin.',
+    'The device reports no interface of this name; pick the WAN line from the interfaces the device reports.',
+  ],
   smtp_test_failed: ['Deneme e-postası gönderilemedi.', 'The trial e-mail could not be sent.'],
   replica_test_failed: [
     'Replika paylaşımına bağlanılamadı.',

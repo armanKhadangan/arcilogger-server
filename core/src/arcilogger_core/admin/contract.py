@@ -920,16 +920,52 @@ class VersionRef(_Model):
     to: Sha256
 
 
+#: ``ifOperStatus`` (RFC 2863) by name, as ``OperStatus`` of ``activity-types.ts``.
+OperStatusName = Literal[
+    "up", "down", "testing", "unknown", "dormant", "not_present", "lower_layer_down"
+]
+#: The ``snmp`` probe's interface list in a request status: at most this many entries …
+PROBE_INTERFACES_MAX: Final = 256
+#: … each name at most this long (W5-N-9).
+PROBE_INTERFACE_NAME_MAX: Final = 64
+#: The failures of the ``snmp`` probe that come with the device's interface list.
+INTERFACE_CODES: Final = frozenset({"snmp_no_such_interface", "snmp_no_hc_counters"})
+
+
+class ProbeInterface(_Model):
+    """One interface the device reported to the ``snmp`` probe (``ifName``, W5-N-9): the
+    browser offers these names when the configured one is not found. No person data, no key."""
+
+    name: Annotated[str, StringConstraints(min_length=1, max_length=PROBE_INTERFACE_NAME_MAX)]
+    oper_status: OperStatusName | None
+    speed_mbps: Annotated[int, Field(ge=0)] | None
+
+    @field_validator("name")
+    @classmethod
+    def _printable(cls, name: str) -> str:
+        if not name.isprintable():
+            raise ValueError("an interface name has only printable characters")
+        return name
+
+
 class ErrorRef(_Model):
     code: str
     #: The configuration path the code is about, when there is one.
     field: ConfigPath | None = None
+    #: What the device reported, for :data:`INTERFACE_CODES` only (W5-N-9).
+    interfaces: Annotated[tuple[ProbeInterface, ...], Field(max_length=PROBE_INTERFACES_MAX)] = ()
 
     @field_validator("code")
     @classmethod
     def _code(cls, code: str) -> str:
         _known_code(code, MESSAGES)
         return code
+
+    @model_validator(mode="after")
+    def _interfaces_of_snmp(self) -> ErrorRef:
+        if self.interfaces and self.code not in INTERFACE_CODES:
+            raise ValueError(f"interfaces come only with {sorted(INTERFACE_CODES)}")
+        return self
 
 
 class WarningRef(_Model):
