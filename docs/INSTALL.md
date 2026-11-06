@@ -673,8 +673,10 @@ the next step and the skipped step stays "Eksik".
 | Administrator and two-step verification | always (steps 1–3 above) | — |
 | Site settings | no configuration problem of level error about the organisation name or the time servers | Ayarlar → Genel (sections 1, 7.1) |
 | Log sources | at least one enabled source is defined | Ayarlar → Kaynaklar (section 11) |
-| Kamu SM: test server | a successful and verified stamp test in the request history, or the production server is selected | Ayarlar → Zaman damgası, test step (section 10) |
+| Kamu SM: test server | a successful and verified stamp test of the provider in use in the request history, or the production server is selected | Ayarlar → Zaman damgası, test step (section 10) |
 | Kamu SM: production | the production server is selected and sealing is ready | Ayarlar → Zaman damgası, production step (section 10, "Switching to production") |
+| TÜRKTRUST: stamp test (with TÜRKTRUST, in place of Kamu SM's test step) | a successful and verified stamp test of TÜRKTRUST in the request history, or TÜRKTRUST's production server is selected | Ayarlar → Zaman damgası, test step |
+| TÜRKTRUST: production (with TÜRKTRUST, in place of Kamu SM's production step) | TÜRKTRUST's production server (`zd.turktrust.com.tr`, legal grade by D12) is selected and sealing is ready | Ayarlar → Zaman damgası, production step |
 | Replica | the replica is on | Ayarlar → Replika (section 10, "Replica") |
 | E-mail | sending e-mail is switched on, an SMTP server and a sender address are set | Ayarlar → E-posta |
 

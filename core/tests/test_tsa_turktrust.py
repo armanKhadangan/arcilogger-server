@@ -33,7 +33,7 @@ from pydantic import ValidationError
 from arcilogger_core import cli
 from arcilogger_core.admin.contract import FALLBACK_POLICY
 from arcilogger_core.config import TURKTRUST_PRODUCTION_HOST, Config, TsaConfig
-from arcilogger_core.credit import check_credit
+from arcilogger_core.credit import check_credit, credit_query
 from arcilogger_core.execpolicy import TrustAnchors
 from arcilogger_core.layout import Layout
 from arcilogger_core.secretstore import TURKTRUST_PASSWORD, TURKTRUST_USERNAME, SecretStore
@@ -595,6 +595,24 @@ def test_the_seal_task_names_a_missing_account_credentials(tmp_path: Path) -> No
     assert cli._provider_cause(app) == "credentials"
     secrets.set(TURKTRUST_PASSWORD, PASSWORD)
     assert cli._provider_cause(app) == "provider"
+
+
+def test_one_rule_says_which_provider_has_a_credit_query(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """C21, #220: ``credit.credit_query`` is the one rule; the Credit task and Uyum Durumu card 5
+    follow it. For a provider without one, no query is sent at all."""
+    assert [p for p in ("mock", "zamane", "rfc3161", "turktrust") if credit_query(p)] == [
+        "mock",
+        "zamane",
+    ]
+    provider = _provider("https://zd.turktrust.com.tr/")
+
+    def asked() -> int | None:
+        raise AssertionError("no credit query is sent")
+
+    monkeypatch.setattr(provider, "credits", asked)
+    assert check_credit(provider, Layout(tmp_path / "data"), 500) is None
 
 
 def test_the_credit_task_records_no_credit_query(tmp_path: Path) -> None:
