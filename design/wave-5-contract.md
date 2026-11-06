@@ -3752,7 +3752,9 @@ The manager took P1 and P2 (#203, comment of 2026-11-05); P3 and P4 stay with GÃ
       within 2 s of when it is due, at every tick (`worker/tests/test_activity_performance.py`;
       the ticks are paced to the probe's 2 s, faster than the 10 s they cover).
   - The load is synthetic, shaped like `tools/loadgen` (its sites, durations and 120 s interim
-    interval): 1,000 devices, about 575 sessions/s, about 30,700 sessions open at once.
+    interval): 1,000 devices, about 575 sessions/s, about 30,700 sessions open at once. The
+    95 minutes before "now" are written at full density (11.3 million lines at 2,000 lines/s,
+    about 15 minutes to write here), so each tick's read meets the table it would meet on site.
   - Measured on the cloud container (4 shared cores, PostgreSQL on the same machine):
 
     | | default load (3 lines/s, 100 devices) | 2,000 lines/s |
@@ -3760,10 +3762,12 @@ The manager took P1 and P2 (#203, comment of 2026-11-05); P3 and P4 stay with GÃ
     | (a) answer from the snapshot | 0.25 s at 200 subjects (0.98 s at 1,000) | â€” |
     | (b) sessions waiting after 30 ticks / after warm-up | 0 / 0 | 0 / 0 |
     | (b) `data_until` behind the newest row | 0 s | 0 s |
-    | (c) the probe job late, at most | 0.02 s | 1.53 s |
-    | a tick: mean / max | 0.02 s / 0.03 s | 2.05 s / 3.47 s |
-    | warm-up: ticks / longest | 1 / 2.2 s | 16 / 5.9 s |
-    | snapshot file / longest write | 104 KB / 0.01 s | 5.8 MB / 1.1 s |
+    | (c) the probe job late, at most | 0.66 s | 1.74 s |
+    | a tick: mean / max | 0.04 s / 0.18 s | 2.54 s / 3.87 s |
+    | warm-up: ticks / longest | 2 / 5.0 s | 74 / 7.8 s |
+    | snapshot file / longest write | 255 KB / 0.16 s | 6.4 MB / 1.4 s |
+
+    The probe's lateness includes the loop's own pause of up to 1 s between its rounds.
 
     Before the thread (the 06:10Z question on #201), at 2,000 lines/s the work of 10 s of logs
     was 1.6â€“1.9 s of the loop's time: ticks in the loop took 1.8â€“2.4 s.
