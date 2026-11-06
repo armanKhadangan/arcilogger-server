@@ -10,7 +10,12 @@ import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/ui/empty-state';
 import { Skeleton } from '@/components/ui/skeleton';
 import { errorMessage } from '@/lib/api';
-import { useDashboardSummary, useLicense, useTodayCompanyUsage } from '@/lib/api-hooks';
+import {
+  useActivityWan,
+  useDashboardSummary,
+  useLicense,
+  useTodayCompanyUsage,
+} from '@/lib/api-hooks';
 import { useAuth } from '@/lib/auth';
 import { formatTime } from '@/lib/format';
 import { moduleEnabled, type ModuleKey } from '@/lib/license';
@@ -38,6 +43,8 @@ import {
 } from './dashboard-model';
 import { CategoriesCard, SitesCard, UsageCard } from './dashboard-usage';
 import { DiskCard } from './disk-card';
+import { WanCard, WanSetupCard } from './wan-card';
+import { wanCardState, wanRequested } from './wan-model';
 
 /** The usage widgets belong to "Kullanım analizi"; the health boxes never depend on a licence. */
 const USAGE_MODULE: ModuleKey = 'usage_analytics';
@@ -72,6 +79,10 @@ export function DashboardPage() {
   const usage = useTodayCompanyUsage(asked.usage && usageLicensed);
   const askDisk = diskRequested(permissions);
   const disk = useSystemDisk(askDisk);
+  // The internet lines (Wave 5 §6 N7): no person data, no licence module.
+  const askWan = wanRequested(permissions);
+  const wan = useActivityWan('60m', askWan);
+  const wanState = wanCardState(wan.isError ? undefined : wan.data, permissions);
   const blocks = visibleBlocks(
     permissions,
     summary.data,
@@ -100,6 +111,7 @@ export function DashboardPage() {
     summary.dataUpdatedAt,
     usageLicensed ? usage.dataUpdatedAt : 0,
     askDisk ? disk.dataUpdatedAt : 0,
+    askWan ? wan.dataUpdatedAt : 0,
   );
   const summaryFailed = asked.summary && summary.isError && !isRefusal(summary.error);
   const [raw, setRaw] = useState<RawLineTarget | null>(null);
@@ -151,7 +163,12 @@ export function DashboardPage() {
   ) : null;
   const showAlerts = blocks.has('alerts') && data?.alerts;
   const nothing =
-    !summaryLoading && !usageLoading && !summaryFailed && blocks.size === 0 && !usageCard;
+    !summaryLoading &&
+    !usageLoading &&
+    !summaryFailed &&
+    blocks.size === 0 &&
+    !usageCard &&
+    wanState === 'hidden';
 
   return (
     <div className="flex flex-col gap-4">
@@ -173,6 +190,7 @@ export function DashboardPage() {
                 // `refresh()` would fetch even a disabled query: never while the module is off.
                 if (asked.usage && usageLicensed) void usage.refresh();
                 if (askDisk) void disk.refresh();
+                if (askWan) void wan.refresh();
               }}
             >
               <RefreshCw aria-hidden="true" />
@@ -226,6 +244,12 @@ export function DashboardPage() {
         >
           {top}
         </div>
+      ) : null}
+
+      {wanState === 'lines' && wan.data ? (
+        <WanCard rates={wan.data} to={linkTarget('activity', permissions)} />
+      ) : wanState === 'setup' ? (
+        <WanSetupCard />
       ) : null}
 
       {showUsage || showAlerts || usageCard ? (

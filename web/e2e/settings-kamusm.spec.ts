@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import { expect, test, type Page } from '@playwright/test';
 
 import { confirmReauth, expectNoA11yViolations, usePreferences, type Theme } from './fixtures';
-import { mockApi, type MockApi } from './mock-api';
+import { mockApi } from './mock-api';
 
 /**
  * Ayarlar → Zaman damgası with Kamu SM in use (contract 2.17): the wizard with the state of each
@@ -39,17 +39,6 @@ async function upload(page: Page, label: string, name: string, content: string) 
     buffer: Buffer.from(content),
   });
   await page.getByRole('button', { name: 'Dosyayı gönder' }).click();
-}
-
-/**
- * The section's `secrets` as W5-T's API reports them (its captured sample, `samples/admin.json`):
- * TÜRKTRUST's two credentials known, not stored. `mock-admin.ts`'s seed site names Kamu SM's only.
- */
-function reportTurktrust(api: MockApi) {
-  Object.assign(api.admin.sections.tsa.secrets, {
-    'turktrust.username': { set: false, changed_at: null, changed_by: null },
-    'turktrust.password': { set: false, changed_at: null, changed_by: null },
-  });
 }
 
 async function applied(page: Page) {
@@ -460,7 +449,6 @@ test.describe('Ayarlar → Zaman damgası', () => {
     page,
   }) => {
     const api = await mockApi(page, { signedInAs: 'tolga', staleReauth: true });
-    reportTurktrust(api);
     await page.goto('/settings/kamusm?step=production');
     await page.getByRole('radio', { name: 'TÜRKTRUST (HTTPS)' }).check();
     const fields = page.getByTestId('turktrust-credentials');
@@ -500,7 +488,6 @@ test.describe('Ayarlar → Zaman damgası', () => {
     page,
   }) => {
     const api = await mockApi(page, { signedInAs: 'tolga' });
-    reportTurktrust(api);
     await page.goto('/settings/kamusm?step=production');
     await page.getByRole('radio', { name: 'TÜRKTRUST (HTTPS)' }).check();
     const fields = page.getByTestId('turktrust-credentials');
@@ -643,7 +630,6 @@ test.describe('Ayarlar → Zaman damgası', () => {
     page,
   }) => {
     const api = await mockApi(page, { signedInAs: 'tolga', staleReauth: true });
-    reportTurktrust(api);
     await page.goto('/settings/kamusm?step=production');
     await page.getByRole('radio', { name: 'TÜRKTRUST (düz HTTP)' }).check();
     await expect(page.getByTestId('tsa-plain-http')).toContainText('şifrelenmeden');
@@ -734,7 +720,7 @@ test.describe('Ayarlar → Zaman damgası', () => {
 for (const theme of ['light', 'dark'] as Theme[]) {
   test(`Kamu SM accessibility — ${theme}`, async ({ page }) => {
     await usePreferences(page, { theme });
-    reportTurktrust(await mockApi(page, { signedInAs: 'tolga' }));
+    await mockApi(page, { signedInAs: 'tolga' });
     await page.goto('/settings/kamusm');
     await expect(steps(page)).toBeVisible();
     await expectNoA11yViolations(page);
