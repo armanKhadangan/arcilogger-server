@@ -1513,7 +1513,8 @@ def _body_tsa(body: _Body, data: Mapping[str, Any]) -> None:
                 and before != TURKTRUST_PLAIN_HTTP
                 and data.get("confirm") is not True
             ):
-                body.error("tsa_confirm_required", "tsa.provider")
+                # Its own code (#204): the reason is the account in clear text, not production.
+                body.error("tsa_plain_http_confirm_required", "tsa.provider")
     for key in (
         "credit_alert_threshold",
         "timeout_seconds",

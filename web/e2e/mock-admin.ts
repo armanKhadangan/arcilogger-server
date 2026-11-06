@@ -210,6 +210,11 @@ const HTTP: Record<string, [number, string, string]> = {
     'Üretimden test sunucusuna geçiş üretim damgalarını durdurur; onaylayın.',
     'Switching from production to the test server stops production stamps; confirm to continue.',
   ],
+  tsa_plain_http_confirm_required: [
+    422,
+    'Düz HTTP ile TÜRKTRUST kullanıcı adı ve parolası ağda şifrelenmeden gider; onaylayın.',
+    'Over plain HTTP the TÜRKTRUST user name and password travel unencrypted on the network; confirm to continue.',
+  ],
   java_not_detected: [
     422,
     'Seçilen Java sunucuda bulunamadı; listeden birini seçin.',
@@ -1713,7 +1718,7 @@ export class AdminMock {
     if (production && server === 'test' && body.confirm !== true)
       return this.refused([problem('tsa.provider', 'tsa_confirm_required')]);
     if (server === 'turktrust-http' && current.server !== server && body.confirm !== true)
-      return this.refused([problem('tsa.provider', 'tsa_confirm_required')]);
+      return this.refused([problem('tsa.provider', 'tsa_plain_http_confirm_required')]);
     const wasTurktrust = current.server === 'turktrust' || current.server === 'turktrust-http';
     const missingAccount = TURKTRUST_SECRETS.filter((name) => !candidate.secrets[name]?.set);
     if (turktrust && !wasTurktrust && missingAccount.length > 0)

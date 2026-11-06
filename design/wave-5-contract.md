@@ -3685,3 +3685,11 @@ Recorded on #204, from the manager's answers of 2026-11-06.
     granted files are `_outbound` in `admin/systemplan.py` and the rule list in
     `ArciInstall.psm1`, with their tests. It adds the `TURKTRUST`, `CRL` and `Proxy` rules, with the
     names and ports of `Set-ArciFirewall.ps1`.
+- **W5-T-4: `turktrust-http` without `confirm` has its own code, `tsa_plain_http_confirm_required`**
+  (independent review of #204, point 2).
+  - §2.4 and C5 named `tsa_confirm_required` for this case. That code's text is about leaving
+    production for the test server, not about the account travelling in clear text.
+  - The body field is unchanged: `confirm: true`, with the form's typed `HTTP` (C5).
+  - The new code's TR/EN text says that the TÜRKTRUST user name and password travel unencrypted.
+    It lives in `api/src/arcilogger_api/admin_channel.py`, granted for this one code. It is
+    answered with HTTP 422, like `tsa_confirm_required`.

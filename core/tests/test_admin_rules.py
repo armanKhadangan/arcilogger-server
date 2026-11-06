@@ -1611,7 +1611,9 @@ def test_turktrust_over_plain_http_needs_the_setting_and_a_confirmation(
 ) -> None:
     ready = context(root, stored_secrets=TURKTRUST_ACCOUNT)
     unconfirmed = validate_section("tsa", config, {"server": "turktrust-http"}, ready)
-    assert "tsa_confirm_required" in codes(unconfirmed)
+    # Its own code (#204): the text names the account in clear text, not production stamps.
+    assert "tsa_plain_http_confirm_required" in codes(unconfirmed)
+    assert "tsa_confirm_required" not in codes(unconfirmed)
     without = validate_section("tsa", config, {"server": "turktrust-http", "confirm": True}, ready)
     assert [(p.code, p.field) for p in without.errors] == [
         ("config_invalid", "tsa.allow_plain_http")

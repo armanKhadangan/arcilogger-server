@@ -400,6 +400,17 @@ def test_only_administrators_see_or_change_the_machine_configuration(
         )
 
 
+def test_the_plain_http_confirmation_names_the_clear_text_account() -> None:
+    """#204: ``turktrust-http`` without ``confirm`` is refused with its own code, whose text
+    says why (the account travels unencrypted), not the production-to-test one."""
+    from arcilogger_api.admin_channel import texts
+
+    message_tr, message_en = texts("tsa_plain_http_confirm_required")
+    assert "TÜRKTRUST" in message_tr and "şifrelenmeden" in message_tr
+    assert "TÜRKTRUST" in message_en and "unencrypted" in message_en
+    assert (message_tr, message_en) != texts("tsa_confirm_required")
+
+
 def test_every_rule_code_has_its_two_texts() -> None:
     from arcilogger_api.admin_channel import STATUS, texts
 
