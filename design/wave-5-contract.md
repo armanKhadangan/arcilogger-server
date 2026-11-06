@@ -3491,3 +3491,50 @@ line is W5-E-10, and what it amends in detail:
   tenth of PT2H". The extra decompression that verifies each sealed file was measured on a 1 M
   line day: 4.4 s for xz 6 at 148 MB/s, about 35 s for a 5 GB day. The issue estimated about a
   minute.
+
+## Deviations — W5-N (2026-11-05)
+
+- **W5-N-1: the SNMP client lives in core** (answer to Q4 on #202, 2026-11-05 23:19).
+  - **Where:** the library boundary is a new `core/src/arcilogger_core/snmp.py`, outside §6.6's
+    list: the authPriv-only `Target`, the GET/walk client and the status mapping. The N5 probe
+    runs in the administration agent's child process, which is core and never imports the worker
+    (SMTP is the precedent, `core/smtp.py`).
+  - **The dependency:** `pysnmp==7.1.30` and `pyasn1==0.6.5`, both BSD-2-Clause, are pinned in
+    `core/pyproject.toml`.
+  - **Imported only there:** pysnmp is imported only inside the client's methods.
+    `core/tests/test_snmp_import.py` proves that `arcilogger_core.config`,
+    `arcilogger_core.snmp`, the collector and ingest load without it.
+  - **Unchanged:** the poller, the state file, the job and `R20-snmp` are in
+    `worker/src/arcilogger_worker/snmp/`.
+- **W5-N-2: `Layout.wan_rates` is a property**, like the other status files of `Layout`;
+  §6.2 N4 writes `Layout.wan_rates()`.
+- **W5-N-3: until W5-T merges, `[sources.snmp]` is read by an adapter** (Q3 on #202, as C9 did).
+  - **What it does:** `worker/src/arcilogger_worker/snmp/settings.py` reads it through `getattr`
+    with N1's defaults and applies N1's rules.
+  - **What is not polled,** with the code the job's details name (logged once per process):
+    - a network address: `snmp_source_is_network`;
+    - a community string, a version other than 3, or a missing or unknown `auth`/`priv`
+      protocol, so no v1/v2c, noAuthNoPriv or authNoPriv: `snmp_auth_priv_required`;
+    - a port, interval, user, interface list or capacity outside N1's bounds:
+      `snmp_setting_invalid`.
+  - **A key** that is missing or not 8 to 64 characters is `snmp_secret_missing`. The source is
+    then polled as `auth_failed` without a request.
+  - **After W5-T:** the model in `config.py` replaces the adapter in the same PR. The two codes
+    not named in N1 then become the model's validation errors.
+- **W5-N-4: the statuses N4 leaves open, and "a good sample".**
+  - **Failures:** a USM refusal (unknown user, wrong digest, decryption, unsupported level or
+    protocol, not in the time window) is `auth_failed`. Any other request failure is `timeout`:
+    no answer, a malformed answer, or an error-status.
+  - **A good sample** is a read of a line's 64-bit counters. The first read after a start or a
+    reset is good, but gives no rate yet. `updated_at` and the 10 minutes of `R20-snmp` count
+    from it.
+  - **The alert:** `R20-snmp:<source>` opens when one line of a source has had no good read for
+    10 minutes, and resolves when every line has. Its title names the source, the lines and the
+    reasons; the e-mail names only the source, the number of lines and the reasons.
+- **W5-N-5: mounting.** W5-N's PR merged before W5-M's routes, so it created
+  `api/src/arcilogger_api/routers/activity.py`: one `/activity` router (prefixes must be unique)
+  that includes `activity/wan.py`. W5-M includes its devices router there.
+  - **Samples:** `web/scripts/samples_activity_wan.py` captures `activity-wan.json`, entered in
+    `capture_api_samples.py`'s `SAMPLE_MODULES`.
+  - **Web tests:** `activity-types.ts` joins the type lists of `web/src/lib/api-types.test.ts`
+    and `api-samples.test.ts`, as C1 asks of a package that mounts a route.
