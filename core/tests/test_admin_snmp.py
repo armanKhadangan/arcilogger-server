@@ -8,16 +8,28 @@ on a network source ``snmp_source_is_network``; removing a source deletes its ke
 
 from __future__ import annotations
 
+import io
+import json
+import subprocess
+import sys
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 import pytest
+from pydantic import JsonValue, ValidationError
 
 from arcilogger_core.admin import messages, rules
-from arcilogger_core.admin.contract import FALLBACK_POLICY
-from arcilogger_core.admin.probe import ChildProber, ProbeResult, probe_snmp
+from arcilogger_core.admin import probe as probe_module
+from arcilogger_core.admin.contract import FALLBACK_POLICY, ErrorRef, ProbeInterface
+from arcilogger_core.admin.probe import (
+    ChildProber,
+    ProbeResult,
+    bounded_interfaces,
+    probe_snmp,
+)
 from arcilogger_core.admin.rules import Probe, RuleContext, SectionCheck, validate_section
+from arcilogger_core.admin.testing import FakeAgent, FakeProber, make_installation
 from arcilogger_core.admin.tomledit import SetSources, edit
 from arcilogger_core.config import Config, SnmpConfig, parse_config
 from arcilogger_core.execpolicy import TrustAnchors
@@ -256,7 +268,7 @@ class _Agent:
         return values
 
 
-PARAMS = {
+PARAMS: dict[str, JsonValue] = {
     "host": "172.20.10.22",
     "port": 161,
     "user": "arcilogger",
@@ -267,10 +279,15 @@ PARAMS = {
 SECRETS = {"auth_key": "authkeyauthkey", "priv_key": "privkeyprivkey"}
 
 
+WAN1 = ProbeInterface(name="wan1", oper_status="up", speed_mbps=1000)
+LAN = ProbeInterface(name="lan", oper_status="down", speed_mbps=100)
+
+
 def test_the_probe_lists_the_interfaces() -> None:
     agent = _Agent({"wan1": (3, 1, 1000, True), "lan": (4, 2, 100, False)})
     result = probe_snmp(PARAMS, SECRETS, client=agent)
-    assert result == ProbeResult(True, None, "wan1: up, 1000 Mbit/s; lan: down, 100 Mbit/s")
+    message = "wan1: up, 1000 Mbit/s; lan: down, 100 Mbit/s"
+    assert result == ProbeResult(True, None, message, (WAN1, LAN))
 
 
 @pytest.mark.parametrize(
@@ -287,6 +304,9 @@ def test_the_probe_names_n4s_reason(agent: _Agent, code: str) -> None:
     assert (result.ok, result.code) == (False, code)
     assert code in messages.MESSAGES  # each reason has TR/EN text (N5)
     assert "authkeyauthkey" not in result.message
+    # once the walk answered, the list of what the device reports goes with it (W5-N-9)
+    walked = code in ("snmp_no_such_interface", "snmp_no_hc_counters")
+    assert bool(result.interfaces) == walked
 
 
 def test_the_child_passes_the_reason_through(tmp_path: Path) -> None:
@@ -311,3 +331,121 @@ def test_switching_snmp_on_probes_the_source(root: Path, config: Config) -> None
         "sources", config, update({**SNMP, "enabled": False}), context(root, stored)
     )
     assert off.probes == ()
+
+
+# -- the interface list reaches the browser (W5-N-9) -----------------------------------------------
+
+
+def _through_the_child(monkeypatch: pytest.MonkeyPatch, answer: dict[str, Any] | None) -> None:
+    """``subprocess.run`` of the parent runs the child's :func:`main` in this process (with
+    ``answer`` as the probe's result when given, as a child of an older or a broken build would)."""
+
+    def run(args: list[str], *, input: bytes, **_kwargs: Any) -> subprocess.CompletedProcess[bytes]:
+        if answer is not None:
+            out = json.dumps(answer).encode()
+        else:
+            stdin, stdout = io.BytesIO(input), io.StringIO()
+            with monkeypatch.context() as patched:
+                patched.setattr(sys, "stdin", io.TextIOWrapper(stdin))
+                patched.setattr(sys, "stdout", stdout)
+                probe_module.main()
+            out = stdout.getvalue().encode()
+        return subprocess.CompletedProcess(args, 0, out, b"")
+
+    monkeypatch.setattr(subprocess, "run", run)  # the parent's call
+
+
+def test_the_child_sends_the_list_and_the_parent_reads_it(monkeypatch: pytest.MonkeyPatch) -> None:
+    agent = _Agent({"lan": (4, 1, 100, True), "wan2": (5, 2, 1000, True)})
+    monkeypatch.setattr(probe_module, "PysnmpClient", lambda: agent)
+    _through_the_child(monkeypatch, None)
+    result = ChildProber().run("snmp", PARAMS, SECRETS)
+    assert (result.ok, result.code) == (False, "snmp_no_such_interface")
+    assert result.interfaces == (
+        ProbeInterface(name="lan", oper_status="up", speed_mbps=100),
+        ProbeInterface(name="wan2", oper_status="down", speed_mbps=1000),
+    )
+
+
+def test_the_list_is_bounded(monkeypatch: pytest.MonkeyPatch) -> None:
+    """257 entries, a 65-character name, a control character, a key as a name, an unknown
+    status and a speed that is not a whole number from 0: cut, replaced or left out."""
+    raw: list[Any] = [
+        {"name": "x" * 65, "oper_status": "up", "speed_mbps": 10},
+        {"name": "wan\x1b[1", "oper_status": "sideways", "speed_mbps": -1},
+        {"name": SECRETS["auth_key"], "oper_status": None, "speed_mbps": True},
+        {"name": "", "oper_status": "up"},
+        {"oper_status": "up"},
+        "wan9",
+    ]
+    raw += [{"name": f"if{i}"} for i in range(257 - len(raw))]
+    _through_the_child(monkeypatch, {"ok": False, "code": "snmp_no_hc_counters", "interfaces": raw})
+    result = ChildProber().run("snmp", PARAMS, SECRETS)
+    assert result.code == "snmp_no_hc_counters"
+    first, control, secret = result.interfaces[:3]
+    assert first == ProbeInterface(name="x" * 64, oper_status="up", speed_mbps=10)
+    assert control == ProbeInterface(name="wan?[1", oper_status=None, speed_mbps=None)
+    assert secret == ProbeInterface(name="***", oper_status=None, speed_mbps=None)
+    assert len(result.interfaces) == 3 + 256 - 6  # the first 256 entries, three left out
+    assert bounded_interfaces({"name": "wan1"}, {}) == ()
+    assert (
+        bounded_interfaces([{"name": "x"}] * 300, {})
+        == (ProbeInterface(name="x", oper_status=None, speed_mbps=None),) * 256
+    )
+
+
+def test_only_the_snmp_probe_has_a_list(monkeypatch: pytest.MonkeyPatch) -> None:
+    listed = [{"name": "wan1"}]
+    _through_the_child(monkeypatch, {"ok": False, "code": "x", "interfaces": listed})
+    assert ChildProber().run("sntp", {"server": "172.20.10.1"}, {}).interfaces == ()
+    _through_the_child(monkeypatch, {"ok": False, "code": "snmp_timeout", "interfaces": listed})
+    assert ChildProber().run("snmp", PARAMS, SECRETS).interfaces == (
+        ProbeInterface(name="wan1", oper_status=None, speed_mbps=None),
+    )
+
+
+def test_error_ref_takes_a_list_with_the_two_codes_only() -> None:
+    for code in ("snmp_no_such_interface", "snmp_no_hc_counters"):
+        assert ErrorRef(code=code, interfaces=(WAN1,)).interfaces == (WAN1,)
+    assert ErrorRef(code="snmp_timeout").interfaces == ()
+    for code in ("snmp_timeout", "ntp_unreachable"):
+        with pytest.raises(ValidationError, match="interfaces come only"):
+            ErrorRef(code=code, interfaces=(WAN1,))
+    with pytest.raises(ValidationError):
+        ErrorRef(code="snmp_no_such_interface", interfaces=(WAN1,) * 257)
+    for name in ("x" * 65, "wan\n1", ""):
+        with pytest.raises(ValidationError):
+            ProbeInterface(name=name, oper_status=None, speed_mbps=None)
+    with pytest.raises(ValidationError):
+        ProbeInterface(name="wan1", oper_status=None, speed_mbps=-1)
+
+
+@pytest.mark.parametrize(
+    ("code", "written"),
+    [
+        ("snmp_no_such_interface", (WAN1, LAN)),
+        ("snmp_no_hc_counters", (WAN1, LAN)),
+        ("snmp_timeout", ()),
+    ],
+)
+def test_the_agent_writes_the_list_with_the_error(
+    tmp_path: Path, code: str, written: tuple[ProbeInterface, ...]
+) -> None:
+    keys = dict(zip(rules.snmp_keys("fw-02"), KEYS.values(), strict=True))
+    installed = make_installation(tmp_path / "cfg", secrets=keys)
+    failure = ProbeResult(False, code, "found: wan1, lan", (WAN1, LAN))
+    prober = FakeProber({"snmp": failure})
+    source = {"name": "fw-02", "type": "fortigate", "address": "172.20.10.23", "snmp": SNMP}
+    request = installed.request(section="sources", ops=[{"op": "source_add", "source": source}])
+    installed.submit(request)
+    FakeAgent(installed, prober=prober).process()
+    status = installed.status(request.id)
+    assert status is not None
+    assert status.error is not None
+    assert (status.state, status.error.code, status.error.interfaces) == (
+        "probe_failed",
+        code,
+        written,
+    )
+    probe = [step for step in status.steps if step.step == "probe"]
+    assert [(step.state, step.code) for step in probe] == [("failed", code)]  # a code only
