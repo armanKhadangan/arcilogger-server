@@ -821,6 +821,21 @@ def sealed_with_certificate(site: Site, day: date, not_after: datetime | None) -
     )
 
 
+def test_tsa_card_names_turktrust(site: Site) -> None:
+    """#220: card 5's label names TÜRKTRUST, whose production server is legal grade by D12;
+    another TÜRKTRUST server is not, and row 1 says so with that label."""
+    turktrust = TsaConfig(provider="turktrust", url="https://zd.turktrust.com.tr/", port=443)
+    card = site.card("tsa", config=site.config.model_copy(update={"tsa": turktrust}))
+    assert facts(card)["server"] == ("TÜRKTRUST üretim", "TÜRKTRUST production")
+    assert "Kamu SM üretim sunucusundan alınmıyor" not in reason(card)[0]
+    other = TsaConfig(provider="turktrust", url="https://tsa.ornek.example/", port=443)
+    card = site.card("tsa", config=site.config.model_copy(update={"tsa": other}))
+    label = ("TÜRKTRUST, üretim sunucusu dışında", "TÜRKTRUST, not its production server")
+    assert facts(card)["server"] == label
+    assert card.tone == "error"
+    assert f"(sağlayıcı: {label[0]})" in reason(card)[0]
+
+
 def test_tsa_card_states(site: Site) -> None:
     production = site.config.model_copy(update={"tsa": PRODUCTION})
 

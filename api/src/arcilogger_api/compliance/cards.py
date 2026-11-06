@@ -179,6 +179,9 @@ def moment(value: Any) -> datetime | None:
 def server_label(config: Config) -> Text:
     """The configured time-stamp server (card 5 labels)."""
     tsa = config.tsa
+    if tsa.provider == "turktrust":
+        # Its production server is legal grade by D12 (#220).
+        return texts.SERVER_TURKTRUST if tsa.legal_grade else texts.SERVER_TURKTRUST_OTHER
     if tsa.legal_grade:
         return texts.SERVER_PRODUCTION
     if tsa.provider == "zamane":

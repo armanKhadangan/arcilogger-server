@@ -85,6 +85,11 @@ SERVER_PRODUCTION: Final[Text] = ("Kamu SM üretim", "Kamu SM production")
 SERVER_TEST: Final[Text] = ("Kamu SM test", "Kamu SM test")
 SERVER_MOCK: Final[Text] = ("Deneme (mock)", "Trial (mock)")
 SERVER_RFC3161: Final[Text] = ("RFC 3161", "RFC 3161")
+SERVER_TURKTRUST: Final[Text] = ("TÜRKTRUST üretim", "TÜRKTRUST production")
+SERVER_TURKTRUST_OTHER: Final[Text] = (
+    "TÜRKTRUST, üretim sunucusu dışında",
+    "TÜRKTRUST, not its production server",
+)
 
 # -- card 1 sources -------------------------------------------------------------------------------
 
