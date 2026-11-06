@@ -32,7 +32,10 @@ java -jar tss-client-console-3.1.33.jar -k  <sunucu> <port> <müşteri no> <paro
 ## 2. ARCILOGGER bunu nasıl kullanır?
 
 - Her gün **bir** zaman damgası: günlük manifest (`manifest-YYYY-MM-DD.json`) damgalanır →
-  yılda 365 kontör; 10.000 kontör yaklaşık 27 yıl yeter.
+  yılda 365 kontör; 10.000 kontör yaklaşık 27 yıl yeter. Saklama/imha açıksa kasa saklama
+  süresini geçtikten sonra imha tutanakları da damgalanır: toplu imha ile (`retention.batch_days`,
+  varsayılan 30) yılda yaklaşık 12 damga daha, yani yaklaşık 377 kontör; 10.000 kontör yaklaşık
+  26 yıl.
 - Sağlayıcılar (`[tsa] provider`):
   - `zamane` — resmî konsol istemcisi; bu sürümde Kamu SM üretim sunucusundan
     (`zd.kamusm.gov.tr`) damga almanın **desteklenen tek yolu**. ARCILOGGER bir damgayı yalnızca

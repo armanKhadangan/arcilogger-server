@@ -112,7 +112,7 @@ def test_first_day_cannot_move_the_chain_back_nor_reseal_a_deleted_day(
     _seal(world, days[:2])
     world.reconfigure(
         seal={"quiet_seconds": 0, "gzip_level": 6, "first_day": "2026-09-01"},
-        retention={"enabled": True, "days": 730},
+        retention={"enabled": True, "days": 730, "batch_days": 1},
     )
     assert world.sealer().chain_start() == days[0]
     world.set_now(days[1] + timedelta(days=730))
