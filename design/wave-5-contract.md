@@ -3663,3 +3663,38 @@ The manager took P1 and P2 (#203, comment of 2026-11-05); P3 and P4 stay with G�
     `USAGE_POLL_MS` = 60 s;
   - `web/scripts/capture_api_samples.py`: the captured refusal of W5-P-2.
 
+## Deviations — W5-T (2026-11-06)
+
+Recorded on #204, from the manager's answers of 2026-11-06.
+
+- **W5-T-1: TÜRKTRUST's account is cleared at the console only in Wave 5.** C5 keeps its body
+  fields: `turktrust_username`, `turktrust_password`, `allow_plain_http`. No
+  `clear_turktrust_credentials` is added, and `clear_credentials` clears only Kamu SM's account,
+  as before. The console clears TÜRKTRUST's: `secret delete turktrust.username` and
+  `secret delete turktrust.password`. Completing this in the browser is Wave 7's work.
+- **W5-T-2: TÜRKTRUST's answers other than 2xx, 401 and 403 are split.**
+  - **Configuration error, not retried:** a 3xx, and any 4xx other than 408 and 429.
+    - Redirects are not followed, so a 3xx most likely means a wrong URL or path (T1).
+    - The text carries the status code and points to `[tsa] url`, never the credentials.
+  - **Unavailable, retried:** 408, 429, 5xx and network errors.
+  - 401 and 403 stay `credentials` configuration errors.
+  - Tests: `core/tests/test_tsa_turktrust.py` (`test_another_refusal_is_a_configuration_error`,
+    `test_a_server_error_is_retried`, `test_a_redirect_is_not_followed`).
+- **W5-T-3: until W5-T part 3, ApplySystem does not know the new outbound rules.**
+  - `admin/systemplan.py` derives the strict outbound rules after a browser change. It puts the
+    `[tsa] url` host under `ARCILOGGER Out Kamu SM` on `tsa.port`, and it knows neither
+    `tsa.crl_urls` nor `network.https_proxy`.
+  - So a browser switch to TÜRKTRUST reaches it on 443. The CRL hosts and the proxy, however, open
+    only when the installer's firewall step (`Set-ArciFirewall.ps1`) runs.
+  - **The follow-up:** a small pull request right after #204 (W5-T part 3) closes the gap. Its
+    granted files are `_outbound` in `admin/systemplan.py` and the rule list in
+    `ArciInstall.psm1`, with their tests. It adds the `TURKTRUST`, `CRL` and `Proxy` rules, with the
+    names and ports of `Set-ArciFirewall.ps1`.
+- **W5-T-4: `turktrust-http` without `confirm` has its own code, `tsa_plain_http_confirm_required`**
+  (independent review of #204, point 2).
+  - §2.4 and C5 named `tsa_confirm_required` for this case. That code's text is about leaving
+    production for the test server, not about the account travelling in clear text.
+  - The body field is unchanged: `confirm: true`, with the form's typed `HTTP` (C5).
+  - The new code's TR/EN text says that the TÜRKTRUST user name and password travel unencrypted.
+    It lives in `api/src/arcilogger_api/admin_channel.py`, granted for this one code. It is
+    answered with HTTP 422, like `tsa_confirm_required`.

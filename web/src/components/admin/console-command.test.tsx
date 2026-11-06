@@ -38,6 +38,10 @@ function tsa(staged: string): TsaSection {
     server: 'test',
     credit_alert_threshold: 500,
     timeout_seconds: 60,
+    allow_plain_http: false,
+    renew_before_days: 180,
+    crl_urls: [],
+    crl_max_age_days: 7,
     java: null,
     java_choices: [],
     zamane: {

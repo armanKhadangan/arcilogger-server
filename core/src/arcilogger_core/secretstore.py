@@ -34,6 +34,9 @@ DATABASE_PASSWORD = "database.password"  # noqa: S105 - a name, not a password
 REPLICA_PASSWORD = "replica.password"  # noqa: S105 - a name, not a password
 #: Password of ``[smtp] username`` for the alert e-mail (``arcilogger-worker``, docs/ALERTS.md).
 SMTP_PASSWORD = "smtp.password"  # noqa: S105 - a name, not a password
+#: TÜRKTRUST's time-stamp account (HTTP Basic, contract §2.4): the user name, then the password.
+TURKTRUST_USERNAME = "turktrust.username"
+TURKTRUST_PASSWORD = "turktrust.password"  # noqa: S105 - a name, not a password
 #: Key of the optional usage-report pseudonyms (``arcilogger_worker.usage.pseudonyms``).
 USAGE_PSEUDONYM_KEY = "usage.pseudonym_key"
 
@@ -44,6 +47,8 @@ SECRET_LIMITS: Final[Mapping[str, tuple[int, bool]]] = MappingProxyType(
     {
         KAMUSM_CUSTOMER: (64, False),
         KAMUSM_PASSWORD: (128, True),
+        TURKTRUST_USERNAME: (128, True),
+        TURKTRUST_PASSWORD: (256, True),
         SMTP_PASSWORD: (256, True),
         REPLICA_PASSWORD: (256, True),
     }

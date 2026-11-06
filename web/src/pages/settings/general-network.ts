@@ -27,7 +27,7 @@ export type GeneralRequest = GeneralBody & { network?: NetworkSection };
  */
 export function httpsProxy(general: GeneralSection): string | undefined {
   const network = (general as GeneralSection & { network?: Partial<Record<string, unknown>> })
-    .network;
+    .network as Partial<Record<string, unknown>> | undefined;
   const value = network?.https_proxy;
   return typeof value === 'string' ? value : undefined;
 }

@@ -190,6 +190,11 @@ TEXTS: Final[Mapping[str, tuple[str, str]]] = {
         "Switching from production to the test server stops production stamps; confirm to "
         "continue.",
     ),
+    "tsa_plain_http_confirm_required": (
+        "Düz HTTP ile TÜRKTRUST kullanıcı adı ve parolası ağda şifrelenmeden gider; onaylayın.",
+        "Over plain HTTP the TÜRKTRUST user name and password travel unencrypted on the "
+        "network; confirm to continue.",
+    ),
     "legal_root_confirm_required": (
         "Parmak izini Kamu SM'nin yayımladığı değerle karşılaştırdığınızı onaylayın.",
         "Confirm that you compared the fingerprint with the value Kamu SM publishes.",

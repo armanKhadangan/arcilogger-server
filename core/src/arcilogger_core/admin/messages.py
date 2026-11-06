@@ -301,18 +301,19 @@ MESSAGES: Final[Mapping[str, tuple[str, str]]] = MappingProxyType(
             "A password is required for the replica user.",
         ),
         "tsa_server_invalid": (
-            'Zaman damgası sunucusu "test" ya da "production" olmalı.',
-            'The time-stamp server must be "test" or "production".',
+            'Zaman damgası sunucusu "test", "production", "turktrust" ya da "turktrust-http" '
+            "olmalı.",
+            'The time-stamp server must be "test", "production", "turktrust" or "turktrust-http".',
         ),
         "tsa_mock_refused": (
             "Deneme (mock) zaman damgası web arayüzünden seçilemez.",
             "The trial (mock) time stamp cannot be chosen from the web interface.",
         ),
         "tsa_not_ready": (
-            "Üretim sunucusuna geçmeden önce eksikleri tamamlayın: kimlik bilgileri, onaylı "
-            "Zamane istemcisi, Java ve en az bir kök sertifika.",
-            "Complete the missing items before switching to the production server: "
-            "credentials, an approved Zamane client, Java and at least one root certificate.",
+            "Bu zaman damgası sunucusuna geçmeden önce eksikleri tamamlayın; hiçbir şey "
+            "değişmedi. Eksikler aşağıda.",
+            "Complete the missing items before switching to this time-stamp server; nothing "
+            "changed. The missing items are below.",
         ),
         "tsa_would_break": (
             "Bu değişiklik şu an çalışan mühürlemeyi durdururdu; uygulanmadı. Nedenler aşağıda.",

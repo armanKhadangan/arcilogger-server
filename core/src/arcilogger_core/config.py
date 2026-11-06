@@ -43,10 +43,15 @@ MAX_RETENTION_BATCH_DAYS = 180
 
 KAMUSM_PRODUCTION_HOST = "zd.kamusm.gov.tr"
 KAMUSM_TEST_HOST = "tzd.kamusm.gov.tr"
+#: TÜRKTRUST's time-stamp server (contract T1: the host is from TÜRKTRUST's e-mail, the path is
+#: to be confirmed on site).
+TURKTRUST_PRODUCTION_HOST = "zd.turktrust.com.tr"
 
 
 class _Model(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True)
+    # hide_input_in_errors: a refused value (a URL with a password in it, #204) is never repeated
+    # in the error text that the console, a task's log or an answer shows.
+    model_config = ConfigDict(extra="forbid", frozen=True, hide_input_in_errors=True)
 
 
 class SourceConfig(_Model):
@@ -131,7 +136,7 @@ class SealConfig(_Model):
 
 
 class TsaConfig(_Model):
-    provider: Literal["mock", "rfc3161", "zamane"] = "mock"
+    provider: Literal["mock", "rfc3161", "zamane", "turktrust"] = "mock"
     #: Time-stamp server URL (Zamane: address passed to the console client).
     url: str = f"http://{KAMUSM_TEST_HOST}"
     port: int = Field(default=80, ge=1, le=65535)
@@ -176,15 +181,44 @@ class TsaConfig(_Model):
     def _crl_urls(cls, values: tuple[str, ...]) -> tuple[str, ...]:
         for value in values:
             parts = urlsplit(value)
+            if parts.username is not None or parts.password is not None:
+                # Not repeated: the value carries the password.
+                raise ValueError("no user name or password in a revocation list URL")
             try:
                 port = parts.port
             except ValueError:  # not a number, or out of range
                 port = -1
             if parts.scheme not in ("http", "https") or not parts.hostname or port == -1:
                 raise ValueError(f"not an http or https URL: {value!r}")
-            if parts.username is not None or parts.password is not None:
-                raise ValueError(f"no user name or password in a revocation list URL: {value!r}")
         return values
+
+    @field_validator("url")
+    @classmethod
+    def _url(cls, value: str) -> str:
+        parts = urlsplit(value)
+        if parts.username is not None or parts.password is not None:
+            # Every provider (#204): the account goes into the secret store, and the URL reaches
+            # logs, errors and repr(). Not repeated here, since it carries the password.
+            raise ValueError(
+                "tsa.url kullanıcı adı ya da parola içeremez; hesap gizli depoya girilir "
+                "[tsa.url cannot carry a user name or password; the account goes into the "
+                "secret store]"
+            )
+        return value
+
+    @model_validator(mode="after")
+    def _turktrust_https(self) -> TsaConfig:
+        if self.provider != "turktrust":
+            return self
+        scheme = urlsplit(self.url).scheme
+        if scheme == "http" and not self.allow_plain_http:
+            raise ValueError(
+                "provider turktrust needs an https:// url: over http:// the TÜRKTRUST user name "
+                "and password travel in clear text (set tsa.allow_plain_http = true to accept it)"
+            )
+        if scheme not in ("http", "https"):
+            raise ValueError("provider turktrust needs an https:// url")
+        return self
 
     @field_validator("legal_root_fingerprints")
     @classmethod
@@ -203,11 +237,21 @@ class TsaConfig(_Model):
 
     @property
     def legal_grade(self) -> bool:
-        """Whether the configuration points at the Kamu SM production server (Zamane client,
-        zd.kamusm.gov.tr). This is only what the site **claims**: a day counts as legal grade
-        when its verified token also chains to a root of ``legal_root_fingerprints``
+        """Whether the configuration points at a production server whose stamps count as legal
+        grade: Kamu SM's (Zamane client, zd.kamusm.gov.tr), or TÜRKTRUST's (zd.turktrust.com.tr)
+        while the product constant
+        :data:`arcilogger_core.tsa.turktrust.TURKTRUST_LEGAL_GRADE` is true (D12). This is only
+        what the site **claims**: a day counts as legal grade when its verified token also
+        chains to a root of ``legal_root_fingerprints``
         (:func:`arcilogger_core.tsa.verify.confirmed_legal_grade`)."""
-        return self.provider == "zamane" and self.host == KAMUSM_PRODUCTION_HOST
+        if self.provider == "zamane":
+            return self.host == KAMUSM_PRODUCTION_HOST
+        if self.provider == "turktrust":
+            # Imported here: arcilogger_core.tsa imports this module.
+            from arcilogger_core.tsa.turktrust import TURKTRUST_LEGAL_GRADE
+
+            return TURKTRUST_LEGAL_GRADE and self.host == TURKTRUST_PRODUCTION_HOST
+        return False
 
 
 class NetworkConfig(_Model):
@@ -236,7 +280,8 @@ class NetworkConfig(_Model):
             or parts.query
             or parts.fragment
         ):
-            raise ValueError(f"https_proxy must be http://host:port (no credentials): {value!r}")
+            # Not repeated: a refused value may carry a password.
+            raise ValueError("https_proxy must be http://host:port (no credentials)")
         return value
 
 

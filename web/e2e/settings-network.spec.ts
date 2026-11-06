@@ -13,7 +13,9 @@ import { mockApi } from './mock-api';
 
 test.describe('Ayarlar → Genel: the outbound proxy', () => {
   test('no field while the API does not report it', async ({ page }) => {
-    await mockApi(page, { signedInAs: 'tolga' });
+    const api = await mockApi(page, { signedInAs: 'tolga' });
+    // An API before W5-T: W5-T's mock reports `network`, so it is taken out here.
+    delete (api.admin.sections.general as { network?: unknown }).network;
     await page.goto('/settings/general');
     await expect(page.getByTestId('settings-clock')).toBeVisible();
     await expect(page.getByTestId('settings-network')).toHaveCount(0);
