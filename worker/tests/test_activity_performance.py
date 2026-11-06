@@ -50,7 +50,7 @@ NOW = tr(DAY, 11)
 TICK_BUDGET = 2.0
 SLICE_BUDGET = 2.0
 TICK = timedelta(seconds=10)
-TICKS = 3
+TICKS = 12
 INTERIM = 120
 #: Written whole before "now" (the warm-up's dense slices), and the share of older sessions.
 DENSE = timedelta(minutes=3)
@@ -246,15 +246,16 @@ def test_ticks_and_warm_up_slices_stay_within_budget(
         details = snapshot.tick(db_session, hi)
         ticks.append({**details, "lines": written})
     figures["tick_max_s"] = max(details["seconds"] for details in ticks)
-    figures["tick_rows"] = [details["rows"] for details in ticks]
+    figures["tick_rows_min"] = min(details["rows"] for details in ticks)
     figures["open_sessions"] = ticks[-1]["open_sessions"]
     figures["write_max_s"] = max(details["write_seconds"] for details in [*slices, *ticks])
     figures["file_bytes"] = layout.activity.stat().st_size
-    phases = ("read_seconds", "slice_seconds", "recount_seconds", "write_seconds")
+    phases = ("read_seconds", "count_seconds", "write_seconds")
     figures["slice_phases_max"] = {name: max(d[name] for d in slices) for name in phases}
     figures["tick_phases_max"] = {name: max(d[name] for d in ticks) for name in phases}
     figures["stale_after_ticks"] = [details["stale_sessions"] for details in ticks]
     figures["recounted"] = [details["recounted"] for details in ticks]
+    figures["ended_waiting"] = [details["ended_waiting"] for details in ticks]
     print(f"\nactivity snapshot at {rate:g} lines/s, {devices} devices: {figures}")
     assert figures["slice_max_s"] < SLICE_BUDGET
     assert figures["tick_max_s"] < TICK_BUDGET

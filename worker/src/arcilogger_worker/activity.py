@@ -23,10 +23,14 @@ background rules are Kullanım's. Only the selection of the rows is the job's ow
 * **Names:** a session's web filter and application logs (by session id) and the DNS answers
   that can name it (for its address, at most ``usage.dns_window_seconds`` before its start; the
   engine takes the newest) are read for the sessions counted; the DNS answers once per session.
+* **One budget per tick** (:data:`TICK_BUDGET`, the file's write set aside): a tick reads and
+  sorts the new rows, then counts in chunks, first the sessions that ended (so they never wait
+  long), then the next warm-up slices, then the open sessions whose logs changed (those that
+  changed longest ago first). What does not fit waits for the next tick; the details say how
+  many sessions wait.
 * **Warm-up:** after a start the last 60 minutes and the overlap before them are read in slices
-  of :data:`WARMUP_SLICE`, as many as a tick's :data:`TICK_BUDGET` allows; the sessions still
-  open are then counted, :data:`RECOUNT_CHUNK` at a time within the same budget. The snapshot says
-  ``warming_up`` until both are done.
+  of :data:`WARMUP_SLICE` within that budget. The snapshot says ``warming_up`` until they are
+  read and every session is counted.
 
 **The file** holds subject keys (``person:12``, ``device:<mac>``, ``ip:<addr>``), their VLAN,
 MAC and address, and per minute and subject the bytes, the sessions started and the bytes of the
@@ -40,6 +44,7 @@ applies access, the KVKK notice, pseudonyms and ``usage_excluded`` when it answe
 
 from __future__ import annotations
 
+import itertools
 import json
 import time
 from collections import defaultdict
@@ -72,11 +77,12 @@ MINUTES: Final = 60
 ID_MARGIN: Final = timedelta(seconds=5)
 #: The seconds one tick may take (M4 guard (b) and (c): 2 s), its file write included: the
 #: start-up's slices and the open sessions counted again fill what the new rows leave.
-TICK_BUDGET: Final = 1.6
+TICK_BUDGET: Final = 1.3
 #: One slice of the start-up's read.
-WARMUP_SLICE: Final = timedelta(seconds=10)
-#: Open sessions counted again in one go.
-RECOUNT_CHUNK: Final = 1000
+WARMUP_SLICE: Final = timedelta(seconds=5)
+#: Sessions that ended, and open sessions whose logs changed, counted in one go.
+ENDED_CHUNK: Final = 1000
+RECOUNT_CHUNK: Final = 500
 #: New rows are read in pages of this many.
 MAX_ROWS: Final = 20_000
 SNAPSHOT_VERSION: Final = 1
@@ -194,12 +200,14 @@ class Snapshot:
         self._write_cost = 0.0
         self._piece_cost = 0.0
         self._pieces_seconds = 0.0
-        self._chunk_cost = 0.0
-        self._slice_cost = 0.0
+        #: What one step of counting took lately (a chunk or a slice; it decays).
+        self._step_cost = 0.0
         #: The sessions that ended, and the sum of the open sessions' counts.
         self.closed = Counted()
         self.opened = Counted()
         self.open: dict[Key, OpenSession] = {}
+        #: The sessions that ended, waiting to be counted (in the order they ended).
+        self.ended: dict[Key, OpenSession] = {}
         #: Ids read above the oldest mark, and the table's highest id at each tick.
         self.seen: set[int] = set()
         self.marks: list[tuple[float, int]] = []
@@ -222,8 +230,10 @@ class Snapshot:
     # -- the tick ---------------------------------------------------------------------------------
 
     def tick(self, session: Session, now: datetime) -> dict[str, Any]:
-        """Read what came since the last tick (and the next warm-up slices), count it, write the
-        snapshot when it changed. Returns the job's details."""
+        """Read what came since the last tick and sort it into sessions, then count, as long as
+        the tick's budget lasts: the sessions that ended, the next warm-up slices, the open
+        sessions whose logs changed. Write the snapshot when it changed. Returns the job's
+        details."""
         began = time.monotonic()
         settings = UsageSettings.load(session)
         overlap = timedelta(seconds=settings.session_overlap_seconds)
@@ -234,7 +244,7 @@ class Snapshot:
             self.started = True
             self.marks = [(began, last_id)]
             self.warm_from = lo - overlap
-        counts = {"rows": 0, "closed_sessions": 0}
+        counts = {"rows": 0, "ended": 0, "closed_sessions": 0, "slices": 0, "recounted": 0}
         # The rows committed since: up to the time the warm-up has read, all of it after.
         covered = end if self.warm_from is None else self.warm_from
         after = self._after(began)
@@ -249,30 +259,36 @@ class Snapshot:
                     "refused": list(REFUSED_ACTIONS),
                 },
             ).all()
-            self._read(session, settings, rows, lo, end, overlap, covered, counts)
+            self._sort(rows, overlap, covered, counts)
             if len(rows) < MAX_ROWS:
                 break
             after = rows[-1][0]
-        read = time.monotonic()
-        sliced = 0
-        while self.warm_from is not None and (not sliced or self._left(began) > self._slice_cost):
-            slicing = time.monotonic()
-            sliced += 1
-            until = min(self.warm_from + self.warmup_slice, end)
-            rows = session.execute(
-                _SLICE_ROWS,
-                {"lo": self.warm_from, "hi": until, "refused": list(REFUSED_ACTIONS)},
-            ).all()
-            self.warm_from = None if until >= end else until
-            self._read(session, settings, rows, lo, end, overlap, until, counts)
-            self._slice_cost = time.monotonic() - slicing
         self._mark(began, last_id)
         self._prune(lo, overlap)
-        recounting = time.monotonic()
-        recounted = 0
-        if self.warm_from is None:
-            recounted = self._recount(session, settings, lo, end, overlap, began)
-            self.settled = self.settled or not any(known.stale for known in self.open.values())
+        read = time.monotonic()
+        while True:
+            step = time.monotonic()
+            if self.ended:
+                counts["closed_sessions"] += self._close(session, settings, lo, end, overlap)
+            elif self.warm_from is not None:
+                until = min(self.warm_from + self.warmup_slice, end)
+                rows = session.execute(
+                    _SLICE_ROWS,
+                    {"lo": self.warm_from, "hi": until, "refused": list(REFUSED_ACTIONS)},
+                ).all()
+                self.warm_from = None if until >= end else until
+                self._sort(rows, overlap, until, counts)
+                counts["slices"] += 1
+            elif any(known.stale for known in self.open.values()):
+                counts["recounted"] += self._recount(session, settings, lo, end, overlap)
+            else:
+                break
+            self._step_cost = max(self._step_cost * 0.8, time.monotonic() - step)
+            if self._left(began) < self._step_cost:
+                break
+        stale = sum(1 for known in self.open.values() if known.stale)
+        if self.warm_from is None and not self.ended and not stale:
+            self.settled = True
         writing = time.monotonic()
         changed = self._write(now, lo, end)
         done = time.monotonic()
@@ -280,22 +296,20 @@ class Snapshot:
             self._write_cost = done - writing - self._pieces_seconds
         return {
             **counts,
-            "slices": sliced,
-            "recounted": recounted,
-            "stale_sessions": sum(1 for known in self.open.values() if known.stale),
+            "ended_waiting": len(self.ended),
+            "stale_sessions": stale,
             "open_sessions": len(self.open),
             "warming_up": not self.settled,
             "written": changed,
             "read_seconds": round(read - began, 3),
-            "slice_seconds": round(recounting - read, 3),
-            "recount_seconds": round(writing - recounting, 3),
+            "count_seconds": round(writing - read, 3),
             "write_seconds": round(done - writing, 3),
             "seconds": round(done - began, 3),
         }
 
     def _left(self, began: float) -> float:
-        """Seconds this tick still has for slices or counting, the file's write set aside."""
-        writing = self._write_cost + self._piece_cost * len(self._dirty)
+        """Seconds this tick still has for counting, the file's write set aside."""
+        writing = 1.5 * (self._write_cost + self._piece_cost * len(self._dirty))
         return self.budget - (time.monotonic() - began) - writing
 
     def _after(self, now: float) -> int:
@@ -313,62 +327,60 @@ class Snapshot:
         low = self.marks[0][1]
         self.seen = {row_id for row_id in self.seen if row_id > low}
 
-    def _read(
+    # -- counting ---------------------------------------------------------------------------------
+
+    def _sort(
         self,
-        session: Session,
-        settings: UsageSettings,
         rows: Sequence[Sequence[Any]],
-        lo: datetime,
-        end: datetime,
         overlap: timedelta,
         until: datetime,
         counts: dict[str, int],
     ) -> None:
-        fresh = [row for row in rows if row[0] not in self.seen]
-        self.seen.update(row[0] for row in fresh)
-        counts["rows"] += len(fresh)
-        counts["closed_sessions"] += self._count(session, settings, fresh, lo, end, overlap, until)
-
-    # -- counting ---------------------------------------------------------------------------------
-
-    def _count(
-        self,
-        session: Session,
-        settings: UsageSettings,
-        rows: Sequence[Sequence[Any]],
-        lo: datetime,
-        end: datetime,
-        overlap: timedelta,
-        until: datetime,
-    ) -> int:
-        """Sort ``rows`` into the open sessions; count the sessions that ended (their final log,
-        or no log for the overlap before ``until``: the end of the rows read) into the closed
-        minutes. Returns how many ended."""
-        closed: dict[Key, OpenSession] = {}
+        """Sort the rows not read before into the sessions: an interim log keeps a session open,
+        a final log ends it, and so does no log for the overlap before ``until`` (the end of
+        the rows read). The sessions that ended wait in ``ended`` to be counted."""
         for row in rows:
+            if row[0] in self.seen:
+                continue
+            self.seen.add(row[0])
+            counts["rows"] += 1
             ip, values = str(row[1]), tuple(row[2:])
             key: Key = (
                 (ip, values[0], values[1], values[2]) if values[0] is not None else (ip, row[0])
             )
-            known = self.open.pop(key, None) or closed.pop(key, None) or OpenSession(ip)
+            known = self.open.pop(key, None) or self.ended.pop(key, None) or OpenSession(ip)
             known.stale = True
             known.rows.append(values)
             known.newest = max(known.newest, values[3].timestamp())
             if values[10] and values[0] is not None:  # an interim log: the session goes on
                 self.open[key] = known
             else:
-                closed[key] = known
+                self.ended[key] = known
+                counts["ended"] += 1
         horizon = until.timestamp() - overlap.total_seconds()
         for key in [key for key, known in self.open.items() if known.newest < horizon]:
-            closed[key] = self.open.pop(key)  # no log for the overlap: it is over
-        if closed:
-            (done,) = self._counts(session, settings, [list(closed.values())], lo, end, overlap)
-            before = [known.counted for known in closed.values() if known.counted is not None]
-            self._dirty |= _pairs(_difference([done], before))
-            for counted in before:
-                _add(self.opened, counted, sign=-1)
-            _add(self.closed, done)
-        return len(closed)
+            self.ended[key] = self.open.pop(key)  # no log for the overlap: it is over
+            counts["ended"] += 1
+
+    def _close(
+        self,
+        session: Session,
+        settings: UsageSettings,
+        lo: datetime,
+        end: datetime,
+        overlap: timedelta,
+    ) -> int:
+        """Count :data:`ENDED_CHUNK` of the sessions that ended into the closed minutes, their
+        open count taken out of the open sum. Returns how many."""
+        keys = list(itertools.islice(self.ended, ENDED_CHUNK))
+        chunk = [self.ended.pop(key) for key in keys]
+        (done,) = self._counts(session, settings, [chunk], lo, end, overlap, cached=True)
+        before = [known.counted for known in chunk if known.counted is not None]
+        self._dirty |= _pairs(_difference([done], before))
+        for counted in before:
+            _add(self.opened, counted, sign=-1)
+        _add(self.closed, done)
+        return len(chunk)
 
     def _recount(
         self,
@@ -377,28 +389,23 @@ class Snapshot:
         lo: datetime,
         end: datetime,
         overlap: timedelta,
-        began: float,
     ) -> int:
-        """Count the open sessions whose logs changed, :data:`RECOUNT_CHUNK` at a time while the
-        tick has time for another chunk; the others wait for the next tick."""
-        stale = [known for known in self.open.values() if known.stale]
-        done = 0
-        while done < len(stale) and (done == 0 or self._left(began) > self._chunk_cost):
-            started = time.monotonic()
-            chunk = stale[done : done + RECOUNT_CHUNK]
-            counts = self._counts(
-                session, settings, [[known] for known in chunk], lo, end, overlap, cached=True
-            )
-            difference = _difference(
-                counts, [known.counted for known in chunk if known.counted is not None]
-            )
-            self._dirty |= _pairs(difference)
-            _add(self.opened, difference)
-            for known, counted in zip(chunk, counts, strict=True):
-                known.counted, known.stale = counted, False
-            done += len(chunk)
-            self._chunk_cost = time.monotonic() - started
-        return done
+        """Count :data:`RECOUNT_CHUNK` of the open sessions whose logs changed (those that
+        changed longest ago first); the others wait. Returns how many."""
+        chunk = list(
+            itertools.islice((known for known in self.open.values() if known.stale), RECOUNT_CHUNK)
+        )
+        counts = self._counts(
+            session, settings, [[known] for known in chunk], lo, end, overlap, cached=True
+        )
+        difference = _difference(
+            counts, [known.counted for known in chunk if known.counted is not None]
+        )
+        self._dirty |= _pairs(difference)
+        _add(self.opened, difference)
+        for known, counted in zip(chunk, counts, strict=True):
+            known.counted, known.stale = counted, False
+        return len(chunk)
 
     def _engine(self, settings: UsageSettings) -> tuple[DomainNamer, BackgroundRules]:
         """The settings' public suffix list and background rules (kept while they hold)."""
@@ -550,8 +557,7 @@ class Snapshot:
                 pieces.pop(key, None)
             else:
                 pieces[key] = piece
-        if self._dirty:
-            self._piece_cost = (time.monotonic() - building) / len(self._dirty)
+        dirty = len(self._dirty)
         self._dirty.clear()
         for minute in touched:
             pieces = self._pieces.get(minute)
@@ -562,6 +568,9 @@ class Snapshot:
             joined = ",".join(pieces[key] for key in sorted(pieces))
             self._fragments[minute] = f'{{"minute":"{_iso(minute)}","subjects":{{{joined}}}}}'
         self._pieces_seconds = time.monotonic() - building
+        if dirty:
+            # The minutes' joins included: what one changed subject-minute costs the write.
+            self._piece_cost = self._pieces_seconds / dirty
         used = {key for pieces in self._pieces.values() for key in pieces}
         newest = max(
             (c.newest for c in (self.closed, self.opened) if c.newest is not None), default=None
