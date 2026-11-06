@@ -406,8 +406,10 @@ def test_the_plain_http_confirmation_names_the_clear_text_account() -> None:
     from arcilogger_api.admin_channel import texts
 
     message_tr, message_en = texts("tsa_plain_http_confirm_required")
-    assert "TÜRKTRUST" in message_tr and "şifrelenmeden" in message_tr
-    assert "TÜRKTRUST" in message_en and "unencrypted" in message_en
+    assert "TÜRKTRUST" in message_tr
+    assert "şifrelenmeden" in message_tr
+    assert "TÜRKTRUST" in message_en
+    assert "unencrypted" in message_en
     assert (message_tr, message_en) != texts("tsa_confirm_required")
 
 
