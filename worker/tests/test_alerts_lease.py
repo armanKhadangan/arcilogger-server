@@ -801,6 +801,22 @@ def test_a_shared_srcmac_per_listed_interface(
     assert "00:00:5e" not in str(alert.details)
 
 
+def test_a_srcmac_session_logged_ahead_of_the_check_still_counts(
+    check: Any, db_session: Session, evidence: Evidence
+) -> None:
+    """#96: the count is the lookup guard's, sessions that overlap the hour. A sender whose clock
+    is ahead logs .58's session (started 30 minutes ago) 20 minutes after the check's moment; it
+    overlaps the hour, so the MAC is shared. Before #96 only rows logged in the hour counted."""
+    set_setting(db_session, "lookup.srcmac_interfaces", ["vlan42"], updated_by="tolga")
+    evidence.traffic(NOW - timedelta(minutes=20), "172.20.42.57", 50001, srcintf="vlan42",
+                     srcmac="00:00:5e:00:53:01")  # fmt: skip
+    evidence.traffic(NOW + timedelta(minutes=20), "172.20.42.58", 50002, srcintf="vlan42",
+                     srcmac="00:00:5e:00:53:01", duration=50 * 60)  # fmt: skip
+    alerts = check()
+    alert = alerts["R20-lease:srcmac-shared:vlan42"]
+    assert (alert.details["count"], alert.details["most"]) == (1, 2)
+
+
 # -- the 24 hours without the problem -------------------------------------------------------------
 
 

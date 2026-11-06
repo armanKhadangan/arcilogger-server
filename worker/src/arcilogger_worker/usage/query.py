@@ -358,9 +358,13 @@ def computed_until(session: Session, period: Period) -> datetime | None:
 
 
 def updated_at(session: Session, period: Period) -> datetime | None:
-    """When the newest rollup of the period was computed: the page's "Son güncelleme" (W5-L, L3)."""
+    """When the period's last computed day was computed, the day ``computed_until`` comes from:
+    the page's "Son güncelleme" (W5-L, L3). A rebuild of an earlier day does not move it."""
     value = session.execute(
-        text("SELECT max(computed_at) FROM usage_days WHERE day >= :first AND day <= :last"),
+        text(
+            "SELECT computed_at FROM usage_days WHERE day >= :first AND day <= :last "
+            "ORDER BY day DESC LIMIT 1"
+        ),
         {"first": period.first, "last": period.last},
     ).scalar_one_or_none()
     return value if isinstance(value, datetime) else None

@@ -507,6 +507,7 @@
       "addBreak": "Mola ekle",
       "addBreakFor": "{{day}} için mola ekle",
       "stripOff": "{{day}}: mesai yok",
+      "stripInvalid": "{{day}}: saatler geçersiz",
       "stripWork": "{{day}}: mesai {{hours}}, mola yok",
       "stripBreaks": "{{day}}: mesai {{hours}}, mola {{breaks}}"
     },

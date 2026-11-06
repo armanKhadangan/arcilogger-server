@@ -32,6 +32,10 @@ function tsa(overrides: Partial<TsaSection> = {}): TsaSection {
     server: 'test',
     credit_alert_threshold: 500,
     timeout_seconds: 60,
+    allow_plain_http: false,
+    renew_before_days: 180,
+    crl_urls: [],
+    crl_max_age_days: 7,
     java: JAVA,
     java_choices: [JAVA],
     zamane: {
@@ -48,7 +52,7 @@ function tsa(overrides: Partial<TsaSection> = {}): TsaSection {
       'kamusm.password': { set: true, changed_at: null, changed_by: null },
       'turktrust.username': { set: false, changed_at: null, changed_by: null },
       'turktrust.password': { set: false, changed_at: null, changed_by: null },
-    } as TsaSection['secrets'],
+    },
     readiness: { production: true, missing: [] },
     seal_ready: { ok: true, causes: [] },
     ...overrides,
@@ -62,7 +66,7 @@ const TURKTRUST_SITE = tsa({
   secrets: {
     'turktrust.username': { set: true, changed_at: null, changed_by: 'web:tolga' },
     'turktrust.password': { set: true, changed_at: null, changed_by: 'web:tolga' },
-  } as TsaSection['secrets'],
+  },
   readiness: { production: false, missing: ['zamane_jar', 'java'] },
 });
 
@@ -72,7 +76,7 @@ const STORED = tsa({
     ...tsa().secrets,
     'turktrust.username': { set: true, changed_at: null, changed_by: 'web:tolga' },
     'turktrust.password': { set: true, changed_at: null, changed_by: 'web:tolga' },
-  } as TsaSection['secrets'],
+  },
 });
 
 /** A server before W5-T: no `turktrust.*` in `secrets`. */

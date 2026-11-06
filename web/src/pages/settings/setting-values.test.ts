@@ -168,6 +168,41 @@ describe('database settings as drafts and back (contract 2.13)', () => {
     });
   });
 
+  it('work hours: a value written outside the editor keeps its shape when one day changes', () => {
+    // Set with `arcilogger-db settings set`: the general hours are not those most days have, and
+    // Thursday's by_day entry equals them (the server accepts both).
+    const stored = {
+      days: [1, 2, 3, 4, 5],
+      start: '09:00',
+      end: '17:00',
+      by_day: {
+        '1': { start: '08:00', end: '18:00' },
+        '2': { start: '08:00', end: '18:00' },
+        '3': { start: '08:00', end: '18:00' },
+        '4': { start: '09:00', end: '17:00' },
+      },
+    };
+    const hours = setting({ key: 'usage.work_hours', type: 'object', value: stored });
+    const draft = toDraft(hours) as WorkWeek;
+    expect(fromDraft(hours, draft)).toEqual({ value: stored });
+    // Friday ends at 15:00: only Friday changes in the saved value (and its audit entry).
+    const edited = {
+      week: draft.week.map((row, index) => (index === 4 ? { ...row, end: '15:00' } : row)),
+    };
+    expect(fromDraft(hours, edited)).toEqual({
+      value: { ...stored, by_day: { ...stored.by_day, '5': { start: '09:00', end: '15:00' } } },
+    });
+    // No work day keeps the stored general hours any more: those most days have take over.
+    const moved = {
+      week: draft.week.map((row, index) =>
+        index === 3 || index === 4 ? { ...row, start: '08:00', end: '18:00' } : row,
+      ),
+    };
+    expect(fromDraft(hours, moved)).toEqual({
+      value: { days: [1, 2, 3, 4, 5], start: '08:00', end: '18:00' },
+    });
+  });
+
   it('work hours: the checks of the server, naming the day', () => {
     const hours = setting({
       key: 'usage.work_hours',

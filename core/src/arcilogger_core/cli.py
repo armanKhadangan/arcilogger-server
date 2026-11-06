@@ -13,8 +13,8 @@ or the web application::
     arcilogger-core requests run                     the browser administration's signed
                                                      requests: credit query, TSA test,
                                                      replica test (ADR-0014)
-    arcilogger-core secret init|set|list|delete      encrypted credentials (Kamu SM, database,
-                                                     replica, SMTP)
+    arcilogger-core secret init|set|list|delete      encrypted credentials (Kamu SM, TÜRKTRUST,
+                                                     database, replica, SMTP)
     arcilogger-core status                           summary for monitoring
     arcilogger-core config-check [--json]            what a production configuration still
                                                      lacks (organisation name, time source)
@@ -132,6 +132,8 @@ from arcilogger_core.secretstore import (
     KAMUSM_PASSWORD,
     REPLICA_PASSWORD,
     SMTP_PASSWORD,
+    TURKTRUST_PASSWORD,
+    TURKTRUST_USERNAME,
     USAGE_PSEUDONYM_KEY,
     SecretStore,
     SecretStoreError,
@@ -154,6 +156,8 @@ from arcilogger_core.tsa.verify import confirmed_legal_grade, verify_token
 SECRET_NAMES = (
     KAMUSM_CUSTOMER,
     KAMUSM_PASSWORD,
+    TURKTRUST_USERNAME,
+    TURKTRUST_PASSWORD,
     DATABASE_PASSWORD,
     REPLICA_PASSWORD,
     SMTP_PASSWORD,
@@ -240,15 +244,19 @@ def cmd_info(_: argparse.Namespace) -> int:
 def _provider_cause(app: App) -> str:
     """Why :func:`arcilogger_core.tsa.make_provider` refused the configuration."""
     tsa = app.config.tsa
-    if tsa.provider != "zamane":
+    if tsa.provider == "zamane":
+        if tsa.zamane_jar is None:
+            return "zamane-jar"
+        needed = {KAMUSM_CUSTOMER, KAMUSM_PASSWORD}
+    elif tsa.provider == "turktrust":  # as tsa.preflight says for TÜRKTRUST's account
+        needed = {TURKTRUST_USERNAME, TURKTRUST_PASSWORD}
+    else:
         return "provider"
-    if tsa.zamane_jar is None:
-        return "zamane-jar"
     try:
         stored = set(app.secrets.names())
     except (OSError, ValueError, SecretStoreError):
         return "secret-store"
-    return "credentials" if not {KAMUSM_CUSTOMER, KAMUSM_PASSWORD} <= stored else "provider"
+    return "credentials" if not needed <= stored else "provider"
 
 
 def _sealer(app: App) -> Sealer:

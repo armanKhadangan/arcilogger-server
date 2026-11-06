@@ -2139,6 +2139,49 @@ All Wave 5 questions are answered (2026-11-02).
   COPY while the policy runs on `messages`: no deadlock, the batch not aborted, the next run
   recompresses the chunk), both ordered through `pg_locks`.
 
+- **W5-G-29: the srcmac guard counts the sessions that overlap the hour (#96, #40 item 7;
+  2026-11-06, the manager).**
+  **The rule.** `lookup/trust.py` `srcmac_ip_counts` counts the IPv4 `srcip` of a
+  `(srcintf, srcmac)` over the rows that overlap `[low, high]`: logged at `low` or later and started
+  at `high` or earlier (`time − duration`, as the session probes compute it; no duration: started
+  when logged). Its scan stops `max_session_seconds` after `high`, as the probes' does. Before, it
+  counted only the rows logged in `[low, high]`, so a router MAC's long session of another address
+  that started in the hour and was logged at its end was missed, and the lookup kept a `low`
+  `srcmac_only` chain where `srcmac_shared` should have refused it.
+  **The three callers change together.** Each passes `lookup.max_session_seconds`: the lookup
+  (`_SrcmacGuard.load`), the `R20-lease:srcmac-shared` alert (`alerts/system.py`
+  `_srcmac_shared`) and the interface list's observed counts (`routers/settings.py`
+  `observed_counts`). The last two count windows that end now. Nothing is logged after now, so
+  their reading changes only for rows logged ahead of the check (a source's clock).
+  **One addition is removed.** The lookup used to add the address of a used row logged outside the
+  hour (`sessions.srcmac_addresses_within`). That addition is gone, because every row a lookup uses
+  overlaps the hour: `lookup.tolerance_seconds` is at most 3600, and the guard's window is ±1 hour.
+  Keeping it would have counted such a row's address twice.
+  **The plan (deviation from the brief's "keep the plan on an index").** The plan is held to its
+  time bound instead: it reads only the partitions or chunks of the UTC days of
+  `[T − 1 h, T + 1 h + max_session_seconds]`, each scan with both bounds. No index holds `srcmac`
+  (D10). An index on `(srcmac, time)` would cost every ingested `fg_traffic` row an entry and would
+  not spare the read:
+  - nearly every row of those days is inside the bound;
+  - the candidates' rows lie on every page of it.
+
+  On TimescaleDB, chunk exclusion bounds the read the same way. Compressed chunks (segmented by
+  `source`) are decompressed over the bound, as the session probes' scan already does.
+  **Measured** (plain PostgreSQL, the traffic site, 1 M rows a day, 100 candidates and 67 MACs): a
+  parallel sequential scan of the two day partitions, **0.157 s** against the guard's 1 s. The 2 h
+  read before #96 took 0.044 s.
+  **Tests:**
+  - `worker/tests/test_trust.py` `test_srcmac_ip_counts_sessions_that_overlap_the_window`. It
+    counts a session that started in the window and was logged after it. It does not count a
+    session that started after the window, one that ended before it, one logged past the scan, or
+    one logged after the window without a duration.
+  - `worker/tests/test_lookup_srcmac.py`
+    `test_a_long_session_of_another_address_that_overlaps_the_hour_makes_the_mac_shared`.
+  - `worker/tests/test_alerts_lease.py`
+    `test_a_srcmac_session_logged_ahead_of_the_check_still_counts`.
+  - The perf guard `test_the_srcmac_guard_counts_two_hours_fast`: the call's longest session, the
+    plan's scans limited to the window's UTC days, and both bounds in the plan.
+
 ## Deviations — W5-H (2026-11-03)
 
 - **W5-H-1: the first line view of an xz file decompresses more than one stream.** §5.4 says
@@ -3562,8 +3605,10 @@ line is W5-E-10, and what it amends in detail:
   not two. #199 and #200 both close with it.
 - **W5-L-2: `data_until` is the existing `computed_until`.** Every usage answer has carried
   `computed_until`, "how far the rollups have processed traffic", since group 2. L3's `data_until`
-  is that field, so the answers add only `updated_at`: the newest `computed_at` of the period's
-  days. The web types get it (types only).
+  is that field, so the answers add only `updated_at`. That is the `computed_at` of the period's
+  last computed day, the day `computed_until` comes from: a rebuild of an earlier day does not
+  move "Son güncelleme" (amended 2026-11-06 after #209's review; it was the newest `computed_at`
+  of all the period's days). The web types get it (types only).
 - **W5-L-3: the back-off measures from the last refresh's start.** `usage_days` keeps the start
   of the last rollup (`computed_at`) and its `duration_ms`, measured until the day's rows are
   written (the commit after it is not included; the job's log shows the same figure). A refresh
@@ -3589,7 +3634,10 @@ The manager took P1 and P2 (#203, comment of 2026-11-05); P3 and P4 stay with G�
   the general `start`/`end`/`breaks` of the saved value are the hours that most work days have
   (on a tie, the earliest day's). Every other work day gets a `by_day` entry; a day equal to the
   general hours gets none (P1). A stored value reads back unchanged, and an untouched editor
-  saves nothing.
+  saves nothing. A value written outside the editor (`arcilogger-db settings set`) keeps its shape
+  when one day changes (amended 2026-11-06 after #209's review): its general hours stay while a
+  work day still has them, and then a stored `by_day` entry equal to them stays while its day
+  keeps them.
 - **W5-P-2: the browser names the day of a refusal.** It checks the server's rules (K1) before
   saving, per day: "Salı: her mola en az 5 dakika olmalı." The server's own refusal
   (`setting_work_hours_breaks`, `setting_work_hours_by_day`) is shown at the setting as before.
@@ -3687,3 +3735,49 @@ The manager took P1 and P2 (#203, comment of 2026-11-05); P3 and P4 stay with G�
   `api-samples.test.ts` (`activity-types.ts` in `TYPES_FILES`, the four `Wan*` interfaces in
   `NOT_SCHEMAS` until W5-N mounts `GET /activity/wan`, the `activity` samples);
   `web/scripts/capture_api_samples.py` (`activity.json`).
+
+## Deviations — W5-T (2026-11-06)
+
+Recorded on #204, from the manager's answers of 2026-11-06.
+
+- **W5-T-1: TÜRKTRUST's account is cleared at the console only in Wave 5.** C5 keeps its body
+  fields: `turktrust_username`, `turktrust_password`, `allow_plain_http`. No
+  `clear_turktrust_credentials` is added, and `clear_credentials` clears only Kamu SM's account,
+  as before. The console clears TÜRKTRUST's: `secret delete turktrust.username` and
+  `secret delete turktrust.password`. Completing this in the browser is Wave 7's work.
+- **W5-T-2: TÜRKTRUST's answers other than 2xx, 401 and 403 are split.**
+  - **Configuration error, not retried:** a 3xx, and any 4xx other than 408 and 429.
+    - Redirects are not followed, so a 3xx most likely means a wrong URL or path (T1).
+    - The text carries the status code and points to `[tsa] url`, never the credentials.
+  - **Unavailable, retried:** 408, 429, 5xx and network errors.
+  - 401 and 403 stay `credentials` configuration errors.
+  - Tests: `core/tests/test_tsa_turktrust.py` (`test_another_refusal_is_a_configuration_error`,
+    `test_a_server_error_is_retried`, `test_a_redirect_is_not_followed`).
+- **W5-T-3: until W5-T part 3, ApplySystem does not know the new outbound rules.**
+  - `admin/systemplan.py` derives the strict outbound rules after a browser change. It puts the
+    `[tsa] url` host under `ARCILOGGER Out Kamu SM` on `tsa.port`, and it knows neither
+    `tsa.crl_urls` nor `network.https_proxy`.
+  - So a browser switch to TÜRKTRUST reaches it on 443. The CRL hosts and the proxy, however, open
+    only when the installer's firewall step (`Set-ArciFirewall.ps1`) runs.
+  - **The follow-up:** a small pull request right after #204 (W5-T part 3) closes the gap. Its
+    granted files are `_outbound` in `admin/systemplan.py` and the rule list in
+    `ArciInstall.psm1`, with their tests. It adds the `TURKTRUST`, `CRL` and `Proxy` rules, with the
+    names and ports of `Set-ArciFirewall.ps1`.
+  - **Closed by W5-T part 3 (2026-11-06).**
+    - `_outbound` plans `ARCILOGGER Out TURKTRUST` (the `[tsa] url` host on the port the provider
+      uses, `tsa.url_with_port`) and `ARCILOGGER Out CRL` (each `tsa.crl_urls` host on 80 and
+      443). With `network.https_proxy` set, it plans `ARCILOGGER Out Proxy` on the proxy's host
+      and port instead of both. With `turktrust`, the Kamu SM rule keeps only Kamu SM's servers,
+      on port 80.
+    - `OutboundRule` and `ArciInstall.psm1`'s `OutboundRulePattern` accept the three names.
+      `Set-ArciFirewall.ps1 -SyncFromConfig` sets them over TCP, and creates any that is missing.
+    - As for every outbound rule, ApplySystem never removes one. A `TURKTRUST`, `CRL` or `Proxy`
+      rule stays when its setting goes away, until the installer's firewall step runs.
+- **W5-T-4: `turktrust-http` without `confirm` has its own code, `tsa_plain_http_confirm_required`**
+  (independent review of #204, point 2).
+  - §2.4 and C5 named `tsa_confirm_required` for this case. That code's text is about leaving
+    production for the test server, not about the account travelling in clear text.
+  - The body field is unchanged: `confirm: true`, with the form's typed `HTTP` (C5).
+  - The new code's TR/EN text says that the TÜRKTRUST user name and password travel unencrypted.
+    It lives in `api/src/arcilogger_api/admin_channel.py`, granted for this one code. It is
+    answered with HTTP 422, like `tsa_confirm_required`.

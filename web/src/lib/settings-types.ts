@@ -85,7 +85,12 @@ export type StepState = 'pending' | 'running' | 'done' | 'skipped' | 'warning' |
 
 /** The secrets the browser may set (write-only fields). */
 export type BrowserSecret =
-  'kamusm.customer' | 'kamusm.password' | 'smtp.password' | 'replica.password';
+  | 'kamusm.customer'
+  | 'kamusm.password'
+  | 'turktrust.username'
+  | 'turktrust.password'
+  | 'smtp.password'
+  | 'replica.password';
 
 export type UploadKind = 'kamusm_root' | 'zamane_client' | 'smtp_ca';
 
@@ -118,12 +123,19 @@ export interface ClockSection {
   alert_offset_ms: number;
 }
 
+/** `[network] https_proxy`: `http://host:port`, or empty for a direct connection. */
+export interface NetworkSection {
+  https_proxy: string;
+}
+
 export interface GeneralSection {
   site_name: string;
   clock: ClockSection;
+  network: NetworkSection;
 }
 
-export type TsaServer = 'test' | 'production';
+/** Kamu SM's Zamane servers, or TÜRKTRUST over HTTPS or plain HTTP (contract §2.4). */
+export type TsaServer = 'test' | 'production' | 'turktrust' | 'turktrust-http';
 
 export interface StagedJar {
   sha256: string;
@@ -164,12 +176,17 @@ export interface SealReady {
 }
 
 export interface TsaSection {
-  /** `mock`, `rfc3161` or `zamane` (only Zamane can be chosen in the browser). */
+  /** `mock`, `rfc3161`, `zamane` or `turktrust` (Zamane and TÜRKTRUST can be chosen). */
   provider: string;
-  /** `null` while the provider is not Zamane. */
+  /** `null` while the server is none of the browser's choices. */
   server: TsaServer | null;
   credit_alert_threshold: number;
   timeout_seconds: number;
+  /** TÜRKTRUST over plain HTTP is allowed (the password then travels in clear text). */
+  allow_plain_http: boolean;
+  renew_before_days: number;
+  crl_urls: string[];
+  crl_max_age_days: number;
   java: string | null;
   /** The Java 8 installations the administration service found (`agent.json`). */
   java_choices: string[];
@@ -604,25 +621,39 @@ export interface ClockBody {
   alert_offset_ms?: number | null;
 }
 
+/** The proxy of a general change (sent as `null` it stays as it is). */
+export interface NetworkBody {
+  https_proxy?: string | null;
+}
+
 export interface GeneralBody {
   etag: string;
   site_name?: string | null;
   clock?: ClockBody | null;
+  network?: NetworkBody | null;
   /** Test a changed time server first (SNTP); `true` when left out. */
   probe?: boolean;
 }
 
 export interface TsaBody {
   etag: string;
-  /** `test` or `production` (`mock`: 422 `tsa_mock_refused`). */
+  /** `test`, `production`, `turktrust` or `turktrust-http` (`mock`: 422 `tsa_mock_refused`). */
   server?: string | null;
   credit_alert_threshold?: number | null;
   timeout_seconds?: number | null;
+  /** `turktrust-http` needs it, with `confirm`. */
+  allow_plain_http?: boolean | null;
+  renew_before_days?: number | null;
+  crl_urls?: string[] | null;
+  crl_max_age_days?: number | null;
   java?: string | null;
   customer?: string | null;
   password?: string | null;
+  turktrust_username?: string | null;
+  turktrust_password?: string | null;
   clear_credentials?: boolean;
-  /** Production to test stops production stamps: the user said so. */
+  /** Production to test stops production stamps, `turktrust-http` sends the password in clear
+   * text: the user said so. */
   confirm?: boolean;
   probe?: boolean;
 }

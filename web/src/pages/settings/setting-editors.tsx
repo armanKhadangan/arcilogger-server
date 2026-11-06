@@ -114,9 +114,10 @@ function DayStrip({ row, name }: { row: WorkDayDraft; name: string }) {
   const { t } = useTranslation();
   const parts = dayParts(row);
   const pauses = parts.filter((part) => part.part === 'break');
-  const label =
-    parts.length === 0
-      ? t('settings.application.stripOff', { day: name })
+  const label = !row.work
+    ? t('settings.application.stripOff', { day: name })
+    : parts.length === 0
+      ? t('settings.application.stripInvalid', { day: name })
       : pauses.length === 0
         ? t('settings.application.stripWork', { day: name, hours: `${row.start}–${row.end}` })
         : t('settings.application.stripBreaks', {
@@ -316,6 +317,10 @@ function WorkHoursEditor({
                                   ...row,
                                   breaks: row.breaks.filter((_, which) => which !== at),
                                 });
+                                // The button goes away with its break: focus stays in the row.
+                                requestAnimationFrame(() => {
+                                  document.getElementById(`${id}-add-${index + 1}`)?.focus();
+                                });
                               }}
                             >
                               <X aria-hidden="true" />
@@ -327,6 +332,7 @@ function WorkHoursEditor({
                         <Button
                           variant="ghost"
                           size="sm"
+                          id={`${id}-add-${index + 1}`}
                           disabled={off || row.breaks.length >= WORK_BREAKS_MAX}
                           aria-label={t('settings.application.addBreakFor', { day })}
                           onClick={() => {

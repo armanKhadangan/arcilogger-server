@@ -1371,23 +1371,49 @@ def _first_read(site: Engine, at: datetime) -> datetime:
 
 
 @pytest.mark.perf
-def test_the_srcmac_guard_counts_two_hours_fast(traffic_site: Engine, timer: _Timer) -> None:
+def test_the_srcmac_guard_counts_two_hours_fast(
+    traffic_site: Engine, timer: _Timer, executed: _Executed
+) -> None:
     """3.8: the srcmac guard query (``trust.srcmac_ip_counts`` as the lookup calls it, for the
-    MACs of 100 candidates) over 2 h at 1 M rows a day, under 1 s; with the query for a row
-    used outside that hour (``srcmac_addresses_within``; a long session logged at its end)."""
+    MACs of 100 candidates) at 1 M rows a day, under 1 s: the sessions that overlap the 2 h
+    around the moment, also those logged up to ``lookup.max_session_seconds`` after them (#96),
+    so its scan runs a day past the hour. The plan is held to that time bound: it reads only the
+    partitions or chunks of those UTC days, each with both bounds. No index holds the MAC (D10),
+    and none would spare the read: nearly every row of those days is in the bound, and the
+    candidates' rows lie on every page of it (W5-G-29)."""
     counts: list[_Timed] = []
 
     def measure() -> None:
         counts.append(timer.time(lookup_engine, "srcmac_ip_counts"))
-        counts.append(timer.time(lookup_engine, "srcmac_addresses_within"))
+        executed.record(traffic_site)
 
     outcome = _guard_lookup(traffic_site, LookupRequest(at=GUARD_AT, public_ip=PUBLIC), measure)
+    executed.stop()
     timer.report("srcmac guard")
+    sql, parameters = executed.one("count(DISTINCT fg_traffic.srcip)")
+    with traffic_site.connect() as connection:
+        plan = (
+            connection.exec_driver_sql(f"EXPLAIN (ANALYZE, BUFFERS) {sql}", parameters)
+            .scalars()
+            .all()
+        )
+    print("\n".join(plan))
     assert outcome.mode == "candidates"
     assert len(outcome.matches) == 100
     (call,) = counts[0].calls
-    _session, low, high, interfaces, _untrusted, macs = call
+    _session, low, high, interfaces, _untrusted, macs, longest = call
     assert (low, high) == (GUARD_AT - timedelta(hours=1), GUARD_AT + timedelta(hours=1))
+    assert longest == 86400
+    scan_end = high + timedelta(seconds=longest)
+    read = {
+        match.group("table")
+        for line in plan
+        if (match := _SEQ_SCAN.search(line) or _INDEX_READ.search(line)) is not None
+    }
+    assert 0 < len(read) <= len(_utc_days(low, scan_end)), read
+    joined = "\n".join(plan)
+    for moment in (low, scan_end):
+        assert f"'{moment.astimezone(UTC):%Y-%m-%d %H:%M:%S}+00'" in joined, moment
     assert set(interfaces) == {"vlan41", "vlan42"}
     assert len(macs) > 50  # the candidates on the listed interfaces (two VLANs of three)
     # The guard passed (one address per MAC): a lease chain and its srcmac agree.

@@ -146,6 +146,17 @@ def test_company_totals_match_the_golden_day(admin: TestClient) -> None:
     }
 
 
+def test_the_last_update_is_that_of_the_periods_last_day(
+    admin: TestClient, site: GoldenSite, db_session: Session
+) -> None:
+    """W5-L-2: "Son güncelleme" is when the day ``computed_until`` comes from was computed; a
+    later rebuild of an earlier day of the period does not move it."""
+    rebuild_day(db_session, DAY, now=NOW + timedelta(hours=1))
+    both = _get(admin, "/company", to=NEXT.isoformat())
+    assert both["updated_at"] == "2026-10-16T06:00:00Z"  # NEXT's rollup, at NOW
+    assert _get(admin, "/company")["updated_at"] == "2026-10-16T07:00:00Z"  # DAY's own
+
+
 def test_work_and_off_hours_split_the_day(admin: TestClient) -> None:
     work = _get(admin, "/company", hours="work")["metrics"]
     off = _get(admin, "/company", hours="off")["metrics"]

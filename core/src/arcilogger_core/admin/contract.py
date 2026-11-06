@@ -119,7 +119,14 @@ OpKind = Literal[
     "smtp_ca_clear",
 ]
 #: The stored secrets the browser may set or delete; every other name is ``schema_invalid``.
-BrowserSecret = Literal["kamusm.customer", "kamusm.password", "smtp.password", "replica.password"]
+BrowserSecret = Literal[
+    "kamusm.customer",
+    "kamusm.password",
+    "turktrust.username",
+    "turktrust.password",
+    "smtp.password",
+    "replica.password",
+]
 UploadKind = Literal["kamusm_root", "zamane_client", "smtp_ca"]
 TaskKind = Literal["seal", "credit", "tsa_test", "replica_test"]
 KeyRole = Literal["api", "agent"]
@@ -1211,10 +1218,13 @@ def _syslog_sender(value: str) -> str:
 
 class OutboundRule(_Model):
     """One host of a strict outbound rule; a rule with several hosts or ports has one entry
-    each (``Set-ArciFirewall.ps1`` names the rules)."""
+    each (``Set-ArciFirewall.ps1`` names the rules; TURKTRUST, CRL and Proxy: Wave 5 W5-T-3)."""
 
     rule: Annotated[
-        str, StringConstraints(pattern=r"^ARCILOGGER Out (NTP|Kamu SM|SMTP( [2-9])?|Replica)$")
+        str,
+        StringConstraints(
+            pattern=r"^ARCILOGGER Out (NTP|Kamu SM|SMTP( [2-9])?|Replica|TURKTRUST|CRL|Proxy)$"
+        ),
     ]
     host: HostName
     port: int = Field(ge=1, le=65535)

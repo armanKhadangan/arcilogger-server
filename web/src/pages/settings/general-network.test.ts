@@ -14,14 +14,14 @@ import { httpsProxy, networkBody, validateHttpsProxy } from './general-network';
 const http = (rest: string) => `http://${rest}`;
 const https = (rest: string) => `https://${rest}`;
 
-const GENERAL: GeneralSection = {
+const GENERAL = {
   site_name: 'Örnek A.Ş.',
   clock: {
     ntp_server: '172.20.0.1',
     fallback_server: 'pool.ornek.example',
     alert_offset_ms: 1000,
   },
-};
+} as GeneralSection; // as an API before W5-T reported it: no `network` (asserted, W5-T)
 
 /** The section as W5-T's API reports it. */
 function w5t(proxy: unknown): GeneralSection {

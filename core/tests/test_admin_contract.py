@@ -44,6 +44,8 @@ from arcilogger_core.secretstore import (
     KAMUSM_PASSWORD,
     REPLICA_PASSWORD,
     SMTP_PASSWORD,
+    TURKTRUST_PASSWORD,
+    TURKTRUST_USERNAME,
     USAGE_PSEUDONYM_KEY,
 )
 from arcilogger_core.timeutil import SITE_TZ
@@ -101,6 +103,8 @@ def test_the_browser_secrets_are_the_stored_names_and_never_the_others() -> None
     assert set(contract.BROWSER_SECRETS) == {
         KAMUSM_CUSTOMER,
         KAMUSM_PASSWORD,
+        TURKTRUST_USERNAME,
+        TURKTRUST_PASSWORD,
         SMTP_PASSWORD,
         REPLICA_PASSWORD,
     }

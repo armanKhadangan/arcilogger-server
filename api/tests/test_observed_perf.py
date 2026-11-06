@@ -206,7 +206,11 @@ def test_the_observed_summary_of_a_day_is_fast(db_engine: Engine) -> None:
     _traffic(db_engine, low - timedelta(hours=1), 25)
     _analyze(db_engine, "fg_traffic")
 
-    seconds, counts = _best_of_three(db_engine, lambda s: observed_counts(s, 24, NOW))
+    # As the router calls it: the srcmac count reads up to the longest session past now (#96),
+    # where nothing was logged yet.
+    seconds, counts = _best_of_three(
+        db_engine, lambda s: observed_counts(s, 24, NOW, max_session_seconds=86400)
+    )
     nodes = _plan(db_engine, observed_nat_query(24, NOW, ()))
     scanned = {node["Relation Name"] for node in nodes}
     print(
