@@ -2529,7 +2529,7 @@ $script:FileWriteMask = [int64](0x2 -bor 0x4 -bor 0x10 -bor 0x100 -bor 0x10000 -
 $script:FolderWriteMask = [int64](0x2 -bor 0x4 -bor 0x40 -bor 0x10000 -bor 0x40000 -bor 0x80000 -bor 0x10000000 -bor 0x40000000)
 $script:AncestorWriteMask = [int64](0x40 -bor 0x10000 -bor 0x40000 -bor 0x80000 -bor 0x10000000)
 # What the system plan may name (arcilogger_core.admin.contract: OutboundRule, HostName).
-$script:OutboundRulePattern = '^ARCILOGGER Out (NTP|Kamu SM|SMTP( [2-9])?|Replica)$'
+$script:OutboundRulePattern = '^ARCILOGGER Out (NTP|Kamu SM|SMTP( [2-9])?|Replica|TURKTRUST|CRL|Proxy)$'
 $script:HostNamePattern = '^[A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?$'
 
 function Get-ArciDefaultSourceNetworks {
@@ -2819,8 +2819,8 @@ function Get-ArciOutboundProblem {
     .SYNOPSIS
         Why an outbound entry of the system plan (Rule, HostName, Port) may not be applied in
         strict outbound mode, or $null: the rule is one ApplySystem updates (ARCILOGGER Out NTP,
-        Out Kamu SM, Out SMTP, Out SMTP 2-9, Out Replica), the host a plain host name or IPv4
-        address, the port 1-65535 (contract 2.8.3 step 3).
+        Out Kamu SM, Out SMTP, Out SMTP 2-9, Out Replica, Out TURKTRUST, Out CRL, Out Proxy), the
+        host a plain host name or IPv4 address, the port 1-65535 (contract 2.8.3 step 3).
     #>
     [CmdletBinding()]
     [OutputType([string])]
