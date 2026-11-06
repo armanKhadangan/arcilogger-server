@@ -24,8 +24,8 @@ değiştirilebilir", bölüm 5). Sayfaların kullandığı API uçları bölüm 
 |---|---|---|
 | **Genel** (`/settings/general`) | kuruluş adı (`site_name`), yerel ve yedek saat kaynağı (`[clock] ntp_server`, `[clock] fallback_server`), saat sapması uyarı eşiği (`[clock] alert_offset_ms`); son ölçülen sapma gösterilir, yeni saat sunucusu kaydetmeden önce denenir | `[clock] ntp_port` |
 | **Uygulama ayarları** (`/settings/application`) | veritabanındaki ayarlar, gruplarıyla (uyarılar ve e-posta, 5651 sorgu ve kira zaman çizelgesi, arama ve canlı akış, kullanım analizi ile mesai saatleri ve tatiller, kullanım raporları, kanıt paketleri, oturum, parola ve gizlilik, veritabanı); 5651 sorgu grubunda **İnternet çıkışları (NAT)** düzenleyicisi, altında "Kayıtlarda görülen NAT adresleri" paneli ve **Kiraları yeniden oluştur** (en çok 31 gün) | dosya yolu veren `devices.oui_file`, `usage.psl_file` |
-| **Kamu SM** (`/settings/kamusm`) | sihirbaz: Java (yönetim hizmetinin sunucuda bulduklarından biri), Zamane istemcisi (yükleme), kök sertifikalar (ekleme) ve yasal kök parmak izleri (yalnızca kurulu kökler için), müşteri numarası ve parola (kaydederken kontör sorgusuyla denenir), **Damga testi (1 kontör harcar)**, **Üretime geç** (ve teste dönüş), kontör uyarı eşiği ve zaman aşımı; `[seal]` yalnızca okunur | deneme (`mock`) ya da başka bir sağlayıcı, serbest adres veya port, özet algoritması, bir kökü ya da parmak izini kaldırmak, serbest bir `java` yolu, bilinmeyen bir Zamane sürümünün onayı (`approve-jar`, bölüm 4) |
-| **Kaynaklar** (`/settings/sources`) | log kaynağı ekleme, düzenleme (ad değişmez), açma/kapama (`[[sources]] enabled`), silme (adı yazılarak); tabloda son kayıt ve güvenlik duvarı durumu | `[collector]` bölümünün tamamı (dinleme adresi, portlar, TLS, `unknown_senders`) |
+| **Zaman damgası** (`/settings/kamusm`) | sihirbaz: Java (yönetim hizmetinin sunucuda bulduklarından biri), Zamane istemcisi (yükleme), kök sertifikalar (ekleme) ve yasal kök parmak izleri (yalnızca kurulu kökler için), müşteri numarası ve parola (kaydederken kontör sorgusuyla denenir), **Damga testi (1 kontör harcar)**, **Üretime geç** (ve teste dönüş), kontör uyarı eşiği ve zaman aşımı; sunucu seçiminde dört seçenek: Kamu SM test, Kamu SM üretim, TÜRKTRUST (HTTPS) ve TÜRKTRUST düz HTTP (yalnızca `HTTP` yazılarak onaylanır; [turktrust.md](turktrust.md)), TÜRKTRUST kullanıcı adı ve parolası; yeniden damgalama ve iptal listesi ayarları (`[tsa] renew_before_days`, `[tsa] crl_urls`, `[tsa] crl_max_age_days`; [ZAMAN-DAMGASI.md](ZAMAN-DAMGASI.md) bölüm 7); `[seal]` yalnızca okunur | deneme (`mock`) ya da başka bir sağlayıcı, serbest adres veya port (TÜRKTRUST'ın başka bir adres yolu dahil, T1), özet algoritması, bir kökü ya da parmak izini kaldırmak, serbest bir `java` yolu, bilinmeyen bir Zamane sürümünün onayı (`approve-jar`, bölüm 4), TÜRKTRUST hesabını silmek (`secret delete turktrust.username` / `turktrust.password`) |
+| **Kaynaklar** (`/settings/sources`) | log kaynağı ekleme, düzenleme (ad değişmez), açma/kapama (`[[sources]] enabled`), silme (adı yazılarak); tabloda son kayıt ve güvenlik duvarı durumu; kaynağın SNMP bölümü (`[sources.snmp]`: açık/kapalı, port, SNMPv3 kullanıcısı, protokoller, WAN arayüzleri, kapasite, okuma aralığı; iki anahtar `snmp.<kaynak>.auth_key` ve `snmp.<kaynak>.priv_key` gizli depoda), **Bağlantıyı dene** ile cihazın arayüz listesi ([CANLI-DURUM.md](CANLI-DURUM.md) bölüm 3) | `[collector]` bölümünün tamamı (dinleme adresi, portlar, TLS, `unknown_senders`) |
 | **E-posta** (`/settings/email`) | `[smtp]` (açık/kapalı, sunucu, port, güvenlik, kullanıcı, gönderen, zaman aşımı), SMTP parolası, sunucu sertifikası için CA dosyası (yükleme ya da Windows sertifika deposuna dönüş), uyarı e-postası ayarları (`alerts.email_*`: alıcılar, en düşük önem, saatlik sınır …); kaydetmeden önce deneme e-postası; **Test e-postası gönder** (kayıtlı ayarlarla, saatte en çok 5) | — |
 | **Replika** (`/settings/replica`) | açık/kapalı, hedef (yalnızca `\\SUNUCU\paylaşım`), kullanıcı, parola; kaydederken bağlantı denenir; **Bağlantıyı test et** (kayıtlı hedefle, dakikada en çok 1) | yerel bir klasör hedefi |
 | **Saklama** (`/settings/retention`) | süresi dolan günleri silme açık/kapalı, saklama süresi (en az 730 gün); silinecek gün sayısı önceden gösterilir ve yazılarak onaylanır. Yalnızca `arcilogger.toml`'da: `[retention] batch_days` (varsayılan 30, 1–180), süresi dolan en eski günün bekleyeceği gün sayısı; sonra süresi dolan bütün günler tek bir damgalı tutanakla silinir, yani günler bir sonraki çalışmada değil, toplu imhanın vakti gelen ilk çalışmada silinir | — |
@@ -74,6 +74,14 @@ sorgu yanıt verir, arşivden geri getirilmesi gereken günleri tek bir yükleme
 olan bir sorgu ise 503 `lookup_settings_invalid` ile reddedilir; metin sınırın üstündeki ayarı ve
 günleri söyler: değeri sınırların içine çekin.
 
+**Ne zaman arşivden yükleme gerekir?** Veritabanı son 30 günü tutar (`db.retention_days`) ve
+varsayılan ayarlarla bir sorgu, istenen anın 8 güne kadar öncesini de okur (en uzun kira zaman
+aşımı: 7 gün × `lease.timeout_percent`). Bu yüzden yaklaşık **22 günden eski** bir an için 5651
+sorgusu önce o günlerin arşivden yeniden yüklenmesini ister (409 `archive_reload_required`; sorgu
+sayfası arşiv kartını gösterir, yükleme hazır olunca aynı sorgu yeniden çalışır,
+[CORRELATION.md](CORRELATION.md)). Yüklenen günler `db.reload_keep_days`
+(7) gün sonra yine silinir.
+
 **İlk kurulum sihirbazı** (`/settings/setup`) kurulumdan sonra yapılacakları bir denetim listesi
 olarak gösterir: Yönetici ve iki adımlı doğrulama, Site ayarları, Log kaynakları, Kamu SM: test
 sunucusu, Kamu SM: üretim, Replika, E-posta ve Özet. Ayarlar ana sayfasındaki **İlk kurulum
@@ -96,7 +104,8 @@ yine de gelen bir ileti **kaydedilir** (ham kayıt hiçbir zaman atılmaz). Kapa
 kaynak sayısında sayılmaya devam eder. **Silinen** bir kaynak da aynı biçimde kapanır; veritabanındaki
 satırı geçmiş için kalır, kapalı ve artık beklenmeyen olarak: R15 ve pano onu beklemez.
 
-**Gizli değerler** (Kamu SM müşteri numarası ve parolası, SMTP ve replika parolası) hiçbir zaman
+**Gizli değerler** (Kamu SM müşteri numarası ve parolası, TÜRKTRUST kullanıcı adı ve parolası,
+SNMPv3 anahtarları, SMTP ve replika parolası) hiçbir zaman
 ekrana gelmez: alanlar "Kayıtlı ✓" ve son değişiklik zamanını gösterir, **Değiştir** ile yenisi
 yazılır. Son 5 dakika içinde parolanın yeniden girilmesi şunlar için istenir: Kamu SM ayarları
 (kontör eşiği ve zaman aşımı dışında; müşteri numarası ve parola dahil), her SMTP, replika,

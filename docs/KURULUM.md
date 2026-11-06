@@ -1569,6 +1569,20 @@ delildir; silinmeleri yalnızca saklama/imha işiyle ve imha tutanağıyla olur.
   turda bir günün bir tablosu: Linux'ta yaklaşık 30 ms; bir günün 16 tablosu birlikte Linux'ta
   0,3–0,45 s, bir Windows CI makinesinde 0,84 s sürdü; bir tablonun turu Windows'ta ve döner
   diskte ölçülmedi, sözleşme W5-G-25).
+- Zaman damgası: TÜRKTRUST kullanılıyorsa [turktrust.md](turktrust.md) bölüm 2 ve 3 (T1–T5 ve
+  elle denetim listesi); Kamu SM'nin iptal listesi adresleri (K10, [kamusm.md](kamusm.md)). İlk
+  `CrlFetch` çalışmasından sonra `& $core crl status` her adresin indirilip doğrulandığını,
+  ilk `Renew` çalışmasından sonra Sistem → Zamanlanmış görevler görevin sonucunu göstermelidir;
+  sıkı giden trafikte `[tsa] crl_urls` dolu olmalıdır (bölüm 10). Zamane konsol istemcisinin bir
+  vekil sunucuyu nasıl aldığı bilinmiyor (bu sürümde `[network] https_proxy` kullanmaz).
+- 5651 sorgusunun okuduğu günler ([AYARLAR.md](AYARLAR.md) bölüm 1): `lookup.max_session_seconds`
+  ayarının 2 günlük üst sınırı FortiGate'in en uzun oturum süreleriyle karşılaştırılır; MikroTik'in
+  kendi varsayılan DHCP kira süresi depoda yazılı değildir; kurumun gerçekte kullandığı DHCP kira
+  süreleri kaydedilir (kira ayarları her sorgunun günleri tek bir 14 günlük yüklemeye sığsın diye 7
+  günle sınırlıdır; daha uzun kira veren bir sunucu için en çok 7 gün girilir).
+- Canlı Durum ([CANLI-DURUM.md](CANLI-DURUM.md) bölüm 6): FortiGate'in ara trafik kayıtlarının
+  sıklığı (X-B1), WAN arayüzünde In/Out yönü (X-B2), cihazın kabul ettiği SNMPv3 protokolleri (X-B3)
+  ve WAN hatlarının arayüz adları (X-B4).
 - Masaüstü Windows 11 Pro'da: yukarıdakilerin hepsi ve güç ayarları, Akıllı Uygulama Denetimi,
   zorunlu bir güncelleme yeniden başlatması — adım adım:
   [KABUL-TESTI-WINDOWS11.md](KABUL-TESTI-WINDOWS11.md).

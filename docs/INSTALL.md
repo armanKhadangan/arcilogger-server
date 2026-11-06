@@ -1426,6 +1426,20 @@ recompresses a chunk), and how long a round of a reload's partitions takes (one 
 round: about 30 ms on Linux; a whole day's 16 tables took 0.3–0.45 s on Linux and 0.84 s on a
 Windows CI machine; one table's round not measured on Windows or a spinning disk, contract
 W5-G-25).
+Time stamping: with TÜRKTRUST, [turktrust.md](turktrust.md) sections 2 and 3 (T1–T5 and the manual
+checklist); Kamu SM's revocation-list addresses (K10, [kamusm.md](kamusm.md)). After the first
+`CrlFetch` run `& $core crl status` must show every address downloaded and verified, and after the
+first `Renew` run Sistem → Zamanlanmış görevler must show the task's result; with strict outbound
+`[tsa] crl_urls` must be filled (section 10). How the Zamane console client takes a proxy is not
+known (it does not use `[network] https_proxy` in this release).
+The days a 5651 lookup reads ([SETTINGS.md](SETTINGS.md) section 1): compare the 2-day cap on
+`lookup.max_session_seconds` with FortiGate's longest sessions; MikroTik's own default DHCP lease
+time is not stated in the repository; record the DHCP lease times the site really uses (the lease
+settings are capped at 7 days so that every lookup's days fit one 14-day reload; for a server that
+gives longer leases, enter at most 7 days).
+Canlı Durum ([LIVE-STATUS.md](LIVE-STATUS.md) section 6): how often FortiGate sends interim traffic
+logs (X-B1), the In/Out direction on the WAN interface (X-B2), the SNMPv3 protocols the device
+accepts (X-B3) and the interface names of the WAN lines (X-B4).
 On desktop Windows 11 Pro all of the above plus the power settings, Smart App Control and a
 forced update restart, step by step:
 [KABUL-TESTI-WINDOWS11.md](KABUL-TESTI-WINDOWS11.md).
