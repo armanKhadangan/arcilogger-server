@@ -1,7 +1,9 @@
 import { expect, test, type Page } from '@playwright/test';
 
+import type { SnmpOut } from '../src/lib/settings-types';
+
 import { confirmReauth, expectNoA11yViolations, usePreferences, type Theme } from './fixtures';
-import { mockApi } from './mock-api';
+import { mockApi, type MockApi } from './mock-api';
 import { mockSources } from './mock-sources';
 
 /**
@@ -247,6 +249,243 @@ test.describe('Ayarlar → Kaynaklar', () => {
     await expect(page.getByRole('button', { name: 'core-r1 kaynağını kaldır' })).toBeDisabled();
   });
 });
+
+/** The stored `[sources.snmp]` of `fortigate` (fictional values): on, keys stored. */
+const STORED_SNMP: SnmpOut = {
+  enabled: true,
+  port: 161,
+  user: 'arcilogger',
+  auth: 'sha256',
+  priv: 'aes128',
+  interfaces: ['wan1'],
+  capacity_mbps: { wan1: { down: 100, up: 20 } },
+  interval_seconds: 15,
+  auth_key: 'set',
+  priv_key: 'set',
+};
+
+function storeSnmp(api: MockApi, name: string) {
+  const source = api.admin.sections.sources.find((item) => item.name === name);
+  if (source) source.snmp = structuredClone(STORED_SNMP);
+}
+
+/** Opens `name`'s dialog and switches its SNMP on with a user, both keys and one line. */
+async function switchSnmpOn(page: Page, name: string) {
+  await page.getByRole('button', { name: `${name} kaynağını düzenle` }).click();
+  const dialog = page.getByRole('dialog', { name: `${name} kaynağını düzenle` });
+  const snmp = dialog.getByTestId('source-snmp');
+  await snmp.getByRole('switch', { name: 'Hat hızını SNMPv3 ile oku' }).click();
+  await snmp.getByLabel('SNMPv3 kullanıcısı').fill('arcilogger');
+  await snmp
+    .getByTestId('secret-source-snmp-auth_key')
+    .getByRole('button', { name: 'Gir' })
+    .click();
+  await snmp.getByLabel('Kimlik doğrulama anahtarı').fill('örnek-anahtar-1'); // gitleaks:allow — fake test value
+  await snmp
+    .getByTestId('secret-source-snmp-priv_key')
+    .getByRole('button', { name: 'Gir' })
+    .click();
+  await snmp.getByLabel('Şifreleme anahtarı').fill('örnek-anahtar-2'); // gitleaks:allow — fake test value
+  await snmp.getByRole('textbox', { name: 'Arayüz 1' }).fill('wan1');
+  return dialog;
+}
+
+/**
+ * Kaynaklar → kaynak → SNMP (Wave 5 §6 N1, N5, P4): the section of the source dialog, its write-
+ * only keys, the browser's checks, the review, the device tried on saving, and a stored table
+ * kept by every other change of the source.
+ */
+test.describe('Ayarlar → Kaynaklar → SNMP', () => {
+  test('switches SNMP on: the review, the keys sent once, the device tried', async ({ page }) => {
+    const api = await mockApi(page, { signedInAs: 'tolga' });
+    await page.goto('/settings/sources');
+    const dialog = await switchSnmpOn(page, 'core-r1');
+    await dialog.getByRole('combobox', { name: 'Şifreleme' }).click();
+    await page.getByRole('option', { name: 'AES-256' }).click();
+    await dialog.getByLabel('İndirme (Mbps)').fill('100');
+    await dialog.getByLabel('Yükleme (Mbps)').fill('20');
+    await dialog.getByRole('button', { name: 'Hat ekle' }).click();
+    await dialog.getByRole('textbox', { name: 'Arayüz 2' }).fill('ppp0');
+    await dialog.getByRole('button', { name: 'Değişiklikleri gözden geçir' }).click();
+    const review = page.getByRole('dialog', { name: 'Değişiklikleri onaylayın' });
+    await expect(review.getByRole('row', { name: /core-r1 · SNMP: WAN arayüzleri/ })).toContainText(
+      'wan1, ppp0',
+    );
+    await expect(review.getByRole('row', { name: /core-r1 · SNMP: şifreleme/ })).toContainText(
+      'aes256',
+    );
+    await expect(
+      review.getByRole('row', { name: /core-r1 · SNMP kimlik doğrulama anahtarı/ }),
+    ).toBeVisible();
+    // The review shows no key: only that it is set.
+    await expect(review).not.toContainText('örnek-anahtar');
+    await review.getByRole('button', { name: 'Onayla ve kaydet' }).click();
+    await applied(page);
+    const progress = page.getByTestId('request-progress');
+    await expect(progress).toContainText('Bağlantı');
+    const put = api.callsTo('PUT', '/admin/config/sources/core-r1');
+    expect(put).toHaveLength(1);
+    expect(put[0]?.body).toMatchObject({
+      source: {
+        name: 'core-r1',
+        snmp: {
+          enabled: true,
+          user: 'arcilogger',
+          priv: 'aes256',
+          interfaces: ['wan1', 'ppp0'],
+          capacity_mbps: { wan1: { down: 100, up: 20 } },
+          interval_seconds: 15,
+        },
+      },
+      snmp_auth_key: 'örnek-anahtar-1',
+      snmp_priv_key: 'örnek-anahtar-2',
+    });
+    const stored = api.admin.sections.sources.find((item) => item.name === 'core-r1')?.snmp;
+    expect(stored).toMatchObject({ enabled: true, auth_key: 'set', priv_key: 'set' });
+    // Opened again: the keys are stored, never shown; nothing is typed in their place.
+    await page.getByRole('button', { name: 'core-r1 kaynağını düzenle' }).click();
+    const again = page.getByTestId('source-snmp');
+    await expect(again.getByTestId('secret-source-snmp-auth_key')).toContainText('Kayıtlı');
+    await expect(again.getByRole('textbox', { name: 'Arayüz 2' })).toHaveValue('ppp0');
+  });
+
+  test("the browser's checks: user, a line, both keys, a capacity in both directions", async ({
+    page,
+  }) => {
+    const api = await mockApi(page, { signedInAs: 'tolga' });
+    await page.goto('/settings/sources');
+    await page.getByRole('button', { name: 'core-r1 kaynağını düzenle' }).click();
+    const dialog = page.getByRole('dialog', { name: 'core-r1 kaynağını düzenle' });
+    await dialog.getByRole('switch', { name: 'Hat hızını SNMPv3 ile oku' }).click();
+    await dialog.getByLabel('Yükleme (Mbps)').fill('20');
+    await dialog.getByRole('button', { name: 'Değişiklikleri gözden geçir' }).click();
+    await expect(dialog.getByLabel('SNMPv3 kullanıcısı')).toBeFocused();
+    await expect(dialog.getByLabel('SNMPv3 kullanıcısı')).toHaveAttribute('aria-invalid', 'true');
+    await expect(dialog).toContainText('Arayüz 1');
+    await expect(dialog).toContainText('Bu alan zorunludur.');
+    await expect(dialog).toContainText('İndirme ve yükleme birlikte girilir.');
+    await expect(dialog.getByTestId('secret-source-snmp-auth_key')).toContainText(
+      'SNMP açıkken iki anahtar da gerekli.',
+    );
+    await dialog
+      .getByTestId('secret-source-snmp-auth_key')
+      .getByRole('button', { name: 'Gir' })
+      .click();
+    await dialog.getByLabel('Kimlik doğrulama anahtarı').fill('kısa');
+    await dialog.getByRole('button', { name: 'Değişiklikleri gözden geçir' }).click();
+    await expect(dialog).toContainText('Anahtar 8–64 karakter olmalı.');
+    expect(api.callsTo('POST', '/admin/config/sources/check')).toHaveLength(0);
+  });
+
+  test('a network source cannot read a line', async ({ page }) => {
+    const api = await mockApi(page, { signedInAs: 'tolga' });
+    await page.goto('/settings/sources');
+    const dialog = await switchSnmpOn(page, 'core-r1');
+    await dialog.getByLabel('Adres').fill('172.20.10.0/24');
+    await dialog.getByRole('button', { name: 'Değişiklikleri gözden geçir' }).click();
+    await expect(dialog.getByTestId('source-snmp-error')).toHaveText(
+      'Adresi bir ağ olan kaynakta SNMP açılamaz: hedef tek bir cihaz adresi olmalı.',
+    );
+    await expect(dialog.getByRole('switch', { name: 'Hat hızını SNMPv3 ile oku' })).toBeFocused();
+    expect(api.callsTo('POST', '/admin/config/sources/check')).toHaveLength(0);
+  });
+
+  test("the server's refusal of the table is shown in the section", async ({ page }) => {
+    const api = await mockApi(page, { signedInAs: 'tolga' });
+    storeSnmp(api, 'core-r1');
+    await page.goto('/settings/sources');
+    // Another session deleted the stored keys meanwhile: the browser still thinks they are set.
+    await page.getByRole('button', { name: 'core-r1 kaynağını düzenle' }).click();
+    const core = api.admin.sections.sources.find((item) => item.name === 'core-r1');
+    if (core?.snmp) core.snmp.priv_key = 'unset';
+    const dialog = page.getByRole('dialog', { name: 'core-r1 kaynağını düzenle' });
+    await dialog.getByRole('textbox', { name: 'Arayüz 1' }).fill('wan2');
+    await dialog.getByRole('button', { name: 'Değişiklikleri gözden geçir' }).click();
+    await expect(dialog.getByTestId('source-snmp-error')).toHaveText(
+      "SNMP'yi açmak için SNMPv3 kimlik doğrulama ve şifreleme anahtarlarının ikisi de gerekir (8-64 karakter).",
+    );
+    expect(api.callsTo('PUT', '/admin/config/sources/core-r1')).toHaveLength(0);
+  });
+
+  test('the device does not know the interface: nothing changed, the reason shown', async ({
+    page,
+  }) => {
+    const api = await mockApi(page, { signedInAs: 'tolga' });
+    api.admin.nextOutcome = 'probe_failed';
+    api.admin.nextProbeFailure = 'snmp_no_such_interface';
+    await page.goto('/settings/sources');
+    await switchSnmpOn(page, 'core-r1');
+    await page.getByRole('button', { name: 'Değişiklikleri gözden geçir' }).click();
+    await page.getByRole('button', { name: 'Onayla ve kaydet' }).click();
+    const progress = page.getByTestId('request-progress');
+    await expect(progress.getByTestId('request-state')).toHaveText(
+      'Bağlantı denemesi başarısız, hiçbir şey değişmedi',
+      { timeout: 10_000 },
+    );
+    await expect(progress).toContainText(
+      'Cihaz bu arayüz adını bildirmiyor; cihazın bildirdiği arayüzlerden WAN hattını seçin.',
+    );
+    expect(api.admin.sections.sources.find((item) => item.name === 'core-r1')?.snmp).toBeNull();
+  });
+
+  test('strict outbound mode: a new device is saved untried, with the warning', async ({
+    page,
+  }) => {
+    const api = await mockApi(page, { signedInAs: 'tolga' });
+    api.admin.strictOutbound = true;
+    await page.goto('/settings/sources');
+    await switchSnmpOn(page, 'core-r1');
+    await page.getByRole('button', { name: 'Değişiklikleri gözden geçir' }).click();
+    const review = page.getByRole('dialog', { name: 'Değişiklikleri onaylayın' });
+    await expect(review).toContainText('Bağlantı denemesi atlandı.');
+    await review.getByRole('button', { name: 'Onayla ve kaydet' }).click();
+    await applied(page);
+  });
+
+  test("a row's switch and an edit keep the stored table (no snmp would delete it)", async ({
+    page,
+  }) => {
+    const api = await mockApi(page, { signedInAs: 'tolga', staleReauth: true });
+    storeSnmp(api, 'fortigate');
+    await page.goto('/settings/sources');
+    await page.getByRole('switch', { name: 'fortigate etkin' }).click();
+    await page
+      .getByRole('dialog', { name: 'Değişiklikleri onaylayın' })
+      .getByRole('button', { name: 'Onayla ve kaydet' })
+      .click();
+    await confirmReauth(page);
+    await applied(page);
+    const table: Partial<SnmpOut> = { ...STORED_SNMP };
+    delete table.auth_key;
+    delete table.priv_key;
+    expect(api.callsTo('PUT', '/admin/config/sources/fortigate').at(-1)?.body).toMatchObject({
+      source: { enabled: false, snmp: table },
+    });
+    expect(api.callsTo('PUT', '/admin/config/sources/fortigate').at(-1)?.body).not.toHaveProperty(
+      'snmp_auth_key',
+    );
+    expect(api.admin.sections.sources.find((item) => item.name === 'fortigate')?.snmp).toEqual(
+      STORED_SNMP,
+    );
+  });
+});
+
+for (const theme of ['light', 'dark'] as Theme[]) {
+  test(`Kaynaklar → SNMP accessibility — ${theme}`, async ({ page }) => {
+    await usePreferences(page, { theme });
+    await mockApi(page, { signedInAs: 'tolga' });
+    await page.goto('/settings/sources');
+    await page.getByRole('button', { name: 'core-r1 kaynağını düzenle' }).click();
+    const dialog = page.getByRole('dialog', { name: 'core-r1 kaynağını düzenle' });
+    await dialog.getByRole('switch', { name: 'Hat hızını SNMPv3 ile oku' }).click();
+    await dialog.getByRole('button', { name: 'Hat ekle' }).click();
+    await expect(dialog.getByTestId('source-snmp-probe')).toBeVisible();
+    await expectNoA11yViolations(page);
+    await dialog.getByRole('button', { name: 'Değişiklikleri gözden geçir' }).click();
+    await expect(dialog.getByLabel('SNMPv3 kullanıcısı')).toBeFocused();
+    await expectNoA11yViolations(page);
+  });
+}
 
 for (const theme of ['light', 'dark'] as Theme[]) {
   test(`Kaynaklar: the filled-in dialog's accessibility — ${theme}`, async ({ page }) => {
