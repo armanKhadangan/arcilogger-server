@@ -147,12 +147,17 @@ export function Topbar({ onOpenPalette }: { onOpenPalette: () => void }) {
         variant="secondary"
         size="sm"
         onClick={onOpenPalette}
+        title={`${t('palette.open')} (${paletteKeys()})`}
         aria-keyshortcuts="Control+K Meta+K"
         className="shrink-0 gap-2 text-muted-strong"
       >
         <Compass aria-hidden="true" />
-        <span className="hidden lg:inline">{t('palette.open')}</span>
-        <kbd className="hidden rounded border border-border bg-subtle px-1.5 font-sans text-[11px] text-muted-strong lg:inline">
+        {/* Narrow windows show only the icon; the words stay the button's name. */}
+        <span className="sr-only lg:not-sr-only">{t('palette.open')}</span>
+        <kbd
+          aria-hidden="true"
+          className="hidden rounded border border-border bg-subtle px-1.5 font-sans text-[11px] text-muted-strong lg:inline"
+        >
           {paletteKeys()}
         </kbd>
       </Button>

@@ -72,6 +72,18 @@ test.describe('getting around', () => {
     await expect(page.getByRole('combobox', { name: 'Sorgu' })).toHaveValue('ip:172.20.41.105');
   });
 
+  test('a narrow window keeps the palette button named, with only its icon', async ({ page }) => {
+    await page.setViewportSize({ width: 900, height: 800 });
+    await mockApi(page, { signedInAs: 'tolga' });
+    await page.goto('/');
+    const button = page.getByRole('button', { name: 'Sayfaya git', exact: true });
+    await expect(button).toBeVisible();
+    // Only the icon is drawn: the words are for screen readers.
+    expect((await button.boundingBox())?.width ?? 0).toBeLessThan(48);
+    await button.click();
+    await expect(page.getByRole('dialog', { name: 'Sayfaya git' })).toBeVisible();
+  });
+
   test('the bell counts the open alerts and opens Güvenlik', async ({ page }) => {
     await mockApi(page, { signedInAs: 'tolga' });
     await page.goto('/');
