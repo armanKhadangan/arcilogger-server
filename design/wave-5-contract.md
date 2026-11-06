@@ -3729,6 +3729,9 @@ Recorded on #104. W5-F moved to the manager on 2026-11-06 (05:50Z); part 1 is Sa
   the SNMP part of AYARLAR/SETTINGS, the `ARCILOGGER SNMP <source>` rule in KURULUM/INSTALL and
   DEVICE-SETUP §6 follow §6 (M1–M3, N1–N7, P3, QB1, QB2). A package that deviates from §6 updates
   these docs in its own pull request. The CHANGELOG line of Canlı Durum comes with P3.
+  - The docs follow the answers to #207's Q6 and Q7: the interface list comes with the probe's
+    refusal when saving (W5-N-7; the pre-save list is #217), and a switched-off source's
+    `ARCILOGGER SNMP` rule stays until the installer's firewall step, as W5-T-3.
 - **W5-F-4: `turktrust.md` stays out of `OPERATOR_DOCS`** (part 1, Q6). The bundle ships the whole
   `docs` tree, so the guide reaches the server. Adding it would also change
   `Build-ArciBundle.ps1`'s required list, a deploy file.

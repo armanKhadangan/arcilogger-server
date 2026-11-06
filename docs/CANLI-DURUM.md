@@ -69,10 +69,16 @@ vardır. Açıldığında ARCILOGGER cihazın WAN arayüzlerinin sayaçlarını 
 | `user` | — | — | SNMPv3 kullanıcı adı (gizli değildir) |
 | `auth` | `sha256` | `sha1`, `sha256`, `sha512` | Kimlik doğrulama protokolü |
 | `priv` | `aes128` | `aes128`, `aes256` | Şifreleme protokolü (`aes256` **sahada doğrula**) |
-| `interfaces` | — | 1–4 arayüz | WAN hatlarının arayüz adları (`ifName`); "Bağlantıyı dene" listeyi cihazdan getirir |
+| `interfaces` | — | 1–4 arayüz | WAN hatlarının arayüz adları (`ifName`), cihazın bildirdiği gibi yazılır; yanlış bir ad kaydederken reddedilir ve ret iletisi cihazın arayüzlerini listeler |
 | `capacity_mbps` | — | isteğe bağlı | Arayüz başına indirme/yükleme kapasitesi (Mbps); yüzde göstermek için |
 | `interval_seconds` | 15 | 10–60 | Okuma aralığı |
 
+- **Kaydederken bağlantı denenir.** SNMP açılırken, değiştirilirken ya da anahtarları yazılırken
+  ARCILOGGER, hiçbir şey kaydetmeden önce cihaza bağlanır ve her arayüzün adını, durumunu ve
+  hızını okur. Başarısız olursa değişiklik uygulanmaz ve nedeni gösterilir (`snmp_timeout`,
+  `snmp_auth_failed`, `snmp_no_such_interface`, `snmp_no_hc_counters`). `snmp_no_such_interface`
+  iletisi cihazın bildirdiği arayüzleri (ad, durum, Mbit/s) listeler. Listeyi kaydetmeden önce
+  getiren ayrı bir düğme sonraki bir sürümde gelecektir.
 - **Yalnızca SNMPv3, kimlik doğrulamalı ve şifreli (authPriv).** SNMP v1/v2c kabul edilmez:
   topluluk adı (community) ağda açık metin gider.
 - **Hedef kaynağın kendi adresidir.** Adresi bir ağ olan kaynakta SNMP açılamaz
@@ -93,7 +99,8 @@ vardır. Açıldığında ARCILOGGER cihazın WAN arayüzlerinin sayaçlarını 
   1 dakikalık ortalamalarla `D:\ARCILOGGER\state\wan-rates.json` dosyasında tutar.
 - **Ağ:** sunucu yalnızca SNMP'si açık kaynakların adresine ve portuna UDP gönderir; gelen bağlantı
   yoktur. Sıkı giden trafikte güvenlik duvarı kaynak başına bir `ARCILOGGER SNMP <kaynak>` kuralı
-  açar ([KURULUM.md](KURULUM.md) bölüm 12).
+  açar ([KURULUM.md](KURULUM.md) bölüm 12). Bir kaynağın SNMP'si kapatılınca kuralı, öteki giden
+  kurallar gibi, kurulumun güvenlik duvarı adımı yeniden çalışana kadar kalır.
 - **Cihaz tarafı:** salt okunur bir SNMPv3 kullanıcısı, yalnızca ARCILOGGER sunucusunun adresine
   yanıt veren, bir LAN arayüzünde; **hiçbir zaman WAN arayüzünde**
   ([DEVICE-SETUP.md](DEVICE-SETUP.md), "SNMPv3").
@@ -122,5 +129,5 @@ bir yazılır.
 |---|---|---|
 | X-B1 | FortiGate'in ara trafik kayıtlarını ne sıklıkla gönderdiği (uzun oturumların tablodaki gecikmesi) | Uzun bir indirme sırasında satırın ne zaman güncellendiğine bakın |
 | X-B2 | WAN arayüzünde In/Out'un indirme/yükleme olduğu | Cihazın kendi arayüz grafiğiyle karşılaştırın |
-| X-B3 | Cihazın kabul ettiği SNMPv3 protokolleri (eski yazılımlar `sha1` isteyebilir ya da `aes256` sunmayabilir) | "Bağlantıyı dene" |
-| X-B4 | Cihazın WAN hatları için bildirdiği arayüz adları (`ifName`) | "Bağlantıyı dene" listeyi gösterir; hiçbir ad varsayılmaz |
+| X-B3 | Cihazın kabul ettiği SNMPv3 protokolleri (eski yazılımlar `sha1` isteyebilir ya da `aes256` sunmayabilir) | Kaydederken yapılan bağlantı denemesi (`snmp_auth_failed`) |
+| X-B4 | Cihazın WAN hatları için bildirdiği arayüz adları (`ifName`) | Cihazın kendi arayüz listesi; yanlış bir adın ret iletisi de listeyi gösterir. Hiçbir ad varsayılmaz |

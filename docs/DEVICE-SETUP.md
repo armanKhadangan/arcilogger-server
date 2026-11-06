@@ -730,10 +730,11 @@ cihazın yazılım sürümüne göre değişir, cihazınızın belgelerine bakı
 3. SNMP'yi **yalnızca bir LAN arayüzünde** açın; **hiçbir zaman bir WAN arayüzünde** açmayın.
 4. ARCILOGGER UDP 161'e (ya da `[sources.snmp] port`) gönderir. Arada bir güvenlik duvarı varsa
    `<arcilogger>` → cihazın LAN adresi, UDP 161'e izin verin; başka bir yöne gerek yoktur.
-5. ARCILOGGER'da Ayarlar → Kaynaklar → kaynak → SNMP: kullanıcı adını, iki anahtarı ve protokolleri
-   girip **Bağlantıyı dene** ile cihazın arayüz listesini (`ifName`, durum, hız) getirin ve WAN
-   hatlarını listeden seçin (en çok 4). Arayüz adları cihazın bildirdiği gibidir; ARCILOGGER hiçbir
-   adı varsaymaz (X-B4).
+5. ARCILOGGER'da Ayarlar → Kaynaklar → kaynak → SNMP: kullanıcı adını, iki anahtarı, protokolleri
+   ve WAN hatlarının arayüz adlarını (`ifName`, en çok 4; cihazın kendi arayüz listesinde
+   gördüğünüz gibi) girip kaydedin. ARCILOGGER kaydetmeden önce cihaza bağlanmayı dener; bir ad
+   yanlışsa değişiklik uygulanmaz ve ret iletisi cihazın bildirdiği arayüzleri (ad, durum, hız)
+   listeler. ARCILOGGER hiçbir adı varsaymaz (X-B4).
 6. **Yönü denetleyin** (X-B2): bir indirme sırasında Canlı Durum'daki indirme hızı cihazın kendi
    arayüz grafiğindeki gelen (In) trafikle aynı olmalı. Cihazın 64 bit sayaçları (`ifHCInOctets`,
    `ifHCOutOctets`) yoksa durum `snmp_no_hc_counters` olur.
@@ -766,10 +767,11 @@ documentation. All of it is **to verify on site** (X-B2–X-B4).
 3. Switch SNMP on **on a LAN interface only**; **never on a WAN interface**.
 4. ARCILOGGER sends to UDP 161 (or `[sources.snmp] port`). If a firewall is in between, allow
    `<arcilogger>` → the device's LAN address, UDP 161; nothing in the other direction.
-5. In ARCILOGGER, Ayarlar → Kaynaklar → the source → SNMP: enter the user name, the two keys and the
-   protocols, fetch the device's interface list (`ifName`, status, speed) with **Bağlantıyı dene**
-   (Test connection) and pick the WAN lines from it (at most 4). The names are as the device reports
-   them; ARCILOGGER assumes none (X-B4).
+5. In ARCILOGGER, Ayarlar → Kaynaklar → the source → SNMP: enter the user name, the two keys, the
+   protocols and the interface names (`ifName`, at most 4) of the WAN lines, as you see them in the
+   device's own interface list, and save. ARCILOGGER tries the connection before it saves; if a
+   name is wrong, the change is not applied and the refusal lists the interfaces the device reports
+   (name, status, speed). ARCILOGGER assumes no name (X-B4).
 6. **Check the direction** (X-B2): during a download, Canlı Durum's download rate must match the
    inbound (In) traffic on the device's own interface graph. A device without 64-bit counters
    (`ifHCInOctets`, `ifHCOutOctets`) gets the status `snmp_no_hc_counters`.

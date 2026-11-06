@@ -72,10 +72,16 @@ SNMP). When it is on, ARCILOGGER reads the counters of the device's WAN interfac
 | `user` | — | — | The SNMPv3 user name (not a secret) |
 | `auth` | `sha256` | `sha1`, `sha256`, `sha512` | Authentication protocol |
 | `priv` | `aes128` | `aes128`, `aes256` | Privacy protocol (`aes256`: **verify on site**) |
-| `interfaces` | — | 1–4 interfaces | The interface names (`ifName`) of the WAN lines; "Bağlantıyı dene" (Test connection) fetches the list from the device |
+| `interfaces` | — | 1–4 interfaces | The interface names (`ifName`) of the WAN lines, typed as the device reports them; a wrong name is refused when saving, and the refusal lists the device's interfaces |
 | `capacity_mbps` | — | optional | Download/upload capacity per interface (Mbps), to show a share |
 | `interval_seconds` | 15 | 10–60 | How often it is read |
 
+- **The connection is tried when saving.** When SNMP is switched on or edited, or its keys are
+  set, ARCILOGGER connects to the device before anything is saved and reads each interface's name,
+  status and speed. If that fails, the change is not applied and the reason is shown
+  (`snmp_timeout`, `snmp_auth_failed`, `snmp_no_such_interface`, `snmp_no_hc_counters`). The
+  message of `snmp_no_such_interface` lists the interfaces the device reports (name, status,
+  Mbit/s). A separate button that fetches the list before saving comes in a later release.
 - **SNMPv3 with authentication and privacy (authPriv) only.** SNMP v1/v2c are refused: their
   community string crosses the network in clear text.
 - **The target is the source's own address.** SNMP cannot be switched on for a source whose address
@@ -96,7 +102,8 @@ SNMP). When it is on, ARCILOGGER reads the counters of the device's WAN interfac
   last 24 hours as 1-minute averages in `D:\ARCILOGGER\state\wan-rates.json`.
 - **Network:** the server sends UDP only to the address and port of the sources with SNMP on;
   nothing is inbound. With strict outbound, the firewall opens one `ARCILOGGER SNMP <source>` rule
-  per source ([INSTALL.md](INSTALL.md) section 12).
+  per source ([INSTALL.md](INSTALL.md) section 12). When a source's SNMP is switched off, its rule
+  stays, like the other outbound rules, until the installer's firewall step runs again.
 - **On the device:** a read-only SNMPv3 user, answering only the ARCILOGGER server's address, on a
   LAN interface, **never on a WAN interface** ([DEVICE-SETUP.md](DEVICE-SETUP.md), "SNMPv3").
 
@@ -124,5 +131,5 @@ minutes while the user keeps asking.
 |---|---|---|
 | X-B1 | How often FortiGate sends interim traffic logs (the delay of long sessions in the table) | Watch when a row updates during a long download |
 | X-B2 | In/Out of the WAN interface are download/upload | Compare with the device's own interface graph |
-| X-B3 | The SNMPv3 protocols the device accepts (older firmware may need `sha1`, or offer no `aes256`) | "Bağlantıyı dene" (Test connection) |
-| X-B4 | The interface names (`ifName`) the device reports for its WAN lines | "Bağlantıyı dene" lists them; no name is assumed |
+| X-B3 | The SNMPv3 protocols the device accepts (older firmware may need `sha1`, or offer no `aes256`) | The connection test when saving (`snmp_auth_failed`) |
+| X-B4 | The interface names (`ifName`) the device reports for its WAN lines | The device's own interface list; the refusal of a wrong name lists them too. No name is assumed |

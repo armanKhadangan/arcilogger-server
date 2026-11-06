@@ -496,7 +496,7 @@ Sahada doğrula. Each item is a setting or has a test that fails loudly if the a
 | X-B1 | How often FortiGate sends interim traffic logs (the delay of Canlı Durum's table for long sessions) | none; a test pins that an interim delta counts at its own minute | [LIVE-STATUS.md](LIVE-STATUS.md) |
 | X-B2 | On each device, In/Out of the WAN interface are download/upload | compare with the device's own interface graph | [DEVICE-SETUP.md](DEVICE-SETUP.md) |
 | X-B3 | The SNMPv3 protocols each device accepts (older firmware may need `sha1`, or offer no `aes256`) | `[sources.snmp] auth`, `priv` | [DEVICE-SETUP.md](DEVICE-SETUP.md) |
-| X-B4 | The interface names (`ifName`) the devices report for their WAN lines | the probe in Kaynaklar lists them; nothing is assumed | [DEVICE-SETUP.md](DEVICE-SETUP.md) |
+| X-B4 | The interface names (`ifName`) the devices report for their WAN lines | the probe when saving refuses a wrong name and lists the device's interfaces; nothing is assumed | [DEVICE-SETUP.md](DEVICE-SETUP.md) |
 | — | The 2-day cap on `lookup.max_session_seconds` (FortiGate's longest sessions) | `lookup.max_session_seconds` | [AYARLAR.md](AYARLAR.md) §1 |
 | — | MikroTik's own default DHCP lease time (not stated in the repository) and the lease times the site really uses: the lease settings are capped at 7 days so that every lookup fits one 14-day reload (W5-G-19) | `lease.default_seconds`, `lease.server_seconds` | [AYARLAR.md](AYARLAR.md) §1 |
 
