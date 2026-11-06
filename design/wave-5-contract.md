@@ -3995,12 +3995,14 @@ The manager took P3 as well (#203, 23:40Z); P4 stays with Gülşah.
   - The page waits for the licence answer before it asks `/activity/devices`, so a locked
     module is never asked.
   - Roles in the menu tests: auditor, İK and viewer now see the entry.
-- **W5-P-9: the e2e answers are built until they are captured.** `e2e/mock-activity.ts` builds
-  `/activity/devices` and `/activity/wan` from `src/lib/activity-types.ts` and the captured
-  people of `usage.json`, with fictional data only. It also builds the refusal
-  `activity_window_invalid`. When W5-M and W5-N merge, their answers are captured
-  (`capture_api_samples.py`) and replace the built ones part by part, in the pull request that
-  follows each of them.
+- **W5-P-9: the e2e answers are the captured ones, with two derived.** `e2e/mock-activity.ts`
+  answers W5-M's `activity.json` (the windows 1, 5 and 15, and the pseudonymous viewer's window
+  5) and W5-N's `activity-wan.json` (hour, day, empty). Derived from them: a pseudonymous
+  viewer's windows 1 and 15 are the captured rows with the captured pseudonyms of the same keys
+  (pseudonyms follow the usage mock's `pseudonymize`, as `viewer_for` follows one setting), and
+  the option `warmingUp` sets `warming_up`. The refusal `activity_window_invalid` comes from the
+  mock's error texts. Until W5-M merged, `/activity/devices` was built from the captured people
+  of `usage.json`.
   - `e2e/mock-license.ts` refuses `/activity/devices` with the module off, as the API does (M3).
 - **W5-P-10: rates in Mbit/s.** The API gives bits per second and bytes. The page shows kbit/s,
   Mbit/s or Gbit/s, and the charts' axes carry plain numbers in Mbit/s, named in the
