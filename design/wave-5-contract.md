@@ -3741,10 +3741,12 @@ Recorded on #204, from the manager's answers of 2026-11-06.
 - **W5-N-4: the statuses N4 leaves open, and "a good sample".**
   - **Failures:** a USM refusal (unknown user, wrong digest, decryption, unsupported level or
     protocol, not in the time window) is `auth_failed`. Any other request failure is `timeout`:
-    no answer, a malformed answer, or an error-status.
+    no answer, a malformed answer, an error-status, or an exception of pysnmp itself, named by
+    its type only. One source's failure never stops the others.
   - **A good sample** is a read of a line's 64-bit counters. The first read after a start or a
-    reset is good, but gives no rate yet. `updated_at` and the 10 minutes of `R20-snmp` count
-    from it.
+    reset is good, but gives no rate yet. `updated_at` is its time.
+  - **The 10 minutes of `R20-snmp`** count from the later of a line's last good read and the
+    start of its watch: when SNMP was switched on, or when the interface was added.
   - **The alert:** `R20-snmp:<source>` opens when one line of a source has had no good read for
     10 minutes, and resolves when every line has. Its title names the source, the lines and the
     reasons; the e-mail names only the source, the number of lines and the reasons.
@@ -3773,17 +3775,42 @@ Recorded on #204, from the manager's answers of 2026-11-06.
     refused.
   - **The probe (N5):** it runs on the request whenever a change switches SNMP on, edits its
     settings or sets its keys, before anything is written.
+    - **Strict outbound mode:** `ARCILOGGER SNMP <source>` exists only after ApplySystem. So a
+      change that switches SNMP on, or moves its address or port, warns `probe_skipped` at
+      `sources.<name>.snmp` instead, as the clock and the replica do. New keys for the same
+      device are still probed.
     - **How:** an `snmp` probe of `admin/probe.py`, through `arcilogger_core.snmp.list_interfaces`.
     - **The list:** its message lists the interfaces the device reports (name, status, Mbit/s).
     - **A failure** gives N4's reason as its code: `snmp_timeout`, `snmp_auth_failed`,
       `snmp_no_such_interface` or `snmp_no_hc_counters`. The child passes the code through,
       and each has TR/EN text.
     - **Not here:** a separate "Bağlantıyı dene" action that returns the list as JSON
-      (question on #207).
+      (W5-N-7).
   - **The rule (N3):** `ARCILOGGER SNMP <source>`, without "Out", as N3 names it. UDP to the
     source's address and SNMP port.
     - **Where:** `OutboundRule`'s pattern and the installer's `OutboundRulePattern` accept the
       name. The system plan adds the rule, and `Set-ArciFirewall.ps1` adds it in full strict
       mode and applies it as UDP in a sync.
-    - **Not here:** a rule left over after a source's SNMP is switched off stays until the next
-      full run (question on #207).
+    - **A left-over rule** (accepted, Q7 on #207): after a source's SNMP is switched off, its
+      rule stays until the installer's firewall step rebuilds the group, as W5-T-3 does for
+      TURKTRUST, CRL and Proxy. ApplySystem never removes an outbound rule, and this one only
+      allows UDP from the server to a LAN device.
+- **W5-N-7: N5's "pick from a list" is the probe's refusal in Wave 5** (Q6 on #207).
+  - A change is probed when it is saved. A wrong interface name fails with
+    `snmp_no_such_interface`, whose message lists what the device reports (name, status,
+    Mbit/s). P4's form takes the names as typed fields and shows that text.
+  - A pre-save action that returns the list as JSON (its own task kind, route and types) is a
+    Wave 6 follow-up: #217.
+- **W5-N-8: the review of #207.**
+  - **IPv4 only:** an enabled SNMP on an IPv6 address is refused as `source_ipv6_unsupported`
+    (pysnmp's UDP transport is IPv4). The browser shows it at `sources.<name>.address`.
+  - **The keys** go to pysnmp as their UTF-8 octets, so a key outside Latin-1 works.
+  - **No row for an idle poll:** a `Job` may carry an `idle` check that the worker asks before
+    it writes a `job_runs` row. `snmp.poll` is idle while no source is due and the state file
+    has nothing left to clear: it then neither runs nor records, and is due 5 s later. An
+    installation without SNMP writes no `snmp.poll` rows.
+  - **Δt** of a rate is the change of `sysUpTime` (same GET) when it moved forward, else the
+    time between the two polls.
+  - **The state file** is written compact (one line). A write that fails (on Windows while the
+    API reads it) is logged and written again at the next poll.
+  - **A source whose SNMP is switched off** resolves its `R20-snmp` as `not_polled`.
