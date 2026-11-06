@@ -58,6 +58,9 @@ def devices_now(
     end = now.astimezone(UTC).replace(second=0, microsecond=0) + MINUTE
     window_from = end - minutes * MINUTE
     snapshot = read_snapshot(snapshot_path) or {}
+    names = [tuple(name) for name in snapshot.get("destinations", [])]
+    app_names = list(snapshot.get("apps", []))
+    #: minute → subject → [download, upload, sessions, [[destination, bytes]], [[app, bytes]]]
     by_minute: dict[datetime, Mapping[str, Any]] = {}
     for entry in snapshot.get("minutes", []):
         moment = datetime.fromisoformat(entry["minute"])
@@ -73,16 +76,17 @@ def devices_now(
     for moment, subjects in by_minute.items():
         if moment < window_from:
             continue
-        for key, cell in subjects.items():
-            down[key] += cell["down"]
-            up[key] += cell["up"]
-            sessions[key] += cell["sessions"]
-            if cell["down"] or cell["up"]:
+        for key, (received, sent, started, volumes, by_app) in subjects.items():
+            down[key] += received
+            up[key] += sent
+            sessions[key] += started
+            if received or sent:
                 last[key] = max(last.get(key, moment), moment)
-            for domain, kind, volume in cell["domains"]:
+            for index, volume in volumes:
+                domain, kind = names[index]
                 domains.setdefault(key, defaultdict(float))[(domain, kind)] += volume
-            for app, volume in cell["apps"]:
-                apps.setdefault(key, defaultdict(float))[app] += volume
+            for index, volume in by_app:
+                apps.setdefault(key, defaultdict(float))[app_names[index]] += volume
     active = sorted(
         key for key in set(down) | set(sessions) if down[key] + up[key] or sessions[key]
     )
@@ -122,8 +126,8 @@ def devices_now(
         per_minute.append(
             ActivityMinute(
                 minute=moment,
-                download_bytes=round(sum(cell["down"] for cell in cells.values())),
-                upload_bytes=round(sum(cell["up"] for cell in cells.values())),
+                download_bytes=round(sum(cell[0] for cell in cells.values())),
+                upload_bytes=round(sum(cell[1] for cell in cells.values())),
             )
         )
     total_down, total_up = sum(down.values()), sum(up.values())

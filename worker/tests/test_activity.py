@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from arcilogger_core.layout import Layout
 from arcilogger_db.models import Person
-from arcilogger_worker.activity import MINUTES, WARMUP_SLICE, Snapshot
+from arcilogger_worker.activity import Snapshot
 from arcilogger_worker.testing import Evidence, tr
 from arcilogger_worker.usage.engine import compute_day
 from arcilogger_worker.usage.testing import DAY, NEXT, PC1, build_golden_site
@@ -39,43 +39,37 @@ def read(path: Path) -> dict[str, Any]:
     return json.loads(path.read_text(encoding="utf-8"))  # type: ignore[no-any-return]
 
 
-def cell(data: dict[str, Any], key: str, moment: datetime) -> dict[str, Any] | None:
-    """The subject's cell of the minute starting at ``moment``."""
+def counts(data: dict[str, Any], key: str, moment: datetime) -> tuple[Any, ...] | None:
+    """The subject's download, upload and sessions started in the file's minute at
+    ``moment``."""
     for entry in data["minutes"]:
         if datetime.fromisoformat(entry["minute"]) == moment.astimezone(UTC):
-            return entry["subjects"].get(key)  # type: ignore[no-any-return]
+            found = entry["subjects"].get(key)
+            return None if found is None else tuple(found[:3])
     return None
-
-
-def counts(data: dict[str, Any], key: str, moment: datetime) -> tuple[Any, ...] | None:
-    """The subject's download, upload and sessions started in the minute at ``moment``."""
-    found = cell(data, key, moment)
-    return None if found is None else (found["down"], found["up"], found["sessions"])
 
 
 def test_over_a_whole_day_the_bytes_are_compute_days(db_session: Session, layout: Layout) -> None:
     """The snapshot over the golden day (and the half hour after it, where the session over
     midnight ends) has, per subject and hour, the bytes of the day's rollup, and per subject the
-    bytes of each foreground destination."""
+    bytes of each foreground destination (as counted; the file rounds each minute)."""
     build_golden_site(db_session, layout)
     db_session.commit()
     snapshot = Snapshot(layout.activity, minutes=24 * 60 + 31, warmup_slice=timedelta(hours=1))
     warm(snapshot, db_session, tr(NEXT, 0, 30))
-    data = read(layout.activity)
     result = compute_day(db_session, DAY)
-    lo, hi = result.lo, result.hi
+    lo, hi = result.lo.timestamp(), result.hi.timestamp()
 
     hourly: defaultdict[tuple[str, datetime], list[float]] = defaultdict(lambda: [0.0, 0.0])
     domains: defaultdict[tuple[str, str], float] = defaultdict(float)
-    for entry in data["minutes"]:
-        moment = datetime.fromisoformat(entry["minute"])
-        if not lo <= moment < hi:
+    for minute, subjects in snapshot.merged().cells.items():
+        if not lo <= minute < hi:
             continue
-        hour = moment.replace(minute=0)
-        for key, values in entry["subjects"].items():
-            hourly[(key, hour)][0] += values["down"]
-            hourly[(key, hour)][1] += values["up"]
-            for domain, _, volume in values["domains"]:
+        hour = datetime.fromtimestamp(minute, UTC).replace(minute=0)
+        for key, (down, up, volumes, _) in subjects.items():
+            hourly[(key, hour)][0] += down
+            hourly[(key, hour)][1] += up
+            for (domain, _kind), volume in volumes.items():
                 domains[(key, domain)] += volume
     expected_hourly: defaultdict[tuple[str, datetime], list[int]] = defaultdict(lambda: [0, 0])
     for row in result.hourly:
@@ -202,6 +196,7 @@ def test_the_file_holds_no_name_and_no_url(db_session: Session, layout: Layout) 
     content = layout.activity.read_text(encoding="utf-8")
     data = json.loads(content)
     assert data["minutes"], "the window has traffic"
+    assert ["video.example", "domain"] in data["destinations"]
     names = list(db_session.scalars(select(Person.name)))
     assert names
     for forbidden in [*names, "izle", "www.", "http"]:
@@ -229,22 +224,24 @@ def test_an_unchanged_snapshot_is_not_written_again(db_session: Session, layout:
 def test_the_warm_up_reads_in_slices_and_then_the_new_rows(
     db_session: Session, layout: Layout
 ) -> None:
-    """After a start, the last hour and the session overlap before it are read
-    :data:`WARMUP_SLICE` at a time; a row that comes meanwhile, in a slice already read, is
-    counted once the warm-up is over."""
+    """After a start, the last hour and the session overlap before it are read in slices (here
+    one per tick: no budget); a row committed meanwhile, in a slice already read, is read by its
+    id and counted once."""
     now = tr(DAY, 12, 0, 30)
     evidence = Evidence(db_session, layout)
     evidence.traffic(tr(DAY, 11, 10), LONE, 40001, rcvdbyte=1000, sentbyte=100, duration=30)
     db_session.commit()
-    snapshot = Snapshot(layout.activity)
+    slice_ = timedelta(minutes=10)
+    snapshot = Snapshot(layout.activity, warmup_slice=slice_, warmup_budget=0)
     first = snapshot.tick(db_session, now)
-    assert first["warming_up"] is True
+    assert (first["warming_up"], first["slices"]) == (True, 1)
     assert read(layout.activity)["warming_up"] is True
+    while snapshot.warm_from is not None and snapshot.warm_from <= tr(DAY, 11, 40):
+        snapshot.tick(db_session, now)
     evidence.traffic(tr(DAY, 11, 30), LONE, 40002, rcvdbyte=2000, sentbyte=200, duration=30)
     db_session.commit()
-    ticks = [first, *warm(snapshot, db_session, now)]
-    overlap = 30  # usage.session_overlap_seconds 1800, in minutes
-    assert len(ticks) == -(-(MINUTES + overlap) // int(WARMUP_SLICE.total_seconds() // 60))
+    ticks = warm(snapshot, db_session, now)
+    assert all(details["slices"] <= 1 for details in ticks)
     assert ticks[-1]["warming_up"] is False
     snapshot.tick(db_session, now)
     data = read(layout.activity)

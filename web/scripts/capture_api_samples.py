@@ -36,8 +36,8 @@ How the samples are made (everything is the production code, in this process):
    midnight), rolled up by the worker's own job; company, subjects, one subject, sites,
    categories (also filtered by department), CSV and Excel exports, rebuild requests, the
    optional pseudonyms and the refusals; on the same site Canlı Durum (``activity.json``,
-   Wave 5 contract §6.2 M2): ``GET /activity/devices`` at 09:02:30 for each window, the
-   pseudonymous answer and the refusals.
+   Wave 5 contract §6.2 M2): the worker's snapshot written at 09:02:30, then
+   ``GET /activity/devices`` for each window, the pseudonymous answer and the refusals.
 6. last the Security page and the dashboard: alerts as the worker writes them (the failed
    sealing of 11.10 imported from ``alerts.jsonl``, R15 of a silent switch from the real check,
    the site's IP conflict, disk, new log source, a credit alert the check resolved) and the
@@ -191,6 +191,7 @@ from arcilogger_db.models import (
 from arcilogger_db.seed import seed
 from arcilogger_db.settings import get_setting, set_setting
 from arcilogger_db.testing import TestServer, admin_dsn_from_env
+from arcilogger_worker.activity import Snapshot as ActivitySnapshot
 from arcilogger_worker.admin_jobs import process_requests as process_admin_requests
 from arcilogger_worker.alerts.importer import import_alerts
 from arcilogger_worker.alerts.r15 import check_silent_sources
@@ -1600,11 +1601,16 @@ def capture_usage(server: TestServer, template: str, root: Path) -> dict[str, An
             )
 
             # Canlı Durum (M2) at 09:02:30: the first interim log of the 09:00-09:05 session
-            # has come, its next one and its final log not yet. Only the route's clock is set
-            # (the sessions keep the capture's own, or they would read as idle afterwards).
+            # has come, its next one and its final log not yet. The worker's snapshot is written
+            # at that moment (its warm-up reads only the logs before it), then only the route's
+            # clock is set (the sessions keep the capture's own, or they would read as idle).
             activity: dict[str, Any] = {}
             devices = f"{API}/activity/devices"
             moment = _local(USAGE_DAY, 9, 2, 30).astimezone(UTC)
+            snapshot = ActivitySnapshot(capture.layout.activity)
+            with capture.factory() as session:
+                while snapshot.tick(session, moment)["warming_up"]:
+                    pass
             with mock.patch.object(activity_routes, "utc_now", lambda: moment):
                 for window in ("1", "5", "15"):
                     activity[f"devices_{window}"] = capture.json(
