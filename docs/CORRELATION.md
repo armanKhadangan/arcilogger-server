@@ -974,9 +974,11 @@ WHERE duration >= 300` and split the scan into "logged within 5 minutes of the w
   the step's time and count, and the count is printed into the installation log (raw and sealed
   data are not touched; with `-RestoreDatabase` the step is skipped; a failure of the step does
   not stop the rollback, and the installer then warns). Every FortiGate-DHCP chain of the
-  previous version is therefore `low`. The step is unconditional: after a rollback between two
-  versions that both read FortiGate DHCP, FortiGate-DHCP chains are `low` as well, until the next
-  `arcilogger-db upgrade` (false lows only, never a wrong person). **The restore:** the seed of
+  previous version is therefore `low`. Since Wave 4 (#81, ASSUMPTIONS RB1) the step runs only
+  when the previous program may not read FortiGate DHCP: one that has
+  `arcilogger_db\lease_rollback.py` already reads it, so the step is skipped with its reason and the
+  leases stay as they are. When that check cannot decide, the step runs, and FortiGate-DHCP chains
+  are `low` until the next `arcilogger-db upgrade` (false lows only, never a wrong person). **The restore:** the seed of
   `arcilogger-db upgrade` sets the `fg_dhcp` leases that still carry the step's time back to
   `high`, deletes the status row and prints how many were restored, how many stay `low` and the
   days to rebuild: from the rollback day minus the longest FortiGate lease (604,800 s when none

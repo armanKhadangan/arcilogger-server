@@ -80,7 +80,7 @@ Manifestin alanları:
 | `audit_log` | ARCILOGGER denetim kaydının o günkü dosyası ve özeti (dosyanın kendisi kanıt paketine varsayılan olarak alınmaz, bkz. bölüm 4) |
 | `gaps` | Beklenen bir kaynaktan uzun süre kayıt gelmeyen aralıklar (bilgi); `kind: "unsealed_empty_days"` kaydı, hiç log olmadığı için tek tek damgalanmamış uzun bir gün dizisini (`first_day` … `last_day`) listeler — bu günün `previous` bağlantısı o dizinin öncesindeki mühürlü güne gider |
 | `clock` | Saat eşitleme örnekleri ve en büyük sapma |
-| `tsa` | Zaman damgası sağlayıcısı ve `legal_grade`: manifestin kendi beyanı (yapılandırma Kamu SM üretim sunucusunu gösteriyordu). ARCILOGGER bir günü ancak doğrulanan damga zinciri yapılandırmadaki bir Kamu SM köküne (`tsa.legal_root_fingerprints`) ulaşıyorsa "yasal sınıf" gösterir. `require_critical_eku: false` varsa kurum, Kamu SM'nin EKU uzantısını kritik işaretlemeyen sertifika profilini kabul etmiştir (K6) |
+| `tsa` | Zaman damgası sağlayıcısı ve `legal_grade`: manifestin kendi beyanı (yapılandırma Kamu SM ya da TÜRKTRUST üretim sunucusunu gösteriyordu; TÜRKTRUST ürün sahibinin kararıyla, [ZAMAN-DAMGASI.md](ZAMAN-DAMGASI.md) bölüm 2). ARCILOGGER bir günü ancak doğrulanan damga zinciri yapılandırmadaki bir köke (`[tsa] legal_root_fingerprints`) ulaşıyorsa "yasal sınıf" gösterir. `require_critical_eku: false` varsa kurum, Kamu SM'nin EKU uzantısını kritik işaretlemeyen sertifika profilini kabul etmiştir (K6) |
 | `previous` | Önceki günün manifest ve damga dosyalarının SHA-256 özetleri |
 | `deletions` | Saklama süresi dolduğu için silinen günlerin damgalı imha tutanakları |
 | `stamped_late`, `created_at` | Geç mühürleme notu, manifestin oluşturulma zamanı |
@@ -92,13 +92,14 @@ Manifestin alanları:
 | Günün ham kayıtları (yazılmakta olan) | `D:\ARCILOGGER\spool\` | Gün mühürlenip kasadaki kopya doğrulanınca silinir |
 | Mühürlü günler (ham kayıt, denetim kaydı, manifest, damga) | `D:\ARCILOGGER\vault\YYYY\MM\DD\` | Varsayılan **760 gün**; ayar 730 günün (2 yıl) altına indirilemez |
 | İmha tutanakları ve zincir çapası | `vault\deletions\` | Süresiz (silinen günlerin özetlerini ve zinciri korur) |
-| Yenileme damgaları (TSA sertifikası bitmeden yeniden damgalama) | `vault\renewals\` | Süresiz (M6'da etkinleşir) |
+| Yenileme damgaları (TSA sertifikası bitmeden yeniden damgalama, `Renew` görevi) | `vault\renewals\` | Süresiz |
+| İptal listeleri (SİL; `CrlFetch` görevi) | `D:\ARCILOGGER\state\crl\` | Süresiz: hiçbir liste silinmez (bir sertifika otoritesi süresi dolan sertifikayı sonraki listelerden çıkarabilir) |
 | İkinci kopya | Replika hedefindeki WORM klasörü (`[replica] target`, ör. bir NAS) | Kasa ile aynı |
 | Kanıt paketleri | `D:\ARCILOGGER\exports\` | **30 gün** (`evidence.keep_days`; worker her gece siler, elle: `arcilogger-core evidence purge`) |
 | Resmi 5651 raporları (PDF ve `.zd` damgası) | `D:\ARCILOGGER\exports\reports\` | Sorguyla birlikte kalır; **henüz süre sınırı ve silme işi yok** |
 | 5651 sorguları (talep bilgileri, sorgu, sonuç) | PostgreSQL `lookups` | **Henüz süre sınırı yok** |
 | ARCILOGGER denetim kaydı | PostgreSQL `audit_log` + günlük dosyası kasada (`audit.jsonl.xz`; eski günlerde `.gz`) | Veritabanındaki kayıt süresiz (silinmesi tetikleyiciyle engellenir); kasadaki günlük dosyası günüyle birlikte saklanır ve imha edilir |
-| Ayrıştırılmış kayıtlar (arama, sorgu) | PostgreSQL | Türetilmiş veridir; ham kayıtlardan yeniden üretilebilir. Hedef 400 gün (`db.retention_days`), ancak bu sürümde bu tabloların **imha işi yoktur**: ayrıştırılmış kayıtlardan hiçbir şey silinmez |
+| Ayrıştırılmış kayıtlar (arama, sorgu) | PostgreSQL | Türetilmiş veridir; ham kayıtlardan yeniden üretilebilir. Veritabanı son **30 günü** tutar (`db.retention_days`, en az 7): worker işi `db.window` her gece 01:00'den sonra daha eski günleri siler; henüz mühürlenmemiş bir gün ve etkin bir arşiv yüklemesinin günleri silinmez. Daha eski bir gün gerektiğinde 5651 sorgusu ve Arama onu mühürlü kasadan yeniden yükler; yüklenen günler `db.reload_keep_days` (varsayılan 7) gün sonra yine silinir. Kasadaki ham kayıtlar bu işten etkilenmez. İmha tutanağı tutulmaz; silinen günler işin çalışma kaydına yazılır |
 | Kullanım özetleri (kişi, cihaz ve departman bazında, adlarla: siteler, URL'ler, engellenen denemeler, saatlik satırlar) | PostgreSQL `usage_*` tabloları, `domain_categories` | **400 gün** (`usage.retention_days`): worker işi `usage.retention` her gece 03:30'dan sonra daha eski günleri siler; biten yeniden hesaplama istekleri (`usage_rebuilds`) 90 gün sonra silinir. İmha tutanağı tutulmaz, silinen satır sayıları işin çalışma kaydına (`job_runs`) yazılır. Ayrıştırılmış kayıtlar veritabanında durdukça yeniden hesaplanabilir |
 | Kayıtlı aramalar (ad, sorgu, zaman aralığı; yalnızca sahibine görünür) | PostgreSQL `saved_searches` | Sahibi silene ya da kullanıcı silinene kadar |
 | Arama dışa aktarımları (CSV, Excel) ve canlı akış satırları | Sunucuda dosya olarak saklanmaz: dışa aktarma bellekte hazırlanıp indirilir, canlı akış son satırları yalnızca bellekte tutar | Dışa aktarmanın boyutu ve SHA-256 özeti denetim kaydındadır (`search.export`, bölüm 9) |
@@ -410,7 +411,8 @@ alanı); ekrandaki her satır ayrıca Türkçe ve İngilizce açıklamasını ta
 | `crl-revoked` | HATA | Bir sertifika damgadan önce iptal edilmiş |
 | `chain-broken`, `chain-not-previous-day` | HATA | Önceki gün sonradan değiştirilmiş ya da bağlantı yanlış |
 | `index-hash-mismatch`, `index-not-canonical` | HATA | `paket.json` ya da listelediği bir dosya değiştirilmiş |
-| `extract-mismatch`, `extract-unknown` | HATA | Alıntı satırı mühürlü dosyadakiyle aynı değil; alıntı klasöründe beklenmeyen dosya |
+| `extract-mismatch` | HATA | Alıntı satırı mühürlü dosyadakiyle aynı değil |
+| `extract-unknown` | HATA (kasa kopyasında UYARI) | Alıntı klasöründe beklenmeyen dosya |
 | `legal-claim-mismatch` | HATA | Manifest yasal damga diyor, damga test TSA'sından |
 | `manifest-day-mismatch`, `manifest-misplaced` | HATA | Manifest başka bir güne ait ya da yanlış gün klasöründe |
 | `file-unreadable`, `file-path-invalid` | HATA | Dosya okunamadı; manifestteki yol geçersiz (`..`, mutlak yol vb.) |
@@ -715,8 +717,13 @@ expired day goes under one deletion record, so a day may stay in the vault up to
 days after it expired. Evidence packages in `exports/`: 30 days. Stored
 official 5651 reports (`exports\reports\`) and the 5651 lookups: no expiry yet. ARCILOGGER's audit
 log: no expiry in the database; its daily file is sealed with the day. Parsed records in the
-database: derived and rebuildable from the vault; intended 400 days, but no deletion job exists yet
-for them. Usage rollups in the database (per person, device and department with names: sites,
+database: derived and rebuildable from the vault; the database keeps the last 30 days
+(`db.retention_days`, at least 7): the worker job `db.window` drops older days every night after
+01:00, never a day not sealed yet or a day of an active archive reload; an older day is reloaded
+from the sealed vault when a 5651 lookup or a search needs it, and dropped again
+`db.reload_keep_days` (default 7) days later. The raw logs in the vault are untouched; no deletion
+record is kept, the job's run lists the dropped days. Revocation lists (`state\crl\`, the
+`CrlFetch` task): never deleted. Usage rollups in the database (per person, device and department with names: sites,
 URLs, blocked attempts, hourly rows; `usage_*` tables, `domain_categories`): 400 days
 (`usage.retention_days`), deleted every night after 03:30 by the worker job `usage.retention`,
 finished rebuild requests (`usage_rebuilds`) after 90 days; no deletion record is kept, the job's
@@ -748,8 +755,9 @@ day, and the chain links past it (`chain-skipped-days`; an invalid run is `chain
 Stamps chaining to more than one root give `summary-several-roots`; a TSA certificate whose
 extended key usage is not critical gives `token-eku-not-critical` (a warning) only where the site
 accepted that profile (`tsa.require_critical_eku = false`, K6), otherwise `token-eku`. A day is
-shown as legal grade only when its manifest claims the Kamu SM production server and the verified
-chain reaches a root listed in `tsa.legal_root_fingerprints`.
+shown as legal grade only when its manifest claims a legal-grade production server (Kamu SM's,
+or TÜRKTRUST's by the product owner's decision, [TIME-STAMPING.md](TIME-STAMPING.md) section 2)
+and the verified chain reaches a root listed in `[tsa] legal_root_fingerprints`.
 
 **Packages from the web interface and the 5651 report (section 4.1).** Administrators create
 packages in the web interface (re-authentication); auditors download those they may see. Web
@@ -789,6 +797,20 @@ without the licensee name or server ids.
   file. `DOGRULAMA.txt` lists the exact commands.
 - Compare the root fingerprints with the values Kamu SM publishes at `sertifikalar.kamusm.gov.tr`;
   no software can prove on its own that a root in the package is Kamu SM's.
+
+**Re-stamping (section 7).** A time stamp stays valid for the moment it was made, but its TSA
+certificate expires. Before it does, the `Renew` task stamps a renewal record that lists the hashes
+of the stamps due (`vault/renewals/`); a package ships the records that cover its days.
+`verify.py` adds one finding per day stamp, computed from the package alone with "now" being the
+moment of verification:
+`renewal-not-due` (INFO: "Re-stamping is not due yet (certificate valid until {date})."),
+`renewal-covered` (OK: "Re-stamped before its certificate expired: {renewal}."; a test, mock or
+revoked renewal never counts), `renewal-due` (WARN: "The stamp certificate expires on {date};
+re-stamping is due."), `renewal-late` (WARN: "Re-stamped after the old certificate had expired
+({date})."; the date is the re-stamping's time) and `renewal-uncovered` (WARN: "The stamp
+certificate expired on {date} with no re-stamping; the stamp is valid for the moment it was
+made."). None of them is a failure. The package does not carry the site's lead time, so
+`verify.py` uses the default of 180 days. Details: [TIME-STAMPING.md](TIME-STAMPING.md) section 3.
 
 **What verification shows and what it does not.** It shows that each manifest existed at its stamp
 time and is unchanged, that the packaged log files match their sealed hashes and that no unsealed

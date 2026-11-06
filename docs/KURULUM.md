@@ -438,7 +438,7 @@ yüzden mühürleme `executable` nedeniyle durur. İstemciyi paketteki betikle e
 `powershell -ExecutionPolicy Bypass -File .\installer\Install-Arcilogger.ps1 -Upgrade -ZamaneJar
 C:\Kurulum\tss-client-console-3.1.33.jar -ZamaneJarSha256 <Kamu SM sayfasındaki SHA-256>` (SHA-256
 değerini karşılaştırır, dosyayı kopyalar ve kaydeder; `[tsa] zamane_jar` bu dosyayı göstermeli)
-ya da **Ayarlar → Kamu SM** sayfasından yükleyin: bu sürüm hiçbir Zamane sürümünü tanımadığı için
+ya da **Ayarlar → Zaman damgası** sayfasından yükleyin: bu sürüm hiçbir Zamane sürümünü tanımadığı için
 yüklenen istemci konsolda `approve-jar` bekler, en erken `jar_hold_hours` sonra (varsayılan 24,
 bölüm 7.2).
 
@@ -562,8 +562,9 @@ Betiğin yaptıkları (sırasıyla):
    bir modül yükletemez; `ARCILOGGER_CONFIG` geçerli kalır.
 8. Saat (`Set-ArciTime.ps1`), masaüstü Windows'ta güç ayarları (`Set-ArciPower.ps1`, bölüm 17),
    güvenlik duvarı (`Set-ArciFirewall.ps1`, bölüm 12), zamanlanmış görevler
-   (`Register-ArciTasks.ps1`: mühürleme, doğrulama, replika, saklama, kontör, saat denetimi ve gece
-   01:40 veritabanı yedeği, [YEDEKLEME.md](YEDEKLEME.md); tarayıcıdan gelen görev istekleri için
+   (`Register-ArciTasks.ps1`: mühürleme, doğrulama, replika, saklama, kontör, saat denetimi, her gün
+   00:30 iptal listelerinin indirilmesi (`CrlFetch`) ve 02:30 yeniden damgalama (`Renew`,
+   [ZAMAN-DAMGASI.md](ZAMAN-DAMGASI.md) bölüm 3 ve 4) ve gece 01:40 veritabanı yedeği, [YEDEKLEME.md](YEDEKLEME.md); tarayıcıdan gelen görev istekleri için
    `Requests` (LOCAL SERVICE) ve güvenlik duvarı ile saati yapılandırmaya uyduran `ApplySystem`
    (SYSTEM); sizin kapattığınız bir görev kapalı kalır).
    Görevler de Python'u yalıtılmış çalıştırır (`python.exe -I -m arcilogger_core …`,
@@ -798,7 +799,7 @@ Diğer kullanıcılar (denetçi vb.) ve sonraki adımlar: [ILK-ADIMLAR.md](ILK-A
 
 ## 10. Kamu SM bağlantısı (test → üretim)
 
-Web arayüzünde **Ayarlar → Kamu SM** sihirbazı aşağıdaki adımları aynı sırayla yapar (Java,
+Web arayüzünde **Ayarlar → Zaman damgası** sihirbazı aşağıdaki adımları aynı sırayla yapar (Java,
 Zamane istemcisi, kök sertifikalar ve parmak izleri, müşteri bilgileri ve kontör sorgusu, damga
 testi, üretime geçiş; [AYARLAR.md](AYARLAR.md)). Konsoldaki yol:
 
@@ -863,10 +864,29 @@ Test sırasında Seal görevinin günleri test damgasıyla mühürlemesini istey
 5. `& $core credit` ve `& $core status` (`legal_grade`) ile denetleyin; Mühürleme sayfasında kırmızı
    uyarı kalkmış olmalıdır.
 
-ARCILOGGER yalnızca Kamu SM üretim sunucusundan alınan ve zinciri `legal_root_fingerprints`
-listesindeki bir köke ulaşan damgaları yasal nitelikli olarak işaretler; test sunucusunun
-damgalarının yasal geçerliliği yoktur (Kamu SM). Damgaların ve kayıt düzeninin
-hukuki değerlendirmesi için hukuk müşavirine danışın.
+ARCILOGGER yalnızca Kamu SM üretim sunucusundan (ya da ürün sahibinin kararıyla TÜRKTRUST üretim
+sunucusundan) alınan ve zinciri `legal_root_fingerprints` listesindeki bir köke ulaşan damgaları
+yasal nitelikli olarak işaretler; test sunucusunun damgalarının yasal geçerliliği yoktur (Kamu SM).
+Damgaların ve kayıt düzeninin hukuki değerlendirmesi için hukuk müşavirine danışın.
+
+### TÜRKTRUST (isteğe bağlı, Kamu SM yerine)
+
+Zaman damgalarını TÜRKTRUST'tan almak isteyen kurum, Ayarlar → Zaman damgası'nda TÜRKTRUST
+sunucusunu seçer, TÜRKTRUST'ın verdiği kullanıcı adını ve parolayı girer ve damga testini çalıştırır.
+Hesap açma, kök sertifikanın parmak izinin karşılaştırılması, sahada doğrulanacaklar (T1–T5) ve
+elle denetim listesi: [turktrust.md](turktrust.md). TÜRKTRUST kontör sorgusu sunmaz; bakiyeyi
+TÜRKTRUST'ın portalından izleyin. Kurulum programı TÜRKTRUST kimlik bilgilerini sormaz. Sıkı giden
+trafikte TÜRKTRUST'a, iptal listelerine ya da vekil sunucuya açılan kurallar bölüm 12'de.
+
+### Yeniden damgalama ve iptal listeleri
+
+Bir damganın TSA sertifikası sona ermeden `Renew` görevi damgayı yeniden damgalar (varsayılan: 180
+gün kala, `[tsa] renew_before_days`); `CrlFetch` görevi her gün sertifika iptal listelerini
+indirir ve doğrulananları saklar. İkisi de kurulumla kaydedilir ve elle bir şey istemez. **Sıkı
+giden trafik** kullanan bir sitede iptal listesi adresleri `[tsa] crl_urls` listesine yazılmalıdır:
+güvenlik duvarı yalnızca bu listedeki sunucuları açar (Kamu SM'nin SİL adresleri K10,
+TÜRKTRUST'ınki T4: **sahada doğrula**). Ayrıntılar, uyarılar (`R20-renewal`, `R20-cert`,
+`R20-crl`) ve uyarı şeridi: [ZAMAN-DAMGASI.md](ZAMAN-DAMGASI.md).
 
 Kimlik bilgisi değişiklikleri (`secret set` / `secret delete`) değerleri olmadan
 `D:\ARCILOGGER\state\seal\secret-changes.jsonl` dosyasına yazılır; worker bunları 15 dakika
@@ -962,9 +982,15 @@ Güvenlik duvarı (`Set-ArciFirewall.ps1`):
   izleme/yedekleme aracı varsa kuralını `-KeepRule '<kural adı>'` ile koruyun.
 - **Giden (isteğe bağlı):** `C:\Program Files\ARCILOGGER\scripts\Set-ArciFirewall.ps1
   -StrictOutbound`. Varsayılan eylem *Engelle* olur; izin yalnızca NTP, DNS, Kamu SM (zd/tzd ve
-  `[tsa]` adresi, `[tsa] port`), Kamu SM sertifika sunucusu, SMTP ve replika hedefine verilir;
-  Windows'un diğer etkin giden izin kuralları da ("Core Networking" dışındakiler) kapatılır.
-  Windows Update için bakım sırasında `-StrictOutbound:$false` ile kapatın.
+  `[tsa]` adresi, `[tsa] port`; sağlayıcı `turktrust` iken yalnızca zd/tzd, port 80), Kamu SM
+  sertifika sunucusu, SMTP ve replika hedefine, sağlayıcı `turktrust` iken TÜRKTRUST sunucusuna
+  (`ARCILOGGER Out TURKTRUST`), `[tsa] crl_urls` adreslerinin sunucularına (`ARCILOGGER Out CRL`,
+  TCP 80 ve 443) ya da `[network] https_proxy` ayarlıysa bu ikisinin yerine vekil sunucuya
+  (`ARCILOGGER Out Proxy`) ve SNMP'si açık her log kaynağının adresine (`ARCILOGGER SNMP <kaynak>`,
+  UDP, kaynağın SNMP portu, varsayılan 161; Canlı Durum'un internet hattı hızı,
+  [CANLI-DURUM.md](CANLI-DURUM.md)) verilir; Windows'un diğer etkin giden izin kuralları da ("Core
+  Networking" dışındakiler) kapatılır. Kuralların portları: [ZAMAN-DAMGASI.md](ZAMAN-DAMGASI.md)
+  bölüm 1. Windows Update için bakım sırasında `-StrictOutbound:$false` ile kapatın.
 - **SMTP (uyarı e-postası), yalnızca sıkı giden modda:** `-StrictOutbound` açıksa ve
   `arcilogger.toml` dosyasının `[smtp]` bölümünde `enabled = true` ve `host` doluysa betik her
   çalıştığında (yükseltmede de) bu sunucuya, bölümün `port` değeri (varsayılan 587) için giden
@@ -984,7 +1010,9 @@ Güvenlik duvarı (`Set-ArciFirewall.ps1`):
 - `[[sources]]` değişiklikleri (Ayarlar → Kaynaklar ya da elle) toplayıcı ve ingest tarafından 5
   saniye içinde yüklenir; `ApplySystem` görevi syslog kurallarını yerinde günceller (yalnızca
   `ARCILOGGER Syslog UDP/TCP` ve sıkı giden kipte `ARCILOGGER Out …` kuralları; başka kural, profil,
-  443, 3389, 5985 değişmez), elle düzenlemeden sonra en geç 5 dakika içinde. Tarayıcı yönetimi
+  443, 3389, 5985 değişmez), elle düzenlemeden sonra en geç 5 dakika içinde. Giden kuralları
+  günceller ya da eksikse oluşturur, hiçbirini kaldırmaz: ayarı kaldırılan bir `ARCILOGGER Out
+  TURKTRUST`, `Out CRL` ya da `Out Proxy` kuralı betik yeniden çalışana kadar kalır. Tarayıcı yönetimi
   kapalıysa (`-DisableBrowserAdministration`), `[tsa]` adresi/portu ya da yönetici adresleri
   değiştiyse betiği kendiniz çalıştırın. `[collector]`, `[api]`, `[ingest]`, `[worker]` ya da
   `[database]` değiştiyse hizmetleri yeniden başlatın (toplayıcı dururken gelen UDP loglar birkaç
@@ -1541,6 +1569,20 @@ delildir; silinmeleri yalnızca saklama/imha işiyle ve imha tutanağıyla olur.
   turda bir günün bir tablosu: Linux'ta yaklaşık 30 ms; bir günün 16 tablosu birlikte Linux'ta
   0,3–0,45 s, bir Windows CI makinesinde 0,84 s sürdü; bir tablonun turu Windows'ta ve döner
   diskte ölçülmedi, sözleşme W5-G-25).
+- Zaman damgası: TÜRKTRUST kullanılıyorsa [turktrust.md](turktrust.md) bölüm 2 ve 3 (T1–T5 ve
+  elle denetim listesi); Kamu SM'nin iptal listesi adresleri (K10, [kamusm.md](kamusm.md)). İlk
+  `CrlFetch` çalışmasından sonra `& $core crl status` her adresin indirilip doğrulandığını,
+  ilk `Renew` çalışmasından sonra Sistem → Zamanlanmış görevler görevin sonucunu göstermelidir;
+  sıkı giden trafikte `[tsa] crl_urls` dolu olmalıdır (bölüm 10). Zamane konsol istemcisinin bir
+  vekil sunucuyu nasıl aldığı bilinmiyor (bu sürümde `[network] https_proxy` kullanmaz).
+- 5651 sorgusunun okuduğu günler ([AYARLAR.md](AYARLAR.md) bölüm 1): `lookup.max_session_seconds`
+  ayarının 2 günlük üst sınırı FortiGate'in en uzun oturum süreleriyle karşılaştırılır; MikroTik'in
+  kendi varsayılan DHCP kira süresi depoda yazılı değildir; kurumun gerçekte kullandığı DHCP kira
+  süreleri kaydedilir (kira ayarları her sorgunun günleri tek bir 14 günlük yüklemeye sığsın diye 7
+  günle sınırlıdır; daha uzun kira veren bir sunucu için en çok 7 gün girilir).
+- Canlı Durum ([CANLI-DURUM.md](CANLI-DURUM.md) bölüm 6): FortiGate'in ara trafik kayıtlarının
+  sıklığı (X-B1), WAN arayüzünde In/Out yönü (X-B2), cihazın kabul ettiği SNMPv3 protokolleri (X-B3)
+  ve WAN hatlarının arayüz adları (X-B4).
 - Masaüstü Windows 11 Pro'da: yukarıdakilerin hepsi ve güç ayarları, Akıllı Uygulama Denetimi,
   zorunlu bir güncelleme yeniden başlatması — adım adım:
   [KABUL-TESTI-WINDOWS11.md](KABUL-TESTI-WINDOWS11.md).

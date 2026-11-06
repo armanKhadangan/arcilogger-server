@@ -78,7 +78,7 @@ java -jar tss-client-console-3.1.33.jar -k  <sunucu> <port> <müşteri no> <paro
 
 ## 4. Bağlantı testi (kurulumda)
 
-Web arayüzünde **Ayarlar → Kamu SM** sihirbazı 2–7. adımları aynı sırayla yapar: Java seçimi,
+Web arayüzünde **Ayarlar → Zaman damgası** sihirbazı 2–7. adımları aynı sırayla yapar: Java seçimi,
 Zamane istemcisinin yüklenmesi (bilinen bir sürüm değilse SHA-256 karşılaştırması ve konsolda
 `approve-jar`), kök sertifikalar ve yasal parmak izleri, müşteri bilgileri (kaydederken kontör
 sorgusuyla denenir), test sunucusunda damga testi, üretime geçiş ([AYARLAR.md](AYARLAR.md)

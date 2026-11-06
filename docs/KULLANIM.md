@@ -224,9 +224,11 @@ Yeniden hesaplama günün loglarıyla yapılır: web arayüzü (API), veritaban�
 gününden (hiç log yoksa bugünden) önce başlayan bir aralığı reddeder (422
 `usage_rebuild_no_logs`, yanıt en erken günü söyler); logu olmayan bir gün boş hesaplanır ve
 özetlerinin yerine boş bir gün yazılırdı, o günlerin özetleri olduğu gibi kalır (sunucudaki
-`usage rebuild` komutu bu denetimi yapmaz). Veritabanının logları tutma süresi
-`db.retention_days` (400 gün) ayarıdır; bu sürümde veritabanından log silinmez
-([DATA-MODEL.md](DATA-MODEL.md)).
+`usage rebuild` komutu bu denetimi yapmaz). Veritabanı logları `db.retention_days` (30 gün)
+boyunca tutar; worker işi `db.window` her gece daha eski günleri siler, kasadaki ham kayıtlar
+kalır ([DATA-MODEL.md](DATA-MODEL.md)). Bu yüzden yeniden hesaplama yalnızca logları hâlâ
+veritabanında olan günler için yapılabilir; kullanım özetleri ise `usage.retention_days` (400 gün)
+boyunca kalır.
 
 ## 6. Gizlilik ve denetim
 

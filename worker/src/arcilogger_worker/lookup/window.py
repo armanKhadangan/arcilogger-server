@@ -1,9 +1,10 @@
 """Where the data of a requested moment lives (spec 7.3: the database keeps less than the vault).
 
-The database keeps ``db.retention_days`` (default 400); the sealed vault keeps at least 730
-days. A lookup for a day that is no longer (or not) in the database says so instead of
-returning an empty result that looks like "nobody": the day may be only in the sealed vault
-(re-ingest from the vault is a later feature, "arşivden yeniden yükle").
+The database keeps ``db.retention_days`` (default 30, Wave 5 Addendum A); the sealed vault keeps
+at least 730 days. A lookup for a day that is no longer (or not) in the database says so instead
+of returning an empty result that looks like "nobody": the day may be only in the sealed vault,
+from which an archive reload brings it back on request ("arşivden yeniden yükle", 409
+``archive_reload_required``).
 """
 
 from __future__ import annotations
@@ -50,7 +51,7 @@ def data_window(
     notes: list[Explanation] = []
     if at > now:
         notes.append(explain("future_time", at=at.isoformat()))
-    retention = int(get_setting(session, "db.retention_days", 400))
+    retention = int(get_setting(session, "db.retention_days"))
     if day < site_day(now - timedelta(days=retention)):
         notes.append(explain("older_than_db_retention", day=day.isoformat(), days=retention))
     if not in_database:
