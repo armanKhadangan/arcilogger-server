@@ -19,7 +19,8 @@ from datetime import UTC, datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from ipaddress import IPv4Address
 from pathlib import Path
-from typing import Any
+from types import SimpleNamespace
+from typing import Any, cast
 from urllib.parse import urlsplit
 
 import pytest
@@ -29,6 +30,7 @@ from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.x509.oid import NameOID
 from pydantic import ValidationError
 
+from arcilogger_core import cli
 from arcilogger_core.admin.contract import FALLBACK_POLICY
 from arcilogger_core.config import TURKTRUST_PRODUCTION_HOST, Config, TsaConfig
 from arcilogger_core.credit import check_credit
@@ -311,7 +313,7 @@ def test_refused_credentials_are_a_configuration_error(
     _no_password(str(raised.value), repr(raised.value), caplog.text)
 
 
-@pytest.mark.parametrize("status", [500, 502, 503])
+@pytest.mark.parametrize("status", [500, 502, 503, 408, 429])
 def test_a_server_error_is_retried(
     secure: TsaServer, tmp_path: Path, status: int, caplog: pytest.LogCaptureFixture
 ) -> None:
@@ -401,11 +403,29 @@ def test_plain_http_through_the_proxy(plain: TsaServer, tmp_path: Path) -> None:
 
 
 def test_a_redirect_is_not_followed(secure: TsaServer, tmp_path: Path) -> None:
-    """The request and its credentials go only to the configured URL."""
+    """The request and its credentials go only to the configured URL; the 3xx is a configuration
+    error (W5-T-2)."""
     secure.status = 307
-    with pytest.raises(TsaUnavailableError, match="HTTP 307"):
+    with pytest.raises(TsaConfigurationError, match="HTTP 307"):
         _provider(secure.url).stamp(_day(tmp_path))
     assert len(secure.authorizations) == 1
+
+
+@pytest.mark.parametrize("status", [301, 302, 308, 400, 404, 405, 415])
+def test_another_refusal_is_a_configuration_error(
+    secure: TsaServer, tmp_path: Path, status: int, caplog: pytest.LogCaptureFixture
+) -> None:
+    """W5-T-2 (#204 Q4): a 3xx, or a 4xx other than 401/403/408/429, most likely means a wrong
+    URL or path (T1). It is not retried, and its text has the status, never the credentials."""
+    secure.status = status
+    caplog.set_level(logging.DEBUG)
+    with pytest.raises(TsaConfigurationError) as raised:
+        _provider(secure.url).stamp(_day(tmp_path))
+    assert raised.value.retryable is False
+    assert f"HTTP {status}" in str(raised.value)
+    assert "[tsa] url" in str(raised.value)
+    assert "credentials" not in str(raised.value)
+    _no_password(str(raised.value), repr(raised.value), caplog.text)
 
 
 def test_no_credit_query() -> None:
@@ -548,6 +568,18 @@ def test_the_seal_preflight_needs_the_turktrust_account(tmp_path: Path) -> None:
     account = frozenset({TURKTRUST_USERNAME, TURKTRUST_PASSWORD})
     # The account is enough: no Zamane client or Java is asked for (only the roots remain).
     assert seal_preflight(config, anchors=anchors, secrets=secrets, stored=account) == ["roots"]
+
+
+def test_the_seal_task_names_a_missing_account_credentials(tmp_path: Path) -> None:
+    """#204 Q3: the Seal task's cause for a missing TÜRKTRUST account is ``credentials``, as the
+    preflight says; with the account stored, a refused provider stays ``provider``."""
+    secrets = _store(tmp_path)
+    app = cast(cli.App, SimpleNamespace(config=_config(tmp_path, port=443), secrets=secrets))
+    assert cli._provider_cause(app) == "credentials"
+    secrets.set(TURKTRUST_USERNAME, USERNAME)
+    assert cli._provider_cause(app) == "credentials"
+    secrets.set(TURKTRUST_PASSWORD, PASSWORD)
+    assert cli._provider_cause(app) == "provider"
 
 
 def test_the_credit_task_records_no_credit_query(tmp_path: Path) -> None:
