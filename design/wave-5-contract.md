@@ -3729,7 +3729,7 @@ The manager took P1 and P2 (#203, comment of 2026-11-05); P3 and P4 stay with G�
     ticks, the newest tick's seconds and the sessions waiting), and it shows in
     `worker-status.json` (`"thread": true`), so the Sistem page and `R20-job` see a stuck or
     failing tick. A failed tick is logged; the next one waits longer (up to 5 minutes).
-  - A tick reads and sorts the new rows, then counts in chunks for up to 5 s: the sessions that
+  - A tick reads and sorts the new rows, then counts in chunks for up to 7 s: the sessions that
     ended, the warm-up slices (5 s of logs each, over the last 60 minutes and the overlap after a
     start), the open sessions whose logs changed. Until all is counted the answer says
     `warming_up`.
@@ -3773,7 +3773,8 @@ The manager took P1 and P2 (#203, comment of 2026-11-05); P3 and P4 stay with G�
   rows in CORRELATION and LISANS/LICENSING §2.3 (granted on #201, 02:07Z), and the thread's
   start/stop hunk of `worker/src/arcilogger_worker/service.py` and
   `worker/tests/test_service.py` (granted on #201, 07:08Z); `api/tests/test_errors_and_app.py`
-  (`/activity` among the mounted routers);
+  (`/activity` among the mounted routers); `docs/CANLI-DURUM.md` and `docs/LIVE-STATUS.md` §2
+  (sessions, last seen, the snapshot, the warm-up and late logs; W5-F-3, asked on #201 07:08Z);
   `api/tests/test_license_routes.py` and LISANS/LICENSING §1 and §2.2 (`/activity` and the
   `usage_analytics` row, granted on #201, 01:19Z); `web/src/lib/api-types.test.ts` and
   `api-samples.test.ts` (`activity-types.ts` in `TYPES_FILES`, the four `Wan*` interfaces in

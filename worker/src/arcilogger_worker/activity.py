@@ -83,8 +83,8 @@ JOB_NAME: Final = "activity.tick"
 ACTIVITY_EVERY: Final = timedelta(seconds=10)
 RECORD_EVERY: Final = timedelta(minutes=1)
 BACKOFF_MAX: Final = timedelta(minutes=5)
-#: The seconds one tick of the thread may count (the job loop does not wait on it).
-THREAD_BUDGET: Final = 5.0
+#: The seconds one tick of the thread may count, of its 10 (the job loop does not wait on it).
+THREAD_BUDGET: Final = 7.0
 #: Minutes of the snapshot.
 MINUTES: Final = 60
 #: Rows committed late: each tick reads the ids above the table's highest id of this long ago,
@@ -238,7 +238,7 @@ class Snapshot:
         self._write_cost = 0.0
         self._piece_cost = 0.0
         self._pieces_seconds = 0.0
-        #: What one step of counting took lately (a chunk or a slice; it decays).
+        #: What one step of counting took lately (a chunk or a slice; a running average).
         self._step_cost = 0.0
         #: The sessions that ended, and the sum of the open sessions' counts.
         self.closed = Counted()
@@ -334,7 +334,9 @@ class Snapshot:
                 counts["recounted"] += self._recount(session, settings, lo, end, overlap)
             else:
                 break
-            self._step_cost = max(self._step_cost * 0.8, time.monotonic() - step)
+            # What a step takes lately (a chunk of sessions or a slice): the next one starts only
+            # when it fits in what the tick has left.
+            self._step_cost = 0.5 * self._step_cost + 0.5 * (time.monotonic() - step)
             if self._left(began) < self._step_cost or (stop is not None and stop.is_set()):
                 break
         stale = sum(1 for known in self.open.values() if known.stale)

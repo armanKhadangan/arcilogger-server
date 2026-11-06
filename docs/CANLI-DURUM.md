@@ -41,9 +41,9 @@ bölümü yalnızca onu görmeye yetkili roller görür (bölüm 4).
 |---|---|
 | Kişi / cihaz / IP | Kullanım raporlarındaki özne kuralları: cihaz bir kişiye atanmışsa kişi, değilse cihaz, o da bilinmiyorsa IP adresi |
 | İndirme, yükleme | Pencere boyunca bayt ve ortalama hız (bayt × 8 / pencerenin saniyesi) |
-| Oturumlar | Pencerede trafiği sayılan oturumlar |
-| En çok siteler, uygulamalar | En çok 3'er; arka plan trafiği siteler arasında sayılmaz |
-| Son görülme | Öznenin pencerede görülen son trafiği |
+| Oturumlar | Pencerede başlayan oturumlar |
+| En çok siteler, uygulamalar | En çok 3'er; arka plan trafiği siteler arasında sayılmaz. Her dakikanın en büyük 5'inden toplanır, bu yüzden yaklaşıktır |
+| Son görülme | Öznenin pencerede trafiği olan en yeni dakikasının sonu (en çok en yeni trafik kaydı) |
 
 - **Pencere:** 1, 5 ya da 15 dakika (varsayılan 5). Başka bir değer 422 `activity_window_invalid`
   ile reddedilir.
@@ -56,6 +56,14 @@ bölümü yalnızca onu görmeye yetkili roller görür (bölüm 4).
 - Hesap Kullanım raporlarının kendi kodudur: bir günün dakikaları toplanınca o günün kullanım
   özetiyle aynı baytlar çıkar. Mesai saatleri ve molalar ([KULLANIM.md](KULLANIM.md)) her dakikaya
   o günün kendi saatleriyle uygulanır.
+- **Rakamlar nereden gelir:** worker son 60 dakikanın bir özetini (`state/activity.json`) tutar;
+  yeni trafik kayıtlarını her 10 saniyede kendi iş parçacığında sayar (`activity.tick`,
+  [CORRELATION.md](CORRELATION.md)); sayfa bu özeti okur. Özette özne anahtarları ve dakika başına
+  baytlar vardır; ad, URL ya da kayıt satırı yoktur. Adlar ve takma adlar sayfa sorduğunda eklenir.
+- **Worker başladıktan sonra** önce son bir saati yeniden okur; bitirene kadar ve özet 60
+  saniyeden eskiyse (worker durmuşsa) sayfa rakamların eksik olduğunu söyler (`warming_up`).
+- Veritabanına zamanından 5 dakikadan geç ulaşan bir trafik kaydı tabloya eklenmez; kullanım
+  raporları onu sayar.
 
 ## 3. İnternet hattı (SNMPv3)
 

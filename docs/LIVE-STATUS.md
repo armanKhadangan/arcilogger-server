@@ -44,9 +44,9 @@ not ask. Each part is shown only to the roles allowed to see it (section 4).
 |---|---|
 | Person / device / IP | The usage reports' subject rules: the person when the device is assigned to one, else the device, else the IP address |
 | Download, upload | Bytes over the window, and the average rate (bytes × 8 / the window's seconds) |
-| Sessions | The sessions whose traffic counts in the window |
-| Top sites, apps | At most 3 each; background traffic is not counted among the sites |
-| Last seen | The subject's last traffic in the window |
+| Sessions | The sessions that started in the window |
+| Top sites, apps | At most 3 each; background traffic is not counted among the sites. They are summed from each minute's 5 largest, so they are approximate |
+| Last seen | The end of the subject's newest minute with traffic in the window (at most the newest traffic log) |
 
 - **Window:** 1, 5 or 15 minutes (default 5). Any other value is refused with 422
   `activity_window_invalid`.
@@ -59,6 +59,16 @@ not ask. Each part is shown only to the roles allowed to see it (section 4).
 - The counting is the usage reports' own code: a whole day of minutes adds up to the same bytes as
   that day's usage rollup. The work hours and breaks ([USAGE.md](USAGE.md)) apply to each minute
   with that day's own hours.
+- **Where the figures come from:** the worker keeps a snapshot of the last 60 minutes
+  (`state/activity.json`), counting the new traffic logs every 10 seconds in a thread of its own
+  (`activity.tick`, [CORRELATION.md](CORRELATION.md)); the page reads that snapshot. It holds
+  subject keys and per-minute bytes, never a name, a URL or a log line; names and pseudonyms are
+  added when the page asks.
+- **After the worker starts** it reads the last hour again first; until it has, and when the
+  snapshot is more than 60 seconds old (the worker stopped), the page says the figures are
+  incomplete (`warming_up`).
+- A traffic log that reaches the database more than 5 minutes after its time is not added to the
+  table; the usage reports count it.
 
 ## 3. The internet line (SNMPv3)
 
