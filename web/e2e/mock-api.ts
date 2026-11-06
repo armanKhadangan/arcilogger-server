@@ -351,7 +351,7 @@ export interface MockOptions {
   revoke?: Partial<Record<Role, string[]>>;
   /** Usage analytics: pseudonyms for `usage.anonymous` viewers, no traffic, a failing rebuild. */
   usage?: UsageOptions;
-  /** Canlı Durum: no SNMP line (`mock-activity.ts`). */
+  /** Canlı Durum: no SNMP line, a snapshot warming up (`mock-activity.ts`). */
   activity?: ActivityOptions;
   /** The licence state at start (default: the trial, every module on). */
   license?: LicenseOptions;
@@ -451,7 +451,10 @@ export class MockApi {
     this.alerts = new AlertsMock();
     this.reports = new ReportsMock();
     this.usage = new UsageMock(options.usage);
-    this.activity = new ActivityMock(options.activity);
+    this.activity = new ActivityMock({
+      pseudonymize: options.usage?.pseudonymize,
+      ...options.activity,
+    });
     this.grant = options.grant ?? {};
     this.revoke = options.revoke ?? {};
     this.needsSetup = options.needsSetup ?? false;

@@ -46,6 +46,8 @@
       "dataUntil": "Veriler {{time}} itibarıyla.",
       "noData": "Henüz trafik kaydı yok.",
       "interim": "Uzun bağlantılar FortiGate ara kayıtları geldikçe görünür. MikroTik bayt sayısı göndermez; burada görünmez.",
+      "warmingUp": "Rakamlar henüz eksik",
+      "warmingUpHint": "Sayım ya hâlâ son 60 dakikayı okuyor (worker yeni başladı) ya da bir dakikadan uzun süredir güncellenmedi. Tablo ve grafik birazdan tamamlanır; sürerse yöneticiniz Sistem sayfasında worker'ın durumuna bakmalı.",
       "locked": "Kullanım analizi modülü kapalı",
       "lockedHint": "\"Şu an\" tablosu Kullanım analizi modülüne aittir. İnternet hattının hızı modülden bağımsız görünür."
     }

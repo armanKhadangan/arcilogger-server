@@ -7,8 +7,7 @@ import { SAMPLE_TODAY } from './samples';
 /*
  * Canlı Durum (contract W5 §6, M1–M3, N6, P3): the internet lines over SNMP on top, "Şu an"
  * below: who sends and receives data in the last 1, 5 or 15 minutes. The lines are W5-N's
- * captured `activity-wan.json`; "Şu an" is built from the captured people until W5-M's answers
- * are captured (`mock-activity.ts`).
+ * captured `activity-wan.json`, "Şu an" W5-M's captured `activity.json` (`mock-activity.ts`).
  */
 
 function lastQuery(api: MockApi, path: string): URLSearchParams | undefined {
@@ -51,14 +50,19 @@ test.describe('Canlı Durum', () => {
     );
     expect(lastQuery(api, '/activity/devices')?.get('window')).toBe('5');
     const table = now.getByRole('table', { name: 'Şu an veri gönderip alanlar' });
-    await expect(table.getByRole('row')).not.toHaveCount(1);
+    await expect(table.getByRole('row')).toHaveCount(2);
+    await expect(table).toContainText('Ayşe Yılmaz');
+    await expect(table).toContainText('video.example');
     await expect(now.getByTestId('activity-note')).toContainText(
       'Uzun bağlantılar FortiGate ara kayıtları geldikçe görünür.',
     );
+    await expect(now.getByTestId('activity-warming')).toHaveCount(0);
 
+    // The captured 1-minute window has no traffic (a long connection shows at its interim logs).
     await window.getByRole('button', { name: 'Son 1 dk' }).click();
     await expect(page).toHaveURL(/\/activity\?window=1$/);
     await expect.poll(() => lastQuery(api, '/activity/devices')?.get('window')).toBe('1');
+    await expect(now.getByText('Bu aralıkta trafik yok.')).toBeVisible();
     await page.reload();
     await expect(
       page.getByRole('group', { name: 'Zaman aralığı' }).getByRole('button', { name: 'Son 1 dk' }),
@@ -81,6 +85,22 @@ test.describe('Canlı Durum', () => {
       'href',
       '/settings/sources',
     );
+  });
+
+  test('a pseudonymous viewer, and a snapshot that is not complete', async ({ page }) => {
+    // The report viewer holds only `usage.anonymous`; with the setting, pseudonyms (as /usage).
+    await mockApi(page, { signedInAs: 'zeynep', usage: { pseudonymize: true } });
+    await page.goto('/activity');
+    const table = page.getByRole('table', { name: 'Şu an veri gönderip alanlar' });
+    await expect(table.getByText(/^Kullanıcı-D364/)).toBeVisible();
+    await expect(table).not.toContainText('Ayşe Yılmaz');
+    await expect(table).not.toContainText('172.20.43.37');
+
+    // `warming_up`: the worker is still reading the last hour, or its snapshot is old.
+    await page.unrouteAll({ behavior: 'ignoreErrors' });
+    await mockApi(page, { signedInAs: 'tolga', activity: { warmingUp: true } });
+    await page.goto('/activity');
+    await expect(page.getByTestId('activity-warming')).toContainText('Rakamlar henüz eksik');
   });
 
   test('each part only for those who may see it', async ({ page }) => {

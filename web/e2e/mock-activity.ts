@@ -1,112 +1,60 @@
 /**
  * Canlı Durum's API (`/activity/devices` W5-M, `/activity/wan` W5-N; contract W5 §6 M2, M3,
- * N6) for the e2e mock. `/activity/wan` answers W5-N's captured `activity-wan.json`.
- * `/activity/devices` is built here from the captured people of `usage.json`, with the types
- * of `src/lib/activity-types.ts` and fictional example data only, until W5-M's answers are
- * captured (W5-P-9).
+ * N6) for the e2e mock, answering the captured samples: W5-M's `activity.json` (the windows
+ * 1, 5 and 15 on the golden usage site, and the pseudonymous viewer's) and W5-N's
+ * `activity-wan.json` (W5-P-9).
  */
 
 import type {
   ActivityDevices,
-  ActivityRow,
   ActivityWindow,
   WanRange,
   WanRates,
 } from '../src/lib/activity-types';
-import type { SubjectRef } from '../src/lib/api-types';
 
 import type { MockUser, RecordedCall } from './mock-api';
 import type { Answer, MockHost } from './mock-records';
-import { ACTIVITY_WAN, copy, USAGE } from './samples';
+import { ACTIVITY, ACTIVITY_WAN, copy } from './samples';
 
 /** What the activity mock needs from the main mock. */
 export interface ActivityHost extends MockHost {
   privacyRequired(account: MockUser): boolean;
+  permissionsOf(account: MockUser): readonly string[];
 }
 
 export interface ActivityOptions {
   /** No source has SNMP on: `/activity/wan` answers the captured `empty`. */
   noLines?: boolean;
+  /** The worker's snapshot is not complete or is old: `warming_up` (W5-M-2). */
+  warmingUp?: boolean;
+  /** `usage.pseudonymize_anonymous_role` (from the usage options): pseudonyms for viewers. */
+  pseudonymize?: boolean;
 }
 
-/** "Now" of the mock's answers: the sample clock's day at 14:35:20 site time. */
-const NOW = Date.parse('2026-10-13T11:35:20Z');
 const WINDOWS: readonly ActivityWindow[] = [1, 5, 15];
 
-function iso(time: number): string {
-  return new Date(time).toISOString().replace('.000Z', 'Z');
+/** The captured answer of a window (`devices_1`, `devices_5`, `devices_15`). */
+function captured(window: ActivityWindow): ActivityDevices {
+  const key = `devices_${window}` as const;
+  return copy(ACTIVITY[key]);
 }
 
-/** The captured people and devices, each with a fixed share of the traffic. */
-function subjects(): SubjectRef[] {
-  const seen = new Map<string, SubjectRef>();
-  for (const row of USAGE.subjects_persons.items) seen.set(row.subject.key, row.subject);
-  for (const row of USAGE.subjects_devices.items) seen.set(row.subject.key, row.subject);
-  return [...seen.values()];
-}
-
-const DOMAINS = [
-  { domain: 'video.example', kind: 'domain' as const },
-  { domain: 'portal.example', kind: 'domain' as const },
-  { domain: 'Microsoft.Teams', kind: 'service' as const },
-  { domain: '198.51.100.20', kind: 'ip' as const },
-];
-const APPS = ['HTTPS.BROWSER', 'Microsoft.Teams', 'Windows.Update'];
-
-function rows(window: ActivityWindow): ActivityRow[] {
-  const seconds = window * 60;
-  return subjects()
-    .map((subject, index) => {
-      // Fixed volumes per minute, decreasing by rank (so the order is by download).
-      const down = Math.round((48_000_000 / (index + 1)) * window);
-      const up = Math.round((3_200_000 / (index + 2)) * window);
-      return {
-        subject,
-        download_bytes: down,
-        upload_bytes: up,
-        download_bps: (down * 8) / seconds,
-        upload_bps: (up * 8) / seconds,
-        sessions: 4 + index * window,
-        top_domains: DOMAINS.slice(index % 2, (index % 2) + 3).map((item, rank) => ({
-          ...item,
-          bytes: Math.round(down / (rank + 2)),
-        })),
-        top_apps: APPS.slice(0, 1 + (index % 3)).map((app, rank) => ({
-          app,
-          bytes: Math.round(down / (rank + 2)),
-        })),
-        last_seen: iso(NOW - (index + 1) * 7_000),
-      };
-    })
-    .sort((a, b) => b.download_bytes - a.download_bytes);
-}
-
-function devices(window: ActivityWindow): ActivityDevices {
-  const list = rows(window);
-  const seconds = window * 60;
-  const down = list.reduce((sum, row) => sum + row.download_bytes, 0);
-  const up = list.reduce((sum, row) => sum + row.upload_bytes, 0);
-  const start = NOW - (NOW % 60_000) - 59 * 60_000;
-  return {
-    window,
-    rows: list,
-    more: false,
-    totals: {
-      download_bytes: down,
-      upload_bytes: up,
-      download_bps: (down * 8) / seconds,
-      upload_bps: (up * 8) / seconds,
-      sessions: list.reduce((sum, row) => sum + row.sessions, 0),
-      subjects: list.length,
-    },
-    per_minute: Array.from({ length: 60 }, (_, index) => ({
-      minute: iso(start + index * 60_000),
-      download_bytes: 120_000_000 + ((index * 37) % 11) * 9_000_000,
-      upload_bytes: 9_000_000 + ((index * 13) % 7) * 800_000,
-    })),
-    data_until: iso(NOW - 2_000),
-    generated_at: iso(NOW),
-  };
+/**
+ * The pseudonymous viewer's answer: captured for window 5; for 1 and 15 the captured rows with
+ * the subjects of that capture (the same persons, by key).
+ */
+function pseudonymous(window: ActivityWindow): ActivityDevices {
+  if (window === 5) return copy(ACTIVITY.viewer_devices_pseudonymous);
+  const named = ACTIVITY.devices_5.rows;
+  const hidden = ACTIVITY.viewer_devices_pseudonymous.rows;
+  const answer = captured(window);
+  for (const row of answer.rows) {
+    const index = named.findIndex((item) => item.subject.key === row.subject.key);
+    const subject = hidden[index]?.subject;
+    if (!subject) throw new Error(`no captured pseudonym for ${row.subject.key}`);
+    row.subject = copy(subject);
+  }
+  return answer;
 }
 
 export class ActivityMock {
@@ -117,6 +65,16 @@ export class ActivityMock {
     if (call.path === '/activity/devices') return this.devices(call, host);
     if (call.path === '/activity/wan') return this.wan(call, host);
     return null;
+  }
+
+  /** `viewer_for`: pseudonyms for a viewer with `usage.anonymous` but not `usage.person`. */
+  private pseudonymize(account: MockUser, host: ActivityHost): boolean {
+    const permissions = host.permissionsOf(account);
+    return (
+      Boolean(this.options.pseudonymize) &&
+      permissions.includes('usage.anonymous') &&
+      !permissions.includes('usage.person')
+    );
   }
 
   /** `usage.person` or `usage.anonymous`, after the KVKK notice (M3). */
@@ -133,7 +91,11 @@ export class ActivityMock {
       const window = Number(call.query.get('window') ?? '5');
       if (!(WINDOWS as readonly number[]).includes(window))
         return host.error(422, 'activity_window_invalid');
-      return [200, devices(window as ActivityWindow)];
+      const answer = this.pseudonymize(account, host)
+        ? pseudonymous(window as ActivityWindow)
+        : captured(window as ActivityWindow);
+      if (this.options.warmingUp) answer.warming_up = true;
+      return [200, answer];
     }
     return denied ?? host.error(403, 'forbidden');
   }

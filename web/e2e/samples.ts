@@ -47,7 +47,7 @@ import type {
   VerifyResult,
   VlanOut,
 } from '../src/lib/api-types';
-import type { WanRates } from '../src/lib/activity-types';
+import type { ActivityDevices, WanRates } from '../src/lib/activity-types';
 import type { ComplianceStatus, ConfigBackupOut } from '../src/lib/compliance-types';
 import type { LiveStatus, LiveStreamOut } from '../src/lib/live-types';
 import type {
@@ -552,6 +552,20 @@ export const SYSTEM_DISK = load('system-disk') as {
 export const SYSTEM_HEALTH = load('system-health') as {
   meta: SampleMeta;
   health: SystemHealth;
+  errors: Record<string, ErrorSample>;
+};
+
+/**
+ * Canlı Durum's "Şu an" (captured, Wave 5 contract §6 M2, W5-M): the windows 1, 5 and 15 from the
+ * worker's snapshot on the golden usage site (window 1 empty: no minute of it has traffic), the
+ * pseudonymous viewer's window 5, and the refusals.
+ */
+export const ACTIVITY = load('activity') as {
+  meta: SampleMeta;
+  devices_1: ActivityDevices;
+  devices_5: ActivityDevices;
+  devices_15: ActivityDevices;
+  viewer_devices_pseudonymous: ActivityDevices;
   errors: Record<string, ErrorSample>;
 };
 

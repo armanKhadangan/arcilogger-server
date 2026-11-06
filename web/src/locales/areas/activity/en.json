@@ -46,6 +46,8 @@
       "dataUntil": "Data as of {{time}}.",
       "noData": "No traffic logs yet.",
       "interim": "Long connections appear as FortiGate's interim logs arrive. MikroTik sends no byte counts; it does not appear here.",
+      "warmingUp": "The figures are not complete yet",
+      "warmingUpHint": "The count is either still reading the last 60 minutes (the worker has just started) or has not been updated for over a minute. The table and chart fill in shortly; if this persists, an administrator should check the worker on the System page.",
       "locked": "The usage analytics module is off",
       "lockedHint": "The \"Right now\" table belongs to the usage analytics module. The internet line's speed is shown without it."
     }

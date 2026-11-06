@@ -7,6 +7,7 @@ import { ChartFrame } from '@/components/charts/chart-frame';
 import { LineChart } from '@/components/charts/line-chart';
 import { seriesColor } from '@/components/charts/palette';
 import { PageHeader } from '@/components/layout/page-header';
+import { Alert } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { KpiCard } from '@/components/ui/card';
@@ -260,6 +261,15 @@ function NowContent({ window }: { window: ActivityWindow }) {
       {() =>
         data ? (
           <div className="flex flex-col gap-4">
+            {data.warming_up ? (
+              <Alert
+                tone="warning"
+                title={t('activity.now.warmingUp')}
+                data-testid="activity-warming"
+              >
+                {t('activity.now.warmingUpHint')}
+              </Alert>
+            ) : null}
             <div
               className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4"
               role="group"
