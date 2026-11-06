@@ -1,4 +1,7 @@
-import type { ReactNode } from 'react';
+import { useEffect, type ReactNode } from 'react';
+
+/** The browser tab's name outside a page (and of `index.html`). */
+const PRODUCT_TITLE = 'ARCILOGGER';
 
 interface PageHeaderProps {
   title: string;
@@ -7,7 +10,21 @@ interface PageHeaderProps {
   actions?: ReactNode;
 }
 
+/**
+ * Names the browser tab after the page ("Mühürleme · ARCILOGGER"), so several open tabs and the
+ * browser's history tell the pages apart; back to the product's name when the page goes.
+ */
+function usePageTitle(title: string) {
+  useEffect(() => {
+    document.title = title ? `${title} · ${PRODUCT_TITLE}` : PRODUCT_TITLE;
+    return () => {
+      document.title = PRODUCT_TITLE;
+    };
+  }, [title]);
+}
+
 export function PageHeader({ title, description, actions }: PageHeaderProps) {
+  usePageTitle(title);
   return (
     <div className="flex flex-wrap items-start justify-between gap-4 pb-6">
       <div className="flex min-w-0 flex-col gap-1">
