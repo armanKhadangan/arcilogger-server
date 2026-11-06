@@ -67,13 +67,16 @@ def config(root: Path) -> Config:
     return parse_config(path.read_bytes(), path)
 
 
-def context(root: Path, stored: frozenset[str] = frozenset()) -> RuleContext:
+def context(
+    root: Path, stored: frozenset[str] = frozenset(), *, strict_outbound: bool = False
+) -> RuleContext:
     return RuleContext(
         policy=POLICY,
         anchors=TrustAnchors(root, POLICY),
         stored_secrets=stored,
         now=NOW,
         local_addresses=("172.20.10.5",),
+        strict_outbound=strict_outbound,
     )
 
 
@@ -168,26 +171,53 @@ def test_removing_a_source_deletes_its_keys(root: Path, config: Config) -> None:
     ]
 
 
-def test_the_sources_etag_follows_the_keys(root: Path, config: Config) -> None:
+def with_snmp(root: Path, config: Config, snmp: SnmpConfig) -> Config:
+    """``config`` with fw-01's ``[sources.snmp]`` table written as the browser would."""
     path = root / "arcilogger.toml"
-    with_snmp = edit(
-        path.read_bytes(),
-        [
-            SetSources(
-                tuple(
-                    s.model_copy(update={"snmp": OFF}) if s.name == "fw-01" else s
-                    for s in config.sources
-                )
-            )
-        ],
-        path=path,
+    sources = tuple(
+        s.model_copy(update={"snmp": snmp}) if s.name == "fw-01" else s for s in config.sources
     )
-    snmp_config = parse_config(with_snmp, path)
+    return parse_config(edit(path.read_bytes(), [SetSources(sources)], path=path), path)
+
+
+def test_the_sources_etag_follows_the_keys(root: Path, config: Config) -> None:
+    snmp_config = with_snmp(root, config, OFF)
     before = rules.etag("sources", snmp_config, frozenset())
     after = rules.etag("sources", snmp_config, frozenset({AUTH_NAME}))
     assert before != after
     assert rules.section_secrets("sources", snmp_config) == rules.snmp_keys("fw-01")
     assert rules.section_secrets("sources", config) == ()
+
+
+def test_strict_mode_skips_the_probe_until_the_rule_exists(root: Path, config: Config) -> None:
+    """``ARCILOGGER SNMP <source>`` is opened by ApplySystem after the change is written: in
+    strict outbound mode a new device address or port is not probed before then."""
+    switched_on = validate_section(
+        "sources", config, update(SNMP, **KEYS), context(root, strict_outbound=True)
+    )
+    assert switched_on.ok, switched_on.errors
+    assert switched_on.probes == ()
+    assert [(w.code, w.field) for w in switched_on.warnings] == [("probe_skipped", SNMP_PATH)]
+    assert "system.firewall" in switched_on.effects
+    stored = frozenset(rules.snmp_keys("fw-01"))
+    on = with_snmp(root, config, OFF.model_copy(update={"enabled": True}))
+    for snmp, address in (({**SNMP, "port": 1161}, "172.20.10.22"), (SNMP, "172.20.10.23")):
+        body = update(snmp)
+        body["source"]["address"] = address
+        moved = validate_section("sources", on, body, context(root, stored, strict_outbound=True))
+        assert moved.ok, moved.errors
+        assert (moved.probes, [w.code for w in moved.warnings]) == ((), ["probe_skipped"])
+
+
+def test_strict_mode_probes_new_keys_for_the_same_device(root: Path, config: Config) -> None:
+    stored = frozenset(rules.snmp_keys("fw-01"))
+    on = with_snmp(root, config, OFF.model_copy(update={"enabled": True}))
+    check = validate_section(
+        "sources", on, update(SNMP, **KEYS), context(root, stored, strict_outbound=True)
+    )
+    assert check.ok, check.errors
+    assert check.probes == (Probe("snmp", "fw-01"),)
+    assert check.warnings == ()
 
 
 # -- the probe (N5) --------------------------------------------------------------------------------

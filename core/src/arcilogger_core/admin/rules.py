@@ -941,11 +941,28 @@ class _Run:
             if any(key not in self.secrets_after for key in snmp_keys(name)):
                 self.error("snmp_secret_missing", f"sources.{name}.snmp")
             else:
-                self.probe("snmp", name)  # N5: the device answers with these settings and keys
+                self._snmp_probe(changed)  # N5: the device answers with these settings and keys
         for key in self.secret_changes:
             keyed = after.get(key.split(".")[1]) if is_snmp_key(key) else None
             if keyed is not None and keyed.snmp is not None and keyed.snmp.enabled:
-                self.probe("snmp", keyed.name)  # new keys for an SNMP that stays on
+                self._snmp_probe(keyed)  # new keys for an SNMP that stays on
+
+    def _snmp_probe(self, source: SourceConfig) -> None:
+        """The ``snmp`` probe of N5; in strict outbound mode ``ARCILOGGER SNMP <source>`` exists
+        only after ApplySystem, so a new device address or port is not probed before then."""
+        before = {old.name: old for old in self.current.sources}.get(source.name)
+        reached = (
+            before is not None
+            and before.snmp is not None
+            and source.snmp is not None
+            and before.snmp.enabled
+            and before.address == source.address
+            and before.snmp.port == source.snmp.port
+        )
+        if self.context.strict_outbound and not reached:
+            self.warn("probe_skipped", f"sources.{source.name}.snmp")
+        else:
+            self.probe("snmp", source.name)
 
     # -- result ----------------------------------------------------------------------------------
 
