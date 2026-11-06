@@ -2,7 +2,8 @@
 
 The migration scripts ship inside the package (``arcilogger_db/migrations``), so the installed
 wheel is enough on the server. :func:`upgrade` migrates to the newest revision, seeds **and**
-creates the monthly partitions (plain PostgreSQL only, :mod:`arcilogger_db.partitions`), in one
+creates the partitions (plain PostgreSQL only: the daily ones of the database window,
+:mod:`arcilogger_db.partitions`), in one
 transaction, under a PostgreSQL advisory lock (two installers cannot migrate at once).
 
 TimescaleDB mode (``[database] timescale`` in the configuration) is passed to the migration
@@ -90,7 +91,8 @@ def upgrade(
     months_back: int | None = None,
 ) -> UpgradeResult:
     """Migrate to ``revision`` (default: newest), seed and create partitions, in one transaction
-    (``months_back`` defaults to the ``db.retention_days`` window, see :mod:`.partitions`)."""
+    (by default the daily partitions of the ``db.retention_days`` window; an explicit
+    ``months_back`` asks for monthly ones, as the test template does, see :mod:`.partitions`)."""
     with engine.begin() as connection:
         connection.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": MIGRATION_LOCK_KEY})
         before = current_revisions(connection)

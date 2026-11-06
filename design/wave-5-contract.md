@@ -2648,8 +2648,9 @@ All Wave 5 questions are answered (2026-11-02).
   `crl fetch` does `state\crl`.
   **Upgrade.** `renewal.state_to_read` gives the new file, or the earlier `state/renewal.json`
   while the new one is missing. The first counted run after the upgrade (every run but a busy
-  one or a dry run: while the earlier file is the only one, a dry run writes nothing) carries
-  over only the earlier file's `failures_in_a_row` (W5-E-8); from then on the new file exists
+  one or a dry run: while the earlier file is the only one, a dry run writes nothing; per W5-E-8
+  it writes no state file, but the folder and `renewal.lock` are created) carries over only the
+  earlier file's `failures_in_a_row` (W5-E-8); from then on the new file exists
   and the earlier one is never read again. Nothing writes, moves or removes the earlier
   `state/renewal.json` or `state/renewal.lock`, neither at the upgrade nor at a run (answer to
   Q3 on #158: deleting them at the upgrade would break the read below): both are left in place
@@ -3824,3 +3825,43 @@ Recorded on #204, from the manager's answers of 2026-11-06.
   - The new code's TR/EN text says that the TÜRKTRUST user name and password travel unencrypted.
     It lives in `api/src/arcilogger_api/admin_channel.py`, granted for this one code. It is
     answered with HTTP 422, like `tsa_confirm_required`.
+
+## Deviations — W5-F (2026-11-06)
+
+Recorded on #104. W5-F moved to the manager on 2026-11-06 (05:50Z); part 1 is Saray's (#105,
+`33d9421`), taken over unchanged and then brought up to the merged packages.
+
+- **W5-F-1: part 1's own deviation is dropped.** It documented `crl-ok` at level OK against D10's
+  "information"; D10 now says `crl-ok` has the level `ok`, so nothing deviates.
+- **W5-F-2: files outside §2.7, the W5-G list on #104.**
+  - `db/src/arcilogger_db/migrate.py` and `worker/src/arcilogger_worker/lookup/window.py`: their
+    docstrings still named the 400-day database and the monthly partitions.
+  - `window.py` also loses the dead `400` fallback of `get_setting(…, "db.retention_days", 400)`:
+    `get_setting` returns the shipped default (30) for a known key, so nothing changes.
+  - `tests/test_docs_consistency.py`
+    (`test_auditor_guide_states_what_the_database_deletes`) pinned the old sentence "no deletion
+    job exists yet". It now checks the database window (`db.window`, `db.retention_days`) in
+    both languages.
+- **W5-F-3: Canlı Durum is documented before its packages merge.** CANLI-DURUM.md / LIVE-STATUS.md,
+  the SNMP part of AYARLAR/SETTINGS, the `ARCILOGGER SNMP <source>` rule in KURULUM/INSTALL and
+  DEVICE-SETUP §6 follow §6 (M1–M3, N1–N7, P3, QB1, QB2). A package that deviates from §6 updates
+  these docs in its own pull request. The CHANGELOG line of Canlı Durum comes with P3.
+  - The docs follow the answers to #207's Q6 and Q7: the interface list comes with the probe's
+    refusal when saving (W5-N-7; the pre-save list is #217), and a switched-off source's
+    `ARCILOGGER SNMP` rule stays until the installer's firewall step, as W5-T-3.
+- **W5-F-4: `turktrust.md` stays out of `OPERATOR_DOCS`** (part 1, Q6). The bundle ships the whole
+  `docs` tree, so the guide reaches the server. Adding it would also change
+  `Build-ArciBundle.ps1`'s required list, a deploy file.
+- **W5-F-5: "Ayarlar → Kamu SM" in code texts.**
+  - The docs name the page "Ayarlar → Zaman damgası", as the menu does.
+  - Several code texts still say "Ayarlar → Kamu SM": the first-run wizard's step targets, the
+    compliance card texts and the installer. The docs quote them unchanged where they quote
+    them (UYUM-DURUMU, the wizard tables).
+  - A follow-up for Wave 6.
+- **W5-F-6: the banner texts.**
+  - `certificate_revoked` (part 1, Q1): W5-C's Turkish text names no provider ("Zaman damgası
+    sağlayıcısıyla görüşün"), and the guides quote it.
+  - `provider_not_legal` (Q2) still points to Kamu SM's production server. That reason only
+    appears for mock, rfc3161 and test servers, so the remedy holds; the guide's remedy names
+    both providers.
+  - The banner sections are 5.2–5.9 (Q3), as W5-D's locale keys have them.

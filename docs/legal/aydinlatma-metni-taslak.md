@@ -40,7 +40,9 @@ toplanmaz. Web sayfalarının içeriği kaydedilmez; ziyaret edilen **adres** ka
 | ARCILOGGER kullanıcıları | Kullanıcı adı, görünen ad, e-posta, rol, giriş zamanları, oturumların IP adresi ve tarayıcı bilgisi, iki adımlı doğrulama kaydı, KVKK bilgilendirmesi onayı | ARCILOGGER |
 | Denetim kaydı | Hangi ARCILOGGER kullanıcısının ne zaman hangi kişisel veriyi görüntülediği, sorguladığı, dışa aktardığı ya da hangi ayarı değiştirdiği | ARCILOGGER |
 | 5651 talepleri | Talep eden makam, dosya/evrak no, talep tarihi, gerekçe, sorgulanan adres ve zaman, bulunan cihaz/kişi, resmi rapor (PDF). Kira kaydı olmayan bir adreste FortiGate oturum kaydındaki kaynak MAC adresi (srcmac) 5651 sorgu sonucunda kısmi kanıt olarak gösterilebilir. Aygıt tanıma açık arayüzlerde yukarıdaki aygıt tanıma alanları, böyle bir arayüzün oturumunu alıntılayan her 5651 raporunun ve kanıt paketinin ham satır kanıtında, başka kişilerin aday oturumları dahil, görünür | ARCILOGGER kullanıcısının girdisi |
-| İnternet kullanım özetleri (kişi, cihaz ve departman bazında, kişi adlarıyla) | Gün ve saat başına çevrimiçi süre ve **tahmini** aktif süre (mesai içi / dışı), ilk ve son etkinlik; ziyaret edilen siteler ve ana bilgisayar adları ile her birinde geçen tahmini süre, kategoriler, uygulamalar; indirilen/yüklenen veri, oturum sayısı; FortiGate'in kaydettiği URL'ler (kişi ya da cihaz ve gün başına en çok 1.000); engellenen denemeler (web, DNS, uygulama denetimi; kişi ya da cihaz ve gün başına en çok 5.000 satır); saatlik tablolar, günlük etkinlik zaman çizelgesi, 30 günlük ısı haritası, cihaz bazında döküm. Süreler bağlantı kayıtlarından hesaplanan tahminlerdir, kesin ekran süresi değildir | ARCILOGGER yukarıdaki trafik, web, DNS ve uygulama kayıtlarından türetir; kişi, cihazın o andaki atamasıyla bulunur (cihaz ve kişi eşleştirmesi) |
+| İnternet kullanım özetleri (kişi, cihaz ve departman bazında, kişi adlarıyla) | Gün ve saat başına çevrimiçi süre ve **tahmini** aktif süre (mesai içi, **mola**, mesai dışı: molalar şirketin girdiği mesai saatlerine göre ayrılır), ilk ve son etkinlik; ziyaret edilen siteler ve ana bilgisayar adları ile her birinde geçen tahmini süre, kategoriler, uygulamalar; indirilen/yüklenen veri, oturum sayısı; FortiGate'in kaydettiği URL'ler (kişi ya da cihaz ve gün başına en çok 1.000); engellenen denemeler (web, DNS, uygulama denetimi; kişi ya da cihaz ve gün başına en çok 5.000 satır); saatlik tablolar, günlük etkinlik zaman çizelgesi, 30 günlük ısı haritası, cihaz bazında döküm. Süreler bağlantı kayıtlarından hesaplanan tahminlerdir, kesin ekran süresi değildir | ARCILOGGER yukarıdaki trafik, web, DNS ve uygulama kayıtlarından türetir; kişi, cihazın o andaki atamasıyla bulunur (cihaz ve kişi eşleştirmesi) |
+| Canlı Durum (anlık kullanım) | Son 1, 5 ya da 15 dakikada kişi, cihaz ya da IP başına indirilen ve yüklenen veri, oturum sayısı, en çok 3 site ve uygulama, son görülme zamanı; şirketin dakika dakika son 60 dakikası. Sayfa açıkken 10 saniyede bir yenilenir; ayrı bir veritabanı tablosu yoktur, yalnızca son 60 dakika tutulur. Kullanım analizinden çıkarılan kişiler satır olarak gösterilmez | ARCILOGGER, FortiGate trafik kayıtlarından kullanım özetleriyle aynı kurallarla hesaplar |
+| İnternet hattı hızı | Hat başına indirme ve yükleme hızı, hat durumu; **kişisel veri içermez** | Ağ cihazlarının arayüz sayaçları (salt okunur SNMPv3) |
 | Zamanlanmış kullanım raporları | Yukarıdaki özetlerden: şirket ve departman toplamları, etkinliği olan her kişi adıyla (siteler, kategoriler, engellenen denemeler, saatlik tablo), cihazlar, dikkat çeken değişiklikler; HTML e-posta, PDF ve Excel | ARCILOGGER; zamanlamaları ve alıcıları yönetici belirler |
 | Sistem ve güvenlik uyarıları | Uyarı kodu, zaman, kaynak (cihaz) adı ya da gönderen IP adresi; IP çakışmasında IP ve MAC adresleri; FortiGate DHCP'de istemcilerin geri çevirdiği havuz adresleri (en çok beş, MAC adresi ve cihaz adı olmadan; e-postaya yazılmaz); uyarıya eklenen notlar | ARCILOGGER denetimleri (log kaynağı sessiz, mühürleme, saat, disk, yedek, IP çakışması …) |
 
@@ -55,7 +57,8 @@ alınmadan önce metin güncellenmelidir.
 - Şirket ağının ve bilgi sistemlerinin güvenliği.
 - ARCILOGGER'ın kendi güvenliği: kimin hangi veriye eriştiğinin denetlenmesi.
 - İnternet kullanımının kişi, cihaz ve departman bazında raporlanması (tahmini kullanım
-  özetleri ve zamanlanmış raporlar). [Şirket ve hukuk müşaviri: bu raporlamanın amacı.]
+  özetleri, mola sürelerindeki kullanım dahil, zamanlanmış raporlar ve Canlı Durum sayfasındaki
+  anlık görünüm). [Şirket ve hukuk müşaviri: bu raporlamanın ve anlık izlemenin amacı.]
 
 [Hukuk müşaviri: amaçların KVKK m. 4 ilkelerine göre ifadesi; başka amaçla kullanılmayacağı.]
 
@@ -76,6 +79,11 @@ alınmadan önce metin güncellenmelidir.
   İzleyici'ye ad yerine takma ad ("Kullanıcı-7F3A") gösterir. Yönetici bir kişiyi kişi düzeyindeki
   görünümlerden ve raporlardan çıkarabilir (`persons.usage_excluded`; trafiği şirket ve departman
   toplamlarında sayılmaya devam eder).
+- **Canlı Durum** sayfasının kişi düzeyindeki "Şu an" tablosunu kullanım görme yetkisi olan
+  roller (dört rolün hepsi) aynı takma ad kuralıyla görür; her görüntüleme denetim kaydına
+  `activity.view` olarak yazılır (kişi adı olmadan; sayfa açık kaldıkça en çok 15 dakikada bir).
+  İnternet hattı hızı kişisel veri taşımaz. Molalardaki kullanım, kullanımı zaten gören rollere
+  aynı bilgilendirme ve denetimle gösterilir; ayrıca gizlenmez.
 - **Zamanlanmış kullanım raporlarını** yalnızca Yönetici oluşturur ve alıcılarını belirler
   (`reports.manage`); raporlar varsayılan olarak kişi düzeyinde ve adlarladır. Alıcılar
   ARCILOGGER kullanıcısı olmak zorunda değildir (e-posta adresleri, bölüm 6).
@@ -146,7 +154,9 @@ imhası zaman damgalı bir imha tutanağıyla yapılır ve bu imha işi **varsay
 Veritabanındaki **kullanım özetleri** 400 gün (`usage.retention_days`) sonra worker tarafından her
 gece silinir (bu silme için imha tutanağı tutulmaz, yalnızca işin çalışma kaydı); sunucudaki
 **kullanım raporu dosyaları** 400 gün (`reports.keep_days`), kanıt paketleri 30 gün sonra silinir;
-e-postayla gönderilen kopyalar alıcılarda kalır. Veritabanındaki ayrıştırılmış kayıtlar, 5651
+e-postayla gönderilen kopyalar alıcılarda kalır. Veritabanındaki ayrıştırılmış kayıtlar son 30 gün
+(`db.retention_days`) tutulur ve daha eski günler her gece silinir; mühürlü ham kayıtlar kasada
+kalır ve gerektiğinde oradan yeniden yüklenir (yüklenen günler 7 gün sonra yine silinir). 5651
 sorguları, resmi raporlar ve denetim kaydı için bu sürümde otomatik imha yoktur (politika
 taslağındaki açık kararlar).
 
@@ -173,6 +183,10 @@ ilişkisi hukuk müşavirince değerlendirilmelidir.
    çizelgeleri) ölçülülüğü, hangi rollerin göreceği ve şirketin çalışanlardan aldığı onayların
    (varsa) kapsamı. ARCILOGGER bu verileri varsayılan olarak adlarla gösterir; takma ad ayarı
    ve kişi düzeyinin kapatılması bölüm 5'tedir.
+7. Mola sürelerindeki kullanımın ölçülmesi ve Canlı Durum sayfasındaki anlık (son 1–15 dakika)
+   kişi düzeyindeki görünümün ölçülülüğü, çalışanlara nasıl duyurulacağı ve hangi rollerin
+   göreceği. ARCILOGGER ikisini de kullanımı zaten gören rollere aynı bilgilendirme ve denetimle
+   gösterir (sahibin varsayılanı); ayrı bir kapatma anahtarı yoktur.
 7. Zamanlanmış raporların alıcıları ve e-posta sağlayıcısı (şirket dışında ya da yurt dışında bir
    hizmet olup olmadığı).
 8. FortiGate aygıt tanımasının hangi arayüzlerde açılacağı: açıldığı arayüzlerin her oturum

@@ -925,20 +925,24 @@ def test_auditor_guide_covers_web_packages_and_the_report() -> None:
 
 
 def test_auditor_guide_states_what_the_database_deletes() -> None:
-    """Retention and KVKK decisions are taken on this section: the parsed log tables have no
-    deletion job yet, but the usage rollups (names, sites, URLs) are deleted after
-    ``usage.retention_days`` by the worker job ``usage.retention`` — in both languages."""
-    assert "usage.retention" in {job.name for job in default_jobs(60)}
+    """Retention and KVKK decisions are taken on this section: the parsed log tables keep the
+    database window (``db.retention_days``, the worker job ``db.window``, Wave 5 W5-G) and the
+    usage rollups (names, sites, URLs) are deleted after ``usage.retention_days`` by the worker job
+    ``usage.retention`` — in both languages."""
+    jobs = {job.name for job in default_jobs(60)}
+    assert {"usage.retention", "db.window"} <= jobs
     days = DEFAULT_SETTINGS["usage.retention_days"]
     turkish, _, english = _doc("DENETCI-KILAVUZU.md").partition('<a id="english"></a>')
     tr = _flat(_section(turkish, "## 2. Ne saklanır", "## 3. "))
     en = _flat(_section(english, "**Retention.**", "**Evidence package.**"))
     assert f"**{days} gün** (`usage.retention_days`)" in tr
     assert f"{days} days (`usage.retention_days`)" in en
+    window = DEFAULT_SETTINGS["db.retention_days"]
+    assert f"son **{window} günü** tutar (`db.retention_days`" in tr
+    assert f"keeps the last {window} days (`db.retention_days`" in en
     for text in (tr, en):
         assert "`usage.retention`" in text
-    assert "ayrıştırılmış kayıtlardan hiçbir şey silinmez" in tr
-    assert "no deletion job exists yet for them" in en
+        assert "`db.window`" in text
 
 
 # -- legal wording (spec 0 rule 6, spec 3.3) ------------------------------------------------------

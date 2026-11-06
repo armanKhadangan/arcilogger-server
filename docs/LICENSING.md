@@ -58,12 +58,15 @@ also shows the result on your own network.
 
 Whatever the licence state, these work and no licence state switches them off: the syslog
 collector and the raw log files (spool), parsing and loading into the database, the nightly
-sealing (Kamu SM time stamp), chain verification, retention and deletion, the replica, the
-database backup; the 5651 lookup, its official PDF report and time stamp, raw lines, evidence
+sealing (Kamu SM or TÜRKTRUST time stamp), re-stamping before a TSA certificate expires (the
+`Renew` task), downloading the revocation lists (the `CrlFetch` task), the legal-validity banner
+on every page ([TIME-STAMPING.md](TIME-STAMPING.md)), chain verification, retention and deletion,
+the replica, the database backup; the 5651 lookup, its official PDF report and time stamp, raw lines, evidence
 packages and the standalone verifier; the sealing page and the credit; the hash-chained audit log
 and its verification; sign-in, two-factor authentication, users and roles; devices, persons,
 departments, VLANs and device-person assignments (by hand); the operational alerts (silent
-source, disk, sealing, credit, clock, replica, backup, alert e-mail, the Güvenlik page); the
+source, disk, sealing, credit, clock, replica, backup, alert e-mail, re-stamping, stamp
+certificate, revocation list, the Güvenlik page); the
 dashboard's health boxes (log intake, seal, credit, clock, alerts) and the licence page.
 
 Only one alert code belongs to a paid module: `R20-report` (a scheduled report could not be sent)

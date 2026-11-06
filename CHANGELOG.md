@@ -5,6 +5,51 @@ versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Time stamping, re-stamping, revocation lists and the database window (Wave 5)
+
+Stamps stay verifiable after their TSA certificate expires, revoked certificates are noticed, a
+second legal-grade provider can be chosen, and the database keeps 30 days while the vault keeps
+the evidence. Guides: [ZAMAN-DAMGASI.md](docs/ZAMAN-DAMGASI.md) /
+[TIME-STAMPING.md](docs/TIME-STAMPING.md), [turktrust.md](docs/turktrust.md). Contract:
+`design/wave-5-contract.md`.
+
+- **TÜRKTRUST** as a second time-stamp provider (`[tsa] provider = "turktrust"`): RFC 3161 with
+  HTTP Basic authentication over verified HTTPS, redirects never followed; plain HTTP only with
+  `[tsa] allow_plain_http` and a typed `HTTP` confirmation, while a banner warns. Its production
+  stamps count as legal grade by the product owner's decision (D12), under the same root
+  fingerprint check as Kamu SM; legal review is recommended. The username and password live in
+  the secret store only; Ayarlar → Zaman damgası offers four servers. TÜRKTRUST has no credit
+  query. T1–T5 are to verify on site.
+- **Re-stamping** (`Renew` task, daily 02:30): stamps whose TSA certificate comes due within
+  `[tsa] renew_before_days` (180) are re-stamped in one renewal record in `vault\renewals\`;
+  evidence packages carry the records, and `verify.py` reports `renewal-not-due`,
+  `renewal-covered`, `renewal-due`, `renewal-late` and `renewal-uncovered`.
+- **Revocation lists** (`CrlFetch` task, daily 00:30): downloaded from `[tsa] crl_urls` or the
+  certificates, stored byte for byte once their signature verifies, never deleted; both verifiers
+  report the `crl-*` codes, and `crl-revoked` fails a day. No CRL address is written in the code
+  (K10).
+- **The legal-validity banner** on every page (`GET /legal-status`) with eight reasons and their
+  sections in the guide, a Panel card for sealing that blocks, and the alerts `R20-renewal`,
+  `R20-cert` and `R20-crl`.
+- **Strict outbound** knows TÜRKTRUST, the CRL hosts and an HTTPS proxy (`[network] https_proxy`):
+  `ARCILOGGER Out TURKTRUST`, `Out CRL`, `Out Proxy`, also after a change in the browser.
+- **The database window:** the database keeps the last 30 days (`db.retention_days`); the worker
+  job `db.window` drops older days as whole daily partitions every night. A 5651 lookup or a
+  search that needs an older day reloads it from the sealed vault ("arşivden yeniden yükle", at
+  most 14 days a request, audited); reloaded days go again after `db.reload_keep_days` (7). The
+  vault is never touched.
+- **Sealing in xz:** new days are sealed as multi-stream xz; days sealed as gzip stay as they are.
+- **Retention in batches:** expired days are deleted once the oldest has been expired
+  `[retention] batch_days` (30) days, under one stamped deletion record, so the stamp use does not
+  double after the second year.
+- **ARCILOGGER Durum:** a small desktop status window for the administrators signed in on the
+  server ([KURULUM.md](docs/KURULUM.md) section 12.1).
+- **Usage:** breaks and per-day work hours (`usage.work_hours`), a "Mola" column and filter, the
+  usage of today refreshed every minute with a back-off, and "Son güncelleme" on the Kullanım page
+  ([KULLANIM.md](docs/KULLANIM.md)).
+- **5651 lookup:** the srcmac guard counts every session that overlaps the hour, so a shared
+  router MAC is not missed (#96).
+
 ### Uyum Durumu, Sistem and the first-run wizard (Wave 4)
 
 The last two placeholder pages of the menu are real: **Uyum Durumu** (ten technical checks and the
@@ -261,10 +306,11 @@ setting or has a loud check (sahada doğrula; KURULUM/INSTALL section 16 is the 
   one transaction) and the count is printed and logged; a failure or `-SkipDatabase` is a warning
   that says what it means for the lookups, never a silent skip. The next `arcilogger-db upgrade`
   sets the leases the previous version left as they were back to `high`, prints how many it
-  restored and how many stay `low`, and names the days to rebuild. The step runs on every such
-  rollback, so **a rollback between two versions that both read FortiGate DHCP shows FortiGate-DHCP
-  chains `low` until the next `arcilogger-db upgrade`** (false lows only, never a wrong person;
-  ASSUMPTIONS RB1).
+  restored and how many stay `low`, and names the days to rebuild. Since Wave 4 (#81) the step is
+  skipped, with its reason, when the program returned to already reads FortiGate DHCP (it has
+  `arcilogger_db\lease_rollback.py`); when that check cannot decide, the step runs, so such a
+  rollback shows FortiGate-DHCP chains `low` until the next `arcilogger-db upgrade` (false lows
+  only, never a wrong person; ASSUMPTIONS RB1).
 - **Upgrade:** the old NAT values become exits named "Genel IP (yükseltmede aktarıldı)", "FortiGate
   WAN adresi (yükseltmede aktarıldı)" and, where needed, "Genel adresi tanımlanmamış hatlar";
   until each line's public address and interfaces are entered, lookups of an address no exit
