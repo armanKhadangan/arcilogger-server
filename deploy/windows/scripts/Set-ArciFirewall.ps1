@@ -57,7 +57,7 @@
     in and the widest network) before anything changes. It then updates the two syslog rules in
     place (Set-NetFirewallAddressFilter), creates them when the first sender appears and removes
     them when the last one goes (an empty RemoteAddress would mean any address), and in strict
-    mode updates the Out NTP / Kamu SM / SMTP / Replica rules in place (a host that does not
+    mode updates the Out NTP / Kamu SM / SMTP / Replica and SNMP <source> rules in place (a host that does not
     resolve keeps its rule as it is). It never disables or removes another rule, never changes a
     profile, needs no -AdminAddress, skips the remote desktop check and never prompts. Exit codes:
     0 done, 2 refused (nothing changed), 3 not managed (no state file: an installation with
@@ -232,7 +232,7 @@ function Invoke-SyncFromConfig {
     (-PolicyPath) before any change, and a refused one changes nothing. The two syslog rules are
     updated in place (Set-NetFirewallAddressFilter), created when the list becomes non-empty and
     removed when it becomes empty (an empty RemoteAddress would mean any address); in strict mode
-    the Out NTP / Kamu SM / SMTP / Replica rules of the plan are updated in place, a rule whose
+    the Out NTP / Kamu SM / SMTP / Replica and SNMP <source> (UDP, Wave 5 §6 N3) rules of the plan are updated in place, a rule whose
     host does not resolve now keeps its addresses. Nothing else is touched: no other rule is
     disabled or removed, no profile changes, the 443, 3389 and 5985 rules and the operator's
     choices of the state file stay as they are. Never prompts. Returns the exit code: 0 done,
@@ -290,7 +290,8 @@ function Invoke-SyncFromConfig {
                 if (@($found).Count -eq 0) { $unresolved += $target }
                 Add-Unique $addresses @($found)
             }
-            $protocol = $(if ($name -eq 'ARCILOGGER Out NTP') { 'UDP' } else { 'TCP' })
+            # NTP and a source's SNMP (Wave 5 §6 N3, ARCILOGGER SNMP <source>) are UDP.
+            $protocol = $(if ($name -eq 'ARCILOGGER Out NTP' -or $name.StartsWith('ARCILOGGER SNMP ')) { 'UDP' } else { 'TCP' })
             $change = [pscustomobject]@{ rule = $name; direction = 'Outbound'; protocol = $protocol; ports = $ports; remote_address = $addresses.ToArray(); hosts = $hosts; operation = 'set'; reason = $null }
             if ($unresolved.Count -gt 0) {
                 # Offline DNS: the rule keeps the addresses it has (contract 2.18 R8).
@@ -538,6 +539,19 @@ if (-not $Remove) {
             $replicaHost = $target.Split('/')[0]
             $replica = Resolve-HostAddresses $replicaHost
             if (@($replica).Count -gt 0) { $rules.Add((New-RuleSpec 'ARCILOGGER Out Replica' 'Outbound' 'TCP' @('445') $replica 'second copy (SMB)')) }
+        }
+
+        # The internet line's speed (Wave 5 §6 N3): UDP to each enabled single-address source
+        # with [sources.snmp] enabled, its own address and SNMP port only; nothing inbound.
+        foreach ($source in @(Get-ArciConfigValue -Config $config -Path 'sources' -Default @())) {
+            $snmp = Get-ArciConfigValue -Config $source -Path 'snmp'
+            if ($null -eq $snmp -or (Get-ArciConfigValue -Config $snmp -Path 'enabled' -Default $false) -ne $true) { continue }
+            if ((Get-ArciConfigValue -Config $source -Path 'enabled' -Default $true) -ne $true) { continue }
+            $address = [string](Get-ArciConfigValue -Config $source -Path 'address' -Default '')
+            if (-not $address -or $address.Contains('/')) { continue }
+            $snmpPort = [string](Get-ArciConfigValue -Config $snmp -Path 'port' -Default 161)
+            $name = 'ARCILOGGER SNMP {0}' -f [string](Get-ArciConfigValue -Config $source -Path 'name' -Default '')
+            $rules.Add((New-RuleSpec $name 'Outbound' 'UDP' @($snmpPort) @($address) 'the internet line speed (SNMPv3, read only)'))
         }
     }
 }

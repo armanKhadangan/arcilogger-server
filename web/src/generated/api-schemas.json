@@ -13899,12 +13899,197 @@
       "title": "SmtpSection",
       "type": "object"
     },
+    "SnmpCapacityIo": {
+      "additionalProperties": false,
+      "description": "A WAN line's capacity in whole Mbit/s (``capacity_mbps``, Wave 5 §6 N1).",
+      "properties": {
+        "down": {
+          "title": "Down",
+          "type": "integer"
+        },
+        "up": {
+          "title": "Up",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "down",
+        "up"
+      ],
+      "title": "SnmpCapacityIo",
+      "type": "object"
+    },
+    "SnmpIn": {
+      "additionalProperties": false,
+      "description": "``[sources.snmp]`` as the browser edits it (Wave 5 §6 N1; the rules check the values, the\nkeys come separately and write-only).",
+      "properties": {
+        "auth": {
+          "default": "sha256",
+          "enum": [
+            "sha1",
+            "sha256",
+            "sha512"
+          ],
+          "title": "Auth",
+          "type": "string"
+        },
+        "capacity_mbps": {
+          "additionalProperties": {
+            "$ref": "#/components/schemas/SnmpCapacityIo"
+          },
+          "title": "Capacity Mbps",
+          "type": "object"
+        },
+        "enabled": {
+          "default": false,
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "interfaces": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Interfaces",
+          "type": "array"
+        },
+        "interval_seconds": {
+          "default": 15,
+          "title": "Interval Seconds",
+          "type": "integer"
+        },
+        "port": {
+          "default": 161,
+          "title": "Port",
+          "type": "integer"
+        },
+        "priv": {
+          "default": "aes128",
+          "enum": [
+            "aes128",
+            "aes256"
+          ],
+          "title": "Priv",
+          "type": "string"
+        },
+        "user": {
+          "default": "",
+          "title": "User",
+          "type": "string"
+        }
+      },
+      "title": "SnmpIn",
+      "type": "object"
+    },
+    "SnmpOut": {
+      "description": "``[sources.snmp]`` of a source (Wave 5 §6 N1); the two keys only as set/unset.",
+      "properties": {
+        "auth": {
+          "enum": [
+            "sha1",
+            "sha256",
+            "sha512"
+          ],
+          "title": "Auth",
+          "type": "string"
+        },
+        "auth_key": {
+          "enum": [
+            "set",
+            "unset"
+          ],
+          "title": "Auth Key",
+          "type": "string"
+        },
+        "capacity_mbps": {
+          "additionalProperties": {
+            "$ref": "#/components/schemas/SnmpCapacityIo"
+          },
+          "title": "Capacity Mbps",
+          "type": "object"
+        },
+        "enabled": {
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "interfaces": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Interfaces",
+          "type": "array"
+        },
+        "interval_seconds": {
+          "title": "Interval Seconds",
+          "type": "integer"
+        },
+        "port": {
+          "title": "Port",
+          "type": "integer"
+        },
+        "priv": {
+          "enum": [
+            "aes128",
+            "aes256"
+          ],
+          "title": "Priv",
+          "type": "string"
+        },
+        "priv_key": {
+          "enum": [
+            "set",
+            "unset"
+          ],
+          "title": "Priv Key",
+          "type": "string"
+        },
+        "user": {
+          "title": "User",
+          "type": "string"
+        }
+      },
+      "required": [
+        "enabled",
+        "port",
+        "user",
+        "auth",
+        "priv",
+        "interfaces",
+        "capacity_mbps",
+        "interval_seconds",
+        "auth_key",
+        "priv_key"
+      ],
+      "title": "SnmpOut",
+      "type": "object"
+    },
     "SourceBody": {
       "additionalProperties": false,
       "properties": {
         "etag": {
           "title": "Etag",
           "type": "string"
+        },
+        "snmp_auth_key": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Snmp Auth Key"
+        },
+        "snmp_priv_key": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Snmp Priv Key"
         },
         "source": {
           "$ref": "#/components/schemas/SourceIn"
@@ -13931,6 +14116,28 @@
           ],
           "title": "Operation",
           "type": "string"
+        },
+        "snmp_auth_key": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Snmp Auth Key"
+        },
+        "snmp_priv_key": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Snmp Priv Key"
         },
         "source": {
           "$ref": "#/components/schemas/SourceIn"
@@ -14471,6 +14678,16 @@
           "title": "Name",
           "type": "string"
         },
+        "snmp": {
+          "anyOf": [
+            {
+              "$ref": "#/components/schemas/SnmpIn"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "transport": {
           "default": "any",
           "enum": [
@@ -14543,6 +14760,16 @@
           "title": "Name",
           "type": "string"
         },
+        "snmp": {
+          "anyOf": [
+            {
+              "$ref": "#/components/schemas/SnmpOut"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "transport": {
           "enum": [
             "any",
@@ -14570,6 +14797,7 @@
         "expected",
         "transport",
         "enabled",
+        "snmp",
         "firewall",
         "last_seen"
       ],

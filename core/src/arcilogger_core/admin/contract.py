@@ -68,6 +68,7 @@ from pydantic import (
 from arcilogger_core.admin.messages import MESSAGES, WARNINGS
 from arcilogger_core.config import EMAIL_ADDRESS, SourceConfig
 from arcilogger_core.layout import RequestQueue
+from arcilogger_core.secretstore import is_snmp_key
 
 # -- schemas ------------------------------------------------------------------------------------
 
@@ -126,6 +127,11 @@ BrowserSecret = Literal[
     "turktrust.password",
     "smtp.password",
     "replica.password",
+]
+#: A source's two SNMPv3 keys (Wave 5 §6 N1: ``snmp.<source>.auth_key`` and ``.priv_key``), set or
+#: deleted with the ``sources`` section.
+SnmpKeyName = Annotated[
+    str, StringConstraints(pattern=r"^snmp\.[a-z0-9][a-z0-9-]{0,62}\.(?:auth|priv)_key$")
 ]
 UploadKind = Literal["kamusm_root", "zamane_client", "smtp_ca"]
 TaskKind = Literal["seal", "credit", "tsa_test", "replica_test"]
@@ -571,7 +577,7 @@ class SetOp(_Model):
 
 class SecretSetOp(_Model):
     op: Literal["secret_set"]
-    name: BrowserSecret
+    name: BrowserSecret | SnmpKeyName
     expect: Literal["set", "unset"]
     #: ``SecretStore.encrypt_value(plaintext)``: the same format as a value of secrets.json.
     token: FernetToken
@@ -579,7 +585,7 @@ class SecretSetOp(_Model):
 
 class SecretDeleteOp(_Model):
     op: Literal["secret_delete"]
-    name: BrowserSecret
+    name: BrowserSecret | SnmpKeyName
     expect: Literal["set", "unset"]
 
 
@@ -1023,7 +1029,7 @@ class SecretChange(_Model):
 class SecretRecord(_Model):
     """One ``settings.secret_change`` audit entry (``operator: "web:<username>"``)."""
 
-    name: BrowserSecret
+    name: BrowserSecret | SnmpKeyName
     action: Literal["set", "delete", "restore"]
     #: ``stored``, ``deleted``, ``absent`` (as ``secretstore.record_change``).
     result: Annotated[str, StringConstraints(pattern=r"^[a-z_]{1,32}$")]
@@ -1061,7 +1067,9 @@ class JournalLine(_Model):
     @model_validator(mode="after")
     def _secrets_masked(self) -> JournalLine:
         for path, change in self.changes.items():
-            if path in BROWSER_SECRETS and not isinstance(change, SecretChange):
+            if (path in BROWSER_SECRETS or is_snmp_key(path)) and not isinstance(
+                change, SecretChange
+            ):
                 raise ValueError(f"{path} is a secret: only set/unset may be journaled")
         _check_unverified(self.state, self.kind, self.section, self.code)
         if self.kind is not None and self.requested_by is None:
@@ -1216,12 +1224,20 @@ def _syslog_sender(value: str) -> str:
     return value
 
 
+#: The strict outbound rule of a source's SNMP (Wave 5 §6 N3): ``ARCILOGGER SNMP <source>``, UDP.
+SNMP_RULE_PREFIX: Final = "ARCILOGGER SNMP "
+
+
 class OutboundRule(_Model):
     """One host of a strict outbound rule; a rule with several hosts or ports has one entry
-    each (``Set-ArciFirewall.ps1`` names the rules)."""
+    each (``Set-ArciFirewall.ps1`` names the rules; NTP and SNMP are UDP, the others TCP)."""
 
     rule: Annotated[
-        str, StringConstraints(pattern=r"^ARCILOGGER Out (NTP|Kamu SM|SMTP( [2-9])?|Replica)$")
+        str,
+        StringConstraints(
+            pattern=r"^ARCILOGGER (Out (NTP|Kamu SM|SMTP( [2-9])?|Replica)"
+            r"|SNMP [a-z0-9][a-z0-9-]{0,62})$"
+        ),
     ]
     host: HostName
     port: int = Field(ge=1, le=65535)

@@ -82,7 +82,13 @@ from arcilogger_core.config import (
     replica_target_text,
 )
 from arcilogger_core.execpolicy import TrustAnchors
-from arcilogger_core.secretstore import SecretValueError, check_secret_value
+from arcilogger_core.secretstore import (
+    SecretValueError,
+    check_secret_value,
+    is_snmp_key,
+    snmp_auth_key,
+    snmp_priv_key,
+)
 from arcilogger_core.smbshare import unc_root
 from arcilogger_core.tsa.preflight import executables_trusted, production_missing
 from arcilogger_core.tsa.zamane_releases import find_release
@@ -454,6 +460,21 @@ def secret_state(name: str, stored: frozenset[str]) -> Literal["set", "unset"]:
     return "set" if name in stored else "unset"
 
 
+def snmp_keys(source: str) -> tuple[str, str]:
+    """A source's two SNMPv3 keys in the secret store (Wave 5 §6 N1)."""
+    return snmp_auth_key(source), snmp_priv_key(source)
+
+
+def section_secrets(section: Section, config: Config) -> tuple[str, ...]:
+    """The secrets a section shows as set/unset: its fixed ones, and for ``sources`` the SNMP keys
+    of every source with an ``[sources.snmp]`` table."""
+    if section == "sources":
+        return tuple(
+            name for source in config.sources if source.snmp for name in snmp_keys(source.name)
+        )
+    return SECTION_SECRETS.get(section, ())
+
+
 def tsa_server(provider: Any, url: Any, port: Any) -> str:
     """``test``, ``production``, ``mock`` or ``custom`` (an RFC 3161 server, another URL)."""
     for name, server in TSA_SERVERS.items():
@@ -467,7 +488,11 @@ def section_values(
 ) -> dict[str, JsonValue]:
     """The values of a section the browser edits (secrets as ``set``/``unset``)."""
     if section == "sources":
-        return {"sources": [source.model_dump(mode="json") for source in config.sources]}
+        return {
+            "sources": [source.model_dump(mode="json") for source in config.sources],
+            # the SNMP keys as set/unset: setting one changes the section's etag too
+            **{name: secret_state(name, stored) for name in section_secrets(section, config)},
+        }
     values = {path: current_value(config, path) for path in SECTION_PATHS[section]}
     for name in SECTION_SECRETS.get(section, ()):
         values[name] = secret_state(name, stored)
@@ -718,7 +743,8 @@ class _Run:
         self._put(op.path, op.value)
 
     def _secret(self, op: SecretSetOp | SecretDeleteOp) -> None:
-        if not self._in_section(EDITABLE[op.name].section, op.name):
+        section: Section = "sources" if is_snmp_key(op.name) else EDITABLE[op.name].section
+        if not self._in_section(section, op.name):
             return
         if op.name in self.secret_changes:
             self.error("config_invalid", op.name)
@@ -897,6 +923,23 @@ class _Run:
             return False
         return True
 
+    def _snmp_keys(self) -> None:
+        """A source whose SNMP this request switches on needs both keys, stored or set here
+        (``snmp_secret_missing``); a key is set only for a source that is there afterwards."""
+        after = {source.name: source for source in (self.sources or self.current.sources)}
+        for key, token in self.secret_changes.items():
+            if is_snmp_key(key) and token is not None:
+                owner = key.split(".")[1]
+                if owner not in after:
+                    self.error("source_not_found", f"sources.{owner}")
+        for path in list(self.changes):
+            name = path.removeprefix("sources.")
+            changed = after.get(name) if path.startswith("sources.") else None
+            if changed is None or changed.snmp is None or not changed.snmp.enabled:
+                continue
+            if any(key not in self.secrets_after for key in snmp_keys(name)):
+                self.error("snmp_secret_missing", f"sources.{name}.snmp")
+
     # -- result ----------------------------------------------------------------------------------
 
     def result(self, ops: Sequence[Op], options: Mapping[str, JsonValue]) -> SectionCheck:
@@ -913,6 +956,7 @@ class _Run:
                 "new": "set" if token is not None else "deleted",
                 "changed": True,
             }
+        self._snmp_keys()
         candidate = None
         edits: list[Edit] = []
         if not self.errors:
@@ -1428,7 +1472,7 @@ class _Body:
         if value != expect or type(value) is not type(expect):  # 1 is no "true", 800.0 no 800
             self.ops.append(SetOp(op="set", path=path, expect=expect, value=value))
 
-    def secret(self, name: BrowserSecret, value: Any) -> None:
+    def secret(self, name: str, value: Any) -> None:
         if not isinstance(value, str):
             self.error("secret_invalid", name)
             return
@@ -1444,7 +1488,7 @@ class _Body:
             )
         )
 
-    def delete(self, name: BrowserSecret) -> None:
+    def delete(self, name: str) -> None:
         if name in self.stored and not any(
             isinstance(op, SecretSetOp | SecretDeleteOp) and op.name == name for op in self.ops
         ):
@@ -1682,6 +1726,8 @@ def _body_sources(body: _Body, data: Mapping[str, Any]) -> None:
         if data.get("confirm") != name:
             body.error("source_confirm_mismatch", f"sources.{name}")
         body.ops.append(SourceRemoveOp(op="source_remove", name=name, expect=current[name]))
+        for key in snmp_keys(name):  # a removed source's SNMP keys go with it
+            body.delete(key)
         return
     raw = data.get("source")
     if not isinstance(raw, Mapping):
@@ -1697,7 +1743,10 @@ def _body_sources(body: _Body, data: Mapping[str, Any]) -> None:
         known = isinstance(label, str) and _SOURCE_NAME.fullmatch(label) is not None
         for error in exc.errors(include_input=False, include_url=False):
             key = str(error["loc"][0]) if error["loc"] else ""
-            body.error("source_invalid", f"sources.{label}.{key}" if known and key else "sources")
+            code = "source_invalid"
+            if "snmp_source_is_network" in str(error.get("msg", "")):
+                code, key = "snmp_source_is_network", "snmp"  # N1: a single address only
+            body.error(code, f"sources.{label}.{key}" if known and key else "sources")
         return
     if name is None:
         body.ops.append(SourceAddOp(op="source_add", source=source))
@@ -1707,6 +1756,10 @@ def _body_sources(body: _Body, data: Mapping[str, Any]) -> None:
         body.ops.append(
             SourceUpdateOp(op="source_update", name=name, expect=current[name], source=source)
         )
+    # The SNMPv3 keys (N1): write-only, never in the source itself or in an answer.
+    for given, key in zip(("snmp_auth_key", "snmp_priv_key"), snmp_keys(source.name), strict=True):
+        if data.get(given) is not None:
+            body.secret(key, data[given])
 
 
 _BODIES: Final[Mapping[Section, Callable[[_Body, Mapping[str, Any]], None]]] = MappingProxyType(

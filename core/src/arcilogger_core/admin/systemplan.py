@@ -42,6 +42,7 @@ from typing import Any, Final
 from urllib.parse import urlparse
 
 from arcilogger_core.admin.contract import (
+    SNMP_RULE_PREFIX,
     AdminPolicy,
     DocumentError,
     FirewallPlan,
@@ -199,6 +200,12 @@ def _outbound(inputs: PlanInputs, problems: list[PlanProblem]) -> list[OutboundR
     if config.replica.enabled and replica is not None:
         text = str(replica).replace("\\", "/").lstrip("/")
         add("ARCILOGGER Out Replica", text.split("/")[0] or None, SMB_PORT)
+    # The internet line's speed (Wave 5 §6 N3): UDP to each enabled single-address source with
+    # SNMP on, its own address and port only; nothing inbound.
+    for source in config.sources:
+        snmp = source.snmp
+        if snmp is not None and snmp.enabled and source.enabled and not source.is_network:
+            add(f"{SNMP_RULE_PREFIX}{source.name}", source.address, snmp.port)
     return rules
 
 

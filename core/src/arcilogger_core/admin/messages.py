@@ -263,6 +263,19 @@ MESSAGES: Final[Mapping[str, tuple[str, str]]] = MappingProxyType(
             "Kaynak sayısı üst sınırına ulaşıldı.",
             "The maximum number of sources has been reached.",
         ),
+        # The internet line's speed over SNMPv3 (Wave 5 §6 N1).
+        "snmp_secret_missing": (
+            "SNMP'yi açmak için SNMPv3 kimlik doğrulama ve şifreleme anahtarlarının ikisi de "
+            "gerekir (8-64 karakter).",
+            "Switching SNMP on needs both the SNMPv3 authentication and privacy keys (8 to 64 "
+            "characters).",
+        ),
+        "snmp_source_is_network": (
+            "SNMP yalnızca tek bir adresi olan kaynakta açılabilir; bir ağ adresine istek "
+            "gönderilmez.",
+            "SNMP can only be switched on for a source with a single address; no request goes "
+            "to a network.",
+        ),
         "secret_invalid": (
             "Girilen gizli bilgi geçersiz (boş, çok uzun ya da kontrol karakteri içeriyor).",
             "The secret is invalid (empty, too long or containing control characters).",
