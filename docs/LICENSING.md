@@ -112,7 +112,7 @@ licence state.
 | `/compliance` | Uyum Durumu: the ten check cards, the status report (PDF), the configuration backup confirmation | 5651 Core |
 | `/legal-status` | Legal-validity status: the banner on every page (every signed-in user) | 5651 Core |
 | `/system` | System page: resource use, disk forecast, database size, services, scheduled tasks, clock | 5651 Core |
-| `/activity` | Canlı Durum: the internet line's speed (`/activity/wan`, the WAN interface counters read over SNMPv3; no person data) | 5651 Core |
+| `/activity` | Canlı Durum: `/activity/wan`, the internet line's speed (the WAN interface counters read over SNMPv3; no person data); base product | 5651 Core |
 | `/archive-reloads` | Archive reload: days older than the database window asked back from the sealed vault, and their progress | 5651 Core |
 | `/usage` | The data of the Kullanım page, exports, rebuilds | Usage analytics |
 | `/reports` | Scheduled reports, runs, preview | Scheduled usage reports |
