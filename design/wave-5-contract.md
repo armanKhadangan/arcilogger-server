@@ -2496,6 +2496,24 @@ All Wave 5 questions are answered (2026-11-02).
   `test_a_deletion_records_token_is_judged_by_the_manifest_that_lists_it`
   (`test_renewal_evidence.py`) runs each through the builder's choice of roots, the standalone
   verifier on the vault and on the package (built, or refused by the self-check).
+- **W5-A-20: retention deletes in batches (#195, the manager's decision; the owner asked about
+  stamp usage on 2026-11-05).** One deletion record a day would double the credit use once the
+  vault passes `retention.days` (about 365 extra stamps a year). The `Retention` task stays daily,
+  but a run deletes only once the oldest expired day has been expired `retention.batch_days` days
+  (new key, `config.RetentionConfig`, default 30, 1–180; `retention.due_day`: that day plus
+  `retention.days + batch_days`, so 1 deletes a day on the day it expires, as before), and then
+  every expired day under one record, one stamp; about 12 records a year. Any other run does
+  nothing and writes nothing (`RetentionResult.due` names the day); a failed run deletes nothing
+  and the next one retries. 180 is KVKK's six-month ceiling of periodic destruction (sahada
+  doğrula: legal review, not a legal claim). Unchanged: the 730-day floor, the re-verification,
+  the record format, the chain anchor, the next manifest listing the record, the `.part` and
+  verify-before-rename rules, and an unfinished record of an interrupted run (finished first,
+  whatever the batch). The key is in `arcilogger.toml` only, not on the settings page. Tests:
+  `test_a_batch_is_due_once_its_oldest_day_has_been_expired_batch_days`,
+  `test_a_day_expired_fewer_than_batch_days_ago_is_not_deleted`,
+  `test_a_due_batch_deletes_every_expired_day_under_one_stamp`,
+  `test_a_failed_batch_deletes_nothing_and_the_next_run_retries` (`core/tests/test_retention.py`)
+  and `test_retention_batch_days_outside_1_to_180_is_refused` (`core/tests/test_config.py`).
 
 ## Deviations — W5-E (2026-11-04)
 
@@ -3452,3 +3470,148 @@ line is W5-E-10, and what it amends in detail:
     later that the bound no longer holds, or a bound that no longer follows from the readings,
     fails at once. When #185 makes the MAC branch cheaper, the readings are taken again and the
     Windows bound goes back to 0.2 s.
+
+## Deviations — #136 (2026-11-05)
+
+- **#136-1: `xz-unsupported` is a failure (`fail`, HATA), and the file is still checked.** A
+  Python built without `lzma` cannot decompress an `.xz` file, so the deep content check of that
+  file, and an extract taken from it, are not done. The verifier reports `xz-unsupported` for each
+  such file (where: its day) and extract (where: "alıntı") instead of `file-content-mismatch` or
+  `extract-mismatch`. Its text says that the check could not be done, not that the file was
+  changed. The level is `fail` because a check the package relies on was not done, so the
+  package is not verified (like `root-none`). The stored file's SHA-256 is still compared with
+  the manifest (`file-ok`), and gzip days and their extracts verify as before.
+  `VERIFIER_VERSION` is "9" (#177 took "8", W5-A-19). The case is in `sealed_format_cases.py`,
+  run with `lzma` taken away in-process. `test_sealed_formats.py` also runs `verify.py` as a
+  script with `lzma` and `_lzma` blocked, and covers an extract from an xz day.
+- **#136-2: only a stamped manifest protects a file from `compress_deterministic`.**
+  - **The refusal:** the sealer refuses with a TR/EN `SealError` (not retryable, so the alert is
+    critical) when the same day's file in the other format is locked, or when a manifest of its
+    folder with its time stamp beside it names it. A stamped manifest that cannot be read
+    protects every file of the folder.
+  - **The narrowing:** a manifest without a time stamp does not protect the file. It belongs to
+    the same failed attempt (the stamp did not come back, e.g. the TSA was down), and the retry
+    rewrites it. Taken literally, "a manifest names it" would block that retry for good after a
+    `seal.compression` change.
+- **#136-3: the guide's wording.**
+  - **Which sentence:** the issue's "§2" is read as item 2 ("Mühürleme") of §1 of
+    `docs/DENETCI-KILAVUZU.md`, where "only the line's stream" stands. §2 (the retention table)
+    does not mention it.
+  - **The Python commands:** the one-liner that opens xz files is dropped (TR §5 "Mühürlü
+    dosyaları açmak", EN "Sealed file formats"). The guide now says to run C2 first, or to use
+    7-Zip, `xz -dc` or `verify.py`.
+  - **Not changed:** the `range_sha256` commands of §9 (TR and EN). They compare their output
+    with a stored hash, so a shortened output fails and is never read as a match (question on
+    #136).
+- **#136-4: the memory ceiling is documented, not capped.** `seal.xz_preset` keeps 0–9 (the
+  manager's preference on #136). `docs/DATA-MODEL.md` "Sealed files" gives the measured memory
+  and the estimate for 8 threads. The H5 wording there now says "a fifth of half the limit, or a
+  tenth of PT2H". The extra decompression that verifies each sealed file was measured on a 1 M
+  line day: 4.4 s for xz 6 at 148 MB/s, about 35 s for a 5 GB day. The issue estimated about a
+  minute.
+
+## Deviations — W5-K (2026-11-05)
+
+- **W5-K-1: the method names.** K2 names `UsageSettings.period(moment)`. The code has
+  `UsageSettings.part_of(moment)` (one minute) and `day_parts(day)` (every minute of a site day),
+  with the type `Part` and `PARTS = ("work", "break", "off")` in
+  `worker/src/arcilogger_worker/usage/config.py`. The reason: `query.Period` is already the date
+  range of every usage answer, and a second "period" in the same module would read as a date range.
+  The database column is `period`, as K3 says. `is_off_hours()` stays: a break is not off hours.
+- **W5-K-2: the `/usage` exports always have the break column.** "Molada aktif (sn)" follows
+  "Mesai dışı aktif (sn)", and "Mola süresi (sn, tahmini)" follows "Mesai dışı süre", also
+  without breaks (then 0). A CSV whose columns come and go with a setting breaks the tools that
+  read it. K5's conditional row and column stay as written for the scheduled reports (PDF, HTML,
+  Excel), which a person reads.
+- **W5-K-3: the report data has a top-level `breaks` flag.** It is true when the work hours had a
+  break on a work day of the report (`UsageSettings.has_breaks`), and the documents show the break
+  row and column by it (K5). The change is additive; schema 1 stays.
+- **W5-K-4: the rollback list.** `0023_usage_period` is in the installer's `$LosslessDowngrades`
+  (#164's test requires every revision above the floor to be judged). Its downgrade first deletes
+  the days that have break rows from the seven rollup tables and `usage_days`: usage analytics,
+  derived data. The older program rebuilds by itself only the last `usage.auto_rebuild_days`
+  days (default 7) of them; an older day inside the 30-day window stays empty until a rebuild is
+  requested, and a day before the window also needs its logs reloaded from the archive
+  (`docs/KULLANIM.md` §2.5). Folding the break rows into the work rows instead was weighed and
+  left out: sessions across a break and the JSON columns (`hosts`, `top_domains`, timelines)
+  cannot be merged exactly in SQL, so the older program's own rebuild is the honest source. Raw
+  logs, log rows, leases and the audit log keep every row.
+- **W5-K-5: files outside the ownership of §6.6.**
+  - `deploy/windows/installer/Install-Arcilogger.ps1`: only the W5-K-4 list entry.
+  - `db/tests/test_cli_downgrade.py`, `db/tests/test_migrations.py`: the head.
+  - Three web places that build a `Metrics` object, so `npm run check` stays green with the new
+    required field until W5-P: `web/src/pages/usage/usage-format.ts` (`sumMetrics`), its test and
+    `web/e2e/mock-usage.ts`.
+- **W5-K-6: the upgrade alone rebuilds nothing.** A work-hours value without breaks and `by_day`
+  keeps the Wave 4 fingerprint (`[days, start, end]`), so an upgrade does not rebuild the recent
+  days; only a changed setting does (test `test_breaks_and_per_day_hours_split_the_day_in_three_parts`).
+- **W5-K-7: the subject answer carries the day's breaks.** P2 shades break bands on the person
+  timeline, and the usage roles cannot read `/settings`. `GET /usage/subjects/{key}` therefore
+  has `breaks` (`[{start, end}]` instants, one-day periods only, like `timeline`; empty
+  otherwise). They come from `usage_days.details.breaks`, the minute runs the rollup itself
+  counted as break, so the bands match the figures even after the setting changed. Additive.
+- **W5-K-8: `0023_usage_period` changes the column in place.** `ALTER COLUMN off_hours TYPE text
+  USING …`, then `RENAME COLUMN … TO period`: one rewrite per table with its indexes and no dead
+  rows, instead of a new column, a full-table `UPDATE` and a new primary key (review of #206).
+  The primary keys keep their names and column order; the downgrade is the mirror image.
+
+## Deviations — W5-L (2026-11-05)
+
+- **W5-L-1: one pull request with W5-K.** The manager's session can push only one branch, and
+  W5-L changes the files W5-K changes. W5-K and W5-L therefore come as one pull request (#206),
+  not two. #199 and #200 both close with it.
+- **W5-L-2: `data_until` is the existing `computed_until`.** Every usage answer has carried
+  `computed_until`, "how far the rollups have processed traffic", since group 2. L3's `data_until`
+  is that field, so the answers add only `updated_at`: the newest `computed_at` of the period's
+  days. The web types get it (types only).
+- **W5-L-3: the back-off measures from the last refresh's start.** `usage_days` keeps the start
+  of the last rollup (`computed_at`) and its `duration_ms`, measured until the day's rows are
+  written (the commit after it is not included; the job's log shows the same figure). A refresh
+  starts when `now ≥ computed_at + 3 × duration_ms`, which is "twice the duration after it
+  ended" (L2); no `finished_at` is stored. A `computed_at` later than now (the clock went back, or a rebuild ran
+  with a later moment) never holds today back.
+- **W5-L-4: measured** (`worker/tests/test_usage_performance.py`, the same container, plain
+  PostgreSQL 16; seconds for the full-day rollup, "again" in brackets):
+
+  | Load | wave-5 | W5-K/L |
+  |---|---|---|
+  | default | 1.77 (1.29) | 1.99 (1.55); another test ran at the same time |
+  | heavy | 6.30 (7.10) | 6.09 (6.90) |
+
+  Both loads refresh every minute. The specification's busy day (a rollup of about a minute late
+  in the day) refreshes about every 3 minutes.
+
+## Deviations — W5-P parts P1 and P2 (2026-11-06)
+
+The manager took P1 and P2 (#203, comment of 2026-11-05); P3 and P4 stay with Gülşah.
+
+- **W5-P-1: the general hours are those most work days share.** The editor is a week table, so
+  the general `start`/`end`/`breaks` of the saved value are the hours that most work days have
+  (on a tie, the earliest day's). Every other work day gets a `by_day` entry; a day equal to the
+  general hours gets none (P1). A stored value reads back unchanged, and an untouched editor
+  saves nothing.
+- **W5-P-2: the browser names the day of a refusal.** It checks the server's rules (K1) before
+  saving, per day: "Salı: her mola en az 5 dakika olmalı." The server's own refusal
+  (`setting_work_hours_breaks`, `setting_work_hours_by_day`) is shown at the setting as before.
+  It is captured as `settings.json` `errors.setting_invalid_work_hours`.
+- **W5-P-3: "Mola" appears when the answer holds break time.** The usage roles cannot read the
+  work hours, so the page cannot tell whether breaks are configured. The "Mola" column (person,
+  device and department tables), tile and company card are shown when a row or the total has
+  `break_active_seconds > 0`, as the reports do (K5). The filter always offers "Mola". The
+  exports always have the column (W5-K-2).
+- **W5-P-4: the timeline's bands come from the day's rollup** (`SubjectDetail.breaks`, W5-K-7).
+  They are shaded behind the day's segments and named in the legend ("Mola (12:00–13:00)").
+  The shared bar `web/src/components/ui/timeline.tsx` gets an optional `bands` property for
+  them; it is outside §6.6's list.
+- **W5-P-5: "Son güncelleme" only for today.** "Son güncelleme 14:36 (veriler 14:35'e kadar)"
+  is shown when the period ends today. An earlier day keeps "Veriler … sonuna kadar işlendi":
+  its last update says nothing new.
+- **W5-P-6: the e2e usage mock has a break hour** (`UsageOptions.breakHour`), so the generated
+  days split one hour of the work hours as the engine does. Its exports have the API's break
+  columns (W5-K-2).
+- **W5-P-7: files outside §6.6's list:**
+  - `web/src/components/ui/timeline.tsx` (W5-P-4);
+  - `web/src/pages/dashboard/dashboard-page.test.tsx`: the Panel's usage refresh, now
+    `USAGE_POLL_MS` = 60 s;
+  - `web/scripts/capture_api_samples.py`: the captured refusal of W5-P-2.
+

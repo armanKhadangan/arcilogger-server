@@ -2,7 +2,7 @@ import { readFile } from 'node:fs/promises';
 
 import { expect, test, type Page } from '@playwright/test';
 
-import { usePreferences, useSampleClock } from './fixtures';
+import { expectNoA11yViolations, usePreferences, useSampleClock } from './fixtures';
 import { mockApi, type MockApi } from './mock-api';
 import { SAMPLE_TODAY, USAGE } from './samples';
 
@@ -42,7 +42,10 @@ test.describe('Kullanım', () => {
     await openUsage(page);
     // Day default (today, processed until 14:35), every duration an estimate.
     await expect(page.getByTestId('period')).toHaveAccessibleName('Dönem: Bugün, 13.10.2026');
-    await expect(page.getByTestId('data-note')).toContainText("Veriler 14:35'e kadar işlendi");
+    // Today: the last update beside the data time (W5 P2; the mock's newest rollup "ran" at 14:35).
+    await expect(page.getByTestId('data-note')).toContainText(
+      "Son güncelleme 14:35 (veriler 14:35'e kadar)",
+    );
     await expect(
       page.getByRole('button', { name: /^tahmini: Tahmini değer: bağlantı kayıtlarından/ }).first(),
     ).toBeVisible();
@@ -341,6 +344,46 @@ test.describe('Kullanım', () => {
     await expect(page.getByRole('button', { name: 'Sonraki dönem' })).toBeEnabled();
     await page.goto('/usage');
     await expect(page.getByRole('button', { name: 'Sonraki dönem' })).toBeDisabled();
+  });
+
+  test('breaks of the work hours: the filter, the column, the card and the timeline band', async ({
+    page,
+  }) => {
+    // W5 P2. Without breaks there is no "Mola" column: every row has 0 s in breaks.
+    await mockApi(page, { signedInAs: 'tolga' });
+    await page.goto('/usage?tab=persons&from=2026-10-05&to=2026-10-09');
+    const plain = page.getByRole('table', { name: 'Kişiler' });
+    await expect(plain.getByRole('button', { name: 'Ayşe Yılmaz', exact: true })).toBeVisible();
+    await expect(plain.getByRole('columnheader', { name: 'Mesai dışı' })).toBeVisible();
+    await expect(plain.getByRole('columnheader', { name: 'Mola' })).toHaveCount(0);
+
+    // A break 10:00-11:00 on work days (the generated people already lunch away at 12:00).
+    await page.unrouteAll({ behavior: 'ignoreErrors' });
+    const api = await mockApi(page, { signedInAs: 'tolga', usage: { breakHour: 10 } });
+    await page.goto('/usage?tab=persons&from=2026-10-05&to=2026-10-09');
+    const table = page.getByRole('table', { name: 'Kişiler' });
+    await expect(table.getByRole('columnheader', { name: 'Mola' })).toBeVisible();
+    const hours = page.getByRole('group', { name: 'Saatler' });
+    for (const name of ['Tüm saatler', 'Mesai içi', 'Mola', 'Mesai dışı'])
+      await expect(hours.getByRole('button', { name, exact: true })).toBeVisible();
+    await hours.getByRole('button', { name: 'Mola', exact: true }).click();
+    await expect(page).toHaveURL(/hours=break/);
+    await expect.poll(() => lastQuery(api, '/usage/subjects')?.get('hours')).toBe('break');
+
+    // The company card, on a work day.
+    await page.goto('/usage?from=2026-10-08&to=2026-10-08');
+    const kpis = page.getByRole('group', { name: 'Şirket geneli özet' });
+    await expect(kpis.getByText('Mola', { exact: true })).toBeVisible();
+
+    // A person's day: the break is a band of the timeline, named in its legend.
+    await page.goto('/usage?tab=persons&from=2026-10-08&to=2026-10-08');
+    await page
+      .getByRole('table', { name: 'Kişiler' })
+      .getByRole('button', { name: 'Ayşe Yılmaz', exact: true })
+      .click();
+    await expect(page.getByTestId('day-band')).toHaveCount(1);
+    await expect(page.getByText('Mola (10:00–11:00)', { exact: true })).toBeVisible();
+    await expectNoA11yViolations(page);
   });
 
   test('the mock reads a period like the API: `from` alone runs to today', async ({ page }) => {

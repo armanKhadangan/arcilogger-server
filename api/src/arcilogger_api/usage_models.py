@@ -14,7 +14,8 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from arcilogger_api.auth.schemas import StrictModel
 
-Hours = Literal["all", "work", "off"]
+#: ``work`` excludes the breaks (contract W5 §6 K4); ``all`` is every part.
+Hours = Literal["all", "work", "break", "off"]
 SubjectKind = Literal["person", "device", "ip"]
 
 
@@ -32,8 +33,11 @@ class UsageEnvelope(BaseModel):
     period: UsagePeriod
     #: Always true: the numbers are estimated from connection logs.
     estimated: bool
-    #: How far the rollups have processed traffic (end of the newest computed day of the period).
+    #: How far the rollups have processed traffic (end of the newest computed day of the period):
+    #: the "veriler … kadar" of the page (contract W5 §6 L3).
     computed_until: datetime | None
+    #: When the newest rollup of the period was computed (W5-L): the page's "Son güncelleme".
+    updated_at: datetime | None
     #: Text key of the method note (web locales ``usage.method_note``).
     notice_key: str
 
@@ -58,6 +62,8 @@ class Metrics(BaseModel):
     sessions: int
     blocked: int
     off_hours_active_seconds: int
+    #: Active time in the breaks of the work hours (W5-K); 0 without breaks.
+    break_active_seconds: int
     first_activity: datetime | None
     last_activity: datetime | None
 
@@ -120,6 +126,13 @@ class TimelineSpan(BaseModel):
     start: datetime
     end: datetime
     category: str | None
+
+
+class BreakSpan(BaseModel):
+    """A break of the work hours on a one-day period, as the day's rollup counted it (W5-K)."""
+
+    start: datetime
+    end: datetime
 
 
 class HeatCell(BaseModel):
@@ -217,6 +230,8 @@ class SubjectDetail(UsageEnvelope):
     devices: list[SubjectRef]
     metrics: Metrics
     timeline: list[TimelineSpan]
+    #: The breaks of the day (one-day periods only, like ``timeline``); empty without breaks.
+    breaks: list[BreakSpan]
     sites: list[SiteRow]
     categories: list[CategoryRow]
     apps: list[AppRow]

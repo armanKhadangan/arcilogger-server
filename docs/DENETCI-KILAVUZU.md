@@ -48,8 +48,9 @@ FortiGate / MikroTik ── syslog ──► ArciCollector ──► spool\<kayn
 2. **Mühürleme.** Gün (Türkiye saatiyle 00:00–24:00, alınma zamanına göre) kapandıktan sonra her
    kaynak dosyası belirlenimci olarak sıkıştırılır, sıkıştırılmış ve açılmış halinin SHA-256
    özetleri ve satır sayısı hesaplanır. Biçim `xz`'dir (`<kaynak>.log.xz`, `audit.jsonl.xz`):
-   dosya, her biri 16 MiB açılmış veri taşıyan bağımsız xz akışlarının art arda eklenmesidir;
-   ARCILOGGER tek bir satırı göstermek için yalnızca o satırın akışını açar. Bu biçimden önce
+   dosya, her biri 16 MiB açılmış veri taşıyan bağımsız xz akışlarının art arda eklenmesidir.
+   ARCILOGGER bir dosyadan ilk kez satır gösterirken satır numarasını denetlemek için önceki
+   akışları bir kez açıp sayar; sonraki gösterimlerde yalnızca satırın akışını açar. Bu biçimden önce
    mühürlenmiş günler `gzip -n` (dosya adı ve zaman yok) ile `.gz` olarak kalır ve hiçbir zaman
    yeniden sıkıştırılmaz (ham kayıt delildir); bir kasada iki biçim yan yana bulunabilir.
    Manifestteki `path` uzantısı biçimi söyler. Dosyaları açmak için bölüm 5'teki "Mühürlü
@@ -107,8 +108,11 @@ Saklama ve imha kararları için hukuk müşavirine verilecek taslaklar:
 [legal/saklama-imha-politikasi-taslak.md](legal/saklama-imha-politikasi-taslak.md),
 [legal/aydinlatma-metni-taslak.md](legal/aydinlatma-metni-taslak.md).
 
-Kasadan silme yalnızca saklama görevi (`retention`, varsayılan **kapalı**) tarafından yapılır:
-süresi dolan gün önce yeniden doğrulanır, silinen günlerin listesi ve özetleri bir **imha
+Kasadan silme yalnızca saklama görevi (`retention`, varsayılan **kapalı**) tarafından yapılır.
+Görev her gün çalışır ama toplu siler: süresi dolan en eski gün `retention.batch_days` gündür
+(varsayılan 30, 1–180) süresi dolmuşsa süresi dolan bütün günler tek bir imha tutanağıyla silinir;
+bir gün bu yüzden süresi dolduktan sonra en çok `batch_days` gün daha kasada kalabilir. Silinecek
+her gün önce yeniden doğrulanır, silinen günlerin listesi ve özetleri bir **imha
 tutanağına** yazılır, tutanak zaman damgasıyla mühürlenir, son silinen günün özetleri **zincir
 çapası** olarak saklanır ve tutanak ertesi günün manifestine eklenir. Böylece zincir, kalan en eski
 günden itibaren doğrulanabilir kalır.
@@ -330,11 +334,15 @@ günlerindir ve aynı şekilde açılır.
   olmalıdır.
 - **Linux/macOS, xz:** `xz -dc <kaynak>.log.xz > <kaynak>.log` (dosyayı yerinde bırakır);
   `xz -t <dosya>` yalnızca bütünlüğü sınar. Eski günler için `gzip -dc <kaynak>.log.gz`.
-- **Python:** `python -I -c "import lzma,shutil,sys; shutil.copyfileobj(lzma.open(sys.argv[1]),
-  open(sys.argv[2], 'wb'))" <kaynak>.log.xz <kaynak>.log` (`.gz` için `lzma` yerine `gzip`).
+- **Python:** `lzma.open` sonraki bir akış bozuksa hata vermeden durabilir ve bozuk bir dosyayı
+  daha kısa bir çıktı olarak açar; bu yüzden kılavuz Python ile açma komutu vermez. Önce C2'yi
+  (SHA-256 kontrolü) yapın, ya da 7-Zip, `xz -dc` veya `verify.py` kullanın: bu üçü hasarda hata
+  verir.
 
-`verify.py` iki biçimi de yalnızca Python'un standart kitaplığıyla okur; Python `lzma` modülü
-olmadan derlenmişse `.xz` dosyaları için hata verir, `.gz` günleri yine doğrulanır.
+`verify.py` iki biçimi de yalnızca Python'un standart kitaplığıyla okur ve her akışı sırayla,
+hasarda hata vererek açar. Python `lzma` modülü olmadan derlenmişse `.xz` dosyaları için
+`xz-unsupported` (HATA) yazar: bu, dosyanın değiştirildiği anlamına gelmez, denetimin
+yapılamadığını söyler (bölüm 7); `.gz` günleri yine doğrulanır.
 
 ### Kök sertifikalar
 
@@ -381,6 +389,7 @@ alanı); ekrandaki her satır ayrıca Türkçe ve İngilizce açıklamasını ta
 |---|---|---|
 | (çıkış kodu 2) | — | Paket okunamadı: şifreli, bozuk ZIP, güvenli olmayan ya da (büyük/küçük harf farkıyla) çakışan dosya adları |
 | `file-hash-mismatch`, `file-size-mismatch`, `file-content-mismatch` | HATA | Kayıt dosyası mühürlendikten sonra değiştirilmiş |
+| `xz-unsupported` | HATA | Bu Python `lzma` modülü olmadan derlenmiş: `.xz` dosyasının açılmış içeriği ya da ondan alınan alıntı denetlenemedi (dosyanın kendisi `file-ok` ile ayrıca sınanır). Dosyanın değiştirildiğini göstermez; `verify.py`'yi `lzma` modülü olan bir Python ile (python.org sürümleri) yeniden çalıştırın |
 | `file-not-sealed` | HATA | Gün klasöründe manifestte olmayan, yani hiç mühürlenmemiş bir dosya var |
 | `file-unexpected` | HATA (kasa kopyasında UYARI) | Paketin bilinen bir parçası olmayan dosya |
 | `file-missing`, `index-file-missing`, `manifest-missing` | HATA | Dosya ya da (kapsamdaki) bir gün eksik |
@@ -679,23 +688,31 @@ manifest's SHA-256 is sent to TÜBİTAK BİLGEM Kamu SM, which returns an RFC 31
 read-only and copies them to the WORM share of the replica (e.g. on a NAS).
 
 **Sealed file formats.** Days are sealed as xz (`<source>.log.xz`, `audit.jsonl.xz`): a
-concatenation of independent xz streams of 16 MiB of uncompressed data each, so ARCILOGGER shows
-one line by decompressing only its stream. Days sealed before this format stay `.gz` (`gzip -n`)
+concatenation of independent xz streams of 16 MiB of uncompressed data each: the first view of a
+line in a file counts the earlier streams (to check its line number); later views open one stream.
+Days sealed before this format stay `.gz` (`gzip -n`)
 and are never re-encoded (raw logs are evidence); one vault can hold both. The `path` suffix in
 the manifest tells the format. Every xz tool decompresses all streams in order into the file whose
 SHA-256 is the manifest's `sha256_uncompressed`: on Windows 7-Zip ("7-Zip → Extract here", or
 `7z e <source>.log.xz`, which writes `<source>.log` itself; do not redirect output with `>`:
 Windows PowerShell 5.1 turns the bytes into UTF-16 text; ARCILOGGER's Windows tests check that 7-Zip reads the
 whole multi-stream file, and a one-time check with the site's 7-Zip version is recommended: field
-check X1), on Linux/macOS `xz -dc <source>.log.xz > <source>.log` (`xz -t` tests only), in Python
-`lzma.open(path).read()`; days sealed as gzip (`.gz`) with `gzip -dc` / `gzip.open`. `verify.py` reads both formats
-with the standard library; a Python built without `lzma` fails on `.xz` files and still verifies
-`.gz` days. In the manual checks of section 5 use `*.xz` (old days `*.gz`) for C2 and
+check X1), on Linux/macOS `xz -dc <source>.log.xz > <source>.log` (`xz -t` tests only); days
+sealed as gzip (`.gz`) with `gzip -dc` / `gzip.open`. Python's `lzma.open` can stop without an
+error at a damaged later stream and give a shorter output, so this guide gives no Python command
+for xz: run C2 (the SHA-256 check) first, or use 7-Zip, `xz -dc` or `verify.py`, which fail on
+damage. `verify.py` reads both formats with the
+standard library, every stream in order; a Python built without `lzma` reports `.xz` files as
+`xz-unsupported` (a failure that says the check could not be done, not that the file was changed)
+and still verifies `.gz` days. In the manual checks of section 5 use `*.xz` (old days `*.gz`) for C2 and
 `xz -dc … | sed -n 'Np'` (old days `gzip -dc`) for C4.
 
 **Retention.** Spool: until the day is sealed. Vault: 760 days by default, never below 730; the
 retention job is off by default. Vault days are deleted only by the retention job, with a
-time-stamped deletion record and a chain anchor. Evidence packages in `exports/`: 30 days. Stored
+time-stamped deletion record and a chain anchor. The job runs daily but deletes in batches: once
+the oldest expired day has been expired for `retention.batch_days` days (default 30, 1–180), every
+expired day goes under one deletion record, so a day may stay in the vault up to `batch_days`
+days after it expired. Evidence packages in `exports/`: 30 days. Stored
 official 5651 reports (`exports\reports\`) and the 5651 lookups: no expiry yet. ARCILOGGER's audit
 log: no expiry in the database; its daily file is sealed with the day. Parsed records in the
 database: derived and rebuildable from the vault; intended 400 days, but no deletion job exists yet

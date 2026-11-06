@@ -2352,6 +2352,27 @@
       "title": "BlockedRow",
       "type": "object"
     },
+    "BreakSpan": {
+      "description": "A break of the work hours on a one-day period, as the day's rollup counted it (W5-K).",
+      "properties": {
+        "end": {
+          "format": "date-time",
+          "title": "End",
+          "type": "string"
+        },
+        "start": {
+          "format": "date-time",
+          "title": "Start",
+          "type": "string"
+        }
+      },
+      "required": [
+        "start",
+        "end"
+      ],
+      "title": "BreakSpan",
+      "type": "object"
+    },
     "Calendar": {
       "properties": {
         "counts": {
@@ -2775,6 +2796,18 @@
         "totals": {
           "$ref": "#/components/schemas/CategoryRow"
         },
+        "updated_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Updated At"
+        },
         "users": {
           "items": {
             "$ref": "#/components/schemas/SubjectRow"
@@ -2791,6 +2824,7 @@
         "period",
         "estimated",
         "computed_until",
+        "updated_at",
         "notice_key",
         "category",
         "totals",
@@ -2833,12 +2867,25 @@
         },
         "period": {
           "$ref": "#/components/schemas/UsagePeriod"
+        },
+        "updated_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Updated At"
         }
       },
       "required": [
         "period",
         "estimated",
         "computed_until",
+        "updated_at",
         "notice_key",
         "items"
       ],
@@ -3414,12 +3461,25 @@
           },
           "title": "Top Sites",
           "type": "array"
+        },
+        "updated_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Updated At"
         }
       },
       "required": [
         "period",
         "estimated",
         "computed_until",
+        "updated_at",
         "notice_key",
         "active_users",
         "metrics",
@@ -4437,12 +4497,25 @@
         "total": {
           "title": "Total",
           "type": "integer"
+        },
+        "updated_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Updated At"
         }
       },
       "required": [
         "period",
         "estimated",
         "computed_until",
+        "updated_at",
         "notice_key",
         "total",
         "limit",
@@ -8478,6 +8551,10 @@
           "title": "Blocked",
           "type": "integer"
         },
+        "break_active_seconds": {
+          "title": "Break Active Seconds",
+          "type": "integer"
+        },
         "download_bytes": {
           "title": "Download Bytes",
           "type": "integer"
@@ -8531,6 +8608,7 @@
         "sessions",
         "blocked",
         "off_hours_active_seconds",
+        "break_active_seconds",
         "first_activity",
         "last_activity"
       ],
@@ -13248,6 +13326,18 @@
         "totals": {
           "$ref": "#/components/schemas/SiteRow"
         },
+        "updated_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Updated At"
+        },
         "users": {
           "items": {
             "$ref": "#/components/schemas/SubjectRow"
@@ -13264,6 +13354,7 @@
         "period",
         "estimated",
         "computed_until",
+        "updated_at",
         "notice_key",
         "domain",
         "category",
@@ -13346,12 +13437,25 @@
         "total": {
           "title": "Total",
           "type": "integer"
+        },
+        "updated_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Updated At"
         }
       },
       "required": [
         "period",
         "estimated",
         "computed_until",
+        "updated_at",
         "notice_key",
         "total",
         "limit",
@@ -14733,6 +14837,13 @@
           "title": "Blocked",
           "type": "array"
         },
+        "breaks": {
+          "items": {
+            "$ref": "#/components/schemas/BreakSpan"
+          },
+          "title": "Breaks",
+          "type": "array"
+        },
         "categories": {
           "items": {
             "$ref": "#/components/schemas/CategoryRow"
@@ -14829,6 +14940,18 @@
           "title": "Timeline",
           "type": "array"
         },
+        "updated_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Updated At"
+        },
         "urls": {
           "items": {
             "$ref": "#/components/schemas/UrlRow"
@@ -14841,12 +14964,14 @@
         "period",
         "estimated",
         "computed_until",
+        "updated_at",
         "notice_key",
         "subject",
         "department",
         "devices",
         "metrics",
         "timeline",
+        "breaks",
         "sites",
         "categories",
         "apps",
@@ -14949,12 +15074,25 @@
         "total": {
           "title": "Total",
           "type": "integer"
+        },
+        "updated_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Updated At"
         }
       },
       "required": [
         "period",
         "estimated",
         "computed_until",
+        "updated_at",
         "notice_key",
         "total",
         "limit",
@@ -16081,6 +16219,7 @@
           "enum": [
             "all",
             "work",
+            "break",
             "off"
           ],
           "title": "Hours",

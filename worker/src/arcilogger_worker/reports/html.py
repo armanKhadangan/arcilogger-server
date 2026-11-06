@@ -218,6 +218,17 @@ def _company(data: Mapping[str, Any]) -> list[str]:
                         "Active time off hours",
                         _e(t.duration(company.get("off_hours_active_seconds"))),
                     ),
+                    *(
+                        [
+                            (
+                                "Moladaki aktif süre*",
+                                "Active time in breaks",
+                                _e(t.duration(company.get("break_active_seconds"))),
+                            )
+                        ]
+                        if data.get("breaks")
+                        else []
+                    ),
                     ("İndirilen", "Downloaded", _e(t.volume(company.get("download_bytes")))),
                     ("Yüklenen", "Uploaded", _e(t.volume(company.get("upload_bytes")))),
                     ("Oturum", "Sessions", _e(t.number(company.get("sessions")))),
@@ -299,7 +310,7 @@ def _departments(data: Mapping[str, Any]) -> list[str]:
     ]
 
 
-def _person_rows(person: Mapping[str, Any], *, dated: bool) -> str:
+def _person_rows(person: Mapping[str, Any], *, dated: bool, breaks: bool) -> str:
     sites = ", ".join(
         f"{_e(site.get('domain'))} {_e(t.duration(site.get('seconds')))}"
         for site in (person.get("top_sites") or [])[:TOP_PERSON_SITES]
@@ -322,8 +333,9 @@ def _person_rows(person: Mapping[str, Any], *, dated: bool) -> str:
         _e(t.number(person.get("sessions"))),
         _e(t.number(person.get("blocked"))),
         _e(t.duration(person.get("off_hours_active_seconds"))),
+        *([_e(t.duration(person.get("break_active_seconds")))] if breaks else []),
     ]
-    aligns = ["left", "center", "right", "right", "right", "right", "right", "right"]
+    aligns = ["left", "center", *["right"] * (len(main) - 2)]
     first = "".join(
         _cell(value, align=align, extra="border-bottom:0;")
         for value, align in zip(main, aligns, strict=True)
@@ -333,7 +345,7 @@ def _person_rows(person: Mapping[str, Any], *, dated: bool) -> str:
         f"{_muted('Kategoriler / Categories:')} {categories or '—'}"
     )
     second = (
-        f'<td colspan="8" style="{FONT}font-size:11px;color:{INK};padding:0 6px 6px 6px;'
+        f'<td colspan="{len(main)}" style="{FONT}font-size:11px;color:{INK};padding:0 6px 6px 6px;'
         f'border-bottom:1px solid {LINE};">{detail}</td>'
     )
     return f"<tr>{first}</tr><tr>{second}</tr>"
@@ -364,13 +376,16 @@ def _persons(data: Mapping[str, Any]) -> list[str]:
         "Engel.",
         "Mesai dışı*",
     ]
-    aligns = ["left", "center", "right", "right", "right", "right", "right", "right"]
+    breaks = bool(data.get("breaks"))
+    if breaks:
+        headers.append("Mola*")
+    aligns = ["left", "center", *["right"] * (len(headers) - 2)]
     head = "".join(
         _cell(_e(header), align=align, header=True)
         for header, align in zip(headers, aligns, strict=True)
     )
     dated = t.several_days(data["period"]["from"], data["period"]["to"])
-    body = "".join(_person_rows(person, dated=dated) for person in persons)
+    body = "".join(_person_rows(person, dated=dated, breaks=breaks) for person in persons)
     pseudonymized = " (takma adlarla / pseudonymised)" if data.get("pseudonymized") else ""
     table = (
         '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" '

@@ -28,6 +28,7 @@ import copy
 import re
 from collections.abc import Iterable, Mapping
 from datetime import date
+from itertools import pairwise
 from typing import Any, Final
 
 from sqlalchemy import func, select
@@ -213,7 +214,9 @@ DEFAULT_SETTINGS: Final[Mapping[str, Any]] = {
     "usage.background_appcats": ["Update", "Network.Service"],
     "usage.background_ports": [53, 123, 853],
     # Work hours (ISO weekdays 1 = Monday, local time "HH:MM", end exclusive); everything else
-    # and the holidays is "mesai dışı".
+    # and the holidays is "mesai dışı". Optional (W5-K): "breaks" [{"start", "end"}] inside the
+    # day ("mola", neither work nor off hours) and "by_day" {"6": {"start", "end", "breaks"?}}
+    # replacing one work day's hours (an entry without "breaks" has none).
     "usage.work_hours": {"days": [1, 2, 3, 4, 5], "start": "08:00", "end": "18:00"},
     # Holidays: "MM-DD" every year (only the fixed-date national holidays of Türkiye are
     # shipped) or "YYYY-MM-DD" once — the religious holidays move every year: the administrator
@@ -392,8 +395,8 @@ SETTING_ERRORS: Final[Mapping[str, tuple[str, str]]] = {
         "Port numbers from 1 to 65535 expected.",
     ),
     "setting_work_hours_fields": (
-        "days, start ve end alanları bekleniyor.",
-        "The fields days, start and end are expected.",
+        "days, start ve end alanları bekleniyor (breaks ve by_day isteğe bağlı).",
+        "The fields days, start and end are expected (breaks and by_day are optional).",
     ),
     "setting_work_hours_days": (
         "Günler 1 (Pazartesi) - 7 (Pazar) arası gün numaraları olmalı.",
@@ -406,6 +409,18 @@ SETTING_ERRORS: Final[Mapping[str, tuple[str, str]]] = {
     "setting_work_hours_order": (
         "Mesai başlangıcı bitişten önce olmalı (gece vardiyası yok).",
         "Work hours must start before they end (no night shift).",
+    ),
+    "setting_work_hours_breaks": (
+        "Molalar SS:DD biçiminde, en az 5 dakika, mesai saatleri içinde, birbiriyle çakışmayan ve "
+        "günde en çok 6 tane olmalı.",
+        "Breaks must be given as HH:MM, last at least 5 minutes, lie inside the work hours, not "
+        "overlap, and number at most 6 a day.",
+    ),
+    "setting_work_hours_by_day": (
+        "Gün bazında saatler yalnız çalışma günleri (1 = Pazartesi … 7 = Pazar) için, başlangıç, "
+        "bitiş ve isteğe bağlı molalarla girilir.",
+        "Hours per weekday are given only for work days (1 = Monday … 7 = Sunday), with start, "
+        "end and optional breaks.",
     ),
     "setting_holiday_invalid": (
         "Geçersiz tarih (AA-GG ya da YYYY-AA-GG).",
@@ -1083,18 +1098,20 @@ def _valid_holiday(text: str) -> bool:
     return True
 
 
-def _work_hours(key: str, value: dict[str, Any]) -> dict[str, Any]:
-    if set(value) != {"days", "start", "end"}:
-        raise SettingValueError(
-            key, "setting_work_hours_fields", f"{key}: days, start ve end alanları bekleniyor"
-        )
-    days, start, end = value["days"], value["start"], value["end"]
-    if not isinstance(days, list) or any(type(d) is not int or not 1 <= d <= 7 for d in days):
-        raise SettingValueError(
-            key,
-            "setting_work_hours_days",
-            f"{key}: days 1 (Pazartesi) - 7 (Pazar) arası gün numaraları olmalı",
-        )
+#: Breaks of one day of ``usage.work_hours`` (contract W5 §6 K1): at most this many, each at
+#: least this many minutes, inside the day's hours and not overlapping.
+WORK_BREAKS_MAX: Final = 6
+WORK_BREAK_MIN_MINUTES: Final = 5
+_WORK_HOURS_FIELDS: Final = frozenset({"days", "start", "end"})
+_WORK_HOURS_OPTIONAL: Final = frozenset({"breaks", "by_day"})
+
+
+def _minutes_of(text: str) -> int:
+    return int(text[:2]) * 60 + int(text[3:])
+
+
+def _work_window(key: str, start: Any, end: Any) -> tuple[str, str]:
+    """``start`` and ``end`` of a day of work hours, checked (HH:MM, start before end)."""
     if not isinstance(start, str) or not isinstance(end, str):
         raise SettingValueError(
             key, "setting_work_hours_time", f"{key}: start ve end SS:DD biçiminde olmalı"
@@ -1111,7 +1128,102 @@ def _work_hours(key: str, value: dict[str, Any]) -> dict[str, Any]:
             "setting_work_hours_order",
             f"{key}: mesai başlangıcı bitişten önce olmalı (gece vardiyası yok)",
         )
-    return {"days": sorted(set(days)), "start": start, "end": end}
+    return start, end
+
+
+def _work_breaks(key: str, value: Any, start: str, end: str) -> list[dict[str, str]]:
+    """The breaks of a day whose hours are ``[start, end)``, sorted (K1)."""
+
+    def refuse(reason: str) -> SettingValueError:
+        return SettingValueError(key, "setting_work_hours_breaks", f"{key}: {reason}")
+
+    if not isinstance(value, list):
+        raise refuse("breaks bir liste olmalı")
+    if len(value) > WORK_BREAKS_MAX:
+        raise refuse(f"bir günde en çok {WORK_BREAKS_MAX} mola")
+    breaks: list[dict[str, str]] = []
+    for item in value:
+        if not isinstance(item, dict) or set(item) != {"start", "end"}:
+            raise refuse("her mola için start ve end alanları bekleniyor")
+        first, last = item["start"], item["end"]
+        if not (
+            isinstance(first, str)
+            and isinstance(last, str)
+            and _HHMM.match(first)
+            and _HHMM.match(last)
+        ):
+            raise refuse("mola başlangıç ve bitişi SS:DD biçiminde olmalı (ör. 12:30)")
+        if _minutes_of(last) - _minutes_of(first) < WORK_BREAK_MIN_MINUTES:
+            raise refuse(f"mola {first}-{last} en az {WORK_BREAK_MIN_MINUTES} dakika olmalı")
+        if first < start or last > end:
+            raise refuse(f"mola {first}-{last} mesai saatleri ({start}-{end}) içinde olmalı")
+        breaks.append({"start": first, "end": last})
+    breaks.sort(key=lambda item: item["start"])
+    for before, after in pairwise(breaks):
+        if after["start"] < before["end"]:
+            raise refuse(
+                f"molalar çakışıyor: {before['start']}-{before['end']} ve "
+                f"{after['start']}-{after['end']}"
+            )
+    return breaks
+
+
+def _work_by_day(key: str, value: Any, days: set[int]) -> dict[str, dict[str, Any]]:
+    """Hours of single weekdays that replace the general ones (K1); work days only."""
+
+    def refuse(reason: str) -> SettingValueError:
+        return SettingValueError(key, "setting_work_hours_by_day", f"{key}: {reason}")
+
+    if not isinstance(value, dict):
+        raise refuse("by_day gün numarasından saatlere bir eşleme olmalı")
+    result: dict[str, dict[str, Any]] = {}
+    for weekday, entry in value.items():
+        if weekday not in {str(day) for day in range(1, 8)} or int(weekday) not in days:
+            raise refuse(f"by_day anahtarı {weekday!r} bir çalışma günü (days) olmalı")
+        if (
+            not isinstance(entry, dict)
+            or not {"start", "end"} <= set(entry)
+            or not set(entry) <= {"start", "end", "breaks"}
+        ):
+            raise refuse(f"by_day[{weekday}]: start, end ve isteğe bağlı breaks bekleniyor")
+        start, end = _work_window(key, entry["start"], entry["end"])
+        day: dict[str, Any] = {"start": start, "end": end}
+        breaks = _work_breaks(key, entry.get("breaks", []), start, end)
+        if breaks:
+            day["breaks"] = breaks
+        result[weekday] = day
+    return dict(sorted(result.items()))
+
+
+def _work_hours(key: str, value: dict[str, Any]) -> dict[str, Any]:
+    """``usage.work_hours``: days, hours, and the optional ``breaks`` and ``by_day`` of W5-K.
+
+    The stored form leaves an empty ``breaks`` or ``by_day`` out, so a value without them keeps
+    the three fields it had before Wave 5.
+    """
+    fields = set(value)
+    if not fields >= _WORK_HOURS_FIELDS or fields - _WORK_HOURS_FIELDS - _WORK_HOURS_OPTIONAL:
+        raise SettingValueError(
+            key,
+            "setting_work_hours_fields",
+            f"{key}: days, start ve end alanları bekleniyor (breaks ve by_day isteğe bağlı)",
+        )
+    days = value["days"]
+    if not isinstance(days, list) or any(type(d) is not int or not 1 <= d <= 7 for d in days):
+        raise SettingValueError(
+            key,
+            "setting_work_hours_days",
+            f"{key}: days 1 (Pazartesi) - 7 (Pazar) arası gün numaraları olmalı",
+        )
+    start, end = _work_window(key, value["start"], value["end"])
+    result: dict[str, Any] = {"days": sorted(set(days)), "start": start, "end": end}
+    breaks = _work_breaks(key, value.get("breaks", []), start, end)
+    if breaks:
+        result["breaks"] = breaks
+    by_day = _work_by_day(key, value.get("by_day", {}), set(days))
+    if by_day:
+        result["by_day"] = by_day
+    return result
 
 
 def set_setting(session: Session, key: str, value: Any, *, updated_by: str) -> None:

@@ -57,7 +57,8 @@
       "from": "2026-10-12",
       "hours": "all",
       "to": "2026-10-12"
-    }
+    },
+    "updated_at": "2026-10-13T04:01:21.177927Z"
   },
   "categories_department_filter": {
     "computed_until": "2026-10-12T21:00:00Z",
@@ -101,7 +102,8 @@
       "from": "2026-10-12",
       "hours": "all",
       "to": "2026-10-12"
-    }
+    },
+    "updated_at": "2026-10-13T04:01:21.177927Z"
   },
   "category": {
     "category": "Video",
@@ -137,12 +139,14 @@
       "upload_bytes": 1860,
       "users": 1
     },
+    "updated_at": "2026-10-13T04:01:21.177927Z",
     "users": [
       {
         "department": "Finans",
         "metrics": {
           "active_seconds": 210,
           "blocked": 0,
+          "break_active_seconds": 0,
           "download_bytes": 18600,
           "first_activity": null,
           "last_activity": null,
@@ -210,12 +214,14 @@
       "upload_bytes": 0,
       "users": 1
     },
+    "updated_at": "2026-10-13T04:01:21.177927Z",
     "users": [
       {
         "department": "Planlama",
         "metrics": {
           "active_seconds": 180,
           "blocked": 0,
+          "break_active_seconds": 0,
           "download_bytes": 16000,
           "first_activity": null,
           "last_activity": null,
@@ -348,12 +354,14 @@
       "upload_bytes": 7700,
       "users": 2
     },
+    "updated_at": "2026-10-13T04:01:21.177927Z",
     "users": [
       {
         "department": "Finans",
         "metrics": {
           "active_seconds": 60,
           "blocked": 0,
+          "break_active_seconds": 0,
           "download_bytes": 5000,
           "first_activity": null,
           "last_activity": null,
@@ -389,6 +397,7 @@
         "metrics": {
           "active_seconds": 30,
           "blocked": 0,
+          "break_active_seconds": 0,
           "download_bytes": 658900,
           "first_activity": null,
           "last_activity": null,
@@ -432,6 +441,7 @@
         "metrics": {
           "active_seconds": 540,
           "blocked": 3,
+          "break_active_seconds": 0,
           "download_bytes": 699500,
           "first_activity": "2026-10-12T06:00:00Z",
           "last_activity": "2026-10-12T16:32:00Z",
@@ -448,6 +458,7 @@
         "metrics": {
           "active_seconds": 300,
           "blocked": 0,
+          "break_active_seconds": 0,
           "download_bytes": 19000,
           "first_activity": "2026-10-12T12:02:00Z",
           "last_activity": "2026-10-12T21:00:00Z",
@@ -464,6 +475,7 @@
         "metrics": {
           "active_seconds": 180,
           "blocked": 0,
+          "break_active_seconds": 0,
           "download_bytes": 16000,
           "first_activity": "2026-10-12T08:00:00Z",
           "last_activity": "2026-10-12T09:00:00Z",
@@ -649,6 +661,7 @@
     "metrics": {
       "active_seconds": 1020,
       "blocked": 3,
+      "break_active_seconds": 0,
       "download_bytes": 734500,
       "first_activity": "2026-10-12T06:00:00Z",
       "last_activity": "2026-10-12T21:00:00Z",
@@ -819,7 +832,8 @@
         "upload_bytes": 300,
         "users": 1
       }
-    ]
+    ],
+    "updated_at": "2026-10-13T04:01:21.177927Z"
   },
   "company_off_hours": {
     "active_users": 2,
@@ -831,6 +845,7 @@
         "metrics": {
           "active_seconds": 120,
           "blocked": 0,
+          "break_active_seconds": 0,
           "download_bytes": 10000,
           "first_activity": "2026-10-12T16:30:00Z",
           "last_activity": "2026-10-12T16:32:00Z",
@@ -847,6 +862,7 @@
         "metrics": {
           "active_seconds": 60,
           "blocked": 0,
+          "break_active_seconds": 0,
           "download_bytes": 3000,
           "first_activity": "2026-10-12T20:59:00Z",
           "last_activity": "2026-10-12T21:00:00Z",
@@ -1032,6 +1048,7 @@
     "metrics": {
       "active_seconds": 180,
       "blocked": 0,
+      "break_active_seconds": 0,
       "download_bytes": 13000,
       "first_activity": "2026-10-12T16:30:00Z",
       "last_activity": "2026-10-12T21:00:00Z",
@@ -1092,11 +1109,12 @@
         "upload_bytes": 0,
         "users": 1
       }
-    ]
+    ],
+    "updated_at": "2026-10-13T04:01:21.177927Z"
   },
   "company_today": {
     "active_users": 1,
-    "computed_until": "2026-10-13T04:01:05.734593Z",
+    "computed_until": "2026-10-13T04:01:21.300349Z",
     "departments": [
       {
         "active_users": 1,
@@ -1104,6 +1122,7 @@
         "metrics": {
           "active_seconds": 60,
           "blocked": 0,
+          "break_active_seconds": 0,
           "download_bytes": 3000,
           "first_activity": "2026-10-12T21:00:00Z",
           "last_activity": "2026-10-12T21:01:00Z",
@@ -1289,6 +1308,7 @@
     "metrics": {
       "active_seconds": 60,
       "blocked": 0,
+      "break_active_seconds": 0,
       "download_bytes": 3000,
       "first_activity": "2026-10-12T21:00:00Z",
       "last_activity": "2026-10-12T21:01:00Z",
@@ -1328,7 +1348,8 @@
         "upload_bytes": 0,
         "users": 1
       }
-    ]
+    ],
+    "updated_at": "2026-10-13T04:01:21.300349Z"
   },
   "company_week": {
     "active_users": 5,
@@ -1340,6 +1361,7 @@
         "metrics": {
           "active_seconds": 540,
           "blocked": 3,
+          "break_active_seconds": 0,
           "download_bytes": 699500,
           "first_activity": "2026-10-12T06:00:00Z",
           "last_activity": "2026-10-12T16:32:00Z",
@@ -1356,6 +1378,7 @@
         "metrics": {
           "active_seconds": 300,
           "blocked": 0,
+          "break_active_seconds": 0,
           "download_bytes": 19000,
           "first_activity": "2026-10-12T12:02:00Z",
           "last_activity": "2026-10-12T21:00:00Z",
@@ -1372,6 +1395,7 @@
         "metrics": {
           "active_seconds": 180,
           "blocked": 0,
+          "break_active_seconds": 0,
           "download_bytes": 16000,
           "first_activity": "2026-10-12T08:00:00Z",
           "last_activity": "2026-10-12T09:00:00Z",
@@ -2565,6 +2589,7 @@
     "metrics": {
       "active_seconds": 1020,
       "blocked": 3,
+      "break_active_seconds": 0,
       "download_bytes": 734500,
       "first_activity": "2026-10-12T06:00:00Z",
       "last_activity": "2026-10-12T21:00:00Z",
@@ -2735,7 +2760,8 @@
         "upload_bytes": 300,
         "users": 1
       }
-    ]
+    ],
+    "updated_at": "2026-10-13T04:01:21.177927Z"
   },
   "company_work_hours": {
     "active_users": 5,
@@ -2747,6 +2773,7 @@
         "metrics": {
           "active_seconds": 420,
           "blocked": 3,
+          "break_active_seconds": 0,
           "download_bytes": 689500,
           "first_activity": "2026-10-12T06:00:00Z",
           "last_activity": "2026-10-12T11:01:00Z",
@@ -2763,6 +2790,7 @@
         "metrics": {
           "active_seconds": 240,
           "blocked": 0,
+          "break_active_seconds": 0,
           "download_bytes": 16000,
           "first_activity": "2026-10-12T12:02:00Z",
           "last_activity": "2026-10-12T12:06:00Z",
@@ -2779,6 +2807,7 @@
         "metrics": {
           "active_seconds": 180,
           "blocked": 0,
+          "break_active_seconds": 0,
           "download_bytes": 16000,
           "first_activity": "2026-10-12T08:00:00Z",
           "last_activity": "2026-10-12T09:00:00Z",
@@ -2964,6 +2993,7 @@
     "metrics": {
       "active_seconds": 840,
       "blocked": 3,
+      "break_active_seconds": 0,
       "download_bytes": 721500,
       "first_activity": "2026-10-12T06:00:00Z",
       "last_activity": "2026-10-12T12:06:00Z",
@@ -3092,7 +3122,8 @@
         "upload_bytes": 300,
         "users": 1
       }
-    ]
+    ],
+    "updated_at": "2026-10-13T04:01:21.177927Z"
   },
   "errors": {
     "forbidden_pseudonyms": {
@@ -3245,7 +3276,7 @@
       "content-disposition": "attachment; filename=\"arcilogger-kullanim-categories-20261012-20261012.xlsx\"",
       "content-type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     },
-    "sha256": "5b83794555eb6f27ae0e9c1aa8b38ccc25f8cdee352807334df2176b770a638e",
+    "sha256": "2da96aab672bd53dda82e1653d55d259e583dd2e83985952a89dd587a7d38efe",
     "size": 5795
   },
   "export_category_csv": {
@@ -3264,9 +3295,9 @@
       "content-disposition": "attachment; filename=\"arcilogger-kullanim-company-20261012-20261012.csv\"",
       "content-type": "text/csv; charset=utf-8"
     },
-    "sha256": "ee0972e7ac2fe3c85432b629ebc02e02cfcad86c27fcd5db3768c335166f681d",
-    "size": 588,
-    "text": "﻿Departman;Kaynak;Aktif kullanıcı;Çevrimiçi süre (sn);Aktif süre (sn, tahmini);Mesai dışı aktif (sn);İndirilen (bayt);Yüklenen (bayt);Oturum;Engellenen;İlk etkinlik;Son etkinlik\r\nŞirket (toplam);;5;1440;1020;180;734500;11560;14;3;2026-10-12T09:00:00+03:00;2026-10-13T00:00:00+03:00\r\nFinans;person;3;840;540;120;699500;11560;10;3;2026-10-12T09:00:00+03:00;2026-10-12T19:32:00+03:00\r\nİdari İşler;vlan;1;420;300;60;19000;0;2;0;2026-10-12T15:02:00+03:00;2026-10-13T00:00:00+03:00\r\nPlanlama;person;1;180;180;0;16000;0;2;0;2026-10-12T11:00:00+03:00;2026-10-12T12:00:00+03:00\r\n"
+    "sha256": "c27d768cbbdc19698fc1889e87a59f54216d4b38d67bf67d9ff5ab1afec07319",
+    "size": 614,
+    "text": "﻿Departman;Kaynak;Aktif kullanıcı;Çevrimiçi süre (sn);Aktif süre (sn, tahmini);Mesai dışı aktif (sn);Molada aktif (sn);İndirilen (bayt);Yüklenen (bayt);Oturum;Engellenen;İlk etkinlik;Son etkinlik\r\nŞirket (toplam);;5;1440;1020;180;0;734500;11560;14;3;2026-10-12T09:00:00+03:00;2026-10-13T00:00:00+03:00\r\nFinans;person;3;840;540;120;0;699500;11560;10;3;2026-10-12T09:00:00+03:00;2026-10-12T19:32:00+03:00\r\nİdari İşler;vlan;1;420;300;60;0;19000;0;2;0;2026-10-12T15:02:00+03:00;2026-10-13T00:00:00+03:00\r\nPlanlama;person;1;180;180;0;0;16000;0;2;0;2026-10-12T11:00:00+03:00;2026-10-12T12:00:00+03:00\r\n"
   },
   "export_company_xlsx": {
     "headers": {
@@ -3274,8 +3305,8 @@
       "content-disposition": "attachment; filename=\"arcilogger-kullanim-company-20261012-20261012.xlsx\"",
       "content-type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     },
-    "sha256": "8e231bc0fd7f9b764f5c49cbe83079655b71e55366a056dc12e61188593f0fc7",
-    "size": 10390
+    "sha256": "e9f00c283b6c8d571be3104bf3c54c621226e87d0fc49da781017ae2a1e1ca05",
+    "size": 10427
   },
   "export_departments_csv": {
     "headers": {
@@ -3283,9 +3314,9 @@
       "content-disposition": "attachment; filename=\"arcilogger-kullanim-subjects-20261012-20261012.csv\"",
       "content-type": "text/csv; charset=utf-8"
     },
-    "sha256": "9ecbc354ee92fef8e6198d432e0ede269dcf825682c5286e1c34f5d739fae239",
-    "size": 483,
-    "text": "﻿Departman;Kaynak;Aktif kullanıcı;Çevrimiçi süre (sn);Aktif süre (sn, tahmini);Mesai dışı aktif (sn);İndirilen (bayt);Yüklenen (bayt);Oturum;Engellenen;İlk etkinlik;Son etkinlik\r\nFinans;person;3;840;540;120;699500;11560;10;3;2026-10-12T09:00:00+03:00;2026-10-12T19:32:00+03:00\r\nİdari İşler;vlan;1;420;300;60;19000;0;2;0;2026-10-12T15:02:00+03:00;2026-10-13T00:00:00+03:00\r\nPlanlama;person;1;180;180;0;16000;0;2;0;2026-10-12T11:00:00+03:00;2026-10-12T12:00:00+03:00\r\n"
+    "sha256": "c29bc0a0c21cbd2efea9b7f00ded5fc58ac94124c3fcada79463385d86d2d4f2",
+    "size": 507,
+    "text": "﻿Departman;Kaynak;Aktif kullanıcı;Çevrimiçi süre (sn);Aktif süre (sn, tahmini);Mesai dışı aktif (sn);Molada aktif (sn);İndirilen (bayt);Yüklenen (bayt);Oturum;Engellenen;İlk etkinlik;Son etkinlik\r\nFinans;person;3;840;540;120;0;699500;11560;10;3;2026-10-12T09:00:00+03:00;2026-10-12T19:32:00+03:00\r\nİdari İşler;vlan;1;420;300;60;0;19000;0;2;0;2026-10-12T15:02:00+03:00;2026-10-13T00:00:00+03:00\r\nPlanlama;person;1;180;180;0;0;16000;0;2;0;2026-10-12T11:00:00+03:00;2026-10-12T12:00:00+03:00\r\n"
   },
   "export_site_csv": {
     "headers": {
@@ -3293,9 +3324,9 @@
       "content-disposition": "attachment; filename=\"arcilogger-kullanim-site-20261012-20261012.csv\"",
       "content-type": "text/csv; charset=utf-8"
     },
-    "sha256": "06dde4137d0ec9ef28ee49d047cfc6c6e9b08f9445ceb6dfdc56881952e472b8",
-    "size": 290,
-    "text": "﻿Ad;Tür;Anahtar;MAC;IP;Departman;Süre (sn, tahmini);Ham süre (sn);Mesai dışı süre (sn, tahmini);İndirilen (bayt);Yüklenen (bayt);Oturum\r\nBurak Demir;person;person:2;;172.20.42.82;Planlama;180;180;0;16000;0;2\r\nCan Öztürk;person;person:3;;172.20.42.82;Finans;120;120;0;7000;0;2\r\n"
+    "sha256": "b6473f48b3e5bb4cce06342a8669aaa40a867f6ccb23b8e4a45fba1171500e8a",
+    "size": 321,
+    "text": "﻿Ad;Tür;Anahtar;MAC;IP;Departman;Süre (sn, tahmini);Ham süre (sn);Mesai dışı süre (sn, tahmini);Mola süresi (sn, tahmini);İndirilen (bayt);Yüklenen (bayt);Oturum\r\nBurak Demir;person;person:2;;172.20.42.82;Planlama;180;180;0;0;16000;0;2\r\nCan Öztürk;person;person:3;;172.20.42.82;Finans;120;120;0;0;7000;0;2\r\n"
   },
   "export_sites_xlsx": {
     "headers": {
@@ -3303,7 +3334,7 @@
       "content-disposition": "attachment; filename=\"arcilogger-kullanim-sites-20261012-20261012.xlsx\"",
       "content-type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     },
-    "sha256": "c8074bf1fc57485a1e40ed30e87697f443dbdb81bea5f7e3f9133a490664af50",
+    "sha256": "58489b7f99772d5d75cd192096fcf28e5e95dceed5eeddac9c847c2506c7cbc9",
     "size": 6123
   },
   "export_subject_csv": {
@@ -3322,8 +3353,8 @@
       "content-disposition": "attachment; filename=\"arcilogger-kullanim-subject-20261012-20261012.xlsx\"",
       "content-type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     },
-    "sha256": "fef5460ea2dbfcdd5c016dcf27ad22ad8e32297fb84fcbae008540b58e81c0ff",
-    "size": 13078
+    "sha256": "88283417ca4bc25537ebafad39bc4c4147abb4d62b410067fdcef3d6f175e589",
+    "size": 13108
   },
   "export_subjects_csv": {
     "headers": {
@@ -3331,9 +3362,9 @@
       "content-disposition": "attachment; filename=\"arcilogger-kullanim-subjects-20261012-20261012.csv\"",
       "content-type": "text/csv; charset=utf-8"
     },
-    "sha256": "7321bfd939c10a9d878b8f2d70d9dc3cbb79f6ab9ba532625074683185ec77a4",
-    "size": 859,
-    "text": "﻿Ad;Tür;Anahtar;MAC;IP;Departman;Çevrimiçi süre (sn);Aktif süre (sn, tahmini);Mesai dışı aktif (sn);İndirilen (bayt);Yüklenen (bayt);Oturum;Engellenen;İlk etkinlik;Son etkinlik;En çok kullanılan siteler;En çok kullanılan kategoriler\r\nAyşe Yılmaz;person;person:1;;172.20.43.37;Finans;660;360;120;687500;11560;7;3;2026-10-12T09:00:00+03:00;2026-10-12T19:32:00+03:00;video.example (210 sn), haber.example (120 sn), posta.example (30 sn);Video (210 sn), Haber (120 sn), Bilinmiyor (30 sn)\r\nBurak Demir;person;person:2;;172.20.42.82;Planlama;180;180;0;16000;0;2;0;2026-10-12T11:00:00+03:00;2026-10-12T12:00:00+03:00;portal.example (180 sn);İş Uygulamaları (180 sn)\r\nCan Öztürk;person;person:3;;172.20.42.82;Finans;120;120;0;7000;0;2;0;2026-10-12T12:00:00+03:00;2026-10-12T13:01:00+03:00;portal.example (120 sn);İş Uygulamaları (120 sn)\r\n"
+    "sha256": "d206be95cefcf75f76056bf6830adbb286d405dc061b20611a9aee9c2aefea0b",
+    "size": 883,
+    "text": "﻿Ad;Tür;Anahtar;MAC;IP;Departman;Çevrimiçi süre (sn);Aktif süre (sn, tahmini);Mesai dışı aktif (sn);Molada aktif (sn);İndirilen (bayt);Yüklenen (bayt);Oturum;Engellenen;İlk etkinlik;Son etkinlik;En çok kullanılan siteler;En çok kullanılan kategoriler\r\nAyşe Yılmaz;person;person:1;;172.20.43.37;Finans;660;360;120;0;687500;11560;7;3;2026-10-12T09:00:00+03:00;2026-10-12T19:32:00+03:00;video.example (210 sn), haber.example (120 sn), posta.example (30 sn);Video (210 sn), Haber (120 sn), Bilinmiyor (30 sn)\r\nBurak Demir;person;person:2;;172.20.42.82;Planlama;180;180;0;0;16000;0;2;0;2026-10-12T11:00:00+03:00;2026-10-12T12:00:00+03:00;portal.example (180 sn);İş Uygulamaları (180 sn)\r\nCan Öztürk;person;person:3;;172.20.42.82;Finans;120;120;0;0;7000;0;2;0;2026-10-12T12:00:00+03:00;2026-10-12T13:01:00+03:00;portal.example (120 sn);İş Uygulamaları (120 sn)\r\n"
   },
   "export_subjects_department_csv": {
     "headers": {
@@ -3341,9 +3372,9 @@
       "content-disposition": "attachment; filename=\"arcilogger-kullanim-subjects-20261012-20261012.csv\"",
       "content-type": "text/csv; charset=utf-8"
     },
-    "sha256": "195ae5744818e7c0e6e67801eb1798033666525e8a42cbeb625fd6b21eec48d8",
-    "size": 681,
-    "text": "﻿Ad;Tür;Anahtar;MAC;IP;Departman;Çevrimiçi süre (sn);Aktif süre (sn, tahmini);Mesai dışı aktif (sn);İndirilen (bayt);Yüklenen (bayt);Oturum;Engellenen;İlk etkinlik;Son etkinlik;En çok kullanılan siteler;En çok kullanılan kategoriler\r\nAyşe Yılmaz;person;person:1;;172.20.43.37;Finans;660;360;120;687500;11560;7;3;2026-10-12T09:00:00+03:00;2026-10-12T19:32:00+03:00;video.example (210 sn), haber.example (120 sn), posta.example (30 sn);Video (210 sn), Haber (120 sn), Bilinmiyor (30 sn)\r\nCan Öztürk;person;person:3;;172.20.42.82;Finans;120;120;0;7000;0;2;0;2026-10-12T12:00:00+03:00;2026-10-12T13:01:00+03:00;portal.example (120 sn);İş Uygulamaları (120 sn)\r\n"
+    "sha256": "c2ee6c11fb8609e179c803490f97768af7a605a1a71d1cc3343c3a2e4a3c2382",
+    "size": 703,
+    "text": "﻿Ad;Tür;Anahtar;MAC;IP;Departman;Çevrimiçi süre (sn);Aktif süre (sn, tahmini);Mesai dışı aktif (sn);Molada aktif (sn);İndirilen (bayt);Yüklenen (bayt);Oturum;Engellenen;İlk etkinlik;Son etkinlik;En çok kullanılan siteler;En çok kullanılan kategoriler\r\nAyşe Yılmaz;person;person:1;;172.20.43.37;Finans;660;360;120;0;687500;11560;7;3;2026-10-12T09:00:00+03:00;2026-10-12T19:32:00+03:00;video.example (210 sn), haber.example (120 sn), posta.example (30 sn);Video (210 sn), Haber (120 sn), Bilinmiyor (30 sn)\r\nCan Öztürk;person;person:3;;172.20.42.82;Finans;120;120;0;0;7000;0;2;0;2026-10-12T12:00:00+03:00;2026-10-12T13:01:00+03:00;portal.example (120 sn);İş Uygulamaları (120 sn)\r\n"
   },
   "hr_subjects_with_pseudonyms_on": {
     "computed_until": "2026-10-12T21:00:00Z",
@@ -3354,6 +3385,7 @@
         "metrics": {
           "active_seconds": 360,
           "blocked": 3,
+          "break_active_seconds": 0,
           "download_bytes": 687500,
           "first_activity": "2026-10-12T06:00:00Z",
           "last_activity": "2026-10-12T16:32:00Z",
@@ -3405,6 +3437,7 @@
         "metrics": {
           "active_seconds": 180,
           "blocked": 0,
+          "break_active_seconds": 0,
           "download_bytes": 16000,
           "first_activity": "2026-10-12T08:00:00Z",
           "last_activity": "2026-10-12T09:00:00Z",
@@ -3440,6 +3473,7 @@
         "metrics": {
           "active_seconds": 120,
           "blocked": 0,
+          "break_active_seconds": 0,
           "download_bytes": 7000,
           "first_activity": "2026-10-12T09:00:00Z",
           "last_activity": "2026-10-12T10:01:00Z",
@@ -3479,10 +3513,11 @@
       "hours": "all",
       "to": "2026-10-12"
     },
-    "total": 3
+    "total": 3,
+    "updated_at": "2026-10-13T04:01:24.664211Z"
   },
   "meta": {
-    "captured_at": "2026-10-13T04:01:17.864635+00:00",
+    "captured_at": "2026-10-13T04:01:42.725567+00:00",
     "clock": "2026-10-13T07:00:00+03:00",
     "info": "captured by web/scripts/capture_api_samples.py; do not edit",
     "site_day": "2026-10-09",
@@ -3572,19 +3607,19 @@
     }
   ],
   "rebuild_done": {
-    "created_at": "2026-10-13T04:01:07.490109Z",
+    "created_at": "2026-10-13T04:01:24.593839Z",
     "error": null,
-    "finished_at": "2026-10-13T04:01:07.532036Z",
+    "finished_at": "2026-10-13T04:01:24.664211Z",
     "from": "2026-10-12",
     "job_id": 1,
     "progress": 1.0,
     "requested_by": "tolga",
-    "started_at": "2026-10-13T04:01:07.532036Z",
+    "started_at": "2026-10-13T04:01:24.664211Z",
     "status": "done",
     "to": "2026-10-12"
   },
   "rebuild_queued": {
-    "created_at": "2026-10-13T04:01:07.490109Z",
+    "created_at": "2026-10-13T04:01:24.593839Z",
     "error": null,
     "finished_at": null,
     "from": "2026-10-12",
@@ -3596,7 +3631,7 @@
     "to": "2026-10-12"
   },
   "rebuild_requested": {
-    "created_at": "2026-10-13T04:01:07.490109Z",
+    "created_at": "2026-10-13T04:01:24.593839Z",
     "error": null,
     "finished_at": null,
     "from": "2026-10-12",
@@ -3639,12 +3674,14 @@
       "upload_bytes": 0,
       "users": 2
     },
+    "updated_at": "2026-10-13T04:01:21.177927Z",
     "users": [
       {
         "department": "Planlama",
         "metrics": {
           "active_seconds": 180,
           "blocked": 0,
+          "break_active_seconds": 0,
           "download_bytes": 16000,
           "first_activity": null,
           "last_activity": null,
@@ -3680,6 +3717,7 @@
         "metrics": {
           "active_seconds": 120,
           "blocked": 0,
+          "break_active_seconds": 0,
           "download_bytes": 7000,
           "first_activity": null,
           "last_activity": null,
@@ -3745,12 +3783,14 @@
       "upload_bytes": 0,
       "users": 1
     },
+    "updated_at": "2026-10-13T04:01:21.177927Z",
     "users": [
       {
         "department": "Finans",
         "metrics": {
           "active_seconds": 120,
           "blocked": 0,
+          "break_active_seconds": 0,
           "download_bytes": 7000,
           "first_activity": null,
           "last_activity": null,
@@ -3940,7 +3980,8 @@
       "hours": "all",
       "to": "2026-10-12"
     },
-    "total": 11
+    "total": 11,
+    "updated_at": "2026-10-13T04:01:21.177927Z"
   },
   "sites_category_filter": {
     "computed_until": "2026-10-12T21:00:00Z",
@@ -3968,7 +4009,8 @@
       "hours": "all",
       "to": "2026-10-12"
     },
-    "total": 1
+    "total": 1,
+    "updated_at": "2026-10-13T04:01:21.177927Z"
   },
   "sites_department_filter": {
     "computed_until": "2026-10-12T21:00:00Z",
@@ -4100,7 +4142,8 @@
       "hours": "all",
       "to": "2026-10-12"
     },
-    "total": 9
+    "total": 9,
+    "updated_at": "2026-10-13T04:01:21.177927Z"
   },
   "sites_search": {
     "computed_until": "2026-10-12T21:00:00Z",
@@ -4128,11 +4171,13 @@
       "hours": "all",
       "to": "2026-10-12"
     },
-    "total": 1
+    "total": 1,
+    "updated_at": "2026-10-13T04:01:21.177927Z"
   },
   "subject_device": {
     "apps": [],
     "blocked": [],
+    "breaks": [],
     "categories": [
       {
         "category": "Bulut Depolama",
@@ -7970,6 +8015,7 @@
     "metrics": {
       "active_seconds": 300,
       "blocked": 0,
+      "break_active_seconds": 0,
       "download_bytes": 19000,
       "first_activity": "2026-10-12T12:02:00Z",
       "last_activity": "2026-10-12T21:00:00Z",
@@ -8034,11 +8080,13 @@
         "start": "2026-10-12T20:59:00Z"
       }
     ],
+    "updated_at": "2026-10-13T04:01:21.177927Z",
     "urls": []
   },
   "subject_ip": {
     "apps": [],
     "blocked": [],
+    "breaks": [],
     "categories": [
       {
         "category": "Bilinmiyor",
@@ -11861,6 +11909,7 @@
     "metrics": {
       "active_seconds": 60,
       "blocked": 0,
+      "break_active_seconds": 0,
       "download_bytes": 5000,
       "first_activity": "2026-10-12T11:00:00Z",
       "last_activity": "2026-10-12T11:01:00Z",
@@ -11907,6 +11956,7 @@
         "start": "2026-10-12T11:00:00Z"
       }
     ],
+    "updated_at": "2026-10-13T04:01:21.177927Z",
     "urls": []
   },
   "subject_person": {
@@ -11956,6 +12006,7 @@
         "url": "/canli"
       }
     ],
+    "breaks": [],
     "categories": [
       {
         "category": "Video",
@@ -15846,6 +15897,7 @@
     "metrics": {
       "active_seconds": 360,
       "blocked": 3,
+      "break_active_seconds": 0,
       "download_bytes": 687500,
       "first_activity": "2026-10-12T06:00:00Z",
       "last_activity": "2026-10-12T16:32:00Z",
@@ -15869,6 +15921,7 @@
         "metrics": {
           "active_seconds": 360,
           "blocked": 3,
+          "break_active_seconds": 0,
           "download_bytes": 687500,
           "first_activity": "2026-10-12T06:00:00Z",
           "last_activity": "2026-10-12T16:32:00Z",
@@ -16022,6 +16075,7 @@
         "start": "2026-10-12T16:30:00Z"
       }
     ],
+    "updated_at": "2026-10-13T04:01:21.177927Z",
     "urls": [
       {
         "blocked": false,
@@ -16055,6 +16109,7 @@
   "subject_reassigned_after": {
     "apps": [],
     "blocked": [],
+    "breaks": [],
     "categories": [
       {
         "category": "İş Uygulamaları",
@@ -19887,6 +19942,7 @@
     "metrics": {
       "active_seconds": 120,
       "blocked": 0,
+      "break_active_seconds": 0,
       "download_bytes": 7000,
       "first_activity": "2026-10-12T09:00:00Z",
       "last_activity": "2026-10-12T10:01:00Z",
@@ -19910,6 +19966,7 @@
         "metrics": {
           "active_seconds": 120,
           "blocked": 0,
+          "break_active_seconds": 0,
           "download_bytes": 7000,
           "first_activity": "2026-10-12T09:00:00Z",
           "last_activity": "2026-10-12T10:01:00Z",
@@ -19967,11 +20024,13 @@
         "start": "2026-10-12T10:00:00Z"
       }
     ],
+    "updated_at": "2026-10-13T04:01:21.177927Z",
     "urls": []
   },
   "subject_reassigned_before": {
     "apps": [],
     "blocked": [],
+    "breaks": [],
     "categories": [
       {
         "category": "İş Uygulamaları",
@@ -23804,6 +23863,7 @@
     "metrics": {
       "active_seconds": 180,
       "blocked": 0,
+      "break_active_seconds": 0,
       "download_bytes": 16000,
       "first_activity": "2026-10-12T08:00:00Z",
       "last_activity": "2026-10-12T09:00:00Z",
@@ -23827,6 +23887,7 @@
         "metrics": {
           "active_seconds": 180,
           "blocked": 0,
+          "break_active_seconds": 0,
           "download_bytes": 16000,
           "first_activity": "2026-10-12T08:00:00Z",
           "last_activity": "2026-10-12T09:00:00Z",
@@ -23884,6 +23945,7 @@
         "start": "2026-10-12T08:59:00Z"
       }
     ],
+    "updated_at": "2026-10-13T04:01:21.177927Z",
     "urls": []
   },
   "subject_week": {
@@ -23933,6 +23995,7 @@
         "url": "/canli"
       }
     ],
+    "breaks": [],
     "categories": [
       {
         "category": "Video",
@@ -28975,6 +29038,7 @@
     "metrics": {
       "active_seconds": 360,
       "blocked": 3,
+      "break_active_seconds": 0,
       "download_bytes": 687500,
       "first_activity": "2026-10-12T06:00:00Z",
       "last_activity": "2026-10-12T16:32:00Z",
@@ -28998,6 +29062,7 @@
         "metrics": {
           "active_seconds": 360,
           "blocked": 3,
+          "break_active_seconds": 0,
           "download_bytes": 687500,
           "first_activity": "2026-10-12T06:00:00Z",
           "last_activity": "2026-10-12T16:32:00Z",
@@ -29130,6 +29195,7 @@
       "pseudonymous": false
     },
     "timeline": [],
+    "updated_at": "2026-10-13T04:01:21.177927Z",
     "urls": [
       {
         "blocked": false,
@@ -29169,6 +29235,7 @@
         "metrics": {
           "active_seconds": 360,
           "blocked": 3,
+          "break_active_seconds": 0,
           "download_bytes": 687500,
           "first_activity": "2026-10-12T06:00:00Z",
           "last_activity": "2026-10-12T16:32:00Z",
@@ -29220,6 +29287,7 @@
         "metrics": {
           "active_seconds": 120,
           "blocked": 0,
+          "break_active_seconds": 0,
           "download_bytes": 7000,
           "first_activity": "2026-10-12T09:00:00Z",
           "last_activity": "2026-10-12T10:01:00Z",
@@ -29259,7 +29327,8 @@
       "hours": "all",
       "to": "2026-10-12"
     },
-    "total": 2
+    "total": 2,
+    "updated_at": "2026-10-13T04:01:21.177927Z"
   },
   "subjects_departments": {
     "computed_until": "2026-10-12T21:00:00Z",
@@ -29271,6 +29340,7 @@
         "metrics": {
           "active_seconds": 540,
           "blocked": 3,
+          "break_active_seconds": 0,
           "download_bytes": 699500,
           "first_activity": "2026-10-12T06:00:00Z",
           "last_activity": "2026-10-12T16:32:00Z",
@@ -29287,6 +29357,7 @@
         "metrics": {
           "active_seconds": 300,
           "blocked": 0,
+          "break_active_seconds": 0,
           "download_bytes": 19000,
           "first_activity": "2026-10-12T12:02:00Z",
           "last_activity": "2026-10-12T21:00:00Z",
@@ -29303,6 +29374,7 @@
         "metrics": {
           "active_seconds": 180,
           "blocked": 0,
+          "break_active_seconds": 0,
           "download_bytes": 16000,
           "first_activity": "2026-10-12T08:00:00Z",
           "last_activity": "2026-10-12T09:00:00Z",
@@ -29322,7 +29394,8 @@
       "hours": "all",
       "to": "2026-10-12"
     },
-    "total": 3
+    "total": 3,
+    "updated_at": "2026-10-13T04:01:21.177927Z"
   },
   "subjects_devices": {
     "computed_until": "2026-10-12T21:00:00Z",
@@ -29333,6 +29406,7 @@
         "metrics": {
           "active_seconds": 300,
           "blocked": 0,
+          "break_active_seconds": 0,
           "download_bytes": 19000,
           "first_activity": "2026-10-12T12:02:00Z",
           "last_activity": "2026-10-12T21:00:00Z",
@@ -29376,6 +29450,7 @@
         "metrics": {
           "active_seconds": 60,
           "blocked": 0,
+          "break_active_seconds": 0,
           "download_bytes": 5000,
           "first_activity": "2026-10-12T11:00:00Z",
           "last_activity": "2026-10-12T11:01:00Z",
@@ -29415,7 +29490,8 @@
       "hours": "all",
       "to": "2026-10-12"
     },
-    "total": 2
+    "total": 2,
+    "updated_at": "2026-10-13T04:01:21.177927Z"
   },
   "subjects_page": {
     "computed_until": "2026-10-12T21:00:00Z",
@@ -29426,6 +29502,7 @@
         "metrics": {
           "active_seconds": 180,
           "blocked": 0,
+          "break_active_seconds": 0,
           "download_bytes": 16000,
           "first_activity": "2026-10-12T08:00:00Z",
           "last_activity": "2026-10-12T09:00:00Z",
@@ -29465,7 +29542,8 @@
       "hours": "all",
       "to": "2026-10-12"
     },
-    "total": 3
+    "total": 3,
+    "updated_at": "2026-10-13T04:01:21.177927Z"
   },
   "subjects_persons": {
     "computed_until": "2026-10-12T21:00:00Z",
@@ -29476,6 +29554,7 @@
         "metrics": {
           "active_seconds": 360,
           "blocked": 3,
+          "break_active_seconds": 0,
           "download_bytes": 687500,
           "first_activity": "2026-10-12T06:00:00Z",
           "last_activity": "2026-10-12T16:32:00Z",
@@ -29527,6 +29606,7 @@
         "metrics": {
           "active_seconds": 180,
           "blocked": 0,
+          "break_active_seconds": 0,
           "download_bytes": 16000,
           "first_activity": "2026-10-12T08:00:00Z",
           "last_activity": "2026-10-12T09:00:00Z",
@@ -29562,6 +29642,7 @@
         "metrics": {
           "active_seconds": 120,
           "blocked": 0,
+          "break_active_seconds": 0,
           "download_bytes": 7000,
           "first_activity": "2026-10-12T09:00:00Z",
           "last_activity": "2026-10-12T10:01:00Z",
@@ -29601,7 +29682,8 @@
       "hours": "all",
       "to": "2026-10-12"
     },
-    "total": 3
+    "total": 3,
+    "updated_at": "2026-10-13T04:01:21.177927Z"
   },
   "subjects_search": {
     "computed_until": "2026-10-12T21:00:00Z",
@@ -29612,6 +29694,7 @@
         "metrics": {
           "active_seconds": 360,
           "blocked": 3,
+          "break_active_seconds": 0,
           "download_bytes": 687500,
           "first_activity": "2026-10-12T06:00:00Z",
           "last_activity": "2026-10-12T16:32:00Z",
@@ -29667,7 +29750,8 @@
       "hours": "all",
       "to": "2026-10-12"
     },
-    "total": 1
+    "total": 1,
+    "updated_at": "2026-10-13T04:01:21.177927Z"
   },
   "viewer_company": {
     "active_users": 5,
@@ -29679,6 +29763,7 @@
         "metrics": {
           "active_seconds": 540,
           "blocked": 3,
+          "break_active_seconds": 0,
           "download_bytes": 699500,
           "first_activity": "2026-10-12T06:00:00Z",
           "last_activity": "2026-10-12T16:32:00Z",
@@ -29695,6 +29780,7 @@
         "metrics": {
           "active_seconds": 300,
           "blocked": 0,
+          "break_active_seconds": 0,
           "download_bytes": 19000,
           "first_activity": "2026-10-12T12:02:00Z",
           "last_activity": "2026-10-12T21:00:00Z",
@@ -29711,6 +29797,7 @@
         "metrics": {
           "active_seconds": 180,
           "blocked": 0,
+          "break_active_seconds": 0,
           "download_bytes": 16000,
           "first_activity": "2026-10-12T08:00:00Z",
           "last_activity": "2026-10-12T09:00:00Z",
@@ -29896,6 +29983,7 @@
     "metrics": {
       "active_seconds": 1020,
       "blocked": 3,
+      "break_active_seconds": 0,
       "download_bytes": 734500,
       "first_activity": "2026-10-12T06:00:00Z",
       "last_activity": "2026-10-12T21:00:00Z",
@@ -30066,7 +30154,8 @@
         "upload_bytes": 300,
         "users": 1
       }
-    ]
+    ],
+    "updated_at": "2026-10-13T04:01:24.664211Z"
   },
   "viewer_sites_pseudonymous": {
     "category": "İş Uygulamaları",
@@ -30100,12 +30189,14 @@
       "upload_bytes": 0,
       "users": 2
     },
+    "updated_at": "2026-10-13T04:01:24.664211Z",
     "users": [
       {
         "department": "Planlama",
         "metrics": {
           "active_seconds": 180,
           "blocked": 0,
+          "break_active_seconds": 0,
           "download_bytes": 16000,
           "first_activity": null,
           "last_activity": null,
@@ -30141,6 +30232,7 @@
         "metrics": {
           "active_seconds": 120,
           "blocked": 0,
+          "break_active_seconds": 0,
           "download_bytes": 7000,
           "first_activity": null,
           "last_activity": null,
@@ -30221,6 +30313,7 @@
         "url": "/canli"
       }
     ],
+    "breaks": [],
     "categories": [
       {
         "category": "Video",
@@ -34111,6 +34204,7 @@
     "metrics": {
       "active_seconds": 360,
       "blocked": 3,
+      "break_active_seconds": 0,
       "download_bytes": 687500,
       "first_activity": "2026-10-12T06:00:00Z",
       "last_activity": "2026-10-12T16:32:00Z",
@@ -34134,6 +34228,7 @@
         "metrics": {
           "active_seconds": 360,
           "blocked": 3,
+          "break_active_seconds": 0,
           "download_bytes": 687500,
           "first_activity": "2026-10-12T06:00:00Z",
           "last_activity": "2026-10-12T16:32:00Z",
@@ -34287,6 +34382,7 @@
         "start": "2026-10-12T16:30:00Z"
       }
     ],
+    "updated_at": "2026-10-13T04:01:24.664211Z",
     "urls": [
       {
         "blocked": false,
@@ -34326,6 +34422,7 @@
         "metrics": {
           "active_seconds": 360,
           "blocked": 3,
+          "break_active_seconds": 0,
           "download_bytes": 687500,
           "first_activity": "2026-10-12T06:00:00Z",
           "last_activity": "2026-10-12T16:32:00Z",
@@ -34377,6 +34474,7 @@
         "metrics": {
           "active_seconds": 180,
           "blocked": 0,
+          "break_active_seconds": 0,
           "download_bytes": 16000,
           "first_activity": "2026-10-12T08:00:00Z",
           "last_activity": "2026-10-12T09:00:00Z",
@@ -34412,6 +34510,7 @@
         "metrics": {
           "active_seconds": 120,
           "blocked": 0,
+          "break_active_seconds": 0,
           "download_bytes": 7000,
           "first_activity": "2026-10-12T09:00:00Z",
           "last_activity": "2026-10-12T10:01:00Z",
@@ -34451,7 +34550,8 @@
       "hours": "all",
       "to": "2026-10-12"
     },
-    "total": 3
+    "total": 3,
+    "updated_at": "2026-10-13T04:01:24.664211Z"
   },
   "viewer_subjects_pseudonymous": {
     "computed_until": "2026-10-12T21:00:00Z",
@@ -34462,6 +34562,7 @@
         "metrics": {
           "active_seconds": 360,
           "blocked": 3,
+          "break_active_seconds": 0,
           "download_bytes": 687500,
           "first_activity": "2026-10-12T06:00:00Z",
           "last_activity": "2026-10-12T16:32:00Z",
@@ -34513,6 +34614,7 @@
         "metrics": {
           "active_seconds": 180,
           "blocked": 0,
+          "break_active_seconds": 0,
           "download_bytes": 16000,
           "first_activity": "2026-10-12T08:00:00Z",
           "last_activity": "2026-10-12T09:00:00Z",
@@ -34548,6 +34650,7 @@
         "metrics": {
           "active_seconds": 120,
           "blocked": 0,
+          "break_active_seconds": 0,
           "download_bytes": 7000,
           "first_activity": "2026-10-12T09:00:00Z",
           "last_activity": "2026-10-12T10:01:00Z",
@@ -34587,6 +34690,7 @@
       "hours": "all",
       "to": "2026-10-12"
     },
-    "total": 3
+    "total": 3,
+    "updated_at": "2026-10-13T04:01:24.664211Z"
   }
 }

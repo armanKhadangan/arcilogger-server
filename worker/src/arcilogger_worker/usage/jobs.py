@@ -1,8 +1,9 @@
 """Usage rollup jobs (spec 10.4) and the rebuild of a range of days.
 
 ==========================  =====================================================================
-``usage.today``             every 5 minutes: today's rollup (``partial``) — the hourly and daily
-                            tables of the current day from what has been loaded so far
+``usage.today``             every minute: today's rollup (``partial``) — the hourly and daily
+                            tables of the current day from what has been loaded so far; it waits
+                            twice the last refresh's duration after that refresh ended (W5-L)
 ``usage.daily``             daily after 00:45: yesterday rebuilt as ``final`` (idempotent)
 ``usage.reattribute``       every 10 minutes: the last ``usage.auto_rebuild_days`` days are
                             rebuilt when what they were computed from changed — a device was
@@ -50,6 +51,8 @@ from arcilogger_worker.usage.store import final_after, inputs_hash, lock_day, wr
 from arcilogger_worker.usage.subjects import build_timelines, timelines_hash
 
 log = logging.getLogger("arcilogger.worker.usage")
+#: ``usage.today`` waits this many times its last duration after that refresh ended (W5-L, L2).
+TODAY_BACKOFF: Final = 2
 
 #: A job that may run long starts no new day after this many seconds.
 TIME_BUDGET: Final = timedelta(seconds=120)
@@ -99,11 +102,11 @@ def rebuild_day(
         status=status,
         inputs=inputs,
         now=now,
-        duration_ms=int((time.perf_counter() - started) * 1000),
+        started=started,
     )
     session.commit()
     details = report.details()
-    details["duration_ms"] = int((time.perf_counter() - started) * 1000)
+    details["duration_ms"] = report.duration_ms
     log.info("usage %s: %s in %s ms", day, status, details["duration_ms"])
     return details
 
@@ -136,13 +139,34 @@ def rebuild_range(
 
 
 def refresh_today(sessions: sessionmaker[Session], *, now: datetime) -> dict[str, Any]:
-    """``usage.today``: today's rollup from the logs loaded so far."""
+    """``usage.today``: today's rollup from the logs loaded so far.
+
+    Back-off (contract W5 §6 L2): the job runs every minute, but a refresh starts only when
+    :data:`TODAY_BACKOFF` times the last one's duration has passed since it ended. A rollup of
+    2 s therefore refreshes every minute; one of 60 s (a very busy site) about every 3 minutes,
+    so the worker never spends all its time on today. Skipped runs answer ``reason: backoff``.
+    """
+    day = site_day(now)
     with sessions() as session:
-        return rebuild_day(session, site_day(now), now=now)
+        row = session.get(UsageDay, day)
+        if row is not None:
+            took = timedelta(milliseconds=int((row.details or {}).get("duration_ms") or 0))
+            due = row.computed_at + took * (1 + TODAY_BACKOFF)
+            # A last refresh "after" now (the clock went back, or a rebuild ran with a later
+            # moment) never holds today back: only a refresh that really just ran does.
+            if row.computed_at <= now < due:
+                return {
+                    "reason": "backoff",
+                    "day": day.isoformat(),
+                    "duration_ms": int(took.total_seconds() * 1000),
+                    "next_after": due.isoformat(),
+                }
+        return rebuild_day(session, day, now=now)
 
 
 def finalize_yesterday(sessions: sessionmaker[Session], *, now: datetime) -> dict[str, Any]:
-    """``usage.daily``: yesterday, final (also when the five-minute job saw all of it)."""
+    """``usage.daily``: yesterday, final (also when the minute job saw all of it); never
+    held back by the back-off of :func:`refresh_today`."""
     with sessions() as session:
         return rebuild_day(session, site_day(now) - timedelta(days=1), now=now)
 
