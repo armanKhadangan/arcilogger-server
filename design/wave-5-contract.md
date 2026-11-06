@@ -3605,8 +3605,10 @@ line is W5-E-10, and what it amends in detail:
   not two. #199 and #200 both close with it.
 - **W5-L-2: `data_until` is the existing `computed_until`.** Every usage answer has carried
   `computed_until`, "how far the rollups have processed traffic", since group 2. L3's `data_until`
-  is that field, so the answers add only `updated_at`: the newest `computed_at` of the period's
-  days. The web types get it (types only).
+  is that field, so the answers add only `updated_at`. That is the `computed_at` of the period's
+  last computed day, the day `computed_until` comes from: a rebuild of an earlier day does not
+  move "Son güncelleme" (amended 2026-11-06 after #209's review; it was the newest `computed_at`
+  of all the period's days). The web types get it (types only).
 - **W5-L-3: the back-off measures from the last refresh's start.** `usage_days` keeps the start
   of the last rollup (`computed_at`) and its `duration_ms`, measured until the day's rows are
   written (the commit after it is not included; the job's log shows the same figure). A refresh
@@ -3632,7 +3634,10 @@ The manager took P1 and P2 (#203, comment of 2026-11-05); P3 and P4 stay with G�
   the general `start`/`end`/`breaks` of the saved value are the hours that most work days have
   (on a tie, the earliest day's). Every other work day gets a `by_day` entry; a day equal to the
   general hours gets none (P1). A stored value reads back unchanged, and an untouched editor
-  saves nothing.
+  saves nothing. A value written outside the editor (`arcilogger-db settings set`) keeps its shape
+  when one day changes (amended 2026-11-06 after #209's review): its general hours stay while a
+  work day still has them, and then a stored `by_day` entry equal to them stays while its day
+  keeps them.
 - **W5-P-2: the browser names the day of a refusal.** It checks the server's rules (K1) before
   saving, per day: "Salı: her mola en az 5 dakika olmalı." The server's own refusal
   (`setting_work_hours_breaks`, `setting_work_hours_by_day`) is shown at the setting as before.
