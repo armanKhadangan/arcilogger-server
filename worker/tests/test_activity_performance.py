@@ -8,11 +8,10 @@ when it is due, every time.
 The load is synthetic, shaped like the load generator's browsing (``tools/loadgen``: its sites,
 their typical durations and volumes, lognormal spread, an interim log every 120 s): per session a
 DNS answer, a web filter log with the host name and the traffic logs, from devices without a
-lease (``ip:`` subjects). The rows are written straight into the tables. Before "now" (11:00)
-the last three minutes are written whole (the warm-up's last slices read them at full density)
-together with every session still open at 11:00 and a tenth of the older closed sessions (they
-fill the snapshot's earlier minutes); then each tick's 10 s of rows are written and the thread's
-tick runs, while the loop runs its probe. ``ARCILOGGER_ACTIVITY_PERF``: ``1`` (default) both
+lease (``ip:`` subjects). The rows are written straight into the tables. The 95 minutes before
+"now" (11:00: the snapshot's hour and the session overlap) are written at full density, so each
+tick's read meets the table it would meet on site; then each tick's 10 s of rows are written and
+the thread's tick runs, while the loop runs its probe. The figures include the per-tick read. ``ARCILOGGER_ACTIVITY_PERF``: ``1`` (default) both
 loads, ``0`` skips. Run with ``-s`` to see the figures (recorded on #211 and in W5-M-4).
 """
 
@@ -27,6 +26,7 @@ import random
 import sys
 import threading
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from functools import cache
@@ -62,10 +62,10 @@ PROBE_LATE = timedelta(seconds=2)
 TICK = timedelta(seconds=10)
 TICKS = 30
 INTERIM = 120
-#: Written whole before "now" (the warm-up's dense slices), and the share of older sessions.
-DENSE = timedelta(minutes=3)
-SAMPLE = 0.1
+#: The history before "now": the last 60 minutes and the session overlap, at full density,
+#: written as it is generated, this many lines at a time.
 HISTORY = timedelta(minutes=95)
+CHUNK = 100_000
 
 
 @cache
@@ -84,19 +84,21 @@ Line = tuple[Any, dict[str, Any]]
 
 @dataclass
 class Load:
-    """The lines (``(table, row)``) written before "now", and those of the ticks after it."""
+    """The lines (``(table, row)``) of the ticks after "now", and how many came before it."""
 
-    before: list[Line] = field(default_factory=list)
     later: list[Line] = field(default_factory=list)
+    before: int = 0
 
 
-def generate(rate: float, devices: int, seed: int) -> Load:
+def generate(
+    rate: float, devices: int, seed: int, write_before: Callable[[list[Line]], None]
+) -> Load:
     """Sessions over :data:`HISTORY` before "now" and the ticks after it, ``rate`` lines per
-    second on average over ``devices`` addresses; only the lines written are kept (module
-    text)."""
+    second on average over ``devices`` addresses. The lines before "now" go to
+    ``write_before``, :data:`CHUNK` at a time; the later ones are kept."""
     sites = [site for site in loadgen().SITES if not site.blocked]
     weights = [site.weight for site in sites]
-    rng, sample = random.Random(seed), random.Random(seed + 1)  # noqa: S311 - synthetic load
+    rng = random.Random(seed)  # noqa: S311 - synthetic load
     # Lines per session: a DNS answer, a web log, the final log and the interim logs.
     per_session = 3 + sum(
         site.weight * max(0.0, site.duration * math.exp(0.405) / INTERIM - 0.5) for site in sites
@@ -104,11 +106,14 @@ def generate(rate: float, devices: int, seed: int) -> Load:
     session_rate = rate / per_session
     begin, finish = NOW - HISTORY, NOW + TICK * TICKS
     load = Load()
+    pending: list[Line] = []
     moment = begin
     number = 0
     while True:
         moment += timedelta(seconds=rng.expovariate(session_rate))
         if moment >= finish:
+            write_before(pending)
+            load.before += len(pending)
             return load
         number += 1
         site = rng.choices(sites, weights=weights)[0]
@@ -118,9 +123,6 @@ def generate(rate: float, devices: int, seed: int) -> Load:
         duration = max(1, int(rng.lognormvariate(0, 0.9) * site.duration))
         received = max(200, int(rng.lognormvariate(0, 1.0) * site.received))
         sent = max(120, received // rng.randint(8, 40))
-        end = moment + timedelta(seconds=duration)
-        if end < NOW - DENSE and sample.random() >= SAMPLE:
-            continue  # a closed session left out: only its sample fills the earlier minutes
         port = 1024 + number % 60000
         lines: list[Line] = [
             (
@@ -190,7 +192,11 @@ def generate(rate: float, devices: int, seed: int) -> Load:
             )
         )
         for line in lines:
-            (load.later if line[1]["time"] >= NOW else load.before).append(line)
+            (load.later if line[1]["time"] >= NOW else pending).append(line)
+        if len(pending) >= CHUNK:
+            write_before(pending)
+            load.before += len(pending)
+            pending = []
 
 
 def write(session: Session, lines: list[Line]) -> int:
@@ -246,16 +252,17 @@ def test_the_snapshot_keeps_up_and_the_loop_is_not_held(
 ) -> None:
     with db_engine.begin() as connection:
         ensure_partitions(connection, today=DAY)
-    load = generate(rate, devices, seed=5651)
+    started = time.monotonic()
+    load = generate(rate, devices, seed=5651, write_before=lambda lines: write(db_session, lines))
     later = load.later
     figures: dict[str, Any] = {
         "lines_per_second": round(
             sum(1 for line in later if line[1]["time"] < NOW + TICK * TICKS)
             / (TICK * TICKS).total_seconds()
         ),
-        "written_before": write(db_session, load.before),
+        "written_before": load.before,
+        "write_before_s": round(time.monotonic() - started),
     }
-    load.before.clear()
 
     clock = Clock(NOW)
     runner = Runner(db_engine, layout.activity, gate=lambda now, engine: None, clock=clock)

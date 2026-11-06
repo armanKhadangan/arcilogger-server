@@ -1650,7 +1650,7 @@ def capture_usage(server: TestServer, template: str, root: Path) -> dict[str, An
             out["hr_subjects_with_pseudonyms_on"] = get(hr, "/subjects", kind="person")
             with mock.patch.object(activity_routes, "utc_now", lambda: moment):
                 out["activity"]["viewer_devices_pseudonymous"] = capture.json(
-                    viewer.get(devices, params={"window": "1"}), 200
+                    viewer.get(devices, params={"window": "5"}), 200
                 )
             out["pseudonyms"] = capture.json(admin.get(f"{usage}/pseudonyms"), 200)
             out["pseudonyms_search"] = capture.json(

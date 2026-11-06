@@ -3682,12 +3682,16 @@ The manager took P1 and P2 (#203, comment of 2026-11-05); P3 and P4 stay with GÃ
   the window, each counted once, for the subject of the minute it started in. `last_seen` is the
   end of the subject's newest minute with traffic, at most `data_until`: the snapshot keeps no
   newest row per subject. `warming_up` (new, `true` while the worker's snapshot does not cover
-  the last 60 minutes yet, and while there is no snapshot) tells the page that the numbers are
-  still incomplete.
+  the last 60 minutes yet, while there is no snapshot, and while it is more than 60 s old) tells
+  the page that the numbers are still incomplete. The top domains and applications are summed
+  from each minute's 5 largest, so they are approximate. The snapshot keeps, per person or
+  device subject, only the address its row shows (`subject.ip`): `Directory.resolve` takes the
+  kind and the MAC from the key, and the row has no department, so the VLAN is not kept.
 - **W5-M-3: one snapshot for every window.** The rows, totals and `per_minute` are sums of the
   snapshot's minutes: the last `window` minutes, and the last 60, both ending with the minute
   under way. Persons with `usage_excluded`, access, the KVKK notice and pseudonyms are applied
-  when the API answers, never in the file.
+  when the API answers, never in the file. A long connection's bytes appear as its interim logs
+  come, about every 120 s, so the 1-minute window is often empty (X-B1).
 - **W5-M-4: M2 counts through an incremental snapshot; M4's guard redefined** (the owner's
   decision on #201, 2026-11-06 02:07Z). A request that read its range would read 75 minutes of
   logs at 2,000 lines/s, about 9 million lines. Instead the worker's `activity.tick` (every
@@ -3697,17 +3701,27 @@ The manager took P1 and P2 (#203, comment of 2026-11-05); P3 and P4 stay with GÃ
   increment rule, attribution, names and background rules are KullanÄ±m's.
   - Rows are read by id, in pages, above the table's highest id of 5 s before (`ID_MARGIN`, ten
     times ingest's 0.5 s flush; from the id sequence, not `max(id)`), and each id is counted
-    once: a batch committed late is not lost.
+    once: a batch committed late is not lost. Each tick's read covers the rows of the last
+    5 minutes (`LATE_ROWS`), not the whole range: a row committed more than 5 minutes after its
+    time is left to the day's rollup (the warm-up's slices read it when its time is not yet
+    covered).
   - A session's logs are kept while it can still log (its newest an interim log younger than
     `usage.session_overlap_seconds`); it is counted again when logs come for it, and counted
-    whole once more when it ends. Over a whole day the snapshot's bytes per subject and hour, and
-    per destination, equal `compute_day`'s (`worker/tests/test_activity.py`). A session's web
+    whole once more when it ends. A session that logs again after it ended (a pause longer than
+    the overlap, or a log committed after its final one) is looked up when its first new row
+    says it ran for at least 60 s: the count of its earlier logs is taken back and it goes on
+    with all of them, so nothing is counted twice. A session whose logs all leave the read range
+    is over. Over a whole day, also fed tick by tick with a moving clock, the snapshot's bytes
+    per subject and hour, and per destination, equal `compute_day`'s
+    (`worker/tests/test_activity.py`). A session's web
     filter and application logs are read when it is first counted, its DNS answers (the newest
     for its address before its start) only when no such log names it.
   - **Its own thread** (the owner's decision on #201, 2026-11-06 07:08Z): `activity.tick` is not
     a job of the loop but a thread of the worker process (`activity.Runner`) with its own
     database engine, so no job waits on it. It starts and stops with the service; on the stop
-    event the tick under way ends after its current chunk and the file is still written whole.
+    event the tick under way ends after its current chunk or page and the file is still written
+    whole; the service waits for it at most 20 s (WinSW allows 30 s) and logs when it did not
+    stop. The licence gate runs inside the tick's error handling, through the thread's engine.
     While `usage_analytics` is off it idles and asks again at each tick (one `skipped` row a
     site day, LISANS Â§2.3); the API's gate stays. Its ticks are recorded in `job_runs` as
     `activity.tick` at most once a minute (`ok`, or `failed` when the last tick failed, with the
@@ -3723,7 +3737,9 @@ The manager took P1 and P2 (#203, comment of 2026-11-05); P3 and P4 stay with GÃ
     address) and applications through name tables: no name, user, URL or raw line. It is sparse,
     replaced whole through a renamed temporary file (not fsynced: rewritten every tick and
     rebuilt from the logs after a restart), only when it changed, and only the subject-minutes
-    whose totals changed are put together again.
+    whose totals changed are put together again. Its name tables hold only the names its minutes
+    use. Memory is bounded: subjects and minutes leave with the 60 minutes, and at most 200,000
+    ended sessions wait to be counted (beyond that the oldest are dropped, and it is logged).
   - **M4's guard, as redefined with the thread** (`perf` tests, measured on the cloud container
     and in the CI perf job):
     - (a) a request answers from the snapshot in under 1 s at the default subject count
@@ -3755,7 +3771,8 @@ The manager took P1 and P2 (#203, comment of 2026-11-05); P3 and P4 stay with GÃ
   `core/src/arcilogger_core/layout.py` (`Layout.activity`, as W5-N's `wan_rates`), the job's
   rows in CORRELATION and LISANS/LICENSING Â§2.3 (granted on #201, 02:07Z), and the thread's
   start/stop hunk of `worker/src/arcilogger_worker/service.py` and
-  `worker/tests/test_service.py` (granted on #201, 07:08Z);
+  `worker/tests/test_service.py` (granted on #201, 07:08Z); `api/tests/test_errors_and_app.py`
+  (`/activity` among the mounted routers);
   `api/tests/test_license_routes.py` and LISANS/LICENSING Â§1 and Â§2.2 (`/activity` and the
   `usage_analytics` row, granted on #201, 01:19Z); `web/src/lib/api-types.test.ts` and
   `api-samples.test.ts` (`activity-types.ts` in `TYPES_FILES`, the four `Wan*` interfaces in
