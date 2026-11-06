@@ -43,13 +43,22 @@ Sağlayıcı `[tsa] provider` ile, sunucu `[tsa] url` ile seçilir. Web arayüz�
   geçiş: [kamusm.md](kamusm.md) ve [KURULUM.md](KURULUM.md) bölüm 10.
 - **TÜRKTRUST (`turktrust`):** HTTP Basic kimlik doğrulamalı RFC 3161. Varsayılan ve önerilen yol
   HTTPS'tir; TLS sertifikası işletim sisteminin güven deposuyla doğrulanır ve bu doğrulama
-  kapatılamaz. Düz HTTP (port 80) yalnızca bir yönetici `tsa.allow_plain_http` ayarını açıkça
+  kapatılamaz. Düz HTTP (port 80) yalnızca bir yönetici `[tsa] allow_plain_http` ayarını açıkça
   açtığında kullanılabilir (onay metni yazılarak); o zaman kullanıcı adı ve parola ağda şifresiz
   gider ve şerit `credentials_in_clear` uyarısını gösterir (bölüm 5.3). Kullanıcı adı ve parola TOML
   dosyasında değil, gizli depoda saklanır: Ayarlar → Zaman damgası'nda girilir (ya da konsolda
   `secret set turktrust.username` / `secret set turktrust.password`); parola hiçbir log, hata
-  metni ya da çıktıda görünmez. Hesap açma, kök sertifikalar ve elle denetim listesi:
+  metni ya da çıktıda görünmez. Kullanıcı adı ya da parola taşıyan bir `[tsa] url`
+  (`https://kullanıcı:parola@…`) reddedilir ve hata metninde tekrarlanmaz. Kayıtlı TÜRKTRUST
+  hesabını **silmek bu sürümde yalnızca konsoldan** yapılır: `secret delete turktrust.username` ve
+  `secret delete turktrust.password` (tarayıcıdaki **Sil** yalnızca Kamu SM müşteri numarasını ve
+  parolasını siler). Hesap açma, kök sertifikalar ve elle denetim listesi:
   [turktrust.md](turktrust.md).
+- **TÜRKTRUST'ın yanıtları:** 401 ve 403 kimlik bilgisi hatasıdır (yeniden denenmez). Bir
+  yönlendirme (3xx) izlenmez; 3xx ve 408 ile 429 dışındaki her 4xx bir yapılandırma hatasıdır,
+  yeniden denenmez ve metni durum kodunu verip `[tsa] url` ayarını gösterir (adres yolu T1,
+  **sahada doğrula**), hiçbir zaman kimlik bilgisini. 408, 429, 5xx ve ağ hataları "sunucuya
+  ulaşılamıyor" sayılır ve yeniden denenir.
 - **TÜRKTRUST kontör sorgusu sunmaz.** Credit görevi TÜRKTRUST için kontör okumaz, kontör kartı
   şu metni gösterir ve `R20-credit` uyarısı verilmez:
   "Bu sağlayıcı kontör sorgusu sunmuyor; bakiyeyi sağlayıcının portalından izleyin."
@@ -64,15 +73,26 @@ Sağlayıcı `[tsa] provider` ile, sunucu `[tsa] url` ile seçilir. Web arayüz�
 damgalama yalnızca özetlerden oluşan yenileme kaydının SHA-256 özetini gönderir (bölüm 3). Hiçbir
 log satırı sunucudan çıkmaz.
 
-**Vekil sunucu (proxy):** `network.https_proxy` (`http://host:port`, varsayılan boş) ayarlanırsa
+**Vekil sunucu (proxy):** `[network] https_proxy` (`http://host:port`, varsayılan boş) ayarlanırsa
 SİL indirme ile `rfc3161` ve `turktrust` sağlayıcıları bu vekil üzerinden bağlanır. Vekil bu
 sürümde kimlik bilgisi almaz. Zamane konsol istemcisi bu ayarı **kullanmaz**: istemcinin vekili
 nasıl aldığı bilinmiyor (**sahada doğrula**).
 
-**Sıkı giden trafik** (`Set-ArciFirewall.ps1 -StrictOutbound`): sağlayıcı `turktrust` iken güvenlik
-duvarı `[tsa] url` adresinin sunucusuna TCP 443'ü (`tsa.allow_plain_http` ile 443 yerine TCP 80'i)
-ve `tsa.crl_urls` adreslerinin sunucularını açar. `network.https_proxy` ayarlıysa bunların hepsinin
-yerine vekilin adresi ve portu açılır. Kamu SM için açılan adresler: [KURULUM.md](KURULUM.md).
+**Sıkı giden trafik** (`Set-ArciFirewall.ps1 -StrictOutbound`): güvenlik duvarı şu giden kuralları
+açar (hepsi TCP):
+
+| Kural | Ne zaman | Adres ve port |
+|---|---|---|
+| `ARCILOGGER Out TURKTRUST` | sağlayıcı `turktrust` ve vekil yok | `[tsa] url` adresinin sunucusu; port adresin kendi portu, yoksa 80 ya da 443 olmayan `[tsa] port`, yoksa 443 (`[tsa] allow_plain_http` ile `http://` adreste 80) |
+| `ARCILOGGER Out CRL` | `[tsa] crl_urls` dolu ve vekil yok | her SİL adresinin sunucusu, 80 ve 443 (listeler imzalıdır, düz HTTP onlar için güvenlidir) |
+| `ARCILOGGER Out Proxy` | `[network] https_proxy` ayarlı | vekilin adresi ve portu; TÜRKTRUST ve SİL kurallarının yerine |
+| `ARCILOGGER Out Kamu SM` | her zaman | Kamu SM'nin iki sunucusu; sağlayıcı `turktrust` iken yalnızca port 80 (Zamane istemcisi vekil kullanmaz, bu kural vekil ayarlıyken de kalır) |
+
+Tarayıcıdan yapılan bir değişiklikten sonra (Ayarlar → Zaman damgası ya da Genel) yönetim hizmeti
+(ApplySystem) bu kuralları aynı adlar ve portlarla günceller, eksik olanı oluşturur. Hiçbir giden
+kuralı kaldırmaz: ayarı kaldırılan bir `TURKTRUST`, `CRL` ya da `Proxy` kuralı, kurulumun güvenlik
+duvarı adımı (`Set-ArciFirewall.ps1`) yeniden çalışana kadar kalır. Kamu SM için açılan adresler:
+[KURULUM.md](KURULUM.md).
 
 ## 2. "Yasal nitelikli" ne demek?
 
@@ -138,7 +158,7 @@ Yalnızca dışa aktarılmış paketlerin içinde bulunan rapor damgaları yenil
 `exports\reports\` kopyaları yenilenir). Özet algoritmasının yenilenmesi (ham dosyaları yeni bir
 algoritmayla yeniden özetlemek) bu sürümde yoktur.
 
-**Ne zaman?** Bir damga, TSA sertifikasının bitişine `tsa.renew_before_days` günden (varsayılan
+**Ne zaman?** Bir damga, TSA sertifikasının bitişine `[tsa] renew_before_days` günden (varsayılan
 180, 30–730) az kaldığında ve onu kapsayan, sayılan bir yenileme yoksa **yenilenmesi gereken**
 (`due`) olur. `Renew` görevi her gün `arcilogger-core renew` komutunu çalıştırır. Bir çalışma en
 çok **bir** yenileme kaydı yazar ve o an yenilenmesi gereken bütün damgaları bu tek kayda koyar:
@@ -212,13 +232,15 @@ gizleyemez.
 
 ### 3.4 Damga başına durum
 
-Her yenilenebilir damga için durum (`state\renewal.json`, yalnızca `Renew` görevi yazar; API ve
-uyarılar okur):
+Her yenilenebilir damga için durum `state\renewal\renewal.json` dosyasındadır. Bu klasör korumalıdır:
+yalnızca `Renew` görevi (LOCAL SERVICE) ve yöneticiler yazar; API ve worker yalnızca okur.
+Yükseltmeden sonraki ilk sayılan çalıştırmaya kadar önceki sürümün `state\renewal.json` dosyası
+okunur; ondan yalnızca art arda başarısızlık sayısı alınır, dosya yerinde kalır ve sonra okunmaz.
 
 | Durum | Koşul | Düzey |
 |---|---|---|
-| `not_due` | Sertifikanın bitişine `tsa.renew_before_days` günden çok var | — |
-| `due` | Bitişe `tsa.renew_before_days` günden az kaldı ve sayılan yenileme yok | uyarı |
+| `not_due` | Sertifikanın bitişine `[tsa] renew_before_days` günden çok var | — |
+| `due` | Bitişe `[tsa] renew_before_days` günden az kaldı ve sayılan yenileme yok | uyarı |
 | `covered` | Sayılan bir yenileme bu damganın özetini listeliyor, sertifika bitmeden damgalanmış ve kendi durumu `not_due` ya da `covered` | — |
 | `late` | Sayılan yenileme, eski sertifikanın süresi dolduktan **sonra** damgalanmış | uyarı |
 | `uncovered` | Sertifikanın süresi doldu ve sayılan yenileme yok | uyarı |
@@ -239,16 +261,20 @@ uzun süreli kanıt için önerilir. Süresi dolmuş bir damga da yenilenir; o z
 | 0 | Yenilendi ya da yenilenmesi gereken yoktu |
 | 1 | Yenilendi, uyarılarla (bazı damgalar `uncovered`) |
 | 2 | Yapılandırma reddetti (sağlayıcı kimlik bilgisi yok, kök yok) |
-| 3 | Zaman damgası sunucusu başarısız oldu (yeniden denenebilir) |
+| 3 | Zaman damgası sunucusu ya da çalıştırma başarısız oldu, veya başka bir çalıştırma kilidi tutuyor (yeniden denenebilir) |
 
-Komut `state\renewal.json` dosyasını da yazar. `Renew` görevi aynı komuttur; son çalışmasının sonucu
+Kilidi tutan bir çalıştırma dışındaki her çalıştırma `state\renewal\renewal.json` dosyasını yazar,
+başarısız ya da reddedilen bir çalıştırma da (`last_run`, `failures_in_a_row`: `R20-renewal`
+bunları okur). `--dry-run` durumları hesaplayıp dosyaya yazar ama damga almaz, yenileme kaydı
+yazmaz ve `last_run` değerini değiştirmez; yükseltmeden sonra yalnızca önceki sürümün dosyası
+varken hiçbir şey yazmaz. `Renew` görevi aynı komuttur; son çalışmasının sonucu
 Sistem → Zamanlanmış görevler'de görünür ([UYUM-DURUMU.md](UYUM-DURUMU.md) bölüm 4.6).
 
 ### 3.6 Bağımsız doğrulayıcı ve kanıt paketi
 
 Kanıt paketi, bir günün manifest ya da damga özetini (ve paketlenen bir raporun damga özetini)
 içeren yenileme kayıtlarını `vault/renewals/` altında taşır; üç kat derin bir yenileme zinciri de
-böylece pakete girer. Bağımsız doğrulayıcı (`verify.py`, `VERIFIER_VERSION = "5"`) paketteki her gün
+böylece pakete girer. Bağımsız doğrulayıcı (`verify.py`; sürümü raporun başında yazar) paketteki her gün
 damgası için bir bulgu ekler. Sonuç yalnızca paketten, doğrulamanın yapıldığı an ("şimdi") esas
 alınarak hesaplanır; sunucudaki doğrulayıcı aynı kodları verir:
 
@@ -260,6 +286,9 @@ alınarak hesaplanır; sunucudaki doğrulayıcı aynı kodları verir:
 | UYARI | `renewal-late` | Yeniden damgalama, eski sertifikanın süresi dolduktan sonra yapılmış ({date}). | Re-stamped after the old certificate had expired ({date}). |
 | UYARI | `renewal-uncovered` | Damga sertifikasının süresi {date} tarihinde doldu ve yeniden damgalama yok; damga, alındığı an için geçerlidir. | The stamp certificate expired on {date} with no re-stamping; the stamp is valid for the moment it was made. |
 
+`renewal-late` satırındaki tarih yeniden damgalamanın zamanıdır (yenileme damgasının genTime değeri),
+öteki satırlardaki tarih sertifikanın bitişidir.
+
 Yenileme damgasının kendisinin denetimi (`renewal-ok`) ve kapsadığı günler (`renewal-covers`)
 önceki sürümlerdeki gibi raporlanır. Doğrulayıcı çıktısının tamamı:
 [DENETCI-KILAVUZU.md](DENETCI-KILAVUZU.md) bölüm 7.
@@ -270,17 +299,17 @@ Yenileme damgasının kendisinin denetimi (`renewal-ok`) ve kapsadığı günler
 
 `CrlFetch` görevi her gün `arcilogger-core crl fetch` komutunu çalıştırır. Adresler:
 
-- `tsa.crl_urls` doluysa yalnızca bu liste (en çok 20 http(s) adresi);
+- `[tsa] crl_urls` doluysa yalnızca bu liste (en çok 20 http(s) adresi);
 - boşsa sabitlenmiş kökler klasöründeki (`[tsa] roots_dir`) sertifikaların ve her sağlayıcının en
   yeni damgasındaki sertifikaların SİL dağıtım noktaları (yalnızca `http` ve `https`).
 
 Programın içinde **hiçbir SİL adresi yazılı değildir**: Kamu SM'nin SİL adresleri bilinmiyor
 ([kamusm.md](kamusm.md) K10), TÜRKTRUST'ınki TÜRKTRUST'ın "kök sertifikaları ve iptal listeleri"
 sayfasından alınır (T4); ikisi de **sahada doğrula**. Sıkı giden trafikte güvenlik duvarı
-`tsa.crl_urls` adreslerinin sunucularını açar; bu yüzden sıkı giden trafik kullanan bir sitede
-SİL adreslerini `tsa.crl_urls` listesine yazın.
+`[tsa] crl_urls` adreslerinin sunucularını açar; bu yüzden sıkı giden trafik kullanan bir sitede
+SİL adreslerini `[tsa] crl_urls` listesine yazın.
 
-Her liste `[tsa] timeout_seconds` süresiyle, en çok 20 MB olarak ve varsa `network.https_proxy`
+Her liste `[tsa] timeout_seconds` süresiyle, en çok 20 MB olarak ve varsa `[network] https_proxy`
 üzerinden indirilir. İş yalnızca indirir; hiçbir şey göndermez. İmzası sabitlenmiş köklerden ya da
 damgalarda görülen ara sertifikalardan biriyle doğrulanan liste bayt bayt şu adla saklanır:
 
@@ -386,11 +415,11 @@ Daha önce deneme ya da test sağlayıcısıyla damgalanmış günler değişmez
 > TÜRKTRUST bağlantısı şifresiz HTTP ile yapılıyor; kullanıcı adı ve parola ağda açık metin olarak
 > gider. Mümkünse HTTPS'e dönün.
 
-**Neden?** Sağlayıcı `turktrust` ve `tsa.allow_plain_http` açık (Ayarlar → Zaman damgası'nda
+**Neden?** Sağlayıcı `turktrust` ve `[tsa] allow_plain_http` açık (Ayarlar → Zaman damgası'nda
 TÜRKTRUST'ın düz HTTP seçimi). Damgalar alınır; ama HTTP Basic kimlik bilgileri şifrelenmeden gider.
 
 **Ne yapmalı?** Ayarlar → Zaman damgası'nda HTTPS'li TÜRKTRUST seçimine dönün
-(`https://zd.turktrust.com.tr/`, port 443) ve `tsa.allow_plain_http` ayarını kapatın. HTTPS
+(`https://zd.turktrust.com.tr/`, port 443) ve `[tsa] allow_plain_http` ayarını kapatın. HTTPS
 çalışmıyorsa nedenini (güvenlik duvarı, vekil, adres yolu T1) sahada doğrulayın
 ([turktrust.md](turktrust.md)). Parola bir süre açık gittiyse değiştirilmesini değerlendirin.
 
@@ -423,7 +452,7 @@ işaretlenir ([ILK-ADIMLAR.md](ILK-ADIMLAR.md) bölüm 3).
 
 > {count} damganın sertifikası {days} gün içinde sona eriyor; yeniden damgalama bekleniyor.
 
-**Neden?** `due` durumunda damgalar var (bölüm 3.4); `{days}`, `tsa.renew_before_days` değeridir.
+**Neden?** `due` durumunda damgalar var (bölüm 3.4); `{days}`, `[tsa] renew_before_days` değeridir.
 
 **Ne yapmalı?** `Renew` görevi bunu her gün kendisi yapar. Uyarı birkaç gün sürüyorsa Sistem →
 Zamanlanmış görevler'de `Renew` görevinin son sonucuna bakın, `& $core renew --dry-run` ile neyin
@@ -443,8 +472,8 @@ bulun. Bu günlerin kanıt değerini hukuk müşavirinizle değerlendirin.
 
 ### 5.8 `certificate_revoked` — sertifika iptal listesinde (tehlike)
 
-> Zaman damgası sertifikası iptal listesinde: {name}. Kamu SM ile görüşün; hukuki inceleme
-> önerilir.
+> Zaman damgası sertifikası iptal listesinde: {name}. Zaman damgası sağlayıcısıyla görüşün;
+> hukuki inceleme önerilir.
 
 **Neden?** Kullanılan bir TSA sertifikası, saklanan ve doğrulanmış bir iptal listesinde damgadan
 önce iptal edilmiş görünüyor (`crl-revoked`, bölüm 4.2). İlgili günlerin doğrulaması başarısız olur.
@@ -457,12 +486,12 @@ kanıttır. `& $core crl status` hangi listenin bu sonucu verdiğini gösterir.
 
 > {days} günden yeni doğrulanmış bir iptal listesi (SİL) yok.
 
-**Neden?** Kullanılan bir sertifikayı veren için `tsa.crl_max_age_days` (varsayılan 7) günden yeni,
+**Neden?** Kullanılan bir sertifikayı veren için `[tsa] crl_max_age_days` (varsayılan 7) günden yeni,
 doğrulanmış bir liste yok.
 
 **Ne yapmalı?** `& $core crl fetch` çalıştırın ve `& $core crl status` ile başarısızlıklara
 bakın (bölüm 4.1): `unreachable` için güvenlik duvarı, vekil ve adres; `unknown_issuer` ya da
-`bad_signature` için sabitlenmiş kökler. SİL adresleri bilinmiyorsa `tsa.crl_urls` listesine yazın
+`bad_signature` için sabitlenmiş kökler. SİL adresleri bilinmiyorsa `[tsa] crl_urls` listesine yazın
 (K10, T4: **sahada doğrula**).
 
 ## 6. Panel, Mühürleme sayfası ve e-posta uyarıları
@@ -480,7 +509,7 @@ bakın (bölüm 4.1): `unreachable` için güvenlik duvarı, vekil ve adres; `un
 |---|---|---|
 | `R20-renewal` | yüksek | `due` ya da `uncovered` bir damga varsa; ayrıca `Renew` görevi art arda iki kez başarısız olduysa |
 | `R20-cert` | kritik / yüksek | Bir sertifika iptal listesinde (`crl-revoked`, kritik) ya da 30 gün içinde sona eriyor ve yenilemeyle kapsanmamış (yüksek) |
-| `R20-crl` | orta | Kullanılan bir sertifikayı veren için `tsa.crl_max_age_days` günden yeni doğrulanmış liste yok |
+| `R20-crl` | orta | Kullanılan bir sertifikayı veren için `[tsa] crl_max_age_days` günden yeni doğrulanmış liste yok |
 
 Yeniden damgalama, SİL indirme, uyarı şeridi ve TÜRKTRUST sağlayıcısı **5651 Temel** işlevleridir:
 hiçbir lisans durumu onları kapatmaz ([LISANS.md](LISANS.md)).
@@ -491,13 +520,13 @@ Bu sürümün yeni ayarları (`arcilogger.toml`):
 
 | Ayar | Tür, varsayılan | Sınırlar | Anlamı | Tarayıcıdan |
 |---|---|---|---|---|
-| `tsa.renew_before_days` | tamsayı, 180 | 30–730 | Sertifikanın bitişine kaç gün kala yeniden damgalanır (bölüm 3.1) | Ayarlar → Zaman damgası (parolanın yeniden girilmesiyle) |
-| `tsa.crl_urls` | http(s) adres listesi, `[]` | en çok 20 | SİL adresleri; boşsa sertifikalardaki dağıtım noktaları (bölüm 4.1) | Ayarlar → Zaman damgası (parolanın yeniden girilmesiyle) |
-| `tsa.crl_max_age_days` | tamsayı, 7 | 1–60 | Bir liste kaç günden eskiyse `crl_stale` ve `R20-crl` (bölüm 5.9) | Ayarlar → Zaman damgası (parolanın yeniden girilmesiyle) |
-| `network.https_proxy` | metin, `""` | `http://host:port` ya da boş | Giden vekil: SİL indirme, `rfc3161`, `turktrust` (bölüm 1) | Ayarlar → Genel (parolanın yeniden girilmesiyle) |
-| `tsa.allow_plain_http` | mantıksal, false | yalnızca `turktrust` için anlamlı | TÜRKTRUST'a düz HTTP (port 80); `credentials_in_clear` (bölüm 5.3) | yalnızca TÜRKTRUST'ın düz HTTP seçimiyle, onay metni yazılarak |
+| `[tsa] renew_before_days` | tamsayı, 180 | 30–730 | Sertifikanın bitişine kaç gün kala yeniden damgalanır (bölüm 3.1) | Ayarlar → Zaman damgası (parolanın yeniden girilmesiyle) |
+| `[tsa] crl_urls` | http(s) adres listesi, `[]` | en çok 20 | SİL adresleri; boşsa sertifikalardaki dağıtım noktaları (bölüm 4.1) | Ayarlar → Zaman damgası (parolanın yeniden girilmesiyle) |
+| `[tsa] crl_max_age_days` | tamsayı, 7 | 1–60 | Bir liste kaç günden eskiyse `crl_stale` ve `R20-crl` (bölüm 5.9) | Ayarlar → Zaman damgası (parolanın yeniden girilmesiyle) |
+| `[network] https_proxy` | metin, `""` | `http://host:port` ya da boş | Giden vekil: SİL indirme, `rfc3161`, `turktrust` (bölüm 1) | Ayarlar → Genel (parolanın yeniden girilmesiyle) |
+| `[tsa] allow_plain_http` | mantıksal, false | yalnızca `turktrust` için anlamlı | TÜRKTRUST'a düz HTTP (port 80); `credentials_in_clear` (bölüm 5.3) | yalnızca TÜRKTRUST'ın düz HTTP seçimiyle, onay metni yazılarak |
 
-Sağlayıcı `turktrust` iken `[tsa] url` `https://` ile başlamalıdır; `tsa.allow_plain_http`
+Sağlayıcı `turktrust` iken `[tsa] url` `https://` ile başlamalıdır; `[tsa] allow_plain_http`
 kapalıyken `http://` bir adres yapılandırma hatası verir (parola açık metin olarak giderdi).
 İlgili mevcut ayarlar: `[tsa] provider`, `[tsa] url`, `[tsa] roots_dir`,
 `[tsa] legal_root_fingerprints`, `[tsa] require_critical_eku`, `[tsa] timeout_seconds`,
@@ -517,7 +546,7 @@ bir testle korunur. Ayrıntılar ve elle denetim listesi: [turktrust.md](turktru
 | T1 | TÜRKTRUST'ın TSA adresi: sunucu `zd.turktrust.com.tr` TÜRKTRUST'ın e-postasından, **yol** bilinmiyor; varsayılan `https://zd.turktrust.com.tr/` | `[tsa] url` |
 | T2 | TÜRKTRUST yanlış kimlik bilgisine HTTP 401 verir; bakiye bittiğinde ne yanıt verdiği bilinmiyor: durum metninde kontör sözcüğü geçen bir ret "kontör yok" sayılır | `[tsa] credit_regex` |
 | T3 | TÜRKTRUST'ın TSA sertifikası EKU uzantısını kritik işaretliyor mu? | `[tsa] require_critical_eku` |
-| T4 | TÜRKTRUST'ın SİL sunucusu (TÜRKTRUST'ın "kök sertifikaları ve iptal listeleri" sayfasından) | `tsa.crl_urls`; güvenlik duvarı bu sunucuları açar |
-| T5 | Port 80 (düz HTTP): TÜRKTRUST'ın e-postası 80 ve 443 portlarını adlandırır; varsayılan HTTPS'tir, damga testi bunu sahada doğrular | `tsa.allow_plain_http` (varsayılan kapalı) |
-| K10 | Kamu SM'nin SİL adresleri | `tsa.crl_urls`, boşsa sertifikalardaki dağıtım noktaları |
-| — | Zamane konsol istemcisinin vekil sunucuyu nasıl aldığı | bu sürümde yok: Zamane `network.https_proxy` kullanmaz |
+| T4 | TÜRKTRUST'ın SİL sunucusu (TÜRKTRUST'ın "kök sertifikaları ve iptal listeleri" sayfasından) | `[tsa] crl_urls`; güvenlik duvarı bu sunucuları açar |
+| T5 | Port 80 (düz HTTP): TÜRKTRUST'ın e-postası 80 ve 443 portlarını adlandırır; varsayılan HTTPS'tir, damga testi bunu sahada doğrular | `[tsa] allow_plain_http` (varsayılan kapalı) |
+| K10 | Kamu SM'nin SİL adresleri | `[tsa] crl_urls`, boşsa sertifikalardaki dağıtım noktaları |
+| — | Zamane konsol istemcisinin vekil sunucuyu nasıl aldığı | bu sürümde yok: Zamane `[network] https_proxy` kullanmaz |

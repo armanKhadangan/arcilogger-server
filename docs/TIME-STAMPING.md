@@ -47,13 +47,22 @@ with re-authentication):
 - **TÜRKTRUST (`turktrust`):** RFC 3161 with HTTP Basic authentication. HTTPS is the default and
   recommended way; the TLS certificate is verified with the operating system's trust store, and
   this verification cannot be turned off. Plain HTTP (port 80) is used only when an
-  administrator explicitly switches on `tsa.allow_plain_http` (by typing a confirmation); the
+  administrator explicitly switches on `[tsa] allow_plain_http` (by typing a confirmation); the
   username and password then cross the network unencrypted, and the banner shows the warning
   `credentials_in_clear` (section 5.3). The username and password are kept in the secret store,
   not in the TOML file: they are entered under Ayarlar → Zaman damgası (or on the console with
   `secret set turktrust.username` / `secret set turktrust.password`); the password never appears
-  in a log, an error text or an output. Opening the account, the root certificates and the manual
+  in a log, an error text or an output. A `[tsa] url` that carries a username or password
+  (`https://user:password@…`) is refused, and the error text does not repeat it. In this release
+  the stored TÜRKTRUST account is **cleared on the console only**: `secret delete
+  turktrust.username` and `secret delete turktrust.password` (the browser's **Sil** (Delete)
+  clears only the Kamu SM customer number and password). Opening the account, the root certificates and the manual
   checklist: [turktrust.md](turktrust.md).
+- **TÜRKTRUST's answers:** 401 and 403 are a credentials error (not retried). A redirect (3xx) is
+  not followed; a 3xx, and any 4xx other than 408 and 429, is a configuration error, is not
+  retried, and its text gives the status code and points to `[tsa] url` (the URL path, T1,
+  **verify on site**), never to the credentials. 408, 429, 5xx and network errors count as "the
+  server cannot be reached" and are retried.
 - **TÜRKTRUST offers no credit query.** The Credit task reads no credit for TÜRKTRUST, the credit
   card shows this text, and no `R20-credit` alert is raised:
   "This provider offers no credit query; watch the balance in the provider's portal."
@@ -68,15 +77,26 @@ with re-authentication):
 sends the SHA-256 of a renewal record, which itself lists hashes only (section 3). No log line
 leaves the server.
 
-**Proxy:** when `network.https_proxy` (`http://host:port`, empty by default) is set, the CRL
+**Proxy:** when `[network] https_proxy` (`http://host:port`, empty by default) is set, the CRL
 download and the `rfc3161` and `turktrust` providers connect through it. The proxy takes no
 credentials in this release. The Zamane console client does **not** use this setting: how the
 client takes a proxy is unknown (**verify on site**, "sahada doğrula").
 
-**Strict outbound** (`Set-ArciFirewall.ps1 -StrictOutbound`): with the provider `turktrust`, the
-firewall opens TCP 443 to the host of `[tsa] url` (TCP 80 instead of 443 with
-`tsa.allow_plain_http`) and the hosts of `tsa.crl_urls`. When `network.https_proxy` is set, the
-proxy's host and port replace them all. The hosts opened for Kamu SM: [INSTALL.md](INSTALL.md).
+**Strict outbound** (`Set-ArciFirewall.ps1 -StrictOutbound`): the firewall opens these outbound
+rules (all TCP):
+
+| Rule | When | Host and port |
+|---|---|---|
+| `ARCILOGGER Out TURKTRUST` | provider `turktrust` and no proxy | the host of `[tsa] url`; the port is the URL's own, else `[tsa] port` unless it is 80 or 443, else 443 (80 for an `http://` URL with `[tsa] allow_plain_http`) |
+| `ARCILOGGER Out CRL` | `[tsa] crl_urls` set and no proxy | the host of each CRL URL, on 80 and 443 (the lists are signed, so plain HTTP is safe for them) |
+| `ARCILOGGER Out Proxy` | `[network] https_proxy` set | the proxy's host and port, in place of the TÜRKTRUST and CRL rules |
+| `ARCILOGGER Out Kamu SM` | always | Kamu SM's two servers; with the provider `turktrust`, port 80 only (the Zamane client takes no proxy, so this rule stays with a proxy too) |
+
+After a change in the browser (Ayarlar → Zaman damgası, or Genel) the management service
+(ApplySystem) updates these rules with the same names and ports, and creates one that is missing.
+It never removes an outbound rule: a `TURKTRUST`, `CRL` or `Proxy` rule whose setting went away
+stays until the installer's firewall step (`Set-ArciFirewall.ps1`) runs again. The hosts opened
+for Kamu SM: [INSTALL.md](INSTALL.md).
 
 ## 2. What "legal grade" means
 
@@ -145,7 +165,7 @@ Report stamps that exist only inside exported packages are not renewed (the copi
 in `exports\reports\` are). Hash-algorithm renewal (re-hashing the raw files with a new algorithm)
 is not part of this release.
 
-**When?** A stamp becomes **due** (`due`) when fewer than `tsa.renew_before_days` days (default
+**When?** A stamp becomes **due** (`due`) when fewer than `[tsa] renew_before_days` days (default
 180, 30–730) are left until its TSA certificate expires and no counting renewal covers it. The
 `Renew` task runs `arcilogger-core renew` every day. One run writes at most **one** renewal record
 and puts every stamp due at that moment into it: at most one stamp a day, so credit use stays
@@ -216,13 +236,16 @@ test renewal can never hide a production stamp that is due.
 
 ### 3.4 Status per stamp
 
-The status of each renewable stamp (`state\renewal.json`, written only by the `Renew` task; the API
-and the alerts read it):
+The status of each renewable stamp is in `state\renewal\renewal.json`. The folder is protected:
+only the `Renew` task (LOCAL SERVICE) and administrators write there; the API and the worker only
+read. Until the first counted run after an upgrade, the earlier release's `state\renewal.json` is
+read; only its count of failures in a row is taken over, and the file stays in place and is not
+read again.
 
 | Status | Condition | Level |
 |---|---|---|
-| `not_due` | More than `tsa.renew_before_days` days are left until the certificate expires | — |
-| `due` | Fewer than `tsa.renew_before_days` days are left and no renewal counts | warning |
+| `not_due` | More than `[tsa] renew_before_days` days are left until the certificate expires | — |
+| `due` | Fewer than `[tsa] renew_before_days` days are left and no renewal counts | warning |
 | `covered` | A counting renewal lists this stamp's hash, was stamped before the certificate expired, and its own status is `not_due` or `covered` | — |
 | `late` | The counting renewal was stamped **after** the old certificate expired | warning |
 | `uncovered` | The certificate has expired and no renewal counts | warning |
@@ -244,9 +267,13 @@ becomes `late`.
 | 0 | Renewed, or nothing was due |
 | 1 | Renewed with warnings (some stamps `uncovered`) |
 | 2 | The configuration refused (no provider credentials, no roots) |
-| 3 | The time-stamp server failed (retryable) |
+| 3 | The time-stamp server or the run failed, or another run holds the lock (retryable) |
 
-The command also writes `state\renewal.json`. The `Renew` task is the same command; the result of
+Every run but one that finds the lock held writes `state\renewal\renewal.json`, a failed or refused
+run too (`last_run`, `failures_in_a_row`: `R20-renewal` reads them). `--dry-run` computes the
+statuses and writes them to the file, but takes no stamp, writes no renewal record and leaves
+`last_run` as it is; after an upgrade, while only the earlier release's file exists, it writes
+nothing. The `Renew` task is the same command; the result of
 its last run is shown under Sistem → Zamanlanmış görevler (System → Scheduled tasks;
 [COMPLIANCE-STATUS.md](COMPLIANCE-STATUS.md) section 4.6).
 
@@ -254,7 +281,7 @@ its last run is shown under Sistem → Zamanlanmış görevler (System → Sched
 
 The evidence package ships, under `vault/renewals/`, the renewal records that contain a day's
 manifest or stamp hash (and a packaged report's stamp hash); a renewal chain three deep thus gets
-into the package too. The standalone verifier (`verify.py`, `VERIFIER_VERSION = "5"`) adds one
+into the package too. The standalone verifier (`verify.py`; it prints its version at the top of the report) adds one
 finding per packaged day stamp. The result is computed from the package alone, with "now" being
 the moment of verification; the verifier on the server gives the same codes:
 
@@ -266,6 +293,9 @@ the moment of verification; the verifier on the server gives the same codes:
 | WARN | `renewal-late` | Yeniden damgalama, eski sertifikanın süresi dolduktan sonra yapılmış ({date}). | Re-stamped after the old certificate had expired ({date}). |
 | WARN | `renewal-uncovered` | Damga sertifikasının süresi {date} tarihinde doldu ve yeniden damgalama yok; damga, alındığı an için geçerlidir. | The stamp certificate expired on {date} with no re-stamping; the stamp is valid for the moment it was made. |
 
+The date of `renewal-late` is the time of the re-stamping (the renewal stamp's genTime); in the
+other rows the date is the certificate's expiry.
+
 The check of the renewal stamp itself (`renewal-ok`) and the days it covers (`renewal-covers`) are
 reported as in earlier releases. The whole verifier output:
 [DENETCI-KILAVUZU.md](DENETCI-KILAVUZU.md) section 7.
@@ -276,18 +306,18 @@ reported as in earlier releases. The whole verifier output:
 
 The `CrlFetch` task runs `arcilogger-core crl fetch` every day. The addresses:
 
-- when `tsa.crl_urls` is set, this list only (at most 20 http(s) URLs);
+- when `[tsa] crl_urls` is set, this list only (at most 20 http(s) URLs);
 - otherwise the CRL distribution points (`http` and `https` only) of the certificates in the pinned
   roots folder (`[tsa] roots_dir`) and in the newest stamp of each provider.
 
 **No CRL address is built into the program**: Kamu SM's CRL addresses are unknown
 ([kamusm.md](kamusm.md) K10), TÜRKTRUST's come from TÜRKTRUST's "kök sertifikaları ve iptal
 listeleri" (root certificates and revocation lists) page (T4); both are **to be verified on
-site** ("sahada doğrula"). With strict outbound, the firewall opens the hosts of `tsa.crl_urls`; a
-site that uses strict outbound should therefore put its CRL addresses into `tsa.crl_urls`.
+site** ("sahada doğrula"). With strict outbound, the firewall opens the hosts of `[tsa] crl_urls`; a
+site that uses strict outbound should therefore put its CRL addresses into `[tsa] crl_urls`.
 
 Each list is downloaded with the `[tsa] timeout_seconds` timeout, at most 20 MB, and through
-`network.https_proxy` when it is set. The job only downloads; it never uploads anything. A list
+`[network] https_proxy` when it is set. The job only downloads; it never uploads anything. A list
 whose signature verifies with one of the pinned roots or with an intermediate certificate seen in
 the stamps is stored byte for byte as:
 
@@ -396,12 +426,12 @@ first). Days stamped earlier by a trial or test provider do not change.
 > The TÜRKTRUST connection uses unencrypted HTTP; the username and password cross the network in
 > clear text. Switch back to HTTPS if you can.
 
-**Why?** The provider is `turktrust` and `tsa.allow_plain_http` is on (TÜRKTRUST's plain-HTTP
+**Why?** The provider is `turktrust` and `[tsa] allow_plain_http` is on (TÜRKTRUST's plain-HTTP
 choice under Ayarlar → Zaman damgası). Stamps are taken, but the HTTP Basic credentials travel
 unencrypted.
 
 **What to do?** Go back to the HTTPS TÜRKTRUST choice under Ayarlar → Zaman damgası
-(`https://zd.turktrust.com.tr/`, port 443) and switch `tsa.allow_plain_http` off. If HTTPS does not
+(`https://zd.turktrust.com.tr/`, port 443) and switch `[tsa] allow_plain_http` off. If HTTPS does not
 work, find out why on site (firewall, proxy, the URL path T1; [turktrust.md](turktrust.md)). If the
 password travelled in clear for a while, consider changing it.
 
@@ -437,7 +467,7 @@ proxy). Days stamped after this period are permanently marked "stamped late" ("g
 > {count} stamp certificate(s) expire within {days} days; re-stamping is due.
 
 **Why?** There are stamps with the status `due` (section 3.4); `{days}` is the value of
-`tsa.renew_before_days`.
+`[tsa] renew_before_days`.
 
 **What to do?** The `Renew` task does this by itself every day. If the warning stays for several
 days, look at the last result of the `Renew` task under Sistem → Zamanlanmış görevler, see what
@@ -472,11 +502,11 @@ are evidence. `& $core crl status` shows which list gave this result.
 > No verified revocation list newer than {days} days.
 
 **Why?** For the issuer of a certificate in use, there is no verified list newer than
-`tsa.crl_max_age_days` (default 7) days.
+`[tsa] crl_max_age_days` (default 7) days.
 
 **What to do?** Run `& $core crl fetch` and look at the failures with `& $core crl status`
 (section 4.1): for `unreachable`, the firewall, the proxy and the address; for `unknown_issuer` or
-`bad_signature`, the pinned roots. If the CRL addresses are unknown, put them into `tsa.crl_urls`
+`bad_signature`, the pinned roots. If the CRL addresses are unknown, put them into `[tsa] crl_urls`
 (K10, T4: **verify on site**).
 
 ## 6. The Panel, the Mühürleme page and the e-mail alerts
@@ -494,7 +524,7 @@ are evidence. `& $core crl status` shows which list gave this result.
 |---|---|---|
 | `R20-renewal` | high | A stamp is `due` or `uncovered`; also when the `Renew` task failed twice in a row |
 | `R20-cert` | critical / high | A certificate is on a revocation list (`crl-revoked`, critical), or expires within 30 days and is not covered by a renewal (high) |
-| `R20-crl` | medium | For the issuer of a certificate in use, no verified list is newer than `tsa.crl_max_age_days` days |
+| `R20-crl` | medium | For the issuer of a certificate in use, no verified list is newer than `[tsa] crl_max_age_days` days |
 
 Re-stamping, the CRL download, the banner and the TÜRKTRUST provider are **5651 Temel**
 functions: no licence state switches them off ([LICENSING.md](LICENSING.md)).
@@ -505,14 +535,14 @@ The new settings of this release (`arcilogger.toml`):
 
 | Setting | Type, default | Bounds | Meaning | From the browser |
 |---|---|---|---|---|
-| `tsa.renew_before_days` | integer, 180 | 30–730 | How many days before the certificate expires a stamp is re-stamped (section 3.1) | Ayarlar → Zaman damgası (with re-authentication) |
-| `tsa.crl_urls` | list of http(s) URLs, `[]` | at most 20 | CRL addresses; when empty, the certificates' distribution points (section 4.1) | Ayarlar → Zaman damgası (with re-authentication) |
-| `tsa.crl_max_age_days` | integer, 7 | 1–60 | A list older than this many days gives `crl_stale` and `R20-crl` (section 5.9) | Ayarlar → Zaman damgası (with re-authentication) |
-| `network.https_proxy` | string, `""` | `http://host:port` or empty | Outbound proxy: CRL download, `rfc3161`, `turktrust` (section 1) | Ayarlar → Genel (General; with re-authentication) |
-| `tsa.allow_plain_http` | boolean, false | meaningful only for `turktrust` | Plain HTTP (port 80) to TÜRKTRUST; `credentials_in_clear` (section 5.3) | only with TÜRKTRUST's plain-HTTP choice, by typing a confirmation |
+| `[tsa] renew_before_days` | integer, 180 | 30–730 | How many days before the certificate expires a stamp is re-stamped (section 3.1) | Ayarlar → Zaman damgası (with re-authentication) |
+| `[tsa] crl_urls` | list of http(s) URLs, `[]` | at most 20 | CRL addresses; when empty, the certificates' distribution points (section 4.1) | Ayarlar → Zaman damgası (with re-authentication) |
+| `[tsa] crl_max_age_days` | integer, 7 | 1–60 | A list older than this many days gives `crl_stale` and `R20-crl` (section 5.9) | Ayarlar → Zaman damgası (with re-authentication) |
+| `[network] https_proxy` | string, `""` | `http://host:port` or empty | Outbound proxy: CRL download, `rfc3161`, `turktrust` (section 1) | Ayarlar → Genel (General; with re-authentication) |
+| `[tsa] allow_plain_http` | boolean, false | meaningful only for `turktrust` | Plain HTTP (port 80) to TÜRKTRUST; `credentials_in_clear` (section 5.3) | only with TÜRKTRUST's plain-HTTP choice, by typing a confirmation |
 
 With the provider `turktrust`, `[tsa] url` must start with `https://`; while
-`tsa.allow_plain_http` is off, an `http://` address is a configuration error (the password would
+`[tsa] allow_plain_http` is off, an `http://` address is a configuration error (the password would
 travel in clear text). Related existing settings: `[tsa] provider`, `[tsa] url`,
 `[tsa] roots_dir`, `[tsa] legal_root_fingerprints`, `[tsa] require_critical_eku`,
 `[tsa] timeout_seconds`, `[tsa] credit_regex` (a credit word is looked for in TÜRKTRUST's rejection
@@ -531,7 +561,7 @@ sections 2 and 3, [kamusm.md](kamusm.md) section 3.
 | T1 | TÜRKTRUST's TSA URL: the host `zd.turktrust.com.tr` is from TÜRKTRUST's e-mail, the **path** is unknown; default `https://zd.turktrust.com.tr/` | `[tsa] url` |
 | T2 | TÜRKTRUST answers HTTP 401 for wrong credentials; its answer for an empty balance is unknown: a rejection whose status text contains a credit word counts as "no credit" | `[tsa] credit_regex` |
 | T3 | Whether TÜRKTRUST's TSA certificate marks the EKU extension critical | `[tsa] require_critical_eku` |
-| T4 | TÜRKTRUST's CRL host (from TÜRKTRUST's "kök sertifikaları ve iptal listeleri" page) | `tsa.crl_urls`; the firewall opens these hosts |
-| T5 | Port 80 (plain HTTP): TÜRKTRUST's e-mail names ports 80 and 443; HTTPS is the default, and the probe stamp confirms it on site | `tsa.allow_plain_http` (off by default) |
-| K10 | Kamu SM's CRL addresses | `tsa.crl_urls`, otherwise the certificates' distribution points |
-| — | How the Zamane console client takes a proxy | not in this release: Zamane does not use `network.https_proxy` |
+| T4 | TÜRKTRUST's CRL host (from TÜRKTRUST's "kök sertifikaları ve iptal listeleri" page) | `[tsa] crl_urls`; the firewall opens these hosts |
+| T5 | Port 80 (plain HTTP): TÜRKTRUST's e-mail names ports 80 and 443; HTTPS is the default, and the probe stamp confirms it on site | `[tsa] allow_plain_http` (off by default) |
+| K10 | Kamu SM's CRL addresses | `[tsa] crl_urls`, otherwise the certificates' distribution points |
+| — | How the Zamane console client takes a proxy | not in this release: Zamane does not use `[network] https_proxy` |

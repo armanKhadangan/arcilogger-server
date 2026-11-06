@@ -34,7 +34,7 @@ ancak şu üçü birlikte doğruysa yasal nitelikli gösterir:
 1. damga yasal nitelik iddia eden bir üretim sağlayıcısından alınmıştır (Kamu SM üretim sunucusu
    ya da `zd.turktrust.com.tr` üzerindeki `turktrust`);
 2. damga doğrulanır;
-3. damganın sertifika zinciri, sitenin `tsa.legal_root_fingerprints` listesine yazdığı bir köke
+3. damganın sertifika zinciri, sitenin `[tsa] legal_root_fingerprints` listesine yazdığı bir köke
    ulaşır (TÜRKTRUST kökü, Ayarlar'da "yasal" onayıyla yüklenmiş; bölüm 5).
 
 Başka bir adresteki `turktrust` damgaları, `rfc3161`, `mock` ve test sunucularının damgaları hiçbir
@@ -50,7 +50,7 @@ ARCILOGGER'da TÜRKTRUST'ın yeri:
 - Her gün bir damga (günlük manifest), Kamu SM'deki gibi. Yeniden damgalama (`Renew` görevi) günde
   en çok bir damga daha alır. TÜRKTRUST üretim damgasıyla yapılan bir yeniden damgalama,
   [ZAMAN-DAMGASI.md](ZAMAN-DAMGASI.md) bölüm 3.3'teki koşullarla sayılır: damga doğrulanır, zinciri
-  `tsa.legal_root_fingerprints` listesindeki bir köke ulaşır ve kendi sertifikası yenilenmesi
+  `[tsa] legal_root_fingerprints` listesindeki bir köke ulaşır ve kendi sertifikası yenilenmesi
   gereken duruma gelmemiştir. Test sunucusuyla yapılanlar hiçbir zaman sayılmaz.
 - Kullanıcı adı ve parola gizli depoda şifreli saklanır (`turktrust.username`,
   `turktrust.password`), `arcilogger.toml` dosyasına hiçbir zaman yazılmaz. Parola hiçbir hata
@@ -63,7 +63,7 @@ ARCILOGGER'da TÜRKTRUST'ın yeri:
 - Kontör kartı "Bu sağlayıcı kontör sorgusu sunmuyor; bakiyeyi sağlayıcının portalından izleyin."
   der; `Credit` görevi TÜRKTRUST için sorgu yapmaz ve `R20-credit` uyarısı TÜRKTRUST için hiç
   verilmez. Bakiyeyi TÜRKTRUST'ın portalından izleyin.
-- Vekil sunucu (proxy): `network.https_proxy` doluysa (`http://host:port`, kimlik bilgisi almaz)
+- Vekil sunucu (proxy): `[network] https_proxy` doluysa (`http://host:port`, kimlik bilgisi almaz)
   TÜRKTRUST bağlantısı ve iptal listesi indirme onun üzerinden gider.
 
 ## 2. "Sahada doğrula" listesi
@@ -74,14 +74,14 @@ ekibine iletin.
 
 | # | Varsayım | Ayar | Durum |
 |---|---|---|---|
-| T1 | TSA adresi: sunucu `zd.turktrust.com.tr` (TÜRKTRUST e-postası), **yolu bilinmiyor**; varsayılan `https://zd.turktrust.com.tr/` | `tsa.url` | Sahada doğrula |
-| T2 | Yanlış kimlik bilgisine TÜRKTRUST HTTP 401 ile cevap verir. Bakiye bittiğinde ne cevap verdiği bilinmiyor: durum metninde kontör kelimesi geçen bir ret "kontör yok" sayılır | `tsa.credit_regex` durum metni için de kullanılır | Sahada doğrula |
-| T3 | TÜRKTRUST TSA sertifikasının genişletilmiş anahtar kullanımı (EKU) uzantısı kritik mi? Varsayılan: kritik değilse doğrulama hatası (Kamu SM K6 ile aynı düzen) | `tsa.require_critical_eku` | Sahada doğrula |
-| T4 | TÜRKTRUST iptal listelerinin (SİL) sunucusu, "kök sertifikaları ve iptal listeleri" sayfasından | `tsa.crl_urls`; sıkı giden güvenlik duvarı bu adreslerin sunucularını açar | Sahada doğrula |
-| T5 | Port 80 (düz HTTP). TÜRKTRUST e-postası 80 ve 443'ü adlandırır; varsayılan HTTPS'tir ve sahadaki damga testi bunu doğrular | `tsa.allow_plain_http` (varsayılan kapalı) | Sahada doğrula |
-| K10 | Kamu SM iptal listesi adresleri ([kamusm.md](kamusm.md) bölüm 3) | `tsa.crl_urls`, boşsa sertifikalardaki SİL dağıtım noktaları | Sahada doğrula |
+| T1 | TSA adresi: sunucu `zd.turktrust.com.tr` (TÜRKTRUST e-postası), **yolu bilinmiyor**; varsayılan `https://zd.turktrust.com.tr/` | `[tsa] url` | Sahada doğrula |
+| T2 | Yanlış kimlik bilgisine TÜRKTRUST HTTP 401 ile cevap verir. Bakiye bittiğinde ne cevap verdiği bilinmiyor: durum metninde kontör kelimesi geçen bir ret "kontör yok" sayılır | `[tsa] credit_regex` durum metni için de kullanılır | Sahada doğrula |
+| T3 | TÜRKTRUST TSA sertifikasının genişletilmiş anahtar kullanımı (EKU) uzantısı kritik mi? Varsayılan: kritik değilse doğrulama hatası (Kamu SM K6 ile aynı düzen) | `[tsa] require_critical_eku` | Sahada doğrula |
+| T4 | TÜRKTRUST iptal listelerinin (SİL) sunucusu, "kök sertifikaları ve iptal listeleri" sayfasından | `[tsa] crl_urls`; sıkı giden güvenlik duvarı bu adreslerin sunucularını açar | Sahada doğrula |
+| T5 | Port 80 (düz HTTP). TÜRKTRUST e-postası 80 ve 443'ü adlandırır; varsayılan HTTPS'tir ve sahadaki damga testi bunu doğrular | `[tsa] allow_plain_http` (varsayılan kapalı) | Sahada doğrula |
+| K10 | Kamu SM iptal listesi adresleri ([kamusm.md](kamusm.md) bölüm 3) | `[tsa] crl_urls`, boşsa sertifikalardaki SİL dağıtım noktaları | Sahada doğrula |
 
-ARCILOGGER'ın kodunda hiçbir iptal listesi adresi yoktur: adresler `tsa.crl_urls` listesinden ya da
+ARCILOGGER'ın kodunda hiçbir iptal listesi adresi yoktur: adresler `[tsa] crl_urls` listesinden ya da
 sabitlenmiş köklerin ve son damgaların sertifikalarındaki SİL dağıtım noktalarından (yalnızca
 http/https) gelir.
 
@@ -113,7 +113,7 @@ ve yapanın adını sitenin kayıtlarına yazın. Ayrıntılar bölüm 4–8'ded
    bakiyesi biten bir deneme hesabıyla görüldü) ve kayda geçirildi; metinde kontör kelimesi
    geçmiyorsa ürün ekibine iletildi.
 8. **T4 (SİL):** TÜRKTRUST'ın iptal listesi adresleri sayfasından alındı, sertifikalardaki SİL
-   dağıtım noktalarıyla karşılaştırıldı; gerekiyorsa `tsa.crl_urls` listesine yazıldı.
+   dağıtım noktalarıyla karşılaştırıldı; gerekiyorsa `[tsa] crl_urls` listesine yazıldı.
    `& $core crl fetch` çıkış kodu 0, `& $core crl status` TÜRKTRUST listesini gösteriyor.
 9. **Güvenlik duvarı ve vekil sunucu** (bölüm 8): sıkı giden modda (`-StrictOutbound`) ya da vekil
    sunucuyla damga testi ve iptal listesi indirme yeniden denendi ve başarılı.
@@ -220,7 +220,7 @@ mühürlemesi de kökler olmadan çalışmaz.
    değildir. Değerler eşleşmiyorsa kökü yüklemeyin ve TÜRKTRUST'a sorun.
 3. **Ayarlar → Zaman damgası**'nda kökü yükleyin. Sağlayıcı TÜRKTRUST iken form "TÜRKTRUST kök
    sertifikası" der. Yalnızca adım 2'de karşılaştırdığınız kökü **yasal** onayıyla yükleyin: parmak
-   izi `tsa.legal_root_fingerprints` listesine eklenir. Konsoldaki yol Kamu SM ile aynıdır: dosyayı
+   izi `[tsa] legal_root_fingerprints` listesine eklenir. Konsoldaki yol Kamu SM ile aynıdır: dosyayı
    `C:\ProgramData\ARCILOGGER\kamusm-roots\` klasörüne koyun (klasörün adı tarihseldir; bütün
    sağlayıcıların kökleri buradadır) ve parmak izini `arcilogger.toml` içindeki `[tsa]` bölümünde
    `legal_root_fingerprints` listesine yazın ([KURULUM.md](KURULUM.md) bölüm 10).
@@ -268,11 +268,22 @@ Kurulum programı TÜRKTRUST kimlik bilgilerini konsolda sormaz ve hiçbir günl
 son adımları bu bölümü ve bölüm 5'i gösterir. Konsoldan her `secret set` için
 `Set-ArciVaultAcl.ps1` gereklidir ([KURULUM.md](KURULUM.md) bölüm 10).
 
+Kullanıcı adını ya da parolayı `[tsa] url` içine yazmayın (`https://kullanıcı:parola@…`): böyle bir
+adres reddedilir ve hata metninde tekrarlanmaz. **Kayıtlı hesabı silmek** bu sürümde yalnızca
+konsoldan yapılır; tarayıcıdaki **Sil** yalnızca Kamu SM müşteri numarasını ve parolasını siler:
+
+```powershell
+& $core secret delete turktrust.username
+& $core secret delete turktrust.password
+```
+
 **Düz HTTP (port 80).** HTTPS sahada çalışmıyorsa (T5) ve yalnızca o zaman: düz HTTP sunucu
-seçimi (`turktrust-http`: `http://zd.turktrust.com.tr/`, port 80). Bu seçim `tsa.allow_plain_http`
+seçimi (`turktrust-http`: `http://zd.turktrust.com.tr/`, port 80). Bu seçim `[tsa] allow_plain_http`
 ayarını açar, yeniden kimlik doğrulama ister ve onay metni yazılarak yapılır; form, parolanın bu
-durumda şifresiz gideceğini söyler. `tsa.allow_plain_http` kapalıyken `turktrust` için `http://`
-ile başlayan bir adres reddedilir: parola açık metin olarak giderdi. Düz HTTP kullanıldıkça uyarı
+durumda şifresiz gideceğini söyler. `[tsa] allow_plain_http` kapalıyken `turktrust` için `http://`
+ile başlayan bir adres reddedilir: parola açık metin olarak giderdi. Sunucu da onaysız bir düz HTTP
+geçişini reddeder (`tsa_plain_http_confirm_required`); form o zaman onay penceresini sunucunun
+metniyle yeniden açar ve onay metninin yeniden yazılmasını ister. Düz HTTP kullanıldıkça uyarı
 şeridi şunu gösterir (`credentials_in_clear`, uyarı; bir tarayıcıda 24 saat gizlenebilir):
 "TÜRKTRUST bağlantısı şifresiz HTTP ile yapılıyor; kullanıcı adı ve parola ağda açık metin olarak
 gider. Mümkünse HTTPS'e dönün."
@@ -285,21 +296,32 @@ gider. Mümkünse HTTPS'e dönün."
   uyarısı verilir ([UYARILAR.md](UYARILAR.md)).
 - **Yanlış kullanıcı adı ya da parola** (HTTP 401 ya da 403): yapılandırma hatası, yeniden
   denenmez. Değerleri Ayarlar'da düzeltin.
-- **Sunucuya ulaşılamıyor** (HTTP 5xx, ağ hatası): mühürleme kendi planına göre yeniden dener. Sıkı
-  giden güvenlik duvarını ve vekil sunucuyu denetleyin (bölüm 8).
+- **Yanlış adres** (yönlendirme 3xx, ya da 408 ve 429 dışında bir 4xx): yapılandırma hatası,
+  yeniden denenmez. Yönlendirme izlenmez; metin durum kodunu verir ve `[tsa] url` ayarını gösterir
+  (adresin yolu T1'dir, sahada doğrulayın), hiçbir zaman kimlik bilgisini.
+- **Sunucuya ulaşılamıyor** (HTTP 408, 429, 5xx, ağ hatası): mühürleme kendi planına göre yeniden
+  dener. Sıkı giden güvenlik duvarını ve vekil sunucuyu denetleyin (bölüm 8).
 - **Bakiye yok** (T2): durum metninde kontör kelimesi geçen bir ret. TÜRKTRUST'ın gerçek cevabı
   sahada doğrulanacaktır.
 
 ## 8. Güvenlik duvarı, vekil sunucu ve iptal listeleri
 
 - **Sıkı giden mod** (`Set-ArciFirewall.ps1 -StrictOutbound`): sağlayıcı `turktrust` iken betik
-  `[tsa] url` adresinin sunucusuna TCP 443'ü, `tsa.allow_plain_http` açıksa 443 yerine TCP 80'i
-  açar; ayrıca `tsa.crl_urls` adreslerinin sunucularını açar. Betik yalnızca bu listedeki
-  adresleri açar: sıkı giden modda TÜRKTRUST'ın iptal listesi adreslerini (T4) `tsa.crl_urls`
-  listesine yazın, yoksa sertifikalardaki SİL dağıtım noktalarına ulaşılamaz.
-- **Vekil sunucu:** `network.https_proxy` doluysa (`http://host:port`) bunların hepsinin yerine
-  yalnızca vekil sunucunun adresi ve portu açılır. Vekil sunucu bu sürümde kimlik bilgisi almaz.
-- **İptal listeleri:** `CrlFetch` görevi her gün `tsa.crl_urls` listesini, liste boşsa
+  `ARCILOGGER Out TURKTRUST` kuralıyla `[tsa] url` adresinin sunucusuna TCP 443'ü (adres kendi
+  portunu veriyorsa onu; `[tsa] allow_plain_http` ile `http://` adreste 80'i) açar; ayrıca
+  `ARCILOGGER Out CRL` kuralıyla `[tsa] crl_urls` adreslerinin sunucularına TCP 80 ve 443'ü açar.
+  Betik yalnızca bu listedeki adresleri açar: sıkı giden modda TÜRKTRUST'ın iptal listesi
+  adreslerini (T4) `[tsa] crl_urls` listesine yazın, yoksa sertifikalardaki SİL dağıtım
+  noktalarına ulaşılamaz. Sağlayıcı `turktrust` iken `ARCILOGGER Out Kamu SM` kuralı yalnızca Kamu
+  SM'nin iki sunucusunu, port 80'de tutar.
+- **Vekil sunucu:** `[network] https_proxy` doluysa (`http://host:port`) bu iki kuralın yerine
+  `ARCILOGGER Out Proxy` kuralıyla yalnızca vekil sunucunun adresi ve portu açılır. Vekil sunucu
+  bu sürümde kimlik bilgisi almaz.
+- **Tarayıcıdan yapılan değişiklikler:** Ayarlar → Zaman damgası ya da Genel'de bir değişiklikten
+  sonra yönetim hizmeti bu kuralları aynı ad ve portlarla günceller, eksik olanı oluşturur; hiçbir
+  kuralı kaldırmaz. Ayarı kaldırılan bir kural, kurulumun güvenlik duvarı adımı yeniden çalışana
+  kadar kalır ([ZAMAN-DAMGASI.md](ZAMAN-DAMGASI.md) bölüm 1).
+- **İptal listeleri:** `CrlFetch` görevi her gün `[tsa] crl_urls` listesini, liste boşsa
   sertifikalardaki SİL dağıtım noktalarını indirir ve sabitlenmiş bir sertifikayla doğrulanan
   listeleri değiştirmeden saklar. TÜRKTRUST'ın SİL sunucusu T4'tür: sahada doğrulayın.
 
@@ -341,7 +363,7 @@ grade only when all three hold:
 1. the stamp comes from a production provider that claims legal grade (the Kamu SM production
    server, or `turktrust` on `zd.turktrust.com.tr`);
 2. the stamp verifies;
-3. the stamp's certificate chain ends at a root the site listed in `tsa.legal_root_fingerprints`
+3. the stamp's certificate chain ends at a root the site listed in `[tsa] legal_root_fingerprints`
    (the TÜRKTRUST root, uploaded in Settings with the "legal" confirmation; section 5).
 
 `turktrust` stamps from any other address, and stamps of `rfc3161`, `mock` and test servers, are
@@ -357,7 +379,7 @@ TÜRKTRUST in ARCILOGGER:
 - One stamp a day (the daily manifest), as with Kamu SM. Re-stamping (the `Renew` task) takes at
   most one more stamp a day. A re-stamping with a TÜRKTRUST production stamp counts under the
   conditions of [TIME-STAMPING.md](TIME-STAMPING.md) section 3.3: its token verifies, chains to a
-  root listed in `tsa.legal_root_fingerprints`, and its own certificate is not due. Re-stamping with
+  root listed in `[tsa] legal_root_fingerprints`, and its own certificate is not due. Re-stamping with
   a test server never counts.
 - The username and the password are stored encrypted in the secret store (`turktrust.username`,
   `turktrust.password`) and never written into `arcilogger.toml`. The password never appears in an
@@ -370,7 +392,7 @@ TÜRKTRUST in ARCILOGGER:
 - The credit card says "This provider offers no credit query; watch the balance in the provider's
   portal."; the `Credit` task makes no query for TÜRKTRUST, and the `R20-credit` alert is never
   raised for it. Watch the balance in TÜRKTRUST's portal.
-- Proxy: when `network.https_proxy` is set (`http://host:port`, no credentials), the TÜRKTRUST
+- Proxy: when `[network] https_proxy` is set (`http://host:port`, no credentials), the TÜRKTRUST
   connection and the revocation-list download go through it.
 
 ### 2. The "sahada doğrula" list
@@ -381,14 +403,14 @@ and pass them to the product team.
 
 | # | Assumption | Setting | State |
 |---|---|---|---|
-| T1 | The TSA URL: host `zd.turktrust.com.tr` (TÜRKTRUST's e-mail), **path unknown**; default `https://zd.turktrust.com.tr/` | `tsa.url` | Sahada doğrula |
-| T2 | TÜRKTRUST answers HTTP 401 for wrong credentials. Its answer for an empty balance is unknown: a rejection whose status text contains a credit word counts as "no credit" | `tsa.credit_regex` is reused for the status text | Sahada doğrula |
-| T3 | Does TÜRKTRUST's TSA certificate mark the extended key usage (EKU) critical? Default: a verification error if it does not (same mechanism as Kamu SM K6) | `tsa.require_critical_eku` | Sahada doğrula |
-| T4 | TÜRKTRUST's revocation-list (CRL) host, from its "kök sertifikaları ve iptal listeleri" page | `tsa.crl_urls`; the strict outbound firewall opens their hosts | Sahada doğrula |
-| T5 | Port 80 (plain HTTP). TÜRKTRUST's e-mail names ports 80 and 443; HTTPS is the default, and the stamp test on site confirms it | `tsa.allow_plain_http` (default off) | Sahada doğrula |
-| K10 | Kamu SM's CRL addresses ([kamusm.md](kamusm.md) section 3) | `tsa.crl_urls`, otherwise the certificates' CRL distribution points | Sahada doğrula |
+| T1 | The TSA URL: host `zd.turktrust.com.tr` (TÜRKTRUST's e-mail), **path unknown**; default `https://zd.turktrust.com.tr/` | `[tsa] url` | Sahada doğrula |
+| T2 | TÜRKTRUST answers HTTP 401 for wrong credentials. Its answer for an empty balance is unknown: a rejection whose status text contains a credit word counts as "no credit" | `[tsa] credit_regex` is reused for the status text | Sahada doğrula |
+| T3 | Does TÜRKTRUST's TSA certificate mark the extended key usage (EKU) critical? Default: a verification error if it does not (same mechanism as Kamu SM K6) | `[tsa] require_critical_eku` | Sahada doğrula |
+| T4 | TÜRKTRUST's revocation-list (CRL) host, from its "kök sertifikaları ve iptal listeleri" page | `[tsa] crl_urls`; the strict outbound firewall opens their hosts | Sahada doğrula |
+| T5 | Port 80 (plain HTTP). TÜRKTRUST's e-mail names ports 80 and 443; HTTPS is the default, and the stamp test on site confirms it | `[tsa] allow_plain_http` (default off) | Sahada doğrula |
+| K10 | Kamu SM's CRL addresses ([kamusm.md](kamusm.md) section 3) | `[tsa] crl_urls`, otherwise the certificates' CRL distribution points | Sahada doğrula |
 
-ARCILOGGER's code holds no revocation-list address: the addresses come from `tsa.crl_urls`, or from
+ARCILOGGER's code holds no revocation-list address: the addresses come from `[tsa] crl_urls`, or from
 the CRL distribution points (http/https only) of the pinned roots and of the newest tokens'
 certificates.
 
@@ -424,7 +446,7 @@ result of each step, its date and who did it into the site's records. Details ar
    credit word, it was passed to the product team.
 8. **T4 (CRL):** TÜRKTRUST's revocation-list addresses were taken from its page and compared with
    the CRL distribution points in the certificates; where needed they were written into
-   `tsa.crl_urls`. `& $core crl fetch` exits with 0, and `& $core crl status` shows the TÜRKTRUST
+   `[tsa] crl_urls`. `& $core crl fetch` exits with 0, and `& $core crl status` shows the TÜRKTRUST
    list.
 9. **Firewall and proxy** (section 8): the stamp test and the revocation-list download were repeated
    in strict outbound mode (`-StrictOutbound`) or through the proxy, and succeed.
@@ -506,7 +528,7 @@ root certificates". The nightly sealing does not work without roots either.
    comparison. If the values do not match, do not upload the root, and ask TÜRKTRUST.
 3. Upload the root under **Settings → Time stamping**. While the provider is TÜRKTRUST the form says
    "TÜRKTRUST kök sertifikası". Upload with the **legal** confirmation only the root you compared in
-   step 2: its fingerprint is added to `tsa.legal_root_fingerprints`. The console way is the same as
+   step 2: its fingerprint is added to `[tsa] legal_root_fingerprints`. The console way is the same as
    for Kamu SM: put the file into `C:\ProgramData\ARCILOGGER\kamusm-roots\` (the folder's name is
    historical; the roots of every provider live there) and write the fingerprint into the
    `legal_root_fingerprints` list in the `[tsa]` section of `arcilogger.toml`
@@ -555,11 +577,24 @@ The installer never asks for the TÜRKTRUST credentials at the console and never
 log; its next steps point to this section and to section 5. Every `secret set` at the console needs
 `Set-ArciVaultAcl.ps1` afterwards ([INSTALL.md](INSTALL.md) section 10).
 
+Do not write the username or password into `[tsa] url` (`https://user:password@…`): such a URL is
+refused, and the error text does not repeat it. In this release the stored account is **cleared on
+the console only**; the browser's **Sil** (Delete) clears only the Kamu SM customer number and
+password:
+
+```powershell
+& $core secret delete turktrust.username
+& $core secret delete turktrust.password
+```
+
 **Plain HTTP (port 80).** Only if HTTPS does not work on site (T5): the plain-HTTP server
 choice (`turktrust-http`: `http://zd.turktrust.com.tr/`, port 80). This choice turns on
-`tsa.allow_plain_http` and asks for re-authentication and a typed confirmation; the form says that
-the password then travels unencrypted. While `tsa.allow_plain_http` is off, an `http://` URL is
-refused for `turktrust`: the password would travel in clear text. As long as plain HTTP is used, the
+`[tsa] allow_plain_http` and asks for re-authentication and a typed confirmation; the form says that
+the password then travels unencrypted. While `[tsa] allow_plain_http` is off, an `http://` URL is
+refused for `turktrust`: the password would travel in clear text. The server, too, refuses a
+plain-HTTP switch without the confirmation (`tsa_plain_http_confirm_required`); the form then opens
+the confirmation again with the server's text and asks for the typed phrase again. As long as plain
+HTTP is used, the
 banner shows (`credentials_in_clear`, a warning; it can be hidden for 24 hours per browser): "The
 TÜRKTRUST connection uses unencrypted HTTP; the username and password cross the network in clear
 text. Switch back to HTTPS if you can."
@@ -572,20 +607,31 @@ text. Switch back to HTTPS if you can."
   ([ALERTS.md](ALERTS.md)).
 - **Wrong username or password** (HTTP 401 or 403): a configuration error, not retried. Correct the
   values in Settings.
-- **Server unavailable** (HTTP 5xx, network error): sealing retries on its own schedule. Check the
-  strict outbound firewall and the proxy (section 8).
+- **Wrong URL** (a 3xx redirect, or a 4xx other than 408 and 429): a configuration error, not
+  retried. Redirects are not followed; the text gives the status code and points to `[tsa] url`
+  (the URL path is T1, verify it on site), never to the credentials.
+- **Server unavailable** (HTTP 408, 429, 5xx, network error): sealing retries on its own schedule.
+  Check the strict outbound firewall and the proxy (section 8).
 - **No credit** (T2): a rejection whose status text contains a credit word. TÜRKTRUST's real answer
   is to be verified on site.
 
 ### 8. Firewall, proxy and revocation lists
 
 - **Strict outbound mode** (`Set-ArciFirewall.ps1 -StrictOutbound`): while the provider is
-  `turktrust`, the script opens TCP 443 to the host of `[tsa] url`, or TCP 80 instead of 443 with
-  `tsa.allow_plain_http`; it also opens the hosts of `tsa.crl_urls`. The script opens only the
-  addresses of that list: in strict outbound mode, write TÜRKTRUST's revocation-list addresses (T4)
-  into `tsa.crl_urls`, or the CRL distribution points in the certificates cannot be reached.
-- **Proxy:** when `network.https_proxy` is set (`http://host:port`), only the proxy's host and port
-  are opened, in place of all of these. The proxy takes no credentials in this release.
-- **Revocation lists:** the `CrlFetch` task downloads `tsa.crl_urls` every day, or the certificates'
+  `turktrust`, the script's `ARCILOGGER Out TURKTRUST` rule opens TCP 443 to the host of
+  `[tsa] url` (the URL's own port if it names one; 80 for an `http://` URL with
+  `[tsa] allow_plain_http`); its `ARCILOGGER Out CRL` rule opens TCP 80 and 443 to the hosts of
+  `[tsa] crl_urls`. The script opens only the addresses of that list: in strict outbound mode,
+  write TÜRKTRUST's revocation-list addresses (T4) into `[tsa] crl_urls`, or the CRL distribution
+  points in the certificates cannot be reached. While the provider is `turktrust`, the
+  `ARCILOGGER Out Kamu SM` rule keeps only Kamu SM's two servers, on port 80.
+- **Proxy:** when `[network] https_proxy` is set (`http://host:port`), the `ARCILOGGER Out Proxy`
+  rule opens only the proxy's host and port, in place of those two rules. The proxy takes no
+  credentials in this release.
+- **Changes in the browser:** after a change under Ayarlar → Zaman damgası or Genel, the management
+  service updates these rules with the same names and ports and creates one that is missing; it
+  removes none. A rule whose setting went away stays until the installer's firewall step runs
+  again ([TIME-STAMPING.md](TIME-STAMPING.md) section 1).
+- **Revocation lists:** the `CrlFetch` task downloads `[tsa] crl_urls` every day, or the certificates'
   CRL distribution points when the list is empty, and stores the lists that verify with a pinned
   certificate byte for byte. TÜRKTRUST's CRL host is T4: verify it on site.
