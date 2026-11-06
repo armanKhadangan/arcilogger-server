@@ -28,15 +28,21 @@ export function toMbps(bps: number): number {
 }
 
 /**
- * A rate in Mbit/s as a chart shows it (axis, tooltip, table view): whole numbers from 10, one
- * decimal from 1, and below 1 as many decimals as the first figure needs (at most 3), so a quiet
- * line reads "0,012", not a column of "0,0".
+ * Decimals for the rates of one chart (axis, tooltip, table view), from its largest value:
+ * none from 10 Mbit/s, one from 1, and below 1 as many as the scale needs (at most 6). One
+ * number for the whole chart, so its axis reads "0,0004 · 0,0008 · 0,0012" and never a column of
+ * "0,0" or ticks with different decimals.
  */
-export function mbpsText(mbps: number, lang: Lang): string {
+export function mbpsDecimals(max: number): number {
+  if (!Number.isFinite(max) || max <= 0) return 1;
+  if (max >= 10) return 0;
+  if (max >= 1) return 1;
+  return Math.min(6, Math.max(1, 1 - Math.floor(Math.log10(max))));
+}
+
+/** A rate in Mbit/s with the chart's decimals (`mbpsDecimals`); 0 is always "0". */
+export function mbpsText(mbps: number, decimals: number, lang: Lang): string {
   if (!Number.isFinite(mbps) || mbps <= 0) return formatNumber(0, 0, lang);
-  if (mbps >= 10) return formatNumber(mbps, 0, lang);
-  if (mbps >= 1) return formatNumber(mbps, 1, lang);
-  const decimals = Math.min(3, Math.max(1, 1 - Math.floor(Math.log10(mbps))));
   return formatNumber(mbps, decimals, lang);
 }
 

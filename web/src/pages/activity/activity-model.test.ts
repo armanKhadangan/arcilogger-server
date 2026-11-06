@@ -4,6 +4,7 @@ import {
   capacityShare,
   formatBps,
   lineSeries,
+  mbpsDecimals,
   mbpsText,
   minuteSeries,
   shareText,
@@ -12,14 +13,18 @@ import {
 } from './activity-model';
 
 describe('Canlı Durum model (W5 P3)', () => {
-  it('writes chart rates with the decimals a quiet line needs, never a column of 0,0', () => {
-    expect(mbpsText(0, 'tr')).toBe('0');
-    expect(mbpsText(0.012, 'tr')).toBe('0,012');
-    expect(mbpsText(0.25, 'tr')).toBe('0,25');
-    expect(mbpsText(0.0004, 'tr')).toBe('0,000');
-    expect(mbpsText(3.46, 'tr')).toBe('3,5');
-    expect(mbpsText(34.2, 'en')).toBe('34');
-    expect(mbpsText(0.012, 'en')).toBe('0.012');
+  it('gives one chart one number of decimals, enough for a quiet line', () => {
+    expect(mbpsDecimals(34.2)).toBe(0);
+    expect(mbpsDecimals(3.46)).toBe(1);
+    expect(mbpsDecimals(0.25)).toBe(2);
+    expect(mbpsDecimals(0.0016)).toBe(4);
+    expect(mbpsDecimals(0)).toBe(1);
+    expect(mbpsDecimals(1e-9)).toBe(6);
+    // A quiet line's axis: every tick distinct, none "0,0".
+    const ticks = [0, 0.0004, 0.0008, 0.0012, 0.0016].map((tick) => mbpsText(tick, 4, 'tr'));
+    expect(ticks).toEqual(['0', '0,0004', '0,0008', '0,0012', '0,0016']);
+    expect(mbpsText(34.2, 0, 'en')).toBe('34');
+    expect(mbpsText(0.012, 3, 'en')).toBe('0.012');
   });
 
   it('reads the window from the address, 5 minutes otherwise', () => {

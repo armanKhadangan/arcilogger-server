@@ -30,6 +30,7 @@ import {
   formatBps,
   lineSeries,
   minuteSeries,
+  mbpsDecimals,
   mbpsText,
   shareText,
   windowFromSearch,
@@ -110,10 +111,11 @@ function LineCard({ line }: { line: WanLine }) {
   const { t } = useTranslation();
   const lang = currentLang();
   const rows = useMemo(() => lineSeries(line), [line]);
+  const decimals = mbpsDecimals(Math.max(0, ...rows.flatMap((row) => [row.download, row.upload])));
   const down = capacityShare(line.download_bps, line.capacity_mbps?.down);
   const up = capacityShare(line.upload_bps, line.capacity_mbps?.up);
   // The axis keeps to a number; the unit is in the description and the table's headers.
-  const mbps = (value: number) => mbpsText(value, lang);
+  const mbps = (value: number) => mbpsText(value, decimals, lang);
   const labels = { download: t('activity.download'), upload: t('activity.upload') };
   return (
     <ChartFrame
@@ -325,7 +327,8 @@ function MinuteChart({ data }: { data: Parameters<typeof minuteSeries>[0] }) {
   const { t } = useTranslation();
   const lang = currentLang();
   const rows = useMemo(() => minuteSeries(data), [data]);
-  const mbps = (value: number) => mbpsText(value, lang);
+  const decimals = mbpsDecimals(Math.max(0, ...rows.flatMap((row) => [row.download, row.upload])));
+  const mbps = (value: number) => mbpsText(value, decimals, lang);
   const labels = { download: t('activity.download'), upload: t('activity.upload') };
   return (
     <ChartFrame
