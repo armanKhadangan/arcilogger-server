@@ -91,9 +91,8 @@ type TsaField =
   | 'crlMaxAgeDays';
 
 /**
- * The body paths the API may name for a field (422 `details`). TÜRKTRUST's body fields and the
- * re-stamping and revocation-list keys are interim until W5-T names them (`kamusm-model.ts`
- * `TurktrustFields`, `EvidenceKeys`).
+ * The body paths the API may name for a field (422 `details`), W5-T's TÜRKTRUST fields and
+ * re-stamping and revocation-list keys included (`TsaBody`).
  */
 const PATHS: Record<TsaField, string[]> = {
   java: ['java', 'tsa.java'],

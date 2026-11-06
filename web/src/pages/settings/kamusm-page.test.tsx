@@ -21,7 +21,7 @@ import { CredentialsStep, EvidenceFields, ProductionStep, TsaRefusal } from './k
  * production servers, TÜRKTRUST over HTTPS with its username and password and the "sahada
  * doğrula" note, and TÜRKTRUST over plain HTTP, which says that the password travels unencrypted
  * and asks for a typed confirmation before anything is sent. The body each choice sends is
- * `kamusm-model.test.ts`'s; the page with the API is the E2E's (after W5-T's schema).
+ * `kamusm-model.test.ts`'s; the page with the API is the E2E's (`settings-kamusm.spec.ts`).
  */
 
 const JAVA = 'C:/Program Files/Eclipse Adoptium/jre-8.0.432.6-hotspot/bin/java.exe';
@@ -59,7 +59,7 @@ function tsa(overrides: Partial<TsaSection> = {}): TsaSection {
   };
 }
 
-/** A TÜRKTRUST site as the API reads it before W5-T names its servers (`server` null). */
+/** A TÜRKTRUST site whose server is none of the choices (`server` null). */
 const TURKTRUST_SITE = tsa({
   provider: 'turktrust',
   server: null,
@@ -329,7 +329,7 @@ describe('Ayarlar → Zaman damgası: the server to switch to', () => {
     expect(screen.getByTestId('tsa-server')).toHaveTextContent(
       'Şu an TÜRKTRUST sunucusu kullanılıyor.',
     );
-    // Its server has no name yet (W5-T): every choice stays open, production is preselected.
+    // Its server is none of the choices: every choice stays open, production is preselected.
     expect(screen.getAllByRole('radio').filter((radio) => radio.hasAttribute('disabled'))).toEqual(
       [],
     );
