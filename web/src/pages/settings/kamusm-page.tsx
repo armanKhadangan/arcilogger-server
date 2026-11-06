@@ -17,7 +17,7 @@ import { flowState, useServerValues } from '@/components/admin/use-section-flow'
 import { PageSkeleton } from '@/components/layout/route-frames';
 import { Alert } from '@/components/ui/alert';
 import { editable } from '@/lib/admin-requests';
-import { errorMessage } from '@/lib/api';
+import { errorMessage, isApiError } from '@/lib/api';
 import { useAdminRequests, useCredits } from '@/lib/api-hooks';
 import { useAuth } from '@/lib/auth';
 import type { AdminRequestOut, TsaSection, TsaTestResult } from '@/lib/settings-types';
@@ -400,6 +400,9 @@ export function KamusmPage() {
             onSwitch={(target) => {
               send({ server: target, confirm: target === 'test' || target === 'turktrust-http' });
             }}
+            httpRefusal={
+              isApiError(flow.failure, 'tsa_plain_http_confirm_required') ? flow.failure : null
+            }
           />
         );
       case 'credit':
