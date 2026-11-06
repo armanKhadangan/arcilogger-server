@@ -3408,5 +3408,12 @@
       "chosen": "{{name}} ({{size}}) seçildi; göndermek için düğmeye basın. Sunucu dosyayı inceler, henüz hiçbir şey kurulmaz.",
       "tooLarge": "Dosya çok büyük; en çok {{size}} olabilir."
     }
+  },
+  "session": {
+    "idleWarning": {
+      "title": "Oturumunuz kapanmak üzere",
+      "body": "Hareketsizlik nedeniyle oturumunuz {{time}} içinde kapanacak. Kaydetmediğiniz değişiklikler kaybolabilir.",
+      "stay": "Oturumu sürdür"
+    }
   }
 }

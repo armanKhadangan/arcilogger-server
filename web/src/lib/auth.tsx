@@ -17,13 +17,29 @@
  */
 
 import { useQueryClient } from '@tanstack/react-query';
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef } from 'react';
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import type { ReactNode } from 'react';
 import { Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { RefreshCw } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { EmptyState } from '@/components/ui/empty-state';
 import { ForbiddenPage } from '@/pages/forbidden-page';
 import { clearRules } from '@/pages/live/live-model';
@@ -42,6 +58,11 @@ export const IDLE_MINUTES_KEY = 'arci.idleMinutes';
 export const IDLE_CHECK_MS = 30_000;
 /** Slack after the idle limit before asking the server (clock and request timing). */
 const IDLE_GRACE_MS = 5_000;
+/**
+ * How long before the idle limit the "Oturumunuz kapanmak üzere" warning opens (half the limit
+ * for very short limits), so text typed into a long form is not lost to a silent sign-out.
+ */
+export const IDLE_WARNING_MS = 120_000;
 
 interface AuthContextValue {
   me: Me;
@@ -145,6 +166,10 @@ export function RequirePermission({
 }
 
 function IdleWatch({ minutes }: { minutes: number }) {
+  const { t } = useTranslation();
+  // Seconds left before the server ends the idle session, while the warning is open.
+  const [left, setLeft] = useState<number | null>(null);
+
   useEffect(() => {
     sessionEndReason = null; // signed in completely: the last ending is explained
   }, []);
@@ -162,7 +187,57 @@ function IdleWatch({ minutes }: { minutes: number }) {
       window.clearInterval(timer);
     };
   }, [minutes]);
-  return null;
+
+  // The warning: shown in the last IDLE_WARNING_MS of the server's idle limit; any request of
+  // the user (or "Oturumu sürdür") moves the limit and closes it. It never extends the session
+  // by itself: only the user's click does.
+  useEffect(() => {
+    const limit = minutes * 60_000;
+    const warnFor = Math.min(IDLE_WARNING_MS, limit / 2);
+    const tick = () => {
+      const remaining = limit - (Date.now() - lastForegroundRequestAt());
+      setLeft(remaining > 0 && remaining <= warnFor ? Math.ceil(remaining / 1000) : null);
+    };
+    tick();
+    const timer = window.setInterval(tick, 1_000);
+    return () => {
+      window.clearInterval(timer);
+    };
+  }, [minutes]);
+
+  const stay = () => {
+    setLeft(null);
+    // A request of the user's: it counts as activity and moves the server's idle limit.
+    api.get<Me>('/auth/me').catch(() => undefined);
+  };
+
+  return (
+    <Dialog
+      open={left !== null}
+      onOpenChange={(open) => {
+        if (!open) stay();
+      }}
+    >
+      <DialogContent hideClose role="alertdialog" data-testid="idle-warning">
+        <DialogHeader>
+          <DialogTitle>{t('session.idleWarning.title')}</DialogTitle>
+          <DialogDescription>
+            {t('session.idleWarning.body', {
+              time:
+                left === null
+                  ? ''
+                  : `${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}`,
+            })}
+          </DialogDescription>
+        </DialogHeader>
+        <DialogFooter>
+          <Button autoFocus onClick={stay}>
+            {t('session.idleWarning.stay')}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
 }
 
 const OUTSIDE_PAGES = ['/login', '/setup'];

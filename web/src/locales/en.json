@@ -3408,5 +3408,12 @@
       "chosen": "{{name}} ({{size}}) chosen; press the button to send it. The server inspects the file; nothing is installed yet.",
       "tooLarge": "The file is too large; at most {{size}}."
     }
+  },
+  "session": {
+    "idleWarning": {
+      "title": "Your session is about to end",
+      "body": "Your session will end in {{time}} because of inactivity. Unsaved changes may be lost.",
+      "stay": "Stay signed in"
+    }
   }
 }

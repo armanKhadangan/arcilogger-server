@@ -5,6 +5,23 @@ versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Getting around the web interface
+
+- The menu lists its entries under five groups: Genel bakış, İnceleme, Kanıt, Rapor ve denetim
+  and Yönetim. The order of the entries is unchanged.
+- **"Sayfaya git"** opens with Ctrl+K (⌘K on a Mac) or the top bar's button. It lists every page
+  and Ayarlar section the user may open. A few letters find an entry in Turkish or English, with
+  Turkish letters optional, and Enter opens it. Its last line searches the logs for the typed
+  text.
+- The bell links to Güvenlik and shows the number of open alerts. "/" moves to the global search
+  box.
+- The browser tab names the page ("Mühürleme · ARCILOGGER").
+- Two minutes before the idle limit, "Oturumunuz kapanmak üzere" offers "Oturumu sürdür", so text
+  typed into a long form is not lost. The limit itself is unchanged.
+- 5651 Sorgu's "Sorgula" stays at the bottom of the window while the form scrolls.
+- Canlı Durum's charts show a quiet line's rate, where they used to show a column of "0,0".
+- The "Sessiz" badges show a no-signal icon where a lone dot used to be.
+
 ## [0.2.0] — 2026-11-06
 
 The first tagged release, version 0.2.0 (`v0.2.0`): its Windows setup program is built by the

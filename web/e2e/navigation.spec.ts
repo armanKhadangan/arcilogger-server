@@ -92,3 +92,27 @@ test.describe('getting around', () => {
     await expect(box).toHaveValue('a/b');
   });
 });
+
+test.describe('the idle warning', () => {
+  test('warns two minutes before the idle limit, and "Oturumu sürdür" keeps the session', async ({
+    page,
+  }) => {
+    await page.clock.install({ time: new Date(`${SAMPLE_TODAY}T15:00:00+03:00`) });
+    await mockApi(page, { signedInAs: 'tolga', idleMinutes: 15 });
+    await page.goto('/');
+    await expect(page.getByRole('heading', { level: 1, name: 'Panel' })).toBeVisible();
+    const warning = page.getByRole('alertdialog', { name: 'Oturumunuz kapanmak üzere' });
+    await page.clock.runFor('12:30');
+    await expect(warning).toBeHidden();
+    await page.clock.runFor('01:00');
+    await expect(warning).toBeVisible();
+    await expect(warning).toContainText('1:30 içinde kapanacak');
+    await expectNoA11yViolations(page);
+    await warning.getByRole('button', { name: 'Oturumu sürdür' }).click();
+    await expect(warning).toBeHidden();
+    // The click was a request of the user's: the limit moved by a whole idle period.
+    await page.clock.runFor('12:00');
+    await expect(warning).toBeHidden();
+    await expect(page.getByRole('heading', { level: 1, name: 'Panel' })).toBeVisible();
+  });
+});
