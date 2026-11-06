@@ -55,7 +55,7 @@ class ActivityRow(BaseModel):
     upload_bytes: int
     download_bps: float
     upload_bps: float
-    #: Sessions open in the window, each counted once.
+    #: Sessions started in the window, each counted once.
     sessions: int
     #: At most 3, by bytes; background traffic excluded.
     top_domains: list[ActivityDomain]

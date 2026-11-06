@@ -1,5 +1,5 @@
 /** Mirror of api/src/arcilogger_api/activity/models.py (Wave 5 contract §6.2, M2 and N6). */
-import type { DateTimeString, SubjectRef } from './api-types';
+import type { DateTimeString, Float, SubjectRef } from './api-types';
 
 export type ActivityWindow = 1 | 5 | 15; // minutes; default 5
 export type WanRange = '60m' | '24h';
@@ -25,9 +25,9 @@ export interface ActivityRow {
   download_bytes: number;
   upload_bytes: number;
   /** Bytes × 8 / the window's seconds. */
-  download_bps: number;
-  upload_bps: number;
-  /** Sessions open in the window, each counted once. */
+  download_bps: Float;
+  upload_bps: Float;
+  /** Sessions started in the window, each counted once. */
   sessions: number;
   /** At most 3, by bytes; background traffic excluded. */
   top_domains: ActivityDomain[];
@@ -40,8 +40,8 @@ export interface ActivityTotals {
   /** Every subject, also those beyond the 200 rows (and persons left out of the rows). */
   download_bytes: number;
   upload_bytes: number;
-  download_bps: number;
-  upload_bps: number;
+  download_bps: Float;
+  upload_bps: Float;
   sessions: number;
   /** Subjects with traffic in the window. */
   subjects: number;

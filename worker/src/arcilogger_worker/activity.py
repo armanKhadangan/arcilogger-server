@@ -178,7 +178,7 @@ class OpenSession:
     names: tuple[list[tuple[Any, ...]], list[tuple[Any, ...]]] | None = None
 
     def start(self) -> float:
-        return min(row[3].timestamp() - (row[4] or 0) for row in self.rows)
+        return float(min(row[3].timestamp() - (row[4] or 0) for row in self.rows))
 
 
 class Snapshot:
@@ -570,12 +570,12 @@ class Snapshot:
         dirty = len(self._dirty)
         self._dirty.clear()
         for minute in touched:
-            pieces = self._pieces.get(minute)
-            if not pieces:
+            entries = self._pieces.get(minute)
+            if not entries:
                 self._pieces.pop(minute, None)
                 self._fragments.pop(minute, None)
                 continue
-            joined = ",".join(pieces[key] for key in sorted(pieces))
+            joined = ",".join(entries[key] for key in sorted(entries))
             self._fragments[minute] = f'{{"minute":"{_iso(minute)}","subjects":{{{joined}}}}}'
         self._pieces_seconds = time.monotonic() - building
         if dirty:
