@@ -168,8 +168,13 @@ def test_a_row_committed_late_is_counted_once(
 ) -> None:
     """Ingest's batches commit out of id order: a row with a lower id, committed after a tick
     has counted a higher one, is still read (the id margin), and neither is counted twice. (The
-    two rows are either side of midnight, so their writers do not share a spool day.)"""
+    two rows are either side of midnight (site time), so their writers do not share a spool day.)"""
     now = tr(NEXT, 0, 1, 30)
+    # Both rows fall in one UTC day: on TimescaleDB the first uncommitted insert of a new chunk
+    # would make the other writer wait for its commit. A row of another device, committed
+    # before, creates the chunk.
+    Evidence(db_session, layout).traffic(tr(NEXT, 0, 0, 5), "172.20.43.99", 40000, duration=1)
+    db_session.commit()
     snapshot = Snapshot(layout.activity)
     warm(snapshot, db_session, now)
     db_session.commit()
