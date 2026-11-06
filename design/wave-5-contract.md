@@ -3255,3 +3255,31 @@ line is W5-E-10, and what it amends in detail:
     later that the bound no longer holds, or a bound that no longer follows from the readings,
     fails at once. When #185 makes the MAC branch cheaper, the readings are taken again and the
     Windows bound goes back to 0.2 s.
+
+## Deviations — W5-T (2026-11-06)
+
+Recorded on #204, from the manager's answers of 2026-11-06.
+
+- **W5-T-1: TÜRKTRUST's account is cleared at the console only in Wave 5.** C5 keeps its body
+  fields: `turktrust_username`, `turktrust_password`, `allow_plain_http`. No
+  `clear_turktrust_credentials` is added, and `clear_credentials` clears only Kamu SM's account,
+  as before. The console clears TÜRKTRUST's: `secret delete turktrust.username` and
+  `secret delete turktrust.password`. Completing this in the browser is Wave 7's work.
+- **W5-T-2: TÜRKTRUST's answers other than 2xx, 401 and 403 are split.**
+  - **Configuration error, not retried:** a 3xx, and any 4xx other than 408 and 429.
+    - Redirects are not followed, so a 3xx most likely means a wrong URL or path (T1).
+    - The text carries the status code and points to `[tsa] url`, never the credentials.
+  - **Unavailable, retried:** 408, 429, 5xx and network errors.
+  - 401 and 403 stay `credentials` configuration errors.
+  - Tests: `core/tests/test_tsa_turktrust.py` (`test_another_refusal_is_a_configuration_error`,
+    `test_a_server_error_is_retried`, `test_a_redirect_is_not_followed`).
+- **W5-T-3: until W5-T part 3, ApplySystem does not know the new outbound rules.**
+  - `admin/systemplan.py` derives the strict outbound rules after a browser change. It puts the
+    `[tsa] url` host under `ARCILOGGER Out Kamu SM` on `tsa.port`, and it knows neither
+    `tsa.crl_urls` nor `network.https_proxy`.
+  - So a browser switch to TÜRKTRUST reaches it on 443. The CRL hosts and the proxy, however, open
+    only when the installer's firewall step (`Set-ArciFirewall.ps1`) runs.
+  - **The follow-up:** a small pull request right after #204 (W5-T part 3) closes the gap. Its
+    granted files are `_outbound` in `admin/systemplan.py` and the rule list in
+    `ArciInstall.psm1`, with their tests. It adds the `TURKTRUST`, `CRL` and `Proxy` rules, with the
+    names and ports of `Set-ArciFirewall.ps1`.
