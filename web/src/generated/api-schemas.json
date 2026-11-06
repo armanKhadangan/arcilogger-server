@@ -16351,6 +16351,11 @@
           "title": "Java Choices",
           "type": "array"
         },
+        "legal_grade": {
+          "default": false,
+          "title": "Legal Grade",
+          "type": "boolean"
+        },
         "provider": {
           "title": "Provider",
           "type": "string"

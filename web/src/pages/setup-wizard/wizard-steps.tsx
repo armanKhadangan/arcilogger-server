@@ -24,6 +24,7 @@ import {
   CHECKED_STEPS,
   firewallNotes,
   siteProblems,
+  stepTextKey,
   type Arrival,
   type CheckedStepId,
   type StepState,
@@ -206,7 +207,7 @@ export function SummaryStep({
                 onClick={onNavigate}
                 className="text-13 font-medium text-primary-ink underline underline-offset-2"
               >
-                {index + 1}. {t(`setupWizard.steps.${step}.title`)}
+                {index + 1}. {t(`setupWizard.steps.${stepTextKey(step, config)}.title`)}
               </Link>
               <WizardBadge state={states[step]} />
             </li>

@@ -20,6 +20,7 @@ import {
   isWizardStep,
   nextStep,
   STEP_LINKS,
+  stepTextKey,
   verifiedStampTest,
   WIZARD_STEPS,
   wizardStates,
@@ -96,7 +97,10 @@ export function WizardPage() {
   useEffect(() => {
     if (appliedSha && shownSha && appliedSha !== shownSha) void refetch();
   }, [appliedSha, shownSha, refetch]);
-  const tested = verifiedStampTest(tests.data?.pages.flatMap((page) => page.items) ?? []);
+  const tested = verifiedStampTest(
+    tests.data?.pages.flatMap((page) => page.items) ?? [],
+    config.data?.sections.tsa.provider,
+  );
   const states = useMemo(
     () => (config.data ? wizardStates({ config: config.data, tested }) : undefined),
     [config.data, tested],
@@ -162,7 +166,8 @@ export function WizardPage() {
                       )}
                     >
                       <span>
-                        {index + 1}. {t(`setupWizard.steps.${item}.title`)}
+                        {index + 1}.{' '}
+                        {t(`setupWizard.steps.${stepTextKey(item, config.data)}.title`)}
                       </span>
                       {item === 'summary' ? (
                         <SummaryBadge states={states} />
@@ -177,8 +182,8 @@ export function WizardPage() {
           </nav>
           <div ref={panel} tabIndex={-1} className="flex min-w-0 flex-col gap-4 outline-none">
             <SettingsCard
-              title={`${WIZARD_STEPS.indexOf(step) + 1}. ${t(`setupWizard.steps.${step}.title`)}`}
-              description={t(`setupWizard.steps.${step}.purpose`)}
+              title={`${WIZARD_STEPS.indexOf(step) + 1}. ${t(`setupWizard.steps.${stepTextKey(step, config.data)}.title`)}`}
+              description={t(`setupWizard.steps.${stepTextKey(step, config.data)}.purpose`)}
               testId={`wizard-step-${step}`}
               actions={step === 'summary' ? undefined : <WizardBadge state={states[step]} />}
             >

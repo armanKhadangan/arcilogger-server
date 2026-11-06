@@ -83,6 +83,8 @@ def test_the_configuration_is_shown_without_any_secret(
     assert document["sections"]["smtp"]["secrets"]["smtp.password"]["set"] is True
     assert document["sections"]["tsa"]["provider"] == "mock"
     assert document["sections"]["tsa"]["server"] is None
+    # #220: the claim the first-run wizard reads (the mock TSA never claims legal grade).
+    assert document["sections"]["tsa"]["legal_grade"] is False
     # W5-T (§2.4, §2.5): TÜRKTRUST's account as set/unset, never a value; the §2.5 keys flat.
     tsa_secrets = document["sections"]["tsa"]["secrets"]
     assert tsa_secrets["turktrust.username"]["set"] is False

@@ -16,6 +16,14 @@ const FIXED: [key: string, tr: string, en: string][] = [
   ['setupWizard.back', 'Kurulum sihirbazına dön', 'Back to the first-run wizard'],
   ['setup.stepWizard', 'Kurulum sihirbazı', 'First-run wizard'],
   ['setup.stepWizardHint', "Girişten sonra, Ayarlar'da", 'After sign-in, in Settings'],
+  // #220: the two time-stamp steps on a TÜRKTRUST site.
+  ['setupWizard.steps.turktrust_test.title', 'TÜRKTRUST: damga testi', 'TÜRKTRUST: stamp test'],
+  ['setupWizard.steps.turktrust_production.title', 'TÜRKTRUST: üretim', 'TÜRKTRUST: production'],
+  [
+    'setupWizard.missing.notTurktrustProduction',
+    "Zaman damgası TÜRKTRUST'ın üretim sunucusundan alınmıyor.",
+    "Time stamps do not come from TÜRKTRUST's production server.",
+  ],
   [
     'auditActions.compliance_report_export',
     'Uyum Durumu Raporu indirildi',
