@@ -4,9 +4,12 @@ One poll of a source is at most one walk of ``ifName`` (when an interface has no
 yet: at start, after a name went missing or after ``sysUpTime`` went back) and one GET of
 ``sysUpTime.0`` and, per interface, ``ifHCInOctets``, ``ifHCOutOctets``, ``ifOperStatus`` and
 ``ifHighSpeed``. A rate is Δoctets * 8 / Δt between two good reads of the same interface; on a
-WAN interface In is the download and Out the upload ("sahada doğrula" X-B2). A read after a
-counter or ``sysUpTime`` decrease (the device restarted or the counters were cleared) gives no
-rate: it only starts the next one. Only the 64-bit counters are read (``snmp_no_hc_counters``).
+WAN interface In is the download and Out the upload ("sahada doğrula" X-B2). Δt is the change of
+``sysUpTime``, read in the same GET as the counters, so a retried request does not skew it; the
+poll times only when it did not move forward. A read after a counter or ``sysUpTime`` decrease
+(the device restarted or the counters were cleared) gives no rate: it only starts the next one.
+Only the 64-bit counters are read (``snmp_no_hc_counters``). An ``ifIndex`` the device gives to
+another interface without a name going missing or a restart is not walked again (rare).
 
 The state of every source is kept in ``state/wan-rates.json`` (:mod:`~.state`), so a restarted
 worker goes on from its last reads.
@@ -131,12 +134,14 @@ async def poll_source(
             fail(line, "snmp_no_hc_counters", now)
             continue
         previous = line.counters
-        line.counters = Counters(octets_in, octets_out, now)
+        line.counters = Counters(octets_in, octets_out, now, uptime)
         line.status = "ok"
         line.updated_at = now
         if previous is None or octets_in < previous.octets_in or octets_out < previous.octets_out:
             continue  # the first read, or the counters were reset: the next read gives a rate
         seconds = (now - previous.at).total_seconds()
+        if uptime is not None and previous.uptime is not None and uptime > previous.uptime:
+            seconds = (uptime - previous.uptime) / 100  # the device's clock, in 1/100 s
         if seconds <= 0:
             continue
         line.add(

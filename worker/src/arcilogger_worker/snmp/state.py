@@ -44,6 +44,8 @@ class Counters:
     octets_in: int
     octets_out: int
     at: datetime
+    #: ``sysUpTime`` of the same answer (the rate's Δt).
+    uptime: int | None = None
 
 
 @dataclass
@@ -104,7 +106,12 @@ class Line:
             "updated_at": _time(self.updated_at) if self.updated_at else None,
             "watched_since": _time(self.watched_since) if self.watched_since else None,
             "counters": (
-                {"in": counters.octets_in, "out": counters.octets_out, "at": _time(counters.at)}
+                {
+                    "in": counters.octets_in,
+                    "out": counters.octets_out,
+                    "at": _time(counters.at),
+                    "uptime": counters.uptime,
+                }
                 if counters
                 else None
             ),
@@ -131,7 +138,13 @@ class Line:
         if counters:
             at = _parse(counters.get("at"))
             if at is not None:
-                line.counters = Counters(int(counters["in"]), int(counters["out"]), at)
+                uptime = counters.get("uptime")
+                line.counters = Counters(
+                    int(counters["in"]),
+                    int(counters["out"]),
+                    at,
+                    uptime if isinstance(uptime, int) else None,
+                )
         for at, down, up in data.get("samples") or []:
             line.samples.append((datetime.fromisoformat(at), float(down), float(up)))
         for at, down, up, count in data.get("minutes") or []:

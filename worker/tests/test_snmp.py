@@ -156,6 +156,18 @@ def test_a_rate_is_delta_octets_times_eight_over_delta_t() -> None:
     assert len(fake.gets[-1]) == 1 + 2 * 4  # one GET: sysUpTime and four objects per line
 
 
+def test_delta_t_is_the_devices_uptime_when_it_moved_forward() -> None:
+    """A poll whose answer came late (a retried request) keeps the device's own Δt."""
+    fake, state = agent(), SourceState("fw-1")
+    poll(fake, state, T0)
+    fake.tick(15, down=1_875_000)  # 1 Mbit/s over the device's 15 s …
+    poll(fake, state, T0 + timedelta(seconds=17))  # … read 2 s late by the server's clock
+    assert state.lines["wan1"].samples == [(T0 + timedelta(seconds=17), 1_000_000.0, 0.0)]
+    fake.tick(0, down=2_500_000)  # sysUpTime that did not move forward: the poll times give Δt
+    poll(fake, state, T0 + timedelta(seconds=37))
+    assert state.lines["wan1"].samples[-1] == (T0 + timedelta(seconds=37), 1_000_000.0, 0.0)
+
+
 def test_a_counter_reset_gives_no_rate_and_starts_the_next() -> None:
     fake, state = agent(), SourceState("fw-1")
     poll(fake, state, T0)

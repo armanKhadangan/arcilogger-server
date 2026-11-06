@@ -162,7 +162,7 @@ def test_an_idle_job_neither_runs_nor_writes_a_row(
     """A due job whose ``idle`` check is true does nothing and is due again ``every`` later;
     a failing check runs the job."""
     calls: list[str] = []
-    state = {"idle": True}
+    state: dict[str, bool | None] = {"idle": True}
 
     def idle(ctx: JobContext) -> bool:
         if state["idle"] is None:

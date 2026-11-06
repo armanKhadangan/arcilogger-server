@@ -2,8 +2,8 @@
 
 pysnmp's own agent side answers on a loopback UDP port, in a thread with its own event loop:
 an authPriv user (SHA-256, AES-128), ``sysUpTime`` and the ``ifName``, ``ifHCInOctets``,
-``ifHCOutOctets``, ``ifOperStatus`` and ``ifHighSpeed`` objects of two interfaces, whose
-counters the test moves. The real :class:`~arcilogger_core.snmp.PysnmpClient` and the
+``ifHCOutOctets``, ``ifOperStatus`` and ``ifHighSpeed`` objects of two interfaces; the test
+moves the counters and ``sysUpTime``. The real :class:`~arcilogger_core.snmp.PysnmpClient` and the
 ``snmp.poll`` job then run as on a site: walk, GET, rates, the state file; and a wrong key gives
 ``auth_failed``, a port with no agent ``timeout``.
 """
@@ -122,6 +122,9 @@ def _serve(agent: Agent, ready: threading.Event, stop: list[Any]) -> None:
             Live(_oid(column), (index,), syntax.clone(agent.values[f"{column}.{index}"]))
             for index in (1, 2)
         ]
+    # sysUpTime too, so that the test moves the device's clock with its own (the rate's Δt)
+    uptime = _oid(SYS_UPTIME)
+    objects.append(Live(uptime[:-1], uptime[-1:], rfc1902.TimeTicks(agent.values[SYS_UPTIME])))
     builder.export_symbols("__ARCILOGGER_TEST", *objects)
     cmdrsp.GetCommandResponder(snmp, snmp_context)
     cmdrsp.NextCommandResponder(snmp, snmp_context)
@@ -144,6 +147,7 @@ def _serve(agent: Agent, ready: threading.Event, stop: list[Any]) -> None:
 def agent() -> Iterator[Agent]:
     responder = Agent(_free_port())
     responder.values = {
+        SYS_UPTIME: 815_220_100,
         f"{IF_NAME}.1": "wan1",
         f"{IF_NAME}.2": "lan",
         f"{IF_HC_IN_OCTETS}.1": 10_000_000_000,
@@ -236,6 +240,7 @@ def test_the_job_round_trip(agent: Agent, tmp_path: Path, layout: Layout) -> Non
         }
     )
     assert snmp_job.poll_due(layout, config, now=T0, sessions=None) is not None
+    agent.values[SYS_UPTIME] += 1000  # 10 s pass on the device
     agent.values[f"{IF_HC_IN_OCTETS}.1"] += 12_500_000  # 10 Mbit/s down over 10 s
     agent.values[f"{IF_HC_OUT_OCTETS}.1"] += 1_250_000  # 1 Mbit/s up
     later = T0 + timedelta(seconds=10)
