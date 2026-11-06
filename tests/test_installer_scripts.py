@@ -11210,6 +11210,28 @@ def test_firewall_strict_outbound_the_proxy_replaces_turktrust_and_the_crls(
     assert outbound["ARCILOGGER Out Kamu SM"]["remote_address"] == ["10.0.0.1"]
 
 
+def test_firewall_strict_outbound_warns_when_the_proxy_does_not_resolve(
+    engine: str, tmp_path: Path
+) -> None:
+    """#204 review: a proxy host that does not resolve leaves no path for stamps and revocation
+    lists (no Proxy, TURKTRUST or CRL rule); the script says so instead of staying silent."""
+    text = (
+        STRICT_CONFIG
+        + TURKTRUST_CONFIG
+        + '[network]\nhttps_proxy = "http://proxy.ornek.invalid:3128"\n'
+    )
+    result, plan = _firewall(engine, tmp_path, text, "-StrictOutbound", *STRICT_ARGS)
+    output = result.stdout + result.stderr
+    assert result.returncode == 0, output
+    outbound = _outbound(plan)
+    for name in ("ARCILOGGER Out Proxy", "ARCILOGGER Out TURKTRUST", "ARCILOGGER Out CRL"):
+        assert name not in outbound, name
+    # Windows PowerShell 5.1 wraps warnings at the console width: compare the words.
+    words = " ".join(output.split())
+    assert "Vekil sunucu (proxy.ornek.invalid) çözümlenemedi" in words
+    assert "[the proxy host does not resolve: in strict outbound mode no path is opened" in words
+
+
 SMTP_CONFIG = '[smtp]\nenabled = true\nhost = "10.0.0.8"\nport = 465\nsecurity = "ssl"\n'
 SMTP_FREE_ARGS = STRICT_ARGS[: STRICT_ARGS.index("-SmtpServer")]
 

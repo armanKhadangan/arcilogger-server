@@ -482,6 +482,11 @@ if (-not $Remove) {
         if ($proxy -and [System.Uri]::TryCreate($proxy, [System.UriKind]::Absolute, [ref]$proxyUri) -and $proxyUri.Host) {
             $proxyAddresses = Resolve-HostAddresses $proxyUri.Host
             if (@($proxyAddresses).Count -gt 0) { $rules.Add((New-RuleSpec 'ARCILOGGER Out Proxy' 'Outbound' 'TCP' @([string]$proxyUri.Port) $proxyAddresses 'HTTPS proxy ([network] https_proxy)')) }
+            else {
+                # No proxy rule, and no TURKTRUST or CRL rule either (they go through the proxy):
+                # in strict mode nothing reaches the stamps or the revocation lists, so say so.
+                Write-ArciWarn ("Vekil sunucu ({0}) çözümlenemedi: sıkı giden kipte zaman damgası ve iptal listeleri için yol açılmadı. [network] https_proxy ayarını düzeltip bu betiği yeniden çalıştırın [the proxy host does not resolve: in strict outbound mode no path is opened for time stamps and revocation lists; fix [network] https_proxy and run this script again]." -f $proxyUri.Host)
+            }
         }
         else {
             if ($provider -eq 'turktrust' -and $tsaUri) {
