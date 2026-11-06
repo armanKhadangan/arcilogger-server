@@ -489,6 +489,10 @@
         "totals": {
           "$ref": "#/components/schemas/ActivityTotals"
         },
+        "warming_up": {
+          "title": "Warming Up",
+          "type": "boolean"
+        },
         "window": {
           "title": "Window",
           "type": "integer"
@@ -501,6 +505,7 @@
         "totals",
         "per_minute",
         "data_until",
+        "warming_up",
         "generated_at"
       ],
       "title": "ActivityDevices",
