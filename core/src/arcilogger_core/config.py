@@ -54,6 +54,49 @@ class _Model(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True, hide_input_in_errors=True)
 
 
+class SnmpCapacity(_Model):
+    """A WAN line's capacity as configured, in whole Mbit/s (``capacity_mbps``, N1)."""
+
+    down: int = Field(ge=1, le=1_000_000)
+    up: int = Field(ge=1, le=1_000_000)
+
+
+class SnmpConfig(_Model):
+    """``[sources.snmp]``: the internet line's speed over read-only SNMPv3 (Wave 5 §6 N1).
+
+    Only SNMPv3 with authentication and privacy (authPriv): there is no ``version`` and no
+    community string (v1/v2c send it in clear text), and ``auth``/``priv`` have no "none". The
+    target is always the source's own single ``address`` (``snmp_source_is_network``). The two
+    keys, ``snmp.<source>.auth_key`` and ``snmp.<source>.priv_key`` (8 to 64 characters), are in
+    the secret store only (``snmp_secret_missing``), never here.
+    """
+
+    enabled: bool = False
+    port: int = Field(default=161, ge=1, le=65535)
+    #: The SNMPv3 user name (not a secret).
+    user: str = Field(default="", max_length=64)
+    auth: Literal["sha1", "sha256", "sha512"] = "sha256"
+    #: ``aes256`` is "sahada doğrula" (X-B3): older firmware may not offer it.
+    priv: Literal["aes128", "aes256"] = "aes128"
+    #: ``ifName`` of each WAN line (X-B4: the probe lists them, nothing is assumed).
+    interfaces: tuple[str, ...] = Field(default=(), max_length=4)
+    capacity_mbps: dict[str, SnmpCapacity] = Field(default_factory=dict)
+    interval_seconds: int = Field(default=15, ge=10, le=60)
+
+    @model_validator(mode="after")
+    def _complete(self) -> SnmpConfig:
+        names = [name.strip() for name in self.interfaces]
+        if any(not name or len(name) > 64 for name in names) or len(set(names)) != len(names):
+            raise ValueError("snmp_setting_invalid: interfaces must be distinct ifName values")
+        if set(self.capacity_mbps) - set(names):
+            raise ValueError("snmp_setting_invalid: capacity_mbps names an interface not listed")
+        if self.enabled and (not self.user.strip() or not names):
+            raise ValueError(
+                "snmp_setting_invalid: an enabled SNMP needs a user and 1 to 4 interfaces"
+            )
+        return self
+
+
 class SourceConfig(_Model):
     """A device that sends syslog, identified by its sender IP address.
 
@@ -78,6 +121,8 @@ class SourceConfig(_Model):
     #: under the source's name as before (raw logs are never dropped), and the source still
     #: counts for the licence's log-source limit (ADR-0013).
     enabled: bool = True
+    #: The internet line's speed over SNMPv3 (Wave 5 §6 N1); ``None``: no SNMP.
+    snmp: SnmpConfig | None = None
 
     @field_validator("address")
     @classmethod
@@ -85,6 +130,16 @@ class SourceConfig(_Model):
         if "/" in value:
             return str(ipaddress.ip_network(value, strict=False))
         return str(ipaddress.ip_address(value))
+
+    @model_validator(mode="after")
+    def _snmp_single_address(self) -> SourceConfig:
+        if self.snmp is None or not self.snmp.enabled:
+            return self
+        if self.is_network:
+            raise ValueError("snmp_source_is_network: SNMP is read from a single address only")
+        if ipaddress.ip_address(self.address).version != 4:  # the UDP transport is IPv4 only
+            raise ValueError("source_ipv6_unsupported: SNMP is read from an IPv4 address only")
+        return self
 
     @property
     def is_network(self) -> bool:

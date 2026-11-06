@@ -73,7 +73,9 @@ come from ``samples_compliance.py`` and ``samples_system.py``, run on the main s
 others (the cards read the whole site; the Sistem samples fix what the host would say). The
 legal-validity samples (``legal-status.json``; Wave 5 contract 2.3.1) come from
 ``samples_legal_status.py``, run after the Sistem samples and before the archive's, with a
-configuration and state files of their own for each case, put back afterwards. The
+configuration and state files of their own for each case, put back afterwards. The internet
+line's speed samples (``activity-wan.json``; Wave 5 §6 N6) come from ``samples_activity_wan.py``,
+run after them with a ``state/wan-rates.json`` of their own, put back afterwards. The
 archive reload samples (``archive.json``; Wave 5 contract §5) come from ``samples_archive.py``,
 run last on the main site with the database window narrowed for their time. The
 Wave 3 lookups (FortiGate DHCP alone, srcmac, the internet exits' cases, a source clock, an
@@ -130,6 +132,7 @@ from sqlalchemy import Engine, event, inspect, select, text, update
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import NullPool
 
+import arcilogger_core
 from arcilogger_api import deps, evidence_limits, rawlines
 from arcilogger_api.app import create_app
 from arcilogger_api.auth.accounts import accept_privacy, privacy_version
@@ -142,10 +145,9 @@ from arcilogger_api.routers import lookup as lookup_router
 from arcilogger_api.routers.evidence import STATUS_LABELS
 from arcilogger_api.security import hash_token
 from arcilogger_api.testing import LoggedIn, login, make_user
-import arcilogger_core
 from arcilogger_core import timeutil
 from arcilogger_core.admin.testing import FakeAgent, SmtpTestServer, make_installation
-from arcilogger_core.config import Config, load_config
+from arcilogger_core.config import load_config
 from arcilogger_core.credit import check_credit
 from arcilogger_core.layout import Layout
 from arcilogger_core.license import revoked as license_revoked
@@ -161,8 +163,8 @@ from arcilogger_core.license.testing import (
     trusted_test_keys,
 )
 from arcilogger_core.rawlog import format_line
-from arcilogger_core.secretstore import USAGE_PSEUDONYM_KEY, SecretStore
 from arcilogger_core.replica import replicate_day
+from arcilogger_core.secretstore import USAGE_PSEUDONYM_KEY, SecretStore
 from arcilogger_core.timeutil import SITE_TZ, site_day, utc_now
 from arcilogger_core.tsa.base import TsaUnavailableError
 from arcilogger_core.tsa.mock import MockFailure, MockTsaProvider
@@ -190,19 +192,19 @@ from arcilogger_db.settings import get_setting, set_setting
 from arcilogger_db.testing import TestServer, admin_dsn_from_env
 from arcilogger_worker.admin_jobs import process_requests as process_admin_requests
 from arcilogger_worker.alerts.importer import import_alerts
+from arcilogger_worker.alerts.mail import SmtpSendError
 from arcilogger_worker.alerts.r15 import check_silent_sources
 from arcilogger_worker.alerts.store import open_alert, resolve
-from arcilogger_worker.alerts.mail import SmtpSendError
 from arcilogger_worker.correlation.leases import rebuild_day
 from arcilogger_worker.licensing import job_license_check
 from arcilogger_worker.reports import runner as report_runner
 from arcilogger_worker.reports.testing import report_sample
 from arcilogger_worker.service import JobContext
 from arcilogger_worker.testing import FIREWALL, Evidence, tr
+from arcilogger_worker.usage import report_data
 from arcilogger_worker.usage.jobs import process_requests
 from arcilogger_worker.usage.jobs import rebuild_day as rebuild_usage_day
 from arcilogger_worker.usage.testing import build_golden_site
-from arcilogger_worker.usage import report_data
 from arcilogger_worker.vaulttesting import SealedVault, at_site, make_vault
 
 # The sample modules next to this script: on the path when it runs as a script, not when a test
@@ -210,6 +212,7 @@ from arcilogger_worker.vaulttesting import SealedVault, at_site, make_vault
 _SCRIPTS = str(Path(__file__).resolve().parent)
 if _SCRIPTS not in sys.path:
     sys.path.insert(0, _SCRIPTS)
+import samples_activity_wan  # noqa: E402
 import samples_archive  # noqa: E402
 import samples_compliance  # noqa: E402
 import samples_legal_status  # noqa: E402
@@ -232,6 +235,7 @@ SAMPLE_MODULES = (
     samples_compliance,
     samples_system,
     samples_legal_status,
+    samples_activity_wan,
     samples_archive,
 )
 

@@ -116,6 +116,7 @@ vermez.
 | `/compliance` | Uyum Durumu: on denetim kartı, Uyum Durumu Raporu (PDF), yapılandırma yedeği onayı | 5651 Temel |
 | `/legal-status` | Yasal geçerlilik durumu: her sayfadaki uyarı bandı (oturum açmış her kullanıcı) | 5651 Temel |
 | `/system` | Sistem sayfası: kaynak kullanımı, disk tahmini, veritabanı boyutu, hizmetler, zamanlanmış görevler, saat | 5651 Temel |
+| `/activity` | Canlı Durum: `/activity/wan`, internet hattının hızı (SNMPv3 ile okunan WAN arayüz sayaçları; kişi verisi yok); temel üründür | 5651 Temel |
 | `/archive-reloads` | Arşivden yeniden yükleme: veritabanı penceresinden eski günlerin mühürlü kasadan geri istenmesi ve ilerlemesi | 5651 Temel |
 | `/usage` | Kullanım sayfasının verileri, dışa aktarma, yeniden hesaplama | Kullanım analizi |
 | `/reports` | Zamanlanmış raporlar, çalıştırmalar, önizleme | Zamanlanmış kullanım raporları |
@@ -151,6 +152,7 @@ uyarısı açmaz. Kapalı modülün verileri silinmez.
 | `reports.run_due` | Zamanlanmış kullanım raporları | atlanır |
 | `reports.purge` | — (rapor dosyalarının silinmesi) | her zaman çalışır |
 | `system.sample` | 5651 Temel | her zaman çalışır |
+| `snmp.poll` | 5651 Temel | her zaman çalışır |
 | `search.counts_backfill` | 5651 Temel | her zaman çalışır |
 
 Komut satırında yalnızca `arcilogger-worker usage rebuild` Kullanım analizi kapalıyken reddedilir

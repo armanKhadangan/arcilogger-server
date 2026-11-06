@@ -1215,6 +1215,24 @@ class Agent:
                 password = secret("smtp.password")
                 if password:
                     secrets["smtp.password"] = password
+            elif probe.kind == "snmp":
+                source = next(s for s in candidate.sources if s.name == probe.target)
+                snmp = source.snmp
+                if snmp is None:  # the rules probe only a source with SNMP on
+                    continue
+                params = {
+                    "host": source.address,
+                    "port": snmp.port,
+                    "user": snmp.user,
+                    "auth": snmp.auth,
+                    "priv": snmp.priv,
+                    "interfaces": list(snmp.interfaces),
+                }
+                keys = rules.snmp_keys(source.name)
+                for role, name in zip(("auth_key", "priv_key"), keys, strict=True):
+                    value = secret(name)
+                    if value:
+                        secrets[role] = value
             else:
                 params = {
                     "target": candidate.replica.target_text,

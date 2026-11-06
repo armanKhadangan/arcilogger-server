@@ -11300,6 +11300,40 @@ def test_firewall_strict_outbound_follows_the_smtp_settings(engine: str, tmp_pat
     assert _smtp_rules(plan) == {}
 
 
+SNMP_CONFIG = (
+    '[[sources]]\nname = "fw-1"\ntype = "fortigate"\naddress = "172.31.255.2"\n'
+    '[sources.snmp]\nenabled = true\nuser = "arcilogger"\ninterfaces = ["wan1"]\n'
+    '[[sources]]\nname = "fw-2"\ntype = "fortigate"\naddress = "172.31.255.3"\n'
+    '[sources.snmp]\nenabled = true\nport = 1161\nuser = "arcilogger"\ninterfaces = ["wan1"]\n'
+    '[[sources]]\nname = "fw-off"\ntype = "fortigate"\naddress = "172.31.255.4"\n'
+    '[sources.snmp]\nenabled = false\nuser = "arcilogger"\ninterfaces = ["wan1"]\n'
+    '[[sources]]\nname = "fw-disabled"\ntype = "fortigate"\naddress = "172.31.255.5"\n'
+    "enabled = false\n"
+    '[sources.snmp]\nenabled = true\nuser = "arcilogger"\ninterfaces = ["wan1"]\n'
+)
+
+
+def test_firewall_strict_outbound_opens_snmp_to_its_sources_only(
+    engine: str, tmp_path: Path
+) -> None:
+    """Wave 5 §6 N3: one UDP rule per enabled single-address source with SNMP on, named
+    ``ARCILOGGER SNMP <source>``, to its own address and SNMP port; none in normal mode."""
+    text = STRICT_CONFIG + SNMP_CONFIG
+    result, plan = _firewall(engine, tmp_path, text, "-StrictOutbound", *SMTP_FREE_ARGS)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert plan is not None
+    snmp = {r["name"]: r for r in plan["rules"] if r["name"].startswith("ARCILOGGER SNMP ")}
+    assert {name: (r["direction"], r["protocol"], r["ports"], r["remote_address"])
+            for name, r in snmp.items()} == {
+        "ARCILOGGER SNMP fw-1": ("Outbound", "UDP", ["161"], ["172.31.255.2"]),
+        "ARCILOGGER SNMP fw-2": ("Outbound", "UDP", ["1161"], ["172.31.255.3"]),
+    }  # fmt: skip
+    result, plan = _firewall(engine, tmp_path, text, *SMTP_FREE_ARGS)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert plan is not None
+    assert not [r for r in plan["rules"] if r["name"].startswith("ARCILOGGER SNMP ")]
+
+
 def test_firewall_remembers_the_smtp_server(engine: str, tmp_path: Path) -> None:
     state = {
         "schema": 1, "strict_outbound": True, "smtp_server": "10.0.0.3:2525",
@@ -13067,6 +13101,8 @@ foreach ($case in @(
         @('turktrust', 'ARCILOGGER Out TURKTRUST', 'zd.turktrust.com.tr', 443),
         @('crl', 'ARCILOGGER Out CRL', 'crl.ornek.example', 80),
         @('proxy', 'ARCILOGGER Out Proxy', '172.20.10.5', 3128),
+        @('snmp', 'ARCILOGGER SNMP fw-1', '172.20.0.1', 161),
+        @('snmp of a bad name', 'ARCILOGGER SNMP Fw 1', '172.20.0.1', 161),
         @('web rule', 'ARCILOGGER HTTPS', 'arcilogger.internal', 443),
         @('dns rule', 'ARCILOGGER Out DNS UDP', '172.20.10.1', 53),
         @('tenth smtp', 'ARCILOGGER Out SMTP 10', 'smtp.ornek.example', 587),
@@ -13211,9 +13247,9 @@ def test_firewall_sync_checks_senders_and_outbound_rules_again(
     outbound = admin_helpers["outbound"]
     allowed = {name for name, problem in outbound.items() if problem is None}
     assert allowed == {
-        "smtp", "second smtp", "ntp", "kamu sm", "replica", "turktrust", "crl", "proxy",
+        "smtp", "second smtp", "ntp", "kamu sm", "replica", "turktrust", "crl", "proxy", "snmp",
     }  # fmt: skip
-    for name in ("web rule", "dns rule", "tenth smtp"):
+    for name in ("web rule", "dns rule", "tenth smtp", "snmp of a bad name"):
         assert "[rule not updated by this step]" in outbound[name], name
     for name in ("command in the host", "leading hyphen"):
         assert "[invalid host name]" in outbound[name], name
