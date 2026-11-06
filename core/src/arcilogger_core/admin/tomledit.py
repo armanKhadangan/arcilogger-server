@@ -44,7 +44,7 @@ from typing import Any, Final, Literal
 
 from pydantic import JsonValue, ValidationError
 
-from arcilogger_core.config import SourceConfig, parse_config
+from arcilogger_core.config import SnmpConfig, SourceConfig, parse_config
 
 MANAGED_BEGIN: Final = (
     "# --- ARCILOGGER web arayüzü yönetir / managed by the ARCILOGGER web interface ---"
@@ -59,6 +59,10 @@ _SOURCE_DEFAULTS: Final[Mapping[str, Any]] = {
     "transport": "any",
     "enabled": True,
 }
+#: ``[sources.snmp]`` (Wave 5 §6 N1): written as a sub-table after its ``[[sources]]`` table,
+#: each capacity as ``[sources.snmp.capacity_mbps."<ifName>"]``; defaults are left out.
+_SNMP_DEFAULTS: Final[Mapping[str, Any]] = SnmpConfig().model_dump(mode="json")
+SNMP_TABLE: Final = "sources.snmp"
 _BARE_KEY: Final = re.compile(r"[A-Za-z0-9_-]+")
 
 
@@ -137,13 +141,25 @@ def toml_value(value: JsonValue) -> str:
 
 
 def source_table(source: SourceConfig) -> dict[str, Any]:
-    """The keys of one ``[[sources]]`` table in model order; defaults are left out."""
+    """The keys of one ``[[sources]]`` table in model order; defaults are left out (also in its
+    ``snmp`` sub-table, which is left out when nothing in it differs from the defaults)."""
     table: dict[str, Any] = {}
     for name, value in source.model_dump(mode="json").items():
+        if name == "snmp":
+            snmp = {
+                key: item for key, item in (value or {}).items() if item != _SNMP_DEFAULTS.get(key)
+            }
+            if snmp:
+                table[name] = snmp
+            continue
         if name in _SOURCE_DEFAULTS and value == _SOURCE_DEFAULTS[name]:
             continue
         table[name] = value
     return table
+
+
+def _table_key(name: str) -> str:
+    return name if _BARE_KEY.fullmatch(name) else toml_string(name)
 
 
 def _render_sources(sources: Sequence[SourceConfig], newline: str) -> str:
@@ -152,7 +168,16 @@ def _render_sources(sources: Sequence[SourceConfig], newline: str) -> str:
         if index:
             lines.append("")
         lines.append("[[sources]]")
-        lines += [f"{key} = {toml_value(value)}" for key, value in source_table(source).items()]
+        table = source_table(source)
+        snmp = table.pop("snmp", None)
+        lines += [f"{key} = {toml_value(value)}" for key, value in table.items()]
+        if snmp is not None:
+            capacity = snmp.pop("capacity_mbps", {})
+            lines.append(f"[{SNMP_TABLE}]")
+            lines += [f"{key} = {toml_value(value)}" for key, value in snmp.items()]
+            for name, value in capacity.items():
+                lines.append(f"[{SNMP_TABLE}.capacity_mbps.{_table_key(name)}]")
+                lines += [f"{key} = {toml_value(item)}" for key, item in value.items()]
     lines.append(MANAGED_END)
     return newline.join(lines) + newline
 
@@ -534,10 +559,10 @@ def _sources_change(
             continue
         if header.name == "sources" and header.kind != "array":
             raise TomlEditError("[sources] is a table, not an array of tables")
-        if header.name.startswith("sources."):
+        if header.name.startswith("sources.") and not header.name.startswith(SNMP_TABLE):
             raise TomlEditError("[[sources]] has a sub-table")
-        if header.name == "sources":
-            _check_editable(region, "[[sources]]")
+        if header.name == "sources" or header.name.startswith(SNMP_TABLE):
+            _check_editable(region, f"[{header.name}]")
     block = _render_sources(item.sources, newline)
     begins = [s for s in statements if s.kind == "comment" and s.text.strip() == MANAGED_BEGIN]
     ends = [s for s in statements if s.kind == "comment" and s.text.strip() == MANAGED_END]
@@ -549,12 +574,15 @@ def _sources_change(
         start, end = begins[0].start, ends[0].end
         for header in headers:
             inside = start <= header.start < end
-            if inside != (header.name == "sources"):
+            ours = header.name == "sources" or header.name.startswith(SNMP_TABLE)
+            if inside != ours:
                 raise TomlEditError(
                     "a table other than [[sources]] in the managed block, or a [[sources]] "
                     "table outside it"
                 )
         return _Change(start, end, _line_break(text, start, newline) + block)
+    if any(header.name.startswith(SNMP_TABLE) for header in headers):
+        raise TomlEditError("[[sources]] has a sub-table outside the managed block")
     if sources:
         first, last = sources[0], sources[-1]
         between = [h for h in headers if first.start <= h.start <= last.start]

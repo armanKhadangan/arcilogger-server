@@ -41,6 +41,25 @@ TURKTRUST_PASSWORD = "turktrust.password"  # noqa: S105 - a name, not a password
 USAGE_PSEUDONYM_KEY = "usage.pseudonym_key"
 
 
+def snmp_auth_key(source: str) -> str:
+    """The name of a source's SNMPv3 authentication key (Wave 5 §6 N1; 8 to 64 characters)."""
+    return f"snmp.{source}.auth_key"
+
+
+def snmp_priv_key(source: str) -> str:
+    """The name of a source's SNMPv3 privacy key (Wave 5 §6 N1; 8 to 64 characters)."""
+    return f"snmp.{source}.priv_key"
+
+
+#: The lengths of an SNMPv3 key (N1; USM needs at least 8 characters).
+SNMP_KEY_LENGTHS: Final = range(8, 65)
+
+
+def is_snmp_key(name: str) -> bool:
+    """Whether ``name`` is one of the two SNMPv3 keys of a source."""
+    return name.startswith("snmp.") and name.endswith((".auth_key", ".priv_key"))
+
+
 #: Longest value of a stored secret given through the browser, and whether it may contain
 #: whitespace (the Kamu SM customer number may not; its exact format is confirmed on site).
 SECRET_LIMITS: Final[Mapping[str, tuple[int, bool]]] = MappingProxyType(
@@ -77,6 +96,10 @@ def check_secret_value(name: str, value: str) -> None:
     limit, spaces = SECRET_LIMITS.get(name, (DEFAULT_SECRET_LIMIT, True))
     if not value:
         raise SecretValueError(f"{name}: empty")
+    if is_snmp_key(name):
+        limit = SNMP_KEY_LENGTHS.stop - 1
+        if len(value) < SNMP_KEY_LENGTHS.start:
+            raise SecretValueError(f"{name}: shorter than {SNMP_KEY_LENGTHS.start} characters")
     if len(value) > limit:
         raise SecretValueError(f"{name}: longer than {limit} characters")
     if any(unicodedata.category(char) in _REFUSED_CATEGORIES for char in value):

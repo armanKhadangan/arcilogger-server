@@ -133,7 +133,7 @@ def poll_due(
 ) -> PollReport | None:
     """One run of ``snmp.poll``; ``None`` when no source has SNMP and nothing is left to clear."""
     report = PollReport()
-    sources = snmp_sources(config, report.refused)
+    sources = snmp_sources(config)
     path = layout.wan_rates
     wan = read_state(path)
     if not sources and not wan.sources and not path.exists():

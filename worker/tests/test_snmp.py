@@ -15,14 +15,15 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from pydantic import ValidationError
 from sqlalchemy.orm import Session, sessionmaker
 
+from arcilogger_core.config import Config
 from arcilogger_core.layout import Layout
-from arcilogger_core.secretstore import SecretStore
+from arcilogger_core.secretstore import SecretStore, snmp_auth_key, snmp_priv_key
 from arcilogger_core.snmp import (
     IF_HC_IN_OCTETS,
     IF_HC_OUT_OCTETS,
@@ -41,12 +42,7 @@ from arcilogger_db.models import Alert
 from arcilogger_worker.alerts import texts
 from arcilogger_worker.snmp import job as snmp_job
 from arcilogger_worker.snmp.poller import poll_source
-from arcilogger_worker.snmp.settings import (
-    SnmpSource,
-    auth_key_name,
-    priv_key_name,
-    snmp_sources,
-)
+from arcilogger_worker.snmp.settings import SnmpSource, snmp_sources
 from arcilogger_worker.snmp.state import (
     MINUTES_KEEP,
     SAMPLES_KEEP,
@@ -299,8 +295,8 @@ def test_an_unreadable_state_file_starts_again(tmp_path: Path, caplog: Any) -> N
 # -- the job --------------------------------------------------------------------------------------
 
 
-def _config(tmp_path: Path, **snmp: Any) -> Any:
-    """A configuration with one SNMP source (the ``[sources.snmp]`` model comes with W5-T)."""
+def _config(tmp_path: Path, **snmp: Any) -> Config:
+    """A configuration with one SNMP source, a network source and a source without SNMP."""
     settings = {
         "enabled": True,
         "port": 1161,
@@ -309,18 +305,17 @@ def _config(tmp_path: Path, **snmp: Any) -> Any:
         "interval_seconds": 15,
         **snmp,
     }
-    source = SimpleNamespace(
-        name="fw-1",
-        address="172.20.0.1",
-        enabled=True,
-        is_network=False,
-        snmp=SimpleNamespace(**settings),
+    return Config.model_validate(
+        {
+            "data_dir": str(tmp_path / "data"),
+            "secrets_dir": str(tmp_path / "secrets"),
+            "sources": [
+                {"name": "fw-1", "type": "fortigate", "address": "172.20.0.1", "snmp": settings},
+                {"name": "aps", "type": "generic", "address": "172.20.10.0/24"},
+                {"name": "core-r1", "type": "mikrotik", "address": "172.20.0.2"},
+            ],
+        }
     )
-    network = SimpleNamespace(
-        name="aps", address="172.20.10.0/24", enabled=True, is_network=True, snmp=source.snmp
-    )
-    plain = SimpleNamespace(name="core-r1", address="172.20.0.2", enabled=True, is_network=False)
-    return SimpleNamespace(sources=[source, network, plain], secrets_dir=tmp_path / "secrets")
 
 
 def _store(tmp_path: Path) -> SecretStore:
@@ -328,8 +323,8 @@ def _store(tmp_path: Path) -> SecretStore:
     folder.mkdir(exist_ok=True)
     SecretStore.create_key(folder / "secret.key")
     store = SecretStore(folder / "secret.key", folder / "secrets.json")
-    store.set(auth_key_name("fw-1"), AUTH_KEY)
-    store.set(priv_key_name("fw-1"), PRIV_KEY)
+    store.set(snmp_auth_key("fw-1"), AUTH_KEY)
+    store.set(snmp_priv_key("fw-1"), PRIV_KEY)
     return store
 
 
@@ -344,37 +339,53 @@ def test_only_enabled_single_address_sources_are_polled(tmp_path: Path) -> None:
         "aes128",
     )
     assert snmp_sources(_config(tmp_path, enabled=False)) == []
-    refused: dict[str, str] = {}
-    snmp_sources(config, refused)
-    assert refused == {"aps": "snmp_source_is_network"}  # a network is never a target
 
 
 @pytest.mark.parametrize(
-    ("settings", "code"),
+    ("settings", "refused"),
     [
-        ({"version": 2}, "snmp_auth_priv_required"),
-        ({"community": "public"}, "snmp_auth_priv_required"),
-        ({"auth": "none"}, "snmp_auth_priv_required"),  # noAuthNoPriv
-        ({"priv": "none"}, "snmp_auth_priv_required"),  # authNoPriv
-        ({"auth": "md5"}, "snmp_auth_priv_required"),
-        ({"priv": "des"}, "snmp_auth_priv_required"),
-        ({"port": 0}, "snmp_setting_invalid"),
-        ({"port": 65536}, "snmp_setting_invalid"),
-        ({"interval_seconds": 9}, "snmp_setting_invalid"),
-        ({"interval_seconds": 61}, "snmp_setting_invalid"),
+        ({"version": 2}, "extra_forbidden"),  # no v1/v2c: there is no version
+        ({"community": "public"}, "extra_forbidden"),  # and no community string
+        ({"auth": "none"}, "literal_error"),  # noAuthNoPriv
+        ({"priv": "none"}, "literal_error"),  # authNoPriv
+        ({"auth": "md5"}, "literal_error"),
+        ({"priv": "des"}, "literal_error"),
+        ({"port": 0}, "greater_than_equal"),
+        ({"port": 65536}, "less_than_equal"),
+        ({"interval_seconds": 9}, "greater_than_equal"),
+        ({"interval_seconds": 61}, "less_than_equal"),
         ({"interfaces": []}, "snmp_setting_invalid"),
-        ({"interfaces": ["a", "b", "c", "d", "e"]}, "snmp_setting_invalid"),
+        ({"interfaces": ["a", "b", "c", "d", "e"]}, "too_long"),
         ({"interfaces": ["wan1", "wan1"]}, "snmp_setting_invalid"),
         ({"user": ""}, "snmp_setting_invalid"),
         ({"capacity_mbps": {"wan9": {"down": 10, "up": 1}}}, "snmp_setting_invalid"),
-        ({"capacity_mbps": {"wan1": {"down": 0, "up": 1}}}, "snmp_setting_invalid"),
+        ({"capacity_mbps": {"wan1": {"down": 0, "up": 1}}}, "greater_than_equal"),
     ],
 )
-def test_n1_refusals(tmp_path: Path, settings: dict[str, Any], code: str) -> None:
-    """The rules of N1 (Q3 on #202: the adapter applies them until W5-T's model does)."""
-    refused: dict[str, str] = {}
-    assert snmp_sources(_config(tmp_path, **settings), refused) == []
-    assert refused == {"fw-1": code, "aps": "snmp_source_is_network"}
+def test_n1_refusals(tmp_path: Path, settings: dict[str, Any], refused: str) -> None:
+    """The rules of N1, in the configuration model: refused when the configuration is read."""
+    with pytest.raises(ValidationError) as error:
+        _config(tmp_path, **settings)
+    assert refused in str(error.value) or refused in {e["type"] for e in error.value.errors()}
+    assert str(settings) not in str(error.value)  # hide_input_in_errors
+
+
+def test_snmp_on_a_network_source_is_refused(tmp_path: Path) -> None:
+    with pytest.raises(ValidationError, match="snmp_source_is_network"):
+        Config.model_validate(
+            {
+                "data_dir": str(tmp_path),
+                "secrets_dir": str(tmp_path),
+                "sources": [
+                    {
+                        "name": "aps",
+                        "type": "generic",
+                        "address": "172.20.10.0/24",
+                        "snmp": {"enabled": True, "user": "u", "interfaces": ["wan1"]},
+                    }
+                ],
+            }
+        )
 
 
 @pytest.mark.parametrize(
@@ -397,13 +408,13 @@ def test_a_missing_or_bad_key_is_reported_and_polled_without_a_request(
 ) -> None:
     store = _store(tmp_path)
     if keys is None:
-        store.delete(priv_key_name("fw-1"))
+        store.delete(snmp_priv_key("fw-1"))
     else:
-        store.set(auth_key_name("fw-1"), keys[0])
+        store.set(snmp_auth_key("fw-1"), keys[0])
     fake = agent()
     report = snmp_job.poll_due(layout, _config(tmp_path), now=T0, sessions=None, client=fake)
     assert report is not None
-    assert report.refused == {"fw-1": "snmp_secret_missing", "aps": "snmp_source_is_network"}
+    assert report.refused == {"fw-1": "snmp_secret_missing"}
     assert (fake.walks, fake.gets) == (0, [])
     line = read_state(layout.wan_rates).sources["fw-1"].lines["wan1"]
     assert line.status == "auth_failed"
@@ -447,7 +458,9 @@ def test_switching_snmp_off_marks_the_lines_disabled(tmp_path: Path, layout: Lay
     snmp_job.poll_due(layout, _config(tmp_path, enabled=False), now=T0, sessions=None, client=fake)
     state = read_state(layout.wan_rates).sources["fw-1"]
     assert {line.status for line in state.lines.values()} == {"disabled"}
-    removed: Any = SimpleNamespace(sources=[], secrets_dir=tmp_path / "secrets")
+    removed = Config.model_validate(
+        {"data_dir": str(tmp_path / "data"), "secrets_dir": str(tmp_path / "secrets")}
+    )
     snmp_job.poll_due(layout, removed, now=T0, sessions=None, client=fake)
     assert read_state(layout.wan_rates).sources == {}
 

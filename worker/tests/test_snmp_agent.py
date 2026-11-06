@@ -18,13 +18,13 @@ from collections.abc import Iterator
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Any
 
 import pytest
 
+from arcilogger_core.config import Config
 from arcilogger_core.layout import Layout
-from arcilogger_core.secretstore import SecretStore
+from arcilogger_core.secretstore import SecretStore, snmp_auth_key, snmp_priv_key
 from arcilogger_core.snmp import (
     IF_HC_IN_OCTETS,
     IF_HC_OUT_OCTETS,
@@ -38,7 +38,6 @@ from arcilogger_core.snmp import (
 )
 from arcilogger_core.timeutil import SITE_TZ
 from arcilogger_worker.snmp import job as snmp_job
-from arcilogger_worker.snmp.settings import auth_key_name, priv_key_name
 from arcilogger_worker.snmp.state import read_state
 
 USER = "arcilogger"
@@ -183,22 +182,29 @@ def test_the_job_round_trip(agent: Agent, tmp_path: Path, layout: Layout) -> Non
     secrets.mkdir()
     SecretStore.create_key(secrets / "secret.key")
     store = SecretStore(secrets / "secret.key", secrets / "secrets.json")
-    store.set(auth_key_name("fw-1"), AUTH_KEY)
-    store.set(priv_key_name("fw-1"), PRIV_KEY)
-    snmp = SimpleNamespace(
-        enabled=True,
-        port=agent.port,
-        user=USER,
-        auth="sha256",
-        priv="aes128",
-        interfaces=["wan1"],
-        capacity_mbps={"wan1": {"down": 1000, "up": 100}},
-        interval_seconds=10,
+    store.set(snmp_auth_key("fw-1"), AUTH_KEY)
+    store.set(snmp_priv_key("fw-1"), PRIV_KEY)
+    config = Config.model_validate(
+        {
+            "data_dir": str(tmp_path / "data"),
+            "secrets_dir": str(secrets),
+            "sources": [
+                {
+                    "name": "fw-1",
+                    "type": "fortigate",
+                    "address": "127.0.0.1",
+                    "snmp": {
+                        "enabled": True,
+                        "port": agent.port,
+                        "user": USER,
+                        "interfaces": ["wan1"],
+                        "capacity_mbps": {"wan1": {"down": 1000, "up": 100}},
+                        "interval_seconds": 10,
+                    },
+                }
+            ],
+        }
     )
-    source = SimpleNamespace(
-        name="fw-1", address="127.0.0.1", enabled=True, is_network=False, snmp=snmp
-    )
-    config: Any = SimpleNamespace(sources=[source], secrets_dir=secrets)
     assert snmp_job.poll_due(layout, config, now=T0, sessions=None) is not None
     agent.values[f"{IF_HC_IN_OCTETS}.1"] += 12_500_000  # 10 Mbit/s down over 10 s
     agent.values[f"{IF_HC_OUT_OCTETS}.1"] += 1_250_000  # 1 Mbit/s up
