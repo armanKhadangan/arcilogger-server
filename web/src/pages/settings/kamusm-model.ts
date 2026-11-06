@@ -6,7 +6,13 @@
  */
 
 import { SECRET_KEPT, secretChanged, type SecretEdit } from '@/components/admin/secret-edit';
-import type { BrowserSecret, SecretMeta, TsaBody, TsaSection } from '@/lib/settings-types';
+import type {
+  BrowserSecret,
+  SecretMeta,
+  TsaBody,
+  TsaSection,
+  TsaServer,
+} from '@/lib/settings-types';
 import { codePointLength } from '@/lib/validation';
 
 import { integerError, parseInteger } from './settings-validation';
@@ -35,13 +41,16 @@ export function isStep(value: string | null): value is StepId {
 /**
  * The servers the browser can choose (Wave 5 contract 2.4 "Browser administration",
  * `TSA_SERVERS`): the Kamu SM Zamane test and production servers, TÜRKTRUST over HTTPS, and
- * TÜRKTRUST over plain HTTP, which is accepted only with a typed confirmation.
- *
- * Interim until W5-T widens `TsaServer` (`settings-types.ts`, checked against the API's schema):
- * the TÜRKTRUST choices are known here only.
+ * TÜRKTRUST over plain HTTP, which is accepted only with a typed confirmation: W5-T's
+ * `TsaServer` (`settings-types.ts`, checked against the API's schema), in the page's order.
  */
-export const SERVER_CHOICES = ['test', 'production', 'turktrust', 'turktrust-http'] as const;
-export type ServerChoice = (typeof SERVER_CHOICES)[number];
+export const SERVER_CHOICES = [
+  'test',
+  'production',
+  'turktrust',
+  'turktrust-http',
+] as const satisfies readonly TsaServer[];
+export type ServerChoice = TsaServer;
 
 export function isServerChoice(value: string | null | undefined): value is ServerChoice {
   return typeof value === 'string' && (SERVER_CHOICES as readonly string[]).includes(value);
@@ -64,36 +73,30 @@ export function choiceProvider(choice: ServerChoice): 'zamane' | 'turktrust' {
 
 /**
  * The server in use, `null` when it is none of the choices (the mock, another RFC 3161 server, a
- * Zamane server at another address) or cannot be told: until W5-T names TÜRKTRUST's servers in
- * `server`, a TÜRKTRUST site reads `null` there.
+ * Zamane server at another address) or does not belong to the provider in use.
  */
 export function currentChoice(tsa: TsaSection): ServerChoice | null {
-  const server: string | null = tsa.server;
+  const server = tsa.server;
   return isServerChoice(server) && choiceProvider(server) === tsa.provider ? server : null;
 }
 
 /** The providers the browser chooses: a site on one of them keeps its server unless one is chosen. */
 const CHOSEN_PROVIDERS: ReadonlySet<string> = new Set(['zamane', 'turktrust']);
 
-/** Interim until W5-T adds them to `BrowserSecret`: TÜRKTRUST's credentials (contract 2.4). */
-export type TurktrustSecret = 'turktrust.username' | 'turktrust.password';
-
 /** What `tsa.secrets` says of a credential (whether it is stored, never its value). */
-export function secretMeta(
-  tsa: TsaSection,
-  name: BrowserSecret | TurktrustSecret,
-): SecretMeta | undefined {
-  return (tsa.secrets as Partial<Record<string, SecretMeta>>)[name];
+export function secretMeta(tsa: TsaSection, name: BrowserSecret): SecretMeta | undefined {
+  return tsa.secrets[name];
 }
 
 /**
- * The server knows TÜRKTRUST: it reports `turktrust.*` in the section's `secrets` (Wave 5
- * contract 2.4, as W5-T has it report). An API before W5-T does not, and refuses the TÜRKTRUST
- * choices (`tsa_server_invalid`) and fields, so the browser offers neither there.
+ * The server knows TÜRKTRUST: it reports both `turktrust.*` credentials in the section's
+ * `secrets` (Wave 5 contract 2.4, as W5-T's captured sample shows). A section without them (an
+ * API before W5-T, which refuses the TÜRKTRUST choices with `tsa_server_invalid`) is offered
+ * neither the TÜRKTRUST servers nor their fields.
  */
 export function turktrustSupported(tsa: TsaSection): boolean {
   return (
-    secretMeta(tsa, 'turktrust.username') !== undefined ||
+    secretMeta(tsa, 'turktrust.username') !== undefined &&
     secretMeta(tsa, 'turktrust.password') !== undefined
   );
 }
@@ -136,7 +139,7 @@ export function stepStatus(step: StepId, tsa: TsaSection, tested: boolean): Step
       return tsa.roots.length === 0 || missing.has('roots') ? 'missing' : 'ok';
     case 'credentials': {
       if (causes.has('credentials')) return 'error';
-      const names: (BrowserSecret | TurktrustSecret)[] = turktrust
+      const names: BrowserSecret[] = turktrust
         ? ['turktrust.username', 'turktrust.password']
         : ['kamusm.customer', 'kamusm.password'];
       const set = names.every((name) => secretMeta(tsa, name)?.set ?? false);
@@ -168,27 +171,21 @@ export function firstOpen(tsa: TsaSection, tested: boolean): StepId {
  * browser-editable with re-authentication, C5): `tsa.renew_before_days` (30–730),
  * `tsa.crl_urls` (http and https only, at most 20) and `tsa.crl_max_age_days` (1–60).
  *
- * Interim until W5-T adds them to `TsaSection` and `TsaBody` (`settings-types.ts`, checked
- * against the API's schema), which replace this: the names are the section's keys without
- * `tsa.`, as `credit_alert_threshold` is.
+ * W5-T's `TsaSection` and `TsaBody` (`settings-types.ts`, checked against the API's schema): the
+ * names are the section's keys without `tsa.`, as `credit_alert_threshold` is.
  */
-export interface EvidenceKeys {
-  renew_before_days: number;
-  crl_urls: string[];
-  crl_max_age_days: number;
-}
+export type EvidenceKeys = Pick<TsaSection, 'renew_before_days' | 'crl_urls' | 'crl_max_age_days'>;
 
 export const RENEW_BEFORE_DAYS = { min: 30, max: 730 } as const;
 export const CRL_MAX_AGE_DAYS = { min: 1, max: 60 } as const;
 export const CRL_URLS_MAX = 20;
 
 /**
- * The keys as the server reports them, `undefined` while it does not (an API before W5-T): the
- * form then shows no field for them, so it never shows a value the server did not give, and
- * never sends a field the API refuses.
+ * The keys as the server reports them, `undefined` while it does not (a section without them is
+ * never shown a value the server did not give, nor sent a field it would refuse).
  */
 export function evidenceKeys(tsa: TsaSection): EvidenceKeys | undefined {
-  const section = tsa as TsaSection & Partial<Record<keyof EvidenceKeys, unknown>>;
+  const section: Partial<Record<keyof EvidenceKeys, unknown>> = tsa;
   const { renew_before_days: renew, crl_urls: urls, crl_max_age_days: age } = section;
   if (typeof renew !== 'number' || typeof age !== 'number' || !Array.isArray(urls))
     return undefined;
@@ -280,15 +277,15 @@ export function validateEvidence(form: EvidenceForm): {
   };
 }
 
-/** Interim until W5-T names them in `TsaBody` (`settings-types.ts`): see `EvidenceKeys`. */
-export type EvidenceFields = Partial<EvidenceKeys>;
+/** The re-stamping and revocation-list fields of W5-T's `TsaBody`. */
+export type EvidenceChanges = Pick<TsaBody, 'renew_before_days' | 'crl_urls' | 'crl_max_age_days'>;
 
 /**
  * The keys a change sends: only those whose value differs from the server's. A form that does
- * not touch them sends none, so a "Kaydet" of the other steps is accepted by an API before W5-T
- * as well (its `TsaBody` refuses an unknown field).
+ * not touch them sends none, so the audit entry of a "Kaydet" of the other steps names no key
+ * that did not change.
  */
-export function evidenceChanges(tsa: TsaSection, form: TsaForm): EvidenceFields {
+export function evidenceChanges(tsa: TsaSection, form: TsaForm): EvidenceChanges {
   const keys = evidenceKeys(tsa);
   const edited = form.evidence;
   if (!keys || !edited) return {};
@@ -335,18 +332,6 @@ export function turktrustChanged(credentials: Credentials): boolean {
 }
 
 /**
- * Interim until W5-T names them in `TsaBody` (`settings-types.ts`): the TÜRKTRUST fields of
- * `PUT /admin/config/tsa`, the username and password and `tsa.allow_plain_http`.
- */
-export interface TurktrustFields {
-  turktrust_username?: string;
-  turktrust_password?: string;
-  allow_plain_http?: boolean;
-}
-
-export type TsaRequest = TsaBody & TurktrustFields & EvidenceFields;
-
-/**
  * The server a change sends: only the one chosen. Without a choice no `server` is sent and the
  * one in use stays (`PUT /admin/config/tsa` keeps it), so a "Kaydet" of a plain-HTTP TÜRKTRUST
  * site never sends `turktrust-http` without its confirmation. A site on another provider (the
@@ -372,7 +357,7 @@ export function tsaBody(
   form: TsaForm,
   credentials: Credentials,
   options: { server?: ServerChoice; chosen?: ServerChoice; confirm?: boolean; probe: boolean },
-): TsaRequest {
+): TsaBody {
   const customer = credentials.customer;
   const password = credentials.password;
   const server = bodyServer(tsa, options.server);

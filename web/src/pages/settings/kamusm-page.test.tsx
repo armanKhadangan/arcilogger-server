@@ -21,7 +21,7 @@ import { CredentialsStep, EvidenceFields, ProductionStep, TsaRefusal } from './k
  * production servers, TÜRKTRUST over HTTPS with its username and password and the "sahada
  * doğrula" note, and TÜRKTRUST over plain HTTP, which says that the password travels unencrypted
  * and asks for a typed confirmation before anything is sent. The body each choice sends is
- * `kamusm-model.test.ts`'s; the page with the API is the E2E's (after W5-T's schema).
+ * `kamusm-model.test.ts`'s; the page with the API is the E2E's (`settings-kamusm.spec.ts`).
  */
 
 const JAVA = 'C:/Program Files/Eclipse Adoptium/jre-8.0.432.6-hotspot/bin/java.exe';
@@ -59,7 +59,7 @@ function tsa(overrides: Partial<TsaSection> = {}): TsaSection {
   };
 }
 
-/** A TÜRKTRUST site as the API reads it before W5-T names its servers (`server` null). */
+/** A TÜRKTRUST site whose server is none of the choices (`server` null). */
 const TURKTRUST_SITE = tsa({
   provider: 'turktrust',
   server: null,
@@ -101,6 +101,7 @@ function Production({
   switched,
   seen = [],
   initial = KEPT,
+  httpRefusal = null,
 }: {
   section: TsaSection;
   unsaved?: boolean;
@@ -108,6 +109,8 @@ function Production({
   seen?: Credentials[];
   /** The credentials as the page holds them (typed in step 4, for instance). */
   initial?: Credentials;
+  /** The page's `tsa_plain_http_confirm_required` refusal, if any. */
+  httpRefusal?: unknown;
 }) {
   const [credentials, setCredentials] = useState<Credentials>(initial);
   const [picked, setPicked] = useState<ServerChoice | null>(null);
@@ -129,6 +132,7 @@ function Production({
       onSwitch={(server) => {
         switched.push(server);
       }}
+      httpRefusal={httpRefusal}
     />
   );
 }
@@ -273,6 +277,50 @@ describe('Ayarlar → Zaman damgası: the server to switch to', () => {
     expect(switched).toEqual(['turktrust-http']);
   });
 
+  it("the server's `tsa_plain_http_confirm_required` opens the confirmation again with its text (W5-T-4)", async () => {
+    const switched: ServerChoice[] = [];
+    const refusal = new ApiError({
+      status: 422,
+      code: 'tsa_plain_http_confirm_required',
+      messageTr:
+        'Düz HTTP ile TÜRKTRUST kullanıcı adı ve parolası ağda şifrelenmeden gider; onaylayın.',
+      messageEn:
+        'Over plain HTTP the TÜRKTRUST user name and password travel unencrypted on the network; confirm to continue.',
+    });
+    const { rerender } = render(
+      <Production section={STORED} switched={switched} httpRefusal={refusal} />,
+    );
+    const ask = screen.getByRole('dialog', {
+      name: 'TÜRKTRUST sunucusuna düz HTTP ile geçilsin mi?',
+    });
+    expect(within(ask).getByTestId('tsa-http-refusal')).toHaveTextContent(
+      'Düz HTTP ile TÜRKTRUST kullanıcı adı ve parolası ağda şifrelenmeden gider; onaylayın.',
+    );
+    // The typed phrase is still asked (Wave 5 contract C5).
+    const confirm = within(ask).getByRole('button', {
+      name: 'TÜRKTRUST sunucusuna düz HTTP ile geç',
+    });
+    expect(confirm).toBeDisabled();
+    await userEvent.type(within(ask).getByLabelText('Onaylamak için HTTP yazın'), 'HTTP');
+    await userEvent.click(confirm);
+    expect(switched).toEqual(['turktrust-http']);
+    // The same refusal does not open it again; "İptal" of a new one sends nothing.
+    rerender(<Production section={STORED} switched={switched} httpRefusal={refusal} />);
+    expect(screen.queryByRole('dialog')).toBeNull();
+    const again = new ApiError({
+      status: 422,
+      code: 'tsa_plain_http_confirm_required',
+      messageTr: 'Onaylayın.',
+      messageEn: 'Confirm.',
+    });
+    rerender(<Production section={STORED} switched={switched} httpRefusal={again} />);
+    await userEvent.click(
+      within(screen.getByRole('dialog')).getByRole('button', { name: 'İptal' }),
+    );
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(switched).toEqual(['turktrust-http']);
+  });
+
   it('back from production to the test server asks again; unsaved changes wait', async () => {
     const switched: ServerChoice[] = [];
     const { unmount } = render(
@@ -329,7 +377,7 @@ describe('Ayarlar → Zaman damgası: the server to switch to', () => {
     expect(screen.getByTestId('tsa-server')).toHaveTextContent(
       'Şu an TÜRKTRUST sunucusu kullanılıyor.',
     );
-    // Its server has no name yet (W5-T): every choice stays open, production is preselected.
+    // Its server is none of the choices: every choice stays open, production is preselected.
     expect(screen.getAllByRole('radio').filter((radio) => radio.hasAttribute('disabled'))).toEqual(
       [],
     );
