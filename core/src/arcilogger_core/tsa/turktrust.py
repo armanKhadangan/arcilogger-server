@@ -35,6 +35,8 @@ TURKTRUST_LEGAL_GRADE: Final = True
 
 #: The statuses that mean the user name or password is wrong (not retried).
 CREDENTIAL_STATUSES: Final = frozenset({401, 403})
+#: The 4xx statuses that are retried like a 5xx: the server is busy, not the request wrong.
+RETRYABLE_CLIENT_STATUSES: Final = frozenset({408, 429})
 
 
 class _NoRedirects(urllib.request.HTTPRedirectHandler):
@@ -105,6 +107,13 @@ class TurktrustHttpsProvider(Rfc3161Client):
             if exc.code in CREDENTIAL_STATUSES:
                 raise TsaConfigurationError(
                     f"credentials: TÜRKTRUST refused the user name or password (HTTP {exc.code})"
+                ) from None
+            if 300 <= exc.code < 500 and exc.code not in RETRYABLE_CLIENT_STATUSES:
+                # W5-T-2: redirects are not followed, so a 3xx (like most 4xx) means a wrong
+                # [tsa] url or path (T1); retrying would only repeat it.
+                raise TsaConfigurationError(
+                    f"time-stamp server answered HTTP {exc.code}: check [tsa] url "
+                    "(redirects are not followed)"
                 ) from None
             raise TsaUnavailableError(f"time-stamp server answered HTTP {exc.code}") from None
         except (urllib.error.URLError, HTTPException, TimeoutError, OSError) as exc:
