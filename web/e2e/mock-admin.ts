@@ -197,13 +197,13 @@ const HTTP: Record<string, [number, string, string]> = {
   ],
   tsa_server_invalid: [
     422,
-    'Zaman damgası sunucusu "test" ya da "production" olmalı.',
-    'The time-stamp server must be "test" or "production".',
+    'Zaman damgası sunucusu "test", "production", "turktrust" ya da "turktrust-http" olmalı.',
+    'The time-stamp server must be "test", "production", "turktrust" or "turktrust-http".',
   ],
   tsa_not_ready: [
     409,
-    'Üretim sunucusuna geçmeden önce eksikleri tamamlayın: kimlik bilgileri, onaylı Zamane istemcisi, Java ve en az bir kök sertifika.',
-    'Complete the missing items before switching to the production server: credentials, an approved Zamane client, Java and at least one root certificate.',
+    'Bu zaman damgası sunucusuna geçmeden önce eksikleri tamamlayın; hiçbir şey değişmedi. Eksikler aşağıda.',
+    'Complete the missing items before switching to this time-stamp server; nothing changed. The missing items are below.',
   ],
   tsa_confirm_required: [
     422,

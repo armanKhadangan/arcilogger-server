@@ -427,6 +427,20 @@ def uploaded(tmp_path: Path, kind: UploadKind, data: bytes) -> UploadInfo:
 # -- tsa: the server, the threshold, Java ----------------------------------------------------------
 
 
+def test_the_tsa_refusal_texts_fit_every_provider() -> None:
+    """#204 Q2: ``tsa_server_invalid`` lists every server choice, TÜRKTRUST's included, and
+    ``tsa_not_ready`` names no provider: its ``missing`` list says what is missing."""
+    tr, en = messages.MESSAGES["tsa_server_invalid"]
+    for server in rules.TSA_SERVERS:
+        assert f'"{server}"' in tr, server
+        assert f'"{server}"' in en, server
+    tr, en = messages.MESSAGES["tsa_not_ready"]
+    for word in ("Zamane", "Java", "Kamu SM", "TÜRKTRUST", "production", "Üretim"):
+        assert word not in tr + en, word
+    assert "Eksikler aşağıda" in tr
+    assert "The missing items are below" in en
+
+
 def test_the_server_is_one_of_the_two_kamu_sm_servers(root: Path, config: Config) -> None:
     assert codes(validate_section("tsa", config, {"server": "mock"}, context(root))) == [
         "tsa_mock_refused"
