@@ -33,7 +33,8 @@ MAC and address, and per minute and subject the bytes, the sessions started and 
 :data:`TOP_PER_MINUTE` largest destinations (a registrable domain, a service name or an address)
 and applications, named through the tables ``destinations`` and ``apps``: never a name, a user,
 a URL or a raw line. It is sparse (only the subject-minutes with traffic), covers the last 60
-minutes, bytes are whole numbers, and it is written atomically, only when it changed. The API
+minutes, bytes are whole numbers, and it is replaced whole (a temporary file renamed), only
+when it changed. The API
 applies access, the KVKK notice, pseudonyms and ``usage_excluded`` when it answers.
 """
 
@@ -51,7 +52,6 @@ from typing import Any, Final
 from sqlalchemy import text
 from sqlalchemy.orm import Session, sessionmaker
 
-from arcilogger_core.fsutil import atomic_write_text
 from arcilogger_core.timeutil import site_day
 from arcilogger_worker.usage.config import UsageSettings
 from arcilogger_worker.usage.domains import BackgroundRules, DomainNamer, normalize_hostname
@@ -75,7 +75,7 @@ WARMUP_SLICE: Final = timedelta(seconds=10)
 WARMUP_BUDGET: Final = 1.0
 #: The seconds a tick goes on counting open sessions again (at least :data:`RECOUNT_CHUNK`).
 RECOUNT_BUDGET: Final = 1.5
-RECOUNT_CHUNK: Final = 500
+RECOUNT_CHUNK: Final = 2000
 #: The most new rows one tick reads; the rest come in the next ticks.
 MAX_ROWS: Final = 20_000
 SNAPSHOT_VERSION: Final = 1
@@ -199,6 +199,8 @@ class Snapshot:
         self.started = False
         self.written: str | None = None
         self._names: tuple[Any, DomainNamer, BackgroundRules] | None = None
+        #: The addresses' attribution over this tick's minutes (read once a tick).
+        self._timelines: tuple[tuple[datetime, datetime], dict[str, IpTimeline]] | None = None
         #: The file: per minute its JSON and its subjects, the minutes whose totals changed
         #: since, and the tables of destinations and applications the minutes refer to.
         self._fragments: dict[int, tuple[str, set[str]]] = {}
@@ -403,12 +405,22 @@ class Snapshot:
             site_day(end - timedelta(seconds=BUCKET)), settings, namer, rules, window=(lo, end)
         )
         ips = sorted({known.ip for known in everyone})
-        timelines = build_timelines(session, ips, lo, end)
+        timelines = self._timelines_of(session, ips, lo, end)
         sessionids = sorted({row[0] for known in everyone for row in known.rows if row[0]})
         since = lo - overlap
         web = _by_session(session.execute(_WEB, {"ips": ips, "sessions": sessionids, "lo": since}))
         app = _by_session(session.execute(_APP, {"ips": ips, "sessions": sessionids, "lo": since}))
-        _answers(session, settings, [known for known in everyone if known.dns is None])
+        # The engine names a session by its web filter or application host name first: only
+        # the sessions without one need their DNS answers.
+        _answers(
+            session,
+            settings,
+            [
+                known
+                for known in everyone
+                if known.dns is None and not _host(known, web) and not _host(known, app)
+            ],
+        )
         for group, counted in zip(groups, results, strict=True):
             by_ip: dict[str, list[OpenSession]] = defaultdict(list)
             for known in group:
@@ -433,6 +445,17 @@ class Snapshot:
                 _started(builder, timelines[ip], traffic, counted)
             _harvest(builder, counted)
         return results
+
+    def _timelines_of(
+        self, session: Session, ips: Sequence[str], lo: datetime, end: datetime
+    ) -> dict[str, IpTimeline]:
+        if self._timelines is None or self._timelines[0] != (lo, end):
+            self._timelines = ((lo, end), {})
+        known = self._timelines[1]
+        missing = [ip for ip in ips if ip not in known]
+        if missing:
+            known.update(build_timelines(session, missing, lo, end))
+        return known
 
     def _prune(self, lo: datetime, overlap: timedelta) -> None:
         """Drop the minutes before ``lo``, and the logs of open sessions older than the
@@ -500,7 +523,8 @@ class Snapshot:
         if content == self.written:
             return False
         stamp = json.dumps(now.astimezone(UTC).isoformat())
-        atomic_write_text(self.path, f'{{"generated_at":{stamp},{content[1:]}')
+        if not _replace(self.path, f'{{"generated_at":{stamp},{content[1:]}'):
+            return False  # the API has it open (Windows): the next tick writes it
         self.written = content
         return True
 
@@ -562,6 +586,21 @@ def tick_job(sessions: sessionmaker[Session], path: Path, now: datetime) -> dict
         return snapshot.tick(session, now)
 
 
+def _replace(path: Path, content: str) -> bool:
+    """Write ``path`` through a temporary file and a rename, so a reader sees the old file or
+    the new one. Not flushed to the disk: the snapshot is rewritten every tick and rebuilt from
+    the logs after a restart. ``False`` when the rename was refused (a reader holds the file
+    open on Windows)."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f"{path.name}.tmp")
+    temporary.write_text(content, encoding="utf-8", newline="\n")
+    try:
+        temporary.replace(path)
+    except PermissionError:
+        return False
+    return True
+
+
 def _iso(moment: float) -> str:
     return datetime.fromtimestamp(moment, UTC).isoformat()
 
@@ -576,6 +615,15 @@ def _by_session(rows: Iterable[Sequence[Any]]) -> dict[tuple[str, int], list[tup
     for row in rows:
         found[(str(row[0]), row[1])].append(tuple(row[1:]))
     return found
+
+
+def _host(known: OpenSession, rows: Mapping[tuple[str, int], list[tuple[Any, ...]]]) -> bool:
+    """Whether a web filter or application log names the session (``(sessionid, time,
+    hostname, …)`` rows by address and session id), as the engine reads them."""
+    sessionid = known.rows[0][0]
+    if sessionid is None:
+        return False
+    return any(normalize_hostname(row[2]) for row in rows.get((known.ip, sessionid), ()))
 
 
 def _answers(session: Session, settings: UsageSettings, sessions: Sequence[OpenSession]) -> None:
