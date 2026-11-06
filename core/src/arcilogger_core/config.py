@@ -49,7 +49,9 @@ TURKTRUST_PRODUCTION_HOST = "zd.turktrust.com.tr"
 
 
 class _Model(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True)
+    # hide_input_in_errors: a refused value (a URL with a password in it, #204) is never repeated
+    # in the error text that the console, a task's log or an answer shows.
+    model_config = ConfigDict(extra="forbid", frozen=True, hide_input_in_errors=True)
 
 
 class SourceConfig(_Model):
@@ -179,15 +181,30 @@ class TsaConfig(_Model):
     def _crl_urls(cls, values: tuple[str, ...]) -> tuple[str, ...]:
         for value in values:
             parts = urlsplit(value)
+            if parts.username is not None or parts.password is not None:
+                # Not repeated: the value carries the password.
+                raise ValueError("no user name or password in a revocation list URL")
             try:
                 port = parts.port
             except ValueError:  # not a number, or out of range
                 port = -1
             if parts.scheme not in ("http", "https") or not parts.hostname or port == -1:
                 raise ValueError(f"not an http or https URL: {value!r}")
-            if parts.username is not None or parts.password is not None:
-                raise ValueError(f"no user name or password in a revocation list URL: {value!r}")
         return values
+
+    @field_validator("url")
+    @classmethod
+    def _url(cls, value: str) -> str:
+        parts = urlsplit(value)
+        if parts.username is not None or parts.password is not None:
+            # Every provider (#204): the account goes into the secret store, and the URL reaches
+            # logs, errors and repr(). Not repeated here, since it carries the password.
+            raise ValueError(
+                "tsa.url kullanıcı adı ya da parola içeremez; hesap gizli depoya girilir "
+                "[tsa.url cannot carry a user name or password; the account goes into the "
+                "secret store]"
+            )
+        return value
 
     @model_validator(mode="after")
     def _turktrust_https(self) -> TsaConfig:
@@ -263,7 +280,8 @@ class NetworkConfig(_Model):
             or parts.query
             or parts.fragment
         ):
-            raise ValueError(f"https_proxy must be http://host:port (no credentials): {value!r}")
+            # Not repeated: a refused value may carry a password.
+            raise ValueError("https_proxy must be http://host:port (no credentials)")
         return value
 
 

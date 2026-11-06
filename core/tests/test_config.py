@@ -424,3 +424,32 @@ def test_wave5_keys_are_read_from_the_file(tmp_path: Path) -> None:
 def test_invalid_wave5_keys_are_refused(tmp_path: Path, section: str, message: str) -> None:
     with pytest.raises(ValidationError, match=message):
         load_config(_write(tmp_path, MINIMAL + "\n" + section + "\n"))
+
+
+@pytest.mark.parametrize("provider", ["mock", "rfc3161", "zamane", "turktrust"])
+@pytest.mark.parametrize(
+    "url", ["https://ornek:Gizli-Parola-7@zd.turktrust.com.tr/", "https://ornek@tsa.example.test/"]
+)
+def test_a_tsa_url_with_an_account_is_refused(tmp_path: Path, provider: str, url: str) -> None:
+    """#204: an account inside tsa.url is refused for every provider (it would reach repr, logs
+    and errors), and the refusal does not repeat the URL."""
+    section = f'[tsa]\nprovider = "{provider}"\nurl = "{url}"'
+    with pytest.raises(ValidationError, match="cannot carry a user name or password") as e:
+        load_config(_write(tmp_path, MINIMAL + "\n" + section + "\n"))
+    assert "kullanıcı adı ya da parola içeremez" in str(e.value)
+    assert "Gizli-Parola-7" not in str(e.value)
+    assert "ornek" not in str(e.value)
+
+
+@pytest.mark.parametrize(
+    "section",
+    [
+        '[tsa]\ncrl_urls = ["http://ornek:Gizli-Parola-7@crl.example.test/a.crl"]',
+        '[network]\nhttps_proxy = "http://ornek:Gizli-Parola-7@proxy.example.test:3128"',
+    ],
+)
+def test_a_refused_url_is_not_repeated(tmp_path: Path, section: str) -> None:
+    """#204: the error text of a refused URL never carries its password."""
+    with pytest.raises(ValidationError) as raised:
+        load_config(_write(tmp_path, MINIMAL + "\n" + section + "\n"))
+    assert "Gizli-Parola-7" not in str(raised.value)
