@@ -3960,6 +3960,14 @@ Recorded on #204, from the manager's answers of 2026-11-06.
     `settings-types.ts`. The captured `admin.json` has `sources.snmp_probe_failed`.
   - **History:** the list lives in the request's status file, so the request history keeps the
     code but not the list once the agent has cleaned that file up.
+- **W5-N-10: only a change that reaches the device probes it** (the review of #225, P4). W5-N-6
+  says the probe runs when a change switches SNMP on, edits its settings or sets its keys; the
+  rule probed for any change of a source whose SNMP was on. Since the browser sends a source's
+  stored `[sources.snmp]` with every change of it (W5-P-13), switching off a source whose device
+  is down failed with `snmp_timeout`. Now (`rules.py`, `_polled_differently`) the device is
+  probed only for a source that stays switched on, and only when its `[sources.snmp]` table or
+  its address changed, or its keys are set. A heartbeat, `expected` or `enabled` change does not
+  probe. Tested in `core/tests/test_admin_snmp.py`.
 
 ## Deviations — W5-F (2026-11-06)
 
