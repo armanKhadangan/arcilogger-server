@@ -321,16 +321,62 @@ def gunzip_sha256(path: Path) -> tuple[str, int]:
     return sealedfile.digest(path)
 
 
+def _check_leftover(path: Path) -> None:
+    """Raise :class:`SealError` unless ``path`` is the leftover of a failed attempt.
+
+    A locked file (read-only, deny-delete ACL or immutable: :func:`lock` ran) or one that a
+    stamped manifest of its folder names is a sealed file and is never deleted. A manifest with
+    no time stamp beside it belongs to a failed attempt too (the stamp did not come back) and is
+    rewritten by this one, so it does not protect the file it names (#136 item 3).
+    """
+    if is_locked(path):
+        reason = (
+            "kilitli (salt okunur, silinmeye karşı korumalı)",
+            "is locked (read-only, protected against deletion)",
+        )
+    else:
+        stamped = [
+            manifest
+            for manifest in sorted(path.parent.glob("manifest-*.json"))
+            if manifest.with_name(manifest.name + ".zd").exists() and _names(manifest, path.name)
+        ]
+        if not stamped:
+            return
+        reason = (
+            f"damgalı {stamped[0].name} manifestinde adı geçiyor",
+            f"is named by the stamped manifest {stamped[0].name}",
+        )
+    raise SealError(
+        f"{path.name}: günün öbür biçimdeki dosyası {reason[0]}; mühürlü bir dosya silinmez, gün "
+        f"mühürlenmedi, kasayı inceleyin / {path.name}: the day's file in the other format "
+        f"{reason[1]}; a sealed file is never deleted, the day was not sealed, check the vault",
+        retryable=False,
+    )
+
+
+def _names(manifest: Path, name: str) -> bool:
+    """Whether ``manifest`` seals a file called ``name``; one that cannot be read is taken to
+    (it protects every file of its folder)."""
+    try:
+        data = json.loads(manifest.read_bytes())
+        paths = [entry["path"] for entry in data["files"]] + [data["audit_log"]["path"]]
+    except (OSError, ValueError, KeyError, TypeError):
+        return True
+    return name in {str(path).rsplit("/", 1)[-1] for path in paths}
+
+
 def compress_deterministic(source: Path, target: Path, config: SealConfig) -> None:
     """Seal ``source`` into ``target`` in the format of its suffix: the same input gives the same
     output (gzip without a name and with mtime 0; xz as independent streams in order).
 
     The same file in the other format (an attempt made before ``[seal] compression`` changed) is
     removed first, with its ``.part``, so a vault day never holds both: readers would refuse the
-    pair as ``sealed_file_ambiguous``.
+    pair as ``sealed_file_ambiguous``. Only a leftover is removed (:func:`_check_leftover`).
     """
     for other in sealedfile.other_formats(target):
-        other.unlink(missing_ok=True)
+        if other.exists():
+            _check_leftover(other)
+            other.unlink()
         other.with_name(other.name + ".part").unlink(missing_ok=True)
     sealedfile.write(
         source,

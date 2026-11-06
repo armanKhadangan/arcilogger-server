@@ -172,7 +172,11 @@ function CategoryView({
         <Tags aria-hidden="true" className="size-5 text-muted" />
         <h2 className="text-xl font-semibold text-foreground">{name}</h2>
       </div>
-      <DataNote computedUntil={data?.computed_until} noticeKey={data?.notice_key} />
+      <DataNote
+        computedUntil={data?.computed_until}
+        updatedAt={data?.updated_at}
+        noticeKey={data?.notice_key}
+      />
       <QueryState
         query={detail}
         empty={data ? data.totals.seconds === 0 && data.sites.length === 0 : false}
@@ -210,7 +214,11 @@ export function CategoriesTab({
 
   return (
     <div className="flex flex-col gap-4">
-      <DataNote computedUntil={list.data?.computed_until} noticeKey={list.data?.notice_key} />
+      <DataNote
+        computedUntil={list.data?.computed_until}
+        updatedAt={list.data?.updated_at}
+        noticeKey={list.data?.notice_key}
+      />
       <QueryState query={list} skeleton="table" empty={list.isSuccess && rows.length === 0}>
         {() => (
           <div className="grid items-start gap-4 lg:grid-cols-[16rem_1fr]">

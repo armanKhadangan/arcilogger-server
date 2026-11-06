@@ -184,7 +184,11 @@ function SiteView({
           </span>
         ) : null}
       </div>
-      <DataNote computedUntil={data?.computed_until} noticeKey={data?.notice_key} />
+      <DataNote
+        computedUntil={data?.computed_until}
+        updatedAt={data?.updated_at}
+        noticeKey={data?.notice_key}
+      />
       <QueryState
         query={site}
         empty={data ? data.totals.seconds === 0 && data.totals.sessions === 0 : false}
@@ -298,7 +302,11 @@ export function SitesTab({
 
   return (
     <div className="flex flex-col gap-4">
-      <DataNote computedUntil={list.data?.computed_until} noticeKey={list.data?.notice_key} />
+      <DataNote
+        computedUntil={list.data?.computed_until}
+        updatedAt={list.data?.updated_at}
+        noticeKey={list.data?.notice_key}
+      />
       <QueryState query={list} skeleton="table" empty={list.isSuccess && rows.length === 0}>
         {() => (
           <SiteTable

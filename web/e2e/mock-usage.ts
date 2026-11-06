@@ -79,6 +79,12 @@ export interface UsageOptions {
   empty?: boolean;
   /** The next rebuild job fails. */
   rebuildFails?: boolean;
+  /**
+   * A one-hour break of the work hours on work days, starting at this hour (W5-K): the generated
+   * days split it from the work hours. None by default, like the captured site. The generated
+   * people are away at 12:00, so a break with activity in it is another hour (e.g. 10).
+   */
+  breakHour?: number;
 }
 
 export const NOTICE_KEY = USAGE.company.notice_key;
@@ -173,11 +179,18 @@ function hourStarts(period: UsagePeriod): string[] {
   return found;
 }
 
+/** The break hour of the mock's work hours (`UsageOptions.breakHour`), set by each mock. */
+let breakHour: number | null = null;
+
+/** The part of the day of an hour (`UsageSettings.part_of`, W5-K): work, break or off. */
+function partOf(day: string, hour: number): Exclude<UsageHours, 'all'> {
+  if (!isWorkHour(day, hour)) return 'off';
+  return hour === breakHour ? 'break' : 'work';
+}
+
 function inPeriod(day: string, hour: number, period: UsagePeriod): boolean {
   if (day < period.from || day > period.to) return false;
-  if (period.hours === 'work') return isWorkHour(day, hour);
-  if (period.hours === 'off') return !isWorkHour(day, hour);
-  return true;
+  return period.hours === 'all' || partOf(day, hour) === period.hours;
 }
 
 const FOLD_FROM = 'ABCDEFGHIJKLMNOPQRSTUVWXYZİıŞĞÜÖÇÂÎÛ';
@@ -220,6 +233,7 @@ function emptyMetrics(): Metrics {
     sessions: 0,
     blocked: 0,
     off_hours_active_seconds: 0,
+    break_active_seconds: 0,
     first_activity: null,
     last_activity: null,
   };
@@ -234,6 +248,7 @@ function addMetrics(total: Metrics, other: Metrics): Metrics {
   total.sessions += other.sessions;
   total.blocked += other.blocked;
   total.off_hours_active_seconds += other.off_hours_active_seconds;
+  total.break_active_seconds += other.break_active_seconds;
   if (
     other.first_activity &&
     (!total.first_activity || Date.parse(other.first_activity) < Date.parse(total.first_activity))
@@ -415,7 +430,7 @@ interface Scope {
   keys: ReadonlySet<string> | null;
 }
 
-type Bare<T> = Omit<T, 'period' | 'estimated' | 'computed_until' | 'notice_key'>;
+type Bare<T> = Omit<T, 'period' | 'estimated' | 'computed_until' | 'updated_at' | 'notice_key'>;
 
 /** Where the figures come from: the captured day or the generated dataset. */
 interface Source {
@@ -1692,6 +1707,13 @@ class GeneratedDays implements Source {
     };
   }
 
+  /** The break of a one-day period that is a work day (`query._break_bands`). */
+  private breaksOf(period: UsagePeriod): { start: string; end: string }[] {
+    if (breakHour === null || period.from !== period.to || !isWorkHour(period.from, breakHour))
+      return [];
+    return [{ start: instant(period.from, breakHour), end: instant(period.from, breakHour + 1) }];
+  }
+
   private metrics(selected: Selected): Metrics {
     const metrics = emptyMetrics();
     let first: number | null = null;
@@ -1699,7 +1721,9 @@ class GeneratedDays implements Source {
     for (const item of selected.hours) {
       metrics.online_seconds += item.online;
       metrics.active_seconds += item.active;
-      if (!isWorkHour(item.day, item.hour)) metrics.off_hours_active_seconds += item.active;
+      const part = partOf(item.day, item.hour);
+      if (part === 'off') metrics.off_hours_active_seconds += item.active;
+      if (part === 'break') metrics.break_active_seconds += item.active;
       if (item.active === 0) continue;
       const start = Date.parse(instant(item.day, item.hour, item.offset));
       const end = start + item.active * 1000;
@@ -2062,6 +2086,7 @@ class GeneratedDays implements Source {
       devices,
       metrics: stats.metrics,
       timeline,
+      breaks: this.breaksOf(period),
       sites,
       categories: categoryRows(sites, categoryUsers),
       apps: this.appRows(records),
@@ -2207,6 +2232,7 @@ const METRIC_HEADER = [
   'Çevrimiçi süre (sn)',
   'Aktif süre (sn, tahmini)',
   'Mesai dışı aktif (sn)',
+  'Molada aktif (sn)',
   'İndirilen (bayt)',
   'Yüklenen (bayt)',
   'Oturum',
@@ -2257,6 +2283,7 @@ const USER_HEADER = [
   'Departman',
   'Süre (sn, tahmini)',
   'Mesai dışı süre (sn, tahmini)',
+  'Mola süresi (sn, tahmini)',
   'İndirilen (bayt)',
   'Yüklenen (bayt)',
   'Oturum',
@@ -2269,6 +2296,7 @@ function metricCells(metrics: Metrics): Cell[] {
     metrics.online_seconds,
     metrics.active_seconds,
     metrics.off_hours_active_seconds,
+    metrics.break_active_seconds,
     metrics.download_bytes,
     metrics.upload_bytes,
     metrics.sessions,
@@ -2333,6 +2361,7 @@ function userCells(row: SubjectRow, site: boolean): Cell[] {
     row.department,
     ...times,
     metrics.off_hours_active_seconds,
+    metrics.break_active_seconds,
     metrics.download_bytes,
     metrics.upload_bytes,
     metrics.sessions,
@@ -2423,6 +2452,7 @@ export class UsageMock {
 
   constructor(options: UsageOptions = {}) {
     this.options = options;
+    breakHour = options.breakHour ?? null;
     this.generated = new GeneratedDays(options.empty ?? false);
   }
 
@@ -2515,8 +2545,8 @@ export class UsageMock {
     if (Array.isArray(from)) return from;
     if (Array.isArray(to)) return to;
     const hours = call.query.get('hours') ?? 'all';
-    if (!['all', 'work', 'off'].includes(hours))
-      return this.invalid(host, 'hours', "Input should be 'all', 'work' or 'off'");
+    if (!['all', 'work', 'break', 'off'].includes(hours))
+      return this.invalid(host, 'hours', "Input should be 'all', 'work', 'break' or 'off'");
     const last = to ?? SAMPLE_TODAY;
     const first = from ?? last;
     const days = (Date.parse(`${last}T00:00:00Z`) - Date.parse(`${first}T00:00:00Z`)) / 86_400_000;
@@ -2553,13 +2583,14 @@ export class UsageMock {
 
   // -- sources ----------------------------------------------------------------------------------
 
-  /** The captured day (every hour; the company view also its work and off hours). */
+  /** The captured day (every hour; the company view also its work and off hours: the captured
+   * site has no breaks, so `hours=break` comes from the generated days). */
   private source(period: UsagePeriod, company = false): Source {
     const captured =
       !this.options.empty &&
       period.from === CAPTURE_DAY &&
       period.to === CAPTURE_DAY &&
-      (period.hours === 'all' || company);
+      (period.hours === 'all' || (company && period.hours !== 'break'));
     return captured ? this.capturedDay : this.generated;
   }
 
@@ -2568,6 +2599,8 @@ export class UsageMock {
       period,
       estimated: true,
       computed_until: source.computedUntil(period),
+      // The mock has no rollup runs: the newest one "ran" when its data ends (W5-L).
+      updated_at: source.computedUntil(period),
       notice_key: NOTICE_KEY,
     };
   }

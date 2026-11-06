@@ -420,11 +420,14 @@ def observed_nat_query(hours: int, now: datetime, untrusted: Collection[str]) ->
     return query
 
 
-def observed_counts(session: Session, hours: int, now: datetime) -> dict[str, Any]:
-    """The database part of the observed answer (no setting is read): the NAT groups
-    (:func:`observed_nat_query`), and per ``srcintf`` the srcmac rows of the last hour with an
-    IPv4 source, their MACs and the most IPv4 sources of one MAC
-    (:func:`arcilogger_worker.lookup.trust.srcmac_ip_counts`, the srcmac guard's count)."""
+def observed_counts(
+    session: Session, hours: int, now: datetime, *, max_session_seconds: int = 0
+) -> dict[str, Any]:
+    """The database part of the observed answer (no setting is read; the caller passes
+    ``lookup.max_session_seconds``): the NAT groups (:func:`observed_nat_query`), and per
+    ``srcintf`` the srcmac rows of the last hour with an IPv4 source, their MACs and the most IPv4
+    sources of one MAC (:func:`arcilogger_worker.lookup.trust.srcmac_ip_counts`, the srcmac
+    guard's count; its hour ends now, so no session logged later can overlap it)."""
     untrusted = sorted(trust.untrusted_sources(session))
     nat = observed_nat_query(hours, now, untrusted)
     groups = [
@@ -439,7 +442,9 @@ def observed_counts(session: Session, hours: int, now: datetime) -> dict[str, An
         for transip, dstintf, trandisp, count, first, last in session.execute(nat)
     ]
     low = now - timedelta(hours=SRCMAC_HOURS)
-    per_mac = trust.srcmac_ip_counts(session, low, now, None, untrusted)
+    per_mac = trust.srcmac_ip_counts(
+        session, low, now, None, untrusted, max_session_seconds=max_session_seconds
+    )
     # The rows srcmac_ip_counts counts: srcmac and srcintf set, an IPv4 source, trusted.
     rows = (
         select(FgTraffic.srcintf, func.count())
@@ -547,7 +552,8 @@ def fortigate_observed(
         seconds = OBSERVED_DEADLINE_SECONDS
         try:
             with statement_deadline(db, seconds):
-                counts = observed_counts(db, hours, utc_now())
+                longest = int(get_setting(db, "lookup.max_session_seconds", 86400))
+                counts = observed_counts(db, hours, utc_now(), max_session_seconds=longest)
         except (LookupTimeoutError, DBAPIError) as exc:
             if isinstance(exc, DBAPIError) and not _is_timeout(exc):
                 raise

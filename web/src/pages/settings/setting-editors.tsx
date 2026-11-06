@@ -25,14 +25,16 @@ import { formatDateTime } from '@/lib/format';
 import { currentLang } from '@/lib/i18n';
 import { roleLabel, ROLE_IDS } from '@/lib/permissions';
 import type { SettingOut } from '@/lib/settings-types';
+import { cn } from '@/lib/utils';
 
 import { EgressEditor } from './egress-editor';
 import { EGRESSES_KEY, type EgressRow } from './egress-model';
 import { FortiGateObservedPanel, type SrcmacDrafts } from './fortigate-observed-panel';
 import { parseInteger } from './settings-validation';
 import {
+  dayParts,
   HOLIDAYS_KEY,
-  isWorkHours,
+  isWorkWeek,
   settingControlId,
   SERVER_SECONDS_KEY,
   SEVERITIES,
@@ -42,14 +44,16 @@ import {
   TOTP_ROLES_KEY,
   validHoliday,
   valueText,
+  WORK_BREAKS_MAX,
   WORK_HOURS_KEY,
   type Draft,
   draftText,
   type ServerSeconds,
-  type WorkHours,
+  type WorkBreak,
+  type WorkDayDraft,
+  type WorkWeek,
 } from './setting-values';
 
-const WEEKDAYS = [1, 2, 3, 4, 5, 6, 7] as const;
 /** FortiGate lease evidence (ADR-0016): its help is a warning while the switch is on. */
 const TRAFFIC_EXTENDS_KEY = 'dhcp.fortigate_traffic_extends';
 /**
@@ -105,6 +109,60 @@ interface EditorProps<D extends Draft> {
   labelId: string;
 }
 
+/** The strip of a weekday row: work and break time on a 24-hour bar (P1). */
+function DayStrip({ row, name }: { row: WorkDayDraft; name: string }) {
+  const { t } = useTranslation();
+  const parts = dayParts(row);
+  const pauses = parts.filter((part) => part.part === 'break');
+  const label =
+    parts.length === 0
+      ? t('settings.application.stripOff', { day: name })
+      : pauses.length === 0
+        ? t('settings.application.stripWork', { day: name, hours: `${row.start}–${row.end}` })
+        : t('settings.application.stripBreaks', {
+            day: name,
+            hours: `${row.start}–${row.end}`,
+            breaks: pauses.map((part) => `${clockOf(part.start)}–${clockOf(part.end)}`).join(', '),
+          });
+  return (
+    <div
+      className="relative h-3 w-full min-w-28 overflow-hidden rounded-sm bg-subtle"
+      role="img"
+      aria-label={label}
+      title={label}
+    >
+      {parts.map((part) => (
+        <span
+          key={`${part.part}-${part.start}`}
+          aria-hidden="true"
+          className={cn('absolute inset-y-0', part.part === 'work' ? 'bg-primary' : 'bg-warning')}
+          style={{
+            left: `${(part.start / 1440) * 100}%`,
+            width: `${((part.end - part.start) / 1440) * 100}%`,
+          }}
+        />
+      ))}
+    </div>
+  );
+}
+
+/** `570` → `"09:30"`. */
+function clockOf(minutes: number): string {
+  return `${String(Math.floor(minutes / 60)).padStart(2, '0')}:${String(minutes % 60).padStart(2, '0')}`;
+}
+
+/** A new break: lunch when it fits the day, otherwise empty fields to fill in. */
+function newBreak(row: WorkDayDraft): WorkBreak {
+  return row.start <= '12:00' && row.end >= '13:00' && row.breaks.length === 0
+    ? { start: '12:00', end: '13:00' }
+    : { start: '', end: '' };
+}
+
+/**
+ * The work hours (contract W5 §6 P1): a week table with each day's hours and breaks, "Tüm günlere
+ * uygula", and a strip of each day. The value saved keeps the hours most days share as the
+ * general ones and the other days as `by_day` (`workHoursOf`).
+ */
 function WorkHoursEditor({
   id,
   draft,
@@ -113,8 +171,24 @@ function WorkHoursEditor({
   invalid,
   describedBy,
   labelId,
-}: EditorProps<WorkHours>) {
+}: EditorProps<WorkWeek>) {
   const { t } = useTranslation();
+  const name = (index: number) => t(`settings.application.weekdays.${index + 1}`);
+  function setRow(index: number, row: WorkDayDraft) {
+    onChange({ week: draft.week.map((item, at) => (at === index ? row : item)) });
+  }
+  function applyToAll(index: number) {
+    const source = draft.week[index];
+    if (!source) return;
+    onChange({
+      week: draft.week.map((item) => ({
+        ...item,
+        start: source.start,
+        end: source.end,
+        breaks: source.breaks.map((pause) => ({ ...pause })),
+      })),
+    });
+  }
   return (
     <fieldset
       className="flex flex-col gap-3"
@@ -124,59 +198,183 @@ function WorkHoursEditor({
       id={id}
       tabIndex={-1}
     >
-      <div
-        className="flex flex-wrap gap-3"
-        role="group"
-        aria-label={t('settings.application.workDays')}
-      >
-        {WEEKDAYS.map((day) => (
-          <div key={day} className="flex items-center gap-1.5">
-            <Checkbox
-              id={`${id}-day-${day}`}
-              checked={draft.days.includes(day)}
-              disabled={disabled}
-              onCheckedChange={(checked) => {
-                const days =
-                  checked === true ? [...draft.days, day] : draft.days.filter((d) => d !== day);
-                onChange({ ...draft, days });
-              }}
-            />
-            <Label htmlFor={`${id}-day-${day}`} className="font-normal">
-              {t(`settings.application.weekdays.${day}`)}
-            </Label>
-          </div>
-        ))}
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[46rem] text-sm">
+          <thead>
+            <tr className="text-left text-xs text-muted">
+              <th scope="col" className="py-1.5 pr-3 font-medium">
+                {t('settings.application.workDay')}
+              </th>
+              <th scope="col" className="py-1.5 pr-3 font-medium">
+                {t('settings.application.workStart')}
+              </th>
+              <th scope="col" className="py-1.5 pr-3 font-medium">
+                {t('settings.application.workEnd')}
+              </th>
+              <th scope="col" className="py-1.5 pr-3 font-medium">
+                {t('settings.application.breaks')}
+              </th>
+              <th scope="col" className="py-1.5 pr-3 font-medium">
+                {t('settings.application.preview')}
+              </th>
+              <th scope="col" className="py-1.5 font-medium">
+                <span className="sr-only">{t('settings.application.applyAll')}</span>
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {draft.week.map((row, index) => {
+              const day = name(index);
+              const off = disabled || !row.work;
+              return (
+                <tr key={day} className="border-t border-border align-top">
+                  <td className="py-2 pr-3">
+                    <div className="flex h-9 items-center gap-1.5">
+                      <Checkbox
+                        id={`${id}-day-${index + 1}`}
+                        checked={row.work}
+                        disabled={disabled}
+                        onCheckedChange={(checked) => {
+                          setRow(index, { ...row, work: checked === true });
+                        }}
+                      />
+                      <Label htmlFor={`${id}-day-${index + 1}`} className="font-normal">
+                        {day}
+                      </Label>
+                    </div>
+                  </td>
+                  <td className="py-2 pr-3">
+                    <Input
+                      className="w-20"
+                      inputMode="numeric"
+                      placeholder="08:00"
+                      aria-label={t('settings.application.dayStart', { day })}
+                      value={row.start}
+                      disabled={off}
+                      onChange={(event) => {
+                        setRow(index, { ...row, start: event.target.value.trim() });
+                      }}
+                    />
+                  </td>
+                  <td className="py-2 pr-3">
+                    <Input
+                      className="w-20"
+                      inputMode="numeric"
+                      placeholder="18:00"
+                      aria-label={t('settings.application.dayEnd', { day })}
+                      value={row.end}
+                      disabled={off}
+                      onChange={(event) => {
+                        setRow(index, { ...row, end: event.target.value.trim() });
+                      }}
+                    />
+                  </td>
+                  <td className="py-2 pr-3">
+                    <div className="flex flex-col gap-1.5">
+                      {row.breaks.map((pause, at) => {
+                        const number = at + 1;
+                        const edit = (change: Partial<WorkBreak>) => {
+                          setRow(index, {
+                            ...row,
+                            breaks: row.breaks.map((item, which) =>
+                              which === at ? { ...item, ...change } : item,
+                            ),
+                          });
+                        };
+                        return (
+                          <div key={at} className="flex items-center gap-1">
+                            <Input
+                              className="w-20"
+                              inputMode="numeric"
+                              placeholder="12:00"
+                              aria-label={t('settings.application.breakStart', { day, number })}
+                              value={pause.start}
+                              disabled={off}
+                              onChange={(event) => {
+                                edit({ start: event.target.value.trim() });
+                              }}
+                            />
+                            <span aria-hidden="true">–</span>
+                            <Input
+                              className="w-20"
+                              inputMode="numeric"
+                              placeholder="13:00"
+                              aria-label={t('settings.application.breakEnd', { day, number })}
+                              value={pause.end}
+                              disabled={off}
+                              onChange={(event) => {
+                                edit({ end: event.target.value.trim() });
+                              }}
+                            />
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              disabled={off}
+                              aria-label={t('settings.application.removeBreak', { day, number })}
+                              onClick={() => {
+                                setRow(index, {
+                                  ...row,
+                                  breaks: row.breaks.filter((_, which) => which !== at),
+                                });
+                              }}
+                            >
+                              <X aria-hidden="true" />
+                            </Button>
+                          </div>
+                        );
+                      })}
+                      <div>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          disabled={off || row.breaks.length >= WORK_BREAKS_MAX}
+                          aria-label={t('settings.application.addBreakFor', { day })}
+                          onClick={() => {
+                            setRow(index, { ...row, breaks: [...row.breaks, newBreak(row)] });
+                          }}
+                        >
+                          <Plus aria-hidden="true" />
+                          {t('settings.application.addBreak')}
+                        </Button>
+                      </div>
+                    </div>
+                  </td>
+                  <td className="py-2 pr-3 align-middle">
+                    <DayStrip row={row} name={day} />
+                  </td>
+                  <td className="py-2">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      disabled={off}
+                      aria-label={t('settings.application.applyAllFrom', { day })}
+                      onClick={() => {
+                        applyToAll(index);
+                      }}
+                    >
+                      {t('settings.application.applyAll')}
+                    </Button>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
       </div>
-      <div className="flex flex-wrap items-end gap-3">
-        <div className="flex flex-col gap-1">
-          <Label htmlFor={`${id}-start`}>{t('settings.application.workStart')}</Label>
-          <Input
-            id={`${id}-start`}
-            className="w-28"
-            inputMode="numeric"
-            placeholder="08:00"
-            value={draft.start}
-            disabled={disabled}
-            onChange={(event) => {
-              onChange({ ...draft, start: event.target.value.trim() });
-            }}
-          />
-        </div>
-        <div className="flex flex-col gap-1">
-          <Label htmlFor={`${id}-end`}>{t('settings.application.workEnd')}</Label>
-          <Input
-            id={`${id}-end`}
-            className="w-28"
-            inputMode="numeric"
-            placeholder="18:00"
-            value={draft.end}
-            disabled={disabled}
-            onChange={(event) => {
-              onChange({ ...draft, end: event.target.value.trim() });
-            }}
-          />
-        </div>
-      </div>
+      <ul className="flex flex-wrap gap-x-4 gap-y-1 text-13 text-muted">
+        <li className="flex items-center gap-1.5">
+          <span aria-hidden="true" className="size-2.5 rounded-sm bg-primary" />
+          {t('usage.hours.work')}
+        </li>
+        <li className="flex items-center gap-1.5">
+          <span aria-hidden="true" className="size-2.5 rounded-sm bg-warning" />
+          {t('usage.hours.break')}
+        </li>
+        <li className="flex items-center gap-1.5">
+          <span aria-hidden="true" className="size-2.5 rounded-sm bg-subtle ring-1 ring-border" />
+          {t('usage.hours.off')}
+        </li>
+      </ul>
     </fieldset>
   );
 }
@@ -452,7 +650,7 @@ export function SettingField({
 
   let editor: ReactNode;
   const common = { id, disabled, invalid, describedBy, labelId };
-  if (setting.key === WORK_HOURS_KEY && isWorkHours(draft))
+  if (setting.key === WORK_HOURS_KEY && isWorkWeek(draft))
     editor = <WorkHoursEditor {...common} draft={draft} onChange={onChange} />;
   else if (setting.key === HOLIDAYS_KEY && Array.isArray(draft))
     editor = <HolidayEditor {...common} draft={draft as string[]} onChange={onChange} />;

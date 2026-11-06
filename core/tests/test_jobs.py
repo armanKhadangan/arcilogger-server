@@ -87,7 +87,7 @@ def test_replica_target_error_is_alerted(world: Any, days: list[date], tmp_path:
 
 def _old_world(world: Any, days: list[date]) -> list[date]:
     _seal(world, days)
-    world.reconfigure(retention={"enabled": True, "days": 730})
+    world.reconfigure(retention={"enabled": True, "days": 730, "batch_days": 1})
     world.set_now(days[1] + timedelta(days=730))  # cutoff = days[1]: only days[0] is past retention
     return days
 

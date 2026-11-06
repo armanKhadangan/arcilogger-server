@@ -237,6 +237,16 @@ PARTITION_LOCK_TIMEOUT_MS: Final = 2000
 #: times, each a wait searches queue behind); back to ``archive_seconds`` once a table is made.
 PARTITION_RETRY_MAX_SECONDS: Final = 60.0
 LOCK_NOT_AVAILABLE: Final = "55P03"
+#: SQLSTATEs of a transaction PostgreSQL aborted for a conflict with another transaction, not
+#: for a problem of the database: a deadlock (40P01; seen between a TimescaleDB recompression
+#: policy and a write into the chunk it recompresses, #149) and a serialization failure (40001).
+#: Nothing was written; the same work is made again at once, a few times, and the database is
+#: not reported unavailable (W5-G-28).
+CONFLICTS: Final = {"40P01": "deadlock", "40001": "serialization failure"}
+#: How often a batch aborted for a conflict is made again before it counts as any other
+#: database error, and the first wait (doubled each time: 0.1, 0.2, 0.4 s, 0.7 s in all).
+CONFLICT_RETRIES: Final = 3
+CONFLICT_BACKOFF: Final = 0.1
 #: The raw days around a request's days whose files are loaded with it (module text).
 RELOAD_MARGIN: Final = timedelta(days=RAW_DAY_MARGIN)
 #: Bytes read at a time when a sealed file is checked against its manifest's SHA-256 (and when
@@ -300,11 +310,21 @@ def _check_stopped() -> None:
         raise CheckStoppedError
 
 
-def _lock_not_available(exc: DBAPIError) -> bool:
-    """Whether a database error is a lock wait that ran past ``lock_timeout`` (55P03)."""
+def _sqlstate(exc: DBAPIError) -> str | None:
+    """The SQLSTATE of a database error (``None`` for a lost connection and the like)."""
     original = exc.orig
     code = getattr(original, "sqlstate", None) or getattr(original, "pgcode", None)
-    return code == LOCK_NOT_AVAILABLE
+    return code if isinstance(code, str) else None
+
+
+def _lock_not_available(exc: DBAPIError) -> bool:
+    """Whether a database error is a lock wait that ran past ``lock_timeout`` (55P03)."""
+    return _sqlstate(exc) == LOCK_NOT_AVAILABLE
+
+
+def _conflict(exc: DBAPIError) -> str | None:
+    """The name of the conflict that aborted a transaction (:data:`CONFLICTS`), else ``None``."""
+    return CONFLICTS.get(_sqlstate(exc) or "")
 
 
 def count_lines(data: bytes) -> int:
@@ -1268,6 +1288,14 @@ class IngestService:
             if self._archive_job is None and self._claim is None and self._reset is None:
                 self._resume_reset()
         except DBAPIError as exc:
+            conflict = _conflict(exc)
+            if conflict is not None:  # rolled back, nothing changed: made again next round
+                log.warning(
+                    "archive reload step aborted by a %s (%s); made again in the next round",
+                    conflict,
+                    _sqlstate(exc),
+                )
+                return True
             self._database_down(exc)
             return False
         return True
@@ -2438,6 +2466,7 @@ class IngestService:
         head = self._head
         self._resolve(head)
         attempt = 0
+        conflicts = 0
         while True:
             try:
                 if not self._take_lock():
@@ -2457,6 +2486,24 @@ class IngestService:
                     return False
                 return True
             except DBAPIError as exc:  # unavailable, not ready, or a schema problem: retry
+                conflict = _conflict(exc)
+                if conflict is not None and conflicts < CONFLICT_RETRIES:
+                    # Aborted for another transaction (#149): the batch was rolled back and the
+                    # offsets did not move. Made again at once; the database is up, and its
+                    # connections stay.
+                    delay = CONFLICT_BACKOFF * (2**conflicts)
+                    conflicts += 1
+                    log.warning(
+                        "batch aborted by a %s (%s), nothing is lost: made again in %.1f s "
+                        "(%d of %d)",
+                        conflict,
+                        _sqlstate(exc),
+                        delay,
+                        conflicts,
+                        CONFLICT_RETRIES,
+                    )
+                    time.sleep(delay)
+                    continue
                 self._database_down(exc)
                 self.engine.dispose()  # fresh connections after the database comes back
                 if not retry or self.stop.is_set():

@@ -32,12 +32,14 @@ export function dativeSuffix(clock: string): string {
 /**
  * "Veriler 14:35'e kadar işlendi" (today), "Veriler 12.10.2026 23:55'e kadar işlendi" or, at a
  * site midnight (a day computed to its end), "Veriler 12.10.2026 sonuna kadar işlendi": how far
- * the rollups have processed traffic (`computed_until` of every usage answer).
+ * the rollups have processed traffic (`computed_until` of every usage answer). With today's
+ * `updated_at` (W5 §6 L3, P2), today reads "Son güncelleme 14:36 (veriler 14:35'e kadar)".
  */
 export function computedUntilText(
   computedUntil: string | null,
   todayDay: string,
   t: TFunction,
+  updatedAt: string | null = null,
 ): string {
   if (!computedUntil) return t('usage.computed.none');
   const { date, time } = siteDateTime(computedUntil);
@@ -49,6 +51,12 @@ export function computedUntilText(
     return t('usage.computed.endOfDay', { date: formatDay(dayBefore) });
   }
   const suffix = dativeSuffix(clock);
+  if (date === todayDay && updatedAt)
+    return t('usage.computed.updated', {
+      updated: siteDateTime(updatedAt).time.slice(0, 5),
+      time: clock,
+      suffix,
+    });
   return date === todayDay
     ? t('usage.computed.today', { time: clock, suffix })
     : t('usage.computed.other', { date: formatDay(date), time: clock, suffix });
@@ -127,6 +135,7 @@ export function sumMetrics(list: readonly Metrics[]): Metrics {
       sessions: sum.sessions + item.sessions,
       blocked: sum.blocked + item.blocked,
       off_hours_active_seconds: sum.off_hours_active_seconds + item.off_hours_active_seconds,
+      break_active_seconds: sum.break_active_seconds + item.break_active_seconds,
       first_activity: earlier(sum.first_activity, item.first_activity),
       last_activity: later(sum.last_activity, item.last_activity),
     }),
@@ -138,6 +147,7 @@ export function sumMetrics(list: readonly Metrics[]): Metrics {
       sessions: 0,
       blocked: 0,
       off_hours_active_seconds: 0,
+      break_active_seconds: 0,
       first_activity: null,
       last_activity: null,
     },

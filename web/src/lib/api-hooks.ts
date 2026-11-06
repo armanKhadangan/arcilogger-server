@@ -879,8 +879,8 @@ export function useImportCsv() {
 
 /** Live widgets of the dashboard (ingest, seal, credit, clock, alerts): spec 12.3 item 2. */
 export const DASHBOARD_POLL_MS = 30_000;
-/** Usage figures change slowly (the rollups run every few minutes): spec 12.3 item 2. */
-export const USAGE_POLL_MS = 300_000;
+/** Today's usage is recomputed every minute (W5 §6 L1, P2); the pages read it as often. */
+export const USAGE_POLL_MS = 60_000;
 
 /** `GET /dashboard/summary` (`dashboard.view`); every block is `null` without its permission. */
 export function useDashboardSummary(enabled = true) {

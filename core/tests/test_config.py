@@ -55,6 +55,22 @@ def test_retention_below_two_years_is_refused(tmp_path: Path) -> None:
         load_config(_write(tmp_path, MINIMAL + "\n[retention]\ndays = 365\n"))
 
 
+@pytest.mark.parametrize("batch_days", [0, -1, 181, 365])
+def test_retention_batch_days_outside_1_to_180_is_refused(tmp_path: Path, batch_days: int) -> None:
+    """``retention.batch_days`` (#195): 1 deletes each day as it expires; 180, six months, is the
+    ceiling."""
+    with pytest.raises(ValidationError, match="batch_days"):
+        load_config(_write(tmp_path, MINIMAL + f"\n[retention]\nbatch_days = {batch_days}\n"))
+
+
+@pytest.mark.parametrize(
+    ("text", "batch_days"), [("", 30), ("batch_days = 1\n", 1), ("batch_days = 180\n", 180)]
+)
+def test_retention_batch_days_defaults_to_30(tmp_path: Path, text: str, batch_days: int) -> None:
+    config = load_config(_write(tmp_path, MINIMAL + "\n[retention]\n" + text))
+    assert config.retention.batch_days == batch_days
+
+
 def test_replica_needs_a_target(tmp_path: Path) -> None:
     with pytest.raises(ValidationError, match=r"replica\.target"):
         load_config(_write(tmp_path, MINIMAL + "\n[replica]\nenabled = true\n"))

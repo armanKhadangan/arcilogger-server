@@ -955,7 +955,9 @@ def test_refuses_an_inconsistent_vault(tmp_path: Path) -> None:
     vault = seal_vault(tmp_path, "ec")
     vault.config = vault.config.model_copy(
         update={
-            "retention": vault.config.retention.model_copy(update={"enabled": True, "days": 730})
+            "retention": vault.config.retention.model_copy(
+                update={"enabled": True, "days": 730, "batch_days": 1}
+            )
         }
     )
     later = datetime.combine(DAYS[0] + timedelta(days=731), time(2, 0), tzinfo=SITE_TZ)
@@ -1194,7 +1196,9 @@ def test_deletion_record_and_chain_anchor_are_shipped_and_verified(tmp_path: Pat
     vault = seal_vault(tmp_path, "ec")
     retention_config = vault.config.model_copy(
         update={
-            "retention": vault.config.retention.model_copy(update={"enabled": True, "days": 730})
+            "retention": vault.config.retention.model_copy(
+                update={"enabled": True, "days": 730, "batch_days": 1}
+            )
         }
     )
     vault.config = retention_config
@@ -1795,7 +1799,9 @@ def test_tamper_deletion_records(tmp_path: Path) -> None:
     vault = seal_vault(tmp_path, "ec")
     vault.config = vault.config.model_copy(
         update={
-            "retention": vault.config.retention.model_copy(update={"enabled": True, "days": 730})
+            "retention": vault.config.retention.model_copy(
+                update={"enabled": True, "days": 730, "batch_days": 1}
+            )
         }
     )
     later = datetime.combine(DAYS[0] + timedelta(days=731), time(2, 0), tzinfo=SITE_TZ)

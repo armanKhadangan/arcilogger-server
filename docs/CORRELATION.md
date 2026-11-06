@@ -469,10 +469,14 @@ identification on a FortiGate interface ([DEVICE-SETUP.md](DEVICE-SETUP.md) sect
 session records carry the client's MAC (`srcmac`). The lookup uses it only when the session row's
 `srcintf` is listed in `lookup.srcmac_interfaces` (default `[]`: off), the MAC is no
 infrastructure MAC, it was seen with at most `lookup.srcmac_max_ips` (default 1) distinct IPv4
-source addresses on that interface within ±1 hour of the moment (a router's or switch's MAC is
-seen with many; a dual-stack client's IPv6 addresses are not counted; a used row logged outside
-that hour, such as a long session logged at its end, adds its own address), no lease of that MAC
-on another IP covers a moment of that hour, and the row comes from a configured FortiGate source.
+source addresses on that interface in the sessions that overlap ±1 hour of the moment (a router's
+or switch's MAC is seen with many; a dual-stack client's IPv6 addresses are not counted). A
+session overlaps when it was logged in the hour or later and started (its time minus its
+`duration`) in the hour or earlier, so a long session of another address that started in the hour
+and was logged at its end counts too; the scan stops `lookup.max_session_seconds` after the hour,
+as the session probes' does (#96). The `R20-lease:srcmac-shared` alert and the interface list's
+observed counts count the same way. Further, no lease of that MAC on another IP covers a moment
+of that hour, and the row comes from a configured FortiGate source.
 `TrafficInfo.srcmac` of a stored outcome is filled only for listed interfaces.
 
 - A match or an internal IP **without a lease**: the MAC, device and person come from that row,

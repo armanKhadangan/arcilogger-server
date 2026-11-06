@@ -724,6 +724,164 @@ W5-J after W5-G and W5-D. All before W5-F's last part, so the docs describe the 
 
 ---
 
+## 6. Addendum B (2026-11-05): breaks and per-day work hours, one-minute usage refresh, Canlı Durum
+
+Owner decisions of 2026-11-05:
+
+- **Breaks in the work hours.** The owner asked where the company's work hours and breaks are
+  entered: "çalışanların aralardaki instagram kullanımlarını mesai saati içi kullanıma karıştırmak
+  istemiyorum … yoksa onu da wave 5 ile birlikte yap".
+- **Usage data every minute.** "kullanım ve tüm verilerin güncelleme hızı … mümkünse onu dakikada
+  bire çek".
+- **A live view of the network.** The owner asked for live download and upload speed and the
+  computers sending data at the moment. He chose:
+  - **"Loglar + SNMP"**: per-computer activity from the logs, and the internet line's speed read
+    from the firewall's interface counters with SNMPv3, read only;
+  - **"Wave 5'e ekle"**.
+
+  This is the first time ARCILOGGER sends a request to a device. Until now it only received
+  syslog. N3 limits that to the configured log sources.
+
+Packages:
+- **W5-K:** breaks and per-day hours, back end.
+- **W5-L:** one-minute usage refresh.
+- **W5-M:** Canlı Durum from the logs, back end.
+- **W5-N:** the internet line's speed over SNMP, back end.
+- **W5-P:** every web part of K, L, M and N.
+
+W5-F (docs) gets the additions of 6.6.
+
+### 6.1 Facts (read on `wave-5` at `76ee6bb`)
+
+| Fact | Where |
+|---|---|
+| Work hours are one database setting, `usage.work_hours` = `{"days": [1..5], "start": "08:00", "end": "18:00"}`. The validator accepts exactly these three fields. A night shift (start ≥ end) is refused. | `db/src/arcilogger_db/settings.py:215-217`, `:1086-1115`; texts `:394-409`; `settings_meta.py:754-762` |
+| It is edited in the browser under Ayarlar → Uygulama ayarları ("Mesai saatleri"), with the holidays (`usage.holidays`). | `web/src/pages/settings/setting-values.ts:34-35`; `web/src/pages/settings/application-page.tsx` |
+| Every minute of a site day is "off hours" or not. There is no third class. | `worker/src/arcilogger_worker/usage/config.py:48-70`, `:164-177`; `usage/engine.py:217`, `:255-257` |
+| The seven rollup tables carry `off_hours boolean` in their primary keys. | `db/src/arcilogger_db/models.py:1451-1650` (`UsageDaily` … `UsageUrl`); migration `v0010_usage.py` |
+| The API's `hours` filter is `all \| work \| off`. Totals carry `off_hours_active_seconds`. | `worker/src/arcilogger_worker/usage/query.py:37`, `:271-336`; `api/src/arcilogger_api/routers/usage.py:221-230` |
+| The PDF and HTML reports print the off-hours time. | `worker/src/arcilogger_worker/reports/html.py:219`, `:324`; `reports/pdf.py:247`, `:468`, `:517` |
+| A change of the work hours rebuilds the last `usage.auto_rebuild_days` days by itself: they are part of the rollup's fingerprint. | `usage/config.py:179-196`; `usage/jobs.py:155-176` |
+| **Today's usage is recomputed every 5 minutes, not every hour.** The Kullanım page polls every 5 minutes; the Panel polls every 30 s. | `worker/src/arcilogger_worker/service.py:220`, `:419`; `usage/jobs.py:138-141`; `web/src/lib/api-hooks.ts:881-883` |
+| A refresh recomputes the whole day. Measured: 1.7 s at the default load and 6.0 s at five times it. Extrapolated to the specification's busy day: about one minute. | `docs/USAGE.md:295-310` |
+| Logs reach the database within about a second: ingest polls every 0.5 s. The 5651 lookup, Arama and Canlı Akış therefore already work on fresh data. | `core/src/arcilogger_core/config.py:348` |
+| FortiGate traffic rows carry `sentbyte`/`rcvdbyte` and, for interim updates of long sessions, `sentdelta`/`rcvddelta`/`durationdelta` with `is_interim`. The usage engine counts each byte once: interim deltas at their own time, the final log only the rest. | `models.py:288-297`; `usage/engine.py:17-24` |
+| How often FortiGate sends interim traffic logs is not confirmed ("sahada doğrula"). | `docs/USAGE.md:311-312`; `docs/CORRELATION.md:1036-1037` |
+| `fg_traffic` has no index on `time` alone. Plain PostgreSQL uses daily partitions since W5-G; TimescaleDB uses 1-day chunks. | `models.py:253-257`; Addendum A G2 |
+| `/api/v1/live/*` is Canlı Akış (the raw tail). `GET /live/status` already exists. | `api/src/arcilogger_api/routers/live.py:1-21` |
+| Usage access: `usage.person` or `usage.anonymous` with the KVKK notice; pseudonyms by setting; module `usage_analytics`. | `api/src/arcilogger_api/routers/usage.py:6-20`, `:80-93`, `:179-184`; `web/src/nav.ts:57-65` |
+| A log source is `[[sources]]` with a single address or a network. Secret names live in the secret store. The strict outbound firewall gets one rule per known target, as for SMTP. | `core/src/arcilogger_core/config.py:47-81`; `secretstore.py:30-38`; `admin/systemplan.py:184-197`; `deploy/windows/scripts/Set-ArciFirewall.ps1:25-35` |
+| Status files of the services live under `state\`, written by their service, read by the API and the Sistem page. | `core/src/arcilogger_core/layout.py:88-106` |
+
+### 6.2 Decisions
+
+| # | Decision |
+|---|---|
+| K1 | **The same key, two optional fields.** `usage.work_hours` = `{"days", "start", "end", "breaks"?, "by_day"?}`. <ul><li>`breaks`: a list of `{"start", "end"}` (HH:MM, end excluded). At most 6, each at least 5 minutes, inside the day's `[start, end)`, not overlapping, sorted on save.</li><li>`by_day`: a map from an ISO weekday `"1"`…`"7"` that is in `days` to `{"start", "end", "breaks"?}`. It replaces that weekday's hours and breaks. **An entry without `breaks` has no breaks**: it does not inherit the general ones.</li><li>A stored three-field value stays valid and means no breaks and the same hours every work day. There is no settings migration.</li><li>New refusal codes, TR/EN in `settings.py`: `setting_work_hours_breaks` (a bad time, outside the day, overlapping, shorter than 5 minutes, more than 6) and `setting_work_hours_by_day` (a key that is not a work day, a bad entry). The `setting_work_hours_fields` text names the two optional fields.</li><li>Night shifts, and hours per person or department, are not in scope.</li></ul> |
+| K2 | **Three classes of minute:** `work`, `break` or `off`. A holiday, or a weekday not in `days`, is `off` all day. A break minute is `break`. `UsageSettings.period(moment)` replaces `is_off_hours`. The fingerprint (`config.py:179-196`) includes `breaks` and `by_day`, so a change rebuilds the recent days through the existing path. |
+| K3 | **Database.** Migration `0023_usage_period`: in the seven rollup tables, `off_hours boolean` becomes `period text NOT NULL CHECK (period IN ('work','break','off'))`, in the same primary-key position. Existing rows: `true` → `'off'`, `false` → `'work'`. Old days are not split by break unless the auto rebuild reaches them. With the 30-day database window, only days whose logs are still in the database can be rebuilt; the docs say so. JSON event records (`blocked_events`, URLs) carry `"period"`; the readers still accept an old `"off_hours"`. |
+| K4 | **API: additive only**, so the web keeps working between the back-end and the web pull requests. <ul><li>`hours` accepts `all \| work \| break \| off`. `work` excludes breaks; with no breaks configured it is unchanged.</li><li>Every object that has `off_hours_active_seconds` gets `break_active_seconds`.</li><li>Records with `off_hours: bool` keep it and get `period` beside it.</li></ul>W5-K adds these fields to `web/src/lib/api-types.ts` (types only) and regenerates the contract and samples. |
+| K5 | **Reports** (PDF, HTML, Excel): a "Mola / Breaks" column or row next to "Mesai dışı". It appears only when the work-hours setting has breaks for some day of the report, so existing reports look as before. |
+| K6 | **KVKK:** break usage is personal data like any usage figure. It has the same roles, the same notice, the same `usage.view` audit and the same pseudonyms. Nothing more is shown than today; the docs recommend naming break measurement in the employee information text (legal review). |
+| L1 | **`usage.today` every 60 s** (`USAGE_TODAY_EVERY`, was 5 minutes). |
+| L2 | **Back-off.** The job skips (`_skipped`, details `{"reason": "backoff"}`) while `now` < the end of the last today-rollup + 2 × its duration. The duration and end are stored in `usage_days.details` (`duration_ms`, `finished_at`). A 2 s rollup therefore refreshes every minute; a 60 s rollup about every 3 minutes. `usage.daily` and rebuild requests never wait for it. |
+| L3 | **Freshness on screen.** `GET /usage/company` and the subject answers carry `updated_at` (today's `computed_at`) and `data_until` (`computed_until`), additive. |
+| L4 | **Unchanged on purpose:** sealing stays once a day (one time stamp per day; credits, ADR and Addendum A). Lookup, Arama and Canlı Akış are already live. A long session's bytes appear when FortiGate logs them (interim or final log, X-B1). |
+| M1 | **Canlı Durum** (`/activity`): a new page after Canlı Akış in the menu. <ul><li>On top: "İnternet hattı / Internet line" (N).</li><li>Below: "Şu an / Right now", who is sending and receiving data over the last 1, 5 or 15 minutes, from the FortiGate traffic logs.</li></ul>MikroTik sends no byte counts and contributes nothing here (stated on the page). |
+| M2 | **`GET /api/v1/activity/devices?window=1\|5\|15`** (minutes, default 5; any other value is 422 `activity_window_invalid`). New area `api/src/arcilogger_api/activity/`. <ul><li>**Per subject** (person, device or IP by the usage subject rules, attribution and `usage_excluded`): `download_bytes`, `upload_bytes`, `download_bps`, `upload_bps` (bytes × 8 / window seconds), `sessions`, `top_domains` (≤ 3, background excluded), `top_apps` (≤ 3), `last_seen`. Sorted by download, at most 200 rows, plus `more`.</li><li>**Company:** `totals`, and `per_minute` with download and upload bytes for each of the last 60 minutes.</li><li>**Freshness:** `data_until` (the newest traffic row) and `generated_at`.</li><li>**Counting:** bytes with the engine's increment rule (`engine.py:17-24`), spread over the minutes they cover, using the engine's code (the API already depends on the worker). An interim delta counts at its own time; the final log adds only what the interim logs did not.</li></ul> |
+| M3 | **Access and audit.** <ul><li>Same as `/usage/subjects`: `usage.person` or `usage.anonymous` with the KVKK notice, pseudonyms by the same rule, module `usage_analytics` (owner question QB1).</li><li>Audit `activity.view` (target `activity:devices`, the window, the row count; no names) at the first request of a user and then at most once every 15 minutes while they keep polling.</li><li>The page polls every 10 s, only while visible.</li></ul> |
+| M4 | **Performance.** Measure the plan of the 15-minute window on both layouts, on perf data at 2,000 lines/s. If plain PostgreSQL scans today's partition, add a BRIN index on `fg_traffic (time)` in migration `0024_fg_traffic_time_brin` (down revision `0023_usage_period`; the pull request that merges second renumbers). The ingest gates must hold. **Guard:** one request over 15 minutes in under 1 s (best of 5) on the perf data; the figures go in the PR and the contract. |
+| N1 | **Configuration** on the log source (TOML, edited in the browser through Kaynaklar and the admin channel). <ul><li>`[sources.snmp]`: `enabled` (false), `port` (161), `user` (SNMPv3 user name, not a secret), `auth` (`sha1` \| `sha256` \| `sha512`, default `sha256`), `priv` (`aes128`, RFC 3826, default; `aes256` allowed, marked "sahada doğrula"), `interfaces` (1–4 `ifName` values of the WAN lines), `capacity_mbps` (optional map from interface to `{"down", "up"}`), `interval_seconds` (15, 10–60).</li><li>**Only SNMPv3 with authentication and privacy (authPriv).** v1/v2c are refused: their community string travels in clear text.</li><li>The target is the source's own `address`. A source whose address is a network is refused with `snmp_source_is_network`.</li><li>Secrets `snmp.<source>.auth_key` and `snmp.<source>.priv_key` (8–64 characters) go in the secret store only: never in TOML, logs or answers. A missing secret gives `snmp_secret_missing`.</li></ul> |
+| N2 | **Poller:** worker job `snmp.poll` every 5 s; it polls each enabled source whose `interval_seconds` is due. <ul><li>**One GET** of `sysUpTime.0` (1.3.6.1.2.1.1.3.0) and, per interface, `ifHCInOctets` (1.3.6.1.2.1.31.1.1.1.6.i), `ifHCOutOctets` (…1.1.10.i), `ifOperStatus` (1.3.6.1.2.1.2.2.1.8.i) and `ifHighSpeed` (1.3.6.1.2.1.31.1.1.1.15.i).</li><li>**ifIndex lookup:** the ifIndex of each name comes from a walk of `ifName` (1.3.6.1.2.1.31.1.1.1.1) at start, and again when a name is missing or `sysUpTime` went back.</li><li>**Rate** = Δoctets × 8 / Δt. A sample after a counter or `sysUpTime` decrease is dropped (reset).</li><li>**64-bit counters only:** an agent without them gives `snmp_no_hc_counters`.</li><li>**Direction:** on a WAN interface, In = download and Out = upload (X-B2).</li><li>**Library:** a maintained SNMP library with an OSI-approved licence (for example pysnmp; confirm its licence in the PR), pinned in `uv.lock`. Its name, version and licence go in the PR, for Wave 7's third-party notices.</li></ul> |
+| N3 | **Network and firewall.** <ul><li>The server sends UDP only to `<source address>:<port>` of SNMP-enabled sources.</li><li>In strict outbound mode, the system plan (`admin/systemplan.py`, as SMTP at `:184-197`) and `Set-ArciFirewall.ps1` add one outbound rule per such source: UDP, that remote address and port, named `ARCILOGGER SNMP <source>`.</li><li>Nothing inbound.</li><li>The device side (DEVICE-SETUP, "sahada doğrula") gets a read-only SNMPv3 user, answered only to the ARCILOGGER server's address, on a LAN interface, **never on a WAN interface**.</li></ul> |
+| N4 | **Storage and state.** <ul><li>`state/wan-rates.json` (new `Layout.wan_rates()`), written atomically by the worker. Per source and interface: the last 60 minutes at full resolution and the last 24 hours as 1-minute averages, with `status` (`ok`, `timeout`, `auth_failed`, `no_such_interface`, `snmp_no_hc_counters`, `disabled`) and `last_error_at`.</li><li>No database table.</li><li>Alert `R20-snmp` (low, key = source) after 10 minutes without a good sample; cleared by the next good one.</li></ul> |
+| N5 | **Probe.** "Bağlantıyı dene / Test connection" in Kaynaklar runs through the admin channel's probe (`admin/probe.py`). It walks `ifName` and returns each interface's name, `ifOperStatus` and `ifHighSpeed`, so the administrator picks the WAN lines from a list. Each error code of N4 has TR/EN text. |
+| N6 | **`GET /api/v1/activity/wan?range=60m\|24h`.** <ul><li>Per SNMP source and interface: `name`, `oper_status`, `download_bps`, `upload_bps` (newest), `capacity_mbps`, `series`, `status`, `updated_at`.</li><li>Access: `dashboard.view` or `system.read`. It holds no person data.</li><li>Not licence-gated (QB1).</li></ul> |
+| N7 | **Panel card "İnternet hattı":** download and upload of each line now, with a 60-minute sparkline. Hidden while no source has SNMP on; administrators see a link to Kaynaklar instead. |
+| P1 | **Mesai saatleri editor** (Uygulama ayarları). <ul><li>A week table, Pazartesi…Pazar: work day, start, end, breaks (add or remove rows), and "Tüm günlere uygula".</li><li>A strip preview of a day in work/break/off colours.</li><li>The server's refusal texts.</li><li>A day whose hours equal the general ones is saved without a `by_day` entry.</li></ul> |
+| P2 | **Kullanım.** <ul><li>The filter reads `Tüm saatler / Mesai içi / Mola / Mesai dışı`.</li><li>A "Mola" column beside "Mesai dışı", also in the exports.</li><li>The person timeline shades break bands.</li><li>"Son güncelleme hh:mm (veriler hh:mm'e kadar)" from L3.</li><li>`USAGE_POLL_MS` 60 s.</li></ul> |
+| P3 | **Canlı Durum page.** <ul><li>The line cards: Mbps now, 60-minute chart, % of capacity when known.</li><li>The window selector 1/5/15.</li><li>The "Şu an" table: subject, download, upload (Mbps), top sites, top apps, last seen.</li><li>The company per-minute chart.</li><li>The `data_until` note: "Uzun bağlantılar FortiGate ara kayıtları geldikçe görünür".</li><li>Polling every 10 s while visible; the module gate and the permissions of M3 and N6, each part shown only to those who may see it.</li></ul> |
+| P4 | **Kaynaklar → source → SNMP:** the N1 fields, write-only secret fields, the probe's interface list and the capacity. **Panel:** the N7 card. |
+
+### 6.3 New and changed keys
+
+| Key | Where | Default | Bounds |
+|---|---|---|---|
+| `usage.work_hours` (two optional fields) | database setting | unchanged: `{"days": [1,2,3,4,5], "start": "08:00", "end": "18:00"}` | K1 |
+| `[sources.snmp]` `enabled`, `port`, `user`, `auth`, `priv`, `interfaces`, `capacity_mbps`, `interval_seconds` | TOML, per source | `false`, 161, `""`, `sha256`, `aes128`, `[]`, `{}`, 15 | port 1–65535; 1–4 interfaces; interval 10–60 |
+| secrets `snmp.<source>.auth_key`, `snmp.<source>.priv_key` | secret store | — | 8–64 characters |
+
+### 6.4 "Sahada doğrula"
+
+- **X-B1:** how often FortiGate sends interim traffic logs. This is the delay of M's table for long sessions. A test pins that an interim delta counts at its own minute.
+- **X-B2:** on each device, In/Out of the WAN interface match download/upload (compare with the device's own interface graph).
+- **X-B3:** the SNMPv3 protocols each device accepts. Older firmware may need `sha1`, or may not offer `aes256`.
+- **X-B4:** the interface names (`ifName`) the devices report for their WAN lines. The probe shows them; nothing is assumed.
+
+### 6.5 Tests (the minimum)
+
+- **W5-K:**
+  - The validator: an old three-field value is valid; every refusal of K1.
+  - Minute classes with breaks, `by_day`, a holiday and a non-work day.
+  - Migration 0023: `true` → `off`, `false` → `work`, primary keys.
+  - A golden day with a session across lunch, split into work and break.
+  - A changed setting rebuilds the recent days.
+  - `hours=break` and `break_active_seconds` in the API and the exports.
+  - The reports' column only when there are breaks.
+  - Captured samples.
+- **W5-L:**
+  - The 60 s interval.
+  - The back-off: skip and run, `usage.daily` unaffected.
+  - The L3 fields.
+  - Default and heavy timings in the PR and in `docs/USAGE.md` §8.
+- **W5-M:**
+  - The increment rule against the usage engine on the same rows: equal byte totals over a whole day.
+  - An interim delta counted at its own time.
+  - Attribution, `usage_excluded` and pseudonyms.
+  - Permissions, the KVKK notice, the module gate and the audit throttle.
+  - `activity_window_invalid`.
+  - The M4 guard.
+  - Captured samples.
+- **W5-N:**
+  - Rate arithmetic.
+  - Counter and `sysUpTime` resets.
+  - `ifName` mapping and re-walk.
+  - Each status code from a test double at the library boundary, and one round trip against an in-process SNMPv3 responder if the library offers one (otherwise say why).
+  - The state file: atomic write and its bounds.
+  - Secrets never in logs or answers (log capture).
+  - The firewall plan: the rule only in strict mode and only for enabled single-address sources.
+  - The TOML refusals.
+  - The probe.
+  - Captured samples.
+- **W5-P:** unit tests of the editor model, the filter, the activity model and the charts; axe; e2e with mocks from the captured samples.
+
+### 6.6 Ownership, owners, order
+
+| Package | Owner | Owns | Depends on |
+|---|---|---|---|
+| W5-K | Manager (owner request 2026-11-05 21:10Z: "sende işin içine gir") | the `usage.work_hours` validator and texts in `db/src/arcilogger_db/settings.py`, its `settings_meta.py` row, `worker/src/arcilogger_worker/usage/config.py`, `usage/engine.py`, `usage/query.py`, the seven rollup models in `models.py`, migration `0023_usage_period`, the usage hunks of `api/src/arcilogger_api/routers/usage.py`, `usage_models.py`, `usage_exports.py`, the period hunks of `worker/src/arcilogger_worker/reports/` (`pdf.py`, `html.py`, `xlsx.py`, `texts.py`), the usage types of `web/src/lib/api-types.ts`, regenerated contract and samples, tests | — |
+| W5-L | Manager (second pull request) | the `USAGE_TODAY_EVERY` line of `worker/src/arcilogger_worker/service.py`, `usage/jobs.py` (back-off, details), the L3 fields, `docs/USAGE.md`/`KULLANIM.md` §8 timings, tests | W5-K merged (same files) |
+| W5-M | Tayfun (after #193; #96 after W5-M) | `api/src/arcilogger_api/activity/` (new: devices), `routers/activity.py` (mount), migration `0024_fg_traffic_time_brin` if M4 needs it, `web/src/lib/activity-types.ts` (day-1 pull request, as W5-C did), regenerated contract and samples, tests | — |
+| W5-N | Arman 2 (after #136) | `worker/src/arcilogger_worker/snmp/` (new), its job line in `service.py`, `Layout.wan_rates()` in `core/src/arcilogger_core/layout.py`, the `[sources.snmp]` model in `config.py`, the two secret names in `secretstore.py`, the SNMP keys in `admin/rules.py` and `admin/contract.py`, the SNMP probe in `admin/probe.py`, the SNMP targets in `admin/systemplan.py`, the SNMP rule in `Set-ArciFirewall.ps1`, `GET /activity/wan` in `api/src/arcilogger_api/activity/`, the `R20-snmp` constant and texts, the dependency in `pyproject.toml`/`uv.lock`, regenerated contract and samples, tests | **W5-T merged**: it owns `config.py`, `secretstore.py`, `admin/rules.py`, `admin/contract.py`, `admin/probe.py`, `Set-ArciFirewall.ps1`. The SNMP module itself can start at once. |
+| W5-P | Gülşah (after #195) | `web/src/pages/activity/` (new), the `activity` entry of `web/src/nav.ts` and its route, the work-hours editor in `web/src/pages/settings/` (`setting-editors.tsx`, `setting-values.ts`), the hunks of `web/src/pages/usage/`, `USAGE_POLL_MS` and the activity hooks in `web/src/lib/api-hooks.ts`, the Panel card, the SNMP section of `web/src/pages/sources/source-sheet.tsx`, locale keys, e2e mocks, tests | each part after its back end: the editor and usage parts after W5-K/L, the activity page after W5-M (and N for the line card) |
+| W5-F | Saray (see the manager's note on #104) | <ul><li>KULLANIM/USAGE: breaks, `by_day`, the minute refresh and back-off, freshness, the 30-day limit on rebuilding old days.</li><li>New CANLI-DURUM.md / LIVE-STATUS.md.</li><li>DEVICE-SETUP: an SNMPv3 section per vendor, "sahada doğrula", goals and parameters only, no invented menu paths.</li><li>KURULUM/INSTALL: the strict outbound SNMP rule.</li><li>AYARLAR/SETTINGS rows.</li><li>LISANS/LICENSING: which part needs `usage_analytics`.</li><li>The KVKK information text draft: breaks and the live view, marked for legal review.</li></ul> | the packages above |
+
+Shared files:
+- `worker/src/arcilogger_worker/service.py`: W5-L and W5-N, one line each.
+- `api/src/arcilogger_api/activity/`: W5-M, then W5-N.
+- `web/src/lib/api-types.ts`: W5-K types, then W5-P.
+
+The later pull request merges `origin/wave-5` and keeps both sides.
+
+**Merge order:** W5-K → W5-L. W5-M any time. W5-N after W5-T. W5-P's parts after their back ends. W5-F last. Wave 5's estimate grows by about 3–5 days (owner informed 2026-11-05).
+
+### 6.7 Owner questions (the defaults ship)
+
+- **QB1 (licence):** the per-person "Şu an" table belongs to the paid `usage_analytics` module, like Kullanım. The internet line's speed (N) belongs to the base product.
+- **QB2 (KVKK):** break usage is visible to the roles that already see usage, with the same notice and audit. No separate switch hides it.
+
+---
+
 ## Manager clarifications (2026-11-02, answers on #101 and #106)
 
 These change the contract text above. Where a section says otherwise, the clarification wins.
@@ -1942,6 +2100,88 @@ All Wave 5 questions are answered (2026-11-02).
   changed, `worker/tests/test_service.py` `test_default_jobs_run_against_the_database` (its
   03:30 tick now runs `db.window`, its 09:00 tick no longer).
 
+- **W5-G-28: a write aborted by a conflict is made again, not reported as an outage (#149, a
+  TimescaleDB recompression policy against a write; seen once in #133's loop).**
+  **The cycle, reproduced.** Where the columnstore policy recompresses a partial chunk by rebuilding
+  it (a hypertable it cannot recompress segment by segment), it holds `ShareLock` on the chunk and
+  then asks for `AccessExclusiveLock` on its index. A transaction that has read the chunk
+  (`AccessShareLock` on the index) and then writes it queues its `RowExclusiveLock` behind the
+  policy's `ShareLock`: a cycle, and PostgreSQL aborts the side that waited longer with `40P01` (in
+  #133's loop, and in the test, the policy, which leaves the chunk partial for its next run). On
+  `messages` TimescaleDB 2.30.2 recompresses segment by segment and gives a chunk with concurrent
+  writes up at once ("aborting recompression due to concurrent DML on uncompressed data, retrying
+  with next policy run"), without waiting.
+  **Not a statement of ours.** No ingest transaction reads a time-series chunk before it writes it:
+  the loader's first lock on a chunk is its COPY's `RowExclusiveLock` (`ingest_offsets` comes first,
+  and `search_counts` and `source_clock_samples` are plain tables), and a reset step's first lock on
+  a chunk is its DELETE's. The time-series tables have no foreign keys. So nothing is reordered
+  (#149 step 3: only if the reproduction showed the statement was ours); which transaction of #133's
+  loop read before it wrote is not in the server log, which does not print the surviving side's
+  query.
+  **Ingest's handling** (`IngestService._flush`, `_archive`). A batch aborted by a deadlock
+  (`40P01`) or a serialization failure (`40001`) was rolled back: offsets and the spool are as they
+  were. It is made again at once, up to `CONFLICT_RETRIES` (3) times after 0.1, 0.2 and 0.4 s, each
+  with a log line naming the conflict and its SQLSTATE. The database is not reported unavailable and
+  its connections stay (no `engine.dispose()`). A conflict that keeps aborting after that, and every
+  other error (a lost connection, a server down), still reads `database_unavailable` with the
+  outage's backoff. A reload's step aborted the same way (a reset step, the claim, a partition) is
+  made again in the next round, and its load goes through `_flush`. The status file's shape is
+  unchanged (the conflict is in the log only), so no new TR/EN text.
+  Tests: `ingest/tests/test_outage.py`
+  `test_a_batch_aborted_by_a_conflict_is_made_again_without_an_outage[40P01|40001]`,
+  `test_a_conflict_that_keeps_aborting_the_batch_is_reported_as_an_outage`,
+  `test_a_lost_connection_is_still_reported_as_an_outage`; `ingest/tests/test_archive_reload.py`
+  `test_a_reload_aborted_by_a_deadlock_is_made_again_in_the_next_round[reset|load]`; TimescaleDB
+  with compression, `ingest/tests/test_recompression.py`
+  `test_a_read_then_write_transaction_deadlocks_with_a_rebuilding_recompression` (the cycle, the
+  policy's notice "deadlock detected", the chunk left partial) and
+  `test_an_ingest_batch_and_the_recompression_do_not_deadlock` (a real batch held open after its
+  COPY while the policy runs on `messages`: no deadlock, the batch not aborted, the next run
+  recompresses the chunk), both ordered through `pg_locks`.
+
+- **W5-G-29: the srcmac guard counts the sessions that overlap the hour (#96, #40 item 7;
+  2026-11-06, the manager).**
+  **The rule.** `lookup/trust.py` `srcmac_ip_counts` counts the IPv4 `srcip` of a
+  `(srcintf, srcmac)` over the rows that overlap `[low, high]`: logged at `low` or later and started
+  at `high` or earlier (`time − duration`, as the session probes compute it; no duration: started
+  when logged). Its scan stops `max_session_seconds` after `high`, as the probes' does. Before, it
+  counted only the rows logged in `[low, high]`, so a router MAC's long session of another address
+  that started in the hour and was logged at its end was missed, and the lookup kept a `low`
+  `srcmac_only` chain where `srcmac_shared` should have refused it.
+  **The three callers change together.** Each passes `lookup.max_session_seconds`: the lookup
+  (`_SrcmacGuard.load`), the `R20-lease:srcmac-shared` alert (`alerts/system.py`
+  `_srcmac_shared`) and the interface list's observed counts (`routers/settings.py`
+  `observed_counts`). The last two count windows that end now. Nothing is logged after now, so
+  their reading changes only for rows logged ahead of the check (a source's clock).
+  **One addition is removed.** The lookup used to add the address of a used row logged outside the
+  hour (`sessions.srcmac_addresses_within`). That addition is gone, because every row a lookup uses
+  overlaps the hour: `lookup.tolerance_seconds` is at most 3600, and the guard's window is ±1 hour.
+  Keeping it would have counted such a row's address twice.
+  **The plan (deviation from the brief's "keep the plan on an index").** The plan is held to its
+  time bound instead: it reads only the partitions or chunks of the UTC days of
+  `[T − 1 h, T + 1 h + max_session_seconds]`, each scan with both bounds. No index holds `srcmac`
+  (D10). An index on `(srcmac, time)` would cost every ingested `fg_traffic` row an entry and would
+  not spare the read:
+  - nearly every row of those days is inside the bound;
+  - the candidates' rows lie on every page of it.
+
+  On TimescaleDB, chunk exclusion bounds the read the same way. Compressed chunks (segmented by
+  `source`) are decompressed over the bound, as the session probes' scan already does.
+  **Measured** (plain PostgreSQL, the traffic site, 1 M rows a day, 100 candidates and 67 MACs): a
+  parallel sequential scan of the two day partitions, **0.157 s** against the guard's 1 s. The 2 h
+  read before #96 took 0.044 s.
+  **Tests:**
+  - `worker/tests/test_trust.py` `test_srcmac_ip_counts_sessions_that_overlap_the_window`. It
+    counts a session that started in the window and was logged after it. It does not count a
+    session that started after the window, one that ended before it, one logged past the scan, or
+    one logged after the window without a duration.
+  - `worker/tests/test_lookup_srcmac.py`
+    `test_a_long_session_of_another_address_that_overlaps_the_hour_makes_the_mac_shared`.
+  - `worker/tests/test_alerts_lease.py`
+    `test_a_srcmac_session_logged_ahead_of_the_check_still_counts`.
+  - The perf guard `test_the_srcmac_guard_counts_two_hours_fast`: the call's longest session, the
+    plan's scans limited to the window's UTC days, and both bounds in the plan.
+
 ## Deviations — W5-H (2026-11-03)
 
 - **W5-H-1: the first line view of an xz file decompresses more than one stream.** §5.4 says
@@ -2299,6 +2539,24 @@ All Wave 5 questions are answered (2026-11-02).
   `test_a_deletion_records_token_is_judged_by_the_manifest_that_lists_it`
   (`test_renewal_evidence.py`) runs each through the builder's choice of roots, the standalone
   verifier on the vault and on the package (built, or refused by the self-check).
+- **W5-A-20: retention deletes in batches (#195, the manager's decision; the owner asked about
+  stamp usage on 2026-11-05).** One deletion record a day would double the credit use once the
+  vault passes `retention.days` (about 365 extra stamps a year). The `Retention` task stays daily,
+  but a run deletes only once the oldest expired day has been expired `retention.batch_days` days
+  (new key, `config.RetentionConfig`, default 30, 1–180; `retention.due_day`: that day plus
+  `retention.days + batch_days`, so 1 deletes a day on the day it expires, as before), and then
+  every expired day under one record, one stamp; about 12 records a year. Any other run does
+  nothing and writes nothing (`RetentionResult.due` names the day); a failed run deletes nothing
+  and the next one retries. 180 is KVKK's six-month ceiling of periodic destruction (sahada
+  doğrula: legal review, not a legal claim). Unchanged: the 730-day floor, the re-verification,
+  the record format, the chain anchor, the next manifest listing the record, the `.part` and
+  verify-before-rename rules, and an unfinished record of an interrupted run (finished first,
+  whatever the batch). The key is in `arcilogger.toml` only, not on the settings page. Tests:
+  `test_a_batch_is_due_once_its_oldest_day_has_been_expired_batch_days`,
+  `test_a_day_expired_fewer_than_batch_days_ago_is_not_deleted`,
+  `test_a_due_batch_deletes_every_expired_day_under_one_stamp`,
+  `test_a_failed_batch_deletes_nothing_and_the_next_run_retries` (`core/tests/test_retention.py`)
+  and `test_retention_batch_days_outside_1_to_180_is_refused` (`core/tests/test_config.py`).
 
 ## Deviations — W5-E (2026-11-04)
 
@@ -3255,6 +3513,150 @@ line is W5-E-10, and what it amends in detail:
     later that the bound no longer holds, or a bound that no longer follows from the readings,
     fails at once. When #185 makes the MAC branch cheaper, the readings are taken again and the
     Windows bound goes back to 0.2 s.
+
+## Deviations — #136 (2026-11-05)
+
+- **#136-1: `xz-unsupported` is a failure (`fail`, HATA), and the file is still checked.** A
+  Python built without `lzma` cannot decompress an `.xz` file, so the deep content check of that
+  file, and an extract taken from it, are not done. The verifier reports `xz-unsupported` for each
+  such file (where: its day) and extract (where: "alıntı") instead of `file-content-mismatch` or
+  `extract-mismatch`. Its text says that the check could not be done, not that the file was
+  changed. The level is `fail` because a check the package relies on was not done, so the
+  package is not verified (like `root-none`). The stored file's SHA-256 is still compared with
+  the manifest (`file-ok`), and gzip days and their extracts verify as before.
+  `VERIFIER_VERSION` is "9" (#177 took "8", W5-A-19). The case is in `sealed_format_cases.py`,
+  run with `lzma` taken away in-process. `test_sealed_formats.py` also runs `verify.py` as a
+  script with `lzma` and `_lzma` blocked, and covers an extract from an xz day.
+- **#136-2: only a stamped manifest protects a file from `compress_deterministic`.**
+  - **The refusal:** the sealer refuses with a TR/EN `SealError` (not retryable, so the alert is
+    critical) when the same day's file in the other format is locked, or when a manifest of its
+    folder with its time stamp beside it names it. A stamped manifest that cannot be read
+    protects every file of the folder.
+  - **The narrowing:** a manifest without a time stamp does not protect the file. It belongs to
+    the same failed attempt (the stamp did not come back, e.g. the TSA was down), and the retry
+    rewrites it. Taken literally, "a manifest names it" would block that retry for good after a
+    `seal.compression` change.
+- **#136-3: the guide's wording.**
+  - **Which sentence:** the issue's "§2" is read as item 2 ("Mühürleme") of §1 of
+    `docs/DENETCI-KILAVUZU.md`, where "only the line's stream" stands. §2 (the retention table)
+    does not mention it.
+  - **The Python commands:** the one-liner that opens xz files is dropped (TR §5 "Mühürlü
+    dosyaları açmak", EN "Sealed file formats"). The guide now says to run C2 first, or to use
+    7-Zip, `xz -dc` or `verify.py`.
+  - **Not changed:** the `range_sha256` commands of §9 (TR and EN). They compare their output
+    with a stored hash, so a shortened output fails and is never read as a match (question on
+    #136).
+- **#136-4: the memory ceiling is documented, not capped.** `seal.xz_preset` keeps 0–9 (the
+  manager's preference on #136). `docs/DATA-MODEL.md` "Sealed files" gives the measured memory
+  and the estimate for 8 threads. The H5 wording there now says "a fifth of half the limit, or a
+  tenth of PT2H". The extra decompression that verifies each sealed file was measured on a 1 M
+  line day: 4.4 s for xz 6 at 148 MB/s, about 35 s for a 5 GB day. The issue estimated about a
+  minute.
+
+## Deviations — W5-K (2026-11-05)
+
+- **W5-K-1: the method names.** K2 names `UsageSettings.period(moment)`. The code has
+  `UsageSettings.part_of(moment)` (one minute) and `day_parts(day)` (every minute of a site day),
+  with the type `Part` and `PARTS = ("work", "break", "off")` in
+  `worker/src/arcilogger_worker/usage/config.py`. The reason: `query.Period` is already the date
+  range of every usage answer, and a second "period" in the same module would read as a date range.
+  The database column is `period`, as K3 says. `is_off_hours()` stays: a break is not off hours.
+- **W5-K-2: the `/usage` exports always have the break column.** "Molada aktif (sn)" follows
+  "Mesai dışı aktif (sn)", and "Mola süresi (sn, tahmini)" follows "Mesai dışı süre", also
+  without breaks (then 0). A CSV whose columns come and go with a setting breaks the tools that
+  read it. K5's conditional row and column stay as written for the scheduled reports (PDF, HTML,
+  Excel), which a person reads.
+- **W5-K-3: the report data has a top-level `breaks` flag.** It is true when the work hours had a
+  break on a work day of the report (`UsageSettings.has_breaks`), and the documents show the break
+  row and column by it (K5). The change is additive; schema 1 stays.
+- **W5-K-4: the rollback list.** `0023_usage_period` is in the installer's `$LosslessDowngrades`
+  (#164's test requires every revision above the floor to be judged). Its downgrade first deletes
+  the days that have break rows from the seven rollup tables and `usage_days`: usage analytics,
+  derived data. The older program rebuilds by itself only the last `usage.auto_rebuild_days`
+  days (default 7) of them; an older day inside the 30-day window stays empty until a rebuild is
+  requested, and a day before the window also needs its logs reloaded from the archive
+  (`docs/KULLANIM.md` §2.5). Folding the break rows into the work rows instead was weighed and
+  left out: sessions across a break and the JSON columns (`hosts`, `top_domains`, timelines)
+  cannot be merged exactly in SQL, so the older program's own rebuild is the honest source. Raw
+  logs, log rows, leases and the audit log keep every row.
+- **W5-K-5: files outside the ownership of §6.6.**
+  - `deploy/windows/installer/Install-Arcilogger.ps1`: only the W5-K-4 list entry.
+  - `db/tests/test_cli_downgrade.py`, `db/tests/test_migrations.py`: the head.
+  - Three web places that build a `Metrics` object, so `npm run check` stays green with the new
+    required field until W5-P: `web/src/pages/usage/usage-format.ts` (`sumMetrics`), its test and
+    `web/e2e/mock-usage.ts`.
+- **W5-K-6: the upgrade alone rebuilds nothing.** A work-hours value without breaks and `by_day`
+  keeps the Wave 4 fingerprint (`[days, start, end]`), so an upgrade does not rebuild the recent
+  days; only a changed setting does (test `test_breaks_and_per_day_hours_split_the_day_in_three_parts`).
+- **W5-K-7: the subject answer carries the day's breaks.** P2 shades break bands on the person
+  timeline, and the usage roles cannot read `/settings`. `GET /usage/subjects/{key}` therefore
+  has `breaks` (`[{start, end}]` instants, one-day periods only, like `timeline`; empty
+  otherwise). They come from `usage_days.details.breaks`, the minute runs the rollup itself
+  counted as break, so the bands match the figures even after the setting changed. Additive.
+- **W5-K-8: `0023_usage_period` changes the column in place.** `ALTER COLUMN off_hours TYPE text
+  USING …`, then `RENAME COLUMN … TO period`: one rewrite per table with its indexes and no dead
+  rows, instead of a new column, a full-table `UPDATE` and a new primary key (review of #206).
+  The primary keys keep their names and column order; the downgrade is the mirror image.
+
+## Deviations — W5-L (2026-11-05)
+
+- **W5-L-1: one pull request with W5-K.** The manager's session can push only one branch, and
+  W5-L changes the files W5-K changes. W5-K and W5-L therefore come as one pull request (#206),
+  not two. #199 and #200 both close with it.
+- **W5-L-2: `data_until` is the existing `computed_until`.** Every usage answer has carried
+  `computed_until`, "how far the rollups have processed traffic", since group 2. L3's `data_until`
+  is that field, so the answers add only `updated_at`: the newest `computed_at` of the period's
+  days. The web types get it (types only).
+- **W5-L-3: the back-off measures from the last refresh's start.** `usage_days` keeps the start
+  of the last rollup (`computed_at`) and its `duration_ms`, measured until the day's rows are
+  written (the commit after it is not included; the job's log shows the same figure). A refresh
+  starts when `now ≥ computed_at + 3 × duration_ms`, which is "twice the duration after it
+  ended" (L2); no `finished_at` is stored. A `computed_at` later than now (the clock went back, or a rebuild ran
+  with a later moment) never holds today back.
+- **W5-L-4: measured** (`worker/tests/test_usage_performance.py`, the same container, plain
+  PostgreSQL 16; seconds for the full-day rollup, "again" in brackets):
+
+  | Load | wave-5 | W5-K/L |
+  |---|---|---|
+  | default | 1.77 (1.29) | 1.99 (1.55); another test ran at the same time |
+  | heavy | 6.30 (7.10) | 6.09 (6.90) |
+
+  Both loads refresh every minute. The specification's busy day (a rollup of about a minute late
+  in the day) refreshes about every 3 minutes.
+
+## Deviations — W5-P parts P1 and P2 (2026-11-06)
+
+The manager took P1 and P2 (#203, comment of 2026-11-05); P3 and P4 stay with Gülşah.
+
+- **W5-P-1: the general hours are those most work days share.** The editor is a week table, so
+  the general `start`/`end`/`breaks` of the saved value are the hours that most work days have
+  (on a tie, the earliest day's). Every other work day gets a `by_day` entry; a day equal to the
+  general hours gets none (P1). A stored value reads back unchanged, and an untouched editor
+  saves nothing.
+- **W5-P-2: the browser names the day of a refusal.** It checks the server's rules (K1) before
+  saving, per day: "Salı: her mola en az 5 dakika olmalı." The server's own refusal
+  (`setting_work_hours_breaks`, `setting_work_hours_by_day`) is shown at the setting as before.
+  It is captured as `settings.json` `errors.setting_invalid_work_hours`.
+- **W5-P-3: "Mola" appears when the answer holds break time.** The usage roles cannot read the
+  work hours, so the page cannot tell whether breaks are configured. The "Mola" column (person,
+  device and department tables), tile and company card are shown when a row or the total has
+  `break_active_seconds > 0`, as the reports do (K5). The filter always offers "Mola". The
+  exports always have the column (W5-K-2).
+- **W5-P-4: the timeline's bands come from the day's rollup** (`SubjectDetail.breaks`, W5-K-7).
+  They are shaded behind the day's segments and named in the legend ("Mola (12:00–13:00)").
+  The shared bar `web/src/components/ui/timeline.tsx` gets an optional `bands` property for
+  them; it is outside §6.6's list.
+- **W5-P-5: "Son güncelleme" only for today.** "Son güncelleme 14:36 (veriler 14:35'e kadar)"
+  is shown when the period ends today. An earlier day keeps "Veriler … sonuna kadar işlendi":
+  its last update says nothing new.
+- **W5-P-6: the e2e usage mock has a break hour** (`UsageOptions.breakHour`), so the generated
+  days split one hour of the work hours as the engine does. Its exports have the API's break
+  columns (W5-K-2).
+- **W5-P-7: files outside §6.6's list:**
+  - `web/src/components/ui/timeline.tsx` (W5-P-4);
+  - `web/src/pages/dashboard/dashboard-page.test.tsx`: the Panel's usage refresh, now
+    `USAGE_POLL_MS` = 60 s;
+  - `web/scripts/capture_api_samples.py`: the captured refusal of W5-P-2.
 
 ## Deviations — W5-T (2026-11-06)
 

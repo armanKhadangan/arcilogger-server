@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import time
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from typing import Any, Final, cast
@@ -82,6 +83,8 @@ class WriteReport:
     status: str
     rows: dict[str, int]
     computed_until: datetime | None
+    #: Milliseconds from ``started`` until the rollup was written (``None`` without ``started``).
+    duration_ms: int | None = None
 
     def details(self) -> dict[str, Any]:
         return {
@@ -101,9 +104,13 @@ def write_day(
     status: str,
     inputs: str,
     now: datetime,
-    duration_ms: int | None = None,
+    started: float | None = None,
 ) -> WriteReport:
-    """Replace the rollup of ``result.day`` (the caller holds :func:`lock_day` and commits)."""
+    """Replace the rollup of ``result.day`` (the caller holds :func:`lock_day` and commits).
+
+    ``started`` (``time.perf_counter()`` when the computation began) stores the rollup's duration
+    with the day, up to the moment its tables are written: ``usage.today`` backs off by it (W5-L).
+    """
     day = result.day
     rows: dict[str, int] = {}
     for model, name in _TABLES:
@@ -114,6 +121,7 @@ def write_day(
             session.execute(insert(table), values[start : start + BATCH])
         rows[name] = len(values)
     details = {**result.stats, "rows": rows}
+    duration_ms = None if started is None else int((time.perf_counter() - started) * 1000)
     if duration_ms is not None:
         details["duration_ms"] = duration_ms
     # Final: the whole day. Partial (today): what was loaded up to now.
@@ -146,7 +154,7 @@ def write_day(
         )
     )
     _categories(session, result)
-    return WriteReport(day, status, rows, computed_until)
+    return WriteReport(day, status, rows, computed_until, duration_ms)
 
 
 def _categories(session: Session, result: DayResult) -> None:

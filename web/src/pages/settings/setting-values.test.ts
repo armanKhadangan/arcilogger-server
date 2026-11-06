@@ -1,6 +1,7 @@
 import type { SettingOut } from '@/lib/settings-types';
 
 import {
+  dayParts,
   fromDraft,
   sameValue,
   settingControlId,
@@ -8,6 +9,8 @@ import {
   validHoliday,
   valueText,
   withServerBounds,
+  type WorkDayDraft,
+  type WorkWeek,
 } from './setting-values';
 import { integerError, validateClock, validateHost, validateSiteName } from './settings-validation';
 
@@ -83,26 +86,172 @@ describe('database settings as drafts and back (contract 2.13)', () => {
     });
   });
 
-  it('work hours: days, times in order', () => {
+  it('work hours: a week of rows, back to the general hours and by_day (W5 P1)', () => {
     const hours = setting({
       key: 'usage.work_hours',
       type: 'object',
       value: { days: [1, 2, 3, 4, 5], start: '08:00', end: '18:00' },
     });
-    const draft = toDraft(hours);
-    expect(draft).toEqual({ days: [1, 2, 3, 4, 5], start: '08:00', end: '18:00' });
-    expect(fromDraft(hours, { days: [5, 1, 1], start: '08:30', end: '17:00' })).toEqual({
-      value: { days: [1, 5], start: '08:30', end: '17:00' },
+    const draft = toDraft(hours) as WorkWeek;
+    expect(draft.week).toHaveLength(7);
+    expect(draft.week[0]).toEqual({ work: true, start: '08:00', end: '18:00', breaks: [] });
+    // A day off shows the general hours, ready for when it becomes a work day.
+    expect(draft.week[5]).toEqual({ work: false, start: '08:00', end: '18:00', breaks: [] });
+    // Unchanged: the stored three fields come back as they were.
+    expect(fromDraft(hours, draft)).toEqual({
+      value: { days: [1, 2, 3, 4, 5], start: '08:00', end: '18:00' },
     });
-    expect(fromDraft(hours, { days: [], start: '08:00', end: '18:00' })).toEqual({
+  });
+
+  it('work hours: the hours most days share are the general ones, the rest by_day', () => {
+    const hours = setting({
+      key: 'usage.work_hours',
+      type: 'object',
+      value: {
+        days: [1, 2, 3, 4, 5, 6],
+        start: '08:00',
+        end: '18:00',
+        breaks: [{ start: '12:30', end: '13:30' }],
+        by_day: { '6': { start: '09:00', end: '13:00' } },
+      },
+    });
+    const draft = toDraft(hours) as WorkWeek;
+    expect(draft.week[0]?.breaks).toEqual([{ start: '12:30', end: '13:30' }]);
+    // A by_day entry without breaks has none (the general ones are not inherited).
+    expect(draft.week[5]).toEqual({ work: true, start: '09:00', end: '13:00', breaks: [] });
+    expect(fromDraft(hours, draft)).toEqual({ value: hours.value });
+    // Friday ends at 15:00: its own entry; the breaks are sorted on save.
+    const friday = {
+      work: true,
+      start: '08:00',
+      end: '15:00',
+      breaks: [
+        { start: '12:30', end: '13:30' },
+        { start: '10:00', end: '10:15' },
+      ],
+    };
+    const edited = { week: draft.week.map((row, index) => (index === 4 ? friday : row)) };
+    expect(fromDraft(hours, edited)).toEqual({
+      value: {
+        days: [1, 2, 3, 4, 5, 6],
+        start: '08:00',
+        end: '18:00',
+        breaks: [{ start: '12:30', end: '13:30' }],
+        by_day: {
+          '5': {
+            start: '08:00',
+            end: '15:00',
+            breaks: [
+              { start: '10:00', end: '10:15' },
+              { start: '12:30', end: '13:30' },
+            ],
+          },
+          '6': { start: '09:00', end: '13:00' },
+        },
+      },
+    });
+    // A day put back to the general hours loses its by_day entry.
+    const back = {
+      week: draft.week.map((row, index) =>
+        index === 5
+          ? { ...row, start: '08:00', end: '18:00', breaks: [{ start: '12:30', end: '13:30' }] }
+          : row,
+      ),
+    };
+    expect(fromDraft(hours, back)).toEqual({
+      value: {
+        days: [1, 2, 3, 4, 5, 6],
+        start: '08:00',
+        end: '18:00',
+        breaks: [{ start: '12:30', end: '13:30' }],
+      },
+    });
+  });
+
+  it('work hours: the checks of the server, naming the day', () => {
+    const hours = setting({
+      key: 'usage.work_hours',
+      type: 'object',
+      value: { days: [1], start: '08:00', end: '18:00' },
+    });
+    const week = (monday: Partial<WorkDayDraft>): WorkWeek => ({
+      week: [1, 2, 3, 4, 5, 6, 7].map((day) => ({
+        work: day === 1,
+        start: '08:00',
+        end: '18:00',
+        breaks: [],
+        ...(day === 1 ? monday : {}),
+      })),
+    });
+    const day = { day: 1 };
+    expect(fromDraft(hours, week({ work: false }))).toEqual({
       error: 'settings.application.errors.workDays',
     });
-    expect(fromDraft(hours, { days: [1], start: '8:00', end: '18:00' })).toEqual({
+    expect(fromDraft(hours, week({ start: '8:00' }))).toEqual({
       error: 'settings.application.errors.workTime',
+      params: day,
     });
-    expect(fromDraft(hours, { days: [1], start: '18:00', end: '08:00' })).toEqual({
+    expect(fromDraft(hours, week({ start: '18:00', end: '08:00' }))).toEqual({
       error: 'settings.application.errors.workOrder',
+      params: day,
     });
+    const pause = (start: string, end: string) => ({ start, end });
+    expect(fromDraft(hours, week({ breaks: [pause('12:00', '')] }))).toEqual({
+      error: 'settings.application.errors.breakTime',
+      params: day,
+    });
+    expect(fromDraft(hours, week({ breaks: [pause('12:00', '12:04')] }))).toEqual({
+      error: 'settings.application.errors.breakShort',
+      params: { day: 1, min: 5 },
+    });
+    expect(fromDraft(hours, week({ breaks: [pause('07:30', '08:30')] }))).toEqual({
+      error: 'settings.application.errors.breakOutside',
+      params: day,
+    });
+    expect(
+      fromDraft(hours, week({ breaks: [pause('12:00', '13:00'), pause('12:30', '13:30')] })),
+    ).toEqual({ error: 'settings.application.errors.breakOverlap', params: day });
+    // Touching breaks are allowed, as on the server; a seventh is refused.
+    expect(
+      fromDraft(hours, week({ breaks: [pause('12:00', '12:30'), pause('12:30', '13:00')] })),
+    ).toEqual({
+      value: {
+        days: [1],
+        start: '08:00',
+        end: '18:00',
+        breaks: [pause('12:00', '12:30'), pause('12:30', '13:00')],
+      },
+    });
+    const seven = Array.from({ length: 7 }, (_, at) => pause(`1${at}:00`, `1${at}:10`));
+    expect(fromDraft(hours, week({ breaks: seven }))).toEqual({
+      error: 'settings.application.errors.breakCount',
+      params: { day: 1, max: 6 },
+    });
+  });
+
+  it('work hours: the strip of a day and the one-line text', () => {
+    const row = {
+      work: true,
+      start: '08:00',
+      end: '18:00',
+      breaks: [{ start: '12:00', end: '13:00' }],
+    };
+    expect(dayParts(row)).toEqual([
+      { start: 480, end: 720, part: 'work' },
+      { start: 720, end: 780, part: 'break' },
+      { start: 780, end: 1080, part: 'work' },
+    ]);
+    expect(dayParts({ ...row, work: false })).toEqual([]);
+    expect(dayParts({ ...row, end: '07:00' })).toEqual([]);
+    expect(
+      valueText({
+        days: [1, 2, 3, 4, 5, 6],
+        start: '08:00',
+        end: '18:00',
+        breaks: [{ start: '12:00', end: '13:00' }],
+        by_day: { '6': { start: '09:00', end: '13:00' } },
+      }),
+    ).toBe('1,2,3,4,5,6 08:00–18:00 (12:00–13:00); 6: 09:00–13:00');
   });
 
   it('holidays: MM-DD every year or YYYY-MM-DD once, real dates only, sorted', () => {

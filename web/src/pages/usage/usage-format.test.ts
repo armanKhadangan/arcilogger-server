@@ -28,6 +28,7 @@ const NONE: Metrics = {
   sessions: 0,
   blocked: 0,
   off_hours_active_seconds: 0,
+  break_active_seconds: 0,
   first_activity: null,
   last_activity: null,
 };
@@ -91,6 +92,20 @@ describe('texts', () => {
       'Data processed up to the end of 12.10.2026',
     );
     expect(computedUntilText(null, '2026-10-13', tr)).toBe('Kullanım verileri henüz hesaplanmadı');
+  });
+
+  it('names the last update of today (W5 L3, P2)', () => {
+    const updated = '2026-10-13T11:36:12Z'; // 14:36 in Türkiye
+    expect(computedUntilText('2026-10-13T11:35:00Z', '2026-10-13', tr, updated)).toBe(
+      "Son güncelleme 14:36 (veriler 14:35'e kadar)",
+    );
+    expect(computedUntilText('2026-10-13T11:30:00Z', '2026-10-13', en, updated)).toBe(
+      'Last update 14:36 (data up to 14:30)',
+    );
+    // An earlier day keeps its own text: its last update says nothing new.
+    expect(computedUntilText('2026-10-12T20:55:00Z', '2026-10-13', tr, updated)).toBe(
+      "Veriler 12.10.2026 23:55'e kadar işlendi",
+    );
   });
 
   it('formats shares, hours and addresses', () => {

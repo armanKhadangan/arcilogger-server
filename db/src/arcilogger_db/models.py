@@ -101,7 +101,10 @@ USAGE_SUBJECT_KINDS: Final = ("person", "device", "ip")
 #: How a session's destination was named (spec 10.2): a host name (web filter, application
 #: control / SSL, DNS answer), a FortiGuard ISDB service (``dstinetsvc``) or only the address.
 USAGE_DOMAIN_KINDS: Final = ("domain", "service", "ip")
-#: ``partial``: today (refreshed every 5 minutes); ``final``: rebuilt after the day ended.
+#: The part of the day a usage row covers (contract W5 §6 K2, revision ``0023_usage_period``):
+#: work hours, a break inside them ("mola"), or off hours (holidays and days off included).
+USAGE_PARTS: Final = ("work", "break", "off")
+#: ``partial``: today (refreshed every minute, W5-L); ``final``: rebuilt after the day ended.
 USAGE_DAY_STATUSES: Final = ("partial", "final")
 USAGE_BLOCKED_SOURCES: Final = ("web", "dns", "app")
 USAGE_REBUILD_STATUSES: Final = ("queued", "running", "done", "failed")
@@ -1404,12 +1407,13 @@ class AlertDelivery(Base):
 #
 # Derived data, rebuilt per site day by ``arcilogger_worker.usage`` (a day is deleted and written
 # again in one transaction). Every table is keyed by the site day (Europe/Istanbul) and the
-# subject (``person:<id>``, ``device:<mac>``, ``ip:<address>``) and split by ``off_hours`` (the
-# part of the day outside the work hours setting, holidays included), so "work hours" and "off
-# hours" views are a filter and "all" is the sum of both rows. Names, departments and categories
-# are joined when read (``persons``, ``vlans``, ``domain_categories``): renaming a person or
-# moving them to another department needs no rebuild. Plain tables, not time series: they hold
-# per subject and day aggregates (ADR-0011 sizing), and retention deletes whole days.
+# subject (``person:<id>``, ``device:<mac>``, ``ip:<address>``) and split by ``period``
+# (:data:`USAGE_PARTS`: the work hours, their breaks, and the rest of the day with the holidays;
+# revision ``0023_usage_period``, before it a boolean ``off_hours``), so "work hours", "breaks"
+# and "off hours" views are a filter and "all" is the sum of the rows. Names, departments and
+# categories are joined when read (``persons``, ``vlans``, ``domain_categories``): renaming a
+# person or moving them to another department needs no rebuild. Plain tables, not time series:
+# they hold per subject and day aggregates (ADR-0011 sizing), and retention deletes whole days.
 
 
 def _seconds() -> Mapped[int]:
@@ -1449,11 +1453,12 @@ class UsageDay(Base):
 
 
 class UsageDaily(Base):
-    """Metrics of one subject on one site day (part: work hours / off hours)."""
+    """Metrics of one subject on one site day and part (work hours, breaks, off hours)."""
 
     __tablename__ = "usage_daily"
     __table_args__ = (
-        PrimaryKeyConstraint("day", "subject", "off_hours", name="pk_usage_daily"),
+        PrimaryKeyConstraint("day", "subject", "period", name="pk_usage_daily"),
+        CheckConstraint(_in("period", USAGE_PARTS), name="period"),
         CheckConstraint(_in("kind", USAGE_SUBJECT_KINDS), name="kind"),
         Index("ix_usage_daily_subject_day", "subject", "day"),
         {"comment": "Usage per subject and day: online/active time, bytes, sessions, timeline."},
@@ -1462,7 +1467,8 @@ class UsageDaily(Base):
     day: Mapped[date] = mapped_column(Date, nullable=False)
     #: ``person:<id>``, ``device:<mac>`` or ``ip:<address>``.
     subject: Mapped[str] = mapped_column(Text, nullable=False)
-    off_hours: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    #: :data:`USAGE_PARTS`.
+    period: Mapped[str] = mapped_column(Text, nullable=False)
     kind: Mapped[str] = mapped_column(Text, nullable=False)
     person_id: Mapped[int | None] = mapped_column(BigInteger)
     mac: Mapped[str | None] = mapped_column(MACADDR)
@@ -1491,7 +1497,8 @@ class UsageDeviceDaily(Base):
 
     __tablename__ = "usage_device_daily"
     __table_args__ = (
-        PrimaryKeyConstraint("day", "mac", "subject", "off_hours", name="pk_usage_device_daily"),
+        PrimaryKeyConstraint("day", "mac", "subject", "period", name="pk_usage_device_daily"),
+        CheckConstraint(_in("period", USAGE_PARTS), name="period"),
         Index("ix_usage_device_daily_subject_day", "subject", "day"),
         {"comment": "Usage per device (MAC), subject and day (per-device breakdown)."},
     )
@@ -1499,7 +1506,8 @@ class UsageDeviceDaily(Base):
     day: Mapped[date] = mapped_column(Date, nullable=False)
     mac: Mapped[str] = mapped_column(MACADDR, nullable=False)
     subject: Mapped[str] = mapped_column(Text, nullable=False)
-    off_hours: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    #: :data:`USAGE_PARTS`.
+    period: Mapped[str] = mapped_column(Text, nullable=False)
     #: Address with the most online minutes, and its VLAN.
     ip: Mapped[str | None] = mapped_column(INET)
     vlan: Mapped[int | None] = mapped_column(Integer)
@@ -1523,7 +1531,8 @@ class UsageDomainDaily(Base):
 
     __tablename__ = "usage_domain_daily"
     __table_args__ = (
-        PrimaryKeyConstraint("day", "subject", "domain", "off_hours", name="pk_usage_domain_daily"),
+        PrimaryKeyConstraint("day", "subject", "domain", "period", name="pk_usage_domain_daily"),
+        CheckConstraint(_in("period", USAGE_PARTS), name="period"),
         CheckConstraint(_in("kind", USAGE_DOMAIN_KINDS), name="kind"),
         Index("ix_usage_domain_daily_domain_day", "domain", "day"),
         Index("ix_usage_domain_daily_subject_day", "subject", "day"),
@@ -1534,7 +1543,8 @@ class UsageDomainDaily(Base):
     subject: Mapped[str] = mapped_column(Text, nullable=False)
     #: Registrable domain (``youtube.com``), FortiGuard service label or IP address.
     domain: Mapped[str] = mapped_column(Text, nullable=False)
-    off_hours: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    #: :data:`USAGE_PARTS`.
+    period: Mapped[str] = mapped_column(Text, nullable=False)
     kind: Mapped[str] = mapped_column(Text, nullable=False)
     #: Share of the active minutes (60 s split by bytes): the per-site times add up to the
     #: active time.
@@ -1557,14 +1567,16 @@ class UsageAppDaily(Base):
 
     __tablename__ = "usage_app_daily"
     __table_args__ = (
-        PrimaryKeyConstraint("day", "subject", "app", "off_hours", name="pk_usage_app_daily"),
+        PrimaryKeyConstraint("day", "subject", "app", "period", name="pk_usage_app_daily"),
+        CheckConstraint(_in("period", USAGE_PARTS), name="period"),
         {"comment": "Usage per subject, application and day."},
     )
 
     day: Mapped[date] = mapped_column(Date, nullable=False)
     subject: Mapped[str] = mapped_column(Text, nullable=False)
     app: Mapped[str] = mapped_column(Text, nullable=False)
-    off_hours: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    #: :data:`USAGE_PARTS`.
+    period: Mapped[str] = mapped_column(Text, nullable=False)
     appcat: Mapped[str | None] = mapped_column(Text)
     seconds: Mapped[float] = mapped_column(DOUBLE_PRECISION, nullable=False, server_default="0")
     bytes: Mapped[int] = mapped_column(BigInteger, nullable=False, server_default="0")
@@ -1576,7 +1588,8 @@ class UsageHourly(Base):
 
     __tablename__ = "usage_hourly"
     __table_args__ = (
-        PrimaryKeyConstraint("hour", "subject", "off_hours", name="pk_usage_hourly"),
+        PrimaryKeyConstraint("hour", "subject", "period", name="pk_usage_hourly"),
+        CheckConstraint(_in("period", USAGE_PARTS), name="period"),
         Index("ix_usage_hourly_day", "day"),
         Index("ix_usage_hourly_subject_hour", "subject", "hour"),
         {"comment": "Usage per subject and hour (online/active time, bytes, top domain)."},
@@ -1585,7 +1598,8 @@ class UsageHourly(Base):
     #: Start of the hour.
     hour: Mapped[datetime] = mapped_column(TZ, nullable=False)
     subject: Mapped[str] = mapped_column(Text, nullable=False)
-    off_hours: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    #: :data:`USAGE_PARTS`.
+    period: Mapped[str] = mapped_column(Text, nullable=False)
     day: Mapped[date] = mapped_column(Date, nullable=False)
     online_seconds: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
     active_seconds: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
@@ -1601,6 +1615,7 @@ class UsageBlocked(Base):
     __tablename__ = "usage_blocked"
     __table_args__ = (
         CheckConstraint(_in("source", USAGE_BLOCKED_SOURCES), name="source"),
+        CheckConstraint(_in("period", USAGE_PARTS), name="period"),
         Index("ix_usage_blocked_day_time", "day", "time"),
         Index("ix_usage_blocked_subject_day", "subject", "day"),
         {"comment": "Blocked attempts per subject (web, DNS, application control)."},
@@ -1610,7 +1625,8 @@ class UsageBlocked(Base):
     day: Mapped[date] = mapped_column(Date, nullable=False)
     time: Mapped[datetime] = mapped_column(TZ, nullable=False)
     subject: Mapped[str] = mapped_column(Text, nullable=False)
-    off_hours: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    #: :data:`USAGE_PARTS`.
+    period: Mapped[str] = mapped_column(Text, nullable=False)
     #: The device (lease MAC) of the attempt; NULL for a bare address.
     mac: Mapped[str | None] = mapped_column(MACADDR)
     source: Mapped[str] = mapped_column(Text, nullable=False)
@@ -1627,6 +1643,7 @@ class UsageUrl(Base):
 
     __tablename__ = "usage_urls"
     __table_args__ = (
+        CheckConstraint(_in("period", USAGE_PARTS), name="period"),
         Index("ix_usage_urls_subject_day", "subject", "day"),
         Index("ix_usage_urls_day", "day"),
         {"comment": "URLs per subject and day from the web filter log (newest kept)."},
@@ -1635,7 +1652,8 @@ class UsageUrl(Base):
     id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
     day: Mapped[date] = mapped_column(Date, nullable=False)
     subject: Mapped[str] = mapped_column(Text, nullable=False)
-    off_hours: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    #: :data:`USAGE_PARTS`.
+    period: Mapped[str] = mapped_column(Text, nullable=False)
     url: Mapped[str] = mapped_column(Text, nullable=False)
     hostname: Mapped[str | None] = mapped_column(Text)
     domain: Mapped[str | None] = mapped_column(Text)

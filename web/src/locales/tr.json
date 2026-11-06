@@ -479,16 +479,36 @@
       "addServer": "Sunucu ekle",
       "errors": {
         "workDays": "En az bir mesai günü seçin.",
-        "workTime": "Saatleri SS:DD biçiminde girin (ör. 08:00).",
-        "workOrder": "Mesai başlangıcı bitişten önce olmalı.",
+        "workTime": "$t(settings.application.weekdays.{{day}}): saatleri SS:DD biçiminde girin (ör. 08:00).",
+        "workOrder": "$t(settings.application.weekdays.{{day}}): mesai başlangıcı bitişten önce olmalı.",
         "holiday": "Tarihi AA-GG ya da YYYY-AA-GG biçiminde girin.",
         "totpRoles": "Yönetici ve denetçi rolleri için iki adımlı doğrulama zorunludur.",
         "serverName": "DHCP sunucusunun adı boş olamaz.",
         "serverSeconds": "Her DHCP sunucusu için {{min}} ile {{max}} saniye arasında bir kira süresi gerekir.",
         "serverSecondsMin": "Kira süresi en az {{min}} saniye olmalı.",
         "integerList": "Her satıra 0 ya da daha büyük bir tam sayı yazın.",
-        "object": "Geçerli bir JSON nesnesi girin."
-      }
+        "object": "Geçerli bir JSON nesnesi girin.",
+        "breakCount": "$t(settings.application.weekdays.{{day}}): bir günde en çok {{max}} mola olabilir.",
+        "breakTime": "$t(settings.application.weekdays.{{day}}): mola saatlerini SS:DD biçiminde girin (ör. 12:30).",
+        "breakShort": "$t(settings.application.weekdays.{{day}}): her mola en az {{min}} dakika olmalı.",
+        "breakOutside": "$t(settings.application.weekdays.{{day}}): molalar mesai saatleri içinde olmalı.",
+        "breakOverlap": "$t(settings.application.weekdays.{{day}}): molalar birbiriyle çakışmamalı."
+      },
+      "workDay": "Gün",
+      "breaks": "Molalar",
+      "preview": "Önizleme",
+      "applyAll": "Tüm günlere uygula",
+      "applyAllFrom": "{{day}} saatlerini tüm günlere uygula",
+      "dayStart": "{{day}} mesai başlangıcı",
+      "dayEnd": "{{day}} mesai bitişi",
+      "breakStart": "{{day}} {{number}}. mola başlangıcı",
+      "breakEnd": "{{day}} {{number}}. mola bitişi",
+      "removeBreak": "{{day}} {{number}}. molayı kaldır",
+      "addBreak": "Mola ekle",
+      "addBreakFor": "{{day}} için mola ekle",
+      "stripOff": "{{day}}: mesai yok",
+      "stripWork": "{{day}}: mesai {{hours}}, mola yok",
+      "stripBreaks": "{{day}}: mesai {{hours}}, mola {{breaks}}"
     },
     "history": {
       "title": "Değişiklik geçmişi",
@@ -2170,11 +2190,13 @@
       "label": "Saatler",
       "all": "Tüm saatler",
       "work": "Mesai içi",
+      "break": "Mola",
       "off": "Mesai dışı",
-      "hint": "Mesai saatleri sunucu ayarlarından gelir (varsayılan Pazartesi–Cuma 08:00–18:00)."
+      "hint": "Mesai saatleri ve molalar sunucu ayarlarından gelir (Ayarlar → Uygulama ayarları; varsayılan Pazartesi–Cuma 08:00–18:00, molasız)."
     },
     "computed": {
       "today": "Veriler {{time}}{{suffix}} kadar işlendi",
+      "updated": "Son güncelleme {{updated}} (veriler {{time}}{{suffix}} kadar)",
       "other": "Veriler {{date}} {{time}}{{suffix}} kadar işlendi",
       "endOfDay": "Veriler {{date}} sonuna kadar işlendi",
       "none": "Kullanım verileri henüz hesaplanmadı"
@@ -2190,6 +2212,7 @@
       "sessions": "Oturum",
       "blocked": "Engellenen",
       "offHours": "Mesai dışı",
+      "breaks": "Mola",
       "firstLast": "İlk / son etkinlik",
       "firstLastShort": "İlk – son",
       "time": "Süre",
@@ -2206,6 +2229,8 @@
       "perUser": "Kullanıcı başına ort. {{value}}",
       "offHours": "Mesai saatleri dışındaki aktif süre",
       "offHoursShare": "Aktif sürede payı: {{share}}",
+      "breaks": "Mesai içindeki molalarda geçen aktif süre",
+      "breaksShare": "Aktif sürede payı: {{share}}",
       "sessions": "Ayrı bağlantı oturumları",
       "blocked": "Web, DNS ve uygulama filtresi",
       "firstLast": "İlk ve son etkin dakika",

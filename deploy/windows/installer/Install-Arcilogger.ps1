@@ -533,6 +533,13 @@ $DailyPartitionRevision = '0021_db_window'
 # crosses a revision not in $LosslessDowngrades is refused before any change
 # (Get-SchemaRollbackPlan).
 $LosslessDowngrades = @(
+    # Turns the usage rollups' period (work, break, off) back into off_hours (off -> true, else
+    # false); a day with break rows is first deleted from the seven rollup tables and usage_days:
+    # usage analytics, derived data only (raw logs, log rows, leases and the audit log keep every
+    # row). The older program rebuilds by itself only the last usage.auto_rebuild_days days of
+    # them; an older day needs a rebuild request, and a day before the database window its logs
+    # back from the vault first (archive reload; v0023_usage_period.py, KULLANIM.md 2.5).
+    '0023_usage_period',
     # Drops leases.moves, nothing else: the missed moves the lease job recorded, derived data (the
     # FortiGate DHCP raw logs keep the ACKs; the database keeps fg_dhcp rows for its window only).
     # Not rebuilt: a later upgrade brings the column back NULL (no backfill, contract #127), the

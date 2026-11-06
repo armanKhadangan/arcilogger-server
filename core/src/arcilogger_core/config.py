@@ -35,6 +35,11 @@ from pydantic import (
 
 MIN_RETENTION_DAYS = 730  # two years: İnternet Toplu Kullanım Sağlayıcıları Yönetmeliği md. 4/1-b
 DEFAULT_RETENTION_DAYS = 760  # two years plus a margin
+#: Retention deletes in batches (#195): one stamped deletion record for about a month of days,
+#: not one a day. 1 deletes each day as it expires; 180, six months, is the ceiling of KVKK's
+#: periodic destruction (sahada doğrula: legal review, not a legal claim).
+DEFAULT_RETENTION_BATCH_DAYS = 30
+MAX_RETENTION_BATCH_DAYS = 180
 
 KAMUSM_PRODUCTION_HOST = "zd.kamusm.gov.tr"
 KAMUSM_TEST_HOST = "tzd.kamusm.gov.tr"
@@ -265,6 +270,9 @@ class NetworkConfig(_Model):
 class RetentionConfig(_Model):
     enabled: bool = False
     days: int = Field(default=DEFAULT_RETENTION_DAYS, ge=MIN_RETENTION_DAYS)
+    #: A run deletes only once the oldest expired day has been expired this many days, and then
+    #: every expired day in one record (:func:`arcilogger_core.retention.due_day`).
+    batch_days: int = Field(default=DEFAULT_RETENTION_BATCH_DAYS, ge=1, le=MAX_RETENTION_BATCH_DAYS)
 
 
 def replica_target_text(target: Path | str) -> str:

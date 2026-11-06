@@ -27,7 +27,8 @@ export const USAGE_TABS = [
 ] as const;
 export type UsageTab = (typeof USAGE_TABS)[number];
 
-export const HOURS_FILTERS: readonly UsageHours[] = ['all', 'work', 'off'];
+/** Every hour, the work hours without their breaks, the breaks, off hours (W5 §6 K4, P2). */
+export const HOURS_FILTERS: readonly UsageHours[] = ['all', 'work', 'break', 'off'];
 
 export interface DayRange {
   from: string;

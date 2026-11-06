@@ -1,7 +1,11 @@
 """Retention and deletion ("imha") of sealed days (build specification 8.4).
 
 Disabled by default (``retention.enabled = false``); the retention period can never be set below
-730 days. When enabled, days older than ``retention.days`` are:
+730 days. When enabled, days older than ``retention.days`` are deleted in batches (#195): the
+``Retention`` task runs daily, but a run deletes only once the oldest expired day has been expired
+for ``retention.batch_days`` days (:func:`due_day`; default 30, 1 deletes each day as it
+expires), and then every expired day under one deletion record, so one time stamp. Every other
+run does nothing and writes nothing; a failed run is tried again the next day. The days are:
 
 1. verified once more (a day that does not verify is never deleted — it raises a critical alert);
 2. described in a **deletion record** (canonical JSON: days, manifest/token hashes, file hashes,
@@ -83,11 +87,21 @@ class RetentionResult:
     discarded: list[str] = field(default_factory=list)
     #: A record of an interrupted run that this run finished (its days deleted now).
     resumed: str | None = None
+    #: The day the expired days are deleted on, when that is later than this run (#195).
+    due: date | None = None
 
 
 def plan(layout: Layout, config: Config, today: date) -> tuple[date, list[date]]:
     cutoff = today - timedelta(days=config.retention.days)
     return cutoff, [day for day in sealed_days(layout) if day < cutoff]
+
+
+def due_day(oldest: date, config: Config) -> date:
+    """The first day a run deletes the batch whose oldest expired day is ``oldest``: that day
+    expires ``retention.days + 1`` days after it (it is then older than the cutoff), and the batch
+    is due once it has been expired ``retention.batch_days`` days, counting that first day; with
+    1, the day it expires (#195)."""
+    return oldest + timedelta(days=config.retention.days + config.retention.batch_days)
 
 
 def records(layout: Layout) -> list[Path]:
@@ -363,6 +377,9 @@ def run_retention(
         cutoff, days = plan(layout, config, site_day(now))
         result.candidates = days
     if not days:
+        return result
+    if site_day(now) < (due := due_day(days[0], config)):
+        result.due = due  # not a batch yet: nothing is written, the next runs check again
         return result
 
     remaining = [day for day in sealed_days(layout) if day >= cutoff]
