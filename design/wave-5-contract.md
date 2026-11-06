@@ -3762,7 +3762,7 @@ The manager took P1 and P2 (#203, comment of 2026-11-05); P3 and P4 stay with G�
 
     | | default load (3 lines/s, 100 devices) | 2,000 lines/s |
     |---|---|---|
-    | (a) answer from the snapshot | 0.25 s at 200 subjects (0.98 s at 1,000) | — |
+    | (a) answer from the snapshot | 0.31 s at 200 subjects (the guard); 0.57–1.1 s at 1,000 (recorded) | — |
     | (b) sessions waiting after 30 ticks / after warm-up | 0 / 0 | 0 / 0 |
     | (b) `data_until` behind the newest row | 0 s | 0 s |
     | (c) the probe job late, at most | 0.66 s | 1.74 s |

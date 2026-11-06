@@ -84,23 +84,15 @@ def devices_now(
     down: defaultdict[str, float] = defaultdict(float)
     up: defaultdict[str, float] = defaultdict(float)
     sessions: defaultdict[str, int] = defaultdict(int)
-    domains: dict[str, defaultdict[tuple[str, str], float]] = {}
-    apps: dict[str, defaultdict[str, float]] = {}
     last: dict[str, datetime] = {}
-    for moment, subjects in by_minute.items():
-        if moment < window_from:
-            continue
-        for key, (received, sent, started, volumes, by_app) in subjects.items():
+    window = [(moment, subjects) for moment, subjects in by_minute.items() if moment >= window_from]
+    for moment, subjects in window:
+        for key, (received, sent, started, _, _) in subjects.items():
             down[key] += received
             up[key] += sent
             sessions[key] += started
             if received or sent:
                 last[key] = max(last.get(key, moment), moment)
-            for index, volume in volumes:
-                domain, kind = names[index]
-                domains.setdefault(key, defaultdict(float))[(domain, kind)] += volume
-            for index, volume in by_app:
-                apps.setdefault(key, defaultdict(float))[app_names[index]] += volume
     active = sorted(
         key for key in set(down) | set(sessions) if down[key] + up[key] or sessions[key]
     )
@@ -110,6 +102,17 @@ def devices_now(
     visible = [key for key in active if not infos[key].excluded]
     visible.sort(key=lambda key: (-down[key], -up[key], key))
     seconds = minutes * 60
+    # The destinations and applications only of the subjects listed (at most MAX_ROWS).
+    listed = set(visible[:MAX_ROWS])
+    domains: dict[str, defaultdict[tuple[str, str], float]] = {}
+    apps: dict[str, defaultdict[str, float]] = {}
+    for _, subjects in window:
+        for key in listed.intersection(subjects):
+            _, _, _, volumes, by_app = subjects[key]
+            for index, volume in volumes:
+                domains.setdefault(key, defaultdict(float))[names[index]] += volume
+            for index, volume in by_app:
+                apps.setdefault(key, defaultdict(float))[app_names[index]] += volume
     rows = []
     for key in visible[:MAX_ROWS]:
         newest = last.get(key, window_from) + MINUTE

@@ -1,10 +1,12 @@
 """``GET /api/v1/activity/devices`` under load (the M4 guard (a) of #201, Wave 5 contract §6.2 M4 as
-amended by deviation W5-M-4): the answer from a full snapshot comes in under :data:`BUDGET`.
+amended by deviation W5-M-4): at the default subject count the answer from a full snapshot comes
+in under :data:`BUDGET`.
 
 The snapshot is the worker's file at its fullest: every subject sends and receives in each of
 the 60 minutes, with :data:`TOP` destinations and applications a minute (the most the worker
-keeps). 200 subjects are the default (the most rows the answer lists); 1,000 the site of the
-worker's 2,000 lines/s guard. Run with ``-s`` to see the figures (recorded on #211).
+keeps). 200 subjects are the default (the most rows the answer lists): the guard. 1,000, the site
+of the worker's 2,000 lines/s guard, is measured as well and its figures recorded (W5-M-4), not
+held to the guard's 1 s. Run with ``-s`` to see the figures (recorded on #211).
 """
 
 from __future__ import annotations
@@ -27,6 +29,8 @@ pytestmark = pytest.mark.perf
 
 API = "/api/v1/activity/devices"
 BUDGET = 1.0
+#: M4 (a)'s "default subject count": the most rows the answer lists.
+DEFAULT_SUBJECTS = 200
 TOP = 5
 NOW = datetime(2026, 10, 14, 8, 0, 30, tzinfo=UTC)
 
@@ -59,14 +63,14 @@ def snapshot(subjects: int) -> dict[str, object]:
         "until": end.isoformat(),
         "warming_up": False,
         "data_until": NOW.isoformat(),
-        "subjects": {key: {"kind": "ip", "vlan": 44, "mac": None, "ip": key[3:]} for key in keys},
-        "destinations": [[f"site{n}.example", "domain"] for n in range(97)],
-        "apps": [f"App.{n}" for n in range(31)],
+        "subjects": {},  # ``ip:`` subjects carry no hint (W5-M-2)
+        "destinations": {str(n): [f"site{n}.example", "domain"] for n in range(97)},
+        "apps": {str(n): f"App.{n}" for n in range(31)},
         "minutes": minutes,
     }
 
 
-@pytest.mark.parametrize("subjects", [200, 1000])
+@pytest.mark.parametrize("subjects", [DEFAULT_SUBJECTS, 1000])
 def test_an_answer_from_a_full_snapshot_is_quick(
     client: TestClient,
     login_as: Callable[..., LoggedIn],
@@ -91,4 +95,5 @@ def test_an_answer_from_a_full_snapshot_is_quick(
         assert len(response.json()["rows"]) == min(subjects, 200)
     size = layout.activity.stat().st_size
     print(f"\nactivity answer, {subjects} subjects, snapshot {size} bytes: {timings} s")
-    assert max(timings) < BUDGET
+    if subjects == DEFAULT_SUBJECTS:
+        assert max(timings) < BUDGET
