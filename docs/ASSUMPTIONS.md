@@ -460,6 +460,46 @@ doğrulayın" / "Verify on site" ([UYUM-DURUMU.md](UYUM-DURUMU.md) §6):
   dumps stay on the server's disk and the configuration is copied by hand (B9, B12); card 10
   reports what exists.
 
+## Wave 5: time stamping, re-stamping, revocation lists, database window, Canlı Durum (2026-11-02 to 2026-11-06)
+
+The Wave 5 contract (`design/wave-5-contract.md`) with its Addenda A (2026-11-02: the 30-day
+database window, xz sealing, the desktop status window) and B (2026-11-05: breaks, the one-minute
+usage refresh, Canlı Durum and SNMP). Operator guides: [ZAMAN-DAMGASI.md](ZAMAN-DAMGASI.md) /
+[TIME-STAMPING.md](TIME-STAMPING.md), [turktrust.md](turktrust.md),
+[CANLI-DURUM.md](CANLI-DURUM.md) / [LIVE-STATUS.md](LIVE-STATUS.md).
+
+### Owner decisions (Wave 5)
+
+| # | Decision | Date |
+|---|---|---|
+| D12 | TÜRKTRUST's production server (`zd.turktrust.com.tr`) is a second legal-grade provider, under the same root-fingerprint check as Kamu SM; a test pins `TURKTRUST_LEGAL_GRADE is True`. No site setting adds another legal provider; the red banner stays for mock, rfc3161 and test servers. Legal review is recommended, and TÜRKTRUST's written statement is kept with the site's records | 2026-11-02 |
+| W5-G | The database keeps the last 30 days (`db.retention_days`, at least 7); older days come back from the sealed vault on request ("arşivden yeniden yükle"). A DB-only drop: the vault is never touched | 2026-11-02 |
+| W5-H | New days are sealed as multi-stream xz; days sealed as gzip stay as they are | 2026-11-02 |
+| — | Sealing stays one time stamp a day; retention deletes in batches (`[retention] batch_days`, default 30) so the stamp use does not double after year 2 | 2026-11-05 |
+| QB1 | The per-person "Şu an" table of Canlı Durum belongs to the paid `usage_analytics` module, like Kullanım; the internet line's speed (SNMP) belongs to 5651 Temel (the default that ships) | 2026-11-05 |
+| QB2 | Break usage is shown to the roles that already see usage, with the same KVKK notice and audit; no separate switch hides it (the default that ships) | 2026-11-05 |
+
+### Verify on site (Wave 5)
+
+Sahada doğrula. Each item is a setting or has a test that fails loudly if the assumption is wrong.
+
+| # | Assumption | Setting or check | Where |
+|---|---|---|---|
+| T1 | TÜRKTRUST's TSA URL path: the host `zd.turktrust.com.tr` is from TÜRKTRUST's e-mail, the path is not known; default `https://zd.turktrust.com.tr/` | `[tsa] url`; a 3xx or 4xx is a configuration error that names the URL | [turktrust.md](turktrust.md) §2 |
+| T2 | TÜRKTRUST answers wrong credentials with HTTP 401; its answer when the balance is empty is not known | `[tsa] credit_regex` | [turktrust.md](turktrust.md) §2 |
+| T3 | Whether TÜRKTRUST's TSA certificate marks its EKU critical | `[tsa] require_critical_eku` | [turktrust.md](turktrust.md) §2 |
+| T4 | TÜRKTRUST's CRL host | `[tsa] crl_urls` | [turktrust.md](turktrust.md) §2 |
+| T5 | Port 80 (plain HTTP) for TÜRKTRUST; HTTPS is the default | `[tsa] allow_plain_http` (off) | [turktrust.md](turktrust.md) §2 |
+| K10 | Kamu SM's CRL addresses; no CRL URL is written in the code (a test fails if one appears) | `[tsa] crl_urls`, else the certificates' distribution points | [kamusm.md](kamusm.md) |
+| — | How the Zamane console client takes a proxy | none: Zamane does not use `[network] https_proxy` | [TIME-STAMPING.md](TIME-STAMPING.md) §8 |
+| X1 | The site's 7-Zip reads a whole multi-stream xz file | the auditor guide's manual check | [DENETCI-KILAVUZU.md](DENETCI-KILAVUZU.md) §5 |
+| X-B1 | How often FortiGate sends interim traffic logs (the delay of Canlı Durum's table for long sessions) | none; a test pins that an interim delta counts at its own minute | [LIVE-STATUS.md](LIVE-STATUS.md) |
+| X-B2 | On each device, In/Out of the WAN interface are download/upload | compare with the device's own interface graph | [DEVICE-SETUP.md](DEVICE-SETUP.md) |
+| X-B3 | The SNMPv3 protocols each device accepts (older firmware may need `sha1`, or offer no `aes256`) | `[sources.snmp] auth`, `priv` | [DEVICE-SETUP.md](DEVICE-SETUP.md) |
+| X-B4 | The interface names (`ifName`) the devices report for their WAN lines | the probe when saving refuses a wrong name and lists the device's interfaces; nothing is assumed | [DEVICE-SETUP.md](DEVICE-SETUP.md) |
+| — | The 2-day cap on `lookup.max_session_seconds` (FortiGate's longest sessions) | `lookup.max_session_seconds` | [AYARLAR.md](AYARLAR.md) §1 |
+| — | MikroTik's own default DHCP lease time (not stated in the repository) and the lease times the site really uses: the lease settings are capped at 7 days so that every lookup fits one 14-day reload (W5-G-19) | `lease.default_seconds`, `lease.server_seconds` | [AYARLAR.md](AYARLAR.md) §1 |
+
 ## Technical assumptions to verify on site
 
 - MikroTik remote syslog wire format (BSD header, ISO-8601 time, topics string) — parser stays
@@ -476,7 +516,7 @@ doğrulayın" / "Verify on site" ([UYUM-DURUMU.md](UYUM-DURUMU.md) §6):
 ### Wave 3: FortiGate DHCP, srcmac, internet exits (contract §1.3)
 
 Sahada doğrula. Each item is a setting or has a loud check until it is confirmed on a real
-FortiGate; the numbers are the contract's (§1.3). V1–V6, V8, V11 and V14–V17 are on the
+FortiGate; the numbers are the contract's (§1.3; V18 from issue #127). V1–V6, V8, V11 and V14–V18 are on the
 operator's checklist with the recorded outcome and date ([KURULUM.md](KURULUM.md) bölüm 16 /
 [INSTALL.md](INSTALL.md) section 16), repeated after every FortiOS upgrade; the topics are
 explained in [CORRELATION.md](CORRELATION.md) §8.
@@ -500,6 +540,7 @@ explained in [CORRELATION.md](CORRELATION.md) §8.
 | V15 | Whether each line's public address is static | `public_dynamic` per exit (EX1); DEVICE-SETUP §2.6 | `egress_observed_not_configured`, `egress_public_unknown`, `egress_public_dynamic`, `public_ip_no_egress`; `egress_changed_after_event` |
 | V16 | FortiGate DHCP lines carry a usable device time, and the FortiGate's clock is right to within minutes (NTP) | `fg_dhcp.device_time`; ingest's `max_clock_skew`; DEVICE-SETUP §2.1 NTP step (FD5) | `R20-lease:source-clock` (high, median offset beyond ±120 s); `source_clock_offset` in lookups (O22); `fortigate-refused` (reason "receive time"); `fortigate.time` parse failures |
 | V17 | Whether FortiOS logs a DHCPDECLINE or checks an address before it offers it; that a client holds one address per server interface and network | the D33 rule (O15; no setting) | `R20-lease:fortigate-decline:<net>` (high); `fg_mac_moved` in the lease job report; `fortigate_dhcp_no_network` outside every configured network |
+| V18 | Two configured networks are not merged later, nor one removed: the lease job does not record a MAC's FortiGate DHCP Ack for an address in **another** configured network (D33, #127), so after such a change the missed-move check of a moment before the lookup's days does not see it | no setting; check before the change ([KURULUM.md](KURULUM.md) bölüm 16 V18) | none: the operator's checklist records the change and the clients that held an address in both networks |
 
 ## Deviations from the specification (technical)
 

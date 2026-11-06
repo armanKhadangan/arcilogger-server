@@ -363,7 +363,7 @@ cause `executable`. Add the client with the script of the bundle,
 `powershell -ExecutionPolicy Bypass -File .\installer\Install-Arcilogger.ps1 -Upgrade -ZamaneJar
 C:\Kurulum\tss-client-console-3.1.33.jar -ZamaneJarSha256 <value from Kamu SM>` (it compares the
 SHA-256, copies and records the file; `[tsa] zamane_jar` must name that file), or upload it in
-**Ayarlar → Kamu SM**: this version knows no Zamane release, so an uploaded client waits for
+**Ayarlar → Zaman damgası**: this version knows no Zamane release, so an uploaded client waits for
 `approve-jar` on the console, at the earliest after `jar_hold_hours` (default 24, section 7.2).)
 
 The setup `.exe` passes the two licence options on to the script; give them from an
@@ -472,7 +472,9 @@ which need no database, start right away; ArciAdmin starts last and stops first;
 interpreter **isolated**, `venv\Scripts\python.exe -I -X utf8 -u -m arcilogger_<package> …`, so no
 environment variable — `PYTHONPATH`, `PYTHONSTARTUP`, machine-wide or the service's own — can make
 them load another module; `ARCILOGGER_CONFIG` still applies) → time sync, on desktop Windows
-the power settings (`Set-ArciPower.ps1`, section 17), firewall, scheduled tasks (including the nightly database dump at
+the power settings (`Set-ArciPower.ps1`, section 17), firewall, scheduled tasks (including the
+revocation-list download `CrlFetch` at 00:30 and the re-stamping `Renew` at 02:30 every day,
+[TIME-STAMPING.md](TIME-STAMPING.md) sections 3 and 4, and the nightly database dump at
 01:40, [BACKUP.md](BACKUP.md), the task requests of the browser in `Requests` (LOCAL SERVICE) and
 `ApplySystem` (SYSTEM), which keeps the firewall and Windows Time in step with the configuration;
 a task you switched off stays off; the tasks run Python isolated too,
@@ -691,7 +693,7 @@ Other users (the auditor etc.) and what comes next: [FIRST-STEPS.md](FIRST-STEPS
 
 ## 10. Kamu SM connection (test → production)
 
-The **Ayarlar → Kamu SM** wizard of the web interface does the steps below in the same order
+The **Ayarlar → Zaman damgası** wizard of the web interface does the steps below in the same order
 (Java, the Zamane client, roots and fingerprints, the customer data with a credit query, the stamp
 test, the switch to production; [SETTINGS.md](SETTINGS.md)). The console path:
 
@@ -748,10 +750,29 @@ Decide **beforehand** whether the Seal task may seal days with test stamps durin
 5. Check with `& $core credit` and `& $core status` (`legal_grade`); the red banner on the sealing
    page must be gone.
 
-ARCILOGGER marks as legal grade only stamps of Kamu SM's production server whose chain reaches a
-root listed in `legal_root_fingerprints`; stamps of the test server have no legal validity (Kamu
-SM). Have the stamps and the record keeping reviewed by a
-lawyer.
+ARCILOGGER marks as legal grade only stamps of Kamu SM's production server (or, by the product
+owner's decision, of TÜRKTRUST's production server) whose chain reaches a root listed in
+`legal_root_fingerprints`; stamps of the test server have no legal validity (Kamu SM). Have the
+stamps and the record keeping reviewed by a lawyer.
+
+### TÜRKTRUST (optional, instead of Kamu SM)
+
+A site that wants its time stamps from TÜRKTRUST chooses the TÜRKTRUST server under Ayarlar →
+Zaman damgası, enters the username and password TÜRKTRUST gave and runs the stamp test. Opening the
+account, comparing the root certificate's fingerprint, the items to verify on site (T1–T5) and the
+manual checklist: [turktrust.md](turktrust.md). TÜRKTRUST offers no credit query; watch the
+balance in its portal. The installer does not ask for the TÜRKTRUST credentials. The rules strict
+outbound opens for TÜRKTRUST, the revocation lists or a proxy: section 12.
+
+### Re-stamping and revocation lists
+
+Before a stamp's TSA certificate expires, the `Renew` task re-stamps it (by default 180 days
+before, `[tsa] renew_before_days`); the `CrlFetch` task downloads the certificate revocation lists
+every day and stores those that verify. The installer registers both; neither needs a hand step.
+**With strict outbound**, write the revocation-list addresses into `[tsa] crl_urls`: the firewall
+opens only the hosts of that list (Kamu SM's CRL addresses are K10, TÜRKTRUST's T4: **verify on
+site**). Details, the alerts (`R20-renewal`, `R20-cert`, `R20-crl`) and the banner:
+[TIME-STAMPING.md](TIME-STAMPING.md).
 
 Credential changes (`secret set` / `secret delete`) are recorded without their values in
 `D:\ARCILOGGER\state\seal\secret-changes.jsonl`; the worker copies them into the audit log
@@ -840,9 +861,15 @@ Firewall (`Set-ArciFirewall.ps1`):
   TCP 5985 from the admin PC only; `-KeepRule '<rule name>'` keeps a rule a monitoring or backup
   agent needs.
 - **Outbound (optional):** `-StrictOutbound`: default Block; NTP, DNS, Kamu SM (zd/tzd and the
-  `[tsa]` host on `[tsa] port`), the Kamu SM certificate host, SMTP and the replica only; Windows'
-  other enabled outbound allow rules (except Core Networking) are disabled too. Switch it off for
-  Windows Update with `-StrictOutbound:$false`.
+  `[tsa]` host on `[tsa] port`; with the provider `turktrust`, zd/tzd on port 80 only), the Kamu SM
+  certificate host, SMTP and the replica only, plus, with the provider `turktrust`, the TÜRKTRUST
+  server (`ARCILOGGER Out TURKTRUST`), the hosts of `[tsa] crl_urls` (`ARCILOGGER Out CRL`, TCP 80
+  and 443) or, with `[network] https_proxy` set, the proxy in place of those two (`ARCILOGGER Out
+  Proxy`), and the address of every log source with SNMP on (`ARCILOGGER SNMP <source>`, UDP, the
+  source's SNMP port, 161 by default; the internet line speed of Canlı Durum,
+  [LIVE-STATUS.md](LIVE-STATUS.md)); Windows' other enabled outbound allow rules (except Core
+  Networking) are disabled too. The rules' ports: [TIME-STAMPING.md](TIME-STAMPING.md) section 1.
+  Switch it off for Windows Update with `-StrictOutbound:$false`.
 - **SMTP (alert e-mail), strict outbound mode only:** with `-StrictOutbound`, and with
   `enabled = true` and a `host` in the `[smtp]` section of `arcilogger.toml`, the script adds the
   outbound rule to that server on the section's `port` (default 587) itself, on every run
@@ -863,7 +890,9 @@ Firewall (`Set-ArciFirewall.ps1`):
 - Changes of `[[sources]]` (on Ayarlar → Kaynaklar or by hand) are loaded by the collector and
   ingest within 5 seconds; the `ApplySystem` task updates the syslog rules in place (only
   `ARCILOGGER Syslog UDP/TCP` and, in strict outbound mode, the `ARCILOGGER Out …` rules; no other
-  rule, no profile, nor 443, 3389, 5985), after a hand edit within 5 minutes. Run the script
+  rule, no profile, nor 443, 3389, 5985), after a hand edit within 5 minutes. It updates the
+  outbound rules, or creates one that is missing, and removes none: an `ARCILOGGER Out TURKTRUST`,
+  `Out CRL` or `Out Proxy` rule whose setting went away stays until the script runs again. Run the script
   yourself when the browser administration is off (`-DisableBrowserAdministration`) or when the
   `[tsa]` URL/port or the admin addresses changed. Restart the services after a change of
   `[collector]`, `[api]`, `[ingest]`, `[worker]` or `[database]` (UDP syslog sent while the
@@ -1397,6 +1426,20 @@ recompresses a chunk), and how long a round of a reload's partitions takes (one 
 round: about 30 ms on Linux; a whole day's 16 tables took 0.3–0.45 s on Linux and 0.84 s on a
 Windows CI machine; one table's round not measured on Windows or a spinning disk, contract
 W5-G-25).
+Time stamping: with TÜRKTRUST, [turktrust.md](turktrust.md) sections 2 and 3 (T1–T5 and the manual
+checklist); Kamu SM's revocation-list addresses (K10, [kamusm.md](kamusm.md)). After the first
+`CrlFetch` run `& $core crl status` must show every address downloaded and verified, and after the
+first `Renew` run Sistem → Zamanlanmış görevler must show the task's result; with strict outbound
+`[tsa] crl_urls` must be filled (section 10). How the Zamane console client takes a proxy is not
+known (it does not use `[network] https_proxy` in this release).
+The days a 5651 lookup reads ([SETTINGS.md](SETTINGS.md) section 1): compare the 2-day cap on
+`lookup.max_session_seconds` with FortiGate's longest sessions; MikroTik's own default DHCP lease
+time is not stated in the repository; record the DHCP lease times the site really uses (the lease
+settings are capped at 7 days so that every lookup's days fit one 14-day reload; for a server that
+gives longer leases, enter at most 7 days).
+Canlı Durum ([LIVE-STATUS.md](LIVE-STATUS.md) section 6): how often FortiGate sends interim traffic
+logs (X-B1), the In/Out direction on the WAN interface (X-B2), the SNMPv3 protocols the device
+accepts (X-B3) and the interface names of the WAN lines (X-B4).
 On desktop Windows 11 Pro all of the above plus the power settings, Smart App Control and a
 forced update restart, step by step:
 [KABUL-TESTI-WINDOWS11.md](KABUL-TESTI-WINDOWS11.md).

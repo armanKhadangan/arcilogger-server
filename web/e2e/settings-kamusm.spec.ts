@@ -3,16 +3,17 @@ import { createHash } from 'node:crypto';
 import { expect, test, type Page } from '@playwright/test';
 
 import { confirmReauth, expectNoA11yViolations, usePreferences, type Theme } from './fixtures';
-import { mockApi } from './mock-api';
+import { mockApi, type MockApi } from './mock-api';
 
 /**
  * Ayarlar → Zaman damgası with Kamu SM in use (contract 2.17): the wizard with the state of each
  * step, the write-only credentials (never pre-filled) with the re-authentication, the Zamane
  * client (a known release and one held for the console's approval), the root certificates and
  * the legal roots, the stamp test, the switch to production and back, the credit threshold, the
- * re-stamping and revocation-list keys (Wave 5 contract 2.5), the server's refusal of a change
- * that would stop a working sealer, a held client on a later visit, and a sealing cause that no
- * step shows. The API is `mock-admin.ts`.
+ * re-stamping and revocation-list keys (Wave 5 contract 2.5), TÜRKTRUST over HTTPS and over
+ * plain HTTP with its typed confirmation (Wave 5 contract 2.4, C5), the server's refusal of a
+ * change that would stop a working sealer, a held client on a later visit, and a sealing cause
+ * that no step shows. The API is `mock-admin.ts`, W5-T's.
  */
 
 const PEM = [
@@ -38,6 +39,17 @@ async function upload(page: Page, label: string, name: string, content: string) 
     buffer: Buffer.from(content),
   });
   await page.getByRole('button', { name: 'Dosyayı gönder' }).click();
+}
+
+/**
+ * The section's `secrets` as W5-T's API reports them (its captured sample, `samples/admin.json`):
+ * TÜRKTRUST's two credentials known, not stored. `mock-admin.ts`'s seed site names Kamu SM's only.
+ */
+function reportTurktrust(api: MockApi) {
+  Object.assign(api.admin.sections.tsa.secrets, {
+    'turktrust.username': { set: false, changed_at: null, changed_by: null },
+    'turktrust.password': { set: false, changed_at: null, changed_by: null },
+  });
 }
 
 async function applied(page: Page) {
@@ -448,12 +460,7 @@ test.describe('Ayarlar → Kamu SM', () => {
     page,
   }) => {
     const api = await mockApi(page, { signedInAs: 'tolga', staleReauth: true });
-    // The section as W5-T's API reports it: TÜRKTRUST known, its credentials not stored.
-    // Interim: `mock-admin.ts` (W5-T's) does not report them yet.
-    Object.assign(api.admin.sections.tsa.secrets, {
-      'turktrust.username': { set: false, changed_at: null, changed_by: null },
-      'turktrust.password': { set: false, changed_at: null, changed_by: null },
-    });
+    reportTurktrust(api);
     await page.goto('/settings/kamusm?step=production');
     await page.getByRole('radio', { name: 'TÜRKTRUST (HTTPS)' }).check();
     const fields = page.getByTestId('turktrust-credentials');
@@ -493,12 +500,7 @@ test.describe('Ayarlar → Kamu SM', () => {
     page,
   }) => {
     const api = await mockApi(page, { signedInAs: 'tolga' });
-    // As W5-T's API reports it. Interim: `mock-admin.ts` (W5-T's) ignores the TÜRKTRUST fields,
-    // so only what the page sends is checked here.
-    Object.assign(api.admin.sections.tsa.secrets, {
-      'turktrust.username': { set: false, changed_at: null, changed_by: null },
-      'turktrust.password': { set: false, changed_at: null, changed_by: null },
-    });
+    reportTurktrust(api);
     await page.goto('/settings/kamusm?step=production');
     await page.getByRole('radio', { name: 'TÜRKTRUST (HTTPS)' }).check();
     const fields = page.getByTestId('turktrust-credentials');
@@ -577,15 +579,7 @@ test.describe('Ayarlar → Kamu SM', () => {
   test('re-stamping and revocation lists (Wave 5 contract 2.5): checked, sent only when changed', async ({
     page,
   }) => {
-    const api = await mockApi(page, { signedInAs: 'tolga' });
-    // The section as W5-T's API reports it. Interim: `mock-admin.ts` (W5-T's) has no such keys
-    // and its `TsaBody` refuses them, so this spec sends none; the body of a change of them is
-    // `kamusm-model.test.ts`'s.
-    Object.assign(api.admin.sections.tsa, {
-      renew_before_days: 180,
-      crl_urls: [],
-      crl_max_age_days: 7,
-    });
+    const api = await mockApi(page, { signedInAs: 'tolga', staleReauth: true });
     await page.goto('/settings/kamusm?step=credit');
     const group = page.getByRole('region', { name: 'Yeniden damgalama ve iptal listeleri' });
     const renew = group.getByLabel('Yeniden damgalama süresi (gün)');
@@ -632,6 +626,62 @@ test.describe('Ayarlar → Kamu SM', () => {
     expect(put).toMatchObject({ credit_alert_threshold: 300 });
     for (const key of ['renew_before_days', 'crl_urls', 'crl_max_age_days'])
       expect(put).not.toHaveProperty(key);
+
+    // A changed key is sent, alone, after the password is confirmed again (C5).
+    await renew.fill('365');
+    await page.getByRole('button', { name: 'Kaydet' }).click();
+    await review.getByRole('button', { name: 'Onayla ve kaydet' }).click();
+    await confirmReauth(page);
+    await applied(page);
+    const changed = api.callsTo('PUT', '/admin/config/tsa').at(-1)?.body;
+    expect(changed).toMatchObject({ renew_before_days: 365 });
+    for (const key of ['crl_urls', 'crl_max_age_days']) expect(changed).not.toHaveProperty(key);
+    await expect(renew).toHaveValue('365');
+  });
+
+  test('TÜRKTRUST over plain HTTP: the warning, the typed HTTP, then the switch with its credentials', async ({
+    page,
+  }) => {
+    const api = await mockApi(page, { signedInAs: 'tolga', staleReauth: true });
+    reportTurktrust(api);
+    await page.goto('/settings/kamusm?step=production');
+    await page.getByRole('radio', { name: 'TÜRKTRUST (düz HTTP)' }).check();
+    await expect(page.getByTestId('tsa-plain-http')).toContainText('şifrelenmeden');
+    const fields = page.getByTestId('turktrust-credentials');
+    await fields.getByRole('button', { name: 'Gir' }).first().click();
+    await page.getByLabel('TÜRKTRUST kullanıcı adı').fill('ornek-as');
+    await fields.getByRole('button', { name: 'Gir' }).click();
+    await page.getByLabel('TÜRKTRUST parolası').fill('deneme-parola'); // gitleaks:allow — fake test value
+    await page.getByRole('button', { name: 'TÜRKTRUST sunucusuna düz HTTP ile geç' }).click();
+
+    const ask = page.getByRole('dialog', {
+      name: 'TÜRKTRUST sunucusuna düz HTTP ile geçilsin mi?',
+    });
+    const go = ask.getByRole('button', { name: 'TÜRKTRUST sunucusuna düz HTTP ile geç' });
+    await expect(go).toBeDisabled();
+    await ask.getByLabel('Onaylamak için HTTP yazın').fill('http');
+    await expect(go).toBeDisabled();
+    await ask.getByLabel('Onaylamak için HTTP yazın').fill('HTTP');
+    await go.click();
+    // Nothing was sent before the typed confirmation; then the check and the change.
+    const review = page.getByRole('dialog', { name: 'Değişiklikleri onaylayın' });
+    await review.getByRole('button', { name: 'Onayla ve kaydet' }).click();
+    await confirmReauth(page);
+    await applied(page);
+    await expect(page.getByTestId('tsa-server')).toContainText('düz HTTP');
+    const sent = [
+      ...api.callsTo('POST', '/admin/config/tsa/check'),
+      ...api.callsTo('PUT', '/admin/config/tsa'),
+    ];
+    expect(sent.length).toBeGreaterThan(1);
+    for (const call of sent)
+      expect(call.body).toMatchObject({
+        server: 'turktrust-http',
+        allow_plain_http: true,
+        confirm: true,
+        turktrust_username: 'ornek-as',
+        turktrust_password: 'deneme-parola',
+      });
   });
 
   test('first setup: a change that would stop the working sealer is refused with its causes', async ({
@@ -684,7 +734,7 @@ test.describe('Ayarlar → Kamu SM', () => {
 for (const theme of ['light', 'dark'] as Theme[]) {
   test(`Kamu SM accessibility — ${theme}`, async ({ page }) => {
     await usePreferences(page, { theme });
-    await mockApi(page, { signedInAs: 'tolga' });
+    reportTurktrust(await mockApi(page, { signedInAs: 'tolga' }));
     await page.goto('/settings/kamusm');
     await expect(steps(page)).toBeVisible();
     await expectNoA11yViolations(page);
@@ -711,6 +761,21 @@ for (const theme of ['light', 'dark'] as Theme[]) {
     await page.getByRole('button', { name: 'Üretim sunucusuna geç' }).click();
     await expect(
       page.getByRole('dialog', { name: 'Üretim sunucusuna geçilsin mi?' }),
+    ).toBeVisible();
+    await expectNoA11yViolations(page);
+    await page.getByRole('button', { name: 'İptal' }).click();
+    // TÜRKTRUST's form over plain HTTP, with its warning, and its typed confirmation.
+    await page.getByRole('radio', { name: 'TÜRKTRUST (düz HTTP)' }).check();
+    const fields = page.getByTestId('turktrust-credentials');
+    await fields.getByRole('button', { name: 'Gir' }).first().click();
+    await page.getByLabel('TÜRKTRUST kullanıcı adı').fill('ornek-as');
+    await fields.getByRole('button', { name: 'Gir' }).click();
+    await page.getByLabel('TÜRKTRUST parolası').fill('deneme-parola'); // gitleaks:allow — fake test value
+    await expect(page.getByTestId('tsa-plain-http')).toBeVisible();
+    await expectNoA11yViolations(page);
+    await page.getByRole('button', { name: 'TÜRKTRUST sunucusuna düz HTTP ile geç' }).click();
+    await expect(
+      page.getByRole('dialog', { name: 'TÜRKTRUST sunucusuna düz HTTP ile geçilsin mi?' }),
     ).toBeVisible();
     await expectNoA11yViolations(page);
   });

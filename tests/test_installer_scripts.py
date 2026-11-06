@@ -8522,6 +8522,29 @@ def test_next_steps_follow_the_time_stamp_provider(engine: str, tmp_path: Path) 
         assert word not in step, word
 
 
+def test_next_steps_explain_re_stamping_and_the_revocation_lists(
+    engine: str, tmp_path: Path
+) -> None:
+    """#103 step 6 (W5-E): for every provider, step 3 ends with the Renew and CrlFetch tasks and,
+    for strict outbound mode, tsa.crl_urls; it asks for nothing and names no secret."""
+    for scenario in ("next-steps", "next-steps-turktrust"):
+        run = tmp_path / scenario
+        run.mkdir()
+        stdout = simulate(engine, run, scenario)["stdout"]
+        step = " ".join(stdout[stdout.index("   3. ") : stdout.index("   4. ")].split())
+        assert "Yeniden damgalama ve iptal listeleri [re-stamping and revocation lists]" in step
+        assert "Renew görevi (her gün 02:30)" in step
+        assert "CrlFetch görevi (her gün 00:30)" in step
+        assert "tsa.renew_before_days" in step
+        assert "R20-renewal, R20-cert, R20-crl" in step
+        assert re.search(r'& "[^"]+arcilogger-core\.exe" renew --dry-run', step), step
+        assert "Sıkı giden kipte (-StrictOutbound) iptal listelerinin adreslerini" in step
+        assert "[in strict outbound mode enter the lists' addresses in tsa.crl_urls" in step
+        assert "(TCP 80 ve 443)" in step
+        # The block closes step 3, after the provider's own lines.
+        assert step.index("secret set") < step.index("Yeniden damgalama ve iptal listeleri")
+
+
 def test_the_java_check_is_for_zamane_only() -> None:
     """Contract 2.4: the Java and Zamane-jar warnings return before any check for another
     provider (turktrust, rfc3161, mock)."""

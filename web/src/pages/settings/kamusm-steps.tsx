@@ -480,7 +480,9 @@ function typedValue(edit: SecretEdit): boolean {
  * TÜRKTRUST (`serverChoices`); a switch to them waits for both credentials, stored or typed here,
  * and choosing another server drops what was typed for TÜRKTRUST. Back to the test server stops production stamps and asks again;
  * plain HTTP says that the password then travels unencrypted and asks for a typed confirmation
- * before anything is sent, because the server's dry run applies the same rule.
+ * before anything is sent, because the server's dry run applies the same rule. Should the server
+ * still refuse a plain-HTTP switch for want of it (`tsa_plain_http_confirm_required`, W5-T-4),
+ * the confirmation opens again with the server's text, and the typed phrase is asked again.
  */
 export function ProductionStep({
   tsa,
@@ -494,6 +496,7 @@ export function ProductionStep({
   onCredentials,
   errors,
   onSwitch,
+  httpRefusal = null,
 }: {
   tsa: TsaSection;
   tested: boolean;
@@ -512,11 +515,16 @@ export function ProductionStep({
   onCredentials: (credentials: Credentials) => void;
   errors: CredentialErrors;
   onSwitch: (server: ServerChoice) => void;
+  /** The server's refusal `tsa_plain_http_confirm_required`: the confirmation opens with its text. */
+  httpRefusal?: unknown;
 }) {
   const { t } = useTranslation();
   const id = useId();
   const [asking, setAsking] = useState<ServerChoice | null>(null);
   const [typed, setTyped] = useState('');
+  // A refusal shown once stays closed until the next one.
+  const [seen, setSeen] = useState<unknown>(null);
+  const refusal = httpRefusal !== null && httpRefusal !== seen ? httpRefusal : null;
   const current = currentChoice(tsa);
   const choices = serverChoices(tsa);
   // The server in use cannot be chosen; the next one is preselected (production, or back to test).
@@ -560,9 +568,11 @@ export function ProductionStep({
         : t(`settings.kamusm.production.to.${CHOICE_KEYS[target]}`);
 
   function confirmed() {
-    if (asking) onSwitch(asking);
+    const server = asking ?? (refusal !== null ? 'turktrust-http' : null);
+    if (server) onSwitch(server);
     setAsking(null);
     setTyped('');
+    setSeen(httpRefusal);
   }
 
   return (
@@ -712,18 +722,26 @@ export function ProductionStep({
         onConfirm={confirmed}
       />
       <ChangeReviewDialog
-        open={asking === 'turktrust-http'}
+        open={asking === 'turktrust-http' || (asking === null && refusal !== null)}
         onOpenChange={(open) => {
-          if (!open) setAsking(null);
+          if (open) return;
+          setAsking(null);
+          setTyped('');
+          setSeen(httpRefusal);
         }}
         check={null}
         title={t('settings.kamusm.production.httpTitle')}
         description={t('settings.kamusm.turktrust.plainHttp')}
-        confirmLabel={switchLabel}
+        confirmLabel={t('settings.kamusm.production.to.turktrustHttp')}
         danger
         confirmDisabled={!plainHttpConfirmed(typed)}
         onConfirm={confirmed}
       >
+        {refusal !== null ? (
+          <Alert tone="danger" assertive={false} data-testid="tsa-http-refusal">
+            {errorMessage(refusal)}
+          </Alert>
+        ) : null}
         <div className="flex flex-col gap-1.5">
           <Label htmlFor={`${id}-phrase`}>
             {t('settings.kamusm.production.httpType', { phrase })}

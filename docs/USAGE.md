@@ -225,9 +225,11 @@ A rebuild needs the day's logs: the web interface (API) refuses a range that sta
 day of the oldest log in the database (before today while there is none; 422
 `usage_rebuild_no_logs`, the answer names the earliest day); a day without logs would be computed
 empty and its rollups replaced by an empty day, so those days keep their rollups (the server
-command `usage rebuild` does not check this). The database's log retention is the setting
-`db.retention_days` (400 days); this release deletes no logs from the database
-([DATA-MODEL.md](DATA-MODEL.md)).
+command `usage rebuild` does not check this). The database keeps the logs for
+`db.retention_days` (30 days); the worker job `db.window` drops older days every night, and the
+raw logs stay in the vault ([DATA-MODEL.md](DATA-MODEL.md)). A rebuild is therefore possible only
+for days whose logs are still in the database; the usage rollups stay for `usage.retention_days`
+(400 days).
 
 ## 6. Privacy and audit
 

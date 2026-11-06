@@ -27,8 +27,10 @@ $db     = "$arci\arcilogger-db.exe"
 
 **What the raw logs can rebuild:** the parsed log tables and the lease (DHCP/ARP) timeline. In a
 restored database ingest loads the logs that arrived after the dump again from the spool and the
-vault; sealed days within the database retention (`db.retention_days`, default 400 days) are
-loaded automatically, older ones are not ("arşivden yeniden yükle" is a later feature). Users,
+vault; sealed days within the database window (`db.retention_days`, default 30 days) are loaded
+automatically, older ones are not: a 5651 lookup or a search that needs them asks for them with
+"arşivden yeniden yükle" (archive reload; [SEARCH.md](SEARCH.md),
+[CORRELATION.md](CORRELATION.md)). Users,
 5651 lookups, person and device details, settings and the audit log of the database exist
 **only** in the database and its backups.
 

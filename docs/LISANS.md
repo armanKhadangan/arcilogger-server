@@ -59,12 +59,15 @@ görmek için de kullanılabilir.
 
 Lisans durumu ne olursa olsun şunlar çalışır ve hiçbir lisans durumu bunları kapatmaz: syslog
 toplayıcı ve ham log dosyaları (spool), ayrıştırma ve veritabanına yükleme, gece mühürlemesi (Kamu
-SM zaman damgası), zincir doğrulaması, saklama ve imha, replika, veritabanı yedeği; 5651 sorgusu,
+SM ya da TÜRKTRUST zaman damgası), TSA sertifikası sona ermeden yeniden damgalama (`Renew` görevi),
+iptal listelerinin indirilmesi (`CrlFetch` görevi), her sayfanın üstündeki yasal geçerlilik uyarı
+şeridi ([ZAMAN-DAMGASI.md](ZAMAN-DAMGASI.md)), zincir doğrulaması, saklama ve imha, replika,
+veritabanı yedeği; 5651 sorgusu,
 resmi PDF raporu ve zaman damgası, ham satırlar, kanıt paketleri ve bağımsız doğrulayıcı;
 Mühürleme sayfası ve kontör; zincirli denetim kaydı ve doğrulaması; giriş, iki adımlı doğrulama,
 kullanıcılar ve roller; cihazlar, kişiler, departmanlar, VLAN'lar ve cihaz-kişi atamaları (elle);
 işletim uyarıları (sessiz kaynak, disk, mühürleme, kontör, saat, replika, yedek, uyarı e-postası,
-Güvenlik sayfası); panelin sağlık kutuları (log alımı, mühür, kontör, saat, uyarılar) ve lisans
+yeniden damgalama, damga sertifikası, iptal listesi, Güvenlik sayfası); panelin sağlık kutuları (log alımı, mühür, kontör, saat, uyarılar) ve lisans
 sayfası.
 
 Yalnızca bir uyarı kodu ücretli bir modüle aittir: `R20-report` (zamanlanmış bir rapor

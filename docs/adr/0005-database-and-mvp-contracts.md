@@ -109,7 +109,8 @@ name in `arcilogger_db.engine` would change, because no other module may import 
   `max_worker_processes` per the TimescaleDB documentation of the installed version
   (*verify on site*).
 - Without TimescaleDB, partitions must exist ahead of time: `arcilogger-db upgrade` creates them
-  for the whole `db.retention_days` window (400 days: 13–14 months back) up to three months
+  for the whole `db.retention_days` window (400 days then: 13–14 months back; since Wave 5 the
+  window is 30 days and new partitions are daily, Wave 5 contract Addendum A) up to three months
   ahead, and the worker runs `ensure_partitions` daily (`arcilogger-db partitions` does the same
   by hand). The ingest vault re-load (after a database loss) covers the same window, so a
   re-loaded day always finds its month. Missing partitions are not an outage — rows go to the

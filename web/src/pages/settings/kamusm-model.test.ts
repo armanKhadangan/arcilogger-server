@@ -85,8 +85,8 @@ function tsa(overrides: Partial<TsaSection> = {}): TsaSection {
 const KEPT: Credentials = { customer: SECRET_KEPT, password: SECRET_KEPT, clear: false };
 
 /**
- * A site on TÜRKTRUST as the API reads it before W5-T names its servers (`server` null), with its
- * two credentials stored. Interim: `turktrust.*` are not `BrowserSecret`s yet.
+ * A site on TÜRKTRUST whose server is none of the choices (`server` null), with its two
+ * credentials stored.
  */
 function turktrustSite(overrides: Partial<TsaSection> = {}): TsaSection {
   return tsa({
@@ -328,11 +328,11 @@ describe('Ayarlar → Zaman damgası: the server choice and TÜRKTRUST (Wave 5 c
     expect(currentChoice(tsa())).toBe('test');
     expect(currentChoice(tsa({ server: 'production' }))).toBe('production');
     expect(currentChoice(tsa({ provider: 'mock', server: null }))).toBeNull();
-    // TÜRKTRUST's servers have no name in `server` until W5-T: the one in use cannot be told.
+    // A TÜRKTRUST server that is none of the choices cannot be told.
     expect(currentChoice(turktrustSite())).toBeNull();
-    // Once named, a server counts only with its own provider.
-    expect(currentChoice(turktrustSite({ server: 'turktrust' as never }))).toBe('turktrust');
-    expect(currentChoice(tsa({ server: 'turktrust-http' as never }))).toBeNull();
+    // A named server counts only with its own provider.
+    expect(currentChoice(turktrustSite({ server: 'turktrust' }))).toBe('turktrust');
+    expect(currentChoice(tsa({ server: 'turktrust-http' }))).toBeNull();
   });
 
   it('"Kaydet" on a TÜRKTRUST site keeps its server: nothing moves it to the Kamu SM test server', () => {
@@ -361,15 +361,37 @@ describe('Ayarlar → Zaman damgası: the server choice and TÜRKTRUST (Wave 5 c
     ).toBe('test');
   });
 
-  it('offers TÜRKTRUST only where the server reports it (W5-T), so an API before it is never sent it', () => {
-    // Before W5-T: no `turktrust.*` in `secrets`, Kamu SM's two servers only.
+  it('offers TÜRKTRUST only where the server reports both its credentials, so an API before W5-T is never sent it', () => {
+    // No `turktrust.*` in `secrets` (an API before W5-T): Kamu SM's two servers only.
     expect(turktrustSupported(tsa())).toBe(false);
     expect(serverChoices(tsa())).toEqual(['test', 'production']);
     expect(toTurktrust(tsa(), 'turktrust')).toBe(false);
-    // Reported (stored or not): all four.
+    // Both reported (stored or not): all four.
     expect(turktrustSupported(withTurktrust())).toBe(true);
     expect(serverChoices(withTurktrust())).toEqual(SERVER_CHOICES);
     expect(serverChoices(turktrustSite())).toEqual(SERVER_CHOICES);
+    // Only one of the two reported: the gate stays closed.
+    const oneOnly = { ...withTurktrust().secrets };
+    delete oneOnly['turktrust.password'];
+    expect(turktrustSupported(tsa({ secrets: oneOnly }))).toBe(false);
+  });
+
+  it("pins the TÜRKTRUST gate on W5-T's captured sample: both credentials reported, all four servers", () => {
+    const captured = JSON.parse(
+      readFileSync(join(process.cwd(), 'e2e', 'samples', 'admin.json'), 'utf8'),
+    ) as { config: { sections: { tsa: TsaSection } } };
+    const section = captured.config.sections.tsa;
+    expect(Object.keys(section.secrets)).toEqual(
+      expect.arrayContaining(['turktrust.username', 'turktrust.password']),
+    );
+    expect(turktrustSupported(section)).toBe(true);
+    expect(serverChoices(section)).toEqual(SERVER_CHOICES);
+    // The §2.5 keys are reported too, so the form shows and sends them.
+    expect(evidenceKeys(section)).toEqual({
+      renew_before_days: section.renew_before_days,
+      crl_urls: section.crl_urls,
+      crl_max_age_days: section.crl_max_age_days,
+    });
   });
 
   it('sends TÜRKTRUST credentials only with a change that goes to TÜRKTRUST', () => {

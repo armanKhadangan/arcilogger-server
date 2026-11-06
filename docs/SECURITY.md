@@ -47,6 +47,12 @@
   yöneticiye ve denetçiye, yapılandırma yedeği onayı ve Sistem yalnızca yöneticiye açıktır. Rapor
   yalnızca onu indiren ARCILOGGER hesabının adını taşır; raporun indirilmesi ve yedek onayı denetim
   kaydına yazılır.
+- **Zaman damgası** (bölüm 17, [ZAMAN-DAMGASI.md](ZAMAN-DAMGASI.md)): sunucudan yalnızca özetler
+  çıkar. TÜRKTRUST kullanıcı adı ve parolası yalnızca şifreli gizli depoda durur; HTTP Basic kimlik
+  doğrulaması varsayılan olarak yalnızca HTTPS üzerinden, sertifikası Windows'un güven deposuyla
+  doğrulanarak gider. Yönlendirmeler izlenmez. Düz HTTP yalnızca yöneticinin yazılı onayıyla açılır
+  ve açık kaldıkça uyarı şeridi bunu söyler. İptal listeleri yalnızca indirilir, imzası
+  doğrulanmadan saklanmaz.
 - Giriş, hatalı giriş, kilitleme, TOTP hataları, çıkış, parola ve kullanıcı değişiklikleri
   **zincirlenmiş denetim kaydına** yazılır; parolalar, kodlar ve gizli anahtarlar asla yazılmaz.
 - İlk yönetici, sunucu konsolunda (yönetici PowerShell'i) üretilen **tek kullanımlık kurulum
@@ -82,7 +88,11 @@ re-authentication, and a live stream that re-checks its session every 30 seconds
 resetting the idle timer. Uyum Durumu and Sistem (section 16): both pages only read and show no
 data about log subjects; Uyum Durumu and its PDF report for the administrator and the auditor,
 the configuration backup confirmation and Sistem for the administrator only; the PDF names only
-the exporting account, and the export and the confirmation are audited.
+the exporting account, and the export and the confirmation are audited. Time stamping (section
+17): only hashes leave the server; the TÜRKTRUST credentials live only in the encrypted secret
+store and go out in HTTP Basic authentication over verified HTTPS, never to a redirect target;
+plain HTTP needs a typed confirmation and keeps a banner up; revocation lists are only downloaded,
+and stored only once their signature verifies.
 
 ## 1. Sign-in flow
 
@@ -275,7 +285,8 @@ recent=True)`).
 
 The Settings pages (browser administration, section 14) ask for it (spec 13) for every change of
 `[tsa]` except the credit alert threshold and the timeout (this covers the Kamu SM customer number
-and password), every `[smtp]` and `[replica]` change (their passwords included), every retention
+and password, the TÜRKTRUST username and password, the server choice with plain HTTP, and the
+re-stamping and revocation-list keys, section 17), every `[smtp]` and `[replica]` change (their passwords included), every retention
 and backup change, a change of `[clock]` (the time sources and the alert threshold), switching a
 log source off or removing it, cancelling a held change, **Revert** and the diagnostics package;
 among the database settings `auth.*`, `privacy.*`, the retention periods, the pseudonyms of the
@@ -443,6 +454,7 @@ entries add `os_user`; never the licensee name or server ids):
 | Compromised ArciApi (browser administration) | it still reads every stored secret (unchanged) and can request any change of the allow-list. The agent's journal, the Event Log, `R20-config-change` and the holds make it visible; it cannot lower retention below 730 days, choose a program to run or skip a hold (section 14) |
 | Compromised ArciAdmin | it writes the configuration, including keys the browser does not offer (they take effect at the next restart, or at once for keys that are reloaded live), and can skip its own holds for retention and the replica; `config_origin` and the missing journal entry make that visible. `execpolicy` (a one-element `java`, trusted locations and hashes) and ApplySystem's own derivation keep it from running code as LOCAL SERVICE or SYSTEM; a staged Zamane client still waits for ApplySystem's own `first_seen` and an administrator's `approve-jar` |
 | Shared LOCAL SERVICE and task requests | another process running as LocalService can read the task requests in `state\requests`, forge task results (display and journal only) and replay a signed request before it expires (one extra sealing attempt) — per-task SIDs would close this (ADR-0007 section 8) |
+| TÜRKTRUST over plain HTTP | with `[tsa] allow_plain_http` the username and password cross the network in clear text in every stamp request; the banner (`credentials_in_clear`) stays up while it is on. Use it only if HTTPS does not work on site (T5, [turktrust.md](turktrust.md)) |
 | Kamu SM password on a command line | the Zamane client takes it as an argument: administrators can see it in the process list during a credit query (ArciAdmin) and during the tasks (LOCAL SERVICE) (ADR-0001) |
 | Python as SYSTEM | ApplySystem runs the installed program's Python as SYSTEM to parse the TOML that ArciAdmin writes (`tomllib`, pydantic), as the installer already does as an administrator; its program folder is writable by administrators only |
 | Hand edit during a browser change | a text editor and the browser at the same time: the agent's `expect` check finds the hand edit at the next request (conflict). Use one way at a time (SETTINGS.md section 7) |
@@ -700,3 +712,55 @@ Audit entries of the two pages (`target` `null`; details integers and strings on
 |---|---|
 | `compliance.report_export` | `sha256` (of the PDF), `ok`, `warning`, `error`, `neutral` (the number of cards per state) |
 | `compliance.config_backup_confirm` | `config_sha256` (of `arcilogger.toml` when it was confirmed) |
+
+## 17. Time stamping: TÜRKTRUST, revocation lists and the proxy
+
+Wave 5 design §2.4 and D13; operator guides: [ZAMAN-DAMGASI.md](ZAMAN-DAMGASI.md) /
+[TIME-STAMPING.md](TIME-STAMPING.md), [turktrust.md](turktrust.md).
+
+**Özet (TR).** Bir zaman damgası, yeniden damgalama ya da iptal listesi indirmesi sunucudan hiçbir
+log satırı çıkarmaz: damga isteği yalnızca özet taşır. TÜRKTRUST kullanıcı adı ve parolası
+`secrets.json` içinde `secret.key` ile şifreli durur; `arcilogger.toml`'a, loglara, hata
+metinlerine, API yanıtlarına ve denetim kaydına hiçbir zaman yazılmaz. Kullanıcı adı ya da parola
+taşıyan bir `[tsa] url` reddedilir ve değeri hata metninde tekrarlanmaz. HTTP Basic kimlik
+doğrulaması varsayılan olarak yalnızca HTTPS üzerinden gider; sunucu sertifikası Windows'un güven
+deposuyla doğrulanır ve bu doğrulama kapatılamaz. Yönlendirmeler izlenmez: parola başka bir
+sunucuya gitmez. Düz HTTP yalnızca `[tsa] allow_plain_http` ile, tarayıcıda yazılı onayla açılır;
+sunucu onaysız geçişi reddeder ve açık kaldıkça uyarı şeridi gösterilir. İptal listeleri yalnızca
+indirilir; imzası doğrulanmayan liste saklanmaz, hiçbir liste silinmez, programda hiçbir SİL adresi
+yazılı değildir. Vekil sunucu kimlik bilgisi almaz.
+
+- **Only hashes leave the server.** A day's stamp sends the manifest's hash, a re-stamping the
+  SHA-256 of a renewal record that itself lists hashes only, the stamp test the hash of 1 KB of
+  random bytes.
+- **The TÜRKTRUST credentials** (`turktrust.username`, `turktrust.password`) are browser secrets
+  like Kamu SM's: written by ArciAdmin into `secrets.json` (Fernet under `secret.key`), shown as
+  "Kayıtlı ✓" and never returned (section 14). The config models never repeat a refused value
+  (`hide_input_in_errors`): a `[tsa] url` or a CRL URL that carries a username or password is
+  refused without its value. In this release the account is cleared at the console only
+  (`secret delete`, W5-T-1); every change is audited without its value (section 11).
+- **Transport.** The provider sends `Authorization: Basic` (RFC 7617, UTF-8) on an unredirected
+  header, over HTTPS by default, with the system's default TLS context (certificate and host name
+  verified against the Windows trust store; no setting turns it off). A redirect is reported as
+  the error it is and never followed, so the header never reaches another host (W5-T-2).
+- **Plain HTTP** needs `[tsa] allow_plain_http`; without it an `http://` URL for `turktrust` is a
+  configuration error. In the browser it is the `turktrust-http` choice, behind re-authentication
+  and the typed `HTTP` phrase; the API refuses the switch without `confirm`
+  (`tsa_plain_http_confirm_required`, W5-T-4). While it is on, the legal-status banner shows
+  `credentials_in_clear` to every signed-in user (section 12, residual risks).
+- **Revocation lists** (`CrlFetch`, LOCAL SERVICE): downloads only, at most 20 MB a list, through
+  `[network] https_proxy` when it is set. A list is stored byte for byte only after its signature
+  verifies with a pinned root or an intermediate seen in a stamp; nothing is ever deleted.
+  `state\crl` is protected: the tasks write, ArciApi and ArciWorker read. No CRL URL is written in
+  the code (K10; a test fails if one appears): the addresses come from `[tsa] crl_urls` or from the
+  certificates.
+- **Re-stamping** (`Renew`, LOCAL SERVICE) writes `state\renewal\renewal.json` in a protected
+  folder (the tasks write, ArciApi and ArciWorker read), so no service can fake "nothing due".
+- **The proxy** (`[network] https_proxy`) is `http://host:port` with no credentials; the Zamane
+  client does not use it.
+- **Strict outbound**: the `ARCILOGGER Out TURKTRUST`, `Out CRL` and `Out Proxy` rules open only
+  the configured hosts and ports; ApplySystem keeps them up to date after a browser change and
+  never removes one ([TIME-STAMPING.md](TIME-STAMPING.md) section 1).
+- **Legal grade** is a technical mark, not a legal assessment: TÜRKTRUST production stamps count
+  by the product owner's decision, under the same root-fingerprint check as Kamu SM. No site
+  setting adds another legal provider. Legal review is recommended.
