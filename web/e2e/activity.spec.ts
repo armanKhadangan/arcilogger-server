@@ -6,8 +6,9 @@ import { SAMPLE_TODAY } from './samples';
 
 /*
  * Canlı Durum (contract W5 §6, M1–M3, N6, P3): the internet lines over SNMP on top, "Şu an"
- * below: who sends and receives data in the last 1, 5 or 15 minutes. The answers come from
- * `mock-activity.ts` (built from the captured people until W5-M and W5-N are captured).
+ * below: who sends and receives data in the last 1, 5 or 15 minutes. The lines are W5-N's
+ * captured `activity-wan.json`; "Şu an" is built from the captured people until W5-M's answers
+ * are captured (`mock-activity.ts`).
  */
 
 function lastQuery(api: MockApi, path: string): URLSearchParams | undefined {
@@ -32,10 +33,12 @@ test.describe('Canlı Durum', () => {
     const api = await mockApi(page, { signedInAs: 'tolga' });
     await openActivity(page);
 
-    // The lines: rate now, share of a known capacity, the 60-minute chart.
+    // The captured lines: `wan1` with its rate and share of a known capacity, `wan2` not
+    // answering, `ether1` with SNMP off.
     const lines = page.getByRole('region', { name: 'İnternet hattı' });
     await expect(lines.getByRole('heading', { name: 'wan1' })).toBeVisible();
     await expect(lines.getByRole('heading', { name: 'wan2' })).toBeVisible();
+    await expect(lines.getByRole('heading', { name: 'ether1' })).toBeVisible();
     await expect(lines).toContainText('kapasitenin %');
     expect(lastQuery(api, '/activity/wan')?.get('range')).toBe('60m');
 
@@ -62,12 +65,13 @@ test.describe('Canlı Durum', () => {
     ).toHaveAttribute('aria-pressed', 'true');
   });
 
-  test('a line that does not answer, and no line at all', async ({ page }) => {
-    await mockApi(page, { signedInAs: 'tolga', activity: { lineDown: true } });
+  test('a line that does not answer, one with SNMP off, and no line at all', async ({ page }) => {
+    await mockApi(page, { signedInAs: 'tolga' });
     await page.goto('/activity');
     const lines = page.getByRole('region', { name: 'İnternet hattı' });
     await expect(lines.getByText(/^Cihaz yanıt vermiyor/)).toBeVisible();
-    await expect(lines.getByText('Henüz ölçüm yok.')).toBeVisible();
+    await expect(lines.getByText(/^SNMP kapalı/)).toBeVisible();
+    await expect(lines.getByText('Henüz ölçüm yok.').first()).toBeVisible();
 
     await page.unrouteAll({ behavior: 'ignoreErrors' });
     await mockApi(page, { signedInAs: 'tolga', activity: { noLines: true } });
@@ -104,7 +108,7 @@ for (const theme of ['light', 'dark'] as Theme[]) {
   test(`Canlı Durum accessibility — ${theme}`, async ({ page }) => {
     await usePreferences(page, { theme });
     await useSampleClock(page, SAMPLE_TODAY);
-    await mockApi(page, { signedInAs: 'tolga', activity: { lineDown: true } });
+    await mockApi(page, { signedInAs: 'tolga' });
     await page.goto('/activity');
     await expect(
       page.getByRole('table', { name: 'Şu an veri gönderip alanlar' }).getByRole('row').nth(1),

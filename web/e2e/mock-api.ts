@@ -351,7 +351,7 @@ export interface MockOptions {
   revoke?: Partial<Record<Role, string[]>>;
   /** Usage analytics: pseudonyms for `usage.anonymous` viewers, no traffic, a failing rebuild. */
   usage?: UsageOptions;
-  /** Canlı Durum: no SNMP line, a line that does not answer (`mock-activity.ts`). */
+  /** Canlı Durum: no SNMP line (`mock-activity.ts`). */
   activity?: ActivityOptions;
   /** The licence state at start (default: the trial, every module on). */
   license?: LicenseOptions;

@@ -1,16 +1,15 @@
 /**
  * Canlı Durum's API (`/activity/devices` W5-M, `/activity/wan` W5-N; contract W5 §6 M2, M3,
- * N6) for the e2e mock. Until those back ends merge and their answers are captured
- * (`capture_api_samples.py`), the answers are built here from the captured people of
- * `usage.json`, with the types of `src/lib/activity-types.ts` and fictional example data only;
- * a captured sample replaces each part when it exists (W5-P-9).
+ * N6) for the e2e mock. `/activity/wan` answers W5-N's captured `activity-wan.json`.
+ * `/activity/devices` is built here from the captured people of `usage.json`, with the types
+ * of `src/lib/activity-types.ts` and fictional example data only, until W5-M's answers are
+ * captured (W5-P-9).
  */
 
 import type {
   ActivityDevices,
   ActivityRow,
   ActivityWindow,
-  WanLine,
   WanRange,
   WanRates,
 } from '../src/lib/activity-types';
@@ -18,7 +17,7 @@ import type { SubjectRef } from '../src/lib/api-types';
 
 import type { MockUser, RecordedCall } from './mock-api';
 import type { Answer, MockHost } from './mock-records';
-import { USAGE } from './samples';
+import { ACTIVITY_WAN, copy, USAGE } from './samples';
 
 /** What the activity mock needs from the main mock. */
 export interface ActivityHost extends MockHost {
@@ -26,10 +25,8 @@ export interface ActivityHost extends MockHost {
 }
 
 export interface ActivityOptions {
-  /** No source has SNMP on: `/activity/wan` answers no lines. */
+  /** No source has SNMP on: `/activity/wan` answers the captured `empty`. */
   noLines?: boolean;
-  /** The second line's device does not answer (`timeout`). */
-  lineDown?: boolean;
 }
 
 /** "Now" of the mock's answers: the sample clock's day at 14:35:20 site time. */
@@ -112,39 +109,6 @@ function devices(window: ActivityWindow): ActivityDevices {
   };
 }
 
-function line(
-  source: string,
-  name: string,
-  range: WanRange,
-  status: WanLine['status'],
-  capacity: { down: number; up: number } | null,
-  level: number,
-): WanLine {
-  const step = range === '60m' ? 15_000 : 60_000;
-  const count = range === '60m' ? 240 : 1_440;
-  const ok = status === 'ok';
-  const series = ok
-    ? Array.from({ length: count }, (_, index) => ({
-        time: iso(NOW - (count - 1 - index) * step),
-        download_bps: level * (0.55 + 0.25 * Math.sin(index / 9)),
-        upload_bps: level * 0.12 * (0.6 + 0.3 * Math.cos(index / 7)),
-      }))
-    : [];
-  const last = series.at(-1);
-  return {
-    source,
-    name,
-    oper_status: ok ? 'up' : null,
-    download_bps: last ? last.download_bps : null,
-    upload_bps: last ? last.upload_bps : null,
-    capacity_mbps: capacity,
-    series,
-    status,
-    updated_at: last ? last.time : null,
-    last_error_at: ok ? null : iso(NOW - 11 * 60_000),
-  };
-}
-
 export class ActivityMock {
   constructor(readonly options: ActivityOptions = {}) {}
 
@@ -183,19 +147,9 @@ export class ActivityMock {
     const asked = call.query.get('range') ?? '60m';
     if (asked !== '60m' && asked !== '24h') return host.error(422, 'validation_error');
     const range: WanRange = asked;
-    const lines = this.options.noLines
-      ? []
-      : [
-          line('fortigate', 'wan1', range, 'ok', { down: 500, up: 100 }, 180_000_000),
-          line(
-            'fortigate',
-            'wan2',
-            range,
-            this.options.lineDown ? 'timeout' : 'ok',
-            null,
-            40_000_000,
-          ),
-        ];
-    return [200, { range, lines, generated_at: iso(NOW) } satisfies WanRates];
+    // The captured answers: `hour` for 60m, `day` for 24h (each with its own range), `empty`.
+    if (this.options.noLines) return [200, { ...copy(ACTIVITY_WAN.empty), range }];
+    const captured: WanRates = range === '60m' ? ACTIVITY_WAN.hour : ACTIVITY_WAN.day;
+    return [200, copy(captured)];
   }
 }
