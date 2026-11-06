@@ -498,7 +498,7 @@
       "breaks": "Breaks",
       "preview": "Preview",
       "applyAll": "Apply to all days",
-      "applyAllFrom": "Apply the hours of {{day}} to all days",
+      "applyAllFrom": "Apply to all days ({{day}}'s hours)",
       "dayStart": "{{day}}: work starts",
       "dayEnd": "{{day}}: work ends",
       "breakStart": "{{day}}: break {{number}} starts",
@@ -507,6 +507,7 @@
       "addBreak": "Add a break",
       "addBreakFor": "Add a break on {{day}}",
       "stripOff": "{{day}}: no work",
+      "stripInvalid": "{{day}}: the hours are not valid",
       "stripWork": "{{day}}: work {{hours}}, no breaks",
       "stripBreaks": "{{day}}: work {{hours}}, breaks {{breaks}}"
     },

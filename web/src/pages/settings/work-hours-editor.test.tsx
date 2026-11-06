@@ -147,6 +147,33 @@ describe('the work-hours editor', () => {
     );
   });
 
+  it('keeps the focus in the row when a break goes, and names a day with invalid hours', async () => {
+    serve(STORED);
+    const field = await editor();
+    const user = userEvent.setup();
+    const add = within(field).getByRole('button', { name: 'Perşembe için mola ekle' });
+    await user.click(add);
+    await user.click(within(field).getByRole('button', { name: 'Perşembe 1. molayı kaldır' }));
+    // The remove button went with its break: the focus moves to the row's "Mola ekle".
+    await waitFor(() => {
+      expect(add).toHaveFocus();
+    });
+    // A work day whose hours cannot be read is not "mesai yok".
+    const end = within(field).getByLabelText('Perşembe mesai bitişi');
+    await user.clear(end);
+    await user.type(end, '07:00');
+    expect(
+      within(field).getByRole('img', { name: 'Perşembe: saatler geçersiz' }),
+    ).toBeInTheDocument();
+    act(() => {
+      setLanguage('en');
+    });
+    // English: the accessible name starts with the visible text (WCAG 2.5.3).
+    expect(
+      within(field).getByRole('button', { name: "Apply to all days (Monday's hours)" }),
+    ).toHaveTextContent('Apply to all days');
+  });
+
   it('reads stored breaks and per-day hours back without changing them', async () => {
     const stored = {
       days: [1, 2, 3, 4, 5, 6],
