@@ -4083,8 +4083,8 @@ P4 is Gülşah's (#203, 23:40Z); it follows W5-N (#207) and the answers of 2026-
   P4 takes #221's hunks of `useActivityWan`, `nav.activity` and `e2e/samples.ts`
   `ACTIVITY_WAN` word for word; only `api-hooks.ts` then differs (#221 adds the devices hook
   beside it), and the later pull request keeps both. The rate texts of the card
-  (`formatBps`, `capacityShare`, `shareText`) repeat #221's `activity-model.ts`; once both
-  have merged, the card can import them from there. The e2e Panel routes `/activity/wan` to
+  (`formatBps`, `capacityShare`, `shareText`) repeated #221's `activity-model.ts`; with both
+  merged, `wan-model.ts` takes them from there. The e2e Panel routes `/activity/wan` to
   the captured answer itself.
 - **W5-P-17: the review names the SNMP fields.** A source's change row lists its SNMP table
   field by field ("fw-1 · SNMP: WAN arayüzleri") and names the two keys

@@ -5,8 +5,10 @@
  */
 
 import type { WanLine, WanRates } from '@/lib/activity-types';
-import { formatNumber, type Lang } from '@/lib/format';
 import { hasAny } from '@/lib/permissions';
+
+/** The rate texts are Canlı Durum's, so the card and the page say the same (W5-P-16). */
+export { capacityShare, formatBps, shareText } from '@/pages/activity/activity-model';
 
 /** Who may read the line speed (N6). */
 export const WAN_PERMISSIONS: readonly string[] = ['dashboard.view', 'system.read'];
@@ -42,24 +44,4 @@ export function sparkValues(line: WanLine, direction: 'download' | 'upload'): nu
   return line.series.map(
     (point) => (direction === 'download' ? point.download_bps : point.upload_bps) / 1_000_000,
   );
-}
-
-/** "12,4 Mbit/s", "850 kbit/s", "1,2 Gbit/s"; "—" before the first sample (as Canlı Durum). */
-export function formatBps(bps: number | null, lang: Lang): string {
-  if (bps === null || !Number.isFinite(bps)) return '—';
-  if (bps >= 1_000_000_000) return `${formatNumber(bps / 1_000_000_000, 2, lang)} Gbit/s`;
-  if (bps >= 1_000_000) return `${formatNumber(bps / 1_000_000, 1, lang)} Mbit/s`;
-  return `${formatNumber(bps / 1_000, 0, lang)} kbit/s`;
-}
-
-/** A rate's share of the line's capacity (Mbit/s as configured), or `null` when unknown. */
-export function capacityShare(bps: number | null, capacityMbps: number | undefined): number | null {
-  if (bps === null || !capacityMbps || capacityMbps <= 0) return null;
-  return bps / (capacityMbps * 1_000_000);
-}
-
-/** "%37" (Turkish) or "37%" (English); above 100 % stays as measured. */
-export function shareText(share: number, lang: Lang): string {
-  const value = formatNumber(Math.round(share * 100), 0, lang);
-  return lang === 'en' ? `${value}%` : `%${value}`;
 }
