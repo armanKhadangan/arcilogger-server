@@ -39,7 +39,7 @@ in every state. Prices are not part of the product.
 | Key | Module | Türkçe | Content | Needs |
 |---|---|---|---|---|
 | `core_5651` | 5651 Core | 5651 Temel | Log collection, sealing, retention, 5651 lookups, evidence packages, devices and persons, alerts, audit log | — (always on) |
-| `usage_analytics` | Usage analytics | Kullanım analizi | Estimated usage time per person, device, site and category, with exports: the **Kullanım** page and the dashboard's usage sections | — |
+| `usage_analytics` | Usage analytics | Kullanım analizi | Estimated usage time per person, device, site and category, with exports: the **Kullanım** page, the dashboard's usage sections and **Canlı Durum**'s table of who is sending and receiving data now | — |
 | `usage_reports` | Scheduled usage reports | Zamanlanmış kullanım raporları | Scheduled usage reports made and e-mailed by the server: the **Raporlar** page | Usage analytics |
 | `bulk_import` | Bulk import (CSV) | Toplu içe aktarma (CSV) | Bulk import of persons and device assignments from CSV files (Cihazlar ve Kişiler → the import part of the **Aktarım** tab); manual entry and the CSV exports are always available | — |
 
@@ -115,7 +115,7 @@ licence state.
 | `/compliance` | Uyum Durumu: the ten check cards, the status report (PDF), the configuration backup confirmation | 5651 Core |
 | `/legal-status` | Legal-validity status: the banner on every page (every signed-in user) | 5651 Core |
 | `/system` | System page: resource use, disk forecast, database size, services, scheduled tasks, clock | 5651 Core |
-| `/activity` | Canlı Durum: `/activity/wan`, the internet line's speed (the WAN interface counters read over SNMPv3; no person data); base product | 5651 Core |
+| `/activity` | Canlı Durum: `GET /activity/devices`, who is sending and receiving data now (per person). `GET /activity/wan`, the internet line's speed (the WAN interface counters read over SNMPv3; no person data), is not gated: base product (5651 Core) | Usage analytics |
 | `/archive-reloads` | Archive reload: days older than the database window asked back from the sealed vault, and their progress | 5651 Core |
 | `/usage` | The data of the Kullanım page, exports, rebuilds | Usage analytics |
 | `/reports` | Scheduled reports, runs, preview | Scheduled usage reports |
@@ -145,6 +145,7 @@ data of a module that is off is not deleted.
 | `usage.requests` | Usage analytics | skipped |
 | `usage.daily` | Usage analytics | skipped |
 | `usage.today` | Usage analytics | skipped |
+| `activity.tick` (a thread of the worker, recorded in `job_runs`) | Usage analytics (Canlı Durum's table of who sends and receives) | idles; one `skipped` row a day |
 | `usage.reattribute` | Usage analytics | skipped |
 | `usage.retention` | — (deletion of personal data) | always runs |
 | `db.window` | 5651 Core (the database window: log rows older than it dropped) | always runs |

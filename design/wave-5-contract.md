@@ -3664,6 +3664,132 @@ The manager took P1 and P2 (#203, comment of 2026-11-05); P3 and P4 stay with G�
     `USAGE_POLL_MS` = 60 s;
   - `web/scripts/capture_api_samples.py`: the captured refusal of W5-P-2.
 
+## Deviations — W5-M (2026-11-06)
+
+- **W5-M-1: the engine reads a range (granted on #201, 2026-11-06 01:17Z).**
+  `worker/src/arcilogger_worker/usage/engine.py` gets two entry points: `DayBuilder(..., window=(lo,
+  hi))`, whose buckets cover `[lo, hi)` instead of a site day, each minute's part (K2) from its own
+  day's hours and breaks (a window across midnight); and `read_range(session, builder, *,
+  settings)`, `compute_day`'s reading loop, which `compute_day` now calls. They are a refactor of
+  `compute_day` for M2, not a new counting rule: the usage golden, break and API tests pass
+  unchanged. A window is whole minutes (`ValueError` otherwise). The worker's snapshot
+  (`arcilogger_worker.activity`, W5-M-4) reads a window's `cells`, `flow_list`, `subjects`,
+  `subject_ips` and `newest`.
+- **W5-M-2: the shapes M2 does not name** (the questions of #205, accepted at its review):
+  `top_domains` are `{domain, kind, bytes}` and `top_apps` `{app, bytes}` (download plus upload in
+  the window); the rates are bits per second as numbers; `totals` has the bytes, rates, `sessions`
+  and `subjects` (subjects with traffic, persons left out of the rows included); `per_minute` is
+  `{minute, download_bytes, upload_bytes}`, oldest first. `sessions` are the sessions started in
+  the window, each counted once, for the subject of the minute it started in. `last_seen` is the
+  end of the subject's newest minute with traffic, at most `data_until`: the snapshot keeps no
+  newest row per subject. `warming_up` (new, `true` while the worker's snapshot does not cover
+  the last 60 minutes yet, while there is no snapshot, and while it is more than 2 minutes old:
+  a quiet site's file is rewritten when the minute rolls) tells the page that the numbers are
+  still incomplete. The top domains and applications are summed
+  from each minute's 5 largest, so they are approximate. The snapshot keeps, per person or
+  device subject, only the address its row shows (`subject.ip`): `Directory.resolve` takes the
+  kind and the MAC from the key, and the row has no department, so the VLAN is not kept.
+- **W5-M-3: one snapshot for every window.** The rows, totals and `per_minute` are sums of the
+  snapshot's minutes: the last `window` minutes, and the last 60, both ending with the minute
+  under way. Persons with `usage_excluded`, access, the KVKK notice and pseudonyms are applied
+  when the API answers, never in the file. A long connection's bytes appear as its interim logs
+  come, about every 120 s, so the 1-minute window is often empty (X-B1).
+- **W5-M-4: M2 counts through an incremental snapshot; M4's guard redefined** (the owner's
+  decision on #201, 2026-11-06 02:07Z). A request that read its range would read 75 minutes of
+  logs at 2,000 lines/s, about 9 million lines. Instead the worker's `activity.tick` (every
+  10 s, module `usage_analytics`) keeps `state/activity.json` (`Layout.activity`): per minute and
+  subject of the last 60 minutes the bytes, the largest destinations and applications, and the
+  sessions started, counted by the engine (`DayBuilder(..., window=...)`, `add_ip`), so the
+  increment rule, attribution, names and background rules are Kullanım's.
+  - Rows are read by id, in pages, above the table's highest id of 5 s before (`ID_MARGIN`, ten
+    times ingest's 0.5 s flush; from the id sequence, not `max(id)`), and each id is counted
+    once: a batch committed late is not lost. Each tick's read covers the rows of the last
+    5 minutes (`LATE_ROWS`), not the whole range: a row committed more than 5 minutes after its
+    time is left to the day's rollup (the warm-up's slices read it when its time is not yet
+    covered). So a device whose clock is more than 5 minutes behind does not appear in "Şu an";
+    the usage reports count it; device clocks are synced with NTP (DEVICE-SETUP). The bound stays
+    for Wave 5 (the owner's re-review of #211, 2026-11-06): an id-only read needs a new index.
+  - A session's logs are kept while it can still log (its newest an interim log younger than
+    `usage.session_overlap_seconds`); it is counted again when logs come for it, and counted
+    whole once more when it ends. A session that logs again after it ended (a pause longer than
+    the overlap, or a log committed after its final one) is looked up when its first new row
+    says it ran for at least 60 s: the count of its earlier logs is taken back and it goes on
+    with all of them, so nothing is counted twice. A session whose logs all leave the read range
+    is over. Over a whole day, also fed tick by tick with a moving clock, the snapshot's bytes
+    per subject and hour, and per destination, equal `compute_day`'s
+    (`worker/tests/test_activity.py`). A session's web
+    filter and application logs are read when it is first counted, its DNS answers (the newest
+    for its address before its start) only when no such log names it.
+  - **Its own thread** (the owner's decision on #201, 2026-11-06 07:08Z): `activity.tick` is not
+    a job of the loop but a thread of the worker process (`activity.Runner`) with its own
+    database engine, so no job waits on it. It starts and stops with the service; on the stop
+    event the tick under way ends after its current chunk or page and the file is still written
+    whole; the service waits for it at most 20 s (WinSW allows 30 s) and logs when it did not
+    stop. The licence gate runs inside the tick's error handling, through the thread's engine.
+    While `usage_analytics` is off it idles and asks again at each tick (one `skipped` row a
+    site day, LISANS §2.3); the API's gate stays. Its ticks are recorded in `job_runs` as
+    `activity.tick` at most once a minute (`ok`, or `failed` when the last tick failed, with the
+    ticks, the newest tick's seconds and the sessions waiting), and it shows in
+    `worker-status.json` (`"thread": true`), so the Sistem page and `R20-job` see a stuck or
+    failing tick. A failed tick is logged; the next one waits longer (up to 5 minutes).
+  - A tick reads and sorts the new rows, then counts in chunks for up to 7 s: the sessions that
+    ended, the warm-up slices (5 s of logs each, over the last 60 minutes and the overlap after a
+    start), the open sessions whose logs changed. Until all is counted the answer says
+    `warming_up`.
+  - The file holds subject keys, their VLAN, MAC and address, and per minute the whole bytes, the
+    sessions started and the 5 largest destinations (a registrable domain, a service or an
+    address) and applications through name tables: no name, user, URL or raw line. It is sparse,
+    replaced whole through a renamed temporary file (not fsynced: rewritten every tick and
+    rebuilt from the logs after a restart), only when it changed, and only the subject-minutes
+    whose totals changed are put together again. Its name tables hold only the names its minutes
+    use. Memory is bounded: subjects and minutes leave with the 60 minutes, and at most 200,000
+    ended sessions wait to be counted (beyond that the oldest are dropped, and it is logged).
+  - **M4's guard, as redefined with the thread** (`perf` tests, measured on the cloud container
+    and in the CI perf job):
+    - (a) a request answers from the snapshot in under 1 s at the default subject count
+      (`api/tests/test_activity_performance.py`);
+    - (b) at 2,000 lines/s for 30 ticks, the sessions waiting to be counted at the end are no
+      more than after the warm-up, and `data_until` is never more than 30 s behind the newest
+      traffic row;
+    - (c) while the thread counts at that load, a probe job of the loop (due every 2 s) starts
+      within 2 s of when it is due, at every tick (`worker/tests/test_activity_performance.py`;
+      the ticks are paced to the probe's 2 s, faster than the 10 s they cover).
+  - The load is synthetic, shaped like `tools/loadgen` (its sites, durations and 120 s interim
+    interval): 1,000 devices, about 575 sessions/s, about 30,700 sessions open at once. The
+    95 minutes before "now" are written at full density (11.3 million lines at 2,000 lines/s,
+    about 15 minutes to write here), so each tick's read meets the table it would meet on site.
+  - Measured on the cloud container (4 shared cores, PostgreSQL on the same machine):
+
+    | | default load (3 lines/s, 100 devices) | 2,000 lines/s |
+    |---|---|---|
+    | (a) answer from the snapshot | 0.31 s at 200 subjects (the guard); 0.57–1.1 s at 1,000 (recorded) | — |
+    | (b) sessions waiting after 30 ticks / after warm-up | 0 / 0 | 0 / 0 |
+    | (b) `data_until` behind the newest row | 0 s | 0 s |
+    | (c) the probe job late, at most | 0.66 s | 1.74 s |
+    | a tick: mean / max | 0.04 s / 0.18 s | 2.54 s / 3.87 s |
+    | warm-up: ticks / longest | 2 / 5.0 s | 74 / 7.8 s |
+    | snapshot file / longest write | 255 KB / 0.16 s | 6.4 MB / 1.4 s |
+
+    The probe's lateness includes the loop's own pause of up to 1 s between its rounds.
+
+    Before the thread (the 06:10Z question on #201), at 2,000 lines/s the work of 10 s of logs
+    was 1.6–1.9 s of the loop's time: ticks in the loop took 1.8–2.4 s.
+- **W5-M-5: files outside the ownership of §6.6.** `worker/src/arcilogger_worker/usage/engine.py`
+  (W5-M-1); `worker/tests/test_usage_window.py` (the window across midnight);
+  `core/src/arcilogger_core/layout.py` (`Layout.activity`, as W5-N's `wan_rates`), the job's
+  rows in CORRELATION and LISANS/LICENSING §2.3 (granted on #201, 02:07Z), and the thread's
+  start/stop hunk of `worker/src/arcilogger_worker/service.py` and
+  `worker/tests/test_service.py` (granted on #201, 07:08Z); `api/tests/test_errors_and_app.py`
+  (`/activity` among the mounted routers); `docs/CANLI-DURUM.md` and `docs/LIVE-STATUS.md` §2
+  (sessions, last seen, the snapshot, the warm-up and late logs; W5-F-3, asked on #201 07:08Z);
+  `api/tests/test_license_routes.py` and LISANS/LICENSING §1 and §2.2 (`/activity` and the
+  `usage_analytics` row, granted on #201, 01:19Z); `web/src/lib/api-types.test.ts` and
+  `api-samples.test.ts` (`activity-types.ts` in `TYPES_FILES`, the `activity` samples; with
+  W5-N merged, no activity interface is left in `NOT_SCHEMAS`); `web/scripts/capture_api_samples.py`
+  (`activity.json`); after W5-N, `api/src/arcilogger_api/routers/activity.py` mounts both routes
+  (`/devices` with the module gate on the route, `/wan` without) and LISANS/LICENSING §2.2 have
+  one `/activity` row with both halves.
+
 ## Deviations — W5-T (2026-11-06)
 
 Recorded on #204, from the manager's answers of 2026-11-06.

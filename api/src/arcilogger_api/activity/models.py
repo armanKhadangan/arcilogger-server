@@ -55,13 +55,13 @@ class ActivityRow(BaseModel):
     upload_bytes: int
     download_bps: float
     upload_bps: float
-    #: Traffic log rows (sessions) of the subject in the window.
+    #: Sessions started in the window, each counted once.
     sessions: int
     #: At most 3, by bytes; background traffic excluded.
     top_domains: list[ActivityDomain]
     #: At most 3, by bytes.
     top_apps: list[ActivityApp]
-    #: The newest traffic row of the subject.
+    #: The end of the subject's newest minute with traffic (at most ``data_until``).
     last_seen: datetime
 
 
@@ -87,7 +87,8 @@ class ActivityMinute(BaseModel):
 class ActivityDevices(BaseModel):
     """``GET /activity/devices`` (M2)."""
 
-    window: ActivityWindow
+    #: Minutes: 1, 5 or 15 (:data:`ActivityWindow`).
+    window: int
     #: Sorted by download, at most 200.
     rows: list[ActivityRow]
     #: More subjects had traffic than ``rows`` holds.
@@ -97,6 +98,9 @@ class ActivityDevices(BaseModel):
     per_minute: list[ActivityMinute]
     #: The newest traffic row (null with none).
     data_until: datetime | None
+    #: The worker's snapshot does not cover the last 60 minutes yet (after a start, or none
+    #: written), or it is more than 2 minutes old (the worker stopped): the figures are partial.
+    warming_up: bool
     generated_at: datetime
 
 

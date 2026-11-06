@@ -39,6 +39,11 @@ Jobs (``DEFAULT_JOBS``):
 ``usage.reattribute``       every 10 minutes: recent days whose inputs or device owners
                             changed are rebuilt (``usage.auto_rebuild_days``)
 ``usage.requests``          every 30 seconds: rebuild requests of the web interface
+``activity.tick``           its own thread, not the loop (W5-M; :class:`.activity.Runner`):
+                            every 10 seconds the new traffic logs counted into Canlı
+                            Durum's snapshot of the last 60 minutes, ``state/activity.json``;
+                            a ``job_runs`` row at most once a minute, idle while
+                            ``usage_analytics`` is off
 ``usage.retention``         daily after 03:30: rollups older than ``usage.retention_days``
 ``db.window``               daily after 01:00, so it and its first retry (01:15) are due
                             before the Backup task's dump (01:40): log rows older than the
@@ -97,7 +102,7 @@ import logging
 import os
 import threading
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import date, datetime, time, timedelta
 from pathlib import Path
 from typing import Any, Final
@@ -112,10 +117,10 @@ from arcilogger_core.configwatch import WORKER_HOT, ConfigWatch, ConfigWatcher
 from arcilogger_core.fsutil import atomic_write_text
 from arcilogger_core.layout import Layout
 from arcilogger_core.timeutil import SITE_TZ, site_day, to_site, utc_now
-from arcilogger_db.engine import session_factory
+from arcilogger_db.engine import engine_from_url, make_engine, session_factory
 from arcilogger_db.models import JobRun
 from arcilogger_db.partitions import LockBudget, ensure_partitions, step_lock_timeout_ms
-from arcilogger_worker import __version__
+from arcilogger_worker import __version__, activity
 from arcilogger_worker.admin_jobs import import_admin_events, process_requests
 from arcilogger_worker.alerts.importer import import_alerts
 from arcilogger_worker.alerts.notify import run_notify
@@ -148,6 +153,8 @@ DAILY_RETRY_FIRST: Final = timedelta(minutes=15)
 DAILY_RETRY_MAX: Final = timedelta(hours=4)
 #: Longest retry delay of a failing interval job (its interval doubles per failure up to this).
 INTERVAL_RETRY_MAX: Final = timedelta(minutes=30)
+#: The seconds the service waits for Canlı Durum's thread to stop (WinSW allows 30 s).
+ACTIVITY_JOIN: Final = 20.0
 #: Retry delay while the database is unreachable (no ``job_runs`` row can be written).
 DATABASE_RETRY: Final = timedelta(minutes=1)
 
@@ -515,6 +522,9 @@ class Worker:
     #: test with a configuration of its own).
     config_path: Path | None = None
     reload_seconds: float = RELOAD_SECONDS
+    #: Canlı Durum's snapshot runs in its own thread while :meth:`run` runs (W5-M; a test of
+    #: the loop turns it off).
+    activity: bool = True
 
     def __post_init__(self) -> None:
         self.sessions = session_factory(self.engine)
@@ -551,6 +561,9 @@ class Worker:
             self.config = self.config_watch.config
         #: The status file is rewritten at the next loop (a new ``config`` block).
         self._status_due = False
+        #: Canlı Durum's thread while :meth:`run` runs, and its engine.
+        self.activity_runner: activity.Runner | None = None
+        self._activity_engine: Engine | None = None
 
     @property
     def status_path(self) -> Path:
@@ -788,6 +801,9 @@ class Worker:
     # -- status and loop --------------------------------------------------------------------------
 
     def write_status(self) -> None:
+        jobs = {name: state.as_json() for name, state in self.states.items()}
+        if self.activity_runner is not None:
+            jobs[activity.JOB_NAME] = self.activity_runner.status()
         data = {
             "service": "arcilogger-worker",
             "version": __version__,
@@ -796,7 +812,7 @@ class Worker:
             "started_at": None if self.started_at is None else self.started_at.isoformat(),
             "updated_at": self.clock().isoformat(),
             "database": {None: "unknown", True: "ok", False: "unreachable"}[self.database_ok],
-            "jobs": {name: state.as_json() for name, state in self.states.items()},
+            "jobs": jobs,
         }
         if self.config_watch is not None:  # the configuration in use (contract 2.4.12)
             data["config"] = self.config_watch.status_block()
@@ -813,6 +829,7 @@ class Worker:
         self.state = "running"
         log.info("ARCILOGGER worker %s started", __version__)
         written: datetime | None = None
+        thread = self._start_activity(stop)
         try:
             while not stop.is_set():
                 ran = self.tick()
@@ -824,6 +841,40 @@ class Worker:
                 # handler only runs between them.
                 stop.wait(SLEEP_SECONDS)
         finally:
+            stop.set()
+            if thread is not None:
+                thread.join(ACTIVITY_JOIN)  # it ends its tick after the chunk under way
+                if thread.is_alive():
+                    log.warning(
+                        "activity.tick did not stop within %s s; the service stops without it",
+                        ACTIVITY_JOIN,
+                    )
+            if self._activity_engine is not None:
+                self._activity_engine.dispose()
             self.state = "stopped"
             self.write_status()
             log.info("ARCILOGGER worker stopped")
+
+    def _start_activity(self, stop: threading.Event) -> threading.Thread | None:
+        """Canlı Durum's thread, with its own database engine (the owner's decision on #201)."""
+        if not self.activity:
+            return None
+        self._activity_engine = (
+            make_engine(self.config, application="worker-activity", pool_size=2)
+            if self.config is not None
+            else engine_from_url(self.engine.url, application="worker-activity", pool_size=2)
+        )
+        self.activity_runner = activity.Runner(
+            self._activity_engine,
+            self.layout.activity,
+            gate=lambda now, engine: module_gate(
+                replace(self.context(now), engine=engine, sessions=session_factory(engine)),
+                USAGE_MODULE,
+            ),
+            clock=self.clock,
+        )
+        thread = threading.Thread(
+            target=self.activity_runner.run, args=(stop,), name=activity.JOB_NAME, daemon=True
+        )
+        thread.start()
+        return thread

@@ -39,7 +39,7 @@ Fiyatlar üründe yer almaz.
 | Anahtar | Modül | English | Ne içerir | Gerekir |
 |---|---|---|---|---|
 | `core_5651` | 5651 Temel | 5651 Core | Log toplama, mühürleme, saklama, 5651 sorgusu, kanıt paketleri, cihazlar ve kişiler, uyarılar, denetim kaydı | — (her zaman açık) |
-| `usage_analytics` | Kullanım analizi | Usage analytics | Kişi, cihaz, site ve kategori bazında tahmini kullanım süreleri ve dışa aktarma: **Kullanım** sayfası ve paneldeki kullanım bölümleri | — |
+| `usage_analytics` | Kullanım analizi | Usage analytics | Kişi, cihaz, site ve kategori bazında tahmini kullanım süreleri ve dışa aktarma: **Kullanım** sayfası, paneldeki kullanım bölümleri ve **Canlı Durum**'daki şu an veri gönderip alanlar tablosu | — |
 | `usage_reports` | Zamanlanmış kullanım raporları | Scheduled usage reports | Kullanım raporlarının zamanlanmış olarak üretilip e-postayla gönderilmesi: **Raporlar** sayfası | Kullanım analizi |
 | `bulk_import` | Toplu içe aktarma (CSV) | Bulk import (CSV) | Kişilerin ve cihaz atamalarının CSV dosyasından toplu içe aktarılması (Cihazlar ve Kişiler → **Aktarım** sekmesinin içe aktarma bölümü); elle giriş ve CSV dışa aktarma her zaman açıktır | — |
 
@@ -116,7 +116,7 @@ vermez.
 | `/compliance` | Uyum Durumu: on denetim kartı, Uyum Durumu Raporu (PDF), yapılandırma yedeği onayı | 5651 Temel |
 | `/legal-status` | Yasal geçerlilik durumu: her sayfadaki uyarı bandı (oturum açmış her kullanıcı) | 5651 Temel |
 | `/system` | Sistem sayfası: kaynak kullanımı, disk tahmini, veritabanı boyutu, hizmetler, zamanlanmış görevler, saat | 5651 Temel |
-| `/activity` | Canlı Durum: `/activity/wan`, internet hattının hızı (SNMPv3 ile okunan WAN arayüz sayaçları; kişi verisi yok); temel üründür | 5651 Temel |
+| `/activity` | Canlı Durum: `GET /activity/devices`, şu an kim veri gönderip alıyor (kişi bazında). `GET /activity/wan`, internet hattının hızı (SNMPv3 ile okunan WAN arayüz sayaçları; kişi verisi yok), kilitli değildir: temel üründür (5651 Temel) | Kullanım analizi |
 | `/archive-reloads` | Arşivden yeniden yükleme: veritabanı penceresinden eski günlerin mühürlü kasadan geri istenmesi ve ilerlemesi | 5651 Temel |
 | `/usage` | Kullanım sayfasının verileri, dışa aktarma, yeniden hesaplama | Kullanım analizi |
 | `/reports` | Zamanlanmış raporlar, çalıştırmalar, önizleme | Zamanlanmış kullanım raporları |
@@ -146,6 +146,7 @@ uyarısı açmaz. Kapalı modülün verileri silinmez.
 | `usage.requests` | Kullanım analizi | atlanır |
 | `usage.daily` | Kullanım analizi | atlanır |
 | `usage.today` | Kullanım analizi | atlanır |
+| `activity.tick` (worker'ın bir iş parçacığı, `job_runs`'a kaydedilir) | Kullanım analizi (Canlı Durum'un kim gönderip alıyor tablosu) | bekler; günde bir `skipped` satırı |
 | `usage.reattribute` | Kullanım analizi | atlanır |
 | `usage.retention` | — (kişisel verilerin silinmesi) | her zaman çalışır |
 | `db.window` | 5651 Temel (veritabanı penceresi: pencereden eski log satırlarının düşürülmesi) | her zaman çalışır |

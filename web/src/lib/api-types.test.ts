@@ -67,14 +67,6 @@ const NOT_SCHEMAS = new Set([
   'SourceConfig',
   // archive-reload-types.ts: the `details` of 409 `archive_reload_required`.
   'ArchiveReloadRequired',
-  // activity-types.ts: W5-M's devices answer, written early (day 1, #205). W5-M removes these
-  // when it mounts `GET /activity/devices` and its schemas join the OpenAPI document.
-  'ActivityDomain',
-  'ActivityApp',
-  'ActivityRow',
-  'ActivityTotals',
-  'ActivityMinute',
-  'ActivityDevices',
 ]);
 /** OpenAPI schemas the web app does not use. */
 const UNUSED_SCHEMAS = new Set(['HTTPValidationError', 'ValidationError', 'Health']);
