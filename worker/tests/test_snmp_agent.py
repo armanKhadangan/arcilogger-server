@@ -43,6 +43,10 @@ from arcilogger_worker.snmp.state import read_state
 USER = "arcilogger"
 AUTH_KEY = "authkeyauthkey"
 PRIV_KEY = "privkeyprivkey"
+#: A second user whose keys are outside Latin-1: the device's passphrase is their UTF-8 octets.
+WIDE_USER = "ornek"
+WIDE_AUTH = "Örnekşifre-ğüı"
+WIDE_PRIV = "Gizlişifre-çöğ"
 T0 = datetime(2026, 10, 12, 10, 0, tzinfo=SITE_TZ)
 
 
@@ -85,7 +89,16 @@ def _serve(agent: Agent, ready: threading.Event, stop: list[Any]) -> None:
         config.USM_PRIV_CFB128_AES,
         PRIV_KEY,
     )
+    config.add_v3_user(
+        snmp,
+        WIDE_USER,
+        config.USM_AUTH_HMAC192_SHA256,
+        WIDE_AUTH.encode("utf-8"),
+        config.USM_PRIV_CFB128_AES,
+        WIDE_PRIV.encode("utf-8"),
+    )
     config.add_vacm_user(snmp, 3, USER, "authPriv", (1, 3, 6), (1, 3, 6))
+    config.add_vacm_user(snmp, 3, WIDE_USER, "authPriv", (1, 3, 6), (1, 3, 6))
     snmp_context = context.SnmpContext(snmp)
     builder = snmp_context.get_mib_instrum().get_mib_builder()
     scalar, instance = builder.import_symbols("SNMPv2-SMI", "MibScalar", "MibScalarInstance")
@@ -175,6 +188,23 @@ def test_a_wrong_key_is_auth_failed_and_no_agent_is_timeout(agent: Agent) -> Non
     with pytest.raises(SnmpError) as silent:
         asyncio.run(client.get(_target(_free_port()), [SYS_UPTIME]))
     assert silent.value.status == "timeout"
+
+
+def test_a_key_outside_latin_1_is_sent_as_utf_8(agent: Agent) -> None:
+    wide = Target("127.0.0.1", agent.port, WIDE_USER, "sha256", "aes128", WIDE_AUTH, WIDE_PRIV)
+    values = asyncio.run(PysnmpClient().get(wide, [f"{IF_OPER_STATUS}.1"]))
+    assert values == {f"{IF_OPER_STATUS}.1": 1}
+
+
+def test_a_failure_pysnmp_raises_is_an_snmp_error_without_its_message() -> None:
+    """An IPv6 address (only a hand-edited configuration can carry one) is not a crash."""
+    ipv6 = Target("2001:db8::1", 161, USER, "sha256", "aes128", AUTH_KEY, PRIV_KEY)
+    with pytest.raises(SnmpError) as error:
+        asyncio.run(PysnmpClient().get(ipv6, [SYS_UPTIME]))
+    assert error.value.status == "timeout"
+    assert error.value.detail.isidentifier()  # the exception's type only
+    assert error.value.__cause__ is None
+    assert error.value.__suppress_context__
 
 
 def test_the_job_round_trip(agent: Agent, tmp_path: Path, layout: Layout) -> None:

@@ -152,6 +152,13 @@ def test_snmp_on_a_network_source_is_refused(root: Path, config: Config) -> None
     assert ("snmp_source_is_network", "sources.aps.snmp") in codes(check)
 
 
+def test_snmp_on_an_ipv6_address_is_refused(root: Path, config: Config) -> None:
+    body = update(SNMP, **KEYS)
+    body["source"]["address"] = "2001:db8::1"
+    check = validate_section("sources", config, body, context(root))
+    assert codes(check) == [("source_ipv6_unsupported", "sources.fw-01.address")]
+
+
 def test_v1_v2c_and_no_privacy_are_refused(root: Path, config: Config) -> None:
     for snmp in ({**SNMP, "community": "public"}, {**SNMP, "priv": "none"}):
         check = validate_section("sources", config, update(snmp, **KEYS), context(root))

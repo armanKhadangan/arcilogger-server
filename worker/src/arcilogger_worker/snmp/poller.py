@@ -35,7 +35,7 @@ from arcilogger_worker.snmp.settings import SnmpSource
 from arcilogger_worker.snmp.state import Counters, Line, SourceState
 
 
-def _fail(line: Line, status: Status, now: datetime) -> None:
+def fail(line: Line, status: Status, now: datetime) -> None:
     line.status = status
     line.last_error_at = now
 
@@ -80,12 +80,16 @@ async def poll_source(
     """Poll ``source`` once and update ``state`` (never raises for an SNMP failure)."""
     prepare(source, state)
     state.polled_at = now
-    if state.watched_since is None:
+    if state.watched_since is None:  # SNMP switched (back) on: no line is late yet
         state.watched_since = now
+        for line in state.lines.values():
+            line.watched_since = now
     lines = list(state.lines.values())
+    for line in lines:
+        line.watched_since = line.watched_since or now  # an interface added since
     if target is None:  # a key is missing from the secret store (refused when configured)
         for line in lines:
-            _fail(line, "auth_failed", now)
+            fail(line, "auth_failed", now)
         return
     try:
         if any(line.if_index is None for line in lines):
@@ -101,7 +105,7 @@ async def poll_source(
         values = await client.get(target, oids)
     except SnmpError as exc:
         for line in lines:
-            _fail(line, exc.status, now)
+            fail(line, exc.status, now)
         return
     uptime = _int(values.get(SYS_UPTIME))
     went_back = uptime is not None and state.uptime is not None and uptime < state.uptime
@@ -112,19 +116,19 @@ async def poll_source(
         return
     for line in lines:
         if line.if_index is None:
-            _fail(line, "no_such_interface", now)
+            fail(line, "no_such_interface", now)
             continue
         in_oid, out_oid, oper_oid, speed_oid = _oids(line.if_index)
         octets_in, octets_out = _int(values.get(in_oid)), _int(values.get(out_oid))
         oper = _int(values.get(oper_oid))
         if values.get(oper_oid) is MISSING and octets_in is None and octets_out is None:
             line.if_index, line.counters = None, None  # gone: walk again at the next poll
-            _fail(line, "no_such_interface", now)
+            fail(line, "no_such_interface", now)
             continue
         line.oper_status = OPER_STATUS.get(oper) if oper is not None else None
         line.high_speed_mbps = _int(values.get(speed_oid))
         if octets_in is None or octets_out is None:
-            _fail(line, "snmp_no_hc_counters", now)
+            fail(line, "snmp_no_hc_counters", now)
             continue
         previous = line.counters
         line.counters = Counters(octets_in, octets_out, now)

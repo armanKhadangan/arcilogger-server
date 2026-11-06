@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping, Sequence, Set
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any, Final
@@ -23,7 +23,7 @@ from arcilogger_core.snmp import PysnmpClient, SnmpClient
 from arcilogger_core.timeutil import isoformat_site
 from arcilogger_worker.alerts.store import active_alerts, open_alert, resolve
 from arcilogger_worker.alerts.texts import SNMP_RULE, SNMP_STATUSES
-from arcilogger_worker.snmp.poller import poll_source
+from arcilogger_worker.snmp.poller import fail, poll_source
 from arcilogger_worker.snmp.settings import (
     SECRET_MISSING,
     SnmpSource,
@@ -101,23 +101,33 @@ async def _poll_all(
     for (source, _), found in zip(jobs, targets, strict=True):
         if found is None:
             refused[source.name] = SECRET_MISSING  # polled as auth_failed, no request sent
-    await asyncio.gather(
+    results = await asyncio.gather(
         *(
             poll_source(source, found, client, state, now)
             for (source, state), found in zip(jobs, targets, strict=True)
-        )
+        ),
+        return_exceptions=True,  # one source's failure never stops the others
     )
+    for (source, state), result in zip(jobs, results, strict=True):
+        if isinstance(result, Exception):
+            log.warning("SNMP poll of %s failed: %s", source.name, type(result).__name__)
+            for line in state.lines.values():
+                fail(line, "timeout", now)
+        elif isinstance(result, BaseException):
+            raise result
 
 
 def failing_lines(state: SourceState, now: datetime) -> dict[str, str]:
     """``ifName`` → status of each line without a good read for :data:`ALERT_AFTER`."""
     found: dict[str, str] = {}
     for name, line in state.lines.items():
-        since = line.updated_at or state.watched_since
+        # the later of the last good read and the start of the watch: a read from before SNMP
+        # was switched off and on again does not make a new failure late at once
+        since = max((at for at in (line.updated_at, line.watched_since) if at), default=None)
         if (
             line.status not in ("ok", "disabled")
             and since is not None
-            and now - since >= (ALERT_AFTER)
+            and now - since >= ALERT_AFTER
         ):
             found[name] = line.status
     return found
@@ -162,11 +172,16 @@ def poll_due(
                 line.status = "disabled"
             wan.sources[name].watched_since = None
     if changed:
-        write_state(path, wan, now)
+        try:
+            write_state(path, wan, now)
+        except OSError as exc:  # on Windows while the API reads it: the next poll writes it
+            log.warning(
+                "%s cannot be written now: %s", path.name, exc.strerror or type(exc).__name__
+            )
     failing = {name: failing_lines(state, now) for name, state in wan.sources.items()}
     report.failing = sorted(name for name, lines in failing.items() if lines)
     if sessions is not None:
-        _alerts(sessions, failing, now, report)
+        _alerts(sessions, failing, enabled, now, report)
     _log_refusals(report.refused)
     return report
 
@@ -174,10 +189,12 @@ def poll_due(
 def _alerts(
     sessions: sessionmaker[Session],
     failing: Mapping[str, Mapping[str, str]],
+    polled: Set[str],
     now: datetime,
     report: PollReport,
 ) -> None:
-    """Open ``R20-snmp:<source>`` for each failing source; resolve the others."""
+    """Open ``R20-snmp:<source>`` for each failing source; resolve the others: ``read_again``
+    for a source still polled, ``not_polled`` for one whose SNMP is off or gone."""
     with sessions() as session:
         for source, lines in failing.items():
             if not lines:
@@ -213,7 +230,7 @@ def _alerts(
             source = key.removeprefix(f"{RULE}:")
             if not key.startswith(f"{RULE}:") or failing.get(source):
                 continue
-            reason = "read_again" if source in failing else "not_polled"
+            reason = "read_again" if source in polled else "not_polled"
             resolve(alert, reason=reason, now=now, facts={"at": isoformat_site(now, "seconds")})
             report.resolved.append(source)
         session.commit()

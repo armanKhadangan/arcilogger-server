@@ -114,7 +114,9 @@ def _status_of(indication: object) -> Status:
 
 
 class PysnmpClient:
-    """:class:`SnmpClient` over pysnmp's asyncio API (a new engine for each request)."""
+    """:class:`SnmpClient` over pysnmp's asyncio API (a new engine for each request). Any
+    failure is an :class:`SnmpError`: one the agent did not cause (a bad address, a key pysnmp
+    cannot take) is ``timeout``, named by its type only."""
 
     def _session(self, target: Target) -> tuple[Any, Any]:
         from pysnmp.hlapi.v3arch import asyncio as hlapi
@@ -129,14 +131,31 @@ class PysnmpClient:
         ]
         user = hlapi.UsmUserData(
             target.user,
-            authKey=target.auth_key,
-            privKey=target.priv_key,
+            # bytes: a key outside Latin-1 is its UTF-8 octets, as the device's passphrase
+            authKey=target.auth_key.encode("utf-8"),
+            privKey=target.priv_key.encode("utf-8"),
             authProtocol=auth,
             privProtocol=priv,
         )
         return hlapi.SnmpEngine(), user
 
     async def get(self, target: Target, oids: Sequence[str]) -> dict[str, Value]:
+        try:
+            return await self._get(target, oids)
+        except SnmpError:
+            raise
+        except Exception as exc:  # one N4 code: the message may hold a key
+            raise SnmpError("timeout", type(exc).__name__) from None
+
+    async def walk(self, target: Target, oid: str) -> dict[str, str]:
+        try:
+            return await self._walk(target, oid)
+        except SnmpError:
+            raise
+        except Exception as exc:  # one N4 code: the message may hold a key
+            raise SnmpError("timeout", type(exc).__name__) from None
+
+    async def _get(self, target: Target, oids: Sequence[str]) -> dict[str, Value]:
         from pysnmp.hlapi.v3arch import asyncio as hlapi
 
         engine, user = self._session(target)
@@ -160,7 +179,7 @@ class PysnmpClient:
             raise SnmpError("timeout", f"error-status {int(status)}")
         return {str(oid): _value(value) for oid, value in binds}
 
-    async def walk(self, target: Target, oid: str) -> dict[str, str]:
+    async def _walk(self, target: Target, oid: str) -> dict[str, str]:
         from pysnmp.hlapi.v3arch import asyncio as hlapi
 
         engine, user = self._session(target)

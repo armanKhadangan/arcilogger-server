@@ -1771,6 +1771,9 @@ def _body_sources(body: _Body, data: Mapping[str, Any]) -> None:
             if "snmp_source_is_network" in str(error.get("msg", "")):
                 code = "snmp_source_is_network"  # N1: a single address only
                 part = "snmp"
+            elif "source_ipv6_unsupported" in str(error.get("msg", "")):
+                code = "source_ipv6_unsupported"  # the SNMP transport is IPv4 only
+                part = "address"
             body.error(code, f"sources.{label}.{part}" if known and part else "sources")
         return
     if name is None:

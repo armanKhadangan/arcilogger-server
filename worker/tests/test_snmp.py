@@ -40,6 +40,7 @@ from arcilogger_core.snmp import (
 from arcilogger_core.timeutil import SITE_TZ
 from arcilogger_db.models import Alert
 from arcilogger_worker.alerts import texts
+from arcilogger_worker.alerts.store import AUTO_RESOLVED
 from arcilogger_worker.snmp import job as snmp_job
 from arcilogger_worker.snmp.poller import poll_source
 from arcilogger_worker.snmp.settings import SnmpSource, snmp_sources
@@ -262,6 +263,7 @@ def test_the_state_file_round_trips_and_keeps_its_windows(tmp_path: Path) -> Non
         poll(fake, state, now)
     write_state(path, WanState({"fw-1": state}), now)
     assert not list(path.parent.glob(".*.tmp"))  # written atomically
+    assert path.read_text(encoding="utf-8").count("\n") == 1  # compact: one line, no indent
     wan1 = read_state(path).sources["fw-1"].lines["wan1"]
     assert all(now - at <= SAMPLES_KEEP for at, _, _ in wan1.samples)
     assert len(wan1.samples) == 13  # every 5 minutes for 60 minutes
@@ -388,6 +390,25 @@ def test_snmp_on_a_network_source_is_refused(tmp_path: Path) -> None:
         )
 
 
+def test_snmp_on_an_ipv6_address_is_refused(tmp_path: Path) -> None:
+    """The UDP transport is IPv4 only, as the browser's ``source_ipv6_unsupported``."""
+    with pytest.raises(ValidationError, match="source_ipv6_unsupported"):
+        Config.model_validate(
+            {
+                "data_dir": str(tmp_path),
+                "secrets_dir": str(tmp_path),
+                "sources": [
+                    {
+                        "name": "fw-6",
+                        "type": "fortigate",
+                        "address": "2001:db8::1",
+                        "snmp": {"enabled": True, "user": "u", "interfaces": ["wan1"]},
+                    }
+                ],
+            }
+        )
+
+
 @pytest.mark.parametrize(
     "settings",
     [
@@ -500,6 +521,7 @@ def test_r20_snmp_after_ten_minutes_and_resolved_by_a_good_read(
     with db_session_factory() as session:
         (alert,) = _snmp_alerts(session)
         assert alert.state == "resolved"
+        assert alert.details[AUTO_RESOLVED]["reason"] == "read_again"
 
 
 def test_a_source_that_never_answered_alerts_after_ten_minutes(
@@ -513,11 +535,102 @@ def test_a_source_that_never_answered_alerts_after_ten_minutes(
     report = snmp_job.poll_due(layout, config, now=late, sessions=db_session_factory, client=fake)
     assert report is not None
     assert report.opened == ["fw-1"]
-    # switching SNMP off resolves it
+    # switching SNMP off resolves it: the source is no longer polled
     off = _config(tmp_path, enabled=False)
     report = snmp_job.poll_due(layout, off, now=late, sessions=db_session_factory, client=fake)
     assert report is not None
     assert report.resolved == ["fw-1"]
+    with db_session_factory() as session:
+        (alert,) = _snmp_alerts(session)
+        assert alert.details[AUTO_RESOLVED]["reason"] == "not_polled"
+
+
+def _fails_ten_minutes_after(
+    layout: Layout, config: Config, fake: FakeAgent, start: datetime
+) -> None:
+    """A failing line opens nothing before ``start`` + 10 minutes, and is reported then."""
+    for minutes in (0, 5, 9.5):
+        now = start + timedelta(minutes=minutes)
+        report = snmp_job.poll_due(layout, config, now=now, sessions=None, client=fake)
+        assert report is not None
+        assert report.failing == [], minutes
+    late = start + timedelta(minutes=10)
+    report = snmp_job.poll_due(layout, config, now=late, sessions=None, client=fake)
+    assert report is not None
+    assert report.failing == ["fw-1"]
+
+
+def test_switching_snmp_on_again_starts_the_ten_minutes_again(
+    tmp_path: Path, layout: Layout
+) -> None:
+    """A good read from before SNMP was switched off does not make a new failure late."""
+    _store(tmp_path)
+    fake = agent()
+    snmp_job.poll_due(layout, _config(tmp_path), now=T0, sessions=None, client=fake)
+    off = T0 + timedelta(minutes=1)
+    snmp_job.poll_due(layout, _config(tmp_path, enabled=False), now=off, sessions=None, client=fake)
+    fake.error = "timeout"
+    _fails_ten_minutes_after(layout, _config(tmp_path), fake, T0 + timedelta(hours=1))
+
+
+def test_a_new_interface_has_its_own_ten_minutes(tmp_path: Path, layout: Layout) -> None:
+    _store(tmp_path)
+    fake = agent()
+    snmp_job.poll_due(layout, _config(tmp_path), now=T0, sessions=None, client=fake)
+    added = _config(tmp_path, interfaces=["wan1", "wan9"])  # wan9: no_such_interface
+    fake.tick(15)
+    _fails_ten_minutes_after(layout, added, fake, T0 + timedelta(hours=1))
+    line = read_state(layout.wan_rates).sources["fw-1"].lines["wan9"]
+    assert line.status == "no_such_interface"
+
+
+class _Broken(FakeAgent):
+    """A client that fails with something other than :class:`SnmpError` for one host."""
+
+    async def get(self, target: Target, oids: Sequence[str]) -> dict[str, Value]:
+        if target.host == "172.20.0.2":
+            raise RuntimeError("not an SNMP error")
+        return await super().get(target, oids)
+
+
+def test_one_source_failing_otherwise_does_not_stop_the_others(
+    tmp_path: Path, layout: Layout, caplog: pytest.LogCaptureFixture
+) -> None:
+    store = _store(tmp_path)
+    store.set(snmp_auth_key("core-r1"), AUTH_KEY)
+    store.set(snmp_priv_key("core-r1"), PRIV_KEY)
+    data = _config(tmp_path).model_dump(mode="json")
+    data["sources"][2]["snmp"] = data["sources"][0]["snmp"]
+    config = Config.model_validate(data)
+    fake = _Broken({1: Interface("wan1", 10_000, 20_000)})
+    report = snmp_job.poll_due(layout, config, now=T0, sessions=None, client=fake)
+    assert report is not None
+    assert report.polled == ["fw-1", "core-r1"]
+    sources = read_state(layout.wan_rates).sources
+    assert sources["fw-1"].lines["wan1"].status == "ok"
+    assert sources["core-r1"].lines["wan1"].status == "timeout"
+    assert "SNMP poll of core-r1 failed: RuntimeError" in caplog.text
+
+
+def test_a_state_file_that_cannot_be_written_is_written_at_the_next_poll(
+    tmp_path: Path, layout: Layout, caplog: pytest.LogCaptureFixture, monkeypatch: Any
+) -> None:
+    _store(tmp_path)
+    config, fake = _config(tmp_path), agent()
+
+    def locked(*_args: Any) -> None:
+        raise PermissionError(13, "The process cannot access the file")
+
+    monkeypatch.setattr(snmp_job, "write_state", locked)
+    report = snmp_job.poll_due(layout, config, now=T0, sessions=None, client=fake)
+    assert report is not None
+    assert report.polled == ["fw-1"]
+    assert not layout.wan_rates.exists()
+    assert "wan-rates.json cannot be written now" in caplog.text
+    monkeypatch.setattr(snmp_job, "write_state", write_state)
+    later = T0 + timedelta(seconds=15)
+    snmp_job.poll_due(layout, config, now=later, sessions=None, client=fake)
+    assert read_state(layout.wan_rates).sources["fw-1"].polled_at == later
 
 
 # -- secrets --------------------------------------------------------------------------------------

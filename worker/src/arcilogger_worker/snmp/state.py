@@ -61,6 +61,9 @@ class Line:
     last_error_at: datetime | None = None
     #: The newest good read of the counters.
     updated_at: datetime | None = None
+    #: When the line was first polled since it appeared or SNMP was switched on: the alert's
+    #: clock while it has had no good read since.
+    watched_since: datetime | None = None
     counters: Counters | None = None
     #: (time, download bit/s, upload bit/s), oldest first.
     samples: list[tuple[datetime, float, float]] = field(default_factory=list)
@@ -99,6 +102,7 @@ class Line:
             "status": self.status,
             "last_error_at": _time(self.last_error_at) if self.last_error_at else None,
             "updated_at": _time(self.updated_at) if self.updated_at else None,
+            "watched_since": _time(self.watched_since) if self.watched_since else None,
             "counters": (
                 {"in": counters.octets_in, "out": counters.octets_out, "at": _time(counters.at)}
                 if counters
@@ -122,6 +126,7 @@ class Line:
             status=status,
             last_error_at=_parse(data.get("last_error_at")),
             updated_at=_parse(data.get("updated_at")),
+            watched_since=_parse(data.get("watched_since")),
         )
         if counters:
             at = _parse(counters.get("at"))
@@ -140,8 +145,7 @@ class SourceState:
     #: ``sysUpTime`` of the last answer, in hundredths of a second.
     uptime: int | None = None
     polled_at: datetime | None = None
-    #: The first poll since SNMP was switched on for the source (the alert's clock while no
-    #: line has had a good read yet).
+    #: The first poll since SNMP was switched on for the source (``None`` while it is off).
     watched_since: datetime | None = None
     lines: dict[str, Line] = field(default_factory=dict)
 
@@ -206,4 +210,6 @@ def write_state(path: Path, state: WanState, now: datetime) -> None:
         for line in source.lines.values():
             line.prune(now)
     state.written_at = now
-    atomic_write_text(path, json.dumps(state.to_json(), ensure_ascii=False, indent=1) + "\n")
+    # compact: rewritten at every poll and read whole by every GET /activity/wan
+    text = json.dumps(state.to_json(), ensure_ascii=False, separators=(",", ":"))
+    atomic_write_text(path, text + "\n")

@@ -133,8 +133,12 @@ class SourceConfig(_Model):
 
     @model_validator(mode="after")
     def _snmp_single_address(self) -> SourceConfig:
-        if self.snmp is not None and self.snmp.enabled and self.is_network:
+        if self.snmp is None or not self.snmp.enabled:
+            return self
+        if self.is_network:
             raise ValueError("snmp_source_is_network: SNMP is read from a single address only")
+        if ipaddress.ip_address(self.address).version != 4:  # the UDP transport is IPv4 only
+            raise ValueError("source_ipv6_unsupported: SNMP is read from an IPv4 address only")
         return self
 
     @property
