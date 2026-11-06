@@ -2139,6 +2139,49 @@ All Wave 5 questions are answered (2026-11-02).
   COPY while the policy runs on `messages`: no deadlock, the batch not aborted, the next run
   recompresses the chunk), both ordered through `pg_locks`.
 
+- **W5-G-29: the srcmac guard counts the sessions that overlap the hour (#96, #40 item 7;
+  2026-11-06, the manager).**
+  **The rule.** `lookup/trust.py` `srcmac_ip_counts` counts the IPv4 `srcip` of a
+  `(srcintf, srcmac)` over the rows that overlap `[low, high]`: logged at `low` or later and started
+  at `high` or earlier (`time − duration`, as the session probes compute it; no duration: started
+  when logged). Its scan stops `max_session_seconds` after `high`, as the probes' does. Before, it
+  counted only the rows logged in `[low, high]`, so a router MAC's long session of another address
+  that started in the hour and was logged at its end was missed, and the lookup kept a `low`
+  `srcmac_only` chain where `srcmac_shared` should have refused it.
+  **The three callers change together.** Each passes `lookup.max_session_seconds`: the lookup
+  (`_SrcmacGuard.load`), the `R20-lease:srcmac-shared` alert (`alerts/system.py`
+  `_srcmac_shared`) and the interface list's observed counts (`routers/settings.py`
+  `observed_counts`). The last two count windows that end now. Nothing is logged after now, so
+  their reading changes only for rows logged ahead of the check (a source's clock).
+  **One addition is removed.** The lookup used to add the address of a used row logged outside the
+  hour (`sessions.srcmac_addresses_within`). That addition is gone, because every row a lookup uses
+  overlaps the hour: `lookup.tolerance_seconds` is at most 3600, and the guard's window is ±1 hour.
+  Keeping it would have counted such a row's address twice.
+  **The plan (deviation from the brief's "keep the plan on an index").** The plan is held to its
+  time bound instead: it reads only the partitions or chunks of the UTC days of
+  `[T − 1 h, T + 1 h + max_session_seconds]`, each scan with both bounds. No index holds `srcmac`
+  (D10). An index on `(srcmac, time)` would cost every ingested `fg_traffic` row an entry and would
+  not spare the read:
+  - nearly every row of those days is inside the bound;
+  - the candidates' rows lie on every page of it.
+
+  On TimescaleDB, chunk exclusion bounds the read the same way. Compressed chunks (segmented by
+  `source`) are decompressed over the bound, as the session probes' scan already does.
+  **Measured** (plain PostgreSQL, the traffic site, 1 M rows a day, 100 candidates and 67 MACs): a
+  parallel sequential scan of the two day partitions, **0.157 s** against the guard's 1 s. The 2 h
+  read before #96 took 0.044 s.
+  **Tests:**
+  - `worker/tests/test_trust.py` `test_srcmac_ip_counts_sessions_that_overlap_the_window`. It
+    counts a session that started in the window and was logged after it. It does not count a
+    session that started after the window, one that ended before it, one logged past the scan, or
+    one logged after the window without a duration.
+  - `worker/tests/test_lookup_srcmac.py`
+    `test_a_long_session_of_another_address_that_overlaps_the_hour_makes_the_mac_shared`.
+  - `worker/tests/test_alerts_lease.py`
+    `test_a_srcmac_session_logged_ahead_of_the_check_still_counts`.
+  - The perf guard `test_the_srcmac_guard_counts_two_hours_fast`: the call's longest session, the
+    plan's scans limited to the window's UTC days, and both bounds in the plan.
+
 ## Deviations — W5-H (2026-11-03)
 
 - **W5-H-1: the first line view of an xz file decompresses more than one stream.** §5.4 says
