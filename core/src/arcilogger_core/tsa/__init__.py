@@ -56,9 +56,9 @@ class TsaExecutableError(TsaConfigurationError):
 
 def url_with_port(url: str, port: int) -> str:
     """``tsa.url`` with ``tsa.port``: unchanged when the URL names a port itself or the port is
-    80 or 443 (the URL's scheme then decides, as for ``rfc3161``: ``tsa.port`` defaults to 80,
-    so an https URL without a port is not sent to port 80), else the port inserted after the
-    host."""
+    80 or 443 (the URL's scheme then decides: ``tsa.port`` defaults to 80, so an https URL
+    without a port is not sent to port 80), else the port inserted after the host, never after
+    the path. Used by ``rfc3161`` and ``turktrust``."""
     parts = urlsplit(url)
     if parts.port is not None or port in (80, 443) or not parts.hostname:
         return url
@@ -83,9 +83,8 @@ def make_provider(
     if settings.provider == "mock":
         return MockTsaProvider(mock_tsa(layout), digest=settings.digest)
     if settings.provider == "rfc3161":
-        url = settings.url if settings.port in (80, 443) else f"{settings.url}:{settings.port}"
         return Rfc3161HttpProvider(
-            url,
+            url_with_port(settings.url, settings.port),
             digest=settings.digest,
             timeout_seconds=settings.timeout_seconds,
             https_proxy=config.network.https_proxy,

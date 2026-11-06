@@ -46,6 +46,7 @@ from arcilogger_core.tsa.base import (
 )
 from arcilogger_core.tsa.mock import MockFailure, MockTsa, MockTsaProvider
 from arcilogger_core.tsa.preflight import seal_preflight
+from arcilogger_core.tsa.rfc3161 import Rfc3161HttpProvider
 from arcilogger_core.tsa.turktrust import (
     TURKTRUST_LEGAL_GRADE,
     TurktrustHttpsProvider,
@@ -550,6 +551,20 @@ def test_make_provider_takes_the_port(tmp_path: Path) -> None:
 )
 def test_url_with_port(url: str, port: int, expected: str) -> None:
     assert url_with_port(url, port) == expected
+
+
+def test_the_rfc3161_provider_puts_the_port_after_the_host(tmp_path: Path) -> None:
+    """#204 review: ``rfc3161`` used to append ``:port`` after the path (``/tsa:8080``)."""
+    config = Config.model_validate(
+        {
+            "data_dir": str(tmp_path / "data"),
+            "secrets_dir": str(tmp_path),
+            "tsa": {"provider": "rfc3161", "url": "http://tsa.example.test/tsa", "port": 8080},
+        }
+    )
+    provider = make_provider(config, Layout(tmp_path / "data"), _store(tmp_path))
+    assert isinstance(provider, Rfc3161HttpProvider)
+    assert provider.url == "http://tsa.example.test:8080/tsa"
 
 
 def test_errors_are_tsa_errors() -> None:
