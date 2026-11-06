@@ -226,11 +226,12 @@ export function withServerBounds(settings: readonly SettingOut[]): readonly Sett
 
 /** The value a draft stands for, or the i18n key of its problem. */
 export function fromDraft(
-  setting: Pick<SettingOut, 'key' | 'type' | 'min' | 'max'>,
+  setting: Pick<SettingOut, 'key' | 'type' | 'min' | 'max'> & { value?: SettingOut['value'] },
   draft: Draft,
 ): Parsed {
   const { key, type } = setting;
-  if (key === WORK_HOURS_KEY && isWorkWeek(draft)) return workHoursOf(draft);
+  if (key === WORK_HOURS_KEY && isWorkWeek(draft))
+    return workHoursOf(draft, isWorkHours(setting.value) ? setting.value : undefined);
   if (key === HOLIDAYS_KEY && Array.isArray(draft)) {
     const days = (draft as string[]).map((item) => item.trim());
     if (days.some((day) => !validHoliday(day)))
@@ -341,8 +342,13 @@ function checkDay(row: WorkDayDraft, day: number): Parsed | DayHours {
  * work days share (on a tie, the earliest day's); a work day with other hours gets a `by_day`
  * entry, and a day whose hours equal the general ones gets none. Empty `breaks` and `by_day` are
  * left out, as the server stores them.
+ *
+ * With the `stored` value (W5-P-1): its general hours stay while a work day still has them, and
+ * then a stored `by_day` entry equal to them stays while its day keeps them (a value written
+ * with `arcilogger-db settings set`). So an edit of one day changes only that day in the saved
+ * value and its audit entry.
  */
-export function workHoursOf(draft: WorkWeek): Parsed {
+export function workHoursOf(draft: WorkWeek, stored?: WorkHours): Parsed {
   const days: number[] = [];
   const hours = new Map<number, DayHours>();
   for (const [index, row] of draft.week.entries()) {
@@ -357,7 +363,7 @@ export function workHoursOf(draft: WorkWeek): Parsed {
   const counts = new Map<string, { count: number; hours: DayHours }>();
   for (const day of days) {
     const own = hours.get(day) as DayHours;
-    const key = canonical(own);
+    const key = sameHours(own);
     const seen = counts.get(key);
     counts.set(key, { count: (seen?.count ?? 0) + 1, hours: own });
   }
@@ -368,16 +374,30 @@ export function workHoursOf(draft: WorkWeek): Parsed {
       best = count;
       general = candidate;
     }
+  // The stored general hours stay while a work day still has them (W5-P-1).
+  const before = stored
+    ? sameHours({ start: stored.start, end: stored.end, breaks: stored.breaks })
+    : undefined;
+  const keeps = days.find((day) => sameHours(hours.get(day) as DayHours) === before);
+  if (keeps !== undefined) general = hours.get(keeps);
   const shared = general as DayHours;
   const value: WorkHours = { days, start: shared.start, end: shared.end };
   if (shared.breaks) value.breaks = shared.breaks;
   const byDay: Record<string, DayHours> = {};
   for (const day of days) {
     const own = hours.get(day) as DayHours;
-    if (canonical(own) !== canonical(shared)) byDay[String(day)] = own;
+    // A stored entry equal to the kept general hours stays while its day keeps them.
+    const entry = keeps !== undefined ? stored?.by_day?.[String(day)] : undefined;
+    if (sameHours(own) !== sameHours(shared) || (entry && sameHours(entry) === sameHours(own)))
+      byDay[String(day)] = own;
   }
   if (Object.keys(byDay).length > 0) value.by_day = byDay;
   return { value: value as unknown as SettingValue };
+}
+
+/** A day's hours as one comparable text (no `breaks` and empty `breaks` are the same). */
+function sameHours(hours: DayHours): string {
+  return canonical({ start: hours.start, end: hours.end, breaks: hours.breaks ?? [] });
 }
 
 /** JSON with sorted object keys (two values are the same setting value). */
