@@ -3,6 +3,7 @@ import {
   ClipboardCheck,
   Clock3,
   FileText,
+  Gauge,
   HeartPulse,
   LayoutDashboard,
   MonitorSmartphone,
@@ -55,6 +56,14 @@ export const NAV_ITEMS: readonly NavItem[] = [
     permissions: ['sources.read'],
   },
   { key: 'live', path: '/live', icon: Activity, permissions: ['search.read'] },
+  {
+    // Canlı Durum (W5 §6 M1): the lines need `dashboard.view` or `system.read` and are in the
+    // base product; "Şu an" needs a usage permission and the module, checked on the page.
+    key: 'activity',
+    path: '/activity',
+    icon: Gauge,
+    permissions: ['dashboard.view', 'system.read', 'usage.person', 'usage.anonymous'],
+  },
   { key: 'search', path: '/search', icon: Search, permissions: ['search.read'] },
   { key: 'lookup', path: '/lookup', icon: Scale, permissions: ['lookup.run'] },
   {
@@ -120,6 +129,7 @@ export const BUILT_PAGES: ReadonlySet<string> = new Set([
   'dashboard',
   'sources',
   'live',
+  'activity',
   'search',
   'security',
   'reports',

@@ -3960,6 +3960,14 @@ Recorded on #204, from the manager's answers of 2026-11-06.
     `settings-types.ts`. The captured `admin.json` has `sources.snmp_probe_failed`.
   - **History:** the list lives in the request's status file, so the request history keeps the
     code but not the list once the agent has cleaned that file up.
+- **W5-N-10: only a change that reaches the device probes it** (the review of #225, P4). W5-N-6
+  says the probe runs when a change switches SNMP on, edits its settings or sets its keys; the
+  rule probed for any change of a source whose SNMP was on. Since the browser sends a source's
+  stored `[sources.snmp]` with every change of it (W5-P-13), switching off a source whose device
+  is down failed with `snmp_timeout`. Now (`rules.py`, `_polled_differently`) the device is
+  probed only for a source that stays switched on, and only when its `[sources.snmp]` table or
+  its address changed, or its keys are set. A heartbeat, `expected` or `enabled` change does not
+  probe. Tested in `core/tests/test_admin_snmp.py`.
 
 ## Deviations — W5-F (2026-11-06)
 
@@ -4000,3 +4008,32 @@ Recorded on #104. W5-F moved to the manager on 2026-11-06 (05:50Z); part 1 is Sa
     appears for mock, rfc3161 and test servers, so the remedy holds; the guide's remedy names
     both providers.
   - The banner sections are 5.2–5.9 (Q3), as W5-D's locale keys have them.
+
+## Deviations — W5-P part P3 (2026-11-06)
+
+The manager took P3 as well (#203, 23:40Z); P4 stays with Gülşah.
+
+- **W5-P-8: the menu entry is the union of the parts' permissions.** "Canlı Durum" is after
+  "Canlı Akış". It is shown to `dashboard.view`, `system.read`, `usage.person` or
+  `usage.anonymous` and names no licence module. On the page:
+  - the lines need `dashboard.view` or `system.read` (N6);
+  - "Şu an" needs a usage permission, the `usage_analytics` module and the accepted KVKK notice
+    (M3). With the module off it says so, and the lines stay.
+  - The page waits for the licence answer before it asks `/activity/devices`, so a locked
+    module is never asked.
+  - Roles in the menu tests: auditor, İK and viewer now see the entry.
+- **W5-P-9: the e2e answers are the captured ones, with two derived.** `e2e/mock-activity.ts`
+  answers W5-M's `activity.json` (the windows 1, 5 and 15, and the pseudonymous viewer's window
+  5) and W5-N's `activity-wan.json` (hour, day, empty). Derived from them: a pseudonymous
+  viewer's windows 1 and 15 are the captured rows with the captured pseudonyms of the same keys
+  (pseudonyms follow the usage mock's `pseudonymize`, as `viewer_for` follows one setting), and
+  the option `warmingUp` sets `warming_up`. The refusal `activity_window_invalid` comes from the
+  mock's error texts. Until W5-M merged, `/activity/devices` was built from the captured people
+  of `usage.json`.
+  - `e2e/mock-license.ts` refuses `/activity/devices` with the module off, as the API does (M3).
+- **W5-P-10: rates in Mbit/s.** The API gives bits per second and bytes. The page shows kbit/s,
+  Mbit/s or Gbit/s, and the charts' axes carry plain numbers in Mbit/s, named in the
+  description and the table view. The company chart turns each minute's bytes into its
+  average Mbit/s.
+- **W5-P-11: the texts are a locale area** (`web/src/locales/areas/activity/`), so the page adds
+  no lines to `tr.json`/`en.json` beyond `nav.activity`.

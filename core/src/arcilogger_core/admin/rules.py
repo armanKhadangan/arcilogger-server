@@ -460,6 +460,12 @@ def secret_state(name: str, stored: frozenset[str]) -> Literal["set", "unset"]:
     return "set" if name in stored else "unset"
 
 
+def _polled_differently(before: SourceConfig | None, after: SourceConfig) -> bool:
+    """``after`` is polled differently from ``before``: a new source, or its ``[sources.snmp]``
+    table (switched on, user, protocols, port, interfaces, capacities) or address changed."""
+    return before is None or before.snmp != after.snmp or before.address != after.address
+
+
 def snmp_keys(source: str) -> tuple[str, str]:
     """A source's two SNMPv3 keys in the secret store (Wave 5 §6 N1)."""
     return snmp_auth_key(source), snmp_priv_key(source)
@@ -926,8 +932,15 @@ class _Run:
 
     def _snmp_keys(self) -> None:
         """A source whose SNMP this request switches on needs both keys, stored or set here
-        (``snmp_secret_missing``); a key is set only for a source that is there afterwards."""
+        (``snmp_secret_missing``); a key is set only for a source that is there afterwards.
+
+        The device is probed (N5) only when the change reaches it differently (SNMP switched
+        on, its settings, the device's address or its keys) and only for a source that stays
+        switched on. The browser sends a source's stored ``[sources.snmp]`` with every change of
+        it (W5-P-13): switching off a source whose device is down, or editing its heartbeat,
+        must not wait for the device to answer."""
         after = {source.name: source for source in (self.sources or self.current.sources)}
+        before = {source.name: source for source in self.current.sources}
         for key, token in self.secret_changes.items():
             if is_snmp_key(key) and token is not None:
                 owner = key.split(".")[1]
@@ -940,11 +953,11 @@ class _Run:
                 continue
             if any(key not in self.secrets_after for key in snmp_keys(name)):
                 self.error("snmp_secret_missing", f"sources.{name}.snmp")
-            else:
+            elif changed.enabled and _polled_differently(before.get(name), changed):
                 self._snmp_probe(changed)  # N5: the device answers with these settings and keys
         for key in self.secret_changes:
             keyed = after.get(key.split(".")[1]) if is_snmp_key(key) else None
-            if keyed is not None and keyed.snmp is not None and keyed.snmp.enabled:
+            if keyed is not None and keyed.enabled and keyed.snmp and keyed.snmp.enabled:
                 self._snmp_probe(keyed)  # new keys for an SNMP that stays on
 
     def _snmp_probe(self, source: SourceConfig) -> None:

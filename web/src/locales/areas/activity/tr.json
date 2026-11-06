@@ -1,0 +1,55 @@
+{
+  "activity": {
+    "description": "İnternet hattının şu anki hızı ve şu an veri gönderip alan bilgisayarlar. Sayfa açıkken her 10 saniyede yenilenir.",
+    "download": "İndirme",
+    "upload": "Yükleme",
+    "columns": {
+      "time": "Saat",
+      "subject": "Kişi / cihaz",
+      "sites": "En çok kullanılan siteler",
+      "apps": "Uygulamalar",
+      "lastSeen": "Son görülme",
+      "mbps": "{{what}} (Mbit/s)"
+    },
+    "window": {
+      "label": "Zaman aralığı",
+      "minutes": "Son {{minutes}} dk"
+    },
+    "lines": {
+      "title": "İnternet hattı",
+      "source": "Kaynak: {{source}} · hız Mbit/s",
+      "share": "kapasitenin {{share}}",
+      "since": "{{time}} itibarıyla",
+      "noSamples": "Henüz ölçüm yok.",
+      "none": "İnternet hattı ölçülmüyor",
+      "noneHint": "Hat hızı, güvenlik duvarının arayüz sayaçlarından salt okunur SNMPv3 ile okunur. Bir kaynakta SNMP açık değil.",
+      "openSources": "Kaynaklar'da SNMP'yi açın"
+    },
+    "status": {
+      "ok": "Çalışıyor",
+      "timeout": "Cihaz yanıt vermiyor",
+      "auth_failed": "SNMP kimlik doğrulaması başarısız",
+      "no_such_interface": "Arayüz cihazda yok",
+      "snmp_no_hc_counters": "Cihaz 64 bit sayaç vermiyor",
+      "disabled": "SNMP kapalı"
+    },
+    "now": {
+      "title": "Şu an",
+      "totals": "Son {{minutes}} dakikanın özeti",
+      "subjects": "Veri gönderen / alan",
+      "sessions": "Oturum",
+      "table": "Şu an veri gönderip alanlar",
+      "more": "En çok indiren {{shown}} satır gösteriliyor.",
+      "empty": "Bu aralıkta trafik yok.",
+      "perMinute": "Son 60 dakika (şirket geneli)",
+      "perMinuteHint": "Dakika başına ortalama hız, Mbit/s",
+      "dataUntil": "Veriler {{time}} itibarıyla.",
+      "noData": "Henüz trafik kaydı yok.",
+      "interim": "Uzun bağlantılar FortiGate ara kayıtları geldikçe görünür. MikroTik bayt sayısı göndermez; burada görünmez.",
+      "warmingUp": "Rakamlar henüz eksik",
+      "warmingUpHint": "Sayım ya hâlâ son 60 dakikayı okuyor (worker yeni başladı) ya da bir dakikadan uzun süredir güncellenmedi. Tablo ve grafik birazdan tamamlanır; sürerse yöneticiniz Sistem sayfasında worker'ın durumuna bakmalı.",
+      "locked": "Kullanım analizi modülü kapalı",
+      "lockedHint": "\"Şu an\" tablosu Kullanım analizi modülüne aittir. İnternet hattının hızı modülden bağımsız görünür."
+    }
+  }
+}

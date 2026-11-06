@@ -333,6 +333,37 @@ def test_switching_snmp_on_probes_the_source(root: Path, config: Config) -> None
     assert off.probes == ()
 
 
+def test_only_a_change_that_reaches_the_device_probes_it(root: Path, config: Config) -> None:
+    """The browser sends a source's stored ``[sources.snmp]`` with every change of it (W5-P-13).
+    Switching the source off, or editing its heartbeat, must not wait for a device that may be
+    down: only SNMP's settings, the address or new keys of a source that stays on are probed."""
+    stored = frozenset(rules.snmp_keys("fw-01"))
+    on = with_snmp(root, config, OFF.model_copy(update={"enabled": True}))
+
+    def check(snmp: dict[str, Any], **source: Any) -> SectionCheck:
+        body = update(snmp)
+        body["source"].update(source)
+        result = validate_section("sources", on, body, context(root, stored))
+        assert result.ok, result.errors
+        return result
+
+    probed = (Probe("snmp", "fw-01"),)
+    assert check(SNMP, enabled=False).probes == ()
+    assert check(SNMP, heartbeat_minutes=30).probes == ()
+    assert check(SNMP, expected=False).probes == ()
+    assert check({**SNMP, "interfaces": ["wan1", "wan2"]}).probes == probed
+    assert check({**SNMP, "port": 1161}).probes == probed
+    assert check(SNMP, address="172.20.10.23").probes == probed
+    # New keys: probed while the source stays on, not for a source switched off.
+    keyed = validate_section("sources", on, update(SNMP, **KEYS), context(root, stored))
+    assert keyed.probes == probed
+    body = update(SNMP, **KEYS)
+    body["source"]["enabled"] = False
+    off = validate_section("sources", on, body, context(root, stored))
+    assert off.ok, off.errors
+    assert off.probes == ()
+
+
 # -- the interface list reaches the browser (W5-N-9) -----------------------------------------------
 
 

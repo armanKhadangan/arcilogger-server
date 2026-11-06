@@ -1,0 +1,55 @@
+{
+  "activity": {
+    "description": "The internet line's speed now and the computers sending and receiving data at the moment. Refreshed every 10 seconds while the page is open.",
+    "download": "Download",
+    "upload": "Upload",
+    "columns": {
+      "time": "Time",
+      "subject": "Person / device",
+      "sites": "Top sites",
+      "apps": "Applications",
+      "lastSeen": "Last seen",
+      "mbps": "{{what}} (Mbit/s)"
+    },
+    "window": {
+      "label": "Time window",
+      "minutes": "Last {{minutes}} min"
+    },
+    "lines": {
+      "title": "Internet line",
+      "source": "Source: {{source}} · speed in Mbit/s",
+      "share": "{{share}} of capacity",
+      "since": "since {{time}}",
+      "noSamples": "No samples yet.",
+      "none": "The internet line is not measured",
+      "noneHint": "The line's speed is read from the firewall's interface counters with read-only SNMPv3. No source has SNMP on.",
+      "openSources": "Turn SNMP on in Sources"
+    },
+    "status": {
+      "ok": "Working",
+      "timeout": "The device does not answer",
+      "auth_failed": "SNMP authentication failed",
+      "no_such_interface": "The interface is not on the device",
+      "snmp_no_hc_counters": "The device has no 64-bit counters",
+      "disabled": "SNMP is off"
+    },
+    "now": {
+      "title": "Right now",
+      "totals": "The last {{minutes}} minutes",
+      "subjects": "Sending or receiving",
+      "sessions": "Sessions",
+      "table": "Sending and receiving now",
+      "more": "The {{shown}} rows that download the most are shown.",
+      "empty": "No traffic in this window.",
+      "perMinute": "The last 60 minutes (whole company)",
+      "perMinuteHint": "Average speed per minute, Mbit/s",
+      "dataUntil": "Data as of {{time}}.",
+      "noData": "No traffic logs yet.",
+      "interim": "Long connections appear as FortiGate's interim logs arrive. MikroTik sends no byte counts; it does not appear here.",
+      "warmingUp": "The figures are not complete yet",
+      "warmingUpHint": "The count is either still reading the last 60 minutes (the worker has just started) or has not been updated for over a minute. The table and chart fill in shortly; if this persists, an administrator should check the worker on the System page.",
+      "locked": "The usage analytics module is off",
+      "lockedHint": "The \"Right now\" table belongs to the usage analytics module. The internet line's speed is shown without it."
+    }
+  }
+}
