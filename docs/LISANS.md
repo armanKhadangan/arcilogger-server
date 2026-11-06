@@ -143,6 +143,7 @@ uyarısı açmaz. Kapalı modülün verileri silinmez.
 | `usage.requests` | Kullanım analizi | atlanır |
 | `usage.daily` | Kullanım analizi | atlanır |
 | `usage.today` | Kullanım analizi | atlanır |
+| `activity.tick` | Kullanım analizi (Canlı Durum'un kim gönderip alıyor tablosu) | atlanır |
 | `usage.reattribute` | Kullanım analizi | atlanır |
 | `usage.retention` | — (kişisel verilerin silinmesi) | her zaman çalışır |
 | `db.window` | 5651 Temel (veritabanı penceresi: pencereden eski log satırlarının düşürülmesi) | her zaman çalışır |

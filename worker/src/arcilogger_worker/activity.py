@@ -47,7 +47,13 @@ from arcilogger_core.fsutil import atomic_write_text
 from arcilogger_core.timeutil import site_day
 from arcilogger_worker.usage.config import UsageSettings
 from arcilogger_worker.usage.domains import BackgroundRules, DomainNamer
-from arcilogger_worker.usage.engine import BUCKET, PRIVATE, REFUSED_ACTIONS, DayBuilder
+from arcilogger_worker.usage.engine import (
+    BUCKET,
+    DNS_TOLERANCE,
+    PRIVATE,
+    REFUSED_ACTIONS,
+    DayBuilder,
+)
 from arcilogger_worker.usage.subjects import IpTimeline, build_timelines
 
 #: Minutes of the snapshot.
@@ -91,10 +97,12 @@ _APP = text(
     "FROM fg_app WHERE srcip = ANY(CAST(:ips AS inet[])) AND sessionid = ANY(:sessions) "
     "AND time >= :lo ORDER BY srcip, time, id"
 )
+#: Only the answers that can name a session (one of its addresses, before its start): the
+#: engine names a session by the newest such answer (``DayBuilder._destination``).
 _DNS = text(
-    "SELECT host(srcip), time, qname, answers, cat, catdesc, action FROM fg_dns "
-    "WHERE srcip = ANY(CAST(:ips AS inet[])) AND time >= :lo AND time < :hi "
-    "ORDER BY srcip, time, id"
+    "SELECT id, host(srcip), time, qname, answers, cat, catdesc, action FROM fg_dns "
+    "WHERE srcip = ANY(CAST(:ips AS inet[])) AND answers && CAST(:addresses AS inet[]) "
+    "AND time >= :lo AND time <= :hi ORDER BY srcip, time, id"
 )
 
 Key = tuple[Any, ...]
@@ -104,12 +112,14 @@ Cells = dict[int, dict[str, dict[tuple[str, str, str | None, bool], list[float]]
 
 @dataclass
 class OpenSession:
-    """The logs so far of a session that can still log."""
+    """The logs so far of a session that can still log, and what they count for."""
 
     ip: str
     rows: list[tuple[Any, ...]] = field(default_factory=list)
     #: The newest log's time (epoch seconds).
     newest: float = 0.0
+    #: The engine's count of ``rows``; ``None`` when logs came (or dropped out) since.
+    counted: Counted | None = None
 
 
 @dataclass
@@ -184,13 +194,16 @@ class Snapshot:
             self.highest = max(self.highest, row[0])
         self._mark()
         details = self._count(session, settings, fresh, lo, end, overlap, until)
-        changed = self._write(self.current(session, settings, lo, end), now, lo, end)
+        counted = self.current(session, settings, lo, end)
+        writing = time.monotonic()
+        changed = self._write(counted, now, lo, end)
         details.update(
             {
                 "rows": len(fresh),
                 "open_sessions": len(self.open),
                 "warming_up": self.warm_from is not None,
                 "written": changed,
+                "write_seconds": round(time.monotonic() - writing, 3),
                 "seconds": round(time.monotonic() - began, 3),
             }
         )
@@ -236,6 +249,7 @@ class Snapshot:
             known = self.open.pop(key, None) or OpenSession(ip)
             known.rows.append(values)
             known.newest = max(known.newest, values[3].timestamp())
+            known.counted = None
             if values[10] and values[0] is not None:  # an interim log: the session goes on
                 self.open[key] = known
             else:
@@ -244,30 +258,26 @@ class Snapshot:
         for key in [key for key, known in self.open.items() if known.newest < horizon]:
             closed[key] = self.open.pop(key)  # no log for the overlap: it is over
         if closed:
-            done = self._sessions(session, settings, closed.values(), lo, end, overlap)
+            (done,) = self._counts(session, settings, [list(closed.values())], lo, end, overlap)
             _add(self.closed, done)
-        self._prune(lo)
+        self._prune(lo, overlap)
         return {"closed_sessions": len(closed)}
 
-    def _sessions(
+    def _counts(
         self,
         session: Session,
         settings: UsageSettings,
-        sessions: Iterable[OpenSession],
+        groups: Sequence[Sequence[OpenSession]],
         lo: datetime,
         end: datetime,
         overlap: timedelta,
-    ) -> Counted:
-        """The engine's count of ``sessions`` over the minutes ``[lo, end)``."""
-        by_ip: dict[str, list[tuple[Any, ...]]] = defaultdict(list)
-        starts: dict[str, list[float]] = defaultdict(list)
-        for known in sessions:
-            ordered = sorted(known.rows, key=lambda r: (r[3], r[0] or 0))
-            by_ip[known.ip].extend(ordered)
-            starts[known.ip].append(min(r[3].timestamp() - (r[4] or 0) for r in ordered))
-        counted = Counted()
-        if not by_ip:
-            return counted
+    ) -> list[Counted]:
+        """The engine's count of each group of sessions over the minutes ``[lo, end)``: one
+        builder and one read of the web filter, application and DNS logs for all of them."""
+        results = [Counted() for _ in groups]
+        everyone = [known for group in groups for known in group]
+        if not everyone:
+            return results
         namer = DomainNamer(settings.psl_file, settings.psl_private_suffixes)
         rules = BackgroundRules.create(
             settings.background_domains, settings.background_appcats, settings.background_ports
@@ -275,65 +285,87 @@ class Snapshot:
         builder = DayBuilder(
             site_day(end - timedelta(seconds=BUCKET)), settings, namer, rules, window=(lo, end)
         )
-        ips = sorted(by_ip)
+        ips = sorted({known.ip for known in everyone})
         timelines = build_timelines(session, ips, lo, end)
-        sessionids = sorted(
-            {row[0] for rows in by_ip.values() for row in rows if row[0] is not None}
-        )
+        rows = [row for known in everyone for row in known.rows]
+        sessionids = sorted({row[0] for row in rows if row[0] is not None})
+        addresses = sorted({str(row[1]) for row in rows if row[1] is not None})
+        starts = [row[3].timestamp() - (row[4] or 0) for row in rows]
         since = lo - overlap
-        web = _group(session.execute(_WEB, {"ips": ips, "sessions": sessionids, "lo": since}))
-        app = _group(session.execute(_APP, {"ips": ips, "sessions": sessionids, "lo": since}))
-        dns_lo = datetime.fromtimestamp(
-            min(min(found) for found in starts.values()), UTC
-        ) - timedelta(seconds=settings.dns_window_seconds)
-        dns = _group(session.execute(_DNS, {"ips": ips, "lo": dns_lo, "hi": end}))
-        for ip in ips:
-            # The engine's order (``_TRAFFIC``): by session, then time; a row without a session
-            # id stands alone, last.
-            rows = sorted(
-                by_ip[ip],
-                key=lambda r: (r[0] is None, r[0] or 0, str(r[1]), r[2] or 0, r[3]),
-            )
-            builder.add_ip(
-                ip, timelines[ip], rows, web.get(ip, []), app.get(ip, []), dns.get(ip, [])
-            )
-            _started(builder, timelines[ip], by_ip[ip], counted)
-        for key, buckets in builder.cells.items():
-            subject = builder.subjects[key]
-            counted.subjects[key] = {
-                "kind": subject.kind,
-                "vlan": subject.vlan,
-                "mac": subject.mac,
-                "ip": _most(builder.subject_ips.get(key)),
-            }
-            for index, cell in buckets.items():
-                minute = int(builder.lo_ts + index * BUCKET)
-                target = counted.cells.setdefault(minute, {}).setdefault(key, {})
-                for flow_id, (_, received, sent) in cell.items():
-                    flow = builder.flow_list[flow_id]
-                    name = (flow.domain, flow.kind, flow.app, flow.background)
-                    entry = target.setdefault(name, [0.0, 0.0])
-                    entry[0] += received
-                    entry[1] += sent
-        counted.newest = builder.newest
-        return counted
+        web = _by_session(session.execute(_WEB, {"ips": ips, "sessions": sessionids, "lo": since}))
+        app = _by_session(session.execute(_APP, {"ips": ips, "sessions": sessionids, "lo": since}))
+        dns = _by_answer(
+            session.execute(
+                _DNS,
+                {
+                    "ips": ips,
+                    "addresses": addresses,
+                    "lo": datetime.fromtimestamp(min(starts) - settings.dns_window_seconds, UTC),
+                    "hi": datetime.fromtimestamp(max(starts) + DNS_TOLERANCE, UTC),
+                },
+            ),
+            set(addresses),
+        )
+        for group, counted in zip(groups, results, strict=True):
+            by_ip: dict[str, list[tuple[Any, ...]]] = defaultdict(list)
+            for known in group:
+                by_ip[known.ip].extend(known.rows)
+            for ip in sorted(by_ip):
+                # The engine's order (``_TRAFFIC``): by session, then time; a row without a
+                # session id stands alone, last.
+                traffic = sorted(
+                    by_ip[ip],
+                    key=lambda r: (r[0] is None, r[0] or 0, str(r[1]), r[2] or 0, r[3], r[4] or 0),
+                )
+                ids = sorted({row[0] for row in traffic if row[0] is not None})
+                answers = {
+                    found
+                    for address in {str(row[1]) for row in traffic if row[1] is not None}
+                    for found in dns.get((ip, address), ())
+                }
+                builder.add_ip(
+                    ip,
+                    timelines[ip],
+                    traffic,
+                    [row for sessionid in ids for row in web.get((ip, sessionid), ())],
+                    [row for sessionid in ids for row in app.get((ip, sessionid), ())],
+                    [row[1:] for row in sorted(answers, key=lambda r: (r[1], r[0]))],
+                )
+                _started(builder, timelines[ip], traffic, counted)
+            _harvest(builder, counted)
+        return results
 
-    def _prune(self, lo: datetime) -> None:
+    def _prune(self, lo: datetime, overlap: timedelta) -> None:
+        """Drop the minutes before ``lo``, and the logs of open sessions older than the
+        engine reads before its range (``lo`` less the overlap)."""
         first = int(lo.timestamp())
         for table in (self.closed.cells, self.closed.sessions):
             for minute in [minute for minute in table if minute < first]:
                 del table[minute]
+        oldest = lo - overlap
+        for known in self.open.values():
+            if known.rows[0][3] < oldest:
+                known.rows = [row for row in known.rows if row[3] >= oldest]
+                known.counted = None
 
     # -- the file ---------------------------------------------------------------------------------
 
     def current(
         self, session: Session, settings: UsageSettings, lo: datetime, end: datetime
     ) -> Counted:
-        """The closed minutes plus the open sessions counted as they stand."""
+        """The closed minutes plus the open sessions counted as they stand: a session is
+        counted again only when logs came for it (its destination's name and whether it is
+        background follow its logs; it is counted whole once more when it ends)."""
         overlap = timedelta(seconds=settings.session_overlap_seconds)
+        stale = [known for known in self.open.values() if known.counted is None]
+        counts = self._counts(session, settings, [[known] for known in stale], lo, end, overlap)
+        for known, counted in zip(stale, counts, strict=True):
+            known.counted = counted
         result = Counted()
         _add(result, self.closed)
-        _add(result, self._sessions(session, settings, self.open.values(), lo, end, overlap))
+        for known in self.open.values():
+            if known.counted is not None:
+                _add(result, known.counted)
         return result
 
     def _write(self, counted: Counted, now: datetime, lo: datetime, end: datetime) -> bool:
@@ -409,11 +441,49 @@ def _top[T](values: Mapping[T, float], count: int) -> list[tuple[T, float]]:
     return sorted(values.items(), key=lambda item: (-item[1], str(item[0])))[:count]
 
 
-def _group(rows: Iterable[Sequence[Any]]) -> dict[str, list[tuple[Any, ...]]]:
-    found: dict[str, list[tuple[Any, ...]]] = defaultdict(list)
+def _by_session(rows: Iterable[Sequence[Any]]) -> dict[tuple[str, int], list[tuple[Any, ...]]]:
+    """Web filter or application rows by (address, session id), in their time order."""
+    found: dict[tuple[str, int], list[tuple[Any, ...]]] = defaultdict(list)
     for row in rows:
-        found[str(row[0])].append(tuple(row[1:]))
+        found[(str(row[0]), row[1])].append(tuple(row[1:]))
     return found
+
+
+def _by_answer(
+    rows: Iterable[Sequence[Any]], addresses: set[str]
+) -> dict[tuple[str, str], list[tuple[Any, ...]]]:
+    """DNS rows ``(id, time, qname, answers, …)`` by (address, answered address)."""
+    found: dict[tuple[str, str], list[tuple[Any, ...]]] = defaultdict(list)
+    for row in rows:
+        values = (row[0], row[2], row[3], tuple(row[4] or ()), *row[5:])
+        for answer in row[4] or ():
+            if str(answer) in addresses:
+                found[(str(row[1]), str(answer))].append(values)
+    return found
+
+
+def _harvest(builder: DayBuilder, counted: Counted) -> None:
+    """Move the builder's cells into ``counted`` (the builder goes on with the next group)."""
+    for key, buckets in builder.cells.items():
+        subject = builder.subjects[key]
+        counted.subjects[key] = {
+            "kind": subject.kind,
+            "vlan": subject.vlan,
+            "mac": subject.mac,
+            "ip": _most(builder.subject_ips.get(key)),
+        }
+        for index, cell in buckets.items():
+            minute = int(builder.lo_ts + index * BUCKET)
+            target = counted.cells.setdefault(minute, {}).setdefault(key, {})
+            for flow_id, (_, received, sent) in cell.items():
+                flow = builder.flow_list[flow_id]
+                name = (flow.domain, flow.kind, flow.app, flow.background)
+                entry = target.setdefault(name, [0.0, 0.0])
+                entry[0] += received
+                entry[1] += sent
+    counted.newest = builder.newest
+    builder.cells.clear()
+    builder.newest = None
 
 
 def _most(counter: Mapping[str, int] | None) -> str | None:
@@ -425,17 +495,16 @@ def _most(counter: Mapping[str, int] | None) -> str | None:
 def _started(
     builder: DayBuilder, timeline: IpTimeline, rows: Sequence[tuple[Any, ...]], counted: Counted
 ) -> None:
-    """Each session counts once, for the subject of its first minute in the snapshot."""
+    """Each session counts once, in the minute it started and for that minute's subject."""
     sessions: dict[Key, float] = {}
     for row in rows:
         key: Key = (row[0], row[1], row[2]) if row[0] is not None else (id(row),)
         start = row[3].timestamp() - (row[4] or 0)
         sessions[key] = min(sessions.get(key, start), start)
     for start in sessions.values():
-        first = max(start, builder.lo_ts)
-        if first >= builder.hi_ts:
-            continue
-        minute = int(builder.lo_ts + ((first - builder.lo_ts) // BUCKET) * BUCKET)
+        if not builder.lo_ts <= start < builder.hi_ts:
+            continue  # started before the snapshot's minutes: not a session started in them
+        minute = int(builder.lo_ts + ((start - builder.lo_ts) // BUCKET) * BUCKET)
         subject = timeline.at(minute).key
         bucket = counted.sessions.setdefault(minute, {})
         bucket[subject] = bucket.get(subject, 0) + 1
