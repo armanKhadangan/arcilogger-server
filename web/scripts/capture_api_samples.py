@@ -146,6 +146,8 @@ from arcilogger_api.routers.evidence import STATUS_LABELS
 from arcilogger_api.security import hash_token
 from arcilogger_api.testing import LoggedIn, login, make_user
 from arcilogger_core import timeutil
+from arcilogger_core.admin.contract import ProbeInterface
+from arcilogger_core.admin.probe import ProbeResult
 from arcilogger_core.admin.testing import FakeAgent, SmtpTestServer, make_installation
 from arcilogger_core.config import load_config
 from arcilogger_core.credit import check_credit
@@ -2962,6 +2964,25 @@ def capture_admin_sources(capture: Capture, admin: Any) -> None:
     collector_loads(capture)
     agent.process()
     out["remove_active"] = capture.json(admin.get(removed["status_url"]), 200)
+    # SNMP switched on with an interface the device does not have: the probe's refusal lists
+    # what it reports (W5-N-9), and nothing is written
+    listed = (
+        ProbeInterface(name="wan2", oper_status="up", speed_mbps=1000),
+        ProbeInterface(name="lan", oper_status="up", speed_mbps=1000),
+        ProbeInterface(name="dmz", oper_status="down", speed_mbps=100),
+        ProbeInterface(name="tunnel-1", oper_status="unknown", speed_mbps=None),
+    )
+    agent.prober.results["snmp"] = ProbeResult(
+        False, "snmp_no_such_interface", "not found: wan1", listed
+    )
+    snmp = {"enabled": True, "user": "arcilogger", "interfaces": ["wan1"]}
+    keys = {"snmp_auth_key": "Örnek-SNMP-Kimlik-1", "snmp_priv_key": "Örnek-SNMP-Gizlilik-1"}
+    device = {"name": "fw-sube", "type": "fortigate", "address": "172.20.30.1", "snmp": snmp}
+    capture.recent(admin)
+    refused = capture.json(admin.post(url, json={"etag": tag(), "source": device, **keys}), 202)
+    agent.process()
+    out["snmp_probe_failed"] = capture.json(admin.get(refused["status_url"]), 200)
+    del agent.prober.results["snmp"]
 
 
 def capture_admin_sections(capture: Capture, admin: Any) -> None:

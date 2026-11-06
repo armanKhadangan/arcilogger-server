@@ -9652,6 +9652,57 @@
       "title": "PrivacyStatus",
       "type": "object"
     },
+    "ProbeInterface": {
+      "additionalProperties": false,
+      "description": "One interface the device reported to the ``snmp`` probe (``ifName``, W5-N-9): the\nbrowser offers these names when the configured one is not found. No person data, no key.",
+      "properties": {
+        "name": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "oper_status": {
+          "anyOf": [
+            {
+              "enum": [
+                "up",
+                "down",
+                "testing",
+                "unknown",
+                "dormant",
+                "not_present",
+                "lower_layer_down"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Oper Status"
+        },
+        "speed_mbps": {
+          "anyOf": [
+            {
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Speed Mbps"
+        }
+      },
+      "required": [
+        "name",
+        "oper_status",
+        "speed_mbps"
+      ],
+      "title": "ProbeInterface",
+      "type": "object"
+    },
     "PseudonymRow": {
       "properties": {
         "kind": {
@@ -10516,6 +10567,13 @@
             }
           ],
           "title": "Field"
+        },
+        "interfaces": {
+          "items": {
+            "$ref": "#/components/schemas/ProbeInterface"
+          },
+          "title": "Interfaces",
+          "type": "array"
         },
         "message_en": {
           "title": "Message En",
