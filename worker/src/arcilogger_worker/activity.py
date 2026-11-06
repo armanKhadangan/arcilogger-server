@@ -20,9 +20,11 @@ background rules are Kullanım's. Only the selection of the rows is the job's ow
   engine reads), so its bytes follow the engine's rule however its logs are spread over ticks;
   it is counted whole once more when it ends. Its logs older than the snapshot's first minute
   less the overlap are dropped, as the engine's read leaves them out.
-* **Names:** a session's web filter and application logs (by session id) and the DNS answers
-  that can name it (for its address, at most ``usage.dns_window_seconds`` before its start; the
-  engine takes the newest) are read for the sessions counted; the DNS answers once per session.
+* **Names:** a session's web filter and application logs (by session id) are read when it is
+  first counted, and the DNS answers that can name it (for its address, at most
+  ``usage.dns_window_seconds`` before its start; the engine takes the newest) only when no web
+  filter or application log names it (the engine takes those names first). Both are kept while
+  the session is open: they come when it starts.
 * **One budget per tick** (:data:`TICK_BUDGET`, the file's write set aside): a tick reads and
   sorts the new rows, then counts in chunks, first the sessions that ended (so they never wait
   long), then the next warm-up slices, then the open sessions whose logs changed (those that
@@ -77,11 +79,11 @@ MINUTES: Final = 60
 ID_MARGIN: Final = timedelta(seconds=5)
 #: The seconds one tick may take (M4 guard (b) and (c): 2 s), its file write included: the
 #: start-up's slices and the open sessions counted again fill what the new rows leave.
-TICK_BUDGET: Final = 1.3
+TICK_BUDGET: Final = 1.5
 #: One slice of the start-up's read.
 WARMUP_SLICE: Final = timedelta(seconds=5)
 #: Sessions that ended, and open sessions whose logs changed, counted in one go.
-ENDED_CHUNK: Final = 1000
+ENDED_CHUNK: Final = 500
 RECOUNT_CHUNK: Final = 500
 #: New rows are read in pages of this many.
 MAX_ROWS: Final = 20_000
@@ -309,7 +311,7 @@ class Snapshot:
 
     def _left(self, began: float) -> float:
         """Seconds this tick still has for counting, the file's write set aside."""
-        writing = 1.5 * (self._write_cost + self._piece_cost * len(self._dirty))
+        writing = self._write_cost + self._piece_cost * len(self._dirty)
         return self.budget - (time.monotonic() - began) - writing
 
     def _after(self, now: float) -> int:
@@ -374,12 +376,20 @@ class Snapshot:
         open count taken out of the open sum. Returns how many."""
         keys = list(itertools.islice(self.ended, ENDED_CHUNK))
         chunk = [self.ended.pop(key) for key in keys]
-        (done,) = self._counts(session, settings, [chunk], lo, end, overlap, cached=True)
-        before = [known.counted for known in chunk if known.counted is not None]
-        self._dirty |= _pairs(_difference([done], before))
+        # A session never counted while open adds only new subject-minutes; one that was is
+        # counted whole again, and only the difference from its open count changes the file.
+        new = [known for known in chunk if known.counted is None]
+        known_before = [known for known in chunk if known.counted is not None]
+        fresh, again = self._counts(
+            session, settings, [new, known_before], lo, end, overlap, cached=True
+        )
+        before = [known.counted for known in known_before if known.counted is not None]
+        self._dirty |= _pairs(fresh)
+        self._dirty |= _pairs(_difference([again], before))
         for counted in before:
             _add(self.opened, counted, sign=-1)
-        _add(self.closed, done)
+        _add(self.closed, fresh)
+        _add(self.closed, again)
         return len(chunk)
 
     def _recount(
