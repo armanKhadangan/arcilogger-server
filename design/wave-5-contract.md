@@ -3941,6 +3941,25 @@ Recorded on #204, from the manager's answers of 2026-11-06.
   - **The state file** is written compact (one line). A write that fails (on Windows while the
     API reads it) is logged and written again at the next poll.
   - **A source whose SNMP is switched off** resolves its `R20-snmp` as `not_polled`.
+- **W5-N-9: the interface list reaches the browser** (#224). W5-N-7's "the list comes with the
+  probe's refusal" needed a field.
+  - **The probe:** `ProbeResult.interfaces` holds what the device reported once the `ifName`
+    walk answered: on success, `snmp_no_such_interface` and `snmp_no_hc_counters`. Each entry is
+    a `ProbeInterface`: `name`, `oper_status` (an RFC 2863 name or null) and `speed_mbps` (a whole
+    number from 0, or null). The other probes leave it empty.
+  - **The child's line** gains `"interfaces"`. The parent reads it bounded:
+    - at most 256 entries;
+    - a name without any secret, its control characters replaced by `?`, cut to 64 characters;
+    - any other status or speed is null, and anything else is left out.
+  - **The request status:** `ErrorRef.interfaces` (contract.py) carries the list, allowed only
+    with `snmp_no_such_interface` and `snmp_no_hc_counters`. The agent passes it there. The
+    probe step stays a code.
+  - **The answer:** `GET /admin/requests/{id}` gives it as `error.interfaces` (`RequestError` in
+    `admin_channel.py`; empty for any other code). It holds no person data and no secret.
+  - **The browser's types:** `ProbeInterface` and `RequestError.interfaces` in
+    `settings-types.ts`. The captured `admin.json` has `sources.snmp_probe_failed`.
+  - **History:** the list lives in the request's status file, so the request history keeps the
+    code but not the list once the agent has cleaned that file up.
 
 ## Deviations — W5-F (2026-11-06)
 

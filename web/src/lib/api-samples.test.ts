@@ -458,6 +458,7 @@ const RULES: Record<string, Record<string, Rule>> = {
       add_active: requestSample,
       remove_accepted: 'AdminAccepted',
       remove_active: requestSample,
+      snmp_probe_failed: requestSample, // error.interfaces: the device's list (W5-N-9)
     }),
     sections: group({
       config: 'AdminConfig',
