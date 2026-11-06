@@ -11,8 +11,9 @@ DNS answer, a web filter log with the host name and the traffic logs, from devic
 lease (``ip:`` subjects). The rows are written straight into the tables. The 95 minutes before
 "now" (11:00: the snapshot's hour and the session overlap) are written at full density, so each
 tick's read meets the table it would meet on site; then each tick's 10 s of rows are written and
-the thread's tick runs, while the loop runs its probe. The figures include the per-tick read. ``ARCILOGGER_ACTIVITY_PERF``: ``1`` (default) both
-loads, ``0`` skips. Run with ``-s`` to see the figures (recorded on #211 and in W5-M-4).
+the thread's tick runs, while the loop runs its probe. The figures include the per-tick read.
+``ARCILOGGER_ACTIVITY_PERF``: ``1`` (default) both loads, ``0`` skips. Run with ``-s`` to see the
+figures (recorded on #211 and in W5-M-4).
 """
 
 from __future__ import annotations
@@ -91,7 +92,7 @@ class Load:
 
 
 def generate(
-    rate: float, devices: int, seed: int, write_before: Callable[[list[Line]], None]
+    rate: float, devices: int, seed: int, write_before: Callable[[list[Line]], object]
 ) -> Load:
     """Sessions over :data:`HISTORY` before "now" and the ticks after it, ``rate`` lines per
     second on average over ``devices`` addresses. The lines before "now" go to

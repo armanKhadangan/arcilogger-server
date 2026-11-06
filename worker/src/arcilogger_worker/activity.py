@@ -457,8 +457,9 @@ class Snapshot:
         """Sessions first seen this tick that logged before: a pause longer than the overlap
         ended them, or a log committed late came after their final log was counted. Their
         earlier logs (read already: before ``front``, the end of the times read, and at most
-        ``mark`` or seen) were counted as an ended session; that count is taken back out of the closed minutes, and the session goes on
-        with all of its logs, so nothing is counted twice."""
+        ``mark`` or seen) were counted as an ended session; that count is taken back out of the
+        closed minutes, and the session goes on with all of its logs, so nothing is counted
+        twice."""
         if not new:
             return
         found = session.execute(
