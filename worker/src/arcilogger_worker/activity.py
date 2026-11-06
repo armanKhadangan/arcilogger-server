@@ -11,8 +11,8 @@ background rules are Kullanım's. Only the selection of the rows is the job's ow
 
 * **New rows** of ``fg_traffic`` (forward sessions from internal addresses, as the engine reads
   them) are read by ``id``: above the highest id the table had :data:`ID_MARGIN` ago (its
-  sequence), so a batch committed late, with lower ids than a row already read, is still read;
-  the ids already counted are skipped.
+  sequence), in pages, so a batch committed late, with lower ids than a row already read, is
+  still read; the ids already counted are skipped.
 * **A session** (``srcip``, ``sessionid``, ``dstip``, ``dstport``) whose newest log is its final
   log is counted once, with all of its logs, into the closed minutes. A session that can still
   log (its newest log an interim one, less than ``usage.session_overlap_seconds`` old) keeps its
@@ -24,8 +24,8 @@ background rules are Kullanım's. Only the selection of the rows is the job's ow
   that can name it (for its address, at most ``usage.dns_window_seconds`` before its start; the
   engine takes the newest) are read for the sessions counted; the DNS answers once per session.
 * **Warm-up:** after a start the last 60 minutes and the overlap before them are read in slices
-  of :data:`WARMUP_SLICE`, as many as :data:`WARMUP_BUDGET` allows in one tick; the sessions
-  still open are then counted, :data:`RECOUNT_BUDGET` at a time. The snapshot says
+  of :data:`WARMUP_SLICE`, as many as a tick's :data:`TICK_BUDGET` allows; the sessions still
+  open are then counted, :data:`RECOUNT_CHUNK` at a time within the same budget. The snapshot says
   ``warming_up`` until both are done.
 
 **The file** holds subject keys (``person:12``, ``device:<mac>``, ``ip:<addr>``), their VLAN,
@@ -68,15 +68,16 @@ from arcilogger_worker.usage.subjects import IpTimeline, build_timelines
 MINUTES: Final = 60
 #: Rows committed late: each tick reads the ids above the table's highest id of this long ago,
 #: skipping those already counted. Ingest commits a batch within its ``batch_seconds`` (0.5 s
-#: by default); this is far more than twice that.
-ID_MARGIN: Final = timedelta(seconds=30)
-#: One slice of the start-up's read, and the seconds a tick goes on reading slices.
+#: by default); this is ten times that.
+ID_MARGIN: Final = timedelta(seconds=5)
+#: The seconds one tick may take (M4 guard (b) and (c): 2 s), its file write included: the
+#: start-up's slices and the open sessions counted again fill what the new rows leave.
+TICK_BUDGET: Final = 1.6
+#: One slice of the start-up's read.
 WARMUP_SLICE: Final = timedelta(seconds=10)
-WARMUP_BUDGET: Final = 1.0
-#: The seconds a tick goes on counting open sessions again (at least :data:`RECOUNT_CHUNK`).
-RECOUNT_BUDGET: Final = 1.5
-RECOUNT_CHUNK: Final = 2000
-#: The most new rows one tick reads; the rest come in the next ticks.
+#: Open sessions counted again in one go.
+RECOUNT_CHUNK: Final = 1000
+#: New rows are read in pages of this many.
 MAX_ROWS: Final = 20_000
 SNAPSHOT_VERSION: Final = 1
 #: Destinations and applications kept per subject and minute (the answer shows 3 per window).
@@ -164,6 +165,9 @@ class OpenSession:
     stale: bool = True
     #: The DNS answers that can name it (read once: they come before the session starts).
     dns: list[tuple[Any, ...]] | None = None
+    #: Its web filter and application logs as last read (an open session counted again uses
+    #: them; its count when it ends reads them again).
+    names: tuple[list[tuple[Any, ...]], list[tuple[Any, ...]]] | None = None
 
     def start(self) -> float:
         return min(row[3].timestamp() - (row[4] or 0) for row in self.rows)
@@ -178,14 +182,20 @@ class Snapshot:
         *,
         minutes: int = MINUTES,
         warmup_slice: timedelta = WARMUP_SLICE,
-        warmup_budget: float = WARMUP_BUDGET,
+        budget: float = TICK_BUDGET,
     ) -> None:
         self.path = path
-        #: Minutes kept, one slice of the start-up's read and the seconds a tick reads slices
-        #: (at least one; the tests set them).
+        #: Minutes kept, one slice of the start-up's read and the seconds of a tick (at least
+        #: one slice and one chunk of open sessions; the tests set them).
         self.minutes = minutes
         self.warmup_slice = warmup_slice
-        self.warmup_budget = warmup_budget
+        self.budget = budget
+        #: What the last writes and counts took (seconds), to keep a tick within its budget.
+        self._write_cost = 0.0
+        self._piece_cost = 0.0
+        self._pieces_seconds = 0.0
+        self._chunk_cost = 0.0
+        self._slice_cost = 0.0
         #: The sessions that ended, and the sum of the open sessions' counts.
         self.closed = Counted()
         self.opened = Counted()
@@ -203,8 +213,9 @@ class Snapshot:
         self._timelines: tuple[tuple[datetime, datetime], dict[str, IpTimeline]] | None = None
         #: The file: per minute its JSON and its subjects, the minutes whose totals changed
         #: since, and the tables of destinations and applications the minutes refer to.
-        self._fragments: dict[int, tuple[str, set[str]]] = {}
-        self._dirty: set[int] = set()
+        self._pieces: dict[int, dict[str, str]] = {}
+        self._fragments: dict[int, str] = {}
+        self._dirty: set[tuple[int, str]] = set()
         self._destinations: dict[tuple[str, str], int] = {}
         self._apps: dict[str, int] = {}
 
@@ -226,21 +237,26 @@ class Snapshot:
         counts = {"rows": 0, "closed_sessions": 0}
         # The rows committed since: up to the time the warm-up has read, all of it after.
         covered = end if self.warm_from is None else self.warm_from
-        rows = session.execute(
-            _NEW_ROWS,
-            {
-                "after": self._after(began),
-                "lo": lo - overlap,
-                "hi": covered if self.warm_from is not None else end + overlap,
-                "limit": MAX_ROWS,
-                "refused": list(REFUSED_ACTIONS),
-            },
-        ).all()
-        self._read(session, settings, rows, lo, end, overlap, covered, counts)
+        after = self._after(began)
+        while True:
+            rows = session.execute(
+                _NEW_ROWS,
+                {
+                    "after": after,
+                    "lo": lo - overlap,
+                    "hi": covered if self.warm_from is not None else end + overlap,
+                    "limit": MAX_ROWS,
+                    "refused": list(REFUSED_ACTIONS),
+                },
+            ).all()
+            self._read(session, settings, rows, lo, end, overlap, covered, counts)
+            if len(rows) < MAX_ROWS:
+                break
+            after = rows[-1][0]
+        read = time.monotonic()
         sliced = 0
-        while self.warm_from is not None and (
-            not sliced or time.monotonic() - began < self.warmup_budget
-        ):
+        while self.warm_from is not None and (not sliced or self._left(began) > self._slice_cost):
+            slicing = time.monotonic()
             sliced += 1
             until = min(self.warm_from + self.warmup_slice, end)
             rows = session.execute(
@@ -249,24 +265,38 @@ class Snapshot:
             ).all()
             self.warm_from = None if until >= end else until
             self._read(session, settings, rows, lo, end, overlap, until, counts)
+            self._slice_cost = time.monotonic() - slicing
         self._mark(began, last_id)
         self._prune(lo, overlap)
+        recounting = time.monotonic()
         recounted = 0
         if self.warm_from is None:
             recounted = self._recount(session, settings, lo, end, overlap, began)
             self.settled = self.settled or not any(known.stale for known in self.open.values())
         writing = time.monotonic()
         changed = self._write(now, lo, end)
+        done = time.monotonic()
+        if changed:
+            self._write_cost = done - writing - self._pieces_seconds
         return {
             **counts,
             "slices": sliced,
             "recounted": recounted,
+            "stale_sessions": sum(1 for known in self.open.values() if known.stale),
             "open_sessions": len(self.open),
             "warming_up": not self.settled,
             "written": changed,
-            "write_seconds": round(time.monotonic() - writing, 3),
-            "seconds": round(time.monotonic() - began, 3),
+            "read_seconds": round(read - began, 3),
+            "slice_seconds": round(recounting - read, 3),
+            "recount_seconds": round(writing - recounting, 3),
+            "write_seconds": round(done - writing, 3),
+            "seconds": round(done - began, 3),
         }
+
+    def _left(self, began: float) -> float:
+        """Seconds this tick still has for slices or counting, the file's write set aside."""
+        writing = self._write_cost + self._piece_cost * len(self._dirty)
+        return self.budget - (time.monotonic() - began) - writing
 
     def _after(self, now: float) -> int:
         """The id to read after: the table's highest id :data:`ID_MARGIN` ago."""
@@ -334,7 +364,7 @@ class Snapshot:
         if closed:
             (done,) = self._counts(session, settings, [list(closed.values())], lo, end, overlap)
             before = [known.counted for known in closed.values() if known.counted is not None]
-            self._dirty |= _changed([done], before)
+            self._dirty |= _pairs(_difference([done], before))
             for counted in before:
                 _add(self.opened, counted, sign=-1)
             _add(self.closed, done)
@@ -350,20 +380,24 @@ class Snapshot:
         began: float,
     ) -> int:
         """Count the open sessions whose logs changed, :data:`RECOUNT_CHUNK` at a time while the
-        tick is within :data:`RECOUNT_BUDGET`; the others wait for the next tick."""
+        tick has time for another chunk; the others wait for the next tick."""
         stale = [known for known in self.open.values() if known.stale]
         done = 0
-        while done < len(stale) and (done == 0 or time.monotonic() - began < RECOUNT_BUDGET):
+        while done < len(stale) and (done == 0 or self._left(began) > self._chunk_cost):
+            started = time.monotonic()
             chunk = stale[done : done + RECOUNT_CHUNK]
-            counts = self._counts(session, settings, [[known] for known in chunk], lo, end, overlap)
-            before = [known.counted for known in chunk if known.counted is not None]
-            self._dirty |= _changed(counts, before)
-            for counted in before:
-                _add(self.opened, counted, sign=-1)
+            counts = self._counts(
+                session, settings, [[known] for known in chunk], lo, end, overlap, cached=True
+            )
+            difference = _difference(
+                counts, [known.counted for known in chunk if known.counted is not None]
+            )
+            self._dirty |= _pairs(difference)
+            _add(self.opened, difference)
             for known, counted in zip(chunk, counts, strict=True):
                 known.counted, known.stale = counted, False
-                _add(self.opened, counted)
             done += len(chunk)
+            self._chunk_cost = time.monotonic() - started
         return done
 
     def _engine(self, settings: UsageSettings) -> tuple[DomainNamer, BackgroundRules]:
@@ -393,9 +427,12 @@ class Snapshot:
         lo: datetime,
         end: datetime,
         overlap: timedelta,
+        *,
+        cached: bool = False,
     ) -> list[Counted]:
         """The engine's count of each group of sessions over the minutes ``[lo, end)``: one
-        builder and one read of the web filter, application and DNS logs for all of them."""
+        builder and one read of the web filter, application and DNS logs for all of them
+        (``cached``: the web filter and application logs already read for a session are used)."""
         results = [Counted() for _ in groups]
         everyone = [known for group in groups for known in group]
         if not everyone:
@@ -406,20 +443,28 @@ class Snapshot:
         )
         ips = sorted({known.ip for known in everyone})
         timelines = self._timelines_of(session, ips, lo, end)
-        sessionids = sorted({row[0] for known in everyone for row in known.rows if row[0]})
+        unread = [known for known in everyone if not cached or known.names is None]
+        sessionids = sorted({row[0] for known in unread for row in known.rows if row[0]})
         since = lo - overlap
-        web = _by_session(session.execute(_WEB, {"ips": ips, "sessions": sessionids, "lo": since}))
-        app = _by_session(session.execute(_APP, {"ips": ips, "sessions": sessionids, "lo": since}))
+        web: dict[tuple[str, int], list[tuple[Any, ...]]] = {}
+        app: dict[tuple[str, int], list[tuple[Any, ...]]] = {}
+        if sessionids:
+            unread_ips = sorted({known.ip for known in unread})
+            bounds = {"ips": unread_ips, "sessions": sessionids, "lo": since}
+            web = _by_session(session.execute(_WEB, bounds))
+            app = _by_session(session.execute(_APP, bounds))
+        for known in unread:
+            sessionid = known.rows[0][0]
+            known.names = (
+                list(web.get((known.ip, sessionid), ())),
+                list(app.get((known.ip, sessionid), ())),
+            )
         # The engine names a session by its web filter or application host name first: only
         # the sessions without one need their DNS answers.
         _answers(
             session,
             settings,
-            [
-                known
-                for known in everyone
-                if known.dns is None and not _host(known, web) and not _host(known, app)
-            ],
+            [known for known in everyone if known.dns is None and not _host(known)],
         )
         for group, counted in zip(groups, results, strict=True):
             by_ip: dict[str, list[OpenSession]] = defaultdict(list)
@@ -432,14 +477,14 @@ class Snapshot:
                     (row for known in by_ip[ip] for row in known.rows),
                     key=lambda r: (r[0] is None, r[0] or 0, str(r[1]), r[2] or 0, r[3], r[4] or 0),
                 )
-                ids = sorted({row[0] for row in traffic if row[0] is not None})
                 answers = {row[0]: row for known in by_ip[ip] for row in known.dns or ()}
+                web_rows, app_rows = _names_of(by_ip[ip])
                 builder.add_ip(
                     ip,
                     timelines[ip],
                     traffic,
-                    [row for sessionid in ids for row in web.get((ip, sessionid), ())],
-                    [row for sessionid in ids for row in app.get((ip, sessionid), ())],
+                    web_rows,
+                    app_rows,
                     [row[1:] for row in sorted(answers.values(), key=lambda r: (r[1], r[0]))],
                 )
                 _started(builder, timelines[ip], traffic, counted)
@@ -481,25 +526,43 @@ class Snapshot:
         return result
 
     def _write(self, now: datetime, lo: datetime, end: datetime) -> bool:
-        """Write the snapshot when its content changed (atomically); whether it was written.
-        Only the minutes whose totals changed are put together again."""
+        """Write the snapshot when its content changed; whether it was written. Only the
+        subject-minutes whose totals changed are put together again."""
         first, last = int(lo.timestamp()), int(end.timestamp())
         if len(self._destinations) + len(self._apps) > NAMES_LIMIT:
             self._destinations.clear()
             self._apps.clear()
-            self._dirty |= set(self._fragments)
+            self._dirty |= {(m, key) for m, pieces in self._pieces.items() for key in pieces}
+            self._pieces.clear()
             self._fragments.clear()
-        for minute in [minute for minute in self._fragments if not first <= minute < last]:
-            del self._fragments[minute]
-        for minute in self._dirty:
-            if first <= minute < last:
-                fragment = self._fragment(minute)
-                if fragment is None:
-                    self._fragments.pop(minute, None)
-                else:
-                    self._fragments[minute] = fragment
+        for minute in [minute for minute in self._pieces if not first <= minute < last]:
+            del self._pieces[minute]
+            self._fragments.pop(minute, None)
+        building = time.monotonic()
+        touched: set[int] = set()
+        for minute, key in self._dirty:
+            if not first <= minute < last:
+                continue
+            touched.add(minute)
+            piece = self._piece(minute, key)
+            pieces = self._pieces.setdefault(minute, {})
+            if piece is None:
+                pieces.pop(key, None)
+            else:
+                pieces[key] = piece
+        if self._dirty:
+            self._piece_cost = (time.monotonic() - building) / len(self._dirty)
         self._dirty.clear()
-        used = {key for _, keys in self._fragments.values() for key in keys}
+        for minute in touched:
+            pieces = self._pieces.get(minute)
+            if not pieces:
+                self._pieces.pop(minute, None)
+                self._fragments.pop(minute, None)
+                continue
+            joined = ",".join(pieces[key] for key in sorted(pieces))
+            self._fragments[minute] = f'{{"minute":"{_iso(minute)}","subjects":{{{joined}}}}}'
+        self._pieces_seconds = time.monotonic() - building
+        used = {key for pieces in self._pieces.values() for key in pieces}
         newest = max(
             (c.newest for c in (self.closed, self.opened) if c.newest is not None), default=None
         )
@@ -518,7 +581,7 @@ class Snapshot:
             sort_keys=True,
             separators=(",", ":"),
         )
-        minutes = ",".join(self._fragments[minute][0] for minute in sorted(self._fragments))
+        minutes = ",".join(self._fragments[minute] for minute in sorted(self._fragments))
         content = f'{header[:-1]},"minutes":[{minutes}]}}'
         if content == self.written:
             return False
@@ -528,51 +591,42 @@ class Snapshot:
         self.written = content
         return True
 
-    def _fragment(self, minute: int) -> tuple[str, set[str]] | None:
-        """One minute of the file (``None`` without traffic): per subject ``[download, upload,
-        sessions, [[destination, bytes]], [[application, bytes]]]``, whole bytes."""
-        parts = (self.closed, self.opened)
-        cells = [counted.cells.get(minute, {}) for counted in parts]
-        started = [counted.sessions.get(minute, {}) for counted in parts]
-        subjects: dict[str, list[Any]] = {}
-        for key in sorted({key for found in (*cells, *started) for key in found}):
-            down = up = 0.0
-            volumes: dict[tuple[str, str], float] = defaultdict(float)
-            by_app: dict[str, float] = defaultdict(float)
-            for found in cells:
-                cell = found.get(key)
-                if cell is None:
-                    continue
-                down += cell[0]
-                up += cell[1]
-                for name, volume in cell[2].items():
-                    volumes[name] += volume
-                for name, volume in cell[3].items():
-                    by_app[name] += volume
-            sessions = sum(found.get(key, 0) for found in started)
-            if round(down) == 0 and round(up) == 0 and not sessions:
+    def _piece(self, minute: int, key: str) -> str | None:
+        """One subject's entry of a minute (``None`` without traffic): ``"key":[download,
+        upload, sessions, [[destination, bytes]], [[application, bytes]]]``, whole bytes."""
+        down = up = 0.0
+        volumes: dict[tuple[str, str], float] = defaultdict(float)
+        by_app: dict[str, float] = defaultdict(float)
+        sessions = 0
+        for counted in (self.closed, self.opened):
+            cell = counted.cells.get(minute, {}).get(key)
+            sessions += counted.sessions.get(minute, {}).get(key, 0)
+            if cell is None:
                 continue
-            subjects[key] = [
-                round(down),
-                round(up),
-                sessions,
-                [
-                    [self._destinations.setdefault(name, len(self._destinations)), round(volume)]
-                    for name, volume in _top(volumes, TOP_PER_MINUTE)
-                    if round(volume)
-                ],
-                [
-                    [self._apps.setdefault(name, len(self._apps)), round(volume)]
-                    for name, volume in _top(by_app, TOP_PER_MINUTE)
-                    if round(volume)
-                ],
-            ]
-        if not subjects:
+            down += cell[0]
+            up += cell[1]
+            for name, volume in cell[2].items():
+                volumes[name] += volume
+            for name, volume in cell[3].items():
+                by_app[name] += volume
+        if round(down) == 0 and round(up) == 0 and not sessions:
             return None
-        text_ = json.dumps(
-            {"minute": _iso(minute), "subjects": subjects}, sort_keys=True, separators=(",", ":")
-        )
-        return text_, set(subjects)
+        entry = [
+            round(down),
+            round(up),
+            sessions,
+            [
+                [self._destinations.setdefault(name, len(self._destinations)), round(volume)]
+                for name, volume in _top(volumes, TOP_PER_MINUTE)
+                if round(volume)
+            ],
+            [
+                [self._apps.setdefault(name, len(self._apps)), round(volume)]
+                for name, volume in _top(by_app, TOP_PER_MINUTE)
+                if round(volume)
+            ],
+        ]
+        return f"{json.dumps(key)}:{json.dumps(entry, separators=(',', ':'))}"
 
 
 #: The snapshot of each data directory, kept by the worker process between its ticks.
@@ -617,13 +671,21 @@ def _by_session(rows: Iterable[Sequence[Any]]) -> dict[tuple[str, int], list[tup
     return found
 
 
-def _host(known: OpenSession, rows: Mapping[tuple[str, int], list[tuple[Any, ...]]]) -> bool:
-    """Whether a web filter or application log names the session (``(sessionid, time,
-    hostname, …)`` rows by address and session id), as the engine reads them."""
-    sessionid = known.rows[0][0]
-    if sessionid is None:
-        return False
-    return any(normalize_hostname(row[2]) for row in rows.get((known.ip, sessionid), ()))
+def _host(known: OpenSession) -> bool:
+    """Whether a web filter or application log names the session (rows ``(sessionid, time,
+    hostname, …)``), as the engine reads them."""
+    web, app = known.names or ([], [])
+    return any(normalize_hostname(row[2]) for row in (*web, *app))
+
+
+def _names_of(
+    sessions: Sequence[OpenSession],
+) -> tuple[list[tuple[Any, ...]], list[tuple[Any, ...]]]:
+    """The sessions' web filter and application logs, each in time order (by session)."""
+    ordered = sorted(sessions, key=lambda known: known.rows[0][0] or 0)
+    web = [row for known in ordered for row in (known.names or ([], []))[0]]
+    app = [row for known in ordered for row in (known.names or ([], []))[1]]
+    return web, app
 
 
 def _answers(session: Session, settings: UsageSettings, sessions: Sequence[OpenSession]) -> None:
@@ -737,15 +799,24 @@ def _started(
         bucket[subject] = bucket.get(subject, 0) + 1
 
 
-def _changed(added: Iterable[Counted], removed: Iterable[Counted]) -> set[int]:
-    """The minutes whose bytes, names or sessions differ between ``added`` and ``removed``: a
-    session counted again changes only the minutes its new logs reach."""
+def _difference(added: Iterable[Counted], removed: Iterable[Counted]) -> Counted:
+    """``added`` less ``removed`` (what is left at zero dropped): a session counted again
+    changes only the minutes its new logs reach."""
     difference = Counted()
     for counted in added:
         _add(difference, counted)
     for counted in removed:
         _add(difference, counted, sign=-1)
-    return set(difference.cells) | set(difference.sessions)
+    return difference
+
+
+def _pairs(difference: Counted) -> set[tuple[int, str]]:
+    """The subject-minutes a difference touches."""
+    changed = {(minute, key) for minute, cells in difference.cells.items() for key in cells}
+    changed.update(
+        (minute, key) for minute, started in difference.sessions.items() for key in started
+    )
+    return changed
 
 
 def _add(total: Counted, other: Counted, *, sign: int = 1) -> None:
@@ -762,11 +833,11 @@ def _add(total: Counted, other: Counted, *, sign: int = 1) -> None:
             for table, values in ((cell[2], volumes), (cell[3], by_app)):
                 for name, volume in values.items():
                     left = table.get(name, 0.0) + sign * volume
-                    if sign < 0 and abs(left) < EPSILON:
+                    if abs(left) < EPSILON:
                         table.pop(name, None)
                     else:
                         table[name] = left
-            if sign < 0 and max(abs(cell[0]), abs(cell[1])) < EPSILON and not (cell[2] or cell[3]):
+            if max(abs(cell[0]), abs(cell[1])) < EPSILON and not (cell[2] or cell[3]):
                 del target_minute[key]
         if not target_minute:
             del total.cells[minute]

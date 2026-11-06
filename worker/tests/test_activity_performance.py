@@ -250,6 +250,11 @@ def test_ticks_and_warm_up_slices_stay_within_budget(
     figures["open_sessions"] = ticks[-1]["open_sessions"]
     figures["write_max_s"] = max(details["write_seconds"] for details in [*slices, *ticks])
     figures["file_bytes"] = layout.activity.stat().st_size
+    phases = ("read_seconds", "slice_seconds", "recount_seconds", "write_seconds")
+    figures["slice_phases_max"] = {name: max(d[name] for d in slices) for name in phases}
+    figures["tick_phases_max"] = {name: max(d[name] for d in ticks) for name in phases}
+    figures["stale_after_ticks"] = [details["stale_sessions"] for details in ticks]
+    figures["recounted"] = [details["recounted"] for details in ticks]
     print(f"\nactivity snapshot at {rate:g} lines/s, {devices} devices: {figures}")
     assert figures["slice_max_s"] < SLICE_BUDGET
     assert figures["tick_max_s"] < TICK_BUDGET

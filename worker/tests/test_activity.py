@@ -232,7 +232,7 @@ def test_the_warm_up_reads_in_slices_and_then_the_new_rows(
     evidence.traffic(tr(DAY, 11, 10), LONE, 40001, rcvdbyte=1000, sentbyte=100, duration=30)
     db_session.commit()
     slice_ = timedelta(minutes=10)
-    snapshot = Snapshot(layout.activity, warmup_slice=slice_, warmup_budget=0)
+    snapshot = Snapshot(layout.activity, warmup_slice=slice_, budget=0)
     first = snapshot.tick(db_session, now)
     assert (first["warming_up"], first["slices"]) == (True, 1)
     assert read(layout.activity)["warming_up"] is True
