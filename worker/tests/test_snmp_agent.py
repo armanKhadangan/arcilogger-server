@@ -211,6 +211,29 @@ def test_a_failure_pysnmp_raises_is_an_snmp_error_without_its_message() -> None:
     assert error.value.__suppress_context__
 
 
+def test_the_probe_child_lists_the_device_s_interfaces(agent: Agent) -> None:
+    """The ``snmp`` probe in its child process against the responder: a name the device does
+    not have is refused with what it reports (W5-N-9)."""
+    from arcilogger_core.admin.contract import ProbeInterface
+    from arcilogger_core.admin.probe import ChildProber
+
+    params: dict[str, Any] = {
+        "host": "127.0.0.1",
+        "port": agent.port,
+        "user": USER,
+        "auth": "sha256",
+        "priv": "aes128",
+        "interfaces": ["wan9"],
+    }
+    keys = {"auth_key": AUTH_KEY, "priv_key": PRIV_KEY}
+    result = ChildProber().run("snmp", params, keys)
+    assert (result.ok, result.code) == (False, "snmp_no_such_interface")
+    assert result.interfaces == (
+        ProbeInterface(name="wan1", oper_status="up", speed_mbps=1000),
+        ProbeInterface(name="lan", oper_status="down", speed_mbps=100),
+    )
+
+
 def test_the_job_round_trip(agent: Agent, tmp_path: Path, layout: Layout) -> None:
     secrets = tmp_path / "secrets"
     secrets.mkdir()

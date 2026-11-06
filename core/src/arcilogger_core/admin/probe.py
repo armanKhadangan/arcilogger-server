@@ -10,18 +10,19 @@ written, the agent tests it with exactly the values it would write:
   write, read and remove test of ``replica.probe`` (60 s);
 * ``snmp`` — a walk of ``ifName`` with a source's candidate SNMPv3 settings and keys, then the
   operational status, speed and 64-bit counters of the configured WAN interfaces
-  (:mod:`arcilogger_core.snmp`, 15 s; Wave 5 §6 N5). Its message lists the interfaces the device
-  reports (name, ``ifOperStatus``, ``ifHighSpeed``), so the administrator can pick the WAN lines;
-  a failure names its N4 reason (``snmp_timeout``, ``snmp_auth_failed``,
-  ``snmp_no_such_interface``, ``snmp_no_hc_counters``).
+  (:mod:`arcilogger_core.snmp`, 15 s; Wave 5 §6 N5). Once the walk answered, its
+  ``interfaces`` list what the device reports (name, ``ifOperStatus``, ``ifHighSpeed``), so the
+  administrator can pick the WAN lines (W5-N-9); a failure names its N4 reason
+  (``snmp_timeout``, ``snmp_auth_failed``, ``snmp_no_such_interface``, ``snmp_no_hc_counters``).
 
 Each runs in a child process (``python -I -m arcilogger_core.admin.probe``,
 :class:`ChildProber`): a hanging client or share is killed at its timeout and leaves nothing in
 the agent. The request, secrets included, goes to the child on its standard input, never on its
-command line; the child answers one JSON line ``{"ok", "code", "message"}`` on its standard
-output, which the agent reads capped. A message never contains a secret (each one is replaced
-by ``***`` as well). The Zamane client itself takes the password on its command line (residual
-risk 4 of contract 2.18, as the evidence tasks do).
+command line; the child answers one JSON line ``{"ok", "code", "message", "interfaces"}`` on its
+standard output, which the agent reads capped and bounded (:func:`bounded_interfaces`). A message
+or an interface name never contains a secret (each one is replaced by ``***`` as well). The
+Zamane client itself takes the password on its command line (residual risk 4 of contract 2.18,
+as the evidence tasks do).
 """
 
 from __future__ import annotations
@@ -33,10 +34,16 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Final, Literal, Protocol
+from typing import Any, Final, Literal, Protocol, get_args
 
 from pydantic import JsonValue
 
+from arcilogger_core.admin.contract import (
+    PROBE_INTERFACE_NAME_MAX,
+    PROBE_INTERFACES_MAX,
+    OperStatusName,
+    ProbeInterface,
+)
 from arcilogger_core.clockcheck import ClockError, sntp_query
 from arcilogger_core.config import SmtpConfig
 from arcilogger_core.replica import probe as replica_probe
@@ -88,6 +95,8 @@ class ProbeResult:
     code: str | None
     #: A short technical description for the log (never a secret).
     message: str
+    #: What the device reported to the ``snmp`` probe once its walk answered (W5-N-9).
+    interfaces: tuple[ProbeInterface, ...] = ()
 
 
 class Prober(Protocol):
@@ -102,6 +111,37 @@ def redact(text: str, secrets: Mapping[str, str]) -> str:
         if value and len(value) >= 3:
             text = text.replace(value, "***")
     return text[:MAX_MESSAGE]
+
+
+_OPER_STATUSES: Final = frozenset(get_args(OperStatusName))
+
+
+def bounded_interfaces(raw: object, secrets: Mapping[str, str]) -> tuple[ProbeInterface, ...]:
+    """An interface list as the child sent it, bounded (W5-N-9): at most
+    :data:`PROBE_INTERFACES_MAX` entries; a name without the ``secrets``, its control characters
+    replaced by ``?`` and cut to :data:`PROBE_INTERFACE_NAME_MAX` characters; a status other than
+    an RFC 2863 name or a speed other than a whole number from 0 is null; anything else is left
+    out."""
+    if not isinstance(raw, list):
+        return ()
+    found: list[ProbeInterface] = []
+    for item in raw[:PROBE_INTERFACES_MAX]:
+        name = item.get("name") if isinstance(item, dict) else None
+        if not isinstance(name, str):
+            continue
+        name = "".join(c if c.isprintable() else "?" for c in redact(name, secrets))
+        name = name[:PROBE_INTERFACE_NAME_MAX]
+        if not name:
+            continue
+        oper, speed = item.get("oper_status"), item.get("speed_mbps")
+        found.append(
+            ProbeInterface(
+                name=name,
+                oper_status=oper if oper in _OPER_STATUSES else None,
+                speed_mbps=speed if type(speed) is int and speed >= 0 else None,
+            )
+        )
+    return tuple(found)
 
 
 def _failed(kind: str, message: str, secrets: Mapping[str, str]) -> ProbeResult:
@@ -209,15 +249,21 @@ def probe_snmp(
         f"{'?' if item.speed_mbps is None else item.speed_mbps} Mbit/s"
         for item in interfaces
     )
+    listed = bounded_interfaces(
+        [
+            {"name": item.name, "oper_status": item.oper_status, "speed_mbps": item.speed_mbps}
+            for item in interfaces
+        ],
+        secrets,
+    )
     names = {item.name: item for item in interfaces}
     missing = [name for name in wanted if name not in names]
     if missing:
-        return ProbeResult(
-            False, "snmp_no_such_interface", f"not found: {', '.join(missing)}. found: {found}"
-        )
+        message = f"not found: {', '.join(missing)}. found: {found}"
+        return ProbeResult(False, "snmp_no_such_interface", message, listed)
     if any(not names[name].counters for name in wanted):
-        return ProbeResult(False, "snmp_no_hc_counters", found)
-    return ProbeResult(True, None, found)
+        return ProbeResult(False, "snmp_no_hc_counters", found, listed)
+    return ProbeResult(True, None, found, listed)
 
 
 def run_probe(kind: str, params: Mapping[str, Any], secrets: Mapping[str, str]) -> ProbeResult:
@@ -279,11 +325,13 @@ class ChildProber:
             error = completed.stderr[:MAX_OUTPUT].decode("utf-8", "replace").strip()
             return _failed(kind, f"exit code {completed.returncode}: {error[-300:]}", secrets)
         message = redact(str(answer.get("message", "")), secrets)
+        listed = bounded_interfaces(answer.get("interfaces"), secrets) if kind == "snmp" else ()
         if answer["ok"]:
-            return ProbeResult(True, None, message)
+            return ProbeResult(True, None, message, listed)
         code = answer.get("code")
         if kind == "snmp" and code in SNMP_CODES.values():
-            return ProbeResult(False, str(code), message)  # N4's reason, not one generic code
+            # N4's reason, not one generic code, and what the device reported
+            return ProbeResult(False, str(code), message, listed)
         return ProbeResult(False, FAILURE_CODES[kind], message)
 
 
@@ -297,7 +345,9 @@ def main() -> int:
     except Exception as exc:  # the parent reads a failure, never a traceback with values
         print(json.dumps({"ok": False, "code": None, "message": type(exc).__name__}))
         return 1
-    print(json.dumps({"ok": result.ok, "code": result.code, "message": result.message}))
+    interfaces = [item.model_dump(mode="json") for item in result.interfaces]
+    answer = {"ok": result.ok, "code": result.code, "message": result.message}
+    print(json.dumps({**answer, "interfaces": interfaces}))
     return 0
 
 
