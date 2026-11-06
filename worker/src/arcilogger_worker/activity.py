@@ -351,7 +351,9 @@ class Snapshot:
             # What a step takes lately (a chunk of sessions or a slice): the next one starts only
             # when it fits in what the tick has left.
             self._step_cost = 0.5 * self._step_cost + 0.5 * (time.monotonic() - step)
-            if self._left(began) < self._step_cost or (stop is not None and stop.is_set()):
+            # ``<=``: on Windows the monotonic clock moves in steps of about 15 ms, so a fast
+            # step can read as 0 s, and a budget of 0 would never end the tick.
+            if self._left(began) <= self._step_cost or (stop is not None and stop.is_set()):
                 break
         stale = sum(1 for known in self.open.values() if known.stale)
         if self.warm_from is None and not self.ended and not stale:
