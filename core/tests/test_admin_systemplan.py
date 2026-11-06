@@ -255,6 +255,69 @@ def test_snmp_sources_get_a_udp_rule_each_in_strict_mode() -> None:
     assert planned.problems == ()
 
 
+TURKTRUST = """\
+[tsa]
+provider = "turktrust"
+url = "https://zd.turktrust.com.tr/"
+port = 443
+crl_urls = ["http://crl.ornek.example/root.crl", "https://crl2.ornek.example/tsa.crl"]
+"""
+
+
+def outbound_of(extra: str) -> list[tuple[str, str, int]]:
+    planned = plan(inputs(config_of(extra=extra), firewall_managed=True, strict_outbound=True))
+    assert planned.problems == ()
+    # The default [clock] fallback's NTP rule is left out: these tests are about the others.
+    found = [(rule.rule, rule.host, rule.port) for rule in planned.firewall.outbound]
+    return [entry for entry in found if entry[0] != "ARCILOGGER Out NTP"]
+
+
+def test_turktrust_and_the_revocation_lists_have_their_rules() -> None:
+    """W5-T-3: the rules Set-ArciFirewall.ps1 makes. TÜRKTRUST's host on its port, the hosts
+    of tsa.crl_urls on 80 and 443; Kamu SM's servers keep port 80, without TÜRKTRUST's host."""
+    assert outbound_of(TURKTRUST) == [
+        ("ARCILOGGER Out Kamu SM", "zd.kamusm.gov.tr", 80),
+        ("ARCILOGGER Out Kamu SM", "tzd.kamusm.gov.tr", 80),
+        ("ARCILOGGER Out TURKTRUST", "zd.turktrust.com.tr", 443),
+        ("ARCILOGGER Out CRL", "crl.ornek.example", 80),
+        ("ARCILOGGER Out CRL", "crl.ornek.example", 443),
+        ("ARCILOGGER Out CRL", "crl2.ornek.example", 80),
+        ("ARCILOGGER Out CRL", "crl2.ornek.example", 443),
+    ]
+
+
+@pytest.mark.parametrize(
+    ("tsa", "port"),
+    [
+        # The default tsa.port (80) leaves an https URL on 443 (tsa.url_with_port).
+        ('url = "https://zd.turktrust.com.tr/"', 443),
+        ('url = "https://zd.turktrust.com.tr/"\nport = 8443', 8443),
+        ('url = "https://zd.turktrust.com.tr:9443/"\nport = 8443', 9443),
+        ('url = "http://zd.turktrust.com.tr/"\nallow_plain_http = true', 80),
+    ],
+)
+def test_turktrusts_rule_takes_the_port_the_provider_uses(tsa: str, port: int) -> None:
+    rules = outbound_of(f'[tsa]\nprovider = "turktrust"\n{tsa}\n')
+    assert [entry for entry in rules if entry[0] == "ARCILOGGER Out TURKTRUST"] == [
+        ("ARCILOGGER Out TURKTRUST", "zd.turktrust.com.tr", port)
+    ]
+
+
+def test_the_proxy_replaces_turktrust_and_the_revocation_lists() -> None:
+    """D13: with network.https_proxy both go through the proxy, so its host and port replace
+    their rules; the Zamane client takes no proxy, so Kamu SM's rule stays."""
+    rules = outbound_of(TURKTRUST + '[network]\nhttps_proxy = "http://172.20.10.5:3128"\n')
+    assert rules == [
+        ("ARCILOGGER Out Kamu SM", "zd.kamusm.gov.tr", 80),
+        ("ARCILOGGER Out Kamu SM", "tzd.kamusm.gov.tr", 80),
+        ("ARCILOGGER Out Proxy", "172.20.10.5", 3128),
+    ]
+    # Another provider: the revocation lists still have their rule without a proxy.
+    kamusm = outbound_of('[tsa]\ncrl_urls = ["http://crl.ornek.example/root.crl"]\n')
+    assert ("ARCILOGGER Out CRL", "crl.ornek.example", 80) in kamusm
+    assert not [entry for entry in kamusm if entry[0] == "ARCILOGGER Out TURKTRUST"]
+
+
 def test_an_invalid_remembered_host_is_left_out_and_named() -> None:
     planned = plan(
         inputs(config_of(), strict_outbound=True, smtp_server="kötü host:25", firewall_managed=True)

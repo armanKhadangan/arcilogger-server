@@ -1230,12 +1230,13 @@ SNMP_RULE_PREFIX: Final = "ARCILOGGER SNMP "
 
 class OutboundRule(_Model):
     """One host of a strict outbound rule; a rule with several hosts or ports has one entry
-    each (``Set-ArciFirewall.ps1`` names the rules; NTP and SNMP are UDP, the others TCP)."""
+    each (``Set-ArciFirewall.ps1`` names the rules; TURKTRUST, CRL and Proxy: Wave 5 W5-T-3; NTP
+    and SNMP are UDP, the others TCP)."""
 
     rule: Annotated[
         str,
         StringConstraints(
-            pattern=r"^ARCILOGGER (Out (NTP|Kamu SM|SMTP( [2-9])?|Replica)"
+            pattern=r"^ARCILOGGER (Out (NTP|Kamu SM|SMTP( [2-9])?|Replica|TURKTRUST|CRL|Proxy)"
             r"|SNMP [a-z0-9][a-z0-9-]{0,62})$"
         ),
     ]

@@ -13075,6 +13075,9 @@ foreach ($case in @(
         @('ntp', 'ARCILOGGER Out NTP', '172.20.10.1', 123),
         @('kamu sm', 'ARCILOGGER Out Kamu SM', 'zd.kamusm.gov.tr', 80),
         @('replica', 'ARCILOGGER Out Replica', 'nas.ornek.example', 445),
+        @('turktrust', 'ARCILOGGER Out TURKTRUST', 'zd.turktrust.com.tr', 443),
+        @('crl', 'ARCILOGGER Out CRL', 'crl.ornek.example', 80),
+        @('proxy', 'ARCILOGGER Out Proxy', '172.20.10.5', 3128),
         @('snmp', 'ARCILOGGER SNMP fw-1', '172.20.0.1', 161),
         @('snmp of a bad name', 'ARCILOGGER SNMP Fw 1', '172.20.0.1', 161),
         @('web rule', 'ARCILOGGER HTTPS', 'arcilogger.internal', 443),
@@ -13220,7 +13223,9 @@ def test_firewall_sync_checks_senders_and_outbound_rules_again(
         assert "[not an IPv4 address or network]" in problems[value], value
     outbound = admin_helpers["outbound"]
     allowed = {name for name, problem in outbound.items() if problem is None}
-    assert allowed == {"smtp", "second smtp", "ntp", "kamu sm", "replica", "snmp"}
+    assert allowed == {
+        "smtp", "second smtp", "ntp", "kamu sm", "replica", "turktrust", "crl", "proxy", "snmp",
+    }  # fmt: skip
     for name in ("web rule", "dns rule", "tenth smtp", "snmp of a bad name"):
         assert "[rule not updated by this step]" in outbound[name], name
     for name in ("command in the host", "leading hyphen"):
@@ -13860,6 +13865,48 @@ def test_firewall_sync_updates_the_syslog_rules_in_place_and_nothing_else(
 SYNC_SCRIPT = WINDOWS / "scripts" / "Sync-ArciSystem.ps1"
 KNOWN_CLIENT = b"a Zamane client release (test bytes)"
 KNOWN_SHA = sha256_bytes(KNOWN_CLIENT)
+
+
+def test_firewall_sync_applies_the_turktrust_crl_and_proxy_rules(
+    engine: str, tmp_path: Path
+) -> None:
+    """W5-T-3: in strict mode ApplySystem's plan may name ARCILOGGER Out TURKTRUST, CRL and
+    Proxy; they are set (created when missing) over TCP on the plan's ports, like Set-ArciFirewall
+    makes them, and nothing else is named."""
+    (tmp_path / "policy.json").write_text(
+        json.dumps(_policy_document(source_networks=["172.20.0.0/16"])), encoding="utf-8"
+    )
+    (tmp_path / "strict.json").write_text(
+        json.dumps({"schema": 1, "strict_outbound": True}), encoding="utf-8"
+    )
+    outbound = [
+        {"rule": "ARCILOGGER Out TURKTRUST", "host": "172.20.10.11", "port": 443},
+        {"rule": "ARCILOGGER Out CRL", "host": "172.20.10.12", "port": 80},
+        {"rule": "ARCILOGGER Out CRL", "host": "172.20.10.12", "port": 443},
+        {"rule": "ARCILOGGER Out CRL", "host": "172.20.10.13", "port": 80},
+        {"rule": "ARCILOGGER Out CRL", "host": "172.20.10.13", "port": 443},
+        {"rule": "ARCILOGGER Out Proxy", "host": "172.20.10.5", "port": 3128},
+    ]
+    cases = [{"name": "wave5", "policy": "policy.json", "state": "strict.json",
+              "senders": ["172.20.10.1"], "outbound": outbound}]  # fmt: skip
+    _, found = _firewall_sync(engine, tmp_path, cases)
+    code, plan = found["wave5"]
+    assert code == 0, plan["problems"]
+    changes = {c["rule"]: c for c in plan["changes"] if c["direction"] == "Outbound"}
+    assert set(changes) == {
+        "ARCILOGGER Out TURKTRUST",
+        "ARCILOGGER Out CRL",
+        "ARCILOGGER Out Proxy",
+    }
+    expected = {
+        "ARCILOGGER Out TURKTRUST": (["443"], ["172.20.10.11"]),
+        "ARCILOGGER Out CRL": (["80", "443"], ["172.20.10.12", "172.20.10.13"]),
+        "ARCILOGGER Out Proxy": (["3128"], ["172.20.10.5"]),
+    }
+    for name, (ports, addresses) in expected.items():
+        change = changes[name]
+        assert (change["operation"], change["protocol"]) == ("set", "TCP"), name
+        assert (change["ports"], change["remote_address"]) == (ports, addresses), name
 
 
 def _system_plan_sample() -> dict[str, Any]:

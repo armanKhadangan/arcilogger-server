@@ -57,9 +57,10 @@
     in and the widest network) before anything changes. It then updates the two syslog rules in
     place (Set-NetFirewallAddressFilter), creates them when the first sender appears and removes
     them when the last one goes (an empty RemoteAddress would mean any address), and in strict
-    mode updates the Out NTP / Kamu SM / SMTP / Replica and SNMP <source> rules in place (a host that does not
-    resolve keeps its rule as it is). It never disables or removes another rule, never changes a
-    profile, needs no -AdminAddress, skips the remote desktop check and never prompts. Exit codes:
+    mode updates the Out NTP / Kamu SM / SMTP / Replica / TURKTRUST / CRL / Proxy and SNMP <source>
+    rules in place, creating one that is missing (a host that does not resolve keeps its rule as it
+    is). It never disables or removes another rule, never changes a profile, needs no
+    -AdminAddress, skips the remote desktop check and never prompts. Exit codes:
     0 done, 2 refused (nothing changed), 3 not managed (no state file: an installation with
     -SkipFirewall). The full mode above stays for the installer and the console.
     -KeepSourceAddress: enabled sources the policy leaves out (system-plan's
@@ -232,8 +233,9 @@ function Invoke-SyncFromConfig {
     (-PolicyPath) before any change, and a refused one changes nothing. The two syslog rules are
     updated in place (Set-NetFirewallAddressFilter), created when the list becomes non-empty and
     removed when it becomes empty (an empty RemoteAddress would mean any address); in strict mode
-    the Out NTP / Kamu SM / SMTP / Replica and SNMP <source> (UDP, Wave 5 §6 N3) rules of the plan are updated in place, a rule whose
-    host does not resolve now keeps its addresses. Nothing else is touched: no other rule is
+    the Out NTP / Kamu SM / SMTP / Replica / TURKTRUST / CRL / Proxy and SNMP <source> (UDP, Wave 5
+    §6 N3) rules of the plan are updated in place (created when missing), a rule whose host does not
+    resolve now keeps its addresses. Nothing else is touched: no other rule is
     disabled or removed, no profile changes, the 443, 3389 and 5985 rules and the operator's
     choices of the state file stay as they are. Never prompts. Returns the exit code: 0 done,
     2 refused (nothing changed), 3 not managed (no state file: -SkipFirewall).
