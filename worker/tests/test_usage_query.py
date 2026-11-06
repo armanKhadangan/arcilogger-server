@@ -77,6 +77,7 @@ def test_site_users_have_the_sites_figures_only(db_session: Session, site: Golde
         "sessions": 1,
         "blocked": 0,
         "off_hours_active_seconds": 0,
+        "break_active_seconds": 0,
         "first_activity": None,
         "last_activity": None,
     }

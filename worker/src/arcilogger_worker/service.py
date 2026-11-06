@@ -34,7 +34,7 @@ Jobs (``DEFAULT_JOBS``):
 ``alerts.system``           every 5 minutes: the R20 system checks (:mod:`.alerts.system`)
 ``alerts.notify``           every minute: alert e-mail through ``[smtp]``
                             (:mod:`.alerts.notify`)
-``usage.today``             every 5 minutes: today's usage rollup (:mod:`.usage.jobs`)
+``usage.today``             every minute, with back-off: today's usage rollup (:mod:`.usage.jobs`)
 ``usage.daily``             daily after 00:45: yesterday's usage rollup, final
 ``usage.reattribute``       every 10 minutes: recent days whose inputs or device owners
                             changed are rebuilt (``usage.auto_rebuild_days``)
@@ -217,8 +217,9 @@ ADMIN_REQUESTS_EVERY: Final = timedelta(seconds=15)
 #: every 5 minutes (they read more files).
 ALERTS_EVERY: Final = timedelta(minutes=1)
 ALERTS_SYSTEM_EVERY: Final = timedelta(minutes=5)
-#: Area U (spec 10.4): today's usage every 5 minutes, re-attribution every 10, requests every 30 s.
-USAGE_TODAY_EVERY: Final = timedelta(minutes=5)
+#: Area U (spec 10.4): today's usage every minute (contract W5 §6 L1; the job backs off on a busy
+#: site, :func:`.usage.jobs.refresh_today`), re-attribution every 10 minutes, requests every 30 s.
+USAGE_TODAY_EVERY: Final = timedelta(minutes=1)
 USAGE_REATTRIBUTE_EVERY: Final = timedelta(minutes=10)
 USAGE_REQUESTS_EVERY: Final = timedelta(seconds=30)
 #: ``reports.run_due`` looks for due schedules and queued runs every minute.
@@ -341,8 +342,11 @@ def job_alerts_notify(ctx: JobContext) -> Mapping[str, Any]:
 
 
 def job_usage_today(ctx: JobContext) -> Mapping[str, Any]:
-    """Today's usage rollup (partial) from the logs loaded so far."""
-    return usage_jobs.refresh_today(ctx.sessions, now=ctx.now)
+    """Today's usage rollup (partial) from the logs so far; ``skipped`` while it backs off."""
+    details = usage_jobs.refresh_today(ctx.sessions, now=ctx.now)
+    if details.get("reason") == "backoff":
+        details[SKIPPED] = True
+    return details
 
 
 def job_usage_daily(ctx: JobContext) -> Mapping[str, Any]:

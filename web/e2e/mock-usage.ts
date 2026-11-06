@@ -220,6 +220,7 @@ function emptyMetrics(): Metrics {
     sessions: 0,
     blocked: 0,
     off_hours_active_seconds: 0,
+    break_active_seconds: 0,
     first_activity: null,
     last_activity: null,
   };
@@ -234,6 +235,7 @@ function addMetrics(total: Metrics, other: Metrics): Metrics {
   total.sessions += other.sessions;
   total.blocked += other.blocked;
   total.off_hours_active_seconds += other.off_hours_active_seconds;
+  total.break_active_seconds += other.break_active_seconds;
   if (
     other.first_activity &&
     (!total.first_activity || Date.parse(other.first_activity) < Date.parse(total.first_activity))
@@ -415,7 +417,7 @@ interface Scope {
   keys: ReadonlySet<string> | null;
 }
 
-type Bare<T> = Omit<T, 'period' | 'estimated' | 'computed_until' | 'notice_key'>;
+type Bare<T> = Omit<T, 'period' | 'estimated' | 'computed_until' | 'updated_at' | 'notice_key'>;
 
 /** Where the figures come from: the captured day or the generated dataset. */
 interface Source {
@@ -2062,6 +2064,7 @@ class GeneratedDays implements Source {
       devices,
       metrics: stats.metrics,
       timeline,
+      breaks: [],
       sites,
       categories: categoryRows(sites, categoryUsers),
       apps: this.appRows(records),
@@ -2568,6 +2571,8 @@ export class UsageMock {
       period,
       estimated: true,
       computed_until: source.computedUntil(period),
+      // The mock has no rollup runs: the newest one "ran" when its data ends (W5-L).
+      updated_at: source.computedUntil(period),
       notice_key: NOTICE_KEY,
     };
   }

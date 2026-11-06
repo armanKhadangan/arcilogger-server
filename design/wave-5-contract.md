@@ -3492,6 +3492,78 @@ line is W5-E-10, and what it amends in detail:
   line day: 4.4 s for xz 6 at 148 MB/s, about 35 s for a 5 GB day. The issue estimated about a
   minute.
 
+## Deviations — W5-K (2026-11-05)
+
+- **W5-K-1: the method names.** K2 names `UsageSettings.period(moment)`. The code has
+  `UsageSettings.part_of(moment)` (one minute) and `day_parts(day)` (every minute of a site day),
+  with the type `Part` and `PARTS = ("work", "break", "off")` in
+  `worker/src/arcilogger_worker/usage/config.py`. The reason: `query.Period` is already the date
+  range of every usage answer, and a second "period" in the same module would read as a date range.
+  The database column is `period`, as K3 says. `is_off_hours()` stays: a break is not off hours.
+- **W5-K-2: the `/usage` exports always have the break column.** "Molada aktif (sn)" follows
+  "Mesai dışı aktif (sn)", and "Mola süresi (sn, tahmini)" follows "Mesai dışı süre", also
+  without breaks (then 0). A CSV whose columns come and go with a setting breaks the tools that
+  read it. K5's conditional row and column stay as written for the scheduled reports (PDF, HTML,
+  Excel), which a person reads.
+- **W5-K-3: the report data has a top-level `breaks` flag.** It is true when the work hours had a
+  break on a work day of the report (`UsageSettings.has_breaks`), and the documents show the break
+  row and column by it (K5). The change is additive; schema 1 stays.
+- **W5-K-4: the rollback list.** `0023_usage_period` is in the installer's `$LosslessDowngrades`
+  (#164's test requires every revision above the floor to be judged). Its downgrade first deletes
+  the days that have break rows from the seven rollup tables and `usage_days`: usage analytics,
+  derived data. The older program rebuilds by itself only the last `usage.auto_rebuild_days`
+  days (default 7) of them; an older day inside the 30-day window stays empty until a rebuild is
+  requested, and a day before the window also needs its logs reloaded from the archive
+  (`docs/KULLANIM.md` §2.5). Folding the break rows into the work rows instead was weighed and
+  left out: sessions across a break and the JSON columns (`hosts`, `top_domains`, timelines)
+  cannot be merged exactly in SQL, so the older program's own rebuild is the honest source. Raw
+  logs, log rows, leases and the audit log keep every row.
+- **W5-K-5: files outside the ownership of §6.6.**
+  - `deploy/windows/installer/Install-Arcilogger.ps1`: only the W5-K-4 list entry.
+  - `db/tests/test_cli_downgrade.py`, `db/tests/test_migrations.py`: the head.
+  - Three web places that build a `Metrics` object, so `npm run check` stays green with the new
+    required field until W5-P: `web/src/pages/usage/usage-format.ts` (`sumMetrics`), its test and
+    `web/e2e/mock-usage.ts`.
+- **W5-K-6: the upgrade alone rebuilds nothing.** A work-hours value without breaks and `by_day`
+  keeps the Wave 4 fingerprint (`[days, start, end]`), so an upgrade does not rebuild the recent
+  days; only a changed setting does (test `test_breaks_and_per_day_hours_split_the_day_in_three_parts`).
+- **W5-K-7: the subject answer carries the day's breaks.** P2 shades break bands on the person
+  timeline, and the usage roles cannot read `/settings`. `GET /usage/subjects/{key}` therefore
+  has `breaks` (`[{start, end}]` instants, one-day periods only, like `timeline`; empty
+  otherwise). They come from `usage_days.details.breaks`, the minute runs the rollup itself
+  counted as break, so the bands match the figures even after the setting changed. Additive.
+- **W5-K-8: `0023_usage_period` changes the column in place.** `ALTER COLUMN off_hours TYPE text
+  USING …`, then `RENAME COLUMN … TO period`: one rewrite per table with its indexes and no dead
+  rows, instead of a new column, a full-table `UPDATE` and a new primary key (review of #206).
+  The primary keys keep their names and column order; the downgrade is the mirror image.
+
+## Deviations — W5-L (2026-11-05)
+
+- **W5-L-1: one pull request with W5-K.** The manager's session can push only one branch, and
+  W5-L changes the files W5-K changes. W5-K and W5-L therefore come as one pull request (#206),
+  not two. #199 and #200 both close with it.
+- **W5-L-2: `data_until` is the existing `computed_until`.** Every usage answer has carried
+  `computed_until`, "how far the rollups have processed traffic", since group 2. L3's `data_until`
+  is that field, so the answers add only `updated_at`: the newest `computed_at` of the period's
+  days. The web types get it (types only).
+- **W5-L-3: the back-off measures from the last refresh's start.** `usage_days` keeps the start
+  of the last rollup (`computed_at`) and its `duration_ms`, measured until the day's rows are
+  written (the commit after it is not included; the job's log shows the same figure). A refresh
+  starts when
+  `now ≥ computed_at + 3 × duration_ms`, which is "twice the duration after it ended" (L2); no
+  `finished_at` is stored. A `computed_at` later than now (the clock went back, or a rebuild ran
+  with a later moment) never holds today back.
+- **W5-L-4: measured** (`worker/tests/test_usage_performance.py`, the same container, plain
+  PostgreSQL 16; seconds for the full-day rollup, "again" in brackets):
+
+  | Load | wave-5 | W5-K/L |
+  |---|---|---|
+  | default | 1.77 (1.29) | 1.99 (1.55); another test ran at the same time |
+  | heavy | 6.30 (7.10) | 6.09 (6.90) |
+
+  Both loads refresh every minute. The specification's busy day (a rollup of about a minute late
+  in the day) refreshes about every 3 minutes.
+
 ## Deviations — W5-N (2026-11-05)
 
 - **W5-N-1: the SNMP client lives in core** (answer to Q4 on #202, 2026-11-05 23:19).

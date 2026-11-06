@@ -574,3 +574,53 @@ def test_the_engines_own_sample_renders_in_every_format() -> None:
         assert name in html, name
         assert name in text, name
         assert name in people, name
+
+
+# -- breaks (W5-K) --------------------------------------------------------------------------------
+
+
+def _with_breaks() -> dict[str, Any]:
+    data = report_sample()
+    data["breaks"] = True
+    data["company"]["break_active_seconds"] = 1800
+    for index, person in enumerate(data["persons"]):
+        person["break_active_seconds"] = 600 if index == 0 else 0
+    return data
+
+
+def test_breaks_are_shown_only_when_the_work_hours_have_them() -> None:
+    """Contract W5 §6 K5: a "Mola" row and column when the work hours had breaks on a day of the
+    report; a report without breaks looks as before (the golden files above are unchanged)."""
+    plain_pdf = normalized(pdf_text(render_pdf(make_document()).pdf))
+    pdf = normalized(pdf_text(render_pdf(make_document(_with_breaks())).pdf))
+    assert "Moladaki aktif süre" not in plain_pdf
+    assert "Moladaki aktif süre (tahmini)" in pdf  # the company totals
+    assert "Mola" in pdf.split("Kişiler (")[1]  # the persons table's column
+
+    plain_mail, _ = render_mail(
+        make_document(), email_html=True, attachments=[], omitted=False, limit_mb=15, run_id=17
+    )
+    mail, _ = render_mail(
+        make_document(_with_breaks()),
+        email_html=True,
+        attachments=[],
+        omitted=False,
+        limit_mb=15,
+        run_id=17,
+    )
+    assert "Moladaki aktif süre" not in plain_mail
+    assert "Mola*" not in plain_mail
+    assert "Moladaki aktif süre*" in mail
+    assert "Mola*" in mail
+
+    book = load_workbook(io.BytesIO(render_xlsx(make_document(_with_breaks()))))
+    header = [cell.value for cell in next(book["Kişiler"].iter_rows())]
+    assert header[header.index("Mesai dışı aktif süre") + 1] == "Moladaki aktif süre"
+    first = [cell.value for cell in list(book["Kişiler"].iter_rows())[1]]
+    assert first[header.index("Moladaki aktif süre")] == timedelta(seconds=600)
+    summary = [row[0].value for row in book["Özet"].iter_rows() if row and row[0].value]
+    assert "Moladaki aktif süre" in summary
+    plain_book = load_workbook(io.BytesIO(render_xlsx(make_document())))
+    assert "Moladaki aktif süre" not in [
+        cell.value for cell in next(plain_book["Kişiler"].iter_rows())
+    ]

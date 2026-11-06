@@ -170,7 +170,80 @@ REFUSALS: list[tuple[str, Any, str, str]] = [
         "usage.work_hours",
         {"days": [1]},
         "setting_work_hours_fields",
-        "usage.work_hours: days, start ve end alanları bekleniyor",
+        "usage.work_hours: days, start ve end alanları bekleniyor (breaks ve by_day isteğe bağlı)",
+    ),
+    (
+        "usage.work_hours",
+        {"days": [1], "start": "08:00", "end": "18:00", "lunch": []},
+        "setting_work_hours_fields",
+        "usage.work_hours: days, start ve end alanları bekleniyor (breaks ve by_day isteğe bağlı)",
+    ),
+    (
+        "usage.work_hours",
+        {
+            "days": [1],
+            "start": "08:00",
+            "end": "18:00",
+            "breaks": [{"start": "12:00", "end": "13:00"}, {"start": "12:30", "end": "13:30"}],
+        },
+        "setting_work_hours_breaks",
+        "usage.work_hours: molalar çakışıyor: 12:00-13:00 ve 12:30-13:30",
+    ),
+    (
+        "usage.work_hours",
+        {
+            "days": [1],
+            "start": "08:00",
+            "end": "18:00",
+            "breaks": [{"start": "07:30", "end": "08:30"}],
+        },
+        "setting_work_hours_breaks",
+        "usage.work_hours: mola 07:30-08:30 mesai saatleri (08:00-18:00) içinde olmalı",
+    ),
+    (
+        "usage.work_hours",
+        {
+            "days": [1],
+            "start": "08:00",
+            "end": "18:00",
+            "breaks": [{"start": "12:00", "end": "12:04"}],
+        },
+        "setting_work_hours_breaks",
+        "usage.work_hours: mola 12:00-12:04 en az 5 dakika olmalı",
+    ),
+    (
+        "usage.work_hours",
+        {
+            "days": [1],
+            "start": "08:00",
+            "end": "18:00",
+            "breaks": [{"start": f"{h:02d}:00", "end": f"{h:02d}:10"} for h in range(9, 16)],
+        },
+        "setting_work_hours_breaks",
+        "usage.work_hours: bir günde en çok 6 mola",
+    ),
+    (
+        "usage.work_hours",
+        {"days": [1], "start": "08:00", "end": "18:00", "breaks": [{"start": "12:00"}]},
+        "setting_work_hours_breaks",
+        "usage.work_hours: her mola için start ve end alanları bekleniyor",
+    ),
+    (
+        "usage.work_hours",
+        {
+            "days": [1],
+            "start": "08:00",
+            "end": "18:00",
+            "by_day": {"6": {"start": "09:00", "end": "13:00"}},
+        },
+        "setting_work_hours_by_day",
+        "usage.work_hours: by_day anahtarı '6' bir çalışma günü (days) olmalı",
+    ),
+    (
+        "usage.work_hours",
+        {"days": [1], "start": "08:00", "end": "18:00", "by_day": {"1": {"start": "09:00"}}},
+        "setting_work_hours_by_day",
+        "usage.work_hours: by_day[1]: start, end ve isteğe bağlı breaks bekleniyor",
     ),
     (
         "usage.work_hours",
@@ -626,3 +699,40 @@ def test_the_change_record_is_in_the_audited_transaction(db_session: Session) ->
 def test_other_settings_leave_the_change_record_alone(db_session: Session) -> None:
     change_setting(db_session, "nat.snat_trandisp", ["snat", "dnat"], actor="ayse")
     assert db_session.get(Setting, CHANGES_KEY) is None
+
+
+def test_work_hours_keep_their_breaks_and_days_in_a_canonical_form() -> None:
+    """W5-K (contract W5 §6 K1): breaks are sorted, an empty ``breaks`` or ``by_day`` is left out,
+    so a Wave 4 value is stored as it was; ``by_day`` entries are sorted by weekday."""
+    plain = {"days": [5, 1, 1], "start": "08:00", "end": "18:00", "breaks": [], "by_day": {}}
+    assert validate_setting("usage.work_hours", plain) == {
+        "days": [1, 5],
+        "start": "08:00",
+        "end": "18:00",
+    }
+    value = {
+        "days": [1, 2, 3, 4, 5, 6],
+        "start": "08:00",
+        "end": "18:00",
+        "breaks": [{"start": "15:00", "end": "15:15"}, {"start": "12:30", "end": "13:30"}],
+        "by_day": {
+            "6": {"start": "09:00", "end": "13:00", "breaks": []},
+            "5": {"start": "08:00", "end": "17:00", "breaks": [{"start": "12:00", "end": "13:00"}]},
+        },
+    }
+    assert validate_setting("usage.work_hours", value) == {
+        "days": [1, 2, 3, 4, 5, 6],
+        "start": "08:00",
+        "end": "18:00",
+        "breaks": [{"start": "12:30", "end": "13:30"}, {"start": "15:00", "end": "15:15"}],
+        "by_day": {
+            "5": {"start": "08:00", "end": "17:00", "breaks": [{"start": "12:00", "end": "13:00"}]},
+            "6": {"start": "09:00", "end": "13:00"},
+        },
+    }
+    # Touching breaks are allowed: one ends where the next begins.
+    touching = {
+        **plain,
+        "breaks": [{"start": "12:00", "end": "12:30"}, {"start": "12:30", "end": "13:00"}],
+    }
+    assert len(validate_setting("usage.work_hours", touching)["breaks"]) == 2

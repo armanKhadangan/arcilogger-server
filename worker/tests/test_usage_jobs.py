@@ -4,12 +4,13 @@ logs, the final rebuild of a partial day, rebuild requests, retention and
 
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import UTC, date, timedelta
 from pathlib import Path
-from typing import Any
+from types import SimpleNamespace
+from typing import Any, cast
 
 import pytest
-from sqlalchemy import Engine, delete, func, make_url, select
+from sqlalchemy import Engine, delete, func, make_url, select, update
 from sqlalchemy.orm import Session
 
 from arcilogger_core.layout import Layout
@@ -27,6 +28,7 @@ from arcilogger_db.models import (
 )
 from arcilogger_db.settings import set_setting
 from arcilogger_worker.cli import EXIT_CONFIG, EXIT_OK, main
+from arcilogger_worker.service import SKIPPED, USAGE_TODAY_EVERY, JobContext, job_usage_today
 from arcilogger_worker.testing import Evidence, tr
 from arcilogger_worker.usage.config import UsageSettings
 from arcilogger_worker.usage.domains import DomainNamer
@@ -266,6 +268,54 @@ def test_today_and_yesterday_jobs(db_engine: Engine, db_session: Session, site: 
     assert (today["day"], today["status"]) == (DAY.isoformat(), "partial")
     yesterday = finalize_yesterday(sessions, now=tr(NEXT, 0, 45))
     assert (yesterday["day"], yesterday["status"]) == (DAY.isoformat(), "final")
+
+
+def test_today_refreshes_every_minute_and_backs_off_on_a_slow_rollup(
+    db_engine: Engine, db_session: Session, site: GoldenSite
+) -> None:
+    """W5-L (contract W5 §6 L1, L2): the job runs every minute; a refresh starts only when twice
+    the last refresh's duration has passed since it ended, and yesterday's final rollup never
+    waits for it."""
+    assert USAGE_TODAY_EVERY.total_seconds() == 60
+    sessions = session_factory(db_engine)
+    start = tr(DAY, 12)
+    first = refresh_today(sessions, now=start)
+    assert first["status"] == "partial"
+    # A fast rollup (milliseconds here): the next minute's run refreshes again.
+    assert "reason" not in refresh_today(sessions, now=start + timedelta(minutes=1))
+    # As if the last refresh had taken 30 s at 12:00: the next one waits until 12:01:30.
+    db_session.execute(
+        update(UsageDay)
+        .where(UsageDay.day == DAY)
+        .values(computed_at=start, details=UsageDay.details.op("||")({"duration_ms": 30_000}))
+    )
+    db_session.commit()
+    held = refresh_today(sessions, now=start + timedelta(minutes=1))
+    assert held == {
+        "reason": "backoff",
+        "day": DAY.isoformat(),
+        "duration_ms": 30_000,
+        "next_after": (start + timedelta(seconds=90)).astimezone(UTC).isoformat(),
+    }
+    assert db_session.get_one(UsageDay, DAY).computed_at == start  # nothing was rebuilt
+    later = refresh_today(sessions, now=start + timedelta(seconds=90))
+    assert later["status"] == "partial"
+    # The worker records a held run as skipped, not as a failure or a run.
+    clock = start + timedelta(seconds=91)
+    db_session.execute(
+        update(UsageDay)
+        .where(UsageDay.day == DAY)
+        .values(computed_at=clock, details=UsageDay.details.op("||")({"duration_ms": 30_000}))
+    )
+    db_session.commit()
+    context = cast(
+        JobContext, SimpleNamespace(sessions=sessions, now=clock + timedelta(seconds=30))
+    )
+    assert job_usage_today(context)[SKIPPED] is True
+    # A last refresh stamped after "now" (the clock went back) holds nothing back.
+    assert "reason" not in refresh_today(sessions, now=clock - timedelta(hours=1))
+    # Yesterday's final rollup is never held back.
+    assert finalize_yesterday(sessions, now=tr(NEXT, 0, 45))["status"] == "final"
 
 
 def test_requests_report_failures_on_the_request(

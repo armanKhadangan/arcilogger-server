@@ -756,9 +756,11 @@ _USAGE = _group(
         "Mesai saatleri",
         "Work hours",
         "Mesai günleri (1 = Pazartesi … 7 = Pazar) ve saatleri (yerel saat, bitiş hariç); geri "
-        "kalan süre ve tatiller mesai dışıdır.",
+        "kalan süre ve tatiller mesai dışıdır. Molalar (breaks) mesai içinde ayrı sayılır; "
+        "by_day bir çalışma gününe kendi saatlerini ve molalarını verir.",
         "Work days (1 = Monday … 7 = Sunday) and hours (local time, end excluded); the rest of "
-        "the time and the holidays are off hours.",
+        "the time and the holidays are off hours. Breaks are counted apart inside the work "
+        "hours; by_day gives one work day its own hours and breaks.",
     ),
     (
         "usage.holidays",
