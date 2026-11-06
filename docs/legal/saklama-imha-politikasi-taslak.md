@@ -60,7 +60,13 @@ saklanması ve imhası. Kişisel veri kategorileri: aydınlatma metni taslağı 
 ## 4. İmha yöntemi (kasa)
 
 İmha yalnızca saklama işiyle yapılır (`\ARCILOGGER\Retention` görevi, `arcilogger-core retention`)
-ve `[retention] enabled = true` gerektirir:
+ve `[retention] enabled = true` gerektirir. Görev her gün çalışır, ancak imha **toplu** yapılır:
+süresi dolan en eski gün `retention.batch_days` gündür (varsayılan 30, 1–180) süresi dolmuş
+olunca süresi dolan bütün günler **tek bir imha tutanağıyla** imha edilir; yani imha, süre
+dolduktan sonra **en geç `batch_days` gün içinde, toplu tutanakla** yapılır. Arada geçen
+çalışmalar hiçbir şey yapmaz ve hiçbir şey yazmaz; başarısız bir çalışma ertesi gün yeniden
+denenir. 180 gün, KVKK'daki periyodik imha için altı aylık üst sınır olarak seçilmiştir
+(sahada doğrula: hukuk müşavirince değerlendirilmelidir, bölüm 6 madde 6). İmha adımları:
 
 1. Süresi dolan her gün silinmeden önce yeniden doğrulanır; doğrulanamayan bir gün hiçbir zaman
    silinmez (kritik uyarı üretilir).
@@ -108,7 +114,9 @@ tamamı için yapılır.
 4. Veritabanındaki denetim kaydının saklama süresi.
 5. Oturum kayıtları, kurulum yedekleri, kanıt paketleri (30 gün) ve kullanım raporlarının (400 gün)
    süreleri.
-6. Periyodik imha aralığı ve imha kayıtlarının tutulma şekli: [hukuk müşaviri].
+6. Periyodik imha aralığı ve imha kayıtlarının tutulma şekli: [hukuk müşaviri]. Kasa imhası
+   bugün toplu yapılır: süre dolduktan sonra en geç `retention.batch_days` gün içinde (varsayılan
+   30, en çok 180), bir imha tutanağıyla; bu aralığın uygun olup olmadığı.
 7. Yedeklerin (veritabanı, `secret.key`) şifrelenmesi ve şirket dışında saklanması
    ([../ASSUMPTIONS.md](../ASSUMPTIONS.md) A6).
 8. Web arayüzündeki KVKK bilgilendirmesinin bu politikaya uygun hale getirilmesi.
@@ -126,4 +134,5 @@ tamamı için yapılır.
 | taslak 3 | 2026-10-20 | Şablon: şirkete özgü bilgiler (unvan, adres, VERBİS kayıt no, sunucu, ikinci kopyanın yeri) `[…]` yer tutucularıyla; hukuk müşaviri onayı bekliyor |
 | taslak 4 | 2026-10-29 | Ayrıştırılmış kayıtlar satırına FortiGate DHCP kayıtları ve oturum kayıtlarının aygıt tanıma alanları eklendi (aynı süre; ham satırlarla birlikte 5651 raporlarına ve kanıt paketlerine girer); hukuk müşaviri onayı bekliyor |
 | taslak 5 | 2026-11-02 | Ayrıştırılmış kayıtlar artık son 30 gün tutulur ve daha eskileri her gece silinir (`db.window`; mühürlenmemiş günler ve etkin arşiv yüklemelerinin günleri hariç); "Arşivden yeniden yüklenen günler" satırı eklendi (7 gün; istek kuyruğa alınmadan önce denetim kaydına yazılır); bölüm 6 madde 2 güncellendi; hukuk müşaviri onayı bekliyor |
+| taslak 7 | 2026-11-05 | Kasa imhası toplu yapılır: süre dolduktan sonra en geç `retention.batch_days` gün içinde (varsayılan 30, 1–180), tek bir imha tutanağıyla (bölüm 4); bölüm 6 madde 6'ya bu aralık eklendi; hukuk müşaviri onayı bekliyor |
 | taslak 6 | 2026-11-03 | Veritabanındaki satırların çalışma kopyası olduğu (mühürlü asıl kayıt kasada en az 730 gün kalır) ve `db.window` işinin her silmesini denetim kaydına yazdığı eklendi; yükseltmenin `db.retention_days` değişikliği ve reddedilen yükleme istekleri (denetim kaydına yazılmaz) anlatıldı; bölüm 6 madde 2: imha tutanağı gerekip gerekmediği hukuk müşavirine soruldu; hukuk müşaviri onayı bekliyor |

@@ -31,7 +31,7 @@ import { formatBytes, formatDuration, formatNumber } from '@/lib/format';
 import { currentLang } from '@/lib/i18n';
 
 import { heatmapRows, HEAT_MAX_MINUTES, HEATMAP_DAYS } from './heatmap-model';
-import { clockOfMinute, layoutTimeline } from './timeline-model';
+import { breakBands, clockOfMinute, layoutTimeline } from './timeline-model';
 import { ExportMenu } from './usage-export';
 import { addressOf, dayTotals, hourLabel, matchesSearch, perDay, shareText } from './usage-format';
 import { metricTiles, noTraffic } from './usage-helpers';
@@ -180,6 +180,7 @@ function DayTimeline({ detail, day }: { detail: SubjectDetail; day: string }) {
       }),
     [detail.timeline, detail.hourly, day, t],
   );
+  const bands = useMemo(() => breakBands(detail.breaks, day), [detail.breaks, day]);
   const segments = layout.segments.map((segment) => ({
     start: segment.start,
     end: segment.end,
@@ -218,6 +219,8 @@ function DayTimeline({ detail, day }: { detail: SubjectDetail; day: string }) {
           categories={layout.categories}
           lang={lang}
           label={t('usage.subject.timelineLabel', { day: formatDay(day) })}
+          bands={bands}
+          bandLabel={t('usage.hours.break')}
         />
       )}
     </ChartFrame>
@@ -697,7 +700,11 @@ export function SubjectView({
   return (
     <div className="flex flex-col gap-4">
       <BackBar label={backLabel} onBack={onBack} />
-      <DataNote computedUntil={data?.computed_until} noticeKey={data?.notice_key} />
+      <DataNote
+        computedUntil={data?.computed_until}
+        updatedAt={data?.updated_at}
+        noticeKey={data?.notice_key}
+      />
       <QueryState
         query={detail}
         empty={data ? noTraffic(data.metrics) && data.blocked.length === 0 : false}

@@ -2682,6 +2682,18 @@ def capture_settings(capture: Capture, admin: Any, auditor: Any) -> None:
     detail = errors["setting_invalid_egress"]["body"]["error"]["details"][0]
     if detail["code"] != "setting_egress_public_private":
         raise SystemExit(f"the private public address was refused with {detail}")
+    # Overlapping breaks of the work hours (W5 §6 K1): the text the editor shows at the setting.
+    hours = {"days": [1, 2, 3, 4, 5], "start": "08:00", "end": "18:00"}
+    lunch = [{"start": "12:00", "end": "13:00"}, {"start": "12:30", "end": "13:30"}]
+    overlap = {
+        "changes": [{"key": "usage.work_hours", "old": hours, "value": {**hours, "breaks": lunch}}]
+    }
+    errors["setting_invalid_work_hours"] = capture.error(
+        admin.patch(url, json=overlap), 422, "setting_invalid"
+    )
+    detail = errors["setting_invalid_work_hours"]["body"]["error"]["details"][0]
+    if detail["code"] != "setting_work_hours_breaks":
+        raise SystemExit(f"the overlapping breaks were refused with {detail}")
     idle = {"changes": [{"key": "auth.idle_minutes", "old": 15, "value": 20}]}
     capture.recent(admin, minutes_ago=10)
     errors["reauth_required"] = capture.error(admin.patch(url, json=idle), 403, "reauth_required")

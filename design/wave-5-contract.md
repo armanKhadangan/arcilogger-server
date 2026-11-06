@@ -2496,6 +2496,24 @@ All Wave 5 questions are answered (2026-11-02).
   `test_a_deletion_records_token_is_judged_by_the_manifest_that_lists_it`
   (`test_renewal_evidence.py`) runs each through the builder's choice of roots, the standalone
   verifier on the vault and on the package (built, or refused by the self-check).
+- **W5-A-20: retention deletes in batches (#195, the manager's decision; the owner asked about
+  stamp usage on 2026-11-05).** One deletion record a day would double the credit use once the
+  vault passes `retention.days` (about 365 extra stamps a year). The `Retention` task stays daily,
+  but a run deletes only once the oldest expired day has been expired `retention.batch_days` days
+  (new key, `config.RetentionConfig`, default 30, 1–180; `retention.due_day`: that day plus
+  `retention.days + batch_days`, so 1 deletes a day on the day it expires, as before), and then
+  every expired day under one record, one stamp; about 12 records a year. Any other run does
+  nothing and writes nothing (`RetentionResult.due` names the day); a failed run deletes nothing
+  and the next one retries. 180 is KVKK's six-month ceiling of periodic destruction (sahada
+  doğrula: legal review, not a legal claim). Unchanged: the 730-day floor, the re-verification,
+  the record format, the chain anchor, the next manifest listing the record, the `.part` and
+  verify-before-rename rules, and an unfinished record of an interrupted run (finished first,
+  whatever the batch). The key is in `arcilogger.toml` only, not on the settings page. Tests:
+  `test_a_batch_is_due_once_its_oldest_day_has_been_expired_batch_days`,
+  `test_a_day_expired_fewer_than_batch_days_ago_is_not_deleted`,
+  `test_a_due_batch_deletes_every_expired_day_under_one_stamp`,
+  `test_a_failed_batch_deletes_nothing_and_the_next_run_retries` (`core/tests/test_retention.py`)
+  and `test_retention_batch_days_outside_1_to_180_is_refused` (`core/tests/test_config.py`).
 
 ## Deviations — W5-E (2026-11-04)
 
@@ -3549,9 +3567,8 @@ line is W5-E-10, and what it amends in detail:
 - **W5-L-3: the back-off measures from the last refresh's start.** `usage_days` keeps the start
   of the last rollup (`computed_at`) and its `duration_ms`, measured until the day's rows are
   written (the commit after it is not included; the job's log shows the same figure). A refresh
-  starts when
-  `now ≥ computed_at + 3 × duration_ms`, which is "twice the duration after it ended" (L2); no
-  `finished_at` is stored. A `computed_at` later than now (the clock went back, or a rebuild ran
+  starts when `now ≥ computed_at + 3 × duration_ms`, which is "twice the duration after it
+  ended" (L2); no `finished_at` is stored. A `computed_at` later than now (the clock went back, or a rebuild ran
   with a later moment) never holds today back.
 - **W5-L-4: measured** (`worker/tests/test_usage_performance.py`, the same container, plain
   PostgreSQL 16; seconds for the full-day rollup, "again" in brackets):
@@ -3563,6 +3580,40 @@ line is W5-E-10, and what it amends in detail:
 
   Both loads refresh every minute. The specification's busy day (a rollup of about a minute late
   in the day) refreshes about every 3 minutes.
+
+## Deviations — W5-P parts P1 and P2 (2026-11-06)
+
+The manager took P1 and P2 (#203, comment of 2026-11-05); P3 and P4 stay with Gülşah.
+
+- **W5-P-1: the general hours are those most work days share.** The editor is a week table, so
+  the general `start`/`end`/`breaks` of the saved value are the hours that most work days have
+  (on a tie, the earliest day's). Every other work day gets a `by_day` entry; a day equal to the
+  general hours gets none (P1). A stored value reads back unchanged, and an untouched editor
+  saves nothing.
+- **W5-P-2: the browser names the day of a refusal.** It checks the server's rules (K1) before
+  saving, per day: "Salı: her mola en az 5 dakika olmalı." The server's own refusal
+  (`setting_work_hours_breaks`, `setting_work_hours_by_day`) is shown at the setting as before.
+  It is captured as `settings.json` `errors.setting_invalid_work_hours`.
+- **W5-P-3: "Mola" appears when the answer holds break time.** The usage roles cannot read the
+  work hours, so the page cannot tell whether breaks are configured. The "Mola" column (person,
+  device and department tables), tile and company card are shown when a row or the total has
+  `break_active_seconds > 0`, as the reports do (K5). The filter always offers "Mola". The
+  exports always have the column (W5-K-2).
+- **W5-P-4: the timeline's bands come from the day's rollup** (`SubjectDetail.breaks`, W5-K-7).
+  They are shaded behind the day's segments and named in the legend ("Mola (12:00–13:00)").
+  The shared bar `web/src/components/ui/timeline.tsx` gets an optional `bands` property for
+  them; it is outside §6.6's list.
+- **W5-P-5: "Son güncelleme" only for today.** "Son güncelleme 14:36 (veriler 14:35'e kadar)"
+  is shown when the period ends today. An earlier day keeps "Veriler … sonuna kadar işlendi":
+  its last update says nothing new.
+- **W5-P-6: the e2e usage mock has a break hour** (`UsageOptions.breakHour`), so the generated
+  days split one hour of the work hours as the engine does. Its exports have the API's break
+  columns (W5-K-2).
+- **W5-P-7: files outside §6.6's list:**
+  - `web/src/components/ui/timeline.tsx` (W5-P-4);
+  - `web/src/pages/dashboard/dashboard-page.test.tsx`: the Panel's usage refresh, now
+    `USAGE_POLL_MS` = 60 s;
+  - `web/scripts/capture_api_samples.py`: the captured refusal of W5-P-2.
 
 ## Deviations — W5-N (2026-11-05)
 

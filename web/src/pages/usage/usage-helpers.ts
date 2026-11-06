@@ -82,6 +82,18 @@ export function metricTiles(metrics: Metrics, t: TFunction): Tile[] {
       hint: t('usage.hints.offHours'),
       estimate: true,
     },
+    // Time in the breaks of the work hours (W5 P2), when the period holds any.
+    ...(metrics.break_active_seconds > 0
+      ? [
+          {
+            key: 'breaks',
+            label: t('usage.metrics.breaks'),
+            value: formatDuration(metrics.break_active_seconds, lang),
+            hint: t('usage.hints.breaks'),
+            estimate: true,
+          },
+        ]
+      : []),
     {
       key: 'span',
       label: t('usage.metrics.firstLast'),

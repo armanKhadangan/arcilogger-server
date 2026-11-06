@@ -94,6 +94,20 @@ describe('texts', () => {
     expect(computedUntilText(null, '2026-10-13', tr)).toBe('Kullanım verileri henüz hesaplanmadı');
   });
 
+  it('names the last update of today (W5 L3, P2)', () => {
+    const updated = '2026-10-13T11:36:12Z'; // 14:36 in Türkiye
+    expect(computedUntilText('2026-10-13T11:35:00Z', '2026-10-13', tr, updated)).toBe(
+      "Son güncelleme 14:36 (veriler 14:35'e kadar)",
+    );
+    expect(computedUntilText('2026-10-13T11:30:00Z', '2026-10-13', en, updated)).toBe(
+      'Last update 14:36 (data up to 14:30)',
+    );
+    // An earlier day keeps its own text: its last update says nothing new.
+    expect(computedUntilText('2026-10-12T20:55:00Z', '2026-10-13', tr, updated)).toBe(
+      "Veriler 12.10.2026 23:55'e kadar işlendi",
+    );
+  });
+
   it('formats shares, hours and addresses', () => {
     expect(shareText(0.125, 'tr')).toBe('12,5 %');
     expect(shareText(1, 'en')).toBe('100.0 %');

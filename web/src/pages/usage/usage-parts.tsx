@@ -53,9 +53,12 @@ export function EstimateHint({
 /** "Veriler 14:35'e kadar işlendi · ⓘ tahmini" above a usage view. */
 export function DataNote({
   computedUntil,
+  updatedAt,
   noticeKey,
 }: {
   computedUntil: string | null | undefined;
+  /** When today's figures were last recomputed (`updated_at`, W5 §6 L3). */
+  updatedAt?: string | null | undefined;
   noticeKey?: string | null;
 }) {
   const { t } = useTranslation();
@@ -66,7 +69,7 @@ export function DataNote({
     >
       <span className="inline-flex items-center gap-1.5">
         <Clock3 aria-hidden="true" className="size-3.5" />
-        {computedUntilText(computedUntil ?? null, today(), t)}
+        {computedUntilText(computedUntil ?? null, today(), t, updatedAt ?? null)}
       </span>
       <EstimateHint noticeKey={noticeKey ?? null} />
     </p>
