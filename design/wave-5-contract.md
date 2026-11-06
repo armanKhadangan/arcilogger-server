@@ -3890,22 +3890,26 @@ P4 is Gülşah's (#203, 23:40Z); it follows W5-N (#207) and the answers of 2026-
     or neither, and the interval. The two keys are write-only, as SMTP's password; the form
     knows only whether each is stored.
   - The browser checks N1's rules while SNMP is on, and a typed key's 8 to 64 characters
-    (counted as the server counts them) also while it is off. The server's refusals of the
+    (counted as the server counts them) also while it is off. Typed keys are sent only with an
+    SNMP table: keys for a source without one would be stored and never shown. The server's refusals of the
     table are shown in the section, those of a key at the key.
 - **W5-P-13: every change of a source carries its `[sources.snmp]`.** The server reads a
   source without `snmp` as one without SNMP. Since W5-N, a row's enable switch and the edit
   dialog sent the source without it, so either deleted a stored table. Both now send it
   unchanged (`sourceConfig`, `fromSourceForm`).
-- **W5-P-14: no interface list in the browser yet.** W5-N-7 says the refusal
-  `snmp_no_such_interface` lists what the device reports. The agent writes only the probe's
-  code to the request (`admin/agent.py`, the step's `code`), and the API words a step by its
-  code alone, so the browser shows the fixed text of each code in the request's steps. The
-  list is in the server's log. Question on #203: carry it on the request as a structured field,
-  or leave it to #217.
+- **W5-P-14: the device's interfaces under the refused request.** W5-N-7 says the refusal
+  `snmp_no_such_interface` lists what the device reports; until W5-N-9 (#226) the request
+  carried only the probe's code. Now, when a change of a source ends with
+  `snmp_no_such_interface` or `snmp_no_hc_counters`, Ayarlar → Kaynaklar shows the request's
+  `error.interfaces` under its steps as a table (name, status in words, Mbit/s), with the
+  code's text above it. The e2e mock serves the captured `sources.snmp_probe_failed`.
 - **W5-P-15: the Panel card N7.**
   - It shows the lines whose source has SNMP on (`status` not `disabled`), each with download
     and upload now, the share of the capacity when one is set, a 60-minute sparkline in each
     direction, the reason while a line is not read and its last good reading.
+  - A line whose `status` is not `ok` shows "—" for its rates, as Canlı Durum does: its last
+    rate can be an hour old. An interface that is not up is named in words ("Arayüz: alt
+    katman kapalı"), never by its raw `ifOperStatus` value.
   - It sits under the health cards, the whole width, and links to Canlı Durum for those who
     may open it.
   - It is asked for with `dashboard.view` or `system.read` (N6), every 10 s as Canlı Durum

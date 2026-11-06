@@ -80,6 +80,23 @@
       },
       "setup": "The line speed is not read yet. Once SNMP is switched on in a log source, its download and upload speed show here.",
       "setupLink": "Switch SNMP on in Settings → Sources"
+    },
+    "oper": {
+      "up": "up",
+      "down": "down",
+      "testing": "testing",
+      "unknown": "unknown",
+      "dormant": "dormant",
+      "not_present": "not present",
+      "lower_layer_down": "lower layer down"
+    },
+    "probe": {
+      "title": "Interfaces the device reports",
+      "caption": "Interfaces the device reports over SNMP: name, status and speed",
+      "name": "Name (ifName)",
+      "status": "Status",
+      "speed": "Speed (Mbit/s)",
+      "hint": "Type the WAN line's name from this list in the source's SNMP section."
     }
   }
 }

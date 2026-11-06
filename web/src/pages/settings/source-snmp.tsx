@@ -13,7 +13,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import type { SnmpAuth, SnmpPriv } from '@/lib/settings-types';
+import { formatNumber } from '@/lib/format';
+import { currentLang } from '@/lib/i18n';
+import type { ProbeInterface, SnmpAuth, SnmpPriv } from '@/lib/settings-types';
 
 import {
   NEW_LINE,
@@ -254,5 +256,59 @@ export function SnmpSection({
         </>
       ) : null}
     </fieldset>
+  );
+}
+
+/**
+ * What the device reported when the probe refused the change (`snmp_no_such_interface`,
+ * `snmp_no_hc_counters`; W5-N-9): each interface's name, status and speed, so the administrator
+ * types the WAN line's name from it.
+ */
+export function ProbeInterfaces({ interfaces }: { interfaces: readonly ProbeInterface[] }) {
+  const { t } = useTranslation();
+  const lang = currentLang();
+  const head = 'px-3 py-2 text-left text-xs font-medium text-muted-strong';
+  return (
+    <section
+      className="flex flex-col gap-2"
+      aria-labelledby="snmp-probe-interfaces"
+      data-testid="snmp-probe-interfaces"
+    >
+      <h3 id="snmp-probe-interfaces" className="text-13 font-semibold text-foreground">
+        {t('snmp.probe.title')}
+      </h3>
+      <div className="overflow-x-auto rounded-lg border border-border">
+        <table className="w-full text-13">
+          <caption className="sr-only">{t('snmp.probe.caption')}</caption>
+          <thead className="bg-subtle">
+            <tr>
+              <th scope="col" className={head}>
+                {t('snmp.probe.name')}
+              </th>
+              <th scope="col" className={head}>
+                {t('snmp.probe.status')}
+              </th>
+              <th scope="col" className={`${head} text-right`}>
+                {t('snmp.probe.speed')}
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {interfaces.map((item) => (
+              <tr key={item.name} className="border-t border-border">
+                <th scope="row" className="px-3 py-1.5 text-left font-mono text-xs font-medium">
+                  {item.name}
+                </th>
+                <td className="px-3 py-1.5">{t(`snmp.oper.${item.oper_status ?? 'unknown'}`)}</td>
+                <td className="px-3 py-1.5 text-right tabular">
+                  {item.speed_mbps === null ? '—' : formatNumber(item.speed_mbps, 0, lang)}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <p className="text-xs text-muted">{t('snmp.probe.hint')}</p>
+    </section>
   );
 }

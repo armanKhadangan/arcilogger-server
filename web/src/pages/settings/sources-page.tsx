@@ -55,7 +55,7 @@ import type {
 } from '@/lib/settings-types';
 import { focusFirstError, hasErrors, type FieldErrors } from '@/lib/validation';
 
-import { SnmpSection } from './source-snmp';
+import { ProbeInterfaces, SnmpSection } from './source-snmp';
 import {
   HEARTBEAT_MAX,
   HEARTBEAT_MIN,
@@ -669,6 +669,9 @@ export function SourcesPage() {
                   void config.refetch();
                 }}
               />
+            ) : null}
+            {last === 'change' && change.request?.error?.interfaces?.length ? (
+              <ProbeInterfaces interfaces={change.request.error.interfaces} />
             ) : null}
             {last === 'remove' && removal.requestId ? (
               <RequestProgress requestId={removal.requestId} />

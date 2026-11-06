@@ -64,6 +64,7 @@ import type {
   SmtpCaBody,
   SmtpCaClear,
   SmtpSection,
+  ProbeInterface,
   SnmpIn,
   SnmpOut,
   SourceCheckBody,
@@ -584,6 +585,8 @@ interface Final {
   ends?: Partial<Record<RequestStep, StepEnd>>;
   rolledBack?: boolean;
   manual?: [string, string];
+  /** The device's interfaces of a failed SNMP probe (W5-N-9). */
+  interfaces?: ProbeInterface[];
   warnings?: string[];
 }
 
@@ -1170,7 +1173,13 @@ export class AdminMock {
     );
     if (final.error) {
       const { code, message_tr, message_en } = message(final.error);
-      out.error = { code, message_tr, message_en, field: null };
+      out.error = {
+        code,
+        message_tr,
+        message_en,
+        field: null,
+        ...(final.interfaces ? { interfaces: final.interfaces } : {}),
+      };
     }
     // A task or the worker reports its outcome also when it failed (`{ok: false, …}`).
     if (item.result) out.result = copy(item.result);
@@ -1241,6 +1250,10 @@ export class AdminMock {
         error: code,
         steps: list,
         ends: { probe: { state: 'failed', code } },
+        // W5-N-9: the captured list of what the device reports, for these two codes only.
+        ...(code === 'snmp_no_such_interface' || code === 'snmp_no_hc_counters'
+          ? { interfaces: copy(ADMIN.sources.snmp_probe_failed.error?.interfaces ?? []) }
+          : {}),
       };
       apply = false;
     } else if (outcome === 'conflict') {

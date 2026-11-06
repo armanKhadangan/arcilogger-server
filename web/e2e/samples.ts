@@ -212,6 +212,8 @@ export const ADMIN = load('admin') as {
     add_active: AdminRequestOut;
     remove_accepted: AdminAccepted;
     remove_active: AdminRequestOut;
+    /** A failed SNMP probe with the device's interfaces in `error.interfaces` (W5-N-9). */
+    snmp_probe_failed: AdminRequestOut;
   };
   sections: {
     config: AdminConfig;

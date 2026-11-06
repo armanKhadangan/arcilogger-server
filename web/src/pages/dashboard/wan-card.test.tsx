@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { MemoryRouter } from 'react-router-dom';
 
-import type { WanRates } from '@/lib/activity-types';
+import type { WanLine, WanRates } from '@/lib/activity-types';
 import type { Role } from '@/lib/api-types';
 import { errorResponse, installFetch, jsonResponse, makeMe } from '@/test/api-mock';
 import { setLanguage } from '@/lib/i18n';
@@ -137,6 +137,28 @@ describe('the Panel card "İnternet hattı" — on the Panel (Wave 5 §6 N7)', (
         .filter((call) => call.path === '/api/v1/activity/wan')
         .map((call) => call.params.get('range')),
     ).toEqual(['60m']);
+  });
+
+  it('a line not read shows no rate, and an interface status in words', () => {
+    const [off, wan1, wan2] = WAN.hour.lines as [WanLine, WanLine, WanLine];
+    const lines = [
+      off,
+      { ...wan1, oper_status: 'lower_layer_down' as const },
+      // Its last rates are kept by the API, up to an hour old: not shown as "now".
+      { ...wan2, download_bps: 41_000_000, upload_bps: 6_000_000 },
+    ];
+    render(
+      <MemoryRouter>
+        <WanCard rates={{ ...WAN.hour, lines }} to={null} />
+      </MemoryRouter>,
+    );
+    const [first, second] = screen.getAllByTestId('wan-line') as [HTMLElement, HTMLElement];
+    expect(first).toHaveTextContent('Arayüz: alt katman kapalı');
+    expect(first).not.toHaveTextContent('lower_layer_down');
+    expect(second).toHaveTextContent('Yanıt yok');
+    expect(second).toHaveTextContent('İndirme—');
+    expect(second).toHaveTextContent('Yükleme—');
+    expect(second).not.toHaveTextContent('41,0 Mbit/s');
   });
 
   it('links to Canlı Durum when the user may open it', () => {

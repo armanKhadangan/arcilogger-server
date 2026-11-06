@@ -90,6 +90,22 @@ describe('[sources.snmp] as the browser edits it (Wave 5 §6 N1, P4)', () => {
     expect(body).not.toHaveProperty('snmp_priv_key');
   });
 
+  it('sends typed keys only with a table: none for a source whose SNMP stays off', () => {
+    const form = toSourceForm(row(null));
+    const off = {
+      ...form,
+      snmp: { ...form.snmp, authKey: typed('örnek-anahtar-1'), privKey: typed('örnek-anahtar-2') },
+    };
+    expect(sourceBody(off, 'e1')).toEqual({ etag: 'e1', source: fromSourceForm(off) });
+    // Switched off, a stored table still goes, and so do keys typed for it.
+    const stored = toSourceForm(row(STORED));
+    const kept = {
+      ...stored,
+      snmp: { ...stored.snmp, enabled: false, authKey: typed('örnek-anahtar-1') },
+    };
+    expect(sourceBody(kept, 'e1').snmp_auth_key).toBe('örnek-anahtar-1');
+  });
+
   it('trims the names, leaves out empty lines and a capacity given in one direction', () => {
     const form = {
       ...NEW_SNMP,

@@ -80,6 +80,23 @@
       },
       "setup": "Hat hızı henüz okunmuyor. Bir log kaynağının SNMP bölümünü açınca indirme ve yükleme hızı burada görünür.",
       "setupLink": "Ayarlar → Kaynaklar'da SNMP'yi aç"
+    },
+    "oper": {
+      "up": "çalışıyor",
+      "down": "kapalı",
+      "testing": "sınanıyor",
+      "unknown": "bilinmiyor",
+      "dormant": "beklemede",
+      "not_present": "yok",
+      "lower_layer_down": "alt katman kapalı"
+    },
+    "probe": {
+      "title": "Cihazın bildirdiği arayüzler",
+      "caption": "Cihazın SNMP ile bildirdiği arayüzler: ad, durum ve hız",
+      "name": "Ad (ifName)",
+      "status": "Durum",
+      "speed": "Hız (Mbit/s)",
+      "hint": "WAN hattının adını bu listeden kaynağın SNMP bölümüne yazın."
     }
   }
 }

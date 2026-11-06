@@ -84,13 +84,17 @@ export function fromSourceForm(form: SourceForm): SourceIn {
   };
 }
 
-/** The change body of the typed source, with the SNMP keys typed in the form (write-only). */
+/**
+ * The change body of the typed source, with the SNMP keys typed in the form (write-only), only
+ * when the source keeps an SNMP table: keys for none would be stored and never shown.
+ */
 export function sourceBody(form: SourceForm, etag: string): SourceBody {
-  const authKey = typedKey(form.snmp.authKey);
-  const privKey = typedKey(form.snmp.privKey);
+  const source = fromSourceForm(form);
+  const authKey = source.snmp ? typedKey(form.snmp.authKey) : undefined;
+  const privKey = source.snmp ? typedKey(form.snmp.privKey) : undefined;
   return {
     etag,
-    source: fromSourceForm(form),
+    source,
     ...(authKey !== undefined ? { snmp_auth_key: authKey } : {}),
     ...(privKey !== undefined ? { snmp_priv_key: privKey } : {}),
   };

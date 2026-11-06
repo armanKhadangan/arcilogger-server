@@ -15,7 +15,9 @@ import { capacityShare, formatBps, polledLines, shareText, sparkValues } from '.
 function Direction({ line, direction }: { line: WanLine; direction: 'download' | 'upload' }) {
   const { t } = useTranslation();
   const lang = currentLang();
-  const bps = direction === 'download' ? line.download_bps : line.upload_bps;
+  // A line not read now shows no rate: its last one can be an hour old ("Son okuma" says when).
+  const bps =
+    line.status !== 'ok' ? null : direction === 'download' ? line.download_bps : line.upload_bps;
   const capacity = direction === 'download' ? line.capacity_mbps?.down : line.capacity_mbps?.up;
   const share = capacityShare(bps, capacity);
   const Icon = direction === 'download' ? ArrowDown : ArrowUp;
@@ -66,7 +68,7 @@ function LineBox({ line, many }: { line: WanLine; many: boolean }) {
           </Badge>
         ) : down ? (
           <Badge tone="warning" icon={TriangleAlert} className="ml-auto">
-            {t('snmp.card.operDown', { state: line.oper_status })}
+            {t('snmp.card.operDown', { state: t(`snmp.oper.${line.oper_status ?? 'unknown'}`) })}
           </Badge>
         ) : null}
       </div>

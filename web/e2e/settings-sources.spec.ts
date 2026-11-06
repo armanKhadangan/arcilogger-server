@@ -425,6 +425,15 @@ test.describe('Ayarlar → Kaynaklar → SNMP', () => {
     await expect(progress).toContainText(
       'Cihaz bu arayüz adını bildirmiyor; cihazın bildirdiği arayüzlerden WAN hattını seçin.',
     );
+    // W5-N-9: what the device reports, from the captured `sources.snmp_probe_failed`.
+    const list = page.getByRole('table', {
+      name: 'Cihazın SNMP ile bildirdiği arayüzler: ad, durum ve hız',
+    });
+    await expect(list.getByRole('rowheader')).toHaveText(['wan2', 'lan', 'dmz', 'tunnel-1']);
+    await expect(list.getByRole('row', { name: /dmz/ })).toContainText('kapalı');
+    await expect(list.getByRole('row', { name: /wan2/ })).toContainText('1.000');
+    await expect(list.getByRole('row', { name: /tunnel-1/ })).toContainText('—');
+    await expectNoA11yViolations(page);
     expect(api.admin.sections.sources.find((item) => item.name === 'core-r1')?.snmp).toBeNull();
   });
 
