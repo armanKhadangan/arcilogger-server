@@ -77,6 +77,8 @@ turkish.RemoveDataQuestion=ARCILOGGER kaldırılıyor: hizmetler, görevler, gü
 english.RemoveDataQuestion=Removing ARCILOGGER: services, tasks, firewall rules and program files are deleted.%n%nRaw logs, the vault (sealed days), backups, the configuration, the secret store and the database are KEPT by default.%n%nDELETE ALL THE DATA AS WELL? This CANNOT be undone.%n%nYes: the PowerShell window shows what goes and asks for the postgres password and, to confirm, the organisation name. ARCILOGGER keeps its records for at least 730 days to support the 5651 obligations; ask your legal counsel before deleting records whose retention has not run out.%nNo (recommended): the data is kept.
 turkish.UninstallFailed=ARCILOGGER kaldırma betiği %1 koduyla bitti; ARCILOGGER tam kaldırılmadı (kod 2: hiçbir şey kaldırılmadı, örneğin bir mühürleme görevi hâlâ çalışıyordu ya da kuruluş adı onaylanmadı). PowerShell penceresindeki iletiyi okuyun, sorunu giderip yönetici konsolunda yeniden çalıştırın: powershell -ExecutionPolicy Bypass -File "%2" -Uninstall%3
 english.UninstallFailed=The ARCILOGGER removal script ended with code %1; ARCILOGGER was not removed completely (code 2: nothing was removed, e.g. a sealing task was still running or the organisation name was not confirmed). Read the PowerShell window, fix the problem and run it again from an administrator console: powershell -ExecutionPolicy Bypass -File "%2" -Uninstall%3
+turkish.DataNotRemoved=Veriler SİLİNMEDİ: kuruluş adı onaylanmadı ya da bir denetim durdurdu (PowerShell penceresindeki iletiye bakın). ARCILOGGER şimdi verileri KORUNARAK kaldırılıyor. Verileri sonra silmek için: docs\KURULUM.md bölüm 14.1.
+english.DataNotRemoved=The data was NOT deleted: the organisation name was not confirmed or a check stopped it (see the PowerShell window). ARCILOGGER is now removed with its data KEPT. To delete the data later: docs\INSTALL.md section 14.1.
 
 [Files]
 Source: "{#BundleDir}\*"; DestDir: "{tmp}\bundle"; Flags: recursesubdirs createallsubdirs ignoreversion deleteafterinstall
@@ -264,11 +266,18 @@ begin
     RunArciInstaller();
 end;
 
+{ Install-Arcilogger.ps1 -Uninstall (with -RemoveData when Extra says so) in a visible window. }
+function RunRemoval(const Script, Extra: String; var ResultCode: Integer): Boolean;
+begin
+  Result := Exec(PowerShellPath(), '-NoProfile -ExecutionPolicy Bypass -File "' + Script + '" -Uninstall' + Extra, '', SW_SHOW, ewWaitUntilTerminated, ResultCode);
+end;
+
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 var
   ResultCode: Integer;
   Script: String;
   RemoveData: String;
+  Ran: Boolean;
 begin
   if CurUninstallStep = usUninstall then
   begin
@@ -289,7 +298,17 @@ begin
       end;
       // The script keeps its own folder (installer\) until the very end, so it can be run again
       // when it stops (a task still running, a file Windows refuses to delete).
-      if not Exec(PowerShellPath(), '-NoProfile -ExecutionPolicy Bypass -File "' + Script + '" -Uninstall' + RemoveData, '', SW_SHOW, ewWaitUntilTerminated, ResultCode) then
+      Ran := RunRemoval(Script, RemoveData, ResultCode);
+      // 2 with -RemoveData: nothing was removed (the name was not confirmed, a check stopped
+      // it). The uninstaller goes on and drops its entry whatever happens, so the program is
+      // removed now with the data kept, rather than left running without an entry.
+      if Ran and (RemoveData <> '') and (ResultCode = 2) then
+      begin
+        SuppressibleMsgBox(CustomMessage('DataNotRemoved'), mbInformation, MB_OK, IDOK);
+        RemoveData := '';
+        Ran := RunRemoval(Script, RemoveData, ResultCode);
+      end;
+      if not Ran then
         MsgBox(FmtMessage(CustomMessage('UninstallFailed'), [SysErrorMessage(ResultCode), Script, RemoveData]), mbCriticalError, MB_OK)
       else if (ResultCode <> 0) and (ResultCode <> 1) then
         MsgBox(FmtMessage(CustomMessage('UninstallFailed'), [IntToStr(ResultCode), Script, RemoveData]), mbCriticalError, MB_OK);

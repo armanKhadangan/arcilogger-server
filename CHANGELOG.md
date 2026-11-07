@@ -20,9 +20,10 @@ versions follow [Semantic Versioning](https://semver.org/).
   default; a silent uninstall keeps the data). Yes, or `Install-Arcilogger.ps1 -Uninstall
   -RemoveData`, first shows what goes (the database, the raw logs, the vault with its sealed days,
   backups, the configuration and the secret store) with the 5651 warning, then asks for the
-  postgres password and the organisation name. PostgreSQL itself, its data directory and the
-  copies on other hosts stay; the Application log keeps event 4130. Only at the server's console,
-  never from the browser.
+  postgres password and the organisation name. Databases go by name only; in a `[backup] dir` of
+  its own only ARCILOGGER's backup files go. PostgreSQL itself, its data directory and the copies
+  on other hosts stay; the Application log keeps event 4130. Only at the server's console, never
+  from the browser; a cancelled confirmation removes the program with the data kept.
 
 ### Database and backups
 

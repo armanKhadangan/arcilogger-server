@@ -4203,37 +4203,49 @@ This is the one place outside the retention job that deletes sealed data, on the
 decision; it runs only at the server, by an administrator, never from the browser.
 - **Setup's uninstaller** asks after its start ("TÜM VERİLER DE SİLİNSİN Mİ? Bu GERİ ALINAMAZ.",
   TR/EN, with the 730-day and legal-review note): **No** is the default button and a silent
-  uninstall keeps the data; **Yes** runs `Install-Arcilogger.ps1 -Uninstall -RemoveData`. The
-  failure message's retry command keeps `-RemoveData`.
+  uninstall asks nothing and keeps the data; **Yes** runs `Install-Arcilogger.ps1 -Uninstall
+  -RemoveData`. When that ends with 2 (nothing removed: the name not confirmed, a check stopped
+  it), the uninstaller says so and runs the plain `-Uninstall`: Inno drops its entry whatever
+  happens, so the program is never left installed without it. The failure message's retry
+  command keeps `-RemoveData`.
 - **Before any change** (`Initialize-DataRemoval`), the script: refuses (exit 2, "nothing
   removed") a data folder it cannot be sure of (an unusable `data-root.txt`, or neither record,
-  configuration nor `-DataRoot`); asks for the postgres password and lists, as the server
-  answers, the databases (`[database] name`, the `replaced_databases` of `install\state.json`,
-  every other database the role owns) and whether the role is dropped (never a superuser or the
-  account psql connects as, and then nothing it owns is listed); never `postgres`,
-  `template0`, `template1`. PostgreSQL out of reach stops it (`-SkipDatabase`: keep the
+  configuration nor `-DataRoot`) and a configuration folder with none of the installer's files
+  (`arcilogger.toml`, `data-root.txt`, `install\state.json`); asks for the postgres password and
+  lists, as the server answers, the databases to drop **by name** (`[database] name`, the
+  `replaced_databases` of `install\state.json`, `<name>_replaced_<14 digits>` and
+  `<name>_restore_<14 digits>`), the role's other databases (kept, named; the role then stays)
+  and whether the role is dropped (never a superuser or the account psql connects as); never
+  `postgres`, `template0`, `template1`; a name that is no identifier of letters, digits and `_`
+  is kept and named. PostgreSQL out of reach stops it (`-SkipDatabase`: keep the
   database, remove the rest). It plans the folders (`Get-ArciDataRemovalPlan`): `spool`,
-  `vault`, `exports`, `state`, `logs`, `backups` of the data folder, `[backup] dir` when it lies
-  elsewhere, and the configuration folder; other names in the data folder (PostgreSQL's data
-  directory `db`, anything else) are kept and named, and the data folder goes only once empty.
+  `vault`, `exports`, `state`, `logs`, `backups` of the data folder and the configuration folder
+  (deleted whole), and `[backup] dir` when it lies elsewhere, where only the Backup task's files
+  go (`arcilogger-*.dump`, their `.json` records and leftovers), the folder once empty; a
+  `[backup] dir` on another host (`\\server\share\...`) is never touched, only named. Other
+  names in the data folder (PostgreSQL's data directory `db`, anything else) are kept and named,
+  and the data folder goes only once empty, never when it is itself a mount point or junction.
   It refuses a drive or share root, a Windows folder (or one holding it), a folder in the Windows
-  folder, one holding the program folder or PostgreSQL's data directory, and data and
-  configuration folders inside each other; and a folder with a link in it (a junction, a
-  symbolic link or a hard link: never followed). It prints what goes with file counts and sizes,
+  folder; a whole-folder target holding the program folder, PostgreSQL's data directory, the
+  data folder, the configuration folder or a kept name; data and configuration folders inside
+  each other; and a folder with a link in it (a junction, a symbolic link or a hard link: never
+  followed; a file whose reparse point is no link, such as Data Deduplication's, is an ordinary
+  file). It prints what goes with file counts and sizes,
   the sealed days and the oldest, what stays (PostgreSQL, the replica and the NAS copy on other
   hosts, USB copies, the Windows event logs) and the 5651 warning (ARCILOGGER keeps the records at
   least 730 days to support the 5651 obligations; ask legal counsel; keep a destruction record).
   Then the organisation name (`site_name`, else the computer name) must be typed (three tries;
-  spaces and letter case do not count; Enter cancels) or given with `-ConfirmRemoveData`; without
+  spaces and letter case, ordinal or Turkish, do not count; Enter cancels) or given with `-ConfirmRemoveData`; without
   a console and without it, exit 2. A dry run prints the same and asks nothing.
 - **Order:** tasks paused and waited for, services stopped and removed, tasks unregistered (as a
-  plain removal); `DROP DATABASE … WITH (FORCE)` for each database, then `DROP ROLE` (a failure
-  there is a warning); each data folder (`Remove-ArciDataFolder`: on Windows Administrators take
+  plain removal); event 4130 with what goes; `DROP DATABASE … WITH (FORCE)` for each database,
+  then `DROP ROLE` (a failure there is a warning); each data folder (`Remove-ArciDataFolder`: on Windows Administrators take
   ownership, the folder gets Administrators and SYSTEM only, every item below its inherited
   entries, which removes the sealed files' deny entries, and its attributes cleared; then it is
-  deleted); **event 4130** (Warning, source `ARCILOGGER-Admin`: who confirmed, the organisation,
-  the databases, the folders, the sealed days) while the source is still registered; the event
-  source, the firewall rules and the power settings as before; then the configuration folder
+  deleted); **event 4130** again with the outcome (Warning; Error with the message when a step
+  fails, before the error ends the run; source `ARCILOGGER-Admin`: who confirmed, the
+  organisation, the databases, the folders, the sealed days), both while the source is still
+  registered; the event source, the firewall rules and the power settings as before; then the configuration folder
   (the firewall and power steps read their records there); the data folder if empty; the program
   folders last. A failure after the first change exits 3; running it again goes on (each step
   skips what is gone).

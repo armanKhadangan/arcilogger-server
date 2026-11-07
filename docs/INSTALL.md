@@ -1389,12 +1389,15 @@ powershell -ExecutionPolicy Bypass -File "C:\Program Files\ARCILOGGER\installer\
 the browser.
 
 **Deleted:**
-- ARCILOGGER's database and role: `[database] name`, the databases a restore set aside
-  (`install\state.json`) and every other database the role owns (`DROP DATABASE … WITH
-  (FORCE)`, `DROP ROLE`). `postgres`, `template0`, `template1`, a superuser and the account
-  connected are never dropped.
+- ARCILOGGER's databases, by name only: `[database] name` and the databases a restore set aside
+  (`install\state.json`, `<name>_replaced_<time>`, `<name>_restore_<time>`), then the role
+  (`DROP DATABASE … WITH (FORCE)`, `DROP ROLE`). Other databases the role owns are not dropped,
+  only named; the role then stays too. `postgres`, `template0`, `template1`, a superuser and the
+  account connected are never dropped.
 - ARCILOGGER's folders in the data folder (e.g. `D:\ARCILOGGER`): `spool`, `vault` (sealed days
-  included), `exports`, `state`, `logs`, `backups`; `[backup] dir` when it lies elsewhere.
+  included), `exports`, `state`, `logs`, `backups`. When `[backup] dir` lies elsewhere, **only the
+  Backup task's files** (`arcilogger-*.dump` and their records) go there, the folder once empty; a
+  share on another host (`\\server\...`) is never touched.
 - The configuration folder `C:\ProgramData\ARCILOGGER`: the configuration, the secret store
   (database, Kamu SM and SMTP passwords), the browser administration's `admin\` folder, Caddy's
   certificate authority, the Zamane client, the installer's records.
@@ -1402,8 +1405,8 @@ the browser.
 
 **Kept:** PostgreSQL itself, its data directory (e.g. `D:\ARCILOGGER\db`) and its other
 databases; anything in the data folder that is not ARCILOGGER's (the data folder is deleted only
-once empty); the **replica** and the **NAS copy** on other hosts (their administrators delete
-them); copies on USB disks; the Windows event logs.
+once empty, and never when it is a mount point or a link); the **replica** and the **NAS copy**
+on other hosts (their administrators delete them); copies on USB disks; the Windows event logs.
 
 **Before it changes anything** the script:
 1. asks for the postgres password and reads the databases to drop from the server (PostgreSQL
@@ -1414,17 +1417,22 @@ them); copies on USB disks; the Windows event logs.
    three tries, letter case and extra spaces do not count, Enter cancels. Without a console it
    runs only with `-ConfirmRemoveData "<organisation name>"`.
 
-A name not confirmed, a data folder that is not certain (give it with `-DataRoot`), a folder that
-is a drive root, a Windows folder, or holds the program folder or PostgreSQL's data directory,
-or a link in a folder (a junction, a symbolic link, a hard link) stops it **before anything is
-removed** (exit code `2`). `-DryRun` shows the same list and neither asks nor deletes.
+A name not confirmed, a data folder that is not certain (give it with `-DataRoot`), a
+configuration folder without the installer's files (a mistyped `-ProgramDataDir`), a folder that
+is a drive root, a Windows folder, or holds the program folder, the data folder, the
+configuration folder, PostgreSQL's data directory or something kept, or a link in a folder (a
+junction, a symbolic link, a hard link) stops it **before anything is removed** (exit code `2`).
+`-DryRun` shows the same list and neither asks nor deletes. When the uninstaller's "Yes" ends
+like this, the removal finishes **with the data kept** (the program is never left installed
+without its entry); to delete the data later, see the last paragraph below.
 
-Order: tasks waited for and removed, services stopped and removed, the database and the role
-dropped, the data folders deleted (Administrators take ownership to unlock the sealed files),
-**event 4130** written to the Application log (the Windows account that confirmed, the
-organisation, the databases and folders deleted, the sealed days; it stays in the log after the
-event source is gone), then the firewall and power settings, the configuration folder and the
-program folders. If it stops halfway (exit code `3`), run the same command again: what is gone
+Order: tasks waited for and removed, services stopped and removed, **event 4130** written to the
+Application log (the Windows account that confirmed, the organisation, the databases and folders
+to delete, the sealed days), the database and the role dropped, the data folders deleted
+(Administrators take ownership to unlock the sealed files), event 4130 written again with the
+outcome (with the error when it stops halfway; both stay in the log after the event source is
+gone), then the firewall and power settings, the configuration folder and the program
+folders. If it stops halfway (exit code `3`), run the same command again: what is gone
 is skipped.
 
 > **5651 warning:** ARCILOGGER keeps the traffic records for at least 730 days to support the

@@ -1518,12 +1518,15 @@ powershell -ExecutionPolicy Bypass -File "C:\Program Files\ARCILOGGER\installer\
 tarayıcıdan yapılamaz.
 
 **Silinenler:**
-- ARCILOGGER'ın veritabanı ve rolü: `[database] name`, bir geri yüklemenin kenara koyduğu
-  veritabanları (`install\state.json`) ve rolün sahibi olduğu diğer veritabanları
-  (`DROP DATABASE … WITH (FORCE)`, `DROP ROLE`). `postgres`, `template0`, `template1`, bir süper
-  kullanıcı ve bağlanılan hesap hiçbir zaman silinmez.
+- ARCILOGGER'ın veritabanları, yalnızca adlarıyla: `[database] name` ve bir geri yüklemenin
+  kenara koyduğu veritabanları (`install\state.json`, `<ad>_replaced_<zaman>`,
+  `<ad>_restore_<zaman>`), ardından rol (`DROP DATABASE … WITH (FORCE)`, `DROP ROLE`). Rolün sahibi
+  olduğu başka veritabanları silinmez, adları gösterilir; o zaman rol de kalır. `postgres`,
+  `template0`, `template1`, bir süper kullanıcı ve bağlanılan hesap hiçbir zaman silinmez.
 - Veri klasörünün (ör. `D:\ARCILOGGER`) ARCILOGGER'a ait klasörleri: `spool`, `vault` (mühürlü
-  günler dahil), `exports`, `state`, `logs`, `backups`; `[backup] dir` başka yerdeyse o klasör.
+  günler dahil), `exports`, `state`, `logs`, `backups`. `[backup] dir` başka yerdeyse orada
+  **yalnızca yedekleme görevinin dosyaları** (`arcilogger-*.dump` ve kayıtları) silinir, klasör
+  ancak boşalınca; başka bir sunucudaki paylaşım (`\\sunucu\...`) hiç silinmez.
 - Yapılandırma klasörü `C:\ProgramData\ARCILOGGER`: yapılandırma, gizli depo (veritabanı,
   Kamu SM ve SMTP parolaları), tarayıcı yönetiminin `admin\` klasörü, Caddy sertifika yetkilisi,
   Zamane istemcisi, kurulum kayıtları.
@@ -1532,8 +1535,9 @@ tarayıcıdan yapılamaz.
 
 **Korunanlar:** PostgreSQL'in kendisi, veri klasörü (ör. `D:\ARCILOGGER\db`) ve diğer
 veritabanları; veri klasöründeki ARCILOGGER'a ait olmayan her şey (veri klasörü ancak boşalınca
-silinir); başka sunucudaki **replika** ve **NAS yedek kopyası** (oradaki yönetici siler); USB
-diske alınmış kopyalar; Windows olay günlükleri.
+silinir; bir bağlama noktası ya da bağlantıysa hiç silinmez); başka sunucudaki **replika** ve
+**NAS yedek kopyası** (oradaki yönetici siler); USB diske alınmış kopyalar; Windows olay
+günlükleri.
 
 **Betik hiçbir şeyi değiştirmeden önce:**
 1. postgres parolasını sorar ve silinecek veritabanlarını sunucudan okur (PostgreSQL'e
@@ -1544,18 +1548,21 @@ diske alınmış kopyalar; Windows olay günlükleri.
    deneme, büyük/küçük harf ve fazla boşluk sayılmaz, Enter vazgeçer. Konsol olmadan yalnızca
    `-ConfirmRemoveData "<kuruluş adı>"` ile çalışır.
 
-Ad onaylanmazsa, veri klasörü kesin değilse (`-DataRoot` ile verin), bir klasör sürücü kökü,
-Windows klasörü, program klasörünü ya da PostgreSQL'in veri klasörünü içeren bir klasörse ya da
-bir klasörde bağlantı (junction, sembolik bağlantı, sabit bağlantı) varsa betik **hiçbir şey
-silmeden** durur (çıkış kodu `2`). `-DryRun` aynı listeyi gösterir, hiçbir şey sormaz ve
-silmez.
+Ad onaylanmazsa, veri klasörü kesin değilse (`-DataRoot` ile verin), yapılandırma klasöründe
+kurulumun dosyaları yoksa (yanlış bir `-ProgramDataDir`), bir klasör sürücü kökü, Windows klasörü,
+program klasörünü, veri klasörünü, yapılandırma klasörünü, PostgreSQL'in veri klasörünü ya da
+korunan bir şeyi içeren bir klasörse ya da bir klasörde bağlantı (junction, sembolik bağlantı,
+sabit bağlantı) varsa betik **hiçbir şey silmeden** durur (çıkış kodu `2`). `-DryRun` aynı
+listeyi gösterir, hiçbir şey sormaz ve silmez. Kaldırma programında "Evet" denip betik böyle
+durursa kaldırma **verileri koruyarak** tamamlanır (program kurulu ama listeden silinmiş
+kalmaz); verileri sonra silmek için yukarıdaki son paragrafa bakın.
 
-Silme sırası: görevler beklenir ve kaldırılır, hizmetler durdurulur ve kaldırılır, veritabanı
-ve rol silinir, veri klasörleri silinir (mühürlü dosyaların kilidi yöneticiler sahiplik alarak
-kaldırılır), Uygulama günlüğüne **olay 4130** yazılır (onaylayan Windows hesabı, kuruluş,
-silinen veritabanları ve klasörler, mühürlü gün sayısı; olay kaynağı silinse de kayıt
-günlükte kalır), ardından güvenlik duvarı ve güç ayarları, yapılandırma klasörü ve program
-klasörleri. Yarıda kalırsa (çıkış kodu `3`) aynı komutu yeniden çalıştırın: silinmiş olan
+Silme sırası: görevler beklenir ve kaldırılır, hizmetler durdurulur ve kaldırılır, Uygulama
+günlüğüne **olay 4130** yazılır (onaylayan Windows hesabı, kuruluş, silinecek veritabanları ve
+klasörler, mühürlü gün sayısı), veritabanı ve rol silinir, veri klasörleri silinir (mühürlü
+dosyaların kilidi yöneticiler sahiplik alarak kaldırılır), olay 4130 sonuçla bir kez daha
+yazılır (yarıda kalırsa hatayla; olay kaynağı silinse de kayıtlar günlükte kalır), ardından
+güvenlik duvarı ve güç ayarları, yapılandırma klasörü ve program klasörleri. Yarıda kalırsa (çıkış kodu `3`) aynı komutu yeniden çalıştırın: silinmiş olan
 atlanır.
 
 > **5651 uyarısı:** ARCILOGGER trafik kayıtlarını 5651 yükümlülüklerini desteklemek için en az

@@ -4159,24 +4159,28 @@ function Format-RemovalSize([int64]$Bytes) {
 
 function Get-RemovalDatabase {
     <#
-    The database part of -Uninstall -RemoveData, before any change: ARCILOGGER's databases (with
-    those a restore set aside, install\state.json) and its role as the server itself lists them
-    (Get-ArciDatabaseRemovalSql's query as the superuser; the postgres password is asked here,
-    once) and PostgreSQL's data directory. A dry run asks nothing and plans the configured names.
-    PostgreSQL out of reach stops the run with 2, nothing removed yet: -SkipDatabase keeps the
-    database and removes the rest.
+    The database part of -Uninstall -RemoveData, before any change: ARCILOGGER's databases (named:
+    [database] name, those a restore set aside or named, install\state.json), the role's other
+    databases (kept), and the role, as the server itself lists them (Get-ArciDatabaseRemovalSql's
+    query as the superuser; the postgres password is asked here, once) and PostgreSQL's data
+    directory. A dry run asks nothing and plans the configured names. A name the removal cannot
+    quote, or PostgreSQL out of reach, stops the run with 2, nothing removed yet: -SkipDatabase
+    keeps the database and removes the rest.
     #>
     $db = Get-DatabaseSettings
     $state = Read-InstallState
     $extra = @()
     if ($state.PSObject.Properties.Name -contains 'replaced_databases') {
         $extra = @(foreach ($entry in @($state.replaced_databases)) {
-                if ($null -ne $entry -and $entry.PSObject.Properties.Name -contains 'name' -and [string]$entry.name -cmatch '^[a-z_][a-z0-9_]{0,62}$') { [string]$entry.name }
+                if ($null -ne $entry -and $entry.PSObject.Properties.Name -contains 'name' -and [string]$entry.name -cmatch '^[A-Za-z_][A-Za-z0-9_]{0,62}$') { [string]$entry.name }
             })
     }
-    $sql = Get-ArciDatabaseRemovalSql -Name ([string]$db.name) -Role ([string]$db.user) -Extra $extra
+    try { $sql = Get-ArciDatabaseRemovalSql -Name ([string]$db.name) -Role ([string]$db.user) -Extra $extra }
+    catch {
+        Stop-Installer 2 ("{0}; veritabanını elle silin ya da -SkipDatabase kullanın. Hiçbir şey kaldırılmadı [drop it by hand or use -SkipDatabase; nothing removed]." -f $_.Exception.Message)
+    }
     if ($script:IsDryRun) {
-        return [pscustomobject]@{ Settings = $db; Databases = @(@([string]$db.name) + $extra); Role = [string]$db.user; DropRole = $true; DataDirectory = $null }
+        return [pscustomobject]@{ Settings = $db; Databases = @(@([string]$db.name) + $extra); Owned = @(); Unnamed = @(); Role = [string]$db.user; DropRole = $true; DataDirectory = $null }
     }
     if (-not $script:PgBin) { $script:PgBin = Get-PostgresBinDir (Find-PostgresService) }
     if (-not $script:PgBin -or -not (Test-Path -LiteralPath (Join-Path $script:PgBin 'psql.exe'))) {
@@ -4189,7 +4193,23 @@ function Get-RemovalDatabase {
     catch {
         Stop-Installer 2 ("PostgreSQL'e bağlanılamadı; veritabanını korumak için -SkipDatabase kullanın. Hiçbir şey kaldırılmadı [PostgreSQL cannot be reached: -SkipDatabase keeps the database; nothing removed]: {0}" -f $_.Exception.Message)
     }
-    [pscustomobject]@{ Settings = $db; Databases = @($answer.Databases); Role = $answer.Role; DropRole = $answer.DropRole; DataDirectory = $answer.DataDirectory }
+    [pscustomobject]@{
+        Settings = $db; Databases = @($answer.Databases); Owned = @($answer.Owned); Unnamed = @($answer.Unnamed)
+        Role = $answer.Role; DropRole = $answer.DropRole; DataDirectory = $answer.DataDirectory
+    }
+}
+
+function Test-RemovalConfigFolder {
+    <#
+    The configuration folder is ARCILOGGER's when it holds one of the installer's files
+    (arcilogger.toml, data-root.txt, install\state.json) or does not exist: a mistyped
+    -ProgramDataDir is never deleted.
+    #>
+    if (-not (Test-Path -LiteralPath $ProgramDataDir)) { return $true }
+    foreach ($marker in @($ConfigPath, $DataRootRecord, $StatePath)) {
+        if (Test-Path -LiteralPath $marker -PathType Leaf) { return $true }
+    }
+    $false
 }
 
 function Initialize-DataRemoval {
@@ -4198,14 +4218,21 @@ function Initialize-DataRemoval {
     what goes (sizes, sealed days, databases), what stays, the 5651 warning and the confirmation
     (the organisation name typed at the console, or -ConfirmRemoveData). Stops with 2, nothing
     removed, when the data folder is not certain (its record cannot be used, or there is neither
-    record nor configuration nor -DataRoot), PostgreSQL cannot be reached (Get-RemovalDatabase),
-    a folder is refused (Get-ArciDataRemovalPlan) or holds a link, or the name is not
-    confirmed. A dry run prints the same and asks nothing. Returns what the removal steps need.
+    record nor configuration nor -DataRoot), the configuration folder holds none of the
+    installer's files, PostgreSQL cannot be reached (Get-RemovalDatabase), a folder is refused
+    (Get-ArciDataRemovalPlan) or holds a link, or the name is not confirmed. A data folder that
+    is itself a mount point or junction is kept (what is in it goes). A dry run prints the same
+    and asks nothing. Returns what the removal steps need.
     #>
     if ($script:DataRootResolution.Problem -or $script:DataRootSource -eq 'auto') {
         $why = $(if ($script:DataRootResolution.Problem) { [string]$script:DataRootResolution.Problem } else { 'kayıt (data-root.txt) ve yapılandırma yok [no record and no configuration]' })
         Add-PlanItem -Id 'data.refuse' -Status 'fail' -Text $why
         Stop-Installer 2 ("Veri klasörü kesin değil; -DataRoot ile verin. Hiçbir şey kaldırılmadı [the data folder is not certain: give it with -DataRoot; nothing removed]: {0}" -f $why)
+    }
+    if (-not (Test-RemovalConfigFolder)) {
+        $why = 'Yapılandırma klasöründe kurulumun dosyaları (arcilogger.toml, data-root.txt, install\state.json) yok; -ProgramDataDir doğru mu? [the configuration folder holds none of the installer''s files: is -ProgramDataDir right?]: {0}' -f $ProgramDataDir
+        Add-PlanItem -Id 'data.refuse' -Status 'fail' -Text $why
+        Stop-Installer 2 ("{0} Hiçbir şey kaldırılmadı [nothing removed]." -f $why)
     }
     $keep = New-Object System.Collections.Generic.List[string]
     $pgDirectory = Get-PostgresDataDir (Find-PostgresService)
@@ -4216,7 +4243,11 @@ function Initialize-DataRemoval {
         if ($database.DataDirectory) { $keep.Add([string]$database.DataDirectory) }
     }
     $names = @()
-    if (Test-Path -LiteralPath $DataRoot -PathType Container) { $names = @(Get-ChildItem -LiteralPath $DataRoot -Force | ForEach-Object { $_.Name }) }
+    $rootIsLink = $false
+    if (Test-Path -LiteralPath $DataRoot -PathType Container) {
+        $names = @(Get-ChildItem -LiteralPath $DataRoot -Force | ForEach-Object { $_.Name })
+        $rootIsLink = [bool]((Get-Item -LiteralPath $DataRoot -Force).Attributes -band [System.IO.FileAttributes]::ReparsePoint)
+    }
     $windows = $(if ($env:SystemRoot) { $env:SystemRoot } elseif ($env:windir) { $env:windir } else { '' })
     $plan = Get-ArciDataRemovalPlan -DataRoot $DataRoot -ProgramDataDir $ProgramDataDir -InstallDir $InstallDir `
         -BackupDir (Get-RemovalBackupDir) -DataRootNames $names -Keep $keep.ToArray() -SystemFolders @(Get-SystemFolders) -WindowsFolder $windows
@@ -4225,7 +4256,7 @@ function Initialize-DataRemoval {
     $facts = @{}
     if ($refusals.Count -eq 0) {
         foreach ($target in @($plan.Targets)) {
-            $fact = Get-ArciFolderFacts -Path $target.Path
+            $fact = Get-ArciFolderFacts -Path $target.Path -DumpsOnly:($target.Kind -eq 'dumps')
             $facts[$target.Path] = $fact
             if (@($fact.Links).Count -gt 0) { $refusals.Add((Get-ArciLinkRefusal @($fact.Links))) }
         }
@@ -4252,13 +4283,16 @@ function Initialize-DataRemoval {
         if (-not $fact.Exists) { continue }
         Write-Host ('    - {0}: {1}; {2} dosya [files], {3}' -f $target.Path, $target.What, $fact.Files, (Format-RemovalSize $fact.Bytes))
     }
-    if ($plan.Root) { Write-Host ('    - {0}, boşalınca [once empty]' -f $plan.Root) }
+    if ($rootIsLink) { Write-Host ('    - {0} bir bağlama noktası ya da bağlantı: içindekiler silinir, kendisi korunur [a mount point or link: what is in it goes, it stays]' -f $plan.Root) }
+    else { Write-Host ('    - {0}, boşalınca [once empty]' -f $plan.Root) }
     $oldestText = $(if ($oldest) { '; en eskisi [oldest] {0}' -f $oldest } else { '' })
     Write-Host ('  Kasa [vault]: {0} mühürlü gün [sealed days]{1}' -f $sealedDays, $oldestText)
     if ($null -eq $database) { Write-Host '  Veritabanı korunuyor [database kept] (-SkipDatabase)' }
     else {
-        $roleText = $(if ($database.DropRole -and $database.Role) { $database.Role } else { 'korunuyor: yok, süper kullanıcı ya da bağlanılan hesap [kept: none, a superuser or the account connected]' })
+        $roleText = $(if ($database.DropRole -and $database.Role) { $database.Role } else { 'korunuyor: yok, süper kullanıcı, bağlanılan hesap ya da başka veritabanlarının sahibi [kept: none, a superuser, the account connected or the owner of other databases]' })
         Write-Host ('  Silinecek veritabanları [databases to drop]: {0}; rol [role]: {1}' -f $(if (@($database.Databases).Count) { @($database.Databases) -join ', ' } else { '-' }), $roleText)
+        if (@($database.Owned).Count) { Write-Host ('  Rolün diğer veritabanları korunuyor [the role''s other databases are kept]: {0}' -f (@($database.Owned) -join ', ')) }
+        if (@($database.Unnamed).Count) { Write-Host ('  Adı tırnaklanamayan veritabanları korunuyor, elle silin [databases whose names cannot be quoted are kept, drop them by hand]: {0}' -f (@($database.Unnamed) -join ', ')) }
     }
     Write-Host '  Korunanlar [kept]: PostgreSQL ve veri klasörü, başka sunucudaki replika ve NAS yedek kopyası, USB''ye alınmış kopyalar, Windows olay günlüğü [PostgreSQL and its data directory, the replica and the NAS copy on other hosts, copies on USB disks, the Windows event logs]'
     foreach ($item in @($plan.Kept)) { Write-Host ('    - {0}: {1}' -f $item.Path, $item.Why) }
@@ -4287,7 +4321,7 @@ function Initialize-DataRemoval {
         if (-not $confirmed) { Stop-Installer 2 'Kuruluş adı onaylanmadı; hiçbir şey kaldırılmadı [the organisation name was not confirmed, nothing removed].' }
         Add-PlanItem -Id 'data.confirm' -Status 'done' -Text ('Kuruluş adı onaylandı [organisation name confirmed]: {0}' -f $site) -Detail $site
     }
-    [pscustomobject]@{ Plan = $plan; Facts = $facts; Database = $database; Site = $site; SealedDays = $sealedDays; Oldest = $oldest }
+    [pscustomobject]@{ Plan = $plan; Facts = $facts; Database = $database; Site = $site; SealedDays = $sealedDays; Oldest = $oldest; RootIsLink = $rootIsLink }
 }
 
 function Test-RemovalConfigTarget($Target) {
@@ -4296,58 +4330,87 @@ function Test-RemovalConfigTarget($Target) {
     $Target.Path -ieq $ProgramDataDir.TrimEnd($separators)
 }
 
+function Get-RemovalEventText($Removal, [string]$Outcome) {
+    <# Event 4130's text: who confirmed, the organisation, what goes, and -Outcome (starting, done, stopped). #>
+    $who = '{0}\{1}' -f [Environment]::UserDomainName, [Environment]::UserName
+    $database = $Removal.Database
+    $databases = $(if ($null -eq $database) { 'korunuyor (-SkipDatabase) [kept]' } elseif (@($database.Databases).Count) { @($database.Databases) -join ', ' } else { '-' })
+    $folders = @(foreach ($target in @($Removal.Plan.Targets)) { $fact = $Removal.Facts[$target.Path]; if ($null -eq $fact -or $fact.Exists) { $target.Path } })
+    $oldest = $(if ($Removal.Oldest) { $Removal.Oldest } else { '-' })
+    @(
+        ('ARCILOGGER verileriyle birlikte kaldırılıyor [ARCILOGGER is being removed with its data] (Install-Arcilogger.ps1 -Uninstall -RemoveData): {0}' -f $Outcome),
+        ('Onaylayan [confirmed by]: {0}; kuruluş [organisation]: {1}' -f $who, $Removal.Site),
+        ('Veritabanları [databases]: {0}' -f $databases),
+        ('Klasörler [folders]: {0}' -f $(if ($folders.Count) { $folders -join ', ' } else { '-' })),
+        ('Kasa [vault]: {0} mühürlü gün [sealed days], en eskisi [oldest] {1}' -f $Removal.SealedDays, $oldest)
+    ) -join [Environment]::NewLine
+}
+
 function Invoke-DataRemovalSteps($Removal) {
     <#
-    The database and the data folders of Initialize-DataRemoval's plan, then event 4130 (who,
-    what), written while the event source is still registered: the Application log keeps it.
+    Event 4130 with what goes, then the database and the data folders of Initialize-DataRemoval's
+    plan, then event 4130 with the outcome (also when a step fails; the error stands), written
+    while the event source is still registered: the Application log keeps both.
     #>
-    $database = $Removal.Database
-    if ($null -ne $database) {
-        $names = @($database.Databases)
-        $role = $(if ($database.DropRole -and $database.Role) { [string]$database.Role } else { $null })
-        $text = 'Veritabanı siliniyor [dropping the database]: {0}; rol [role]: {1}' -f $(if ($names.Count) { $names -join ', ' } else { '-' }), $(if ($role) { $role } else { 'korunuyor [kept]' })
-        Invoke-Step 'database.remove' $text {
-            $sql = Get-ArciDatabaseRemovalSql -Name ([string]$database.Settings.name) -Role ([string]$database.Settings.user) -Databases $names
-            if ($names.Count -gt 0) { [void](Invoke-Psql -Database 'postgres' -Sql $sql.Drop) }
-            if ($role) {
-                # The databases are gone: a role still owning something elsewhere is only a warning.
-                try { [void](Invoke-Psql -Database 'postgres' -Sql $sql.Role) }
-                catch {
-                    $message = "Rol '{0}' silinemedi, elle silin: DROP ROLE {0}; [role not dropped, drop it by hand]: {1}" -f $role, $_.Exception.Message
-                    Write-ArciWarn $message
-                    $script:Warnings.Add($message)
+    $starting = Get-RemovalEventText $Removal 'başlıyor [starting]'
+    Invoke-Step 'data.event' 'Uygulama günlüğüne olay 4130 yazılıyor: başlıyor [writing event 4130 to the Application log: starting]' {
+        if (-not (Write-ArciEvent -Id 4130 -Level 'Warning' -Message $starting)) { Write-ArciWarn 'Olay 4130 yazılamadı [event 4130 not written].' }
+    } $starting
+    try {
+        $database = $Removal.Database
+        if ($null -ne $database) {
+            $names = @($database.Databases)
+            $role = $(if ($database.DropRole -and $database.Role) { [string]$database.Role } else { $null })
+            $text = 'Veritabanı siliniyor [dropping the database]: {0}; rol [role]: {1}' -f $(if ($names.Count) { $names -join ', ' } else { '-' }), $(if ($role) { $role } else { 'korunuyor [kept]' })
+            Invoke-Step 'database.remove' $text {
+                $sql = Get-ArciDatabaseRemovalSql -Name ([string]$database.Settings.name) -Role ([string]$database.Settings.user) -Databases $names
+                if ($names.Count -gt 0) { [void](Invoke-Psql -Database 'postgres' -Sql $sql.Drop) }
+                if ($role) {
+                    # The databases are gone: a role still owning something elsewhere is only a warning.
+                    try { [void](Invoke-Psql -Database 'postgres' -Sql $sql.Role) }
+                    catch {
+                        $message = "Rol '{0}' silinemedi, elle silin: DROP ROLE {0}; [role not dropped, drop it by hand]: {1}" -f $role, $_.Exception.Message
+                        Write-ArciWarn $message
+                        $script:Warnings.Add($message)
+                    }
                 }
+            } ([pscustomobject]@{ databases = $names; role = $role })
+        }
+        foreach ($target in @($Removal.Plan.Targets)) {
+            if (Test-RemovalConfigTarget $target) { continue }
+            $fact = $Removal.Facts[$target.Path]
+            if ($null -ne $fact -and -not $fact.Exists) { continue }
+            if ($target.Kind -eq 'dumps') {
+                Invoke-Step 'data.remove' ('Yedekler siliniyor [deleting the backups]: {0} ({1})' -f $target.Path, $target.What) {
+                    $separators = [char[]]@([char]92, [char]47)
+                    $keepFolder = $target.Path.TrimEnd($separators) -ieq $DataRoot.TrimEnd($separators)
+                    [void](Remove-ArciBackupDumps -Path $target.Path -KeepFolder:$keepFolder)
+                } $target.Path
+                continue
             }
-        } ([pscustomobject]@{ databases = $names; role = $role })
+            Invoke-Step 'data.remove' ('Siliniyor [deleting]: {0} ({1})' -f $target.Path, $target.What) {
+                [void](Remove-ArciDataFolder -Path $target.Path)
+            } $target.Path
+        }
     }
-    $removed = New-Object System.Collections.Generic.List[string]
-    foreach ($target in @($Removal.Plan.Targets)) {
-        if (Test-RemovalConfigTarget $target) { continue }
-        $fact = $Removal.Facts[$target.Path]
-        if ($null -ne $fact -and -not $fact.Exists) { continue }
-        $removed.Add($target.Path)
-        Invoke-Step 'data.remove' ('Siliniyor [deleting]: {0} ({1})' -f $target.Path, $target.What) {
-            [void](Remove-ArciDataFolder -Path $target.Path)
-        } $target.Path
+    catch {
+        if (-not $script:IsDryRun) {
+            [void](Write-ArciEvent -Id 4130 -Level 'Error' -Message (Get-RemovalEventText $Removal ('yarıda kaldı [stopped]: {0}' -f $_.Exception.Message)))
+        }
+        throw
     }
-    $who = '{0}\{1}' -f [Environment]::UserDomainName, [Environment]::UserName
-    $oldest = $(if ($Removal.Oldest) { $Removal.Oldest } else { '-' })
-    $databases = $(if ($null -eq $database) { 'korundu (-SkipDatabase) [kept]' } elseif (@($database.Databases).Count) { @($database.Databases) -join ', ' } else { '-' })
-    $message = @(
-        'ARCILOGGER verileriyle birlikte kaldırılıyor [ARCILOGGER is being removed with its data] (Install-Arcilogger.ps1 -Uninstall -RemoveData).',
-        ('Onaylayan [confirmed by]: {0}; kuruluş [organisation]: {1}' -f $who, $Removal.Site),
-        ('Silinen veritabanları [databases dropped]: {0}' -f $databases),
-        ('Silinen klasörler [folders deleted]: {0}' -f $(if ($removed.Count) { $removed -join ', ' } else { '-' })),
-        ('Kasa [vault]: {0} mühürlü gün [sealed days], en eskisi [oldest] {1}' -f $Removal.SealedDays, $oldest),
-        ('Yapılandırma klasörü bundan sonra silinir [the configuration folder is deleted next]: {0}' -f $ProgramDataDir)
-    ) -join [Environment]::NewLine
-    Invoke-Step 'data.event' 'Uygulama günlüğüne olay 4130 yazılıyor [writing event 4130 to the Application log]' {
-        if (-not (Write-ArciEvent -Id 4130 -Level 'Warning' -Message $message)) { Write-ArciWarn 'Olay 4130 yazılamadı [event 4130 not written].' }
-    } $message
+    $done = Get-RemovalEventText $Removal ('veritabanı ve veri klasörleri silindi; yapılandırma klasörü bundan sonra [the database and the data folders are deleted; the configuration folder follows]: {0}' -f $ProgramDataDir)
+    Invoke-Step 'data.result' 'Uygulama günlüğüne olay 4130 yazılıyor: sonuç [writing event 4130 to the Application log: outcome]' {
+        if (-not (Write-ArciEvent -Id 4130 -Level 'Warning' -Message $done)) { Write-ArciWarn 'Olay 4130 yazılamadı [event 4130 not written].' }
+    } $done
 }
 
 function Invoke-ConfigRemovalSteps($Removal) {
-    <# The configuration folder, after the firewall and power steps have read their records there; then the data folder once nothing is left in it. #>
+    <#
+    The configuration folder, after the firewall and power steps have read their records there;
+    then the data folder once nothing is left in it (never a data folder that is itself a mount
+    point or junction).
+    #>
     $what = @(foreach ($target in @($Removal.Plan.Targets)) { if (Test-RemovalConfigTarget $target) { $target.What } })
     Invoke-Step 'config.remove' ('Siliniyor [deleting]: {0} ({1})' -f $ProgramDataDir, ($what -join '')) {
         [void](Remove-ArciDataFolder -Path $ProgramDataDir)
@@ -4357,7 +4420,8 @@ function Invoke-ConfigRemovalSteps($Removal) {
     Invoke-Step 'data.root' ('Veri klasörü boşsa siliniyor [deleting the data folder once empty]: {0}' -f $root) {
         if (-not (Test-Path -LiteralPath $root)) { return }
         $left = @(Get-ChildItem -LiteralPath $root -Force | ForEach-Object { $_.Name })
-        if ($left.Count -eq 0) { [void](Remove-ArciDataFolder -Path $root) }
+        if ($Removal.RootIsLink) { Write-ArciInfo ('Veri klasörü bir bağlama noktası ya da bağlantı, korunuyor [the data folder is a mount point or link, kept]: {0}' -f $root) }
+        elseif ($left.Count -eq 0) { [void](Remove-ArciDataFolder -Path $root) }
         else { Write-ArciInfo ('Veri klasörü korunuyor, içinde [data folder kept, it holds]: {0}' -f ($left -join ', ')) }
     } $root
 }
@@ -4430,6 +4494,11 @@ function Invoke-UninstallMode {
         $kept.Add(@('keep.postgresql', 'PostgreSQL', 'PostgreSQL programı, veri klasörü ve diğer veritabanları korunuyor [PostgreSQL itself, its data directory and its other databases kept]'))
         if ($null -eq $removal.Database) { $kept.Add(@('keep.database', 'PostgreSQL', 'Veritabanı silinmedi (-SkipDatabase) [database kept]; istenirse elle: DROP DATABASE arcilogger; DROP ROLE arcilogger;')) }
         foreach ($item in @($removal.Plan.Kept)) { $kept.Add(@('keep.other', $item.Path, $item.Why)) }
+        if ($null -ne $removal.Database) {
+            foreach ($name in @(@($removal.Database.Owned) + @($removal.Database.Unnamed))) {
+                $kept.Add(@('keep.database', $name, 'Veritabanı ARCILOGGER''ın değil ya da adı tırnaklanamıyor, silinmedi [database not ARCILOGGER''s, or its name cannot be quoted: not dropped]'))
+            }
+        }
         $kept.Add(@('keep.remote', 'replica', 'Başka sunucudaki replika ve NAS yedek kopyası silinmez; oradaki yönetici siler [the replica and the NAS copy on other hosts are not deleted: their administrators delete them]'))
         foreach ($entry in $kept) {
             Add-PlanItem -Id $entry[0] -Status 'kept' -Text ("{0}: {1}" -f $entry[2], $entry[1]) -Detail $entry[1]

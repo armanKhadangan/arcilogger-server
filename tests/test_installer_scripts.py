@@ -6421,6 +6421,8 @@ if ($Scenario.StartsWith('uninstall-data')) {
     }
     [void](New-Item -ItemType Directory -Path $backupElsewhere -Force)
     Write-Text (Join-Path $backupElsewhere 'arcilogger-20261107-014000.dump') 'dump'
+    Write-Text (Join-Path $backupElsewhere 'arcilogger-20261107-014000.dump.json') '{}'
+    Write-Text (Join-Path $backupElsewhere 'another-system.dump') 'not ARCILOGGER''s'
     $toml = "site_name = `"Örnek A.Ş.`"`n[backup]`ndir = '$backupElsewhere'`n"
     Write-Text (Join-Path $programData 'arcilogger.toml') $toml
     $recorded = '{"database_provisioned": true, "replaced_databases": [{"name": ' +
@@ -6729,6 +6731,13 @@ if ($Scenario.StartsWith('uninstall-data')) {
         $relative = $relative.Replace([char]92, [char]47)
         $sim.calls.Add("remove-data $relative")
         ArciInstall\Remove-ArciDataFolder -Path $Path
+    }
+    function Remove-ArciBackupDumps {
+        param([string]$Path, [switch]$KeepFolder)
+        $relative = $Path.Substring($Base.Length).TrimStart([char]92, [char]47)
+        $relative = $relative.Replace([char]92, [char]47)
+        $sim.calls.Add("remove-dumps $relative keep=$([bool]$KeepFolder)")
+        ArciInstall\Remove-ArciBackupDumps -Path $Path -KeepFolder:$KeepFolder
     }
 }
 function Invoke-AclSteps { $sim.calls.Add('acl') }
@@ -7147,6 +7156,9 @@ $report = [ordered]@{
                     Sort-Object)
         })
     backup_elsewhere_left = (Test-Path -LiteralPath $backupElsewhere)
+    backup_elsewhere_files = @(if (Test-Path -LiteralPath $backupElsewhere) {
+            Get-ChildItem -LiteralPath $backupElsewhere -Force | ForEach-Object { $_.Name }
+        })
     programdata_left = (Test-Path -LiteralPath $programData)
     event = $sim.event
     sql = $sim.sql.ToArray()
@@ -9041,8 +9053,16 @@ def test_setup_uninstaller_asks_whether_to_delete_the_data_too() -> None:
     assert question + "MB_YESNO or MB_DEFBUTTON2, IDNO) = IDYES then" in step
     assert step.index("if not UninstallSilent() then") < step.index("RemoveDataQuestion")
     assert "RemoveData := ' -RemoveData'" in step
-    assert "'\" -Uninstall' + RemoveData" in step
-    assert step.index("RemoveDataQuestion") < step.index("Exec(PowerShellPath()")
+    run = text[text.index("function RunRemoval") :]
+    assert "'\" -Uninstall' + Extra" in run[: run.index("\nend;")]
+    assert step.index("RemoveDataQuestion") < step.index(
+        "RunRemoval(Script, RemoveData, ResultCode)"
+    )
+    # 2 with -RemoveData (name not confirmed, a check stopped it): the program is removed with
+    # the data kept, never left running without its uninstall entry.
+    fallback = step[step.index("(RemoveData <> '') and (ResultCode = 2)") :]
+    assert "CustomMessage('DataNotRemoved')" in fallback
+    assert fallback.index("RemoveData := '';") < fallback.index("RunRemoval(")
     for language, keep, wording in (
         ("turkish", "KORUNUR", "TÜM VERİLER DE SİLİNSİN Mİ? Bu GERİ ALINAMAZ."),
         ("english", "KEPT", "DELETE ALL THE DATA AS WELL? This CANNOT be undone."),
@@ -9053,6 +9073,9 @@ def test_setup_uninstaller_asks_whether_to_delete_the_data_too() -> None:
         assert wording in message.group(1)
         assert "730" in message.group(1)
         assert "5651" in message.group(1)
+        kept = re.search(rf"(?m)^{language}\.DataNotRemoved=(.+)$", text)
+        assert kept is not None, language
+        assert "14.1" in kept.group(1)
 
 
 def test_removal_event_id_is_the_contract_s() -> None:
@@ -9079,7 +9102,9 @@ def test_uninstall_with_the_data_removes_the_database_and_every_folder(
     report = _data_removal_report(engine, tmp_path, "uninstall-data")
     assert report["exit"] is None, report["message"]
     assert report["data_left"] == ["db", "notes.txt"]
-    assert report["backup_elsewhere_left"] is False
+    # [backup] dir: only the Backup task's files go; the other system's dump and the folder stay.
+    assert report["backup_elsewhere_left"] is True
+    assert report["backup_elsewhere_files"] == ["another-system.dump"]
     assert report["programdata_left"] is False
     assert _folders(report) == {"ARCILOGGER.notes": None}
     assert report["services"] == {}
@@ -9097,21 +9122,25 @@ def test_uninstall_with_the_data_removes_the_database_and_every_folder(
     folders = ("spool", "vault", "exports", "state", "logs", "backups")
     assert data == [
         *(f"data/ARCILOGGER/{folder}" for folder in folders),
-        "elsewhere/backups",
         "programdata/ARCILOGGER",
     ], "never db, notes.txt or the data folder that still holds them"
-    # Nothing is changed before the tasks are paused and the services are gone; the data goes
-    # before the event, the event before its source; the firewall and power steps read their
-    # records in the configuration folder, which goes after them; the program folder last.
+    assert "remove-dumps elsewhere/backups keep=False" in calls
+    # Nothing is changed before the tasks are paused and the services are gone; event 4130 is
+    # written before the first deletion and again after the data; then its source goes; the
+    # firewall and power steps read their records in the configuration folder, which goes
+    # after them; the program folder last.
     position = {call: index for index, call in enumerate(calls)}
-    assert (
-        position["unregister Seal state=Disabled"] < position["remove-data data/ARCILOGGER/spool"]
-    )
-    assert position["remove-data elsewhere/backups"] < position["event 4130 Warning"]
-    assert position["event 4130 Warning"] < position["event source removed"]
+    events = [index for index, call in enumerate(calls) if call == "event 4130 Warning"]
+    assert len(events) == 2
+    assert position["unregister Seal state=Disabled"] < events[0]
+    assert events[0] < position["remove-data data/ARCILOGGER/spool"]
+    assert position["remove-dumps elsewhere/backups keep=False"] < events[1]
+    assert events[1] < position["event source removed"]
     assert position["event source removed"] < position["remove-data programdata/ARCILOGGER"]
     assert position["remove-data programdata/ARCILOGGER"] < position["remove ARCILOGGER"]
     event = report["event"]
+    done = "[the database and the data folders are deleted; the configuration folder follows]"
+    assert done in event
     assert "Örnek A.Ş." in event
     assert "arcilogger, arcilogger_replaced_20261104120000" in event
     assert "2 mühürlü gün [sealed days], en eskisi [oldest] 2026-11-05" in event
@@ -9166,9 +9195,10 @@ def test_dry_run_uninstall_with_the_data_plans_each_deletion(engine: str, tmp_pa
         "tasks.disable",
         "services.remove",
         "tasks.unregister",
+        "data.event",
         "database.remove",
         "data.remove",
-        "data.event",
+        "data.result",
         "eventlog.remove",
         "firewall.remove",
         "config.remove",
@@ -9230,7 +9260,7 @@ def test_confirm_remove_data_needs_remove_data(engine: str, tmp_path: Path) -> N
     assert _unwrapped("[only with -RemoveData]") in _unwrapped(result.stdout)
 
 
-@pytest.mark.parametrize("case", ["drive-root", "hard-link", "no-data-root"])
+@pytest.mark.parametrize("case", ["drive-root", "hard-link", "no-data-root", "foreign-config"])
 def test_dry_run_uninstall_with_the_data_refuses_before_any_change(
     engine: str, tmp_path: Path, case: str
 ) -> None:
@@ -9246,9 +9276,13 @@ def test_dry_run_uninstall_with_the_data_refuses_before_any_change(
     if case == "hard-link":
         (data / "vault").mkdir(parents=True)
         os.link(elsewhere, data / "vault" / "linked.txt")
+    config = tmp_path / "programdata" / "ARCILOGGER" / "arcilogger.toml"
     if case == "no-data-root":
-        config = tmp_path / "programdata" / "ARCILOGGER" / "arcilogger.toml"
         config.write_text(f'site_name = "{SITE_NAME}"\n', encoding="utf-8")
+    if case == "foreign-config":
+        # A mistyped -ProgramDataDir: a folder with none of the installer's files.
+        config.unlink()
+        (config.parent / "someone-else.txt").write_text("keep", encoding="utf-8")
     result, plan = dry_run(
         engine,
         tmp_path,
@@ -9268,9 +9302,12 @@ def test_dry_run_uninstall_with_the_data_refuses_before_any_change(
         "drive-root": "[a drive or share root]",
         "hard-link": "[a link (reparse point or hard link) in a folder to delete",
         "no-data-root": "[the data folder is not certain: give it with -DataRoot",
+        "foreign-config": "[the configuration folder holds none of the installer's files",
     }[case]
     assert _unwrapped(expected) in stdout
     assert elsewhere.read_text(encoding="utf-8") == "not ARCILOGGER's"
+    if case == "foreign-config":
+        assert (config.parent / "someone-else.txt").is_file()
 
 
 _REMOVAL_FUNCTIONS_SCRIPT = r"""
@@ -9288,6 +9325,7 @@ function Plan([hashtable]$Extra) {
     $plan = Get-ArciDataRemovalPlan @arguments
     [ordered]@{
         targets = @($plan.Targets | ForEach-Object { $_.Path }); root = $plan.Root
+        kinds = @($plan.Targets | ForEach-Object { $_.Kind })
         kept = @($plan.Kept | ForEach-Object { [ordered]@{ path = $_.Path; why = $_.Why } })
         problems = @($plan.Problems)
     }
@@ -9300,6 +9338,9 @@ $results = [ordered]@{
     backup_elsewhere = (Plan @{ BackupDir = (Join-Path $Base 'elsewhere') })
     pg_in_state = (Plan @{ Keep = @((Join-Path $data 'state/pg')) })
     program_in_backup = (Plan @{ BackupDir = $Base })
+    program_in_config = (Plan @{ ProgramDataDir = $Base })
+    backup_is_data = (Plan @{ BackupDir = $data; DataRootNames = @('db'); Keep = @($pgData) })
+    unc_backup = (Plan @{ BackupDir = '\\nas\yedek\arcilogger' })
     nested = (Plan @{ ProgramDataDir = (Join-Path $data 'config') })
     system = (Plan @{ SystemFolders = @((Join-Path $data 'logs/Users')) })
     windows = (Plan @{
@@ -9315,12 +9356,14 @@ $results['confirm'] = @(
     (Test-ArciRemovalConfirmation -Expected '' -Typed ''),
     (Test-ArciRemovalConfirmation -Expected "Örnek`tA.Ş." -Typed 'Örnek A.Ş.')
 )
+# As Turkish counts letter case (İ/i); where the platform has no Turkish culture, ordinal only.
+$results['turkish'] = (Test-ArciRemovalConfirmation -Expected 'İZMİR' -Typed 'izmir')
 $replaced = 'arcilogger_replaced_20261104120000'
 $sql = Get-ArciDatabaseRemovalSql -Name 'arcilogger' -Role 'arcilogger' `
     -Extra @($replaced, 'arcilogger') -Databases @('arcilogger')
 $results['sql'] = [ordered]@{ query = $sql.Query; drop = $sql.Drop; role = $sql.Role }
 $refused = @()
-foreach ($bad in @("arcilogger'; DROP ROLE postgres; --", 'Arcilogger', '9abc')) {
+foreach ($bad in @("arcilogger'; DROP ROLE postgres; --", 'arci-logger', '9abc')) {
     try { [void](Get-ArciDatabaseRemovalSql -Name $bad -Role 'arcilogger'); $refused += $false }
     catch { $refused += $true }
 }
@@ -9336,6 +9379,23 @@ $kept = ConvertFrom-ArciDatabaseRemovalQuery -Text "role|postgres|keep`n"
 $results['parsed_keep'] = [ordered]@{
     databases = @($kept.Databases); role = $kept.Role; drop = $kept.DropRole
 }
+$owned = ConvertFrom-ArciDatabaseRemovalQuery -Text ("database|arcilogger`ndatabase|Bad-Name`n" +
+    "owned|other_app`nrole|arcilogger|drop`n")
+$results['parsed_owned'] = [ordered]@{
+    databases = @($owned.Databases); owned = @($owned.Owned); unnamed = @($owned.Unnamed)
+    drop = $owned.DropRole
+}
+$results['mixed_case_sql'] = (Get-ArciDatabaseRemovalSql -Name 'Arcilogger' -Role 'Arcilogger').Role
+# The Backup task's files in a [backup] dir of their own: only those go, the folder once empty.
+$dumps = Join-Path $Base 'dumps'
+$dumpFacts = Get-ArciFolderFacts -Path $dumps -DumpsOnly
+$results['dump_facts'] = [ordered]@{ files = $dumpFacts.Files; bytes = $dumpFacts.Bytes }
+$results['dumps_first'] = (Remove-ArciBackupDumps -Path $dumps)
+$results['dumps_left'] = @(Get-ChildItem -LiteralPath $dumps -Force | ForEach-Object { $_.Name })
+Remove-Item -LiteralPath (Join-Path $dumps 'other-system.dump')
+$results['dumps_kept_folder'] = (Remove-ArciBackupDumps -Path $dumps -KeepFolder)
+$results['dumps_second'] = (Remove-ArciBackupDumps -Path $dumps)
+$results['dumps_absent'] = (Remove-ArciBackupDumps -Path $dumps)
 # Folders on disk (made by the test): facts, then the removal.
 $tree = Join-Path $Base 'tree'
 $facts = Get-ArciFolderFacts -Path $tree
@@ -9365,6 +9425,15 @@ def test_data_removal_functions(engine: str, tmp_path: Path) -> None:
     sealed.write_bytes(b"12345")
     (tree / "notes.txt").write_bytes(b"123")
     sealed.chmod(0o444)  # read-only (the attribute on Windows)
+    dumps = base / "dumps"
+    dumps.mkdir()
+    for name, size in (
+        ("arcilogger-20261107-014000.dump", 7),
+        ("arcilogger-20261107-014000.dump.json", 2),
+        (".arcilogger-20261108-014000.dump.partial", 1),
+        ("other-system.dump", 5),
+    ):
+        (dumps / name).write_bytes(b"x" * size)
     linked = base / "linked"
     (linked / "vault").mkdir(parents=True)
     (linked / "vault" / "kept.txt").write_text("x", encoding="utf-8")
@@ -9382,6 +9451,7 @@ def test_data_removal_functions(engine: str, tmp_path: Path) -> None:
     standard.append(str(data / "backups"))
     plain = results["plain"]
     assert plain["targets"] == [*standard, str(data / "yedek"), str(config)]
+    assert plain["kinds"] == [*(["folder"] * 6), "dumps", "folder"]
     assert plain["root"] == str(data)
     assert plain["kept"] == [
         {
@@ -9392,13 +9462,30 @@ def test_data_removal_functions(engine: str, tmp_path: Path) -> None:
             "path": str(data / "notes"),
             "why": "ARCILOGGER'ın değil, korunur [not ARCILOGGER's, kept]",
         },
+        {
+            "path": str(data / "yedek"),
+            "why": (
+                "yedek klasörü: içindeki ARCILOGGER yedekleri silinir, gerisi korunur "
+                "[the backup folder: ARCILOGGER's backups go, the rest stays]"
+            ),
+        },
     ]
     assert plain["problems"] == []
+    # [backup] dir = the data folder, or one holding the program folder: only the Backup task's
+    # files directly in it would go, never the folder with what else it holds.
+    assert results["backup_is_data"]["problems"] == []
+    assert results["backup_is_data"]["kinds"][-2] == "dumps"
+    assert results["program_in_backup"]["problems"] == []
+    # A [backup] dir on another host is never touched, only named.
+    unc = results["unc_backup"]
+    assert unc["targets"] == [*standard, str(config)]
+    assert unc["kept"][0]["path"] == "\\\\nas\\yedek\\arcilogger"
+    assert "[the backup folder is on another host" in unc["kept"][0]["why"]
     assert results["backup_inside"]["targets"] == [*standard, str(config)]
     assert results["backup_elsewhere"]["targets"][-2] == str(base / "elsewhere")
     expectations = {
         "pg_in_state": "[holds PostgreSQL's data directory]",
-        "program_in_backup": "[holds the program folder]",
+        "program_in_config": "[holds the program folder]",
         "nested": "[the data folder and the configuration folder are inside each other",
         "system": "[a Windows folder or holds one]",
         "windows": "[inside the Windows folder]",
@@ -9409,10 +9496,16 @@ def test_data_removal_functions(engine: str, tmp_path: Path) -> None:
         assert problems, case
         assert any(expected in problem for problem in problems), (case, problems)
     assert results["confirm"] == [True, False, False, False, True]
+    if sys.platform == "win32":
+        assert results["turkish"] is True
     sql = results["sql"]
     assert "\\set db_names 'arcilogger,arcilogger_replaced_20261104120000'" in sql["query"]
     assert "datname NOT IN ('postgres', 'template0', 'template1')" in sql["query"]
     assert "AND NOT rolsuper AND rolname <> current_user" in sql["query"]
+    # Dropped by name, never by owner: the restore's names, and the role's others only listed.
+    assert "left(:'db_name', 39) || '_replaced_[0-9]{14}$'" in sql["query"]
+    assert "left(:'db_name', 40) || '_restore_[0-9]{14}$'" in sql["query"]
+    assert "SELECT 'owned|' || datname" in sql["query"]
     assert "\\set db_names 'arcilogger'" in sql["drop"]
     assert sql["drop"].rstrip().endswith("\\gexec")
     assert "rolname <> current_user \\gexec" in sql["role"]
@@ -9424,6 +9517,19 @@ def test_data_removal_functions(engine: str, tmp_path: Path) -> None:
         "dir": "D:\\ARCILOGGER\\db",
     }
     assert results["parsed_keep"] == {"databases": [], "role": "postgres", "drop": False}
+    assert results["parsed_owned"] == {
+        "databases": ["arcilogger"],
+        "owned": ["other_app"],
+        "unnamed": ["Bad-Name"],
+        "drop": False,
+    }
+    assert "\\set role_name 'Arcilogger'" in results["mixed_case_sql"]
+    assert results["dump_facts"] == {"files": 3, "bytes": 10}
+    assert results["dumps_first"] == "kept"
+    assert results["dumps_left"] == ["other-system.dump"]
+    assert results["dumps_kept_folder"] == "kept"
+    assert results["dumps_second"] == "removed"
+    assert results["dumps_absent"] == "absent"
     assert results["facts"] == {"exists": True, "files": 2, "bytes": 8, "links": []}
     assert results["facts_missing"] is False
     assert results["removed"] == "removed"
