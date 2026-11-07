@@ -43,7 +43,9 @@ export function DonutChart({
   height = 200,
 }: DonutChartProps) {
   return (
-    <div style={{ height }} className="relative w-full" aria-hidden="true">
+    // Size containment: the hole's texts scale with the ring (`cqmin`), so a narrow card at
+    // 1280 px keeps "17 sa 30 dk" inside it.
+    <div style={{ height }} className="[container-type:size] relative w-full" aria-hidden="true">
       <ResponsiveContainer width="100%" height="100%">
         <PieChart>
           <Pie
@@ -67,8 +69,14 @@ export function DonutChart({
       </ResponsiveContainer>
       {centerLabel ? (
         <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
-          <span className="text-xl font-semibold text-foreground tabular">{centerLabel}</span>
-          {centerHint ? <span className="text-xs text-muted">{centerHint}</span> : null}
+          <span className="text-[length:min(1.25rem,8cqmin)] leading-tight font-semibold text-foreground tabular">
+            {centerLabel}
+          </span>
+          {centerHint ? (
+            <span className="text-[length:min(0.75rem,6cqmin)] leading-tight text-muted">
+              {centerHint}
+            </span>
+          ) : null}
         </div>
       ) : null}
     </div>
