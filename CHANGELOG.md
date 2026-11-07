@@ -17,7 +17,8 @@ versions follow [Semantic Versioning](https://semver.org/).
   box.
 - The browser tab names the page ("Mühürleme · ARCILOGGER").
 - Two minutes before the idle limit, "Oturumunuz kapanmak üzere" offers "Oturumu sürdür", so text
-  typed into a long form is not lost. The limit itself is unchanged.
+  typed into a long form is not lost. The limit itself is unchanged. Work in another tab of the
+  same browser counts, so a tab left open does not warn by mistake.
 - 5651 Sorgu's "Sorgula" stays at the bottom of the window while the form scrolls. Leaving a
   filled-in form for another page asks first, as Ayarlar does; the result's own page does not.
 - Every password field has "Parolayı göster" and says "Caps Lock açık" while that key is on.
@@ -28,7 +29,13 @@ versions follow [Semantic Versioning](https://semver.org/).
   - Kullanım's card explanations and figure headers wrap;
   - the donut's total stays inside its ring;
   - Kaynaklar's last-message time, Arama's "Ham satır" button and Kullanım's volumes show whole;
-  - Güvenlik Özeti keeps its five severity tiles on one row.
+  - Güvenlik Özeti keeps its five severity tiles on one row;
+  - Arama's facet values wrap beside "Hariç tut".
+- Down to 1100 px (a 1366 px laptop at 125 % scaling):
+  - Kaynaklar keeps the sender's address whole;
+  - Panel wraps a silent source's last time;
+  - the Kategoriler donut and Güvenlik Özeti's figures move under their neighbours rather than
+    shrink.
 
 ## [0.2.0] — 2026-11-06
 
