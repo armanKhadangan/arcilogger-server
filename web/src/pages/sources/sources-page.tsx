@@ -150,9 +150,10 @@ export function SourcesHealthPage() {
                     {t('sources.badges.unknown')}
                   </Badge>
                 ) : (
-                  <span className="shrink-0">{typeLabel(item.type)}</span>
+                  // The address is the sender: in a narrow window the type gives way, not it.
+                  <span className="truncate">{typeLabel(item.type)}</span>
                 )}
-                {item.address ? <span className="truncate font-mono">{item.address}</span> : null}
+                {item.address ? <span className="shrink-0 font-mono">{item.address}</span> : null}
               </span>
             </span>
           );
