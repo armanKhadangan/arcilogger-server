@@ -106,10 +106,10 @@ function FullPageLoading() {
 }
 
 /**
- * Why the last session ended (401 code), kept until the next complete sign-in. When a page's
- * request reports `session_idle`, the session is gone on the server, so the `/auth/me` asked
- * right afterwards only says `not_authenticated`; the sign-in page should still explain the
- * timeout, whichever of the two redirects lands last.
+ * Why the last session ended (401 code), kept until the next complete sign-in. The `/auth/me`
+ * asked right after a page's `session_idle` may carry no explanation (another tab signed out
+ * meanwhile and the cookie is gone: `not_authenticated`); the sign-in page should still explain
+ * the timeout, whichever of the two redirects lands last.
  */
 let sessionEndReason: string | null = null;
 
