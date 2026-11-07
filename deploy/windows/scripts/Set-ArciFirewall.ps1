@@ -9,18 +9,24 @@
         (addresses and networks such as 10.0.1.0/24). Without any (a new installation has none
         until the organisation adds its devices) there is no syslog rule: 514 stays closed and
         the script says so. Add the [[sources]] and run it again.
-      - TCP 443 (web interface) and TCP/UDP 3389 (remote desktop) only from the admin PC
-        (-AdminAddress, e.g. 10.0.0.10 or 10.0.0.0/24; no default: asked at the console when
-        neither given nor remembered, otherwise the script stops); with -AllowWinRM also TCP
-        5985 (PowerShell remoting, Server Manager) from the admin PC.
+      - TCP 443 (web interface) only from the admin PC (-AdminAddress, e.g. 10.0.0.10 or
+        10.0.0.0/24; no default: asked at the console when neither given nor remembered,
+        otherwise the script stops); with -AllowWinRM also TCP 5985 (PowerShell remoting, Server
+        Manager) from the admin PC.
+      - TCP/UDP 3389: the remote desktop is never closed (owner decision 2026-11-07). The
+        ARCILOGGER RDP rules allow it from every address, and every rule for the remote desktop
+        port (-RdpPort; Windows' own "Remote Desktop - User Mode" rules, whatever their group is
+        called in this Windows language) stays as it is. Such a rule an earlier version disabled
+        is enabled again.
       - Every OTHER enabled inbound allow rule is disabled, because an allow rule always wins over
-        the default Block action: Windows' own "Remote Desktop", "Windows Remote Management
-        (HTTP-In)" (TCP 5985, enabled by default on Windows Server), "File and Printer Sharing"
-        and any rule another program added. Kept are only the rule groups in -KeepRuleGroup
-        (default: "Core Networking" - DHCP, IPv6 neighbour discovery, ICMP errors) and the rules
-        named in -KeepRule. Every rule disabled here is recorded in the state file; -Remove
-        enables them again. The script stops before changing anything if no rule of the
-        -KeepRuleGroup groups exists (the group name is an assumption: verify on site).
+        the default Block action: Windows' own "Windows Remote Management (HTTP-In)" (TCP 5985,
+        enabled by default on Windows Server), "File and Printer Sharing" and any rule another
+        program added. Kept are the rule groups in -KeepRuleGroup (default: "Core Networking" -
+        DHCP, IPv6 neighbour discovery, ICMP errors), the rules named in -KeepRule and the remote
+        desktop port's rules. Every rule disabled here is recorded in the state file; -Remove
+        enables them again, and a recorded rule that is kept now is enabled again at the next
+        run. The script stops before changing anything if no rule of the -KeepRuleGroup groups
+        exists (the group name is an assumption: verify on site).
 
     Outbound (-StrictOutbound, optional; default action becomes Block):
       NTP (UDP 123) to [clock] ntp_server and fallback_server, DNS (53) to the configured DNS
@@ -70,8 +76,8 @@
     All ARCILOGGER rules are in the rule group "ARCILOGGER". Safe to run again (idempotent).
 
 .PARAMETER Force
-    Apply the remote desktop restriction even when a session from another address is open
-    (that session would be cut off).
+    No effect: the remote desktop is never restricted, so no open session can be cut off. Kept
+    because the installer passes it, also to the script of a version it rolls back to.
 
 .EXAMPLE
     .\Set-ArciFirewall.ps1
@@ -178,9 +184,24 @@ function Write-FirewallState($State) {
     Write-ArciUtf8File -Path $StateFile -Text ($State | ConvertTo-Json -Depth 5)
 }
 
+function Get-RdpRuleNames {
+    <#
+    The rules for the remote desktop port (LocalPort -RdpPort), found by their port and not by
+    their group, whose name depends on the Windows language: they are never disabled.
+    #>
+    $filters = @(Get-NetFirewallPortFilter -All | Where-Object { $_ -and (@($_.LocalPort) -contains "$RdpPort") })
+    # Nothing piped into Get-NetFirewallRule must not become a query for every rule.
+    if ($filters.Count -eq 0) { return @() }
+    @($filters | Get-NetFirewallRule | ForEach-Object { [string]$_.Name })
+}
+
+# The names of the remote desktop port's rules (Get-RdpRuleNames), read before any change.
+$RdpRuleNames = @()
+
 function Test-KeptRule($Rule) {
     if ($Rule.Group -eq $Group) { return $true }
     if ($KeepRule -contains [string]$Rule.Name -or $KeepRule -contains [string]$Rule.DisplayName) { return $true }
+    if ($RdpRuleNames -contains [string]$Rule.Name) { return $true }
     ($KeepRuleGroup -contains [string]$Rule.Group) -or ($KeepRuleGroup -contains [string]$Rule.DisplayGroup)
 }
 
@@ -414,7 +435,7 @@ $SourceAddress = @($SourceAddress | Where-Object { $_ })
 $rules = New-Object System.Collections.Generic.List[object]
 if (-not $Remove) {
     if (@($AdminAddress).Count -eq 0) {
-        throw 'Yönetici PC''sinin adresi yok [no admin PC address]: 443 (web) ve 3389 (uzak masaüstü) yalnızca ondan açılır. -AdminAddress ile verin, örnek -AdminAddress 10.0.0.10 ya da bir ağ: -AdminAddress 10.0.0.0/24; değer hatırlanır [443 and 3389 are opened only for it: give -AdminAddress, e.g. 10.0.0.10 or a network such as 10.0.0.0/24; it is remembered].'
+        throw 'Yönetici PC''sinin adresi yok [no admin PC address]: 443 (web) yalnızca ondan açılır. -AdminAddress ile verin, örnek -AdminAddress 10.0.0.10 ya da bir ağ: -AdminAddress 10.0.0.0/24; değer hatırlanır [443 is opened only for it: give -AdminAddress, e.g. 10.0.0.10 or a network such as 10.0.0.0/24; it is remembered].'
     }
     foreach ($value in @($SourceAddress) + @($AdminAddress)) {
         if (-not (Test-ArciAddressSpec $value)) { throw ("Geçersiz adres [invalid address]: {0} (örnek 10.0.0.10 veya 10.0.0.0/24)" -f $value) }
@@ -429,8 +450,9 @@ if (-not $Remove) {
         Write-ArciWarn ("Hiç syslog göndericisi yok ([[sources]] boş): {0} kapalı kalır, hiçbir log kaydedilmez. Güvenlik duvarınızın ve ana yönlendiricinizin [[sources]] kayıtlarını {1} dosyasına ekleyip bu betiği yeniden çalıştırın (docs\DEVICE-SETUP.md bölüm 4) [no syslog sender configured: {0} stays closed and no log is recorded; add the [[sources]] of your firewall and core router and run this script again]." -f "UDP/TCP $SyslogPort", $ConfigPath)
     }
     $rules.Add((New-RuleSpec 'ARCILOGGER HTTPS' 'Inbound' 'TCP' @("$HttpsPort") $AdminAddress 'web interface from the admin PC'))
-    $rules.Add((New-RuleSpec 'ARCILOGGER RDP' 'Inbound' 'TCP' @("$RdpPort") $AdminAddress 'remote desktop from the admin PC'))
-    $rules.Add((New-RuleSpec 'ARCILOGGER RDP UDP' 'Inbound' 'UDP' @("$RdpPort") $AdminAddress 'remote desktop (UDP transport) from the admin PC'))
+    # The remote desktop is never closed (owner decision 2026-11-07): from every address.
+    $rules.Add((New-RuleSpec 'ARCILOGGER RDP' 'Inbound' 'TCP' @("$RdpPort") @('Any') 'remote desktop, never closed'))
+    $rules.Add((New-RuleSpec 'ARCILOGGER RDP UDP' 'Inbound' 'UDP' @("$RdpPort") @('Any') 'remote desktop (UDP transport), never closed'))
     if ($AllowWinRM) {
         $rules.Add((New-RuleSpec 'ARCILOGGER WinRM' 'Inbound' 'TCP' @("$WinRMPort") $AdminAddress 'PowerShell remoting / Server Manager from the admin PC'))
     }
@@ -563,6 +585,8 @@ if (-not $Remove) {
 $wouldDisable = $null
 $keptGroupRuleCount = $null
 if (-not $Remove -and (Get-Command Get-NetFirewallRule -ErrorAction SilentlyContinue)) {
+    # Not caught: a remote desktop rule that could not be recognised would be disabled.
+    $RdpRuleNames = @(Get-RdpRuleNames)
     try {
         $directions = @('Inbound') + $(if ($strict) { @('Outbound') } else { @() })
         $wouldDisable = @(foreach ($direction in $directions) {
@@ -584,7 +608,8 @@ $plan = [pscustomobject]@{
     allow_winrm            = [bool]$AllowWinRM
     default_inbound        = 'Block'
     default_outbound       = $(if ($strict) { 'Block' } else { 'Allow' })
-    other_inbound_rules    = 'disabled (recorded for -Remove), except -KeepRuleGroup and -KeepRule'
+    other_inbound_rules    = 'disabled (recorded for -Remove), except -KeepRuleGroup, -KeepRule and the remote desktop port''s rules'
+    remote_desktop         = [pscustomobject]@{ port = $RdpPort; remote_address = 'Any'; kept_rules = @($RdpRuleNames) }
     other_outbound_rules   = $(if ($strict) { 'disabled (recorded for -Remove), except -KeepRuleGroup and -KeepRule' } else { 'unchanged' })
     keep_rule_groups       = @($KeepRuleGroup)
     keep_rules             = @($KeepRule)
@@ -630,12 +655,6 @@ if ($Remove) {
 
 # --- checks before any change ----------------------------------------------------------------------
 
-if (-not $Force) {
-    $foreign = @(Get-ArciForeignRdpSession -AdminAddress $AdminAddress -Port $RdpPort)
-    if ($foreign.Count -gt 0) {
-        throw ("Açık uzak masaüstü oturumu {0} adresinden; bu kural onu keserdi. -AdminAddress'e ekleyin veya -Force kullanın. [An RDP session from {0} would be cut off.]" -f ($foreign -join ', '))
-    }
-}
 if (@(Get-KeptGroupRules).Count -eq 0) {
     throw ("-KeepRuleGroup hiçbir kurala uymuyor: {0}. 'Core Networking' grubunun adını denetleyin: Get-NetFirewallRule -DisplayGroup '<ad>' | Select-Object -First 1 Group, DisplayGroup [no rule matches the groups to keep; nothing was changed]." -f ($KeepRuleGroup -join ', '))
 }
@@ -652,6 +671,18 @@ foreach ($entry in @($state.disabled_rules)) {
     if ($entry -is [string]) { $disabled.Add([pscustomobject]@{ name = $entry; display_name = $entry; direction = 'Inbound' }) }
     else { $disabled.Add($entry) }
 }
+# A rule an earlier run disabled that is kept now (the remote desktop port's, one named in
+# -KeepRule since) is enabled again and leaves the record.
+$stillDisabled = New-Object System.Collections.Generic.List[object]
+foreach ($entry in $disabled) {
+    $rule = Get-NetFirewallRule -Name ([string]$entry.name) -ErrorAction SilentlyContinue
+    if ($rule -and (Test-KeptRule $rule)) {
+        $rule | Enable-NetFirewallRule
+        Write-ArciInfo ("yeniden açıldı [re-enabled]: {0}" -f $rule.DisplayName)
+    }
+    else { $stillDisabled.Add($entry) }
+}
+$disabled = $stillDisabled
 $state.strict_outbound = $strict
 $state.admin_address = @($AdminAddress)
 $state.allow_winrm = [bool]$AllowWinRM

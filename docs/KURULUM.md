@@ -482,7 +482,7 @@ olmaz; anahtar için bölüm 9'daki komut kullanılır.
 | `-ServerName` | hatırlanan değer; yoksa `arcilogger.internal` | Ek web adı (hatırlanır) |
 | `-SiteName` | — (yok; ilk kurulumda gerekli) | Kuruluş adı (`site_name`); bölüm 7.1 |
 | `-NtpServer` | — (yok; boş: yalnızca yedek saat sunucusu) | Yerel saat kaynağı (`[clock] ntp_server`); bölüm 7.1 |
-| `-AdminAddress` | — (yok; hatırlanan değer) | 443 ve 3389'a yalnızca bu adres(ler) ya da ağ(lar) bağlanabilir (ör. `10.0.0.10`, `10.0.0.0/24`); bir kez verilen değer hatırlanır; bölüm 7.1 |
+| `-AdminAddress` | — (yok; hatırlanan değer) | 443'e (web) yalnızca bu adres(ler) ya da ağ(lar) bağlanabilir (ör. `10.0.0.10`, `10.0.0.0/24`); uzak masaüstü (3389) hiçbir zaman kapatılmaz; bir kez verilen değer hatırlanır; bölüm 7.1 |
 | `-DataRoot` | sabit NTFS `D:` varsa `D:\ARCILOGGER`, yoksa `C:\ARCILOGGER` | Veri klasörü (yalnızca ilk kurulumda; sonra `arcilogger.toml` belirler) |
 | `-ZamaneJar`, `-ZamaneJarSha256` | — | Zamane istemcisi ve Kamu SM'nin yayımladığı özet |
 | `-LicenseFile` | — (yok) | Kurulacak lisans dosyası (`.lic`, [LISANS.md](LISANS.md) bölüm 4). Ön denetimde Python olmadan okunur (dosya var, en çok 65.536 bayt, JSON; lisans no, bakım ve geçerlilik tarihi); okunamazsa kurulum hiçbir şey değiştirmeden durur (`2`). Şema kurulduktan hemen sonra `arcilogger-db license install` ile yüklenir; ürün dosyayı reddederse ya da veritabanına ulaşılamazsa uyarı verilir, kurulum sürer ve `1` ile biter. `-SkipDatabase` ile yüklenmez, sonra çalıştırılacak komut yazılır |
@@ -508,8 +508,8 @@ Betiğin yaptıkları (sırasıyla):
    bilgisayarın bir adresi ya da `0.0.0.0` değilse **durur** ve nasıl düzeltileceğini yazar),
    kuruluş adı ve saat kaynağı (bölüm 7.1).
    Güvenlik duvarı adımının reddedebileceği her şey de burada, hiçbir şey değişmeden denetlenir:
-   `-AdminAddress` (verilmiş ya da hatırlanan bir değer olmalı) ve biçimi, mevcut `arcilogger.toml`
-   içindeki `[[sources]]` adresleri ve güvenlik duvarının keseceği açık bir uzak masaüstü oturumu.
+   `-AdminAddress` (verilmiş ya da hatırlanan bir değer olmalı) ve biçimi ve mevcut
+   `arcilogger.toml` içindeki `[[sources]]` adresleri.
    Hiç log kaynağı (`[[sources]]`) yoksa (yeni bir kurulumda hiç yoktur) ön denetim durmaz, uyarır
    (bölüm 7.1). Lisansın bakım kuralı (`preflight.license`): paketin yayın tarihi
    (`bundle-manifest.json`, `release_date`) `-LicenseFile` dosyasının ya da kurulu lisansın bakım
@@ -614,7 +614,7 @@ sorulmaz.
 |---|---|---|---|
 | Kuruluş adı (raporlar, e-postalar, kanıt paketleri, web arayüzünün kenar çubuğu) | `-SiteName "<kuruluş adı>"` | `site_name` | İlk kurulumda sorulur; konsol yoksa ön denetim durur. Yükseltmede yapılandırmadaki ad kalır |
 | Yerel saat kaynağı (genellikle ana yönlendirici ya da yerel bir NTP sunucusu) | `-NtpServer <adres ya da ad>` | `[clock] ntp_server` | İlk kurulumda sorulur (Enter: yok). Boş kalırsa Windows Time ve saatlik saat denetimi yalnızca `[clock] fallback_server` (`time.ume.tubitak.gov.tr`) kullanır ve ön denetim uyarır. Yükseltmede yapılandırmadaki değer kalır |
-| Yönetici PC'sinin adresi ya da ağı (ör. `10.0.0.10`, `10.0.0.0/24`) | `-AdminAddress` | `install\firewall-state.json` (güvenlik duvarı: 443 ve 3389 yalnızca ona açılır) | Hatırlanan değer; o da yoksa sorulur, konsol yoksa ön denetim durur (`-SkipFirewall` ile gerekmez) |
+| Yönetici PC'sinin adresi ya da ağı (ör. `10.0.0.10`, `10.0.0.0/24`) | `-AdminAddress` | `install\firewall-state.json` (güvenlik duvarı: 443 yalnızca ona açılır) | Hatırlanan değer; o da yoksa sorulur, konsol yoksa ön denetim durur (`-SkipFirewall` ile gerekmez) |
 
 `-SiteName` ve `-NtpServer` yeni `arcilogger.toml` dosyasına yazılır. Yükseltmede ya da var olan bir
 yapılandırmayla verilirlerse dosyada yalnızca o satır değişir; önceki dosya
@@ -981,11 +981,15 @@ Güvenlik duvarı (`Set-ArciFirewall.ps1`):
 
 - **Gelen:** varsayılan eylem *Engelle*. İzin yalnızca: UDP/TCP 514 `[[sources]]` adreslerinden
   (hiç `[[sources]]` yoksa 514 için kural oluşturulmaz, 514 kapalı kalır ve betik bunu yazar),
-  TCP 443 ve TCP/UDP 3389 `-AdminAddress` adreslerinden. Bunların dışındaki **tüm etkin gelen izin
-  kuralları kapatılır** ve kaydedilir — Windows'un "Uzak Masaüstü", "Windows Uzaktan Yönetimi
-  (HTTP-In)" (TCP 5985, Windows Server'da varsayılan olarak açık), "Dosya ve Yazıcı Paylaşımı"
-  kuralları ve başka programların eklediği kurallar dahil. Yalnızca "Core Networking" grubu
-  (DHCP, IPv6 komşu bulma, ICMP hata iletileri) açık kalır. PowerShell uzaktan yönetimi
+  TCP 443 `-AdminAddress` adreslerinden. **Uzak masaüstü hiçbir zaman kapatılmaz** (ürün sahibinin
+  kararı, 2026-11-07): TCP/UDP 3389 her adresten açıktır, Windows'un uzak masaüstü portuna ait
+  kendi kuralları olduğu gibi kalır ve önceki bir sürümün kapattığı böyle bir kural yükseltmede
+  yeniden açılır. Bunların dışındaki **tüm etkin gelen izin kuralları kapatılır** ve kaydedilir —
+  Windows'un "Windows Uzaktan Yönetimi (HTTP-In)" (TCP 5985, Windows Server'da varsayılan olarak
+  açık), "Dosya ve Yazıcı Paylaşımı" kuralları ve başka programların eklediği kurallar dahil.
+  Yalnızca "Core Networking" grubu (DHCP, IPv6 komşu bulma, ICMP hata iletileri) açık kalır.
+  Uzak masaüstüne kimin bağlanabileceğini Windows'un kendi ayarları (kullanıcı hakları, Ağ Düzeyinde
+  Kimlik Doğrulama) belirler. PowerShell uzaktan yönetimi
   gerekiyorsa `-AllowWinRM` (TCP 5985, yalnızca yönetici PC'sinden); gelen bağlantı bekleyen bir
   izleme/yedekleme aracı varsa kuralını `-KeepRule '<kural adı>'` ile koruyun.
 - **Giden (isteğe bağlı):** `C:\Program Files\ARCILOGGER\scripts\Set-ArciFirewall.ps1
@@ -1595,7 +1599,6 @@ Veriler korunarak kaldırıldıysa ve sonradan silinmek isteniyorsa: aynı sür�
 | `TCP 8000 kullanımda` (API portu) | Başka bir program `[api] port` değerini kullanıyor: onu durdurun ya da `arcilogger.toml` içinde `[api] port` değerini değiştirip kurulumu yeniden çalıştırın (Caddy'nin yönlendirmesi, sağlık denetimi ve ön denetim bu değeri izler) |
 | Kaldırma `2` ile bitti: `Görev hâlâ çalışıyor` | Bir kanıt görevi (mühürleme, doğrulama) sürüyor; hiçbir şey kaldırılmadı. Görev bitince yeniden çalıştırın ya da `-TaskWaitMinutes` değerini artırın |
 | `... silinmek üzere işaretli` | Hizmetler (services.msc) penceresini kapatıp betiği yeniden çalıştırın |
-| `Açık uzak masaüstü oturumu ... keserdi` (ön denetim) | Kurulumu `-AdminAddress` adreslerinden birinden bağlanarak yapın ya da bağlandığınız adresi/ağı `-AdminAddress` ile ekleyin (`-Force` oturumu keser) |
 | `-KeepRuleGroup hiçbir kurala uymuyor` | "Core Networking" grubunun adı farklı: `Get-NetFirewallRule -DisplayGroup '<ad>' \| Select-Object -First 1 Group, DisplayGroup` ile bulup `Set-ArciFirewall.ps1 -KeepRuleGroup '<Group değeri>'` |
 | Bir izleme/yedekleme aracına dışarıdan bağlanılamıyor | Güvenlik duvarı ARCILOGGER dışındaki gelen kuralları kapattı: `Set-ArciFirewall.ps1 -KeepRule '<kural adı>'` (hatırlanır) |
 | Yükseltme `3` ile bitti | Ekrandaki açıklama ve `C:\ProgramData\ARCILOGGER\install\state.json` (`last_failure`, `pending_database_restore`); bölüm 13 |

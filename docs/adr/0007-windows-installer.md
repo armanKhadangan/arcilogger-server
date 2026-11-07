@@ -476,3 +476,21 @@ settled, and the installer draws no conclusion.
 - Installations made before this amendment keep their configuration: the upgrade reads
   `site_name` and `[clock] ntp_server` from it and the remembered admin addresses from the
   firewall state file.
+
+## Amendment 2026-11-07: the remote desktop is never closed
+
+The product owner decided that the firewall step never closes the remote desktop ("uzak masaüstü
+hiçbir zaman kapatılmasın", 2026-11-07). Section 5 changes in three places:
+
+- The `ARCILOGGER RDP` rules (TCP/UDP 3389) allow every address, no longer only `-AdminAddress`;
+  443 stays limited to the admin PC.
+- Every rule for the remote desktop port stays as it is. The rules are found by their local port,
+  because their group name depends on the Windows language. A recorded rule that is kept now (one
+  of those, or one named in `-KeepRule` later) is enabled again at the next run, so an upgrade
+  opens again what an earlier version disabled.
+- With nothing to cut off, the open-session check (preflight `rdp-session`) is gone. `-Force` of
+  `Set-ArciFirewall.ps1` stays without effect, because installers of other versions pass it during a
+  rollback.
+
+Who may sign in by remote desktop remains Windows' own setting: user rights and Network Level
+Authentication.

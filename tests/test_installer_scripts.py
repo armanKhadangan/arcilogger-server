@@ -1355,7 +1355,6 @@ foreach ($property in $in.folders.PSObject.Properties) {
     $states[$property.Name] = Get-ArciProgramFolderState -Path $property.Value
 }
 $out['folder_states'] = $states
-$out['rdp_foreign'] = @(Get-ArciForeignRdpSession -AdminAddress @('172.20.10.37'))
 
 $pathCase = $in.module_path
 $out['module_path'] = Get-ArciWindowsPowerShellModulePath -ModulePath $pathCase.value `
@@ -1802,9 +1801,6 @@ def test_module_address_containment(probe: dict[str, Any]) -> None:
     assert got == expected, [
         case for case, ok in zip(ADDRESS_IN, got, strict=True) if ok != case[2]
     ]
-    # Runs without the NetTCPIP module too (Linux CI): an empty list, never an error.
-    assert isinstance(probe["rdp_foreign"], list)
-    assert all(isinstance(address, str) for address in probe["rdp_foreign"])
 
 
 def test_module_drops_powershell_7_module_folders(probe: dict[str, Any], tmp_path: Path) -> None:
@@ -11107,7 +11103,24 @@ $tasks = @(Get-ScheduledTask -TaskPath '\ARCILOGGER\' -ErrorAction SilentlyConti
         })
 $rules = @(Get-NetFirewallRule -Group 'ARCILOGGER' -ErrorAction SilentlyContinue |
         Where-Object { $_ } | ForEach-Object { [string]$_.DisplayName })
-$report = [ordered]@{ services = $services; tasks = $tasks; rules = $rules }
+# The inbound allow rules for the remote desktop port other than ARCILOGGER's, and the addresses
+# ARCILOGGER's own remote desktop rule allows.
+$rdpFilters = @(Get-NetFirewallPortFilter -All |
+        Where-Object { $_ -and (@($_.LocalPort) -contains '3389') })
+$rdpRules = @(if ($rdpFilters.Count -gt 0) {
+        $rdpFilters | Get-NetFirewallRule | Where-Object {
+            $_.Group -ne 'ARCILOGGER' -and [string]$_.Direction -eq 'Inbound' -and
+                [string]$_.Action -eq 'Allow'
+        } | ForEach-Object { [string]$_.Name }
+    })
+$rdpRemote = @(Get-NetFirewallRule -Group 'ARCILOGGER' -ErrorAction SilentlyContinue |
+        Where-Object { $_ -and [string]$_.DisplayName -eq 'ARCILOGGER RDP' } |
+        Get-NetFirewallAddressFilter | ForEach-Object { @($_.RemoteAddress) } |
+        ForEach-Object { [string]$_ })
+$report = [ordered]@{
+    services = $services; tasks = $tasks; rules = $rules; rdp_rules = $rdpRules
+    rdp_remote = $rdpRemote
+}
 [System.IO.File]::WriteAllText($OutputPath, ($report | ConvertTo-Json -Depth 4))
 """
 
@@ -11630,6 +11643,17 @@ def test_real_install_upgrade_rollback_and_uninstall(tmp_path: Path) -> None:
         recorded = (program_data / "data-root.txt").read_text(encoding="utf-8").strip()
         assert Path(recorded) == data, (recorded, last())
         assert {"ARCILOGGER Syslog UDP", "ARCILOGGER HTTPS"} <= set(state["rules"]), last()
+        # The remote desktop is never closed (owner decision 2026-11-07): ARCILOGGER's rule allows
+        # every address, and no rule of Windows for its port is among those the step disabled.
+        assert state["rdp_remote"] == ["Any"], (state["rdp_remote"], last())
+        firewall_state = json.loads(
+            (program_data / "install" / "firewall-state.json").read_text(encoding="utf-8-sig")
+        )
+        disabled = {
+            entry["name"] if isinstance(entry, dict) else entry
+            for entry in firewall_state["disabled_rules"]
+        }
+        assert not disabled & set(state["rdp_rules"]), (disabled, state["rdp_rules"], last())
         # A syslog message reaches the raw spool through the service and its NTFS rights.
         marker = f"arcilogger-e2e-{uuid.uuid4().hex}"
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sender:
@@ -11848,8 +11872,13 @@ def test_firewall_plan_from_sources(engine: str, tmp_path: Path) -> None:
     assert rules["ARCILOGGER HTTPS"]["ports"] == ["443"]
     assert rules["ARCILOGGER RDP"]["ports"] == rules["ARCILOGGER RDP UDP"]["ports"] == ["3389"]
     assert rules["ARCILOGGER RDP UDP"]["protocol"] == "UDP"
-    for name in ("ARCILOGGER HTTPS", "ARCILOGGER RDP", "ARCILOGGER RDP UDP"):
-        assert rules[name]["remote_address"] == ["172.20.10.37"], name
+    assert rules["ARCILOGGER HTTPS"]["remote_address"] == ["172.20.10.37"]
+    # The remote desktop is never closed (owner decision 2026-11-07): from every address, and
+    # no rule for its port is switched off.
+    for name in ("ARCILOGGER RDP", "ARCILOGGER RDP UDP"):
+        assert rules[name]["remote_address"] == ["Any"], name
+    assert plan["remote_desktop"]["port"] == 3389
+    assert plan["remote_desktop"]["remote_address"] == "Any"
     assert plan["default_inbound"] == "Block"
     assert plan["default_outbound"] == "Allow"
     assert plan["strict_outbound"] is False
@@ -11866,10 +11895,12 @@ def test_firewall_plan_from_sources(engine: str, tmp_path: Path) -> None:
         # Windows: the rules this run would switch off, read from the real firewall.
         assert plan["kept_group_rules"] > 0, "the Core Networking group exists"
         kept = set(plan["keep_rule_groups"])
+        remote_desktop = set(plan["remote_desktop"]["kept_rules"])
         for rule in plan["would_disable"]:
             assert rule["direction"] == "Inbound", rule
             assert rule["group"] not in kept, rule
             assert rule["group"] != "ARCILOGGER", rule
+            assert rule["name"] not in remote_desktop, rule
 
 
 def test_firewall_without_sources_keeps_514_closed(engine: str, tmp_path: Path) -> None:
@@ -11890,7 +11921,12 @@ def test_firewall_without_sources_keeps_514_closed(engine: str, tmp_path: Path) 
         "ARCILOGGER RDP UDP",
     }
     assert plan["default_inbound"] == "Block"
-    assert all(rule["remote_address"] == [ADMIN_ADDRESS] for rule in plan["rules"])
+    remote = {rule["name"]: rule["remote_address"] for rule in plan["rules"]}
+    assert remote == {
+        "ARCILOGGER HTTPS": [ADMIN_ADDRESS],
+        "ARCILOGGER RDP": ["Any"],
+        "ARCILOGGER RDP UDP": ["Any"],
+    }
     # Windows PowerShell 5.1 wraps warnings at the console width: compare the words.
     words = " ".join(output.split())
     assert "[no syslog sender configured: UDP/TCP 514 stays closed" in words
@@ -12277,7 +12313,8 @@ def test_firewall_remembers_admin_addresses_winrm_and_kept_rules(
     assert plan is not None
     rules = {rule["name"]: rule for rule in plan["rules"]}
     assert plan["admin_address"] == ["172.20.10.0/28"]
-    assert rules["ARCILOGGER RDP"]["remote_address"] == ["172.20.10.0/28"]
+    assert rules["ARCILOGGER HTTPS"]["remote_address"] == ["172.20.10.0/28"]
+    assert rules["ARCILOGGER RDP"]["remote_address"] == ["Any"]  # never closed
     assert rules["ARCILOGGER WinRM"]["remote_address"] == ["172.20.10.0/28"]
     assert plan["keep_rules"] == ["Zabbix Agent (TCP-In)"]
     # A parameter given on the command line wins over the remembered value.

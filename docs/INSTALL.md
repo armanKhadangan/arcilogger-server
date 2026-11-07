@@ -438,8 +438,7 @@ Windows), PostgreSQL service, ports 514/443, the server address and the address 
 will listen on: a `[collector] bind` that is neither `0.0.0.0` nor an address of this computer
 **stops** it with the fix — the organisation name and the time source (section 7.1), and
 everything the firewall step could refuse: an admin address (given or remembered) and its
-format, the `[[sources]]` of an existing configuration, an open remote-desktop session the
-firewall would cut off; no log source at all, as on every new installation, is a warning, not a
+format and the `[[sources]]` of an existing configuration; no log source at all, as on every new installation, is a warning, not a
 stop, section 7.1; the licence's maintenance rule `preflight.license`: a bundle whose release date,
 `release_date` in `bundle-manifest.json`, is after the maintenance date of `-LicenseFile` or of the
 installed licence **stops** it with `2` — `-AllowUncoveredUpgrade` warns and goes on, section 13,
@@ -519,7 +518,7 @@ PowerShell), otherwise the preflight stops or (for the time source) warns. Nothi
 |---|---|---|---|
 | Organisation name (reports, e-mails, evidence packages, the web interface's sidebar) | `-SiteName "<organisation name>"` | `site_name` | Asked on a first installation; without a console the preflight stops. An upgrade keeps the configured name |
 | Local time source (usually the core router or a local NTP server) | `-NtpServer <address or name>` | `[clock] ntp_server` | Asked on a first installation (Enter: none). Left empty, Windows Time and the hourly clock check use only `[clock] fallback_server` (`time.ume.tubitak.gov.tr`) and the preflight warns. An upgrade keeps the configured value |
-| The admin PC's address or network (e.g. `10.0.0.10`, `10.0.0.0/24`) | `-AdminAddress` | `install\firewall-state.json` (firewall: 443 and 3389 only from it) | The remembered value; without one it is asked, without a console the preflight stops (not needed with `-SkipFirewall`) |
+| The admin PC's address or network (e.g. `10.0.0.10`, `10.0.0.0/24`) | `-AdminAddress` | `install\firewall-state.json` (firewall: 443 only from it) | The remembered value; without one it is asked, without a console the preflight stops (not needed with `-SkipFirewall`) |
 
 `-SiteName` and `-NtpServer` go into the new `arcilogger.toml`. Given on an upgrade or with an
 existing configuration, only that line of the file changes; the previous file is kept as
@@ -862,11 +861,15 @@ scheduled tasks and for the firewall rules.
 Firewall (`Set-ArciFirewall.ps1`):
 
 - **Inbound:** default Block; allowed are only UDP/TCP 514 from `[[sources]]` (without any
-  `[[sources]]` no rule is made for 514, it stays closed and the script says so) and TCP 443 and
-  TCP/UDP 3389 from `-AdminAddress`. **Every other enabled inbound allow rule is disabled** and
-  recorded — Windows' "Remote Desktop", "Windows Remote Management (HTTP-In)" (TCP 5985, enabled by
-  default on Windows Server), "File and Printer Sharing" and rules other programs added — except
-  the "Core Networking" group (DHCP, IPv6 neighbour discovery, ICMP errors). `-AllowWinRM` opens
+  `[[sources]]` no rule is made for 514, it stays closed and the script says so) and TCP 443 from
+  `-AdminAddress`. **The remote desktop is never closed** (the product owner's decision,
+  2026-11-07): TCP/UDP 3389 is open from every address, Windows' own rules for the remote desktop
+  port stay as they are, and such a rule an earlier version disabled is enabled again on an
+  upgrade. **Every other enabled inbound allow rule is disabled** and recorded — Windows' "Windows
+  Remote Management (HTTP-In)" (TCP 5985, enabled by default on Windows Server), "File and Printer
+  Sharing" and rules other programs added — except the "Core Networking" group (DHCP, IPv6
+  neighbour discovery, ICMP errors). Who may sign in by remote desktop is Windows' own setting
+  (user rights, Network Level Authentication). `-AllowWinRM` opens
   TCP 5985 from the admin PC only; `-KeepRule '<rule name>'` keeps a rule a monitoring or backup
   agent needs.
 - **Outbound (optional):** `-StrictOutbound`: default Block; NTP, DNS, Kamu SM (zd/tzd and the
@@ -1464,7 +1467,6 @@ version again (it adopts the existing data), then remove it with `-Uninstall -Re
 | TCP 8000 (the API port) in use | Stop the other program, or change `[api] port` in `arcilogger.toml` and run the installer again (Caddy's upstream, the health check and the preflight follow it) |
 | Removal ended with `2`: "task still running" | An evidence job (sealing, verification) is running; nothing was removed. Run it again later or raise `-TaskWaitMinutes` |
 | Service "marked for deletion" | Close services.msc and run the script again |
-| "An RDP session from … would be cut off" (preflight) | Connect from one of the `-AdminAddress` addresses or add your address or network with `-AdminAddress` (`-Force` cuts the session) |
 | "-KeepRuleGroup matches no rule" | The Core Networking group has another name: find it with `Get-NetFirewallRule -DisplayGroup '<name>' \| Select-Object -First 1 Group, DisplayGroup` and pass `-KeepRuleGroup` |
 | A monitoring or backup agent is unreachable | The firewall disabled its inbound rule: `Set-ArciFirewall.ps1 -KeepRule '<rule name>'` (remembered) |
 | Upgrade ended with `3` | The output and `C:\ProgramData\ARCILOGGER\install\state.json` (`last_failure`, `pending_database_restore`); section 13 |

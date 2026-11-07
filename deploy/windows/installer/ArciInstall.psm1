@@ -1040,7 +1040,7 @@ function Read-ArciAdminAddress {
     [CmdletBinding()]
     [OutputType([string[]])]
     param([int]$Attempts = 3)
-    $prompt = 'Yönetici PC''sinin IP adresi ya da ağı; 443 (web) ve 3389 (uzak masaüstü) yalnızca ona açılır, örnek 10.0.0.10 veya 10.0.0.0/24 [admin PC address or network: 443 and 3389 are opened only for it, e.g. 10.0.0.10 or 10.0.0.0/24]'
+    $prompt = 'Yönetici PC''sinin IP adresi ya da ağı; 443 (web) yalnızca ona açılır, örnek 10.0.0.10 veya 10.0.0.0/24 [admin PC address or network: 443 is opened only for it, e.g. 10.0.0.10 or 10.0.0.0/24]'
     for ($attempt = 1; $attempt -le $Attempts; $attempt++) {
         $answer = $null
         try { $answer = [string](Read-Host $prompt) }
@@ -1256,32 +1256,6 @@ function Test-ArciAddressInNetwork {
         $bits -= $take
     }
     $true
-}
-
-function Get-ArciForeignRdpSession {
-    <#
-    .SYNOPSIS
-        Remote addresses of open remote desktop connections that -AdminAddress does not cover
-        (they would be cut off by the firewall rules). Loopback connections are never filtered.
-    #>
-    [CmdletBinding()]
-    [OutputType([string[]])]
-    param([Parameter(Mandatory = $true)][string[]]$AdminAddress, [int]$Port = 3389)
-    # Writes the addresses one by one: call it as @(Get-ArciForeignRdpSession ...).
-    $foreign = New-Object System.Collections.Generic.List[string]
-    if (-not (Get-Command Get-NetTCPConnection -ErrorAction SilentlyContinue)) { return }
-    foreach ($session in @(Get-NetTCPConnection -LocalPort $Port -State Established -ErrorAction SilentlyContinue)) {
-        if ($null -eq $session) { continue }
-        $remote = [string]$session.RemoteAddress
-        $parsed = $null
-        if ([System.Net.IPAddress]::TryParse($remote, [ref]$parsed) -and [System.Net.IPAddress]::IsLoopback($parsed)) { continue }
-        $covered = $false
-        foreach ($spec in $AdminAddress) {
-            if (Test-ArciAddressInNetwork -Address $remote -Network $spec) { $covered = $true; break }
-        }
-        if (-not $covered -and -not $foreign.Contains($remote)) { $foreign.Add($remote) }
-    }
-    $foreign.ToArray()
 }
 
 # --- this computer's addresses and the collector's ----------------------------------------------
@@ -4031,7 +4005,7 @@ Export-ModuleMember -Function @(
     'Invoke-ArciExe', 'Get-ArciConfiguredDataDir', 'Read-ArciDataRootRecord', 'Resolve-ArciDataRoot', 'Read-ArciTomlFile', 'Get-ArciConfigValue', 'Get-ArciApiEndpoint', 'Test-ArciProxyTrust', 'Get-ArciSourceAddresses', 'Get-ArciSourceTables',
     'ConvertTo-ArciTomlString', 'Get-ArciTomlString', 'Set-ArciTomlString', 'Get-ArciSiteNameProblem', 'Get-ArciTimeServerProblem',
     'Get-ArciTimePeerList', 'Read-ArciAdminAddress',
-    'ConvertTo-ArciNetwork', 'Test-ArciAddressSpec', 'Test-ArciAddressInNetwork', 'Get-ArciForeignRdpSession',
+    'ConvertTo-ArciNetwork', 'Test-ArciAddressSpec', 'Test-ArciAddressInNetwork',
     'Get-ArciNetworkFacts', 'Get-ArciLocalAddresses', 'Select-ArciServerAddress', 'Get-ArciCollectorBind', 'Test-ArciBindAddress',
     'Get-ArciInstallMarkerName', 'Get-ArciProgramFolderState', 'Get-ArciAlembicChain',
     'ConvertTo-ArciIsoDate', 'Get-ArciJsonField', 'Read-ArciLicenseFile', 'Read-ArciLicenseStatus', 'Test-ArciMaintenanceCovers',

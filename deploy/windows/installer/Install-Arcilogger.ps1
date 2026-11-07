@@ -44,7 +44,8 @@
                       a first installation, kept on an upgrade. Empty: Windows Time and the hourly
                       clock check use only [clock] fallback_server and the preflight warns.
       -AdminAddress   the admin PC's address(es) or network(s), e.g. 10.0.0.10 or 10.0.0.0/24:
-                      443 and 3389 are opened only for them. Remembered by Set-ArciFirewall.ps1,
+                      443 is opened only for them (the remote desktop, 3389, is never closed).
+                      Remembered by Set-ArciFirewall.ps1,
                       so an upgrade needs it only to change it (not needed with -SkipFirewall).
       -SiteName and -NtpServer go into the new arcilogger.toml; given on an upgrade, they are
       written into the existing one (only those keys change; the previous file is kept as
@@ -2638,19 +2639,13 @@ function Invoke-FirewallPreflight {
     $admins = @(Get-EffectiveAdminAddress)
     $invalid = @($admins | Where-Object { -not (Test-ArciAddressSpec $_) })
     if ($admins.Count -eq 0) {
-        Add-Check 'admin-address' 'fail' 'Yönetici PC''sinin adresi gerekli [admin PC address required]: güvenlik duvarı 443 (web) ve 3389''u (uzak masaüstü) yalnızca ona açar. -AdminAddress ile verin, örnek -AdminAddress 10.0.0.10 ya da bir ağ: -AdminAddress 10.0.0.0/24; değer hatırlanır [the firewall opens 443 and 3389 only for it: give -AdminAddress, e.g. 10.0.0.10 or a network such as 10.0.0.0/24; it is remembered]'
+        Add-Check 'admin-address' 'fail' 'Yönetici PC''sinin adresi gerekli [admin PC address required]: güvenlik duvarı 443''ü (web) yalnızca ona açar. -AdminAddress ile verin, örnek -AdminAddress 10.0.0.10 ya da bir ağ: -AdminAddress 10.0.0.0/24; değer hatırlanır [the firewall opens 443 only for it: give -AdminAddress, e.g. 10.0.0.10 or a network such as 10.0.0.0/24; it is remembered]'
     }
     elseif ($invalid.Count -gt 0) {
         Add-Check 'admin-address' 'fail' ("-AdminAddress geçersiz [invalid]: '{0}' (örnek 10.0.0.10 veya 10.0.0.0/24)" -f ($invalid -join "', '"))
     }
     else {
-        Add-Check 'admin-address' 'ok' ("443/3389 yalnızca [only from] {0}" -f ($admins -join ', '))
-        if (-not $Force) {
-            $foreign = @(Get-ArciForeignRdpSession -AdminAddress $admins)
-            if ($foreign.Count -gt 0) {
-                Add-Check 'rdp-session' 'fail' ("Açık uzak masaüstü oturumu [open RDP session] {0}: güvenlik duvarı bu oturumu keserdi. Adresi -AdminAddress'e ekleyin ya da -Force kullanın [would be cut off]." -f ($foreign -join ', '))
-            }
-        }
+        Add-Check 'admin-address' 'ok' ("443 yalnızca [only from] {0}; uzak masaüstü (3389) hiçbir zaman kapatılmaz [the remote desktop is never closed]" -f ($admins -join ', '))
     }
     # The senders of 514 ([[sources]]) are checked by Invoke-SourcesPreflight.
 }
@@ -3327,7 +3322,7 @@ function Invoke-CommonTail {
             strict_outbound = $(if ($firewall.ContainsKey('StrictOutbound')) { $firewall['StrictOutbound'] } else { 'kept' })
             admin_address   = @(Get-EffectiveAdminAddress)
         }
-        Invoke-Step 'firewall.apply' ("Güvenlik duvarı [firewall]: 514 yalnızca [[sources]], 443/3389 yalnızca {0}, diğer gelen trafik kapalı [all other inbound blocked]" -f (@(Get-EffectiveAdminAddress) -join ', ')) {
+        Invoke-Step 'firewall.apply' ("Güvenlik duvarı [firewall]: 514 yalnızca [[sources]], 443 yalnızca {0}, uzak masaüstü (3389) her adresten açık, diğer gelen trafik kapalı [remote desktop open, all other inbound blocked]" -f (@(Get-EffectiveAdminAddress) -join ', ')) {
             & (Join-Path $ScriptsDir 'Set-ArciFirewall.ps1') @firewall
         } $detail
     }

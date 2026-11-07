@@ -74,6 +74,14 @@ data (docs/KURULUM.md section 13).
   - the Kategoriler donut and Güvenlik Özeti's figures move under their neighbours rather than
     shrink.
 
+### Changed
+
+- **The remote desktop is never closed** (the product owner's decision). The firewall step opens
+  3389 from every address, no longer only from the admin PC; 443 stays limited to the admin PC.
+  Windows' own remote desktop rules are no longer switched off. Installing this version over an
+  older one switches them on again. The installation no longer stops over an open remote desktop
+  session.
+
 ### Fixed
 
 - **Files sent from Ayarlar → Zaman damgası** (a Zamane client, a Kamu SM root certificate) and the
