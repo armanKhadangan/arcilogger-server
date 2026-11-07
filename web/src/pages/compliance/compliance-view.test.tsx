@@ -342,6 +342,34 @@ describe('Uyum Durumu', () => {
       '10 denetimden 10 tanesi tamam',
     );
     expect(screen.queryByRole('link', { name: 'İlk kurulum sihirbazını aç' })).toBeNull();
+    expect(screen.queryByRole('button', { name: /^Yalnızca tamam olmayanlar/ })).toBeNull();
+  });
+
+  it('"Yalnızca tamam olmayanlar" keeps the six cards not ok, in order, and stays on refresh', async () => {
+    const user = userEvent.setup();
+    const { update } = renderView();
+    const only = screen.getByRole('button', { name: 'Yalnızca tamam olmayanlar 6' });
+    expect(only).toHaveAttribute('aria-pressed', 'false');
+    await user.click(only);
+    expect(only).toHaveAttribute('aria-pressed', 'true');
+    const notOk = STORY_TR.flatMap((tone, index) =>
+      tone === 'Tamam' ? [] : [`${String(index + 1)}. ${TITLES_TR[index] ?? ''}`],
+    );
+    expect(
+      cards().map((item) => within(item).getByRole('heading', { level: 2 }).textContent),
+    ).toEqual(notOk);
+    // The summary still counts every card.
+    expect(screen.getByTestId('compliance-summary')).toHaveTextContent(
+      '10 denetimden 4 tanesi tamam',
+    );
+    // Everything fine after a refresh: all ten cards, and nothing to filter.
+    update({ status: allOkCompliance() });
+    expect(cards()).toHaveLength(10);
+    expect(screen.queryByRole('button', { name: /^Yalnızca tamam olmayanlar/ })).toBeNull();
+    update({ status: complianceStatus() });
+    expect(cards()).toHaveLength(6);
+    await user.click(screen.getByRole('button', { name: 'Yalnızca tamam olmayanlar 6' }));
+    expect(cards()).toHaveLength(10);
   });
 
   it('hides every link the user may not open; the cards stay', () => {

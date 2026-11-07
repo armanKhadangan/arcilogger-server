@@ -22,6 +22,7 @@
     "toneCount": "{{tone}}: {{count}}",
     "checkedAt": "Denetlendi {{time}}",
     "confirmBackupAction": "Onaylıyorum",
-    "backupConfirmed": "Yapılandırma kopyasının onayı denetim kaydına yazıldı."
+    "backupConfirmed": "Yapılandırma kopyasının onayı denetim kaydına yazıldı.",
+    "onlyOpen": "Yalnızca tamam olmayanlar"
   }
 }

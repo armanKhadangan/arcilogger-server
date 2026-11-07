@@ -96,7 +96,8 @@ export function ResultsTable({
       {
         id: 'raw',
         header: t('search.results.raw'),
-        size: 115,
+        // The button and the cell's padding whole: at 115 px a stray "…" followed it.
+        size: 132,
         enableSorting: false,
         enableHiding: false,
         meta: { label: t('search.results.raw') },

@@ -51,6 +51,14 @@ export function toneCounts(counts: ComplianceCounts): { tone: ComplianceTone; co
   return TONE_ORDER.map((tone) => ({ tone, count: counts[tone] })).filter((item) => item.count > 0);
 }
 
+/**
+ * The cards that are not "Tamam" (Sorun, Dikkat, Bilgi yok): what "Yalnızca tamam olmayanlar"
+ * keeps, in the server's order.
+ */
+export function openCards(cards: readonly ComplianceCard[]): ComplianceCard[] {
+  return cards.filter((card) => card.tone !== 'ok');
+}
+
 /** A card's texts in the interface language. */
 export interface CardTexts {
   title: string;

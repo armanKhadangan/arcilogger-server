@@ -80,6 +80,18 @@ denenir. 180 gün, KVKK'daki periyodik imha için altı aylık üst sınır olar
 Mühürlü bir günden tek bir kişinin satırları silinemez (bütünlük kanıtı bozulur); imha günün
 tamamı için yapılır.
 
+**Kurulumun verileriyle birlikte kaldırılması.** Saklama işinin dışında kayıtları silen tek yol,
+ARCILOGGER'ın sunucudan **verileriyle birlikte** kaldırılmasıdır ([../KURULUM.md](../KURULUM.md)
+bölüm 14.1). Kaldırma varsayılan olarak verileri korur; verileri de silmek yalnızca sunucunun
+konsolunda bir yöneticinin bunu seçmesiyle, silinecekler (mühürlü gün sayısı ve en eski gün
+dahil) gösterildikten ve kuruluş adı yazılarak onaylandıktan sonra olur; tarayıcıdan yapılamaz.
+Saklama süresine bakılmaksızın veritabanı, kasa (mühürlü günler), ham loglar, dışa aktarımlar,
+yedekler, yapılandırma ve ARCILOGGER denetim kaydı silinir; başka sunucudaki replika ve NAS yedek
+kopyası silinmez. ARCILOGGER bu silme için bir imha tutanağı **düzenlemez**: kaydı, Windows
+Uygulama günlüğündeki olay 4130 (onaylayan Windows hesabı, kuruluş, silinenler) ve kurulum
+günlüğüdür. Bu yolun kim tarafından, hangi koşulda kullanılacağı ve şirketin ayrıca bir imha
+tutanağı düzenleyip düzenlemeyeceği hukuk müşavirince belirlenmelidir (bölüm 6 madde 10).
+
 ## 5. Teknik ve idari tedbirler (bugün)
 
 - Kayıtlar şirketin sunucusunda tutulur; ARCILOGGER bulut hizmeti kullanmaz ve kayıtları kendisi
@@ -124,6 +136,9 @@ tamamı için yapılır.
    giden kullanım raporlarının (kişi adlarıyla) ve uyarı e-postalarının buna göre
    değerlendirilmesi ve alıcıların posta kutularındaki kopyaların süresi (bölüm 5; aydınlatma
    metni bölüm 9, soru 7).
+10. Kurulumun verileriyle birlikte kaldırılması (bölüm 4): saklama süresi dolmamış kayıtlar
+    varken kullanılıp kullanılamayacağı, kimin onayıyla yapılacağı ve şirketin bunun için ayrıca
+    bir imha tutanağı düzenleyip düzenlemeyeceği.
 
 ## 7. Sürüm
 
@@ -135,4 +150,5 @@ tamamı için yapılır.
 | taslak 4 | 2026-10-29 | Ayrıştırılmış kayıtlar satırına FortiGate DHCP kayıtları ve oturum kayıtlarının aygıt tanıma alanları eklendi (aynı süre; ham satırlarla birlikte 5651 raporlarına ve kanıt paketlerine girer); hukuk müşaviri onayı bekliyor |
 | taslak 5 | 2026-11-02 | Ayrıştırılmış kayıtlar artık son 30 gün tutulur ve daha eskileri her gece silinir (`db.window`; mühürlenmemiş günler ve etkin arşiv yüklemelerinin günleri hariç); "Arşivden yeniden yüklenen günler" satırı eklendi (7 gün; istek kuyruğa alınmadan önce denetim kaydına yazılır); bölüm 6 madde 2 güncellendi; hukuk müşaviri onayı bekliyor |
 | taslak 7 | 2026-11-05 | Kasa imhası toplu yapılır: süre dolduktan sonra en geç `retention.batch_days` gün içinde (varsayılan 30, 1–180), tek bir imha tutanağıyla (bölüm 4); bölüm 6 madde 6'ya bu aralık eklendi; hukuk müşaviri onayı bekliyor |
+| taslak 8 | 2026-11-07 | Kurulumun verileriyle birlikte kaldırılması eklendi (bölüm 4; yalnızca sunucu konsolunda, onaylı; imha tutanağı yerine olay 4130); bölüm 6 madde 10; hukuk müşaviri onayı bekliyor |
 | taslak 6 | 2026-11-03 | Veritabanındaki satırların çalışma kopyası olduğu (mühürlü asıl kayıt kasada en az 730 gün kalır) ve `db.window` işinin her silmesini denetim kaydına yazdığı eklendi; yükseltmenin `db.retention_days` değişikliği ve reddedilen yükleme istekleri (denetim kaydına yazılmaz) anlatıldı; bölüm 6 madde 2: imha tutanağı gerekip gerekmediği hukuk müşavirine soruldu; hukuk müşaviri onayı bekliyor |

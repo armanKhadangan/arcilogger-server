@@ -1250,8 +1250,14 @@ class Agent:
                     if value:
                         secrets[role] = value
             else:
+                # The replica's target, or the backup copy's on the same NAS (C6): both with
+                # the replica's user and password.
                 params = {
-                    "target": candidate.replica.target_text,
+                    "target": (
+                        candidate.backup.mirror_text
+                        if probe.kind == "backup_mirror"
+                        else candidate.replica.target_text
+                    ),
                     "user": candidate.replica.user,
                 }
                 password = secret("replica.password")

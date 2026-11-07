@@ -1536,6 +1536,48 @@ def test_backup_changes(root: Path, config: Config) -> None:
     assert off.alert == "medium"
 
 
+@pytest.mark.parametrize(
+    ("target", "code"),
+    [
+        ("D:\\Yedek", "backup_mirror_target_invalid"),
+        ("\\\\NAS-02\\arcilogger-yedek", "backup_mirror_other_host"),
+        ("\\\\NAS-01\\arcilogger-worm", "backup_mirror_inside_replica"),
+        ("\\\\nas-01\\ARCILOGGER-WORM\\yedek", "backup_mirror_inside_replica"),
+    ],
+)
+def test_backup_mirror_target_must_be_a_folder_of_its_own_on_the_replicas_nas(
+    root: Path, target: str, code: str
+) -> None:
+    """Wave 5 addendum C, C6: the replica's user and password are never offered to another
+    host, and the copies never land in the replica's (often WORM) folder."""
+    config = with_tables(root, REPLICA_ON)
+    check = validate_section("backup", config, {"mirror_target": target}, context(root))
+    assert [(p.code, p.field) for p in check.errors] == [(code, "backup.mirror_target")]
+
+
+def test_backup_mirror_needs_the_replica(root: Path, config: Config) -> None:
+    check = validate_section(
+        "backup", config, {"mirror_target": "\\\\NAS-01\\arcilogger-yedek"}, context(root)
+    )
+    assert codes(check) == ["backup_mirror_needs_replica"]
+
+
+def test_backup_mirror_is_probed_with_the_replicas_user(root: Path) -> None:
+    config = with_tables(root, REPLICA_ON)
+    stored = context(root, stored_secrets=frozenset({"replica.password"}))
+    check = validate_section(
+        "backup", config, {"mirror_target": "//NAS-01/arcilogger-yedek/"}, stored
+    )
+    assert check.ok
+    assert check.reauth
+    assert set(check.effects) == {"task.next_run:Backup", "task.next_run:Replica"}
+    assert [(p.kind, p.target) for p in check.probes] == [("backup_mirror", "nas-01")]
+    # Switching the copy off needs neither the replica nor a probe.
+    off = validate_section("backup", with_tables(root, ""), {"mirror_target": ""}, stored)
+    assert off.ok
+    assert off.probes == ()
+
+
 # -- re-authentication and guarded changes (contract 2.3) ------------------------------------------
 
 

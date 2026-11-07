@@ -74,7 +74,8 @@ export function AuditPage() {
         id: 'action',
         accessorKey: 'action',
         header: t('audit.columns.action'),
-        size: 300,
+        // "KVKK bilgilendirmesi onaylandı privacy.accept", the longest pair, whole.
+        size: 324,
         enableSorting: false,
         meta: { label: t('audit.columns.action') },
         cell: (info) => {

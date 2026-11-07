@@ -12,7 +12,7 @@ import {
   ShieldAlert,
   ShieldQuestionMark,
   Signal,
-  SignalZero,
+  WifiOff,
   Trash2,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
@@ -80,7 +80,7 @@ export const STATUS_STYLE: Record<Status, { tone: Tone; icon: LucideIcon }> = {
   deleted: { tone: 'neutral', icon: Trash2 },
   noData: { tone: 'neutral', icon: CircleDashed },
   active: { tone: 'success', icon: Signal },
-  silent: { tone: 'danger', icon: SignalZero },
+  silent: { tone: 'danger', icon: WifiOff },
   unknown: { tone: 'neutral', icon: CircleHelp },
 };
 

@@ -8,6 +8,8 @@ written, the agent tests it with exactly the values it would write:
 * ``smtp`` — the trial e-mail (``arcilogger_core.smtp``) to the recipient the user chose;
 * ``replica`` — the share connected with the candidate user (``smbshare.connected``) and the
   write, read and remove test of ``replica.probe`` (60 s);
+* ``backup_mirror`` — the same test of the backup copy's target on the replica's NAS, with the
+  replica's user (Wave 5 addendum C, C6; 60 s);
 * ``snmp`` — a walk of ``ifName`` with a source's candidate SNMPv3 settings and keys, then the
   operational status, speed and 64-bit counters of the configured WAN interfaces
   (:mod:`arcilogger_core.snmp`, 15 s; Wave 5 §6 N5). Once the walk answered, its
@@ -54,7 +56,7 @@ from arcilogger_core.timeutil import utc_now
 from arcilogger_core.tsa.base import TsaError
 from arcilogger_core.tsa.zamane import ZamaneCliProvider
 
-ProbeKind = Literal["sntp", "credit", "smtp", "replica", "snmp"]
+ProbeKind = Literal["sntp", "credit", "smtp", "replica", "snmp", "backup_mirror"]
 #: The failure code of each probe (contract 2.12).
 FAILURE_CODES: Final[Mapping[str, str]] = {
     "sntp": "ntp_unreachable",
@@ -62,6 +64,7 @@ FAILURE_CODES: Final[Mapping[str, str]] = {
     "smtp": "smtp_test_failed",
     "replica": "replica_test_failed",
     "snmp": "snmp_timeout",
+    "backup_mirror": "backup_mirror_test_failed",
 }
 #: The SNMP probe's failure codes: N4's reasons (Wave 5 §6 N5), each with TR/EN text.
 SNMP_CODES: Final[Mapping[str, str]] = {
@@ -80,6 +83,7 @@ TIMEOUTS: Final[Mapping[str, float]] = {
     "smtp": 60,
     "replica": 60,
     "snmp": 15,
+    "backup_mirror": 60,
 }
 CHILD_MARGIN: Final = 10.0
 #: Bytes read from the child, characters kept of a message.
@@ -210,8 +214,15 @@ def probe_smtp(
 
 
 def probe_replica(
-    params: Mapping[str, Any], secrets: Mapping[str, str], *, api: ShareApi | None = None
+    params: Mapping[str, Any],
+    secrets: Mapping[str, str],
+    *,
+    api: ShareApi | None = None,
+    kind: ProbeKind = "replica",
 ) -> ProbeResult:
+    """The share connected with the candidate user and a file written, read and removed: the
+    replica's target, or (``backup_mirror``, Wave 5 addendum C) the backup copy's target on the
+    same NAS with the replica's user."""
     target = Path(str(params["target"]))
     user = params.get("user")
     try:
@@ -220,7 +231,7 @@ def probe_replica(
         ):
             message = replica_probe(target)
     except OSError as exc:  # ShareError is an OSError; it never contains the password
-        return _failed("replica", f"{type(exc).__name__}: {exc}", secrets)
+        return _failed(kind, f"{type(exc).__name__}: {exc}", secrets)
     return ProbeResult(True, None, message)
 
 
@@ -276,6 +287,8 @@ def run_probe(kind: str, params: Mapping[str, Any], secrets: Mapping[str, str]) 
         return probe_smtp(params, secrets)
     if kind == "replica":
         return probe_replica(params, secrets)
+    if kind == "backup_mirror":
+        return probe_replica(params, secrets, kind="backup_mirror")
     if kind == "snmp":
         return probe_snmp(params, secrets)
     raise ValueError(f"unknown probe {kind!r}")

@@ -49,6 +49,12 @@ jobs:
       ARCILOGGER_REQUIRE_DB: '1'
       # The migration must actually create hypertables here (fails loudly otherwise).
       ARCILOGGER_EXPECT_TIMESCALE: '1'
+      # The Tk windows (ARCILOGGER Durum, Lisans Yöneticisi) are tested here too, as on Windows:
+      # uv's own Python has tkinter (the runner's system Python has none), the display is the
+      # Xvfb the step below starts, and a missing display fails those tests instead of skipping.
+      UV_PYTHON_PREFERENCE: only-managed
+      DISPLAY: ':99'
+      ARCILOGGER_REQUIRE_DISPLAY: '1'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -59,6 +65,17 @@ jobs:
           enable-cache: true
       - name: Install workspace
         run: uv sync --locked --all-packages
+      - name: Virtual display for the Tk window tests (Xvfb, DISPLAY :99)
+        run: |
+          command -v Xvfb >/dev/null || (sudo apt-get update && sudo apt-get install -y xvfb)
+          (Xvfb :99 -screen 0 1280x1024x24 -nolisten tcp &)
+          # Ready once Tk can open a window on it (a few tenths of a second).
+          ready=0
+          for attempt in $(seq 1 40); do
+            if uv run python -c "import tkinter; tkinter.Tk().destroy()" 2>/dev/null; then ready=1; break; fi
+            sleep 0.5
+          done
+          test "$ready" = 1
       - name: Lint (ruff) and types (mypy --strict, Linux and Windows)
         run: uv run poe lint
       # The service container's server log is printed after the last step and fills the end of

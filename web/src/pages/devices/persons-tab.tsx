@@ -201,7 +201,8 @@ export function PersonsTab({
         id: 'title',
         accessorFn: (row) => row.title ?? '',
         header: t('devices.persons.title'),
-        size: 160,
+        // "Planlama Uzmanı" whole at 1280 px.
+        size: 172,
         minSize: 120,
         enableSorting: false,
         meta: { label: t('devices.persons.title'), grow: true },

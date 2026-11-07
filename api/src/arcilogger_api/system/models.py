@@ -1,4 +1,5 @@
-"""JSON of ``GET /system`` and ``GET /system/disk`` (Wave 4 contract 2.5.1).
+"""JSON of ``GET /system``, ``GET /system/disk`` (Wave 4 contract 2.5.1) and
+``GET /system/database`` (Wave 5 addendum C, C7).
 
 The web mirror is ``web/src/lib/system-types.ts``: the same names, fields and optionality. Times
 are timezone-aware, dates plain days; integers are bytes, counts or whole percents.
@@ -143,3 +144,93 @@ class SystemSummary(BaseModel):
 class SystemDisk(BaseModel):
     checked_at: datetime
     drives: list[DriveInfo]
+
+
+class DatabaseGrowth(BaseModel):
+    """The database's growth a day, fitted like a drive's forecast to the daily samples."""
+
+    state: Literal["estimated", "insufficient", "not_growing"]
+    samples: int
+    bytes_per_day: int | None
+
+
+class DatabaseSample(BaseModel):
+    day: date
+    bytes: int
+
+
+class LastBackup(BaseModel):
+    """``state/backup/last.json`` of the Backup task (only what the page shows)."""
+
+    finished: datetime | None
+    ok: bool
+    #: The dump's file name (no folder) and size; ``null`` after a failed attempt.
+    file: str | None
+    bytes: int | None
+
+
+class DatabaseDetails(BaseModel):
+    """The Veritabanı page: what database ARCILOGGER uses, how big it is and how it grows."""
+
+    checked_at: datetime
+    storage: Literal["postgresql", "timescaledb"]
+    #: ``SHOW server_version`` (``16.4``) and the TimescaleDB extension's version, if installed.
+    server_version: str | None
+    timescaledb_version: str | None
+    #: The database's name and where the API reaches it (``[database]`` host and port).
+    name: str | None
+    host: str
+    port: int
+    total_bytes: int | None
+    measured_at: datetime | None
+    tables: list[TableSize]
+    #: Connections to this database now, and the server's limit.
+    connections: int | None
+    max_connections: int | None
+    #: ``db.retention_days``: days of logs the database keeps (older days are archived).
+    window_days: int | None
+    growth: DatabaseGrowth
+    #: The daily samples of the last 30 days, oldest first.
+    history: list[DatabaseSample]
+    #: The data folder's drive with its forecast (PostgreSQL's own folder is usually on it).
+    data_drive: DriveInfo | None
+    last_backup: LastBackup | None
+
+
+class BackupDump(BaseModel):
+    """A dump of the backup folder (``state/backup/list.json`` of the Backup task)."""
+
+    name: str
+    taken: datetime | None
+    bytes: int
+    #: The SHA-256 the dump's sidecar records (``null`` without one).
+    sha256: str | None
+
+
+class BackupMirrorState(BaseModel):
+    """The last copy to the backup copy's target (``state/backup/mirror.json``)."""
+
+    finished: datetime | None
+    ok: bool
+    copied: int
+    present: int
+    pruned: int
+    prune_refused: int
+    #: ``{dump name: why}`` of the dumps that were not copied.
+    failed: dict[str, str]
+    error: str | None
+
+
+class BackupsInfo(BaseModel):
+    """``GET /system/backups``: Ayarlar → Yedekleme's list (Wave 5 addendum C, C5-C6)."""
+
+    checked_at: datetime
+    enabled: bool
+    #: ``[backup] dir`` as a full path on the server.
+    folder: str
+    #: When the Backup task last wrote the list (``null``: no successful run yet).
+    list_updated: datetime | None
+    dumps: list[BackupDump]
+    #: ``[backup] mirror_target`` (``null``: no copy) and its last run.
+    mirror_target: str | None
+    mirror: BackupMirrorState | None

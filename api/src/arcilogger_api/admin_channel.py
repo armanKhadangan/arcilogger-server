@@ -1199,7 +1199,13 @@ class Channel:
             temp.unlink(missing_ok=True)
             target.unlink(missing_ok=True)
             raise admin_error("admin_inbox_write_failed") from exc
-        info = rules.inspect_upload(upload_id, kind, target, now=self.now)
+        try:
+            info = rules.inspect_upload(upload_id, kind, target, now=self.now)
+        except OSError as exc:  # the inbox's rights let the API write but not read it back
+            log.error("upload %s not read back: %s", upload_id, _describe(exc))
+            target.unlink(missing_ok=True)
+            layout.upload_meta(upload_id).unlink(missing_ok=True)
+            raise admin_error("admin_inbox_write_failed") from exc
         refused = (
             ("root_certificate_invalid" if info.root is None or not info.root.ok else None)
             if kind == "kamusm_root"
@@ -1242,7 +1248,10 @@ class Channel:
                 or data.stat().st_size != meta.size
             ):
                 continue
-            found[upload_id] = rules.inspect_upload(upload_id, meta.kind, data, now=self.now)
+            try:
+                found[upload_id] = rules.inspect_upload(upload_id, meta.kind, data, now=self.now)
+            except OSError as exc:
+                log.error("upload %s not read back: %s", upload_id, _describe(exc))
         return found
 
     # -- reading a request back ----------------------------------------------------------------

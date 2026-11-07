@@ -72,7 +72,12 @@ def test_sample_writes_one_entry_per_site_day(
     assert layout.system_history == tmp_path / "state" / "system-history.json"
     # 21:40 UTC is 00:40 of the next site day (Europe/Istanbul, UTC+3).
     first = datetime(2026, 10, 11, 21, 40, tzinfo=UTC)
-    assert job_system_sample(context(layout, first)) == {"day": "2026-10-12", "drives": 2}
+    # The SQLite engine has no pg_database_size: the day has no database size, the disks count.
+    assert job_system_sample(context(layout, first)) == {
+        "day": "2026-10-12",
+        "drives": 2,
+        "database": False,
+    }
     assert history(layout) == {
         "schema": 1,
         "days": [
@@ -96,6 +101,23 @@ def test_sample_writes_one_entry_per_site_day(
     assert [day["day"] for day in history(layout)["days"]] == ["2026-10-12", "2026-10-13"]
     assert read_history(layout.system_history) == history(layout)["days"]
     assert written == [layout.system_history] * 3  # always replaced in one step
+
+
+def test_sample_records_the_database_size(
+    tmp_path: Path, disks: dict[str, int], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The Veritabanı page's growth (Wave 5 addendum C, C7): ``database`` beside the drives."""
+    layout = Layout(tmp_path)
+    monkeypatch.setattr(system_jobs, "database_size", lambda ctx: 42 * GIB)
+    now = datetime(2026, 11, 7, 9, 0, tzinfo=UTC)
+    assert job_system_sample(context(layout, now))["database"] is True
+    (day,) = history(layout)["days"]
+    assert day["database"] == 42 * GIB
+    assert read_history(layout.system_history) == [day]
+    # An entry whose size is not an integer is left out when read.
+    day["database"] = "42"
+    layout.system_history.write_text(json.dumps({"schema": 1, "days": [day]}), encoding="utf-8")
+    assert read_history(layout.system_history) == []
 
 
 def test_history_keeps_120_days(tmp_path: Path, disks: dict[str, int]) -> None:
@@ -172,6 +194,7 @@ def test_a_drive_that_cannot_be_measured_is_left_out(
     assert job_system_sample(context(layout, datetime(2026, 10, 12, 9, 0, tzinfo=UTC))) == {
         "day": "2026-10-12",
         "drives": 0,
+        "database": False,
     }
 
 

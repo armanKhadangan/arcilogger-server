@@ -200,9 +200,36 @@ gives another value, do not restore that file. Keep `SHA256.txt` where only admi
 write (do the same on the NAS share).
 
 The copies contain personal data too: use an encrypted disk or a share only administrators can
-reach. You delete old copies outside the server yourself (ARCILOGGER cleans only its own folder).
-Automating the copy is the owner's decision ([ADR-0009](adr/0009-database-backup.md), open
-points).
+reach. You delete old copies you made by hand yourself (ARCILOGGER cleans only its own folders).
+
+### 4.1 Automatic copy on the NAS (`[backup] mirror_target`)
+
+By the owner's decision (2026-11-07, Wave 5 Addendum C, C6) a second copy of the dumps can be
+made automatically: in **Ayarlar → Yedekleme → Yedeklerin NAS kopyası** (Settings → Backup →
+NAS copy of the backups) enter a **separate** share or folder on the replica's NAS (e.g.
+`\\<NAS>\arcilogger-yedek`; `[backup] mirror_target` in the configuration).
+
+- The target must be on the **same NAS** as the replica and is written with the replica's user
+  (`replica.user`, its password in the secret store). The password is never sent to another
+  server; in strict outbound mode the replica's rule covers this copy too. Switch on **Settings →
+  Replica** first.
+- The target **cannot** be the replica folder itself or inside it: the replica folder is usually
+  write-once (WORM), while old copies of the backups must be deletable. On the NAS let only the
+  replica user write to this share and only administrators read it.
+- When you save, ARCILOGGER connects to the share and writes, reads and deletes a test file.
+- The Replica task, every hour after the sealed days, copies new dumps with their sidecars. A
+  copy is written under a temporary name and read back; it gets its name only when its SHA-256
+  equals the sidecar's. A file of the same name is never overwritten.
+- The copy on the NAS keeps what the folder on the server keeps: once every dump is copied, the
+  old dumps the retention deleted on the server are deleted from the NAS too (personal data does
+  not stay longer on the NAS than on the server). When a dump could not be copied, nothing is
+  deleted.
+- The result goes to `state\backup\mirror.json` and shows on **Settings → Backup**. A failed copy
+  opens an `R20-replica` alert.
+- The list of the dumps on the server (`state\backup\list.json`, written by the Backup task after
+  every successful backup) shows on the same page: name, time, size, SHA-256. The services cannot
+  read the backup folder, hence a file of its own.
+- Emptying the target stops the copy; you delete the copies left on the NAS yourself.
 
 ## 5. Restore
 

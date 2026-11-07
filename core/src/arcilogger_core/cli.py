@@ -71,6 +71,13 @@ from arcilogger_core.admin.contract import (
     TsaTestResult,
 )
 from arcilogger_core.alerts import raise_alert
+from arcilogger_core.backupmirror import (
+    MirrorOutcome,
+    backup_folder,
+    mirror_backups,
+)
+from arcilogger_core.backupmirror import summary as mirror_summary
+from arcilogger_core.backupmirror import write_state as write_mirror_state
 from arcilogger_core.chain import sealed_days, verify_range
 from arcilogger_core.clockcheck import check_clock
 from arcilogger_core.config import (
@@ -438,6 +445,7 @@ def cmd_replica(args: argparse.Namespace, app: App) -> int:
     except SecretStoreError as exc:
         print(f"Hata: {exc}", file=sys.stderr)
         return 2
+    mirrored: MirrorOutcome | None = None
     try:
         with connected(target, user, password):
             if args.test:
@@ -463,7 +471,28 @@ def cmd_replica(args: argparse.Namespace, app: App) -> int:
             f"{outcome.day.isoformat()}  {outcome.status:10}  {outcome.copied} dosya  "
             f"{outcome.message}"
         )
-    return 0 if all(o.status != "failed" for o in outcomes) else 1
+    mirror = app.config.backup.mirror_target
+    if mirror is not None and not args.day:
+        # A share of its own on the replica's host, with the replica's user (C6).
+        try:
+            with connected(mirror, user, password):
+                mirrored = mirror_backups(backup_folder(app.config), mirror)
+        except OSError as exc:  # ShareError: never the password; the address is taken out
+            reason = (exc.strerror or str(exc)).replace(unc_root(mirror) or "\0", "<share>")
+            mirrored = MirrorOutcome(error=f"the share cannot be connected: {reason}")
+    if mirrored is not None:
+        write_mirror_state(app.layout, mirrored, finished=utc_now())
+        print(mirror_summary(mirrored))
+        if not mirrored.ok:
+            raise_alert(
+                app.layout.alerts,
+                "R20-replica",
+                "medium",
+                mirror_summary(mirrored),
+                {"part": "backup-mirror"},
+            )
+    replicated = all(o.status != "failed" for o in outcomes)
+    return 0 if replicated and (mirrored is None or mirrored.ok) else 1
 
 
 def cmd_retention(args: argparse.Namespace, app: App) -> int:

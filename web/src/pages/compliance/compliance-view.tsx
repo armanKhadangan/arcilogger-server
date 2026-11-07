@@ -1,5 +1,5 @@
-import { FileDown, ListChecks, RefreshCw } from 'lucide-react';
-import { useId } from 'react';
+import { FileDown, ListChecks, ListFilter, RefreshCw } from 'lucide-react';
+import { useId, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 
@@ -19,6 +19,7 @@ import {
   canConfirmBackup,
   cardLinks,
   errorWithCode,
+  openCards,
   showWizardLink,
   summaryFigures,
   toneCounts,
@@ -73,6 +74,11 @@ export function ComplianceView({
   const lang = currentLang();
   const { permissions } = useAuth();
   const figures = status ? summaryFigures(status.counts) : null;
+  // "Yalnızca tamam olmayanlar": offered while some cards are fine and some are not.
+  const [onlyOpen, setOnlyOpen] = useState(false);
+  const open = status ? openCards(status.cards) : [];
+  const filtering = onlyOpen && open.length > 0;
+  const offerFilter = status !== undefined && open.length > 0 && open.length < status.cards.length;
   return (
     <div className="flex flex-col gap-4">
       <PageHeader
@@ -154,17 +160,33 @@ export function ComplianceView({
                   </Badge>
                 ))}
             </p>
-            {showWizardLink(status, permissions) ? (
-              <Button variant="secondary" size="sm" asChild>
-                <Link to={WIZARD_PATH}>
-                  <ListChecks aria-hidden="true" />
-                  {t('compliance.openWizard')}
-                </Link>
-              </Button>
-            ) : null}
+            <div className="flex flex-wrap items-center gap-2">
+              {offerFilter ? (
+                <Button
+                  variant={filtering ? 'primary' : 'secondary'}
+                  size="sm"
+                  aria-pressed={filtering}
+                  onClick={() => {
+                    setOnlyOpen((current) => !current);
+                  }}
+                >
+                  <ListFilter aria-hidden="true" />
+                  {t('compliance.onlyOpen')}
+                  <span className="tabular">{formatNumber(open.length, 0, lang)}</span>
+                </Button>
+              ) : null}
+              {showWizardLink(status, permissions) ? (
+                <Button variant="secondary" size="sm" asChild>
+                  <Link to={WIZARD_PATH}>
+                    <ListChecks aria-hidden="true" />
+                    {t('compliance.openWizard')}
+                  </Link>
+                </Button>
+              ) : null}
+            </div>
           </div>
           <ol className="grid gap-4 lg:grid-cols-2" aria-label={t('compliance.cardsLabel')}>
-            {status.cards.map((card) => (
+            {(filtering ? open : status.cards).map((card) => (
               <li key={card.id} className="min-w-0">
                 <ComplianceCardView
                   card={card}

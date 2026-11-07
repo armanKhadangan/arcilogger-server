@@ -25,7 +25,9 @@ def _text(root: ET.Element, path: str) -> str:
 
 
 def test_the_only_desktop_definition() -> None:
-    assert sorted(p.name for p in TASK.parent.iterdir()) == ["StatusWindow.xml"]
+    """One task definition; the icons sit in a sub-folder that Register-ArciTasks.ps1 (which
+    reads *.xml of the folder itself) never registers."""
+    assert sorted(p.name for p in TASK.parent.iterdir()) == ["StatusWindow.xml", "icons"]
 
 
 def test_status_window_task() -> None:
@@ -69,6 +71,11 @@ def test_register_script_registers_the_desktop_folder() -> None:
 def test_bundle_and_program_carry_the_desktop_folder() -> None:
     build = (WINDOWS / "installer" / "Build-ArciBundle.ps1").read_text(encoding="utf-8-sig")
     assert "Copy-Tree (Join-Path $Windows 'desktop') (Join-Path $stage 'desktop') '*.xml'" in build
+    icons = (
+        "Copy-Tree (Join-Path $Windows 'desktop\\icons') "
+        "(Join-Path $stage 'desktop\\icons') '*.ico'"
+    )
+    assert icons in build
     install = (WINDOWS / "installer" / "Install-Arcilogger.ps1").read_text(encoding="utf-8-sig")
     assert "@('installer', 'scripts', 'tasks', 'desktop', 'config', 'docs', 'licenses')" in install
 
@@ -105,18 +112,32 @@ def test_installer_closes_and_removes_the_window() -> None:
         "Get-ScheduledTask -TaskPath '\\ARCILOGGER\\Desktop\\' -ErrorAction SilentlyContinue "
         "| Unregister-ScheduledTask -Confirm:$false"
     ) in register
-    assert "Set-ArciStatusWindowShortcut -Root $Root" in register
+    assert "Set-ArciShortcuts -Root $Root" in register
     # Without ProgramData (the installer's simulation on Linux pwsh) there is no Start menu, and
     # Join-Path would refuse the missing drive C:.
     folder = _function(install, "Get-StatusWindowFolder")
     assert "if (-not $env:ProgramData) { return $null }" in folder
-    shortcut = _function(install, "Set-ArciStatusWindowShortcut")
-    assert "$link.Arguments = '-I -m arcilogger_core.desktop'" in shortcut
-    assert "Remove-ArciStatusWindowShortcut" in shortcut
+    assert "if (-not $env:ProgramData) { return $null }" in _function(
+        install, "Get-ArciDesktopFolder"
+    )
+    shortcut = _function(install, "Set-ArciShortcuts")
+    assert "-Arguments '-I -m arcilogger_core.desktop'" in shortcut
+    # "ARCILOGGER" in the Start menu and on the desktop: the web interface, through Explorer.
+    assert "$web = @(Join-Path $menu 'ARCILOGGER.lnk')" in shortcut
+    assert "$web += @(Join-Path $desktop 'ARCILOGGER.lnk')" in shortcut
+    assert "-Target (Join-Path $env:WINDIR 'explorer.exe') -Arguments $ArciLocalWebUrl" in shortcut
+    assert "$ArciLocalWebUrl = 'https://localhost/'" in install
+    assert "$icon = Join-Path $Root 'desktop\\icons\\arcilogger.ico'" in shortcut
+    assert "$link.IconLocation = $Icon + ',0'" in _function(install, "New-ArciShortcut")
+    # Removal deletes exactly the shortcuts the installer makes, and the folder once empty.
+    paths = _function(install, "Get-ArciShortcutPaths")
+    for name in ("'ARCILOGGER Durum.lnk'", "'ARCILOGGER.lnk'"):
+        assert name in paths
+    assert "Get-ArciShortcutPaths" in _function(install, "Remove-ArciShortcuts")
     removal = install[install.index("Invoke-Step 'tasks.unregister'") :]
     removal = removal[: removal.index("Invoke-Step 'eventlog.remove'")]
     assert "Get-ArciStatusWindowTask | Unregister-ScheduledTask -Confirm:$false" in removal
-    assert "Remove-ArciStatusWindowShortcut" in removal
+    assert "Remove-ArciShortcuts" in removal
 
 
 def test_the_window_runs_isolated(tmp_path: Path) -> None:

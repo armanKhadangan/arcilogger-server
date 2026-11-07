@@ -405,7 +405,6 @@ export function defaultUsers(): MockUser[] {
 
 export class MockApi {
   users: MockUser[] = defaultUsers();
-  session: Session | null = null;
   needsSetup: boolean;
   setupToken = 'kurulum-anahtari-2026'; // gitleaks:allow — fake test value
   staleReauth: boolean;
@@ -413,8 +412,24 @@ export class MockApi {
   siteName: string;
   chainBroken: boolean;
   privacyVersion: string;
-  /** 401 code returned for the next authenticated request (e.g. `session_idle`). */
+  /** The session ends with this 401 code at the next authenticated request (e.g. `session_idle`). */
   expireWith: string | null = null;
+  private activeSession: Session | null = null;
+  /**
+   * The code of a session that ended on the server: like `security._refusal`, which keeps the
+   * session row, every later request of that session gets it (not `not_authenticated`), also
+   * requests of the same page sent at the same moment, until the browser signs in again or out.
+   */
+  private endedWith: string | null = null;
+
+  get session(): Session | null {
+    return this.activeSession;
+  }
+
+  set session(value: Session | null) {
+    this.activeSession = value;
+    this.endedWith = null;
+  }
   /** One refusal for the next matching request (`METHOD /path` → status + code). */
   failNext: { route: string; status: number; code: string } | null = null;
   calls: RecordedCall[] = [];
@@ -642,13 +657,12 @@ export class MockApi {
   /** Authentication like `security._authenticate` (+ CSRF on mutations). */
   private authenticate(call: RecordedCall, allowPending = false): MockUser | [number, unknown] {
     if (this.expireWith) {
-      const code = this.expireWith;
-      this.expireWith = null;
       this.session = null;
-      return this.error(401, code);
+      this.endedWith = this.expireWith;
+      this.expireWith = null;
     }
     const account = this.current();
-    if (!account || !this.session) return this.error(401, 'not_authenticated');
+    if (!account || !this.session) return this.error(401, this.endedWith ?? 'not_authenticated');
     if (!this.session.mfaPassed && !allowPending) return this.error(401, 'mfa_required');
     if (call.method !== 'GET' && call.csrf !== CSRF_TOKEN) return this.error(403, 'csrf_failed');
     return account;

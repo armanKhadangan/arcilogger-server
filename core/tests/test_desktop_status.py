@@ -18,7 +18,7 @@ from typing import Any
 import pytest
 
 from arcilogger_core.desktop import __main__ as entry
-from arcilogger_core.desktop import status, winapi
+from arcilogger_core.desktop import status, tray, winapi
 from arcilogger_core.desktop.status import Level, Probe, ServiceState, Site, Snapshot
 from arcilogger_core.layout import Layout
 from arcilogger_core.timeutil import day_window, isoformat_site
@@ -851,8 +851,9 @@ def _entry_patch(
     elevated: bool,
     relaunched: bool = True,
     instances: Sequence[object | None] = (1,),
+    running: bool = False,
 ) -> SimpleNamespace:
-    calls = SimpleNamespace(relaunch=[], front=[], released=[], run=[])
+    calls = SimpleNamespace(relaunch=[], front=[], released=[], run=[], options=[], asked=[])
     queue = list(instances)
     monkeypatch.setattr(winapi, "single_instance", lambda name: queue.pop(0))
     monkeypatch.setattr(winapi, "is_elevated", lambda: elevated)
@@ -865,12 +866,50 @@ def _entry_patch(
         return relaunched
 
     monkeypatch.setattr(winapi, "relaunch_elevated", relaunch)
-    fake_window = SimpleNamespace(run=lambda refresh: calls.run.append(refresh) or 0)
+    monkeypatch.setattr(tray, "show_running", lambda: calls.asked.append(True) or running)
+
+    def run(refresh: object, **options: object) -> int:
+        calls.run.append(refresh)
+        calls.options.append(options)
+        return 0
+
+    fake_window = SimpleNamespace(run=run)
     import arcilogger_core.desktop as package
 
     monkeypatch.setitem(sys.modules, "arcilogger_core.desktop.window", fake_window)
     monkeypatch.setattr(package, "window", fake_window, raising=False)
     return calls
+
+
+def test_a_second_start_asks_the_running_icon_first(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The running program's icon shows its window, also for a start without rights: no UAC
+    prompt, no search for a visible window."""
+    calls = _entry_patch(monkeypatch, elevated=False, instances=(None,), running=True)
+    assert entry.main(["--config", str(tmp_path / "none.toml")]) == 0
+    assert calls.asked == [True]
+    assert calls.relaunch == []
+    assert calls.front == []
+    assert calls.run == []
+
+
+def test_the_logon_task_starts_with_only_the_icon(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    data, chosen = tmp_path / "data", tmp_path / "yedek"
+    config = tmp_path / "arcilogger.toml"
+    config.write_text(f'data_dir = "{data.as_posix()}"\n[backup]\ndir = "{chosen.as_posix()}"\n')
+    calls = _entry_patch(monkeypatch, elevated=True)
+    assert entry.main(["--no-elevate", "--tray", "--config", str(config)]) == 0
+    assert calls.asked == []  # the first start asks nobody
+    (options,) = calls.options
+    assert options["hidden"] is True
+    folders = options["backup_folders"]
+    assert [folder.path for folder in folders] == [chosen, data / "backups" / "db"]
+    calls = _entry_patch(monkeypatch, elevated=True)
+    assert entry.main(["--config", str(config)]) == 0
+    assert calls.options[0]["hidden"] is False
 
 
 def test_a_second_start_shows_the_first_window(

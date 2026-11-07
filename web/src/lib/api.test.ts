@@ -118,6 +118,20 @@ describe('apiRequest headers', () => {
     vi.restoreAllMocks();
   });
 
+  it('counts the activity of another tab of the same browser (one session cookie)', async () => {
+    installFetch(() => jsonResponse(200, {}));
+    vi.spyOn(Date, 'now').mockReturnValue(1_000);
+    await api.get('/auth/me');
+    expect(window.localStorage.getItem('arci.lastActivity')).toBe('1000');
+    // Another tab sent a request later.
+    window.localStorage.setItem('arci.lastActivity', '5000');
+    expect(lastForegroundRequestAt()).toBe(5_000);
+    // An unreadable value counts for nothing.
+    window.localStorage.setItem('arci.lastActivity', 'x');
+    expect(lastForegroundRequestAt()).toBe(1_000);
+    vi.restoreAllMocks();
+  });
+
   it('returns undefined for 204 and parses JSON otherwise', async () => {
     installFetch((request) =>
       request.path.endsWith('logout') ? jsonResponse(204, null) : jsonResponse(200, { a: 1 }),

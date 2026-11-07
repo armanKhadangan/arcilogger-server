@@ -8,6 +8,7 @@ import { Alert } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { CodeBlock } from '@/components/ui/code-block';
 import { Input } from '@/components/ui/input';
+import { PasswordInput } from '@/components/ui/password-input';
 import { Field } from '@/components/ui/label';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Stepper } from '@/components/ui/stepper';
@@ -222,9 +223,8 @@ export function SetupPage() {
             error={message('password')}
             required
           >
-            <Input
+            <PasswordInput
               id={`${id}-password`}
-              type="password"
               autoComplete="new-password"
               value={values.password}
               aria-invalid={message('password') ? true : undefined}
@@ -240,9 +240,8 @@ export function SetupPage() {
             error={message('confirm')}
             required
           >
-            <Input
+            <PasswordInput
               id={`${id}-confirm`}
-              type="password"
               autoComplete="new-password"
               value={values.confirm}
               aria-invalid={message('confirm') ? true : undefined}

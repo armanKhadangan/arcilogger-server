@@ -10,7 +10,7 @@ import {
   CircleHelp,
   CornerDownRight,
   Signal,
-  SignalZero,
+  WifiOff,
   type LucideIcon,
 } from 'lucide-react';
 
@@ -42,8 +42,8 @@ export const STATE_STYLE: Record<
   { tone: NonNullable<BadgeProps['tone']>; icon: LucideIcon }
 > = {
   active: { tone: 'success', icon: Signal },
-  silent: { tone: 'danger', icon: SignalZero },
-  silentUnwatched: { tone: 'neutral', icon: SignalZero },
+  silent: { tone: 'danger', icon: WifiOff },
+  silentUnwatched: { tone: 'neutral', icon: WifiOff },
   never: { tone: 'warning', icon: CircleDashed },
   disabled: { tone: 'neutral', icon: Ban },
   unknown: { tone: 'info', icon: CircleHelp },

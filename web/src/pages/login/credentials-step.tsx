@@ -6,6 +6,7 @@ import { useTranslation } from 'react-i18next';
 import { Alert } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { PasswordInput } from '@/components/ui/password-input';
 import { Field } from '@/components/ui/label';
 import { errorMessage, isApiError } from '@/lib/api';
 import { useLogin } from '@/lib/api-hooks';
@@ -80,10 +81,9 @@ export function CredentialsStep({ onSubmitted }: { onSubmitted: () => void }) {
         error={errors.password && t(errors.password)}
         required
       >
-        <Input
+        <PasswordInput
           id={`${id}-password`}
           name="password"
-          type="password"
           autoComplete="current-password"
           value={password}
           aria-invalid={errors.password ? true : undefined}
