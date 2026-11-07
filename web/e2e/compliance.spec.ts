@@ -156,6 +156,21 @@ test.describe('Uyum Durumu', () => {
     expect(api.calls.filter((call) => call.method !== 'GET')).toEqual([]);
   });
 
+  test('"Yalnızca tamam olmayanlar" leaves the cards that need a look', async ({ page }) => {
+    await open(page);
+    const notOk = ADMIN_CARDS.filter((item) => item.tone !== 'ok');
+    const only = page.getByRole('button', { name: /^Yalnızca tamam olmayanlar/ });
+    await expect(only).toHaveText(`Yalnızca tamam olmayanlar${String(notOk.length)}`);
+    await only.click();
+    await expect(only).toHaveAttribute('aria-pressed', 'true');
+    await expect(cards(page).getByRole('heading', { level: 2 })).toHaveText(
+      notOk.map((item) => `${String(item.number)}. ${item.title_tr}`),
+    );
+    await expectNoA11yViolations(page);
+    await only.click();
+    await expect(cards(page)).toHaveCount(10);
+  });
+
   test('"Uyum Durumu Raporu (PDF)" downloads the report under the captured name', async ({
     page,
   }) => {
