@@ -260,6 +260,9 @@ class Event(IntEnum):
     TASK_REQUESTED = 4111  # wakes the Requests task
     REQUEST_REJECTED = 4120
     SECRET_CHANGED = 4121  # the name only
+    #: The installer's -Uninstall -RemoveData (contract addendum C8): who removed what, written
+    #: before the source is removed with the rest; the Application log keeps it.
+    DATA_REMOVED = 4130
     AGENT_STOPPING = 4199
 
 

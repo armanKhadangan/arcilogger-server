@@ -366,6 +366,12 @@
     "/api/v1/system": [
       "get"
     ],
+    "/api/v1/system/backups": [
+      "get"
+    ],
+    "/api/v1/system/database": [
+      "get"
+    ],
     "/api/v1/system/disk": [
       "get"
     ],
@@ -2462,12 +2468,134 @@
             }
           ],
           "title": "Min Free Gb"
+        },
+        "mirror_target": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Mirror Target"
         }
       },
       "required": [
         "etag"
       ],
       "title": "BackupBody",
+      "type": "object"
+    },
+    "BackupDump": {
+      "description": "A dump of the backup folder (``state/backup/list.json`` of the Backup task).",
+      "properties": {
+        "bytes": {
+          "title": "Bytes",
+          "type": "integer"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "sha256": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Sha256"
+        },
+        "taken": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Taken"
+        }
+      },
+      "required": [
+        "name",
+        "taken",
+        "bytes",
+        "sha256"
+      ],
+      "title": "BackupDump",
+      "type": "object"
+    },
+    "BackupMirrorState": {
+      "description": "The last copy to the backup copy's target (``state/backup/mirror.json``).",
+      "properties": {
+        "copied": {
+          "title": "Copied",
+          "type": "integer"
+        },
+        "error": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Error"
+        },
+        "failed": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Failed",
+          "type": "object"
+        },
+        "finished": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Finished"
+        },
+        "ok": {
+          "title": "Ok",
+          "type": "boolean"
+        },
+        "present": {
+          "title": "Present",
+          "type": "integer"
+        },
+        "prune_refused": {
+          "title": "Prune Refused",
+          "type": "integer"
+        },
+        "pruned": {
+          "title": "Pruned",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "finished",
+        "ok",
+        "copied",
+        "present",
+        "pruned",
+        "prune_refused",
+        "failed",
+        "error"
+      ],
+      "title": "BackupMirrorState",
       "type": "object"
     },
     "BackupSection": {
@@ -2491,6 +2619,17 @@
         "min_free_gb": {
           "title": "Min Free Gb",
           "type": "integer"
+        },
+        "mirror_target": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Mirror Target"
         }
       },
       "required": [
@@ -2498,9 +2637,79 @@
         "keep_daily",
         "keep_weekly",
         "keep_monthly",
-        "min_free_gb"
+        "min_free_gb",
+        "mirror_target"
       ],
       "title": "BackupSection",
+      "type": "object"
+    },
+    "BackupsInfo": {
+      "description": "``GET /system/backups``: Ayarlar → Yedekleme's list (Wave 5 addendum C, C5-C6).",
+      "properties": {
+        "checked_at": {
+          "format": "date-time",
+          "title": "Checked At",
+          "type": "string"
+        },
+        "dumps": {
+          "items": {
+            "$ref": "#/components/schemas/BackupDump"
+          },
+          "title": "Dumps",
+          "type": "array"
+        },
+        "enabled": {
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "folder": {
+          "title": "Folder",
+          "type": "string"
+        },
+        "list_updated": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "List Updated"
+        },
+        "mirror": {
+          "anyOf": [
+            {
+              "$ref": "#/components/schemas/BackupMirrorState"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "mirror_target": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Mirror Target"
+        }
+      },
+      "required": [
+        "checked_at",
+        "enabled",
+        "folder",
+        "list_updated",
+        "dumps",
+        "mirror_target",
+        "mirror"
+      ],
+      "title": "BackupsInfo",
       "type": "object"
     },
     "BlockedRow": {
@@ -4540,6 +4749,215 @@
       "title": "DashboardSummary",
       "type": "object"
     },
+    "DatabaseDetails": {
+      "description": "The Veritabanı page: what database ARCILOGGER uses, how big it is and how it grows.",
+      "properties": {
+        "checked_at": {
+          "format": "date-time",
+          "title": "Checked At",
+          "type": "string"
+        },
+        "connections": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Connections"
+        },
+        "data_drive": {
+          "anyOf": [
+            {
+              "$ref": "#/components/schemas/DriveInfo"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "growth": {
+          "$ref": "#/components/schemas/DatabaseGrowth"
+        },
+        "history": {
+          "items": {
+            "$ref": "#/components/schemas/DatabaseSample"
+          },
+          "title": "History",
+          "type": "array"
+        },
+        "host": {
+          "title": "Host",
+          "type": "string"
+        },
+        "last_backup": {
+          "anyOf": [
+            {
+              "$ref": "#/components/schemas/LastBackup"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "max_connections": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Max Connections"
+        },
+        "measured_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Measured At"
+        },
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Name"
+        },
+        "port": {
+          "title": "Port",
+          "type": "integer"
+        },
+        "server_version": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Server Version"
+        },
+        "storage": {
+          "enum": [
+            "postgresql",
+            "timescaledb"
+          ],
+          "title": "Storage",
+          "type": "string"
+        },
+        "tables": {
+          "items": {
+            "$ref": "#/components/schemas/TableSize"
+          },
+          "title": "Tables",
+          "type": "array"
+        },
+        "timescaledb_version": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Timescaledb Version"
+        },
+        "total_bytes": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Total Bytes"
+        },
+        "window_days": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Window Days"
+        }
+      },
+      "required": [
+        "checked_at",
+        "storage",
+        "server_version",
+        "timescaledb_version",
+        "name",
+        "host",
+        "port",
+        "total_bytes",
+        "measured_at",
+        "tables",
+        "connections",
+        "max_connections",
+        "window_days",
+        "growth",
+        "history",
+        "data_drive",
+        "last_backup"
+      ],
+      "title": "DatabaseDetails",
+      "type": "object"
+    },
+    "DatabaseGrowth": {
+      "description": "The database's growth a day, fitted like a drive's forecast to the daily samples.",
+      "properties": {
+        "bytes_per_day": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Bytes Per Day"
+        },
+        "samples": {
+          "title": "Samples",
+          "type": "integer"
+        },
+        "state": {
+          "enum": [
+            "estimated",
+            "insufficient",
+            "not_growing"
+          ],
+          "title": "State",
+          "type": "string"
+        }
+      },
+      "required": [
+        "state",
+        "samples",
+        "bytes_per_day"
+      ],
+      "title": "DatabaseGrowth",
+      "type": "object"
+    },
     "DatabaseInfo": {
       "properties": {
         "measured_at": {
@@ -4588,6 +5006,25 @@
         "measured_at"
       ],
       "title": "DatabaseInfo",
+      "type": "object"
+    },
+    "DatabaseSample": {
+      "properties": {
+        "bytes": {
+          "title": "Bytes",
+          "type": "integer"
+        },
+        "day": {
+          "format": "date",
+          "title": "Day",
+          "type": "string"
+        }
+      },
+      "required": [
+        "day",
+        "bytes"
+      ],
+      "title": "DatabaseSample",
       "type": "object"
     },
     "DayHealth": {
@@ -7051,6 +7488,57 @@
       "type": "object"
     },
     "JsonValue": {},
+    "LastBackup": {
+      "description": "``state/backup/last.json`` of the Backup task (only what the page shows).",
+      "properties": {
+        "bytes": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Bytes"
+        },
+        "file": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "File"
+        },
+        "finished": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Finished"
+        },
+        "ok": {
+          "title": "Ok",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "finished",
+        "ok",
+        "file",
+        "bytes"
+      ],
+      "title": "LastBackup",
+      "type": "object"
+    },
     "LeaseBrief": {
       "properties": {
         "confidence": {

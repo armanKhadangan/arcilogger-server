@@ -122,7 +122,8 @@ export function KpiCard({
       <span className="text-2xl leading-8 font-semibold text-foreground tabular">{value}</span>
       <div className="flex items-end justify-between gap-3">
         <div className="flex min-w-0 flex-col gap-1">
-          {hint ? <span className="truncate text-13 text-muted">{hint}</span> : null}
+          {/* Wraps rather than cut: in a four-card row at 1280 px the hint is the explanation. */}
+          {hint ? <span className="text-13 break-words text-muted">{hint}</span> : null}
           {delta ? (
             <span className={cn('flex items-center gap-1 text-xs font-medium', deltaTone(delta))}>
               <DeltaIcon aria-hidden="true" className="size-3.5" />

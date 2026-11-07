@@ -24,6 +24,11 @@ interface StackedAreaChartProps<Row extends Record<string, string | number>> {
   formatValue: (value: number) => string;
   formatX?: (value: string | number) => string;
   height?: number;
+  /**
+   * The value axis from the data's lowest to highest value instead of from 0 (a slow growth);
+   * the series are then drawn on their own, not stacked.
+   */
+  fitValues?: boolean;
 }
 
 function ChartTooltip({
@@ -67,6 +72,7 @@ export function StackedAreaChart<Row extends Record<string, string | number>>({
   formatValue,
   formatX = (value) => String(value),
   height = 220,
+  fitValues = false,
 }: StackedAreaChartProps<Row>) {
   return (
     <div style={{ height }} className="w-full" aria-hidden="true">
@@ -83,6 +89,7 @@ export function StackedAreaChart<Row extends Record<string, string | number>>({
             minTickGap={16}
           />
           <YAxis
+            domain={fitValues ? ['auto', 'auto'] : undefined}
             tickFormatter={(value: number) => formatValue(value)}
             tickLine={false}
             axisLine={false}
@@ -99,7 +106,8 @@ export function StackedAreaChart<Row extends Record<string, string | number>>({
               dataKey={item.key}
               name={item.label}
               type="monotone"
-              stackId="stack"
+              // A stack starts at 0: fitted values are drawn on their own.
+              stackId={fitValues ? undefined : 'stack'}
               stroke={seriesColor(index)}
               strokeWidth={2}
               fill={seriesColor(index)}

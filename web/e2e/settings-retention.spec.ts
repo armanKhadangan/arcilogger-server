@@ -2,6 +2,8 @@ import { expect, test, type Page } from '@playwright/test';
 
 import { confirmReauth, expectNoA11yViolations, usePreferences, type Theme } from './fixtures';
 import { mockApi } from './mock-api';
+import { mockW4 } from './mock-w4';
+import { SYSTEM_BACKUPS } from './samples';
 
 /**
  * Ayarlar → Saklama, Replika and Yedekleme (contract 2.17): the retention floor, the preview of
@@ -192,6 +194,48 @@ test.describe('Ayarlar → Yedekleme', () => {
     const alerts = api.callsTo('GET', '/alerts').at(-1);
     expect(alerts?.query.get('rule')).toBe('R20-backup');
     expect(alerts?.query.get('state')).toBe('open');
+  });
+
+  test('the NAS copy of the backups and the list of the dumps (Wave 5 addendum C)', async ({
+    page,
+  }) => {
+    const api = await mockApi(page, { signedInAs: 'tolga', staleReauth: true });
+    const backups = structuredClone(SYSTEM_BACKUPS.backups);
+    backups.mirror_target = '\\\\NAS-01\\arcilogger-yedek';
+    backups.mirror = {
+      finished: backups.checked_at,
+      ok: false,
+      copied: 1,
+      present: 2,
+      pruned: 1,
+      prune_refused: 0,
+      failed: { 'arcilogger-20261012-014000.dump': 'Access is denied' },
+      error: null,
+    };
+    await mockW4(page, api, { backups });
+    await page.goto('/settings/backup');
+    const list = page.getByTestId('backup-list');
+    await expect(list.getByTestId('backup-dumps').getByRole('rowheader')).toHaveCount(
+      SYSTEM_BACKUPS.backups.dumps.length,
+    );
+    await expect(list).toContainText(SYSTEM_BACKUPS.backups.folder);
+    const state = page.getByTestId('backup-mirror-state');
+    await expect(state).toContainText('arcilogger-20261012-014000.dump: Access is denied');
+    await expect(state).toContainText("1 eski kopya NAS'tan silindi.");
+    // The copy's target: a network share, checked in the browser before the server checks it.
+    const card = page.getByTestId('settings-backup-mirror');
+    await expect(card).toContainText('Replika hedefi');
+    await card.getByLabel('NAS paylaşımı').fill('D:\\Yedek');
+    await page.getByRole('button', { name: 'Kaydet' }).click();
+    await expect(card).toContainText('biçiminde bir ağ paylaşımı yazın');
+    await card.getByLabel('NAS paylaşımı').fill('\\\\NAS-01\\arcilogger-yedek');
+    await page.getByRole('button', { name: 'Kaydet' }).click();
+    const review = page.getByRole('dialog', { name: 'Değişiklikleri onaylayın' });
+    await expect(review.getByRole('row', { name: /Yedeklerin NAS kopyası/ })).toBeVisible();
+    await review.getByRole('button', { name: 'Onayla ve kaydet' }).click();
+    await confirmReauth(page);
+    await applied(page);
+    expect(api.admin.sections.backup.mirror_target).toBe('\\\\NAS-01\\arcilogger-yedek');
   });
 });
 

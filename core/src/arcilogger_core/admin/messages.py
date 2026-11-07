@@ -335,6 +335,34 @@ MESSAGES: Final[Mapping[str, tuple[str, str]]] = MappingProxyType(
             "Replika kullanıcısı için parola gerekir.",
             "A password is required for the replica user.",
         ),
+        "backup_mirror_target_invalid": (
+            "Yedek kopyası hedefi \\\\sunucu\\paylaşım biçiminde bir ağ paylaşımı olmalı.",
+            "The backup copy target must be a network share like \\\\server\\share.",
+        ),
+        "backup_mirror_needs_replica": (
+            "Yedek kopyası replikanın NAS'ına, replikanın kullanıcısıyla yazılır: önce Ayarlar → "
+            "Replika'da replikayı açın ve hedefini kaydedin.",
+            "The backup copy goes to the replica's NAS with the replica's user: first switch "
+            "the replica on and save its target in Settings → Replica.",
+        ),
+        "backup_mirror_other_host": (
+            "Yedek kopyası hedefi replikayla aynı NAS'ta olmalı (replikanın parolası başka bir "
+            "sunucuya gönderilmez).",
+            "The backup copy target must be on the replica's NAS (the replica's password is "
+            "never sent to another server).",
+        ),
+        "backup_mirror_inside_replica": (
+            "Yedek kopyası replika klasörünün içinde ya da onunla aynı olamaz: replika klasörü "
+            "genellikle silinemez (WORM), yedeklerin eski kopyaları ise silinebilmeli. Aynı NAS'ta "
+            "ayrı bir paylaşım ya da klasör kullanın.",
+            "The backup copy cannot be the replica folder or inside it: the replica folder is "
+            "usually write-once (WORM), while old copies of the backups must be deletable. Use a "
+            "share or folder of its own on the same NAS.",
+        ),
+        "backup_mirror_test_failed": (
+            "Yedek kopyası hedefine bağlanılamadı ya da yazılamadı.",
+            "The backup copy target could not be reached or written.",
+        ),
         "tsa_server_invalid": (
             'Zaman damgası sunucusu "test", "production", "turktrust" ya da "turktrust-http" '
             "olmalı.",

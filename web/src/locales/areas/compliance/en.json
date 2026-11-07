@@ -22,6 +22,7 @@
     "toneCount": "{{tone}}: {{count}}",
     "checkedAt": "Checked {{time}}",
     "confirmBackupAction": "Confirm",
-    "backupConfirmed": "The confirmation of the configuration copy was written to the audit log."
+    "backupConfirmed": "The confirmation of the configuration copy was written to the audit log.",
+    "onlyOpen": "Only those not OK"
   }
 }

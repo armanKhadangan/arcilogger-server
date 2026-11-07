@@ -35,14 +35,15 @@
     <Hidden>false</Hidden>
     <RunOnlyIfIdle>false</RunOnlyIfIdle>
     <WakeToRun>false</WakeToRun>
-    <!-- Open as long as the person keeps it open. -->
+    <!-- Running as long as the person keeps it: the icon in the notification area (the tray
+         argument), whose click opens the window. -->
     <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>
     <Priority>7</Priority>
   </Settings>
   <Actions Context="Author">
     <Exec>
       <Command>{{PYTHONW}}</Command>
-      <Arguments>-I -m arcilogger_core.desktop --no-elevate</Arguments>
+      <Arguments>-I -m arcilogger_core.desktop --no-elevate --tray</Arguments>
     </Exec>
   </Actions>
 </Task>

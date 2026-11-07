@@ -523,7 +523,7 @@ installer's ACL plan `Get-ArciAclPlan`):
 
 | Who | Writes | Never |
 |---|---|---|
-| ArciApi (`NT SERVICE\ArciApi`) | signed requests and uploads into `admin\inbox` (create and write files; it may delete only its own) | `arcilogger.toml`, `secrets.json`, `secret.key`, `kamusm-roots`, `smtp-ca`, `zamane`, `admin\keys`, `policy.json` |
+| ArciApi (`NT SERVICE\ArciApi`) | signed requests and uploads into `admin\inbox` (create, write and read back files; it may delete only its own) | `arcilogger.toml`, `secrets.json`, `secret.key`, `kamusm-roots`, `smtp-ca`, `zamane`, `admin\keys`, `policy.json` |
 | ArciAdmin (`NT SERVICE\ArciAdmin`, virtual account) | `arcilogger.toml` and `secrets.json` (explicit file entries), new files in `kamusm-roots` and `smtp-ca` (it may delete only files it created), `zamane\web` (staging), its own `admin` folders, task requests in `state\requests`, `logs` | `secret.key`, a root an administrator placed, `zamane` itself, `zamane\approved`, `policy.json`, `admin\keys`, `install`, the spool, the vault, exports, backups; no service-control, task, firewall or registry right, no listener, no database |
 | `\ARCILOGGER\ApplySystem` (SYSTEM) | the `ARCILOGGER Syslog UDP/TCP` rules (in strict outbound mode the `ARCILOGGER Out …` rules), the Windows Time peers, `zamane\approved`, `admin\system` | another firewall rule, a profile, 443, 3389, 5985; it takes **no input from a request** |
 | `\ARCILOGGER\Requests` and the evidence tasks (LOCAL SERVICE) | task results in `state\requests` | the configuration; a staged Zamane client (no right on `zamane\web`) |

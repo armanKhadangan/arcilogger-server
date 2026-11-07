@@ -173,6 +173,14 @@ class Site:
     configured: bool = False
     #: Why the configuration could not be used (None: it was).
     problem: str | None = None
+    #: The folder of the scheduled database dumps (``[backup] dir``), for the Backups list.
+    backup_dir: Path | None = None
+
+    def backup_folder(self) -> Path | None:
+        """``backup_dir``, or the default folder below the data folder when it is unknown."""
+        if self.backup_dir is not None:
+            return self.backup_dir
+        return None if self.data_root is None else self.data_root / "backups" / "scheduled"
 
 
 def health_url(host: str, port: int) -> str:
@@ -217,6 +225,11 @@ def load_site(config_path: Path | None = None) -> Site:
             if source.enabled and source.expected
         ),
         configured=True,
+        backup_dir=(
+            config.backup.dir
+            if config.backup.dir.is_absolute()
+            else config.data_dir / config.backup.dir
+        ),
     )
 
 

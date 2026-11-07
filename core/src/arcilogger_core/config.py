@@ -489,6 +489,21 @@ class BackupConfig(_Model):
     #: A run is refused (alert ``R20-backup``) while the backup folder's disk has less free space
     #: than this plus the size of the newest dump: a dump must never fill the evidence disk.
     min_free_gb: int = Field(default=10, ge=0, le=100_000)
+    #: A second copy of every dump on a share of the replica's NAS, e.g.
+    #: ``\\\\NAS-01\\arcilogger-yedek`` (Wave 5 addendum C, C6): a share or folder of its own on
+    #: the same host as ``replica.target``, never inside the replica's (often WORM) folder. The
+    #: Replica task copies the dumps there with the replica's user and keeps the same dumps as
+    #: this folder. ``None``: no copy.
+    mirror_target: Path | None = None
+
+    @field_serializer("mirror_target", when_used="json-unless-none")
+    def _mirror_json(self, target: Path) -> str:
+        return replica_target_text(target)
+
+    @property
+    def mirror_text(self) -> str | None:
+        """``mirror_target`` as :func:`replica_target_text` gives it (None: no copy)."""
+        return None if self.mirror_target is None else replica_target_text(self.mirror_target)
 
 
 # --- Area E: alert e-mail (docs/ALERTS.md, ADR-0010) ---------------------------------------------

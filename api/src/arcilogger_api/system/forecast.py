@@ -25,10 +25,11 @@ from __future__ import annotations
 
 import math
 from collections.abc import Iterable, Sequence
+from dataclasses import dataclass
 from datetime import date, timedelta
 from typing import Any, Final
 
-from arcilogger_api.system.models import DiskForecast
+from arcilogger_api.system.models import DatabaseGrowth, DiskForecast
 
 #: Samples the line is fitted to (the newest ones).
 WINDOW: Final = 30
@@ -68,6 +69,56 @@ def _first_day(
     return today + timedelta(days=max(ahead, 0))
 
 
+def database_samples(history: Iterable[dict[str, Any]]) -> list[tuple[date, int]]:
+    """``(day, bytes)`` of the database (the entries' ``database``), oldest first."""
+    samples: dict[date, int] = {}
+    for entry in history:
+        size = entry.get("database")
+        if type(size) is not int:
+            continue
+        try:
+            samples[date.fromisoformat(entry["day"])] = size
+        except (KeyError, TypeError, ValueError):
+            continue
+    return sorted(samples.items())
+
+
+@dataclass(frozen=True)
+class _Line:
+    """The least-squares line through the newest :data:`WINDOW` samples."""
+
+    samples: list[tuple[date, int]]
+    #: ``None``: fewer than :data:`MIN_SAMPLES` samples.
+    slope: float | None
+    intercept: float
+
+
+def _line(samples: Sequence[tuple[date, int]]) -> _Line:
+    used = sorted(samples)[-WINDOW:]
+    if len(used) < MIN_SAMPLES:
+        return _Line(used, None, 0.0)
+    start = used[0][0]
+    xs = [float((day - start).days) for day, _ in used]
+    ys = [float(value) for _, value in used]
+    mean_x = sum(xs) / len(xs)
+    mean_y = sum(ys) / len(ys)
+    spread = sum((x - mean_x) ** 2 for x in xs)
+    slope = sum((x - mean_x) * (y - mean_y) for x, y in zip(xs, ys, strict=True)) / spread
+    return _Line(used, slope, mean_y - slope * mean_x)
+
+
+def growth(samples: Sequence[tuple[date, int]]) -> DatabaseGrowth:
+    """The database's growth a day: the same straight line as a drive's, without marks."""
+    line = _line(samples)
+    if line.slope is None:
+        return DatabaseGrowth(state="insufficient", samples=len(line.samples), bytes_per_day=None)
+    if line.slope <= 0:
+        return DatabaseGrowth(state="not_growing", samples=len(line.samples), bytes_per_day=None)
+    return DatabaseGrowth(
+        state="estimated", samples=len(line.samples), bytes_per_day=round(line.slope)
+    )
+
+
 def forecast(
     samples: Sequence[tuple[date, int]],
     *,
@@ -78,8 +129,9 @@ def forecast(
 ) -> DiskForecast:
     """The forecast of a drive of ``total`` bytes from its daily ``(day, used bytes)`` samples
     (``used_now``: the drive's use at this moment, when measured)."""
-    used = sorted(samples)[-WINDOW:]
-    if len(used) < MIN_SAMPLES:
+    line = _line(samples)
+    used, slope, intercept = line.samples, line.slope, line.intercept
+    if slope is None:
         return DiskForecast(
             state="insufficient",
             samples=len(used),
@@ -88,12 +140,6 @@ def forecast(
             full_on=None,
         )
     start = used[0][0]
-    xs = [float((day - start).days) for day, _ in used]
-    ys = [float(value) for _, value in used]
-    mean_x = sum(xs) / len(xs)
-    mean_y = sum(ys) / len(ys)
-    spread = sum((x - mean_x) ** 2 for x in xs)
-    slope = sum((x - mean_x) * (y - mean_y) for x, y in zip(xs, ys, strict=True)) / spread
     if slope <= 0:
         return DiskForecast(
             state="not_growing",
@@ -102,7 +148,6 @@ def forecast(
             warning_on=None,
             full_on=None,
         )
-    intercept = mean_y - slope * mean_x
     warning = total * warning_percent / 100
     already_above = (used_now if used_now is not None else used[-1][1]) >= warning
     return DiskForecast(

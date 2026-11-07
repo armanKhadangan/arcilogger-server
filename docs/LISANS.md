@@ -115,7 +115,7 @@ vermez.
 | `/settings` | Uygulama ayarları (veritabanı ayarları) | 5651 Temel |
 | `/compliance` | Uyum Durumu: on denetim kartı, Uyum Durumu Raporu (PDF), yapılandırma yedeği onayı | 5651 Temel |
 | `/legal-status` | Yasal geçerlilik durumu: her sayfadaki uyarı bandı (oturum açmış her kullanıcı) | 5651 Temel |
-| `/system` | Sistem sayfası: kaynak kullanımı, disk tahmini, veritabanı boyutu, hizmetler, zamanlanmış görevler, saat | 5651 Temel |
+| `/system` | Sistem sayfası: kaynak kullanımı, disk tahmini, veritabanı boyutu, hizmetler, zamanlanmış görevler, saat; Veritabanı sayfası; Ayarlar → Yedekleme'deki yedek listesi | 5651 Temel |
 | `/activity` | Canlı Durum: `GET /activity/devices`, şu an kim veri gönderip alıyor (kişi bazında). `GET /activity/wan`, internet hattının hızı (SNMPv3 ile okunan WAN arayüz sayaçları; kişi verisi yok), kilitli değildir: temel üründür (5651 Temel) | Kullanım analizi |
 | `/archive-reloads` | Arşivden yeniden yükleme: veritabanı penceresinden eski günlerin mühürlü kasadan geri istenmesi ve ilerlemesi | 5651 Temel |
 | `/usage` | Kullanım sayfasının verileri, dışa aktarma, yeniden hesaplama | Kullanım analizi |

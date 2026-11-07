@@ -14,6 +14,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
+import { PasswordInput } from '@/components/ui/password-input';
 import { Field } from '@/components/ui/label';
 import { errorMessage } from '@/lib/api';
 import { useReauthMutation } from '@/lib/api-hooks';
@@ -98,9 +99,8 @@ export function ReauthDialog({ open, onDone }: ReauthDialogProps) {
           </DialogHeader>
           {problem ? <Alert tone="danger">{problem}</Alert> : null}
           <Field id={`${id}-password`} label={t('login.password')} required>
-            <Input
+            <PasswordInput
               id={`${id}-password`}
-              type="password"
               autoComplete="current-password"
               value={password}
               onChange={(event) => {

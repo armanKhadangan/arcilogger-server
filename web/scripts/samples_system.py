@@ -1,5 +1,6 @@
 """The Sistem samples (``web/e2e/samples/system.json``, ``system-disk.json``,
-``system-health.json``), captured from the real API.
+``system-health.json``), the Veritabanı page's (``system-database.json``) and Ayarlar →
+Yedekleme's list (``system-backups.json``), captured from the real API.
 
 ``capture_api_samples.py`` calls :func:`capture` on its main site after every other page's
 samples (Wave 4 contract 2.2, 2.5, 2.6), with the capture (the app, its database and data
@@ -39,7 +40,12 @@ What the files hold: ``system.json`` ``summary`` (``GET /system``, the processor
 ``summary_first_reading`` (the first reading of a process: ``cpu_percent`` null),
 ``system-disk.json`` ``disk`` and ``disk_not_growing`` (``GET /system/disk``),
 ``system-health.json`` ``health``
-(``GET /system/health``); each with ``errors.forbidden`` (the auditor: ``system.read`` is the
+(``GET /system/health``), ``system-database.json`` ``database`` (``GET /system/database``: the
+daily samples grow about 180 MB a day; the server's version, the database's name, address and
+connections are fixed after the real answer was checked, they differ with every server and
+capture), ``system-backups.json`` ``backups`` (``GET /system/backups``: the Backup task's
+``state/backup/list.json`` of three dumps; no copy is configured on the capture's site) and
+``backups_empty`` (no list yet); each with ``errors.forbidden`` (the auditor: ``system.read`` is the
 administrators' only). Everything the module writes is put back afterwards: the files as they
 were (or removed), their modification times, the ``job_runs`` rows, the measured database sizes
 kept by the app.
@@ -89,12 +95,16 @@ SHAPE_KEYS: dict[str, tuple[frozenset[str], frozenset[str]]] = {
     "system": (frozenset(), frozenset({"platform", "role", "storage"})),
     "system-disk": (frozenset(), frozenset({"role"})),
     "system-health": (frozenset(), frozenset({"name", "task", "last_status"})),
+    "system-database": (frozenset(), frozenset({"storage", "role", "state"})),
+    "system-backups": (frozenset(), frozenset()),
 }
 
 API = "/api/v1"
 SUMMARY = f"{API}/system"
 DISK = f"{API}/system/disk"
 HEALTH = f"{API}/system/health"
+DATABASE = f"{API}/system/database"
+BACKUPS = f"{API}/system/backups"
 
 GB = 1_000_000_000
 
@@ -159,6 +169,18 @@ DATABASE_TABLES = (
     ("job_runs", 912_261_120),
     ("audit_log", 402_653_184),
 )
+
+#: The database's daily samples: :data:`DATABASE_TOTAL` today, about 180 MB less each day back.
+DATABASE_GROWTH = 183_500_800
+#: What the Veritabanı sample shows of the server (the real values differ with every capture).
+DATABASE_SERVER = {
+    "server_version": "16.4",
+    "name": "arcilogger",
+    "host": "127.0.0.1",
+    "port": 5432,
+    "connections": 7,
+    "max_connections": 100,
+}
 
 #: An unknown sender in the status files (counted only: its address never leaves the API).
 UNKNOWN = "192.0.2.77"
@@ -339,7 +361,9 @@ def history(data: Drive, slope: int, today: date) -> dict[str, Any]:
         if back < SYSTEM_SAMPLES:
             used = SYSTEM.sampled - back * 41_943_040
             drives.append({"path": SYSTEM.label, "total": SYSTEM.total, "used": used})
-        days.append({"day": (today - timedelta(days=back)).isoformat(), "drives": drives})
+        database = DATABASE_TOTAL - back * DATABASE_GROWTH
+        day = (today - timedelta(days=back)).isoformat()
+        days.append({"day": day, "drives": drives, "database": database})
     return {"schema": HISTORY_SCHEMA, "days": days}
 
 
@@ -719,6 +743,11 @@ def _capture(
 
     disk: dict[str, Any] = {"disk": capture.json(admin.get(DISK), 200)}
     expect_forecasts(disk["disk"], "estimated", "insufficient")
+    database = {
+        "database": expect_database(capture.json(admin.get(DATABASE), 200)),
+        "errors": {"forbidden": capture.error(auditor.get(DATABASE), 403, "forbidden")},
+    }
+    backups = capture_backups(capture, admin, auditor, today)
     layout.system_history.write_text(json.dumps(history(DATA_FLAT, -DATA_SHRINK, today), indent=1))
     usage[DATA.label] = DATA_FLAT.usage
     disk["disk_not_growing"] = capture.json(admin.get(DISK), 200)
@@ -728,7 +757,68 @@ def _capture(
     health: dict[str, Any] = {"health": capture.json(admin.get(HEALTH), 200)}
     health["errors"] = {"forbidden": capture.error(auditor.get(HEALTH), 403, "forbidden")}
     expect_health(health["health"])
-    return {"system": system, "system-disk": disk, "system-health": health}
+    return {
+        "system": system,
+        "system-disk": disk,
+        "system-health": health,
+        "system-database": database,
+        "system-backups": backups,
+    }
+
+
+#: The dumps of the Backup task's list: the last three nights (01:40 site time), about 1.2 GB.
+BACKUP_SIZES = (1_281_734_656, 1_274_023_936, 1_266_884_608)
+
+
+def capture_backups(capture: Capture, admin: Any, auditor: Any, today: date) -> dict[str, Any]:
+    """``GET /system/backups`` without a list, then with the list of three dumps."""
+    path = capture.layout.state / "backup" / "list.json"
+    path.unlink(missing_ok=True)
+    empty = capture.json(admin.get(BACKUPS), 200)
+    if empty["dumps"] or empty["list_updated"] is not None:
+        raise SystemExit(f"system: backups without a list: {empty}")
+    dumps = []
+    for back, size in enumerate(BACKUP_SIZES, start=1):
+        taken = site_at(today - timedelta(days=back), time(1, 40))
+        dumps.append(
+            {
+                "name": f"arcilogger-{taken:%Y%m%d-%H%M%S}.dump",
+                "taken": isoformat_site(taken, "seconds"),
+                "size": size,
+                "sha256": f"{back:02d}" * 32,
+            }
+        )
+    updated = isoformat_site(site_at(today - timedelta(days=1), time(1, 52, 10)), "seconds")
+    path.write_text(json.dumps({"schema": 1, "updated": updated, "dumps": dumps}))
+    try:
+        listed = capture.json(admin.get(BACKUPS), 200)
+    finally:
+        path.unlink(missing_ok=True)
+    if [d["name"] for d in listed["dumps"]] != [d["name"] for d in dumps]:
+        raise SystemExit(f"system: backups {listed}")
+    return {
+        "backups": listed,
+        "backups_empty": empty,
+        "errors": {"forbidden": capture.error(auditor.get(BACKUPS), 403, "forbidden")},
+    }
+
+
+def expect_database(answer: dict[str, Any]) -> dict[str, Any]:
+    """The real answer checked, then its server facts fixed (:data:`DATABASE_SERVER`)."""
+    real = {key: answer[key] for key in DATABASE_SERVER}
+    if None in real.values() or answer["connections"] < 1:
+        raise SystemExit(f"system: the database's server facts: {real}")
+    if answer["growth"] != {
+        "state": "estimated",
+        "samples": HISTORY,
+        "bytes_per_day": DATABASE_GROWTH,
+    }:
+        raise SystemExit(f"system: the database's growth: {answer['growth']}")
+    if len(answer["history"]) != HISTORY or answer["total_bytes"] != DATABASE_TOTAL:
+        raise SystemExit(f"system: the database's samples: {answer['history']}")
+    if answer["last_backup"] is None or answer["data_drive"]["path"] != DATA.label:
+        raise SystemExit(f"system: backup {answer['last_backup']}, drive {answer['data_drive']}")
+    return answer | DATABASE_SERVER
 
 
 def expect_forecasts(answer: dict[str, Any], data: str, system: str) -> None:

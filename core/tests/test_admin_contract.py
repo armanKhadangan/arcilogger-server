@@ -141,7 +141,7 @@ def test_kinds_and_tasks() -> None:
 def test_event_ids() -> None:
     assert contract.EVENT_SOURCE == "ARCILOGGER-Admin"
     assert sorted(int(event) for event in contract.Event) == [
-        4100, 4101, 4102, 4103, 4104, 4105, 4106, 4107, 4110, 4111, 4120, 4121, 4199,
+        4100, 4101, 4102, 4103, 4104, 4105, 4106, 4107, 4110, 4111, 4120, 4121, 4130, 4199,
     ]  # fmt: skip
 
 

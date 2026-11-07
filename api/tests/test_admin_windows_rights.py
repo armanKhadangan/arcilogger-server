@@ -23,6 +23,7 @@ import builtins
 import errno
 import io
 import os
+import zipfile
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from datetime import timedelta
@@ -373,6 +374,47 @@ def test_a_file_the_api_cannot_read_is_a_problem_not_a_server_error(
     assert tsa["zamane"]["present"] is False
     assert {"zamane_jar", "java", "roots"} <= set(tsa["readiness"]["missing"])
     assert rights.refused  # the API did try, and got "access denied"
+
+
+def test_an_upload_the_api_cannot_read_back_is_refused_not_a_server_error(
+    client: TestClient,
+    login_as: Login,
+    reauthenticate: Callable[[LoggedIn], None],
+    installed: Installed,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The inbox's earlier rights let NT SERVICE\\ArciApi create and write
+    ``admin\\inbox\\uploads\\<id>.bin`` but not open it again ("access denied"): every root
+    certificate and Zamane client sent from the browser ended in a 500. Now the API says the
+    file could not be handed over (503 ``admin_inbox_write_failed``) and leaves nothing behind;
+    the installer's entry (``Get-ArciAclPlan``) holds the whole read again."""
+    uploads = installed.layout.uploads
+    real_open = io.open
+
+    def open_(file: Any, mode: str = "r", *args: Any, **kwargs: Any) -> Any:
+        writing = any(flag in mode for flag in "wxa+")
+        if not isinstance(file, int) and not writing and Path(os.fsdecode(file)).parent == uploads:
+            raise PermissionError(errno.EACCES, "Access is denied", os.fsdecode(file))
+        return real_open(file, mode, *args, **kwargs)
+
+    monkeypatch.setattr(io, "open", open_)
+    monkeypatch.setattr(builtins, "open", open_)
+    reauthenticate(login_as(client, "admin"))
+    jar = io.BytesIO()
+    with zipfile.ZipFile(jar, "w") as archive:
+        archive.writestr("META-INF/MANIFEST.MF", "Manifest-Version: 1.0\n")
+    for kind, data in (
+        ("zamane_client", jar.getvalue()),
+        ("kamusm_root", b"-----BEGIN CERTIFICATE-----\nAAAA\n-----END CERTIFICATE-----\n"),
+    ):
+        response = client.post(
+            f"{V}/admin/uploads",
+            params={"kind": kind},
+            files={"file": ("dosya", data, "application/octet-stream")},
+        )
+        assert response.status_code == 503, response.text
+        assert response.json()["error"]["code"] == "admin_inbox_write_failed"
+    assert not [path for path in uploads.iterdir() if path.is_file()]
 
 
 def test_the_new_text_has_both_languages() -> None:

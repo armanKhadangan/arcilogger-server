@@ -45,6 +45,7 @@ interface TableFrame {
   maxHeight?: number;
 }
 
+/** The figure columns are narrow: their headers wrap ("Aktif / kullanıcı") rather than be cut. */
 function durationColumn<T>(
   id: string,
   label: string,
@@ -58,7 +59,7 @@ function durationColumn<T>(
     header: label,
     size,
     sortDescFirst: true,
-    meta: { label, numeric: true, exportValue: (row: T) => get(row) },
+    meta: { label, numeric: true, wrapHeader: true, exportValue: (row: T) => get(row) },
     cell: (info) => formatDuration(info.getValue<number>(), lang),
   };
 }
@@ -76,7 +77,7 @@ function bytesColumn<T>(
     header: label,
     size,
     sortDescFirst: true,
-    meta: { label, numeric: true },
+    meta: { label, numeric: true, wrapHeader: true },
     cell: (info) => formatBytes(info.getValue<number>(), lang),
   };
 }
@@ -94,7 +95,7 @@ function countColumn<T>(
     header: label,
     size,
     sortDescFirst: true,
-    meta: { label, numeric: true },
+    meta: { label, numeric: true, wrapHeader: true },
     cell: (info) => formatNumber(info.getValue<number>(), 0, lang),
   };
 }
@@ -111,7 +112,7 @@ function shareColumn<T>(
     header: label,
     size: 80,
     sortDescFirst: true,
-    meta: { label, numeric: true },
+    meta: { label, numeric: true, wrapHeader: true },
     cell: (info) => shareText(info.getValue<number>(), lang),
   };
 }
@@ -223,14 +224,15 @@ function metricColumns<T>(
       ]
     : [];
   const volumes = [
+    // "1.021,9 KB" whole: 96 px with the cell's padding.
     bytesColumn(
       'download',
       t('usage.metrics.download'),
       (row: T) => get(row).download_bytes,
       lang,
-      88,
+      96,
     ),
-    bytesColumn('upload', t('usage.metrics.upload'), (row: T) => get(row).upload_bytes, lang, 88),
+    bytesColumn('upload', t('usage.metrics.upload'), (row: T) => get(row).upload_bytes, lang, 96),
     countColumn('sessions', t('usage.metrics.sessions'), (row: T) => get(row).sessions, lang, 74),
   ];
   if (variant === 'site') return [active, offHours, ...pauses, ...volumes];

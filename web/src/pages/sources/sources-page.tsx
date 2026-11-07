@@ -150,9 +150,10 @@ export function SourcesHealthPage() {
                     {t('sources.badges.unknown')}
                   </Badge>
                 ) : (
-                  <span className="shrink-0">{typeLabel(item.type)}</span>
+                  // The address is the sender: in a narrow window the type gives way, not it.
+                  <span className="truncate">{typeLabel(item.type)}</span>
                 )}
-                {item.address ? <span className="truncate font-mono">{item.address}</span> : null}
+                {item.address ? <span className="shrink-0 font-mono">{item.address}</span> : null}
               </span>
             </span>
           );
@@ -212,7 +213,8 @@ export function SourcesHealthPage() {
         id: 'lastMessage',
         accessorFn: (row) => row.item.last_message ?? '',
         header: t('sources.columns.lastMessage'),
-        size: 150,
+        // "13.10.2026 14:59:12" whole: the name column gives up the width.
+        size: 172,
         meta: {
           label: t('sources.columns.lastMessage'),
           wrapHeader: true,
