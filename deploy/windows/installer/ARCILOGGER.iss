@@ -51,6 +51,10 @@ RestartApplications=no
 SetupLogging=yes
 Uninstallable=yes
 UninstallDisplayName=ARCILOGGER {#AppVersion}
+; The program's icon (deploy\windows\desktop\icons, in the bundle): Setup, its uninstaller and the
+; entry in Settings > Apps.
+SetupIconFile={#BundleDir}\desktop\icons\arcilogger.ico
+UninstallDisplayIcon={uninstallexe}
 
 [Languages]
 Name: "turkish"; MessagesFile: "compiler:Languages\Turkish.isl"

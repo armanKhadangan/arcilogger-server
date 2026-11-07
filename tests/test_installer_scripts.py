@@ -631,6 +631,10 @@ def test_inno_script_compiles(tmp_path: Path) -> None:
     bundle = tmp_path / "bundle"
     bundle.mkdir()
     (bundle / "SHA256SUMS").write_text("", encoding="utf-8")
+    # SetupIconFile: the bundle carries the program's icon (Build-ArciBundle.ps1).
+    icons = bundle / "desktop" / "icons"
+    icons.mkdir(parents=True)
+    shutil.copyfile(INSTALLER.parent / "desktop" / "icons" / "arcilogger.ico", icons / "arcilogger.ico")
     out = tmp_path / "out"
     command = [
         iscc,

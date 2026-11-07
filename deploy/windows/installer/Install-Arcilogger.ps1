@@ -1285,7 +1285,12 @@ function Start-ArciServices([string[]]$Only = $ServiceNames) {
 
 # The read-only desktop status window "ARCILOGGER Durum" (Wave 5 contract section 5, I3-I4): a logon
 # task in \ARCILOGGER\Desktop\, registered by Register-ArciTasks.ps1 from the program's desktop\
-# folder, and a Start-menu shortcut for every user.
+# folder. Shortcuts for every user (Wave 5 addendum C, C1): the Start-menu folder ARCILOGGER holds
+# "ARCILOGGER" (the web interface) and "ARCILOGGER Durum" (the window), the desktop "ARCILOGGER";
+# all of them carry the program's icon (desktop\icons\arcilogger.ico).
+
+# What the "ARCILOGGER" shortcuts open: the web interface on this server, as the window's button.
+$ArciLocalWebUrl = 'https://localhost/'
 
 function Get-StatusWindowFolder {
     <# The all-users Start-menu folder of the shortcut; none without a ProgramData folder (not Windows). #>
@@ -1327,38 +1332,77 @@ function Stop-ArciStatusWindow {
         }
 }
 
-function Set-ArciStatusWindowShortcut([string]$Root) {
-    <# The Start-menu shortcut when the program in $Root has the status window; otherwise none. #>
-    $folder = Get-StatusWindowFolder
-    if (-not $folder) { return }
-    $shortcut = Join-Path $folder 'ARCILOGGER Durum.lnk'
+function Get-ArciDesktopFolder {
+    <# The all-users desktop; none without a ProgramData folder (not Windows), like the Start menu. #>
+    if (-not $env:ProgramData) { return $null }
+    $folder = [Environment]::GetFolderPath('CommonDesktopDirectory')
+    if (-not $folder) { return $null }
+    $folder
+}
+
+function Get-ArciShortcutPaths {
+    <# Every shortcut the installer makes; Remove-ArciShortcuts deletes exactly these. #>
+    $paths = @()
+    $menu = Get-StatusWindowFolder
+    if ($menu) { $paths += @((Join-Path $menu 'ARCILOGGER Durum.lnk'), (Join-Path $menu 'ARCILOGGER.lnk')) }
+    $desktop = Get-ArciDesktopFolder
+    if ($desktop) { $paths += @(Join-Path $desktop 'ARCILOGGER.lnk') }
+    $paths
+}
+
+function New-ArciShortcut([string]$Path, [string]$Target, [string]$Arguments, [string]$WorkingDirectory, [string]$Icon, [string]$Description) {
+    [void](New-Item -ItemType Directory -Path (Split-Path -Parent $Path) -Force)
+    $link = (New-Object -ComObject WScript.Shell).CreateShortcut($Path)
+    $link.TargetPath = $Target
+    $link.Arguments = $Arguments
+    $link.WorkingDirectory = $WorkingDirectory
+    if ($Icon) { $link.IconLocation = $Icon + ',0' }
+    $link.Description = $Description
+    $link.Save()
+}
+
+function Set-ArciShortcuts([string]$Root) {
+    <#
+    The shortcuts of the program in $Root. "ARCILOGGER" opens the web interface in the default
+    browser (Explorer hands the address on); "ARCILOGGER Durum" exists only when the program has
+    the status window. A program without the icon (an older version after a rollback) gets the
+    shortcuts with Windows' default icons.
+    #>
+    $menu = Get-StatusWindowFolder
+    if (-not $menu) { return }
+    $icon = Join-Path $Root 'desktop\icons\arcilogger.ico'
+    if (-not (Test-Path -LiteralPath $icon)) { $icon = '' }
     $pythonw = Join-Path $Root 'venv\Scripts\pythonw.exe'
-    if (-not (Test-Path -LiteralPath (Join-Path $Root 'desktop')) -or -not (Test-Path -LiteralPath $pythonw)) {
-        Remove-ArciStatusWindowShortcut
-        return
-    }
-    # A convenience only: without it the window still opens at logon (Windows Script Host may be
-    # switched off by policy), so a failure is a warning, never a failed installation.
+    $window = (Test-Path -LiteralPath (Join-Path $Root 'desktop')) -and (Test-Path -LiteralPath $pythonw)
+    $web = @(Join-Path $menu 'ARCILOGGER.lnk')
+    $desktop = Get-ArciDesktopFolder
+    if ($desktop) { $web += @(Join-Path $desktop 'ARCILOGGER.lnk') }
+    # A convenience only: without them the window still opens at logon and the web interface at
+    # its address (Windows Script Host may be switched off by policy), so a failure is a warning,
+    # never a failed installation.
     try {
-        [void](New-Item -ItemType Directory -Path $folder -Force)
-        $link = (New-Object -ComObject WScript.Shell).CreateShortcut($shortcut)
-        $link.TargetPath = $pythonw
-        $link.Arguments = '-I -m arcilogger_core.desktop'
-        $link.WorkingDirectory = $Root
-        $link.Description = 'ARCILOGGER Durum: salt okunur durum penceresi [read-only status window]'
-        $link.Save()
+        $status = Join-Path $menu 'ARCILOGGER Durum.lnk'
+        if ($window) {
+            New-ArciShortcut -Path $status -Target $pythonw -Arguments '-I -m arcilogger_core.desktop' -WorkingDirectory $Root -Icon $icon `
+                -Description 'ARCILOGGER Durum: salt okunur durum penceresi [read-only status window]'
+        }
+        elseif (Test-Path -LiteralPath $status) { Remove-Item -LiteralPath $status -Force }
+        foreach ($path in $web) {
+            New-ArciShortcut -Path $path -Target (Join-Path $env:WINDIR 'explorer.exe') -Arguments $ArciLocalWebUrl -WorkingDirectory $Root -Icon $icon `
+                -Description 'ARCILOGGER: web arayüzü [web interface]'
+        }
     }
     catch {
-        Write-ArciWarn ("Başlat menüsü kısayolu oluşturulamadı [Start-menu shortcut not created]: {0}" -f $_.Exception.Message)
+        Write-ArciWarn ("Kısayollar oluşturulamadı [shortcuts not created]: {0}" -f $_.Exception.Message)
     }
 }
 
-function Remove-ArciStatusWindowShortcut {
+function Remove-ArciShortcuts {
+    foreach ($path in @(Get-ArciShortcutPaths)) {
+        if (Test-Path -LiteralPath $path) { Remove-Item -LiteralPath $path -Force }
+    }
     $folder = Get-StatusWindowFolder
-    if (-not $folder) { return }
-    $shortcut = Join-Path $folder 'ARCILOGGER Durum.lnk'
-    if (Test-Path -LiteralPath $shortcut) { Remove-Item -LiteralPath $shortcut -Force }
-    if ((Test-Path -LiteralPath $folder) -and -not (Get-ChildItem -LiteralPath $folder -Force)) {
+    if ($folder -and (Test-Path -LiteralPath $folder) -and -not (Get-ChildItem -LiteralPath $folder -Force)) {
         Remove-Item -LiteralPath $folder -Force
     }
 }
@@ -1415,7 +1459,7 @@ function Register-ArciTaskSet([string]$Root, [switch]$Replace) {
         Get-ScheduledTask -TaskPath '\ARCILOGGER\Desktop\' -ErrorAction SilentlyContinue | Unregister-ScheduledTask -Confirm:$false
     }
     & (Join-Path $Root 'scripts\Register-ArciTasks.ps1') -Python (Join-Path $Root 'venv\Scripts\python.exe') -TaskDirectory (Join-Path $Root 'tasks')
-    Set-ArciStatusWindowShortcut -Root $Root
+    Set-ArciShortcuts -Root $Root
 }
 
 function Register-ArciTasksKeepingChoices([string]$Root) {
@@ -4075,7 +4119,7 @@ function Invoke-UninstallMode {
     Invoke-Step 'tasks.unregister' 'Zamanlanmış görevler kaldırılıyor [removing scheduled tasks] \ARCILOGGER\' {
         Get-ScheduledTask -TaskPath '\ARCILOGGER\' -ErrorAction SilentlyContinue | Unregister-ScheduledTask -Confirm:$false
         Get-ArciStatusWindowTask | Unregister-ScheduledTask -Confirm:$false
-        Remove-ArciStatusWindowShortcut
+        Remove-ArciShortcuts
     }
     # The events already written stay in the Application log.
     Invoke-Step 'eventlog.remove' 'Olay günlüğü kaynağı kaldırılıyor [removing the Event Log source] ARCILOGGER-Admin' {
