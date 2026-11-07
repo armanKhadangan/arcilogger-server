@@ -301,43 +301,47 @@ function CompanyContent({
             </>
           }
         >
-          <div className="grid items-center gap-4 sm:grid-cols-[minmax(0,14rem)_1fr]">
-            <DonutChart
-              data={slices.map((slice) => ({ ...slice, label: categoryLabel(slice.label, t) }))}
-              formatValue={(value) => formatDuration(value, lang)}
-              centerLabel={formatDuration(metrics.active_seconds, lang)}
-              centerHint={t('usage.estimated')}
-              height={220}
-            />
-            <ul className="flex flex-col gap-1.5" aria-label={t('usage.company.topCategories')}>
-              {data.top_categories.map((row, index) => {
-                const colour = index < DONUT_SLICES ? seriesColor(index) : CHART_OTHER;
-                const name = visibleText(categoryLabel(row.category, t));
-                return (
-                  <li key={row.category} className="flex items-center gap-2 text-13">
-                    <span
-                      aria-hidden="true"
-                      className="size-2.5 shrink-0 rounded-sm"
-                      style={{ background: colour }}
-                    />
-                    <DrillButton
-                      onClick={() => {
-                        onDrill({ category: row.category });
-                      }}
-                      title={t('usage.openDetail', { name })}
-                    >
-                      {name}
-                    </DrillButton>
-                    <span className="ml-auto pl-2 whitespace-nowrap tabular">
-                      {formatDuration(row.seconds, lang)}
-                    </span>
-                    <span className="w-14 text-right text-xs text-muted-strong tabular">
-                      {shareText(row.share, lang)}
-                    </span>
-                  </li>
-                );
-              })}
-            </ul>
+          {/* The card's own width decides: under 28rem (1100-1280 px windows) the donut sits
+              above its legend instead of shrinking to a dot beside it. */}
+          <div className="@container">
+            <div className="grid items-center gap-4 @md:grid-cols-[minmax(8rem,14rem)_1fr]">
+              <DonutChart
+                data={slices.map((slice) => ({ ...slice, label: categoryLabel(slice.label, t) }))}
+                formatValue={(value) => formatDuration(value, lang)}
+                centerLabel={formatDuration(metrics.active_seconds, lang)}
+                centerHint={t('usage.estimated')}
+                height={220}
+              />
+              <ul className="flex flex-col gap-1.5" aria-label={t('usage.company.topCategories')}>
+                {data.top_categories.map((row, index) => {
+                  const colour = index < DONUT_SLICES ? seriesColor(index) : CHART_OTHER;
+                  const name = visibleText(categoryLabel(row.category, t));
+                  return (
+                    <li key={row.category} className="flex items-center gap-2 text-13">
+                      <span
+                        aria-hidden="true"
+                        className="size-2.5 shrink-0 rounded-sm"
+                        style={{ background: colour }}
+                      />
+                      <DrillButton
+                        onClick={() => {
+                          onDrill({ category: row.category });
+                        }}
+                        title={t('usage.openDetail', { name })}
+                      >
+                        {name}
+                      </DrillButton>
+                      <span className="ml-auto pl-2 whitespace-nowrap tabular">
+                        {formatDuration(row.seconds, lang)}
+                      </span>
+                      <span className="w-14 text-right text-xs text-muted-strong tabular">
+                        {shareText(row.share, lang)}
+                      </span>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
           </div>
         </Section>
       </div>
