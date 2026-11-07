@@ -8,6 +8,10 @@ decisions I1-I5).
   (services, API, disk).
 * One window per session: a second start shows the first one (through an elevated copy when
   started without rights: Windows lets only an elevated process restore an elevated window).
+* The icon in the notification area (Wave 5 addendum C, C2): ``--tray`` (the logon task) starts
+  with only the icon; a click on it shows the window, and closing the window hides it again. A
+  second start asks the running one, through its icon, to show the window: this works without
+  rights too (:func:`.tray.show_running`).
 
 ``--print`` writes one look as text (``python.exe``, a console; no Tk needed), ``--self-test``
 builds the window off-screen (exit 0 or 1), ``--config`` reads another configuration file
@@ -23,7 +27,7 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Final
 
-from arcilogger_core.desktop import status, winapi
+from arcilogger_core.desktop import backups, status, tray, winapi
 
 #: One window per logon session.
 MUTEX: Final = "Local\\ARCILOGGER-Durum"
@@ -38,6 +42,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--print", action="store_true", help="print one look as text and exit")
     parser.add_argument("--self-test", action="store_true", help="build the window off-screen")
     parser.add_argument("--no-elevate", action="store_true", help="never ask for elevation (UAC)")
+    parser.add_argument(
+        "--tray", action="store_true", help="start with only the notification-area icon"
+    )
     return parser
 
 
@@ -59,6 +66,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.config is not None:
         again += ["--config", str(args.config)]
     guard = winapi.single_instance(MUTEX)
+    if guard is None and tray.show_running():
+        return 0
     if guard is None:
         # The open window runs elevated (the logon task); Windows lets only an elevated process
         # restore it, so a start without rights hands that to an elevated copy.
@@ -75,7 +84,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     from arcilogger_core.desktop import window
 
     winapi.dpi_aware()
-    return window.run(lambda: status.collect(site, probe))
+    folders = backups.folders(site.data_root, site.backup_folder())
+    return window.run(lambda: status.collect(site, probe), backup_folders=folders, hidden=args.tray)
 
 
 if __name__ == "__main__":

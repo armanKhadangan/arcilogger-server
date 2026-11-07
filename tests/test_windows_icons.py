@@ -28,7 +28,8 @@ def _images(path: Path) -> list[tuple[int, bytes]]:
         width, height, colours, _, planes, bits, length, offset = struct.unpack_from(
             "<BBBBHHII", data, 6 + 16 * index
         )
-        assert width == height and colours == 0 and planes == 1 and bits == 32, path.name
+        assert width == height, path.name
+        assert (colours, planes, bits) == (0, 1, 32), path.name
         assert offset + length <= len(data), f"{path.name}: image {index} beyond the file"
         images.append((width or 256, data[offset : offset + length]))
     return images
@@ -41,7 +42,8 @@ def _check_bmp(name: str, size: int, image: bytes) -> None:
     assert len(image) == 40 + size * size * 4 + mask_row * size, name
     alphas = image[40 + 3 : 40 + size * size * 4 : 4]
     # Transparent corners (rounded square), opaque inside: the alpha channel is used.
-    assert 0 in alphas and 255 in alphas, f"{name}: {size} px has no transparency"
+    assert 0 in alphas, f"{name}: {size} px has no transparent pixel"
+    assert 255 in alphas, f"{name}: {size} px has no opaque pixel"
 
 
 def test_program_icon() -> None:

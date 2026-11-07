@@ -950,17 +950,39 @@ The window is **read-only**:
 "Web arayüzünü aç" opens `https://localhost/`. Without the root certificate on the server, the
 browser shows a certificate warning (section 8).
 
+- **Notification-area icon** (next to the clock): its colour is the window's (green, orange,
+  red, grey) and hovering it shows the state. When the state turns red a Windows notification
+  appears as well.
+  - A click on the icon shows the window. Closing the window only hides it; the icon stays.
+  - Right-click menu: **Durum penceresini göster** (show the window), **Web arayüzünü aç** (open
+    the web interface), **Yedekler…** (backups), **Simgeyi kapat** (ends the program; it starts
+    again at the next logon).
+  - Like the window, the icon changes nothing.
+- The **Yedekler…** (Backups) window lists the database backups: the scheduled ones
+  (`[backup] dir`) and the installer's pre-upgrade dumps (`backups\db`), each with its time and
+  size.
+  - **Kopyasını kaydet…** (save a copy) copies the selected backup into a folder you choose (a USB
+    disk, a share). The copy is written under a temporary name first, its SHA-256 is compared
+    with the hash recorded for the backup, and only then does it get its name. A file of the same
+    name is never overwritten.
+  - **Klasör yolunu kopyala** puts the backup folder's path on the clipboard.
+  - Only administrators may read the backup folders. If you open them in File Explorer, Windows
+    offers to change the folder's permissions ("Continue"): decline (a changed permission is an
+    `acl_drift` alert). Take the copy from this window.
+- **Shortcuts:** **ARCILOGGER** on the desktop and in the Start menu (opens the web interface in
+  the default browser), and **ARCILOGGER Durum** in the Start menu; all with the ARCILOGGER icon.
 - **Start:**
-  - the scheduled task `\ARCILOGGER\Desktop\StatusWindow` opens the window at every logon of a
-    member of Administrators, with the highest rights. There is no UAC prompt. The rights are
-    needed because only administrators may read `state\` of the data folder.
-  - A closed window opens again from the Start menu: **ARCILOGGER → ARCILOGGER Durum**. That
-    shortcut asks for UAC consent.
+  - the scheduled task `\ARCILOGGER\Desktop\StatusWindow` starts the program at every logon of a
+    member of Administrators, with the highest rights; only the notification-area icon shows.
+    There is no UAC prompt. The rights are needed because only administrators may read `state\`
+    of the data folder.
+  - When the icon was closed, the program opens again from the Start menu: **ARCILOGGER →
+    ARCILOGGER Durum**. That shortcut asks for UAC consent.
   - Without consent, the window shows only the services and the API (on the default port 8000).
     The configuration and the data folder are open to administrators only, so the other rows
     say "cannot be read".
-- One window per session. A second start brings the open one to the front (the shortcut asks
-  for UAC consent for that too).
+- One window per session. A second start shows the open one; with the icon running this needs
+  no UAC consent.
 - An upgrade and the removal close the window. After an upgrade it opens again at the next logon,
   or from the shortcut.
 - One look from the command line (elevated PowerShell):

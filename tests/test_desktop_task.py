@@ -71,7 +71,10 @@ def test_register_script_registers_the_desktop_folder() -> None:
 def test_bundle_and_program_carry_the_desktop_folder() -> None:
     build = (WINDOWS / "installer" / "Build-ArciBundle.ps1").read_text(encoding="utf-8-sig")
     assert "Copy-Tree (Join-Path $Windows 'desktop') (Join-Path $stage 'desktop') '*.xml'" in build
-    icons = "Copy-Tree (Join-Path $Windows 'desktop\\icons') (Join-Path $stage 'desktop\\icons') '*.ico'"
+    icons = (
+        "Copy-Tree (Join-Path $Windows 'desktop\\icons') "
+        "(Join-Path $stage 'desktop\\icons') '*.ico'"
+    )
     assert icons in build
     install = (WINDOWS / "installer" / "Install-Arcilogger.ps1").read_text(encoding="utf-8-sig")
     assert "@('installer', 'scripts', 'tasks', 'desktop', 'config', 'docs', 'licenses')" in install

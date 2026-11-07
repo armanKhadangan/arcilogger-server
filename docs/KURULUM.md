@@ -1070,17 +1070,36 @@ Pencere **yalnızca okur**:
 "Web arayüzünü aç" düğmesi `https://localhost/` adresini açar. Sunucuda kök sertifika kurulu
 değilse tarayıcı bir sertifika uyarısı gösterir (bölüm 8).
 
+- **Bildirim alanı simgesi** (saatin yanında): rengi pencerenin rengidir (yeşil, turuncu,
+  kırmızı, gri); üzerine gelince durum yazılır. Durum kırmızıya dönünce bir Windows bildirimi de
+  çıkar.
+  - Simgeye tıklamak pencereyi gösterir. Pencereyi kapatmak yalnızca gizler; simge kalır.
+  - Sağ tık menüsü: **Durum penceresini göster**, **Web arayüzünü aç**, **Yedekler…**,
+    **Simgeyi kapat** (programı bitirir; bir sonraki oturum açılışında yeniden başlar).
+  - Simge, pencere gibi hiçbir şeyi değiştirmez.
+- **Yedekler…** penceresi veritabanı yedeklerini listeler: zamanlanmış yedekler (`[backup] dir`)
+  ve kurulumun yükseltme öncesi yedekleri (`backups\db`); her birinin zamanı ve boyutu.
+  - **Kopyasını kaydet…** seçilen yedeği seçtiğiniz klasöre (USB disk, paylaşım) kopyalar. Kopya
+    önce geçici bir adla yazılır, SHA-256'sı yedeğin kaydındaki özetle karşılaştırılır ve ancak
+    tutarsa asıl adını alır. Aynı adlı bir dosyanın üzerine yazılmaz.
+  - **Klasör yolunu kopyala** yedek klasörünün yolunu panoya alır.
+  - Yedek klasörlerini yalnızca yöneticiler okuyabilir. Dosya Gezgini'nde açmayı denerseniz
+    Windows "Devam" ile klasörün izinlerini değiştirmeyi önerir; kabul etmeyin (değişen izin bir
+    `acl_drift` uyarısıdır). Kopyayı bu pencereden alın.
+- **Kısayollar:** masaüstünde ve Başlat menüsünde **ARCILOGGER** (web arayüzünü varsayılan
+  tarayıcıda açar), Başlat menüsünde ayrıca **ARCILOGGER Durum**; hepsi ARCILOGGER simgesiyle.
 - **Başlatma:**
   - `\ARCILOGGER\Desktop\StatusWindow` zamanlanmış görevi, Administrators üyesi biri her oturum
-    açtığında pencereyi en yüksek yetkiyle açar. UAC sorusu çıkmaz. Bu yetki gereklidir, çünkü
-    veri klasörünün `state\` bölümünü yalnızca yöneticiler okuyabilir.
-  - Kapatılan pencere Başlat menüsünde **ARCILOGGER → ARCILOGGER Durum** ile yeniden açılır. Bu
-    kısayol UAC onayı ister.
+    açtığında programı en yüksek yetkiyle başlatır; yalnızca bildirim alanı simgesi görünür. UAC
+    sorusu çıkmaz. Bu yetki gereklidir, çünkü veri klasörünün `state\` bölümünü yalnızca
+    yöneticiler okuyabilir.
+  - Simge kapatıldıysa program Başlat menüsünde **ARCILOGGER → ARCILOGGER Durum** ile yeniden
+    açılır. Bu kısayol UAC onayı ister.
   - Onay verilmezse pencere yalnızca servisleri ve API'yi (varsayılan 8000 portunda) gösterir.
     Yapılandırma ve veri klasörü yalnızca yöneticilere açık olduğundan diğer satırlar
     "okunamadı" der.
-- Her oturumda tek pencere açılır. İkinci kez başlatmak açık olanı öne getirir (kısayol bunun
-  için de UAC onayı ister).
+- Her oturumda tek pencere açılır. İkinci kez başlatmak açık olanı gösterir; simge açıksa bunun
+  için UAC onayı gerekmez.
 - Yükseltme ve kaldırma pencereyi kapatır. Yükseltmeden sonra pencere bir sonraki oturum
   açılışında ya da kısayolla yeniden açılır.
 - Komut satırından tek bakış (yönetici PowerShell):

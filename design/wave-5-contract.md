@@ -882,6 +882,60 @@ The later pull request merges `origin/wave-5` and keeps both sides.
 
 ---
 
+## 7. Addendum C (2026-11-07): icon and shortcuts, notification-area icon, backups, database page
+
+The owner's requests of 2026-11-07 (release 0.3.0, built by the manager on the branch of #231):
+
+- "uygulamanın niye masaüstü bir logosu veya bir simgesi yok çalıştırabilmem için";
+- "o durum gösterge sayfası vardır ya. onu system tray kısmında görebilmek istiyorum";
+- in Ayarlar, data control: choose where the backups are saved, open the backups' location, a
+  mirror of the backups (for example on a NAS);
+- a database page: how full it is and which database it uses;
+- a way to remove ARCILOGGER together with its data (an owner decision, C8).
+
+**C1 Icon and shortcuts.** `tools/icons/build-icons.mjs` draws the Windows icons from
+`web/public/favicon.svg` (white on a rounded square; Chromium of `web/`) into
+`deploy/windows/desktop/icons/`: `arcilogger.ico` (16-256 px; 32-bit BMP images, PNG at 256 px)
+and `tray-<level>.ico` for the levels `ok`, `warn`, `unknown`, `critical` in the colours of
+`status.COLOURS`. The bundle carries them (`Build-ArciBundle.ps1`), the program has them in
+`desktop\icons\`. The installer (`Set-ArciShortcuts`, `Remove-ArciShortcuts`) makes, for every
+user: Start menu folder `ARCILOGGER` with **ARCILOGGER** (`explorer.exe https://localhost/`) and
+**ARCILOGGER Durum** (`pythonw.exe -I -m arcilogger_core.desktop`), desktop **ARCILOGGER**; all
+with `arcilogger.ico`. A failure is a warning. Setup and its uninstaller carry the icon
+(`SetupIconFile`, `UninstallDisplayIcon={uninstallexe}`).
+
+**C2 Notification-area icon** (`arcilogger_core.desktop.tray`, standard library `ctypes`).
+- The logon task starts `-I -m arcilogger_core.desktop --no-elevate --tray`: only the icon shows.
+  The icon has the level's colour, tooltip `ARCILOGGER Durum — <TR> / <EN>`; on the rise to
+  critical a notification (title `ARCILOGGER — Sorun var / Problem`, text: the first critical row)
+  next to the taskbar flash.
+- Left click: show the window. Right-click menu (`tray.MENU`): show, open the web interface,
+  Backups (C3), close the icon (ends the program). Closing the window hides it while the icon
+  runs; without an icon (no notification area) the window behaves as before.
+- A second start asks the running program to show its window: registered message
+  `ARCILOGGER-Durum-Show` to the window class `ARCILOGGER-Durum-Tray`, let through the message
+  filter (with `TaskbarCreated`), so a start without rights needs no UAC prompt.
+- I1-I5 hold: the icon changes nothing.
+
+**C3 Backups window** (`arcilogger_core.desktop.backups`, `window.BackupsWindow`). Lists the
+`*.dump` files of `[backup] dir` and `backups\db`, newest first (time, size). **Kopyasını kaydet…**
+copies the selected dump (and its sidecar) to a folder chosen in a dialog: written as
+`<name>.partial`, flushed, hashed from disk, renamed only when the hash equals the sidecar's
+(else the source's); an existing name is never overwritten; a dump whose content differs from
+its sidecar is refused ("bozulmuş olabilir"). It replaces "open the folder in Explorer": the
+backup folders are administrators-only and Explorer's "Continue" would add an ACL entry (an
+`acl_drift` alert).
+
+**C4-C7** (backup folder from the browser, backup list on the web page, a mirror of the backups,
+the database page) are described with their implementation below, in this addendum's own
+"Deviations" entry. **C8** (removal with the data) waits for the owner's answer (Owner
+questions).
+
+Tests: `tests/test_windows_icons.py`, `tests/test_desktop_task.py`,
+`core/tests/test_desktop_backups.py`, `core/tests/test_desktop_status.py` (start modes),
+`core/tests/test_desktop_window.py` and `--self-test` (icon follows the level, notifications,
+commands, hide on close, Backups list and copy); the real icon on Windows CI.
+
 ## Manager clarifications (2026-11-02, answers on #101 and #106)
 
 These change the contract text above. Where a section says otherwise, the clarification wins.
@@ -978,6 +1032,7 @@ All Wave 5 questions are answered (2026-11-02).
 | Q3 | Renew report tokens as well? | **Yes, the stored ones** (owner: "ne daha iyi ve güvenliyse"): `exports/reports/*.pdf.zd` (D3). |
 | Q4 | Revocation lists are never deleted. Limit them? | **Keep all** (default). `crl status` reports their count and size. Revisit after the first year on site. |
 | Q5 | Renewal window? | **180 days** (default; configurable, 30–730). |
+| Q6 (2026-11-07, C8) | Removal together with the data? Proposal: Setup's uninstaller keeps the data by default; a separate box "Tüm verileri de sil (geri alınamaz)" plus the organisation name typed deletes raw logs, vault, backups, configuration and ARCILOGGER's database and role (PostgreSQL itself stays: the customer installs it); a 5651 warning recommends legal review; only at the server, never from the browser. | **Open** — until answered nothing deletes data outside the retention job. |
 
 ## Deviations
 
