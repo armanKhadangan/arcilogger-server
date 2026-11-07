@@ -1368,7 +1368,74 @@ created (`C:\Program Files\ARCILOGGER`, `.previous`, `.failed-*`, `.rolled-back-
 `VERSION.json` or `INSTALL-IN-PROGRESS.json`). Any other folder — a mistyped `-InstallDir`, a drive
 root, a Windows folder — stops it before anything is removed. It **never** deletes the raw logs,
 the vault, exports, backups (`D:\ARCILOGGER`), the configuration, the secret store and the
-browser administration's `admin\` folder (`C:\ProgramData\ARCILOGGER`) or the database.
+browser administration's `admin\` folder (`C:\ProgramData\ARCILOGGER`) or the database. The
+stored records are legal evidence: they are deleted by the retention job, with a destruction
+record. The one exception is a deliberate **removal with the data** (section 14.1).
+
+Removing through the setup (Settings → Apps → ARCILOGGER → Uninstall) first asks **"DELETE ALL
+THE DATA AS WELL?"**. The default button is **No**: the data is kept and the removal above runs. A
+silent uninstall (`/SILENT`, `/VERYSILENT`) always keeps the data.
+
+### 14.1 Removal with the data ("Tüm verileri de sil")
+
+To reset the server, or to remove ARCILOGGER with all its records, answer **Yes** to that
+question or run in an administrator console:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File "C:\Program Files\ARCILOGGER\installer\Install-Arcilogger.ps1" -Uninstall -RemoveData
+```
+
+**This cannot be undone.** It runs only at the server's console, as an administrator; never from
+the browser.
+
+**Deleted:**
+- ARCILOGGER's database and role: `[database] name`, the databases a restore set aside
+  (`install\state.json`) and every other database the role owns (`DROP DATABASE … WITH
+  (FORCE)`, `DROP ROLE`). `postgres`, `template0`, `template1`, a superuser and the account
+  connected are never dropped.
+- ARCILOGGER's folders in the data folder (e.g. `D:\ARCILOGGER`): `spool`, `vault` (sealed days
+  included), `exports`, `state`, `logs`, `backups`; `[backup] dir` when it lies elsewhere.
+- The configuration folder `C:\ProgramData\ARCILOGGER`: the configuration, the secret store
+  (database, Kamu SM and SMTP passwords), the browser administration's `admin\` folder, Caddy's
+  certificate authority, the Zamane client, the installer's records.
+- Then everything of section 14: services, tasks, shortcuts, firewall rules, program folders.
+
+**Kept:** PostgreSQL itself, its data directory (e.g. `D:\ARCILOGGER\db`) and its other
+databases; anything in the data folder that is not ARCILOGGER's (the data folder is deleted only
+once empty); the **replica** and the **NAS copy** on other hosts (their administrators delete
+them); copies on USB disks; the Windows event logs.
+
+**Before it changes anything** the script:
+1. asks for the postgres password and reads the databases to drop from the server (PostgreSQL
+   out of reach stops it; `-SkipDatabase` keeps the database and removes the rest);
+2. shows the folders to delete with file counts and sizes, the number of sealed days and the
+   oldest, what is kept and the **5651 warning**;
+3. asks you to type the **organisation name** (`site_name`; without one, the computer name):
+   three tries, letter case and extra spaces do not count, Enter cancels. Without a console it
+   runs only with `-ConfirmRemoveData "<organisation name>"`.
+
+A name not confirmed, a data folder that is not certain (give it with `-DataRoot`), a folder that
+is a drive root, a Windows folder, or holds the program folder or PostgreSQL's data directory,
+or a link in a folder (a junction, a symbolic link, a hard link) stops it **before anything is
+removed** (exit code `2`). `-DryRun` shows the same list and neither asks nor deletes.
+
+Order: tasks waited for and removed, services stopped and removed, the database and the role
+dropped, the data folders deleted (Administrators take ownership to unlock the sealed files),
+**event 4130** written to the Application log (the Windows account that confirmed, the
+organisation, the databases and folders deleted, the sealed days; it stays in the log after the
+event source is gone), then the firewall and power settings, the configuration folder and the
+program folders. If it stops halfway (exit code `3`), run the same command again: what is gone
+is skipped.
+
+> **5651 warning:** ARCILOGGER keeps the traffic records for at least 730 days to support the
+> 5651 obligations. Deleting records whose retention has not run out may affect those
+> obligations: ask your legal counsel first and keep a destruction record
+> ([legal/saklama-imha-politikasi-taslak.md](legal/saklama-imha-politikasi-taslak.md)). As
+> ARCILOGGER's own audit log is deleted too, the record of the removal is event 4130 and the
+> install log (`%TEMP%\ARCILOGGER-uninstall-*.log`).
+
+If ARCILOGGER was removed with its data kept and the data is to go later: install the same
+version again (it adopts the existing data), then remove it with `-Uninstall -RemoveData`.
 
 ## 15. Troubleshooting
 

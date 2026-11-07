@@ -461,7 +461,8 @@ Start-ScheduledTask -TaskPath \ARCILOGGER\ -TaskName ApplySystem   # güvenlik d
 Olay kimlikleri (kaynak `ARCILOGGER-Admin`, Uygulama günlüğü): 4100/4199 hizmet başladı/duruyor,
 4101 sistem eşitlemesi istendi, 4102 uygulandı, 4103 başarısız, 4104 bekletiliyor ya da istemci
 kaydedildi, 4105 iptal, 4106 eşitleme sonucu, 4107 istemci onaylandı, 4110 mühürleme isteği, 4111
-görev isteği, 4120 reddedilen istek, 4121 kayıtlı kimlik bilgisi değişti (yalnızca adı). Bir olay
+görev isteği, 4120 reddedilen istek, 4121 kayıtlı kimlik bilgisi değişti (yalnızca adı), 4130 kurulum
+betiği verilerle birlikte kaldırdı ([KURULUM.md](KURULUM.md) bölüm 14.1). Bir olay
 yalnızca bir görevi uyandırır; yetki imzalı istektedir.
 
 ## 9. Sahada doğrulanacaklar

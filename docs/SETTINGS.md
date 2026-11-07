@@ -463,7 +463,8 @@ Start-ScheduledTask -TaskPath \ARCILOGGER\ -TaskName ApplySystem   # bring the f
 Event IDs (source `ARCILOGGER-Admin`, Application log): 4100/4199 service started/stopping, 4101
 system sync requested, 4102 applied, 4103 failed, 4104 held or a client recorded, 4105 cancelled,
 4106 sync result, 4107 client promoted, 4110 seal request, 4111 task request, 4120 request refused,
-4121 stored credential changed (its name only). An event only wakes a task; the authority is the
+4121 stored credential changed (its name only), 4130 the installer removed ARCILOGGER with its
+data ([INSTALL.md](INSTALL.md) section 14.1). An event only wakes a task; the authority is the
 signed request.
 
 ## 9. Verify on site

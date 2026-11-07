@@ -16,6 +16,13 @@ versions follow [Semantic Versioning](https://semver.org/).
 - **Yedekler…** lists the database backups and saves a copy where you choose (a USB disk, a share),
   checked against the backup's recorded SHA-256 before it gets its name. The backup folders stay
   administrators-only; File Explorer would offer to change their permissions.
+- **Removing ARCILOGGER with its data.** The uninstaller asks "TÜM VERİLER DE SİLİNSİN Mİ?" (No by
+  default; a silent uninstall keeps the data). Yes, or `Install-Arcilogger.ps1 -Uninstall
+  -RemoveData`, first shows what goes (the database, the raw logs, the vault with its sealed days,
+  backups, the configuration and the secret store) with the 5651 warning, then asks for the
+  postgres password and the organisation name. PostgreSQL itself, its data directory and the
+  copies on other hosts stay; the Application log keeps event 4130. Only at the server's console,
+  never from the browser.
 
 ### Database and backups
 

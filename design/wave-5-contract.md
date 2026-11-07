@@ -928,8 +928,8 @@ backup folders are administrators-only and Explorer's "Continue" would add an AC
 
 **C4-C7** (backup folder from the browser, backup list on the web page, a mirror of the backups,
 the database page) are described with their implementation below, in this addendum's own
-"Deviations" entry. **C8** (removal with the data) waits for the owner's answer (Owner
-questions).
+"Deviations" entry. **C8** (removal with the data) is built as the owner answered Q6 (Owner
+questions), described there too.
 
 Tests: `tests/test_windows_icons.py`, `tests/test_desktop_task.py`,
 `core/tests/test_desktop_backups.py`, `core/tests/test_desktop_status.py` (start modes),
@@ -1032,7 +1032,7 @@ All Wave 5 questions are answered (2026-11-02).
 | Q3 | Renew report tokens as well? | **Yes, the stored ones** (owner: "ne daha iyi ve güvenliyse"): `exports/reports/*.pdf.zd` (D3). |
 | Q4 | Revocation lists are never deleted. Limit them? | **Keep all** (default). `crl status` reports their count and size. Revisit after the first year on site. |
 | Q5 | Renewal window? | **180 days** (default; configurable, 30–730). |
-| Q6 (2026-11-07, C8) | Removal together with the data? Proposal: Setup's uninstaller keeps the data by default; a separate box "Tüm verileri de sil (geri alınamaz)" plus the organisation name typed deletes raw logs, vault, backups, configuration and ARCILOGGER's database and role (PostgreSQL itself stays: the customer installs it); a 5651 warning recommends legal review; only at the server, never from the browser. | **Open** — until answered nothing deletes data outside the retention job. |
+| Q6 (2026-11-07, C8) | Removal together with the data? Proposal: Setup's uninstaller keeps the data by default; a separate box "Tüm verileri de sil (geri alınamaz)" plus the organisation name typed deletes raw logs, vault, backups, configuration and ARCILOGGER's database and role (PostgreSQL itself stays: the customer installs it); a 5651 warning recommends legal review; only at the server, never from the browser. | **Answered 2026-11-07** (owner: "bu seçenek kesinlikle olsun"): as proposed; built as C8 in "Deviations — Addendum C". |
 
 ## Deviations
 
@@ -4197,6 +4197,52 @@ evidence copy), and old copies of the backups hold personal data and must be del
   `list_updated`, `dumps`, `mirror_target`, `mirror`). Ayarlar → Yedekleme shows the copy's field
   with the replica's target, the list with the folder's path ("Yolu kopyala") and the copy's last
   result; opening the folder or copying a dump to a USB disk is the tray's Backups window (C3).
+
+**C8 Removal with the data, as built** (Q6 answered 2026-11-07: "bu seçenek kesinlikle olsun").
+This is the one place outside the retention job that deletes sealed data, on the owner's
+decision; it runs only at the server, by an administrator, never from the browser.
+- **Setup's uninstaller** asks after its start ("TÜM VERİLER DE SİLİNSİN Mİ? Bu GERİ ALINAMAZ.",
+  TR/EN, with the 730-day and legal-review note): **No** is the default button and a silent
+  uninstall keeps the data; **Yes** runs `Install-Arcilogger.ps1 -Uninstall -RemoveData`. The
+  failure message's retry command keeps `-RemoveData`.
+- **Before any change** (`Initialize-DataRemoval`), the script: refuses (exit 2, "nothing
+  removed") a data folder it cannot be sure of (an unusable `data-root.txt`, or neither record,
+  configuration nor `-DataRoot`); asks for the postgres password and lists, as the server
+  answers, the databases (`[database] name`, the `replaced_databases` of `install\state.json`,
+  every other database the role owns) and whether the role is dropped (never a superuser or the
+  account psql connects as, and then nothing it owns is listed); never `postgres`,
+  `template0`, `template1`. PostgreSQL out of reach stops it (`-SkipDatabase`: keep the
+  database, remove the rest). It plans the folders (`Get-ArciDataRemovalPlan`): `spool`,
+  `vault`, `exports`, `state`, `logs`, `backups` of the data folder, `[backup] dir` when it lies
+  elsewhere, and the configuration folder; other names in the data folder (PostgreSQL's data
+  directory `db`, anything else) are kept and named, and the data folder goes only once empty.
+  It refuses a drive or share root, a Windows folder (or one holding it), a folder in the Windows
+  folder, one holding the program folder or PostgreSQL's data directory, and data and
+  configuration folders inside each other; and a folder with a link in it (a junction, a
+  symbolic link or a hard link: never followed). It prints what goes with file counts and sizes,
+  the sealed days and the oldest, what stays (PostgreSQL, the replica and the NAS copy on other
+  hosts, USB copies, the Windows event logs) and the 5651 warning (ARCILOGGER keeps the records at
+  least 730 days to support the 5651 obligations; ask legal counsel; keep a destruction record).
+  Then the organisation name (`site_name`, else the computer name) must be typed (three tries;
+  spaces and letter case do not count; Enter cancels) or given with `-ConfirmRemoveData`; without
+  a console and without it, exit 2. A dry run prints the same and asks nothing.
+- **Order:** tasks paused and waited for, services stopped and removed, tasks unregistered (as a
+  plain removal); `DROP DATABASE … WITH (FORCE)` for each database, then `DROP ROLE` (a failure
+  there is a warning); each data folder (`Remove-ArciDataFolder`: on Windows Administrators take
+  ownership, the folder gets Administrators and SYSTEM only, every item below its inherited
+  entries, which removes the sealed files' deny entries, and its attributes cleared; then it is
+  deleted); **event 4130** (Warning, source `ARCILOGGER-Admin`: who confirmed, the organisation,
+  the databases, the folders, the sealed days) while the source is still registered; the event
+  source, the firewall rules and the power settings as before; then the configuration folder
+  (the firewall and power steps read their records there); the data folder if empty; the program
+  folders last. A failure after the first change exits 3; running it again goes on (each step
+  skips what is gone).
+- `arcilogger_core.admin.contract.Event.DATA_REMOVED = 4130`. Tests: the setup's question and
+  messages, the plan's targets and refusals, the confirmation, the SQL and its parsing (and
+  against a real PostgreSQL), a folder's facts and removal (read-only files; a hard link stops
+  it; on Windows locked sealed files go and a junction stops it), dry runs (plan order,
+  `-SkipDatabase`, the refusals, `-RemoveData` only with `-Uninstall`), and the simulated
+  removal (with the right and with another organisation name).
 
 **C4 (choosing the backup folder from the browser) is not built in this round**: the new folder
 needs its administrators-only rights set by ApplySystem as SYSTEM (`Sync-ArciSystem.ps1`), which

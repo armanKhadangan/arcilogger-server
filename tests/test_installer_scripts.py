@@ -6399,6 +6399,42 @@ if ($Scenario -eq 'uninstall-desktop') {
     # What Set-ArciPower.ps1 recorded on a desktop Windows at the installation.
     Write-Text (Join-Path $programData 'install/power-state.json') '{"schema": 1, "previous": {}}'
 }
+# uninstall-data*: -Uninstall -RemoveData over a data folder with every kind of ARCILOGGER data,
+# PostgreSQL's data directory (db, kept) and a file of the operator's (kept), a backup folder
+# outside it ([backup] dir) and a restore's replaced database in install\state.json. On Windows
+# the sealed files are locked as arcilogger_core.immutability locks them.
+$backupElsewhere = Join-Path $Base 'elsewhere/backups'
+if ($Scenario.StartsWith('uninstall-data')) {
+    $files = @(
+        'spool/fw/2026-11-07.log', 'spool/_audit/2026-11-07.jsonl',
+        'vault/2026/11/05/manifest-2026-11-05.json', 'vault/2026/11/06/manifest-2026-11-06.json',
+        'vault/2026/11/06/fw.log.gz', 'vault/deletions/anchor.json', 'exports/package.zip',
+        'state/seal/2026-11-06.json', 'state/crl/kamusm.crl', 'logs/collector.log',
+        'backups/db/arcilogger-20261101-before-1.0.0.dump',
+        'backups/scheduled/arcilogger-20261107-014000.dump',
+        'db/PG_VERSION', 'notes.txt'
+    )
+    foreach ($relative in $files) {
+        $path = Join-Path $dataRoot $relative
+        [void](New-Item -ItemType Directory -Path (Split-Path -Parent $path) -Force)
+        Write-Text $path 'x'
+    }
+    [void](New-Item -ItemType Directory -Path $backupElsewhere -Force)
+    Write-Text (Join-Path $backupElsewhere 'arcilogger-20261107-014000.dump') 'dump'
+    $toml = "site_name = `"Örnek A.Ş.`"`n[backup]`ndir = '$backupElsewhere'`n"
+    Write-Text (Join-Path $programData 'arcilogger.toml') $toml
+    $recorded = '{"database_provisioned": true, "replaced_databases": [{"name": ' +
+    '"arcilogger_replaced_20261104120000", "dump": "x"}, {"name": "Not Valid"}]}'
+    Write-Text (Join-Path $programData 'install/state.json') $recorded
+    if ($env:OS -eq 'Windows_NT') {
+        $day = 'vault/2026/11/06'
+        foreach ($sealed in @("$day/fw.log.gz", "$day/manifest-2026-11-06.json")) {
+            $path = Join-Path $dataRoot $sealed
+            & attrib.exe +R $path
+            & icacls.exe $path /deny '*S-1-1-0:(DE,WD,AD,WA,WEA)' | Out-Null
+        }
+    }
+}
 # The configuration: as the version installed before the run wrote it, or (rollback) as the
 # browser changed it after the upgrade (a source switched off), with the copy that upgrade kept.
 $configPath = Join-Path $programData 'arcilogger.toml'
@@ -6454,6 +6490,12 @@ if ($Scenario.StartsWith('rollback-restore-')) {
     if (-not $Scenario.Contains('-cancel')) { $mode['Force'] = $true }
     if (-not $Scenario.Contains('-no-dump')) { Write-Text $mode['DatabaseDump'] 'PGDMP simulated' }
 }
+# uninstall-data: the organisation name in other letter case; -wrong-name: another name.
+if ($Scenario.StartsWith('uninstall-data')) {
+    $mode['RemoveData'] = $true
+    $mode['ConfirmRemoveData'] = ' örnek   a.ş. '
+    if ($Scenario -eq 'uninstall-data-wrong-name') { $mode['ConfirmRemoveData'] = 'Başka Kurum' }
+}
 $bundle = Join-Path $Base 'bundle'
 $taskWait = if ($Scenario -in @('tasks-busy', 'uninstall-busy-stuck')) { 0 } else { 1 }
 . $Installer @mode -InstallDir $program -ProgramDataDir $programData -DataRoot $dataRoot `
@@ -6465,7 +6507,8 @@ if ($Scenario -eq 'desktop-upgrade') { $script:IsClientOs = $true }
 
 $sim = @{
     services = @{}; tasks = @{}; exit = $null; message = $null; error = $null; failed_once = $false
-    api_calls = 0; https_calls = 0; api_uri = $null; busy_polls = 0
+    api_calls = 0; https_calls = 0; api_uri = $null; busy_polls = 0; event = $null
+    sql = (New-Object System.Collections.Generic.List[string])
     calls = (New-Object System.Collections.Generic.List[string])
     registered_from = (New-Object System.Collections.Generic.List[string])
     processes = (New-Object System.Collections.Generic.List[object])
@@ -6663,6 +6706,31 @@ function Test-ArciProgramConfig {
     $null
 }
 function Unregister-ArciEventSource { $sim.calls.Add('event source removed'); 'removed' }
+function Write-ArciEvent {
+    param([int]$Id, [string]$Level, [string]$Message)
+    $sim.calls.Add("event $Id $Level")
+    $sim.event = $Message
+    $true
+}
+if ($Scenario.StartsWith('uninstall-data')) {
+    # psql.exe where the PostgreSQL service names it, and the postgres password given
+    # (-PgSuperuserCredential): the removal's query runs through Invoke-PgTool below.
+    $script:PgBin = Join-Path $Base 'pgbin'
+    [void](New-Item -ItemType Directory -Path $script:PgBin -Force)
+    Write-Text (Join-Path $script:PgBin 'psql.exe') 'stub'
+    $secret = ConvertTo-SecureString 'x' -AsPlainText -Force
+    $script:PgCredential = New-Object System.Management.Automation.PSCredential `
+        -ArgumentList 'postgres', $secret
+    function Find-PostgresService { $null }
+    # The module's own removal (it calls the real Remove-Item), recorded by its path below $Base.
+    function Remove-ArciDataFolder {
+        param([string]$Path)
+        $relative = $Path.Substring($Base.Length).TrimStart([char]92, [char]47)
+        $relative = $relative.Replace([char]92, [char]47)
+        $sim.calls.Add("remove-data $relative")
+        ArciInstall\Remove-ArciDataFolder -Path $Path
+    }
+}
 function Invoke-AclSteps { $sim.calls.Add('acl') }
 # ArciAdmin's entries on arcilogger.toml and secrets.json once more (after a secret was stored).
 function Restore-ConfigFileAccess {
@@ -6714,6 +6782,17 @@ function Get-PgCredential {
 function Invoke-PgTool {
     param([string]$Tool, [string[]]$ArgumentList, [string]$StdinText, [string[]]$Redact = @())
     $sim.calls.Add("pg $Tool")
+    if ($Scenario.StartsWith('uninstall-data') -and $Tool -eq 'psql.exe') {
+        # What PostgreSQL 16 answers the removal's query (Get-ArciDatabaseRemovalSql): both
+        # databases, the role to drop, its data directory (in the data folder, as the guide has it).
+        $sim.sql.Add([string]$StdinText)
+        $out = ''
+        if ([string]$StdinText -match "'database\|'") {
+            $out = "database|arcilogger`ndatabase|arcilogger_replaced_20261104120000`n" +
+            "role|arcilogger|drop`ndata_directory|$(Join-Path $dataRoot 'db')`n"
+        }
+        return [pscustomobject]@{ ExitCode = 0; StdOut = $out; StdErr = '' }
+    }
     if ($Scenario -eq 'rollback-restore-db-fails' -and $Tool -eq 'psql.exe') {
         throw ('psql.exe: çıkış kodu 2 [exit code]: connection to server at "127.0.0.1", ' +
             'port 5432 failed')
@@ -7063,8 +7142,18 @@ $report = [ordered]@{
     firewall = $firewall; power = $power
     transcript = $sim.transcript; redirected = $sim.redirected
     data_kept = (Test-Path -LiteralPath (Join-Path $dataRoot 'vault/sealed.log.gz'))
+    data_left = $(if (Test-Path -LiteralPath $dataRoot) {
+            @(Get-ChildItem -LiteralPath $dataRoot -Force | ForEach-Object { $_.Name } |
+                    Sort-Object)
+        })
+    backup_elsewhere_left = (Test-Path -LiteralPath $backupElsewhere)
+    programdata_left = (Test-Path -LiteralPath $programData)
+    event = $sim.event
+    sql = $sim.sql.ToArray()
     config = $(if (Test-Path $configPath) { [System.IO.File]::ReadAllText($configPath) })
-    config_files = @(Get-ChildItem -LiteralPath $programData -File | ForEach-Object { $_.Name })
+    config_files = @(if (Test-Path -LiteralPath $programData) {
+            Get-ChildItem -LiteralPath $programData -File | ForEach-Object { $_.Name }
+        })
     config_kept = (Test-Path -LiteralPath $statePath)
     module_path = $env:PSModulePath
     plan = @($script:Plan.ToArray())
@@ -8935,7 +9024,555 @@ def test_setup_uninstaller_reports_a_failed_removal() -> None:
         message = re.search(rf"(?m)^{language}\.UninstallFailed=(.+)$", text)
         assert message is not None, language
         assert "%1" in message.group(1)
-        assert '-File "%2" -Uninstall' in message.group(1)
+        assert '-File "%2" -Uninstall%3' in message.group(1), "the retry keeps -RemoveData"
+
+
+# --- removal with the data (-Uninstall -RemoveData, contract addendum C8) ------------------------
+
+
+def test_setup_uninstaller_asks_whether_to_delete_the_data_too() -> None:
+    """Owner decision Q6: the uninstaller offers "Tüm verileri de sil"; No is the default button,
+    a silent uninstall keeps the data, and Yes only passes -RemoveData: the script shows what
+    goes and asks for the organisation name before it changes anything."""
+    text = (INSTALLER / "ARCILOGGER.iss").read_bytes()[len(BOM) :].decode("utf-8")
+    step = text[text.index("procedure CurUninstallStepChanged") :]
+    step = step[: step.index("\nend;")]
+    question = "SuppressibleMsgBox(CustomMessage('RemoveDataQuestion'), mbConfirmation, "
+    assert question + "MB_YESNO or MB_DEFBUTTON2, IDNO) = IDYES then" in step
+    assert step.index("if not UninstallSilent() then") < step.index("RemoveDataQuestion")
+    assert "RemoveData := ' -RemoveData'" in step
+    assert "'\" -Uninstall' + RemoveData" in step
+    assert step.index("RemoveDataQuestion") < step.index("Exec(PowerShellPath()")
+    for language, keep, wording in (
+        ("turkish", "KORUNUR", "TÜM VERİLER DE SİLİNSİN Mİ? Bu GERİ ALINAMAZ."),
+        ("english", "KEPT", "DELETE ALL THE DATA AS WELL? This CANNOT be undone."),
+    ):
+        message = re.search(rf"(?m)^{language}\.RemoveDataQuestion=(.+)$", text)
+        assert message is not None, language
+        assert keep in message.group(1)
+        assert wording in message.group(1)
+        assert "730" in message.group(1)
+        assert "5651" in message.group(1)
+
+
+def test_removal_event_id_is_the_contract_s() -> None:
+    """Event 4130 is registered with the other IDs of the source ARCILOGGER-Admin."""
+    script = INSTALL_SCRIPT.read_text(encoding="utf-8-sig")
+    assert int(Event.DATA_REMOVED) == 4130
+    assert "Write-ArciEvent -Id 4130 -Level 'Warning'" in script
+
+
+def _data_removal_report(engine: str, tmp_path: Path, scenario: str) -> dict[str, Any]:
+    report = simulate(engine, tmp_path, scenario)
+    left = report["data_left"]
+    report["data_left"] = [left] if isinstance(left, str) else left
+    return report
+
+
+def test_uninstall_with_the_data_removes_the_database_and_every_folder(
+    engine: str, tmp_path: Path
+) -> None:
+    """-Uninstall -RemoveData: the database (both, with the restore's replaced one) and its role,
+    every ARCILOGGER folder of the data folder (sealed files too, locked on Windows), the backup
+    folder outside it and the configuration folder; PostgreSQL's data directory and the
+    operator's file stay, and so does the data folder that holds them."""
+    report = _data_removal_report(engine, tmp_path, "uninstall-data")
+    assert report["exit"] is None, report["message"]
+    assert report["data_left"] == ["db", "notes.txt"]
+    assert report["backup_elsewhere_left"] is False
+    assert report["programdata_left"] is False
+    assert _folders(report) == {"ARCILOGGER.notes": None}
+    assert report["services"] == {}
+    assert report["tasks"] == {}
+    assert report["firewall"] == "remove=True"
+    query, drop, role = report["sql"]
+    assert "\\set db_names 'arcilogger,arcilogger_replaced_20261104120000'" in query
+    assert "Not Valid" not in query, "only valid names from install\\state.json"
+    assert "\\set db_names 'arcilogger,arcilogger_replaced_20261104120000'" in drop
+    assert "DROP DATABASE IF EXISTS %I WITH (FORCE)" in drop
+    assert "\\set role_name 'arcilogger'" in role
+    assert "DROP ROLE IF EXISTS %I" in role
+    calls = report["calls"]
+    data = [c.removeprefix("remove-data ") for c in calls if c.startswith("remove-data ")]
+    folders = ("spool", "vault", "exports", "state", "logs", "backups")
+    assert data == [
+        *(f"data/ARCILOGGER/{folder}" for folder in folders),
+        "elsewhere/backups",
+        "programdata/ARCILOGGER",
+    ], "never db, notes.txt or the data folder that still holds them"
+    # Nothing is changed before the tasks are paused and the services are gone; the data goes
+    # before the event, the event before its source; the firewall and power steps read their
+    # records in the configuration folder, which goes after them; the program folder last.
+    position = {call: index for index, call in enumerate(calls)}
+    assert (
+        position["unregister Seal state=Disabled"] < position["remove-data data/ARCILOGGER/spool"]
+    )
+    assert position["remove-data elsewhere/backups"] < position["event 4130 Warning"]
+    assert position["event 4130 Warning"] < position["event source removed"]
+    assert position["event source removed"] < position["remove-data programdata/ARCILOGGER"]
+    assert position["remove-data programdata/ARCILOGGER"] < position["remove ARCILOGGER"]
+    event = report["event"]
+    assert "Örnek A.Ş." in event
+    assert "arcilogger, arcilogger_replaced_20261104120000" in event
+    assert "2 mühürlü gün [sealed days], en eskisi [oldest] 2026-11-05" in event
+    kept = {item["id"]: item for item in report["plan"] if item["status"] == "kept"}
+    assert set(kept) == {"keep.postgresql", "keep.other", "keep.remote"}
+    confirmed = next(item for item in report["plan"] if item["id"] == "data.confirm")
+    assert confirmed["status"] == "done"
+    assert confirmed["detail"] == "Örnek A.Ş."
+
+
+def test_uninstall_with_the_data_and_another_name_changes_nothing(
+    engine: str, tmp_path: Path
+) -> None:
+    report = _data_removal_report(engine, tmp_path, "uninstall-data-wrong-name")
+    assert report["exit"] == 2
+    assert "[the organisation name was not confirmed, nothing removed]" in report["message"]
+    assert not [c for c in report["calls"] if c.startswith(("stop ", "exe sc.exe", "remove "))]
+    assert report["tasks"]["Seal"] == "Ready", "never paused"
+    assert _running(report) == ALL_SERVICES
+    assert report["data_kept"] is True
+    assert report["programdata_left"] is True
+    assert report["backup_elsewhere_left"] is True
+    assert len(report["sql"]) == 1, "only the query"
+    assert report["event"] is None
+
+
+def _write_removal_config(tmp_path: Path, extra: str = "") -> Path:
+    """arcilogger.toml of a dry run's installation: the organisation, its data folder."""
+    config = tmp_path / "programdata" / "ARCILOGGER" / "arcilogger.toml"
+    config.parent.mkdir(parents=True, exist_ok=True)
+    data = tmp_path / "data" / "ARCILOGGER"
+    data_dir = str(data).replace("'", "")
+    config.write_text(
+        f"site_name = \"{SITE_NAME}\"\ndata_dir = '{data_dir}'\n{extra}", encoding="utf-8"
+    )
+    return data
+
+
+def test_dry_run_uninstall_with_the_data_plans_each_deletion(engine: str, tmp_path: Path) -> None:
+    bundle = make_fake_bundle(tmp_path)
+    program = write_version(tmp_path / "program" / "ARCILOGGER", "9.9.9", "1" * 64)
+    data = _write_removal_config(tmp_path)
+    for name in ("vault/2026/11/06/manifest-2026-11-06.json", "spool/fw/2026-11-07.log"):
+        (data / name).parent.mkdir(parents=True, exist_ok=True)
+        (data / name).write_text("x", encoding="utf-8")
+    (data / "db").mkdir()
+    result, plan = dry_run(engine, tmp_path, bundle, "-Uninstall", "-RemoveData")
+    assert_dry_run_exit(result, plan)
+    ids = _ids(plan)
+    _before(
+        ids,
+        "tasks.disable",
+        "services.remove",
+        "tasks.unregister",
+        "database.remove",
+        "data.remove",
+        "data.event",
+        "eventlog.remove",
+        "firewall.remove",
+        "config.remove",
+        "data.root",
+        "program.remove",
+    )
+    removed = [item["detail"] for item in plan["items"] if item["id"] == "data.remove"]
+    assert removed == [str(data / "spool"), str(data / "vault")], "only what is there"
+    config = [item["detail"] for item in plan["items"] if item["id"] == "config.remove"]
+    assert config == [str(tmp_path / "programdata" / "ARCILOGGER")]
+    database = next(item for item in plan["items"] if item["id"] == "database.remove")
+    assert database["detail"] == {"databases": ["arcilogger"], "role": "arcilogger"}
+    confirm = next(item for item in plan["items"] if item["id"] == "data.confirm")
+    assert confirm["status"] == "planned"
+    assert confirm["detail"] == SITE_NAME
+    kept = {item["id"] for item in plan["items"] if item["status"] == "kept"}
+    assert "keep.data" not in kept
+    assert "keep.database" not in kept
+    assert str(program) in [i["detail"] for i in plan["items"] if i["id"] == "program.remove"]
+    stdout = _unwrapped(result.stdout)
+    assert _unwrapped("[ALL DATA WILL BE DELETED, IRREVERSIBLY]") in stdout
+    assert _unwrapped("1 mühürlü gün [sealed days]; en eskisi [oldest] 2026-11-06") in stdout
+    assert _unwrapped("en az 730 gün saklar") in stdout
+    assert _unwrapped("hukuk danışmanınıza danışın") in stdout
+    assert (data / "vault" / "2026" / "11" / "06" / "manifest-2026-11-06.json").is_file()
+
+
+def test_dry_run_uninstall_with_the_data_keeps_the_database_with_skip_database(
+    engine: str, tmp_path: Path
+) -> None:
+    bundle = make_fake_bundle(tmp_path)
+    write_version(tmp_path / "program" / "ARCILOGGER", "9.9.9", "1" * 64)
+    _write_removal_config(tmp_path)
+    result, plan = dry_run(engine, tmp_path, bundle, "-Uninstall", "-RemoveData", "-SkipDatabase")
+    assert_dry_run_exit(result, plan)
+    ids = _ids(plan)
+    assert "database.remove" not in ids
+    assert "keep.database" in ids
+    assert "config.remove" in ids
+
+
+@pytest.mark.parametrize(
+    "extra", [["-RemoveData"], ["-ConfirmRemoveData", SITE_NAME], ["-Upgrade", "-RemoveData"]]
+)
+def test_remove_data_needs_uninstall(engine: str, tmp_path: Path, extra: list[str]) -> None:
+    bundle = make_fake_bundle(tmp_path)
+    result, plan = dry_run(engine, tmp_path, bundle, *extra, incomplete=True)
+    assert result.returncode == 2, result.stdout + result.stderr
+    assert _unwrapped("[only with -Uninstall]") in _unwrapped(result.stdout)
+    assert "program.create" not in _ids(plan)
+
+
+def test_confirm_remove_data_needs_remove_data(engine: str, tmp_path: Path) -> None:
+    bundle = make_fake_bundle(tmp_path)
+    result, _ = dry_run(
+        engine, tmp_path, bundle, "-Uninstall", "-ConfirmRemoveData", SITE_NAME, incomplete=True
+    )
+    assert result.returncode == 2, result.stdout + result.stderr
+    assert _unwrapped("[only with -RemoveData]") in _unwrapped(result.stdout)
+
+
+@pytest.mark.parametrize("case", ["drive-root", "hard-link", "no-data-root"])
+def test_dry_run_uninstall_with_the_data_refuses_before_any_change(
+    engine: str, tmp_path: Path, case: str
+) -> None:
+    """A [backup] dir at a drive root, a link in a data folder (never followed), or a data folder
+    nothing names: the removal stops with 2 before the tasks are paused."""
+    bundle = make_fake_bundle(tmp_path)
+    write_version(tmp_path / "program" / "ARCILOGGER", "9.9.9", "1" * 64)
+    root = "C:\\" if sys.platform == "win32" else "/"
+    extra = f"[backup]\ndir = '{root}'\n" if case == "drive-root" else ""
+    data = _write_removal_config(tmp_path, extra)
+    elsewhere = tmp_path / "elsewhere.txt"
+    elsewhere.write_text("not ARCILOGGER's", encoding="utf-8")
+    if case == "hard-link":
+        (data / "vault").mkdir(parents=True)
+        os.link(elsewhere, data / "vault" / "linked.txt")
+    if case == "no-data-root":
+        config = tmp_path / "programdata" / "ARCILOGGER" / "arcilogger.toml"
+        config.write_text(f'site_name = "{SITE_NAME}"\n', encoding="utf-8")
+    result, plan = dry_run(
+        engine,
+        tmp_path,
+        bundle,
+        "-Uninstall",
+        "-RemoveData",
+        data_root=case != "no-data-root",
+        incomplete=True,
+    )
+    assert result.returncode == 2, result.stdout + result.stderr
+    ids = _ids(plan)
+    assert "data.refuse" in ids
+    assert "tasks.disable" not in ids, "refused before any change"
+    stdout = _unwrapped(result.stdout)
+    assert _unwrapped("nothing removed]") in stdout
+    expected = {
+        "drive-root": "[a drive or share root]",
+        "hard-link": "[a link (reparse point or hard link) in a folder to delete",
+        "no-data-root": "[the data folder is not certain: give it with -DataRoot",
+    }[case]
+    assert _unwrapped(expected) in stdout
+    assert elsewhere.read_text(encoding="utf-8") == "not ARCILOGGER's"
+
+
+_REMOVAL_FUNCTIONS_SCRIPT = r"""
+param([string]$ModulePath, [string]$Base, [string]$OutputPath)
+$ErrorActionPreference = 'Stop'
+Set-StrictMode -Version 2.0
+Import-Module $ModulePath -Force
+$sep = [System.IO.Path]::DirectorySeparatorChar
+$data = Join-Path $Base 'data'
+$config = Join-Path $Base 'programdata'
+$program = Join-Path $Base 'program'
+function Plan([hashtable]$Extra) {
+    $arguments = @{ DataRoot = $data; ProgramDataDir = $config; InstallDir = $program }
+    foreach ($key in $Extra.Keys) { $arguments[$key] = $Extra[$key] }
+    $plan = Get-ArciDataRemovalPlan @arguments
+    [ordered]@{
+        targets = @($plan.Targets | ForEach-Object { $_.Path }); root = $plan.Root
+        kept = @($plan.Kept | ForEach-Object { [ordered]@{ path = $_.Path; why = $_.Why } })
+        problems = @($plan.Problems)
+    }
+}
+$pgData = Join-Path $data 'db'
+$results = [ordered]@{
+    plain = (Plan @{ DataRootNames = @('spool', 'Vault', 'db', 'notes', 'yedek'); Keep = @($pgData);
+            BackupDir = (Join-Path $data 'yedek') })
+    backup_inside = (Plan @{ BackupDir = (Join-Path $data 'backups/scheduled') })
+    backup_elsewhere = (Plan @{ BackupDir = (Join-Path $Base 'elsewhere') })
+    pg_in_state = (Plan @{ Keep = @((Join-Path $data 'state/pg')) })
+    program_in_backup = (Plan @{ BackupDir = $Base })
+    nested = (Plan @{ ProgramDataDir = (Join-Path $data 'config') })
+    system = (Plan @{ SystemFolders = @((Join-Path $data 'logs/Users')) })
+    windows = (Plan @{
+            BackupDir = (Join-Path $Base 'Windows/Temp/x')
+            WindowsFolder = (Join-Path $Base 'Windows')
+        })
+    share_root = (Plan @{ BackupDir = '\\nas\yedek' })
+}
+$results['confirm'] = @(
+    (Test-ArciRemovalConfirmation -Expected 'Örnek A.Ş.' -Typed '  örnek   a.ş. '),
+    (Test-ArciRemovalConfirmation -Expected 'Örnek A.Ş.' -Typed 'Örnek A.S.'),
+    (Test-ArciRemovalConfirmation -Expected 'Örnek A.Ş.' -Typed ''),
+    (Test-ArciRemovalConfirmation -Expected '' -Typed ''),
+    (Test-ArciRemovalConfirmation -Expected "Örnek`tA.Ş." -Typed 'Örnek A.Ş.')
+)
+$replaced = 'arcilogger_replaced_20261104120000'
+$sql = Get-ArciDatabaseRemovalSql -Name 'arcilogger' -Role 'arcilogger' `
+    -Extra @($replaced, 'arcilogger') -Databases @('arcilogger')
+$results['sql'] = [ordered]@{ query = $sql.Query; drop = $sql.Drop; role = $sql.Role }
+$refused = @()
+foreach ($bad in @("arcilogger'; DROP ROLE postgres; --", 'Arcilogger', '9abc')) {
+    try { [void](Get-ArciDatabaseRemovalSql -Name $bad -Role 'arcilogger'); $refused += $false }
+    catch { $refused += $true }
+}
+$results['sql_refused'] = $refused
+$answer = "database|arcilogger`r`ndatabase|$replaced`nrole|arcilogger|drop`n" +
+"data_directory|D:\ARCILOGGER\db`n`n"
+$parsed = ConvertFrom-ArciDatabaseRemovalQuery -Text $answer
+$results['parsed'] = [ordered]@{
+    databases = @($parsed.Databases); role = $parsed.Role; drop = $parsed.DropRole
+    dir = $parsed.DataDirectory
+}
+$kept = ConvertFrom-ArciDatabaseRemovalQuery -Text "role|postgres|keep`n"
+$results['parsed_keep'] = [ordered]@{
+    databases = @($kept.Databases); role = $kept.Role; drop = $kept.DropRole
+}
+# Folders on disk (made by the test): facts, then the removal.
+$tree = Join-Path $Base 'tree'
+$facts = Get-ArciFolderFacts -Path $tree
+$results['facts'] = [ordered]@{
+    exists = $facts.Exists; files = $facts.Files; bytes = $facts.Bytes; links = @($facts.Links)
+}
+$results['facts_missing'] = (Get-ArciFolderFacts -Path (Join-Path $Base 'missing')).Exists
+$results['removed'] = (Remove-ArciDataFolder -Path $tree)
+$results['tree_left'] = (Test-Path -LiteralPath $tree)
+$results['absent'] = (Remove-ArciDataFolder -Path (Join-Path $Base 'missing'))
+$linked = Join-Path $Base 'linked'
+try { $results['linked'] = (Remove-ArciDataFolder -Path $linked) }
+catch { $results['linked'] = $_.Exception.Message }
+$results['linked_left'] = @(Get-ChildItem -LiteralPath $linked -Recurse -Force |
+        ForEach-Object { $_.Name } | Sort-Object)
+[System.IO.File]::WriteAllText($OutputPath, (ConvertTo-Json -InputObject $results -Depth 5))
+"""
+
+
+def test_data_removal_functions(engine: str, tmp_path: Path) -> None:
+    """The plan (pure), the confirmation, the database SQL and its answer, the facts of a folder
+    and its removal: read-only files go, a hard link stops it before anything is deleted."""
+    base = tmp_path / "base"
+    tree = base / "tree"
+    (tree / "2026" / "11" / "06").mkdir(parents=True)
+    sealed = tree / "2026" / "11" / "06" / "fw.log.gz"
+    sealed.write_bytes(b"12345")
+    (tree / "notes.txt").write_bytes(b"123")
+    sealed.chmod(0o444)  # read-only (the attribute on Windows)
+    linked = base / "linked"
+    (linked / "vault").mkdir(parents=True)
+    (linked / "vault" / "kept.txt").write_text("x", encoding="utf-8")
+    elsewhere = base / "elsewhere.txt"
+    elsewhere.write_text("not ARCILOGGER's", encoding="utf-8")
+    os.link(elsewhere, linked / "vault" / "link.txt")
+    output = tmp_path / "removal.json"
+    script = write_script(tmp_path / "removal.ps1", _REMOVAL_FUNCTIONS_SCRIPT)
+    arguments = ["-ModulePath", str(MODULE), "-Base", str(base), "-OutputPath", str(output)]
+    result = run_powershell(engine, script, *arguments)
+    assert result.returncode == 0, result.stdout + result.stderr
+    results = read_json(output)
+    data, config = base / "data", base / "programdata"
+    standard = [str(data / name) for name in ("spool", "vault", "exports", "state", "logs")]
+    standard.append(str(data / "backups"))
+    plain = results["plain"]
+    assert plain["targets"] == [*standard, str(data / "yedek"), str(config)]
+    assert plain["root"] == str(data)
+    assert plain["kept"] == [
+        {
+            "path": str(data / "db"),
+            "why": "PostgreSQL veri klasörü, korunur [PostgreSQL's data directory, kept]",
+        },
+        {
+            "path": str(data / "notes"),
+            "why": "ARCILOGGER'ın değil, korunur [not ARCILOGGER's, kept]",
+        },
+    ]
+    assert plain["problems"] == []
+    assert results["backup_inside"]["targets"] == [*standard, str(config)]
+    assert results["backup_elsewhere"]["targets"][-2] == str(base / "elsewhere")
+    expectations = {
+        "pg_in_state": "[holds PostgreSQL's data directory]",
+        "program_in_backup": "[holds the program folder]",
+        "nested": "[the data folder and the configuration folder are inside each other",
+        "system": "[a Windows folder or holds one]",
+        "windows": "[inside the Windows folder]",
+        "share_root": "[a drive or share root]",
+    }
+    for case, expected in expectations.items():
+        problems = results[case]["problems"]
+        assert problems, case
+        assert any(expected in problem for problem in problems), (case, problems)
+    assert results["confirm"] == [True, False, False, False, True]
+    sql = results["sql"]
+    assert "\\set db_names 'arcilogger,arcilogger_replaced_20261104120000'" in sql["query"]
+    assert "datname NOT IN ('postgres', 'template0', 'template1')" in sql["query"]
+    assert "AND NOT rolsuper AND rolname <> current_user" in sql["query"]
+    assert "\\set db_names 'arcilogger'" in sql["drop"]
+    assert sql["drop"].rstrip().endswith("\\gexec")
+    assert "rolname <> current_user \\gexec" in sql["role"]
+    assert results["sql_refused"] == [True, True, True]
+    assert results["parsed"] == {
+        "databases": ["arcilogger", "arcilogger_replaced_20261104120000"],
+        "role": "arcilogger",
+        "drop": True,
+        "dir": "D:\\ARCILOGGER\\db",
+    }
+    assert results["parsed_keep"] == {"databases": [], "role": "postgres", "drop": False}
+    assert results["facts"] == {"exists": True, "files": 2, "bytes": 8, "links": []}
+    assert results["facts_missing"] is False
+    assert results["removed"] == "removed"
+    assert results["tree_left"] is False
+    assert results["absent"] == "absent"
+    link = _unwrapped("[a link (reparse point or hard link) in a folder to delete")
+    assert link in _unwrapped(results["linked"])
+    assert results["linked_left"] == ["kept.txt", "link.txt", "vault"]
+    assert elsewhere.read_text(encoding="utf-8") == "not ARCILOGGER's"
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="NTFS rights are Windows-only")
+def test_data_removal_deletes_sealed_files_and_stops_at_a_junction(tmp_path: Path) -> None:
+    """Sealed files carry the read-only attribute and a deny entry for Everyone on delete and
+    write (arcilogger_core.immutability): the removal takes them over and deletes them. A
+    junction in a folder to delete is never followed: the folder it points to stays whole."""
+    powershell = _windows_admin_powershell()
+    vault = tmp_path / "vault"
+    day = vault / "2026" / "11" / "06"
+    day.mkdir(parents=True)
+    sealed = day / "fw.log.gz"
+    sealed.write_bytes(b"sealed")
+    subprocess.run(["attrib", "+R", str(sealed)], check=True)
+    subprocess.run(
+        ["icacls", str(sealed), "/deny", "*S-1-1-0:(DE,WD,AD,WA,WEA)"],
+        check=True,
+        capture_output=True,
+    )
+    junctioned = tmp_path / "junctioned"
+    target = tmp_path / "target"
+    target.mkdir()
+    (target / "keep.txt").write_text("keep", encoding="utf-8")
+    junctioned.mkdir()
+    subprocess.run(["cmd", "/c", "mklink", "/J", str(junctioned / "j"), str(target)], check=True)
+    script = write_script(
+        tmp_path / "remove.ps1",
+        "param([string]$ModulePath, [string]$Vault, [string]$Junctioned)\n"
+        "$ErrorActionPreference = 'Stop'\n"
+        "Import-Module $ModulePath -Force\n"
+        "Write-Output (Remove-ArciDataFolder -Path $Vault)\n"
+        "try { Remove-ArciDataFolder -Path $Junctioned }\n"
+        "catch { Write-Output $_.Exception.Message }\n",
+    )
+    result = run_powershell(
+        powershell,
+        script,
+        "-ModulePath",
+        str(MODULE),
+        "-Vault",
+        str(vault),
+        "-Junctioned",
+        str(junctioned),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout.splitlines()[0].strip() == "removed"
+    assert not vault.exists()
+    assert _unwrapped("[a link (reparse point or hard link) in a folder to delete") in _unwrapped(
+        result.stdout
+    )
+    assert (target / "keep.txt").read_text(encoding="utf-8") == "keep"
+    assert (junctioned / "j").exists()
+
+
+@pytest.mark.skipif(
+    not os.environ.get("ARCILOGGER_TEST_PG"),
+    reason="ARCILOGGER_TEST_PG (a PostgreSQL to create a database on)",
+)
+def test_database_removal_statements_run_on_postgresql(engine: str, tmp_path: Path) -> None:
+    """The removal's query and DROP DATABASE against a real server, the test role standing in
+    for ARCILOGGER's: its own databases go; as the account psql connects as, the role is kept
+    and a database it owns that is not named is neither listed nor dropped."""
+    test_pg = os.environ["ARCILOGGER_TEST_PG"]
+    psql = (
+        os.environ.get("ARCILOGGER_PSQL")
+        or shutil.which("psql")
+        or next((p for p in ["/usr/lib/postgresql/16/bin/psql"] if Path(p).is_file()), None)
+    )
+    if not psql:
+        pytest.skip("psql not found")
+    dsn = urllib.parse.urlsplit(test_pg)
+    owner = dsn.username or "postgres"
+    name = f"arci_t_rm_{uuid.uuid4().hex[:10]}"
+    replaced, other = f"{name}_replaced_20261107120000", f"{name}_other"
+    output = tmp_path / "sql.json"
+    script = write_script(
+        tmp_path / "sql.ps1",
+        "param([string]$ModulePath, [string]$Name, [string]$Role, [string]$Replaced, "
+        "[string]$OutputPath)\n"
+        "$ErrorActionPreference = 'Stop'\n"
+        "Import-Module $ModulePath -Force\n"
+        "$sql = Get-ArciDatabaseRemovalSql -Name $Name -Role $Role -Extra @($Replaced) "
+        "-Databases @($Name, $Replaced)\n"
+        "$json = [ordered]@{ query = $sql.Query; drop = $sql.Drop; role = $sql.Role } |\n"
+        "    ConvertTo-Json\n"
+        "[System.IO.File]::WriteAllText($OutputPath, $json)\n",
+    )
+    result = run_powershell(
+        engine,
+        script,
+        "-ModulePath",
+        str(MODULE),
+        "-Name",
+        name,
+        "-Role",
+        owner,
+        "-Replaced",
+        replaced,
+        "-OutputPath",
+        str(output),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    sql = read_json(output)
+    env = {**os.environ, "PGPASSWORD": dsn.password or "", "PGCONNECT_TIMEOUT": "15"}
+    base = [psql, "-X", "-q", "-v", "ON_ERROR_STOP=1", "-h", dsn.hostname or "127.0.0.1"]
+    base += ["-p", str(dsn.port or 5432), "-U", owner, "-d", (dsn.path or "/postgres")[1:]]
+
+    def run(script: str, *extra: str) -> str:
+        done = subprocess.run(
+            [*base, *extra, "-f", "-"],
+            input=script,
+            capture_output=True,
+            text=True,
+            env=env,
+            check=False,
+            timeout=120,
+        )
+        assert done.returncode == 0, done.stderr
+        return done.stdout
+
+    for database in (name, replaced, other):
+        run(f'CREATE DATABASE "{database}";\n')
+    try:
+        listed = run(sql["query"], "-t", "-A").split()
+        assert f"database|{name}" in listed
+        assert f"database|{replaced}" in listed
+        assert f"database|{other}" not in listed, "the connecting account's: only named ones"
+        assert f"role|{owner}|keep" in listed
+        run(sql["drop"])
+        run(sql["role"])
+        left = run(
+            "SELECT datname FROM pg_database WHERE starts_with(datname, :'prefix') ORDER BY 1;\n",
+            *("-t", "-A", "-v", f"prefix={name}"),
+        ).split()
+        assert left == [other]
+        role = "SELECT count(*) FROM pg_roles WHERE rolname = :'role';\n"
+        assert run(role, "-t", "-A", "-v", f"role={owner}").strip() == "1"
+    finally:
+        for database in (name, replaced, other):
+            run(f'DROP DATABASE IF EXISTS "{database}";\n')
 
 
 # --- database provisioning SQL -------------------------------------------------------------------

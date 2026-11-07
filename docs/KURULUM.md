@@ -1498,7 +1498,75 @@ yazılmış bir `-InstallDir`), sürücü kökü ya da Windows klasörü verilir
 silmeden** durur. **Ham loglar, kasa, dışa aktarımlar, yedekler (`D:\ARCILOGGER`), yapılandırma,
 gizli depo ve tarayıcı yönetiminin `admin\` klasörü (`C:\ProgramData\ARCILOGGER`) ve veritabanı
 silinmez.** Saklanan kayıtlar yasal
-delildir; silinmeleri yalnızca saklama/imha işiyle ve imha tutanağıyla olur.
+delildir; silinmeleri saklama/imha işiyle ve imha tutanağıyla olur. Tek istisna, bilerek
+seçilen **verilerle birlikte kaldırmadır** (bölüm 14.1).
+
+Kurulum programıyla (Ayarlar → Uygulamalar → ARCILOGGER → Kaldır) kaldırırken önce şu soru
+gelir: **"TÜM VERİLER DE SİLİNSİN Mİ?"**. Varsayılan düğme **Hayır**dır: veriler korunur ve
+yukarıdaki kaldırma yapılır. Sessiz kaldırma (`/SILENT`, `/VERYSILENT`) verileri her zaman korur.
+
+### 14.1 Verilerle birlikte kaldırma ("Tüm verileri de sil")
+
+Sunucuyu sıfırlamak ya da ARCILOGGER'ı bütün kayıtlarıyla birlikte kaldırmak için, kaldırma
+sorusuna **Evet** deyin ya da yönetici konsolunda çalıştırın:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File "C:\Program Files\ARCILOGGER\installer\Install-Arcilogger.ps1" -Uninstall -RemoveData
+```
+
+**Bu işlem geri alınamaz.** Yalnızca sunucunun konsolunda, yönetici haklarıyla yapılır;
+tarayıcıdan yapılamaz.
+
+**Silinenler:**
+- ARCILOGGER'ın veritabanı ve rolü: `[database] name`, bir geri yüklemenin kenara koyduğu
+  veritabanları (`install\state.json`) ve rolün sahibi olduğu diğer veritabanları
+  (`DROP DATABASE … WITH (FORCE)`, `DROP ROLE`). `postgres`, `template0`, `template1`, bir süper
+  kullanıcı ve bağlanılan hesap hiçbir zaman silinmez.
+- Veri klasörünün (ör. `D:\ARCILOGGER`) ARCILOGGER'a ait klasörleri: `spool`, `vault` (mühürlü
+  günler dahil), `exports`, `state`, `logs`, `backups`; `[backup] dir` başka yerdeyse o klasör.
+- Yapılandırma klasörü `C:\ProgramData\ARCILOGGER`: yapılandırma, gizli depo (veritabanı,
+  Kamu SM ve SMTP parolaları), tarayıcı yönetiminin `admin\` klasörü, Caddy sertifika yetkilisi,
+  Zamane istemcisi, kurulum kayıtları.
+- Ardından bölüm 14'teki her şey: hizmetler, görevler, kısayollar, güvenlik duvarı kuralları,
+  program klasörleri.
+
+**Korunanlar:** PostgreSQL'in kendisi, veri klasörü (ör. `D:\ARCILOGGER\db`) ve diğer
+veritabanları; veri klasöründeki ARCILOGGER'a ait olmayan her şey (veri klasörü ancak boşalınca
+silinir); başka sunucudaki **replika** ve **NAS yedek kopyası** (oradaki yönetici siler); USB
+diske alınmış kopyalar; Windows olay günlükleri.
+
+**Betik hiçbir şeyi değiştirmeden önce:**
+1. postgres parolasını sorar ve silinecek veritabanlarını sunucudan okur (PostgreSQL'e
+   ulaşılamazsa durur; `-SkipDatabase` ile veritabanı korunur, gerisi silinir);
+2. silinecek klasörleri dosya sayısı ve boyutuyla, kasadaki mühürlü gün sayısını ve en eski
+   günü, korunanları ve **5651 uyarısını** gösterir;
+3. onay için **kuruluş adını** (`site_name`; yoksa bilgisayarın adı) yazmanızı ister: üç
+   deneme, büyük/küçük harf ve fazla boşluk sayılmaz, Enter vazgeçer. Konsol olmadan yalnızca
+   `-ConfirmRemoveData "<kuruluş adı>"` ile çalışır.
+
+Ad onaylanmazsa, veri klasörü kesin değilse (`-DataRoot` ile verin), bir klasör sürücü kökü,
+Windows klasörü, program klasörünü ya da PostgreSQL'in veri klasörünü içeren bir klasörse ya da
+bir klasörde bağlantı (junction, sembolik bağlantı, sabit bağlantı) varsa betik **hiçbir şey
+silmeden** durur (çıkış kodu `2`). `-DryRun` aynı listeyi gösterir, hiçbir şey sormaz ve
+silmez.
+
+Silme sırası: görevler beklenir ve kaldırılır, hizmetler durdurulur ve kaldırılır, veritabanı
+ve rol silinir, veri klasörleri silinir (mühürlü dosyaların kilidi yöneticiler sahiplik alarak
+kaldırılır), Uygulama günlüğüne **olay 4130** yazılır (onaylayan Windows hesabı, kuruluş,
+silinen veritabanları ve klasörler, mühürlü gün sayısı; olay kaynağı silinse de kayıt
+günlükte kalır), ardından güvenlik duvarı ve güç ayarları, yapılandırma klasörü ve program
+klasörleri. Yarıda kalırsa (çıkış kodu `3`) aynı komutu yeniden çalıştırın: silinmiş olan
+atlanır.
+
+> **5651 uyarısı:** ARCILOGGER trafik kayıtlarını 5651 yükümlülüklerini desteklemek için en az
+> 730 gün saklar. Saklama süresi dolmamış kayıtları silmek bu yükümlülükleri etkileyebilir:
+> silmeden önce hukuk danışmanınıza danışın ve bir imha tutanağı tutun
+> ([legal/saklama-imha-politikasi-taslak.md](legal/saklama-imha-politikasi-taslak.md)).
+> ARCILOGGER kendi denetim kaydını da sildiği için silmenin kaydı olay 4130 ve kurulum
+> günlüğüdür (`%TEMP%\ARCILOGGER-uninstall-*.log`).
+
+Veriler korunarak kaldırıldıysa ve sonradan silinmek isteniyorsa: aynı sürümü yeniden kurun
+(kurulum mevcut verileri benimser), ardından `-Uninstall -RemoveData` ile kaldırın.
 
 ## 15. Sorun giderme
 
