@@ -26,7 +26,7 @@ function Figure({ icon: Icon, label, value }: { icon: LucideIcon; label: string;
   return (
     <div className="flex min-w-0 flex-col gap-0.5">
       <dt className="flex items-center gap-1.5 text-13 text-muted">
-        <Icon aria-hidden="true" className="size-4" strokeWidth={1.75} />
+        <Icon aria-hidden="true" className="size-4 shrink-0" strokeWidth={1.75} />
         {label}
       </dt>
       <dd className="text-xl font-semibold text-foreground tabular">{value}</dd>
@@ -64,7 +64,11 @@ export function SecuritySummary({
         <Alert tone="danger">{errorMessage(error)}</Alert>
       ) : summary ? (
         <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-          <ul className="flex flex-wrap gap-2" aria-label={t('security.summary.bySeverity')}>
+          {/* The five tiles stay on one row from lg up; the figures beside them give way. */}
+          <ul
+            className="flex flex-wrap gap-2 lg:shrink-0 lg:flex-nowrap"
+            aria-label={t('security.summary.bySeverity')}
+          >
             {ALERT_SEVERITIES.map((severity) => {
               const Icon = SEVERITY_STYLE[severity].icon;
               const count = summary.open_by_severity[severity];
@@ -87,7 +91,7 @@ export function SecuritySummary({
               );
             })}
           </ul>
-          <dl className="grid grid-cols-3 gap-6">
+          <dl className="grid min-w-0 grid-cols-3 gap-6">
             <Figure
               icon={Activity}
               label={t('security.summary.open')}
