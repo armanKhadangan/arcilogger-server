@@ -436,7 +436,8 @@ function NowTable({ rows }: { rows: ActivityRow[] }) {
         accessorKey: 'last_seen',
         header: t('activity.columns.lastSeen'),
         size: 100,
-        meta: { label: t('activity.columns.lastSeen') },
+        // "Son görülme" over "09:02:00": the header wraps rather than be cut.
+        meta: { label: t('activity.columns.lastSeen'), wrapHeader: true },
         cell: (info) => (
           <span className="tabular">{formatTime(info.row.original.last_seen, true)}</span>
         ),
