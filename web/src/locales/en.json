@@ -1211,7 +1211,11 @@
       "mac": "MAC address",
       "submit": "Run lookup",
       "running": "Looking up…",
-      "auditNote": "The lookup and the request details are recorded in the audit log (the reason only as a hash)."
+      "auditNote": "The lookup and the request details are recorded in the audit log (the reason only as a hash).",
+      "unsaved": {
+        "title": "The lookup has not been run",
+        "body": "The request details and the query have not been run yet. What you entered is lost if you leave the page."
+      }
     },
     "validation": {
       "date": "Enter a valid date.",

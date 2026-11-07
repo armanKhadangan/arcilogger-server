@@ -1211,7 +1211,11 @@
       "mac": "MAC adresi",
       "submit": "Sorgula",
       "running": "Sorgulanıyor…",
-      "auditNote": "Sorgu ve talep bilgileri denetim kaydına yazılır (gerekçenin yalnızca özeti)."
+      "auditNote": "Sorgu ve talep bilgileri denetim kaydına yazılır (gerekçenin yalnızca özeti).",
+      "unsaved": {
+        "title": "Sorgu çalıştırılmadı",
+        "body": "Talep bilgileri ve sorgu henüz çalıştırılmadı. Sayfadan ayrılırsanız girdikleriniz kaybolur."
+      }
     },
     "validation": {
       "date": "Geçerli bir tarih girin.",

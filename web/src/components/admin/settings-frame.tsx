@@ -1,13 +1,12 @@
 import { ArrowLeft } from 'lucide-react';
 import { useEffect, useId } from 'react';
 import type { ReactNode } from 'react';
-import { Link, useBlocker, useLocation } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 
 import { PageHeader } from '@/components/layout/page-header';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
-import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { useAdminConfig, useAdminStatus } from '@/lib/api-hooks';
 import {
   startWizardMode,
@@ -121,39 +120,4 @@ export function SettingsCard({
   );
 }
 
-/**
- * The unsaved-change guard (2.17 `dirty`): leaving the page in the app asks first, closing or
- * reloading the tab gets the browser's own question.
- */
-export function UnsavedChangesGuard({ when }: { when: boolean }) {
-  const { t } = useTranslation();
-  const blocker = useBlocker(
-    ({ currentLocation, nextLocation }) =>
-      when && currentLocation.pathname !== nextLocation.pathname,
-  );
-  useEffect(() => {
-    if (!when) return undefined;
-    const warn = (event: BeforeUnloadEvent) => {
-      event.preventDefault();
-    };
-    window.addEventListener('beforeunload', warn);
-    return () => {
-      window.removeEventListener('beforeunload', warn);
-    };
-  }, [when]);
-  return (
-    <ConfirmDialog
-      open={blocker.state === 'blocked'}
-      onOpenChange={(open) => {
-        if (!open && blocker.state === 'blocked') blocker.reset();
-      }}
-      title={t('admin.unsaved.title')}
-      description={t('admin.unsaved.body')}
-      confirmLabel={t('admin.unsaved.leave')}
-      danger
-      onConfirm={() => {
-        if (blocker.state === 'blocked') blocker.proceed();
-      }}
-    />
-  );
-}
+export { UnsavedChangesGuard } from '@/components/layout/unsaved-changes-guard';

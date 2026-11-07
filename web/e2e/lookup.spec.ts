@@ -61,6 +61,30 @@ test.describe('5651 Sorgu', () => {
     await expect(submit).toBeFocused();
   });
 
+  test('leaving a filled-in form asks first; running it does not', async ({ page }) => {
+    await mockApi(page, { signedInAs: 'tolga' });
+    await page.goto('/lookup');
+    await page.getByLabel('Gerekçe').fill('5651 kapsamında IP bilgisi talebi');
+    const menu = page.getByRole('navigation', { name: 'Ana menü' });
+    await menu.getByRole('link', { name: 'Panel' }).click();
+    const guard = page.getByRole('dialog', { name: 'Sorgu çalıştırılmadı' });
+    await expect(guard).toBeVisible();
+    await guard.getByRole('button', { name: 'İptal' }).click();
+    await expect(page).toHaveURL(/\/lookup$/);
+    await expect(page.getByLabel('Gerekçe')).toHaveValue('5651 kapsamında IP bilgisi talebi');
+
+    // The result opens on the same page; afterwards nothing is left to lose.
+    await fillRequest(page);
+    await page.getByLabel('Genel / WAN IP').fill('100.64.12.9');
+    await page.getByLabel('Tarih', { exact: true }).fill('09.10.2026');
+    await page.getByLabel('Saat', { exact: true }).fill('11:23:41');
+    await page.getByRole('button', { name: 'Sorgula' }).click();
+    await expect(page).toHaveURL(/\/lookup\/9$/);
+    await expect(guard).toBeHidden();
+    await menu.getByRole('link', { name: 'Panel' }).click();
+    await expect(page.getByRole('heading', { level: 1, name: 'Panel' })).toBeVisible();
+  });
+
   test('checks the form in the browser, then runs an exact lookup with its chain', async ({
     page,
   }) => {

@@ -5,6 +5,7 @@ import { useTranslation } from 'react-i18next';
 
 import { keepDaysOf, requiredOf } from '@/components/archive/archive-model';
 import { ArchiveReloadCard } from '@/components/archive/archive-reload-card';
+import { UnsavedChangesGuard } from '@/components/layout/unsaved-changes-guard';
 import { Alert } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -155,8 +156,18 @@ export function LookupForm({
   };
 
   const targetProblem = message('target');
+  // Typed but not run (or refused): a menu link would lose the request's details and reason.
+  const changed = (Object.keys(draft) as (keyof LookupDraft)[]).some(
+    (field) => draft[field] !== initial[field],
+  );
   return (
     <Card className="p-4">
+      <UnsavedChangesGuard
+        when={changed}
+        area="/lookup"
+        title={t('lookup.form.unsaved.title')}
+        description={t('lookup.form.unsaved.body')}
+      />
       <form
         onSubmit={submit}
         noValidate
