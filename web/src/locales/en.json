@@ -236,7 +236,9 @@
     "new": "New password",
     "confirm": "New password (again)",
     "policy": "At least {{min}} characters. A long passphrase is recommended; common passwords and passwords containing your user name or name are not accepted.",
-    "submit": "Change password"
+    "submit": "Change password",
+    "show": "Show password",
+    "capsLock": "Caps Lock is on"
   },
   "validation": {
     "required": "This field is required.",

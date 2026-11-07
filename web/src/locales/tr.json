@@ -236,7 +236,9 @@
     "new": "Yeni parola",
     "confirm": "Yeni parola (tekrar)",
     "policy": "En az {{min}} karakter. Uzun bir parola cümlesi önerilir; yaygın parolalar, kullanıcı adınız veya adınızı içeren parolalar kabul edilmez.",
-    "submit": "Parolayı değiştir"
+    "submit": "Parolayı değiştir",
+    "show": "Parolayı göster",
+    "capsLock": "Caps Lock açık"
   },
   "validation": {
     "required": "Bu alan zorunludur.",

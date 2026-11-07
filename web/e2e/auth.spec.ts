@@ -69,6 +69,12 @@ test.describe('sign-in', () => {
     // Keyboard on the button: after the refusal the focus is still on "Giriş yap".
     await page.getByLabel('Kullanıcı adı').fill('tolga');
     await page.getByLabel('Parola', { exact: true }).fill('yanlış parola');
+    // "Parolayı göster" shows what was typed, and hides it again.
+    const show = page.getByRole('button', { name: 'Parolayı göster' });
+    await show.click();
+    await expect(page.getByLabel('Parola', { exact: true })).toHaveAttribute('type', 'text');
+    await show.click();
+    await expect(page.getByLabel('Parola', { exact: true })).toHaveAttribute('type', 'password');
     const signIn = page.getByRole('button', { name: 'Giriş yap' });
     await signIn.focus();
     await page.keyboard.press('Enter');
