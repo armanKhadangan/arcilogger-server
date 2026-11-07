@@ -127,4 +127,20 @@ test.describe('the idle warning', () => {
     await expect(warning).toBeHidden();
     await expect(page.getByRole('heading', { level: 1, name: 'Panel' })).toBeVisible();
   });
+
+  test('no warning in a tab left open while another tab of the browser is in use', async ({
+    page,
+  }) => {
+    await page.clock.install({ time: new Date(`${SAMPLE_TODAY}T15:00:00+03:00`) });
+    await mockApi(page, { signedInAs: 'tolga', idleMinutes: 15 });
+    await page.goto('/');
+    await expect(page.getByRole('heading', { level: 1, name: 'Panel' })).toBeVisible();
+    await page.clock.runFor('12:30');
+    // Another tab sends a request: one session cookie serves both tabs.
+    await page.evaluate(() => {
+      window.localStorage.setItem('arci.lastActivity', String(Date.now()));
+    });
+    await page.clock.runFor('01:00');
+    await expect(page.getByRole('alertdialog', { name: 'Oturumunuz kapanmak üzere' })).toBeHidden();
+  });
 });

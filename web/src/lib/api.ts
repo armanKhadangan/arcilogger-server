@@ -22,6 +22,7 @@
 
 import type { PasswordProblem } from './api-types';
 import i18n, { currentLang } from './i18n';
+import { readPreference, writePreference } from './storage';
 
 export const API_BASE = '/api/v1';
 export const CSRF_COOKIE = 'arci_csrf';
@@ -116,6 +117,16 @@ export interface ApiEventHandlers {
 
 let handlers: ApiEventHandlers = {};
 let lastForeground = Date.now();
+/**
+ * The last activity of any tab of this browser: one session cookie serves them all, so a tab
+ * left open must not warn of an idle limit that another tab keeps moving.
+ */
+const ACTIVITY_KEY = 'arci.lastActivity';
+
+function noteForeground(): void {
+  lastForeground = Date.now();
+  writePreference(ACTIVITY_KEY, String(lastForeground));
+}
 
 /** Install the global reactions; returns a function that removes them again. */
 export function setApiEventHandlers(next: ApiEventHandlers): () => void {
@@ -125,9 +136,13 @@ export function setApiEventHandlers(next: ApiEventHandlers): () => void {
   };
 }
 
-/** When the app last sent a request that counts as user activity (ms since epoch). */
+/**
+ * When the app last sent a request that counts as user activity (ms since epoch), in this tab or
+ * another of the same browser.
+ */
 export function lastForegroundRequestAt(): number {
-  return lastForeground;
+  const shared = Number(readPreference(ACTIVITY_KEY));
+  return Number.isFinite(shared) ? Math.max(lastForeground, shared) : lastForeground;
 }
 
 /** Value of a cookie readable by scripts (`arci_csrf`), `null` when absent. */
@@ -270,7 +285,7 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
     const token = await ensureCsrfCookie();
     if (token) headers[CSRF_HEADER] = token;
   }
-  if (!options.background) lastForeground = Date.now();
+  if (!options.background) noteForeground();
 
   let response: Response;
   try {
@@ -380,7 +395,7 @@ export async function apiDownload(
     onProgress?: DownloadProgress;
   },
 ): Promise<DownloadedFile> {
-  lastForeground = Date.now();
+  noteForeground();
   let response: Response;
   try {
     response = await fetch(buildUrl(path, options.params), {
