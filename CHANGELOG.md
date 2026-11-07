@@ -5,6 +5,13 @@ versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.3.0] — 2026-11-07
+
+Release version 0.3.0 (`v0.3.0`): the server's desktop (icon, notification area, Backups), the
+Veritabanı page, the NAS copy of the backups, removal with the data, and an easier web interface.
+Upgrading from 0.2.0: run the new `ARCILOGGER-Setup-0.3.0.exe`; it upgrades in place and keeps the
+data (docs/KURULUM.md section 13).
+
 ### On the server's desktop
 
 - ARCILOGGER has an icon. Setup puts **ARCILOGGER** (the web interface) on the desktop and in the
