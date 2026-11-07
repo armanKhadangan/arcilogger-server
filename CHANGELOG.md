@@ -74,6 +74,15 @@ data (docs/KURULUM.md section 13).
   - the Kategoriler donut and Güvenlik Özeti's figures move under their neighbours rather than
     shrink.
 
+### Fixed
+
+- **Files sent from Ayarlar → Zaman damgası** (a Zamane client, a Kamu SM root certificate) and the
+  e-mail server's CA file ended in "Beklenmeyen bir hata oluştu" on the server: the installer let
+  the API write them into `admin\inbox\uploads` but not read them back for the preview. The
+  installer now grants the whole read (installing this version over an older one corrects the
+  rights), and a file the API cannot read back is refused with "nothing changed" instead of a
+  server error. The Windows end-to-end test now sends a file from the browser.
+
 ## [0.2.0] — 2026-11-06
 
 The first tagged release, version 0.2.0 (`v0.2.0`): its Windows setup program is built by the

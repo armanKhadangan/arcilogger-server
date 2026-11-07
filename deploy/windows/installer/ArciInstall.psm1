@@ -1977,9 +1977,11 @@ function Get-ArciAclPlan {
     # What the owner of a protected state folder keeps (OWNER RIGHTS): reading its permissions,
     # never changing them.
     $ownerOnly = 'ReadPermissions'
-    # The API's right on the inbox: create a request file and write it, read it back, list the
-    # folder (quotas); deleting is left to CREATOR OWNER (its own temporary files).
-    $inboxWriter = 'CreateFiles, WriteData, ReadData, ReadAttributes, ListDirectory'
+    # The API's right on the inbox: create a request file and write it, read an upload back
+    # (Read: opening a file for reading asks for its data, attributes, extended attributes and
+    # permissions together, so ReadData alone is "access denied"), list the folder (quotas);
+    # deleting is left to CREATOR OWNER (its own temporary files).
+    $inboxWriter = 'CreateFiles, WriteData, Read'
     # The agent's right on state\requests: read, create a task request and write it.
     $requestWriter = 'ReadAndExecute, CreateFiles, WriteData'
 

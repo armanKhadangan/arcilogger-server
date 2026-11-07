@@ -20,6 +20,7 @@ import hmac
 import http.server
 import importlib.util
 import inspect
+import io
 import json
 import os
 import re
@@ -10862,6 +10863,39 @@ def _https_send(
         return error.code, error.read().decode("utf-8", "replace")
 
 
+def _https_upload(kind: str, name: str, data: bytes, cafile: Path, cookie: str) -> tuple[int, str]:
+    """POST https://localhost/api/v1/admin/uploads?kind=<kind> through Caddy as the web
+    interface sends a file: multipart/form-data, field ``file``; (status, body)."""
+    from arcilogger_api.security import CSRF_COOKIE, CSRF_HEADER
+
+    csrf = next(
+        part.split("=", 1)[1] for part in cookie.split("; ") if part.startswith(f"{CSRF_COOKIE}=")
+    )
+    boundary = f"----arcilogger-e2e-{uuid.uuid4().hex}"
+    body = b"".join([
+        f"--{boundary}\r\n".encode(),
+        f'Content-Disposition: form-data; name="file"; filename="{name}"\r\n'.encode(),
+        b"Content-Type: application/octet-stream\r\n\r\n",
+        data,
+        f"\r\n--{boundary}--\r\n".encode(),
+    ])  # fmt: skip
+    headers = {
+        "Cookie": cookie,
+        CSRF_HEADER: csrf,
+        "Content-Type": f"multipart/form-data; boundary={boundary}",
+    }
+    context = ssl.create_default_context(cafile=str(cafile))
+    request = urllib.request.Request(
+        f"https://localhost/api/v1/admin/uploads?kind={kind}", data=body, headers=headers,
+        method="POST",
+    )  # fmt: skip
+    try:
+        with urllib.request.urlopen(request, context=context, timeout=60) as response:
+            return response.status, response.read().decode("utf-8", "replace")
+    except urllib.error.HTTPError as error:
+        return error.code, error.read().decode("utf-8", "replace")
+
+
 #: The failure text of an end-to-end check, built only when the check fails: the last installer
 #: run and what the server side says then (``_e2e_server_side``).
 Log = Callable[[], str]
@@ -11354,6 +11388,19 @@ def _e2e_browser_administration(
     assert state["results"]["Requests"] == 0, (state["results"], log())
     expected = {int(Event.SEAL_REQUESTED), int(Event.TASK_REQUESTED), int(Event.SYSTEM_SYNC_RESULT)}
     assert expected <= set(state["events"]), (state["events"], log())
+
+    # 4. A Zamane client sent from the browser (Ayarlar → Zaman damgası): NT SERVICE\ArciApi
+    #    writes it into admin\inbox\uploads and reads it back for the preview. With the
+    #    inbox's earlier rights that read was "access denied" and the answer a 500.
+    jar = io.BytesIO()
+    with zipfile.ZipFile(jar, "w") as archive:
+        archive.writestr("META-INF/MANIFEST.MF", "Manifest-Version: 1.0\n")
+        archive.writestr("ornek/Istemci.class", b"e2e")
+    status, text = _https_upload("zamane_client", "tss-client.jar", jar.getvalue(), cafile, cookie)
+    assert status == 201, (status, text, log())
+    preview = json.loads(text)
+    assert preview["sha256"] == sha256_bytes(jar.getvalue()), (preview, log())
+    assert (preview["zamane"]["kind"], preview["zamane"]["known"]) == ("jar", False), preview
     _e2e_config(cafile, cookie, log)  # nothing became unreadable for NT SERVICE\ArciApi meanwhile
 
 
@@ -13251,6 +13298,41 @@ def test_acl_script_help_lists_every_state_folder_of_the_plan() -> None:
     assert "LOCAL SERVICE modify" in rows["<data>\\state\\requests"]
 
 
+#: FileSystemRights bits (System.Security.AccessControl) of the names the ACL plan uses.
+FILE_RIGHTS = {
+    "ReadData": 0x1, "ListDirectory": 0x1, "WriteData": 0x2, "CreateFiles": 0x2,
+    "AppendData": 0x4, "CreateDirectories": 0x4, "ReadExtendedAttributes": 0x8,
+    "WriteExtendedAttributes": 0x10, "ExecuteFile": 0x20, "Traverse": 0x20,
+    "ReadAttributes": 0x80, "WriteAttributes": 0x100, "Delete": 0x10000,
+    "ReadPermissions": 0x20000, "Read": 0x20089, "ReadAndExecute": 0x200A9,
+}  # fmt: skip
+#: What opening a file for reading asks for (FILE_GENERIC_READ without SYNCHRONIZE, which .NET
+#: adds to every allow entry): Python's open() and Path.read_bytes() ask for all of it.
+GENERIC_READ_BITS = 0x20089
+
+
+def _mask(rights: str) -> int:
+    mask = 0
+    for name in rights.split(","):
+        mask |= FILE_RIGHTS[name.strip()]
+    return mask
+
+
+def test_the_api_can_read_back_the_uploads_it_writes(engine: str, tmp_path: Path) -> None:
+    """A root certificate or a Zamane client sent from the browser is written into
+    admin\\inbox\\uploads and read back for its preview (``Channel.stage_upload``). With only
+    ReadData and ReadAttributes on the inbox, Windows refused that read ("access denied") and the
+    upload ended in a 500 on the real installation: the API's entry must hold every bit of a
+    read."""
+    entries = _plan_by_path(_acl_plan(engine, tmp_path), tmp_path)
+    api = service_sid("ArciApi")
+    ((rights, scope),) = _grants(entries["programdata/admin/inbox"], api)
+    assert scope == "all"  # files in inbox\uploads inherit it
+    assert _mask(rights) & GENERIC_READ_BITS == GENERIC_READ_BITS, rights
+    before = _mask("CreateFiles, WriteData, ReadData, ReadAttributes, ListDirectory")
+    assert before & GENERIC_READ_BITS != GENERIC_READ_BITS  # the entry before this fix
+
+
 def test_acl_plan_keeps_the_api_and_the_tasks_out_of_the_configuration(
     engine: str, tmp_path: Path
 ) -> None:
@@ -13266,9 +13348,8 @@ def test_acl_plan_keeps_the_api_and_the_tasks_out_of_the_configuration(
     assert _writes(entries, api) == {
         "programdata/admin/inbox", "data/spool/_audit", "data/exports", "data/logs",
     }  # fmt: skip
-    assert _grants(entries["programdata/admin/inbox"], api) == {
-        ("CreateFiles, WriteData, ReadData, ReadAttributes, ListDirectory", "all")
-    }
+    inbox = _grants(entries["programdata/admin/inbox"], api)
+    assert inbox == {("CreateFiles, WriteData, Read", "all")}
     for path, readers in (
         ("programdata/admin/keys/agent-ed25519.key", {AGENT}),
         ("programdata/admin/keys/api-ed25519.key", {api}),
