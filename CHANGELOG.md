@@ -5,6 +5,28 @@ versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### On the server's desktop
+
+- ARCILOGGER has an icon. Setup puts **ARCILOGGER** (the web interface) on the desktop and in the
+  Start menu next to **ARCILOGGER Durum**; Setup, its uninstaller and the Settings > Apps entry
+  carry the icon.
+- ARCILOGGER Durum lives in the notification area, next to the clock: the icon has the state's
+  colour, a click shows the window, and closing the window only hides it. A red state also shows
+  a Windows notification. The icon's menu opens the web interface and **Yedekler…**.
+- **Yedekler…** lists the database backups and saves a copy where you choose (a USB disk, a share),
+  checked against the backup's recorded SHA-256 before it gets its name. The backup folders stay
+  administrators-only; File Explorer would offer to change their permissions.
+
+### Database and backups
+
+- New page **Yönetim → Veritabanı**: the database in use and its version, its name, address and
+  connections, its size and daily growth, the days of logs it keeps, a chart of the last 30 days,
+  the data drive with its forecast, the last backup and the largest tables.
+- **Ayarlar → Yedekleme** lists the backups the server keeps (name, time, size, SHA-256), with the
+  folder's path, and can keep a second copy on the replica's NAS (`[backup] mirror_target`): a
+  share of its own, never the replica's folder, written with the replica's user and tried when
+  saved. The NAS copy keeps what the server keeps.
+
 ### Getting around the web interface
 
 - The menu lists its entries under five groups: Genel bakış, İnceleme, Kanıt, Rapor ve denetim
