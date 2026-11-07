@@ -8,6 +8,8 @@ import { LicenseBanner } from '@/components/license/license-banner';
 import { ReauthProvider } from '@/lib/reauth';
 import { readPreference, writePreference } from '@/lib/storage';
 
+import { CommandPalette } from './command-palette';
+import { usePaletteShortcut } from './command-palette-model';
 import { Sidebar } from './sidebar';
 import { Topbar } from './topbar';
 
@@ -21,12 +23,15 @@ function initialCollapsed(): boolean {
 
 /**
  * Sidebar + top bar + licence and legal-validity banners + routed page, for signed-in users
- * (inside `RequireAuth`). Also hosts the re-authentication dialog (`useReauth`) and the KVKK
+ * (inside `RequireAuth`). Also hosts the "Sayfaya git" palette (Ctrl+K, `command-palette.tsx`),
+ * the re-authentication dialog (`useReauth`) and the KVKK
  * notice, which stays open until accepted.
  */
 export function AppShell() {
   const { t } = useTranslation();
   const [collapsed, setCollapsed] = useState(initialCollapsed);
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  usePaletteShortcut(setPaletteOpen);
 
   return (
     <ReauthProvider>
@@ -47,7 +52,11 @@ export function AppShell() {
           }}
         />
         <div className="flex min-w-0 flex-1 flex-col">
-          <Topbar />
+          <Topbar
+            onOpenPalette={() => {
+              setPaletteOpen(true);
+            }}
+          />
           <main
             id="content"
             tabIndex={-1}
@@ -60,6 +69,7 @@ export function AppShell() {
         </div>
       </div>
       <PrivacyNoticeDialog />
+      <CommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} />
     </ReauthProvider>
   );
 }

@@ -175,6 +175,7 @@ EDITABLE: Final[Mapping[str, Editable]] = MappingProxyType(
             "backup.keep_weekly",
             "backup.keep_monthly",
             "backup.min_free_gb",
+            "backup.mirror_target",
         ),
         **_paths("sources", "source", False, "sources"),
     }
@@ -314,7 +315,7 @@ class Problem:
         return HTTP_STATUS.get(self.code, 422)
 
 
-Probes = Literal["sntp", "credit", "smtp", "replica", "snmp"]
+Probes = Literal["sntp", "credit", "smtp", "replica", "snmp", "backup_mirror"]
 
 
 @dataclass(frozen=True)
@@ -585,6 +586,12 @@ def unc_ok(target: str) -> bool:
     if any(set(segment) & set('*?"<>|') for segment in rest):
         return False
     return unc_root(target) is not None
+
+
+def _nested(first: str, second: str) -> bool:
+    """One UNC path is the other or inside it (case-insensitive, either separator)."""
+    a, b = (path.replace("/", "\\").rstrip("\\").lower() + "\\" for path in (first, second))
+    return a.startswith(b) or b.startswith(a)
 
 
 def replica_user_ok(user: str) -> bool:
@@ -1406,6 +1413,21 @@ def _backup(run: _Run) -> None:
     }
     if run.changed("backup.enabled") and not isinstance(backup["enabled"], bool):
         run.error("config_invalid", "backup.enabled")
+    mirror = backup.get("mirror_target")
+    if run.changed("backup.mirror_target") and mirror is not None:
+        # A share of the replica's NAS, reached with the replica's user: the password is never
+        # offered to another host, and the strict outbound rule of the replica covers it
+        # (Wave 5 addendum C, C6). Never the replica's own (often WORM) folder.
+        replica = run.doc["replica"]
+        target = replica["target"]
+        if not (isinstance(mirror, str) and unc_ok(mirror)):
+            run.error("backup_mirror_target_invalid", "backup.mirror_target")
+        elif not (replica["enabled"] and isinstance(target, str)):
+            run.error("backup_mirror_needs_replica", "backup.mirror_target")
+        elif unc_host(mirror) != unc_host(target):
+            run.error("backup_mirror_other_host", "backup.mirror_target")
+        elif _nested(mirror, target):
+            run.error("backup_mirror_inside_replica", "backup.mirror_target")
     for key, (low, high) in ranges.items():
         if run.changed(f"backup.{key}") and not _integer(backup[key], low, high):
             run.error("config_invalid", f"backup.{key}")
@@ -1413,6 +1435,10 @@ def _backup(run: _Run) -> None:
         return
     run.reauth = True
     run.effects.add("task.next_run:Backup")
+    if run.changed("backup.mirror_target"):
+        run.effects.add("task.next_run:Replica")
+        if mirror is not None and not run.errors and run.doc["replica"]["user"]:
+            run.probe("backup_mirror", unc_host(mirror))
     if before["enabled"] and backup["enabled"] is False:
         run.warn("backup_disabled", "backup.enabled")
         run.alert("medium")
@@ -1748,6 +1774,11 @@ def _body_backup(body: _Body, data: Mapping[str, Any]) -> None:
     for key in ("enabled", "keep_daily", "keep_weekly", "keep_monthly", "min_free_gb"):
         if key in data:
             body.set(f"backup.{key}", data[key])
+    if "mirror_target" in data:
+        target = _optional_text(data["mirror_target"])
+        if isinstance(target, str) and unc_ok(target):
+            target = replica_target_text(target)
+        body.set("backup.mirror_target", target)
 
 
 def _body_sources(body: _Body, data: Mapping[str, Any]) -> None:
@@ -1833,7 +1864,8 @@ def validate_section(
       ``clear_ca``;
     * ``replica``: ``enabled``, ``target``, ``user``, ``password``, ``clear_password``;
     * ``retention``: ``enabled``, ``days``, ``confirm_delete_days``;
-    * ``backup``: ``enabled``, ``keep_daily``, ``keep_weekly``, ``keep_monthly``, ``min_free_gb``;
+    * ``backup``: ``enabled``, ``keep_daily``, ``keep_weekly``, ``keep_monthly``, ``min_free_gb``,
+      ``mirror_target`` (empty: no copy);
     * ``sources``: ``source`` (add), ``name`` + ``source`` (edit), ``name`` + ``remove: true`` +
       ``confirm`` (remove).
 

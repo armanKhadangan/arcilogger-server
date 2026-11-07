@@ -29,7 +29,7 @@ endpoints the pages use are in section 10.
 | **E-mail** (`/settings/email`) | `[smtp]` (on/off, server, port, security, user, sender, timeout), the SMTP password, a CA file for the server's certificate (upload, or back to the Windows certificate store), the alert e-mail settings (`alerts.email_*`: recipients, lowest severity, hourly limit …); a trial e-mail before saving; **Send a test e-mail** (with the saved settings, at most 5 an hour) | — |
 | **Replica** (`/settings/replica`) | on/off, target (`\\SERVER\share` only), user, password; the connection is tried when saving; **Test the connection** (the saved target, at most once a minute) | a local folder as target |
 | **Retention** (`/settings/retention`) | deleting expired days on/off, the retention period (at least 730 days); the number of days it deletes is shown first and typed to confirm. Only in `arcilogger.toml`: `[retention] batch_days` (default 30, 1–180), the days the oldest expired day waits before every expired day is deleted under one stamped record, so expired days go at the first run that finds the batch due, not always the next one | — |
-| **Backup** (`/settings/backup`) | on/off, `[backup] keep_daily`, `[backup] keep_weekly`, `[backup] keep_monthly`, `[backup] min_free_gb`; this version does not show the last backup's details on the page, a failed backup is an `R20-backup` alert | `[backup] dir`, `[backup] pg_dump`, `[backup] pg_restore` |
+| **Backup** (`/settings/backup`) | on/off, `[backup] keep_daily`, `[backup] keep_weekly`, `[backup] keep_monthly`, `[backup] min_free_gb`, `[backup] mirror_target` (the NAS copy of the backups: a share of its own on the replica's NAS, with the replica's user; tried when saved; [BACKUP.md](BACKUP.md) section 4.1); the list of the dumps on the server (name, time, size, SHA-256) and the NAS copy's last result; a failed backup is an `R20-backup` alert, a failed copy an `R20-replica` alert | `[backup] dir`, `[backup] pg_dump`, `[backup] pg_restore` |
 | **Change history** (`/settings/history`) | the requests, their states and changes, a link to the audit log; **Cancel**, **Revert**; the configuration versions; **Download the diagnostics package** (a ZIP for support, no secrets) | restoring a version (`versions restore`, the page shows the command) |
 | **First-run wizard** (`/settings/setup`) | changes no value itself: it shows the steps after the installation in order and opens one of the pages above in each step (below) | — |
 
@@ -463,7 +463,8 @@ Start-ScheduledTask -TaskPath \ARCILOGGER\ -TaskName ApplySystem   # bring the f
 Event IDs (source `ARCILOGGER-Admin`, Application log): 4100/4199 service started/stopping, 4101
 system sync requested, 4102 applied, 4103 failed, 4104 held or a client recorded, 4105 cancelled,
 4106 sync result, 4107 client promoted, 4110 seal request, 4111 task request, 4120 request refused,
-4121 stored credential changed (its name only). An event only wakes a task; the authority is the
+4121 stored credential changed (its name only), 4130 the installer removed ARCILOGGER with its
+data ([INSTALL.md](INSTALL.md) section 14.1). An event only wakes a task; the authority is the
 signed request.
 
 ## 9. Verify on site

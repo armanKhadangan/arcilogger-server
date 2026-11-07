@@ -15,7 +15,7 @@ import {
   EyeOff,
   FileQuestion,
   Hourglass,
-  SignalZero,
+  WifiOff,
   TriangleAlert,
   type LucideIcon,
 } from 'lucide-react';
@@ -214,7 +214,7 @@ export function sampleState(sample: ClockSampleOut, limitMs: number): SampleStat
 export const SAMPLE_STYLE: Record<SampleState, StateStyle> = {
   ok: { tone: 'success', icon: CircleCheck, label: 'system.state.sample.ok' },
   over: { tone: 'danger', icon: CircleX, label: 'system.state.sample.over' },
-  noAnswer: { tone: 'danger', icon: SignalZero, label: 'system.state.sample.noAnswer' },
+  noAnswer: { tone: 'danger', icon: WifiOff, label: 'system.state.sample.noAnswer' },
 };
 
 /** The ingest's database connection: `null` when its status file does not say. */

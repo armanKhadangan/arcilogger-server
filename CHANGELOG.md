@@ -5,6 +5,92 @@ versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.3.0] — 2026-11-07
+
+Release version 0.3.0 (`v0.3.0`): the server's desktop (icon, notification area, Backups), the
+Veritabanı page, the NAS copy of the backups, removal with the data, and an easier web interface.
+Upgrading from 0.2.0: run the new `ARCILOGGER-Setup-0.3.0.exe`; it upgrades in place and keeps the
+data (docs/KURULUM.md section 13).
+
+### On the server's desktop
+
+- ARCILOGGER has an icon. Setup puts **ARCILOGGER** (the web interface) on the desktop and in the
+  Start menu next to **ARCILOGGER Durum**; Setup, its uninstaller and the Settings > Apps entry
+  carry the icon.
+- ARCILOGGER Durum lives in the notification area, next to the clock: the icon has the state's
+  colour, a click shows the window, and closing the window only hides it. A red state also shows
+  a Windows notification. The icon's menu opens the web interface and **Yedekler…**.
+- **Yedekler…** lists the database backups and saves a copy where you choose (a USB disk, a share),
+  checked against the backup's recorded SHA-256 before it gets its name. The backup folders stay
+  administrators-only; File Explorer would offer to change their permissions.
+- **Removing ARCILOGGER with its data.** The uninstaller asks "TÜM VERİLER DE SİLİNSİN Mİ?" (No by
+  default; a silent uninstall keeps the data). Yes, or `Install-Arcilogger.ps1 -Uninstall
+  -RemoveData`, first shows what goes (the database, the raw logs, the vault with its sealed days,
+  backups, the configuration and the secret store) with the 5651 warning, then asks for the
+  postgres password and the organisation name. Databases go by name only; in a `[backup] dir` of
+  its own only ARCILOGGER's backup files go. PostgreSQL itself, its data directory and the copies
+  on other hosts stay; the Application log keeps event 4130. Only at the server's console, never
+  from the browser; a cancelled confirmation removes the program with the data kept.
+
+### Database and backups
+
+- New page **Yönetim → Veritabanı**: the database in use and its version, its name, address and
+  connections, its size and daily growth, the days of logs it keeps, a chart of the last 30 days,
+  the data drive with its forecast, the last backup and the largest tables.
+- **Ayarlar → Yedekleme** lists the backups the server keeps (name, time, size, SHA-256), with the
+  folder's path, and can keep a second copy on the replica's NAS (`[backup] mirror_target`): a
+  share of its own, never the replica's folder, written with the replica's user and tried when
+  saved. The NAS copy keeps what the server keeps.
+
+### Getting around the web interface
+
+- The menu lists its entries under five groups: Genel bakış, İnceleme, Kanıt, Rapor ve denetim
+  and Yönetim. The order of the entries is unchanged.
+- **"Sayfaya git"** opens with Ctrl+K (⌘K on a Mac) or the top bar's button. It lists every page
+  and Ayarlar section the user may open. A few letters find an entry in Turkish or English, with
+  Turkish letters optional, and Enter opens it. Its last line searches the logs for the typed
+  text.
+- The bell links to Güvenlik and shows the number of open alerts. "/" moves to the global search
+  box.
+- The browser tab names the page ("Mühürleme · ARCILOGGER").
+- Two minutes before the idle limit, "Oturumunuz kapanmak üzere" offers "Oturumu sürdür", so text
+  typed into a long form is not lost. The limit itself is unchanged. Work in another tab of the
+  same browser counts, so a tab left open does not warn by mistake.
+- 5651 Sorgu's "Sorgula" stays at the bottom of the window while the form scrolls. Leaving a
+  filled-in form for another page asks first, as Ayarlar does; the result's own page does not.
+- Every password field has "Parolayı göster" and says "Caps Lock açık" while that key is on.
+- Uyum Durumu's "Yalnızca tamam olmayanlar" hides the cards that are fine.
+- Canlı Durum's charts show a quiet line's rate, where they used to show a column of "0,0".
+- The "Sessiz" badges show a no-signal icon where a lone dot used to be.
+- At 1280 and 1440 px, nothing is cut any more:
+  - Kullanım's card explanations and figure headers wrap;
+  - the donut's total stays inside its ring;
+  - Kaynaklar's last-message time, Arama's "Ham satır" button and Kullanım's volumes show whole;
+  - Güvenlik Özeti keeps its five severity tiles on one row;
+  - Arama's facet values wrap beside "Hariç tut".
+- Down to 1100 px (a 1366 px laptop at 125 % scaling):
+  - Kaynaklar keeps the sender's address whole;
+  - Panel wraps a silent source's last time;
+  - the Kategoriler donut and Güvenlik Özeti's figures move under their neighbours rather than
+    shrink.
+
+### Changed
+
+- **The remote desktop is never closed** (the product owner's decision). The firewall step opens
+  3389 from every address, no longer only from the admin PC; 443 stays limited to the admin PC.
+  Windows' own remote desktop rules are no longer switched off. Installing this version over an
+  older one switches them on again. The installation no longer stops over an open remote desktop
+  session.
+
+### Fixed
+
+- **Files sent from Ayarlar → Zaman damgası** (a Zamane client, a Kamu SM root certificate) and the
+  e-mail server's CA file ended in "Beklenmeyen bir hata oluştu" on the server: the installer let
+  the API write them into `admin\inbox\uploads` but not read them back for the preview. The
+  installer now grants the whole read (installing this version over an older one corrects the
+  rights), and a file the API cannot read back is refused with "nothing changed" instead of a
+  server error. The Windows end-to-end test now sends a file from the browser.
+
 ## [0.2.0] — 2026-11-06
 
 The first tagged release, version 0.2.0 (`v0.2.0`): its Windows setup program is built by the

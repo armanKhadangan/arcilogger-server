@@ -259,7 +259,7 @@ Added after ARCILOGGER? Run
 ## 3. Java 8 (Kamu SM Zamane client)
 
 ```powershell
-msiexec /i C:\Kurulum\ARCILOGGER-0.2.0\operator-installers\temurin8-jre\OpenJDK8U-jre_x64_windows_hotspot_8u502b07.msi INSTALLDIR="C:\Program Files\Eclipse Adoptium\jre-8\" /qn /norestart /l*v C:\Windows\Temp\temurin8.log
+msiexec /i C:\Kurulum\ARCILOGGER-0.3.0\operator-installers\temurin8-jre\OpenJDK8U-jre_x64_windows_hotspot_8u502b07.msi INSTALLDIR="C:\Program Files\Eclipse Adoptium\jre-8\" /qn /norestart /l*v C:\Windows\Temp\temurin8.log
 & "C:\Program Files\Eclipse Adoptium\jre-8\bin\java.exe" -version
 ```
 
@@ -291,7 +291,7 @@ the values are in `SHA256SUMS.txt`, in the release notes and in the job summary 
 *Summary*):
 
 ```powershell
-Get-FileHash .\ARCILOGGER-Setup-0.2.0.exe, .\ARCILOGGER-0.2.0.zip -Algorithm SHA256 | Format-List Hash, Path
+Get-FileHash .\ARCILOGGER-Setup-0.3.0.exe, .\ARCILOGGER-0.3.0.zip -Algorithm SHA256 | Format-List Hash, Path
 Get-Content .\SHA256SUMS.txt
 ```
 
@@ -330,11 +330,11 @@ repository or the bundle.
 
 ## 6. Copy and verify
 
-Copy the folder to e.g. `C:\Kurulum\ARCILOGGER-0.2.0` (not into `D:\ARCILOGGER`), with the jar:
+Copy the folder to e.g. `C:\Kurulum\ARCILOGGER-0.3.0` (not into `D:\ARCILOGGER`), with the jar:
 
 ```powershell
 Get-ChildItem -Recurse C:\Kurulum | Unblock-File
-Get-FileHash C:\Kurulum\ARCILOGGER-0.2.0\SHA256SUMS -Algorithm SHA256   # = bundle fingerprint
+Get-FileHash C:\Kurulum\ARCILOGGER-0.3.0\SHA256SUMS -Algorithm SHA256   # = bundle fingerprint
 ```
 
 Copying only `ARCILOGGER-Setup-<version>.exe`? Compare its `Get-FileHash` with `SHA256SUMS.txt` on
@@ -343,7 +343,7 @@ the server too; the setup window prints the bundle fingerprint again.
 ## 7. Install
 
 ```powershell
-cd C:\Kurulum\ARCILOGGER-0.2.0
+cd C:\Kurulum\ARCILOGGER-0.3.0
 powershell -ExecutionPolicy Bypass -File .\installer\Install-Arcilogger.ps1 -DryRun `
     -SiteName "<organisation name>" -NtpServer <local time source> -AdminAddress <admin PC>
 powershell -ExecutionPolicy Bypass -File .\installer\Install-Arcilogger.ps1 `
@@ -438,8 +438,7 @@ Windows), PostgreSQL service, ports 514/443, the server address and the address 
 will listen on: a `[collector] bind` that is neither `0.0.0.0` nor an address of this computer
 **stops** it with the fix — the organisation name and the time source (section 7.1), and
 everything the firewall step could refuse: an admin address (given or remembered) and its
-format, the `[[sources]]` of an existing configuration, an open remote-desktop session the
-firewall would cut off; no log source at all, as on every new installation, is a warning, not a
+format and the `[[sources]]` of an existing configuration; no log source at all, as on every new installation, is a warning, not a
 stop, section 7.1; the licence's maintenance rule `preflight.license`: a bundle whose release date,
 `release_date` in `bundle-manifest.json`, is after the maintenance date of `-LicenseFile` or of the
 installed licence **stops** it with `2` — `-AllowUncoveredUpgrade` warns and goes on, section 13,
@@ -519,7 +518,7 @@ PowerShell), otherwise the preflight stops or (for the time source) warns. Nothi
 |---|---|---|---|
 | Organisation name (reports, e-mails, evidence packages, the web interface's sidebar) | `-SiteName "<organisation name>"` | `site_name` | Asked on a first installation; without a console the preflight stops. An upgrade keeps the configured name |
 | Local time source (usually the core router or a local NTP server) | `-NtpServer <address or name>` | `[clock] ntp_server` | Asked on a first installation (Enter: none). Left empty, Windows Time and the hourly clock check use only `[clock] fallback_server` (`time.ume.tubitak.gov.tr`) and the preflight warns. An upgrade keeps the configured value |
-| The admin PC's address or network (e.g. `10.0.0.10`, `10.0.0.0/24`) | `-AdminAddress` | `install\firewall-state.json` (firewall: 443 and 3389 only from it) | The remembered value; without one it is asked, without a console the preflight stops (not needed with `-SkipFirewall`) |
+| The admin PC's address or network (e.g. `10.0.0.10`, `10.0.0.0/24`) | `-AdminAddress` | `install\firewall-state.json` (firewall: 443 only from it) | The remembered value; without one it is asked, without a console the preflight stops (not needed with `-SkipFirewall`) |
 
 `-SiteName` and `-NtpServer` go into the new `arcilogger.toml`. Given on an upgrade or with an
 existing configuration, only that line of the file changes; the previous file is kept as
@@ -851,15 +850,26 @@ scheduled tasks and for the firewall rules.
   first Sunday, VerifyMonthly until the first of the month; Requests and (with retention on)
   Retention have no readable evidence ("İzlenemiyor", Not observable); the task of a feature that
   is off (e.g. replica or retention off) shows "Kullanılmıyor" (Not used).
+- **Veritabanı** (Database, `/database`, administrator only): the database in use and its version
+  (PostgreSQL, with TimescaleDB when installed), the database's name and address, the number of
+  connections, the total size, the daily growth (from the database size the same `system.sample`
+  job writes every day; it needs at least 7 daily samples), the days of logs the database keeps
+  (`db.retention_days`; older days are taken out of the database, the raw logs and seals stay in
+  the vault), a chart of the size over the last 30 days, the data drive with its forecast, the last
+  backup and the largest tables. Only table names, sizes and counts are shown.
 
 Firewall (`Set-ArciFirewall.ps1`):
 
 - **Inbound:** default Block; allowed are only UDP/TCP 514 from `[[sources]]` (without any
-  `[[sources]]` no rule is made for 514, it stays closed and the script says so) and TCP 443 and
-  TCP/UDP 3389 from `-AdminAddress`. **Every other enabled inbound allow rule is disabled** and
-  recorded — Windows' "Remote Desktop", "Windows Remote Management (HTTP-In)" (TCP 5985, enabled by
-  default on Windows Server), "File and Printer Sharing" and rules other programs added — except
-  the "Core Networking" group (DHCP, IPv6 neighbour discovery, ICMP errors). `-AllowWinRM` opens
+  `[[sources]]` no rule is made for 514, it stays closed and the script says so) and TCP 443 from
+  `-AdminAddress`. **The remote desktop is never closed** (the product owner's decision,
+  2026-11-07): TCP/UDP 3389 is open from every address, Windows' own rules for the remote desktop
+  port stay as they are, and such a rule an earlier version disabled is enabled again on an
+  upgrade. **Every other enabled inbound allow rule is disabled** and recorded — Windows' "Windows
+  Remote Management (HTTP-In)" (TCP 5985, enabled by default on Windows Server), "File and Printer
+  Sharing" and rules other programs added — except the "Core Networking" group (DHCP, IPv6
+  neighbour discovery, ICMP errors). Who may sign in by remote desktop is Windows' own setting
+  (user rights, Network Level Authentication). `-AllowWinRM` opens
   TCP 5985 from the admin PC only; `-KeepRule '<rule name>'` keeps a rule a monitoring or backup
   agent needs.
 - **Outbound (optional):** `-StrictOutbound`: default Block; NTP, DNS, Kamu SM (zd/tzd and the
@@ -950,17 +960,39 @@ The window is **read-only**:
 "Web arayüzünü aç" opens `https://localhost/`. Without the root certificate on the server, the
 browser shows a certificate warning (section 8).
 
+- **Notification-area icon** (next to the clock): its colour is the window's (green, orange,
+  red, grey) and hovering it shows the state. When the state turns red a Windows notification
+  appears as well.
+  - A click on the icon shows the window. Closing the window only hides it; the icon stays.
+  - Right-click menu: **Durum penceresini göster** (show the window), **Web arayüzünü aç** (open
+    the web interface), **Yedekler…** (backups), **Simgeyi kapat** (ends the program; it starts
+    again at the next logon).
+  - Like the window, the icon changes nothing.
+- The **Yedekler…** (Backups) window lists the database backups: the scheduled ones
+  (`[backup] dir`) and the installer's pre-upgrade dumps (`backups\db`), each with its time and
+  size.
+  - **Kopyasını kaydet…** (save a copy) copies the selected backup into a folder you choose (a USB
+    disk, a share). The copy is written under a temporary name first, its SHA-256 is compared
+    with the hash recorded for the backup, and only then does it get its name. A file of the same
+    name is never overwritten.
+  - **Klasör yolunu kopyala** puts the backup folder's path on the clipboard.
+  - Only administrators may read the backup folders. If you open them in File Explorer, Windows
+    offers to change the folder's permissions ("Continue"): decline (a changed permission is an
+    `acl_drift` alert). Take the copy from this window.
+- **Shortcuts:** **ARCILOGGER** on the desktop and in the Start menu (opens the web interface in
+  the default browser), and **ARCILOGGER Durum** in the Start menu; all with the ARCILOGGER icon.
 - **Start:**
-  - the scheduled task `\ARCILOGGER\Desktop\StatusWindow` opens the window at every logon of a
-    member of Administrators, with the highest rights. There is no UAC prompt. The rights are
-    needed because only administrators may read `state\` of the data folder.
-  - A closed window opens again from the Start menu: **ARCILOGGER → ARCILOGGER Durum**. That
-    shortcut asks for UAC consent.
+  - the scheduled task `\ARCILOGGER\Desktop\StatusWindow` starts the program at every logon of a
+    member of Administrators, with the highest rights; only the notification-area icon shows.
+    There is no UAC prompt. The rights are needed because only administrators may read `state\`
+    of the data folder.
+  - When the icon was closed, the program opens again from the Start menu: **ARCILOGGER →
+    ARCILOGGER Durum**. That shortcut asks for UAC consent.
   - Without consent, the window shows only the services and the API (on the default port 8000).
     The configuration and the data folder are open to administrators only, so the other rows
     say "cannot be read".
-- One window per session. A second start brings the open one to the front (the shortcut asks
-  for UAC consent for that too).
+- One window per session. A second start shows the open one; with the icon running this needs
+  no UAC consent.
 - An upgrade and the removal close the window. After an upgrade it opens again at the next logon,
   or from the shortcut.
 - One look from the command line (elevated PowerShell):
@@ -1339,7 +1371,82 @@ created (`C:\Program Files\ARCILOGGER`, `.previous`, `.failed-*`, `.rolled-back-
 `VERSION.json` or `INSTALL-IN-PROGRESS.json`). Any other folder — a mistyped `-InstallDir`, a drive
 root, a Windows folder — stops it before anything is removed. It **never** deletes the raw logs,
 the vault, exports, backups (`D:\ARCILOGGER`), the configuration, the secret store and the
-browser administration's `admin\` folder (`C:\ProgramData\ARCILOGGER`) or the database.
+browser administration's `admin\` folder (`C:\ProgramData\ARCILOGGER`) or the database. The
+stored records are legal evidence: they are deleted by the retention job, with a destruction
+record. The one exception is a deliberate **removal with the data** (section 14.1).
+
+Removing through the setup (Settings → Apps → ARCILOGGER → Uninstall) first asks **"DELETE ALL
+THE DATA AS WELL?"**. The default button is **No**: the data is kept and the removal above runs. A
+silent uninstall (`/SILENT`, `/VERYSILENT`) always keeps the data.
+
+### 14.1 Removal with the data ("Tüm verileri de sil")
+
+To reset the server, or to remove ARCILOGGER with all its records, answer **Yes** to that
+question or run in an administrator console:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File "C:\Program Files\ARCILOGGER\installer\Install-Arcilogger.ps1" -Uninstall -RemoveData
+```
+
+**This cannot be undone.** It runs only at the server's console, as an administrator; never from
+the browser.
+
+**Deleted:**
+- ARCILOGGER's databases, by name only: `[database] name` and the databases a restore set aside
+  (`install\state.json`, `<name>_replaced_<time>`, `<name>_restore_<time>`), then the role
+  (`DROP DATABASE … WITH (FORCE)`, `DROP ROLE`). Other databases the role owns are not dropped,
+  only named; the role then stays too. `postgres`, `template0`, `template1`, a superuser and the
+  account connected are never dropped.
+- ARCILOGGER's folders in the data folder (e.g. `D:\ARCILOGGER`): `spool`, `vault` (sealed days
+  included), `exports`, `state`, `logs`, `backups`. When `[backup] dir` lies elsewhere, **only the
+  Backup task's files** (`arcilogger-*.dump` and their records) go there, the folder once empty; a
+  share on another host (`\\server\...`) is never touched.
+- The configuration folder `C:\ProgramData\ARCILOGGER`: the configuration, the secret store
+  (database, Kamu SM and SMTP passwords), the browser administration's `admin\` folder, Caddy's
+  certificate authority, the Zamane client, the installer's records.
+- Then everything of section 14: services, tasks, shortcuts, firewall rules, program folders.
+
+**Kept:** PostgreSQL itself, its data directory (e.g. `D:\ARCILOGGER\db`) and its other
+databases; anything in the data folder that is not ARCILOGGER's (the data folder is deleted only
+once empty, and never when it is a mount point or a link); the **replica** and the **NAS copy**
+on other hosts (their administrators delete them); copies on USB disks; the Windows event logs.
+
+**Before it changes anything** the script:
+1. asks for the postgres password and reads the databases to drop from the server (PostgreSQL
+   out of reach stops it; `-SkipDatabase` keeps the database and removes the rest);
+2. shows the folders to delete with file counts and sizes, the number of sealed days and the
+   oldest, what is kept and the **5651 warning**;
+3. asks you to type the **organisation name** (`site_name`; without one, the computer name):
+   three tries, letter case and extra spaces do not count, Enter cancels. Without a console it
+   runs only with `-ConfirmRemoveData "<organisation name>"`.
+
+A name not confirmed, a data folder that is not certain (give it with `-DataRoot`), a
+configuration folder without the installer's files (a mistyped `-ProgramDataDir`), a folder that
+is a drive root, a Windows folder, or holds the program folder, the data folder, the
+configuration folder, PostgreSQL's data directory or something kept, or a link in a folder (a
+junction, a symbolic link, a hard link) stops it **before anything is removed** (exit code `2`).
+`-DryRun` shows the same list and neither asks nor deletes. When the uninstaller's "Yes" ends
+like this, the removal finishes **with the data kept** (the program is never left installed
+without its entry); to delete the data later, see the last paragraph below.
+
+Order: tasks waited for and removed, services stopped and removed, **event 4130** written to the
+Application log (the Windows account that confirmed, the organisation, the databases and folders
+to delete, the sealed days), the database and the role dropped, the data folders deleted
+(Administrators take ownership to unlock the sealed files), event 4130 written again with the
+outcome (with the error when it stops halfway; both stay in the log after the event source is
+gone), then the firewall and power settings, the configuration folder and the program
+folders. If it stops halfway (exit code `3`), run the same command again: what is gone
+is skipped.
+
+> **5651 warning:** ARCILOGGER keeps the traffic records for at least 730 days to support the
+> 5651 obligations. Deleting records whose retention has not run out may affect those
+> obligations: ask your legal counsel first and keep a destruction record
+> ([legal/saklama-imha-politikasi-taslak.md](legal/saklama-imha-politikasi-taslak.md)). As
+> ARCILOGGER's own audit log is deleted too, the record of the removal is event 4130 and the
+> install log (`%TEMP%\ARCILOGGER-uninstall-*.log`).
+
+If ARCILOGGER was removed with its data kept and the data is to go later: install the same
+version again (it adopts the existing data), then remove it with `-Uninstall -RemoveData`.
 
 ## 15. Troubleshooting
 
@@ -1360,7 +1467,6 @@ browser administration's `admin\` folder (`C:\ProgramData\ARCILOGGER`) or the da
 | TCP 8000 (the API port) in use | Stop the other program, or change `[api] port` in `arcilogger.toml` and run the installer again (Caddy's upstream, the health check and the preflight follow it) |
 | Removal ended with `2`: "task still running" | An evidence job (sealing, verification) is running; nothing was removed. Run it again later or raise `-TaskWaitMinutes` |
 | Service "marked for deletion" | Close services.msc and run the script again |
-| "An RDP session from … would be cut off" (preflight) | Connect from one of the `-AdminAddress` addresses or add your address or network with `-AdminAddress` (`-Force` cuts the session) |
 | "-KeepRuleGroup matches no rule" | The Core Networking group has another name: find it with `Get-NetFirewallRule -DisplayGroup '<name>' \| Select-Object -First 1 Group, DisplayGroup` and pass `-KeepRuleGroup` |
 | A monitoring or backup agent is unreachable | The firewall disabled its inbound rule: `Set-ArciFirewall.ps1 -KeepRule '<rule name>'` (remembered) |
 | Upgrade ended with `3` | The output and `C:\ProgramData\ARCILOGGER\install\state.json` (`last_failure`, `pending_database_restore`); section 13 |

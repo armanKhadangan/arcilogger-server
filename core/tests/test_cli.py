@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import io
 import json
 from datetime import date, datetime, time, timedelta
@@ -224,6 +225,39 @@ def test_replica_command(setup: dict[str, Any], capsys: pytest.CaptureFixture[st
     assert run(setup, "replica") == 0
     assert capsys.readouterr().out.count("copied") == 3
     assert (setup["tmp"] / "nas").is_dir()
+
+
+def test_replica_command_mirrors_the_backups(
+    setup: dict[str, Any], capsys: pytest.CaptureFixture[str]
+) -> None:
+    """``[backup] mirror_target``: the Replica task copies the dumps too (Wave 5 addendum C, C6;
+    a local folder here: the test has no SMB share and the configuration no replica user)."""
+    mirror = setup["tmp"] / "nas-yedek"
+    config = Path(setup["config"])
+    config.write_text(
+        config.read_text(encoding="utf-8").replace("enabled = false", "enabled = true")
+        + f'\n[backup]\nmirror_target = "{mirror.as_posix()}"\n',
+        encoding="utf-8",
+    )
+    scheduled = setup["layout"].root / "backups" / "scheduled"
+    scheduled.mkdir(parents=True)
+    dump = scheduled / "arcilogger-20261107-014000.dump"
+    dump.write_bytes(b"PGDMP")
+    sha256 = hashlib.sha256(b"PGDMP").hexdigest()
+    (scheduled / (dump.name + ".json")).write_text(json.dumps({"sha256": sha256}))
+    assert run(setup, "replica") == 0
+    assert "Yedek kopyası: 1 yeni, 0 zaten var" in capsys.readouterr().out
+    copy = mirror / dump.name
+    assert copy.read_bytes() == b"PGDMP"
+    state = json.loads((setup["layout"].state / "backup" / "mirror.json").read_text())
+    assert (state["ok"], state["copied"], state["present"]) == (True, 1, 0)
+    # A dump that does not match its record: the run fails and raises the replica's alert.
+    (scheduled / "arcilogger-20261108-014000.dump").write_bytes(b"bad")
+    (scheduled / "arcilogger-20261108-014000.dump.json").write_text(json.dumps({"sha256": sha256}))
+    assert run(setup, "replica") == 1
+    alerts = [a for a in read_alerts(setup["layout"].alerts) if a["rule"] == "R20-replica"]
+    assert alerts[-1]["details"] == {"part": "backup-mirror"}
+    assert "kopyalanamadı" in alerts[-1]["message"]
 
 
 def test_secrets_are_stored_but_never_printed(

@@ -316,7 +316,7 @@ olarak içerir (`operator-installers\temurin8-jre\`). Sabit bir klasöre kurun k
 `arcilogger.toml` içindeki yol Java güncellemelerinden sonra da geçerli kalsın:
 
 ```powershell
-msiexec /i C:\Kurulum\ARCILOGGER-0.2.0\operator-installers\temurin8-jre\OpenJDK8U-jre_x64_windows_hotspot_8u502b07.msi INSTALLDIR="C:\Program Files\Eclipse Adoptium\jre-8\" /qn /norestart /l*v C:\Windows\Temp\temurin8.log
+msiexec /i C:\Kurulum\ARCILOGGER-0.3.0\operator-installers\temurin8-jre\OpenJDK8U-jre_x64_windows_hotspot_8u502b07.msi INSTALLDIR="C:\Program Files\Eclipse Adoptium\jre-8\" /qn /norestart /l*v C:\Windows\Temp\temurin8.log
 & "C:\Program Files\Eclipse Adoptium\jre-8\bin\java.exe" -version
 ```
 
@@ -350,7 +350,7 @@ Bu yolda yönetici PC'sinde Git, uv, Node.js ya da Inno Setup gerekmez. İndirdi
 özetinde (Actions → çalıştırma → *Summary*) yazar:
 
 ```powershell
-Get-FileHash .\ARCILOGGER-Setup-0.2.0.exe, .\ARCILOGGER-0.2.0.zip -Algorithm SHA256 | Format-List Hash, Path
+Get-FileHash .\ARCILOGGER-Setup-0.3.0.exe, .\ARCILOGGER-0.3.0.zip -Algorithm SHA256 | Format-List Hash, Path
 Get-Content .\SHA256SUMS.txt
 ```
 
@@ -394,12 +394,12 @@ yayımlanan **SHA-256** değerini not edin ve `tss-client-console-3.1.33.jar` do
 
 ## 6. Paketi sunucuya kopyalama ve doğrulama
 
-Klasörü USB bellekle veya paylaşımla sunucuya kopyalayın, örneğin `C:\Kurulum\ARCILOGGER-0.2.0`
+Klasörü USB bellekle veya paylaşımla sunucuya kopyalayın, örneğin `C:\Kurulum\ARCILOGGER-0.3.0`
 (**`D:\ARCILOGGER` içine değil**). Jar dosyasını da `C:\Kurulum\` içine koyun.
 
 ```powershell
 Get-ChildItem -Recurse C:\Kurulum | Unblock-File       # "internetten indirildi" işaretini kaldırır
-Get-FileHash C:\Kurulum\ARCILOGGER-0.2.0\SHA256SUMS -Algorithm SHA256
+Get-FileHash C:\Kurulum\ARCILOGGER-0.3.0\SHA256SUMS -Algorithm SHA256
 ```
 
 Çıkan değer, bölüm 4'te not ettiğiniz **paket parmak izi** ile aynı olmalıdır. Kurulum betiği
@@ -414,7 +414,7 @@ karşılaştırın; kurulum penceresi paket parmak izini yeniden yazar.
 değerleri (bölüm 7.1) burada da verin; verilmezse deneme onları sorar:
 
 ```powershell
-cd C:\Kurulum\ARCILOGGER-0.2.0
+cd C:\Kurulum\ARCILOGGER-0.3.0
 powershell -ExecutionPolicy Bypass -File .\installer\Install-Arcilogger.ps1 -DryRun `
     -SiteName "<kuruluş adı>" -NtpServer <yerel saat kaynağı> -AdminAddress <yönetici PC'si>
 ```
@@ -482,7 +482,7 @@ olmaz; anahtar için bölüm 9'daki komut kullanılır.
 | `-ServerName` | hatırlanan değer; yoksa `arcilogger.internal` | Ek web adı (hatırlanır) |
 | `-SiteName` | — (yok; ilk kurulumda gerekli) | Kuruluş adı (`site_name`); bölüm 7.1 |
 | `-NtpServer` | — (yok; boş: yalnızca yedek saat sunucusu) | Yerel saat kaynağı (`[clock] ntp_server`); bölüm 7.1 |
-| `-AdminAddress` | — (yok; hatırlanan değer) | 443 ve 3389'a yalnızca bu adres(ler) ya da ağ(lar) bağlanabilir (ör. `10.0.0.10`, `10.0.0.0/24`); bir kez verilen değer hatırlanır; bölüm 7.1 |
+| `-AdminAddress` | — (yok; hatırlanan değer) | 443'e (web) yalnızca bu adres(ler) ya da ağ(lar) bağlanabilir (ör. `10.0.0.10`, `10.0.0.0/24`); uzak masaüstü (3389) hiçbir zaman kapatılmaz; bir kez verilen değer hatırlanır; bölüm 7.1 |
 | `-DataRoot` | sabit NTFS `D:` varsa `D:\ARCILOGGER`, yoksa `C:\ARCILOGGER` | Veri klasörü (yalnızca ilk kurulumda; sonra `arcilogger.toml` belirler) |
 | `-ZamaneJar`, `-ZamaneJarSha256` | — | Zamane istemcisi ve Kamu SM'nin yayımladığı özet |
 | `-LicenseFile` | — (yok) | Kurulacak lisans dosyası (`.lic`, [LISANS.md](LISANS.md) bölüm 4). Ön denetimde Python olmadan okunur (dosya var, en çok 65.536 bayt, JSON; lisans no, bakım ve geçerlilik tarihi); okunamazsa kurulum hiçbir şey değiştirmeden durur (`2`). Şema kurulduktan hemen sonra `arcilogger-db license install` ile yüklenir; ürün dosyayı reddederse ya da veritabanına ulaşılamazsa uyarı verilir, kurulum sürer ve `1` ile biter. `-SkipDatabase` ile yüklenmez, sonra çalıştırılacak komut yazılır |
@@ -508,8 +508,8 @@ Betiğin yaptıkları (sırasıyla):
    bilgisayarın bir adresi ya da `0.0.0.0` değilse **durur** ve nasıl düzeltileceğini yazar),
    kuruluş adı ve saat kaynağı (bölüm 7.1).
    Güvenlik duvarı adımının reddedebileceği her şey de burada, hiçbir şey değişmeden denetlenir:
-   `-AdminAddress` (verilmiş ya da hatırlanan bir değer olmalı) ve biçimi, mevcut `arcilogger.toml`
-   içindeki `[[sources]]` adresleri ve güvenlik duvarının keseceği açık bir uzak masaüstü oturumu.
+   `-AdminAddress` (verilmiş ya da hatırlanan bir değer olmalı) ve biçimi ve mevcut
+   `arcilogger.toml` içindeki `[[sources]]` adresleri.
    Hiç log kaynağı (`[[sources]]`) yoksa (yeni bir kurulumda hiç yoktur) ön denetim durmaz, uyarır
    (bölüm 7.1). Lisansın bakım kuralı (`preflight.license`): paketin yayın tarihi
    (`bundle-manifest.json`, `release_date`) `-LicenseFile` dosyasının ya da kurulu lisansın bakım
@@ -614,7 +614,7 @@ sorulmaz.
 |---|---|---|---|
 | Kuruluş adı (raporlar, e-postalar, kanıt paketleri, web arayüzünün kenar çubuğu) | `-SiteName "<kuruluş adı>"` | `site_name` | İlk kurulumda sorulur; konsol yoksa ön denetim durur. Yükseltmede yapılandırmadaki ad kalır |
 | Yerel saat kaynağı (genellikle ana yönlendirici ya da yerel bir NTP sunucusu) | `-NtpServer <adres ya da ad>` | `[clock] ntp_server` | İlk kurulumda sorulur (Enter: yok). Boş kalırsa Windows Time ve saatlik saat denetimi yalnızca `[clock] fallback_server` (`time.ume.tubitak.gov.tr`) kullanır ve ön denetim uyarır. Yükseltmede yapılandırmadaki değer kalır |
-| Yönetici PC'sinin adresi ya da ağı (ör. `10.0.0.10`, `10.0.0.0/24`) | `-AdminAddress` | `install\firewall-state.json` (güvenlik duvarı: 443 ve 3389 yalnızca ona açılır) | Hatırlanan değer; o da yoksa sorulur, konsol yoksa ön denetim durur (`-SkipFirewall` ile gerekmez) |
+| Yönetici PC'sinin adresi ya da ağı (ör. `10.0.0.10`, `10.0.0.0/24`) | `-AdminAddress` | `install\firewall-state.json` (güvenlik duvarı: 443 yalnızca ona açılır) | Hatırlanan değer; o da yoksa sorulur, konsol yoksa ön denetim durur (`-SkipFirewall` ile gerekmez) |
 
 `-SiteName` ve `-NtpServer` yeni `arcilogger.toml` dosyasına yazılır. Yükseltmede ya da var olan bir
 yapılandırmayla verilirlerse dosyada yalnızca o satır değişir; önceki dosya
@@ -970,16 +970,26 @@ görevlerin durumunu ve güvenlik duvarı kurallarını Windows'a yalnızca onla
   kadar "Kanıt yok" gösterir; Requests ve (saklama açıksa) Retention görevlerinin okunabilir kanıtı
   yoktur ("İzlenemiyor"); kapalı bir özelliğin görevi (ör. replika ya da saklama kapalıyken)
   "Kullanılmıyor" gösterir.
+- **Veritabanı** (`/database`, yalnızca yönetici): kullanılan veritabanı ve sürümü (PostgreSQL, varsa
+  TimescaleDB), veritabanının adı ve adresi, bağlantı sayısı, toplam boyut, günlük büyüme (aynı
+  `system.sample` işinin her gün yazdığı veritabanı boyutundan; en az 7 günlük ölçüm gerekir),
+  veritabanında tutulan gün sayısı (`db.retention_days`; daha eski günler veritabanından çıkarılır,
+  ham loglar ve mühürler kasada kalır), son 30 günün boyut grafiği, veri diski ve dolma tahmini, son
+  yedek ve en büyük tablolar. Yalnızca tablo adları, boyutlar ve sayılar gösterilir.
 
 Güvenlik duvarı (`Set-ArciFirewall.ps1`):
 
 - **Gelen:** varsayılan eylem *Engelle*. İzin yalnızca: UDP/TCP 514 `[[sources]]` adreslerinden
   (hiç `[[sources]]` yoksa 514 için kural oluşturulmaz, 514 kapalı kalır ve betik bunu yazar),
-  TCP 443 ve TCP/UDP 3389 `-AdminAddress` adreslerinden. Bunların dışındaki **tüm etkin gelen izin
-  kuralları kapatılır** ve kaydedilir — Windows'un "Uzak Masaüstü", "Windows Uzaktan Yönetimi
-  (HTTP-In)" (TCP 5985, Windows Server'da varsayılan olarak açık), "Dosya ve Yazıcı Paylaşımı"
-  kuralları ve başka programların eklediği kurallar dahil. Yalnızca "Core Networking" grubu
-  (DHCP, IPv6 komşu bulma, ICMP hata iletileri) açık kalır. PowerShell uzaktan yönetimi
+  TCP 443 `-AdminAddress` adreslerinden. **Uzak masaüstü hiçbir zaman kapatılmaz** (ürün sahibinin
+  kararı, 2026-11-07): TCP/UDP 3389 her adresten açıktır, Windows'un uzak masaüstü portuna ait
+  kendi kuralları olduğu gibi kalır ve önceki bir sürümün kapattığı böyle bir kural yükseltmede
+  yeniden açılır. Bunların dışındaki **tüm etkin gelen izin kuralları kapatılır** ve kaydedilir —
+  Windows'un "Windows Uzaktan Yönetimi (HTTP-In)" (TCP 5985, Windows Server'da varsayılan olarak
+  açık), "Dosya ve Yazıcı Paylaşımı" kuralları ve başka programların eklediği kurallar dahil.
+  Yalnızca "Core Networking" grubu (DHCP, IPv6 komşu bulma, ICMP hata iletileri) açık kalır.
+  Uzak masaüstüne kimin bağlanabileceğini Windows'un kendi ayarları (kullanıcı hakları, Ağ Düzeyinde
+  Kimlik Doğrulama) belirler. PowerShell uzaktan yönetimi
   gerekiyorsa `-AllowWinRM` (TCP 5985, yalnızca yönetici PC'sinden); gelen bağlantı bekleyen bir
   izleme/yedekleme aracı varsa kuralını `-KeepRule '<kural adı>'` ile koruyun.
 - **Giden (isteğe bağlı):** `C:\Program Files\ARCILOGGER\scripts\Set-ArciFirewall.ps1
@@ -1070,17 +1080,36 @@ Pencere **yalnızca okur**:
 "Web arayüzünü aç" düğmesi `https://localhost/` adresini açar. Sunucuda kök sertifika kurulu
 değilse tarayıcı bir sertifika uyarısı gösterir (bölüm 8).
 
+- **Bildirim alanı simgesi** (saatin yanında): rengi pencerenin rengidir (yeşil, turuncu,
+  kırmızı, gri); üzerine gelince durum yazılır. Durum kırmızıya dönünce bir Windows bildirimi de
+  çıkar.
+  - Simgeye tıklamak pencereyi gösterir. Pencereyi kapatmak yalnızca gizler; simge kalır.
+  - Sağ tık menüsü: **Durum penceresini göster**, **Web arayüzünü aç**, **Yedekler…**,
+    **Simgeyi kapat** (programı bitirir; bir sonraki oturum açılışında yeniden başlar).
+  - Simge, pencere gibi hiçbir şeyi değiştirmez.
+- **Yedekler…** penceresi veritabanı yedeklerini listeler: zamanlanmış yedekler (`[backup] dir`)
+  ve kurulumun yükseltme öncesi yedekleri (`backups\db`); her birinin zamanı ve boyutu.
+  - **Kopyasını kaydet…** seçilen yedeği seçtiğiniz klasöre (USB disk, paylaşım) kopyalar. Kopya
+    önce geçici bir adla yazılır, SHA-256'sı yedeğin kaydındaki özetle karşılaştırılır ve ancak
+    tutarsa asıl adını alır. Aynı adlı bir dosyanın üzerine yazılmaz.
+  - **Klasör yolunu kopyala** yedek klasörünün yolunu panoya alır.
+  - Yedek klasörlerini yalnızca yöneticiler okuyabilir. Dosya Gezgini'nde açmayı denerseniz
+    Windows "Devam" ile klasörün izinlerini değiştirmeyi önerir; kabul etmeyin (değişen izin bir
+    `acl_drift` uyarısıdır). Kopyayı bu pencereden alın.
+- **Kısayollar:** masaüstünde ve Başlat menüsünde **ARCILOGGER** (web arayüzünü varsayılan
+  tarayıcıda açar), Başlat menüsünde ayrıca **ARCILOGGER Durum**; hepsi ARCILOGGER simgesiyle.
 - **Başlatma:**
   - `\ARCILOGGER\Desktop\StatusWindow` zamanlanmış görevi, Administrators üyesi biri her oturum
-    açtığında pencereyi en yüksek yetkiyle açar. UAC sorusu çıkmaz. Bu yetki gereklidir, çünkü
-    veri klasörünün `state\` bölümünü yalnızca yöneticiler okuyabilir.
-  - Kapatılan pencere Başlat menüsünde **ARCILOGGER → ARCILOGGER Durum** ile yeniden açılır. Bu
-    kısayol UAC onayı ister.
+    açtığında programı en yüksek yetkiyle başlatır; yalnızca bildirim alanı simgesi görünür. UAC
+    sorusu çıkmaz. Bu yetki gereklidir, çünkü veri klasörünün `state\` bölümünü yalnızca
+    yöneticiler okuyabilir.
+  - Simge kapatıldıysa program Başlat menüsünde **ARCILOGGER → ARCILOGGER Durum** ile yeniden
+    açılır. Bu kısayol UAC onayı ister.
   - Onay verilmezse pencere yalnızca servisleri ve API'yi (varsayılan 8000 portunda) gösterir.
     Yapılandırma ve veri klasörü yalnızca yöneticilere açık olduğundan diğer satırlar
     "okunamadı" der.
-- Her oturumda tek pencere açılır. İkinci kez başlatmak açık olanı öne getirir (kısayol bunun
-  için de UAC onayı ister).
+- Her oturumda tek pencere açılır. İkinci kez başlatmak açık olanı gösterir; simge açıksa bunun
+  için UAC onayı gerekmez.
 - Yükseltme ve kaldırma pencereyi kapatır. Yükseltmeden sonra pencere bir sonraki oturum
   açılışında ya da kısayolla yeniden açılır.
 - Komut satırından tek bakış (yönetici PowerShell):
@@ -1473,7 +1502,82 @@ yazılmış bir `-InstallDir`), sürücü kökü ya da Windows klasörü verilir
 silmeden** durur. **Ham loglar, kasa, dışa aktarımlar, yedekler (`D:\ARCILOGGER`), yapılandırma,
 gizli depo ve tarayıcı yönetiminin `admin\` klasörü (`C:\ProgramData\ARCILOGGER`) ve veritabanı
 silinmez.** Saklanan kayıtlar yasal
-delildir; silinmeleri yalnızca saklama/imha işiyle ve imha tutanağıyla olur.
+delildir; silinmeleri saklama/imha işiyle ve imha tutanağıyla olur. Tek istisna, bilerek
+seçilen **verilerle birlikte kaldırmadır** (bölüm 14.1).
+
+Kurulum programıyla (Ayarlar → Uygulamalar → ARCILOGGER → Kaldır) kaldırırken önce şu soru
+gelir: **"TÜM VERİLER DE SİLİNSİN Mİ?"**. Varsayılan düğme **Hayır**dır: veriler korunur ve
+yukarıdaki kaldırma yapılır. Sessiz kaldırma (`/SILENT`, `/VERYSILENT`) verileri her zaman korur.
+
+### 14.1 Verilerle birlikte kaldırma ("Tüm verileri de sil")
+
+Sunucuyu sıfırlamak ya da ARCILOGGER'ı bütün kayıtlarıyla birlikte kaldırmak için, kaldırma
+sorusuna **Evet** deyin ya da yönetici konsolunda çalıştırın:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File "C:\Program Files\ARCILOGGER\installer\Install-Arcilogger.ps1" -Uninstall -RemoveData
+```
+
+**Bu işlem geri alınamaz.** Yalnızca sunucunun konsolunda, yönetici haklarıyla yapılır;
+tarayıcıdan yapılamaz.
+
+**Silinenler:**
+- ARCILOGGER'ın veritabanları, yalnızca adlarıyla: `[database] name` ve bir geri yüklemenin
+  kenara koyduğu veritabanları (`install\state.json`, `<ad>_replaced_<zaman>`,
+  `<ad>_restore_<zaman>`), ardından rol (`DROP DATABASE … WITH (FORCE)`, `DROP ROLE`). Rolün sahibi
+  olduğu başka veritabanları silinmez, adları gösterilir; o zaman rol de kalır. `postgres`,
+  `template0`, `template1`, bir süper kullanıcı ve bağlanılan hesap hiçbir zaman silinmez.
+- Veri klasörünün (ör. `D:\ARCILOGGER`) ARCILOGGER'a ait klasörleri: `spool`, `vault` (mühürlü
+  günler dahil), `exports`, `state`, `logs`, `backups`. `[backup] dir` başka yerdeyse orada
+  **yalnızca yedekleme görevinin dosyaları** (`arcilogger-*.dump` ve kayıtları) silinir, klasör
+  ancak boşalınca; başka bir sunucudaki paylaşım (`\\sunucu\...`) hiç silinmez.
+- Yapılandırma klasörü `C:\ProgramData\ARCILOGGER`: yapılandırma, gizli depo (veritabanı,
+  Kamu SM ve SMTP parolaları), tarayıcı yönetiminin `admin\` klasörü, Caddy sertifika yetkilisi,
+  Zamane istemcisi, kurulum kayıtları.
+- Ardından bölüm 14'teki her şey: hizmetler, görevler, kısayollar, güvenlik duvarı kuralları,
+  program klasörleri.
+
+**Korunanlar:** PostgreSQL'in kendisi, veri klasörü (ör. `D:\ARCILOGGER\db`) ve diğer
+veritabanları; veri klasöründeki ARCILOGGER'a ait olmayan her şey (veri klasörü ancak boşalınca
+silinir; bir bağlama noktası ya da bağlantıysa hiç silinmez); başka sunucudaki **replika** ve
+**NAS yedek kopyası** (oradaki yönetici siler); USB diske alınmış kopyalar; Windows olay
+günlükleri.
+
+**Betik hiçbir şeyi değiştirmeden önce:**
+1. postgres parolasını sorar ve silinecek veritabanlarını sunucudan okur (PostgreSQL'e
+   ulaşılamazsa durur; `-SkipDatabase` ile veritabanı korunur, gerisi silinir);
+2. silinecek klasörleri dosya sayısı ve boyutuyla, kasadaki mühürlü gün sayısını ve en eski
+   günü, korunanları ve **5651 uyarısını** gösterir;
+3. onay için **kuruluş adını** (`site_name`; yoksa bilgisayarın adı) yazmanızı ister: üç
+   deneme, büyük/küçük harf ve fazla boşluk sayılmaz, Enter vazgeçer. Konsol olmadan yalnızca
+   `-ConfirmRemoveData "<kuruluş adı>"` ile çalışır.
+
+Ad onaylanmazsa, veri klasörü kesin değilse (`-DataRoot` ile verin), yapılandırma klasöründe
+kurulumun dosyaları yoksa (yanlış bir `-ProgramDataDir`), bir klasör sürücü kökü, Windows klasörü,
+program klasörünü, veri klasörünü, yapılandırma klasörünü, PostgreSQL'in veri klasörünü ya da
+korunan bir şeyi içeren bir klasörse ya da bir klasörde bağlantı (junction, sembolik bağlantı,
+sabit bağlantı) varsa betik **hiçbir şey silmeden** durur (çıkış kodu `2`). `-DryRun` aynı
+listeyi gösterir, hiçbir şey sormaz ve silmez. Kaldırma programında "Evet" denip betik böyle
+durursa kaldırma **verileri koruyarak** tamamlanır (program kurulu ama listeden silinmiş
+kalmaz); verileri sonra silmek için yukarıdaki son paragrafa bakın.
+
+Silme sırası: görevler beklenir ve kaldırılır, hizmetler durdurulur ve kaldırılır, Uygulama
+günlüğüne **olay 4130** yazılır (onaylayan Windows hesabı, kuruluş, silinecek veritabanları ve
+klasörler, mühürlü gün sayısı), veritabanı ve rol silinir, veri klasörleri silinir (mühürlü
+dosyaların kilidi yöneticiler sahiplik alarak kaldırılır), olay 4130 sonuçla bir kez daha
+yazılır (yarıda kalırsa hatayla; olay kaynağı silinse de kayıtlar günlükte kalır), ardından
+güvenlik duvarı ve güç ayarları, yapılandırma klasörü ve program klasörleri. Yarıda kalırsa (çıkış kodu `3`) aynı komutu yeniden çalıştırın: silinmiş olan
+atlanır.
+
+> **5651 uyarısı:** ARCILOGGER trafik kayıtlarını 5651 yükümlülüklerini desteklemek için en az
+> 730 gün saklar. Saklama süresi dolmamış kayıtları silmek bu yükümlülükleri etkileyebilir:
+> silmeden önce hukuk danışmanınıza danışın ve bir imha tutanağı tutun
+> ([legal/saklama-imha-politikasi-taslak.md](legal/saklama-imha-politikasi-taslak.md)).
+> ARCILOGGER kendi denetim kaydını da sildiği için silmenin kaydı olay 4130 ve kurulum
+> günlüğüdür (`%TEMP%\ARCILOGGER-uninstall-*.log`).
+
+Veriler korunarak kaldırıldıysa ve sonradan silinmek isteniyorsa: aynı sürümü yeniden kurun
+(kurulum mevcut verileri benimser), ardından `-Uninstall -RemoveData` ile kaldırın.
 
 ## 15. Sorun giderme
 
@@ -1495,7 +1599,6 @@ delildir; silinmeleri yalnızca saklama/imha işiyle ve imha tutanağıyla olur.
 | `TCP 8000 kullanımda` (API portu) | Başka bir program `[api] port` değerini kullanıyor: onu durdurun ya da `arcilogger.toml` içinde `[api] port` değerini değiştirip kurulumu yeniden çalıştırın (Caddy'nin yönlendirmesi, sağlık denetimi ve ön denetim bu değeri izler) |
 | Kaldırma `2` ile bitti: `Görev hâlâ çalışıyor` | Bir kanıt görevi (mühürleme, doğrulama) sürüyor; hiçbir şey kaldırılmadı. Görev bitince yeniden çalıştırın ya da `-TaskWaitMinutes` değerini artırın |
 | `... silinmek üzere işaretli` | Hizmetler (services.msc) penceresini kapatıp betiği yeniden çalıştırın |
-| `Açık uzak masaüstü oturumu ... keserdi` (ön denetim) | Kurulumu `-AdminAddress` adreslerinden birinden bağlanarak yapın ya da bağlandığınız adresi/ağı `-AdminAddress` ile ekleyin (`-Force` oturumu keser) |
 | `-KeepRuleGroup hiçbir kurala uymuyor` | "Core Networking" grubunun adı farklı: `Get-NetFirewallRule -DisplayGroup '<ad>' \| Select-Object -First 1 Group, DisplayGroup` ile bulup `Set-ArciFirewall.ps1 -KeepRuleGroup '<Group değeri>'` |
 | Bir izleme/yedekleme aracına dışarıdan bağlanılamıyor | Güvenlik duvarı ARCILOGGER dışındaki gelen kuralları kapattı: `Set-ArciFirewall.ps1 -KeepRule '<kural adı>'` (hatırlanır) |
 | Yükseltme `3` ile bitti | Ekrandaki açıklama ve `C:\ProgramData\ARCILOGGER\install\state.json` (`last_failure`, `pending_database_restore`); bölüm 13 |

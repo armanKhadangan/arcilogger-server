@@ -209,6 +209,9 @@ ROUTES: dict[tuple[str, str], str | None] = {
     ("GET", f"{V}/system"): None,
     ("GET", f"{V}/system/disk"): None,
     ("GET", f"{V}/system/health"): None,
+    # Veritabanı page and Ayarlar → Yedekleme's list (Wave 5 addendum C, C5-C7): 5651 Temel.
+    ("GET", f"{V}/system/database"): None,
+    ("GET", f"{V}/system/backups"): None,
     # Archive reloads (Wave 5 contract G9): 5651 Temel, never gated.
     ("POST", f"{V}/archive-reloads"): None,
     ("GET", f"{V}/archive-reloads"): None,
@@ -274,7 +277,7 @@ def test_every_route_is_classified(app: FastAPI) -> None:
     assert found == sorted(ROUTES)
     gated = [key for key, module in ROUTES.items() if module is not None]
     assert len(gated) == 24
-    assert len(ROUTES) - len(gated) == 134
+    assert len(ROUTES) - len(gated) == 136
 
 
 def test_the_module_markers_equal_the_table() -> None:

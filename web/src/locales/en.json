@@ -22,10 +22,18 @@
     "audit": "Audit log",
     "settings": "Settings",
     "system": "System",
+    "database": "Database",
     "collapse": "Collapse menu",
     "expand": "Expand menu",
     "skipToContent": "Skip to content",
-    "version": "Version"
+    "version": "Version",
+    "groups": {
+      "overview": "Overview",
+      "investigation": "Investigation",
+      "evidence": "Evidence",
+      "oversight": "Reports and audit",
+      "admin": "Administration"
+    }
   },
   "topbar": {
     "searchPlaceholder": "Search IP, MAC, person, domain…",
@@ -42,7 +50,20 @@
     "language": "Language",
     "logout": "Sign out",
     "sessionNote": "The session closes after {{minutes}} min of inactivity.",
-    "userMenuFor": "User menu: {{name}}"
+    "userMenuFor": "User menu: {{name}}",
+    "alertsOpen_one": "Security alerts: {{count}} open alert",
+    "alertsOpen_other": "Security alerts: {{count}} open alerts",
+    "alertsNone": "Security alerts: no open alert",
+    "searchShortcut": "Shortcut: /"
+  },
+  "palette": {
+    "title": "Go to",
+    "open": "Go to page",
+    "description": "Type to filter, choose with the arrow keys, open with Enter.",
+    "placeholder": "Type a page or setting…",
+    "empty": "No matching page.",
+    "searchLogs": "Search the logs for “{{query}}”",
+    "keys": "↑ ↓ to choose · Enter to open · Esc to close"
   },
   "notFound": {
     "title": "Page not found",
@@ -216,7 +237,9 @@
     "new": "New password",
     "confirm": "New password (again)",
     "policy": "At least {{min}} characters. A long passphrase is recommended; common passwords and passwords containing your user name or name are not accepted.",
-    "submit": "Change password"
+    "submit": "Change password",
+    "show": "Show password",
+    "capsLock": "Caps Lock is on"
   },
   "validation": {
     "required": "This field is required.",
@@ -945,7 +968,7 @@
     },
     "backup": {
       "title": "Backup",
-      "description": "How long database backups are kept. The backup folder and the tools are changed on the server console only.",
+      "description": "How the database backups are kept, and their second copy on the NAS. The backup folder and the tools are changed on the server console only.",
       "cardTitle": "Backup task",
       "cardDescription": "How many daily, weekly and monthly backups are kept, and the free space needed on the backup disk.",
       "enabled": "Database backup is on",
@@ -964,10 +987,41 @@
         "min_free_gb": "{{min}}–{{max}} GB. With less free space no backup is taken and an alert is raised."
       },
       "stateTitle": "Last backup",
-      "stateNote": "This version does not show the details of the last backup in the web interface; a failed or refused backup shows as an alert.",
+      "stateNote": "A failed or refused backup shows as an alert. The last backup's time and size also show on the Database page.",
       "noAlerts": "No open backup alert.",
       "alertsLink": "Alerts on the Security page",
-      "stateHidden": "You may not see the backup alerts."
+      "stateHidden": "You may not see the backup alerts.",
+      "mirrorTitle": "NAS copy of the backups",
+      "mirrorDescription": "Every hour a second copy of the backups is written to a share of its own on the replica's NAS; the NAS keeps the backups the server keeps.",
+      "mirrorField": "NAS share",
+      "mirrorHint": "A share or folder of its own on the replica's NAS, e.g. \\\\NAS\\arcilogger-yedek. Written with the replica's user; leave it empty for no copy.",
+      "mirrorReplica": "Replica target: {{target}}. The copy must be on the same NAS but outside the replica folder.",
+      "mirrorNoReplica": "First switch the replica on in Settings → Replica: the copy goes to the replica's NAS with the replica's user.",
+      "mirrorReplicaLink": "Replica settings",
+      "mirrorInvalid": "Enter a network share like \\\\server\\share.",
+      "listTitle": "Backups",
+      "listDescription": "The backups the backup folder on the server keeps (updated after every successful backup).",
+      "folder": "Backup folder",
+      "copyPath": "Copy the path",
+      "copied": "Copied",
+      "noDumps": "No backup yet.",
+      "listUpdated": "List updated {{time}}.",
+      "name": "File",
+      "taken": "Time",
+      "size": "Size",
+      "sha256": "SHA-256",
+      "openNote": "To open the folder or copy a backup to a USB disk, use the \"Yedekler…\" window from the menu of the ARCILOGGER icon in the notification area on the server.",
+      "listHidden": "You may not see the list of backups.",
+      "mirrorState": {
+        "none": "The NAS copy is off.",
+        "never": "The NAS copy has not run yet; the replica task runs every hour.",
+        "ok": "Last copy {{time}}: {{copied}} new, {{present}} already there.",
+        "pruned": "{{count}} old copies deleted from the NAS.",
+        "pruneRefused": "{{count}} old copies could not be deleted from the NAS (the share refused).",
+        "failed": "The last copy at {{time}} failed.",
+        "error": "Reason: {{error}}",
+        "failedItem": "{{name}}: {{why}}"
+      }
     },
     "leaseRebuild": {
       "title": "Rebuild the leases",
@@ -1191,7 +1245,11 @@
       "mac": "MAC address",
       "submit": "Run lookup",
       "running": "Looking up…",
-      "auditNote": "The lookup and the request details are recorded in the audit log (the reason only as a hash)."
+      "auditNote": "The lookup and the request details are recorded in the audit log (the reason only as a hash).",
+      "unsaved": {
+        "title": "The lookup has not been run",
+        "body": "The request details and the query have not been run yet. What you entered is lost if you leave the page."
+      }
     },
     "validation": {
       "date": "Enter a valid date.",
@@ -3360,7 +3418,8 @@
         "keep_daily": "Daily backups kept",
         "keep_weekly": "Weekly backups kept",
         "keep_monthly": "Monthly backups kept",
-        "min_free_gb": "Free space needed (GB)"
+        "min_free_gb": "Free space needed (GB)",
+        "mirror_target": "NAS copy of the backups"
       }
     },
     "section": {
@@ -3387,6 +3446,13 @@
       "send": "Send the file",
       "chosen": "{{name}} ({{size}}) chosen; press the button to send it. The server inspects the file; nothing is installed yet.",
       "tooLarge": "The file is too large; at most {{size}}."
+    }
+  },
+  "session": {
+    "idleWarning": {
+      "title": "Your session is about to end",
+      "body": "Your session will end in {{time}} because of inactivity. Unsaved changes may be lost.",
+      "stay": "Stay signed in"
     }
   }
 }

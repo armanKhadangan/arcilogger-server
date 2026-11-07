@@ -236,6 +236,9 @@ class BackupSection(BaseModel):
     keep_weekly: int
     keep_monthly: int
     min_free_gb: int
+    #: A second copy of the dumps on a share of the replica's NAS (Wave 5 addendum C, C6);
+    #: ``null``: no copy.
+    mirror_target: str | None
 
 
 class SnmpCapacityIo(BaseModel):
@@ -604,6 +607,7 @@ def get_config(db: DbSession, user: SettingsDep, channel: ChannelDep) -> AdminCo
             keep_weekly=config.backup.keep_weekly,
             keep_monthly=config.backup.keep_monthly,
             min_free_gb=config.backup.min_free_gb,
+            mirror_target=config.backup.mirror_text,
         ),
         sources=_sources(channel, db, config, files.stored),
     )
@@ -1404,6 +1408,8 @@ class BackupBody(Body):
     keep_weekly: int | None = None
     keep_monthly: int | None = None
     min_free_gb: int | None = None
+    #: ``\\\\host\\share[\\path]`` on the replica's NAS; ``""`` or ``null``: no copy.
+    mirror_target: str | None = None
 
 
 class SmtpCaBody(Body):

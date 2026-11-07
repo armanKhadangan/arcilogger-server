@@ -1,15 +1,19 @@
-"""``system.sample``: one disk sample a day for the Sistem page's forecast (Wave 4 contract 2.5.2).
+"""``system.sample``: one disk sample a day for the Sistem page's forecast (Wave 4 contract 2.5.2),
+and the database's size for the Veritabanı page's growth (Wave 5 addendum C, C7).
 
 A daily job after 00:30 (the Wave 4 switch-on registers it in :mod:`arcilogger_worker.service`).
-It appends ``{"day": "YYYY-MM-DD", "drives": [{"path", "total", "used"}]}`` for the site day of
-the run to ``state/system-history.json`` (:attr:`~arcilogger_core.layout.Layout.system_history`)
-= ``{"schema": 1, "days": [...]}``: an entry of the same day is replaced (a retry, a second run
-after a restart), the newest :data:`HISTORY_DAYS` days are kept, and the file is written
-atomically, so a reader never sees half of it. The drives are those of the R20 disk check
+It appends ``{"day": "YYYY-MM-DD", "drives": [{"path", "total", "used"}], "database": <n>}``
+for the site day of the run to ``state/system-history.json``
+(:attr:`~arcilogger_core.layout.Layout.system_history`) = ``{"schema": 1, "days": [...]}``: an
+entry of the same day is replaced (a retry, a second run after a restart), the newest
+:data:`HISTORY_DAYS` days are kept, and the file is written atomically, so a reader never sees
+half of it. The drives are those of the R20 disk check
 (:func:`arcilogger_worker.alerts.system.drives`): the data drive and, when it is another device,
 the system drive, by their label; the byte counts are integers.
 
-The file holds nothing but drive labels and byte counts. A damaged file or one of another schema
+``database`` is ``pg_database_size`` of ARCILOGGER's database; it is left out when the size could
+not be read (the disks are sampled all the same). The file holds nothing but drive labels and
+byte counts. A damaged file or one of another schema
 is started again from this sample, which is logged; the forecast then waits for seven new samples
 (:mod:`arcilogger_api.system.forecast`). A file that cannot be read at the moment fails the run,
 which the worker retries: the days already kept are never thrown away for a passing error.
@@ -23,6 +27,9 @@ import shutil
 from collections.abc import Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Final
+
+from sqlalchemy import text
+from sqlalchemy.exc import SQLAlchemyError
 
 from arcilogger_core.fsutil import atomic_write_text
 from arcilogger_core.timeutil import site_day
@@ -49,6 +56,8 @@ def _drive_entry(value: Any) -> bool:
 
 def _day_entry(value: Any) -> bool:
     if not isinstance(value, dict) or not isinstance(value.get("day"), str):
+        return False
+    if "database" in value and type(value["database"]) is not int:
         return False
     drives_ = value.get("drives")
     return isinstance(drives_, list) and all(_drive_entry(drive) for drive in drives_)
@@ -97,16 +106,31 @@ def sample_drives(data_dir: Path) -> list[dict[str, Any]]:
     return sampled
 
 
+def database_size(ctx: JobContext) -> int | None:
+    """``pg_database_size`` of ARCILOGGER's database; ``None`` when it cannot be read."""
+    try:
+        with ctx.sessions() as session:
+            size = session.scalar(text("SELECT pg_database_size(current_database())"))
+    except SQLAlchemyError as exc:
+        log.warning("database size: %s", exc)
+        return None
+    return int(size) if size is not None else None
+
+
 def job_system_sample(ctx: JobContext) -> Mapping[str, Any]:
-    """Today's (site day) disk sample into ``state/system-history.json``."""
+    """Today's (site day) disk and database sample into ``state/system-history.json``."""
     day = site_day(ctx.now).isoformat()
     sampled = sample_drives(ctx.layout.root)
+    database = database_size(ctx)
     path = ctx.layout.system_history
     days = [entry for entry in read_history(path, strict=True) if entry["day"] != day]
-    days.append({"day": day, "drives": sampled})
+    entry: dict[str, Any] = {"day": day, "drives": sampled}
+    if database is not None:
+        entry["database"] = database
+    days.append(entry)
     days.sort(key=lambda entry: entry["day"])
     path.parent.mkdir(parents=True, exist_ok=True)
     atomic_write_text(
         path, json.dumps({"schema": HISTORY_SCHEMA, "days": days[-HISTORY_DAYS:]}, indent=1)
     )
-    return {"day": day, "drives": len(sampled)}
+    return {"day": day, "drives": len(sampled), "database": database is not None}

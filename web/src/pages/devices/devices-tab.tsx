@@ -212,7 +212,8 @@ export function DevicesTab({
         id: 'last_ip',
         accessorFn: (row) => row.last_ip ?? '',
         header: t('devices.columns.lastIp'),
-        size: 165,
+        // "VLAN 60 · Wi-Fi Personel" whole.
+        size: 172,
         meta: { label: t('devices.columns.lastIp') },
         cell: (info) => {
           const row = info.row.original;

@@ -56,7 +56,7 @@ function FacetBlock({
                   title={t('search.facets.multipleNote')}
                 >
                   <span className="size-3.5 shrink-0" aria-hidden="true" />
-                  <span className="truncate text-foreground">{label}</span>
+                  <span className="min-w-0 break-words text-foreground">{label}</span>
                   <span className="sr-only">{t('search.facets.multipleNote')}</span>
                   <span className="ml-auto pl-2 text-muted tabular">{count}</span>
                 </li>
@@ -72,7 +72,8 @@ function FacetBlock({
                   }}
                 >
                   <Filter aria-hidden="true" className="size-3.5 shrink-0 text-muted" />
-                  <span className="truncate text-foreground">{label}</span>
+                  {/* Wraps rather than be cut beside "Hariç tut": "VLAN 42 (Planlama)". */}
+                  <span className="min-w-0 break-words text-foreground">{label}</span>
                   <span className="ml-auto pl-2 text-muted tabular">{count}</span>
                 </button>
                 <Button

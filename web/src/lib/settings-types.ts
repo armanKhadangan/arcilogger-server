@@ -253,6 +253,8 @@ export interface BackupSection {
   keep_weekly: number;
   keep_monthly: number;
   min_free_gb: number;
+  /** A share of its own on the replica's NAS for the second copy (Wave 5 addendum C, C6). */
+  mirror_target: string | null;
 }
 
 export type SourceType = 'fortigate' | 'mikrotik' | 'generic';
@@ -751,6 +753,8 @@ export interface BackupBody {
   keep_weekly?: number | null;
   keep_monthly?: number | null;
   min_free_gb?: number | null;
+  /** `\\\\host\\share[\\path]` on the replica's NAS; `''` or `null`: no copy. */
+  mirror_target?: string | null;
 }
 
 export interface SourceBody {

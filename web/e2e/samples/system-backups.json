@@ -1,0 +1,60 @@
+{
+  "backups": {
+    "checked_at": "2026-10-13T07:01:10.669741+03:00",
+    "dumps": [
+      {
+        "bytes": 1281734656,
+        "name": "arcilogger-20261012-014000.dump",
+        "sha256": "0101010101010101010101010101010101010101010101010101010101010101",
+        "taken": "2026-10-12T01:40:00+03:00"
+      },
+      {
+        "bytes": 1274023936,
+        "name": "arcilogger-20261011-014000.dump",
+        "sha256": "0202020202020202020202020202020202020202020202020202020202020202",
+        "taken": "2026-10-11T01:40:00+03:00"
+      },
+      {
+        "bytes": 1266884608,
+        "name": "arcilogger-20261010-014000.dump",
+        "sha256": "0303030303030303030303030303030303030303030303030303030303030303",
+        "taken": "2026-10-10T01:40:00+03:00"
+      }
+    ],
+    "enabled": true,
+    "folder": "data/backups/scheduled",
+    "list_updated": "2026-10-12T01:52:10+03:00",
+    "mirror": null,
+    "mirror_target": null
+  },
+  "backups_empty": {
+    "checked_at": "2026-10-13T07:01:10.652378+03:00",
+    "dumps": [],
+    "enabled": true,
+    "folder": "data/backups/scheduled",
+    "list_updated": null,
+    "mirror": null,
+    "mirror_target": null
+  },
+  "errors": {
+    "forbidden": {
+      "body": {
+        "error": {
+          "code": "forbidden",
+          "message_en": "You do not have permission for this action.",
+          "message_tr": "Bu işlem için yetkiniz yok."
+        }
+      },
+      "headers": {},
+      "status": 403
+    }
+  },
+  "meta": {
+    "captured_at": "2026-10-13T04:01:30.380059+00:00",
+    "clock": "2026-10-13T07:00:00+03:00",
+    "info": "captured by web/scripts/capture_api_samples.py; do not edit",
+    "site_day": "2026-10-09",
+    "site_today": "2026-10-13",
+    "tsa": "mock (never legally valid)"
+  }
+}

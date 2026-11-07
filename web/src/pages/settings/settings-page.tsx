@@ -1,18 +1,4 @@
-import {
-  Building2,
-  CalendarClock,
-  ChevronRight,
-  DatabaseBackup,
-  HardDriveUpload,
-  History,
-  KeyRound,
-  ListChecks,
-  Mail,
-  Network,
-  SlidersHorizontal,
-  Stamp,
-  Users,
-} from 'lucide-react';
+import { ChevronRight, KeyRound, ListChecks, Users } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { useEffect, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
@@ -26,51 +12,11 @@ import { Card } from '@/components/ui/card';
 import { useAdminConfig, useAdminStatus, useLicense } from '@/lib/api-hooks';
 import { useAuth } from '@/lib/auth';
 import { LICENSE_ADMIN_PERMISSION, LICENSE_PAGE } from '@/lib/license';
+import { SETTINGS_SECTIONS } from '@/lib/settings-sections';
 import { endWizardMode, WIZARD_PATH } from '@/pages/setup-wizard/wizard-mode';
 
 /** Sections of spec 12.3 page 15 that come later ("Gizlilik" is in Uygulama ayarları). */
 const LATER_SECTIONS = ['rules'] as const;
-
-interface Section {
-  key: string;
-  to: string;
-  icon: LucideIcon;
-  /** Every one of them is needed. */
-  permissions: readonly string[];
-}
-
-/** The sections of the browser administration (contract 2.17), in the order of the page. */
-const SECTIONS: readonly Section[] = [
-  { key: 'general', to: '/settings/general', icon: Building2, permissions: ['settings.manage'] },
-  {
-    key: 'application',
-    to: '/settings/application',
-    icon: SlidersHorizontal,
-    permissions: ['settings.manage'],
-  },
-  { key: 'kamusm', to: '/settings/kamusm', icon: Stamp, permissions: ['settings.manage'] },
-  {
-    key: 'sources',
-    to: '/settings/sources',
-    icon: Network,
-    permissions: ['settings.manage', 'sources.manage'],
-  },
-  { key: 'email', to: '/settings/email', icon: Mail, permissions: ['settings.manage'] },
-  {
-    key: 'replica',
-    to: '/settings/replica',
-    icon: HardDriveUpload,
-    permissions: ['settings.manage'],
-  },
-  {
-    key: 'retention',
-    to: '/settings/retention',
-    icon: CalendarClock,
-    permissions: ['settings.manage'],
-  },
-  { key: 'backup', to: '/settings/backup', icon: DatabaseBackup, permissions: ['settings.manage'] },
-  { key: 'history', to: '/settings/history', icon: History, permissions: ['settings.manage'] },
-];
 
 function SectionCard({
   to,
@@ -143,7 +89,9 @@ export function SettingsPage() {
   const status = useAdminStatus(manage);
   // The installation's setup problems (e.g. no local time source), every one of them here.
   const config = useAdminConfig(manage);
-  const sections = SECTIONS.filter((section) => section.permissions.every((item) => can(item)));
+  const sections = SETTINGS_SECTIONS.filter((section) =>
+    section.permissions.every((item) => can(item)),
+  );
   useEffect(() => {
     endWizardMode();
   }, []);

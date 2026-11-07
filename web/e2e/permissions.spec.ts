@@ -27,6 +27,7 @@ const MENUS: [string, string, string[]][] = [
       'Denetim Kaydı',
       'Ayarlar',
       'Sistem',
+      'Veritabanı',
       'Bileşen Kiti',
     ],
   ],

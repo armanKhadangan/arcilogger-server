@@ -29,7 +29,7 @@ değiştirilebilir", bölüm 5). Sayfaların kullandığı API uçları bölüm 
 | **E-posta** (`/settings/email`) | `[smtp]` (açık/kapalı, sunucu, port, güvenlik, kullanıcı, gönderen, zaman aşımı), SMTP parolası, sunucu sertifikası için CA dosyası (yükleme ya da Windows sertifika deposuna dönüş), uyarı e-postası ayarları (`alerts.email_*`: alıcılar, en düşük önem, saatlik sınır …); kaydetmeden önce deneme e-postası; **Test e-postası gönder** (kayıtlı ayarlarla, saatte en çok 5) | — |
 | **Replika** (`/settings/replica`) | açık/kapalı, hedef (yalnızca `\\SUNUCU\paylaşım`), kullanıcı, parola; kaydederken bağlantı denenir; **Bağlantıyı test et** (kayıtlı hedefle, dakikada en çok 1) | yerel bir klasör hedefi |
 | **Saklama** (`/settings/retention`) | süresi dolan günleri silme açık/kapalı, saklama süresi (en az 730 gün); silinecek gün sayısı önceden gösterilir ve yazılarak onaylanır. Yalnızca `arcilogger.toml`'da: `[retention] batch_days` (varsayılan 30, 1–180), süresi dolan en eski günün bekleyeceği gün sayısı; sonra süresi dolan bütün günler tek bir damgalı tutanakla silinir, yani günler bir sonraki çalışmada değil, toplu imhanın vakti gelen ilk çalışmada silinir | — |
-| **Yedekleme** (`/settings/backup`) | açık/kapalı, `[backup] keep_daily`, `[backup] keep_weekly`, `[backup] keep_monthly`, `[backup] min_free_gb`; son yedeğin ayrıntıları bu sürümde sayfada gösterilmez, başarısız bir yedek `R20-backup` uyarısıdır | `[backup] dir`, `[backup] pg_dump`, `[backup] pg_restore` |
+| **Yedekleme** (`/settings/backup`) | açık/kapalı, `[backup] keep_daily`, `[backup] keep_weekly`, `[backup] keep_monthly`, `[backup] min_free_gb`, `[backup] mirror_target` (yedeklerin NAS kopyası: replikanın NAS'ında ayrı bir paylaşım, replikanın kullanıcısıyla; kaydederken bağlantı denenir; [YEDEKLEME.md](YEDEKLEME.md) bölüm 4.1); sunucudaki yedeklerin listesi (ad, zaman, boyut, SHA-256) ve NAS kopyasının son sonucu; başarısız bir yedek `R20-backup`, başarısız bir kopya `R20-replica` uyarısıdır | `[backup] dir`, `[backup] pg_dump`, `[backup] pg_restore` |
 | **Değişiklik geçmişi** (`/settings/history`) | isteklerin listesi ve durumları, değişiklikleri, denetim kaydına bağlantı; **İptal et**, **Geri al**; yapılandırma sürümleri; **Tanılama paketini indir** (destek için ZIP, gizli bilgi içermez) | bir sürümü geri yüklemek (`versions restore`, sayfa komutu gösterir) |
 | **İlk kurulum sihirbazı** (`/settings/setup`) | kendisi hiçbir değeri değiştirmez: kurulumdan sonraki adımları sırayla gösterir ve her adımda yukarıdaki sayfalardan birini açar (aşağıda) | — |
 
@@ -461,7 +461,8 @@ Start-ScheduledTask -TaskPath \ARCILOGGER\ -TaskName ApplySystem   # güvenlik d
 Olay kimlikleri (kaynak `ARCILOGGER-Admin`, Uygulama günlüğü): 4100/4199 hizmet başladı/duruyor,
 4101 sistem eşitlemesi istendi, 4102 uygulandı, 4103 başarısız, 4104 bekletiliyor ya da istemci
 kaydedildi, 4105 iptal, 4106 eşitleme sonucu, 4107 istemci onaylandı, 4110 mühürleme isteği, 4111
-görev isteği, 4120 reddedilen istek, 4121 kayıtlı kimlik bilgisi değişti (yalnızca adı). Bir olay
+görev isteği, 4120 reddedilen istek, 4121 kayıtlı kimlik bilgisi değişti (yalnızca adı), 4130 kurulum
+betiği verilerle birlikte kaldırdı ([KURULUM.md](KURULUM.md) bölüm 14.1). Bir olay
 yalnızca bir görevi uyandırır; yetki imzalı istektedir.
 
 ## 9. Sahada doğrulanacaklar

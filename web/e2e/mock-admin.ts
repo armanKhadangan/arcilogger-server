@@ -2621,6 +2621,10 @@ export class AdminMock {
       keep_weekly: body.keep_weekly ?? current.keep_weekly,
       keep_monthly: body.keep_monthly ?? current.keep_monthly,
       min_free_gb: body.min_free_gb ?? current.min_free_gb,
+      mirror_target:
+        body.mirror_target === undefined
+          ? current.mirror_target
+          : body.mirror_target?.trim() || null,
     };
     const ranges: Record<string, [number, number]> = {
       keep_daily: [1, 3660],

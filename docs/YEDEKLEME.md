@@ -199,9 +199,34 @@ yüklemeyin. `SHA256.txt`'yi yalnızca yöneticilerin yazabildiği yerde tutun (
 aynısını yapın).
 
 Kopyalar da kişisel veri içerir: şifreli bir disk ya da yalnızca yöneticilerin erişebildiği bir
-paylaşım kullanın. Dışarıdaki eski kopyaları siz silersiniz (ARCILOGGER yalnızca kendi klasörünü
-temizler). Kopyalamanın otomatikleştirilmesi sahibin kararıdır
-([ADR-0009](adr/0009-database-backup.md), açık konular).
+paylaşım kullanın. Elle aldığınız dışarıdaki eski kopyaları siz silersiniz (ARCILOGGER yalnızca
+kendi klasörlerini temizler).
+
+### 4.1 NAS'a otomatik kopya (`[backup] mirror_target`)
+
+Sahibin kararıyla (2026-11-07, Wave 5 Ek C, C6) yedeklerin ikinci kopyası otomatik alınabilir:
+**Ayarlar → Yedekleme → Yedeklerin NAS kopyası** alanına replikanın NAS'ında **ayrı** bir paylaşım
+ya da klasör yazın (ör. `\\<NAS>\arcilogger-yedek`; yapılandırmada `[backup] mirror_target`).
+
+- Hedef replikayla **aynı NAS'ta** olmalı ve replikanın kullanıcısıyla (`replica.user`, parolası
+  gizli depoda) yazılır. Parola başka bir sunucuya hiç gönderilmez; sıkı giden trafik kipinde
+  replikanın kuralı bu kopyayı da kapsar. Önce **Ayarlar → Replika**'yı açın.
+- Hedef replika klasörünün kendisi ya da içi **olamaz**: replika klasörü genellikle silinemez
+  (WORM), yedeklerin eski kopyaları ise silinebilmelidir. NAS'ta bu paylaşıma yalnızca replika
+  kullanıcısı yazabilsin, yalnızca yöneticiler okuyabilsin.
+- Kaydederken ARCILOGGER paylaşıma bağlanıp bir deneme dosyası yazar, okur ve siler.
+- Replika görevi her saat çalışırken, mühürlü günlerden sonra yeni yedekleri yan dosyalarıyla
+  kopyalar. Kopya önce geçici adla yazılır ve geri okunur. SHA-256'sı yan dosyadaki özetle
+  tutmazsa adını almaz. Aynı adlı bir dosyanın üzerine yazılmaz.
+- NAS'taki kopya, sunucudaki klasörün tuttuğu yedekleri tutar: bütün yedekler kopyalandıktan
+  sonra saklama kuralının sunucuda sildiği eski yedekler NAS'tan da silinir (kişisel veri NAS'ta
+  sunucudakinden uzun kalmaz). Bir yedek kopyalanamadıysa hiçbir şey silinmez.
+- Sonuç `state\backup\mirror.json` dosyasına yazılır ve **Ayarlar → Yedekleme** sayfasında
+  görünür. Başarısız bir kopya bir `R20-replica` uyarısı açar.
+- Sunucudaki yedeklerin listesi (`state\backup\list.json`, her başarılı yedekten sonra yedekleme
+  görevi yazar) da aynı sayfada görünür: ad, zaman, boyut, SHA-256. Servisler yedek klasörünü
+  okuyamaz; liste bu yüzden ayrı bir dosyadadır.
+- Hedefi boşaltmak kopyayı durdurur; NAS'ta kalan kopyaları siz silersiniz.
 
 ## 5. Geri yükleme
 

@@ -82,7 +82,7 @@ switches off a 5651 function.
 |---|---|---|---|
 | G1 | Organisation name (`site_name`) | installer `-SiteName` | P1 |
 | G2 | Local time source (`[clock] ntp_server`), usually the core router | installer `-NtpServer` | P2; `time.ume.tubitak.gov.tr` stays the shipped fallback |
-| G3 | Admin PC address or network (443, 3389) | installer / `Set-ArciFirewall.ps1` `-AdminAddress` (remembered) | P3 |
+| G3 | Admin PC address or network (443; the remote desktop is open from every address since 2026-11-07) | installer / `Set-ArciFirewall.ps1` `-AdminAddress` (remembered) | P3 |
 | G4 | Server address (`[collector] bind`, web address) | installer `-ServerAddress` (remembered, else detected) | I2, I3 |
 | G5 | Log sources (`[[sources]]`: names, addresses or networks, `heartbeat_minutes`, `transport`) | `arcilogger.toml`, by the administrator after the installation (none on a new installation) | the example's sources are fictional and commented out (P5); [DEVICE-SETUP.md](DEVICE-SETUP.md) §4 |
 | G6 | VLANs (subnet, VLAN id, name, DHCP server, guest flag) and departments | administrator: both on the Cihazlar ve Kişiler page (`/api/v1/vlans`, `/api/v1/departments`) | P4; a guest network that does not leave through the FortiGate is a VLAN with `guest` set ([DEVICE-SETUP.md](DEVICE-SETUP.md) §5) |

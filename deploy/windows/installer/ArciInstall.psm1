@@ -1040,7 +1040,7 @@ function Read-ArciAdminAddress {
     [CmdletBinding()]
     [OutputType([string[]])]
     param([int]$Attempts = 3)
-    $prompt = 'Yönetici PC''sinin IP adresi ya da ağı; 443 (web) ve 3389 (uzak masaüstü) yalnızca ona açılır, örnek 10.0.0.10 veya 10.0.0.0/24 [admin PC address or network: 443 and 3389 are opened only for it, e.g. 10.0.0.10 or 10.0.0.0/24]'
+    $prompt = 'Yönetici PC''sinin IP adresi ya da ağı; 443 (web) yalnızca ona açılır, örnek 10.0.0.10 veya 10.0.0.0/24 [admin PC address or network: 443 is opened only for it, e.g. 10.0.0.10 or 10.0.0.0/24]'
     for ($attempt = 1; $attempt -le $Attempts; $attempt++) {
         $answer = $null
         try { $answer = [string](Read-Host $prompt) }
@@ -1256,32 +1256,6 @@ function Test-ArciAddressInNetwork {
         $bits -= $take
     }
     $true
-}
-
-function Get-ArciForeignRdpSession {
-    <#
-    .SYNOPSIS
-        Remote addresses of open remote desktop connections that -AdminAddress does not cover
-        (they would be cut off by the firewall rules). Loopback connections are never filtered.
-    #>
-    [CmdletBinding()]
-    [OutputType([string[]])]
-    param([Parameter(Mandatory = $true)][string[]]$AdminAddress, [int]$Port = 3389)
-    # Writes the addresses one by one: call it as @(Get-ArciForeignRdpSession ...).
-    $foreign = New-Object System.Collections.Generic.List[string]
-    if (-not (Get-Command Get-NetTCPConnection -ErrorAction SilentlyContinue)) { return }
-    foreach ($session in @(Get-NetTCPConnection -LocalPort $Port -State Established -ErrorAction SilentlyContinue)) {
-        if ($null -eq $session) { continue }
-        $remote = [string]$session.RemoteAddress
-        $parsed = $null
-        if ([System.Net.IPAddress]::TryParse($remote, [ref]$parsed) -and [System.Net.IPAddress]::IsLoopback($parsed)) { continue }
-        $covered = $false
-        foreach ($spec in $AdminAddress) {
-            if (Test-ArciAddressInNetwork -Address $remote -Network $spec) { $covered = $true; break }
-        }
-        if (-not $covered -and -not $foreign.Contains($remote)) { $foreign.Add($remote) }
-    }
-    $foreign.ToArray()
 }
 
 # --- this computer's addresses and the collector's ----------------------------------------------
@@ -1977,9 +1951,11 @@ function Get-ArciAclPlan {
     # What the owner of a protected state folder keeps (OWNER RIGHTS): reading its permissions,
     # never changing them.
     $ownerOnly = 'ReadPermissions'
-    # The API's right on the inbox: create a request file and write it, read it back, list the
-    # folder (quotas); deleting is left to CREATOR OWNER (its own temporary files).
-    $inboxWriter = 'CreateFiles, WriteData, ReadData, ReadAttributes, ListDirectory'
+    # The API's right on the inbox: create a request file and write it, read an upload back
+    # (Read: opening a file for reading asks for its data, attributes, extended attributes and
+    # permissions together, so ReadData alone is "access denied"), list the folder (quotas);
+    # deleting is left to CREATOR OWNER (its own temporary files).
+    $inboxWriter = 'CreateFiles, WriteData, Read'
     # The agent's right on state\requests: read, create a task request and write it.
     $requestWriter = 'ReadAndExecute, CreateFiles, WriteData'
 
@@ -3594,6 +3570,432 @@ function Test-ArciHttpsHealth {
     }
 }
 
+# --- removal with the data (-Uninstall -RemoveData, contract addendum C8) --------------------------
+
+# The folders of ARCILOGGER's own data below the data root (arcilogger_core.layout, and backups\
+# with the installer's dumps and the Backup task's scheduled ones), with what they hold for the
+# confirmation screen.
+$script:ArciDataFolders = @(
+    [pscustomobject]@{ Name = 'spool'; What = 'henüz mühürlenmemiş ham loglar ve günün denetim kaydı [raw logs not sealed yet, the audit log of the day]' },
+    [pscustomobject]@{ Name = 'vault'; What = 'kasa: mühürlü günler, zaman damgaları, imha ve yeniden damgalama kayıtları [the vault: sealed days, time stamps, deletion and renewal records]' },
+    [pscustomobject]@{ Name = 'exports'; What = 'kanıt paketleri ve saklanan raporlar [evidence packages and stored reports]' },
+    [pscustomobject]@{ Name = 'state'; What = 'iş durumları, iptal listeleri, saat örnekleri [job state, revocation lists, clock samples]' },
+    [pscustomobject]@{ Name = 'logs'; What = 'program günlükleri [program logs]' },
+    [pscustomobject]@{ Name = 'backups'; What = 'veritabanı yedekleri [database backups]' }
+)
+$script:ArciConfigFolderWhat = 'yapılandırma, gizli depo (veritabanı, Kamu SM, SMTP parolaları), tarayıcı yönetimi klasörü, Caddy sertifika yetkilisi, Zamane istemcisi, kurulum kayıtları [configuration, secret store, administration folder, Caddy CA, Zamane client, installer records]'
+$script:ArciBackupFolderWhat = 'yalnızca ARCILOGGER''ın yedek dosyaları (arcilogger-*.dump ve kayıtları); klasör boşalınca silinir [only ARCILOGGER''s backup files; the folder once empty]'
+# The Backup task's files in [backup] dir (arcilogger_db.backup: BACKUP_NAME, SIDECAR_NAME,
+# LEFTOVER_NAME): the only names a removal deletes there.
+$script:ArciBackupFileName = '^(arcilogger-[0-9]{8}-[0-9]{6}\.dump(\.json)?|\.arcilogger-[0-9]{8}-[0-9]{6}\.dump(\.partial|\.json\.tmp))$'
+# The PostgreSQL databases a removal never drops, and the names it accepts (quoted with %I).
+$script:PgSystemDatabases = @('postgres', 'template0', 'template1')
+$script:PgIdentifier = '^[A-Za-z_][A-Za-z0-9_]{0,62}$'
+
+function Test-ArciLinkItem {
+    <#
+    .SYNOPSIS
+        True when -Item is a link a removal must neither follow nor reset: a folder that is a
+        reparse point (a junction, a mount point, a symbolic link), a file that is a symbolic
+        link, or a file with another name elsewhere (a hard link: it shares its entries). A file
+        whose reparse point is no link (Data Deduplication, for example) is an ordinary file.
+        LinkType opens the file; a failure is the caller's.
+    #>
+    [CmdletBinding()]
+    [OutputType([bool])]
+    param([Parameter(Mandatory = $true)][System.IO.FileSystemInfo]$Item)
+    $reparse = [bool]($Item.Attributes -band [System.IO.FileAttributes]::ReparsePoint)
+    if ($Item -is [System.IO.DirectoryInfo]) { return $reparse }
+    @('SymbolicLink', 'Junction', 'HardLink') -contains [string]$Item.LinkType
+}
+
+function Test-ArciUncPath([string]$Path) {
+    <# True for \\server\share... (or //server/share...): a folder on another host. #>
+    [bool]($Path -match '^[\\/]{2}[^\\/]')
+}
+
+function Get-ArciDataRemovalPlan {
+    <#
+    .SYNOPSIS
+        What -Uninstall -RemoveData deletes (contract addendum C8, owner decision Q6), as plain
+        data: Targets (Path, What, Kind), Root (the data root, removed only once it is empty),
+        Kept (Path, Why) and the Problems that stop the removal before any change. Pure: reads
+        and deletes nothing.
+    .DESCRIPTION
+        The targets, in this order: ARCILOGGER's folders below -DataRoot (spool, vault, exports,
+        state, logs, backups; Kind 'folder', deleted whole), the backup folder ([backup] dir,
+        -BackupDir) when it is not below one of them (Kind 'dumps': only the Backup task's files
+        go, the folder once empty; a folder on another host, \\server\share..., is never
+        touched and is named as kept), and -ProgramDataDir (Kind 'folder'). Any other name the
+        data root lists (-DataRootNames) is kept and named: PostgreSQL's data directory (-Keep;
+        the installation guide puts it in D:\ARCILOGGER\db) or something that is not
+        ARCILOGGER's.
+        A problem: a data root that is a drive or share root (then nothing else is planned); a
+        target that is a drive or share root, that is or holds a Windows folder
+        (-SystemFolders) or lies in the Windows folder (-WindowsFolder); a 'folder' target that
+        holds the program folder (-InstallDir) or a -Keep path, is or holds the data root, or
+        holds the configuration folder or a kept name; data root and configuration folder inside
+        each other. A 'dumps' target is refused only as a root or a Windows folder: nothing but
+        the Backup task's files directly in it goes, and the folder only once it is empty. Paths
+        are compared as Test-ArciPathBelow compares them.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][string]$DataRoot,
+        [Parameter(Mandatory = $true)][string]$ProgramDataDir,
+        [Parameter(Mandatory = $true)][string]$InstallDir,
+        [AllowEmptyString()][string]$BackupDir = '',
+        [AllowEmptyCollection()][string[]]$DataRootNames = @(),
+        [AllowEmptyCollection()][string[]]$Keep = @(),
+        [AllowEmptyCollection()][string[]]$SystemFolders = @(),
+        [AllowEmptyString()][string]$WindowsFolder = ''
+    )
+    $separators = [char[]]@([char]92, [char]47)
+    $isRoot = {
+        param([string]$Path)
+        # C:\, C:, \ or /, and \\server\share: nothing of the data is ever a whole drive or share.
+        $Path -match '^([A-Za-z]:)?[\\/]*$' -or $Path -match '^[\\/]{2}[^\\/]+([\\/]+[^\\/]+)?[\\/]*$'
+    }
+    $root = $DataRoot.TrimEnd($separators)
+    $config = $ProgramDataDir.TrimEnd($separators)
+    $keepPaths = @($Keep | Where-Object { $_ } | ForEach-Object { ([string]$_).TrimEnd($separators) })
+    $targets = New-Object System.Collections.Generic.List[object]
+    $kept = New-Object System.Collections.Generic.List[object]
+    $problems = New-Object System.Collections.Generic.List[string]
+    if (& $isRoot $root) {
+        # Nothing below a drive root is joined or deleted: such a data root is no installation's.
+        $problems.Add(('Güvenlik: veri klasörü bir sürücü ya da paylaşım kökü; elle silin [the data folder is a drive or share root, delete by hand]: {0}' -f $DataRoot))
+        return [pscustomobject]@{ Targets = @(); Root = $null; Kept = @(); Problems = $problems.ToArray() }
+    }
+    foreach ($folder in $script:ArciDataFolders) {
+        $targets.Add([pscustomobject]@{ Path = [System.IO.Path]::Combine($root, $folder.Name); What = $folder.What; Kind = 'folder' })
+    }
+    # A root ("/", "C:\") trims to nothing or "C:": keep what was given, so it is refused below.
+    $backup = ([string]$BackupDir).TrimEnd($separators)
+    if (-not $backup -and ([string]$BackupDir).Trim()) { $backup = [string]$BackupDir }
+    if ($backup -and (Test-ArciUncPath $backup) -and -not (& $isRoot $backup)) {
+        $kept.Add([pscustomobject]@{ Path = $backup; Why = 'yedek klasörü başka bir sunucuda, silinmez; oradaki yönetici siler [the backup folder is on another host: not deleted, its administrator deletes it]' })
+        $backup = ''
+    }
+    if ($backup -and -not @($targets | Where-Object { Test-ArciPathBelow $backup $_.Path }).Count) {
+        $targets.Add([pscustomobject]@{ Path = $backup; What = $script:ArciBackupFolderWhat; Kind = 'dumps' })
+    }
+    $targets.Add([pscustomobject]@{ Path = $config; What = $script:ArciConfigFolderWhat; Kind = 'folder' })
+    $standard = @($script:ArciDataFolders | ForEach-Object { $_.Name })
+    foreach ($name in @($DataRootNames | Where-Object { $_ })) {
+        if ($standard -icontains $name) { continue }
+        $path = [System.IO.Path]::Combine($root, $name)
+        $why = 'ARCILOGGER''ın değil, korunur [not ARCILOGGER''s, kept]'
+        if ($backup -and ($path -ieq $backup)) { $why = 'yedek klasörü: içindeki ARCILOGGER yedekleri silinir, gerisi korunur [the backup folder: ARCILOGGER''s backups go, the rest stays]' }
+        if (@($keepPaths | Where-Object { Test-ArciPathBelow $_ $path }).Count) { $why = 'PostgreSQL veri klasörü, korunur [PostgreSQL''s data directory, kept]' }
+        $kept.Add([pscustomobject]@{ Path = $path; Why = $why })
+    }
+    $keptPaths = @($kept | ForEach-Object { $_.Path })
+    if ((Test-ArciPathBelow $root $config) -or (Test-ArciPathBelow $config $root)) {
+        $problems.Add(('Veri klasörü ile yapılandırma klasörü iç içe; elle silin [the data folder and the configuration folder are inside each other, delete them by hand]: {0}, {1}' -f $root, $config))
+    }
+    foreach ($target in $targets) {
+        $path = $target.Path
+        $folder = $target.Kind -eq 'folder'
+        $why = $null
+        if (& $isRoot $path) { $why = 'bir sürücü ya da paylaşım kökü [a drive or share root]' }
+        elseif (@($SystemFolders | Where-Object { $_ -and (Test-ArciPathBelow $_ $path) }).Count) { $why = 'bir Windows klasörü ya da onu içeriyor [a Windows folder or holds one]' }
+        elseif ($WindowsFolder -and (Test-ArciPathBelow $path $WindowsFolder)) { $why = 'Windows klasörünün içinde [inside the Windows folder]' }
+        elseif ($folder -and (Test-ArciPathBelow $InstallDir $path)) { $why = 'program klasörünü içeriyor [holds the program folder]' }
+        elseif ($folder -and @($keepPaths | Where-Object { Test-ArciPathBelow $_ $path }).Count) { $why = 'PostgreSQL veri klasörünü içeriyor [holds PostgreSQL''s data directory]' }
+        elseif ($folder -and (Test-ArciPathBelow $root $path)) { $why = 'veri klasörünün kendisi ya da onu içeriyor [is or holds the data folder]' }
+        elseif ($folder -and ($path -ine $config) -and (Test-ArciPathBelow $config $path)) { $why = 'yapılandırma klasörünü içeriyor [holds the configuration folder]' }
+        elseif ($folder -and @($keptPaths | Where-Object { Test-ArciPathBelow $_ $path }).Count) { $why = 'korunan bir şeyi içeriyor [holds something that is kept]' }
+        if ($why) { $problems.Add(('Güvenlik: silinmez, {0} [refusing to delete]: {1}' -f $why, $path)) }
+    }
+    [pscustomobject]@{
+        Targets  = $targets.ToArray()
+        Root     = $root
+        Kept     = $kept.ToArray()
+        Problems = $problems.ToArray()
+    }
+}
+
+function Get-ArciFolderFacts {
+    <#
+    .SYNOPSIS
+        A folder -Uninstall -RemoveData is about to delete: Exists, Files, Bytes, Links (what
+        Test-ArciLinkItem calls a link, -Path itself included; never followed) and Unreadable
+        (what could not be listed or read). Reads only.
+    .DESCRIPTION
+        -DumpsOnly: only the Backup task's files directly in -Path count ($ArciBackupFileName),
+        nothing below it is listed, and a link among them is skipped, not reported: those are
+        all a removal deletes there.
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory = $true)][string]$Path, [switch]$DumpsOnly)
+    $facts = [pscustomobject]@{ Path = $Path; Exists = $false; Files = [int64]0; Bytes = [int64]0; Links = @(); Unreadable = @() }
+    if (-not (Test-Path -LiteralPath $Path)) { return $facts }
+    $facts.Exists = $true
+    $links = New-Object System.Collections.Generic.List[string]
+    $unreadable = New-Object System.Collections.Generic.List[string]
+    if ($DumpsOnly) {
+        foreach ($file in @(Get-ChildItem -LiteralPath $Path -File -Force -ErrorAction SilentlyContinue)) {
+            if ($file.Name -cnotmatch $script:ArciBackupFileName) { continue }
+            if ([bool]($file.Attributes -band [System.IO.FileAttributes]::ReparsePoint)) { continue }
+            $facts.Files += 1
+            $facts.Bytes += [int64]$file.Length
+        }
+        return $facts
+    }
+    $pending = New-Object System.Collections.Generic.List[object]
+    $pending.Add((Get-Item -LiteralPath $Path -Force))
+    for ($i = 0; $i -lt $pending.Count; $i++) {
+        $item = $pending[$i]
+        try { $link = Test-ArciLinkItem -Item $item }
+        catch {
+            $unreadable.Add($item.FullName)
+            continue
+        }
+        if ($link) {
+            $links.Add($item.FullName)
+            continue
+        }
+        if ($item -is [System.IO.DirectoryInfo]) {
+            try { foreach ($child in @($item.GetFileSystemInfos())) { $pending.Add($child) } }
+            catch { $unreadable.Add($item.FullName) }
+            continue
+        }
+        $facts.Files += 1
+        $facts.Bytes += [int64]$item.Length
+    }
+    $facts.Links = $links.ToArray()
+    $facts.Unreadable = $unreadable.ToArray()
+    $facts
+}
+
+function Get-ArciLinkRefusal([string[]]$Links) {
+    <# Why -Uninstall -RemoveData does not delete a folder with a link in it (Get-ArciFolderFacts). #>
+    "Silinecek klasörde bir bağlantı var; izlenmez ve silinmez, elle kaldırın [a link (reparse point or hard link) in a folder to delete: never followed, remove it by hand]: {0}" -f ($Links -join ', ')
+}
+
+function Remove-ArciDataFolder {
+    <#
+    .SYNOPSIS
+        Delete one folder of ARCILOGGER's data, sealed files included (-Uninstall -RemoveData,
+        contract addendum C8): 'removed', or 'absent' when it is not there.
+    .DESCRIPTION
+        The sealed files carry the read-only attribute and a deny entry for Everyone on delete
+        and write (arcilogger_core.immutability), and the protected folders entries of their
+        own. On Windows BUILTIN\Administrators therefore first becomes the owner of -Path and of
+        every item below it: -Path gets full control for Administrators and SYSTEM only, every
+        item below the inherited entries only (the deny entries go) and a file's attributes are
+        cleared; then the folder is deleted. A link (Test-ArciLinkItem) is never followed or
+        reset: one there stops this function before it changes anything (the caller has checked
+        every folder before the first change, Get-ArciFolderFacts), and one met while the
+        entries are reset stops it there. An item removed meanwhile is skipped
+        (Test-ArciItemGone); any other failure names the item and "takeown /A /R /F <folder>".
+    #>
+    [CmdletBinding()]
+    [OutputType([string])]
+    param([Parameter(Mandatory = $true)][string]$Path)
+    if (-not (Test-Path -LiteralPath $Path)) { return 'absent' }
+    $facts = Get-ArciFolderFacts -Path $Path
+    if ($facts.Links.Count -gt 0) { throw (Get-ArciLinkRefusal $facts.Links) }
+    if (Test-ArciWindows) {
+        $item = Get-Item -LiteralPath $Path -Force
+        $admins = New-Object System.Security.Principal.SecurityIdentifier -ArgumentList $script:WellKnownSid.Administrators
+        $system = New-Object System.Security.Principal.SecurityIdentifier -ArgumentList $script:WellKnownSid.System
+        $sidType = [System.Security.Principal.SecurityIdentifier]
+        $full = [System.Security.AccessControl.FileSystemRights]::FullControl
+        $inherit = [System.Security.AccessControl.InheritanceFlags]'ContainerInherit, ObjectInherit'
+        $none = [System.Security.AccessControl.PropagationFlags]::None
+        $allow = [System.Security.AccessControl.AccessControlType]::Allow
+        try {
+            $security = Get-ArciAccessControl -Item $item
+            $security.SetAccessRuleProtection($true, $false)
+            foreach ($rule in @($security.GetAccessRules($true, $false, $sidType))) { [void]$security.RemoveAccessRuleSpecific($rule) }
+            foreach ($sid in @($admins, $system)) {
+                $security.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule -ArgumentList $sid, $full, $inherit, $none, $allow))
+            }
+            $security.SetOwner($admins)
+            Set-ArciAccessControl -Item $item -Security $security
+        }
+        catch { throw (Get-ArciTakeOverError $item.FullName $item $_) }
+        # Then every item below, parents before their children: each inherits full control from
+        # the folder above it before its own entries are read.
+        $below = New-Object System.Collections.Generic.List[object]
+        try { foreach ($child in @($item.GetFileSystemInfos())) { $below.Add($child) } }
+        catch { throw (Get-ArciTakeOverError $item.FullName $item $_) }
+        for ($i = 0; $i -lt $below.Count; $i++) {
+            $child = $below[$i]
+            try { $link = Test-ArciLinkItem -Item $child }
+            catch {
+                if (Test-ArciItemGone $child $_) { continue }
+                throw (Get-ArciTakeOverError $item.FullName $child $_)
+            }
+            if ($link) { throw (Get-ArciLinkRefusal @($child.FullName)) }
+            try {
+                $childSecurity = Get-ArciAccessControl -Item $child
+                $childSecurity.SetAccessRuleProtection($false, $false)
+                foreach ($rule in @($childSecurity.GetAccessRules($true, $false, $sidType))) { [void]$childSecurity.RemoveAccessRuleSpecific($rule) }
+                $childSecurity.SetOwner($admins)
+                Set-ArciAccessControl -Item $child -Security $childSecurity
+                if ($child -is [System.IO.FileInfo]) { $child.Attributes = [System.IO.FileAttributes]::Normal }
+            }
+            catch {
+                if (Test-ArciItemGone $child $_) { continue }
+                throw (Get-ArciTakeOverError $item.FullName $child $_)
+            }
+            if ($child -is [System.IO.DirectoryInfo]) {
+                try { foreach ($grandchild in @($child.GetFileSystemInfos())) { $below.Add($grandchild) } }
+                catch { if (-not (Test-ArciItemGone $child $_)) { throw (Get-ArciTakeOverError $item.FullName $child $_) } }
+            }
+        }
+    }
+    Remove-Item -LiteralPath $Path -Recurse -Force
+    'removed'
+}
+
+function Remove-ArciBackupDumps {
+    <#
+    .SYNOPSIS
+        Delete the Backup task's files ($ArciBackupFileName) directly in -Path, [backup] dir of a
+        removal with the data, and the folder once nothing is left in it (never with
+        -KeepFolder): 'removed' (the folder went), 'kept' (something else is in it, or
+        -KeepFolder) or 'absent'. Nothing else in the folder and nothing below it is touched; a
+        link among those names is skipped.
+    #>
+    [CmdletBinding()]
+    [OutputType([string])]
+    param([Parameter(Mandatory = $true)][string]$Path, [switch]$KeepFolder)
+    if (-not (Test-Path -LiteralPath $Path -PathType Container)) { return 'absent' }
+    foreach ($file in @(Get-ChildItem -LiteralPath $Path -File -Force)) {
+        if ($file.Name -cnotmatch $script:ArciBackupFileName) { continue }
+        if ([bool]($file.Attributes -band [System.IO.FileAttributes]::ReparsePoint)) { continue }
+        Remove-Item -LiteralPath $file.FullName -Force
+    }
+    if ($KeepFolder -or @(Get-ChildItem -LiteralPath $Path -Force).Count -gt 0) { return 'kept' }
+    Remove-Item -LiteralPath $Path -Force
+    'removed'
+}
+
+function Test-ArciRemovalConfirmation {
+    <#
+    .SYNOPSIS
+        True when -Typed confirms -Expected (the organisation name of -Uninstall -RemoveData):
+        the same text after the spaces at both ends are trimmed and every run of spaces inside
+        is made one, letter case not counted, ordinally ("örnek a.ş." confirms "Örnek A.Ş.") or
+        as Turkish counts it ("izmir" confirms "İZMİR"). An empty -Expected or -Typed never
+        confirms. Pure.
+    #>
+    [CmdletBinding()]
+    [OutputType([bool])]
+    param([AllowNull()][AllowEmptyString()][string]$Expected, [AllowNull()][AllowEmptyString()][string]$Typed)
+    $normal = { param([string]$Text) ([regex]::Replace(([string]$Text).Normalize([System.Text.NormalizationForm]::FormC), '\s+', ' ')).Trim() }
+    $want = & $normal $Expected
+    $got = & $normal $Typed
+    if (-not $want -or -not $got) { return $false }
+    if ([string]::Equals($want, $got, [System.StringComparison]::OrdinalIgnoreCase)) { return $true }
+    try {
+        $turkish = [System.Globalization.CultureInfo]::GetCultureInfo('tr-TR')
+        return ($turkish.CompareInfo.Compare($want, $got, [System.Globalization.CompareOptions]::IgnoreCase) -eq 0)
+    }
+    catch { return $false }
+}
+
+function Get-ArciDatabaseRemovalSql {
+    <#
+    .SYNOPSIS
+        The psql scripts of -Uninstall -RemoveData for ARCILOGGER's database (contract addendum
+        C8), run as the superuser on the postgres database: Query prints one line each,
+        'database|<name>' (dropped), 'owned|<name>' (the role owns it, not ARCILOGGER's: kept),
+        'role|<name>|drop' or 'role|<name>|keep' and 'data_directory|<path>'; Drop drops
+        -Databases (WITH (FORCE): a session left over is ended); Role drops the role. Pure.
+    .DESCRIPTION
+        ARCILOGGER's databases are named, never taken by ownership: -Name, the ones a restore set
+        aside (-Extra: replaced_databases of install\state.json) and those whose name a restore
+        gives (<name>_replaced_<14 digits>, <name>_restore_<14 digits>, the name cut as
+        Get-RestoreDatabaseName cuts it); never postgres, template0 or template1. Other
+        databases the role owns are listed as 'owned' only when the role is not a superuser and
+        not the account psql connects as. The role is dropped only when it is neither. Names
+        must be PostgreSQL identifiers of letters, digits and _ ($PgIdentifier); they are bound
+        with \set and quoted by format('%I').
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][string]$Name,
+        [Parameter(Mandatory = $true)][string]$Role,
+        [AllowEmptyCollection()][string[]]$Extra = @(),
+        [AllowEmptyCollection()][string[]]$Databases = @()
+    )
+    foreach ($value in @(@($Name, $Role) + @($Extra) + @($Databases))) {
+        if ([string]$value -cnotmatch $script:PgIdentifier) {
+            throw ('Geçersiz PostgreSQL adı [not a valid PostgreSQL identifier]: {0}' -f $value)
+        }
+    }
+    $system = ($script:PgSystemDatabases | ForEach-Object { "'{0}'" -f $_ }) -join ', '
+    $named = "(datname = ANY (string_to_array(:'db_names', ',')) OR datname ~ ('^' || left(:'db_name', 39) || '_replaced_[0-9]{14}$') OR datname ~ ('^' || left(:'db_name', 40) || '_restore_[0-9]{14}$'))"
+    $owner = "(SELECT oid FROM pg_roles WHERE rolname = :'role_name' AND NOT rolsuper AND rolname <> current_user)"
+    $names = @(@($Name) + @($Extra) | Select-Object -Unique) -join ','
+    $query = @(
+        '\set ON_ERROR_STOP on',
+        ("\set role_name '{0}'" -f $Role),
+        ("\set db_name '{0}'" -f $Name),
+        ("\set db_names '{0}'" -f $names),
+        ("SELECT 'database|' || datname FROM pg_database WHERE datname NOT IN ({0}) AND {1} ORDER BY datname;" -f $system, $named),
+        ("SELECT 'owned|' || datname FROM pg_database WHERE datname NOT IN ({0}) AND datdba = {1} AND NOT {2} ORDER BY datname;" -f $system, $owner, $named),
+        "SELECT 'role|' || rolname || '|' || CASE WHEN rolsuper OR rolname = current_user THEN 'keep' ELSE 'drop' END FROM pg_roles WHERE rolname = :'role_name';",
+        "SELECT 'data_directory|' || setting FROM pg_settings WHERE name = 'data_directory';"
+    ) -join "`n"
+    $drop = @(
+        '\set ON_ERROR_STOP on',
+        ("\set db_names '{0}'" -f (@($Databases) -join ',')),
+        ("SELECT format('DROP DATABASE IF EXISTS %I WITH (FORCE)', name) FROM unnest(string_to_array(:'db_names', ',')) AS name WHERE name NOT IN ({0}) \gexec" -f $system)
+    ) -join "`n"
+    $roleSql = @(
+        '\set ON_ERROR_STOP on',
+        ("\set role_name '{0}'" -f $Role),
+        "SELECT format('DROP ROLE IF EXISTS %I', rolname) FROM pg_roles WHERE rolname = :'role_name' AND NOT rolsuper AND rolname <> current_user \gexec"
+    ) -join "`n"
+    [pscustomobject]@{ Query = $query + "`n"; Drop = $drop + "`n"; Role = $roleSql + "`n" }
+}
+
+function ConvertFrom-ArciDatabaseRemovalQuery {
+    <#
+    .SYNOPSIS
+        The answer of Get-ArciDatabaseRemovalSql's Query (psql -t -A) as Databases (to drop),
+        Owned (the role's other databases, kept), Unnamed (names to drop that are no identifier
+        the removal quotes: left for the administrator), Role (or $null when there is no such
+        role), DropRole and DataDirectory. Pure.
+    #>
+    [CmdletBinding()]
+    param([AllowNull()][AllowEmptyString()][string]$Text)
+    $result = [pscustomobject]@{ Databases = @(); Owned = @(); Unnamed = @(); Role = $null; DropRole = $false; DataDirectory = $null }
+    $databases = New-Object System.Collections.Generic.List[string]
+    $owned = New-Object System.Collections.Generic.List[string]
+    $unnamed = New-Object System.Collections.Generic.List[string]
+    foreach ($line in @(([string]$Text) -split '\r?\n')) {
+        $parts = $line.Trim() -split '\|', 3
+        switch ($parts[0]) {
+            'database' {
+                if ($parts.Count -ge 2 -and $parts[1]) {
+                    if ($parts[1] -cmatch $script:PgIdentifier) { $databases.Add($parts[1]) } else { $unnamed.Add($parts[1]) }
+                }
+            }
+            'owned' { if ($parts.Count -ge 2 -and $parts[1]) { $owned.Add($parts[1]) } }
+            'role' {
+                if ($parts.Count -ge 3) {
+                    $result.Role = $parts[1]
+                    $result.DropRole = $parts[2] -eq 'drop'
+                }
+            }
+            'data_directory' { if ($parts.Count -ge 2 -and $parts[1]) { $result.DataDirectory = $parts[1] } }
+        }
+    }
+    $result.Databases = $databases.ToArray()
+    $result.Owned = $owned.ToArray()
+    $result.Unnamed = $unnamed.ToArray()
+    # A role that still owns a database (one kept here) cannot be dropped.
+    if ($owned.Count -gt 0 -or $unnamed.Count -gt 0) { $result.DropRole = $false }
+    $result
+}
+
 Export-ModuleMember -Function @(
     'Get-ArciServiceNames', 'Get-ArciWellKnownSid', 'Write-ArciStep', 'Write-ArciInfo', 'Write-ArciWarn',
     'Test-ArciWindows', 'Test-ArciAdministrator', 'Test-ArciInteractiveConsole', 'Get-ArciWindowsPowerShellModulePath', 'Initialize-ArciModulePath',
@@ -3603,7 +4005,7 @@ Export-ModuleMember -Function @(
     'Invoke-ArciExe', 'Get-ArciConfiguredDataDir', 'Read-ArciDataRootRecord', 'Resolve-ArciDataRoot', 'Read-ArciTomlFile', 'Get-ArciConfigValue', 'Get-ArciApiEndpoint', 'Test-ArciProxyTrust', 'Get-ArciSourceAddresses', 'Get-ArciSourceTables',
     'ConvertTo-ArciTomlString', 'Get-ArciTomlString', 'Set-ArciTomlString', 'Get-ArciSiteNameProblem', 'Get-ArciTimeServerProblem',
     'Get-ArciTimePeerList', 'Read-ArciAdminAddress',
-    'ConvertTo-ArciNetwork', 'Test-ArciAddressSpec', 'Test-ArciAddressInNetwork', 'Get-ArciForeignRdpSession',
+    'ConvertTo-ArciNetwork', 'Test-ArciAddressSpec', 'Test-ArciAddressInNetwork',
     'Get-ArciNetworkFacts', 'Get-ArciLocalAddresses', 'Select-ArciServerAddress', 'Get-ArciCollectorBind', 'Test-ArciBindAddress',
     'Get-ArciInstallMarkerName', 'Get-ArciProgramFolderState', 'Get-ArciAlembicChain',
     'ConvertTo-ArciIsoDate', 'Get-ArciJsonField', 'Read-ArciLicenseFile', 'Read-ArciLicenseStatus', 'Test-ArciMaintenanceCovers',
@@ -3616,5 +4018,8 @@ Export-ModuleMember -Function @(
     'Get-ArciExecutableRecords', 'Get-ArciUnsafeWriters', 'Get-ArciPathAclFacts', 'Read-ArciInstallerHashes', 'Get-ArciZamaneJarPlan', 'Copy-ArciApprovedJar', 'Merge-ArciJarsDocument',
     'Get-ArciDriveFacts', 'Get-ArciDiskBusType', 'Select-ArciDataRoot', 'Get-ArciDataDriveChecks',
     'Get-ArciOsSupport', 'Get-ArciPowerSchemeGuid', 'ConvertFrom-ArciPowercfgQuery',
-    'Test-ArciHttpsHealth'
+    'Test-ArciHttpsHealth',
+    'Test-ArciLinkItem', 'Test-ArciUncPath', 'Get-ArciDataRemovalPlan', 'Get-ArciFolderFacts', 'Get-ArciLinkRefusal', 'Remove-ArciDataFolder',
+    'Remove-ArciBackupDumps', 'Test-ArciRemovalConfirmation',
+    'Get-ArciDatabaseRemovalSql', 'ConvertFrom-ArciDatabaseRemovalQuery'
 )

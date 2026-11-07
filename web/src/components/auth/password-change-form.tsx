@@ -5,7 +5,7 @@ import { useTranslation } from 'react-i18next';
 import { Alert } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { DialogFooter } from '@/components/ui/dialog';
-import { Input } from '@/components/ui/input';
+import { PasswordInput } from '@/components/ui/password-input';
 import { Field } from '@/components/ui/label';
 import { errorMessage, isApiError, passwordProblemText, type ApiError } from '@/lib/api';
 import { useChangePassword } from '@/lib/api-hooks';
@@ -99,9 +99,8 @@ export function PasswordChangeForm({
         error={currentError}
         required
       >
-        <Input
+        <PasswordInput
           id={`${id}-current`}
-          type="password"
           autoComplete="current-password"
           value={current}
           aria-invalid={currentError ? true : undefined}
@@ -119,9 +118,8 @@ export function PasswordChangeForm({
         error={passwordError}
         required
       >
-        <Input
+        <PasswordInput
           id={`${id}-new`}
-          type="password"
           autoComplete="new-password"
           value={password}
           aria-invalid={passwordError ? true : undefined}
@@ -137,9 +135,8 @@ export function PasswordChangeForm({
         error={errors.confirm && t(errors.confirm)}
         required
       >
-        <Input
+        <PasswordInput
           id={`${id}-confirm`}
-          type="password"
           autoComplete="new-password"
           value={confirm}
           aria-invalid={errors.confirm ? true : undefined}

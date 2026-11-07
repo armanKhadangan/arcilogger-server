@@ -91,8 +91,9 @@ export function IngestCard({ ingest, to }: { ingest: DashboardIngest } & LinkPro
         <div className="flex flex-col gap-1">
           <p className="text-xs font-medium text-danger-ink">{t('dashboard.ingest.silentTitle')}</p>
           <ul className="flex flex-col gap-0.5 text-13" data-testid="silent-sources">
+            {/* Wraps: in three cards a row (1100 px) the time is what matters. */}
             {ingest.silent.map((source) => (
-              <li key={source.name} className="truncate">
+              <li key={source.name} className="break-words">
                 {source.last_seen
                   ? t('dashboard.ingest.silentSince', {
                       name: visibleText(source.name),

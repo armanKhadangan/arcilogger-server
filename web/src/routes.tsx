@@ -247,6 +247,12 @@ export const routes: RouteObject[] = [
                   Component: (await import('@/pages/system/system-page')).SystemPage,
                 }),
               },
+              {
+                path: 'database',
+                lazy: async () => ({
+                  Component: (await import('@/pages/database/database-page')).DatabasePage,
+                }),
+              },
             ],
           },
           // The browser administration (ADR-0014): machine configuration, database settings,

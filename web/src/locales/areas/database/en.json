@@ -1,0 +1,61 @@
+{
+  "database": {
+    "description": "The database ARCILOGGER uses: how full it is, how fast it grows, the last backup.",
+    "updated": "Updated {{time}}",
+    "refresh": "Refresh",
+    "loadFailed": "The database information could not be loaded.",
+    "unknown": "—",
+    "engine": {
+      "title": "Database in use",
+      "product": "Database",
+      "postgresql": "PostgreSQL {{version}}",
+      "timescaledb": "PostgreSQL {{version}} with TimescaleDB {{extension}}",
+      "name": "Database name",
+      "address": "Address",
+      "connections": "Connections",
+      "connectionsValue": "{{count}} / at most {{limit}}"
+    },
+    "size": {
+      "title": "Size",
+      "total": "Total size",
+      "unmeasured": "Not measured",
+      "measuredAt": "Measured at",
+      "growth": "Daily growth",
+      "perDay": "about {{size}} a day",
+      "insufficient": "A forecast needs at least 7 daily samples ({{samples}} so far).",
+      "notGrowing": "It did not grow in the last 30 days.",
+      "window": "Kept in the database",
+      "windowValue": "the last {{days}} days",
+      "windowNote": "Older days are taken out of the database. The raw logs and seals stay in the vault and can be loaded again from the Search page."
+    },
+    "chart": {
+      "title": "Size over the last 30 days",
+      "caption": "One sample a day (after 00:30 at night).",
+      "empty": "No daily sample yet; the first one is taken tonight.",
+      "day": "Day",
+      "size": "Size"
+    },
+    "drive": {
+      "title": "Data drive",
+      "note": "PostgreSQL's own data folder is usually put on this drive at installation.",
+      "none": "The data drive could not be read."
+    },
+    "backup": {
+      "title": "Last backup",
+      "none": "No backup yet.",
+      "ok": "Succeeded",
+      "failed": "Failed",
+      "finished": "Time",
+      "file": "File",
+      "size": "Size",
+      "settings": "Backup settings"
+    },
+    "tables": {
+      "title": "Largest tables",
+      "caption": "Partitions and chunks included.",
+      "table": "Table",
+      "size": "Size",
+      "none": "The table sizes could not be read."
+    }
+  }
+}

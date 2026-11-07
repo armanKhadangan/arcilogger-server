@@ -882,6 +882,60 @@ The later pull request merges `origin/wave-5` and keeps both sides.
 
 ---
 
+## 7. Addendum C (2026-11-07): icon and shortcuts, notification-area icon, backups, database page
+
+The owner's requests of 2026-11-07 (release 0.3.0, built by the manager on the branch of #231):
+
+- "uygulamanın niye masaüstü bir logosu veya bir simgesi yok çalıştırabilmem için";
+- "o durum gösterge sayfası vardır ya. onu system tray kısmında görebilmek istiyorum";
+- in Ayarlar, data control: choose where the backups are saved, open the backups' location, a
+  mirror of the backups (for example on a NAS);
+- a database page: how full it is and which database it uses;
+- a way to remove ARCILOGGER together with its data (an owner decision, C8).
+
+**C1 Icon and shortcuts.** `tools/icons/build-icons.mjs` draws the Windows icons from
+`web/public/favicon.svg` (white on a rounded square; Chromium of `web/`) into
+`deploy/windows/desktop/icons/`: `arcilogger.ico` (16-256 px; 32-bit BMP images, PNG at 256 px)
+and `tray-<level>.ico` for the levels `ok`, `warn`, `unknown`, `critical` in the colours of
+`status.COLOURS`. The bundle carries them (`Build-ArciBundle.ps1`), the program has them in
+`desktop\icons\`. The installer (`Set-ArciShortcuts`, `Remove-ArciShortcuts`) makes, for every
+user: Start menu folder `ARCILOGGER` with **ARCILOGGER** (`explorer.exe https://localhost/`) and
+**ARCILOGGER Durum** (`pythonw.exe -I -m arcilogger_core.desktop`), desktop **ARCILOGGER**; all
+with `arcilogger.ico`. A failure is a warning. Setup and its uninstaller carry the icon
+(`SetupIconFile`, `UninstallDisplayIcon={uninstallexe}`).
+
+**C2 Notification-area icon** (`arcilogger_core.desktop.tray`, standard library `ctypes`).
+- The logon task starts `-I -m arcilogger_core.desktop --no-elevate --tray`: only the icon shows.
+  The icon has the level's colour, tooltip `ARCILOGGER Durum — <TR> / <EN>`; on the rise to
+  critical a notification (title `ARCILOGGER — Sorun var / Problem`, text: the first critical row)
+  next to the taskbar flash.
+- Left click: show the window. Right-click menu (`tray.MENU`): show, open the web interface,
+  Backups (C3), close the icon (ends the program). Closing the window hides it while the icon
+  runs; without an icon (no notification area) the window behaves as before.
+- A second start asks the running program to show its window: registered message
+  `ARCILOGGER-Durum-Show` to the window class `ARCILOGGER-Durum-Tray`, let through the message
+  filter (with `TaskbarCreated`), so a start without rights needs no UAC prompt.
+- I1-I5 hold: the icon changes nothing.
+
+**C3 Backups window** (`arcilogger_core.desktop.backups`, `window.BackupsWindow`). Lists the
+`*.dump` files of `[backup] dir` and `backups\db`, newest first (time, size). **Kopyasını kaydet…**
+copies the selected dump (and its sidecar) to a folder chosen in a dialog: written as
+`<name>.partial`, flushed, hashed from disk, renamed only when the hash equals the sidecar's
+(else the source's); an existing name is never overwritten; a dump whose content differs from
+its sidecar is refused ("bozulmuş olabilir"). It replaces "open the folder in Explorer": the
+backup folders are administrators-only and Explorer's "Continue" would add an ACL entry (an
+`acl_drift` alert).
+
+**C4-C7** (backup folder from the browser, backup list on the web page, a mirror of the backups,
+the database page) are described with their implementation below, in this addendum's own
+"Deviations" entry. **C8** (removal with the data) is built as the owner answered Q6 (Owner
+questions), described there too.
+
+Tests: `tests/test_windows_icons.py`, `tests/test_desktop_task.py`,
+`core/tests/test_desktop_backups.py`, `core/tests/test_desktop_status.py` (start modes),
+`core/tests/test_desktop_window.py` and `--self-test` (icon follows the level, notifications,
+commands, hide on close, Backups list and copy); the real icon on Windows CI.
+
 ## Manager clarifications (2026-11-02, answers on #101 and #106)
 
 These change the contract text above. Where a section says otherwise, the clarification wins.
@@ -978,6 +1032,7 @@ All Wave 5 questions are answered (2026-11-02).
 | Q3 | Renew report tokens as well? | **Yes, the stored ones** (owner: "ne daha iyi ve güvenliyse"): `exports/reports/*.pdf.zd` (D3). |
 | Q4 | Revocation lists are never deleted. Limit them? | **Keep all** (default). `crl status` reports their count and size. Revisit after the first year on site. |
 | Q5 | Renewal window? | **180 days** (default; configurable, 30–730). |
+| Q6 (2026-11-07, C8) | Removal together with the data? Proposal: Setup's uninstaller keeps the data by default; a separate box "Tüm verileri de sil (geri alınamaz)" plus the organisation name typed deletes raw logs, vault, backups, configuration and ARCILOGGER's database and role (PostgreSQL itself stays: the customer installs it); a 5651 warning recommends legal review; only at the server, never from the browser. | **Answered 2026-11-07** (owner: "bu seçenek kesinlikle olsun"): as proposed; built as C8 in "Deviations — Addendum C". |
 
 ## Deviations
 
@@ -4095,3 +4150,113 @@ P4 is Gülşah's (#203, 23:40Z); it follows W5-N (#207) and the answers of 2026-
   `probe_skipped` in strict outbound mode (`strictOutbound`). Its texts are those of
   `admin/messages.py`. Its seed TSA section reports the two `turktrust.*` secrets as W5-T's API
   does, so `e2e/settings-kamusm.spec.ts` drops `reportTurktrust` (granted on #214).
+
+## Deviations — Addendum C (2026-11-07)
+
+**C7 Veritabanı page, as built.** `GET /api/v1/system/database` (`system.read`, not audited, no
+licence module; `arcilogger_api.system.database`) answers `DatabaseDetails`: `storage`,
+`server_version` (`SHOW server_version`), `timescaledb_version` (`pg_extension`), `name`
+(`current_database()`), `host`/`port` (`[database]`), `total_bytes`/`measured_at`/`tables` (the
+measured sizes of `GET /system`, the same 5-minute cache), `connections` (`pg_stat_activity` of this
+database) and `max_connections`, `window_days` (`db.retention_days`), `growth`
+(`{state, samples, bytes_per_day}`: the same least-squares line as a drive's forecast, newest 30
+samples, at least 7), `history` (the samples of the last 30 days), `data_drive` (the data folder's
+drive with its forecast) and `last_backup` (`state/backup/last.json`: time, ok, the file's name only
+and its size after a success). Each reading that fails answers `null` on its own. The worker job
+`system.sample` adds `"database": <pg_database_size>` to each day of `state/system-history.json`
+(left out when it cannot be read; an entry whose value is not an integer is not read). Web: menu
+entry **Veritabanı** under Yönetim (`/database`, `system.read`), sample `system-database.json`
+(the server facts fixed after the real answer was checked). The area chart got `fitValues` (value
+axis from the data, series not stacked) so a slow growth is visible.
+
+**C5 and C6, as built.** The owner asked for a mirror of the backups "on an external NAS". The
+copy does **not** go into the replica's folder: that folder is often write-once (WORM, the vault's
+evidence copy), and old copies of the backups hold personal data and must be deletable (KVKK);
+`docs/YEDEKLEME.md` already asked for a separate share. So:
+- `[backup] mirror_target` (browser-editable in the `backup` section; `null`: no copy): a UNC share
+  or folder **on the replica's host** (`backup_mirror_other_host` otherwise), never the replica's
+  folder or inside it (`backup_mirror_inside_replica`), only while the replica is on with a target
+  (`backup_mirror_needs_replica`); `backup_mirror_target_invalid` for anything else. Written with
+  the replica's user and its stored password: the password is never offered to another host, and
+  the strict outbound rule `ARCILOGGER Out Replica` (host:445) already covers it. A change probes
+  the share (`backup_mirror` probe: the replica probe's write/read/delete test on the new target;
+  `backup_mirror_test_failed`) when the replica has a user, and sets `task.next_run:Replica`.
+- The Replica task (hourly), after the sealed days and outside `--day`, connects to the mirror
+  target and runs `arcilogger_core.backupmirror.mirror_backups`: every scheduled dump with its
+  sidecar, staged as `.arcilogger-staging\<name>.partial`, read back, renamed only when its SHA-256
+  equals the sidecar's; an existing name is never overwritten; a dump not matching its sidecar is
+  not copied. Once every dump is there, the scheduled dumps the folder no longer keeps are deleted
+  from the share (the NAS keeps what the server keeps); nothing is deleted after a failure or from
+  an empty folder; a refused deletion is counted. Result: `state/backup/mirror.json`
+  (`finished`, `ok`, `copied`, `present`, `pruned`, `prune_refused`, `failed`, `error`; no
+  address, no password); a failure raises `R20-replica` (medium, details `{"part":
+  "backup-mirror"}`).
+- The Backup task writes `state/backup/list.json` after every successful run (`updated`, `dumps`:
+  name, site time, size, the sidecar's SHA-256): the services cannot read the backup folder.
+- `GET /api/v1/system/backups` (`system.read`, not audited): `BackupsInfo` (`enabled`, `folder`,
+  `list_updated`, `dumps`, `mirror_target`, `mirror`). Ayarlar → Yedekleme shows the copy's field
+  with the replica's target, the list with the folder's path ("Yolu kopyala") and the copy's last
+  result; opening the folder or copying a dump to a USB disk is the tray's Backups window (C3).
+
+**C8 Removal with the data, as built** (Q6 answered 2026-11-07: "bu seçenek kesinlikle olsun").
+This is the one place outside the retention job that deletes sealed data, on the owner's
+decision; it runs only at the server, by an administrator, never from the browser.
+- **Setup's uninstaller** asks after its start ("TÜM VERİLER DE SİLİNSİN Mİ? Bu GERİ ALINAMAZ.",
+  TR/EN, with the 730-day and legal-review note): **No** is the default button and a silent
+  uninstall asks nothing and keeps the data; **Yes** runs `Install-Arcilogger.ps1 -Uninstall
+  -RemoveData`. When that ends with 2 (nothing removed: the name not confirmed, a check stopped
+  it), the uninstaller says so and runs the plain `-Uninstall`: Inno drops its entry whatever
+  happens, so the program is never left installed without it. The failure message's retry
+  command keeps `-RemoveData`.
+- **Before any change** (`Initialize-DataRemoval`), the script: refuses (exit 2, "nothing
+  removed") a data folder it cannot be sure of (an unusable `data-root.txt`, or neither record,
+  configuration nor `-DataRoot`) and a configuration folder with none of the installer's files
+  (`arcilogger.toml`, `data-root.txt`, `install\state.json`); asks for the postgres password and
+  lists, as the server answers, the databases to drop **by name** (`[database] name`, the
+  `replaced_databases` of `install\state.json`, `<name>_replaced_<14 digits>` and
+  `<name>_restore_<14 digits>`), the role's other databases (kept, named; the role then stays)
+  and whether the role is dropped (never a superuser or the account psql connects as); never
+  `postgres`, `template0`, `template1`; a name that is no identifier of letters, digits and `_`
+  is kept and named. PostgreSQL out of reach stops it (`-SkipDatabase`: keep the
+  database, remove the rest). It plans the folders (`Get-ArciDataRemovalPlan`): `spool`,
+  `vault`, `exports`, `state`, `logs`, `backups` of the data folder and the configuration folder
+  (deleted whole), and `[backup] dir` when it lies elsewhere, where only the Backup task's files
+  go (`arcilogger-*.dump`, their `.json` records and leftovers), the folder once empty; a
+  `[backup] dir` on another host (`\\server\share\...`) is never touched, only named. Other
+  names in the data folder (PostgreSQL's data directory `db`, anything else) are kept and named,
+  and the data folder goes only once empty, never when it is itself a mount point or junction.
+  It refuses a drive or share root, a Windows folder (or one holding it), a folder in the Windows
+  folder; a whole-folder target holding the program folder, PostgreSQL's data directory, the
+  data folder, the configuration folder or a kept name; data and configuration folders inside
+  each other; and a folder with a link in it (a junction, a symbolic link or a hard link: never
+  followed; a file whose reparse point is no link, such as Data Deduplication's, is an ordinary
+  file). It prints what goes with file counts and sizes,
+  the sealed days and the oldest, what stays (PostgreSQL, the replica and the NAS copy on other
+  hosts, USB copies, the Windows event logs) and the 5651 warning (ARCILOGGER keeps the records at
+  least 730 days to support the 5651 obligations; ask legal counsel; keep a destruction record).
+  Then the organisation name (`site_name`, else the computer name) must be typed (three tries;
+  spaces and letter case, ordinal or Turkish, do not count; Enter cancels) or given with `-ConfirmRemoveData`; without
+  a console and without it, exit 2. A dry run prints the same and asks nothing.
+- **Order:** tasks paused and waited for, services stopped and removed, tasks unregistered (as a
+  plain removal); event 4130 with what goes; `DROP DATABASE … WITH (FORCE)` for each database,
+  then `DROP ROLE` (a failure there is a warning); each data folder (`Remove-ArciDataFolder`: on Windows Administrators take
+  ownership, the folder gets Administrators and SYSTEM only, every item below its inherited
+  entries, which removes the sealed files' deny entries, and its attributes cleared; then it is
+  deleted); **event 4130** again with the outcome (Warning; Error with the message when a step
+  fails, before the error ends the run; source `ARCILOGGER-Admin`: who confirmed, the
+  organisation, the databases, the folders, the sealed days), both while the source is still
+  registered; the event source, the firewall rules and the power settings as before; then the configuration folder
+  (the firewall and power steps read their records there); the data folder if empty; the program
+  folders last. A failure after the first change exits 3; running it again goes on (each step
+  skips what is gone).
+- `arcilogger_core.admin.contract.Event.DATA_REMOVED = 4130`. Tests: the setup's question and
+  messages, the plan's targets and refusals, the confirmation, the SQL and its parsing (and
+  against a real PostgreSQL), a folder's facts and removal (read-only files; a hard link stops
+  it; on Windows locked sealed files go and a junction stops it), dry runs (plan order,
+  `-SkipDatabase`, the refusals, `-RemoveData` only with `-Uninstall`), and the simulated
+  removal (with the right and with another organisation name).
+
+**C4 (choosing the backup folder from the browser) is not built in this round**: the new folder
+needs its administrators-only rights set by ApplySystem as SYSTEM (`Sync-ArciSystem.ps1`), which
+cannot be tested in this session; the NAS copy covers the "off the server" need. It follows with a
+Windows-tested change; until then `[backup] dir` stays a console setting (locked, `security`).

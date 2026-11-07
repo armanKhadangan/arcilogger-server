@@ -44,7 +44,8 @@
                       a first installation, kept on an upgrade. Empty: Windows Time and the hourly
                       clock check use only [clock] fallback_server and the preflight warns.
       -AdminAddress   the admin PC's address(es) or network(s), e.g. 10.0.0.10 or 10.0.0.0/24:
-                      443 and 3389 are opened only for them. Remembered by Set-ArciFirewall.ps1,
+                      443 is opened only for them (the remote desktop, 3389, is never closed).
+                      Remembered by Set-ArciFirewall.ps1,
                       so an upgrade needs it only to change it (not needed with -SkipFirewall).
       -SiteName and -NtpServer go into the new arcilogger.toml; given on an upgrade, they are
       written into the existing one (only those keys change; the previous file is kept as
@@ -137,6 +138,21 @@
                 created) and restores the power settings Set-ArciPower.ps1 recorded. It NEVER
                 deletes the data folder (spool, vault, exports, logs, backups), the configuration,
                 the secret store, the administration folder (admin\), Caddy's CA or the database.
+    -Uninstall -RemoveData: the same, and ALL of ARCILOGGER's data with it (contract addendum C8,
+                owner decision Q6; ARCILOGGER-Setup's uninstaller asks, "no" by default): the
+                database(s) and role (DROP DATABASE ... WITH (FORCE), DROP ROLE; never postgres
+                or a superuser), the data folder's spool, vault, exports, state, logs and backups
+                (sealed files included), [backup] dir, and the configuration folder. PostgreSQL
+                itself, its data directory (D:\ARCILOGGER\db), any other name in the data folder,
+                the replica and the NAS copy on other hosts are kept. Before any change it shows
+                what goes (sizes, sealed days) with the 5651 warning, asks for the postgres
+                password and for the organisation name (site_name, else the computer name) to be
+                typed; -ConfirmRemoveData "<name>" gives that answer in advance (a run without a
+                console needs it). A refused folder (a drive or share root, a Windows folder,
+                one that holds the program folder or PostgreSQL's data directory), a link in a
+                folder, an unknown data folder, PostgreSQL out of reach (-SkipDatabase: keep the
+                database) or a wrong name stops it with 2: nothing removed. The Application log
+                keeps event 4130 (who, what) after the event source is gone.
     -Auto:      install, or upgrade when another bundle is installed (used by ARCILOGGER-Setup.exe);
                 the console window then waits for Enter before it closes.
     -DryRun / -WhatIf: checks and prints the plan, changes nothing (-PlanPath writes it as JSON).
@@ -161,6 +177,8 @@
     powershell -ExecutionPolicy Bypass -File .\installer\Install-Arcilogger.ps1 -Upgrade
 .EXAMPLE
     powershell -ExecutionPolicy Bypass -File "C:\Program Files\ARCILOGGER\installer\Install-Arcilogger.ps1" -Uninstall
+.EXAMPLE
+    powershell -ExecutionPolicy Bypass -File "C:\Program Files\ARCILOGGER\installer\Install-Arcilogger.ps1" -Uninstall -RemoveData
 #>
 [CmdletBinding(SupportsShouldProcess = $true)]
 param(
@@ -209,6 +227,9 @@ param(
     [int]$AdminChangeHoldHours,
     [int]$ZamaneHoldHours,
     [switch]$DisableBrowserAdministration,
+    # Removal with the data (see .DESCRIPTION, -Uninstall -RemoveData).
+    [switch]$RemoveData,
+    [string]$ConfirmRemoveData,
     [switch]$Force
 )
 
@@ -237,6 +258,8 @@ $script:NtpServerValue = $(if ($script:NtpServerGiven) { ([string]$NtpServer).Tr
 $script:NtpServerSource = $(if ($script:NtpServerGiven) { 'parameter' } else { 'none' })
 $script:FallbackServer = 'time.ume.tubitak.gov.tr'   # [clock] fallback_server of the configuration in use
 $script:ConfigReadError = $null        # site_name or [clock] of the configuration is not readable
+# -ConfirmRemoveData: the organisation name given in advance for -Uninstall -RemoveData.
+$script:ConfirmRemoveDataGiven = $PSBoundParameters.ContainsKey('ConfirmRemoveData')
 $script:SourceCount = $null           # [[sources]] of the configuration in use; $null: not read (Invoke-SourcesPreflight)
 $script:SourceSenders = @()           # their enabled sender addresses (Invoke-AdminPolicyPreflight checks them)
 # -ServerAddress / -ServerName: given, else remembered or detected (Resolve-ServerIdentity).
@@ -448,6 +471,12 @@ $LicenseFile = ConvertTo-FullPath $LicenseFile
 if ($modeCount -gt 1) { Stop-Installer 2 '-Upgrade, -Uninstall ve -Rollback birlikte kullanılamaz [use only one mode].' }
 if (($LicenseFile -or $AllowUncoveredUpgrade) -and ($Uninstall -or $Rollback)) {
     Stop-Installer 2 '-LicenseFile ve -AllowUncoveredUpgrade yalnızca kurulum ve yükseltmede kullanılır [only for an installation or an upgrade].'
+}
+if (($RemoveData -or $script:ConfirmRemoveDataGiven) -and -not $Uninstall) {
+    Stop-Installer 2 '-RemoveData ve -ConfirmRemoveData yalnızca -Uninstall ile kullanılır [only with -Uninstall].'
+}
+if ($script:ConfirmRemoveDataGiven -and -not $RemoveData) {
+    Stop-Installer 2 '-ConfirmRemoveData yalnızca -RemoveData ile kullanılır [only with -RemoveData].'
 }
 
 $InstallDir = Resolve-InstallPath $InstallDir 'InstallDir'
@@ -1285,7 +1314,12 @@ function Start-ArciServices([string[]]$Only = $ServiceNames) {
 
 # The read-only desktop status window "ARCILOGGER Durum" (Wave 5 contract section 5, I3-I4): a logon
 # task in \ARCILOGGER\Desktop\, registered by Register-ArciTasks.ps1 from the program's desktop\
-# folder, and a Start-menu shortcut for every user.
+# folder. Shortcuts for every user (Wave 5 addendum C, C1): the Start-menu folder ARCILOGGER holds
+# "ARCILOGGER" (the web interface) and "ARCILOGGER Durum" (the window), the desktop "ARCILOGGER";
+# all of them carry the program's icon (desktop\icons\arcilogger.ico).
+
+# What the "ARCILOGGER" shortcuts open: the web interface on this server, as the window's button.
+$ArciLocalWebUrl = 'https://localhost/'
 
 function Get-StatusWindowFolder {
     <# The all-users Start-menu folder of the shortcut; none without a ProgramData folder (not Windows). #>
@@ -1327,38 +1361,77 @@ function Stop-ArciStatusWindow {
         }
 }
 
-function Set-ArciStatusWindowShortcut([string]$Root) {
-    <# The Start-menu shortcut when the program in $Root has the status window; otherwise none. #>
-    $folder = Get-StatusWindowFolder
-    if (-not $folder) { return }
-    $shortcut = Join-Path $folder 'ARCILOGGER Durum.lnk'
+function Get-ArciDesktopFolder {
+    <# The all-users desktop; none without a ProgramData folder (not Windows), like the Start menu. #>
+    if (-not $env:ProgramData) { return $null }
+    $folder = [Environment]::GetFolderPath('CommonDesktopDirectory')
+    if (-not $folder) { return $null }
+    $folder
+}
+
+function Get-ArciShortcutPaths {
+    <# Every shortcut the installer makes; Remove-ArciShortcuts deletes exactly these. #>
+    $paths = @()
+    $menu = Get-StatusWindowFolder
+    if ($menu) { $paths += @((Join-Path $menu 'ARCILOGGER Durum.lnk'), (Join-Path $menu 'ARCILOGGER.lnk')) }
+    $desktop = Get-ArciDesktopFolder
+    if ($desktop) { $paths += @(Join-Path $desktop 'ARCILOGGER.lnk') }
+    $paths
+}
+
+function New-ArciShortcut([string]$Path, [string]$Target, [string]$Arguments, [string]$WorkingDirectory, [string]$Icon, [string]$Description) {
+    [void](New-Item -ItemType Directory -Path (Split-Path -Parent $Path) -Force)
+    $link = (New-Object -ComObject WScript.Shell).CreateShortcut($Path)
+    $link.TargetPath = $Target
+    $link.Arguments = $Arguments
+    $link.WorkingDirectory = $WorkingDirectory
+    if ($Icon) { $link.IconLocation = $Icon + ',0' }
+    $link.Description = $Description
+    $link.Save()
+}
+
+function Set-ArciShortcuts([string]$Root) {
+    <#
+    The shortcuts of the program in $Root. "ARCILOGGER" opens the web interface in the default
+    browser (Explorer hands the address on); "ARCILOGGER Durum" exists only when the program has
+    the status window. A program without the icon (an older version after a rollback) gets the
+    shortcuts with Windows' default icons.
+    #>
+    $menu = Get-StatusWindowFolder
+    if (-not $menu) { return }
+    $icon = Join-Path $Root 'desktop\icons\arcilogger.ico'
+    if (-not (Test-Path -LiteralPath $icon)) { $icon = '' }
     $pythonw = Join-Path $Root 'venv\Scripts\pythonw.exe'
-    if (-not (Test-Path -LiteralPath (Join-Path $Root 'desktop')) -or -not (Test-Path -LiteralPath $pythonw)) {
-        Remove-ArciStatusWindowShortcut
-        return
-    }
-    # A convenience only: without it the window still opens at logon (Windows Script Host may be
-    # switched off by policy), so a failure is a warning, never a failed installation.
+    $window = (Test-Path -LiteralPath (Join-Path $Root 'desktop')) -and (Test-Path -LiteralPath $pythonw)
+    $web = @(Join-Path $menu 'ARCILOGGER.lnk')
+    $desktop = Get-ArciDesktopFolder
+    if ($desktop) { $web += @(Join-Path $desktop 'ARCILOGGER.lnk') }
+    # A convenience only: without them the window still opens at logon and the web interface at
+    # its address (Windows Script Host may be switched off by policy), so a failure is a warning,
+    # never a failed installation.
     try {
-        [void](New-Item -ItemType Directory -Path $folder -Force)
-        $link = (New-Object -ComObject WScript.Shell).CreateShortcut($shortcut)
-        $link.TargetPath = $pythonw
-        $link.Arguments = '-I -m arcilogger_core.desktop'
-        $link.WorkingDirectory = $Root
-        $link.Description = 'ARCILOGGER Durum: salt okunur durum penceresi [read-only status window]'
-        $link.Save()
+        $status = Join-Path $menu 'ARCILOGGER Durum.lnk'
+        if ($window) {
+            New-ArciShortcut -Path $status -Target $pythonw -Arguments '-I -m arcilogger_core.desktop' -WorkingDirectory $Root -Icon $icon `
+                -Description 'ARCILOGGER Durum: salt okunur durum penceresi [read-only status window]'
+        }
+        elseif (Test-Path -LiteralPath $status) { Remove-Item -LiteralPath $status -Force }
+        foreach ($path in $web) {
+            New-ArciShortcut -Path $path -Target (Join-Path $env:WINDIR 'explorer.exe') -Arguments $ArciLocalWebUrl -WorkingDirectory $Root -Icon $icon `
+                -Description 'ARCILOGGER: web arayüzü [web interface]'
+        }
     }
     catch {
-        Write-ArciWarn ("Başlat menüsü kısayolu oluşturulamadı [Start-menu shortcut not created]: {0}" -f $_.Exception.Message)
+        Write-ArciWarn ("Kısayollar oluşturulamadı [shortcuts not created]: {0}" -f $_.Exception.Message)
     }
 }
 
-function Remove-ArciStatusWindowShortcut {
+function Remove-ArciShortcuts {
+    foreach ($path in @(Get-ArciShortcutPaths)) {
+        if (Test-Path -LiteralPath $path) { Remove-Item -LiteralPath $path -Force }
+    }
     $folder = Get-StatusWindowFolder
-    if (-not $folder) { return }
-    $shortcut = Join-Path $folder 'ARCILOGGER Durum.lnk'
-    if (Test-Path -LiteralPath $shortcut) { Remove-Item -LiteralPath $shortcut -Force }
-    if ((Test-Path -LiteralPath $folder) -and -not (Get-ChildItem -LiteralPath $folder -Force)) {
+    if ($folder -and (Test-Path -LiteralPath $folder) -and -not (Get-ChildItem -LiteralPath $folder -Force)) {
         Remove-Item -LiteralPath $folder -Force
     }
 }
@@ -1415,7 +1488,7 @@ function Register-ArciTaskSet([string]$Root, [switch]$Replace) {
         Get-ScheduledTask -TaskPath '\ARCILOGGER\Desktop\' -ErrorAction SilentlyContinue | Unregister-ScheduledTask -Confirm:$false
     }
     & (Join-Path $Root 'scripts\Register-ArciTasks.ps1') -Python (Join-Path $Root 'venv\Scripts\python.exe') -TaskDirectory (Join-Path $Root 'tasks')
-    Set-ArciStatusWindowShortcut -Root $Root
+    Set-ArciShortcuts -Root $Root
 }
 
 function Register-ArciTasksKeepingChoices([string]$Root) {
@@ -2566,19 +2639,13 @@ function Invoke-FirewallPreflight {
     $admins = @(Get-EffectiveAdminAddress)
     $invalid = @($admins | Where-Object { -not (Test-ArciAddressSpec $_) })
     if ($admins.Count -eq 0) {
-        Add-Check 'admin-address' 'fail' 'Yönetici PC''sinin adresi gerekli [admin PC address required]: güvenlik duvarı 443 (web) ve 3389''u (uzak masaüstü) yalnızca ona açar. -AdminAddress ile verin, örnek -AdminAddress 10.0.0.10 ya da bir ağ: -AdminAddress 10.0.0.0/24; değer hatırlanır [the firewall opens 443 and 3389 only for it: give -AdminAddress, e.g. 10.0.0.10 or a network such as 10.0.0.0/24; it is remembered]'
+        Add-Check 'admin-address' 'fail' 'Yönetici PC''sinin adresi gerekli [admin PC address required]: güvenlik duvarı 443''ü (web) yalnızca ona açar. -AdminAddress ile verin, örnek -AdminAddress 10.0.0.10 ya da bir ağ: -AdminAddress 10.0.0.0/24; değer hatırlanır [the firewall opens 443 only for it: give -AdminAddress, e.g. 10.0.0.10 or a network such as 10.0.0.0/24; it is remembered]'
     }
     elseif ($invalid.Count -gt 0) {
         Add-Check 'admin-address' 'fail' ("-AdminAddress geçersiz [invalid]: '{0}' (örnek 10.0.0.10 veya 10.0.0.0/24)" -f ($invalid -join "', '"))
     }
     else {
-        Add-Check 'admin-address' 'ok' ("443/3389 yalnızca [only from] {0}" -f ($admins -join ', '))
-        if (-not $Force) {
-            $foreign = @(Get-ArciForeignRdpSession -AdminAddress $admins)
-            if ($foreign.Count -gt 0) {
-                Add-Check 'rdp-session' 'fail' ("Açık uzak masaüstü oturumu [open RDP session] {0}: güvenlik duvarı bu oturumu keserdi. Adresi -AdminAddress'e ekleyin ya da -Force kullanın [would be cut off]." -f ($foreign -join ', '))
-            }
-        }
+        Add-Check 'admin-address' 'ok' ("443 yalnızca [only from] {0}; uzak masaüstü (3389) hiçbir zaman kapatılmaz [the remote desktop is never closed]" -f ($admins -join ', '))
     }
     # The senders of 514 ([[sources]]) are checked by Invoke-SourcesPreflight.
 }
@@ -3255,7 +3322,7 @@ function Invoke-CommonTail {
             strict_outbound = $(if ($firewall.ContainsKey('StrictOutbound')) { $firewall['StrictOutbound'] } else { 'kept' })
             admin_address   = @(Get-EffectiveAdminAddress)
         }
-        Invoke-Step 'firewall.apply' ("Güvenlik duvarı [firewall]: 514 yalnızca [[sources]], 443/3389 yalnızca {0}, diğer gelen trafik kapalı [all other inbound blocked]" -f (@(Get-EffectiveAdminAddress) -join ', ')) {
+        Invoke-Step 'firewall.apply' ("Güvenlik duvarı [firewall]: 514 yalnızca [[sources]], 443 yalnızca {0}, uzak masaüstü (3389) her adresten açık, diğer gelen trafik kapalı [remote desktop open, all other inbound blocked]" -f (@(Get-EffectiveAdminAddress) -join ', ')) {
             & (Join-Path $ScriptsDir 'Set-ArciFirewall.ps1') @firewall
         } $detail
     }
@@ -4047,6 +4114,313 @@ function Remove-ArciProgramFolder([string]$Folder) {
     Remove-Item -LiteralPath $Folder -Recurse -Force
 }
 
+# --- removal with the data (-Uninstall -RemoveData, contract addendum C8) ---------------------------
+
+function Get-RemovalConfirmationName {
+    <# What -Uninstall -RemoveData asks to be typed: site_name of arcilogger.toml, else the computer name. #>
+    $site = $null
+    if (Test-Path -LiteralPath $ConfigPath) {
+        try { $site = Get-ArciTomlString -Text ([System.IO.File]::ReadAllText($ConfigPath, [System.Text.Encoding]::UTF8)) -Key 'site_name' }
+        catch { $site = $null }
+    }
+    $site = ([string]$site).Trim()
+    if ($site) { return $site }
+    [Environment]::MachineName
+}
+
+function Get-RemovalBackupDir {
+    <# [backup] dir of arcilogger.toml as a full path (a relative one lies below the data folder); '' without one. #>
+    if (-not (Test-Path -LiteralPath $ConfigPath)) { return '' }
+    $value = $null
+    try { $value = Get-ArciTomlString -Text ([System.IO.File]::ReadAllText($ConfigPath, [System.Text.Encoding]::UTF8)) -Section 'backup' -Key 'dir' }
+    catch {
+        $message = '[backup] dir okunamadı; o klasör veri klasörünün dışındaysa silinmez, elle silin [[backup] dir cannot be read: a backup folder outside the data folder is not deleted, delete it by hand]: {0}' -f $_.Exception.Message
+        Write-ArciWarn $message
+        $script:Warnings.Add($message)
+        return ''
+    }
+    $value = ([string]$value).Trim()
+    if (-not $value) { return '' }
+    if (Test-ArciWindows) { $value = $value.Replace('/', '\') }
+    if (-not [System.IO.Path]::IsPathRooted($value)) { $value = [System.IO.Path]::Combine($DataRoot, $value) }
+    [System.IO.Path]::GetFullPath($value)
+}
+
+function Format-RemovalSize([int64]$Bytes) {
+    if ($Bytes -ge 1GB) { return ('{0:N1} GB' -f ($Bytes / 1GB)) }
+    if ($Bytes -ge 1MB) { return ('{0:N1} MB' -f ($Bytes / 1MB)) }
+    '{0:N0} KB' -f [Math]::Ceiling($Bytes / 1KB)
+}
+
+function Get-RemovalDatabase {
+    <#
+    The database part of -Uninstall -RemoveData, before any change: ARCILOGGER's databases (named:
+    [database] name, those a restore set aside or named, install\state.json), the role's other
+    databases (kept), and the role, as the server itself lists them (Get-ArciDatabaseRemovalSql's
+    query as the superuser; the postgres password is asked here, once) and PostgreSQL's data
+    directory. A dry run asks nothing and plans the configured names. A name the removal cannot
+    quote, or PostgreSQL out of reach, stops the run with 2, nothing removed yet: -SkipDatabase
+    keeps the database and removes the rest.
+    #>
+    $db = Get-DatabaseSettings
+    $state = Read-InstallState
+    $extra = @()
+    if ($state.PSObject.Properties.Name -contains 'replaced_databases') {
+        $extra = @(foreach ($entry in @($state.replaced_databases)) {
+                if ($null -ne $entry -and $entry.PSObject.Properties.Name -contains 'name' -and [string]$entry.name -cmatch '^[A-Za-z_][A-Za-z0-9_]{0,62}$') { [string]$entry.name }
+            })
+    }
+    try { $sql = Get-ArciDatabaseRemovalSql -Name ([string]$db.name) -Role ([string]$db.user) -Extra $extra }
+    catch {
+        Stop-Installer 2 ("{0}; veritabanını elle silin ya da -SkipDatabase kullanın. Hiçbir şey kaldırılmadı [drop it by hand or use -SkipDatabase; nothing removed]." -f $_.Exception.Message)
+    }
+    if ($script:IsDryRun) {
+        return [pscustomobject]@{ Settings = $db; Databases = @(@([string]$db.name) + $extra); Owned = @(); Unnamed = @(); Role = [string]$db.user; DropRole = $true; DataDirectory = $null }
+    }
+    if (-not $script:PgBin) { $script:PgBin = Get-PostgresBinDir (Find-PostgresService) }
+    if (-not $script:PgBin -or -not (Test-Path -LiteralPath (Join-Path $script:PgBin 'psql.exe'))) {
+        Stop-Installer 2 ("psql.exe bulunamadı; -PgBinDir verin ya da veritabanını korumak için -SkipDatabase kullanın. Hiçbir şey kaldırılmadı [psql.exe not found: give -PgBinDir, or -SkipDatabase to keep the database; nothing removed]: {0}" -f $script:PgBin)
+    }
+    if (-not $script:PgCredential -and -not (Test-ArciInteractiveConsole)) {
+        Stop-Installer 2 'postgres parolası gerekiyor: konsolda çalıştırın ya da -PgSuperuserCredential verin. Hiçbir şey kaldırılmadı [the postgres password is needed: run it at the console or give -PgSuperuserCredential; nothing removed].'
+    }
+    try { $answer = ConvertFrom-ArciDatabaseRemovalQuery -Text ([string](Invoke-Psql -Database 'postgres' -TuplesOnly -Sql $sql.Query).StdOut) }
+    catch {
+        Stop-Installer 2 ("PostgreSQL'e bağlanılamadı; veritabanını korumak için -SkipDatabase kullanın. Hiçbir şey kaldırılmadı [PostgreSQL cannot be reached: -SkipDatabase keeps the database; nothing removed]: {0}" -f $_.Exception.Message)
+    }
+    [pscustomobject]@{
+        Settings = $db; Databases = @($answer.Databases); Owned = @($answer.Owned); Unnamed = @($answer.Unnamed)
+        Role = $answer.Role; DropRole = $answer.DropRole; DataDirectory = $answer.DataDirectory
+    }
+}
+
+function Test-RemovalConfigFolder {
+    <#
+    The configuration folder is ARCILOGGER's when it holds one of the installer's files
+    (arcilogger.toml, data-root.txt, install\state.json) or does not exist: a mistyped
+    -ProgramDataDir is never deleted.
+    #>
+    if (-not (Test-Path -LiteralPath $ProgramDataDir)) { return $true }
+    foreach ($marker in @($ConfigPath, $DataRootRecord, $StatePath)) {
+        if (Test-Path -LiteralPath $marker -PathType Leaf) { return $true }
+    }
+    $false
+}
+
+function Initialize-DataRemoval {
+    <#
+    -Uninstall -RemoveData (contract addendum C8, owner decision Q6), before anything is changed:
+    what goes (sizes, sealed days, databases), what stays, the 5651 warning and the confirmation
+    (the organisation name typed at the console, or -ConfirmRemoveData). Stops with 2, nothing
+    removed, when the data folder is not certain (its record cannot be used, or there is neither
+    record nor configuration nor -DataRoot), the configuration folder holds none of the
+    installer's files, PostgreSQL cannot be reached (Get-RemovalDatabase), a folder is refused
+    (Get-ArciDataRemovalPlan) or holds a link, or the name is not confirmed. A data folder that
+    is itself a mount point or junction is kept (what is in it goes). A dry run prints the same
+    and asks nothing. Returns what the removal steps need.
+    #>
+    if ($script:DataRootResolution.Problem -or $script:DataRootSource -eq 'auto') {
+        $why = $(if ($script:DataRootResolution.Problem) { [string]$script:DataRootResolution.Problem } else { 'kayıt (data-root.txt) ve yapılandırma yok [no record and no configuration]' })
+        Add-PlanItem -Id 'data.refuse' -Status 'fail' -Text $why
+        Stop-Installer 2 ("Veri klasörü kesin değil; -DataRoot ile verin. Hiçbir şey kaldırılmadı [the data folder is not certain: give it with -DataRoot; nothing removed]: {0}" -f $why)
+    }
+    if (-not (Test-RemovalConfigFolder)) {
+        $why = 'Yapılandırma klasöründe kurulumun dosyaları (arcilogger.toml, data-root.txt, install\state.json) yok; -ProgramDataDir doğru mu? [the configuration folder holds none of the installer''s files: is -ProgramDataDir right?]: {0}' -f $ProgramDataDir
+        Add-PlanItem -Id 'data.refuse' -Status 'fail' -Text $why
+        Stop-Installer 2 ("{0} Hiçbir şey kaldırılmadı [nothing removed]." -f $why)
+    }
+    $keep = New-Object System.Collections.Generic.List[string]
+    $pgDirectory = Get-PostgresDataDir (Find-PostgresService)
+    if ($pgDirectory) { $keep.Add($pgDirectory) }
+    $database = $null
+    if (-not $SkipDatabase) {
+        $database = Get-RemovalDatabase
+        if ($database.DataDirectory) { $keep.Add([string]$database.DataDirectory) }
+    }
+    $names = @()
+    $rootIsLink = $false
+    if (Test-Path -LiteralPath $DataRoot -PathType Container) {
+        $names = @(Get-ChildItem -LiteralPath $DataRoot -Force | ForEach-Object { $_.Name })
+        $rootIsLink = [bool]((Get-Item -LiteralPath $DataRoot -Force).Attributes -band [System.IO.FileAttributes]::ReparsePoint)
+    }
+    $windows = $(if ($env:SystemRoot) { $env:SystemRoot } elseif ($env:windir) { $env:windir } else { '' })
+    $plan = Get-ArciDataRemovalPlan -DataRoot $DataRoot -ProgramDataDir $ProgramDataDir -InstallDir $InstallDir `
+        -BackupDir (Get-RemovalBackupDir) -DataRootNames $names -Keep $keep.ToArray() -SystemFolders @(Get-SystemFolders) -WindowsFolder $windows
+    $refusals = New-Object System.Collections.Generic.List[string]
+    foreach ($problem in @($plan.Problems)) { $refusals.Add($problem) }
+    $facts = @{}
+    if ($refusals.Count -eq 0) {
+        foreach ($target in @($plan.Targets)) {
+            $fact = Get-ArciFolderFacts -Path $target.Path -DumpsOnly:($target.Kind -eq 'dumps')
+            $facts[$target.Path] = $fact
+            if (@($fact.Links).Count -gt 0) { $refusals.Add((Get-ArciLinkRefusal @($fact.Links))) }
+        }
+    }
+    if ($refusals.Count -gt 0) {
+        foreach ($refusal in $refusals) { Add-PlanItem -Id 'data.refuse' -Status 'fail' -Text $refusal }
+        Stop-Installer 2 ("{0} Hiçbir şey kaldırılmadı [nothing removed]." -f ($refusals -join ' '))
+    }
+    # No link anywhere (checked above): the listing follows nothing.
+    $vault = [System.IO.Path]::Combine($DataRoot, 'vault')
+    $oldest = Get-ArciOldestVaultDay -VaultPath $vault
+    $sealedDays = 0
+    if (Test-Path -LiteralPath $vault -PathType Container) {
+        $sealedDays = @(Get-ChildItem -LiteralPath $vault -Recurse -Force -File -Filter 'manifest-*.json' -ErrorAction SilentlyContinue | Where-Object { $_.Name -cmatch '^manifest-[0-9]{4}-[0-9]{2}-[0-9]{2}\.json$' }).Count
+    }
+    $site = Get-RemovalConfirmationName
+
+    Write-Host ''
+    Write-Host 'TÜM VERİLER SİLİNECEK, GERİ ALINAMAZ [ALL DATA WILL BE DELETED, IRREVERSIBLY]' -ForegroundColor Red
+    Write-Host ('  Kuruluş [organisation]: {0}' -f $site)
+    Write-Host '  Silinecek klasörler [folders to delete]:'
+    foreach ($target in @($plan.Targets)) {
+        $fact = $facts[$target.Path]
+        if (-not $fact.Exists) { continue }
+        Write-Host ('    - {0}: {1}; {2} dosya [files], {3}' -f $target.Path, $target.What, $fact.Files, (Format-RemovalSize $fact.Bytes))
+    }
+    if ($rootIsLink) { Write-Host ('    - {0} bir bağlama noktası ya da bağlantı: içindekiler silinir, kendisi korunur [a mount point or link: what is in it goes, it stays]' -f $plan.Root) }
+    else { Write-Host ('    - {0}, boşalınca [once empty]' -f $plan.Root) }
+    $oldestText = $(if ($oldest) { '; en eskisi [oldest] {0}' -f $oldest } else { '' })
+    Write-Host ('  Kasa [vault]: {0} mühürlü gün [sealed days]{1}' -f $sealedDays, $oldestText)
+    if ($null -eq $database) { Write-Host '  Veritabanı korunuyor [database kept] (-SkipDatabase)' }
+    else {
+        $roleText = $(if ($database.DropRole -and $database.Role) { $database.Role } else { 'korunuyor: yok, süper kullanıcı, bağlanılan hesap ya da başka veritabanlarının sahibi [kept: none, a superuser, the account connected or the owner of other databases]' })
+        Write-Host ('  Silinecek veritabanları [databases to drop]: {0}; rol [role]: {1}' -f $(if (@($database.Databases).Count) { @($database.Databases) -join ', ' } else { '-' }), $roleText)
+        if (@($database.Owned).Count) { Write-Host ('  Rolün diğer veritabanları korunuyor [the role''s other databases are kept]: {0}' -f (@($database.Owned) -join ', ')) }
+        if (@($database.Unnamed).Count) { Write-Host ('  Adı tırnaklanamayan veritabanları korunuyor, elle silin [databases whose names cannot be quoted are kept, drop them by hand]: {0}' -f (@($database.Unnamed) -join ', ')) }
+    }
+    Write-Host '  Korunanlar [kept]: PostgreSQL ve veri klasörü, başka sunucudaki replika ve NAS yedek kopyası, USB''ye alınmış kopyalar, Windows olay günlüğü [PostgreSQL and its data directory, the replica and the NAS copy on other hosts, copies on USB disks, the Windows event logs]'
+    foreach ($item in @($plan.Kept)) { Write-Host ('    - {0}: {1}' -f $item.Path, $item.Why) }
+    Write-Host ''
+    Write-Host '5651 UYARISI: ARCILOGGER trafik kayıtlarını 5651 yükümlülüklerini desteklemek için en az 730 gün saklar. Saklama süresi dolmamış kayıtları silmek bu yükümlülükleri etkileyebilir: silmeden önce hukuk danışmanınıza danışın ve bir imha tutanağı tutun (docs\legal\saklama-imha-politikasi-taslak.md).' -ForegroundColor Yellow
+    Write-Host '[5651 WARNING: ARCILOGGER keeps the traffic records for at least 730 days to support the 5651 obligations. Deleting records whose retention has not run out may affect them: ask your legal counsel first and keep a destruction record.]' -ForegroundColor Yellow
+    Write-Host ''
+
+    if ($script:IsDryRun) {
+        Add-PlanItem -Id 'data.confirm' -Status 'planned' -Text ("Gerçek çalıştırma kuruluş adının yazılmasını ister [a real run asks for the organisation name]: {0}" -f $site) -Detail $site
+    }
+    else {
+        $confirmed = $false
+        if ($script:ConfirmRemoveDataGiven) { $confirmed = Test-ArciRemovalConfirmation -Expected $site -Typed $ConfirmRemoveData }
+        elseif (Test-ArciInteractiveConsole) {
+            for ($attempt = 1; $attempt -le 3 -and -not $confirmed; $attempt++) {
+                $typed = Read-Host ('Silmek için kuruluş adını aynen yazın, vazgeçmek için Enter [type the organisation name to delete, Enter to cancel]: {0}' -f $site)
+                if (-not ([string]$typed).Trim()) { break }
+                $confirmed = Test-ArciRemovalConfirmation -Expected $site -Typed $typed
+                if (-not $confirmed) { Write-ArciWarn 'Ad eşleşmedi [the name does not match].' }
+            }
+        }
+        else {
+            Stop-Installer 2 ('Onay gerekiyor: konsolda çalıştırın ya da -ConfirmRemoveData "{0}" verin. Hiçbir şey kaldırılmadı [confirmation needed: run it at the console or give -ConfirmRemoveData; nothing removed].' -f $site)
+        }
+        if (-not $confirmed) { Stop-Installer 2 'Kuruluş adı onaylanmadı; hiçbir şey kaldırılmadı [the organisation name was not confirmed, nothing removed].' }
+        Add-PlanItem -Id 'data.confirm' -Status 'done' -Text ('Kuruluş adı onaylandı [organisation name confirmed]: {0}' -f $site) -Detail $site
+    }
+    [pscustomobject]@{ Plan = $plan; Facts = $facts; Database = $database; Site = $site; SealedDays = $sealedDays; Oldest = $oldest; RootIsLink = $rootIsLink }
+}
+
+function Test-RemovalConfigTarget($Target) {
+    # The configuration folder: deleted last (Invoke-ConfigRemovalSteps), after the firewall and power steps read their records in it.
+    $separators = [char[]]@([char]92, [char]47)
+    $Target.Path -ieq $ProgramDataDir.TrimEnd($separators)
+}
+
+function Get-RemovalEventText($Removal, [string]$Outcome) {
+    <# Event 4130's text: who confirmed, the organisation, what goes, and -Outcome (starting, done, stopped). #>
+    $who = '{0}\{1}' -f [Environment]::UserDomainName, [Environment]::UserName
+    $database = $Removal.Database
+    $databases = $(if ($null -eq $database) { 'korunuyor (-SkipDatabase) [kept]' } elseif (@($database.Databases).Count) { @($database.Databases) -join ', ' } else { '-' })
+    $folders = @(foreach ($target in @($Removal.Plan.Targets)) { $fact = $Removal.Facts[$target.Path]; if ($null -eq $fact -or $fact.Exists) { $target.Path } })
+    $oldest = $(if ($Removal.Oldest) { $Removal.Oldest } else { '-' })
+    @(
+        ('ARCILOGGER verileriyle birlikte kaldırılıyor [ARCILOGGER is being removed with its data] (Install-Arcilogger.ps1 -Uninstall -RemoveData): {0}' -f $Outcome),
+        ('Onaylayan [confirmed by]: {0}; kuruluş [organisation]: {1}' -f $who, $Removal.Site),
+        ('Veritabanları [databases]: {0}' -f $databases),
+        ('Klasörler [folders]: {0}' -f $(if ($folders.Count) { $folders -join ', ' } else { '-' })),
+        ('Kasa [vault]: {0} mühürlü gün [sealed days], en eskisi [oldest] {1}' -f $Removal.SealedDays, $oldest)
+    ) -join [Environment]::NewLine
+}
+
+function Invoke-DataRemovalSteps($Removal) {
+    <#
+    Event 4130 with what goes, then the database and the data folders of Initialize-DataRemoval's
+    plan, then event 4130 with the outcome (also when a step fails; the error stands), written
+    while the event source is still registered: the Application log keeps both.
+    #>
+    $starting = Get-RemovalEventText $Removal 'başlıyor [starting]'
+    Invoke-Step 'data.event' 'Uygulama günlüğüne olay 4130 yazılıyor: başlıyor [writing event 4130 to the Application log: starting]' {
+        if (-not (Write-ArciEvent -Id 4130 -Level 'Warning' -Message $starting)) { Write-ArciWarn 'Olay 4130 yazılamadı [event 4130 not written].' }
+    } $starting
+    try {
+        $database = $Removal.Database
+        if ($null -ne $database) {
+            $names = @($database.Databases)
+            $role = $(if ($database.DropRole -and $database.Role) { [string]$database.Role } else { $null })
+            $text = 'Veritabanı siliniyor [dropping the database]: {0}; rol [role]: {1}' -f $(if ($names.Count) { $names -join ', ' } else { '-' }), $(if ($role) { $role } else { 'korunuyor [kept]' })
+            Invoke-Step 'database.remove' $text {
+                $sql = Get-ArciDatabaseRemovalSql -Name ([string]$database.Settings.name) -Role ([string]$database.Settings.user) -Databases $names
+                if ($names.Count -gt 0) { [void](Invoke-Psql -Database 'postgres' -Sql $sql.Drop) }
+                if ($role) {
+                    # The databases are gone: a role still owning something elsewhere is only a warning.
+                    try { [void](Invoke-Psql -Database 'postgres' -Sql $sql.Role) }
+                    catch {
+                        $message = "Rol '{0}' silinemedi, elle silin: DROP ROLE {0}; [role not dropped, drop it by hand]: {1}" -f $role, $_.Exception.Message
+                        Write-ArciWarn $message
+                        $script:Warnings.Add($message)
+                    }
+                }
+            } ([pscustomobject]@{ databases = $names; role = $role })
+        }
+        foreach ($target in @($Removal.Plan.Targets)) {
+            if (Test-RemovalConfigTarget $target) { continue }
+            $fact = $Removal.Facts[$target.Path]
+            if ($null -ne $fact -and -not $fact.Exists) { continue }
+            if ($target.Kind -eq 'dumps') {
+                Invoke-Step 'data.remove' ('Yedekler siliniyor [deleting the backups]: {0} ({1})' -f $target.Path, $target.What) {
+                    $separators = [char[]]@([char]92, [char]47)
+                    $keepFolder = $target.Path.TrimEnd($separators) -ieq $DataRoot.TrimEnd($separators)
+                    [void](Remove-ArciBackupDumps -Path $target.Path -KeepFolder:$keepFolder)
+                } $target.Path
+                continue
+            }
+            Invoke-Step 'data.remove' ('Siliniyor [deleting]: {0} ({1})' -f $target.Path, $target.What) {
+                [void](Remove-ArciDataFolder -Path $target.Path)
+            } $target.Path
+        }
+    }
+    catch {
+        if (-not $script:IsDryRun) {
+            [void](Write-ArciEvent -Id 4130 -Level 'Error' -Message (Get-RemovalEventText $Removal ('yarıda kaldı [stopped]: {0}' -f $_.Exception.Message)))
+        }
+        throw
+    }
+    $done = Get-RemovalEventText $Removal ('veritabanı ve veri klasörleri silindi; yapılandırma klasörü bundan sonra [the database and the data folders are deleted; the configuration folder follows]: {0}' -f $ProgramDataDir)
+    Invoke-Step 'data.result' 'Uygulama günlüğüne olay 4130 yazılıyor: sonuç [writing event 4130 to the Application log: outcome]' {
+        if (-not (Write-ArciEvent -Id 4130 -Level 'Warning' -Message $done)) { Write-ArciWarn 'Olay 4130 yazılamadı [event 4130 not written].' }
+    } $done
+}
+
+function Invoke-ConfigRemovalSteps($Removal) {
+    <#
+    The configuration folder, after the firewall and power steps have read their records there;
+    then the data folder once nothing is left in it (never a data folder that is itself a mount
+    point or junction).
+    #>
+    $what = @(foreach ($target in @($Removal.Plan.Targets)) { if (Test-RemovalConfigTarget $target) { $target.What } })
+    Invoke-Step 'config.remove' ('Siliniyor [deleting]: {0} ({1})' -f $ProgramDataDir, ($what -join '')) {
+        [void](Remove-ArciDataFolder -Path $ProgramDataDir)
+    } $ProgramDataDir
+    $root = $Removal.Plan.Root
+    if (-not $root) { return }
+    Invoke-Step 'data.root' ('Veri klasörü boşsa siliniyor [deleting the data folder once empty]: {0}' -f $root) {
+        if (-not (Test-Path -LiteralPath $root)) { return }
+        $left = @(Get-ChildItem -LiteralPath $root -Force | ForEach-Object { $_.Name })
+        if ($Removal.RootIsLink) { Write-ArciInfo ('Veri klasörü bir bağlama noktası ya da bağlantı, korunuyor [the data folder is a mount point or link, kept]: {0}' -f $root) }
+        elseif ($left.Count -eq 0) { [void](Remove-ArciDataFolder -Path $root) }
+        else { Write-ArciInfo ('Veri klasörü korunuyor, içinde [data folder kept, it holds]: {0}' -f ($left -join ', ')) }
+    } $root
+}
+
 function Invoke-UninstallMode {
     # Decide what may be deleted before anything is changed: only ARCILOGGER program folders.
     $folders = @(Get-ProgramFolders)
@@ -4057,6 +4431,9 @@ function Invoke-UninstallMode {
             Stop-Installer 2 ("{0} Hiçbir şey kaldırılmadı [nothing removed]." -f $_.Exception.Message)
         }
     }
+    # With -RemoveData also the data: what goes and the confirmation, still before any change.
+    $removal = $null
+    if ($RemoveData) { $removal = Initialize-DataRemoval }
     # The evidence jobs run python.exe from the program folder (sealing every 5 minutes, monthly
     # verification for hours): Windows would refuse to delete the files they hold open and leave
     # half a program folder behind. Pause them and wait first, as an upgrade does; a job still
@@ -4075,8 +4452,11 @@ function Invoke-UninstallMode {
     Invoke-Step 'tasks.unregister' 'Zamanlanmış görevler kaldırılıyor [removing scheduled tasks] \ARCILOGGER\' {
         Get-ScheduledTask -TaskPath '\ARCILOGGER\' -ErrorAction SilentlyContinue | Unregister-ScheduledTask -Confirm:$false
         Get-ArciStatusWindowTask | Unregister-ScheduledTask -Confirm:$false
-        Remove-ArciStatusWindowShortcut
+        Remove-ArciShortcuts
     }
+    # With the services and tasks gone nothing writes there any more: the database and the data
+    # folders, and event 4130 while the source is still registered.
+    if ($removal) { Invoke-DataRemovalSteps $removal }
     # The events already written stay in the Application log.
     Invoke-Step 'eventlog.remove' 'Olay günlüğü kaynağı kaldırılıyor [removing the Event Log source] ARCILOGGER-Admin' {
         Write-ArciInfo ('ARCILOGGER-Admin: {0}' -f (Unregister-ArciEventSource))
@@ -4095,11 +4475,31 @@ function Invoke-UninstallMode {
             }
         } $PowerStatePath
     }
+    if ($removal) { Invoke-ConfigRemovalSteps $removal }
     foreach ($folder in $folders) {
         Invoke-Step 'program.remove' ("Program klasörü siliniyor [removing program folder]: {0}" -f $folder) {
             Set-Location -LiteralPath $(if ($env:SystemRoot) { $env:SystemRoot } else { [System.IO.Path]::GetTempPath() })
             Remove-ArciProgramFolder $folder
         } $folder
+    }
+    if ($removal) {
+        # What a removal with the data leaves: PostgreSQL, the names in the data folder that are
+        # not ARCILOGGER's, the copies on other hosts (their own administrators delete them).
+        $kept = New-Object System.Collections.Generic.List[object]
+        $kept.Add(@('keep.postgresql', 'PostgreSQL', 'PostgreSQL programı, veri klasörü ve diğer veritabanları korunuyor [PostgreSQL itself, its data directory and its other databases kept]'))
+        if ($null -eq $removal.Database) { $kept.Add(@('keep.database', 'PostgreSQL', 'Veritabanı silinmedi (-SkipDatabase) [database kept]; istenirse elle: DROP DATABASE arcilogger; DROP ROLE arcilogger;')) }
+        foreach ($item in @($removal.Plan.Kept)) { $kept.Add(@('keep.other', $item.Path, $item.Why)) }
+        if ($null -ne $removal.Database) {
+            foreach ($name in @(@($removal.Database.Owned) + @($removal.Database.Unnamed))) {
+                $kept.Add(@('keep.database', $name, 'Veritabanı ARCILOGGER''ın değil ya da adı tırnaklanamıyor, silinmedi [database not ARCILOGGER''s, or its name cannot be quoted: not dropped]'))
+            }
+        }
+        $kept.Add(@('keep.remote', 'replica', 'Başka sunucudaki replika ve NAS yedek kopyası silinmez; oradaki yönetici siler [the replica and the NAS copy on other hosts are not deleted: their administrators delete them]'))
+        foreach ($entry in $kept) {
+            Add-PlanItem -Id $entry[0] -Status 'kept' -Text ("{0}: {1}" -f $entry[2], $entry[1]) -Detail $entry[1]
+            Write-ArciInfo ("{0}: {1}" -f $entry[2], $entry[1])
+        }
+        return
     }
     foreach ($kept in @(
             @('keep.data', $DataRoot, 'Veri klasörü korunuyor (ham loglar, kasa, dışa aktarımlar, yedekler) [data folder kept]'),

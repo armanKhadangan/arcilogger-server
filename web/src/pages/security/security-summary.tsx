@@ -26,7 +26,7 @@ function Figure({ icon: Icon, label, value }: { icon: LucideIcon; label: string;
   return (
     <div className="flex min-w-0 flex-col gap-0.5">
       <dt className="flex items-center gap-1.5 text-13 text-muted">
-        <Icon aria-hidden="true" className="size-4" strokeWidth={1.75} />
+        <Icon aria-hidden="true" className="size-4 shrink-0" strokeWidth={1.75} />
         {label}
       </dt>
       <dd className="text-xl font-semibold text-foreground tabular">{value}</dd>
@@ -63,51 +63,58 @@ export function SecuritySummary({
       ) : error ? (
         <Alert tone="danger">{errorMessage(error)}</Alert>
       ) : summary ? (
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-          <ul className="flex flex-wrap gap-2" aria-label={t('security.summary.bySeverity')}>
-            {ALERT_SEVERITIES.map((severity) => {
-              const Icon = SEVERITY_STYLE[severity].icon;
-              const count = summary.open_by_severity[severity];
-              return (
-                <li
-                  key={severity}
-                  className={cn(
-                    'flex min-w-24 flex-col gap-0.5 rounded-lg px-3 py-2',
-                    count > 0 ? SEVERITY_TILE[severity] : 'bg-subtle text-muted-strong',
-                  )}
-                >
-                  <span className="flex items-center gap-1.5 text-xs font-medium">
-                    <Icon aria-hidden="true" className="size-3.5" />
-                    {t(`severity.${severity}`)}
-                  </span>
-                  <span className="text-lg font-semibold tabular">
-                    {formatNumber(count, 0, lang)}
-                  </span>
-                </li>
-              );
-            })}
-          </ul>
-          <dl className="grid grid-cols-3 gap-6">
-            <Figure
-              icon={Activity}
-              label={t('security.summary.open')}
-              value={formatNumber(open, 0, lang)}
-            />
-            <Figure
-              icon={Search}
-              label={t('security.summary.acknowledged')}
-              value={formatNumber(summary.acknowledged, 0, lang)}
-            />
-            <Figure
-              icon={Clock3}
-              label={t('security.summary.meanTimeToClose')}
-              value={
-                summary.mean_time_to_close_seconds_30d === null
-                  ? '—'
-                  : formatDuration(summary.mean_time_to_close_seconds_30d, lang)
-              }
-            />
-          </dl>
+        // Tiles and figures side by side only when the card is wide enough for both (56rem);
+        // else the figures go under the tiles.
+        <div className="@container">
+          <div className="flex flex-col gap-4 @4xl:flex-row @4xl:items-end @4xl:justify-between">
+            <ul
+              className="flex flex-wrap gap-2 @4xl:shrink-0 @4xl:flex-nowrap"
+              aria-label={t('security.summary.bySeverity')}
+            >
+              {ALERT_SEVERITIES.map((severity) => {
+                const Icon = SEVERITY_STYLE[severity].icon;
+                const count = summary.open_by_severity[severity];
+                return (
+                  <li
+                    key={severity}
+                    className={cn(
+                      'flex min-w-24 flex-col gap-0.5 rounded-lg px-3 py-2',
+                      count > 0 ? SEVERITY_TILE[severity] : 'bg-subtle text-muted-strong',
+                    )}
+                  >
+                    <span className="flex items-center gap-1.5 text-xs font-medium">
+                      <Icon aria-hidden="true" className="size-3.5" />
+                      {t(`severity.${severity}`)}
+                    </span>
+                    <span className="text-lg font-semibold tabular">
+                      {formatNumber(count, 0, lang)}
+                    </span>
+                  </li>
+                );
+              })}
+            </ul>
+            <dl className="grid min-w-0 grid-cols-3 gap-6">
+              <Figure
+                icon={Activity}
+                label={t('security.summary.open')}
+                value={formatNumber(open, 0, lang)}
+              />
+              <Figure
+                icon={Search}
+                label={t('security.summary.acknowledged')}
+                value={formatNumber(summary.acknowledged, 0, lang)}
+              />
+              <Figure
+                icon={Clock3}
+                label={t('security.summary.meanTimeToClose')}
+                value={
+                  summary.mean_time_to_close_seconds_30d === null
+                    ? '—'
+                    : formatDuration(summary.mean_time_to_close_seconds_30d, lang)
+                }
+              />
+            </dl>
+          </div>
         </div>
       ) : null}
     </Card>
