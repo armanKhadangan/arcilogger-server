@@ -18,9 +18,17 @@ versions follow [Semantic Versioning](https://semver.org/).
 - The browser tab names the page ("Mühürleme · ARCILOGGER").
 - Two minutes before the idle limit, "Oturumunuz kapanmak üzere" offers "Oturumu sürdür", so text
   typed into a long form is not lost. The limit itself is unchanged.
-- 5651 Sorgu's "Sorgula" stays at the bottom of the window while the form scrolls.
+- 5651 Sorgu's "Sorgula" stays at the bottom of the window while the form scrolls. Leaving a
+  filled-in form for another page asks first, as Ayarlar does; the result's own page does not.
+- Every password field has "Parolayı göster" and says "Caps Lock açık" while that key is on.
+- Uyum Durumu's "Yalnızca tamam olmayanlar" hides the cards that are fine.
 - Canlı Durum's charts show a quiet line's rate, where they used to show a column of "0,0".
 - The "Sessiz" badges show a no-signal icon where a lone dot used to be.
+- At 1280 and 1440 px, nothing is cut any more:
+  - Kullanım's card explanations and figure headers wrap;
+  - the donut's total stays inside its ring;
+  - Kaynaklar's last-message time, Arama's "Ham satır" button and Kullanım's volumes show whole;
+  - Güvenlik Özeti keeps its five severity tiles on one row.
 
 ## [0.2.0] — 2026-11-06
 
