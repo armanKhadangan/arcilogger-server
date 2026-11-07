@@ -212,7 +212,8 @@ export function SourcesHealthPage() {
         id: 'lastMessage',
         accessorFn: (row) => row.item.last_message ?? '',
         header: t('sources.columns.lastMessage'),
-        size: 150,
+        // "13.10.2026 14:59:12" whole: the name column gives up the width.
+        size: 172,
         meta: {
           label: t('sources.columns.lastMessage'),
           wrapHeader: true,
