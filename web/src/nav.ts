@@ -2,6 +2,7 @@ import {
   Activity,
   ClipboardCheck,
   Clock3,
+  Database,
   FileText,
   Gauge,
   HeartPulse,
@@ -157,6 +158,13 @@ export const NAV_ITEMS: readonly NavItem[] = [
     icon: HeartPulse,
     permissions: ['system.read'],
   },
+  {
+    key: 'database',
+    group: 'admin',
+    path: '/database',
+    icon: Database,
+    permissions: ['system.read'],
+  },
 ];
 
 /**
@@ -181,6 +189,7 @@ export const BUILT_PAGES: ReadonlySet<string> = new Set([
   'usage',
   'compliance',
   'system',
+  'database',
 ]);
 
 /**

@@ -1,0 +1,61 @@
+{
+  "database": {
+    "description": "ARCILOGGER'ın kullandığı veritabanı: ne kadar dolu, ne hızla büyüyor, son yedek.",
+    "updated": "Güncellendi {{time}}",
+    "refresh": "Yenile",
+    "loadFailed": "Veritabanı bilgisi alınamadı.",
+    "unknown": "—",
+    "engine": {
+      "title": "Kullanılan veritabanı",
+      "product": "Veritabanı",
+      "postgresql": "PostgreSQL {{version}}",
+      "timescaledb": "PostgreSQL {{version}} ve TimescaleDB {{extension}}",
+      "name": "Veritabanının adı",
+      "address": "Adres",
+      "connections": "Bağlantılar",
+      "connectionsValue": "{{count}} / en çok {{limit}}"
+    },
+    "size": {
+      "title": "Doluluk",
+      "total": "Toplam boyut",
+      "unmeasured": "Ölçülemedi",
+      "measuredAt": "Ölçüm zamanı",
+      "growth": "Günlük büyüme",
+      "perDay": "günde yaklaşık {{size}}",
+      "insufficient": "Tahmin için en az 7 günlük ölçüm gerekir ({{samples}} gün var).",
+      "notGrowing": "Son 30 günde büyümedi.",
+      "window": "Veritabanında tutulan",
+      "windowValue": "son {{days}} gün",
+      "windowNote": "Daha eski günler veritabanından çıkarılır. Ham loglar ve mühürler kasada kalır; Arama sayfasından yeniden yüklenebilir."
+    },
+    "chart": {
+      "title": "Son 30 günün boyutu",
+      "caption": "Her gün bir ölçüm (gece 00:30'dan sonra).",
+      "empty": "Henüz günlük ölçüm yok; ilk ölçüm bu gece alınır.",
+      "day": "Gün",
+      "size": "Boyut"
+    },
+    "drive": {
+      "title": "Veri diski",
+      "note": "PostgreSQL'in kendi veri klasörü kurulumda genellikle bu diske konur.",
+      "none": "Veri diski okunamadı."
+    },
+    "backup": {
+      "title": "Son yedek",
+      "none": "Henüz yedek alınmadı.",
+      "ok": "Başarılı",
+      "failed": "Başarısız",
+      "finished": "Zaman",
+      "file": "Dosya",
+      "size": "Boyut",
+      "settings": "Yedekleme ayarları"
+    },
+    "tables": {
+      "title": "En büyük tablolar",
+      "caption": "Bölümleri ve parçaları dahil.",
+      "table": "Tablo",
+      "size": "Boyut",
+      "none": "Tablo boyutları okunamadı."
+    }
+  }
+}

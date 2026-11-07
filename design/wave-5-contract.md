@@ -4150,3 +4150,21 @@ P4 is Gülşah's (#203, 23:40Z); it follows W5-N (#207) and the answers of 2026-
   `probe_skipped` in strict outbound mode (`strictOutbound`). Its texts are those of
   `admin/messages.py`. Its seed TSA section reports the two `turktrust.*` secrets as W5-T's API
   does, so `e2e/settings-kamusm.spec.ts` drops `reportTurktrust` (granted on #214).
+
+## Deviations — Addendum C (2026-11-07)
+
+**C7 Veritabanı page, as built.** `GET /api/v1/system/database` (`system.read`, not audited, no
+licence module; `arcilogger_api.system.database`) answers `DatabaseDetails`: `storage`,
+`server_version` (`SHOW server_version`), `timescaledb_version` (`pg_extension`), `name`
+(`current_database()`), `host`/`port` (`[database]`), `total_bytes`/`measured_at`/`tables` (the
+measured sizes of `GET /system`, the same 5-minute cache), `connections` (`pg_stat_activity` of this
+database) and `max_connections`, `window_days` (`db.retention_days`), `growth`
+(`{state, samples, bytes_per_day}`: the same least-squares line as a drive's forecast, newest 30
+samples, at least 7), `history` (the samples of the last 30 days), `data_drive` (the data folder's
+drive with its forecast) and `last_backup` (`state/backup/last.json`: time, ok, the file's name only
+and its size after a success). Each reading that fails answers `null` on its own. The worker job
+`system.sample` adds `"database": <pg_database_size>` to each day of `state/system-history.json`
+(left out when it cannot be read; an entry whose value is not an integer is not read). Web: menu
+entry **Veritabanı** under Yönetim (`/database`, `system.read`), sample `system-database.json`
+(the server facts fixed after the real answer was checked). The area chart got `fitValues` (value
+axis from the data, series not stacked) so a slow growth is visible.

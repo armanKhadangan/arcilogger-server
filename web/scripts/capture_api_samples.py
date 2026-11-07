@@ -70,8 +70,8 @@ come from modules of their own next to this script, each kept with its API
 (``samples_search.py``, ``samples_live_sources.py``, ``samples_network.py``): their ``capture``
 runs on the main site after step 7's pages, in that order, and returns ``{file name: data}``; a
 file whose data is empty is not written. The Uyum Durumu and Sistem samples (``compliance.json``;
-``system.json``, ``system-disk.json``, ``system-health.json``; Wave 4 contract 2.3, 2.5, 2.6)
-come from ``samples_compliance.py`` and ``samples_system.py``, run on the main site after the
+``system.json``, ``system-disk.json``, ``system-health.json``; Wave 4 contract 2.3, 2.5, 2.6;
+the Veritabanı page's ``system-database.json``, Wave 5 addendum C) come from ``samples_compliance.py`` and ``samples_system.py``, run on the main site after the
 others (the cards read the whole site; the Sistem samples fix what the host would say). The
 legal-validity samples (``legal-status.json``; Wave 5 contract 2.3.1) come from
 ``samples_legal_status.py``, run after the Sistem samples and before the archive's, with a

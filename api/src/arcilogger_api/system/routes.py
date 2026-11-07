@@ -1,11 +1,13 @@
-"""``GET /api/v1/system`` and ``GET /api/v1/system/disk`` (Wave 4 contract 2.2, 2.5).
+"""``GET /api/v1/system``, ``GET /api/v1/system/disk`` (Wave 4 contract 2.2, 2.5) and
+``GET /api/v1/system/database`` (the Veritabanı page, Wave 5 addendum C, C7).
 
 Both need ``system.read`` (administrators, owner question Q2), belong to 5651 Temel (no licence
 module, so no licence state blocks them) and are not audited: they read the server's own state
 and carry no data about log subjects (contract 0.1 item 4). The web app refreshes them every
 30 seconds in the background. The database sizes are measured at most every 5 minutes
 (:data:`~arcilogger_api.system.resources.DATABASE_TTL`); everything else per request.
-``/system/disk`` is the drives alone, for the Panel's disk card.
+``/system/disk`` is the drives alone, for the Panel's disk card; ``/system/database`` shares
+the measured sizes with ``/system``.
 
 This module is not under ``routers/``, so the application does not mount it yet: the Wave 4
 switch-on adds ``routers/system.py``, which includes :data:`router`. Its tests mount it
@@ -21,7 +23,13 @@ from fastapi import APIRouter, Depends, FastAPI, Request
 
 from arcilogger_api.deps import ConfigDep, DbSession, LayoutDep, TtlCache
 from arcilogger_api.security import CurrentUser, require
-from arcilogger_api.system.models import DatabaseInfo, SystemDisk, SystemSummary
+from arcilogger_api.system.database import database_details
+from arcilogger_api.system.models import (
+    DatabaseDetails,
+    DatabaseInfo,
+    SystemDisk,
+    SystemSummary,
+)
 from arcilogger_api.system.resources import (
     DATABASE_TTL,
     collector_info,
@@ -81,4 +89,26 @@ def system_disk(_: ReaderDep, db: DbSession, layout: LayoutDep, config: ConfigDe
         drives=drive_infos(
             layout, config.data_dir, warning=warning_percent(db), today=site_day(now)
         ),
+    )
+
+
+@router.get("/database")
+def system_database(
+    _: ReaderDep, request: Request, db: DbSession, layout: LayoutDep, config: ConfigDep
+) -> DatabaseDetails:
+    """The database: engine and version, size and largest tables, connections, the days it
+    keeps, its daily growth and the last backup."""
+    now = to_site(utc_now())
+    sizes = database_cache(request.app).get_or_compute(
+        lambda: measure_database(db, now), keep=lambda info: info.total_bytes is not None
+    )
+    drives = drive_infos(layout, config.data_dir, warning=warning_percent(db), today=site_day(now))
+    return database_details(
+        db,
+        config=config,
+        layout=layout,
+        sizes=sizes,
+        data_drive=next((drive for drive in drives if drive.role == "data"), None),
+        now=now,
+        today=site_day(now),
     )

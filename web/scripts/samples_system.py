@@ -1,5 +1,6 @@
 """The Sistem samples (``web/e2e/samples/system.json``, ``system-disk.json``,
-``system-health.json``), captured from the real API.
+``system-health.json``) and the Veritabanı page's (``system-database.json``), captured from the
+real API.
 
 ``capture_api_samples.py`` calls :func:`capture` on its main site after every other page's
 samples (Wave 4 contract 2.2, 2.5, 2.6), with the capture (the app, its database and data
@@ -39,7 +40,10 @@ What the files hold: ``system.json`` ``summary`` (``GET /system``, the processor
 ``summary_first_reading`` (the first reading of a process: ``cpu_percent`` null),
 ``system-disk.json`` ``disk`` and ``disk_not_growing`` (``GET /system/disk``),
 ``system-health.json`` ``health``
-(``GET /system/health``); each with ``errors.forbidden`` (the auditor: ``system.read`` is the
+(``GET /system/health``), ``system-database.json`` ``database`` (``GET /system/database``: the
+daily samples grow about 180 MB a day; the server's version, the database's name, address and
+connections are fixed after the real answer was checked, they differ with every server and
+capture); each with ``errors.forbidden`` (the auditor: ``system.read`` is the
 administrators' only). Everything the module writes is put back afterwards: the files as they
 were (or removed), their modification times, the ``job_runs`` rows, the measured database sizes
 kept by the app.
@@ -89,12 +93,14 @@ SHAPE_KEYS: dict[str, tuple[frozenset[str], frozenset[str]]] = {
     "system": (frozenset(), frozenset({"platform", "role", "storage"})),
     "system-disk": (frozenset(), frozenset({"role"})),
     "system-health": (frozenset(), frozenset({"name", "task", "last_status"})),
+    "system-database": (frozenset(), frozenset({"storage", "role", "state"})),
 }
 
 API = "/api/v1"
 SUMMARY = f"{API}/system"
 DISK = f"{API}/system/disk"
 HEALTH = f"{API}/system/health"
+DATABASE = f"{API}/system/database"
 
 GB = 1_000_000_000
 
@@ -159,6 +165,18 @@ DATABASE_TABLES = (
     ("job_runs", 912_261_120),
     ("audit_log", 402_653_184),
 )
+
+#: The database's daily samples: :data:`DATABASE_TOTAL` today, about 180 MB less each day back.
+DATABASE_GROWTH = 183_500_800
+#: What the Veritabanı sample shows of the server (the real values differ with every capture).
+DATABASE_SERVER = {
+    "server_version": "16.4",
+    "name": "arcilogger",
+    "host": "127.0.0.1",
+    "port": 5432,
+    "connections": 7,
+    "max_connections": 100,
+}
 
 #: An unknown sender in the status files (counted only: its address never leaves the API).
 UNKNOWN = "192.0.2.77"
@@ -339,7 +357,9 @@ def history(data: Drive, slope: int, today: date) -> dict[str, Any]:
         if back < SYSTEM_SAMPLES:
             used = SYSTEM.sampled - back * 41_943_040
             drives.append({"path": SYSTEM.label, "total": SYSTEM.total, "used": used})
-        days.append({"day": (today - timedelta(days=back)).isoformat(), "drives": drives})
+        database = DATABASE_TOTAL - back * DATABASE_GROWTH
+        day = (today - timedelta(days=back)).isoformat()
+        days.append({"day": day, "drives": drives, "database": database})
     return {"schema": HISTORY_SCHEMA, "days": days}
 
 
@@ -719,6 +739,10 @@ def _capture(
 
     disk: dict[str, Any] = {"disk": capture.json(admin.get(DISK), 200)}
     expect_forecasts(disk["disk"], "estimated", "insufficient")
+    database = {
+        "database": expect_database(capture.json(admin.get(DATABASE), 200)),
+        "errors": {"forbidden": capture.error(auditor.get(DATABASE), 403, "forbidden")},
+    }
     layout.system_history.write_text(json.dumps(history(DATA_FLAT, -DATA_SHRINK, today), indent=1))
     usage[DATA.label] = DATA_FLAT.usage
     disk["disk_not_growing"] = capture.json(admin.get(DISK), 200)
@@ -728,7 +752,30 @@ def _capture(
     health: dict[str, Any] = {"health": capture.json(admin.get(HEALTH), 200)}
     health["errors"] = {"forbidden": capture.error(auditor.get(HEALTH), 403, "forbidden")}
     expect_health(health["health"])
-    return {"system": system, "system-disk": disk, "system-health": health}
+    return {
+        "system": system,
+        "system-disk": disk,
+        "system-health": health,
+        "system-database": database,
+    }
+
+
+def expect_database(answer: dict[str, Any]) -> dict[str, Any]:
+    """The real answer checked, then its server facts fixed (:data:`DATABASE_SERVER`)."""
+    real = {key: answer[key] for key in DATABASE_SERVER}
+    if None in real.values() or answer["connections"] < 1:
+        raise SystemExit(f"system: the database's server facts: {real}")
+    if answer["growth"] != {
+        "state": "estimated",
+        "samples": HISTORY,
+        "bytes_per_day": DATABASE_GROWTH,
+    }:
+        raise SystemExit(f"system: the database's growth: {answer['growth']}")
+    if len(answer["history"]) != HISTORY or answer["total_bytes"] != DATABASE_TOTAL:
+        raise SystemExit(f"system: the database's samples: {answer['history']}")
+    if answer["last_backup"] is None or answer["data_drive"]["path"] != DATA.label:
+        raise SystemExit(f"system: backup {answer['last_backup']}, drive {answer['data_drive']}")
+    return answer | DATABASE_SERVER
 
 
 def expect_forecasts(answer: dict[str, Any], data: str, system: str) -> None:

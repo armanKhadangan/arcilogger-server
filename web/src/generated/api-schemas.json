@@ -366,6 +366,9 @@
     "/api/v1/system": [
       "get"
     ],
+    "/api/v1/system/database": [
+      "get"
+    ],
     "/api/v1/system/disk": [
       "get"
     ],
@@ -4540,6 +4543,215 @@
       "title": "DashboardSummary",
       "type": "object"
     },
+    "DatabaseDetails": {
+      "description": "The Veritabanı page: what database ARCILOGGER uses, how big it is and how it grows.",
+      "properties": {
+        "checked_at": {
+          "format": "date-time",
+          "title": "Checked At",
+          "type": "string"
+        },
+        "connections": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Connections"
+        },
+        "data_drive": {
+          "anyOf": [
+            {
+              "$ref": "#/components/schemas/DriveInfo"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "growth": {
+          "$ref": "#/components/schemas/DatabaseGrowth"
+        },
+        "history": {
+          "items": {
+            "$ref": "#/components/schemas/DatabaseSample"
+          },
+          "title": "History",
+          "type": "array"
+        },
+        "host": {
+          "title": "Host",
+          "type": "string"
+        },
+        "last_backup": {
+          "anyOf": [
+            {
+              "$ref": "#/components/schemas/LastBackup"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "max_connections": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Max Connections"
+        },
+        "measured_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Measured At"
+        },
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Name"
+        },
+        "port": {
+          "title": "Port",
+          "type": "integer"
+        },
+        "server_version": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Server Version"
+        },
+        "storage": {
+          "enum": [
+            "postgresql",
+            "timescaledb"
+          ],
+          "title": "Storage",
+          "type": "string"
+        },
+        "tables": {
+          "items": {
+            "$ref": "#/components/schemas/TableSize"
+          },
+          "title": "Tables",
+          "type": "array"
+        },
+        "timescaledb_version": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Timescaledb Version"
+        },
+        "total_bytes": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Total Bytes"
+        },
+        "window_days": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Window Days"
+        }
+      },
+      "required": [
+        "checked_at",
+        "storage",
+        "server_version",
+        "timescaledb_version",
+        "name",
+        "host",
+        "port",
+        "total_bytes",
+        "measured_at",
+        "tables",
+        "connections",
+        "max_connections",
+        "window_days",
+        "growth",
+        "history",
+        "data_drive",
+        "last_backup"
+      ],
+      "title": "DatabaseDetails",
+      "type": "object"
+    },
+    "DatabaseGrowth": {
+      "description": "The database's growth a day, fitted like a drive's forecast to the daily samples.",
+      "properties": {
+        "bytes_per_day": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Bytes Per Day"
+        },
+        "samples": {
+          "title": "Samples",
+          "type": "integer"
+        },
+        "state": {
+          "enum": [
+            "estimated",
+            "insufficient",
+            "not_growing"
+          ],
+          "title": "State",
+          "type": "string"
+        }
+      },
+      "required": [
+        "state",
+        "samples",
+        "bytes_per_day"
+      ],
+      "title": "DatabaseGrowth",
+      "type": "object"
+    },
     "DatabaseInfo": {
       "properties": {
         "measured_at": {
@@ -4588,6 +4800,25 @@
         "measured_at"
       ],
       "title": "DatabaseInfo",
+      "type": "object"
+    },
+    "DatabaseSample": {
+      "properties": {
+        "bytes": {
+          "title": "Bytes",
+          "type": "integer"
+        },
+        "day": {
+          "format": "date",
+          "title": "Day",
+          "type": "string"
+        }
+      },
+      "required": [
+        "day",
+        "bytes"
+      ],
+      "title": "DatabaseSample",
       "type": "object"
     },
     "DayHealth": {
@@ -7051,6 +7282,57 @@
       "type": "object"
     },
     "JsonValue": {},
+    "LastBackup": {
+      "description": "``state/backup/last.json`` of the Backup task (only what the page shows).",
+      "properties": {
+        "bytes": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Bytes"
+        },
+        "file": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "File"
+        },
+        "finished": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Finished"
+        },
+        "ok": {
+          "title": "Ok",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "finished",
+        "ok",
+        "file",
+        "bytes"
+      ],
+      "title": "LastBackup",
+      "type": "object"
+    },
     "LeaseBrief": {
       "properties": {
         "confidence": {

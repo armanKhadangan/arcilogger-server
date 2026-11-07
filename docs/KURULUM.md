@@ -970,6 +970,12 @@ görevlerin durumunu ve güvenlik duvarı kurallarını Windows'a yalnızca onla
   kadar "Kanıt yok" gösterir; Requests ve (saklama açıksa) Retention görevlerinin okunabilir kanıtı
   yoktur ("İzlenemiyor"); kapalı bir özelliğin görevi (ör. replika ya da saklama kapalıyken)
   "Kullanılmıyor" gösterir.
+- **Veritabanı** (`/database`, yalnızca yönetici): kullanılan veritabanı ve sürümü (PostgreSQL, varsa
+  TimescaleDB), veritabanının adı ve adresi, bağlantı sayısı, toplam boyut, günlük büyüme (aynı
+  `system.sample` işinin her gün yazdığı veritabanı boyutundan; en az 7 günlük ölçüm gerekir),
+  veritabanında tutulan gün sayısı (`db.retention_days`; daha eski günler veritabanından çıkarılır,
+  ham loglar ve mühürler kasada kalır), son 30 günün boyut grafiği, veri diski ve dolma tahmini, son
+  yedek ve en büyük tablolar. Yalnızca tablo adları, boyutlar ve sayılar gösterilir.
 
 Güvenlik duvarı (`Set-ArciFirewall.ps1`):
 

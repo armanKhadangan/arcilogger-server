@@ -851,6 +851,13 @@ scheduled tasks and for the firewall rules.
   first Sunday, VerifyMonthly until the first of the month; Requests and (with retention on)
   Retention have no readable evidence ("İzlenemiyor", Not observable); the task of a feature that
   is off (e.g. replica or retention off) shows "Kullanılmıyor" (Not used).
+- **Veritabanı** (Database, `/database`, administrator only): the database in use and its version
+  (PostgreSQL, with TimescaleDB when installed), the database's name and address, the number of
+  connections, the total size, the daily growth (from the database size the same `system.sample`
+  job writes every day; it needs at least 7 daily samples), the days of logs the database keeps
+  (`db.retention_days`; older days are taken out of the database, the raw logs and seals stay in
+  the vault), a chart of the size over the last 30 days, the data drive with its forecast, the last
+  backup and the largest tables. Only table names, sizes and counts are shown.
 
 Firewall (`Set-ArciFirewall.ps1`):
 

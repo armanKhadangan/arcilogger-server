@@ -10,7 +10,7 @@
 
 import { usePollingQuery } from './api-hooks';
 import type { SystemHealth } from './system-health-types';
-import type { SystemDisk, SystemSummary } from './system-types';
+import type { DatabaseDetails, SystemDisk, SystemSummary } from './system-types';
 
 export const SYSTEM_POLL_MS = 30_000;
 
@@ -18,6 +18,7 @@ export const systemKeys = {
   summary: ['system', 'summary'] as const,
   health: ['system', 'health'] as const,
   disk: ['system', 'disk'] as const,
+  database: ['system', 'database'] as const,
 };
 
 /** `GET /system`: host, drives with their forecast, database, collector, ingest and versions. */
@@ -47,5 +48,14 @@ export function useSystemDisk(enabled: boolean) {
     path: '/system/disk',
     intervalMs: SYSTEM_POLL_MS,
     enabled,
+  });
+}
+
+/** `GET /system/database`: the Veritabanı page (engine, size, growth, connections, last backup). */
+export function useSystemDatabase() {
+  return usePollingQuery<DatabaseDetails>({
+    queryKey: systemKeys.database,
+    path: '/system/database',
+    intervalMs: SYSTEM_POLL_MS,
   });
 }

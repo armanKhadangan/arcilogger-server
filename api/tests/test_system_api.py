@@ -26,7 +26,12 @@ from arcilogger_api import testing as api_testing
 from arcilogger_api.app import API_PREFIX
 from arcilogger_api.deps import TtlCache
 from arcilogger_api.system import resources, routes
-from arcilogger_api.system.models import DatabaseInfo, SystemDisk, SystemSummary
+from arcilogger_api.system.models import (
+    DatabaseDetails,
+    DatabaseInfo,
+    SystemDisk,
+    SystemSummary,
+)
 from arcilogger_api.system.resources import CpuMeter, configured_name, measure_database
 from arcilogger_api.testing import LoggedIn
 from arcilogger_core import RELEASE_DATE, hostinfo
@@ -42,6 +47,7 @@ from arcilogger_worker.alerts.system import drives
 Login = Callable[..., LoggedIn]
 API = f"{API_PREFIX}/system"
 DISK = f"{API}/disk"
+DATABASE = f"{API}/database"
 GIB = 1024**3
 
 
@@ -361,7 +367,7 @@ def test_system_is_refused_without_system_read(
     measured: list[int] = []
     monkeypatch.setattr(routes, "measure_database", lambda *_: measured.append(1))
     login_as(client, role)
-    for path in (API, DISK):
+    for path in (API, DISK, DATABASE):
         response = client.get(path)
         assert response.status_code == 403, (role, path)
         assert response.json()["error"]["code"] == "forbidden"
@@ -369,7 +375,7 @@ def test_system_is_refused_without_system_read(
 
 
 def test_system_needs_a_session(client: TestClient) -> None:
-    for path in (API, DISK):
+    for path in (API, DISK, DATABASE):
         assert client.get(path).status_code == 401
 
 
@@ -380,6 +386,95 @@ def test_system_is_not_licence_gated(client: TestClient, login_as: Login, licenc
     assert client.get(f"{API_PREFIX}/license").json()["status"] == "trial_expired"
     assert get(client)["version"]["product"] == "ARCILOGGER"
     assert get(client, DISK)["drives"]
+
+
+def test_database_page(
+    client: TestClient, login_as: Login, layout: Layout, api_config: Config
+) -> None:
+    """``GET /system/database`` (Wave 5 addendum C, C7): engine and version, size, connections,
+    the days it keeps, the growth of the daily samples and the last backup."""
+    today = site_day(utc_now())
+    days = [today - timedelta(days=offset) for offset in range(40, -1, -1)]
+    layout.state.mkdir(parents=True, exist_ok=True)
+    history = [
+        {"day": day.isoformat(), "drives": [], "database": GIB + index * 10_000_000}
+        for index, day in enumerate(days)
+    ]
+    history.insert(0, {"day": "2026-01-01", "drives": [], "database": "big"})  # left out
+    layout.system_history.write_text(json.dumps({"schema": 1, "days": history}), encoding="utf-8")
+    (layout.state / "backup").mkdir()
+    (layout.state / "backup" / "last.json").write_text(
+        json.dumps(
+            {
+                "schema": 1,
+                "finished": "2026-11-07T01:41:12+03:00",
+                "ok": True,
+                "file": "backups/scheduled/arcilogger-20261107-014000.dump",
+                "size": 5_000_000,
+                "sha256": "0" * 64,
+                "error": None,
+            }
+        ),
+        encoding="utf-8",
+    )
+    login_as(client, "admin")
+    body = get(client, DATABASE)
+    assert DatabaseDetails.model_validate(body)
+    assert body["storage"] in ("postgresql", "timescaledb")
+    assert body["server_version"].split(".")[0].isdigit()
+    assert body["name"]
+    assert (body["host"], body["port"]) == (api_config.database.host, api_config.database.port)
+    assert body["total_bytes"] > 0
+    assert 0 < len(body["tables"]) <= 10
+    assert body["connections"] >= 1
+    assert body["max_connections"] > 0
+    assert body["window_days"] == 30
+    assert body["growth"] == {"state": "estimated", "samples": 30, "bytes_per_day": 10_000_000}
+    shown = [date.fromisoformat(sample["day"]) for sample in body["history"]]
+    assert shown == days[-30:]
+    assert body["data_drive"]["role"] == "data"
+    assert body["last_backup"] == {
+        "finished": "2026-11-07T01:41:12+03:00",
+        "ok": True,
+        "file": "arcilogger-20261107-014000.dump",
+        "bytes": 5_000_000,
+    }
+
+
+def test_database_page_without_history_or_backup(client: TestClient, login_as: Login) -> None:
+    login_as(client, "admin")
+    body = get(client, DATABASE)
+    assert body["growth"] == {"state": "insufficient", "samples": 0, "bytes_per_day": None}
+    assert body["history"] == []
+    assert body["last_backup"] is None
+
+
+def test_a_failed_backup_shows_no_file(client: TestClient, login_as: Login, layout: Layout) -> None:
+    (layout.state / "backup").mkdir(parents=True)
+    (layout.state / "backup" / "last.json").write_text(
+        json.dumps({"finished": "2026-11-07T01:41:12+03:00", "ok": False, "file": "x", "size": 1}),
+        encoding="utf-8",
+    )
+    login_as(client, "admin")
+    assert get(client, DATABASE)["last_backup"] == {
+        "finished": "2026-11-07T01:41:12+03:00",
+        "ok": False,
+        "file": None,
+        "bytes": None,
+    }
+    # A folder outside the data folder is written as a full Windows path: the name is shown.
+    (layout.state / "backup" / "last.json").write_text(
+        json.dumps(
+            {
+                "finished": "2026-11-07T01:41:12+03:00",
+                "ok": True,
+                "file": "E:/Yedek/arcilogger-20261107-014000.dump",
+                "size": 9,
+            }
+        ),
+        encoding="utf-8",
+    )
+    assert get(client, DATABASE)["last_backup"]["file"] == "arcilogger-20261107-014000.dump"
 
 
 def test_system_returns_no_sender_address(

@@ -1,4 +1,7 @@
-/** Mirror of api/src/arcilogger_api/system/models.py (Wave 4 contract 2.5.1). */
+/**
+ * Mirror of api/src/arcilogger_api/system/models.py (Wave 4 contract 2.5.1; the Veritabanı page,
+ * Wave 5 addendum C, C7).
+ */
 import type { DateString, DateTimeString, Float } from './api-types';
 
 export type DriveRole = 'data' | 'system';
@@ -114,4 +117,46 @@ export interface SystemSummary {
 export interface SystemDisk {
   checked_at: DateTimeString;
   drives: DriveInfo[];
+}
+
+/** The database's growth a day, fitted like a drive's forecast (`GET /system/database`). */
+export interface DatabaseGrowth {
+  state: 'estimated' | 'insufficient' | 'not_growing';
+  samples: number;
+  bytes_per_day: number | null;
+}
+
+export interface DatabaseSample {
+  day: DateString;
+  bytes: number;
+}
+
+/** The Backup task's last attempt (`state/backup/last.json`); file name and size after success. */
+export interface LastBackup {
+  finished: DateTimeString | null;
+  ok: boolean;
+  file: string | null;
+  bytes: number | null;
+}
+
+/** `GET /system/database`: the Veritabanı page. */
+export interface DatabaseDetails {
+  checked_at: DateTimeString;
+  storage: 'postgresql' | 'timescaledb';
+  server_version: string | null;
+  timescaledb_version: string | null;
+  name: string | null;
+  host: string;
+  port: number;
+  total_bytes: number | null;
+  measured_at: DateTimeString | null;
+  tables: TableSize[];
+  connections: number | null;
+  max_connections: number | null;
+  /** Days of logs the database keeps (`db.retention_days`); older days are archived. */
+  window_days: number | null;
+  growth: DatabaseGrowth;
+  history: DatabaseSample[];
+  data_drive: DriveInfo | null;
+  last_backup: LastBackup | null;
 }

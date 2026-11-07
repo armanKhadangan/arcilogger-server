@@ -30,6 +30,7 @@ test.describe('getting around', () => {
       await expect(nav.getByRole('list', { name: 'Yönetim' }).getByRole('link')).toHaveText([
         'Ayarlar',
         'Sistem',
+        'Veritabanı',
       ]);
       await expectNoA11yViolations(page);
       await page.getByRole('button', { name: 'Menüyü daralt' }).click();

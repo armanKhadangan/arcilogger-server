@@ -713,6 +713,11 @@ const RULES: Record<string, Record<string, Rule>> = {
     health: 'SystemHealth',
     errors,
   },
+  // Veritabanı (Wave 5 addendum C, C7): 30 daily samples, the data drive, the last backup.
+  'system-database': {
+    database: 'DatabaseDetails',
+    errors,
+  },
   // Canlı Durum (Wave 5 contract §6.2 M2) on the golden usage site at 09:02:30: each window, the
   // pseudonymous answer and the refusals.
   activity: {

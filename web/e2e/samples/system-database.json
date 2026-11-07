@@ -1,0 +1,229 @@
+{
+  "database": {
+    "checked_at": "2026-10-13T07:01:10.285631+03:00",
+    "connections": 7,
+    "data_drive": {
+      "critical_percent": 95,
+      "forecast": {
+        "full_on": "2027-01-01",
+        "growth_bytes_per_day": 10318018648,
+        "samples": 30,
+        "state": "estimated",
+        "warning_on": "2026-11-23"
+      },
+      "free_bytes": 817847894016,
+      "path": "D:",
+      "role": "data",
+      "total_bytes": 2000381014016,
+      "used_bytes": 1182533120000,
+      "used_percent": 59,
+      "warning_percent": 80
+    },
+    "growth": {
+      "bytes_per_day": 183500800,
+      "samples": 30,
+      "state": "estimated"
+    },
+    "history": [
+      {
+        "bytes": 313150586880,
+        "day": "2026-09-14"
+      },
+      {
+        "bytes": 313334087680,
+        "day": "2026-09-15"
+      },
+      {
+        "bytes": 313517588480,
+        "day": "2026-09-16"
+      },
+      {
+        "bytes": 313701089280,
+        "day": "2026-09-17"
+      },
+      {
+        "bytes": 313884590080,
+        "day": "2026-09-18"
+      },
+      {
+        "bytes": 314068090880,
+        "day": "2026-09-19"
+      },
+      {
+        "bytes": 314251591680,
+        "day": "2026-09-20"
+      },
+      {
+        "bytes": 314435092480,
+        "day": "2026-09-21"
+      },
+      {
+        "bytes": 314618593280,
+        "day": "2026-09-22"
+      },
+      {
+        "bytes": 314802094080,
+        "day": "2026-09-23"
+      },
+      {
+        "bytes": 314985594880,
+        "day": "2026-09-24"
+      },
+      {
+        "bytes": 315169095680,
+        "day": "2026-09-25"
+      },
+      {
+        "bytes": 315352596480,
+        "day": "2026-09-26"
+      },
+      {
+        "bytes": 315536097280,
+        "day": "2026-09-27"
+      },
+      {
+        "bytes": 315719598080,
+        "day": "2026-09-28"
+      },
+      {
+        "bytes": 315903098880,
+        "day": "2026-09-29"
+      },
+      {
+        "bytes": 316086599680,
+        "day": "2026-09-30"
+      },
+      {
+        "bytes": 316270100480,
+        "day": "2026-10-01"
+      },
+      {
+        "bytes": 316453601280,
+        "day": "2026-10-02"
+      },
+      {
+        "bytes": 316637102080,
+        "day": "2026-10-03"
+      },
+      {
+        "bytes": 316820602880,
+        "day": "2026-10-04"
+      },
+      {
+        "bytes": 317004103680,
+        "day": "2026-10-05"
+      },
+      {
+        "bytes": 317187604480,
+        "day": "2026-10-06"
+      },
+      {
+        "bytes": 317371105280,
+        "day": "2026-10-07"
+      },
+      {
+        "bytes": 317554606080,
+        "day": "2026-10-08"
+      },
+      {
+        "bytes": 317738106880,
+        "day": "2026-10-09"
+      },
+      {
+        "bytes": 317921607680,
+        "day": "2026-10-10"
+      },
+      {
+        "bytes": 318105108480,
+        "day": "2026-10-11"
+      },
+      {
+        "bytes": 318288609280,
+        "day": "2026-10-12"
+      },
+      {
+        "bytes": 318472110080,
+        "day": "2026-10-13"
+      }
+    ],
+    "host": "127.0.0.1",
+    "last_backup": {
+      "bytes": 1281734656,
+      "file": "arcilogger-20261012-0140.dump",
+      "finished": "2026-10-12T01:52:10+03:00",
+      "ok": true
+    },
+    "max_connections": 100,
+    "measured_at": "2026-10-13T07:01:10.158285+03:00",
+    "name": "arcilogger",
+    "port": 5432,
+    "server_version": "16.4",
+    "storage": "postgresql",
+    "tables": [
+      {
+        "bytes": 196534018048,
+        "name": "messages"
+      },
+      {
+        "bytes": 52018347008,
+        "name": "fg_traffic"
+      },
+      {
+        "bytes": 21473632256,
+        "name": "fg_web"
+      },
+      {
+        "bytes": 13902413824,
+        "name": "fg_dns"
+      },
+      {
+        "bytes": 6871646208,
+        "name": "search_counts"
+      },
+      {
+        "bytes": 3221225472,
+        "name": "mt_dhcp"
+      },
+      {
+        "bytes": 2147483648,
+        "name": "leases"
+      },
+      {
+        "bytes": 1610612736,
+        "name": "mt_arp"
+      },
+      {
+        "bytes": 912261120,
+        "name": "job_runs"
+      },
+      {
+        "bytes": 402653184,
+        "name": "audit_log"
+      }
+    ],
+    "timescaledb_version": null,
+    "total_bytes": 318472110080,
+    "window_days": 30
+  },
+  "errors": {
+    "forbidden": {
+      "body": {
+        "error": {
+          "code": "forbidden",
+          "message_en": "You do not have permission for this action.",
+          "message_tr": "Bu işlem için yetkiniz yok."
+        }
+      },
+      "headers": {},
+      "status": 403
+    }
+  },
+  "meta": {
+    "captured_at": "2026-10-13T04:01:30.769656+00:00",
+    "clock": "2026-10-13T07:00:00+03:00",
+    "info": "captured by web/scripts/capture_api_samples.py; do not edit",
+    "site_day": "2026-10-09",
+    "site_today": "2026-10-13",
+    "tsa": "mock (never legally valid)"
+  }
+}
