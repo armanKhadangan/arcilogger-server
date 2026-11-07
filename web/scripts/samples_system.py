@@ -1,6 +1,6 @@
 """The Sistem samples (``web/e2e/samples/system.json``, ``system-disk.json``,
-``system-health.json``) and the Veritabanı page's (``system-database.json``), captured from the
-real API.
+``system-health.json``), the Veritabanı page's (``system-database.json``) and Ayarlar →
+Yedekleme's list (``system-backups.json``), captured from the real API.
 
 ``capture_api_samples.py`` calls :func:`capture` on its main site after every other page's
 samples (Wave 4 contract 2.2, 2.5, 2.6), with the capture (the app, its database and data
@@ -43,7 +43,9 @@ What the files hold: ``system.json`` ``summary`` (``GET /system``, the processor
 (``GET /system/health``), ``system-database.json`` ``database`` (``GET /system/database``: the
 daily samples grow about 180 MB a day; the server's version, the database's name, address and
 connections are fixed after the real answer was checked, they differ with every server and
-capture); each with ``errors.forbidden`` (the auditor: ``system.read`` is the
+capture), ``system-backups.json`` ``backups`` (``GET /system/backups``: the Backup task's
+``state/backup/list.json`` of three dumps; no copy is configured on the capture's site) and
+``backups_empty`` (no list yet); each with ``errors.forbidden`` (the auditor: ``system.read`` is the
 administrators' only). Everything the module writes is put back afterwards: the files as they
 were (or removed), their modification times, the ``job_runs`` rows, the measured database sizes
 kept by the app.
@@ -94,6 +96,7 @@ SHAPE_KEYS: dict[str, tuple[frozenset[str], frozenset[str]]] = {
     "system-disk": (frozenset(), frozenset({"role"})),
     "system-health": (frozenset(), frozenset({"name", "task", "last_status"})),
     "system-database": (frozenset(), frozenset({"storage", "role", "state"})),
+    "system-backups": (frozenset(), frozenset()),
 }
 
 API = "/api/v1"
@@ -101,6 +104,7 @@ SUMMARY = f"{API}/system"
 DISK = f"{API}/system/disk"
 HEALTH = f"{API}/system/health"
 DATABASE = f"{API}/system/database"
+BACKUPS = f"{API}/system/backups"
 
 GB = 1_000_000_000
 
@@ -743,6 +747,7 @@ def _capture(
         "database": expect_database(capture.json(admin.get(DATABASE), 200)),
         "errors": {"forbidden": capture.error(auditor.get(DATABASE), 403, "forbidden")},
     }
+    backups = capture_backups(capture, admin, auditor, today)
     layout.system_history.write_text(json.dumps(history(DATA_FLAT, -DATA_SHRINK, today), indent=1))
     usage[DATA.label] = DATA_FLAT.usage
     disk["disk_not_growing"] = capture.json(admin.get(DISK), 200)
@@ -757,6 +762,44 @@ def _capture(
         "system-disk": disk,
         "system-health": health,
         "system-database": database,
+        "system-backups": backups,
+    }
+
+
+#: The dumps of the Backup task's list: the last three nights (01:40 site time), about 1.2 GB.
+BACKUP_SIZES = (1_281_734_656, 1_274_023_936, 1_266_884_608)
+
+
+def capture_backups(capture: Capture, admin: Any, auditor: Any, today: date) -> dict[str, Any]:
+    """``GET /system/backups`` without a list, then with the list of three dumps."""
+    path = capture.layout.state / "backup" / "list.json"
+    path.unlink(missing_ok=True)
+    empty = capture.json(admin.get(BACKUPS), 200)
+    if empty["dumps"] or empty["list_updated"] is not None:
+        raise SystemExit(f"system: backups without a list: {empty}")
+    dumps = []
+    for back, size in enumerate(BACKUP_SIZES, start=1):
+        taken = site_at(today - timedelta(days=back), time(1, 40))
+        dumps.append(
+            {
+                "name": f"arcilogger-{taken:%Y%m%d-%H%M%S}.dump",
+                "taken": isoformat_site(taken, "seconds"),
+                "size": size,
+                "sha256": f"{back:02d}" * 32,
+            }
+        )
+    updated = isoformat_site(site_at(today - timedelta(days=1), time(1, 52, 10)), "seconds")
+    path.write_text(json.dumps({"schema": 1, "updated": updated, "dumps": dumps}))
+    try:
+        listed = capture.json(admin.get(BACKUPS), 200)
+    finally:
+        path.unlink(missing_ok=True)
+    if [d["name"] for d in listed["dumps"]] != [d["name"] for d in dumps]:
+        raise SystemExit(f"system: backups {listed}")
+    return {
+        "backups": listed,
+        "backups_empty": empty,
+        "errors": {"forbidden": capture.error(auditor.get(BACKUPS), 403, "forbidden")},
     }
 
 

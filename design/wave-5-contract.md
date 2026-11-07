@@ -4168,3 +4168,37 @@ and its size after a success). Each reading that fails answers `null` on its own
 entry **Veritabanı** under Yönetim (`/database`, `system.read`), sample `system-database.json`
 (the server facts fixed after the real answer was checked). The area chart got `fitValues` (value
 axis from the data, series not stacked) so a slow growth is visible.
+
+**C5 and C6, as built.** The owner asked for a mirror of the backups "on an external NAS". The
+copy does **not** go into the replica's folder: that folder is often write-once (WORM, the vault's
+evidence copy), and old copies of the backups hold personal data and must be deletable (KVKK);
+`docs/YEDEKLEME.md` already asked for a separate share. So:
+- `[backup] mirror_target` (browser-editable in the `backup` section; `null`: no copy): a UNC share
+  or folder **on the replica's host** (`backup_mirror_other_host` otherwise), never the replica's
+  folder or inside it (`backup_mirror_inside_replica`), only while the replica is on with a target
+  (`backup_mirror_needs_replica`); `backup_mirror_target_invalid` for anything else. Written with
+  the replica's user and its stored password: the password is never offered to another host, and
+  the strict outbound rule `ARCILOGGER Out Replica` (host:445) already covers it. A change probes
+  the share (`backup_mirror` probe: the replica probe's write/read/delete test on the new target;
+  `backup_mirror_test_failed`) when the replica has a user, and sets `task.next_run:Replica`.
+- The Replica task (hourly), after the sealed days and outside `--day`, connects to the mirror
+  target and runs `arcilogger_core.backupmirror.mirror_backups`: every scheduled dump with its
+  sidecar, staged as `.arcilogger-staging\<name>.partial`, read back, renamed only when its SHA-256
+  equals the sidecar's; an existing name is never overwritten; a dump not matching its sidecar is
+  not copied. Once every dump is there, the scheduled dumps the folder no longer keeps are deleted
+  from the share (the NAS keeps what the server keeps); nothing is deleted after a failure or from
+  an empty folder; a refused deletion is counted. Result: `state/backup/mirror.json`
+  (`finished`, `ok`, `copied`, `present`, `pruned`, `prune_refused`, `failed`, `error`; no
+  address, no password); a failure raises `R20-replica` (medium, details `{"part":
+  "backup-mirror"}`).
+- The Backup task writes `state/backup/list.json` after every successful run (`updated`, `dumps`:
+  name, site time, size, the sidecar's SHA-256): the services cannot read the backup folder.
+- `GET /api/v1/system/backups` (`system.read`, not audited): `BackupsInfo` (`enabled`, `folder`,
+  `list_updated`, `dumps`, `mirror_target`, `mirror`). Ayarlar → Yedekleme shows the copy's field
+  with the replica's target, the list with the folder's path ("Yolu kopyala") and the copy's last
+  result; opening the folder or copying a dump to a USB disk is the tray's Backups window (C3).
+
+**C4 (choosing the backup folder from the browser) is not built in this round**: the new folder
+needs its administrators-only rights set by ApplySystem as SYSTEM (`Sync-ArciSystem.ps1`), which
+cannot be tested in this session; the NAS copy covers the "off the server" need. It follows with a
+Windows-tested change; until then `[backup] dir` stays a console setting (locked, `security`).

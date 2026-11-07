@@ -665,6 +665,18 @@ def test_run_prunes_after_a_successful_backup(tmp_path: Path) -> None:
     assert [p.name for p in outcome.pruned.deleted] == [old[1].name, old[2].name]
     assert [b.path for b in list_backups(folder)] == [outcome.file, old[0]]
     assert _backup_alerts(tmp_path) == []  # an ordinary run: no clock alert
+    # list.json: what the folder keeps after the retention, newest first (Wave 5 addendum C).
+    assert outcome.file is not None
+    listed = json.loads(
+        (tmp_path / "data" / "state" / "backup" / "list.json").read_text(encoding="utf-8")
+    )
+    assert listed["updated"] == "2026-10-19T01:40:02+03:00"
+    assert [(d["name"], d["sha256"]) for d in listed["dumps"]] == [
+        (outcome.file.name, outcome.sha256),
+        (old[0].name, None),  # written by hand here: no sidecar
+    ]
+    assert listed["dumps"][0]["size"] == outcome.file.stat().st_size
+    assert listed["dumps"][0]["taken"].startswith("2026-10-19T01:40:02")
 
 
 def test_run_keeps_its_dump_when_the_clock_was_set_back(tmp_path: Path) -> None:

@@ -366,6 +366,9 @@
     "/api/v1/system": [
       "get"
     ],
+    "/api/v1/system/backups": [
+      "get"
+    ],
     "/api/v1/system/database": [
       "get"
     ],
@@ -2465,12 +2468,134 @@
             }
           ],
           "title": "Min Free Gb"
+        },
+        "mirror_target": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Mirror Target"
         }
       },
       "required": [
         "etag"
       ],
       "title": "BackupBody",
+      "type": "object"
+    },
+    "BackupDump": {
+      "description": "A dump of the backup folder (``state/backup/list.json`` of the Backup task).",
+      "properties": {
+        "bytes": {
+          "title": "Bytes",
+          "type": "integer"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "sha256": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Sha256"
+        },
+        "taken": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Taken"
+        }
+      },
+      "required": [
+        "name",
+        "taken",
+        "bytes",
+        "sha256"
+      ],
+      "title": "BackupDump",
+      "type": "object"
+    },
+    "BackupMirrorState": {
+      "description": "The last copy to the backup copy's target (``state/backup/mirror.json``).",
+      "properties": {
+        "copied": {
+          "title": "Copied",
+          "type": "integer"
+        },
+        "error": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Error"
+        },
+        "failed": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Failed",
+          "type": "object"
+        },
+        "finished": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Finished"
+        },
+        "ok": {
+          "title": "Ok",
+          "type": "boolean"
+        },
+        "present": {
+          "title": "Present",
+          "type": "integer"
+        },
+        "prune_refused": {
+          "title": "Prune Refused",
+          "type": "integer"
+        },
+        "pruned": {
+          "title": "Pruned",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "finished",
+        "ok",
+        "copied",
+        "present",
+        "pruned",
+        "prune_refused",
+        "failed",
+        "error"
+      ],
+      "title": "BackupMirrorState",
       "type": "object"
     },
     "BackupSection": {
@@ -2494,6 +2619,17 @@
         "min_free_gb": {
           "title": "Min Free Gb",
           "type": "integer"
+        },
+        "mirror_target": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Mirror Target"
         }
       },
       "required": [
@@ -2501,9 +2637,79 @@
         "keep_daily",
         "keep_weekly",
         "keep_monthly",
-        "min_free_gb"
+        "min_free_gb",
+        "mirror_target"
       ],
       "title": "BackupSection",
+      "type": "object"
+    },
+    "BackupsInfo": {
+      "description": "``GET /system/backups``: Ayarlar → Yedekleme's list (Wave 5 addendum C, C5-C6).",
+      "properties": {
+        "checked_at": {
+          "format": "date-time",
+          "title": "Checked At",
+          "type": "string"
+        },
+        "dumps": {
+          "items": {
+            "$ref": "#/components/schemas/BackupDump"
+          },
+          "title": "Dumps",
+          "type": "array"
+        },
+        "enabled": {
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "folder": {
+          "title": "Folder",
+          "type": "string"
+        },
+        "list_updated": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "List Updated"
+        },
+        "mirror": {
+          "anyOf": [
+            {
+              "$ref": "#/components/schemas/BackupMirrorState"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "mirror_target": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Mirror Target"
+        }
+      },
+      "required": [
+        "checked_at",
+        "enabled",
+        "folder",
+        "list_updated",
+        "dumps",
+        "mirror_target",
+        "mirror"
+      ],
+      "title": "BackupsInfo",
       "type": "object"
     },
     "BlockedRow": {

@@ -968,7 +968,7 @@
     },
     "backup": {
       "title": "Yedekleme",
-      "description": "Veritabanı yedeklerinin saklanması. Yedek klasörü ve araçlar yalnızca sunucu konsolundan değiştirilir.",
+      "description": "Veritabanı yedeklerinin saklanması ve NAS'taki ikinci kopyası. Yedek klasörü ve araçlar yalnızca sunucu konsolundan değiştirilir.",
       "cardTitle": "Yedekleme görevi",
       "cardDescription": "Kaç günlük, haftalık ve aylık yedeğin saklanacağı ve yedek diskinde gereken boş alan.",
       "enabled": "Veritabanı yedeklemesi açık",
@@ -987,10 +987,41 @@
         "min_free_gb": "{{min}}–{{max}} GB. Disk bundan azsa yedekleme yapılmaz ve uyarı oluşur."
       },
       "stateTitle": "Son yedekleme",
-      "stateNote": "Son yedeklemenin ayrıntıları bu sürümde web arayüzünde gösterilmez; başarısız ya da yapılamayan bir yedekleme uyarı olarak görünür.",
+      "stateNote": "Başarısız ya da yapılamayan bir yedekleme uyarı olarak görünür. Son yedeğin zamanı ve boyutu Veritabanı sayfasında da görünür.",
       "noAlerts": "Açık yedekleme uyarısı yok.",
       "alertsLink": "Güvenlik sayfasındaki uyarılar",
-      "stateHidden": "Yedekleme uyarılarını görme yetkiniz yok."
+      "stateHidden": "Yedekleme uyarılarını görme yetkiniz yok.",
+      "mirrorTitle": "Yedeklerin NAS kopyası",
+      "mirrorDescription": "Yedeklerin ikinci kopyası her saat replikanın NAS'ındaki ayrı bir paylaşıma yazılır; NAS, sunucunun tuttuğu yedekleri tutar.",
+      "mirrorField": "NAS paylaşımı",
+      "mirrorHint": "Replikayla aynı NAS'ta ayrı bir paylaşım ya da klasör, örn. \\\\NAS\\arcilogger-yedek. Replikanın kullanıcısıyla yazılır; boş bırakılırsa kopya alınmaz.",
+      "mirrorReplica": "Replika hedefi: {{target}}. Kopya aynı NAS'ta ama replika klasörünün dışında olmalı.",
+      "mirrorNoReplica": "Önce Ayarlar → Replika'da replikayı açın: kopya replikanın NAS'ına, replikanın kullanıcısıyla yazılır.",
+      "mirrorReplicaLink": "Replika ayarları",
+      "mirrorInvalid": "\\\\sunucu\\paylaşım biçiminde bir ağ paylaşımı yazın.",
+      "listTitle": "Yedekler",
+      "listDescription": "Sunucudaki yedek klasöründe tutulan yedekler (her başarılı yedeklemeden sonra güncellenir).",
+      "folder": "Yedek klasörü",
+      "copyPath": "Yolu kopyala",
+      "copied": "Kopyalandı",
+      "noDumps": "Henüz yedek alınmadı.",
+      "listUpdated": "Liste {{time}} tarihinde güncellendi.",
+      "name": "Dosya",
+      "taken": "Zaman",
+      "size": "Boyut",
+      "sha256": "SHA-256",
+      "openNote": "Klasörü açmak ya da bir yedeği USB'ye kopyalamak için sunucuda tepsideki ARCILOGGER simgesinin menüsünden \"Yedekler…\" penceresini kullanın.",
+      "listHidden": "Yedek listesini görme yetkiniz yok.",
+      "mirrorState": {
+        "none": "NAS kopyası kapalı.",
+        "never": "NAS kopyası henüz çalışmadı; replika görevi her saat çalışır.",
+        "ok": "Son kopya {{time}}: {{copied}} yeni, {{present}} zaten vardı.",
+        "pruned": "{{count}} eski kopya NAS'tan silindi.",
+        "pruneRefused": "{{count}} eski kopya NAS'tan silinemedi (paylaşım izin vermedi).",
+        "failed": "Son kopya {{time}} başarısız oldu.",
+        "error": "Neden: {{error}}",
+        "failedItem": "{{name}}: {{why}}"
+      }
     },
     "leaseRebuild": {
       "title": "Kiraları yeniden oluştur",
@@ -3387,7 +3418,8 @@
         "keep_daily": "Saklanan günlük yedek",
         "keep_weekly": "Saklanan haftalık yedek",
         "keep_monthly": "Saklanan aylık yedek",
-        "min_free_gb": "Gereken boş alan (GB)"
+        "min_free_gb": "Gereken boş alan (GB)",
+        "mirror_target": "Yedeklerin NAS kopyası"
       }
     },
     "section": {

@@ -10,7 +10,7 @@
 
 import { usePollingQuery } from './api-hooks';
 import type { SystemHealth } from './system-health-types';
-import type { DatabaseDetails, SystemDisk, SystemSummary } from './system-types';
+import type { BackupsInfo, DatabaseDetails, SystemDisk, SystemSummary } from './system-types';
 
 export const SYSTEM_POLL_MS = 30_000;
 
@@ -19,6 +19,7 @@ export const systemKeys = {
   health: ['system', 'health'] as const,
   disk: ['system', 'disk'] as const,
   database: ['system', 'database'] as const,
+  backups: ['system', 'backups'] as const,
 };
 
 /** `GET /system`: host, drives with their forecast, database, collector, ingest and versions. */
@@ -57,5 +58,15 @@ export function useSystemDatabase() {
     queryKey: systemKeys.database,
     path: '/system/database',
     intervalMs: SYSTEM_POLL_MS,
+  });
+}
+
+/** `GET /system/backups`: the dumps the backup folder keeps and the last copy to the NAS. */
+export function useSystemBackups(enabled = true) {
+  return usePollingQuery<BackupsInfo>({
+    queryKey: systemKeys.backups,
+    path: '/system/backups',
+    intervalMs: SYSTEM_POLL_MS,
+    enabled,
   });
 }

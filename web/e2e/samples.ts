@@ -75,7 +75,12 @@ import type {
 } from '../src/lib/settings-types';
 import type { SourceDetail, SourcesOverview, SourceTail } from '../src/lib/sources-types';
 import type { SystemHealth } from '../src/lib/system-health-types';
-import type { DatabaseDetails, SystemDisk, SystemSummary } from '../src/lib/system-types';
+import type {
+  BackupsInfo,
+  DatabaseDetails,
+  SystemDisk,
+  SystemSummary,
+} from '../src/lib/system-types';
 import type { LicenseSamples } from '../src/test/license-samples';
 
 function load(name: string): unknown {
@@ -542,6 +547,17 @@ export const SYSTEM_DISK = load('system-disk') as {
   meta: SampleMeta;
   disk: SystemDisk;
   disk_not_growing: SystemDisk;
+  errors: Record<string, ErrorSample>;
+};
+
+/**
+ * Ayarlar → Yedekleme's list (`GET /system/backups`, Wave 5 addendum C, C5): the Backup task's
+ * list of three dumps (no NAS copy on the capture's site), the empty list, and the refusal.
+ */
+export const SYSTEM_BACKUPS = load('system-backups') as {
+  meta: SampleMeta;
+  backups: BackupsInfo;
+  backups_empty: BackupsInfo;
   errors: Record<string, ErrorSample>;
 };
 

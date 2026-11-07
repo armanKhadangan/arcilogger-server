@@ -1,5 +1,6 @@
 """``GET /api/v1/system``, ``GET /api/v1/system/disk`` (Wave 4 contract 2.2, 2.5) and
-``GET /api/v1/system/database`` (the Veritabanı page, Wave 5 addendum C, C7).
+``GET /api/v1/system/database`` (the Veritabanı page) and ``GET /api/v1/system/backups``
+(Ayarlar → Yedekleme's list; Wave 5 addendum C, C5-C7).
 
 Both need ``system.read`` (administrators, owner question Q2), belong to 5651 Temel (no licence
 module, so no licence state blocks them) and are not audited: they read the server's own state
@@ -23,8 +24,10 @@ from fastapi import APIRouter, Depends, FastAPI, Request
 
 from arcilogger_api.deps import ConfigDep, DbSession, LayoutDep, TtlCache
 from arcilogger_api.security import CurrentUser, require
+from arcilogger_api.system.backups import backups_info
 from arcilogger_api.system.database import database_details
 from arcilogger_api.system.models import (
+    BackupsInfo,
     DatabaseDetails,
     DatabaseInfo,
     SystemDisk,
@@ -112,3 +115,9 @@ def system_database(
         now=now,
         today=site_day(now),
     )
+
+
+@router.get("/backups")
+def system_backups(_: ReaderDep, layout: LayoutDep, config: ConfigDep) -> BackupsInfo:
+    """The dumps the backup folder keeps and the last copy to the NAS (names, times, sizes)."""
+    return backups_info(config, layout, to_site(utc_now()))

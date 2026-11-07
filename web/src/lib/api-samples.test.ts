@@ -718,6 +718,12 @@ const RULES: Record<string, Record<string, Rule>> = {
     database: 'DatabaseDetails',
     errors,
   },
+  // Yedekleme's list (Wave 5 addendum C, C5): three dumps, and no list yet.
+  'system-backups': {
+    backups: 'BackupsInfo',
+    backups_empty: 'BackupsInfo',
+    errors,
+  },
   // Canlı Durum (Wave 5 contract §6.2 M2) on the golden usage site at 09:02:30: each window, the
   // pseudonymous answer and the refusals.
   activity: {

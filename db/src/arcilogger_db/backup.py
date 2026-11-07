@@ -10,6 +10,9 @@
   9, read by the alert checks); a failed or refused one also raises ``R20-backup``. A successful
   run then applies the retention, which always keeps the dump it has just made (``prune``: the
   dump ``last.json`` names).
+* After a successful run, ``state/backup/list.json`` lists the dumps the folder keeps (name,
+  site time, size, the sidecar's SHA-256) for Ayarlar → Yedekleme (Wave 5 addendum C, C5): the
+  services cannot read the folder itself.
 * **prune** — keeps the newest dump of each of the last ``keep_daily`` days, ``keep_weekly`` ISO
   weeks and ``keep_monthly`` months that have one (counted by periods that have a dump, never by
   the clock: a clock that jumps forward deletes nothing early). It deletes only files named like
@@ -806,7 +809,33 @@ def run_backup(
                 "dir": relative_to_data(config, dumped.folder),
             },
         )
+    write_list_state(layout, dumped.folder, finished=dumped.finished)
     return outcome
+
+
+def list_state_path(layout: Layout) -> Path:
+    """``state/backup/list.json``: the dumps the folder holds (Wave 5 addendum C, C5)."""
+    return layout.state / "backup" / "list.json"
+
+
+def write_list_state(layout: Layout, folder: Path, *, finished: datetime) -> None:
+    """The scheduled dumps of ``folder`` after the run, for Ayarlar → Yedekleme (the services
+    cannot read the backup folder): name, time, size and the SHA-256 the sidecar records. A
+    failure is logged only: the backup itself succeeded."""
+    dumps = [
+        {
+            "name": backup.path.name,
+            "taken": isoformat_site(backup.taken, "seconds"),
+            "size": backup.size,
+            "sha256": (backup.sidecar or {}).get("sha256"),
+        }
+        for backup in list_backups(folder)
+    ]
+    state = {"schema": STATE_SCHEMA, "updated": isoformat_site(finished, "seconds"), "dumps": dumps}
+    try:
+        atomic_write_text(list_state_path(layout), json.dumps(state, ensure_ascii=False) + "\n")
+    except OSError as exc:
+        log.warning("backup list: %s", exc.strerror or exc)
 
 
 def _dump(

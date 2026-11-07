@@ -160,3 +160,34 @@ export interface DatabaseDetails {
   data_drive: DriveInfo | null;
   last_backup: LastBackup | null;
 }
+
+/** A dump of the backup folder (`GET /system/backups`, `state/backup/list.json`). */
+export interface BackupDump {
+  name: string;
+  taken: DateTimeString | null;
+  bytes: number;
+  sha256: string | null;
+}
+
+/** The last copy to the backup copy's target (`state/backup/mirror.json`). */
+export interface BackupMirrorState {
+  finished: DateTimeString | null;
+  ok: boolean;
+  copied: number;
+  present: number;
+  pruned: number;
+  prune_refused: number;
+  failed: Record<string, string>;
+  error: string | null;
+}
+
+/** `GET /system/backups`: Ayarlar → Yedekleme's list (Wave 5 addendum C, C5-C6). */
+export interface BackupsInfo {
+  checked_at: DateTimeString;
+  enabled: boolean;
+  folder: string;
+  list_updated: DateTimeString | null;
+  dumps: BackupDump[];
+  mirror_target: string | null;
+  mirror: BackupMirrorState | null;
+}

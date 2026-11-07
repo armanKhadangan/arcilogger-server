@@ -25,6 +25,7 @@
  *   summary's drives then the same);
  * - `GET /system/health`: the captured services, tasks, jobs and clock;
  * - `GET /system/database`: the captured Veritabanı page (`samples/system-database.json`);
+ * - `GET /system/backups`: Ayarlar → Yedekleme's list (`samples/system-backups.json`);
  * - refusals are the captured bodies (`forbidden`), other paths 404 and other methods 405.
  */
 
@@ -35,7 +36,12 @@ import type { Page, Request, Route } from '@playwright/test';
 import type { ApiErrorBody } from '../src/lib/api-types';
 import type { ComplianceStatus, ConfigBackupOut } from '../src/lib/compliance-types';
 import type { SystemHealth } from '../src/lib/system-health-types';
-import type { DatabaseDetails, SystemDisk, SystemSummary } from '../src/lib/system-types';
+import type {
+  BackupsInfo,
+  DatabaseDetails,
+  SystemDisk,
+  SystemSummary,
+} from '../src/lib/system-types';
 
 import type { MockApi, MockUser, RecordedCall } from './mock-api';
 import type { Answer } from './mock-records';
@@ -44,6 +50,7 @@ import {
   copy,
   type ErrorSample,
   SYSTEM,
+  SYSTEM_BACKUPS,
   SYSTEM_DATABASE,
   SYSTEM_DISK,
   SYSTEM_HEALTH,
@@ -78,6 +85,8 @@ export interface W4Options {
   health?: SystemHealth;
   /** The Veritabanı page (default: the capture's `database`). */
   database?: DatabaseDetails;
+  /** Ayarlar → Yedekleme's list (default: the capture's `backups`). */
+  backups?: BackupsInfo;
 }
 
 export class W4Mock {
@@ -89,6 +98,7 @@ export class W4Mock {
   disk: SystemDisk;
   health: SystemHealth;
   database: DatabaseDetails;
+  backups: BackupsInfo;
   /** Confirmations the mock recorded (each answered 200). */
   confirmations = 0;
   /** Reports the mock served. */
@@ -110,6 +120,7 @@ export class W4Mock {
     if (options.diskNotGrowing && !options.system) this.system.drives = copy(this.disk.drives);
     this.health = options.health ?? copy(SYSTEM_HEALTH.health);
     this.database = options.database ?? copy(SYSTEM_DATABASE.database);
+    this.backups = options.backups ?? copy(SYSTEM_BACKUPS.backups);
   }
 
   async install(page: Page): Promise<void> {
@@ -188,6 +199,8 @@ export class W4Mock {
         return this.only(call, 'GET') ?? this.sistem(call, this.health, SYSTEM_HEALTH.errors);
       case '/system/database':
         return this.only(call, 'GET') ?? this.sistem(call, this.database, SYSTEM_DATABASE.errors);
+      case '/system/backups':
+        return this.only(call, 'GET') ?? this.sistem(call, this.backups, SYSTEM_BACKUPS.errors);
     }
     return this.api.error(404, 'not_found');
   }
@@ -227,7 +240,7 @@ export class W4Mock {
   /** A Sistem answer (`system.read`, administrators only; read fresh, never cached). */
   private sistem(
     call: RecordedCall,
-    payload: SystemSummary | SystemDisk | SystemHealth | DatabaseDetails,
+    payload: SystemSummary | SystemDisk | SystemHealth | DatabaseDetails | BackupsInfo,
     errors: Record<string, ErrorSample>,
   ): Answer {
     const account = this.allowed(call, 'system.read', errors);
