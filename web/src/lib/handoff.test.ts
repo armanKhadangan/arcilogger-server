@@ -192,11 +192,17 @@ describe('a hand-over with a range', () => {
 describe('handoff and the end of a session', () => {
   it('"Çıkış yap" forgets every entry', async () => {
     const user = userEvent.setup();
-    installFetch((request) =>
-      request.path === '/api/v1/auth/me'
-        ? jsonResponse(200, makeMe('admin'))
-        : errorResponse(404, 'not_found'),
-    );
+    // As the server: once signed out, /auth/me answers 401. A mock that still answered 200 sent
+    // the sign-in page on to "/" before the test could see "/login".
+    let signedOut = false;
+    installFetch((request) => {
+      if (request.path === '/api/v1/auth/logout') signedOut = true;
+      if (request.path === '/api/v1/auth/me')
+        return signedOut
+          ? errorResponse(401, 'not_authenticated')
+          : jsonResponse(200, makeMe('admin'));
+      return errorResponse(404, 'not_found');
+    });
     const { router } = renderApp('/search');
     await screen.findByRole('heading', { level: 1, name: 'Arama' });
     handoff.put('/evidence', EXTRACT);
