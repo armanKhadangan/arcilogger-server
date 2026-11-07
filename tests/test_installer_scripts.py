@@ -9260,12 +9260,13 @@ def test_confirm_remove_data_needs_remove_data(engine: str, tmp_path: Path) -> N
     assert _unwrapped("[only with -RemoveData]") in _unwrapped(result.stdout)
 
 
-@pytest.mark.parametrize("case", ["drive-root", "hard-link", "no-data-root", "foreign-config"])
+@pytest.mark.parametrize("case", ["drive-root", "hard-link", "bad-record", "foreign-config"])
 def test_dry_run_uninstall_with_the_data_refuses_before_any_change(
     engine: str, tmp_path: Path, case: str
 ) -> None:
-    """A [backup] dir at a drive root, a link in a data folder (never followed), or a data folder
-    nothing names: the removal stops with 2 before the tasks are paused."""
+    """A [backup] dir at a drive root, a link in a data folder (never followed), a data root record
+    that cannot be used (the data folder is not certain) or a configuration folder with none of
+    the installer's files: the removal stops with 2 before the tasks are paused."""
     bundle = make_fake_bundle(tmp_path)
     write_version(tmp_path / "program" / "ARCILOGGER", "9.9.9", "1" * 64)
     root = "C:\\" if sys.platform == "win32" else "/"
@@ -9277,8 +9278,8 @@ def test_dry_run_uninstall_with_the_data_refuses_before_any_change(
         (data / "vault").mkdir(parents=True)
         os.link(elsewhere, data / "vault" / "linked.txt")
     config = tmp_path / "programdata" / "ARCILOGGER" / "arcilogger.toml"
-    if case == "no-data-root":
-        config.write_text(f'site_name = "{SITE_NAME}"\n', encoding="utf-8")
+    if case == "bad-record":
+        (config.parent / "data-root.txt").write_text("relative/path\n", encoding="utf-8")
     if case == "foreign-config":
         # A mistyped -ProgramDataDir: a folder with none of the installer's files.
         config.unlink()
@@ -9289,7 +9290,7 @@ def test_dry_run_uninstall_with_the_data_refuses_before_any_change(
         bundle,
         "-Uninstall",
         "-RemoveData",
-        data_root=case != "no-data-root",
+        data_root=case != "bad-record",
         incomplete=True,
     )
     assert result.returncode == 2, result.stdout + result.stderr
@@ -9301,7 +9302,7 @@ def test_dry_run_uninstall_with_the_data_refuses_before_any_change(
     expected = {
         "drive-root": "[a drive or share root]",
         "hard-link": "[a link (reparse point or hard link) in a folder to delete",
-        "no-data-root": "[the data folder is not certain: give it with -DataRoot",
+        "bad-record": "[the data folder is not certain: give it with -DataRoot",
         "foreign-config": "[the configuration folder holds none of the installer's files",
     }[case]
     assert _unwrapped(expected) in stdout
