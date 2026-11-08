@@ -487,6 +487,8 @@ $StateDir = Join-Path $ProgramDataDir 'install'
 $StatePath = Join-Path $StateDir 'state.json'
 $FirewallStatePath = Join-Path $StateDir 'firewall-state.json'
 $PowerStatePath = Join-Path $StateDir 'power-state.json'
+# The self-test's rows of this run (0.4.0 P3); the finish page of Setup shows their counts.
+$SelfTestPath = Join-Path $StateDir 'selftest.json'
 # The browser administration (Config.admin_dir; contract 2.2), the Zamane client folder, the
 # secret store's values and the record of the data root every task and service checks the
 # configuration's data_dir against (config.DATA_ROOT_RECORD, written on every run).
@@ -2381,7 +2383,44 @@ function Invoke-HealthCheck {
         $script:Warnings.Add('Caddy root certificate not created')
         Write-ArciWarn ("Caddy kök sertifikası oluşmadı [root certificate missing]: {0}" -f $CaddyRootSource)
     }
+    if (-not (Invoke-SelfTest)) { $healthy = $false }
     if (-not $healthy -and $script:ExitCode -eq 0) { $script:ExitCode = 1 }
+}
+
+function Invoke-SelfTest {
+    <#
+    `arcilogger-core selftest --json` (0.4.0 P3): the configuration, the secret store, the
+    database, the roots, the time-stamp server, the e-mail server and the clock. Its rows are
+    printed, kept in the plan and written to install\selftest.json for the finish page of Setup.
+    A warning or failure ends the run with code 1; it never fails the installation. Returns
+    $true when every row is ok or skipped.
+    #>
+    if (-not (Test-Path -LiteralPath $CoreExe)) { return $true }
+    try {
+        $answer = Invoke-ArciProcess -FilePath $CoreExe -ArgumentList @('--config', $ConfigPath, 'selftest', '--json') -AllowFailure -TimeoutSeconds 300
+        $result = ConvertTo-ArciSelfTestResult -Json $answer.StdOut
+    }
+    catch {
+        $script:Warnings.Add('self-test: ' + $_.Exception.Message)
+        Write-ArciWarn ("Denetim çalışmadı [self-test did not run]: {0}" -f $_.Exception.Message)
+        return $false
+    }
+    Write-ArciInfo 'Denetim [self-test]:'
+    foreach ($row in $result.rows) {
+        $line = '{0,-9} {1} [{2}]' -f $row.id, $row.message_tr, $row.message_en
+        switch ($row.status) {
+            'ok' { Write-ArciInfo ('  TAMAM   ' + $line) }
+            'skip' { Write-ArciInfo ('  ATLANDI ' + $line) }
+            default {
+                Write-ArciWarn ('  {0} {1}' -f $(if ($row.status -eq 'fail') { 'HATA ' } else { 'UYARI' }), $line)
+                $script:Warnings.Add(('self-test {0}: {1}' -f $row.id, $row.message_en))
+            }
+        }
+    }
+    Add-PlanItem -Id 'selftest' -Status $(if ($result.fail -gt 0) { 'fail' } elseif ($result.warn -gt 0) { 'warn' } else { 'ok' }) -Text ("Denetim [self-test]: {0} tamam, {1} uyarı, {2} hata, {3} atlandı" -f $result.ok, $result.warn, $result.fail, $result.skip) -Detail $result.rows
+    try { Write-ArciUtf8File -Path $SelfTestPath -Text ($result | ConvertTo-Json -Depth 4) }
+    catch { Write-ArciWarn ("{0} yazılamadı [not written]: {1}" -f $SelfTestPath, $_.Exception.Message) }
+    return ($result.warn + $result.fail) -eq 0
 }
 
 function Show-NextSteps {
@@ -3396,7 +3435,7 @@ function Invoke-CommonTail {
     # The database services after the migration (and the collector or web again if their early
     # start failed; running services are left alone).
     Invoke-Step 'services.start' 'Hizmetler başlatılıyor [starting services]' { Start-ArciServices }
-    Invoke-Step 'health.check' 'Sağlık denetimi [health check]: hizmetler, API, https://localhost/api/v1/health' {
+    Invoke-Step 'health.check' 'Sağlık denetimi [health check]: hizmetler, API, https://localhost/api/v1/health, denetim [self-test]' {
         Invoke-HealthCheck
         try { Test-JavaForZamane } catch { Write-ArciWarn ("Zamane denetlenemedi [not checked]: {0}" -f $_.Exception.Message) }
     }
@@ -4600,6 +4639,10 @@ try {
         else {
             Stop-Installer 2 'Ön denetim başarısız; hiçbir şey değiştirilmedi [preflight failed, nothing changed].'
         }
+    }
+    # The finish page of Setup reads the self-test of this run only (0.4.0 P3).
+    if (-not $script:IsDryRun -and ($Mode -eq 'install' -or $Mode -eq 'upgrade')) {
+        Remove-Item -LiteralPath $SelfTestPath -Force -ErrorAction SilentlyContinue
     }
     switch ($Mode) {
         'install' { Invoke-Install }

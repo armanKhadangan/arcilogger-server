@@ -16,6 +16,12 @@ versions follow [Semantic Versioning](https://semver.org/).
   known refusals of Google and Microsoft 365 a "Ne yapmalı" line: an app password, the SMTP relay,
   SMTP AUTH for the mailbox, "Send As" for the sender. Before, the page said only "Deneme
   e-postası gönderilemedi."
+- **A self-test at the end of setup** (`arcilogger-core selftest`, also by hand): the
+  configuration, the secret store, the database, the root certificates, the time-stamp server,
+  the e-mail server (sign-in only, nothing is sent) and the clock, each ok, warning or failure,
+  in Turkish and English. It changes nothing and uses no credit. The setup prints the rows, and
+  its finish page says how many were ok and how many need attention; a warning ends the setup
+  with code 1, never with a failure.
 - **The daily stamp tests are a setting** (Ayarlar → Zaman damgası → kontör adımı, default 10, at
   most 20); `admin\policy.json` can still lower it (`tsa_test_per_day`, 20 in new installations).
 

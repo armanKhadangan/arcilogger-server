@@ -67,6 +67,7 @@ from arcilogger_core.config import TURKTRUST_ROOT_FINGERPRINTS, ApiConfig
 from arcilogger_core.fsutil import atomic_write_bytes
 from arcilogger_core.rawlog import format_line
 from arcilogger_core.secretstore import KAMUSM_CUSTOMER, KAMUSM_PASSWORD, SecretStore
+from arcilogger_core.selftest import ROWS as SELFTEST_ROWS
 
 REPO = Path(__file__).parents[1]
 WINDOWS = REPO / "deploy" / "windows"
@@ -11665,6 +11666,14 @@ def test_real_install_upgrade_rollback_and_uninstall(tmp_path: Path) -> None:
         shipped = program_data / "kamusm-roots" / TURKTRUST_H7_FILE
         assert shipped.is_file(), last()
         assert sha256_bytes(shipped.read_bytes()) in TURKTRUST_ROOT_FINGERPRINTS, last()
+        # 0.4.0 P3: the setup ran the self-test and kept its rows for Setup's finish page.
+        checked = read_json(program_data / "install" / "selftest.json")
+        assert [row["id"] for row in checked["rows"]] == list(SELFTEST_ROWS), (checked, last())
+        statuses = {row["id"]: row["status"] for row in checked["rows"]}
+        assert statuses["config"] == "ok", (statuses, last())
+        assert statuses["roots"] in ("ok", "skip"), (checked, last())
+        if E2E_DB:
+            assert statuses["database"] == "ok", (checked, last())
         # A syslog message reaches the raw spool through the service and its NTFS rights.
         marker = f"arcilogger-e2e-{uuid.uuid4().hex}"
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sender:
@@ -13122,6 +13131,95 @@ if ($Packages) {
 }
 [System.IO.File]::WriteAllText($OutputPath, (ConvertTo-Json -InputObject $out -Depth 4))
 """
+
+
+_SELFTEST_SCRIPT = r"""
+param([string]$ModulePath, [string]$InputPath, [string]$OutputPath)
+$ErrorActionPreference = 'Stop'
+Import-Module $ModulePath -Force
+$json = [System.IO.File]::ReadAllText($InputPath)
+$result = ConvertTo-ArciSelfTestResult -Json $json
+Write-ArciUtf8File -Path $OutputPath -Text ($result | ConvertTo-Json -Depth 4)
+$refused = $null
+try { [void](ConvertTo-ArciSelfTestResult -Json '{"rows":[{"id":"x","status":"maybe"}]}') }
+catch { $refused = $_.Exception.Message }
+Write-Host ('refused: ' + $refused)
+"""
+
+
+def test_the_self_test_result_is_counted_and_keeps_only_its_texts(
+    engine: str, tmp_path: Path
+) -> None:
+    """0.4.0 P3: the setup keeps the counts first (the finish page of Setup reads them from the
+    top of install\\selftest.json) and a row's id, status and fixed texts only: a field the
+    command might add later never reaches the file."""
+    secret = "Ornek-Gizli-Deger-55"
+    rows = [
+        {"id": "config", "status": "ok", "message_tr": "Yapılandırma okundu.", "message_en": "ok"},
+        {"id": "secrets", "status": "warn", "message_tr": "Kayıtlı değil", "message_en": "x"},
+        {"id": "database", "status": "fail", "message_tr": "Veritabanı", "message_en": "y"},
+        {"id": "smtp", "status": "skip", "message_tr": "kapalı", "message_en": "off",
+         "detail": secret},
+    ]  # fmt: skip
+    source = tmp_path / "selftest-in.json"
+    source.write_text(json.dumps({"rows": rows}, ensure_ascii=False), encoding="utf-8")
+    output = tmp_path / "selftest.json"
+    script = write_script(tmp_path / "selftest.ps1", _SELFTEST_SCRIPT)
+    result = run_powershell(
+        engine,
+        script,
+        "-ModulePath",
+        str(MODULE),
+        "-InputPath",
+        str(source),
+        "-OutputPath",
+        str(output),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "refused: selftest: unknown status maybe" in result.stdout
+    raw = output.read_bytes()
+    assert not raw.startswith(BOM)
+    text = raw.decode("utf-8")
+    assert secret not in text
+    report = json.loads(text)
+    assert (report["ok"], report["warn"], report["fail"], report["skip"]) == (1, 1, 1, 1)
+    assert [set(row) for row in report["rows"]] == [
+        {"id", "status", "message_tr", "message_en"}
+    ] * 4
+    assert report["rows"][0]["message_tr"] == "Yapılandırma okundu."
+    # what SelfTestCount of ARCILOGGER.iss reads: the first "key": number of the file
+    for key, value in (("ok", 1), ("warn", 1), ("fail", 1)):
+        found = re.search(rf'"{key}":\s*(\d+)', text)
+        assert found is not None
+        assert int(found.group(1)) == value
+        assert found.start() < text.index('"rows"')
+
+
+def test_the_setup_runs_the_self_test_and_shows_its_counts() -> None:
+    """0.4.0 P3: the health check ends with `selftest --json`; its warnings end the run with
+    code 1 and never fail it; the run removes an earlier result first; Setup's finish page names
+    the counts in both languages."""
+    script = INSTALL_SCRIPT.read_text(encoding="utf-8-sig")
+    health = script[script.index("function Invoke-HealthCheck {") :]
+    health = health[: health.index("\nfunction ")]
+    assert "if (-not (Invoke-SelfTest)) { $healthy = $false }" in health
+    selftest = script[script.index("function Invoke-SelfTest {") :]
+    selftest = selftest[: selftest.index("\nfunction ")]
+    assert "@('--config', $ConfigPath, 'selftest', '--json')" in selftest
+    assert "-AllowFailure" in selftest
+    assert "ConvertTo-ArciSelfTestResult -Json $answer.StdOut" in selftest
+    assert "Write-ArciUtf8File -Path $SelfTestPath" in selftest
+    assert "Stop-Installer" not in selftest  # never a failure of the installation
+    assert "$SelfTestPath = Join-Path $StateDir 'selftest.json'" in script
+    main = script[script.rindex("    switch ($Mode) {") - 400 :]
+    assert "Remove-Item -LiteralPath $SelfTestPath" in main
+    iss = _iss()
+    page = _pascal(iss, "procedure CurPageChanged")
+    assert "wpFinished" in page
+    assert "LoadStringFromFile(SelfTestFile(), Content)" in page
+    assert "ExpandConstant('{commonappdata}\\ARCILOGGER\\install\\selftest.json')" in iss
+    assert "turkish.SelfTestLine=Denetim: %1 tamam, %2 uyarı/eksik" in iss
+    assert "english.SelfTestLine=Self-test: %1 ok, %2 warnings/missing" in iss
 
 
 def test_the_installer_runs_the_venv_launchers_as_python(engine: str, tmp_path: Path) -> None:

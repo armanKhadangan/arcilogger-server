@@ -356,6 +356,41 @@ function Write-ArciUtf8File {
     [System.IO.File]::WriteAllText($Path, $Text, (New-Object System.Text.UTF8Encoding -ArgumentList $false))
 }
 
+function ConvertTo-ArciSelfTestResult {
+    <#
+    .SYNOPSIS
+        The rows of `arcilogger-core selftest --json` (0.4.0 P3) with their counts:
+        {ok, warn, fail, skip, rows}. The setup prints them and keeps them in install\selftest.json
+        for the finish page; a row is its id, status and fixed texts only (the command removes
+        every stored secret from a cause).
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory = $true)][AllowEmptyString()][string]$Json)
+    $report = $Json | ConvertFrom-Json
+    if ($null -eq $report -or $null -eq $report.rows) { throw 'selftest: no rows in its answer' }
+    $rows = @(foreach ($row in @($report.rows)) {
+            [pscustomobject][ordered]@{
+                id         = [string]$row.id
+                status     = [string]$row.status
+                message_tr = [string]$row.message_tr
+                message_en = [string]$row.message_en
+            }
+        })
+    $counts = [ordered]@{ ok = 0; warn = 0; fail = 0; skip = 0 }
+    foreach ($row in $rows) {
+        if (-not $counts.Contains($row.status)) { throw ('selftest: unknown status ' + $row.status) }
+        $counts[$row.status] = [int]$counts[$row.status] + 1
+    }
+    # The counts come first: the finish page of Setup reads them from the top of the file.
+    [pscustomobject][ordered]@{
+        ok   = $counts['ok']
+        warn = $counts['warn']
+        fail = $counts['fail']
+        skip = $counts['skip']
+        rows = $rows
+    }
+}
+
 function Read-ArciSha256Sums {
     <#
     .SYNOPSIS
@@ -4031,7 +4066,7 @@ Export-ModuleMember -Function @(
     'Get-ArciServiceNames', 'Get-ArciWellKnownSid', 'Write-ArciStep', 'Write-ArciInfo', 'Write-ArciWarn',
     'Test-ArciWindows', 'Test-ArciAdministrator', 'Test-ArciInteractiveConsole', 'Get-ArciWindowsPowerShellModulePath', 'Initialize-ArciModulePath',
     'Get-ArciServiceSid', 'New-ArciRandomPassword', 'Rename-ArciFolder',
-    'ConvertTo-ArciScramVerifier', 'Get-ArciFileSha256', 'Write-ArciUtf8File', 'Read-ArciSha256Sums',
+    'ConvertTo-ArciScramVerifier', 'Get-ArciFileSha256', 'Write-ArciUtf8File', 'ConvertTo-ArciSelfTestResult', 'Read-ArciSha256Sums',
     'Test-ArciBundle', 'Resolve-ArciComponentSource', 'Expand-ArciTemplate', 'ConvertTo-ArciArgumentString', 'Invoke-ArciProcess',
     'Invoke-ArciExe', 'Get-ArciConfiguredDataDir', 'Read-ArciDataRootRecord', 'Resolve-ArciDataRoot', 'Read-ArciTomlFile', 'Get-ArciConfigValue', 'Get-ArciApiEndpoint', 'Test-ArciProxyTrust', 'Get-ArciSourceAddresses', 'Get-ArciSourceTables',
     'ConvertTo-ArciTomlString', 'Get-ArciTomlString', 'Set-ArciTomlString', 'Get-ArciSiteNameProblem', 'Get-ArciTimeServerProblem',

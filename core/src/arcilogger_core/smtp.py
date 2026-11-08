@@ -20,6 +20,7 @@ import html
 import re
 import smtplib
 import ssl
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 from email.message import EmailMessage
@@ -270,6 +271,19 @@ class SmtpSender:
         temporary (the e-mail is retried); a 5xx reply to the sender, the recipient or the
         message is permanent.
         """
+        self._guarded(lambda: self._send(message, recipient))
+
+    def check(self) -> None:
+        """Connect, TLS as configured, EHLO and, with a user name, AUTH; then QUIT: nothing is
+        sent (the self-test, 0.4.0 P3). :class:`SmtpSendError` as :meth:`send` raises it."""
+
+        def session() -> None:
+            with self._open():
+                pass
+
+        self._guarded(session)
+
+    def _guarded(self, run: Callable[[], None]) -> None:
         settings = self.config
         if settings.host is None or settings.from_address is None:
             raise SmtpSendError("[smtp] host / from_address are not set", permanent=False)
@@ -279,7 +293,7 @@ class SmtpSender:
                 permanent=False,
             )
         try:
-            self._send(message, recipient)
+            run()
         except (smtplib.SMTPException, OSError) as exc:
             code = _code(exc)
             raise SmtpSendError(
@@ -294,7 +308,8 @@ class SmtpSender:
                 permanent=False,
             ) from None
 
-    def _send(self, message: EmailMessage, recipient: str) -> None:
+    def _open(self) -> smtplib.SMTP:
+        """A connection past TLS and AUTH; leaving its ``with`` block sends QUIT."""
         settings = self.config
         host, port, timeout = str(settings.host), settings.port, settings.timeout_seconds
         client: smtplib.SMTP
@@ -302,11 +317,19 @@ class SmtpSender:
             client = smtplib.SMTP_SSL(host, port, timeout=timeout, context=self._context())
         else:
             client = smtplib.SMTP(host, port, timeout=timeout)
-        with client:
+        try:
             client.ehlo()
             if settings.security == "starttls":
                 client.starttls(context=self._context())
                 client.ehlo()
             if settings.username:
                 client.login(settings.username, self.password or "")
+        except BaseException:
+            client.close()
+            raise
+        return client
+
+    def _send(self, message: EmailMessage, recipient: str) -> None:
+        settings = self.config
+        with self._open() as client:
             client.send_message(message, from_addr=str(settings.from_address), to_addrs=[recipient])

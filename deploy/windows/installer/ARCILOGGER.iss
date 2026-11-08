@@ -67,6 +67,8 @@ turkish.InstallerFailed=ARCILOGGER kurulumu %1 koduyla bitti. Ayrıntılar Power
 english.InstallerFailed=The ARCILOGGER installer ended with code %1. See the PowerShell window and the install log: %%TEMP%%\ARCILOGGER-*.log (with a copy in the logs folder of the data folder once that exists; the window shows the path at the end). Fix the problem and run the setup again.
 turkish.InstallerWarnings=ARCILOGGER kuruldu, ancak uyarılar var (kod 1). PowerShell penceresindeki sağlık denetimi sonuçlarını okuyun.
 english.InstallerWarnings=ARCILOGGER is installed with warnings (code 1). Read the health check results in the PowerShell window.
+turkish.SelfTestLine=Denetim: %1 tamam, %2 uyarı/eksik — ayrıntılar PowerShell penceresinde ve günlükte.
+english.SelfTestLine=Self-test: %1 ok, %2 warnings/missing — details in the PowerShell window and the log.
 turkish.InstallerNotRecorded=ARCILOGGER kurulumu %1 koduyla bitti, ancak bu paket kurulmadı: %2 bu paketin parmak izini göstermiyor. PowerShell betiği ilk satırından önce durmuş olabilir (sözdizimi ya da parametre hatası). Betiği yönetici konsolundan çalıştırıp hatayı okuyun (docs\KURULUM.md, bölüm 15).
 english.InstallerNotRecorded=The ARCILOGGER installer ended with code %1, but this bundle was not installed: %2 does not name its fingerprint. The PowerShell script may have stopped before its first line (a syntax or parameter error). Run it from an administrator console and read the error (docs\INSTALL.md, section 15).
 turkish.LicenseFileMissing=Lisans dosyası bulunamadı: "%1" (/LICENSEFILE). Dosyanın yolunu tırnak içinde verin, ör. /LICENSEFILE="C:\Kurulum\ARCI-L-....lic". Kurulum hiçbir şey değiştirmeden kapanıyor.
@@ -264,6 +266,52 @@ procedure CurStepChanged(CurStep: TSetupStep);
 begin
   if CurStep = ssPostInstall then
     RunArciInstaller();
+end;
+
+function SelfTestFile(): String;
+begin
+  Result := ExpandConstant('{commonappdata}\ARCILOGGER\install\selftest.json');
+end;
+
+{ The number after "Key": in the self-test's result file (Install-Arcilogger.ps1 writes the
+  counts first, as ConvertTo-Json does with any spacing); -1 when it is not there. }
+function SelfTestCount(const Content, Key: String): Integer;
+var
+  At, I: Integer;
+  Digits: String;
+begin
+  Result := -1;
+  At := Pos('"' + Key + '":', Content);
+  if At = 0 then
+    Exit;
+  I := At + Length(Key) + 3;
+  while (I <= Length(Content)) and ((Content[I] = ' ') or (Content[I] = #9)) do
+    I := I + 1;
+  Digits := '';
+  while (I <= Length(Content)) and (Content[I] >= '0') and (Content[I] <= '9') do
+  begin
+    Digits := Digits + Content[I];
+    I := I + 1;
+  end;
+  Result := StrToIntDef(Digits, -1);
+end;
+
+{ The finish page names the self-test's counts (0.4.0 P3) when this run wrote them; the script
+  removes the file of an earlier run before it starts. }
+procedure CurPageChanged(CurPageID: Integer);
+var
+  Content: AnsiString;
+  Ok, Warn, Fail: Integer;
+begin
+  if (CurPageID <> wpFinished) or not LoadStringFromFile(SelfTestFile(), Content) then
+    Exit;
+  Ok := SelfTestCount(Content, 'ok');
+  Warn := SelfTestCount(Content, 'warn');
+  Fail := SelfTestCount(Content, 'fail');
+  if (Ok < 0) or (Warn < 0) or (Fail < 0) then
+    Exit;
+  WizardForm.FinishedLabel.Caption := WizardForm.FinishedLabel.Caption + #13#10#13#10 +
+    FmtMessage(CustomMessage('SelfTestLine'), [IntToStr(Ok), IntToStr(Warn + Fail)]);
 end;
 
 { Install-Arcilogger.ps1 -Uninstall (with -RemoveData when Extra says so) in a visible window. }
