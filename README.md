@@ -85,11 +85,11 @@ departmanlar ve sunucu ayarları kurulumdan sonra web arayüzünde tanımlanır
 
 ## Durum
 
-Bu sürüm (0.3.1): MVP (M2/M3'ün temel parçaları, kimlik doğrulama ve denetim kaydı (M6'dan),
+Bu sürüm (0.3.2): MVP (M2/M3'ün temel parçaları, kimlik doğrulama ve denetim kaydı (M6'dan),
 Windows kurulum programı (M7'den)), ardından eklenenler (Wave 0–5), 0.3.0'ın eklentileri
 (masaüstü simgesi ve bildirim alanı, Veritabanı sayfası, yedeklerin NAS kopyası, verilerle
-birlikte kaldırma) ve 0.3.1'in TÜRKTRUST düzeltmesi (H7 kökü ürünle gelir). Tablo her aşamanın
-bugünkü durumunu gösterir ([CHANGELOG.md](CHANGELOG.md), "0.3.1").
+birlikte kaldırma) ve 0.3.1/0.3.2'nin TÜRKTRUST düzeltmeleri (H7 kökü ürünle gelir). Tablo her
+aşamanın bugünkü durumunu gösterir ([CHANGELOG.md](CHANGELOG.md), "0.3.2").
 
 | Aşama | Kapsam | Durum |
 |---|---|---|

@@ -5,6 +5,18 @@ versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.3.2] — 2026-11-08
+
+Release version 0.3.2 (`v0.3.2`): a fix of the TÜRKTRUST page. Upgrading from 0.3.0 or 0.3.1: run
+the new `ARCILOGGER-Setup-0.3.2.exe`; it upgrades in place and keeps the data.
+
+### Fixed
+
+- **Ayarlar → Zaman damgası showed "Müşteri bilgileri: Eksik" with TÜRKTRUST although its
+  username and password were stored.** The step also asked for Kamu SM's customer number and
+  password, which a TÜRKTRUST site never enters. It now follows only TÜRKTRUST's two values. Only
+  the badge was wrong: sealing and the stamp test already used TÜRKTRUST's values.
+
 ## [0.3.1] — 2026-11-08
 
 Release version 0.3.1 (`v0.3.1`): ARCILOGGER can seal with TÜRKTRUST. Upgrading from 0.3.0: run

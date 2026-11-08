@@ -1,6 +1,6 @@
 # ARCILOGGER — Mimari / Architecture
 
-> Durum: sürüm 0.3.1 (MVP, Wave 0–5, 0.3.0'ın eklentileri ve 0.3.1'in TÜRKTRUST düzeltmesi) — M1 (toplayıcı, mühürleme, doğrulama, replika, saklama) ve M2/M3'ün
+> Durum: sürüm 0.3.2 (MVP, Wave 0–5, 0.3.0'ın eklentileri ve 0.3.1/0.3.2'nin TÜRKTRUST düzeltmeleri) — M1 (toplayıcı, mühürleme, doğrulama, replika, saklama) ve M2/M3'ün
 > temel parçaları: FortiGate/MikroTik ayrıştırıcılarıyla ingest, kira zaman çizelgesi, 5651 sorgusu
 > ve resmi PDF rapor, kanıt paketi; ayrıca kimlik doğrulama/TOTP/denetim kaydı (M6'dan) ve Windows
 > kurulum programı (M7'den). Bu belge hedef mimariyi anlatır; her bölümün hangi aşamada (M1–M7)

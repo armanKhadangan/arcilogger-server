@@ -18,7 +18,7 @@ Modules available so far:
 
 from typing import Final
 
-__version__ = "0.3.1"
+__version__ = "0.3.2"
 
 #: Release day of this version, bumped together with ``__version__``. The licence's
 #: ``maintenance_until`` is compared with it (a version released after the maintenance period
