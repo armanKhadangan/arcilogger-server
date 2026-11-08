@@ -487,6 +487,9 @@ def test_strict_outbound_mode_syncs_the_firewall_for_a_new_server(
         ({"credit_alert_threshold": "500"}, "tsa.credit_alert_threshold"),
         ({"timeout_seconds": 4}, "tsa.timeout_seconds"),
         ({"timeout_seconds": 601}, "tsa.timeout_seconds"),
+        ({"tests_per_day": -1}, "tsa.tests_per_day"),
+        ({"tests_per_day": 21}, "tsa.tests_per_day"),
+        ({"tests_per_day": True}, "tsa.tests_per_day"),
     ],
 )
 def test_tsa_numbers_out_of_range(
@@ -501,6 +504,17 @@ def test_the_credit_threshold_needs_no_reauthentication(root: Path, config: Conf
     assert check.ok
     assert not check.reauth
     assert check.changes == {"tsa.credit_alert_threshold": {"old": 500, "new": 200}}
+
+
+@pytest.mark.parametrize("value", [0, 3, 20])
+def test_the_daily_stamp_tests_are_a_plain_setting(root: Path, config: Config, value: int) -> None:
+    """0.4.0 D5: ``tsa.tests_per_day`` (0-20, default 10) is edited from the browser without a
+    password confirmation; the policy's ``tsa_test_per_day`` stays the ceiling (API)."""
+    assert config.tsa.tests_per_day == 10
+    check = validate_section("tsa", config, {"tests_per_day": value}, context(root))
+    assert check.ok
+    assert not check.reauth
+    assert check.changes == {"tsa.tests_per_day": {"old": 10, "new": value}}
 
 
 JRE = "C:/Program Files/Eclipse Adoptium/jre-8.0.412.8-hotspot/bin/java.exe"

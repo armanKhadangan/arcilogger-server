@@ -216,6 +216,9 @@ class TsaConfig(_Model):
     #: How the credit is read from the client output — verify on the test server.
     credit_regex: str = r"(?i)(?:kontör|kontor|credit)\D{0,40}?(\d+)"
     credit_alert_threshold: int = Field(default=500, ge=0)
+    #: Stamp tests a site day from the browser (0.4.0 D5); the policy's ``tsa_test_per_day``
+    #: stays the administrator's ceiling, and the smaller of the two applies.
+    tests_per_day: int = Field(default=10, ge=0, le=20)
     #: Directory with the pinned root certificates (PEM/DER) the verifier trusts.
     roots_dir: Path | None = None
     #: SHA-256 fingerprints of the Kamu SM root certificates whose stamps count as "legal grade"

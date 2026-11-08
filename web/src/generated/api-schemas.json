@@ -17052,6 +17052,17 @@
           ],
           "title": "Server"
         },
+        "tests_per_day": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Tests Per Day"
+        },
         "timeout_seconds": {
           "anyOf": [
             {
@@ -17181,6 +17192,10 @@
           ],
           "title": "Server"
         },
+        "tests_per_day": {
+          "title": "Tests Per Day",
+          "type": "integer"
+        },
         "timeout_seconds": {
           "title": "Timeout Seconds",
           "type": "integer"
@@ -17194,6 +17209,7 @@
         "server",
         "credit_alert_threshold",
         "timeout_seconds",
+        "tests_per_day",
         "allow_plain_http",
         "renew_before_days",
         "crl_urls",

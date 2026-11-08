@@ -482,7 +482,10 @@ class AdminPolicy(_Model):
     #: Folders whose programs the tasks may run (``tsa.java``, ``pg_dump``, ``pg_restore``).
     executable_roots: tuple[Text, ...] = ("C:\\Program Files", "C:\\Program Files (x86)")
     trusted_executables: tuple[TrustedExecutable, ...] = ()
-    tsa_test_per_day: int = Field(default=3, ge=0, le=20)
+    #: The ceiling of the browser's stamp tests a site day (0.4.0 D5: ``tsa.tests_per_day`` is
+    #: the site's choice below it); 20 for a policy written by 0.4.0 or later, an older file
+    #: keeps its value.
+    tsa_test_per_day: int = Field(default=20, ge=0, le=20)
     written_at: AwareDatetime
     written_by: Text
 

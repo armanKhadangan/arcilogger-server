@@ -2601,7 +2601,7 @@ function New-ArciAdminPolicy {
         [ValidateRange(1, 168)][int]$JarHoldHours = 24,
         [string[]]$ExecutableRoot = $script:DefaultExecutableRoots,
         [AllowEmptyCollection()][object[]]$TrustedExecutable = @(),
-        [ValidateRange(0, 20)][int]$TsaTestPerDay = 3,
+        [ValidateRange(0, 20)][int]$TsaTestPerDay = 20,
         [string]$WrittenAt,
         [string]$WrittenBy = 'installer'
     )
@@ -2661,7 +2661,7 @@ function Read-ArciAdminPolicy {
         Exists = $false; Valid = $false; Problem = $null; Sha256 = $null
         Enabled = $false; SourceNetworks = $script:DefaultSourceNetworks; MinPrefixV4 = 16; MaxSources = 500
         HoldHours = 0; JarHoldHours = 24; ExecutableRoots = $script:DefaultExecutableRoots; TrustedExecutables = @()
-        TsaTestPerDay = 3; WrittenAt = $null; WrittenBy = $null
+        TsaTestPerDay = 20; WrittenAt = $null; WrittenBy = $null
     }
     if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
         $policy.Problem = 'policy.json yok [missing]'
@@ -2710,7 +2710,7 @@ function Read-ArciAdminPolicy {
         $maxSources = & $integer 'max_sources' 1 5000 500
         $holdHours = & $integer 'hold_hours' 0 168 0
         $jarHoldHours = & $integer 'jar_hold_hours' 1 168 24
-        $tsaTests = & $integer 'tsa_test_per_day' 0 20 3
+        $tsaTests = & $integer 'tsa_test_per_day' 0 20 20
     }
     catch { return (& $fail $_.Exception.Message) }
     $networks = $script:DefaultSourceNetworks

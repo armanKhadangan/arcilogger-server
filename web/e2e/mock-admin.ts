@@ -1727,6 +1727,9 @@ export class AdminMock {
       problems.push(problem('tsa.credit_alert_threshold', 'config_invalid'));
     const timeout = body.timeout_seconds ?? current.timeout_seconds;
     if (!integer(timeout, 5, 600)) problems.push(problem('tsa.timeout_seconds', 'config_invalid'));
+    // 0.4.0 D5: the site's daily stamp tests, 0–20.
+    const testsPerDay = body.tests_per_day ?? current.tests_per_day;
+    if (!integer(testsPerDay, 0, 20)) problems.push(problem('tsa.tests_per_day', 'config_invalid'));
     // Contract §2.5 and C10, as config.py checks them.
     const renew = body.renew_before_days ?? current.renew_before_days;
     if (!integer(renew, 30, 730)) problems.push(problem('tsa.renew_before_days', 'config_invalid'));
@@ -1763,6 +1766,7 @@ export class AdminMock {
     candidate.java = java;
     candidate.credit_alert_threshold = threshold;
     candidate.timeout_seconds = timeout;
+    candidate.tests_per_day = testsPerDay;
     candidate.renew_before_days = renew;
     candidate.crl_max_age_days = maxAge;
     candidate.crl_urls = [...crlUrls];
@@ -1809,6 +1813,7 @@ export class AdminMock {
       server: tsa.server,
       credit_alert_threshold: tsa.credit_alert_threshold,
       timeout_seconds: tsa.timeout_seconds,
+      tests_per_day: tsa.tests_per_day,
       allow_plain_http: tsa.allow_plain_http,
       renew_before_days: tsa.renew_before_days,
       crl_urls: tsa.crl_urls,
@@ -1820,7 +1825,10 @@ export class AdminMock {
       ...secretChanges,
     };
     const reauth = Object.keys(changes).some(
-      (path) => path !== 'tsa.credit_alert_threshold' && path !== 'tsa.timeout_seconds',
+      (path) =>
+        path !== 'tsa.credit_alert_threshold' &&
+        path !== 'tsa.timeout_seconds' &&
+        path !== 'tsa.tests_per_day',
     );
     const warnings: string[] = [];
     if (server === 'production' && !production) {
@@ -1990,7 +1998,8 @@ export class AdminMock {
     const body = call.body as TsaTestBody;
     if (body.confirm_credit !== true) return this.reject('tsa_test_confirm_required');
     if (this.agent === 'disabled') return this.reject('admin_disabled');
-    // One every 5 minutes, then `policy.tsa_test_per_day` a site day (WP4-3).
+    // One every 5 minutes, then `tsa.tests_per_day` a site day, at most the policy's
+    // `tsa_test_per_day` (WP4-3, 0.4.0 D5).
     const last = this.lastAction.get('action.tsa_test');
     if (last !== undefined && Date.now() - last < 5 * 60_000)
       return this.limited(
@@ -2002,7 +2011,8 @@ export class AdminMock {
       (item) =>
         item.out.kind === 'action.tsa_test' && siteDay(new Date(item.out.created_at)) === today,
     ).length;
-    if (done >= this.config().policy.tsa_test_per_day) {
+    const perDay = Math.min(this.sections.tsa.tests_per_day, this.config().policy.tsa_test_per_day);
+    if (done >= perDay) {
       const midnight = Date.parse(`${today}T00:00:00+03:00`) + 86_400_000;
       return this.limited('tsa_test_limit', Math.ceil((midnight - this.now().getTime()) / 1000));
     }

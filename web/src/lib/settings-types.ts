@@ -188,6 +188,11 @@ export interface TsaSection {
   legal_grade?: boolean;
   credit_alert_threshold: number;
   timeout_seconds: number;
+  /**
+   * Stamp tests a site day from the browser (0.4.0 D5, 0–20); the policy's `tsa_test_per_day`
+   * caps it.
+   */
+  tests_per_day: number;
   /** TÜRKTRUST over plain HTTP is allowed (the password then travels in clear text). */
   allow_plain_http: boolean;
   renew_before_days: number;
@@ -695,6 +700,7 @@ export interface TsaBody {
   server?: string | null;
   credit_alert_threshold?: number | null;
   timeout_seconds?: number | null;
+  tests_per_day?: number | null;
   /** `turktrust-http` needs it, with `confirm`. */
   allow_plain_http?: boolean | null;
   renew_before_days?: number | null;

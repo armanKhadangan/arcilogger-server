@@ -1538,7 +1538,7 @@ row's state stands. Texts: `admin_channel.texts(code)` (the API's `TEXTS`, then
 | `POST /admin/config/sources` | `sources.manage` | `{etag, source: SourceIn}` → 202 |
 | `PUT /admin/config/sources/{name}` | `sources.manage`; re-auth to switch one off | `{etag, source: SourceIn}` (the name cannot change: 422 `source_rename_not_allowed`) → 202 |
 | `DELETE /admin/config/sources/{name}?etag=&confirm=<name>` | `sources.manage`; re-auth | → 202; 422 `source_confirm_mismatch` |
-| `POST /admin/actions/tsa-test` | `settings.manage` | `{confirm_credit: true}` (else 422 `tsa_test_confirm_required`) → 202 (`action.tsa_test`); 429 `admin_rate_limited` within 5 min, `tsa_test_limit` after `policy.tsa_test_per_day` per site day |
+| `POST /admin/actions/tsa-test` | `settings.manage` | `{confirm_credit: true}` (else 422 `tsa_test_confirm_required`) → 202 (`action.tsa_test`); 429 `admin_rate_limited` within 5 min, `tsa_test_limit` after `min(tsa.tests_per_day, policy.tsa_test_per_day)` per site day (0.4.0 D5) |
 | `POST /admin/actions/replica-test` | `settings.manage` | `{}` → 202 (`action.replica_test`, `{ok, message}`); 429 `admin_rate_limited` within a minute |
 | `POST /admin/actions/test-email` | `settings.manage` | `{to}` → 202 (`worker.test_email`, `{ok, to, smtp_code, error_text}`, the address masked); 422 `test_email_recipient_not_allowed`, 409 `smtp_not_configured`, 429 `admin_rate_limited` after five an hour |
 | `POST /admin/actions/lease-rebuild` | `settings.manage` | `{from, to}` → 202 (`worker.lease_rebuild`, `{done_days, total_days, failed_days}`); 422 `lease_rebuild_range` |

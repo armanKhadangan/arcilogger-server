@@ -11644,6 +11644,8 @@ def test_real_install_upgrade_rollback_and_uninstall(tmp_path: Path) -> None:
         policy = parse_document(AdminPolicy, (program_data / "admin" / "policy.json").read_bytes())
         assert policy.enabled is True, last()
         assert ",".join(policy.source_networks) == E2E_SOURCE_NETWORKS, last()
+        # 0.4.0 D5: a policy written now caps the browser's stamp tests at 20 (was 3).
+        assert policy.tsa_test_per_day == 20, last()
         recorded = (program_data / "data-root.txt").read_text(encoding="utf-8").strip()
         assert Path(recorded) == data, (recorded, last())
         assert {"ARCILOGGER Syslog UDP", "ARCILOGGER HTTPS"} <= set(state["rules"]), last()

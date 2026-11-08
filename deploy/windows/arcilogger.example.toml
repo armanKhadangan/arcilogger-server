@@ -100,6 +100,7 @@ java = ["C:/Program Files/Eclipse Adoptium/jre-8/bin/java.exe"]
 zamane_jar = "C:/ProgramData/ARCILOGGER/zamane/tss-client-console-3.1.33.jar"
 zamane_verify_flag = "-CC"
 credit_alert_threshold = 500
+tests_per_day = 10              # stamp tests a day from the browser (0-20); admin\policy.json caps it
 roots_dir = "C:/ProgramData/ARCILOGGER/kamusm-roots"
 # SHA-256 fingerprints of the Kamu SM roots, compared with Kamu SM's published values; a day is
 # shown as legal grade only when its stamp chains to one of them (empty: no day is).

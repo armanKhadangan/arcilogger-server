@@ -14,7 +14,13 @@ import {
   type EvidenceForm,
   type ServerChoice,
 } from './kamusm-model';
-import { CredentialsStep, EvidenceFields, ProductionStep, TsaRefusal } from './kamusm-steps';
+import {
+  CreditStep,
+  CredentialsStep,
+  EvidenceFields,
+  ProductionStep,
+  TsaRefusal,
+} from './kamusm-steps';
 
 /*
  * Ayarlar → Zaman damgası, the server choice (Wave 5 contract 2.3.2, 2.4): Kamu SM's test and
@@ -32,6 +38,7 @@ function tsa(overrides: Partial<TsaSection> = {}): TsaSection {
     server: 'test',
     credit_alert_threshold: 500,
     timeout_seconds: 60,
+    tests_per_day: 10,
     allow_plain_http: false,
     renew_before_days: 180,
     crl_urls: [],
@@ -556,5 +563,35 @@ describe('Ayarlar → Zaman damgası: re-stamping and revocation lists (Wave 5 c
     expect(screen.getByLabelText('Re-stamping window (days)')).toHaveValue('180');
     expect(screen.getByTestId('tsa-crl-note')).toHaveTextContent('Verify on site');
     expect(screen.getByText(/at most 20 addresses/)).toBeInTheDocument();
+  });
+});
+
+describe('Ayarlar → Zaman damgası: the daily stamp tests in the credit step (0.4.0 D5)', () => {
+  const FORM = { java: null, threshold: '500', timeout: '60', testsPerDay: '10' };
+
+  it('edits the value and names the policy ceiling only when it is lower', async () => {
+    const seen: unknown[] = [];
+    const { rerender } = render(
+      <CreditStep
+        form={FORM}
+        disabled={false}
+        errors={{}}
+        ceiling={3}
+        onChange={(next) => seen.push(next)}
+      />,
+    );
+    const field = screen.getByLabelText('Günlük damga testi sayısı');
+    expect(field).toHaveValue('10');
+    expect(screen.getByTestId('tests-per-day-ceiling')).toHaveTextContent(
+      'Sunucu politikası günde en çok 3 teste izin veriyor',
+    );
+    await userEvent.type(field, '1');
+    expect(seen).toEqual([{ testsPerDay: '101' }]);
+    rerender(
+      <CreditStep form={FORM} disabled={false} errors={{}} ceiling={20} onChange={() => {}} />,
+    );
+    expect(screen.queryByTestId('tests-per-day-ceiling')).not.toBeInTheDocument();
+    rerender(<CreditStep form={FORM} disabled={false} errors={{}} onChange={() => {}} />);
+    expect(screen.queryByTestId('tests-per-day-ceiling')).not.toBeInTheDocument();
   });
 });

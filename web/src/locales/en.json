@@ -750,7 +750,11 @@
         "threshold": "Credit alert threshold",
         "thresholdHint": "0–1,000,000. An alert is raised when the remaining credits drop below it.",
         "timeout": "Stamp request timeout (s)",
-        "timeoutHint": "5–600 seconds."
+        "timeoutHint": "5–600 seconds.",
+        "testsPerDay": "Stamp tests per day",
+        "testsPerDayHint": "0–20. Each stamp test uses 1 credit; tests are at least 5 minutes apart.",
+        "testsPerDayCeiling_one": "The server policy allows at most {{count}} test a day; for more, an administrator raises tsa_test_per_day in admin\\policy.json.",
+        "testsPerDayCeiling_other": "The server policy allows at most {{count}} tests a day; for more, an administrator raises tsa_test_per_day in admin\\policy.json."
       },
       "seal": {
         "title": "Sealing",

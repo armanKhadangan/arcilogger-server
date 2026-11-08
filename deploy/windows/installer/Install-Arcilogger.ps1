@@ -1898,7 +1898,7 @@ function Resolve-AdminPolicyChoice {
         MinPrefixV4        = (& $kept 'MinPrefixV4' 16)
         MaxSources         = (& $kept 'MaxSources' 500)
         ExecutableRoots    = @($roots | ForEach-Object { [string]$_ })
-        TsaTestPerDay      = (& $kept 'TsaTestPerDay' 3)
+        TsaTestPerDay      = (& $kept 'TsaTestPerDay' 20)
         TrustedExecutables = @($trusted | Where-Object { $null -ne $_ })
     }
 }
