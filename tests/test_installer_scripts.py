@@ -63,7 +63,7 @@ from arcilogger_core.admin.contract import (
     SystemStatus,
     parse_document,
 )
-from arcilogger_core.config import ApiConfig
+from arcilogger_core.config import TURKTRUST_ROOT_FINGERPRINTS, ApiConfig
 from arcilogger_core.fsutil import atomic_write_bytes
 from arcilogger_core.rawlog import format_line
 from arcilogger_core.secretstore import KAMUSM_CUSTOMER, KAMUSM_PASSWORD, SecretStore
@@ -73,6 +73,8 @@ WINDOWS = REPO / "deploy" / "windows"
 INSTALLER = WINDOWS / "installer"
 SERVICES = WINDOWS / "services"
 CADDYFILE = WINDOWS / "caddy" / "Caddyfile"
+#: TÜRKTRUST's H7 root, shipped in the bundle's roots\ and installed into kamusm-roots\ (0.3.1).
+TURKTRUST_H7_FILE = "TURKTRUST_Elektronik_Sertifika_Hizmet_Saglayicisi_h7.crt"
 COMPONENTS = INSTALLER / "components.json"
 MODULE = INSTALLER / "ArciInstall.psm1"
 INSTALL_SCRIPT = INSTALLER / "Install-Arcilogger.ps1"
@@ -11654,6 +11656,11 @@ def test_real_install_upgrade_rollback_and_uninstall(tmp_path: Path) -> None:
             for entry in firewall_state["disabled_rules"]
         }
         assert not disabled & set(state["rdp_rules"]), (disabled, state["rdp_rules"], last())
+        # TÜRKTRUST's H7 root ships with the product (0.3.1): the file TÜRKTRUST publishes, in the
+        # roots folder, its fingerprint one the core counts as a legal root.
+        shipped = program_data / "kamusm-roots" / TURKTRUST_H7_FILE
+        assert shipped.is_file(), last()
+        assert sha256_bytes(shipped.read_bytes()) in TURKTRUST_ROOT_FINGERPRINTS, last()
         # A syslog message reaches the raw spool through the service and its NTFS rights.
         marker = f"arcilogger-e2e-{uuid.uuid4().hex}"
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sender:

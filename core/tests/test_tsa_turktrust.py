@@ -38,10 +38,12 @@ from arcilogger_core.execpolicy import TrustAnchors
 from arcilogger_core.layout import Layout
 from arcilogger_core.secretstore import TURKTRUST_PASSWORD, TURKTRUST_USERNAME, SecretStore
 from arcilogger_core.tsa import make_provider, url_with_port
+from arcilogger_core.tsa.asn1 import TimeStampResp
 from arcilogger_core.tsa.base import (
     TsaConfigurationError,
     TsaError,
     TsaNoCreditError,
+    TsaRejectedError,
     TsaUnavailableError,
 )
 from arcilogger_core.tsa.mock import MockFailure, MockTsa, MockTsaProvider
@@ -117,11 +119,13 @@ def _tls_files(folder: Path) -> tuple[Path, ssl.SSLContext]:
 @dataclass
 class TsaServer:
     """The mock TSA behind HTTP(S) and HTTP Basic authentication. ``status`` other than 200 is
-    answered instead of a stamp; every request's ``Authorization`` header is recorded."""
+    answered instead of a stamp, as is ``answer`` (with 200); every request's ``Authorization``
+    header is recorded."""
 
     tsa: MockTsa
     tls: ssl.SSLContext | None = None
     status: int = 200
+    answer: bytes | None = None
     authorizations: list[str | None] = field(default_factory=list)
 
     def __post_init__(self) -> None:
@@ -143,7 +147,7 @@ class TsaServer:
                     self.send_header("Content-Length", "0")
                     self.end_headers()
                     return
-                answer = outer.tsa.respond(body)
+                answer = outer.answer if outer.answer is not None else outer.tsa.respond(body)
                 self.send_response(200)
                 self.send_header("Content-Type", "application/timestamp-reply")
                 self.send_header("Content-Length", str(len(answer)))
@@ -346,6 +350,33 @@ def test_a_credit_word_rejection_is_no_credit(
     with pytest.raises(TsaNoCreditError, match="credit") as raised:
         _provider(secure.url).stamp(_day(tmp_path))
     _no_password(str(raised.value))
+
+
+def test_a_rejection_without_a_reason_is_a_credentials_problem(
+    secure: TsaServer, tmp_path: Path
+) -> None:
+    """T2 (seen on 2026-11-08): TÜRKTRUST answers a wrong password with HTTP 200 and a
+    rejection that gives no reason; the real answer, not retried."""
+    secure.answer = (
+        Path(__file__).parent / "data" / "turktrust" / "wrong-password.tsr"
+    ).read_bytes()
+    with pytest.raises(TsaConfigurationError, match="credentials") as raised:
+        _provider(secure.url).stamp(_day(tmp_path))
+    assert raised.value.retryable is False
+    assert "failInfo: bad_alg, bad_request, bit 1" in str(raised.value)
+    _no_password(str(raised.value))
+
+
+def test_a_rejection_that_gives_a_reason_stays_a_rejection(
+    secure: TsaServer, tmp_path: Path
+) -> None:
+    secure.answer = TimeStampResp(
+        {"status": {"status": "rejection", "status_string": ["sunucu meşgul"]}}
+    ).dump()
+    with pytest.raises(TsaRejectedError, match="sunucu meşgul") as raised:
+        _provider(secure.url).stamp(_day(tmp_path))
+    assert raised.value.retryable is True
+    assert raised.value.texts == ("sunucu meşgul",)
 
 
 def test_the_server_certificate_is_verified(

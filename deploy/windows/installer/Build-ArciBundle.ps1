@@ -313,6 +313,8 @@ Copy-Tree (Join-Path $Windows 'desktop') (Join-Path $stage 'desktop') '*.xml'
 Copy-Tree (Join-Path $Windows 'desktop\icons') (Join-Path $stage 'desktop\icons') '*.ico'
 Copy-Tree (Join-Path $Windows 'services') (Join-Path $stage 'services') '*.xml'
 Copy-Tree (Join-Path $Windows 'caddy') (Join-Path $stage 'caddy') 'Caddyfile'
+# Root certificates shipped with the product (TÜRKTRUST's H7), as the provider publishes them.
+Copy-Tree (Join-Path $Windows 'roots') (Join-Path $stage 'roots') '*.crt'
 [void](New-Item -ItemType Directory -Path (Join-Path $stage 'config') -Force)
 Copy-Item -LiteralPath (Join-Path $Windows 'arcilogger.example.toml') -Destination (Join-Path $stage 'config\arcilogger.example.toml') -Force
 # Every Markdown document of docs\ with its subfolders (adr\, legal\): the operator documents link

@@ -18,10 +18,11 @@ import os
 import sys
 import tomllib
 import unicodedata
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path, PureWindowsPath
-from typing import Literal
+from typing import Any, Literal
 from urllib.parse import urlparse, urlsplit
 
 from pydantic import (
@@ -46,6 +47,16 @@ KAMUSM_TEST_HOST = "tzd.kamusm.gov.tr"
 #: TÜRKTRUST's time-stamp server (contract T1: the host is from TÜRKTRUST's e-mail, the path is
 #: to be confirmed on site).
 TURKTRUST_PRODUCTION_HOST = "zd.turktrust.com.tr"
+#: The roots TÜRKTRUST's time stamps chain to, shipped with the product (product owner's
+#: decision of 2026-11-08: the TÜRKTRUST root is built in). "TÜRKTRUST Elektronik Sertifika Hizmet
+#: Sağlayıcısı H7" (2020-03-05 to 2030-03-03): SHA-256 of the file on TÜRKTRUST's page "Kök
+#: Sertifikaları Kurulumu ve İptal Listeleri", the root of the stamp the production server gave
+#: a test account on 2026-11-08 (docs/turktrust.md, field results). With ``provider = "turktrust"``
+#: they count as ``legal_root_fingerprints`` without being listed; the installer puts the file
+#: into ``roots_dir``.
+TURKTRUST_ROOT_FINGERPRINTS: tuple[str, ...] = (
+    "9af399d1773a43c6f5c81831443ec5d6d2ce6a9c9e61dcad232dc1005443d413",
+)
 
 
 class _Model(BaseModel):
@@ -275,6 +286,18 @@ class TsaConfig(_Model):
             raise ValueError("provider turktrust needs an https:// url")
         return self
 
+    @model_validator(mode="before")
+    @classmethod
+    def _turktrust_roots(cls, data: Any) -> Any:
+        """``provider = "turktrust"`` trusts TÜRKTRUST's built-in roots as legal roots
+        (:data:`TURKTRUST_ROOT_FINGERPRINTS`); the file's own list is kept as it is."""
+        if not isinstance(data, Mapping) or data.get("provider") != "turktrust":
+            return data
+        listed = data.get("legal_root_fingerprints", ())
+        if not isinstance(listed, (list, tuple)):
+            return data  # the field validator refuses it
+        return {**data, "legal_root_fingerprints": (*listed, *TURKTRUST_ROOT_FINGERPRINTS)}
+
     @field_validator("legal_root_fingerprints")
     @classmethod
     def _fingerprints(cls, values: tuple[str, ...]) -> tuple[str, ...]:
@@ -284,7 +307,7 @@ class TsaConfig(_Model):
             if len(text) != 64 or any(c not in "0123456789abcdef" for c in text):
                 raise ValueError(f"not a SHA-256 fingerprint: {value!r}")
             normalized.append(text)
-        return tuple(normalized)
+        return tuple(dict.fromkeys(normalized))
 
     @property
     def host(self) -> str:
