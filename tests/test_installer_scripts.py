@@ -13373,7 +13373,7 @@ def test_the_self_test_result_is_counted_and_keeps_only_its_texts(
     """0.4.0 P3: the setup keeps the counts first (the finish page of Setup reads them from the
     top of install\\selftest.json) and a row's id, status and fixed texts only: a field the
     command might add later never reaches the file."""
-    secret = "Ornek-Gizli-Deger-55"
+    secret = "Ornek-Gizli-Deger-55"  # gitleaks:allow (fake value that must not reach the file)
     rows = [
         {"id": "config", "status": "ok", "message_tr": "Yapılandırma okundu.", "message_en": "ok"},
         {"id": "secrets", "status": "warn", "message_tr": "Kayıtlı değil", "message_en": "x"},
