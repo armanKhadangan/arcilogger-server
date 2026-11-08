@@ -5,6 +5,24 @@ versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.3.3] — 2026-11-08
+
+Release version 0.3.3 (`v0.3.3`): setup works where Windows' application control is on.
+Upgrading from 0.3.0, 0.3.1 or a failed 0.3.2: run the new `ARCILOGGER-Setup-0.3.3.exe`; it
+upgrades in place and keeps the data.
+
+### Fixed
+
+- **The upgrade to 0.3.2 stopped at "secret init" on a server with Windows' application control
+  (Smart App Control or WDAC) on**: "An Application Control policy has blocked this file". The
+  installer ran `arcilogger-core.exe`, a launcher pip writes unsigned during the installation;
+  the policy refused it, the upgrade was rolled back and the previous version kept running.
+  Setup now runs these commands (`secret`, the database upgrade, licence and setup-token steps)
+  as the venv's own `python.exe -P -m arcilogger_<name>`, the signed interpreter the services
+  and the scheduled tasks already use. The console commands that setup prints still name the
+  launchers; where the policy blocks them, run `python.exe -m arcilogger_core …` from the same
+  `venv\Scripts` folder instead.
+
 ## [0.3.2] — 2026-11-08
 
 Release version 0.3.2 (`v0.3.2`): a fix of the TÜRKTRUST page. Upgrading from 0.3.0 or 0.3.1: run
