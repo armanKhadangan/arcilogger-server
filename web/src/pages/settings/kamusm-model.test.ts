@@ -595,8 +595,8 @@ describe('Ayarlar → Zaman damgası: the server choice and TÜRKTRUST (Wave 5 c
     expect(text(LOCALES.tr, 'settings.kamusm.title')).toBe('Zaman damgası');
     expect(text(LOCALES.tr, 'settings.kamusm.titles.zamane')).toBe('Kamu SM zaman damgası');
     expect(text(LOCALES.tr, 'settings.kamusm.titles.turktrust')).toBe('TÜRKTRUST zaman damgası');
-    // The "sahada doğrula" note names T1 (the path), T2 (an empty balance) and T5 (port 80)
-    // without a URL: host names only.
+    // The "sahada doğrula" note names T1 (the path, confirmed), T2 (an empty balance, still
+    // unconfirmed) and T5 (port 80) without a URL: host names only.
     for (const locale of Object.values(LOCALES)) {
       const note = String(text(locale, 'settings.kamusm.turktrust.note.body'));
       expect(note).toContain('zd.turktrust.com.tr');

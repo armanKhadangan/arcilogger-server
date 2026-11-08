@@ -85,7 +85,7 @@
         "plainHttp": "Over plain HTTP the TÜRKTRUST username and password cross the network unencrypted, in clear text. Choose it only if HTTPS cannot be used, and switch back to HTTPS as soon as you can.",
         "note": {
           "title": "Verify on site (sahada doğrula)",
-          "body": "Some of TÜRKTRUST's behaviour is not confirmed by this installation; check it with the first stamp test. The host is zd.turktrust.com.tr; the path of the address is unknown, by default /. If TÜRKTRUST gives another path, write it into [tsa] url in arcilogger.toml on the server console. The answer for an empty balance is unknown; a rejection whose status text contains a credit word counts as no credit. Plain HTTP uses port 80, HTTPS port 443. Details: turktrust.md section 2."
+          "body": "TÜRKTRUST's behaviour was checked with a test account on 8 November 2026: the host is zd.turktrust.com.tr, the path of the address is / (a stamp was taken over HTTPS); a wrong username or password gets a rejection without a reason. Not confirmed yet: the answer for an empty balance; a rejection whose status text contains a credit word counts as no credit. If TÜRKTRUST gives another path, write it into [tsa] url in arcilogger.toml on the server console. Plain HTTP uses port 80, HTTPS port 443. Details: turktrust.md section 2."
         },
         "causes": {
           "credentials": "The TÜRKTRUST username or password is not stored."

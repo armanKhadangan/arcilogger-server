@@ -17,6 +17,12 @@ the new `ARCILOGGER-Setup-0.3.2.exe`; it upgrades in place and keeps the data.
   password, which a TÜRKTRUST site never enters. It now follows only TÜRKTRUST's two values. Only
   the badge was wrong: sealing and the stamp test already used TÜRKTRUST's values.
 
+### Changed
+
+- The "Sahada doğrula" note on the TÜRKTRUST page says what the test account confirmed on
+  2026-11-08 (the address path `/` over HTTPS, the answer to a wrong password) and that only the
+  answer for an empty balance is still unconfirmed.
+
 ## [0.3.1] — 2026-11-08
 
 Release version 0.3.1 (`v0.3.1`): ARCILOGGER can seal with TÜRKTRUST. Upgrading from 0.3.0: run
