@@ -143,7 +143,9 @@ export function stepStatus(step: StepId, tsa: TsaSection, tested: boolean): Step
         ? ['turktrust.username', 'turktrust.password']
         : ['kamusm.customer', 'kamusm.password'];
       const set = names.every((name) => secretMeta(tsa, name)?.set ?? false);
-      return set && !missing.has('credentials') ? 'ok' : 'missing';
+      // `readiness` is what Kamu SM's production server still needs: its `credentials` are
+      // Kamu SM's customer number and password, which a TÜRKTRUST site never stores.
+      return set && (turktrust || !missing.has('credentials')) ? 'ok' : 'missing';
     }
     case 'test':
       return tested ? 'ok' : 'optional';

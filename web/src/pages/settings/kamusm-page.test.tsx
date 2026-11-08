@@ -67,7 +67,8 @@ const TURKTRUST_SITE = tsa({
     'turktrust.username': { set: true, changed_at: null, changed_by: 'web:tolga' },
     'turktrust.password': { set: true, changed_at: null, changed_by: 'web:tolga' },
   },
-  readiness: { production: false, missing: ['zamane_jar', 'java'] },
+  // As the API reports it: Kamu SM production's readiness, Kamu SM's credentials not stored.
+  readiness: { production: false, missing: ['credentials', 'zamane_jar', 'java'] },
 });
 
 /** A Kamu SM site whose TÜRKTRUST credentials are stored (a later switch needs nothing typed). */
