@@ -31,6 +31,7 @@ import {
   CRL_URLS_MAX,
   RENEW_BEFORE_DAYS,
   STEPS,
+  TESTS_PER_DAY,
   TURKTRUST_KEPT,
   TURKTRUST_TEXTS,
   causeKey,
@@ -40,6 +41,7 @@ import {
   isStep,
   providerText,
   stepStatus,
+  testsPerDay,
   tsaBody,
   toTurktrust,
   tsaForm,
@@ -70,7 +72,7 @@ import {
 } from './kamusm-steps';
 import { RootsStep, ZamaneStep } from './kamusm-uploads';
 
-const EMPTY: TsaForm = { java: null, threshold: '500', timeout: '60' };
+const EMPTY: TsaForm = { java: null, threshold: '500', timeout: '60', testsPerDay: '10' };
 const KEPT: Credentials = {
   customer: SECRET_KEPT,
   password: SECRET_KEPT,
@@ -82,6 +84,7 @@ type TsaField =
   | 'java'
   | 'threshold'
   | 'timeout'
+  | 'testsPerDay'
   | 'customer'
   | 'password'
   | 'turktrustUsername'
@@ -98,6 +101,7 @@ const PATHS: Record<TsaField, string[]> = {
   java: ['java', 'tsa.java'],
   threshold: ['credit_alert_threshold', 'tsa.credit_alert_threshold'],
   timeout: ['timeout_seconds', 'tsa.timeout_seconds'],
+  testsPerDay: ['tests_per_day', 'tsa.tests_per_day'],
   customer: ['customer', 'kamusm.customer'],
   password: ['password', 'kamusm.password'],
   turktrustUsername: ['turktrust_username', 'turktrust.username'],
@@ -111,6 +115,7 @@ const BOUNDS: Record<TsaField, Record<string, number>> = {
   java: {},
   threshold: { min: 0, max: 1_000_000 },
   timeout: { min: 5, max: 600 },
+  testsPerDay: TESTS_PER_DAY,
   customer: {},
   password: {},
   turktrustUsername: {},
@@ -374,7 +379,7 @@ export function KamusmPage() {
           <TestStep
             tsa={tsaSection}
             writable={section.writable}
-            perDay={policy?.tsa_test_per_day ?? 0}
+            perDay={testsPerDay(tsaSection, policy?.tsa_test_per_day)}
           />
         );
       case 'production':
@@ -411,7 +416,12 @@ export function KamusmPage() {
             <CreditStep
               form={values}
               disabled={locked}
-              errors={{ threshold: message('threshold'), timeout: message('timeout') }}
+              errors={{
+                threshold: message('threshold'),
+                timeout: message('timeout'),
+                testsPerDay: message('testsPerDay'),
+              }}
+              ceiling={policy?.tsa_test_per_day}
               onChange={change}
             />
             {values.evidence ? (

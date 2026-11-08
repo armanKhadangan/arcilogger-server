@@ -127,7 +127,14 @@ EDITABLE: Final[Mapping[str, Editable]] = MappingProxyType(
             "network.https_proxy",
         ),
         **_paths("tsa", "server", True, "tsa.provider", "tsa.url", "tsa.port"),
-        **_paths("tsa", "value", False, "tsa.credit_alert_threshold", "tsa.timeout_seconds"),
+        **_paths(
+            "tsa",
+            "value",
+            False,
+            "tsa.credit_alert_threshold",
+            "tsa.timeout_seconds",
+            "tsa.tests_per_day",
+        ),
         **_paths(
             "tsa",
             "value",
@@ -1175,6 +1182,8 @@ def _tsa(run: _Run) -> None:
         run.value("tsa.timeout_seconds"), 5, 600
     ):
         run.error("config_invalid", "tsa.timeout_seconds")
+    if run.changed("tsa.tests_per_day") and not _integer(run.value("tsa.tests_per_day"), 0, 20):
+        run.error("config_invalid", "tsa.tests_per_day")
     if run.changed("tsa.renew_before_days") and not _integer(
         run.value("tsa.renew_before_days"), 30, 730
     ):
@@ -1205,7 +1214,7 @@ def _tsa(run: _Run) -> None:
     sensitive = [
         path
         for path in [*run.set_paths, *run.derived]
-        if path not in ("tsa.credit_alert_threshold", "tsa.timeout_seconds")
+        if path not in ("tsa.credit_alert_threshold", "tsa.timeout_seconds", "tsa.tests_per_day")
     ]
     if sensitive or credentials or run.roots_added or run.stage_jar:
         run.reauth = True
@@ -1625,6 +1634,7 @@ def _body_tsa(body: _Body, data: Mapping[str, Any]) -> None:
     for key in (
         "credit_alert_threshold",
         "timeout_seconds",
+        "tests_per_day",
         "allow_plain_http",
         "renew_before_days",
         "crl_urls",
@@ -1856,8 +1866,9 @@ def validate_section(
     * ``general``: ``site_name``, ``clock`` {``ntp_server``, ``fallback_server``,
       ``alert_offset_ms``};
     * ``tsa``: ``server`` (``test``/``production``), ``credit_alert_threshold``,
-      ``timeout_seconds``, ``java``, ``customer``, ``password``, ``clear_credentials``,
-      ``confirm`` (production to test), ``root`` {``upload_id``, ``legal``, ``confirmed``},
+      ``timeout_seconds``, ``tests_per_day``, ``java``, ``customer``, ``password``,
+      ``clear_credentials``, ``confirm`` (production to test), ``root`` {``upload_id``,
+      ``legal``, ``confirmed``},
       ``legal_root`` {``sha256``, ``confirmed``}, ``zamane`` {``upload_id``, ``expected_sha256``};
     * ``smtp``: ``enabled``, ``host``, ``port``, ``security``, ``username``, ``from_address``,
       ``timeout_seconds``, ``password``, ``clear_password``, ``test_to``, ``ca`` {``upload_id``},

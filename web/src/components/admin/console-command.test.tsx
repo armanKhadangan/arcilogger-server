@@ -38,6 +38,7 @@ function tsa(staged: string): TsaSection {
     server: 'test',
     credit_alert_threshold: 500,
     timeout_seconds: 60,
+    tests_per_day: 10,
     allow_plain_http: false,
     renew_before_days: 180,
     crl_urls: [],

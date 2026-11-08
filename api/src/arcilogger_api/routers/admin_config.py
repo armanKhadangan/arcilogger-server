@@ -170,6 +170,9 @@ class TsaSection(BaseModel):
     legal_grade: bool = False
     credit_alert_threshold: int
     timeout_seconds: int
+    #: Stamp tests a site day from the browser (0.4.0 D5); the policy's ``tsa_test_per_day``
+    #: (``policy`` in this answer) caps it.
+    tests_per_day: int
     #: TÜRKTRUST over plain HTTP is allowed (its password then travels in clear text).
     allow_plain_http: bool
     #: Re-stamping: a token whose TSA certificate expires within this many days is renewed.
@@ -440,6 +443,7 @@ def _tsa(
         legal_grade=tsa.legal_grade,
         credit_alert_threshold=tsa.credit_alert_threshold,
         timeout_seconds=tsa.timeout_seconds,
+        tests_per_day=tsa.tests_per_day,
         allow_plain_http=tsa.allow_plain_http,
         renew_before_days=tsa.renew_before_days,
         crl_urls=list(tsa.crl_urls),
@@ -1020,6 +1024,8 @@ class TsaBody(Body):
     server: str | None = None
     credit_alert_threshold: int | None = None
     timeout_seconds: int | None = None
+    #: 0 to 20 (``config_invalid``); the effective limit is also capped by the policy.
+    tests_per_day: int | None = None
     #: TÜRKTRUST over plain HTTP (the password then travels in clear text; re-authentication).
     allow_plain_http: bool | None = None
     renew_before_days: int | None = None

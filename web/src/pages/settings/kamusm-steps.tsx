@@ -768,11 +768,18 @@ export function CreditStep({
   onChange,
   disabled,
   errors,
+  ceiling,
 }: {
   form: TsaForm;
   onChange: (form: Partial<TsaForm>) => void;
   disabled: boolean;
-  errors: { threshold?: string | undefined; timeout?: string | undefined };
+  errors: {
+    threshold?: string | undefined;
+    timeout?: string | undefined;
+    testsPerDay?: string | undefined;
+  };
+  /** The policy's `tsa_test_per_day` (the administrator's ceiling), when the server reports it. */
+  ceiling?: number | undefined;
 }) {
   const { t } = useTranslation();
   const id = useId();
@@ -804,6 +811,24 @@ export function CreditStep({
           onChange({ timeout });
         }}
       />
+      <TextField
+        id={`${id}-testsPerDay`}
+        label={t('settings.kamusm.credit.testsPerDay')}
+        hint={t('settings.kamusm.credit.testsPerDayHint')}
+        value={form.testsPerDay}
+        inputMode="numeric"
+        inputClassName="w-40"
+        disabled={disabled}
+        error={errors.testsPerDay}
+        onChange={(testsPerDay) => {
+          onChange({ testsPerDay });
+        }}
+      />
+      {ceiling !== undefined && Number(form.testsPerDay) > ceiling ? (
+        <p className="self-end text-13 text-muted-strong" data-testid="tests-per-day-ceiling">
+          {t('settings.kamusm.credit.testsPerDayCeiling', { count: ceiling })}
+        </p>
+      ) : null}
     </div>
   );
 }

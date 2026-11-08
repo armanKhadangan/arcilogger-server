@@ -7,8 +7,9 @@ change of the configuration (202 with ``status_url``; :mod:`arcilogger_api.admin
 * ``POST /admin/actions/tsa-test`` ``{"confirm_credit": true}`` — "Damga testi": one real time
   stamp from the configured server, verified (``action.tsa_test``, run by the Requests task).
   It uses one Kamu SM credit, so the body must say so (422 ``tsa_test_confirm_required``); one
-  every 5 minutes (429 ``admin_rate_limited``) and ``policy.tsa_test_per_day`` per site day (429
-  ``tsa_test_limit``). The result is the JSON of ``arcilogger-core tsa-test`` without the token.
+  every 5 minutes (429 ``admin_rate_limited``) and ``tsa.tests_per_day`` per site day, at most the
+  policy's ``tsa_test_per_day`` (429 ``tsa_test_limit``; 0.4.0 D5). The result is the JSON of
+  ``arcilogger-core tsa-test`` without the token.
 * ``POST /admin/actions/replica-test`` ``{}`` — "Replika testi": the Requests task connects to
   the share as the Replica task does (``action.replica_test``); one a minute.
 * ``POST /admin/actions/test-email`` ``{"to"}`` — "Test e-postası" through ``[smtp]``, sent by
@@ -73,7 +74,7 @@ def tsa_test(
     channel.check_count(
         db,
         "action.tsa_test",
-        limit=channel.policy.policy.tsa_test_per_day,
+        limit=min(channel.files.config.tsa.tests_per_day, channel.policy.policy.tsa_test_per_day),
         since=start,
         until=end,
         code="tsa_test_limit",

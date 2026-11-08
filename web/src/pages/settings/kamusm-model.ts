@@ -210,6 +210,8 @@ export interface TsaForm {
   java: string | null;
   threshold: string;
   timeout: string;
+  /** `tsa.tests_per_day` (0.4.0 D5). */
+  testsPerDay: string;
   /** Left out while the server does not report the keys (`evidenceKeys`). */
   evidence?: EvidenceForm;
 }
@@ -221,6 +223,7 @@ export function tsaForm(tsa: TsaSection | undefined): TsaForm | undefined {
     java: tsa.java,
     threshold: String(tsa.credit_alert_threshold),
     timeout: String(tsa.timeout_seconds),
+    testsPerDay: String(tsa.tests_per_day),
     ...(keys
       ? {
           evidence: {
@@ -373,6 +376,7 @@ export function tsaBody(
     ...(server ? { server } : {}),
     credit_alert_threshold: parseInteger(form.threshold) ?? tsa.credit_alert_threshold,
     timeout_seconds: parseInteger(form.timeout) ?? tsa.timeout_seconds,
+    tests_per_day: parseInteger(form.testsPerDay) ?? tsa.tests_per_day,
     java: form.java,
     ...(typed(customer) ? { customer: customer.value } : {}),
     ...(typed(password) ? { password: password.value } : {}),
@@ -422,11 +426,31 @@ export function validateTurktrustPassword(value: string): string | undefined {
   return undefined;
 }
 
-/** The threshold and the timeout (`credit_alert_threshold` 0–1 000 000, `timeout_seconds` 5–600). */
-export function validateNumbers(form: TsaForm): { threshold?: string; timeout?: string } {
+/** `tsa.tests_per_day`: 0–20 (0.4.0 D5). */
+export const TESTS_PER_DAY = { min: 0, max: 20 } as const;
+
+/**
+ * The threshold, the timeout and the daily stamp tests (`credit_alert_threshold` 0–1 000 000,
+ * `timeout_seconds` 5–600, `tests_per_day` 0–20).
+ */
+export function validateNumbers(form: TsaForm): {
+  threshold?: string;
+  timeout?: string;
+  testsPerDay?: string;
+} {
   const threshold = integerError(form.threshold, 0, 1_000_000);
   const timeout = integerError(form.timeout, 5, 600);
-  return { ...(threshold ? { threshold } : {}), ...(timeout ? { timeout } : {}) };
+  const testsPerDay = integerError(form.testsPerDay, TESTS_PER_DAY.min, TESTS_PER_DAY.max);
+  return {
+    ...(threshold ? { threshold } : {}),
+    ...(timeout ? { timeout } : {}),
+    ...(testsPerDay ? { testsPerDay } : {}),
+  };
+}
+
+/** The stamp tests a site day the server allows: the site's value, at most the policy's. */
+export function testsPerDay(tsa: TsaSection, ceiling: number | undefined): number {
+  return ceiling === undefined ? tsa.tests_per_day : Math.min(tsa.tests_per_day, ceiling);
 }
 
 /** 64 hexadecimal characters (the SHA-256 Kamu SM publishes), spaces and case ignored. */

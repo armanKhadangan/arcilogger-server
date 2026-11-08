@@ -30,6 +30,7 @@ import {
   providerText,
   serverChoices,
   stepStatus,
+  testsPerDay,
   toTurktrust,
   tsaBody,
   tsaForm,
@@ -54,6 +55,7 @@ function tsa(overrides: Partial<TsaSection> = {}): TsaSection {
     server: 'test',
     credit_alert_threshold: 500,
     timeout_seconds: 60,
+    tests_per_day: 10,
     java: JAVA,
     java_choices: [JAVA],
     zamane: {
@@ -220,7 +222,7 @@ describe('the Kamu SM wizard (contract 2.17)', () => {
   it('the body: numbers as typed, credentials only when a new value was typed', () => {
     const section = tsa();
     const form = tsaForm(section);
-    expect(form).toEqual({ java: JAVA, threshold: '500', timeout: '60' });
+    expect(form).toEqual({ java: JAVA, threshold: '500', timeout: '60', testsPerDay: '10' });
     if (!form) return;
     // No server chosen: none is sent, the one in use stays.
     expect(
@@ -229,6 +231,7 @@ describe('the Kamu SM wizard (contract 2.17)', () => {
       etag: 'tsa:1',
       credit_alert_threshold: 300,
       timeout_seconds: 60,
+      tests_per_day: 10,
       java: JAVA,
       probe: true,
     });
@@ -266,11 +269,26 @@ describe('the Kamu SM wizard (contract 2.17)', () => {
     expect(validatePassword('a\u0007b')).toBe('settings.kamusm.errors.password');
     expect(validatePassword('ç'.repeat(128))).toBeUndefined();
     expect(validatePassword('ç'.repeat(129))).toBe('settings.kamusm.errors.password');
-    expect(validateNumbers({ java: null, threshold: '-1', timeout: '601' })).toEqual({
+    expect(
+      validateNumbers({ java: null, threshold: '-1', timeout: '601', testsPerDay: '10' }),
+    ).toEqual({
       threshold: 'admin.errors.min',
       timeout: 'admin.errors.max',
     });
-    expect(validateNumbers({ java: null, threshold: '0', timeout: '5' })).toEqual({});
+    expect(
+      validateNumbers({ java: null, threshold: '0', timeout: '5', testsPerDay: '10' }),
+    ).toEqual({});
+    // 0.4.0 D5: the daily stamp tests, 0–20.
+    for (const testsPerDay of ['0', '20'])
+      expect(validateNumbers({ java: null, threshold: '0', timeout: '5', testsPerDay })).toEqual(
+        {},
+      );
+    expect(
+      validateNumbers({ java: null, threshold: '0', timeout: '5', testsPerDay: '21' }),
+    ).toEqual({ testsPerDay: 'admin.errors.max' });
+    expect(
+      validateNumbers({ java: null, threshold: '0', timeout: '5', testsPerDay: '-1' }),
+    ).toEqual({ testsPerDay: 'admin.errors.min' });
   });
 
   it('reads a published SHA-256 with spaces and capitals; names the sealing causes', () => {
@@ -337,13 +355,14 @@ describe('Ayarlar → Zaman damgası: the server choice and TÜRKTRUST (Wave 5 c
   });
 
   it('"Kaydet" on a TÜRKTRUST site keeps its server: nothing moves it to the Kamu SM test server', () => {
-    const form = { java: null, threshold: '500', timeout: '60' };
+    const form = { java: null, threshold: '500', timeout: '60', testsPerDay: '10' };
     const body = tsaBody(turktrustSite(), 'tsa:1', form, KEPT, { probe: true });
     expect(body).not.toHaveProperty('server');
     expect(body).toEqual({
       etag: 'tsa:1',
       credit_alert_threshold: 500,
       timeout_seconds: 60,
+      tests_per_day: 10,
       java: null,
       probe: true,
     });
@@ -396,7 +415,7 @@ describe('Ayarlar → Zaman damgası: the server choice and TÜRKTRUST (Wave 5 c
   });
 
   it('sends TÜRKTRUST credentials only with a change that goes to TÜRKTRUST', () => {
-    const form = { java: JAVA, threshold: '500', timeout: '60' };
+    const form = { java: JAVA, threshold: '500', timeout: '60', testsPerDay: '10' };
     const typed: Credentials = {
       ...KEPT,
       turktrust: {
@@ -439,7 +458,7 @@ describe('Ayarlar → Zaman damgası: the server choice and TÜRKTRUST (Wave 5 c
   });
 
   it('"Kaydet" on a plain-HTTP TÜRKTRUST site sends no server, so no unconfirmed turktrust-http', () => {
-    const form = { java: null, threshold: '400', timeout: '60' };
+    const form = { java: null, threshold: '400', timeout: '60', testsPerDay: '10' };
     const site = turktrustSite({ server: 'turktrust-http' as never });
     expect(currentChoice(site)).toBe('turktrust-http');
     const body = tsaBody(site, 'tsa:1', form, KEPT, { probe: true });
@@ -468,6 +487,7 @@ describe('Ayarlar → Zaman damgası: the server choice and TÜRKTRUST (Wave 5 c
       server: 'turktrust',
       credit_alert_threshold: 500,
       timeout_seconds: 60,
+      tests_per_day: 10,
       java: JAVA,
       turktrust_username: 'ornek-as',
       turktrust_password: 'deneme-parola',
@@ -730,6 +750,7 @@ describe('Ayarlar → Zaman damgası: re-stamping and revocation lists (Wave 5 c
       etag: 'tsa:1',
       credit_alert_threshold: 500,
       timeout_seconds: 60,
+      tests_per_day: 10,
       java: JAVA,
       probe: true,
     });
@@ -752,6 +773,7 @@ describe('Ayarlar → Zaman damgası: re-stamping and revocation lists (Wave 5 c
       etag: 'tsa:1',
       credit_alert_threshold: 500,
       timeout_seconds: 60,
+      tests_per_day: 10,
       java: JAVA,
       renew_before_days: 365,
       crl_urls: [CRL_B, CRL_A],
@@ -786,5 +808,25 @@ describe('Ayarlar → Zaman damgası: re-stamping and revocation lists (Wave 5 c
     expect(text(LOCALES.tr, 'admin.paths.tsa.renew_before_days')).toBe(
       'Yeniden damgalama süresi (gün)',
     );
+  });
+});
+
+describe('Ayarlar → Zaman damgası: the daily stamp tests (0.4.0 D5)', () => {
+  it('are the site value, at most the policy ceiling', () => {
+    const section = tsa({ tests_per_day: 10 });
+    expect(testsPerDay(section, 20)).toBe(10);
+    expect(testsPerDay(section, 3)).toBe(3);
+    expect(testsPerDay(section, undefined)).toBe(10);
+  });
+
+  it('are sent with the section and come back into the form', () => {
+    const section = tsa({ tests_per_day: 4 });
+    const form = tsaForm(section);
+    expect(form?.testsPerDay).toBe('4');
+    if (!form) throw new Error('no form');
+    const body = tsaBody(section, 'tsa:1', { ...form, testsPerDay: ' 12 ' }, KEPT, {
+      probe: false,
+    });
+    expect(body.tests_per_day).toBe(12);
   });
 });

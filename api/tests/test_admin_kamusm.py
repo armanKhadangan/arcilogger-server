@@ -323,3 +323,33 @@ def test_the_stamp_test_is_confirmed_limited_and_reports_the_stamp(
     limited = client.post(url, json={"confirm_credit": True})
     assert error(limited) == (429, "tsa_test_limit")
     assert int(limited.headers["retry-after"]) >= 1
+
+
+@pytest.mark.parametrize(("site", "policy"), [(1, 20), (10, 1)])
+def test_the_daily_stamp_tests_are_the_smaller_of_the_site_and_the_policy(
+    client: TestClient,
+    login_as: Login,
+    installed: Installed,
+    agent: FakeAgent,
+    app_session_factory: sessionmaker[Session],
+    site: int,
+    policy: int,
+) -> None:
+    """0.4.0 D5: ``tsa.tests_per_day`` (the browser's setting) is the limit, never above the
+    policy's ``tsa_test_per_day`` (the administrator's ceiling)."""
+    config = installed.config_path.read_text(encoding="utf-8")
+    marker = "credit_alert_threshold = 500       # credits\n"
+    assert marker in config
+    installed.config_path.write_text(
+        config.replace(marker, f"{marker}tests_per_day = {site}\n"), encoding="utf-8"
+    )
+    installed.write_policy(tsa_test_per_day=policy)
+    login_as(client, "admin")
+    url = f"{V}/admin/actions/tsa-test"
+    assert client.post(url, json={"confirm_credit": True}).status_code == 202
+    agent.process()
+    with app_session_factory() as session:  # past the 5-minute spacing
+        for row in session.scalars(select(AdminRequest)):
+            row.created_at -= timedelta(minutes=6)
+        session.commit()
+    assert error(client.post(url, json={"confirm_credit": True})) == (429, "tsa_test_limit")

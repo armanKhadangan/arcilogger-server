@@ -129,6 +129,7 @@ test.describe('Ayarlar → Zaman damgası', () => {
       etag: expect.stringMatching(/^tsa:[0-9a-f]{64}$/) as unknown,
       credit_alert_threshold: 500,
       timeout_seconds: 60,
+      tests_per_day: 10,
       java: 'C:/Program Files/Eclipse Adoptium/jre-8.0.432.6-hotspot/bin/java.exe',
       customer: '100200300',
       password: 'yeni-gizli-deger', // gitleaks:allow — fake test value

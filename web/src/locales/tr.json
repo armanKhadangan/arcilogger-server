@@ -750,7 +750,11 @@
         "threshold": "Kontör uyarı eşiği",
         "thresholdHint": "0–1 000 000. Kalan kontör bu sayının altına düşünce uyarı oluşur.",
         "timeout": "Damga isteği zaman aşımı (sn)",
-        "timeoutHint": "5–600 saniye."
+        "timeoutHint": "5–600 saniye.",
+        "testsPerDay": "Günlük damga testi sayısı",
+        "testsPerDayHint": "0–20. Her damga testi 1 kontör harcar; iki test arasında en az 5 dakika olmalı.",
+        "testsPerDayCeiling_one": "Sunucu politikası günde en çok {{count}} teste izin veriyor; fazlası için yöneticinin admin\\policy.json içindeki tsa_test_per_day değerini artırması gerekir.",
+        "testsPerDayCeiling_other": "Sunucu politikası günde en çok {{count}} teste izin veriyor; fazlası için yöneticinin admin\\policy.json içindeki tsa_test_per_day değerini artırması gerekir."
       },
       "seal": {
         "title": "Mühürleme",
