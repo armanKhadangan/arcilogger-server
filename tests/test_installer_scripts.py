@@ -11603,6 +11603,153 @@ def test_the_end_to_end_settings_checks_read_what_the_api_could_not(
         _e2e_source_open(name, cafile, "", log, timeout=0)
 
 
+#: 0.4.0 P1: the end-to-end job of the bundled PostgreSQL (installer.yml) runs on a runner whose own
+#: PostgreSQL service it deleted first.
+E2E_BUNDLED_PG = os.environ.get("ARCILOGGER_E2E_BUNDLED_PG") == "1"
+
+# Starts the installer without any PostgreSQL credential (setup installs its own) and with the
+# switches of -Switches (comma-separated) and -ConfirmRemoveData.
+_E2E_BUNDLED_PG_SCRIPT = r"""
+param([string]$Installer, [string]$PlanPath, [string]$Switches, [string]$Confirm)
+$ErrorActionPreference = 'Stop'
+$parameters = @{
+    SkipTimeSetup = $true; MinFreeGB = 1; HealthWaitSeconds = 60; PlanPath = $PlanPath
+    ServerAddress = '127.0.0.1'; AdminAddress = @('192.0.2.10')
+    SourceNetwork = @('127.0.0.1/32', '10.0.0.0/8')
+}
+foreach ($switch in @($Switches -split ',' | Where-Object { $_ })) { $parameters[$switch] = $true }
+if ($Confirm) { $parameters['ConfirmRemoveData'] = $Confirm }
+& $Installer @parameters
+exit $LASTEXITCODE
+"""
+
+_E2E_PG_SERVICE_SCRIPT = r"""
+param([string]$OutputPath)
+$service = Get-CimInstance -ClassName Win32_Service -Filter "Name LIKE 'postgresql%'"
+$report = @($service | ForEach-Object {
+    [ordered]@{ name = $_.Name; state = $_.State; account = $_.StartName; path = $_.PathName } })
+$rules = @()
+$data = $env:ARCILOGGER_E2E_PGDATA
+if ($data -and (Test-Path -LiteralPath $data)) {
+    $type = [System.Security.Principal.SecurityIdentifier]
+    $rules = @((Get-Acl -LiteralPath $data).GetAccessRules($true, $true, $type) | ForEach-Object {
+        [ordered]@{ sid = $_.IdentityReference.Value; rights = [string]$_.FileSystemRights
+                    inherited = $_.IsInherited } })
+}
+$document = [ordered]@{ services = $report; acl = $rules }
+[System.IO.File]::WriteAllText($OutputPath, (ConvertTo-Json $document -Depth 4))
+"""
+
+
+@pytest.mark.skipif(
+    not (E2E_BUNDLE and E2E_BUNDLED_PG), reason="needs the bundled-PostgreSQL end-to-end job"
+)
+def test_real_install_with_the_bundled_postgres(tmp_path: Path) -> None:
+    r"""0.4.0 P1 on a real Windows server without PostgreSQL (contract 2.1, S2): the setup
+    installs PostgreSQL 16 as NETWORK SERVICE with its cluster in <data root>\pgdata, asks for no
+    password and shows it nowhere; a later run reads it from the secret store; -RemoveData
+    removes the service, the binaries and the cluster."""
+    powershell = _windows_admin_powershell()
+    assert E2E_BUNDLE is not None
+    bundle = Path(E2E_BUNDLE)
+    program = Path(os.environ["PROGRAMFILES"]) / "ARCILOGGER"
+    postgres = Path(os.environ["PROGRAMFILES"]) / "ARCILOGGER-PostgreSQL" / "16"
+    program_data = Path(os.environ["PROGRAMDATA"]) / "ARCILOGGER"
+    data = Path(os.environ.get("RUNNER_TEMP", "D:/")) / "ARCILOGGER"
+    cluster = data / "pgdata"
+    program_data.mkdir(parents=True, exist_ok=True)
+    (program_data / "arcilogger.toml").write_text(
+        f'site_name = "CI"\ndata_dir = "{data.as_posix()}"\n\n'
+        '[[sources]]\nname = "local"\ntype = "generic"\naddress = "127.0.0.1"\n\n'
+        '[collector]\nbind = "127.0.0.1"\nudp_port = 514\ntcp_port = 514\n\n'
+        '[tsa]\nprovider = "mock"\n',
+        encoding="utf-8",
+    )
+    wrapper = write_script(tmp_path / "e2e-bundled-pg.ps1", _E2E_BUNDLED_PG_SCRIPT)
+    probe = write_script(tmp_path / "e2e-pg-service.ps1", _E2E_PG_SERVICE_SCRIPT)
+    outputs: list[str] = []
+
+    def run(label: str, switches: str = "", confirm: str = "") -> dict[str, Any]:
+        plan = tmp_path / f"plan-{len(outputs)}.json"
+        arguments = ["-Installer", str(bundle / "installer" / "Install-Arcilogger.ps1")]
+        arguments += ["-PlanPath", str(plan), "-Switches", switches, "-Confirm", confirm]
+        result = run_powershell(powershell, wrapper, *arguments, timeout=1800)
+        text = f"===== {label}: exit code {result.returncode} =====\n"
+        text += f"{result.stdout}\n{result.stderr}"
+        outputs.append(text + (plan.read_text(encoding="utf-8-sig") if plan.is_file() else ""))
+        print(text, flush=True)
+        assert result.returncode in (0, 1), text + _e2e_server_side(data, program_data)
+        return read_json(plan)
+
+    def server() -> dict[str, Any]:
+        output = tmp_path / "pg-service.json"
+        os.environ["ARCILOGGER_E2E_PGDATA"] = str(cluster)
+        result = run_powershell(powershell, probe, "-OutputPath", str(output))
+        assert result.returncode == 0, result.stdout + result.stderr
+        found: dict[str, Any] = read_json(output)
+        return found
+
+    assert server()["services"] == [], "the job deletes the runner's own PostgreSQL service first"
+    plan = run("install")
+    items = {item["id"]: item for item in plan["items"]}
+    assert items["preflight.postgresql"]["status"] == "ok", items["preflight.postgresql"]
+    assert items["postgres.install"]["status"] == "done", items.get("postgres.install")
+    facts = server()
+    assert [s["name"] for s in facts["services"]] == ["postgresql-x64-16"], facts
+    service = facts["services"][0]
+    assert service["state"] == "Running", service
+    assert "networkservice" in service["account"].lower().replace(" ", ""), service
+    assert str(postgres / "bin" / "pg_ctl.exe").lower() in service["path"].lower(), service
+    rights = {rule["sid"]: rule for rule in facts["acl"] if not rule["inherited"]}
+    assert "Modify" in rights["S-1-5-20"]["rights"], facts["acl"]
+    assert all(not rule["inherited"] for rule in facts["acl"]), "inheritance is off"
+    state = json.loads((program_data / "install" / "state.json").read_text(encoding="utf-8-sig"))
+    assert state["postgres"]["bundled"] is True, state
+    assert Path(state["postgres"]["data"]) == cluster, state
+    checked = json.loads((program_data / "install" / "selftest.json").read_text("utf-8-sig"))
+    statuses = {row["id"]: row["status"] for row in checked["rows"]}
+    assert statuses["database"] == "ok", checked
+
+    # The password: generated, stored, readable only into a pipe, and nowhere in any output.
+    python = program / "venv" / "Scripts" / "python.exe"
+    config = program_data / "arcilogger.toml"
+    secret = subprocess.run(
+        [str(python), "-P", "-m", "arcilogger_core", "--config", str(config), "secret", "get",
+         "postgres.superuser"],
+        capture_output=True, text=True, check=True,
+    )  # fmt: skip
+    password = secret.stdout
+    assert re.fullmatch(r"[A-Za-z0-9]{32}", password), "32 letters and digits"
+    psql = subprocess.run(
+        [str(postgres / "bin" / "psql.exe"), "-h", "127.0.0.1", "-U", "postgres", "-d", "postgres",
+         "-w", "-t", "-A", "-c",
+         "SELECT current_setting('listen_addresses') || ' ' || current_setting('port') || ' '"
+         " || (SELECT count(*) FROM pg_database WHERE datname = 'arcilogger')"],
+        capture_output=True, text=True, env={**os.environ, "PGPASSWORD": password}, check=False,
+    )  # fmt: skip
+    assert psql.returncode == 0, psql.stderr
+    assert psql.stdout.strip() == "localhost 5432 1", psql.stdout
+
+    # A later run reads the password from the store: -ResetDatabasePassword needs the superuser.
+    plan = run("repair, new role password", "ResetDatabasePassword")
+    items = {item["id"]: item for item in plan["items"]}
+    assert items["database.provision"]["status"] == "done", items.get("database.provision")
+    assert "postgres.install" not in items, "the service exists now"
+    for text in outputs:
+        assert password not in text
+
+    # -RemoveData: the service, the binaries and the cluster go.
+    plan = run("remove with the data", "Uninstall,RemoveData", "CI")
+    items = {item["id"]: item for item in plan["items"]}
+    assert items["postgres.remove"]["status"] == "done", items.get("postgres.remove")
+    assert "database.remove" not in items, "no SQL for the PostgreSQL setup installed"
+    assert server()["services"] == []
+    assert not postgres.exists()
+    assert not cluster.exists()
+    for text in outputs:
+        assert password not in text
+
+
 @pytest.mark.skipif(not E2E_BUNDLE, reason="needs the real bundle the end-to-end job builds")
 def test_real_install_upgrade_rollback_and_uninstall(tmp_path: Path) -> None:
     from arcilogger_db.migrate import head_revisions
