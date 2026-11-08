@@ -543,10 +543,10 @@ bir testle korunur. Ayrıntılar ve elle denetim listesi: [turktrust.md](turktru
 
 | No | Varsayım | Nereden ayarlanır? |
 |---|---|---|
-| T1 | TÜRKTRUST'ın TSA adresi: sunucu `zd.turktrust.com.tr` TÜRKTRUST'ın e-postasından, **yol** bilinmiyor; varsayılan `https://zd.turktrust.com.tr/` | `[tsa] url` |
-| T2 | TÜRKTRUST yanlış kimlik bilgisine HTTP 401 verir; bakiye bittiğinde ne yanıt verdiği bilinmiyor: durum metninde kontör sözcüğü geçen bir ret "kontör yok" sayılır | `[tsa] credit_regex` |
-| T3 | TÜRKTRUST'ın TSA sertifikası EKU uzantısını kritik işaretliyor mu? | `[tsa] require_critical_eku` |
-| T4 | TÜRKTRUST'ın SİL sunucusu (TÜRKTRUST'ın "kök sertifikaları ve iptal listeleri" sayfasından) | `[tsa] crl_urls`; güvenlik duvarı bu sunucuları açar |
-| T5 | Port 80 (düz HTTP): TÜRKTRUST'ın e-postası 80 ve 443 portlarını adlandırır; varsayılan HTTPS'tir, damga testi bunu sahada doğrular | `[tsa] allow_plain_http` (varsayılan kapalı) |
+| T1 | TÜRKTRUST'ın TSA adresi `https://zd.turktrust.com.tr/` (8.11.2026'da doğrulandı: kök yol damga verir) | `[tsa] url` |
+| T2 | Yanlış parola: HTTP 200 ve metinsiz bir ret (8.11.2026'da doğrulandı; kimlik bilgisi hatası olarak bildirilir). Bakiye bittiğinde ne yanıt verdiği bilinmiyor: durum metninde kontör sözcüğü geçen bir ret "kontör yok" sayılır | `[tsa] credit_regex` |
+| T3 | TÜRKTRUST'ın TSA sertifikası EKU uzantısını kritik işaretler (8.11.2026'da doğrulandı) | `[tsa] require_critical_eku` |
+| T4 | TÜRKTRUST'ın SİL'i: `http://www.turktrust.com.tr/sil/TURKTRUST_Kok_SIL_h7.crl` (8.11.2026'da doğrulandı) | `[tsa] crl_urls`; güvenlik duvarı bu sunucuları açar |
+| T5 | HTTPS çalışır (8.11.2026'da doğrulandı); düz HTTP gerekmez | `[tsa] allow_plain_http` (varsayılan kapalı) |
 | K10 | Kamu SM'nin SİL adresleri | `[tsa] crl_urls`, boşsa sertifikalardaki dağıtım noktaları |
 | — | Zamane konsol istemcisinin vekil sunucuyu nasıl aldığı | bu sürümde yok: Zamane `[network] https_proxy` kullanmaz |

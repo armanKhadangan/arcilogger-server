@@ -5,6 +5,35 @@ versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.3.1] — 2026-11-08
+
+Release version 0.3.1 (`v0.3.1`): ARCILOGGER can seal with TÜRKTRUST. Upgrading from 0.3.0: run
+the new `ARCILOGGER-Setup-0.3.1.exe`; it upgrades in place and keeps the data.
+
+### Fixed
+
+- **TÜRKTRUST stamps could not be read at all.** TÜRKTRUST's root "Elektronik Sertifika Hizmet
+  Sağlayıcısı H7", which every TÜRKTRUST stamp carries, writes a NULL into its ECDSA signature
+  algorithm fields (against RFC 5758), and the library ARCILOGGER used refused it: the stamp test,
+  the nightly sealing and a root upload in the browser all failed. ARCILOGGER now reads such a
+  certificate ignoring only that difference and keeps its fingerprint, the installed file and the
+  files of an evidence package exactly as TÜRKTRUST publishes them. The standalone verifier in the
+  evidence packages already accepted it.
+- **A wrong TÜRKTRUST password was reported as an unreadable answer and retried.** TÜRKTRUST
+  answers it with HTTP 200 and a rejection without any text; ARCILOGGER now reports "kullanıcı adı
+  ya da parola" (credentials) and does not retry. Any rejection now names its failure bits.
+
+### Changed
+
+- **TÜRKTRUST's root ships with the product** (owner decision 2026-11-08). Setup puts the H7 root
+  into `C:\ProgramData\ARCILOGGER\kamusm-roots\` on every install and upgrade (an existing file is
+  never touched), and with TÜRKTRUST as the provider its fingerprint
+  `9af399d1…d413` counts as a legal root without being listed. Choosing TÜRKTRUST (HTTPS) and
+  entering its username and password under Ayarlar → Zaman damgası is all that is left.
+- docs/turktrust.md: T1, T3, T4, T5 and the wrong-password part of T2 were confirmed on site on
+  2026-11-08 with a TÜRKTRUST test account (HTTPS at the root path; the TSA certificate's EKU is
+  critical; the revocation list `TURKTRUST_Kok_SIL_h7.crl`).
+
 ## [0.3.0] — 2026-11-07
 
 Release version 0.3.0 (`v0.3.0`): the server's desktop (icon, notification area, Backups), the

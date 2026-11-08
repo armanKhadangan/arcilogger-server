@@ -18,11 +18,11 @@ Modules available so far:
 
 from typing import Final
 
-__version__ = "0.3.0"
+__version__ = "0.3.1"
 
 #: Release day of this version, bumped together with ``__version__``. The licence's
 #: ``maintenance_until`` is compared with it (a version released after the maintenance period
 #: runs with 5651 Temel only); Build-ArciBundle reads this exact line into the bundle manifest.
-RELEASE_DATE: Final = "2026-11-07"
+RELEASE_DATE: Final = "2026-11-08"
 
 PRODUCT_NAME = "ARCILOGGER"

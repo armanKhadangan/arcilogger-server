@@ -548,11 +548,7 @@ def _roots(
 ) -> tuple[list[_Entry], list[dict[str, Any]]]:
     """Only the trusted roots the package's tokens actually chain to (never, say, a test root
     the server also trusts): the recipient is asked to compare exactly these with Kamu SM."""
-    unique = {
-        digest: root
-        for root in roots
-        if (digest := fingerprint(root)) in used
-    }
+    unique = {digest: root for root in roots if (digest := fingerprint(root)) in used}
     entries, index, bundle = [], [], b""
     for digest, certificate in sorted(unique.items()):
         name = f"{ROOTS_FOLDER}{digest[:16]}.pem"

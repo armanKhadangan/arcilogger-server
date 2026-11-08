@@ -44,8 +44,8 @@ MAX_RETENTION_BATCH_DAYS = 180
 
 KAMUSM_PRODUCTION_HOST = "zd.kamusm.gov.tr"
 KAMUSM_TEST_HOST = "tzd.kamusm.gov.tr"
-#: TÜRKTRUST's time-stamp server (contract T1: the host is from TÜRKTRUST's e-mail, the path is
-#: to be confirmed on site).
+#: TÜRKTRUST's time-stamp server (contract T1: the host is from TÜRKTRUST's e-mail; the root path
+#: stamps, confirmed with a test account on 2026-11-08).
 TURKTRUST_PRODUCTION_HOST = "zd.turktrust.com.tr"
 #: The roots TÜRKTRUST's time stamps chain to, shipped with the product (product owner's
 #: decision of 2026-11-08: the TÜRKTRUST root is built in). "TÜRKTRUST Elektronik Sertifika Hizmet
