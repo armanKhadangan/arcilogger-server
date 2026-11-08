@@ -371,6 +371,42 @@ def test_bundled_components_carry_verified_licence_texts() -> None:
     assert "THIRD-PARTY-NOTICES.txt" in script
 
 
+def test_bundled_postgresql_is_pinned_on_first_download() -> None:
+    """0.4.0 P1: EDB's PostgreSQL 16 binaries archive (no installer). EDB publishes no checksum, so
+    the release job pins it on its first download (-PinComponent); until then the build leaves it
+    out and setup uses an operator-installed PostgreSQL 16. The build checks the layout (S1) and
+    packs only the server folders."""
+    postgres = next(c for c in _components() if c["name"] == "postgresql_binaries")
+    assert postgres["version"].startswith("16.")
+    assert postgres["url"] == (
+        "https://get.enterprisedb.com/postgresql/"
+        f"postgresql-{postgres['version']}-5-windows-x64-binaries.zip"
+    )
+    assert postgres["file"] in postgres["url"]
+    assert postgres["licence_url"].endswith(
+        f"/REL_{postgres['version'].replace('.', '_')}/COPYRIGHT"
+    )
+    assert set(postgres["layout"]) >= {
+        "pgsql/bin/initdb.exe", "pgsql/bin/pg_ctl.exe", "pgsql/bin/psql.exe",
+        "pgsql/bin/pg_dump.exe", "pgsql/bin/pg_restore.exe",
+        "pgsql/share/extension/pg_trgm.control",
+    }  # fmt: skip
+    assert postgres["keep"] == ["pgsql/bin", "pgsql/lib", "pgsql/share"]
+    build = (INSTALLER / "Build-ArciBundle.ps1").read_text(encoding="utf-8-sig")
+    assert "[string[]]$PinComponent = @()," in build
+    assert "function Get-PinnedComponent" in build
+    assert "Write-Host ('PIN {0} {1} {2}' -f $name, $sha256, $url)" in build
+    assert "elseif (-not $component.required) {" in build
+    packed = build[build.index("function New-PostgresServerZip") :]
+    packed = packed[: packed.index("\n}")]
+    assert "foreach ($path in @($Component.layout))" in packed
+    assert "throw (" in packed
+    workflow = (REPO / ".github" / "workflows" / "installer.yml").read_text(encoding="utf-8")
+    assert "PIN_COMPONENTS: ${{ inputs.pin_components }}" in workflow
+    assert "-PinComponent $pins" in workflow
+    assert "if ($pin -notmatch '^[a-z0-9_]+$')" in workflow
+
+
 def test_timescaledb_is_opt_in_until_the_licence_decision() -> None:
     build = (INSTALLER / "Build-ArciBundle.ps1").read_text(encoding="utf-8-sig")
     assert "[switch]$IncludeTimescaleDB" in build
@@ -381,7 +417,11 @@ def test_timescaledb_is_opt_in_until_the_licence_decision() -> None:
 
 def test_bundled_components_are_pinned_verified_release_downloads() -> None:
     bundled = {c["name"]: c for c in _components() if c["role"] == "bundled"}
-    assert set(bundled) == {"python", "winsw", "caddy"}
+    assert set(bundled) == {"python", "winsw", "caddy", "postgresql_binaries"}
+    postgres = bundled.pop(
+        "postgresql_binaries"
+    )  # test_bundled_postgresql_is_pinned_on_first_download
+    assert postgres["required"] is False
     for component in bundled.values():
         assert component["required"] is True
         assert component["sha256"]
@@ -403,7 +443,9 @@ def test_unverified_components_are_operator_installed() -> None:
     components = {c["name"]: c for c in _components()}
     for component in components.values():
         if component["sha256"] is None:
-            assert component["role"] == "operator", component["name"]
+            # an optional bundled one waits for its first download (-PinComponent, 0.4.0 P1)
+            optional = component["role"] == "bundled" and component["required"] is False
+            assert component["role"] == "operator" or optional, component["name"]
     # Could not be verified from the build environment: must stay null until someone does.
     assert components["postgresql"]["sha256"] is None
     assert components["zamane"]["sha256"] is None

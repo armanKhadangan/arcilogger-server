@@ -31,6 +31,13 @@
 .PARAMETER ComponentUrl
     Download URL for components without one in components.json, e.g. @{ postgresql = 'https://...' }.
 
+.PARAMETER PinComponent
+    Bundled components whose vendor publishes no checksum and whose sha256 is still null in
+    components.json (postgresql_binaries, 0.4.0 P1): downloaded once from their url, their
+    SHA-256 computed, printed ("PIN <name> <sha256> <url>") and written to
+    pinned-components.json next to the bundle, to be recorded in components.json. Without it such
+    a component (required = false) is left out and setup uses an operator-installed PostgreSQL.
+
 .PARAMETER IncludeTimescaleDB
     Also put the TimescaleDB Windows build into operator-installers\. Off by default: its -tsl
     library is under the Timescale License (not OSI-approved), see docs/adr/0007.
@@ -53,6 +60,7 @@ param(
     [string]$CacheDir,
     [hashtable]$ComponentSha256 = @{},
     [hashtable]$ComponentUrl = @{},
+    [string[]]$PinComponent = @(),
     [switch]$SkipOperatorInstallers,
     [switch]$IncludeTimescaleDB,
     [switch]$NoInno,
@@ -135,6 +143,59 @@ function Get-VerifiedComponent($Component) {
     [pscustomobject]@{ Name = $name; File = $target; FileName = $fileName; Sha256 = $sha256; Source = $source; Url = $url }
 }
 
+function Get-PinnedComponent($Component) {
+    <#
+    The first download of a bundled component without a recorded checksum (-PinComponent): its
+    SHA-256 is computed from this download, printed and kept for pinned-components.json. Only its
+    https url from components.json is used; nothing else of the run changes it.
+    #>
+    $name = [string]$Component.name
+    $url = [string]$Component.url
+    if ($url -notmatch '^https://') { throw ("{0}: yalnızca https [https only]: {1}" -f $name, $url) }
+    $fileName = [string]$Component.file
+    if (-not $fileName) { throw ("{0}: components.json'da file yok [no file name]" -f $name) }
+    $target = Join-Path $CacheDir $fileName
+    $partial = $target + '.part'
+    Write-ArciInfo ("indiriliyor, ilk kez sabitlenecek [downloading, to be pinned]: {0}" -f $url)
+    $previous = $ProgressPreference
+    $ProgressPreference = 'SilentlyContinue'
+    try { Invoke-WebRequest -Uri $url -OutFile $partial -UseBasicParsing } finally { $ProgressPreference = $previous }
+    Move-Item -LiteralPath $partial -Destination $target -Force
+    $sha256 = Get-ArciFileSha256 -Path $target
+    $script:Pinned[$name] = [ordered]@{ sha256 = $sha256; url = $url; file = $fileName; size = (Get-Item -LiteralPath $target).Length; pinned_on = (Get-Date).ToUniversalTime().ToString('yyyy-MM-dd') }
+    Write-Host ('PIN {0} {1} {2}' -f $name, $sha256, $url)
+    $source = ('pinned on its first download by this build (-PinComponent, {0}); record it in components.json' -f $script:Pinned[$name].pinned_on)
+    [pscustomobject]@{ Name = $name; File = $target; FileName = $fileName; Sha256 = $sha256; Source = $source; Url = $url }
+}
+
+function New-PostgresServerZip($Component, $Result) {
+    <#
+    The PostgreSQL server of the EDB binaries archive (0.4.0 P1): every path of the component's
+    layout must be in it (contract S1; the build fails naming the first missing one), and only
+    the folders in keep (bin, lib, share) are packed into
+    thirdparty\postgresql_binaries\postgresql-<version>-windows-x64-server.zip. pgAdmin 4,
+    StackBuilder, the documentation and the headers stay out.
+    #>
+    $unpacked = Join-Path $work 'postgresql-binaries'
+    if (Test-Path -LiteralPath $unpacked) { Remove-Item -LiteralPath $unpacked -Recurse -Force }
+    [void](New-Item -ItemType Directory -Path $unpacked -Force)
+    Invoke-ArciExe -FilePath $tar -ArgumentList @('-xf', $Result.File, '-C', $unpacked)
+    foreach ($path in @($Component.layout)) {
+        $full = Join-Path $unpacked ([string]$path).Replace('/', '\')
+        if (-not (Test-Path -LiteralPath $full -PathType Leaf)) {
+            throw ("{0}: arşivde yok [missing in the archive]: {1} (sözleşme S1)" -f $Component.name, $path)
+        }
+    }
+    $fileName = 'postgresql-{0}-windows-x64-server.zip' -f $Component.version
+    $packed = Join-Path $work $fileName
+    if (Test-Path -LiteralPath $packed) { Remove-Item -LiteralPath $packed -Force }
+    $keep = @($Component.keep | ForEach-Object { ([string]$_).Replace('\', '/') })
+    Invoke-ArciExe -FilePath $tar -ArgumentList (@('-a', '-c', '-f', $packed, '-C', $unpacked) + $keep)
+    $sha256 = Get-ArciFileSha256 -Path $packed
+    $source = ('{0}; packed from the vendor archive {1} (SHA-256 {2}), folders {3}' -f $Result.Source, $Result.FileName, $Result.Sha256, ($keep -join ', '))
+    [pscustomobject]@{ Name = $Result.Name; File = $packed; FileName = $fileName; Sha256 = $sha256; Source = $source; Url = $Result.Url }
+}
+
 function Get-VerifiedLicence($Component) {
     <#
     The licence text of a component that goes into the bundle, downloaded from its tag-pinned
@@ -208,6 +269,7 @@ $manifestComponents = New-Object System.Collections.Generic.List[object]
 $skipped = New-Object System.Collections.Generic.List[string]
 $verified = @{}
 $licences = @{}
+$script:Pinned = [ordered]@{}
 [void](New-Item -ItemType Directory -Path (Join-Path $stage 'licenses') -Force)
 foreach ($component in $catalog.components) {
     if ($component.name -eq 'timescaledb' -and -not $IncludeTimescaleDB) {
@@ -223,7 +285,18 @@ foreach ($component in $catalog.components) {
             continue
         }
     }
-    $result = Get-VerifiedComponent $component
+    # A bundled component the vendor publishes no checksum for is pinned on its first download
+    # (-PinComponent); until then an optional one is left out (0.4.0 P1).
+    $pin = $false
+    if ($component.role -eq 'bundled' -and -not $component.sha256 -and -not $ComponentSha256.ContainsKey($component.name)) {
+        if ($PinComponent -contains $component.name) { $pin = $true }
+        elseif (-not $component.required) {
+            $skipped.Add(("{0}: SHA-256 henüz sabitlenmedi, paket bu bileşen olmadan [not pinned yet, bundle without it]; -PinComponent {0}" -f $component.name))
+            continue
+        }
+    }
+    $result = $(if ($pin) { Get-PinnedComponent $component } else { Get-VerifiedComponent $component })
+    if ($component.name -eq 'postgresql_binaries') { $result = New-PostgresServerZip $component $result }
     $verified[$component.name] = $result
     $folder = if ($component.role -eq 'bundled') { 'thirdparty' } else { 'operator-installers' }
     $relative = '{0}/{1}/{2}' -f $folder, $component.name, $result.FileName
@@ -254,6 +327,11 @@ foreach ($required in @('python', 'winsw', 'caddy')) {
     if (-not $verified.ContainsKey($required)) { throw ("Gerekli bileşen eksik [required component missing]: {0}" -f $required) }
 }
 foreach ($line in $skipped) { Write-ArciWarn $line }
+if ($script:Pinned.Count -gt 0) {
+    $pinFile = Join-Path $OutputRoot 'pinned-components.json'
+    Write-ArciUtf8File -Path $pinFile -Text ($script:Pinned | ConvertTo-Json -Depth 3)
+    Write-ArciWarn ("İlk indirmede sabitlenen bileşenler [pinned on first download]: {0} -> components.json" -f $pinFile)
+}
 
 # --- Python wheels -------------------------------------------------------------------------------------------
 
