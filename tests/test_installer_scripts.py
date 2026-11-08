@@ -3975,6 +3975,7 @@ def test_dry_run_fresh_install(engine: str, tmp_path: Path) -> None:
         "collector_bind": SERVER_ADDRESS,
         "site_name": SITE_NAME,
         "ntp_server": "",
+        "tsa_provider": "turktrust",
     }
     assert items["preflight.site-name"]["status"] == "ok"
     assert SITE_NAME in items["preflight.site-name"]["text"]
@@ -7126,6 +7127,8 @@ if ($Scenario.StartsWith('rollback-restore-committed')) {
 }
 
 if ($Scenario.StartsWith('health')) {
+    # The self-test (0.4.0 P3) has tests of its own; here it passes and is recorded.
+    function Invoke-SelfTest { $sim.calls.Add('selftest'); $true }
     # Caddy's root certificate, as Caddy writes it on its first start.
     [void](New-Item -ItemType Directory -Path (Split-Path -Parent $CaddyRootSource) -Force)
     $rsa = [System.Security.Cryptography.RSA]::Create(2048)
@@ -8626,8 +8629,10 @@ def test_upgrade_keeps_a_copy_of_the_configuration_for_a_rollback(
 
 def test_health_check_waits_for_the_api_and_the_certificate(engine: str, tmp_path: Path) -> None:
     """Services report "Running" before Python has imported and Caddy has its certificate."""
-    health = simulate(engine, tmp_path, "health-slow")["health"]
+    report = simulate(engine, tmp_path, "health-slow")
+    health = report["health"]
     assert health["exit_code"] == 0
+    assert "selftest" in report["calls"], "the health check ends with the self-test"
     assert health["warnings"] == []
     assert health["api_calls"] == 3, "polled until the API answered"
     assert health["https_calls"] == 2, "polled until the TLS handshake worked"

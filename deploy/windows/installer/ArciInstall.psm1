@@ -404,12 +404,13 @@ function ConvertTo-ArciSelfTestResult {
     param([Parameter(Mandatory = $true)][AllowEmptyString()][string]$Json)
     $report = $Json | ConvertFrom-Json
     if ($null -eq $report -or $null -eq $report.rows) { throw 'selftest: no rows in its answer' }
+    # Fields read StrictMode-safe: a row without one is checked by its status below.
     $rows = @(foreach ($row in @($report.rows)) {
             [pscustomobject][ordered]@{
-                id         = [string]$row.id
-                status     = [string]$row.status
-                message_tr = [string]$row.message_tr
-                message_en = [string]$row.message_en
+                id         = [string](Get-ArciJsonField -Object $row -Name 'id')
+                status     = [string](Get-ArciJsonField -Object $row -Name 'status')
+                message_tr = [string](Get-ArciJsonField -Object $row -Name 'message_tr')
+                message_en = [string](Get-ArciJsonField -Object $row -Name 'message_en')
             }
         })
     $counts = [ordered]@{ ok = 0; warn = 0; fail = 0; skip = 0 }

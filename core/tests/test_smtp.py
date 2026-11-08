@@ -199,7 +199,9 @@ REPLIES = [
     ("smtp-relay.gmail.com", 550, "5.7.1 Invalid credentials for relay [198.51.100.7].",
      "geçiş hizmeti"),
     ("smtp-relay.gmail.com", 550, "5.7.0 Email relay denied [198.51.100.7].", "geçiş hizmeti"),
-    ("smtp.office365.com", 535, "5.7.139 Authentication unsuccessful, SmtpClientAuthentication "
+    # Microsoft's own wording, no credential: gitleaks reads "Authentication ..., <word>" as one
+    ("smtp.office365.com", 535,
+     "5.7.139 Authentication unsuccessful, SmtpClientAuthentication "  # gitleaks:allow
      "is disabled for the Tenant.", "SMTP AUTH"),
     ("smtp.office365.com", 535, "5.7.3 Authentication unsuccessful", "SMTP AUTH"),
     ("smtp.office365.com", 530, "5.7.57 Client not authenticated to send mail.",
