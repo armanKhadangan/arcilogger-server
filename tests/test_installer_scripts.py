@@ -8604,8 +8604,9 @@ def test_next_steps_print_the_setup_token_command(engine: str, tmp_path: Path) -
 
 
 def test_next_steps_follow_the_time_stamp_provider(engine: str, tmp_path: Path) -> None:
-    """Contract 2.4: with TÜRKTRUST, step 3 says where its account and its roots go; Kamu SM's
-    Java, Zamane client and credit lines stay with Kamu SM. No secret is asked or shown."""
+    """Contract 2.4: with TÜRKTRUST, step 3 says where its account goes and (0.3.1) that its H7
+    root ships with the product and where it is; Kamu SM's Java, Zamane client and credit lines
+    stay with Kamu SM. No secret is asked or shown."""
     kamusm = simulate(engine, tmp_path, "next-steps")["stdout"]
     assert "3. Kamu SM test hesabı [test account]:" in kamusm
     assert "secret set kamusm.customer" in kamusm
@@ -8619,9 +8620,10 @@ def test_next_steps_follow_the_time_stamp_provider(engine: str, tmp_path: Path) 
     assert "[enter the user name and password under Settings → Time stamping" in step
     assert "secret set turktrust.username" in step
     assert "secret set turktrust.password" in step
-    assert "TÜRKTRUST'un kök sertifikalarını TÜRKTRUST'tan alın" in step
+    assert "TÜRKTRUST'un H7 kökü ürünle gelir" in step
+    assert "yasal kök sayılır [TÜRKTRUST's H7 root ships with the product" in step
     roots = run / "sim" / "programdata" / "ARCILOGGER" / "kamusm-roots"
-    shown = re.search(r"ya da (.+) içine koyun", step)
+    shown = re.search(r"ürünle gelir ve (.+) içine konmuştur", step)
     assert shown is not None, step
     assert Path(shown.group(1).replace("\\", "/")) == roots
     for word in ("Kamu SM", "kamusm.", "Java", "Zamane", "kontör", "credit"):
