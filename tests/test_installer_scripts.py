@@ -392,6 +392,10 @@ def test_bundled_postgresql_is_pinned_on_first_download() -> None:
         "pgsql/share/extension/pg_trgm.control",
     }  # fmt: skip
     assert postgres["keep"] == ["pgsql/bin", "pgsql/lib", "pgsql/share"]
+    # pinned by the release job's first download; every later build refuses another file
+    assert re.fullmatch(r"[0-9a-f]{64}", postgres["sha256"])
+    assert postgres["verified_on"] == "2026-11-08"
+    assert "workflow_dispatch run 42522270612" in postgres["sha256_source"]
     build = (INSTALLER / "Build-ArciBundle.ps1").read_text(encoding="utf-8-sig")
     assert "[string[]]$PinComponent = @()," in build
     assert "function Get-PinnedComponent" in build

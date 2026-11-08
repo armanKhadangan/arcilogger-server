@@ -127,10 +127,10 @@
       "download_page": "https://www.enterprisedb.com/download-postgresql-binaries",
       "url": "https://get.enterprisedb.com/postgresql/postgresql-16.15-5-windows-x64-binaries.zip",
       "file": "postgresql-16.15-5-windows-x64-binaries.zip",
-      "sha256": null,
-      "sha256_source": "Not verified yet: get.enterprisedb.com answers 403 to the development environment (2026-11-08) and EDB publishes no checksum file for the binaries archives. The release job pins it on its first download (Build-ArciBundle.ps1 -PinComponent postgresql_binaries); the value is then recorded here with the run and the date. Until then the build leaves the component out and setup uses an operator-installed PostgreSQL 16 as before.",
+      "sha256": "43bb45f173a6f08cf1d29a97a6d8deb119e8e8093a24c00d2d1001a0ccaa8281",
+      "sha256_source": "Pinned on its first download (trust on first use): EDB publishes no checksum file for the binaries archives and get.enterprisedb.com answers 403 to the development environment. The release job of installer.yml (workflow_dispatch run 42522270612, pin_components=postgresql_binaries, commit cbe1dc05, 2026-11-08) downloaded it from the url above on GitHub's Windows runner, checked every path in layout (S1) and printed this SHA-256. Every later build refuses a file with another value.",
       "vendor_checksum_url": null,
-      "verified_on": null,
+      "verified_on": "2026-11-08",
       "layout": [
         "pgsql/bin/initdb.exe",
         "pgsql/bin/pg_ctl.exe",
