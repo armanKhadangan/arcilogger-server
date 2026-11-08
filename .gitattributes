@@ -12,6 +12,9 @@
 
 # Log fixtures are evidence-like data: never touch line endings or whitespace.
 tests/fixtures/** -text -diff linguist-generated
+# Real time-stamp answers and root certificates: hashed and verified byte for byte.
+core/tests/data/** -text -diff
+deploy/windows/roots/** -text -diff
 
 *.woff2 binary
 *.png binary

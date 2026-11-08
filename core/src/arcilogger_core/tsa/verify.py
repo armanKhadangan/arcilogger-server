@@ -38,6 +38,7 @@ from cryptography.hazmat.primitives.asymmetric import ec, padding, rsa
 from cryptography.hazmat.primitives.serialization import Encoding
 from cryptography.x509.oid import ExtendedKeyUsageOID
 
+from arcilogger_core.tsa import certparse
 from arcilogger_core.tsa.asn1 import (
     DIGESTS,
     READABLE_DIGESTS,
@@ -46,6 +47,8 @@ from arcilogger_core.tsa.asn1 import (
     tst_info,
 )
 from arcilogger_core.tsa.base import TokenInfo, TsaError, VerifyResult
+from arcilogger_core.tsa.certparse import load_certificates as load_certificate_data
+from arcilogger_core.tsa.certparse import load_der, original_der
 
 if TYPE_CHECKING:  # arcilogger_core.crl imports this module
     from arcilogger_core.crl import Crl
@@ -93,11 +96,7 @@ def load_certificates(paths: Iterable[Path]) -> list[x509.Certificate]:
     """Load PEM or DER certificates (one or more per PEM file)."""
     certificates: list[x509.Certificate] = []
     for path in paths:
-        data = path.read_bytes()
-        if b"-----BEGIN CERTIFICATE-----" in data:
-            certificates.extend(x509.load_pem_x509_certificates(data))
-        else:
-            certificates.append(x509.load_der_x509_certificate(data))
+        certificates.extend(load_certificate_data(path.read_bytes()))
     return certificates
 
 
@@ -113,7 +112,7 @@ def _token_certificates(token: Any) -> list[tuple[Any, x509.Certificate]]:
         if choice.name != "certificate":
             continue
         der = choice.chosen.dump()
-        pairs.append((asn1_x509.Certificate.load(der), x509.load_der_x509_certificate(der)))
+        pairs.append((asn1_x509.Certificate.load(der), load_der(der)))
     return pairs
 
 
@@ -178,7 +177,7 @@ def _issuer_serial_problem(ess: Any, cert: x509.Certificate) -> str | None:
 
 
 def _check_ess_binding(signed_attrs: Any, cert: x509.Certificate) -> str | None:
-    der = cert.public_bytes(Encoding.DER)
+    der = original_der(cert)
     v2 = _attribute(signed_attrs, "signing_certificate_v2")
     if v2 is not None:
         ess = v2["certs"][0]
@@ -236,8 +235,9 @@ def _valid_at(cert: x509.Certificate, moment: datetime) -> bool:
 
 
 def fingerprint(certificate: x509.Certificate) -> str:
-    """SHA-256 fingerprint of a certificate (lower-case hex of its DER encoding)."""
-    return hashlib.sha256(certificate.public_bytes(Encoding.DER)).hexdigest()
+    """SHA-256 fingerprint of a certificate: lower-case hex of the DER encoding its issuer wrote
+    (:func:`arcilogger_core.tsa.certparse.fingerprint`)."""
+    return certparse.fingerprint(certificate)
 
 
 def _check_chain(

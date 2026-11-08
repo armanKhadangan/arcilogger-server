@@ -69,6 +69,7 @@ from arcilogger_core.layout import Layout
 from arcilogger_core.timeutil import isoformat_site, to_utc
 from arcilogger_core.tsa.asn1 import parse_container
 from arcilogger_core.tsa.base import TsaError
+from arcilogger_core.tsa.certparse import load_der
 from arcilogger_core.tsa.verify import fingerprint
 
 if sys.platform == "win32":
@@ -586,7 +587,7 @@ def _certificates_of(token_data: bytes, loaded: dict[bytes, x509.Certificate]) -
         ders = [choice.chosen.dump() for choice in choices if choice.name == "certificate"]
         for der in ders:
             if der not in loaded:
-                loaded[der] = x509.load_der_x509_certificate(der)
+                loaded[der] = load_der(der)
     except (TsaError, ValueError, TypeError, KeyError):
         return []
     return ders

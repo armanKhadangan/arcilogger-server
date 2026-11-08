@@ -1778,7 +1778,41 @@ function Invoke-ConfigSteps {
     if ($ZamaneJar) {
         Invoke-Step 'zamane.jar' ("Zamane istemcisi [client]: {0}" -f $ZamaneJar) { Install-ZamaneJar }
     }
+    if (Test-Path -LiteralPath (Get-BundleFile 'roots')) {
+        Invoke-Step 'roots.install' ("Ürünle gelen kök sertifikalar [built-in root certificates]: {0}" -f (Join-Path $ProgramDataDir 'kamusm-roots')) {
+            Install-BundledRoots
+        }
+    }
     Invoke-AdminSteps
+}
+
+function Install-BundledRoots {
+    <#
+    .SYNOPSIS
+        Puts the root certificates the product ships (the bundle's roots\: TÜRKTRUST's H7, 0.3.1)
+        into the roots folder, as the files the provider publishes. A certificate already there
+        (the same SHA-256, under any name) is left alone; nothing is ever overwritten or removed.
+        Its fingerprint counts as a legal root by itself (TURKTRUST_ROOT_FINGERPRINTS in core).
+    #>
+    $target = Join-Path $ProgramDataDir 'kamusm-roots'
+    $present = @{}
+    foreach ($file in @(Get-ChildItem -LiteralPath $target -File -ErrorAction SilentlyContinue)) {
+        $present[(Get-ArciFileSha256 -Path $file.FullName)] = $true
+    }
+    foreach ($root in @(Get-ChildItem -LiteralPath (Get-BundleFile 'roots') -Filter '*.crt' -File)) {
+        $sha = Get-ArciFileSha256 -Path $root.FullName
+        $destination = Join-Path $target $root.Name
+        if ($present.ContainsKey($sha)) {
+            Write-ArciInfo ("{0}: zaten var [already there]" -f $root.Name)
+        }
+        elseif (Test-Path -LiteralPath $destination) {
+            Write-ArciWarn ("{0}: bu adda başka bir dosya var, dokunulmadı [another file has this name, left alone]" -f $destination)
+        }
+        else {
+            Copy-Item -LiteralPath $root.FullName -Destination $destination
+            Write-ArciInfo ("{0} (SHA-256 {1})" -f $root.Name, $sha)
+        }
+    }
 }
 
 function Install-ZamaneJar {
@@ -2390,7 +2424,7 @@ function Show-NextSteps {
         Write-Host ('      & "{0}" secret set turktrust.username' -f $CoreExe)
         Write-Host ('      & "{0}" secret set turktrust.password' -f $CoreExe)
         Write-Host ('      & "{0}"   # secret set / secret delete sonrası: ArciAdmin''in secrets.json hakkı geri gelir [after a console secret set / secret delete: gives ArciAdmin its right on secrets.json back]' -f (Join-Path $InstallDir 'scripts\Set-ArciVaultAcl.ps1'))
-        Write-Host ('      Kök sertifikalar [roots]: TÜRKTRUST''un kök sertifikalarını TÜRKTRUST''tan alın; Ayarlar → Zaman damgası''ndan yükleyin ya da {0} içine koyun, SHA-256 parmak izlerini TÜRKTRUST''un yayımladığı değerlerle karşılaştırın [get TÜRKTRUST''s root certificates from TÜRKTRUST; upload them under Settings → Time stamping or put them in {0}, and compare the fingerprints with the values TÜRKTRUST publishes].' -f (Join-Path $ProgramDataDir 'kamusm-roots'))
+        Write-Host ('      Kök sertifika [root]: TÜRKTRUST''un H7 kökü ürünle gelir ve {0} içine konmuştur; yasal kök sayılır [TÜRKTRUST''s H7 root ships with the product, is in {0} and counts as a legal root].' -f (Join-Path $ProgramDataDir 'kamusm-roots'))
         Write-Host ('      & "{0}" tsa-test   # damgayı bu köklerle doğrular [verifies the stamp with these roots]' -f $CoreExe)
     }
     else {

@@ -20,4 +20,4 @@ Modules:
 * :mod:`arcilogger_db.cli` — the ``arcilogger-db`` command.
 """
 
-__version__ = "0.3.0"
+__version__ = "0.3.3"

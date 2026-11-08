@@ -23,7 +23,21 @@ class TsaNoCreditError(TsaError):
 
 
 class TsaRejectedError(TsaError):
-    """The server answered with a rejection status."""
+    """The server answered with a rejection status: ``status`` (RFC 3161 PKIStatus), its
+    ``texts`` (PKIFreeText, often absent) and ``fail_info`` (the PKIFailureInfo bits set)."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        status: str = "",
+        texts: tuple[str, ...] = (),
+        fail_info: tuple[str, ...] = (),
+    ) -> None:
+        super().__init__(message)
+        self.status = status
+        self.texts = texts
+        self.fail_info = fail_info
 
 
 class TsaResponseError(TsaError):

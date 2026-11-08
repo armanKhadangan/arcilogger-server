@@ -21,9 +21,15 @@ import ssl
 import urllib.error
 import urllib.request
 from http.client import HTTPException
+from pathlib import Path
 from typing import Final
 
-from arcilogger_core.tsa.base import TsaConfigurationError, TsaUnavailableError
+from arcilogger_core.tsa.base import (
+    StampResult,
+    TsaConfigurationError,
+    TsaRejectedError,
+    TsaUnavailableError,
+)
 from arcilogger_core.tsa.client import Rfc3161Client
 from arcilogger_core.tsa.rfc3161 import MAX_RESPONSE_BYTES, REQUEST_TYPE, timestamp_opener
 
@@ -37,6 +43,11 @@ TURKTRUST_LEGAL_GRADE: Final = True
 CREDENTIAL_STATUSES: Final = frozenset({401, 403})
 #: The 4xx statuses that are retried like a 5xx: the server is busy, not the request wrong.
 RETRYABLE_CLIENT_STATUSES: Final = frozenset({408, 429})
+#: TÜRKTRUST answers a wrong user name or password not with HTTP 401 but with HTTP 200 and a
+#: rejection without any text (failInfo badAlg, badRequest and bit 1), seen with a test account on
+#: 2026-11-08 (T2, docs/turktrust.md). Such a rejection is reported as a credentials problem and
+#: not retried; a rejection that says why stays a rejection.
+WRONG_CREDENTIALS_REJECTION: Final = "rejection"
 
 
 class _NoRedirects(urllib.request.HTTPRedirectHandler):
@@ -85,6 +96,18 @@ class TurktrustHttpsProvider(Rfc3161Client):
 
     def __repr__(self) -> str:
         return f"TurktrustHttpsProvider(url={self.url!r}, digest={self.digest!r})"
+
+    def stamp(self, file_path: Path) -> StampResult:
+        try:
+            return super().stamp(file_path)
+        except TsaRejectedError as exc:
+            if exc.status == WRONG_CREDENTIALS_REJECTION and not exc.texts:
+                raise TsaConfigurationError(
+                    "credentials: TÜRKTRUST rejected the request without a reason, its answer to "
+                    "a wrong user name or password; check turktrust.username and "
+                    f"turktrust.password ({exc})"
+                ) from None
+            raise
 
     def _exchange(self, request: bytes) -> bytes:
         http_request = urllib.request.Request(  # noqa: S310 - scheme checked in __init__

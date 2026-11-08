@@ -2,7 +2,9 @@
 
 > Durum: **taslak (Wave 5)**. TÜRKTRUST hakkında bilinenler TÜRKTRUST'ın e-postasından ve ürün
 > sahibinin 2.11.2026 tarihli kararından gelir. **"Sahada doğrula"** ile işaretli konular sahada,
-> TÜRKTRUST hesabıyla netleştirilecek ve bu belge güncellenecektir. English: [below](#english).
+> TÜRKTRUST hesabıyla netleştirilecek ve bu belge güncellenecektir. T1, T3, T4, T5 ve T2'nin yanlış
+> parola kısmı 8.11.2026'da bir TÜRKTRUST test hesabıyla, üretim sunucusundan alınan gerçek bir
+> damgayla sahada doğrulandı (bölüm 2). English: [below](#english).
 >
 > ARCILOGGER, **5651 yükümlülüklerini desteklemek için tasarlanmıştır**; hukuki uygunluk iddiasında
 > bulunmaz. Sağlayıcılar, yasal nitelik, yeniden damgalama ve iptal listeleri:
@@ -17,12 +19,12 @@ olduğu gibi sunucudan yalnızca özet (hash) çıkar; log satırı hiçbir zama
 
 | Konu | Bilgi | Kaynak |
 |---|---|---|
-| Üretim sunucusu | `zd.turktrust.com.tr`; adresin **yolu** bilinmiyor, varsayılan `https://zd.turktrust.com.tr/` (T1) | TÜRKTRUST e-postası |
+| Üretim sunucusu | `https://zd.turktrust.com.tr/` (kök yol; 8.11.2026'da doğrulandı, T1) | TÜRKTRUST e-postası, sahada damga |
 | Portlar | 80 ve 443; ARCILOGGER varsayılan olarak HTTPS (443) kullanır, düz HTTP (80) yalnızca açık bir yönetici seçimiyle (T5) | TÜRKTRUST e-postası |
-| Protokol | RFC 3161, HTTP Basic kimlik doğrulaması (kullanıcı adı + parola); TÜRKTRUST'ın yanlış kimlik bilgisine cevabı **sahada doğrula** (T2, bölüm 3 adım 7) | Ürün kararı (D12) |
+| Protokol | RFC 3161, HTTP Basic kimlik doğrulaması (kullanıcı adı + parola); yanlış parolaya cevap HTTP 200 ve metinsiz bir ret (8.11.2026'da görüldü, T2) | Ürün kararı (D12), sahada damga |
 | Kontör sorgusu | **Yok.** Bakiye TÜRKTRUST'ın kendi portalındadır | TÜRKTRUST |
 | Portal adresi, düşük bakiye e-postası | **TÜRKTRUST'a sorun** | — |
-| Kök sertifikalar ve iptal listeleri | TÜRKTRUST'ın "kök sertifikaları ve iptal listeleri" sayfası; kesin adresler **sahada doğrula** (T4) | TÜRKTRUST |
+| Kök sertifikalar ve iptal listeleri | Kök H7 ürünle gelir (bölüm 5); iptal listesi `http://www.turktrust.com.tr/sil/TURKTRUST_Kok_SIL_h7.crl` (T4). TÜRKTRUST'ın sayfası: <https://www.turktrust.com.tr/kok-sertifikalari-kurulumu-ve-iptal-listeleri.html> | TÜRKTRUST, sahada damga |
 | Başvuru, fiyat, sözleşme, deneme hesabı | **TÜRKTRUST'a sorun** | — |
 
 **Yasal nitelik (legal grade).** TÜRKTRUST üretim sunucusunun (`zd.turktrust.com.tr`) damgaları,
@@ -74,11 +76,11 @@ ekibine iletin.
 
 | # | Varsayım | Ayar | Durum |
 |---|---|---|---|
-| T1 | TSA adresi: sunucu `zd.turktrust.com.tr` (TÜRKTRUST e-postası), **yolu bilinmiyor**; varsayılan `https://zd.turktrust.com.tr/` | `[tsa] url` | Sahada doğrula |
-| T2 | Yanlış kimlik bilgisine TÜRKTRUST HTTP 401 ile cevap verir. Bakiye bittiğinde ne cevap verdiği bilinmiyor: durum metninde kontör kelimesi geçen bir ret "kontör yok" sayılır | `[tsa] credit_regex` durum metni için de kullanılır | Sahada doğrula |
-| T3 | TÜRKTRUST TSA sertifikasının genişletilmiş anahtar kullanımı (EKU) uzantısı kritik mi? Varsayılan: kritik değilse doğrulama hatası (Kamu SM K6 ile aynı düzen) | `[tsa] require_critical_eku` | Sahada doğrula |
-| T4 | TÜRKTRUST iptal listelerinin (SİL) sunucusu, "kök sertifikaları ve iptal listeleri" sayfasından | `[tsa] crl_urls`; sıkı giden güvenlik duvarı bu adreslerin sunucularını açar | Sahada doğrula |
-| T5 | Port 80 (düz HTTP). TÜRKTRUST e-postası 80 ve 443'ü adlandırır; varsayılan HTTPS'tir ve sahadaki damga testi bunu doğrular | `[tsa] allow_plain_http` (varsayılan kapalı) | Sahada doğrula |
+| T1 | TSA adresi: sunucu `zd.turktrust.com.tr` (TÜRKTRUST e-postası); varsayılan `https://zd.turktrust.com.tr/` | `[tsa] url` | **Doğrulandı** (8.11.2026): kök yol (`/`) RFC 3161 POST ile damga verir |
+| T2 | Yanlış parolaya TÜRKTRUST HTTP 401 ile değil, **HTTP 200 ve metinsiz bir ret** ile cevap verir (`rejection`, failInfo `badAlg`, `badRequest` ve RFC 3161'de adı olmayan bit 1); ARCILOGGER bunu yeniden denenmeyen bir kimlik bilgisi hatası olarak bildirir. Kimlik bilgisi hiç gönderilmezse HTTP 401. Bakiye bittiğinde ne cevap verdiği bilinmiyor: durum metninde kontör kelimesi geçen bir ret "kontör yok" sayılır | `[tsa] credit_regex` durum metni için de kullanılır | Yanlış parola **doğrulandı** (8.11.2026); boş bakiye: sahada doğrula |
+| T3 | TÜRKTRUST TSA sertifikasının genişletilmiş anahtar kullanımı (EKU) uzantısı kritik mi? | `[tsa] require_critical_eku` | **Doğrulandı** (8.11.2026): "TÜRKTRUST Zaman Damgası Hizmetleri H7" sertifikasında EKU (Time Stamping) kritik; varsayılan ayar doğru |
+| T4 | TÜRKTRUST iptal listesinin (SİL) adresi | `[tsa] crl_urls`; sıkı giden güvenlik duvarı bu adreslerin sunucularını açar | **Doğrulandı** (8.11.2026): damga sertifikasındaki dağıtım noktası `http://www.turktrust.com.tr/sil/TURKTRUST_Kok_SIL_h7.crl` (H7'nin imzaladığı liste; HTTPS ile de indirilebiliyor) |
+| T5 | HTTPS (443) ve düz HTTP (80). TÜRKTRUST e-postası 80 ve 443'ü adlandırır | `[tsa] allow_plain_http` (varsayılan kapalı) | **Doğrulandı** (8.11.2026): HTTPS çalışır; düz HTTP gerekmez (parolayı açık metin gönderir) |
 | K10 | Kamu SM iptal listesi adresleri ([kamusm.md](kamusm.md) bölüm 3) | `[tsa] crl_urls`, boşsa sertifikalardaki SİL dağıtım noktaları | Sahada doğrula |
 
 ARCILOGGER'ın kodunda hiçbir iptal listesi adresi yoktur: adresler `[tsa] crl_urls` listesinden ya da
@@ -200,12 +202,27 @@ Saygılarımızla,
 
 ## 5. Kök sertifikalar ve parmak izleri
 
+**TÜRKTRUST'ın kökü ürünle gelir (0.3.1).** TÜRKTRUST'ın damgaları **"TÜRKTRUST Elektronik
+Sertifika Hizmet Sağlayıcısı H7"** köküne bağlanır (2020-03-05 – 2030-03-03; SHA-256
+`9af399d1773a43c6f5c81831443ec5d6d2ce6a9c9e61dcad232dc1005443d413`, TÜRKTRUST'ın "Kök Sertifikaları
+Kurulumu ve İptal Listeleri" sayfasındaki dosya; 8.11.2026'da üretim sunucusunun verdiği gerçek bir
+damgayla doğrulandı). Kurulum ve her yükseltme bu dosyayı `C:\ProgramData\ARCILOGGER\kamusm-roots\`
+klasörüne koyar (var olan bir dosyaya dokunmaz); sağlayıcı TÜRKTRUST iken parmak izi, listeye
+yazılmadan da yasal kök sayılır (ürün sahibinin 8.11.2026 kararı). Aşağıdaki adımlar yalnızca
+TÜRKTRUST başka bir köke geçerse gerekir; dosyanın SHA-256 değerini yine de TÜRKTRUST'ın sayfasıyla
+karşılaştırıp kayda geçirebilirsiniz.
+
+H7 kökü imza algoritması alanlarına RFC 5758'e aykırı bir NULL değeri yazar; ARCILOGGER 0.3.0 bu
+yüzden hiçbir TÜRKTRUST damgasını okuyamıyordu. 0.3.1 kökü yalnızca bu farkı yok sayarak okur,
+parmak izini ve kurulan dosyayı ise TÜRKTRUST'ın yayımladığı haliyle tutar.
+
 Kökler damga testinden **önce** gelir: test önce damgayı alır, sonra onu sabitlenmiş köklerle
 doğrular; kökler yoksa damga alınmış olarak "no pinned root certificates" hatasıyla biter. Gece
 mühürlemesi de kökler olmadan çalışmaz.
 
 1. TÜRKTRUST'ın kök (ve gerekiyorsa ara) sertifikalarını TÜRKTRUST'ın "kök sertifikaları ve iptal
-   listeleri" sayfasından indirin. Sayfanın adresi: **sahada doğrula** (TÜRKTRUST'a sorun).
+   listeleri" sayfasından indirin:
+   <https://www.turktrust.com.tr/kok-sertifikalari-kurulumu-ve-iptal-listeleri.html>.
 2. Her dosyanın SHA-256 parmak izini TÜRKTRUST'ın yayımladığı ya da yazılı verdiği değerle
    karşılaştırın ve kayda geçirin (dosya adı, parmak izi, tarih, karşılaştıran):
 
@@ -331,7 +348,9 @@ gider. Mümkünse HTTPS'e dönün."
 
 > Status: **draft (Wave 5)**. What is known about TÜRKTRUST comes from TÜRKTRUST's e-mail and from
 > the product owner's decision of 2 November 2026. Items marked **"sahada doğrula"** (verify on
-> site) will be settled on site with a TÜRKTRUST account, and this document will be updated.
+> site) will be settled on site with a TÜRKTRUST account, and this document will be updated. T1,
+> T3, T4, T5 and the wrong-password part of T2 were confirmed on site on 8 November 2026 with a
+> TÜRKTRUST test account and a real stamp from the production server (section 2).
 >
 > ARCILOGGER is **designed to support 5651 obligations**; it makes no claim of legal compliance.
 > Providers, legal grade, re-stamping and revocation lists: [TIME-STAMPING.md](TIME-STAMPING.md).
@@ -346,12 +365,12 @@ Kamu SM, only a hash leaves the server; a log line is never sent.
 
 | Topic | Information | Source |
 |---|---|---|
-| Production server | `zd.turktrust.com.tr`; the **path** of the URL is unknown, default `https://zd.turktrust.com.tr/` (T1) | TÜRKTRUST's e-mail |
+| Production server | `https://zd.turktrust.com.tr/` (the root path; confirmed 2026-11-08, T1) | TÜRKTRUST's e-mail, a stamp on site |
 | Ports | 80 and 443; ARCILOGGER uses HTTPS (443) by default, plain HTTP (80) only by an explicit administrator choice (T5) | TÜRKTRUST's e-mail |
-| Protocol | RFC 3161, HTTP Basic authentication (username + password); TÜRKTRUST's answer to wrong credentials **sahada doğrula** (T2, section 3 step 7) | Product decision (D12) |
+| Protocol | RFC 3161, HTTP Basic authentication (username + password); a wrong password is answered with HTTP 200 and a rejection without text (seen 2026-11-08, T2) | Product decision (D12), a stamp on site |
 | Credit query | **None.** The balance is in TÜRKTRUST's own portal | TÜRKTRUST |
 | Portal address, low-balance e-mail | **Ask TÜRKTRUST** | — |
-| Root certificates and revocation lists | TÜRKTRUST's "kök sertifikaları ve iptal listeleri" page; exact addresses **sahada doğrula** (T4) | TÜRKTRUST |
+| Root certificates and revocation lists | The H7 root ships with the product (section 5); revocation list `http://www.turktrust.com.tr/sil/TURKTRUST_Kok_SIL_h7.crl` (T4). TÜRKTRUST's page: <https://www.turktrust.com.tr/kok-sertifikalari-kurulumu-ve-iptal-listeleri.html> | TÜRKTRUST, a stamp on site |
 | Application, price, contract, trial account | **Ask TÜRKTRUST** | — |
 
 **Legal grade.** Stamps of the TÜRKTRUST production server (`zd.turktrust.com.tr`) count as legal
@@ -403,11 +422,11 @@ and pass them to the product team.
 
 | # | Assumption | Setting | State |
 |---|---|---|---|
-| T1 | The TSA URL: host `zd.turktrust.com.tr` (TÜRKTRUST's e-mail), **path unknown**; default `https://zd.turktrust.com.tr/` | `[tsa] url` | Sahada doğrula |
-| T2 | TÜRKTRUST answers HTTP 401 for wrong credentials. Its answer for an empty balance is unknown: a rejection whose status text contains a credit word counts as "no credit" | `[tsa] credit_regex` is reused for the status text | Sahada doğrula |
-| T3 | Does TÜRKTRUST's TSA certificate mark the extended key usage (EKU) critical? Default: a verification error if it does not (same mechanism as Kamu SM K6) | `[tsa] require_critical_eku` | Sahada doğrula |
-| T4 | TÜRKTRUST's revocation-list (CRL) host, from its "kök sertifikaları ve iptal listeleri" page | `[tsa] crl_urls`; the strict outbound firewall opens their hosts | Sahada doğrula |
-| T5 | Port 80 (plain HTTP). TÜRKTRUST's e-mail names ports 80 and 443; HTTPS is the default, and the stamp test on site confirms it | `[tsa] allow_plain_http` (default off) | Sahada doğrula |
+| T1 | The TSA URL: host `zd.turktrust.com.tr` (TÜRKTRUST's e-mail); default `https://zd.turktrust.com.tr/` | `[tsa] url` | **Confirmed** (2026-11-08): the root path (`/`) answers an RFC 3161 POST with a stamp |
+| T2 | TÜRKTRUST answers a wrong password not with HTTP 401 but with **HTTP 200 and a rejection without any text** (`rejection`, failInfo `badAlg`, `badRequest` and bit 1, which RFC 3161 does not name); ARCILOGGER reports it as a credentials error that is not retried. Without any credentials: HTTP 401. Its answer for an empty balance is unknown: a rejection whose status text contains a credit word counts as "no credit" | `[tsa] credit_regex` is reused for the status text | Wrong password **confirmed** (2026-11-08); empty balance: sahada doğrula |
+| T3 | Does TÜRKTRUST's TSA certificate mark the extended key usage (EKU) critical? | `[tsa] require_critical_eku` | **Confirmed** (2026-11-08): the EKU (Time Stamping) of "TÜRKTRUST Zaman Damgası Hizmetleri H7" is critical; the default is right |
+| T4 | TÜRKTRUST's revocation-list (CRL) address | `[tsa] crl_urls`; the strict outbound firewall opens their hosts | **Confirmed** (2026-11-08): the stamp certificate's distribution point `http://www.turktrust.com.tr/sil/TURKTRUST_Kok_SIL_h7.crl` (signed by H7; also served over HTTPS) |
+| T5 | HTTPS (443) and plain HTTP (80). TÜRKTRUST's e-mail names ports 80 and 443 | `[tsa] allow_plain_http` (default off) | **Confirmed** (2026-11-08): HTTPS works; plain HTTP is not needed (it sends the password in clear text) |
 | K10 | Kamu SM's CRL addresses ([kamusm.md](kamusm.md) section 3) | `[tsa] crl_urls`, otherwise the certificates' CRL distribution points | Sahada doğrula |
 
 ARCILOGGER's code holds no revocation-list address: the addresses come from `[tsa] crl_urls`, or from
@@ -508,12 +527,27 @@ Turkish.
 
 ### 5. Root certificates and fingerprints
 
+**TÜRKTRUST's root ships with the product (0.3.1).** TÜRKTRUST's stamps chain to **"TÜRKTRUST
+Elektronik Sertifika Hizmet Sağlayıcısı H7"** (2020-03-05 to 2030-03-03; SHA-256
+`9af399d1773a43c6f5c81831443ec5d6d2ce6a9c9e61dcad232dc1005443d413`, the file on TÜRKTRUST's page
+"Kök Sertifikaları Kurulumu ve İptal Listeleri"; confirmed on 2026-11-08 with a real stamp from the
+production server). Installing and every upgrade put the file into
+`C:\ProgramData\ARCILOGGER\kamusm-roots\` (an existing file is never touched); while the provider is
+TÜRKTRUST its fingerprint counts as a legal root without being listed (product owner's decision of
+2026-11-08). The steps below are needed only if TÜRKTRUST moves to another root; you can still
+compare the file's SHA-256 with TÜRKTRUST's page and record it.
+
+The H7 root writes a NULL into its signature algorithm fields, against RFC 5758; ARCILOGGER 0.3.0
+therefore could not read any TÜRKTRUST stamp. 0.3.1 reads the root ignoring only that difference,
+and keeps its fingerprint and the installed file as TÜRKTRUST publishes them.
+
 The roots come **before** the stamp test: the test takes the stamp first and then verifies it with
 the pinned roots; without roots it ends, with the stamp already taken, with the error "no pinned
 root certificates". The nightly sealing does not work without roots either.
 
 1. Download TÜRKTRUST's root (and, where needed, intermediate) certificates from TÜRKTRUST's "kök
-   sertifikaları ve iptal listeleri" page. The page's address: **sahada doğrula** (ask TÜRKTRUST).
+   sertifikaları ve iptal listeleri" page:
+   <https://www.turktrust.com.tr/kok-sertifikalari-kurulumu-ve-iptal-listeleri.html>.
 2. Compare each file's SHA-256 fingerprint with the value TÜRKTRUST publishes or gives in writing,
    and record it (file name, fingerprint, date, who compared):
 

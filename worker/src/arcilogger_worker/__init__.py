@@ -14,4 +14,4 @@ Usage rollups (M4) and security detections (M5) come later. Evidence jobs
 ``arcilogger-core`` and run from Windows Task Scheduler without the database.
 """
 
-__version__ = "0.3.0"
+__version__ = "0.3.3"

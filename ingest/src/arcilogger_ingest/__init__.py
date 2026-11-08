@@ -6,4 +6,4 @@ row keeps a reference (source, day, line number) to its raw line. If the databas
 offset simply stops advancing; nothing is lost because the raw file is the queue.
 """
 
-__version__ = "0.3.0"
+__version__ = "0.3.3"

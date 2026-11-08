@@ -57,10 +57,27 @@ def parse_container(data: bytes) -> tuple[Any, str]:
     """Return ``(ContentInfo, container)`` for a TimeStampResp or a bare TimeStampToken."""
     try:
         response = TimeStampResp.load(data, strict=True)
-        status = response["status"]["status"].native
+        info = response["status"]
+        status = info["status"].native
         if status not in ("granted", "granted_with_mods"):
-            texts = response["status"]["status_string"].native or []
-            raise TsaRejectedError(f"time-stamp request rejected ({status}): {'; '.join(texts)}")
+            texts = tuple(info["status_string"].native or ())
+            # Bits RFC 3161 does not name come as numbers: TÜRKTRUST also sets bit 1 (RFC 4210's
+            # badMessageCheck) when it refuses the user name or password.
+            fail_info = tuple(
+                sorted(
+                    bit if isinstance(bit, str) else f"bit {bit}"
+                    for bit in info["fail_info"].native or ()
+                )
+            )
+            details = "; ".join(texts) or "no reason given"
+            if fail_info:
+                details += f" [failInfo: {', '.join(fail_info)}]"
+            raise TsaRejectedError(
+                f"time-stamp request rejected ({status}): {details}",
+                status=str(status),
+                texts=texts,
+                fail_info=fail_info,
+            )
         token = response["time_stamp_token"]
         if token.native is None:
             raise TsaResponseError("granted response without a token")

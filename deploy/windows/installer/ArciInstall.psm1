@@ -519,6 +519,34 @@ function ConvertTo-ArciArgumentString {
     (@($quoted) -join ' ')
 }
 
+function Resolve-ArciLauncher {
+    <#
+    .SYNOPSIS
+        The program and leading arguments that run FilePath. A console-script launcher of the
+        venv (Scripts\arcilogger-core.exe, arcilogger-db.exe, ...) runs as the venv's python.exe
+        with "-P -m arcilogger_<name>" instead. pip writes these launchers during the
+        installation, unsigned and new, and Windows' application control (Smart App Control,
+        WDAC) may refuse to start them ("An Application Control policy has blocked this file",
+        seen on a site on 2026-11-08), while python.exe is the signed interpreter the services
+        and tasks already run. -P keeps the current folder off sys.path, as the launcher does.
+        Anything else, and a launcher without a python.exe beside it, is run as it is.
+    .OUTPUTS
+        [pscustomobject] with FilePath and Prefix (the arguments that go first).
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory = $true)][string]$FilePath)
+    $name = [System.IO.Path]::GetFileName($FilePath)
+    $folder = [System.IO.Path]::GetDirectoryName($FilePath)
+    if ($folder -and $name -match '^arcilogger-(core|db|api|worker|ingest|collector)\.exe$') {
+        $module = 'arcilogger_' + $Matches[1].ToLowerInvariant()
+        $python = Join-Path $folder 'python.exe'
+        if (Test-Path -LiteralPath $python -PathType Leaf) {
+            return [pscustomobject]@{ FilePath = $python; Prefix = @('-P', '-m', $module) }
+        }
+    }
+    [pscustomobject]@{ FilePath = $FilePath; Prefix = @() }
+}
+
 function Invoke-ArciProcess {
     <#
     .SYNOPSIS
@@ -542,9 +570,10 @@ function Invoke-ArciProcess {
         [switch]$AllowFailure,
         [ValidateRange(0, 86400)][int]$TimeoutSeconds = 0
     )
+    $program = Resolve-ArciLauncher -FilePath $FilePath
     $psi = New-Object System.Diagnostics.ProcessStartInfo
-    $psi.FileName = $FilePath
-    $psi.Arguments = ConvertTo-ArciArgumentString -ArgumentList $ArgumentList
+    $psi.FileName = $program.FilePath
+    $psi.Arguments = ConvertTo-ArciArgumentString -ArgumentList (@($program.Prefix) + @($ArgumentList))
     $psi.UseShellExecute = $false
     $psi.CreateNoWindow = $true
     $psi.RedirectStandardOutput = $true
@@ -622,7 +651,9 @@ function Invoke-ArciExe {
     #>
     [CmdletBinding()]
     param([Parameter(Mandatory = $true)][string]$FilePath, [AllowEmptyCollection()][string[]]$ArgumentList = @())
-    & $FilePath @ArgumentList
+    $program = Resolve-ArciLauncher -FilePath $FilePath
+    $arguments = @($program.Prefix) + @($ArgumentList)
+    & $program.FilePath @arguments
     if ($LASTEXITCODE -ne 0) {
         throw ("{0} çıkış kodu {1} [exit code]" -f [System.IO.Path]::GetFileName($FilePath), $LASTEXITCODE)
     }

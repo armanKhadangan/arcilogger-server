@@ -86,7 +86,7 @@ const KEPT: Credentials = { customer: SECRET_KEPT, password: SECRET_KEPT, clear:
 
 /**
  * A site on TÜRKTRUST whose server is none of the choices (`server` null), with its two
- * credentials stored.
+ * credentials stored and Kamu SM's not.
  */
 function turktrustSite(overrides: Partial<TsaSection> = {}): TsaSection {
   return tsa({
@@ -100,7 +100,8 @@ function turktrustSite(overrides: Partial<TsaSection> = {}): TsaSection {
       'turktrust.username': { set: true, changed_at: null, changed_by: 'web:tolga' },
       'turktrust.password': { set: true, changed_at: null, changed_by: 'web:tolga' },
     },
-    readiness: { production: false, missing: ['zamane_jar', 'java'] },
+    // As the API reports it: `readiness` is Kamu SM production's, whose credentials are not stored.
+    readiness: { production: false, missing: ['credentials', 'zamane_jar', 'java'] },
     ...overrides,
   });
 }
@@ -526,6 +527,10 @@ describe('Ayarlar → Zaman damgası: the server choice and TÜRKTRUST (Wave 5 c
     ]);
     // The page opens the first step in use, not "Java".
     expect(firstOpen(site, false)).toBe('roots');
+    // Its credentials are done with TÜRKTRUST's two stored, although the API's `readiness` (Kamu
+    // SM production's) lists `credentials`: 0.3.1 showed "Eksik" here after a correct entry.
+    expect(site.readiness.missing).toContain('credentials');
+    expect(stepStatus('credentials', site, false)).toBe('ok');
     const unset = turktrustSite({
       secrets: {
         'kamusm.customer': { set: true, changed_at: null, changed_by: null },
@@ -590,8 +595,8 @@ describe('Ayarlar → Zaman damgası: the server choice and TÜRKTRUST (Wave 5 c
     expect(text(LOCALES.tr, 'settings.kamusm.title')).toBe('Zaman damgası');
     expect(text(LOCALES.tr, 'settings.kamusm.titles.zamane')).toBe('Kamu SM zaman damgası');
     expect(text(LOCALES.tr, 'settings.kamusm.titles.turktrust')).toBe('TÜRKTRUST zaman damgası');
-    // The "sahada doğrula" note names T1 (the path), T2 (an empty balance) and T5 (port 80)
-    // without a URL: host names only.
+    // The "sahada doğrula" note names T1 (the path, confirmed), T2 (an empty balance, still
+    // unconfirmed) and T5 (port 80) without a URL: host names only.
     for (const locale of Object.values(LOCALES)) {
       const note = String(text(locale, 'settings.kamusm.turktrust.note.body'));
       expect(note).toContain('zd.turktrust.com.tr');

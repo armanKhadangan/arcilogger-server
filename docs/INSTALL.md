@@ -259,7 +259,7 @@ Added after ARCILOGGER? Run
 ## 3. Java 8 (Kamu SM Zamane client)
 
 ```powershell
-msiexec /i C:\Kurulum\ARCILOGGER-0.3.0\operator-installers\temurin8-jre\OpenJDK8U-jre_x64_windows_hotspot_8u502b07.msi INSTALLDIR="C:\Program Files\Eclipse Adoptium\jre-8\" /qn /norestart /l*v C:\Windows\Temp\temurin8.log
+msiexec /i C:\Kurulum\ARCILOGGER-0.3.3\operator-installers\temurin8-jre\OpenJDK8U-jre_x64_windows_hotspot_8u502b07.msi INSTALLDIR="C:\Program Files\Eclipse Adoptium\jre-8\" /qn /norestart /l*v C:\Windows\Temp\temurin8.log
 & "C:\Program Files\Eclipse Adoptium\jre-8\bin\java.exe" -version
 ```
 
@@ -291,7 +291,7 @@ the values are in `SHA256SUMS.txt`, in the release notes and in the job summary 
 *Summary*):
 
 ```powershell
-Get-FileHash .\ARCILOGGER-Setup-0.3.0.exe, .\ARCILOGGER-0.3.0.zip -Algorithm SHA256 | Format-List Hash, Path
+Get-FileHash .\ARCILOGGER-Setup-0.3.3.exe, .\ARCILOGGER-0.3.3.zip -Algorithm SHA256 | Format-List Hash, Path
 Get-Content .\SHA256SUMS.txt
 ```
 
@@ -330,11 +330,11 @@ repository or the bundle.
 
 ## 6. Copy and verify
 
-Copy the folder to e.g. `C:\Kurulum\ARCILOGGER-0.3.0` (not into `D:\ARCILOGGER`), with the jar:
+Copy the folder to e.g. `C:\Kurulum\ARCILOGGER-0.3.3` (not into `D:\ARCILOGGER`), with the jar:
 
 ```powershell
 Get-ChildItem -Recurse C:\Kurulum | Unblock-File
-Get-FileHash C:\Kurulum\ARCILOGGER-0.3.0\SHA256SUMS -Algorithm SHA256   # = bundle fingerprint
+Get-FileHash C:\Kurulum\ARCILOGGER-0.3.3\SHA256SUMS -Algorithm SHA256   # = bundle fingerprint
 ```
 
 Copying only `ARCILOGGER-Setup-<version>.exe`? Compare its `Get-FileHash` with `SHA256SUMS.txt` on
@@ -343,7 +343,7 @@ the server too; the setup window prints the bundle fingerprint again.
 ## 7. Install
 
 ```powershell
-cd C:\Kurulum\ARCILOGGER-0.3.0
+cd C:\Kurulum\ARCILOGGER-0.3.3
 powershell -ExecutionPolicy Bypass -File .\installer\Install-Arcilogger.ps1 -DryRun `
     -SiteName "<organisation name>" -NtpServer <local time source> -AdminAddress <admin PC>
 powershell -ExecutionPolicy Bypass -File .\installer\Install-Arcilogger.ps1 `
@@ -758,9 +758,11 @@ stamps and the record keeping reviewed by a lawyer.
 
 ### TÜRKTRUST (optional, instead of Kamu SM)
 
-A site that wants its time stamps from TÜRKTRUST chooses the TÜRKTRUST server under Ayarlar →
-Zaman damgası, enters the username and password TÜRKTRUST gave and runs the stamp test. Opening the
-account, comparing the root certificate's fingerprint, the items to verify on site (T1–T5) and the
+A site that wants its time stamps from TÜRKTRUST chooses the TÜRKTRUST server (HTTPS) under Ayarlar →
+Zaman damgası, enters the username and password TÜRKTRUST gave and runs the stamp test. TÜRKTRUST's
+root certificate (H7) ships with the product: the installer puts it into
+`C:\ProgramData\ARCILOGGER\kamusm-roots\` and it counts as a legal root, so no root has to be
+uploaded. Opening the account, the root's fingerprint, the items confirmed on site (T1–T5) and the
 manual checklist: [turktrust.md](turktrust.md). TÜRKTRUST offers no credit query; watch the
 balance in its portal. The installer does not ask for the TÜRKTRUST credentials. The rules strict
 outbound opens for TÜRKTRUST, the revocation lists or a proxy: section 12.

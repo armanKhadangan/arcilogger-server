@@ -85,7 +85,7 @@
         "plainHttp": "Düz HTTP ile TÜRKTRUST kullanıcı adı ve parolası ağda şifrelenmeden, açık metin olarak gider. Yalnızca HTTPS kullanılamıyorsa seçin ve mümkün olunca HTTPS'e dönün.",
         "note": {
           "title": "Sahada doğrula",
-          "body": "TÜRKTRUST'ın bazı davranışları bu kurulumda doğrulanmadı; ilk damga testinde denetleyin. Sunucu adı zd.turktrust.com.tr; adresin yolu bilinmiyor, varsayılan /. TÜRKTRUST başka bir yol verdiyse sunucu konsolunda arcilogger.toml içindeki [tsa] url değerine yazın. Bakiye bittiğinde verilen yanıt bilinmiyor; durum metninde kontör sözcüğü geçen bir ret, kontör bitti sayılır. Düz HTTP 80, HTTPS 443 numaralı bağlantı noktasını kullanır. Ayrıntılar: turktrust.md bölüm 2."
+          "body": "TÜRKTRUST'ın davranışları 8 Kasım 2026'da bir test hesabıyla denetlendi: sunucu adı zd.turktrust.com.tr, adresin yolu / (damga HTTPS ile alındı); yanlış kullanıcı adı ya da parolaya açıklamasız bir ret verir. Henüz doğrulanmayan: bakiye bittiğinde verilen yanıt; durum metninde kontör sözcüğü geçen bir ret, kontör bitti sayılır. TÜRKTRUST başka bir yol verirse sunucu konsolunda arcilogger.toml içindeki [tsa] url değerine yazın. Düz HTTP 80, HTTPS 443 numaralı bağlantı noktasını kullanır. Ayrıntılar: turktrust.md bölüm 2."
         },
         "causes": {
           "credentials": "TÜRKTRUST kullanıcı adı ya da parolası kayıtlı değil."

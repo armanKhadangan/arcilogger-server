@@ -63,7 +63,7 @@ from arcilogger_core.admin.contract import (
     SystemStatus,
     parse_document,
 )
-from arcilogger_core.config import ApiConfig
+from arcilogger_core.config import TURKTRUST_ROOT_FINGERPRINTS, ApiConfig
 from arcilogger_core.fsutil import atomic_write_bytes
 from arcilogger_core.rawlog import format_line
 from arcilogger_core.secretstore import KAMUSM_CUSTOMER, KAMUSM_PASSWORD, SecretStore
@@ -73,6 +73,8 @@ WINDOWS = REPO / "deploy" / "windows"
 INSTALLER = WINDOWS / "installer"
 SERVICES = WINDOWS / "services"
 CADDYFILE = WINDOWS / "caddy" / "Caddyfile"
+#: TÜRKTRUST's H7 root, shipped in the bundle's roots\ and installed into kamusm-roots\ (0.3.1).
+TURKTRUST_H7_FILE = "TURKTRUST_Elektronik_Sertifika_Hizmet_Saglayicisi_h7.crt"
 COMPONENTS = INSTALLER / "components.json"
 MODULE = INSTALLER / "ArciInstall.psm1"
 INSTALL_SCRIPT = INSTALLER / "Install-Arcilogger.ps1"
@@ -8602,8 +8604,9 @@ def test_next_steps_print_the_setup_token_command(engine: str, tmp_path: Path) -
 
 
 def test_next_steps_follow_the_time_stamp_provider(engine: str, tmp_path: Path) -> None:
-    """Contract 2.4: with TÜRKTRUST, step 3 says where its account and its roots go; Kamu SM's
-    Java, Zamane client and credit lines stay with Kamu SM. No secret is asked or shown."""
+    """Contract 2.4: with TÜRKTRUST, step 3 says where its account goes and (0.3.1) that its H7
+    root ships with the product and where it is; Kamu SM's Java, Zamane client and credit lines
+    stay with Kamu SM. No secret is asked or shown."""
     kamusm = simulate(engine, tmp_path, "next-steps")["stdout"]
     assert "3. Kamu SM test hesabı [test account]:" in kamusm
     assert "secret set kamusm.customer" in kamusm
@@ -8617,9 +8620,10 @@ def test_next_steps_follow_the_time_stamp_provider(engine: str, tmp_path: Path) 
     assert "[enter the user name and password under Settings → Time stamping" in step
     assert "secret set turktrust.username" in step
     assert "secret set turktrust.password" in step
-    assert "TÜRKTRUST'un kök sertifikalarını TÜRKTRUST'tan alın" in step
+    assert "TÜRKTRUST'un H7 kökü ürünle gelir" in step
+    assert "yasal kök sayılır [TÜRKTRUST's H7 root ships with the product" in step
     roots = run / "sim" / "programdata" / "ARCILOGGER" / "kamusm-roots"
-    shown = re.search(r"ya da (.+) içine koyun", step)
+    shown = re.search(r"ürünle gelir ve (.+) içine konmuştur", step)
     assert shown is not None, step
     assert Path(shown.group(1).replace("\\", "/")) == roots
     for word in ("Kamu SM", "kamusm.", "Java", "Zamane", "kontör", "credit"):
@@ -11654,6 +11658,11 @@ def test_real_install_upgrade_rollback_and_uninstall(tmp_path: Path) -> None:
             for entry in firewall_state["disabled_rules"]
         }
         assert not disabled & set(state["rdp_rules"]), (disabled, state["rdp_rules"], last())
+        # TÜRKTRUST's H7 root ships with the product (0.3.1): the file TÜRKTRUST publishes, in the
+        # roots folder, its fingerprint one the core counts as a legal root.
+        shipped = program_data / "kamusm-roots" / TURKTRUST_H7_FILE
+        assert shipped.is_file(), last()
+        assert sha256_bytes(shipped.read_bytes()) in TURKTRUST_ROOT_FINGERPRINTS, last()
         # A syslog message reaches the raw spool through the service and its NTFS rights.
         marker = f"arcilogger-e2e-{uuid.uuid4().hex}"
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sender:
@@ -13082,6 +13091,93 @@ def test_acl_script_checks_both_protected_state_folders_for_links_first() -> Non
     child_check = "Confirm-ArciNoLink -Item $child -Folder $item.FullName\n"
     assert entry.index(folder_check) < entry.index("Set-ArciAccessControl -Item $item")
     assert entry.index(child_check) < entry.index("Set-ArciAccessControl -Item $child")
+
+
+_LAUNCHER_SCRIPT = r"""
+param([string]$ModulePath, [string]$Folder, [string]$Packages, [string]$OutputPath)
+$ErrorActionPreference = 'Stop'
+$module = Import-Module $ModulePath -Force -PassThru
+$scripts = Join-Path $Folder 'Scripts'
+$cases = [ordered]@{
+    core = Join-Path $scripts 'arcilogger-core.exe'
+    db = Join-Path $scripts 'arcilogger-db.exe'
+    api_upper = Join-Path $scripts 'ARCILOGGER-API.EXE'
+    pip = Join-Path $scripts 'pip.exe'
+    lonely = Join-Path (Join-Path $Folder 'NoPython') 'arcilogger-core.exe'
+    bare = 'arcilogger-core.exe'
+    sc = 'sc.exe'
+}
+$out = [ordered]@{}
+foreach ($name in $cases.Keys) {
+    $resolved = & $module { param($Path) Resolve-ArciLauncher -FilePath $Path } $cases[$name]
+    $out[$name] = [ordered]@{ file = $resolved.FilePath; prefix = @($resolved.Prefix) }
+}
+if ($Packages) {
+    $arguments = @('--config', 'C:\a b\arcilogger.toml', 'secret', 'init')
+    $run = Invoke-ArciProcess -FilePath $cases.core -ArgumentList $arguments `
+        -Environment @{ PYTHONPATH = $Packages }
+    $out['run'] = $run.StdOut.Trim()
+}
+[System.IO.File]::WriteAllText($OutputPath, (ConvertTo-Json -InputObject $out -Depth 4))
+"""
+
+
+def test_the_installer_runs_the_venv_launchers_as_python(engine: str, tmp_path: Path) -> None:
+    """0.3.3: on a site with Windows' application control on, the upgrade to 0.3.2 stopped at
+    "secret init": "An Application Control policy has blocked this file" for the venv's
+    arcilogger-core.exe, a launcher pip writes unsigned during the installation, while the
+    venv's python.exe (the signed interpreter the services and tasks run) had just worked.
+    Invoke-ArciProcess and Invoke-ArciExe therefore run arcilogger-<name>.exe as the python.exe
+    beside it with "-P -m arcilogger_<name>"; the arguments stay as they are, and anything
+    else (or a launcher without a python.exe beside it) runs unchanged. Off Windows the run
+    itself is checked too, with a stand-in package that prints what it received."""
+    venv = tmp_path / "venv"
+    scripts = venv / "Scripts"
+    scripts.mkdir(parents=True)
+    for name in ("arcilogger-core.exe", "arcilogger-db.exe", "ARCILOGGER-API.EXE", "pip.exe"):
+        (scripts / name).write_bytes(b"not a program\n")
+    (venv / "NoPython").mkdir()
+    (venv / "NoPython" / "arcilogger-core.exe").write_bytes(b"not a program\n")
+    packages = ""
+    if sys.platform == "win32":
+        (scripts / "python.exe").write_bytes(b"")  # only its presence is checked here
+    else:
+        (scripts / "python.exe").symlink_to(os.path.realpath(sys.executable))
+        stand_in = tmp_path / "packages" / "arcilogger_core"
+        stand_in.mkdir(parents=True)
+        (stand_in / "__init__.py").write_text("", encoding="utf-8")
+        (stand_in / "__main__.py").write_text(
+            "import json, sys\n"
+            "print(json.dumps({'argv': sys.argv[1:], 'safe_path': sys.flags.safe_path}))\n",
+            encoding="utf-8",
+        )
+        packages = str(tmp_path / "packages")
+    script = write_script(tmp_path / "launchers.ps1", _LAUNCHER_SCRIPT)
+    out = tmp_path / "launchers.json"
+    result = run_powershell(
+        engine, script, "-ModulePath", str(MODULE), "-Folder", str(venv),
+        "-Packages", packages, "-OutputPath", str(out),
+    )  # fmt: skip
+    assert result.returncode == 0, result.stdout + result.stderr
+    report = read_json(out)
+    python = scripts / "python.exe"
+    for case, module in (("core", "core"), ("db", "db"), ("api_upper", "api")):
+        assert Path(report[case]["file"]) == python, report[case]
+        assert report[case]["prefix"] == ["-P", "-m", f"arcilogger_{module}"], report[case]
+    assert Path(report["pip"]["file"]) == scripts / "pip.exe"
+    assert Path(report["lonely"]["file"]) == venv / "NoPython" / "arcilogger-core.exe"
+    assert report["bare"]["file"] == "arcilogger-core.exe"
+    assert report["sc"]["file"] == "sc.exe"
+    for case in ("pip", "lonely", "bare", "sc"):
+        assert report[case]["prefix"] == [], report[case]
+    if packages:
+        assert json.loads(report["run"]) == {
+            "argv": ["--config", "C:\\a b\\arcilogger.toml", "secret", "init"],
+            "safe_path": True,
+        }
+    module = MODULE.read_text(encoding="utf-8-sig")
+    for helper in ("Invoke-ArciProcess", "Invoke-ArciExe"):
+        assert "Resolve-ArciLauncher -FilePath $FilePath" in _function(module, helper), helper
 
 
 _ITEM_GONE_SCRIPT = r"""

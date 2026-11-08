@@ -558,10 +558,10 @@ sections 2 and 3, [kamusm.md](kamusm.md) section 3.
 
 | Id | Assumption | Where it is configured |
 |---|---|---|
-| T1 | TÜRKTRUST's TSA URL: the host `zd.turktrust.com.tr` is from TÜRKTRUST's e-mail, the **path** is unknown; default `https://zd.turktrust.com.tr/` | `[tsa] url` |
-| T2 | TÜRKTRUST answers HTTP 401 for wrong credentials; its answer for an empty balance is unknown: a rejection whose status text contains a credit word counts as "no credit" | `[tsa] credit_regex` |
-| T3 | Whether TÜRKTRUST's TSA certificate marks the EKU extension critical | `[tsa] require_critical_eku` |
-| T4 | TÜRKTRUST's CRL host (from TÜRKTRUST's "kök sertifikaları ve iptal listeleri" page) | `[tsa] crl_urls`; the firewall opens these hosts |
-| T5 | Port 80 (plain HTTP): TÜRKTRUST's e-mail names ports 80 and 443; HTTPS is the default, and the probe stamp confirms it on site | `[tsa] allow_plain_http` (off by default) |
+| T1 | TÜRKTRUST's TSA URL `https://zd.turktrust.com.tr/` (confirmed 2026-11-08: the root path stamps) | `[tsa] url` |
+| T2 | A wrong password: HTTP 200 and a rejection without text (confirmed 2026-11-08; reported as a credentials error). Its answer for an empty balance is unknown: a rejection whose status text contains a credit word counts as "no credit" | `[tsa] credit_regex` |
+| T3 | TÜRKTRUST's TSA certificate marks the EKU extension critical (confirmed 2026-11-08) | `[tsa] require_critical_eku` |
+| T4 | TÜRKTRUST's CRL: `http://www.turktrust.com.tr/sil/TURKTRUST_Kok_SIL_h7.crl` (confirmed 2026-11-08) | `[tsa] crl_urls`; the firewall opens these hosts |
+| T5 | HTTPS works (confirmed 2026-11-08); plain HTTP is not needed | `[tsa] allow_plain_http` (off by default) |
 | K10 | Kamu SM's CRL addresses | `[tsa] crl_urls`, otherwise the certificates' distribution points |
 | — | How the Zamane console client takes a proxy | not in this release: Zamane does not use `[network] https_proxy` |

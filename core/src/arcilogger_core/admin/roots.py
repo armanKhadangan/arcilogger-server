@@ -24,11 +24,10 @@ from pathlib import Path
 from typing import Final, Literal
 
 from cryptography import x509
-from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives.asymmetric import ec, rsa
-from cryptography.hazmat.primitives.serialization import Encoding
 
 from arcilogger_core.admin.contract import UPLOAD_LIMITS
+from arcilogger_core.tsa import certparse
 
 ROOT_INVALID: Final = "root_certificate_invalid"
 ROOT_EXPIRED: Final = "root_expired"
@@ -105,20 +104,14 @@ def _info(certificate: x509.Certificate) -> CertificateInfo:
         is_ca = constraints.ca
     except x509.ExtensionNotFound:
         is_ca = False
-    self_signed = certificate.issuer == certificate.subject
-    if self_signed:
-        try:
-            certificate.verify_directly_issued_by(certificate)
-        except (ValueError, TypeError, InvalidSignature):
-            self_signed = False
     return CertificateInfo(
-        sha256=hashlib.sha256(certificate.public_bytes(Encoding.DER)).hexdigest(),
+        sha256=certparse.fingerprint(certificate),
         subject=certificate.subject.rfc4514_string(),
         issuer=certificate.issuer.rfc4514_string(),
         not_before=certificate.not_valid_before_utc,
         not_after=certificate.not_valid_after_utc,
         is_ca=is_ca,
-        self_signed=self_signed,
+        self_signed=certparse.is_self_signed(certificate),
         key=_key_text(certificate),
     )
 
@@ -133,9 +126,8 @@ def _strong_key(certificate: x509.Certificate) -> bool:
 
 
 def _certificates(data: bytes) -> list[x509.Certificate]:
-    if _PEM_MARK in data:
-        return x509.load_pem_x509_certificates(data)
-    return [x509.load_der_x509_certificate(data)]
+    # Leniently: TÜRKTRUST's H7 root (arcilogger_core.tsa.certparse).
+    return certparse.load_certificates(data)
 
 
 def inspect_root(data: bytes, *, now: datetime | None = None) -> RootInspection:
@@ -170,7 +162,7 @@ def inspect_root(data: bytes, *, now: datetime | None = None) -> RootInspection:
     return RootInspection(
         ok=True,
         certificate=info,
-        pem=certificate.public_bytes(Encoding.PEM),
+        pem=certparse.to_pem(certificate),
         warnings=warnings,
     )
 

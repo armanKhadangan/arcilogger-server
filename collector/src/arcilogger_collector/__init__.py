@@ -13,4 +13,4 @@ The spool file is also the durable queue for the ingest service, so the collecto
 depends on the database and never waits for anything except the disk.
 """
 
-__version__ = "0.3.0"
+__version__ = "0.3.3"

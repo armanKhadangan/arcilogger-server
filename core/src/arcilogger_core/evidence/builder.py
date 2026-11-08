@@ -78,6 +78,7 @@ from arcilogger_core.seal import sha256_file, unsealed_days
 from arcilogger_core.timeutil import isoformat_site, to_site, utc_now
 from arcilogger_core.tsa.asn1 import READABLE_DIGESTS, parse_container
 from arcilogger_core.tsa.base import TokenInfo, TsaError
+from arcilogger_core.tsa.certparse import load_der, original_der, to_pem
 from arcilogger_core.tsa.verify import (
     confirmed_legal_grade,
     fingerprint,
@@ -204,7 +205,7 @@ def _vault_path(layout: Layout, relative: str) -> Path:
 def _token_certificates(token: bytes) -> list[x509.Certificate]:
     content, _ = parse_container(token)
     return [
-        x509.load_der_x509_certificate(choice.chosen.dump())
+        load_der(choice.chosen.dump())
         for choice in content["content"]["certificates"] or []
         if choice.name == "certificate"
     ]
@@ -530,7 +531,7 @@ class _Records:
 
 
 def _certificate_facts(certificate: x509.Certificate, path: str) -> dict[str, Any]:
-    der = certificate.public_bytes(Encoding.DER)
+    der = original_der(certificate)
     return {
         "path": path,
         "subject": certificate.subject.rfc4514_string(),
@@ -547,15 +548,11 @@ def _roots(
 ) -> tuple[list[_Entry], list[dict[str, Any]]]:
     """Only the trusted roots the package's tokens actually chain to (never, say, a test root
     the server also trusts): the recipient is asked to compare exactly these with Kamu SM."""
-    unique = {
-        digest: root
-        for root in roots
-        if (digest := hashlib.sha256(root.public_bytes(Encoding.DER)).hexdigest()) in used
-    }
+    unique = {digest: root for root in roots if (digest := fingerprint(root)) in used}
     entries, index, bundle = [], [], b""
     for digest, certificate in sorted(unique.items()):
         name = f"{ROOTS_FOLDER}{digest[:16]}.pem"
-        pem = certificate.public_bytes(Encoding.PEM)
+        pem = to_pem(certificate)
         bundle += pem
         entries.append(_Entry(name, "root", data=pem))
         index.append(_certificate_facts(certificate, name))
@@ -570,13 +567,12 @@ def _tsa_certificates(
     unique: dict[str, x509.Certificate] = {}
     for day in days:
         for certificate in day.certificates:
-            der = certificate.public_bytes(Encoding.DER)
-            if der not in root_ders:
-                unique[hashlib.sha256(der).hexdigest()] = certificate
+            if certificate.public_bytes(Encoding.DER) not in root_ders:
+                unique[fingerprint(certificate)] = certificate
     entries, index = [], []
     for digest, certificate in sorted(unique.items()):
         name = f"{TSA_FOLDER}{digest[:16]}.pem"
-        entries.append(_Entry(name, "tsa_certificate", data=certificate.public_bytes(Encoding.PEM)))
+        entries.append(_Entry(name, "tsa_certificate", data=to_pem(certificate)))
         index.append(_certificate_facts(certificate, name))
     return entries, index
 
@@ -752,7 +748,7 @@ def _guide_facts(
     encrypted: bool,
     roots: Sequence[x509.Certificate],
 ) -> GuideFacts:
-    by_digest = {hashlib.sha256(r.public_bytes(Encoding.DER)).hexdigest(): r for r in roots}
+    by_digest = {fingerprint(r): r for r in roots}
     return GuideFacts(
         package_id=package_id,
         created_at=now,

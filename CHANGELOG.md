@@ -5,6 +5,71 @@ versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.3.3] — 2026-11-08
+
+Release version 0.3.3 (`v0.3.3`): setup works where Windows' application control is on.
+Upgrading from 0.3.0, 0.3.1 or a failed 0.3.2: run the new `ARCILOGGER-Setup-0.3.3.exe`; it
+upgrades in place and keeps the data.
+
+### Fixed
+
+- **The upgrade to 0.3.2 stopped at "secret init" on a server with Windows' application control
+  (Smart App Control or WDAC) on**: "An Application Control policy has blocked this file". The
+  installer ran `arcilogger-core.exe`, a launcher pip writes unsigned during the installation;
+  the policy refused it, the upgrade was rolled back and the previous version kept running.
+  Setup now runs these commands (`secret`, the database upgrade, licence and setup-token steps)
+  as the venv's own `python.exe -P -m arcilogger_<name>`, the signed interpreter the services
+  and the scheduled tasks already use. The console commands that setup prints still name the
+  launchers; where the policy blocks them, run `python.exe -m arcilogger_core …` from the same
+  `venv\Scripts` folder instead.
+
+## [0.3.2] — 2026-11-08
+
+Release version 0.3.2 (`v0.3.2`): a fix of the TÜRKTRUST page. Upgrading from 0.3.0 or 0.3.1: run
+the new `ARCILOGGER-Setup-0.3.2.exe`; it upgrades in place and keeps the data.
+
+### Fixed
+
+- **Ayarlar → Zaman damgası showed "Müşteri bilgileri: Eksik" with TÜRKTRUST although its
+  username and password were stored.** The step also asked for Kamu SM's customer number and
+  password, which a TÜRKTRUST site never enters. It now follows only TÜRKTRUST's two values. Only
+  the badge was wrong: sealing and the stamp test already used TÜRKTRUST's values.
+
+### Changed
+
+- The "Sahada doğrula" note on the TÜRKTRUST page says what the test account confirmed on
+  2026-11-08 (the address path `/` over HTTPS, the answer to a wrong password) and that only the
+  answer for an empty balance is still unconfirmed.
+
+## [0.3.1] — 2026-11-08
+
+Release version 0.3.1 (`v0.3.1`): ARCILOGGER can seal with TÜRKTRUST. Upgrading from 0.3.0: run
+the new `ARCILOGGER-Setup-0.3.1.exe`; it upgrades in place and keeps the data.
+
+### Fixed
+
+- **TÜRKTRUST stamps could not be read at all.** TÜRKTRUST's root "Elektronik Sertifika Hizmet
+  Sağlayıcısı H7", which every TÜRKTRUST stamp carries, writes a NULL into its ECDSA signature
+  algorithm fields (against RFC 5758), and the library ARCILOGGER used refused it: the stamp test,
+  the nightly sealing and a root upload in the browser all failed. ARCILOGGER now reads such a
+  certificate ignoring only that difference and keeps its fingerprint, the installed file and the
+  files of an evidence package exactly as TÜRKTRUST publishes them. The standalone verifier in the
+  evidence packages already accepted it.
+- **A wrong TÜRKTRUST password was reported as an unreadable answer and retried.** TÜRKTRUST
+  answers it with HTTP 200 and a rejection without any text; ARCILOGGER now reports "kullanıcı adı
+  ya da parola" (credentials) and does not retry. Any rejection now names its failure bits.
+
+### Changed
+
+- **TÜRKTRUST's root ships with the product** (owner decision 2026-11-08). Setup puts the H7 root
+  into `C:\ProgramData\ARCILOGGER\kamusm-roots\` on every install and upgrade (an existing file is
+  never touched), and with TÜRKTRUST as the provider its fingerprint
+  `9af399d1…d413` counts as a legal root without being listed. Choosing TÜRKTRUST (HTTPS) and
+  entering its username and password under Ayarlar → Zaman damgası is all that is left.
+- docs/turktrust.md: T1, T3, T4, T5 and the wrong-password part of T2 were confirmed on site on
+  2026-11-08 with a TÜRKTRUST test account (HTTPS at the root path; the TSA certificate's EKU is
+  critical; the revocation list `TURKTRUST_Kok_SIL_h7.crl`).
+
 ## [0.3.0] — 2026-11-07
 
 Release version 0.3.0 (`v0.3.0`): the server's desktop (icon, notification area, Backups), the

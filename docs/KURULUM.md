@@ -316,7 +316,7 @@ olarak içerir (`operator-installers\temurin8-jre\`). Sabit bir klasöre kurun k
 `arcilogger.toml` içindeki yol Java güncellemelerinden sonra da geçerli kalsın:
 
 ```powershell
-msiexec /i C:\Kurulum\ARCILOGGER-0.3.0\operator-installers\temurin8-jre\OpenJDK8U-jre_x64_windows_hotspot_8u502b07.msi INSTALLDIR="C:\Program Files\Eclipse Adoptium\jre-8\" /qn /norestart /l*v C:\Windows\Temp\temurin8.log
+msiexec /i C:\Kurulum\ARCILOGGER-0.3.3\operator-installers\temurin8-jre\OpenJDK8U-jre_x64_windows_hotspot_8u502b07.msi INSTALLDIR="C:\Program Files\Eclipse Adoptium\jre-8\" /qn /norestart /l*v C:\Windows\Temp\temurin8.log
 & "C:\Program Files\Eclipse Adoptium\jre-8\bin\java.exe" -version
 ```
 
@@ -350,7 +350,7 @@ Bu yolda yönetici PC'sinde Git, uv, Node.js ya da Inno Setup gerekmez. İndirdi
 özetinde (Actions → çalıştırma → *Summary*) yazar:
 
 ```powershell
-Get-FileHash .\ARCILOGGER-Setup-0.3.0.exe, .\ARCILOGGER-0.3.0.zip -Algorithm SHA256 | Format-List Hash, Path
+Get-FileHash .\ARCILOGGER-Setup-0.3.3.exe, .\ARCILOGGER-0.3.3.zip -Algorithm SHA256 | Format-List Hash, Path
 Get-Content .\SHA256SUMS.txt
 ```
 
@@ -394,12 +394,12 @@ yayımlanan **SHA-256** değerini not edin ve `tss-client-console-3.1.33.jar` do
 
 ## 6. Paketi sunucuya kopyalama ve doğrulama
 
-Klasörü USB bellekle veya paylaşımla sunucuya kopyalayın, örneğin `C:\Kurulum\ARCILOGGER-0.3.0`
+Klasörü USB bellekle veya paylaşımla sunucuya kopyalayın, örneğin `C:\Kurulum\ARCILOGGER-0.3.3`
 (**`D:\ARCILOGGER` içine değil**). Jar dosyasını da `C:\Kurulum\` içine koyun.
 
 ```powershell
 Get-ChildItem -Recurse C:\Kurulum | Unblock-File       # "internetten indirildi" işaretini kaldırır
-Get-FileHash C:\Kurulum\ARCILOGGER-0.3.0\SHA256SUMS -Algorithm SHA256
+Get-FileHash C:\Kurulum\ARCILOGGER-0.3.3\SHA256SUMS -Algorithm SHA256
 ```
 
 Çıkan değer, bölüm 4'te not ettiğiniz **paket parmak izi** ile aynı olmalıdır. Kurulum betiği
@@ -414,7 +414,7 @@ karşılaştırın; kurulum penceresi paket parmak izini yeniden yazar.
 değerleri (bölüm 7.1) burada da verin; verilmezse deneme onları sorar:
 
 ```powershell
-cd C:\Kurulum\ARCILOGGER-0.3.0
+cd C:\Kurulum\ARCILOGGER-0.3.3
 powershell -ExecutionPolicy Bypass -File .\installer\Install-Arcilogger.ps1 -DryRun `
     -SiteName "<kuruluş adı>" -NtpServer <yerel saat kaynağı> -AdminAddress <yönetici PC'si>
 ```
@@ -874,9 +874,11 @@ Damgaların ve kayıt düzeninin hukuki değerlendirmesi için hukuk müşavirin
 ### TÜRKTRUST (isteğe bağlı, Kamu SM yerine)
 
 Zaman damgalarını TÜRKTRUST'tan almak isteyen kurum, Ayarlar → Zaman damgası'nda TÜRKTRUST
-sunucusunu seçer, TÜRKTRUST'ın verdiği kullanıcı adını ve parolayı girer ve damga testini çalıştırır.
-Hesap açma, kök sertifikanın parmak izinin karşılaştırılması, sahada doğrulanacaklar (T1–T5) ve
-elle denetim listesi: [turktrust.md](turktrust.md). TÜRKTRUST kontör sorgusu sunmaz; bakiyeyi
+sunucusunu (HTTPS) seçer, TÜRKTRUST'ın verdiği kullanıcı adını ve parolayı girer ve damga testini
+çalıştırır. TÜRKTRUST'ın kök sertifikası (H7) ürünle gelir: kurulum onu
+`C:\ProgramData\ARCILOGGER\kamusm-roots\` içine koyar ve yasal kök sayılır, elle kök yüklemek
+gerekmez. Hesap açma, kökün parmak izi, sahada doğrulananlar (T1–T5) ve elle denetim listesi:
+[turktrust.md](turktrust.md). TÜRKTRUST kontör sorgusu sunmaz; bakiyeyi
 TÜRKTRUST'ın portalından izleyin. Kurulum programı TÜRKTRUST kimlik bilgilerini sormaz. Sıkı giden
 trafikte TÜRKTRUST'a, iptal listelerine ya da vekil sunucuya açılan kurallar bölüm 12'de.
 

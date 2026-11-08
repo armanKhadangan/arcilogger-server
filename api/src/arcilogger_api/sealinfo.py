@@ -70,6 +70,7 @@ from arcilogger_core.seal import sha256_file
 from arcilogger_core.timeutil import day_window, site_day, utc_now
 from arcilogger_core.tsa.asn1 import parse_container
 from arcilogger_core.tsa.base import TsaError
+from arcilogger_core.tsa.certparse import load_der
 from arcilogger_core.tsa.verify import (
     confirmed_legal_grade,
     inspect_token,
@@ -257,7 +258,7 @@ def token_certificate(token: bytes, subject: str) -> x509.Certificate | None:
         for choice in content["content"]["certificates"] or []:
             if choice.name != "certificate":
                 continue
-            certificate = x509.load_der_x509_certificate(choice.chosen.dump())
+            certificate = load_der(choice.chosen.dump())
             if certificate.subject.rfc4514_string() == subject:
                 return certificate
     except (TsaError, ValueError, TypeError, KeyError):

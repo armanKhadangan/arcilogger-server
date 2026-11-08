@@ -1,7 +1,7 @@
 {
   "name": "arcilogger-web",
   "private": true,
-  "version": "0.3.0",
+  "version": "0.3.3",
   "description": "ARCILOGGER web interface (served by the ARCILOGGER server; no client software is installed on user PCs)",
   "type": "module",
   "engines": {
