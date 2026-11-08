@@ -13521,10 +13521,11 @@ function Get-PortOwners([string]$Protocol, [int]$Port) {
     }
     , @()
 }
-if ($Scenario -eq 'data-taken') {
+if ($Scenario -like 'data-*') {
     $folder = Join-Path $DataRoot 'pgdata'
     [void](New-Item -ItemType Directory -Path $folder -Force)
-    [System.IO.File]::WriteAllText((Join-Path $folder 'notes.txt'), 'not a cluster')
+    $name = $(if ($Scenario -eq 'data-cluster') { 'PG_VERSION' } else { 'notes.txt' })
+    [System.IO.File]::WriteAllText((Join-Path $folder $name), '16')
 }
 Add-PostgresChecks
 $report = [ordered]@{
@@ -13541,6 +13542,9 @@ PG_CHECK_CASES = [
     ("fresh", "install", {"preflight.postgresql": "ok"}),
     ("port-taken", "install", {"preflight.postgresql": "ok", "preflight.postgresql-port": "fail"}),
     ("data-taken", "install", {"preflight.postgresql": "ok", "preflight.postgresql-data": "fail"}),
+    # a cluster without its stored password (no secret store on this new server)
+    ("data-cluster", "install",
+     {"preflight.postgresql": "ok", "preflight.postgresql-data": "fail"}),
     # an operator's -PgServiceName, an upgrade or a bundle without PostgreSQL keep today's path
     ("no-bundle", None, {"preflight.postgresql": "fail"}),
     ("upgrade", None, {"preflight.postgresql": "fail"}),

@@ -851,8 +851,18 @@ function Install-BundledPostgres {
         [System.IO.File]::AppendAllText((Join-Path $data 'postgresql.conf'), $lines, (New-Object System.Text.UTF8Encoding -ArgumentList $false))
     }
     [void](Invoke-ArciProcess -FilePath (Join-Path $bin 'pg_ctl.exe') -ArgumentList @('register', '-N', $BundledPgService, '-D', $data, '-S', 'auto', '-U', 'NT AUTHORITY\NetworkService'))
-    Start-Service -Name $BundledPgService
-    $version = Wait-BundledPostgres
+    try {
+        Start-Service -Name $BundledPgService
+        $version = Wait-BundledPostgres
+    }
+    catch {
+        # Unregistered again, so that the next run starts over from here: the cluster and its
+        # stored password stay and are used again.
+        $failure = $_.Exception.Message
+        try { Stop-Service -Name $BundledPgService -Force -ErrorAction Stop } catch { Write-Verbose 'service not running' }
+        [void](Invoke-ArciProcess -FilePath (Join-Path $bin 'pg_ctl.exe') -ArgumentList @('unregister', '-N', $BundledPgService) -AllowFailure)
+        throw ("PostgreSQL hizmeti başlamadı [the PostgreSQL service did not start]: {0}" -f $failure)
+    }
     Write-BundledPostgresRecord $component $data
     Write-ArciInfo ("PostgreSQL hazır [ready]: {0}" -f $version)
 }
@@ -3105,6 +3115,10 @@ function Add-PostgresChecks {
             }
             if ((Test-Path -LiteralPath $data) -and @(Get-ChildItem -LiteralPath $data -Force).Count -gt 0 -and -not (Test-Path -LiteralPath (Join-Path $data 'PG_VERSION'))) {
                 Add-Check 'postgresql-data' 'fail' ("{0} boş değil ve bir PostgreSQL veri klasörü değil; taşıyın ya da silin [not empty and not a PostgreSQL cluster: move it away]" -f $data)
+            }
+            elseif ((Test-Path -LiteralPath (Join-Path $data 'PG_VERSION')) -and -not (Test-StoredSecret 'postgres.superuser')) {
+                # A cluster of an interrupted run is used again only with the password it was made with.
+                Add-Check 'postgresql-data' 'fail' ("{0} bir PostgreSQL veri klasörü ama parolası gizli depoda yok; taşıyın ya da silin [a PostgreSQL cluster whose password is not stored: move it away]" -f $data)
             }
         }
         elseif ($null -eq $service) {
