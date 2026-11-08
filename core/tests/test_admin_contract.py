@@ -688,3 +688,10 @@ def test_only_the_smtp_trial_error_carries_the_server_answer() -> None:
         ErrorRef(code="ntp_unreachable", detail="timeout")
     with pytest.raises(ValueError, match="at most 300"):
         ErrorRef(code="smtp_test_failed", detail="x" * 301)
+    # its explanation (S5) has both texts, and only beside an answer
+    answer = {"code": "smtp_test_failed", "detail": "535 5.7.8 Username and Password"}
+    assert ErrorRef(**answer, hint_tr="Parola.", hint_en="Password.").hint_en == "Password."
+    with pytest.raises(ValueError, match="both texts or none"):
+        ErrorRef(**answer, hint_tr="Parola.")
+    with pytest.raises(ValueError, match="a hint explains a detail"):
+        ErrorRef(code="smtp_test_failed", hint_tr="Parola.", hint_en="Password.")

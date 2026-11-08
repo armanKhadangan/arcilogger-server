@@ -144,7 +144,14 @@ def test_a_test_email_is_sent_once_with_its_result_and_audit_entry(
     assert "Deneme e-postası" in str(smtp_server.received[0].message["Subject"])
     row = request(db_session, request_id)
     assert (row.state, row.terminal, row.error_code) == ("succeeded", True, None)
-    assert row.result == {"ok": True, "to": MASKED, "smtp_code": None, "error_text": None}
+    assert row.result == {
+        "ok": True,
+        "to": MASKED,
+        "smtp_code": None,
+        "error_text": None,
+        "hint_tr": None,
+        "hint_en": None,
+    }
     (entry,) = audit(db_session, "smtp.test")
     assert entry.actor_username == "system"
     assert entry.target is None
@@ -177,12 +184,45 @@ def test_a_refused_test_email_keeps_the_smtp_code(
     assert row.result is not None
     assert (row.result["ok"], row.result["to"], row.result["smtp_code"]) == (False, MASKED, 550)
     assert "550" in row.result["error_text"]
+    assert (row.result["hint_tr"], row.result["hint_en"]) == (None, None)  # an unknown server
     (entry,) = audit(db_session, "smtp.test")
     assert (entry.details["ok"], entry.details["smtp_code"], entry.details["code"]) == (
         False,
         550,
         "smtp_test_failed",
     )
+
+
+def test_a_refusal_of_a_known_mail_server_is_explained(
+    sessions: sessionmaker[Session],
+    db_session: Session,
+    layout: Layout,
+    smtp_server: FakeSmtp,
+    requester: User,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """0.4.0 S5: the reply and the configured host go to ``smtp.explain``; its texts come back
+    beside the raw reply (the table itself is pinned in core's tests)."""
+    seen: list[tuple[str | None, str | None]] = []
+
+    def explain(text: str | None, host: str | None) -> tuple[str, str]:
+        seen.append((text, host))
+        return "Uygulama şifresi gerekir.", "An app password is needed."
+
+    monkeypatch.setattr(admin_jobs, "explain", explain)
+    smtp_server.refuse.add(TO)
+    request_id = queue(db_session, requester, TEST_EMAIL, {"to": TO})
+    config = smtp_config(layout, smtp_server)
+    process_requests(sessions, config, now=NOW)
+    row = request(db_session, request_id)
+    assert row.result is not None
+    assert (row.result["hint_tr"], row.result["hint_en"]) == (
+        "Uygulama şifresi gerekir.",
+        "An app password is needed.",
+    )
+    ((text, host),) = seen
+    assert "550" in (text or "")
+    assert host == config.smtp.host
 
 
 def test_a_test_email_without_an_smtp_server_is_not_configured(
@@ -230,6 +270,8 @@ def test_a_test_email_goes_only_to_a_listed_recipient_or_the_requester(
         "to": "n***@ornek.example",
         "smtp_code": None,
         "error_text": None,
+        "hint_tr": None,
+        "hint_en": None,
     }
     set_setting(db_session, "alerts.email_recipients", [duty], updated_by="tolga")
     db_session.commit()
@@ -357,6 +399,8 @@ def test_an_unexpected_error_fails_only_its_own_request(
         "to": "k***@ornek.example",
         "smtp_code": None,
         "error_text": "beklenmeyen hata / unexpected error: RuntimeError",
+        "hint_tr": None,
+        "hint_en": None,
     }
     assert [r.recipients for r in smtp_server.received] == [[TO]]
     rebuilt = request(db_session, rebuild_id)

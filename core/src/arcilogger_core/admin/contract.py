@@ -941,6 +941,8 @@ INTERFACE_CODES: Final = frozenset({"snmp_no_such_interface", "snmp_no_hc_counte
 #: secret the probe was given and cut at :data:`DETAIL_MAX`.
 DETAIL_CODES: Final = frozenset({"smtp_test_failed"})
 DETAIL_MAX: Final = 300
+#: Longest explanation of a :data:`DETAIL_CODES` answer (``arcilogger_core.smtp.explain``).
+HINT_MAX: Final = 600
 
 
 class ProbeInterface(_Model):
@@ -967,6 +969,9 @@ class ErrorRef(_Model):
     interfaces: Annotated[tuple[ProbeInterface, ...], Field(max_length=PROBE_INTERFACES_MAX)] = ()
     #: The server's answer, for :data:`DETAIL_CODES` only (0.4.0 P6); never a secret.
     detail: Annotated[str, Field(max_length=DETAIL_MAX)] | None = None
+    #: What to change for a known answer of Google or Microsoft 365 (0.4.0 S5), both or none.
+    hint_tr: Annotated[str, Field(max_length=HINT_MAX)] | None = None
+    hint_en: Annotated[str, Field(max_length=HINT_MAX)] | None = None
 
     @field_validator("code")
     @classmethod
@@ -980,6 +985,10 @@ class ErrorRef(_Model):
             raise ValueError(f"interfaces come only with {sorted(INTERFACE_CODES)}")
         if self.detail is not None and self.code not in DETAIL_CODES:
             raise ValueError(f"a detail comes only with {sorted(DETAIL_CODES)}")
+        if (self.hint_tr is None) != (self.hint_en is None):
+            raise ValueError("a hint has both texts or none")
+        if self.hint_tr is not None and self.detail is None:
+            raise ValueError("a hint explains a detail")
         return self
 
 

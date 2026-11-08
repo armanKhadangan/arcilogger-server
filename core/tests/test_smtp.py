@@ -12,9 +12,17 @@ from typing import Any
 
 import pytest
 
+from arcilogger_core.admin.contract import HINT_MAX
 from arcilogger_core.admin.testing import SmtpState, SmtpTestServer
 from arcilogger_core.config import SmtpConfig
-from arcilogger_core.smtp import ERROR_MAX, SmtpSender, SmtpSendError, error_text, trial_message
+from arcilogger_core.smtp import (
+    ERROR_MAX,
+    SmtpSender,
+    SmtpSendError,
+    error_text,
+    explain,
+    trial_message,
+)
 from arcilogger_core.testing import refused_port
 from arcilogger_core.timeutil import SITE_TZ
 
@@ -172,3 +180,66 @@ def test_error_texts_are_short_and_without_the_secret() -> None:
     assert text.startswith("SMTPResponseException: 554 ")
     assert error_text(TimeoutError()) == "timeout: no answer from the SMTP server"
     assert PASSWORD not in error_text(OSError(f"refused {PASSWORD}"), PASSWORD)
+
+
+# -- explanations of known refusals (0.4.0 S5) ---------------------------------------------
+
+#: The replies as the providers' pages print them (read 2026-11-08; design/0.4.0-contract.md,
+#: Deviations), shaped as smtplib raises them, and the explanation each one must get. Google's
+#: page prints 5.7.80 and 5.7.90; the contract's table had 5.7.8 and 5.7.9: both are covered.
+REPLIES = [
+    ("smtp.gmail.com", 535, "5.7.80 Username and Password not accepted.", "kullanıcı adı"),
+    ("smtp.gmail.com", 535, "5.7.8 Username and Password not accepted.", "kullanıcı adı"),
+    ("smtp.gmail.com", 534, "5.7.90 Application-specific password required.", "16 karakter"),
+    ("smtp.gmail.com", 534, "5.7.9 Application-specific password required.", "16 karakter"),
+    ("smtp.gmail.com", 534, "5.7.90 Please log in with your web browser and then try again.",
+     "kullanıcı adı"),
+    ("smtp.gmail.com", 534, "5.7.14 Please log in through your web browser and then try again.",
+     "kullanıcı adı"),
+    ("smtp-relay.gmail.com", 550, "5.7.1 Invalid credentials for relay [198.51.100.7].",
+     "geçiş hizmeti"),
+    ("smtp-relay.gmail.com", 550, "5.7.0 Email relay denied [198.51.100.7].", "geçiş hizmeti"),
+    ("smtp.office365.com", 535, "5.7.139 Authentication unsuccessful, SmtpClientAuthentication "
+     "is disabled for the Tenant.", "SMTP AUTH"),
+    ("smtp.office365.com", 535, "5.7.3 Authentication unsuccessful", "SMTP AUTH"),
+    ("smtp.office365.com", 530, "5.7.57 Client not authenticated to send mail.",
+     "oturum açılmadan"),
+    ("smtp.office365.com", 550, "5.7.60 SMTP; Client does not have permissions to send as this "
+     "sender.", "Farklı Gönder"),
+]  # fmt: skip
+
+
+@pytest.mark.parametrize(("host", "code", "reply", "said"), REPLIES)
+def test_known_refusals_are_explained(host: str, code: int, reply: str, said: str) -> None:
+    text = error_text(smtplib.SMTPAuthenticationError(code, reply.encode()))
+    explained = explain(text, host)
+    assert explained is not None, text
+    tr, en = explained
+    assert said in tr
+    assert en
+    assert max(len(tr), len(en)) <= HINT_MAX
+    assert "\n" not in tr + en
+
+
+def test_the_host_family_decides() -> None:
+    google = error_text(smtplib.SMTPAuthenticationError(535, b"5.7.8 Username and Password"))
+    assert explain(google, "SMTP.Gmail.com.") is not None
+    assert explain(google, "smtp.googlemail.com") is not None
+    assert explain(google, "smtp.ornek.example") is None  # the same reply from another server
+    assert explain(google, "gmail.com.ornek.example") is None
+    assert explain(google, None) is None
+    microsoft = "SMTPAuthenticationError: 535 5.7.3 Authentication unsuccessful"
+    assert explain(microsoft, "smtp-mail.outlook.com") is not None
+    assert explain(microsoft, "smtp.gmail.com") is None
+
+
+def test_unknown_replies_get_no_explanation() -> None:
+    assert explain("SMTPAuthenticationError: 535 5.7.38 something new", "smtp.gmail.com") is None
+    assert explain("timeout: no answer from the SMTP server", "smtp.office365.com") is None
+    assert explain("", "smtp.gmail.com") is None
+    assert explain(None, "smtp.gmail.com") is None
+    # 5.7.1 at Google says many things: only a relay refusal is explained
+    policy = "SMTPDataError: 550 5.7.1 This message is likely unsolicited email."
+    assert explain(policy, "smtp-relay.gmail.com") is None
+    # a status inside a longer number is not one
+    assert explain("SMTPResponseException: 451 15.7.80 x", "smtp.gmail.com") is None

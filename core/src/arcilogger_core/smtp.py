@@ -9,11 +9,15 @@ without the worker.
 certificate against the system trust store or ``ca_file`` — always, there is no switch to turn it
 off. ``none`` is plain SMTP for a relay on this server. The password (secret ``smtp.password``)
 is used for ``AUTH`` only and never appears in an error text.
+
+:func:`explain` turns a known refusal of Google's or Microsoft 365's servers into a short
+explanation of what to change (0.4.0 S5); the raw reply is always shown next to it.
 """
 
 from __future__ import annotations
 
 import html
+import re
 import smtplib
 import ssl
 from dataclasses import dataclass
@@ -117,6 +121,134 @@ def _code(exc: BaseException) -> int | None:
         exc, smtplib.SMTPAuthenticationError
     ):
         return int(exc.smtp_code)
+    return None
+
+
+# -- explanations of known refusals (0.4.0 S5) ---------------------------------------------------
+#
+# Sources, read 2026-11-08 (design/0.4.0-contract.md, Deviations): Google's "SMTP errors and
+# codes" (support.google.com/a/answer/3726730, updated 2026-10-26; it prints 5.7.80 and 5.7.90
+# where the contract's table had 5.7.8 and 5.7.9, so both forms are matched — sahada doğrula),
+# "Transition from less secure apps to OAuth" (answer/176600) and "Route outgoing SMTP relay
+# messages through Google" (answer/2956491); Microsoft Learn "How to set up a multifunction
+# device or application to send email using Microsoft 365" (updated 2026-10-05) and "Fix issues
+# with printers, scanners, and LOB applications that send email using Microsoft 365".
+
+#: The mail server families with explanations, by the domain of ``[smtp] host``.
+_FAMILIES: Final = {
+    "gmail.com": "google",
+    "googlemail.com": "google",
+    "office365.com": "microsoft",
+    "outlook.com": "microsoft",
+}
+#: An enhanced status code (RFC 3463) in a reply.
+_STATUS: Final = re.compile(r"(?<![\d.])([245]\.\d{1,3}\.\d{1,3})(?![\d.])")
+
+
+@dataclass(frozen=True)
+class Explanation:
+    """What to change when a server of ``family`` answers with one of ``statuses`` (and, when
+    set, a reply containing ``phrase``)."""
+
+    family: str
+    statuses: frozenset[str]
+    phrase: str | None
+    tr: str
+    en: str
+
+
+#: The first entry that matches explains the reply.
+EXPLANATIONS: Final[tuple[Explanation, ...]] = (
+    Explanation(
+        "google",
+        frozenset({"5.7.9", "5.7.90"}),
+        "application-specific password",
+        "Bu Google hesabında 2 Adımlı Doğrulama açık: hesap parolası yerine 16 karakterlik bir "
+        "uygulama şifresi gerekir (myaccount.google.com/apppasswords). Yönetici uygulama "
+        "şifrelerine izin vermiyorsa “Google SMTP geçiş hizmeti” hazır ayarını kullanın.",
+        "This Google account has 2-Step Verification on: it needs a 16-character app password "
+        "instead of the account password (myaccount.google.com/apppasswords). If the "
+        "administrator does not allow app passwords, use the “Google SMTP relay” preset.",
+    ),
+    Explanation(
+        "google",
+        frozenset({"5.7.8", "5.7.80", "5.7.9", "5.7.90", "5.7.14"}),
+        None,
+        "Google bu kullanıcı adı ve parolayla girişi kabul etmedi. Google Workspace hesapları "
+        "1 Mayıs 2025'ten beri hesap parolasıyla SMTP girişini kabul etmiyor: 2 Adımlı "
+        "Doğrulama açık hesabın uygulama şifresini girin ya da “Google SMTP geçiş hizmeti” "
+        "hazır ayarını kullanın.",
+        "Google did not accept this user name and password. Since 1 May 2025 Google Workspace "
+        "accounts no longer accept the account password for SMTP: enter an app password of an "
+        "account with 2-Step Verification, or use the “Google SMTP relay” preset.",
+    ),
+    Explanation(
+        "google",
+        frozenset({"5.7.0", "5.7.1"}),
+        "relay",
+        "Google SMTP geçiş hizmeti bu gönderimi kabul etmedi. Google Yönetici Konsolu'nda "
+        "(Uygulamalar → Google Workspace → Gmail → Yönlendirme → SMTP geçiş hizmeti) bu "
+        "sunucunun internete çıktığı genel IP adresini ekleyin; gönderen adresi kendi alan "
+        "adınızda olmalı.",
+        "The Google SMTP relay did not accept this e-mail. In the Google Admin console (Apps → "
+        "Google Workspace → Gmail → Routing → SMTP relay service) add the public IP address "
+        "this server reaches the internet from; the sender address must be in your own domain.",
+    ),
+    Explanation(
+        "microsoft",
+        frozenset({"5.7.3", "5.7.139"}),
+        None,
+        "Microsoft 365 girişi kabul etmedi. Parolayı kontrol edin; Microsoft 365 yöneticisi bu "
+        "posta kutusu için kimliği doğrulanmış SMTP'yi (SMTP AUTH) açmalı. Kiracıda “Güvenlik "
+        "varsayılanları” açıksa parolayla SMTP girişi çalışmaz.",
+        "Microsoft 365 did not accept the sign-in. Check the password; the Microsoft 365 "
+        "administrator must turn on authenticated SMTP (SMTP AUTH) for this mailbox. With the "
+        "tenant's Security defaults on, SMTP sign-in with a password does not work.",
+    ),
+    Explanation(
+        "microsoft",
+        frozenset({"5.7.57"}),
+        None,
+        "Microsoft 365 oturum açılmadan gönderime izin vermiyor: kullanıcı adı ve parolayı "
+        "girin; posta kutusu için SMTP AUTH açık olmalı.",
+        "Microsoft 365 does not accept e-mail without a sign-in: enter the user name and "
+        "password; SMTP AUTH must be on for the mailbox.",
+    ),
+    Explanation(
+        "microsoft",
+        frozenset({"5.7.60"}),
+        None,
+        "Microsoft 365 bu gönderen adresine izin vermiyor: gönderen adresi oturum açan posta "
+        "kutusunun adresi olmalı ya da bu posta kutusuna o adres için “Farklı Gönder” (Send "
+        "As) izni verilmeli.",
+        "Microsoft 365 refuses this sender address: it must be the address of the signed-in "
+        "mailbox, or that mailbox needs “Send As” permission for it.",
+    ),
+)
+
+
+def family(host: str | None) -> str | None:
+    """``google``, ``microsoft`` or None for the domain of ``host``."""
+    name = (host or "").strip().rstrip(".").lower()
+    for domain, found in _FAMILIES.items():
+        if name == domain or name.endswith(f".{domain}"):
+            return found
+    return None
+
+
+def explain(text: str | None, host: str | None) -> tuple[str, str] | None:
+    """``(tr, en)``: what to change for the refusal ``text`` (as :func:`error_text` writes it)
+    of the server ``host``; None for a reply or a server without an explanation."""
+    found = family(host)
+    if not text or found is None:
+        return None
+    statuses = set(_STATUS.findall(text))
+    lowered = text.lower()
+    for entry in EXPLANATIONS:
+        if entry.family != found or not statuses & entry.statuses:
+            continue
+        if entry.phrase is None or entry.phrase in lowered:
+            return entry.tr, entry.en
     return None
 
 

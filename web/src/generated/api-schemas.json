@@ -11301,6 +11301,28 @@
           ],
           "title": "Field"
         },
+        "hint_en": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Hint En"
+        },
+        "hint_tr": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Hint Tr"
+        },
         "interfaces": {
           "items": {
             "$ref": "#/components/schemas/ProbeInterface"
