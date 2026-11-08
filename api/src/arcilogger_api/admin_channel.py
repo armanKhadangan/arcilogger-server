@@ -65,6 +65,7 @@ from arcilogger_api.errors import ApiError
 from arcilogger_api.security import CurrentUser, client_ip, ensure_recent_auth
 from arcilogger_core.admin import rules
 from arcilogger_core.admin.contract import (
+    DETAIL_CODES,
     EXPIRED_GRACE,
     INBOX_MAX_BYTES,
     INBOX_MAX_REQUESTS,
@@ -378,6 +379,9 @@ class RequestError(BaseModel):
     #: What the device reported to the ``snmp`` probe, with ``snmp_no_such_interface`` and
     #: ``snmp_no_hc_counters`` only (W5-N-9); no person data, no secret.
     interfaces: list[ProbeInterface] = Field(default_factory=list)
+    #: The e-mail server's answer to the trial e-mail, with ``smtp_test_failed`` only (0.4.0 P6);
+    #: the secrets the trial was given are removed.
+    detail: str | None = None
 
 
 class AdminRequestOut(BaseModel):
@@ -1301,11 +1305,12 @@ class Channel:
         error = status.error.code if status is not None and status.error is not None else None
         field_path = status.error.field if status is not None and status.error is not None else None
         interfaces = status.error.interfaces if status is not None and status.error else ()
+        detail = status.error.detail if status is not None and status.error else None
         if row.terminal and row.error_code and error is None:
             error = row.error_code
         self._mirror(db, row, state, status, result, error)
         return self._out(
-            row, state, steps, version, result, error, warnings, field_path, interfaces
+            row, state, steps, version, result, error, warnings, field_path, interfaces, detail
         )
 
     def _unclaimed(self, row: AdminRequestRow) -> str:
@@ -1437,6 +1442,7 @@ class Channel:
         warnings: Sequence[str],
         field_path: str | None,
         interfaces: Sequence[ProbeInterface] = (),
+        detail: str | None = None,
     ) -> AdminRequestOut:
         label_tr, label_en = STATE_LABELS.get(state, (state, state))
         for item in steps:
@@ -1451,6 +1457,7 @@ class Channel:
                 message_en=message_en,
                 field=field_path,
                 interfaces=list(interfaces) if error in INTERFACE_CODES else [],
+                detail=detail if error in DETAIL_CODES else None,
             )
         manual_tr, manual_en = (
             manual_steps(version.number if version else None, error)

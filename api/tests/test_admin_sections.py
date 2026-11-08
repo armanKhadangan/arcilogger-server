@@ -20,6 +20,7 @@ from fastapi.testclient import TestClient
 from arcilogger_api import admin_channel
 from arcilogger_api.testing import LoggedIn
 from arcilogger_core.admin import agent as agent_module
+from arcilogger_core.admin.probe import ProbeResult
 from arcilogger_core.admin.testing import FakeAgent, Installed, windows_replica_target
 from arcilogger_core.config import Config, parse_config
 
@@ -100,6 +101,24 @@ def test_the_mail_server_is_probed_with_the_typed_password(
         "arcilogger",
     )
     assert smtp["secrets"]["smtp.password"]["set"] is True
+
+
+def test_a_refused_trial_email_shows_the_mail_server_answer(
+    client: TestClient, admin: LoggedIn, agent: FakeAgent
+) -> None:
+    """0.4.0 P6: the browser shows what the mail server said, so the administrator sees an
+    app-password or SMTP AUTH refusal; the typed password never comes back."""
+    password = "Örnek-Posta-Parola-3"
+    answer = f"535 5.7.8 Username and Password not accepted ({password})"
+    agent.prober.results["smtp"] = ProbeResult(False, "smtp_test_failed", answer)
+    body = {"etag": etag(client, "smtp"), **SMTP, "password": password}
+    found = settle(client, agent, client.put(f"{CONFIG}/smtp", json=body))
+    assert found["state"] == "probe_failed", found
+    assert found["error"]["code"] == "smtp_test_failed"
+    detail = found["error"]["detail"]
+    assert detail.startswith("535 5.7.8 Username and Password not accepted")
+    assert password not in detail
+    assert client.get(CONFIG).json()["sections"]["smtp"]["host"] is None
 
 
 def test_a_mail_server_change_is_reverted_without_a_trial_recipient(

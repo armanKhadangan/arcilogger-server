@@ -19,6 +19,7 @@ from arcilogger_core.admin.contract import (
     AdminRequest,
     AgentStatus,
     DocumentError,
+    ErrorRef,
     JarsFile,
     JournalLine,
     RequestStatus,
@@ -676,3 +677,14 @@ def _plan_with(path: str, value: Any) -> dict[str, Any]:
 def test_an_invalid_system_plan_is_refused(path: str, value: Any) -> None:
     with pytest.raises(DocumentError):
         document(SystemPlan, _plan_with(path, value))
+
+
+def test_only_the_smtp_trial_error_carries_the_server_answer() -> None:
+    """0.4.0 P6: ``detail`` (the e-mail server's answer, at most 300 characters) comes only with
+    ``smtp_test_failed``."""
+    ref = ErrorRef(code="smtp_test_failed", detail="535 5.7.8 Username and Password not accepted")
+    assert ref.detail is not None
+    with pytest.raises(ValueError, match="a detail comes only with"):
+        ErrorRef(code="ntp_unreachable", detail="timeout")
+    with pytest.raises(ValueError, match="at most 300"):
+        ErrorRef(code="smtp_test_failed", detail="x" * 301)

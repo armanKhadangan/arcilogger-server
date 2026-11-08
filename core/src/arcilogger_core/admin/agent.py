@@ -56,6 +56,8 @@ from arcilogger_core.admin import rules, tomledit
 from arcilogger_core.admin.apply import Applier, ApplyOutcome, ChangePlan
 from arcilogger_core.admin.contract import (
     ACTION_TASKS,
+    DETAIL_CODES,
+    DETAIL_MAX,
     HEARTBEAT_INTERVAL,
     INTERFACE_CODES,
     JOURNAL_DAYS,
@@ -353,6 +355,7 @@ class _Progress:
         warnings: Iterable[str] = (),
         rolled_back: bool = False,
         interfaces: Sequence[ProbeInterface] = (),
+        detail: str | None = None,
     ) -> RequestStatus:
         status = RequestStatus(
             id=self.id,
@@ -364,7 +367,12 @@ class _Progress:
             effective_at=effective_at,
             result=result,
             error=(
-                ErrorRef(code=error, field=_field(field_path), interfaces=tuple(interfaces))
+                ErrorRef(
+                    code=error,
+                    field=_field(field_path),
+                    interfaces=tuple(interfaces),
+                    detail=detail,
+                )
                 if error
                 else None
             ),
@@ -969,8 +977,11 @@ class Agent:
             code: str,
             path: str | None,
             interfaces: Sequence[ProbeInterface] = (),
+            detail: str | None = None,
         ) -> bool:
-            progress.write(status_state, error=code, field_path=path, interfaces=interfaces)
+            progress.write(
+                status_state, error=code, field_path=path, interfaces=interfaces, detail=detail
+            )
             self._journal(
                 request.id,
                 state,
@@ -1036,9 +1047,11 @@ class Agent:
                     progress.step("probe", "failed", failure.code)
                     log.warning("request %s: probe failed: %s", request.id, failure.message)
                     code = failure.code or "probe_failed"
-                    # the step stays a code; the device's interface list goes with the error
+                    # the step stays a code; the device's interface list, or the e-mail server's
+                    # answer (0.4.0 P6), goes with the error
                     listed = failure.interfaces if code in INTERFACE_CODES else ()
-                    return fail("failed", "probe_failed", code, None, listed)
+                    detail = failure.message[:DETAIL_MAX] if code in DETAIL_CODES else None
+                    return fail("failed", "probe_failed", code, None, listed, detail)
                 progress.step("probe", "done")
             elif check.probes:
                 progress.step("probe", "skipped", "probe_skipped")

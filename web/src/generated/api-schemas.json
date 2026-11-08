@@ -11279,6 +11279,17 @@
           "title": "Code",
           "type": "string"
         },
+        "detail": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Detail"
+        },
         "field": {
           "anyOf": [
             {

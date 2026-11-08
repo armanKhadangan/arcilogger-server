@@ -936,6 +936,11 @@ PROBE_INTERFACES_MAX: Final = 256
 PROBE_INTERFACE_NAME_MAX: Final = 64
 #: The failures of the ``snmp`` probe that come with the device's interface list.
 INTERFACE_CODES: Final = frozenset({"snmp_no_such_interface", "snmp_no_hc_counters"})
+#: The codes whose error carries the server's own answer as ``detail`` (0.4.0 P6): the SMTP
+#: trial's reply, so the administrator sees why the e-mail server refused it. Redacted of every
+#: secret the probe was given and cut at :data:`DETAIL_MAX`.
+DETAIL_CODES: Final = frozenset({"smtp_test_failed"})
+DETAIL_MAX: Final = 300
 
 
 class ProbeInterface(_Model):
@@ -960,6 +965,8 @@ class ErrorRef(_Model):
     field: ConfigPath | None = None
     #: What the device reported, for :data:`INTERFACE_CODES` only (W5-N-9).
     interfaces: Annotated[tuple[ProbeInterface, ...], Field(max_length=PROBE_INTERFACES_MAX)] = ()
+    #: The server's answer, for :data:`DETAIL_CODES` only (0.4.0 P6); never a secret.
+    detail: Annotated[str, Field(max_length=DETAIL_MAX)] | None = None
 
     @field_validator("code")
     @classmethod
@@ -971,6 +978,8 @@ class ErrorRef(_Model):
     def _interfaces_of_snmp(self) -> ErrorRef:
         if self.interfaces and self.code not in INTERFACE_CODES:
             raise ValueError(f"interfaces come only with {sorted(INTERFACE_CODES)}")
+        if self.detail is not None and self.code not in DETAIL_CODES:
+            raise ValueError(f"a detail comes only with {sorted(DETAIL_CODES)}")
         return self
 
 
