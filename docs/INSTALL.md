@@ -406,7 +406,9 @@ gateway; the devices' syslog target, certificate and web address, and `[collecto
 (remembered, otherwise arcilogger.internal), `-SiteName` (no default; required on a first
 installation), `-NtpServer` (no default; empty: the fallback time server only), `-AdminAddress`
 (no default; addresses or networks such as `10.0.0.10` or `10.0.0.0/24`; remembered) — the last
-three in section 7.1, `-DataRoot` (D:\ARCILOGGER on a fixed NTFS `D:`, otherwise
+three in section 7.1, `-TimeStampProvider` (`turktrust` by default, or `zamane` for the Kamu SM
+test server; only a new `arcilogger.toml` gets it, another value stops with `2`; the setup .exe
+asks on its "Time stamping" page), `-DataRoot` (D:\ARCILOGGER on a fixed NTFS `D:`, otherwise
 C:\ARCILOGGER; first install only), `-StrictOutbound` (remembered; `-StrictOutbound:$false` switches
 it off), `-SkipFirewall`, `-SkipTimeSetup` (only the installer's time step: with the browser
 administration on, `ApplySystem` sets Windows Time from `[clock]`; [SETTINGS.md](SETTINGS.md)

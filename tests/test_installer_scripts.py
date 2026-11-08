@@ -63,7 +63,7 @@ from arcilogger_core.admin.contract import (
     SystemStatus,
     parse_document,
 )
-from arcilogger_core.config import TURKTRUST_ROOT_FINGERPRINTS, ApiConfig
+from arcilogger_core.config import TURKTRUST_ROOT_FINGERPRINTS, ApiConfig, load_config
 from arcilogger_core.fsutil import atomic_write_bytes
 from arcilogger_core.rawlog import format_line
 from arcilogger_core.secretstore import KAMUSM_CUSTOMER, KAMUSM_PASSWORD, SecretStore
@@ -552,13 +552,17 @@ def test_setup_passes_its_licence_switches_to_the_script() -> None:
     old one. A /LICENSEFILE that names no file stops the setup before anything is copied."""
     text = _iss()
     parameters = _pascal(text, "function InstallerParameters")
-    statements = [line.strip() for line in parameters.splitlines()[2:]]
-    assert statements == [
+    statements = [line.strip() for line in parameters.splitlines()]
+    start = statements.index(SETUP_DEFAULT_PARAMETERS)
+    # the licence switches first; the setup pages' values of a first installation follow, as
+    # test_setup_pages_ask_on_a_first_installation_only checks
+    assert statements[start : start + 6] == [
         SETUP_DEFAULT_PARAMETERS,
         "if LicenseFileArgument <> '' then",
         "Result := Result + ' -LicenseFile \"' + LicenseFileArgument + '\"';",
         "if AllowUncoveredUpgrade then",
         "Result := Result + ' -AllowUncoveredUpgrade';",
+        "if not FirstInstallation() then",
     ]
     run = _pascal(text, "procedure RunArciInstaller")
     assert "Parameters := InstallerParameters();" in run
@@ -6395,6 +6399,10 @@ if ($Scenario -eq 'next-steps-turktrust') {
     $toml = "[tsa]`nprovider = `"turktrust`"`nurl = `"https://zd.turktrust.com.tr/`"`n"
     Write-Text (Join-Path $programData 'arcilogger.toml') $toml
 }
+if ($Scenario -eq 'next-steps-zamane') {
+    $toml = "[tsa]`nprovider = `"zamane`"`nurl = `"http://tzd.kamusm.gov.tr`"`n"
+    Write-Text (Join-Path $programData 'arcilogger.toml') $toml
+}
 if ($Scenario -eq 'uninstall-desktop') {
     # What Set-ArciPower.ps1 recorded on a desktop Windows at the installation.
     Write-Text (Join-Path $programData 'install/power-state.json') '{"schema": 1, "previous": {}}'
@@ -6779,6 +6787,10 @@ function Read-ArciTomlFile {
         $tsa = [pscustomobject]@{ provider = 'turktrust'; url = 'https://zd.turktrust.com.tr/' }
         $config | Add-Member -NotePropertyName tsa -NotePropertyValue $tsa
     }
+    if ($Scenario -eq 'next-steps-zamane') {
+        $tsa = [pscustomobject]@{ provider = 'zamane'; url = 'http://tzd.kamusm.gov.tr' }
+        $config | Add-Member -NotePropertyName tsa -NotePropertyValue $tsa
+    }
     $config
 }
 function Get-DatabaseSettings {
@@ -7080,6 +7092,7 @@ try {
         'health-port' { Invoke-HealthCheck }
         'next-steps' { Show-NextSteps }
         'next-steps-turktrust' { Show-NextSteps }
+        'next-steps-zamane' { Show-NextSteps }
         # A configuration without [[sources]] (Invoke-SourcesPreflight counted none); the harness
         # runs with -SkipFirewall, the last scenario as if the firewall step had run.
         'next-steps-no-sources' { $script:SourceCount = 0; Show-NextSteps }
@@ -8607,14 +8620,20 @@ def test_next_steps_print_the_setup_token_command(engine: str, tmp_path: Path) -
 def test_next_steps_follow_the_time_stamp_provider(engine: str, tmp_path: Path) -> None:
     """Contract 2.4: with TÜRKTRUST, step 3 says where its account goes and (0.3.1) that its H7
     root ships with the product and where it is; Kamu SM's Java, Zamane client and credit lines
-    stay with Kamu SM. No secret is asked or shown."""
-    kamusm = simulate(engine, tmp_path, "next-steps")["stdout"]
+    stay with Kamu SM. No secret is asked or shown. Without a readable configuration the text is
+    TÜRKTRUST's, the default of a new installation (0.4.0 D3)."""
+    kamusm = simulate(engine, tmp_path, "next-steps-zamane")["stdout"]
     assert "3. Kamu SM test hesabı [test account]:" in kamusm
     assert "secret set kamusm.customer" in kamusm
     assert "TÜRKTRUST" not in kamusm
-    run = tmp_path / "turktrust"
-    run.mkdir()
-    stdout = simulate(engine, run, "next-steps-turktrust")["stdout"]
+    for scenario in ("next-steps-turktrust", "next-steps"):
+        run = tmp_path / scenario
+        run.mkdir()
+        stdout = simulate(engine, run, scenario)["stdout"]
+        assert_turktrust_step(stdout, run)
+
+
+def assert_turktrust_step(stdout: str, run: Path) -> None:
     step = stdout[stdout.index("   3. ") : stdout.index("   4. ")]
     assert step.startswith("   3. TÜRKTRUST zaman damgası hesabı [time-stamp account]:")
     assert "Ayarlar → Zaman damgası" in step
@@ -8636,7 +8655,7 @@ def test_next_steps_explain_re_stamping_and_the_revocation_lists(
 ) -> None:
     """#103 step 6 (W5-E): for every provider, step 3 ends with the Renew and CrlFetch tasks and,
     for strict outbound mode, tsa.crl_urls; it asks for nothing and names no secret."""
-    for scenario in ("next-steps", "next-steps-turktrust"):
+    for scenario in ("next-steps", "next-steps-turktrust", "next-steps-zamane"):
         run = tmp_path / scenario
         run.mkdir()
         stdout = simulate(engine, run, scenario)["stdout"]
@@ -13131,6 +13150,143 @@ if ($Packages) {
 }
 [System.IO.File]::WriteAllText($OutputPath, (ConvertTo-Json -InputObject $out -Depth 4))
 """
+
+
+def test_setup_pages_ask_on_a_first_installation_only() -> None:
+    """0.4.0 D2: the organisation page (name, time server, admin address) and the time-stamping
+    page (TÜRKTRUST first and chosen) are skipped when VERSION.json says ARCILOGGER is installed;
+    their values reach the script quoted, each as one argument, on a first installation only."""
+    iss = _iss()
+    wizard = _pascal(iss, "procedure InitializeWizard")
+    assert "CreateInputQueryPage(wpWelcome" in wizard
+    for prompt in ("SiteNamePrompt", "NtpServerPrompt", "AdminAddressPrompt"):
+        assert f"OrganisationPage.Add(CustomMessage('{prompt}'), False);" in wizard
+    order = [wizard.index(f"ProviderPage.Add(CustomMessage('{name}'))") for name in (
+        "ProviderTurktrust", "ProviderZamane")]  # fmt: skip
+    assert order == sorted(order)
+    assert "ProviderPage.SelectedValueIndex := 0;" in wizard
+    assert "Result := not FileExists(VersionFile());" in _pascal(iss, "function FirstInstallation")
+    skip = _pascal(iss, "function ShouldSkipPage")
+    assert "and not FirstInstallation()" in skip
+    params = _pascal(iss, "function InstallerParameters")
+    assert params.index("if not FirstInstallation() then") < params.index("-SiteName")
+    assert "' -SiteName \"' + Name + '\"'" in params
+    assert "' -NtpServer \"' + Ntp + '\"'" in params
+    assert "' -AdminAddress \"' + Admin + '\"'" in params
+    assert "' -TimeStampProvider \"zamane\"'" in params
+    assert "SafeArgument(Name)" in params
+    check = _pascal(iss, "function NextButtonClick")
+    assert "WizardSilent()" in check  # a silent setup lets the script ask at its console
+    for language in ("turkish", "english"):
+        for key in ("OrganisationTitle", "SiteNamePrompt", "NtpServerPrompt", "AdminAddressPrompt",
+                    "ProviderTitle", "ProviderTurktrust", "ProviderZamane", "FieldRequired",
+                    "FieldCharacters", "FieldAddresses", "SetupValuesRefused"):  # fmt: skip
+            assert f"\n{language}.{key}=" in iss.replace("\r\n", "\n"), (language, key)
+    assert "turkish.ProviderTurktrust=TÜRKTRUST (önerilen)" in iss
+    # the script splits the page's comma-separated list as its console prompt does
+    script = INSTALL_SCRIPT.read_text(encoding="utf-8-sig")
+    effective = script[script.index("function Get-EffectiveAdminAddress {") :]
+    assert ".Split([char[]]@(',', ';', ' ', \"`t\")" in effective[: effective.index("\n}")]
+
+
+_TSA_PROVIDER_SCRIPT = r"""
+param([string]$ModulePath, [string]$ExamplePath, [string]$OutputDir)
+$ErrorActionPreference = 'Stop'
+Import-Module $ModulePath -Force
+$text = [System.IO.File]::ReadAllText($ExamplePath, [System.Text.Encoding]::UTF8)
+foreach ($provider in @('turktrust', 'zamane')) {
+    $out = Set-ArciExampleTsaProvider -Text $text -Provider $provider
+    Write-ArciUtf8File -Path (Join-Path $OutputDir ($provider + '.toml')) -Text $out
+}
+$crlf = Set-ArciExampleTsaProvider -Text ($text -replace "`r?`n", "`r`n") -Provider 'zamane'
+Write-ArciUtf8File -Path (Join-Path $OutputDir 'zamane-crlf.toml') -Text $crlf
+$refused = $null
+try { [void](Set-ArciExampleTsaProvider -Text "[tsa]`nprovider = `"mock`"`n" -Provider 'zamane') }
+catch { $refused = $_.Exception.Message }
+Write-Host ('refused: ' + $refused)
+"""
+
+#: The Kamu SM keys -TimeStampProvider zamane turns on (0.4.0 D3): today's test-server lines.
+KAMUSM_KEYS = ("provider", "url", "port", "java", "zamane_jar", "zamane_verify_flag")
+
+
+def kamusm_example(text: str) -> str:
+    """What Set-ArciExampleTsaProvider -Provider zamane makes of the example, step by step."""
+    head, rest = text.split("\n[tsa]\n", 1)
+    body, tail = rest.split("\n[", 1)
+    for line in ('provider = "turktrust"\n', 'url = "https://zd.turktrust.com.tr/"\n'):
+        assert body.count(line) == 1, line
+        body = body.replace(line, "")
+    for key in KAMUSM_KEYS:
+        assert len(re.findall(rf"(?m)^#{key} = ", body)) == 1, key
+        body = re.sub(rf"(?m)^#(?={key} = )", "", body)
+    return f"{head}\n[tsa]\n{body}\n[{tail}"
+
+
+def test_a_new_configuration_is_turktrust_unless_kamu_sm_is_chosen(tmp_path: Path) -> None:
+    """0.4.0 D3: the example names TÜRKTRUST (no Java, no Zamane client; H7 is built in), and its
+    commented Kamu SM lines are the test-server configuration of today, valid once turned on."""
+    text = (WINDOWS / "arcilogger.example.toml").read_text(encoding="utf-8")
+    turktrust = tomllib.loads(text)["tsa"]
+    assert (turktrust["provider"], turktrust["url"]) == (
+        "turktrust",
+        "https://zd.turktrust.com.tr/",
+    )
+    assert not {"java", "zamane_jar", "port", "zamane_verify_flag"} & set(turktrust)
+    kamusm = tomllib.loads(kamusm_example(text))["tsa"]
+    assert (kamusm["provider"], kamusm["url"], kamusm["port"]) == (
+        "zamane",
+        "http://tzd.kamusm.gov.tr",
+        80,
+    )
+    assert kamusm["java"] == ["C:/Program Files/Eclipse Adoptium/jre-8/bin/java.exe"]
+    assert kamusm["zamane_verify_flag"] == "-CC"
+    # every other key of the section is the same for both
+    assert {k: v for k, v in kamusm.items() if k not in KAMUSM_KEYS} == {
+        k: v for k, v in turktrust.items() if k not in KAMUSM_KEYS
+    }
+    path = tmp_path / "arcilogger.toml"
+    path.write_text(kamusm_example(text), encoding="utf-8")
+    loaded = load_config(path)
+    assert (loaded.tsa.provider, loaded.tsa.legal_grade) == ("zamane", False)  # the test server
+
+
+def test_the_setup_turns_on_the_kamu_sm_lines_as_the_test_does(engine: str, tmp_path: Path) -> None:
+    """Set-ArciExampleTsaProvider: turktrust leaves the example as it is, zamane gives what
+    kamusm_example gives (also with CRLF), and a [tsa] that is not as shipped is refused."""
+    example = WINDOWS / "arcilogger.example.toml"
+    script = write_script(tmp_path / "tsa-provider.ps1", _TSA_PROVIDER_SCRIPT)
+    result = run_powershell(
+        engine,
+        script,
+        "-ModulePath",
+        str(MODULE),
+        "-ExamplePath",
+        str(example),
+        "-OutputDir",
+        str(tmp_path),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "refused: Örnek yapılandırmanın [tsa] bölümü beklenen biçimde değil" in result.stdout
+    text = example.read_text(encoding="utf-8")
+    assert (tmp_path / "turktrust.toml").read_text(encoding="utf-8") == text
+    assert (tmp_path / "zamane.toml").read_text(encoding="utf-8") == kamusm_example(text)
+    crlf = (tmp_path / "zamane-crlf.toml").read_bytes().decode("utf-8")
+    assert crlf.replace("\r\n", "\n") == kamusm_example(text)
+
+
+def test_the_setup_takes_the_time_stamp_provider() -> None:
+    """-TimeStampProvider (turktrust by default) reaches only a new arcilogger.toml; another value
+    stops in the preflight (code 2), not at parameter binding (code 1)."""
+    script = INSTALL_SCRIPT.read_text(encoding="utf-8-sig")
+    assert "[string]$TimeStampProvider = 'turktrust'," in script
+    assert "ValidateSet('turktrust', 'zamane')][string]$TimeStampProvider" not in script
+    preflight = script[script.index("function Invoke-SetupPreflight {") :]
+    preflight = preflight[: preflight.index("\nfunction ")]
+    assert "Add-Check 'tsa-provider' 'fail'" in preflight
+    copy = script[script.index("Invoke-Step 'config.copy'") :]
+    copy = copy[: copy.index("Write-ArciUtf8File -Path $ConfigPath")]
+    assert "Set-ArciExampleTsaProvider -Text $text -Provider $providerValue" in copy
 
 
 _SELFTEST_SCRIPT = r"""

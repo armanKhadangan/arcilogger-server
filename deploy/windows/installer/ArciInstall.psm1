@@ -356,6 +356,42 @@ function Write-ArciUtf8File {
     [System.IO.File]::WriteAllText($Path, $Text, (New-Object System.Text.UTF8Encoding -ArgumentList $false))
 }
 
+function Set-ArciExampleTsaProvider {
+    <#
+    .SYNOPSIS
+        The example configuration's [tsa] section for -TimeStampProvider (0.4.0 D3). The example
+        names TÜRKTRUST and carries the Kamu SM keys as a commented block: 'turktrust' leaves the
+        text as it is; 'zamane' removes the two TÜRKTRUST lines (provider, url) and turns on the
+        six commented Kamu SM lines (provider, url, port, java, zamane_jar, zamane_verify_flag).
+        Only a new arcilogger.toml is made this way; an existing one is never rewritten. Throws
+        when the section is not as shipped (a line missing or twice).
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][string]$Text,
+        [Parameter(Mandatory = $true)][ValidateSet('turktrust', 'zamane')][string]$Provider
+    )
+    if ($Provider -eq 'turktrust') { return $Text }
+    $section = [regex]::Match($Text, '(?ms)^[ \t]*\[tsa\][ \t]*(?:#[^\r\n]*)?\r?$(?<body>.*?)(?=^[ \t]*\[|\z)')
+    if (-not $section.Success) { throw 'Örnek yapılandırmada [tsa] bölümü yok [no [tsa] section in the example].' }
+    $body = $section.Groups['body'].Value
+    $patterns = @(
+        '(?m)^provider = "turktrust"[ \t]*\r?\n',
+        '(?m)^url = "https://zd\.turktrust\.com\.tr/"[ \t]*\r?\n'
+    )
+    foreach ($key in @('provider', 'url', 'port', 'java', 'zamane_jar', 'zamane_verify_flag')) {
+        $patterns += ('(?m)^#(?={0} = )' -f [regex]::Escape($key))
+    }
+    foreach ($pattern in $patterns) {
+        $count = [regex]::Matches($body, $pattern).Count
+        if ($count -ne 1) {
+            throw ("Örnek yapılandırmanın [tsa] bölümü beklenen biçimde değil [the example's [tsa] is not as shipped]: {0} ({1})" -f $pattern, $count)
+        }
+        $body = [regex]::Replace($body, $pattern, '')
+    }
+    $Text.Substring(0, $section.Groups['body'].Index) + $body + $Text.Substring($section.Groups['body'].Index + $section.Groups['body'].Length)
+}
+
 function ConvertTo-ArciSelfTestResult {
     <#
     .SYNOPSIS
@@ -4066,7 +4102,7 @@ Export-ModuleMember -Function @(
     'Get-ArciServiceNames', 'Get-ArciWellKnownSid', 'Write-ArciStep', 'Write-ArciInfo', 'Write-ArciWarn',
     'Test-ArciWindows', 'Test-ArciAdministrator', 'Test-ArciInteractiveConsole', 'Get-ArciWindowsPowerShellModulePath', 'Initialize-ArciModulePath',
     'Get-ArciServiceSid', 'New-ArciRandomPassword', 'Rename-ArciFolder',
-    'ConvertTo-ArciScramVerifier', 'Get-ArciFileSha256', 'Write-ArciUtf8File', 'ConvertTo-ArciSelfTestResult', 'Read-ArciSha256Sums',
+    'ConvertTo-ArciScramVerifier', 'Get-ArciFileSha256', 'Write-ArciUtf8File', 'Set-ArciExampleTsaProvider', 'ConvertTo-ArciSelfTestResult', 'Read-ArciSha256Sums',
     'Test-ArciBundle', 'Resolve-ArciComponentSource', 'Expand-ArciTemplate', 'ConvertTo-ArciArgumentString', 'Invoke-ArciProcess',
     'Invoke-ArciExe', 'Get-ArciConfiguredDataDir', 'Read-ArciDataRootRecord', 'Resolve-ArciDataRoot', 'Read-ArciTomlFile', 'Get-ArciConfigValue', 'Get-ArciApiEndpoint', 'Test-ArciProxyTrust', 'Get-ArciSourceAddresses', 'Get-ArciSourceTables',
     'ConvertTo-ArciTomlString', 'Get-ArciTomlString', 'Set-ArciTomlString', 'Get-ArciSiteNameProblem', 'Get-ArciTimeServerProblem',

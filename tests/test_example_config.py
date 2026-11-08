@@ -42,7 +42,10 @@ def test_example_config_loads() -> None:
     config = load_config(EXAMPLE)
     assert config.retention.enabled is False
     assert config.retention.days >= 730
-    assert config.tsa.legal_grade is False  # test server until the connection test is done
+    # TÜRKTRUST's production server (0.4.0 D3): legal grade once a stamp chains to its built-in
+    # H7 root; nothing is stamped before its user name and password are stored.
+    assert (config.tsa.provider, config.tsa.legal_grade) == ("turktrust", True)
+    assert config.tsa.java == ("java",)  # no Java needed: the Zamane keys are commented out
     assert (config.database.host, config.database.name) == ("127.0.0.1", "arcilogger")
     assert (config.api.host, config.api.port) == ("127.0.0.1", 8000)
     # Scheduled database backup (ADR-0009): the example states the defaults.

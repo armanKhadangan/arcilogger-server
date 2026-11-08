@@ -50,6 +50,11 @@
       -SiteName and -NtpServer go into the new arcilogger.toml; given on an upgrade, they are
       written into the existing one (only those keys change; the previous file is kept as
       arcilogger.toml.before-<time>).
+      -TimeStampProvider  turktrust (default, 0.4.0) or zamane (Kamu SM: Java and the Zamane
+                      client are needed). Only a new arcilogger.toml gets it: TÜRKTRUST's block of
+                      the example, or the example's Kamu SM test-server lines. An existing
+                      configuration keeps its provider (change it under Ayarlar -> Zaman damgası).
+                      Another value stops with 2 before any change.
     The log sources ([[sources]]) take no parameter: a new arcilogger.toml has none (the example
     lists the devices of its fictional network as comments only), so the firewall opens 514 to
     no sender until the organisation adds its own; the preflight warns and the next steps say
@@ -202,6 +207,8 @@ param(
     [string]$SiteName,
     [string]$NtpServer,
     [string[]]$AdminAddress,
+    # Not a ValidateSet: a wrong value must stop with 2 in the preflight, not with 1 at binding.
+    [string]$TimeStampProvider = 'turktrust',
     [System.Management.Automation.PSCredential]$PgSuperuserCredential,
     [string]$PgServiceName,
     [string]$PgBinDir,
@@ -256,6 +263,9 @@ $script:SiteNameValue = $(if ($script:SiteNameGiven) { $SiteName.Trim() } else {
 $script:SiteNameSource = $(if ($script:SiteNameGiven) { 'parameter' } else { 'none' })
 $script:NtpServerValue = $(if ($script:NtpServerGiven) { ([string]$NtpServer).Trim() } else { '' })
 $script:NtpServerSource = $(if ($script:NtpServerGiven) { 'parameter' } else { 'none' })
+# -TimeStampProvider (0.4.0 D3): the provider of a new arcilogger.toml only.
+$script:TimeStampProviderGiven = $PSBoundParameters.ContainsKey('TimeStampProvider')
+$script:TimeStampProviderValue = ([string]$TimeStampProvider).Trim().ToLowerInvariant()
 $script:FallbackServer = 'time.ume.tubitak.gov.tr'   # [clock] fallback_server of the configuration in use
 $script:ConfigReadError = $null        # site_name or [clock] of the configuration is not readable
 # -ConfirmRemoveData: the organisation name given in advance for -Uninstall -RemoveData.
@@ -1725,6 +1735,7 @@ function Invoke-ConfigSteps {
         $bindValue = [string]$ServerAddress
         $siteValue = $script:SiteNameValue
         $ntpValue = $script:NtpServerValue
+        $providerValue = $script:TimeStampProviderValue
         Invoke-Step 'config.copy' ("Örnek yapılandırma kopyalanıyor [copying example configuration]: {0}" -f $ConfigPath) {
             $text = [System.IO.File]::ReadAllText((Get-BundleFile 'config/arcilogger.example.toml'), [System.Text.Encoding]::UTF8)
             $pattern = '(?m)^data_dir\s*=\s*"[^"]*"'
@@ -1732,8 +1743,9 @@ function Invoke-ConfigSteps {
             $text = [regex]::Replace($text, $pattern, ('data_dir = "{0}"' -f $dataDirValue))
             $text = Set-ExampleCollectorBind -Text $text -Address $bindValue
             $text = Set-ConfigSetupValues -Text $text -SiteName $siteValue -NtpServer $ntpValue
+            $text = Set-ArciExampleTsaProvider -Text $text -Provider $providerValue
             Write-ArciUtf8File -Path $ConfigPath -Text $text
-        } ([pscustomobject]@{ data_dir = $dataDirValue; collector_bind = $bindValue; site_name = $siteValue; ntp_server = $ntpValue })
+        } ([pscustomobject]@{ data_dir = $dataDirValue; collector_bind = $bindValue; site_name = $siteValue; ntp_server = $ntpValue; tsa_provider = $providerValue })
     }
     # The data root every task and service checks the configuration's data_dir against
     # (data-root.txt, Day 0 note D0-2): written on every run from the record itself, -DataRoot
@@ -2444,17 +2456,18 @@ function Show-NextSteps {
     Write-Host ('      Sonra {0}/setup adresini açıp anahtarı, kullanıcı adını ve parolayı girin [then open {0}/setup].' -f $url)
     $browserAdministration = ($null -eq $script:AdminPolicyChoice) -or $script:AdminPolicyChoice.Enabled
     # Step 3 follows the configured provider (contract 2.4): TÜRKTRUST's account needs no Java
-    # and no Zamane client. An unreadable configuration keeps Kamu SM's text, a new
-    # installation's. The secrets are never asked here and never written into the log.
-    $provider = $null
+    # and no Zamane client. A configuration that cannot be read follows -TimeStampProvider,
+    # TÜRKTRUST by default (0.4.0 D3); only Kamu SM gets Kamu SM's text. The secrets are never
+    # asked here and never written into the log.
+    $provider = $script:TimeStampProviderValue
     if ((Test-Path -LiteralPath $VenvPython) -and (Test-Path -LiteralPath $ConfigPath)) {
         try {
             $config = Read-ArciTomlFile -Python $VenvPython -ConfigPath $ConfigPath
             $provider = Get-ArciConfigValue -Config $config -Path 'tsa.provider' -Default 'mock'
         }
-        catch { $provider = $null }
+        catch { $provider = $script:TimeStampProviderValue }
     }
-    if ($provider -eq 'turktrust') {
+    if ($provider -ne 'zamane') {
         Write-Host '   3. TÜRKTRUST zaman damgası hesabı [time-stamp account]:'
         Write-Host '      Kullanıcı adı ve parolayı web arayüzünde Ayarlar → Zaman damgası''nda girin; konsoldan da girilebilir [enter the user name and password under Settings → Time stamping in the web interface; or at the console] (docs\AYARLAR.md):'
         if (-not $browserAdministration) {
@@ -2698,7 +2711,8 @@ function Get-RememberedAdminAddress {
 
 function Get-EffectiveAdminAddress {
     <# -AdminAddress when given, else the addresses typed at the console, else the remembered ones; there is no default. #>
-    if ($script:AdminAddressGiven) { return @($AdminAddress | Where-Object { $_ }) }
+    # The setup .exe passes its page's list as one argument ("a,b"): split it as the console does.
+    if ($script:AdminAddressGiven) { return @($AdminAddress | ForEach-Object { ([string]$_).Split([char[]]@(',', ';', ' ', "`t"), [System.StringSplitOptions]::RemoveEmptyEntries) } | Where-Object { $_ }) }
     if (@($script:PromptedAdminAddress).Count -gt 0) { return $script:PromptedAdminAddress }
     @(Get-RememberedAdminAddress)
 }
@@ -3219,6 +3233,18 @@ function Invoke-SetupPreflight {
     }
     else {
         Add-Check 'ntp-server' 'fail' 'Saat sunucusu yok [no time server]: [clock] ntp_server ve fallback_server boş; -NtpServer ile verin [both are empty: give -NtpServer]'
+    }
+    $names = @{ turktrust = 'TÜRKTRUST'; zamane = 'Kamu SM (Zamane)' }
+    if (-not $names.ContainsKey($script:TimeStampProviderValue)) {
+        Add-Check 'tsa-provider' 'fail' ("-TimeStampProvider geçersiz [invalid]: '{0}'; turktrust ya da zamane [turktrust or zamane]" -f $TimeStampProvider)
+    }
+    elseif (Test-Path -LiteralPath $ConfigPath) {
+        if ($script:TimeStampProviderGiven) {
+            Add-Check 'tsa-provider' 'warn' ("-TimeStampProvider {0} uygulanmadı: mevcut yapılandırmanın sağlayıcısı korunur; değiştirmek için Ayarlar -> Zaman damgası [not applied: the existing configuration keeps its provider; change it under Settings -> Time stamping]" -f $script:TimeStampProviderValue)
+        }
+    }
+    else {
+        Add-Check 'tsa-provider' 'ok' ("Zaman damgası sağlayıcısı [time-stamp provider]: {0}" -f $names[$script:TimeStampProviderValue])
     }
 }
 

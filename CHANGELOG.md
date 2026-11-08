@@ -16,6 +16,13 @@ versions follow [Semantic Versioning](https://semver.org/).
   known refusals of Google and Microsoft 365 a "Ne yapmalı" line: an app password, the SMTP relay,
   SMTP AUTH for the mailbox, "Send As" for the sender. Before, the page said only "Deneme
   e-postası gönderilemedi."
+- **Setup asks its questions in its own pages** on a first installation: "Kurum bilgileri"
+  (organisation name, time server, the admin PC's address) and "Zaman damgası" (TÜRKTRUST,
+  recommended, or Kamu SM). The PowerShell window no longer asks for them. Upgrades keep the
+  configured values and show no page.
+- **TÜRKTRUST is the default time-stamp provider of a new installation**: no Java and no Zamane
+  client are needed, and its H7 root ships with the product. Kamu SM stays a choice in setup
+  (`-TimeStampProvider zamane`) and in the browser; an existing configuration is not changed.
 - **A self-test at the end of setup** (`arcilogger-core selftest`, also by hand): the
   configuration, the secret store, the database, the root certificates, the time-stamp server,
   the e-mail server (sign-in only, nothing is sent) and the clock, each ok, warning or failure,

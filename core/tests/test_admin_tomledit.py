@@ -80,9 +80,12 @@ def test_the_site_name_is_replaced_in_place_with_its_comment() -> None:
             ['ntp_server = "172.20.10.1"', "alert_offset_ms = 500"],
         ),
         (
-            [SetValue("tsa.url", "http://zd.kamusm.gov.tr"), SetValue("tsa.timeout_seconds", 90)],
-            ['url = "http://tzd.kamusm.gov.tr"'],
-            ['url = "http://zd.kamusm.gov.tr"', "timeout_seconds = 90"],
+            [
+                SetValue("tsa.url", "https://zd.turktrust.com.tr/tsa"),
+                SetValue("tsa.timeout_seconds", 90),
+            ],
+            ['url = "https://zd.turktrust.com.tr/"'],
+            ['url = "https://zd.turktrust.com.tr/tsa"', "timeout_seconds = 90"],
         ),
         (
             [SetValue("tsa.legal_root_fingerprints", ["a1" * 32, "b2" * 32])],
