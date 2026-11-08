@@ -12902,7 +12902,8 @@ def test_a_folder_in_use_is_renamed_once_windows_lets_go(engine: str, tmp_path: 
 def test_the_installer_swaps_program_folders_with_retries() -> None:
     script = INSTALL_SCRIPT.read_text(encoding="utf-8-sig")
     assert "Rename-Item" not in script
-    assert script.count("Rename-ArciFolder -LiteralPath") == 6
+    # six program-folder swaps, and the bundled PostgreSQL's binaries out and back (0.4.0 P1)
+    assert script.count("Rename-ArciFolder -LiteralPath") == 8
 
 
 # --- browser administration (ADR-0014; contract 2.2, 2.4.1, 2.8.3, 2.16) ------------------------
@@ -13337,6 +13338,223 @@ def test_the_setup_turns_on_the_kamu_sm_lines_as_the_test_does(engine: str, tmp_
     assert (tmp_path / "zamane.toml").read_text(encoding="utf-8") == kamusm_example(text)
     crlf = (tmp_path / "zamane-crlf.toml").read_bytes().decode("utf-8")
     assert crlf.replace("\r\n", "\n") == kamusm_example(text)
+
+
+# --- 0.4.0 P1: the PostgreSQL that setup installs ---------------------------------------------
+
+_PG_CHECKS_SCRIPT = r"""
+param([string]$Installer, [string]$Base, [string]$DataRoot, [string]$Scenario, [string]$OutputPath)
+$ErrorActionPreference = 'Stop'
+$parameters = @{
+    InstallDir = (Join-Path $Base 'program/ARCILOGGER')
+    ProgramDataDir = (Join-Path $Base 'programdata/ARCILOGGER')
+    DataRoot = $DataRoot; BundleRoot = (Join-Path $Base 'bundle'); ServerAddress = '172.20.20.15'
+}
+if ($Scenario -eq 'upgrade') { $parameters['Upgrade'] = $true }
+if ($Scenario -eq 'service-name') { $parameters['PgServiceName'] = 'postgresql-x64-16' }
+. $Installer @parameters
+$component = [pscustomobject]@{
+    name = 'postgresql_binaries'; version = '16.15'; sha256 = '00'
+    path = 'thirdparty/postgresql_binaries/postgresql-16.15-windows-x64-server.zip'
+}
+$listed = @($(if ($Scenario -ne 'no-bundle') { $component }))
+$script:Manifest = [pscustomobject]@{ components = $listed }
+function Find-PostgresService {
+    if ($Scenario -notin @('service', 'service-bundled')) { return $null }
+    $path = '"C:\pg\16\bin\pg_ctl.exe" runservice -N "postgresql-x64-16" -D "D:\pgdata" -w'
+    [pscustomobject]@{ Name = 'postgresql-x64-16'; State = 'Running'; PathName = $path }
+}
+function Get-BundledPostgresRecord {
+    if ($Scenario -ne 'service-bundled') { return $null }
+    [pscustomobject]@{ bundled = $true; version = '16.15'; data = 'D:\pgdata' }
+}
+function Get-PortOwners([string]$Protocol, [int]$Port) {
+    if ($Scenario -eq 'port-taken' -and $Protocol -eq 'TCP' -and $Port -eq 5432) {
+        return , @([pscustomobject]@{ Pid = 4242; Name = 'postgres'; Path = $null })
+    }
+    , @()
+}
+if ($Scenario -eq 'data-taken') {
+    $folder = Join-Path $DataRoot 'pgdata'
+    [void](New-Item -ItemType Directory -Path $folder -Force)
+    [System.IO.File]::WriteAllText((Join-Path $folder 'notes.txt'), 'not a cluster')
+}
+Add-PostgresChecks
+$report = [ordered]@{
+    bundle = $script:PgBundle; bin = $script:PgBin
+    checks = @($script:Plan | ForEach-Object {
+        [ordered]@{ id = $_.id; status = $_.status; text = $_.text } })
+}
+$utf8 = New-Object System.Text.UTF8Encoding -ArgumentList $false
+[System.IO.File]::WriteAllText($OutputPath, ($report | ConvertTo-Json -Depth 4), $utf8)
+"""
+
+PG_CHECK_CASES = [
+    # (scenario, the path taken, the checks and their status)
+    ("fresh", "install", {"preflight.postgresql": "ok"}),
+    ("port-taken", "install", {"preflight.postgresql": "ok", "preflight.postgresql-port": "fail"}),
+    ("data-taken", "install", {"preflight.postgresql": "ok", "preflight.postgresql-data": "fail"}),
+    # an operator's -PgServiceName, an upgrade or a bundle without PostgreSQL keep today's path
+    ("no-bundle", None, {"preflight.postgresql": "fail"}),
+    ("upgrade", None, {"preflight.postgresql": "fail"}),
+    ("service-name", "-", {}),
+    ("service", None, {"preflight.postgresql": "ok"}),
+    ("service-bundled", "present", {"preflight.postgresql": "ok"}),
+]  # fmt: skip
+
+
+@pytest.mark.parametrize(
+    ("scenario", "path", "checks"), PG_CHECK_CASES, ids=[case[0] for case in PG_CHECK_CASES]
+)
+def test_setup_installs_postgres_only_where_there_is_none(
+    engine: str, tmp_path: Path, scenario: str, path: str | None, checks: dict[str, str]
+) -> None:
+    r"""0.4.0 D1: a new installation on a server without any PostgreSQL service installs the
+    bundled one; port 5432 in use or a foreign <data root>\pgdata stop it in the preflight (code
+    2, nothing changed). A server with a service, -PgServiceName, an upgrade, or a bundle
+    without PostgreSQL keep today's path; a service setup installed earlier is recognised."""
+    base = tmp_path / "base"
+    make_fake_bundle(base)
+    data_root = base / "data" / "ARCILOGGER"
+    data_root.mkdir(parents=True)
+    output = tmp_path / "checks.json"
+    script = write_script(tmp_path / "pg-checks.ps1", _PG_CHECKS_SCRIPT)
+    result = run_powershell(
+        engine, script, "-Installer", str(INSTALL_SCRIPT), "-Base", str(base),
+        "-DataRoot", str(data_root), "-Scenario", scenario, "-OutputPath", str(output),
+    )  # fmt: skip
+    assert result.returncode == 0, result.stdout + result.stderr
+    report = read_json(output)
+    found = {check["id"]: check["status"] for check in report["checks"]}
+    if path == "-":  # -PgServiceName names a service this server does not have
+        assert report["bundle"] is None
+        assert found["preflight.postgresql"] == "fail"
+        return
+    assert report["bundle"] == path
+    for check, status in checks.items():
+        assert found.get(check) == status, (check, report["checks"])
+    texts = {check["id"]: check["text"] for check in report["checks"]}
+    if path == "install":
+        assert report["bin"].replace("\\", "/").endswith("program/ARCILOGGER-PostgreSQL/16/bin")
+        assert "kurulumla gelir [comes with the setup]" in texts["preflight.postgresql"]
+    if scenario == "port-taken":
+        assert "postgres (pid 4242)" in texts["preflight.postgresql-port"]
+    if path is None and scenario != "service":
+        assert "PostgreSQL 16 bulunamadı" in texts["preflight.postgresql"]
+
+
+def test_the_bundled_postgres_password_never_leaves_the_secret_store() -> None:
+    """Contract 2.1.2: the generated superuser password goes to the secret store on stdin, to
+    initdb in a file only the installing account can open (deleted in finally), and back into the
+    installer only through `secret get` into a pipe; the step's plan detail names paths only."""
+    script = INSTALL_SCRIPT.read_text(encoding="utf-8-sig")
+    install = script[script.index("function Install-BundledPostgres {") :]
+    install = install[: install.index("\nfunction ")]
+    assert "New-ArciRandomPassword -Length 32" in install
+    stored = "'postgres.superuser') -StdinText ($password + \"`n\") -Redact @($password)"
+    assert stored in install
+    assert "New-ArciPrivateFile -Path $passwordFile -Text $password -UserSid $user" in install
+    initdb = "('--pwfile=' + $passwordFile), '-E', 'UTF8', '--locale=C') -Redact @($password)"
+    assert initdb in install
+    assert "finally { Remove-Item -LiteralPath $passwordFile" in install
+    assert "'-A', 'scram-sha-256'" in install
+    assert "listen_addresses = 'localhost'`r`nport = 5432" in install
+    register = "'register', '-N', $BundledPgService, '-D', $data, '-S', 'auto', '-U', "
+    assert register + "'NT AUTHORITY\\NetworkService'" in install
+    assert "Set-ArciPostgresDataAcl -Path $data -UserSid $user" in install
+    # the password is in no Write-*, no plan item and no step detail
+    for line in install.splitlines():
+        if "$password" in line:
+            assert not re.search(r"Write-|Add-PlanItem|Invoke-Step", line), line
+    credential = script[script.index("function Get-PgCredential {") :]
+    credential = credential[: credential.index("\nfunction ")]
+    assert "'secret', 'get', 'postgres.superuser') -AllowFailure" in credential
+    assert credential.index("'secret', 'get'") < credential.index("Read-Host")
+    tail = script[script.index("function Invoke-CommonTail {") :]
+    tail = tail[: tail.index("\nfunction ")]
+    steps = ("Invoke-ConfigSteps", "'postgres.install'", "Invoke-AclSteps", "'database.provision'")
+    order = [tail.index(step) for step in steps]
+    assert order == sorted(order), "after the secret store exists, before rights and database"
+    detail = "@{ bin = $BundledPgHome; data = (Get-BundledPgData); service = $BundledPgService })"
+    assert detail in tail
+    newer = "-Installed ([string]$record.version) -Offered ([string]$component.version)"
+    assert f"Test-ArciNewerVersion {newer}" in tail
+    home = "(Join-Path (Split-Path -Parent $InstallDir) 'ARCILOGGER-PostgreSQL') '16'"
+    assert f"$BundledPgHome = Join-Path {home}" in script
+    assert "$BundledPgService = 'postgresql-x64-16'" in script
+
+
+def test_the_bundled_postgres_is_updated_and_removed_whole() -> None:
+    """Contract 2.1.3: a later 16.x minor swaps the binaries and puts the previous ones back when
+    the server does not answer; -RemoveData removes the service, the cluster and the binaries of
+    the PostgreSQL setup installed without SQL, and only its ARCILOGGER database and role of an
+    operator's PostgreSQL; -SkipDatabase keeps both."""
+    script = INSTALL_SCRIPT.read_text(encoding="utf-8-sig")
+    update = script[script.index("function Update-BundledPostgres(") :]
+    update = update[: update.index("\nfunction ")]
+    steps = [update.index(part) for part in (
+        "Stop-Service -Name $BundledPgService", "Rename-ArciFolder -LiteralPath $BundledPgHome",
+        "Install-BundledPostgresBinaries $Component", "Wait-BundledPostgres")]  # fmt: skip
+    assert steps == sorted(steps)
+    back = update[update.index("catch {") :]
+    assert "-LiteralPath $previous -NewName (Split-Path -Leaf $BundledPgHome)" in back
+    assert "throw (" in back
+    remove = script[script.index("function Remove-BundledPostgres(") :]
+    remove = remove[: remove.index("\nfunction ")]
+    assert "@('delete', $name)" in remove
+    assert "Remove-ArciDataFolder -Path ([string]$Record.data)" in remove
+    removal = script[script.index("function Initialize-DataRemoval {") :]
+    removal = removal[: removal.index("\nfunction ")]
+    assert "if ($null -ne $bundledPg -and -not $SkipDatabase) { $removePg = $bundledPg }" in removal
+    assert "if (-not $SkipDatabase -and $null -eq $removePg) {" in removal
+    assert "Postgres = $removePg" in removal
+    steps = script[script.index("function Invoke-DataRemovalSteps(") :]
+    steps = steps[: steps.index("\nfunction ")]
+    assert "Invoke-Step 'postgres.remove'" in steps
+    targets = steps.index("foreach ($target in @($Removal.Plan.Targets))")
+    assert steps.index("'postgres.remove'") < targets
+
+
+def test_setup_says_no_postgres_password_is_asked_on_the_bundled_path() -> None:
+    """Contract 2.1.4: the status text loses "and the PostgreSQL password" when setup installed or
+    installs PostgreSQL itself, which Setup knows before the window opens."""
+    iss = _iss()
+    path = _pascal(iss, "function BundledPostgresPath")
+    assert "DirExists(ExpandConstant('{commonpf64}\\ARCILOGGER-PostgreSQL\\16'))" in path
+    assert "DirExists(ExpandConstant('{tmp}\\bundle\\thirdparty\\postgresql_binaries'))" in path
+    assert "RegGetSubkeyNames(HKLM, 'SYSTEM\\CurrentControlSet\\Services', Names)" in path
+    assert "Pos('postgresql', Lowercase(Names[I])) = 1" in path
+    run = _pascal(iss, "procedure RunArciInstaller")
+    assert "if BundledPostgresPath() then" in run
+    assert iss.index("function BundledPostgresPath()") < iss.index("procedure RunArciInstaller")
+    text = iss.replace("\r\n", "\n")
+    for language in ("turkish", "english"):
+        key = f"{language}.RunInstallerBundled="
+        line = next(x for x in text.splitlines() if x.startswith(key)).lower()
+        assert "parola" not in line
+        assert "password" not in line
+
+
+_PG_VERSION_SCRIPT = r"""
+param([string]$ModulePath)
+$ErrorActionPreference = 'Stop'
+Import-Module $ModulePath -Force
+$cases = @(@('16.15', '16.16'), @('16.15', '16.15'), @('16.16', '16.15'), @('16.9', '16.10'),
+    @('', '16.15'), @('16.15', 'x'))
+foreach ($case in $cases) {
+    $later = Test-ArciNewerVersion -Installed $case[0] -Offered $case[1]
+    Write-Host ('{0}|{1}={2}' -f $case[0], $case[1], $later)
+}
+"""
+
+
+def test_only_a_later_postgres_minor_replaces_the_binaries(engine: str, tmp_path: Path) -> None:
+    script = write_script(tmp_path / "pg-version.ps1", _PG_VERSION_SCRIPT)
+    result = run_powershell(engine, script, "-ModulePath", str(MODULE))
+    assert result.returncode == 0, result.stdout + result.stderr
+    for line in ("16.15|16.16=True", "16.15|16.15=False", "16.16|16.15=False",
+                 "16.9|16.10=True", "|16.15=False", "16.15|x=False"):  # fmt: skip
+        assert line in result.stdout, result.stdout
 
 
 def test_the_setup_takes_the_time_stamp_provider() -> None:

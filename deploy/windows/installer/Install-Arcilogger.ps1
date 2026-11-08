@@ -308,6 +308,9 @@ $script:Failures = New-Object System.Collections.Generic.List[string]
 $script:PlannedPastPreflight = $false
 $script:PgCredential = $PgSuperuserCredential
 $script:PgBin = $PgBinDir
+# The PostgreSQL that setup installs itself (0.4.0 P1): 'install' when this run installs it (the
+# preflight found no PostgreSQL service), 'present' when an earlier run did; $null otherwise.
+$script:PgBundle = $null
 $script:BundleInfo = $null
 $script:Manifest = $null
 $script:ExitCode = 0
@@ -565,6 +568,11 @@ $VenvPython = Join-Path $Venv 'Scripts\python.exe'
 $BasePython = Join-Path $InstallDir 'python\python.exe'
 $CoreExe = Join-Path $Venv 'Scripts\arcilogger-core.exe'
 $DbExe = Join-Path $Venv 'Scripts\arcilogger-db.exe'
+# 0.4.0 P1: the binaries of the PostgreSQL that setup installs live beside the program folder (which
+# an upgrade swaps), its cluster in <data root>\pgdata (Get-BundledPgData), its service under the
+# name EDB's installer gives PostgreSQL 16.
+$BundledPgService = 'postgresql-x64-16'
+$BundledPgHome = Join-Path (Join-Path (Split-Path -Parent $InstallDir) 'ARCILOGGER-PostgreSQL') '16'
 # The schema downgrade of a rollback (issue #122): this version's command (arcilogger-db <command>
 # --to <revision> --json), and the revision of the daily partitions a version before it cannot handle.
 $SchemaDowngradeCommand = @('schema', 'downgrade')
@@ -738,8 +746,179 @@ function Get-PostgresDataDir($Service) {
     $null
 }
 
+# --- the PostgreSQL that setup installs (0.4.0 P1, contract 2.1) ------------------------------------
+
+function Get-BundledPgData {
+    Join-Path $DataRoot 'pgdata'
+}
+
+function Get-BundledPostgresComponent {
+    <# The bundle's PostgreSQL server (postgresql_binaries); $null when this bundle carries none. #>
+    if ($null -eq $script:Manifest) { return $null }
+    $found = @($script:Manifest.components | Where-Object { $_.name -eq 'postgresql_binaries' })
+    if ($found.Count -eq 1) { return $found[0] }
+    $null
+}
+
+function Get-BundledPostgresRecord {
+    <# install\state.json's postgres record when setup installed PostgreSQL itself; else $null. #>
+    $state = Read-InstallState
+    if ($state.PSObject.Properties.Name -notcontains 'postgres' -or $null -eq $state.postgres) { return $null }
+    $record = $state.postgres
+    if ($record.PSObject.Properties.Name -contains 'bundled' -and [bool]$record.bundled) { return $record }
+    $null
+}
+
+function Test-StoredSecret([string]$Name) {
+    if (-not (Test-Path -LiteralPath $CoreExe)) { return $false }
+    $result = Invoke-ArciProcess -FilePath $CoreExe -ArgumentList @('--config', $ConfigPath, 'secret', 'list') -AllowFailure
+    ($result.ExitCode -eq 0) -and ($result.StdOut -match ('(?m)^' + [regex]::Escape($Name) + '\b'))
+}
+
+function Install-BundledPostgresBinaries($Component) {
+    <#
+    The bundle's server zip (pgsql\bin, lib, share) into $BundledPgHome through a staging folder;
+    the programs setup and the tasks run must be in it (contract S1, checked by the build too).
+    #>
+    $root = Split-Path -Parent $BundledPgHome
+    $staging = $BundledPgHome + '.new'
+    [void](New-Item -ItemType Directory -Path $root -Force)
+    if (Test-Path -LiteralPath $staging) { Remove-Item -LiteralPath $staging -Recurse -Force }
+    [void](New-Item -ItemType Directory -Path $staging -Force)
+    Invoke-ArciExe -FilePath $TarExe -ArgumentList @('-xf', (Get-BundleFile $Component.path), '-C', $staging)
+    foreach ($program in @('initdb.exe', 'pg_ctl.exe', 'postgres.exe', 'psql.exe', 'pg_dump.exe', 'pg_restore.exe')) {
+        if (-not (Test-Path -LiteralPath (Join-Path $staging ('pgsql\bin\' + $program)))) {
+            throw ("PostgreSQL programı pakette yok [missing in the bundle]: {0}" -f $program)
+        }
+    }
+    if (Test-Path -LiteralPath $BundledPgHome) { Remove-Item -LiteralPath $BundledPgHome -Recurse -Force }
+    Move-Item -LiteralPath (Join-Path $staging 'pgsql') -Destination $BundledPgHome
+    Remove-Item -LiteralPath $staging -Recurse -Force
+}
+
+function Wait-BundledPostgres {
+    <# The server answers "SELECT version()" as postgres with the stored password within a minute. #>
+    $deadline = [DateTime]::UtcNow.AddSeconds(60)
+    while ($true) {
+        try { return ([string](Invoke-Psql -Database 'postgres' -TuplesOnly -Sql "SELECT version();`n").StdOut).Trim() }
+        catch {
+            if ([DateTime]::UtcNow -ge $deadline) { throw }
+            Start-Sleep -Seconds 2
+        }
+    }
+}
+
+function Write-BundledPostgresRecord($Component, [string]$Data) {
+    Write-InstallState @{ postgres = [ordered]@{ bundled = $true; version = [string]$Component.version; bin = (Join-Path $BundledPgHome 'bin'); data = $Data; service = $BundledPgService } }
+}
+
+function Install-BundledPostgres {
+    <#
+    Contract 2.1.2: PostgreSQL 16 from the bundle on a server without a PostgreSQL service. The
+    binaries go to $BundledPgHome, the cluster to <data root>\pgdata (UTF8, locale C, SCRAM;
+    localhost:5432 only), the service runs as NETWORK SERVICE, which may modify that folder and
+    nothing else of ARCILOGGER. The superuser password is generated and stored as
+    postgres.superuser (stdin of "secret set"); it is never on a command line, in the log or in
+    the plan, and initdb reads it from a file only this account can open, deleted at once. A
+    cluster an interrupted run left is used again when its password is stored; otherwise the step
+    stops before anything is written into it.
+    #>
+    $component = Get-BundledPostgresComponent
+    $data = Get-BundledPgData
+    $bin = Join-Path $BundledPgHome 'bin'
+    Install-BundledPostgresBinaries $component
+    $script:PgBin = $bin
+    if (Test-Path -LiteralPath (Join-Path $data 'PG_VERSION')) {
+        if (-not (Test-StoredSecret 'postgres.superuser')) {
+            throw ("{0} önceki bir denemeden kalmış, parolası gizli depoda yok: klasörü taşıyın ya da silin [left by an earlier attempt and its password is not stored: move or delete the folder]" -f $data)
+        }
+        Write-ArciInfo ("Önceki denemenin veri klasörü kullanılıyor [using the cluster of an earlier attempt]: {0}" -f $data)
+    }
+    else {
+        $password = New-ArciRandomPassword -Length 32
+        [void](Invoke-ArciProcess -FilePath $CoreExe -ArgumentList @('--config', $ConfigPath, 'secret', 'set', 'postgres.superuser') -StdinText ($password + "`n") -Redact @($password))
+        $script:PgCredential = New-Object System.Management.Automation.PSCredential -ArgumentList 'postgres', (ConvertTo-SecureString -String $password -AsPlainText -Force)
+        [void](New-Item -ItemType Directory -Path $data -Force)
+        $user = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+        Set-ArciPostgresDataAcl -Path $data -UserSid $user
+        $passwordFile = Join-Path ([System.IO.Path]::GetTempPath()) ('arcilogger-pg-{0}.txt' -f [guid]::NewGuid().ToString('N'))
+        try {
+            New-ArciPrivateFile -Path $passwordFile -Text $password -UserSid $user
+            [void](Invoke-ArciProcess -FilePath (Join-Path $bin 'initdb.exe') -ArgumentList @('-D', $data, '-U', 'postgres', '-A', 'scram-sha-256', ('--pwfile=' + $passwordFile), '-E', 'UTF8', '--locale=C') -Redact @($password))
+        }
+        finally { Remove-Item -LiteralPath $passwordFile -Force -ErrorAction SilentlyContinue }
+        $lines = "`r`n# ARCILOGGER (0.4.0 P1): local connections only, on the port of arcilogger.toml.`r`nlisten_addresses = 'localhost'`r`nport = 5432`r`n"
+        [System.IO.File]::AppendAllText((Join-Path $data 'postgresql.conf'), $lines, (New-Object System.Text.UTF8Encoding -ArgumentList $false))
+    }
+    [void](Invoke-ArciProcess -FilePath (Join-Path $bin 'pg_ctl.exe') -ArgumentList @('register', '-N', $BundledPgService, '-D', $data, '-S', 'auto', '-U', 'NT AUTHORITY\NetworkService'))
+    Start-Service -Name $BundledPgService
+    $version = Wait-BundledPostgres
+    Write-BundledPostgresRecord $component $data
+    Write-ArciInfo ("PostgreSQL hazır [ready]: {0}" -f $version)
+}
+
+function Update-BundledPostgres($Record, $Component) {
+    <#
+    Contract 2.1.3: a later 16.x minor in the bundle replaces the binaries of the PostgreSQL setup
+    installed (the cluster stays): stop the service, keep the old binaries as 16.previous, unpack
+    the new ones, start and ask "SELECT version()". Any failure puts the previous binaries back and
+    starts them again. ARCILOGGER's services are stopped by then (Invoke-Upgrade).
+    #>
+    $previous = $BundledPgHome + '.previous'
+    Stop-Service -Name $BundledPgService
+    if (Test-Path -LiteralPath $previous) { Remove-Item -LiteralPath $previous -Recurse -Force }
+    Rename-ArciFolder -LiteralPath $BundledPgHome -NewName (Split-Path -Leaf $previous)
+    try {
+        Install-BundledPostgresBinaries $Component
+        Start-Service -Name $BundledPgService
+        $version = Wait-BundledPostgres
+    }
+    catch {
+        $failure = $_.Exception.Message
+        try { Stop-Service -Name $BundledPgService -ErrorAction Stop } catch { Write-Verbose 'service not running' }
+        if (Test-Path -LiteralPath $BundledPgHome) { Remove-Item -LiteralPath $BundledPgHome -Recurse -Force }
+        Rename-ArciFolder -LiteralPath $previous -NewName (Split-Path -Leaf $BundledPgHome)
+        Start-Service -Name $BundledPgService
+        throw ("PostgreSQL {0} başlamadı, önceki sürüm geri kondu [did not start, the previous binaries are back]: {1}" -f $Component.version, $failure)
+    }
+    Write-BundledPostgresRecord $Component ([string]$Record.data)
+    Write-ArciInfo ("PostgreSQL güncellendi [updated]: {0}" -f $version)
+}
+
+function Remove-BundledPostgres($Record) {
+    <#
+    -Uninstall -RemoveData of a PostgreSQL that setup installed (contract 2.1.3): the service, the
+    cluster and the binaries go; no SQL is needed for that. A PostgreSQL the operator installed
+    keeps everything but ARCILOGGER's database and role (Get-RemovalDatabase).
+    #>
+    $name = [string]$Record.service
+    if (Get-Service -Name $name -ErrorAction SilentlyContinue) {
+        Stop-Service -Name $name -Force
+        [void](Invoke-ArciProcess -FilePath (Join-Path $env:SystemRoot 'System32\sc.exe') -ArgumentList @('delete', $name))
+        $deadline = [DateTime]::UtcNow.AddSeconds(30)
+        while ((Get-Service -Name $name -ErrorAction SilentlyContinue) -and [DateTime]::UtcNow -lt $deadline) { Start-Sleep -Seconds 1 }
+    }
+    if (Test-Path -LiteralPath ([string]$Record.data)) { [void](Remove-ArciDataFolder -Path ([string]$Record.data)) }
+    foreach ($folder in @($BundledPgHome, ($BundledPgHome + '.previous'), ($BundledPgHome + '.new'))) {
+        if (Test-Path -LiteralPath $folder) { Remove-Item -LiteralPath $folder -Recurse -Force }
+    }
+    $root = Split-Path -Parent $BundledPgHome
+    if ((Test-Path -LiteralPath $root) -and @(Get-ChildItem -LiteralPath $root -Force).Count -eq 0) { Remove-Item -LiteralPath $root -Force }
+}
+
 function Get-PgCredential {
     if ($script:PgCredential) { return $script:PgCredential }
+    if ($script:PgBundle -or (Get-BundledPostgresRecord)) {
+        # Setup installed this PostgreSQL and generated its password (0.4.0 P1): it comes from the
+        # secret store, into this process only; nobody knows it and nothing asks for it.
+        $answer = Invoke-ArciProcess -FilePath $CoreExe -ArgumentList @('--config', $ConfigPath, 'secret', 'get', 'postgres.superuser') -AllowFailure
+        if ($answer.ExitCode -ne 0 -or -not $answer.StdOut) {
+            throw ("postgres.superuser gizli depodan okunamadı [cannot be read from the secret store]: {0}" -f $answer.StdErr.Trim())
+        }
+        $secure = ConvertTo-SecureString -String $answer.StdOut -AsPlainText -Force
+        $script:PgCredential = New-Object System.Management.Automation.PSCredential -ArgumentList 'postgres', $secure
+        return $script:PgCredential
+    }
     Write-Host ''
     Write-Host 'PostgreSQL süper kullanıcısının (postgres) parolası gerekiyor. Bir kez sorulur; diske, günlüğe ve komut satırına yazılmaz.'
     Write-Host '[The postgres superuser password is asked once and never stored, logged or put on a command line.]'
@@ -2270,6 +2449,8 @@ function Set-PostgresDataAccess {
     The data root's inheritance is cut off. If the PostgreSQL data folder lies inside it
     (D:\ARCILOGGER\db), make sure PostgreSQL's own service account keeps full control there.
     #>
+    # Setup's own PostgreSQL has its folder's entries already (Set-ArciPostgresDataAcl, by SID).
+    if ($script:PgBundle -or (Get-BundledPostgresRecord)) { return }
     $service = Find-PostgresService
     $dataDir = Get-PostgresDataDir $service
     if (-not $dataDir) { return }
@@ -2896,6 +3077,60 @@ function Invoke-LicensePreflight {
     $script:LicenseStop = $cover.Text
 }
 
+function Add-PostgresChecks {
+    <#
+    The PostgreSQL part of the preflight: -SkipDatabase; no PostgreSQL service at all on a new
+    installation whose bundle carries PostgreSQL, so setup installs its own (0.4.0 P1: port 5432
+    and <data root>\pgdata must be free); no service and no bundled PostgreSQL (install it
+    first); or the operator's service, running, with psql.exe beside pg_ctl.exe.
+    #>
+    if ($SkipDatabase) {
+        Add-Check 'postgresql' 'warn' 'Veritabanı adımları atlanıyor [-SkipDatabase]'
+    }
+    else {
+        $service = Find-PostgresService
+        $component = Get-BundledPostgresComponent
+        if ($null -eq $service -and $Mode -eq 'install' -and $null -ne $component -and -not $PgServiceName -and -not $PgBinDir) {
+            # 0.4.0 P1: no PostgreSQL service at all (not even a stopped one of another version),
+            # so setup installs its own; the operator's service, -PgServiceName and -PgBinDir
+            # keep today's path.
+            $script:PgBundle = 'install'
+            $script:PgBin = Join-Path $BundledPgHome 'bin'
+            $data = Get-BundledPgData
+            Add-Check 'postgresql' 'ok' ("PostgreSQL {0} kurulumla gelir [comes with the setup]: {1}; veri [data] {2}; hizmet [service] {3}" -f $component.version, $BundledPgHome, $data, $BundledPgService)
+            $owners = Get-PortOwners 'TCP' 5432
+            if (@($owners).Count -gt 0) {
+                $who = (@($owners) | ForEach-Object { '{0} (pid {1})' -f $_.Name, $_.Pid }) -join ', '
+                Add-Check 'postgresql-port' 'fail' ("5432 portu kullanımda [port 5432 is in use]: {0}. O programı durdurun ya da PostgreSQL 16'yı kendiniz kurup hizmet olarak çalıştırın (docs\KURULUM.md, PostgreSQL) [stop it, or install PostgreSQL 16 yourself as a service]" -f $who)
+            }
+            if ((Test-Path -LiteralPath $data) -and @(Get-ChildItem -LiteralPath $data -Force).Count -gt 0 -and -not (Test-Path -LiteralPath (Join-Path $data 'PG_VERSION'))) {
+                Add-Check 'postgresql-data' 'fail' ("{0} boş değil ve bir PostgreSQL veri klasörü değil; taşıyın ya da silin [not empty and not a PostgreSQL cluster: move it away]" -f $data)
+            }
+        }
+        elseif ($null -eq $service) {
+            $help = @(
+                'PostgreSQL 16 bulunamadı [not found]. Önce kurun [install it first]:',
+                '  1. EDB PostgreSQL 16 Windows x64 yükleyicisi: https://www.enterprisedb.com/downloads/postgres-postgresql-downloads',
+                ('  2. Yönetici olarak çalıştırın; port 5432, yerel ayar (locale) "C", veri klasörü {0}, Stack Builder gerekmez.' -f (Join-Path $DataRoot 'db')),
+                '  3. postgres parolasını güvenli bir yerde saklayın (ARCILOGGER kaydetmez).',
+                '  4. Bu betiği yeniden çalıştırın. Ayrıntı: docs\KURULUM.md, "PostgreSQL".'
+            ) -join [Environment]::NewLine
+            Add-Check 'postgresql' 'fail' $help
+        }
+        else {
+            $script:PgBin = Get-PostgresBinDir $service
+            if ($service.Name -eq $BundledPgService -and (Get-BundledPostgresRecord)) { $script:PgBundle = 'present' }
+            $versionOk = ($service.Name -match '-16$' -or [string]$service.PathName -match '\\16\\bin\\')
+            if (-not $versionOk) { Add-Check 'postgresql-version' 'warn' ("PostgreSQL 16 bekleniyordu [expected]: {0}" -f $service.Name) }
+            if ($service.State -eq 'Running') { Add-Check 'postgresql' 'ok' ("{0} çalışıyor [running]; bin: {1}" -f $service.Name, $script:PgBin) }
+            else { Add-Check 'postgresql' 'fail' ("{0} çalışmıyor [not running]: Start-Service {0}" -f $service.Name) }
+            if (-not $script:PgBin -or -not (Test-Path -LiteralPath (Join-Path $script:PgBin 'psql.exe'))) {
+                Add-Check 'psql' 'fail' ("psql.exe bulunamadı; -PgBinDir verin [psql.exe not found]: {0}" -f $script:PgBin)
+            }
+        }
+    }
+}
+
 function Invoke-Preflight {
     Write-ArciStep 'Ön denetim [preflight]'
     $onWindows = Test-ArciWindows
@@ -2964,32 +3199,7 @@ function Invoke-Preflight {
     $driveChecks = Get-ArciDataDriveChecks -Root $root -Drive $driveFacts -BusType $busType -SystemDrive $env:SystemDrive -MinFreeGB $MinFreeGB -Mode $Mode
     foreach ($check in $driveChecks) { Add-Check $check.Id $check.Status $check.Text }
 
-    if ($SkipDatabase) {
-        Add-Check 'postgresql' 'warn' 'Veritabanı adımları atlanıyor [-SkipDatabase]'
-    }
-    else {
-        $service = Find-PostgresService
-        if ($null -eq $service) {
-            $help = @(
-                'PostgreSQL 16 bulunamadı [not found]. Önce kurun [install it first]:',
-                '  1. EDB PostgreSQL 16 Windows x64 yükleyicisi: https://www.enterprisedb.com/downloads/postgres-postgresql-downloads',
-                ('  2. Yönetici olarak çalıştırın; port 5432, yerel ayar (locale) "C", veri klasörü {0}, Stack Builder gerekmez.' -f (Join-Path $DataRoot 'db')),
-                '  3. postgres parolasını güvenli bir yerde saklayın (ARCILOGGER kaydetmez).',
-                '  4. Bu betiği yeniden çalıştırın. Ayrıntı: docs\KURULUM.md, "PostgreSQL".'
-            ) -join [Environment]::NewLine
-            Add-Check 'postgresql' 'fail' $help
-        }
-        else {
-            $script:PgBin = Get-PostgresBinDir $service
-            $versionOk = ($service.Name -match '-16$' -or [string]$service.PathName -match '\\16\\bin\\')
-            if (-not $versionOk) { Add-Check 'postgresql-version' 'warn' ("PostgreSQL 16 bekleniyordu [expected]: {0}" -f $service.Name) }
-            if ($service.State -eq 'Running') { Add-Check 'postgresql' 'ok' ("{0} çalışıyor [running]; bin: {1}" -f $service.Name, $script:PgBin) }
-            else { Add-Check 'postgresql' 'fail' ("{0} çalışmıyor [not running]: Start-Service {0}" -f $service.Name) }
-            if (-not $script:PgBin -or -not (Test-Path -LiteralPath (Join-Path $script:PgBin 'psql.exe'))) {
-                Add-Check 'psql' 'fail' ("psql.exe bulunamadı; -PgBinDir verin [psql.exe not found]: {0}" -f $script:PgBin)
-            }
-        }
-    }
+    Add-PostgresChecks
 
     # The API port ([api] port of arcilogger.toml): a foreign program on it would leave ArciApi
     # restarting in a loop and Caddy answering 502.
@@ -3353,6 +3563,12 @@ function Invoke-BundleCheck {
             Stop-Installer 2 ("{0}: dosya özeti tutmuyor [file checksum mismatch]" -f $name)
         }
     }
+    # The bundled PostgreSQL server (0.4.0 P1) is a zip packed from the pinned vendor archive: its
+    # own checksum is the bundle manifest's, checked like every file of SHA256SUMS.
+    $postgres = Get-BundledPostgresComponent
+    if ($null -ne $postgres -and (Get-ArciFileSha256 -Path (Get-BundleFile $postgres.path)) -ne $postgres.sha256) {
+        Stop-Installer 2 'postgresql_binaries: dosya özeti tutmuyor [file checksum mismatch]'
+    }
     Add-PlanItem -Id 'bundle.verify' -Status 'ok' -Text ("Paket {0}: {1} dosya, parmak izi [fingerprint] {2}" -f $script:Manifest.version, $script:BundleInfo.Files, $script:BundleInfo.Fingerprint)
     Write-ArciInfo ("Sürüm [version] {0}; {1} dosya doğrulandı [files verified]" -f $script:Manifest.version, $script:BundleInfo.Files)
     Write-ArciInfo ("Paket parmak izi [bundle fingerprint] (SHA-256 of SHA256SUMS): {0}" -f $script:BundleInfo.Fingerprint)
@@ -3368,6 +3584,21 @@ function Invoke-CommonTail {
     version without the database having changed. The migration is the last change.
     #>
     Invoke-ConfigSteps
+    if ($script:PgBundle -eq 'install') {
+        # After the secret store exists (secrets.init), before the rights and the database steps.
+        Invoke-Step 'postgres.install' ("PostgreSQL kuruluyor [installing PostgreSQL]: {0}, veri [data] {1}, hizmet [service] {2}" -f $BundledPgHome, (Get-BundledPgData), $BundledPgService) {
+            Install-BundledPostgres
+        } ([pscustomobject]@{ bin = $BundledPgHome; data = (Get-BundledPgData); service = $BundledPgService })
+    }
+    elseif ($script:PgBundle -eq 'present') {
+        $record = Get-BundledPostgresRecord
+        $component = Get-BundledPostgresComponent
+        if ($null -ne $component -and (Test-ArciNewerVersion -Installed ([string]$record.version) -Offered ([string]$component.version))) {
+            Invoke-Step 'postgres.update' ("PostgreSQL {0} -> {1} (program dosyaları [binaries]; veri klasörü değişmez [the cluster stays])" -f $record.version, $component.version) {
+                Update-BundledPostgres $record $component
+            } $BundledPgHome
+        }
+    }
     Invoke-AclSteps
     if (-not $SkipDatabase) {
         # Versions without the database package (arcilogger-db) need no database yet.
@@ -4332,10 +4563,16 @@ function Initialize-DataRemoval {
         Stop-Installer 2 ("{0} Hiçbir şey kaldırılmadı [nothing removed]." -f $why)
     }
     $keep = New-Object System.Collections.Generic.List[string]
+    # The PostgreSQL that setup installed (0.4.0 P1) goes whole: service, cluster and binaries,
+    # without SQL; -SkipDatabase keeps it as it is. An operator's PostgreSQL keeps all but
+    # ARCILOGGER's database and role.
+    $bundledPg = Get-BundledPostgresRecord
+    $removePg = $null
+    if ($null -ne $bundledPg -and -not $SkipDatabase) { $removePg = $bundledPg }
     $pgDirectory = Get-PostgresDataDir (Find-PostgresService)
-    if ($pgDirectory) { $keep.Add($pgDirectory) }
+    if ($pgDirectory -and $null -eq $removePg) { $keep.Add($pgDirectory) }
     $database = $null
-    if (-not $SkipDatabase) {
+    if (-not $SkipDatabase -and $null -eq $removePg) {
         $database = Get-RemovalDatabase
         if ($database.DataDirectory) { $keep.Add([string]$database.DataDirectory) }
     }
@@ -4344,6 +4581,11 @@ function Initialize-DataRemoval {
     if (Test-Path -LiteralPath $DataRoot -PathType Container) {
         $names = @(Get-ChildItem -LiteralPath $DataRoot -Force | ForEach-Object { $_.Name })
         $rootIsLink = [bool]((Get-Item -LiteralPath $DataRoot -Force).Attributes -band [System.IO.FileAttributes]::ReparsePoint)
+    }
+    if ($null -ne $removePg) {
+        # Its cluster is no name to keep: Remove-BundledPostgres deletes it.
+        $cluster = [System.IO.Path]::GetFullPath([string]$removePg.data).TrimEnd('\')
+        $names = @($names | Where-Object { [System.IO.Path]::GetFullPath([System.IO.Path]::Combine($DataRoot, $_)).TrimEnd('\') -ine $cluster })
     }
     $windows = $(if ($env:SystemRoot) { $env:SystemRoot } elseif ($env:windir) { $env:windir } else { '' })
     $plan = Get-ArciDataRemovalPlan -DataRoot $DataRoot -ProgramDataDir $ProgramDataDir -InstallDir $InstallDir `
@@ -4384,14 +4626,22 @@ function Initialize-DataRemoval {
     else { Write-Host ('    - {0}, boşalınca [once empty]' -f $plan.Root) }
     $oldestText = $(if ($oldest) { '; en eskisi [oldest] {0}' -f $oldest } else { '' })
     Write-Host ('  Kasa [vault]: {0} mühürlü gün [sealed days]{1}' -f $sealedDays, $oldestText)
-    if ($null -eq $database) { Write-Host '  Veritabanı korunuyor [database kept] (-SkipDatabase)' }
+    if ($null -ne $removePg) {
+        Write-Host ('  Kurulumun kurduğu PostgreSQL bütünüyle silinecek [the PostgreSQL setup installed goes whole]: hizmet [service] {0}, program {1}, veri [cluster] {2}' -f $removePg.service, $BundledPgHome, $removePg.data)
+    }
+    elseif ($null -eq $database) { Write-Host '  Veritabanı korunuyor [database kept] (-SkipDatabase)' }
     else {
         $roleText = $(if ($database.DropRole -and $database.Role) { $database.Role } else { 'korunuyor: yok, süper kullanıcı, bağlanılan hesap ya da başka veritabanlarının sahibi [kept: none, a superuser, the account connected or the owner of other databases]' })
         Write-Host ('  Silinecek veritabanları [databases to drop]: {0}; rol [role]: {1}' -f $(if (@($database.Databases).Count) { @($database.Databases) -join ', ' } else { '-' }), $roleText)
         if (@($database.Owned).Count) { Write-Host ('  Rolün diğer veritabanları korunuyor [the role''s other databases are kept]: {0}' -f (@($database.Owned) -join ', ')) }
         if (@($database.Unnamed).Count) { Write-Host ('  Adı tırnaklanamayan veritabanları korunuyor, elle silin [databases whose names cannot be quoted are kept, drop them by hand]: {0}' -f (@($database.Unnamed) -join ', ')) }
     }
-    Write-Host '  Korunanlar [kept]: PostgreSQL ve veri klasörü, başka sunucudaki replika ve NAS yedek kopyası, USB''ye alınmış kopyalar, Windows olay günlüğü [PostgreSQL and its data directory, the replica and the NAS copy on other hosts, copies on USB disks, the Windows event logs]'
+    if ($null -ne $removePg) {
+        Write-Host '  Korunanlar [kept]: başka sunucudaki replika ve NAS yedek kopyası, USB''ye alınmış kopyalar, Windows olay günlüğü [the replica and the NAS copy on other hosts, copies on USB disks, the Windows event logs]'
+    }
+    else {
+        Write-Host '  Korunanlar [kept]: PostgreSQL ve veri klasörü, başka sunucudaki replika ve NAS yedek kopyası, USB''ye alınmış kopyalar, Windows olay günlüğü [PostgreSQL and its data directory, the replica and the NAS copy on other hosts, copies on USB disks, the Windows event logs]'
+    }
     foreach ($item in @($plan.Kept)) { Write-Host ('    - {0}: {1}' -f $item.Path, $item.Why) }
     Write-Host ''
     Write-Host '5651 UYARISI: ARCILOGGER trafik kayıtlarını 5651 yükümlülüklerini desteklemek için en az 730 gün saklar. Saklama süresi dolmamış kayıtları silmek bu yükümlülükleri etkileyebilir: silmeden önce hukuk danışmanınıza danışın ve bir imha tutanağı tutun (docs\legal\saklama-imha-politikasi-taslak.md).' -ForegroundColor Yellow
@@ -4418,7 +4668,7 @@ function Initialize-DataRemoval {
         if (-not $confirmed) { Stop-Installer 2 'Kuruluş adı onaylanmadı; hiçbir şey kaldırılmadı [the organisation name was not confirmed, nothing removed].' }
         Add-PlanItem -Id 'data.confirm' -Status 'done' -Text ('Kuruluş adı onaylandı [organisation name confirmed]: {0}' -f $site) -Detail $site
     }
-    [pscustomobject]@{ Plan = $plan; Facts = $facts; Database = $database; Site = $site; SealedDays = $sealedDays; Oldest = $oldest; RootIsLink = $rootIsLink }
+    [pscustomobject]@{ Plan = $plan; Facts = $facts; Database = $database; Postgres = $removePg; Site = $site; SealedDays = $sealedDays; Oldest = $oldest; RootIsLink = $rootIsLink }
 }
 
 function Test-RemovalConfigTarget($Target) {
@@ -4431,7 +4681,7 @@ function Get-RemovalEventText($Removal, [string]$Outcome) {
     <# Event 4130's text: who confirmed, the organisation, what goes, and -Outcome (starting, done, stopped). #>
     $who = '{0}\{1}' -f [Environment]::UserDomainName, [Environment]::UserName
     $database = $Removal.Database
-    $databases = $(if ($null -eq $database) { 'korunuyor (-SkipDatabase) [kept]' } elseif (@($database.Databases).Count) { @($database.Databases) -join ', ' } else { '-' })
+    $databases = $(if ($null -ne $Removal.Postgres) { 'kurulumun kurduğu PostgreSQL bütünüyle [the PostgreSQL setup installed, whole]: {0}' -f $Removal.Postgres.data } elseif ($null -eq $database) { 'korunuyor (-SkipDatabase) [kept]' } elseif (@($database.Databases).Count) { @($database.Databases) -join ', ' } else { '-' })
     $folders = @(foreach ($target in @($Removal.Plan.Targets)) { $fact = $Removal.Facts[$target.Path]; if ($null -eq $fact -or $fact.Exists) { $target.Path } })
     $oldest = $(if ($Removal.Oldest) { $Removal.Oldest } else { '-' })
     @(
@@ -4472,6 +4722,12 @@ function Invoke-DataRemovalSteps($Removal) {
                     }
                 }
             } ([pscustomobject]@{ databases = $names; role = $role })
+        }
+        if ($null -ne $Removal.Postgres) {
+            $postgres = $Removal.Postgres
+            Invoke-Step 'postgres.remove' ('PostgreSQL siliniyor [removing PostgreSQL]: hizmet [service] {0}, {1}, {2}' -f $postgres.service, $BundledPgHome, $postgres.data) {
+                Remove-BundledPostgres $postgres
+            } ([pscustomobject]@{ service = $postgres.service; bin = $BundledPgHome; data = $postgres.data })
         }
         foreach ($target in @($Removal.Plan.Targets)) {
             if (Test-RemovalConfigTarget $target) { continue }

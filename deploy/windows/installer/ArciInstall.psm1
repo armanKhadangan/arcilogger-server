@@ -27,6 +27,8 @@ $script:ArciServiceNames = @('ArciCollector', 'ArciIngest', 'ArciApi', 'ArciWork
 $script:WellKnownSid = @{
     System         = 'S-1-5-18'
     LocalService   = 'S-1-5-19'
+    # NT AUTHORITY\NETWORK SERVICE: the account of the PostgreSQL that setup installs (0.4.0 P1).
+    NetworkService = 'S-1-5-20'
     Administrators = 'S-1-5-32-544'
     Everyone       = 'S-1-1-0'
     Users          = 'S-1-5-32-545'
@@ -301,6 +303,77 @@ function ConvertTo-ArciScramVerifier {
 }
 
 # --- files and checksums --------------------------------------------------------------------------
+
+function Set-ArciPostgresDataAcl {
+    <#
+    .SYNOPSIS
+        The data folder of the PostgreSQL that setup installs (0.4.0 P1): inheritance off,
+        Administrators and SYSTEM full control, NETWORK SERVICE (the service's account) modify,
+        and -UserSid (the account that runs the setup) full control, each for the folder, its
+        sub-folders and files.
+    .DESCRIPTION
+        initdb and pg_ctl drop the Administrators group from their own token when an
+        administrator starts them, so the installing account needs an entry of its own to create
+        the cluster. The accounts are given by SID: their names are localised
+        (NT YETKİLİSİ\AĞ HİZMETİ on a Turkish Windows).
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory = $true)][string]$Path, [Parameter(Mandatory = $true)][string]$UserSid)
+    $security = New-Object System.Security.AccessControl.DirectorySecurity
+    $security.SetAccessRuleProtection($true, $false)
+    $inherit = [System.Security.AccessControl.InheritanceFlags]'ContainerInherit, ObjectInherit'
+    $grants = @(
+        @{ Sid = $script:WellKnownSid.Administrators; Rights = 'FullControl' },
+        @{ Sid = $script:WellKnownSid.System; Rights = 'FullControl' },
+        @{ Sid = $script:WellKnownSid.NetworkService; Rights = 'Modify' },
+        @{ Sid = $UserSid; Rights = 'FullControl' }
+    )
+    foreach ($grant in $grants) {
+        $sid = New-Object System.Security.Principal.SecurityIdentifier -ArgumentList $grant.Sid
+        $rights = [System.Security.AccessControl.FileSystemRights]$grant.Rights
+        $rule = New-Object System.Security.AccessControl.FileSystemAccessRule -ArgumentList $sid, $rights, $inherit, ([System.Security.AccessControl.PropagationFlags]::None), ([System.Security.AccessControl.AccessControlType]::Allow)
+        $security.AddAccessRule($rule)
+    }
+    Set-ArciAccessControl -Item (Get-Item -LiteralPath $Path -Force) -Security $security
+}
+
+function New-ArciPrivateFile {
+    <#
+    .SYNOPSIS
+        A new file with -Text (UTF-8 without BOM) that only -UserSid can open: created empty,
+        its inheritance cut to one entry, then written. For a secret a program must read from a
+        file (initdb --pwfile, 0.4.0 P1); the caller deletes it in its finally block.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][string]$Text,
+        [Parameter(Mandatory = $true)][string]$UserSid
+    )
+    $utf8 = New-Object System.Text.UTF8Encoding -ArgumentList $false
+    [System.IO.File]::WriteAllText($Path, '', $utf8)
+    $security = New-Object System.Security.AccessControl.FileSecurity
+    $security.SetAccessRuleProtection($true, $false)
+    $sid = New-Object System.Security.Principal.SecurityIdentifier -ArgumentList $UserSid
+    $security.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule -ArgumentList $sid, ([System.Security.AccessControl.FileSystemRights]::FullControl), ([System.Security.AccessControl.AccessControlType]::Allow)))
+    Set-ArciAccessControl -Item (Get-Item -LiteralPath $Path -Force) -Security $security
+    [System.IO.File]::WriteAllText($Path, $Text, $utf8)
+}
+
+function Test-ArciNewerVersion {
+    <#
+    .SYNOPSIS
+        Whether -Offered is a later version than -Installed ("16.16" after "16.15"); a version
+        either side that cannot be read is never later (nothing is replaced on a guess).
+    #>
+    [CmdletBinding()]
+    [OutputType([bool])]
+    param([AllowEmptyString()][string]$Installed, [AllowEmptyString()][string]$Offered)
+    $before = $null
+    $after = $null
+    if (-not [version]::TryParse($Installed, [ref]$before) -or -not [version]::TryParse($Offered, [ref]$after)) { return $false }
+    $after -gt $before
+}
 
 function Rename-ArciFolder {
     # Right after files were written into a folder or a program ran from it, a virus scanner or
@@ -4102,7 +4175,7 @@ function ConvertFrom-ArciDatabaseRemovalQuery {
 Export-ModuleMember -Function @(
     'Get-ArciServiceNames', 'Get-ArciWellKnownSid', 'Write-ArciStep', 'Write-ArciInfo', 'Write-ArciWarn',
     'Test-ArciWindows', 'Test-ArciAdministrator', 'Test-ArciInteractiveConsole', 'Get-ArciWindowsPowerShellModulePath', 'Initialize-ArciModulePath',
-    'Get-ArciServiceSid', 'New-ArciRandomPassword', 'Rename-ArciFolder',
+    'Get-ArciServiceSid', 'New-ArciRandomPassword', 'Rename-ArciFolder', 'Set-ArciPostgresDataAcl', 'New-ArciPrivateFile', 'Test-ArciNewerVersion',
     'ConvertTo-ArciScramVerifier', 'Get-ArciFileSha256', 'Write-ArciUtf8File', 'Set-ArciExampleTsaProvider', 'ConvertTo-ArciSelfTestResult', 'Read-ArciSha256Sums',
     'Test-ArciBundle', 'Resolve-ArciComponentSource', 'Expand-ArciTemplate', 'ConvertTo-ArciArgumentString', 'Invoke-ArciProcess',
     'Invoke-ArciExe', 'Get-ArciConfiguredDataDir', 'Read-ArciDataRootRecord', 'Resolve-ArciDataRoot', 'Read-ArciTomlFile', 'Get-ArciConfigValue', 'Get-ArciApiEndpoint', 'Test-ArciProxyTrust', 'Get-ArciSourceAddresses', 'Get-ArciSourceTables',
