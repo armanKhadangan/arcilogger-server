@@ -169,7 +169,7 @@ from arcilogger_core.configwatch import config_status_of
 from arcilogger_core.execpolicy import ExecutableRefusedError, check_java, check_zamane_jar
 from arcilogger_core.layout import Layout
 from arcilogger_core.secretstore import SecretStoreError, SecretValueError
-from arcilogger_core.smtp import explain
+from arcilogger_core.smtp import explain, mask_addresses
 from arcilogger_core.timeutil import isoformat_site, site_day, to_site, utc_now
 from arcilogger_core.tsa.preflight import seal_preflight
 from arcilogger_core.tsa.zamane_releases import find_release
@@ -1060,7 +1060,9 @@ class Agent:
                     # the step stays a code; the device's interface list, or the e-mail server's
                     # answer (0.4.0 P6), goes with the error
                     listed = failure.interfaces if code in INTERFACE_CODES else ()
-                    detail = failure.message[:DETAIL_MAX] if code in DETAIL_CODES else None
+                    # the server's answer may quote a recipient: masked, as the test e-mail's
+                    answer = mask_addresses(failure.message)
+                    detail = answer[:DETAIL_MAX] if code in DETAIL_CODES else None
                     host = check.candidate.smtp.host if check.candidate is not None else None
                     hint = explain(detail, host) if detail else None
                     return fail("failed", "probe_failed", code, None, listed, detail, hint)

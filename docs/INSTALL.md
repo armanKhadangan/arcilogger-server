@@ -404,7 +404,9 @@ Parameters: `-ServerAddress` (remembered; otherwise the address of the only adap
 gateway; the devices' syslog target, certificate and web address, and `[collector] bind` of a new
 `arcilogger.toml`; remembered in `C:\ProgramData\ARCILOGGER\install\state.json`), `-ServerName`
 (remembered, otherwise arcilogger.internal), `-SiteName` (no default; required on a first
-installation), `-NtpServer` (no default; empty: the fallback time server only), `-AdminAddress`
+installation), `-NtpServer` (no default; empty: the fallback time server only; `-NoNtpServer` is
+the same as an empty one and is what the setup .exe passes when its time server field is left
+empty, so the window does not ask again), `-AdminAddress`
 (no default; addresses or networks such as `10.0.0.10` or `10.0.0.0/24`; remembered) — the last
 three in section 7.1, `-TimeStampProvider` (`turktrust` by default, or `zamane` for the Kamu SM
 test server; only a new `arcilogger.toml` gets it, another value stops with `2`; the setup .exe

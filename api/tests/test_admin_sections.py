@@ -130,6 +130,13 @@ def test_a_refused_trial_email_shows_the_mail_server_answer(
     assert found["error"]["detail"].startswith("535 5.7.8")
     assert (found["error"]["hint_tr"], found["error"]["hint_en"]) == (None, None)
 
+    # an answer that quotes the recipient shows it masked, as the test e-mail's result does
+    quoted = "550 5.1.1 <bora.kaya@ornek.example>: Recipient address rejected"
+    agent.prober.results["smtp"] = ProbeResult(False, "smtp_test_failed", quoted)
+    again = {"etag": etag(client, "smtp"), **SMTP, "password": password}
+    found = settle(client, agent, client.put(f"{CONFIG}/smtp", json=again))
+    assert found["error"]["detail"] == "550 5.1.1 <b***@ornek.example>: Recipient address rejected"
+
 
 def test_a_mail_server_change_is_reverted_without_a_trial_recipient(
     client: TestClient, admin: LoggedIn, agent: FakeAgent

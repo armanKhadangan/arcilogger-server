@@ -91,6 +91,25 @@ class SmtpSendError(Exception):
         self.smtp_code = smtp_code
 
 
+_ADDRESS_IN_TEXT: Final = re.compile(
+    r"[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+"
+)
+
+
+def mask_address(address: str) -> str:
+    """``bora@ornek.example`` → ``b***@ornek.example`` (ADR-0010 A4; ``***`` when it is not an
+    address)."""
+    local, at, domain = address.strip().rpartition("@")
+    if not at or not local or not domain:
+        return "***"
+    return f"{local[0]}***@{domain}"
+
+
+def mask_addresses(text: str) -> str:
+    """Every e-mail address in ``text`` masked (an SMTP reply may quote the recipient)."""
+    return _ADDRESS_IN_TEXT.sub(lambda match: mask_address(match.group()), text)
+
+
 def error_text(exc: BaseException, secret: str | None = None) -> str:
     """A short description of a failed send, without the password (even if a server echoed
     it)."""

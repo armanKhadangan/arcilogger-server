@@ -455,6 +455,7 @@ export function EmailPage() {
               form.restore();
               setPassword(SECRET_KEPT);
               setErrors({});
+              setChosen(null);
             }}
             onReload={() => {
               void config.refetch().then((result) => {
@@ -462,6 +463,7 @@ export function EmailPage() {
                 if (fresh) form.setValues(fresh);
                 setPassword(SECRET_KEPT);
                 setErrors({});
+                setChosen(null);
               });
             }}
             onTerminal={(request) => {

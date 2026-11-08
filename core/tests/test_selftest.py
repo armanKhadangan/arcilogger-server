@@ -4,7 +4,9 @@ changes nothing and no stored secret appears in its output."""
 from __future__ import annotations
 
 import json
+import socket
 import ssl
+import subprocess
 import threading
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
@@ -23,6 +25,7 @@ from arcilogger_core import selftest
 from arcilogger_core.admin.testing import SmtpState, SmtpTestServer
 from arcilogger_core.cli import main
 from arcilogger_core.clockcheck import ClockError, NtpResult
+from arcilogger_core.config import load_config
 from arcilogger_core.secretstore import SMTP_PASSWORD, TURKTRUST_PASSWORD, SecretStore
 from arcilogger_core.selftest import DatabaseAnswer, Probes, Row
 from arcilogger_core.smtp import SmtpSendError
@@ -271,6 +274,72 @@ def test_an_https_answer_of_401_counts_as_reached(https_401: str) -> None:
 def test_no_https_answer_is_an_error(tmp_path: Path) -> None:
     with pytest.raises(OSError, match=r".+"):  # nobody listens on the discard port
         selftest.http_status("https://127.0.0.1:9/", 2.0, "")
+
+
+def test_an_answer_that_is_not_http_is_an_error() -> None:
+    """A middlebox that answers with something else: http.client raises its own error (no
+    OSError), which must not end the self-test without its JSON."""
+    with socket.create_server(("127.0.0.1", 0)) as server:
+
+        def answer() -> None:
+            connection, _ = server.accept()
+            with connection:
+                connection.recv(4096)
+                connection.sendall(b"NOT HTTP AT ALL\r\n\r\n")
+
+        thread = threading.Thread(target=answer, daemon=True)
+        thread.start()
+        port = server.getsockname()[1]
+        with pytest.raises(OSError, match="BadStatusLine"):
+            selftest.http_status(f"http://127.0.0.1:{port}/", 5.0, "")
+        thread.join(5)
+
+
+def test_the_database_child_prints_utf8(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Its Turkish warnings would not fit a pipe's Windows code page (cp1252): the child is told
+    to print UTF-8."""
+    seen: dict[str, Any] = {}
+
+    def run(command: list[str], **options: Any) -> subprocess.CompletedProcess[bytes]:
+        seen.update(options)
+        report = json.dumps({**HEAD, "warnings": ["bölümleri yok"]}).encode()
+        return subprocess.CompletedProcess(command, 0, report, b"")
+
+    monkeypatch.setattr(subprocess, "run", run)
+    answer = selftest.run_database_check(tmp_path / "arcilogger.toml")
+    assert seen["env"]["PYTHONIOENCODING"] == "utf-8"
+    assert answer is not None
+    assert answer.report is not None
+    assert answer.report["warnings"] == ["bölümleri yok"]
+
+
+def test_the_mail_server_check_waits_no_longer_than_the_network_timeout(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """``[smtp] timeout_seconds`` may be 300 s per step: more than the installer waits for the
+    whole self-test."""
+    seen: list[int] = []
+
+    class Sender:
+        def __init__(self, settings: Any, _password: str | None) -> None:
+            seen.append(settings.timeout_seconds)
+
+        def check(self) -> None:
+            return None
+
+    monkeypatch.setattr(selftest, "SmtpSender", Sender)
+    for configured, used in ((300, int(selftest.NETWORK_TIMEOUT)), (5, 5)):
+        root = tmp_path / str(configured)
+        root.mkdir()
+        config = write_config(
+            root,
+            extra=(
+                '[smtp]\nenabled = true\nhost = "127.0.0.1"\n'
+                f'from_address = "arcilogger@ornek.example"\ntimeout_seconds = {configured}\n'
+            ),
+        )
+        selftest.smtp_check(load_config(config), None)
+        assert seen[-1] == used
 
 
 # -- the e-mail server --------------------------------------------------------------------------

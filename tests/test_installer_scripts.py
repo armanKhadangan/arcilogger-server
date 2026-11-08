@@ -4267,6 +4267,13 @@ if ($Scenario -eq 'given') {
     $parameters['NtpServer'] = ''
     $parameters['AdminAddress'] = @('10.0.0.10')
 }
+if ($Scenario -like 'setup-page*') {
+    # Setup's page: the optional time server left empty is -NoNtpServer (0.4.0 P2)
+    $parameters['SiteName'] = 'Kurum'
+    $parameters['NoNtpServer'] = $true
+    $parameters['AdminAddress'] = @('10.0.0.10')
+    if ($Scenario -eq 'setup-page-both') { $parameters['NtpServer'] = '10.0.0.1' }
+}
 if ($Scenario -eq 'no-firewall') { $parameters['SkipFirewall'] = $true }
 . $Installer @parameters
 function Test-ArciInteractiveConsole { $Scenario -ne 'quiet' }
@@ -4309,6 +4316,10 @@ SETUP_PROMPT_CASES = [
     ("empty-name", 'site_name = ""\n[clock]\nntp_server = ""\n', ["10.0.0.10"], ["Kurum"],
      ("Kurum", "prompt", "", "config", ["10.0.0.10"]), [ORGANISATION_PROMPT]),
     ("given", None, None, [], ("Kurum", "parameter", "", "parameter", ["10.0.0.10"]), []),
+    # An empty time server on Setup's page is not asked again in the window; -NtpServer wins.
+    ("setup-page", None, None, [], ("Kurum", "parameter", "", "parameter", ["10.0.0.10"]), []),
+    ("setup-page-both", None, None, [],
+     ("Kurum", "parameter", "10.0.0.1", "parameter", ["10.0.0.10"]), []),
     ("no-firewall", None, None, ["Kurum", ""], ("Kurum", "prompt", "", "prompt", []),
      [ORGANISATION_PROMPT, TIME_PROMPT]),
     ("quiet", None, None, [], ("", "none", "", "none", []), []),
@@ -13207,13 +13218,19 @@ def test_setup_pages_ask_on_a_first_installation_only() -> None:
         "ProviderTurktrust", "ProviderZamane")]  # fmt: skip
     assert order == sorted(order)
     assert "ProviderPage.SelectedValueIndex := 0;" in wizard
-    assert "Result := not FileExists(VersionFile());" in _pascal(iss, "function FirstInstallation")
+    # a configuration kept by a removal (the data stayed) is no first installation
+    first = _pascal(iss, "function FirstInstallation")
+    assert "Result := not FileExists(VersionFile()) and" in first
+    kept = "ExpandConstant('{commonappdata}\\ARCILOGGER\\arcilogger.toml')"
+    assert f"not FileExists({kept});" in first
     skip = _pascal(iss, "function ShouldSkipPage")
     assert "and not FirstInstallation()" in skip
     params = _pascal(iss, "function InstallerParameters")
     assert params.index("if not FirstInstallation() then") < params.index("-SiteName")
     assert "' -SiteName \"' + Name + '\"'" in params
     assert "' -NtpServer \"' + Ntp + '\"'" in params
+    # an empty quoted argument does not always survive -File: the empty field is a switch
+    assert "if Ntp = '' then\n    Result := Result + ' -NoNtpServer'" in params
     assert "' -AdminAddress \"' + Admin + '\"'" in params
     assert "' -TimeStampProvider \"zamane\"'" in params
     assert "SafeArgument(Name)" in params
@@ -13415,6 +13432,14 @@ def test_the_setup_runs_the_self_test_and_shows_its_counts() -> None:
     page = _pascal(iss, "procedure CurPageChanged")
     assert "wpFinished" in page
     assert "LoadStringFromFile(SelfTestFile(), Content)" in page
+    # only this run's result, and only when the run ended with 0 or 1 (an earlier upgrade's
+    # file must not show after a refused or failed run)
+    assert "not InstallerSucceeded" in page
+    run = _pascal(iss, "procedure RunArciInstaller")
+    assert run.index("DeleteFile(SelfTestFile());") < run.index("Exec(PowerShellPath()")
+    assert run.index("InstallerSucceeded := False;") < run.index("Exec(PowerShellPath()")
+    assert run.index("InstallerSucceeded := True;") > run.index("BundleIsInstalled(Fingerprint)")
+    assert iss.index("function SelfTestFile()") < iss.index("procedure RunArciInstaller")
     assert "ExpandConstant('{commonappdata}\\ARCILOGGER\\install\\selftest.json')" in iss
     assert "turkish.SelfTestLine=Denetim: %1 tamam, %2 uyarı/eksik" in iss
     assert "english.SelfTestLine=Self-test: %1 ok, %2 warnings/missing" in iss

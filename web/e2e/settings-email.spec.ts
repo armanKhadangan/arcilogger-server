@@ -149,6 +149,21 @@ test.describe('Ayarlar → E-posta', () => {
     // typing another server leaves the preset behind
     await smtp.getByLabel('SMTP sunucusu').fill('posta.ornek.example');
     await expect(preset).toHaveText('Diğer');
+
+    // discarding the changes forgets the choice too: the saved server decides again
+    await preset.click();
+    await page.getByRole('option', { name: /^Microsoft 365/ }).click();
+    await page
+      .getByRole('dialog', { name: 'Hazır ayar dolu alanları değiştirecek' })
+      .getByRole('button', { name: 'Değiştir' })
+      .click();
+    await expect(preset).toHaveText(/^Microsoft 365/);
+    await page
+      .getByTestId('section-actions')
+      .getByRole('button', { name: 'Değişiklikleri bırak' })
+      .click();
+    await expect(smtp.getByLabel('SMTP sunucusu')).toHaveValue('smtp.ornek.example');
+    await expect(preset).toHaveText('Diğer');
   });
 
   test("a refused trial e-mail shows the mail server's answer and what to do", async ({ page }) => {

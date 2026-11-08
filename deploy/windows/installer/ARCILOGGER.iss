@@ -91,8 +91,8 @@ turkish.ProviderTurktrust=TÜRKTRUST (önerilen)
 english.ProviderTurktrust=TÜRKTRUST (recommended)
 turkish.ProviderZamane=Kamu SM (Zamane; Java ve Zamane istemcisi gerekir)
 english.ProviderZamane=Kamu SM (Zamane; needs Java and the Zamane client)
-turkish.FieldInvalid=%1: %2
-english.FieldInvalid=%1: %2
+turkish.FieldInvalid=%1 %2
+english.FieldInvalid=%1 %2
 turkish.FieldRequired=boş olamaz
 english.FieldRequired=must not be empty
 turkish.FieldTooLong=en çok %1 karakter
@@ -130,6 +130,8 @@ var
   { The setup pages of a first installation (0.4.0 D2): organisation and time stamping. }
   OrganisationPage: TInputQueryWizardPage;
   ProviderPage: TInputOptionWizardPage;
+  { The script ran to the end with 0 or 1 and recorded this bundle: its self-test is shown. }
+  InstallerSucceeded: Boolean;
 
 function PowerShellPath(): String;
 begin
@@ -272,11 +274,13 @@ begin
   end;
 end;
 
-{ No ARCILOGGER is installed: the setup pages are shown (0.4.0 D2). An upgrade or a repair
-  keeps the configured values and never shows them. }
+{ No ARCILOGGER is installed and no configuration is kept: the setup pages are shown (0.4.0
+  D2). An upgrade, a repair or an installation over a configuration that a removal kept (the
+  data stayed) keeps the configured values and never shows them. }
 function FirstInstallation(): Boolean;
 begin
-  Result := not FileExists(VersionFile());
+  Result := not FileExists(VersionFile()) and
+    not FileExists(ExpandConstant('{commonappdata}\ARCILOGGER\arcilogger.toml'));
 end;
 
 procedure InitializeWizard();
@@ -461,7 +465,9 @@ begin
   Admin := AdminAddresses(OrganisationPage.Values[2], Bad);
   if (Name <> '') and SafeArgument(Name) then
     Result := Result + ' -SiteName "' + Name + '"';
-  if (Ntp <> '') and IsHostShape(Ntp) then
+  if Ntp = '' then
+    Result := Result + ' -NoNtpServer'
+  else if IsHostShape(Ntp) then
     Result := Result + ' -NtpServer "' + Ntp + '"';
   if (Admin <> '') and (Bad = '') then
     Result := Result + ' -AdminAddress "' + Admin + '"';
@@ -469,6 +475,11 @@ begin
     Result := Result + ' -TimeStampProvider "zamane"'
   else
     Result := Result + ' -TimeStampProvider "turktrust"';
+end;
+
+function SelfTestFile(): String;
+begin
+  Result := ExpandConstant('{commonappdata}\ARCILOGGER\install\selftest.json');
 end;
 
 procedure RunArciInstaller();
@@ -480,6 +491,9 @@ begin
   WizardForm.StatusLabel.Caption := CustomMessage('RunInstaller');
   Fingerprint := BundleFingerprint();
   Parameters := InstallerParameters();
+  { The finish page shows the self-test of this run only: an earlier run's file goes first. }
+  InstallerSucceeded := False;
+  DeleteFile(SelfTestFile());
   if not Exec(PowerShellPath(), Parameters, ExpandConstant('{tmp}\bundle'), SW_SHOW, ewWaitUntilTerminated, ResultCode) then
     MsgBox(FmtMessage(CustomMessage('InstallerFailed'), [SysErrorMessage(ResultCode)]), mbCriticalError, MB_OK)
   else if (ResultCode <> 0) and (ResultCode <> 1) then
@@ -492,19 +506,18 @@ begin
   end
   else if not BundleIsInstalled(Fingerprint) then
     MsgBox(FmtMessage(CustomMessage('InstallerNotRecorded'), [IntToStr(ResultCode), VersionFile()]), mbCriticalError, MB_OK)
-  else if ResultCode = 1 then
-    MsgBox(CustomMessage('InstallerWarnings'), mbInformation, MB_OK);
+  else
+  begin
+    InstallerSucceeded := True;
+    if ResultCode = 1 then
+      MsgBox(CustomMessage('InstallerWarnings'), mbInformation, MB_OK);
+  end;
 end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
 begin
   if CurStep = ssPostInstall then
     RunArciInstaller();
-end;
-
-function SelfTestFile(): String;
-begin
-  Result := ExpandConstant('{commonappdata}\ARCILOGGER\install\selftest.json');
 end;
 
 { The number after "Key": in the self-test's result file (Install-Arcilogger.ps1 writes the
@@ -537,14 +550,14 @@ begin
   Result := StrToIntDef(Digits, -1);
 end;
 
-{ The finish page names the self-test's counts (0.4.0 P3) when this run wrote them; the script
-  removes the file of an earlier run before it starts. }
+{ The finish page names the self-test's counts (0.4.0 P3) when this run wrote them and ended
+  with 0 or 1; RunArciInstaller removes the file of an earlier run before it starts. }
 procedure CurPageChanged(CurPageID: Integer);
 var
   Content: AnsiString;
   Ok, Warn, Fail: Integer;
 begin
-  if (CurPageID <> wpFinished) or not LoadStringFromFile(SelfTestFile(), Content) then
+  if (CurPageID <> wpFinished) or not InstallerSucceeded or not LoadStringFromFile(SelfTestFile(), Content) then
     Exit;
   Ok := SelfTestCount(Content, 'ok');
   Warn := SelfTestCount(Content, 'warn');

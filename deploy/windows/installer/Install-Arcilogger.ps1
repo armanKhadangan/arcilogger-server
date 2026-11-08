@@ -43,6 +43,8 @@
       -NtpServer      the local time source ([clock] ntp_server; usually the core router), asked on
                       a first installation, kept on an upgrade. Empty: Windows Time and the hourly
                       clock check use only [clock] fallback_server and the preflight warns.
+      -NoNtpServer    the same as an empty -NtpServer, which a command line cannot always pass
+                      (Setup's page left the optional time server empty); -NtpServer wins.
       -AdminAddress   the admin PC's address(es) or network(s), e.g. 10.0.0.10 or 10.0.0.0/24:
                       443 is opened only for them (the remote desktop, 3389, is never closed).
                       Remembered by Set-ArciFirewall.ps1,
@@ -206,6 +208,7 @@ param(
     # No defaults: asked at the console when missing (Resolve-SetupValues), see .DESCRIPTION.
     [string]$SiteName,
     [string]$NtpServer,
+    [switch]$NoNtpServer,
     [string[]]$AdminAddress,
     # Not a ValidateSet: a wrong value must stop with 2 in the preflight, not with 1 at binding.
     [string]$TimeStampProvider = 'turktrust',
@@ -258,7 +261,7 @@ $script:PromptedAdminAddress = @()    # typed at the console (Resolve-SetupValue
 # -SiteName / -NtpServer: given, else configured, else asked (Resolve-SetupValues). Sources:
 # parameter, config (an existing arcilogger.toml), prompt, none.
 $script:SiteNameGiven = $PSBoundParameters.ContainsKey('SiteName') -and [bool]([string]$SiteName).Trim()
-$script:NtpServerGiven = $PSBoundParameters.ContainsKey('NtpServer')
+$script:NtpServerGiven = $PSBoundParameters.ContainsKey('NtpServer') -or $NoNtpServer
 $script:SiteNameValue = $(if ($script:SiteNameGiven) { $SiteName.Trim() } else { '' })
 $script:SiteNameSource = $(if ($script:SiteNameGiven) { 'parameter' } else { 'none' })
 $script:NtpServerValue = $(if ($script:NtpServerGiven) { ([string]$NtpServer).Trim() } else { '' })

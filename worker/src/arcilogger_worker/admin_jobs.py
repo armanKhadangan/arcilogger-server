@@ -89,7 +89,7 @@ from arcilogger_core.admin.contract import (
     parse_document,
 )
 from arcilogger_core.config import EMAIL_ADDRESS, Config
-from arcilogger_core.smtp import explain
+from arcilogger_core.smtp import explain, mask_address, mask_addresses
 from arcilogger_core.timeutil import site_day
 from arcilogger_db.audit import append_audit
 from arcilogger_db.models import AdminRequest, User
@@ -119,9 +119,6 @@ LEASE_REBUILD_DAYS: Final = 31
 #: ``admin.requests`` starts no further step after this long (a rebuild goes on next run).
 REQUESTS_BUDGET: Final = timedelta(seconds=30)
 _ADDRESS: Final = re.compile(EMAIL_ADDRESS)
-_ADDRESS_IN_TEXT: Final = re.compile(
-    r"[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+"
-)
 
 
 def _lines(path: Path, report: ImportReport) -> list[bytes]:
@@ -270,20 +267,6 @@ def import_admin_events(
 
 
 # -- the worker channel (contract 2.9) ------------------------------------------------------------
-
-
-def mask_address(address: str) -> str:
-    """``bora@ornek.example`` → ``b***@ornek.example`` (ADR-0010 A4; ``***`` when it is not an
-    address)."""
-    local, at, domain = address.strip().rpartition("@")
-    if not at or not local or not domain:
-        return "***"
-    return f"{local[0]}***@{domain}"
-
-
-def mask_addresses(text: str) -> str:
-    """Every e-mail address in ``text`` masked (an SMTP reply may quote the recipient)."""
-    return _ADDRESS_IN_TEXT.sub(lambda match: mask_address(match.group()), text)
 
 
 @dataclass

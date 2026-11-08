@@ -26,7 +26,9 @@ runs it at its end and shows the rows; a warning or failure never fails the inst
 
 from __future__ import annotations
 
+import http.client
 import json
+import os
 import socket
 import ssl
 import subprocess
@@ -175,11 +177,13 @@ class DatabaseAnswer:
 
 def run_database_check(config_path: Path) -> DatabaseAnswer | None:
     """``python -P -m arcilogger_db --config <toml> check`` with this interpreter; None when the
-    database package is not installed."""
+    database package is not installed. The child prints UTF-8: its Turkish warnings would not fit
+    the Windows code page of a pipe."""
     try:
         completed = subprocess.run(  # noqa: S603 - this interpreter, fixed arguments
             [sys.executable, "-P", "-m", "arcilogger_db", "--config", str(config_path), "check"],
             capture_output=True,
+            env={**os.environ, "PYTHONIOENCODING": "utf-8"},
             timeout=DATABASE_TIMEOUT,
             check=False,
         )
@@ -216,6 +220,8 @@ def http_status(url: str, timeout: float, https_proxy: str) -> int:
     except urllib.error.URLError as exc:
         reason = exc.reason
         raise OSError(str(reason)) from None
+    except http.client.HTTPException as exc:  # an answer that is not HTTP (a middlebox)
+        raise OSError(f"{type(exc).__name__}: {exc}") from None
 
 
 def tcp_connect(host: str, port: int, timeout: float) -> None:
@@ -224,7 +230,10 @@ def tcp_connect(host: str, port: int, timeout: float) -> None:
 
 
 def smtp_check(config: Config, password: str | None) -> None:
-    SmtpSender(config.smtp, password).check()
+    """Connect, TLS, EHLO and AUTH with the network timeout at most (``[smtp] timeout_seconds``
+    may be 300 s per step, more than the installer waits for the whole self-test)."""
+    timeout = min(config.smtp.timeout_seconds, int(NETWORK_TIMEOUT))
+    SmtpSender(config.smtp.model_copy(update={"timeout_seconds": timeout}), password).check()
 
 
 @dataclass

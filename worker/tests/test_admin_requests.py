@@ -20,6 +20,7 @@ from arcilogger_core.admin.messages import MESSAGES
 from arcilogger_core.config import Config, SmtpConfig
 from arcilogger_core.layout import Layout
 from arcilogger_core.secretstore import SMTP_PASSWORD, SecretStore
+from arcilogger_core.smtp import mask_address, mask_addresses
 from arcilogger_db.audit import verify_audit_chain
 from arcilogger_db.engine import session_factory
 from arcilogger_db.models import AdminRequest, AuditLog, JobRun, Lease, User
@@ -30,8 +31,6 @@ from arcilogger_worker.admin_jobs import (
     TEST_EMAIL,
     RequestsReport,
     lease_rebuild_range,
-    mask_address,
-    mask_addresses,
     process_requests,
 )
 from arcilogger_worker.alerts.commands import trial_email
