@@ -201,8 +201,27 @@ messages before go-live, for example) are not sealed, stay in place and raise a 
 
 ## 2. PostgreSQL 16
 
-ARCILOGGER does not install the database server; you install PostgreSQL with the vendor's (EDB)
-installer and ARCILOGGER creates its own role and database (why: ADR-0007 section 3).
+**PostgreSQL with the setup (from 0.4.0).** On a server without any PostgreSQL service a new
+installation installs PostgreSQL 16 from the bundle itself, and none of the steps below are
+needed:
+- the binaries go to `C:\Program Files\ARCILOGGER-PostgreSQL\16`;
+- the cluster lives in `<data root>\pgdata` (e.g. `D:\ARCILOGGER\pgdata`);
+- the service is `postgresql-x64-16` and runs as NETWORK SERVICE;
+- it listens on `localhost:5432` only, with locale `C` and UTF8;
+- the superuser (`postgres`) password is generated and kept only in the encrypted secret store
+  (`postgres.superuser`). Nobody types it; later upgrades read it from there.
+
+Port 5432 in use by another program, or a `pgdata` left by another installation, stops the
+preflight (exit code 2) before anything changes. A later 16.x minor in a new bundle replaces the
+binaries on upgrade and leaves the cluster alone. Removal with the data ("Tüm verileri de sil")
+removes this PostgreSQL too (service, binaries, `pgdata`). For antivirus exclusions see step 4
+below, with `D:\ARCILOGGER\pgdata` and
+`C:\Program Files\ARCILOGGER-PostgreSQL\16\bin\postgres.exe`.
+
+**Your own PostgreSQL.** When the server already has a PostgreSQL service (even a stopped or
+disabled one), ARCILOGGER uses it: you install PostgreSQL with the vendor's (EDB) installer and
+ARCILOGGER creates its own role and database (why: ADR-0007 section 3). The steps below are for
+this path.
 
 1. Download the latest PostgreSQL **16** Windows x64 installer from
    <https://www.enterprisedb.com/downloads/postgres-postgresql-downloads> (linked from
