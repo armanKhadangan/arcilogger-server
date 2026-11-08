@@ -5,6 +5,20 @@ versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- **E-mail provider presets** (Ayarlar → E-posta → **Sağlayıcı**): Google Workspace / Gmail with
+  an app password, the Google SMTP relay without a password, Microsoft 365, a hosting company or
+  the company's own mail server. A preset fills the server, port and security, says what the
+  provider needs, and asks before changing a filled field; it is not saved. Every option connects
+  with a user name and password or without a login (no OAuth).
+- **A refused trial or test e-mail shows the mail server's answer**, never the password, and for
+  known refusals of Google and Microsoft 365 a "Ne yapmalı" line: an app password, the SMTP relay,
+  SMTP AUTH for the mailbox, "Send As" for the sender. Before, the page said only "Deneme
+  e-postası gönderilemedi."
+- **The daily stamp tests are a setting** (Ayarlar → Zaman damgası → kontör adımı, default 10, at
+  most 20); `admin\policy.json` can still lower it (`tsa_test_per_day`, 20 in new installations).
+
 ## [0.3.3] — 2026-11-08
 
 Release version 0.3.3 (`v0.3.3`): setup works where Windows' application control is on.

@@ -112,6 +112,83 @@ test.describe('Ayarlar → E-posta', () => {
     );
   });
 
+  test('a provider preset fills the server, says what it needs and asks before overwriting', async ({
+    page,
+  }) => {
+    await mockApi(page, { signedInAs: 'tolga' });
+    await page.goto('/settings/email');
+    const smtp = page.getByTestId('settings-smtp');
+    const preset = smtp.getByLabel('Sağlayıcı');
+    await expect(preset).toHaveText('Diğer'); // smtp.ornek.example is no provider's
+    await expect(smtp.getByTestId('smtp-preset-help')).toHaveCount(0);
+
+    await preset.click();
+    await page
+      .getByRole('option', { name: 'Google Workspace / Gmail (uygulama şifresiyle)' })
+      .click();
+    const ask = page.getByRole('dialog', { name: 'Hazır ayar dolu alanları değiştirecek' });
+    await expect(ask.getByTestId('smtp-preset-overwrites')).toHaveText(
+      'SMTP sunucusu: smtp.ornek.example → smtp.gmail.com',
+    );
+    await ask.getByRole('button', { name: 'Değiştir' }).click();
+    await expect(smtp.getByLabel('SMTP sunucusu')).toHaveValue('smtp.gmail.com');
+    await expect(smtp.getByTestId('smtp-preset-help')).toContainText('16 karakterlik uygulama');
+
+    // the relay clears the user name: asked first, and nothing changes when declined
+    await preset.click();
+    await page.getByRole('option', { name: /Google SMTP geçiş hizmeti/ }).click();
+    const relay = page.getByRole('dialog', { name: 'Hazır ayar dolu alanları değiştirecek' });
+    await expect(relay.getByTestId('smtp-preset-overwrites')).toContainText(
+      'Kullanıcı adı: arcilogger → (boş)',
+    );
+    await relay.getByRole('button', { name: 'İptal' }).click();
+    await expect(smtp.getByLabel('SMTP sunucusu')).toHaveValue('smtp.gmail.com');
+    await expect(smtp.getByLabel('Kullanıcı adı')).toHaveValue('arcilogger');
+    await expect(preset).toHaveText('Google Workspace / Gmail (uygulama şifresiyle)');
+
+    // typing another server leaves the preset behind
+    await smtp.getByLabel('SMTP sunucusu').fill('posta.ornek.example');
+    await expect(preset).toHaveText('Diğer');
+  });
+
+  test("a refused trial e-mail shows the mail server's answer and what to do", async ({ page }) => {
+    const api = await mockApi(page, { signedInAs: 'tolga', staleReauth: true });
+    api.admin.nextOutcome = 'probe_failed';
+    api.admin.nextProbeFailure = 'smtp_test_failed';
+    api.admin.nextProbeAnswer = {
+      detail: 'SMTPAuthenticationError: 535 5.7.8 Username and Password not accepted.',
+      hint_tr: 'Google bu kullanıcı adı ve parolayla girişi kabul etmedi: uygulama şifresi girin.',
+      hint_en: 'Google did not accept this user name and password: enter an app password.',
+    };
+    await page.goto('/settings/email');
+    const smtp = page.getByTestId('settings-smtp');
+    await smtp.getByLabel('Sağlayıcı').click();
+    await page
+      .getByRole('option', { name: 'Google Workspace / Gmail (uygulama şifresiyle)' })
+      .click();
+    await page.getByRole('dialog').getByRole('button', { name: 'Değiştir' }).click();
+    await smtp.getByRole('button', { name: 'Değiştir' }).click();
+    await smtp.getByLabel('Parola', { exact: true }).fill('hesap-parolasi'); // gitleaks:allow — fake test value
+    await smtp.getByLabel('Deneme e-postasının alıcısı').click();
+    await page.getByRole('option', { name: 'tolga@ornek.com.tr' }).click();
+    await page.getByTestId('section-actions').getByRole('button', { name: 'Kaydet' }).click();
+    await page
+      .getByRole('dialog', { name: 'Değişiklikleri onaylayın' })
+      .getByRole('button', { name: 'Onayla ve kaydet' })
+      .click();
+    await confirmReauth(page);
+    const progress = page.getByTestId('request-progress');
+    await expect(progress).toHaveAttribute('data-state', 'probe_failed', { timeout: 10_000 });
+    await expect(progress).toContainText('Deneme e-postası gönderilemedi.');
+    const answer = progress.getByTestId('smtp-answer');
+    await expect(answer.getByTestId('smtp-hint')).toHaveText(
+      'Ne yapmalı: Google bu kullanıcı adı ve parolayla girişi kabul etmedi: uygulama şifresi girin.',
+    );
+    await expect(answer).toContainText('535 5.7.8 Username and Password not accepted.');
+    await expect(answer).not.toContainText('hesap-parolasi');
+    expect(api.admin.sections.smtp.host).toBe('smtp.ornek.example'); // nothing changed
+  });
+
   test('switching e-mail off warns and asks for the password', async ({ page }) => {
     const api = await mockApi(page, { signedInAs: 'tolga', staleReauth: true });
     await page.goto('/settings/email');

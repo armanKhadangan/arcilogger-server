@@ -187,9 +187,9 @@ EXPLANATIONS: Final[tuple[Explanation, ...]] = (
         frozenset({"5.7.0", "5.7.1"}),
         "relay",
         "Google SMTP geçiş hizmeti bu gönderimi kabul etmedi. Google Yönetici Konsolu'nda "
-        "(Uygulamalar → Google Workspace → Gmail → Yönlendirme → SMTP geçiş hizmeti) bu "
-        "sunucunun internete çıktığı genel IP adresini ekleyin; gönderen adresi kendi alan "
-        "adınızda olmalı.",
+        "Apps → Google Workspace → Gmail → Routing → SMTP relay service altında bu sunucunun "
+        "internete çıktığı genel IP adresini ekleyin; gönderen adresi kendi alan adınızda "
+        "olmalı.",
         "The Google SMTP relay did not accept this e-mail. In the Google Admin console (Apps → "
         "Google Workspace → Gmail → Routing → SMTP relay service) add the public IP address "
         "this server reaches the internet from; the sender address must be in your own domain.",

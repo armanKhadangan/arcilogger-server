@@ -1,0 +1,34 @@
+{
+  "settings": {
+    "email": {
+      "presets": {
+        "label": "Sağlayıcı",
+        "hint": "Sunucu, bağlantı noktası ve güvenliği doldurur; kendisi kaydedilmez.",
+        "choose": "Sağlayıcı seçin",
+        "names": {
+          "google": "Google Workspace / Gmail (uygulama şifresiyle)",
+          "google-relay": "Google SMTP geçiş hizmeti (parolasız, IP adresiyle)",
+          "microsoft365": "Microsoft 365 / Outlook",
+          "hosting": "Hosting firmasının e-postası",
+          "company": "Şirket içi e-posta sunucusu",
+          "other": "Diğer"
+        },
+        "help": {
+          "google": "Google, hesap parolasıyla SMTP girişini kabul etmiyor. Kullanıcı adı tam e-posta adresidir; parola o hesabın 16 karakterlik uygulama şifresidir (hesapta 2 Adımlı Doğrulama açık olmalı; kurum hesabında yönetici bu seçeneği kapatmış olabilir). Uygulama şifresi kullanılamıyorsa “Google SMTP geçiş hizmeti”ni seçin.",
+          "google-relay": "Parola gerekmez: Google gönderimi bu sunucunun internete çıktığı genel IP adresinden tanır. Google Yönetici Konsolu'nda Apps → Google Workspace → Gmail → Routing → SMTP relay service altında bir kural ekleyin: yalnızca belirtilen IP adreslerinden gelen postayı kabul etsin ve listeye bu genel IP adresini yazın. Gönderen adresi kendi alan adınızda olmalı; kullanıcı adı boş kalır.",
+          "microsoft365": "Kullanıcı adı posta kutusunun tam adresidir, parola o hesabın parolasıdır. Microsoft 365 yöneticisi bu posta kutusu için kimliği doğrulanmış SMTP'yi (SMTP AUTH) açmalıdır; kiracıda “Güvenlik varsayılanları” açıkken parolayla giriş çalışmaz. Gönderen adresi posta kutusunun adresi olmalıdır.",
+          "hosting": "Hosting firmanızın verdiği SMTP sunucu adını, kullanıcı adını (genellikle tam e-posta adresi) ve parolayı girin. Firma 465 ve SSL/TLS diyorsa onları seçin.",
+          "company": "Şirket içindeki e-posta sunucusunun ya da aktarıcının (relay) adını yazın. Sunucu bu makineye IP adresinden izin veriyorsa kullanıcı adı boş kalır. Kullanıcı adı girilecekse STARTTLS seçin: şifresiz bağlantıyla kullanıcı adı yalnızca bu sunucunun kendisine gönderilebilir."
+        },
+        "confirmTitle": "Hazır ayar dolu alanları değiştirecek",
+        "confirmBody": "Şu alanlar değişecek:",
+        "confirm": "Değiştir",
+        "empty": "(boş)"
+      },
+      "answer": {
+        "title": "E-posta sunucusunun cevabı",
+        "whatToDo": "Ne yapmalı"
+      }
+    }
+  }
+}

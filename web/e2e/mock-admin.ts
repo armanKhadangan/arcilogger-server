@@ -587,7 +587,16 @@ interface Final {
   manual?: [string, string];
   /** The device's interfaces of a failed SNMP probe (W5-N-9). */
   interfaces?: ProbeInterface[];
+  /** The mail server's answer to a failed trial e-mail and its explanation (0.4.0 P6). */
+  answer?: ProbeAnswer;
   warnings?: string[];
+}
+
+/** What the agent reports with `smtp_test_failed` (0.4.0 P6, S5). */
+export interface ProbeAnswer {
+  detail: string;
+  hint_tr: string | null;
+  hint_en: string | null;
 }
 
 interface MockRequest {
@@ -850,6 +859,8 @@ export class AdminMock {
   nextOutcome: Outcome | null = null;
   /** The code of the next failed probe (`snmp_no_such_interface`, …; then back to `probe_failed`). */
   nextProbeFailure: string | null = null;
+  /** The mail server's answer that comes with the next `smtp_test_failed` (0.4.0 P6). */
+  nextProbeAnswer: ProbeAnswer | null = null;
   /** Strict outbound mode: a new SNMP address or port is not tried before ApplySystem (W5-N-6). */
   strictOutbound = false;
   /** The next action ends like this (then back to `succeeded`). */
@@ -1179,6 +1190,7 @@ export class AdminMock {
         message_en,
         field: null,
         ...(final.interfaces ? { interfaces: final.interfaces } : {}),
+        ...(final.answer ?? {}),
       };
     }
     // A task or the worker reports its outcome also when it failed (`{ok: false, …}`).
@@ -1243,7 +1255,9 @@ export class AdminMock {
     if (outcome === 'probe_failed' && list.includes('probe')) {
       // The agent stops at the probe: nothing after it runs. The code is the probe's own.
       const code = this.nextProbeFailure ?? 'probe_failed';
+      const answer = code === 'smtp_test_failed' ? this.nextProbeAnswer : null;
       this.nextProbeFailure = null;
+      this.nextProbeAnswer = null;
       list = list.slice(0, list.indexOf('probe') + 1);
       final = {
         state: 'probe_failed',
@@ -1254,6 +1268,7 @@ export class AdminMock {
         ...(code === 'snmp_no_such_interface' || code === 'snmp_no_hc_counters'
           ? { interfaces: copy(ADMIN.sources.snmp_probe_failed.error?.interfaces ?? []) }
           : {}),
+        ...(answer ? { answer: { ...answer } } : {}),
       };
       apply = false;
     } else if (outcome === 'conflict') {
