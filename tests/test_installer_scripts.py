@@ -11683,7 +11683,8 @@ def test_real_install_with_the_bundled_postgres(tmp_path: Path) -> None:
         outputs.append(text + (plan.read_text(encoding="utf-8-sig") if plan.is_file() else ""))
         print(text, flush=True)
         assert result.returncode in (0, 1), text + _e2e_server_side(data, program_data)
-        return read_json(plan)
+        found: dict[str, Any] = read_json(plan)
+        return found
 
     def server() -> dict[str, Any]:
         output = tmp_path / "pg-service.json"
@@ -13663,11 +13664,11 @@ def test_the_bundled_postgres_is_updated_and_removed_whole() -> None:
     assert "if ($null -ne $bundledPg -and -not $SkipDatabase) { $removePg = $bundledPg }" in removal
     assert "if (-not $SkipDatabase -and $null -eq $removePg) {" in removal
     assert "Postgres = $removePg" in removal
-    steps = script[script.index("function Invoke-DataRemovalSteps(") :]
-    steps = steps[: steps.index("\nfunction ")]
-    assert "Invoke-Step 'postgres.remove'" in steps
-    targets = steps.index("foreach ($target in @($Removal.Plan.Targets))")
-    assert steps.index("'postgres.remove'") < targets
+    data_steps = script[script.index("function Invoke-DataRemovalSteps(") :]
+    data_steps = data_steps[: data_steps.index("\nfunction ")]
+    assert "Invoke-Step 'postgres.remove'" in data_steps
+    targets = data_steps.index("foreach ($target in @($Removal.Plan.Targets))")
+    assert data_steps.index("'postgres.remove'") < targets
 
 
 def test_setup_says_no_postgres_password_is_asked_on_the_bundled_path() -> None:
