@@ -10,7 +10,9 @@
 > bulunmaz. Sağlayıcılar, yasal nitelik, yeniden damgalama ve iptal listeleri:
 > [ZAMAN-DAMGASI.md](ZAMAN-DAMGASI.md). Kamu SM için: [kamusm.md](kamusm.md).
 
-TÜRKTRUST, Kamu SM'nin yanında ikinci zaman damgası sağlayıcısıdır (`[tsa] provider = "turktrust"`).
+TÜRKTRUST, 0.4.0'dan itibaren yeni bir kurulumun **varsayılan** zaman damgası sağlayıcısıdır
+(`[tsa] provider = "turktrust"`). Kamu SM kurulum sayfasında ve Ayarlar → Zaman damgası'nda
+seçilebilir; bir yükseltme yapılandırılmış sağlayıcıyı değiştirmez.
 ARCILOGGER ona RFC 3161 ile, kullanıcı adı ve parolayla (HTTP Basic kimlik doğrulaması) bağlanır;
 Java'ya, Zamane istemcisine ya da TÜRKTRUST'ın ücretli Spira kitaplığına gerek yoktur. Kamu SM'de
 olduğu gibi sunucudan yalnızca özet (hash) çıkar; log satırı hiçbir zaman gönderilmez.
@@ -250,7 +252,8 @@ kökü listede değilse hiçbir TÜRKTRUST günü yasal nitelikli gösterilmez (
 
 ## 6. Kullanıcı adı ve parola (Ayarlar)
 
-1. **Ayarlar → Zaman damgası**'nı açın (Yönetici rolü). Sunucu seçiminde **TÜRKTRUST**'u seçin:
+1. **Ayarlar → Zaman damgası**'nı açın (Yönetici rolü). Sunucu seçiminde **TÜRKTRUST**'u seçin
+   (yeni bir kurulumda zaten seçilidir):
    sağlayıcı `turktrust`, adres `https://zd.turktrust.com.tr/`, port 443 olur. Adresin yolu T1'dir
    (sahada doğrula): TÜRKTRUST başka bir yol verdiyse tarayıcı formu onu alamaz; sunucu konsolunda
    `C:\ProgramData\ARCILOGGER\arcilogger.toml` içindeki `[tsa] url` değerine yazın (aşağıdaki
@@ -356,7 +359,9 @@ gider. Mümkünse HTTPS'e dönün."
 > Providers, legal grade, re-stamping and revocation lists: [TIME-STAMPING.md](TIME-STAMPING.md).
 > For Kamu SM: [kamusm.md](kamusm.md).
 
-TÜRKTRUST is the second time-stamp provider next to Kamu SM (`[tsa] provider = "turktrust"`).
+From 0.4.0 TÜRKTRUST is the **default** time-stamp provider of a new installation
+(`[tsa] provider = "turktrust"`). Kamu SM can be chosen on the setup page and under Settings →
+Time stamping; an upgrade does not change the configured provider.
 ARCILOGGER connects to it with RFC 3161, using a username and a password (HTTP Basic
 authentication); it needs no Java, no Zamane client and no paid TÜRKTRUST Spira library. As with
 Kamu SM, only a hash leaves the server; a log line is never sent.
@@ -576,7 +581,8 @@ the TÜRKTRUST root in it, no TÜRKTRUST day is shown as legal grade (`legal_roo
 
 ### 6. Username and password (Settings)
 
-1. Open **Settings → Time stamping** (Administrator role). Choose **TÜRKTRUST** as the server: the
+1. Open **Settings → Time stamping** (Administrator role). Choose **TÜRKTRUST** as the server (a
+   new installation has it chosen already): the
    provider becomes `turktrust`, the URL `https://zd.turktrust.com.tr/`, the port 443. The path of
    the URL is T1 (sahada doğrula): if TÜRKTRUST gave another path, the browser form cannot take it;
    write it into `[tsa] url` in `C:\ProgramData\ARCILOGGER\arcilogger.toml` on the server console

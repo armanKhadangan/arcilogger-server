@@ -83,10 +83,20 @@ the last 5 minutes):
   Without a valid licence (trial over) the limit is 3; during the trial there is none. Deactivate
   a user to free a place ([LICENSING.md](LICENSING.md) section 6).
 
-## 3. Kamu SM: before the account, test and production
+## 3. Time stamping: before the account (TÜRKTRUST; Kamu SM test and production)
 
-**Without Kamu SM credentials** the installed configuration is `provider = "zamane"` with the test
-server. The `\ARCILOGGER\Seal` task runs every night (every 5 minutes from 00:10) and **fails
+**TÜRKTRUST (the default of a new installation from 0.4.0).** The installed configuration is
+`provider = "turktrust"` with TÜRKTRUST's production server (`https://zd.turktrust.com.tr/`); there
+is no test server. Until the user name and password are entered, the Seal task fails every time
+as described below (`R20-seal-config`) and the days wait in the spool. Once the account is
+entered, the waiting days are sealed with production stamps; those stamped more than
+`late_after_hours` (48) hours after the end of their day are marked "stamped late"
+(`stamped_late`) for good. Enter the account right after the installation (Ayarlar → Zaman
+damgası; [INSTALL.md](INSTALL.md) section 10), or choose where the chain starts with `first_day`
+of option A below. The rest of this section is for an installation that chose Kamu SM.
+
+**On an installation that chose Kamu SM, without its credentials** the installed configuration is
+`provider = "zamane"` with the test server. The `\ARCILOGGER\Seal` task runs every night (every 5 minutes from 00:10) and **fails
 every time** without credentials or roots: Task Scheduler shows the last run result `0x1`,
 `pending_days` in `& $core status` grows by one every day and the error is written to
 `D:\ARCILOGGER\logs\core.log`. This is a configuration error: an `R20-seal-config` alert is

@@ -485,11 +485,11 @@ Sahada doğrula. Each item is a setting or has a test that fails loudly if the a
 
 | # | Assumption | Setting or check | Where |
 |---|---|---|---|
-| T1 | TÜRKTRUST's TSA URL path: the host `zd.turktrust.com.tr` is from TÜRKTRUST's e-mail, the path is not known; default `https://zd.turktrust.com.tr/` | `[tsa] url`; a 3xx or 4xx is a configuration error that names the URL | [turktrust.md](turktrust.md) §2 |
-| T2 | TÜRKTRUST answers wrong credentials with HTTP 401; its answer when the balance is empty is not known | `[tsa] credit_regex` | [turktrust.md](turktrust.md) §2 |
-| T3 | Whether TÜRKTRUST's TSA certificate marks its EKU critical | `[tsa] require_critical_eku` | [turktrust.md](turktrust.md) §2 |
-| T4 | TÜRKTRUST's CRL host | `[tsa] crl_urls` | [turktrust.md](turktrust.md) §2 |
-| T5 | Port 80 (plain HTTP) for TÜRKTRUST; HTTPS is the default | `[tsa] allow_plain_http` (off) | [turktrust.md](turktrust.md) §2 |
+| T1 | TÜRKTRUST's TSA URL: the host `zd.turktrust.com.tr` is from TÜRKTRUST's e-mail; default `https://zd.turktrust.com.tr/`. **Confirmed 2026-11-08:** the root path gives stamps | `[tsa] url`; a 3xx or 4xx is a configuration error that names the URL | [turktrust.md](turktrust.md) §2 |
+| T2 | **Confirmed 2026-11-08:** a wrong password is answered with HTTP 200 and a rejection without text (a credentials error, not retried); a request without credentials gets HTTP 401. The answer when the balance is empty is not known | `[tsa] credit_regex` | [turktrust.md](turktrust.md) §2 |
+| T3 | Whether TÜRKTRUST's TSA certificate marks its EKU critical. **Confirmed 2026-11-08:** critical, the default is right | `[tsa] require_critical_eku` | [turktrust.md](turktrust.md) §2 |
+| T4 | TÜRKTRUST's CRL address. **Confirmed 2026-11-08:** `http://www.turktrust.com.tr/sil/TURKTRUST_Kok_SIL_h7.crl` | `[tsa] crl_urls` | [turktrust.md](turktrust.md) §2 |
+| T5 | Port 80 (plain HTTP) for TÜRKTRUST; HTTPS is the default. **Confirmed 2026-11-08:** HTTPS works, plain HTTP is not needed | `[tsa] allow_plain_http` (off) | [turktrust.md](turktrust.md) §2 |
 | K10 | Kamu SM's CRL addresses; no CRL URL is written in the code (a test fails if one appears) | `[tsa] crl_urls`, else the certificates' distribution points | [kamusm.md](kamusm.md) |
 | — | How the Zamane console client takes a proxy | none: Zamane does not use `[network] https_proxy` | [TIME-STAMPING.md](TIME-STAMPING.md) §8 |
 | X1 | The site's 7-Zip reads a whole multi-stream xz file | the auditor guide's manual check | [DENETCI-KILAVUZU.md](DENETCI-KILAVUZU.md) §5 |
@@ -499,6 +499,36 @@ Sahada doğrula. Each item is a setting or has a test that fails loudly if the a
 | X-B4 | The interface names (`ifName`) the devices report for their WAN lines | the probe when saving refuses a wrong name and lists the device's interfaces; nothing is assumed | [DEVICE-SETUP.md](DEVICE-SETUP.md) |
 | — | The 2-day cap on `lookup.max_session_seconds` (FortiGate's longest sessions) | `lookup.max_session_seconds` | [AYARLAR.md](AYARLAR.md) §1 |
 | — | MikroTik's own default DHCP lease time (not stated in the repository) and the lease times the site really uses: the lease settings are capped at 7 days so that every lookup fits one 14-day reload (W5-G-19) | `lease.default_seconds`, `lease.server_seconds` | [AYARLAR.md](AYARLAR.md) §1 |
+
+## 0.4.0: easy setup (2026-11-08)
+
+The 0.4.0 contract (`design/0.4.0-contract.md`, tracking issue #234). Operator guides:
+[KURULUM.md](KURULUM.md) / [INSTALL.md](INSTALL.md) (sections 2, 7, 10 and 12),
+[AYARLAR.md](AYARLAR.md) / [SETTINGS.md](SETTINGS.md) (section 8.1), [turktrust.md](turktrust.md),
+[ADR-0007](adr/0007-windows-installer.md) (amendment 2026-11-08).
+
+### Owner decisions (0.4.0)
+
+| # | Decision | Date |
+|---|---|---|
+| E1 | The next release is "kolay kurulum" (easy setup): PostgreSQL ships with the setup, the setup questions are asked on its own pages, a self-test runs at the end, the daily stamp tests become a setting, the e-mail page gets provider presets | 2026-11-08 |
+| E2 | TÜRKTRUST is the time-stamp provider of a new installation, with its root built in; Kamu SM stays a choice in setup and in the browser, and an upgrade keeps the configured provider | 2026-11-08 |
+| E3 | Every e-mail preset connects with a user name and password, or without a login for a relay that authorises by IP; no OAuth | 2026-11-08 |
+| E4 | Wave 6 is not part of 0.4.0 | 2026-11-08 |
+
+### Verify on site (0.4.0)
+
+Sahada doğrula. Each item is configurable or pinned, and has a test that fails loudly if the
+assumption is wrong.
+
+| # | Assumption | Setting or check | Where |
+|---|---|---|---|
+| S1 | EDB's PostgreSQL 16 binaries zip holds `pgsql\bin\initdb.exe`, `pg_ctl.exe`, `postgres.exe`, `psql.exe`, `pg_dump.exe`, `pg_restore.exe` and `pgsql\share\extension\pg_trgm.control` | `components.json` (`postgresql_binaries.layout`); the build checks every path and stops naming the missing one (16.15: checked by the release job, 2026-11-08) | [KURULUM.md](KURULUM.md) §2 |
+| S2 | `pg_ctl register -S auto -U "NT AUTHORITY\NetworkService"` registers a working service, and NETWORK SERVICE needs modify rights on `pgdata` only | the Windows end-to-end test installs on a runner without a PostgreSQL service, runs the setup again and removes it with the data (passed in CI on 2026-11-09) | [ADR-0007](adr/0007-windows-installer.md) amendment 2026-11-08 |
+| S3 | Google: `smtp.gmail.com` 587 STARTTLS with an app password (only with 2-Step Verification, where the administrator allows it); the SMTP relay `smtp-relay.gmail.com` 587, which authorises by the office's IP address | `web/src/pages/settings/smtp-presets.ts`; a unit test pins the table. Sources read on 2026-11-08 are listed in the contract's deviations (P6) | [AYARLAR.md](AYARLAR.md) §8.1 |
+| S4 | Microsoft 365: `smtp.office365.com` 587 STARTTLS; SMTP AUTH must be enabled for the mailbox (security defaults block basic authentication) | same | [AYARLAR.md](AYARLAR.md) §8.1 |
+| S5 | The refusals that get an explanation: Google `5.7.8` / `5.7.80`, `5.7.9` / `5.7.90`, `5.7.14` and the relay's refusals naming "relay"; Microsoft `5.7.139`, `5.7.3`, `5.7.57`, `5.7.60`. Which form Google's servers send (`5.7.8` or `5.7.80`) shows on the first real refusal | `core/src/arcilogger_core/smtp.py` (`EXPLANATIONS`); unit tests for each reply, and none for an unknown one | [AYARLAR.md](AYARLAR.md) §8.1 |
+| S6 | TÜRKTRUST answers a request without credentials with HTTP 401 (seen 2026-11-08) | the self-test's `tsa.reach` counts any HTTP answer as reached; a unit test with a stub that answers 401 | [KURULUM.md](KURULUM.md) §12 |
 
 ## Technical assumptions to verify on site
 

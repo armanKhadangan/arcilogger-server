@@ -1,6 +1,7 @@
 # ADR-0007: Windows installer — offline bundle, WinSW services, operator-installed PostgreSQL
 
-- Status: accepted (2026-10-12); amended 2026-10-19 (desktop Windows, release build; proposed)
+- Status: accepted (2026-10-12); amended 2026-10-19 (desktop Windows, release build; proposed),
+  2026-11-07 (remote desktop) and 2026-11-08 (PostgreSQL ships with the setup, 0.4.0)
 - Related: [ADR-0001](0001-windows-server-browser-only.md), [ADR-0002](0002-own-syslog-collector.md),
   [ADR-0003](0003-integrity-on-windows.md)
 
@@ -494,3 +495,72 @@ hiçbir zaman kapatılmasın", 2026-11-07). Section 5 changes in three places:
 
 Who may sign in by remote desktop remains Windows' own setting: user rights and Network Level
 Authentication.
+
+## Amendment 2026-11-08: setup installs PostgreSQL where there is none (0.4.0)
+
+- Status: accepted (owner's 0.4.0 scope "kolay kurulum", 2026-11-08; 0.4.0 contract D1 in the
+  repository's `design` folder).
+
+Section 3 kept every site's first step manual: install PostgreSQL with EDB's interactive
+installer, type its superuser password, and type it again at every ARCILOGGER run. 0.4.0 removes
+that step where it is not needed. Section 3 stays as it is for a server that brings its own
+PostgreSQL; a server without one gets it from the bundle.
+
+### C1. When
+
+A first installation installs PostgreSQL 16 itself when **no** `postgresql*` service exists (a
+stopped or disabled one counts as existing), the bundle carries the archive and neither
+`-PgServiceName` nor `-PgBinDir` is given. Port 5432 taken by another program, or a `pgdata`
+folder that another installation left (a foreign folder, or a cluster whose password is not in
+the secret store), stops the preflight with code 2 before any change.
+
+### C2. What is installed
+
+- **Archive:** EDB's PostgreSQL 16 binaries zip for Windows x64 (`postgresql_binaries` in
+  `components.json`, role `bundled`), not the interactive installer. Its SHA-256 was pinned on its
+  first download by the release job (EDB publishes no checksum file for these archives); every
+  later build refuses another value, checks the paths the installer needs (contract S1) and keeps
+  only the server, its libraries and `share`. The bundle's `SHA256SUMS` and
+  `THIRD-PARTY-NOTICES.txt` (PostgreSQL License) cover it.
+- **Places:** the programs in `C:\Program Files\ARCILOGGER-PostgreSQL\16`, apart from ARCILOGGER's
+  program folder, which an upgrade swaps; the cluster in `<data root>\pgdata`.
+- **Cluster:** `initdb` with `scram-sha-256`, UTF8 and the `C` locale (as section 3 creates
+  ARCILOGGER's database); `postgresql.conf` gets only `listen_addresses = 'localhost'` and
+  `port = 5432`.
+- **Service:** `postgresql-x64-16`, registered with `pg_ctl register` to start automatically as
+  `NT AUTHORITY\NetworkService` (contract S2, tried on an empty Windows runner in CI). The
+  `pgdata` folder gets a protected ACL: Administrators and SYSTEM full control, NETWORK SERVICE
+  modify, the installing administrator full control.
+- **Record:** `install\state.json` keeps `postgres` (`bundled`, `version`, `bin`, `data`,
+  `service`).
+
+### C3. The superuser password
+
+The reason of section 3, no password on a command line, holds. The installer generates a
+32-character password and writes it to the encrypted secret store on stdin as
+`postgres.superuser`. `initdb` reads it from a password file that only the installing user can
+read and that is deleted afterwards. Later runs read it back with `arcilogger-core secret get
+postgres.superuser`, which answers only into a pipe (never to a console) and only for this one
+name, and records the read without the value. It never appears on a command line, in the log or
+in the plan. With an operator-installed PostgreSQL the password is still asked and never stored.
+
+### C4. Upgrade, rollback, removal
+
+- An upgrade whose bundle carries a newer 16.x minor swaps the programs: stop the service, rename
+  the folder to `16.previous`, unpack, start, check with `select version()`; on a failure the
+  previous programs come back. The data folder is not touched. A major upgrade stays out of scope.
+- `-Rollback` leaves PostgreSQL as it is. A removal without the data keeps it with its data.
+- `-Uninstall -RemoveData` removes the service, the programs and `pgdata` of a bundled instance
+  (no SQL is needed); for an operator instance it drops only ARCILOGGER's database and role, as
+  before.
+
+### Consequences
+
+- A new site needs no PostgreSQL step and types no database password.
+- On a bundled site PostgreSQL's minor updates (including its security fixes) come only with an
+  ARCILOGGER release: each release has to carry the newest 16.x minor, pinned as above.
+- The superuser password now lives in the secret store, next to `database.password`; whoever can
+  read the store's key (administrators and the ARCILOGGER services) can reach it.
+- NETWORK SERVICE is shared with other Windows services, as LOCAL SERVICE is for the tasks
+  (section 8).
+- TimescaleDB is not part of the bundled PostgreSQL; it stays the operator's option.
