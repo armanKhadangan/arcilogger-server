@@ -6,7 +6,11 @@ versions follow [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
-
+- **Setup installs PostgreSQL 16 itself** on a server that has no PostgreSQL service: the
+  service runs as NETWORK SERVICE, the cluster lives in `<data root>\pgdata` and listens on
+  localhost only, and the superuser password is generated and kept only in the encrypted
+  secret store, so nobody types it. A later 16.x minor in a new bundle replaces its binaries;
+  removal with the data removes it too. A server with its own PostgreSQL keeps today's path.
 - **E-mail provider presets** (Ayarlar → E-posta → **Sağlayıcı**): Google Workspace / Gmail with
   an app password, the Google SMTP relay without a password, Microsoft 365, a hosting company or
   the company's own mail server. A preset fills the server, port and security, says what the

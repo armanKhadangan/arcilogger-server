@@ -15,6 +15,8 @@ or the web application::
                                                      replica test (ADR-0014)
     arcilogger-core secret init|set|list|delete      encrypted credentials (Kamu SM, TÜRKTRUST,
                                                      database, replica, SMTP)
+    arcilogger-core secret get postgres.superuser    the bundled PostgreSQL's superuser password,
+                                                     into a pipe only (the installer, 0.4.0 P1)
     arcilogger-core status                           summary for monitoring
     arcilogger-core config-check [--json]            what a production configuration still
                                                      lacks (organisation name, time source)
@@ -137,6 +139,7 @@ from arcilogger_core.secretstore import (
     DATABASE_PASSWORD,
     KAMUSM_CUSTOMER,
     KAMUSM_PASSWORD,
+    POSTGRES_SUPERUSER,
     REPLICA_PASSWORD,
     SMTP_PASSWORD,
     TURKTRUST_PASSWORD,
@@ -169,7 +172,11 @@ SECRET_NAMES = (
     REPLICA_PASSWORD,
     SMTP_PASSWORD,
     USAGE_PSEUDONYM_KEY,
+    POSTGRES_SUPERUSER,
 )
+#: The secrets ``secret get`` gives back: only the one the installer generated for the PostgreSQL
+#: it installed and needs again on an upgrade (0.4.0 P1). Every other secret is write-only.
+READABLE_SECRETS = (POSTGRES_SUPERUSER,)
 log = logging.getLogger("arcilogger.cli")
 
 
@@ -771,6 +778,8 @@ def cmd_secret(args: argparse.Namespace, app: App) -> int:
         return 0
     if args.name not in SECRET_NAMES:
         raise UsageError(f"unknown secret {args.name!r}; allowed: {', '.join(SECRET_NAMES)}")
+    if action == "get":
+        return _reveal_secret(app, args.name)
     if action == "delete":
         deleted = store.delete(args.name)
         print("silindi" if deleted else "kayıtlı değildi")
@@ -780,6 +789,35 @@ def cmd_secret(args: argparse.Namespace, app: App) -> int:
     store.set(args.name, value.removeprefix("\ufeff").rstrip("\r\n"))
     print(f"{args.name} kaydedildi.")
     return _record_secret_change(app, args.name, "set", "stored")
+
+
+def _reveal_secret(app: App, name: str) -> int:
+    """The value of a readable secret on stdout, for the installer that reads it through a pipe
+    (never a console, never with a line end). The read is recorded first: a read that cannot be
+    recorded gives nothing."""
+    if name not in READABLE_SECRETS:
+        raise UsageError(f"{name!r} is write-only; readable: {', '.join(READABLE_SECRETS)}")
+    if sys.stdout.isatty():
+        raise UsageError("secret get writes only into a pipe (the installer), not to a console")
+    value = app.secrets.get(name)
+    if value is None:
+        print(f"{name}: kayıtlı değil [not stored]", file=sys.stderr)
+        return 1
+    try:
+        record_change(
+            app.layout.secret_changes, name=name, action="read", result="read", operator=_operator()
+        )
+    except OSError as exc:
+        print(
+            f"Okuma denetim kaydına yazılamadı; değer verilmedi ({app.layout.secret_changes}: "
+            f"{exc.strerror or exc}) [the read cannot be recorded; nothing given].",
+            file=sys.stderr,
+        )
+        return 1
+    log.info("secret %s: read by %s", name, _operator())
+    sys.stdout.write(value)
+    sys.stdout.flush()
+    return 0
 
 
 def _record_secret_change(app: App, name: str, action: str, result: str) -> int:
@@ -1401,6 +1439,10 @@ def _build_parser() -> argparse.ArgumentParser:
     set_cmd.add_argument("name")
     delete_cmd = secret_commands.add_parser("delete", help="remove a secret")
     delete_cmd.add_argument("name")
+    get_cmd = secret_commands.add_parser(
+        "get", help="print postgres.superuser into a pipe (the installer only)"
+    )
+    get_cmd.add_argument("name")
 
     evidence = commands.add_parser("evidence", help="evidence packages (Kanıt Paketi)")
     evidence_commands = evidence.add_subparsers(dest="evidence_command", required=True)

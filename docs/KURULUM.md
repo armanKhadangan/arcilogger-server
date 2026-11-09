@@ -221,9 +221,26 @@ yalnızca bir kez `info` düzeyinde `R20-clock` uyarısı verir.
 
 ## 2. PostgreSQL 16
 
-ARCILOGGER veritabanını kendisi kurmaz: PostgreSQL'i üreticinin (EDB) yükleyicisiyle siz
-kurarsınız, ARCILOGGER yalnızca kendi rolünü ve veritabanını oluşturur
-(neden: [ADR-0007](adr/0007-windows-installer.md) bölüm 3).
+**Kurulumla gelen PostgreSQL (0.4.0'dan itibaren).** Sunucuda hiçbir PostgreSQL hizmeti yoksa
+yeni bir kurulum PostgreSQL 16'yı paketten kendisi kurar ve aşağıdaki adımların hiçbiri gerekmez:
+- programlar `C:\Program Files\ARCILOGGER-PostgreSQL\16` klasörüne kurulur;
+- veri `<veri klasörü>\pgdata` klasöründe durur (örneğin `D:\ARCILOGGER\pgdata`);
+- hizmetin adı `postgresql-x64-16`'dır ve NETWORK SERVICE hesabıyla çalışır;
+- yalnızca `localhost:5432` dinlenir; yerel ayar `C`, kodlama UTF8'dir;
+- süper kullanıcı (`postgres`) parolası üretilir ve yalnızca şifreli gizli depoda
+  (`postgres.superuser`) durur. Kimse parola girmez; sonraki yükseltmeler parolayı oradan okur.
+
+5432 portu başka bir programdaysa ya da `pgdata` başka bir kurulumdan kalmışsa kurulum ön
+denetimde durur (çıkış kodu 2) ve hiçbir şeyi değiştirmez. Yeni bir pakette 16 serisinin daha yeni
+bir sürümü varsa yükseltme programları değiştirir, veri klasörüne dokunmaz. "Tüm verileri de sil"
+ile kaldırma bu PostgreSQL'i (hizmet, programlar, `pgdata`) de siler. Virüs tarayıcısı istisnaları
+için aşağıdaki 5. maddeye bakın: yollar `D:\ARCILOGGER\pgdata` ve
+`C:\Program Files\ARCILOGGER-PostgreSQL\16\bin\postgres.exe` olur.
+
+**Kendi PostgreSQL'iniz.** Sunucuda zaten bir PostgreSQL hizmeti varsa (durdurulmuş ya da devre dışı
+olsa bile) ARCILOGGER onu kullanır: PostgreSQL'i üreticinin (EDB) yükleyicisiyle siz kurarsınız,
+ARCILOGGER yalnızca kendi rolünü ve veritabanını oluşturur (neden:
+[ADR-0007](adr/0007-windows-installer.md) bölüm 3). Bu yol için aşağıdaki adımlar geçerlidir.
 
 1. Yönetici PC'sinde PostgreSQL **16** Windows x64 yükleyicisini EDB sayfasından indirin:
    <https://www.enterprisedb.com/downloads/postgres-postgresql-downloads> (postgresql.org'un

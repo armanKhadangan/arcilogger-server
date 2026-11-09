@@ -244,7 +244,8 @@ def test_release_job_runs_only_for_tags_and_manual_runs() -> None:
         "if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')"
     )
     assert condition in release
-    assert "needs: [installer, installer-e2e]" in release, "built only when the tests pass"
+    needs = "needs: [installer, installer-e2e, installer-e2e-bundled-postgres]"
+    assert needs in release, "built only when the tests pass, the bundled PostgreSQL's too"
     assert 'throw "Tag $env:GITHUB_REF_NAME does not name the version' in release
 
 

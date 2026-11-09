@@ -63,6 +63,8 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 [CustomMessages]
 turkish.RunInstaller=ARCILOGGER kuruluyor. Açılan PowerShell penceresini izleyin; eksik kurulum bilgileri (kuruluş adı, saat kaynağı, yönetici PC'sinin adresi) ve PostgreSQL parolası orada sorulur, ilk kurulumda kurulum anahtarı da orada gösterilir. Pencere Enter'a basınca kapanır.
 english.RunInstaller=Installing ARCILOGGER. Follow the PowerShell window; it asks for missing setup values (organisation name, time source, admin PC address) and the PostgreSQL password, and shows the setup token of a first installation. The window closes when you press Enter.
+turkish.RunInstallerBundled=ARCILOGGER kuruluyor; PostgreSQL de kurulumla birlikte kuruluyor. Açılan PowerShell penceresini izleyin; eksik kurulum bilgileri (kuruluş adı, saat kaynağı, yönetici PC'sinin adresi) orada sorulur, ilk kurulumda kurulum anahtarı da orada gösterilir. Pencere Enter'a basınca kapanır.
+english.RunInstallerBundled=Installing ARCILOGGER; PostgreSQL is installed with it. Follow the PowerShell window; it asks for missing setup values (organisation name, time source, admin PC address) and shows the setup token of a first installation. The window closes when you press Enter.
 turkish.InstallerFailed=ARCILOGGER kurulumu %1 koduyla bitti. Ayrıntılar PowerShell penceresinde ve kurulum günlüğünde: %%TEMP%%\ARCILOGGER-*.log (veri klasörü oluştuysa bir kopyası onun logs klasöründe; pencerenin sonunda yolu yazılır). Hatayı giderip kurulumu yeniden çalıştırabilirsiniz.
 english.InstallerFailed=The ARCILOGGER installer ended with code %1. See the PowerShell window and the install log: %%TEMP%%\ARCILOGGER-*.log (with a copy in the logs folder of the data folder once that exists; the window shows the path at the end). Fix the problem and run the setup again.
 turkish.InstallerWarnings=ARCILOGGER kuruldu, ancak uyarılar var (kod 1). PowerShell penceresindeki sağlık denetimi sonuçlarını okuyun.
@@ -477,6 +479,24 @@ begin
     Result := Result + ' -TimeStampProvider "turktrust"';
 end;
 
+{ The script asks for no PostgreSQL password (0.4.0 P1) when setup installed PostgreSQL before
+  (its binaries folder) or installs it now: the bundle carries it and no PostgreSQL service is
+  registered. }
+function BundledPostgresPath(): Boolean;
+var
+  Names: TArrayOfString;
+  I: Integer;
+begin
+  Result := DirExists(ExpandConstant('{commonpf64}\ARCILOGGER-PostgreSQL\16'));
+  if Result or not DirExists(ExpandConstant('{tmp}\bundle\thirdparty\postgresql_binaries')) then
+    Exit;
+  Result := True;
+  if RegGetSubkeyNames(HKLM, 'SYSTEM\CurrentControlSet\Services', Names) then
+    for I := 0 to GetArrayLength(Names) - 1 do
+      if Pos('postgresql', Lowercase(Names[I])) = 1 then
+        Result := False;
+end;
+
 function SelfTestFile(): String;
 begin
   Result := ExpandConstant('{commonappdata}\ARCILOGGER\install\selftest.json');
@@ -488,7 +508,10 @@ var
   Parameters: String;
   Fingerprint: String;
 begin
-  WizardForm.StatusLabel.Caption := CustomMessage('RunInstaller');
+  if BundledPostgresPath() then
+    WizardForm.StatusLabel.Caption := CustomMessage('RunInstallerBundled')
+  else
+    WizardForm.StatusLabel.Caption := CustomMessage('RunInstaller');
   Fingerprint := BundleFingerprint();
   Parameters := InstallerParameters();
   { The finish page shows the self-test of this run only: an earlier run's file goes first. }

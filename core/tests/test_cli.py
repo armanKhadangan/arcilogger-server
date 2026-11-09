@@ -399,6 +399,39 @@ def test_the_smtp_password_is_a_stored_secret(
     assert "Smtp-Deneme-Parolasi-4" not in out
 
 
+def test_only_the_bundled_postgres_password_is_read_back_into_a_pipe(
+    setup: dict[str, Any], capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """0.4.0 P1: the installer generated ``postgres.superuser`` and reads it again on an upgrade
+    (``secret get``, into a pipe, without a line end); the read is recorded first. Every other
+    secret stays write-only, and a console gets nothing."""
+    assert run(setup, "secret", "init") == 0
+    monkeypatch.setattr("sys.stdin", io.StringIO("Kurulum-Uretti-5\n"))  # gitleaks:allow
+    assert run(setup, "secret", "set", "postgres.superuser") == 0
+    monkeypatch.setattr("sys.stdin", io.StringIO("Gizli-Parola-6\n"))  # gitleaks:allow
+    assert run(setup, "secret", "set", "database.password") == 0
+    capsys.readouterr()
+    assert run(setup, "secret", "get", "postgres.superuser") == 0
+    assert capsys.readouterr().out == "Kurulum-Uretti-5"
+    changes = setup["layout"].secret_changes.read_text(encoding="utf-8").splitlines()
+    assert json.loads(changes[-1])["action"] == "read"
+    assert "Kurulum-Uretti-5" not in "".join(changes)
+
+    assert run(setup, "secret", "get", "database.password") == 2
+    assert "Gizli-Parola-6" not in capsys.readouterr().out
+    monkeypatch.setattr("sys.stdout.isatty", lambda: True)
+    assert run(setup, "secret", "get", "postgres.superuser") == 2
+    assert "Kurulum-Uretti-5" not in capsys.readouterr().out
+    monkeypatch.setattr("sys.stdout.isatty", lambda: False)
+
+    # a read that cannot be recorded gives nothing
+    log = setup["layout"].secret_changes
+    log.unlink()
+    log.mkdir()
+    assert run(setup, "secret", "get", "postgres.superuser") == 1
+    assert capsys.readouterr().out == ""
+
+
 def test_seal_configuration_alert_once_per_day_and_cause(tmp_path: Path) -> None:
     """The Seal task runs every 5 minutes: ``R20-seal-config`` once a site day per cause."""
     layout = Layout(tmp_path)
