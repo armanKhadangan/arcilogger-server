@@ -10,13 +10,14 @@ ARCILOGGER. What differs on desktop Windows (hardware, power, updates, single di
 section 17; the acceptance test is [KABUL-TESTI-WINDOWS11.md](KABUL-TESTI-WINDOWS11.md) (Turkish,
 with an English summary). The **installation** needs no internet access on the server: everything is
 installed from an **offline bundle** built on the admin PC. **In operation** the server has no
-general internet access, but the nightly sealing needs **permanent** access to the Kamu SM
-time-stamp server (`zd.kamusm.gov.tr`, test `tzd.kamusm.gov.tr`, TCP 80; only hashes are sent) and
-to the Kamu SM certificate host (`sertifikalar.kamusm.gov.tr`) ([DEVICE-SETUP.md](DEVICE-SETUP.md)
-section 1, flows 6–7). Nothing is installed on user PCs; people use a browser only. Allow about
+general internet access, but the nightly sealing needs **permanent** access to the time-stamp
+server (only hashes are sent). A new installation uses TÜRKTRUST by default (`zd.turktrust.com.tr`,
+HTTPS 443; [turktrust.md](turktrust.md)). With Kamu SM it needs the Kamu SM time-stamp server
+(`zd.kamusm.gov.tr`, test `tzd.kamusm.gov.tr`, TCP 80) and the Kamu SM certificate host
+(`sertifikalar.kamusm.gov.tr`) ([DEVICE-SETUP.md](DEVICE-SETUP.md) section 1, flows 6–7). Nothing is installed on user PCs; people use a browser only. Allow about
 1–1.5 hours (without Windows itself).
 
-After the installation (first administrator, Kamu SM test → production, first 5651 lookup, daily
+After the installation (first administrator, the time-stamp account, first 5651 lookup, daily
 checks): [FIRST-STEPS.md](FIRST-STEPS.md). Drafts for the company's lawyer, before the pilot:
 [employee information text](legal/aydinlatma-metni-taslak.md),
 [retention and deletion policy](legal/saklama-imha-politikasi-taslak.md) (Turkish).
@@ -29,15 +30,15 @@ run, and the 5651 functions always run. Request code, licence file, modules and 
 | # | Step | Where |
 |---|---|---|
 | 1 | Disks, network | Server |
-| 2 | PostgreSQL 16 (+ optional TimescaleDB) | Server |
-| 3 | Java 8 for the Kamu SM Zamane client | Server |
+| 2 | PostgreSQL 16: setup installs it where there is none; your own with EDB's installer (+ optional TimescaleDB) | Server |
+| 3 | Java 8 for the Kamu SM Zamane client (Kamu SM only) | Server |
 | 4 | Download the release (GitHub) or build the bundle | Admin PC (internet) |
-| 5 | Download the Zamane client from Kamu SM | Admin PC |
+| 5 | Download the Zamane client from Kamu SM (Kamu SM only) | Admin PC |
 | 6 | Copy and verify the bundle | Server |
-| 7 | Install ARCILOGGER | Server |
+| 7 | Install ARCILOGGER (two question pages on a first installation, a self-test at the end) | Server |
 | 8 | Install the root certificate on the admin PC | Admin PC |
 | 9 | First login (first administrator), first-run wizard | Server + browser |
-| 10 | Kamu SM connection (test → production) | Server |
+| 10 | Time stamping: the TÜRKTRUST account (default) or the Kamu SM connection (test → production) | Browser or server |
 | 11 | Device setup | FortiGate, MikroTik |
 | 12 | Checks after installation (console, the Uyum Durumu and Sistem pages); then [FIRST-STEPS.md](FIRST-STEPS.md) | Server + browser |
 
@@ -277,8 +278,11 @@ Added after ARCILOGGER? Run
 
 ## 3. Java 8 (Kamu SM Zamane client)
 
+**Only with Kamu SM.** TÜRKTRUST, the default of a new installation, needs no Java and no Zamane
+client; then skip this section and section 5.
+
 ```powershell
-msiexec /i C:\Kurulum\ARCILOGGER-0.3.3\operator-installers\temurin8-jre\OpenJDK8U-jre_x64_windows_hotspot_8u502b07.msi INSTALLDIR="C:\Program Files\Eclipse Adoptium\jre-8\" /qn /norestart /l*v C:\Windows\Temp\temurin8.log
+msiexec /i C:\Kurulum\ARCILOGGER-0.4.0\operator-installers\temurin8-jre\OpenJDK8U-jre_x64_windows_hotspot_8u502b07.msi INSTALLDIR="C:\Program Files\Eclipse Adoptium\jre-8\" /qn /norestart /l*v C:\Windows\Temp\temurin8.log
 & "C:\Program Files\Eclipse Adoptium\jre-8\bin\java.exe" -version
 ```
 
@@ -310,7 +314,7 @@ the values are in `SHA256SUMS.txt`, in the release notes and in the job summary 
 *Summary*):
 
 ```powershell
-Get-FileHash .\ARCILOGGER-Setup-0.3.3.exe, .\ARCILOGGER-0.3.3.zip -Algorithm SHA256 | Format-List Hash, Path
+Get-FileHash .\ARCILOGGER-Setup-0.4.0.exe, .\ARCILOGGER-0.4.0.zip -Algorithm SHA256 | Format-List Hash, Path
 Get-Content .\SHA256SUMS.txt
 ```
 
@@ -343,17 +347,17 @@ Setup is missing).
 
 ## 5. Zamane client
 
-Download the ZIP from Kamu SM's "Ücretsiz Zaman Damgası İstemci Yazılımı" page, note the
+Only with Kamu SM (section 3). Download the ZIP from Kamu SM's "Ücretsiz Zaman Damgası İstemci Yazılımı" page, note the
 **SHA-256** published there, extract `tss-client-console-3.1.33.jar`. It never goes into the
 repository or the bundle.
 
 ## 6. Copy and verify
 
-Copy the folder to e.g. `C:\Kurulum\ARCILOGGER-0.3.3` (not into `D:\ARCILOGGER`), with the jar:
+Copy the folder to e.g. `C:\Kurulum\ARCILOGGER-0.4.0` (not into `D:\ARCILOGGER`), with the jar:
 
 ```powershell
 Get-ChildItem -Recurse C:\Kurulum | Unblock-File
-Get-FileHash C:\Kurulum\ARCILOGGER-0.3.3\SHA256SUMS -Algorithm SHA256   # = bundle fingerprint
+Get-FileHash C:\Kurulum\ARCILOGGER-0.4.0\SHA256SUMS -Algorithm SHA256   # = bundle fingerprint
 ```
 
 Copying only `ARCILOGGER-Setup-<version>.exe`? Compare its `Get-FileHash` with `SHA256SUMS.txt` on
@@ -362,20 +366,42 @@ the server too; the setup window prints the bundle fingerprint again.
 ## 7. Install
 
 ```powershell
-cd C:\Kurulum\ARCILOGGER-0.3.3
+cd C:\Kurulum\ARCILOGGER-0.4.0
 powershell -ExecutionPolicy Bypass -File .\installer\Install-Arcilogger.ps1 -DryRun `
     -SiteName "<organisation name>" -NtpServer <local time source> -AdminAddress <admin PC>
 powershell -ExecutionPolicy Bypass -File .\installer\Install-Arcilogger.ps1 `
+    -SiteName "<organisation name>" -NtpServer <local time source> -AdminAddress <admin PC>
+```
+
+The time-stamp provider is TÜRKTRUST by default. For Kamu SM give the provider and the Zamane
+client too:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\installer\Install-Arcilogger.ps1 `
     -SiteName "<organisation name>" -NtpServer <local time source> -AdminAddress <admin PC> `
-    -ZamaneJar C:\Kurulum\tss-client-console-3.1.33.jar -ZamaneJarSha256 <value from Kamu SM>
+    -TimeStampProvider zamane -ZamaneJar C:\Kurulum\tss-client-console-3.1.33.jar `
+    -ZamaneJarSha256 <value from Kamu SM>
 ```
 
 The organisation's own values (section 7.1) have no default; the dry run asks for the missing
 ones too.
 
-(or double-click `ARCILOGGER-Setup-<version>.exe`, which runs the same script with `-Auto` —
-install, or upgrade when another version is installed — in a window that stays open until you
-press **Enter**. The setup installs no Zamane client, and a jar copied into
+Or double-click `ARCILOGGER-Setup-<version>.exe`. On a first installation (no ARCILOGGER and no
+`C:\ProgramData\ARCILOGGER\arcilogger.toml` on the server) it first shows two pages:
+
+- **Kurum bilgileri** (Organisation): the organisation name (required), the time server
+  (optional; a name or an IPv4 address) and the admin PC's address (required; IPv4 or
+  IPv4/prefix, comma separated);
+- **Zaman damgası** (Time stamping): "TÜRKTRUST (önerilen)" (recommended) or "Kamu SM (Zamane;
+  Java ve Zamane istemcisi gerekir)" (needs Java and the Zamane client).
+
+The pages check the shape only (empty, length, characters); a message box names the field that
+is wrong. The values reach the script as `-SiteName`, `-NtpServer` (an empty field gives
+`-NoNtpServer`), `-AdminAddress` and `-TimeStampProvider`. The script's preflight does the full
+checks and stops before changing anything (`2`) on a value it refuses. An upgrade shows no page
+and keeps the configured values. Then the same script runs with `-Auto` — install, or upgrade
+when another version is installed — in a window that stays open until you press **Enter**.
+(With Kamu SM: the setup installs no Zamane client, and a jar copied into
 `C:\ProgramData\ARCILOGGER\zamane\` by hand afterwards does not run: the tasks run only a client
 the installer recorded, a known release or one approved on the console, so sealing stops with the
 cause `executable`. Add the client with the script of the bundle,
@@ -399,8 +425,10 @@ safest). When there is no such file the setup says so and closes before copying 
 `/ALLOWUNCOVEREDUPGRADE` reaches it as `-AllowUncoveredUpgrade` (section 13). Both can be given
 together. Without them the setup runs the script with `-Auto` only, as before.
 
-The **postgres superuser password** is asked once, and the organisation's values that were not
-given (section 7.1). At the end of a first installation, once
+With the PostgreSQL that setup installs (section 2) no password is asked: the installer reads it
+from the secret store. With the server's own PostgreSQL the **postgres superuser password** is
+asked once and stored nowhere. The organisation's values that were not given (section 7.1) are
+asked in the window too; those of the setup pages are not. At the end of a first installation, once
 the install log is closed and only when someone sits at the window:
 
 - the first administrator's **setup token** is shown in the window (section 9). The installer writes
@@ -410,8 +438,10 @@ the install log is closed and only when someone sits at the window:
   either. A tool that records the console window itself still sees it: then get a new token with the
   command of section 9, which voids the previous one. Over a kept database with an administrator (a
   reinstallation after section 14) no token is created and the installer says so;
-- "Kamu SM müşteri numarası ve parolasını şimdi girmek ister misiniz? [E/h]" (store the Kamu SM
-  customer number and password now?) is asked. `E` (or Enter) reads the customer number (visible)
+- with **Kamu SM** as the time-stamp provider, "Kamu SM müşteri numarası ve parolasını şimdi
+  girmek ister misiniz? [E/h]" (store the Kamu SM customer number and password now?) is asked.
+  With TÜRKTRUST (the default) nothing is asked: its user name and password are entered under
+  Ayarlar → Zaman damgası (section 10). `E` (or Enter) reads the customer number (visible)
   and the password (hidden) straight into the encrypted secret store (`secret set`, on stdin;
   never on a command line or in the log); `h` skips it (section 10). It is not asked when either
   of the two is already stored (enter the missing one with the commands of section 10).
@@ -457,7 +487,8 @@ What it does: bundle checksums and preflight (Windows version and edition — Wi
 2022/2025 and Windows 11 Pro/Enterprise/Education are supported, Windows 10 and Home stop it, ARM64
 warns, desktop Windows gets a note to verify the licence terms — administrator, .NET 4.6.1+, the
 data drive (fixed disk, NTFS, free space; a warning for a disk on USB and for the disk of
-Windows), PostgreSQL service, ports 514/443, the server address and the address the collector
+Windows), PostgreSQL service (without one: port 5432 and the `pgdata` folder for the PostgreSQL
+that setup installs, section 2), the time-stamp provider (`-TimeStampProvider`), ports 514/443, the server address and the address the collector
 will listen on: a `[collector] bind` that is neither `0.0.0.0` nor an address of this computer
 **stops** it with the fix — the organisation name and the time source (section 7.1), and
 everything the firewall step could refuse: an admin address (given or remembered) and its
@@ -470,14 +501,20 @@ data folder (and the browser administration's `admin\` folder, `smtp-ca\`, `zama
 `zamane\approved\`, `state\requests\`) → Python 3.12, venv, offline hash-checked wheels, web
 interface, Caddy, WinSW →
 `arcilogger.toml` only if absent (`data_dir` = data folder, `[collector] bind` = server address,
-`site_name` = organisation name, `[clock] ntp_server` = local time source; the example
+`site_name` = organisation name, `[clock] ntp_server` = local time source, `[tsa]` = the chosen
+provider's keys: TÜRKTRUST's `provider = "turktrust"` and `url = "https://zd.turktrust.com.tr/"`
+without Java or Zamane keys, or Kamu SM's test server with `java`, `zamane_jar` and
+`zamane_verify_flag`; the example
 configures **no log source**, the `[[sources]]` of its fictional example network are comments,
 section 7.1; an existing file is left alone but for a given `-SiteName` / `-NtpServer` line) →
 the data root recorded in `C:\ProgramData\ARCILOGGER\data-root.txt` (the services and tasks
 check `data_dir` against it; no browser change can move the data folder) → the programs the tasks
 run recorded (section 7.2) → secret store key and an empty `secrets.json` → the browser
 administration's keys (`keys init`, an existing key is never replaced), `admin\policy.json` and
-the Event Log source `ARCILOGGER-Admin` → least-privilege NTFS rights and vault auditing (the collector cannot delete or
+the Event Log source `ARCILOGGER-Admin` → without any PostgreSQL service, the PostgreSQL that
+setup installs (step `postgres.install`: the programs, `pgdata`, a generated superuser password
+into the secret store, `initdb`, a service running as NETWORK SERVICE; section 2; a newer 16.x in
+a new bundle swaps the programs on upgrade, `postgres.update`) → least-privilege NTFS rights and vault auditing (the collector cannot delete or
 rename raw files and cannot reach the audit spool or the sealing state; only the scheduled tasks
 write the nightly database dumps in `backups\scheduled`, which no service can read; limit: the
 scheduled tasks run as Windows' shared LOCAL SERVICE account, so Windows services running as
@@ -505,12 +542,17 @@ upgrade`, the **last** change (a first installation's trial starts here) → wit
 step `license.install` (a refusal is only a warning) → start ingest, API and worker → health check (services,
 `http://<[api] host:port>/api/v1/health` — default `127.0.0.1:8000`, which Caddy's `/api` upstream
 follows too — and `https://localhost/api/v1/health` through Caddy with the
-certificate pinned to Caddy's root; polled for up to 90 s). The next steps printed at the end
+certificate pinned to Caddy's root; polled for up to 90 s) → the **self-test** (`arcilogger-core
+selftest`, section 12), whose table is printed and also written to
+`C:\ProgramData\ARCILOGGER\install\selftest.json` (no secrets); the setup `.exe`'s last page shows
+"Denetim: N tamam, M uyarı/eksik" (N ok, M warnings/missing). A warning or a missing item ends the
+installation with `1`, never with a failure: a new TÜRKTRUST installation warns in the `secrets`
+row until its user name and password are entered (section 10). The next steps printed at the end
 include, as step 6, the licence: the licensee when a licence is installed, otherwise the
 **request code** to e-mail to the licensor (or, when it cannot be read, the command to run later;
 [LICENSING.md](LICENSING.md) section 4).
 
-Exit codes: `0` done, `1` done with warnings (also a `-LicenseFile` the product refused or could
+Exit codes: `0` done, `1` done with warnings (read the health check and the self-test; also a `-LicenseFile` the product refused or could
 not install), `2` stopped before changing anything (for a dry run: the real run would stop at the
 preflight; also the licence's maintenance rule, an unreadable `-LicenseFile` and a bundle without a
 release date), `3` failed while changing the system — the output
@@ -532,7 +574,9 @@ the ARCILOGGER services can read the configuration and the secret-store key.
 ### 7.1 The organisation's own values
 
 ARCILOGGER carries no organisation's data: there is **no default** for the organisation name, the
-time source or the admin PC's address. The installer takes them from its parameters; what is
+time source or the admin PC's address. The installer takes them from its parameters (the setup
+`.exe` asks for them on its **Kurum bilgileri** page on a first installation and passes them on,
+section 7); what is
 missing it asks for when a person sits at the console (the setup `.exe`'s window, an elevated
 PowerShell), otherwise the preflight stops or (for the time source) warns. Nothing is asked under
 `-NonInteractive`, in CI or with redirected output.
@@ -715,9 +759,36 @@ fingerprints are to be compared with the values Kamu SM publishes before switchi
 
 Other users (the auditor etc.) and what comes next: [FIRST-STEPS.md](FIRST-STEPS.md).
 
-## 10. Kamu SM connection (test → production)
+## 10. Time stamping: TÜRKTRUST (default) or Kamu SM
 
-The **Ayarlar → Zaman damgası** wizard of the web interface does the steps below in the same order
+### TÜRKTRUST (the default of a new installation)
+
+From 0.4.0 a new installation takes its time stamps from TÜRKTRUST: `[tsa] provider =
+"turktrust"`, the server `https://zd.turktrust.com.tr/` (TÜRKTRUST's production server, HTTPS).
+No Java and no Zamane client are needed. TÜRKTRUST's root certificate (H7) ships with the
+product: the installer puts it into `C:\ProgramData\ARCILOGGER\kamusm-roots\` and it counts as a
+legal root, so no root has to be uploaded. What is left is the account: enter the user name and
+password TÜRKTRUST gave under Ayarlar → Zaman damgası and run the stamp test. At the console (the
+values are not shown and are stored encrypted):
+
+```powershell
+$core = "C:\Program Files\ARCILOGGER\venv\Scripts\arcilogger-core.exe"
+& $core secret set turktrust.username    # user name
+& $core secret set turktrust.password    # password
+& "C:\Program Files\ARCILOGGER\scripts\Set-ArciVaultAcl.ps1"   # then: the administration service's right (below, step 2)
+& $core tsa-test                         # takes one stamp and verifies it with the root that ships
+```
+
+With the account stored, the `secrets` warning of the self-test at the end of the installation
+goes away too (section 12). Opening the account, the root's fingerprint, the items confirmed on
+site (T1–T5) and the manual checklist: [turktrust.md](turktrust.md). TÜRKTRUST offers no credit
+query; watch the balance in its portal. The rules strict outbound opens for TÜRKTRUST, the
+revocation lists or a proxy: section 12.
+
+### Kamu SM: the test server
+
+When Kamu SM was chosen at the installation, or the site switched to Kamu SM under Ayarlar →
+Zaman damgası, the **Ayarlar → Zaman damgası** wizard of the web interface does the steps below in the same order
 (Java, the Zamane client, roots and fingerprints, the customer data with a credit query, the stamp
 test, the switch to production; [SETTINGS.md](SETTINGS.md)). The console path:
 
@@ -779,17 +850,6 @@ owner's decision, of TÜRKTRUST's production server) whose chain reaches a root 
 `legal_root_fingerprints`; stamps of the test server have no legal validity (Kamu SM). Have the
 stamps and the record keeping reviewed by a lawyer.
 
-### TÜRKTRUST (optional, instead of Kamu SM)
-
-A site that wants its time stamps from TÜRKTRUST chooses the TÜRKTRUST server (HTTPS) under Ayarlar →
-Zaman damgası, enters the username and password TÜRKTRUST gave and runs the stamp test. TÜRKTRUST's
-root certificate (H7) ships with the product: the installer puts it into
-`C:\ProgramData\ARCILOGGER\kamusm-roots\` and it counts as a legal root, so no root has to be
-uploaded. Opening the account, the root's fingerprint, the items confirmed on site (T1–T5) and the
-manual checklist: [turktrust.md](turktrust.md). TÜRKTRUST offers no credit query; watch the
-balance in its portal. The installer does not ask for the TÜRKTRUST credentials. The rules strict
-outbound opens for TÜRKTRUST, the revocation lists or a proxy: section 12.
-
 ### Re-stamping and revocation lists
 
 Before a stamp's TSA certificate expires, the `Renew` task re-stamps it (by default 180 days
@@ -837,10 +897,28 @@ Get-ScheduledTask -TaskPath \ARCILOGGER\ | Format-Table TaskName, State
 Get-NetFirewallRule -Group ARCILOGGER | Format-Table DisplayName, Direction, Enabled
 & "C:\Program Files\ARCILOGGER\venv\Scripts\arcilogger-core.exe" status
 & "C:\Program Files\ARCILOGGER\venv\Scripts\arcilogger-db.exe" license status --config "C:\ProgramData\ARCILOGGER\arcilogger.toml"
+& "C:\Program Files\ARCILOGGER\venv\Scripts\arcilogger-core.exe" selftest
 ```
 
-The last command prints the licence state, the modules that are on and the limits (trial: the
+`license status` prints the licence state, the modules that are on and the limits (trial: the
 days left; [LICENSING.md](LICENSING.md) section 5).
+
+**The self-test (`selftest`).** It runs by itself at the end of the installation; run it again
+whenever you like. It changes nothing: no stamp, no credit, no e-mail. Each row says `TAMAM`
+(ok), `UYARI` (warning), `HATA` (failure) or `ATLANDI` (skipped), with its Turkish and English
+text; a failure gives its cause, never a password. `--json` gives the same as JSON. Exit code:
+`0` all ok (or skipped), `1` at least one warning, `2` at least one failure. The installer counts
+a failure as a warning too and ends with `1`.
+
+| Row | Ok when | Otherwise |
+|---|---|---|
+| `config` | the configuration loads | failure (the other rows are not tried) |
+| `secrets` | the secret store opens and the credentials the configuration uses are stored (the TÜRKTRUST or Kamu SM production account, the SMTP and replica passwords) | missing: warning; the store does not open: failure |
+| `database` | the database answers and its schema is current | failure |
+| `roots` | at least one root certificate is installed; with TÜRKTRUST, H7 among them | failure (skipped for the trial provider) |
+| `tsa.reach` | TÜRKTRUST: an HTTPS request without credentials gets any HTTP answer (401 is expected); Kamu SM: a TCP connection to the server's port | warning (skipped for the trial provider) |
+| `smtp` | with e-mail on: connect, TLS as configured, EHLO and, with a user name, AUTH, then QUIT; nothing is sent | warning, with what to do for the known refusals of Google and Microsoft 365 (skipped with e-mail off) |
+| `clock` | the clock check is within its limit | warning |
 
 **On the web.** Two pages show most of the same checks; both only read and refresh every 30
 seconds. The console commands stay valid: only they ask Windows for the state of the services and
@@ -1559,6 +1637,10 @@ recompresses a chunk), and how long a round of a reload's partitions takes (one 
 round: about 30 ms on Linux; a whole day's 16 tables took 0.3–0.45 s on Linux and 0.84 s on a
 Windows CI machine; one table's round not measured on Windows or a spinning disk, contract
 W5-G-25).
+The PostgreSQL that setup installs (section 2): the bundle's PostgreSQL archive holds the
+expected programs (S1; the build checks every path) and the service `pg_ctl register` sets up
+under NETWORK SERVICE runs (S2; tried on an empty machine in Windows CI): `sc.exe qc
+postgresql-x64-16` and `Get-Service postgresql-x64-16`.
 Time stamping: with TÜRKTRUST, [turktrust.md](turktrust.md) sections 2 and 3 (T1–T5 and the manual
 checklist); Kamu SM's revocation-list addresses (K10, [kamusm.md](kamusm.md)). After the first
 `CrlFetch` run `& $core crl status` must show every address downloaded and verified, and after the

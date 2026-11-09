@@ -5,6 +5,13 @@ versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.4.0] — 2026-11-09
+
+Release version 0.4.0 (`v0.4.0`): kolay kurulum (easy setup). A new server needs no PostgreSQL,
+Java or Zamane step, and setup asks its questions on its own pages. Upgrading from 0.3.x: run the
+new `ARCILOGGER-Setup-0.4.0.exe`; it upgrades in place and keeps the data, the configured
+time-stamp provider and the PostgreSQL the server already has.
+
 ### Added
 - **Setup installs PostgreSQL 16 itself** on a server that has no PostgreSQL service: the
   service runs as NETWORK SERVICE, the cluster lives in `<data root>\pgdata` and listens on
@@ -22,7 +29,8 @@ versions follow [Semantic Versioning](https://semver.org/).
   e-postası gönderilemedi."
 - **Setup asks its questions in its own pages** on a first installation: "Kurum bilgileri"
   (organisation name, time server, the admin PC's address) and "Zaman damgası" (TÜRKTRUST,
-  recommended, or Kamu SM). The PowerShell window no longer asks for them. Upgrades keep the
+  recommended, or Kamu SM). The PowerShell window no longer asks for them, and with TÜRKTRUST it
+  asks for no account either: its user name and password go in the browser. Upgrades keep the
   configured values and show no page.
 - **TÜRKTRUST is the default time-stamp provider of a new installation**: no Java and no Zamane
   client are needed, and its H7 root ships with the product. Kamu SM stays a choice in setup
@@ -35,6 +43,11 @@ versions follow [Semantic Versioning](https://semver.org/).
   with code 1, never with a failure.
 - **The daily stamp tests are a setting** (Ayarlar → Zaman damgası → kontör adımı, default 10, at
   most 20); `admin\policy.json` can still lower it (`tsa_test_per_day`, 20 in new installations).
+
+### Known limitations
+
+- The backup folder (`[backup] dir`) is still set in `arcilogger.toml` on the server, with the
+  folder's rights set by hand; choosing it in the browser is not in this version.
 
 ## [0.3.3] — 2026-11-08
 

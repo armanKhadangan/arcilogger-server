@@ -83,10 +83,20 @@ içinde parolanın yeniden girilmesini ister):
   çalışmaya devam eder. Geçerli bir lisans yokken (deneme bitti) sınır 3'tür; deneme süresince
   sınır yoktur. Yer açmak için bir kullanıcıyı pasifleştirin ([LISANS.md](LISANS.md) bölüm 6).
 
-## 3. Kamu SM: hesap gelmeden önce, test ve üretim
+## 3. Zaman damgası: hesap gelmeden önce (TÜRKTRUST; Kamu SM test ve üretim)
 
-**Kamu SM kimlik bilgileri yokken** kurulumla gelen yapılandırma `provider = "zamane"` ve test
-sunucusudur. `\ARCILOGGER\Seal` görevi her gece (00:10'dan sonra 5 dakikada bir) çalışır ve
+**TÜRKTRUST (0.4.0'dan itibaren yeni bir kurulumun varsayılanı).** Kurulumla gelen yapılandırma
+`provider = "turktrust"` ve TÜRKTRUST'ın üretim sunucusudur (`https://zd.turktrust.com.tr/`); test
+sunucusu yoktur. Kullanıcı adı ve parola girilene kadar Seal görevi aşağıda anlatıldığı gibi her
+seferinde başarısız olur (`R20-seal-config`) ve günler spool'da bekler. Hesap girilince bekleyen
+günler üretim damgasıyla mühürlenir; gün bitiminden `late_after_hours` (48) saatten sonra
+damgalananlar kalıcı olarak "geç damgalandı" (`stamped_late`) olarak işaretlenir. Hesabı kurulumdan
+hemen sonra girin (Ayarlar → Zaman damgası; [KURULUM.md](KURULUM.md) bölüm 10) ya da zincirin
+başlangıcını aşağıdaki A seçeneğindeki `first_day` ile seçin. Bölümün geri kalanı Kamu SM seçilmiş
+bir kurulum içindir.
+
+**Kamu SM seçilmiş bir kurulumda, kimlik bilgileri yokken** kurulumla gelen yapılandırma
+`provider = "zamane"` ve test sunucusudur. `\ARCILOGGER\Seal` görevi her gece (00:10'dan sonra 5 dakikada bir) çalışır ve
 kimlik bilgileri ya da kökler olmadığı için **her seferinde başarısız olur**: Görev Zamanlayıcı'da
 son çalışma sonucu `0x1` görünür, `& $core status` çıktısında `pending_days` her gün büyür ve
 hata `D:\ARCILOGGER\logs\core.log` dosyasına yazılır. Bu bir yapılandırma hatasıdır:

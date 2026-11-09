@@ -10,13 +10,15 @@ Bu belge, boş bir Windows Server'dan ya da ARCILOGGER'a ayrılmış bir Windows
 güncellemeler, tek disk, lisans) bölüm 17'dedir; kabul testi:
 [KABUL-TESTI-WINDOWS11.md](KABUL-TESTI-WINDOWS11.md). **Kurulum için** sunucunun internete çıkması
 gerekmez: her şey yönetici bilgisayarında (yönetici PC'si) hazırlanan **çevrimdışı paketten**
-kurulur. **Çalışırken** ise sunucunun genel internet erişimi olmaz, ama gece mühürlemesi için Kamu
-SM zaman damgası sunucusuna (`zd.kamusm.gov.tr`, testte `tzd.kamusm.gov.tr`, TCP 80; yalnızca özet
-gider) ve Kamu SM sertifika sunucusuna (`sertifikalar.kamusm.gov.tr`) **sürekli** erişim gerekir
-([DEVICE-SETUP.md](DEVICE-SETUP.md) bölüm 1, akış 6–7). Kullanıcı bilgisayarlarına hiçbir şey
+kurulur. **Çalışırken** ise sunucunun genel internet erişimi olmaz, ama gece mühürlemesi için zaman
+damgası sunucusuna **sürekli** erişim gerekir (yalnızca özet gider). Yeni bir kurulumun varsayılanı
+TÜRKTRUST'tır (`zd.turktrust.com.tr`, HTTPS 443; [turktrust.md](turktrust.md)). Kamu SM seçilirse
+Kamu SM zaman damgası sunucusu (`zd.kamusm.gov.tr`, testte `tzd.kamusm.gov.tr`, TCP 80) ve Kamu SM
+sertifika sunucusu (`sertifikalar.kamusm.gov.tr`) gerekir ([DEVICE-SETUP.md](DEVICE-SETUP.md) bölüm
+1, akış 6–7). Kullanıcı bilgisayarlarına hiçbir şey
 kurulmaz; ARCILOGGER'a yalnızca tarayıcıyla bağlanılır.
 
-Kurulum bittikten sonra yapılacaklar (ilk yönetici, Kamu SM test → üretim, ilk 5651 sorgusu,
+Kurulum bittikten sonra yapılacaklar (ilk yönetici, zaman damgası hesabı, ilk 5651 sorgusu,
 günlük kontroller): [ILK-ADIMLAR.md](ILK-ADIMLAR.md). Pilot öncesinde hukuk müşavirine verilecek
 taslaklar: [aydınlatma metni](legal/aydinlatma-metni-taslak.md),
 [saklama ve imha politikası](legal/saklama-imha-politikasi-taslak.md).
@@ -31,15 +33,15 @@ Toplam süre: yaklaşık 1–1,5 saat (Windows kurulumu hariç).
 | # | Adım | Nerede |
 |---|---|---|
 | 1 | Diskler, ağ, saat | Sunucu |
-| 2 | PostgreSQL 16 (+ isteğe bağlı TimescaleDB) | Sunucu |
-| 3 | Java 8 (Kamu SM Zamane istemcisi için) | Sunucu |
+| 2 | PostgreSQL 16: sunucuda yoksa kurulum kendisi kurar; kendi PostgreSQL'iniz için EDB yükleyicisi (+ isteğe bağlı TimescaleDB) | Sunucu |
+| 3 | Java 8 (yalnızca Kamu SM seçilirse, Zamane istemcisi için) | Sunucu |
 | 4 | Kurulum paketini indirme (GitHub sürümü) ya da oluşturma | Yönetici PC'si (internet gerekir) |
-| 5 | Zamane istemcisini Kamu SM'den indirme | Yönetici PC'si |
+| 5 | Zamane istemcisini Kamu SM'den indirme (yalnızca Kamu SM) | Yönetici PC'si |
 | 6 | Paketi sunucuya kopyalama ve doğrulama | Sunucu |
-| 7 | ARCILOGGER kurulumu | Sunucu |
+| 7 | ARCILOGGER kurulumu (ilk kurulumda iki soru sayfası, sonda otomatik denetim) | Sunucu |
 | 8 | Kök sertifikayı yönetici PC'sine kurma | Yönetici PC'si |
 | 9 | İlk giriş (ilk yönetici), ilk kurulum sihirbazı | Sunucu + tarayıcı |
-| 10 | Kamu SM bağlantısı (test → üretim) | Sunucu |
+| 10 | Zaman damgası: TÜRKTRUST hesabı (varsayılan) ya da Kamu SM bağlantısı (test → üretim) | Tarayıcı ya da sunucu |
 | 11 | Cihaz ayarları | FortiGate, MikroTik |
 | 12 | Kurulum sonrası denetim (konsol, Uyum Durumu ve Sistem sayfaları); sonra [ILK-ADIMLAR.md](ILK-ADIMLAR.md) | Sunucu + tarayıcı |
 
@@ -328,12 +330,13 @@ kullanılabilir.
 
 ## 3. Java 8 (Kamu SM Zamane istemcisi)
 
-Zamane konsol istemcisi Java 1.8 ister. Paket, Eclipse Temurin 8 JRE yükleyicisini doğrulanmış
+**Yalnızca Kamu SM seçilirse gerekir.** TÜRKTRUST (yeni bir kurulumun varsayılanı) Java ve Zamane
+istemcisi istemez; o zaman bu bölümü ve bölüm 5'i atlayın. Zamane konsol istemcisi Java 1.8 ister. Paket, Eclipse Temurin 8 JRE yükleyicisini doğrulanmış
 olarak içerir (`operator-installers\temurin8-jre\`). Sabit bir klasöre kurun ki
 `arcilogger.toml` içindeki yol Java güncellemelerinden sonra da geçerli kalsın:
 
 ```powershell
-msiexec /i C:\Kurulum\ARCILOGGER-0.3.3\operator-installers\temurin8-jre\OpenJDK8U-jre_x64_windows_hotspot_8u502b07.msi INSTALLDIR="C:\Program Files\Eclipse Adoptium\jre-8\" /qn /norestart /l*v C:\Windows\Temp\temurin8.log
+msiexec /i C:\Kurulum\ARCILOGGER-0.4.0\operator-installers\temurin8-jre\OpenJDK8U-jre_x64_windows_hotspot_8u502b07.msi INSTALLDIR="C:\Program Files\Eclipse Adoptium\jre-8\" /qn /norestart /l*v C:\Windows\Temp\temurin8.log
 & "C:\Program Files\Eclipse Adoptium\jre-8\bin\java.exe" -version
 ```
 
@@ -367,7 +370,7 @@ Bu yolda yönetici PC'sinde Git, uv, Node.js ya da Inno Setup gerekmez. İndirdi
 özetinde (Actions → çalıştırma → *Summary*) yazar:
 
 ```powershell
-Get-FileHash .\ARCILOGGER-Setup-0.3.3.exe, .\ARCILOGGER-0.3.3.zip -Algorithm SHA256 | Format-List Hash, Path
+Get-FileHash .\ARCILOGGER-Setup-0.4.0.exe, .\ARCILOGGER-0.4.0.zip -Algorithm SHA256 | Format-List Hash, Path
 Get-Content .\SHA256SUMS.txt
 ```
 
@@ -405,18 +408,18 @@ Betik şunları yapar ve herhangi bir özet (SHA-256) tutmazsa **durur**:
 
 ## 5. Zamane istemcisi (Kamu SM)
 
-Kamu SM'nin "Ücretsiz Zaman Damgası İstemci Yazılımı" sayfasından ZIP'i indirin, sayfada
+Yalnızca Kamu SM seçilirse gerekir (bölüm 3). Kamu SM'nin "Ücretsiz Zaman Damgası İstemci Yazılımı" sayfasından ZIP'i indirin, sayfada
 yayımlanan **SHA-256** değerini not edin ve `tss-client-console-3.1.33.jar` dosyasını çıkarın
 ([kamusm.md](kamusm.md) bölüm 4). Jar dosyası ARCILOGGER deposuna ve paketine **konmaz**.
 
 ## 6. Paketi sunucuya kopyalama ve doğrulama
 
-Klasörü USB bellekle veya paylaşımla sunucuya kopyalayın, örneğin `C:\Kurulum\ARCILOGGER-0.3.3`
+Klasörü USB bellekle veya paylaşımla sunucuya kopyalayın, örneğin `C:\Kurulum\ARCILOGGER-0.4.0`
 (**`D:\ARCILOGGER` içine değil**). Jar dosyasını da `C:\Kurulum\` içine koyun.
 
 ```powershell
 Get-ChildItem -Recurse C:\Kurulum | Unblock-File       # "internetten indirildi" işaretini kaldırır
-Get-FileHash C:\Kurulum\ARCILOGGER-0.3.3\SHA256SUMS -Algorithm SHA256
+Get-FileHash C:\Kurulum\ARCILOGGER-0.4.0\SHA256SUMS -Algorithm SHA256
 ```
 
 Çıkan değer, bölüm 4'te not ettiğiniz **paket parmak izi** ile aynı olmalıdır. Kurulum betiği
@@ -431,7 +434,7 @@ karşılaştırın; kurulum penceresi paket parmak izini yeniden yazar.
 değerleri (bölüm 7.1) burada da verin; verilmezse deneme onları sorar:
 
 ```powershell
-cd C:\Kurulum\ARCILOGGER-0.3.3
+cd C:\Kurulum\ARCILOGGER-0.4.0
 powershell -ExecutionPolicy Bypass -File .\installer\Install-Arcilogger.ps1 -DryRun `
     -SiteName "<kuruluş adı>" -NtpServer <yerel saat kaynağı> -AdminAddress <yönetici PC'si>
 ```
@@ -441,14 +444,34 @@ veri sürücüsü NTFS değil, sunucu adresi bu bilgisayarın değil). Ardından
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\installer\Install-Arcilogger.ps1 `
+    -SiteName "<kuruluş adı>" -NtpServer <yerel saat kaynağı> -AdminAddress <yönetici PC'si>
+```
+
+Zaman damgası sağlayıcısı varsayılan olarak TÜRKTRUST'tır. Kamu SM için sağlayıcıyı ve Zamane
+istemcisini de verin:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\installer\Install-Arcilogger.ps1 `
     -SiteName "<kuruluş adı>" -NtpServer <yerel saat kaynağı> -AdminAddress <yönetici PC'si> `
-    -ZamaneJar C:\Kurulum\tss-client-console-3.1.33.jar `
+    -TimeStampProvider zamane -ZamaneJar C:\Kurulum\tss-client-console-3.1.33.jar `
     -ZamaneJarSha256 <Kamu SM sayfasındaki SHA-256>
 ```
 
-`ARCILOGGER-Setup-<sürüm>.exe` kullanıyorsanız çift tıklayın: aynı betik `-Auto` ile bir PowerShell
-penceresinde çalışır (kurulu değilse kurar, başka bir sürüm kuruluysa yükseltir) ve pencere siz
-**Enter**'a basana kadar açık kalır. Kurulum dosyası Zamane istemcisini kurmaz; sonradan
+`ARCILOGGER-Setup-<sürüm>.exe` kullanıyorsanız çift tıklayın. İlk kurulumda (sunucuda ARCILOGGER ve
+`C:\ProgramData\ARCILOGGER\arcilogger.toml` yoksa) kurulum programı önce iki sayfa gösterir:
+
+- **Kurum bilgileri:** kuruluş adı (zorunlu), saat sunucusu (isteğe bağlı; bir ad ya da IPv4
+  adresi) ve yönetici bilgisayarının adresi (zorunlu; IPv4 ya da IPv4/önek, virgülle birden çok);
+- **Zaman damgası:** "TÜRKTRUST (önerilen)" ya da "Kamu SM (Zamane; Java ve Zamane istemcisi
+  gerekir)".
+
+Sayfalar yalnızca biçimi denetler (boş alan, uzunluk, karakterler); hatalı alanın adını bir uyarı
+penceresi verir. Değerler betiğe `-SiteName`, `-NtpServer` (alan boşsa `-NoNtpServer`),
+`-AdminAddress` ve `-TimeStampProvider` olarak gider. Tam denetimi betiğin ön denetimi yapar ve
+reddettiği bir değerde hiçbir şey değiştirmeden durur (`2`). Yükseltmede sayfalar gösterilmez,
+yapılandırmadaki değerler kalır. Ardından aynı betik `-Auto` ile bir PowerShell penceresinde
+çalışır (kurulu değilse kurar, başka bir sürüm kuruluysa yükseltir) ve pencere siz **Enter**'a
+basana kadar açık kalır. Kamu SM seçildiyse: kurulum dosyası Zamane istemcisini kurmaz; sonradan
 `C:\ProgramData\ARCILOGGER\zamane\` içine elle kopyalanan bir jar da çalışmaz: görevler yalnızca
 kurulumun kaydettiği, bilinen bir sürüm olan ya da konsolda onaylanan istemciyi çalıştırır, bu
 yüzden mühürleme `executable` nedeniyle durur. İstemciyi paketteki betikle ekleyin:
@@ -473,8 +496,10 @@ Dosya yoksa kurulum hiçbir şey kopyalamadan bunu söyleyip kapanır. `/ALLOWUN
 betiğe `-AllowUncoveredUpgrade` olarak gider (bölüm 13). İkisi birlikte de verilebilir.
 Seçenek verilmezse kurulum `.exe` dosyası betiği eskisi gibi yalnızca `-Auto` ile çalıştırır.
 
-Kurulum sırasında **PostgreSQL süper kullanıcı (postgres) parolası** bir kez ve verilmemiş kuruluş
-değerleri (bölüm 7.1) sorulur. İlk kurulumun sonunda, kurulum günlüğü kapandıktan sonra ve yalnızca
+Kurulumla gelen PostgreSQL'de (bölüm 2) parola sorulmaz; kurulum onu gizli depodan okur. Sunucunun
+kendi PostgreSQL'i varsa **PostgreSQL süper kullanıcı (postgres) parolası** bir kez sorulur ve hiçbir
+yere kaydedilmez. Verilmemiş kuruluş değerleri (bölüm 7.1) de pencerede sorulur; kurulum
+sayfalarından gelenler sorulmaz. İlk kurulumun sonunda, kurulum günlüğü kapandıktan sonra ve yalnızca
 pencerenin başında biri varsa:
 
 - İlk yöneticinin **kurulum anahtarı** pencerede gösterilir (bölüm 9). Kurulum programı anahtar
@@ -484,7 +509,9 @@ pencerenin başında biri varsa:
   Konsol penceresinin kendisini kaydeden bir araç onu yine görür: o zaman bölüm 9'daki komutla yeni
   anahtar alın, önceki geçersiz olur. Yöneticisi olan, korunmuş bir veritabanı üzerine yeniden
   kurulumda (bölüm 14'ten sonra) anahtar üretilmez ve kurulum programı bunu yazar.
-- "Kamu SM müşteri numarası ve parolasını şimdi girmek ister misiniz? [E/h]" sorulur. `E` (ya da
+- Zaman damgası olarak **Kamu SM** seçildiyse "Kamu SM müşteri numarası ve parolasını şimdi girmek
+  ister misiniz? [E/h]" sorulur. TÜRKTRUST'ta (varsayılan) bir şey sorulmaz: TÜRKTRUST'ın kullanıcı
+  adı ve parolası Ayarlar → Zaman damgası'nda girilir (bölüm 10). `E` (ya da
   Enter) ile müşteri numarası (görünür) ve parola (görünmez) doğrudan şifreli gizli depoya gider
   (`secret set`, standart girdi üzerinden; komut satırına ve günlüğe yazılmaz); `h` ile atlanır,
   sonra bölüm 10'daki komutlarla girilir. Kimlik bilgilerinden biri zaten kayıtlıysa sorulmaz
@@ -522,8 +549,9 @@ Betiğin yaptıkları (sırasıyla):
 1. Paket özetleri, ön denetim: Windows sürümü ve baskısı (Windows Server 2022/2025 ve Windows 11
    Pro/Enterprise/Education desteklenir; Windows 10 ve Home'da durur; ARM64'te uyarır; masaüstü
    Windows'ta lisans koşullarını doğrulama notu), yönetici hakkı, .NET 4.6.1+, veri sürücüsü
-   (sabit disk, NTFS, boş alan; USB diskte ve Windows'un diskinde uyarı), PostgreSQL hizmeti,
-   514/443 portları, sunucu adresi ve toplayıcının dinleyeceği adres (`[collector] bind` bu
+   (sabit disk, NTFS, boş alan; USB diskte ve Windows'un diskinde uyarı), PostgreSQL hizmeti
+   (yoksa kurulumla gelen PostgreSQL için 5432 portu ve `pgdata` klasörü, bölüm 2), zaman damgası
+   sağlayıcısı (`-TimeStampProvider`), 514/443 portları, sunucu adresi ve toplayıcının dinleyeceği adres (`[collector] bind` bu
    bilgisayarın bir adresi ya da `0.0.0.0` değilse **durur** ve nasıl düzeltileceğini yazar),
    kuruluş adı ve saat kaynağı (bölüm 7.1).
    Güvenlik duvarı adımının reddedebileceği her şey de burada, hiçbir şey değişmeden denetlenir:
@@ -541,7 +569,10 @@ Betiğin yaptıkları (sırasıyla):
 3. Python 3.12 → sanal ortam → bağımlılıklar **çevrimdışı ve özet denetimli** (`pip --no-index
    --require-hashes`) → ARCILOGGER, web arayüzü, Caddy, WinSW.
 4. `arcilogger.toml` yoksa örnekten oluşturulur: `data_dir` veri klasörü, `[collector] bind`
-   sunucu adresi, `site_name` kuruluş adı, `[clock] ntp_server` yerel saat kaynağı olur; örnek
+   sunucu adresi, `site_name` kuruluş adı, `[clock] ntp_server` yerel saat kaynağı olur; `[tsa]`
+   seçilen sağlayıcının ayarlarını alır (TÜRKTRUST: `provider = "turktrust"` ve
+   `url = "https://zd.turktrust.com.tr/"`, Java ve Zamane ayarı olmadan; Kamu SM: test sunucusu,
+   `java`, `zamane_jar` ve `zamane_verify_flag`); örnek
    **hiçbir log kaynağı** tanımlamaz, kurgusal örnek ağın `[[sources]]` satırları yorum satırıdır
    (bölüm 7.1). Varsa **dokunulmaz**; yalnızca verilen `-SiteName` / `-NtpServer` satırı değişir.
    Veri klasörü `C:\ProgramData\ARCILOGGER\data-root.txt` dosyasına yazılır: hizmetler ve görevler
@@ -550,6 +581,10 @@ Betiğin yaptıkları (sırasıyla):
    anahtarı (`secret init`) ve boş `secrets.json`; tarayıcı yönetiminin anahtarları (`keys init`,
    var olan bir anahtar değişmez), `admin\policy.json` ve Windows olay günlüğü kaynağı
    `ARCILOGGER-Admin`.
+   Sunucuda hiç PostgreSQL hizmeti yoksa ardından kurulumla gelen PostgreSQL kurulur (adım
+   `postgres.install`: programlar, `pgdata`, gizli depoya yazılan üretilmiş süper kullanıcı
+   parolası, `initdb`, NETWORK SERVICE hesabıyla çalışan hizmet; bölüm 2). Yeni paketteki 16
+   serisinin daha yeni bir sürümü yükseltmede programları değiştirir (`postgres.update`).
 5. NTFS izinleri: her ARCILOGGER hizmeti yalnızca ihtiyacı olan klasöre yazabilir (tablo:
    [ADR-0007](adr/0007-windows-installer.md) bölüm 4). Toplayıcı spool'a yazabilir ama ham log
    dosyalarını **silemez ve yeniden adlandıramaz** (açtığı dosyaya yazabilir; içeriği gece mührü
@@ -594,12 +629,17 @@ Betiğin yaptıkları (sırasıyla):
    `license.install`; reddedilirse yalnızca uyarı).
 10. Sağlık denetimi: hizmetler, `http://<[api] host:port>/api/v1/health` (varsayılan
     `127.0.0.1:8000`; Caddy'nin `/api` yönlendirmesi de bu değeri izler) ve Caddy üzerinden
-    `https://localhost/api/v1/health` (90 saniyeye kadar beklenir). Sonunda web adresi, kök
-    sertifikanın yolu ve parmak izleri ile sonraki adımlar yazılır. Sonraki adımların 6.'sı
+    `https://localhost/api/v1/health` (90 saniyeye kadar beklenir). Ardından **otomatik denetim**
+    (`arcilogger-core selftest`, bölüm 12) çalışır ve tablosunu yazar. Sonuç
+    `C:\ProgramData\ARCILOGGER\install\selftest.json` dosyasına da yazılır (gizli bilgi içermez);
+    Setup.exe'nin son sayfası "Denetim: N tamam, M uyarı/eksik" satırını gösterir. Bir uyarı ya da
+    eksik kurulumu `1` ile bitirir, hiçbir zaman başarısız yapmaz. Yeni bir TÜRKTRUST kurulumunda
+    kullanıcı adı ve parola girilene kadar `secrets` satırı uyarı verir (bölüm 10). Sonunda web
+    adresi, kök sertifikanın yolu ve parmak izleri ile sonraki adımlar yazılır. Sonraki adımların 6.'sı
     lisanstır: lisans kuruluysa lisans sahibi, yoksa lisans verene e-postayla gönderilecek
     **istek kodu** (alınamazsa sonra çalıştırılacak komut; [LISANS.md](LISANS.md) bölüm 4).
 
-Çıkış kodları: `0` tamam, `1` uyarılarla tamam (sağlık denetimini okuyun; ürünün reddettiği ya da
+Çıkış kodları: `0` tamam, `1` uyarılarla tamam (sağlık denetimini ve otomatik denetimi okuyun; ürünün reddettiği ya da
 yüklenemeyen bir `-LicenseFile` da), `2` hiçbir şey değiştirilmeden durdu (deneme çalıştırmasında:
 gerçek çalıştırma ön denetimde dururdu; lisansın bakım kuralı, okunamayan bir `-LicenseFile` ve
 yayın tarihi olmayan bir paket de), `3` bir değişiklik sırasında hata oldu. `3` durumunda betik ne
@@ -624,7 +664,8 @@ Windows PowerShell'de çalışır.
 ### 7.1 Kuruluşa özgü değerler
 
 ARCILOGGER hiçbir kuruluşun bilgisini taşımaz: kuruluş adı, saat kaynağı ve yönetici PC'sinin
-adresi için **varsayılan değer yoktur**. Kurulum bunları parametrelerden alır; eksik olanı, konsolun
+adresi için **varsayılan değer yoktur**. Kurulum bunları parametrelerden alır (Setup.exe ilk kurulumda **Kurum bilgileri** sayfasında sorar
+ve betiğe verir, bölüm 7); eksik olanı, konsolun
 başında biri varsa (kurulum `.exe`'sinin penceresi, yönetici PowerShell'i) sorar, yoksa ön denetimde
 durur ya da (saat kaynağı için) uyarır. `-NonInteractive`, CI ya da yönlendirilmiş çıktıyla bir şey
 sorulmaz.
@@ -818,9 +859,36 @@ gerektiğini hatırlatır (sahada doğrulayın). Ayrıntılar: [UYUM-DURUMU.md](
 
 Diğer kullanıcılar (denetçi vb.) ve sonraki adımlar: [ILK-ADIMLAR.md](ILK-ADIMLAR.md).
 
-## 10. Kamu SM bağlantısı (test → üretim)
+## 10. Zaman damgası: TÜRKTRUST (varsayılan) ya da Kamu SM
 
-Web arayüzünde **Ayarlar → Zaman damgası** sihirbazı aşağıdaki adımları aynı sırayla yapar (Java,
+### TÜRKTRUST (yeni kurulumun varsayılanı)
+
+0.4.0'dan itibaren yeni bir kurulum zaman damgalarını TÜRKTRUST'tan alır: `[tsa] provider =
+"turktrust"`, sunucu `https://zd.turktrust.com.tr/` (TÜRKTRUST'ın üretim sunucusu, HTTPS). Java ve
+Zamane istemcisi gerekmez. TÜRKTRUST'ın kök sertifikası (H7) ürünle gelir: kurulum onu
+`C:\ProgramData\ARCILOGGER\kamusm-roots\` içine koyar ve yasal kök sayılır, elle kök yüklemek
+gerekmez. Geriye hesap kalır: Ayarlar → Zaman damgası'nda TÜRKTRUST'ın verdiği kullanıcı adını ve
+parolayı girin ve damga testini çalıştırın. Konsoldan (değerler ekranda görünmez, şifreli
+saklanır):
+
+```powershell
+$core = "C:\Program Files\ARCILOGGER\venv\Scripts\arcilogger-core.exe"
+& $core secret set turktrust.username    # kullanıcı adı
+& $core secret set turktrust.password    # parola
+& "C:\Program Files\ARCILOGGER\scripts\Set-ArciVaultAcl.ps1"   # sonra: yönetim hizmetinin hakkı (aşağıda, adım 2)
+& $core tsa-test                         # bir damga alır ve ürünle gelen kökle doğrular
+```
+
+Hesap girilince kurulum sonundaki otomatik denetimin `secrets` uyarısı da kalkar (bölüm 12).
+Hesap açma, kökün parmak izi, sahada doğrulananlar (T1–T5) ve elle denetim listesi:
+[turktrust.md](turktrust.md). TÜRKTRUST kontör sorgusu sunmaz; bakiyeyi TÜRKTRUST'ın portalından
+izleyin. Sıkı giden trafikte TÜRKTRUST'a, iptal listelerine ya da vekil sunucuya açılan kurallar
+bölüm 12'de.
+
+### Kamu SM: test sunucusu
+
+Kurulumda Kamu SM seçildiyse ya da Ayarlar → Zaman damgası'nda Kamu SM'ye geçildiyse, web
+arayüzünde **Ayarlar → Zaman damgası** sihirbazı aşağıdaki adımları aynı sırayla yapar (Java,
 Zamane istemcisi, kök sertifikalar ve parmak izleri, müşteri bilgileri ve kontör sorgusu, damga
 testi, üretime geçiş; [AYARLAR.md](AYARLAR.md)). Konsoldaki yol:
 
@@ -890,17 +958,6 @@ sunucusundan) alınan ve zinciri `legal_root_fingerprints` listesindeki bir kök
 yasal nitelikli olarak işaretler; test sunucusunun damgalarının yasal geçerliliği yoktur (Kamu SM).
 Damgaların ve kayıt düzeninin hukuki değerlendirmesi için hukuk müşavirine danışın.
 
-### TÜRKTRUST (isteğe bağlı, Kamu SM yerine)
-
-Zaman damgalarını TÜRKTRUST'tan almak isteyen kurum, Ayarlar → Zaman damgası'nda TÜRKTRUST
-sunucusunu (HTTPS) seçer, TÜRKTRUST'ın verdiği kullanıcı adını ve parolayı girer ve damga testini
-çalıştırır. TÜRKTRUST'ın kök sertifikası (H7) ürünle gelir: kurulum onu
-`C:\ProgramData\ARCILOGGER\kamusm-roots\` içine koyar ve yasal kök sayılır, elle kök yüklemek
-gerekmez. Hesap açma, kökün parmak izi, sahada doğrulananlar (T1–T5) ve elle denetim listesi:
-[turktrust.md](turktrust.md). TÜRKTRUST kontör sorgusu sunmaz; bakiyeyi
-TÜRKTRUST'ın portalından izleyin. Kurulum programı TÜRKTRUST kimlik bilgilerini sormaz. Sıkı giden
-trafikte TÜRKTRUST'a, iptal listelerine ya da vekil sunucuya açılan kurallar bölüm 12'de.
-
 ### Yeniden damgalama ve iptal listeleri
 
 Bir damganın TSA sertifikası sona ermeden `Renew` görevi damgayı yeniden damgalar (varsayılan: 180
@@ -956,10 +1013,28 @@ Get-ScheduledTask -TaskPath \ARCILOGGER\ | Format-Table TaskName, State
 Get-NetFirewallRule -Group ARCILOGGER | Format-Table DisplayName, Direction, Enabled
 & "C:\Program Files\ARCILOGGER\venv\Scripts\arcilogger-core.exe" status
 & "C:\Program Files\ARCILOGGER\venv\Scripts\arcilogger-db.exe" license status --config "C:\ProgramData\ARCILOGGER\arcilogger.toml"
+& "C:\Program Files\ARCILOGGER\venv\Scripts\arcilogger-core.exe" selftest
 ```
 
-Son komut lisans durumunu, açık modülleri ve sınırları yazar (deneme, kalan gün; [LISANS.md](LISANS.md)
-bölüm 5).
+`license status` lisans durumunu, açık modülleri ve sınırları yazar (deneme, kalan gün;
+[LISANS.md](LISANS.md) bölüm 5).
+
+**Otomatik denetim (`selftest`).** Kurulumun sonunda kendiliğinden çalışan denetimdir; istediğiniz
+zaman yeniden çalıştırın. Hiçbir şeyi değiştirmez: damga almaz, kontör harcamaz, e-posta göndermez.
+Her satır `TAMAM`, `UYARI`, `HATA` ya da `ATLANDI` yazar, Türkçe ve İngilizce açıklamasıyla; bir
+hatanın nedeni yazılır, hiçbir parola yazılmaz. `--json` aynı sonucu JSON olarak verir. Çıkış
+kodu: `0` her şey tamam (ya da atlandı), `1` en az bir uyarı, `2` en az bir hata. Kurulum
+programı bir uyarıyı da hatayı da yalnızca uyarı sayar ve `1` ile biter.
+
+| Satır | Tamam, eğer | Değilse |
+|---|---|---|
+| `config` | yapılandırma okunuyor | hata (diğer satırlar denenmez) |
+| `secrets` | gizli depo açılıyor ve yapılandırmanın kullandığı bilgiler kayıtlı (TÜRKTRUST ya da Kamu SM üretim hesabı, SMTP ve replika parolaları) | eksik bilgi: uyarı; depo açılmıyor: hata |
+| `database` | veritabanına bağlanılıyor ve şema güncel | hata |
+| `roots` | en az bir kök sertifika kurulu; TÜRKTRUST'ta H7 aralarında | hata (deneme sağlayıcısında atlanır) |
+| `tsa.reach` | TÜRKTRUST: sunucu kimlik bilgisi olmadan gönderilen bir HTTPS isteğine herhangi bir HTTP cevabı veriyor (beklenen cevap 401); Kamu SM: sunucunun portuna TCP bağlantısı kuruluyor | uyarı (deneme sağlayıcısında atlanır) |
+| `smtp` | e-posta açıksa: bağlantı, ayarlı TLS, EHLO ve kullanıcı adı varsa giriş (AUTH), sonra QUIT; hiçbir e-posta gönderilmez | uyarı, Google ve Microsoft 365'in bilinen retlerinde ne yapılacağıyla (e-posta kapalıysa atlanır) |
+| `clock` | saat denetimi sınırın içinde | uyarı |
 
 **Web arayüzünde.** Aynı denetimlerin çoğunu iki sayfa da gösterir; ikisi de yalnızca okur ve 30
 saniyede bir yenilenir. Konsol komutları geçerliliğini korur: Windows hizmetlerinin ve zamanlanmış
@@ -1695,6 +1770,10 @@ Veriler korunarak kaldırıldıysa ve sonradan silinmek isteniyorsa: aynı sür�
   turda bir günün bir tablosu: Linux'ta yaklaşık 30 ms; bir günün 16 tablosu birlikte Linux'ta
   0,3–0,45 s, bir Windows CI makinesinde 0,84 s sürdü; bir tablonun turu Windows'ta ve döner
   diskte ölçülmedi, sözleşme W5-G-25).
+- Kurulumla gelen PostgreSQL (bölüm 2): paketteki PostgreSQL arşivinde beklenen programların
+  bulunması (S1; paket oluşturulurken her yol denetlenir) ve `pg_ctl register` ile NETWORK SERVICE
+  hesabına kaydedilen hizmetin çalışması (S2; Windows CI'da boş bir makinede sınandı):
+  `sc.exe qc postgresql-x64-16` ve `Get-Service postgresql-x64-16`.
 - Zaman damgası: TÜRKTRUST kullanılıyorsa [turktrust.md](turktrust.md) bölüm 2 ve 3 (T1–T5 ve
   elle denetim listesi); Kamu SM'nin iptal listesi adresleri (K10, [kamusm.md](kamusm.md)). İlk
   `CrlFetch` çalışmasından sonra `& $core crl status` her adresin indirilip doğrulandığını,

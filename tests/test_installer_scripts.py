@@ -6928,8 +6928,10 @@ if ($Scenario.Contains('-cancel')) {
     }
 }
 if ($Scenario.StartsWith('first-install')) {
-    # The end of a first installation (after the transcript): a person at the console or not.
+    # The end of a first installation (after the transcript): a person at the console or not;
+    # -zamane: the operator chose Kamu SM (-TimeStampProvider zamane), the others TÜRKTRUST.
     function Test-ArciInteractiveConsole { $Scenario -ne 'first-install-quiet' }
+    if ($Scenario.EndsWith('-zamane')) { $script:TimeStampProviderValue = 'zamane' }
     function Read-Host {
         param([Parameter(Position = 0)][string]$Prompt, [switch]$AsSecureString)
         $sim.calls.Add(('read-host secure={0}: {1}' -f [bool]$AsSecureString, $Prompt))
@@ -7173,6 +7175,7 @@ try {
         { $_.StartsWith('next-steps-licen') } { Show-NextSteps }
         { $_.StartsWith('license-install') } { Install-LicenseFile }
         'first-install-console' { Complete-FirstInstall }
+        'first-install-console-zamane' { Complete-FirstInstall }
         'first-install-quiet' { Complete-FirstInstall }
         'first-install-admin-exists' { Complete-FirstInstall }
         'first-install-captured' {
@@ -8960,8 +8963,9 @@ def test_upgrade_with_a_refused_licence_completes(engine: str, tmp_path: Path) -
 def test_first_install_shows_the_setup_token_and_stores_kamusm_credentials(
     engine: str, tmp_path: Path
 ) -> None:
-    """After the transcript: the token on the console only, the Kamu SM secrets on stdin."""
-    report = simulate(engine, tmp_path, "first-install-console")
+    """After the transcript: the token on the console only, the Kamu SM secrets on stdin (a
+    site that chose Kamu SM)."""
+    report = simulate(engine, tmp_path, "first-install-console-zamane")
     stdout = report["stdout"]
     assert "SIMULATED-SETUP-TOKEN" in stdout
     assert "https://172.20.20.15/setup" in stdout, "with the browser address"
@@ -8988,6 +8992,18 @@ def test_first_install_shows_the_setup_token_and_stores_kamusm_credentials(
     assert len(secure) == 1, "the password is read hidden"
     assert "parola" in secure[0]
     assert "kamu-sim-pw-1" not in stdout
+
+
+def test_first_install_with_turktrust_shows_the_token_and_asks_nothing(
+    engine: str, tmp_path: Path
+) -> None:
+    """0.4.0 D2/D3: on a TÜRKTRUST site (the default) the window shows the setup token and asks
+    no question; TÜRKTRUST's account is entered in the browser (the next steps say where)."""
+    report = simulate(engine, tmp_path, "first-install-console")
+    assert "SIMULATED-SETUP-TOKEN" in report["stdout"]
+    assert [p["arguments"].split(" --config ")[0] for p in report["processes"]] == ["setup-token"]
+    assert not [c for c in report["calls"] if c.startswith("read-host")], "no question"
+    assert "Kamu SM" not in report["stdout"]
 
 
 def test_first_install_token_bypasses_transcripts_and_redirection(
@@ -12746,6 +12762,8 @@ def test_installer_handles_token_and_kamusm_secrets_after_the_transcript() -> No
     finish = _function(script, "Complete-FirstInstall")
     quiet = finish.index("if (-not (Test-ArciInteractiveConsole)) { return }")
     assert quiet < finish.index("Show-SetupToken")
+    # Only a Kamu SM site is asked (0.4.0 D2): TÜRKTRUST's account goes in the browser.
+    assert "if ((Get-ConfiguredTsaProvider) -eq 'zamane') { Read-KamuSmCredentials }" in finish
     kamusm = _function(script, "Read-KamuSmCredentials")
     assert "Kamu SM müşteri numarası ve parolasını şimdi girmek ister misiniz? [E/h]" in kamusm
     assert "Read-Host -AsSecureString" in kamusm
