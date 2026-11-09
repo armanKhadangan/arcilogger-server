@@ -12190,6 +12190,16 @@ STRICT_ARGS = (
 )
 
 
+def test_firewall_says_it_is_reading_the_rules_before_the_slow_part() -> None:
+    """Windows answers the rule queries one rule at a time: on a server with many rules the
+    remote desktop and allow-rule scans take minutes, and the owner took the silent window for a
+    frozen one (2026-11-09). A line is printed before the first of them."""
+    script = (WINDOWS / "scripts" / "Set-ArciFirewall.ps1").read_text(encoding="utf-8-sig")
+    line = "Write-ArciInfo 'Güvenlik duvarı kuralları okunuyor; kural sayısına göre birkaç dakika"
+    assert line in script
+    assert script.index(line) < script.index("$RdpRuleNames = @(Get-RdpRuleNames)")
+
+
 def test_firewall_plan_from_sources(engine: str, tmp_path: Path) -> None:
     text = with_example_sources((WINDOWS / "arcilogger.example.toml").read_text(encoding="utf-8"))
     result, plan = _firewall(engine, tmp_path, text)
