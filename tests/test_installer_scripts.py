@@ -13513,12 +13513,15 @@ $listed = @($(if ($Scenario -ne 'no-bundle') { $component }))
 $script:Manifest = [pscustomobject]@{ components = $listed }
 function Find-PostgresService {
     if ($Scenario -notin @('service', 'service-bundled')) { return $null }
-    $path = '"C:\pg\16\bin\pg_ctl.exe" runservice -N "postgresql-x64-16" -D "D:\pgdata" -w'
+    # A path of this machine: Join-Path refuses a drive that does not exist (C: on Linux).
+    $bin = Join-Path $Base 'pg/16/bin'
+    $path = '"{0}" runservice -N "postgresql-x64-16" -D "{1}" -w' -f (Join-Path $bin 'pg_ctl.exe'),
+        (Join-Path $Base 'pgdata')
     [pscustomobject]@{ Name = 'postgresql-x64-16'; State = 'Running'; PathName = $path }
 }
 function Get-BundledPostgresRecord {
     if ($Scenario -ne 'service-bundled') { return $null }
-    [pscustomobject]@{ bundled = $true; version = '16.15'; data = 'D:\pgdata' }
+    [pscustomobject]@{ bundled = $true; version = '16.15'; data = (Join-Path $Base 'pgdata') }
 }
 function Get-PortOwners([string]$Protocol, [int]$Port) {
     if ($Scenario -eq 'port-taken' -and $Protocol -eq 'TCP' -and $Port -eq 5432) {
