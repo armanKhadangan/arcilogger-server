@@ -5,6 +5,33 @@ versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- **E-mail provider presets** (Ayarlar → E-posta → **Sağlayıcı**): Google Workspace / Gmail with
+  an app password, the Google SMTP relay without a password, Microsoft 365, a hosting company or
+  the company's own mail server. A preset fills the server, port and security, says what the
+  provider needs, and asks before changing a filled field; it is not saved. Every option connects
+  with a user name and password or without a login (no OAuth).
+- **A refused trial or test e-mail shows the mail server's answer**, never the password, and for
+  known refusals of Google and Microsoft 365 a "Ne yapmalı" line: an app password, the SMTP relay,
+  SMTP AUTH for the mailbox, "Send As" for the sender. Before, the page said only "Deneme
+  e-postası gönderilemedi."
+- **Setup asks its questions in its own pages** on a first installation: "Kurum bilgileri"
+  (organisation name, time server, the admin PC's address) and "Zaman damgası" (TÜRKTRUST,
+  recommended, or Kamu SM). The PowerShell window no longer asks for them. Upgrades keep the
+  configured values and show no page.
+- **TÜRKTRUST is the default time-stamp provider of a new installation**: no Java and no Zamane
+  client are needed, and its H7 root ships with the product. Kamu SM stays a choice in setup
+  (`-TimeStampProvider zamane`) and in the browser; an existing configuration is not changed.
+- **A self-test at the end of setup** (`arcilogger-core selftest`, also by hand): the
+  configuration, the secret store, the database, the root certificates, the time-stamp server,
+  the e-mail server (sign-in only, nothing is sent) and the clock, each ok, warning or failure,
+  in Turkish and English. It changes nothing and uses no credit. The setup prints the rows, and
+  its finish page says how many were ok and how many need attention; a warning ends the setup
+  with code 1, never with a failure.
+- **The daily stamp tests are a setting** (Ayarlar → Zaman damgası → kontör adımı, default 10, at
+  most 20); `admin\policy.json` can still lower it (`tsa_test_per_day`, 20 in new installations).
+
 ## [0.3.3] — 2026-11-08
 
 Release version 0.3.3 (`v0.3.3`): setup works where Windows' application control is on.

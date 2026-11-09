@@ -356,6 +356,78 @@ function Write-ArciUtf8File {
     [System.IO.File]::WriteAllText($Path, $Text, (New-Object System.Text.UTF8Encoding -ArgumentList $false))
 }
 
+function Set-ArciExampleTsaProvider {
+    <#
+    .SYNOPSIS
+        The example configuration's [tsa] section for -TimeStampProvider (0.4.0 D3). The example
+        names TÜRKTRUST and carries the Kamu SM keys as a commented block: 'turktrust' leaves the
+        text as it is; 'zamane' removes the two TÜRKTRUST lines (provider, url) and turns on the
+        six commented Kamu SM lines (provider, url, port, java, zamane_jar, zamane_verify_flag).
+        Only a new arcilogger.toml is made this way; an existing one is never rewritten. Throws
+        when the section is not as shipped (a line missing or twice).
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][string]$Text,
+        [Parameter(Mandatory = $true)][ValidateSet('turktrust', 'zamane')][string]$Provider
+    )
+    if ($Provider -eq 'turktrust') { return $Text }
+    $section = [regex]::Match($Text, '(?ms)^[ \t]*\[tsa\][ \t]*(?:#[^\r\n]*)?\r?$(?<body>.*?)(?=^[ \t]*\[|\z)')
+    if (-not $section.Success) { throw 'Örnek yapılandırmada [tsa] bölümü yok [no [tsa] section in the example].' }
+    $body = $section.Groups['body'].Value
+    $patterns = @(
+        '(?m)^provider = "turktrust"[ \t]*\r?\n',
+        '(?m)^url = "https://zd\.turktrust\.com\.tr/"[ \t]*\r?\n'
+    )
+    foreach ($key in @('provider', 'url', 'port', 'java', 'zamane_jar', 'zamane_verify_flag')) {
+        $patterns += ('(?m)^#(?={0} = )' -f [regex]::Escape($key))
+    }
+    foreach ($pattern in $patterns) {
+        $count = [regex]::Matches($body, $pattern).Count
+        if ($count -ne 1) {
+            throw ("Örnek yapılandırmanın [tsa] bölümü beklenen biçimde değil [the example's [tsa] is not as shipped]: {0} ({1})" -f $pattern, $count)
+        }
+        $body = [regex]::Replace($body, $pattern, '')
+    }
+    $Text.Substring(0, $section.Groups['body'].Index) + $body + $Text.Substring($section.Groups['body'].Index + $section.Groups['body'].Length)
+}
+
+function ConvertTo-ArciSelfTestResult {
+    <#
+    .SYNOPSIS
+        The rows of `arcilogger-core selftest --json` (0.4.0 P3) with their counts:
+        {ok, warn, fail, skip, rows}. The setup prints them and keeps them in install\selftest.json
+        for the finish page; a row is its id, status and fixed texts only (the command removes
+        every stored secret from a cause).
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory = $true)][AllowEmptyString()][string]$Json)
+    $report = $Json | ConvertFrom-Json
+    if ($null -eq $report -or $null -eq $report.rows) { throw 'selftest: no rows in its answer' }
+    # Fields read StrictMode-safe: a row without one is checked by its status below.
+    $rows = @(foreach ($row in @($report.rows)) {
+            [pscustomobject][ordered]@{
+                id         = [string](Get-ArciJsonField -Object $row -Name 'id')
+                status     = [string](Get-ArciJsonField -Object $row -Name 'status')
+                message_tr = [string](Get-ArciJsonField -Object $row -Name 'message_tr')
+                message_en = [string](Get-ArciJsonField -Object $row -Name 'message_en')
+            }
+        })
+    $counts = [ordered]@{ ok = 0; warn = 0; fail = 0; skip = 0 }
+    foreach ($row in $rows) {
+        if (-not $counts.Contains($row.status)) { throw ('selftest: unknown status ' + $row.status) }
+        $counts[$row.status] = [int]$counts[$row.status] + 1
+    }
+    # The counts come first: the finish page of Setup reads them from the top of the file.
+    [pscustomobject][ordered]@{
+        ok   = $counts['ok']
+        warn = $counts['warn']
+        fail = $counts['fail']
+        skip = $counts['skip']
+        rows = $rows
+    }
+}
+
 function Read-ArciSha256Sums {
     <#
     .SYNOPSIS
@@ -4031,7 +4103,7 @@ Export-ModuleMember -Function @(
     'Get-ArciServiceNames', 'Get-ArciWellKnownSid', 'Write-ArciStep', 'Write-ArciInfo', 'Write-ArciWarn',
     'Test-ArciWindows', 'Test-ArciAdministrator', 'Test-ArciInteractiveConsole', 'Get-ArciWindowsPowerShellModulePath', 'Initialize-ArciModulePath',
     'Get-ArciServiceSid', 'New-ArciRandomPassword', 'Rename-ArciFolder',
-    'ConvertTo-ArciScramVerifier', 'Get-ArciFileSha256', 'Write-ArciUtf8File', 'Read-ArciSha256Sums',
+    'ConvertTo-ArciScramVerifier', 'Get-ArciFileSha256', 'Write-ArciUtf8File', 'Set-ArciExampleTsaProvider', 'ConvertTo-ArciSelfTestResult', 'Read-ArciSha256Sums',
     'Test-ArciBundle', 'Resolve-ArciComponentSource', 'Expand-ArciTemplate', 'ConvertTo-ArciArgumentString', 'Invoke-ArciProcess',
     'Invoke-ArciExe', 'Get-ArciConfiguredDataDir', 'Read-ArciDataRootRecord', 'Resolve-ArciDataRoot', 'Read-ArciTomlFile', 'Get-ArciConfigValue', 'Get-ArciApiEndpoint', 'Test-ArciProxyTrust', 'Get-ArciSourceAddresses', 'Get-ArciSourceTables',
     'ConvertTo-ArciTomlString', 'Get-ArciTomlString', 'Set-ArciTomlString', 'Get-ArciSiteNameProblem', 'Get-ArciTimeServerProblem',

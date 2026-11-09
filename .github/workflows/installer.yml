@@ -71,6 +71,15 @@ on:
       - 'pyproject.toml'
       - 'uv.lock'
   workflow_dispatch:
+    inputs:
+      pin_components:
+        description: >-
+          Bundled components to pin on their first download (0.4.0 P1), e.g. postgresql_binaries:
+          their SHA-256 is printed ("PIN ...") and kept in pinned-components.json of the artifact,
+          to be recorded in deploy/windows/installer/components.json.
+        required: false
+        default: ''
+        type: string
 
 permissions:
   contents: read
@@ -287,11 +296,16 @@ jobs:
       # The same build as on the admin PC (docs/KURULUM.md section 4), with Inno Setup required.
       - name: Build the offline bundle and the setup .exe (Windows PowerShell 5.1, Inno Setup)
         shell: powershell
+        env:
+          PIN_COMPONENTS: ${{ inputs.pin_components }}
         run: |
           $ErrorActionPreference = 'Stop'
           $version = $env:ARCILOGGER_VERSION
           $dist = Join-Path $env:RUNNER_TEMP 'dist'
-          & .\deploy\windows\installer\Build-ArciBundle.ps1 -RequireInno -OutputRoot $dist
+          # Component names only (letters, digits, "_"): the input never reaches a command line as code.
+          $pins = @(([string]$env:PIN_COMPONENTS -split '[\s,]+') | Where-Object { $_ })
+          foreach ($pin in $pins) { if ($pin -notmatch '^[a-z0-9_]+$') { throw "invalid component name: $pin" } }
+          & .\deploy\windows\installer\Build-ArciBundle.ps1 -RequireInno -OutputRoot $dist -PinComponent $pins
           $bundle = Join-Path $dist "ARCILOGGER-$version"
           $setup = Join-Path $dist "ARCILOGGER-Setup-$version.exe"
           $fingerprint = Join-Path $dist "ARCILOGGER-$version.fingerprint.txt"
@@ -300,6 +314,8 @@ jobs:
           }
           $out = $env:ARCILOGGER_RELEASE
           Copy-Item -LiteralPath $setup, $fingerprint -Destination $out
+          $pinned = Join-Path $dist 'pinned-components.json'
+          if (Test-Path -LiteralPath $pinned) { Copy-Item -LiteralPath $pinned -Destination $out }
           # The folder bundle as one zip (ARCILOGGER-<version>\ inside), for the script path.
           Add-Type -AssemblyName System.IO.Compression, System.IO.Compression.FileSystem
           $zip = Join-Path $out "ARCILOGGER-$version.zip"

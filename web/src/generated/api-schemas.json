@@ -11279,6 +11279,17 @@
           "title": "Code",
           "type": "string"
         },
+        "detail": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Detail"
+        },
         "field": {
           "anyOf": [
             {
@@ -11289,6 +11300,28 @@
             }
           ],
           "title": "Field"
+        },
+        "hint_en": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Hint En"
+        },
+        "hint_tr": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Hint Tr"
         },
         "interfaces": {
           "items": {

@@ -12,6 +12,7 @@ import {
   PLAIN_HTTP_PHRASE,
   SEAL_CAUSES,
   SERVER_CHOICES,
+  TURKTRUST_FIRST,
   STEPS,
   TURKTRUST_KEPT,
   TURKTRUST_TEXTS,
@@ -389,11 +390,22 @@ describe('Ayarlar → Zaman damgası: the server choice and TÜRKTRUST (Wave 5 c
     // Both reported (stored or not): all four.
     expect(turktrustSupported(withTurktrust())).toBe(true);
     expect(serverChoices(withTurktrust())).toEqual(SERVER_CHOICES);
-    expect(serverChoices(turktrustSite())).toEqual(SERVER_CHOICES);
+    expect(serverChoices(turktrustSite())).toEqual(TURKTRUST_FIRST);
     // Only one of the two reported: the gate stays closed.
     const oneOnly = { ...withTurktrust().secrets };
     delete oneOnly['turktrust.password'];
     expect(turktrustSupported(tsa({ secrets: oneOnly }))).toBe(false);
+  });
+
+  it('offers TÜRKTRUST first to a site not on Kamu SM; a Kamu SM site keeps its order (0.4.0 D3)', () => {
+    expect(TURKTRUST_FIRST).toEqual(['turktrust', 'turktrust-http', 'test', 'production']);
+    expect([...TURKTRUST_FIRST].sort()).toEqual([...SERVER_CHOICES].sort());
+    const mock = withTurktrust({ provider: 'mock', server: null });
+    expect(serverChoices(mock)).toEqual(TURKTRUST_FIRST);
+    expect(serverChoices(withTurktrust({ provider: 'rfc3161', server: null }))).toEqual(
+      TURKTRUST_FIRST,
+    );
+    expect(serverChoices(withTurktrust())).toEqual(SERVER_CHOICES); // Kamu SM in use
   });
 
   it("pins the TÜRKTRUST gate on W5-T's captured sample: both credentials reported, all four servers", () => {
@@ -405,7 +417,9 @@ describe('Ayarlar → Zaman damgası: the server choice and TÜRKTRUST (Wave 5 c
       expect.arrayContaining(['turktrust.username', 'turktrust.password']),
     );
     expect(turktrustSupported(section)).toBe(true);
-    expect(serverChoices(section)).toEqual(SERVER_CHOICES);
+    // the captured site runs the mock provider: TÜRKTRUST's servers come first (0.4.0 D3)
+    expect(section.provider).toBe('mock');
+    expect(serverChoices(section)).toEqual(TURKTRUST_FIRST);
     // The §2.5 keys are reported too, so the form shows and sends them.
     expect(evidenceKeys(section)).toEqual({
       renew_before_days: section.renew_before_days,

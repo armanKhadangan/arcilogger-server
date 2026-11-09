@@ -63,6 +63,8 @@ def test_the_answer_lists_what_the_device_reports(
     ]
     assert found["error"]["message_tr"]
     assert found["error"]["message_en"]
+    # only the trial e-mail carries the server's answer and its explanation
+    assert (found["error"]["detail"], found["error"]["hint_tr"]) == (None, None)
     (probe,) = [step for step in found["steps"] if step["step"] == "probe"]
     assert (probe["state"], probe["code"]) == ("failed", code)  # the step stays a code
     assert "fw-sube" not in {source["name"] for source in sources(client)}

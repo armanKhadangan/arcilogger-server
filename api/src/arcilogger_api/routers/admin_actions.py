@@ -37,8 +37,9 @@ from pydantic import BaseModel, ConfigDict, Field
 from arcilogger_api.admin_channel import AdminAccepted, ChannelDep, admin_error
 from arcilogger_api.deps import DbSession
 from arcilogger_api.security import CurrentUser, require
+from arcilogger_core.smtp import mask_address
 from arcilogger_core.timeutil import day_window, site_day
-from arcilogger_worker.admin_jobs import LEASE_REBUILD_DAYS, mask_address
+from arcilogger_worker.admin_jobs import LEASE_REBUILD_DAYS
 from arcilogger_worker.correlation.leases import first_evidence_time
 
 router = APIRouter(prefix="/admin/actions", tags=["admin"])

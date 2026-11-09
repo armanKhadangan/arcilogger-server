@@ -34,11 +34,12 @@ The worker also works the **worker channel** (contract 2.9): requests the API st
 (job ``admin.requests``, every 15 seconds):
 
 * ``worker.test_email`` (``params.to``) — the test e-mail of ``alerts test-email`` through
-  ``[smtp]``; the result is ``{ok, to, smtp_code, error_text}`` with every address masked
-  (``b***@ornek.example``) and the audit entry ``smtp.test``. ``smtp_not_configured`` when the
-  server or the sender is not set, ``smtp_test_failed`` when the e-mail was not accepted or the
-  password cannot be read (``error_text`` is then a fixed sentence: the error itself may name a
-  file of the server and stays in the worker's log).
+  ``[smtp]``; the result is ``{ok, to, smtp_code, error_text, hint_tr, hint_en}`` with every
+  address masked (``b***@ornek.example``) and the audit entry ``smtp.test``; the hint explains a
+  known refusal of Google or Microsoft 365 (``arcilogger_core.smtp.explain``, 0.4.0 S5).
+  ``smtp_not_configured`` when the server or the sender is not set, ``smtp_test_failed`` when the
+  e-mail was not accepted or the password cannot be read (``error_text`` is then a fixed
+  sentence: the error itself may name a file of the server and stays in the worker's log).
 * ``worker.lease_rebuild`` (``params.from``, ``params.to``) — the lease timeline of each day
   rebuilt in order (:func:`.correlation.rebuild.rebuild_lease_day`, a ``leases.rebuild`` job
   run per day with the request's id). The row is ``running`` with ``{done_days, total_days,
@@ -88,6 +89,7 @@ from arcilogger_core.admin.contract import (
     parse_document,
 )
 from arcilogger_core.config import EMAIL_ADDRESS, Config
+from arcilogger_core.smtp import explain, mask_address, mask_addresses
 from arcilogger_core.timeutil import site_day
 from arcilogger_db.audit import append_audit
 from arcilogger_db.models import AdminRequest, User
@@ -117,9 +119,6 @@ LEASE_REBUILD_DAYS: Final = 31
 #: ``admin.requests`` starts no further step after this long (a rebuild goes on next run).
 REQUESTS_BUDGET: Final = timedelta(seconds=30)
 _ADDRESS: Final = re.compile(EMAIL_ADDRESS)
-_ADDRESS_IN_TEXT: Final = re.compile(
-    r"[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+"
-)
 
 
 def _lines(path: Path, report: ImportReport) -> list[bytes]:
@@ -270,20 +269,6 @@ def import_admin_events(
 # -- the worker channel (contract 2.9) ------------------------------------------------------------
 
 
-def mask_address(address: str) -> str:
-    """``bora@ornek.example`` → ``b***@ornek.example`` (ADR-0010 A4; ``***`` when it is not an
-    address)."""
-    local, at, domain = address.strip().rpartition("@")
-    if not at or not local or not domain:
-        return "***"
-    return f"{local[0]}***@{domain}"
-
-
-def mask_addresses(text: str) -> str:
-    """Every e-mail address in ``text`` masked (an SMTP reply may quote the recipient)."""
-    return _ADDRESS_IN_TEXT.sub(lambda match: mask_address(match.group()), text)
-
-
 @dataclass
 class RequestsReport:
     """What one ``admin.requests`` run did: ``<id> <kind> <state>`` per step."""
@@ -368,7 +353,14 @@ def _test_email(session: Session, row: AdminRequest, config: Config) -> None:
             "failed",
             action=SMTP_TEST_ACTION,
             details={"to": masked, "ok": False, "smtp_code": None},
-            result={"ok": False, "to": masked, "smtp_code": None, "error_text": None},
+            result={
+                "ok": False,
+                "to": masked,
+                "smtp_code": None,
+                "error_text": None,
+                "hint_tr": None,
+                "hint_en": None,
+            },
             code="validation_failed",
         )
         return
@@ -385,6 +377,7 @@ def _test_email(session: Session, row: AdminRequest, config: Config) -> None:
     else:
         ok, smtp_code, text = outcome.ok, outcome.smtp_code, outcome.error_text
         code = None if ok else "smtp_test_failed"
+    hint = None if ok else explain(text, config.smtp.host)
     _finish(
         session,
         row,
@@ -396,6 +389,8 @@ def _test_email(session: Session, row: AdminRequest, config: Config) -> None:
             "to": masked,
             "smtp_code": smtp_code,
             "error_text": None if text is None else mask_addresses(text),
+            "hint_tr": hint[0] if hint else None,
+            "hint_en": hint[1] if hint else None,
         },
         code=code,
     )
@@ -547,6 +542,8 @@ def _record_error(
                     "to": masked,
                     "smtp_code": None,
                     "error_text": f"beklenmeyen hata / unexpected error: {error}",
+                    "hint_tr": None,
+                    "hint_en": None,
                 },
                 code="smtp_test_failed",
             )

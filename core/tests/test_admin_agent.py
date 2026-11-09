@@ -1290,6 +1290,14 @@ def test_a_failed_trial_email_changes_nothing(installed: Installed) -> None:
     assert status.state == "probe_failed"
     assert installed.store.get("smtp.password") is None
     assert not installed.config().smtp.enabled
+    # 0.4.0 P6: the e-mail server's answer goes with the error, without the password.
+    assert status.error is not None
+    assert status.error.code == "smtp_test_failed"
+    assert status.error.detail is not None
+    assert status.error.detail.startswith("535 authentication failed")
+    assert "smtp-parola" not in status.error.detail
+    written = installed.layout.request_status(request.id).read_text(encoding="utf-8")
+    assert "smtp-parola" not in written
 
 
 def test_turning_the_replica_off_is_held(installed: Installed) -> None:

@@ -1,0 +1,34 @@
+{
+  "settings": {
+    "email": {
+      "presets": {
+        "label": "Provider",
+        "hint": "Fills the server, port and security; the choice itself is not saved.",
+        "choose": "Choose a provider",
+        "names": {
+          "google": "Google Workspace / Gmail (with an app password)",
+          "google-relay": "Google SMTP relay (no password, by IP address)",
+          "microsoft365": "Microsoft 365 / Outlook",
+          "hosting": "Your hosting company's e-mail",
+          "company": "Company mail server",
+          "other": "Other"
+        },
+        "help": {
+          "google": "Google does not accept the account password for SMTP. The user name is the full e-mail address; the password is that account's 16-character app password (the account needs 2-Step Verification; an organisation's administrator may have turned the option off). If app passwords cannot be used, choose “Google SMTP relay”.",
+          "google-relay": "No password: Google recognises the e-mail by the public IP address this server reaches the internet from. In the Google Admin console, under Apps → Google Workspace → Gmail → Routing → SMTP relay service, add a rule that accepts mail only from the specified IP addresses, and list that public IP address. The sender address must be in your own domain; the user name stays empty.",
+          "microsoft365": "The user name is the mailbox's full address and the password is that account's password. The Microsoft 365 administrator must turn on authenticated SMTP (SMTP AUTH) for this mailbox; with the tenant's Security defaults on, sign-in with a password does not work. The sender address must be the mailbox's address.",
+          "hosting": "Enter the SMTP server name, the user name (usually the full e-mail address) and the password your hosting company gave you. If they say 465 and SSL/TLS, choose those.",
+          "company": "Type the name of the company's mail server or relay. If it accepts this machine by its IP address, the user name stays empty. If a user name is needed, choose STARTTLS: over a plain connection a user name may only go to this server itself."
+        },
+        "confirmTitle": "The preset changes filled fields",
+        "confirmBody": "These fields change:",
+        "confirm": "Change them",
+        "empty": "(empty)"
+      },
+      "answer": {
+        "title": "The mail server's answer",
+        "whatToDo": "What to do"
+      }
+    }
+  }
+}

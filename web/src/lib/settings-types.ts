@@ -569,6 +569,11 @@ export interface RequestError extends CodeMessage {
   field?: string | null;
   /** With `snmp_no_such_interface` and `snmp_no_hc_counters` only: what the device reports. */
   interfaces?: ProbeInterface[];
+  /** With `smtp_test_failed` only: the e-mail server's answer, without a secret (0.4.0 P6). */
+  detail?: string | null;
+  /** What to change for a known answer of Google or Microsoft 365 (0.4.0 S5), both or none. */
+  hint_tr?: string | null;
+  hint_en?: string | null;
 }
 
 /** `action.seal` (`SealOutcome` of the Seal task). */
@@ -618,6 +623,9 @@ export interface TestEmailResult {
   smtp_code: number | null;
   /** A fixed sentence of the worker, never the exception's text. */
   error_text: string | null;
+  /** What to change for a known refusal of Google or Microsoft 365 (0.4.0 S5), both or none. */
+  hint_tr?: string | null;
+  hint_en?: string | null;
 }
 
 /** `worker.lease_rebuild`, also while it runs. */

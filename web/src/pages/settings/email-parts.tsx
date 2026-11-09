@@ -22,6 +22,7 @@ import { errorMessage, isApiError } from '@/lib/api';
 import { useClearSmtpCa, useSetSmtpCa, useTestEmail } from '@/lib/api-hooks';
 import { shortHash } from '@/lib/display';
 import { formatDateTime } from '@/lib/format';
+import { currentLang } from '@/lib/i18n';
 import { isReauthCancelled, useReauth } from '@/lib/reauth';
 import type {
   AdminRequestOut,
@@ -80,6 +81,35 @@ export function RecipientSelect({
   );
 }
 
+/**
+ * What a known refusal of Google or Microsoft 365 needs (0.4.0 S5, `arcilogger_core.smtp`) and
+ * the mail server's own answer below it; nothing when there is neither.
+ */
+export function SmtpAnswer({
+  detail,
+  hintTr,
+  hintEn,
+}: {
+  detail?: string | null;
+  hintTr?: string | null;
+  hintEn?: string | null;
+}) {
+  const { t } = useTranslation();
+  const hint = currentLang() === 'en' ? hintEn : hintTr;
+  if (!detail && !hint) return null;
+  return (
+    <div className="flex flex-col gap-2" data-testid="smtp-answer">
+      {hint ? (
+        <p data-testid="smtp-hint">
+          <span className="font-semibold">{t('settings.email.answer.whatToDo')}: </span>
+          {hint}
+        </p>
+      ) : null}
+      {detail ? <CodeBlock label={t('settings.email.answer.title')} code={detail} wrap /> : null}
+    </div>
+  );
+}
+
 function TestEmailOutcome({ request }: { request: AdminRequestOut }) {
   const { t } = useTranslation();
   const result = request.result as TestEmailResult | null;
@@ -90,7 +120,10 @@ function TestEmailOutcome({ request }: { request: AdminRequestOut }) {
     </Alert>
   ) : (
     <Alert tone="danger" data-testid="test-email-result">
-      {t('settings.email.test.failed', { error: result.error_text ?? '—' })}
+      <div className="flex flex-col gap-2">
+        {t('settings.email.test.failed', { error: result.error_text ?? '—' })}
+        <SmtpAnswer hintTr={result.hint_tr} hintEn={result.hint_en} />
+      </div>
     </Alert>
   );
 }

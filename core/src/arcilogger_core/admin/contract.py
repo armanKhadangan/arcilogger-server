@@ -936,6 +936,13 @@ PROBE_INTERFACES_MAX: Final = 256
 PROBE_INTERFACE_NAME_MAX: Final = 64
 #: The failures of the ``snmp`` probe that come with the device's interface list.
 INTERFACE_CODES: Final = frozenset({"snmp_no_such_interface", "snmp_no_hc_counters"})
+#: The codes whose error carries the server's own answer as ``detail`` (0.4.0 P6): the SMTP
+#: trial's reply, so the administrator sees why the e-mail server refused it. Redacted of every
+#: secret the probe was given and cut at :data:`DETAIL_MAX`.
+DETAIL_CODES: Final = frozenset({"smtp_test_failed"})
+DETAIL_MAX: Final = 300
+#: Longest explanation of a :data:`DETAIL_CODES` answer (``arcilogger_core.smtp.explain``).
+HINT_MAX: Final = 600
 
 
 class ProbeInterface(_Model):
@@ -960,6 +967,11 @@ class ErrorRef(_Model):
     field: ConfigPath | None = None
     #: What the device reported, for :data:`INTERFACE_CODES` only (W5-N-9).
     interfaces: Annotated[tuple[ProbeInterface, ...], Field(max_length=PROBE_INTERFACES_MAX)] = ()
+    #: The server's answer, for :data:`DETAIL_CODES` only (0.4.0 P6); never a secret.
+    detail: Annotated[str, Field(max_length=DETAIL_MAX)] | None = None
+    #: What to change for a known answer of Google or Microsoft 365 (0.4.0 S5), both or none.
+    hint_tr: Annotated[str, Field(max_length=HINT_MAX)] | None = None
+    hint_en: Annotated[str, Field(max_length=HINT_MAX)] | None = None
 
     @field_validator("code")
     @classmethod
@@ -971,6 +983,12 @@ class ErrorRef(_Model):
     def _interfaces_of_snmp(self) -> ErrorRef:
         if self.interfaces and self.code not in INTERFACE_CODES:
             raise ValueError(f"interfaces come only with {sorted(INTERFACE_CODES)}")
+        if self.detail is not None and self.code not in DETAIL_CODES:
+            raise ValueError(f"a detail comes only with {sorted(DETAIL_CODES)}")
+        if (self.hint_tr is None) != (self.hint_en is None):
+            raise ValueError("a hint has both texts or none")
+        if self.hint_tr is not None and self.detail is None:
+            raise ValueError("a hint explains a detail")
         return self
 
 

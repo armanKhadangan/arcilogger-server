@@ -43,6 +43,8 @@
       -NtpServer      the local time source ([clock] ntp_server; usually the core router), asked on
                       a first installation, kept on an upgrade. Empty: Windows Time and the hourly
                       clock check use only [clock] fallback_server and the preflight warns.
+      -NoNtpServer    the same as an empty -NtpServer, which a command line cannot always pass
+                      (Setup's page left the optional time server empty); -NtpServer wins.
       -AdminAddress   the admin PC's address(es) or network(s), e.g. 10.0.0.10 or 10.0.0.0/24:
                       443 is opened only for them (the remote desktop, 3389, is never closed).
                       Remembered by Set-ArciFirewall.ps1,
@@ -50,6 +52,11 @@
       -SiteName and -NtpServer go into the new arcilogger.toml; given on an upgrade, they are
       written into the existing one (only those keys change; the previous file is kept as
       arcilogger.toml.before-<time>).
+      -TimeStampProvider  turktrust (default, 0.4.0) or zamane (Kamu SM: Java and the Zamane
+                      client are needed). Only a new arcilogger.toml gets it: TÜRKTRUST's block of
+                      the example, or the example's Kamu SM test-server lines. An existing
+                      configuration keeps its provider (change it under Ayarlar -> Zaman damgası).
+                      Another value stops with 2 before any change.
     The log sources ([[sources]]) take no parameter: a new arcilogger.toml has none (the example
     lists the devices of its fictional network as comments only), so the firewall opens 514 to
     no sender until the organisation adds its own; the preflight warns and the next steps say
@@ -201,7 +208,10 @@ param(
     # No defaults: asked at the console when missing (Resolve-SetupValues), see .DESCRIPTION.
     [string]$SiteName,
     [string]$NtpServer,
+    [switch]$NoNtpServer,
     [string[]]$AdminAddress,
+    # Not a ValidateSet: a wrong value must stop with 2 in the preflight, not with 1 at binding.
+    [string]$TimeStampProvider = 'turktrust',
     [System.Management.Automation.PSCredential]$PgSuperuserCredential,
     [string]$PgServiceName,
     [string]$PgBinDir,
@@ -251,11 +261,14 @@ $script:PromptedAdminAddress = @()    # typed at the console (Resolve-SetupValue
 # -SiteName / -NtpServer: given, else configured, else asked (Resolve-SetupValues). Sources:
 # parameter, config (an existing arcilogger.toml), prompt, none.
 $script:SiteNameGiven = $PSBoundParameters.ContainsKey('SiteName') -and [bool]([string]$SiteName).Trim()
-$script:NtpServerGiven = $PSBoundParameters.ContainsKey('NtpServer')
+$script:NtpServerGiven = $PSBoundParameters.ContainsKey('NtpServer') -or $NoNtpServer
 $script:SiteNameValue = $(if ($script:SiteNameGiven) { $SiteName.Trim() } else { '' })
 $script:SiteNameSource = $(if ($script:SiteNameGiven) { 'parameter' } else { 'none' })
 $script:NtpServerValue = $(if ($script:NtpServerGiven) { ([string]$NtpServer).Trim() } else { '' })
 $script:NtpServerSource = $(if ($script:NtpServerGiven) { 'parameter' } else { 'none' })
+# -TimeStampProvider (0.4.0 D3): the provider of a new arcilogger.toml only.
+$script:TimeStampProviderGiven = $PSBoundParameters.ContainsKey('TimeStampProvider')
+$script:TimeStampProviderValue = ([string]$TimeStampProvider).Trim().ToLowerInvariant()
 $script:FallbackServer = 'time.ume.tubitak.gov.tr'   # [clock] fallback_server of the configuration in use
 $script:ConfigReadError = $null        # site_name or [clock] of the configuration is not readable
 # -ConfirmRemoveData: the organisation name given in advance for -Uninstall -RemoveData.
@@ -487,6 +500,8 @@ $StateDir = Join-Path $ProgramDataDir 'install'
 $StatePath = Join-Path $StateDir 'state.json'
 $FirewallStatePath = Join-Path $StateDir 'firewall-state.json'
 $PowerStatePath = Join-Path $StateDir 'power-state.json'
+# The self-test's rows of this run (0.4.0 P3); the finish page of Setup shows their counts.
+$SelfTestPath = Join-Path $StateDir 'selftest.json'
 # The browser administration (Config.admin_dir; contract 2.2), the Zamane client folder, the
 # secret store's values and the record of the data root every task and service checks the
 # configuration's data_dir against (config.DATA_ROOT_RECORD, written on every run).
@@ -1723,6 +1738,7 @@ function Invoke-ConfigSteps {
         $bindValue = [string]$ServerAddress
         $siteValue = $script:SiteNameValue
         $ntpValue = $script:NtpServerValue
+        $providerValue = $script:TimeStampProviderValue
         Invoke-Step 'config.copy' ("Örnek yapılandırma kopyalanıyor [copying example configuration]: {0}" -f $ConfigPath) {
             $text = [System.IO.File]::ReadAllText((Get-BundleFile 'config/arcilogger.example.toml'), [System.Text.Encoding]::UTF8)
             $pattern = '(?m)^data_dir\s*=\s*"[^"]*"'
@@ -1730,8 +1746,9 @@ function Invoke-ConfigSteps {
             $text = [regex]::Replace($text, $pattern, ('data_dir = "{0}"' -f $dataDirValue))
             $text = Set-ExampleCollectorBind -Text $text -Address $bindValue
             $text = Set-ConfigSetupValues -Text $text -SiteName $siteValue -NtpServer $ntpValue
+            $text = Set-ArciExampleTsaProvider -Text $text -Provider $providerValue
             Write-ArciUtf8File -Path $ConfigPath -Text $text
-        } ([pscustomobject]@{ data_dir = $dataDirValue; collector_bind = $bindValue; site_name = $siteValue; ntp_server = $ntpValue })
+        } ([pscustomobject]@{ data_dir = $dataDirValue; collector_bind = $bindValue; site_name = $siteValue; ntp_server = $ntpValue; tsa_provider = $providerValue })
     }
     # The data root every task and service checks the configuration's data_dir against
     # (data-root.txt, Day 0 note D0-2): written on every run from the record itself, -DataRoot
@@ -2381,7 +2398,44 @@ function Invoke-HealthCheck {
         $script:Warnings.Add('Caddy root certificate not created')
         Write-ArciWarn ("Caddy kök sertifikası oluşmadı [root certificate missing]: {0}" -f $CaddyRootSource)
     }
+    if (-not (Invoke-SelfTest)) { $healthy = $false }
     if (-not $healthy -and $script:ExitCode -eq 0) { $script:ExitCode = 1 }
+}
+
+function Invoke-SelfTest {
+    <#
+    `arcilogger-core selftest --json` (0.4.0 P3): the configuration, the secret store, the
+    database, the roots, the time-stamp server, the e-mail server and the clock. Its rows are
+    printed, kept in the plan and written to install\selftest.json for the finish page of Setup.
+    A warning or failure ends the run with code 1; it never fails the installation. Returns
+    $true when every row is ok or skipped.
+    #>
+    if (-not (Test-Path -LiteralPath $CoreExe)) { return $true }
+    try {
+        $answer = Invoke-ArciProcess -FilePath $CoreExe -ArgumentList @('--config', $ConfigPath, 'selftest', '--json') -AllowFailure -TimeoutSeconds 300
+        $result = ConvertTo-ArciSelfTestResult -Json $answer.StdOut
+    }
+    catch {
+        $script:Warnings.Add('self-test: ' + $_.Exception.Message)
+        Write-ArciWarn ("Denetim çalışmadı [self-test did not run]: {0}" -f $_.Exception.Message)
+        return $false
+    }
+    Write-ArciInfo 'Denetim [self-test]:'
+    foreach ($row in $result.rows) {
+        $line = '{0,-9} {1} [{2}]' -f $row.id, $row.message_tr, $row.message_en
+        switch ($row.status) {
+            'ok' { Write-ArciInfo ('  TAMAM   ' + $line) }
+            'skip' { Write-ArciInfo ('  ATLANDI ' + $line) }
+            default {
+                Write-ArciWarn ('  {0} {1}' -f $(if ($row.status -eq 'fail') { 'HATA ' } else { 'UYARI' }), $line)
+                $script:Warnings.Add(('self-test {0}: {1}' -f $row.id, $row.message_en))
+            }
+        }
+    }
+    Add-PlanItem -Id 'selftest' -Status $(if ($result.fail -gt 0) { 'fail' } elseif ($result.warn -gt 0) { 'warn' } else { 'ok' }) -Text ("Denetim [self-test]: {0} tamam, {1} uyarı, {2} hata, {3} atlandı" -f $result.ok, $result.warn, $result.fail, $result.skip) -Detail $result.rows
+    try { Write-ArciUtf8File -Path $SelfTestPath -Text ($result | ConvertTo-Json -Depth 4) }
+    catch { Write-ArciWarn ("{0} yazılamadı [not written]: {1}" -f $SelfTestPath, $_.Exception.Message) }
+    return ($result.warn + $result.fail) -eq 0
 }
 
 function Show-NextSteps {
@@ -2405,17 +2459,18 @@ function Show-NextSteps {
     Write-Host ('      Sonra {0}/setup adresini açıp anahtarı, kullanıcı adını ve parolayı girin [then open {0}/setup].' -f $url)
     $browserAdministration = ($null -eq $script:AdminPolicyChoice) -or $script:AdminPolicyChoice.Enabled
     # Step 3 follows the configured provider (contract 2.4): TÜRKTRUST's account needs no Java
-    # and no Zamane client. An unreadable configuration keeps Kamu SM's text, a new
-    # installation's. The secrets are never asked here and never written into the log.
-    $provider = $null
+    # and no Zamane client. A configuration that cannot be read follows -TimeStampProvider,
+    # TÜRKTRUST by default (0.4.0 D3); only Kamu SM gets Kamu SM's text. The secrets are never
+    # asked here and never written into the log.
+    $provider = $script:TimeStampProviderValue
     if ((Test-Path -LiteralPath $VenvPython) -and (Test-Path -LiteralPath $ConfigPath)) {
         try {
             $config = Read-ArciTomlFile -Python $VenvPython -ConfigPath $ConfigPath
             $provider = Get-ArciConfigValue -Config $config -Path 'tsa.provider' -Default 'mock'
         }
-        catch { $provider = $null }
+        catch { $provider = $script:TimeStampProviderValue }
     }
-    if ($provider -eq 'turktrust') {
+    if ($provider -ne 'zamane') {
         Write-Host '   3. TÜRKTRUST zaman damgası hesabı [time-stamp account]:'
         Write-Host '      Kullanıcı adı ve parolayı web arayüzünde Ayarlar → Zaman damgası''nda girin; konsoldan da girilebilir [enter the user name and password under Settings → Time stamping in the web interface; or at the console] (docs\AYARLAR.md):'
         if (-not $browserAdministration) {
@@ -2659,7 +2714,8 @@ function Get-RememberedAdminAddress {
 
 function Get-EffectiveAdminAddress {
     <# -AdminAddress when given, else the addresses typed at the console, else the remembered ones; there is no default. #>
-    if ($script:AdminAddressGiven) { return @($AdminAddress | Where-Object { $_ }) }
+    # The setup .exe passes its page's list as one argument ("a,b"): split it as the console does.
+    if ($script:AdminAddressGiven) { return @($AdminAddress | ForEach-Object { ([string]$_).Split([char[]]@(',', ';', ' ', "`t"), [System.StringSplitOptions]::RemoveEmptyEntries) } | Where-Object { $_ }) }
     if (@($script:PromptedAdminAddress).Count -gt 0) { return $script:PromptedAdminAddress }
     @(Get-RememberedAdminAddress)
 }
@@ -3181,6 +3237,18 @@ function Invoke-SetupPreflight {
     else {
         Add-Check 'ntp-server' 'fail' 'Saat sunucusu yok [no time server]: [clock] ntp_server ve fallback_server boş; -NtpServer ile verin [both are empty: give -NtpServer]'
     }
+    $names = @{ turktrust = 'TÜRKTRUST'; zamane = 'Kamu SM (Zamane)' }
+    if (-not $names.ContainsKey($script:TimeStampProviderValue)) {
+        Add-Check 'tsa-provider' 'fail' ("-TimeStampProvider geçersiz [invalid]: '{0}'; turktrust ya da zamane [turktrust or zamane]" -f $TimeStampProvider)
+    }
+    elseif (Test-Path -LiteralPath $ConfigPath) {
+        if ($script:TimeStampProviderGiven) {
+            Add-Check 'tsa-provider' 'warn' ("-TimeStampProvider {0} uygulanmadı: mevcut yapılandırmanın sağlayıcısı korunur; değiştirmek için Ayarlar -> Zaman damgası [not applied: the existing configuration keeps its provider; change it under Settings -> Time stamping]" -f $script:TimeStampProviderValue)
+        }
+    }
+    else {
+        Add-Check 'tsa-provider' 'ok' ("Zaman damgası sağlayıcısı [time-stamp provider]: {0}" -f $names[$script:TimeStampProviderValue])
+    }
 }
 
 function Invoke-AddressPreflight {
@@ -3396,7 +3464,7 @@ function Invoke-CommonTail {
     # The database services after the migration (and the collector or web again if their early
     # start failed; running services are left alone).
     Invoke-Step 'services.start' 'Hizmetler başlatılıyor [starting services]' { Start-ArciServices }
-    Invoke-Step 'health.check' 'Sağlık denetimi [health check]: hizmetler, API, https://localhost/api/v1/health' {
+    Invoke-Step 'health.check' 'Sağlık denetimi [health check]: hizmetler, API, https://localhost/api/v1/health, denetim [self-test]' {
         Invoke-HealthCheck
         try { Test-JavaForZamane } catch { Write-ArciWarn ("Zamane denetlenemedi [not checked]: {0}" -f $_.Exception.Message) }
     }
@@ -4600,6 +4668,10 @@ try {
         else {
             Stop-Installer 2 'Ön denetim başarısız; hiçbir şey değiştirilmedi [preflight failed, nothing changed].'
         }
+    }
+    # The finish page of Setup reads the self-test of this run only (0.4.0 P3).
+    if (-not $script:IsDryRun -and ($Mode -eq 'install' -or $Mode -eq 'upgrade')) {
+        Remove-Item -LiteralPath $SelfTestPath -Force -ErrorAction SilentlyContinue
     }
     switch ($Mode) {
         'install' { Invoke-Install }

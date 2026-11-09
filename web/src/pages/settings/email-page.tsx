@@ -17,6 +17,7 @@ import { flowState, useServerValues } from '@/components/admin/use-section-flow'
 import { PageSkeleton } from '@/components/layout/route-frames';
 import { Alert } from '@/components/ui/alert';
 import { Checkbox } from '@/components/ui/checkbox';
+import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { Field, Label } from '@/components/ui/label';
 import {
   Select,
@@ -32,7 +33,7 @@ import { useAuth } from '@/lib/auth';
 import type { SmtpBody, SmtpSection, SmtpSecurity } from '@/lib/settings-types';
 import { codePointLength, focusFirstError, hasErrors, type FieldErrors } from '@/lib/validation';
 
-import { RecipientSelect, SmtpCaCard, TestEmailCard } from './email-parts';
+import { RecipientSelect, SmtpAnswer, SmtpCaCard, TestEmailCard } from './email-parts';
 import { SettingsGroupForm } from './settings-group-form';
 import {
   LOCAL_HOSTS,
@@ -41,6 +42,15 @@ import {
   validateEmail,
   validateHost,
 } from './settings-validation';
+import {
+  SMTP_PRESETS,
+  planPreset,
+  presetOf,
+  smtpPreset,
+  type PresetPlan,
+  type SmtpPreset,
+  type SmtpPresetId,
+} from './smtp-presets';
 
 const SECURITIES: readonly SmtpSecurity[] = ['starttls', 'ssl', 'none'];
 
@@ -78,6 +88,8 @@ const PATHS: Record<SmtpField, string[]> = {
   test_to: ['test_to'],
 };
 const SHOWN = Object.values(PATHS).flat();
+/** The label key (`settings.email.*`) of each field a preset sets. */
+const LABELS = { host: 'host', port: 'port', security: 'security', username: 'username' } as const;
 const BOUNDS: Partial<Record<SmtpField, Record<string, number>>> = {
   port: { min: 1, max: 65_535 },
   timeout: { min: 1, max: 300 },
@@ -161,6 +173,9 @@ export function EmailPage() {
   const [probe, setProbe] = useState(true);
   const [errors, setErrors] = useState<FieldErrors<SmtpField>>({});
   const [settingsDirty, setSettingsDirty] = useState(false);
+  // The provider preset (0.4.0 P6): chosen here, or inferred from the server name; not stored.
+  const [chosen, setChosen] = useState<SmtpPresetId | null>(null);
+  const [asking, setAsking] = useState<{ preset: SmtpPreset; plan: PresetPlan } | null>(null);
   const settings = useSettings();
   const alertSettings = useMemo(
     () =>
@@ -191,11 +206,37 @@ export function EmailPage() {
   const needsTest = values.enabled && (!base.enabled || endpointChanged(values, base));
   const stored = smtp?.secrets['smtp.password']?.set ?? false;
 
+  const shownPreset = chosen ?? presetOf(values.host);
+
   function change(next: Partial<SmtpForm>) {
     form.setValues((current) => ({ ...current, ...next }));
     setErrors({});
     flow.edit();
+    // a provider's own server typed over: the preset no longer describes the form
+    const fixed = chosen ? smtpPreset(chosen).host : null;
+    if (next.host !== undefined && fixed !== null && next.host.trim().toLowerCase() !== fixed)
+      setChosen(null);
   }
+
+  function applyPreset(preset: SmtpPreset, plan: PresetPlan) {
+    if (Object.keys(plan.next).length > 0) change(plan.next);
+    setChosen(preset.id);
+  }
+
+  /** Fills the empty fields at once; asks before changing a filled one (contract 2.6). */
+  function choosePreset(id: SmtpPresetId) {
+    const preset = smtpPreset(id);
+    const plan = planPreset(values, preset);
+    if (plan.overwrites.length > 0) setAsking({ preset, plan });
+    else applyPreset(preset, plan);
+  }
+
+  const presetValue = (field: keyof SmtpForm, value: string) =>
+    value === ''
+      ? t('settings.email.presets.empty')
+      : field === 'security'
+        ? t(`settings.email.securities.${value}`)
+        : value;
 
   function save() {
     const found = validate(values, base, stored, password, testTo, needsTest);
@@ -263,6 +304,35 @@ export function EmailPage() {
             {base.enabled && !values.enabled ? (
               <Alert tone="warning" assertive={false}>
                 {t('settings.email.disabling')}
+              </Alert>
+            ) : null}
+            <Field
+              id={`${id}-preset`}
+              label={t('settings.email.presets.label')}
+              hint={t('settings.email.presets.hint')}
+            >
+              <Select
+                value={shownPreset ?? ''}
+                disabled={locked}
+                onValueChange={(preset) => {
+                  choosePreset(preset as SmtpPresetId);
+                }}
+              >
+                <SelectTrigger id={`${id}-preset`} className="w-full md:w-96">
+                  <SelectValue placeholder={t('settings.email.presets.choose')} />
+                </SelectTrigger>
+                <SelectContent>
+                  {SMTP_PRESETS.map((preset) => (
+                    <SelectItem key={preset.id} value={preset.id}>
+                      {t(`settings.email.presets.names.${preset.id}`)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </Field>
+            {shownPreset && shownPreset !== 'other' ? (
+              <Alert tone="info" assertive={false} data-testid="smtp-preset-help">
+                {t(`settings.email.presets.help.${shownPreset}`)}
               </Alert>
             ) : null}
             <div className="grid gap-4 md:grid-cols-2">
@@ -385,6 +455,7 @@ export function EmailPage() {
               form.restore();
               setPassword(SECRET_KEPT);
               setErrors({});
+              setChosen(null);
             }}
             onReload={() => {
               void config.refetch().then((result) => {
@@ -392,12 +463,20 @@ export function EmailPage() {
                 if (fresh) form.setValues(fresh);
                 setPassword(SECRET_KEPT);
                 setErrors({});
+                setChosen(null);
               });
             }}
             onTerminal={(request) => {
               if (request.state === 'active' || request.state === 'partially_active')
                 setPassword(SECRET_KEPT);
             }}
+            renderResult={(request) => (
+              <SmtpAnswer
+                detail={request.error?.detail}
+                hintTr={request.error?.hint_tr}
+                hintEn={request.error?.hint_en}
+              />
+            )}
             probingText={t('settings.email.probing')}
           />
           <SmtpCaCard
@@ -425,6 +504,31 @@ export function EmailPage() {
           testId="settings-group-email"
         />
       ) : null}
+      <ConfirmDialog
+        open={asking !== null}
+        onOpenChange={(open) => {
+          if (!open) setAsking(null);
+        }}
+        title={t('settings.email.presets.confirmTitle')}
+        description={t('settings.email.presets.confirmBody')}
+        confirmLabel={t('settings.email.presets.confirm')}
+        onConfirm={() => {
+          if (asking) applyPreset(asking.preset, asking.plan);
+          setAsking(null);
+        }}
+      >
+        <ul className="flex flex-col gap-1 text-13" data-testid="smtp-preset-overwrites">
+          {asking?.plan.overwrites.map((item) => (
+            <li key={item.field}>
+              <span className="font-semibold">{t(`settings.email.${LABELS[item.field]}`)}</span>
+              {': '}
+              <span className="font-mono">{presetValue(item.field, item.from)}</span>
+              {' → '}
+              <span className="font-mono">{presetValue(item.field, item.to)}</span>
+            </li>
+          ))}
+        </ul>
+      </ConfirmDialog>
       <ChangeReviewDialog
         open={flow.phase === 'confirm' || flow.phase === 'submitting'}
         onOpenChange={(open) => {

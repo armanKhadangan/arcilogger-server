@@ -67,6 +67,44 @@ turkish.InstallerFailed=ARCILOGGER kurulumu %1 koduyla bitti. Ayrıntılar Power
 english.InstallerFailed=The ARCILOGGER installer ended with code %1. See the PowerShell window and the install log: %%TEMP%%\ARCILOGGER-*.log (with a copy in the logs folder of the data folder once that exists; the window shows the path at the end). Fix the problem and run the setup again.
 turkish.InstallerWarnings=ARCILOGGER kuruldu, ancak uyarılar var (kod 1). PowerShell penceresindeki sağlık denetimi sonuçlarını okuyun.
 english.InstallerWarnings=ARCILOGGER is installed with warnings (code 1). Read the health check results in the PowerShell window.
+turkish.SelfTestLine=Denetim: %1 tamam, %2 uyarı/eksik — ayrıntılar PowerShell penceresinde ve günlükte.
+english.SelfTestLine=Self-test: %1 ok, %2 warnings/missing — details in the PowerShell window and the log.
+turkish.OrganisationTitle=Kurum bilgileri
+english.OrganisationTitle=Organisation
+turkish.OrganisationDescription=ARCILOGGER'ın raporlarda, e-postalarda ve güvenlik duvarında kullandığı bilgiler.
+english.OrganisationDescription=What ARCILOGGER uses in reports, e-mails and the firewall.
+turkish.OrganisationHint=Bu sayfa yalnızca ilk kurulumda sorulur; değerler sonra web arayüzünde değiştirilebilir.
+english.OrganisationHint=This page is asked on a first installation only; the values can be changed later in the web interface.
+turkish.SiteNamePrompt=Kuruluş adı (zorunlu):
+english.SiteNamePrompt=Organisation name (required):
+turkish.NtpServerPrompt=Saat sunucusu (isteğe bağlı; genellikle ana yönlendirici, ad ya da IPv4 adresi):
+english.NtpServerPrompt=Time server (optional; usually the core router, a name or an IPv4 address):
+turkish.AdminAddressPrompt=Yönetici bilgisayarının adresi (zorunlu; IPv4 ya da IPv4/önek, virgülle ayrılmış):
+english.AdminAddressPrompt=Admin PC address (required; IPv4 or IPv4/prefix, comma separated):
+turkish.ProviderTitle=Zaman damgası
+english.ProviderTitle=Time stamping
+turkish.ProviderDescription=Günlük logları mühürleyen zaman damgası sağlayıcısı.
+english.ProviderDescription=The time-stamp provider that seals the daily logs.
+turkish.ProviderHint=Kullanıcı adı ve parola (ya da Kamu SM müşteri bilgileri) kurulumdan sonra web arayüzünde, Ayarlar → Zaman damgası'nda girilir. Sağlayıcı sonra da değiştirilebilir.
+english.ProviderHint=The user name and password (or the Kamu SM customer details) are entered after the installation in the web interface, under Settings → Time stamping. The provider can be changed later too.
+turkish.ProviderTurktrust=TÜRKTRUST (önerilen)
+english.ProviderTurktrust=TÜRKTRUST (recommended)
+turkish.ProviderZamane=Kamu SM (Zamane; Java ve Zamane istemcisi gerekir)
+english.ProviderZamane=Kamu SM (Zamane; needs Java and the Zamane client)
+turkish.FieldInvalid=%1 %2
+english.FieldInvalid=%1 %2
+turkish.FieldRequired=boş olamaz
+english.FieldRequired=must not be empty
+turkish.FieldTooLong=en çok %1 karakter
+english.FieldTooLong=at most %1 characters
+turkish.FieldCharacters=tırnak ("), denetim karakteri, başta "-" ya da sonda "\" olamaz
+english.FieldCharacters=no quote ("), control character, leading "-" or trailing "\"
+turkish.FieldHost=ad ya da IPv4 adresi, boşluksuz
+english.FieldHost=a name or an IPv4 address, without spaces
+turkish.FieldAddresses=geçersiz adres: %1 (ör. 172.20.10.15 ya da 172.20.10.0/24)
+english.FieldAddresses=invalid address: %1 (e.g. 172.20.10.15 or 172.20.10.0/24)
+turkish.SetupValuesRefused=ARCILOGGER kurulumu 2 koduyla durdu; hiçbir şey değiştirilmedi. Kurulum sayfalarındaki bir değer (kuruluş adı, saat sunucusu ya da yönetici adresi) ya da başka bir ön denetim kabul edilmedi: PowerShell penceresindeki [HATA] satırı hangisi olduğunu yazar. Setup'ı yeniden çalıştırıp düzeltin.
+english.SetupValuesRefused=The ARCILOGGER installer stopped with code 2; nothing was changed. A value of the setup pages (organisation name, time server or admin address) or another preflight check was refused: the [HATA] line in the PowerShell window names it. Run the setup again and correct it.
 turkish.InstallerNotRecorded=ARCILOGGER kurulumu %1 koduyla bitti, ancak bu paket kurulmadı: %2 bu paketin parmak izini göstermiyor. PowerShell betiği ilk satırından önce durmuş olabilir (sözdizimi ya da parametre hatası). Betiği yönetici konsolundan çalıştırıp hatayı okuyun (docs\KURULUM.md, bölüm 15).
 english.InstallerNotRecorded=The ARCILOGGER installer ended with code %1, but this bundle was not installed: %2 does not name its fingerprint. The PowerShell script may have stopped before its first line (a syntax or parameter error). Run it from an administrator console and read the error (docs\INSTALL.md, section 15).
 turkish.LicenseFileMissing=Lisans dosyası bulunamadı: "%1" (/LICENSEFILE). Dosyanın yolunu tırnak içinde verin, ör. /LICENSEFILE="C:\Kurulum\ARCI-L-....lic". Kurulum hiçbir şey değiştirmeden kapanıyor.
@@ -89,6 +127,11 @@ var
     (InitializeSetup). Empty / False: the script gets -Auto only. }
   LicenseFileArgument: String;
   AllowUncoveredUpgrade: Boolean;
+  { The setup pages of a first installation (0.4.0 D2): organisation and time stamping. }
+  OrganisationPage: TInputQueryWizardPage;
+  ProviderPage: TInputOptionWizardPage;
+  { The script ran to the end with 0 or 1 and recorded this bundle: its self-test is shown. }
+  InstallerSucceeded: Boolean;
 
 function PowerShellPath(): String;
 begin
@@ -231,14 +274,212 @@ begin
   end;
 end;
 
-{ The script's command line: -Auto as always, then the switches given to the setup. }
+{ No ARCILOGGER is installed and no configuration is kept: the setup pages are shown (0.4.0
+  D2). An upgrade, a repair or an installation over a configuration that a removal kept (the
+  data stayed) keeps the configured values and never shows them. }
+function FirstInstallation(): Boolean;
+begin
+  Result := not FileExists(VersionFile()) and
+    not FileExists(ExpandConstant('{commonappdata}\ARCILOGGER\arcilogger.toml'));
+end;
+
+procedure InitializeWizard();
+begin
+  OrganisationPage := CreateInputQueryPage(wpWelcome, CustomMessage('OrganisationTitle'),
+    CustomMessage('OrganisationDescription'), CustomMessage('OrganisationHint'));
+  OrganisationPage.Add(CustomMessage('SiteNamePrompt'), False);
+  OrganisationPage.Add(CustomMessage('NtpServerPrompt'), False);
+  OrganisationPage.Add(CustomMessage('AdminAddressPrompt'), False);
+  ProviderPage := CreateInputOptionPage(OrganisationPage.ID, CustomMessage('ProviderTitle'),
+    CustomMessage('ProviderDescription'), CustomMessage('ProviderHint'), True, False);
+  ProviderPage.Add(CustomMessage('ProviderTurktrust'));
+  ProviderPage.Add(CustomMessage('ProviderZamane'));
+  ProviderPage.SelectedValueIndex := 0;
+end;
+
+function ShouldSkipPage(PageID: Integer): Boolean;
+begin
+  Result := ((PageID = OrganisationPage.ID) or (PageID = ProviderPage.ID)) and not FirstInstallation();
+end;
+
+{ A value the script gets as one quoted argument (no quote, no control character, no leading
+  "-" that would read as a parameter, no trailing backslash that would escape the quote). }
+function SafeArgument(const Value: String): Boolean;
+var
+  I: Integer;
+begin
+  Result := False;
+  for I := 1 to Length(Value) do
+    if (Value[I] = '"') or (Ord(Value[I]) < 32) or (Ord(Value[I]) = 127) then
+      Exit;
+  if Length(Value) > 0 then
+    if (Value[1] = '-') or (Value[Length(Value)] = '\') then
+      Exit;
+  Result := True;
+end;
+
+{ Shape only: four decimal octets 0-255, then an optional /0-32. The script checks again. }
+function IsIPv4Spec(const Value: String): Boolean;
+var
+  I, Octets, Digits, Number, Slash: Integer;
+  Part: String;
+  Ch: Char;
+begin
+  Result := False;
+  Part := Value;
+  Slash := Pos('/', Part);
+  if Slash > 0 then
+  begin
+    Number := StrToIntDef(Copy(Part, Slash + 1, Length(Part)), -1);
+    if (Slash = Length(Part)) or (Number < 0) or (Number > 32) then
+      Exit;
+    Part := Copy(Part, 1, Slash - 1);
+  end;
+  Octets := 0;
+  Digits := 0;
+  Number := 0;
+  for I := 1 to Length(Part) + 1 do
+  begin
+    if I > Length(Part) then
+      Ch := '.'
+    else
+      Ch := Part[I];
+    if Ch = '.' then
+    begin
+      if (Digits = 0) or (Number > 255) then
+        Exit;
+      Octets := Octets + 1;
+      Digits := 0;
+      Number := 0;
+    end
+    else if (Ch >= '0') and (Ch <= '9') and (Digits < 3) then
+    begin
+      Number := Number * 10 + (Ord(Ch) - Ord('0'));
+      Digits := Digits + 1;
+    end
+    else
+      Exit;
+  end;
+  Result := Octets = 4;
+end;
+
+{ The admin addresses, split at commas, semicolons and spaces; the first invalid one in Bad. }
+function AdminAddresses(const Value: String; var Bad: String): String;
+var
+  I: Integer;
+  Item: String;
+  Ch: Char;
+begin
+  Result := '';
+  Bad := '';
+  Item := '';
+  for I := 1 to Length(Value) + 1 do
+  begin
+    if I > Length(Value) then
+      Ch := ','
+    else
+      Ch := Value[I];
+    if (Ch = ',') or (Ch = ';') or (Ch = ' ') or (Ch = #9) then
+    begin
+      if Item <> '' then
+      begin
+        if not IsIPv4Spec(Item) then
+        begin
+          Bad := Item;
+          Exit;
+        end;
+        if Result <> '' then
+          Result := Result + ',';
+        Result := Result + Item;
+      end;
+      Item := '';
+    end
+    else
+      Item := Item + Ch;
+  end;
+end;
+
+{ A host name or an IPv4 address without spaces (letters, digits, "-" and "."). }
+function IsHostShape(const Value: String): Boolean;
+var
+  I: Integer;
+begin
+  Result := (Length(Value) > 0) and (Length(Value) <= 253);
+  for I := 1 to Length(Value) do
+    if not (((Value[I] >= 'a') and (Value[I] <= 'z')) or ((Value[I] >= 'A') and (Value[I] <= 'Z')) or
+            ((Value[I] >= '0') and (Value[I] <= '9')) or (Value[I] = '-') or (Value[I] = '.')) then
+      Result := False;
+end;
+
+function FieldProblem(const Prompt, Problem: String): Boolean;
+begin
+  MsgBox(FmtMessage(CustomMessage('FieldInvalid'), [Prompt, Problem]), mbError, MB_OK);
+  Result := False;
+end;
+
+{ The organisation page checks shapes only (empty, length, characters); the script's preflight
+  keeps the full checks and stops with code 2 before any change. }
+function NextButtonClick(CurPageID: Integer): Boolean;
+var
+  Name, Ntp, Bad: String;
+begin
+  Result := True;
+  if (CurPageID <> OrganisationPage.ID) or WizardSilent() then
+    Exit;
+  Name := Trim(OrganisationPage.Values[0]);
+  Ntp := Trim(OrganisationPage.Values[1]);
+  if Name = '' then
+    Result := FieldProblem(CustomMessage('SiteNamePrompt'), CustomMessage('FieldRequired'))
+  else if Length(Name) > 200 then
+    Result := FieldProblem(CustomMessage('SiteNamePrompt'), FmtMessage(CustomMessage('FieldTooLong'), ['200']))
+  else if not SafeArgument(Name) then
+    Result := FieldProblem(CustomMessage('SiteNamePrompt'), CustomMessage('FieldCharacters'))
+  else if (Ntp <> '') and not IsHostShape(Ntp) then
+    Result := FieldProblem(CustomMessage('NtpServerPrompt'), CustomMessage('FieldHost'))
+  else if Trim(OrganisationPage.Values[2]) = '' then
+    Result := FieldProblem(CustomMessage('AdminAddressPrompt'), CustomMessage('FieldRequired'))
+  else
+  begin
+    AdminAddresses(OrganisationPage.Values[2], Bad);
+    if Bad <> '' then
+      Result := FieldProblem(CustomMessage('AdminAddressPrompt'), FmtMessage(CustomMessage('FieldAddresses'), [Bad]));
+  end;
+end;
+
+{ The script's command line: -Auto as always, then the switches given to the setup, then the
+  values of the setup pages of a first installation, each quoted as one argument. They are no
+  secrets. A silent first installation without them lets the script ask at its console. }
 function InstallerParameters(): String;
+var
+  Name, Ntp, Admin, Bad: String;
 begin
   Result := '-NoProfile -ExecutionPolicy Bypass -File "' + ExpandConstant('{tmp}\bundle\installer\Install-Arcilogger.ps1') + '" -Auto';
   if LicenseFileArgument <> '' then
     Result := Result + ' -LicenseFile "' + LicenseFileArgument + '"';
   if AllowUncoveredUpgrade then
     Result := Result + ' -AllowUncoveredUpgrade';
+  if not FirstInstallation() then
+    Exit;
+  Name := Trim(OrganisationPage.Values[0]);
+  Ntp := Trim(OrganisationPage.Values[1]);
+  Admin := AdminAddresses(OrganisationPage.Values[2], Bad);
+  if (Name <> '') and SafeArgument(Name) then
+    Result := Result + ' -SiteName "' + Name + '"';
+  if Ntp = '' then
+    Result := Result + ' -NoNtpServer'
+  else if IsHostShape(Ntp) then
+    Result := Result + ' -NtpServer "' + Ntp + '"';
+  if (Admin <> '') and (Bad = '') then
+    Result := Result + ' -AdminAddress "' + Admin + '"';
+  if ProviderPage.SelectedValueIndex = 1 then
+    Result := Result + ' -TimeStampProvider "zamane"'
+  else
+    Result := Result + ' -TimeStampProvider "turktrust"';
+end;
+
+function SelfTestFile(): String;
+begin
+  Result := ExpandConstant('{commonappdata}\ARCILOGGER\install\selftest.json');
 end;
 
 procedure RunArciInstaller();
@@ -250,20 +491,81 @@ begin
   WizardForm.StatusLabel.Caption := CustomMessage('RunInstaller');
   Fingerprint := BundleFingerprint();
   Parameters := InstallerParameters();
+  { The finish page shows the self-test of this run only: an earlier run's file goes first. }
+  InstallerSucceeded := False;
+  DeleteFile(SelfTestFile());
   if not Exec(PowerShellPath(), Parameters, ExpandConstant('{tmp}\bundle'), SW_SHOW, ewWaitUntilTerminated, ResultCode) then
     MsgBox(FmtMessage(CustomMessage('InstallerFailed'), [SysErrorMessage(ResultCode)]), mbCriticalError, MB_OK)
   else if (ResultCode <> 0) and (ResultCode <> 1) then
-    MsgBox(FmtMessage(CustomMessage('InstallerFailed'), [IntToStr(ResultCode)]), mbCriticalError, MB_OK)
+  begin
+    { Code 2 of a first installation: most likely a value of the setup pages was refused. }
+    if (ResultCode = 2) and FirstInstallation() then
+      MsgBox(CustomMessage('SetupValuesRefused'), mbCriticalError, MB_OK)
+    else
+      MsgBox(FmtMessage(CustomMessage('InstallerFailed'), [IntToStr(ResultCode)]), mbCriticalError, MB_OK);
+  end
   else if not BundleIsInstalled(Fingerprint) then
     MsgBox(FmtMessage(CustomMessage('InstallerNotRecorded'), [IntToStr(ResultCode), VersionFile()]), mbCriticalError, MB_OK)
-  else if ResultCode = 1 then
-    MsgBox(CustomMessage('InstallerWarnings'), mbInformation, MB_OK);
+  else
+  begin
+    InstallerSucceeded := True;
+    if ResultCode = 1 then
+      MsgBox(CustomMessage('InstallerWarnings'), mbInformation, MB_OK);
+  end;
 end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
 begin
   if CurStep = ssPostInstall then
     RunArciInstaller();
+end;
+
+{ The number after "Key": in the self-test's result file (Install-Arcilogger.ps1 writes the
+  counts first, as ConvertTo-Json does with any spacing); -1 when it is not there. }
+function SelfTestCount(const Content, Key: String): Integer;
+var
+  At, I: Integer;
+  Digits: String;
+begin
+  Result := -1;
+  At := Pos('"' + Key + '":', Content);
+  if At = 0 then
+    Exit;
+  I := At + Length(Key) + 3;
+  { No index past the end: the loops test the length first, on its own. }
+  while I <= Length(Content) do
+  begin
+    if (Content[I] <> ' ') and (Content[I] <> #9) then
+      Break;
+    I := I + 1;
+  end;
+  Digits := '';
+  while I <= Length(Content) do
+  begin
+    if (Content[I] < '0') or (Content[I] > '9') then
+      Break;
+    Digits := Digits + Content[I];
+    I := I + 1;
+  end;
+  Result := StrToIntDef(Digits, -1);
+end;
+
+{ The finish page names the self-test's counts (0.4.0 P3) when this run wrote them and ended
+  with 0 or 1; RunArciInstaller removes the file of an earlier run before it starts. }
+procedure CurPageChanged(CurPageID: Integer);
+var
+  Content: AnsiString;
+  Ok, Warn, Fail: Integer;
+begin
+  if (CurPageID <> wpFinished) or not InstallerSucceeded or not LoadStringFromFile(SelfTestFile(), Content) then
+    Exit;
+  Ok := SelfTestCount(Content, 'ok');
+  Warn := SelfTestCount(Content, 'warn');
+  Fail := SelfTestCount(Content, 'fail');
+  if (Ok < 0) or (Warn < 0) or (Fail < 0) then
+    Exit;
+  WizardForm.FinishedLabel.Caption := WizardForm.FinishedLabel.Caption + #13#10#13#10 +
+    FmtMessage(CustomMessage('SelfTestLine'), [IntToStr(Ok), IntToStr(Warn + Fail)]);
 end;
 
 { Install-Arcilogger.ps1 -Uninstall (with -RemoveData when Extra says so) in a visible window. }

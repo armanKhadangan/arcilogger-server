@@ -58,7 +58,7 @@ from typing import Any, cast
 
 from pydantic import ValidationError
 
-from arcilogger_core import PRODUCT_NAME, __version__
+from arcilogger_core import PRODUCT_NAME, __version__, selftest
 from arcilogger_core.admin.contract import (
     ActionResult,
     AdminLayout,
@@ -851,6 +851,17 @@ def cmd_config_check(args: argparse.Namespace, app: App) -> int:
     return 1 if failed else 0
 
 
+def cmd_selftest(args: argparse.Namespace) -> int:
+    """The check after setup (0.4.0 P3, :mod:`arcilogger_core.selftest`): exit 0 all ok or
+    skipped, 1 a warning, 2 a failure. It changes nothing."""
+    rows = selftest.run(args.config or default_config_path())
+    if args.json:
+        _print_json(selftest.as_json(rows))
+    else:
+        print(selftest.render(rows))
+    return selftest.exit_code(rows)
+
+
 def cmd_crl(args: argparse.Namespace, app: App) -> int:
     """``crl fetch``: download, verify and store the revocation lists (the ``CrlFetch`` task;
     exit 0 all stored, 1 some failed and are recorded in the index, 2 no URL known).
@@ -1363,6 +1374,12 @@ def _build_parser() -> argparse.ArgumentParser:
         "config-check", help="what a production configuration still lacks (exit 1: incomplete)"
     )
     config_check.add_argument("--json", action="store_true")
+    selftest = commands.add_parser(
+        "selftest",
+        help="check the installation: configuration, secrets, database, roots, time-stamp "
+        "server, e-mail and clock (exit 1: a warning, 2: a failure)",
+    )
+    selftest.add_argument("--json", action="store_true")
     crl = commands.add_parser("crl", help="revocation lists (SİL/CRL) of the time stamps")
     crl_commands = crl.add_subparsers(dest="crl_command", required=True)
     crl_fetch = crl_commands.add_parser("fetch", help="download, verify and store the lists")
@@ -1478,6 +1495,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return cmd_info(args)
     if args.command == "evidence" and args.evidence_command == "verify":
         return cmd_evidence_verify(args)  # an auditor's machine has no arcilogger.toml
+    if args.command == "selftest":
+        return cmd_selftest(args)  # a configuration that does not load is one of its rows
     handler = HANDLERS.get(args.command or "")
     if handler is None:
         parser.print_help()

@@ -26,7 +26,7 @@ değiştirilebilir", bölüm 5). Sayfaların kullandığı API uçları bölüm 
 | **Uygulama ayarları** (`/settings/application`) | veritabanındaki ayarlar, gruplarıyla (uyarılar ve e-posta, 5651 sorgu ve kira zaman çizelgesi, arama ve canlı akış, kullanım analizi ile mesai saatleri ve tatiller, kullanım raporları, kanıt paketleri, oturum, parola ve gizlilik, veritabanı); 5651 sorgu grubunda **İnternet çıkışları (NAT)** düzenleyicisi, altında "Kayıtlarda görülen NAT adresleri" paneli ve **Kiraları yeniden oluştur** (en çok 31 gün) | dosya yolu veren `devices.oui_file`, `usage.psl_file` |
 | **Zaman damgası** (`/settings/kamusm`) | sihirbaz: Java (yönetim hizmetinin sunucuda bulduklarından biri), Zamane istemcisi (yükleme), kök sertifikalar (ekleme) ve yasal kök parmak izleri (yalnızca kurulu kökler için), müşteri numarası ve parola (kaydederken kontör sorgusuyla denenir), **Damga testi (1 kontör harcar)**, **Üretime geç** (ve teste dönüş), kontör uyarı eşiği, zaman aşımı ve günlük damga testi sayısı (`[tsa] tests_per_day`, 0–20, varsayılan 10; sunucu politikasının `tsa_test_per_day` değeri üst sınırdır); sunucu seçiminde dört seçenek: Kamu SM test, Kamu SM üretim, TÜRKTRUST (HTTPS) ve TÜRKTRUST düz HTTP (yalnızca `HTTP` yazılarak onaylanır; [turktrust.md](turktrust.md)), TÜRKTRUST kullanıcı adı ve parolası; yeniden damgalama ve iptal listesi ayarları (`[tsa] renew_before_days`, `[tsa] crl_urls`, `[tsa] crl_max_age_days`; [ZAMAN-DAMGASI.md](ZAMAN-DAMGASI.md) bölüm 7); `[seal]` yalnızca okunur | deneme (`mock`) ya da başka bir sağlayıcı, serbest adres veya port (TÜRKTRUST'ın başka bir adres yolu dahil, T1), özet algoritması, bir kökü ya da parmak izini kaldırmak, serbest bir `java` yolu, bilinmeyen bir Zamane sürümünün onayı (`approve-jar`, bölüm 4), TÜRKTRUST hesabını silmek (`secret delete turktrust.username` / `turktrust.password`) |
 | **Kaynaklar** (`/settings/sources`) | log kaynağı ekleme, düzenleme (ad değişmez), açma/kapama (`[[sources]] enabled`), silme (adı yazılarak); tabloda son kayıt ve güvenlik duvarı durumu; kaynağın SNMP bölümü (`[sources.snmp]`: açık/kapalı, port, SNMPv3 kullanıcısı, protokoller, WAN arayüzleri, kapasite, okuma aralığı; iki anahtar `snmp.<kaynak>.auth_key` ve `snmp.<kaynak>.priv_key` gizli depoda), kaydederken cihaza bağlantı denenir, yanlış bir arayüz adının ret iletisi cihazın arayüzlerini listeler ([CANLI-DURUM.md](CANLI-DURUM.md) bölüm 3) | `[collector]` bölümünün tamamı (dinleme adresi, portlar, TLS, `unknown_senders`) |
-| **E-posta** (`/settings/email`) | `[smtp]` (açık/kapalı, sunucu, port, güvenlik, kullanıcı, gönderen, zaman aşımı), SMTP parolası, sunucu sertifikası için CA dosyası (yükleme ya da Windows sertifika deposuna dönüş), uyarı e-postası ayarları (`alerts.email_*`: alıcılar, en düşük önem, saatlik sınır …); kaydetmeden önce deneme e-postası; **Test e-postası gönder** (kayıtlı ayarlarla, saatte en çok 5) | — |
+| **E-posta** (`/settings/email`) | `[smtp]` (açık/kapalı, sunucu, port, güvenlik, kullanıcı, gönderen, zaman aşımı), SMTP parolası, sunucu sertifikası için CA dosyası (yükleme ya da Windows sertifika deposuna dönüş), uyarı e-postası ayarları (`alerts.email_*`: alıcılar, en düşük önem, saatlik sınır …); kaydetmeden önce deneme e-postası; **Test e-postası gönder** (kayıtlı ayarlarla, saatte en çok 5); **Sağlayıcı** hazır ayarı (bölüm 8.1) | — |
 | **Replika** (`/settings/replica`) | açık/kapalı, hedef (yalnızca `\\SUNUCU\paylaşım`), kullanıcı, parola; kaydederken bağlantı denenir; **Bağlantıyı test et** (kayıtlı hedefle, dakikada en çok 1) | yerel bir klasör hedefi |
 | **Saklama** (`/settings/retention`) | süresi dolan günleri silme açık/kapalı, saklama süresi (en az 730 gün); silinecek gün sayısı önceden gösterilir ve yazılarak onaylanır. Yalnızca `arcilogger.toml`'da: `[retention] batch_days` (varsayılan 30, 1–180), süresi dolan en eski günün bekleyeceği gün sayısı; sonra süresi dolan bütün günler tek bir damgalı tutanakla silinir, yani günler bir sonraki çalışmada değil, toplu imhanın vakti gelen ilk çalışmada silinir | — |
 | **Yedekleme** (`/settings/backup`) | açık/kapalı, `[backup] keep_daily`, `[backup] keep_weekly`, `[backup] keep_monthly`, `[backup] min_free_gb`, `[backup] mirror_target` (yedeklerin NAS kopyası: replikanın NAS'ında ayrı bir paylaşım, replikanın kullanıcısıyla; kaydederken bağlantı denenir; [YEDEKLEME.md](YEDEKLEME.md) bölüm 4.1); sunucudaki yedeklerin listesi (ad, zaman, boyut, SHA-256) ve NAS kopyasının son sonucu; başarısız bir yedek `R20-backup`, başarısız bir kopya `R20-replica` uyarısıdır | `[backup] dir`, `[backup] pg_dump`, `[backup] pg_restore` |
@@ -464,6 +464,41 @@ kaydedildi, 4105 iptal, 4106 eşitleme sonucu, 4107 istemci onaylandı, 4110 mü
 görev isteği, 4120 reddedilen istek, 4121 kayıtlı kimlik bilgisi değişti (yalnızca adı), 4130 kurulum
 betiği verilerle birlikte kaldırdı ([KURULUM.md](KURULUM.md) bölüm 14.1). Bir olay
 yalnızca bir görevi uyandırır; yetki imzalı istektedir.
+
+### 8.1 E-posta gönderilmiyor
+
+**Ayarlar → E-posta**'daki **Sağlayıcı** listesi sunucu, bağlantı noktası ve güvenliği doldurur ve
+o sağlayıcının ne istediğini yazar. Seçim kaydedilmez; dolu bir alanı değiştirmeden önce sorar.
+Her seçenek kullanıcı adı ve parolayla ya da girişsiz bağlanır (OAuth yoktur).
+
+| Sağlayıcı | Sunucu | Bağlantı | Giriş |
+|---|---|---|---|
+| Google Workspace / Gmail | `smtp.gmail.com` | 587, STARTTLS | tam e-posta adresi ve 16 karakterlik **uygulama şifresi** (hesapta 2 Adımlı Doğrulama açık olmalı) |
+| Google SMTP geçiş hizmeti | `smtp-relay.gmail.com` | 587, STARTTLS | girişsiz: Google Yönetici Konsolu'nda (Apps → Google Workspace → Gmail → Routing → SMTP relay service) sunucunun genel IP adresine izin verilir |
+| Microsoft 365 / Outlook | `smtp.office365.com` | 587, STARTTLS (465 desteklenmez) | posta kutusunun adresi ve parolası; yönetici posta kutusu için SMTP AUTH'u açmalı, kiracıda "Güvenlik varsayılanları" kapalı olmalı |
+| Hosting firması | firmanın verdiği | 587, STARTTLS (firma 465 diyorsa SSL/TLS) | firmanın verdiği kullanıcı adı ve parola |
+| Şirket içi sunucu | sunucunun adı | 25, şifresiz (girişsiz) ya da STARTTLS (girişli) | sunucunun istediği |
+
+Google, Workspace hesaplarında 1 Mayıs 2025'ten beri hesap parolasıyla SMTP girişini kabul
+etmiyor. Uygulama şifresi kullanılamıyorsa SMTP geçiş hizmeti parolasız bir yoldur.
+
+Deneme ya da test e-postası reddedilirse sayfa **e-posta sunucusunun cevabını** gösterir (parola
+hiçbir zaman gösterilmez). Google'ın ve Microsoft 365'in bilinen cevapları için **Ne yapmalı**
+satırı da çıkar:
+
+| Cevap | Anlamı |
+|---|---|
+| Google `5.7.8` / `5.7.80`, `5.7.14` | hesap parolası kabul edilmedi: uygulama şifresi ya da geçiş hizmeti |
+| Google `5.7.9` / `5.7.90` "Application-specific password required" | 2 Adımlı Doğrulama açık: uygulama şifresi gerekir |
+| Google `5.7.0` / `5.7.1` "relay" | geçiş hizmeti bu IP adresine ya da gönderen alan adına izin vermiyor |
+| Microsoft `5.7.3`, `5.7.139` | giriş reddedildi: parola, posta kutusunda SMTP AUTH, "Güvenlik varsayılanları" |
+| Microsoft `5.7.57` | girişsiz gönderim: kullanıcı adı ve parola girin |
+| Microsoft `5.7.60` | gönderen adresi posta kutusunun değil: "Farklı Gönder" (Send As) izni gerekir |
+
+Kaynaklar (2026-11-08'de okundu): Google Workspace Yönetici Yardımı "SMTP errors and codes",
+"Transition from less secure apps to OAuth", "Route outgoing SMTP relay messages through Google";
+Microsoft Learn "How to set up a multifunction device or application to send email using
+Microsoft 365". Sağlayıcılar bu davranışı değiştirebilir (**sahada doğrulayın**).
 
 ## 9. Sahada doğrulanacaklar
 

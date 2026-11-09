@@ -101,11 +101,22 @@ export function turktrustSupported(tsa: TsaSection): boolean {
   );
 }
 
-/** The servers the browser offers: TÜRKTRUST's only where the server knows TÜRKTRUST. */
+/** TÜRKTRUST's servers before Kamu SM's (0.4.0 D3): the order for a site not on Kamu SM. */
+export const TURKTRUST_FIRST = [
+  'turktrust',
+  'turktrust-http',
+  'test',
+  'production',
+] as const satisfies readonly ServerChoice[];
+
+/**
+ * The servers the browser offers: TÜRKTRUST's only where the server knows TÜRKTRUST, and then
+ * first (0.4.0 D3) unless the site is on Kamu SM, whose order stays as it was.
+ */
 export function serverChoices(tsa: TsaSection): readonly ServerChoice[] {
-  return turktrustSupported(tsa)
-    ? SERVER_CHOICES
-    : SERVER_CHOICES.filter((choice) => choiceProvider(choice) === 'zamane');
+  if (!turktrustSupported(tsa))
+    return SERVER_CHOICES.filter((choice) => choiceProvider(choice) === 'zamane');
+  return tsa.provider === 'zamane' ? SERVER_CHOICES : TURKTRUST_FIRST;
 }
 
 /**

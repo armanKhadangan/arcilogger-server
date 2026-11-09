@@ -26,7 +26,7 @@ endpoints the pages use are in section 10.
 | **Application settings** (`/settings/application`) | the database settings by group (alerts and e-mail, 5651 lookup and lease timeline, search and live tail, usage analytics with the work hours and holidays, usage reports, evidence packages, sessions, passwords and privacy, database); in the 5651 lookup group the **Internet exits (NAT)** editor, under it the "Kayıtlarda görülen NAT adresleri" (NAT addresses seen in the logs) panel, and **Rebuild the leases** (at most 31 days) | `devices.oui_file`, `usage.psl_file`, which name files |
 | **Zaman damgası** (Time stamping, `/settings/kamusm`) | a wizard: Java (one of those the administration service found on the server), Zamane client (upload), root certificates (add) and legal root fingerprints (installed roots only), customer number and password (tried with a credit query when saved), **Stamp test (uses 1 credit)**, **Switch to production** (and back to test), credit alert threshold, timeout and the stamp tests per day (`[tsa] tests_per_day`, 0–20, default 10; the server policy's `tsa_test_per_day` is the ceiling); four server choices: Kamu SM test, Kamu SM production, TÜRKTRUST (HTTPS) and TÜRKTRUST over plain HTTP (confirmed only by typing `HTTP`; [turktrust.md](turktrust.md)), the TÜRKTRUST username and password; the re-stamping and revocation-list settings (`[tsa] renew_before_days`, `[tsa] crl_urls`, `[tsa] crl_max_age_days`; [TIME-STAMPING.md](TIME-STAMPING.md) section 7); `[seal]` read-only | the mock or another provider, a free URL or port (another TÜRKTRUST URL path included, T1), the digest, removing a root or a fingerprint, a free `java` path, approving an unknown Zamane release (`approve-jar`, section 4), clearing the TÜRKTRUST account (`secret delete turktrust.username` / `turktrust.password`) |
 | **Sources** (`/settings/sources`) | add a log source, edit it (the name is fixed), switch it on or off (`[[sources]] enabled`), remove it (typing its name); the table shows the last message and the firewall state; the source's SNMP part (`[sources.snmp]`: on/off, port, SNMPv3 user, protocols, WAN interfaces, capacity, read interval; the two keys `snmp.<source>.auth_key` and `snmp.<source>.priv_key` in the secret store), the connection is tried when saving, and the refusal of a wrong interface name lists the device's interfaces ([LIVE-STATUS.md](LIVE-STATUS.md) section 3) | the whole `[collector]` section (bind address, ports, TLS, `unknown_senders`) |
-| **E-mail** (`/settings/email`) | `[smtp]` (on/off, server, port, security, user, sender, timeout), the SMTP password, a CA file for the server's certificate (upload, or back to the Windows certificate store), the alert e-mail settings (`alerts.email_*`: recipients, lowest severity, hourly limit …); a trial e-mail before saving; **Send a test e-mail** (with the saved settings, at most 5 an hour) | — |
+| **E-mail** (`/settings/email`) | `[smtp]` (on/off, server, port, security, user, sender, timeout), the SMTP password, a CA file for the server's certificate (upload, or back to the Windows certificate store), the alert e-mail settings (`alerts.email_*`: recipients, lowest severity, hourly limit …); a trial e-mail before saving; **Send a test e-mail** (with the saved settings, at most 5 an hour); the **Provider** preset (section 8.1) | — |
 | **Replica** (`/settings/replica`) | on/off, target (`\\SERVER\share` only), user, password; the connection is tried when saving; **Test the connection** (the saved target, at most once a minute) | a local folder as target |
 | **Retention** (`/settings/retention`) | deleting expired days on/off, the retention period (at least 730 days); the number of days it deletes is shown first and typed to confirm. Only in `arcilogger.toml`: `[retention] batch_days` (default 30, 1–180), the days the oldest expired day waits before every expired day is deleted under one stamped record, so expired days go at the first run that finds the batch due, not always the next one | — |
 | **Backup** (`/settings/backup`) | on/off, `[backup] keep_daily`, `[backup] keep_weekly`, `[backup] keep_monthly`, `[backup] min_free_gb`, `[backup] mirror_target` (the NAS copy of the backups: a share of its own on the replica's NAS, with the replica's user; tried when saved; [BACKUP.md](BACKUP.md) section 4.1); the list of the dumps on the server (name, time, size, SHA-256) and the NAS copy's last result; a failed backup is an `R20-backup` alert, a failed copy an `R20-replica` alert | `[backup] dir`, `[backup] pg_dump`, `[backup] pg_restore` |
@@ -466,6 +466,41 @@ system sync requested, 4102 applied, 4103 failed, 4104 held or a client recorded
 4121 stored credential changed (its name only), 4130 the installer removed ARCILOGGER with its
 data ([INSTALL.md](INSTALL.md) section 14.1). An event only wakes a task; the authority is the
 signed request.
+
+
+### 8.1 E-mail is not sent
+
+The **Provider** list on **Settings → E-mail** fills the server, port and security and says what
+that provider needs. The choice is not saved; it asks before changing a filled field. Every
+option connects with a user name and password, or without a login (there is no OAuth).
+
+| Provider | Server | Connection | Login |
+|---|---|---|---|
+| Google Workspace / Gmail | `smtp.gmail.com` | 587, STARTTLS | the full e-mail address and a 16-character **app password** (the account needs 2-Step Verification) |
+| Google SMTP relay | `smtp-relay.gmail.com` | 587, STARTTLS | no login: the Google Admin console (Apps → Google Workspace → Gmail → Routing → SMTP relay service) allows the server's public IP address |
+| Microsoft 365 / Outlook | `smtp.office365.com` | 587, STARTTLS (465 is not supported) | the mailbox's address and password; the administrator turns on SMTP AUTH for the mailbox, and the tenant's Security defaults must be off |
+| Hosting company | the one they give | 587, STARTTLS (SSL/TLS if they say 465) | the user name and password they give |
+| Company mail server | its name | 25, plain (no login) or STARTTLS (with a login) | what the server needs |
+
+Since 1 May 2025 Google Workspace accounts no longer accept the account password for SMTP. Where
+app passwords cannot be used, the SMTP relay is a way without a password.
+
+When a trial or test e-mail is refused, the page shows **the mail server's answer** (never the
+password). For known answers of Google and Microsoft 365 a **What to do** line comes with it:
+
+| Answer | Meaning |
+|---|---|
+| Google `5.7.8` / `5.7.80`, `5.7.14` | the account password was refused: an app password or the relay |
+| Google `5.7.9` / `5.7.90` "Application-specific password required" | 2-Step Verification is on: an app password is needed |
+| Google `5.7.0` / `5.7.1` "relay" | the relay does not allow this IP address or sender domain |
+| Microsoft `5.7.3`, `5.7.139` | sign-in refused: the password, SMTP AUTH on the mailbox, Security defaults |
+| Microsoft `5.7.57` | sending without a login: enter the user name and password |
+| Microsoft `5.7.60` | the sender is not the mailbox's address: "Send As" permission is needed |
+
+Sources (read 2026-11-08): Google Workspace Admin Help "SMTP errors and codes", "Transition from
+less secure apps to OAuth", "Route outgoing SMTP relay messages through Google"; Microsoft Learn
+"How to set up a multifunction device or application to send email using Microsoft 365". The
+providers may change this behaviour (**verify on site**).
 
 ## 9. Verify on site
 

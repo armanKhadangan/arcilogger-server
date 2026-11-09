@@ -65,6 +65,7 @@ from arcilogger_api.errors import ApiError
 from arcilogger_api.security import CurrentUser, client_ip, ensure_recent_auth
 from arcilogger_core.admin import rules
 from arcilogger_core.admin.contract import (
+    DETAIL_CODES,
     EXPIRED_GRACE,
     INBOX_MAX_BYTES,
     INBOX_MAX_REQUESTS,
@@ -79,6 +80,7 @@ from arcilogger_core.admin.contract import (
     AdminRequest,
     AgentStatus,
     DocumentError,
+    ErrorRef,
     JarsFile,
     JournalLine,
     ProbeInterface,
@@ -378,6 +380,12 @@ class RequestError(BaseModel):
     #: What the device reported to the ``snmp`` probe, with ``snmp_no_such_interface`` and
     #: ``snmp_no_hc_counters`` only (W5-N-9); no person data, no secret.
     interfaces: list[ProbeInterface] = Field(default_factory=list)
+    #: The e-mail server's answer to the trial e-mail, with ``smtp_test_failed`` only (0.4.0 P6);
+    #: the secrets the trial was given are removed.
+    detail: str | None = None
+    #: What to change for a known answer of Google or Microsoft 365 (0.4.0 S5), both or none.
+    hint_tr: str | None = None
+    hint_en: str | None = None
 
 
 class AdminRequestOut(BaseModel):
@@ -1300,12 +1308,19 @@ class Channel:
         result = status.result.model_dump(mode="json") if status and status.result else None
         error = status.error.code if status is not None and status.error is not None else None
         field_path = status.error.field if status is not None and status.error is not None else None
-        interfaces = status.error.interfaces if status is not None and status.error else ()
         if row.terminal and row.error_code and error is None:
             error = row.error_code
         self._mirror(db, row, state, status, result, error)
         return self._out(
-            row, state, steps, version, result, error, warnings, field_path, interfaces
+            row,
+            state,
+            steps,
+            version,
+            result,
+            error,
+            warnings,
+            field_path,
+            status.error if status is not None else None,
         )
 
     def _unclaimed(self, row: AdminRequestRow) -> str:
@@ -1436,8 +1451,10 @@ class Channel:
         error: str | None,
         warnings: Sequence[str],
         field_path: str | None,
-        interfaces: Sequence[ProbeInterface] = (),
+        answer: ErrorRef | None = None,
     ) -> AdminRequestOut:
+        """The request as the browser reads it; ``answer`` is the agent's error with what the
+        device or the e-mail server said (W5-N-9, 0.4.0 P6)."""
         label_tr, label_en = STATE_LABELS.get(state, (state, state))
         for item in steps:
             if item.code and item.message_tr is None:
@@ -1450,8 +1467,11 @@ class Channel:
                 message_tr=message_tr,
                 message_en=message_en,
                 field=field_path,
-                interfaces=list(interfaces) if error in INTERFACE_CODES else [],
+                interfaces=list(answer.interfaces) if answer and error in INTERFACE_CODES else [],
             )
+            if answer is not None and error in DETAIL_CODES:
+                problem.detail = answer.detail
+                problem.hint_tr, problem.hint_en = answer.hint_tr, answer.hint_en
         manual_tr, manual_en = (
             manual_steps(version.number if version else None, error)
             if state == "needs_attention"

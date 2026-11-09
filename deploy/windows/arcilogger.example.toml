@@ -90,20 +90,25 @@ max_consecutive_empty_days = 7 # longer runs without any log are not stamped day
 #                              # alert, and the next sealed day's manifest lists them in its gaps
 
 [tsa]
-# Start with the Kamu SM TEST server; switch to production after the connection test:
-#   provider = "zamane", url = "http://zd.kamusm.gov.tr"  -> Kamu SM production server
-provider = "zamane"
-url = "http://tzd.kamusm.gov.tr"
-port = 80
+# TÜRKTRUST (the default, 0.4.0): no Java and no Zamane client. Its user name and password are
+# entered in the browser (Ayarlar -> Zaman damgası) and kept in the encrypted secret store.
+provider = "turktrust"
+url = "https://zd.turktrust.com.tr/"
+# Kamu SM instead: setup -TimeStampProvider zamane writes the six lines below in place of the two
+# above (the Kamu SM TEST server; production after the connection test: http://zd.kamusm.gov.tr).
+#provider = "zamane"
+#url = "http://tzd.kamusm.gov.tr"
+#port = 80
+#java = ["C:/Program Files/Eclipse Adoptium/jre-8/bin/java.exe"]
+#zamane_jar = "C:/ProgramData/ARCILOGGER/zamane/tss-client-console-3.1.33.jar"
+#zamane_verify_flag = "-CC"
 digest = "sha256"
-java = ["C:/Program Files/Eclipse Adoptium/jre-8/bin/java.exe"]
-zamane_jar = "C:/ProgramData/ARCILOGGER/zamane/tss-client-console-3.1.33.jar"
-zamane_verify_flag = "-CC"
 credit_alert_threshold = 500
 tests_per_day = 10              # stamp tests a day from the browser (0-20); admin\policy.json caps it
 roots_dir = "C:/ProgramData/ARCILOGGER/kamusm-roots"
-# SHA-256 fingerprints of the Kamu SM roots, compared with Kamu SM's published values; a day is
-# shown as legal grade only when its stamp chains to one of them (empty: no day is).
+# SHA-256 fingerprints of further legal roots (Kamu SM's, compared with Kamu SM's published
+# values). TÜRKTRUST's H7 root is built in and need not be listed. A day is shown as legal grade
+# only when its stamp chains to one of them.
 legal_root_fingerprints = []
 # require_critical_eku = false # only if Kamu SM's TSA certificate marks its EKU non-critical (K6)
 

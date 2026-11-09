@@ -482,7 +482,9 @@ olmaz; anahtar için bölüm 9'daki komut kullanılır.
 | `-ServerName` | hatırlanan değer; yoksa `arcilogger.internal` | Ek web adı (hatırlanır) |
 | `-SiteName` | — (yok; ilk kurulumda gerekli) | Kuruluş adı (`site_name`); bölüm 7.1 |
 | `-NtpServer` | — (yok; boş: yalnızca yedek saat sunucusu) | Yerel saat kaynağı (`[clock] ntp_server`); bölüm 7.1 |
+| `-NoNtpServer` | — | Boş `-NtpServer` ile aynı: yerel saat kaynağı yok. Setup.exe, "Saat sunucusu" alanı boş bırakılınca bunu verir; böylece pencere aynı soruyu yeniden sormaz. `-NtpServer` verilirse o geçerlidir |
 | `-AdminAddress` | — (yok; hatırlanan değer) | 443'e (web) yalnızca bu adres(ler) ya da ağ(lar) bağlanabilir (ör. `10.0.0.10`, `10.0.0.0/24`); uzak masaüstü (3389) hiçbir zaman kapatılmaz; bir kez verilen değer hatırlanır; bölüm 7.1 |
+| `-TimeStampProvider` | `turktrust` | Yeni `arcilogger.toml` içindeki zaman damgası sağlayıcısı: `turktrust` (TÜRKTRUST, Java ve Zamane istemcisi gerekmez) ya da `zamane` (Kamu SM test sunucusu). Mevcut yapılandırmaya dokunulmaz (sağlayıcı Ayarlar → Zaman damgası'nda değişir); başka bir değer `2` ile durdurur. Setup.exe ilk kurulumda bunu "Zaman damgası" sayfasında sorar |
 | `-DataRoot` | sabit NTFS `D:` varsa `D:\ARCILOGGER`, yoksa `C:\ARCILOGGER` | Veri klasörü (yalnızca ilk kurulumda; sonra `arcilogger.toml` belirler) |
 | `-ZamaneJar`, `-ZamaneJarSha256` | — | Zamane istemcisi ve Kamu SM'nin yayımladığı özet |
 | `-LicenseFile` | — (yok) | Kurulacak lisans dosyası (`.lic`, [LISANS.md](LISANS.md) bölüm 4). Ön denetimde Python olmadan okunur (dosya var, en çok 65.536 bayt, JSON; lisans no, bakım ve geçerlilik tarihi); okunamazsa kurulum hiçbir şey değiştirmeden durur (`2`). Şema kurulduktan hemen sonra `arcilogger-db license install` ile yüklenir; ürün dosyayı reddederse ya da veritabanına ulaşılamazsa uyarı verilir, kurulum sürer ve `1` ile biter. `-SkipDatabase` ile yüklenmez, sonra çalıştırılacak komut yazılır |

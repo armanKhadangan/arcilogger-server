@@ -116,6 +116,38 @@
       "notes": "Install-Arcilogger.ps1 stops with Turkish instructions when no PostgreSQL service (postgresql-x64-16) is present. ARCILOGGER creates its own role and database; the postgres superuser password is asked once and never stored."
     },
     {
+      "name": "postgresql_binaries",
+      "title": "PostgreSQL 16 binaries for Windows x64 (EDB zip archive, no installer), set up by ARCILOGGER on a server without PostgreSQL 16",
+      "version": "16.15",
+      "role": "bundled",
+      "required": false,
+      "licence": "PostgreSQL License",
+      "licence_url": "https://raw.githubusercontent.com/postgres/postgres/REL_16_15/COPYRIGHT",
+      "licence_sha256": "3d6af92ff8a4c2cdf69afb1cf44edea727922f5cd0cf8b5f72b11cdecac8fdfd",
+      "download_page": "https://www.enterprisedb.com/download-postgresql-binaries",
+      "url": "https://get.enterprisedb.com/postgresql/postgresql-16.15-5-windows-x64-binaries.zip",
+      "file": "postgresql-16.15-5-windows-x64-binaries.zip",
+      "sha256": null,
+      "sha256_source": "Not verified yet: get.enterprisedb.com answers 403 to the development environment (2026-11-08) and EDB publishes no checksum file for the binaries archives. The release job pins it on its first download (Build-ArciBundle.ps1 -PinComponent postgresql_binaries); the value is then recorded here with the run and the date. Until then the build leaves the component out and setup uses an operator-installed PostgreSQL 16 as before.",
+      "vendor_checksum_url": null,
+      "verified_on": null,
+      "layout": [
+        "pgsql/bin/initdb.exe",
+        "pgsql/bin/pg_ctl.exe",
+        "pgsql/bin/postgres.exe",
+        "pgsql/bin/psql.exe",
+        "pgsql/bin/pg_dump.exe",
+        "pgsql/bin/pg_restore.exe",
+        "pgsql/share/extension/pg_trgm.control"
+      ],
+      "keep": [
+        "pgsql/bin",
+        "pgsql/lib",
+        "pgsql/share"
+      ],
+      "notes": "The download link on EDB's page (sbp.enterprisedb.com/getfile.jsp?fileid=1260623, 'Binaries from installer Version 16.15', Windows x86-64, read 2026-11-08) redirects to the url above. The archive also holds pgAdmin 4, StackBuilder, the documentation and the headers; the build keeps only the folders in keep (the server, its libraries and share), checks every path in layout (contract 0.4.0 S1) and packs them into thirdparty/postgresql_binaries/postgresql-16.15-windows-x64-server.zip. 16.15 is the newest 16.x minor on postgresql.org/support/versioning on 2026-11-08."
+    },
+    {
       "name": "timescaledb",
       "title": "TimescaleDB for PostgreSQL 16, Windows amd64 build (optional)",
       "version": "2.30.2",

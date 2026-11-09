@@ -20,6 +20,7 @@ from fastapi.testclient import TestClient
 from arcilogger_api import admin_channel
 from arcilogger_api.testing import LoggedIn
 from arcilogger_core.admin import agent as agent_module
+from arcilogger_core.admin.probe import ProbeResult
 from arcilogger_core.admin.testing import FakeAgent, Installed, windows_replica_target
 from arcilogger_core.config import Config, parse_config
 
@@ -100,6 +101,41 @@ def test_the_mail_server_is_probed_with_the_typed_password(
         "arcilogger",
     )
     assert smtp["secrets"]["smtp.password"]["set"] is True
+
+
+def test_a_refused_trial_email_shows_the_mail_server_answer(
+    client: TestClient, admin: LoggedIn, agent: FakeAgent
+) -> None:
+    """0.4.0 P6: the browser shows what the mail server said and, for a known refusal of Google
+    or Microsoft 365, what to change (S5); the typed password never comes back."""
+    password = "Örnek-Posta-Parola-3"
+    answer = f"535 5.7.8 Username and Password not accepted ({password})"
+    agent.prober.results["smtp"] = ProbeResult(False, "smtp_test_failed", answer)
+    google = {**SMTP, "host": "smtp.gmail.com", "password": password}
+    found = settle(
+        client, agent, client.put(f"{CONFIG}/smtp", json={"etag": etag(client, "smtp"), **google})
+    )
+    assert found["state"] == "probe_failed", found
+    assert found["error"]["code"] == "smtp_test_failed"
+    detail = found["error"]["detail"]
+    assert detail.startswith("535 5.7.8 Username and Password not accepted")
+    assert password not in detail
+    assert "uygulama şifresi" in found["error"]["hint_tr"]
+    assert "app password" in found["error"]["hint_en"]
+    assert client.get(CONFIG).json()["sections"]["smtp"]["host"] is None
+
+    # the same answer of another server is shown without an explanation
+    other = {"etag": etag(client, "smtp"), **SMTP, "password": password}
+    found = settle(client, agent, client.put(f"{CONFIG}/smtp", json=other))
+    assert found["error"]["detail"].startswith("535 5.7.8")
+    assert (found["error"]["hint_tr"], found["error"]["hint_en"]) == (None, None)
+
+    # an answer that quotes the recipient shows it masked, as the test e-mail's result does
+    quoted = "550 5.1.1 <bora.kaya@ornek.example>: Recipient address rejected"
+    agent.prober.results["smtp"] = ProbeResult(False, "smtp_test_failed", quoted)
+    again = {"etag": etag(client, "smtp"), **SMTP, "password": password}
+    found = settle(client, agent, client.put(f"{CONFIG}/smtp", json=again))
+    assert found["error"]["detail"] == "550 5.1.1 <b***@ornek.example>: Recipient address rejected"
 
 
 def test_a_mail_server_change_is_reverted_without_a_trial_recipient(
