@@ -2650,17 +2650,9 @@ function Show-NextSteps {
     Write-Host ('      Sonra {0}/setup adresini açıp anahtarı, kullanıcı adını ve parolayı girin [then open {0}/setup].' -f $url)
     $browserAdministration = ($null -eq $script:AdminPolicyChoice) -or $script:AdminPolicyChoice.Enabled
     # Step 3 follows the configured provider (contract 2.4): TÜRKTRUST's account needs no Java
-    # and no Zamane client. A configuration that cannot be read follows -TimeStampProvider,
-    # TÜRKTRUST by default (0.4.0 D3); only Kamu SM gets Kamu SM's text. The secrets are never
-    # asked here and never written into the log.
-    $provider = $script:TimeStampProviderValue
-    if ((Test-Path -LiteralPath $VenvPython) -and (Test-Path -LiteralPath $ConfigPath)) {
-        try {
-            $config = Read-ArciTomlFile -Python $VenvPython -ConfigPath $ConfigPath
-            $provider = Get-ArciConfigValue -Config $config -Path 'tsa.provider' -Default 'mock'
-        }
-        catch { $provider = $script:TimeStampProviderValue }
-    }
+    # and no Zamane client; only Kamu SM gets Kamu SM's text. The secrets are never asked here
+    # and never written into the log.
+    $provider = Get-ConfiguredTsaProvider
     if ($provider -ne 'zamane') {
         Write-Host '   3. TÜRKTRUST zaman damgası hesabı [time-stamp account]:'
         Write-Host '      Kullanıcı adı ve parolayı web arayüzünde Ayarlar → Zaman damgası''nda girin; konsoldan da girilebilir [enter the user name and password under Settings → Time stamping in the web interface; or at the console] (docs\AYARLAR.md):'
@@ -2809,6 +2801,23 @@ function Show-SetupToken {
     }
 }
 
+function Get-ConfiguredTsaProvider {
+    <#
+    The time-stamp provider of arcilogger.toml (tsa.provider, mock without the key). A
+    configuration that cannot be read yet follows -TimeStampProvider, TÜRKTRUST by default
+    (0.4.0 D3).
+    #>
+    $provider = $script:TimeStampProviderValue
+    if ((Test-Path -LiteralPath $VenvPython) -and (Test-Path -LiteralPath $ConfigPath)) {
+        try {
+            $config = Read-ArciTomlFile -Python $VenvPython -ConfigPath $ConfigPath
+            $provider = Get-ArciConfigValue -Config $config -Path 'tsa.provider' -Default 'mock'
+        }
+        catch { $provider = $script:TimeStampProviderValue }
+    }
+    [string]$provider
+}
+
 function Read-KamuSmCredentials {
     <#
     Optional: the Kamu SM customer number and password, straight into the encrypted secret store
@@ -2863,7 +2872,9 @@ function Complete-FirstInstall {
     if (-not (Test-ArciInteractiveConsole)) { return }
     try {
         if (-not $SkipDatabase) { Show-SetupToken }
-        Read-KamuSmCredentials
+        # Only a Kamu SM site is asked for its customer number and password: TÜRKTRUST's account
+        # is entered in the browser, and the window asks nothing else (0.4.0 D2).
+        if ((Get-ConfiguredTsaProvider) -eq 'zamane') { Read-KamuSmCredentials }
     }
     catch { Write-Host ('Kurulum sonu adımı yapılamadı [final step failed]: {0}' -f $_.Exception.Message) -ForegroundColor Yellow }
 }
