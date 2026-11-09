@@ -111,6 +111,38 @@ function Get-ProductReleaseDate {
     Get-ArciProductReleaseDate -InitText $init
 }
 
+function Save-ArciDownload([string]$Url, [string]$OutFile) {
+    <#
+    One download, tried again on a passing failure: GitHub's release downloads answer
+    "504 Gateway Time-out" now and then (two release builds of 0.4.0 stopped on it). A server
+    error (5xx, 408, 429), a timeout or a dropped connection is tried again after 10, 30 and 90
+    seconds; any other answer (404, 403 ...) stops at once. The callers check the file's SHA-256
+    as before, so a retry never lets another file in.
+    #>
+    $waits = @(10, 30, 90)
+    for ($attempt = 0; ; $attempt++) {
+        $previous = $ProgressPreference
+        $ProgressPreference = 'SilentlyContinue'   # the progress bar makes Invoke-WebRequest very slow in 5.1
+        try {
+            Invoke-WebRequest -Uri $Url -OutFile $OutFile -UseBasicParsing
+            return
+        }
+        catch {
+            # Windows PowerShell 5.1 throws a WebException, PowerShell 7 an HttpResponseException;
+            # both carry the answer, if there was one, in Response (StrictMode: looked up).
+            $status = $null
+            $response = $_.Exception.PSObject.Properties['Response']
+            if ($null -ne $response -and $null -ne $response.Value) { $status = [int]$response.Value.StatusCode }
+            $passing = ($null -eq $status) -or ($status -ge 500) -or ($status -eq 408) -or ($status -eq 429)
+            if (-not $passing -or $attempt -ge $waits.Count) { throw }
+            if (Test-Path -LiteralPath $OutFile) { Remove-Item -LiteralPath $OutFile -Force }
+            Write-ArciInfo ("yeniden denenecek, {0} s sonra [retrying in {0} s]: {1} ({2})" -f $waits[$attempt], $Url, $_.Exception.Message)
+            Start-Sleep -Seconds $waits[$attempt]
+        }
+        finally { $ProgressPreference = $previous }
+    }
+}
+
 function Get-VerifiedComponent($Component) {
     <# Download (or reuse from the cache) and verify one component; returns the local file. #>
     $resolved = Resolve-ArciComponentSource -Component $Component -UrlOverride $ComponentUrl -Sha256Override $ComponentSha256
@@ -126,9 +158,7 @@ function Get-VerifiedComponent($Component) {
     else {
         $partial = $target + '.part'
         Write-ArciInfo ("indiriliyor [downloading]: {0}" -f $url)
-        $previous = $ProgressPreference
-        $ProgressPreference = 'SilentlyContinue'   # the progress bar makes Invoke-WebRequest very slow in 5.1
-        try { Invoke-WebRequest -Uri $url -OutFile $partial -UseBasicParsing } finally { $ProgressPreference = $previous }
+        Save-ArciDownload -Url $url -OutFile $partial
         $actual = Get-ArciFileSha256 -Path $partial
         if ($actual -ne $sha256) {
             Remove-Item -LiteralPath $partial -Force
@@ -157,9 +187,7 @@ function Get-PinnedComponent($Component) {
     $target = Join-Path $CacheDir $fileName
     $partial = $target + '.part'
     Write-ArciInfo ("indiriliyor, ilk kez sabitlenecek [downloading, to be pinned]: {0}" -f $url)
-    $previous = $ProgressPreference
-    $ProgressPreference = 'SilentlyContinue'
-    try { Invoke-WebRequest -Uri $url -OutFile $partial -UseBasicParsing } finally { $ProgressPreference = $previous }
+    Save-ArciDownload -Url $url -OutFile $partial
     Move-Item -LiteralPath $partial -Destination $target -Force
     $sha256 = Get-ArciFileSha256 -Path $target
     $script:Pinned[$name] = [ordered]@{ sha256 = $sha256; url = $url; file = $fileName; size = (Get-Item -LiteralPath $target).Length; pinned_on = (Get-Date).ToUniversalTime().ToString('yyyy-MM-dd') }
@@ -215,9 +243,7 @@ function Get-VerifiedLicence($Component) {
     $target = Join-Path $CacheDir ('licence-' + $fileName)
     if (-not ((Test-Path -LiteralPath $target) -and (Get-ArciFileSha256 -Path $target) -eq $Component.licence_sha256)) {
         $partial = $target + '.part'
-        $previous = $ProgressPreference
-        $ProgressPreference = 'SilentlyContinue'
-        try { Invoke-WebRequest -Uri $url -OutFile $partial -UseBasicParsing } finally { $ProgressPreference = $previous }
+        Save-ArciDownload -Url $url -OutFile $partial
         $actual = Get-ArciFileSha256 -Path $partial
         if ($actual -ne $Component.licence_sha256) {
             Remove-Item -LiteralPath $partial -Force

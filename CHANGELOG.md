@@ -46,8 +46,9 @@ time-stamp provider and the PostgreSQL the server already has.
 
 ### Known limitations
 
-- The backup folder (`[backup] dir`) is still set in `arcilogger.toml` on the server, with the
-  folder's rights set by hand; choosing it in the browser is not in this version.
+- The backup folder (`[backup] dir`) is set in `arcilogger.toml` on the server, with the
+  folder's rights set by hand. By the owner's decision (2026-11-09) folder locations are set on
+  the server only; the browser does not change them.
 
 ## [0.3.3] — 2026-11-08
 

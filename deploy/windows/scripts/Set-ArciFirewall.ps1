@@ -585,6 +585,9 @@ if (-not $Remove) {
 $wouldDisable = $null
 $keptGroupRuleCount = $null
 if (-not $Remove -and (Get-Command Get-NetFirewallRule -ErrorAction SilentlyContinue)) {
+    # Windows answers these queries rule by rule: on a server with many rules they take minutes,
+    # and without a line the window looks frozen.
+    Write-ArciInfo 'Güvenlik duvarı kuralları okunuyor; kural sayısına göre birkaç dakika sürebilir [reading the firewall rules; this can take a few minutes]'
     # Not caught: a remote desktop rule that could not be recognised would be disabled.
     $RdpRuleNames = @(Get-RdpRuleNames)
     try {
