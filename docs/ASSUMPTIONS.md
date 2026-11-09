@@ -515,6 +515,7 @@ The 0.4.0 contract (`design/0.4.0-contract.md`, tracking issue #234). Operator g
 | E2 | TÜRKTRUST is the time-stamp provider of a new installation, with its root built in; Kamu SM stays a choice in setup and in the browser, and an upgrade keeps the configured provider | 2026-11-08 |
 | E3 | Every e-mail preset connects with a user name and password, or without a login for a relay that authorises by IP; no OAuth | 2026-11-08 |
 | E4 | Wave 6 is not part of 0.4.0 | 2026-11-08 |
+| E5 | Folder locations, the backup folder among them, are set only on the server where ARCILOGGER is installed, never from the browser ("mümkünse yedek falan konumu seçme konularını sadece yüklenmiş olan sunucunun üzerinden ayarlanabilmesini istiyorum"). The contract's P5 (the backup folder from the browser) is dropped | 2026-11-09 |
 
 ### Verify on site (0.4.0)
 
