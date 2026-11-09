@@ -411,6 +411,82 @@ def test_bundled_postgresql_is_pinned_on_first_download() -> None:
     assert "if ($pin -notmatch '^[a-z0-9_]+$')" in workflow
 
 
+_DOWNLOAD_SCRIPT = r"""
+Set-StrictMode -Version 2.0
+$ErrorActionPreference = 'Stop'
+$script:calls = New-Object System.Collections.Generic.List[string]
+$script:answers = @()
+function Write-ArciInfo([string]$Text) { $script:calls.Add('info') }
+function Start-Sleep { param([int]$Seconds) $script:calls.Add('sleep ' + $Seconds) }
+function Invoke-WebRequest {
+    param([string]$Uri, [string]$OutFile, [switch]$UseBasicParsing)
+    $script:calls.Add('get')
+    $next = $script:answers[0]
+    $script:answers = @($script:answers | Select-Object -Skip 1)
+    if ($next -eq 'ok') { [System.IO.File]::WriteAllText($OutFile, 'data'); return }
+    [System.IO.File]::WriteAllText($OutFile, 'half')
+    $exception = New-Object System.Exception ('simulated ' + $next)
+    if ($next -ne 'none') {
+        # as both editions carry it: the HTTP answer in Response.StatusCode
+        $response = [pscustomobject]@{ StatusCode = [int]$next }
+        $exception | Add-Member -NotePropertyName Response -NotePropertyValue $response
+    }
+    throw $exception
+}
+@@FUNCTION@@
+$report = [ordered]@{}
+foreach ($case in @(
+        @{ name = 'retried'; answers = @('504', '502', 'ok') },
+        @{ name = 'refused'; answers = @('404') },
+        @{ name = 'given-up'; answers = @('504', '504', '504', '504') },
+        @{ name = 'dropped'; answers = @('none', 'ok') })) {
+    $script:calls.Clear()
+    $script:answers = $case.answers
+    $out = Join-Path $PSScriptRoot ($case.name + '.bin')
+    $failure = $null
+    try { Save-ArciDownload -Url 'https://example.invalid/file.zip' -OutFile $out }
+    catch { $failure = $_.Exception.Message }
+    $file = $null
+    if (Test-Path -LiteralPath $out) { $file = [System.IO.File]::ReadAllText($out) }
+    $report[$case.name] = [ordered]@{
+        calls = $script:calls.ToArray(); error = $failure; file = $file
+    }
+}
+$report | ConvertTo-Json -Depth 4
+"""
+
+
+def test_bundle_downloads_retry_a_passing_server_error(engine: str, tmp_path: Path) -> None:
+    """Two 0.4.0 release builds stopped on GitHub answering 504 to a release download: a server
+    error or a dropped connection is tried again (10, 30, 90 s), a 4xx answer stops at once, and
+    after the last wait the error goes to the build as before. The SHA-256 checks stay with the
+    callers, so a retry never lets another file in."""
+    build = (INSTALLER / "Build-ArciBundle.ps1").read_text(encoding="utf-8-sig")
+    function = _function(build, "Save-ArciDownload")
+    assert build.count("Invoke-WebRequest -Uri") == 1, "every download goes through the helper"
+    assert build.count("Save-ArciDownload -Url $url -OutFile $partial") == 3
+    script = write_script(
+        tmp_path / "download.ps1", _DOWNLOAD_SCRIPT.replace("@@FUNCTION@@", function + "\n}")
+    )
+    result = run_powershell(engine, script)
+    assert result.returncode == 0, result.stdout + result.stderr
+    report = json.loads(result.stdout)
+    retried = ["get", "info", "sleep 10", "get", "info", "sleep 30", "get"]
+    assert report["retried"]["calls"] == retried
+    assert report["retried"]["error"] is None
+    assert report["retried"]["file"] == "data", "the half file of a failed try is gone"
+    assert report["refused"]["calls"] == ["get"], "a 404 is not tried again"
+    assert report["refused"]["error"] == "simulated 404"
+    given_up = report["given-up"]
+    assert [c for c in given_up["calls"] if c.startswith("sleep")] == [
+        "sleep 10", "sleep 30", "sleep 90",
+    ]  # fmt: skip
+    assert given_up["calls"].count("get") == 4
+    assert given_up["error"] == "simulated 504"
+    assert report["dropped"]["calls"] == ["get", "info", "sleep 10", "get"]
+    assert report["dropped"]["file"] == "data"
+
+
 def test_timescaledb_is_opt_in_until_the_licence_decision() -> None:
     build = (INSTALLER / "Build-ArciBundle.ps1").read_text(encoding="utf-8-sig")
     assert "[switch]$IncludeTimescaleDB" in build
