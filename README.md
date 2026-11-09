@@ -14,7 +14,8 @@ departmanlar ve sunucu ayarları kurulumdan sonra web arayüzünde tanımlanır
 
 - FortiGate ve MikroTik cihazlarından syslog alır, her kaydı **değiştirmeden** saklar.
 - Her gece günün loglarını sıkıştırır, SHA-256 ile özetler, önceki güne zincirler ve
-  **TÜBİTAK BİLGEM Kamu SM zaman damgası** ile mühürler; en az 2 yıl saklar.
+  **zaman damgasıyla** mühürler (yeni kurulumda TÜRKTRUST; TÜBİTAK BİLGEM Kamu SM de seçilebilir);
+  en az 2 yıl saklar.
 - "Bu genel IP'yi şu saatte kim kullandı?" sorusunu IP → MAC → cihaz → (kişi) zinciriyle yanıtlar,
   resmi PDF rapor ve bağımsız doğrulanabilen kanıt paketi üretir. Kişi, cihazın **olay anında**
   kime atanmış olduğuna göre (atama geçmişi) adlandırılır; atanmamış cihazda sonuç cihaz ve
@@ -68,7 +69,7 @@ departmanlar ve sunucu ayarları kurulumdan sonra web arayüzünde tanımlanır
 
 - Kurulum: [docs/KURULUM.md](docs/KURULUM.md) (English: [docs/INSTALL.md](docs/INSTALL.md));
   kurulum programı ve betikler: [deploy/windows/README.md](deploy/windows/README.md).
-- Kurulumdan sonra (ilk yönetici, Kamu SM test → üretim, ilk 5651 sorgusu, günlük kontroller):
+- Kurulumdan sonra (ilk yönetici, zaman damgası hesabı, ilk 5651 sorgusu, günlük kontroller):
   [docs/ILK-ADIMLAR.md](docs/ILK-ADIMLAR.md) (English: [docs/FIRST-STEPS.md](docs/FIRST-STEPS.md));
   Ayarlar sayfaları ve konsolda kalanlar: [docs/AYARLAR.md](docs/AYARLAR.md) (English:
   [docs/SETTINGS.md](docs/SETTINGS.md)).
@@ -85,12 +86,13 @@ departmanlar ve sunucu ayarları kurulumdan sonra web arayüzünde tanımlanır
 
 ## Durum
 
-Bu sürüm (0.3.3): MVP (M2/M3'ün temel parçaları, kimlik doğrulama ve denetim kaydı (M6'dan),
+Bu sürüm (0.4.0): MVP (M2/M3'ün temel parçaları, kimlik doğrulama ve denetim kaydı (M6'dan),
 Windows kurulum programı (M7'den)), ardından eklenenler (Wave 0–5), 0.3.0'ın eklentileri
 (masaüstü simgesi ve bildirim alanı, Veritabanı sayfası, yedeklerin NAS kopyası, verilerle
-birlikte kaldırma), 0.3.1/0.3.2'nin TÜRKTRUST düzeltmeleri (H7 kökü ürünle gelir) ve 0.3.3'ün
-kurulum düzeltmesi. Tablo her aşamanın bugünkü durumunu gösterir ([CHANGELOG.md](CHANGELOG.md),
-"0.3.3").
+birlikte kaldırma), 0.3.1–0.3.3'ün TÜRKTRUST ve kurulum düzeltmeleri ve 0.4.0'ın kolay kurulumu
+(PostgreSQL kurulumla gelir, kurulum soruları pencerelerde, TÜRKTRUST varsayılan, kurulum sonunda
+otomatik denetim, e-posta sağlayıcı seçimi). Tablo her aşamanın bugünkü durumunu gösterir
+([CHANGELOG.md](CHANGELOG.md), "0.4.0").
 
 | Aşama | Kapsam | Durum |
 |---|---|---|
