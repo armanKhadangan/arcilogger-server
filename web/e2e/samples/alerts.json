@@ -1,13 +1,14 @@
 {
   "detail": {
+    "assignee": null,
     "auto_resolved": false,
-    "created_at": "2026-10-13T04:00:13.525554Z",
+    "created_at": "2026-10-13T04:00:15.561362Z",
     "deliveries": [
       {
         "attempts": 1,
         "kind": "new",
         "recipient_masked": "t***@example.com",
-        "sent_at": "2026-10-13T04:00:13.525554Z",
+        "sent_at": "2026-10-13T04:00:15.561362Z",
         "status": "sent"
       },
       {
@@ -19,15 +20,17 @@
       }
     ],
     "details": {
-      "last_seen": "2026-10-13T06:42:12+03:00",
+      "last_seen": "2026-10-13T06:42:15+03:00",
       "never_seen": false,
       "source": "switch-3",
       "threshold_minutes": 15,
       "title_en": "Log source silent: no message from switch-3 for more than 15 minutes"
     },
     "events": [],
+    "evidence_total": null,
     "id": 4,
     "notes_count": 0,
+    "person": null,
     "resolved_at": null,
     "rule": "R15",
     "rule_name_en": "Log source silent",
@@ -36,19 +39,20 @@
     "runbook_tr": "1. Cihazın açık ve ağa bağlı olduğunu denetleyin.\n2. Cihazın syslog ayarının ARCILOGGER sunucusunu gösterdiğini doğrulayın (DEVICE-SETUP.md).\n3. Sunucuda toplayıcının çalıştığını denetleyin: Get-Service ArciCollector.\n4. Sessiz geçen süre 5651 kayıtlarında bir boşluktur ve günün manifestinde görünür: aynı gün inceleyin. Kaynak yeniden mesaj gönderince uyarı kendiliğinden kapanır.",
     "severity": "high",
     "state": "open",
-    "summary_en": "No message from switch-3 for more than 15 minutes. Last message: 13.10.2026 06:42:12.",
-    "summary_tr": "switch-3 kaynağından 15 dakikadan uzun süredir mesaj gelmedi. Son mesaj: 13.10.2026 06:42:12.",
-    "time": "2026-10-13T04:00:13.525554Z",
-    "title": "Log kaynağı sessiz: switch-3 15 dakikadan uzun süredir mesaj göndermedi (son mesaj 2026-10-13T06:42:12+03:00)",
-    "updated_at": "2026-10-13T04:00:13.560130Z"
+    "summary_en": "No message from switch-3 for more than 15 minutes. Last message: 13.10.2026 06:42:15.",
+    "summary_tr": "switch-3 kaynağından 15 dakikadan uzun süredir mesaj gelmedi. Son mesaj: 13.10.2026 06:42:15.",
+    "time": "2026-10-13T04:00:15.561362Z",
+    "title": "Log kaynağı sessiz: switch-3 15 dakikadan uzun süredir mesaj göndermedi (son mesaj 2026-10-13T06:42:15+03:00)",
+    "updated_at": "2026-10-13T04:00:15.600888Z"
   },
   "detail_auto_resolved": {
+    "assignee": null,
     "auto_resolved": true,
-    "created_at": "2026-10-13T04:00:13.525554Z",
+    "created_at": "2026-10-13T04:00:15.561362Z",
     "deliveries": [],
     "details": {
       "auto_resolved": {
-        "at": "2026-10-10T08:00:13.525554+00:00",
+        "at": "2026-10-10T08:00:15.561362+00:00",
         "reason": "credit_ok"
       },
       "credits": 420,
@@ -61,7 +65,7 @@
     },
     "events": [
       {
-        "at": "2026-10-10T08:00:13.525554Z",
+        "at": "2026-10-10T08:00:15.561362Z",
         "by": "system",
         "from_state": "open",
         "id": 1,
@@ -70,9 +74,11 @@
         "to_state": "resolved"
       }
     ],
+    "evidence_total": null,
     "id": 3,
     "notes_count": 0,
-    "resolved_at": "2026-10-10T08:00:13.525554Z",
+    "person": null,
+    "resolved_at": "2026-10-10T08:00:15.561362Z",
     "rule": "R20-credit",
     "rule_name_en": "Kamu SM credit low",
     "rule_name_tr": "Kamu SM kontörü az",
@@ -82,13 +88,14 @@
     "state": "resolved",
     "summary_en": "Credit left 420 (threshold 500).",
     "summary_tr": "Kalan kontör 420 (eşik 500).",
-    "time": "2026-10-13T04:00:11Z",
+    "time": "2026-10-13T04:00:12Z",
     "title": "Kamu SM kontörü azaldı: 420 kaldı (eşik 500)",
-    "updated_at": "2026-10-29T01:01:35.807671Z"
+    "updated_at": "2026-11-12T22:32:30.692643Z"
   },
   "detail_dismissed": {
+    "assignee": null,
     "auto_resolved": false,
-    "created_at": "2026-10-29T01:01:22.528016Z",
+    "created_at": "2026-11-12T22:32:15.543924Z",
     "deliveries": [],
     "details": {
       "end": "2026-10-09T12:00:00+00:00",
@@ -106,7 +113,7 @@
     },
     "events": [
       {
-        "at": "2026-10-13T04:00:13.725684Z",
+        "at": "2026-10-13T04:00:15.799998Z",
         "by": "tolga",
         "from_state": "open",
         "id": 6,
@@ -115,7 +122,7 @@
         "to_state": "dismissed"
       },
       {
-        "at": "2026-10-13T04:00:13.725684Z",
+        "at": "2026-10-13T04:00:15.799998Z",
         "by": "tolga",
         "from_state": null,
         "id": 7,
@@ -124,8 +131,10 @@
         "to_state": null
       }
     ],
+    "evidence_total": null,
     "id": 1,
     "notes_count": 1,
+    "person": null,
     "resolved_at": null,
     "rule": "ip_conflict",
     "rule_name_en": "IP conflict",
@@ -138,11 +147,12 @@
     "summary_tr": "Çakışan IP adresi: 172.20.42.57.",
     "time": "2026-10-09T10:00:00Z",
     "title": "IP çakışması: 172.20.42.57 aynı anda iki MAC adresinde (00:00:5e:00:53:57, 00:0c:29:00:00:99; 2026-10-09T13:00:00+03:00)",
-    "updated_at": "2026-10-13T04:00:13.725684Z"
+    "updated_at": "2026-10-13T04:00:15.799998Z"
   },
   "detail_seal": {
+    "assignee": null,
     "auto_resolved": false,
-    "created_at": "2026-10-13T04:00:13.525554Z",
+    "created_at": "2026-10-13T04:00:15.561362Z",
     "deliveries": [],
     "details": {
       "attempts": 1,
@@ -154,8 +164,10 @@
       "retryable": true
     },
     "events": [],
+    "evidence_total": null,
     "id": 2,
     "notes_count": 0,
+    "person": null,
     "resolved_at": null,
     "rule": "R20-seal",
     "rule_name_en": "Day not sealed",
@@ -166,9 +178,9 @@
     "state": "open",
     "summary_en": "11.10.2026 could not be sealed (attempt 1).",
     "summary_tr": "11.10.2026 günü mühürlenemedi (1. deneme).",
-    "time": "2026-10-13T04:00:00Z",
+    "time": "2026-10-13T04:00:01Z",
     "title": "Mühürleme başarısız (11.10.2026): mock TSA unreachable (injected). 5 dk sonra tekrar denenecek.",
-    "updated_at": "2026-10-13T04:00:13.540928Z"
+    "updated_at": "2026-10-13T04:00:15.577403Z"
   },
   "errors": {
     "alert_key_active": {
@@ -265,8 +277,10 @@
   "list": {
     "items": [
       {
+        "assignee": null,
         "auto_resolved": false,
-        "created_at": "2026-10-13T04:00:13.634944Z",
+        "created_at": "2026-10-13T04:00:15.691327Z",
+        "evidence_total": null,
         "id": 7,
         "notes_count": 1,
         "resolved_at": null,
@@ -277,13 +291,15 @@
         "state": "acknowledged",
         "summary_en": "Drive D: is 84% full (threshold 80%).",
         "summary_tr": "D: diski %84 dolu (eşik %80).",
-        "time": "2026-10-13T04:00:13.626399Z",
+        "time": "2026-10-13T04:00:15.680568Z",
         "title": "Disk dolmak üzere: D: %84 dolu (eşik %80)",
-        "updated_at": "2026-10-13T04:00:13.682009Z"
+        "updated_at": "2026-10-13T04:00:15.747848Z"
       },
       {
+        "assignee": null,
         "auto_resolved": false,
-        "created_at": "2026-10-13T04:00:13.525554Z",
+        "created_at": "2026-10-13T04:00:15.561362Z",
+        "evidence_total": null,
         "id": 4,
         "notes_count": 0,
         "resolved_at": null,
@@ -292,18 +308,20 @@
         "rule_name_tr": "Log kaynağı sessiz",
         "severity": "high",
         "state": "open",
-        "summary_en": "No message from switch-3 for more than 15 minutes. Last message: 13.10.2026 06:42:12.",
-        "summary_tr": "switch-3 kaynağından 15 dakikadan uzun süredir mesaj gelmedi. Son mesaj: 13.10.2026 06:42:12.",
-        "time": "2026-10-13T04:00:13.525554Z",
-        "title": "Log kaynağı sessiz: switch-3 15 dakikadan uzun süredir mesaj göndermedi (son mesaj 2026-10-13T06:42:12+03:00)",
-        "updated_at": "2026-10-13T04:00:13.560130Z"
+        "summary_en": "No message from switch-3 for more than 15 minutes. Last message: 13.10.2026 06:42:15.",
+        "summary_tr": "switch-3 kaynağından 15 dakikadan uzun süredir mesaj gelmedi. Son mesaj: 13.10.2026 06:42:15.",
+        "time": "2026-10-13T04:00:15.561362Z",
+        "title": "Log kaynağı sessiz: switch-3 15 dakikadan uzun süredir mesaj göndermedi (son mesaj 2026-10-13T06:42:15+03:00)",
+        "updated_at": "2026-10-13T04:00:15.600888Z"
       },
       {
+        "assignee": null,
         "auto_resolved": true,
-        "created_at": "2026-10-13T04:00:13.525554Z",
+        "created_at": "2026-10-13T04:00:15.561362Z",
+        "evidence_total": null,
         "id": 3,
         "notes_count": 0,
-        "resolved_at": "2026-10-10T08:00:13.525554Z",
+        "resolved_at": "2026-10-10T08:00:15.561362Z",
         "rule": "R20-credit",
         "rule_name_en": "Kamu SM credit low",
         "rule_name_tr": "Kamu SM kontörü az",
@@ -311,13 +329,15 @@
         "state": "resolved",
         "summary_en": "Credit left 420 (threshold 500).",
         "summary_tr": "Kalan kontör 420 (eşik 500).",
-        "time": "2026-10-13T04:00:11Z",
+        "time": "2026-10-13T04:00:12Z",
         "title": "Kamu SM kontörü azaldı: 420 kaldı (eşik 500)",
-        "updated_at": "2026-10-29T01:01:35.807671Z"
+        "updated_at": "2026-11-12T22:32:30.692643Z"
       },
       {
+        "assignee": null,
         "auto_resolved": false,
-        "created_at": "2026-10-13T04:00:13.525554Z",
+        "created_at": "2026-10-13T04:00:15.561362Z",
+        "evidence_total": null,
         "id": 2,
         "notes_count": 0,
         "resolved_at": null,
@@ -328,13 +348,15 @@
         "state": "open",
         "summary_en": "11.10.2026 could not be sealed (attempt 1).",
         "summary_tr": "11.10.2026 günü mühürlenemedi (1. deneme).",
-        "time": "2026-10-13T04:00:00Z",
+        "time": "2026-10-13T04:00:01Z",
         "title": "Mühürleme başarısız (11.10.2026): mock TSA unreachable (injected). 5 dk sonra tekrar denenecek.",
-        "updated_at": "2026-10-13T04:00:13.540928Z"
+        "updated_at": "2026-10-13T04:00:15.577403Z"
       },
       {
+        "assignee": null,
         "auto_resolved": false,
-        "created_at": "2026-10-12T23:00:13.525554Z",
+        "created_at": "2026-10-12T23:00:15.561362Z",
+        "evidence_total": null,
         "id": 6,
         "notes_count": 2,
         "resolved_at": null,
@@ -345,16 +367,18 @@
         "state": "open",
         "summary_en": "Sender address: 172.20.10.77.",
         "summary_tr": "Gönderici adresi: 172.20.10.77.",
-        "time": "2026-10-12T23:00:13.525554Z",
+        "time": "2026-10-12T23:00:15.561362Z",
         "title": "Yeni log kaynağı: 172.20.10.77 (kaydediliyor)",
-        "updated_at": "2026-10-13T04:00:13.851658Z"
+        "updated_at": "2026-10-13T04:00:15.953782Z"
       },
       {
+        "assignee": null,
         "auto_resolved": false,
-        "created_at": "2026-10-12T02:00:13.525554Z",
+        "created_at": "2026-10-12T02:00:15.561362Z",
+        "evidence_total": null,
         "id": 5,
         "notes_count": 1,
-        "resolved_at": "2026-10-13T04:00:13.601157Z",
+        "resolved_at": "2026-10-13T04:00:15.650332Z",
         "rule": "R20-disk",
         "rule_name_en": "Disk almost full",
         "rule_name_tr": "Disk dolmak üzere",
@@ -362,13 +386,15 @@
         "state": "resolved",
         "summary_en": "Drive D: is 84% full (threshold 80%).",
         "summary_tr": "D: diski %84 dolu (eşik %80).",
-        "time": "2026-10-12T02:00:13.525554Z",
+        "time": "2026-10-12T02:00:15.561362Z",
         "title": "Disk dolmak üzere: D: %84 dolu (eşik %80)",
-        "updated_at": "2026-10-13T04:00:13.601157Z"
+        "updated_at": "2026-10-13T04:00:15.650332Z"
       },
       {
+        "assignee": null,
         "auto_resolved": false,
-        "created_at": "2026-10-29T01:01:22.528016Z",
+        "created_at": "2026-11-12T22:32:15.543924Z",
+        "evidence_total": null,
         "id": 1,
         "notes_count": 1,
         "resolved_at": null,
@@ -381,7 +407,7 @@
         "summary_tr": "Çakışan IP adresi: 172.20.42.57.",
         "time": "2026-10-09T10:00:00Z",
         "title": "IP çakışması: 172.20.42.57 aynı anda iki MAC adresinde (00:00:5e:00:53:57, 00:0c:29:00:00:99; 2026-10-09T13:00:00+03:00)",
-        "updated_at": "2026-10-13T04:00:13.725684Z"
+        "updated_at": "2026-10-13T04:00:15.799998Z"
       }
     ],
     "limit": 50,
@@ -391,8 +417,10 @@
   "list_active": {
     "items": [
       {
+        "assignee": null,
         "auto_resolved": false,
-        "created_at": "2026-10-13T04:00:13.634944Z",
+        "created_at": "2026-10-13T04:00:15.691327Z",
+        "evidence_total": null,
         "id": 7,
         "notes_count": 1,
         "resolved_at": null,
@@ -403,13 +431,15 @@
         "state": "acknowledged",
         "summary_en": "Drive D: is 84% full (threshold 80%).",
         "summary_tr": "D: diski %84 dolu (eşik %80).",
-        "time": "2026-10-13T04:00:13.626399Z",
+        "time": "2026-10-13T04:00:15.680568Z",
         "title": "Disk dolmak üzere: D: %84 dolu (eşik %80)",
-        "updated_at": "2026-10-13T04:00:13.682009Z"
+        "updated_at": "2026-10-13T04:00:15.747848Z"
       },
       {
+        "assignee": null,
         "auto_resolved": false,
-        "created_at": "2026-10-13T04:00:13.525554Z",
+        "created_at": "2026-10-13T04:00:15.561362Z",
+        "evidence_total": null,
         "id": 4,
         "notes_count": 0,
         "resolved_at": null,
@@ -418,15 +448,17 @@
         "rule_name_tr": "Log kaynağı sessiz",
         "severity": "high",
         "state": "open",
-        "summary_en": "No message from switch-3 for more than 15 minutes. Last message: 13.10.2026 06:42:12.",
-        "summary_tr": "switch-3 kaynağından 15 dakikadan uzun süredir mesaj gelmedi. Son mesaj: 13.10.2026 06:42:12.",
-        "time": "2026-10-13T04:00:13.525554Z",
-        "title": "Log kaynağı sessiz: switch-3 15 dakikadan uzun süredir mesaj göndermedi (son mesaj 2026-10-13T06:42:12+03:00)",
-        "updated_at": "2026-10-13T04:00:13.560130Z"
+        "summary_en": "No message from switch-3 for more than 15 minutes. Last message: 13.10.2026 06:42:15.",
+        "summary_tr": "switch-3 kaynağından 15 dakikadan uzun süredir mesaj gelmedi. Son mesaj: 13.10.2026 06:42:15.",
+        "time": "2026-10-13T04:00:15.561362Z",
+        "title": "Log kaynağı sessiz: switch-3 15 dakikadan uzun süredir mesaj göndermedi (son mesaj 2026-10-13T06:42:15+03:00)",
+        "updated_at": "2026-10-13T04:00:15.600888Z"
       },
       {
+        "assignee": null,
         "auto_resolved": false,
-        "created_at": "2026-10-13T04:00:13.525554Z",
+        "created_at": "2026-10-13T04:00:15.561362Z",
+        "evidence_total": null,
         "id": 2,
         "notes_count": 0,
         "resolved_at": null,
@@ -437,13 +469,15 @@
         "state": "open",
         "summary_en": "11.10.2026 could not be sealed (attempt 1).",
         "summary_tr": "11.10.2026 günü mühürlenemedi (1. deneme).",
-        "time": "2026-10-13T04:00:00Z",
+        "time": "2026-10-13T04:00:01Z",
         "title": "Mühürleme başarısız (11.10.2026): mock TSA unreachable (injected). 5 dk sonra tekrar denenecek.",
-        "updated_at": "2026-10-13T04:00:13.540928Z"
+        "updated_at": "2026-10-13T04:00:15.577403Z"
       },
       {
+        "assignee": null,
         "auto_resolved": false,
-        "created_at": "2026-10-12T23:00:13.525554Z",
+        "created_at": "2026-10-12T23:00:15.561362Z",
+        "evidence_total": null,
         "id": 6,
         "notes_count": 2,
         "resolved_at": null,
@@ -454,9 +488,9 @@
         "state": "open",
         "summary_en": "Sender address: 172.20.10.77.",
         "summary_tr": "Gönderici adresi: 172.20.10.77.",
-        "time": "2026-10-12T23:00:13.525554Z",
+        "time": "2026-10-12T23:00:15.561362Z",
         "title": "Yeni log kaynağı: 172.20.10.77 (kaydediliyor)",
-        "updated_at": "2026-10-13T04:00:13.851658Z"
+        "updated_at": "2026-10-13T04:00:15.953782Z"
       }
     ],
     "limit": 50,
@@ -466,8 +500,10 @@
   "list_page": {
     "items": [
       {
+        "assignee": null,
         "auto_resolved": false,
-        "created_at": "2026-10-13T04:00:13.634944Z",
+        "created_at": "2026-10-13T04:00:15.691327Z",
+        "evidence_total": null,
         "id": 7,
         "notes_count": 1,
         "resolved_at": null,
@@ -478,13 +514,15 @@
         "state": "acknowledged",
         "summary_en": "Drive D: is 84% full (threshold 80%).",
         "summary_tr": "D: diski %84 dolu (eşik %80).",
-        "time": "2026-10-13T04:00:13.626399Z",
+        "time": "2026-10-13T04:00:15.680568Z",
         "title": "Disk dolmak üzere: D: %84 dolu (eşik %80)",
-        "updated_at": "2026-10-13T04:00:13.682009Z"
+        "updated_at": "2026-10-13T04:00:15.747848Z"
       },
       {
+        "assignee": null,
         "auto_resolved": false,
-        "created_at": "2026-10-13T04:00:13.525554Z",
+        "created_at": "2026-10-13T04:00:15.561362Z",
+        "evidence_total": null,
         "id": 4,
         "notes_count": 0,
         "resolved_at": null,
@@ -493,18 +531,20 @@
         "rule_name_tr": "Log kaynağı sessiz",
         "severity": "high",
         "state": "open",
-        "summary_en": "No message from switch-3 for more than 15 minutes. Last message: 13.10.2026 06:42:12.",
-        "summary_tr": "switch-3 kaynağından 15 dakikadan uzun süredir mesaj gelmedi. Son mesaj: 13.10.2026 06:42:12.",
-        "time": "2026-10-13T04:00:13.525554Z",
-        "title": "Log kaynağı sessiz: switch-3 15 dakikadan uzun süredir mesaj göndermedi (son mesaj 2026-10-13T06:42:12+03:00)",
-        "updated_at": "2026-10-13T04:00:13.560130Z"
+        "summary_en": "No message from switch-3 for more than 15 minutes. Last message: 13.10.2026 06:42:15.",
+        "summary_tr": "switch-3 kaynağından 15 dakikadan uzun süredir mesaj gelmedi. Son mesaj: 13.10.2026 06:42:15.",
+        "time": "2026-10-13T04:00:15.561362Z",
+        "title": "Log kaynağı sessiz: switch-3 15 dakikadan uzun süredir mesaj göndermedi (son mesaj 2026-10-13T06:42:15+03:00)",
+        "updated_at": "2026-10-13T04:00:15.600888Z"
       },
       {
+        "assignee": null,
         "auto_resolved": true,
-        "created_at": "2026-10-13T04:00:13.525554Z",
+        "created_at": "2026-10-13T04:00:15.561362Z",
+        "evidence_total": null,
         "id": 3,
         "notes_count": 0,
-        "resolved_at": "2026-10-10T08:00:13.525554Z",
+        "resolved_at": "2026-10-10T08:00:15.561362Z",
         "rule": "R20-credit",
         "rule_name_en": "Kamu SM credit low",
         "rule_name_tr": "Kamu SM kontörü az",
@@ -512,9 +552,9 @@
         "state": "resolved",
         "summary_en": "Credit left 420 (threshold 500).",
         "summary_tr": "Kalan kontör 420 (eşik 500).",
-        "time": "2026-10-13T04:00:11Z",
+        "time": "2026-10-13T04:00:12Z",
         "title": "Kamu SM kontörü azaldı: 420 kaldı (eşik 500)",
-        "updated_at": "2026-10-29T01:01:35.807671Z"
+        "updated_at": "2026-11-12T22:32:30.692643Z"
       }
     ],
     "limit": 3,
@@ -524,8 +564,10 @@
   "list_search": {
     "items": [
       {
+        "assignee": null,
         "auto_resolved": false,
-        "created_at": "2026-10-13T04:00:13.525554Z",
+        "created_at": "2026-10-13T04:00:15.561362Z",
+        "evidence_total": null,
         "id": 4,
         "notes_count": 0,
         "resolved_at": null,
@@ -534,11 +576,11 @@
         "rule_name_tr": "Log kaynağı sessiz",
         "severity": "high",
         "state": "open",
-        "summary_en": "No message from switch-3 for more than 15 minutes. Last message: 13.10.2026 06:42:12.",
-        "summary_tr": "switch-3 kaynağından 15 dakikadan uzun süredir mesaj gelmedi. Son mesaj: 13.10.2026 06:42:12.",
-        "time": "2026-10-13T04:00:13.525554Z",
-        "title": "Log kaynağı sessiz: switch-3 15 dakikadan uzun süredir mesaj göndermedi (son mesaj 2026-10-13T06:42:12+03:00)",
-        "updated_at": "2026-10-13T04:00:13.560130Z"
+        "summary_en": "No message from switch-3 for more than 15 minutes. Last message: 13.10.2026 06:42:15.",
+        "summary_tr": "switch-3 kaynağından 15 dakikadan uzun süredir mesaj gelmedi. Son mesaj: 13.10.2026 06:42:15.",
+        "time": "2026-10-13T04:00:15.561362Z",
+        "title": "Log kaynağı sessiz: switch-3 15 dakikadan uzun süredir mesaj göndermedi (son mesaj 2026-10-13T06:42:15+03:00)",
+        "updated_at": "2026-10-13T04:00:15.600888Z"
       }
     ],
     "limit": 50,
@@ -546,7 +588,7 @@
     "total": 1
   },
   "meta": {
-    "captured_at": "2026-10-13T04:01:17.864635+00:00",
+    "captured_at": "2026-10-13T04:01:29.937228+00:00",
     "clock": "2026-10-13T07:00:00+03:00",
     "info": "captured by web/scripts/capture_api_samples.py; do not edit",
     "site_day": "2026-10-09",
@@ -554,7 +596,7 @@
     "tsa": "mock (never legally valid)"
   },
   "note_created": {
-    "at": "2026-10-13T04:00:13.851658Z",
+    "at": "2026-10-13T04:00:15.953782Z",
     "by": "tolga",
     "from_state": null,
     "id": 11,
@@ -563,8 +605,9 @@
     "to_state": null
   },
   "state_acknowledged": {
+    "assignee": null,
     "auto_resolved": false,
-    "created_at": "2026-10-13T04:00:13.634944Z",
+    "created_at": "2026-10-13T04:00:15.691327Z",
     "deliveries": [],
     "details": {
       "drive": "D:",
@@ -573,7 +616,7 @@
     },
     "events": [
       {
-        "at": "2026-10-13T04:00:13.682009Z",
+        "at": "2026-10-13T04:00:15.747848Z",
         "by": "tolga",
         "from_state": "open",
         "id": 4,
@@ -582,7 +625,7 @@
         "to_state": "acknowledged"
       },
       {
-        "at": "2026-10-13T04:00:13.682009Z",
+        "at": "2026-10-13T04:00:15.747848Z",
         "by": "tolga",
         "from_state": null,
         "id": 5,
@@ -591,8 +634,10 @@
         "to_state": null
       }
     ],
+    "evidence_total": null,
     "id": 7,
     "notes_count": 1,
+    "person": null,
     "resolved_at": null,
     "rule": "R20-disk",
     "rule_name_en": "Disk almost full",
@@ -603,13 +648,14 @@
     "state": "acknowledged",
     "summary_en": "Drive D: is 84% full (threshold 80%).",
     "summary_tr": "D: diski %84 dolu (eşik %80).",
-    "time": "2026-10-13T04:00:13.626399Z",
+    "time": "2026-10-13T04:00:15.680568Z",
     "title": "Disk dolmak üzere: D: %84 dolu (eşik %80)",
-    "updated_at": "2026-10-13T04:00:13.682009Z"
+    "updated_at": "2026-10-13T04:00:15.747848Z"
   },
   "state_dismissed": {
+    "assignee": null,
     "auto_resolved": false,
-    "created_at": "2026-10-29T01:01:22.528016Z",
+    "created_at": "2026-11-12T22:32:15.543924Z",
     "deliveries": [],
     "details": {
       "end": "2026-10-09T12:00:00+00:00",
@@ -627,7 +673,7 @@
     },
     "events": [
       {
-        "at": "2026-10-13T04:00:13.725684Z",
+        "at": "2026-10-13T04:00:15.799998Z",
         "by": "tolga",
         "from_state": "open",
         "id": 6,
@@ -636,7 +682,7 @@
         "to_state": "dismissed"
       },
       {
-        "at": "2026-10-13T04:00:13.725684Z",
+        "at": "2026-10-13T04:00:15.799998Z",
         "by": "tolga",
         "from_state": null,
         "id": 7,
@@ -645,8 +691,10 @@
         "to_state": null
       }
     ],
+    "evidence_total": null,
     "id": 1,
     "notes_count": 1,
+    "person": null,
     "resolved_at": null,
     "rule": "ip_conflict",
     "rule_name_en": "IP conflict",
@@ -659,11 +707,12 @@
     "summary_tr": "Çakışan IP adresi: 172.20.42.57.",
     "time": "2026-10-09T10:00:00Z",
     "title": "IP çakışması: 172.20.42.57 aynı anda iki MAC adresinde (00:00:5e:00:53:57, 00:0c:29:00:00:99; 2026-10-09T13:00:00+03:00)",
-    "updated_at": "2026-10-13T04:00:13.725684Z"
+    "updated_at": "2026-10-13T04:00:15.799998Z"
   },
   "state_reopened": {
+    "assignee": null,
     "auto_resolved": false,
-    "created_at": "2026-10-12T23:00:13.525554Z",
+    "created_at": "2026-10-12T23:00:15.561362Z",
     "deliveries": [],
     "details": {
       "address": "172.20.10.77",
@@ -671,7 +720,7 @@
     },
     "events": [
       {
-        "at": "2026-10-13T04:00:13.767583Z",
+        "at": "2026-10-13T04:00:15.852832Z",
         "by": "tolga",
         "from_state": "open",
         "id": 8,
@@ -680,7 +729,7 @@
         "to_state": "resolved"
       },
       {
-        "at": "2026-10-13T04:00:13.767583Z",
+        "at": "2026-10-13T04:00:15.852832Z",
         "by": "tolga",
         "from_state": null,
         "id": 9,
@@ -689,7 +738,7 @@
         "to_state": null
       },
       {
-        "at": "2026-10-13T04:00:13.811665Z",
+        "at": "2026-10-13T04:00:15.905543Z",
         "by": "tolga",
         "from_state": "resolved",
         "id": 10,
@@ -698,8 +747,10 @@
         "to_state": "open"
       }
     ],
+    "evidence_total": null,
     "id": 6,
     "notes_count": 1,
+    "person": null,
     "resolved_at": null,
     "rule": "new-log-source",
     "rule_name_en": "New log source",
@@ -710,13 +761,14 @@
     "state": "open",
     "summary_en": "Sender address: 172.20.10.77.",
     "summary_tr": "Gönderici adresi: 172.20.10.77.",
-    "time": "2026-10-12T23:00:13.525554Z",
+    "time": "2026-10-12T23:00:15.561362Z",
     "title": "Yeni log kaynağı: 172.20.10.77 (kaydediliyor)",
-    "updated_at": "2026-10-13T04:00:13.811665Z"
+    "updated_at": "2026-10-13T04:00:15.905543Z"
   },
   "state_resolved": {
+    "assignee": null,
     "auto_resolved": false,
-    "created_at": "2026-10-12T02:00:13.525554Z",
+    "created_at": "2026-10-12T02:00:15.561362Z",
     "deliveries": [],
     "details": {
       "drive": "D:",
@@ -726,7 +778,7 @@
     },
     "events": [
       {
-        "at": "2026-10-13T04:00:13.601157Z",
+        "at": "2026-10-13T04:00:15.650332Z",
         "by": "tolga",
         "from_state": "open",
         "id": 2,
@@ -735,7 +787,7 @@
         "to_state": "resolved"
       },
       {
-        "at": "2026-10-13T04:00:13.601157Z",
+        "at": "2026-10-13T04:00:15.650332Z",
         "by": "tolga",
         "from_state": null,
         "id": 3,
@@ -744,9 +796,11 @@
         "to_state": null
       }
     ],
+    "evidence_total": null,
     "id": 5,
     "notes_count": 1,
-    "resolved_at": "2026-10-13T04:00:13.601157Z",
+    "person": null,
+    "resolved_at": "2026-10-13T04:00:15.650332Z",
     "rule": "R20-disk",
     "rule_name_en": "Disk almost full",
     "rule_name_tr": "Disk dolmak üzere",
@@ -756,16 +810,260 @@
     "state": "resolved",
     "summary_en": "Drive D: is 84% full (threshold 80%).",
     "summary_tr": "D: diski %84 dolu (eşik %80).",
-    "time": "2026-10-12T02:00:13.525554Z",
+    "time": "2026-10-12T02:00:15.561362Z",
     "title": "Disk dolmak üzere: D: %84 dolu (eşik %80)",
-    "updated_at": "2026-10-13T04:00:13.601157Z"
+    "updated_at": "2026-10-13T04:00:15.650332Z"
   },
   "summary": {
     "acknowledged": 1,
+    "by_day": [
+      {
+        "critical": 0,
+        "day": "2026-09-14",
+        "high": 0,
+        "info": 0,
+        "low": 0,
+        "medium": 0
+      },
+      {
+        "critical": 0,
+        "day": "2026-09-15",
+        "high": 0,
+        "info": 0,
+        "low": 0,
+        "medium": 0
+      },
+      {
+        "critical": 0,
+        "day": "2026-09-16",
+        "high": 0,
+        "info": 0,
+        "low": 0,
+        "medium": 0
+      },
+      {
+        "critical": 0,
+        "day": "2026-09-17",
+        "high": 0,
+        "info": 0,
+        "low": 0,
+        "medium": 0
+      },
+      {
+        "critical": 0,
+        "day": "2026-09-18",
+        "high": 0,
+        "info": 0,
+        "low": 0,
+        "medium": 0
+      },
+      {
+        "critical": 0,
+        "day": "2026-09-19",
+        "high": 0,
+        "info": 0,
+        "low": 0,
+        "medium": 0
+      },
+      {
+        "critical": 0,
+        "day": "2026-09-20",
+        "high": 0,
+        "info": 0,
+        "low": 0,
+        "medium": 0
+      },
+      {
+        "critical": 0,
+        "day": "2026-09-21",
+        "high": 0,
+        "info": 0,
+        "low": 0,
+        "medium": 0
+      },
+      {
+        "critical": 0,
+        "day": "2026-09-22",
+        "high": 0,
+        "info": 0,
+        "low": 0,
+        "medium": 0
+      },
+      {
+        "critical": 0,
+        "day": "2026-09-23",
+        "high": 0,
+        "info": 0,
+        "low": 0,
+        "medium": 0
+      },
+      {
+        "critical": 0,
+        "day": "2026-09-24",
+        "high": 0,
+        "info": 0,
+        "low": 0,
+        "medium": 0
+      },
+      {
+        "critical": 0,
+        "day": "2026-09-25",
+        "high": 0,
+        "info": 0,
+        "low": 0,
+        "medium": 0
+      },
+      {
+        "critical": 0,
+        "day": "2026-09-26",
+        "high": 0,
+        "info": 0,
+        "low": 0,
+        "medium": 0
+      },
+      {
+        "critical": 0,
+        "day": "2026-09-27",
+        "high": 0,
+        "info": 0,
+        "low": 0,
+        "medium": 0
+      },
+      {
+        "critical": 0,
+        "day": "2026-09-28",
+        "high": 0,
+        "info": 0,
+        "low": 0,
+        "medium": 0
+      },
+      {
+        "critical": 0,
+        "day": "2026-09-29",
+        "high": 0,
+        "info": 0,
+        "low": 0,
+        "medium": 0
+      },
+      {
+        "critical": 0,
+        "day": "2026-09-30",
+        "high": 0,
+        "info": 0,
+        "low": 0,
+        "medium": 0
+      },
+      {
+        "critical": 0,
+        "day": "2026-10-01",
+        "high": 0,
+        "info": 0,
+        "low": 0,
+        "medium": 0
+      },
+      {
+        "critical": 0,
+        "day": "2026-10-02",
+        "high": 0,
+        "info": 0,
+        "low": 0,
+        "medium": 0
+      },
+      {
+        "critical": 0,
+        "day": "2026-10-03",
+        "high": 0,
+        "info": 0,
+        "low": 0,
+        "medium": 0
+      },
+      {
+        "critical": 0,
+        "day": "2026-10-04",
+        "high": 0,
+        "info": 0,
+        "low": 0,
+        "medium": 0
+      },
+      {
+        "critical": 0,
+        "day": "2026-10-05",
+        "high": 0,
+        "info": 0,
+        "low": 0,
+        "medium": 0
+      },
+      {
+        "critical": 0,
+        "day": "2026-10-06",
+        "high": 0,
+        "info": 0,
+        "low": 0,
+        "medium": 0
+      },
+      {
+        "critical": 0,
+        "day": "2026-10-07",
+        "high": 0,
+        "info": 0,
+        "low": 0,
+        "medium": 0
+      },
+      {
+        "critical": 0,
+        "day": "2026-10-08",
+        "high": 0,
+        "info": 0,
+        "low": 0,
+        "medium": 0
+      },
+      {
+        "critical": 0,
+        "day": "2026-10-09",
+        "high": 0,
+        "info": 0,
+        "low": 0,
+        "medium": 1
+      },
+      {
+        "critical": 0,
+        "day": "2026-10-10",
+        "high": 0,
+        "info": 0,
+        "low": 0,
+        "medium": 0
+      },
+      {
+        "critical": 0,
+        "day": "2026-10-11",
+        "high": 0,
+        "info": 0,
+        "low": 0,
+        "medium": 0
+      },
+      {
+        "critical": 0,
+        "day": "2026-10-12",
+        "high": 1,
+        "info": 0,
+        "low": 0,
+        "medium": 0
+      },
+      {
+        "critical": 0,
+        "day": "2026-10-13",
+        "high": 4,
+        "info": 0,
+        "low": 0,
+        "medium": 1
+      }
+    ],
     "latest": [
       {
+        "assignee": null,
         "auto_resolved": false,
-        "created_at": "2026-10-13T04:00:13.634944Z",
+        "created_at": "2026-10-13T04:00:15.691327Z",
+        "evidence_total": null,
         "id": 7,
         "notes_count": 1,
         "resolved_at": null,
@@ -776,13 +1074,15 @@
         "state": "acknowledged",
         "summary_en": "Drive D: is 84% full (threshold 80%).",
         "summary_tr": "D: diski %84 dolu (eşik %80).",
-        "time": "2026-10-13T04:00:13.626399Z",
+        "time": "2026-10-13T04:00:15.680568Z",
         "title": "Disk dolmak üzere: D: %84 dolu (eşik %80)",
-        "updated_at": "2026-10-13T04:00:13.682009Z"
+        "updated_at": "2026-10-13T04:00:15.747848Z"
       },
       {
+        "assignee": null,
         "auto_resolved": false,
-        "created_at": "2026-10-13T04:00:13.525554Z",
+        "created_at": "2026-10-13T04:00:15.561362Z",
+        "evidence_total": null,
         "id": 4,
         "notes_count": 0,
         "resolved_at": null,
@@ -791,15 +1091,17 @@
         "rule_name_tr": "Log kaynağı sessiz",
         "severity": "high",
         "state": "open",
-        "summary_en": "No message from switch-3 for more than 15 minutes. Last message: 13.10.2026 06:42:12.",
-        "summary_tr": "switch-3 kaynağından 15 dakikadan uzun süredir mesaj gelmedi. Son mesaj: 13.10.2026 06:42:12.",
-        "time": "2026-10-13T04:00:13.525554Z",
-        "title": "Log kaynağı sessiz: switch-3 15 dakikadan uzun süredir mesaj göndermedi (son mesaj 2026-10-13T06:42:12+03:00)",
-        "updated_at": "2026-10-13T04:00:13.560130Z"
+        "summary_en": "No message from switch-3 for more than 15 minutes. Last message: 13.10.2026 06:42:15.",
+        "summary_tr": "switch-3 kaynağından 15 dakikadan uzun süredir mesaj gelmedi. Son mesaj: 13.10.2026 06:42:15.",
+        "time": "2026-10-13T04:00:15.561362Z",
+        "title": "Log kaynağı sessiz: switch-3 15 dakikadan uzun süredir mesaj göndermedi (son mesaj 2026-10-13T06:42:15+03:00)",
+        "updated_at": "2026-10-13T04:00:15.600888Z"
       },
       {
+        "assignee": null,
         "auto_resolved": false,
-        "created_at": "2026-10-13T04:00:13.525554Z",
+        "created_at": "2026-10-13T04:00:15.561362Z",
+        "evidence_total": null,
         "id": 2,
         "notes_count": 0,
         "resolved_at": null,
@@ -810,13 +1112,15 @@
         "state": "open",
         "summary_en": "11.10.2026 could not be sealed (attempt 1).",
         "summary_tr": "11.10.2026 günü mühürlenemedi (1. deneme).",
-        "time": "2026-10-13T04:00:00Z",
+        "time": "2026-10-13T04:00:01Z",
         "title": "Mühürleme başarısız (11.10.2026): mock TSA unreachable (injected). 5 dk sonra tekrar denenecek.",
-        "updated_at": "2026-10-13T04:00:13.540928Z"
+        "updated_at": "2026-10-13T04:00:15.577403Z"
       },
       {
+        "assignee": null,
         "auto_resolved": false,
-        "created_at": "2026-10-12T23:00:13.525554Z",
+        "created_at": "2026-10-12T23:00:15.561362Z",
+        "evidence_total": null,
         "id": 6,
         "notes_count": 2,
         "resolved_at": null,
@@ -827,9 +1131,9 @@
         "state": "open",
         "summary_en": "Sender address: 172.20.10.77.",
         "summary_tr": "Gönderici adresi: 172.20.10.77.",
-        "time": "2026-10-12T23:00:13.525554Z",
+        "time": "2026-10-12T23:00:15.561362Z",
         "title": "Yeni log kaynağı: 172.20.10.77 (kaydediliyor)",
-        "updated_at": "2026-10-13T04:00:13.851658Z"
+        "updated_at": "2026-10-13T04:00:15.953782Z"
       }
     ],
     "mean_time_to_close_seconds_30d": 31200,
@@ -839,6 +1143,64 @@
       "info": 0,
       "low": 0,
       "medium": 1
-    }
+    },
+    "top_keys": [
+      {
+        "count": 2,
+        "key": "R20-disk:D:",
+        "rule": "R20-disk"
+      },
+      {
+        "count": 1,
+        "key": "R15:switch-3",
+        "rule": "R15"
+      },
+      {
+        "count": 1,
+        "key": "R20-credit",
+        "rule": "R20-credit"
+      },
+      {
+        "count": 1,
+        "key": "R20-seal:2026-10-11",
+        "rule": "R20-seal"
+      },
+      {
+        "count": 1,
+        "key": "ip_conflict:172.20.42.57:00:00:5e:00:53:57,00:0c:29:00:00:99:2026-10-09",
+        "rule": "ip_conflict"
+      },
+      {
+        "count": 1,
+        "key": "new-log-source:172.20.10.77",
+        "rule": "new-log-source"
+      }
+    ],
+    "top_rules": [
+      {
+        "count": 2,
+        "rule": "R20-disk"
+      },
+      {
+        "count": 1,
+        "rule": "R15"
+      },
+      {
+        "count": 1,
+        "rule": "R20-credit"
+      },
+      {
+        "count": 1,
+        "rule": "R20-seal"
+      },
+      {
+        "count": 1,
+        "rule": "ip_conflict"
+      },
+      {
+        "count": 1,
+        "rule": "new-log-source"
+      }
+    ]
   }
 }

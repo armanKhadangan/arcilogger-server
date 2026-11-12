@@ -726,3 +726,15 @@ to the normal site: `port-scan` (R01), `external-scan` (R02), `brute-force` (R03
 - **W6-A-4: `ruff format` and this contract.** ruff 0.17 formats the Python block of §2.1.2;
   `ruff format --check .` failed on `wave-6` because of it. The day-1 pull request applies the
   formatter's whitespace-only change to that block; no word of the contract changed.
+
+### W6-A (engine pull request, #243)
+
+- **W6-A-5: a slice is at most the rule's window long.** §2.1.2 has a rule count the window
+  that ends with its slice (`(end − window_seconds, end]`), and §2.1.3 cuts the backlog into
+  slices of up to `rules.max_slice_seconds` (600). With a window shorter than the slice, a
+  rule would see only the last window of each slice: R01's 60-s window would miss a scan in
+  the first nine minutes of a 600-s slice, and the 24-h dry run in 600-s slices would answer
+  differently from the minute-by-minute live run. The engine and the dry run therefore cut
+  slices of `min(rules.max_slice_seconds, window_seconds)` (`engine.step`), so every moment
+  of a backlog falls into the window of some slice end. In steady state (a run a minute) the
+  slices are a minute long anyway. `test_a_backlog_puts_every_moment_into_a_window` pins it.

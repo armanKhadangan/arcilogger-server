@@ -116,7 +116,6 @@ from arcilogger_core.config import Config
 from arcilogger_core.configwatch import WORKER_HOT, ConfigWatch, ConfigWatcher
 from arcilogger_core.fsutil import atomic_write_text
 from arcilogger_core.layout import Layout
-from arcilogger_core.license.modules import SECURITY_RULES_MODULE
 from arcilogger_core.timeutil import SITE_TZ, site_day, to_site, utc_now
 from arcilogger_db.engine import engine_from_url, make_engine, session_factory
 from arcilogger_db.models import JobRun
@@ -245,6 +244,7 @@ SEARCH_COUNTS_EVERY: Final = timedelta(minutes=10)
 #: The modules of the paid jobs (licensing contract 1.4).
 USAGE_MODULE: Final = "usage_analytics"
 REPORTS_MODULE: Final = "usage_reports"
+SECURITY_RULES_MODULE: Final = "security_rules"
 #: ``rules.run`` evaluates the security rules every minute (Wave 6 contract §2.1.3).
 RULES_EVERY: Final = timedelta(minutes=1)
 

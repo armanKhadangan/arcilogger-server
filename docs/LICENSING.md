@@ -102,6 +102,7 @@ licence state.
 | `/raw` | Raw log lines | 5651 Core |
 | `/search` | Arama (log search): searches, statistics, saved searches, export | 5651 Core |
 | `/evidence` | Evidence packages | 5651 Core |
+| `/rules` | Security rules: the list is always readable; saving settings and "Son 24 saatte dene" (dry run) need the module | Security rules |
 | `/seals` | Sealed days, manifest, time stamp, verification, "Şimdi mühürle" (seal now) | 5651 Core |
 | `/credits` | Kamu SM credit, "Kontör sorgula" (query now) | 5651 Core |
 | `/devices` | Devices and device-person assignments | 5651 Core |

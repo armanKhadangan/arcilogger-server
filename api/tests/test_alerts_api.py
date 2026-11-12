@@ -113,11 +113,14 @@ RULES: dict[tuple[str, str], str] = {
     ("GET", "/api/v1/alerts/{alert_id}"): "alerts.read",
     ("POST", "/api/v1/alerts/{alert_id}/state"): "alerts.manage",
     ("POST", "/api/v1/alerts/{alert_id}/notes"): "alerts.manage",
+    ("GET", "/api/v1/alerts/{alert_id}/evidence"): "alerts.read",
+    ("POST", "/api/v1/alerts/{alert_id}/assign"): "alerts.manage",
     ("GET", "/api/v1/dashboard/summary"): "dashboard.view",
 }
 BODIES: dict[tuple[str, str], dict[str, Any]] = {
     ("POST", "/api/v1/alerts/{alert_id}/state"): {"state": "acknowledged"},
     ("POST", "/api/v1/alerts/{alert_id}/notes"): {"text": "Bakıyorum."},
+    ("POST", "/api/v1/alerts/{alert_id}/assign"): {"user_id": None},
 }
 
 
@@ -298,7 +301,7 @@ def test_list_item_shape(client: TestClient, admin: LoggedIn, several: dict[str,
     assert set(disk) == {
         "id", "time", "created_at", "updated_at", "resolved_at", "rule", "rule_name_tr",
         "rule_name_en", "severity", "state", "title", "summary_tr", "summary_en",
-        "auto_resolved", "notes_count",
+        "auto_resolved", "notes_count", "assignee", "evidence_total",
     }  # fmt: skip
     conflict = items[several["conflict"]]
     assert conflict["auto_resolved"] is True
@@ -693,7 +696,13 @@ def test_summary_without_history(client: TestClient, admin: LoggedIn) -> None:
         "acknowledged": 0,
         "latest": [],
         "mean_time_to_close_seconds_30d": None,
+        "by_day": body["by_day"],
+        "top_rules": [],
+        "top_keys": [],
     }
+    assert len(body["by_day"]) == 30
+    assert all(sum(day[name] for name in ("critical", "high", "medium", "low", "info")) == 0
+               for day in body["by_day"])  # fmt: skip
 
 
 def test_mean_time_to_close_from_the_api_workflow(

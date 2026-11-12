@@ -38,7 +38,7 @@ from collections.abc import Callable, Iterable, Sequence
 from contextlib import AbstractContextManager
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
-from typing import Any, Final
+from typing import Any, Final, Literal
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import func, select, text
@@ -500,7 +500,10 @@ def run_rules(
     return report
 
 
-def data_status(last_input_at: datetime | None, now: datetime, no_data: timedelta) -> str:
+DataStatus = Literal["ok", "no_data", "never"]
+
+
+def data_status(last_input_at: datetime | None, now: datetime, no_data: timedelta) -> DataStatus:
     """``ok`` (data within ``rules.no_data_hours``), ``no_data`` or ``never``."""
     if last_input_at is None:
         return "never"
