@@ -5,8 +5,8 @@ Every rule groups the rows of its inputs by source address and counts them by **
 (D8) over its window ``(end - window_seconds, end]``. Only addresses with at least one matching
 row in the slice ``(start, end]`` are counted (§2.1.2), so one slice costs the slice's rows plus
 the window's rows of those addresses (the ``(srcip, time)`` and ``(src, time)`` indexes). Device
-time is bounded for partition pruning: the window start minus the accepted clock skew up to the
-slice end plus the skew.
+time is bounded for partition pruning by :attr:`RuleContext.time_low` and
+:attr:`RuleContext.time_high`.
 
 Every parameter reaches SQL as a bound parameter (lists as arrays, networks as ``cidr[]`` with
 ``<<=``); nothing is formatted into the statement. The rules only read.
@@ -27,6 +27,7 @@ from sqlalchemy import (
     Subquery,
     Text,
     any_,
+    case,
     cast,
     distinct,
     false,
@@ -41,6 +42,7 @@ from sqlalchemy.orm import InstrumentedAttribute, Session
 from sqlalchemy.sql.elements import ColumnElement
 
 from arcilogger_db.models import FgApp, FgDns, FgTraffic, FgWeb, MtFw
+from arcilogger_db.settings import DEFAULT_SETTINGS, get_setting
 from arcilogger_worker.rules.model import (
     EvidenceRef,
     Hit,
@@ -53,6 +55,9 @@ from arcilogger_worker.rules.model import (
 #: Upper bound of a count threshold (a window holds at most this many rows of one address).
 MAX_COUNT: Final = 1_000_000
 HOUR: Final = 3600
+EVIDENCE_MAX_KEY: Final = "rules.evidence_max"
+#: Names a title lists (R10's ``what``).
+NAMES_SHOWN: Final = 3
 
 # -- SQL building blocks --------------------------------------------------------------------------
 
@@ -101,10 +106,9 @@ class Input:
 
 def _received(table: Any, ctx: RuleContext, since: datetime) -> tuple[ColumnElement[bool], ...]:
     """Receive time in ``(since, end]``, device time within the pruning bounds."""
-    skew = ctx.start - ctx.device_from
     return (
-        table.time >= ctx.window_start - skew,
-        table.time <= ctx.device_to,
+        table.time >= ctx.time_low,
+        table.time <= ctx.time_high,
         table.time_received > since,
         table.time_received <= ctx.end,
     )
@@ -186,7 +190,9 @@ def evaluate(
     hits: list[Hit] = []
     for row in found:
         key = str(row.ip)
-        values: dict[str, object] = {name: int(row._mapping[name]) for name in measured}
+        values: dict[str, object] = {
+            name: _value(row._mapping[name]) for name in measured if name != "count"
+        }
         values["window_seconds"] = ctx.settings.window_seconds
         hits.append(
             Hit(
@@ -200,12 +206,32 @@ def evaluate(
     return hits
 
 
+def _value(value: object) -> object:
+    """A count as it is; a list of names (``array_agg``) as one sorted, comma-separated text of
+    at most :data:`NAMES_SHOWN` names (a title stays short)."""
+    if isinstance(value, list):
+        names = sorted({str(item) for item in value if item})
+        more = ", …" if len(names) > NAMES_SHOWN else ""
+        return ", ".join(names[:NAMES_SHOWN]) + more
+    return value
+
+
+def _evidence_max(session: Session) -> int:
+    """``rules.evidence_max`` (a hand-edited value outside 1-100 is brought into range)."""
+    try:
+        value = int(get_setting(session, EVIDENCE_MAX_KEY))
+    except (TypeError, ValueError):
+        value = DEFAULT_SETTINGS[EVIDENCE_MAX_KEY]
+    return min(max(value, 1), 100)
+
+
 def _evidence(
     session: Session, ctx: RuleContext, inputs: Sequence[Input], keys: Sequence[str]
 ) -> dict[str, list[EvidenceRef]]:
     """The oldest ``evidence_max`` window rows of each hit address (receive time, then table
     and row id, so the order is stable)."""
     listed = cast(literal(sorted(keys), ARRAY(INET)), ARRAY(INET))
+    limit = _evidence_max(session)
     bare = [Input(i.table, i.address, i.where, {}) for i in inputs]
     window = _window_rows(bare, ctx, listed)
     ranked = select(
@@ -219,11 +245,11 @@ def _evidence(
     ).subquery()
     by_key: dict[str, list[EvidenceRef]] = {}
     for row in session.execute(
-        select(ranked).where(ranked.c.n <= ctx.evidence_max).order_by(ranked.c.ip, ranked.c.n)
+        select(ranked).where(ranked.c.n <= limit).order_by(ranked.c.ip, ranked.c.n)
     ):
         by_key.setdefault(str(row.ip), []).append(
             EvidenceRef(
-                tbl=row.tbl,
+                table=row.tbl,
                 row_id=int(row.row_id),
                 time=row.time,
                 time_received=row.time_received,
@@ -256,7 +282,7 @@ def _deny_actions() -> Param:
     return Param(
         "deny_actions",
         "strings",
-        ["deny"],
+        ("deny",),
         min=1,
         label_tr="Engelleme sayılan FortiGate action değerleri",
         label_en="FortiGate action values counted as blocked",
@@ -317,7 +343,7 @@ R01: Final = RuleDef(
         Param(
             "mikrotik_prefixes",
             "strings",
-            [],
+            (),
             label_tr="Engelleme kuralı sayılan MikroTik log önekleri (boş: MikroTik okunmaz)",
             label_en="MikroTik log prefixes of blocking rules (empty: MikroTik is not read)",
         ),
@@ -361,7 +387,7 @@ R02: Final = RuleDef(
         Param(
             "policy_names",
             "strings",
-            [],
+            (),
             label_tr="Yalnızca bu FortiGate politikaları (boş: hepsi)",
             label_en="Only these FortiGate policies (empty: all)",
         ),
@@ -401,7 +427,7 @@ def evaluate_r08(session: Session, ctx: RuleContext) -> list[Hit]:
 
 def r08_needs_setup(settings: RuleSettings) -> bool:
     """Idle until the allowed DNS servers are listed: without them every DNS query counts."""
-    return not settings.params.get("allowed_dns_servers")
+    return not settings.param("allowed_dns_servers")
 
 
 R08: Final = RuleDef(
@@ -415,7 +441,7 @@ R08: Final = RuleDef(
         Param(
             "ports",
             "ints",
-            [53, 853],
+            (53, 853),
             min=1,
             label_tr="DNS portları",
             label_en="DNS ports",
@@ -423,7 +449,7 @@ R08: Final = RuleDef(
         Param(
             "allowed_dns_servers",
             "networks",
-            [],
+            (),
             label_tr="İzin verilen DNS sunucuları (adres ya da ağ)",
             label_en="Allowed DNS servers (address or network)",
         ),
@@ -444,21 +470,24 @@ def evaluate_r10(session: Session, ctx: RuleContext) -> list[Hit]:
     categories = param(ctx, "categories")
     if categories:
         for table in (FgWeb, FgDns):
-            inputs.append(Input(table, table.srcip, (table.catdesc == _texts(categories),), {}))
+            matched = table.catdesc == _texts(categories)
+            inputs.append(Input(table, table.srcip, (matched,), {"what": table.catdesc}))
     apps, appcats = param(ctx, "apps"), param(ctx, "appcats")
     if apps or appcats:
-        matched = []
+        parts = []
+        name: Any = FgApp.appcat
         if apps:
-            matched.append(FgApp.app == _texts(apps))
+            parts.append(FgApp.app == _texts(apps))
+            name = case((FgApp.app == _texts(apps), FgApp.app), else_=FgApp.appcat)
         if appcats:
-            matched.append(FgApp.appcat == _texts(appcats))
-        inputs.append(Input(FgApp, FgApp.srcip, (or_(*matched),), {}))
+            parts.append(FgApp.appcat == _texts(appcats))
+        inputs.append(Input(FgApp, FgApp.srcip, (or_(*parts),), {"what": name}))
     threshold = int(param(ctx, "threshold"))
     return evaluate(
         session,
         ctx,
         inputs,
-        aggregates=lambda rows: {},
+        aggregates=lambda rows: {"what": func.array_agg(distinct(rows.c.what))},
         reached=lambda m: m["count"] >= threshold,
     )
 
@@ -474,21 +503,21 @@ R10: Final = RuleDef(
         Param(
             "categories",
             "strings",
-            ["Proxy Avoidance"],
+            ("Proxy Avoidance",),
             label_tr="FortiGuard kategorileri (catdesc; sahada doğrula)",
             label_en="FortiGuard categories (catdesc; verify on site)",
         ),
         Param(
             "apps",
             "strings",
-            ["Tor"],
+            ("Tor",),
             label_tr="Uygulamalar (app; sahada doğrula)",
             label_en="Applications (app; verify on site)",
         ),
         Param(
             "appcats",
             "strings",
-            ["Proxy"],
+            ("Proxy",),
             label_tr="Uygulama kategorileri (appcat; sahada doğrula)",
             label_en="Application categories (appcat; verify on site)",
         ),
@@ -536,7 +565,7 @@ R19: Final = RuleDef(
         Param(
             "rcode_field",
             "strings",
-            ["rcode"],
+            ("rcode",),
             min=1,
             max=1,
             label_tr="Yanıt kodunun alanı (sahada doğrula)",
@@ -545,7 +574,7 @@ R19: Final = RuleDef(
         Param(
             "nxdomain_values",
             "strings",
-            ["NXDOMAIN", "3"],
+            ("NXDOMAIN", "3"),
             min=1,
             label_tr='"Böyle bir ad yok" yanıt kodları (sahada doğrula)',
             label_en='"No such name" response codes (verify on site)',

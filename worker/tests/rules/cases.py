@@ -73,3 +73,97 @@ class RuleCase:
 
 #: Every case, one block per rule package, in the order the packages merge.
 CASES: Final[list[RuleCase]] = []
+
+# -- W6-B network: R01, R02, R08, R10, R19 (contract §2.2.1) --------------------------------------
+
+_SCANNER: Final = "172.20.41.17"
+_OUTSIDE: Final = "203.0.113.50"
+
+
+def _deny(srcip: str, seconds_before: int, **values: object) -> CaseRow:
+    """A blocked FortiGate session from ``srcip``, received ``seconds_before`` the slice end."""
+    columns = {"srcip": srcip, "dstip": "198.51.100.10", "dstport": 443, "action": "deny"}
+    return CaseRow("fg_traffic", -timedelta(seconds=seconds_before), {**columns, **values})
+
+
+def _dns_bypass(repeat: int) -> CaseRow:
+    columns = {"srcip": _SCANNER, "dstip": "198.51.100.53", "dstport": 53, "action": "accept"}
+    return CaseRow("fg_traffic", -timedelta(seconds=60), columns, repeat=repeat)
+
+
+def _nxdomain(repeat: int) -> CaseRow:
+    """DNS answers "no such name"; the response code in ``extra`` is V6 (sahada doğrula)."""
+    columns = {"srcip": _SCANNER, "qname": "x7k2q9.example", "extra": {"rcode": "NXDOMAIN"}}
+    return CaseRow("fg_dns", -timedelta(seconds=300), columns, repeat=repeat)
+
+
+_DNS_SERVERS: Final = {"params": {"allowed_dns_servers": ["172.20.10.1"]}}
+
+CASES.extend(
+    [
+        RuleCase(
+            "R01",
+            "ports",
+            tuple(_deny(_SCANNER, 59 - n, dstport=1000 + n) for n in range(30)),
+            (ExpectedHit(_SCANNER, 30, {"ports": 30, "hosts": 1}, evidence=20),),
+        ),
+        RuleCase(
+            "R01",
+            "hosts",
+            tuple(_deny(_SCANNER, 59 - n, dstip=f"172.20.50.{n + 1}") for n in range(50)),
+            (ExpectedHit(_SCANNER, 50, {"ports": 1, "hosts": 50}, evidence=20),),
+        ),
+        RuleCase(
+            "R01",
+            "below",
+            tuple(_deny(_SCANNER, 59 - n, dstport=1000 + n) for n in range(29)),
+        ),
+        RuleCase(
+            "R02",
+            "scan",
+            (
+                CaseRow(
+                    "fg_traffic", -timedelta(seconds=120), _deny(_OUTSIDE, 0).values, repeat=100
+                ),
+            ),
+            (ExpectedHit(_OUTSIDE, 100, evidence=20),),
+        ),
+        RuleCase(
+            "R02",
+            "below",
+            (CaseRow("fg_traffic", -timedelta(seconds=120), _deny(_OUTSIDE, 0).values, repeat=99),),
+        ),
+        RuleCase(
+            "R08",
+            "bypass",
+            (_dns_bypass(20),),
+            (ExpectedHit(_SCANNER, 20, {"servers": 1}, evidence=20),),
+            overrides=_DNS_SERVERS,
+        ),
+        RuleCase("R08", "below", (_dns_bypass(19),), overrides=_DNS_SERVERS),
+        RuleCase(
+            "R10",
+            "proxy",
+            (
+                CaseRow(
+                    "fg_web",
+                    -timedelta(seconds=30),
+                    {"srcip": _SCANNER, "catdesc": "Proxy Avoidance"},
+                ),
+            ),
+            (ExpectedHit(_SCANNER, 1, {"what": "Proxy Avoidance"}, evidence=1),),
+        ),
+        RuleCase(
+            "R10",
+            "other",
+            (CaseRow("fg_web", -timedelta(seconds=30), {"srcip": _SCANNER, "catdesc": "News"}),),
+        ),
+        RuleCase(
+            "R19",
+            "dga",
+            (_nxdomain(201),),
+            (ExpectedHit(_SCANNER, 201, evidence=20),),
+        ),
+        RuleCase("R19", "at-threshold", (_nxdomain(200),)),
+    ]
+)

@@ -22,10 +22,14 @@ from arcilogger_core.layout import Layout
 from arcilogger_core.rawlog import RawRecord, format_line, parse_line
 from arcilogger_core.timeutil import SITE_TZ, site_day, to_site
 from arcilogger_db.models import Base, FgTraffic
+from arcilogger_db.settings import set_setting
 from arcilogger_ingest.parsers import LinePosition, SourceType
 from arcilogger_ingest.parsers import parse_line as parse_raw
 from arcilogger_worker.rules import network
-from arcilogger_worker.rules.model import Hit, RuleContext, RuleDef, RuleSettings
+from arcilogger_worker.rules.model import Actions, Hit, RuleContext, RuleDef, RuleSettings
+from arcilogger_worker.rules.texts import title
+
+from .cases import CASES, SLICE_END, RuleCase
 
 pytestmark = pytest.mark.usefixtures("db_session")
 
@@ -160,24 +164,27 @@ def context(
         severity=rule.severity,
         window_seconds=rule.window_seconds,
         cooldown_seconds=rule.cooldown_seconds,
+        actions=Actions(email=True, webhook=True),
         params=values,
     )
-    start = end - timedelta(seconds=slice_seconds)
-    skew = timedelta(hours=1)
     return RuleContext(
         settings=settings,
-        start=start,
+        start=end - timedelta(seconds=slice_seconds),
         end=end,
-        window_start=end - timedelta(seconds=rule.window_seconds),
-        device_from=start - skew,
-        device_to=end + skew,
-        internal_networks=[ip_network(n) for n in INTERNAL],
+        max_device_skew=timedelta(hours=1),
+        internal_networks=tuple(ip_network(n) for n in INTERNAL),
         zone=SITE_TZ,
     )
 
 
 def run(session: Session, rule: RuleDef, **kwargs: Any) -> list[Hit]:
-    return list(rule.evaluate(session, context(rule, **kwargs)))
+    """The rule's hits; each one fills its rule's title templates."""
+    hits = list(rule.evaluate(session, context(rule, **kwargs)))
+    for hit in hits:
+        turkish, english = title(rule.id, hit.key, hit.count, hit.values)
+        assert hit.key in turkish
+        assert hit.key in english
+    return hits
 
 
 def spread(count: int, seconds: float, *, end: datetime = NOW) -> list[datetime]:
@@ -189,6 +196,10 @@ def spread(count: int, seconds: float, *, end: datetime = NOW) -> list[datetime]
 def assert_opens(layout: Layout, hit: Hit) -> None:
     """Every evidence reference names its own spool line (what ``GET /api/v1/raw`` opens)."""
     for ref in hit.evidence:
+        assert ref.source is not None
+        assert ref.raw_day is not None
+        assert ref.raw_line is not None
+        assert ref.raw_offset is not None
         data = layout.spool_file(ref.source, ref.raw_day).read_bytes()
         assert data[: ref.raw_offset].count(b"\n") == ref.raw_line - 1
         line = data[ref.raw_offset :].split(b"\n", 1)[0]
@@ -202,6 +213,53 @@ def only(hits: Sequence[Hit]) -> Hit:
     return hits[0]
 
 
+# -- The cases of cases.py (T-A1, T-R) -----------------------------------------------------------
+
+NETWORK_CASES = [case for case in CASES if case.rule in {rule.id for rule in network.RULES}]
+
+
+def insert_case_rows(session: Session, case: RuleCase) -> None:
+    """The case's rows with the common columns filled in (a raw reference per row; no spool
+    file: these rows check the rule, the tests above check the references)."""
+    number = 0
+    for row in case.rows:
+        table = Base.metadata.tables[row.table]
+        for repeat in range(row.repeat):
+            number += 1
+            received = SLICE_END + row.received + timedelta(seconds=repeat)
+            common = {
+                "time": received + row.device_offset,
+                "time_received": received,
+                "source": "core-r1" if row.table.startswith("mt_") else "fortigate",
+                "sender": ROUTER if row.table.startswith("mt_") else FIREWALL,
+                "raw_day": site_day(received),
+                "raw_line": number,
+                "raw_offset": 100 * (number - 1),
+            }
+            session.execute(insert(table).values(**common, **row.values))
+
+
+def test_every_network_rule_has_its_cases() -> None:
+    for rule in network.RULES:
+        cases = [case for case in NETWORK_CASES if case.rule == rule.id]
+        assert any(case.positive for case in cases), rule.id
+        assert any(not case.positive for case in cases), rule.id
+
+
+@pytest.mark.parametrize("case", NETWORK_CASES, ids=lambda case: f"{case.rule}-{case.name}")
+def test_the_cases(db_session: Session, case: RuleCase) -> None:
+    insert_case_rows(db_session, case)
+    rule = next(rule for rule in network.RULES if rule.id == case.rule)
+    params = dict(case.overrides.get("params", {}))  # type: ignore[call-overload]
+    seconds = case.slice_seconds or 600  # rules.max_slice_seconds
+    hits = run(db_session, rule, end=SLICE_END, slice_seconds=seconds, **params)
+    assert [(hit.key, hit.count) for hit in hits] == [(e.key, e.count) for e in case.expected]
+    for hit, expected in zip(hits, case.expected, strict=True):
+        assert {name: hit.values.get(name) for name in expected.values} == expected.values
+        if expected.evidence is not None:
+            assert len(hit.evidence) == expected.evidence
+
+
 # -- R01 ------------------------------------------------------------------------------------------
 
 
@@ -212,11 +270,21 @@ def test_r01_internal_port_scan(db_session: Session, lines: Lines, layout: Layou
     lines.traffic(NOW, SCANNER, dstport=5000, action="accept")  # not blocked
     hit = only(run(db_session, network.R01))
     assert (hit.key, hit.count, hit.time) == (SCANNER, 30, NOW)
-    assert hit.values == {"count": 30, "ports": 30, "hosts": 1, "window_seconds": 60}
+    assert hit.values == {"ports": 30, "hosts": 1, "window_seconds": 60}
     assert len(hit.evidence) == 20  # rules.evidence_max, the oldest first
     assert [e.time_received for e in hit.evidence] == spread(30, 59)[:20]
-    assert {e.tbl for e in hit.evidence} == {"fg_traffic"}
+    assert {e.table for e in hit.evidence} == {"fg_traffic"}
     assert_opens(layout, hit)
+
+
+def test_evidence_follows_the_setting(db_session: Session, lines: Lines) -> None:
+    """``rules.evidence_max`` caps the evidence of a hit; the count stays every row."""
+    set_setting(db_session, "rules.evidence_max", 5, updated_by="test")
+    for n, at in enumerate(spread(30, 59)):
+        lines.traffic(at, SCANNER, dstport=1000 + n)
+    hit = only(run(db_session, network.R01))
+    assert (hit.count, len(hit.evidence)) == (30, 5)
+    assert [e.time_received for e in hit.evidence] == spread(30, 59)[:5]
 
 
 def test_r01_one_port_below_the_threshold(db_session: Session, lines: Lines) -> None:
@@ -261,7 +329,7 @@ def test_r01_mikrotik_lines_count_when_their_prefix_is_listed(
     assert run(db_session, network.R01) == []  # default: MikroTik not read
     hit = only(run(db_session, network.R01, mikrotik_prefixes=["DROP-FWD"]))
     assert (hit.count, hit.values["ports"], hit.values["hosts"]) == (30, 30, 2)
-    assert {e.tbl for e in hit.evidence} == {"fg_traffic", "mt_fw"}
+    assert {e.table for e in hit.evidence} == {"fg_traffic", "mt_fw"}
     assert_opens(layout, hit)
     assert run(db_session, network.R01, mikrotik_prefixes=["DROP-WAN"]) == []
 
@@ -277,7 +345,7 @@ def test_r02_external_scan(db_session: Session, lines: Lines, layout: Layout) ->
     assert (hit.key, hit.count, hit.values) == (
         OUTSIDE,
         100,
-        {"count": 100, "window_seconds": 300},
+        {"window_seconds": 300},
     )
     assert_opens(layout, hit)
     assert run(db_session, network.R02, policy_names=["VPN-IN"]) == []
@@ -337,8 +405,26 @@ def test_r10_proxy_vpn_tor(db_session: Session, lines: Lines, layout: Layout, ki
     else:
         lines.app(at, SCANNER, "Example.Tunnel", "Proxy")
     hit = only(run(db_session, network.R10))
-    assert (hit.key, hit.count, hit.values) == (SCANNER, 1, {"count": 1, "window_seconds": 3600})
+    what = {"web": "Proxy Avoidance", "dns": "Proxy Avoidance", "app": "Tor", "appcat": "Proxy"}
+    assert (hit.key, hit.count, hit.values) == (
+        SCANNER,
+        1,
+        {"what": what[kind], "window_seconds": 3600},
+    )
     assert_opens(layout, hit)
+
+
+def test_r10_names_what_it_matched(db_session: Session, lines: Lines) -> None:
+    at = NOW - timedelta(seconds=30)
+    for name in ("Proxy Avoidance", "Synthetic VPN", "Synthetic Tunnel", "Synthetic Relay"):
+        lines.web(at, SCANNER, name)
+    lines.app(at, SCANNER, "Tor", "Proxy")
+    names = ["Proxy Avoidance", "Synthetic Relay", "Synthetic Tunnel", "Synthetic VPN"]
+    hit = only(run(db_session, network.R10, categories=names))
+    assert (hit.count, hit.values["what"]) == (
+        5,
+        "Proxy Avoidance, Synthetic Relay, Synthetic Tunnel, …",
+    )
 
 
 def test_r10_nothing_listed_matches(db_session: Session, lines: Lines) -> None:
