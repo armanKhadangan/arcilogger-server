@@ -40,7 +40,7 @@
         "raw": "Raw line"
       },
       "openRaw": "Open raw line",
-      "openRawOf": "Open the raw line of the record of {{time}}",
+      "openRawOf": "Open raw line: {{time}}",
       "noRaw": "Opening a raw line needs the search or 5651 lookup permission.",
       "tables": {
         "fg_ips": "FortiGate IPS record",

@@ -40,7 +40,7 @@
         "raw": "Ham satır"
       },
       "openRaw": "Ham satırı aç",
-      "openRawOf": "{{time}} kaydının ham satırını aç",
+      "openRawOf": "Ham satırı aç: {{time}}",
       "noRaw": "Ham satırı açmak için arama ya da 5651 sorgu yetkisi gerekir.",
       "tables": {
         "fg_ips": "FortiGate IPS kaydı",
