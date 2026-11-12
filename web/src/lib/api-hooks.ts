@@ -1649,7 +1649,7 @@ export function useWebhookDeliveries(name: string | null) {
   return useQuery({
     queryKey: queryKeys.webhookDeliveries(name ?? ''),
     queryFn: ({ signal }) =>
-      api.get<WebhookDeliveries>(`/webhooks/${encodeURIComponent(name ?? '')}/deliveries`, {
+      api.get<WebhookDeliveries>(`/webhooks/${encodeURIComponent(String(name))}/deliveries`, {
         signal,
         params: { limit: 50 },
       }),
