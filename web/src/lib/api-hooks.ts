@@ -1,7 +1,7 @@
 /**
  * TanStack Query hooks, one per endpoint of the auth, users, audit, 5651 lookup, evidence,
- * sealing, credit, devices/persons, dashboard, security alert, scheduled report, usage, licence,
- * browser administration (`/admin/*`) and database settings (`/settings`) API.
+ * sealing, credit, devices/persons, dashboard, security alert and rule, scheduled report, usage,
+ * licence, browser administration (`/admin/*`) and database settings (`/settings`) API.
  *
  * Conventions:
  *  - Sign-in steps pass `silent`: their 401/403 answers are part of the flow (wrong code,
@@ -129,6 +129,7 @@ import type {
 } from './api-types';
 import { siteToday } from './display';
 import type { RawRef } from './lookup-types';
+import type { DryRunResult, RuleList, RuleOut, RuleSettingsIn } from './rules-types';
 import type { SealDayDetail } from './seal-types';
 import type {
   AdminAccepted,
@@ -208,6 +209,7 @@ export const queryKeys = {
   alert: (id: number) => ['alerts', 'one', id] as const,
   alertSummary: ['alerts', 'summary'] as const,
   alertsAll: ['alerts'] as const,
+  rules: ['rules'] as const,
   schedules: ['reports', 'schedules'] as const,
   runs: (filters: RunFilters) => ['reports', 'runs', filters] as const,
   run: (id: number) => ['reports', 'run', id] as const,
@@ -1003,6 +1005,46 @@ export function useAddAlertNote() {
     mutationFn: ({ id, ...body }: AlertNoteRequest & { id: number }) =>
       api.post<AlertEvent>(`/alerts/${id}/notes`, body),
     onSuccess: refresh,
+  });
+}
+
+// -- security rules (Wave 6 contract §2.3, §2.6.1) ------------------------------------------------
+
+/** `GET /rules` (`alerts.read`): every rule with its settings, defaults and data status. */
+export function useRules() {
+  return useQuery({
+    queryKey: queryKeys.rules,
+    queryFn: ({ signal }) => api.get<RuleList>('/rules', { signal }),
+  });
+}
+
+/**
+ * `PUT /rules/{id}` (`settings.manage`, module `security_rules`): the rule's overrides; the answer
+ * is the rule as it is now, put into the list.
+ */
+export function useUpdateRule() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, body }: { id: string; body: RuleSettingsIn }) =>
+      api.put<RuleOut>(`/rules/${encodeURIComponent(id)}`, body),
+    onSuccess: (rule) => {
+      client.setQueryData<RuleList>(queryKeys.rules, (list) =>
+        list
+          ? { ...list, rules: list.rules.map((item) => (item.id === rule.id ? rule : item)) }
+          : list,
+      );
+    },
+  });
+}
+
+/**
+ * `POST /rules/{id}/dry-run` ("Son 24 saatte dene"): the alerts the candidate settings would have
+ * opened in the last 24 hours; nothing is written.
+ */
+export function useRuleDryRun() {
+  return useMutation({
+    mutationFn: ({ id, body }: { id: string; body: RuleSettingsIn }) =>
+      api.post<DryRunResult>(`/rules/${encodeURIComponent(id)}/dry-run`, body),
   });
 }
 
