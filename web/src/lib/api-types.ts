@@ -987,6 +987,8 @@ export interface AlertFilters {
   /** Inclusive start, exclusive end (ISO 8601 with offset). */
   from?: string;
   to?: string;
+  /** `me`, `none` or a user id (Wave 6 §2.6.2). */
+  assignee?: string;
   sort?: AlertSort;
   order?: SortOrder;
   limit?: number;

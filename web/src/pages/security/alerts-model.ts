@@ -26,8 +26,10 @@ import type {
   AlertState,
   SortOrder,
 } from '@/lib/api-types';
+import type { AlertAdditions, AlertAssignee, AlertsOfDay } from '@/lib/alert-rule-types';
 import type { Lang } from '@/lib/format';
 import { parseId } from '@/lib/display';
+import { roleHas } from '@/lib/permissions';
 import { siteDayEnd, siteDayStart } from '@/lib/site-day';
 import { codePointLength } from '@/lib/validation';
 
@@ -192,6 +194,8 @@ export interface AlertView {
   /** Site days `YYYY-MM-DD`, inclusive. */
   from: string | null;
   to: string | null;
+  /** "Bana atananlar": only the alerts assigned to the signed-in user (Wave 6 §2.6.2). */
+  mine: boolean;
   sort: AlertSort;
   order: SortOrder;
 }
@@ -202,11 +206,12 @@ export const DEFAULT_ALERT_VIEW: AlertView = {
   rule: '',
   from: null,
   to: null,
+  mine: false,
   sort: 'time',
   order: 'desc',
 };
 
-const KEYS = ['state', 'severity', 'rule', 'from', 'to', 'sort', 'order'] as const;
+const KEYS = ['state', 'severity', 'rule', 'from', 'to', 'assignee', 'sort', 'order'] as const;
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
 const RULE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 
@@ -237,6 +242,7 @@ export function alertViewFromSearch(params: URLSearchParams): AlertView {
     rule: normalizeRule(params.get('rule') ?? ''),
     from,
     to,
+    mine: params.get('assignee') === 'me',
     sort: (ALERT_SORTS as readonly (string | null)[]).includes(sort)
       ? (sort as AlertSort)
       : DEFAULT_ALERT_VIEW.sort,
@@ -253,6 +259,7 @@ export function alertViewToSearch(view: AlertView, params: URLSearchParams): URL
   if (view.rule) next.set('rule', view.rule);
   if (view.from) next.set('from', view.from);
   if (view.to) next.set('to', view.to);
+  if (view.mine) next.set('assignee', 'me');
   if (view.sort !== DEFAULT_ALERT_VIEW.sort || view.order !== DEFAULT_ALERT_VIEW.order) {
     next.set('sort', view.sort);
     next.set('order', view.order);
@@ -267,7 +274,8 @@ export function isAlertViewFiltered(view: AlertView, search: string): boolean {
     view.severity !== null ||
     view.rule !== '' ||
     view.from !== null ||
-    view.to !== null
+    view.to !== null ||
+    view.mine
   );
 }
 
@@ -295,6 +303,7 @@ export function alertQuery(
   if (q) filters.q = q;
   if (view.from) filters.from = siteDayStart(localDay(view.from));
   if (view.to) filters.to = siteDayEnd(localDay(view.to));
+  if (view.mine) filters.assignee = 'me';
   return filters;
 }
 
@@ -354,4 +363,35 @@ export function detailRows(details: Record<string, unknown>): [string, string][]
           ? String(value)
           : JSON.stringify(value),
   ]);
+}
+
+// -- Wave 6: assignment, evidence, the summary's 30 days (§2.6.2) --------------------------------
+
+/** The user the alert is assigned to; `null` for nobody (and for an API without assignment). */
+export function assigneeOf(alert: AlertAdditions): AlertAssignee | null {
+  return alert.assignee ?? null;
+}
+
+/** Rows behind a rule's alert (0 for the alerts of the checks, which name no rows). */
+export function evidenceTotalOf(alert: AlertAdditions): number {
+  return alert.evidence_total ?? 0;
+}
+
+/** Who may be given an alert: active users whose role reads alerts, by user name. */
+export function assignCandidates<
+  T extends { id: number; username: string; role: string; active: boolean },
+>(users: readonly T[]): T[] {
+  return users
+    .filter((user) => user.active && roleHas(user.role, 'alerts.read'))
+    .sort((a, b) => a.username.localeCompare(b.username, 'tr'));
+}
+
+/** The summary's 30 site days, oldest first, with a total per day (chart and table). */
+export function byDayRows(days: readonly AlertsOfDay[] | undefined) {
+  return [...(days ?? [])]
+    .sort((a, b) => a.day.localeCompare(b.day))
+    .map((day) => ({
+      ...day,
+      total: ALERT_SEVERITIES.reduce((sum, severity) => sum + day[severity], 0),
+    }));
 }
