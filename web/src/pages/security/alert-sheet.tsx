@@ -9,6 +9,7 @@ import {
   RotateCcw,
   Search,
   Undo2,
+  UserRoundCheck,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { useEffect, useId, useRef, useState } from 'react';
@@ -96,6 +97,19 @@ function History({ events }: { events: readonly AlertEvent[] }) {
     .map((event) => {
       const system = event.by === 'system';
       const by = system ? t('security.detail.system') : event.by;
+      // Wave 6 §2.5: who the alert was given to (`text`: the user name, null for nobody).
+      if ((event.kind as string) === 'assign') {
+        return {
+          id: String(event.id),
+          time: formatDateTime(event.at),
+          title: event.text
+            ? t('security.assign.event', { user: event.text })
+            : t('security.assign.eventCleared'),
+          description: <span>{t('security.detail.by', { user: by })}</span>,
+          icon: UserRoundCheck,
+          tone: 'neutral',
+        };
+      }
       if (event.kind === 'note') {
         return {
           id: String(event.id),

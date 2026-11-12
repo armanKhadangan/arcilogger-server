@@ -32,7 +32,14 @@ import type {
   DashboardSummary,
   OpenBySeverity,
 } from '../src/lib/api-types';
+import type { AlertDetailWithRules } from '../src/lib/alert-rule-types';
 import { codePointLength } from '../src/lib/validation';
+import {
+  PERSON_ALERT,
+  RULE_ALERT,
+  RULE_EVIDENCE,
+  SUMMARY_ADDITIONS,
+} from '../src/test/alert-rule-samples';
 
 import type { MockUser, RecordedCall } from './mock-api';
 import type { Answer, MockHost } from './mock-records';
@@ -55,7 +62,7 @@ const SITE_OFFSET_MS = 3 * 3_600_000;
 const NOTE_MAX = 2000;
 
 /** Fields of `AlertDetail` that `AlertOut` does not have. */
-const DETAIL_ONLY = ['details', 'events', 'runbook_tr', 'runbook_en', 'deliveries'];
+const DETAIL_ONLY = ['details', 'events', 'runbook_tr', 'runbook_en', 'deliveries', 'person'];
 
 function alertOut(detail: AlertDetail): AlertOut {
   return Object.fromEntries(
@@ -140,14 +147,37 @@ function rank(list: readonly string[], value: string): number {
   return list.indexOf(value);
 }
 
+/**
+ * Wave 6 (contract §2.6.2, §2.6.3; `rules: true`): two rule alerts beside the captured ones
+ * (`src/test/alert-rule-samples.ts`), `?assignee=me|none|<id>`, `POST /alerts/{id}/assign`
+ * (`alerts.manage`; only a user whose role reads alerts, else 422 `alert_assignee_invalid`; an
+ * `assign` event), `GET /alerts/{id}/evidence`, the person of a person-level alert only for
+ * `usage.person`, and the summary's 30 days and top lists.
+ */
+export interface AlertsOptions {
+  rules?: boolean;
+}
+
+/** A user of the main mock as the assignment needs it. */
+export interface AssignableUser {
+  id: number;
+  username: string;
+  permissions: readonly string[];
+}
+
 export class AlertsMock {
-  readonly alerts = new Map<number, AlertDetail>();
+  readonly alerts = new Map<number, AlertDetailWithRules>();
   private readonly started = Date.now();
   private readonly clock = Date.parse(`${ALERTS.meta.site_today}T15:00:00+03:00`);
   private nextEvent: number;
 
-  constructor() {
+  constructor(
+    private readonly options: AlertsOptions = {},
+    private readonly userById: (id: number) => AssignableUser | null = () => null,
+  ) {
     for (const item of capturedAlerts()) this.alerts.set(item.id, item);
+    if (options.rules)
+      for (const item of [RULE_ALERT, PERSON_ALERT]) this.alerts.set(item.id, copy(item));
     this.nextEvent =
       Math.max(0, ...[...this.alerts.values()].flatMap((item) => item.events.map((e) => e.id))) + 1;
   }
@@ -174,9 +204,13 @@ export class AlertsMock {
       const account = host.requirePermission(call, 'alerts.read');
       return Array.isArray(account) ? account : [200, this.summary()];
     }
-    if ((match = /^\/alerts\/(\d+)(\/state|\/notes)?$/.exec(path))) {
+    if ((match = /^\/alerts\/(\d+)(\/state|\/notes|\/assign|\/evidence)?$/.exec(path))) {
       const id = Number(match[1]);
       if (method === 'GET' && !match[2]) return this.detail(call, host, id);
+      if (this.options.rules && method === 'POST' && match[2] === '/assign')
+        return this.assign(call, host, id);
+      if (this.options.rules && method === 'GET' && match[2] === '/evidence')
+        return this.evidence(call, host, id);
       if (method === 'POST' && match[2] === '/state') return this.changeState(call, host, id);
       if (method === 'POST' && match[2] === '/notes') return this.addNote(call, host, id);
     }
@@ -221,6 +255,15 @@ export class AlertsMock {
     const to = q.get('to');
     if (from && to && Date.parse(from) >= Date.parse(to))
       return validation(host, 'to', 'Input should be after from');
+    const assignee = q.get('assignee');
+    if (assignee !== null && !/^(me|none|\d+)$/.test(assignee))
+      return validation(host, 'assignee', "Input should be 'me', 'none' or a user id");
+    const assigned = (item: AlertDetailWithRules): boolean => {
+      if (assignee === null) return true;
+      const holder = item.assignee?.id ?? null;
+      if (assignee === 'none') return holder === null;
+      return holder === (assignee === 'me' ? account.id : Number(assignee));
+    };
     const text = (q.get('q') ?? '').trim().toLocaleLowerCase('tr');
     const sign = order === 'asc' ? 1 : -1;
     const key = (item: AlertDetail): number | string => {
@@ -237,6 +280,7 @@ export class AlertsMock {
       .filter((item) => rules.length === 0 || rules.includes(item.rule))
       .filter((item) => !from || Date.parse(item.time) >= Date.parse(from))
       .filter((item) => !to || Date.parse(item.time) < Date.parse(to))
+      .filter(assigned)
       .filter(
         (item) =>
           !text ||
@@ -266,7 +310,64 @@ export class AlertsMock {
     const account = host.requirePermission(call, 'alerts.read');
     if (Array.isArray(account)) return account;
     const found = this.alerts.get(id);
-    return found ? [200, copy(found)] : host.error(404, 'alert_not_found');
+    if (!found) return host.error(404, 'alert_not_found');
+    const answer = copy(found);
+    // D3: the person's name only for `usage.person` (the API audits `alert.person_view`).
+    if (!host.permissionsOf(account).includes('usage.person')) delete answer.person;
+    return [200, answer];
+  }
+
+  private assign(call: RecordedCall, host: MockHost, id: number): Answer {
+    const account = host.requirePermission(call, 'alerts.manage');
+    if (Array.isArray(account)) return account;
+    const found = this.alerts.get(id);
+    if (!found) return host.error(404, 'alert_not_found');
+    const body = call.body as { user_id?: unknown };
+    const userId = body.user_id;
+    if (userId !== null && !Number.isInteger(userId))
+      return validation(host, 'user_id', 'Input should be an integer or null');
+    let assignee: AlertDetailWithRules['assignee'] = null;
+    if (userId !== null) {
+      const user = this.userById(userId as number);
+      if (!user?.permissions.includes('alerts.read'))
+        return [
+          422,
+          {
+            error: {
+              code: 'alert_assignee_invalid',
+              message_tr: 'Bu kullanıcıya uyarı atanamaz.',
+              message_en: 'Alerts cannot be assigned to this user.',
+            },
+          },
+        ];
+      assignee = { id: user.id, username: user.username };
+    }
+    found.assignee = assignee;
+    const at = this.now().toISOString();
+    found.updated_at = at;
+    found.events.push({
+      id: this.nextEvent++,
+      kind: 'assign' as AlertEvent['kind'],
+      from_state: null,
+      to_state: null,
+      text: assignee?.username ?? null,
+      by: account.username,
+      at,
+    });
+    return [200, copy(found)];
+  }
+
+  private evidence(call: RecordedCall, host: MockHost, id: number): Answer {
+    const account = host.requirePermission(call, 'alerts.read');
+    if (Array.isArray(account)) return account;
+    const found = this.alerts.get(id);
+    if (!found) return host.error(404, 'alert_not_found');
+    return [
+      200,
+      id === RULE_EVIDENCE.alert_id
+        ? copy(RULE_EVIDENCE)
+        : { alert_id: id, total: found.evidence_total ?? 0, items: [] },
+    ];
   }
 
   openBySeverity(): OpenBySeverity {
@@ -315,6 +416,7 @@ export class AlertsMock {
         .length,
       latest: this.latest(),
       mean_time_to_close_seconds_30d: this.meanTimeToClose(),
+      ...(this.options.rules ? copy(SUMMARY_ADDITIONS) : {}),
     };
   }
 

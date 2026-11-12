@@ -12,7 +12,9 @@
       "nobody": "Not assigned",
       "me": "{{user}} (me)",
       "done": "The alert was assigned to {{user}}.",
-      "cleared": "The assignment was removed."
+      "cleared": "The assignment was removed.",
+      "event": "Assigned to {{user}}",
+      "eventCleared": "Assignment removed"
     },
     "person": {
       "label": "Person: {{name}}",

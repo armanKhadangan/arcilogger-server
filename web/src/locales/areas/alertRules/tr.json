@@ -12,7 +12,9 @@
       "nobody": "Kimseye atanmadı",
       "me": "{{user}} (ben)",
       "done": "Uyarı {{user}} kullanıcısına atandı.",
-      "cleared": "Atama kaldırıldı."
+      "cleared": "Atama kaldırıldı.",
+      "event": "{{user}} kullanıcısına atandı",
+      "eventCleared": "Atama kaldırıldı"
     },
     "person": {
       "label": "Kişi: {{name}}",
