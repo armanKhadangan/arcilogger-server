@@ -42,6 +42,7 @@ Fiyatlar üründe yer almaz.
 | `usage_analytics` | Kullanım analizi | Usage analytics | Kişi, cihaz, site ve kategori bazında tahmini kullanım süreleri ve dışa aktarma: **Kullanım** sayfası, paneldeki kullanım bölümleri ve **Canlı Durum**'daki şu an veri gönderip alanlar tablosu | — |
 | `usage_reports` | Zamanlanmış kullanım raporları | Scheduled usage reports | Kullanım raporlarının zamanlanmış olarak üretilip e-postayla gönderilmesi: **Raporlar** sayfası | Kullanım analizi |
 | `bulk_import` | Toplu içe aktarma (CSV) | Bulk import (CSV) | Kişilerin ve cihaz atamalarının CSV dosyasından toplu içe aktarılması (Cihazlar ve Kişiler → **Aktarım** sekmesinin içe aktarma bölümü); elle giriş ve CSV dışa aktarma her zaman açıktır | — |
+| `security_rules` | Güvenlik kuralları | Security rules | Ağdaki şüpheli olayları ayarlanabilir eşiklerle yakalayan güvenlik kuralları (R01–R14, R16–R19), kural düzenleyici ve webhook bildirimleri; log kaynağı ve sistem uyarıları (R15, R20), IP çakışması ve yeni log kaynağı uyarısı 5651 Temel'dedir | — |
 
 **Kullanım modüllerinin veri ön koşulu:** Kullanım analizi ve Zamanlanmış kullanım raporları
 yalnızca FortiGate kayıtlarından hesaplanır: trafik kayıtları (uzun oturumlar için ara kayıtlarla),

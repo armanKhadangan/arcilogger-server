@@ -56,9 +56,11 @@ OTHER = "0000-1111-2222-3333"
 #: 20 October 2026, 12:00 site time.
 NOW = datetime(2026, 10, 20, 9, 0, tzinfo=UTC)
 RELEASE = date(2026, 10, 1)
-PAID = ["usage_analytics", "usage_reports", "bulk_import"]
-NAMES_TR = "Kullanım analizi, Zamanlanmış kullanım raporları, Toplu içe aktarma (CSV)"
-NAMES_EN = "Usage analytics, Scheduled usage reports, Bulk import (CSV)"
+PAID = ["usage_analytics", "usage_reports", "bulk_import", "security_rules"]
+NAMES_TR = (
+    "Kullanım analizi, Zamanlanmış kullanım raporları, Toplu içe aktarma (CSV), Güvenlik kuralları"
+)
+NAMES_EN = "Usage analytics, Scheduled usage reports, Bulk import (CSV), Security rules"
 DAY = timedelta(days=1)
 #: A person, a raw FortiGate line and an address: none of it may reach an alert e-mail.
 PERSON = "Ayşe Yılmaztürk"

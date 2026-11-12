@@ -371,7 +371,13 @@ def test_license_check_records_state_changes_once(
     first = check(worker, now)
     assert first == {
         "status": "trial",
-        "enabled": ["core_5651", "usage_analytics", "usage_reports", "bulk_import"],
+        "enabled": [
+            "core_5651",
+            "usage_analytics",
+            "usage_reports",
+            "bulk_import",
+            "security_rules",
+        ],
         "recorded": ["state"],
         "alerts": {"found": [], "opened": [], "resolved": []},  # 14 days of trial left
     }
@@ -386,7 +392,13 @@ def test_license_check_records_state_changes_once(
     assert second.details == {
         "from": "trial",
         "to": "trial_expired",
-        "enabled_from": ["core_5651", "usage_analytics", "usage_reports", "bulk_import"],
+        "enabled_from": [
+            "core_5651",
+            "usage_analytics",
+            "usage_reports",
+            "bulk_import",
+            "security_rules",
+        ],
         "enabled_to": ["core_5651"],
         "problem": None,
     }
