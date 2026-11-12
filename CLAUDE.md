@@ -12,12 +12,12 @@ installer in `deploy/windows/`. Read `CONTRIBUTING.md` (ground rules, team workf
   design contract sections to read, the files you own, the files you must not touch, the
   done-when list and the commands to run.
 - **Design contracts** live in `design/` (Wave 3: `design/wave-3-contract.md`; Wave 4:
-  `design/wave-4-contract.md`; Wave 5: `design/wave-5-contract.md`). They are binding:
+  `design/wave-4-contract.md`; Wave 5: `design/wave-5-contract.md`; Wave 6: `design/wave-6-contract.md`). They are binding:
   names, setting keys, defaults, error codes, JSON shapes, texts and tests are fixed there. Read
   §0, §4.1, your package in §4.3, every §2 and §3 section your package touches, and the
   "Implementation notes" sections.
 - **Branches:** start from the wave's integration branch (Wave 3: `wave-3`; Wave 4: `wave-4`; Wave 5:
-  `wave-5`; your issue names it), never from `main`: `git fetch origin wave-N && git checkout -B <your branch>
+  `wave-5`; Wave 6: `wave-6`; your issue names it), never from `main`: `git fetch origin wave-N && git checkout -B <your branch>
   origin/wave-N`. Open your pull request **into that integration branch**. Never push to `wave-*`
   or `main`; the manager reviews and merges.
 - **One owner per file.** Edit only the files your issue gives you (and the exceptions it lists).
@@ -28,7 +28,7 @@ installer in `deploy/windows/`. Read `CONTRIBUTING.md` (ground rules, team workf
 - **Open questions** of the contract: implement the contract's stated default and list the question
   in the pull request under "Questions". Do not decide owner questions yourself.
 - **Never sit idle.**
-  - When your pull request is ready for review (not a draft), go on with your next issue: the open issue assigned to you with the label `ready` and no pull request yet, `wave-3` before `wave-4` before `wave-5`, then the lowest number. An issue marked **"Öncelik: ilk / Priority: first"** goes before all of them.
+  - When your pull request is ready for review (not a draft), go on with your next issue: the open issue assigned to you with the label `ready` and no pull request yet, `wave-3` before `wave-4` before `wave-5` before `wave-6`, then the lowest number. An issue marked **"Öncelik: ilk / Priority: first"** goes before all of them.
   - First, though, handle any review comment on your open pull requests, and fix any red CI on them.
   - An early-start "Hazır / Ready" comment names the branch to start from, often the branch of the package you wait for. Its pull request merges after that package; the comment says when.
   - Read the latest comments on your issue and pull request before each push: answers to your questions arrive there.
