@@ -1,0 +1,70 @@
+{
+  "webhooks": {
+    "title": "Webhook'lar",
+    "description": "Uyarıların gönderildiği webhook'lar, son teslimleri ve deneme bildirimi.",
+    "serverOnly": "Webhook'lar yalnızca sunucuda tanımlanır: arcilogger.toml dosyasındaki [[webhooks]] bölümü, gizli anahtarı için \"arcilogger-core secret set webhook.<ad>.secret\". Tarayıcıdan webhook eklenmez ve değiştirilmez; ayrıntılar KURULUM.md'de.",
+    "locked": "Güvenlik kuralları lisansınızda açık değil: webhook'lara bildirim gönderilmez ve deneme bildirimi gönderilemez.",
+    "caption": "Tanımlı webhook'lar",
+    "empty": "Tanımlı webhook yok.",
+    "emptyHint": "Bir webhook eklemek için sunucudaki arcilogger.toml dosyasına [[webhooks]] bölümü yazın (KURULUM.md).",
+    "columns": {
+      "name": "Ad",
+      "format": "Biçim",
+      "host": "Hedef sunucu",
+      "severity": "En düşük önem",
+      "enabled": "Durum",
+      "last": "Son teslim",
+      "counts": "Son 7 gün",
+      "actions": "İşlemler"
+    },
+    "formats": {
+      "generic": "Genel (imzalı JSON)",
+      "teams": "Microsoft Teams",
+      "slack": "Slack"
+    },
+    "verify": "Sahada doğrula",
+    "verifyHint": "Bu biçimin hedef tarafından kabul edildiği doğrulanmadı; ilk bildirimin geldiğini kontrol edin.",
+    "allRules": "Bütün kurallar",
+    "someRules": "Kurallar: {{rules}}",
+    "on": "Açık",
+    "off": "Kapalı",
+    "never": "Henüz teslim yok",
+    "counts": "{{sent}} gönderildi · {{failed}} başarısız",
+    "status": {
+      "sent": "Gönderildi",
+      "queued": "Sırada",
+      "failed": "Başarısız"
+    },
+    "deliveriesButton": "Teslimler",
+    "deliveriesOf": "Teslimler: {{name}}",
+    "testButton": "Test gönder",
+    "testOf": "Test gönder: {{name}}",
+    "test": {
+      "title": "Deneme bildirimi: {{name}}",
+      "ok": "Deneme bildirimi gönderildi; hedef HTTP {{status}} ile yanıt verdi.",
+      "failed": "Deneme bildirimi gönderilemedi: {{error}}"
+    },
+    "deliveries": {
+      "title": "Teslimler: {{name}}",
+      "description": "Son 50 teslim, yeniden eskiye. Başarısız bir teslim 24 saat boyunca yeniden denenir.",
+      "empty": "Bu webhook'a henüz bildirim gönderilmedi.",
+      "alert": "#{{id}} · {{rule}}",
+      "next": "Sonraki deneme: {{time}}",
+      "columns": {
+        "created": "Sıraya alındı",
+        "alert": "Uyarı",
+        "status": "Durum",
+        "attempts": "Deneme",
+        "error": "Son hata"
+      }
+    }
+  },
+  "settings": {
+    "sections": {
+      "webhooks": "Webhook'lar"
+    },
+    "hints": {
+      "webhooks": "Uyarıların gönderildiği webhook'lar, son teslimleri ve deneme bildirimi (salt okunur)."
+    }
+  }
+}
