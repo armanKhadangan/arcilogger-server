@@ -416,6 +416,32 @@ def test_a_known_refusal_gets_its_explanation(tmp_path: Path) -> None:
     assert "app password" in smtp.message_en
 
 
+def test_port_465_with_starttls_says_what_to_choose(tmp_path: Path) -> None:
+    """Gmail on 465 with STARTTLS: the server waits for the TLS handshake and drops the
+    connection (a site, 2026-11-12). The row says to pick SSL/TLS or port 587."""
+    config = write_config(
+        tmp_path,
+        extra=(
+            '[smtp]\nenabled = true\nhost = "smtp.gmail.com"\nport = 465\n'
+            'security = "starttls"\n'
+            'username = "bt@ornek.example"\nfrom_address = "bt@ornek.example"\n'
+        ),
+    )
+    SecretStore(tmp_path / "secret.key", tmp_path / "secrets.json").set(SMTP_PASSWORD, PASSWORD)
+
+    def dropped(_config: object, _password: object) -> None:
+        raise SmtpSendError(
+            "SMTPServerDisconnected: Connection unexpectedly closed", permanent=False
+        )
+
+    smtp = by_id(selftest.run(config, calm(smtp=dropped)))["smtp"]
+    assert smtp.status == "warn"
+    assert "Connection unexpectedly closed" in smtp.message_tr
+    assert "“SSL/TLS”" in smtp.message_tr
+    assert "587" in smtp.message_tr
+    assert "“SSL/TLS”" in smtp.message_en
+
+
 def test_the_clock_row(tmp_path: Path) -> None:
     config = write_config(tmp_path)
     far = by_id(selftest.run(config, calm(ntp=lambda *_: NtpResult(2.5, 0.0, 2))))["clock"]
