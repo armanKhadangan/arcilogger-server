@@ -364,7 +364,8 @@ export interface UserFilters {
   active?: boolean | undefined;
 }
 
-export function useUsers(filters: UserFilters) {
+/** `GET /users` (`users.manage`); `enabled: false` for a page that only may list them. */
+export function useUsers(filters: UserFilters, enabled = true) {
   return useInfiniteQuery({
     queryKey: queryKeys.users(filters),
     queryFn: ({ signal, pageParam }) =>
@@ -380,6 +381,7 @@ export function useUsers(filters: UserFilters) {
     initialPageParam: null as string | null,
     getNextPageParam: (page) => page.next_cursor,
     placeholderData: keepPreviousData,
+    enabled,
   });
 }
 

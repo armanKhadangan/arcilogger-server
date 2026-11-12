@@ -368,13 +368,13 @@ export function detailRows(details: Record<string, unknown>): [string, string][]
 // -- Wave 6: assignment, evidence, the summary's 30 days (§2.6.2) --------------------------------
 
 /** The user the alert is assigned to; `null` for nobody (and for an API without assignment). */
-export function assigneeOf(alert: AlertAdditions): AlertAssignee | null {
-  return alert.assignee ?? null;
+export function assigneeOf(alert: AlertOut | AlertAdditions): AlertAssignee | null {
+  return (alert as AlertAdditions).assignee ?? null;
 }
 
 /** Rows behind a rule's alert (0 for the alerts of the checks, which name no rows). */
-export function evidenceTotalOf(alert: AlertAdditions): number {
-  return alert.evidence_total ?? 0;
+export function evidenceTotalOf(alert: AlertOut | AlertAdditions): number {
+  return (alert as AlertAdditions).evidence_total ?? 0;
 }
 
 /** Who may be given an alert: active users whose role reads alerts, by user name. */
