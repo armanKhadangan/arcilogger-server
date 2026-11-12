@@ -10082,6 +10082,54 @@
       "title": "OpenBySeverity",
       "type": "object"
     },
+    "OtherSetting": {
+      "description": "A setting another page edits (``settings_meta.EDITED_ELSEWHERE``: the security rules,\nWave 6 contract §2.1.4): listed with its value for completeness and backups, never shown or\nchanged on the generic page (``PATCH`` refuses it).",
+      "properties": {
+        "is_default": {
+          "title": "Is Default",
+          "type": "boolean"
+        },
+        "key": {
+          "title": "Key",
+          "type": "string"
+        },
+        "updated_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Updated At"
+        },
+        "updated_by": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Updated By"
+        },
+        "value": {
+          "$ref": "#/components/schemas/JsonValue"
+        }
+      },
+      "required": [
+        "key",
+        "value",
+        "is_default",
+        "updated_by",
+        "updated_at"
+      ],
+      "title": "OtherSetting",
+      "type": "object"
+    },
     "ParamOut": {
       "properties": {
         "key": {
@@ -14577,6 +14625,14 @@
     },
     "SettingsOut": {
       "properties": {
+        "elsewhere": {
+          "default": [],
+          "items": {
+            "$ref": "#/components/schemas/OtherSetting"
+          },
+          "title": "Elsewhere",
+          "type": "array"
+        },
         "groups": {
           "items": {
             "$ref": "#/components/schemas/SettingGroup"

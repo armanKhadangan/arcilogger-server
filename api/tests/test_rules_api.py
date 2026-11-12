@@ -360,3 +360,24 @@ def test_an_assign_event_has_no_state(app_session_factory: sessionmaker[Session]
         session.commit()
         events = list(session.scalars(select(AlertEvent).where(AlertEvent.alert_id == alert_id)))
         assert [(event.kind, event.from_state) for event in events] == [("assign", None)]
+
+
+def test_the_generic_settings_list_the_rules_apart(client: TestClient, admin: LoggedIn) -> None:
+    """Deviation W6-A-3: ``GET /settings`` answers the ``rules.*`` keys in ``elsewhere`` (for
+    backups), never in a group of the generic page, and ``PATCH`` refuses them."""
+    body = client.get(f"{API}/settings").json()
+    in_groups = {item["key"] for group in body["groups"] for item in group["settings"]}
+    assert not {key for key in in_groups if key.startswith("rules.")}
+    elsewhere = {item["key"]: item for item in body["elsewhere"]}
+    assert elsewhere["rules.lag_seconds"]["value"] == 120
+    assert elsewhere["rules.R01"]["is_default"] is True
+    client.put(f"{API}/rules/R01", json={"severity": "low"})
+    body = client.get(f"{API}/settings").json()
+    changed = next(item for item in body["elsewhere"] if item["key"] == "rules.R01")
+    assert changed["value"] == {"severity": "low"}
+    assert changed["updated_by"] == "yonetici"
+    response = client.patch(
+        f"{API}/settings",
+        json={"changes": [{"key": "rules.R01", "old": {"severity": "low"}, "value": {}}]},
+    )
+    assert response.status_code == 422
