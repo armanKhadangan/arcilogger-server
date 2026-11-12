@@ -143,6 +143,7 @@ uyarısı açmaz. Kapalı modülün verileri silinmez.
 | `alerts.import` | 5651 Temel | her zaman çalışır |
 | `alerts.r15` | 5651 Temel | her zaman çalışır |
 | `alerts.system` | 5651 Temel | her zaman çalışır |
+| `rules.run` | Güvenlik kuralları | atlanır |
 | `alerts.notify` | 5651 Temel | her zaman çalışır |
 | `usage.requests` | Kullanım analizi | atlanır |
 | `usage.daily` | Kullanım analizi | atlanır |

@@ -417,6 +417,7 @@ Every day:
   | `R20-disk` | Data or system drive more than 80 % full (`alerts.disk_used_percent`) |
   | `R20-parse` | More than 1 % of a source's lines of the last hour could not be parsed |
   | `R20-job` | A worker job failed 3 times in a row (`logs\worker.log`) |
+  | `R20-rules` | A security rule failed to run 3 times in a row (`rules.failures_alert`; Settings → Güvenlik kuralları, `logs\worker.log`) |
   | `R20-backup` | Database backup failed, older than 36 hours, or still none 48 hours after the installation |
   | `R20-email` | An alert e-mail could not be sent (`[smtp]`, `smtp.password`, firewall); never e-mailed itself |
   | `R20-report` | A scheduled usage report could not be made or not sent to a recipient (the run history on the Raporlar page, `[smtp]`; sections 14 and 15). Not raised while the Scheduled usage reports module is off in the licence; resolved by itself when the module goes off |
