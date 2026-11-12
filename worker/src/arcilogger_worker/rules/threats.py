@@ -51,6 +51,7 @@ from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.orm import InstrumentedAttribute, Session
 
 from arcilogger_db.models import FgEvent, FgIps, FgTraffic, FgVirus, MtEvent
+from arcilogger_db.settings import INTEGER_RANGES
 from arcilogger_worker.rules.model import EvidenceRef, Hit, Param, RuleContext, RuleDef
 
 #: A JSON text value that is a plain decimal number (``extra`` values are strings; anything
@@ -58,6 +59,9 @@ from arcilogger_worker.rules.model import EvidenceRef, Hit, Param, RuleContext, 
 _NUMBER: Final = r"^\s*[0-9]+(\.[0-9]+)?\s*$"
 #: A column of a model or an SQL expression.
 _Column = SQLColumnExpression[Any] | InstrumentedAttribute[Any]
+#: Evidence rows a hit carries at most: the largest ``rules.evidence_max`` (the engine keeps the
+#: configured number of them, oldest first).
+EVIDENCE_LIMIT: Final = INTEGER_RANGES["rules.evidence_max"][1] or 100
 #: The FortiGate's performance-statistics event (V3, sahada doğrula).
 PERF_LOGIDS: Final = ("0100040704",)
 
@@ -118,8 +122,8 @@ def _host(column: _Column) -> ColumnElement[str]:
 def _bounds(model: Any, ctx: RuleContext, since: datetime) -> ColumnElement[bool]:
     """Device time within the pruning bounds, receive time within ``(since, end]`` (D8)."""
     return and_(
-        model.time >= ctx.device_start,
-        model.time <= ctx.device_end,
+        model.time >= ctx.time_low,
+        model.time <= ctx.time_high,
         model.time_received > since,
         model.time_received <= ctx.end,
     )
@@ -195,7 +199,7 @@ def _groups(
     )
     query = (
         select(rows)
-        .where(rows.c.n >= minimum, or_(rows.c.rn <= ctx.evidence_max, rows.c.rn_desc == 1))
+        .where(rows.c.n >= minimum, or_(rows.c.rn <= EVIDENCE_LIMIT, rows.c.rn_desc == 1))
         .order_by(rows.c.key, rows.c.rn)
     )
     table = model.__tablename__
@@ -206,9 +210,9 @@ def _groups(
             group = groups[row["key"]] = _Group(
                 row["key"], count=row["n"], first=row["first_at"], last=row["last_at"]
             )
-        if row["rn"] <= ctx.evidence_max:
+        if row["rn"] <= EVIDENCE_LIMIT:
             ref = EvidenceRef(
-                tbl=table,
+                table=table,
                 row_id=row["row_id"],
                 time=row["time"],
                 time_received=row["time_received"],
@@ -244,7 +248,7 @@ def _hit(ctx: RuleContext, group: _Group, values: Mapping[str, object]) -> Hit:
         time=last,
         count=group.count,
         values=dict(values),
-        evidence=group.refs(ctx.evidence_max),
+        evidence=group.refs(EVIDENCE_LIMIT),
     )
 
 
@@ -304,6 +308,7 @@ def evaluate_r05(session: Session, ctx: RuleContext) -> list[Hit]:
                 group,
                 {
                     **group.newest,
+                    "attack": group.newest.get("attack") or "-",
                     "count": group.count,
                     "window_seconds": ctx.settings.window_seconds,
                 },
@@ -448,7 +453,7 @@ def _r17_samples(session: Session, ctx: RuleContext) -> dict[str, _Group]:
         )
         for sample in best:
             ref = EvidenceRef(
-                tbl="fg_event",
+                table="fg_event",
                 row_id=sample.id,
                 time=sample.time,
                 time_received=sample.time_received,
@@ -474,6 +479,26 @@ def _plain(value: object) -> object:
         return None
     number = float(str(value))
     return int(number) if number.is_integer() else number
+
+
+def _r17_reason(values: Mapping[str, object], *, sustained: bool) -> tuple[str, str]:
+    """The title's reason, Turkish and English: what is above its limit, and conserve mode."""
+    turkish, english = [], []
+    if sustained:
+        minutes = int(str(values["sustain_seconds"])) // 60
+        cpu, mem = values["cpu"], values["mem"]
+        if isinstance(cpu, (int, float)) and cpu > int(str(values["cpu_percent"])):
+            turkish.append(f"CPU %{cpu}")
+            english.append(f"CPU {cpu}%")
+        if isinstance(mem, (int, float)) and mem > int(str(values["mem_percent"])):
+            turkish.append(f"bellek %{mem}")
+            english.append(f"memory {mem}%")
+        turkish[-1:] = [f"{turkish[-1]}, {minutes} dakikadır"] if turkish else []
+        english[-1:] = [f"{english[-1]} for {minutes} minutes"] if english else []
+    if values["conserve"]:
+        turkish.append("conserve mode")
+        english.append("conserve mode")
+    return "; ".join(turkish), "; ".join(english)
 
 
 def evaluate_r17(session: Session, ctx: RuleContext) -> list[Hit]:
@@ -504,6 +529,7 @@ def evaluate_r17(session: Session, ctx: RuleContext) -> list[Hit]:
         if source in samples and source in conserve:
             values["cpu"] = samples[source].newest.get("cpu")
             values["mem"] = samples[source].newest.get("mem")
+        values["reason_tr"], values["reason_en"] = _r17_reason(values, sustained=source in samples)
         hits.append(_hit(ctx, group, values))
     return hits
 
@@ -566,7 +592,7 @@ RULES: Final[tuple[RuleDef, ...]] = (
             Param(
                 "high_severities",
                 "strings",
-                ["high", "critical"],
+                ("high", "critical"),
                 min=0,
                 max=_LIST_MAX,
                 label_tr="Her biri uyarı açan IPS önem dereceleri",
@@ -575,7 +601,7 @@ RULES: Final[tuple[RuleDef, ...]] = (
             Param(
                 "medium_severities",
                 "strings",
-                ["medium"],
+                ("medium",),
                 min=0,
                 max=_LIST_MAX,
                 label_tr="Eşikle sayılan IPS önem dereceleri",
@@ -604,7 +630,7 @@ RULES: Final[tuple[RuleDef, ...]] = (
             Param(
                 "ips_eventtypes",
                 "strings",
-                ["botnet"],
+                ("botnet",),
                 min=0,
                 max=_LIST_MAX,
                 label_tr="Botnet sayılan IPS olay türleri (sahada doğrula)",
@@ -613,7 +639,7 @@ RULES: Final[tuple[RuleDef, ...]] = (
             Param(
                 "threat_policy_names",
                 "strings",
-                [],
+                (),
                 min=0,
                 max=200,
                 label_tr="Tehdit IP politikası adları (boş = kapalı)",
@@ -634,7 +660,7 @@ RULES: Final[tuple[RuleDef, ...]] = (
             Param(
                 "ignore_actions",
                 "strings",
-                [],
+                (),
                 min=0,
                 max=_LIST_MAX,
                 label_tr="Yok sayılan eylemler",
@@ -681,7 +707,7 @@ RULES: Final[tuple[RuleDef, ...]] = (
             Param(
                 "perf_logids",
                 "strings",
-                list(PERF_LOGIDS),
+                PERF_LOGIDS,
                 min=1,
                 max=_LIST_MAX,
                 label_tr="Performans istatistiği logid'leri (sahada doğrula)",
@@ -690,7 +716,7 @@ RULES: Final[tuple[RuleDef, ...]] = (
             Param(
                 "cpu_field",
                 "strings",
-                ["cpu"],
+                ("cpu",),
                 min=1,
                 max=5,
                 label_tr="CPU alanı (sahada doğrula)",
@@ -699,7 +725,7 @@ RULES: Final[tuple[RuleDef, ...]] = (
             Param(
                 "mem_field",
                 "strings",
-                ["mem"],
+                ("mem",),
                 min=1,
                 max=5,
                 label_tr="Bellek alanı (sahada doğrula)",
@@ -708,7 +734,7 @@ RULES: Final[tuple[RuleDef, ...]] = (
             Param(
                 "conserve_phrases",
                 "strings",
-                ["conserve"],
+                ("conserve",),
                 min=0,
                 max=_LIST_MAX,
                 label_tr="Conserve mode olay ifadeleri (sahada doğrula)",
@@ -730,7 +756,7 @@ RULES: Final[tuple[RuleDef, ...]] = (
             Param(
                 "fortigate_phrases",
                 "strings",
-                ["ran out of"],
+                ("ran out of",),
                 min=0,
                 max=_LIST_MAX,
                 label_tr="FortiGate havuz doldu ifadeleri (sahada doğrula)",

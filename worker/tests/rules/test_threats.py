@@ -14,9 +14,12 @@ from __future__ import annotations
 import re
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime, timedelta, timezone
+from ipaddress import ip_network
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
+import pytest
 from sqlalchemy import func, insert, select
 from sqlalchemy.orm import Session
 
@@ -24,8 +27,11 @@ from arcilogger_core.rawlog import RawRecord
 from arcilogger_core.timeutil import site_day
 from arcilogger_db.models import Alert, FgEvent, FgIps, FgTraffic, FgVirus, MtEvent
 from arcilogger_ingest.parsers import LinePosition, parse_line
-from arcilogger_worker.rules.model import Hit, RuleContext, RuleDef, RuleSettings
-from arcilogger_worker.rules.threats import RULES
+from arcilogger_worker.rules.model import Actions, Hit, RuleContext, RuleDef, RuleSettings
+from arcilogger_worker.rules.texts import COMMON_FIELDS, TEXTS, title, title_fields
+from arcilogger_worker.rules.threats import EVIDENCE_LIMIT, RULES
+
+from .cases import CASES, SLICE_END, CaseRow, RuleCase
 
 FIXTURES = Path(__file__).resolve().parents[3] / "tests" / "fixtures"
 TR = timezone(timedelta(hours=3))
@@ -143,6 +149,23 @@ def rule(rule_id: str) -> RuleDef:
     return next(entry for entry in RULES if entry.id == rule_id)
 
 
+def settings_of(
+    entry: RuleDef, params: Mapping[str, object] | None = None, *, window_seconds: int | None = None
+) -> RuleSettings:
+    """The rule's defaults with ``params`` (lists as tuples, as the settings reader gives)."""
+    values = {p.key: p.default for p in entry.params}
+    for key, value in (params or {}).items():
+        values[key] = tuple(value) if isinstance(value, list) else value
+    return RuleSettings(
+        enabled=True,
+        severity=entry.severity,
+        window_seconds=window_seconds or entry.window_seconds,
+        cooldown_seconds=entry.cooldown_seconds,
+        actions=Actions(email=True, webhook=True),
+        params=values,
+    )
+
+
 def run(
     session: Session,
     rule_id: str,
@@ -151,38 +174,33 @@ def run(
     end: datetime = END,
     start: datetime = START,
     window_seconds: int | None = None,
-    evidence_max: int = 20,
 ) -> dict[str, Hit]:
     """``evaluate`` of the rule on the slice ``(start, end]`` with its defaults and ``params``."""
     entry = rule(rule_id)
-    window = window_seconds or entry.window_seconds
-    settings = RuleSettings(
-        enabled=True,
-        severity=entry.severity,
-        window_seconds=window,
-        cooldown_seconds=entry.cooldown_seconds,
-        actions={"email": True, "webhook": True},
-        params={**{p.key: p.default for p in entry.params}, **(params or {})},
-    )
-    skew = timedelta(seconds=3600)
     ctx = RuleContext(
-        settings=settings,
+        settings=settings_of(entry, params, window_seconds=window_seconds),
         start=start,
         end=end,
-        window_start=end - timedelta(seconds=window),
-        device_start=start - timedelta(seconds=window) - skew,
-        device_end=end + skew,
-        internal_networks=("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"),
-        tz=TR,
-        evidence_max=evidence_max,
+        max_device_skew=timedelta(seconds=3600),
+        internal_networks=tuple(
+            ip_network(net) for net in ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16")
+        ),
+        zone=ZoneInfo("Europe/Istanbul"),
     )
     hits = list(entry.evaluate(session, ctx))
     by_key = {hit.key: hit for hit in hits}
     assert len(by_key) == len(hits), "one hit per key"
+    for hit in hits:
+        missing = title_fields(TEXTS[rule_id]) - COMMON_FIELDS - set(hit.values)
+        assert not missing, f"{rule_id}: the title needs {sorted(missing)}"
+        title(rule_id, hit.key, hit.count, hit.values)
     return by_key
 
 
-def refs(inserted: Sequence[tuple[str, int, dict[str, Any]]]) -> list[tuple[str, int, int, int]]:
+Ref = tuple[str, int | None, int | None, int | None]
+
+
+def refs(inserted: Sequence[tuple[str, int, dict[str, Any]]]) -> list[Ref]:
     """``(table, row id, raw line, raw offset)`` of inserted rows (what ``/raw`` opens)."""
     return [
         (table, row_id, values["raw_line"], values["raw_offset"])
@@ -190,8 +208,8 @@ def refs(inserted: Sequence[tuple[str, int, dict[str, Any]]]) -> list[tuple[str,
     ]
 
 
-def hit_refs(hit: Hit) -> list[tuple[str, int, int, int]]:
-    return [(ref.tbl, ref.row_id, ref.raw_line, ref.raw_offset) for ref in hit.evidence]
+def hit_refs(hit: Hit) -> list[Ref]:
+    return [(ref.table, ref.row_id, ref.raw_line, ref.raw_offset) for ref in hit.evidence]
 
 
 # =================================================================================================
@@ -225,7 +243,7 @@ def test_threat_rules_registered() -> None:
     assert rule("R18").cooldown_seconds == 3600
     for entry in RULES:
         assert entry.inputs
-        assert entry.needs_setup is None, f"{entry.id} works with its defaults"
+        assert not entry.needs_setup(settings_of(entry)), f"{entry.id} works with its defaults"
         for param in entry.params:
             assert param.label_tr
             assert param.label_en
@@ -284,13 +302,18 @@ def test_r05_low_severity_is_ignored_and_keys_are_separate(db_session: Session) 
     assert set(run(db_session, "R05")) == {"198.51.100.7:99003", "198.51.100.8:99001"}
 
 
-def test_r05_evidence_cap_keeps_the_oldest(db_session: Session) -> None:
+def test_r05_evidence_keeps_the_oldest_up_to_the_limit(db_session: Session) -> None:
+    """At most ``EVIDENCE_LIMIT`` (the largest ``rules.evidence_max``) rows, oldest first; the
+    count is every row."""
     rows = Rows(db_session)
-    inserted = [rows.add(IPS, START + timedelta(seconds=second))[0] for second in range(1, 8)]
-    hit = run(db_session, "R05", evidence_max=3)["198.51.100.7:99001"]
-    assert hit.count == 7
-    assert hit_refs(hit) == refs(inserted[:3])
-    assert hit.time == START + timedelta(seconds=7)
+    inserted = [
+        rows.add(IPS, START + timedelta(milliseconds=500 * n))[0]
+        for n in range(1, EVIDENCE_LIMIT + 3)
+    ]
+    hit = run(db_session, "R05")["198.51.100.7:99001"]
+    assert hit.count == EVIDENCE_LIMIT + 2
+    assert hit_refs(hit) == refs(inserted[:EVIDENCE_LIMIT])
+    assert hit.time == START + timedelta(milliseconds=500 * (EVIDENCE_LIMIT + 2))
 
 
 # =================================================================================================
@@ -340,7 +363,7 @@ def test_r06_both_parts_add_up_per_address(db_session: Session) -> None:
     rows.add(botnet, END - timedelta(seconds=5))
     hits = run(db_session, "R06", {"threat_policy_names": [str(traffic[0][2]["policyname"])]})
     assert hits[srcip].count == 2
-    assert [ref.tbl for ref in hits[srcip].evidence] == ["fg_traffic", "fg_ips"]
+    assert [ref.table for ref in hits[srcip].evidence] == ["fg_traffic", "fg_ips"]
 
 
 # =================================================================================================
@@ -571,3 +594,67 @@ def test_list_parameters_are_bound(db_session: Session) -> None:
     assert run(db_session, "R17", {"conserve_phrases": ["%", "_"]}) == {}
     assert run(db_session, "R05", {"high_severities": ["%"], "medium_severities": ["%"]}) == {}
     assert db_session.scalar(select(func.count()).select_from(Alert)) == 1
+
+
+# =================================================================================================
+# The W6-D block of cases.py (T-R), run here until the engine tests run every case
+# =================================================================================================
+
+W6D_CASES = [case for case in CASES if case.rule in {entry.id for entry in RULES}]
+
+
+def write_case_rows(session: Session, rows: Sequence[CaseRow]) -> None:
+    """The case rows with the common columns (source, sender, raw reference) filled in."""
+    line = 0
+    for row in rows:
+        values = dict(row.values)
+        extra = values.pop("extra", {})
+        source = str(
+            values.pop("source", "fortigate" if row.table.startswith("fg_") else "core-r1")
+        )
+        for n in range(row.repeat):
+            line += 1
+            received = SLICE_END + row.received + timedelta(seconds=n)
+            session.execute(
+                insert(MODELS[row.table]).values(
+                    time=received + row.device_offset,
+                    time_received=received,
+                    source=source,
+                    sender=FIREWALL if row.table.startswith("fg_") else ROUTER,
+                    extra=extra,
+                    raw_day=site_day(received),
+                    raw_line=line,
+                    raw_offset=line * 1000,
+                    **values,
+                )
+            )
+    session.commit()
+
+
+@pytest.mark.parametrize("case", W6D_CASES, ids=lambda case: f"{case.rule}-{case.name}")
+def test_w6d_cases(db_session: Session, case: RuleCase) -> None:
+    write_case_rows(db_session, case.rows)
+    params = case.overrides.get("params", {})
+    assert isinstance(params, Mapping)
+    hits = run(
+        db_session,
+        case.rule,
+        params,
+        end=SLICE_END,
+        start=SLICE_END - timedelta(seconds=case.slice_seconds or 600),
+    )
+    assert set(hits) == {expected.key for expected in case.expected}
+    for expected in case.expected:
+        hit = hits[expected.key]
+        assert hit.count == expected.count
+        for name, value in expected.values.items():
+            assert hit.values[name] == value, name
+        if expected.evidence is not None:
+            assert len(hit.evidence) == expected.evidence
+
+
+def test_every_threat_rule_has_positive_and_negative_cases() -> None:
+    for entry in RULES:
+        cases = [case for case in W6D_CASES if case.rule == entry.id]
+        assert any(case.positive for case in cases), entry.id
+        assert any(not case.positive for case in cases), entry.id
