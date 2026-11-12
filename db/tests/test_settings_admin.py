@@ -35,6 +35,30 @@ from arcilogger_db.settings_admin import change_setting, reset_setting
 REFUSALS: list[tuple[str, Any, str, str]] = [
     ("no.such.key", 1, "setting_unknown", "bilinmeyen ayar: no.such.key"),
     (
+        "rules.internal_networks",
+        ["172.20.41.17/24"],
+        "setting_network_invalid",
+        "rules.internal_networks: geçersiz ağ '172.20.41.17/24' (ör. 10.0.0.0/8)",
+    ),
+    (
+        "rules.internal_networks",
+        ["10.0.0.0/8; DROP TABLE alerts"],
+        "setting_network_invalid",
+        "rules.internal_networks: geçersiz ağ '10.0.0.0/8; DROP TABLE alerts' (ör. 10.0.0.0/8)",
+    ),
+    (
+        "rules.internal_networks",
+        [f"10.{n // 256}.{n % 256}.0/24" for n in range(201)],
+        "setting_too_many",
+        "rules.internal_networks: en çok 200 ağ",
+    ),
+    (
+        "rules.evidence_max",
+        101,
+        "setting_out_of_range",
+        "rules.evidence_max: en az 1, en çok 100 olmalı",
+    ),
+    (
         "evidence.keep_days",
         None,
         "setting_type",

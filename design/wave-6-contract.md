@@ -186,37 +186,39 @@ the rule packages only add their `RuleDef`s.
 ```python
 @dataclass(frozen=True)
 class Param:
-    key: str                 # e.g. "threshold_ports"
+    key: str  # e.g. "threshold_ports"
     kind: Literal["int", "bytes", "seconds", "percent", "strings", "networks", "ints", "bool"]
     default: object
-    min: int | None = None   # int / bytes / seconds / percent; list length for lists
+    min: int | None = None  # int / bytes / seconds / percent; list length for lists
     max: int | None = None
     label_tr: str = ""
     label_en: str = ""
 
+
 @dataclass(frozen=True)
 class RuleDef:
-    id: str                          # "R01"
+    id: str  # "R01"
     kind: Literal["event", "condition"]
-    severity: str                    # default severity (ALERT_SEVERITIES)
-    window_seconds: int              # default window
-    cooldown_seconds: int            # default cooldown
-    params: tuple[Param, ...]        # rule-specific parameters
-    inputs: tuple[str, ...]          # tables read, e.g. ("fg_traffic",)
-    person_level: bool = False       # R09, R13, R14
-    format_verified: bool = True     # False: "sahada doğrula" (§0.4)
-    needs_setup: Callable[[RuleSettings], bool] | None = None   # True: idle until configured
+    severity: str  # default severity (ALERT_SEVERITIES)
+    window_seconds: int  # default window
+    cooldown_seconds: int  # default cooldown
+    params: tuple[Param, ...]  # rule-specific parameters
+    inputs: tuple[str, ...]  # tables read, e.g. ("fg_traffic",)
+    person_level: bool = False  # R09, R13, R14
+    format_verified: bool = True  # False: "sahada doğrula" (§0.4)
+    needs_setup: Callable[[RuleSettings], bool] | None = None  # True: idle until configured
     evaluate: Callable[[Session, RuleContext], Iterable[Hit]]
-    clear_seconds: int | None = None # condition rules only
+    clear_seconds: int | None = None  # condition rules only
+
 
 @dataclass(frozen=True)
 class Hit:
-    key: str                         # group value, e.g. "172.20.41.17" (dedup key R01:<key>)
-    time: datetime                   # receive time of the newest row of the hit
-    count: int                       # rows behind the hit in its window
-    values: Mapping[str, object]     # the numbers the title and details show
+    key: str  # group value, e.g. "172.20.41.17" (dedup key R01:<key>)
+    time: datetime  # receive time of the newest row of the hit
+    count: int  # rows behind the hit in its window
+    values: Mapping[str, object]  # the numbers the title and details show
     evidence: Sequence[EvidenceRef]  # at most rules.evidence_max, oldest first
-    person_id: int | None = None     # person-level rules only
+    person_id: int | None = None  # person-level rules only
 ```
 
 `RuleContext` gives the evaluating function: the validated settings, the slice
@@ -699,3 +701,28 @@ to the normal site: `port-scan` (R01), `external-scan` (R02), `brute-force` (R03
 ---
 
 ## Deviations
+
+### W6-A (2026-11-12, day-1 pull request, #243)
+
+- **W6-A-1: the device-time pruning bounds reach the whole window.** §2.1.2 gives the lower
+  bound as `start − rules.max_device_skew_seconds`. A window longer than the slice (R08's
+  3600 s against the 600-s slice) also counts rows received before `start`, and such a row may be
+  up to the skew earlier in device time: the bound `start − skew` would drop it and count less
+  than the window holds. `RuleContext.time_low` is `min(start, window_start) − skew`
+  (`time_high` stays `end + skew`); `test_the_context_reads_the_whole_window` pins it.
+- **W6-A-2: `alert_evidence` of a `devices` row.** §2.5 lists the columns, and `devices` as an
+  allowed `tbl`, but a device has no `id` and no raw line (it is keyed by MAC, R11). Only
+  `alert_id`, `n` and `tbl` are `NOT NULL`; the check `ck_alert_evidence_raw_ref` requires
+  `row_id`, both times, `source` and the three raw-reference columns for every table but
+  `devices`, whose evidence keeps `time` (the first sighting) only. Also `n >= 1`.
+- **W6-A-3: the generic settings page and `rules.*`.** `settings_meta.EDITED_ELSEWHERE`
+  (`rules.`) keeps the keys off the generic page and `PATCH /settings` refuses them as keys it
+  does not show (`setting_unknown`), so only the rules API writes them. `GET /settings` returning
+  them "for backups" (§2.1.4) needs a field in its answer that the web types would follow (W6-F):
+  it comes with the rules API pull request, not on day 1. On the console,
+  `arcilogger-db settings set rules.<ID>` accepts any object (a hand edit, which the worker reads
+  field by field as §2.1.4 says); `rules.internal_networks` is checked as CIDR networks there
+  (`setting_network_invalid`, new code), the numeric keys against bounds in `INTEGER_RANGES`.
+- **W6-A-4: `ruff format` and this contract.** ruff 0.17 formats the Python block of §2.1.2;
+  `ruff format --check .` failed on `wave-6` because of it. The day-1 pull request applies the
+  formatter's whitespace-only change to that block; no word of the contract changed.
