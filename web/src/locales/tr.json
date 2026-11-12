@@ -396,8 +396,6 @@
   "settings": {
     "description": "Sistem ayarları ve kullanıcı yönetimi.",
     "usersHint": "Hesaplar, roller, parola ve iki adımlı doğrulama sıfırlama.",
-    "laterTitle": "Sonraki adımlarda",
-    "laterHint": "Bu bölümler tarayıcıdan yönetimin sonraki adımlarıyla gelir.",
     "sections": {
       "general": "Genel",
       "sources": "Kaynaklar",

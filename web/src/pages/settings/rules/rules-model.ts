@@ -11,7 +11,7 @@
 
 import type { AlertSeverity } from '@/lib/api-types';
 import type { Lang } from '@/lib/format';
-import { formatNumber } from '@/lib/format';
+import { formatBytes, formatDuration, formatNumber } from '@/lib/format';
 import type {
   RuleOut,
   RuleParam,
@@ -94,10 +94,10 @@ function mibText(bytes: number): string {
 
 function paramText(param: RuleParam, value: RuleParamValue | undefined): string | boolean {
   if (param.kind === 'bool') return value === true;
-  if (value === undefined || value === null) return '';
+  if (value === undefined) return '';
   if (Array.isArray(value)) return value.map(String).join('\n');
   if (param.kind === 'bytes' && typeof value === 'number') return mibText(value);
-  return String(value as string | number | boolean);
+  return String(value);
 }
 
 /** The form of a rule's effective settings. */
@@ -210,7 +210,12 @@ function bytesProblem(text: string, param: RuleParam, lang: Lang): RuleProblem |
   if (!value) return { key: 'validation.required' };
   if (!DECIMAL.test(value)) return { key: 'rules.errors.mib' };
   const bytes = Math.round(Number(value.replace(',', '.')) * MIB);
-  return bounded(bytes, param.min, param.max, (bound) => `${formatNumber(bound / MIB, 0, lang)} MiB`);
+  return bounded(
+    bytes,
+    param.min,
+    param.max,
+    (bound) => `${formatNumber(bound / MIB, 0, lang)} MiB`,
+  );
 }
 
 function entryProblem(kind: RuleParamKind, entry: string): string | undefined {
@@ -246,7 +251,8 @@ function listProblem(text: string, param: RuleParam, lang: Lang): RuleProblem | 
     return min === 1
       ? { key: 'validation.required' }
       : { key: 'rules.errors.listMin', values: { min: formatNumber(min, 0, lang) } };
-  if (count > max) return { key: 'rules.errors.listMax', values: { max: formatNumber(max, 0, lang) } };
+  if (count > max)
+    return { key: 'rules.errors.listMax', values: { max: formatNumber(max, 0, lang) } };
   return undefined;
 }
 
@@ -312,7 +318,10 @@ function paramValue(param: RuleParam, text: string | boolean | undefined): RuleP
  * The settings the form describes (a valid form). A parameter of a kind the editor has no input
  * for keeps its stored value.
  */
-export function fromRuleForm(form: RuleForm, rule: Pick<RuleOut, 'settings' | 'params'>): RuleSettings {
+export function fromRuleForm(
+  form: RuleForm,
+  rule: Pick<RuleOut, 'settings' | 'params'>,
+): RuleSettings {
   const params: Record<string, RuleParamValue> = { ...rule.settings.params };
   for (const param of rule.params) {
     if (isKnownKind(param.kind)) params[param.key] = paramValue(param, form.params[param.key]);
@@ -409,6 +418,25 @@ export function ruleName(rule: Pick<RuleOut, 'name_tr' | 'name_en' | 'id'>, lang
 export function paramLabel(param: Pick<RuleParam, 'label_tr' | 'label_en' | 'key'>, lang: Lang) {
   const label = lang === 'en' ? param.label_en : param.label_tr;
   return label.trim() ? label : param.key;
+}
+
+/** A value as the "Varsayılan" line shows it (`t` names a flag "Açık" / "Kapalı"). */
+export function shownValue(
+  param: Pick<RuleParam, 'kind'>,
+  value: RuleParamValue | undefined,
+  lang: Lang,
+  t: (key: string) => string,
+): string {
+  if (value === undefined) return '—';
+  if (Array.isArray(value)) return value.map(String).join(', ');
+  if (typeof value === 'boolean') return t(value ? 'rules.state.on' : 'rules.state.off');
+  if (typeof value === 'number') {
+    if (param.kind === 'bytes') return formatBytes(value, lang);
+    if (param.kind === 'seconds') return formatDuration(value, lang);
+    if (param.kind === 'percent') return lang === 'en' ? `${value}%` : `%${value}`;
+    return formatNumber(value, 0, lang);
+  }
+  return String(value);
 }
 
 /** Rules in id order (`R2` before `R10`). */

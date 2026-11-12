@@ -6,6 +6,7 @@ import {
   History,
   Mail,
   Network,
+  ShieldCheck,
   SlidersHorizontal,
   Stamp,
 } from 'lucide-react';
@@ -40,6 +41,8 @@ export const SETTINGS_SECTIONS: readonly SettingsSection[] = [
     permissions: ['settings.manage', 'sources.manage'],
   },
   { key: 'email', to: '/settings/email', icon: Mail, permissions: ['settings.manage'] },
+  // Readable with `alerts.read`; the page offers the changes to `settings.manage` only.
+  { key: 'rules', to: '/settings/rules', icon: ShieldCheck, permissions: ['alerts.read'] },
   {
     key: 'replica',
     to: '/settings/replica',

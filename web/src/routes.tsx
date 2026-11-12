@@ -330,6 +330,19 @@ export const routes: RouteObject[] = [
               },
             ],
           },
+          // Ayarlar → Güvenlik kuralları (Wave 6 §2.3): read with `alerts.read`, changed with
+          // `settings.manage` (checked on the page and by the API).
+          {
+            element: <PermissionGate anyOf={['alerts.read']} />,
+            children: [
+              {
+                path: 'settings/rules',
+                lazy: async () => ({
+                  Component: (await import('@/pages/settings/rules/rules-page')).RulesPage,
+                }),
+              },
+            ],
+          },
           // Developer page: not in the bundle the installer ships (`UI_KIT_ITEM` is null there).
           ...(UI_KIT_ITEM
             ? [

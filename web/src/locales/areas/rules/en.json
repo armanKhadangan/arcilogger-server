@@ -1,0 +1,107 @@
+{
+  "rules": {
+    "title": "Security rules",
+    "description": "Switch the security rules R01–R19 on and off and change their thresholds and actions. The thresholds are starting values; adjust them to your network.",
+    "caption": "Security rules",
+    "loadFailed": "The rules could not be read.",
+    "empty": "This version has no security rules.",
+    "readOnly": "You can view the rules; changing them needs the settings management permission.",
+    "locked": "Security rules are not enabled in your licence: you can see the rules but not change them. The rules do not run; the 5651 Temel alerts (R15, R20) keep working.",
+    "lockedBadge": "Locked",
+    "columns": {
+      "code": "Code",
+      "name": "Rule",
+      "severity": "Severity",
+      "state": "State",
+      "data": "Data",
+      "notes": "Notes"
+    },
+    "state": {
+      "on": "On",
+      "off": "Off",
+      "setup": "Needs setup"
+    },
+    "dataStatus": {
+      "ok": "Data arriving",
+      "no_data": "No data in the last 24 hours",
+      "never": "No data ever"
+    },
+    "verify": "Verify on site",
+    "verifyHint": "The log format this rule reads is not confirmed by a sample line. Compare its first alerts with the device's own records.",
+    "setupHint": "The rule does not run until its required parameter is set.",
+    "personLevel": "Person level",
+    "personLevelHint": "The alert is matched to the person of the address at that moment; the name is shown only to those allowed to see personal data, and every view is written to the audit log.",
+    "lastError": "Last run failed: {{error}}",
+    "skipped": "Data that piled up before {{time}} was skipped (older than 24 hours).",
+    "lastInput": "Last data: {{time}}",
+    "open": "Open rule {{id}}",
+    "sheet": {
+      "title": "{{id}} · {{name}}",
+      "kind": {
+        "event": "Event rule: one alert per key; a person closes it.",
+        "condition": "Condition rule: the alert closes itself when the condition is gone."
+      },
+      "inputs": "Tables read: {{tables}}",
+      "enabled": "Rule on",
+      "enabledHint": "Once switched on it looks only at data that arrives afterwards; it raises no alerts for older data.",
+      "severity": "Severity",
+      "window": "Window (seconds)",
+      "windowHint": "Events are counted within this time: {{duration}}. Between 60 seconds and 7 days.",
+      "cooldown": "Cooldown (seconds)",
+      "cooldownHint": "After an alert is closed, no new alert opens for the same key within this time: {{duration}}. At most 7 days.",
+      "noCooldown": "no cooldown",
+      "params": "Parameters",
+      "startingValue": "Starting value; adjust it to your network.",
+      "default": "Default: {{value}}",
+      "defaultEmpty": "Default: empty",
+      "listHint": "One value per line.",
+      "networksHint": "One IP address or network per line (CIDR, e.g. 172.20.0.0/16).",
+      "intsHint": "One whole number per line.",
+      "bytesHint": "In MiB: {{readable}}.",
+      "percentHint": "Percent (%).",
+      "secondsHint": "Seconds: {{duration}}.",
+      "unknownParam": "This parameter cannot be changed in the browser; its value: {{value}}",
+      "actions": "Actions",
+      "email": "Send e-mail",
+      "emailHint": "Sent when the severity reaches the alert e-mail threshold of the application settings.",
+      "webhook": "Send to webhooks",
+      "webhookHint": "Sent to the webhooks configured on the server.",
+      "advice": "What to do",
+      "resetDefaults": "Back to defaults",
+      "save": "Save",
+      "saved": "{{id}} saved.",
+      "unchanged": "No changes.",
+      "dryRun": "Try on the last 24 hours",
+      "dryRunHint": "Runs with these settings on the data of the last 24 hours; saves nothing and opens no alert.",
+      "dryRunRunning": "Trying…",
+      "dryRunResult_one": "With these settings {{n}} alert would have opened in the last 24 hours",
+      "dryRunResult_other": "With these settings {{n}} alerts would have opened in the last 24 hours",
+      "dryRunKeys": "First keys",
+      "dryRunKey": "Key",
+      "dryRunCount": "Events",
+      "dryRunFirst": "First",
+      "dryRunLast": "Last",
+      "dryRunTruncated": "Only the first 20 keys are shown.",
+      "dryRunDuration": "The trial took {{ms}} ms.",
+      "dryRunStale": "The settings changed after the trial; try again for a current result.",
+      "fixErrors": "Correct the marked fields."
+    },
+    "errors": {
+      "mib": "Enter a number in MiB (e.g. 1024 or 1.5).",
+      "entryTooLong": "Line {{line}}: at most {{max}} characters.",
+      "entryInteger": "Line {{line}}: enter a whole number.",
+      "entryNetwork": "Line {{line}}: not a valid IP address or network (CIDR).",
+      "entryHostBits": "Line {{line}}: the network address must be {{network}}.",
+      "listMin": "Enter at least {{min}} values.",
+      "listMax": "At most {{max}} values can be entered."
+    }
+  },
+  "settings": {
+    "hints": {
+      "rules": "Switching the security rules on and off, thresholds, actions and a trial on the last 24 hours."
+    }
+  },
+  "security": {
+    "openRules": "Edit the security rules"
+  }
+}

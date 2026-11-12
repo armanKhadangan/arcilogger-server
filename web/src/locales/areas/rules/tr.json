@@ -1,0 +1,107 @@
+{
+  "rules": {
+    "title": "Güvenlik kuralları",
+    "description": "R01–R19 güvenlik kurallarını açıp kapatın, eşiklerini ve eylemlerini değiştirin. Eşikler başlangıç değeridir; ağınıza göre ayarlayın.",
+    "caption": "Güvenlik kuralları",
+    "loadFailed": "Kurallar okunamadı.",
+    "empty": "Bu sürümde güvenlik kuralı yok.",
+    "readOnly": "Kuralları görüntüleyebilirsiniz; değiştirmek için ayar yönetimi yetkisi gerekir.",
+    "locked": "Güvenlik kuralları lisansınızda açık değil: kuralları görebilir, değiştiremezsiniz. Kural çalışmaz; 5651 Temel uyarıları (R15, R20) çalışmaya devam eder.",
+    "lockedBadge": "Kilitli",
+    "columns": {
+      "code": "Kod",
+      "name": "Kural",
+      "severity": "Önem",
+      "state": "Durum",
+      "data": "Veri",
+      "notes": "Notlar"
+    },
+    "state": {
+      "on": "Açık",
+      "off": "Kapalı",
+      "setup": "Ayar gerekli"
+    },
+    "dataStatus": {
+      "ok": "Veri geliyor",
+      "no_data": "Son 24 saatte veri yok",
+      "never": "Hiç veri gelmedi"
+    },
+    "verify": "Sahada doğrula",
+    "verifyHint": "Bu kuralın okuduğu log biçimi örnek bir satırla doğrulanmadı. İlk uyarılarını cihazın kendi kayıtlarıyla karşılaştırın.",
+    "setupHint": "Kural, gerekli parametre girilene kadar çalışmaz.",
+    "personLevel": "Kişi düzeyi",
+    "personLevelHint": "Uyarı adresin o andaki kişisiyle eşleştirilir; kişi adı yalnızca kişi verisini görme yetkisi olanlara gösterilir ve her gösterim denetim kaydına yazılır.",
+    "lastError": "Son çalışma hatası: {{error}}",
+    "skipped": "{{time}} öncesinde biriken veri atlandı (24 saatten eski).",
+    "lastInput": "Son veri: {{time}}",
+    "open": "{{id}} kuralını aç",
+    "sheet": {
+      "title": "{{id}} · {{name}}",
+      "kind": {
+        "event": "Olay kuralı: her anahtar için bir uyarı açılır; uyarıyı bir kişi kapatır.",
+        "condition": "Durum kuralı: koşul ortadan kalkınca uyarı kendiliğinden kapanır."
+      },
+      "inputs": "Okuduğu tablolar: {{tables}}",
+      "enabled": "Kural açık",
+      "enabledHint": "Açıldığında yalnızca açıldıktan sonraki veriye bakar; eski veri için uyarı açmaz.",
+      "severity": "Önem",
+      "window": "Pencere (saniye)",
+      "windowHint": "Olaylar bu süre içinde sayılır: {{duration}}. 60 saniye ile 7 gün arası.",
+      "cooldown": "Bekleme süresi (saniye)",
+      "cooldownHint": "Kapatılan bir uyarıdan sonra aynı anahtar için bu süre boyunca yeni uyarı açılmaz: {{duration}}. En çok 7 gün.",
+      "noCooldown": "bekleme yok",
+      "params": "Parametreler",
+      "startingValue": "Başlangıç değeri; ağınıza göre ayarlayın.",
+      "default": "Varsayılan: {{value}}",
+      "defaultEmpty": "Varsayılan: boş",
+      "listHint": "Her satıra bir değer yazın.",
+      "networksHint": "Her satıra bir IP adresi ya da ağ yazın (CIDR, ör. 172.20.0.0/16).",
+      "intsHint": "Her satıra bir tam sayı yazın.",
+      "bytesHint": "MiB olarak: {{readable}}.",
+      "percentHint": "Yüzde (%).",
+      "secondsHint": "Saniye: {{duration}}.",
+      "unknownParam": "Bu parametre tarayıcıdan değiştirilemez; değeri: {{value}}",
+      "actions": "Eylemler",
+      "email": "E-posta gönder",
+      "emailHint": "Önem, Uygulama ayarlarındaki uyarı e-postası eşiğine ulaştığında gönderilir.",
+      "webhook": "Webhook'a gönder",
+      "webhookHint": "Sunucuda tanımlı webhook'lara gönderilir.",
+      "advice": "Ne yapılmalı",
+      "resetDefaults": "Varsayılanlara dön",
+      "save": "Kaydet",
+      "saved": "{{id}} kaydedildi.",
+      "unchanged": "Değişiklik yok.",
+      "dryRun": "Son 24 saatte dene",
+      "dryRunHint": "Bu ayarlarla son 24 saatin verisi üzerinde çalışır; hiçbir şey kaydetmez ve uyarı açmaz.",
+      "dryRunRunning": "Deneniyor…",
+      "dryRunResult_one": "Son 24 saatte bu ayarlarla {{n}} uyarı açılırdı",
+      "dryRunResult_other": "Son 24 saatte bu ayarlarla {{n}} uyarı açılırdı",
+      "dryRunKeys": "İlk anahtarlar",
+      "dryRunKey": "Anahtar",
+      "dryRunCount": "Olay",
+      "dryRunFirst": "İlk",
+      "dryRunLast": "Son",
+      "dryRunTruncated": "Yalnızca ilk 20 anahtar gösteriliyor.",
+      "dryRunDuration": "Deneme {{ms}} ms sürdü.",
+      "dryRunStale": "Ayarlar denemeden sonra değişti; güncel sonuç için yeniden deneyin.",
+      "fixErrors": "İşaretli alanları düzeltin."
+    },
+    "errors": {
+      "mib": "MiB olarak bir sayı girin (ör. 1024 ya da 1,5).",
+      "entryTooLong": "Satır {{line}}: en çok {{max}} karakter olabilir.",
+      "entryInteger": "Satır {{line}}: bir tam sayı girin.",
+      "entryNetwork": "Satır {{line}}: geçerli bir IP adresi ya da ağ (CIDR) değil.",
+      "entryHostBits": "Satır {{line}}: ağ adresi {{network}} olmalı.",
+      "listMin": "En az {{min}} değer girin.",
+      "listMax": "En çok {{max}} değer girilebilir."
+    }
+  },
+  "settings": {
+    "hints": {
+      "rules": "Güvenlik kurallarını açma ve kapatma, eşikler, eylemler ve son 24 saatte deneme."
+    }
+  },
+  "security": {
+    "openRules": "Güvenlik kurallarını düzenle"
+  }
+}

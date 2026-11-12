@@ -396,8 +396,6 @@
   "settings": {
     "description": "System settings and user management.",
     "usersHint": "Accounts, roles, password and two-factor resets.",
-    "laterTitle": "In later steps",
-    "laterHint": "These sections come with the next steps of browser administration.",
     "sections": {
       "general": "General",
       "sources": "Sources",

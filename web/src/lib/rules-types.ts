@@ -14,14 +14,7 @@ export type RuleKind = 'event' | 'condition';
 
 /** How a parameter is typed (`arcilogger_worker.rules.model.Param.kind`). */
 export type RuleParamKind =
-  | 'int'
-  | 'bytes'
-  | 'seconds'
-  | 'percent'
-  | 'strings'
-  | 'networks'
-  | 'ints'
-  | 'bool';
+  'int' | 'bytes' | 'seconds' | 'percent' | 'strings' | 'networks' | 'ints' | 'bool';
 
 /**
  * Whether the tables the rule reads receive rows: `ok`, `no_data` (nothing within
