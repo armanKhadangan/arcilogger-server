@@ -186,37 +186,39 @@ the rule packages only add their `RuleDef`s.
 ```python
 @dataclass(frozen=True)
 class Param:
-    key: str                 # e.g. "threshold_ports"
+    key: str  # e.g. "threshold_ports"
     kind: Literal["int", "bytes", "seconds", "percent", "strings", "networks", "ints", "bool"]
     default: object
-    min: int | None = None   # int / bytes / seconds / percent; list length for lists
+    min: int | None = None  # int / bytes / seconds / percent; list length for lists
     max: int | None = None
     label_tr: str = ""
     label_en: str = ""
 
+
 @dataclass(frozen=True)
 class RuleDef:
-    id: str                          # "R01"
+    id: str  # "R01"
     kind: Literal["event", "condition"]
-    severity: str                    # default severity (ALERT_SEVERITIES)
-    window_seconds: int              # default window
-    cooldown_seconds: int            # default cooldown
-    params: tuple[Param, ...]        # rule-specific parameters
-    inputs: tuple[str, ...]          # tables read, e.g. ("fg_traffic",)
-    person_level: bool = False       # R09, R13, R14
-    format_verified: bool = True     # False: "sahada doğrula" (§0.4)
-    needs_setup: Callable[[RuleSettings], bool] | None = None   # True: idle until configured
+    severity: str  # default severity (ALERT_SEVERITIES)
+    window_seconds: int  # default window
+    cooldown_seconds: int  # default cooldown
+    params: tuple[Param, ...]  # rule-specific parameters
+    inputs: tuple[str, ...]  # tables read, e.g. ("fg_traffic",)
+    person_level: bool = False  # R09, R13, R14
+    format_verified: bool = True  # False: "sahada doğrula" (§0.4)
+    needs_setup: Callable[[RuleSettings], bool] | None = None  # True: idle until configured
     evaluate: Callable[[Session, RuleContext], Iterable[Hit]]
-    clear_seconds: int | None = None # condition rules only
+    clear_seconds: int | None = None  # condition rules only
+
 
 @dataclass(frozen=True)
 class Hit:
-    key: str                         # group value, e.g. "172.20.41.17" (dedup key R01:<key>)
-    time: datetime                   # receive time of the newest row of the hit
-    count: int                       # rows behind the hit in its window
-    values: Mapping[str, object]     # the numbers the title and details show
+    key: str  # group value, e.g. "172.20.41.17" (dedup key R01:<key>)
+    time: datetime  # receive time of the newest row of the hit
+    count: int  # rows behind the hit in its window
+    values: Mapping[str, object]  # the numbers the title and details show
     evidence: Sequence[EvidenceRef]  # at most rules.evidence_max, oldest first
-    person_id: int | None = None     # person-level rules only
+    person_id: int | None = None  # person-level rules only
 ```
 
 `RuleContext` gives the evaluating function: the validated settings, the slice
