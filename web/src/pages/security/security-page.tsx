@@ -1,6 +1,6 @@
-import { FilterX, RefreshCw, Search, ShieldCheck } from 'lucide-react';
+import { FilterX, RefreshCw, Search, ShieldCheck, SlidersHorizontal } from 'lucide-react';
 import { useCallback, useEffect, useId, useMemo, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 
 import { PageHeader } from '@/components/layout/page-header';
@@ -65,8 +65,8 @@ function toDay(date: Date): string {
 /**
  * Güvenlik (spec 11, 12.3 item 8; `alerts.read`, changes `alerts.manage`): "Güvenlik Özeti", the
  * alerts (filtered, sorted and paged by the server; refreshed every 30 s in the background) and the
- * detail drawer with the state workflow, notes, runbook and e-mails. The rule editor comes in a
- * later milestone.
+ * detail drawer with the state workflow, notes, runbook and e-mails. The rules are edited in
+ * Ayarlar → Güvenlik kuralları (Wave 6 §2.3), linked below the list.
  */
 export function SecurityPage() {
   const { t } = useTranslation();
@@ -446,8 +446,14 @@ export function SecurityPage() {
           setPaging({ key: filterKey, page: next });
         }}
       />
-      <p className="text-xs text-muted" data-testid="rule-editor-note">
-        {t('security.ruleEditorLater')}
+      <p className="text-13" data-testid="rule-editor-link">
+        <Link
+          to="/settings/rules"
+          className="inline-flex items-center gap-1.5 rounded-sm font-medium text-accent-ink hover:underline"
+        >
+          <SlidersHorizontal aria-hidden="true" className="size-3.5" />
+          {t('security.openRules')}
+        </Link>
       </p>
       <AlertSheet
         alertId={openId}

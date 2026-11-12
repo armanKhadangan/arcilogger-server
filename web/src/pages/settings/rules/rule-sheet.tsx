@@ -1,5 +1,5 @@
 import { FlaskConical, Lock, RotateCcw, Save } from 'lucide-react';
-import { useState, type ReactNode, type RefObject } from 'react';
+import { useRef, useState, type ReactNode, type RefObject } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { SwitchField, TextField } from '@/components/admin/form-fields';
@@ -156,6 +156,8 @@ function RuleEditor({
   );
   const [trial, setTrial] = useState<Trial | null>(null);
   const [trialError, setTrialError] = useState<string | null>(null);
+  /** Save turns disabled once saved: the focus stays in the sheet (Escape still closes it). */
+  const content = useRef<HTMLDivElement>(null);
   const changed = isRuleChanged(form, rule);
   const busy = update.isPending || dryRun.isPending;
 
@@ -207,6 +209,7 @@ function RuleEditor({
     if (!body) return;
     try {
       await update.mutateAsync({ id: rule.id, body });
+      content.current?.focus();
       toast({ title: t('rules.sheet.saved', { id: rule.id }), variant: 'success' });
     } catch (error) {
       refused(error);
@@ -235,224 +238,228 @@ function RuleEditor({
   const general = serverError && serverError.field === null ? serverError.text : null;
 
   return (
-    <SheetBody className="flex flex-col gap-5">
-      <div className="flex flex-col gap-2 empty:hidden">
-        {locked ? (
-          <Alert tone="warning" assertive={false}>
-            <span className="flex items-start gap-2">
-              <Lock aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
-              {t('rules.locked')}
-            </span>
-          </Alert>
-        ) : null}
-        {rule.needs_setup ? (
-          <Alert tone="warning" assertive={false} data-testid="rule-needs-setup">
-            {t('rules.state.setup')}: {t('rules.setupHint')}
-          </Alert>
-        ) : null}
-        {!rule.format_verified ? (
-          <Alert tone="info" assertive={false} data-testid="rule-verify">
-            <span className="flex flex-col items-start gap-1">
-              <VerifyBadge />
-              {t('rules.verifyHint')}
-            </span>
-          </Alert>
-        ) : null}
-        {rule.person_level ? (
-          <Alert tone="info" assertive={false}>
-            {t('rules.personLevel')}: {t('rules.personLevelHint')}
-          </Alert>
-        ) : null}
-        {rule.last_error ? (
-          <Alert tone="danger" assertive={false} data-testid="rule-last-error">
-            {t('rules.lastError', { error: rule.last_error })}
-          </Alert>
-        ) : null}
-        {rule.skipped_until ? (
-          <Alert tone="info" assertive={false} data-testid="rule-skipped">
-            {t('rules.skipped', { time: formatDateTime(rule.skipped_until) })}
-          </Alert>
-        ) : null}
-      </div>
-
-      <SwitchField
-        id="rule-enabled"
-        label={t('rules.sheet.enabled')}
-        hint={t('rules.sheet.enabledHint')}
-        checked={form.enabled}
-        disabled={disabled}
-        onChange={(enabled) => {
-          set({ enabled });
-        }}
-      />
-
-      <div className="grid gap-4 sm:grid-cols-2">
-        <Field id="rule-severity" label={t('rules.sheet.severity')}>
-          <Select
-            value={form.severity}
-            disabled={disabled}
-            onValueChange={(severity) => {
-              set({ severity: severity as AlertSeverity });
-            }}
-          >
-            <SelectTrigger id="rule-severity" className="w-48">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {ALERT_SEVERITIES.map((severity) => (
-                <SelectItem key={severity} value={severity}>
-                  {t(`severity.${severity}`)}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </Field>
-        <div />
-        <TextField
-          id={ruleFieldId('window')}
-          label={t('rules.sheet.window')}
-          hint={t('rules.sheet.windowHint', {
-            duration: window === null ? '—' : formatDuration(window, lang),
-          })}
-          value={form.window}
-          error={message('window')}
-          disabled={disabled}
-          inputMode="numeric"
-          inputClassName="w-40"
-          autoComplete="off"
-          onChange={(value) => {
-            set({ window: value });
-          }}
-        />
-        <TextField
-          id={ruleFieldId('cooldown')}
-          label={t('rules.sheet.cooldown')}
-          hint={t('rules.sheet.cooldownHint', {
-            duration:
-              cooldown === null
-                ? '—'
-                : cooldown === 0
-                  ? t('rules.sheet.noCooldown')
-                  : formatDuration(cooldown, lang),
-          })}
-          value={form.cooldown}
-          error={message('cooldown')}
-          disabled={disabled}
-          inputMode="numeric"
-          inputClassName="w-40"
-          autoComplete="off"
-          onChange={(value) => {
-            set({ cooldown: value });
-          }}
-        />
-      </div>
-
-      {rule.params.length > 0 ? (
-        <Section title={t('rules.sheet.params')}>
-          <p className="text-xs text-muted" data-testid="rule-starting-value">
-            {t('rules.sheet.startingValue')}
-          </p>
-          <div className="flex flex-col gap-4">
-            {rule.params.map((param) => (
-              <RuleParamInput
-                key={param.key}
-                param={param}
-                value={form.params[param.key]}
-                stored={rule.settings.params[param.key]}
-                fallback={rule.defaults.params[param.key]}
-                error={message(paramField(param.key))}
-                disabled={disabled}
-                onChange={(value) => {
-                  setParam(param.key, value);
-                }}
-              />
-            ))}
-          </div>
-        </Section>
-      ) : null}
-
-      <Section title={t('rules.sheet.actions')}>
-        <SwitchField
-          id="rule-action-email"
-          label={t('rules.sheet.email')}
-          hint={t('rules.sheet.emailHint')}
-          checked={form.email}
-          disabled={disabled}
-          onChange={(email) => {
-            set({ email });
-          }}
-        />
-        <SwitchField
-          id="rule-action-webhook"
-          label={t('rules.sheet.webhook')}
-          hint={t('rules.sheet.webhookHint')}
-          checked={form.webhook}
-          disabled={disabled}
-          onChange={(webhook) => {
-            set({ webhook });
-          }}
-        />
-      </Section>
-
-      {advice.trim() ? (
-        <Section title={t('rules.sheet.advice')}>
-          <p className="text-13 whitespace-pre-line text-foreground" data-testid="rule-advice">
-            {advice}
-          </p>
-        </Section>
-      ) : null}
-
-      {editable ? (
-        <Section title={t('rules.sheet.dryRun')}>
-          <p className="text-xs text-muted">{t('rules.sheet.dryRunHint')}</p>
-          <Button
-            variant="secondary"
-            className="self-start"
-            disabled={busy}
-            onClick={() => void tryIt()}
-          >
-            <FlaskConical aria-hidden="true" />
-            {dryRun.isPending ? t('rules.sheet.dryRunRunning') : t('rules.sheet.dryRun')}
-          </Button>
-          {trialError ? (
-            <Alert tone="danger" data-testid="rule-dry-run-error">
-              {trialError}
+    <SheetBody>
+      <div ref={content} tabIndex={-1} className="flex flex-col gap-5 outline-none">
+        <div className="flex flex-col gap-2 empty:hidden">
+          {locked ? (
+            <Alert tone="warning" assertive={false}>
+              <span className="flex items-start gap-2">
+                <Lock aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
+                {t('rules.locked')}
+              </span>
             </Alert>
           ) : null}
-          {trial ? <DryRunPanel trial={trial} stale={trial.form !== JSON.stringify(form)} /> : null}
-        </Section>
-      ) : null}
-
-      {editable ? (
-        <div className="flex flex-col gap-2 border-t border-border pt-4">
-          {general ? (
-            <Alert tone="danger" data-testid="rule-save-error">
-              {general}
+          {rule.needs_setup ? (
+            <Alert tone="warning" assertive={false} data-testid="rule-needs-setup">
+              {t('rules.state.setup')}: {t('rules.setupHint')}
             </Alert>
           ) : null}
-          {hasRuleErrors(errors) ? (
-            <p className="text-xs text-danger-ink">{t('rules.sheet.fixErrors')}</p>
+          {!rule.format_verified ? (
+            <Alert tone="info" assertive={false} data-testid="rule-verify">
+              <span className="flex flex-col items-start gap-1">
+                <VerifyBadge />
+                {t('rules.verifyHint')}
+              </span>
+            </Alert>
           ) : null}
-          <div className="flex flex-wrap items-center justify-end gap-2">
-            <Button
-              variant="ghost"
-              disabled={busy}
-              onClick={() => {
-                setForm(defaultsForm(rule));
-                setErrors({});
-                setServerError(null);
+          {rule.person_level ? (
+            <Alert tone="info" assertive={false}>
+              {t('rules.personLevel')}: {t('rules.personLevelHint')}
+            </Alert>
+          ) : null}
+          {rule.last_error ? (
+            <Alert tone="danger" assertive={false} data-testid="rule-last-error">
+              {t('rules.lastError', { error: rule.last_error })}
+            </Alert>
+          ) : null}
+          {rule.skipped_until ? (
+            <Alert tone="info" assertive={false} data-testid="rule-skipped">
+              {t('rules.skipped', { time: formatDateTime(rule.skipped_until) })}
+            </Alert>
+          ) : null}
+        </div>
+
+        <SwitchField
+          id="rule-enabled"
+          label={t('rules.sheet.enabled')}
+          hint={t('rules.sheet.enabledHint')}
+          checked={form.enabled}
+          disabled={disabled}
+          onChange={(enabled) => {
+            set({ enabled });
+          }}
+        />
+
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Field id="rule-severity" label={t('rules.sheet.severity')}>
+            <Select
+              value={form.severity}
+              disabled={disabled}
+              onValueChange={(severity) => {
+                set({ severity: severity as AlertSeverity });
               }}
             >
-              <RotateCcw aria-hidden="true" />
-              {t('rules.sheet.resetDefaults')}
-            </Button>
-            <Button disabled={busy || !changed} onClick={() => void save()}>
-              <Save aria-hidden="true" />
-              {t('rules.sheet.save')}
-            </Button>
-          </div>
+              <SelectTrigger id="rule-severity" className="w-48">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {ALERT_SEVERITIES.map((severity) => (
+                  <SelectItem key={severity} value={severity}>
+                    {t(`severity.${severity}`)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </Field>
+          <div />
+          <TextField
+            id={ruleFieldId('window')}
+            label={t('rules.sheet.window')}
+            hint={t('rules.sheet.windowHint', {
+              duration: window === null ? '—' : formatDuration(window, lang),
+            })}
+            value={form.window}
+            error={message('window')}
+            disabled={disabled}
+            inputMode="numeric"
+            inputClassName="w-40"
+            autoComplete="off"
+            onChange={(value) => {
+              set({ window: value });
+            }}
+          />
+          <TextField
+            id={ruleFieldId('cooldown')}
+            label={t('rules.sheet.cooldown')}
+            hint={t('rules.sheet.cooldownHint', {
+              duration:
+                cooldown === null
+                  ? '—'
+                  : cooldown === 0
+                    ? t('rules.sheet.noCooldown')
+                    : formatDuration(cooldown, lang),
+            })}
+            value={form.cooldown}
+            error={message('cooldown')}
+            disabled={disabled}
+            inputMode="numeric"
+            inputClassName="w-40"
+            autoComplete="off"
+            onChange={(value) => {
+              set({ cooldown: value });
+            }}
+          />
         </div>
-      ) : null}
+
+        {rule.params.length > 0 ? (
+          <Section title={t('rules.sheet.params')}>
+            <p className="text-xs text-muted" data-testid="rule-starting-value">
+              {t('rules.sheet.startingValue')}
+            </p>
+            <div className="flex flex-col gap-4">
+              {rule.params.map((param) => (
+                <RuleParamInput
+                  key={param.key}
+                  param={param}
+                  value={form.params[param.key]}
+                  stored={rule.settings.params[param.key]}
+                  fallback={rule.defaults.params[param.key]}
+                  error={message(paramField(param.key))}
+                  disabled={disabled}
+                  onChange={(value) => {
+                    setParam(param.key, value);
+                  }}
+                />
+              ))}
+            </div>
+          </Section>
+        ) : null}
+
+        <Section title={t('rules.sheet.actions')}>
+          <SwitchField
+            id="rule-action-email"
+            label={t('rules.sheet.email')}
+            hint={t('rules.sheet.emailHint')}
+            checked={form.email}
+            disabled={disabled}
+            onChange={(email) => {
+              set({ email });
+            }}
+          />
+          <SwitchField
+            id="rule-action-webhook"
+            label={t('rules.sheet.webhook')}
+            hint={t('rules.sheet.webhookHint')}
+            checked={form.webhook}
+            disabled={disabled}
+            onChange={(webhook) => {
+              set({ webhook });
+            }}
+          />
+        </Section>
+
+        {advice.trim() ? (
+          <Section title={t('rules.sheet.advice')}>
+            <p className="text-13 whitespace-pre-line text-foreground" data-testid="rule-advice">
+              {advice}
+            </p>
+          </Section>
+        ) : null}
+
+        {editable ? (
+          <Section title={t('rules.sheet.dryRun')}>
+            <p className="text-xs text-muted">{t('rules.sheet.dryRunHint')}</p>
+            <Button
+              variant="secondary"
+              className="self-start"
+              disabled={busy}
+              onClick={() => void tryIt()}
+            >
+              <FlaskConical aria-hidden="true" />
+              {dryRun.isPending ? t('rules.sheet.dryRunRunning') : t('rules.sheet.dryRun')}
+            </Button>
+            {trialError ? (
+              <Alert tone="danger" data-testid="rule-dry-run-error">
+                {trialError}
+              </Alert>
+            ) : null}
+            {trial ? (
+              <DryRunPanel trial={trial} stale={trial.form !== JSON.stringify(form)} />
+            ) : null}
+          </Section>
+        ) : null}
+
+        {editable ? (
+          <div className="flex flex-col gap-2 border-t border-border pt-4">
+            {general ? (
+              <Alert tone="danger" data-testid="rule-save-error">
+                {general}
+              </Alert>
+            ) : null}
+            {hasRuleErrors(errors) ? (
+              <p className="text-xs text-danger-ink">{t('rules.sheet.fixErrors')}</p>
+            ) : null}
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              <Button
+                variant="ghost"
+                disabled={busy}
+                onClick={() => {
+                  setForm(defaultsForm(rule));
+                  setErrors({});
+                  setServerError(null);
+                }}
+              >
+                <RotateCcw aria-hidden="true" />
+                {t('rules.sheet.resetDefaults')}
+              </Button>
+              <Button disabled={busy || !changed} onClick={() => void save()}>
+                <Save aria-hidden="true" />
+                {t('rules.sheet.save')}
+              </Button>
+            </div>
+          </div>
+        ) : null}
+      </div>
     </SheetBody>
   );
 }

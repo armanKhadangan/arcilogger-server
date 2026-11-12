@@ -404,10 +404,13 @@ export function dataStatusKey(rule: Pick<RuleOut, 'data_status'>): string {
 
 export type RuleState = 'on' | 'off' | 'setup';
 
-/** On, off, or on but idle until a parameter is set ("Ayar gerekli"). */
+/**
+ * On or off; "Ayar gerekli" while the rule is idle until a parameter is set, whether it is
+ * switched on or not (such a rule ships off, §2.1.4).
+ */
 export function ruleState(rule: Pick<RuleOut, 'settings' | 'needs_setup'>): RuleState {
-  if (!rule.settings.enabled) return 'off';
-  return rule.needs_setup ? 'setup' : 'on';
+  if (rule.needs_setup) return 'setup';
+  return rule.settings.enabled ? 'on' : 'off';
 }
 
 export function ruleName(rule: Pick<RuleOut, 'name_tr' | 'name_en' | 'id'>, lang: Lang): string {
