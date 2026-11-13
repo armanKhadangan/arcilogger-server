@@ -380,7 +380,7 @@ def _smtp(config: Config, probes: Probes, password: str | None, secrets: list[st
         probes.smtp(config, password)
     except SmtpSendError as exc:
         text = _cause(str(exc), secrets)
-        hint = explain(text, settings.host)
+        hint = explain(text, settings.host, port=settings.port, security=settings.security)
         row = _row("smtp", "warn", target=target, cause=text)
         if hint:  # the explanation first, as the browser shows it (0.4.0 P6)
             return Row(

@@ -336,7 +336,7 @@ olarak içerir (`operator-installers\temurin8-jre\`). Sabit bir klasöre kurun k
 `arcilogger.toml` içindeki yol Java güncellemelerinden sonra da geçerli kalsın:
 
 ```powershell
-msiexec /i C:\Kurulum\ARCILOGGER-0.4.0\operator-installers\temurin8-jre\OpenJDK8U-jre_x64_windows_hotspot_8u502b07.msi INSTALLDIR="C:\Program Files\Eclipse Adoptium\jre-8\" /qn /norestart /l*v C:\Windows\Temp\temurin8.log
+msiexec /i C:\Kurulum\ARCILOGGER-0.4.1\operator-installers\temurin8-jre\OpenJDK8U-jre_x64_windows_hotspot_8u502b07.msi INSTALLDIR="C:\Program Files\Eclipse Adoptium\jre-8\" /qn /norestart /l*v C:\Windows\Temp\temurin8.log
 & "C:\Program Files\Eclipse Adoptium\jre-8\bin\java.exe" -version
 ```
 
@@ -370,7 +370,7 @@ Bu yolda yönetici PC'sinde Git, uv, Node.js ya da Inno Setup gerekmez. İndirdi
 özetinde (Actions → çalıştırma → *Summary*) yazar:
 
 ```powershell
-Get-FileHash .\ARCILOGGER-Setup-0.4.0.exe, .\ARCILOGGER-0.4.0.zip -Algorithm SHA256 | Format-List Hash, Path
+Get-FileHash .\ARCILOGGER-Setup-0.4.1.exe, .\ARCILOGGER-0.4.1.zip -Algorithm SHA256 | Format-List Hash, Path
 Get-Content .\SHA256SUMS.txt
 ```
 
@@ -414,12 +414,12 @@ yayımlanan **SHA-256** değerini not edin ve `tss-client-console-3.1.33.jar` do
 
 ## 6. Paketi sunucuya kopyalama ve doğrulama
 
-Klasörü USB bellekle veya paylaşımla sunucuya kopyalayın, örneğin `C:\Kurulum\ARCILOGGER-0.4.0`
+Klasörü USB bellekle veya paylaşımla sunucuya kopyalayın, örneğin `C:\Kurulum\ARCILOGGER-0.4.1`
 (**`D:\ARCILOGGER` içine değil**). Jar dosyasını da `C:\Kurulum\` içine koyun.
 
 ```powershell
 Get-ChildItem -Recurse C:\Kurulum | Unblock-File       # "internetten indirildi" işaretini kaldırır
-Get-FileHash C:\Kurulum\ARCILOGGER-0.4.0\SHA256SUMS -Algorithm SHA256
+Get-FileHash C:\Kurulum\ARCILOGGER-0.4.1\SHA256SUMS -Algorithm SHA256
 ```
 
 Çıkan değer, bölüm 4'te not ettiğiniz **paket parmak izi** ile aynı olmalıdır. Kurulum betiği
@@ -434,7 +434,7 @@ karşılaştırın; kurulum penceresi paket parmak izini yeniden yazar.
 değerleri (bölüm 7.1) burada da verin; verilmezse deneme onları sorar:
 
 ```powershell
-cd C:\Kurulum\ARCILOGGER-0.4.0
+cd C:\Kurulum\ARCILOGGER-0.4.1
 powershell -ExecutionPolicy Bypass -File .\installer\Install-Arcilogger.ps1 -DryRun `
     -SiteName "<kuruluş adı>" -NtpServer <yerel saat kaynağı> -AdminAddress <yönetici PC'si>
 ```
@@ -1018,6 +1018,19 @@ Get-NetFirewallRule -Group ARCILOGGER | Format-Table DisplayName, Direction, Ena
 
 `license status` lisans durumunu, açık modülleri ve sınırları yazar (deneme, kalan gün;
 [LISANS.md](LISANS.md) bölüm 5).
+
+**"An Application Control policy has blocked this file" hatası.** Akıllı Uygulama Denetimi
+(Smart App Control) ya da kurumun uygulama denetimi (WDAC) açıksa Windows, kurulumun
+`venv\Scripts` klasörüne yazdığı imzasız `arcilogger-*.exe` başlatıcılarını engelleyebilir.
+Servisler ve zamanlanmış görevler bundan etkilenmez: onlar aynı klasördeki `python.exe` ile
+çalışır. Bu belgelerdeki bir `arcilogger-<ad>.exe <komut>` komutunu engellenirse aynı klasörün
+`python.exe`'si ile `-I -m arcilogger_<ad>` biçiminde çalıştırın; komutun geri kalanı aynıdır.
+Örneğin:
+
+```powershell
+& "C:\Program Files\ARCILOGGER\venv\Scripts\python.exe" -I -m arcilogger_core selftest
+& "C:\Program Files\ARCILOGGER\venv\Scripts\python.exe" -I -m arcilogger_core verify --last 3
+```
 
 **Otomatik denetim (`selftest`).** Kurulumun sonunda kendiliğinden çalışan denetimdir; istediğiniz
 zaman yeniden çalıştırın. Hiçbir şeyi değiştirmez: damga almaz, kontör harcamaz, e-posta göndermez.
