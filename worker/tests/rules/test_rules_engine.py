@@ -22,8 +22,10 @@ from arcilogger_db.partitions import ensure_partitions
 from arcilogger_db.settings import set_setting
 from arcilogger_worker.alerts.store import active_alert, change_state
 from arcilogger_worker.rules import engine as rule_engine
+from arcilogger_worker.rules.dryrun import DryRunTimeoutError, dry_run
 from arcilogger_worker.rules.engine import FAILING_RULE, failing_key, run_rules
 from arcilogger_worker.rules.model import EvidenceRef, Hit, Param, RuleContext, RuleDef
+from arcilogger_worker.rules.settings import RuleSettingsError
 
 NOW = datetime(2026, 11, 12, 9, 45, tzinfo=UTC)
 #: The horizon at NOW with the default ``rules.lag_seconds`` (120).
@@ -426,3 +428,60 @@ def test_list_parameters_are_bound_not_spliced(sessions: sessionmaker[Session]) 
     assert alert.dedup_key == f"R02:{OTHER}"
     with sessions() as session:
         assert session.scalar(select(func.count()).select_from(TABLE)) == 7
+
+
+# -- T-A5: dry run --------------------------------------------------------------------------------
+
+
+def _counts(sessions: sessionmaker[Session]) -> dict[str, int]:
+    with sessions() as session:
+        return {
+            table: session.scalar(text(f"SELECT count(*) FROM {table}")) or 0  # noqa: S608 - fixed names
+            for table in ("alerts", "alert_evidence", "alert_events", "rule_state", "settings")
+        }
+
+
+def test_the_dry_run_answers_what_the_live_run_does_and_writes_nothing(
+    sessions: sessionmaker[Session],
+) -> None:
+    candidate = {"params": {"threshold": 4}}
+    _setting(sessions, "rules.R02", candidate)
+    _setting(sessions, "rules.max_slice_seconds", 3600)
+    for hours, count, srcip in ((20, 5, SCANNER), (10, 3, SCANNER), (5, 6, OTHER), (2, 4, SCANNER)):
+        _rows(sessions, HORIZON - timedelta(hours=hours, seconds=-10), count, srcip=srcip)
+    before = _counts(sessions)
+    with sessions() as session:
+        result = dry_run(session, RULE, candidate, NOW).as_json()
+    assert _counts(sessions) == before
+    assert result["would_open"] == 2
+    assert [(item["key"], item["count"]) for item in result["keys"]] == [(SCANNER, 9), (OTHER, 6)]
+    assert result["truncated"] is False
+    assert result["duration_ms"] >= 0
+    # The live run over the same 24 hours opens the same alerts.
+    with sessions() as session:
+        session.add(RuleState(rule="R02", watermark=HORIZON - timedelta(hours=24), failures=0))
+        session.commit()
+    details = _run(sessions)
+    assert details["opened"] == 2
+    assert {alert.details["key"]: alert.details["count"] for alert in _alerts(sessions)} == {
+        SCANNER: 9,
+        OTHER: 6,
+    }
+
+
+def test_the_dry_run_refuses_invalid_candidates_and_times_out(
+    sessions: sessionmaker[Session],
+) -> None:
+    with sessions() as session, pytest.raises(RuleSettingsError) as caught:
+        dry_run(session, RULE, {"params": {"threshold": 0}}, NOW)
+    assert caught.value.field == "params.threshold"
+    _setting(sessions, "rules.dry_run_timeout_seconds", 5)
+
+    def slow(session: Session, context: RuleContext) -> Iterable[Hit]:
+        session.execute(text("SELECT pg_sleep(6)"))
+        return ()
+
+    with sessions() as session, pytest.raises(DryRunTimeoutError):
+        dry_run(session, RuleDef(**{**RULE.__dict__, "evaluate": slow}), {}, NOW)
+    with sessions() as session, pytest.raises(KeyError):
+        dry_run(session, "R15", {}, NOW)
