@@ -15,6 +15,7 @@ bağlayıcıdır.
 | 4 — Uyum Durumu, Sistem, first-run wizard | [wave-4-contract.md](wave-4-contract.md) | `wave-4` | §4 of the contract; one GitHub issue each |
 | 5 — re-stamping, revocation lists, legal-validity banners, TÜRKTRUST | [wave-5-contract.md](wave-5-contract.md) | `wave-5` | §4 and addenda of the contract |
 | 0.4.0 — kolay kurulum / easy setup | [0.4.0-contract.md](0.4.0-contract.md) | `main` (one pull request per package) | §4 of the contract; tracking issue #234 |
+| 6 — security rules R01–R19, rule engine, rule editor, webhooks (0.5.0) | [wave-6-contract.md](wave-6-contract.md) | `wave-6` | §4 of the contract; one GitHub issue each |
 
 How to read a contract (the GitHub issue of your package says which sections you need):
 
