@@ -3,9 +3,15 @@
 Every rule of the registry has at least one positive case (it raises the alerts listed in
 :attr:`RuleCase.expected`) and one negative case (just below the threshold: no alert). A case is
 data only: the rows it writes into the parsed tables (:class:`CaseRow`), the overrides of its
-rule's settings (``rules.<ID>`` shape) and what the rule must answer. The engine tests write the
-rows with the common columns filled in (``source``, ``sender``, the raw reference), evaluate the
-rule on the slice that ends at :data:`SLICE_END` and compare the hits.
+rule's settings (``rules.<ID>`` shape) and what the rule must answer. ``test_rules_cases.py``
+writes the rows, runs the rule through the engine on the slice that ends at :data:`SLICE_END` and
+compares the alerts. The writer fills in what a row does not name:
+
+- a parsed row gets ``source`` (``fortigate`` for an ``fg_*`` table, ``core-r1`` otherwise) unless
+  its values name one, and the sender and its raw reference (``raw_day``, ``raw_line``,
+  ``raw_offset``) always; ``extra`` is ``{}`` unless named;
+- a ``devices`` row gets ``created_at`` = its receive time and ``first_seen`` = ``last_seen`` = its
+  device time (receive time plus :attr:`CaseRow.device_offset`).
 
 Each rule package appends **one block** of cases for its rules (append-only, contract §4.1):
 W6-B network, W6-C access, W6-D threats, W6-E people. Every value comes from the fictional world
@@ -65,6 +71,11 @@ class RuleCase:
     settings: Mapping[str, object] = field(default_factory=dict)
     #: Length of the evaluated slice; ``None``: ``rules.max_slice_seconds``.
     slice_seconds: int | None = None
+    #: The cooldown case: a closed alert of every expected key, this long before
+    #: :data:`SLICE_END` (its ``time``). Inside the rule's cooldown the hits are counted on that
+    #: alert's ``after_close`` and no alert opens; past it a new alert opens as in a positive case.
+    #: The closed alert's time plus the cooldown must not fall inside the slice.
+    closed_before: timedelta | None = None
 
     @property
     def positive(self) -> bool:
