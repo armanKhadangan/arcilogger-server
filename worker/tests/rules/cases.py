@@ -236,3 +236,90 @@ CASES.extend(
         ),
     ]
 )
+
+# -------------------------------------------------------------------------------------------------
+# W6-E — people (R09, R13, R14; contract §2.2.4). The case rows have no leases, so the key is the
+# address (``ip:<srcip>``); the person keys are tested with leases in ``test_people.py``.
+# -------------------------------------------------------------------------------------------------
+
+_MIB = 1024 * 1024
+_PC = "172.20.43.37"
+
+
+def _blocked_web(count: int) -> CaseRow:
+    return CaseRow(
+        "fg_web",
+        timedelta(seconds=-300),
+        {
+            "srcip": _PC,
+            "dstip": "198.51.100.20",
+            "dstport": 443,
+            "hostname": "proxy.example",
+            "catdesc": "Proxy Avoidance",
+            "action": "blocked",
+        },
+        repeat=count,
+    )
+
+
+def _sent(received: timedelta, sessionid: int, sent: int, rcvd: int = 2000) -> CaseRow:
+    return CaseRow(
+        "fg_traffic",
+        received,
+        {
+            "subtype": "forward",
+            "action": "accept",
+            "sessionid": sessionid,
+            "srcip": _PC,
+            "srcport": 50000 + sessionid % 1000,
+            "dstip": "203.0.113.10",
+            "dstport": 443,
+            "sentbyte": sent,
+            "rcvdbyte": rcvd,
+            "is_interim": False,
+        },
+    )
+
+
+#: R14 cases: a "night" of 12:00-13:00 site time, which holds the slice (12:35-12:45).
+_NOON = {
+    "params": {"user_networks": ["172.20.43.0/24"], "night_start": 43_200, "night_end": 46_800}
+}
+
+CASES.extend(
+    [
+        RuleCase(
+            "R09",
+            "blocked-20",
+            (_blocked_web(20),),
+            (ExpectedHit(f"ip:{_PC}", 20, {"srcip": _PC, "count": 20}, evidence=20),),
+        ),
+        RuleCase("R09", "blocked-19", (_blocked_web(19),)),
+        RuleCase(
+            "R13",
+            "sent-1100-mib",
+            (_sent(timedelta(seconds=-60), 1001, 1100 * _MIB),),
+            (ExpectedHit(f"ip:{_PC}", 1, {"bytes": 1100 * _MIB, "period": "hour"}, evidence=1),),
+        ),
+        RuleCase("R13", "sent-1-gib", (_sent(timedelta(seconds=-60), 1001, 1024 * _MIB),)),
+        RuleCase(
+            "R14",
+            "night-10-mib",
+            (
+                _sent(timedelta(seconds=-1800), 1002, 4 * _MIB, 2 * _MIB),
+                _sent(timedelta(seconds=-60), 1003, 2 * _MIB, 2 * _MIB),
+            ),
+            (ExpectedHit(f"ip:{_PC}", 2, {"bytes": 10 * _MIB, "night": "2026-11-12"}, evidence=2),),
+            overrides=_NOON,
+        ),
+        RuleCase(
+            "R14",
+            "night-below-10-mib",
+            (
+                _sent(timedelta(seconds=-1800), 1002, 4 * _MIB, 2 * _MIB),
+                _sent(timedelta(seconds=-60), 1003, 2 * _MIB, 2 * _MIB - 1),
+            ),
+            overrides=_NOON,
+        ),
+    ]
+)
