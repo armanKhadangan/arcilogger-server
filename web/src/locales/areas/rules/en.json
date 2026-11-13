@@ -84,7 +84,9 @@
       "dryRunTruncated": "Only the first 20 keys are shown.",
       "dryRunDuration": "The trial took {{ms}} ms.",
       "dryRunStale": "The settings changed after the trial; try again for a current result.",
-      "fixErrors": "Correct the marked fields."
+      "fixErrors": "Correct the marked fields.",
+      "timeOfDayHint": "Time of day, site time (HH:MM, e.g. 06:00).",
+      "timeOfDayPlaceholder": "HH:MM"
     },
     "errors": {
       "mib": "Enter a number in MiB (e.g. 1024 or 1.5).",
@@ -93,7 +95,8 @@
       "entryNetwork": "Line {{line}}: not a valid IP address or network (CIDR).",
       "entryHostBits": "Line {{line}}: the network address must be {{network}}.",
       "listMin": "Enter at least {{min}} values.",
-      "listMax": "At most {{max}} values can be entered."
+      "listMax": "At most {{max}} values can be entered.",
+      "timeOfDay": "Enter the time as HH:MM (00:00 – 23:59)."
     }
   },
   "settings": {

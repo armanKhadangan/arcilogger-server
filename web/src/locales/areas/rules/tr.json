@@ -84,7 +84,9 @@
       "dryRunTruncated": "Yalnızca ilk 20 anahtar gösteriliyor.",
       "dryRunDuration": "Deneme {{ms}} ms sürdü.",
       "dryRunStale": "Ayarlar denemeden sonra değişti; güncel sonuç için yeniden deneyin.",
-      "fixErrors": "İşaretli alanları düzeltin."
+      "fixErrors": "İşaretli alanları düzeltin.",
+      "timeOfDayHint": "Saat, site saatiyle (SS:DD, ör. 06:00).",
+      "timeOfDayPlaceholder": "SS:DD"
     },
     "errors": {
       "mib": "MiB olarak bir sayı girin (ör. 1024 ya da 1,5).",
@@ -93,7 +95,8 @@
       "entryNetwork": "Satır {{line}}: geçerli bir IP adresi ya da ağ (CIDR) değil.",
       "entryHostBits": "Satır {{line}}: ağ adresi {{network}} olmalı.",
       "listMin": "En az {{min}} değer girin.",
-      "listMax": "En çok {{max}} değer girilebilir."
+      "listMax": "En çok {{max}} değer girilebilir.",
+      "timeOfDay": "Saati SS:DD olarak girin (00:00 – 23:59)."
     }
   },
   "settings": {

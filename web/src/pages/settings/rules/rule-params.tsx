@@ -10,6 +10,7 @@ import type { RuleParam, RuleParamValue } from '@/lib/rules-types';
 import {
   isKnownKind,
   isListKind,
+  isTimeOfDay,
   MIB,
   paramField,
   paramLabel,
@@ -124,6 +125,8 @@ export function RuleParamInput({
     kindHint = t('rules.sheet.bytesHint', {
       readable: bytes === null ? '—' : formatBytes(bytes, lang),
     });
+  } else if (isTimeOfDay(param)) {
+    kindHint = t('rules.sheet.timeOfDayHint');
   } else if (param.kind === 'seconds') {
     const seconds = typedSeconds(text);
     kindHint = t('rules.sheet.secondsHint', {
@@ -141,7 +144,8 @@ export function RuleParamInput({
         hint={kindHint ? `${kindHint} ${byDefault}` : byDefault}
         error={error}
         disabled={disabled}
-        inputMode={param.kind === 'bytes' ? 'decimal' : 'numeric'}
+        inputMode={param.kind === 'bytes' ? 'decimal' : isTimeOfDay(param) ? 'text' : 'numeric'}
+        placeholder={isTimeOfDay(param) ? t('rules.sheet.timeOfDayPlaceholder') : undefined}
         inputClassName="w-40"
         autoComplete="off"
         onChange={onChange}

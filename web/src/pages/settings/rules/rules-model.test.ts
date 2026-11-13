@@ -2,6 +2,8 @@ import type { RuleOut, RuleParam } from '@/lib/rules-types';
 import { RULES } from '@/test/rules-samples';
 
 import {
+  clockSeconds,
+  clockText,
   dataStatusKey,
   defaultsForm,
   fieldOfProblem,
@@ -236,5 +238,49 @@ describe('the server refusal and the table', () => {
     expect(shownValue(param('int'), 65535, 'tr', t)).toBe('65.535');
     expect(shownValue(param('ints'), [53, 853], 'tr', t)).toBe('53, 853');
     expect(shownValue(param('bool'), true, 'tr', t)).toBe('rules.state.on');
+  });
+});
+
+describe("R14's night as HH:MM (manager, #256)", () => {
+  const night = (key: string): RuleParam => ({
+    key,
+    kind: 'seconds',
+    min: 0,
+    max: 86_399,
+    label_tr: key,
+    label_en: key,
+  });
+  const rule = {
+    params: [night('night_start'), night('night_end'), param('seconds', 60, 86_400)],
+    settings: {
+      ...sample('R01').settings,
+      params: { night_start: 0, night_end: 21_600, p: 600 },
+    },
+  };
+
+  it('shows the stored seconds since site midnight as HH:MM; other seconds stay seconds', () => {
+    expect(toRuleForm(rule).params).toEqual({ night_start: '00:00', night_end: '06:00', p: '600' });
+    expect(clockText(86_399)).toBe('23:59');
+    expect(shownValue(night('night_end'), 21_600, 'tr', t)).toBe('06:00');
+    expect(shownValue(param('seconds'), 21_600, 'tr', t)).toBe('6 sa');
+  });
+
+  it('checks HH:MM and sends seconds since site midnight', () => {
+    expect(clockSeconds('6:30')).toBe(23_400);
+    expect(clockSeconds('24:00')).toBeNull();
+    expect(clockSeconds('06.00')).toBeNull();
+    expect(paramProblem(night('night_start'), '23:59')).toBeUndefined();
+    expect(paramProblem(night('night_start'), '25:00')).toEqual({ key: 'rules.errors.timeOfDay' });
+    expect(paramProblem(night('night_start'), ' ')).toEqual({ key: 'validation.required' });
+    const form = {
+      ...toRuleForm(rule),
+      params: { night_start: '22:30', night_end: '05:00', p: '900' },
+    };
+    expect(validateRule(form, rule.params)).toEqual({});
+    expect(fromRuleForm(form, rule).params).toEqual({
+      night_start: 81_000,
+      night_end: 18_000,
+      p: 900,
+    });
   });
 });

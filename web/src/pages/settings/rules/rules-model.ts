@@ -92,11 +92,37 @@ function mibText(bytes: number): string {
   return Number.isInteger(mib) ? String(mib) : String(Number(mib.toFixed(3)));
 }
 
+/**
+ * R14's night (`night_start`, `night_end`): kind `seconds`, stored as seconds since site
+ * midnight (0 … 86 399), shown and typed as HH:MM (manager, #256, 2026-11-13). Every other
+ * `seconds` parameter is a duration in seconds.
+ */
+export const TIME_OF_DAY_PARAMS: ReadonlySet<string> = new Set(['night_start', 'night_end']);
+const TIME_OF_DAY = /^([01]?\d|2[0-3]):([0-5]\d)$/;
+
+export function isTimeOfDay(param: Pick<RuleParam, 'key' | 'kind'>): boolean {
+  return param.kind === 'seconds' && TIME_OF_DAY_PARAMS.has(param.key);
+}
+
+/** 21 600 → `06:00` (whole minutes; seconds past the minute are dropped). */
+export function clockText(seconds: number): string {
+  const minutes = Math.floor((((seconds % 86_400) + 86_400) % 86_400) / 60);
+  return `${String(Math.floor(minutes / 60)).padStart(2, '0')}:${String(minutes % 60).padStart(2, '0')}`;
+}
+
+/** `6:00` / `06:00` → 21 600; `null` for anything else. */
+export function clockSeconds(text: string): number | null {
+  const found = TIME_OF_DAY.exec(text.trim());
+  if (!found) return null;
+  return Number(found[1]) * 3600 + Number(found[2]) * 60;
+}
+
 function paramText(param: RuleParam, value: RuleParamValue | undefined): string | boolean {
   if (param.kind === 'bool') return value === true;
   if (value === undefined) return '';
   if (Array.isArray(value)) return value.map(String).join('\n');
   if (param.kind === 'bytes' && typeof value === 'number') return mibText(value);
+  if (isTimeOfDay(param) && typeof value === 'number') return clockText(value);
   return String(value);
 }
 
@@ -264,6 +290,10 @@ export function paramProblem(
 ): RuleProblem | undefined {
   if (!isKnownKind(param.kind) || param.kind === 'bool' || typeof value !== 'string')
     return undefined;
+  if (isTimeOfDay(param)) {
+    if (!value.trim()) return { key: 'validation.required' };
+    return clockSeconds(value) === null ? { key: 'rules.errors.timeOfDay' } : undefined;
+  }
   switch (param.kind) {
     case 'bytes':
       return bytesProblem(value, param, lang);
@@ -301,6 +331,7 @@ export function hasRuleErrors(errors: RuleErrors): boolean {
 function paramValue(param: RuleParam, text: string | boolean | undefined): RuleParamValue {
   if (param.kind === 'bool') return text === true;
   const value = typeof text === 'string' ? text : '';
+  if (isTimeOfDay(param)) return clockSeconds(value) ?? 0;
   switch (param.kind) {
     case 'strings':
     case 'networks':
@@ -425,7 +456,7 @@ export function paramLabel(param: Pick<RuleParam, 'label_tr' | 'label_en' | 'key
 
 /** A value as the "Varsayılan" line shows it (`t` names a flag "Açık" / "Kapalı"). */
 export function shownValue(
-  param: Pick<RuleParam, 'kind'>,
+  param: Pick<RuleParam, 'kind' | 'key'>,
   value: RuleParamValue | undefined,
   lang: Lang,
   t: (key: string) => string,
@@ -435,6 +466,7 @@ export function shownValue(
   if (typeof value === 'boolean') return t(value ? 'rules.state.on' : 'rules.state.off');
   if (typeof value === 'number') {
     if (param.kind === 'bytes') return formatBytes(value, lang);
+    if (isTimeOfDay(param)) return clockText(value);
     if (param.kind === 'seconds') return formatDuration(value, lang);
     if (param.kind === 'percent') return lang === 'en' ? `${value}%` : `%${value}`;
     return formatNumber(value, 0, lang);
