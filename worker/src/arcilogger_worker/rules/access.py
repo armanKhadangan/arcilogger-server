@@ -375,7 +375,9 @@ def evaluate_r11(session: Session, ctx: RuleContext) -> list[Hit]:
 
 def _first_sighting(session: Session, mac: str, first_seen: datetime | None) -> list[EvidenceRef]:
     """The parsed row the inventory took ``first_seen`` from (one exact device-time match per
-    table, the partition pruned by it); empty when the row is gone (retention)."""
+    table, the partition pruned by it), so the alert opens its raw line; when that row is gone
+    (retention), the ``devices`` row itself, which keeps the first sighting's time only
+    (deviation W6-A-2)."""
     if first_seen is None:
         return []
     parts = [
@@ -388,6 +390,8 @@ def _first_sighting(session: Session, mac: str, first_seen: datetime | None) -> 
     found = session.execute(
         select(rows).order_by(rows.c.time_received, rows.c.tbl, rows.c.id).limit(1)
     ).all()
+    if not found:
+        return [EvidenceRef(table="devices", row_id=None, time=first_seen)]
     return [_evidence(row) for row in found]
 
 

@@ -376,6 +376,17 @@ def test_r11_reports_a_device_the_inventory_just_learnt(
     assert hits[0].time == now
 
 
+def test_r11_evidence_without_its_sighting_row_is_the_device(db_session: Session) -> None:
+    """The parsed row of the first sighting is gone (retention): the evidence is the
+    ``devices`` row with the first sighting's time only (deviation W6-A-2)."""
+    seen = at(9, 40)
+    upsert_devices(db_session, [DeviceSighting(MAC_A, seen, "172.20.43.77", 43)])
+    hits = run(db_session, "R11", _now(db_session) + timedelta(seconds=1))
+    assert keys(hits) == {MAC_A: 1}
+    (ref,) = hits[0].evidence
+    assert (ref.table, ref.row_id, ref.time, ref.raw_day) == ("devices", None, seen, None)
+
+
 def test_r11_never_reports_devices_known_before_the_slice(
     evidence: Evidence, db_session: Session
 ) -> None:
