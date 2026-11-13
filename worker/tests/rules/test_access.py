@@ -590,26 +590,23 @@ def test_rule_definitions() -> None:
 
 
 def _write_case_row(session: Session, row: CaseRow, n: int) -> None:
-    """A case row with the common columns as the case block assumes them (``core-r1`` for a
-    MikroTik table, ``fortigate`` for a FortiGate one; a device's insert time = receive time)."""
+    """A case row with the common columns as the case block assumes them (``source`` from its
+    values; a device's insert time = its receive time)."""
     received = SLICE_END + row.received + timedelta(seconds=n)
     if row.table == "devices":
         values = {"first_seen": received, "last_seen": received, **row.values}
         session.execute(insert(Device).values(**values, created_at=received))
         return
     table = Base.metadata.tables[row.table]
-    session.execute(
-        insert(table).values(
-            time=received + row.device_offset,
-            time_received=received,
-            source="core-r1" if row.table.startswith("mt_") else "fortigate",
-            sender="172.20.10.1" if row.table.startswith("mt_") else FIREWALL,
-            raw_day=site_day(received),
-            raw_line=n + 1,
-            raw_offset=0,
-            **row.values,
-        )
-    )
+    common = {
+        "time": received + row.device_offset,
+        "time_received": received,
+        "sender": "172.20.10.1" if row.table.startswith("mt_") else FIREWALL,
+        "raw_day": site_day(received),
+        "raw_line": n + 1,
+        "raw_offset": 0,
+    }
+    session.execute(insert(table).values(**common, **row.values))
 
 
 @pytest.mark.parametrize(
