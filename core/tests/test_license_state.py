@@ -50,7 +50,7 @@ SERVER = "XW68-7K1Z-5FGV-AGT8"
 OTHER = "0000-1111-2222-3333"
 NOW = datetime(2026, 10, 20, 9, 0, tzinfo=UTC)
 RELEASE = date(2026, 10, 20)
-PAID = ("usage_analytics", "usage_reports", "bulk_import")
+PAID = ("usage_analytics", "usage_reports", "bulk_import", "security_rules")
 ALL = frozenset(module_keys())
 
 
@@ -732,12 +732,15 @@ def test_module_registry() -> None:
         "usage_analytics",
         "usage_reports",
         "bulk_import",
+        "security_rules",
     ]
     assert module("core_5651").always
     assert module("core_5651").name_tr == "5651 Temel"
     assert module("usage_analytics").name_tr == "Kullanım analizi"
     assert module("usage_reports").requires == ("usage_analytics",)
     assert module("bulk_import").name_en == "Bulk import (CSV)"
+    assert module("security_rules").name_tr == "Güvenlik kuralları"
+    assert module("security_rules").requires == ()
     assert not any(item.always for item in MODULES[1:])
     for item in MODULES:
         assert item.description_tr

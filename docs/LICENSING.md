@@ -42,6 +42,7 @@ in every state. Prices are not part of the product.
 | `usage_analytics` | Usage analytics | Kullanım analizi | Estimated usage time per person, device, site and category, with exports: the **Kullanım** page, the dashboard's usage sections and **Canlı Durum**'s table of who is sending and receiving data now | — |
 | `usage_reports` | Scheduled usage reports | Zamanlanmış kullanım raporları | Scheduled usage reports made and e-mailed by the server: the **Raporlar** page | Usage analytics |
 | `bulk_import` | Bulk import (CSV) | Toplu içe aktarma (CSV) | Bulk import of persons and device assignments from CSV files (Cihazlar ve Kişiler → the import part of the **Aktarım** tab); manual entry and the CSV exports are always available | — |
+| `security_rules` | Security rules | Güvenlik kuralları | Security rules that catch suspicious events on the network with adjustable thresholds (R01–R14, R16–R19), the rule editor and webhook notifications; the log source and system alerts (R15, R20), IP conflicts and the new log source alert stay in 5651 Core | — |
 
 **Data the usage modules need:** Usage analytics and Scheduled usage reports are computed from
 FortiGate logs only: traffic logs (with interim logs for long sessions), web filter, DNS filter,

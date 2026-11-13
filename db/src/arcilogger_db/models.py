@@ -93,7 +93,9 @@ SEAL_VERIFY_OUTCOMES: Final = ("ok", "failed", "timeout", "error")
 #: Area E (alert e-mail, ADR-0010): what an ``alert_deliveries`` row announces, and its state.
 #: ``suppressed``: not e-mailed because of ``alerts.email_max_per_hour``; counted in the next
 #: summary e-mail (``message_id`` set once it was).
-ALERT_DELIVERY_KINDS: Final = ("new", "resolved")
+#: ``webhook`` (Wave 6 D10, revision ``0024_rules``): a delivery to the webhook named in
+#: ``recipient``; the e-mail job ignores those rows, the webhook job the others.
+ALERT_DELIVERY_KINDS: Final = ("new", "resolved", "webhook")
 ALERT_DELIVERY_STATUSES: Final = ("queued", "sent", "failed", "suppressed")
 #: Area U (usage analytics, ADR-0011): who a usage row belongs to — the person the device was
 #: assigned to at that moment, else the device (MAC of the lease), else the bare IP address.
@@ -113,9 +115,13 @@ DOMAIN_CATEGORY_SOURCES: Final = ("web", "dns")
 
 #: Area S (alert workflow, ADR-0010 amendment): an ``alert_events`` row is a change of state or
 #: a note; a note holds 1-2000 characters, the reason code of an automatic change at most 200.
-ALERT_EVENT_KINDS: Final = ("state", "note")
+#: ``assign`` (Wave 6 §2.5, revision ``0024_rules``): the alert was given to a user (``text``
+#: = the user name) or to nobody (``text`` NULL).
+ALERT_EVENT_KINDS: Final = ("state", "note", "assign")
 ALERT_NOTE_MAX: Final = 2000
 ALERT_REASON_MAX: Final = 200
+#: The longest user name (``users.username`` check): the text of an ``assign`` event.
+USERNAME_MAX: Final = 64
 
 #: Area R (scheduled usage reports, ADR-0012): what a schedule produces and when; a run of a
 #: schedule with a period given by hand is ``custom``.
@@ -1336,6 +1342,7 @@ class Alert(Base):
         CheckConstraint(_in("state", ALERT_STATES), name="state"),
         Index("ix_alerts_time", "time"),
         Index("ix_alerts_state_time", "state", "time"),
+        Index("ix_alerts_assignee_state", "assignee_id", "state"),
         Index(
             "uq_alerts_open_dedup_key",
             "dedup_key",
@@ -1363,6 +1370,11 @@ class Alert(Base):
     updated_at: Mapped[datetime] = _updated()
     #: When the alert became ``resolved`` (automatically or by a person).
     resolved_at: Mapped[datetime | None] = mapped_column(TZ, sort_order=902)
+    #: The user it is assigned to (Wave 6 §2.5, revision ``0024_rules``); NULL: nobody, or the
+    #: user row is gone.
+    assignee_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("users.id", ondelete="SET NULL"), sort_order=903
+    )
 
 
 class AlertDelivery(Base):
@@ -1741,7 +1753,9 @@ class AlertEvent(Base):
             f"AND {_in('to_state', ALERT_STATES)} AND from_state <> to_state "
             f"AND (text IS NULL OR char_length(text) BETWEEN 1 AND {ALERT_REASON_MAX})) "
             "OR (kind = 'note' AND from_state IS NULL AND to_state IS NULL "
-            f"AND char_length(text) BETWEEN 1 AND {ALERT_NOTE_MAX})",
+            f"AND char_length(text) BETWEEN 1 AND {ALERT_NOTE_MAX}) "
+            "OR (kind = 'assign' AND from_state IS NULL AND to_state IS NULL "
+            f"AND (text IS NULL OR char_length(text) BETWEEN 1 AND {USERNAME_MAX}))",
             name="shape",
         ),
         CheckConstraint("btrim(actor) <> ''", name="actor"),
@@ -1754,7 +1768,8 @@ class AlertEvent(Base):
     alert_id: Mapped[int] = mapped_column(
         BigInteger, ForeignKey("alerts.id", ondelete="CASCADE"), nullable=False
     )
-    #: ``state`` (``from_state`` → ``to_state``) or ``note`` (``text``).
+    #: ``state`` (``from_state`` → ``to_state``), ``note`` (``text``) or ``assign`` (``text``:
+    #: the new assignee's user name, NULL for nobody).
     kind: Mapped[str] = mapped_column(Text, nullable=False)
     from_state: Mapped[str | None] = mapped_column(Text)
     to_state: Mapped[str | None] = mapped_column(Text)
@@ -1768,6 +1783,107 @@ class AlertEvent(Base):
         BigInteger, ForeignKey("users.id", ondelete="SET NULL")
     )
     at: Mapped[datetime] = mapped_column(TZ, nullable=False, server_default=func.now())
+
+
+# =================================================================================================
+# Area W: the security rules R01-R19 (Wave 6 contract §2.1, §2.5, revision 0024_rules)
+# =================================================================================================
+
+#: The tables an ``alert_evidence`` row may name: the parsed log tables the rules read (every
+#: time-series table but ``messages``) and ``devices`` (R11, a new device; no raw reference).
+#: A test keeps it equal to :data:`TIME_SERIES_TABLES` without ``messages``, plus ``devices``.
+RULE_EVIDENCE_TABLES: Final = (
+    "fg_traffic",
+    "fg_web",
+    "fg_dns",
+    "fg_app",
+    "fg_ips",
+    "fg_virus",
+    "fg_event",
+    "mt_dhcp",
+    "mt_arp",
+    "mt_fw",
+    "mt_account",
+    "mt_interface",
+    "mt_config",
+    "mt_event",
+    "fg_dhcp",
+    "devices",
+)
+
+
+class RuleState(Base):
+    """Where one security rule stands (``arcilogger_worker.rules.engine``, job ``rules.run``).
+
+    The watermark is the receive time up to which the rule has been evaluated; the rule never
+    raises an alert for data older than its first watermark (contract D12). Derived state: a
+    missing row starts the rule afresh at the current horizon.
+    """
+
+    __tablename__ = "rule_state"
+    __table_args__ = (
+        CheckConstraint("failures >= 0", name="failures"),
+        CheckConstraint("alerts_opened >= 0", name="alerts_opened"),
+        {"comment": "Watermark, last run, last data and errors of each security rule."},
+    )
+
+    #: The rule id, e.g. ``R01``.
+    rule: Mapped[str] = mapped_column(Text, primary_key=True)
+    #: Receive time up to which the rule has been evaluated (slice ends, committed).
+    watermark: Mapped[datetime | None] = mapped_column(TZ)
+    last_run_at: Mapped[datetime | None] = mapped_column(TZ)
+    #: Newest ``time_received`` among the rule's input tables at the last run (data status).
+    last_input_at: Mapped[datetime | None] = mapped_column(TZ)
+    #: Error of the last failed slice (no parameter value, no log content); NULL after a success.
+    last_error: Mapped[str | None] = mapped_column(Text)
+    #: Failed slices in a row (``rules.failures_alert`` of them raise ``R20-rules``).
+    failures: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    #: The backlog older than ``rules.max_catch_up_hours`` was skipped up to this moment.
+    skipped_until: Mapped[datetime | None] = mapped_column(TZ)
+    alerts_opened: Mapped[int] = mapped_column(BigInteger, nullable=False, server_default="0")
+    updated_at: Mapped[datetime | None] = mapped_column(TZ)
+
+
+class AlertEvidence(Base):
+    """One row that caused a security rule's alert, linked, not copied (contract §0.1 rule 4).
+
+    At most ``rules.evidence_max`` rows per alert, ``n`` from 1, oldest first; never updated,
+    deleted with the alert. The raw line is opened through ``GET /api/v1/raw`` with its own
+    permission and audit; no line content is stored here. A ``devices`` row (R11) has no raw
+    reference: only its ``time`` (the device's first sighting) is kept.
+    """
+
+    __tablename__ = "alert_evidence"
+    __table_args__ = (
+        PrimaryKeyConstraint("alert_id", "n"),
+        CheckConstraint(_in("tbl", RULE_EVIDENCE_TABLES), name="tbl"),
+        CheckConstraint("n >= 1", name="n"),
+        CheckConstraint(
+            "tbl = 'devices' OR (row_id IS NOT NULL AND time IS NOT NULL "
+            "AND time_received IS NOT NULL AND source IS NOT NULL AND raw_day IS NOT NULL "
+            "AND raw_line IS NOT NULL AND raw_offset IS NOT NULL)",
+            name="raw_ref",
+        ),
+        {"comment": "The log rows behind a security rule's alert (references, no content)."},
+    )
+
+    alert_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("alerts.id", ondelete="CASCADE"), nullable=False
+    )
+    #: Position, 1 = oldest.
+    n: Mapped[int] = mapped_column(SmallInteger, nullable=False)
+    #: The table of the row (:data:`RULE_EVIDENCE_TABLES`).
+    tbl: Mapped[str] = mapped_column(Text, nullable=False)
+    #: The row's ``id`` (NULL for ``devices``, keyed by MAC).
+    row_id: Mapped[int | None] = mapped_column(BigInteger)
+    #: Device time of the row (``devices``: ``first_seen``).
+    time: Mapped[datetime | None] = mapped_column(TZ)
+    time_received: Mapped[datetime | None] = mapped_column(TZ)
+    source: Mapped[str | None] = mapped_column(Text)
+    #: The raw reference for ``GET /api/v1/raw`` (docs/DATA-MODEL.md, "Raw reference").
+    raw_day: Mapped[date | None] = mapped_column(Date)
+    raw_line: Mapped[int | None] = mapped_column(Integer)
+    raw_offset: Mapped[int | None] = mapped_column(BigInteger)
 
 
 #: Default formats of a report schedule (all three; the owner decision asks for full detail).

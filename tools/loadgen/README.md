@@ -60,6 +60,43 @@ bayt aynı kalır, aşağıdaki 2026-11-02 değişikliği dışında):
 - Wave 3'ten beri kapsananlar: FortiGate DHCP (`--dhcp-server`), srcmac ve birden çok internet
   çıkışı.
 
+**Saldırı senaryoları (Wave 6, `--scenario AD[,AD…]|all`).** Güvenlik kurallarının (R01–R19)
+yakaladığı olayları normal sitenin üzerine ekler; demo ve kural motorunun performans testi `all`
+kullanır. Her senaryo, üretilen her günün aynı site saatinde, örnek ağın hiçbir DHCP havuzunda
+olmayan adreslerden satır yazar; `stats` bu satırları `scenario.<ad>` türü olarak sayar. Seçenek
+verilmezse çıktı bayt bayt aynıdır.
+
+| Senaryo | Kural | Ne ekler | Saat |
+|---|---|---|---|
+| `port-scan` | R01 | 172.20.41.196'dan 172.20.20.10'un 40 portuna 40 sn içinde reddedilen 40 bağlantı | 10:12 |
+| `external-scan` | R02 | 203.0.113.77'den WAN adresinin 120 portuna 4 dk içinde reddedilen 120 bağlantı | 10:21 |
+| `brute-force` | R03 | 172.20.41.196'dan 6 başarısız FortiGate yönetici girişi (`0100032002`) ve 3 başarısız yönlendirici girişi, 90 sn içinde | 10:30 |
+| `off-hours-admin` | R04 | 172.20.10.37'den yönlendiriciye ve FortiGate'e (`0100032001`) yönetici girişi | 22:40 |
+| `ips` | R05 | WAN adresine kritik bir IPS imzası | 11:00 |
+| `botnet` | R06 | 172.20.41.231'den botnet sunucusuna bağlantı (`eventtype` `botnet`) | 11:10 |
+| `malware` | R07 | 172.20.43.232'nin indirdiği test dosyasını antivirüs engeller | 11:20 |
+| `dns-bypass` | R08 | 172.20.42.230'dan dış DNS sunucusu 198.51.100.53'e 40 dk içinde 25 sorgu | 11:30 |
+| `blocked-category` | R09 | 172.20.42.230'dan 25 dk içinde engellenen kategoride 25 sayfa | 13:00 |
+| `tor` | R10 | Uygulama kontrolü 172.20.42.230'da Tor görür | 13:40 |
+| `new-device` | R11 | Hiç görülmemiş bir MAC (`00:00:5E:00:53:F0`–`FF`, her gün başka) 172.20.43.240'ı alır | 14:00 |
+| `mac-flap` | R12 | 172.20.43.250 iki MAC ile dönüşümlü görülür, 30 dk içinde dört kez (ARP-LOG; FortiGate sitesinde DHCP Ack) | 14:10–14:40 |
+| `big-upload` | R13 | 172.20.42.230 20 dk içinde 1,5 GiB gönderir | 15:20 |
+| `night` | R14 | 172.20.42.230 gece 12 MiB gönderir, 50 MiB alır | 02:30 |
+| `config-change` | R16 | FortiGate'te politika değişikliği (`0100044546`) ve yönlendiricide filtre kuralı değişikliği (admin) | 16:00 |
+| `fw-health` | R17 | Performans istatistiklerinde CPU %96, bellek %91 (16:30–16:55); 16:45'te koruma (conserve) modu satırı | 16:30 |
+| `pool-empty` | R18 | Misafir Wi-Fi havuzu (dhcp61) boş; FortiGate sitesinde FortiGate satırı | 17:00 |
+| `dga` | R19 | 172.20.42.230 25 dk içinde 250 NXDOMAIN yanıtı alır (rastgele görünen adlar) | 18:30 |
+
+**Bu satırların hepsi sentetiktir, sahada doğrulanmalıdır.** Reddedilen trafik satırlarının, IPS
+botnet (`9900000041`), koruma modu (`9900000042`) ve FortiGate havuz doldu (`9900000043`)
+satırlarının biçim örneği yoktur (`logid` değerleri yer tutucudur); yönetici girişi ve
+yapılandırma değişikliği `logid` değerleri, `logdesc` metinleri, Tor'un `appid` değeri ve DNS
+yanıt kodu alanı (`rcode`) kuralların varsayılan parametreleridir, yakalanmış değerler değildir
+(Wave 6 sözleşmesi §0.4). Eşikler başlangıç değeridir: senaryolar varsayılan eşikleri aşacak
+kadar satır yazar. Testler: `tests/test_loadgen_scenarios.py` (her senaryonun satırları gerçek
+ayrıştırıcılardan geçer ve kuralının eşleşmesini sağlar; MikroTik ve yalnızca FortiGate olan
+sitede).
+
 ```text
 uv run python tools/loadgen/arcilogger_loadgen.py --help
 # Bir günün spool dosyaları (toplayıcının yazdığı biçimde), demo için:
@@ -74,6 +111,9 @@ uv run python tools/loadgen/arcilogger_loadgen.py stats
 uv run python tools/loadgen/arcilogger_loadgen.py --dhcp-server fortigate --srcmac --users 20 truth
 uv run python tools/loadgen/arcilogger_loadgen.py --egress hat-1:100.64.12.9:wan1:60 \
     --egress hat-2:100.64.13.9:wan2:40 stats
+# Saldırı senaryoları (hepsi ya da seçilenler):
+uv run python tools/loadgen/arcilogger_loadgen.py --scenario all --day 2026-10-12 spool --data-dir D:\demo\data
+uv run python tools/loadgen/arcilogger_loadgen.py --scenario brute-force,mac-flap stats
 ```
 
 - **Üretim sunucusunda kullanmayın.** `spool`, kullanımda olan bir veri klasörünü (mühürlü
@@ -189,8 +229,45 @@ default output's digest is pinned; in the site plans every DHCP line is an `fg_d
 real parser, checked against the truth, renewals come at half the lease, exit shares stay within
 ±2 %).
 
-Covered since Wave 3: FortiGate DHCP (`--dhcp-server`), srcmac and several internet exits. Not
+**Attack scenarios (Wave 6, `--scenario NAME[,NAME…]|all`).** They add the events the security
+rules (R01–R19) catch to the normal site; the demo and the rule engine's performance guard use
+`all`. Each scenario writes its lines at the same site time of every generated day, from
+addresses in none of the example network's DHCP pools; `stats` counts them as kind
+`scenario.<name>`. Without the option the output is byte for byte the same.
+
+| Scenario | Rule | What it adds | Time |
+|---|---|---|---|
+| `port-scan` | R01 | Internal 172.20.41.196 tries 40 ports of 172.20.20.10 in 40 s, all denied | 10:12 |
+| `external-scan` | R02 | 203.0.113.77 tries 120 ports of the WAN address in 4 min, all denied | 10:21 |
+| `brute-force` | R03 | 6 failed FortiGate admin logins (`0100032002`) and 3 failed router logins from 172.20.41.196 within 90 s | 10:30 |
+| `off-hours-admin` | R04 | Admin logins to the router and the FortiGate (`0100032001`) from 172.20.10.37 | 22:40 |
+| `ips` | R05 | A critical IPS signature against the WAN address | 11:00 |
+| `botnet` | R06 | 172.20.41.231 contacts a botnet server (`eventtype` `botnet`) | 11:10 |
+| `malware` | R07 | The antivirus blocks a test file 172.20.43.232 downloads | 11:20 |
+| `dns-bypass` | R08 | 172.20.42.230 asks the outside DNS server 198.51.100.53 25 times in 40 min | 11:30 |
+| `blocked-category` | R09 | 172.20.42.230 opens 25 pages of a blocked category in 25 min | 13:00 |
+| `tor` | R10 | Application control sees Tor on 172.20.42.230 | 13:40 |
+| `new-device` | R11 | A never-seen MAC (`00:00:5E:00:53:F0`–`FF`, another one each day) gets 172.20.43.240 | 14:00 |
+| `mac-flap` | R12 | 172.20.43.250 is seen with two MACs in turn, four times in 30 min (ARP-LOG; DHCP Ack on a FortiGate site) | 14:10–14:40 |
+| `big-upload` | R13 | 172.20.42.230 sends 1.5 GiB in 20 min | 15:20 |
+| `night` | R14 | 172.20.42.230 sends 12 MiB and receives 50 MiB at night | 02:30 |
+| `config-change` | R16 | A firewall policy change on the FortiGate (`0100044546`) and a router filter-rule change (admin) | 16:00 |
+| `fw-health` | R17 | CPU 96 %, memory 91 % in the performance statistics (16:30–16:55); a conserve-mode line at 16:45 | 16:30 |
+| `pool-empty` | R18 | The guest Wi-Fi pool (dhcp61) is empty; a FortiGate line on a FortiGate site | 17:00 |
+| `dga` | R19 | 172.20.42.230 gets 250 NXDOMAIN answers in 25 min (random-looking names) | 18:30 |
+
+**Every one of these lines is synthetic: verify on site.** The denied traffic lines, the IPS
+botnet (`9900000041`), conserve-mode (`9900000042`) and FortiGate pool-exhausted (`9900000043`)
+lines have no format sample (their logids are placeholders); the admin-login and
+configuration-change logids, the `logdesc` texts, Tor's `appid` and the DNS response-code field
+(`rcode`) are the rules' default parameters, not captured values (Wave 6 contract §0.4). The
+thresholds are starting values: the scenarios write enough lines to pass the default thresholds.
+Tests: `tests/test_loadgen_scenarios.py` (every scenario's lines go through the real parsers and
+match their rule, on a MikroTik and on a FortiGate-only site).
+
+Covered since Wave 3: FortiGate DHCP (`--dhcp-server`), srcmac and several internet exits; since
+Wave 6, IPS, antivirus, admin-login and configuration-change events through the scenarios. Not
 covered yet (later milestones): access points as log sources (`ap-<ip>` sources, Wi-Fi
-connect events), IPS/virus/VPN/admin-login events, usage-report golden datasets. Volume with the
+connect events), VPN events, usage-report golden datasets. Volume with the
 defaults: about 210,000 lines per workday for 120 people (measured on the development machine:
 5 s to generate).

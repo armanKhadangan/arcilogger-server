@@ -13,6 +13,7 @@ import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
+from ipaddress import ip_network
 from pathlib import Path
 from typing import Any
 
@@ -23,13 +24,16 @@ from sqlalchemy.orm import Session
 from arcilogger_core.layout import Layout
 from arcilogger_core.rawlog import RawRecord, format_line
 from arcilogger_core.rawlog import parse_line as parse_raw
-from arcilogger_core.timeutil import site_day, to_site
+from arcilogger_core.timeutil import SITE_TZ, site_day, to_site
 from arcilogger_db.models import Base, Device, Setting
 from arcilogger_ingest.parsers import LinePosition, SourceType, parse_line
 from arcilogger_worker.correlation.devices import DeviceSighting, upsert_devices
-from arcilogger_worker.rules.access import ACCESS_RULES
-from arcilogger_worker.rules.model import Hit, RuleContext, RuleDef, RuleSettings
+from arcilogger_worker.rules.access import RULES as ACCESS_RULES
+from arcilogger_worker.rules.model import Actions, Hit, RuleContext, RuleDef, RuleSettings
+from arcilogger_worker.rules.texts import COMMON_FIELDS, TEXTS, title, title_fields
 from arcilogger_worker.testing import Evidence, tr
+
+from .cases import CASES, SLICE_END, CaseRow, RuleCase
 
 FIXTURES = Path(__file__).resolve().parents[3] / "tests" / "fixtures" / "synthetic"
 #: A Wednesday (work hours 08:00 to 18:00 by default); 2026-10-29 is a shipped holiday.
@@ -163,32 +167,41 @@ def run(
     end: datetime,
     *,
     start: datetime | None = None,
-    params: Mapping[str, object] | None = None,
-    evidence_max: int = 20,
+    params: Mapping[str, Any] | None = None,
 ) -> list[Hit]:
-    """Evaluate one rule over the slice ``(start, end]`` (default: the last 60 s)."""
+    """Evaluate one rule over the slice ``(start, end]`` (default: the last 60 s), with its
+    parameters as the settings give them: lists as tuples, networks as network objects."""
     rule = RULES[rule_id]
-    effective = {p.key: p.default for p in rule.params} | dict(params or {})
+    effective: dict[str, object] = {p.key: p.default for p in rule.params}
+    for key, value in (params or {}).items():
+        kind = next(p.kind for p in rule.params if p.key == key)
+        if kind == "networks":
+            value = tuple(ip_network(str(item)) for item in value)
+        elif kind in {"strings", "ints"}:
+            value = tuple(value)
+        effective[key] = value
     settings = RuleSettings(
         enabled=True,
         severity=rule.severity,
         window_seconds=rule.window_seconds,
         cooldown_seconds=rule.cooldown_seconds,
+        actions=Actions(email=True, webhook=True),
         params=effective,
     )
-    start = end - timedelta(seconds=60) if start is None else start
-    skew = timedelta(hours=1)
     ctx = RuleContext(
         settings=settings,
-        start=start,
+        start=end - timedelta(seconds=60) if start is None else start,
         end=end,
-        window_start=end - timedelta(seconds=rule.window_seconds),
-        device_from=start - skew - timedelta(seconds=rule.window_seconds),
-        device_to=end + skew,
-        internal_networks=("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"),
-        evidence_max=evidence_max,
+        max_device_skew=timedelta(hours=1),
+        internal_networks=tuple(
+            ip_network(net) for net in ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16")
+        ),
+        zone=SITE_TZ,
     )
-    return sorted(rule.evaluate(session, ctx), key=lambda hit: hit.key)
+    hits = sorted(rule.evaluate(session, ctx), key=lambda hit: hit.key)
+    for hit in hits:  # every hit can fill its rule's title (texts.py)
+        title(rule_id, hit.key, hit.count, hit.values)
+    return hits
 
 
 def keys(hits: list[Hit]) -> dict[str, int]:
@@ -197,10 +210,15 @@ def keys(hits: list[Hit]) -> dict[str, int]:
 
 def assert_openable(site: Site, hit: Hit, *needles: str) -> None:
     """Every evidence reference opens a raw line; each needle is in one of them."""
-    texts = [site.raw(ref.source, ref.raw_day, ref.raw_offset).decode() for ref in hit.evidence]
-    assert [ref.time_received for ref in hit.evidence] == sorted(
-        ref.time_received for ref in hit.evidence
-    )
+    texts = []
+    for ref in hit.evidence:
+        assert ref.source is not None
+        assert ref.raw_day is not None
+        assert ref.raw_offset is not None
+        texts.append(site.raw(ref.source, ref.raw_day, ref.raw_offset).decode())
+    received = [ref.time_received for ref in hit.evidence if ref.time_received is not None]
+    assert len(received) == len(hit.evidence)
+    assert received == sorted(received)
     for needle in needles:
         assert any(needle in text for text in texts), (needle, texts)
 
@@ -252,7 +270,8 @@ def test_r03_a_failure_without_an_address_counts_for_the_user(
 def test_r03_evidence_is_capped_oldest_first(site: Site, db_session: Session) -> None:
     for k in range(8):
         site.mt(MT_LOGIN_FAILED, at(9, 50, k))
-    hits = run(db_session, "R03", at(9, 51), evidence_max=3)
+    setting(db_session, "rules.evidence_max", 3)
+    hits = run(db_session, "R03", at(9, 51))
     assert [hit.count for hit in hits] == [8, 8]
     for hit in hits:
         assert [ref.time for ref in hit.evidence] == [at(9, 50, k) for k in range(3)]
@@ -268,12 +287,18 @@ def test_r04_login_off_hours(site: Site, db_session: Session) -> None:
     assert keys(hits) == {"user:admin": 1, "user:netops": 1}
     netops = hits[1]
     assert netops.values == {
+        "srcip": ADMIN_PC,
+        "reason_tr": "mesai dışı",
+        "reason_en": "off hours",
         "user": "netops",
-        "ip": ADMIN_PC,
         "logins": 1,
         "off_hours": True,
         "unexpected_address": False,
     }
+    assert title("R04", netops.key, netops.count, netops.values) == (
+        f"Yönetici girişi: user:netops, {ADMIN_PC} (mesai dışı)",
+        f"Admin login: user:netops, {ADMIN_PC} (off hours)",
+    )
     assert_openable(site, netops, "user netops logged in")
     assert_openable(site, hits[0], 'logdesc="Admin login successful"')
 
@@ -312,7 +337,8 @@ def test_r04_unexpected_address(site: Site, db_session: Session) -> None:
     assert keys(hits) == {"user:admin": 1}
     assert hits[0].values["unexpected_address"] is True
     assert hits[0].values["off_hours"] is False
-    assert hits[0].values["ip"] == ATTACKER
+    assert hits[0].values["reason_en"] == "unexpected address"
+    assert hits[0].values["srcip"] == ATTACKER
 
 
 def test_r04_failed_logins_are_not_logins(site: Site, db_session: Session) -> None:
@@ -346,7 +372,7 @@ def test_r11_reports_a_device_the_inventory_just_learnt(
         "vlan": 43,
         "first_seen": seen.isoformat(),
     }
-    assert [(ref.tbl, ref.source) for ref in hits[0].evidence] == [("mt_dhcp", "core-r1")]
+    assert [(ref.table, ref.source) for ref in hits[0].evidence] == [("mt_dhcp", "core-r1")]
     assert hits[0].time == now
 
 
@@ -401,7 +427,7 @@ def test_r12_counts_mac_changes_of_an_address(evidence: Evidence, db_session: Se
         "macs": [MAC_A, MAC_B],
         "window_seconds": 3600,
     }
-    assert [ref.tbl for ref in hits[0].evidence] == ["mt_arp"] * 3
+    assert [ref.table for ref in hits[0].evidence] == ["mt_arp"] * 3
 
 
 def test_r12_below_the_threshold(evidence: Evidence, db_session: Session) -> None:
@@ -419,7 +445,7 @@ def test_r12_mixes_arp_and_both_dhcp_servers(evidence: Evidence, db_session: Ses
     evidence.fortigate_dhcp(at(9, 12), ip, MAC_B, interface="vlan42")
     hits = run(db_session, "R12", at(9, 13))
     assert keys(hits) == {ip: 3}
-    assert sorted({ref.tbl for ref in hits[0].evidence}) == ["fg_dhcp", "mt_dhcp"]
+    assert sorted({ref.table for ref in hits[0].evidence}) == ["fg_dhcp", "mt_dhcp"]
     setting(db_session, "dhcp.fortigate_interfaces_excluded", ["vlan42"])
     assert run(db_session, "R12", at(9, 13)) == []
 
@@ -546,3 +572,57 @@ def test_rule_definitions() -> None:
         for param in rule.params:
             assert param.label_tr, (rule.id, param.key)
             assert param.label_en, (rule.id, param.key)
+        assert title_fields(TEXTS[rule.id]) - COMMON_FIELDS <= {"srcip", "reason_tr", "reason_en"}
+
+
+# -- the W6-C block of cases.py, run on these rules -----------------------------------------------
+
+
+def _write_case_row(session: Session, row: CaseRow, n: int) -> None:
+    """A case row with the common columns as the case block assumes them (``core-r1`` for a
+    MikroTik table, ``fortigate`` for a FortiGate one; a device's insert time = receive time)."""
+    received = SLICE_END + row.received + timedelta(seconds=n)
+    if row.table == "devices":
+        values = {"first_seen": received, "last_seen": received, **row.values}
+        session.execute(insert(Device).values(**values, created_at=received))
+        return
+    table = Base.metadata.tables[row.table]
+    session.execute(
+        insert(table).values(
+            time=received + row.device_offset,
+            time_received=received,
+            source="core-r1" if row.table.startswith("mt_") else "fortigate",
+            sender="172.20.10.1" if row.table.startswith("mt_") else FIREWALL,
+            raw_day=site_day(received),
+            raw_line=n + 1,
+            raw_offset=0,
+            **row.values,
+        )
+    )
+
+
+@pytest.mark.parametrize(
+    "case",
+    [case for case in CASES if case.rule in RULES],
+    ids=lambda case: f"{case.rule}-{case.name}",
+)
+def test_the_w6c_cases(db_session: Session, case: RuleCase) -> None:
+    for key, value in case.settings.items():
+        setting(db_session, key, value)
+    for row in case.rows:
+        for n in range(row.repeat):
+            _write_case_row(db_session, row, n)
+    params = dict(case.overrides.get("params", {}))  # type: ignore[call-overload]
+    hits = run(
+        db_session,
+        case.rule,
+        SLICE_END,
+        start=SLICE_END - timedelta(seconds=case.slice_seconds or 600),
+        params=params,
+    )
+    assert keys(hits) == {expected.key: expected.count for expected in case.expected}
+    for expected in case.expected:
+        hit = next(hit for hit in hits if hit.key == expected.key)
+        assert {k: hit.values[k] for k in expected.values} == dict(expected.values)
+        if expected.evidence is not None:
+            assert len(hit.evidence) == expected.evidence

@@ -56,7 +56,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.sql.elements import ColumnElement
 
 from arcilogger_db.models import Device, FgDhcp, FgEvent, MtAccount, MtArp, MtConfig, MtDhcp
-from arcilogger_db.settings import get_settings
+from arcilogger_db.settings import get_setting, get_settings
 from arcilogger_worker.lookup.types import LookupSettings, normalize_mac
 from arcilogger_worker.rules.model import EvidenceRef, Hit, Param, RuleContext, RuleDef
 from arcilogger_worker.usage.config import UsageSettings
@@ -67,13 +67,21 @@ _REFERENCE: Final = ("id", "time", "time_received", "source", "raw_day", "raw_li
 MACS_SHOWN: Final = 10
 #: Shown for a login or change without a user name (a key never ends empty).
 NO_USER: Final = "-"
+#: R04's reasons, as its title shows them (``{reason_tr}`` / ``{reason_en}``).
+OFF_HOURS: Final = ("mesai dışı", "off hours")
+UNEXPECTED_ADDRESS: Final = ("beklenmeyen adres", "unexpected address")
 
 
 # -- shared query parts ---------------------------------------------------------------------------
 
 
 def _param(ctx: RuleContext, key: str) -> Any:
-    return ctx.settings.params[key]
+    return ctx.settings.param(key)
+
+
+def _evidence_max(session: Session) -> int:
+    """``rules.evidence_max``: the evidence rows a hit keeps (oldest first)."""
+    return int(get_setting(session, "rules.evidence_max", 20))
 
 
 def _texts(values: Iterable[object]) -> ColumnElement[Any]:
@@ -81,17 +89,18 @@ def _texts(values: Iterable[object]) -> ColumnElement[Any]:
     return any_(cast(sorted({str(v) for v in values}), ARRAY(Text)))
 
 
-def _in_networks(column: Any, networks: Sequence[str]) -> ColumnElement[bool]:
-    """``column <<= ANY(:networks::cidr[])``."""
+def _in_networks(column: Any, networks: Sequence[object]) -> ColumnElement[bool]:
+    """``column <<= ANY(:networks::cidr[])`` (the networks of a ``networks`` parameter)."""
     contained = column.op("<<=", is_comparison=True)
-    return contained(any_(cast(list(networks), ARRAY(CIDR))))  # type: ignore[no-any-return]
+    texts = [str(network) for network in networks]
+    return contained(any_(cast(texts, ARRAY(CIDR))))  # type: ignore[no-any-return]
 
 
 def _bounded(table: Any, ctx: RuleContext, since: datetime) -> ColumnElement[bool]:
     """Device time within the pruning bounds, receive time in ``(since, ctx.end]``."""
     return and_(
-        table.time >= ctx.device_from,
-        table.time <= ctx.device_to,
+        table.time >= ctx.time_low,
+        table.time <= ctx.time_high,
         table.time_received > since,
         table.time_received <= ctx.end,
     )
@@ -104,7 +113,7 @@ def _reference(table: Any, name: str) -> list[ColumnElement[Any]]:
 
 def _evidence(row: Any) -> EvidenceRef:
     return EvidenceRef(
-        tbl=row.tbl,
+        table=row.tbl,
         row_id=int(row.id),
         time=row.time,
         time_received=row.time_received,
@@ -126,13 +135,13 @@ class _Group:
     key: str
     rows: list[Any]
 
-    def hit(self, ctx: RuleContext, values: Mapping[str, object]) -> Hit:
+    def hit(self, values: Mapping[str, object], evidence_max: int) -> Hit:
         return Hit(
             key=self.key,
             time=max(row.time_received for row in self.rows),
             count=len(self.rows),
             values=dict(values),
-            evidence=[_evidence(row) for row in self.rows[: ctx.evidence_max]],
+            evidence=[_evidence(row) for row in self.rows[:evidence_max]],
         )
 
 
@@ -151,7 +160,7 @@ def _counted(
 ) -> list[tuple[Any, list[Any]]]:
     """Keys of ``keyed`` (columns ``key`` and the raw reference) with at least ``threshold``
     rows in the window and one in the slice: ``(count row, evidence rows)``, the evidence
-    oldest first and at most ``ctx.evidence_max`` per key."""
+    oldest first and at most ``rules.evidence_max`` per key."""
     counts = session.execute(
         select(
             keyed.c.key,
@@ -175,7 +184,7 @@ def _counted(
     evidence: dict[str, list[Any]] = defaultdict(list)
     for row in session.execute(
         select(numbered)
-        .where(numbered.c.n <= ctx.evidence_max)
+        .where(numbered.c.n <= _evidence_max(session))
         .order_by(numbered.c.key, numbered.c.n)
     ):
         evidence[row.key].append(row)
@@ -270,16 +279,24 @@ def evaluate_r04(session: Session, ctx: RuleContext) -> list[Hit]:
         off_hours = usage is not None and usage.is_off_hours(row.time)
         if off_hours or row.unexpected:
             reported.append(_Keyed(f"user:{_user(row.user_name)}", row, off_hours=off_hours))
+    evidence_max = _evidence_max(session)
     hits = []
     for group in _groups(reported):
+        off_hours = any(row.off_hours for row in group.rows)
+        unexpected = any(row.unexpected for row in group.rows)
+        reasons = [
+            texts for texts, on in ((OFF_HOURS, off_hours), (UNEXPECTED_ADDRESS, unexpected)) if on
+        ]
         values = {
+            "srcip": group.rows[-1].ip or NO_USER,
+            "reason_tr": ", ".join(tr for tr, _ in reasons),
+            "reason_en": ", ".join(en for _, en in reasons),
             "user": group.key.removeprefix("user:"),
-            "ip": group.rows[-1].ip,
             "logins": len(group.rows),
-            "off_hours": any(row.off_hours for row in group.rows),
-            "unexpected_address": any(row.unexpected for row in group.rows),
+            "off_hours": off_hours,
+            "unexpected_address": unexpected,
         }
-        hits.append(group.hit(ctx, values))
+        hits.append(group.hit(values, evidence_max))
     return hits
 
 
@@ -332,6 +349,7 @@ def evaluate_r11(session: Session, ctx: RuleContext) -> list[Hit]:
         .where(*conditions)
         .order_by(Device.created_at, Device.mac)
     ).all()
+    evidence_max = _evidence_max(session)
     hits = []
     for device in devices:
         mac = normalize_mac(str(device.mac))
@@ -349,7 +367,7 @@ def evaluate_r11(session: Session, ctx: RuleContext) -> list[Hit]:
                     if device.first_seen is None
                     else device.first_seen.isoformat(),
                 },
-                evidence=evidence[: ctx.evidence_max],
+                evidence=evidence[:evidence_max],
             )
         )
     return hits
@@ -498,6 +516,7 @@ def evaluate_r16(session: Session, ctx: RuleContext) -> list[Hit]:
     ).subquery("changes")
     rows = session.execute(select(changes)).all()
     keyed = [_Keyed(f"{row.device}:{_user(row.user_name)}", row) for row in rows]
+    evidence_max = _evidence_max(session) if keyed else 0
     hits = []
     for group in _groups(keyed):
         latest = group.rows[-1]
@@ -506,18 +525,18 @@ def evaluate_r16(session: Session, ctx: RuleContext) -> list[Hit]:
             "user": _user(latest.user_name),
             "changes": len(group.rows),
         }
-        hits.append(group.hit(ctx, values))
+        hits.append(group.hit(values, evidence_max))
     return hits
 
 
 # -- the rule definitions -------------------------------------------------------------------------
 
 
-def _strings(key: str, default: list[str], tr: str, en: str) -> Param:
+def _strings(key: str, default: tuple[str, ...], tr: str, en: str) -> Param:
     return Param(key, "strings", default, 0, 200, tr, en)
 
 
-ACCESS_RULES: Final[tuple[RuleDef, ...]] = (
+RULES: Final[tuple[RuleDef, ...]] = (
     RuleDef(
         id="R03",
         kind="event",
@@ -528,13 +547,13 @@ ACCESS_RULES: Final[tuple[RuleDef, ...]] = (
             Param("threshold", "int", 5, 1, 10000, "Başarısız giriş sayısı", "Failed logins"),
             _strings(
                 "fortigate_fail_logids",
-                ["0100032002"],
+                ("0100032002",),
                 "FortiGate başarısız giriş logid'leri",
                 "FortiGate failed-login logids",
             ),
             _strings(
                 "fortigate_fail_descs",
-                ["Admin login failed"],
+                ("Admin login failed",),
                 "FortiGate başarısız giriş açıklamaları (logdesc)",
                 "FortiGate failed-login descriptions (logdesc)",
             ),
@@ -560,7 +579,7 @@ ACCESS_RULES: Final[tuple[RuleDef, ...]] = (
             Param(
                 "trusted_admin_networks",
                 "networks",
-                [],
+                (),
                 0,
                 200,
                 "Yönetici girişine izin verilen ağlar (boş: bu kısım kapalı)",
@@ -568,13 +587,13 @@ ACCESS_RULES: Final[tuple[RuleDef, ...]] = (
             ),
             _strings(
                 "fortigate_ok_logids",
-                ["0100032001"],
+                ("0100032001",),
                 "FortiGate başarılı giriş logid'leri",
                 "FortiGate successful-login logids",
             ),
             _strings(
                 "fortigate_ok_descs",
-                ["Admin login successful"],
+                ("Admin login successful",),
                 "FortiGate başarılı giriş açıklamaları (logdesc)",
                 "FortiGate successful-login descriptions (logdesc)",
             ),
@@ -600,7 +619,7 @@ ACCESS_RULES: Final[tuple[RuleDef, ...]] = (
             Param(
                 "ignore_vlans",
                 "ints",
-                [],
+                (),
                 0,
                 200,
                 "Yok sayılan VLAN'lar",
@@ -629,7 +648,7 @@ ACCESS_RULES: Final[tuple[RuleDef, ...]] = (
         params=(
             _strings(
                 "fortigate_logids",
-                ["0100044546", "0100044547"],
+                ("0100044546", "0100044547"),
                 "FortiGate yapılandırma değişikliği logid'leri",
                 "FortiGate configuration-change logids",
             ),
