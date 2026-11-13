@@ -377,7 +377,8 @@ def _test_email(session: Session, row: AdminRequest, config: Config) -> None:
     else:
         ok, smtp_code, text = outcome.ok, outcome.smtp_code, outcome.error_text
         code = None if ok else "smtp_test_failed"
-    hint = None if ok else explain(text, config.smtp.host)
+    smtp = config.smtp
+    hint = None if ok else explain(text, smtp.host, port=smtp.port, security=smtp.security)
     _finish(
         session,
         row,
