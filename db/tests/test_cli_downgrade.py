@@ -47,7 +47,7 @@ BEFORE = "0020_fg_traffic_transip_time"
 #: its steps leaves (they commit one by one, a later revision's downgrade with the first).
 REVISION = "0021_db_window"
 #: The head, where every downgrade here starts.
-HEAD = "0023_usage_period"
+HEAD = "0024_rules"
 CONFIG = """
 data_dir = "{data}"
 

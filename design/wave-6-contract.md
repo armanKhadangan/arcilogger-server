@@ -701,3 +701,28 @@ to the normal site: `port-scan` (R01), `external-scan` (R02), `brute-force` (R03
 ---
 
 ## Deviations
+
+### W6-A (2026-11-12, day-1 pull request, #243)
+
+- **W6-A-1: the device-time pruning bounds reach the whole window.** §2.1.2 gives the lower
+  bound as `start − rules.max_device_skew_seconds`. A window longer than the slice (R08's
+  3600 s against the 600-s slice) also counts rows received before `start`, and such a row may be
+  up to the skew earlier in device time: the bound `start − skew` would drop it and count less
+  than the window holds. `RuleContext.time_low` is `min(start, window_start) − skew`
+  (`time_high` stays `end + skew`); `test_the_context_reads_the_whole_window` pins it.
+- **W6-A-2: `alert_evidence` of a `devices` row.** §2.5 lists the columns, and `devices` as an
+  allowed `tbl`, but a device has no `id` and no raw line (it is keyed by MAC, R11). Only
+  `alert_id`, `n` and `tbl` are `NOT NULL`; the check `ck_alert_evidence_raw_ref` requires
+  `row_id`, both times, `source` and the three raw-reference columns for every table but
+  `devices`, whose evidence keeps `time` (the first sighting) only. Also `n >= 1`.
+- **W6-A-3: the generic settings page and `rules.*`.** `settings_meta.EDITED_ELSEWHERE`
+  (`rules.`) keeps the keys off the generic page and `PATCH /settings` refuses them as keys it
+  does not show (`setting_unknown`), so only the rules API writes them. `GET /settings` returning
+  them "for backups" (§2.1.4) needs a field in its answer that the web types would follow (W6-F):
+  it comes with the rules API pull request, not on day 1. On the console,
+  `arcilogger-db settings set rules.<ID>` accepts any object (a hand edit, which the worker reads
+  field by field as §2.1.4 says); `rules.internal_networks` is checked as CIDR networks there
+  (`setting_network_invalid`, new code), the numeric keys against bounds in `INTEGER_RANGES`.
+- **W6-A-4: `ruff format` and this contract.** ruff 0.17 formats the Python block of §2.1.2;
+  `ruff format --check .` failed on `wave-6` because of it. The day-1 pull request applies the
+  formatter's whitespace-only change to that block; no word of the contract changed.

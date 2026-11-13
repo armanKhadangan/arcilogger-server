@@ -1,9 +1,9 @@
 """The module registry: what a licence can switch on (licensing contract 1.1).
 
 ``core_5651`` (5651 Temel) is in every licence and every state. The other modules are features
-without a 5651 role (usage analytics, scheduled reports, bulk CSV import); everything the 5651
-obligations need stays in ``core_5651`` and is never gated. A licence may list keys a newer
-version adds: an older version keeps and ignores them.
+without a 5651 role (usage analytics, scheduled reports, bulk CSV import, security rules);
+everything the 5651 obligations need stays in ``core_5651`` and is never gated. A licence may list
+keys a newer version adds: an older version keeps and ignores them.
 
 Prices are not in the code.
 """
@@ -14,6 +14,9 @@ from dataclasses import dataclass
 from typing import Final
 
 CORE_MODULE: Final = "core_5651"
+#: Wave 6 decision D1 (owner question Q1, its default): the security rules R01-R14, R16-R19 and
+#: the webhooks. R15, R20, ``ip_conflict`` and ``new_source`` stay in ``core_5651``.
+SECURITY_RULES_MODULE: Final = "security_rules"
 
 
 @dataclass(frozen=True)
@@ -75,6 +78,21 @@ MODULES: Final[tuple[Module, ...]] = (
         description_en=(
             "Bulk import of persons and device assignments from CSV files (manual entry is "
             "always available)."
+        ),
+    ),
+    Module(
+        key=SECURITY_RULES_MODULE,
+        name_tr="Güvenlik kuralları",
+        name_en="Security rules",
+        description_tr=(
+            "Ağdaki şüpheli olayları ayarlanabilir eşiklerle yakalayan güvenlik kuralları "
+            "(R01-R14, R16-R19), kural düzenleyici ve webhook bildirimleri. Log kaynağı ve sistem "
+            "uyarıları (R15, R20) 5651 Temel'dedir."
+        ),
+        description_en=(
+            "Security rules that catch suspicious events on the network with adjustable "
+            "thresholds (R01-R14, R16-R19), the rule editor and webhook notifications. The log "
+            "source and system alerts (R15, R20) are in 5651 Core."
         ),
     ),
 )
