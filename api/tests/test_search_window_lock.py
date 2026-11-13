@@ -32,9 +32,9 @@ level before its transaction (``archive.service.hold_window``), so its snapshot 
 * a search or export that waited for the lock until its budget was gone says so (the lock-wait
   text of ``search_timeout``); a scan that ran out keeps the text of the shortest time slice.
 
-The day is ten days before today (daily partitions); its two lines are CORE-R1 heartbeats, at
-01:00 (UTC-day partition of the day before) and at 12:00 (its own UTC day), written to the spool
-and the database and sealed with the mock TSA.
+The day is at least ten days before today and in an earlier month (daily partitions); its two
+lines are CORE-R1 heartbeats, at 01:00 (UTC-day partition of the day before) and at 12:00 (its
+own UTC day), written to the spool and the database and sealed with the mock TSA.
 """
 
 from __future__ import annotations
@@ -89,8 +89,13 @@ from arcilogger_worker.testing import Evidence, tr
 from .test_search_grammar import OVERSTATEMENT
 
 API = "/api/v1/search"
-#: The searched day: ten days old, inside the daily partitions.
-DAY = site_day(utc_now()) - timedelta(days=10)
+TODAY = site_day(utc_now())
+#: The searched day: at least ten days old, and in the month before today's with its neighbours,
+#: so that the fixture can give them daily partitions: the test template has one monthly
+#: partition, today's month (``arcilogger_db.testing``), which covers a day of today's month
+#: whole. ``TODAY - 10`` alone fell inside it from the 11th of every month on, and the drops
+#: below had no partition to drop (CI, 2026-11-12).
+DAY = min(TODAY - timedelta(days=10), TODAY.replace(day=1) - timedelta(days=3))
 #: Its line in the UTC-day partition of the day before (00:00-03:00 of the site day).
 EARLY = tr(DAY, 1)
 #: Its line in its own UTC-day partition.

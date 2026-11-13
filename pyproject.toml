@@ -1,6 +1,6 @@
 [project]
 name = "arcilogger-workspace"
-version = "0.4.0"
+version = "0.4.1"
 description = "ARCILOGGER monorepo (uv workspace root, not a distributable package)"
 requires-python = ">=3.12"
 readme = "README.md"

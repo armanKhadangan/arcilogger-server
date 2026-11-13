@@ -200,12 +200,14 @@ def test_a_refusal_of_a_known_mail_server_is_explained(
     requester: User,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """0.4.0 S5: the reply and the configured host go to ``smtp.explain``; its texts come back
-    beside the raw reply (the table itself is pinned in core's tests)."""
-    seen: list[tuple[str | None, str | None]] = []
+    """0.4.0 S5: the reply and the configured host, port and security go to ``smtp.explain``;
+    its texts come back beside the raw reply (the table itself is pinned in core's tests)."""
+    seen: list[tuple[str | None, str | None, int | None, str | None]] = []
 
-    def explain(text: str | None, host: str | None) -> tuple[str, str]:
-        seen.append((text, host))
+    def explain(
+        text: str | None, host: str | None, *, port: int | None, security: str | None
+    ) -> tuple[str, str]:
+        seen.append((text, host, port, security))
         return "Uygulama şifresi gerekir.", "An app password is needed."
 
     monkeypatch.setattr(admin_jobs, "explain", explain)
@@ -219,9 +221,9 @@ def test_a_refusal_of_a_known_mail_server_is_explained(
         "Uygulama şifresi gerekir.",
         "An app password is needed.",
     )
-    ((text, host),) = seen
+    ((text, host, port, security),) = seen
     assert "550" in (text or "")
-    assert host == config.smtp.host
+    assert (host, port, security) == (config.smtp.host, config.smtp.port, config.smtp.security)
 
 
 def test_a_test_email_without_an_smtp_server_is_not_configured(
