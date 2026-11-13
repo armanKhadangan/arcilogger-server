@@ -11,6 +11,14 @@ The child only reads: it never writes ``state/verify`` (the API service account 
 ADR-0007); the API stores the result in ``seal_verifications``. Only this module's
 ``main`` runs in the child, and it imports nothing but ``arcilogger_core``.
 
+**The child's answer is ASCII.** ``-X utf8`` of the API service is an option of that
+interpreter and does not reach the child, and ``-I`` ignores ``PYTHONUTF8`` and
+``PYTHONIOENCODING``: on Windows the child's stdout pipe is in the ANSI code page. A
+``root`` such as TÜRKTRUST's H7 ("… Sağlayıcısı …") then could not be printed (cp1252) or
+arrived as bytes that are not UTF-8 (cp1254), and every "Doğrula" ended as "could not run"
+(seen on a site on 2026-11-12). So the child is started with ``-X utf8`` and prints JSON
+with ``\\uXXXX`` escapes, which reads the same in every code page.
+
 Root certificates are loaded **read-only**: the pinned roots of ``tsa.roots_dir`` and — only
 while ``tsa.provider`` is ``mock`` — the mock TSA's test root (``state/mock-tsa/root.pem``),
 exactly the set :func:`arcilogger_core.tsa.trusted_roots` trusts, without creating the mock
@@ -75,7 +83,7 @@ class CheckResult:
 def command(
     layout: Layout, roots_dir: Path | None, day: date, *, deep: bool, provider: str
 ) -> list[str]:
-    args = [sys.executable, "-I", "-m", __name__, "--data-dir", str(layout.root)]
+    args = [sys.executable, "-I", "-X", "utf8", "-m", __name__, "--data-dir", str(layout.root)]
     args += ["--day", day.isoformat(), "--provider", provider]
     if roots_dir is not None:
         args += ["--roots-dir", str(roots_dir)]
@@ -154,7 +162,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(json.dumps({"ok": False, "errors": ["no trusted root certificates"]}))
         return 1
     result = check_day(layout, args.day, roots, deep=args.deep)
-    print(json.dumps(result, ensure_ascii=False))
+    print(json.dumps(result))  # ASCII: the pipe's code page may not hold a root's name
     return 0 if result["ok"] else 1
 
 

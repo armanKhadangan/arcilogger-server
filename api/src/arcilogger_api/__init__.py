@@ -1,3 +1,3 @@
 """ARCILOGGER HTTP API (Windows service ``ArciApi``), served to the browser through Caddy."""
 
-__version__ = "0.4.0"
+__version__ = "0.4.1"
