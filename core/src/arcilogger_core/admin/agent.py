@@ -1063,8 +1063,17 @@ class Agent:
                     # the server's answer may quote a recipient: masked, as the test e-mail's
                     answer = mask_addresses(failure.message)
                     detail = answer[:DETAIL_MAX] if code in DETAIL_CODES else None
-                    host = check.candidate.smtp.host if check.candidate is not None else None
-                    hint = explain(detail, host) if detail else None
+                    smtp = check.candidate.smtp if check.candidate is not None else None
+                    hint = (
+                        explain(
+                            detail,
+                            smtp.host if smtp else None,
+                            port=smtp.port if smtp else None,
+                            security=smtp.security if smtp else None,
+                        )
+                        if detail
+                        else None
+                    )
                     return fail("failed", "probe_failed", code, None, listed, detail, hint)
                 progress.step("probe", "done")
             elif check.probes:

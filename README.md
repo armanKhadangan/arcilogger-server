@@ -86,13 +86,14 @@ departmanlar ve sunucu ayarları kurulumdan sonra web arayüzünde tanımlanır
 
 ## Durum
 
-Bu sürüm (0.4.0): MVP (M2/M3'ün temel parçaları, kimlik doğrulama ve denetim kaydı (M6'dan),
+Bu sürüm (0.4.1): MVP (M2/M3'ün temel parçaları, kimlik doğrulama ve denetim kaydı (M6'dan),
 Windows kurulum programı (M7'den)), ardından eklenenler (Wave 0–5), 0.3.0'ın eklentileri
 (masaüstü simgesi ve bildirim alanı, Veritabanı sayfası, yedeklerin NAS kopyası, verilerle
 birlikte kaldırma), 0.3.1–0.3.3'ün TÜRKTRUST ve kurulum düzeltmeleri ve 0.4.0'ın kolay kurulumu
 (PostgreSQL kurulumla gelir, kurulum soruları pencerelerde, TÜRKTRUST varsayılan, kurulum sonunda
-otomatik denetim, e-posta sağlayıcı seçimi). Tablo her aşamanın bugünkü durumunu gösterir
-([CHANGELOG.md](CHANGELOG.md), "0.4.0").
+otomatik denetim, e-posta sağlayıcı seçimi) ve 0.4.1'in düzeltmeleri (web'deki "Doğrula" ve
+e-posta bağlantı noktası açıklaması). Tablo her aşamanın bugünkü durumunu gösterir
+([CHANGELOG.md](CHANGELOG.md), "0.4.1").
 
 | Aşama | Kapsam | Durum |
 |---|---|---|

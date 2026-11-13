@@ -4,6 +4,7 @@ detail against the sealed manifest, downloads, on-demand verification and its ti
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 import re
 import sys
@@ -1117,6 +1118,41 @@ def test_sealcheck_child_prints_the_day_check(
     code = sealcheck.main(["--data-dir", str(empty.root), "--day", D11.isoformat()])
     assert code == 1
     assert json.loads(capsys.readouterr().out)["errors"] == ["no trusted root certificates"]
+
+
+#: The H7 root's name as a day check reports it: letters no Windows ANSI code page holds all of.
+TURKISH_ROOT = "TÜRKTRUST Elektronik Sertifika Hizmet Sağlayıcısı H7"
+
+
+@pytest.mark.parametrize("encoding", ["cp1252", "cp1254"])
+def test_sealcheck_child_answer_reads_the_same_in_any_code_page(
+    vault: SealedVault, layout: Layout, monkeypatch: pytest.MonkeyPatch, encoding: str
+) -> None:
+    """On Windows the child's stdout pipe is in the ANSI code page (``-I`` ignores PYTHONUTF8):
+    a Turkish root name could not be printed (cp1252) or was not UTF-8 (cp1254), and every
+    "Doğrula" of a TÜRKTRUST site ended as "could not run" (2026-11-12)."""
+
+    def check(*args: object, **kwargs: object) -> dict[str, object]:
+        return {"day": D11.isoformat(), "ok": True, "errors": [], "root": TURKISH_ROOT}
+
+    monkeypatch.setattr(sealcheck, "check_day", check)
+    raw = io.BytesIO()
+    pipe = io.TextIOWrapper(raw, encoding=encoding, errors="strict", write_through=True)
+    monkeypatch.setattr(sys, "stdout", pipe)
+    code = sealcheck.main(
+        ["--data-dir", str(layout.root), "--day", D11.isoformat(), "--provider", "mock"]
+    )
+    monkeypatch.undo()
+    assert code == 0
+    answer = raw.getvalue()
+    assert answer.isascii()
+    assert json.loads(answer)["root"] == TURKISH_ROOT
+
+
+def test_sealcheck_child_runs_in_utf8_mode(layout: Layout) -> None:
+    """``-X utf8`` of the API service does not reach the child: the command sets it again."""
+    args = sealcheck.command(layout, None, D10, deep=False, provider="mock")
+    assert args[1:4] == ["-I", "-X", "utf8"]
 
 
 def test_verify_refusals(

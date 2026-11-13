@@ -5,6 +5,29 @@ versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.4.1] — 2026-11-13
+
+Release version 0.4.1 (`v0.4.1`): fixes found on a site running 0.4.0. Upgrading: run the new
+`ARCILOGGER-Setup-0.4.1.exe`; it upgrades in place and keeps the data and the settings.
+
+### Fixed
+- **"Doğrula" on the sealing page works on Windows with a real root certificate.** The check runs
+  in a child process whose answer went through a pipe in the Windows code page: the name of
+  TÜRKTRUST's H7 root ("… Sağlayıcısı …") could not be printed or read, and every check ended as
+  "Doğrulama çalıştırılamadı". The child now runs in UTF-8 mode and answers in ASCII JSON. The
+  scheduled verification was not affected (`verify` on the command line verified the same days).
+- **A port and a connection security that do not go together are explained.** Port 465 with
+  STARTTLS (or none) ends in "Connection unexpectedly closed", port 587 or 25 with SSL/TLS in a
+  TLS error. The trial e-mail, the test e-mail and the self-test now say what to choose: SSL/TLS
+  for 465, STARTTLS for 587; the server's reply is still shown beside it.
+- **The firewall script says that it is reading the rules** before the slow part, so the window
+  no longer looks frozen on a server with many firewall rules.
+
+### Documentation
+- KURULUM.md / INSTALL.md section 12: when Smart App Control or WDAC blocks an
+  `arcilogger-*.exe` ("An Application Control policy has blocked this file"), run the same
+  command with the venv's `python.exe -I -m arcilogger_<name>`.
+
 ## [0.4.0] — 2026-11-09
 
 Release version 0.4.0 (`v0.4.0`): kolay kurulum (easy setup). A new server needs no PostgreSQL,

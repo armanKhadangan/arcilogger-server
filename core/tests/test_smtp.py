@@ -21,6 +21,7 @@ from arcilogger_core.smtp import (
     SmtpSendError,
     error_text,
     explain,
+    mismatch,
     trial_message,
 )
 from arcilogger_core.testing import refused_port
@@ -245,3 +246,47 @@ def test_unknown_replies_get_no_explanation() -> None:
     assert explain(policy, "smtp-relay.gmail.com") is None
     # a status inside a longer number is not one
     assert explain("SMTPResponseException: 451 15.7.80 x", "smtp.gmail.com") is None
+
+
+DROPPED = "SMTPServerDisconnected: Connection unexpectedly closed"
+
+
+@pytest.mark.parametrize(
+    ("port", "security", "said"),
+    [
+        (465, "starttls", "“SSL/TLS”"),
+        (465, "none", "“SSL/TLS”"),
+        (587, "ssl", "“STARTTLS”"),
+        (25, "ssl", "“STARTTLS”"),
+    ],
+)
+@pytest.mark.parametrize("host", ["smtp.gmail.com", "smtp.ornek.example", None])
+def test_a_port_and_security_that_do_not_match_are_explained_for_any_server(
+    port: int, security: str, said: str, host: str | None
+) -> None:
+    explained = explain(DROPPED, host, port=port, security=security)
+    assert explained == mismatch(port, security)
+    assert explained is not None
+    tr, en = explained
+    assert said in tr
+    assert said in en
+    assert str(port) in tr
+    assert max(len(tr), len(en)) <= HINT_MAX
+    assert "\n" not in tr + en
+
+
+@pytest.mark.parametrize(
+    ("port", "security"), [(465, "ssl"), (587, "starttls"), (25, "starttls"), (25, "none"),
+                           (2525, "starttls"), (2525, "ssl"), (None, None)],
+)  # fmt: skip
+def test_matching_or_unknown_ports_are_no_mismatch(port: int | None, security: str | None) -> None:
+    assert mismatch(port, security) is None
+    # the provider's explanations still apply
+    google = error_text(smtplib.SMTPAuthenticationError(535, b"5.7.8 Username and Password"))
+    assert explain(google, "smtp.gmail.com", port=port, security=security) is not None
+    assert explain(DROPPED, "smtp.gmail.com", port=port, security=security) is None
+
+
+def test_no_failure_no_explanation() -> None:
+    assert explain(None, "smtp.gmail.com", port=465, security="starttls") is None
+    assert explain("", "smtp.gmail.com", port=465, security="starttls") is None
