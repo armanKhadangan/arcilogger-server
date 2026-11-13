@@ -11,7 +11,9 @@ off. ``none`` is plain SMTP for a relay on this server. The password (secret ``s
 is used for ``AUTH`` only and never appears in an error text.
 
 :func:`explain` turns a known refusal of Google's or Microsoft 365's servers into a short
-explanation of what to change (0.4.0 S5); the raw reply is always shown next to it.
+explanation of what to change (0.4.0 S5), and any failure of a port and a security that do not
+go together (465 with STARTTLS, 587 with SSL/TLS: :func:`mismatch`) into what to choose; the
+raw reply is always shown next to it.
 """
 
 from __future__ import annotations
@@ -247,6 +249,42 @@ EXPLANATIONS: Final[tuple[Explanation, ...]] = (
 )
 
 
+#: The port of SMTP with TLS from the first byte ("submissions", RFC 8314); 587 and 25 start in
+#: plain text and switch with STARTTLS.
+IMPLICIT_TLS_PORT: Final = 465
+STARTTLS_PORTS: Final = frozenset({25, 587})
+
+
+def mismatch(port: int | None, security: str | None) -> tuple[str, str] | None:
+    """``(tr, en)`` when ``port`` and ``security`` do not go together, else None.
+
+    465 with STARTTLS (or none) waits for the server's greeting while the server waits for the
+    TLS handshake, until it drops the connection: "Connection unexpectedly closed" (seen on a
+    site with Gmail on 2026-11-12). SSL/TLS on 587 or 25 sends a handshake to a server that
+    answers in plain text: a TLS "wrong version number" error.
+    """
+    if port == IMPLICIT_TLS_PORT and security in ("starttls", "none"):
+        return (
+            "465 numaralı bağlantı noktası en baştan şifreli (SSL/TLS) bağlantı ister, ama "
+            "bağlantı güvenliği “STARTTLS” ya da “Şifresiz” seçili. Ayarlar → E-posta'da "
+            "bağlantı güvenliğini “SSL/TLS” yapın ya da 587 numaralı bağlantı noktasını "
+            "“STARTTLS” ile kullanın.",
+            "Port 465 expects an encrypted (SSL/TLS) connection from the start, but the "
+            "connection security is “STARTTLS” or “none”. In Ayarlar → E-posta set the "
+            "connection security to “SSL/TLS”, or use port 587 with “STARTTLS”.",
+        )
+    if port in STARTTLS_PORTS and security == "ssl":
+        return (
+            f"{port} numaralı bağlantı noktası önce şifresiz bağlanır, sonra STARTTLS ile "
+            "şifreler, ama bağlantı güvenliği “SSL/TLS” seçili. Ayarlar → E-posta'da bağlantı "
+            "güvenliğini “STARTTLS” yapın ya da 465 numaralı bağlantı noktasını kullanın.",
+            f"Port {port} starts unencrypted and switches to encryption with STARTTLS, but the "
+            "connection security is “SSL/TLS”. In Ayarlar → E-posta set the connection security "
+            "to “STARTTLS”, or use port 465.",
+        )
+    return None
+
+
 def family(host: str | None) -> str | None:
     """``google``, ``microsoft`` or None for the domain of ``host``."""
     name = (host or "").strip().rstrip(".").lower()
@@ -256,11 +294,23 @@ def family(host: str | None) -> str | None:
     return None
 
 
-def explain(text: str | None, host: str | None) -> tuple[str, str] | None:
-    """``(tr, en)``: what to change for the refusal ``text`` (as :func:`error_text` writes it)
-    of the server ``host``; None for a reply or a server without an explanation."""
+def explain(
+    text: str | None,
+    host: str | None,
+    *,
+    port: int | None = None,
+    security: str | None = None,
+) -> tuple[str, str] | None:
+    """``(tr, en)``: what to change for the failure ``text`` (as :func:`error_text` writes it)
+    of the server ``host``; None for a reply or a server without an explanation. A ``port``
+    and ``security`` that do not go together (:func:`mismatch`) explain any failure first."""
+    if not text:
+        return None
+    wrong = mismatch(port, security)
+    if wrong is not None:
+        return wrong
     found = family(host)
-    if not text or found is None:
+    if found is None:
         return None
     statuses = set(_STATUS.findall(text))
     lowered = text.lower()

@@ -282,7 +282,7 @@ Added after ARCILOGGER? Run
 client; then skip this section and section 5.
 
 ```powershell
-msiexec /i C:\Kurulum\ARCILOGGER-0.4.0\operator-installers\temurin8-jre\OpenJDK8U-jre_x64_windows_hotspot_8u502b07.msi INSTALLDIR="C:\Program Files\Eclipse Adoptium\jre-8\" /qn /norestart /l*v C:\Windows\Temp\temurin8.log
+msiexec /i C:\Kurulum\ARCILOGGER-0.4.1\operator-installers\temurin8-jre\OpenJDK8U-jre_x64_windows_hotspot_8u502b07.msi INSTALLDIR="C:\Program Files\Eclipse Adoptium\jre-8\" /qn /norestart /l*v C:\Windows\Temp\temurin8.log
 & "C:\Program Files\Eclipse Adoptium\jre-8\bin\java.exe" -version
 ```
 
@@ -314,7 +314,7 @@ the values are in `SHA256SUMS.txt`, in the release notes and in the job summary 
 *Summary*):
 
 ```powershell
-Get-FileHash .\ARCILOGGER-Setup-0.4.0.exe, .\ARCILOGGER-0.4.0.zip -Algorithm SHA256 | Format-List Hash, Path
+Get-FileHash .\ARCILOGGER-Setup-0.4.1.exe, .\ARCILOGGER-0.4.1.zip -Algorithm SHA256 | Format-List Hash, Path
 Get-Content .\SHA256SUMS.txt
 ```
 
@@ -353,11 +353,11 @@ repository or the bundle.
 
 ## 6. Copy and verify
 
-Copy the folder to e.g. `C:\Kurulum\ARCILOGGER-0.4.0` (not into `D:\ARCILOGGER`), with the jar:
+Copy the folder to e.g. `C:\Kurulum\ARCILOGGER-0.4.1` (not into `D:\ARCILOGGER`), with the jar:
 
 ```powershell
 Get-ChildItem -Recurse C:\Kurulum | Unblock-File
-Get-FileHash C:\Kurulum\ARCILOGGER-0.4.0\SHA256SUMS -Algorithm SHA256   # = bundle fingerprint
+Get-FileHash C:\Kurulum\ARCILOGGER-0.4.1\SHA256SUMS -Algorithm SHA256   # = bundle fingerprint
 ```
 
 Copying only `ARCILOGGER-Setup-<version>.exe`? Compare its `Get-FileHash` with `SHA256SUMS.txt` on
@@ -366,7 +366,7 @@ the server too; the setup window prints the bundle fingerprint again.
 ## 7. Install
 
 ```powershell
-cd C:\Kurulum\ARCILOGGER-0.4.0
+cd C:\Kurulum\ARCILOGGER-0.4.1
 powershell -ExecutionPolicy Bypass -File .\installer\Install-Arcilogger.ps1 -DryRun `
     -SiteName "<organisation name>" -NtpServer <local time source> -AdminAddress <admin PC>
 powershell -ExecutionPolicy Bypass -File .\installer\Install-Arcilogger.ps1 `
@@ -902,6 +902,18 @@ Get-NetFirewallRule -Group ARCILOGGER | Format-Table DisplayName, Direction, Ena
 
 `license status` prints the licence state, the modules that are on and the limits (trial: the
 days left; [LICENSING.md](LICENSING.md) section 5).
+
+**"An Application Control policy has blocked this file".** With Smart App Control or the
+organisation's application control (WDAC) on, Windows may block the unsigned
+`arcilogger-*.exe` launchers that setup writes into `venv\Scripts`. The services and the
+scheduled tasks are not affected: they run the `python.exe` of the same folder. When an
+`arcilogger-<name>.exe <command>` of these documents is blocked, run it with that `python.exe`
+as `-I -m arcilogger_<name>`; the rest of the command is the same. For example:
+
+```powershell
+& "C:\Program Files\ARCILOGGER\venv\Scripts\python.exe" -I -m arcilogger_core selftest
+& "C:\Program Files\ARCILOGGER\venv\Scripts\python.exe" -I -m arcilogger_core verify --last 3
+```
 
 **The self-test (`selftest`).** It runs by itself at the end of the installation; run it again
 whenever you like. It changes nothing: no stamp, no credit, no e-mail. Each row says `TAMAM`
