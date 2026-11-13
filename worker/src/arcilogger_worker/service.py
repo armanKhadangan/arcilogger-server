@@ -142,8 +142,11 @@ from arcilogger_worker.usage import jobs as usage_jobs
 
 log = logging.getLogger("arcilogger_worker")
 
-#: The loop checks for due jobs and stop requests this often.
+#: The loop checks for due jobs and stop requests at least this often. It waits until the next
+#: job is due (:meth:`Worker.pause`), so a job starts on time, not up to a whole wait late.
 SLEEP_SECONDS: Final = 1.0
+#: The shortest wait between two loops (a clock that reads a little early does not spin it).
+MIN_SLEEP_SECONDS: Final = 0.02
 #: The status file is rewritten at least this often (and after every job run).
 STATUS_EVERY: Final = timedelta(seconds=15)
 #: ``arcilogger.toml`` is looked at at most this often (a stat; read when it changed).
@@ -824,6 +827,20 @@ class Worker:
         except OSError:
             log.exception("cannot write %s", self.status_path)
 
+    def pause(self, now: datetime) -> float:
+        """The seconds the loop waits after a tick: until the next job is due (the ``next_due``
+        :meth:`tick` set), at most :data:`SLEEP_SECONDS` and at least :data:`MIN_SLEEP_SECONDS`.
+        A tick that took long therefore does not delay the next job by a whole wait more. While
+        the database is unreachable the full wait is kept: a tick that could not read the job
+        history leaves every ``next_due`` behind."""
+        if self.database_ok is False:
+            return SLEEP_SECONDS
+        dues = [state.next_due for state in self.states.values() if state.next_due is not None]
+        if not dues:
+            return SLEEP_SECONDS
+        seconds = (min(dues) - now).total_seconds()
+        return min(SLEEP_SECONDS, max(MIN_SLEEP_SECONDS, seconds))
+
     def run(self, stop: threading.Event) -> None:
         self.started_at = self.clock()
         self.state = "running"
@@ -839,7 +856,7 @@ class Worker:
                     written = now
                 # Short waits: on Windows a blocked wait is not interrupted by Ctrl+C, the signal
                 # handler only runs between them.
-                stop.wait(SLEEP_SECONDS)
+                stop.wait(self.pause(self.clock()))
         finally:
             stop.set()
             if thread is not None:
