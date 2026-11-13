@@ -73,3 +73,253 @@ class RuleCase:
 
 #: Every case, one block per rule package, in the order the packages merge.
 CASES: Final[list[RuleCase]] = []
+
+# -------------------------------------------------------------------------------------------------
+# W6-D — threats and health (R05, R06, R07, R17, R18; contract §2.2.3)
+# -------------------------------------------------------------------------------------------------
+#: ``source`` in a row's values names the source (the keys of R17 and R18 contain it).
+
+_IPS: Final[Mapping[str, object]] = {
+    "logid": "9900000006",
+    "eventtype": "signature",
+    "srcip": "198.51.100.7",
+    "srcport": 40123,
+    "dstip": "172.20.41.17",
+    "dstport": 443,
+    "proto": 6,
+    "service": "HTTPS",
+    "attack": "Synthetic.Signature.Remote.Code.Execution",
+    "attackid": 99001,
+    "severity": "high",
+    "action": "dropped",
+}
+_VIRUS: Final[Mapping[str, object]] = {
+    "logid": "9900000007",
+    "eventtype": "infected",
+    "srcip": "203.0.113.30",
+    "dstip": "172.20.41.110",
+    "virus": "Synthetic.Test.File",
+    "virusid": 99002,
+    "dtype": "Virus",
+    "filename": "eicar.com",
+    "url": "http://downloads.example/eicar.com",
+    "hostname": "downloads.example",
+    "action": "blocked",
+}
+
+
+def _perf(cpu: int, mem: int) -> Mapping[str, object]:
+    return {
+        "source": "fortigate",
+        "logid": "0100040704",
+        "subtype": "system",
+        "level": "notice",
+        "logdesc": "System performance statistics",
+        "action": "perf-stats",
+        "extra": {"cpu": str(cpu), "mem": str(mem)},
+    }
+
+
+def _samples(*values: tuple[int, int]) -> tuple[CaseRow, ...]:
+    """Performance samples one minute apart, the newest 10 s before the slice end."""
+    newest = timedelta(seconds=-10)
+    return tuple(
+        CaseRow("fg_event", newest - timedelta(minutes=len(values) - 1 - index), _perf(cpu, mem))
+        for index, (cpu, mem) in enumerate(values)
+    )
+
+
+_POOL: Final[Mapping[str, object]] = {
+    "source": "core-r1",
+    "event": "dhcp_pool_empty",
+    "topics": "dhcp,warning",
+    "level": "warning",
+    "text": "dhcp60 failed to give out IP address: pool <pool60> is empty",
+    "extra": {"server": "dhcp60", "vlan": 60, "pool": "pool60"},
+}
+
+CASES.extend(
+    [
+        RuleCase(
+            "R05",
+            "high-severity-each",
+            (CaseRow("fg_ips", timedelta(seconds=-30), _IPS),),
+            (
+                ExpectedHit(
+                    "198.51.100.7:99001",
+                    1,
+                    {"srcip": "198.51.100.7", "attack": _IPS["attack"]},
+                    evidence=1,
+                ),
+            ),
+        ),
+        RuleCase(
+            "R05",
+            "medium-at-threshold",
+            (CaseRow("fg_ips", timedelta(seconds=-20), {**_IPS, "severity": "medium"}, repeat=10),),
+            (ExpectedHit("198.51.100.7:99001", 10, evidence=10),),
+        ),
+        RuleCase(
+            "R05",
+            "medium-below-threshold",
+            (CaseRow("fg_ips", timedelta(seconds=-20), {**_IPS, "severity": "medium"}, repeat=9),),
+        ),
+        RuleCase(
+            "R06",
+            "botnet",
+            (CaseRow("fg_ips", timedelta(seconds=-30), {**_IPS, "eventtype": "botnet"}),),
+            (ExpectedHit("198.51.100.7", 1, {"srcip": "198.51.100.7"}, evidence=1),),
+        ),
+        RuleCase(
+            "R06",
+            "signature-is-not-botnet",
+            (CaseRow("fg_ips", timedelta(seconds=-30), _IPS),),
+        ),
+        RuleCase(
+            "R07",
+            "malware",
+            (CaseRow("fg_virus", timedelta(seconds=-30), _VIRUS),),
+            (
+                ExpectedHit(
+                    "203.0.113.30:99002",
+                    1,
+                    {"virus": "Synthetic.Test.File", "srcip": "203.0.113.30"},
+                    evidence=1,
+                ),
+            ),
+        ),
+        RuleCase(
+            "R07",
+            "ignored-action",
+            (CaseRow("fg_virus", timedelta(seconds=-30), _VIRUS),),
+            overrides={"params": {"ignore_actions": ["blocked"]}},
+        ),
+        RuleCase(
+            "R17",
+            "cpu-sustained",
+            _samples((20, 30), *[(95, 30)] * 11),
+            (ExpectedHit("fortigate", 11, {"cpu": 95, "conserve": False}, evidence=11),),
+        ),
+        RuleCase(
+            "R17",
+            "cpu-not-yet-sustained",
+            _samples((20, 30), *[(95, 30)] * 10),
+        ),
+        RuleCase(
+            "R17",
+            "conserve-mode",
+            (
+                CaseRow(
+                    "fg_event",
+                    timedelta(seconds=-30),
+                    {
+                        "source": "fortigate",
+                        "logid": "9900000060",
+                        "subtype": "system",
+                        "level": "critical",
+                        "logdesc": "Kernel enters memory conserve mode",
+                    },
+                ),
+            ),
+            (ExpectedHit("fortigate", 1, {"conserve": True}, evidence=1),),
+        ),
+        RuleCase(
+            "R18",
+            "mikrotik-pool-empty",
+            (CaseRow("mt_event", timedelta(seconds=-30), _POOL),),
+            (ExpectedHit("core-r1:dhcp60", 1, {"pool": "pool60"}, evidence=1),),
+        ),
+        RuleCase(
+            "R18",
+            "other-dhcp-failure",
+            (CaseRow("mt_event", timedelta(seconds=-30), {**_POOL, "event": "dhcp_failed"}),),
+        ),
+    ]
+)
+
+# -------------------------------------------------------------------------------------------------
+# W6-E — people (R09, R13, R14; contract §2.2.4). The case rows have no leases, so the key is the
+# address (``ip:<srcip>``); the person keys are tested with leases in ``test_people.py``.
+# -------------------------------------------------------------------------------------------------
+
+_MIB = 1024 * 1024
+_PC = "172.20.43.37"
+
+
+def _blocked_web(count: int) -> CaseRow:
+    return CaseRow(
+        "fg_web",
+        timedelta(seconds=-300),
+        {
+            "srcip": _PC,
+            "dstip": "198.51.100.20",
+            "dstport": 443,
+            "hostname": "proxy.example",
+            "catdesc": "Proxy Avoidance",
+            "action": "blocked",
+        },
+        repeat=count,
+    )
+
+
+def _sent(received: timedelta, sessionid: int, sent: int, rcvd: int = 2000) -> CaseRow:
+    return CaseRow(
+        "fg_traffic",
+        received,
+        {
+            "subtype": "forward",
+            "action": "accept",
+            "sessionid": sessionid,
+            "srcip": _PC,
+            "srcport": 50000 + sessionid % 1000,
+            "dstip": "203.0.113.10",
+            "dstport": 443,
+            "sentbyte": sent,
+            "rcvdbyte": rcvd,
+            "is_interim": False,
+        },
+    )
+
+
+#: R14 cases: a "night" of 12:00-13:00 site time, which holds the slice (12:35-12:45).
+_NOON = {
+    "params": {"user_networks": ["172.20.43.0/24"], "night_start": 43_200, "night_end": 46_800}
+}
+
+CASES.extend(
+    [
+        RuleCase(
+            "R09",
+            "blocked-20",
+            (_blocked_web(20),),
+            (ExpectedHit(f"ip:{_PC}", 20, {"srcip": _PC, "count": 20}, evidence=20),),
+        ),
+        RuleCase("R09", "blocked-19", (_blocked_web(19),)),
+        RuleCase(
+            "R13",
+            "sent-1100-mib",
+            (_sent(timedelta(seconds=-60), 1001, 1100 * _MIB),),
+            (ExpectedHit(f"ip:{_PC}", 1, {"bytes": 1100 * _MIB, "period": "hour"}, evidence=1),),
+        ),
+        RuleCase("R13", "sent-1-gib", (_sent(timedelta(seconds=-60), 1001, 1024 * _MIB),)),
+        RuleCase(
+            "R14",
+            "night-10-mib",
+            (
+                _sent(timedelta(seconds=-1800), 1002, 4 * _MIB, 2 * _MIB),
+                _sent(timedelta(seconds=-60), 1003, 2 * _MIB, 2 * _MIB),
+            ),
+            (ExpectedHit(f"ip:{_PC}", 2, {"bytes": 10 * _MIB, "night": "2026-11-12"}, evidence=2),),
+            overrides=_NOON,
+        ),
+        RuleCase(
+            "R14",
+            "night-below-10-mib",
+            (
+                _sent(timedelta(seconds=-1800), 1002, 4 * _MIB, 2 * _MIB),
+                _sent(timedelta(seconds=-60), 1003, 2 * _MIB, 2 * _MIB - 1),
+            ),
+            overrides=_NOON,
+        ),
+    ]
+)
