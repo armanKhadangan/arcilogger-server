@@ -418,3 +418,208 @@ CASES.extend(
         RuleCase("R19", "at-threshold", (_nxdomain(200),)),
     ]
 )
+
+
+# -- W6-C: access and devices (R03, R04, R11, R12, R16) -------------------------------------------
+#
+# Every parsed row names its ``source`` (``core-r1`` for the router, ``fortigate``): R16's key
+# holds it. A ``devices`` row is assumed to get ``created_at`` = its receive time and
+# ``first_seen`` = its device time (R11 reads the insert time, deviation in the contract).
+# SLICE_END is a Thursday, 12:45 site time: within the default work hours.
+
+_FAILED_LOGIN: Final = {
+    "source": "fortigate",
+    "logid": "0100032002",
+    "subtype": "system",
+    "logdesc": "Admin login failed",
+    "user_name": "admin",
+    "srcip": "172.20.41.196",
+    "action": "login",
+    "status": "failed",
+}
+_ROUTER_LOGIN: Final = {
+    "source": "core-r1",
+    "action": "login",
+    "user_name": "netops",
+    "via": "winbox",
+}
+
+CASES.extend(
+    [
+        RuleCase(
+            "R03",
+            "five-failed-logins",
+            (CaseRow("fg_event", timedelta(seconds=-120), _FAILED_LOGIN, repeat=5),),
+            expected=(
+                ExpectedHit("user:admin", 5, {"failures": 5}, evidence=5),
+                ExpectedHit("ip:172.20.41.196", 5, {"failures": 5}, evidence=5),
+            ),
+        ),
+        RuleCase(
+            "R03",
+            "four-failed-logins",
+            (CaseRow("fg_event", timedelta(seconds=-120), _FAILED_LOGIN, repeat=4),),
+        ),
+        RuleCase(
+            "R03",
+            "router-and-firewall-together",
+            (
+                CaseRow("fg_event", timedelta(seconds=-90), _FAILED_LOGIN, repeat=3),
+                CaseRow(
+                    "mt_account",
+                    timedelta(seconds=-60),
+                    {
+                        "source": "core-r1",
+                        "action": "login_failure",
+                        "user_name": "admin",
+                        "ip": "172.20.41.196",
+                    },
+                    repeat=2,
+                ),
+            ),
+            expected=(
+                ExpectedHit("user:admin", 5),
+                ExpectedHit("ip:172.20.41.196", 5),
+            ),
+        ),
+        RuleCase(
+            "R04",
+            "login-from-an-unexpected-address",
+            (
+                CaseRow(
+                    "mt_account", timedelta(seconds=-60), {**_ROUTER_LOGIN, "ip": "172.20.41.196"}
+                ),
+            ),
+            expected=(
+                ExpectedHit(
+                    "user:netops",
+                    1,
+                    {"srcip": "172.20.41.196", "reason_en": "unexpected address"},
+                    evidence=1,
+                ),
+            ),
+            overrides={"params": {"trusted_admin_networks": ["172.20.10.0/24"]}},
+        ),
+        RuleCase(
+            "R04",
+            "login-after-work-hours",
+            (
+                CaseRow(
+                    "mt_account", timedelta(seconds=-60), {**_ROUTER_LOGIN, "ip": "172.20.10.37"}
+                ),
+            ),
+            expected=(ExpectedHit("user:netops", 1, {"reason_en": "off hours"}),),
+            settings={
+                "usage.work_hours": {"days": [1, 2, 3, 4, 5], "start": "08:00", "end": "12:00"}
+            },
+        ),
+        RuleCase(
+            "R04",
+            "login-at-work-from-the-admin-network",
+            (
+                CaseRow(
+                    "mt_account", timedelta(seconds=-60), {**_ROUTER_LOGIN, "ip": "172.20.10.37"}
+                ),
+            ),
+            overrides={"params": {"trusted_admin_networks": ["172.20.10.0/24"]}},
+        ),
+        RuleCase(
+            "R11",
+            "a-new-device",
+            (
+                CaseRow(
+                    "devices",
+                    timedelta(seconds=-30),
+                    {"mac": "00:00:5e:00:53:f0", "last_ip": "172.20.43.240", "last_vlan": 43},
+                ),
+            ),
+            expected=(ExpectedHit("00:00:5e:00:53:f0", 1, {"ip": "172.20.43.240", "vlan": 43}),),
+        ),
+        RuleCase(
+            "R11",
+            "an-infrastructure-device",
+            (
+                CaseRow(
+                    "devices",
+                    timedelta(seconds=-30),
+                    {"mac": "00:00:5e:00:53:f1", "last_vlan": 10, "infrastructure": True},
+                ),
+            ),
+        ),
+        RuleCase(
+            "R12",
+            "three-mac-changes",
+            tuple(
+                CaseRow(
+                    "mt_arp",
+                    timedelta(minutes=minutes),
+                    {"source": "core-r1", "ip": "172.20.43.50", "mac": mac, "interface": "vlan43"},
+                )
+                for minutes, mac in (
+                    (-30, "00:00:5e:00:53:e1"),
+                    (-20, "00:00:5e:00:53:e2"),
+                    (-10, "00:00:5e:00:53:e1"),
+                    (-1, "00:00:5e:00:53:e2"),
+                )
+            ),
+            expected=(
+                ExpectedHit(
+                    "172.20.43.50",
+                    3,
+                    {"changes": 3, "macs": ["00:00:5e:00:53:e1", "00:00:5e:00:53:e2"]},
+                    evidence=3,
+                ),
+            ),
+        ),
+        RuleCase(
+            "R12",
+            "two-mac-changes",
+            tuple(
+                CaseRow(
+                    "mt_arp",
+                    timedelta(minutes=minutes),
+                    {"source": "core-r1", "ip": "172.20.43.50", "mac": mac, "interface": "vlan43"},
+                )
+                for minutes, mac in (
+                    (-20, "00:00:5e:00:53:e1"),
+                    (-10, "00:00:5e:00:53:e2"),
+                    (-1, "00:00:5e:00:53:e1"),
+                )
+            ),
+        ),
+        RuleCase(
+            "R16",
+            "router-configuration-changes",
+            (
+                CaseRow(
+                    "mt_config",
+                    timedelta(seconds=-60),
+                    {
+                        "source": "core-r1",
+                        "action": "changed",
+                        "user_name": "admin",
+                        "target": "filter rule",
+                    },
+                    repeat=2,
+                ),
+            ),
+            expected=(ExpectedHit("core-r1:admin", 2, {"changes": 2}, evidence=2),),
+        ),
+        RuleCase(
+            "R16",
+            "an-event-of-another-logid",
+            (
+                CaseRow(
+                    "fg_event",
+                    timedelta(seconds=-60),
+                    {
+                        "source": "fortigate",
+                        "logid": "9900000010",
+                        "logdesc": "Configuration changed",
+                        "user_name": "admin",
+                    },
+                ),
+            ),
+        ),
+    ]
+)

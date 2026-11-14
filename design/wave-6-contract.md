@@ -726,3 +726,10 @@ to the normal site: `port-scan` (R01), `external-scan` (R02), `brute-force` (R03
 - **W6-A-4: `ruff format` and this contract.** ruff 0.17 formats the Python block of §2.1.2;
   `ruff format --check .` failed on `wave-6` because of it. The day-1 pull request applies the
   formatter's whitespace-only change to that block; no word of the contract changed.
+
+### W6-C (#245): R11 matches the device's insert time, not `first_seen`
+
+- **Contract:** §2.2.2 R11, "a `devices` row whose `first_seen` is in the slice".
+- **Implemented:** a `devices` row whose `created_at` (the server's insert time) is in the slice; `first_seen` is shown in the alert's values.
+- **Why:** `first_seen` is the **device time** of the first DHCP or ARP sighting. The lease jobs write the row later, after their own lag. A device whose row is inserted after `rules.run` moved its watermark past that `first_seen` would never alert. `created_at` is written once, at the insert, by the server's clock. That fits D8 (receive time, not device time) and D12 (devices that existed when the rule started never alert, with no extra seeding).
+- **Limit:** a lease-job transaction that runs longer than `rules.lag_seconds` (120 s) can commit rows with a `created_at` behind the watermark. The default lag covers the normal job; a full rebuild of old days creates no new devices worth an alert.
