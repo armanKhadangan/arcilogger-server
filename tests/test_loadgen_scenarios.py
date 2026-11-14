@@ -1,11 +1,14 @@
 """Load generator attack scenarios (Wave 6 contract §2.7, T-I).
 
-Each scenario's lines (kind ``scenario.<name>``) go through the real parsers, and the rows are
-checked against the match of the rule they are written for, with the rule's default parameters
-(contract §2.2): the table, the fields the rule reads, the count within the window. On both
-kinds of site: the MikroTik site (the default) and the FortiGate-only site. The rule modules of
-W6-B, W6-D and W6-E are not on ``wave-6`` yet; when they are, this test also runs each rule on
-the rows (the W6-I documentation pull request).
+Each scenario's lines (kind ``scenario.<name>``) go through the real parsers, on a MikroTik
+site (the default) and on a FortiGate-only site. Two checks:
+
+* without a database: the rows meet the match of the rule they are written for, with the
+  rule's default parameters (contract §2.2): the table, the fields the rule reads, the count
+  within the window;
+* T-I proper: the rows are loaded into the database and the real rule of
+  ``arcilogger_worker.rules`` (registry) raises an alert on them, with its default parameters
+  (R08 and R14 with the settings they need before they run).
 """
 
 from __future__ import annotations
@@ -26,7 +29,7 @@ from typing import Any
 import pytest
 
 from arcilogger_core.rawlog import RawRecord
-from arcilogger_core.timeutil import to_site
+from arcilogger_core.timeutil import SITE_TZ, site_day, to_site
 from arcilogger_ingest.parsers import LinePosition, SourceType, parse_line
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -292,3 +295,94 @@ def test_cli_option() -> None:
     assert args.scenario == tuple(lg.SCENARIOS)
     args = lg.build_parser().parse_args(["stats"])
     assert args.scenario == ()
+
+
+# -- T-I: every scenario fires its rule (the real rules of worker/.../rules) ---------------------
+
+#: Settings a rule needs before it runs (contract §2.2: R08 and R14 are idle until configured):
+#: the site's DNS server and the users' networks of the example world.
+RULE_PARAMS: dict[str, dict[str, tuple[str, ...]]] = {
+    "R08": {"allowed_dns_servers": ("172.20.20.53/32",)},
+    "R14": {"user_networks": ("172.20.40.0/21",)},
+}
+
+
+def _rule_context(rule: Any, start: datetime, end: datetime) -> Any:
+    from arcilogger_worker.rules.model import Actions, RuleContext, RuleSettings
+
+    params: dict[str, object] = {param.key: param.default for param in rule.params}
+    for key, values in RULE_PARAMS.get(rule.id, {}).items():
+        kind = next(param.kind for param in rule.params if param.key == key)
+        params[key] = (
+            tuple(ipaddress.ip_network(v) for v in values) if kind == "networks" else values
+        )
+    settings = RuleSettings(
+        enabled=True,
+        severity=rule.severity,
+        window_seconds=rule.window_seconds,
+        cooldown_seconds=rule.cooldown_seconds,
+        actions=Actions(email=True, webhook=True),
+        params=params,
+    )
+    assert rule.needs_setup is None or not rule.needs_setup(settings), rule.id
+    return RuleContext(
+        settings=settings,
+        start=start,
+        end=end,
+        max_device_skew=timedelta(hours=1),
+        internal_networks=tuple(map(ipaddress.ip_network, ("10.0.0.0/8", "172.16.0.0/12"))),
+        zone=SITE_TZ,
+    )
+
+
+def _load(session: Any, messages: list[Any]) -> list[tuple[str, dict[str, Any]]]:
+    """Parse ``messages`` with the real parsers and insert their typed rows, as ingest does."""
+    from arcilogger_db.models import Base
+
+    loaded = []
+    for k, message in enumerate(messages, 1):
+        kind: SourceType = "fortigate" if message.source == "fortigate" else "mikrotik"
+        outcome = parse_line(
+            RawRecord(message.received, "172.20.10.1", message.wire),
+            LinePosition(message.source, kind, site_day(message.received), k, 0),
+        )
+        assert outcome.error is None, (message.wire, outcome.error)
+        for row in outcome.rows:
+            table = Base.metadata.tables[row.table]
+            session.execute(table.insert().values(**row.values))
+            loaded.append((row.table, dict(row.values)))
+    return loaded
+
+
+@pytest.mark.parametrize("dhcp_server", ["mikrotik", "fortigate"])
+@pytest.mark.parametrize("name", list(loadgen().SCENARIOS))
+def test_each_scenario_fires_its_rule(db_session: Any, name: str, dhcp_server: str) -> None:
+    """T-I: the scenario's lines, loaded through the real parsers, make its rule raise an alert
+    with the default parameters (R08 and R14 with the settings they need)."""
+    from sqlalchemy import func, select
+
+    from arcilogger_worker.correlation.devices import DeviceSighting, upsert_devices
+    from arcilogger_worker.rules import registry
+    from arcilogger_worker.rules.texts import title
+
+    rule = registry.rule(loadgen().SCENARIOS[name])
+    out = day_output((name,), dhcp_server)
+    messages = [m for m in out.messages if m.kind == f"scenario.{name}"]
+    if name == "fw-health":  # the busy samples are the site's own performance statistics
+        messages += [m for m in out.messages if m.kind == "perf-stats"]
+    loaded = _load(db_session, messages)
+    if rule.id == "R11":
+        # The lease jobs learn the device from its DHCP row; R11 reads the inventory.
+        (_table, row), *_ = [(t, r) for t, r in loaded if t in {"mt_dhcp", "fg_dhcp"}]
+        upsert_devices(db_session, [DeviceSighting(str(row["mac"]), row["time"], str(row["ip"]))])
+        end = db_session.execute(select(func.now())).scalar_one() + timedelta(seconds=1)
+    else:
+        scenario_rows = [r for t, r in loaded if t in rule.inputs]
+        assert scenario_rows, f"{name}: no row of {rule.inputs}"
+        last = max(m.received for m in out.messages if m.kind == f"scenario.{name}")
+        end = last + timedelta(seconds=1)
+    context = _rule_context(rule, end - timedelta(seconds=600), end)
+    hits = list(rule.evaluate(db_session, context))
+    assert hits, f"{name}: {rule.id} raised no alert"
+    for hit in hits:
+        title(rule.id, hit.key, hit.count, hit.values)
