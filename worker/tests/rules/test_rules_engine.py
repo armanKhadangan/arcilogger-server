@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from datetime import UTC, date, datetime, timedelta
+from ipaddress import ip_address
 from typing import Any
 
 import pytest
@@ -428,6 +429,28 @@ def test_list_parameters_are_bound_not_spliced(sessions: sessionmaker[Session]) 
     assert alert.dedup_key == f"R02:{OTHER}"
     with sessions() as session:
         assert session.scalar(select(func.count()).select_from(TABLE)) == 7
+
+
+def test_hit_values_are_kept_as_json() -> None:
+    """``details.values`` keeps a rule's lists and objects as JSON, not as their text."""
+    values = {
+        "macs": ("00:00:5e:00:53:e1", "00:00:5e:00:53:e2"),
+        "ports": [22, 443],
+        "share": 0.5,
+        "night": date(2026, 11, 12),
+        "at": NOW,
+        "by": {"tcp": 3},
+        "ip": ip_address("172.20.41.17"),
+    }
+    assert {name: rule_engine.json_value(value) for name, value in values.items()} == {
+        "macs": ["00:00:5e:00:53:e1", "00:00:5e:00:53:e2"],
+        "ports": [22, 443],
+        "share": 0.5,
+        "night": "2026-11-12",
+        "at": "2026-11-12T09:45:00+00:00",
+        "by": {"tcp": 3},
+        "ip": "172.20.41.17",
+    }
 
 
 # -- T-A5: dry run --------------------------------------------------------------------------------

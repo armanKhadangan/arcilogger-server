@@ -12,12 +12,15 @@ lease (``ip:`` subjects). The rows are written straight into the tables. The 95 
 "now" (11:00: the snapshot's hour and the session overlap) are written at full density, so each
 tick's read meets the table it would meet on site; then each tick's 10 s of rows are written and
 the thread's tick runs, while the loop runs its probe. The figures include the per-tick read.
+Before the thread counts, what is loaded is frozen out of the collector's full passes, as the
+service does at its start; the load's lines still to be written (ingest's on site) with it.
 ``ARCILOGGER_ACTIVITY_PERF``: ``1`` (default) both loads, ``0`` skips. Run with ``-s`` to see the
 figures (recorded on #211 and in W5-M-4).
 """
 
 from __future__ import annotations
 
+import gc
 import importlib.util
 import itertools
 import json
@@ -27,7 +30,7 @@ import random
 import sys
 import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from functools import cache
@@ -43,7 +46,7 @@ from arcilogger_core.layout import Layout
 from arcilogger_db.models import FgDns, FgTraffic, FgWeb
 from arcilogger_db.partitions import ensure_partitions
 from arcilogger_worker.activity import Runner
-from arcilogger_worker.service import Job, JobContext, Worker
+from arcilogger_worker.service import Job, JobContext, Worker, freeze_loaded
 from arcilogger_worker.testing import tr
 
 pytestmark = [
@@ -236,6 +239,13 @@ def backlog(details: dict[str, Any]) -> int:
     return int(details["ended_waiting"]) + int(details["stale_sessions"])
 
 
+@pytest.fixture
+def unfreeze() -> Iterator[None]:
+    """The objects the test froze (:func:`freeze_loaded`) given back to the collector."""
+    yield
+    gc.unfreeze()
+
+
 @pytest.mark.parametrize(
     ("rate", "devices"),
     [
@@ -248,6 +258,7 @@ def test_the_snapshot_keeps_up_and_the_loop_is_not_held(
     db_session: Session,
     db_session_factory: sessionmaker[Session],
     layout: Layout,
+    unfreeze: None,
     rate: float,
     devices: int,
 ) -> None:
@@ -265,6 +276,11 @@ def test_the_snapshot_keeps_up_and_the_loop_is_not_held(
         "write_before_s": round(time.monotonic() - started),
     }
 
+    # What is loaded now is frozen, as the service freezes what it loaded at its start
+    # (``cli.run``), before Canlı Durum's thread counts. Here that includes the load's lines still
+    # to be written, which on site are ingest's, not the worker's: left in, they made each full
+    # pass of the collector (it holds every thread) about twice as long as the worker's own.
+    freeze_loaded()
     clock = Clock(NOW)
     runner = Runner(db_engine, layout.activity, gate=lambda now, engine: None, clock=clock)
     warm = []

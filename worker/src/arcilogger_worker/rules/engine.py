@@ -34,10 +34,10 @@ counts, never a parameter or an evidence value.
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from contextlib import AbstractContextManager
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from typing import Any, Final, Literal
 from zoneinfo import ZoneInfo
 
@@ -125,11 +125,18 @@ class EngineReport:
 # -- one hit ---------------------------------------------------------------------------------------
 
 
-def _json_value(value: object) -> object:
-    """A hit value as JSON: numbers, strings, booleans and None as they are, anything else
-    (an address object) as text."""
-    if value is None or isinstance(value, bool | int | str):
+def json_value(value: object) -> object:
+    """A hit value as JSON: numbers, strings, booleans and None as they are, a list or tuple as a
+    list and a mapping as an object (their items alike), a moment or a day in ISO form, anything
+    else (an address object) as text."""
+    if value is None or isinstance(value, bool | int | float | str):
         return value
+    if isinstance(value, list | tuple):
+        return [json_value(item) for item in value]
+    if isinstance(value, Mapping):
+        return {str(name): json_value(item) for name, item in value.items()}
+    if isinstance(value, date):  # a datetime too
+        return value.isoformat()
     return str(value)
 
 
@@ -194,7 +201,7 @@ def apply_hit(
     ``cooled`` (counted on the closed alert whose cooldown it falls in)."""
     key = f"{rule.id}:{hit.key}"
     first_time = min((ref.time_received or ref.time for ref in hit.evidence), default=hit.time)
-    values = {name: _json_value(value) for name, value in hit.values.items()}
+    values = {name: json_value(value) for name, value in hit.values.items()}
     title_tr, title_en = title(rule.id, hit.key, hit.count, hit.values)
     current = active_alert(session, key)
     if current is not None:
@@ -316,7 +323,7 @@ def slices(start: datetime, end: datetime, size: timedelta) -> list[tuple[dateti
     return bounds
 
 
-def _evaluate_slice(
+def evaluate_slice(
     sessions: Sessions,
     rule: RuleDef,
     settings: RuleSettings,
@@ -325,6 +332,9 @@ def _evaluate_slice(
     now: datetime,
     run: RuleRun,
 ) -> None:
+    """The slice ``(start, end]`` of ``rule`` in one transaction: its hits recorded and the
+    watermark moved to ``end``; nothing when the watermark is not at ``start`` (another run moved
+    it meanwhile). The case tests evaluate a case's slice with it."""
     start, end = bounds
     with sessions() as session:
         _statement_timeout(session, engine.statement_timeout_seconds)
@@ -463,7 +473,7 @@ def run_rule(
         session.commit()
     for bounds in slices(watermark, horizon, step(engine, settings)):
         try:
-            _evaluate_slice(sessions, rule, settings, engine, bounds, now, run)
+            evaluate_slice(sessions, rule, settings, engine, bounds, now, run)
         except Exception as exc:
             error = _error_name(exc)
             log.warning("rule %s: slice from %s failed (%s)", rule.id, bounds[0], error)

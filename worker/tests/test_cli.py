@@ -3,6 +3,7 @@ stops on request) and ``rebuild --day`` (manual repair, job_runs row, exit codes
 
 from __future__ import annotations
 
+import gc
 import json
 import threading
 from datetime import date, timedelta
@@ -109,15 +110,21 @@ def test_run_starts_writes_status_and_stops(pg_dsn: str, tmp_path: Path, db_engi
     thread = threading.Thread(target=lambda: result.append(run(config, stop=stop)))
     thread.start()
     status_path = tmp_path / "data" / "state" / "worker-status.json"
+    frozen = 0
     for _ in range(300):
         if status_path.exists():
             status = json.loads(status_path.read_text(encoding="utf-8"))
             if status["jobs"]["leases.incremental"]["last_status"]:
+                frozen = gc.get_freeze_count()
                 break
         threading.Event().wait(0.05)
     stop.set()
     thread.join(timeout=20)
     assert result == [EXIT_OK]
+    # What was loaded at the start stays out of the collector's full passes while the service
+    # runs, and is given back when it stops.
+    assert frozen > 0
+    assert gc.get_freeze_count() == 0
     status = json.loads(status_path.read_text(encoding="utf-8"))
     assert status["state"] == "stopped"
     assert status["jobs"]["leases.incremental"]["last_status"] == "ok"
