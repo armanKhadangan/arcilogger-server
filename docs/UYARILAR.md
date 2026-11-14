@@ -314,7 +314,8 @@ sayar.
   olarak tutar; ham satır, izniyle ve denetim kaydıyla Ham satırı aç ile açılır. Uyarının
   ayrıntısında, e-postasında ve webhook bildiriminde ham log satırı yoktur.
 - **Tekilleştirme ve bekleme süresi:** aynı anahtar (ör. aynı kaynak adres) için etkin bir uyarı
-  varsa yeni uyarı açılmaz, sayısı güncellenir. Kapatılan bir uyarıdan sonra bekleme süresi
+  varsa yeni uyarı açılmaz; uyarının sayısı, bir pencerede görülen en yüksek sayıdır (çalışmalar
+  boyunca toplanmaz). Kapatılan bir uyarıdan sonra bekleme süresi
   içinde gelen olaylar yeni uyarı açmaz, kapanan uyarıda sayılır.
 - **"Sahada doğrula":** deposunda biçim örneği olmayan bir log biçimini okuyan kurallar (FortiGate
   yönetici girişi, yapılandırma değişikliği, performans, botnet, DNS yanıt kodu) "sahada doğrula"
@@ -392,7 +393,8 @@ sayar.
 ### R08 DNS atlatma (orta, ayar gerekli)
 
 - **Ne yakalar:** bir iç adresin 1 saatte, izinli olmayan DNS sunucularına (53 ve 853 numaralı
-  portlar) **20** bağlantısı.
+  portlar) **20** bağlantısı; güvenlik duvarının engellediği bağlantılar da sayılır (engellenen
+  bir deneme yine bir denemedir).
 - **Ayar gerekli:** `allowed_dns_servers` (kurumun DNS sunucuları) boşken kural çalışmaz.
 - **Bekleme:** 1 saat. **Veri:** FortiGate trafik logları.
 - **Ne yapılmalı:** Cihazın DNS ayarını ve tarayıcısının güvenli DNS (DoH/DoT) ayarını
@@ -401,9 +403,10 @@ sayar.
 
 ### R09 Engelli kategori ısrarı (düşük, kişi düzeyinde)
 
-- **Ne yakalar:** bir kişinin (adres, o andaki DHCP kirasına göre kişiye bağlanır; bağlanamazsa
-  adres) 1 saatte engellenen kategorilere **20** isteği (`fg_web`, `fg_dns`, `action` =
-  `blocked`).
+- **Ne yakalar:** bir kişinin 1 saatte engellenen kategorilere **20** isteği (`fg_web`,
+  `fg_dns`, `action` = `blocked`). Kişi düzeyindeki kurallar (R09, R13, R14) satırları adres ve
+  dakika başına toplar; bir dakika, o dakikanın başında adresi (DHCP kirasıyla) tutan kişiye
+  aittir, kullanım raporlarındaki gibi. Kimseye bağlanamayan adresin anahtarı adrestir.
 - **Bekleme:** 1 saat. **Veri:** FortiGate web filtresi ve DNS filtresi logları.
 - **Ne yapılmalı:** İsteklerin bir uygulamadan mı yoksa kişiden mi geldiğine bakın; kurum
   kurallarına göre işlem yapın. Kişi adları yalnızca yetkili rollere gösterilir.

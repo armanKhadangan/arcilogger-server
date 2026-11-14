@@ -323,7 +323,8 @@ then on.
   entry. An alert's details, its e-mail and its webhook notification never contain a raw log
   line.
 - **Deduplication and cooldown:** while an alert of the same key (e.g. the same source address)
-  is active, no new alert opens; its count is updated. After an alert is closed, events within
+  is active, no new alert opens; the alert's count is the highest count seen in one window (it
+  is not added up across runs). After an alert is closed, events within
   the cooldown open no new alert; they are counted on the closed alert.
 - **"Sahada doğrula" (verify on site):** the rules that read a log format the repository has no
   format sample of (FortiGate admin login, configuration change, performance, botnet, DNS
@@ -402,7 +403,8 @@ then on.
 ### R08 DNS bypass (medium, needs setup)
 
 - **Catches:** **20** connections of an internal address to DNS servers that are not allowed
-  (ports 53 and 853) within 1 hour.
+  (ports 53 and 853) within 1 hour; connections the firewall blocked count too (a blocked
+  attempt is still an attempt).
 - **Needs setup:** the rule does not run while `allowed_dns_servers` (the organisation's DNS
   servers) is empty.
 - **Cooldown:** 1 hour. **Data:** FortiGate traffic logs.
@@ -412,8 +414,9 @@ then on.
 ### R09 Repeated blocked categories (low, person-level)
 
 - **Catches:** **20** requests of a person to blocked categories within 1 hour (`fg_web`,
-  `fg_dns`, `action` = `blocked`). The address is attributed to the person by the DHCP lease of
-  the moment; without one, the address is the key.
+  `fg_dns`, `action` = `blocked`). The person-level rules (R09, R13, R14) sum the rows per
+  address and minute; a minute belongs to whoever held the address (by DHCP lease) at its first
+  instant, as in the usage reports. An address attributed to nobody is its own key.
 - **Cooldown:** 1 hour. **Data:** FortiGate web filter and DNS filter logs.
 - **What to do:** See whether the requests came from an application or a person and act under
   your organisation's rules. Person names are shown to authorised roles only.
