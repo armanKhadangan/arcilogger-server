@@ -14,7 +14,13 @@ from arcilogger_db.settings import (
     REAUTH_KEYS,
     validate_setting,
 )
-from arcilogger_db.settings_meta import GROUPS, SETTINGS, group_settings, setting_meta
+from arcilogger_db.settings_meta import (
+    GROUPS,
+    SETTINGS,
+    edited_elsewhere,
+    group_settings,
+    setting_meta,
+)
 
 #: Contract 2.13 (and Wave 2 contract 2.19 for "search"): which keys belong to which group.
 GROUP_PREFIXES = {
@@ -27,12 +33,14 @@ GROUP_PREFIXES = {
     "security": ("auth.", "privacy."),
     "database": ("db.retention_days", "db.reload_keep_days"),
 }
+#: The keys of the generic settings page: every setting but those another page edits.
+VISIBLE = sorted(key for key in DEFAULT_SETTINGS if not edited_elsewhere(key))
 #: Words that would claim legal compliance (the wording rule of the product).
 OVERSTATEMENT = re.compile(r"uyumlu|uyumu|garanti|complian|guarantee", re.IGNORECASE)
 
 
 def test_exactly_the_visible_settings_are_described() -> None:
-    assert set(SETTINGS) == set(DEFAULT_SETTINGS)
+    assert set(SETTINGS) == set(VISIBLE)
     assert all(meta.key == key for key, meta in SETTINGS.items())
     order = [group.id for group in GROUPS]
     groups = [meta.group for meta in SETTINGS.values()]
@@ -49,7 +57,7 @@ def test_groups_follow_the_contract() -> None:
         assert all(key.startswith(GROUP_PREFIXES[group.id]) for key in keys), group.id
 
 
-@pytest.mark.parametrize("key", sorted(DEFAULT_SETTINGS))
+@pytest.mark.parametrize("key", VISIBLE)
 def test_every_setting_has_turkish_and_english_texts(key: str) -> None:
     meta = setting_meta(key)
     texts = (meta.label_tr, meta.label_en, meta.help_tr, meta.help_en)
@@ -63,7 +71,7 @@ def test_every_setting_has_turkish_and_english_texts(key: str) -> None:
         assert not OVERSTATEMENT.search(text), (key, text)
 
 
-@pytest.mark.parametrize("key", sorted(DEFAULT_SETTINGS))
+@pytest.mark.parametrize("key", VISIBLE)
 def test_the_metadata_agrees_with_the_validation(key: str) -> None:
     meta = setting_meta(key)
     default = DEFAULT_SETTINGS[key]
@@ -91,3 +99,14 @@ def test_the_metadata_agrees_with_the_validation(key: str) -> None:
 def test_an_unknown_key_has_no_metadata() -> None:
     with pytest.raises(KeyError):
         setting_meta("audit.spool_watermark")  # an internal value, not a setting
+
+
+def test_the_security_rules_are_edited_on_their_own_page() -> None:
+    """Wave 6 contract §2.1.4: the ``rules.*`` keys exist (backups, the console) but the generic
+    page neither shows nor changes them; the rule editor does."""
+    rules = [key for key in DEFAULT_SETTINGS if key.startswith("rules.")]
+    assert "rules.lag_seconds" in rules
+    assert "rules.R01" in rules
+    assert all(edited_elsewhere(key) for key in rules)
+    assert not set(rules) & set(SETTINGS)
+    assert [key for key in DEFAULT_SETTINGS if edited_elsewhere(key)] == rules

@@ -22,6 +22,7 @@ from typing import Any
 
 import pytest
 
+from arcilogger_core import snmp
 from arcilogger_core.config import Config
 from arcilogger_core.layout import Layout
 from arcilogger_core.secretstore import SecretStore, snmp_auth_key, snmp_priv_key
@@ -184,10 +185,17 @@ def test_the_client_walks_and_gets_with_authpriv(agent: Agent) -> None:
     assert values[f"{IF_HC_IN_OCTETS}.9"] is None  # noSuchInstance
 
 
-def test_a_wrong_key_is_auth_failed_and_no_agent_is_timeout(agent: Agent) -> None:
+def test_a_wrong_key_is_auth_failed_and_no_agent_is_timeout(
+    agent: Agent, monkeypatch: pytest.MonkeyPatch
+) -> None:
     client = PysnmpClient()
-    with pytest.raises(SnmpError) as wrong:
-        asyncio.run(client.get(_target(agent.port, auth_key="wrongwrongwrong"), [SYS_UPTIME]))
+    # The responder answers from a thread of this process: on a busy runner its two answers
+    # (discovery, then the report) can take longer than the 2 s a device gets, and the wrong key
+    # would read as no answer. What is checked here is the class of the answer, not its speed.
+    with monkeypatch.context() as patch:
+        patch.setattr(snmp, "TIMEOUT_SECONDS", 5.0)
+        with pytest.raises(SnmpError) as wrong:
+            asyncio.run(client.get(_target(agent.port, auth_key="wrongwrongwrong"), [SYS_UPTIME]))
     assert wrong.value.status == "auth_failed"
     with pytest.raises(SnmpError) as silent:
         asyncio.run(client.get(_target(_free_port()), [SYS_UPTIME]))

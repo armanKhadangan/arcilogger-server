@@ -585,6 +585,11 @@ $DailyPartitionRevision = '0021_db_window'
 # crosses a revision not in $LosslessDowngrades is refused before any change
 # (Get-SchemaRollbackPlan).
 $LosslessDowngrades = @(
+    # Drops rule_state (the security rules' watermarks: derived), alert_evidence (references to
+    # the log rows behind a rule's alert, never their content), alerts.assignee_id with the assign
+    # events and the webhook deliveries: alert workflow only. The alerts stay; raw logs, log rows,
+    # leases and the audit log (alert.assign entries included) keep every row (v0024_rules.py).
+    '0024_rules',
     # Turns the usage rollups' period (work, break, off) back into off_hours (off -> true, else
     # false); a day with break rows is first deleted from the seven rollup tables and usage_days:
     # usage analytics, derived data only (raw logs, log rows, leases and the audit log keep every

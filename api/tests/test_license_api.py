@@ -37,7 +37,7 @@ pytestmark = pytest.mark.license_live
 Login = Callable[..., LoggedIn]
 URL = "/api/v1/license"
 GATED = "/api/v1/usage/company"
-ALL = ["core_5651", "usage_analytics", "usage_reports", "bulk_import"]
+ALL = ["core_5651", "usage_analytics", "usage_reports", "bulk_import", "security_rules"]
 
 
 def error(response: Any) -> tuple[int, str]:
@@ -71,7 +71,7 @@ def test_trial_document_for_admin_and_other_roles(
     assert document["status"] == "trial"
     assert document["problem"] is None
     assert enabled(document) == ALL
-    assert [item["licensed"] for item in document["modules"]] == [False] * 4
+    assert [item["licensed"] for item in document["modules"]] == [False] * len(ALL)
     assert document["modules"][0]["always"] is True
     assert document["trial"]["days_left"] == 14
     assert document["licensee"] is None

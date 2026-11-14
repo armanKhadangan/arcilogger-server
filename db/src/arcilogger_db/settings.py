@@ -25,6 +25,7 @@ labels and help texts are in :mod:`arcilogger_db.settings_meta`.
 from __future__ import annotations
 
 import copy
+import ipaddress
 import re
 from collections.abc import Iterable, Mapping
 from datetime import date
@@ -49,6 +50,12 @@ from arcilogger_db.models import ALERT_SEVERITIES, ROLES, Setting
 SEED_AUTHOR: Final = ":seed"
 SYSTEM_AUTHOR: Final = ":system"
 MIGRATION_AUTHOR: Final = ":migration"
+
+#: The security rules of Wave 6 (spec 11): R01-R19 except R15, which stays a 5651 Temel check
+#: (``arcilogger_worker.alerts.r15``). Each has a setting ``rules.<ID>``.
+SECURITY_RULE_IDS: Final = tuple(f"R{number:02d}" for number in range(1, 20) if number != 15)
+#: Most entries of ``rules.internal_networks`` (contract §2.1.4: lists of at most 200).
+MAX_RULE_LIST: Final = 200
 
 #: Every known setting with its shipped default (build specification sections in comments).
 DEFAULT_SETTINGS: Final[Mapping[str, Any]] = {
@@ -286,6 +293,33 @@ DEFAULT_SETTINGS: Final[Mapping[str, Any]] = {
     "live.buffer_lines": 5000,
     "live.max_minutes": 60,
     "live.backfill_lines": 50,
+    # --- Security rules R01-R19 (Wave 6 contract §2.1.4, worker job rules.run) ---------------
+    # Edited on Ayarlar -> Güvenlik kuralları (PUT /api/v1/rules/{id}), not on the generic
+    # settings page (settings_meta.EDITED_ELSEWHERE). Starting values, not measured facts.
+    # Data younger than this (seconds) is left for the next run (late rows still arrive).
+    "rules.lag_seconds": 120,
+    # Largest receive-time slice evaluated in one transaction (seconds).
+    "rules.max_slice_seconds": 600,
+    # A backlog older than this (hours) is skipped and recorded (rule_state.skipped_until).
+    "rules.max_catch_up_hours": 24,
+    # statement_timeout of one slice (seconds).
+    "rules.statement_timeout_seconds": 20,
+    # Failed slices of one rule in a row before the system alert R20-rules.
+    "rules.failures_alert": 3,
+    # Evidence rows (references to log rows) kept per alert.
+    "rules.evidence_max": 20,
+    # A rule's data status is "no_data" when none of its inputs had a row for this long (hours).
+    "rules.no_data_hours": 24,
+    # Device time may be this far (seconds) from receive time; bounds the partitions a rule reads.
+    "rules.max_device_skew_seconds": 3600,
+    # "İç adres" for every rule (RFC 1918 by default).
+    "rules.internal_networks": ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"],
+    # statement_timeout of a "Son 24 saatte dene" trial run (seconds).
+    "rules.dry_run_timeout_seconds": 30,
+    # The overrides of one rule, only what differs from its registry defaults:
+    # {"enabled", "severity", "window_seconds", "cooldown_seconds", "actions": {"email",
+    # "webhook"}, "params": {...}}; validated by arcilogger_worker.rules.settings.
+    **{f"rules.{rule}": {} for rule in SECURITY_RULE_IDS},
 }
 
 
@@ -372,6 +406,10 @@ SETTING_ERRORS: Final[Mapping[str, tuple[str, str]]] = {
     "setting_empty": ("Boş olamaz.", "Cannot be empty."),
     "setting_email_invalid": ("Geçersiz e-posta adresi.", "Invalid e-mail address."),
     "setting_too_many": ("En çok {limit} öğe girilebilir.", "At most {limit} items are allowed."),
+    "setting_network_invalid": (
+        "Her satır CIDR biçiminde bir ağ olmalı, ör. 10.0.0.0/8.",
+        "Each line must be a network in CIDR form, e.g. 10.0.0.0/8.",
+    ),
     "setting_severity_invalid": (
         "Önem derecesi {severities} değerlerinden biri olmalı.",
         "The severity must be one of {severities}.",
@@ -665,6 +703,17 @@ INTEGER_RANGES: Final[Mapping[str, tuple[int, int | None]]] = {
     "live.buffer_lines": (500, 50_000),
     "live.max_minutes": (5, 480),
     "live.backfill_lines": (0, 200),
+    # Security rules (Wave 6 §2.1.4): conservative bounds, not spec values; none switches the
+    # engine's limits off.
+    "rules.lag_seconds": (30, 3600),
+    "rules.max_slice_seconds": (60, 3600),
+    "rules.max_catch_up_hours": (1, 168),
+    "rules.statement_timeout_seconds": (1, 300),
+    "rules.failures_alert": (1, 100),
+    "rules.evidence_max": (1, 100),
+    "rules.no_data_hours": (1, 720),
+    "rules.max_device_skew_seconds": (0, 86_400),
+    "rules.dry_run_timeout_seconds": (5, 300),
 }
 #: The bounds of each server's lease time in ``lease.server_seconds``: those of
 #: ``lease.default_seconds`` (#126, above).
@@ -859,7 +908,32 @@ def validate_setting(key: str, value: Any) -> Any:
         return _validate_alert_setting(key, value)
     if key.startswith("usage."):
         return _validate_usage_setting(key, value)
+    if key == "rules.internal_networks":
+        return _networks(key, value)
     return value
+
+
+def _networks(key: str, value: list[Any]) -> list[str]:
+    """IPv4 or IPv6 networks in CIDR form (``10.0.0.0/8``; no host bits), duplicates dropped,
+    at most :data:`MAX_RULE_LIST`. ``rules.<ID>`` objects are checked by the worker's
+    ``arcilogger_worker.rules.settings`` (the rules API); a hand edit the worker cannot use is
+    ignored there field by field."""
+    networks = []
+    for item in value:
+        try:
+            if not isinstance(item, str) or len(item) > 64:
+                raise ValueError(item)
+            networks.append(str(ipaddress.ip_network(item.strip(), strict=True)))
+        except ValueError:
+            raise SettingValueError(
+                key, "setting_network_invalid", f"{key}: geçersiz ağ {item!r} (ör. 10.0.0.0/8)"
+            ) from None
+    networks = _unique(networks)
+    if len(networks) > MAX_RULE_LIST:
+        raise SettingValueError(
+            key, "setting_too_many", f"{key}: en çok {MAX_RULE_LIST} ağ", limit=MAX_RULE_LIST
+        )
+    return networks
 
 
 def email_addresses(
