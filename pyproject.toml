@@ -168,19 +168,21 @@ typecheck = "mypy"
 typecheck-windows = "mypy --platform win32"
 test = "pytest -n auto -m 'not perf' --cov --cov-report=term --cov-report=xml"
 # Tests run in parallel worker processes (pytest-xdist; every test database has a unique name).
+# A test still running after 15 minutes gets every thread's stack dumped (faulthandler), so a
+# hung run says where it hangs; the throughput guards, which run longer, are left out.
 # Throughput guards measure speed, so they run alone and without coverage tracing.
 test-perf = "pytest -m perf --no-cov"
-test-core = "pytest -n auto core/tests tests --cov=arcilogger_core --cov-report=term --cov-fail-under=90"
+test-core = "pytest --override-ini=faulthandler_timeout=900 -n auto core/tests tests --cov=arcilogger_core --cov-report=term --cov-fail-under=90"
 # Coverage gates of the specification (17): ingest >= 85 %, api >= 80 % (with test-core >= 90 %);
 # all three run in CI (.github/workflows/ci.yml, Linux job).
-test-ingest = "pytest -n auto ingest/tests -m 'not perf' --cov=arcilogger_ingest --cov-report=term --cov-fail-under=85"
-test-api = "pytest -n auto api/tests -m 'not perf' --cov=arcilogger_api --cov-report=term --cov-fail-under=80"
+test-ingest = "pytest --override-ini=faulthandler_timeout=900 -n auto ingest/tests -m 'not perf' --cov=arcilogger_ingest --cov-report=term --cov-fail-under=85"
+test-api = "pytest --override-ini=faulthandler_timeout=900 -n auto api/tests -m 'not perf' --cov=arcilogger_api --cov-report=term --cov-fail-under=80"
 # CI runs each test once, not "test" next to the gates. Linux job: test-core, test-ingest,
 # test-api and test-rest, which reports the coverage of the packages without a gate. Windows
 # jobs: test-core and test-others (no coverage: Windows gates only core). Either set names every
 # testpaths directory exactly once (tests/test_ci_workflows.py checks it).
-test-rest = "pytest -n auto db/tests collector/tests worker/tests -m 'not perf' --cov=arcilogger_db --cov=arcilogger_collector --cov=arcilogger_worker --cov-report=term"
-test-others = "pytest -n auto db/tests collector/tests ingest/tests api/tests worker/tests -m 'not perf'"
+test-rest = "pytest --override-ini=faulthandler_timeout=900 -n auto db/tests collector/tests worker/tests -m 'not perf' --cov=arcilogger_db --cov=arcilogger_collector --cov=arcilogger_worker --cov-report=term"
+test-others = "pytest --override-ini=faulthandler_timeout=900 -n auto db/tests collector/tests ingest/tests api/tests worker/tests -m 'not perf'"
 test-db = "pytest -n auto db/tests --cov=arcilogger_db --cov-report=term"
 api-dev = "uvicorn arcilogger_api.app:create_app --factory --reload --host 127.0.0.1 --port 8000"
 check = ["lint", "test"]
