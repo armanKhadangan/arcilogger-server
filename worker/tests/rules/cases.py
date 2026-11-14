@@ -635,6 +635,34 @@ CASES.extend(
     ]
 )
 
+#: The cooldown cases of the network rules (T-R): each rule's main positive case, with an alert of
+#: its keys closed 10 minutes before the slice end. Every network rule's cooldown is an hour, so
+#: the hits are counted on the closed alert's ``after_close`` and no alert opens.
+_NETWORK_COOLED: Final = timedelta(minutes=10)
+_NETWORK_MAIN: Final = {
+    "R01": "ports",
+    "R02": "scan",
+    "R08": "bypass",
+    "R10": "proxy",
+    "R19": "dga",
+}
+CASES.extend(
+    [
+        RuleCase(
+            case.rule,
+            f"{case.name}-cooldown",
+            case.rows,
+            case.expected,
+            overrides=case.overrides,
+            settings=case.settings,
+            slice_seconds=case.slice_seconds,
+            closed_before=_NETWORK_COOLED,
+        )
+        for case in CASES
+        if _NETWORK_MAIN.get(case.rule) == case.name
+    ]
+)
+
 # -------------------------------------------------------------------------------------------------
 # W6-D and W6-E — cooldown cases (one per rule, issues #246 and #247): a positive case of the
 # rule, with a closed alert of each expected key ten minutes before the slice. Every one of these
