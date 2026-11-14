@@ -112,6 +112,12 @@
     "/api/v1/alerts/{alert_id}": [
       "get"
     ],
+    "/api/v1/alerts/{alert_id}/assign": [
+      "post"
+    ],
+    "/api/v1/alerts/{alert_id}/evidence": [
+      "get"
+    ],
     "/api/v1/alerts/{alert_id}/notes": [
       "post"
     ],
@@ -292,6 +298,15 @@
       "patch"
     ],
     "/api/v1/reports/schedules/{schedule_id}/run": [
+      "post"
+    ],
+    "/api/v1/rules": [
+      "get"
+    ],
+    "/api/v1/rules/{rule_id}": [
+      "put"
+    ],
+    "/api/v1/rules/{rule_id}/dry-run": [
       "post"
     ],
     "/api/v1/seals/calendar": [
@@ -1342,6 +1357,30 @@
       "title": "AgentOut",
       "type": "object"
     },
+    "AlertAssignRequest": {
+      "additionalProperties": false,
+      "description": "Give the alert to a user (``null``: to nobody).",
+      "properties": {
+        "user_id": {
+          "anyOf": [
+            {
+              "maximum": 9.223372036854776e+18,
+              "minimum": 1.0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "User Id"
+        }
+      },
+      "required": [
+        "user_id"
+      ],
+      "title": "AlertAssignRequest",
+      "type": "object"
+    },
     "AlertDeliveryOut": {
       "properties": {
         "attempts": {
@@ -1395,6 +1434,16 @@
     },
     "AlertDetail": {
       "properties": {
+        "assignee": {
+          "anyOf": [
+            {
+              "$ref": "#/components/schemas/AssigneeOut"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "auto_resolved": {
           "title": "Auto Resolved",
           "type": "boolean"
@@ -1422,6 +1471,17 @@
           },
           "title": "Events",
           "type": "array"
+        },
+        "evidence_total": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Evidence Total"
         },
         "id": {
           "title": "Id",
@@ -1523,6 +1583,8 @@
         "summary_en",
         "auto_resolved",
         "notes_count",
+        "assignee",
+        "evidence_total",
         "details",
         "events",
         "runbook_tr",
@@ -1567,7 +1629,8 @@
         "kind": {
           "enum": [
             "state",
-            "note"
+            "note",
+            "assign"
           ],
           "title": "Kind",
           "type": "string"
@@ -1613,6 +1676,136 @@
       "title": "AlertEvent",
       "type": "object"
     },
+    "AlertEvidenceOut": {
+      "properties": {
+        "n": {
+          "title": "N",
+          "type": "integer"
+        },
+        "raw": {
+          "anyOf": [
+            {
+              "$ref": "#/components/schemas/AlertEvidenceRaw"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "row_id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Row Id"
+        },
+        "table": {
+          "title": "Table",
+          "type": "string"
+        },
+        "time": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Time"
+        },
+        "time_received": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Time Received"
+        }
+      },
+      "required": [
+        "n",
+        "table",
+        "row_id",
+        "time",
+        "time_received",
+        "raw"
+      ],
+      "title": "AlertEvidenceOut",
+      "type": "object"
+    },
+    "AlertEvidencePage": {
+      "properties": {
+        "alert_id": {
+          "title": "Alert Id",
+          "type": "integer"
+        },
+        "evidence_total": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Evidence Total"
+        },
+        "items": {
+          "items": {
+            "$ref": "#/components/schemas/AlertEvidenceOut"
+          },
+          "title": "Items",
+          "type": "array"
+        }
+      },
+      "required": [
+        "alert_id",
+        "evidence_total",
+        "items"
+      ],
+      "title": "AlertEvidencePage",
+      "type": "object"
+    },
+    "AlertEvidenceRaw": {
+      "description": "What ``GET /api/v1/raw`` opens (with its own permission and audit).",
+      "properties": {
+        "day": {
+          "format": "date",
+          "title": "Day",
+          "type": "string"
+        },
+        "line": {
+          "title": "Line",
+          "type": "integer"
+        },
+        "offset": {
+          "title": "Offset",
+          "type": "integer"
+        },
+        "source": {
+          "title": "Source",
+          "type": "string"
+        }
+      },
+      "required": [
+        "source",
+        "day",
+        "line",
+        "offset"
+      ],
+      "title": "AlertEvidenceRaw",
+      "type": "object"
+    },
     "AlertNoteRequest": {
       "additionalProperties": false,
       "description": "A note: 1-2000 characters (trimmed), line breaks allowed.",
@@ -1632,6 +1825,16 @@
     },
     "AlertOut": {
       "properties": {
+        "assignee": {
+          "anyOf": [
+            {
+              "$ref": "#/components/schemas/AssigneeOut"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "auto_resolved": {
           "title": "Auto Resolved",
           "type": "boolean"
@@ -1640,6 +1843,17 @@
           "format": "date-time",
           "title": "Created At",
           "type": "string"
+        },
+        "evidence_total": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Evidence Total"
         },
         "id": {
           "title": "Id",
@@ -1732,7 +1946,9 @@
         "summary_tr",
         "summary_en",
         "auto_resolved",
-        "notes_count"
+        "notes_count",
+        "assignee",
+        "evidence_total"
       ],
       "title": "AlertOut",
       "type": "object"
@@ -1808,6 +2024,13 @@
           "title": "Acknowledged",
           "type": "integer"
         },
+        "by_day": {
+          "items": {
+            "$ref": "#/components/schemas/DayCounts"
+          },
+          "title": "By Day",
+          "type": "array"
+        },
         "latest": {
           "items": {
             "$ref": "#/components/schemas/AlertOut"
@@ -1828,13 +2051,30 @@
         },
         "open_by_severity": {
           "$ref": "#/components/schemas/OpenBySeverity"
+        },
+        "top_keys": {
+          "items": {
+            "$ref": "#/components/schemas/KeyCount"
+          },
+          "title": "Top Keys",
+          "type": "array"
+        },
+        "top_rules": {
+          "items": {
+            "$ref": "#/components/schemas/RuleCount"
+          },
+          "title": "Top Rules",
+          "type": "array"
         }
       },
       "required": [
         "open_by_severity",
         "acknowledged",
         "latest",
-        "mean_time_to_close_seconds_30d"
+        "mean_time_to_close_seconds_30d",
+        "by_day",
+        "top_rules",
+        "top_keys"
       ],
       "title": "AlertSummary",
       "type": "object"
@@ -2200,6 +2440,24 @@
         "devices"
       ],
       "title": "AssignResult",
+      "type": "object"
+    },
+    "AssigneeOut": {
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "integer"
+        },
+        "username": {
+          "title": "Username",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "username"
+      ],
+      "title": "AssigneeOut",
       "type": "object"
     },
     "AssignmentOut": {
@@ -5027,6 +5285,45 @@
       "title": "DatabaseSample",
       "type": "object"
     },
+    "DayCounts": {
+      "properties": {
+        "critical": {
+          "title": "Critical",
+          "type": "integer"
+        },
+        "day": {
+          "format": "date",
+          "title": "Day",
+          "type": "string"
+        },
+        "high": {
+          "title": "High",
+          "type": "integer"
+        },
+        "info": {
+          "title": "Info",
+          "type": "integer"
+        },
+        "low": {
+          "title": "Low",
+          "type": "integer"
+        },
+        "medium": {
+          "title": "Medium",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "day",
+        "critical",
+        "high",
+        "medium",
+        "low",
+        "info"
+      ],
+      "title": "DayCounts",
+      "type": "object"
+    },
     "DayHealth": {
       "properties": {
         "day": {
@@ -5982,6 +6279,67 @@
         "forecast"
       ],
       "title": "DriveInfo",
+      "type": "object"
+    },
+    "DryRunKey": {
+      "properties": {
+        "count": {
+          "title": "Count",
+          "type": "integer"
+        },
+        "first_time": {
+          "format": "date-time",
+          "title": "First Time",
+          "type": "string"
+        },
+        "key": {
+          "title": "Key",
+          "type": "string"
+        },
+        "last_time": {
+          "format": "date-time",
+          "title": "Last Time",
+          "type": "string"
+        }
+      },
+      "required": [
+        "key",
+        "count",
+        "first_time",
+        "last_time"
+      ],
+      "title": "DryRunKey",
+      "type": "object"
+    },
+    "DryRunOut": {
+      "properties": {
+        "duration_ms": {
+          "title": "Duration Ms",
+          "type": "integer"
+        },
+        "keys": {
+          "items": {
+            "$ref": "#/components/schemas/DryRunKey"
+          },
+          "title": "Keys",
+          "type": "array"
+        },
+        "truncated": {
+          "title": "Truncated",
+          "type": "boolean"
+        },
+        "would_open": {
+          "title": "Would Open",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "would_open",
+        "keys",
+        "truncated",
+        "duration_ms"
+      ],
+      "title": "DryRunOut",
       "type": "object"
     },
     "EvidenceCreate": {
@@ -7488,6 +7846,29 @@
       "type": "object"
     },
     "JsonValue": {},
+    "KeyCount": {
+      "properties": {
+        "count": {
+          "title": "Count",
+          "type": "integer"
+        },
+        "key": {
+          "title": "Key",
+          "type": "string"
+        },
+        "rule": {
+          "title": "Rule",
+          "type": "string"
+        }
+      },
+      "required": [
+        "rule",
+        "key",
+        "count"
+      ],
+      "title": "KeyCount",
+      "type": "object"
+    },
     "LastBackup": {
       "description": "``state/backup/last.json`` of the Backup task (only what the page shows).",
       "properties": {
@@ -9672,6 +10053,116 @@
       "title": "OpenBySeverity",
       "type": "object"
     },
+    "OtherSetting": {
+      "description": "A setting another page edits (``settings_meta.EDITED_ELSEWHERE``: the security rules,\nWave 6 contract §2.1.4): listed with its value for completeness and backups, never shown or\nchanged on the generic page (``PATCH`` refuses it).",
+      "properties": {
+        "is_default": {
+          "title": "Is Default",
+          "type": "boolean"
+        },
+        "key": {
+          "title": "Key",
+          "type": "string"
+        },
+        "updated_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Updated At"
+        },
+        "updated_by": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Updated By"
+        },
+        "value": {
+          "$ref": "#/components/schemas/JsonValue"
+        }
+      },
+      "required": [
+        "key",
+        "value",
+        "is_default",
+        "updated_by",
+        "updated_at"
+      ],
+      "title": "OtherSetting",
+      "type": "object"
+    },
+    "ParamOut": {
+      "properties": {
+        "key": {
+          "title": "Key",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "int",
+            "bytes",
+            "seconds",
+            "percent",
+            "strings",
+            "networks",
+            "ints",
+            "bool"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "label_en": {
+          "title": "Label En",
+          "type": "string"
+        },
+        "label_tr": {
+          "title": "Label Tr",
+          "type": "string"
+        },
+        "max": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Max"
+        },
+        "min": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Min"
+        }
+      },
+      "required": [
+        "key",
+        "kind",
+        "min",
+        "max",
+        "label_tr",
+        "label_en"
+      ],
+      "title": "ParamOut",
+      "type": "object"
+    },
     "ParseErrorItem": {
       "properties": {
         "code": {
@@ -11660,6 +12151,201 @@
         "source"
       ],
       "title": "RootCertificate",
+      "type": "object"
+    },
+    "RuleCount": {
+      "properties": {
+        "count": {
+          "title": "Count",
+          "type": "integer"
+        },
+        "rule": {
+          "title": "Rule",
+          "type": "string"
+        }
+      },
+      "required": [
+        "rule",
+        "count"
+      ],
+      "title": "RuleCount",
+      "type": "object"
+    },
+    "RuleOut": {
+      "properties": {
+        "advice_en": {
+          "title": "Advice En",
+          "type": "string"
+        },
+        "advice_tr": {
+          "title": "Advice Tr",
+          "type": "string"
+        },
+        "data_status": {
+          "enum": [
+            "ok",
+            "no_data",
+            "never"
+          ],
+          "title": "Data Status",
+          "type": "string"
+        },
+        "defaults": {
+          "additionalProperties": true,
+          "title": "Defaults",
+          "type": "object"
+        },
+        "format_verified": {
+          "title": "Format Verified",
+          "type": "boolean"
+        },
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "inputs": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Inputs",
+          "type": "array"
+        },
+        "kind": {
+          "enum": [
+            "event",
+            "condition"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "last_error": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Last Error"
+        },
+        "last_input_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Last Input At"
+        },
+        "last_run_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Last Run At"
+        },
+        "name_en": {
+          "title": "Name En",
+          "type": "string"
+        },
+        "name_tr": {
+          "title": "Name Tr",
+          "type": "string"
+        },
+        "needs_setup": {
+          "title": "Needs Setup",
+          "type": "boolean"
+        },
+        "note_en": {
+          "title": "Note En",
+          "type": "string"
+        },
+        "note_tr": {
+          "title": "Note Tr",
+          "type": "string"
+        },
+        "params": {
+          "items": {
+            "$ref": "#/components/schemas/ParamOut"
+          },
+          "title": "Params",
+          "type": "array"
+        },
+        "person_level": {
+          "title": "Person Level",
+          "type": "boolean"
+        },
+        "settings": {
+          "additionalProperties": true,
+          "title": "Settings",
+          "type": "object"
+        },
+        "skipped_until": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Skipped Until"
+        }
+      },
+      "required": [
+        "id",
+        "name_tr",
+        "name_en",
+        "kind",
+        "inputs",
+        "person_level",
+        "format_verified",
+        "needs_setup",
+        "data_status",
+        "last_input_at",
+        "last_run_at",
+        "last_error",
+        "skipped_until",
+        "defaults",
+        "settings",
+        "params",
+        "advice_tr",
+        "advice_en",
+        "note_tr",
+        "note_en"
+      ],
+      "title": "RuleOut",
+      "type": "object"
+    },
+    "RulesOut": {
+      "properties": {
+        "module_enabled": {
+          "title": "Module Enabled",
+          "type": "boolean"
+        },
+        "rules": {
+          "items": {
+            "$ref": "#/components/schemas/RuleOut"
+          },
+          "title": "Rules",
+          "type": "array"
+        }
+      },
+      "required": [
+        "module_enabled",
+        "rules"
+      ],
+      "title": "RulesOut",
       "type": "object"
     },
     "RunOut": {
@@ -13910,6 +14596,14 @@
     },
     "SettingsOut": {
       "properties": {
+        "elsewhere": {
+          "default": [],
+          "items": {
+            "$ref": "#/components/schemas/OtherSetting"
+          },
+          "title": "Elsewhere",
+          "type": "array"
+        },
         "groups": {
           "items": {
             "$ref": "#/components/schemas/SettingGroup"
