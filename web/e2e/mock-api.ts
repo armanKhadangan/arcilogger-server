@@ -25,7 +25,7 @@ import type {
 
 import { API_SCHEMAS, AUDIT_VECTORS, ROLE_CONTRACT } from './generated';
 import { AdminMock, type AdminOptions } from './mock-admin';
-import { AlertsMock } from './mock-alerts';
+import { AlertsMock, type AlertsOptions } from './mock-alerts';
 import { DevicesMock } from './mock-devices';
 import { LicenseMock, type LicenseOptions } from './mock-license';
 import { RecordsMock, type Answer, type RecordsOptions } from './mock-records';
@@ -360,6 +360,8 @@ export interface MockOptions {
    * changes, the speed of the requests, a fresh Kamu SM section (`mock-admin.ts`).
    */
   admin?: AdminOptions;
+  /** Security alerts: the Wave 6 rule alerts, assignment and evidence (`mock-alerts.ts`). */
+  alerts?: AlertsOptions;
 }
 
 function user(
@@ -463,7 +465,12 @@ export class MockApi {
     this.records = new RecordsMock(options.records);
     this.admin = new AdminMock(options.admin, () => CREDITS[this.records.credits]);
     this.devices = new DevicesMock();
-    this.alerts = new AlertsMock();
+    this.alerts = new AlertsMock(options.alerts, (id) => {
+      const found = this.users.find((item) => item.id === id && item.active);
+      return found
+        ? { id: found.id, username: found.username, permissions: this.permissionsOf(found) }
+        : null;
+    });
     this.reports = new ReportsMock();
     this.usage = new UsageMock(options.usage);
     this.activity = new ActivityMock({

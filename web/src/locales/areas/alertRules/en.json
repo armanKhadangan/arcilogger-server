@@ -1,0 +1,65 @@
+{
+  "security": {
+    "columns": {
+      "assignee": "Assignee"
+    },
+    "filters": {
+      "mine": "Assigned to me"
+    },
+    "assign": {
+      "title": "Assignee",
+      "label": "Who is investigating the alert",
+      "nobody": "Not assigned",
+      "me": "{{user}} (me)",
+      "done": "The alert was assigned to {{user}}.",
+      "cleared": "The assignment was removed.",
+      "event": "Assigned to {{user}}",
+      "eventCleared": "Assignment removed"
+    },
+    "person": {
+      "label": "Person: {{name}}",
+      "audited": "The name of a person is shown only to those allowed to see personal data; this view was written to the audit log."
+    },
+    "tabs": {
+      "label": "Parts of the alert",
+      "details": "Details",
+      "evidence_one": "Evidence ({{formatted}})",
+      "evidence_other": "Evidence ({{formatted}})"
+    },
+    "evidence": {
+      "caption": "Records that caused the alert",
+      "empty": "No evidence rows are kept for this alert.",
+      "all_one": "{{count}} record caused the alert.",
+      "all_other": "{{count}} records caused the alert.",
+      "kept": "The first {{shown}} of {{total}} records are kept as evidence.",
+      "columns": {
+        "time": "Device time",
+        "table": "Record",
+        "source": "Source",
+        "received": "Received",
+        "raw": "Raw line"
+      },
+      "openRaw": "Open raw line",
+      "openRawOf": "Open raw line: {{time}}",
+      "noRaw": "Opening a raw line needs the search or 5651 lookup permission.",
+      "tables": {
+        "fg_ips": "FortiGate IPS record",
+        "fg_virus": "FortiGate antivirus record",
+        "mt_fw": "MikroTik firewall record",
+        "mt_account": "MikroTik login record",
+        "mt_config": "MikroTik configuration record",
+        "mt_event": "MikroTik event record",
+        "devices": "Device record"
+      }
+    },
+    "trends": {
+      "byDay": "Last 30 days",
+      "byDayHint": "Alerts opened per day, by severity.",
+      "day": "Day",
+      "total": "Total",
+      "topRules": "Rules with the most alerts (7 days)",
+      "topKeys": "Addresses and keys with the most alerts (7 days)",
+      "none": "No alerts in the last 7 days."
+    }
+  }
+}

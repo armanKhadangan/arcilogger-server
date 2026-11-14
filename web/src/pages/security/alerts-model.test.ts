@@ -13,11 +13,15 @@ import {
   alertViewFromSearch,
   alertViewToSearch,
   alertViewWithSorting,
+  assignCandidates,
+  assigneeOf,
+  byDayRows,
   canTransition,
   closeHintKey,
   closesActive,
   DEFAULT_ALERT_VIEW,
   detailRows,
+  evidenceTotalOf,
   isActive,
   isAlertViewFiltered,
   nextStates,
@@ -127,6 +131,7 @@ describe('the address of the security page', () => {
       rule: 'R15',
       from: '2026-10-01',
       to: '2026-10-13',
+      mine: false,
       sort: 'severity',
       order: 'asc',
     });
@@ -232,5 +237,55 @@ describe('alert texts', () => {
       ['macs', '["a","b"]'],
       ['x', '—'],
     ]);
+  });
+});
+
+describe('Wave 6 additions (§2.6.2)', () => {
+  it('"Bana atananlar" lives in the address as assignee=me and asks the API for it', () => {
+    const view = alertViewFromSearch(new URLSearchParams('assignee=me&state=open'));
+    expect(view).toEqual({ ...DEFAULT_ALERT_VIEW, state: 'open', mine: true });
+    expect(alertViewFromSearch(new URLSearchParams('assignee=7')).mine).toBe(false);
+    expect(alertViewToSearch(view, new URLSearchParams('alert=3')).toString()).toBe(
+      'alert=3&state=open&assignee=me',
+    );
+    expect(alertQuery(view, '', 0, 50)).toMatchObject({ assignee: 'me', state: 'open' });
+    expect(alertQuery(DEFAULT_ALERT_VIEW, '', 0, 50)).not.toHaveProperty('assignee');
+    expect(isAlertViewFiltered({ ...DEFAULT_ALERT_VIEW, mine: true }, '')).toBe(true);
+  });
+
+  it('reads the assignee and the evidence count, absent in the answers of older APIs', () => {
+    expect(assigneeOf({ assignee: { id: 1, username: 'tolga' } })).toEqual({
+      id: 1,
+      username: 'tolga',
+    });
+    expect(assigneeOf({})).toBeNull();
+    expect(evidenceTotalOf({ evidence_total: 47 })).toBe(47);
+    expect(evidenceTotalOf({})).toBe(0);
+  });
+
+  it('offers active users whose role reads alerts', () => {
+    const users = [
+      { id: 2, username: 'zeynep', role: 'viewer', active: true },
+      { id: 4, username: 'emre', role: 'admin', active: false },
+      { id: 1, username: 'tolga', role: 'admin', active: true },
+      { id: 5, username: 'ali', role: 'admin', active: true },
+    ];
+    expect(assignCandidates(users).map((user) => user.username)).toEqual(['ali', 'tolga']);
+  });
+
+  it('the 30 days oldest first with a total per day', () => {
+    const day = (date: string, high: number) => ({
+      day: date,
+      critical: 1,
+      high,
+      medium: 0,
+      low: 0,
+      info: 2,
+    });
+    expect(byDayRows([day('2026-10-13', 4), day('2026-10-12', 0)])).toEqual([
+      { ...day('2026-10-12', 0), total: 3 },
+      { ...day('2026-10-13', 4), total: 7 },
+    ]);
+    expect(byDayRows(undefined)).toEqual([]);
   });
 });

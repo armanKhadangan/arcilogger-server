@@ -1,0 +1,65 @@
+{
+  "security": {
+    "columns": {
+      "assignee": "Atanan"
+    },
+    "filters": {
+      "mine": "Bana atananlar"
+    },
+    "assign": {
+      "title": "Atanan",
+      "label": "Uyarıyı kim inceliyor",
+      "nobody": "Kimseye atanmadı",
+      "me": "{{user}} (ben)",
+      "done": "Uyarı {{user}} kullanıcısına atandı.",
+      "cleared": "Atama kaldırıldı.",
+      "event": "{{user}} kullanıcısına atandı",
+      "eventCleared": "Atama kaldırıldı"
+    },
+    "person": {
+      "label": "Kişi: {{name}}",
+      "audited": "Kişi adı yalnızca kişi verisini görme yetkisi olanlara gösterilir; bu gösterim denetim kaydına yazıldı."
+    },
+    "tabs": {
+      "label": "Uyarının bölümleri",
+      "details": "Ayrıntılar",
+      "evidence_one": "Kanıt ({{formatted}})",
+      "evidence_other": "Kanıt ({{formatted}})"
+    },
+    "evidence": {
+      "caption": "Uyarıya yol açan kayıtlar",
+      "empty": "Bu uyarı için saklanan kanıt satırı yok.",
+      "all_one": "Uyarıya yol açan {{count}} kayıt.",
+      "all_other": "Uyarıya yol açan {{count}} kayıt.",
+      "kept": "{{total}} kaydın ilk {{shown}} tanesi kanıt olarak saklanır.",
+      "columns": {
+        "time": "Cihaz zamanı",
+        "table": "Kayıt",
+        "source": "Kaynak",
+        "received": "Alındığı an",
+        "raw": "Ham satır"
+      },
+      "openRaw": "Ham satırı aç",
+      "openRawOf": "Ham satırı aç: {{time}}",
+      "noRaw": "Ham satırı açmak için arama ya da 5651 sorgu yetkisi gerekir.",
+      "tables": {
+        "fg_ips": "FortiGate IPS kaydı",
+        "fg_virus": "FortiGate antivirüs kaydı",
+        "mt_fw": "MikroTik güvenlik duvarı kaydı",
+        "mt_account": "MikroTik oturum kaydı",
+        "mt_config": "MikroTik yapılandırma kaydı",
+        "mt_event": "MikroTik olay kaydı",
+        "devices": "Cihaz kaydı"
+      }
+    },
+    "trends": {
+      "byDay": "Son 30 gün",
+      "byDayHint": "Gün başına açılan uyarılar, önem derecesine göre.",
+      "day": "Gün",
+      "total": "Toplam",
+      "topRules": "En çok uyarı üreten kurallar (7 gün)",
+      "topKeys": "En çok uyarı üreten adresler ve anahtarlar (7 gün)",
+      "none": "Son 7 günde uyarı yok."
+    }
+  }
+}

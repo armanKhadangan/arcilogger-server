@@ -9,12 +9,14 @@ import {
   RotateCcw,
   Search,
   Undo2,
+  UserRoundCheck,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { useEffect, useId, useRef, useState } from 'react';
 import type { FormEvent, ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import { RawLineSheet, type RawLineTarget } from '@/components/evidence/raw-line-sheet';
 import { Alert } from '@/components/ui/alert';
 import { Badge, SeverityBadge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -28,19 +30,22 @@ import {
   SheetTitle,
 } from '@/components/ui/sheet';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
 import { Timeline, type TimelineItem } from '@/components/ui/timeline';
 import { toast } from '@/components/ui/toast';
+import type { AlertDetailWithRules } from '@/lib/alert-rule-types';
 import { errorMessage, isApiError } from '@/lib/api';
 import { useAddAlertNote, useAlert, useChangeAlertState } from '@/lib/api-hooks';
 import type { AlertDetail, AlertEvent, AlertState } from '@/lib/api-types';
 import { visibleText } from '@/lib/display';
-import { formatDateTime } from '@/lib/format';
+import { formatDateTime, formatNumber } from '@/lib/format';
 import { currentLang } from '@/lib/i18n';
 import { isReauthCancelled, useReauth } from '@/lib/reauth';
 import { Facts } from '@/pages/devices/device-parts';
 
 import { AlertStateBadge } from './alert-parts';
+import { AlertEvidenceList, AlertPersonRow, AssigneeControl } from './alert-rule-parts';
 import {
   actionOf,
   activeAlertOf,
@@ -48,6 +53,7 @@ import {
   closeHintKey,
   closesActive,
   detailRows,
+  evidenceTotalOf,
   isActive,
   isAlertState,
   nextStates,
@@ -91,6 +97,19 @@ function History({ events }: { events: readonly AlertEvent[] }) {
     .map((event) => {
       const system = event.by === 'system';
       const by = system ? t('security.detail.system') : event.by;
+      // Wave 6 §2.5: who the alert was given to (`text`: the user name, null for nobody).
+      if ((event.kind as string) === 'assign') {
+        return {
+          id: String(event.id),
+          time: formatDateTime(event.at),
+          title: event.text
+            ? t('security.assign.event', { user: event.text })
+            : t('security.assign.eventCleared'),
+          description: <span>{t('security.detail.by', { user: by })}</span>,
+          icon: UserRoundCheck,
+          tone: 'neutral',
+        };
+      }
       if (event.kind === 'note') {
         return {
           id: String(event.id),
@@ -475,158 +494,203 @@ export function AlertSheet({
   const lang = currentLang();
   const id = useId();
   const detail = useAlert(alertId);
-  const alert = detail.data;
+  const alert: AlertDetailWithRules | undefined = detail.data;
+  const [raw, setRaw] = useState<RawLineTarget | null>(null);
+  const evidenceTotal = alert ? evidenceTotalOf(alert) : 0;
   const notFound = detail.isError && isApiError(detail.error) && detail.error.status === 404;
 
+  // Everything but the evidence: the whole sheet, or its first tab for a rule's alert.
+  const details = alert ? (
+    <>
+      {manage ? (
+        <Section id={`${id}-actions`} title={t('security.actions.title')}>
+          <StateActions
+            alert={alert}
+            onChanged={() => void detail.refresh()}
+            onOpenAlert={onOpenAlert}
+          />
+        </Section>
+      ) : null}
+
+      <Section id={`${id}-summary`} title={t('security.detail.summary')}>
+        <p className="text-13 whitespace-pre-wrap text-foreground">
+          {visibleText(alertSummaryText(alert, lang))}
+        </p>
+        <AlertPersonRow alert={alert} />
+        <Facts
+          items={[
+            [t('security.columns.rule'), `${alert.rule} · ${ruleName(alert, lang)}`],
+            [t('security.columns.time'), formatDateTime(alert.time)],
+            [t('security.detail.created'), formatDateTime(alert.created_at)],
+            [t('security.detail.updated'), formatDateTime(alert.updated_at)],
+            [
+              t('security.detail.resolved'),
+              alert.resolved_at ? formatDateTime(alert.resolved_at) : '—',
+            ],
+          ]}
+        />
+      </Section>
+
+      <Section id={`${id}-details`} title={t('security.detail.details')}>
+        {Object.keys(alert.details).length === 0 ? (
+          <p className="text-13 text-muted">{t('security.detail.noDetails')}</p>
+        ) : (
+          <div className="overflow-x-auto rounded-lg border border-border">
+            <table className="w-full border-separate border-spacing-0 text-13">
+              <caption className="sr-only">{t('security.detail.details')}</caption>
+              <thead>
+                <tr>
+                  <th
+                    scope="col"
+                    className="border-b border-border bg-subtle px-3 py-2 text-left text-xs font-medium text-muted-strong"
+                  >
+                    {t('security.detail.field')}
+                  </th>
+                  <th
+                    scope="col"
+                    className="border-b border-border bg-subtle px-3 py-2 text-left text-xs font-medium text-muted-strong"
+                  >
+                    {t('security.detail.value')}
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {detailRows(alert.details).map(([key, value]) => (
+                  <tr key={key}>
+                    <th
+                      scope="row"
+                      className="border-b border-border px-3 py-1.5 text-left font-mono text-xs font-normal text-muted-strong"
+                    >
+                      {key}
+                    </th>
+                    <td className="border-b border-border px-3 py-1.5 font-mono text-xs break-all">
+                      {visibleText(value)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Section>
+
+      <Section id={`${id}-runbook`} title={t('security.detail.runbook')}>
+        <div
+          className="rounded-lg border border-border bg-subtle/50 px-3 py-2 text-13 whitespace-pre-wrap text-foreground"
+          data-testid="runbook"
+        >
+          {(lang === 'en' ? alert.runbook_en : alert.runbook_tr) || t('security.detail.noRunbook')}
+        </div>
+      </Section>
+
+      <Section id={`${id}-history`} title={t('security.detail.history')}>
+        <History events={alert.events} />
+      </Section>
+
+      {manage ? (
+        <Section id={`${id}-notes`} title={t('security.notes.title')}>
+          <AddNote alertId={alert.id} />
+        </Section>
+      ) : null}
+
+      <Section id={`${id}-deliveries`} title={t('security.detail.deliveries')}>
+        <Deliveries alert={alert} />
+        <p className="text-xs text-muted">{t('security.detail.deliveriesNote')}</p>
+      </Section>
+    </>
+  ) : null;
+
   return (
-    <Sheet
-      open={alertId !== null}
-      onOpenChange={(open) => {
-        if (!open) onClose();
-      }}
-    >
-      <SheetContent className="max-w-2xl">
-        <SheetHeader>
-          <SheetTitle className="text-base font-semibold text-foreground">
-            {alert
-              ? visibleText(alertSummaryText(alert, lang))
-              : t('security.detail.title', { id: alertId ?? '' })}
-          </SheetTitle>
-          <SheetDescription className="text-13 text-muted">
-            {alert
-              ? `${alert.rule} · ${ruleName(alert, lang)} · ${formatDateTime(alert.time)}`
-              : t('security.detail.loading')}
-          </SheetDescription>
-        </SheetHeader>
-        <SheetBody className="flex flex-col gap-5">
-          {detail.isPending ? (
-            <div role="status" aria-label={t('common.loading')} className="flex flex-col gap-2">
-              <Skeleton className="h-24" />
-              <Skeleton className="h-48" />
-            </div>
-          ) : notFound ? (
-            <Alert tone="warning">{t('security.detail.notFound')}</Alert>
-          ) : detail.isError ? (
-            <Alert tone="danger">
-              <span className="flex flex-wrap items-center gap-2">
-                {errorMessage(detail.error)}
-                <Button size="sm" variant="secondary" onClick={() => void detail.refresh()}>
-                  <RefreshCw aria-hidden="true" />
-                  {t('common.retry')}
-                </Button>
-              </span>
-            </Alert>
-          ) : alert ? (
-            <>
-              <div className="flex flex-wrap items-center gap-2">
-                <SeverityBadge severity={alert.severity} />
-                <AlertStateBadge state={alert.state} />
-                {alert.auto_resolved ? (
-                  <Badge tone="info" icon={Bot}>
-                    {t('security.autoResolved')}
-                  </Badge>
-                ) : null}
+    <>
+      <Sheet
+        open={alertId !== null}
+        onOpenChange={(open) => {
+          if (!open) onClose();
+        }}
+      >
+        <SheetContent className="max-w-2xl">
+          <SheetHeader>
+            <SheetTitle className="text-base font-semibold text-foreground">
+              {alert
+                ? visibleText(alertSummaryText(alert, lang))
+                : t('security.detail.title', { id: alertId ?? '' })}
+            </SheetTitle>
+            <SheetDescription className="text-13 text-muted">
+              {alert
+                ? `${alert.rule} · ${ruleName(alert, lang)} · ${formatDateTime(alert.time)}`
+                : t('security.detail.loading')}
+            </SheetDescription>
+          </SheetHeader>
+          <SheetBody className="flex flex-col gap-5">
+            {detail.isPending ? (
+              <div role="status" aria-label={t('common.loading')} className="flex flex-col gap-2">
+                <Skeleton className="h-24" />
+                <Skeleton className="h-48" />
               </div>
-
-              {manage ? (
-                <Section id={`${id}-actions`} title={t('security.actions.title')}>
-                  <StateActions
-                    alert={alert}
-                    onChanged={() => void detail.refresh()}
-                    onOpenAlert={onOpenAlert}
-                  />
-                </Section>
-              ) : null}
-
-              <Section id={`${id}-summary`} title={t('security.detail.summary')}>
-                <p className="text-13 whitespace-pre-wrap text-foreground">
-                  {visibleText(alertSummaryText(alert, lang))}
-                </p>
-                <Facts
-                  items={[
-                    [t('security.columns.rule'), `${alert.rule} · ${ruleName(alert, lang)}`],
-                    [t('security.columns.time'), formatDateTime(alert.time)],
-                    [t('security.detail.created'), formatDateTime(alert.created_at)],
-                    [t('security.detail.updated'), formatDateTime(alert.updated_at)],
-                    [
-                      t('security.detail.resolved'),
-                      alert.resolved_at ? formatDateTime(alert.resolved_at) : '—',
-                    ],
-                  ]}
-                />
-              </Section>
-
-              <Section id={`${id}-details`} title={t('security.detail.details')}>
-                {Object.keys(alert.details).length === 0 ? (
-                  <p className="text-13 text-muted">{t('security.detail.noDetails')}</p>
-                ) : (
-                  <div className="overflow-x-auto rounded-lg border border-border">
-                    <table className="w-full border-separate border-spacing-0 text-13">
-                      <caption className="sr-only">{t('security.detail.details')}</caption>
-                      <thead>
-                        <tr>
-                          <th
-                            scope="col"
-                            className="border-b border-border bg-subtle px-3 py-2 text-left text-xs font-medium text-muted-strong"
-                          >
-                            {t('security.detail.field')}
-                          </th>
-                          <th
-                            scope="col"
-                            className="border-b border-border bg-subtle px-3 py-2 text-left text-xs font-medium text-muted-strong"
-                          >
-                            {t('security.detail.value')}
-                          </th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {detailRows(alert.details).map(([key, value]) => (
-                          <tr key={key}>
-                            <th
-                              scope="row"
-                              className="border-b border-border px-3 py-1.5 text-left font-mono text-xs font-normal text-muted-strong"
-                            >
-                              {key}
-                            </th>
-                            <td className="border-b border-border px-3 py-1.5 font-mono text-xs break-all">
-                              {visibleText(value)}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-              </Section>
-
-              <Section id={`${id}-runbook`} title={t('security.detail.runbook')}>
-                <div
-                  className="rounded-lg border border-border bg-subtle/50 px-3 py-2 text-13 whitespace-pre-wrap text-foreground"
-                  data-testid="runbook"
-                >
-                  {(lang === 'en' ? alert.runbook_en : alert.runbook_tr) ||
-                    t('security.detail.noRunbook')}
+            ) : notFound ? (
+              <Alert tone="warning">{t('security.detail.notFound')}</Alert>
+            ) : detail.isError ? (
+              <Alert tone="danger">
+                <span className="flex flex-wrap items-center gap-2">
+                  {errorMessage(detail.error)}
+                  <Button size="sm" variant="secondary" onClick={() => void detail.refresh()}>
+                    <RefreshCw aria-hidden="true" />
+                    {t('common.retry')}
+                  </Button>
+                </span>
+              </Alert>
+            ) : alert ? (
+              <>
+                <div className="flex flex-wrap items-center gap-2">
+                  <SeverityBadge severity={alert.severity} />
+                  <AlertStateBadge state={alert.state} />
+                  {alert.auto_resolved ? (
+                    <Badge tone="info" icon={Bot}>
+                      {t('security.autoResolved')}
+                    </Badge>
+                  ) : null}
                 </div>
-              </Section>
 
-              <Section id={`${id}-history`} title={t('security.detail.history')}>
-                <History events={alert.events} />
-              </Section>
-
-              {manage ? (
-                <Section id={`${id}-notes`} title={t('security.notes.title')}>
-                  <AddNote alertId={alert.id} />
+                <Section id={`${id}-assignee`} title={t('security.assign.title')}>
+                  <AssigneeControl alert={alert} manage={manage} />
                 </Section>
-              ) : null}
 
-              <Section id={`${id}-deliveries`} title={t('security.detail.deliveries')}>
-                <Deliveries alert={alert} />
-                <p className="text-xs text-muted">{t('security.detail.deliveriesNote')}</p>
-              </Section>
-            </>
-          ) : null}
-        </SheetBody>
-      </SheetContent>
-    </Sheet>
+                {evidenceTotal > 0 ? (
+                  <Tabs key={alert.id} defaultValue="details">
+                    <TabsList aria-label={t('security.tabs.label')}>
+                      <TabsTrigger value="details">{t('security.tabs.details')}</TabsTrigger>
+                      <TabsTrigger value="evidence">
+                        {t('security.tabs.evidence', {
+                          count: evidenceTotal,
+                          formatted: formatNumber(evidenceTotal, 0, lang),
+                        })}
+                      </TabsTrigger>
+                    </TabsList>
+                    <TabsContent value="details" className="flex flex-col gap-5 pt-4">
+                      {details}
+                    </TabsContent>
+                    <TabsContent value="evidence" className="pt-4">
+                      <AlertEvidenceList
+                        alertId={alert.id}
+                        total={evidenceTotal}
+                        onOpenRaw={setRaw}
+                      />
+                    </TabsContent>
+                  </Tabs>
+                ) : (
+                  details
+                )}
+              </>
+            ) : null}
+          </SheetBody>
+        </SheetContent>
+      </Sheet>
+      <RawLineSheet
+        target={raw}
+        onClose={() => {
+          setRaw(null);
+        }}
+      />
+    </>
   );
 }

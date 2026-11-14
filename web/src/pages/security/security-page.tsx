@@ -1,4 +1,4 @@
-import { FilterX, RefreshCw, Search, ShieldCheck } from 'lucide-react';
+import { FilterX, RefreshCw, Search, ShieldCheck, UserRoundCheck } from 'lucide-react';
 import { useCallback, useEffect, useId, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
@@ -41,6 +41,7 @@ import {
   alertViewFromSearch,
   alertViewToSearch,
   alertViewWithSorting,
+  assigneeOf,
   DEFAULT_ALERT_VIEW,
   isAlertState,
   isAlertViewFiltered,
@@ -50,6 +51,7 @@ import {
   type AlertView,
 } from './alerts-model';
 import { SecuritySummary } from './security-summary';
+import { SecurityTrends } from './security-trends';
 
 const ALL = 'all';
 
@@ -196,6 +198,22 @@ export function SecurityPage() {
         cell: (info) => <AlertStateBadge state={info.row.original.state} />,
       },
       {
+        id: 'assignee',
+        accessorFn: (row) => assigneeOf(row)?.username ?? '',
+        header: t('security.columns.assignee'),
+        size: 130,
+        enableSorting: false,
+        meta: { label: t('security.columns.assignee') },
+        cell: (info) => {
+          const assignee = assigneeOf(info.row.original);
+          return assignee ? (
+            <span className="truncate font-mono text-xs">{assignee.username}</span>
+          ) : (
+            <span className="text-muted">—</span>
+          );
+        },
+      },
+      {
         id: 'notes',
         accessorKey: 'notes_count',
         header: t('security.columns.notes'),
@@ -301,6 +319,17 @@ export function SecurityPage() {
             }}
           />
         </div>
+        <Button
+          variant="secondary"
+          aria-pressed={view.mine}
+          className={cn(view.mine && 'border-primary bg-primary-soft text-primary-ink')}
+          onClick={() => {
+            setView({ ...view, mine: !view.mine });
+          }}
+        >
+          <UserRoundCheck aria-hidden="true" />
+          {t('security.filters.mine')}
+        </Button>
         {filtered ? (
           <Button variant="ghost" onClick={clear}>
             <FilterX aria-hidden="true" />
@@ -367,6 +396,7 @@ export function SecurityPage() {
         pending={summary.isPending}
         error={summary.isError ? summary.error : null}
       />
+      {summary.data ? <SecurityTrends summary={summary.data} /> : null}
       {!manage ? (
         <Alert tone="info" assertive={false} data-testid="read-only">
           {t('security.readOnly')}
