@@ -46,7 +46,15 @@ DEPARTMENT_VLANS = {
 
 
 def test_shipped_defaults_name_no_network_of_any_site() -> None:
-    shipped = json.dumps(DEFAULT_SETTINGS, ensure_ascii=False)
+    # The security rules' "iç adres" are the RFC 1918 ranges, not a site's networks (Wave 6
+    # contract §2.1.4); every other default names no address at all.
+    assert DEFAULT_SETTINGS["rules.internal_networks"] == [
+        "10.0.0.0/8",
+        "172.16.0.0/12",
+        "192.168.0.0/16",
+    ]
+    others = {k: v for k, v in DEFAULT_SETTINGS.items() if k != "rules.internal_networks"}
+    shipped = json.dumps(others, ensure_ascii=False)
     assert not re.search(
         r"192\.168\.|172\.(20|31)\.|100\.64\.|\bdhcp\d+\b|örnek|ornek", shipped, re.I
     )

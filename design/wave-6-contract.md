@@ -684,6 +684,43 @@ to the normal site: `port-scan` (R01), `external-scan` (R02), `brute-force` (R03
 
 (Answers to questions on the issues are appended here.)
 
+- **C1 — an alert's `count` is the largest window count, not a sum** (#262). A hit's `count`
+  is the rows of its window. With slices shorter than the window, adding hits up counts the
+  same rows again on every run. An active alert's `count` and `evidence_total` therefore take
+  the largest value any of its hits reported ("en yüksek pencere sayısı / most in one window").
+  The stored evidence stays de-duplicated and capped at `rules.evidence_max`, and `last_time`
+  and `values` move as before. §2.1.5's "counts add up" is replaced by this. It lands in W6-A's
+  dry-run PR, before any API or UI shows a count.
+- **C2 — the rules' indexes go into a new migration `0025`** with the perf guard (T-A6).
+  `0024_rules` is merged and is not edited.
+- **C3 — `rules.evidence_max`:** a rule may return up to 100 evidence rows (the setting's
+  maximum) or read the setting itself; the engine keeps the configured number, oldest first.
+- **C4 — defaults the tables leave open** (#253, #254): cooldown 3600 s for R01, R03, R08,
+  R12 and R19; 0 s for R04 and R11; the per-row rules R04, R11 and R16 have a window of 60 s
+  (the minimum: they read their slice). R08 counts a DNS connection to a server that is not
+  allowed whatever its `action` (an attempt that was blocked is still an attempt). R19's
+  `rcode_field` is a `strings` parameter with exactly one entry.
+- **C5 — R04's off hours** are judged on the login's device `time`; windows and slices stay on
+  `time_received` (D8).
+- **C6 — R14** uses only `night_start`/`night_end` (§2.2.4); D5's mention of R14 does not make
+  it read `usage.work_hours` or `usage.holidays`. Both are `seconds` after site midnight
+  (defaults 0 and 21 600); the rule editor (W6-F) shows and edits them as HH:MM.
+- **C7 — the person of an address** (R09, R13, R14): rows are summed per address and minute of
+  device time, and a minute belongs to whoever held the address at its first instant, as in the
+  usage rollups.
+- **C8 — the case writer** (`worker/tests/rules/test_rules_cases.py`) keeps a row's named
+  `source`, and gives a `devices` row `created_at` = its receive time and `first_seen` =
+  `last_seen` = its device time. Cooldown cases use `RuleCase.closed_before`.
+- **C9 — webhooks** (#266):
+  - "24 h after the first attempt" counts from the delivery row's `created_at`.
+  - A webhook removed or switched off fails its queued rows and resolves its `R20-webhook`.
+    Switched on again, it sends nothing from before.
+  - Only alerts opened in the last 24 h are queued.
+  - A missing secret or Teams/Slack URL is retried like an unreachable target. `GET
+    /api/v1/webhooks` shows it at once: per webhook a `ready` boolean and a reason code
+    (`secret_missing`, `url_missing`), never a value.
+  - `R20-webhook` has its own entry in the alert catalogue (`alerts/texts.py`).
+
 ---
 
 ## 7. Owner questions (the defaults ship)
@@ -701,3 +738,48 @@ to the normal site: `port-scan` (R01), `external-scan` (R02), `brute-force` (R03
 ---
 
 ## Deviations
+
+### W6-A (2026-11-12, day-1 pull request, #243)
+
+- **W6-A-1: the device-time pruning bounds reach the whole window.** §2.1.2 gives the lower
+  bound as `start − rules.max_device_skew_seconds`. A window longer than the slice (R08's
+  3600 s against the 600-s slice) also counts rows received before `start`, and such a row may be
+  up to the skew earlier in device time: the bound `start − skew` would drop it and count less
+  than the window holds. `RuleContext.time_low` is `min(start, window_start) − skew`
+  (`time_high` stays `end + skew`); `test_the_context_reads_the_whole_window` pins it.
+- **W6-A-2: `alert_evidence` of a `devices` row.** §2.5 lists the columns, and `devices` as an
+  allowed `tbl`, but a device has no `id` and no raw line (it is keyed by MAC, R11). Only
+  `alert_id`, `n` and `tbl` are `NOT NULL`; the check `ck_alert_evidence_raw_ref` requires
+  `row_id`, both times, `source` and the three raw-reference columns for every table but
+  `devices`, whose evidence keeps `time` (the first sighting) only. Also `n >= 1`.
+- **W6-A-3: the generic settings page and `rules.*`.** `settings_meta.EDITED_ELSEWHERE`
+  (`rules.`) keeps the keys off the generic page and `PATCH /settings` refuses them as keys it
+  does not show (`setting_unknown`), so only the rules API writes them. `GET /settings` returning
+  them "for backups" (§2.1.4) needs a field in its answer that the web types would follow (W6-F):
+  it comes with the rules API pull request, not on day 1. On the console,
+  `arcilogger-db settings set rules.<ID>` accepts any object (a hand edit, which the worker reads
+  field by field as §2.1.4 says); `rules.internal_networks` is checked as CIDR networks there
+  (`setting_network_invalid`, new code), the numeric keys against bounds in `INTEGER_RANGES`.
+- **W6-A-4: `ruff format` and this contract.** ruff 0.17 formats the Python block of §2.1.2;
+  `ruff format --check .` failed on `wave-6` because of it. The day-1 pull request applies the
+  formatter's whitespace-only change to that block; no word of the contract changed.
+
+### W6-A (engine pull request, #243)
+
+- **W6-A-5: a slice is at most the rule's window long.** §2.1.2 has a rule count the window
+  that ends with its slice (`(end − window_seconds, end]`), and §2.1.3 cuts the backlog into
+  slices of up to `rules.max_slice_seconds` (600). With a window shorter than the slice, a
+  rule would see only the last window of each slice: R01's 60-s window would miss a scan in
+  the first nine minutes of a 600-s slice, and the 24-h dry run in 600-s slices would answer
+  differently from the minute-by-minute live run. The engine (and the dry run that follows)
+  therefore cut slices of `min(rules.max_slice_seconds, window_seconds)` (`engine.step`), so
+  every moment of a backlog falls into the window of some slice end. In steady state (a run a
+  minute) the slices are a minute long anyway. `test_a_backlog_puts_every_moment_into_a_window`
+  pins it.
+
+### W6-C (#245): R11 matches the device's insert time, not `first_seen`
+
+- **Contract:** §2.2.2 R11, "a `devices` row whose `first_seen` is in the slice".
+- **Implemented:** a `devices` row whose `created_at` (the server's insert time) is in the slice; `first_seen` is shown in the alert's values.
+- **Why:** `first_seen` is the **device time** of the first DHCP or ARP sighting. The lease jobs write the row later, after their own lag. A device whose row is inserted after `rules.run` moved its watermark past that `first_seen` would never alert. `created_at` is written once, at the insert, by the server's clock. That fits D8 (receive time, not device time) and D12 (devices that existed when the rule started never alert, with no extra seeding).
+- **Limit:** a lease-job transaction that runs longer than `rules.lag_seconds` (120 s) can commit rows with a `created_at` behind the watermark. The default lag covers the normal job; a full rebuild of old days creates no new devices worth an alert.
