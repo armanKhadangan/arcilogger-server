@@ -181,6 +181,14 @@ RULES: Final[Mapping[str, RuleText]] = {
         "[smtp] ayarlarını ve smtp.password'u denetleyin: arcilogger-worker alerts test-email.",
         "Check [smtp] and smtp.password: arcilogger-worker alerts test-email.",
     ),
+    # Wave 6 §2.4.2: an alert webhook could not deliver (permanent refusal, or 24 hours).
+    "R20-webhook": RuleText(
+        "Webhook teslim edilemiyor",
+        "Webhook cannot deliver",
+        "[[webhooks]] ayarını, gizli değerini ve güvenlik duvarını denetleyin; Webhook'lar "
+        "sayfasında Test gönder.",
+        "Check [[webhooks]], its secret and the firewall; Send test on the Webhooks page.",
+    ),
     # Area R (ADR-0012): a scheduled usage report could not be made or e-mailed.
     "R20-report": RuleText(
         "Kullanım raporu gönderilemedi",
@@ -650,6 +658,18 @@ _STEPS: Final[dict[str, tuple[str, str]]] = {
         "2. Send a test e-mail: arcilogger-worker alerts test-email --to <address>.\n"
         "3. With strict outbound mode, check the firewall rule (Set-ArciFirewall.ps1).\n"
         "4. The next e-mail that reaches the recipients it names closes the alert by itself.",
+    ),
+    "R20-webhook": (
+        "1. Ayarlar → Webhook'lar sayfasında webhook'un son teslimlerine ve hatasına bakın.\n"
+        "2. arcilogger.toml içindeki [[webhooks]] kaydını ve gizli değeri denetleyin "
+        "(generic: webhook.<ad>.secret; teams ve slack: webhook.<ad>.url).\n"
+        "3. Sıkı giden mod açıksa güvenlik duvarı kuralını denetleyin (Set-ArciFirewall.ps1).\n"
+        "4. Test gönder ile deneyin; webhook'un bir sonraki başarılı gönderimi uyarıyı kapatır.",
+        "1. Look at the webhook's last deliveries and its error on Settings → Webhooks.\n"
+        "2. Check its [[webhooks]] entry in arcilogger.toml and its secret (generic: "
+        "webhook.<name>.secret; teams and slack: webhook.<name>.url).\n"
+        "3. With strict outbound mode, check the firewall rule (Set-ArciFirewall.ps1).\n"
+        "4. Try Send test; the webhook's next successful delivery closes the alert.",
     ),
     "R20-lease": (
         "1. Ayrıntılardaki nedeni okuyun; o nedene özgü ne yapılacağı orada yazılıdır.\n"

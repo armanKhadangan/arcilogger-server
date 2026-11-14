@@ -119,6 +119,7 @@ vermez.
 | `/system` | Sistem sayfası: kaynak kullanımı, disk tahmini, veritabanı boyutu, hizmetler, zamanlanmış görevler, saat; Veritabanı sayfası; Ayarlar → Yedekleme'deki yedek listesi | 5651 Temel |
 | `/activity` | Canlı Durum: `GET /activity/devices`, şu an kim veri gönderip alıyor (kişi bazında). `GET /activity/wan`, internet hattının hızı (SNMPv3 ile okunan WAN arayüz sayaçları; kişi verisi yok), kilitli değildir: temel üründür (5651 Temel) | Kullanım analizi |
 | `/archive-reloads` | Arşivden yeniden yükleme: veritabanı penceresinden eski günlerin mühürlü kasadan geri istenmesi ve ilerlemesi | 5651 Temel |
+| `/webhooks` | Webhook'lar: sunucuda (`[[webhooks]]`) ayarlanmış uyarı webhook'larının listesi, hazır olup olmadıkları ve teslimleri | 5651 Temel |
 | `/usage` | Kullanım sayfasının verileri, dışa aktarma, yeniden hesaplama | Kullanım analizi |
 | `/reports` | Zamanlanmış raporlar, çalıştırmalar, önizleme | Zamanlanmış kullanım raporları |
 | `/imports` | CSV içe aktarma ve şablonları | Toplu içe aktarma (CSV) |
@@ -145,6 +146,7 @@ uyarısı açmaz. Kapalı modülün verileri silinmez.
 | `alerts.system` | 5651 Temel | her zaman çalışır |
 | `rules.run` | Güvenlik kuralları | atlanır |
 | `alerts.notify` | 5651 Temel | her zaman çalışır |
+| `alerts.webhooks` | Güvenlik kuralları | atlanır |
 | `usage.requests` | Kullanım analizi | atlanır |
 | `usage.daily` | Kullanım analizi | atlanır |
 | `usage.today` | Kullanım analizi | atlanır |

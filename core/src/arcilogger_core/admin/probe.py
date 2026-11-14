@@ -47,7 +47,7 @@ from arcilogger_core.admin.contract import (
     ProbeInterface,
 )
 from arcilogger_core.clockcheck import ClockError, sntp_query
-from arcilogger_core.config import SmtpConfig
+from arcilogger_core.config import SmtpConfig, WebhookConfig
 from arcilogger_core.replica import probe as replica_probe
 from arcilogger_core.smbshare import ShareApi, connected
 from arcilogger_core.smtp import SmtpSender, SmtpSendError, trial_message
@@ -55,8 +55,11 @@ from arcilogger_core.snmp import PysnmpClient, SnmpClient, SnmpError, Target, li
 from arcilogger_core.timeutil import utc_now
 from arcilogger_core.tsa.base import TsaError
 from arcilogger_core.tsa.zamane import ZamaneCliProvider
+from arcilogger_core.webhook import Target as WebhookTarget
+from arcilogger_core.webhook import WebhookAlert, WebhookError, encode, payload
+from arcilogger_core.webhook import send as send_webhook
 
-ProbeKind = Literal["sntp", "credit", "smtp", "replica", "snmp", "backup_mirror"]
+ProbeKind = Literal["sntp", "credit", "smtp", "replica", "snmp", "backup_mirror", "webhook"]
 #: The failure code of each probe (contract 2.12).
 FAILURE_CODES: Final[Mapping[str, str]] = {
     "sntp": "ntp_unreachable",
@@ -65,6 +68,7 @@ FAILURE_CODES: Final[Mapping[str, str]] = {
     "replica": "replica_test_failed",
     "snmp": "snmp_timeout",
     "backup_mirror": "backup_mirror_test_failed",
+    "webhook": "webhook_test_failed",
 }
 #: The SNMP probe's failure codes: N4's reasons (Wave 5 §6 N5), each with TR/EN text.
 SNMP_CODES: Final[Mapping[str, str]] = {
@@ -84,6 +88,8 @@ TIMEOUTS: Final[Mapping[str, float]] = {
     "replica": 60,
     "snmp": 15,
     "backup_mirror": 60,
+    # ``[[webhooks]] timeout_seconds`` is at most 60.
+    "webhook": 70,
 }
 CHILD_MARGIN: Final = 10.0
 #: Bytes read from the child, characters kept of a message.
@@ -277,6 +283,49 @@ def probe_snmp(
     return ProbeResult(True, None, found, listed)
 
 
+#: The test notification of a webhook (Wave 6 contract §2.4.4).
+WEBHOOK_TEST_RULE: Final = "TEST"
+WEBHOOK_TEST_TITLES: Final = ("ARCILOGGER deneme bildirimi", "ARCILOGGER test notification")
+
+
+def probe_webhook(
+    params: Mapping[str, Any], secrets: Mapping[str, str], *, now: datetime | None = None
+) -> ProbeResult:
+    """The test notification ("Test gönder", §2.4.4) to one ``[[webhooks]]`` entry
+    (``params["webhook"]``), through ``params["https_proxy"]``: ``ok`` with the status code, or
+    ``webhook_test_failed`` with the error text of §2.4.2. ``secrets``: ``secret`` (the HMAC
+    secret of a ``generic`` webhook) or ``url`` (the URL of a ``teams`` or ``slack`` one)."""
+    webhook = WebhookConfig.model_validate(params["webhook"])
+    moment = now or utc_now()
+    web_url = str(params.get("web_url", "")).rstrip("/")
+    target = WebhookTarget(
+        url=webhook.url if webhook.format == "generic" else secrets.get("url", ""),
+        format=webhook.format,
+        secret=secrets.get("secret"),
+        timeout_seconds=webhook.timeout_seconds,
+        ca_file=webhook.ca_file,
+        https_proxy=str(params.get("https_proxy", "")),
+    )
+    test = WebhookAlert(
+        id=0,
+        rule=WEBHOOK_TEST_RULE,
+        severity="info",
+        state="open",
+        title_tr=WEBHOOK_TEST_TITLES[0],
+        title_en=WEBHOOK_TEST_TITLES[1],
+        time=moment,
+        count=1,
+        url=web_url,
+    )
+    version = str(params.get("version", ""))
+    document = payload(webhook.format, test, version=version, site=str(params.get("site", "")))
+    try:
+        status = send_webhook(target, encode(document), version=version, now=moment)
+    except WebhookError as exc:
+        return _failed("webhook", str(exc), secrets)
+    return ProbeResult(True, None, f"HTTP {status}")
+
+
 def run_probe(kind: str, params: Mapping[str, Any], secrets: Mapping[str, str]) -> ProbeResult:
     """One probe in this process (the child's work)."""
     if kind == "sntp":
@@ -291,6 +340,8 @@ def run_probe(kind: str, params: Mapping[str, Any], secrets: Mapping[str, str]) 
         return probe_replica(params, secrets, kind="backup_mirror")
     if kind == "snmp":
         return probe_snmp(params, secrets)
+    if kind == "webhook":
+        return probe_webhook(params, secrets)
     raise ValueError(f"unknown probe {kind!r}")
 
 

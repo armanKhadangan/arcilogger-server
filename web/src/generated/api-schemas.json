@@ -436,6 +436,12 @@
       "get",
       "patch",
       "post"
+    ],
+    "/api/v1/webhooks": [
+      "get"
+    ],
+    "/api/v1/webhooks/{name}/deliveries": [
+      "get"
     ]
   },
   "schemas": {
@@ -18391,6 +18397,261 @@
         "generated_at"
       ],
       "title": "WanRates",
+      "type": "object"
+    },
+    "WebhookCounts": {
+      "additionalProperties": false,
+      "properties": {
+        "failed": {
+          "title": "Failed",
+          "type": "integer"
+        },
+        "queued": {
+          "title": "Queued",
+          "type": "integer"
+        },
+        "sent": {
+          "title": "Sent",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "sent",
+        "failed",
+        "queued"
+      ],
+      "title": "WebhookCounts",
+      "type": "object"
+    },
+    "WebhookDeliveries": {
+      "additionalProperties": false,
+      "properties": {
+        "items": {
+          "items": {
+            "$ref": "#/components/schemas/WebhookDelivery"
+          },
+          "title": "Items",
+          "type": "array"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "items"
+      ],
+      "title": "WebhookDeliveries",
+      "type": "object"
+    },
+    "WebhookDelivery": {
+      "additionalProperties": false,
+      "properties": {
+        "alert_id": {
+          "title": "Alert Id",
+          "type": "integer"
+        },
+        "attempts": {
+          "title": "Attempts",
+          "type": "integer"
+        },
+        "created_at": {
+          "format": "date-time",
+          "title": "Created At",
+          "type": "string"
+        },
+        "last_error": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Last Error"
+        },
+        "next_attempt_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Next Attempt At"
+        },
+        "rule": {
+          "title": "Rule",
+          "type": "string"
+        },
+        "sent_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Sent At"
+        },
+        "severity": {
+          "title": "Severity",
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "queued",
+            "sent",
+            "failed"
+          ],
+          "title": "Status",
+          "type": "string"
+        }
+      },
+      "required": [
+        "alert_id",
+        "rule",
+        "severity",
+        "status",
+        "attempts",
+        "last_error",
+        "next_attempt_at",
+        "created_at",
+        "sent_at"
+      ],
+      "title": "WebhookDelivery",
+      "type": "object"
+    },
+    "WebhookLastDelivery": {
+      "additionalProperties": false,
+      "properties": {
+        "status": {
+          "enum": [
+            "queued",
+            "sent",
+            "failed"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "time": {
+          "format": "date-time",
+          "title": "Time",
+          "type": "string"
+        }
+      },
+      "required": [
+        "time",
+        "status"
+      ],
+      "title": "WebhookLastDelivery",
+      "type": "object"
+    },
+    "WebhookList": {
+      "additionalProperties": false,
+      "properties": {
+        "webhooks": {
+          "items": {
+            "$ref": "#/components/schemas/WebhookOut"
+          },
+          "title": "Webhooks",
+          "type": "array"
+        }
+      },
+      "required": [
+        "webhooks"
+      ],
+      "title": "WebhookList",
+      "type": "object"
+    },
+    "WebhookOut": {
+      "additionalProperties": false,
+      "properties": {
+        "counts_7d": {
+          "$ref": "#/components/schemas/WebhookCounts"
+        },
+        "enabled": {
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "format": {
+          "enum": [
+            "generic",
+            "teams",
+            "slack"
+          ],
+          "title": "Format",
+          "type": "string"
+        },
+        "host": {
+          "title": "Host",
+          "type": "string"
+        },
+        "last_delivery": {
+          "anyOf": [
+            {
+              "$ref": "#/components/schemas/WebhookLastDelivery"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "min_severity": {
+          "title": "Min Severity",
+          "type": "string"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "ready": {
+          "title": "Ready",
+          "type": "boolean"
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "enum": [
+                "disabled",
+                "secret_missing",
+                "url_missing"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Reason"
+        },
+        "rules": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Rules",
+          "type": "array"
+        }
+      },
+      "required": [
+        "name",
+        "format",
+        "host",
+        "min_severity",
+        "rules",
+        "enabled",
+        "ready",
+        "reason",
+        "last_delivery",
+        "counts_7d"
+      ],
+      "title": "WebhookOut",
       "type": "object"
     },
     "ZamaneBody": {

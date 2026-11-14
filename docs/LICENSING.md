@@ -118,6 +118,7 @@ licence state.
 | `/system` | System page: resource use, disk forecast, database size, services, scheduled tasks, clock; the Database page; the list of backups in Settings → Backup | 5651 Core |
 | `/activity` | Canlı Durum: `GET /activity/devices`, who is sending and receiving data now (per person). `GET /activity/wan`, the internet line's speed (the WAN interface counters read over SNMPv3; no person data), is not gated: base product (5651 Core) | Usage analytics |
 | `/archive-reloads` | Archive reload: days older than the database window asked back from the sealed vault, and their progress | 5651 Core |
+| `/webhooks` | Webhooks: the alert webhooks configured on the server (`[[webhooks]]`), whether they are ready and their deliveries | 5651 Core |
 | `/usage` | The data of the Kullanım page, exports, rebuilds | Usage analytics |
 | `/reports` | Scheduled reports, runs, preview | Scheduled usage reports |
 | `/imports` | CSV import and its templates | Bulk import (CSV) |
@@ -144,6 +145,7 @@ data of a module that is off is not deleted.
 | `alerts.system` | 5651 Core | always runs |
 | `rules.run` | Security rules | skipped |
 | `alerts.notify` | 5651 Core | always runs |
+| `alerts.webhooks` | Security rules | skipped |
 | `usage.requests` | Usage analytics | skipped |
 | `usage.daily` | Usage analytics | skipped |
 | `usage.today` | Usage analytics | skipped |
