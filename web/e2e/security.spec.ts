@@ -26,7 +26,11 @@ test.describe('Güvenlik', () => {
     await expect(summary).toContainText('Açık3');
     await expect(summary).toContainText('İnceleniyor1');
     await expect(summary).toContainText('Ortalama kapanma süresi (30 gün)');
-    await expect(page.getByTestId('rule-editor-note')).toContainText('Kural düzenleyici');
+    await expect(
+      page
+        .getByTestId('rule-editor-link')
+        .getByRole('link', { name: 'Güvenlik kurallarını düzenle' }),
+    ).toHaveAttribute('href', '/settings/rules');
 
     const table = page.getByRole('table', { name: 'Güvenlik uyarıları' });
     await expect(table.getByRole('row')).toHaveCount(8);

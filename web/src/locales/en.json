@@ -396,8 +396,6 @@
   "settings": {
     "description": "System settings and user management.",
     "usersHint": "Accounts, roles, password and two-factor resets.",
-    "laterTitle": "In later steps",
-    "laterHint": "These sections come with the next steps of browser administration.",
     "sections": {
       "general": "General",
       "sources": "Sources",
@@ -2637,7 +2635,6 @@
   "security": {
     "description": "Rule-based security alerts: filter, investigate, add notes and close them.",
     "readOnly": "You can view the alerts; changing their state and adding notes needs the alert management permission.",
-    "ruleEditorLater": "The rule editor (YAML, test on the last 24 h) comes in a later version. For now the thresholds are database settings (alerts.*, ALERTS.md).",
     "caption": "Security alerts",
     "empty": "No security alerts yet.",
     "emptyHint": "Alerts appear here when a rule finds a problem.",
