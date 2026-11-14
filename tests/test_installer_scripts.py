@@ -2235,6 +2235,8 @@ def support(engine: str, tmp_path: Path) -> dict[str, Any]:
         str(output),
     )
     assert result.returncode == 0, result.stdout + result.stderr
+    # pwsh has (rarely, on the Linux runner) ended with 0 and no file: show what it printed.
+    assert output.exists(), result.stdout + result.stderr
     report: dict[str, Any] = read_json(output)
     return report
 
@@ -7352,6 +7354,8 @@ def simulate(
         env_extra=env_extra,
     )
     assert result.returncode == 0, result.stdout + result.stderr
+    # pwsh has (rarely, on the Linux runner) ended with 0 and no file: show what it printed.
+    assert output.exists(), result.stdout + result.stderr
     report: dict[str, Any] = read_json(output)
     assert report["error"] is None, report["error"]
     report["stdout"] = result.stdout

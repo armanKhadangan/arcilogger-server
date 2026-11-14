@@ -143,6 +143,7 @@ data of a module that is off is not deleted.
 | `alerts.import` | 5651 Core | always runs |
 | `alerts.r15` | 5651 Core | always runs |
 | `alerts.system` | 5651 Core | always runs |
+| `rules.run` | Security rules | skipped |
 | `alerts.notify` | 5651 Core | always runs |
 | `alerts.webhooks` | Security rules | skipped |
 | `usage.requests` | Usage analytics | skipped |

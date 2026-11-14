@@ -33,6 +33,7 @@ timeline, the 5651 attribution repair), ``alerts …`` and ``version`` work in e
 from __future__ import annotations
 
 import argparse
+import gc
 import logging
 import signal
 import sys
@@ -62,7 +63,7 @@ from arcilogger_db.models import JobRun
 from arcilogger_worker import __version__
 from arcilogger_worker.alerts.commands import list_alerts, send_test_email
 from arcilogger_worker.correlation.rebuild import rebuild_lease_day
-from arcilogger_worker.service import Worker, default_jobs
+from arcilogger_worker.service import Worker, default_jobs, freeze_loaded
 from arcilogger_worker.usage.jobs import rebuild_range
 
 EXIT_OK = 0
@@ -195,9 +196,11 @@ def run(config_path: Path | None, *, stop: threading.Event | None = None) -> int
         config=config,
         config_path=fixed_path,  # live reload, the admin folder
     )
+    freeze_loaded()
     try:
         worker.run(stop)
     finally:
+        gc.unfreeze()
         engine.dispose()
     return EXIT_OK
 

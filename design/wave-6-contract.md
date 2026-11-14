@@ -726,3 +726,23 @@ to the normal site: `port-scan` (R01), `external-scan` (R02), `brute-force` (R03
 - **W6-A-4: `ruff format` and this contract.** ruff 0.17 formats the Python block of §2.1.2;
   `ruff format --check .` failed on `wave-6` because of it. The day-1 pull request applies the
   formatter's whitespace-only change to that block; no word of the contract changed.
+
+### W6-A (engine pull request, #243)
+
+- **W6-A-5: a slice is at most the rule's window long.** §2.1.2 has a rule count the window
+  that ends with its slice (`(end − window_seconds, end]`), and §2.1.3 cuts the backlog into
+  slices of up to `rules.max_slice_seconds` (600). With a window shorter than the slice, a
+  rule would see only the last window of each slice: R01's 60-s window would miss a scan in
+  the first nine minutes of a 600-s slice, and the 24-h dry run in 600-s slices would answer
+  differently from the minute-by-minute live run. The engine (and the dry run that follows)
+  therefore cut slices of `min(rules.max_slice_seconds, window_seconds)` (`engine.step`), so
+  every moment of a backlog falls into the window of some slice end. In steady state (a run a
+  minute) the slices are a minute long anyway. `test_a_backlog_puts_every_moment_into_a_window`
+  pins it.
+
+### W6-C (#245): R11 matches the device's insert time, not `first_seen`
+
+- **Contract:** §2.2.2 R11, "a `devices` row whose `first_seen` is in the slice".
+- **Implemented:** a `devices` row whose `created_at` (the server's insert time) is in the slice; `first_seen` is shown in the alert's values.
+- **Why:** `first_seen` is the **device time** of the first DHCP or ARP sighting. The lease jobs write the row later, after their own lag. A device whose row is inserted after `rules.run` moved its watermark past that `first_seen` would never alert. `created_at` is written once, at the insert, by the server's clock. That fits D8 (receive time, not device time) and D12 (devices that existed when the rule started never alert, with no extra seeding).
+- **Limit:** a lease-job transaction that runs longer than `rules.lag_seconds` (120 s) can commit rows with a `created_at` behind the watermark. The default lag covers the normal job; a full rebuild of old days creates no new devices worth an alert.

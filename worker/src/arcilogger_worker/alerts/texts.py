@@ -30,6 +30,7 @@ from arcilogger_core.admin.messages import MESSAGES as ADMIN_MESSAGES
 from arcilogger_core.admin.messages import WARNINGS as ADMIN_WARNINGS
 from arcilogger_core.fmt import format_date, format_datetime, format_number
 from arcilogger_core.seal import CONFIG_CAUSES
+from arcilogger_worker.rules.texts import TEXTS as SECURITY_TEXTS
 
 SEVERITY_LABELS: Final[Mapping[str, tuple[str, str]]] = {
     "info": ("Bilgi", "Info"),
@@ -161,6 +162,12 @@ RULES: Final[Mapping[str, RuleText]] = {
         "Background job failing repeatedly",
         "logs\\worker.log ve state\\worker-status.json dosyalarına bakın.",
         "Look at logs\\worker.log and state\\worker-status.json.",
+    ),
+    "R20-rules": RuleText(
+        "Güvenlik kuralı çalışamıyor",
+        "Security rule cannot run",
+        "Ayarlar → Güvenlik kuralları sayfasında kuralın son hatasına ve logs\\worker.log'a bakın.",
+        "See the rule's last error on Settings → Güvenlik kuralları and logs\\worker.log.",
     ),
     "R20-backup": RuleText(
         "Veritabanı yedeği sorunu",
@@ -339,7 +346,15 @@ UNKNOWN_RULE: Final = RuleText(
 
 
 def rule_text(rule: str) -> RuleText:
-    return RULES.get(rule, UNKNOWN_RULE)
+    """The catalogue's entry of ``rule``; a security rule's (R01-R19, Wave 6) comes from its own
+    texts (:mod:`arcilogger_worker.rules.texts`)."""
+    known = RULES.get(rule)
+    if known is not None:
+        return known
+    security = SECURITY_TEXTS.get(rule)
+    if security is not None:
+        return RuleText(security.name_tr, security.name_en, security.advice_tr, security.advice_en)
+    return UNKNOWN_RULE
 
 
 # -- runbooks (the Security page's alert detail; docs/UYARILAR.md "Ne yapılmalı") ---------------
@@ -495,6 +510,18 @@ _STEPS: Final[dict[str, tuple[str, str]]] = {
         "1. See in the details which job fails.\n"
         "2. Look at D:\\ARCILOGGER\\logs\\worker.log and state\\worker-status.json.\n"
         "3. The next successful run of the job closes the alert by itself.",
+    ),
+    "R20-rules": (
+        "1. Hangi kuralın çalışamadığını ayrıntılarda görün; Ayarlar → Güvenlik kuralları "
+        "sayfası kuralın son hatasını gösterir.\n"
+        "2. D:\\ARCILOGGER\\logs\\worker.log dosyasına bakın; zaman aşımında kuralın "
+        "listelerini ya da penceresini küçültün.\n"
+        "3. Kuralın bir sonraki başarılı çalışmasıyla uyarı kendiliğinden kapanır.",
+        "1. See in the details which rule cannot run; Settings → Güvenlik kuralları shows the "
+        "rule's last error.\n"
+        "2. Look at D:\\ARCILOGGER\\logs\\worker.log; on a timeout, shorten the rule's lists or "
+        "window.\n"
+        "3. The next successful run of the rule closes the alert by itself.",
     ),
     "R20-backup": (
         "1. state\\backup\\last.json ve logs\\backup.log dosyalarına bakın.\n"
@@ -874,8 +901,15 @@ UNKNOWN_RUNBOOK: Final = (
 
 
 def runbook(rule: str) -> tuple[str, str]:
-    """What to do about an alert of ``rule``, Turkish and English (step by step)."""
-    return RUNBOOKS.get(rule, UNKNOWN_RUNBOOK)
+    """What to do about an alert of ``rule``, Turkish and English (step by step); a security
+    rule's advice ("Ne yapılmalı") for R01-R19."""
+    known = RUNBOOKS.get(rule)
+    if known is not None:
+        return known
+    security = SECURITY_TEXTS.get(rule)
+    if security is not None:
+        return security.advice_tr, security.advice_en
+    return UNKNOWN_RUNBOOK
 
 
 # -- whitelisted facts ----------------------------------------------------------------------------
