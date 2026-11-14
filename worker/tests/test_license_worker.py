@@ -60,6 +60,7 @@ GATED = {
     "usage.today": "usage_analytics",
     "usage.reattribute": "usage_analytics",
     "reports.run_due": "usage_reports",
+    "alerts.webhooks": "security_rules",
 }
 
 
