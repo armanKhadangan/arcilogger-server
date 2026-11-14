@@ -39,7 +39,7 @@ import { errorMessage, isApiError } from '@/lib/api';
 import { useAddAlertNote, useAlert, useChangeAlertState } from '@/lib/api-hooks';
 import type { AlertDetail, AlertEvent, AlertState } from '@/lib/api-types';
 import { visibleText } from '@/lib/display';
-import { formatDateTime, formatNumber } from '@/lib/format';
+import { formatDateTime } from '@/lib/format';
 import { currentLang } from '@/lib/i18n';
 import { isReauthCancelled, useReauth } from '@/lib/reauth';
 import { Facts } from '@/pages/devices/device-parts';
@@ -659,12 +659,7 @@ export function AlertSheet({
                   <Tabs key={alert.id} defaultValue="details">
                     <TabsList aria-label={t('security.tabs.label')}>
                       <TabsTrigger value="details">{t('security.tabs.details')}</TabsTrigger>
-                      <TabsTrigger value="evidence">
-                        {t('security.tabs.evidence', {
-                          count: evidenceTotal,
-                          formatted: formatNumber(evidenceTotal, 0, lang),
-                        })}
-                      </TabsTrigger>
+                      <TabsTrigger value="evidence">{t('security.tabs.evidence')}</TabsTrigger>
                     </TabsList>
                     <TabsContent value="details" className="flex flex-col gap-5 pt-4">
                       {details}

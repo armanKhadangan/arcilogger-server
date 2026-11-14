@@ -23,15 +23,14 @@
     "tabs": {
       "label": "Parts of the alert",
       "details": "Details",
-      "evidence_one": "Evidence ({{formatted}})",
-      "evidence_other": "Evidence ({{formatted}})"
+      "evidence": "Evidence"
     },
     "evidence": {
       "caption": "Records that caused the alert",
       "empty": "No evidence rows are kept for this alert.",
-      "all_one": "{{count}} record caused the alert.",
-      "all_other": "{{count}} records caused the alert.",
-      "kept": "The first {{shown}} of {{total}} records are kept as evidence.",
+      "all_one": "{{count}} record is kept as evidence.",
+      "all_other": "{{count}} records are kept as evidence.",
+      "kept": "Most in one window: {{total}} records; the first {{shown}} are kept as evidence.",
       "columns": {
         "time": "Device time",
         "table": "Record",

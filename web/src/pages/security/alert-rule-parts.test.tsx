@@ -87,7 +87,7 @@ describe('Güvenlik — an alert of a rule (Wave 6 §2.6.2)', () => {
     serve('hr', { grant: ['alerts.read'] });
     renderApp('/security?alert=9001');
     const sheet = await screen.findByRole('dialog');
-    await user.click(await within(sheet).findByRole('tab', { name: 'Kanıt (47)' }));
+    await user.click(await within(sheet).findByRole('tab', { name: 'Kanıt' }));
     const evidence = await within(sheet).findByTestId('alert-evidence');
     expect(within(evidence).getAllByTestId('evidence-row')).toHaveLength(3);
     expect(within(evidence).queryByRole('button', { name: /Ham satırı aç/ })).toBeNull();

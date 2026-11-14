@@ -23,15 +23,14 @@
     "tabs": {
       "label": "Uyarının bölümleri",
       "details": "Ayrıntılar",
-      "evidence_one": "Kanıt ({{formatted}})",
-      "evidence_other": "Kanıt ({{formatted}})"
+      "evidence": "Kanıt"
     },
     "evidence": {
       "caption": "Uyarıya yol açan kayıtlar",
       "empty": "Bu uyarı için saklanan kanıt satırı yok.",
-      "all_one": "Uyarıya yol açan {{count}} kayıt.",
-      "all_other": "Uyarıya yol açan {{count}} kayıt.",
-      "kept": "{{total}} kaydın ilk {{shown}} tanesi kanıt olarak saklanır.",
+      "all_one": "Kanıt olarak saklanan {{count}} kayıt.",
+      "all_other": "Kanıt olarak saklanan {{count}} kayıt.",
+      "kept": "Bir pencerede en çok {{total}} kayıt; ilk {{shown}} tanesi kanıt olarak saklanır.",
       "columns": {
         "time": "Cihaz zamanı",
         "table": "Kayıt",

@@ -35,9 +35,11 @@ test.describe('Güvenlik — Wave 6 additions', () => {
   test('evidence: the kept rows and the raw line of one', async ({ page }) => {
     await mockApi(page, { signedInAs: 'tolga', alerts: { rules: true } });
     const sheet = await openAlert(page, 9001);
-    await sheet.getByRole('tab', { name: 'Kanıt (47)' }).click();
+    await sheet.getByRole('tab', { name: 'Kanıt' }).click();
     const evidence = sheet.getByTestId('alert-evidence');
-    await expect(evidence).toContainText('47 kaydın ilk 3 tanesi kanıt olarak saklanır.');
+    await expect(evidence).toContainText(
+      'Bir pencerede en çok 47 kayıt; ilk 3 tanesi kanıt olarak saklanır.',
+    );
     await expect(evidence.getByTestId('evidence-row')).toHaveCount(3);
     await expect(evidence.getByTestId('evidence-row').first()).toContainText(
       'FortiGate oturum kaydı',
@@ -107,9 +109,9 @@ test.describe('Güvenlik — Wave 6 additions', () => {
     await mockApi(page, { signedInAs: 'tolga', alerts: { rules: true } });
     const sheet = await openAlert(page, 9001);
     await expect(sheet.getByLabel('Who is investigating the alert')).toHaveText('Not assigned');
-    await sheet.getByRole('tab', { name: 'Evidence (47)' }).click();
+    await sheet.getByRole('tab', { name: 'Evidence' }).click();
     await expect(sheet.getByTestId('alert-evidence')).toContainText(
-      'The first 3 of 47 records are kept as evidence.',
+      'Most in one window: 47 records; the first 3 are kept as evidence.',
     );
   });
 
@@ -123,7 +125,7 @@ test.describe('Güvenlik — Wave 6 additions', () => {
       await expect(page.getByTestId('security-trends')).toBeVisible();
       await expectNoA11yViolations(page);
       const sheet = await openAlert(page, 9001);
-      await sheet.getByRole('tab', { name: 'Kanıt (47)' }).click();
+      await sheet.getByRole('tab', { name: 'Kanıt' }).click();
       await expect(sheet.getByTestId('evidence-row')).toHaveCount(3);
       await expectNoA11yViolations(page);
     });

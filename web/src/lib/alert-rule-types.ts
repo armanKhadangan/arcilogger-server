@@ -27,7 +27,10 @@ export interface AlertAssignee {
 /** The fields each alert of `GET /alerts` and `GET /alerts/{id}` gains. */
 export interface AlertAdditions {
   assignee?: AlertAssignee | null;
-  /** Rows behind the alert; at most `rules.evidence_max` of them are kept as evidence. */
+  /**
+   * The most rows any one window of the alert held (C1: the largest window count, not a sum);
+   * at most `rules.evidence_max` rows are kept as evidence.
+   */
   evidence_total?: number;
 }
 
