@@ -208,8 +208,10 @@ def apply_hit(
         details = dict(current.details or {})
         details.update(
             title_en=title_en,
-            count=int(details.get("count") or 0) + hit.count,
-            evidence_total=int(details.get("evidence_total") or 0) + hit.count,
+            # The largest window count, never a sum: consecutive windows overlap, and adding
+            # them up would count the same rows again on every run (manager, #262).
+            count=max(int(details.get("count") or 0), hit.count),
+            evidence_total=max(int(details.get("evidence_total") or 0), hit.count),
             values=values,
             last_time=max(hit.time.isoformat(), str(details.get("last_time") or "")),
         )
