@@ -136,6 +136,7 @@ from arcilogger_worker.db_window import job_db_window
 from arcilogger_worker.evidence_jobs import import_job_events, purge_evidence
 from arcilogger_worker.licensing import StatusCache, job_license_check, module_gate
 from arcilogger_worker.reports.runner import purge_reports, resolve_while_unlicensed, run_due
+from arcilogger_worker.rules.engine import run_rules
 from arcilogger_worker.search_jobs import backfill_counts
 from arcilogger_worker.snmp.job import SNMP_POLL_EVERY, job_snmp_idle, job_snmp_poll
 from arcilogger_worker.system_jobs import job_system_sample
@@ -257,6 +258,9 @@ SEARCH_COUNTS_EVERY: Final = timedelta(minutes=10)
 #: The modules of the paid jobs (licensing contract 1.4).
 USAGE_MODULE: Final = "usage_analytics"
 REPORTS_MODULE: Final = "usage_reports"
+SECURITY_RULES_MODULE: Final = "security_rules"
+#: ``rules.run`` evaluates the security rules every minute (Wave 6 contract §2.1.3).
+RULES_EVERY: Final = timedelta(minutes=1)
 
 
 # -- the jobs -------------------------------------------------------------------------------------
@@ -362,6 +366,14 @@ def job_alerts_system(ctx: JobContext) -> Mapping[str, Any]:
     ).details()
 
 
+def job_rules_run(ctx: JobContext) -> Mapping[str, Any]:
+    """The security rules R01-R19 on the logs received since their watermarks."""
+    details = run_rules(ctx.sessions, now=ctx.now).details()
+    if details.pop("_skipped"):
+        details[SKIPPED] = True
+    return details
+
+
 def job_alerts_notify(ctx: JobContext) -> Mapping[str, Any]:
     """Alert e-mail (skipped while ``[smtp] enabled`` is false)."""
     return run_notify(ctx.sessions, job_config(ctx), now=ctx.now).details()
@@ -443,6 +455,8 @@ def default_jobs(interval_seconds: int) -> tuple[Job, ...]:
         Job("alerts.import", job_alerts_import, every=ALERTS_EVERY),
         Job("alerts.r15", job_alerts_r15, every=ALERTS_EVERY),
         Job("alerts.system", job_alerts_system, every=ALERTS_SYSTEM_EVERY),
+        # The security rules (Wave 6 §2.1.3) before the e-mail, which sends what they raised.
+        Job("rules.run", job_rules_run, every=RULES_EVERY, module=SECURITY_RULES_MODULE),
         Job("alerts.notify", job_alerts_notify, every=ALERTS_EVERY),
         # Usage (spec 10.4) after the lease timeline: it reads who held an address when.
         Job("usage.requests", job_usage_requests, every=USAGE_REQUESTS_EVERY, module=USAGE_MODULE),

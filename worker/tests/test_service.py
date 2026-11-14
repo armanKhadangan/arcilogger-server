@@ -276,6 +276,7 @@ def test_default_jobs_run_against_the_database(
         ("alerts.import", "ok"),
         ("alerts.r15", "ok"),
         ("alerts.system", "ok"),
+        ("rules.run", "ok"),  # the registered rules start at the horizon (D12)
         ("alerts.notify", "skipped"),  # [smtp] enabled = false by default
         ("usage.requests", "skipped"),  # no rebuild request
         ("usage.daily", "ok"),
@@ -300,6 +301,7 @@ def test_default_jobs_run_against_the_database(
         ("alerts.import", "ok"),
         ("alerts.r15", "ok"),
         ("alerts.system", "ok"),
+        ("rules.run", "ok"),
         ("alerts.notify", "skipped"),
         ("usage.requests", "skipped"),
         ("usage.today", "ok"),

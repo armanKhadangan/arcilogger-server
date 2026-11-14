@@ -416,6 +416,7 @@ Her gün:
   | `R20-disk` | Veri ya da sistem diski %80'den fazla dolu (`alerts.disk_used_percent`) |
   | `R20-parse` | Bir kaynağın son bir saatteki satırlarının %1'inden fazlası ayrıştırılamadı |
   | `R20-job` | Bir worker işi art arda 3 kez başarısız (`logs\worker.log`) |
+  | `R20-rules` | Bir güvenlik kuralı art arda 3 kez çalışamadı (`rules.failures_alert`; Ayarlar → Güvenlik kuralları, `logs\worker.log`) |
   | `R20-backup` | Veritabanı yedeği başarısız, 36 saatten eski ya da kurulumdan 48 saat sonra hâlâ yok |
   | `R20-email` | Uyarı e-postası gönderilemedi (`[smtp]`, `smtp.password`, güvenlik duvarı); kendisi e-postayla gitmez |
   | `R20-report` | Zamanlanmış bir kullanım raporu üretilemedi ya da bir alıcıya gönderilemedi (Raporlar sayfasındaki çalıştırma geçmişi, `[smtp]`; bölüm 14 ve 15). Zamanlanmış kullanım raporları modülü lisansta kapalıyken açılmaz; modül kapanınca kendiliğinden çözülür |
