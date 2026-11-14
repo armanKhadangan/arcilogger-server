@@ -662,3 +662,38 @@ CASES.extend(
         if _NETWORK_MAIN.get(case.rule) == case.name
     ]
 )
+
+# -------------------------------------------------------------------------------------------------
+# W6-D and W6-E — cooldown cases (one per rule, issues #246 and #247): a positive case of the
+# rule, with a closed alert of each expected key ten minutes before the slice. Every one of these
+# rules has a cooldown of an hour or more, so the hits are counted on that alert's
+# ``after_close`` and no alert opens.
+# -------------------------------------------------------------------------------------------------
+
+
+def _in_cooldown(rule: str, name: str) -> RuleCase:
+    case = next(case for case in CASES if case.rule == rule and case.name == name)
+    return RuleCase(
+        case.rule,
+        f"{case.name}-in-cooldown",
+        case.rows,
+        case.expected,
+        overrides=case.overrides,
+        settings=case.settings,
+        slice_seconds=case.slice_seconds,
+        closed_before=timedelta(minutes=10),
+    )
+
+
+CASES.extend(
+    [
+        _in_cooldown("R05", "high-severity-each"),
+        _in_cooldown("R06", "botnet"),
+        _in_cooldown("R07", "malware"),
+        _in_cooldown("R17", "cpu-sustained"),
+        _in_cooldown("R18", "mikrotik-pool-empty"),
+        _in_cooldown("R09", "blocked-20"),
+        _in_cooldown("R13", "sent-1100-mib"),
+        _in_cooldown("R14", "night-10-mib"),
+    ]
+)
