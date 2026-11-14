@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import ipaddress
 import os
+import re
 import sys
 import tomllib
 import unicodedata
@@ -566,6 +567,104 @@ class SmtpConfig(_Model):
         return self
 
 
+#: The alert severities, lowest first (``arcilogger_db.models.ALERT_SEVERITIES``; this package
+#: does not import the database one).
+WebhookSeverity = Literal["info", "low", "medium", "high", "critical"]
+#: Most webhooks of one server (Wave 6 contract §2.4.1).
+WEBHOOK_MAX = 10
+#: Lengths of a ``generic`` webhook's HMAC secret (``webhook.<name>.secret``).
+WEBHOOK_SECRET_LENGTHS = range(32, 257)
+_WEBHOOK_NAME = r"^[a-z0-9-]{1,32}$"
+#: A rule id as alerts carry it: ``R01`` … ``R19``, ``R15``, ``R20-email``, ``R20-webhook`` …
+_RULE_ID = r"^R[0-9]{2}(-[a-z0-9-]{1,32})?$"
+
+
+def webhook_url_problem(url: str) -> str | None:
+    """Why ``url`` cannot be a webhook's target, or ``None`` (contract §2.4.1): ``https://``
+    only, no user name or password in it, and not a loopback address. The text never repeats
+    the URL: its path or query may be the target's only secret (Teams, Slack)."""
+    parts = urlsplit(url)
+    try:
+        _ = parts.port  # raises for a port that is not a number from 1 to 65535
+    except ValueError:
+        return "the port is not a number from 1 to 65535"
+    if parts.scheme != "https":
+        return "only https:// is allowed"
+    if not parts.hostname:
+        return "the URL names no host"
+    if parts.username is not None or parts.password is not None:
+        return "the URL must not contain a user name or password"
+    try:
+        address = ipaddress.ip_address(parts.hostname)
+    except ValueError:
+        return None
+    mapped = getattr(address, "ipv4_mapped", None)
+    if address.is_loopback or (mapped is not None and mapped.is_loopback):
+        return "a loopback address is not a webhook target"
+    return None
+
+
+class WebhookConfig(_Model):
+    """One target of the alert webhooks (``[[webhooks]]``; worker job ``alerts.webhooks``,
+    Wave 6 contract §2.4), set **on the server only** (decision D4).
+
+    ``generic`` posts the alert signed with HMAC-SHA256; its secret lives in the encrypted
+    secret store under :attr:`secret_name` (32-256 characters). For ``teams`` and ``slack`` the
+    URL itself is the secret: it is stored under :attr:`url_name` and ``url`` stays empty here.
+    The server certificate is always verified (the system trust store, or ``ca_file``); there
+    is no switch to turn that off.
+    """
+
+    name: str = Field(pattern=_WEBHOOK_NAME)
+    url: str = Field(default="", max_length=2048)
+    format: Literal["generic", "teams", "slack"] = "generic"
+    min_severity: WebhookSeverity = "high"
+    #: Empty: every rule (R15 and R20 included); else only the listed rule ids.
+    rules: tuple[str, ...] = ()
+    enabled: bool = True
+    timeout_seconds: int = Field(default=10, ge=1, le=60)
+    #: PEM file with the certificate(s) to trust instead of the system store (a company CA).
+    ca_file: Path | None = None
+
+    @field_validator("ca_file", mode="before")
+    @classmethod
+    def _no_ca_file(cls, value: Any) -> Any:
+        return None if value == "" else value
+
+    @field_validator("rules")
+    @classmethod
+    def _rule_ids(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        if any(not re.fullmatch(_RULE_ID, rule) for rule in value):
+            raise ValueError("webhook rules must be rule ids such as R01 or R20-email")
+        if len(set(value)) != len(value):
+            raise ValueError("webhook rules must not repeat a rule id")
+        return value
+
+    @model_validator(mode="after")
+    def _target(self) -> WebhookConfig:
+        if self.format != "generic":
+            if self.url:
+                raise ValueError(
+                    f"the URL of a {self.format} webhook is a secret: store it with "
+                    f"arcilogger-core secret set {self.url_name} and leave url empty"
+                )
+            return self
+        problem = webhook_url_problem(self.url) if self.url else "url is required"
+        if problem is not None:
+            raise ValueError(f"webhooks.{self.name}.url: {problem}")
+        return self
+
+    @property
+    def secret_name(self) -> str:
+        """The secret store name of a ``generic`` webhook's HMAC secret."""
+        return f"webhook.{self.name}.secret"
+
+    @property
+    def url_name(self) -> str:
+        """The secret store name of a ``teams`` or ``slack`` webhook's URL."""
+        return f"webhook.{self.name}.url"
+
+
 class Config(_Model):
     #: The organisation that runs ARCILOGGER, shown in reports, e-mails, evidence packages and
     #: the web. Required for production (the installer asks for it, ``-SiteName``) but empty by
@@ -591,6 +690,7 @@ class Config(_Model):
     worker: WorkerConfig = WorkerConfig()
     backup: BackupConfig = BackupConfig()
     smtp: SmtpConfig = SmtpConfig()
+    webhooks: tuple[WebhookConfig, ...] = ()
 
     @field_validator("site_name")
     @classmethod
@@ -627,6 +727,15 @@ class Config(_Model):
             raise ValueError("source addresses must be unique")
         if any(name.startswith("unknown-") for name in names):
             raise ValueError("source names starting with 'unknown-' are reserved")
+        return self
+
+    @model_validator(mode="after")
+    def _webhooks(self) -> Config:
+        names = [webhook.name for webhook in self.webhooks]
+        if len(set(names)) != len(names):
+            raise ValueError("webhook names must be unique")
+        if len(names) > WEBHOOK_MAX:
+            raise ValueError(f"at most {WEBHOOK_MAX} webhooks")
         return self
 
     def source_for(self, address: str) -> SourceConfig | None:
