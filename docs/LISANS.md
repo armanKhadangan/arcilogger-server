@@ -144,6 +144,7 @@ uyarısı açmaz. Kapalı modülün verileri silinmez.
 | `alerts.r15` | 5651 Temel | her zaman çalışır |
 | `alerts.system` | 5651 Temel | her zaman çalışır |
 | `alerts.notify` | 5651 Temel | her zaman çalışır |
+| `alerts.webhooks` | Güvenlik kuralları | atlanır |
 | `usage.requests` | Kullanım analizi | atlanır |
 | `usage.daily` | Kullanım analizi | atlanır |
 | `usage.today` | Kullanım analizi | atlanır |

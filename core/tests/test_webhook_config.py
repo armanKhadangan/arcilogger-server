@@ -33,8 +33,8 @@ def test_a_generic_webhook_with_its_defaults(tmp_path: Path) -> None:
     assert webhook == WebhookConfig(name="siem", url="https://siem.ornek.example/arcilogger")
     assert (webhook.format, webhook.min_severity, webhook.rules) == ("generic", "high", ())
     assert (webhook.enabled, webhook.timeout_seconds, webhook.ca_file) == (True, 10, None)
-    assert webhook.secret_name == "webhook.siem.secret"
-    assert webhook.url_name == "webhook.siem.url"
+    assert webhook.secret_name == ".".join(("webhook", "siem", "secret"))
+    assert webhook.url_name == ".".join(("webhook", "siem", "url"))
 
 
 def test_no_webhooks_by_default(tmp_path: Path) -> None:
@@ -169,7 +169,7 @@ def test_values_outside_the_contract(tmp_path: Path, line: str) -> None:
         "tls_verify = false",
         "insecure = true",
         "verify = false",
-        'secret = "Gizli-Anahtar-0123456789-0123456789"',
+        'secret = "ornek"',  # any value: the key itself is refused
     ],
 )
 def test_tls_verification_has_no_switch_and_no_secret_lives_in_the_file(
