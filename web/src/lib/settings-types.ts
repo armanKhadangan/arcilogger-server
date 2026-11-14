@@ -897,8 +897,19 @@ export interface SettingGroup {
   settings: SettingOut[];
 }
 
+/** A setting another page edits (the rule editor's `rules.*`): not shown on the generic page. */
+export interface OtherSetting {
+  key: string;
+  value: SettingValue;
+  is_default: boolean;
+  updated_by: string | null;
+  updated_at: DateTimeString | null;
+}
+
 export interface SettingsOut {
   groups: SettingGroup[];
+  /** The settings other pages edit (Wave 6: the security rules), by key. */
+  elsewhere?: OtherSetting[];
 }
 
 export interface SettingChange {

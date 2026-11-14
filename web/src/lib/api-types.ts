@@ -899,6 +899,15 @@ export interface AlertOut {
   /** Closed by the system because the problem went away. */
   auto_resolved: boolean;
   notes_count: number;
+  /** The user the alert is given to (Wave 6), or `null`. */
+  assignee: AssigneeOut | null;
+  /** A security rule's alert: the rows behind it; `null` for other alerts. */
+  evidence_total: number | null;
+}
+
+export interface AssigneeOut {
+  id: number;
+  username: string;
 }
 
 /**
@@ -908,7 +917,8 @@ export interface AlertOut {
  */
 export interface AlertEvent {
   id: number;
-  kind: 'state' | 'note';
+  /** `assign`: `text` is the new assignee's user name, `null` for nobody. */
+  kind: 'state' | 'note' | 'assign';
   from_state: AlertState | null;
   to_state: AlertState | null;
   text: string | null;
@@ -929,6 +939,8 @@ export interface AlertDeliveryOut {
 export interface AlertDetail extends AlertOut {
   /** The detector's facts, sanitised by the API (no secrets). */
   details: Record<string, unknown>;
+  /** A person-level rule's person, only for `usage.person` (the API audits the view). */
+  person: AlertPersonOut | null;
   /** Oldest first. */
   events: AlertEvent[];
   runbook_tr: string;
@@ -973,6 +985,67 @@ export interface AlertSummary {
   latest: AlertOut[];
   /** Over the alerts closed in the last 30 days; `null` when none was closed. */
   mean_time_to_close_seconds_30d: number | null;
+  /** Alerts per site day of the last 30 days, per severity, oldest first. */
+  by_day: DayCounts[];
+  /** The rules and the keys with the most alerts of the last 7 days (≤ 10 each). */
+  top_rules: RuleCount[];
+  top_keys: KeyCount[];
+}
+
+export interface DayCounts {
+  day: DateString;
+  critical: number;
+  high: number;
+  medium: number;
+  low: number;
+  info: number;
+}
+
+export interface RuleCount {
+  rule: string;
+  count: number;
+}
+
+export interface KeyCount {
+  rule: string;
+  /** The alert's dedup key, e.g. `R01:172.20.41.17`. */
+  key: string;
+  count: number;
+}
+
+export interface AlertPersonOut {
+  id: number;
+  name: string;
+}
+
+/** `POST /alerts/{id}/assign`: `null` gives the alert to nobody. */
+export interface AlertAssignRequest {
+  user_id: number | null;
+}
+
+/** What `GET /raw` opens for an evidence row (with its own permission and audit). */
+export interface AlertEvidenceRaw {
+  source: string;
+  day: DateString;
+  line: number;
+  offset: number;
+}
+
+export interface AlertEvidenceOut {
+  n: number;
+  table: string;
+  row_id: number | null;
+  time: DateTimeString | null;
+  time_received: DateTimeString | null;
+  /** `null` for a `devices` row (no raw line). */
+  raw: AlertEvidenceRaw | null;
+}
+
+/** `GET /alerts/{id}/evidence`: references only, never line content. */
+export interface AlertEvidencePage {
+  alert_id: number;
+  evidence_total: number | null;
+  items: AlertEvidenceOut[];
 }
 
 export type AlertSort = 'time' | 'created_at' | 'updated_at' | 'severity' | 'state' | 'rule';

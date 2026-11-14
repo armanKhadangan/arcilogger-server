@@ -740,6 +740,17 @@ to the normal site: `port-scan` (R01), `external-scan` (R02), `brute-force` (R03
   minute) the slices are a minute long anyway. `test_a_backlog_puts_every_moment_into_a_window`
   pins it.
 
+### W6-A (API pull request, #243)
+
+- **W6-A-3, completed.** `GET /settings` answers the `rules.*` keys in the new list
+  `elsewhere` (`key`, `value`, `is_default`, `updated_by`, `updated_at`), apart from the groups
+  of the generic page, which the web does not show. The field has a default, so the web types
+  carry it as optional and the generic page's tests need no change.
+- **W6-A-6: the licence code of the rule writes.** §2.6.1 names `module_disabled`
+  ("existing code"). The existing code of every paid route is `module_not_licensed` (403,
+  `arcilogger_api.licensing.require_module`), so `PUT /rules/{id}` and the dry run answer that
+  code. `GET /rules` stays readable and says `module_enabled`.
+
 ### W6-C (#245): R11 matches the device's insert time, not `first_seen`
 
 - **Contract:** §2.2.2 R11, "a `devices` row whose `first_seen` is in the slice".

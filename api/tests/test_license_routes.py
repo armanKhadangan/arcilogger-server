@@ -37,7 +37,7 @@ from arcilogger_db.license_guard import FALLBACK_MESSAGES
 pytestmark = pytest.mark.license_live
 
 Login = Callable[..., LoggedIn]
-UA, UR, BI = "usage_analytics", "usage_reports", "bulk_import"
+UA, UR, BI, SR = "usage_analytics", "usage_reports", "bulk_import", "security_rules"
 V = "/api/v1"
 
 #: Every route (method, OpenAPI path) → the module that gates it, ``None`` for 5651 Temel.
@@ -70,6 +70,9 @@ ROUTES: dict[tuple[str, str], str | None] = {
     # Module bulk_import: 2 routes
     ("POST", f"{V}/imports/{{kind}}"): BI,
     ("GET", f"{V}/imports/{{kind}}/template.csv"): BI,
+    # Module security_rules (Wave 6 D1): the rule editor's writes; the list stays readable
+    ("PUT", f"{V}/rules/{{rule_id}}"): SR,
+    ("POST", f"{V}/rules/{{rule_id}}/dry-run"): SR,
     # 5651 Temel, never gated: 133 routes, among them the 3 of the licence, the browser
     # administration (ADR-0014), Canlı Akış, Kaynaklar, Arama (ADR-0015), Uyum Durumu, Sistem,
     # the legal-validity status (Wave 5 contract 0.1 item 6) and the archive reloads (Wave 5 G9)
@@ -79,6 +82,9 @@ ROUTES: dict[tuple[str, str], str | None] = {
     ("GET", f"{V}/alerts/{{alert_id}}"): None,
     ("POST", f"{V}/alerts/{{alert_id}}/state"): None,
     ("POST", f"{V}/alerts/{{alert_id}}/notes"): None,
+    ("GET", f"{V}/alerts/{{alert_id}}/evidence"): None,
+    ("POST", f"{V}/alerts/{{alert_id}}/assign"): None,
+    ("GET", f"{V}/rules"): None,
     ("GET", f"{V}/audit"): None,
     ("GET", f"{V}/audit/verify"): None,
     ("POST", f"{V}/auth/login"): None,
@@ -276,8 +282,8 @@ def test_every_route_is_classified(app: FastAPI) -> None:
     found = sorted((method.upper(), path) for path, ops in paths.items() for method in ops)
     assert found == sorted(ROUTES)
     gated = [key for key, module in ROUTES.items() if module is not None]
-    assert len(gated) == 24
-    assert len(ROUTES) - len(gated) == 136
+    assert len(gated) == 26
+    assert len(ROUTES) - len(gated) == 139
 
 
 def test_the_module_markers_equal_the_table() -> None:

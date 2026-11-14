@@ -55,7 +55,7 @@ const SITE_OFFSET_MS = 3 * 3_600_000;
 const NOTE_MAX = 2000;
 
 /** Fields of `AlertDetail` that `AlertOut` does not have. */
-const DETAIL_ONLY = ['details', 'events', 'runbook_tr', 'runbook_en', 'deliveries'];
+const DETAIL_ONLY = ['details', 'events', 'runbook_tr', 'runbook_en', 'deliveries', 'person'];
 
 function alertOut(detail: AlertDetail): AlertOut {
   return Object.fromEntries(
@@ -315,6 +315,10 @@ export class AlertsMock {
         .length,
       latest: this.latest(),
       mean_time_to_close_seconds_30d: this.meanTimeToClose(),
+      // Wave 6 (W6-A): the counts the Security page will chart (W6-F fills the mock).
+      by_day: [],
+      top_rules: [],
+      top_keys: [],
     };
   }
 
