@@ -55,7 +55,7 @@ const SITE_OFFSET_MS = 3 * 3_600_000;
 const NOTE_MAX = 2000;
 
 /** Fields of `AlertDetail` that `AlertOut` does not have. */
-const DETAIL_ONLY = ['details', 'events', 'runbook_tr', 'runbook_en', 'deliveries', 'person'];
+const DETAIL_ONLY = ['details', 'events', 'runbook_tr', 'runbook_en', 'deliveries'];
 
 function alertOut(detail: AlertDetail): AlertOut {
   return Object.fromEntries(

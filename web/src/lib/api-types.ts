@@ -939,8 +939,6 @@ export interface AlertDeliveryOut {
 export interface AlertDetail extends AlertOut {
   /** The detector's facts, sanitised by the API (no secrets). */
   details: Record<string, unknown>;
-  /** A person-level rule's person, only for `usage.person` (the API audits the view). */
-  person: AlertPersonOut | null;
   /** Oldest first. */
   events: AlertEvent[];
   runbook_tr: string;
@@ -1011,11 +1009,6 @@ export interface KeyCount {
   /** The alert's dedup key, e.g. `R01:172.20.41.17`. */
   key: string;
   count: number;
-}
-
-export interface AlertPersonOut {
-  id: number;
-  name: string;
 }
 
 /** `POST /alerts/{id}/assign`: `null` gives the alert to nobody. */

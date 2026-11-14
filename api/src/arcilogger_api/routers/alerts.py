@@ -26,9 +26,7 @@ writer of ``alert_events`` and of the audit entries ``alert.state`` (from/to) an
   ``assignee`` and ``evidence_total``; ``POST /alerts/{id}/assign`` ``{user_id}`` (only users
   with ``alerts.read``; audit ``alert.assign``; 422 ``alert_assignee_invalid``);
   ``GET /alerts/{id}/evidence`` (the security rule's evidence rows with their raw references,
-  never line content); the summary's ``by_day``, ``top_rules`` and ``top_keys``; and, for a user
-  with ``usage.person``, the person of a person-level rule's alert in ``GET /alerts/{id}``,
-  audited as ``alert.person_view`` before it is returned.
+  never line content); and the summary's ``by_day``, ``top_rules`` and ``top_keys``.
 
 Rule names, summaries and runbooks come from the catalogue
 (:mod:`arcilogger_worker.alerts.texts`), never from the database. E-mail addresses are masked
@@ -64,7 +62,6 @@ from arcilogger_db.models import (
     Alert,
     AlertDelivery,
     AlertEvidence,
-    Person,
     User,
 )
 from arcilogger_db.models import AlertEvent as AlertEventRow
@@ -81,7 +78,6 @@ from arcilogger_worker.alerts.store import (
     clean_note,
 )
 from arcilogger_worker.alerts.texts import facts, rule_text, runbook
-from arcilogger_worker.rules import registry
 
 router = APIRouter(prefix="/alerts", tags=["alerts"])
 
@@ -201,16 +197,9 @@ class AlertDeliveryOut(BaseModel):
     recipient_masked: str
 
 
-class AlertPersonOut(BaseModel):
-    id: int
-    name: str
-
-
 class AlertDetail(AlertOut):
     #: The alert's details without secrets and without very long values (:func:`sanitize`).
     details: dict[str, Any]
-    #: A person-level rule's person (R09, R13, R14), only for ``usage.person`` (audited).
-    person: AlertPersonOut | None
     #: Oldest first.
     events: list[AlertEvent]
     runbook_tr: str
@@ -484,7 +473,7 @@ def sanitize(value: Any, depth: int = 0) -> Any:
     return value
 
 
-def alert_detail(db: Session, alert: Alert, person: AlertPersonOut | None = None) -> AlertDetail:
+def alert_detail(db: Session, alert: Alert) -> AlertDetail:
     events = list(
         db.scalars(
             select(AlertEventRow)
@@ -504,7 +493,6 @@ def alert_detail(db: Session, alert: Alert, person: AlertPersonOut | None = None
     return AlertDetail(
         **base.model_dump(),
         details=sanitize(dict(alert.details or {})),
-        person=person,
         events=[event_out(event) for event in events],
         runbook_tr=steps_tr,
         runbook_en=steps_en,
@@ -751,47 +739,10 @@ def _alert(db: Session, alert_id: int, *, lock: bool = False) -> Alert:
     return row
 
 
-def _person_level(rule: str) -> bool:
-    try:
-        return registry.rule(rule).person_level
-    except KeyError:
-        return False
-
-
-def _person(
-    db: Session, request: Request, user: CurrentUser, alert: Alert
-) -> AlertPersonOut | None:
-    """The person of a person-level rule's alert, for a ``usage.person`` holder only (decision
-    D3), audited as ``alert.person_view`` before it is returned."""
-    person_id = (alert.details or {}).get("person_id")
-    if not (
-        user.has("usage.person")
-        and _person_level(alert.rule)
-        and isinstance(person_id, int)
-        and not isinstance(person_id, bool)
-    ):
-        return None
-    person = db.get(Person, person_id)
-    if person is None:
-        return None
-    record_audit(
-        db,
-        actor=user,
-        action="alert.person_view",
-        target=f"alert:{alert.id}",
-        details={"alert_id": alert.id, "person_id": person.id},
-        ip=client_ip(request),
-    )
-    db.commit()
-    return AlertPersonOut(id=person.id, name=person.name)
-
-
 @router.get("/{alert_id}")
-def get_alert(alert_id: AlertId, request: Request, db: DbSession, user: ReaderDep) -> AlertDetail:
-    """The alert with its details, events, runbook and e-mail deliveries (and, for a
-    person-level rule and a ``usage.person`` holder, its person)."""
-    alert = _alert(db, alert_id)
-    return alert_detail(db, alert, _person(db, request, user, alert))
+def get_alert(alert_id: AlertId, db: DbSession, user: ReaderDep) -> AlertDetail:
+    """The alert with its details, events, runbook and e-mail deliveries."""
+    return alert_detail(db, _alert(db, alert_id))
 
 
 @router.get("/{alert_id}/evidence")

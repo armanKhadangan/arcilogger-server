@@ -1,6 +1,6 @@
 """The rules API and the alert additions of Wave 6 (contract §2.6.1-§2.6.3, test T-A8):
 permissions, the module lock, the audit ``rule.update`` with before and after, the dry run, the
-assignment, the evidence and the audited person view. A test rule stands in for the rule
+assignment and the evidence. A test rule stands in for the rule
 packages (W6-B…E), registered for the test only."""
 
 from __future__ import annotations
@@ -14,10 +14,9 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
-from arcilogger_api import security
 from arcilogger_api.routers import rules as rules_router
 from arcilogger_api.testing import LoggedIn, make_user
-from arcilogger_db.models import Alert, AlertEvent, AlertEvidence, AuditLog, Person, Setting
+from arcilogger_db.models import Alert, AlertEvent, AlertEvidence, AuditLog, Setting
 from arcilogger_worker.rules import registry
 from arcilogger_worker.rules.dryrun import DryRunTimeoutError
 from arcilogger_worker.rules.model import Hit, Param, RuleContext, RuleDef
@@ -319,38 +318,6 @@ def test_the_evidence_of_an_alert(
     listed = client.get(f"{API}/alerts").json()["items"][0]
     assert listed["evidence_total"] == 47
     assert error(client.get(f"{API}/alerts/999999/evidence")) == (404, "alert_not_found")
-
-
-# -- the person of a person-level rule (D3) ------------------------------------------------------
-
-
-def test_the_person_is_shown_to_usage_person_only_and_audited(
-    client: TestClient,
-    login_as: Login,
-    app_session_factory: sessionmaker[Session],
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    with app_session_factory() as session:
-        person = Person(name="Deniz Örnek")
-        session.add(person)
-        session.commit()
-        person_id = person.id
-    details = {"title_en": "x", "person_id": person_id, "key": "person:1"}
-    alert_id = add_alert(app_session_factory, rule="R09", details=details, dedup_key="R09:person:1")
-    other_id = add_alert(app_session_factory, details=details, dedup_key="R01:p")
-    login_as(client, "admin", username="yonetici")
-    body = client.get(f"{API}/alerts/{alert_id}").json()
-    assert body["person"] == {"id": person_id, "name": "Deniz Örnek"}
-    (entry,) = audits(app_session_factory, "alert.person_view")
-    assert entry.details == {"alert_id": alert_id, "person_id": person_id}
-    # Not for a rule that is not person-level.
-    assert client.get(f"{API}/alerts/{other_id}").json()["person"] is None
-    # Not without usage.person (and nothing audited).
-    without = security.ROLE_PERMISSIONS["admin"] - {"usage.person"}
-    monkeypatch.setitem(security.ROLE_PERMISSIONS, "admin", without)
-    login_as(client, "admin", username="yonetici2")
-    assert client.get(f"{API}/alerts/{alert_id}").json()["person"] is None
-    assert len(audits(app_session_factory, "alert.person_view")) == 1
 
 
 def test_an_assign_event_has_no_state(app_session_factory: sessionmaker[Session]) -> None:
