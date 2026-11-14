@@ -116,7 +116,6 @@ from arcilogger_core.config import Config
 from arcilogger_core.configwatch import WORKER_HOT, ConfigWatch, ConfigWatcher
 from arcilogger_core.fsutil import atomic_write_text
 from arcilogger_core.layout import Layout
-from arcilogger_core.license.modules import SECURITY_RULES_MODULE
 from arcilogger_core.timeutil import SITE_TZ, site_day, to_site, utc_now
 from arcilogger_db.engine import engine_from_url, make_engine, session_factory
 from arcilogger_db.models import JobRun
@@ -245,6 +244,9 @@ SEARCH_COUNTS_EVERY: Final = timedelta(minutes=10)
 #: The modules of the paid jobs (licensing contract 1.4).
 USAGE_MODULE: Final = "usage_analytics"
 REPORTS_MODULE: Final = "usage_reports"
+#: The alert webhooks (Wave 6 decision D1); a literal like the two above, so that this module
+#: never loads the licence code (A-T17b).
+SECURITY_RULES_MODULE: Final = "security_rules"
 
 
 # -- the jobs -------------------------------------------------------------------------------------
