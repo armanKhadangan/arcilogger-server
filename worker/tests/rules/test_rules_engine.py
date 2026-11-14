@@ -346,8 +346,10 @@ def test_an_active_alert_is_updated_and_its_evidence_capped(
     details = _run(sessions, first + timedelta(minutes=1))
     assert (details["opened"], details["updated"]) == (0, 1)
     (alert,) = _alerts(sessions)
-    assert alert.details["count"] == 5 + 9  # the window of the second slice holds all nine
-    assert alert.details["evidence_total"] == 14
+    # The largest window count: the second slice's window holds all nine rows, the first one's
+    # five of them; a sum (14) would count those five twice.
+    assert alert.details["count"] == 9
+    assert alert.details["evidence_total"] == 9
     evidence = _evidence(sessions, alert.id)
     assert [row.n for row in evidence] == list(range(1, 8))
     assert len({(row.tbl, row.row_id) for row in evidence}) == 7
@@ -477,7 +479,9 @@ def test_the_dry_run_answers_what_the_live_run_does_and_writes_nothing(
         result = dry_run(session, RULE, candidate, NOW).as_json()
     assert _counts(sessions) == before
     assert result["would_open"] == 2
-    assert [(item["key"], item["count"]) for item in result["keys"]] == [(SCANNER, 9), (OTHER, 6)]
+    # SCANNER: five rows at -20 h and four at -2 h (the three at -10 h stay below the threshold);
+    # its count is the largest window, five.
+    assert [(item["key"], item["count"]) for item in result["keys"]] == [(SCANNER, 5), (OTHER, 6)]
     assert result["truncated"] is False
     assert result["duration_ms"] >= 0
     # The live run over the same 24 hours opens the same alerts.
@@ -487,7 +491,7 @@ def test_the_dry_run_answers_what_the_live_run_does_and_writes_nothing(
     details = _run(sessions)
     assert details["opened"] == 2
     assert {alert.details["key"]: alert.details["count"] for alert in _alerts(sessions)} == {
-        SCANNER: 9,
+        SCANNER: 5,
         OTHER: 6,
     }
 

@@ -59,7 +59,8 @@ class DryRun:
     duration_ms: int = 0
 
     def as_json(self) -> dict[str, Any]:
-        """The answer of ``POST /rules/{id}/dry-run``: the first keys by their first hit."""
+        """The answer of ``POST /rules/{id}/dry-run``: the first keys by their first hit, each
+        with the largest window count of its hits (an alert's ``count``)."""
         ordered = sorted(self.keys.items(), key=lambda item: (item[1].first_time, item[0]))
         return {
             "would_open": self.would_open,
@@ -111,7 +112,7 @@ def dry_run(session: Session, rule_id: str | RuleDef, candidate: object, now: da
                     result.keys[hit.key] = _Key(hit.count, hit.time, hit.time, hit.time)
                     result.would_open += 1
                     continue
-                entry.count += hit.count
+                entry.count = max(entry.count, hit.count)  # the largest window, as the engine
                 entry.last_time = max(entry.last_time, hit.time)
                 if not entry.active and hit.time >= entry.opened_at + cooldown:
                     entry.active = True  # a new alert after the cooldown of the closed one
