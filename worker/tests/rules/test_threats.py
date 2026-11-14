@@ -21,12 +21,13 @@ from zoneinfo import ZoneInfo
 
 import pytest
 from sqlalchemy import func, insert, select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, sessionmaker
 
 from arcilogger_core.rawlog import RawRecord
 from arcilogger_core.timeutil import site_day
 from arcilogger_db.models import Alert, FgEvent, FgIps, FgTraffic, FgVirus, MtEvent
 from arcilogger_ingest.parsers import LinePosition, parse_line
+from arcilogger_worker.rules.engine import run_rules
 from arcilogger_worker.rules.model import Actions, Hit, RuleContext, RuleDef, RuleSettings
 from arcilogger_worker.rules.texts import COMMON_FIELDS, TEXTS, title, title_fields
 from arcilogger_worker.rules.threats import EVIDENCE_LIMIT, RULES
@@ -515,6 +516,43 @@ def test_r17_text_values_do_not_break_the_slice(db_session: Session) -> None:
     rows.add(PERF.replace(b"cpu=3 ", b'cpu="n/a" '), END - timedelta(seconds=20))
     rows.add(CONSERVE, END - timedelta(seconds=10))
     assert set(run(db_session, "R17")) == {"fortigate"}
+
+
+def test_r17_through_the_engine_resolves_itself(
+    db_session_factory: sessionmaker[Session],
+) -> None:
+    """D9: R17 is a condition rule. Its alert stays open while the overload goes on and within
+    ``clear_seconds`` (600) after the last hit; the engine then resolves it
+    (``condition_cleared``)."""
+
+    def runs(now: datetime) -> dict[str, Any]:
+        return run_rules(db_session_factory, now=now, rules=(rule("R17"),)).details()
+
+    first = END - timedelta(minutes=20)
+    assert runs(first)["started"] == ["R17"]
+    with db_session_factory() as session:
+        rows = Rows(session)
+        last = first + timedelta(minutes=2)
+        for minute in range(13):  # 12 minutes above 80 % CPU, the newest at ``last``
+            rows.add(perf(95, 30), last - timedelta(minutes=12 - minute))
+
+    def alert() -> Alert:
+        with db_session_factory() as session:
+            (found,) = session.scalars(select(Alert).where(Alert.rule == "R17")).all()
+            session.expunge(found)
+            return found
+
+    assert runs(last + timedelta(minutes=3))["opened"] == 1
+    assert alert().state == "open"
+    assert alert().details["rule_kind"] == "condition"
+    with db_session_factory() as session:  # the overload is over
+        Rows(session).add(perf(20, 30), last + timedelta(minutes=4))
+    runs(last + timedelta(minutes=9))  # 7 minutes after the last hit: within clear_seconds
+    assert alert().state == "open"
+    assert runs(last + timedelta(minutes=15))["resolved"] == 1
+    resolved = alert()
+    assert resolved.state == "resolved"
+    assert resolved.details["auto_resolved"]["reason"] == "condition_cleared"
 
 
 # =================================================================================================
