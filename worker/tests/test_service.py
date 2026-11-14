@@ -214,6 +214,7 @@ def test_default_jobs_run_against_the_database(
         ("alerts.r15", "ok"),
         ("alerts.system", "ok"),
         ("alerts.notify", "skipped"),  # [smtp] enabled = false by default
+        ("alerts.webhooks", "skipped"),  # no [[webhooks]] by default
         ("usage.requests", "skipped"),  # no rebuild request
         ("usage.daily", "ok"),
         ("usage.today", "ok"),
@@ -238,6 +239,7 @@ def test_default_jobs_run_against_the_database(
         ("alerts.r15", "ok"),
         ("alerts.system", "ok"),
         ("alerts.notify", "skipped"),
+        ("alerts.webhooks", "skipped"),
         ("usage.requests", "skipped"),
         ("usage.today", "ok"),
         ("usage.reattribute", "skipped"),

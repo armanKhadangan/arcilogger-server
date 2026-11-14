@@ -65,6 +65,8 @@ from arcilogger_worker.alerts.store import resolve as resolve_alert
 log = logging.getLogger("arcilogger_worker.alerts")
 
 EMAIL_RULE: Final = "R20-email"
+#: The deliveries of ``alerts.webhooks`` share the table and are left alone here (D10).
+WEBHOOK_KIND: Final = "webhook"
 #: Only alerts whose problem was last seen within this period are e-mailed.
 LOOKBACK: Final = timedelta(hours=24)
 #: Waits after the 1st, 2nd, … failed attempt (the last one repeats).
@@ -189,7 +191,7 @@ def enqueue(session: Session, policy: Policy, *, now: datetime) -> tuple[int, in
     )
     # By the latest occurrence (the first one, an imported repeat, a check that found it again):
     # imported history stays out, a problem still going on is e-mailed however long it lasts.
-    alert_ids = [alert.id for alert in candidates if last_seen(alert) >= since]
+    alert_ids = [alert.id for alert in candidates if last_seen(alert) >= since and emailed(alert)]
     new_rows = [
         {"alert_id": alert_id, "kind": "new", "recipient": recipient, "created_at": now}
         for alert_id in alert_ids
@@ -229,11 +231,20 @@ def enqueue(session: Session, policy: Policy, *, now: datetime) -> tuple[int, in
     return counts[0], counts[1]
 
 
+def emailed(alert: Alert) -> bool:
+    """Whether the alert's rule e-mails it (Wave 6 decision D11): a security rule whose action
+    ``email`` is off is not; every other alert has no actions and is."""
+    actions = (alert.details or {}).get("actions")
+    return not (isinstance(actions, dict) and actions.get("email") is False)
+
+
 def _retire(session: Session, policy: Policy, *, now: datetime) -> None:
-    """Queued rows of a recipient no longer listed, or never tried within a day: ``failed``."""
+    """Queued rows of a recipient no longer listed, or never tried within a day: ``failed``.
+    Webhook deliveries (``kind = 'webhook'``) are ``alerts.webhooks``' (decision D10)."""
     stale = session.scalars(
         select(AlertDelivery)
         .where(
+            AlertDelivery.kind != WEBHOOK_KIND,
             AlertDelivery.status.in_(("queued", "suppressed")),
             AlertDelivery.message_id.is_(None),
             or_(
@@ -257,6 +268,7 @@ def _due(session: Session, recipient: str, now: datetime) -> tuple[list[AlertDel
     rows = session.scalars(
         select(AlertDelivery)
         .where(
+            AlertDelivery.kind != WEBHOOK_KIND,
             AlertDelivery.recipient == recipient,
             ready,
             or_(
