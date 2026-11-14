@@ -85,12 +85,21 @@ def test_database_down_at_start_then_back(
     proxy.down()
     running = Running(world.service(proxied_engine))
     status_path = world.layout.state / "ingest-status.json"
+    seen: list[dict[str, Any]] = []
+
+    def reported_down() -> bool:
+        # The status is written at its interval, and on Windows a read during the replace finds
+        # no file: wait until a written status says the database is down.
+        status = read_status(status_path)
+        if status is not None and status.get("database", {}).get("ok") is False:
+            seen.append(status)
+        return bool(seen)
+
     try:
         wait_for(lambda: proxy.refused >= 2)
-        status = read_status(status_path)
-        assert status is not None
-        assert status["database"]["ok"] is False
-        assert status["database"]["last_error"]
+        wait_for(reported_down)
+        assert seen[-1]["database"]["ok"] is False
+        assert seen[-1]["database"]["last_error"]
         assert offsets(db_engine) == {}  # nothing moved
         proxy.up()
         wait_for(all_loaded(db_engine, world))
