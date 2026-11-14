@@ -32,6 +32,7 @@ import { RecordsMock, type Answer, type RecordsOptions } from './mock-records';
 import { ReportsMock } from './mock-reports';
 import { ActivityMock, type ActivityOptions } from './mock-activity';
 import { UsageMock, type UsageOptions } from './mock-usage';
+import { WebhooksMock, type WebhooksOptions } from './mock-webhooks';
 import {
   ADMIN,
   ALERTS,
@@ -360,6 +361,8 @@ export interface MockOptions {
    * changes, the speed of the requests, a fresh Kamu SM section (`mock-admin.ts`).
    */
   admin?: AdminOptions;
+  /** Webhooks (Wave 6): none configured, a failing test (`mock-webhooks.ts`). */
+  webhooks?: WebhooksOptions;
 }
 
 function user(
@@ -452,6 +455,8 @@ export class MockApi {
    * before the captured seal and credit samples, which it changes once a request succeeded.
    */
   readonly admin: AdminMock;
+  /** Webhooks configured on the server, their deliveries and "Test gönder" (Wave 6). */
+  readonly webhooks: WebhooksMock;
   readonly grant: Partial<Record<Role, string[]>>;
   readonly revoke: Partial<Record<Role, string[]>>;
 
@@ -462,6 +467,7 @@ export class MockApi {
     );
     this.records = new RecordsMock(options.records);
     this.admin = new AdminMock(options.admin, () => CREDITS[this.records.credits]);
+    this.webhooks = new WebhooksMock(this.admin, options.webhooks);
     this.devices = new DevicesMock();
     this.alerts = new AlertsMock();
     this.reports = new ReportsMock();
@@ -794,6 +800,7 @@ export class MockApi {
           this.usage.answer(call, this) ??
           this.activity.answer(call, this) ??
           this.alerts.answer(call, this) ??
+          this.webhooks.answer(call, this) ??
           this.reports.answer(call, this) ??
           this.error(404, 'not_found')
         );

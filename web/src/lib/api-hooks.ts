@@ -157,6 +157,7 @@ import type {
   UploadPreview,
   ZamaneBody,
 } from './settings-types';
+import type { WebhookDeliveries, WebhookList } from './webhook-types';
 
 export const AUDIT_PAGE_SIZE = 100;
 export const USER_PAGE_SIZE = 500;
@@ -220,6 +221,8 @@ export const queryKeys = {
   adminRequestsAll: ['admin', 'requests'] as const,
   adminVersions: ['admin', 'versions'] as const,
   settings: ['settings'] as const,
+  webhooks: ['webhooks'] as const,
+  webhookDeliveries: (name: string) => ['webhooks', 'deliveries', name] as const,
 };
 
 // -- auth ---------------------------------------------------------------------------------------
@@ -1629,4 +1632,37 @@ export function useResetSetting() {
       api.post<SettingsPatchResult>(`/settings/${encodeURIComponent(key)}/reset`),
     onSettled: () => client.invalidateQueries({ queryKey: queryKeys.settings }),
   });
+}
+
+// -- webhooks (Wave 6 contract §2.4.4, read-only: configured on the server, D4) -------------------
+
+/** `GET /webhooks` (`alerts.read`): each webhook with its last delivery and 7-day counts. */
+export function useWebhooks() {
+  return useQuery({
+    queryKey: queryKeys.webhooks,
+    queryFn: ({ signal }) => api.get<WebhookList>('/webhooks', { signal }),
+  });
+}
+
+/** `GET /webhooks/{name}/deliveries` (`alerts.read`): the newest 50. */
+export function useWebhookDeliveries(name: string | null) {
+  return useQuery({
+    queryKey: queryKeys.webhookDeliveries(name ?? ''),
+    queryFn: ({ signal }) =>
+      api.get<WebhookDeliveries>(`/webhooks/${encodeURIComponent(String(name))}/deliveries`, {
+        signal,
+        params: { limit: 50 },
+      }),
+    enabled: name !== null,
+  });
+}
+
+/**
+ * `POST /webhooks/{name}/test` (`settings.manage`, module `security_rules`): queues the probe
+ * through the administration requests, as the SMTP trial does; the page follows the request.
+ */
+export function useTestWebhook() {
+  return useAdminMutation((name: string) =>
+    api.post<AdminAccepted>(`/webhooks/${encodeURIComponent(name)}/test`),
+  );
 }

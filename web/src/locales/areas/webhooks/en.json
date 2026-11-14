@@ -1,0 +1,70 @@
+{
+  "webhooks": {
+    "title": "Webhooks",
+    "description": "The webhooks alerts are sent to, their latest deliveries and a test notification.",
+    "serverOnly": "Webhooks are configured on the server only: the [[webhooks]] section of arcilogger.toml, and \"arcilogger-core secret set webhook.<name>.secret\" for the secret. The browser neither adds nor changes a webhook; see INSTALL.md.",
+    "locked": "Security rules are not enabled in your licence: no notifications are sent to webhooks and no test notification can be sent.",
+    "caption": "Configured webhooks",
+    "empty": "No webhooks are configured.",
+    "emptyHint": "To add a webhook, write a [[webhooks]] section into arcilogger.toml on the server (INSTALL.md).",
+    "columns": {
+      "name": "Name",
+      "format": "Format",
+      "host": "Target host",
+      "severity": "Minimum severity",
+      "enabled": "State",
+      "last": "Last delivery",
+      "counts": "Last 7 days",
+      "actions": "Actions"
+    },
+    "formats": {
+      "generic": "Generic (signed JSON)",
+      "teams": "Microsoft Teams",
+      "slack": "Slack"
+    },
+    "verify": "Verify on site",
+    "verifyHint": "It is not confirmed that the target accepts this format; check that the first notification arrives.",
+    "allRules": "Every rule",
+    "someRules": "Rules: {{rules}}",
+    "on": "On",
+    "off": "Off",
+    "never": "No delivery yet",
+    "counts": "{{sent}} sent · {{failed}} failed",
+    "status": {
+      "sent": "Sent",
+      "queued": "Queued",
+      "failed": "Failed"
+    },
+    "deliveriesButton": "Deliveries",
+    "deliveriesOf": "Deliveries: {{name}}",
+    "testButton": "Send test",
+    "testOf": "Send test: {{name}}",
+    "test": {
+      "title": "Test notification: {{name}}",
+      "ok": "The test notification was sent; the target answered HTTP {{status}}.",
+      "failed": "The test notification could not be sent: {{error}}"
+    },
+    "deliveries": {
+      "title": "Deliveries: {{name}}",
+      "description": "The latest 50 deliveries, newest first. A failed delivery is retried for 24 hours.",
+      "empty": "No notification has been sent to this webhook yet.",
+      "alert": "#{{id}} · {{rule}}",
+      "next": "Next attempt: {{time}}",
+      "columns": {
+        "created": "Queued",
+        "alert": "Alert",
+        "status": "State",
+        "attempts": "Attempts",
+        "error": "Last error"
+      }
+    }
+  },
+  "settings": {
+    "sections": {
+      "webhooks": "Webhooks"
+    },
+    "hints": {
+      "webhooks": "The webhooks alerts are sent to, their latest deliveries and a test notification (read-only)."
+    }
+  }
+}
