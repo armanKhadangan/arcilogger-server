@@ -97,6 +97,7 @@ and the data-minimisation jobs ``usage.retention`` / ``reports.purge`` — never
 
 from __future__ import annotations
 
+import gc
 import json
 import logging
 import os
@@ -210,6 +211,16 @@ class Job:
         if self.daily_after is None:
             raise ValueError(f"job {self.name} is not a daily job")
         return self.daily_after
+
+
+def freeze_loaded() -> None:
+    """Keep what is loaded so far (the modules, the configuration: they live as long as the
+    service) out of the collector's full passes, as the service does at its start. A full pass
+    walks every tracked object and holds every thread meanwhile; at a high log rate Canlı Durum's
+    open sessions make such passes long and frequent, and each one would walk these too.
+    :func:`gc.unfreeze` gives them back."""
+    gc.collect()
+    gc.freeze()
 
 
 def retry_delay(job: Job, failures: int) -> timedelta:
