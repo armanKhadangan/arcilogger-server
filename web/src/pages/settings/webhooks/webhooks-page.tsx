@@ -1,5 +1,13 @@
-import { History, Lock, RefreshCw, Send, ShieldQuestionMark, Webhook } from 'lucide-react';
-import { useRef, useState } from 'react';
+import {
+  History,
+  Lock,
+  RefreshCw,
+  Send,
+  ShieldQuestionMark,
+  TriangleAlert,
+  Webhook,
+} from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 
@@ -207,9 +215,23 @@ function WebhookRow({
         </span>
       </td>
       <td className="px-3 py-2">
-        <Badge tone={webhook.enabled ? 'success' : 'neutral'}>
-          {t(webhook.enabled ? 'webhooks.on' : 'webhooks.off')}
-        </Badge>
+        <span className="flex flex-col items-start gap-0.5">
+          <Badge tone={webhook.enabled ? 'success' : 'neutral'}>
+            {t(webhook.enabled ? 'webhooks.on' : 'webhooks.off')}
+          </Badge>
+          {!webhook.ready ? (
+            <Badge
+              tone="warning"
+              icon={TriangleAlert}
+              title={t(`webhooks.notReadyHint.${webhook.reason ?? 'secret_missing'}`, {
+                name: webhook.name,
+              })}
+              data-testid="webhook-not-ready"
+            >
+              {t(`webhooks.notReady.${webhook.reason ?? 'secret_missing'}`)}
+            </Badge>
+          ) : null}
+        </span>
       </td>
       <td className="px-3 py-2">
         {webhook.last_delivery ? (
@@ -246,7 +268,7 @@ function WebhookRow({
             <Button
               size="sm"
               variant="secondary"
-              disabled={busy || !webhook.enabled}
+              disabled={busy || !webhook.enabled || !webhook.ready}
               aria-label={t('webhooks.testOf', { name: webhook.name })}
               onClick={() => {
                 onTest(webhook.name);
@@ -284,14 +306,17 @@ export function WebhooksPage() {
   const canTest = can('settings.manage') && !locked;
   const list = sortWebhooks(webhooks.data?.webhooks ?? []);
 
+  // A new test's progress takes the focus once it is on the page (its button may be disabled now).
+  const trialId = trial?.requestId ?? null;
+  useEffect(() => {
+    if (trialId !== null) progress.current?.focus();
+  }, [trialId]);
+
   async function runTest(name: string) {
     setFailure(null);
     try {
       const accepted = await withReauth(() => test.mutateAsync(name));
       setTrial({ name, requestId: accepted.request_id });
-      window.requestAnimationFrame(() => {
-        progress.current?.focus();
-      });
     } catch (error) {
       if (!isReauthCancelled(error)) setFailure(errorMessage(error));
     }

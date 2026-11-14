@@ -57,6 +57,14 @@
         "attempts": "Deneme",
         "error": "Son hata"
       }
+    },
+    "notReady": {
+      "secret_missing": "Gizli anahtar eksik",
+      "url_missing": "Adres eksik"
+    },
+    "notReadyHint": {
+      "secret_missing": "Gönderemez: gizli anahtar girilmemiş. Sunucuda: arcilogger-core secret set webhook.{{name}}.secret",
+      "url_missing": "Gönderemez: Teams/Slack adresi girilmemiş. Sunucuda: arcilogger-core secret set webhook.{{name}}.url"
     }
   },
   "settings": {

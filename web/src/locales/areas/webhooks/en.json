@@ -57,6 +57,14 @@
         "attempts": "Attempts",
         "error": "Last error"
       }
+    },
+    "notReady": {
+      "secret_missing": "Secret missing",
+      "url_missing": "URL missing"
+    },
+    "notReadyHint": {
+      "secret_missing": "Cannot send: the secret is not set. On the server: arcilogger-core secret set webhook.{{name}}.secret",
+      "url_missing": "Cannot send: the Teams/Slack URL is not set. On the server: arcilogger-core secret set webhook.{{name}}.url"
     }
   },
   "settings": {

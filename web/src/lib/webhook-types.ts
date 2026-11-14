@@ -12,6 +12,9 @@ import type { AlertSeverity, DateTimeString } from './api-types';
 /** `generic` is signed (HMAC); `teams` and `slack` are "sahada doğrula" (V8). */
 export type WebhookFormat = 'generic' | 'teams' | 'slack';
 
+/** Why a webhook cannot send (C9). */
+export type WebhookNotReady = 'secret_missing' | 'url_missing';
+
 /** A row of `alert_deliveries` with `kind = 'webhook'` (D10). */
 export type WebhookDeliveryStatus = 'queued' | 'sent' | 'failed';
 
@@ -36,6 +39,13 @@ export interface WebhookOut {
   /** The rules it is sent for; empty: every rule, R15 and R20 included. */
   rules: string[];
   enabled: boolean;
+  /**
+   * Whether it can send (C9): `false` while its secret (`generic`) or its URL (`teams`, `slack`)
+   * is missing in the secret store; never the value itself.
+   */
+  ready: boolean;
+  /** Why it is not ready; `null` when it is. */
+  reason: WebhookNotReady | null;
   last_delivery: WebhookLastDelivery | null;
   counts_7d: WebhookCounts;
 }

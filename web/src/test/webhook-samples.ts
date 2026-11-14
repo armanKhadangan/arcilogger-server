@@ -1,7 +1,8 @@
 /**
  * Answers of the webhooks API (Wave 6 contract §2.4.4), written from the contract until W6-H's API
  * is captured: three webhooks of the example world (`*.ornek.example`) on the sample day
- * (13.10.2026), one of each format, the Slack one switched off, and the deliveries of `siem`.
+ * (13.10.2026), one of each format, the Teams one not ready (its URL not set, C9), the Slack one
+ * switched off, and the deliveries of `siem`.
  *
  * Shared by the unit tests and the E2E mock (`e2e/mock-webhooks.ts`), so it imports nothing with
  * the `@/` alias and reads no file.
@@ -18,6 +19,8 @@ export const WEBHOOKS: WebhookList = {
       min_severity: 'high',
       rules: [],
       enabled: true,
+      ready: true,
+      reason: null,
       last_delivery: { time: '2026-10-13T08:43:40Z', status: 'sent' },
       counts_7d: { sent: 12, failed: 1, queued: 0 },
     },
@@ -28,6 +31,9 @@ export const WEBHOOKS: WebhookList = {
       min_severity: 'critical',
       rules: ['R06', 'R07'],
       enabled: true,
+      // Its Teams URL is not in the secret store yet (C9).
+      ready: false,
+      reason: 'url_missing',
       last_delivery: null,
       counts_7d: { sent: 0, failed: 0, queued: 0 },
     },
@@ -38,6 +44,8 @@ export const WEBHOOKS: WebhookList = {
       min_severity: 'medium',
       rules: [],
       enabled: false,
+      ready: true,
+      reason: null,
       last_delivery: { time: '2026-10-10T14:02:11Z', status: 'failed' },
       counts_7d: { sent: 0, failed: 3, queued: 0 },
     },

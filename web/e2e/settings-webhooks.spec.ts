@@ -28,6 +28,14 @@ test.describe("Ayarlar → Webhook'lar", () => {
     await expect(teams).toContainText('Sahada doğrula');
     await expect(teams).toContainText('Kurallar: R06, R07');
     await expect(teams).toContainText('Henüz teslim yok');
+    // C9: its URL is not in the secret store, so it cannot send and cannot be tried.
+    await expect(teams.getByTestId('webhook-not-ready')).toHaveText('Adres eksik');
+    await expect(teams.getByTestId('webhook-not-ready')).toHaveAttribute(
+      'title',
+      /arcilogger-core secret set webhook\.teams-guvenlik\.url/,
+    );
+    await expect(teams.getByRole('button', { name: 'Test gönder: teams-guvenlik' })).toBeDisabled();
+    await expect(siem.getByTestId('webhook-not-ready')).toHaveCount(0);
     const slack = page.locator('[data-testid="webhook-row"][data-name="slack-bt"]');
     await expect(slack).toContainText('Kapalı');
     await expect(slack.getByRole('button', { name: 'Test gönder: slack-bt' })).toBeDisabled();
