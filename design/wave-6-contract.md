@@ -684,6 +684,43 @@ to the normal site: `port-scan` (R01), `external-scan` (R02), `brute-force` (R03
 
 (Answers to questions on the issues are appended here.)
 
+- **C1 — an alert's `count` is the largest window count, not a sum** (#262). A hit's `count`
+  is the rows of its window. With slices shorter than the window, adding hits up counts the
+  same rows again on every run. An active alert's `count` and `evidence_total` therefore take
+  the largest value any of its hits reported ("en yüksek pencere sayısı / most in one window").
+  The stored evidence stays de-duplicated and capped at `rules.evidence_max`, and `last_time`
+  and `values` move as before. §2.1.5's "counts add up" is replaced by this. It lands in W6-A's
+  dry-run PR, before any API or UI shows a count.
+- **C2 — the rules' indexes go into a new migration `0025`** with the perf guard (T-A6).
+  `0024_rules` is merged and is not edited.
+- **C3 — `rules.evidence_max`:** a rule may return up to 100 evidence rows (the setting's
+  maximum) or read the setting itself; the engine keeps the configured number, oldest first.
+- **C4 — defaults the tables leave open** (#253, #254): cooldown 3600 s for R01, R03, R08,
+  R12 and R19; 0 s for R04 and R11; the per-row rules R04, R11 and R16 have a window of 60 s
+  (the minimum: they read their slice). R08 counts a DNS connection to a server that is not
+  allowed whatever its `action` (an attempt that was blocked is still an attempt). R19's
+  `rcode_field` is a `strings` parameter with exactly one entry.
+- **C5 — R04's off hours** are judged on the login's device `time`; windows and slices stay on
+  `time_received` (D8).
+- **C6 — R14** uses only `night_start`/`night_end` (§2.2.4); D5's mention of R14 does not make
+  it read `usage.work_hours` or `usage.holidays`. Both are `seconds` after site midnight
+  (defaults 0 and 21 600); the rule editor (W6-F) shows and edits them as HH:MM.
+- **C7 — the person of an address** (R09, R13, R14): rows are summed per address and minute of
+  device time, and a minute belongs to whoever held the address at its first instant, as in the
+  usage rollups.
+- **C8 — the case writer** (`worker/tests/rules/test_rules_cases.py`) keeps a row's named
+  `source`, and gives a `devices` row `created_at` = its receive time and `first_seen` =
+  `last_seen` = its device time. Cooldown cases use `RuleCase.closed_before`.
+- **C9 — webhooks** (#266):
+  - "24 h after the first attempt" counts from the delivery row's `created_at`.
+  - A webhook removed or switched off fails its queued rows and resolves its `R20-webhook`.
+    Switched on again, it sends nothing from before.
+  - Only alerts opened in the last 24 h are queued.
+  - A missing secret or Teams/Slack URL is retried like an unreachable target. `GET
+    /api/v1/webhooks` shows it at once: per webhook a `ready` boolean and a reason code
+    (`secret_missing`, `url_missing`), never a value.
+  - `R20-webhook` has its own entry in the alert catalogue (`alerts/texts.py`).
+
 ---
 
 ## 7. Owner questions (the defaults ship)
