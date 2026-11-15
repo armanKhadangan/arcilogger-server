@@ -326,6 +326,13 @@ then on.
   is active, no new alert opens; the alert's count is the highest count seen in one window (it
   is not added up across runs). After an alert is closed, events within
   the cooldown open no new alert; they are counted on the closed alert.
+- **Trial run ("Son 24 saatte dene", try on the last 24 hours):** a rule's new settings can be
+  tried on the last 24 hours of data before they are saved. The trial evaluates the rule in the
+  same slices as the live run, applies deduplication and the cooldown as if no alert existed, and
+  gives the number of alerts that would have opened and the first 20 keys (with their counts and
+  first and last times). It runs in a read-only transaction: it writes nothing and opens no
+  alert. If it does not finish within `rules.dry_run_timeout_seconds` (30 seconds by default) it
+  stops; shorten the window or the lists and try again.
 - **"Sahada doğrula" (verify on site):** the rules that read a log format the repository has no
   format sample of (FortiGate admin login, configuration change, performance, botnet, DNS
   response code) are marked "sahada doğrula"; the logids and texts they read are settings.

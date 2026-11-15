@@ -317,6 +317,12 @@ sayar.
   varsa yeni uyarı açılmaz; uyarının sayısı, bir pencerede görülen en yüksek sayıdır (çalışmalar
   boyunca toplanmaz). Kapatılan bir uyarıdan sonra bekleme süresi
   içinde gelen olaylar yeni uyarı açmaz, kapanan uyarıda sayılır.
+- **Deneme ("Son 24 saatte dene"):** bir kuralın yeni ayarları kaydetmeden önce son 24 saatin
+  verisiyle denenebilir. Deneme, kuralı canlı çalışmayla aynı dilimlerle değerlendirir, uyarı
+  açılmamış gibi tekilleştirme ve bekleme süresini uygular ve açılacak uyarıların sayısını, ilk 20
+  anahtarı (sayıları, ilk ve son zamanlarıyla) verir. Salt okunur bir işlemde çalışır: hiçbir şey
+  yazmaz, uyarı açmaz. `rules.dry_run_timeout_seconds` (varsayılan 30 saniye) içinde bitmezse
+  durur; pencereyi ya da listeleri küçültüp yeniden deneyin.
 - **"Sahada doğrula":** deposunda biçim örneği olmayan bir log biçimini okuyan kurallar (FortiGate
   yönetici girişi, yapılandırma değişikliği, performans, botnet, DNS yanıt kodu) "sahada doğrula"
   olarak işaretlidir; okudukları logid ve metinler ayardır. Sahadaki cihazın gerçek bir satırıyla

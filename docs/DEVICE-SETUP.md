@@ -3,7 +3,8 @@
 > Ağ yöneticisi içindir. Komutlar build specification bölüm 15'ten alınmıştır ve **FortiOS 7.6**
 > ile **RouterOS 7** için yazılmıştır; bölüm 2.1'deki saat adımının ve bölüm 2.4–2.5'in FortiGate
 > komutları FortiOS 7.6 CLI başvuru belgesindendir. Her komutu uygulamadan önce cihazınızdaki
-> sürümün belgeleriyle doğrulayın. Bu belgede yazanların uygulandığını varsaymıyoruz. Bölüm 2.4–2.6
+> sürümün belgeleriyle doğrulayın; bölüm 2.7'nin kayıtlarının depoda biçim örneği yoktur, o
+> komutlar sahada doğrulanmalıdır. Bu belgede yazanların uygulandığını varsaymıyoruz. Bölüm 2.4–2.7
 > Türkçe metnin ardından İngilizce de verilir (English text follows the Turkish one).
 
 ARCILOGGER hiçbir kuruluşun ağ planını taşımaz: aşağıdaki komutlarda `<…>` yerine kendi
@@ -506,6 +507,107 @@ lookup and lease timeline → Internet exits (NAT) ([INSTALL.md](INSTALL.md) sec
   tunnel) as exits of the type "Not an internet exit" (`internal`): until then they count as an
   unconfigured line (`R20-nat:unmapped-transip`, `egress_unmapped_seen`) and as unclaimed
   candidates.
+
+### 2.7 Güvenlik kuralları için kayıtlar (IPS, antivirüs, uygulama kontrolü, yönetici girişi, yapılandırma, performans) / Logs for the security rules (IPS, antivirus, application control, admin login, configuration, performance)
+
+Güvenlik kuralları ([UYARILAR.md](UYARILAR.md) bölüm 9) FortiGate'in aşağıdaki kayıtlarını okur.
+Bu kayıtlar gelmezse kural çalışır ama hiçbir şey bulmaz.
+
+| Kayıt (`type` / `subtype`) | Tablo | Kurallar |
+|---|---|---|
+| `utm` / `ips` | `fg_ips` | R05 (IPS imzası), R06 (botnet) |
+| `utm` / `virus` | `fg_virus` | R07 (zararlı yazılım) |
+| `utm` / `app-ctrl` | `fg_app` | R10 (Tor ve vekil sunucu) |
+| `event` / `system`: yönetici girişi (`0100032001`, `0100032002`) | `fg_event` | R03, R04 |
+| `event` / `system`: yapılandırma değişikliği (`0100044546`, `0100044547`) | `fg_event` | R16 |
+| `event` / `system`: performans istatistikleri (`0100040704`) | `fg_event` | R17 |
+
+Aşağıdaki komutlar **FortiOS 7.6** için yazılmıştır. Depoda bu kayıtların bir biçim örneği
+yoktur: `logid` değerleri ve alan adları kuralların varsayılan parametreleridir, yakalanmış
+değerler değildir. **Sahada doğrulayın:** her ayardan sonra Arama'da ilgili kaydın geldiğini
+görün; `logid` ya da alan adı farklıysa kuralın parametresini (`rules.<ID>` ayarı)
+değiştirin.
+
+```text
+# Olay (event) kayıtları: yönetici girişi, yapılandırma değişikliği, performans (sahada doğrula)
+config log eventfilter
+    set event enable
+    set system enable
+end
+# Performans istatistikleri her 5 dakikada bir (R17; sahada doğrula)
+config system global
+    set sys-perf-log-interval 5
+end
+# Syslog'a bilgi (information) düzeyindeki kayıtlar da gitsin (sahada doğrula)
+config log syslogd filter
+    set severity information
+end
+# IPS: imzaların kaydı ve botnet bağlantıları (R05, R06; sahada doğrula)
+config ips sensor
+    edit "<ips-profili>"
+        set scan-botnet-connections block
+        config entries
+            edit 1
+                set log enable
+            next
+        end
+    next
+end
+# Antivirüs (R07; sahada doğrula)
+config antivirus profile
+    edit "<av-profili>"
+        set av-virus-log enable
+    next
+end
+# Uygulama kontrolü (R10; sahada doğrula)
+config application list
+    edit "<uygulama-profili>"
+        set other-application-log enable
+        config entries
+            edit 1
+                set log enable
+            next
+        end
+    next
+end
+```
+
+Profiller yalnızca bağlı oldukları politikaların trafiğini kaydeder: internet politikalarında
+`set utm-status enable` ile `set ips-sensor "<ips-profili>"`, `set av-profile "<av-profili>"`
+ve `set application-list "<uygulama-profili>"` olmalı, `set logtraffic all` kalmalıdır (bölüm
+2.3). R06 ayrıca trafik kayıtlarındaki botnet işaretini okur.
+
+MikroTik tarafında aynı kurallar için bölüm 3'teki `account` (yönetici girişi: R03, R04) ve
+`system` (yapılandırma değişikliği: R16) konuları yeterlidir.
+
+**English.** The security rules ([ALERTS.md](ALERTS.md) section 9) read the following FortiGate
+logs. Without them a rule runs but finds nothing.
+
+| Log (`type` / `subtype`) | Table | Rules |
+|---|---|---|
+| `utm` / `ips` | `fg_ips` | R05 (IPS signature), R06 (botnet) |
+| `utm` / `virus` | `fg_virus` | R07 (malware) |
+| `utm` / `app-ctrl` | `fg_app` | R10 (Tor and proxies) |
+| `event` / `system`: admin login (`0100032001`, `0100032002`) | `fg_event` | R03, R04 |
+| `event` / `system`: configuration change (`0100044546`, `0100044547`) | `fg_event` | R16 |
+| `event` / `system`: performance statistics (`0100040704`) | `fg_event` | R17 |
+
+The commands above are written for **FortiOS 7.6**. The repository has no format sample of these
+logs: the `logid` values and field names are the rules' default parameters, not captured
+values. **Verify on site:** after each setting, see the log arrive in Search; if a `logid` or a
+field name differs, change the rule's parameter (the `rules.<ID>` setting). In order, the
+commands switch on the system event logs (admin login, configuration change, performance), the
+performance statistics every 5 minutes (R17), information-level logs to syslog, logging in the
+IPS sensor and its botnet scan (R05, R06), the antivirus log (R07) and the application-control
+log (R10).
+
+Profiles log only the traffic of the policies they are attached to: the internet policies need
+`set utm-status enable` with `set ips-sensor "<ips-profili>"`, `set av-profile "<av-profili>"`
+and `set application-list "<uygulama-profili>"`, and keep `set logtraffic all` (section 2.3). R06
+also reads the botnet mark in the traffic logs.
+
+On the MikroTik side the `account` (admin login: R03, R04) and `system` (configuration change:
+R16) topics of section 3 are enough for the same rules.
 
 ## 3. MikroTik (RouterOS 7)
 
