@@ -1,5 +1,6 @@
 import en from '@/locales/en.json';
 import tr from '@/locales/tr.json';
+import type { AlertOut } from '@/lib/api-types';
 import { ALERTS } from '@/test/samples';
 
 import {
@@ -253,14 +254,15 @@ describe('Wave 6 additions (§2.6.2)', () => {
     expect(isAlertViewFiltered({ ...DEFAULT_ALERT_VIEW, mine: true }, '')).toBe(true);
   });
 
-  it('reads the assignee and the evidence count, absent in the answers of older APIs', () => {
-    expect(assigneeOf({ assignee: { id: 1, username: 'tolga' } })).toEqual({
+  it("reads the assignee and the evidence count (none for a check's alert)", () => {
+    const alert = (fields: Partial<AlertOut>): AlertOut => ({ ...ALERTS.detail, ...fields });
+    expect(assigneeOf(alert({ assignee: { id: 1, username: 'tolga' } }))).toEqual({
       id: 1,
       username: 'tolga',
     });
-    expect(assigneeOf({})).toBeNull();
-    expect(evidenceTotalOf({ evidence_total: 47 })).toBe(47);
-    expect(evidenceTotalOf({})).toBe(0);
+    expect(assigneeOf(alert({ assignee: null }))).toBeNull();
+    expect(evidenceTotalOf(alert({ evidence_total: 47 }))).toBe(47);
+    expect(evidenceTotalOf(alert({ evidence_total: null }))).toBe(0);
   });
 
   it('offers active users whose role reads alerts', () => {

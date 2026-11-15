@@ -347,7 +347,7 @@ export class AlertsMock {
     found.updated_at = at;
     found.events.push({
       id: this.nextEvent++,
-      kind: 'assign' as AlertEvent['kind'],
+      kind: 'assign',
       from_state: null,
       to_state: null,
       text: assignee?.username ?? null,

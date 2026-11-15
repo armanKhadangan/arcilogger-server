@@ -8,12 +8,8 @@
  * the `@/` alias and reads no file.
  */
 
-import type {
-  AlertDetailWithRules,
-  AlertEvidencePage,
-  DayCounts,
-  AlertSummaryAdditions,
-} from '../lib/alert-rule-types';
+import type { AlertDetailWithRules, AlertEvidencePage, DayCounts } from '../lib/alert-rule-types';
+import type { AlertSummary } from '../lib/api-types';
 
 const TIME = '2026-10-13T08:41:07Z';
 
@@ -151,7 +147,7 @@ function day(offset: number): DayCounts {
   };
 }
 
-export const SUMMARY_ADDITIONS: Required<AlertSummaryAdditions> = {
+export const SUMMARY_ADDITIONS: Pick<AlertSummary, 'by_day' | 'top_rules' | 'top_keys'> = {
   by_day: Array.from({ length: 30 }, (_, index) => day(29 - index)),
   top_rules: [
     { rule: 'R01', count: 6 },
