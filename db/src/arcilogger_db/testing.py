@@ -240,6 +240,16 @@ class TestServer:
                     with Session(engine) as session:
                         seed_example_network(session)
                         session.commit()
+                # TimescaleDB: each copy's compression policies would compress, against today's
+                # date, the past days its test writes, and lock the chunk the test inserts into
+                # (DeadlockDetected, hung CI runs). They stay defined but paused in every copy;
+                # a test that needs a compressed chunk compresses it itself.
+                with engine.connect() as connection:
+                    timescale = connection.scalar(
+                        text("SELECT 1 FROM pg_extension WHERE extname = 'timescaledb'")
+                    )
+                if timescale:
+                    pause_compression_jobs(engine)
             finally:
                 engine.dispose()
             # TimescaleDB's background scheduler connects to every database with the extension;
