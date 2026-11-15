@@ -23,8 +23,10 @@ from arcilogger_db.partitions import ensure_partitions
 from arcilogger_db.settings import set_setting
 from arcilogger_worker.alerts.store import active_alert, change_state
 from arcilogger_worker.rules import engine as rule_engine
+from arcilogger_worker.rules.dryrun import DryRunTimeoutError, dry_run
 from arcilogger_worker.rules.engine import FAILING_RULE, failing_key, run_rules
 from arcilogger_worker.rules.model import EvidenceRef, Hit, Param, RuleContext, RuleDef
+from arcilogger_worker.rules.settings import RuleSettingsError
 
 NOW = datetime(2026, 11, 12, 9, 45, tzinfo=UTC)
 #: The horizon at NOW with the default ``rules.lag_seconds`` (120).
@@ -344,8 +346,10 @@ def test_an_active_alert_is_updated_and_its_evidence_capped(
     details = _run(sessions, first + timedelta(minutes=1))
     assert (details["opened"], details["updated"]) == (0, 1)
     (alert,) = _alerts(sessions)
-    assert alert.details["count"] == 5 + 9  # the window of the second slice holds all nine
-    assert alert.details["evidence_total"] == 14
+    # The largest window count: the second slice's window holds all nine rows, the first one's
+    # five of them; a sum (14) would count those five twice.
+    assert alert.details["count"] == 9
+    assert alert.details["evidence_total"] == 9
     evidence = _evidence(sessions, alert.id)
     assert [row.n for row in evidence] == list(range(1, 8))
     assert len({(row.tbl, row.row_id) for row in evidence}) == 7
@@ -449,3 +453,62 @@ def test_hit_values_are_kept_as_json() -> None:
         "by": {"tcp": 3},
         "ip": "172.20.41.17",
     }
+
+
+# -- T-A5: dry run --------------------------------------------------------------------------------
+
+
+def _counts(sessions: sessionmaker[Session]) -> dict[str, int]:
+    with sessions() as session:
+        return {
+            table: session.scalar(text(f"SELECT count(*) FROM {table}")) or 0  # noqa: S608 - fixed names
+            for table in ("alerts", "alert_evidence", "alert_events", "rule_state", "settings")
+        }
+
+
+def test_the_dry_run_answers_what_the_live_run_does_and_writes_nothing(
+    sessions: sessionmaker[Session],
+) -> None:
+    candidate = {"params": {"threshold": 4}}
+    _setting(sessions, "rules.R02", candidate)
+    _setting(sessions, "rules.max_slice_seconds", 3600)
+    for hours, count, srcip in ((20, 5, SCANNER), (10, 3, SCANNER), (5, 6, OTHER), (2, 4, SCANNER)):
+        _rows(sessions, HORIZON - timedelta(hours=hours, seconds=-10), count, srcip=srcip)
+    before = _counts(sessions)
+    with sessions() as session:
+        result = dry_run(session, RULE, candidate, NOW).as_json()
+    assert _counts(sessions) == before
+    assert result["would_open"] == 2
+    # SCANNER: five rows at -20 h and four at -2 h (the three at -10 h stay below the threshold);
+    # its count is the largest window, five.
+    assert [(item["key"], item["count"]) for item in result["keys"]] == [(SCANNER, 5), (OTHER, 6)]
+    assert result["truncated"] is False
+    assert result["duration_ms"] >= 0
+    # The live run over the same 24 hours opens the same alerts.
+    with sessions() as session:
+        session.add(RuleState(rule="R02", watermark=HORIZON - timedelta(hours=24), failures=0))
+        session.commit()
+    details = _run(sessions)
+    assert details["opened"] == 2
+    assert {alert.details["key"]: alert.details["count"] for alert in _alerts(sessions)} == {
+        SCANNER: 5,
+        OTHER: 6,
+    }
+
+
+def test_the_dry_run_refuses_invalid_candidates_and_times_out(
+    sessions: sessionmaker[Session],
+) -> None:
+    with sessions() as session, pytest.raises(RuleSettingsError) as caught:
+        dry_run(session, RULE, {"params": {"threshold": 0}}, NOW)
+    assert caught.value.field == "params.threshold"
+    _setting(sessions, "rules.dry_run_timeout_seconds", 5)
+
+    def slow(session: Session, context: RuleContext) -> Iterable[Hit]:
+        session.execute(text("SELECT pg_sleep(6)"))
+        return ()
+
+    with sessions() as session, pytest.raises(DryRunTimeoutError):
+        dry_run(session, RuleDef(**{**RULE.__dict__, "evaluate": slow}), {}, NOW)
+    with sessions() as session, pytest.raises(KeyError):
+        dry_run(session, "R15", {}, NOW)
