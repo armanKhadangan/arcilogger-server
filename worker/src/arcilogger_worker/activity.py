@@ -283,8 +283,9 @@ class Snapshot:
         self._pruned = 0
         #: The file: per minute its JSON and its subjects, the minutes whose totals changed
         #: since, and the tables of destinations and applications the minutes refer to.
-        #: minute → subject → (its JSON, the destination and application ids it names)
-        self._pieces: dict[int, dict[str, tuple[str, frozenset[int], frozenset[int]]]] = {}
+        #: minute → subject → (its JSON, the destination and application ids it names; tuples,
+        #: which the collector stops tracking, see :class:`Packed`)
+        self._pieces: dict[int, dict[str, tuple[str, tuple[int, ...], tuple[int, ...]]]] = {}
         self._fragments: dict[int, str] = {}
         self._dirty: set[tuple[int, str]] = set()
         self._destinations: dict[tuple[str, str], int] = {}
@@ -821,7 +822,7 @@ class Snapshot:
         self._dirty.clear()
         return touched
 
-    def _piece(self, minute: int, key: str) -> tuple[str, frozenset[int], frozenset[int]] | None:
+    def _piece(self, minute: int, key: str) -> tuple[str, tuple[int, ...], tuple[int, ...]] | None:
         """One subject's entry of a minute (``None`` without traffic): ``"key":[download,
         upload, sessions, [[destination, bytes]], [[application, bytes]]]``, whole bytes, with
         the destination and application ids it names."""
@@ -855,8 +856,8 @@ class Snapshot:
         entry = [max(round(down), 0), max(round(up), 0), max(sessions, 0), destinations, apps]
         return (
             f"{json.dumps(key)}:{json.dumps(entry, separators=(',', ':'))}",
-            frozenset(i for i, _ in destinations),
-            frozenset(i for i, _ in apps),
+            tuple(i for i, _ in destinations),
+            tuple(i for i, _ in apps),
         )
 
 
