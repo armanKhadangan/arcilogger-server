@@ -39,12 +39,12 @@ from pathlib import Path
 from types import ModuleType
 from typing import Any
 
-import psycopg
 import pytest
 from sqlalchemy import Engine, delete, insert, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from arcilogger_core.layout import Layout
+from arcilogger_db.bulk import copy_rows
 from arcilogger_db.models import FgDns, FgTraffic, FgWeb
 from arcilogger_db.partitions import ensure_partitions
 from arcilogger_worker.activity import Runner
@@ -240,18 +240,19 @@ OMITTED: dict[str, object] = {"is_interim": False}
 
 
 def copy(session: Session, table: Any, rows: list[dict[str, Any]]) -> None:
-    """Write ``rows`` (one table's, from :func:`rows_by_table`) with ``COPY`` and commit: the
-    values :func:`write` inserts, in the same order, so the same ids."""
+    """Write ``rows`` (one table's, from :func:`rows_by_table`) with ``COPY``
+    (:func:`~arcilogger_db.bulk.copy_rows`) and commit: the values :func:`write` inserts, in the
+    same order, so the same ids."""
     # Every column a row names (an interim log names more than a final one), in the table's
     # order; a row without one gets what the database would give it.
     present = set().union(*(row.keys() for row in rows))
     columns = [column.name for column in table.__table__.columns if column.name in present]
-    statement = f"COPY {table.__tablename__} ({', '.join(columns)}) FROM STDIN"
-    connection = session.connection().connection.driver_connection
-    assert isinstance(connection, psycopg.Connection)
-    with connection.cursor() as cursor, cursor.copy(statement) as stream:
-        for row in rows:
-            stream.write_row([row.get(name, OMITTED.get(name)) for name in columns])
+    copy_rows(
+        session.connection(),
+        table.__tablename__,
+        ({**OMITTED, **row} for row in rows),
+        columns=columns,
+    )
     session.commit()
 
 
