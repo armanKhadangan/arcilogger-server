@@ -3,9 +3,15 @@
 Every rule of the registry has at least one positive case (it raises the alerts listed in
 :attr:`RuleCase.expected`) and one negative case (just below the threshold: no alert). A case is
 data only: the rows it writes into the parsed tables (:class:`CaseRow`), the overrides of its
-rule's settings (``rules.<ID>`` shape) and what the rule must answer. The engine tests write the
-rows with the common columns filled in (``source``, ``sender``, the raw reference), evaluate the
-rule on the slice that ends at :data:`SLICE_END` and compare the hits.
+rule's settings (``rules.<ID>`` shape) and what the rule must answer. ``test_rules_cases.py``
+writes the rows, runs the rule through the engine on the slice that ends at :data:`SLICE_END` and
+compares the alerts. The writer fills in what a row does not name:
+
+- a parsed row gets ``source`` (``fortigate`` for an ``fg_*`` table, ``core-r1`` otherwise) unless
+  its values name one, and the sender and its raw reference (``raw_day``, ``raw_line``,
+  ``raw_offset``) always; ``extra`` is ``{}`` unless named;
+- a ``devices`` row gets ``created_at`` = its receive time and ``first_seen`` = ``last_seen`` = its
+  device time (receive time plus :attr:`CaseRow.device_offset`).
 
 Each rule package appends **one block** of cases for its rules (append-only, contract §4.1):
 W6-B network, W6-C access, W6-D threats, W6-E people. Every value comes from the fictional world
@@ -65,6 +71,11 @@ class RuleCase:
     settings: Mapping[str, object] = field(default_factory=dict)
     #: Length of the evaluated slice; ``None``: ``rules.max_slice_seconds``.
     slice_seconds: int | None = None
+    #: The cooldown case: a closed alert of every expected key, this long before
+    #: :data:`SLICE_END` (its ``time``). Inside the rule's cooldown the hits are counted on that
+    #: alert's ``after_close`` and no alert opens; past it a new alert opens as in a positive case.
+    #: The closed alert's time plus the cooldown must not fall inside the slice.
+    closed_before: timedelta | None = None
 
     @property
     def positive(self) -> bool:
@@ -321,5 +332,368 @@ CASES.extend(
             ),
             overrides=_NOON,
         ),
+    ]
+)
+
+
+# -- W6-B network: R01, R02, R08, R10, R19 (contract §2.2.1) --------------------------------------
+
+_SCANNER: Final = "172.20.41.17"
+_OUTSIDE: Final = "203.0.113.50"
+
+
+def _deny(srcip: str, seconds_before: int, **values: object) -> CaseRow:
+    """A blocked FortiGate session from ``srcip``, received ``seconds_before`` the slice end."""
+    columns = {"srcip": srcip, "dstip": "198.51.100.10", "dstport": 443, "action": "deny"}
+    return CaseRow("fg_traffic", -timedelta(seconds=seconds_before), {**columns, **values})
+
+
+def _dns_bypass(repeat: int) -> CaseRow:
+    columns = {"srcip": _SCANNER, "dstip": "198.51.100.53", "dstport": 53, "action": "accept"}
+    return CaseRow("fg_traffic", -timedelta(seconds=60), columns, repeat=repeat)
+
+
+def _nxdomain(repeat: int) -> CaseRow:
+    """DNS answers "no such name"; the response code in ``extra`` is V6 (sahada doğrula)."""
+    columns = {"srcip": _SCANNER, "qname": "x7k2q9.example", "extra": {"rcode": "NXDOMAIN"}}
+    return CaseRow("fg_dns", -timedelta(seconds=300), columns, repeat=repeat)
+
+
+_DNS_SERVERS: Final = {"params": {"allowed_dns_servers": ["172.20.10.1"]}}
+
+CASES.extend(
+    [
+        RuleCase(
+            "R01",
+            "ports",
+            tuple(_deny(_SCANNER, 59 - n, dstport=1000 + n) for n in range(30)),
+            (ExpectedHit(_SCANNER, 30, {"ports": 30, "hosts": 1}, evidence=20),),
+        ),
+        RuleCase(
+            "R01",
+            "hosts",
+            tuple(_deny(_SCANNER, 59 - n, dstip=f"172.20.50.{n + 1}") for n in range(50)),
+            (ExpectedHit(_SCANNER, 50, {"ports": 1, "hosts": 50}, evidence=20),),
+        ),
+        RuleCase(
+            "R01",
+            "below",
+            tuple(_deny(_SCANNER, 59 - n, dstport=1000 + n) for n in range(29)),
+        ),
+        RuleCase(
+            "R02",
+            "scan",
+            (
+                CaseRow(
+                    "fg_traffic", -timedelta(seconds=120), _deny(_OUTSIDE, 0).values, repeat=100
+                ),
+            ),
+            (ExpectedHit(_OUTSIDE, 100, evidence=20),),
+        ),
+        RuleCase(
+            "R02",
+            "below",
+            (CaseRow("fg_traffic", -timedelta(seconds=120), _deny(_OUTSIDE, 0).values, repeat=99),),
+        ),
+        RuleCase(
+            "R08",
+            "bypass",
+            (_dns_bypass(20),),
+            (ExpectedHit(_SCANNER, 20, {"servers": 1}, evidence=20),),
+            overrides=_DNS_SERVERS,
+        ),
+        RuleCase("R08", "below", (_dns_bypass(19),), overrides=_DNS_SERVERS),
+        RuleCase(
+            "R10",
+            "proxy",
+            (
+                CaseRow(
+                    "fg_web",
+                    -timedelta(seconds=30),
+                    {"srcip": _SCANNER, "catdesc": "Proxy Avoidance"},
+                ),
+            ),
+            (ExpectedHit(_SCANNER, 1, {"what": "Proxy Avoidance"}, evidence=1),),
+        ),
+        RuleCase(
+            "R10",
+            "other",
+            (CaseRow("fg_web", -timedelta(seconds=30), {"srcip": _SCANNER, "catdesc": "News"}),),
+        ),
+        RuleCase(
+            "R19",
+            "dga",
+            (_nxdomain(201),),
+            (ExpectedHit(_SCANNER, 201, evidence=20),),
+        ),
+        RuleCase("R19", "at-threshold", (_nxdomain(200),)),
+    ]
+)
+
+
+# -- W6-C: access and devices (R03, R04, R11, R12, R16) -------------------------------------------
+#
+# Every parsed row names its ``source`` (``core-r1`` for the router, ``fortigate``): R16's key
+# holds it. A ``devices`` row is assumed to get ``created_at`` = its receive time and
+# ``first_seen`` = its device time (R11 reads the insert time, deviation in the contract).
+# SLICE_END is a Thursday, 12:45 site time: within the default work hours.
+
+_FAILED_LOGIN: Final = {
+    "source": "fortigate",
+    "logid": "0100032002",
+    "subtype": "system",
+    "logdesc": "Admin login failed",
+    "user_name": "admin",
+    "srcip": "172.20.41.196",
+    "action": "login",
+    "status": "failed",
+}
+_ROUTER_LOGIN: Final = {
+    "source": "core-r1",
+    "action": "login",
+    "user_name": "netops",
+    "via": "winbox",
+}
+
+CASES.extend(
+    [
+        RuleCase(
+            "R03",
+            "five-failed-logins",
+            (CaseRow("fg_event", timedelta(seconds=-120), _FAILED_LOGIN, repeat=5),),
+            expected=(
+                ExpectedHit("user:admin", 5, {"failures": 5}, evidence=5),
+                ExpectedHit("ip:172.20.41.196", 5, {"failures": 5}, evidence=5),
+            ),
+        ),
+        RuleCase(
+            "R03",
+            "four-failed-logins",
+            (CaseRow("fg_event", timedelta(seconds=-120), _FAILED_LOGIN, repeat=4),),
+        ),
+        RuleCase(
+            "R03",
+            "router-and-firewall-together",
+            (
+                CaseRow("fg_event", timedelta(seconds=-90), _FAILED_LOGIN, repeat=3),
+                CaseRow(
+                    "mt_account",
+                    timedelta(seconds=-60),
+                    {
+                        "source": "core-r1",
+                        "action": "login_failure",
+                        "user_name": "admin",
+                        "ip": "172.20.41.196",
+                    },
+                    repeat=2,
+                ),
+            ),
+            expected=(
+                ExpectedHit("user:admin", 5),
+                ExpectedHit("ip:172.20.41.196", 5),
+            ),
+        ),
+        RuleCase(
+            "R04",
+            "login-from-an-unexpected-address",
+            (
+                CaseRow(
+                    "mt_account", timedelta(seconds=-60), {**_ROUTER_LOGIN, "ip": "172.20.41.196"}
+                ),
+            ),
+            expected=(
+                ExpectedHit(
+                    "user:netops",
+                    1,
+                    {"srcip": "172.20.41.196", "reason_en": "unexpected address"},
+                    evidence=1,
+                ),
+            ),
+            overrides={"params": {"trusted_admin_networks": ["172.20.10.0/24"]}},
+        ),
+        RuleCase(
+            "R04",
+            "login-after-work-hours",
+            (
+                CaseRow(
+                    "mt_account", timedelta(seconds=-60), {**_ROUTER_LOGIN, "ip": "172.20.10.37"}
+                ),
+            ),
+            expected=(ExpectedHit("user:netops", 1, {"reason_en": "off hours"}),),
+            settings={
+                "usage.work_hours": {"days": [1, 2, 3, 4, 5], "start": "08:00", "end": "12:00"}
+            },
+        ),
+        RuleCase(
+            "R04",
+            "login-at-work-from-the-admin-network",
+            (
+                CaseRow(
+                    "mt_account", timedelta(seconds=-60), {**_ROUTER_LOGIN, "ip": "172.20.10.37"}
+                ),
+            ),
+            overrides={"params": {"trusted_admin_networks": ["172.20.10.0/24"]}},
+        ),
+        RuleCase(
+            "R11",
+            "a-new-device",
+            (
+                CaseRow(
+                    "devices",
+                    timedelta(seconds=-30),
+                    {"mac": "00:00:5e:00:53:f0", "last_ip": "172.20.43.240", "last_vlan": 43},
+                ),
+            ),
+            expected=(ExpectedHit("00:00:5e:00:53:f0", 1, {"ip": "172.20.43.240", "vlan": 43}),),
+        ),
+        RuleCase(
+            "R11",
+            "an-infrastructure-device",
+            (
+                CaseRow(
+                    "devices",
+                    timedelta(seconds=-30),
+                    {"mac": "00:00:5e:00:53:f1", "last_vlan": 10, "infrastructure": True},
+                ),
+            ),
+        ),
+        RuleCase(
+            "R12",
+            "three-mac-changes",
+            tuple(
+                CaseRow(
+                    "mt_arp",
+                    timedelta(minutes=minutes),
+                    {"source": "core-r1", "ip": "172.20.43.50", "mac": mac, "interface": "vlan43"},
+                )
+                for minutes, mac in (
+                    (-30, "00:00:5e:00:53:e1"),
+                    (-20, "00:00:5e:00:53:e2"),
+                    (-10, "00:00:5e:00:53:e1"),
+                    (-1, "00:00:5e:00:53:e2"),
+                )
+            ),
+            expected=(
+                ExpectedHit(
+                    "172.20.43.50",
+                    3,
+                    {"changes": 3, "macs": ["00:00:5e:00:53:e1", "00:00:5e:00:53:e2"]},
+                    evidence=3,
+                ),
+            ),
+        ),
+        RuleCase(
+            "R12",
+            "two-mac-changes",
+            tuple(
+                CaseRow(
+                    "mt_arp",
+                    timedelta(minutes=minutes),
+                    {"source": "core-r1", "ip": "172.20.43.50", "mac": mac, "interface": "vlan43"},
+                )
+                for minutes, mac in (
+                    (-20, "00:00:5e:00:53:e1"),
+                    (-10, "00:00:5e:00:53:e2"),
+                    (-1, "00:00:5e:00:53:e1"),
+                )
+            ),
+        ),
+        RuleCase(
+            "R16",
+            "router-configuration-changes",
+            (
+                CaseRow(
+                    "mt_config",
+                    timedelta(seconds=-60),
+                    {
+                        "source": "core-r1",
+                        "action": "changed",
+                        "user_name": "admin",
+                        "target": "filter rule",
+                    },
+                    repeat=2,
+                ),
+            ),
+            expected=(ExpectedHit("core-r1:admin", 2, {"changes": 2}, evidence=2),),
+        ),
+        RuleCase(
+            "R16",
+            "an-event-of-another-logid",
+            (
+                CaseRow(
+                    "fg_event",
+                    timedelta(seconds=-60),
+                    {
+                        "source": "fortigate",
+                        "logid": "9900000010",
+                        "logdesc": "Configuration changed",
+                        "user_name": "admin",
+                    },
+                ),
+            ),
+        ),
+    ]
+)
+
+#: The cooldown cases of the network rules (T-R): each rule's main positive case, with an alert of
+#: its keys closed 10 minutes before the slice end. Every network rule's cooldown is an hour, so
+#: the hits are counted on the closed alert's ``after_close`` and no alert opens.
+_NETWORK_COOLED: Final = timedelta(minutes=10)
+_NETWORK_MAIN: Final = {
+    "R01": "ports",
+    "R02": "scan",
+    "R08": "bypass",
+    "R10": "proxy",
+    "R19": "dga",
+}
+CASES.extend(
+    [
+        RuleCase(
+            case.rule,
+            f"{case.name}-cooldown",
+            case.rows,
+            case.expected,
+            overrides=case.overrides,
+            settings=case.settings,
+            slice_seconds=case.slice_seconds,
+            closed_before=_NETWORK_COOLED,
+        )
+        for case in CASES
+        if _NETWORK_MAIN.get(case.rule) == case.name
+    ]
+)
+
+# -------------------------------------------------------------------------------------------------
+# W6-D and W6-E — cooldown cases (one per rule, issues #246 and #247): a positive case of the
+# rule, with a closed alert of each expected key ten minutes before the slice. Every one of these
+# rules has a cooldown of an hour or more, so the hits are counted on that alert's
+# ``after_close`` and no alert opens.
+# -------------------------------------------------------------------------------------------------
+
+
+def _in_cooldown(rule: str, name: str) -> RuleCase:
+    case = next(case for case in CASES if case.rule == rule and case.name == name)
+    return RuleCase(
+        case.rule,
+        f"{case.name}-in-cooldown",
+        case.rows,
+        case.expected,
+        overrides=case.overrides,
+        settings=case.settings,
+        slice_seconds=case.slice_seconds,
+        closed_before=timedelta(minutes=10),
+    )
+
+
+CASES.extend(
+    [
+        _in_cooldown("R05", "high-severity-each"),
+        _in_cooldown("R06", "botnet"),
+        _in_cooldown("R07", "malware"),
+        _in_cooldown("R17", "cpu-sustained"),
+        _in_cooldown("R18", "mikrotik-pool-empty"),
+        _in_cooldown("R09", "blocked-20"),
+        _in_cooldown("R13", "sent-1100-mib"),
+        _in_cooldown("R14", "night-10-mib"),
     ]
 )
