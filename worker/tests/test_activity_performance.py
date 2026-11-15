@@ -31,6 +31,7 @@ import sys
 import threading
 import time
 from collections.abc import Callable, Iterator
+from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from functools import cache
@@ -38,8 +39,9 @@ from pathlib import Path
 from types import ModuleType
 from typing import Any
 
+import psycopg
 import pytest
-from sqlalchemy import Engine, insert
+from sqlalchemy import Engine, delete, insert, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from arcilogger_core.layout import Layout
@@ -70,6 +72,8 @@ INTERIM = 120
 #: written as it is generated, this many lines at a time.
 HISTORY = timedelta(minutes=95)
 CHUNK = 100_000
+#: Chunks of a table waiting to be written, at most (:class:`History`).
+BEHIND = 2
 
 
 @cache
@@ -203,8 +207,8 @@ def generate(
             pending = []
 
 
-def write(session: Session, lines: list[Line]) -> int:
-    """Insert ``lines`` (in time order, as ingest would); returns how many."""
+def rows_by_table(lines: list[Line]) -> dict[Any, list[dict[str, Any]]]:
+    """The rows of ``lines`` as ingest would store them, in time order, per table."""
     by_table: dict[Any, list[dict[str, Any]]] = {}
     for number, (table, row) in enumerate(sorted(lines, key=lambda line: line[1]["time"])):
         values = {
@@ -219,11 +223,70 @@ def write(session: Session, lines: list[Line]) -> int:
         if table is FgTraffic:
             values.update(subtype="forward", proto=6, trandisp="snat")
         by_table.setdefault(table, []).append(values)
-    for table, rows in by_table.items():
+    return by_table
+
+
+def write(session: Session, lines: list[Line]) -> int:
+    """Insert ``lines`` (in time order, as ingest would); returns how many."""
+    for table, rows in rows_by_table(lines).items():
         for start in range(0, len(rows), 5000):
             session.execute(insert(table), rows[start : start + 5000])
     session.commit()
     return len(lines)
+
+
+#: What a column a row leaves out holds (its server default); every other one is NULL.
+OMITTED: dict[str, object] = {"is_interim": False}
+
+
+def copy(session: Session, table: Any, rows: list[dict[str, Any]]) -> None:
+    """Write ``rows`` (one table's, from :func:`rows_by_table`) with ``COPY`` and commit: the
+    values :func:`write` inserts, in the same order, so the same ids."""
+    # Every column a row names (an interim log names more than a final one), in the table's
+    # order; a row without one gets what the database would give it.
+    present = set().union(*(row.keys() for row in rows))
+    columns = [column.name for column in table.__table__.columns if column.name in present]
+    statement = f"COPY {table.__tablename__} ({', '.join(columns)}) FROM STDIN"
+    connection = session.connection().connection.driver_connection
+    assert isinstance(connection, psycopg.Connection)
+    with connection.cursor() as cursor, cursor.copy(statement) as stream:
+        for row in rows:
+            stream.write_row([row.get(name, OMITTED.get(name)) for name in columns])
+    session.commit()
+
+
+class History:
+    """The history's ``write_before`` (#227): each table's rows of a chunk go to :func:`copy` on
+    a thread and a connection of that table's, while the next chunk is generated. A table's
+    chunks are written in order, so its ids are :func:`write`'s; at most :data:`BEHIND` of them
+    wait, so the history is never held in memory. Leaving the ``with`` waits for the last."""
+
+    def __init__(self, factory: sessionmaker[Session]) -> None:
+        self.factory = factory
+        self.writers: dict[Any, tuple[ThreadPoolExecutor, Session, list[Future[None]]]] = {}
+
+    def __enter__(self) -> History:
+        return self
+
+    def __call__(self, lines: list[Line]) -> int:
+        for table, rows in rows_by_table(lines).items():
+            if table not in self.writers:
+                self.writers[table] = (ThreadPoolExecutor(max_workers=1), self.factory(), [])
+            pool, session, queued = self.writers[table]
+            while len(queued) >= BEHIND:
+                queued.pop(0).result()
+            queued.append(pool.submit(copy, session, table, rows))
+        return len(lines)
+
+    def __exit__(self, *exc_info: object) -> None:
+        try:
+            for _, _, queued in self.writers.values():
+                for future in queued:
+                    future.result()
+        finally:
+            for pool, session, _ in self.writers.values():
+                pool.shutdown(cancel_futures=True)
+                session.close()
 
 
 class Clock:
@@ -265,7 +328,8 @@ def test_the_snapshot_keeps_up_and_the_loop_is_not_held(
     with db_engine.begin() as connection:
         ensure_partitions(connection, today=DAY)
     started = time.monotonic()
-    load = generate(rate, devices, seed=5651, write_before=lambda lines: write(db_session, lines))
+    with History(db_session_factory) as history:
+        load = generate(rate, devices, seed=5651, write_before=history)
     later = load.later
     figures: dict[str, Any] = {
         "lines_per_second": round(
@@ -344,3 +408,40 @@ def test_the_snapshot_keeps_up_and_the_loop_is_not_held(
     assert figures["data_until_lag_max_s"] <= LAG_LIMIT.total_seconds()
     assert len(starts) >= TICKS
     assert figures["probe_late_max_s"] < PROBE_LATE.total_seconds()
+
+
+def test_the_history_is_written_as_the_inserts_write_it(
+    db_engine: Engine,
+    db_session: Session,
+    db_session_factory: sessionmaker[Session],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """#227: :class:`History` writes what :func:`write` writes, over several chunks: the same
+    tables, the same rows and the same content, in the same id order."""
+    with db_engine.begin() as connection:
+        ensure_partitions(connection, today=DAY)
+    monkeypatch.setitem(globals(), "CHUNK", 1000)
+    tables = (FgTraffic, FgWeb, FgDns)
+
+    def stored() -> dict[str, list[dict[str, Any]]]:
+        """Each table's rows by id, the ids counted from the table's first."""
+        result = {}
+        for table in tables:
+            rows = db_session.execute(select(table.__table__).order_by(table.id)).mappings().all()
+            first = rows[0]["id"] if rows else 0
+            result[table.__tablename__] = [{**row, "id": row["id"] - first} for row in rows]
+            db_session.execute(delete(table))
+        db_session.commit()
+        return result
+
+    old = generate(3.0, 100, seed=5651, write_before=lambda lines: write(db_session, lines))
+    inserted = stored()
+    with History(db_session_factory) as history:
+        new = generate(3.0, 100, seed=5651, write_before=history)
+    copied = stored()
+    assert new.before == old.before > 5 * CHUNK
+    assert {name: len(rows) for name, rows in copied.items()} == {
+        name: len(rows) for name, rows in inserted.items()
+    }
+    assert all(inserted.values())
+    assert copied == inserted
