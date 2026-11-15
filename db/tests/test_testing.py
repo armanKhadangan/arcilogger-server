@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 
@@ -105,3 +106,27 @@ def test_stale_databases_of_dead_processes_are_dropped(pg_server: TestServer) ->
     finally:
         pg_server.drop_database(stale)
         pg_server.drop_database(alive)
+
+
+def test_a_test_database_has_its_compression_policies_paused(db_engine: Engine) -> None:
+    """A copy of the template keeps its compression policies defined but not scheduled: run
+    against today's date they compressed the past days a test writes, under the test's inserts
+    (DeadlockDetected in test_activity.py, hung CI runs). On the Linux CI job
+    (``ARCILOGGER_EXPECT_TIMESCALE=1``) it fails instead of skipping."""
+    with db_engine.connect() as connection:
+        status = connection.execute(
+            text("SELECT value FROM settings WHERE key = 'db.timescale'")
+        ).scalar_one()
+        if status["storage"] != "hypertables":
+            if os.environ.get("ARCILOGGER_EXPECT_TIMESCALE") == "1":
+                pytest.fail(f"TimescaleDB expected but the template has {status['storage']}")
+            pytest.skip("TimescaleDB is not installed (the Linux CI job runs this)")
+        scheduled = connection.execute(
+            text(
+                "SELECT hypertable_name, scheduled FROM timescaledb_information.jobs "
+                "WHERE proc_name = 'policy_compression'"
+            )
+        ).all()
+    assert [name for name, on in scheduled if on] == []
+    if status.get("compression"):
+        assert scheduled, "the policies stay defined"
