@@ -671,7 +671,7 @@ class _MemoryStore:
 
 
 class _TableStore:
-    """The live runs' totals: the tables of ``0026_rule_traffic_totals``, written in the slice's
+    """The live runs' totals: the tables of ``0027_rule_traffic_totals``, written in the slice's
     transaction (a rolled-back slice rolls them back too)."""
 
     def filled_until(self, session: Session, period: _Period) -> datetime | None:

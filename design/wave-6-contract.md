@@ -810,7 +810,7 @@ to the normal site: `port-scan` (R01), `external-scan` (R02), `brute-force` (R03
 
 - **W6-E-1: a bucket's first and last receive time may name a log that no longer counts.** R13's
   day and R14's nights are kept per address, minute of device time and minute of receive time
-  (`rule_traffic_totals`, revision `0026_rule_traffic_totals`), and each slice adds what the
+  (`rule_traffic_totals`, revision `0027_rule_traffic_totals`), and each slice adds what the
   sessions it touches change. Bytes and log counts are exact: a session is counted again as of
   the slice start and as of its end, so a late log that changes the increment of a log counted
   before is taken into account (the "counter case": a late interim log with the final log's

@@ -1,6 +1,6 @@
 """R13's and R14's running traffic totals (#280).
 
-Revision ID: 0026_rule_traffic_totals
+Revision ID: 0027_rule_traffic_totals
 Revises: 0025_admin_webhook_test
 Create Date: 2026-11-15
 
@@ -27,7 +27,7 @@ import sqlalchemy as sa
 from alembic import op
 from sqlalchemy.dialects import postgresql
 
-revision: str = "0026_rule_traffic_totals"
+revision: str = "0027_rule_traffic_totals"
 down_revision: str | Sequence[str] | None = "0025_admin_webhook_test"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None

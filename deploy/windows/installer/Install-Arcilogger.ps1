@@ -588,8 +588,8 @@ $LosslessDowngrades = @(
     # Drops R13's and R14's running traffic totals (rule_traffic_state, rule_traffic_totals,
     # rule_traffic_evidence): derived from fg_traffic, the next rules.run rebuilds the current
     # period with one read; raw logs, log rows, leases and alerts keep every row
-    # (v0026_rule_traffic_totals.py).
-    '0026_rule_traffic_totals',
+    # (v0027_rule_traffic_totals.py).
+    '0027_rule_traffic_totals',
     # Deletes the worker.webhook_test requests ("Test gönder" of Ayarlar -> Webhook'lar, Wave 6)
     # and narrows the kind check again: request history only, the outcome stays in the audit log
     # (webhook.test); raw logs, log rows, leases and alerts keep every row
