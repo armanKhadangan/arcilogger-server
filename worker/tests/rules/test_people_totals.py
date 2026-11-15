@@ -373,3 +373,48 @@ def test_a_dry_run_keeps_the_same_totals_in_its_session(db_session: Session) -> 
     db_session.rollback()
     assert dry == live
     assert any(live)
+
+
+def test_a_kept_evidence_list_is_read_again_after_a_late_log(db_session: Session) -> None:
+    """An address's kept list of its oldest counted logs is dropped when a late log makes one of
+    them count 0, and read again: the next hit's evidence leaves that log out."""
+    ip = "172.20.43.30"
+    at = MIDNIGHT + timedelta(minutes=5)
+    logs = [
+        Log(ip, 8000, at, at, True, 40 * KIB, 0, 40 * KIB, 0),
+        Log(ip, 8000, at + timedelta(seconds=30), at + timedelta(seconds=30), False, 100 * KIB, 0),
+    ]
+    logs += [
+        Log(
+            ip,
+            8001 + n,
+            at + timedelta(seconds=40 + n),
+            at + timedelta(seconds=40 + n),
+            False,
+            10 * KIB,
+            0,
+        )
+        for n in range(120)
+    ]
+    write(db_session, logs)
+    entry = rule("R13")
+    chosen = settings(entry, {"hour_bytes": 1024**4, "day_bytes": KIB})
+    first = hits(db_session, entry, chosen, at - timedelta(minutes=1), at + timedelta(minutes=9))
+    zeroed = db_session.scalars(
+        select(FgTraffic.id).where(FgTraffic.sessionid == 8000, FgTraffic.is_interim.is_(False))
+    ).one()
+    assert zeroed in [row_id for _, row_id in first[0][4]]
+    assert db_session.scalars(select(func.count()).select_from(RuleTrafficEvidence)).one() == 1
+    # The late interim log with the final log's counters, and a new log of the address.
+    late_at = at + timedelta(minutes=12)
+    write(
+        db_session,
+        [
+            Log(ip, 8000, at + timedelta(seconds=20), late_at, True, 100 * KIB, 0, 0, 0),
+            Log(ip, 9000, late_at, late_at, False, 10 * KIB, 0),
+        ],
+    )
+    start, end = at + timedelta(minutes=9), at + timedelta(minutes=19)
+    second = hits(db_session, entry, chosen, start, end)
+    assert second == once(db_session, partial(hits, db_session, entry, chosen, start, end))
+    assert zeroed not in [row_id for _, row_id in second[0][4]]
