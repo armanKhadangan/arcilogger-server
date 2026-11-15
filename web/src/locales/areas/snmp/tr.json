@@ -43,7 +43,11 @@
         "capacityBoth": "İndirme ve yükleme birlikte girilir.",
         "noLine": "En az bir WAN arayüzü girin.",
         "tooManyLines": "En çok 4 WAN hattı."
-      }
+      },
+      "test": "Bağlantıyı dene",
+      "testHint": "Kaydetmeden önce cihaza bu değerlerle bağlanır ve bildirdiği arayüzleri listeler; WAN hatlarını listeden seçin. Hiçbir şey kaydedilmez. Parola onayı ister, dakikada bir kez denenebilir.",
+      "testing": "Cihaz deneniyor…",
+      "testFailed": "Bağlantı denemesi başarısız: {{reason}} Arayüz adlarını elle yazabilirsiniz."
     },
     "review": {
       "field": "{{name}} · SNMP: {{field}}",
@@ -96,7 +100,11 @@
       "name": "Ad (ifName)",
       "status": "Durum",
       "speed": "Hız (Mbit/s)",
-      "hint": "WAN hattının adını bu listeden kaynağın SNMP bölümüne yazın."
+      "hint": "WAN hattının adını bu listeden kaynağın SNMP bölümüne yazın.",
+      "pick": "Seç",
+      "pickLine": "{{name}} arayüzünü WAN hattı olarak seç",
+      "picked": "Seçildi",
+      "pickHint": "Seçilen ad ilk boş hatta yazılır; en çok 4 hat."
     }
   }
 }
