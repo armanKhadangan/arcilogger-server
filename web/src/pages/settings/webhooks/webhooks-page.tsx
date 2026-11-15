@@ -37,7 +37,13 @@ import type { AdminRequestOut } from '@/lib/settings-types';
 import type { WebhookDeliveryStatus, WebhookOut } from '@/lib/webhook-types';
 import { alertHref } from '@/pages/security/alerts-model';
 
-import { formatVerified, sortWebhooks, testLocked, testResultOf } from './webhooks-model';
+import {
+  formatVerified,
+  sortWebhooks,
+  testErrorText,
+  testLocked,
+  testResultOf,
+} from './webhooks-model';
 
 const STATUS_TONE: Record<WebhookDeliveryStatus, NonNullable<BadgeProps['tone']>> = {
   sent: 'success',
@@ -59,7 +65,7 @@ function TestOutcome({ request }: { request: AdminRequestOut }) {
     <p className="text-13 text-foreground" data-testid="webhook-test-result">
       {result.ok
         ? t('webhooks.test.ok', { status: result.status ?? '—' })
-        : t('webhooks.test.failed', { error: result.error_text ?? '—' })}
+        : t('webhooks.test.failed', { error: testErrorText(result) })}
     </p>
   );
 }

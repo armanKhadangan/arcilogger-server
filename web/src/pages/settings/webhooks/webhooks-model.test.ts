@@ -1,7 +1,13 @@
 import { licenseSample } from '@/test/samples';
 import { WEBHOOKS } from '@/test/webhook-samples';
 
-import { formatVerified, sortWebhooks, testLocked, testResultOf } from './webhooks-model';
+import {
+  formatVerified,
+  sortWebhooks,
+  testErrorText,
+  testLocked,
+  testResultOf,
+} from './webhooks-model';
 
 describe("Ayarlar → Webhook'lar (Wave 6 §2.4.4)", () => {
   it('marks Teams and Slack "sahada doğrula" (V8)', () => {
@@ -45,5 +51,13 @@ describe("Ayarlar → Webhook'lar (Wave 6 §2.4.4)", () => {
     });
     expect(testResultOf({ result: null })).toBeNull();
     expect(testResultOf({ result: { status: 200 } })).toBeNull();
+  });
+
+  it("words a failed test's error: its text, else the status code, else a dash (C10)", () => {
+    expect(testErrorText({ status: 401, error_text: '401 Unauthorized: signature rejected' })).toBe(
+      '401 Unauthorized: signature rejected',
+    );
+    expect(testErrorText({ status: 503, error_text: '' })).toBe('HTTP 503');
+    expect(testErrorText({ status: null, error_text: null })).toBe('—');
   });
 });

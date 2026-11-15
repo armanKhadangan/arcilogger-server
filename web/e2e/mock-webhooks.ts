@@ -4,8 +4,9 @@
  *
  * - `GET /webhooks` and `GET /webhooks/{name}/deliveries`: `alerts.read`; 404
  *   `webhook_not_found` for a name not configured;
- * - `POST /webhooks/{name}/test`: `settings.manage`; queues the probe as an administration
- *   request (`mock-admin.ts`), which succeeds, or fails with `test: 'failed'`.
+ * - `POST /webhooks/{name}/test`: `settings.manage`; 409 `webhook_not_ready` for a webhook that is
+ *   not ready (C10); else queues the probe as an administration request `worker.webhook_test`
+ *   (`mock-admin.ts`), which succeeds, or fails with `test: 'failed'`.
  */
 
 import type { RecordedCall } from './mock-api';
@@ -54,7 +55,20 @@ export class WebhooksMock {
     if (method === 'POST' && match[2] === 'test') {
       const account = host.requirePermission(call, 'settings.manage');
       if (Array.isArray(account)) return account;
-      if (!this.list().some((item) => item.name === name)) return this.notFound();
+      const webhook = this.list().find((item) => item.name === name);
+      if (!webhook) return this.notFound();
+      // C10: a webhook switched off, or without its secret or URL, is not tried.
+      if (!webhook.ready)
+        return [
+          409,
+          {
+            error: {
+              code: 'webhook_not_ready',
+              message_tr: 'Bu webhook gönderime hazır değil; durumuna bakın.',
+              message_en: 'This webhook is not ready to send; see its state.',
+            },
+          },
+        ];
       const failed = this.options.test === 'failed';
       return this.admin.webhookTest(
         account,

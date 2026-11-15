@@ -2438,8 +2438,9 @@ export class AdminMock {
    */
   webhookTest(account: MockUser, result: Record<string, unknown>, failed: boolean): Answer {
     const item = this.enqueue({
-      // The kind W6-H gives the probe's request is not in the API yet (`action.*` as the probes).
-      kind: 'action.webhook_test' as RequestKind,
+      // C10 (manager on #260): the worker channel, like `worker.test_email`; the kind is not in
+      // the web's `RequestKind` until W6-H's API is in the contract.
+      kind: 'worker.webhook_test' as RequestKind,
       section: null,
       account,
       steps: [],

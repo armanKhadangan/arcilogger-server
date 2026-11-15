@@ -40,3 +40,12 @@ export function testResultOf(request: Pick<AdminRequestOut, 'result'>): WebhookT
     error_text: typeof result.error_text === 'string' ? result.error_text : null,
   };
 }
+
+/**
+ * The `{error}` of a failed test (C10, manager on #260): the error text, else the reply's status
+ * code, else a dash (no reply came: timeout, DNS, TLS).
+ */
+export function testErrorText(result: Pick<WebhookTestResult, 'status' | 'error_text'>): string {
+  if (result.error_text) return result.error_text;
+  return result.status === null ? '—' : `HTTP ${result.status}`;
+}
