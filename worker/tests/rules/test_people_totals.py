@@ -8,7 +8,7 @@ Every value is fictional (Örnek A.Ş., ``172.20.x``, RFC 5737 destinations).
 from __future__ import annotations
 
 import random
-from collections.abc import Callable, Iterator
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from functools import partial
@@ -17,11 +17,11 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 import pytest
-from sqlalchemy import insert
+from sqlalchemy import delete, func, insert, select, text
 from sqlalchemy.orm import Session
 
 from arcilogger_core.timeutil import site_day
-from arcilogger_db.models import FgTraffic
+from arcilogger_db.models import FgTraffic, RuleTrafficEvidence, RuleTrafficState
 from arcilogger_worker.rules import people
 from arcilogger_worker.rules.model import Actions, Hit, RuleContext, RuleDef, RuleSettings
 
@@ -35,25 +35,23 @@ ADDRESSES = [f"172.20.43.{n}" for n in range(10, 16)]
 KIB = 1024
 
 
-@pytest.fixture(autouse=True)
-def _fresh_totals() -> Iterator[None]:
-    people.clear_period_totals()
-    yield
-    people.clear_period_totals()
-
-
 @pytest.fixture
 def rebuilds(monkeypatch: pytest.MonkeyPatch) -> list[datetime]:
     """The slice ends at which a period's totals were read whole."""
     ends: list[datetime] = []
-    rebuild = people._rebuild
+    rebuild = people._TableStore.rebuild
 
-    def counted(session: Session, ctx: RuleContext, period: Any) -> Any:
+    def counted(self: Any, session: Session, ctx: RuleContext, period: Any) -> None:
         ends.append(ctx.end)
-        return rebuild(session, ctx, period)
+        rebuild(self, session, ctx, period)
 
-    monkeypatch.setattr(people, "_rebuild", counted)
+    monkeypatch.setattr(people._TableStore, "rebuild", counted)
     return ends
+
+
+def forget(session: Session) -> None:
+    """A restart that lost the totals (or a downgrade and upgrade): the next run reads whole."""
+    session.execute(delete(RuleTrafficState))
 
 
 @dataclass
@@ -183,14 +181,13 @@ def normalized(hit: Hit) -> tuple[Any, ...]:
 
 
 def once(session: Session, run: Callable[[], list[Any]]) -> list[Any]:
-    """``run`` as one read of the period: the live totals set aside, rebuilt, put back."""
-    kept = dict(people._LIVE)
-    people.clear_period_totals()
+    """``run`` as one read of the period: in a savepoint without the kept totals, rolled back."""
+    nested = session.begin_nested()
     try:
+        forget(session)
         return run()
     finally:
-        people._LIVE.clear()
-        people._LIVE.update(kept)
+        nested.rollback()
 
 
 def slice_by_slice(
@@ -209,7 +206,7 @@ def slice_by_slice(
     while start < end:
         stop = min(start + size, end)
         if index == restart_at:
-            people.clear_period_totals()
+            forget(session)
         before = len(rebuilds)
         incremental = hits(session, entry, chosen, start, stop)
         whole += len(rebuilds) - before
@@ -243,8 +240,12 @@ def test_r13_day_total_slice_by_slice(db_session: Session, rebuilds: list[dateti
     assert seen > 0, "the day total raised no alert: the comparison proves nothing"
     # Read whole only at the first slice, at midnight (a new day) and after the restart.
     assert whole == 3
-    kept = [totals for key, totals in people._LIVE.items() if key[1].rule == "R13"]
-    assert any(len(refs) == people.EVIDENCE_LIMIT for t in kept for refs in t.evidence.values())
+    full = db_session.scalars(
+        select(func.count())
+        .select_from(RuleTrafficEvidence)
+        .where(func.jsonb_array_length(RuleTrafficEvidence.refs) == people.EVIDENCE_LIMIT)
+    ).one()
+    assert full > 0, "no address's evidence list was kept full"
 
 
 def test_r14_night_totals_slice_by_slice(db_session: Session, rebuilds: list[datetime]) -> None:
@@ -292,3 +293,83 @@ def test_a_changed_setting_rebuilds_the_totals(db_session: Session) -> None:
         db_session, lambda: sorted(normalized(hit) for hit in entry.evaluate(db_session, ctx))
     )
     assert narrowed == reference
+
+
+def test_a_late_log_that_zeroes_a_counted_log(db_session: Session) -> None:
+    """The counter case, pinned (deviation W6-E-1): a late interim log with the final log's
+    counters arrives between an interim and the final log, so the final log counts nothing any
+    more. The bytes and the logs drop by what the final log had counted; the hit's time is the
+    newest counted log in the slice, newer than any log a late log can zero, so it stays exact
+    too."""
+    ip = "172.20.43.20"
+    at = MIDNIGHT + timedelta(minutes=10)
+    logs = [
+        Log(
+            ip,
+            7001,
+            at + timedelta(minutes=2),
+            at + timedelta(minutes=2),
+            True,
+            40 * KIB,
+            0,
+            40 * KIB,
+            0,
+        ),
+        Log(ip, 7001, at + timedelta(minutes=5), at + timedelta(minutes=5), False, 100 * KIB, 0),
+        # The late interim log (device time before the final log, received ten minutes later).
+        Log(
+            ip,
+            7001,
+            at + timedelta(minutes=4),
+            at + timedelta(minutes=15),
+            True,
+            100 * KIB,
+            0,
+            0,
+            0,
+        ),
+        Log(
+            ip,
+            7002,
+            at + timedelta(minutes=16),
+            at + timedelta(minutes=16),
+            False,
+            5 * 1024 * KIB,
+            0,
+        ),
+    ]
+    write(db_session, logs)
+    entry = rule("R13")
+    chosen = settings(entry, {"hour_bytes": 1024**4, "day_bytes": KIB})
+    first = hits(db_session, entry, chosen, at, at + timedelta(minutes=10))
+    assert [dict(hit[3])["day_bytes"] for hit in first] == [100 * KIB]
+    second = hits(db_session, entry, chosen, at + timedelta(minutes=10), at + timedelta(minutes=20))
+    reference = once(
+        db_session,
+        partial(
+            hits, db_session, entry, chosen, at + timedelta(minutes=10), at + timedelta(minutes=20)
+        ),
+    )
+    assert second == reference
+    (hit,) = second
+    assert dict(hit[3])["day_bytes"] == 40 * KIB + 5 * 1024 * KIB  # the final log counts 0 now
+    assert hit[2] == 2  # the interim log and the new session's log
+    assert hit[1] == logs[3].received
+
+
+def test_a_dry_run_keeps_the_same_totals_in_its_session(db_session: Session) -> None:
+    """A read-only transaction (the dry run) keeps the totals in its session, not in the table,
+    and gets every slice's alerts of the live runs."""
+    rng = random.Random(77)  # noqa: S311 - synthetic traffic
+    write(db_session, traffic(rng, MIDNIGHT, MIDNIGHT + timedelta(hours=3), (10, 60)))
+    entry = rule("R13")
+    chosen = settings(entry, {"hour_bytes": 1024**4, "day_bytes": 10 * 1024 * KIB})
+    ends = [MIDNIGHT + timedelta(minutes=10 * n) for n in range(1, 19)]
+    live = [hits(db_session, entry, chosen, end - timedelta(minutes=10), end) for end in ends]
+    db_session.commit()
+    db_session.execute(text("SET TRANSACTION READ ONLY"))
+    dry = [hits(db_session, entry, chosen, end - timedelta(minutes=10), end) for end in ends]
+    assert db_session.info.get("rules.period_totals") is not None
+    db_session.rollback()
+    assert dry == live
+    assert any(live)

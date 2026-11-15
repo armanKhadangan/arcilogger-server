@@ -25,10 +25,11 @@ reads only addresses with a matching row in the slice, and binds every parameter
 
 from __future__ import annotations
 
+import json
 from collections import defaultdict
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
-from datetime import datetime, time, timedelta
+from datetime import date, datetime, time, timedelta
 from ipaddress import ip_network
 from typing import Any, Final, Literal
 
@@ -39,18 +40,29 @@ from sqlalchemy import (
     any_,
     case,
     cast,
+    delete,
     false,
     func,
+    insert,
     literal,
     or_,
     select,
     text,
+    update,
 )
-from sqlalchemy.dialects.postgresql import ARRAY, CIDR
+from sqlalchemy.dialects.postgresql import ARRAY, CIDR, INET
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import InstrumentedAttribute, Session
 from sqlalchemy.sql.elements import Label
 
-from arcilogger_db.models import FgDns, FgTraffic, FgWeb
+from arcilogger_db.models import (
+    FgDns,
+    FgTraffic,
+    FgWeb,
+    RuleTrafficEvidence,
+    RuleTrafficState,
+    RuleTrafficTotal,
+)
 from arcilogger_db.settings import INTEGER_RANGES, get_setting
 from arcilogger_worker.rules.model import (
     EvidenceRef,
@@ -500,77 +512,378 @@ class _Period:
     skew: timedelta
 
 
+#: A bucket's key (address, minute of device time, minute of receive time) and content
+#: [logs, bytes, first received, last received].
+_Key = tuple[str, datetime, datetime]
+_Change = tuple[str, datetime, datetime, int, int, datetime | None, datetime | None]
+
+
 @dataclass
 class _Totals:
-    """A period's totals as of ``filled_until`` (the end of the last slice counted): address →
-    minute of device time → [rows, bytes, first received, last received]."""
+    """A period's totals as a dry run keeps them (:class:`_MemoryStore`)."""
 
     filled_until: datetime
-    buckets: dict[str, dict[datetime, list[Any]]] = field(default_factory=dict)
-    #: Address → its oldest :data:`EVIDENCE_LIMIT` counted logs, once it has that many (newer
-    #: logs never enter; dropped when a late log changes which earlier logs count).
+    inputs: str
+    buckets: dict[str, dict[tuple[datetime, datetime], list[Any]]] = field(default_factory=dict)
     evidence: dict[str, list[EvidenceRef]] = field(default_factory=dict)
 
 
-#: The live runs' totals, by database and period (the worker's process; rebuilt after a
-#: restart). A dry run keeps its own in its read-only session (``session.info``).
-_LIVE: dict[tuple[str, _Period], _Totals] = {}
-#: Periods older than this before the newest one of their rule are dropped.
+#: Periods older than this before the period being counted are dropped.
 _KEEP: Final = timedelta(days=2)
 
 
-def clear_period_totals() -> None:
-    """Forget the live totals (tests; the next run rebuilds them)."""
-    _LIVE.clear()
+def _inputs(period: _Period) -> str:
+    """What a period's amounts were counted with (a change rebuilds them)."""
+    return json.dumps(
+        {
+            "count_from": None if period.count_from is None else period.count_from.isoformat(),
+            "sent_only": period.sent_only,
+            "networks": list(period.networks),
+            "overlap": period.overlap.total_seconds(),
+            "skew": period.skew.total_seconds(),
+        },
+        sort_keys=True,
+    )
 
 
-def _store(session: Session) -> tuple[dict[Any, _Totals], Any]:
-    """Where this session's totals live, and their key prefix."""
+def _rebuild_query(ctx: RuleContext, session: Session, period: _Period) -> Any:
+    """The period's buckets from one read of it (every address)."""
+    rows = _traffic_rows(
+        session,
+        ctx,
+        period.since,
+        sent_only=period.sent_only,
+        networks=_period_networks(period),
+        count_from=period.count_from,
+        scope="all",
+        period=True,
+    )
+    minute = _minute(rows.c.time)
+    received = _minute(rows.c.time_received)
+    return (
+        select(
+            rows.c.srcip,
+            minute.label("minute"),
+            received.label("received"),
+            func.count().label("rows"),
+            func.coalesce(func.sum(rows.c.amount), 0).label("amount"),
+            func.min(rows.c.time_received).label("first"),
+            func.max(rows.c.time_received).label("last"),
+        )
+        .where(rows.c.wanted)
+        .group_by(rows.c.srcip, minute, received)
+    )
+
+
+def _evidence_json(refs: Sequence[EvidenceRef]) -> list[dict[str, Any]]:
+    return [
+        {
+            "id": ref.row_id,
+            "time": ref.time.isoformat(),
+            "time_received": None if ref.time_received is None else ref.time_received.isoformat(),
+            "source": ref.source,
+            "raw_day": None if ref.raw_day is None else ref.raw_day.isoformat(),
+            "raw_line": ref.raw_line,
+            "raw_offset": ref.raw_offset,
+        }
+        for ref in refs
+    ]
+
+
+def _evidence_refs(values: Sequence[Mapping[str, Any]]) -> list[EvidenceRef]:
+    return [
+        EvidenceRef(
+            table="fg_traffic",
+            row_id=value["id"],
+            time=datetime.fromisoformat(value["time"]),
+            time_received=datetime.fromisoformat(value["time_received"]),
+            source=value["source"],
+            raw_day=date.fromisoformat(value["raw_day"]),
+            raw_line=value["raw_line"],
+            raw_offset=value["raw_offset"],
+        )
+        for value in values
+    ]
+
+
+class _MemoryStore:
+    """A dry run's totals, in its read-only session (it may not write, and its candidate
+    settings may count other amounts)."""
+
+    def __init__(self) -> None:
+        self.periods: dict[tuple[str, datetime], _Totals] = {}
+
+    def filled_until(self, session: Session, period: _Period) -> datetime | None:
+        totals = self.periods.get((period.rule, period.since))
+        return totals.filled_until if totals and totals.inputs == _inputs(period) else None
+
+    def rebuild(self, session: Session, ctx: RuleContext, period: _Period) -> None:
+        totals = _Totals(ctx.end, _inputs(period))
+        for row in session.execute(_rebuild_query(ctx, session, period)):
+            cells = totals.buckets.setdefault(str(row.srcip), {})
+            cells[(row.minute, row.received)] = [row.rows, int(row.amount), row.first, row.last]
+        self.periods[(period.rule, period.since)] = totals
+
+    def apply(self, session: Session, period: _Period, changes: Sequence[_Change]) -> None:
+        totals = self.periods[(period.rule, period.since)]
+        for ip, minute, received, rows, amount, first, last in changes:
+            cells = totals.buckets.setdefault(ip, {})
+            cell = cells.setdefault((minute, received), [0, 0, None, None])
+            cell[0] += rows
+            cell[1] += amount
+            if first is not None and (cell[2] is None or first < cell[2]):
+                cell[2] = first
+            if last is not None and (cell[3] is None or last > cell[3]):
+                cell[3] = last
+            if cell[0] <= 0 and cell[1] <= 0:
+                del cells[(minute, received)]
+
+    def finish(self, session: Session, period: _Period, end: datetime) -> None:
+        self.periods[(period.rule, period.since)].filled_until = end
+        for key in [k for k in self.periods if k[0] == period.rule and k[1] < period.since - _KEEP]:
+            del self.periods[key]
+
+    def buckets(
+        self, session: Session, period: _Period, addresses: Sequence[str]
+    ) -> list[tuple[str, datetime, int, int, datetime, datetime]]:
+        totals = self.periods[(period.rule, period.since)]
+        found: dict[tuple[str, datetime], list[Any]] = {}
+        for ip in addresses:
+            for (minute, _), cell in totals.buckets.get(ip, {}).items():
+                into = found.setdefault((ip, minute), [0, 0, cell[2], cell[3]])
+                into[0] += cell[0]
+                into[1] += cell[1]
+                into[2] = min(into[2], cell[2])
+                into[3] = max(into[3], cell[3])
+        return [(ip, minute, *cell) for (ip, minute), cell in found.items()]
+
+    def evidence(self, session: Session, period: _Period, ip: str) -> list[EvidenceRef] | None:
+        return self.periods[(period.rule, period.since)].evidence.get(ip)
+
+    def keep_evidence(
+        self, session: Session, period: _Period, ip: str, refs: Sequence[EvidenceRef]
+    ) -> None:
+        self.periods[(period.rule, period.since)].evidence[ip] = list(refs)
+
+    def drop_evidence(self, session: Session, period: _Period, ips: Sequence[str]) -> None:
+        for ip in ips:
+            self.periods[(period.rule, period.since)].evidence.pop(ip, None)
+
+
+class _TableStore:
+    """The live runs' totals: the tables of ``0026_rule_traffic_totals``, written in the slice's
+    transaction (a rolled-back slice rolls them back too)."""
+
+    def filled_until(self, session: Session, period: _Period) -> datetime | None:
+        state = session.get(RuleTrafficState, (period.rule, period.since))
+        return state.filled_until if state is not None and state.inputs == _inputs(period) else None
+
+    def rebuild(self, session: Session, ctx: RuleContext, period: _Period) -> None:
+        session.execute(
+            delete(RuleTrafficState).where(
+                RuleTrafficState.rule == period.rule,
+                RuleTrafficState.period_start == period.since,
+            )
+        )
+        session.add(
+            RuleTrafficState(
+                rule=period.rule,
+                period_start=period.since,
+                inputs=_inputs(period),
+                filled_until=ctx.end,
+            )
+        )
+        session.flush()
+        built = _rebuild_query(ctx, session, period).subquery("built")
+        session.execute(
+            insert(RuleTrafficTotal).from_select(
+                [
+                    "rule",
+                    "period_start",
+                    "srcip",
+                    "minute",
+                    "received",
+                    "rows",
+                    "amount",
+                    "first_received",
+                    "last_received",
+                ],
+                select(
+                    literal(period.rule),
+                    literal(period.since),
+                    cast(built.c.srcip, INET),
+                    built.c.minute,
+                    built.c.received,
+                    built.c.rows,
+                    built.c.amount,
+                    built.c.first,
+                    built.c.last,
+                ),
+            )
+        )
+
+    def apply(self, session: Session, period: _Period, changes: Sequence[_Change]) -> None:
+        if not changes:
+            return
+        table = RuleTrafficTotal.__table__
+        upsert = pg_insert(RuleTrafficTotal)
+        session.execute(
+            upsert.on_conflict_do_update(
+                index_elements=["rule", "period_start", "srcip", "minute", "received"],
+                set_={
+                    "rows": table.c.rows + upsert.excluded.rows,
+                    "amount": table.c.amount + upsert.excluded.amount,
+                    "first_received": func.least(
+                        table.c.first_received, upsert.excluded.first_received
+                    ),
+                    "last_received": func.greatest(
+                        table.c.last_received, upsert.excluded.last_received
+                    ),
+                },
+            ),
+            [
+                {
+                    "rule": period.rule,
+                    "period_start": period.since,
+                    "srcip": ip,
+                    "minute": minute,
+                    "received": received,
+                    "rows": rows,
+                    "amount": amount,
+                    "first_received": first,
+                    "last_received": last,
+                }
+                for ip, minute, received, rows, amount, first, last in changes
+            ],
+        )
+        session.execute(
+            delete(RuleTrafficTotal).where(
+                RuleTrafficTotal.rule == period.rule,
+                RuleTrafficTotal.period_start == period.since,
+                func.host(RuleTrafficTotal.srcip) == any_(_texts({c[0] for c in changes})),
+                RuleTrafficTotal.rows <= 0,
+                RuleTrafficTotal.amount <= 0,
+            )
+        )
+
+    def finish(self, session: Session, period: _Period, end: datetime) -> None:
+        session.execute(
+            update(RuleTrafficState)
+            .where(
+                RuleTrafficState.rule == period.rule,
+                RuleTrafficState.period_start == period.since,
+            )
+            .values(filled_until=end)
+        )
+        session.execute(
+            delete(RuleTrafficState).where(
+                RuleTrafficState.rule == period.rule,
+                RuleTrafficState.period_start < period.since - _KEEP,
+            )
+        )
+
+    def buckets(
+        self, session: Session, period: _Period, addresses: Sequence[str]
+    ) -> list[tuple[str, datetime, int, int, datetime, datetime]]:
+        if not addresses:
+            return []
+        query = (
+            select(
+                func.host(RuleTrafficTotal.srcip),
+                RuleTrafficTotal.minute,
+                func.sum(RuleTrafficTotal.rows),
+                func.sum(RuleTrafficTotal.amount),
+                func.min(RuleTrafficTotal.first_received),
+                func.max(RuleTrafficTotal.last_received),
+            )
+            .where(
+                RuleTrafficTotal.rule == period.rule,
+                RuleTrafficTotal.period_start == period.since,
+                RuleTrafficTotal.srcip
+                == any_(cast(literal(sorted(addresses), ARRAY(Text)), ARRAY(INET))),
+            )
+            .group_by(RuleTrafficTotal.srcip, RuleTrafficTotal.minute)
+        )
+        return [
+            (str(ip), minute, int(rows), int(amount), first, last)
+            for ip, minute, rows, amount, first, last in session.execute(query)
+        ]
+
+    def evidence(self, session: Session, period: _Period, ip: str) -> list[EvidenceRef] | None:
+        kept = session.get(RuleTrafficEvidence, (period.rule, period.since, ip))
+        return None if kept is None else _evidence_refs(kept.refs)
+
+    def keep_evidence(
+        self, session: Session, period: _Period, ip: str, refs: Sequence[EvidenceRef]
+    ) -> None:
+        upsert = pg_insert(RuleTrafficEvidence).values(
+            rule=period.rule, period_start=period.since, srcip=ip, refs=_evidence_json(refs)
+        )
+        session.execute(
+            upsert.on_conflict_do_update(
+                index_elements=["rule", "period_start", "srcip"],
+                set_={"refs": upsert.excluded.refs},
+            )
+        )
+
+    def drop_evidence(self, session: Session, period: _Period, ips: Sequence[str]) -> None:
+        if ips:
+            session.execute(
+                delete(RuleTrafficEvidence).where(
+                    RuleTrafficEvidence.rule == period.rule,
+                    RuleTrafficEvidence.period_start == period.since,
+                    func.host(RuleTrafficEvidence.srcip) == any_(_texts(ips)),
+                )
+            )
+
+
+_Store = _MemoryStore | _TableStore
+
+
+def _store(session: Session) -> _Store:
+    """The table in a live run; in a dry run's read-only transaction, its own memory."""
     if session.execute(text("SHOW transaction_read_only")).scalar_one() == "on":
-        return session.info.setdefault("rules.period_totals", {}), None
-    return _LIVE, str(session.get_bind().engine.url)
+        store = session.info.get("rules.period_totals")
+        if not isinstance(store, _MemoryStore):
+            store = session.info["rules.period_totals"] = _MemoryStore()
+        return store
+    return _TableStore()
 
 
 def _period_buckets(
     session: Session, ctx: RuleContext, period: _Period
-) -> tuple[list[_Bucket], _Totals]:
-    """The period's buckets of the addresses with a log in the slice, as of the slice end, and
-    the period's totals."""
-    store, prefix = _store(session)
-    totals = store.get((prefix, period))
-    addresses = _slice_addresses(session, ctx, period)
-    if totals is None or totals.filled_until != ctx.start:
-        totals = _rebuild(session, ctx, period)
+) -> tuple[list[_Bucket], _Store]:
+    """The period's buckets of the addresses with a log in the slice, as of the slice end (the
+    totals counted on to it), and their store."""
+    store = _store(session)
+    if store.filled_until(session, period) != ctx.start:
+        store.rebuild(session, ctx, period)
     else:
-        _advance(session, ctx, period, totals)
-    totals.filled_until = ctx.end
-    store[(prefix, period)] = totals
-    for key in [
-        key
-        for key in store
-        if key[0] == prefix and key[1].rule == period.rule and key[1].since < period.since - _KEEP
-    ]:
-        del store[key]
+        store.apply(session, period, _advance(session, ctx, period, store))
+    store.finish(session, period, ctx.end)
+    addresses = sorted(_slice_addresses(session, ctx, period))
     buckets = [
-        _Bucket(ip, minute, cell[0], cell[1], cell[2], cell[3], cell[3] > ctx.start)
-        for ip in sorted(addresses)
-        for minute, cell in sorted(totals.buckets.get(ip, {}).items())
+        _Bucket(ip, minute, rows, amount, first, last, last > ctx.start)
+        for ip, minute, rows, amount, first, last in sorted(
+            store.buckets(session, period, addresses)
+        )
     ]
-    return buckets, totals
+    return buckets, store
 
 
 def _period_evidence(
     session: Session,
     ctx: RuleContext,
     period: _Period,
-    totals: _Totals,
+    store: _Store,
     keys: Mapping[str, _Subject],
     timelines: Mapping[str, IpTimeline],
 ) -> dict[str, list[EvidenceRef]]:
     """The evidence of the keys' hits over the period, as :func:`_evidence` gives it: the
-    addresses' oldest counted logs, read only for the addresses whose list is not full."""
+    addresses' oldest counted logs, read only for the addresses whose kept list is not full."""
     addresses = sorted({ip for subject in keys.values() for ip in subject.ips})
-    missing = [ip for ip in addresses if len(totals.evidence.get(ip, ())) < EVIDENCE_LIMIT]
+    kept = {ip: store.evidence(session, period, ip) for ip in addresses}
+    missing = [ip for ip, refs in kept.items() if refs is None or len(refs) < EVIDENCE_LIMIT]
     if missing:
         rows = _traffic_rows(
             session,
@@ -584,10 +897,10 @@ def _period_evidence(
         )
         found = _address_refs(session, FgTraffic, rows)
         for ip in missing:
-            totals.evidence[ip] = found.get(ip, [])
-    return _by_key(
-        [(ip, ref) for ip in addresses for ref in totals.evidence.get(ip, [])], keys, timelines
-    )
+            refs = kept[ip] = found.get(ip, [])
+            if len(refs) >= EVIDENCE_LIMIT:  # full: newer logs never enter it
+                store.keep_evidence(session, period, ip, refs)
+    return _by_key([(ip, ref) for ip in addresses for ref in kept[ip] or []], keys, timelines)
 
 
 def _period_bounds(ctx: RuleContext, period: _Period) -> tuple[datetime, datetime, datetime]:
@@ -612,25 +925,6 @@ def _slice_addresses(session: Session, ctx: RuleContext, period: _Period) -> set
 
 def _period_networks(period: _Period) -> list[Network]:
     return [ip_network(net) for net in period.networks]
-
-
-def _rebuild(session: Session, ctx: RuleContext, period: _Period) -> _Totals:
-    """The period's totals from one read of it (every address)."""
-    rows = _traffic_rows(
-        session,
-        ctx,
-        period.since,
-        sent_only=period.sent_only,
-        networks=_period_networks(period),
-        count_from=period.count_from,
-        scope="all",
-        period=True,
-    )
-    totals = _Totals(filled_until=ctx.end)
-    for bucket in _buckets(session, ctx, rows):
-        cells = totals.buckets.setdefault(bucket.srcip, {})
-        cells[bucket.minute] = [bucket.count, bucket.amount, bucket.first, bucket.last]
-    return totals
 
 
 #: The traffic a period counts, for the SQL below (table alias ``{t}``).
@@ -686,15 +980,18 @@ old AS (
     FROM logs WHERE time_received <= :start AND time <= :start_high
     WINDOW w AS (PARTITION BY srcip, sessionid, dstip, dstport ORDER BY time, id)
 )
-SELECT 'new', host(srcip), date_trunc('minute', time), count(*), sum(amount),
-       min(time_received), max(time_received)
-FROM new WHERE counts AND amount > 0 GROUP BY srcip, date_trunc('minute', time)
+SELECT 'new', host(srcip), date_trunc('minute', time), date_trunc('minute', time_received),
+       count(*), sum(amount), min(time_received), max(time_received)
+FROM new WHERE counts AND amount > 0
+GROUP BY srcip, date_trunc('minute', time), date_trunc('minute', time_received)
 UNION ALL
-SELECT 'old', host(srcip), date_trunc('minute', time), count(*), sum(amount), NULL, NULL
-FROM old WHERE counts AND amount > 0 GROUP BY srcip, date_trunc('minute', time)
+SELECT 'old', host(srcip), date_trunc('minute', time), date_trunc('minute', time_received),
+       count(*), sum(amount), NULL, NULL
+FROM old WHERE counts AND amount > 0
+GROUP BY srcip, date_trunc('minute', time), date_trunc('minute', time_received)
 UNION ALL
-SELECT DISTINCT 'changed', host(n.srcip), NULL::timestamptz, 0, 0, NULL::timestamptz,
-       NULL::timestamptz
+SELECT DISTINCT 'changed', host(n.srcip), NULL::timestamptz, NULL::timestamptz, 0, 0,
+       NULL::timestamptz, NULL::timestamptz
 FROM new n LEFT JOIN old o ON o.id = n.id
 WHERE n.counts AND n.time_received <= :start
   AND (n.amount > 0) IS DISTINCT FROM (coalesce(o.amount, 0) > 0)
@@ -710,12 +1007,13 @@ def _changes_sql(sent_only: bool) -> Any:
     )
 
 
-def _advance(session: Session, ctx: RuleContext, period: _Period, totals: _Totals) -> None:
-    """Add what the slice changes (:data:`_CHANGES`): a session counted again replaces its
-    count as of the slice start with its count as of the slice end, so a late log that changes
-    the increment of a log counted before is taken into account."""
+def _advance(session: Session, ctx: RuleContext, period: _Period, store: _Store) -> list[_Change]:
+    """What the slice changes (:data:`_CHANGES`): a session counted again replaces its count as
+    of the slice start with its count as of the slice end, so a late log that changes the
+    increment of a log counted before is taken into account. The kept evidence of an address
+    where a late log changed which earlier logs count is dropped (read again when needed)."""
     if not period.networks:
-        return
+        return []
     lookback, low, high = _period_bounds(ctx, period)
     found = session.execute(
         _changes_sql(period.sent_only),
@@ -732,35 +1030,35 @@ def _advance(session: Session, ctx: RuleContext, period: _Period, totals: _Total
             "count_from": period.count_from or period.since,
         },
     )
-    old: dict[tuple[str, datetime], tuple[int, int]] = {}
-    new: dict[tuple[str, datetime], tuple[int, int, datetime, datetime]] = {}
-    for side, ip, minute, rows, amount, first, last in found:
-        if side == "changed":  # an earlier log counts now, or no longer: its list read again
-            totals.evidence.pop(str(ip), None)
+    changes: list[_Change] = []
+    changed: set[str] = set()
+    for side, ip, minute, received, rows, amount, first, last in found:
+        if side == "changed":
+            changed.add(str(ip))
         elif side == "old":
-            old[(str(ip), minute)] = (int(rows), int(amount))
+            changes.append((str(ip), minute, received, -int(rows), -int(amount), None, None))
         else:
-            new[(str(ip), minute)] = (int(rows), int(amount), first, last)
-    for ip, minute in old.keys() | new.keys():
-        was_rows, was_amount = old.get((ip, minute), (0, 0))
-        now = new.get((ip, minute))
-        cells = totals.buckets.setdefault(ip, {})
-        cell = cells.get(minute)
-        if cell is None:
-            cell = cells[minute] = [0, 0, None, None]
-        if now is not None:
-            cell[0] += now[0]
-            cell[1] += now[1]
-            if cell[2] is None or now[2] < cell[2]:
-                cell[2] = now[2]
-            if cell[3] is None or now[3] > cell[3]:
-                cell[3] = now[3]
-        cell[0] -= was_rows
-        cell[1] -= was_amount
-        if cell[0] <= 0 and cell[1] <= 0:
-            del cells[minute]
-        if not cells:
-            del totals.buckets[ip]
+            changes.append((str(ip), minute, received, int(rows), int(amount), first, last))
+    store.drop_evidence(session, period, sorted(changed))
+    return _summed(changes)
+
+
+def _summed(changes: Sequence[_Change]) -> list[_Change]:
+    """One change per bucket (the slice-start count taken from the slice-end count)."""
+    found: dict[_Key, list[Any]] = {}
+    for ip, minute, received, rows, amount, first, last in changes:
+        into = found.setdefault((ip, minute, received), [0, 0, None, None])
+        into[0] += rows
+        into[1] += amount
+        if first is not None:
+            into[2] = first if into[2] is None else min(into[2], first)
+        if last is not None:
+            into[3] = last if into[3] is None else max(into[3], last)
+    return [
+        (ip, minute, received, cell[0], cell[1], cell[2], cell[3])
+        for (ip, minute, received), cell in found.items()
+        if cell[0] or cell[1] or cell[2] is not None
+    ]
 
 
 def _hit(subject: _Subject, values: Mapping[str, object], evidence: Sequence[EvidenceRef]) -> Hit:
@@ -818,7 +1116,7 @@ def evaluate_r13(session: Session, ctx: RuleContext) -> list[Hit]:
     day_start = _site_day_start(ctx)
     hour_buckets = _buckets(session, ctx, hour_rows)
     day_period = _period(session, ctx, "R13", day_start, None, True, networks)
-    day_buckets, day_totals = _period_buckets(session, ctx, day_period)
+    day_buckets, day_store = _period_buckets(session, ctx, day_period)
     timelines = _timelines(session, [*hour_buckets, *day_buckets])
     hour = _subjects(hour_buckets, timelines)
     day = _subjects(day_buckets, timelines)
@@ -842,7 +1140,7 @@ def evaluate_r13(session: Session, ctx: RuleContext) -> list[Hit]:
     )
     by_day = {key: subject for key, (subject, period) in picked.items() if period == "day"}
     if by_day:
-        evidence.update(_period_evidence(session, ctx, day_period, day_totals, by_day, timelines))
+        evidence.update(_period_evidence(session, ctx, day_period, day_store, by_day, timelines))
     for key, (subject, period) in picked.items():
         values = {
             "srcip": subject.srcip,
@@ -892,7 +1190,7 @@ def evaluate_r14(session: Session, ctx: RuleContext) -> list[Hit]:
     hits: list[Hit] = []
     for low, high in _nights(ctx):
         period = _period(session, ctx, "R14", low, low, False, networks)
-        night_buckets, totals = _period_buckets(session, ctx, period)
+        night_buckets, store = _period_buckets(session, ctx, period)
         buckets = [bucket for bucket in night_buckets if bucket.first < high]
         timelines = _timelines(session, buckets)
         subjects = {
@@ -902,7 +1200,7 @@ def evaluate_r14(session: Session, ctx: RuleContext) -> list[Hit]:
         }
         if not subjects:
             continue
-        evidence = _period_evidence(session, ctx, period, totals, subjects, timelines)
+        evidence = _period_evidence(session, ctx, period, store, subjects, timelines)
         night = low.astimezone(ctx.zone).date().isoformat()
         for key, subject in subjects.items():
             values = {
