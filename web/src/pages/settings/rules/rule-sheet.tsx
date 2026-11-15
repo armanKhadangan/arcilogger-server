@@ -28,7 +28,7 @@ import { useRuleDryRun, useUpdateRule } from '@/lib/api-hooks';
 import type { AlertSeverity } from '@/lib/api-types';
 import { formatDateTime, formatDuration, formatNumber } from '@/lib/format';
 import { currentLang } from '@/lib/i18n';
-import type { DryRunOut, RuleOut } from '@/lib/rules-types';
+import type { DryRunOut, Rule } from '@/lib/rule-settings';
 import { focusFirstError } from '@/lib/validation';
 import { ALERT_SEVERITIES } from '@/pages/security/alerts-model';
 
@@ -141,7 +141,7 @@ function RuleEditor({
   editable,
   locked,
 }: {
-  rule: RuleOut;
+  rule: Rule;
   editable: boolean;
   locked: boolean;
 }) {
@@ -476,7 +476,7 @@ export function RuleSheet({
   returnFocus,
   onClose,
 }: {
-  rule: RuleOut | null;
+  rule: Rule | null;
   editable: boolean;
   locked: boolean;
   returnFocus?: RefObject<HTMLElement | null>;

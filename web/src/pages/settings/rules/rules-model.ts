@@ -13,13 +13,13 @@ import type { AlertSeverity } from '@/lib/api-types';
 import type { Lang } from '@/lib/format';
 import { formatBytes, formatDuration, formatNumber } from '@/lib/format';
 import type {
-  RuleOut,
+  Rule,
   ParamOut,
   RuleParamKind,
   RuleParamValue,
   RuleSettings,
   RuleSettingsIn,
-} from '@/lib/rules-types';
+} from '@/lib/rule-settings';
 import { codePointLength } from '@/lib/validation';
 
 /** A rule's window: at least a minute, at most 7 days (§2.1.4). */
@@ -127,7 +127,7 @@ function paramText(param: ParamOut, value: RuleParamValue | undefined): string |
 }
 
 /** The form of a rule's effective settings. */
-export function toRuleForm(rule: Pick<RuleOut, 'settings' | 'params'>): RuleForm {
+export function toRuleForm(rule: Pick<Rule, 'settings' | 'params'>): RuleForm {
   const { settings } = rule;
   return {
     enabled: settings.enabled,
@@ -351,7 +351,7 @@ function paramValue(param: ParamOut, text: string | boolean | undefined): RulePa
  */
 export function fromRuleForm(
   form: RuleForm,
-  rule: Pick<RuleOut, 'settings' | 'params'>,
+  rule: Pick<Rule, 'settings' | 'params'>,
 ): RuleSettings {
   const params: Record<string, RuleParamValue> = { ...rule.settings.params };
   for (const param of rule.params) {
@@ -399,13 +399,13 @@ export function ruleBody(settings: RuleSettings, defaults: RuleSettings): RuleSe
 }
 
 /** Whether the form differs from the rule's stored settings (Save is offered then). */
-export function isRuleChanged(form: RuleForm, rule: Pick<RuleOut, 'settings' | 'params'>): boolean {
+export function isRuleChanged(form: RuleForm, rule: Pick<Rule, 'settings' | 'params'>): boolean {
   const stored = toRuleForm(rule);
   return JSON.stringify(stored) !== JSON.stringify(form);
 }
 
 /** The form of the registry's defaults ("Varsayılanlara dön"). */
-export function defaultsForm(rule: Pick<RuleOut, 'defaults' | 'params'>): RuleForm {
+export function defaultsForm(rule: Pick<Rule, 'defaults' | 'params'>): RuleForm {
   return toRuleForm({ settings: rule.defaults, params: rule.params });
 }
 
@@ -429,7 +429,7 @@ export function fieldOfProblem(details: unknown, params: readonly ParamOut[]): R
 // -- the table --------------------------------------------------------------------------------
 
 /** "Veri geliyor" / "Son 24 saatte veri yok" / "Hiç veri gelmedi" (an i18n key). */
-export function dataStatusKey(rule: Pick<RuleOut, 'data_status'>): string {
+export function dataStatusKey(rule: Pick<Rule, 'data_status'>): string {
   return `rules.dataStatus.${rule.data_status}`;
 }
 
@@ -439,12 +439,12 @@ export type RuleState = 'on' | 'off' | 'setup';
  * On or off; "Ayar gerekli" while the rule is idle until a parameter is set, whether it is
  * switched on or not (such a rule ships off, §2.1.4).
  */
-export function ruleState(rule: Pick<RuleOut, 'settings' | 'needs_setup'>): RuleState {
+export function ruleState(rule: Pick<Rule, 'settings' | 'needs_setup'>): RuleState {
   if (rule.needs_setup) return 'setup';
   return rule.settings.enabled ? 'on' : 'off';
 }
 
-export function ruleName(rule: Pick<RuleOut, 'name_tr' | 'name_en' | 'id'>, lang: Lang): string {
+export function ruleName(rule: Pick<Rule, 'name_tr' | 'name_en' | 'id'>, lang: Lang): string {
   const name = lang === 'en' ? rule.name_en : rule.name_tr;
   return name.trim() ? name : rule.id;
 }
@@ -475,6 +475,6 @@ export function shownValue(
 }
 
 /** Rules in id order (`R2` before `R10`). */
-export function sortRules<T extends Pick<RuleOut, 'id'>>(rules: readonly T[]): T[] {
+export function sortRules<T extends Pick<Rule, 'id'>>(rules: readonly T[]): T[] {
   return [...rules].sort((a, b) => a.id.localeCompare(b.id, 'en', { numeric: true }));
 }

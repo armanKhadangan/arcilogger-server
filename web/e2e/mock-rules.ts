@@ -13,7 +13,7 @@
  *   reaches the candidate's threshold. `dryRun: 'busy' | 'timeout'` answers 409 / 504 instead.
  */
 
-import type { RulesOut, RuleOut, RuleParamValue, RuleSettings } from '../src/lib/rules-types';
+import type { Rules, Rule, RuleParamValue, RuleSettings } from '../src/lib/rule-settings';
 import { DRY_RUN, RULE_ERRORS, RULES, RULES_LOCKED } from '../src/test/rules-samples';
 
 import type { RecordedCall } from './mock-api';
@@ -59,14 +59,14 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 export class RulesMock {
-  private readonly list: RulesOut;
+  private readonly list: Rules;
 
   constructor(private readonly options: RulesOptions = {}) {
     this.list = copy(options.locked ? RULES_LOCKED : RULES);
   }
 
   /** The rule as the mock holds it now. */
-  rule(id: string): RuleOut | undefined {
+  rule(id: string): Rule | undefined {
     return this.list.rules.find((item) => item.id === id);
   }
 
@@ -97,7 +97,7 @@ export class RulesMock {
   }
 
   /** The defaults with the body's overrides, or the refusal of the body. */
-  private merge(rule: RuleOut, body: unknown): RuleSettings | Answer {
+  private merge(rule: Rule, body: unknown): RuleSettings | Answer {
     if (!isRecord(body)) return invalid('body');
     for (const key of Object.keys(body)) if (!SETTING_KEYS.includes(key)) return invalid(key);
     const settings: RuleSettings = copy(rule.defaults);

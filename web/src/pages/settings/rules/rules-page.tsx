@@ -13,7 +13,7 @@ import { useRules } from '@/lib/api-hooks';
 import { useAuth } from '@/lib/auth';
 import { formatDateTime } from '@/lib/format';
 import { currentLang } from '@/lib/i18n';
-import type { RuleDataStatus, RuleOut } from '@/lib/rules-types';
+import type { RuleDataStatus, Rule } from '@/lib/rule-settings';
 
 import { VerifyBadge } from './rule-badges';
 import { RuleSheet } from './rule-sheet';
@@ -34,7 +34,7 @@ const DATA_TONE: Record<RuleDataStatus, NonNullable<BadgeProps['tone']>> = {
   never: 'neutral',
 };
 
-function RuleRow({ rule, onOpen }: { rule: RuleOut; onOpen: (id: string) => void }) {
+function RuleRow({ rule, onOpen }: { rule: Rule; onOpen: (id: string) => void }) {
   const { t } = useTranslation();
   const lang = currentLang();
   const state = ruleState(rule);

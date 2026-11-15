@@ -1,4 +1,4 @@
-import type { RuleOut, ParamOut } from '@/lib/rules-types';
+import type { Rule, ParamOut } from '@/lib/rule-settings';
 import { RULES } from '@/test/rules-samples';
 
 import {
@@ -20,7 +20,7 @@ import {
   validateRule,
 } from './rules-model';
 
-function sample(id: string): RuleOut {
+function sample(id: string): Rule {
   const found = RULES.rules.find((rule) => rule.id === id);
   if (!found) throw new Error(`no sample rule ${id}`);
   return structuredClone(found);

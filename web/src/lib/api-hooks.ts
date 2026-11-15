@@ -129,7 +129,7 @@ import type {
 } from './api-types';
 import { siteToday } from './display';
 import type { RawRef } from './lookup-types';
-import type { DryRunOut, RulesOut, RuleOut, RuleSettingsIn } from './rules-types';
+import type { DryRunOut, Rules, Rule, RuleSettingsIn } from './rule-settings';
 import type { SealDayDetail } from './seal-types';
 import type {
   AdminAccepted,
@@ -1014,7 +1014,7 @@ export function useAddAlertNote() {
 export function useRules() {
   return useQuery({
     queryKey: queryKeys.rules,
-    queryFn: ({ signal }) => api.get<RulesOut>('/rules', { signal }),
+    queryFn: ({ signal }) => api.get<Rules>('/rules', { signal }),
   });
 }
 
@@ -1026,9 +1026,9 @@ export function useUpdateRule() {
   const client = useQueryClient();
   return useMutation({
     mutationFn: ({ id, body }: { id: string; body: RuleSettingsIn }) =>
-      api.put<RuleOut>(`/rules/${encodeURIComponent(id)}`, body),
+      api.put<Rule>(`/rules/${encodeURIComponent(id)}`, body),
     onSuccess: (rule) => {
-      client.setQueryData<RulesOut>(queryKeys.rules, (list) =>
+      client.setQueryData<Rules>(queryKeys.rules, (list) =>
         list
           ? { ...list, rules: list.rules.map((item) => (item.id === rule.id ? rule : item)) }
           : list,

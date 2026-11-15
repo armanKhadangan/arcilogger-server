@@ -5,7 +5,7 @@ import { Field } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { formatBytes, formatDuration } from '@/lib/format';
 import { currentLang } from '@/lib/i18n';
-import type { ParamOut, RuleParamValue } from '@/lib/rules-types';
+import type { ParamOut, RuleParamValue } from '@/lib/rule-settings';
 
 import {
   isKnownKind,
