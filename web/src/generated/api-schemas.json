@@ -62,6 +62,9 @@
     "/api/v1/admin/config/sources/check": [
       "post"
     ],
+    "/api/v1/admin/config/sources/snmp-test": [
+      "post"
+    ],
     "/api/v1/admin/config/sources/{name}": [
       "delete",
       "put"
