@@ -246,7 +246,7 @@ def test_a_test_notification_is_sent_by_the_worker(
     process_requests(factory, local.config(), now=utc_now())
     done = client.get(accepted["status_url"]).json()
     assert (done["kind"], done["state"]) == ("worker.webhook_test", "succeeded"), done
-    assert done["result"] == {"ok": True, "name": "siem", "status": 200, "error_text": None}
+    assert done["result"] == {"ok": True, "status": 200, "error_text": None}
     (sent,) = receiver.received
     assert sent.headers["X-Arcilogger-Signature"].startswith("sha256=")
     document = json.loads(sent.body)
@@ -283,6 +283,27 @@ def test_a_failed_test_names_the_reason(
     )
     assert done["result"]["status"] == 503
     assert done["result"]["error_text"] == "HTTP 503: bakımda: ***"
+
+
+@pytest.mark.usefixtures("configured")
+@pytest.mark.parametrize(
+    ("name", "reason"), [("yedek", "secret_missing"), ("slack-bt", "disabled")]
+)
+def test_a_webhook_that_is_not_ready_is_not_tested(
+    client: TestClient, login_as: Login, factory: sessionmaker[Session], name: str, reason: str
+) -> None:
+    """Refused before anything is queued: 409 ``webhook_not_ready`` with the reason of the list."""
+    login_as(client, "admin")
+    response = client.post(f"{API}/{name}/test")
+    assert response.status_code == 409, response.text
+    error = response.json()["error"]
+    assert (error["code"], error["details"]) == ("webhook_not_ready", {"reason": reason})
+    assert (error["message_tr"], error["message_en"]) == (
+        "Bu webhook gönderime hazır değil; durumuna bakın.",
+        "This webhook is not ready to send; see its state.",
+    )
+    with factory() as session:
+        assert session.scalars(select(AdminRequest)).all() == []
 
 
 def test_the_test_needs_settings_manage_a_known_name_and_waits_its_turn(

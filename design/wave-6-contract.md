@@ -792,12 +792,13 @@ to the normal site: `port-scan` (R01), `external-scan` (R02), `brute-force` (R03
   outcome code takes fixed texts from `core/admin/messages.py`, as `smtp_test_failed` does. The
   message is "Deneme bildirimi gönderilemedi." / "The test notification could not be sent.", and
   the reason (§2.4.2: the status code and the cleaned reply) is `result.error_text` of the
-  request, `{ok, name, status, error_text}`. The page shows both (W6-F).
+  request, `{ok, status, error_text}` (manager's answer of 2026-11-15 19:08 on #266). The page
+  shows both (W6-F).
 - **W6-H-2: a new revision `0025_admin_webhook_test`.** `admin_requests.kind` is checked by the
   database (`ck_admin_requests_kind`, frozen in `0015_admin_requests`), so the new worker-channel
   kind needs a revision; it only widens that check (the downgrade deletes the
-  `worker.webhook_test` rows first). C2 gives W6-A a `0025` for the rules' indexes: whichever
-  lands second renumbers (question on #266).
+  `worker.webhook_test` rows first). The manager fixed the numbers on #266: `0025` is this
+  kind, and the rules' indexes of C2 take `0026` with down-revision `0025`.
 - **W6-H-3: the webhook secrets on the console.** §2.4.1 has the administrator run
   `arcilogger-core secret set webhook.<name>.secret`; the CLI accepted only a fixed list of
   names, so it now also takes `webhook.<name>.secret` and `webhook.<name>.url`. `secret get`

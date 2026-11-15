@@ -474,7 +474,7 @@ def outcome_of(session: Session, request_id: str) -> tuple[AdminRequest, AuditLo
 def test_the_test_notification_is_signed_and_sent_by_the_worker(
     sessions: sessionmaker[Session], db_session: Session, tmp_path: Path, receiver: WebhookReceiver
 ) -> None:
-    hook = WebhookConfig(name="siem", url=receiver.url, ca_file=receiver.ca_file, enabled=False)
+    hook = WebhookConfig(name="siem", url=receiver.url, ca_file=receiver.ca_file)
     set_setting(db_session, "alerts.web_base_url", WEB, updated_by="test")
     db_session.commit()
     request_id = queue_test(db_session, "siem")
@@ -482,7 +482,7 @@ def test_the_test_notification_is_signed_and_sent_by_the_worker(
     assert report.steps == [f"{request_id} {WEBHOOK_TEST} succeeded"]
     row, entry = outcome_of(db_session, request_id)
     assert (row.state, row.terminal, row.error_code) == ("succeeded", True, None)
-    assert row.result == {"ok": True, "name": "siem", "status": 200, "error_text": None}
+    assert row.result == {"ok": True, "status": 200, "error_text": None}
     assert entry.details == {
         "name": "siem",
         "ok": True,
@@ -490,7 +490,7 @@ def test_the_test_notification_is_signed_and_sent_by_the_worker(
         "request": request_id,
         "requested_by": {"user_id": row.requested_by_id, "username": "ayse"},
     }
-    (sent,) = receiver.received  # a switched-off webhook can be tested before it is switched on
+    (sent,) = receiver.received
     timestamp = int(sent.headers["X-Arcilogger-Timestamp"])
     assert timestamp == int(NOW.timestamp())
     assert sent.headers[SIGNATURE_HEADER] == signature(SECRET, timestamp, sent.body)
@@ -558,16 +558,22 @@ def test_a_missing_secret_or_url_fails_the_test_without_a_request(
 
 
 @pytest.mark.parametrize("name", ["eski", 7], ids=["removed", "not-a-name"])
-def test_a_webhook_no_longer_in_the_file_is_not_found(
+def test_a_webhook_no_longer_in_the_file_fails_the_test(
     sessions: sessionmaker[Session], db_session: Session, tmp_path: Path, name: object
 ) -> None:
+    """Removed from ``[[webhooks]]`` after the API queued the test (a row written past the API:
+    not a name at all): the test fails, with the one failure code of the request."""
     request_id = queue_test(db_session, name)
     process_requests(sessions, config_of(tmp_path, SIEM), now=NOW)
     row, entry = outcome_of(db_session, request_id)
-    assert (row.state, row.error_code) == ("failed", "webhook_not_found")
+    assert (row.state, row.error_code) == ("failed", "webhook_test_failed")
+    assert row.result == {
+        "ok": False,
+        "status": None,
+        "error_text": "the webhook is no longer in [[webhooks]]",
+    }
     found = name if isinstance(name, str) else None
-    assert row.result == {"ok": False, "name": found, "status": None, "error_text": None}
-    assert entry.details["code"] == "webhook_not_found"
+    assert (entry.details["name"], entry.details["code"]) == (found, "webhook_test_failed")
 
 
 def test_an_expired_test_sends_nothing(

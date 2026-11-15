@@ -43,10 +43,11 @@ The worker also works the **worker channel** (contract 2.9): requests the API st
 * ``worker.webhook_test`` (``params.name``) — "Test gönder" of Ayarlar → Webhook'lar (Wave 6
   §2.4.4): the test notification (rule ``TEST``) to the ``[[webhooks]]`` entry ``name``, with
   the secret or URL of the worker's own secret store and the sender of ``alerts.webhooks``; the
-  result is ``{ok, name, status, error_text}`` and the audit entry ``webhook.test``.
-  ``webhook_not_found`` when the entry is no longer in the file, ``webhook_test_failed`` with the
-  text of §2.4.2 (the status code and the cleaned reply, never the URL's path, the secret or a
-  header value) when the target did not answer ``2xx`` or its secret or URL is missing.
+  result is ``{ok, status, error_text}`` and the audit entry ``webhook.test`` (``{name, ok,
+  status}``). ``webhook_test_failed`` when the target did not answer ``2xx`` (``status`` is null
+  when no reply came), its secret or URL is missing, or the entry is no longer in the file;
+  ``error_text`` is the text of §2.4.2 (the status code and the cleaned reply, never the URL's
+  path, the secret or a header value), null on success.
 * ``worker.lease_rebuild`` (``params.from``, ``params.to``) — the lease timeline of each day
   rebuilt in order (:func:`.correlation.rebuild.rebuild_lease_day`, a ``leases.rebuild`` job
   run per day with the request's id). The row is ``running`` with ``{done_days, total_days,
@@ -426,7 +427,7 @@ def _webhook_result(
         "succeeded" if ok else "failed",
         action=WEBHOOK_TEST_ACTION,
         details={"name": name, "ok": ok, "status": status},
-        result={"ok": ok, "name": name, "status": status, "error_text": text},
+        result={"ok": ok, "status": status, "error_text": text},
         code=code,
     )
 
@@ -438,7 +439,8 @@ def _webhook_test(session: Session, row: AdminRequest, config: Config, *, now: d
     webhook = next((item for item in config.webhooks if item.name == name), None)
     if not isinstance(name, str) or webhook is None:
         found = name if isinstance(name, str) else None
-        _webhook_result(session, row, found, status=None, text=None, code="webhook_not_found")
+        text = "the webhook is no longer in [[webhooks]]"
+        _webhook_result(session, row, found, status=None, text=text, code="webhook_test_failed")
         return
     web_url = web_base_url(get_setting(session, "alerts.web_base_url"), config)
     document = payload(

@@ -17,11 +17,14 @@ the secret store, decision D4): the browser lists them, shows their deliveries a
 * ``POST /webhooks/{name}/test`` (``settings.manage``, module ``security_rules``) — "Test gönder":
   the test notification (rule ``TEST``) to that webhook, sent by the worker like the test e-mail
   (``worker.test_email``): a request of the worker channel (``worker.webhook_test``, 202 with
-  ``status_url``; manager's answer on #266). The worker reads the secret or the Teams/Slack URL
-  from its own secret store and answers ``{ok, name, status, error_text}`` (``succeeded``), or
-  ``webhook_test_failed`` with the text of §2.4.2. Five an hour (429 ``admin_rate_limited``); a
-  test the worker has not sent within 10 minutes expires. The audit entries are
-  ``admin.request`` and the worker's ``webhook.test``.
+  ``status_url``; manager's answers on #266). A webhook that is not ``ready`` is refused before
+  anything is queued (409 ``webhook_not_ready``, ``details.reason`` as in the list). The worker
+  reads the secret or the Teams/Slack URL from its own secret store; the request's ``result`` is
+  ``{ok, status, error_text}`` (``status`` null when no reply came; ``error_text`` as
+  ``last_error`` of §2.4.2, null on success) and its code ``webhook_test_failed`` when the test
+  failed. Five an hour (429 ``admin_rate_limited``); a test the worker has not sent within 10
+  minutes expires. The audit entries are ``admin.request`` and the worker's ``webhook.test``
+  (``{name, ok, status}``).
 
 ``webhook_not_found`` (404) for a name that is not in ``[[webhooks]]``. Reads are not audited
 (like the alert list). The reads stay open without the ``security_rules`` licence module; the
@@ -60,6 +63,10 @@ KIND: Final = "webhook"
 COUNT_DAYS: Final = 7
 DELIVERIES_MAX: Final = 200
 NOT_FOUND: Final = ("Böyle bir webhook yok.", "No such webhook.")
+NOT_READY: Final = (
+    "Bu webhook gönderime hazır değil; durumuna bakın.",
+    "This webhook is not ready to send; see its state.",
+)
 #: "Test gönder": the worker-channel request, five an hour like the test e-mail, expired when
 #: the worker has not sent it within 10 minutes (the person stopped waiting).
 TEST_KIND: Final = "worker.webhook_test"
@@ -262,7 +269,9 @@ def send_test(
     name: NameParam, request: Request, db: DbSession, user: SettingsDep, channel: ChannelDep
 ) -> AdminAccepted:
     """The test notification to one webhook, sent by the worker."""
-    configured(channel, name)
+    reason = readiness(configured(channel, name), channel.files.stored)
+    if reason is not None:
+        raise ApiError(409, "webhook_not_ready", *NOT_READY, details={"reason": reason})
     channel.check_window(db, TEST_KIND, limit=TESTS, window=TEST_WINDOW, code="admin_rate_limited")
     return channel.submit_worker(
         db,

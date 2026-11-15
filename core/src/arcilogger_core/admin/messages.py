@@ -92,10 +92,6 @@ MESSAGES: Final[Mapping[str, tuple[str, str]]] = MappingProxyType(
             "Deneme bildirimi gönderilemedi.",
             "The test notification could not be sent.",
         ),
-        "webhook_not_found": (
-            "Böyle bir webhook yok.",
-            "No such webhook.",
-        ),
         "replica_test_failed": (
             "Replika paylaşımına bağlanılamadı.",
             "The replica share could not be reached.",
