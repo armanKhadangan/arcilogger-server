@@ -242,6 +242,11 @@ def target_of(webhook: WebhookConfig, config: Config, store: SecretStore | None)
     )
 
 
+def site_of(web_url: str) -> str:
+    """The payload's ``site``: the host of ``alerts.web_base_url``."""
+    return urlsplit(web_url).hostname or web_url
+
+
 def webhook_alert(alert: Alert, web_url: str) -> WebhookAlert:
     details = alert.details or {}
     count = details.get("count")
@@ -289,9 +294,11 @@ def _lease(
             row.status, row.last_error = "failed", "alert not found"
             session.commit()
             return _lease(sessions, webhook, web_url, now)
-        site = urlsplit(web_url).hostname or web_url
         document = payload(
-            webhook.format, webhook_alert(alert, web_url), version=__version__, site=site
+            webhook.format,
+            webhook_alert(alert, web_url),
+            version=__version__,
+            site=site_of(web_url),
         )
         row.attempts += 1
         row.next_attempt_at = now + retry_after(row.attempts)
@@ -379,7 +386,8 @@ def deliver(
             return  # unreachable or not configured: the other rows wait for the next run
 
 
-def _secret_store(config: Config) -> SecretStore | None:
+def secret_store(config: Config) -> SecretStore | None:
+    """The secret store of ``config``, or ``None`` (logged) when it cannot be opened."""
     try:
         return SecretStore(config.secrets_dir / "secret.key", config.secrets_dir / "secrets.json")
     except (SecretStoreError, OSError, ValueError) as exc:
@@ -415,7 +423,7 @@ def run_webhooks(
     if not enabled:
         report.skipped = "no enabled [[webhooks]]"
         return report
-    store = _secret_store(config)
+    store = secret_store(config)
     post = sender or (lambda target, body: send(target, body, version=__version__, now=now))
     for webhook in enabled:
         try:

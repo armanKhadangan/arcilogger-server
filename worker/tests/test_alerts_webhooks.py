@@ -3,8 +3,9 @@
 The queue (no backfill, ``min_severity``, ``rules``, ``actions.webhook``), the retry schedule
 (1, 5, 15, 60 minutes, then hourly, ``failed`` after 24 h), a permanent 4xx, ``R20-webhook`` and
 its resolution, removed webhooks, and what a request and ``last_error`` never hold. Most tests
-send through a recording fake; one goes through a local HTTPS receiver with its own test CA.
-Every value is fictional.
+send through a recording fake; some go through a local HTTPS receiver with its own test CA. The
+last part is "Test gönder" (§2.4.4): the worker-channel request ``worker.webhook_test``, its
+result and its ``webhook.test`` audit entry. Every value is fictional.
 """
 
 from __future__ import annotations
@@ -20,13 +21,17 @@ import pytest
 from sqlalchemy import Engine, select
 from sqlalchemy.orm import Session, sessionmaker
 
+from arcilogger_core.admin.contract import new_id
+from arcilogger_core.admin.messages import MESSAGES
 from arcilogger_core.config import Config, WebhookConfig
 from arcilogger_core.layout import Layout
 from arcilogger_core.secretstore import SecretStore
 from arcilogger_core.webhook import SIGNATURE_HEADER, Target, WebhookError, signature
 from arcilogger_core.webhooktesting import WebhookReceiver
-from arcilogger_db.models import Alert, AlertDelivery
+from arcilogger_db.models import AdminRequest, Alert, AlertDelivery, AuditLog, User
 from arcilogger_db.settings import set_setting
+from arcilogger_worker import admin_jobs
+from arcilogger_worker.admin_jobs import WEBHOOK_TEST, WEBHOOK_TEST_ACTION, process_requests
 from arcilogger_worker.alerts import notify
 from arcilogger_worker.alerts.store import open_alert
 from arcilogger_worker.alerts.webhooks import (
@@ -429,3 +434,168 @@ def test_last_error_holds_no_secret_and_no_query(
     assert row.last_error.startswith("HTTP 400: bad request to ***")
     for never in (SECRET, "kanal=guvenlik", "/arcilogger"):
         assert never not in row.last_error
+
+
+# -- "Test gönder": the worker-channel request worker.webhook_test (§2.4.4) -----------------------
+
+
+def queue_test(session: Session, name: object, *, expires_at: datetime | None = None) -> str:
+    """A ``worker.webhook_test`` row as the API queues it (``params.name``)."""
+    user = session.scalars(select(User).where(User.username == "ayse")).first()
+    if user is None:
+        user = User(username="ayse", display_name="Ayşe", role="admin", password_hash="!")
+        session.add(user)
+        session.flush()
+    row = AdminRequest(
+        id=new_id(),
+        kind=WEBHOOK_TEST,
+        channel="worker",
+        state="queued",
+        requested_by_id=user.id,
+        requested_by=user.username,
+        created_at=NOW - timedelta(seconds=5),
+        expires_at=expires_at,
+        params={"name": name},
+    )
+    session.add(row)
+    session.commit()
+    return row.id
+
+
+def outcome_of(session: Session, request_id: str) -> tuple[AdminRequest, AuditLog]:
+    session.expire_all()
+    row = session.get(AdminRequest, request_id)
+    assert row is not None
+    (entry,) = session.scalars(select(AuditLog).where(AuditLog.action == WEBHOOK_TEST_ACTION))
+    assert entry.details["request"] == request_id
+    return row, entry
+
+
+def test_the_test_notification_is_signed_and_sent_by_the_worker(
+    sessions: sessionmaker[Session], db_session: Session, tmp_path: Path, receiver: WebhookReceiver
+) -> None:
+    hook = WebhookConfig(name="siem", url=receiver.url, ca_file=receiver.ca_file, enabled=False)
+    set_setting(db_session, "alerts.web_base_url", WEB, updated_by="test")
+    db_session.commit()
+    request_id = queue_test(db_session, "siem")
+    report = process_requests(sessions, config_of(tmp_path, hook), now=NOW)
+    assert report.steps == [f"{request_id} {WEBHOOK_TEST} succeeded"]
+    row, entry = outcome_of(db_session, request_id)
+    assert (row.state, row.terminal, row.error_code) == ("succeeded", True, None)
+    assert row.result == {"ok": True, "name": "siem", "status": 200, "error_text": None}
+    assert entry.details == {
+        "name": "siem",
+        "ok": True,
+        "status": 200,
+        "request": request_id,
+        "requested_by": {"user_id": row.requested_by_id, "username": "ayse"},
+    }
+    (sent,) = receiver.received  # a switched-off webhook can be tested before it is switched on
+    timestamp = int(sent.headers["X-Arcilogger-Timestamp"])
+    assert timestamp == int(NOW.timestamp())
+    assert sent.headers[SIGNATURE_HEADER] == signature(SECRET, timestamp, sent.body)
+    document = json.loads(sent.body)
+    assert document["site"] == "arcilogger.ornek.example"
+    assert document["alert"] == {
+        "id": 0,
+        "rule": "TEST",
+        "severity": "info",
+        "state": "open",
+        "title_tr": "ARCILOGGER deneme bildirimi",
+        "title_en": "ARCILOGGER test notification",
+        "time": "2026-11-14T12:00:00+03:00",
+        "count": 1,
+        "url": WEB,
+    }
+
+
+def test_a_refused_test_keeps_the_status_and_the_cleaned_reply(
+    sessions: sessionmaker[Session], db_session: Session, tmp_path: Path, receiver: WebhookReceiver
+) -> None:
+    hook = WebhookConfig(name="siem", url=receiver.url, ca_file=receiver.ca_file)
+    receiver.statuses = [404]
+    receiver.reply = f"no channel at {receiver.url} for {SECRET}".encode()
+    request_id = queue_test(db_session, "siem")
+    process_requests(sessions, config_of(tmp_path, hook), now=NOW)
+    row, entry = outcome_of(db_session, request_id)
+    assert (row.state, row.error_code) == ("failed", "webhook_test_failed")
+    assert row.result is not None
+    assert (row.result["ok"], row.result["status"]) == (False, 404)
+    assert row.result["error_text"].startswith("HTTP 404: no channel at ***")
+    assert (entry.details["ok"], entry.details["status"], entry.details["code"]) == (
+        False,
+        404,
+        "webhook_test_failed",
+    )
+    stored = json.dumps([row.result, row.params, entry.details])
+    for never in (SECRET, "kanal=guvenlik", "/arcilogger"):
+        assert never not in stored
+    assert MESSAGES["webhook_test_failed"] == (
+        "Deneme bildirimi gönderilemedi.",
+        "The test notification could not be sent.",
+    )
+
+
+@pytest.mark.parametrize("stored", ["", None], ids=["teams-url-missing", "secret-missing"])
+def test_a_missing_secret_or_url_fails_the_test_without_a_request(
+    sessions: sessionmaker[Session],
+    db_session: Session,
+    tmp_path: Path,
+    stored: str | None,
+) -> None:
+    """``secret-missing``: a ``generic`` webhook without its HMAC secret; ``teams-url-missing``:
+    a Teams webhook whose URL is not in the secret store. The text names the stored secret and
+    the command that sets it, never a value."""
+    hook = SIEM if stored is None else WebhookConfig(name="teams-bt", format="teams")
+    request_id = queue_test(db_session, hook.name)
+    process_requests(sessions, config_of(tmp_path, hook, secret=None), now=NOW)
+    row, _ = outcome_of(db_session, request_id)
+    assert (row.state, row.error_code) == ("failed", "webhook_test_failed")
+    assert row.result is not None
+    name = hook.secret_name if stored is None else hook.url_name
+    assert row.result["error_text"].startswith(f"{name}: ")
+    assert f"arcilogger-core secret set {name}" in row.result["error_text"]
+
+
+@pytest.mark.parametrize("name", ["eski", 7], ids=["removed", "not-a-name"])
+def test_a_webhook_no_longer_in_the_file_is_not_found(
+    sessions: sessionmaker[Session], db_session: Session, tmp_path: Path, name: object
+) -> None:
+    request_id = queue_test(db_session, name)
+    process_requests(sessions, config_of(tmp_path, SIEM), now=NOW)
+    row, entry = outcome_of(db_session, request_id)
+    assert (row.state, row.error_code) == ("failed", "webhook_not_found")
+    found = name if isinstance(name, str) else None
+    assert row.result == {"ok": False, "name": found, "status": None, "error_text": None}
+    assert entry.details["code"] == "webhook_not_found"
+
+
+def test_an_expired_test_sends_nothing(
+    sessions: sessionmaker[Session], db_session: Session, tmp_path: Path, receiver: WebhookReceiver
+) -> None:
+    hook = WebhookConfig(name="siem", url=receiver.url, ca_file=receiver.ca_file)
+    request_id = queue_test(db_session, "siem", expires_at=NOW - timedelta(seconds=1))
+    process_requests(sessions, config_of(tmp_path, hook), now=NOW)
+    row, entry = outcome_of(db_session, request_id)
+    assert (row.state, row.error_code) == ("expired", "request_expired")
+    assert (entry.details["name"], entry.details["ok"]) == ("siem", False)
+    assert receiver.received == []
+
+
+def test_an_unexpected_error_fails_only_that_test(
+    sessions: sessionmaker[Session],
+    db_session: Session,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def broken(*args: object, **kwargs: object) -> int:
+        raise RuntimeError("beklenmedik")
+
+    monkeypatch.setattr(admin_jobs, "send", broken)
+    request_id = queue_test(db_session, "siem")
+    process_requests(sessions, config_of(tmp_path, SIEM), now=NOW)
+    row, entry = outcome_of(db_session, request_id)
+    assert (row.state, row.error_code) == ("failed", "webhook_test_failed")
+    assert row.result is not None
+    assert row.result["error_text"] == "beklenmeyen hata / unexpected error: RuntimeError"
+    assert entry.details["code"] == "webhook_test_failed"

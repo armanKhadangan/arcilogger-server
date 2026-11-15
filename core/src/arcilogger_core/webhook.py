@@ -74,6 +74,27 @@ class WebhookAlert:
     url: str
 
 
+#: The test notification ("Test gönder", §2.4.4): its rule and its titles.
+TRIAL_RULE: Final = "TEST"
+TRIAL_TITLES: Final = ("ARCILOGGER deneme bildirimi", "ARCILOGGER test notification")
+
+
+def trial_alert(now: datetime, url: str) -> WebhookAlert:
+    """The alert of the test notification (§2.4.4), sent by the worker's ``worker.webhook_test``
+    and the agent's ``webhook`` probe alike; ``url`` is the web interface's address."""
+    return WebhookAlert(
+        id=0,
+        rule=TRIAL_RULE,
+        severity="info",
+        state="open",
+        title_tr=TRIAL_TITLES[0],
+        title_en=TRIAL_TITLES[1],
+        time=now,
+        count=1,
+        url=url,
+    )
+
+
 def payload(
     format: WebhookFormat, alert: WebhookAlert, *, version: str, site: str
 ) -> dict[str, Any]:

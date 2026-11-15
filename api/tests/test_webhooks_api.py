@@ -1,22 +1,28 @@
 """``/api/v1/webhooks`` (Wave 6 contract §2.4.4, W6-H): the webhooks of ``[[webhooks]]`` as the
 configuration file holds them now, each with its host only, whether it is ready to send and why
-not, its last delivery and its 7-day counts; the deliveries of one webhook; ``webhook_not_found``.
-Every value is fictional."""
+not, its last delivery and its 7-day counts; the deliveries of one webhook; ``webhook_not_found``;
+"Test gönder" (``POST /webhooks/{name}/test``), a worker-channel request that the worker's own job
+sends to a local HTTPS receiver with its own test CA. Every value is fictional."""
 
 from __future__ import annotations
 
-from collections.abc import Callable
+import json
+from collections.abc import Callable, Iterator
 from datetime import timedelta
+from pathlib import Path
 from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from arcilogger_api.testing import LoggedIn
 from arcilogger_core.admin.testing import Installed
 from arcilogger_core.timeutil import utc_now
-from arcilogger_db.models import Alert, AlertDelivery
+from arcilogger_core.webhooktesting import WebhookReceiver
+from arcilogger_db.models import AdminRequest, Alert, AlertDelivery, AuditLog
+from arcilogger_worker.admin_jobs import process_requests
 
 API = "/api/v1/webhooks"
 Login = Callable[..., LoggedIn]
@@ -201,3 +207,100 @@ def test_the_list_needs_alerts_read(client: TestClient, login_as: Login) -> None
     login_as(client, "viewer")
     assert client.get(API).status_code == 403
     assert client.get(f"{API}/siem/deliveries").status_code == 403
+
+
+# -- "Test gönder" ---------------------------------------------------------------------------------
+
+
+@pytest.fixture
+def receiver(tmp_path: Path) -> Iterator[WebhookReceiver]:
+    with WebhookReceiver(tmp_path / "tls") as found:
+        yield found
+
+
+@pytest.fixture
+def local(installed: Installed, receiver: WebhookReceiver) -> Installed:
+    """``siem`` posting to the local receiver (its own CA), with its HMAC secret stored."""
+    with installed.config_path.open("a", encoding="utf-8") as handle:
+        handle.write(
+            f'\n[[webhooks]]\nname = "siem"\nurl = "{receiver.url}"\n'
+            f"ca_file = '{receiver.ca_file}'\n"
+        )
+    installed.store.set("webhook.siem.secret", HMAC)
+    return installed
+
+
+def test_a_test_notification_is_sent_by_the_worker(
+    local: Installed,
+    receiver: WebhookReceiver,
+    client: TestClient,
+    login_as: Login,
+    factory: sessionmaker[Session],
+) -> None:
+    login_as(client, "admin")
+    response = client.post(f"{API}/siem/test")
+    assert response.status_code == 202, response.text
+    accepted = response.json()
+    assert client.get(accepted["status_url"]).json()["state"] == "queued"
+    assert receiver.received == []  # the API sends nothing itself
+    process_requests(factory, local.config(), now=utc_now())
+    done = client.get(accepted["status_url"]).json()
+    assert (done["kind"], done["state"]) == ("worker.webhook_test", "succeeded"), done
+    assert done["result"] == {"ok": True, "name": "siem", "status": 200, "error_text": None}
+    (sent,) = receiver.received
+    assert sent.headers["X-Arcilogger-Signature"].startswith("sha256=")
+    document = json.loads(sent.body)
+    assert (document["alert"]["rule"], document["alert"]["title_en"]) == (
+        "TEST",
+        "ARCILOGGER test notification",
+    )
+    with factory() as session:
+        (entry,) = session.scalars(select(AuditLog).where(AuditLog.action == "admin.request"))
+        assert (entry.details["kind"], entry.details["name"]) == ("worker.webhook_test", "siem")
+        (tested,) = session.scalars(select(AuditLog).where(AuditLog.action == "webhook.test"))
+        assert (tested.details["ok"], tested.details["status"]) == (True, 200)
+    assert HMAC not in json.dumps(done)
+
+
+def test_a_failed_test_names_the_reason(
+    local: Installed,
+    receiver: WebhookReceiver,
+    client: TestClient,
+    login_as: Login,
+    factory: sessionmaker[Session],
+) -> None:
+    receiver.statuses = [503]
+    receiver.reply = f"bakımda: {receiver.url}".encode()
+    login_as(client, "admin")
+    accepted = client.post(f"{API}/siem/test").json()
+    process_requests(factory, local.config(), now=utc_now())
+    done = client.get(accepted["status_url"]).json()
+    assert done["state"] == "failed"
+    assert done["error"]["code"] == "webhook_test_failed"
+    assert (done["error"]["message_tr"], done["error"]["message_en"]) == (
+        "Deneme bildirimi gönderilemedi.",
+        "The test notification could not be sent.",
+    )
+    assert done["result"]["status"] == 503
+    assert done["result"]["error_text"] == "HTTP 503: bakımda: ***"
+
+
+def test_the_test_needs_settings_manage_a_known_name_and_waits_its_turn(
+    local: Installed, client: TestClient, login_as: Login, factory: sessionmaker[Session]
+) -> None:
+    login_as(client, "viewer")
+    assert client.post(f"{API}/siem/test").status_code == 403
+    login_as(client, "admin")
+    missing = client.post(f"{API}/yok/test")
+    assert (missing.status_code, missing.json()["error"]["code"]) == (404, "webhook_not_found")
+    for _ in range(5):
+        assert client.post(f"{API}/siem/test").status_code == 202
+    limited = client.post(f"{API}/siem/test")
+    assert (limited.status_code, limited.json()["error"]["code"]) == (429, "admin_rate_limited")
+    assert 3500 <= limited.json()["error"]["details"]["retry_after"] <= 3600
+    with factory() as session:
+        rows = session.scalars(select(AdminRequest)).all()
+        assert {(row.kind, row.channel, row.params["name"]) for row in rows} == {
+            ("worker.webhook_test", "worker", "siem")
+        }
+        assert all(row.expires_at is not None for row in rows)

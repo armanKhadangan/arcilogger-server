@@ -102,7 +102,7 @@ RequestKind = Literal[
 ]
 #: Non-secret actions the worker runs from the database queue (``admin_requests``,
 #: ``channel = 'worker'``); they never become a request file.
-WorkerKind = Literal["worker.test_email", "worker.lease_rebuild"]
+WorkerKind = Literal["worker.test_email", "worker.lease_rebuild", "worker.webhook_test"]
 Channel = Literal["agent", "worker"]
 #: The sections of ``arcilogger.toml`` the browser may change (contract 2.3).
 Section = Literal["general", "tsa", "smtp", "replica", "retention", "backup", "sources"]

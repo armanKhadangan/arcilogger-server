@@ -217,9 +217,10 @@ ROUTES: dict[tuple[str, str], str | None] = {
     ("GET", f"{V}/archive-reloads"): None,
     ("GET", f"{V}/archive-reloads/{{reload_id}}"): None,
     # The alert webhooks (Wave 6 contract §2.4.4, W6-H): the list and the deliveries stay
-    # readable without the security_rules module.
+    # readable without the security_rules module; "Test gönder" needs it.
     ("GET", f"{V}/webhooks"): None,
     ("GET", f"{V}/webhooks/{{name}}/deliveries"): None,
+    ("POST", f"{V}/webhooks/{{name}}/test"): "security_rules",
 }
 PLACEHOLDERS = {
     "{key}": "x",
@@ -280,7 +281,7 @@ def test_every_route_is_classified(app: FastAPI) -> None:
     found = sorted((method.upper(), path) for path, ops in paths.items() for method in ops)
     assert found == sorted(ROUTES)
     gated = [key for key, module in ROUTES.items() if module is not None]
-    assert len(gated) == 24
+    assert len(gated) == 25
     assert len(ROUTES) - len(gated) == 138
 
 

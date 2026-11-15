@@ -55,8 +55,15 @@ from arcilogger_core.snmp import PysnmpClient, SnmpClient, SnmpError, Target, li
 from arcilogger_core.timeutil import utc_now
 from arcilogger_core.tsa.base import TsaError
 from arcilogger_core.tsa.zamane import ZamaneCliProvider
+from arcilogger_core.webhook import (
+    TRIAL_RULE,
+    TRIAL_TITLES,
+    WebhookError,
+    encode,
+    payload,
+    trial_alert,
+)
 from arcilogger_core.webhook import Target as WebhookTarget
-from arcilogger_core.webhook import WebhookAlert, WebhookError, encode, payload
 from arcilogger_core.webhook import send as send_webhook
 
 ProbeKind = Literal["sntp", "credit", "smtp", "replica", "snmp", "backup_mirror", "webhook"]
@@ -284,8 +291,8 @@ def probe_snmp(
 
 
 #: The test notification of a webhook (Wave 6 contract §2.4.4).
-WEBHOOK_TEST_RULE: Final = "TEST"
-WEBHOOK_TEST_TITLES: Final = ("ARCILOGGER deneme bildirimi", "ARCILOGGER test notification")
+WEBHOOK_TEST_RULE: Final = TRIAL_RULE
+WEBHOOK_TEST_TITLES: Final = TRIAL_TITLES
 
 
 def probe_webhook(
@@ -306,17 +313,7 @@ def probe_webhook(
         ca_file=webhook.ca_file,
         https_proxy=str(params.get("https_proxy", "")),
     )
-    test = WebhookAlert(
-        id=0,
-        rule=WEBHOOK_TEST_RULE,
-        severity="info",
-        state="open",
-        title_tr=WEBHOOK_TEST_TITLES[0],
-        title_en=WEBHOOK_TEST_TITLES[1],
-        time=moment,
-        count=1,
-        url=web_url,
-    )
+    test = trial_alert(moment, web_url)
     version = str(params.get("version", ""))
     document = payload(webhook.format, test, version=version, site=str(params.get("site", "")))
     try:

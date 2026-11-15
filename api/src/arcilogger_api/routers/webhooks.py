@@ -14,8 +14,18 @@ the secret store, decision D4): the browser lists them, shows their deliveries a
   text: the status code and at most 300 characters of the reply, without the URL's query, the
   secret or any header value.
 
+* ``POST /webhooks/{name}/test`` (``settings.manage``, module ``security_rules``) — "Test gönder":
+  the test notification (rule ``TEST``) to that webhook, sent by the worker like the test e-mail
+  (``worker.test_email``): a request of the worker channel (``worker.webhook_test``, 202 with
+  ``status_url``; manager's answer on #266). The worker reads the secret or the Teams/Slack URL
+  from its own secret store and answers ``{ok, name, status, error_text}`` (``succeeded``), or
+  ``webhook_test_failed`` with the text of §2.4.2. Five an hour (429 ``admin_rate_limited``); a
+  test the worker has not sent within 10 minutes expires. The audit entries are
+  ``admin.request`` and the worker's ``webhook.test``.
+
 ``webhook_not_found`` (404) for a name that is not in ``[[webhooks]]``. Reads are not audited
-(like the alert list).
+(like the alert list). The reads stay open without the ``security_rules`` licence module; the
+test needs it, as the job ``alerts.webhooks`` does.
 """
 
 from __future__ import annotations
@@ -24,14 +34,16 @@ from datetime import datetime, timedelta
 from typing import Annotated, Final, Literal
 from urllib.parse import urlsplit
 
-from fastapi import APIRouter, Depends, Path, Query
+from fastapi import APIRouter, Depends, Path, Query, Request
 from sqlalchemy import func, select
+from sqlalchemy.dialects.postgresql import distinct_on
 from sqlalchemy.orm import Session
 
-from arcilogger_api.admin_channel import Channel, ChannelDep
+from arcilogger_api.admin_channel import AdminAccepted, Channel, ChannelDep
 from arcilogger_api.auth.schemas import StrictModel
 from arcilogger_api.deps import DbSession
 from arcilogger_api.errors import ApiError
+from arcilogger_api.licensing import require_module
 from arcilogger_api.security import CurrentUser, require
 from arcilogger_core.config import WebhookConfig
 from arcilogger_core.secretstore import SecretStoreError
@@ -40,11 +52,20 @@ from arcilogger_db.models import Alert, AlertDelivery
 
 router = APIRouter(prefix="/webhooks", tags=["webhooks"])
 ReaderDep = Annotated[CurrentUser, Depends(require("alerts.read"))]
+SettingsDep = Annotated[CurrentUser, Depends(require("settings.manage"))]
+#: A webhook's name in a path (``[[webhooks]] name``).
+NameParam = Annotated[str, Path(pattern=r"^[a-z0-9-]{1,32}$")]
 
 KIND: Final = "webhook"
 COUNT_DAYS: Final = 7
 DELIVERIES_MAX: Final = 200
 NOT_FOUND: Final = ("Böyle bir webhook yok.", "No such webhook.")
+#: "Test gönder": the worker-channel request, five an hour like the test e-mail, expired when
+#: the worker has not sent it within 10 minutes (the person stopped waiting).
+TEST_KIND: Final = "worker.webhook_test"
+TESTS: Final = 5
+TEST_WINDOW: Final = timedelta(hours=1)
+TEST_VALIDITY: Final = timedelta(minutes=10)
 
 WebhookFormat = Literal["generic", "teams", "slack"]
 DeliveryStatus = Literal["queued", "sent", "failed"]
@@ -156,7 +177,7 @@ def _last(db: Session) -> dict[str, WebhookLastDelivery]:
     newest = (
         select(AlertDelivery.recipient, AlertDelivery.status, moment.label("at"))
         .where(AlertDelivery.kind == KIND)
-        .distinct(AlertDelivery.recipient)
+        .ext(distinct_on(AlertDelivery.recipient))
         .order_by(AlertDelivery.recipient, moment.desc(), AlertDelivery.id.desc())
     )
     return {
@@ -201,7 +222,7 @@ def deliveries(
     db: DbSession,
     user: ReaderDep,
     channel: ChannelDep,
-    name: Annotated[str, Path(pattern=r"^[a-z0-9-]{1,32}$")],
+    name: NameParam,
     limit: Annotated[int, Query(ge=1, le=DELIVERIES_MAX)] = 50,
 ) -> WebhookDeliveries:
     """The newest deliveries of one webhook."""
@@ -229,4 +250,26 @@ def deliveries(
             )
             for row, rule, severity in rows
         ],
+    )
+
+
+@router.post(
+    "/{name}/test",
+    status_code=202,
+    dependencies=[require_module("security_rules")],
+)
+def send_test(
+    name: NameParam, request: Request, db: DbSession, user: SettingsDep, channel: ChannelDep
+) -> AdminAccepted:
+    """The test notification to one webhook, sent by the worker."""
+    configured(channel, name)
+    channel.check_window(db, TEST_KIND, limit=TESTS, window=TEST_WINDOW, code="admin_rate_limited")
+    return channel.submit_worker(
+        db,
+        user,
+        request,
+        kind=TEST_KIND,
+        params={"name": name},
+        audited={"name": name},
+        expires_at=channel.now + TEST_VALIDITY,
     )
