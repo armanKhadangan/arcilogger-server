@@ -1267,22 +1267,23 @@ def _window_evidence(
         store = _store(session)
         counted_ctx = ctx if until is None else replace(ctx, end=min(ctx.end, until))
         end = counted_ctx.end
-        for ip in ips:
-            need = EVIDENCE_LIMIT - per_address[ip]
-            if need <= 0:
-                continue
-            # The kept minutes say where the oldest logs end: read only up to that minute
-            # (counting whole minutes only; the partial first minute's logs come on top).
-            hi, seen = end, 0
-            whole = first + timedelta(seconds=_MINUTE)
+        # The kept minutes say where each address's oldest logs end; one read up to the
+        # furthest of them (counting whole minutes only; the partial first minute comes on top).
+        wanted = [ip for ip in ips if per_address[ip] < EVIDENCE_LIMIT]
+        if not wanted:
+            continue
+        whole = first + timedelta(seconds=_MINUTE)
+        hi = start
+        for ip in wanted:
+            reach, seen = end, 0
             for received, rows in store.per_minute(session, period, ip, whole):
                 seen += rows
-                if seen >= need:
-                    hi = min(end, received + timedelta(seconds=_MINUTE))
+                if seen >= EVIDENCE_LIMIT - per_address[ip]:
+                    reach = min(end, received + timedelta(seconds=_MINUTE))
                     break
-            for row in _counted(session, counted_ctx, period, start, hi, [ip]):
-                if per_address[row.srcip] >= EVIDENCE_LIMIT:
-                    break
+            hi = max(hi, reach)
+        for row in _counted(session, counted_ctx, period, start, hi, wanted):
+            if per_address[row.srcip] < EVIDENCE_LIMIT:
                 per_address[row.srcip] += 1
                 refs.append(
                     (
