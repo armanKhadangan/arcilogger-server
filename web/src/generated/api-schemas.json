@@ -1491,6 +1491,16 @@
           "title": "Notes Count",
           "type": "integer"
         },
+        "person": {
+          "anyOf": [
+            {
+              "$ref": "#/components/schemas/AlertPersonOut"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "resolved_at": {
           "anyOf": [
             {
@@ -1586,6 +1596,7 @@
         "assignee",
         "evidence_total",
         "details",
+        "person",
         "events",
         "runbook_tr",
         "runbook_en",
@@ -1982,6 +1993,24 @@
         "offset"
       ],
       "title": "AlertPage",
+      "type": "object"
+    },
+    "AlertPersonOut": {
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "integer"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "name"
+      ],
+      "title": "AlertPersonOut",
       "type": "object"
     },
     "AlertStateRequest": {
