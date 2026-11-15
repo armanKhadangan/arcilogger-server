@@ -70,7 +70,9 @@ class Log:
     dstport: int = 443
 
 
-def traffic(rng: random.Random, begin: datetime, end: datetime) -> list[Log]:
+def traffic(
+    rng: random.Random, begin: datetime, end: datetime, every: tuple[int, int] = (60, 600)
+) -> list[Log]:
     """Sessions of the addresses between ``begin`` and ``end``: interim logs every few minutes
     with their deltas, a final log with the counters; some logs come late, some devices' clocks
     run ahead, a few logs have no session id."""
@@ -78,7 +80,7 @@ def traffic(rng: random.Random, begin: datetime, end: datetime) -> list[Log]:
     number = 0
     moment = begin
     while moment < end:
-        moment += timedelta(seconds=rng.randint(60, 600))
+        moment += timedelta(seconds=rng.randint(*every))
         number += 1
         ip = rng.choice(ADDRESSES)
         sent = rcvd = 0
@@ -220,7 +222,9 @@ def slice_by_slice(
 
 def test_r13_day_total_slice_by_slice(db_session: Session, rebuilds: list[datetime]) -> None:
     rng = random.Random(5651)  # noqa: S311 - synthetic traffic
-    write(db_session, traffic(rng, MIDNIGHT - timedelta(hours=1), MIDNIGHT + timedelta(hours=9)))
+    # Dense enough that addresses reach the evidence limit (their lists are then kept).
+    logs = traffic(rng, MIDNIGHT - timedelta(hours=1), MIDNIGHT + timedelta(hours=9), (10, 60))
+    write(db_session, logs)
     entry = rule("R13")
     # A small day limit, so the day total raises alerts during the morning; the hour limit
     # stays out of the way.
@@ -239,6 +243,8 @@ def test_r13_day_total_slice_by_slice(db_session: Session, rebuilds: list[dateti
     assert seen > 0, "the day total raised no alert: the comparison proves nothing"
     # Read whole only at the first slice, at midnight (a new day) and after the restart.
     assert whole == 3
+    kept = [totals for key, totals in people._LIVE.items() if key[1].rule == "R13"]
+    assert any(len(refs) == people.EVIDENCE_LIMIT for t in kept for refs in t.evidence.values())
 
 
 def test_r14_night_totals_slice_by_slice(db_session: Session, rebuilds: list[datetime]) -> None:
