@@ -5,7 +5,7 @@ import { Field } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { formatBytes, formatDuration } from '@/lib/format';
 import { currentLang } from '@/lib/i18n';
-import type { RuleParam, RuleParamValue } from '@/lib/rules-types';
+import type { ParamOut, RuleParamValue } from '@/lib/rules-types';
 
 import {
   isKnownKind,
@@ -44,7 +44,7 @@ export function RuleParamInput({
   disabled,
   onChange,
 }: {
-  param: RuleParam;
+  param: ParamOut;
   /** The text (or flag) in the form. */
   value: string | boolean | undefined;
   /** The stored value (shown for a kind without an input). */

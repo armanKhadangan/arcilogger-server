@@ -1,4 +1,4 @@
-import type { RuleOut, RuleParam } from '@/lib/rules-types';
+import type { RuleOut, ParamOut } from '@/lib/rules-types';
 import { RULES } from '@/test/rules-samples';
 
 import {
@@ -26,8 +26,8 @@ function sample(id: string): RuleOut {
   return structuredClone(found);
 }
 
-function param(kind: RuleParam['kind'], min: number | null = null, max: number | null = null) {
-  return { key: 'p', kind, min, max, label_tr: 'P', label_en: 'P' } satisfies RuleParam;
+function param(kind: ParamOut['kind'], min: number | null = null, max: number | null = null) {
+  return { key: 'p', kind, min, max, label_tr: 'P', label_en: 'P' } satisfies ParamOut;
 }
 
 const t = (key: string) => key;
@@ -242,7 +242,7 @@ describe('the server refusal and the table', () => {
 });
 
 describe("R14's night as HH:MM (manager, #256)", () => {
-  const night = (key: string): RuleParam => ({
+  const night = (key: string): ParamOut => ({
     key,
     kind: 'seconds',
     min: 0,

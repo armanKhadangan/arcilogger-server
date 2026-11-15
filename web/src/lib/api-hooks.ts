@@ -129,7 +129,7 @@ import type {
 } from './api-types';
 import { siteToday } from './display';
 import type { RawRef } from './lookup-types';
-import type { DryRunResult, RuleList, RuleOut, RuleSettingsIn } from './rules-types';
+import type { DryRunOut, RulesOut, RuleOut, RuleSettingsIn } from './rules-types';
 import type { SealDayDetail } from './seal-types';
 import type {
   AdminAccepted,
@@ -1014,7 +1014,7 @@ export function useAddAlertNote() {
 export function useRules() {
   return useQuery({
     queryKey: queryKeys.rules,
-    queryFn: ({ signal }) => api.get<RuleList>('/rules', { signal }),
+    queryFn: ({ signal }) => api.get<RulesOut>('/rules', { signal }),
   });
 }
 
@@ -1028,7 +1028,7 @@ export function useUpdateRule() {
     mutationFn: ({ id, body }: { id: string; body: RuleSettingsIn }) =>
       api.put<RuleOut>(`/rules/${encodeURIComponent(id)}`, body),
     onSuccess: (rule) => {
-      client.setQueryData<RuleList>(queryKeys.rules, (list) =>
+      client.setQueryData<RulesOut>(queryKeys.rules, (list) =>
         list
           ? { ...list, rules: list.rules.map((item) => (item.id === rule.id ? rule : item)) }
           : list,
@@ -1044,7 +1044,7 @@ export function useUpdateRule() {
 export function useRuleDryRun() {
   return useMutation({
     mutationFn: ({ id, body }: { id: string; body: RuleSettingsIn }) =>
-      api.post<DryRunResult>(`/rules/${encodeURIComponent(id)}/dry-run`, body),
+      api.post<DryRunOut>(`/rules/${encodeURIComponent(id)}/dry-run`, body),
   });
 }
 

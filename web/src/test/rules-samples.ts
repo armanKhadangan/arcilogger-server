@@ -16,7 +16,7 @@
  */
 
 import type { ApiErrorBody } from '../lib/api-types';
-import type { DryRunResult, RuleList, RuleOut, RuleSettings } from '../lib/rules-types';
+import type { DryRunOut, RulesOut, RuleOut, RuleSettings } from '../lib/rules-types';
 
 const MIB = 1_048_576;
 const GIB = 1_073_741_824;
@@ -81,11 +81,18 @@ const R19_DEFAULTS = settings('medium', 3600, 3600, {
   threshold: 200,
 });
 
-function rule(fields: Omit<RuleOut, 'settings'> & { settings?: RuleSettings }): RuleOut {
-  return { ...fields, settings: fields.settings ?? fields.defaults };
+function rule(
+  fields: Omit<RuleOut, 'settings' | 'note_tr' | 'note_en'> & { settings?: RuleSettings },
+): RuleOut {
+  return {
+    ...fields,
+    settings: fields.settings ?? fields.defaults,
+    note_tr: 'Başlangıç değeri; ağınıza göre ayarlayın.',
+    note_en: 'Starting value; adjust it to your network.',
+  };
 }
 
-export const RULES: RuleList = {
+export const RULES: RulesOut = {
   module_enabled: true,
   rules: [
     rule({
@@ -370,10 +377,10 @@ export const RULES: RuleList = {
 };
 
 /** `GET /rules` without the `security_rules` module: readable, every change locked (D1). */
-export const RULES_LOCKED: RuleList = { ...RULES, module_enabled: false };
+export const RULES_LOCKED: RulesOut = { ...RULES, module_enabled: false };
 
 /** A trial run of R01 with its defaults: three addresses would have alerted. */
-export const DRY_RUN: DryRunResult = {
+export const DRY_RUN: DryRunOut = {
   would_open: 3,
   keys: [
     {

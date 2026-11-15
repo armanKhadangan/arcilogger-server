@@ -14,7 +14,7 @@ import type { Lang } from '@/lib/format';
 import { formatBytes, formatDuration, formatNumber } from '@/lib/format';
 import type {
   RuleOut,
-  RuleParam,
+  ParamOut,
   RuleParamKind,
   RuleParamValue,
   RuleSettings,
@@ -100,7 +100,7 @@ function mibText(bytes: number): string {
 export const TIME_OF_DAY_PARAMS: ReadonlySet<string> = new Set(['night_start', 'night_end']);
 const TIME_OF_DAY = /^([01]?\d|2[0-3]):([0-5]\d)$/;
 
-export function isTimeOfDay(param: Pick<RuleParam, 'key' | 'kind'>): boolean {
+export function isTimeOfDay(param: Pick<ParamOut, 'key' | 'kind'>): boolean {
   return param.kind === 'seconds' && TIME_OF_DAY_PARAMS.has(param.key);
 }
 
@@ -117,7 +117,7 @@ export function clockSeconds(text: string): number | null {
   return Number(found[1]) * 3600 + Number(found[2]) * 60;
 }
 
-function paramText(param: RuleParam, value: RuleParamValue | undefined): string | boolean {
+function paramText(param: ParamOut, value: RuleParamValue | undefined): string | boolean {
   if (param.kind === 'bool') return value === true;
   if (value === undefined) return '';
   if (Array.isArray(value)) return value.map(String).join('\n');
@@ -231,7 +231,7 @@ function integerProblem(
   return bounded(Number(value), min, max, (bound) => formatNumber(bound, 0, lang));
 }
 
-function bytesProblem(text: string, param: RuleParam, lang: Lang): RuleProblem | undefined {
+function bytesProblem(text: string, param: ParamOut, lang: Lang): RuleProblem | undefined {
   const value = text.trim();
   if (!value) return { key: 'validation.required' };
   if (!DECIMAL.test(value)) return { key: 'rules.errors.mib' };
@@ -256,7 +256,7 @@ function entryProblem(kind: RuleParamKind, entry: string): string | undefined {
   return undefined;
 }
 
-function listProblem(text: string, param: RuleParam, lang: Lang): RuleProblem | undefined {
+function listProblem(text: string, param: ParamOut, lang: Lang): RuleProblem | undefined {
   const lines = text.split(/\r?\n/);
   let line = 0;
   for (const raw of lines) {
@@ -284,7 +284,7 @@ function listProblem(text: string, param: RuleParam, lang: Lang): RuleProblem | 
 
 /** The problem of one parameter's text, `undefined` when it may be sent. */
 export function paramProblem(
-  param: RuleParam,
+  param: ParamOut,
   value: string | boolean | undefined,
   lang: Lang = 'tr',
 ): RuleProblem | undefined {
@@ -309,7 +309,7 @@ export function paramProblem(
 /** The browser's checks of the whole form (every field, in the sheet's order). */
 export function validateRule(
   form: RuleForm,
-  params: readonly RuleParam[],
+  params: readonly ParamOut[],
   lang: Lang = 'tr',
 ): RuleErrors {
   const errors: RuleErrors = {};
@@ -328,7 +328,7 @@ export function hasRuleErrors(errors: RuleErrors): boolean {
   return Object.values(errors).some(Boolean);
 }
 
-function paramValue(param: RuleParam, text: string | boolean | undefined): RuleParamValue {
+function paramValue(param: ParamOut, text: string | boolean | undefined): RuleParamValue {
   if (param.kind === 'bool') return text === true;
   const value = typeof text === 'string' ? text : '';
   if (isTimeOfDay(param)) return clockSeconds(value) ?? 0;
@@ -413,7 +413,7 @@ export function defaultsForm(rule: Pick<RuleOut, 'defaults' | 'params'>): RuleFo
  * The field a 422 `rule_param_invalid` names (`details.field`: `window_seconds`,
  * `params.threshold`, …), `null` for one the form has no input for.
  */
-export function fieldOfProblem(details: unknown, params: readonly RuleParam[]): RuleField | null {
+export function fieldOfProblem(details: unknown, params: readonly ParamOut[]): RuleField | null {
   if (typeof details !== 'object' || details === null) return null;
   const field = (details as { field?: unknown }).field;
   if (typeof field !== 'string') return null;
@@ -449,14 +449,14 @@ export function ruleName(rule: Pick<RuleOut, 'name_tr' | 'name_en' | 'id'>, lang
   return name.trim() ? name : rule.id;
 }
 
-export function paramLabel(param: Pick<RuleParam, 'label_tr' | 'label_en' | 'key'>, lang: Lang) {
+export function paramLabel(param: Pick<ParamOut, 'label_tr' | 'label_en' | 'key'>, lang: Lang) {
   const label = lang === 'en' ? param.label_en : param.label_tr;
   return label.trim() ? label : param.key;
 }
 
 /** A value as the "Varsayılan" line shows it (`t` names a flag "Açık" / "Kapalı"). */
 export function shownValue(
-  param: Pick<RuleParam, 'kind' | 'key'>,
+  param: Pick<ParamOut, 'kind' | 'key'>,
   value: RuleParamValue | undefined,
   lang: Lang,
   t: (key: string) => string,

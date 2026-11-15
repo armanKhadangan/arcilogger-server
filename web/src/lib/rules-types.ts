@@ -3,7 +3,7 @@
  * `arcilogger_api.routers.rules`): the rules R01–R19 with their settings, the change of one rule
  * and the trial run over the last 24 hours ("Son 24 saatte dene").
  *
- * Written from the contract's JSON while W6-A's API is on its way; `api-types.test.ts` checks
+ * Names and fields as W6-A's API has them (its branch `w6-a-api-243`); `api-types.test.ts` checks
  * this file against the OpenAPI document once the API is in the generated contract.
  */
 
@@ -54,7 +54,7 @@ export interface RuleSettingsIn {
 }
 
 /** A rule-specific parameter; `min`/`max` bound a number, or a list's length. */
-export interface RuleParam {
+export interface ParamOut {
   key: string;
   kind: RuleParamKind;
   min: number | null;
@@ -84,13 +84,16 @@ export interface RuleOut {
   skipped_until: string | null;
   defaults: RuleSettings;
   settings: RuleSettings;
-  params: RuleParam[];
+  params: ParamOut[];
   advice_tr: string;
   advice_en: string;
+  /** "Başlangıç değeri; ağınıza göre ayarlayın." (contract §0.1 item 9). */
+  note_tr: string;
+  note_en: string;
 }
 
 /** `GET /rules`: readable without the module; the changes need it (D1). */
-export interface RuleList {
+export interface RulesOut {
   module_enabled: boolean;
   rules: RuleOut[];
 }
@@ -104,7 +107,7 @@ export interface DryRunKey {
 }
 
 /** `POST /rules/{id}/dry-run`. */
-export interface DryRunResult {
+export interface DryRunOut {
   would_open: number;
   /** The first 20 keys; `truncated` when there were more. */
   keys: DryRunKey[];

@@ -13,7 +13,7 @@
  *   reaches the candidate's threshold. `dryRun: 'busy' | 'timeout'` answers 409 / 504 instead.
  */
 
-import type { RuleList, RuleOut, RuleParamValue, RuleSettings } from '../src/lib/rules-types';
+import type { RulesOut, RuleOut, RuleParamValue, RuleSettings } from '../src/lib/rules-types';
 import { DRY_RUN, RULE_ERRORS, RULES, RULES_LOCKED } from '../src/test/rules-samples';
 
 import type { RecordedCall } from './mock-api';
@@ -59,7 +59,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 export class RulesMock {
-  private readonly list: RuleList;
+  private readonly list: RulesOut;
 
   constructor(private readonly options: RulesOptions = {}) {
     this.list = copy(options.locked ? RULES_LOCKED : RULES);

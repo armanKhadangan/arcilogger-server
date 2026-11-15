@@ -28,7 +28,7 @@ import { useRuleDryRun, useUpdateRule } from '@/lib/api-hooks';
 import type { AlertSeverity } from '@/lib/api-types';
 import { formatDateTime, formatDuration, formatNumber } from '@/lib/format';
 import { currentLang } from '@/lib/i18n';
-import type { DryRunResult, RuleOut } from '@/lib/rules-types';
+import type { DryRunOut, RuleOut } from '@/lib/rules-types';
 import { focusFirstError } from '@/lib/validation';
 import { ALERT_SEVERITIES } from '@/pages/security/alerts-model';
 
@@ -59,7 +59,7 @@ function typedSeconds(text: string): number | null {
 
 /** The trial run's answer and the form it ran with (a later change makes it stale). */
 interface Trial {
-  result: DryRunResult;
+  result: DryRunOut;
   form: string;
 }
 
@@ -354,7 +354,7 @@ function RuleEditor({
         {rule.params.length > 0 ? (
           <Section title={t('rules.sheet.params')}>
             <p className="text-xs text-muted" data-testid="rule-starting-value">
-              {t('rules.sheet.startingValue')}
+              {(lang === 'en' ? rule.note_en : rule.note_tr) || t('rules.sheet.startingValue')}
             </p>
             <div className="flex flex-col gap-4">
               {rule.params.map((param) => (

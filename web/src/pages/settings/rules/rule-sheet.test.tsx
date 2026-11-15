@@ -2,7 +2,7 @@ import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 import type { Role } from '@/lib/api-types';
-import type { RuleList } from '@/lib/rules-types';
+import type { RulesOut } from '@/lib/rules-types';
 import { errorResponse, installFetch, jsonResponse, makeMe } from '@/test/api-mock';
 import { renderApp } from '@/test/render';
 import { licenseSample } from '@/test/samples';
@@ -13,7 +13,7 @@ function serve(
   {
     list = RULES,
     put = () => jsonResponse(200, RULES.rules[0]),
-  }: { list?: RuleList; put?: () => Response } = {},
+  }: { list?: RulesOut; put?: () => Response } = {},
 ) {
   return installFetch((request) => {
     switch (`${request.method} ${request.path}`) {
