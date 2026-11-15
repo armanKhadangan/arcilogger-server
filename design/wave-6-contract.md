@@ -693,8 +693,12 @@ to the normal site: `port-scan` (R01), `external-scan` (R02), `brute-force` (R03
   and `values` move as before. §2.1.5's "counts add up" is replaced by this. It lands in W6-A's
   dry-run PR, before any API or UI shows a count. A closed alert's `after_close.count` (cooldown)
   follows the same rule: the largest window count, never a sum (#270; lands with the rules API).
-- **C2 — the rules' indexes go into a new migration `0026`** with the perf guard (T-A6),
-  down-revision `0025` (C10). `0024_rules` is merged and is not edited.
+- **C2 — no index migration for the rules** (#278). The perf guard (T-A6) measured every rule's
+  statements with `EXPLAIN (ANALYZE, BUFFERS)`: the primary keys `(time, id)` and the existing
+  per-table key indexes serve every rule, and an index on `time_received` made R01 and R02
+  slower. §2.1.7 allows only indexes the rules need, so none is added. `0024_rules` is merged and
+  is not edited; `0025` is W6-H's request kind (C10). R13's and R14's day and night totals,
+  which no index helps, are #280.
 - **C3 — `rules.evidence_max`:** a rule may return up to 100 evidence rows (the setting's
   maximum) or read the setting itself; the engine keeps the configured number, oldest first.
 - **C4 — defaults the tables leave open** (#253, #254): cooldown 3600 s for R01, R03, R08,
@@ -746,6 +750,20 @@ to the normal site: `port-scan` (R01), `external-scan` (R02), `brute-force` (R03
     `systemplan.py`); only its host and port are kept, in memory, and the URL is never logged or
     written. A URL that cannot be read gives no rule and one warning naming the webhook, not the
     URL.
+- **C11 — the SNMP test before saving** (#217, Wave 5 §6 N5):
+  - `POST /api/v1/admin/config/sources/snmp-test` (`settings.manage`, recent re-authentication,
+    one a minute per user) takes one source's add or update body and answers 202 with a queued
+    `config.apply` of `sources` with `options.probe_only: true`; for an existing source an empty
+    key uses the stored one.
+  - The agent validates and probes with the decrypted keys of the request and writes nothing: no
+    secret store, no `arcilogger.toml`, no `versions/`, no applied journal lines. The keys travel
+    as `secret_set` does and are dropped after the probe.
+  - Success ends in `succeeded` (no new state) with `result = {"probe_only": true, "interfaces":
+    [{"name", "oper_status", "speed_mbps"}]}`, bounded as W5-N-9; failure is `probe_failed`, with
+    the list whenever the walk succeeded. The API never turns a probe-only request into
+    `active`. Audit `admin.probe` with the source name and outcome, never a value.
+  - The SNMP form offers the interfaces as a pick list and falls back to typed names (W6-H's
+    owner builds it, with a grant for the SNMP part of `web/src/pages/sources/`).
 
 ---
 
