@@ -764,6 +764,13 @@ to the normal site: `port-scan` (R01), `external-scan` (R02), `brute-force` (R03
     `active`. Audit `admin.probe` with the source name and outcome, never a value.
   - The SNMP form offers the interfaces as a pick list and falls back to typed names (W6-H's
     owner builds it, with a grant for the SNMP part of `web/src/pages/sources/`).
+- **C12 — the live tail's Linux bound follows CI's interpreter** (#191). CI's Linux job runs uv's
+  managed Python 3.12.16 since 2026-11-07, not the runner's 3.12.3: the gauge became 8 to 11 %
+  faster on the same CPU and the event loop's figure in gauge lines rose with it, while its time a
+  line stayed. 3 of 89 readings on 3.12.16 failed `LOOP_GAUGE_LINES` 6.8 (0 of 42 on 3.12.3), so
+  ubuntu-latest's value is 7.4, fitted to the 89: the costliest passes by 5.2 %, a path 40 %
+  costlier fails on 81 of them, 20 % costlier on 48. `CI_READINGS`' Linux rows are those
+  readings, with their CPU models. windows-latest is unchanged.
 
 ---
 
