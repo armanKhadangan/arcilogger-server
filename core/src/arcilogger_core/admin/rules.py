@@ -680,6 +680,8 @@ class _Run:
         self.effects: set[str] = set()
         self.probes: list[Probe] = []
         self.followups: list[str] = []
+        #: "Bağlantıyı dene" (Wave 6 C11): probe the source's SNMP, write nothing.
+        self.probe_only = False
 
     # -- helpers ---------------------------------------------------------------------------------
 
@@ -974,6 +976,34 @@ class _Run:
             if keyed is not None and keyed.enabled and keyed.snmp and keyed.snmp.enabled:
                 self._snmp_probe(keyed)  # new keys for an SNMP that stays on
 
+    def _snmp_test(self) -> None:
+        """``options.probe_only`` (Wave 6 C11, #217): exactly one source added or changed, with
+        an ``[sources.snmp]`` table, its user and both keys (stored, or set by this request), is
+        probed whether its SNMP is on or not (the browser sends it switched off, as the test
+        comes before its interfaces are chosen) and wherever it is reached from; nothing else
+        may be in the request."""
+        named = [
+            path.removeprefix("sources.") for path in self.changes if path.startswith("sources.")
+        ]
+        keys = {key.split(".")[1] for key in self.secret_changes if is_snmp_key(key)}
+        after = {source.name: source for source in (self.sources or self.current.sources)}
+        target = after.get(named[0]) if len(named) == 1 else None
+        if (
+            self.section != "sources"
+            or target is None
+            or keys - {target.name}
+            or any(token is None for token in self.secret_changes.values())
+        ):
+            self.error("source_invalid", "sources")
+            return
+        if target.snmp is None or not target.snmp.user.strip():
+            self.error("snmp_setting_invalid", f"sources.{target.name}.snmp")
+        elif any(key not in self.secrets_after for key in snmp_keys(target.name)):
+            self.error("snmp_secret_missing", f"sources.{target.name}.snmp")
+        else:
+            self.reauth = True  # it may carry keys: a recent re-authentication, like any key
+            self.probe("snmp", target.name)
+
     def _snmp_probe(self, source: SourceConfig) -> None:
         """The ``snmp`` probe of N5; in strict outbound mode ``ARCILOGGER SNMP <source>`` exists
         only after ApplySystem, so a new device address or port is not probed before then."""
@@ -1007,7 +1037,10 @@ class _Run:
                 "new": "set" if token is not None else "deleted",
                 "changed": True,
             }
-        self._snmp_keys()
+        if self.probe_only:
+            self._snmp_test()
+        else:
+            self._snmp_keys()
         candidate = None
         edits: list[Edit] = []
         if not self.errors:
@@ -1479,12 +1512,16 @@ def _run(
     *,
     test_to: str | None,
     probe: bool,
+    probe_only: bool = False,
 ) -> SectionCheck:
     run = _Run(section, current, context)
+    run.probe_only = probe_only
     for op in ops:
         run.apply(op)
     _RULES[section](run)
     options: dict[str, JsonValue] = {"test_to": test_to} if test_to else {}
+    if probe_only:
+        options["probe_only"] = True
     if probe and any(item.kind == "smtp" for item in run.probes) and not test_to:
         run.error("smtp_test_recipient_required", "test_to")
     check = run.result(ops, options)
@@ -1517,6 +1554,7 @@ def check_request(request: AdminRequest, current: Config, context: RuleContext) 
         context,
         test_to=request.options.test_to,
         probe=request.probe,
+        probe_only=request.options.probe_only,
     )
 
 
@@ -1527,7 +1565,9 @@ class _Body:
     """Builds the ops of a form body (absent keys stay as they are) and checks what only a
     person types: confirmations, the trial recipient, the expected SHA-256 of a client."""
 
-    def __init__(self, section: Section, current: Config, context: RuleContext) -> None:
+    def __init__(
+        self, section: Section, current: Config, context: RuleContext, *, probe_only: bool = False
+    ) -> None:
         self.section = section
         self.current = current
         self.context = context
@@ -1535,6 +1575,9 @@ class _Body:
         self.ops: list[Op] = []
         self.errors: list[Problem] = []
         self.test_to: str | None = None
+        #: "Bağlantıyı dene" (Wave 6 C11): the source's op even when nothing changed, its SNMP
+        #: switched off in the candidate (the test comes before its interfaces are chosen).
+        self.probe_only = probe_only
 
     def error(self, code: str, path: str | None = None) -> None:
         self.errors.append(Problem(code, path))
@@ -1814,6 +1857,9 @@ def _body_sources(body: _Body, data: Mapping[str, Any]) -> None:
     fields = dict(raw)
     if name is not None:
         fields.setdefault("name", name)  # an edit takes the name from the path
+    snmp = fields.get("snmp")
+    if body.probe_only and isinstance(snmp, Mapping):
+        fields["snmp"] = {**snmp, "enabled": False}  # probed as typed, never switched on here
     try:
         source = SourceConfig.model_validate(fields)
     except ValidationError as exc:
@@ -1834,7 +1880,7 @@ def _body_sources(body: _Body, data: Mapping[str, Any]) -> None:
         body.ops.append(SourceAddOp(op="source_add", source=source))
     elif source.name != name:
         body.error("source_rename_not_allowed", f"sources.{name}.name")
-    elif source != current[name]:
+    elif source != current[name] or body.probe_only:
         body.ops.append(
             SourceUpdateOp(op="source_update", name=name, expect=current[name], source=source)
         )
@@ -1858,7 +1904,12 @@ _BODIES: Final[Mapping[Section, Callable[[_Body, Mapping[str, Any]], None]]] = M
 
 
 def validate_section(
-    section: Section, current: Config, body: Mapping[str, Any], context: RuleContext
+    section: Section,
+    current: Config,
+    body: Mapping[str, Any],
+    context: RuleContext,
+    *,
+    probe_only: bool = False,
 ) -> SectionCheck:
     """The API's check of a form body (contract 2.11.1; ``etag`` is the API's, ``probe``
     defaults to true). Absent keys stay as they are. Body keys per section:
@@ -1882,10 +1933,18 @@ def validate_section(
 
     A check without ops (nothing differs) is ``ok`` with empty ``ops``: there is nothing to
     queue."""
-    builder = _Body(section, current, context)
+    builder = _Body(section, current, context, probe_only=probe_only)
     _BODIES[section](builder, body)
-    probe = body.get("probe", True) is not False
-    check = _run(section, current, builder.ops, context, test_to=builder.test_to, probe=probe)
+    probe = probe_only or body.get("probe", True) is not False
+    check = _run(
+        section,
+        current,
+        builder.ops,
+        context,
+        test_to=builder.test_to,
+        probe=probe,
+        probe_only=probe_only,
+    )
     errors = list(builder.errors)
     if section == "retention" and check.ok and check.guarded and check.candidate is not None:
         preview = context.retention_preview
