@@ -366,7 +366,7 @@ export class AlertsMock {
       200,
       id === RULE_EVIDENCE.alert_id
         ? copy(RULE_EVIDENCE)
-        : { alert_id: id, total: found.evidence_total ?? 0, items: [] },
+        : { alert_id: id, evidence_total: found.evidence_total ?? null, items: [] },
     ];
   }
 

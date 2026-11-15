@@ -39,7 +39,7 @@ import {
 import { useCallback, useRef, useState } from 'react';
 
 import type { ActivityDevices, ActivityWindow, WanRange, WanRates } from './activity-types';
-import type { AlertEvidence, AssignAlertBody } from './alert-rule-types';
+import type { AlertAssignRequest, AlertEvidencePage } from './alert-rule-types';
 import { AGENT_STATUS_POLL_MS, requestPollInterval } from './admin-requests';
 import { api, type QueryValue } from './api';
 import type {
@@ -1017,7 +1017,8 @@ export function useAddAlertNote() {
 export function useAlertEvidence(id: number | null) {
   return useQuery({
     queryKey: queryKeys.alertEvidence(id ?? 0),
-    queryFn: ({ signal }) => api.get<AlertEvidence>(`/alerts/${String(id)}/evidence`, { signal }),
+    queryFn: ({ signal }) =>
+      api.get<AlertEvidencePage>(`/alerts/${String(id)}/evidence`, { signal }),
     enabled: id !== null,
   });
 }
@@ -1030,7 +1031,7 @@ export function useAssignAlert() {
   const client = useQueryClient();
   const refresh = useAlertRefresh();
   return useMutation({
-    mutationFn: ({ id, ...body }: AssignAlertBody & { id: number }) =>
+    mutationFn: ({ id, ...body }: AlertAssignRequest & { id: number }) =>
       api.post<AlertDetail>(`/alerts/${id}/assign`, body),
     onSuccess: async (detail) => {
       client.setQueryData(queryKeys.alert(detail.id), detail);

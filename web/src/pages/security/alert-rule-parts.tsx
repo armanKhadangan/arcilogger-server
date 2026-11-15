@@ -16,7 +16,7 @@ import {
 } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
 import { toast } from '@/components/ui/toast';
-import type { AlertDetailWithRules, AlertEvidenceRow } from '@/lib/alert-rule-types';
+import type { AlertDetailWithRules, AlertEvidenceOut } from '@/lib/alert-rule-types';
 import { errorMessage } from '@/lib/api';
 import { useAlertEvidence, useAssignAlert, useUsers } from '@/lib/api-hooks';
 import { useAuth } from '@/lib/auth';
@@ -144,7 +144,7 @@ export function AlertPersonRow({ alert }: { alert: AlertDetailWithRules }) {
   );
 }
 
-function rawTarget(row: AlertEvidenceRow): RawLineTarget | null {
+function rawTarget(row: AlertEvidenceOut): RawLineTarget | null {
   if (!row.raw) return null;
   // The line alone: the alert's evidence has no summary text of the row (only the lookup's has).
   return { ref: { ...row.raw } };
@@ -181,7 +181,7 @@ export function AlertEvidenceList({
   const items = evidence.data.items;
   if (items.length === 0)
     return <p className="text-13 text-muted">{t('security.evidence.empty')}</p>;
-  const all = Math.max(total, evidence.data.total);
+  const all = Math.max(total, evidence.data.evidence_total ?? 0);
   return (
     <div className="flex flex-col gap-2" data-testid="alert-evidence">
       <p className="text-xs text-muted">
@@ -220,18 +220,20 @@ export function AlertEvidenceList({
               return (
                 <tr key={row.n} className="border-t border-border" data-testid="evidence-row">
                   <th scope="row" className="px-3 py-1.5 text-left font-normal tabular">
-                    {formatDateTime(row.time)}
+                    {row.time ? formatDateTime(row.time) : '—'}
                   </th>
-                  <td className="px-3 py-1.5">{tableLabel(row.tbl, t)}</td>
-                  <td className="px-3 py-1.5 font-mono text-xs">{row.source}</td>
-                  <td className="px-3 py-1.5 tabular">{formatDateTime(row.time_received)}</td>
+                  <td className="px-3 py-1.5">{tableLabel(row.table, t)}</td>
+                  <td className="px-3 py-1.5 font-mono text-xs">{row.raw?.source ?? '—'}</td>
+                  <td className="px-3 py-1.5 tabular">
+                    {row.time_received ? formatDateTime(row.time_received) : '—'}
+                  </td>
                   <td className="px-3 py-1.5 text-right">
                     {target && canRaw ? (
                       <Button
                         size="sm"
                         variant="ghost"
                         aria-label={t('security.evidence.openRawOf', {
-                          time: formatDateTime(row.time),
+                          time: row.time ? formatDateTime(row.time) : '—',
                         })}
                         onClick={() => {
                           onOpenRaw(target);

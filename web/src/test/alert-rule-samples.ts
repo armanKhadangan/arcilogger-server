@@ -10,8 +10,8 @@
 
 import type {
   AlertDetailWithRules,
-  AlertEvidence,
-  AlertsOfDay,
+  AlertEvidencePage,
+  DayCounts,
   AlertSummaryAdditions,
 } from '../lib/alert-rule-types';
 
@@ -106,41 +106,38 @@ export const PERSON_ALERT: AlertDetailWithRules = {
   person: { id: 12, name: 'Deniz Örnek' },
 };
 
-export const RULE_EVIDENCE: AlertEvidence = {
+export const RULE_EVIDENCE: AlertEvidencePage = {
   alert_id: 9001,
-  total: 47,
+  evidence_total: 47,
   items: [
     {
       n: 1,
-      tbl: 'fg_traffic',
+      table: 'fg_traffic',
       row_id: 880412,
       time: '2026-09-01T07:42:18Z',
       time_received: '2026-09-01T07:42:18Z',
-      source: 'fortigate',
       raw: { source: 'fortigate', day: '2026-09-01', line: 1, offset: 0 },
     },
     {
       n: 2,
-      tbl: 'fg_traffic',
+      table: 'fg_traffic',
       row_id: 880413,
       time: '2026-09-01T19:42:18Z',
       time_received: '2026-09-01T19:42:18Z',
-      source: 'fortigate',
       raw: { source: 'fortigate', day: '2026-09-01', line: 2, offset: 411 },
     },
     {
       n: 3,
-      tbl: 'fg_traffic',
+      table: 'fg_traffic',
       row_id: 880409,
       time: '2026-09-01T06:37:52Z',
       time_received: '2026-09-01T06:37:52Z',
-      source: 'fortigate',
       raw: { source: 'fortigate', day: '2026-09-01', line: 3, offset: 822 },
     },
   ],
 };
 
-function day(offset: number): AlertsOfDay {
+function day(offset: number): DayCounts {
   const date = new Date(Date.UTC(2026, 9, 13 - offset));
   const iso = date.toISOString().slice(0, 10);
   // A fixed, varied pattern: a few medium and low alerts, a high one every fifth day.

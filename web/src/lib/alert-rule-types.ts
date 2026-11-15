@@ -3,35 +3,28 @@
  * the assignee of an alert, its evidence rows, the person of a person-level rule's alert (D3) and
  * the summary's 30 days and top lists.
  *
- * Written from the contract while W6-A's API is on its way, so every addition to an existing
+ * Names and fields as W6-A's API has them (its branch `w6-a-api-243`); every addition to an existing
  * answer is optional here: the page works with the answers of today's API, and the fields join
  * `AlertOut`, `AlertDetail` and `AlertSummary` in `api-types.ts` (checked against the OpenAPI
  * document by `api-types.test.ts`) once the API has them.
  */
 
-import type {
-  AlertDetail,
-  AlertOut,
-  AlertSeverity,
-  AlertSummary,
-  DateString,
-  DateTimeString,
-} from './api-types';
+import type { AlertDetail, AlertOut, AlertSummary, DateString, DateTimeString } from './api-types';
 
 /** The user an alert is assigned to (only users with `alerts.read`). */
-export interface AlertAssignee {
+export interface AssigneeOut {
   id: number;
   username: string;
 }
 
 /** The fields each alert of `GET /alerts` and `GET /alerts/{id}` gains. */
 export interface AlertAdditions {
-  assignee?: AlertAssignee | null;
+  assignee?: AssigneeOut | null;
   /**
-   * The most rows any one window of the alert held (C1: the largest window count, not a sum);
-   * at most `rules.evidence_max` rows are kept as evidence.
+   * A rule's alert: the most rows any one window of it held (C1: the largest window count, not
+   * a sum); at most `rules.evidence_max` rows are kept as evidence. `null` for a check's alert.
    */
-  evidence_total?: number;
+  evidence_total?: number | null;
 }
 
 /** The person of a person-level rule's alert (R09, R13, R14), only for `usage.person` (D3). */
@@ -44,49 +37,55 @@ export type AlertWithAssignment = AlertOut & AlertAdditions;
 export type AlertDetailWithRules = AlertDetail & AlertAdditions & { person?: AlertPerson | null };
 
 /** `POST /alerts/{id}/assign` (`alerts.manage`): a user id, or `null` for nobody. */
-export interface AssignAlertBody {
+export interface AlertAssignRequest {
   user_id: number | null;
 }
 
 /** The line of a spool file a row came from (`GET /raw`). */
-export interface EvidenceRawRef {
+export interface AlertEvidenceRaw {
   source: string;
   day: DateString;
   line: number;
-  offset: number | null;
+  offset: number;
 }
 
 /** One row that caused the alert (`alert_evidence`), oldest first; never the line's content. */
-export interface AlertEvidenceRow {
+export interface AlertEvidenceOut {
   n: number;
   /** The parsed table (`fg_traffic`, …) or `devices`. */
-  tbl: string;
-  row_id: number;
+  table: string;
+  row_id: number | null;
   /** Device time of the row. */
-  time: DateTimeString;
-  time_received: DateTimeString;
-  source: string;
+  time: DateTimeString | null;
+  time_received: DateTimeString | null;
   /** `null` for a row without a raw line (a `devices` row). */
-  raw: EvidenceRawRef | null;
+  raw: AlertEvidenceRaw | null;
 }
 
 /** `GET /alerts/{id}/evidence` (`alerts.read`). */
-export interface AlertEvidence {
+export interface AlertEvidencePage {
   alert_id: number;
-  /** Rows behind the alert, also those beyond the kept evidence. */
-  total: number;
-  items: AlertEvidenceRow[];
+  /** As `AlertOut.evidence_total`; `items` holds at most `rules.evidence_max`. */
+  evidence_total: number | null;
+  items: AlertEvidenceOut[];
 }
 
 /** One site day of the last 30: alerts opened that day, per severity. */
-export type AlertsOfDay = { day: DateString } & Record<AlertSeverity, number>;
+export interface DayCounts {
+  day: DateString;
+  critical: number;
+  high: number;
+  medium: number;
+  low: number;
+  info: number;
+}
 
-export interface TopRule {
+export interface RuleCount {
   rule: string;
   count: number;
 }
 
-export interface TopKey {
+export interface KeyCount {
   rule: string;
   /** The rule's group value: an address, a MAC, `user:<name>`; never a person's name. */
   key: string;
@@ -95,9 +94,9 @@ export interface TopKey {
 
 /** `GET /alerts/summary` gains the last 30 site days and the 10 largest of the last 7 days. */
 export interface AlertSummaryAdditions {
-  by_day?: AlertsOfDay[];
-  top_rules?: TopRule[];
-  top_keys?: TopKey[];
+  by_day?: DayCounts[];
+  top_rules?: RuleCount[];
+  top_keys?: KeyCount[];
 }
 
 export type AlertSummaryWithRules = AlertSummary & AlertSummaryAdditions;

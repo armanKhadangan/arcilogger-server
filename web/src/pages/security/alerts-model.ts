@@ -26,7 +26,7 @@ import type {
   AlertState,
   SortOrder,
 } from '@/lib/api-types';
-import type { AlertAdditions, AlertAssignee, AlertsOfDay } from '@/lib/alert-rule-types';
+import type { AlertAdditions, AssigneeOut, DayCounts } from '@/lib/alert-rule-types';
 import type { Lang } from '@/lib/format';
 import { parseId } from '@/lib/display';
 import { roleHas } from '@/lib/permissions';
@@ -368,7 +368,7 @@ export function detailRows(details: Record<string, unknown>): [string, string][]
 // -- Wave 6: assignment, evidence, the summary's 30 days (§2.6.2) --------------------------------
 
 /** The user the alert is assigned to; `null` for nobody (and for an API without assignment). */
-export function assigneeOf(alert: AlertOut | AlertAdditions): AlertAssignee | null {
+export function assigneeOf(alert: AlertOut | AlertAdditions): AssigneeOut | null {
   return (alert as AlertAdditions).assignee ?? null;
 }
 
@@ -387,7 +387,7 @@ export function assignCandidates<
 }
 
 /** The summary's 30 site days, oldest first, with a total per day (chart and table). */
-export function byDayRows(days: readonly AlertsOfDay[] | undefined) {
+export function byDayRows(days: readonly DayCounts[] | undefined) {
   return [...(days ?? [])]
     .sort((a, b) => a.day.localeCompare(b.day))
     .map((day) => ({
