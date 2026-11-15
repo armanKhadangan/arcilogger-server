@@ -5896,17 +5896,24 @@ def test_dry_run_trial_warning_only_when_it_applies(
 ) -> None:
     """No warning for days younger than 14 days, for days before the product's epoch (the
     product ignores them too), when a status file says what the licence state is, or on a
-    first installation."""
-    bundle = make_fake_bundle(tmp_path) if vault == "install" else _upgrade_setup(tmp_path)
-    if vault == "young":
-        write_vault_day(tmp_path, site_today() - timedelta(days=14))
-    elif vault == "before-the-product":
-        write_vault_day(tmp_path, date(2025, 12, 31))
-    else:
-        write_vault_day(tmp_path, site_today() - timedelta(days=60))
-    if vault == "with-status-file":
-        write_license_status(tmp_path, "trial_expired", None)
-    _, plan = dry_run(engine, tmp_path, bundle, *([] if vault == "install" else ["-Upgrade"]))
+    first installation. The script counts the 14 days from its own site day: when midnight in
+    Istanbul falls between writing the young day and the script's run, that day is 15 days old
+    there (seen on #279), so such a run is made once more, in a fresh folder."""
+    for attempt in range(2):
+        root = tmp_path / f"attempt-{attempt}"
+        today = site_today()
+        bundle = make_fake_bundle(root) if vault == "install" else _upgrade_setup(root)
+        if vault == "young":
+            write_vault_day(root, today - timedelta(days=14))
+        elif vault == "before-the-product":
+            write_vault_day(root, date(2025, 12, 31))
+        else:
+            write_vault_day(root, today - timedelta(days=60))
+        if vault == "with-status-file":
+            write_license_status(root, "trial_expired", None)
+        _, plan = dry_run(engine, root, bundle, *([] if vault == "install" else ["-Upgrade"]))
+        if site_today() == today:
+            break
     check = _license_check(plan)
     assert check["status"] == "info", check
     assert check["text"] == NO_LICENCE_TEXT
