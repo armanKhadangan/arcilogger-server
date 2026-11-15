@@ -805,3 +805,17 @@ to the normal site: `port-scan` (R01), `external-scan` (R02), `brute-force` (R03
   reads `webhook.<name>.url` into a pipe (recorded like `postgres.superuser`) for
   `Set-ArciFirewall.ps1` (manager's answer 3 on #266, option a); the HMAC secret stays
   write-only.
+
+### #217 (W6-H follow-up, "Bağlantıyı dene"; manager's C11 on #217)
+
+- **#217-1: the tested source's SNMP is switched off in the probe-only candidate.** An enabled
+  `[sources.snmp]` needs 1 to 4 interfaces (`SnmpConfig`), but the test exists to list them before
+  any is chosen. With `options.probe_only` the API sends the source's op with
+  `snmp.enabled = false` (as typed otherwise), and the rules probe that table regardless of
+  `enabled` (with its user and both keys required, and a recent re-authentication). The op is sent
+  even when nothing changed, as `config.apply` needs one. Nothing of it is written.
+- **#217-2: the journal and the audit.** The agent's journal line of a test has the new state
+  `probe` and the source's name (`JournalLine.source`); the worker writes `admin.probe` with
+  `log_source` and `ok` (the key `source` of the audit details already names the journal file).
+  Success has no result in the journal, only in the request status
+  (`{"probe_only": true, "interfaces": [...]}`).
