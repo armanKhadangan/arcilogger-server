@@ -494,6 +494,13 @@ WARNINGS: Final[Mapping[str, tuple[str, str]]] = MappingProxyType(
             "A server name is not valid for a firewall rule; it was not added to the strict "
             "outbound rule.",
         ),
+        "webhook_url_unreadable": (
+            "Bir webhook'un adresi gizli depodan okunamadı ya da geçersiz; sıkı giden trafik "
+            "kuralı açılmadı. arcilogger-core secret set webhook.<ad>.url ile kaydedin.",
+            "A webhook's URL cannot be read from the secret store or is not valid; no strict "
+            "outbound rule was opened for it. Store it with arcilogger-core secret set "
+            "webhook.<name>.url.",
+        ),
         "ntp_server_empty": (
             "Yerel saat kaynağı yok; saat yalnızca yedek sunucuyla eşitlenir.",
             "No local time source; the clock follows only the fallback server.",

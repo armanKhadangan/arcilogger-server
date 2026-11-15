@@ -5,17 +5,21 @@ off. Every value is fictional (``*.example`` hosts)."""
 
 from __future__ import annotations
 
+import io
+import json
 from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
 
+from arcilogger_core.cli import main
 from arcilogger_core.config import (
     WEBHOOK_MAX,
     WebhookConfig,
     load_config,
     webhook_url_problem,
 )
+from arcilogger_core.layout import Layout
 
 BASE = """
 data_dir = "D:/ARCILOGGER"
@@ -185,3 +189,46 @@ def _file(tmp_path: Path, text: str) -> Path:
     path = tmp_path / "arcilogger.toml"
     path.write_text(BASE + text, encoding="utf-8")
     return path
+
+
+# -- the stored secrets on the console (arcilogger-core secret) -----------------------------------
+
+
+def test_the_webhook_secrets_are_set_on_the_console_and_only_the_url_is_read_back(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``secret set webhook.<name>.secret`` / ``.url`` (§2.4.1). ``secret get`` gives back only
+    the URL of a Teams or Slack webhook, into a pipe, the read recorded: the firewall script opens
+    its host (manager's answer 3 on #266). The HMAC secret stays write-only."""
+    data = tmp_path / "data"
+    config = tmp_path / "arcilogger.toml"
+    config.write_text(
+        f'data_dir = "{data.as_posix()}"\nsecrets_dir = "{(tmp_path / "secrets").as_posix()}"\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr("arcilogger_core.cli.check_fixed_location", lambda *args: None)
+
+    def cli(*args: str) -> int:
+        return main(["--config", str(config), *args])
+
+    assert cli("secret", "init") == 0
+    url = "https://hooks.ornek.example/services/T000/B000/Gizli"
+    monkeypatch.setattr("sys.stdin", io.StringIO(url + "\n"))
+    assert cli("secret", "set", "webhook.slack-bt.url") == 0
+    monkeypatch.setattr("sys.stdin", io.StringIO("ornek-" * 8 + "\n"))
+    assert cli("secret", "set", "webhook.siem.secret") == 0
+    capsys.readouterr()
+    monkeypatch.setattr("sys.stdout.isatty", lambda: False)
+    assert cli("secret", "get", "webhook.slack-bt.url") == 0
+    assert capsys.readouterr().out == url
+    changes = Layout(data).secret_changes.read_text(encoding="utf-8")
+    last = json.loads(changes.splitlines()[-1])
+    assert (last["name"], last["action"]) == ("webhook.slack-bt.url", "read")
+    assert "Gizli" not in changes
+    assert cli("secret", "get", "webhook.siem.secret") == 2
+    assert "ornek-ornek" not in capsys.readouterr().out
+    for refused in ("webhook.Siem.url", "webhook.siem.token", "webhook..url", "webhook.siem.url.x"):
+        assert cli("secret", "set", refused) == 2, refused
+    monkeypatch.setattr("sys.stdout.isatty", lambda: True)
+    assert cli("secret", "get", "webhook.slack-bt.url") == 2  # never to a console
+    assert url not in capsys.readouterr().out

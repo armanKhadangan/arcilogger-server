@@ -1286,18 +1286,21 @@ def _syslog_sender(value: str) -> str:
 
 #: The strict outbound rule of a source's SNMP (Wave 5 §6 N3): ``ARCILOGGER SNMP <source>``, UDP.
 SNMP_RULE_PREFIX: Final = "ARCILOGGER SNMP "
+#: The strict outbound rule of an alert webhook (Wave 6 §2.4.1): ``ARCILOGGER Out Webhook
+#: <name>``, TCP to the host and port of its URL.
+WEBHOOK_RULE_PREFIX: Final = "ARCILOGGER Out Webhook "
 
 
 class OutboundRule(_Model):
     """One host of a strict outbound rule; a rule with several hosts or ports has one entry
-    each (``Set-ArciFirewall.ps1`` names the rules; TURKTRUST, CRL and Proxy: Wave 5 W5-T-3; NTP
-    and SNMP are UDP, the others TCP)."""
+    each (``Set-ArciFirewall.ps1`` names the rules; TURKTRUST, CRL and Proxy: Wave 5 W5-T-3;
+    Webhook <name>: Wave 6 §2.4.1; NTP and SNMP are UDP, the others TCP)."""
 
     rule: Annotated[
         str,
         StringConstraints(
-            pattern=r"^ARCILOGGER (Out (NTP|Kamu SM|SMTP( [2-9])?|Replica|TURKTRUST|CRL|Proxy)"
-            r"|SNMP [a-z0-9][a-z0-9-]{0,62})$"
+            pattern=r"^ARCILOGGER (Out (NTP|Kamu SM|SMTP( [2-9])?|Replica|TURKTRUST|CRL|Proxy"
+            r"|Webhook [a-z0-9-]{1,32})|SNMP [a-z0-9][a-z0-9-]{0,62})$"
         ),
     ]
     host: HostName

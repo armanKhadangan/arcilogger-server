@@ -575,6 +575,9 @@ WEBHOOK_MAX = 10
 #: Lengths of a ``generic`` webhook's HMAC secret (``webhook.<name>.secret``).
 WEBHOOK_SECRET_LENGTHS = range(32, 257)
 _WEBHOOK_NAME = r"^[a-z0-9-]{1,32}$"
+#: The stored secrets of the webhooks (``arcilogger-core secret set``): ``webhook.<name>.secret``
+#: (a ``generic`` webhook's HMAC secret) and ``webhook.<name>.url`` (a Teams or Slack URL).
+WEBHOOK_SECRET_NAME = re.compile(r"webhook\.[a-z0-9-]{1,32}\.(secret|url)")
 #: A rule id as alerts carry it: ``R01`` … ``R19``, ``R15``, ``R20-email``, ``R20-webhook`` …
 _RULE_ID = r"^R[0-9]{2}(-[a-z0-9-]{1,32})?$"
 
@@ -602,6 +605,16 @@ def webhook_url_problem(url: str) -> str | None:
     if address.is_loopback or (mapped is not None and mapped.is_loopback):
         return "a loopback address is not a webhook target"
     return None
+
+
+def webhook_host_port(url: str) -> tuple[str, int] | None:
+    """The host and port a webhook's URL reaches (443 unless the URL names one), or ``None`` for
+    a URL that is not a webhook target (:func:`webhook_url_problem`): what the strict outbound
+    rule ``ARCILOGGER Out Webhook <name>`` opens, never the URL's path or query."""
+    if webhook_url_problem(url) is not None:
+        return None
+    parts = urlsplit(url)
+    return str(parts.hostname), parts.port or 443
 
 
 class WebhookConfig(_Model):
