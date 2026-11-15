@@ -1,7 +1,7 @@
 /**
  * The TypeScript API types (`api-types.ts`, `settings-types.ts`, `search-types.ts`,
  * `live-types.ts`, `sources-types.ts`, `compliance-types.ts`, `system-types.ts`,
- * `system-health-types.ts`, `legal-status-types.ts`) and the endpoints the app calls must match the API's
+ * `system-health-types.ts`, `legal-status-types.ts`, `rules-types.ts`) and the endpoints the app calls must match the API's
  * OpenAPI document (`src/generated/api-schemas.json`, made by
  * `web/scripts/export_api_contract.py` from the FastAPI app). A renamed, retyped, newly required
  * or removed field — or a call to an endpoint that does not exist — fails here.
@@ -32,6 +32,7 @@ const TYPES_FILES = [
   'archive-reload-types.ts',
   'legal-status-types.ts',
   'activity-types.ts',
+  'rules-types.ts',
 ].map((name) => join(SRC, 'lib', name));
 
 /**

@@ -9,9 +9,10 @@ dismissed is never re-opened by a check; the next occurrence is a new alert.
 
 **Every change of state is an ``alert_events`` row** (ADR-0010 amendment): :func:`resolve` and
 :func:`reopen` write one by ``system`` with the reason code, and a person's change or note goes
-through :func:`change_state` / :func:`add_note` — the only writers for the API — which also
-write the audit entry through the caller's hook (``alert.state`` with from/to, ``alert.note``
-with the note's **length** only: a note may name people, the sealed audit log never holds it).
+through :func:`change_state` / :func:`add_note` / :func:`assign` — the only writers for the API
+— which also write the audit entry through the caller's hook (``alert.state`` with from/to,
+``alert.note`` with the note's **length** only: a note may name people, the sealed audit log never
+holds it; ``alert.assign`` with the user ids).
 
 A person's transitions (:data:`TRANSITIONS`; the web names in brackets): ``open`` (Yeni) →
 ``acknowledged`` (İnceleniyor), ``resolved`` (Kapandı) or ``dismissed`` (Yanlış alarm);
@@ -37,6 +38,7 @@ from arcilogger_db.models import (
     ALERT_SEVERITIES,
     Alert,
     AlertEvent,
+    User,
 )
 
 #: Lowest first: ``info`` < ``low`` < ``medium`` < ``high`` < ``critical``.
@@ -406,5 +408,39 @@ def add_note(
     alert.updated_at = now
     event = record_event(session, alert, kind="note", text=value, by=by, user_id=user_id, at=now)
     audit("alert.note", {"length": len(value)})
+    session.flush()
+    return event
+
+
+def assign(
+    session: Session,
+    alert: Alert,
+    assignee: User | None,
+    *,
+    by: str,
+    user_id: int | None,
+    now: datetime,
+    audit: AuditHook,
+) -> AlertEvent:
+    """A person gives ``alert`` (locked by the caller) to ``assignee`` or to nobody (Wave 6
+    contract §2.6.2): ``alerts.assignee_id``, an ``assign`` event (``text`` = the assignee's
+    user name, NULL for nobody) and the audit entry ``alert.assign`` (user ids only).
+    :class:`WorkflowError` ``unchanged`` when it already is."""
+    wanted = assignee.id if assignee is not None else None
+    if alert.assignee_id == wanted:
+        raise WorkflowError("unchanged")
+    previous = alert.assignee_id
+    alert.assignee_id = wanted
+    alert.updated_at = now
+    event = record_event(
+        session,
+        alert,
+        kind="assign",
+        text=assignee.username if assignee is not None else None,
+        by=by,
+        user_id=user_id,
+        at=now,
+    )
+    audit("alert.assign", {"from": previous, "to": wanted, "rule": alert.rule})
     session.flush()
     return event

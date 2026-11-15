@@ -416,6 +416,10 @@ export class AlertsMock {
         .length,
       latest: this.latest(),
       mean_time_to_close_seconds_30d: this.meanTimeToClose(),
+      // Wave 6 (W6-A): the counts the Security page charts; with `rules`, the samples' (W6-F).
+      by_day: [],
+      top_rules: [],
+      top_keys: [],
       ...(this.options.rules ? copy(SUMMARY_ADDITIONS) : {}),
     };
   }

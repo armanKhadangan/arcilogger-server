@@ -21,7 +21,7 @@ W6-B network, W6-C access, W6-D threats, W6-E people. Every value comes from the
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from typing import Final
 
@@ -695,5 +695,29 @@ CASES.extend(
         _in_cooldown("R09", "blocked-20"),
         _in_cooldown("R13", "sent-1100-mib"),
         _in_cooldown("R14", "night-10-mib"),
+    ]
+)
+
+# -------------------------------------------------------------------------------------------------
+# W6-C — cooldown cases (one per rule, issue #245): a positive case of the rule, with a closed
+# alert of each expected key before the slice. R03, R12 and R16 (cooldowns of an hour, an hour
+# and ten minutes) count the hits on that alert's ``after_close`` five minutes after it, and no
+# alert opens. R04 and R11 have no cooldown: an alert closed one minute before (within their
+# window) does not hold the hit back, and a new alert opens.
+# -------------------------------------------------------------------------------------------------
+
+
+def _closed_before(rule: str, name: str, closed_before: timedelta) -> RuleCase:
+    case = next(case for case in CASES if case.rule == rule and case.name == name)
+    return replace(case, name=f"{case.name}-after-a-closed-alert", closed_before=closed_before)
+
+
+CASES.extend(
+    [
+        _closed_before("R03", "five-failed-logins", timedelta(minutes=5)),
+        _closed_before("R12", "three-mac-changes", timedelta(minutes=5)),
+        _closed_before("R16", "router-configuration-changes", timedelta(minutes=5)),
+        _closed_before("R04", "login-from-an-unexpected-address", timedelta(minutes=1)),
+        _closed_before("R11", "a-new-device", timedelta(minutes=1)),
     ]
 )
