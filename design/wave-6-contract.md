@@ -555,6 +555,7 @@ and only for an alert of a person-level rule; each such answer writes `alert.per
 | `rule_dry_run_timeout` | Deneme {n} sn içinde bitmedi; pencereyi ya da listeleri küçültün. | The trial run did not finish within {n} s; shorten the window or the lists. |
 | `alert_assignee_invalid` | Bu kullanıcıya uyarı atanamaz. | Alerts cannot be assigned to this user. |
 | `webhook_not_found` | Böyle bir webhook yok. | No such webhook. |
+| `webhook_not_ready` | Bu webhook gönderime hazır değil; durumuna bakın. | This webhook is not ready to send; see its state. |
 | `webhook_test_failed` | Deneme bildirimi gönderilemedi: {error} | The test notification could not be sent: {error} |
 
 ### 2.7 Load generator scenarios (W6-I)
@@ -690,9 +691,10 @@ to the normal site: `port-scan` (R01), `external-scan` (R02), `brute-force` (R03
   the largest value any of its hits reported ("en yüksek pencere sayısı / most in one window").
   The stored evidence stays de-duplicated and capped at `rules.evidence_max`, and `last_time`
   and `values` move as before. §2.1.5's "counts add up" is replaced by this. It lands in W6-A's
-  dry-run PR, before any API or UI shows a count.
-- **C2 — the rules' indexes go into a new migration `0025`** with the perf guard (T-A6).
-  `0024_rules` is merged and is not edited.
+  dry-run PR, before any API or UI shows a count. A closed alert's `after_close.count` (cooldown)
+  follows the same rule: the largest window count, never a sum (#270; lands with the rules API).
+- **C2 — the rules' indexes go into a new migration `0026`** with the perf guard (T-A6),
+  down-revision `0025` (C10). `0024_rules` is merged and is not edited.
 - **C3 — `rules.evidence_max`:** a rule may return up to 100 evidence rows (the setting's
   maximum) or read the setting itself; the engine keeps the configured number, oldest first.
 - **C4 — defaults the tables leave open** (#253, #254): cooldown 3600 s for R01, R03, R08,
@@ -720,6 +722,30 @@ to the normal site: `port-scan` (R01), `external-scan` (R02), `brute-force` (R03
     /api/v1/webhooks` shows it at once: per webhook a `ready` boolean and a reason code
     (`secret_missing`, `url_missing`), never a value.
   - `R20-webhook` has its own entry in the alert catalogue (`alerts/texts.py`).
+  - The reason codes are `null` when `ready` is true, otherwise `disabled`, `secret_missing` or
+    `url_missing`.
+- **C10 — the webhook test and the firewall rule** (#266, #260):
+  - The test runs on the worker channel, as the test e-mail does, not as an administration agent
+    probe: request kind `worker.webhook_test` (`params.name`), sent by the worker with its own
+    secret store. §2.4.4's probe kind `webhook` is replaced by this.
+  - The kind needs migration `0025` (W6-H): `ck_admin_requests_kind` is dropped and created again
+    with `worker.webhook_test`; the downgrade deletes those rows and restores the old list.
+  - `POST /api/v1/webhooks/{name}/test` refuses before queueing: 404 `webhook_not_found`, 409
+    `webhook_not_ready` (`details.reason`) when `ready` is false, and the test e-mail's rate limit.
+    It answers the queued request; the web polls it as it polls the test e-mail.
+  - The request's `result` is `{"ok", "status", "error_text"}`: `status` is the HTTP status code
+    or `null` when no reply came (timeout, DNS, TLS); `error_text` follows §2.4.2's `last_error`
+    rule and is `null` on success. Its `code` is `webhook_test_failed` on failure. Audit
+    `webhook.test` with `{name, ok, status}`, never the URL.
+  - Until W6-F's webhook types land, `web/src/lib/api-types.test.ts` lists the six webhook
+    schemas in `UNUSED_SCHEMAS` (granted to W6-H, marked with #260, removed by #260).
+  - Firewall rule `ARCILOGGER Out Webhook <name>` (T-H4): built in `Set-ArciFirewall.ps1`, in
+    `systemplan.py` (`_outbound`) and in the rule-name pattern of `ArciInstall.psm1`. A `generic`
+    webhook gives the host and port of `url`. A `teams`/`slack` URL is read from the secret store
+    (`arcilogger-core secret get webhook.<name>.url` in the script, the agent's secret store in
+    `systemplan.py`); only its host and port are kept, in memory, and the URL is never logged or
+    written. A URL that cannot be read gives no rule and one warning naming the webhook, not the
+    URL.
 
 ---
 
