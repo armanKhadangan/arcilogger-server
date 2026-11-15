@@ -216,10 +216,14 @@ function WebhookRow({
       </td>
       <td className="px-3 py-2">
         <span className="flex flex-col items-start gap-0.5">
-          <Badge tone={webhook.enabled ? 'success' : 'neutral'}>
-            {t(webhook.enabled ? 'webhooks.on' : 'webhooks.off')}
+          <Badge
+            tone={webhook.enabled ? 'success' : 'neutral'}
+            title={webhook.enabled ? undefined : t('webhooks.notReadyHint.disabled')}
+          >
+            {t(webhook.enabled ? 'webhooks.on' : 'webhooks.notReady.disabled')}
           </Badge>
-          {!webhook.ready ? (
+          {/* Switched off is said by the badge above; a missing secret or URL here. */}
+          {!webhook.ready && webhook.reason !== 'disabled' ? (
             <Badge
               tone="warning"
               icon={TriangleAlert}

@@ -37,7 +37,9 @@ test.describe("Ayarlar → Webhook'lar", () => {
     await expect(teams.getByRole('button', { name: 'Test gönder: teams-guvenlik' })).toBeDisabled();
     await expect(siem.getByTestId('webhook-not-ready')).toHaveCount(0);
     const slack = page.locator('[data-testid="webhook-row"][data-name="slack-bt"]');
-    await expect(slack).toContainText('Kapalı');
+    // Switched off: the reason `disabled` (manager, #260), said once, with no second badge.
+    await expect(slack).toContainText('Kapalı (`enabled = false`)');
+    await expect(slack.getByTestId('webhook-not-ready')).toHaveCount(0);
     await expect(slack.getByRole('button', { name: 'Test gönder: slack-bt' })).toBeDisabled();
     // Nothing on the page configures a webhook (D4).
     await expect(page.getByRole('textbox')).toHaveCount(0);
