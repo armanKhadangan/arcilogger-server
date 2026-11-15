@@ -52,11 +52,11 @@ import logging
 import threading
 import time
 from collections import defaultdict
-from collections.abc import Callable, Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
-from typing import Any, Final
+from typing import Any, Final, NamedTuple
 
 from sqlalchemy import Engine, text
 from sqlalchemy.exc import SQLAlchemyError
@@ -177,6 +177,11 @@ Key = tuple[Any, ...]
 Cell = list[Any]
 #: minute (epoch seconds) → subject key → cell
 Cells = dict[int, dict[str, Cell]]
+#: (minute, subject key, download, upload, ((destination, kind, bytes), …),
+#: ((application, bytes), …))
+PackedCell = tuple[
+    int, str, float, float, tuple[tuple[str, str, float], ...], tuple[tuple[str, float], ...]
+]
 
 
 @dataclass
@@ -192,27 +197,43 @@ class Counted:
     newest: float | None = None
 
 
-@dataclass
+class Packed(NamedTuple):
+    """A session's count as tuples of atoms (:class:`Counted`'s content, in its order). The
+    garbage collector stops tracking a tuple that holds only atoms, so the counts of tens of
+    thousands of open sessions are not walked by each of its full passes, which hold every
+    thread of the worker (#265): only the running totals (:attr:`Snapshot.closed`,
+    :attr:`Snapshot.opened`) stay mutable, and they are bounded by the minutes and subjects."""
+
+    cells: tuple[PackedCell, ...]
+    #: (minute, subject key, sessions started)
+    sessions: tuple[tuple[int, str, int], ...]
+    #: (person or device subject key, its main address)
+    subjects: tuple[tuple[str, Any], ...]
+    newest: float | None
+
+
+@dataclass(slots=True)
 class OpenSession:
-    """The logs so far of a session that can still log, and what they count for."""
+    """The logs so far of a session that can still log, and what they count for. Everything it
+    holds is a tuple of atoms (or :class:`Packed`), for the collector's sake (#265)."""
 
     ip: str
-    rows: list[tuple[Any, ...]] = field(default_factory=list)
+    rows: tuple[tuple[Any, ...], ...] = ()
     #: The ids of ``rows`` in ``fg_traffic``.
-    ids: set[int] = field(default_factory=set)
+    ids: tuple[int, ...] = ()
     #: The newest log's time (epoch seconds).
     newest: float = 0.0
     #: The engine's count of ``rows`` as last taken (in the open sum until it is taken again).
-    counted: Counted | None = None
+    counted: Packed | None = None
     #: Logs came (or dropped out) since: to be counted again.
     stale: bool = True
     #: Its final log came (a late interim log does not open it again).
     final: bool = False
     #: The DNS answers that can name it (read once: they come before the session starts).
-    dns: list[tuple[Any, ...]] | None = None
+    dns: tuple[tuple[Any, ...], ...] | None = None
     #: Its web filter and application logs as last read (an open session counted again uses
     #: them; its count when it ends reads them again).
-    names: tuple[list[tuple[Any, ...]], list[tuple[Any, ...]]] | None = None
+    names: tuple[tuple[tuple[Any, ...], ...], tuple[tuple[Any, ...], ...]] | None = None
 
     def start(self) -> float:
         return float(min((row[3].timestamp() - (row[4] or 0) for row in self.rows), default=0.0))
@@ -429,8 +450,8 @@ class Snapshot:
                 if values[0] is not None and (values[4] or 0) >= earlier:
                     new[key] = known
             known.stale = True
-            known.rows.append(values)
-            known.ids.add(int(row[0]))
+            known.rows += (values,)
+            known.ids += (int(row[0]),)
             known.newest = max(known.newest, values[3].timestamp())
             known.final = known.final or not values[10] or values[0] is None
             if known.final:
@@ -502,8 +523,8 @@ class Snapshot:
             if row[5] >= front or (row[0] > mark and row[0] not in self.seen):
                 continue  # not read yet: it comes as a new row
             old = earlier.setdefault(key, OpenSession(ip))
-            old.rows.append(values)
-            old.ids.add(int(row[0]))
+            old.rows += (values,)
+            old.ids += (int(row[0]),)
         if not earlier:
             return
         olds = list(earlier.values())
@@ -513,7 +534,7 @@ class Snapshot:
         for key, old in earlier.items():
             known = new[key]
             known.rows = old.rows + known.rows
-            known.ids |= old.ids
+            known.ids += old.ids
             known.newest = max(known.newest, *(row[3].timestamp() for row in old.rows))
             known.final = known.final or any(not row[10] for row in old.rows)
             known.dns = known.names = None
@@ -573,7 +594,7 @@ class Snapshot:
         self._dirty |= _pairs(difference)
         _add(self.opened, difference)
         for known, counted in zip(chunk, counts, strict=True):
-            known.counted, known.stale = counted, False
+            known.counted, known.stale = _pack(counted), False
         return len(chunk)
 
     def _engine(self, settings: UsageSettings) -> tuple[DomainNamer, BackgroundRules]:
@@ -632,8 +653,8 @@ class Snapshot:
         for known in unread:
             sessionid = known.rows[0][0]
             known.names = (
-                list(web.get((known.ip, sessionid), ())),
-                list(app.get((known.ip, sessionid), ())),
+                tuple(web.get((known.ip, sessionid), ())),
+                tuple(app.get((known.ip, sessionid), ())),
             )
         # The engine names a session by its web filter or application host name first: only
         # the sessions without one need their DNS answers.
@@ -701,7 +722,7 @@ class Snapshot:
         oldest = lo - overlap
         for key, known in list(self.open.items()):
             if any(row[3] < oldest for row in known.rows):
-                known.rows = [row for row in known.rows if row[3] >= oldest]
+                known.rows = tuple(row for row in known.rows if row[3] >= oldest)
                 known.stale = True
                 if not known.rows:
                     del self.open[key]
@@ -1054,7 +1075,7 @@ def _by_session(rows: Iterable[Sequence[Any]]) -> dict[tuple[str, int], list[tup
 def _host(known: OpenSession) -> bool:
     """Whether a web filter or application log names the session (rows ``(sessionid, time,
     hostname, …)``), as the engine reads them."""
-    web, app = known.names or ([], [])
+    web, app = known.names or ((), ())
     return any(normalize_hostname(row[2]) for row in (*web, *app))
 
 
@@ -1063,8 +1084,8 @@ def _names_of(
 ) -> tuple[list[tuple[Any, ...]], list[tuple[Any, ...]]]:
     """The sessions' web filter and application logs, each in time order (by session)."""
     ordered = sorted(sessions, key=lambda known: known.rows[0][0] or 0)
-    web = [row for known in ordered for row in (known.names or ([], []))[0]]
-    app = [row for known in ordered for row in (known.names or ([], []))[1]]
+    web = [row for known in ordered for row in (known.names or ((), ()))[0]]
+    app = [row for known in ordered for row in (known.names or ((), ()))[1]]
     return web, app
 
 
@@ -1074,7 +1095,7 @@ def _answers(session: Session, settings: UsageSettings, sessions: Sequence[OpenS
     window before its start, all of them when none of those has a usable name."""
     lookups: list[tuple[OpenSession, str, datetime, datetime]] = []
     for known in sessions:
-        known.dns = []
+        known.dns = ()
         address = next((str(row[1]) for row in known.rows if row[1] is not None), None)
         if address is None:
             continue
@@ -1098,7 +1119,7 @@ def _answers(session: Session, settings: UsageSettings, sessions: Sequence[OpenS
         for index, number in enumerate(unusable):
             found[number] = again.get(index, [])
     for number, rows in found.items():
-        lookups[number][0].dns = rows
+        lookups[number][0].dns = tuple(rows)
 
 
 def _lookup(
@@ -1121,7 +1142,9 @@ def _lookup(
         },
     )
     for row in rows:
-        found[int(row[0]) - 1].append((row[1], row[2], row[3], row[4], row[5], row[6], row[7]))
+        # The answers as a tuple: the row then holds only atoms (see :class:`Packed`).
+        answers = None if row[4] is None else tuple(row[4])
+        found[int(row[0]) - 1].append((row[1], row[2], row[3], answers, row[5], row[6], row[7]))
     return found
 
 
@@ -1176,59 +1199,115 @@ def _started(
         bucket[subject] = bucket.get(subject, 0) + 1
 
 
-def _difference(added: Iterable[Counted], removed: Iterable[Counted]) -> Counted:
+def _pack(counted: Counted) -> Packed:
+    """``counted`` as :class:`Packed`, in the same order (so it adds up to the same sums)."""
+    return Packed(
+        cells=tuple(
+            (
+                minute,
+                key,
+                cell[0],
+                cell[1],
+                tuple((domain, kind, volume) for (domain, kind), volume in cell[2].items()),
+                tuple(cell[3].items()),
+            )
+            for minute, subjects in counted.cells.items()
+            for key, cell in subjects.items()
+        ),
+        sessions=tuple(
+            (minute, key, count)
+            for minute, started in counted.sessions.items()
+            for key, count in started.items()
+        ),
+        subjects=tuple((key, info.get("ip")) for key, info in counted.subjects.items()),
+        newest=counted.newest,
+    )
+
+
+def _cells(
+    counted: Counted | Packed,
+) -> Iterator[
+    tuple[int, str, float, float, Iterable[tuple[tuple[str, str], float]], Iterable[Any]]
+]:
+    """(minute, subject key, download, upload, ((destination, kind), bytes) …, (application,
+    bytes) …) of each cell."""
+    if isinstance(counted, Packed):
+        for minute, key, down, up, volumes, by_app in counted.cells:
+            yield minute, key, down, up, (((d, k), v) for d, k, v in volumes), by_app
+        return
+    for minute, subjects in counted.cells.items():
+        for key, (down, up, volumes, by_app) in subjects.items():
+            yield minute, key, down, up, volumes.items(), by_app.items()
+
+
+def _started_counts(counted: Counted | Packed) -> Iterator[tuple[int, str, int]]:
+    """(minute, subject key, sessions started)."""
+    if isinstance(counted, Packed):
+        yield from counted.sessions
+        return
+    for minute, started in counted.sessions.items():
+        for key, count in started.items():
+            yield minute, key, count
+
+
+def _difference(added: Iterable[Counted], removed: Iterable[Counted | Packed]) -> Counted:
     """``added`` less ``removed`` (what is left at zero dropped): a session counted again
     changes only the minutes its new logs reach."""
     difference = Counted()
     for counted in added:
         _add(difference, counted)
-    for counted in removed:
-        _add(difference, counted, sign=-1)
+    for taken in removed:
+        _add(difference, taken, sign=-1)
     return difference
 
 
-def _pairs(difference: Counted) -> set[tuple[int, str]]:
+def _pairs(difference: Counted | Packed) -> set[tuple[int, str]]:
     """The subject-minutes a difference touches."""
-    changed = {(minute, key) for minute, cells in difference.cells.items() for key in cells}
-    changed.update(
-        (minute, key) for minute, started in difference.sessions.items() for key in started
-    )
+    changed = {(minute, key) for minute, key, *_ in _cells(difference)}
+    changed.update((minute, key) for minute, key, _ in _started_counts(difference))
     return changed
 
 
-def _add(total: Counted, other: Counted, *, sign: int = 1) -> None:
+def _add(total: Counted, other: Counted | Packed, *, sign: int = 1) -> None:
     """Add ``other`` into ``total`` (``sign=-1``: take it back out, dropping what is left at
     zero)."""
-    for minute, subjects in other.cells.items():
+    minutes: set[int] = set()
+    for minute, key, down, up, volumes, by_app in _cells(other):
+        minutes.add(minute)
         target_minute = total.cells.setdefault(minute, {})
-        for key, (down, up, volumes, by_app) in subjects.items():
-            cell = target_minute.get(key)
-            if cell is None:
-                cell = target_minute[key] = [0.0, 0.0, {}, {}]
-            cell[0] += sign * down
-            cell[1] += sign * up
-            for table, values in ((cell[2], volumes), (cell[3], by_app)):
-                for name, volume in values.items():
-                    left = table.get(name, 0.0) + sign * volume
-                    if abs(left) < EPSILON:
-                        table.pop(name, None)
-                    else:
-                        table[name] = left
-            if max(abs(cell[0]), abs(cell[1])) < EPSILON and not (cell[2] or cell[3]):
-                del target_minute[key]
-        if not target_minute:
+        cell = target_minute.get(key)
+        if cell is None:
+            cell = target_minute[key] = [0.0, 0.0, {}, {}]
+        cell[0] += sign * down
+        cell[1] += sign * up
+        for table, values in ((cell[2], volumes), (cell[3], by_app)):
+            for name, volume in values:
+                left = table.get(name, 0.0) + sign * volume
+                if abs(left) < EPSILON:
+                    table.pop(name, None)
+                else:
+                    table[name] = left
+        if max(abs(cell[0]), abs(cell[1])) < EPSILON and not (cell[2] or cell[3]):
+            del target_minute[key]
+    for minute in minutes:
+        if not total.cells[minute]:
             del total.cells[minute]
-    for minute, started in other.sessions.items():
+    minutes = set()
+    for minute, key, count in _started_counts(other):
+        minutes.add(minute)
         target_sessions = total.sessions.setdefault(minute, {})
-        for key, count in started.items():
-            left = target_sessions.get(key, 0) + sign * count
-            if left:
-                target_sessions[key] = left
-            else:
-                target_sessions.pop(key, None)
-        if not target_sessions:
+        left = target_sessions.get(key, 0) + sign * count
+        if left:
+            target_sessions[key] = left
+        else:
+            target_sessions.pop(key, None)
+    for minute in minutes:
+        if not total.sessions[minute]:
             del total.sessions[minute]
     if sign > 0:
-        total.subjects.update(other.subjects)
+        if isinstance(other, Packed):
+            total.subjects.update((key, {"ip": ip}) for key, ip in other.subjects)
+        else:
+            total.subjects.update(other.subjects)
         if other.newest is not None and (total.newest is None or other.newest > total.newest):
             total.newest = other.newest
