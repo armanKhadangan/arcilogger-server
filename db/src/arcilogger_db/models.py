@@ -32,6 +32,7 @@ from sqlalchemy import (
     CheckConstraint,
     Date,
     ForeignKey,
+    ForeignKeyConstraint,
     Identity,
     Index,
     Integer,
@@ -1842,6 +1843,71 @@ class RuleState(Base):
     skipped_until: Mapped[datetime | None] = mapped_column(TZ)
     alerts_opened: Mapped[int] = mapped_column(BigInteger, nullable=False, server_default="0")
     updated_at: Mapped[datetime | None] = mapped_column(TZ)
+
+
+class RuleTrafficState(Base):
+    """A period's running traffic totals of R13 (site day) or R14 (night): up to which receive
+    time they are counted, and what they were counted with (``arcilogger_worker.rules.people``,
+    #280). Derived data: a missing or stale row makes the next run read the period whole."""
+
+    __tablename__ = "rule_traffic_state"
+    __table_args__ = ({"comment": "Running traffic totals of R13 and R14: their state."},)
+
+    rule: Mapped[str] = mapped_column(Text, primary_key=True)
+    #: The period's start (receive time): site midnight (R13) or the night's start (R14).
+    period_start: Mapped[datetime] = mapped_column(TZ, primary_key=True)
+    #: What the amounts depend on (networks, night bounds, overlap, skew); a change rebuilds.
+    inputs: Mapped[str] = mapped_column(Text, nullable=False)
+    #: The receive time up to which the totals are counted (the last slice end).
+    filled_until: Mapped[datetime] = mapped_column(TZ, nullable=False)
+
+
+class RuleTrafficTotal(Base):
+    """A period's bytes and logs per address, minute of device time and minute of receive time
+    (derived from ``fg_traffic``; rebuilt from it when missing)."""
+
+    __tablename__ = "rule_traffic_totals"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["rule", "period_start"],
+            ["rule_traffic_state.rule", "rule_traffic_state.period_start"],
+            ondelete="CASCADE",
+        ),
+        {"comment": "Running traffic totals of R13 and R14 per address and minute."},
+    )
+
+    rule: Mapped[str] = mapped_column(Text, primary_key=True)
+    period_start: Mapped[datetime] = mapped_column(TZ, primary_key=True)
+    srcip: Mapped[str] = mapped_column(INET, primary_key=True)
+    #: Minute of device time (the minute's subject is its first instant's, C7).
+    minute: Mapped[datetime] = mapped_column(TZ, primary_key=True)
+    #: Minute of receive time (windows sum the minutes they hold).
+    received: Mapped[datetime] = mapped_column(TZ, primary_key=True)
+    rows: Mapped[int] = mapped_column(Integer, nullable=False)
+    amount: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    first_received: Mapped[datetime | None] = mapped_column(TZ)
+    last_received: Mapped[datetime | None] = mapped_column(TZ)
+
+
+class RuleTrafficEvidence(Base):
+    """The oldest counted logs of an address in a period, kept once there are a full list's
+    worth (references only, as ``alert_evidence``)."""
+
+    __tablename__ = "rule_traffic_evidence"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["rule", "period_start"],
+            ["rule_traffic_state.rule", "rule_traffic_state.period_start"],
+            ondelete="CASCADE",
+        ),
+        {"comment": "Running traffic totals of R13 and R14: kept evidence references."},
+    )
+
+    rule: Mapped[str] = mapped_column(Text, primary_key=True)
+    period_start: Mapped[datetime] = mapped_column(TZ, primary_key=True)
+    srcip: Mapped[str] = mapped_column(INET, primary_key=True)
+    #: [{"id", "time", "time_received", "source", "raw_day", "raw_line", "raw_offset"}, …]
+    refs: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, nullable=False)
 
 
 class AlertEvidence(Base):
