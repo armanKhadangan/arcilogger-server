@@ -62,6 +62,8 @@ EXPECTED_ROUTERS = {
     "/legal-status": "legal-status",
     # Canlı Durum (Wave 5 contract §6.2 M2, §6 N6: /activity/devices and /activity/wan).
     "/activity": "activity",
+    # The alert webhooks, configured on the server (Wave 6 contract §2.4.4, W6-H).
+    "/webhooks": "webhooks",
 }
 
 

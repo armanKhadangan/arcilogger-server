@@ -69,7 +69,19 @@ const NOT_SCHEMAS = new Set([
   'ArchiveReloadRequired',
 ]);
 /** OpenAPI schemas the web app does not use. */
-const UNUSED_SCHEMAS = new Set(['HTTPValidationError', 'ValidationError', 'Health']);
+const UNUSED_SCHEMAS = new Set([
+  'HTTPValidationError',
+  'ValidationError',
+  'Health',
+  // Temporary (W6-H, #266): the webhooks API until W6-F's #260 adds `webhook-types.ts`; #260
+  // removes these six.
+  'WebhookList',
+  'WebhookOut',
+  'WebhookLastDelivery',
+  'WebhookCounts',
+  'WebhookDeliveries',
+  'WebhookDelivery',
+]);
 
 /**
  * Unions that narrow a wider API type: the API declares a plain string (or any JSON value) whose

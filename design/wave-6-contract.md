@@ -783,3 +783,25 @@ to the normal site: `port-scan` (R01), `external-scan` (R02), `brute-force` (R03
 - **Implemented:** a `devices` row whose `created_at` (the server's insert time) is in the slice; `first_seen` is shown in the alert's values.
 - **Why:** `first_seen` is the **device time** of the first DHCP or ARP sighting. The lease jobs write the row later, after their own lag. A device whose row is inserted after `rules.run` moved its watermark past that `first_seen` would never alert. `created_at` is written once, at the insert, by the server's clock. That fits D8 (receive time, not device time) and D12 (devices that existed when the rule started never alert, with no extra seeding).
 - **Limit:** a lease-job transaction that runs longer than `rules.lag_seconds` (120 s) can commit rows with a `created_at` behind the watermark. The default lag covers the normal job; a full rebuild of old days creates no new devices worth an alert.
+
+### W6-H (#249, pull request #266)
+
+- **W6-H-1: `webhook_test_failed` names the reason in the request's result.** §2.6.4 gives the
+  text "Deneme bildirimi gönderilemedi: {error}". "Test gönder" is a worker-channel request
+  (`worker.webhook_test`, as the test e-mail; manager's answer 1 on #266), and a request's
+  outcome code takes fixed texts from `core/admin/messages.py`, as `smtp_test_failed` does. The
+  message is "Deneme bildirimi gönderilemedi." / "The test notification could not be sent.", and
+  the reason (§2.4.2: the status code and the cleaned reply) is `result.error_text` of the
+  request, `{ok, status, error_text}` (manager's answer of 2026-11-15 19:08 on #266). The page
+  shows both (W6-F).
+- **W6-H-2: a new revision `0025_admin_webhook_test`.** `admin_requests.kind` is checked by the
+  database (`ck_admin_requests_kind`, frozen in `0015_admin_requests`), so the new worker-channel
+  kind needs a revision; it only widens that check (the downgrade deletes the
+  `worker.webhook_test` rows first). The manager fixed the numbers on #266: `0025` is this
+  kind, and the rules' indexes of C2 take `0026` with down-revision `0025`.
+- **W6-H-3: the webhook secrets on the console.** §2.4.1 has the administrator run
+  `arcilogger-core secret set webhook.<name>.secret`; the CLI accepted only a fixed list of
+  names, so it now also takes `webhook.<name>.secret` and `webhook.<name>.url`. `secret get`
+  reads `webhook.<name>.url` into a pipe (recorded like `postgres.superuser`) for
+  `Set-ArciFirewall.ps1` (manager's answer 3 on #266, option a); the HMAC secret stays
+  write-only.

@@ -12522,6 +12522,57 @@ def test_firewall_strict_outbound_opens_snmp_to_its_sources_only(
     assert not [r for r in plan["rules"] if r["name"].startswith("ARCILOGGER SNMP ")]
 
 
+WEBHOOK_URL = "https://203.0.113.30/webhookb2/Gizli-Yol?sig=Gizli-Imza"
+WEBHOOK_CONFIG = (
+    '[[webhooks]]\nname = "siem"\nurl = "https://198.51.100.20:8443/arcilogger?kanal=guvenlik"\n'
+    '[[webhooks]]\nname = "teams-bt"\nformat = "teams"\n'
+    '[[webhooks]]\nname = "slack-bt"\nformat = "slack"\n'
+    '[[webhooks]]\nname = "kapali"\nurl = "https://198.51.100.21/hook"\nenabled = false\n'
+)
+
+
+def _webhook_rules(plan: dict[str, Any] | None) -> dict[str, tuple[str, list[str], list[str]]]:
+    assert plan is not None
+    return {
+        r["name"]: (r["protocol"], r["ports"], r["remote_address"])
+        for r in plan["rules"]
+        if r["name"].startswith("ARCILOGGER Out Webhook ")
+    }
+
+
+def test_firewall_strict_outbound_opens_the_webhooks(engine: str, tmp_path: Path) -> None:
+    """T-H4 (Wave 6 §2.4.1, manager's answer 3 on #266): ``ARCILOGGER Out Webhook <name>``, TCP
+    to the host and port of each enabled webhook's URL. A Teams or Slack URL comes from the
+    secret store (``arcilogger-core secret get webhook.<name>.url``); only its host and port are
+    used, and the URL is never printed. One that is not stored gets no rule and a warning naming
+    the webhook. Through [network] https_proxy, and in normal mode, there is none."""
+    SecretStore.create_key(tmp_path / "secret.key")
+    store = SecretStore(tmp_path / "secret.key", tmp_path / "secrets.json")
+    store.set("webhook.teams-bt.url", WEBHOOK_URL)
+    head = f'data_dir = "{(tmp_path / "data").as_posix()}"\n'
+    text = head + STRICT_CONFIG.split("\n", 1)[1] + WEBHOOK_CONFIG
+    result, plan = _firewall(engine, tmp_path, text, "-StrictOutbound", *SMTP_FREE_ARGS)
+    output = result.stdout + result.stderr
+    assert result.returncode == 0, output
+    assert _webhook_rules(plan) == {
+        "ARCILOGGER Out Webhook siem": ("TCP", ["8443"], ["198.51.100.20"]),
+        "ARCILOGGER Out Webhook teams-bt": ("TCP", ["443"], ["203.0.113.30"]),
+    }
+    assert _unwrapped("[the URL of webhook slack-bt cannot be read from the secret store") in (
+        _unwrapped(output)
+    )
+    for never in ("Gizli-Yol", "Gizli-Imza", "kanal=guvenlik"):
+        assert never not in output
+        assert never not in (tmp_path / "firewall.json").read_text(encoding="utf-8")
+    proxied = text + '[network]\nhttps_proxy = "http://172.20.10.5:3128"\n'
+    result, plan = _firewall(engine, tmp_path, proxied, "-StrictOutbound", *SMTP_FREE_ARGS)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert _webhook_rules(plan) == {}
+    result, plan = _firewall(engine, tmp_path, text, *SMTP_FREE_ARGS)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert _webhook_rules(plan) == {}
+
+
 def test_firewall_remembers_the_smtp_server(engine: str, tmp_path: Path) -> None:
     state = {
         "schema": 1, "strict_outbound": True, "smtp_server": "10.0.0.3:2525",
@@ -14880,6 +14931,8 @@ foreach ($case in @(
         @('proxy', 'ARCILOGGER Out Proxy', '172.20.10.5', 3128),
         @('snmp', 'ARCILOGGER SNMP fw-1', '172.20.0.1', 161),
         @('snmp of a bad name', 'ARCILOGGER SNMP Fw 1', '172.20.0.1', 161),
+        @('webhook', 'ARCILOGGER Out Webhook siem-2', 'siem.ornek.example', 8443),
+        @('webhook of a bad name', 'ARCILOGGER Out Webhook siem.2', 'siem.ornek.example', 443),
         @('web rule', 'ARCILOGGER HTTPS', 'arcilogger.internal', 443),
         @('dns rule', 'ARCILOGGER Out DNS UDP', '172.20.10.1', 53),
         @('tenth smtp', 'ARCILOGGER Out SMTP 10', 'smtp.ornek.example', 587),
@@ -15025,8 +15078,15 @@ def test_firewall_sync_checks_senders_and_outbound_rules_again(
     allowed = {name for name, problem in outbound.items() if problem is None}
     assert allowed == {
         "smtp", "second smtp", "ntp", "kamu sm", "replica", "turktrust", "crl", "proxy", "snmp",
+        "webhook",
     }  # fmt: skip
-    for name in ("web rule", "dns rule", "tenth smtp", "snmp of a bad name"):
+    for name in (
+        "web rule",
+        "dns rule",
+        "tenth smtp",
+        "snmp of a bad name",
+        "webhook of a bad name",
+    ):
         assert "[rule not updated by this step]" in outbound[name], name
     for name in ("command in the host", "leading hyphen"):
         assert "[invalid host name]" in outbound[name], name
@@ -15543,6 +15603,7 @@ def _firewall_sync(
 
 SMTP_OUT = {"rule": "ARCILOGGER Out SMTP", "host": "smtp.ornek.example", "port": 587}
 NTP_OUT = {"rule": "ARCILOGGER Out NTP", "host": "172.20.10.1", "port": 123}
+WEBHOOK_OUT = {"rule": "ARCILOGGER Out Webhook siem", "host": "198.51.100.20", "port": 8443}
 
 
 def test_firewall_sync_updates_the_syslog_rules_in_place_and_nothing_else(
@@ -15571,7 +15632,7 @@ def test_firewall_sync_updates_the_syslog_rules_in_place_and_nothing_else(
         {**base, "name": "not-managed", "senders": ["172.20.10.1"], "state": "none.json"},
         {**base, "name": "disabled", "senders": ["172.20.10.1"], "policy": "off.json"},
         {**base, "name": "strict", "senders": ["172.20.10.1"], "state": "strict.json",
-         "outbound": [SMTP_OUT, NTP_OUT]},
+         "outbound": [SMTP_OUT, NTP_OUT, WEBHOOK_OUT]},
         {**base, "name": "not-strict", "senders": ["172.20.10.1"], "outbound": [SMTP_OUT]},
         {**base, "name": "bad-rule", "senders": ["172.20.10.1"], "state": "strict.json",
          "outbound": [{"rule": "ARCILOGGER HTTPS", "host": "172.20.10.37", "port": 443}]},
@@ -15598,7 +15659,8 @@ def test_firewall_sync_updates_the_syslog_rules_in_place_and_nothing_else(
         ), name  # fmt: skip
         named = {change["rule"] for change in plan["changes"]}
         assert named <= {"ARCILOGGER Syslog UDP", "ARCILOGGER Syslog TCP",
-                         "ARCILOGGER Out SMTP", "ARCILOGGER Out NTP"}, name  # fmt: skip
+                         "ARCILOGGER Out SMTP", "ARCILOGGER Out NTP",
+                         "ARCILOGGER Out Webhook siem"}, name  # fmt: skip
         ports = {port for change in plan["changes"] for port in change["ports"]}
         assert not ports & {"443", "3389", "5985"}, name
         if code != 0:
@@ -15625,6 +15687,9 @@ def test_firewall_sync_updates_the_syslog_rules_in_place_and_nothing_else(
     assert strict["ARCILOGGER Out NTP"]["protocol"] == "UDP"
     assert strict["ARCILOGGER Out SMTP"]["operation"] == "keep", "offline DNS keeps the rule"
     assert strict["ARCILOGGER Out SMTP"]["ports"] == ["587"]
+    webhook = strict["ARCILOGGER Out Webhook siem"]  # Wave 6 §2.4.1: TCP to its host and port
+    assert (webhook["operation"], webhook["protocol"], webhook["ports"]) == ("set", "TCP", ["8443"])
+    assert webhook["remote_address"] == ["198.51.100.20"]
     assert any("[not resolved]" in w for w in found["strict"][1]["warnings"])
     assert [c["direction"] for c in found["not-strict"][1]["changes"]] == ["Inbound", "Inbound"]
     assert any("[strict outbound mode is off" in w for w in found["not-strict"][1]["warnings"])
