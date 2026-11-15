@@ -8,8 +8,9 @@ Every value is fictional (Örnek A.Ş., ``172.20.x``, RFC 5737 destinations).
 from __future__ import annotations
 
 import random
+from collections import defaultdict
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, date, datetime, timedelta
 from functools import partial
 from ipaddress import ip_network
@@ -418,3 +419,43 @@ def test_a_kept_evidence_list_is_read_again_after_a_late_log(db_session: Session
     second = hits(db_session, entry, chosen, start, end)
     assert second == once(db_session, partial(hits, db_session, entry, chosen, start, end))
     assert zeroed not in [row_id for _, row_id in second[0][4]]
+
+
+def test_the_hour_is_the_days_increments_received_in_it(db_session: Session) -> None:
+    """R13's hour (deviation W6-E-2): the bytes of the logs received in the window, each as its
+    period counts it, summed from the kept minutes and the window's partial first minute; across
+    midnight, yesterday's logs as yesterday counts them."""
+    rng = random.Random(2026)  # noqa: S311 - synthetic traffic
+    write(db_session, traffic(rng, MIDNIGHT - timedelta(hours=2), MIDNIGHT + timedelta(hours=2)))
+    entry = rule("R13")
+    chosen = settings(entry, {"hour_bytes": 1024**4, "day_bytes": 1024**4})
+    for minutes in range(-20, 100, 7):
+        end = MIDNIGHT + timedelta(minutes=minutes, seconds=17)
+        ctx = RuleContext(chosen, end - timedelta(minutes=7), end, SKEW, INTERNAL, ZONE)
+        hits(db_session, entry, chosen, ctx.start, ctx.end)  # counts the periods on to the end
+        today = people._period(
+            db_session, ctx, "R13", people._site_day_start(ctx), None, True, list(INTERNAL)
+        )
+        window = people._window_buckets(db_session, ctx, today, ctx.window_start, ADDRESSES)
+        kept: dict[str, int] = defaultdict(int)
+        for bucket in window:
+            kept[bucket.srcip] += bucket.amount
+        expected: dict[str, int] = defaultdict(int)
+        for period, until in people._window_periods(db_session, ctx, today, ctx.window_start):
+            capped = replace(ctx, end=min(ctx.end, until or ctx.end))
+            rows = people._traffic_rows(
+                db_session,
+                capped,
+                period.since,
+                sent_only=True,
+                networks=list(INTERNAL),
+                scope="all",
+                period=True,
+            )
+            for ip, amount in db_session.execute(
+                select(rows.c.srcip, func.sum(rows.c.amount))
+                .where(rows.c.wanted, rows.c.time_received > ctx.window_start)
+                .group_by(rows.c.srcip)
+            ):
+                expected[str(ip)] += int(amount)
+        assert dict(kept) == dict(expected), f"window ending {end:%H:%M:%S}"

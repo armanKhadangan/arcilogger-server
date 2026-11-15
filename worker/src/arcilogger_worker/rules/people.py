@@ -28,7 +28,7 @@ from __future__ import annotations
 import json
 from collections import defaultdict
 from collections.abc import Iterable, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import date, datetime, time, timedelta
 from ipaddress import ip_network
 from typing import Any, Final, Literal
@@ -48,6 +48,7 @@ from sqlalchemy import (
     or_,
     select,
     text,
+    true,
     update,
 )
 from sqlalchemy.dialects.postgresql import ARRAY, CIDR, INET
@@ -644,12 +645,18 @@ class _MemoryStore:
             del self.periods[key]
 
     def buckets(
-        self, session: Session, period: _Period, addresses: Sequence[str]
+        self,
+        session: Session,
+        period: _Period,
+        addresses: Sequence[str],
+        received_after: datetime | None = None,
     ) -> list[tuple[str, datetime, int, int, datetime, datetime]]:
         totals = self.periods[(period.rule, period.since)]
         found: dict[tuple[str, datetime], list[Any]] = {}
         for ip in addresses:
-            for (minute, _), cell in totals.buckets.get(ip, {}).items():
+            for (minute, received), cell in totals.buckets.get(ip, {}).items():
+                if received_after is not None and received <= received_after:
+                    continue
                 into = found.setdefault((ip, minute), [0, 0, cell[2], cell[3]])
                 into[0] += cell[0]
                 into[1] += cell[1]
@@ -783,10 +790,15 @@ class _TableStore:
         )
 
     def buckets(
-        self, session: Session, period: _Period, addresses: Sequence[str]
+        self,
+        session: Session,
+        period: _Period,
+        addresses: Sequence[str],
+        received_after: datetime | None = None,
     ) -> list[tuple[str, datetime, int, int, datetime, datetime]]:
         if not addresses:
             return []
+        after = true() if received_after is None else RuleTrafficTotal.received > received_after
         query = (
             select(
                 func.host(RuleTrafficTotal.srcip),
@@ -801,6 +813,7 @@ class _TableStore:
                 RuleTrafficTotal.period_start == period.since,
                 RuleTrafficTotal.srcip
                 == any_(cast(literal(sorted(addresses), ARRAY(Text)), ARRAY(INET))),
+                after,
             )
             .group_by(RuleTrafficTotal.srcip, RuleTrafficTotal.minute)
         )
@@ -855,12 +868,7 @@ def _period_buckets(
 ) -> tuple[list[_Bucket], _Store]:
     """The period's buckets of the addresses with a log in the slice, as of the slice end (the
     totals counted on to it), and their store."""
-    store = _store(session)
-    if store.filled_until(session, period) != ctx.start:
-        store.rebuild(session, ctx, period)
-    else:
-        store.apply(session, period, _advance(session, ctx, period, store))
-    store.finish(session, period, ctx.end)
+    store = _counted_to(session, ctx, period)
     addresses = sorted(_slice_addresses(session, ctx, period))
     buckets = [
         _Bucket(ip, minute, rows, amount, first, last, last > ctx.start)
@@ -869,6 +877,25 @@ def _period_buckets(
         )
     ]
     return buckets, store
+
+
+def _counted_to(
+    session: Session, ctx: RuleContext, period: _Period, cap: datetime | None = None
+) -> _Store:
+    """The period's totals counted up to the slice end (or ``cap``, a period's end the slice
+    passed: yesterday's day while R13's hour still reaches into it)."""
+    store = _store(session)
+    end = ctx.end if cap is None else min(ctx.end, cap)
+    filled = store.filled_until(session, period)
+    if filled == end:
+        return store
+    capped = ctx if end == ctx.end else replace(ctx, end=end)
+    if filled != ctx.start:
+        store.rebuild(session, capped, period)
+    else:
+        store.apply(session, period, _advance(session, capped, period, store))
+    store.finish(session, period, end)
+    return store
 
 
 def _period_evidence(
@@ -938,17 +965,9 @@ _AMOUNT: Final = (
     "CASE WHEN is_interim AND {d} IS NOT NULL THEN greatest({d}, 0) "
     "ELSE greatest(coalesce({c}, 0) - coalesce(lag({c}) OVER w, 0), 0) END"
 )
-#: What a slice changes in a period's buckets: the sessions with a log received in the slice (or
-#: an earlier log the slice's device-time bound now reaches), all their logs from the lookback on
-#: (each session through the session id index), counted as of the slice start (``old``) and as
-#: of its end (``new``), per address and minute of device time.
-_CHANGES: Final = """
-WITH touched AS (
-    SELECT DISTINCT t.srcip, t.sessionid, t.dstip, t.dstport FROM fg_traffic t
-    WHERE {match_t} AND (
-        (t.time_received > :start AND t.time_received <= :end)
-        OR (t.time_received > :lookback AND t.time_received <= :start AND t.time > :start_high))
-),
+#: All logs of the touched sessions from the lookback on, each session through the session id
+#: index (a log without a session id: its address and destination).
+_LOGS: Final = """
 logs AS (
     SELECT l.* FROM touched k CROSS JOIN LATERAL (
         SELECT g.id, g.srcip, g.sessionid, g.dstip, g.dstport, g.time, g.time_received,
@@ -967,7 +986,21 @@ logs AS (
           AND g.sessionid IS NULL AND g.srcip = k.srcip
           AND g.dstip IS NOT DISTINCT FROM k.dstip AND g.dstport IS NOT DISTINCT FROM k.dstport
     ) l WHERE k.sessionid IS NULL
+)
+"""
+#: What a slice changes in a period's buckets: the sessions with a log received in the slice (or
+#: an earlier log the slice's device-time bound now reaches), all their logs from the lookback on
+#: (each session through the session id index), counted as of the slice start (``old``) and as
+#: of its end (``new``), per address and minute of device time.
+_CHANGES: Final = """
+WITH touched AS (
+    SELECT DISTINCT t.srcip, t.sessionid, t.dstip, t.dstport FROM fg_traffic t
+    WHERE {match_t} AND (
+        (t.time_received > :start AND t.time_received <= :end)
+        OR (t.time_received > :lookback AND t.time_received <= :start AND t.time > :start_high))
 ),
+{logs},
+
 new AS (
     SELECT id, srcip, time, time_received, {amount} AS amount,
            time_received > :since AND time_received >= :count_from AS counts
@@ -998,12 +1031,80 @@ WHERE n.counts AND n.time_received <= :start
 """
 
 
-def _changes_sql(sent_only: bool) -> Any:
+#: The counted logs received in ``(:lo, :hi]`` (of the addresses ``:ips``, or all), each with
+#: its bytes as the period counts them (the window's partial first minute; a window's evidence).
+_COUNTED: Final = """
+WITH touched AS (
+    SELECT DISTINCT t.srcip, t.sessionid, t.dstip, t.dstport FROM fg_traffic t
+    WHERE {match_t} AND t.time_received > :lo AND t.time_received <= :hi
+      AND (CAST(:ips AS text[]) IS NULL OR host(t.srcip) = ANY(CAST(:ips AS text[])))
+),
+{logs},
+counted AS (
+    SELECT id, srcip, time, time_received, {amount} AS amount FROM logs
+    WINDOW w AS (PARTITION BY srcip, sessionid, dstip, dstport ORDER BY time, id)
+)
+SELECT c.id, host(c.srcip) AS srcip, c.time, c.time_received, c.amount, f.source, f.raw_day,
+       f.raw_line, f.raw_offset
+FROM counted c JOIN fg_traffic f ON f.id = c.id AND f.time = c.time
+WHERE c.time_received > :lo AND c.time_received <= :hi AND c.time_received > :since
+  AND c.time_received >= :count_from AND c.amount > 0
+  AND (CAST(:ips AS text[]) IS NULL OR host(c.srcip) = ANY(CAST(:ips AS text[])))
+ORDER BY c.time_received, c.id
+"""
+
+
+def _amount(sent_only: bool) -> str:
     amount = _AMOUNT.format(d="sentdelta", c="sentbyte")
     if not sent_only:
         amount = f"{amount} + {_AMOUNT.format(d='rcvddelta', c='rcvdbyte')}"
+    return amount
+
+
+def _logs() -> str:
+    return _LOGS.format(match_g=_MATCH.format(t="g"))
+
+
+def _changes_sql(sent_only: bool) -> Any:
     return text(
-        _CHANGES.format(match_t=_MATCH.format(t="t"), match_g=_MATCH.format(t="g"), amount=amount)
+        _CHANGES.format(logs=_logs(), match_t=_MATCH.format(t="t"), amount=_amount(sent_only))
+    )
+
+
+def _counted(
+    session: Session,
+    ctx: RuleContext,
+    period: _Period,
+    lo: datetime,
+    hi: datetime,
+    ips: Sequence[str] | None,
+) -> list[Any]:
+    """The counted logs of the period received in ``(lo, hi]`` (:data:`_COUNTED`)."""
+    if not period.networks or hi <= lo:
+        return []
+    lookback, low, high = _period_bounds(ctx, period)
+    query = text(
+        _COUNTED.format(
+            logs=_logs(), match_t=_MATCH.format(t="t"), amount=_amount(period.sent_only)
+        )
+    )
+    return list(
+        session.execute(
+            query,
+            {
+                "refused": list(REFUSED_ACTIONS),
+                "networks": list(period.networks),
+                "low": low,
+                "high": high,
+                "lo": lo,
+                "hi": hi,
+                "end": ctx.end,
+                "lookback": lookback,
+                "since": period.since,
+                "count_from": period.count_from or period.since,
+                "ips": None if ips is None else sorted(ips),
+            },
+        )
     )
 
 
@@ -1061,6 +1162,97 @@ def _summed(changes: Sequence[_Change]) -> list[_Change]:
     ]
 
 
+# The windows: R13's hour summed from the periods' buckets (deviation W6-E-2)
+
+
+def _floor_minute(moment: datetime) -> datetime:
+    return moment.replace(second=0, microsecond=0)
+
+
+def _window_periods(
+    session: Session, ctx: RuleContext, today: _Period, start: datetime
+) -> list[tuple[_Period, datetime | None]]:
+    """The periods a window from ``start`` reaches (today's, and yesterday's up to midnight)
+    and their ends, each counted up to the slice end or its end."""
+    periods: list[tuple[_Period, datetime | None]] = [(today, None)]
+    if start < today.since:
+        yesterday = replace(today, since=today.since - timedelta(days=1))
+        _counted_to(session, ctx, yesterday, cap=today.since)
+        periods.append((yesterday, today.since))
+    return periods
+
+
+def _window_buckets(
+    session: Session, ctx: RuleContext, today: _Period, start: datetime, addresses: Sequence[str]
+) -> list[_Bucket]:
+    """The window ``(start, end]``'s buckets of the addresses: the kept minutes received after
+    the window's first minute, and that minute's logs received after ``start`` (one read of a
+    partial minute)."""
+    first = _floor_minute(start)
+    found: dict[tuple[str, datetime], list[Any]] = {}
+
+    def add(ip: str, minute: datetime, rows: int, amount: int, low: Any, high: Any) -> None:
+        cell = found.setdefault((ip, minute), [0, 0, low, high])
+        cell[0] += rows
+        cell[1] += amount
+        cell[2] = min(cell[2], low)
+        cell[3] = max(cell[3], high)
+
+    for period, until in _window_periods(session, ctx, today, start):
+        store = _store(session)
+        for bucket in store.buckets(session, period, addresses, received_after=first):
+            add(*bucket)
+        hi = min(first + timedelta(seconds=_MINUTE), ctx.end, until or ctx.end)
+        for row in _counted(session, ctx, period, start, hi, addresses):
+            add(
+                row.srcip,
+                _floor_minute(row.time),
+                1,
+                int(row.amount),
+                row.time_received,
+                row.time_received,
+            )
+    return [
+        _Bucket(ip, minute, cell[0], cell[1], cell[2], cell[3], cell[3] > ctx.start)
+        for (ip, minute), cell in sorted(found.items())
+    ]
+
+
+def _window_evidence(
+    session: Session,
+    ctx: RuleContext,
+    today: _Period,
+    start: datetime,
+    keys: Mapping[str, _Subject],
+    timelines: Mapping[str, IpTimeline],
+) -> dict[str, list[EvidenceRef]]:
+    """The evidence of the keys' hits over the window: each address's oldest counted logs
+    received in it (only the picked addresses' logs are read)."""
+    ips = sorted({ip for subject in keys.values() for ip in subject.ips})
+    refs: list[tuple[str, EvidenceRef]] = []
+    per_address: dict[str, int] = defaultdict(int)
+    for period, until in reversed(_window_periods(session, ctx, today, start)):
+        for row in _counted(session, ctx, period, start, until or ctx.end, ips):
+            if per_address[row.srcip] < EVIDENCE_LIMIT:
+                per_address[row.srcip] += 1
+                refs.append(
+                    (
+                        row.srcip,
+                        EvidenceRef(
+                            table="fg_traffic",
+                            row_id=row.id,
+                            time=row.time,
+                            time_received=row.time_received,
+                            source=row.source,
+                            raw_day=row.raw_day,
+                            raw_line=row.raw_line,
+                            raw_offset=row.raw_offset,
+                        ),
+                    )
+                )
+    return _by_key(refs, keys, timelines)
+
+
 def _hit(subject: _Subject, values: Mapping[str, object], evidence: Sequence[EvidenceRef]) -> Hit:
     if subject.last is None:  # pragma: no cover - a subject always has a bucket
         raise ValueError(f"empty subject {subject.key}")
@@ -1112,11 +1304,11 @@ def evaluate_r13(session: Session, ctx: RuleContext) -> list[Hit]:
     """Bytes sent by one person (else one internal address) above ``hour_bytes`` within the
     window, or above ``day_bytes`` since the start of the site day."""
     networks = list(ctx.internal_networks)
-    hour_rows = _traffic_rows(session, ctx, ctx.window_start, sent_only=True, networks=networks)
     day_start = _site_day_start(ctx)
-    hour_buckets = _buckets(session, ctx, hour_rows)
     day_period = _period(session, ctx, "R13", day_start, None, True, networks)
     day_buckets, day_store = _period_buckets(session, ctx, day_period)
+    addresses = sorted({bucket.srcip for bucket in day_buckets})
+    hour_buckets = _window_buckets(session, ctx, day_period, ctx.window_start, addresses)
     timelines = _timelines(session, [*hour_buckets, *day_buckets])
     hour = _subjects(hour_buckets, timelines)
     day = _subjects(day_buckets, timelines)
@@ -1131,12 +1323,11 @@ def evaluate_r13(session: Session, ctx: RuleContext) -> list[Hit]:
             picked[key] = (subject, "day")
     if not picked:
         return hits
-    evidence = _evidence(
-        session,
-        FgTraffic,
-        hour_rows,
-        {key: subject for key, (subject, period) in picked.items() if period == "hour"},
-        timelines,
+    by_hour = {key: subject for key, (subject, period) in picked.items() if period == "hour"}
+    evidence = (
+        _window_evidence(session, ctx, day_period, ctx.window_start, by_hour, timelines)
+        if by_hour
+        else {}
     )
     by_day = {key: subject for key, (subject, period) in picked.items() if period == "day"}
     if by_day:

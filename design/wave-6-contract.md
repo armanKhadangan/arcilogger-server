@@ -821,3 +821,15 @@ to the normal site: `port-scan` (R01), `external-scan` (R02), `brute-force` (R03
   late log can zero, so it stays exact (pinned by
   `test_a_late_log_that_zeroes_a_counted_log`); what can lag, by less than the receive minute
   the logs share, is the first receive time R14 compares with the night's end.
+- **W6-E-2: R13's hour counts each log as the site day counts it.** §2.2.4 has R13 compare the
+  bytes sent in the window with `hour_bytes`. A log's bytes are its counter less the previous log
+  of its session; the hour read only saw a previous log received after `window_start −
+  usage.session_overlap_seconds`, the day sees one received after `day_start − overlap`. So
+  when a session's consecutive logs were more than the window and the overlap apart, the hour
+  counted the later log's whole counter, bytes from before the hour included. The hour is now
+  the bytes of the logs received in the window as their site day counts them (yesterday's logs
+  as yesterday counts them), summed from the kept minutes of receive time
+  (`rule_traffic_totals.received`) and the window's partial first minute, so a run reads its
+  slice and one partial minute, not the hour (manager's answer 2 on #280). It differs from the
+  old hour only for such sessions, and only by leaving out bytes sent before the hour; it is
+  pinned by `test_the_hour_is_the_days_increments_received_in_it`.
