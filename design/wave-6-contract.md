@@ -805,3 +805,19 @@ to the normal site: `port-scan` (R01), `external-scan` (R02), `brute-force` (R03
   reads `webhook.<name>.url` into a pipe (recorded like `postgres.superuser`) for
   `Set-ArciFirewall.ps1` (manager's answer 3 on #266, option a); the HMAC secret stays
   write-only.
+
+### W6-E (2026-11-15, #280: R13's and R14's running totals)
+
+- **W6-E-1: a bucket's first and last receive time may name a log that no longer counts.** R13's
+  day and R14's nights are kept per address, minute of device time and minute of receive time
+  (`rule_traffic_totals`, revision `0026_rule_traffic_totals`), and each slice adds what the
+  sessions it touches change. Bytes and log counts are exact: a session is counted again as of
+  the slice start and as of its end, so a late log that changes the increment of a log counted
+  before is taken into account (the "counter case": a late interim log with the final log's
+  counters makes the final log count 0). The first and last receive time of a bucket are a
+  minimum and a maximum and cannot be taken back: a bucket whose other logs still count may keep
+  the time of a log that counts 0 now (manager's answer 3 on #280). A hit's time is the newest
+  counted log of the subject, and a hit needs a counted log in the slice, newer than any log a
+  late log can zero, so it stays exact (pinned by
+  `test_a_late_log_that_zeroes_a_counted_log`); what can lag, by less than the receive minute
+  the logs share, is the first receive time R14 compares with the night's end.
