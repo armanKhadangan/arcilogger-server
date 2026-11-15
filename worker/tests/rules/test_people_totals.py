@@ -426,7 +426,10 @@ def test_the_hour_is_the_days_increments_received_in_it(db_session: Session) -> 
     period counts it, summed from the kept minutes and the window's partial first minute; across
     midnight, yesterday's logs as yesterday counts them."""
     rng = random.Random(2026)  # noqa: S311 - synthetic traffic
-    write(db_session, traffic(rng, MIDNIGHT - timedelta(hours=2), MIDNIGHT + timedelta(hours=2)))
+    write(
+        db_session,
+        traffic(rng, MIDNIGHT - timedelta(hours=2), MIDNIGHT + timedelta(hours=2), (5, 40)),
+    )
     entry = rule("R13")
     chosen = settings(entry, {"hour_bytes": 1024**4, "day_bytes": 1024**4})
     for minutes in range(-20, 100, 7):
@@ -459,3 +462,18 @@ def test_the_hour_is_the_days_increments_received_in_it(db_session: Session) -> 
             ):
                 expected[str(ip)] += int(amount)
         assert dict(kept) == dict(expected), f"window ending {end:%H:%M:%S}"
+        # The hour's evidence: each address's oldest counted logs in the window, as a full read
+        # of the window gives them (the kept minutes only say how far to read).
+        subjects = {f"ip:{ip}": people._Subject(f"ip:{ip}", None, ips={ip}) for ip in ADDRESSES}
+        found = people._window_evidence(db_session, ctx, today, ctx.window_start, subjects, {})
+        full: dict[str, list[int]] = defaultdict(list)
+        for period, until in reversed(
+            people._window_periods(db_session, ctx, today, ctx.window_start)
+        ):
+            capped = replace(ctx, end=min(ctx.end, until or ctx.end))
+            for row in people._counted(
+                db_session, capped, period, ctx.window_start, capped.end, ADDRESSES
+            ):
+                if len(full[f"ip:{row.srcip}"]) < people.EVIDENCE_LIMIT:
+                    full[f"ip:{row.srcip}"].append(row.id)
+        assert {key: [ref.row_id for ref in refs] for key, refs in found.items()} == dict(full)

@@ -664,6 +664,17 @@ class _MemoryStore:
                 into[3] = max(into[3], cell[3])
         return [(ip, minute, *cell) for (ip, minute), cell in found.items()]
 
+    def per_minute(
+        self, session: Session, period: _Period, ip: str, received_from: datetime
+    ) -> list[tuple[datetime, int]]:
+        found: dict[datetime, int] = defaultdict(int)
+        for (_, received), cell in (
+            self.periods[(period.rule, period.since)].buckets.get(ip, {}).items()
+        ):
+            if received >= received_from:
+                found[received] += cell[0]
+        return sorted(found.items())
+
     def evidence(self, session: Session, period: _Period, ip: str) -> list[EvidenceRef] | None:
         return self.periods[(period.rule, period.since)].evidence.get(ip)
 
@@ -821,6 +832,22 @@ class _TableStore:
             (str(ip), minute, int(rows), int(amount), first, last)
             for ip, minute, rows, amount, first, last in session.execute(query)
         ]
+
+    def per_minute(
+        self, session: Session, period: _Period, ip: str, received_from: datetime
+    ) -> list[tuple[datetime, int]]:
+        query = (
+            select(RuleTrafficTotal.received, func.sum(RuleTrafficTotal.rows))
+            .where(
+                RuleTrafficTotal.rule == period.rule,
+                RuleTrafficTotal.period_start == period.since,
+                RuleTrafficTotal.srcip == cast(literal(ip), INET),
+                RuleTrafficTotal.received >= received_from,
+            )
+            .group_by(RuleTrafficTotal.received)
+            .order_by(RuleTrafficTotal.received)
+        )
+        return [(received, int(rows)) for received, rows in session.execute(query)]
 
     def evidence(self, session: Session, period: _Period, ip: str) -> list[EvidenceRef] | None:
         kept = session.get(RuleTrafficEvidence, (period.rule, period.since, ip))
@@ -1202,8 +1229,12 @@ def _window_buckets(
         store = _store(session)
         for bucket in store.buckets(session, period, addresses, received_after=first):
             add(*bucket)
-        hi = min(first + timedelta(seconds=_MINUTE), ctx.end, until or ctx.end)
-        for row in _counted(session, ctx, period, start, hi, addresses):
+        # Yesterday's logs as yesterday counts them: its sessions' logs up to midnight.
+        counted_ctx = ctx if until is None else replace(ctx, end=min(ctx.end, until))
+        # The partial minute ends just before the next kept minute (``_counted`` reads up to
+        # and including ``hi``; a log received on the minute is that minute's).
+        hi = min(first + timedelta(seconds=_MINUTE, microseconds=-1), counted_ctx.end)
+        for row in _counted(session, counted_ctx, period, start, hi, addresses):
             add(
                 row.srcip,
                 _floor_minute(row.time),
@@ -1231,9 +1262,27 @@ def _window_evidence(
     ips = sorted({ip for subject in keys.values() for ip in subject.ips})
     refs: list[tuple[str, EvidenceRef]] = []
     per_address: dict[str, int] = defaultdict(int)
+    first = _floor_minute(start)
     for period, until in reversed(_window_periods(session, ctx, today, start)):
-        for row in _counted(session, ctx, period, start, until or ctx.end, ips):
-            if per_address[row.srcip] < EVIDENCE_LIMIT:
+        store = _store(session)
+        counted_ctx = ctx if until is None else replace(ctx, end=min(ctx.end, until))
+        end = counted_ctx.end
+        for ip in ips:
+            need = EVIDENCE_LIMIT - per_address[ip]
+            if need <= 0:
+                continue
+            # The kept minutes say where the oldest logs end: read only up to that minute
+            # (counting whole minutes only; the partial first minute's logs come on top).
+            hi, seen = end, 0
+            whole = first + timedelta(seconds=_MINUTE)
+            for received, rows in store.per_minute(session, period, ip, whole):
+                seen += rows
+                if seen >= need:
+                    hi = min(end, received + timedelta(seconds=_MINUTE))
+                    break
+            for row in _counted(session, counted_ctx, period, start, hi, [ip]):
+                if per_address[row.srcip] >= EVIDENCE_LIMIT:
+                    break
                 per_address[row.srcip] += 1
                 refs.append(
                     (
