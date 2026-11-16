@@ -96,7 +96,17 @@ STRICT = (
 #: ubuntu-latest read 5.10 to 6.14 there (6.76 to 6.80 allowed), windows-latest 4.33 to 5.01
 #: (5.51 to 5.77, with windows-latest's floor of 0.7); a path 40 % costlier is over the limit by
 #: at least 5.1 % and 8.2 %.
-LOOP_GAUGE_LINES_BY_SYSTEM = {"win32": 5.6, "linux": 6.8}
+#: ubuntu-latest: 7.4 since 2026-11-15 (#191), not that fit's 6.8. CI's Linux job runs uv's managed
+#: Python (3.12.16) since 2026-11-07, no longer the runner's 3.12.3: on the same CPU model the
+#: gauge became 8 to 11 % faster and the loop's figure in gauge lines rose with it (EPYC 7763:
+#: 15.86 us and 5.78 before, 14.28 us and 6.12 after, medians), while its time a line stayed (91.7
+#: and 87.4 us). Brought to the reference, its 89 readings on 3.12.16 (2026-11-07 to 11-15, seven
+#: CPU models) read 4.83 to 7.04, median 6.20; 0 of the 42 on 3.12.3 failed 6.8, 3 of these 89
+#: did (6.66, 6.17 and 6.19 against 6.65, 5.96 and 6.06). At 7.4 the costliest passes by 5.2 %, a
+#: path 1.4 times as costly fails on 81 of the 89 (at the median by 17 %), one 1.2 times as costly
+#: on 48. Of the 8 that a 1.4 times costlier path passes, 6 are Xeon 6975P-C runners, whose figure
+#: is the lowest (4.38 to 5.40); a limit of their own waits for more of their readings (#191).
+LOOP_GAUGE_LINES_BY_SYSTEM = {"win32": 5.6, "linux": 7.4}
 LOOP_GAUGE_LINES = LOOP_GAUGE_LINES_BY_SYSTEM[SYSTEM]
 #: A faster core gets a tighter limit, in gauge lines: the limit goes with the gauge, relative to
 #: the reference, to this power. On those runs the loop's CPU a line went with the gauge to the
@@ -142,14 +152,17 @@ CYCLE_LINES = 50
 #: CI's readings ``test_ci_bound_on_ci_readings`` holds the bound to (#157): the system, the
 #: throughput guard's job, its gauge (us), the runner's CPU model as the guard prints it since
 #: #191 (None: before #191), its event loop's figure (gauge lines), a factor on that figure and
-#: whether the product passes. Of the 136 readings above, at the reference (speed 0.9
-#: and up) and below 0.6 of it on each system: the costliest passes, a loop 20 % costlier fails
-#: on the median runner and on the costliest, and one 40 % costlier on the cheapest. On
-#: ubuntu-latest at the reference 20 % fails on 18 of its 38 runners only, not on the median
-#: (5.63, job 125907495605: 0.3 % under the limit); 6.8 there is #129's, unchanged. The
-#: windows-latest floor class's rows are from its 17 readings to 2026-11-05 (#186), with #184's
-#: re-run at 0.66 (job 127045733227) and a runner at 0.72 (job 126731675111) whose 20 % costlier
-#: loop still fails: the flat limit does not reach speed 0.6 and up.
+#: whether the product passes. windows-latest's rows are from the 136 readings above, at the
+#: reference (speed 0.9 and up) and below 0.6 of it: the costliest passes, a loop 20 % costlier
+#: fails on the median runner and on the costliest, and one 40 % costlier on the cheapest. Its
+#: floor class's rows are from its 17 readings to 2026-11-05 (#186), with #184's re-run at 0.66
+#: (job 127045733227) and a runner at 0.72 (job 126731675111) whose 20 % costlier loop still
+#: fails: the flat limit does not reach speed 0.6 and up. ubuntu-latest's rows are from its 89
+#: readings on uv's Python 3.12.16 (#191, see ``LOOP_GAUGE_LINES_BY_SYSTEM``; the earlier rows
+#: were the runner's 3.12.3): its three costliest, the three failures of 6.8, pass; a loop 20 %
+#: costlier fails on the costliest, on the median (5.40 at 7.49 us, by 0.6 %) and on the EPYC
+#: 7763's costliest; one 40 % costlier on the cheapest EPYC 7763 and a median EPYC 9V74 and Xeon
+#: 6975P-C, not on every runner (81 of the 89).
 CI_READINGS = [
     ("win32", 126226298897, 17.56, None, 5.47, 1.0, True),
     ("win32", 127021406709, 9.09, None, 5.26, 1.0, True),
@@ -161,13 +174,15 @@ CI_READINGS = [
     ("win32", 126731675111, 12.82, None, 4.41, 1.2, False),
     ("win32", 126476924796, 16.26, None, 4.26, 1.4, False),
     ("win32", 126710077852, 8.69, None, 3.94, 1.4, False),
-    ("linux", 126399858478, 15.77, None, 6.47, 1.0, True),
-    ("linux", 126075098521, 8.40, None, 5.86, 1.0, True),
-    ("linux", 125388444265, 8.65, None, 5.39, 1.2, False),
-    ("linux", 126399858478, 15.77, None, 6.47, 1.2, False),
-    ("linux", 126075098521, 8.40, None, 5.86, 1.2, False),
-    ("linux", 126151620758, 15.26, None, 4.86, 1.4, False),
-    ("linux", 126431632764, 8.57, None, 4.51, 1.4, False),
+    ("linux", 132535280955, 8.25, "AMD EPYC 9V45 96-Core Processor", 6.17, 1.0, True),
+    ("linux", 132918751885, 8.96, "Intel(R) Xeon(R) 6973P-C", 6.19, 1.0, True),
+    ("linux", 132217191672, 14.25, "AMD EPYC 7763 64-Core Processor", 6.66, 1.0, True),
+    ("linux", 132535280955, 8.25, "AMD EPYC 9V45 96-Core Processor", 6.17, 1.2, False),
+    ("linux", 132434913153, 7.49, "AMD EPYC 9V45 96-Core Processor", 5.40, 1.2, False),
+    ("linux", 132217191672, 14.25, "AMD EPYC 7763 64-Core Processor", 6.66, 1.2, False),
+    ("linux", 131625979423, 14.34, "AMD EPYC 7763 64-Core Processor", 5.35, 1.4, False),
+    ("linux", 132105147967, 10.70, "AMD EPYC 9V74 80-Core Processor", 5.70, 1.4, False),
+    ("linux", 132930037321, 9.61, "Intel(R) Xeon(R) 6975P-C", 5.31, 1.4, False),
 ]
 #: Lines in a round of the gauge (about 30 ms) and rounds before the burst and again after it.
 GAUGE_LINES = 2_000

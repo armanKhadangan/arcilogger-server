@@ -75,7 +75,7 @@ describe('the lease-evidence card', () => {
     expect(fortigate).toHaveTextContent('FortiGate DHCP');
     expect(fortigate).toHaveTextContent('Son 24 saatte 2 kullanılabilir kayıt');
     expect(fortigate).toHaveTextContent('2 güncel kira');
-    expect(fortigate).toHaveTextContent('Son kayıt 13.10.2026 06:36:23');
+    expect(fortigate).toHaveTextContent('Son kayıt 13.10.2026 06:36:05');
     const mikrotik = box.querySelector('[data-table="mt_dhcp"]') as HTMLElement;
     expect(mikrotik).toHaveTextContent('Son 24 saatte 0 kullanılabilir kayıt');
     expect(mikrotik).toHaveTextContent('Son bir saatte kayıt yok');

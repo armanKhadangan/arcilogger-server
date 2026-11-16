@@ -121,6 +121,7 @@ def test_kinds_and_tasks() -> None:
         *contract.REQUEST_KINDS,
         "worker.test_email",
         "worker.lease_rebuild",
+        "worker.webhook_test",
     }
     assert [contract.task_queue(kind) for kind in contract.TASK_KINDS] == [
         "seal",

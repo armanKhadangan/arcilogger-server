@@ -67,7 +67,7 @@ from arcilogger_db.settings import (
     validate_setting,
 )
 from arcilogger_db.settings_admin import change_setting, list_settings, reset_setting
-from arcilogger_db.settings_meta import GROUPS, SETTINGS, group_settings
+from arcilogger_db.settings_meta import GROUPS, SETTINGS, edited_elsewhere, group_settings
 from arcilogger_worker.lookup import trust
 
 router = APIRouter(prefix="/settings", tags=["settings"])
@@ -144,8 +144,22 @@ class SettingGroup(BaseModel):
     settings: list[SettingOut]
 
 
+class OtherSetting(BaseModel):
+    """A setting another page edits (``settings_meta.EDITED_ELSEWHERE``: the security rules,
+    Wave 6 contract §2.1.4): listed with its value for completeness and backups, never shown or
+    changed on the generic page (``PATCH`` refuses it)."""
+
+    key: str
+    value: JsonValue
+    is_default: bool
+    updated_by: str | None
+    updated_at: datetime | None
+
+
 class SettingsOut(BaseModel):
     groups: list[SettingGroup]
+    #: The settings other pages edit (the rule editor's ``rules.*``), by key.
+    elsewhere: list[OtherSetting] = []
 
 
 class SettingChange(BaseModel):
@@ -229,7 +243,8 @@ class FortigateObserved(BaseModel):
 
 @router.get("")
 def get_settings(db: DbSession, user: SettingsDep) -> SettingsOut:
-    """Every visible database setting, by group (contract 2.13)."""
+    """Every visible database setting, by group (contract 2.13), and the settings other pages
+    edit (``elsewhere``, Wave 6 contract §2.1.4)."""
     rows = {row.key: row for row in list_settings(db)}
     groups = []
     for group in GROUPS:
@@ -264,7 +279,21 @@ def get_settings(db: DbSession, user: SettingsDep) -> SettingsOut:
                 id=group.id, label_tr=group.label_tr, label_en=group.label_en, settings=items
             )
         )
-    return SettingsOut(groups=groups)
+    elsewhere = []
+    for row in rows.values():
+        if not edited_elsewhere(row.key):
+            continue
+        person = row.updated_by if row.updated_by and not row.updated_by.startswith(":") else None
+        elsewhere.append(
+            OtherSetting(
+                key=row.key,
+                value=row.value,
+                is_default=row.is_default,
+                updated_by=person,
+                updated_at=row.updated_at if person else None,
+            )
+        )
+    return SettingsOut(groups=groups, elsewhere=elsewhere)
 
 
 def _known(key: str) -> None:

@@ -43,6 +43,7 @@ EXPECTED_ROUTERS = {
     "/dashboard": "dashboard",
     # Scheduled usage reports (group 2 area R, docs/MVP-CONTRACTS.md section 13).
     "/reports": "reports",
+    "/rules": "rules",
     # The licence page and upload (licensing contract 6.1-6.3).
     "/license": "license",
     # Ayarlar: the browser administration (ADR-0014, docs/MVP-CONTRACTS.md section 16).
@@ -62,6 +63,8 @@ EXPECTED_ROUTERS = {
     "/legal-status": "legal-status",
     # Canlı Durum (Wave 5 contract §6.2 M2, §6 N6: /activity/devices and /activity/wan).
     "/activity": "activity",
+    # The alert webhooks, configured on the server (Wave 6 contract §2.4.4, W6-H).
+    "/webhooks": "webhooks",
 }
 
 
