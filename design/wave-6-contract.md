@@ -940,3 +940,16 @@ to the normal site: `port-scan` (R01), `external-scan` (R02), `brute-force` (R03
   This meaning of the hour is the default of the question asked on #280 and still open there;
   keeping the old hour exactly would need the buckets keyed by the previous log's receive minute
   too.
+- **W6-E-3: what a run of R13 and R14 reads.** The day's and the nights' totals read only the
+  slice: its logs and the other logs of their sessions, and the kept buckets of its addresses.
+  The hour evidence of R13's hit addresses (each address's oldest counted logs received in the
+  window, as before) reads at most these addresses' own rows of the window (manager's answer on
+  #286): per hit address, the device minutes its kept buckets name for the counted logs received
+  up to the minute of its 100th log, each range through `ix_fg_traffic_srcip_time`. The buckets
+  hold every counted log, a late one too, so the evidence is the same as one read of the window
+  (pinned by `test_the_hour_is_the_days_increments_received_in_it`). The first evidence of an
+  address newly over `day_bytes` or a night's `bytes` reads its period once and is kept after
+  that (W6-E's kept evidence lists). With 0, 5 and 10 minutes of the guard's traffic behind the
+  slice, a kept run of R13 took 1.15 s, 3.08 s and 2.83 s: the step from 0 to 5 minutes is the
+  hour evidence of 43 addresses newly over `hour_bytes` (1 at 0 minutes), and it does not grow
+  further with the minutes behind.
