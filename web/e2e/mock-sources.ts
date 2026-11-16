@@ -71,6 +71,8 @@ function source(name: string, fields: Partial<SourceHealth>): SourceHealth {
     pending_bytes: 0,
     parse_failures_today: 0,
     parse_failure_permille: null,
+    clock_offset_seconds: null,
+    clock_rows: 0,
     promoted_to: null,
     suggested: null,
     ...fields,
