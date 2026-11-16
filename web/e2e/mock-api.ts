@@ -33,6 +33,7 @@ import { ReportsMock } from './mock-reports';
 import { RulesMock, type RulesOptions } from './mock-rules';
 import { ActivityMock, type ActivityOptions } from './mock-activity';
 import { UsageMock, type UsageOptions } from './mock-usage';
+import { WebhooksMock, type WebhooksOptions } from './mock-webhooks';
 import {
   ADMIN,
   ALERTS,
@@ -365,6 +366,8 @@ export interface MockOptions {
   alerts?: AlertsOptions;
   /** Security rules (Wave 6): the module locked, a refused trial run (`mock-rules.ts`). */
   rules?: RulesOptions;
+  /** Webhooks (Wave 6): none configured, a failing test (`mock-webhooks.ts`). */
+  webhooks?: WebhooksOptions;
 }
 
 function user(
@@ -459,6 +462,8 @@ export class MockApi {
    * before the captured seal and credit samples, which it changes once a request succeeded.
    */
   readonly admin: AdminMock;
+  /** Webhooks configured on the server, their deliveries and "Test gönder" (Wave 6). */
+  readonly webhooks: WebhooksMock;
   readonly grant: Partial<Record<Role, string[]>>;
   readonly revoke: Partial<Record<Role, string[]>>;
 
@@ -469,6 +474,7 @@ export class MockApi {
     );
     this.records = new RecordsMock(options.records);
     this.admin = new AdminMock(options.admin, () => CREDITS[this.records.credits]);
+    this.webhooks = new WebhooksMock(this.admin, options.webhooks);
     this.devices = new DevicesMock();
     this.alerts = new AlertsMock(options.alerts, (id) => {
       const found = this.users.find((item) => item.id === id && item.active);
@@ -808,6 +814,7 @@ export class MockApi {
           this.activity.answer(call, this) ??
           this.alerts.answer(call, this) ??
           this.rules.answer(call, this) ??
+          this.webhooks.answer(call, this) ??
           this.reports.answer(call, this) ??
           this.error(404, 'not_found')
         );

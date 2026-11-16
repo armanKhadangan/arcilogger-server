@@ -329,6 +329,11 @@ const MESSAGES: Record<string, [string, string]> = {
     'The device gives no 64-bit counters (ifHCInOctets) for this interface.',
   ],
   smtp_test_failed: ['Deneme e-postası gönderilemedi.', 'The trial e-mail could not be sent.'],
+  // Wave 6 §2.6.4: `{error}` is the reply of §2.4.2, also in the request's result.
+  webhook_test_failed: [
+    'Deneme bildirimi gönderilemedi.',
+    'The test notification could not be sent.',
+  ],
   replica_test_failed: [
     'Replika paylaşımına bağlanılamadı.',
     'The replica share could not be reached.',
@@ -2434,6 +2439,26 @@ export class AdminMock {
   }
 
   /** The worker's test e-mail (WP3-2, WP4-4): no agent needed, 5 in any 60 minutes. */
+  /**
+   * "Test gönder" of a webhook (Wave 6 §2.4.4, `mock-webhooks.ts`): the probe `webhook` queued as
+   * an action request, with its result (the status code, or why it failed).
+   */
+  webhookTest(account: MockUser, result: Record<string, unknown>, failed: boolean): Answer {
+    const item = this.enqueue({
+      // C10 (manager on #260): the worker channel, like `worker.test_email`; the kind is not in
+      // the web's `RequestKind` until W6-H's API is in the contract.
+      kind: 'worker.webhook_test' as RequestKind,
+      section: null,
+      account,
+      steps: [],
+      result,
+      ...(failed
+        ? { failure: { state: 'failed' as RequestState, error: 'webhook_test_failed' } }
+        : {}),
+    });
+    return this.accepted(item);
+  }
+
   private testEmail(call: RecordedCall, host: MockHost): Answer {
     const account = host.requirePermission(call, 'settings.manage');
     if (Array.isArray(account)) return account;

@@ -1,7 +1,7 @@
 /**
  * The TypeScript API types (`api-types.ts`, `settings-types.ts`, `search-types.ts`,
  * `live-types.ts`, `sources-types.ts`, `compliance-types.ts`, `system-types.ts`,
- * `system-health-types.ts`, `legal-status-types.ts`, `rules-types.ts`) and the endpoints the app calls must match the API's
+ * `system-health-types.ts`, `legal-status-types.ts`, `rules-types.ts`, `webhook-types.ts`) and the endpoints the app calls must match the API's
  * OpenAPI document (`src/generated/api-schemas.json`, made by
  * `web/scripts/export_api_contract.py` from the FastAPI app). A renamed, retyped, newly required
  * or removed field — or a call to an endpoint that does not exist — fails here.
@@ -33,6 +33,7 @@ const TYPES_FILES = [
   'legal-status-types.ts',
   'activity-types.ts',
   'rules-types.ts',
+  'webhook-types.ts',
 ].map((name) => join(SRC, 'lib', name));
 
 /**
@@ -61,6 +62,7 @@ const NOT_SCHEMAS = new Set([
   'TsaTestResult',
   'ReplicaTestResult',
   'TestEmailResult',
+  'WebhookTestResult',
   'LeaseRebuildResult',
   'SectionBodies',
   'SettingProblem',
@@ -70,19 +72,7 @@ const NOT_SCHEMAS = new Set([
   'ArchiveReloadRequired',
 ]);
 /** OpenAPI schemas the web app does not use. */
-const UNUSED_SCHEMAS = new Set([
-  'HTTPValidationError',
-  'ValidationError',
-  'Health',
-  // Temporary (W6-H, #266): the webhooks API until W6-F's #260 adds `webhook-types.ts`; #260
-  // removes these six.
-  'WebhookList',
-  'WebhookOut',
-  'WebhookLastDelivery',
-  'WebhookCounts',
-  'WebhookDeliveries',
-  'WebhookDelivery',
-]);
+const UNUSED_SCHEMAS = new Set(['HTTPValidationError', 'ValidationError', 'Health']);
 
 /**
  * Unions that narrow a wider API type: the API declares a plain string (or any JSON value) whose
@@ -101,6 +91,9 @@ const NARROWED: Record<string, string> = {
   SettingType: 'string',
   SettingGroupId: 'string',
   SettingValue: 'ref:JsonValue',
+  // `routers/webhooks.py`: `min_severity` and a delivery's `severity` are strings of the alerts'
+  // severities (`arcilogger_core.alerts`).
+  WebhookSeverity: 'string',
 };
 
 interface Field {
