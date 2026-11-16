@@ -62,6 +62,7 @@ from typing import Any, Final
 
 from sqlalchemy import Column, Connection, Engine, MetaData, Table, insert, text
 from sqlalchemy.engine import make_url
+from sqlalchemy.exc import DBAPIError
 
 from arcilogger_core.rawlog import RawRecord
 from arcilogger_core.timeutil import SITE_TZ, site_day, utc_now
@@ -86,6 +87,8 @@ OFFSET_STEP: Final = 200
 #: Device times of a day stay this far before its end, so that every receive time is that day's.
 DAY_MARGIN: Final = timedelta(seconds=10)
 PER_ROWS: Final = 10_000_000
+#: How long :func:`drop_database` tries.
+DROP_WAIT: Final = timedelta(minutes=10)
 MIGRATION_LOGGER: Final = "alembic.runtime.migration"
 
 
@@ -139,10 +142,20 @@ def create_database(server: str, name: str) -> str:
 
 
 def drop_database(server: str, name: str) -> None:
+    """Drops ``name``; while an autovacuum worker (which a role without superuser may not end)
+    is still in it, tries again for up to :data:`DROP_WAIT`."""
     admin = engine_from_url(server, application="rehearsal", isolation_level="AUTOCOMMIT")
+    until = time.monotonic() + DROP_WAIT.total_seconds()
     try:
-        with admin.connect() as connection:
-            connection.execute(text(f'DROP DATABASE IF EXISTS "{name}" WITH (FORCE)'))
+        while True:
+            try:
+                with admin.connect() as connection:
+                    connection.execute(text(f'DROP DATABASE IF EXISTS "{name}" WITH (FORCE)'))
+                return
+            except DBAPIError:
+                if time.monotonic() > until:
+                    raise
+                time.sleep(5)
     finally:
         admin.dispose()
 
@@ -538,12 +551,13 @@ def main(argv: list[str] | None = None) -> int:
         log(f"lossless: {result['lossless']}")
     finally:
         engine.dispose()
+        # The result first: it outlives a database that cannot be dropped yet.
+        text_out = json.dumps(result, indent=2, ensure_ascii=False)
+        if args.out is not None:
+            args.out.write_text(text_out + "\n", encoding="utf-8")
+        log(text_out)
         if not args.keep:
             drop_database(args.url, args.database)
-    text_out = json.dumps(result, indent=2, ensure_ascii=False)
-    if args.out is not None:
-        args.out.write_text(text_out + "\n", encoding="utf-8")
-    log(text_out)
     return 0 if result["lossless"] else 1
 
 
