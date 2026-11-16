@@ -867,3 +867,45 @@ to the normal site: `port-scan` (R01), `external-scan` (R02), `brute-force` (R03
   reads `webhook.<name>.url` into a pipe (recorded like `postgres.superuser`) for
   `Set-ArciFirewall.ps1` (manager's answer 3 on #266, option a); the HMAC secret stays
   write-only.
+
+### W6-A (performance guard pull request, #278)
+
+- **W6-A-7: C2 reversed by measurement. The rules get receive-time indexes, revision
+  `0026_rules_time_received`.** C2 said "no index migration" after the guard's slice alone, where
+  every row lies inside every window and no index can help. In production the slice is always the
+  newest 60 s of a filled window. A rule finds the rows of its slice and window by `time_received`
+  (D8), and its device-time bounds are the window plus twice `rules.max_device_skew_seconds` wide
+  (3 h with the defaults). With only `time` indexed (the primary key), that step read every row in
+  those bounds. Measured with the guard's mix (10,000 messages per second) and 0, 5 and 10 minutes
+  behind the slice, plain PostgreSQL 16:
+
+  | rule | 0 min | 5 min | 10 min | rows read 0 / 5 / 10 min |
+  |---|---|---|---|---|
+  | R01 | 0.04 s | 0.11 s | 0.22 s | 318,296 / 963,783 / 1,768,494 |
+  | R02 | 0.03 s | 0.17 s | 0.33 s | 173,868 / 1,389,303 / 2,546,814 |
+  | R09 | 0.14 s | 0.56 s | 0.89 s | 851,650 / 5,112,546 / 9,374,106 |
+  | R10 | 0.07 s | 0.47 s | 1.21 s | 743,578 / 5,089,230 / 9,330,553 |
+  | R13 (#280) | 2.15 s | 10.16 s | 18.74 s | 1,272,864 / 7,642,116 / 14,012,592 |
+  | R14 (#280) | 0.92 s | 4.52 s | 8.89 s | 636,432 / 3,821,052 / 7,006,296 |
+
+  The other 12 rules stay at or under 0.21 s. With an index on `time_received` of `fg_traffic`,
+  `fg_dns`, `fg_web` and `fg_app`, at 10 minutes:
+
+  | rule | without | with the index | rows read without / with |
+  |---|---|---|---|
+  | R01 | 0.18 s | 0.05 s | 1,768,494 / 319,096 |
+  | R02 | 0.30 s | 0.06 s | 2,546,814 / 959,670 |
+  | R09 | 0.86 s | 0.42 s | 9,374,106 / 3,406,890 |
+  | R10 | 1.17 s | 0.45 s | 9,331,225 / 5,092,218 |
+  | R13 | 18.76 s | 13.22 s | 14,012,592 / 8,915,592 |
+  | R14 | 8.70 s | 6.40 s | 7,006,296 / 4,457,796 |
+  | all 18 rules | 30.7 s | 21.3 s | |
+
+  - **On the slice alone** (the guard) the job takes 4.6 s with the indexes, against 4.8 s
+    without; R01 and R02 stay at 0.05 s and 0.03 s.
+  - **Ingest's throughput gate** (20,000 lines) gave 5,421–5,575 lines/s without the indexes and
+    5,315–5,777 with them (5,656–5,971 on the migrated test template): within the spread of its
+    runs. The Windows throughput guards in CI give the final word.
+  - The other parsed tables are small or read through their own indexes, so they get none.
+    R09 and R10 stay under the line of about 1 s per 10 minutes behind the slice, so W6-B gets no
+    issue (manager, #278).

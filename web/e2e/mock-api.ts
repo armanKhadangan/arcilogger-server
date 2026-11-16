@@ -30,6 +30,7 @@ import { DevicesMock } from './mock-devices';
 import { LicenseMock, type LicenseOptions } from './mock-license';
 import { RecordsMock, type Answer, type RecordsOptions } from './mock-records';
 import { ReportsMock } from './mock-reports';
+import { RulesMock, type RulesOptions } from './mock-rules';
 import { ActivityMock, type ActivityOptions } from './mock-activity';
 import { UsageMock, type UsageOptions } from './mock-usage';
 import {
@@ -362,6 +363,8 @@ export interface MockOptions {
   admin?: AdminOptions;
   /** Security alerts: the Wave 6 rule alerts, assignment and evidence (`mock-alerts.ts`). */
   alerts?: AlertsOptions;
+  /** Security rules (Wave 6): the module locked, a refused trial run (`mock-rules.ts`). */
+  rules?: RulesOptions;
 }
 
 function user(
@@ -442,6 +445,8 @@ export class MockApi {
   readonly devices: DevicesMock;
   /** Security alerts, the dashboard summary and today's company usage (contract samples). */
   readonly alerts: AlertsMock;
+  /** Security rules and their trial runs (Wave 6 contract JSON). */
+  readonly rules: RulesMock;
   /** Scheduled reports, runs, files and previews (contract samples). */
   readonly reports: ReportsMock;
   /** Usage analytics (`/usage/*`): the captured day and a generated dataset. */
@@ -471,6 +476,7 @@ export class MockApi {
         ? { id: found.id, username: found.username, permissions: this.permissionsOf(found) }
         : null;
     });
+    this.rules = new RulesMock(options.rules);
     this.reports = new ReportsMock();
     this.usage = new UsageMock(options.usage);
     this.activity = new ActivityMock({
@@ -801,6 +807,7 @@ export class MockApi {
           this.usage.answer(call, this) ??
           this.activity.answer(call, this) ??
           this.alerts.answer(call, this) ??
+          this.rules.answer(call, this) ??
           this.reports.answer(call, this) ??
           this.error(404, 'not_found')
         );
