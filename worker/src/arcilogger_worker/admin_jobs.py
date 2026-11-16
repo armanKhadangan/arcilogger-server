@@ -7,6 +7,8 @@ job ``audit.import`` (with :mod:`.evidence_jobs`) copies every line into the has
 log **once**, actor ``system``:
 
 * ``admin.<state>`` — ``admin.applied``, ``admin.failed``, ``admin.rejected``, ``admin.action``,
+  ``admin.probe`` (a source's "Bağlantıyı dene", Wave 6 C11: ``log_source`` and ``ok``, no
+  value),
   … for the line's state, target ``admin-request:<id>``, key ``admin:<request>:<state>``: the
   requester, the version, the configuration's SHA-256 before and after, the masked changes (a
   secret only as ``set``/``unset``), the code, whether it was rolled back and, for an action,
@@ -93,6 +95,7 @@ from arcilogger_core.admin.contract import (
     DocumentError,
     JournalLine,
     SealResult,
+    SnmpProbeResult,
     SystemJournalLine,
     TsaTestResult,
     parse_document,
@@ -164,6 +167,8 @@ def action_result(result: ActionResult) -> dict[str, Any]:
             "serial": result.serial,
             "gen_time": None if result.gen_time is None else result.gen_time.isoformat(),
         }
+    if isinstance(result, SnmpProbeResult):
+        return {"interfaces": len(result.interfaces)}
     return {"ok": result.ok}  # the replica test (its message stays in the request's status)
 
 
@@ -188,6 +193,9 @@ def request_event(line: JournalLine, source: str) -> AuditEvent:
         details["requested_by"] = line.requested_by.model_dump(mode="json")
     if line.result is not None:
         details["result"] = action_result(line.result)
+    if line.source is not None:  # admin.probe (Wave 6 C11): the log source tested, no value
+        details["log_source"] = line.source
+        details["ok"] = line.code is None
     return AuditEvent(
         f"admin:{line.request}:{line.state}",
         f"admin.{line.state}",

@@ -8,6 +8,7 @@ import {
   Network,
   ShieldCheck,
   SlidersHorizontal,
+  Webhook,
   Stamp,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
@@ -56,5 +57,7 @@ export const SETTINGS_SECTIONS: readonly SettingsSection[] = [
     permissions: ['settings.manage'],
   },
   { key: 'backup', to: '/settings/backup', icon: DatabaseBackup, permissions: ['settings.manage'] },
+  // Read-only (D4: configured on the server); "Test gönder" needs `settings.manage`.
+  { key: 'webhooks', to: '/settings/webhooks', icon: Webhook, permissions: ['alerts.read'] },
   { key: 'history', to: '/settings/history', icon: History, permissions: ['settings.manage'] },
 ];

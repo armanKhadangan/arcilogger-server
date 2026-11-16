@@ -94,6 +94,7 @@ from arcilogger_core.admin.contract import (
     SetOp,
     SmtpCaClearOp,
     SmtpCaSetOp,
+    SnmpProbeResult,
     SourceAddOp,
     SourceRemoveOp,
     SourceUpdateOp,
@@ -526,6 +527,7 @@ class Agent:
         code: str | None = None,
         rolled_back: bool = False,
         result: Any = None,
+        source: str | None = None,
     ) -> None:
         line = JournalLine.model_validate(
             {
@@ -545,6 +547,7 @@ class Agent:
                 "code": code,
                 "rolled_back": rolled_back,
                 "result": result,
+                "source": source,
             }
         )
         append_journal(self.layout, line)
@@ -983,6 +986,7 @@ class Agent:
             interfaces: Sequence[ProbeInterface] = (),
             detail: str | None = None,
             hint: tuple[str, str] | None = None,
+            source: str | None = None,
         ) -> bool:
             progress.write(
                 status_state,
@@ -999,6 +1003,7 @@ class Agent:
                 section=request.section,
                 requested_by=requester,
                 code=code,
+                source=source,
             )
             if status_state == "failed":
                 self._event(
@@ -1047,12 +1052,14 @@ class Agent:
                 return fail("failed", "failed", "secret_invalid", None)
         warnings = [problem.code for problem in check.warnings]
         progress.step("validate", "warning" if warnings else "done")
+        probe_only = request.options.probe_only
         if pending is None:
             if check.probes and request.probe:
                 progress.step("probe", "running")
                 progress.write("probing", warnings=warnings)
                 self.heartbeat()
-                failure = self._probe(request, check, files)
+                found: list[ProbeInterface] = []
+                failure = self._probe(request, check, files, found)
                 if failure is not None:
                     progress.step("probe", "failed", failure.code)
                     log.warning("request %s: probe failed: %s", request.id, failure.message)
@@ -1074,8 +1081,31 @@ class Agent:
                         if detail
                         else None
                     )
+                    if probe_only:
+                        return fail(
+                            "probe",
+                            "probe_failed",
+                            code,
+                            None,
+                            listed,
+                            source=check.probes[0].target,
+                        )
                     return fail("failed", "probe_failed", code, None, listed, detail, hint)
                 progress.step("probe", "done")
+                if probe_only:
+                    # "Bağlantıyı dene" (Wave 6 C11): what the device reports; nothing of the
+                    # request is written, its keys leave this process with it.
+                    result = SnmpProbeResult(interfaces=tuple(found))
+                    progress.write("succeeded", warnings=warnings, result=result)
+                    self._journal(
+                        request.id,
+                        "probe",
+                        kind=kind,
+                        section=request.section,
+                        requested_by=requester,
+                        source=check.probes[0].target,
+                    )
+                    return False
             elif check.probes:
                 progress.step("probe", "skipped", "probe_skipped")
             staged = check.stage_jar
@@ -1219,9 +1249,14 @@ class Agent:
         return True
 
     def _probe(
-        self, request: AdminRequest, check: rules.SectionCheck, files: _Files
+        self,
+        request: AdminRequest,
+        check: rules.SectionCheck,
+        files: _Files,
+        found: list[ProbeInterface] | None = None,
     ) -> ProbeResult | None:
-        """Run the probes of the change with its candidate values; the first failure."""
+        """Run the probes of the change with its candidate values; the first failure. ``found``
+        receives the interfaces a successful ``snmp`` probe reported."""
         candidate = check.candidate
         if candidate is None:
             return None
@@ -1304,6 +1339,8 @@ class Agent:
                 # (the parent's interface names are bounded and redacted already, W5-N-9)
                 message = redact(result.message, secrets)
                 return ProbeResult(False, result.code, message, result.interfaces)
+            if found is not None:
+                found.extend(result.interfaces)
         return None
 
     def _finish(

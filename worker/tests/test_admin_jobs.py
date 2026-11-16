@@ -230,6 +230,35 @@ def test_a_held_change_and_its_outcome_are_two_entries(
     ]
 
 
+def test_a_probe_only_test_is_audited_as_admin_probe(
+    admin: AdminLayout, sessions: sessionmaker[Session], db_session: Session
+) -> None:
+    """Wave 6 C11 (#217): "Bağlantıyı dene" writes nothing but its journal line; the audit
+    names the log source and the outcome, never a value."""
+    tested = JournalLine(
+        line=new_id(),
+        request=new_id(),
+        state="probe",
+        at=NOW,
+        kind="config.apply",
+        section="sources",
+        requested_by=Requester(user_id=3, username="ayse"),
+        source="fw-02",
+    )
+    refused = tested.model_copy(
+        update={"line": new_id(), "request": new_id(), "code": "snmp_auth_failed"}
+    )
+    write_journal(admin, date(2026, 10, 25), tested, refused)
+    assert len(import_admin_events(sessions, admin).imported) == 2
+    rows = entries(db_session)
+    assert [(row.action, row.details["log_source"], row.details["ok"]) for row in rows] == [
+        ("admin.probe", "fw-02", True),
+        ("admin.probe", "fw-02", False),
+    ]
+    assert rows[1].details["code"] == "snmp_auth_failed"
+    assert rows[0].details["changes"] == {}
+
+
 def test_an_unreadable_journal_is_reported_not_imported(
     admin: AdminLayout, sessions: sessionmaker[Session], db_session: Session
 ) -> None:

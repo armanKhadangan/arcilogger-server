@@ -48,6 +48,7 @@ from arcilogger_api.admin_channel import (
     admin_error,
     check_error,
     code_message,
+    rate_limited,
     require_reauth,
     texts,
 )
@@ -862,6 +863,7 @@ def checked(
     encrypt: bool,
     form: dict[str, Any] | None = None,
     uploads: dict[str, rules.UploadInfo] | None = None,
+    probe_only: bool = False,
 ) -> rules.SectionCheck:
     """The rules of ``section`` on the form (409 ``config_conflict`` for a stale ``etag``)."""
     files = channel.usable_files()
@@ -870,7 +872,11 @@ def checked(
         raise admin_error("config_conflict", details={"current_etag": current})
     context = channel.context(db, user, uploads=uploads, encrypt=encrypt)
     return rules.validate_section(
-        section, files.config, body.form() if form is None else form, context
+        section,
+        files.config,
+        body.form() if form is None else form,
+        context,
+        probe_only=probe_only,
     )
 
 
@@ -1331,6 +1337,51 @@ def add_source(
 
 
 SourceName = Annotated[str, PathParam(pattern=r"^[a-z0-9][a-z0-9-]{0,62}$")]
+#: "Bağlantıyı dene": one a minute per user (Wave 6 C11).
+SNMP_TEST_EVERY: Final = timedelta(minutes=1)
+
+
+@router.post("/config/sources/snmp-test", status_code=status.HTTP_202_ACCEPTED)
+def snmp_test(
+    body: SourceCheckBody, request: Request, db: DbSession, user: SettingsDep, channel: ChannelDep
+) -> AdminAccepted:
+    """ "Bağlantıyı dene" (Wave 6 C11, #217): one source as its add or update would send it, with
+    its SNMP settings and keys (a key left empty uses the stored one), probed by the agent
+    before anything is saved. The request ends ``succeeded`` with ``result.interfaces`` (what
+    the device reports) or ``probe_failed``; nothing of it is written. Needs a recent
+    re-authentication (it may carry keys); one a minute per user."""
+    channel.require_enabled()
+    require_reauth(user, True)
+    newest = db.scalar(
+        select(AdminRequestRow.created_at)
+        .where(
+            AdminRequestRow.kind == "config.apply",
+            AdminRequestRow.requested_by_id == user.id,
+            AdminRequestRow.params.contains({"probe_only": True}),
+        )
+        .order_by(AdminRequestRow.created_at.desc())
+        .limit(1)
+    )
+    if newest is not None and channel.now - newest < SNMP_TEST_EVERY:
+        raise rate_limited("admin_rate_limited", SNMP_TEST_EVERY - (channel.now - newest))
+    keys = {key: getattr(body, key) or None for key in ("snmp_auth_key", "snmp_priv_key")}
+    tested = body.model_copy(update=keys)
+    check = checked(channel, db, user, "sources", tested, encrypt=True, probe_only=True)
+    if not check.ok:
+        refused(db, user, request, "sources", check)
+        raise check_error(check)
+    return channel.submit(
+        db,
+        user,
+        request,
+        kind="config.apply",
+        section="sources",
+        ops=check.ops,
+        options=check.options,
+        changes=check.changes,
+        warnings=[problem.code for problem in check.warnings],
+        params={"probe_only": True},
+    )
 
 
 @router.put("/config/sources/{name}", status_code=status.HTTP_202_ACCEPTED)
