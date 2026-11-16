@@ -97,11 +97,13 @@ test.describe('Güvenlik — Wave 6 additions', () => {
     await expect(sheet).not.toContainText('Deniz Örnek');
   });
 
-  test('the answers of today’s API: no trends, no tabs, nobody assigned', async ({ page }) => {
+  test('no rule alerts in 7 days: the top lists say so', async ({ page }) => {
     await mockApi(page, { signedInAs: 'tolga' });
     await page.goto('/security');
     await expect(page.getByTestId('security-summary')).toBeVisible();
-    await expect(page.getByTestId('security-trends')).toHaveCount(0);
+    await expect(page.getByTestId('security-trends')).toBeVisible();
+    await expect(page.getByTestId('top-rules')).toContainText('Son 7 günde uyarı yok.');
+    await expect(page.getByTestId('top-keys')).toContainText('Son 7 günde uyarı yok.');
   });
 
   test('in English', async ({ page }) => {
