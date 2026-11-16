@@ -494,7 +494,9 @@ def alert_detail(db: Session, alert: Alert, person: AlertPersonOut | None = None
     )
     deliveries = db.scalars(
         select(AlertDelivery)
-        .where(AlertDelivery.alert_id == alert.id)
+        # The e-mail deliveries only: a webhook's rows (kind ``webhook``, decision D10) are on
+        # Ayarlar → Webhook'lar.
+        .where(AlertDelivery.alert_id == alert.id, AlertDelivery.kind != "webhook")
         .order_by(AlertDelivery.created_at, AlertDelivery.id)
     )
     steps_tr, steps_en = runbook(alert.rule)

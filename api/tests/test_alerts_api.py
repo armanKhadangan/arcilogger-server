@@ -335,6 +335,7 @@ def test_detail_sanitises_details_and_masks_recipients(
             ("new", "tolga@ornek.example", "sent"),
             ("new", "it@firma.com.tr", "failed"),
             ("resolved", "garbage", "queued"),
+            ("webhook", "siem", "sent"),  # Ayarlar → Webhook'lar shows it, not the alert (#296)
         ):
             session.add(
                 AlertDelivery(
