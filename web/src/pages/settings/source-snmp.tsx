@@ -22,10 +22,26 @@ import {
   SNMP_AUTHS,
   SNMP_LINES_MAX,
   SNMP_PRIVS,
+  pickLine,
   snmpId,
   type SnmpField,
   type SnmpForm,
 } from './snmp-model';
+
+/**
+ * "Bağlantıyı dene" (Wave 6 C11): the device tried with the typed values before anything is
+ * saved; what it reports is a pick list for the WAN lines. Without it, or after a failure, the
+ * names are typed.
+ */
+export interface SnmpTestView {
+  onTest: () => void;
+  /** The test is queued or running. */
+  busy: boolean;
+  /** What the device reported, once the test succeeded. */
+  interfaces: readonly ProbeInterface[] | null;
+  /** Why the test failed, already in the user's language. */
+  error: string | null;
+}
 
 /**
  * The SNMP part of a source (Wave 5 §6 N1, P4): switched on, ARCILOGGER reads the counters of
@@ -33,16 +49,19 @@ import {
  * the line's speed on the Panel and on Canlı Durum. The two keys are write-only, as SMTP's
  * password: the browser only learns whether each is stored. The device is tried with the new
  * values when the change is saved (N5); a refusal of the try comes back on the request.
+ * "Bağlantıyı dene" (`test`, Wave 6 C11) tries it before, and lists what it reports.
  */
 export function SnmpSection({
   values,
   onChange,
   message,
+  test,
 }: {
   values: SnmpForm;
   onChange: (values: SnmpForm) => void;
   /** The message at a field: the server's refusal, else the browser's check. */
   message: (field: SnmpField) => string | undefined;
+  test?: SnmpTestView;
 }) {
   const { t } = useTranslation();
   const set = (next: Partial<SnmpForm>) => {
@@ -250,6 +269,37 @@ export function SnmpSection({
               set({ interval });
             }}
           />
+          {test ? (
+            <div className="flex flex-col gap-2" data-testid="source-snmp-test">
+              <Button
+                size="sm"
+                variant="secondary"
+                className="self-start"
+                busy={test.busy}
+                aria-describedby="source-snmp-test-hint"
+                onClick={test.onTest}
+              >
+                {test.busy ? t('snmp.form.testing') : t('snmp.form.test')}
+              </Button>
+              <p id="source-snmp-test-hint" className="text-xs text-muted">
+                {t('snmp.form.testHint')}
+              </p>
+              {test.error ? (
+                <Alert tone="danger" data-testid="source-snmp-test-error">
+                  {t('snmp.form.testFailed', { reason: test.error })}
+                </Alert>
+              ) : null}
+              {test.interfaces ? (
+                <ProbeInterfaces
+                  interfaces={test.interfaces}
+                  picked={new Set(values.lines.map((line) => line.name.trim()))}
+                  onPick={(name) => {
+                    onChange(pickLine(values, name));
+                  }}
+                />
+              ) : null}
+            </div>
+          ) : null}
           <Alert tone="info" assertive={false} data-testid="source-snmp-probe">
             {t('snmp.form.probeNote')}
           </Alert>
@@ -262,10 +312,21 @@ export function SnmpSection({
 /**
  * What the device reported when the probe refused the change (`snmp_no_such_interface`,
  * `snmp_no_hc_counters`; W5-N-9): each interface's name, status and speed, so the administrator
- * types the WAN line's name from it.
+ * types the WAN line's name from it. With `onPick` ("Bağlantıyı dene", Wave 6 C11) each row has a
+ * button that puts its name into the WAN lines.
  */
-export function ProbeInterfaces({ interfaces }: { interfaces: readonly ProbeInterface[] }) {
+export function ProbeInterfaces({
+  interfaces,
+  onPick,
+  picked,
+}: {
+  interfaces: readonly ProbeInterface[];
+  onPick?: (name: string) => void;
+  /** The names already in the WAN lines. */
+  picked?: ReadonlySet<string>;
+}) {
   const { t } = useTranslation();
+  const full = onPick !== undefined && (picked?.size ?? 0) >= SNMP_LINES_MAX;
   const lang = currentLang();
   const head = 'px-3 py-2 text-left text-xs font-medium text-muted-strong';
   return (
@@ -291,6 +352,11 @@ export function ProbeInterfaces({ interfaces }: { interfaces: readonly ProbeInte
               <th scope="col" className={`${head} text-right`}>
                 {t('snmp.probe.speed')}
               </th>
+              {onPick ? (
+                <th scope="col" className={head}>
+                  <span className="sr-only">{t('snmp.probe.pick')}</span>
+                </th>
+              ) : null}
             </tr>
           </thead>
           <tbody>
@@ -303,12 +369,33 @@ export function ProbeInterfaces({ interfaces }: { interfaces: readonly ProbeInte
                 <td className="px-3 py-1.5 text-right tabular">
                   {item.speed_mbps === null ? '—' : formatNumber(item.speed_mbps, 0, lang)}
                 </td>
+                {onPick ? (
+                  <td className="px-3 py-1 text-right">
+                    {picked?.has(item.name) ? (
+                      <span className="text-xs text-muted">{t('snmp.probe.picked')}</span>
+                    ) : (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        disabled={full}
+                        aria-label={t('snmp.probe.pickLine', { name: item.name })}
+                        onClick={() => {
+                          onPick(item.name);
+                        }}
+                      >
+                        {t('snmp.probe.pick')}
+                      </Button>
+                    )}
+                  </td>
+                ) : null}
               </tr>
             ))}
           </tbody>
         </table>
       </div>
-      <p className="text-xs text-muted">{t('snmp.probe.hint')}</p>
+      <p className="text-xs text-muted">
+        {onPick ? t('snmp.probe.pickHint') : t('snmp.probe.hint')}
+      </p>
     </section>
   );
 }

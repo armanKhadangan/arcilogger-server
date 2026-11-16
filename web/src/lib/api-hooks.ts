@@ -152,6 +152,7 @@ import type {
   SmtpCaBody,
   SmtpCaClear,
   SourceBody,
+  SourceCheckBody,
   TestEmailBody,
   TsaTestBody,
   UploadKind,
@@ -1512,6 +1513,18 @@ export function useAddSource() {
 export function useUpdateSource() {
   return useAdminMutation(({ name, body }: { name: string; body: SourceBody }) =>
     api.put<AdminAccepted>(`/admin/config/sources/${encodeURIComponent(name)}`, body),
+  );
+}
+
+/**
+ * "Bağlantıyı dene" (Wave 6 C11): one source's SNMP, as its add or update would send it, probed
+ * by the agent before anything is saved (re-auth, one a minute); the request's `result` lists
+ * the device's interfaces.
+ */
+export function useSnmpTest() {
+  return useAdminMutation(
+    (body: SourceCheckBody) => api.post<AdminAccepted>('/admin/config/sources/snmp-test', body),
+    { secret: true },
   );
 }
 

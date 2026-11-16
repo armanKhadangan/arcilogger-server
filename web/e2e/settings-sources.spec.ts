@@ -535,3 +535,70 @@ for (const theme of ['light', 'dark'] as Theme[]) {
     await expectNoA11yViolations(page);
   });
 }
+
+/**
+ * "Bağlantıyı dene" (Wave 6 C11, #217): the device tried with the dialog's values before
+ * anything is saved; what it reports becomes a pick list for the WAN lines, and a failed test
+ * leaves the names to be typed.
+ */
+test.describe('Ayarlar → Kaynaklar → SNMP → Bağlantıyı dene', () => {
+  test('lists the interfaces and picks the WAN lines; nothing is saved', async ({ page }) => {
+    const api = await mockApi(page, { signedInAs: 'tolga' });
+    await page.goto('/settings/sources');
+    const dialog = await switchSnmpOn(page, 'core-r1');
+    const first = dialog.getByRole('textbox', { name: 'Arayüz 1' });
+    await first.fill('');
+    await dialog.getByRole('button', { name: 'Bağlantıyı dene' }).click();
+    const list = dialog.getByRole('table', {
+      name: 'Cihazın SNMP ile bildirdiği arayüzler: ad, durum ve hız',
+    });
+    await expect(list.getByRole('rowheader')).toHaveText(['wan1', 'wan2', 'lan'], {
+      timeout: 10_000,
+    });
+    await list.getByRole('button', { name: 'wan2 arayüzünü WAN hattı olarak seç' }).click();
+    await expect(first).toHaveValue('wan2');
+    await expect(list.getByRole('row', { name: /wan2/ })).toContainText('Seçildi');
+    await list.getByRole('button', { name: 'wan1 arayüzünü WAN hattı olarak seç' }).click();
+    await expect(dialog.getByRole('textbox', { name: 'Arayüz 2' })).toHaveValue('wan1');
+    await expectNoA11yViolations(page);
+    // the dialog's values as the update would send them, with the typed keys
+    const [call] = api.callsTo('POST', '/admin/config/sources/snmp-test');
+    expect(call?.body).toMatchObject({
+      operation: 'update',
+      source: { name: 'core-r1', snmp: { enabled: true, user: 'arcilogger', interfaces: [] } },
+      snmp_auth_key: 'örnek-anahtar-1',
+      snmp_priv_key: 'örnek-anahtar-2',
+    });
+    expect(api.admin.sections.sources.find((item) => item.name === 'core-r1')?.snmp).toBeNull();
+    expect(api.callsTo('PUT', '/admin/config/sources/core-r1')).toHaveLength(0);
+  });
+
+  test('a failed test names the reason and the names stay typable', async ({ page }) => {
+    const api = await mockApi(page, { signedInAs: 'tolga' });
+    api.admin.nextProbeFailure = 'snmp_auth_failed';
+    await page.goto('/settings/sources');
+    const dialog = await switchSnmpOn(page, 'core-r1');
+    await dialog.getByRole('button', { name: 'Bağlantıyı dene' }).click();
+    await expect(dialog.getByTestId('source-snmp-test-error')).toContainText(
+      'SNMPv3 kimlik doğrulaması başarısız',
+      { timeout: 10_000 },
+    );
+    await expect(dialog.getByTestId('source-snmp-test-error')).toContainText(
+      'Arayüz adlarını elle yazabilirsiniz.',
+    );
+    await expect(dialog.getByRole('table')).toHaveCount(0);
+    await expect(dialog.getByRole('textbox', { name: 'Arayüz 1' })).toHaveValue('wan1');
+  });
+
+  test('asks for the password first when it is not recent', async ({ page }) => {
+    const api = await mockApi(page, { signedInAs: 'tolga', staleReauth: true });
+    await page.goto('/settings/sources');
+    const dialog = await switchSnmpOn(page, 'core-r1');
+    await dialog.getByRole('button', { name: 'Bağlantıyı dene' }).click();
+    await confirmReauth(page);
+    await expect(dialog.getByRole('rowheader')).toHaveText(['wan1', 'wan2', 'lan'], {
+      timeout: 10_000,
+    });
+    expect(api.callsTo('POST', '/admin/config/sources/snmp-test')).toHaveLength(2);
+  });
+});

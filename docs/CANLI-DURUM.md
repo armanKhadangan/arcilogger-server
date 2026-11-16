@@ -79,7 +79,7 @@ vardır. Açıldığında ARCILOGGER cihazın WAN arayüzlerinin sayaçlarını 
 | `user` | — | — | SNMPv3 kullanıcı adı (gizli değildir) |
 | `auth` | `sha256` | `sha1`, `sha256`, `sha512` | Kimlik doğrulama protokolü |
 | `priv` | `aes128` | `aes128`, `aes256` | Şifreleme protokolü (`aes256` **sahada doğrula**) |
-| `interfaces` | — | 1–4 arayüz | WAN hatlarının arayüz adları (`ifName`), cihazın bildirdiği gibi yazılır; yanlış bir ad kaydederken reddedilir ve ret iletisi cihazın arayüzlerini listeler |
+| `interfaces` | — | 1–4 arayüz | WAN hatlarının arayüz adları (`ifName`): "Bağlantıyı dene" listesinden seçilir ya da cihazın bildirdiği gibi yazılır; yanlış bir ad kaydederken reddedilir ve ret iletisi cihazın arayüzlerini listeler |
 | `capacity_mbps` | — | isteğe bağlı | Arayüz başına indirme/yükleme kapasitesi (Mbps); yüzde göstermek için |
 | `interval_seconds` | 15 | 10–60 | Okuma aralığı |
 
@@ -87,8 +87,13 @@ vardır. Açıldığında ARCILOGGER cihazın WAN arayüzlerinin sayaçlarını 
   ARCILOGGER, hiçbir şey kaydetmeden önce cihaza bağlanır ve her arayüzün adını, durumunu ve
   hızını okur. Başarısız olursa değişiklik uygulanmaz ve nedeni gösterilir (`snmp_timeout`,
   `snmp_auth_failed`, `snmp_no_such_interface`, `snmp_no_hc_counters`). `snmp_no_such_interface`
-  iletisi cihazın bildirdiği arayüzleri (ad, durum, Mbit/s) listeler. Listeyi kaydetmeden önce
-  getiren ayrı bir düğme sonraki bir sürümde gelecektir.
+  iletisi cihazın bildirdiği arayüzleri (ad, durum, Mbit/s) listeler.
+- **"Bağlantıyı dene" kaydetmeden önce dener.** SNMP bölümündeki düğme, formdaki değerlerle (ve
+  yazılan ya da kayıtlı anahtarlarla) cihaza bağlanır ve bildirdiği arayüzleri listeler; WAN
+  hatları listeden "Seç" ile doldurulur (en çok 4). Hiçbir şey kaydedilmez: ne ayar dosyası ne
+  gizli depo değişir, anahtarlar yalnızca deneme için kullanılır. Parola onayı ister, kullanıcı
+  başına dakikada bir kez çalışır ve denetim kaydına `admin.probe` olarak (kaynağın adı ve sonuç;
+  değer yok) yazılır. Deneme başarısız olursa nedeni gösterilir ve arayüz adları elle yazılabilir.
 - **Yalnızca SNMPv3, kimlik doğrulamalı ve şifreli (authPriv).** SNMP v1/v2c kabul edilmez:
   topluluk adı (community) ağda açık metin gider.
 - **Hedef kaynağın kendi adresidir.** Adresi bir ağ olan kaynakta SNMP açılamaz

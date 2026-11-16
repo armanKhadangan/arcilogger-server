@@ -33,19 +33,22 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
-import { agentWritable } from '@/lib/admin-requests';
+import { agentWritable, localized } from '@/lib/admin-requests';
 import { errorMessage, isApiError } from '@/lib/api';
 import {
   useAddSource,
   useAdminConfig,
+  useAdminRequest,
   useAdminStatus,
   useCheckSection,
   useRemoveSource,
+  useSnmpTest,
   useUpdateSource,
 } from '@/lib/api-hooks';
 import { useAuth } from '@/lib/auth';
 import { formatDateTime } from '@/lib/format';
 import { useHandoff, type HandoffPayloads } from '@/lib/handoff';
+import { isReauthCancelled, useReauth } from '@/lib/reauth';
 import type {
   FirewallState,
   SourceBody,
@@ -55,7 +58,7 @@ import type {
 } from '@/lib/settings-types';
 import { focusFirstError, hasErrors, type FieldErrors } from '@/lib/validation';
 
-import { ProbeInterfaces, SnmpSection } from './source-snmp';
+import { ProbeInterfaces, SnmpSection, type SnmpTestView } from './source-snmp';
 import {
   HEARTBEAT_MAX,
   HEARTBEAT_MIN,
@@ -70,7 +73,14 @@ import {
   type SourceField,
   type SourceForm,
 } from './sources-model';
-import { snmpBounds, snmpId, snmpPaths, validateSnmp, type SnmpField } from './snmp-model';
+import {
+  probedInterfaces,
+  snmpBounds,
+  snmpId,
+  snmpPaths,
+  validateSnmp,
+  type SnmpField,
+} from './snmp-model';
 
 const PERMISSION = 'sources.manage';
 
@@ -123,6 +133,7 @@ function SourceDialog({
   onSubmit,
   errors,
   snmpMessage,
+  snmpTest,
   busy,
   problemMessage,
 }: {
@@ -132,6 +143,8 @@ function SourceDialog({
   onSubmit: () => void;
   errors: Record<SourceField, string | undefined>;
   snmpMessage: (field: SnmpField) => string | undefined;
+  /** "Bağlantıyı dene" (Wave 6 C11). */
+  snmpTest: SnmpTestView;
   busy: boolean;
   problemMessage: string | null;
 }) {
@@ -279,6 +292,7 @@ function SourceDialog({
           <SnmpSection
             values={values.snmp}
             message={snmpMessage}
+            test={snmpTest}
             onChange={(snmp) => {
               set({ snmp });
             }}
@@ -352,6 +366,12 @@ export function SourcesPage() {
     submit: removeAsync,
   });
   const [editing, setEditing] = useState<Editing | null>(null);
+  const { withReauth } = useReauth();
+  const { mutateAsync: snmpTestAsync } = useSnmpTest();
+  /** "Bağlantıyı dene": the request on screen, and a refusal before it was queued. */
+  const [testId, setTestId] = useState<string | null>(null);
+  const [testRefusal, setTestRefusal] = useState<string | null>(null);
+  const tested = useAdminRequest(testId).data;
   const [errors, setErrors] = useState<FieldErrors<SourceField>>({});
   const [snmpErrors, setSnmpErrors] = useState<FieldErrors<SnmpField>>({});
   const [typed, setTyped] = useState('');
@@ -401,8 +421,35 @@ export function SourcesPage() {
     removal.reset();
     setErrors({});
     setSnmpErrors({});
+    setTestId(null);
+    setTestRefusal(null);
     setEditing(next);
   }
+
+  /** "Bağlantıyı dene": the dialog's values as their add or update would send them. */
+  async function testSnmp() {
+    if (!editing) return;
+    setTestRefusal(null);
+    setTestId(null);
+    const body = { ...sourceBody(editing.values, etag), operation: editing.mode };
+    try {
+      const accepted = await withReauth(() => snmpTestAsync(body));
+      setTestId(accepted.request_id);
+    } catch (error) {
+      if (!isReauthCancelled(error)) setTestRefusal(errorMessage(error));
+    }
+  }
+
+  const testFailed =
+    tested !== undefined && tested.terminal && tested.state !== 'succeeded' && tested.error
+      ? localized(tested.error)
+      : null;
+  const snmpTest: SnmpTestView = {
+    onTest: () => void testSnmp(),
+    busy: testId !== null && (tested === undefined || !tested.terminal),
+    interfaces: tested?.state === 'succeeded' ? probedInterfaces(tested.result) : null,
+    error: testRefusal ?? testFailed,
+  };
 
   function review() {
     if (!editing) return;
@@ -693,6 +740,7 @@ export function SourcesPage() {
             heartbeat: message('heartbeat'),
           }}
           snmpMessage={snmpMessage}
+          snmpTest={snmpTest}
           busy={change.phase === 'checking'}
           problemMessage={change.failure ? errorMessage(change.failure) : null}
           onChange={(values) => {
