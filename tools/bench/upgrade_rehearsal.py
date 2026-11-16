@@ -18,7 +18,9 @@ script measures that on a database it builds itself, and drops the database at t
    day). On TimescaleDB the compression policy jobs run (``run_job``) after each day, as the
    policy runs on a site day after day: the chunks older than 7 days are compressed, and only
    the last week's stay as they were written (``timescaledb_information.chunks`` is printed).
-   Then ``ANALYZE``.
+   Then ``VACUUM (ANALYZE)`` of the four tables, as autovacuum has long done on a site's older
+   rows (without it the first read of the rows, here the index build of ``0026``, would also
+   set every row's hint bits and write the tables again).
 2. **The upgrade** to the head with :func:`arcilogger_db.migrate.upgrade` (what ``arcilogger-db
    upgrade`` runs: one transaction under the migrations' lock, then the seed and the partitions):
    each revision timed from alembic's ``Running upgrade`` log lines, the last one up to the
@@ -51,6 +53,7 @@ import importlib.util
 import json
 import logging
 import math
+import os
 import platform
 import sys
 import time
@@ -264,15 +267,18 @@ def build(
                 run_compression(autocommit)
                 compressed += time.perf_counter() - started
             log(f"  {day}: written ({written:.0f} s, compression {compressed:.0f} s)")
+    started = time.perf_counter()
     with autocommit.connect() as connection:
         for table in TABLES:
-            connection.execute(text(f"ANALYZE {table}"))
+            connection.execute(text(f"VACUUM (ANALYZE) {table}"))
+    vacuumed = time.perf_counter() - started
     return {
         "days": [first.isoformat(), (today - timedelta(days=1)).isoformat()],
         "template_rows": {table: len(rows[table]) for table in TABLES},
         "copies_per_day": copies,
         "write_seconds": round(written, 1),
         "compression_seconds": round(compressed, 1),
+        "vacuum_seconds": round(vacuumed, 1),
     }
 
 
@@ -472,6 +478,13 @@ def downgrade(engine: Engine, mode: str) -> tuple[dict[str, float], float]:
     return timed(run)
 
 
+def drop_caches() -> None:
+    """Linux, as root: the page cache written back and dropped, so that a step reads the tables
+    from disk, as after a restart of the server (``shared_buffers`` stays: 128 MB by default)."""
+    os.sync()
+    Path("/proc/sys/vm/drop_caches").write_text("3\n", encoding="ascii")
+
+
 def revision(engine: Engine) -> str:
     with engine.connect() as connection:
         return ", ".join(migrate.current_revisions(connection))
@@ -495,6 +508,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--users", type=int, default=120, help="people of the template day")
     parser.add_argument("--out", type=Path, help="the result as JSON")
     parser.add_argument("--keep", action="store_true", help="keep the database")
+    parser.add_argument(
+        "--drop-caches", action="store_true", help="cold page cache before each step (root)"
+    )
     args = parser.parse_args(argv)
     mode: str = args.timescale
 
@@ -505,6 +521,7 @@ def main(argv: list[str] | None = None) -> int:
     result: dict[str, Any] = {
         "layout": "timescaledb" if mode == "require" else "postgresql",
         "machine": f"{platform.system()} {platform.machine()}, Python {platform.python_version()}",
+        "cold_cache": args.drop_caches,
     }
     try:
         log(f"building {args.database} at {OLD_HEAD}")
@@ -532,6 +549,8 @@ def main(argv: list[str] | None = None) -> int:
             ("upgrade_again", upgrade),
         ):
             log(f"{name} from {revision(engine)}")
+            if args.drop_caches:
+                drop_caches()
             steps, whole = run(engine, mode)
             result[name] = {
                 "to": revision(engine),
