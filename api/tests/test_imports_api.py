@@ -460,7 +460,7 @@ def test_assignments_build_history_in_file_order(
     data = _lines(
         "mac;employee_no;person_name;valid_from;note",
         "00-00-5E-00-53-3B;1001;;01.09.2026 09:00;ilk zimmet",
-        "f01f.af00.0001;;Mehmet Öz;2026-10-01T08:00:00+03:00;devir",
+        "0000.5e00.533b;;Mehmet Öz;2026-10-01T08:00:00+03:00;devir",
         "02:00:5e:00:53:46;1001;Ayşe Işık;;",
     )
     preview = _upload(client, "assignments", data).json()

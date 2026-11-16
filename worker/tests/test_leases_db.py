@@ -305,7 +305,7 @@ def test_devices_are_upserted_without_touching_admin_fields(
     oui = tmp_path / "oui.csv"
     oui.write_text(
         "Registry,Assignment,Organization Name,Organization Address\n"
-        'MA-L,F01FAF,"Example Devices, Inc.",Somewhere\n',
+        'MA-L,00005E,"Example Devices, Inc.",Somewhere\n',
         encoding="utf-8",
     )
     set_setting(db_session, "devices.oui_file", str(oui), updated_by="tolga")

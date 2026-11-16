@@ -79,7 +79,7 @@ describe('bulk assignment checks', () => {
     );
     const many = Array.from({ length: ASSIGN_MAX_DEVICES + 1 }, (_, index) => ({
       ...UNKNOWN,
-      mac: `3c:52:82:00:${String(Math.floor(index / 256)).padStart(2, '0')}:${(index % 256).toString(16).padStart(2, '0')}`,
+      mac: `00:00:5e:00:${String(Math.floor(index / 256)).padStart(2, '0')}:${(index % 256).toString(16).padStart(2, '0')}`,
     }));
     expect(checkAssign('assign', draft(), many, NOW).errors.devices).toBe(
       'devices.assign.errors.tooMany',

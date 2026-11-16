@@ -761,7 +761,7 @@ test.describe('Cihazlar ve Kişiler', () => {
     await expect(result.getByTestId('import-counts')).toContainText('Eklenecek1');
     const preview = result.getByRole('table', { name: 'Değişecek kayıtlar (önizleme)' });
     await expect(preview.getByRole('row').nth(1)).toContainText(
-      '2Atama3c:52:82:00:00:05Can Öztürk12.10.2026 09:00:00',
+      '2Atama00:00:5e:00:53:1bCan Öztürk12.10.2026 09:00:00',
     );
 
     // Can Öztürk is deactivated before the import is applied.

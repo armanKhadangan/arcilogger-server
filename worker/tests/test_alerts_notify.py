@@ -217,7 +217,7 @@ def test_the_content_never_carries_log_lines_or_names(
     for part in (mail.message["Subject"], mail.part("plain"), mail.part("html"), whole):
         for secret in (PERSON, "Ayşe", "Yılmaztürk", "ayse.yilmazturk", RAW, "srcip=", "<189>"):
             assert secret not in part, secret
-        assert "f0:1f:af" not in part
+        assert "00:00:5e:00:53:3b" not in part
     text = mail.part("plain")
     assert "custom-rule — ARCILOGGER uyarısı" in text  # an unknown rule: the generic text
     assert "18.10.2026 günü mühürlenemedi (2. deneme)." in text

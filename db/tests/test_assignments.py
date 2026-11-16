@@ -297,8 +297,8 @@ def test_migration_backfills_existing_links_and_downgrades(empty_engine: Engine)
             )
         ).all()
     assert [tuple(row) for row in rows] == [
-        (OTHER, person, created, None, ":migration", True),
         (MAC, person, seen, None, ":migration", True),
+        (OTHER, person, created, None, ":migration", True),
     ]
     with empty_engine.begin() as connection:
         command.downgrade(alembic_config(connection), "0007_evidence_seals")

@@ -245,8 +245,8 @@ def test_list_sorts_pages_and_counts(
 @pytest.mark.parametrize(
     ("query", "expected"),
     [
-        ({"q": "f01faf000001"}, [PC1]),  # MAC without separators
-        ({"q": "F0-1F-AF"}, [PC1, PC2]),  # MAC with dashes, upper case
+        ({"q": "00005e00533b"}, [PC1]),  # MAC without separators
+        ({"q": "5E-00-53-3"}, [PC1, PC2, PRINTER]),  # part of a MAC, dashes, upper case
         ({"q": "idari-şef"}, [PC2]),  # host name, case folded
         ({"q": "İDARİ"}, [PC2]),  # dotted capital İ folds to i
         ({"q": "ayşe'nin"}, [PC1]),  # device name
