@@ -2,7 +2,7 @@
 
 > Durum: sürüm 0.4.1. Kaynak: `db/src/arcilogger_db/models.py` ve
 > `db/src/arcilogger_db/migrations/versions/` (`v0001_baseline`, `v0006_lookup_reports` …
-> `v0025_admin_webhook_test`). Bir test, modellerle migrasyonların birebir aynı olduğunu
+> `v0026_rules_time_received`). Bir test, modellerle migrasyonların birebir aynı olduğunu
 > her çalıştırmada doğrular.
 
 ## Özet (TR)

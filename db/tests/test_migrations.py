@@ -30,7 +30,7 @@ from arcilogger_db.testing import TestServer
 
 BASELINE = "0001_baseline"
 #: Newest revision (re-chained by the orchestrator when parallel revisions are merged).
-HEAD = "0025_admin_webhook_test"
+HEAD = "0026_rules_time_received"
 
 
 @pytest.fixture
