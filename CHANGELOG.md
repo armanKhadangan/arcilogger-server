@@ -5,6 +5,115 @@ versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Security rules, the rule editor and webhooks (Wave 6)
+
+Eighteen security rules watch the logs that ARCILOGGER already keeps and open alerts on the
+Güvenlik (Security) page. Each rule can be tuned in the browser and tried on the last 24 hours
+before it is saved, and alerts can also go to the organisation's own systems through webhooks.
+The security rules are not a 5651 obligation: they belong to the licence module `security_rules`
+("Güvenlik kuralları" / "Security rules"), and no licence state blocks a 5651 function. Contract:
+`design/wave-6-contract.md`.
+
+- **The rules R01–R19** (R15 is the existing silent-source alert). Each rule is listed with its
+  Turkish and English name:
+  - R01 İçeriden port taraması / Internal port scan; R02 Dışarıdan tarama / External scan;
+  - R03 Kaba kuvvet giriş denemesi / Brute-force login; R04 Mesai dışı / beklenmeyen yerden
+    yönetici girişi / Admin login off hours or from an unexpected address;
+  - R05 IPS saldırısı / IPS attack; R06 Botnet / tehdit IP / Botnet or threat IP; R07 Zararlı
+    yazılım / Malware;
+  - R08 DNS atlatma / DNS bypass; R09 Engelli kategori ısrarı / Repeated blocked categories;
+    R10 Proxy / VPN / Tor;
+  - R11 Yeni cihaz / New device; R12 MAC değişimi / MAC change;
+  - R13 Büyük veri gönderimi / Large upload; R14 Gece etkinliği / Night activity;
+  - R16 Cihaz yapılandırma değişikliği / Device configuration change; R17 Güvenlik duvarı
+    sağlığı / Firewall health; R18 DHCP havuzu doldu / DHCP pool exhausted; R19 Şüpheli DNS
+    (DGA) / Suspicious DNS (DGA).
+- **How they run:** the worker job `rules.run` evaluates every switched-on rule once a minute.
+  - It counts by receive time, so a device clock that is off neither hides nor splits a burst.
+    Device time is shown in the evidence.
+  - A rule that is switched on starts at the present (`rules.lag_seconds`, default 120 s) and
+    never raises alerts for older data.
+  - An alert is opened once per key. While it is open its count is the most rows seen in one
+    window; a cooldown keeps a closed key quiet.
+  - R17 closes its own alert once the condition has gone. Every other rule's alert is closed by
+    a person.
+  - A rule that keeps failing opens `R20-rules` ("Güvenlik kuralı çalışamıyor" / "Security rule
+    cannot run").
+- **Rules that read unconfirmed formats** ship marked "sahada doğrula" (verify on site):
+  - which ones: R03, R04, R06, R16, R17 and R19 (`format_verified: false`; FortiGate login,
+    configuration-change, botnet, performance and DNS response-code fields);
+  - what the editor shows: the mark, and each rule's matching values as parameters.
+- **Ayarlar → Güvenlik kuralları** (rule editor, `settings.manage`): per rule:
+  - switched on or off;
+  - severity, window and cooldown;
+  - its parameters;
+  - whether it e-mails (`alerts.email_min_severity` still applies) and whether it goes to the
+    webhooks.
+
+  **"Son 24 saatte dene"** runs the candidate settings over the last 24 hours and answers how many
+  alerts they would have opened, without saving anything. Without the licence module, the list
+  stays readable and the editor shows the lock.
+- **The Güvenlik page:**
+  - an alert can be given to a user (`alert.assign`, only users who can read alerts);
+  - an evidence tab lists the log rows behind the alert, as references that "Ham satırı aç"
+    opens with the raw-line permission and audit, never the line's content in the alert;
+  - 30-day trends by severity, and the rules and keys with the most alerts of the last 7 days.
+- **Person names (KVKK):** R09, R13 and R14 are person-level rules.
+  - Their alerts store a person id.
+  - The person's name is shown only to users with `usage.person`, and each such view is audited
+    (`alert.person_view`) before the answer is returned.
+  - Alert e-mails and webhooks carry no person name and no log line.
+  - Legal review of these notes is recommended.
+- **Webhooks** (`[[webhooks]]` in `arcilogger.toml`, set on the server only):
+  - **Formats and secrets:** up to ten targets in the formats `generic` (HMAC-SHA256 signed),
+    `teams` and `slack` (the last two "sahada doğrula"). The HMAC secret and a Teams/Slack URL
+    live in the secret store (`arcilogger-core secret set webhook.<name>.secret` / `.url`).
+  - **Sending:** the worker job `alerts.webhooks` sends each new alert once, over HTTPS with the
+    certificate always verified, through `[network] https_proxy` when set. It tries again after
+    1, 5, 15 and 60 minutes, then every hour, for 24 hours. A 4xx other than 408 and 429 fails
+    at once, and a failed delivery opens `R20-webhook`.
+  - **What is sent:** no backfill, no person name, no log line.
+  - **In the browser:** Ayarlar → Webhook'lar lists the webhooks, whether each is ready, its last
+    deliveries and their errors (without the URL's path, the secret or a header value).
+    **"Test gönder"** sends a test notification through the worker
+    (`POST /api/v1/webhooks/{name}/test`).
+  - **Firewall:** in strict outbound mode the firewall gets an `ARCILOGGER Out Webhook <name>` rule
+    for each enabled webhook.
+
+### Fixes and smaller additions (Wave 6)
+
+- **"Bağlantıyı dene" in a source's SNMP section** (#217). The device is tried with the typed
+  values and keys before anything is saved, and the interfaces it reports are offered as a pick
+  list for the WAN lines. Nothing is written, and the test is audited as `admin.probe`. A failed
+  test names its reason, and the names can still be typed.
+- **Each source's device clock** (#222):
+  - `GET /api/v1/sources` gives each source's typical clock offset (`clock_offset_seconds`);
+  - the new alert `R20-source-clock:<source>` opens for a source whose clock is more than
+    `alerts.source_clock_limit_seconds` (default 120 s, "sahada doğrula") off, and closes once it
+    is back;
+  - it replaces `R20-lease:source-clock`; open alerts of the old kind are closed as superseded.
+- **Canlı Durum holds its open sessions in a compact form** (#275): the worker's garbage
+  collector no longer walks every open session's counts, which held the worker's threads at high
+  log rates. The snapshot is unchanged.
+
+### Upgrade note (Wave 6)
+
+- **Migrations `0024`–`0027`:**
+  - `0024` adds the rules' state, the alert evidence, the alert assignee and the webhook
+    delivery kind;
+  - `0025` adds the webhook test's request kind;
+  - `0026` builds indexes on the receive time of `fg_traffic`, `fg_dns`, `fg_web` and `fg_app`;
+  - `0027` adds R13's and R14's running totals.
+
+  **`0026` indexes every existing row of those four tables while the services are stopped**, so
+  on a site with a large database the upgrade takes noticeably longer than before. Plan the
+  upgrade outside working hours. The installer can roll the four revisions back.
+- **The security rules need the licence module `security_rules`.** Without it, `rules.run`,
+  `alerts.webhooks` and the rule and webhook-test writes are skipped or refused; nothing else
+  changes. Every rule is switched on by default except R08 and R14, which wait for a value only
+  the site knows (R08 its allowed DNS servers, R14 its user networks). Each rule starts at the
+  present, so nothing is raised for the days before the upgrade.
+
 ## [0.4.1] — 2026-11-13
 
 Release version 0.4.1 (`v0.4.1`): fixes found on a site running 0.4.0. Upgrading: run the new
