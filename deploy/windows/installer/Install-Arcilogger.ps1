@@ -585,6 +585,9 @@ $DailyPartitionRevision = '0021_db_window'
 # crosses a revision not in $LosslessDowngrades is refused before any change
 # (Get-SchemaRollbackPlan).
 $LosslessDowngrades = @(
+    # Drops the security rules' receive-time indexes on fg_traffic, fg_dns, fg_web and fg_app:
+    # indexes only, every row stays (v0026_rules_time_received.py).
+    '0026_rules_time_received',
     # Deletes the worker.webhook_test requests ("Test gönder" of Ayarlar -> Webhook'lar, Wave 6)
     # and narrows the kind check again: request history only, the outcome stays in the audit log
     # (webhook.test); raw logs, log rows, leases and alerts keep every row
