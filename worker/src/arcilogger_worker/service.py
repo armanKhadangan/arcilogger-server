@@ -163,6 +163,13 @@ INTERVAL_RETRY_MAX: Final = timedelta(minutes=30)
 ACTIVITY_JOIN: Final = 20.0
 #: Retry delay while the database is unreachable (no ``job_runs`` row can be written).
 DATABASE_RETRY: Final = timedelta(minutes=1)
+#: The collector's thresholds while the service runs (#281; CPython's are ``(700, 10, 10)``).
+#: CPython 3.12 runs a full pass when the objects promoted since the last one exceed a quarter
+#: of the old generation; Canlı Durum's ticks promote some 350k short-lived objects each (the
+#: rows read, the usage engine's structures), which at 2000 lines/s made 195 full passes in 30
+#: ticks, 18 % of their time. With these, 8 passes, 1.5 %, the longest 0.33 s (it was 0.25 s;
+#: the bound is 0.5 s, M4 guard (c)), and the young collections 7.8 s instead of 6.2 s.
+COLLECTOR_THRESHOLDS: Final = (2000, 10, 100)
 
 
 @dataclass(frozen=True)
@@ -220,9 +227,11 @@ def freeze_loaded() -> None:
     service) out of the collector's full passes, as the service does at its start. A full pass
     walks every tracked object and holds every thread meanwhile; at a high log rate Canlı Durum's
     open sessions make such passes long and frequent, and each one would walk these too.
-    :func:`gc.unfreeze` gives them back."""
+    :func:`gc.unfreeze` gives them back. Sets :data:`COLLECTOR_THRESHOLDS` as well (the caller
+    keeps :func:`gc.get_threshold` from before, to set it back)."""
     gc.collect()
     gc.freeze()
+    gc.set_threshold(*COLLECTOR_THRESHOLDS)
 
 
 def retry_delay(job: Job, failures: int) -> timedelta:
