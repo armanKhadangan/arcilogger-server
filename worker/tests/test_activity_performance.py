@@ -305,9 +305,12 @@ def backlog(details: dict[str, Any]) -> int:
 
 @pytest.fixture
 def unfreeze() -> Iterator[None]:
-    """The objects the test froze (:func:`freeze_loaded`) given back to the collector."""
+    """The objects the test froze (:func:`freeze_loaded`) given back to the collector, and its
+    thresholds as they were."""
+    thresholds = gc.get_threshold()
     yield
     gc.unfreeze()
+    gc.set_threshold(*thresholds)
 
 
 @pytest.mark.parametrize(
