@@ -137,6 +137,15 @@ def test_the_evidence_tables_are_the_parsed_tables_and_devices() -> None:
     assert sorted(RULE_EVIDENCE_TABLES) == sorted([*parsed, "devices"])
 
 
+def test_rules_registry_complete() -> None:
+    """T-A1: every security rule R01-R14, R16-R19 is in the registry exactly once (the rule
+    packages W6-B ... W6-E are merged); a missing one is named."""
+    ids = list(registry.rule_ids())
+    missing = [item for item in SECURITY_RULE_IDS if item not in ids]
+    assert not missing, f"not in the registry: {', '.join(missing)}"
+    assert len(ids) == len(set(ids)) == len(SECURITY_RULE_IDS)
+
+
 def test_the_registry_is_in_id_order_and_complete_per_rule() -> None:
     """Every registered rule has texts, known inputs, and a positive and a negative case (T-A1;
     the rule packages W6-B … W6-E add the rules and their cases)."""
