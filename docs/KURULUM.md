@@ -1303,6 +1303,15 @@ değilse tarayıcı bir sertifika uyarısı gösterir (bölüm 8).
    powershell -ExecutionPolicy Bypass -File .\installer\Install-Arcilogger.ps1 -Upgrade -DryRun
    powershell -ExecutionPolicy Bypass -File .\installer\Install-Arcilogger.ps1 -Upgrade
    ```
+
+   **0.5.0'a yükseltmenin süresi:** 0.5.0 yükseltmesi `fg_traffic`, `fg_dns`, `fg_web` ve `fg_app`
+   tablolarına alış zamanı indeksi kurar (`0026_rules_time_received`). Düz PostgreSQL'de bu dört
+   tablodaki her 10 milyon satır için yaklaşık 7 saniye sürer ve yaklaşık 0,2 GB ek disk ister.
+   TimescaleDB'de yalnızca sıkıştırılmamış parçalar (yaklaşık son 7 gün) sayılır; sıkıştırılmış
+   parçalar açılmaz. Diğer üç sürüm (`0024`, `0025`, `0027`) ve `0023`'e geri alma birer
+   saniyenin altında biter; geri alma bu dört tablonun satırlarını değiştirmez. Süreler 4 vCPU'lu
+   bir geliştirme makinesinde ölçüldü; daha yavaş bir diskte orantılı olarak uzar. Örnek: dört
+   tabloda 500 milyon satır için yaklaşık 6 dakika ve 11 GB ek disk.
 3. Yükseltmeden sonra **Sistem** sayfasının **Sürüm ve güncelleme** bloğunda yeni sürümü ve yayın
    tarihini, **Hizmetler** bloğunda hizmetlerin çalıştığını ve **Uyum Durumu** kartlarını denetleyin
    (bölüm 12).

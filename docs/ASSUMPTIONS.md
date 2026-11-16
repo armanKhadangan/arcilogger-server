@@ -594,6 +594,7 @@ The manager's clarifications of the contract (§6) that change what the product 
 | C9 | Webhooks: a delivery gives up 24 h after its row was created; a webhook removed or switched off fails its queued rows and resolves its `R20-webhook`, and sends nothing from before when it is switched on again; only alerts opened in the last 24 h are queued; a missing secret or Teams/Slack URL is retried, and `GET /api/v1/webhooks` shows `ready` with a reason code, never a value | #266 |
 | C10 | "Test gönder" is a worker-channel request (`worker.webhook_test`, revision `0025`), refused before queueing for an unknown or not-ready webhook; the firewall's `ARCILOGGER Out Webhook <name>` rule keeps only a host and port, and a Teams/Slack URL is never logged or written | #266, #260 |
 | C11 | "Bağlantıyı dene": a probe-only `config.apply` of `sources` that writes nothing and ends `succeeded` with the device's interfaces | #217 |
+| C13 | A device clock that is minutes off: the system alert `R20-source-clock:<source>` (free, 5651 Temel) when a source's typical offset (the median of its newest rows received in the last hour, at least 10) is beyond `alerts.source_clock_limit_seconds` (120 s, "sahada doğrula"); it resolves when the clock is back. It replaces `R20-lease:source-clock` (an open one resolves as `superseded`). Kaynaklar, Sistem and Canlı Durum show the offset; ingest and the lookup's own tolerance (D28) are unchanged | #222 |
 
 C8 (the case writer of the rule tests) and C12 (the live tail's Linux performance bound) change
 no product behaviour.

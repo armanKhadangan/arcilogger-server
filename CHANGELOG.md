@@ -91,10 +91,32 @@ The security rules are not a 5651 obligation: they belong to the licence module 
   - the new alert `R20-source-clock:<source>` opens for a source whose clock is more than
     `alerts.source_clock_limit_seconds` (default 120 s, "sahada doğrula") off, and closes once it
     is back;
-  - it replaces `R20-lease:source-clock`; open alerts of the old kind are closed as superseded.
+  - it replaces `R20-lease:source-clock`; open alerts of the old kind are closed as superseded;
+  - **Kaynaklar** shows the offset in its "Saat farkı" (clock offset) column ("zamanında", "7 dk
+    geri"); the **Sistem** page lists the sources beyond the limit (`GET /api/v1/system/health`,
+    `source_clocks`); **Canlı Durum** names a firewall whose clock is too far behind for "Şu an"
+    (`GET /api/v1/activity/devices`, `late_sources`) (#290).
 - **Canlı Durum holds its open sessions in a compact form** (#275): the worker's garbage
   collector no longer walks every open session's counts, which held the worker's threads at high
   log rates. The snapshot is unchanged.
+- **The worker's garbage-collector thresholds** (#281, #301): once the worker service has frozen
+  what it loaded at the start, it sets Python's thresholds to (2000, 10, 100), so the collector
+  runs less often at high log rates; they are set back when the service stops.
+- **A FortiGate lease logged as unlimited is named in a lookup** (#299, #300): when the lease's
+  own last DHCP record logged `lease=0`, the chain carries the info note
+  `fortigate_lease_unlimited` with the configured time the lease ran on (`lease.server_seconds`,
+  else `lease.default_seconds`, × `lease.timeout_percent`). The chain, its confidence and its
+  person do not change; RAPOR and DENETCI-KILAVUZU explain the note.
+- **The alert detail lists only e-mail deliveries** (#304, found in the Wave 6 walk):
+  `GET /api/v1/alerts/{id}` answered 500 for an alert a webhook had sent, because the webhook's
+  delivery rows were listed with the e-mails. They are shown on Ayarlar → Webhook'lar only. No
+  released version had the fault.
+- **The Wave 6 documents** (#250, #306): UYARILAR/ALERTS §8 (the Güvenlik page: assignment,
+  evidence, the person, the 30-day trends) and §9 (every rule, the dry run, the rule editor);
+  DEVICE-SETUP 2.7 (the FortiGate logs the rules read, with the FortiOS commands, "sahada
+  doğrula"); KURULUM/INSTALL 7.3 (alert webhooks, Ayarlar → Webhook'lar and "Test gönder"). A
+  test sends every load-generator scenario through the real parsers to the rule that must raise
+  it (T-I).
 
 ### Upgrade note (Wave 6)
 
@@ -105,14 +127,32 @@ The security rules are not a 5651 obligation: they belong to the licence module 
   - `0026` builds indexes on the receive time of `fg_traffic`, `fg_dns`, `fg_web` and `fg_app`;
   - `0027` adds R13's and R14's running totals.
 
-  **`0026` indexes every existing row of those four tables while the services are stopped**, so
-  on a site with a large database the upgrade takes noticeably longer than before. Plan the
-  upgrade outside working hours. The installer can roll the four revisions back.
+  **`0026` indexes every existing row of those four tables while the services are stopped.**
+  Measured in the upgrade rehearsal (#297, #298; `tools/bench/upgrade_rehearsal.py`): on plain
+  PostgreSQL it takes about 7 seconds and about 0.2 GB of extra disk per 10 million rows in these
+  four tables; on TimescaleDB only the uncompressed chunks (about the last 7 days) count, and
+  compressed chunks are not decompressed. The other three revisions and the downgrade to
+  `0023` each finish in under a second; the downgrade does not change the rows of these four
+  tables. The times were measured on a 4-vCPU development machine; a slower disk takes
+  proportionally longer. Example: 500 million rows in the four tables take about 6 minutes and
+  11 GB of extra disk. Plan the upgrade outside working hours. The installer can roll the four
+  revisions back.
 - **The security rules need the licence module `security_rules`.** Without it, `rules.run`,
   `alerts.webhooks` and the rule and webhook-test writes are skipped or refused; nothing else
   changes. Every rule is switched on by default except R08 and R14, which wait for a value only
   the site knows (R08 its allowed DNS servers, R14 its user networks). Each rule starts at the
   present, so nothing is raised for the days before the upgrade.
+
+### Known limitations (Wave 6)
+
+- **R13 and R14 in a catch-up** (#302): when ingest catches up after an outage, one minute of
+  receive time can hold hours of device time. R13's and R14's statement for such a slice can then
+  run past `rules.statement_timeout_seconds` (default 20 s). The slice is rolled back and tried
+  again on every run, and after `rules.failures_alert` (default 3) failures in a row `R20-rules`
+  ("Güvenlik kuralı çalışamıyor: R13") opens; the rule stays behind until the slice passes or,
+  once it is more than `rules.max_catch_up_hours` (24) behind, skips the backlog. In the Wave 6
+  walk a whole scenario day sent in 10 s needed about 66 s with the timeout raised to
+  300 s, on a loaded 4-core machine. A fix is under way (#307).
 
 ## [0.4.1] — 2026-11-13
 

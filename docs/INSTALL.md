@@ -1196,6 +1196,15 @@ powershell -ExecutionPolicy Bypass -File .\installer\Install-Arcilogger.ps1 -Upg
 powershell -ExecutionPolicy Bypass -File .\installer\Install-Arcilogger.ps1 -Upgrade
 ```
 
+**Upgrade time to 0.5.0:** the 0.5.0 upgrade builds a receive-time index on `fg_traffic`,
+`fg_dns`, `fg_web` and `fg_app` (`0026_rules_time_received`). On plain PostgreSQL it takes about
+7 seconds and about 0.2 GB of extra disk per 10 million rows in these four tables. On TimescaleDB
+only the uncompressed chunks (about the last 7 days) count; compressed chunks are not
+decompressed. The other three revisions (`0024`, `0025`, `0027`) and the downgrade to `0023`
+each finish in under a second; the downgrade does not change the rows of these four tables. The
+times were measured on a 4-vCPU development machine; a slower disk takes proportionally longer.
+Example: 500 million rows in the four tables take about 6 minutes and 11 GB of extra disk.
+
 After the upgrade, check the new version and release date in the **Sürüm ve güncelleme** (Version
 and upgrades) block of the **Sistem** page, the services in its **Hizmetler** (Services) block, and
 the **Uyum Durumu** cards (section 12).

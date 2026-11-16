@@ -3009,13 +3009,15 @@ not a 5651 obligation; they belong to the licence module `security_rules`.
 | `GET /alerts?assignee=me\|none\|<id>` | `alerts.read` | each alert gains `assignee` and `evidence_total` |
 | `POST /alerts/{id}/assign` | `alerts.manage` | `{"user_id": n \| null}`, only users with `alerts.read`; an `assign` event and the audit `alert.assign`; 422 `alert_assignee_invalid` |
 | `GET /alerts/{id}/evidence` | `alerts.read` | the rows behind the alert with `raw: {source, day, line, offset}` for `/raw`; no line content |
-| `GET /alerts/{id}` | `alerts.read` | adds `person: {id, name}` only for `usage.person` and a person-level rule (R09, R13, R14), audited first as `alert.person_view` |
+| `GET /alerts/{id}` | `alerts.read` | adds `person: {id, name}` only for `usage.person` and a person-level rule (R09, R13, R14), audited first as `alert.person_view`; `deliveries` lists the e-mail deliveries only, a webhook's are on `GET /webhooks/{name}/deliveries` (#304) |
 | `GET /alerts/summary` | `alerts.read` | adds `by_day` (30 site days by severity), `top_rules`, `top_keys` (7 days) |
 | `GET /webhooks` | `alerts.read`; readable without the module | each `[[webhooks]]` entry: name, format, host only, `min_severity`, `rules`, `enabled`, `ready` and `reason` (`disabled`, `secret_missing`, `url_missing` or null), last delivery, 7-day counts |
 | `GET /webhooks/{name}/deliveries?limit=50` | `alerts.read` | the newest deliveries with `last_error` (no URL path, query, secret or header value); 404 `webhook_not_found` |
 | `POST /webhooks/{name}/test` | `settings.manage`, module | "Test gönder": a queued `worker.webhook_test`, as the test e-mail (five an hour); 404 `webhook_not_found`, 409 `webhook_not_ready` (`details.reason`) |
 | `POST /admin/config/sources/snmp-test` | `settings.manage`, recent re-authentication | "Bağlantıyı dene" (#217): a queued probe-only `config.apply` of `sources`; one a minute per user (429 `admin_rate_limited`) |
 | `GET /sources`, `/sources/{name}` | unchanged | each source gains `clock_offset_seconds` and `clock_rows` (#222) |
+| `GET /system/health` | unchanged | gains `source_clocks` (the sources beyond `alerts.source_clock_limit_seconds`, furthest off first, at most 10: `source`, `offset_seconds`, `rows`) and `source_clock_limit_seconds` (#222) |
+| `GET /activity/devices` | unchanged | gains `late_sources` (the enabled FortiGate sources whose clock is more than 5 minutes behind, so their traffic is missing from "Şu an": `source`, `behind_seconds`) (#222) |
 
 ### 20.2 Settings, module and worker jobs
 
@@ -3149,3 +3151,5 @@ Recorded in the contract's "Deviations" sections, each with its tests; what touc
     SNMP needs 1–4 interfaces and the test comes first (#217-1).
   - **The journal state `probe`** names the source; the audit `admin.probe` carries `log_source`
     and `ok` (#217-2).
+- **#222:** the contract's C13 names `/live` for the sources too late for "Şu an"; Canlı Durum's
+  "Şu an" reads `GET /activity/devices`, so `late_sources` is answered there.
