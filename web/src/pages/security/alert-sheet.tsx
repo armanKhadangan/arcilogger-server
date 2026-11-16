@@ -34,7 +34,6 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
 import { Timeline, type TimelineItem } from '@/components/ui/timeline';
 import { toast } from '@/components/ui/toast';
-import type { AlertDetailWithRules } from '@/lib/alert-rule-types';
 import { errorMessage, isApiError } from '@/lib/api';
 import { useAddAlertNote, useAlert, useChangeAlertState } from '@/lib/api-hooks';
 import type { AlertDetail, AlertEvent, AlertState } from '@/lib/api-types';
@@ -494,7 +493,7 @@ export function AlertSheet({
   const lang = currentLang();
   const id = useId();
   const detail = useAlert(alertId);
-  const alert: AlertDetailWithRules | undefined = detail.data;
+  const alert: AlertDetail | undefined = detail.data;
   const [raw, setRaw] = useState<RawLineTarget | null>(null);
   const evidenceTotal = alert ? evidenceTotalOf(alert) : 0;
   const notFound = detail.isError && isApiError(detail.error) && detail.error.status === 404;

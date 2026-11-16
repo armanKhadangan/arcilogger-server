@@ -16,7 +16,8 @@ import {
 } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
 import { toast } from '@/components/ui/toast';
-import type { AlertDetailWithRules, AlertEvidenceOut } from '@/lib/alert-rule-types';
+import type { AlertDetail } from '@/lib/api-types';
+import type { AlertEvidenceOut } from '@/lib/alert-rule-types';
 import { errorMessage } from '@/lib/api';
 import { useAlertEvidence, useAssignAlert, useUsers } from '@/lib/api-hooks';
 import { useAuth } from '@/lib/auth';
@@ -39,13 +40,7 @@ function tableLabel(table: string, t: ReturnType<typeof useTranslation>['t']): s
  * `alerts.manage` it is chosen here (the list of users needs `users.manage`; without it only
  * "me" and "nobody" are offered); the server writes an `assign` event and the audit `alert.assign`.
  */
-export function AssigneeControl({
-  alert,
-  manage,
-}: {
-  alert: AlertDetailWithRules;
-  manage: boolean;
-}) {
+export function AssigneeControl({ alert, manage }: { alert: AlertDetail; manage: boolean }) {
   const { t } = useTranslation();
   const id = useId();
   const { me, can } = useAuth();
@@ -127,7 +122,7 @@ export function AssigneeControl({
  * The person of a person-level rule's alert (R09, R13, R14), only when the API sends it: for
  * `usage.person`, after writing `alert.person_view` (D3). Nobody else sees a name here.
  */
-export function AlertPersonRow({ alert }: { alert: AlertDetailWithRules }) {
+export function AlertPersonRow({ alert }: { alert: AlertDetail }) {
   const { t } = useTranslation();
   if (!alert.person) return null;
   return (

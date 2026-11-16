@@ -32,7 +32,6 @@ import type {
   DashboardSummary,
   OpenBySeverity,
 } from '../src/lib/api-types';
-import type { AlertDetailWithRules } from '../src/lib/alert-rule-types';
 import { codePointLength } from '../src/lib/validation';
 import {
   PERSON_ALERT,
@@ -166,7 +165,7 @@ export interface AssignableUser {
 }
 
 export class AlertsMock {
-  readonly alerts = new Map<number, AlertDetailWithRules>();
+  readonly alerts = new Map<number, AlertDetail>();
   private readonly started = Date.now();
   private readonly clock = Date.parse(`${ALERTS.meta.site_today}T15:00:00+03:00`);
   private nextEvent: number;
@@ -258,7 +257,7 @@ export class AlertsMock {
     const assignee = q.get('assignee');
     if (assignee !== null && !/^(me|none|\d+)$/.test(assignee))
       return validation(host, 'assignee', "Input should be 'me', 'none' or a user id");
-    const assigned = (item: AlertDetailWithRules): boolean => {
+    const assigned = (item: AlertDetail): boolean => {
       if (assignee === null) return true;
       const holder = item.assignee?.id ?? null;
       if (assignee === 'none') return holder === null;
@@ -313,7 +312,7 @@ export class AlertsMock {
     if (!found) return host.error(404, 'alert_not_found');
     const answer = copy(found);
     // D3: the person's name only for `usage.person` (the API audits `alert.person_view`).
-    if (!host.permissionsOf(account).includes('usage.person')) delete answer.person;
+    if (!host.permissionsOf(account).includes('usage.person')) answer.person = null;
     return [200, answer];
   }
 
@@ -326,7 +325,7 @@ export class AlertsMock {
     const userId = body.user_id;
     if (userId !== null && !Number.isInteger(userId))
       return validation(host, 'user_id', 'Input should be an integer or null');
-    let assignee: AlertDetailWithRules['assignee'] = null;
+    let assignee: AlertDetail['assignee'] = null;
     if (userId !== null) {
       const user = this.userById(userId as number);
       if (!user?.permissions.includes('alerts.read'))

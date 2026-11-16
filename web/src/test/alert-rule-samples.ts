@@ -8,13 +8,13 @@
  * the `@/` alias and reads no file.
  */
 
-import type { AlertDetailWithRules, AlertEvidencePage, DayCounts } from '../lib/alert-rule-types';
-import type { AlertSummary } from '../lib/api-types';
+import type { AlertEvidencePage, DayCounts } from '../lib/alert-rule-types';
+import type { AlertDetail, AlertSummary } from '../lib/api-types';
 
 const TIME = '2026-10-13T08:41:07Z';
 
 /** R01, open, nobody assigned; 47 rows behind it, the first three kept here. */
-export const RULE_ALERT: AlertDetailWithRules = {
+export const RULE_ALERT: AlertDetail = {
   id: 9001,
   time: TIME,
   created_at: '2026-10-13T08:43:02Z',
@@ -61,10 +61,11 @@ export const RULE_ALERT: AlertDetailWithRules = {
   deliveries: [],
   assignee: null,
   evidence_total: 47,
+  person: null,
 };
 
 /** R13 (person level): the person of the address, sent only to `usage.person` (D3). */
-export const PERSON_ALERT: AlertDetailWithRules = {
+export const PERSON_ALERT: AlertDetail = {
   ...RULE_ALERT,
   id: 9002,
   time: '2026-10-13T07:12:40Z',

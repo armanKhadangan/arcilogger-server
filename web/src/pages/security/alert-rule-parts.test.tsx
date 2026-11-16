@@ -1,8 +1,7 @@
 import { screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
-import type { AlertDetailWithRules } from '@/lib/alert-rule-types';
-import type { Role } from '@/lib/api-types';
+import type { AlertDetail, Role } from '@/lib/api-types';
 import { errorResponse, installFetch, jsonResponse, makeMe } from '@/test/api-mock';
 import {
   PERSON_ALERT,
@@ -19,7 +18,7 @@ function serve(
     alert = RULE_ALERT,
     assign = () => jsonResponse(200, { ...RULE_ALERT, assignee: { id: 1, username: 'tolga' } }),
     grant = [],
-  }: { alert?: AlertDetailWithRules; assign?: () => Response; grant?: string[] } = {},
+  }: { alert?: AlertDetail; assign?: () => Response; grant?: string[] } = {},
 ) {
   const me = makeMe(role);
   me.permissions = [...me.permissions, ...grant];
