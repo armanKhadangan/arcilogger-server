@@ -47,7 +47,7 @@ from arcilogger_worker.lookup.refs import (
     fg_dhcp_ref,
 )
 from arcilogger_worker.lookup.trust import CONFIGURATION, kept, refusal, untrusted_sources
-from arcilogger_worker.lookup.types import EvidenceRef, LookupSettings
+from arcilogger_worker.lookup.types import UNLIMITED_LEASE, EvidenceRef, LookupSettings
 
 if TYPE_CHECKING:
     from arcilogger_worker.correlation.leases import Context
@@ -214,7 +214,7 @@ def _fortigate(
         lease = usable_lease(settings, row.lease)
         if row.lease is not None and lease is None:
             stats[LEASE_FALLBACK] += 1
-            if row.lease == 0:
+            if row.lease == UNLIMITED_LEASE:
                 stats[LEASE_UNLIMITED] += 1
         network = ctx.network_for(row.ip)
         if network is None:

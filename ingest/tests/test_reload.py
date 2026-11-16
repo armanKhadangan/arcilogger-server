@@ -309,12 +309,62 @@ def test_a_broken_file_keeps_the_sources_and_loading_goes_on(
     with running(world, db_engine, config_path) as service:
         wait_for(lambda: (status_config(world) or {}).get("sha256") == good_sha)
         rewrite(config_path, toml_of(world, SOURCES).replace('type = "mikrotik"', 'type = "x"'))
-        wait_for(lambda: (status_config(world) or {}).get("error") is not None)
+        # The broken file's own error, not the first error the status names: on Windows the
+        # watcher's read can meet the replace itself and report a PermissionError first, which
+        # it reads past at the next poll (#228; that case has its own test below).
+        wait_for(lambda: broken_by(world, "sources.1.type: "))
         block = status_config(world)
         assert block is not None
         assert block["sha256"] == good_sha  # still the file the sources came from
         assert block["error"].startswith("sources.1.type: ")
         assert [source.name for source in service.config.sources] == ["fortigate", "core-r1", "ap"]
+        world.append("core-r1", DAY, (dhcp_message(i) for i in range(10, 20)))
+        wait_for(lambda: lines_loaded(db_engine, "core-r1") == 20)
+    assert check_exactly_once(db_engine, world) == []
+
+
+def broken_by(world: World, prefix: str) -> bool:
+    error = (status_config(world) or {}).get("error")
+    return isinstance(error, str) and error.startswith(prefix)
+
+
+def test_a_refused_read_keeps_the_sources_and_the_next_poll_takes_the_file(
+    world: World, db_engine: Engine, config_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#228: on Windows the configuration file can be refused to the reader for a moment
+    (``PermissionError``: a sharing violation, or the name pending while the agent's replace
+    puts the new file in place). The watcher keeps the sources in use, says why in the status,
+    and reads the file again at its next poll: the new sources are taken then, nothing is
+    lost."""
+    good_sha = sha(config_path)
+    refusals: list[Path] = []
+    read_bytes = Path.read_bytes
+
+    def refused_once(path: Path) -> bytes:
+        if path == config_path and not refusals and armed.is_set():
+            refusals.append(path)
+            raise PermissionError(13, "Permission denied", str(path))
+        return read_bytes(path)
+
+    armed = threading.Event()
+    monkeypatch.setattr(Path, "read_bytes", refused_once)
+    world.append("core-r1", DAY, (dhcp_message(i) for i in range(10)))
+    with running(world, db_engine, config_path) as service:
+        wait_for(lambda: (status_config(world) or {}).get("sha256") == good_sha)
+        armed.set()
+        rewrite(config_path, toml_of(world, [*SOURCES, SWITCH]))
+        wait_for(lambda: broken_by(world, "PermissionError: "))
+        block = status_config(world)
+        assert block is not None
+        assert block["sha256"] == good_sha  # the sources in use came from the old file
+        assert [source.name for source in service.config.sources] == ["fortigate", "core-r1", "ap"]
+        new_sha = sha(config_path)
+        wait_for(lambda: (status_config(world) or {}).get("sha256") == new_sha)
+        assert (status_config(world) or {}).get("error") is None
+        assert [source.name for source in service.config.sources] == [
+            "fortigate", "core-r1", "ap", "switch-2"
+        ]  # fmt: skip
+        assert refusals == [config_path]
         world.append("core-r1", DAY, (dhcp_message(i) for i in range(10, 20)))
         wait_for(lambda: lines_loaded(db_engine, "core-r1") == 20)
     assert check_exactly_once(db_engine, world) == []

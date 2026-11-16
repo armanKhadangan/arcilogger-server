@@ -33,8 +33,8 @@ const EXPLANATION_TONE: Record<string, AlertTone> = {
   exact_nat: 'success',
   // ADR-0016 (contract 2.11): FortiGate DHCP, srcmac and the internet exits. `no_lease`,
   // `no_lease_for_mac`, `srcmac_agrees`, `srcmac_infrastructure`, `egress_search`,
-  // `egress_unconfigured`, `fortigate_format_unverified`, `fortigate_format_verified` and
-  // `source_configured_later` are information by design.
+  // `egress_unconfigured`, `fortigate_format_unverified`, `fortigate_format_verified`,
+  // `fortigate_lease_unlimited` (#299) and `source_configured_later` are information by design.
   chain_missing: 'warning',
   fortigate_dhcp_not_converted: 'warning',
   srcmac_only: 'warning',

@@ -357,7 +357,10 @@ public-IP request carries:
   `trust.REFUSAL_RULES`, `trust.CONFIGURATION` = the excluded-interface and IPv6 rules); a logged
   lease time (300-8,640,000 s) ends the lease that long after its last DHCP record, without the
   timeout margin (D6). A chain carries `fortigate_format_unverified`, or
-  `fortigate_format_verified` with `at` and `by` read from the setting row at lookup time.
+  `fortigate_format_verified` with `at` and `by` read from the setting row at lookup time, and
+  `fortigate_lease_unlimited` (info, `{fallback}` seconds, no citation) when the lease's own last
+  record logged `lease=0` (`types.UNLIMITED_LEASE`, ASSUMPTIONS V4) and it kept no logged time
+  (#299).
 - **Lowered to `low` with a reason:** `lease_renewal_not_seen` (the moment lies more than half a
   lease after the lease's last DHCP record with no renewal in between);
   `fortigate_dhcp_not_converted_since_lease` (FortiGate DHCP lines of the chain's IP or MAC after
@@ -2220,7 +2223,8 @@ ADR-0016).
   `fortigate_dhcp_no_network`, `egress_observed_not_configured`, `egress_changed_after_event`,
   `session_changed_exit`, `egress_not_logged_but_seen`, `dhcp_sources_overlap`,
   `session_from_unknown_source`, `source_configured_later`, `egress_public_dynamic`,
-  `egress_internal`, `source_clock_offset`, `source_clock_shared` (#82); rewritten: `no_lease`,
+  `egress_internal`, `source_clock_offset`, `source_clock_shared` (#82),
+  `fortigate_lease_unlimited` (#299); rewritten: `no_lease`,
   `no_lease_for_mac`, `port_hint` (`{egresses}`), `public_ip_not_transip`. Retired, kept for
   stored lookups and never emitted: `public_ip_not_configured`, `wan_transip_not_seen`.
   `srcmac_mismatch` is a conflict key like `ip_conflict` (`types.CONFLICT_KEYS`).

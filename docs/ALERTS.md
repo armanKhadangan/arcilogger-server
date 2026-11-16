@@ -300,8 +300,266 @@ cannot go straight to İnceleniyor: re-open it first.
   the same advice as section 2) and the e-mail deliveries (masked recipient, status, attempts).
   The full addresses are in the setting `alerts.email_recipients` and among the schedule's
   recipients on the Raporlar page.
+- **Assignment:** an alert can be given to an active user who may read alerts (`alerts.read`), or
+  to nobody ("Atanan"; changing it takes `alerts.manage`). The select lists the users; without
+  the right to see the user list (`users.manage`) you can only choose yourself or "Kimseye
+  atanmadı". Assigning to a user who cannot read alerts is refused ("Bu kullanıcıya uyarı
+  atanamaz." / "Alerts cannot be assigned to this user."). An assignment is an event in the
+  timeline and the audit entry `alert.assign`. The list has an **Atanan** (assignee) column and
+  a **Bana atananlar** (assigned to me) filter.
+- **Evidence:** a security rule's alert has a **Kanıt** (evidence) tab with the records behind it:
+  device time, record type, source and receive time. Of the most records any one window held,
+  the first `rules.evidence_max` (default 20) are kept, and the tab says so ("Bir pencerede en çok
+  … kayıt; ilk … tanesi kanıt olarak saklanır."). The alert keeps references to the rows, never
+  their content. **Ham satırı aç** (open the raw line) opens it in the raw-line view: it needs the
+  search or 5651 lookup right (`search.read` or `lookup.run`), and every opening is audited as
+  `raw.view`. Evidence from the device inventory has no raw line.
+- **Person (R09, R13, R14):** the "Kişi: …" (person) line of a person-level alert is shown only
+  to users with the right to see personal data (`usage.person`), and written to the audit log
+  (`alert.person_view`) before it is shown; a note under the line says so (section 9, KVKK).
+- **The last 30 days:** below the security summary, the alerts opened in the last 30 days per day
+  and severity (with a table view), and the 10 rules and 10 keys (an address, a MAC or a user
+  name; never a person's name) with the most alerts in the last 7 days. Clicking a rule filters
+  the list by it.
 - **Mean time to close:** the mean time from opening to the last closing (a change from Yeni or
   İnceleniyor to Kapandı or Yanlış alarm; switching between Kapandı and Yanlış alarm is no
   closing) of the alerts that are closed now and were last closed within the last 30 days
   (closed by a person or by a check). Alerts closed before this release have no timeline and do
   not count.
+
+## 9. Security rules (R01–R19)
+
+> These rules belong to the **Security rules** licence module ([LICENSING.md](LICENSING.md)); the
+> log-source and system alerts (`R15`, `R20-*`) stay in 5651 Temel and never switch off with any
+> licence state. The security rules are not a 5651 obligation; they help you see suspicious
+> events on the network.
+
+The rules run in the worker once a minute, holding back the last two minutes (for late lines), and
+only **read** the parsed tables and the device inventory; they never change a raw log line, the
+vault or a seal. Windows count by **receive time** (a device with a wrong clock does not hide a
+scan; `R20-source-clock` reports the wrong clock, section 2). A rule switched on for the first time
+raises no alert for older data; it counts from then on.
+
+- **Thresholds are starting values**, not measured facts: adjust them to your network.
+- **Alert and evidence:** every alert keeps the rows that raised it as evidence (table, row and
+  raw-line reference); the raw line opens with Ham satırı aç (open the raw line), with its
+  permission and an audit entry (the Kanıt tab, section 8). An alert's details, its e-mail and its
+  webhook notification never contain a raw log line.
+- **Deduplication and cooldown:** while an alert of the same key (e.g. the same source address)
+  is active, no new alert opens; the alert's count is the highest count seen in one window (it
+  is not added up across runs). After an alert is closed, events within
+  the cooldown open no new alert; they are counted on the closed alert.
+- **Trial run ("Son 24 saatte dene", try on the last 24 hours):** a rule's new settings can be
+  tried on the last 24 hours of data before they are saved. The trial evaluates the rule in the
+  same slices as the live run, applies deduplication and the cooldown as if no alert existed, and
+  gives the number of alerts that would have opened and the first 20 keys (with their counts and
+  first and last times). It runs in a read-only transaction: it writes nothing and opens no
+  alert. If it does not finish within `rules.dry_run_timeout_seconds` (30 seconds by default) it
+  stops; shorten the window or the lists and try again.
+- **"Sahada doğrula" (verify on site):** the rules that read a log format the repository has no
+  format sample of (FortiGate admin login, configuration change, performance, botnet, DNS
+  response code) are marked "sahada doğrula"; the logids and texts they read are settings.
+  Compare them with a real line of the site's device ([DEVICE-SETUP.md](DEVICE-SETUP.md)).
+- **KVKK:** R09, R13 and R14 are person-level: the alert keeps the person by number only, and the
+  title shows the address. The person's name is shown on the Security page only to users with
+  the person permission (`usage.person`), after it has been written to the audit log
+  (`alert.person_view`); e-mails and webhooks carry no person names. As these rules can be seen as
+  monitoring employees, **legal review is recommended**; review your privacy notice and internal
+  rules.
+
+### Rule editor: Settings → Güvenlik kuralları (Security rules)
+
+**Settings → Güvenlik kuralları** (`/settings/rules`) shows each rule on one row: code, name,
+severity, state (On / Off / Needs setup) and data status (**Data arriving**, **No data in the
+last 24 hours**, **No data ever**: whether rows arrived in the tables the rule reads in the last
+24 hours). The notes column carries **Verify on site** (the log format it reads has not been
+verified with a sample line), **Needs setup** (the rule does not run until its required
+parameter is entered: R08, R14) and **Person level** (R09, R13, R14). Every user who can see
+alerts (`alerts.read`) sees the page; only users with the settings permission
+(`settings.manage`) change the rules. Without the Security rules module in the licence the rules
+show as **Locked** and cannot be changed; the 5651 Temel alerts (R15, R20) keep working.
+
+A row opens the rule's form: whether the rule is on, severity, window (60 seconds to 7 days),
+cooldown (at most 7 days), the rule's parameters (one value per line in lists; networks checked
+as CIDR; bytes in MiB, times of day as HH:MM), actions (**Send e-mail**, **Send to webhooks**),
+the "What to do" text, **Back to defaults**, **Try on the last 24 hours** and **Save**. The
+trial's result reads "With these settings {n} alerts would have opened in the last 24 hours",
+with the first keys; if the settings change after the trial, the page asks you to try again.
+Save writes the `rules.<ID>` setting and adds `rule.update` to the audit log with the settings
+before and after (no person data). A rule that is switched on looks only at data that arrives
+after that.
+
+**Webhooks:** the alerts of a rule with **Send to webhooks** on also go to the webhooks defined
+on the server ([INSTALL.md](INSTALL.md) section 7.3); a notification carries no person name and
+no raw log line.
+
+### R01 Internal port scan (high)
+
+- **Catches:** an internal address blocked on **30** different ports or **50** different
+  addresses within 1 minute (`fg_traffic`, `action` = `deny`). MikroTik firewall lines can count
+  too (the log prefixes given in `mikrotik_prefixes`).
+- **Cooldown:** 1 hour. **Data:** FortiGate traffic logs; logging of denied traffic must be on.
+- **What to do:** Find the device of the address with a 5651 lookup; check it for malware or an
+  unauthorised scanning tool and take it off the network if need be.
+
+### R02 External scan (medium)
+
+- **Catches:** **100** blocked connections of an external address within 5 minutes;
+  `policy_names` can limit it to some policies (empty: all).
+- **Cooldown:** 1 hour. **Data:** FortiGate traffic logs (denied traffic).
+- **What to do:** Look at the target ports of the blocked connections and close any service left
+  open. For a scan that goes on, you can block the address on the firewall.
+
+### R03 Brute-force login (high, verify on site)
+
+- **Catches:** **5** failed admin logins within 5 minutes: FortiGate (`logid` `0100032002` or
+  `logdesc` "Admin login failed") and MikroTik ("login failure"). Each line counts both for the
+  account (`user:<name>`) and for the source address (`ip:<address>`).
+- **Cooldown:** 1 hour. **Data:** FortiGate event logs (admin login), the MikroTik `account`
+  topic.
+- **What to do:** Check the address and the account the attempts came from; change the password
+  of a real account and allow the management interface from the management network only.
+
+### R04 Admin login off hours or from an unexpected address (medium, verify on site)
+
+- **Catches:** every successful admin login (FortiGate `0100032001` or "Admin login successful";
+  MikroTik "logged in") outside work hours (`usage.work_hours` and `usage.holidays`; a lunch break
+  counts as work time; no usage analytics licence needed), or from an address outside
+  `trusted_admin_networks` (this part is off while the list is empty). Work hours are judged on
+  the login's own time.
+- **Data:** FortiGate event logs, the MikroTik `account` topic.
+- **What to do:** Have the account's owner confirm the login; if it was not theirs, change the
+  account's password and review the device's configuration changes.
+
+### R05 IPS attack (high)
+
+- **Catches:** every IPS attack of high or critical severity; **10** of medium severity within 1
+  hour (`fg_ips`). Key: the source address and the attack id.
+- **Cooldown:** 1 hour. **Data:** FortiGate IPS logs.
+- **What to do:** Make sure the target system is up to date and that the attack was blocked; if
+  it was not, review the IPS profile and the target's patches.
+
+### R06 Botnet or threat IP (critical, verify on site)
+
+- **Catches:** the FortiGate's botnet detection (`fg_ips`, `eventtype` `botnet`) and, optionally,
+  traffic caught by a threat IP policy (`threat_policy_names`).
+- **Cooldown:** 1 hour. **Data:** FortiGate IPS logs (botnet detection on).
+- **What to do:** Find the address's device with a 5651 lookup, take it off the network and scan
+  it for malware; change the device's passwords.
+
+### R07 Malware (high)
+
+- **Catches:** every antivirus record (`fg_virus`; except the actions in `ignore_actions`). The
+  title holds only the virus name and the source address; the file name and address stay in the
+  evidence line.
+- **Cooldown:** 1 hour. **Data:** FortiGate antivirus logs.
+- **What to do:** Make sure the file was blocked and run a full scan on the device. The file's
+  name and address are in the evidence line (open the raw line).
+
+### R08 DNS bypass (medium, needs setup)
+
+- **Catches:** **20** connections of an internal address to DNS servers that are not allowed
+  (ports 53 and 853) within 1 hour; connections the firewall blocked count too (a blocked
+  attempt is still an attempt).
+- **Needs setup:** the rule does not run while `allowed_dns_servers` (the organisation's DNS
+  servers) is empty.
+- **Cooldown:** 1 hour. **Data:** FortiGate traffic logs.
+- **What to do:** Check the device's DNS setting and its browser's secure DNS (DoH/DoT) setting;
+  consider closing ports 53 and 853 to outside DNS servers on the firewall.
+
+### R09 Repeated blocked categories (low, person-level)
+
+- **Catches:** **20** requests of a person to blocked categories within 1 hour (`fg_web`,
+  `fg_dns`, `action` = `blocked`). The person-level rules (R09, R13, R14) sum the rows per
+  address and minute; a minute belongs to whoever held the address (by DHCP lease) at its first
+  instant, as in the usage reports. An address attributed to nobody is its own key.
+- **Cooldown:** 1 hour. **Data:** FortiGate web filter and DNS filter logs.
+- **What to do:** See whether the requests came from an application or a person and act under
+  your organisation's rules. Person names are shown to authorised roles only.
+
+### R10 Proxy / VPN / Tor (medium)
+
+- **Catches:** the "Proxy Avoidance" category (web or DNS filter), the Tor application or the
+  Proxy application category; **1** record within 1 hour is enough. Category and application
+  names are FortiGuard's: verify them on site for your FortiOS version.
+- **Cooldown:** 1 hour. **Data:** FortiGate web filter, DNS filter and application control logs.
+- **What to do:** This use can get around the filter and the logs; find the device, act under
+  your organisation's rules and block the application or category.
+
+### R11 New device (low)
+
+- **Catches:** every device the device inventory has just learnt (from a DHCP or ARP record);
+  infrastructure devices, random (private) MAC addresses (`ignore_random`) and the VLANs in
+  `ignore_vlans` excepted. Devices known before the rule was switched on raise no alert.
+- **Data:** DHCP and ARP evidence (MikroTik DHCP, ARP-LOG or FortiGate DHCP).
+- **What to do:** Check whether the device is known; if it is, assign it to a person on the
+  Devices page, if not, find where it is connected.
+
+### R12 MAC change (medium)
+
+- **Catches:** one IP address changing its MAC address **3** times within 1 hour (ARP-LOG,
+  MikroTik DHCP assignment or FortiGate DHCP Ack); infrastructure MAC addresses
+  (`devices.infrastructure_macs`) are ignored. The `ip_conflict` alert of 5651 Temel runs as
+  well.
+- **Cooldown:** 1 hour. **Data:** DHCP and ARP evidence.
+- **What to do:** Find the devices that use the address in turn; it may be an address conflict, a
+  wrong static address or ARP poisoning.
+
+### R13 Large upload (medium, person-level)
+
+- **Catches:** more than **1 GiB** **sent** by a person (or an address) within 1 hour, or more
+  than **5 GiB** in one site day; counted as the usage reports count (the final records' sent
+  bytes, the interim records' differences, no double count). The hour is the share of the
+  records **received** in the last hour as the site day counts them: each record counts what its
+  session sent since the session's previous record (yesterday's records as yesterday counts them).
+- **Cooldown:** 1 hour. **Data:** FortiGate traffic logs.
+- **What to do:** Check the target of the upload and whether it is a known backup or sync; if
+  not, look into a possible data leak.
+
+### R14 Night activity (low, person-level, needs setup)
+
+- **Catches:** at least **10 MiB** of traffic at night (site time 00:00–06:00) from an address in
+  the user networks (`user_networks`).
+- **Needs setup:** the rule does not run while `user_networks` is empty.
+- **Cooldown:** 6 hours. **Data:** FortiGate traffic logs.
+- **What to do:** Check for an update or backup that runs at night; if there is none, look into
+  the device and the target of the traffic.
+
+### R16 Device configuration change (medium, verify on site)
+
+- **Catches:** every configuration change: FortiGate (`logid` `0100044546`, `0100044547`) and
+  MikroTik ("… changed/added/removed by <user>"). Key: the source and the user.
+- **Cooldown:** 10 minutes; changes within it are counted on the same alert. **Data:** FortiGate
+  event logs (configuration change), the MikroTik `system` topic.
+- **What to do:** Make sure the change was planned; if not, compare it with the device's
+  configuration backup and change the account's password.
+
+### R17 Firewall health (high, verify on site)
+
+- **Catches:** CPU above 80 % or memory above 85 % in every sample of the FortiGate's
+  performance statistics (`logid` `0100040704`, fields `cpu` and `mem`) for 10 minutes, or a
+  conserve mode record. This is a **condition** rule: when the condition has not been seen for 10
+  minutes, the alert closes by itself (`condition_cleared`).
+- **Data:** FortiGate system event logs (performance statistics).
+- **What to do:** Look at the device's CPU and memory use, its session count and the features
+  turned on; conserve mode drops traffic or lets it through unchecked.
+
+### R18 DHCP pool exhausted (high)
+
+- **Catches:** the MikroTik record "failed to give out IP address … pool … is empty" (a confirmed
+  parser family) and a FortiGate record whose `logdesc` contains "ran out of" (verify on site).
+  Key: the source and the server or interface.
+- **Cooldown:** 1 hour. **Data:** the MikroTik `dhcp` topic, FortiGate DHCP events.
+- **What to do:** Enlarge the pool or shorten the lease time; find any unknown devices that fill
+  it.
+
+### R19 Suspicious DNS (DGA) (medium, verify on site)
+
+- **Catches:** more than **200** "no such name" (NXDOMAIN) DNS answers to one address within 1
+  hour; the response code is read from the FortiGate DNS log's `rcode` field (`NXDOMAIN` or `3`).
+- **Cooldown:** 1 hour. **Data:** FortiGate DNS filter logs (answers included).
+- **What to do:** Many queries for names that do not exist can be a sign of malware; find the
+  device and scan it.
+
+The load generator writes a fictional attack scenario for every rule (`--scenario`,
+`tools/loadgen/README.md` in the repository); the demo and the tests use it.

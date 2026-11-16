@@ -24,7 +24,8 @@ from arcilogger_api.testing import LoggedIn
 from arcilogger_core.config import Config
 from arcilogger_core.layout import Layout
 from arcilogger_core.secretstore import SecretStore
-from arcilogger_db.models import AuditLog, Person
+from arcilogger_db.clocksamples import ClockKey, upsert_samples
+from arcilogger_db.models import AuditLog, Person, Source
 from arcilogger_db.settings import set_setting
 from arcilogger_worker.activity import Snapshot
 from arcilogger_worker.testing import tr
@@ -158,6 +159,34 @@ def test_without_a_snapshot_the_answer_is_empty_and_warming_up(
     answer = _get(admin, window="5")
     assert (answer["rows"], answer["warming_up"], answer["data_until"]) == ([], True, None)
     assert len(answer["per_minute"]) == 60
+
+
+def test_a_firewall_far_behind_is_named(
+    admin: TestClient, app_session_factory: sessionmaker[Session]
+) -> None:
+    """``late_sources``: a FortiGate whose clock is more than 5 minutes behind is missing from the
+    figures, and the answer names it; one 2 minutes behind and a router are not named (#222)."""
+    minute = NOW.astimezone(UTC).replace(second=0, microsecond=0) - timedelta(minutes=1)
+    with app_session_factory() as session:
+        session.add_all(
+            [
+                Source(name="fortigate", type="fortigate", address="172.20.0.1"),
+                Source(name="fortigate-2", type="fortigate", address="172.20.0.2"),
+                Source(name="core-r1", type="mikrotik", address="172.20.10.1"),
+            ]
+        )
+        session.flush()
+        upsert_samples(
+            session.connection(),
+            {
+                ClockKey("fortigate", minute, -420): 30,
+                ClockKey("fortigate-2", minute, -120): 30,
+                ClockKey("core-r1", minute, -900): 30,
+            },
+        )
+        session.commit()
+    answer = _get(admin, window="5")
+    assert answer["late_sources"] == [{"source": "fortigate", "behind_seconds": 420}]
 
 
 def test_an_excluded_person_is_no_row_but_counts_in_the_totals(

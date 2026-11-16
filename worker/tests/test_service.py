@@ -3,6 +3,7 @@ restarts), failures and database outages never stop the loop, status file, stop 
 
 from __future__ import annotations
 
+import gc
 import itertools
 import json
 import threading
@@ -19,6 +20,7 @@ from arcilogger_core.layout import Layout
 from arcilogger_db.engine import engine_from_url
 from arcilogger_db.models import JobRun, Lease
 from arcilogger_worker.service import (
+    COLLECTOR_THRESHOLDS,
     MIN_SLEEP_SECONDS,
     SKIPPED,
     SLEEP_SECONDS,
@@ -26,6 +28,7 @@ from arcilogger_worker.service import (
     JobContext,
     Worker,
     default_jobs,
+    freeze_loaded,
     retry_delay,
 )
 from arcilogger_worker.testing import Evidence, tr
@@ -393,3 +396,18 @@ def test_retry_delays() -> None:
         timedelta(minutes=30),
     ]
     assert retry_delay(hourly, 5) == timedelta(hours=1)  # never shorter than the interval
+
+
+def test_the_service_start_freezes_what_is_loaded_and_sets_the_thresholds() -> None:
+    """#281: what is loaded is frozen, and the collector runs with fewer full passes while the
+    service runs (the measured thresholds), set back by the caller at its end."""
+    before = gc.get_threshold()
+    try:
+        freeze_loaded()
+        assert gc.get_freeze_count() > 0
+        assert gc.get_threshold() == COLLECTOR_THRESHOLDS
+        assert COLLECTOR_THRESHOLDS[0] >= before[0]
+        assert COLLECTOR_THRESHOLDS[2] > before[2]
+    finally:
+        gc.unfreeze()
+        gc.set_threshold(*before)

@@ -26,7 +26,8 @@
       "today": "Bugün: satır, hata %",
       "signalInterval": "Sinyal aralığı",
       "state": "Durum",
-      "actions": "İşlemler"
+      "actions": "İşlemler",
+      "clock": "Saat farkı"
     },
     "badges": {
       "unknown": "Bilinmeyen",
@@ -124,6 +125,15 @@
         "search": "Aramada göster",
         "invalidNote": "Toplayıcı biçiminde olmayan satırlar (rawlog.invalid) veritabanına yüklenmez; Arama onları bulamaz, yalnızca örnek satırları açılır."
       }
+    },
+    "clock": {
+      "onTime": "zamanında",
+      "behind_one": "{{count}} dk geri",
+      "behind_other": "{{count}} dk geri",
+      "ahead_one": "{{count}} dk ileri",
+      "ahead_other": "{{count}} dk ileri",
+      "title": "Cihaz saatinin alma zamanından farkı: son bir saatte alınan en yeni {{rows}} kaydın ortancası (bir dakikanın altındaki fark zamanında sayılır).",
+      "unknown": "Son bir saatte yeterli kayıt yok."
     }
   },
   "settings": {

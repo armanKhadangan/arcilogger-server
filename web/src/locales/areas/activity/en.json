@@ -49,7 +49,9 @@
       "warmingUp": "The figures are not complete yet",
       "warmingUpHint": "The count is either still reading the last 60 minutes (the worker has just started) or has not been updated for over a minute. The table and chart fill in shortly; if this persists, an administrator should check the worker on the System page.",
       "locked": "The usage analytics module is off",
-      "lockedHint": "The \"Right now\" table belongs to the usage analytics module. The internet line's speed is shown without it."
+      "lockedHint": "The \"Right now\" table belongs to the usage analytics module. The internet line's speed is shown without it.",
+      "lateSources": "Firewall clock behind",
+      "lateSourcesHint": "{{sources}}: the device clock is more than 5 minutes behind, so its traffic does not show under Now. Switch on NTP on the device (R20-source-clock)."
     }
   }
 }

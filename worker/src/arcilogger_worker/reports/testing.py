@@ -126,7 +126,7 @@ PERSONS: Final = (
 )  # fmt: skip
 #: Devices with traffic but no person (label, MAC, IP, VLAN, active minutes, down MB, up MB).
 UNASSIGNED: Final = (
-    ("TOPLANTI-ODASI", "00:0c:29:00:17:01", "172.20.43.90", 43, 52, 640, 35),
+    ("TOPLANTI-ODASI", "00:00:5e:00:53:c1", "172.20.43.90", 43, 52, 640, 35),
     ("02:4b:1e:00:17:02", "02:4b:1e:00:17:02", "172.20.60.77", 60, 38, 410, 22),
 )
 #: Blocked attempts: (hh:mm:ss, person, domain, category, action, source); the person's

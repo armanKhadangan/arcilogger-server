@@ -70,7 +70,7 @@ from sqlalchemy import create_engine, text
 WAN, WAN_PORT, AT = "100.64.12.9", 51001, (11, 23, 41)
 PC, PC_MAC, PC_HOST = "172.20.42.57", "00:00:5e:00:53:57", "PLN-PC14"
 PC_SERVER, PC_LEASE = "dhcp42", (10, 42, 18)
-ROGUE_MAC = "00:0c:29:00:00:99"
+ROGUE_MAC = "00:00:5e:00:53:9a"
 PERSON, DEPARTMENT, DEVICE_NAME = "Selin Kaya", "Planlama", "Planlama-PC-14"
 OTHERS = (
     ("172.20.42.165", "3c:52:82:00:00:05", "PLN-PC-05", "dhcp42"),
@@ -130,7 +130,7 @@ def _write_spool(config_path: Path) -> date:
         spool.dhcp(tr(day, 8, 12), "assigned", ip, mac, server=server, hostname=hostname)
     spool.dhcp(tr(day, *PC_LEASE), "assigned", PC, PC_MAC, server=PC_SERVER, hostname=PC_HOST)
     spool.traffic(tr(day, *AT), PC, WAN_PORT, "203.0.113.10", 443, duration=10)
-    destinations = [("151.101.1.69", 443), ("104.18.32.7", 443), ("8.8.8.8", 53)]
+    destinations = [("198.51.100.69", 443), ("198.51.100.169", 443), ("8.8.8.8", 53)]
     for index in range(9):
         ip = OTHERS[index % len(OTHERS)][0]
         dstip, dstport = destinations[index % len(destinations)]
@@ -146,7 +146,7 @@ def _write_spool(config_path: Path) -> date:
     # A static device answers ARP for the PC's address: an IP conflict around 13:30.
     spool.arp(tr(day, 13), PC, ROGUE_MAC, interface="vlan42")
     spool.arp(tr(day, 14), PC, ROGUE_MAC, interface="vlan42")
-    spool.traffic(tr(day, 13, 30), PC, 61001, "93.184.216.34", 443, duration=12)
+    spool.traffic(tr(day, 13, 30), PC, 61001, "203.0.113.34", 443, duration=12)
     return day
 
 

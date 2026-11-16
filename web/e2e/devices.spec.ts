@@ -99,7 +99,7 @@ test.describe('Cihazlar ve Kişiler', () => {
     await page.getByLabel('Tür').click();
     await page.getByRole('option', { name: 'Yazıcı' }).click();
     await expect(page).toHaveURL(/type=printer/);
-    await expect.poll(() => macs(page)).toEqual(['00:0c:29:00:00:99']);
+    await expect.poll(() => macs(page)).toEqual(['00:00:5e:00:53:9a']);
 
     // Reload: the filters come back from the address (the search box starts empty).
     await page.reload();
@@ -107,7 +107,7 @@ test.describe('Cihazlar ve Kişiler', () => {
       'aria-pressed',
       'true',
     );
-    await expect.poll(() => macs(page)).toEqual(['00:0c:29:00:00:99']);
+    await expect.poll(() => macs(page)).toEqual(['00:00:5e:00:53:9a']);
 
     await page.getByRole('button', { name: 'Filtreleri temizle' }).first().click();
     await expect(page).toHaveURL(/\/devices$/);

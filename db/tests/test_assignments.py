@@ -283,7 +283,7 @@ def test_migration_backfills_existing_links_and_downgrades(empty_engine: Engine)
                 "INSERT INTO devices (mac, person_id, first_seen) VALUES "
                 "(:a, :p, :seen), (:b, :p, NULL), (:c, NULL, :seen)"
             ),
-            {"a": MAC, "b": OTHER, "c": "00:0c:29:00:00:99", "p": person, "seen": seen},
+            {"a": MAC, "b": OTHER, "c": "00:00:5e:00:53:9a", "p": person, "seen": seen},
         )
         created = connection.execute(
             text("SELECT created_at FROM devices WHERE mac = :b"), {"b": OTHER}

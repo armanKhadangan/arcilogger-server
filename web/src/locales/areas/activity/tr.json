@@ -49,7 +49,9 @@
       "warmingUp": "Rakamlar henüz eksik",
       "warmingUpHint": "Sayım ya hâlâ son 60 dakikayı okuyor (worker yeni başladı) ya da bir dakikadan uzun süredir güncellenmedi. Tablo ve grafik birazdan tamamlanır; sürerse yöneticiniz Sistem sayfasında worker'ın durumuna bakmalı.",
       "locked": "Kullanım analizi modülü kapalı",
-      "lockedHint": "\"Şu an\" tablosu Kullanım analizi modülüne aittir. İnternet hattının hızı modülden bağımsız görünür."
+      "lockedHint": "\"Şu an\" tablosu Kullanım analizi modülüne aittir. İnternet hattının hızı modülden bağımsız görünür.",
+      "lateSources": "Saati geride kalan güvenlik duvarı",
+      "lateSourcesHint": "{{sources}}: cihaz saati 5 dakikadan fazla geride, bu yüzden trafiği Şu an'da görünmez. Cihazda NTP'yi açın (R20-source-clock)."
     }
   }
 }

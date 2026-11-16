@@ -556,6 +556,15 @@ ENGINE_EXPLANATIONS: Final[Mapping[str, tuple[str, str]]] = {
         "The FortiGate DHCP record format was marked as verified on site at this installation on "
         "{at} by {by} (DEVICE-SETUP.md section 2.4).",
     ),
+    "fortigate_lease_unlimited": (
+        "FortiGate bu kiranın son DHCP kaydında kira süresini süresiz bildirdi (lease=0); kira, "
+        "yerine ayarlardaki süreyle hesaplandı: son kayıttan {fallback} sn sonra biter "
+        "(lease.server_seconds, yoksa lease.default_seconds, lease.timeout_percent payıyla).",
+        "The FortiGate reported the lease time as unlimited in this lease's last DHCP record "
+        "(lease=0); the configured time was used instead: the lease ends {fallback} s after the "
+        "last record (lease.server_seconds, else lease.default_seconds, with the "
+        "lease.timeout_percent margin).",
+    ),
     "session_from_unknown_source": (
         "{count} eşleşmenin kayıtları yapılandırmada tanımlı olmayan bir göndericiden geldi "
         "({sources}); bu eşleşmeler ayrıca kendi satırlarında işaretlidir. Bu kayıtlar kurumun "

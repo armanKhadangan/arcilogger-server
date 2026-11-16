@@ -734,7 +734,7 @@ def test_attribute_uses_open_leases_only_until_their_timeout(
 def test_ip_conflict_lists_every_device(
     db_session: Session, evidence: Evidence, site: Site
 ) -> None:
-    rogue = "00:0c:29:00:00:99"
+    rogue = "00:00:5e:00:53:9a"
     evidence.arp(tr(DAY, 12), PC, rogue, interface="vlan42")
     evidence.arp(tr(DAY, 13), PC, rogue, interface="vlan42")
     db_session.commit()

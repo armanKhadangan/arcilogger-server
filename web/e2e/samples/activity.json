@@ -2,6 +2,7 @@
   "devices_1": {
     "data_until": "2026-10-12T06:02:00Z",
     "generated_at": "2026-10-12T06:02:30Z",
+    "late_sources": [],
     "more": false,
     "per_minute": [
       {
@@ -320,6 +321,7 @@
   "devices_15": {
     "data_until": "2026-10-12T06:02:00Z",
     "generated_at": "2026-10-12T06:02:30Z",
+    "late_sources": [],
     "more": false,
     "per_minute": [
       {
@@ -669,6 +671,7 @@
   "devices_5": {
     "data_until": "2026-10-12T06:02:00Z",
     "generated_at": "2026-10-12T06:02:30Z",
+    "late_sources": [],
     "more": false,
     "per_minute": [
       {
@@ -1040,7 +1043,7 @@
     }
   },
   "meta": {
-    "captured_at": "2026-10-13T04:01:42.132084+00:00",
+    "captured_at": "2026-10-13T04:01:29.307085+00:00",
     "clock": "2026-10-13T07:00:00+03:00",
     "info": "captured by web/scripts/capture_api_samples.py; do not edit",
     "site_day": "2026-10-09",
@@ -1050,6 +1053,7 @@
   "viewer_devices_pseudonymous": {
     "data_until": "2026-10-12T06:02:00Z",
     "generated_at": "2026-10-12T06:02:30Z",
+    "late_sources": [],
     "more": false,
     "per_minute": [
       {

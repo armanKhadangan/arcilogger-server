@@ -248,7 +248,7 @@ test.describe('5651 Sorgu', () => {
     const second = conflict.getByRole('region', { name: 'Olasılık 2' });
     await expect(first).toContainText('MAC 00:00:5e:00:53:57 (PLN-PC14)');
     await expect(first).toContainText('Selin Kaya / Planlama');
-    await expect(second).toContainText('MAC 00:0c:29:00:00:99');
+    await expect(second).toContainText('MAC 00:00:5e:00:53:9a');
     await expect(second).toContainText('bağlı kişi yok · Departman Planlama');
     await expect(page.getByText('Düşük güven').first()).toBeVisible();
   });

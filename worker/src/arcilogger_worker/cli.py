@@ -196,11 +196,13 @@ def run(config_path: Path | None, *, stop: threading.Event | None = None) -> int
         config=config,
         config_path=fixed_path,  # live reload, the admin folder
     )
+    thresholds = gc.get_threshold()
     freeze_loaded()
     try:
         worker.run(stop)
     finally:
         gc.unfreeze()
+        gc.set_threshold(*thresholds)
         engine.dispose()
     return EXIT_OK
 

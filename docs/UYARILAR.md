@@ -293,8 +293,260 @@ doğrudan İnceleniyor yapılamaz: önce yeniden açın.
   özetinde de; `R20-email` ve `R20-report` alıcıyı adlandırır), ne yapılacağı (adım adım, bölüm
   2'deki öneriyle aynı) ve e-posta teslimleri (alıcı maskeli, durum, deneme sayısı). Tam
   adresler `alerts.email_recipients` ayarında ve Raporlar sayfasında zamanlamanın alıcılarındadır.
+- **Atama:** bir uyarı, uyarıları okuyabilen (`alerts.read`) etkin bir kullanıcıya ya da kimseye
+  atanabilir ("Atanan"; atamayı değiştirmek `alerts.manage` ister). Seçim listesi kullanıcıları
+  gösterir; kullanıcı listesini görme yetkisi (`users.manage`) yoksa yalnızca kendinizi ya da
+  "Kimseye atanmadı"yı seçebilirsiniz. Uyarıları okuyamayan bir kullanıcıya atama "Bu kullanıcıya
+  uyarı atanamaz." ile reddedilir. Atama zaman çizelgesine bir olay, denetim kaydına
+  `alert.assign` olarak yazılır. Listede **Atanan** sütunu ve **Bana atananlar** süzgeci vardır.
+- **Kanıt:** bir güvenlik kuralının uyarısında **Kanıt** sekmesi uyarıya yol açan kayıtları
+  gösterir: cihaz zamanı, kayıt türü, kaynak ve alındığı an. Bir pencerede görülen en yüksek kayıt
+  sayısından ilk `rules.evidence_max` (varsayılan 20) satır saklanır; sekme bunu söyler ("Bir
+  pencerede en çok … kayıt; ilk … tanesi kanıt olarak saklanır."). Uyarı satırların içeriğini
+  değil, yalnızca başvurusunu tutar. **Ham satırı aç** satırı ham satır görünümüyle açar: arama ya
+  da 5651 sorgu yetkisi (`search.read` ya da `lookup.run`) gerekir ve her açılış denetim kaydına
+  `raw.view` olarak yazılır. Cihaz envanterinden gelen kanıtın ham satırı yoktur.
+- **Kişi (R09, R13, R14):** kişi düzeyindeki bir uyarının ayrıntısındaki "Kişi: …" satırı yalnızca
+  kişi verisini görme yetkisi (`usage.person`) olanlara ve gösterimden önce denetim kaydına
+  (`alert.person_view`) yazılarak gösterilir; satırın altındaki not bunu söyler (bölüm 9, KVKK).
+- **Son 30 gün:** Güvenlik özetinin altında son 30 günde açılan uyarılar gün gün ve önem
+  derecesine göre (tablo görünümüyle), son 7 günde en çok uyarı açan 10 kural ve 10 anahtar
+  (adres, MAC ya da kullanıcı adı; kişi adı değil) gösterilir. Bir kurala tıklamak listeyi o
+  kurala süzer.
 - **Ortalama kapanma süresi:** şu an kapalı olan ve son kapanışı son 30 gün içinde olan
   uyarıların, açılmalarından son kapanışlarına (Yeni ya da İnceleniyor durumundan Kapandı ya da
   Yanlış alarm'a geçiş; Kapandı ↔ Yanlış alarm değişikliği kapanış sayılmaz) kadar geçen sürenin
   ortalaması (kişinin ve denetimin kapattıkları birlikte). Bu sürümden önce kapanmış uyarıların
   zaman çizelgesi yoktur, sayılmaz.
+
+## 9. Güvenlik kuralları (R01–R19)
+
+> Bu kurallar **Güvenlik kuralları** lisans modülündedir ([LISANS.md](LISANS.md)); log kaynağı ve
+> sistem uyarıları (`R15`, `R20-*`) 5651 Temel'de kalır ve hiçbir lisans durumunda kapanmaz.
+> Güvenlik kuralları bir 5651 yükümlülüğü değildir; ağdaki şüpheli olayları görmenize yardım eder.
+
+Kurallar işçide dakikada bir, son iki dakikayı bekleterek (geç gelen satırlar için) çalışır ve
+yalnızca ayrıştırılmış tabloları ve cihaz envanterini **okur**; hiçbir ham log satırını, kasayı ya
+da mühürü değiştirmez. Pencereler **alım zamanına** göre sayılır (saati kaymış bir cihaz bir
+taramayı gizlemez; kayık saati `R20-source-clock` bildirir, bölüm 2). Bir kural ilk kez açıldığında
+eski veriler için uyarı açmaz, o andan itibaren sayar.
+
+- **Eşikler başlangıç değeridir**, ölçülmüş gerçekler değildir: ağınıza göre ayarlayın.
+- **Uyarı ve kanıt:** her uyarı onu açan satırları (tablo, satır ve ham satır başvurusu) kanıt
+  olarak tutar; ham satır, izniyle ve denetim kaydıyla Ham satırı aç ile açılır (Kanıt sekmesi,
+  bölüm 8). Uyarının ayrıntısında, e-postasında ve webhook bildiriminde ham log satırı yoktur.
+- **Tekilleştirme ve bekleme süresi:** aynı anahtar (ör. aynı kaynak adres) için etkin bir uyarı
+  varsa yeni uyarı açılmaz; uyarının sayısı, bir pencerede görülen en yüksek sayıdır (çalışmalar
+  boyunca toplanmaz). Kapatılan bir uyarıdan sonra bekleme süresi
+  içinde gelen olaylar yeni uyarı açmaz, kapanan uyarıda sayılır.
+- **Deneme ("Son 24 saatte dene"):** bir kuralın yeni ayarları kaydetmeden önce son 24 saatin
+  verisiyle denenebilir. Deneme, kuralı canlı çalışmayla aynı dilimlerle değerlendirir, uyarı
+  açılmamış gibi tekilleştirme ve bekleme süresini uygular ve açılacak uyarıların sayısını, ilk 20
+  anahtarı (sayıları, ilk ve son zamanlarıyla) verir. Salt okunur bir işlemde çalışır: hiçbir şey
+  yazmaz, uyarı açmaz. `rules.dry_run_timeout_seconds` (varsayılan 30 saniye) içinde bitmezse
+  durur; pencereyi ya da listeleri küçültüp yeniden deneyin.
+- **"Sahada doğrula":** deposunda biçim örneği olmayan bir log biçimini okuyan kurallar (FortiGate
+  yönetici girişi, yapılandırma değişikliği, performans, botnet, DNS yanıt kodu) "sahada doğrula"
+  olarak işaretlidir; okudukları logid ve metinler ayardır. Sahadaki cihazın gerçek bir satırıyla
+  karşılaştırın ([DEVICE-SETUP.md](DEVICE-SETUP.md)).
+- **KVKK:** R09, R13 ve R14 kişi düzeyindedir: uyarı kişiyi yalnızca numarasıyla tutar, başlık
+  adresi gösterir. Kişinin adı Güvenlik sayfasında yalnızca kişi görme yetkisi (`usage.person`)
+  olan kullanıcılara, denetim kaydına (`alert.person_view`) yazıldıktan sonra gösterilir;
+  e-postada ve webhook'ta kişi adı yoktur. Bu kuralların çalışanları izleme olarak görülebileceği
+  için **hukuki inceleme önerilir**; aydınlatma metninizi ve iç kurallarınızı gözden geçirin.
+
+### Kural düzenleyici: Ayarlar → Güvenlik kuralları
+
+**Ayarlar → Güvenlik kuralları** (`/settings/rules`) her kuralı bir satırda gösterir: kod, ad,
+önem, durum (Açık / Kapalı / Ayar gerekli) ve veri durumu (**Veri geliyor**, **Son 24 saatte veri
+yok**, **Hiç veri gelmedi**: kuralın okuduğu tablolara son 24 saatte satır geldi mi). Notlar
+sütunu **Sahada doğrula** (okuduğu log biçimi bir örnek satırla doğrulanmadı), **Ayar gerekli**
+(kural gerekli parametre girilene kadar çalışmaz: R08, R14) ve **Kişi düzeyi** (R09, R13, R14)
+işaretlerini taşır. Sayfayı uyarıları görebilen (`alerts.read`) her kullanıcı görür; kuralları
+yalnızca ayar yönetimi yetkisi (`settings.manage`) olanlar değiştirir. Güvenlik kuralları lisansta
+açık değilse kurallar **Kilitli** görünür ve değiştirilemez; 5651 Temel uyarıları (R15, R20)
+çalışmaya devam eder.
+
+Bir satır kuralın formunu açar: kuralın açık olup olmadığı, önem, pencere (60 saniye ile 7 gün
+arası), bekleme süresi (en çok 7 gün), kuralın parametreleri (listelerde her satıra bir değer;
+ağlar CIDR olarak denetlenir; baytlar MiB, saatler SS:DD olarak), eylemler (**E-posta gönder**,
+**Webhook'a gönder**), "Ne yapılmalı" metni, **Varsayılanlara dön**, **Son 24 saatte dene** ve
+**Kaydet**. Deneme sonucu "Son 24 saatte bu ayarlarla {n} uyarı açılırdı" ve ilk anahtarlar
+olarak gösterilir; ayarlar denemeden sonra değişirse sayfa yeniden denemenizi ister. Kaydet
+`rules.<ID>` ayarını yazar ve denetim kaydına `rule.update` olarak önceki ve sonraki ayarları
+(kişi verisi olmadan) ekler. Açılan bir kural yalnızca açıldıktan sonraki veriye bakar.
+
+**Webhook'lar:** **Webhook'a gönder** açık bir kuralın uyarıları sunucuda tanımlı webhook'lara
+da gönderilir ([KURULUM.md](KURULUM.md) bölüm 7.3); bildirimde kişi adı ve ham log satırı yoktur.
+
+### R01 İçeriden port taraması (yüksek)
+
+- **Ne yakalar:** bir iç adresin 1 dakikada **30** farklı porta ya da **50** farklı adrese
+  engellenen bağlantıları (`fg_traffic`, `action` = `deny`). İsteğe bağlı olarak MikroTik
+  güvenlik duvarı satırları da sayılır (`mikrotik_prefixes` ile verilen log önekleri).
+- **Bekleme:** 1 saat. **Veri:** FortiGate trafik logları; reddedilen trafiğin loglanması açık
+  olmalıdır.
+- **Ne yapılmalı:** Adresin hangi cihaza ait olduğunu 5651 sorgusuyla bulun; cihazda zararlı
+  yazılım ya da izinsiz tarama aracı olup olmadığını denetleyin, gerekirse cihazı ağdan ayırın.
+
+### R02 Dışarıdan tarama (orta)
+
+- **Ne yakalar:** dış bir adresin 5 dakikada **100** engellenen bağlantısı; `policy_names` ile
+  yalnızca belirli politikalar sayılabilir (boş: hepsi).
+- **Bekleme:** 1 saat. **Veri:** FortiGate trafik logları (reddedilen trafik).
+- **Ne yapılmalı:** Engellenen bağlantıların hedef portlarına bakın; açık bırakılmış bir hizmet
+  varsa kapatın. Süren taramalarda adresi güvenlik duvarında engelleyebilirsiniz.
+
+### R03 Kaba kuvvet giriş denemesi (yüksek, sahada doğrula)
+
+- **Ne yakalar:** 5 dakikada **5** başarısız yönetici girişi: FortiGate (`logid` `0100032002`
+  ya da `logdesc` "Admin login failed") ve MikroTik ("login failure"). Her satır hem hesap
+  (`user:<ad>`) hem kaynak adres (`ip:<adres>`) için sayılır.
+- **Bekleme:** 1 saat. **Veri:** FortiGate olay logları (yönetici girişi), MikroTik `account`
+  konusu.
+- **Ne yapılmalı:** Denemelerin geldiği adresi ve hesabı denetleyin; hesap gerçekse parolasını
+  değiştirin, yönetim arayüzüne yalnızca yönetim ağından erişilmesine izin verin.
+
+### R04 Mesai dışı / beklenmeyen yerden yönetici girişi (orta, sahada doğrula)
+
+- **Ne yakalar:** her başarılı yönetici girişi (FortiGate `0100032001` ya da "Admin login
+  successful"; MikroTik "logged in"): mesai dışındaysa (`usage.work_hours` ve `usage.holidays`;
+  öğle arası mesai sayılır; kullanım analizi lisansı gerekmez) ya da adres
+  `trusted_admin_networks` dışındaysa (liste boşken bu kısım kapalıdır). Mesai, girişin kendi
+  zamanına göre değerlendirilir.
+- **Veri:** FortiGate olay logları, MikroTik `account` konusu.
+- **Ne yapılmalı:** Girişi yapan kişiye girişin kendisine ait olduğunu doğrulatın; değilse
+  hesabın parolasını değiştirin ve cihazın yapılandırma değişikliklerini gözden geçirin.
+
+### R05 IPS saldırısı (yüksek)
+
+- **Ne yakalar:** yüksek ya da kritik önemdeki her IPS saldırısı; orta önemdekilerden 1 saatte
+  **10** tane (`fg_ips`). Anahtar: kaynak adres ve saldırı numarası.
+- **Bekleme:** 1 saat. **Veri:** FortiGate IPS logları.
+- **Ne yapılmalı:** Hedef sistemin güncel olduğunu ve saldırının engellendiğini doğrulayın;
+  engellenmediyse IPS profilini ve hedefin yamalarını gözden geçirin.
+
+### R06 Botnet / tehdit IP (kritik, sahada doğrula)
+
+- **Ne yakalar:** FortiGate'in botnet tespiti (`fg_ips`, `eventtype` `botnet`) ve isteğe bağlı
+  olarak tehdit IP politikasına (`threat_policy_names`) takılan trafik.
+- **Bekleme:** 1 saat. **Veri:** FortiGate IPS logları (botnet tespiti açık).
+- **Ne yapılmalı:** Adresin cihazını 5651 sorgusuyla bulun, ağdan ayırın ve zararlı yazılım
+  taraması yapın; cihazın parolalarını değiştirin.
+
+### R07 Zararlı yazılım (yüksek)
+
+- **Ne yakalar:** her antivirüs kaydı (`fg_virus`; `ignore_actions` ile verilen eylemler hariç).
+  Başlıkta yalnızca virüsün adı ve kaynak adres vardır; dosya adı ve adres kanıt satırındadır.
+- **Bekleme:** 1 saat. **Veri:** FortiGate antivirüs logları.
+- **Ne yapılmalı:** Dosyanın engellendiğini doğrulayın; cihazda tam tarama yapın. Dosyanın adı ve
+  adresi kanıt satırındadır (Ham satırı aç).
+
+### R08 DNS atlatma (orta, ayar gerekli)
+
+- **Ne yakalar:** bir iç adresin 1 saatte, izinli olmayan DNS sunucularına (53 ve 853 numaralı
+  portlar) **20** bağlantısı; güvenlik duvarının engellediği bağlantılar da sayılır (engellenen
+  bir deneme yine bir denemedir).
+- **Ayar gerekli:** `allowed_dns_servers` (kurumun DNS sunucuları) boşken kural çalışmaz.
+- **Bekleme:** 1 saat. **Veri:** FortiGate trafik logları.
+- **Ne yapılmalı:** Cihazın DNS ayarını ve tarayıcısının güvenli DNS (DoH/DoT) ayarını
+  denetleyin; dış DNS sunucularına giden 53 ve 853 numaralı portları güvenlik duvarında kapatmayı
+  düşünün.
+
+### R09 Engelli kategori ısrarı (düşük, kişi düzeyinde)
+
+- **Ne yakalar:** bir kişinin 1 saatte engellenen kategorilere **20** isteği (`fg_web`,
+  `fg_dns`, `action` = `blocked`). Kişi düzeyindeki kurallar (R09, R13, R14) satırları adres ve
+  dakika başına toplar; bir dakika, o dakikanın başında adresi (DHCP kirasıyla) tutan kişiye
+  aittir, kullanım raporlarındaki gibi. Kimseye bağlanamayan adresin anahtarı adrestir.
+- **Bekleme:** 1 saat. **Veri:** FortiGate web filtresi ve DNS filtresi logları.
+- **Ne yapılmalı:** İsteklerin bir uygulamadan mı yoksa kişiden mi geldiğine bakın; kurum
+  kurallarına göre işlem yapın. Kişi adları yalnızca yetkili rollere gösterilir.
+
+### R10 Proxy / VPN / Tor (orta)
+
+- **Ne yakalar:** "Proxy Avoidance" kategorisi (web ya da DNS filtresi), Tor uygulaması ya da
+  Proxy uygulama kategorisi; 1 saatte **1** kayıt yeter. Kategori ve uygulama adları
+  FortiGuard'ındır: sitenizdeki FortiOS sürümünde sahada doğrulayın.
+- **Bekleme:** 1 saat. **Veri:** FortiGate web filtresi, DNS filtresi ve uygulama kontrolü
+  logları.
+- **Ne yapılmalı:** Bu kullanım filtreyi ve kayıtları atlatabilir; cihazı bulun, kurum
+  kurallarına göre işlem yapın ve ilgili uygulama ya da kategoriyi engelleyin.
+
+### R11 Yeni cihaz (düşük)
+
+- **Ne yakalar:** cihaz envanterinin yeni öğrendiği her cihaz (DHCP ya da ARP kaydından);
+  altyapı cihazları, rastgele (özel) MAC adresleri (`ignore_random`) ve `ignore_vlans`'taki
+  VLAN'lar hariç. Kural açılmadan önce bilinen cihazlar için uyarı açılmaz.
+- **Veri:** DHCP ve ARP kanıtı (MikroTik DHCP, ARP-LOG ya da FortiGate DHCP).
+- **Ne yapılmalı:** Cihazın tanıdık olup olmadığını denetleyin; tanıdıksa Cihazlar sayfasında bir
+  kişiye atayın, değilse bağlandığı yeri bulun.
+
+### R12 MAC değişimi (orta)
+
+- **Ne yakalar:** aynı IP adresinin 1 saatte **3** kez MAC adresi değiştirmesi (ARP-LOG, MikroTik
+  DHCP atama ya da FortiGate DHCP Ack); altyapı MAC adresleri (`devices.infrastructure_macs`) yok
+  sayılır. 5651 Temel'deki `ip_conflict` uyarısı ayrıca çalışır.
+- **Bekleme:** 1 saat. **Veri:** DHCP ve ARP kanıtı.
+- **Ne yapılmalı:** Aynı adresi sırayla kullanan cihazları bulun; adres çakışması, yanlış sabit
+  adres ya da ARP zehirlemesi olabilir.
+
+### R13 Büyük veri gönderimi (orta, kişi düzeyinde)
+
+- **Ne yakalar:** bir kişinin (ya da adresin) 1 saatte **1 GiB**'tan ya da bir günde (yerel saat)
+  **5 GiB**'tan fazla **gönderdiği** veri; kullanım raporlarıyla aynı sayım (son kayıtların
+  gönderilen baytı, ara kayıtların farkı, çift sayım yok). Saat, son bir saatte **alınan**
+  kayıtların günlük sayımdaki payıdır: her kayıt, oturumunun önceki kaydından bu yana gönderilen
+  kadar, site gününün saydığı gibi sayılır (dünkü kayıtlar dünün saydığı gibi).
+- **Bekleme:** 1 saat. **Veri:** FortiGate trafik logları.
+- **Ne yapılmalı:** Gönderimin hedefini ve bilinen bir yedekleme ya da eşitleme olup olmadığını
+  denetleyin; değilse veri sızıntısı olasılığını inceleyin.
+
+### R14 Gece etkinliği (düşük, kişi düzeyinde, ayar gerekli)
+
+- **Ne yakalar:** kullanıcı ağlarından (`user_networks`) bir adresin gece (yerel saat 00:00–06:00)
+  en az **10 MiB** trafiği.
+- **Ayar gerekli:** `user_networks` boşken kural çalışmaz.
+- **Bekleme:** 6 saat. **Veri:** FortiGate trafik logları.
+- **Ne yapılmalı:** Gece çalışan güncelleme ya da yedekleme olup olmadığını denetleyin; değilse
+  cihazı ve trafiğin hedefini inceleyin.
+
+### R16 Cihaz yapılandırma değişikliği (orta, sahada doğrula)
+
+- **Ne yakalar:** her yapılandırma değişikliği: FortiGate (`logid` `0100044546`,
+  `0100044547`) ve MikroTik ("… changed/added/removed by <kullanıcı>"). Anahtar: kaynak ve
+  kullanıcı.
+- **Bekleme:** 10 dakika; bu sürede gelen değişiklikler aynı uyarıda sayılır. **Veri:** FortiGate
+  olay logları (yapılandırma değişikliği), MikroTik `system` konusu.
+- **Ne yapılmalı:** Değişikliğin planlı olduğunu doğrulayın; değilse cihazın yapılandırma
+  yedeğiyle karşılaştırın ve hesabın parolasını değiştirin.
+
+### R17 Güvenlik duvarı sağlığı (yüksek, sahada doğrula)
+
+- **Ne yakalar:** FortiGate'in performans istatistiklerinde (`logid` `0100040704`, `cpu` ve `mem`
+  alanları) 10 dakika boyunca her örnekte CPU %80'in ya da bellek %85'in üstünde olması, ya da
+  koruma (conserve) modu kaydı. Bu bir **durum** kuralıdır: koşul 10 dakika görülmezse uyarı
+  kendiliğinden kapanır (`condition_cleared`).
+- **Veri:** FortiGate sistem olay logları (performans istatistikleri).
+- **Ne yapılmalı:** Cihazın işlemci ve bellek kullanımına, oturum sayısına ve açık özelliklerine
+  bakın; conserve mode trafiği keser ya da denetimsiz geçirir.
+
+### R18 DHCP havuzu doldu (yüksek)
+
+- **Ne yakalar:** MikroTik "failed to give out IP address … pool … is empty" kaydı (doğrulanmış
+  ayrıştırıcı ailesi) ve `logdesc`'inde "ran out of" geçen FortiGate kaydı (sahada doğrula).
+  Anahtar: kaynak ve sunucu ya da arayüz.
+- **Bekleme:** 1 saat. **Veri:** MikroTik `dhcp` konusu, FortiGate DHCP olayları.
+- **Ne yapılmalı:** Havuzu genişletin ya da kira süresini kısaltın; havuzu dolduran bilinmeyen
+  cihazlar varsa bulun.
+
+### R19 Şüpheli DNS (DGA) (orta, sahada doğrula)
+
+- **Ne yakalar:** bir adresin 1 saatte **200**'den fazla "böyle bir ad yok" (NXDOMAIN) DNS yanıtı;
+  yanıt kodu FortiGate DNS logunun `rcode` alanından okunur (`NXDOMAIN` ya da `3`).
+- **Bekleme:** 1 saat. **Veri:** FortiGate DNS filtresi logları (yanıtlar dahil).
+- **Ne yapılmalı:** Çok sayıda var olmayan alan adı sorgusu zararlı yazılım belirtisi olabilir;
+  cihazı bulun ve tarayın.
+
+Yük üreteci her kural için kurgusal bir saldırı senaryosu üretir (`--scenario`, depodaki
+`tools/loadgen/README.md`); demo ve testler bunu kullanır.
