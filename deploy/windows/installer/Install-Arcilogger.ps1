@@ -585,6 +585,11 @@ $DailyPartitionRevision = '0021_db_window'
 # crosses a revision not in $LosslessDowngrades is refused before any change
 # (Get-SchemaRollbackPlan).
 $LosslessDowngrades = @(
+    # Deletes the worker.webhook_test requests ("Test gönder" of Ayarlar -> Webhook'lar, Wave 6)
+    # and narrows the kind check again: request history only, the outcome stays in the audit log
+    # (webhook.test); raw logs, log rows, leases and alerts keep every row
+    # (v0025_admin_webhook_test.py).
+    '0025_admin_webhook_test',
     # Drops rule_state (the security rules' watermarks: derived), alert_evidence (references to
     # the log rows behind a rule's alert, never their content), alerts.assignee_id with the assign
     # events and the webhook deliveries: alert workflow only. The alerts stay; raw logs, log rows,

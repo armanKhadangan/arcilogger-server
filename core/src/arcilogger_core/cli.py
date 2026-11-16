@@ -14,9 +14,11 @@ or the web application::
                                                      requests: credit query, TSA test,
                                                      replica test (ADR-0014)
     arcilogger-core secret init|set|list|delete      encrypted credentials (Kamu SM, TÜRKTRUST,
-                                                     database, replica, SMTP)
+                                                     database, replica, SMTP, webhooks)
     arcilogger-core secret get postgres.superuser    the bundled PostgreSQL's superuser password,
                                                      into a pipe only (the installer, 0.4.0 P1)
+    arcilogger-core secret get webhook.<name>.url    a Teams/Slack webhook's URL, into a pipe
+                                                     only (Set-ArciFirewall.ps1, Wave 6)
     arcilogger-core status                           summary for monitoring
     arcilogger-core config-check [--json]            what a production configuration still
                                                      lacks (organisation name, time source)
@@ -83,6 +85,7 @@ from arcilogger_core.backupmirror import write_state as write_mirror_state
 from arcilogger_core.chain import sealed_days, verify_range
 from arcilogger_core.clockcheck import check_clock
 from arcilogger_core.config import (
+    WEBHOOK_SECRET_NAME,
     Config,
     ConfigLocationError,
     check_fixed_location,
@@ -175,8 +178,23 @@ SECRET_NAMES = (
     POSTGRES_SUPERUSER,
 )
 #: The secrets ``secret get`` gives back: only the one the installer generated for the PostgreSQL
-#: it installed and needs again on an upgrade (0.4.0 P1). Every other secret is write-only.
+#: it installed and needs again on an upgrade (0.4.0 P1), and a Teams or Slack webhook's URL,
+#: whose host ``Set-ArciFirewall.ps1`` opens in strict outbound mode (Wave 6 §2.4.1, manager's
+#: answer 3 on #266). Every other secret is write-only.
 READABLE_SECRETS = (POSTGRES_SUPERUSER,)
+
+
+def _settable(name: str) -> bool:
+    """A fixed secret name, or ``webhook.<name>.secret`` / ``webhook.<name>.url`` (W6-H)."""
+    return name in SECRET_NAMES or WEBHOOK_SECRET_NAME.fullmatch(name) is not None
+
+
+def _readable(name: str) -> bool:
+    return name in READABLE_SECRETS or (
+        WEBHOOK_SECRET_NAME.fullmatch(name) is not None and name.endswith(".url")
+    )
+
+
 log = logging.getLogger("arcilogger.cli")
 
 
@@ -776,8 +794,9 @@ def cmd_secret(args: argparse.Namespace, app: App) -> int:
         for name in store.names():
             print(f"{name}  (kayıtlı ✓)")
         return 0
-    if args.name not in SECRET_NAMES:
-        raise UsageError(f"unknown secret {args.name!r}; allowed: {', '.join(SECRET_NAMES)}")
+    if not _settable(args.name):
+        allowed = ", ".join((*SECRET_NAMES, "webhook.<name>.secret", "webhook.<name>.url"))
+        raise UsageError(f"unknown secret {args.name!r}; allowed: {allowed}")
     if action == "get":
         return _reveal_secret(app, args.name)
     if action == "delete":
@@ -795,8 +814,9 @@ def _reveal_secret(app: App, name: str) -> int:
     """The value of a readable secret on stdout, for the installer that reads it through a pipe
     (never a console, never with a line end). The read is recorded first: a read that cannot be
     recorded gives nothing."""
-    if name not in READABLE_SECRETS:
-        raise UsageError(f"{name!r} is write-only; readable: {', '.join(READABLE_SECRETS)}")
+    if not _readable(name):
+        readable = ", ".join((*READABLE_SECRETS, "webhook.<name>.url"))
+        raise UsageError(f"{name!r} is write-only; readable: {readable}")
     if sys.stdout.isatty():
         raise UsageError("secret get writes only into a pipe (the installer), not to a console")
     value = app.secrets.get(name)
@@ -1440,7 +1460,8 @@ def _build_parser() -> argparse.ArgumentParser:
     delete_cmd = secret_commands.add_parser("delete", help="remove a secret")
     delete_cmd.add_argument("name")
     get_cmd = secret_commands.add_parser(
-        "get", help="print postgres.superuser into a pipe (the installer only)"
+        "get",
+        help="print postgres.superuser or webhook.<name>.url into a pipe (installer, firewall)",
     )
     get_cmd.add_argument("name")
 
