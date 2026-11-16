@@ -271,7 +271,7 @@ PC, PC_MAC, PC_HOSTNAME = "172.20.42.57", "00:00:5e:00:53:57", "PLN-PC14"
 PERSON_NAME, DEPARTMENT, DEVICE_NAME = "Selin Kaya", "Planlama", "Planlama-PC-14"
 #: A phone on the staff Wi-Fi (VLAN 60) with a randomised MAC address.
 PHONE, PHONE_MAC, PHONE_HOSTNAME = "172.20.60.142", "02:00:5e:00:53:64", "Telefon-12"
-ROGUE_MAC = "00:0c:29:00:00:99"
+ROGUE_MAC = "00:00:5e:00:53:9a"
 #: Other clients on the department VLANs (VLAN 42 Planlama, 41 Finans, 43 İdari İşler).
 OTHERS = (
     ("172.20.42.165", "3c:52:82:00:00:05", "PLN-PC-05", "dhcp42"),
@@ -591,8 +591,8 @@ def build_site(capture: Capture) -> None:
         # Background sessions of other clients around the requested moment.
         destinations = [
             ("203.0.113.10", 443),
-            ("151.101.1.69", 443),
-            ("104.18.32.7", 443),
+            ("198.51.100.69", 443),
+            ("198.51.100.169", 443),
             ("8.8.8.8", 53),
             ("20.190.160.20", 443),
         ]
@@ -612,7 +612,7 @@ def build_site(capture: Capture) -> None:
         # A static device answers ARP for the PC's address: an IP conflict around 13:30.
         evidence.arp(tr(day, 13), PC, ROGUE_MAC, interface="vlan42")
         evidence.arp(tr(day, 14), PC, ROGUE_MAC, interface="vlan42")
-        evidence.traffic(tr(day, 13, 30), PC, 61001, "93.184.216.34", 443, duration=12)
+        evidence.traffic(tr(day, 13, 30), PC, 61001, "203.0.113.34", 443, duration=12)
         session.commit()
         rebuild_day(session, day, horizon=tr(day + timedelta(days=1), 9))
         device = session.get_one(Device, PC_MAC)
@@ -665,7 +665,7 @@ def write_odd_line(capture: Capture) -> tuple[str, date, int]:
     lines = path.read_bytes().count(b"\n")
     message = (
         '<190>logid="0316013056" type="utm" subtype="webfilter" srcip=172.20.42.165 '
-        'dstip=104.18.32.7 hostname="fatura\u202excod.exe" msg="tab\there"'
+        'dstip=198.51.100.169 hostname="fatura\u202excod.exe" msg="tab\there"'
     ).encode() + b" \x01 \xff"
     with path.open("ab") as handle:
         handle.write(format_line(_local(WAITING, 14, 2, 3), FIREWALL, message))
@@ -698,11 +698,11 @@ def capture_lookups(capture: Capture, admin: Any, auditor: Any, newcomer: Any) -
             public_ip=PUBLIC_IP, public_port=41234, dest_ip="203.0.113.10", dest_port=443
         ),
         "conflict": {
-            **lookup_body(public_ip=PUBLIC_IP, dest_ip="93.184.216.34", dest_port=443),
+            **lookup_body(public_ip=PUBLIC_IP, dest_ip="203.0.113.34", dest_port=443),
             "query": {
                 "at": "2026-10-09T13:30:05",
                 "public_ip": PUBLIC_IP,
-                "dest_ip": "93.184.216.34",
+                "dest_ip": "203.0.113.34",
                 "dest_port": 443,
             },
         },
