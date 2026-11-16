@@ -419,6 +419,7 @@ Her gün:
   | `R20-rules` | Bir güvenlik kuralı art arda 3 kez çalışamadı (`rules.failures_alert`; Ayarlar → Güvenlik kuralları, `logs\worker.log`) |
   | `R20-backup` | Veritabanı yedeği başarısız, 36 saatten eski ya da kurulumdan 48 saat sonra hâlâ yok |
   | `R20-email` | Uyarı e-postası gönderilemedi (`[smtp]`, `smtp.password`, güvenlik duvarı); kendisi e-postayla gitmez |
+  | `R20-webhook` | Webhook teslim edilemiyor: 24 saat içinde gönderilemedi ya da hedef kalıcı olarak reddetti (`[[webhooks]]`, `webhook.<ad>.secret`, güvenlik duvarı); kendisi o webhook'a gitmez, sonraki başarılı gönderimle kapanır |
   | `R20-report` | Zamanlanmış bir kullanım raporu üretilemedi ya da bir alıcıya gönderilemedi (Raporlar sayfasındaki çalıştırma geçmişi, `[smtp]`; bölüm 14 ve 15). Zamanlanmış kullanım raporları modülü lisansta kapalıyken açılmaz; modül kapanınca kendiliğinden çözülür |
   | `R20-license` | Ücretli modüller kapanıyor ya da kapalı: deneme süresi 3 gün içinde, süreli bir lisans 14 gün içinde bitiyor ya da lisans durumu yüzünden ücretli modüller kapalı (deneme bitti, lisans doğrulanamıyor ya da başka sunucu için, süresi doldu, sürüm bakım kapsamında değil); 5651 işlevleri çalışmaya devam eder. Ayarlar → Lisans ([LISANS.md](LISANS.md)) |
   | `R20-license-limit` | Kullanıcı (yeni kullanıcı eklenemez) ya da log kaynağı (toplanmaya ve mühürlenmeye devam eder) sayısı lisans sınırını aşıyor |

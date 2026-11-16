@@ -21,7 +21,11 @@ clients are hashed, never opened. :func:`plan` is a pure function of :class:`Pla
 * **outbound** (strict mode only) — one entry per host and port of the NTP, Kamu SM, SMTP and
   replica rules, and of TÜRKTRUST's, the revocation lists' and the proxy's, as
   ``Set-ArciFirewall.ps1`` makes them (Wave 5 contract 2.4, W5-T-3): with ``network.https_proxy``
-  set, its host and port replace the TURKTRUST and CRL rules;
+  set, its host and port replace the TURKTRUST and CRL rules. The same holds for the enabled
+  alert webhooks (``ARCILOGGER Out Webhook <name>``, Wave 6 §2.4.1): the host and port of a
+  ``generic`` webhook's ``url``, and of a Teams or Slack webhook's URL in the secret store, of
+  which :func:`read_inputs` keeps nothing else; one it cannot read gets no entry and the problem
+  ``webhook_url_unreadable`` with the webhook's name;
 * **time** — the local source and the fallback, ``changed`` when the peer list differs from the
   one applied last (``Get-ArciTimePeerList``'s format);
 * **jars** — every staged ``zamane\\web\\<sha256>.jar`` whose recomputed SHA-256 is that name and
@@ -45,6 +49,7 @@ from urllib.parse import urlparse, urlsplit
 
 from arcilogger_core.admin.contract import (
     SNMP_RULE_PREFIX,
+    WEBHOOK_RULE_PREFIX,
     AdminPolicy,
     DocumentError,
     FirewallPlan,
@@ -66,9 +71,11 @@ from arcilogger_core.config import (
     KAMUSM_TEST_HOST,
     Config,
     parse_config,
+    webhook_host_port,
 )
 from arcilogger_core.configwatch import config_status_of
 from arcilogger_core.layout import Layout
+from arcilogger_core.secretstore import SecretStore, SecretStoreError
 from arcilogger_core.tsa import url_with_port
 from arcilogger_core.tsa.zamane_releases import find_release
 
@@ -109,6 +116,9 @@ class PlanInputs:
     staged: Mapping[str, Path] = field(default_factory=dict)
     #: SHA-256 of the clients ``jars.json`` already lists as approved.
     approved: frozenset[str] = frozenset()
+    #: Host and port of each enabled Teams or Slack webhook's stored URL (``None``: not stored,
+    #: unreadable or not a webhook target); never the URL itself.
+    webhook_targets: Mapping[str, tuple[str, int] | None] = field(default_factory=dict)
 
 
 def peer_list(primary: str | None, fallback: str | None) -> str:
@@ -229,6 +239,20 @@ def _outbound(inputs: PlanInputs, problems: list[PlanProblem]) -> list[OutboundR
         snmp = source.snmp
         if snmp is not None and snmp.enabled and source.enabled and not source.is_network:
             add(f"{SNMP_RULE_PREFIX}{source.name}", source.address, snmp.port)
+    # The alert webhooks (Wave 6 §2.4.1): direct only; through the proxy, its rule covers them.
+    if proxy is None or proxy.port is None:
+        for webhook in config.webhooks:
+            if not webhook.enabled:
+                continue
+            reach = (
+                webhook_host_port(webhook.url)
+                if webhook.format == "generic"
+                else inputs.webhook_targets.get(webhook.name)
+            )
+            if reach is None:
+                problems.append(PlanProblem(code="webhook_url_unreadable", value=webhook.name))
+                continue
+            add(f"{WEBHOOK_RULE_PREFIX}{webhook.name}", *reach)
     return rules
 
 
@@ -328,6 +352,27 @@ def _acknowledged(versions: Path, sha256: str, path: Path) -> Config | None:
     return None
 
 
+def webhook_targets(config: Config) -> dict[str, tuple[str, int] | None]:
+    """Host and port of each enabled Teams or Slack webhook's URL, read from the secret store
+    (``webhook.<name>.url``); ``None`` for one that is not stored, cannot be read or is not a
+    webhook target. The URL itself is not kept: its path is the target's only secret."""
+    wanted = [w for w in config.webhooks if w.enabled and w.format != "generic"]
+    if not wanted:
+        return {}
+    try:
+        store = SecretStore(config.secrets_dir / "secret.key", config.secrets_dir / "secrets.json")
+    except (OSError, ValueError, SecretStoreError):
+        return dict.fromkeys((w.name for w in wanted), None)
+    found: dict[str, tuple[str, int] | None] = {}
+    for webhook in wanted:
+        try:
+            url = store.get(webhook.url_name)
+        except (OSError, ValueError, SecretStoreError):
+            url = None
+        found[webhook.name] = webhook_host_port(url) if url else None
+    return found
+
+
 def read_inputs(config_path: Path, *, now: datetime) -> PlanInputs:
     """Everything :func:`plan` needs, read now from the installation of ``config_path``
     (:class:`PlanError` when the configuration is unusable)."""
@@ -392,6 +437,7 @@ def read_inputs(config_path: Path, *, now: datetime) -> PlanInputs:
         applied_peers=applied_peers,
         staged=staged_clients(root / "zamane" / "web"),
         approved=approved,
+        webhook_targets=webhook_targets(config) if strict else {},
     )
 
 

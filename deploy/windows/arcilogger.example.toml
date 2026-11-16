@@ -188,3 +188,22 @@ security = "starttls"          # "starttls" | "ssl" | "none" (plain text: a rela
 # from_address = "<sender address>"
 timeout_seconds = 30
 # ca_file = 'C:\ProgramData\ARCILOGGER\smtp-ca.pem'   # a company CA; default: the system store
+
+# --- Area E: alert webhooks (docs/KURULUM.md / docs/INSTALL.md). Configured here only, never in
+# the browser; none by default. Only https; the certificate is always verified. "generic" signs
+# the alert with HMAC-SHA256; its secret (32-256 characters) is in the secret store:
+#   arcilogger-core secret set webhook.siem.secret
+# For "teams" and "slack" the URL itself is the secret: leave url empty and store it with
+#   arcilogger-core secret set webhook.<name>.url
+# The payload is the alert's title and link only: no person names, no log lines. Teams and
+# Slack payloads: sahada doğrula. "Test gönder" on the Webhooks page sends a test notification.
+# Strict outbound firewall: Set-ArciFirewall.ps1 allows each enabled webhook's host and port.
+# [[webhooks]]
+# name = "siem"                # a-z, 0-9 and "-", at most 32 characters, unique
+# url = "<https address of your SIEM>"
+# format = "generic"           # "generic" | "teams" | "slack"
+# min_severity = "high"        # info | low | medium | high | critical
+# rules = []                   # [] = every rule (R15, R20 included); else e.g. ["R01", "R06"]
+# enabled = true
+# timeout_seconds = 10
+# ca_file = 'C:\ProgramData\ARCILOGGER\webhook-ca.pem'   # a company CA; default: the system store

@@ -86,6 +86,12 @@ MESSAGES: Final[Mapping[str, tuple[str, str]]] = MappingProxyType(
             "The lease timeline could not be rebuilt for some days; their error is in the job "
             "runs (leases.rebuild). The other days were rebuilt.",
         ),
+        # The webhook test of Ayarlar → Webhook'lar (Wave 6 §2.4.4, W6-H): the reason is the
+        # request's ``result.error_text`` (§2.4.2: the status code and the cleaned reply).
+        "webhook_test_failed": (
+            "Deneme bildirimi gönderilemedi.",
+            "The test notification could not be sent.",
+        ),
         "replica_test_failed": (
             "Replika paylaşımına bağlanılamadı.",
             "The replica share could not be reached.",
@@ -483,6 +489,13 @@ WARNINGS: Final[Mapping[str, tuple[str, str]]] = MappingProxyType(
             "kuralına eklenmedi.",
             "A server name is not valid for a firewall rule; it was not added to the strict "
             "outbound rule.",
+        ),
+        "webhook_url_unreadable": (
+            "Bir webhook'un adresi gizli depodan okunamadı ya da geçersiz; sıkı giden trafik "
+            "kuralı açılmadı. arcilogger-core secret set webhook.<ad>.url ile kaydedin.",
+            "A webhook's URL cannot be read from the secret store or is not valid; no strict "
+            "outbound rule was opened for it. Store it with arcilogger-core secret set "
+            "webhook.<name>.url.",
         ),
         "ntp_server_empty": (
             "Yerel saat kaynağı yok; saat yalnızca yedek sunucuyla eşitlenir.",

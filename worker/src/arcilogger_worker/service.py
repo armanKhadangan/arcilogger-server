@@ -127,6 +127,7 @@ from arcilogger_worker.alerts.importer import import_alerts
 from arcilogger_worker.alerts.notify import run_notify
 from arcilogger_worker.alerts.r15 import check_silent_sources
 from arcilogger_worker.alerts.system import run_system_checks
+from arcilogger_worker.alerts.webhooks import run_webhooks
 from arcilogger_worker.correlation.leases import (
     rebuild_days,
     run_incremental,
@@ -379,6 +380,11 @@ def job_alerts_notify(ctx: JobContext) -> Mapping[str, Any]:
     return run_notify(ctx.sessions, job_config(ctx), now=ctx.now).details()
 
 
+def job_alerts_webhooks(ctx: JobContext) -> Mapping[str, Any]:
+    """Alerts to the webhooks of ``[[webhooks]]`` (skipped while none is enabled)."""
+    return run_webhooks(ctx.sessions, job_config(ctx), ctx.layout, now=ctx.now).details()
+
+
 def job_usage_today(ctx: JobContext) -> Mapping[str, Any]:
     """Today's usage rollup (partial) from the logs so far; ``skipped`` while it backs off."""
     details = usage_jobs.refresh_today(ctx.sessions, now=ctx.now)
@@ -458,6 +464,13 @@ def default_jobs(interval_seconds: int) -> tuple[Job, ...]:
         # The security rules (Wave 6 §2.1.3) before the e-mail, which sends what they raised.
         Job("rules.run", job_rules_run, every=RULES_EVERY, module=SECURITY_RULES_MODULE),
         Job("alerts.notify", job_alerts_notify, every=ALERTS_EVERY),
+        # Wave 6 §2.4.2: after the e-mail; a webhook is part of the security_rules module.
+        Job(
+            "alerts.webhooks",
+            job_alerts_webhooks,
+            every=ALERTS_EVERY,
+            module=SECURITY_RULES_MODULE,
+        ),
         # Usage (spec 10.4) after the lease timeline: it reads who held an address when.
         Job("usage.requests", job_usage_requests, every=USAGE_REQUESTS_EVERY, module=USAGE_MODULE),
         Job("usage.daily", job_usage_daily, daily_after=time(0, 45), module=USAGE_MODULE),
