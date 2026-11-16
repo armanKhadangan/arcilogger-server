@@ -15709,6 +15709,21 @@
           ],
           "title": "Address"
         },
+        "clock_offset_seconds": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Clock Offset Seconds"
+        },
+        "clock_rows": {
+          "title": "Clock Rows",
+          "type": "integer"
+        },
         "configured": {
           "title": "Configured",
           "type": "boolean"
@@ -15915,6 +15930,8 @@
         "pending_bytes",
         "parse_failures_today",
         "parse_failure_permille",
+        "clock_offset_seconds",
+        "clock_rows",
         "promoted_to",
         "suggested",
         "hourly",
@@ -16011,6 +16028,21 @@
             }
           ],
           "title": "Address"
+        },
+        "clock_offset_seconds": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Clock Offset Seconds"
+        },
+        "clock_rows": {
+          "title": "Clock Rows",
+          "type": "integer"
         },
         "configured": {
           "title": "Configured",
@@ -16190,6 +16222,8 @@
         "pending_bytes",
         "parse_failures_today",
         "parse_failure_permille",
+        "clock_offset_seconds",
+        "clock_rows",
         "promoted_to",
         "suggested"
       ],

@@ -184,6 +184,11 @@ class SourceHealth(Answer):
     pending_bytes: int
     parse_failures_today: int
     parse_failure_permille: float | None
+    #: The device clock's typical offset from the receive time, whole seconds (negative: behind;
+    #: ``0`` under a minute): the median of its newest rows of the last hour; ``None`` with fewer
+    #: than 10 (#222). A network: its member furthest off.
+    clock_offset_seconds: int | None
+    clock_rows: int
     #: A promoted unknown sender: the source it is written under now.
     promoted_to: str | None
     suggested: Suggested | None

@@ -66,6 +66,7 @@ from arcilogger_api.sealinfo import VaultView
 from arcilogger_core.config import Config, SourceConfig
 from arcilogger_core.layout import Layout
 from arcilogger_core.timeutil import site_day, to_site
+from arcilogger_db import clocksamples
 from arcilogger_db.kinds import family_of, kind_of
 from arcilogger_db.models import (
     Alert,
@@ -414,6 +415,17 @@ def _pending_bytes(
     return total
 
 
+def clock_offsets(db: Session, names: Iterable[str], now: datetime) -> dict[str, tuple[int, int]]:
+    """Each source's typical clock offset and its rows (:func:`clocksamples.typical`; #222),
+    only those with enough rows."""
+    found: dict[str, tuple[int, int]] = {}
+    for name in names:
+        offset, rows = clocksamples.typical(db, name, now)
+        if offset is not None:
+            found[name] = (offset, rows)
+    return found
+
+
 def permille(failures: int, lines: int) -> float | None:
     return round(1000 * failures / lines, 1) if lines else None
 
@@ -435,6 +447,7 @@ def overview(
     offsets = _today_offsets(db, today)
     loaded = _loaded(db, today)
     failures = _failures_on(db, today)
+    clocks = clock_offsets(db, names, now)
     states = {item.name: state_of(item, config, now) for item in items}
     suggested = suggestions(
         db, [item.name for item in items if states[item.name][0] == "unknown"], config, now
@@ -450,6 +463,12 @@ def overview(
         lines = sum(offsets.get(name, (0, 0))[1] for name in parts)
         failed = sum(failures.get(name, 0) for name in parts)
         pending = sum(_pending_bytes(layout, name, today, loaded.get(name, {})) for name in parts)
+        # A network's clock is its member's that is furthest off.
+        clock = max(
+            (clocks[name] for name in parts if name in clocks),
+            key=lambda found: abs(found[0]),
+            default=None,
+        )
         state, promoted = states[item.name]
         if members and item.enabled:  # a network: active when a member is
             member_states = {states[m.name][0] for m in members}
@@ -480,6 +499,8 @@ def overview(
             "pending_bytes": pending,
             "parse_failures_today": failed,
             "parse_failure_permille": permille(failed, lines),
+            "clock_offset_seconds": None if clock is None else clock[0],
+            "clock_rows": 0 if clock is None else clock[1],
             "promoted_to": promoted,
             "suggested": suggested.get(item.name),
         }
