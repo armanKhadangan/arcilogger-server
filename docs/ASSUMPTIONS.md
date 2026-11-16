@@ -560,18 +560,19 @@ its default (contract §0.2 and §7); changing one later is a change in one plac
 Sahada doğrula. Each item is a parameter of its rule (Ayarlar → Güvenlik kuralları, or
 `arcilogger-db settings set rules.<ID>`) or a setting, and has a test that reads synthetic lines
 through the real parser and fails loudly if the assumption is wrong. Field samples from a site's
-devices would confirm them.
+devices would confirm them. The rows are the contract's V1–V8 (§0.4), labelled `W6-V…` here so
+that they are not read as the FortiGate-only verification list's V1–V9 further down.
 
 | # | Assumption | Parameter or setting | Test |
 |---|---|---|---|
-| V1 | FortiGate admin login logids: failed `0100032002`, successful `0100032001` (also matched on `logdesc`) | `rules.R03.fortigate_fail_logids`, `fortigate_fail_descs`; `rules.R04.fortigate_ok_logids`, `fortigate_ok_descs` | `test_r03_r04_formats` |
-| V2 | FortiGate configuration-change logids `0100044546`, `0100044547` | `rules.R16.fortigate_logids` | `test_r16_formats` |
-| V3 | FortiGate performance statistics: `fg_event` rows with logid `0100040704`, `cpu` and `mem` in `extra` | `rules.R17.perf_logids`, `cpu_field`, `mem_field` | `test_r17_formats` |
-| V4 | Conserve mode is announced by an `fg_event` row whose `logdesc` contains `conserve` | `rules.R17.conserve_phrases` | `test_r17_formats` |
-| V5 | FortiGate DHCP pool exhaustion: `fg_event` `logdesc` contains `ran out of` (MikroTik's `dhcp_pool_empty` is a confirmed parser family) | `rules.R18.fortigate_phrases` | `test_r18_formats` |
-| V6 | The FortiGate DNS log's response code is in `extra["rcode"]`, NXDOMAIN as `NXDOMAIN` (also numeric `3`) | `rules.R19.rcode_field`, `nxdomain_values` | `test_r19_formats` |
-| V7 | Botnet detections arrive as `fg_ips` rows with `eventtype` `botnet` | `rules.R06.ips_eventtypes` | `test_r06_formats` |
-| V8 | Teams (Workflows, Adaptive Card) and Slack (incoming webhook `{"text"}`) accept the payloads ARCILOGGER sends | `[[webhooks]] format` | `test_webhook_payload_shapes` pins the JSON |
+| W6-V1 | FortiGate admin login logids: failed `0100032002`, successful `0100032001` (also matched on `logdesc`) | `rules.R03.fortigate_fail_logids`, `fortigate_fail_descs`; `rules.R04.fortigate_ok_logids`, `fortigate_ok_descs` | `test_r03_r04_formats` |
+| W6-V2 | FortiGate configuration-change logids `0100044546`, `0100044547` | `rules.R16.fortigate_logids` | `test_r16_formats` |
+| W6-V3 | FortiGate performance statistics: `fg_event` rows with logid `0100040704`, `cpu` and `mem` in `extra` | `rules.R17.perf_logids`, `cpu_field`, `mem_field` | `test_r17_formats` |
+| W6-V4 | Conserve mode is announced by an `fg_event` row whose `logdesc` contains `conserve` | `rules.R17.conserve_phrases` | `test_r17_formats` |
+| W6-V5 | FortiGate DHCP pool exhaustion: `fg_event` `logdesc` contains `ran out of` (MikroTik's `dhcp_pool_empty` is a confirmed parser family) | `rules.R18.fortigate_phrases` | `test_r18_formats` |
+| W6-V6 | The FortiGate DNS log's response code is in `extra["rcode"]`, NXDOMAIN as `NXDOMAIN` (also numeric `3`) | `rules.R19.rcode_field`, `nxdomain_values` | `test_r19_formats` |
+| W6-V7 | Botnet detections arrive as `fg_ips` rows with `eventtype` `botnet` | `rules.R06.ips_eventtypes` | `test_r06_formats` |
+| W6-V8 | Teams (Workflows, Adaptive Card) and Slack (incoming webhook `{"text"}`) accept the payloads ARCILOGGER sends | `[[webhooks]] format` | `test_webhook_payload_shapes` pins the JSON |
 | — | How far a device clock may be off before `R20-source-clock` opens (#222) | `alerts.source_clock_limit_seconds` (default 120 s, a starting value) | `worker/tests/test_alerts_lease.py` (`R20-source-clock`) |
 
 The rules whose formats are not confirmed (R03, R04, R06, R16, R17, R19) show "sahada doğrula" in
@@ -601,7 +602,7 @@ no product behaviour.
 
 ### Open points for the owner (Wave 6)
 
-- **Field samples** for V1–V8: anonymised lines from a site's FortiGate (admin login, configuration
+- **Field samples** for W6-V1–W6-V8: anonymised lines from a site's FortiGate (admin login, configuration
   change, performance statistics, conserve mode, DHCP pool exhaustion, DNS with NXDOMAIN, IPS
   botnet) and one real Teams and Slack delivery.
 - **Legal review** of the KVKK notes for the person-level rules R09, R13 and R14 (who may see a
