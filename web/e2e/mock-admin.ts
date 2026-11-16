@@ -329,6 +329,11 @@ const MESSAGES: Record<string, [string, string]> = {
     'The device gives no 64-bit counters (ifHCInOctets) for this interface.',
   ],
   smtp_test_failed: ['Deneme e-postası gönderilemedi.', 'The trial e-mail could not be sent.'],
+  // Wave 6 §2.6.4: `{error}` is the reply of §2.4.2, also in the request's result.
+  webhook_test_failed: [
+    'Deneme bildirimi gönderilemedi.',
+    'The test notification could not be sent.',
+  ],
   replica_test_failed: [
     'Replika paylaşımına bağlanılamadı.',
     'The replica share could not be reached.',
@@ -859,6 +864,13 @@ export class AdminMock {
   nextOutcome: Outcome | null = null;
   /** The code of the next failed probe (`snmp_no_such_interface`, …; then back to `probe_failed`). */
   nextProbeFailure: string | null = null;
+  /** What the device reports to "Bağlantıyı dene" (Wave 6 C11; fictional names). */
+  snmpTestInterfaces: ProbeInterface[] = [
+    { name: 'wan1', oper_status: 'up', speed_mbps: 1000 },
+    { name: 'wan2', oper_status: 'down', speed_mbps: 100 },
+    { name: 'lan', oper_status: 'up', speed_mbps: 1000 },
+  ];
+  private snmpTests: number[] = [];
   /** The mail server's answer that comes with the next `smtp_test_failed` (0.4.0 P6). */
   nextProbeAnswer: ProbeAnswer | null = null;
   /** Strict outbound mode: a new SNMP address or port is not tried before ApplySystem (W5-N-6). */
@@ -2427,6 +2439,26 @@ export class AdminMock {
   }
 
   /** The worker's test e-mail (WP3-2, WP4-4): no agent needed, 5 in any 60 minutes. */
+  /**
+   * "Test gönder" of a webhook (Wave 6 §2.4.4, `mock-webhooks.ts`): the probe `webhook` queued as
+   * an action request, with its result (the status code, or why it failed).
+   */
+  webhookTest(account: MockUser, result: Record<string, unknown>, failed: boolean): Answer {
+    const item = this.enqueue({
+      // C10 (manager on #260): the worker channel, like `worker.test_email`; the kind is not in
+      // the web's `RequestKind` until W6-H's API is in the contract.
+      kind: 'worker.webhook_test' as RequestKind,
+      section: null,
+      account,
+      steps: [],
+      result,
+      ...(failed
+        ? { failure: { state: 'failed' as RequestState, error: 'webhook_test_failed' } }
+        : {}),
+    });
+    return this.accepted(item);
+  }
+
   private testEmail(call: RecordedCall, host: MockHost): Answer {
     const account = host.requirePermission(call, 'settings.manage');
     if (Array.isArray(account)) return account;
@@ -2463,6 +2495,37 @@ export class AdminMock {
         ? {}
         : { failure: { state: 'failed' as RequestState, error: 'smtp_test_failed' } }),
     });
+    return this.accepted(item);
+  }
+
+  /**
+   * "Bağlantıyı dene" (Wave 6 C11, #217): the source's SNMP tried before it is saved, a
+   * probe-only `config.apply` of `sources` that changes nothing and ends `succeeded` with the
+   * device's interfaces (`snmpTestInterfaces`), or `probe_failed` with `nextProbeFailure`.
+   * A recent re-authentication, one a minute.
+   */
+  private snmpTest(call: RecordedCall, host: MockHost): Answer {
+    const account = host.requirePermission(call, 'settings.manage', true);
+    if (Array.isArray(account)) return account;
+    const body = call.body as SourceCheckBody;
+    const refusal = this.stale('sources', body.etag, true);
+    if (refusal) return refusal;
+    const minute = Date.now() - 60_000;
+    if (this.snmpTests.some((at) => at > minute)) return this.limited('admin_rate_limited', 60);
+    this.snmpTests.push(Date.now());
+    const code = this.nextProbeFailure;
+    this.nextProbeFailure = null;
+    const item = this.enqueue({
+      kind: 'config.apply',
+      section: 'sources',
+      account,
+      steps: [],
+      outcome: 'active',
+      result: code ? null : { probe_only: true, interfaces: copy(this.snmpTestInterfaces) },
+      ...(code ? { failure: { state: 'probe_failed' as RequestState, error: code } } : {}),
+    });
+    item.apply = null; // nothing is written
+    item.final = { ...item.final, state: code ? 'probe_failed' : 'succeeded' };
     return this.accepted(item);
   }
 
@@ -3180,6 +3243,7 @@ export class AdminMock {
     if (route === 'POST /admin/config/sources/check')
       return this.sourceChange(call, host, 'check', null);
     if (route === 'POST /admin/config/sources') return this.sourceChange(call, host, 'add', null);
+    if (route === 'POST /admin/config/sources/snmp-test') return this.snmpTest(call, host);
     if ((match = /^\/admin\/config\/sources\/([^/]+)$/.exec(path))) {
       const name = decodeURIComponent(match[1] ?? '');
       if (method === 'PUT') return this.sourceChange(call, host, 'update', name);

@@ -6,7 +6,14 @@
  */
 
 import { SECRET_KEPT, type SecretEdit } from '@/components/admin/secret-edit';
-import type { SnmpAuth, SnmpCapacityIo, SnmpIn, SnmpOut, SnmpPriv } from '@/lib/settings-types';
+import type {
+  ProbeInterface,
+  SnmpAuth,
+  SnmpCapacityIo,
+  SnmpIn,
+  SnmpOut,
+  SnmpPriv,
+} from '@/lib/settings-types';
 import { codePointLength, type FieldErrors } from '@/lib/validation';
 
 import { integerError, parseInteger } from './settings-validation';
@@ -263,4 +270,29 @@ export function snmpPaths(name: string): {
     auth_key: [`snmp.${source}.auth_key`],
     priv_key: [`snmp.${source}.priv_key`],
   };
+}
+
+/** "Bağlantıyı dene" (Wave 6 C11): the interfaces of a probe-only request's result, else `null`. */
+export function probedInterfaces(
+  result: Record<string, unknown> | null | undefined,
+): ProbeInterface[] | null {
+  if (!result || result.probe_only !== true || !Array.isArray(result.interfaces)) return null;
+  return result.interfaces as ProbeInterface[];
+}
+
+/**
+ * A name picked from the device's list: it goes into the first empty line, else into a new one
+ * (at most {@link SNMP_LINES_MAX}); a name already listed stays where it is.
+ */
+export function pickLine(form: SnmpForm, name: string): SnmpForm {
+  if (form.lines.some((line) => line.name.trim() === name)) return form;
+  const empty = form.lines.findIndex((line) => line.name.trim() === '');
+  if (empty >= 0) {
+    return {
+      ...form,
+      lines: form.lines.map((line, at) => (at === empty ? { ...line, name } : line)),
+    };
+  }
+  if (form.lines.length >= SNMP_LINES_MAX) return form;
+  return { ...form, lines: [...form.lines, { ...NEW_LINE, name }] };
 }

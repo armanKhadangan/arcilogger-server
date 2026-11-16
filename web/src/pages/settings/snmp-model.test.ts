@@ -1,7 +1,17 @@
 import { SECRET_KEPT } from '@/components/admin/secret-edit';
 import type { SnmpOut, SourceOut } from '@/lib/settings-types';
 
-import { fromSnmpForm, NEW_SNMP, snmpIn, snmpPaths, toSnmpForm, validateSnmp } from './snmp-model';
+import {
+  fromSnmpForm,
+  NEW_LINE,
+  NEW_SNMP,
+  pickLine,
+  probedInterfaces,
+  snmpIn,
+  snmpPaths,
+  toSnmpForm,
+  validateSnmp,
+} from './snmp-model';
 import { fromSourceForm, sourceBody, sourceConfig, toSourceForm } from './sources-model';
 
 const STORED: SnmpOut = {
@@ -202,5 +212,32 @@ describe('[sources.snmp] as the browser edits it (Wave 5 §6 N1, P4)', () => {
       auth_key: ['snmp.fw-merkez.auth_key'],
       priv_key: ['snmp.fw-merkez.priv_key'],
     });
+  });
+});
+
+describe('"Bağlantıyı dene" (Wave 6 C11)', () => {
+  const WAN1 = { name: 'wan1', oper_status: 'up' as const, speed_mbps: 1000 };
+
+  it('reads the interfaces of a probe-only result only', () => {
+    expect(probedInterfaces({ probe_only: true, interfaces: [WAN1] })).toEqual([WAN1]);
+    expect(probedInterfaces({ probe_only: true, interfaces: [] })).toEqual([]);
+    expect(probedInterfaces({ credits: 3 })).toBeNull();
+    expect(probedInterfaces(null)).toBeNull();
+  });
+
+  it('puts a picked name into the first empty line, else a new one, at most four', () => {
+    const empty = { ...NEW_SNMP, enabled: true, lines: [NEW_LINE] };
+    const one = pickLine(empty, 'wan1');
+    expect(one.lines.map((line) => line.name)).toEqual(['wan1']);
+    expect(pickLine(one, 'wan1')).toBe(one); // already listed: unchanged
+    const two = pickLine(one, 'wan2');
+    expect(two.lines.map((line) => line.name)).toEqual(['wan1', 'wan2']);
+    const four = ['wan3', 'wan4'].reduce(pickLine, two);
+    expect(pickLine(four, 'wan5')).toBe(four);
+    const typed = { ...empty, lines: [{ name: 'lan', down: '100', up: '100' }, NEW_LINE] };
+    expect(pickLine(typed, 'wan1').lines).toEqual([
+      { name: 'lan', down: '100', up: '100' },
+      { name: 'wan1', down: '', up: '' },
+    ]);
   });
 });

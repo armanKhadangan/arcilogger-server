@@ -39,6 +39,7 @@ import {
 import { useCallback, useRef, useState } from 'react';
 
 import type { ActivityDevices, ActivityWindow, WanRange, WanRates } from './activity-types';
+import type { AlertAssignRequest, AlertEvidencePage } from './alert-rule-types';
 import { AGENT_STATUS_POLL_MS, requestPollInterval } from './admin-requests';
 import { api, type QueryValue } from './api';
 import type {
@@ -152,12 +153,14 @@ import type {
   SmtpCaBody,
   SmtpCaClear,
   SourceBody,
+  SourceCheckBody,
   TestEmailBody,
   TsaTestBody,
   UploadKind,
   UploadPreview,
   ZamaneBody,
 } from './settings-types';
+import type { WebhookDeliveries, WebhookList } from './webhook-types';
 
 export const AUDIT_PAGE_SIZE = 100;
 export const USER_PAGE_SIZE = 500;
@@ -207,6 +210,7 @@ export const queryKeys = {
   activityWan: (range: WanRange) => ['activity', 'wan', range] as const,
   alerts: (filters: AlertFilters) => ['alerts', 'list', filters] as const,
   alert: (id: number) => ['alerts', 'one', id] as const,
+  alertEvidence: (id: number) => ['alerts', 'evidence', id] as const,
   alertSummary: ['alerts', 'summary'] as const,
   alertsAll: ['alerts'] as const,
   rules: ['rules'] as const,
@@ -222,6 +226,8 @@ export const queryKeys = {
   adminRequestsAll: ['admin', 'requests'] as const,
   adminVersions: ['admin', 'versions'] as const,
   settings: ['settings'] as const,
+  webhooks: ['webhooks'] as const,
+  webhookDeliveries: (name: string) => ['webhooks', 'deliveries', name] as const,
 };
 
 // -- auth ---------------------------------------------------------------------------------------
@@ -364,7 +370,8 @@ export interface UserFilters {
   active?: boolean | undefined;
 }
 
-export function useUsers(filters: UserFilters) {
+/** `GET /users` (`users.manage`); `enabled: false` for a page that only may list them. */
+export function useUsers(filters: UserFilters, enabled = true) {
   return useInfiniteQuery({
     queryKey: queryKeys.users(filters),
     queryFn: ({ signal, pageParam }) =>
@@ -380,6 +387,7 @@ export function useUsers(filters: UserFilters) {
     initialPageParam: null as string | null,
     getNextPageParam: (page) => page.next_cursor,
     placeholderData: keepPreviousData,
+    enabled,
   });
 }
 
@@ -1008,6 +1016,36 @@ export function useAddAlertNote() {
   });
 }
 
+/**
+ * `GET /alerts/{id}/evidence` (`alerts.read`, Wave 6 §2.6.2): the rows behind a rule's alert with
+ * the raw line each came from, opened through `GET /raw` (audited `raw.view`); no line content.
+ */
+export function useAlertEvidence(id: number | null) {
+  return useQuery({
+    queryKey: queryKeys.alertEvidence(id ?? 0),
+    queryFn: ({ signal }) =>
+      api.get<AlertEvidencePage>(`/alerts/${String(id)}/evidence`, { signal }),
+    enabled: id !== null,
+  });
+}
+
+/**
+ * `POST /alerts/{id}/assign` (`alerts.manage`, Wave 6 §2.6.2): a user with `alerts.read`, or
+ * nobody; 422 `alert_assignee_invalid`. The answer is the alert as it is now.
+ */
+export function useAssignAlert() {
+  const client = useQueryClient();
+  const refresh = useAlertRefresh();
+  return useMutation({
+    mutationFn: ({ id, ...body }: AlertAssignRequest & { id: number }) =>
+      api.post<AlertDetail>(`/alerts/${id}/assign`, body),
+    onSuccess: async (detail) => {
+      client.setQueryData(queryKeys.alert(detail.id), detail);
+      await refresh();
+    },
+  });
+}
+
 // -- security rules (Wave 6 contract §2.3, §2.6.1) ------------------------------------------------
 
 /** `GET /rules` (`alerts.read`): every rule with its settings, defaults and data status. */
@@ -1515,6 +1553,18 @@ export function useUpdateSource() {
   );
 }
 
+/**
+ * "Bağlantıyı dene" (Wave 6 C11): one source's SNMP, as its add or update would send it, probed
+ * by the agent before anything is saved (re-auth, one a minute); the request's `result` lists
+ * the device's interfaces.
+ */
+export function useSnmpTest() {
+  return useAdminMutation(
+    (body: SourceCheckBody) => api.post<AdminAccepted>('/admin/config/sources/snmp-test', body),
+    { secret: true },
+  );
+}
+
 /** `DELETE /admin/config/sources/{name}?etag=…&confirm=<name>` (re-auth, the name typed). */
 export function useRemoveSource() {
   return useAdminMutation(
@@ -1671,4 +1721,37 @@ export function useResetSetting() {
       api.post<SettingsPatchResult>(`/settings/${encodeURIComponent(key)}/reset`),
     onSettled: () => client.invalidateQueries({ queryKey: queryKeys.settings }),
   });
+}
+
+// -- webhooks (Wave 6 contract §2.4.4, read-only: configured on the server, D4) -------------------
+
+/** `GET /webhooks` (`alerts.read`): each webhook with its last delivery and 7-day counts. */
+export function useWebhooks() {
+  return useQuery({
+    queryKey: queryKeys.webhooks,
+    queryFn: ({ signal }) => api.get<WebhookList>('/webhooks', { signal }),
+  });
+}
+
+/** `GET /webhooks/{name}/deliveries` (`alerts.read`): the newest 50. */
+export function useWebhookDeliveries(name: string | null) {
+  return useQuery({
+    queryKey: queryKeys.webhookDeliveries(name ?? ''),
+    queryFn: ({ signal }) =>
+      api.get<WebhookDeliveries>(`/webhooks/${encodeURIComponent(String(name))}/deliveries`, {
+        signal,
+        params: { limit: 50 },
+      }),
+    enabled: name !== null,
+  });
+}
+
+/**
+ * `POST /webhooks/{name}/test` (`settings.manage`, module `security_rules`): queues the probe
+ * through the administration requests, as the SMTP trial does; the page follows the request.
+ */
+export function useTestWebhook() {
+  return useAdminMutation((name: string) =>
+    api.post<AdminAccepted>(`/webhooks/${encodeURIComponent(name)}/test`),
+  );
 }
