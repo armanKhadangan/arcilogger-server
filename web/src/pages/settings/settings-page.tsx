@@ -7,16 +7,12 @@ import { useTranslation } from 'react-i18next';
 import { AgentStatusChip, ConfigProblems } from '@/components/admin/agent-status';
 import { LicenseStateBadge } from '@/components/license/license-state-badge';
 import { PageHeader } from '@/components/layout/page-header';
-import { Badge } from '@/components/ui/badge';
 import { Card } from '@/components/ui/card';
 import { useAdminConfig, useAdminStatus, useLicense } from '@/lib/api-hooks';
 import { useAuth } from '@/lib/auth';
 import { LICENSE_ADMIN_PERMISSION, LICENSE_PAGE } from '@/lib/license';
 import { SETTINGS_SECTIONS } from '@/lib/settings-sections';
 import { endWizardMode, WIZARD_PATH } from '@/pages/setup-wizard/wizard-mode';
-
-/** Sections of spec 12.3 page 15 that come later ("Gizlilik" is in Uygulama ayarları). */
-const LATER_SECTIONS = ['rules'] as const;
 
 function SectionCard({
   to,
@@ -136,17 +132,6 @@ export function SettingsPage() {
             testId={`settings-${section.key}`}
           />
         ))}
-        <Card className="p-5">
-          <h2 className="text-sm font-semibold text-foreground">{t('settings.laterTitle')}</h2>
-          <p className="mt-1 text-13 text-muted">{t('settings.laterHint')}</p>
-          <ul className="mt-3 flex flex-wrap gap-2">
-            {LATER_SECTIONS.map((key) => (
-              <li key={key}>
-                <Badge tone="outline">{t(`settings.sections.${key}`)}</Badge>
-              </li>
-            ))}
-          </ul>
-        </Card>
       </div>
     </div>
   );
