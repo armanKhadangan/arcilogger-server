@@ -90,7 +90,7 @@ function lookupSampleFor(body: LookupIn): LookupOut {
   const query = body.query;
   if (query.internal_ip || query.mac) return LOOKUPS.internal;
   if (query.public_ip === '100.64.12.9') return LOOKUPS.exact;
-  if (query.dest_ip === '93.184.216.34') return LOOKUPS.conflict;
+  if (query.dest_ip === '203.0.113.34') return LOOKUPS.conflict;
   if (query.dest_ip === '203.0.113.10') return LOOKUPS.candidates;
   if (!query.dest_ip && !query.dest_domain && query.dest_port == null) return LOOKUPS.truncated;
   return LOOKUPS.none;
