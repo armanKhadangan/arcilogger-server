@@ -240,6 +240,12 @@ yıl yönetici girer. Ayrıntılar: [UYUM-DURUMU.md](UYUM-DURUMU.md) bölüm 2.7
 | `alerts.filter_skip_holidays` | açık | — | açıkken `usage.holidays` listesindeki günlerde kayıt beklenmez; kapalıyken resmî tatiller de beklenen gün sayılır |
 | `alerts.filter_quiet_hours` | 24 | 6–168 | beklenen günlerde kayıtsız geçebilecek en uzun süre (saat) |
 
+Aynı gruptaki `alerts.source_clock_limit_seconds` (varsayılan 120, 30–86400 saniye) cihaz saati
+sınırıdır: bir kaynağın son bir saatte alınan en yeni kayıtlarının cihaz zamanı alma zamanından
+ortanca olarak bundan fazla farklıysa o kaynak için `R20-source-clock` uyarısı açılır. Başlangıç
+değeridir, sahada doğrulayın. Her kaynağın saat farkı Kaynaklar sayfasında görünür;
+[UYARILAR.md](UYARILAR.md) bölüm 2, [DEVICE-SETUP.md](DEVICE-SETUP.md) (NTP).
+
 **Veritabanı** grubu, ayrıştırılmış kayıtların veritabanında ne kadar kaldığını söyler. Mühürlü
 kasadaki ham kayıtlar bu ayarlardan etkilenmez. Worker işi `db.window` her gece 01:00'den sonra
 pencereden eski günleri siler; henüz mühürlenmemiş bir gün ve etkin bir arşiv yüklemesinin günleri

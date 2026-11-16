@@ -416,6 +416,7 @@ Every day:
   | `R20-spool-torn` | An unterminated last line (power cut, crash, full disk) was closed with a line break (no byte is changed; the fragment stays one damaged line) |
   | `R20-disk` | Data or system drive more than 80 % full (`alerts.disk_used_percent`) |
   | `R20-parse` | More than 1 % of a source's lines of the last hour could not be parsed |
+  | `R20-source-clock` | Device clock off (high, one alert per source): the device times of a source's latest records differ from their receive times by a median of more than `alerts.source_clock_limit_seconds` (120 seconds; verify on site). Switch on NTP on the device (DEVICE-SETUP.md, NTP); replaces `R20-lease:source-clock` |
   | `R20-job` | A worker job failed 3 times in a row (`logs\worker.log`) |
   | `R20-rules` | A security rule failed to run 3 times in a row (`rules.failures_alert`; Settings → Güvenlik kuralları, `logs\worker.log`) |
   | `R20-backup` | Database backup failed, older than 36 hours, or still none 48 hours after the installation |

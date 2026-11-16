@@ -127,10 +127,23 @@ end
 ```
 
 `diagnose sys ntp status` NTP sunucularının bilgisini listeler (**doğrulayın**, sonucu
-[KURULUM.md](KURULUM.md) bölüm 16'ya yazın). Bir kaynağın saati 120 saniyeden fazla kayarsa
-`R20-lease:source-clock` uyarısı açılır ve o anların 5651 zincirleri düşük güvenle gösterilir;
-yalnız oturum araması için ölçülen bir kaynakta zincirin düşürülme sınırı, sorgu toleransı daha
-büyükse toleranstır ([CORRELATION.md](CORRELATION.md) bölüm 7).
+[KURULUM.md](KURULUM.md) bölüm 16'ya yazın). Bir kaynağın saati `alerts.source_clock_limit_seconds`
+(120 saniye; sahada doğrulayın) değerinden fazla kayarsa o kaynak için `R20-source-clock` uyarısı
+açılır ve o anların 5651 zincirleri düşük güvenle gösterilir; yalnız oturum araması için ölçülen
+bir kaynakta zincirin düşürülme sınırı, sorgu toleransı daha büyükse toleranstır
+([CORRELATION.md](CORRELATION.md) bölüm 7). Kaynaklar sayfası her kaynağın saat farkını gösterir.
+Sınırın altındaki birkaç dakikalık bir kayma da kesin sorguları kaydırır ve 5 dakikadan fazla
+geride kalan bir cihaz Canlı Durum'un Şu an görünümünde görünmez ([CANLI-DURUM.md](CANLI-DURUM.md)
+bölüm 2).
+
+*Clock (NTP).* The FortiGate's clock dates every session and DHCP record; a drift of minutes
+shifts exact lookups (the real session is not found, or another session that reused the port
+later is). Sync it with NTP as above. A source whose clock is off by more than
+`alerts.source_clock_limit_seconds` (120 seconds; verify on site) opens `R20-source-clock` for that
+source, and the 5651 chains of those moments show with low confidence. The Sources page shows each
+source's clock offset. A drift of a few minutes under the limit still shifts exact lookups, and a
+device more than 5 minutes behind does not show under Live Status's Now
+([LIVE-STATUS.md](LIVE-STATUS.md) section 2).
 
 ### 2.2 Web ve DNS filtre profilleri
 

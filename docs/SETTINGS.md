@@ -243,6 +243,12 @@ administrator enters the dates of the religious holidays every year. Details:
 | `alerts.filter_skip_holidays` | on | — | on: no record is expected on the days of `usage.holidays`; off: public holidays count as expected days |
 | `alerts.filter_quiet_hours` | 24 | 6–168 | the longest time without a record on expected days (hours) |
 
+`alerts.source_clock_limit_seconds` of the same group (default 120, 30–86,400 seconds) is the
+device clock limit: when the device times of a source's newest records received in the last hour
+differ from their receive times by a median of more than this, `R20-source-clock` opens for that
+source. It is a starting value; verify on site. Each source's clock offset shows on the Sources
+page; [ALERTS.md](ALERTS.md) section 2, [DEVICE-SETUP.md](DEVICE-SETUP.md) (NTP).
+
 The **Database** group says how long the parsed records stay in the database. The raw records in
 the sealed vault are not affected. The worker job `db.window` drops the days older than the
 window every night after 01:00; a day not sealed yet and the days of an active archive reload are
