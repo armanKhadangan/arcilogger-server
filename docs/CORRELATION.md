@@ -992,7 +992,8 @@ WHERE duration >= 300` and split the scan into "logged within 5 minutes of the w
   `no_lease`, or a chain `low`. The lines the previous version loaded stay `fg_event` rows and
   are named as above.
 - **Source clocks.** A device clock that is off by less than 120 s is not alerted
-  (`R20-lease:source-clock`, a fixed 120 s for every source) and lowers no chain below max(120 s,
+  (`R20-source-clock:<source>`, `alerts.source_clock_limit_seconds`, 120 s by default; #222) and
+  lowers no chain below max(120 s,
   the lookup tolerance) for a source measured only for the session search (120 s otherwise), yet
   with the default ±60 s tolerance a drift of one to two minutes can still move a session out of the
   window. A source with fewer than 10 rows around T is not measured. An empty result states the
@@ -1078,7 +1079,7 @@ The operator's checklist with the recorded outcomes is [KURULUM.md](KURULUM.md) 
 - **Carrier-grade NAT** at the ISP (a public IP shared with other customers) and **whether each
   line's public IP is static** (`public_dynamic`): ask the ISP.
 - **The FortiGate's clock** syncs with NTP (DEVICE-SETUP.md section 2.1) and its DHCP lines carry
-  a usable device time (`R20-lease:source-clock`).
+  a usable device time (`R20-source-clock`).
 - **DECLINE:** whether FortiOS logs a DHCPDECLINE or checks an address before it offers it, and
   that a client holds one address per server interface and network.
 - **ARP-LOG script interval** (`arp.interval_seconds`, 1 h) and its jitter (merge grace 66 min).

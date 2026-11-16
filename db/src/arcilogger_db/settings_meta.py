@@ -209,6 +209,15 @@ _ALERTS = _group(
         "No rate is computed for a source that sent fewer messages in the last hour.",
     ),
     (
+        "alerts.source_clock_limit_seconds",
+        "Cihaz saati sınırı (saniye)",
+        "Device clock limit (seconds)",
+        "Bir kaynağın son kayıtlarının cihaz zamanı alma zamanından ortanca olarak bundan fazla "
+        "farklıysa R20-source-clock uyarısı. Başlangıç değeri; sahada doğrulayın.",
+        "R20-source-clock when the device times of a source's latest records differ from their "
+        "receive times by a median of more than this. A starting value; verify on site.",
+    ),
+    (
         "alerts.job_failures",
         "Art arda başarısız çalışma",
         "Failed runs in a row",

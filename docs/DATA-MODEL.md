@@ -80,7 +80,8 @@
 - Kaynak saatleri (revizyon `0019_source_clock_samples`, ADR-0016 D28): `source_clock_samples`
   her kaynak için satırların **alındığı** dakikada cihaz saatinin alma zamanından farkını
   (sıfırdan uzağa yuvarlanmış tam saniye; bir dakikanın altındaki fark 0) ve satır sayısını
-  tutar. Ingest bunu satırlarla aynı işlemde yazar; `R20-lease:source-clock` uyarısı ve 5651
+  tutar. Ingest bunu satırlarla aynı işlemde yazar; `R20-source-clock` uyarısı, Kaynaklar'daki
+  saat farkı ve 5651
   sorgusunun saat denetimi saatleri geri ya da ileri atlayan bir cihaz saatini buradan ölçer.
 - NAT adresi indeksi (revizyon `0020_fg_traffic_transip_time`): `fg_traffic` tablosunun yeni
   indeksi `ix_fg_traffic_transip_time (transip, time)`, 5651 sorgusunun bir NAT adresi için port
@@ -158,7 +159,8 @@ exit) and add three status rows that are never edited: `nat.egresses_migration`,
 (revision `0019_source_clock_samples`, ADR-0016 D28) add `source_clock_samples`: per source and
 **received** minute, the device clock's offset from the receive time (whole seconds rounded away
 from zero, 0 under a minute) and its rows, written by ingest in the transaction of the rows; the
-`R20-lease:source-clock` alert and a lookup's clock check measure a clock that jumped by hours
+`R20-source-clock` alert, the clock offset on Sources and a lookup's clock check measure a clock
+that jumped by hours
 there. The NAT address index (revision `0020_fg_traffic_transip_time`) is `fg_traffic`'s new
 index `ix_fg_traffic_transip_time (transip, time)`: a lookup's steps without a port on one NAT
 address (the overlap probe, and the D15 check's tail after its window and its steps for sessions

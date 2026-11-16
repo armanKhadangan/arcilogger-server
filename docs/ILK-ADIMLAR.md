@@ -415,6 +415,7 @@ Her gün:
   | `R20-spool-torn` | Elektrik kesintisi, çökme ya da dolu disk yüzünden yarım kalmış son satır bir satır sonuyla kapatıldı (baytlar değiştirilmez; yarım satır tek bir bozuk satır olarak kalır) |
   | `R20-disk` | Veri ya da sistem diski %80'den fazla dolu (`alerts.disk_used_percent`) |
   | `R20-parse` | Bir kaynağın son bir saatteki satırlarının %1'inden fazlası ayrıştırılamadı |
+  | `R20-source-clock` | Cihaz saati kayık (yüksek, kaynak başına bir uyarı): bir kaynağın son kayıtlarının cihaz zamanı alma zamanından ortanca olarak `alerts.source_clock_limit_seconds` (120 saniye; sahada doğrulayın) değerinden fazla farklı. Cihazda NTP'yi açın (DEVICE-SETUP.md, NTP); `R20-lease:source-clock`'un yerini alır |
   | `R20-job` | Bir worker işi art arda 3 kez başarısız (`logs\worker.log`) |
   | `R20-rules` | Bir güvenlik kuralı art arda 3 kez çalışamadı (`rules.failures_alert`; Ayarlar → Güvenlik kuralları, `logs\worker.log`) |
   | `R20-backup` | Veritabanı yedeği başarısız, 36 saatten eski ya da kurulumdan 48 saat sonra hâlâ yok |

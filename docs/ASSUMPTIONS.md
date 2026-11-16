@@ -319,7 +319,8 @@ list under "Technical assumptions to verify on site" below); the settings are in
 Each default below is implemented; the contract's "Review notes" and "Deviations" sections give
 the alternatives.
 
-- The source-clock limit of ±120 s (`R20-lease:source-clock`, O22).
+- The source-clock limit of ±120 s (`R20-source-clock`, the setting
+  `alerts.source_clock_limit_seconds`, #222; O22).
 - An `unknown-<ip>` sender is trusted once its address lies in an enabled, configured FortiGate
   source (FD6); a stricter posture would wait for roadmap 2.2.
 - `fortigate-renewals-not-logged` stays open as an info alert on a verified site that never logged
