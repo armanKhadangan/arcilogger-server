@@ -3,8 +3,7 @@
  * `arcilogger_api.routers.webhooks`): the webhooks configured on the server (D4: never from the
  * browser), their deliveries and "Test gönder".
  *
- * Written from the contract while W6-H's API is on its way; `api-types.test.ts` checks this file
- * against the OpenAPI document once the API is in the generated contract.
+ * Checked against the OpenAPI document by `api-types.test.ts`.
  */
 
 import type { AlertSeverity, DateTimeString } from './api-types';
@@ -14,6 +13,12 @@ export type WebhookFormat = 'generic' | 'teams' | 'slack';
 
 /** Why a webhook cannot send (C9; `disabled`: `enabled = false` in the file, manager on #260). */
 export type WebhookNotReady = 'disabled' | 'secret_missing' | 'url_missing';
+
+/**
+ * A severity as the webhooks API sends it: declared a string, its values the alerts' severities
+ * (`NARROWED` in `api-types.test.ts`).
+ */
+export type WebhookSeverity = AlertSeverity;
 
 /** A row of `alert_deliveries` with `kind = 'webhook'` (D10). */
 export type WebhookDeliveryStatus = 'queued' | 'sent' | 'failed';
@@ -35,7 +40,7 @@ export interface WebhookOut {
   format: WebhookFormat;
   /** The URL's host only: never its path, query or a secret. */
   host: string;
-  min_severity: AlertSeverity;
+  min_severity: WebhookSeverity;
   /** The rules it is sent for; empty: every rule, R15 and R20 included. */
   rules: string[];
   enabled: boolean;
@@ -58,7 +63,7 @@ export interface WebhookList {
 export interface WebhookDelivery {
   alert_id: number;
   rule: string;
-  severity: AlertSeverity;
+  severity: WebhookSeverity;
   status: WebhookDeliveryStatus;
   attempts: number;
   /** The status code and at most 300 characters of the reply; no URL query, secret or header. */
