@@ -1015,22 +1015,25 @@ _AMOUNT: Final = (
     "CASE WHEN is_interim AND {d} IS NOT NULL THEN greatest({d}, 0) "
     "ELSE greatest(coalesce({c}, 0) - coalesce(lag({c}) OVER w, 0), 0) END"
 )
-#: All logs of the touched sessions from the lookback on: the session ids in one read of the
-#: session id index (an array, so the planner cannot turn it into a join over the whole index),
-#: then the full session key; a log without a session id through its address and destination
-#: (``OFFSET 0``: one read per key, not a join over the table).
+#: A log's session key as text (``{t}``: the alias), for :data:`_LOGS`' ``:keys``.
+_KEY: Final = (
+    "({t}.srcip::text || ' ' || {t}.sessionid::text || ' ' || coalesce({t}.dstip::text, '-') "
+    "|| ' ' || coalesce({t}.dstport::text, '-'))"
+)
+#: All logs of the touched sessions from the lookback on: their session ids and full session
+#: keys (``:sessions``, ``:keys``: :data:`_KEY`, read first by :func:`_touched_keys`); a log
+#: without a session id through its address and destination (``OFFSET 0``: one read per key,
+#: not a join over the table). The ids and keys are bound arrays, not a subquery or a join:
+#: PostgreSQL hashes ``= ANY`` over a constant array, so whichever plan the statistics give (the
+#: session id index, or the receive-time index with the ids as a filter: statistics from before
+#: a catch-up's burst, #302), each row costs a lookup, not a comparison with every key.
 _LOGS: Final = """
 logs AS (
     SELECT g.id, g.srcip, g.sessionid, g.dstip, g.dstport, g.time, g.time_received,
            g.is_interim, g.sentbyte, g.rcvdbyte, g.sentdelta, g.rcvddelta
     FROM fg_traffic g
     WHERE {match_g} AND g.time_received > :lookback AND g.time_received <= :end
-      AND g.sessionid = ANY(ARRAY(
-          SELECT DISTINCT k.sessionid FROM touched k WHERE k.sessionid IS NOT NULL))
-      AND EXISTS (
-          SELECT 1 FROM touched k
-          WHERE k.sessionid = g.sessionid AND k.srcip = g.srcip
-            AND k.dstip IS NOT DISTINCT FROM g.dstip AND k.dstport IS NOT DISTINCT FROM g.dstport)
+      AND g.sessionid = ANY(CAST(:sessions AS bigint[])) AND {key_g} = ANY(CAST(:keys AS text[]))
     UNION ALL
     SELECT l.* FROM touched k CROSS JOIN LATERAL (
         SELECT g.id, g.srcip, g.sessionid, g.dstip, g.dstport, g.time, g.time_received,
@@ -1048,15 +1051,17 @@ logs AS (
 #: receive time, device time), all their logs from the lookback on
 #: (each session through the session id index), counted as of the slice start (``old``) and as
 #: of its end (``new``), per address and minute of device time.
-_CHANGES: Final = """
-WITH touched AS (
+_TOUCHED_SLICE: Final = """
+touched AS (
     SELECT t.srcip, t.sessionid, t.dstip, t.dstport FROM fg_traffic t
     WHERE {match_t} AND t.time_received > :start AND t.time_received <= :end
     UNION
     SELECT t.srcip, t.sessionid, t.dstip, t.dstport FROM fg_traffic t
     WHERE {match_t} AND t.time > :start_high
       AND t.time_received > :lookback AND t.time_received <= :start
-),
+)"""
+_CHANGES: Final = """
+WITH {touched},
 {logs},
 
 new AS (
@@ -1143,12 +1148,28 @@ def _amount(sent_only: bool) -> str:
 
 
 def _logs() -> str:
-    return _LOGS.format(match_g=_MATCH.format(t="g"))
+    return _LOGS.format(match_g=_MATCH.format(t="g"), key_g=_KEY.format(t="g"))
+
+
+def _touched_keys(session: Session, touched: str, params: dict[str, Any]) -> None:
+    """The session ids and keys of the ``touched`` CTE with a session id, into ``params``
+    (``:sessions`` and ``:keys`` of :data:`_LOGS`)."""
+    query = text(
+        f"WITH {touched} SELECT DISTINCT k.sessionid, {_KEY.format(t='k')} "  # noqa: S608 - fixed SQL
+        "FROM touched k WHERE k.sessionid IS NOT NULL"
+    )
+    rows = session.execute(query, params).all()
+    params["sessions"] = sorted({int(sessionid) for sessionid, _ in rows})
+    params["keys"] = [str(key) for _, key in rows]
 
 
 def _changes_sql(sent_only: bool) -> Any:
     return text(
-        _CHANGES.format(logs=_logs(), match_t=_MATCH.format(t="t"), amount=_amount(sent_only))
+        _CHANGES.format(
+            touched=_TOUCHED_SLICE.format(match_t=_MATCH.format(t="t")),
+            logs=_logs(),
+            amount=_amount(sent_only),
+        )
     )
 
 
@@ -1167,15 +1188,10 @@ def _counted(
     if not period.networks or hi <= lo or ranges == []:
         return []
     lookback, low, high = _period_bounds(ctx, period)
-    touched = _TOUCHED_RECEIVED if ranges is None else _TOUCHED_BY_ADDRESS
-    match_t = _MATCH.format(t="t")
-    query = text(
-        _COUNTED.format(
-            touched=touched.format(match_t=match_t),
-            logs=_logs(),
-            amount=_amount(period.sent_only),
-        )
+    touched = (_TOUCHED_RECEIVED if ranges is None else _TOUCHED_BY_ADDRESS).format(
+        match_t=_MATCH.format(t="t")
     )
+    query = text(_COUNTED.format(touched=touched, logs=_logs(), amount=_amount(period.sent_only)))
     addresses = None if ips is None else sorted(ips)
     by_address: dict[str, list[Any]] = {}
     if ranges is not None:
@@ -1185,25 +1201,22 @@ def _counted(
             "highs": [entry.high for entry in ranges],
             "reach": [min(entry.reach, hi) for entry in ranges],
         }
-    return list(
-        session.execute(
-            query,
-            {
-                "refused": list(REFUSED_ACTIONS),
-                "networks": list(period.networks),
-                "low": low,
-                "high": high,
-                "lo": lo,
-                "hi": hi,
-                "end": ctx.end,
-                "lookback": lookback,
-                "since": period.since,
-                "count_from": period.count_from or period.since,
-                "ips": addresses,
-                **by_address,
-            },
-        )
-    )
+    params: dict[str, Any] = {
+        "refused": list(REFUSED_ACTIONS),
+        "networks": list(period.networks),
+        "low": low,
+        "high": high,
+        "lo": lo,
+        "hi": hi,
+        "end": ctx.end,
+        "lookback": lookback,
+        "since": period.since,
+        "count_from": period.count_from or period.since,
+        "ips": addresses,
+        **by_address,
+    }
+    _touched_keys(session, touched, params)
+    return list(session.execute(query, params))
 
 
 def _advance(session: Session, ctx: RuleContext, period: _Period, store: _Store) -> list[_Change]:
@@ -1214,21 +1227,21 @@ def _advance(session: Session, ctx: RuleContext, period: _Period, store: _Store)
     if not period.networks:
         return []
     lookback, low, high = _period_bounds(ctx, period)
-    found = session.execute(
-        _changes_sql(period.sent_only),
-        {
-            "refused": list(REFUSED_ACTIONS),
-            "networks": list(period.networks),
-            "low": low,
-            "high": high,
-            "start": ctx.start,
-            "end": ctx.end,
-            "lookback": lookback,
-            "start_high": ctx.start + period.skew,
-            "since": period.since,
-            "count_from": period.count_from or period.since,
-        },
-    )
+    params: dict[str, Any] = {
+        "refused": list(REFUSED_ACTIONS),
+        "networks": list(period.networks),
+        "low": low,
+        "high": high,
+        "start": ctx.start,
+        "end": ctx.end,
+        "lookback": lookback,
+        "start_high": ctx.start + period.skew,
+        "since": period.since,
+        "count_from": period.count_from or period.since,
+    }
+    touched = _TOUCHED_SLICE.format(match_t=_MATCH.format(t="t"))
+    _touched_keys(session, touched, params)
+    found = session.execute(_changes_sql(period.sent_only), params)
     changes: list[_Change] = []
     changed: set[str] = set()
     for side, ip, minute, received, rows, amount, first, last in found:
