@@ -323,6 +323,7 @@ def test_the_snapshot_keeps_up_and_the_loop_is_not_held(
     db_session_factory: sessionmaker[Session],
     layout: Layout,
     unfreeze: None,
+    capsys: pytest.CaptureFixture[str],
     rate: float,
     devices: int,
 ) -> None:
@@ -404,7 +405,9 @@ def test_the_snapshot_keeps_up_and_the_loop_is_not_held(
     figures["probe_late_max_s"] = round(max(late, default=0.0), 3)
     figures["open_sessions"] = ticks[-1]["open_sessions"]
     figures["file_bytes"] = layout.activity.stat().st_size
-    print(f"\nactivity snapshot at {rate:g} lines/s, {devices} devices: {figures}")
+    # Printed on a pass too (as the live tail's guard does), so CI's log shows each run's margin.
+    with capsys.disabled():
+        print(f"\nactivity snapshot at {rate:g} lines/s, {devices} devices: {figures}")
     assert backlog(ticks[-1]) <= figures["backlog_after_warm_up"]
     assert figures["data_until_lag_max_s"] <= LAG_LIMIT.total_seconds()
     assert len(starts) >= TICKS

@@ -693,12 +693,13 @@ to the normal site: `port-scan` (R01), `external-scan` (R02), `brute-force` (R03
   and `values` move as before. §2.1.5's "counts add up" is replaced by this. It lands in W6-A's
   dry-run PR, before any API or UI shows a count. A closed alert's `after_close.count` (cooldown)
   follows the same rule: the largest window count, never a sum (#270; lands with the rules API).
-- **C2 — no index migration for the rules** (#278). The perf guard (T-A6) measured every rule's
-  statements with `EXPLAIN (ANALYZE, BUFFERS)`: the primary keys `(time, id)` and the existing
-  per-table key indexes serve every rule, and an index on `time_received` made R01 and R02
-  slower. §2.1.7 allows only indexes the rules need, so none is added. `0024_rules` is merged and
-  is not edited; `0025` is W6-H's request kind (C10). R13's and R14's day and night totals,
-  which no index helps, are #280.
+- **C2 — the rules' receive-time indexes, migration `0026_rules_time_received`** (#278,
+  W6-A-7). Measured on the slice alone, no index paid; with a window filled behind the slice (as
+  in production), `(time_received)` on `fg_traffic`, `fg_dns`, `fg_web` and `fg_app` took the 18
+  rules from 30.7 s to 21.3 s at 10 minutes behind, with ingest's gate unchanged. `0024_rules`
+  is merged and is not edited; `0025` is W6-H's request kind (C10); `0027` holds R13's and
+  R14's running totals (#280). An upgrade builds the four indexes over every existing row with
+  the services stopped (CHANGELOG).
 - **C3 — `rules.evidence_max`:** a rule may return up to 100 evidence rows (the setting's
   maximum) or read the setting itself; the engine keeps the configured number, oldest first.
 - **C4 — defaults the tables leave open** (#253, #254): cooldown 3600 s for R01, R03, R08,
@@ -763,7 +764,8 @@ to the normal site: `port-scan` (R01), `external-scan` (R02), `brute-force` (R03
     the list whenever the walk succeeded. The API never turns a probe-only request into
     `active`. Audit `admin.probe` with the source name and outcome, never a value.
   - The SNMP form offers the interfaces as a pick list and falls back to typed names (W6-H's
-    owner builds it, with a grant for the SNMP part of `web/src/pages/sources/`).
+    owner builds it, with a grant for the SNMP form in `web/src/pages/settings/`:
+    `source-snmp.tsx`, `snmp-model.ts`, `sources-page.tsx`).
 - **C12 — the live tail's Linux bound follows CI's interpreter** (#191). CI's Linux job runs uv's
   managed Python 3.12.16 since 2026-11-07, not the runner's 3.12.3: the gauge became 8 to 11 %
   faster on the same CPU and the event loop's figure in gauge lines rose with it, while its time a
@@ -771,6 +773,16 @@ to the normal site: `port-scan` (R01), `external-scan` (R02), `brute-force` (R03
   ubuntu-latest's value is 7.4, fitted to the 89: the costliest passes by 5.2 %, a path 40 %
   costlier fails on 81 of them, 20 % costlier on 48. `CI_READINGS`' Linux rows are those
   readings, with their CPU models. windows-latest is unchanged.
+- **C13 — a device clock that is minutes off** (#222):
+  - A source's typical offset is the median of its newest rows received in the last hour
+    (`source_clock_samples`, at least 10 rows); ingest does not change.
+  - `GET /api/v1/sources` gives `clock_offset_seconds` (negative: behind) and `clock_rows`;
+    `/system/health` the sources beyond the limit; `/live` the sources too late for "Şu an".
+  - The alert is the system alert `R20-source-clock:<source>` (free, 5651 Temel), one per
+    source, above `alerts.source_clock_limit_seconds` (default 120, 30-86,400, "sahada
+    doğrula"); it resolves when the offset is back within the limit. It replaces
+    `R20-lease:source-clock`: an open one is resolved as `superseded`, and its catalogue entry
+    stays for old alerts. The look-up's own D28 tolerance is unchanged; D8 is unchanged.
 
 ---
 
