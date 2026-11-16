@@ -16,7 +16,7 @@ from arcilogger_db.engine import engine_from_url
 from arcilogger_db.migrate import alembic_config, current_revisions, upgrade
 from arcilogger_db.testing import TestServer
 
-BEFORE = "0025_admin_webhook_test"
+BEFORE = "0026_rules_time_received"
 REVISION = "0027_rule_traffic_totals"
 TABLES = {"rule_traffic_state", "rule_traffic_totals", "rule_traffic_evidence"}
 PERIOD = "2026-11-14 21:00+00"

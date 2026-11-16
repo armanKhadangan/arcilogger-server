@@ -2,7 +2,7 @@
 
 > Durum: sürüm 0.4.1. Kaynak: `db/src/arcilogger_db/models.py` ve
 > `db/src/arcilogger_db/migrations/versions/` (`v0001_baseline`, `v0006_lookup_reports` …
-> `v0025_admin_webhook_test`). Bir test, modellerle migrasyonların birebir aynı olduğunu
+> `v0027_rule_traffic_totals`). Bir test, modellerle migrasyonların birebir aynı olduğunu
 > her çalıştırmada doğrular.
 
 ## Özet (TR)
@@ -90,6 +90,12 @@
   satırlarını okutur; `(transip, transport, time)` indeksinde `time` üçüncü sütun olduğundan
   böyle bir adım adresin bölümdeki bütün indeks girdilerini yürüyordu. Milyon satır başına
   yaklaşık 31,5 MB yer tutar.
+- Güvenlik kurallarının alma zamanı indeksleri (revizyon `0026_rules_time_received`, Wave 6):
+  `fg_traffic`, `fg_dns`, `fg_web` ve `fg_app` tablolarında `(time_received)`. Kurallar dilimdeki
+  ve penceredeki satırları alma zamanıyla bulur; yalnızca cihaz zamanı indeksliyken bu adım
+  pencere ile iki kat saat kayması genişliğindeki (varsayılanlarla 3 saat) bütün satırları
+  okuyordu. Dilimin arkasında 10 dakikalık yükle 18 kural 30,7 sn yerine 21,3 sn sürer; ingest
+  hızı ölçüm aralığında kalır.
 - Kira hareketleri (revizyon `0022_lease_moves`, issue #127): `leases.moves` (JSONB, NULL
   olabilir), kira işinin gördüğü ama uygulamadığı FortiGate ACK'lerini (kiranın MAC adresinin
   başka bir adres alması) kirayla birlikte saklar; 5651 sorgusunun kaçırılmış taşınma denetimi
@@ -159,7 +165,12 @@ address (the overlap probe, and the D15 check's tail after its window and its st
 spanning the moment; its window step stays in time order; a port-less session search on one
 address may take it too, the same rows in the same order) read that address's rows of their range
 only, where on `(transip, transport, time)` they walked every index entry of the address in the
-partition; it takes about 31.5 MB per million rows. Lease moves (revision `0022_lease_moves`,
+partition; it takes about 31.5 MB per million rows. The security rules' receive-time indexes
+(revision `0026_rules_time_received`, Wave 6) are `(time_received)` on `fg_traffic`, `fg_dns`,
+`fg_web` and `fg_app`: a rule finds the rows of its slice and window by receive time, and with
+only the device time indexed that step read every row in bounds the window plus twice the clock
+skew wide (3 h with the defaults); with 10 minutes of load behind the slice the 18 rules take
+21.3 s instead of 30.7 s, ingest within the spread of its runs. Lease moves (revision `0022_lease_moves`,
 issue #127) add `leases.moves` (JSONB, nullable): the FortiGate ACKs of the lease's MAC for
 another address that the lease job saw and did not apply, which a lookup's missed-move check
 reads for the part before the database window. The value is bounded (lease rows are never
@@ -267,10 +278,10 @@ through the table itself (never into a partition), so the identity column is use
 | Table | Content | Indexes besides the primary key |
 |---|---|---|
 | `messages` | Every received message (lightweight): severity, facility, program/topics, host, type, subtype, short text, `parse_error` | (source, time), (type, time) |
-| `fg_traffic` | FortiGate traffic (incl. interim `0000000020`, `is_interim`), source NAT `transip:transport`; `srcmac` (`MACADDR`, revision `0017_fortigate_dhcp`): "MAC address associated with the Source IP", filled only where the FortiGate's device identification is on, NULL in older rows; never lease evidence (ADR-0016, D10) | (srcip, time), (transip, transport, time), (transip, time) (`ix_fg_traffic_transip_time`, revision `0020_fg_traffic_transip_time`: the lookup's steps without a port on one NAT address, in the overlap probe `_Probe.seen_overlap` and the tail and spanning-sessions steps of the D15 check `_Lookup._carried`; a port-less search on one address may take it too (the same rows, in the same order); about 31.5 MB per million rows), (sessionid), (dstip, dstport, time) — none on `srcmac` (the search field `srcmac:` scans) |
-| `fg_web` | Web filter: hostname, url (≤ 2,000 chars), cat, catdesc, action, eventtype, profile | (sessionid), (srcip, time), `ix_fg_web_rhost_time` (reverse(lower(hostname)), time) — the search field `domain:` (revision `0016_search`) |
-| `fg_dns` | DNS: qname, qtype, answers `INET[]`, catdesc, action | (srcip, time), (qname, time) |
-| `fg_app` | Application control: app, appid, appcat, hostname, url | (sessionid), (srcip, time) |
+| `fg_traffic` | FortiGate traffic (incl. interim `0000000020`, `is_interim`), source NAT `transip:transport`; `srcmac` (`MACADDR`, revision `0017_fortigate_dhcp`): "MAC address associated with the Source IP", filled only where the FortiGate's device identification is on, NULL in older rows; never lease evidence (ADR-0016, D10) | (srcip, time), (time_received) (`ix_fg_traffic_time_received`, revision `0026_rules_time_received`: the security rules), (transip, transport, time), (transip, time) (`ix_fg_traffic_transip_time`, revision `0020_fg_traffic_transip_time`: the lookup's steps without a port on one NAT address, in the overlap probe `_Probe.seen_overlap` and the tail and spanning-sessions steps of the D15 check `_Lookup._carried`; a port-less search on one address may take it too (the same rows, in the same order); about 31.5 MB per million rows), (sessionid), (dstip, dstport, time) — none on `srcmac` (the search field `srcmac:` scans) |
+| `fg_web` | Web filter: hostname, url (≤ 2,000 chars), cat, catdesc, action, eventtype, profile | (sessionid), (srcip, time), `ix_fg_web_rhost_time` (reverse(lower(hostname)), time) — the search field `domain:` (revision `0016_search`), (time_received) (revision `0026_rules_time_received`: the security rules) |
+| `fg_dns` | DNS: qname, qtype, answers `INET[]`, catdesc, action | (srcip, time), (qname, time), (time_received) (revision `0026_rules_time_received`: the security rules) |
+| `fg_app` | Application control: app, appid, appcat, hostname, url | (sessionid), (srcip, time), (time_received) (revision `0026_rules_time_received`: the security rules) |
 | `fg_ips` / `fg_virus` | IPS and antivirus events | (srcip, time) |
 | `fg_event` | Admin logins, configuration changes (`cfgpath`, `cfgobj`, `cfgattr`), system/perf, VPN, user | (subtype, time) |
 | `fg_dhcp` | FortiGate DHCP server events (revision `0017_fortigate_dhcp`, ADR-0016): an `event` line with `ip`, `mac` and `dhcp_msg` that convert (else it stays `fg_event`, parse failure `fortigate.dhcp`): logid, subtype, level, logdesc, dhcp_msg, interface (the DHCP server's interface), ip, mac (both NOT NULL), hostname, lease (`BIGINT`, seconds as logged, NULL when absent; verify on site), msg, `device_time` (`true`: `time` is the FortiGate's event time; `false`: the receive time, never lease evidence). What a row means (ACK, RELEASE) is decided by the worker from its `logid` (`dhcp.fortigate_logids`), so a settings change re-reads old rows; lines loaded before the upgrade are not converted | (ip, time), (mac, time) |

@@ -1,7 +1,7 @@
 """R13's and R14's running traffic totals (#280).
 
 Revision ID: 0027_rule_traffic_totals
-Revises: 0025_admin_webhook_test
+Revises: 0026_rules_time_received
 Create Date: 2026-11-15
 
 R13 (a site day's bytes) and R14 (a night's) kept a period's totals by reading the whole period
@@ -28,7 +28,7 @@ from alembic import op
 from sqlalchemy.dialects import postgresql
 
 revision: str = "0027_rule_traffic_totals"
-down_revision: str | Sequence[str] | None = "0025_admin_webhook_test"
+down_revision: str | Sequence[str] | None = "0026_rules_time_received"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

@@ -265,6 +265,7 @@ class FgTraffic(TimeSeries, Base):
         Index("ix_fg_traffic_transip_time", "transip", "time"),
         Index("ix_fg_traffic_sessionid", "sessionid"),
         Index("ix_fg_traffic_dstip_dstport_time", "dstip", "dstport", "time"),
+        Index("ix_fg_traffic_time_received", "time_received"),
         comment="FortiGate traffic logs (forward/local), incl. interim updates and source NAT.",
     )
 
@@ -322,6 +323,7 @@ class FgWeb(TimeSeries, Base):
         Index("ix_fg_web_sessionid", "sessionid"),
         Index("ix_fg_web_srcip_time", "srcip", "time"),
         Index("ix_fg_web_rhost_time", text("reverse(lower(hostname))"), "time"),
+        Index("ix_fg_web_time_received", "time_received"),
         comment="FortiGate web filter logs (host name, URL, category).",
     )
 
@@ -350,6 +352,7 @@ class FgDns(TimeSeries, Base):
         "fg_dns",
         Index("ix_fg_dns_srcip_time", "srcip", "time"),
         Index("ix_fg_dns_qname_time", "qname", "time"),
+        Index("ix_fg_dns_time_received", "time_received"),
         comment="FortiGate DNS logs (queried names and answers).",
     )
 
@@ -377,6 +380,7 @@ class FgApp(TimeSeries, Base):
         "fg_app",
         Index("ix_fg_app_sessionid", "sessionid"),
         Index("ix_fg_app_srcip_time", "srcip", "time"),
+        Index("ix_fg_app_time_received", "time_received"),
         comment="FortiGate application control logs.",
     )
 
