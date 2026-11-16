@@ -26,7 +26,8 @@
       "today": "Today: lines, failures %",
       "signalInterval": "Heartbeat",
       "state": "State",
-      "actions": "Actions"
+      "actions": "Actions",
+      "clock": "Clock offset"
     },
     "badges": {
       "unknown": "Unknown",
@@ -124,6 +125,15 @@
         "search": "Show in Search",
         "invalidNote": "Lines not in the collector's format (rawlog.invalid) are not loaded into the database; Search cannot find them, only their example line opens."
       }
+    },
+    "clock": {
+      "onTime": "on time",
+      "behind_one": "{{count}} min behind",
+      "behind_other": "{{count}} min behind",
+      "ahead_one": "{{count}} min ahead",
+      "ahead_other": "{{count}} min ahead",
+      "title": "The device clock's offset from the receive time: the median of the newest {{rows}} records received in the last hour (under a minute counts as on time).",
+      "unknown": "Not enough records in the last hour."
     }
   },
   "settings": {

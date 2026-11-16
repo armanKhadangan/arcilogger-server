@@ -69,7 +69,19 @@ export interface ActivityDevices {
    * written), or it is more than 2 minutes old (the worker stopped): the figures are partial.
    */
   warming_up: boolean;
+  /**
+   * Enabled FortiGate sources whose clock is more than 5 minutes behind: their traffic is missing
+   * from these figures until the clock is set right (#222).
+   */
+  late_sources: LateSource[];
   generated_at: DateTimeString;
+}
+
+/** A FortiGate whose clock is further behind than the snapshot reads back (#222). */
+export interface LateSource {
+  source: string;
+  /** How far its device clock is behind the receive time (seconds, positive). */
+  behind_seconds: number;
 }
 
 export interface WanCapacity {

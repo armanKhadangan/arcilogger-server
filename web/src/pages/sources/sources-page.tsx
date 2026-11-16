@@ -15,6 +15,7 @@ import { EmptyState } from '@/components/ui/empty-state';
 import { Skeleton } from '@/components/ui/skeleton';
 import { errorMessage } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
+import { clockOffsetText } from '@/lib/clock-offset';
 import { formatBytes, formatDateTime, formatNumber, formatTime } from '@/lib/format';
 import { handoff } from '@/lib/handoff';
 import { currentLang } from '@/lib/i18n';
@@ -296,6 +297,39 @@ export function SourcesHealthPage() {
                       value: t('sources.percent', { value: formatNumber(percent, 1, lang) }),
                     })}
               </span>
+            </span>
+          );
+        },
+      },
+      {
+        // The device clock's typical offset from the receive time (#222).
+        id: 'clock',
+        accessorFn: (row) => row.item.clock_offset_seconds,
+        header: t('sources.columns.clock'),
+        size: 78,
+        meta: {
+          label: t('sources.columns.clock'),
+          wrapHeader: true,
+          exportValue: (row) =>
+            row.item.clock_offset_seconds === null
+              ? ''
+              : clockOffsetText(row.item.clock_offset_seconds, t),
+        },
+        cell: (info) => {
+          const item = info.row.original.item;
+          if (item.clock_offset_seconds === null) {
+            return (
+              <span className="text-muted" title={t('sources.clock.unknown')}>
+                —
+              </span>
+            );
+          }
+          return (
+            <span
+              className={cn('tabular', item.clock_offset_seconds === 0 && 'text-muted')}
+              title={t('sources.clock.title', { rows: item.clock_rows })}
+            >
+              {clockOffsetText(item.clock_offset_seconds, t)}
             </span>
           );
         },

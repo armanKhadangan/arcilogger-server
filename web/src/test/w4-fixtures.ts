@@ -1214,5 +1214,7 @@ export function systemHealth(peers: AppliedPeersCase = 'applied'): SystemHealth 
       applied_at: peers === 'not_reported' ? null : '2026-10-05T03:20:41+03:00',
       samples: structuredClone([...CLOCK_SAMPLES]),
     },
+    source_clocks: [],
+    source_clock_limit_seconds: 120,
   };
 }

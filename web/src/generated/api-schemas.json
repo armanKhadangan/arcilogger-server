@@ -501,6 +501,13 @@
           "title": "Generated At",
           "type": "string"
         },
+        "late_sources": {
+          "items": {
+            "$ref": "#/components/schemas/LateSource"
+          },
+          "title": "Late Sources",
+          "type": "array"
+        },
         "more": {
           "title": "More",
           "type": "boolean"
@@ -539,6 +546,7 @@
         "per_minute",
         "data_until",
         "warming_up",
+        "late_sources",
         "generated_at"
       ],
       "title": "ActivityDevices",
@@ -7956,6 +7964,25 @@
         "bytes"
       ],
       "title": "LastBackup",
+      "type": "object"
+    },
+    "LateSource": {
+      "description": "A FortiGate whose clock is further behind than the snapshot reads back (#222).",
+      "properties": {
+        "behind_seconds": {
+          "title": "Behind Seconds",
+          "type": "integer"
+        },
+        "source": {
+          "title": "Source",
+          "type": "string"
+        }
+      },
+      "required": [
+        "source",
+        "behind_seconds"
+      ],
+      "title": "LateSource",
       "type": "object"
     },
     "LeaseBrief": {
@@ -15696,6 +15723,30 @@
       "title": "SourceCheckBody",
       "type": "object"
     },
+    "SourceClockOut": {
+      "description": "A log source whose device clock is beyond ``alerts.source_clock_limit_seconds`` (#222).",
+      "properties": {
+        "offset_seconds": {
+          "title": "Offset Seconds",
+          "type": "integer"
+        },
+        "rows": {
+          "title": "Rows",
+          "type": "integer"
+        },
+        "source": {
+          "title": "Source",
+          "type": "string"
+        }
+      },
+      "required": [
+        "source",
+        "offset_seconds",
+        "rows"
+      ],
+      "title": "SourceClockOut",
+      "type": "object"
+    },
     "SourceDetail": {
       "properties": {
         "address": {
@@ -17140,6 +17191,17 @@
           "title": "Services",
           "type": "array"
         },
+        "source_clock_limit_seconds": {
+          "title": "Source Clock Limit Seconds",
+          "type": "integer"
+        },
+        "source_clocks": {
+          "items": {
+            "$ref": "#/components/schemas/SourceClockOut"
+          },
+          "title": "Source Clocks",
+          "type": "array"
+        },
         "tasks": {
           "items": {
             "$ref": "#/components/schemas/TaskHealth"
@@ -17158,7 +17220,9 @@
         "apply_system",
         "tasks",
         "jobs",
-        "time"
+        "time",
+        "source_clocks",
+        "source_clock_limit_seconds"
       ],
       "title": "SystemHealth",
       "type": "object"
