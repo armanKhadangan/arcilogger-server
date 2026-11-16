@@ -123,7 +123,7 @@ test.describe('Cihazlar ve Kişiler', () => {
     await expect.poll(() => lastDevicesQuery(api)?.get('sort')).toBe('mac');
     expect(lastDevicesQuery(api)?.get('order')).toBe('asc');
     await expect(page).toHaveURL(/sort=mac&order=asc/);
-    await expect.poll(async () => (await macs(page))[0]).toBe('00:00:5e:00:53:57');
+    await expect.poll(async () => (await macs(page))[0]).toBe('00:00:5e:00:53:0c');
   });
 
   test('assigns several devices to one person and removes an assignment', async ({ page }) => {

@@ -286,7 +286,7 @@ test.describe('Kullanım', () => {
     await expect(devices.getByRole('button', { name: '172.20.41.77' })).toBeVisible();
     await devices.getByRole('button', { name: 'PC-02', exact: true }).click();
     await expect(page).toHaveURL(
-      new RegExp(`tab=devices&${DAY}&subject=device%3A3c%3A52%3A82%3A00%3A10%3A02$`),
+      new RegExp(`tab=devices&${DAY}&subject=device%3A00%3A00%3A5e%3A00%3A53%3A1f$`),
     );
     await expect(page.getByRole('heading', { level: 2, name: 'PC-02' })).toBeVisible();
     await expect(page.getByTestId('subject-header')).toContainText('00:00:5e:00:53:1f');
@@ -564,7 +564,7 @@ test.describe('Kullanım', () => {
     await expect(page).toHaveURL(/subject=p%3Ad3648b10d647ade3$/);
     await expect(page.getByRole('heading', { level: 2 }).getByText('anonim')).toBeVisible();
     const header = page.getByTestId('subject-header');
-    await expect(header.getByRole('button', { name: /^Cihaz-FB1A/ })).toBeVisible();
+    await expect(header.getByRole('button', { name: /^Cihaz-A247/ })).toBeVisible();
     await expect(header).not.toContainText('Ayşe');
     await expect(header).not.toContainText('172.20.43.37');
     await page.goto(`/usage?tab=persons&${DAY}&subject=person%3A1`);

@@ -206,7 +206,7 @@ describe('the address', () => {
   });
 
   it('opens a subject on the tab of its kind', () => {
-    expect(view('tab=persons&subject=device%3Aaa%3Abb%3Acc%3A00%3A00%3A01')).toMatchObject({
+    expect(view('tab=persons&subject=device%3A02%3A00%3A5e%3A00%3A53%3A08')).toMatchObject({
       tab: 'devices',
       subject: 'device:02:00:5e:00:53:08',
     });

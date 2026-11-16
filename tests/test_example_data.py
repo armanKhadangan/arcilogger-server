@@ -111,7 +111,7 @@ def _offenders() -> list[str]:
         except UnicodeDecodeError:
             continue
         for number, line in enumerate(text.splitlines(), start=1):
-            for written in macs(line):
+            for written in macs(re.sub("%3[Aa]", ":", line)):  # in a URL, too
                 value = normal(written)
                 if not FICTIONAL.fullmatch(value) and value not in PROTOCOL:
                     found.append(f"{path}:{number}: {written}")

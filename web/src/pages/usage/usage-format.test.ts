@@ -277,7 +277,7 @@ describe('metrics', () => {
     expect(matchesApiSearch('ayşe', ['Ayşe Yılmaz'])).toBe(true);
     // Not folded further than the API: "ayse" does not find "Ayşe".
     expect(matchesApiSearch('ayse', ['Ayşe Yılmaz'])).toBe(false);
-    expect(matchesApiSearch(' 10:02 ', ['PC-02', '00:00:5e:00:53:1f'])).toBe(true);
+    expect(matchesApiSearch(' 53:1f ', ['PC-02', '00:00:5e:00:53:1f'])).toBe(true);
     expect(matchesApiSearch('yılmaz ayşe', ['Ayşe Yılmaz'])).toBe(false);
     expect(matchesApiSearch('', [null])).toBe(true);
     expect(matchesApiSearch('x', [null, undefined])).toBe(false);
