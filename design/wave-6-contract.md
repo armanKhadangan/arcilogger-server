@@ -892,6 +892,9 @@ to the normal site: `port-scan` (R01), `external-scan` (R02), `brute-force` (R03
   the bytes of the logs received in the window as their site day counts them (yesterday's logs
   as yesterday counts them), summed from the kept minutes of receive time
   (`rule_traffic_totals.received`) and the window's partial first minute, so a run reads its
-  slice and one partial minute, not the hour (manager's answer 2 on #280). It differs from the
-  old hour only for such sessions, and only by leaving out bytes sent before the hour; it is
-  pinned by `test_the_hour_is_the_days_increments_received_in_it`.
+  slice and one partial minute, not the hour (manager's answer 2 on #280: key by receive
+  minute). It differs from the old hour only for such sessions, and only by leaving out bytes
+  sent before the hour; it is pinned by `test_the_hour_is_the_days_increments_received_in_it`.
+  This meaning of the hour is the default of the question asked on #280 and still open there;
+  keeping the old hour exactly would need the buckets keyed by the previous log's receive minute
+  too.
