@@ -33,6 +33,7 @@ from arcilogger_db.models import (
 from arcilogger_db.settings import MIGRATION_AUTHOR, SEED_AUTHOR, set_setting
 from arcilogger_worker.alerts import system
 from arcilogger_worker.alerts.mail import MailItem, render_text
+from arcilogger_worker.alerts.store import open_alert
 from arcilogger_worker.alerts.system import run_system_checks
 from arcilogger_worker.alerts.texts import (
     LEASE_CAUSES,
@@ -62,11 +63,11 @@ class Usage(NamedTuple):
 
 @pytest.fixture(autouse=True)
 def only_these_checks(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The two ADR-0016 checks, as alerts.system runs them (own transactions)."""
-    checks = tuple(
-        (name, check) for name, check in system.CHECKS if name in ("lease_evidence", "nat_exits")
-    )
-    assert len(checks) == 2
+    """The two ADR-0016 checks and the device clocks that took over their ``source-clock``
+    (#222), as alerts.system runs them (own transactions)."""
+    names = ("lease_evidence", "nat_exits", "source_clock")
+    checks = tuple((name, check) for name, check in system.CHECKS if name in names)
+    assert len(checks) == 3
     monkeypatch.setattr(system, "CHECKS", checks)
 
 
@@ -594,9 +595,9 @@ def test_a_clock_that_jumps_after_logging_on_time_opens_at_the_next_check(
     jumped = NOW - timedelta(minutes=4)
     line = _sent(db_session, "fortigate", NOW - timedelta(hours=2), jumped, -0.3 * SECOND, 1)
     _sent(db_session, "fortigate", jumped, NOW, jump, line)
-    alert = check()["R20-lease:source-clock"]
+    alert = check()["R20-source-clock:fortigate"]
     assert alert.details["seconds"] == int(jump.total_seconds())
-    assert alert.details["sources"] == ["fortigate"]
+    assert alert.details["source"] == "fortigate"
 
 
 def test_a_quiet_source_whose_clock_jumps_is_judged_on_its_recent_minutes(
@@ -610,8 +611,8 @@ def test_a_quiet_source_whose_clock_jumps_is_judged_on_its_recent_minutes(
     jumped = NOW - 6 * MINUTE
     line = _sent(db_session, "fortigate", NOW - HOUR, jumped, -0.3 * SECOND, 1, every=MINUTE)
     _sent(db_session, "fortigate", jumped, NOW, -timedelta(hours=3), line, every=MINUTE)
-    assert "R20-lease:source-clock" not in check(NOW - 2 * MINUTE)
-    assert check()["R20-lease:source-clock"].details["seconds"] == -10800
+    assert "R20-source-clock:fortigate" not in check(NOW - 2 * MINUTE)
+    assert check()["R20-source-clock:fortigate"].details["seconds"] == -10800
 
 
 def test_a_clock_eight_minutes_behind_then_three_hours_is_measured_at_three_hours(
@@ -622,9 +623,9 @@ def test_a_clock_eight_minutes_behind_then_three_hours_is_measured_at_three_hour
     _clock(db_session, "fortigate", timedelta(milliseconds=-300), rows=0)
     jumped = NOW - timedelta(minutes=5)
     line = _sent(db_session, "fortigate", NOW - timedelta(hours=1), jumped, -8 * MINUTE, 1)
-    assert check(jumped)["R20-lease:source-clock"].details["seconds"] == -480
+    assert check(jumped)["R20-source-clock:fortigate"].details["seconds"] == -480
     _sent(db_session, "fortigate", jumped, NOW, -timedelta(hours=3), line)
-    assert check()["R20-lease:source-clock"].details["seconds"] == -10800
+    assert check()["R20-source-clock:fortigate"].details["seconds"] == -10800
 
 
 @pytest.mark.parametrize(
@@ -639,29 +640,29 @@ def test_a_clock_eight_minutes_behind_then_three_hours_is_measured_at_three_hour
 def test_a_source_whose_clock_is_off(
     check: Any, db_session: Session, offset: timedelta, kind: str, table: str
 ) -> None:
-    _clock(db_session, "core-r1" if kind == "mikrotik" else "fortigate", offset, kind=kind,
-           table=table)  # fmt: skip
-    alert = check()["R20-lease:source-clock"]
+    source = "core-r1" if kind == "mikrotik" else "fortigate"
+    _clock(db_session, source, offset, kind=kind, table=table)
+    alert = check()[f"R20-source-clock:{source}"]
     seconds = int(offset.total_seconds())
+    minutes = round(abs(seconds) / 60)
     assert alert.severity == "high"
-    assert (alert.details["seconds"], alert.details["sources"]) == (
-        seconds, ["core-r1" if kind == "mikrotik" else "fortigate"],
-    )  # fmt: skip
+    assert (alert.details["seconds"], alert.details["source"]) == (seconds, source)
+    assert alert.details["minutes"] == (minutes if seconds > 0 else -minutes)
+    # The e-mail names the source and the minutes (#222), never a log line.
     mail = render_text([_item(alert)], "https://arcilogger.example.com")
-    assert f"({seconds} sn)" in mail
-    assert "fortigate" not in mail.replace("FortiGate", "")
-    assert "core-r1" not in mail
+    assert f"{source} kaynağının saati {minutes} dakika" in mail
+    assert "traffic" not in mail
 
 
 def test_a_clock_alert_resolves_at_the_next_good_measurement(
     check: Any, db_session: Session
 ) -> None:
     _clock(db_session, "fortigate", -timedelta(minutes=8))
-    assert "R20-lease:source-clock" in check()
+    assert "R20-source-clock:fortigate" in check()
     later = NOW + timedelta(hours=2)
     _clock(db_session, "fortigate", timedelta(milliseconds=3), start=later - timedelta(minutes=50))
-    assert "R20-lease:source-clock" not in check(later)
-    assert resolved(db_session)["R20-lease:source-clock"] == "clock_ok"
+    assert "R20-source-clock:fortigate" not in check(later)
+    assert resolved(db_session)["R20-source-clock:fortigate"] == "clock_ok"
 
 
 def test_clocks_that_are_not_judged(check: Any, db_session: Session) -> None:
@@ -669,11 +670,41 @@ def test_clocks_that_are_not_judged(check: Any, db_session: Session) -> None:
     _clock(db_session, "fortigate", timedelta(milliseconds=3), late=4)
     # Receive-time rows (no usable device time) say nothing about the clock.
     _clock(db_session, "fortigate-2", timedelta(0))
-    # A switch 10 minutes off whose files hold no row a lookup reads.
-    _clock(db_session, "switch-1", -timedelta(minutes=10), kind="generic", table="")
     # A source with too few recent rows.
     _clock(db_session, "fortigate-3", -timedelta(minutes=8), rows=9)
-    assert "R20-lease:source-clock" not in check()
+    found = check()
+    assert not [key for key in found if "clock" in key]
+
+
+def test_every_source_is_judged_not_only_those_lookups_read(
+    check: Any, db_session: Session
+) -> None:
+    """A switch 10 minutes off whose files hold no row a lookup reads: the lease cause left it
+    alone, the per-source alert does not (#222)."""
+    _clock(db_session, "switch-1", -timedelta(minutes=10), kind="generic", table="")
+    assert check()["R20-source-clock:switch-1"].details["minutes"] == -10
+
+
+def test_the_old_lease_clock_alert_hands_over_to_the_per_source_alert(
+    check: Any, db_session: Session
+) -> None:
+    """An upgraded site with an open ``R20-lease:source-clock``: the next check resolves it as
+    ``superseded`` and opens ``R20-source-clock:<source>`` where the clock is still off (#222)."""
+    open_alert(
+        db_session,
+        rule="R20-lease",
+        severity="high",
+        title="Bir log kaynağının saati kayık",
+        details={"cause": "source-clock", "seconds": -480, "sources": ["fortigate"]},
+        key="R20-lease:source-clock",
+        time=NOW - HOUR,
+        now=NOW - HOUR,
+    )
+    _clock(db_session, "fortigate", -timedelta(minutes=8))
+    found = check()
+    assert "R20-lease:source-clock" not in found
+    assert resolved(db_session)["R20-lease:source-clock"] == "superseded"
+    assert found["R20-source-clock:fortigate"].details["seconds"] == -480
 
 
 # -- renewals -------------------------------------------------------------------------------------

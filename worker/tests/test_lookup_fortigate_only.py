@@ -49,8 +49,7 @@ from arcilogger_db.models import (
     Vlan,
 )
 from arcilogger_db.searchcounts import rebuild_stream
-from arcilogger_db.settings import get_settings, set_setting
-from arcilogger_worker.alerts import system
+from arcilogger_db.settings import DEFAULT_SETTINGS, get_settings, set_setting
 from arcilogger_worker.correlation.leases import rebuild_day
 from arcilogger_worker.lookup import (
     AttributionChain,
@@ -2894,12 +2893,12 @@ def test_a_clock_set_ahead_and_corrected_is_named_at_the_moments_whose_device_ti
 
 
 def test_the_lookup_and_the_alert_share_the_clock_limits() -> None:
-    """``source_clock_offset`` and ``R20-lease:source-clock`` use the same limit and the same
-    minimum of rows (D28)."""
-    assert (engine.CLOCK_LIMIT_SECONDS, engine.CLOCK_MIN_ROWS) == (
-        system.CLOCK_LIMIT_SECONDS,
-        system.CLOCK_MIN_ROWS,
-    )
+    """``source_clock_offset`` and ``R20-source-clock`` use the same limit by default and the same
+    minimum of rows (D28, #222)."""
+    assert (
+        DEFAULT_SETTINGS["alerts.source_clock_limit_seconds"],
+        clocksamples.TYPICAL_MIN_ROWS,
+    ) == (engine.CLOCK_LIMIT_SECONDS, engine.CLOCK_MIN_ROWS)
 
 
 # -- every engine explanation has a test that emits it (4.3 WP-C, "done when") --------------------
