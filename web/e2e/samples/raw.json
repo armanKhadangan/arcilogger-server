@@ -140,12 +140,12 @@
       "line": 1,
       "offset": 0,
       "origin": "vault",
-      "raw_base64": "MjAyNi0xMC0wOVQwODoxMjowMC4wMDMwMDArMDM6MDAgMTcyLjIwLjEwLjEgPDMwPjIwMjYtMTAtMDlUMDg6MTI6MDAuMDAwKzAzOjAwIENPUkUtUjEgZGhjcCxpbmZvIGRoY3A0MiBhc3NpZ25lZCAxNzIuMjAuNDIuMTY1IGZvciAzQzo1Mjo4MjowMDowMDowNSBQTE4tUEMtMDU=",
+      "raw_base64": "MjAyNi0xMC0wOVQwODoxMjowMC4wMDMwMDArMDM6MDAgMTcyLjIwLjEwLjEgPDMwPjIwMjYtMTAtMDlUMDg6MTI6MDAuMDAwKzAzOjAwIENPUkUtUjEgZGhjcCxpbmZvIGRoY3A0MiBhc3NpZ25lZCAxNzIuMjAuNDIuMTY1IGZvciAwMDowMDo1RTowMDo1MzoxQiBQTE4tUEMtMDU=",
       "received": "2026-10-09T08:12:00.003000+03:00",
       "sender": "172.20.10.1",
-      "sha256": "3ebeaba5f55f4355c3ed84b173eeb09989de3fa0e2656372a3ce853c2deb44cd",
+      "sha256": "4cc0eea7b150d57830890e55b8eb3fe3006ca5f78780ed751ccbd8e4534ca96a",
       "source": "core-r1",
-      "text": "2026-10-09T08:12:00.003000+03:00 172.20.10.1 <30>2026-10-09T08:12:00.000+03:00 CORE-R1 dhcp,info dhcp42 assigned 172.20.42.165 for 3C:52:82:00:00:05 PLN-PC-05"
+      "text": "2026-10-09T08:12:00.003000+03:00 172.20.10.1 <30>2026-10-09T08:12:00.000+03:00 CORE-R1 dhcp,info dhcp42 assigned 172.20.42.165 for 00:00:5E:00:53:1B PLN-PC-05"
     },
     "core-r1|2026-10-09|2": {
       "day": "2026-10-09",
@@ -154,12 +154,12 @@
       "line": 2,
       "offset": 159,
       "origin": "vault",
-      "raw_base64": "MjAyNi0xMC0wOVQwODoxMjowMC4wMDMwMDArMDM6MDAgMTcyLjIwLjEwLjEgPDMwPjIwMjYtMTAtMDlUMDg6MTI6MDAuMDAwKzAzOjAwIENPUkUtUjEgZGhjcCxpbmZvIGRoY3A0MSBhc3NpZ25lZCAxNzIuMjAuNDEuMTUgZm9yIDAwOjE1OjVEOjAwOjAwOjIwIEZJTi1QQy0wMQ==",
+      "raw_base64": "MjAyNi0xMC0wOVQwODoxMjowMC4wMDMwMDArMDM6MDAgMTcyLjIwLjEwLjEgPDMwPjIwMjYtMTAtMDlUMDg6MTI6MDAuMDAwKzAzOjAwIENPUkUtUjEgZGhjcCxpbmZvIGRoY3A0MSBhc3NpZ25lZCAxNzIuMjAuNDEuMTUgZm9yIDAwOjAwOjVFOjAwOjUzOjBDIEZJTi1QQy0wMQ==",
       "received": "2026-10-09T08:12:00.003000+03:00",
       "sender": "172.20.10.1",
-      "sha256": "fc211669c354fbd103cf243921a56ebff73c6106819b6841142590768fb553b8",
+      "sha256": "0aa101d341e7419ded39209d77178920bcef34f64a03d98e4bdf04e7cb84c9e4",
       "source": "core-r1",
-      "text": "2026-10-09T08:12:00.003000+03:00 172.20.10.1 <30>2026-10-09T08:12:00.000+03:00 CORE-R1 dhcp,info dhcp41 assigned 172.20.41.15 for 00:15:5D:00:00:20 FIN-PC-01"
+      "text": "2026-10-09T08:12:00.003000+03:00 172.20.10.1 <30>2026-10-09T08:12:00.000+03:00 CORE-R1 dhcp,info dhcp41 assigned 172.20.41.15 for 00:00:5E:00:53:0C FIN-PC-01"
     },
     "core-r1|2026-10-09|3": {
       "day": "2026-10-09",
@@ -168,12 +168,12 @@
       "line": 3,
       "offset": 317,
       "origin": "vault",
-      "raw_base64": "MjAyNi0xMC0wOVQwODoxMjowMC4wMDMwMDArMDM6MDAgMTcyLjIwLjEwLjEgPDMwPjIwMjYtMTAtMDlUMDg6MTI6MDAuMDAwKzAzOjAwIENPUkUtUjEgZGhjcCxpbmZvIGRoY3A0MyBhc3NpZ25lZCAxNzIuMjAuNDMuNDQgZm9yIEE0OjgzOkU3OjAwOjAwOjQ0IElEUi1QQy0wNA==",
+      "raw_base64": "MjAyNi0xMC0wOVQwODoxMjowMC4wMDMwMDArMDM6MDAgMTcyLjIwLjEwLjEgPDMwPjIwMjYtMTAtMDlUMDg6MTI6MDAuMDAwKzAzOjAwIENPUkUtUjEgZGhjcCxpbmZvIGRoY3A0MyBhc3NpZ25lZCAxNzIuMjAuNDMuNDQgZm9yIDAwOjAwOjVFOjAwOjUzOjM2IElEUi1QQy0wNA==",
       "received": "2026-10-09T08:12:00.003000+03:00",
       "sender": "172.20.10.1",
-      "sha256": "9b3baeae282e2d2cb1ef61a0606bff6d170beb535f27f7fde0ca9d3af77b6d28",
+      "sha256": "7de20ecf4032d481ca2804da026383d31566fcb9326edba6453d318e0bdb44b3",
       "source": "core-r1",
-      "text": "2026-10-09T08:12:00.003000+03:00 172.20.10.1 <30>2026-10-09T08:12:00.000+03:00 CORE-R1 dhcp,info dhcp43 assigned 172.20.43.44 for A4:83:E7:00:00:44 IDR-PC-04"
+      "text": "2026-10-09T08:12:00.003000+03:00 172.20.10.1 <30>2026-10-09T08:12:00.000+03:00 CORE-R1 dhcp,info dhcp43 assigned 172.20.43.44 for 00:00:5E:00:53:36 IDR-PC-04"
     },
     "core-r1|2026-10-09|4": {
       "day": "2026-10-09",
@@ -765,7 +765,7 @@
     }
   },
   "meta": {
-    "captured_at": "2026-10-13T04:01:43.366985+00:00",
+    "captured_at": "2026-10-13T04:01:37.778062+00:00",
     "clock": "2026-10-13T07:00:00+03:00",
     "info": "captured by web/scripts/capture_api_samples.py; do not edit",
     "site_day": "2026-10-09",

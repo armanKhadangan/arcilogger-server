@@ -44,7 +44,7 @@
         "last_ip": "172.20.42.165",
         "last_seen": "2026-10-09T05:12:00Z",
         "last_vlan": 42,
-        "mac": "3c:52:82:00:00:05",
+        "mac": "00:00:5e:00:53:1b",
         "name": null,
         "notes": null,
         "person": {
@@ -251,12 +251,12 @@
   "devices_csv": {
     "headers": {
       "cache-control": "no-store",
-      "content-disposition": "attachment; filename=\"arcilogger-cihazlar-20261013-040016.csv\"",
+      "content-disposition": "attachment; filename=\"arcilogger-cihazlar-20261013-040015.csv\"",
       "content-type": "text/csv; charset=utf-8"
     },
-    "sha256": "a5f3ad3a23a571e44857bacec89ee8a12a3fc7292b2e81e38c09d39e975ecb74",
+    "sha256": "43459feb2ef7a831f29ac47b76de7c511116531d5f3c101f62e5fe07f4bdd378",
     "size": 1259,
-    "text": "﻿mac;name;type;vendor;randomized;infrastructure;hostnames;last_ip;last_vlan;vlan_name;person_id;person;employee_no;assigned_since;department;department_source;first_seen;last_seen;tags;notes\r\n00:00:5e:00:53:9a;Eski yazıcı (statik IP);printer;;hayır;hayır;;172.20.42.57;42;Planlama;;;;;Planlama;vlan;2026-10-09T13:00:00+03:00;2026-10-09T14:00:00+03:00;statik, kat-1;ARP çakışması: 172.20.42.57 adresini de yanıtlıyor.\r\n00:00:5e:00:53:57;Planlama-PC-14;pc;;hayır;hayır;PLN-PC14;172.20.42.57;42;Planlama;1;Selin Kaya;1001;2026-10-01T09:00:00+03:00;Planlama;person;2026-10-09T10:42:18+03:00;2026-10-09T10:42:18+03:00;;\r\n02:00:5e:00:53:64;;;;evet;hayır;Telefon-12;172.20.60.142;60;Wi-Fi Personel;1;Selin Kaya;1001;2026-10-12T09:00:00+03:00;Planlama;person;2026-10-09T09:37:52+03:00;2026-10-09T09:37:52+03:00;;\r\n00:15:5d:00:00:20;;;;hayır;hayır;FIN-PC-01;172.20.41.15;41;Finans;;;;;Finans;vlan;2026-10-09T08:12:00+03:00;2026-10-09T08:12:00+03:00;;\r\n3c:52:82:00:00:05;;;;hayır;hayır;PLN-PC-05;172.20.42.165;42;Planlama;;;;;Planlama;vlan;2026-10-09T08:12:00+03:00;2026-10-09T08:12:00+03:00;;\r\na4:83:e7:00:00:44;;;;hayır;hayır;IDR-PC-04;172.20.43.44;43;İdari İşler;;;;;İdari İşler;vlan;2026-10-09T08:12:00+03:00;2026-10-09T08:12:00+03:00;;\r\n"
+    "text": "﻿mac;name;type;vendor;randomized;infrastructure;hostnames;last_ip;last_vlan;vlan_name;person_id;person;employee_no;assigned_since;department;department_source;first_seen;last_seen;tags;notes\r\n00:00:5e:00:53:9a;Eski yazıcı (statik IP);printer;;hayır;hayır;;172.20.42.57;42;Planlama;;;;;Planlama;vlan;2026-10-09T13:00:00+03:00;2026-10-09T14:00:00+03:00;statik, kat-1;ARP çakışması: 172.20.42.57 adresini de yanıtlıyor.\r\n00:00:5e:00:53:57;Planlama-PC-14;pc;;hayır;hayır;PLN-PC14;172.20.42.57;42;Planlama;1;Selin Kaya;1001;2026-10-01T09:00:00+03:00;Planlama;person;2026-10-09T10:42:18+03:00;2026-10-09T10:42:18+03:00;;\r\n02:00:5e:00:53:64;;;;evet;hayır;Telefon-12;172.20.60.142;60;Wi-Fi Personel;1;Selin Kaya;1001;2026-10-12T09:00:00+03:00;Planlama;person;2026-10-09T09:37:52+03:00;2026-10-09T09:37:52+03:00;;\r\n00:00:5e:00:53:0c;;;;hayır;hayır;FIN-PC-01;172.20.41.15;41;Finans;;;;;Finans;vlan;2026-10-09T08:12:00+03:00;2026-10-09T08:12:00+03:00;;\r\n00:00:5e:00:53:1b;;;;hayır;hayır;PLN-PC-05;172.20.42.165;42;Planlama;;;;;Planlama;vlan;2026-10-09T08:12:00+03:00;2026-10-09T08:12:00+03:00;;\r\n00:00:5e:00:53:36;;;;hayır;hayır;IDR-PC-04;172.20.43.44;43;İdari İşler;;;;;İdari İşler;vlan;2026-10-09T08:12:00+03:00;2026-10-09T08:12:00+03:00;;\r\n"
   },
   "errors": {
     "assignment_in_future": {
@@ -266,7 +266,7 @@
           "details": [
             {
               "earliest": null,
-              "mac": "00:15:5d:00:00:20",
+              "mac": "00:00:5e:00:53:0c",
               "reason": "in_future"
             }
           ],
@@ -332,8 +332,8 @@
       "body": {
         "error": {
           "code": "device_not_found",
-          "message_en": "Device not found: 02:00:00:00:00:01.",
-          "message_tr": "Cihaz bulunamadı: 02:00:00:00:00:01."
+          "message_en": "Device not found: 02:00:5e:00:53:00.",
+          "message_tr": "Cihaz bulunamadı: 02:00:5e:00:53:00."
         }
       },
       "headers": {},
@@ -345,11 +345,11 @@
           "code": "device_not_found",
           "details": {
             "macs": [
-              "02:00:00:00:00:01"
+              "02:00:5e:00:53:00"
             ]
           },
-          "message_en": "Device not found: 02:00:00:00:00:01.",
-          "message_tr": "Cihaz bulunamadı: 02:00:00:00:00:01."
+          "message_en": "Device not found: 02:00:5e:00:53:00.",
+          "message_tr": "Cihaz bulunamadı: 02:00:5e:00:53:00."
         }
       },
       "headers": {},
@@ -432,7 +432,7 @@
                 "macs",
                 0
               ],
-              "msg": "Value error, not a MAC address (aa:bb:cc:dd:ee:ff)",
+              "msg": "Value error, not a MAC address (00:00:5e:00:53:38)",
               "type": "value_error"
             }
           ],
@@ -475,7 +475,7 @@
       {
         "action": "assign",
         "line": 2,
-        "mac": "00:15:5d:00:00:20",
+        "mac": "00:00:5e:00:53:0c",
         "person_id": 2,
         "person_name": "Can Öztürk",
         "previous_person_id": null,
@@ -485,12 +485,12 @@
       {
         "action": "assign",
         "line": 3,
-        "mac": "a4:83:e7:00:00:44",
+        "mac": "00:00:5e:00:53:36",
         "person_id": 1,
         "person_name": "Selin Kaya",
         "previous_person_id": null,
         "previous_person_name": null,
-        "valid_from": "2026-10-13T04:00:17.246912+00:00"
+        "valid_from": "2026-10-13T04:00:15.876245+00:00"
       }
     ],
     "rows": 2,
@@ -503,8 +503,8 @@
     "errors": [
       {
         "line": 2,
-        "message_en": "Device 02:00:00:00:00:01 has not been seen yet (it is not in the device list); import it again once the device has been on the network.",
-        "message_tr": "02:00:00:00:00:01 cihazı henüz görülmedi (cihaz listesinde yok); cihaz ağa bağlanıp göründükten sonra tekrar içe aktarın."
+        "message_en": "Device 02:00:5e:00:53:00 has not been seen yet (it is not in the device list); import it again once the device has been on the network.",
+        "message_tr": "02:00:5e:00:53:00 cihazı henüz görülmedi (cihaz listesinde yok); cihaz ağa bağlanıp göründükten sonra tekrar içe aktarın."
       },
       {
         "line": 3,
@@ -532,7 +532,7 @@
       {
         "action": "assign",
         "line": 2,
-        "mac": "00:15:5d:00:00:20",
+        "mac": "00:00:5e:00:53:0c",
         "person_id": 2,
         "person_name": "Can Öztürk",
         "previous_person_id": null,
@@ -542,12 +542,12 @@
       {
         "action": "assign",
         "line": 3,
-        "mac": "a4:83:e7:00:00:44",
+        "mac": "00:00:5e:00:53:36",
         "person_id": 1,
         "person_name": "Selin Kaya",
         "previous_person_id": null,
         "previous_person_name": null,
-        "valid_from": "2026-10-13T04:00:17.201663+00:00"
+        "valid_from": "2026-10-13T04:00:15.840037+00:00"
       }
     ],
     "rows": 2,
@@ -718,7 +718,7 @@
         "last_ip": "172.20.41.15",
         "last_seen": "2026-10-09T05:12:00Z",
         "last_vlan": 41,
-        "mac": "00:15:5d:00:00:20",
+        "mac": "00:00:5e:00:53:0c",
         "name": null,
         "notes": null,
         "person": null,
@@ -743,7 +743,7 @@
         "last_ip": "172.20.42.165",
         "last_seen": "2026-10-09T05:12:00Z",
         "last_vlan": 42,
-        "mac": "3c:52:82:00:00:05",
+        "mac": "00:00:5e:00:53:1b",
         "name": null,
         "notes": null,
         "person": null,
@@ -768,7 +768,7 @@
         "last_ip": "172.20.43.44",
         "last_seen": "2026-10-09T05:12:00Z",
         "last_vlan": 43,
-        "mac": "a4:83:e7:00:00:44",
+        "mac": "00:00:5e:00:53:36",
         "name": null,
         "notes": null,
         "person": null,
@@ -828,7 +828,7 @@
         "last_ip": "172.20.41.15",
         "last_seen": "2026-10-09T05:12:00Z",
         "last_vlan": 41,
-        "mac": "00:15:5d:00:00:20",
+        "mac": "00:00:5e:00:53:0c",
         "name": null,
         "notes": null,
         "person": null,
@@ -921,7 +921,7 @@
         "last_ip": "172.20.41.15",
         "last_seen": "2026-10-09T05:12:00Z",
         "last_vlan": 41,
-        "mac": "00:15:5d:00:00:20",
+        "mac": "00:00:5e:00:53:0c",
         "name": null,
         "notes": null,
         "person": null,
@@ -946,7 +946,7 @@
         "last_ip": "172.20.42.165",
         "last_seen": "2026-10-09T05:12:00Z",
         "last_vlan": 42,
-        "mac": "3c:52:82:00:00:05",
+        "mac": "00:00:5e:00:53:1b",
         "name": null,
         "notes": null,
         "person": null,
@@ -971,7 +971,7 @@
         "last_ip": "172.20.43.44",
         "last_seen": "2026-10-09T05:12:00Z",
         "last_vlan": 43,
-        "mac": "a4:83:e7:00:00:44",
+        "mac": "00:00:5e:00:53:36",
         "name": null,
         "notes": null,
         "person": null,
@@ -987,7 +987,7 @@
     "total": 4
   },
   "meta": {
-    "captured_at": "2026-10-13T04:01:43.366985+00:00",
+    "captured_at": "2026-10-13T04:01:37.778062+00:00",
     "clock": "2026-10-13T07:00:00+03:00",
     "info": "captured by web/scripts/capture_api_samples.py; do not edit",
     "site_day": "2026-10-09",
@@ -996,7 +996,7 @@
   },
   "person_created": {
     "active": true,
-    "created_at": "2026-10-13T04:00:15.710280Z",
+    "created_at": "2026-10-13T04:00:14.458913Z",
     "department": {
       "id": 1,
       "name": "Finans"
@@ -1008,7 +1008,7 @@
     "name": "Can Öztürk",
     "notes": null,
     "title": "Mali Analist",
-    "updated_at": "2026-10-13T04:00:15.710316Z",
+    "updated_at": "2026-10-13T04:00:14.458957Z",
     "usage_excluded": false
   },
   "person_detail": {
@@ -1041,7 +1041,7 @@
         "valid_to": null
       }
     ],
-    "created_at": "2026-10-13T04:00:00.776729Z",
+    "created_at": "2026-10-13T04:00:00.461520Z",
     "department": {
       "id": 2,
       "name": "Planlama"
@@ -1111,12 +1111,12 @@
     "name": "Selin Kaya",
     "notes": null,
     "title": "Planlama Uzmanı",
-    "updated_at": "2026-11-16T06:38:47.142537Z",
+    "updated_at": "2026-11-16T15:50:56.646194Z",
     "usage_excluded": false
   },
   "person_updated": {
     "active": true,
-    "created_at": "2026-10-13T04:00:15.710280Z",
+    "created_at": "2026-10-13T04:00:14.458913Z",
     "department": {
       "id": 1,
       "name": "Finans"
@@ -1128,14 +1128,14 @@
     "name": "Can Öztürk",
     "notes": null,
     "title": "Finans Müdürü",
-    "updated_at": "2026-11-16T06:38:47.341895Z",
+    "updated_at": "2026-11-16T15:50:56.798370Z",
     "usage_excluded": false
   },
   "persons": {
     "items": [
       {
         "active": true,
-        "created_at": "2026-10-13T04:00:15.710280Z",
+        "created_at": "2026-10-13T04:00:14.458913Z",
         "department": {
           "id": 1,
           "name": "Finans"
@@ -1147,12 +1147,12 @@
         "name": "Can Öztürk",
         "notes": null,
         "title": "Finans Müdürü",
-        "updated_at": "2026-11-16T06:38:47.341895Z",
+        "updated_at": "2026-11-16T15:50:56.798370Z",
         "usage_excluded": false
       },
       {
         "active": false,
-        "created_at": "2026-10-13T04:00:15.852132Z",
+        "created_at": "2026-10-13T04:00:14.583918Z",
         "department": null,
         "device_count": 0,
         "email": null,
@@ -1161,12 +1161,12 @@
         "name": "Deniz Işık",
         "notes": null,
         "title": null,
-        "updated_at": "2026-10-13T04:00:15.852169Z",
+        "updated_at": "2026-10-13T04:00:14.583961Z",
         "usage_excluded": true
       },
       {
         "active": true,
-        "created_at": "2026-10-13T04:00:00.776729Z",
+        "created_at": "2026-10-13T04:00:00.461520Z",
         "department": {
           "id": 2,
           "name": "Planlama"
@@ -1178,7 +1178,7 @@
         "name": "Selin Kaya",
         "notes": null,
         "title": "Planlama Uzmanı",
-        "updated_at": "2026-11-16T06:38:47.142537Z",
+        "updated_at": "2026-11-16T15:50:56.646194Z",
         "usage_excluded": false
       }
     ],
@@ -1189,18 +1189,18 @@
   "persons_csv": {
     "headers": {
       "cache-control": "no-store",
-      "content-disposition": "attachment; filename=\"arcilogger-kisiler-20261013-040017.csv\"",
+      "content-disposition": "attachment; filename=\"arcilogger-kisiler-20261013-040015.csv\"",
       "content-type": "text/csv; charset=utf-8"
     },
-    "sha256": "dd088623e4f2c3f3520e74dfcc75fa96474d1b2cda9a6ba7f2930bcc70fdaddd",
+    "sha256": "a44b3871a89a3ccad5c7a8f064d09bac2ebe3bd7e7538dadb69240689920faea",
     "size": 449,
-    "text": "﻿id;name;department;title;email;employee_no;active;notes;usage_excluded;device_count;created_at;updated_at\r\n2;Can Öztürk;Finans;Finans Müdürü;can.ozturk@example.com;1002;evet;;hayır;0;2026-10-13T07:00:15+03:00;2026-11-16T09:38:47+03:00\r\n3;Deniz Işık;;;;0950;hayır;;evet;0;2026-10-13T07:00:15+03:00;2026-10-13T07:00:15+03:00\r\n1;Selin Kaya;Planlama;Planlama Uzmanı;;1001;evet;;hayır;2;2026-10-13T07:00:00+03:00;2026-11-16T09:38:47+03:00\r\n"
+    "text": "﻿id;name;department;title;email;employee_no;active;notes;usage_excluded;device_count;created_at;updated_at\r\n2;Can Öztürk;Finans;Finans Müdürü;can.ozturk@example.com;1002;evet;;hayır;0;2026-10-13T07:00:14+03:00;2026-11-16T18:50:56+03:00\r\n3;Deniz Işık;;;;0950;hayır;;evet;0;2026-10-13T07:00:14+03:00;2026-10-13T07:00:14+03:00\r\n1;Selin Kaya;Planlama;Planlama Uzmanı;;1001;evet;;hayır;2;2026-10-13T07:00:00+03:00;2026-11-16T18:50:56+03:00\r\n"
   },
   "persons_search": {
     "items": [
       {
         "active": true,
-        "created_at": "2026-10-13T04:00:15.710280Z",
+        "created_at": "2026-10-13T04:00:14.458913Z",
         "department": {
           "id": 1,
           "name": "Finans"
@@ -1212,7 +1212,7 @@
         "name": "Can Öztürk",
         "notes": null,
         "title": "Finans Müdürü",
-        "updated_at": "2026-11-16T06:38:47.341895Z",
+        "updated_at": "2026-11-16T15:50:56.798370Z",
         "usage_excluded": false
       }
     ],
@@ -1259,9 +1259,9 @@
       "content-disposition": "attachment; filename=\"arcilogger-atamalar-sablon.csv\"",
       "content-type": "text/csv; charset=utf-8"
     },
-    "sha256": "d1170699340911c896ca61c46ab1d0d3ef47e8da7e19ea44ef55d60d6d16fcc0",
+    "sha256": "f4e72d2df1c24e68035ca2fd3ee740abf30fde40a00a0e136f828629cbfbee21",
     "size": 125,
-    "text": "﻿mac;employee_no;person_name;valid_from;note\r\nf0:1f:af:00:00:01;1001;Ayşe Yılmaz;2026-10-01T09:00:00+03:00;Zimmet formu\r\n"
+    "text": "﻿mac;employee_no;person_name;valid_from;note\r\n00:00:5e:00:53:3b;1001;Ayşe Yılmaz;2026-10-01T09:00:00+03:00;Zimmet formu\r\n"
   },
   "template_persons": {
     "headers": {
@@ -1290,7 +1290,7 @@
         "last_ip": "172.20.42.165",
         "last_seen": "2026-10-09T05:12:00Z",
         "last_vlan": 42,
-        "mac": "3c:52:82:00:00:05",
+        "mac": "00:00:5e:00:53:1b",
         "name": null,
         "notes": null,
         "person": null,
