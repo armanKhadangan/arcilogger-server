@@ -1015,18 +1015,22 @@ _AMOUNT: Final = (
     "CASE WHEN is_interim AND {d} IS NOT NULL THEN greatest({d}, 0) "
     "ELSE greatest(coalesce({c}, 0) - coalesce(lag({c}) OVER w, 0), 0) END"
 )
-#: All logs of the touched sessions from the lookback on, each session through the session id
-#: index (a log without a session id: its address and destination).
+#: All logs of the touched sessions from the lookback on: the session ids in one read of the
+#: session id index (an array, so the planner cannot turn it into a join over the whole index),
+#: then the full session key; a log without a session id through its address and destination
+#: (``OFFSET 0``: one read per key, not a join over the table).
 _LOGS: Final = """
 logs AS (
-    SELECT l.* FROM touched k CROSS JOIN LATERAL (
-        SELECT g.id, g.srcip, g.sessionid, g.dstip, g.dstport, g.time, g.time_received,
-               g.is_interim, g.sentbyte, g.rcvdbyte, g.sentdelta, g.rcvddelta
-        FROM fg_traffic g
-        WHERE {match_g} AND g.time_received > :lookback AND g.time_received <= :end
-          AND g.sessionid = k.sessionid AND g.srcip = k.srcip
-          AND g.dstip IS NOT DISTINCT FROM k.dstip AND g.dstport IS NOT DISTINCT FROM k.dstport
-    ) l WHERE k.sessionid IS NOT NULL
+    SELECT g.id, g.srcip, g.sessionid, g.dstip, g.dstport, g.time, g.time_received,
+           g.is_interim, g.sentbyte, g.rcvdbyte, g.sentdelta, g.rcvddelta
+    FROM fg_traffic g
+    WHERE {match_g} AND g.time_received > :lookback AND g.time_received <= :end
+      AND g.sessionid = ANY(ARRAY(
+          SELECT DISTINCT k.sessionid FROM touched k WHERE k.sessionid IS NOT NULL))
+      AND EXISTS (
+          SELECT 1 FROM touched k
+          WHERE k.sessionid = g.sessionid AND k.srcip = g.srcip
+            AND k.dstip IS NOT DISTINCT FROM g.dstip AND k.dstport IS NOT DISTINCT FROM g.dstport)
     UNION ALL
     SELECT l.* FROM touched k CROSS JOIN LATERAL (
         SELECT g.id, g.srcip, g.sessionid, g.dstip, g.dstport, g.time, g.time_received,
@@ -1035,19 +1039,23 @@ logs AS (
         WHERE {match_g} AND g.time_received > :lookback AND g.time_received <= :end
           AND g.sessionid IS NULL AND g.srcip = k.srcip
           AND g.dstip IS NOT DISTINCT FROM k.dstip AND g.dstport IS NOT DISTINCT FROM k.dstport
+        OFFSET 0
     ) l WHERE k.sessionid IS NULL
 )
 """
 #: What a slice changes in a period's buckets: the sessions with a log received in the slice (or
-#: an earlier log the slice's device-time bound now reaches), all their logs from the lookback on
+#: an earlier log the slice's device-time bound now reaches; two reads, each on its own index:
+#: receive time, device time), all their logs from the lookback on
 #: (each session through the session id index), counted as of the slice start (``old``) and as
 #: of its end (``new``), per address and minute of device time.
 _CHANGES: Final = """
 WITH touched AS (
-    SELECT DISTINCT t.srcip, t.sessionid, t.dstip, t.dstport FROM fg_traffic t
-    WHERE {match_t} AND (
-        (t.time_received > :start AND t.time_received <= :end)
-        OR (t.time_received > :lookback AND t.time_received <= :start AND t.time > :start_high))
+    SELECT t.srcip, t.sessionid, t.dstip, t.dstport FROM fg_traffic t
+    WHERE {match_t} AND t.time_received > :start AND t.time_received <= :end
+    UNION
+    SELECT t.srcip, t.sessionid, t.dstip, t.dstport FROM fg_traffic t
+    WHERE {match_t} AND t.time > :start_high
+      AND t.time_received > :lookback AND t.time_received <= :start
 ),
 {logs},
 
@@ -1091,7 +1099,9 @@ touched AS (
 )"""
 #: The sessions of each address's logs received in ``(:lo, reach]`` whose device time lies in
 #: ``[low, high)``, through the address index (``ix_fg_traffic_srcip_time``): only these
-#: addresses' rows of those device minutes are read (a window's evidence).
+#: addresses' rows of those device minutes are read (a window's evidence). ``OFFSET 0`` makes it
+#: one index read per range, not a join over the table, and keeps the receive-time filter out of
+#: it (else a bitmap of the receive-time index over the whole window joins every range's read).
 _TOUCHED_BY_ADDRESS: Final = """
 touched AS (
     SELECT DISTINCT t.srcip, t.sessionid, t.dstip, t.dstport
@@ -1100,10 +1110,11 @@ touched AS (
         CAST(:reach AS timestamptz[])
     ) AS a(ip, low, high, reach)
     CROSS JOIN LATERAL (
-        SELECT t.srcip, t.sessionid, t.dstip, t.dstport FROM fg_traffic t
+        SELECT t.srcip, t.sessionid, t.dstip, t.dstport, t.time_received FROM fg_traffic t
         WHERE t.srcip = a.ip AND {match_t} AND t.time >= a.low AND t.time < a.high
-          AND t.time_received > :lo AND t.time_received <= a.reach
+        OFFSET 0
     ) t
+    WHERE t.time_received > :lo AND t.time_received <= a.reach
 )"""
 #: The counted logs received in ``(:lo, :hi]`` of the ``touched`` sessions (so of their
 #: addresses only), each with its bytes as the period counts them (the window's partial first
