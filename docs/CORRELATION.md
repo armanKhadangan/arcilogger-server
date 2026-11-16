@@ -223,7 +223,8 @@ and its chains are `low`, section 2) and its lease time: the logged `lease` when
 `dhcp.fortigate_use_logged_lease` is on and it lies in 300–8,640,000 s (the FortiOS `lease-time`
 range), otherwise the configured time of its interface (`lease.server_seconds`, else
 `lease.default_seconds`) with the margin, counted `lease_fallback` (and `lease_unlimited` for `0`,
-which raises `R20-lease:fortigate-lease-unlimited`). The job report's `details.stats` holds
+which raises `R20-lease:fortigate-lease-unlimited`; a lookup names it on the chain with
+`fortigate_lease_unlimited`, section 3). The job report's `details.stats` holds
 these counters, `kept_fg_dhcp`, `refused_fg_dhcp` and `excluded_fg_dhcp`, counted once, in the
 run's own window.
 
@@ -442,7 +443,12 @@ a person resolved or dismissed are never changed. The incremental job only raise
   - `srcmac_mismatch`: below.
 - **FortiGate notes on a chain** whose lease is `fg_dhcp` (info): `fortigate_format_unverified`
   while `dhcp.fortigate_format_verified` is off, `fortigate_format_verified` (who marked it and
-  when) once it is on ([DEVICE-SETUP.md](DEVICE-SETUP.md) section 2.4). A chain whose cited DHCP
+  when) once it is on ([DEVICE-SETUP.md](DEVICE-SETUP.md) section 2.4); `fortigate_lease_unlimited`
+  when the lease's own last DHCP record at or before T logged `lease=0` (FortiOS's "unlimited",
+  verify on site: ASSUMPTIONS V4) and the lease kept no logged time of an earlier ACK, with
+  `fallback`, the configured time in seconds the lease ran on (`lease.server_seconds`, else
+  `lease.default_seconds`, × `lease.timeout_percent`); the chain, its confidence and its person
+  stay as they are (#299). A chain whose cited DHCP
   rows come from a sender configured later carries `source_configured_later` (info).
 - **Department**: the linked person's department, else the VLAN's
   (`arcilogger_db.network.vlan_department` — the same rule as the usage reports).
