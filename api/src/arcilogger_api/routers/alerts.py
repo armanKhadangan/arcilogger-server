@@ -22,6 +22,13 @@ writer of ``alert_events`` and of the audit entries ``alert.state`` (from/to) an
   ``alert_transition_not_allowed`` or ``alert_key_active`` (re-open while another active alert
   holds the same dedup key; ``details.alert_id`` names it).
 * ``POST /alerts/{id}/notes`` ``{text}`` (1-2000 characters) — 201 with the new event.
+* Wave 6 (contract §2.6.2, §2.6.3): ``assignee=me|none|<user id>`` filter; every alert carries
+  ``assignee`` and ``evidence_total``; ``POST /alerts/{id}/assign`` ``{user_id}`` (only users
+  with ``alerts.read``; audit ``alert.assign``; 422 ``alert_assignee_invalid``);
+  ``GET /alerts/{id}/evidence`` (the security rule's evidence rows with their raw references,
+  never line content); the summary's ``by_day``, ``top_rules`` and ``top_keys``; and, for a user
+  with ``usage.person``, the person of a person-level rule's alert in ``GET /alerts/{id}``,
+  audited as ``alert.person_view`` before it is returned.
 
 Rule names, summaries and runbooks come from the catalogue
 (:mod:`arcilogger_worker.alerts.texts`), never from the database. E-mail addresses are masked
@@ -33,11 +40,12 @@ from __future__ import annotations
 
 import re
 from collections.abc import Iterable, Mapping
-from datetime import datetime, timedelta
+from contextlib import suppress
+from datetime import date, datetime, timedelta
 from typing import Annotated, Any, Final, Literal
 
 from fastapi import APIRouter, Depends, Path, Query, Request
-from pydantic import AfterValidator, AwareDatetime, BaseModel, StringConstraints
+from pydantic import AfterValidator, AwareDatetime, BaseModel, Field, StringConstraints
 from sqlalchemy import ColumnElement, Select, case, extract, func, or_, select
 from sqlalchemy.dialects.postgresql import distinct_on
 from sqlalchemy.orm import Session
@@ -46,15 +54,18 @@ from arcilogger_api.audit import record_audit
 from arcilogger_api.auth.schemas import StrictModel
 from arcilogger_api.deps import DbSession
 from arcilogger_api.errors import ApiError
-from arcilogger_api.security import CurrentUser, client_ip, require
+from arcilogger_api.security import CurrentUser, client_ip, permissions_for, require
 from arcilogger_api.textfold import fold, folded
-from arcilogger_core.timeutil import utc_now
+from arcilogger_core.timeutil import SITE_TZ, site_day, utc_now
 from arcilogger_db.models import (
     ALERT_NOTE_MAX,
     ALERT_SEVERITIES,
     ALERT_STATES,
     Alert,
     AlertDelivery,
+    AlertEvidence,
+    Person,
+    User,
 )
 from arcilogger_db.models import AlertEvent as AlertEventRow
 from arcilogger_worker.alerts.store import (
@@ -65,10 +76,12 @@ from arcilogger_worker.alerts.store import (
     AuditHook,
     WorkflowError,
     add_note,
+    assign,
     change_state,
     clean_note,
 )
 from arcilogger_worker.alerts.texts import facts, rule_text, runbook
+from arcilogger_worker.rules import registry
 
 router = APIRouter(prefix="/alerts", tags=["alerts"])
 
@@ -84,6 +97,10 @@ LATEST: Final = 5
 #: Window of the mean time to close.
 CLOSE_WINDOW: Final = timedelta(days=30)
 RULE_PATTERN: Final = re.compile(r"^[A-Za-z0-9_.:-]{1,64}$")
+#: The summary's day counts (site days) and its top lists (days, entries).
+BY_DAY_DAYS: Final = 30
+TOP_DAYS: Final = 7
+TOP_MAX: Final = 10
 
 Severity = Literal["info", "low", "medium", "high", "critical"]
 State = Literal["open", "acknowledged", "resolved", "dismissed"]
@@ -108,6 +125,10 @@ MESSAGES: Final = {
         "'{from_tr}' durumundaki bir uyarı '{to_tr}' yapılamaz.",
         "An alert that is '{from_en}' cannot be set to '{to_en}'.",
     ),
+    "alert_assignee_invalid": (
+        "Bu kullanıcıya uyarı atanamaz.",
+        "Alerts cannot be assigned to this user.",
+    ),
     "alert_key_active": (
         "Aynı sorun için etkin bir uyarı var (#{other}): sorun sürdüğü için denetim yeni bir "
         "uyarı açtı. Bu uyarı yeniden açılamaz; etkin uyarıyı kullanın.",
@@ -125,6 +146,11 @@ def _error(status: int, code: str, *, details: Any = None, **params: object) -> 
 
 
 # -- response and request models ------------------------------------------------------------------
+
+
+class AssigneeOut(BaseModel):
+    id: int
+    username: str
 
 
 class AlertOut(BaseModel):
@@ -147,11 +173,16 @@ class AlertOut(BaseModel):
     #: Resolved by its check (not by a person).
     auto_resolved: bool
     notes_count: int
+    #: The user the alert is given to (Wave 6 §2.6.2), or null.
+    assignee: AssigneeOut | None
+    #: A security rule's alert: the rows behind it (``details.evidence_total``), else null.
+    evidence_total: int | None
 
 
 class AlertEvent(BaseModel):
     id: int
-    kind: Literal["state", "note"]
+    #: ``assign``: ``text`` is the new assignee's user name, null for nobody.
+    kind: Literal["state", "note", "assign"]
     from_state: State | None
     to_state: State | None
     #: The note, or the reason code of an automatic change (``by`` = ``system``).
@@ -170,9 +201,16 @@ class AlertDeliveryOut(BaseModel):
     recipient_masked: str
 
 
+class AlertPersonOut(BaseModel):
+    id: int
+    name: str
+
+
 class AlertDetail(AlertOut):
     #: The alert's details without secrets and without very long values (:func:`sanitize`).
     details: dict[str, Any]
+    #: A person-level rule's person (R09, R13, R14), only for ``usage.person`` (audited).
+    person: AlertPersonOut | None
     #: Oldest first.
     events: list[AlertEvent]
     runbook_tr: str
@@ -195,6 +233,28 @@ class OpenBySeverity(BaseModel):
     info: int
 
 
+class DayCounts(BaseModel):
+    #: A site day (Europe/Istanbul).
+    day: date
+    critical: int
+    high: int
+    medium: int
+    low: int
+    info: int
+
+
+class RuleCount(BaseModel):
+    rule: str
+    count: int
+
+
+class KeyCount(BaseModel):
+    rule: str
+    #: The alert's dedup key (``R01:172.20.41.17``).
+    key: str
+    count: int
+
+
 class AlertSummary(BaseModel):
     #: Alerts in the state ``open`` (Yeni), per severity.
     open_by_severity: OpenBySeverity
@@ -204,6 +264,11 @@ class AlertSummary(BaseModel):
     #: Mean seconds from ``created_at`` to closing (resolved or dismissed, by a person or a
     #: check) of the alerts closed within the last 30 days; ``null`` when there is none.
     mean_time_to_close_seconds_30d: int | None
+    #: Alerts per site day of the last 30, per severity (by ``time``), oldest first.
+    by_day: list[DayCounts]
+    #: The rules and keys with the most alerts of the last 7 days (at most 10 each).
+    top_rules: list[RuleCount]
+    top_keys: list[KeyCount]
 
 
 #: Trimmed, 1-2000 characters, no control characters but tab and line breaks.
@@ -219,6 +284,38 @@ class AlertStateRequest(StrictModel):
 
     state: State
     note: NoteText | None = None
+
+
+class AlertAssignRequest(StrictModel):
+    """Give the alert to a user (``null``: to nobody)."""
+
+    user_id: Annotated[int, Field(ge=1, le=MAX_ID)] | None
+
+
+class AlertEvidenceRaw(BaseModel):
+    """What ``GET /api/v1/raw`` opens (with its own permission and audit)."""
+
+    source: str
+    day: date
+    line: int
+    offset: int
+
+
+class AlertEvidenceOut(BaseModel):
+    n: int
+    table: str
+    row_id: int | None
+    time: datetime | None
+    time_received: datetime | None
+    #: Null for a ``devices`` row (no raw line).
+    raw: AlertEvidenceRaw | None
+
+
+class AlertEvidencePage(BaseModel):
+    alert_id: int
+    #: Rows behind the alert in all; ``items`` holds at most ``rules.evidence_max``.
+    evidence_total: int | None
+    items: list[AlertEvidenceOut]
 
 
 class AlertNoteRequest(StrictModel):
@@ -240,7 +337,12 @@ def _summary(alert: Alert) -> tuple[str, str]:
     return alert.title, english if isinstance(english, str) and english else name_en
 
 
-def alert_out(alert: Alert, notes: int) -> AlertOut:
+def _evidence_total(alert: Alert) -> int | None:
+    value = (alert.details or {}).get("evidence_total")
+    return value if isinstance(value, int) and not isinstance(value, bool) else None
+
+
+def alert_out(alert: Alert, notes: int, assignee: AssigneeOut | None) -> AlertOut:
     """The alert as the web shows it; e-mail addresses in the title and the summary are masked
     like the details' (``R20-email`` names the refused recipient)."""
     text = rule_text(alert.rule)
@@ -261,7 +363,18 @@ def alert_out(alert: Alert, notes: int) -> AlertOut:
         summary_en=summary_en,
         auto_resolved=alert.state == "resolved" and AUTO_RESOLVED in (alert.details or {}),
         notes_count=notes,
+        assignee=assignee,
+        evidence_total=_evidence_total(alert),
     )
+
+
+def assignees(db: Session, alerts: Iterable[Alert]) -> dict[int, AssigneeOut]:
+    """The assignees of ``alerts`` by user id."""
+    wanted = sorted({alert.assignee_id for alert in alerts if alert.assignee_id is not None})
+    if not wanted:
+        return {}
+    rows = db.execute(select(User.id, User.username).where(User.id.in_(wanted)))
+    return {user_id: AssigneeOut(id=user_id, username=name) for user_id, name in rows}
 
 
 def notes_counts(db: Session, ids: Iterable[int]) -> dict[int, int]:
@@ -278,7 +391,15 @@ def notes_counts(db: Session, ids: Iterable[int]) -> dict[int, int]:
 
 def alert_outs(db: Session, alerts: list[Alert]) -> list[AlertOut]:
     counts = notes_counts(db, (alert.id for alert in alerts))
-    return [alert_out(alert, counts.get(alert.id, 0)) for alert in alerts]
+    users = assignees(db, alerts)
+    return [
+        alert_out(
+            alert,
+            counts.get(alert.id, 0),
+            users.get(alert.assignee_id) if alert.assignee_id is not None else None,
+        )
+        for alert in alerts
+    ]
 
 
 def event_out(row: AlertEventRow) -> AlertEvent:
@@ -363,7 +484,7 @@ def sanitize(value: Any, depth: int = 0) -> Any:
     return value
 
 
-def alert_detail(db: Session, alert: Alert) -> AlertDetail:
+def alert_detail(db: Session, alert: Alert, person: AlertPersonOut | None = None) -> AlertDetail:
     events = list(
         db.scalars(
             select(AlertEventRow)
@@ -377,10 +498,13 @@ def alert_detail(db: Session, alert: Alert) -> AlertDetail:
         .order_by(AlertDelivery.created_at, AlertDelivery.id)
     )
     steps_tr, steps_en = runbook(alert.rule)
-    base = alert_out(alert, sum(1 for event in events if event.kind == "note"))
+    users = assignees(db, [alert])
+    assignee = users.get(alert.assignee_id) if alert.assignee_id is not None else None
+    base = alert_out(alert, sum(1 for event in events if event.kind == "note"), assignee)
     return AlertDetail(
         **base.model_dump(),
         details=sanitize(dict(alert.details or {})),
+        person=person,
         events=[event_out(event) for event in events],
         runbook_tr=steps_tr,
         runbook_en=steps_en,
@@ -505,6 +629,7 @@ def list_alerts(
     state: Annotated[list[str] | None, Query()] = None,
     severity: Annotated[list[str] | None, Query()] = None,
     rule: Annotated[list[str] | None, Query()] = None,
+    assignee: Annotated[str | None, Query(pattern=r"^(me|none|[1-9][0-9]{0,18})$")] = None,
     q: Annotated[str | None, Query(max_length=200)] = None,
     time_from: Annotated[AwareDatetime | None, Query(alias="from")] = None,
     time_to: Annotated[AwareDatetime | None, Query(alias="to")] = None,
@@ -526,6 +651,12 @@ def list_alerts(
         query = query.where(Alert.severity.in_(severities))
     if rules:
         query = query.where(Alert.rule.in_(rules))
+    if assignee == "me":
+        query = query.where(Alert.assignee_id == user.id)
+    elif assignee == "none":
+        query = query.where(Alert.assignee_id.is_(None))
+    elif assignee is not None:
+        query = query.where(Alert.assignee_id == int(assignee))
     if q and q.strip():
         query = query.where(_search(q.strip()))
     if time_from is not None:
@@ -543,12 +674,69 @@ def summary(db: DbSession, user: ReaderDep) -> AlertSummary:
     acknowledged = db.scalar(
         select(func.count()).select_from(Alert).where(Alert.state == "acknowledged")
     )
+    now = utc_now()
     return AlertSummary(
         open_by_severity=open_by_severity(db),
         acknowledged=int(acknowledged or 0),
         latest=latest_active(db),
-        mean_time_to_close_seconds_30d=mean_time_to_close(db, utc_now()),
+        mean_time_to_close_seconds_30d=mean_time_to_close(db, now),
+        by_day=by_day(db, now),
+        top_rules=top_rules(db, now),
+        top_keys=top_keys(db, now),
     )
+
+
+def by_day(db: Session, now: datetime, days: int = BY_DAY_DAYS) -> list[DayCounts]:
+    """Alerts per site day of the last ``days`` (today included), per severity, by ``time``."""
+    today = site_day(now)
+    first = today - timedelta(days=days - 1)
+    start = datetime.combine(first, datetime.min.time(), tzinfo=SITE_TZ)
+    local_day = func.date(func.timezone(SITE_TZ.key, Alert.time))
+    counts: dict[date, dict[str, int]] = {
+        first + timedelta(days=n): dict.fromkeys(ALERT_SEVERITIES, 0) for n in range(days)
+    }
+    for day, severity, count in db.execute(
+        select(local_day, Alert.severity, func.count())
+        .where(Alert.time >= start, Alert.time <= now)
+        .group_by(local_day, Alert.severity)
+    ):
+        if day in counts:
+            counts[day][severity] = int(count)
+    return [DayCounts(day=day, **values) for day, values in sorted(counts.items())]
+
+
+def top_rules(db: Session, now: datetime) -> list[RuleCount]:
+    """The rules with the most alerts of the last 7 days (by ``time``)."""
+    count = func.count().label("count")
+    rows = db.execute(
+        select(Alert.rule, count)
+        .where(Alert.time >= now - timedelta(days=TOP_DAYS), Alert.time <= now)
+        .group_by(Alert.rule)
+        .order_by(count.desc(), Alert.rule)
+        .limit(TOP_MAX)
+    )
+    return [RuleCount(rule=rule, count=int(number)) for rule, number in rows]
+
+
+def top_keys(db: Session, now: datetime) -> list[KeyCount]:
+    """The dedup keys with the most alerts of the last 7 days (alerts without a key are not
+    counted)."""
+    count = func.count().label("count")
+    rows = db.execute(
+        select(Alert.rule, Alert.dedup_key, count)
+        .where(
+            Alert.time >= now - timedelta(days=TOP_DAYS),
+            Alert.time <= now,
+            Alert.dedup_key.is_not(None),
+        )
+        .group_by(Alert.rule, Alert.dedup_key)
+        .order_by(count.desc(), Alert.dedup_key)
+        .limit(TOP_MAX)
+    )
+    return [
+        KeyCount(rule=rule, key=mask_addresses(key or ""), count=int(number))
+        for rule, key, number in rows
+    ]
 
 
 # -- one alert ------------------------------------------------------------------------------------
@@ -563,10 +751,80 @@ def _alert(db: Session, alert_id: int, *, lock: bool = False) -> Alert:
     return row
 
 
+def _person_level(rule: str) -> bool:
+    try:
+        return registry.rule(rule).person_level
+    except KeyError:
+        return False
+
+
+def _person(
+    db: Session, request: Request, user: CurrentUser, alert: Alert
+) -> AlertPersonOut | None:
+    """The person of a person-level rule's alert, for a ``usage.person`` holder only (decision
+    D3), audited as ``alert.person_view`` before it is returned."""
+    person_id = (alert.details or {}).get("person_id")
+    if not (
+        user.has("usage.person")
+        and _person_level(alert.rule)
+        and isinstance(person_id, int)
+        and not isinstance(person_id, bool)
+    ):
+        return None
+    person = db.get(Person, person_id)
+    if person is None:
+        return None
+    record_audit(
+        db,
+        actor=user,
+        action="alert.person_view",
+        target=f"alert:{alert.id}",
+        details={"alert_id": alert.id, "person_id": person.id},
+        ip=client_ip(request),
+    )
+    db.commit()
+    return AlertPersonOut(id=person.id, name=person.name)
+
+
 @router.get("/{alert_id}")
-def get_alert(alert_id: AlertId, db: DbSession, user: ReaderDep) -> AlertDetail:
-    """The alert with its details, events, runbook and e-mail deliveries."""
-    return alert_detail(db, _alert(db, alert_id))
+def get_alert(alert_id: AlertId, request: Request, db: DbSession, user: ReaderDep) -> AlertDetail:
+    """The alert with its details, events, runbook and e-mail deliveries (and, for a
+    person-level rule and a ``usage.person`` holder, its person)."""
+    alert = _alert(db, alert_id)
+    return alert_detail(db, alert, _person(db, request, user, alert))
+
+
+@router.get("/{alert_id}/evidence")
+def get_evidence(alert_id: AlertId, db: DbSession, user: ReaderDep) -> AlertEvidencePage:
+    """The rows behind a security rule's alert, oldest first, with what ``/raw`` opens (no line
+    content; an alert without evidence answers an empty list)."""
+    alert = _alert(db, alert_id)
+    rows = db.scalars(
+        select(AlertEvidence).where(AlertEvidence.alert_id == alert.id).order_by(AlertEvidence.n)
+    )
+    items = []
+    for row in rows:
+        raw = None
+        if (
+            row.source is not None
+            and row.raw_day is not None
+            and row.raw_line is not None
+            and row.raw_offset is not None
+        ):
+            raw = AlertEvidenceRaw(
+                source=row.source, day=row.raw_day, line=row.raw_line, offset=row.raw_offset
+            )
+        items.append(
+            AlertEvidenceOut(
+                n=row.n,
+                table=row.tbl,
+                row_id=row.row_id,
+                time=row.time,
+                time_received=row.time_received,
+                raw=raw,
+            )
+        )
+    return AlertEvidencePage(alert_id=alert.id, evidence_total=_evidence_total(alert), items=items)
 
 
 def _workflow_error(exc: WorkflowError, previous: str, wanted: str) -> ApiError:
@@ -640,3 +898,35 @@ def create_note(
         audit=_auditor(db, request, user, alert),
     )
     return event_out(event)
+
+
+def _assignee(db: Session, user_id: int | None) -> User | None:
+    """The user an alert may be given to: active and allowed to read alerts."""
+    if user_id is None:
+        return None
+    target = db.get(User, user_id)
+    if target is None or not target.active or "alerts.read" not in permissions_for(target.role):
+        raise _error(422, "alert_assignee_invalid", details={"user_id": user_id})
+    return target
+
+
+@router.post("/{alert_id}/assign")
+def assign_alert(
+    alert_id: AlertId, body: AlertAssignRequest, request: Request, db: DbSession, user: ManagerDep
+) -> AlertDetail:
+    """Give the alert to a user who may read alerts, or to nobody (audited ``alert.assign``);
+    the same assignee again changes nothing."""
+    alert = _alert(db, alert_id, lock=True)
+    target = _assignee(db, body.user_id)
+    # The same assignee again: nothing to record.
+    with suppress(WorkflowError):
+        assign(
+            db,
+            alert,
+            target,
+            by=user.username,
+            user_id=user.id,
+            now=utc_now(),
+            audit=_auditor(db, request, user, alert),
+        )
+    return alert_detail(db, alert)

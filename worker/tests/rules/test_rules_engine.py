@@ -374,6 +374,13 @@ def test_the_cooldown_counts_on_the_closed_alert(sessions: sessionmaker[Session]
     assert (details["opened"], details["cooled"]) == (0, 1)
     (closed,) = _alerts(sessions)
     assert closed.details["after_close"]["count"] == 3
+    # A minute later the window holds those three and one more: the largest window count (C1),
+    # four, not a sum of seven that would count the three again.
+    _rows(sessions, second + timedelta(seconds=60) - timedelta(seconds=130), 1)
+    details = _run(sessions, second + timedelta(seconds=60))
+    assert (details["opened"], details["cooled"]) == (0, 1)
+    (closed,) = _alerts(sessions)
+    assert closed.details["after_close"]["count"] == 4
     # After the cooldown (1 h after the closed alert's time) a new alert opens.
     third = alert.time + timedelta(hours=1, minutes=5)
     _rows(sessions, third - timedelta(seconds=130), 3)

@@ -62,6 +62,7 @@ GATED = {
     "reports.run_due": "usage_reports",
     # Wave 6 decision D1: the security rules R01-R19 (R15 and R20 stay in 5651 Temel).
     "rules.run": "security_rules",
+    "alerts.webhooks": "security_rules",
 }
 
 

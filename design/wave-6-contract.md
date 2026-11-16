@@ -555,6 +555,7 @@ and only for an alert of a person-level rule; each such answer writes `alert.per
 | `rule_dry_run_timeout` | Deneme {n} sn içinde bitmedi; pencereyi ya da listeleri küçültün. | The trial run did not finish within {n} s; shorten the window or the lists. |
 | `alert_assignee_invalid` | Bu kullanıcıya uyarı atanamaz. | Alerts cannot be assigned to this user. |
 | `webhook_not_found` | Böyle bir webhook yok. | No such webhook. |
+| `webhook_not_ready` | Bu webhook gönderime hazır değil; durumuna bakın. | This webhook is not ready to send; see its state. |
 | `webhook_test_failed` | Deneme bildirimi gönderilemedi: {error} | The test notification could not be sent: {error} |
 
 ### 2.7 Load generator scenarios (W6-I)
@@ -690,9 +691,14 @@ to the normal site: `port-scan` (R01), `external-scan` (R02), `brute-force` (R03
   the largest value any of its hits reported ("en yüksek pencere sayısı / most in one window").
   The stored evidence stays de-duplicated and capped at `rules.evidence_max`, and `last_time`
   and `values` move as before. §2.1.5's "counts add up" is replaced by this. It lands in W6-A's
-  dry-run PR, before any API or UI shows a count.
-- **C2 — the rules' indexes go into a new migration `0025`** with the perf guard (T-A6).
-  `0024_rules` is merged and is not edited.
+  dry-run PR, before any API or UI shows a count. A closed alert's `after_close.count` (cooldown)
+  follows the same rule: the largest window count, never a sum (#270; lands with the rules API).
+- **C2 — no index migration for the rules** (#278). The perf guard (T-A6) measured every rule's
+  statements with `EXPLAIN (ANALYZE, BUFFERS)`: the primary keys `(time, id)` and the existing
+  per-table key indexes serve every rule, and an index on `time_received` made R01 and R02
+  slower. §2.1.7 allows only indexes the rules need, so none is added. `0024_rules` is merged and
+  is not edited; `0025` is W6-H's request kind (C10). R13's and R14's day and night totals,
+  which no index helps, are #280.
 - **C3 — `rules.evidence_max`:** a rule may return up to 100 evidence rows (the setting's
   maximum) or read the setting itself; the engine keeps the configured number, oldest first.
 - **C4 — defaults the tables leave open** (#253, #254): cooldown 3600 s for R01, R03, R08,
@@ -720,6 +726,51 @@ to the normal site: `port-scan` (R01), `external-scan` (R02), `brute-force` (R03
     /api/v1/webhooks` shows it at once: per webhook a `ready` boolean and a reason code
     (`secret_missing`, `url_missing`), never a value.
   - `R20-webhook` has its own entry in the alert catalogue (`alerts/texts.py`).
+  - The reason codes are `null` when `ready` is true, otherwise `disabled`, `secret_missing` or
+    `url_missing`.
+- **C10 — the webhook test and the firewall rule** (#266, #260):
+  - The test runs on the worker channel, as the test e-mail does, not as an administration agent
+    probe: request kind `worker.webhook_test` (`params.name`), sent by the worker with its own
+    secret store. §2.4.4's probe kind `webhook` is replaced by this.
+  - The kind needs migration `0025` (W6-H): `ck_admin_requests_kind` is dropped and created again
+    with `worker.webhook_test`; the downgrade deletes those rows and restores the old list.
+  - `POST /api/v1/webhooks/{name}/test` refuses before queueing: 404 `webhook_not_found`, 409
+    `webhook_not_ready` (`details.reason`) when `ready` is false, and the test e-mail's rate limit.
+    It answers the queued request; the web polls it as it polls the test e-mail.
+  - The request's `result` is `{"ok", "status", "error_text"}`: `status` is the HTTP status code
+    or `null` when no reply came (timeout, DNS, TLS); `error_text` follows §2.4.2's `last_error`
+    rule and is `null` on success. Its `code` is `webhook_test_failed` on failure. Audit
+    `webhook.test` with `{name, ok, status}`, never the URL.
+  - Until W6-F's webhook types land, `web/src/lib/api-types.test.ts` lists the six webhook
+    schemas in `UNUSED_SCHEMAS` (granted to W6-H, marked with #260, removed by #260).
+  - Firewall rule `ARCILOGGER Out Webhook <name>` (T-H4): built in `Set-ArciFirewall.ps1`, in
+    `systemplan.py` (`_outbound`) and in the rule-name pattern of `ArciInstall.psm1`. A `generic`
+    webhook gives the host and port of `url`. A `teams`/`slack` URL is read from the secret store
+    (`arcilogger-core secret get webhook.<name>.url` in the script, the agent's secret store in
+    `systemplan.py`); only its host and port are kept, in memory, and the URL is never logged or
+    written. A URL that cannot be read gives no rule and one warning naming the webhook, not the
+    URL.
+- **C11 — the SNMP test before saving** (#217, Wave 5 §6 N5):
+  - `POST /api/v1/admin/config/sources/snmp-test` (`settings.manage`, recent re-authentication,
+    one a minute per user) takes one source's add or update body and answers 202 with a queued
+    `config.apply` of `sources` with `options.probe_only: true`; for an existing source an empty
+    key uses the stored one.
+  - The agent validates and probes with the decrypted keys of the request and writes nothing: no
+    secret store, no `arcilogger.toml`, no `versions/`, no applied journal lines. The keys travel
+    as `secret_set` does and are dropped after the probe.
+  - Success ends in `succeeded` (no new state) with `result = {"probe_only": true, "interfaces":
+    [{"name", "oper_status", "speed_mbps"}]}`, bounded as W5-N-9; failure is `probe_failed`, with
+    the list whenever the walk succeeded. The API never turns a probe-only request into
+    `active`. Audit `admin.probe` with the source name and outcome, never a value.
+  - The SNMP form offers the interfaces as a pick list and falls back to typed names (W6-H's
+    owner builds it, with a grant for the SNMP part of `web/src/pages/sources/`).
+- **C12 — the live tail's Linux bound follows CI's interpreter** (#191). CI's Linux job runs uv's
+  managed Python 3.12.16 since 2026-11-07, not the runner's 3.12.3: the gauge became 8 to 11 %
+  faster on the same CPU and the event loop's figure in gauge lines rose with it, while its time a
+  line stayed. 3 of 89 readings on 3.12.16 failed `LOOP_GAUGE_LINES` 6.8 (0 of 42 on 3.12.3), so
+  ubuntu-latest's value is 7.4, fitted to the 89: the costliest passes by 5.2 %, a path 40 %
+  costlier fails on 81 of them, 20 % costlier on 48. `CI_READINGS`' Linux rows are those
+  readings, with their CPU models. windows-latest is unchanged.
 
 ---
 
@@ -777,12 +828,45 @@ to the normal site: `port-scan` (R01), `external-scan` (R02), `brute-force` (R03
   minute) the slices are a minute long anyway. `test_a_backlog_puts_every_moment_into_a_window`
   pins it.
 
+### W6-A (API pull request, #243)
+
+- **W6-A-3, completed.** `GET /settings` answers the `rules.*` keys in the new list
+  `elsewhere` (`key`, `value`, `is_default`, `updated_by`, `updated_at`), apart from the groups
+  of the generic page, which the web does not show. The field has a default, so the web types
+  carry it as optional and the generic page's tests need no change.
+- **W6-A-6: the licence code of the rule writes.** §2.6.1 names `module_disabled`
+  ("existing code"). The existing code of every paid route is `module_not_licensed` (403,
+  `arcilogger_api.licensing.require_module`), so `PUT /rules/{id}` and the dry run answer that
+  code. `GET /rules` stays readable and says `module_enabled`.
+
 ### W6-C (#245): R11 matches the device's insert time, not `first_seen`
 
 - **Contract:** §2.2.2 R11, "a `devices` row whose `first_seen` is in the slice".
 - **Implemented:** a `devices` row whose `created_at` (the server's insert time) is in the slice; `first_seen` is shown in the alert's values.
 - **Why:** `first_seen` is the **device time** of the first DHCP or ARP sighting. The lease jobs write the row later, after their own lag. A device whose row is inserted after `rules.run` moved its watermark past that `first_seen` would never alert. `created_at` is written once, at the insert, by the server's clock. That fits D8 (receive time, not device time) and D12 (devices that existed when the rule started never alert, with no extra seeding).
 - **Limit:** a lease-job transaction that runs longer than `rules.lag_seconds` (120 s) can commit rows with a `created_at` behind the watermark. The default lag covers the normal job; a full rebuild of old days creates no new devices worth an alert.
+
+### W6-H (#249, pull request #266)
+
+- **W6-H-1: `webhook_test_failed` names the reason in the request's result.** §2.6.4 gives the
+  text "Deneme bildirimi gönderilemedi: {error}". "Test gönder" is a worker-channel request
+  (`worker.webhook_test`, as the test e-mail; manager's answer 1 on #266), and a request's
+  outcome code takes fixed texts from `core/admin/messages.py`, as `smtp_test_failed` does. The
+  message is "Deneme bildirimi gönderilemedi." / "The test notification could not be sent.", and
+  the reason (§2.4.2: the status code and the cleaned reply) is `result.error_text` of the
+  request, `{ok, status, error_text}` (manager's answer of 2026-11-15 19:08 on #266). The page
+  shows both (W6-F).
+- **W6-H-2: a new revision `0025_admin_webhook_test`.** `admin_requests.kind` is checked by the
+  database (`ck_admin_requests_kind`, frozen in `0015_admin_requests`), so the new worker-channel
+  kind needs a revision; it only widens that check (the downgrade deletes the
+  `worker.webhook_test` rows first). The manager fixed the numbers on #266: `0025` is this
+  kind, and the rules' indexes of C2 take `0026` with down-revision `0025`.
+- **W6-H-3: the webhook secrets on the console.** §2.4.1 has the administrator run
+  `arcilogger-core secret set webhook.<name>.secret`; the CLI accepted only a fixed list of
+  names, so it now also takes `webhook.<name>.secret` and `webhook.<name>.url`. `secret get`
+  reads `webhook.<name>.url` into a pipe (recorded like `postgres.superuser`) for
+  `Set-ArciFirewall.ps1` (manager's answer 3 on #266, option a); the HMAC secret stays
+  write-only.
 
 ### W6-A (performance guard pull request, #278)
 
