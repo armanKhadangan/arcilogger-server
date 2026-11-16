@@ -738,6 +738,13 @@ Yerel saat kaynağı (`[clock] ntp_server`), yedek sunucu (`[clock] fallback_ser
 sunucu, durum ("Sınır içinde", "Sınırda ya da üstünde" ya da "Yanıt yok"), sapma ve gecikme (ms),
 katman (stratum). Kart 6 bu ölçümlerin en yenisini değerlendirir.
 
+Altında log kaynaklarının saatleri (#222): cihaz saati `alerts.source_clock_limit_seconds` (120
+saniye; sahada doğrulayın) sınırını aşan etkin kaynaklar, en çok kayandan başlayarak en çok 10
+tanesi, saat farkıyla ("7 dk geri") ve dayandığı kayıt sayısıyla; hiçbiri yoksa "Bütün log
+kaynaklarının saati sınırın içinde". Her biri için `R20-source-clock` uyarısı açıktır. Sunucunun
+kendi saati yukarıdaki ölçümlerdir; kaynakların saati onların son bir saatte alınan en yeni
+kayıtlarından ölçülür.
+
 ### 4.9 Sürüm ve güncelleme
 
 Ürün adı, API sürümü, çekirdek sürümü, yayın tarihi ve lisansın bakım süresi (Ayarlar → Lisans'taki

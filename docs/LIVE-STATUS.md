@@ -69,8 +69,11 @@ not ask. Each part is shown only to the roles allowed to see it (section 4).
   incomplete (`warming_up`).
 - A traffic log that reaches the database more than 5 minutes after its time is not added to the
   table; the usage reports count it. So a device whose clock is more than 5 minutes behind does
-  not appear in "Şu an"; the usage reports count it. Sync device clocks with NTP
-  ([DEVICE-SETUP.md](DEVICE-SETUP.md)).
+  not appear in "Şu an"; the usage reports count it. The page names such a firewall and how many
+  minutes it is behind (`late_sources`: the median of its newest records received in the last
+  hour, #222); the Sources page shows each source's clock offset, and `R20-source-clock` opens once
+  the clock is beyond `alerts.source_clock_limit_seconds` (120 seconds). Sync device clocks with
+  NTP ([DEVICE-SETUP.md](DEVICE-SETUP.md)).
 
 ## 3. The internet line (SNMPv3)
 
