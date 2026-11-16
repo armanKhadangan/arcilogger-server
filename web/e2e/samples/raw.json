@@ -210,12 +210,12 @@
       "line": 6,
       "offset": 792,
       "origin": "vault",
-      "raw_base64": "MjAyNi0xMC0wOVQxMzowMDowMC4wMDMwMDArMDM6MDAgMTcyLjIwLjEwLjEgPDMwPjIwMjYtMTAtMDlUMTM6MDA6MDAuMDAwKzAzOjAwIENPUkUtUjEgc2NyaXB0LGluZm8gQVJQLUxPRyAxNzIuMjAuNDIuNTcgMDA6MEM6Mjk6MDA6MDA6OTkgdmxhbjQy",
+      "raw_base64": "MjAyNi0xMC0wOVQxMzowMDowMC4wMDMwMDArMDM6MDAgMTcyLjIwLjEwLjEgPDMwPjIwMjYtMTAtMDlUMTM6MDA6MDAuMDAwKzAzOjAwIENPUkUtUjEgc2NyaXB0LGluZm8gQVJQLUxPRyAxNzIuMjAuNDIuNTcgMDA6MDA6NUU6MDA6NTM6OUEgdmxhbjQy",
       "received": "2026-10-09T13:00:00.003000+03:00",
       "sender": "172.20.10.1",
-      "sha256": "d804cc073f12dc3c64a96c6132b0a30e4db3cbeeaa56a2d137838ce9d51dc77d",
+      "sha256": "69efd79c50f7c7f7269b0f60911ce692eec9ddc7fec28aa154da5392bc1b25df",
       "source": "core-r1",
-      "text": "2026-10-09T13:00:00.003000+03:00 172.20.10.1 <30>2026-10-09T13:00:00.000+03:00 CORE-R1 script,info ARP-LOG 172.20.42.57 00:0C:29:00:00:99 vlan42"
+      "text": "2026-10-09T13:00:00.003000+03:00 172.20.10.1 <30>2026-10-09T13:00:00.000+03:00 CORE-R1 script,info ARP-LOG 172.20.42.57 00:00:5E:00:53:9A vlan42"
     },
     "core-r1|2026-10-09|7": {
       "day": "2026-10-09",
@@ -224,12 +224,12 @@
       "line": 7,
       "offset": 937,
       "origin": "vault",
-      "raw_base64": "MjAyNi0xMC0wOVQxNDowMDowMC4wMDMwMDArMDM6MDAgMTcyLjIwLjEwLjEgPDMwPjIwMjYtMTAtMDlUMTQ6MDA6MDAuMDAwKzAzOjAwIENPUkUtUjEgc2NyaXB0LGluZm8gQVJQLUxPRyAxNzIuMjAuNDIuNTcgMDA6MEM6Mjk6MDA6MDA6OTkgdmxhbjQy",
+      "raw_base64": "MjAyNi0xMC0wOVQxNDowMDowMC4wMDMwMDArMDM6MDAgMTcyLjIwLjEwLjEgPDMwPjIwMjYtMTAtMDlUMTQ6MDA6MDAuMDAwKzAzOjAwIENPUkUtUjEgc2NyaXB0LGluZm8gQVJQLUxPRyAxNzIuMjAuNDIuNTcgMDA6MDA6NUU6MDA6NTM6OUEgdmxhbjQy",
       "received": "2026-10-09T14:00:00.003000+03:00",
       "sender": "172.20.10.1",
-      "sha256": "317acb85d7ec40800d0ceffd6e2a45499726b77dcef000d817f2d1cb91ee1548",
+      "sha256": "568d23bcafa0ed9f7c0436daeb39f4d2c9e31d4ff0c2b4d752c34a4a724d2576",
       "source": "core-r1",
-      "text": "2026-10-09T14:00:00.003000+03:00 172.20.10.1 <30>2026-10-09T14:00:00.000+03:00 CORE-R1 script,info ARP-LOG 172.20.42.57 00:0C:29:00:00:99 vlan42"
+      "text": "2026-10-09T14:00:00.003000+03:00 172.20.10.1 <30>2026-10-09T14:00:00.000+03:00 CORE-R1 script,info ARP-LOG 172.20.42.57 00:00:5E:00:53:9A vlan42"
     },
     "fortigate|2026-09-01|1": {
       "day": "2026-09-01",
@@ -600,7 +600,7 @@
       "file": "vault/2026/10/09/fortigate.log.gz",
       "length": 412,
       "line": 18,
-      "offset": 6547,
+      "offset": 6555,
       "origin": "vault",
       "raw_base64": "MjAyNi0xMC0wOVQxMToyMzoxMS4wMDMwMDArMDM6MDAgMTcyLjMxLjI1NS4xIDwxODk+ZGF0ZT0yMDI2LTEwLTA5IHRpbWU9MTE6MjM6MTEgZGV2bmFtZT0iRklSRVdBTEwtMDEiIGRldmlkPSJGR1QwMDAwMDAwMDAwMDAwIiBldmVudHRpbWU9MTc5MTUzNDE5MTAwMDAwMDAwMCB0ej0iKzAzMDAiIGxvZ2lkPSIwMDAwMDAwMDEzIiB0eXBlPSJ0cmFmZmljIiBzdWJ0eXBlPSJmb3J3YXJkIiBsZXZlbD0ibm90aWNlIiB2ZD0icm9vdCIgc3JjaXA9MTcyLjIwLjQxLjE1IHNyY3BvcnQ9NTAxMTAgZHN0aXA9MjAzLjAuMTEzLjEwIGRzdHBvcnQ9NDQzIHNlc3Npb25pZD01MDExMCBwcm90bz02IGFjdGlvbj0iYWNjZXB0IiB0cmFuZGlzcD0ic25hdCIgdHJhbnNpcD0xMDAuNjQuMTIuOSB0cmFuc3BvcnQ9NTAxMTAgZHVyYXRpb249NQ==",
       "received": "2026-10-09T11:23:11.003000+03:00",
@@ -628,7 +628,7 @@
       "file": "vault/2026/10/09/fortigate.log.gz",
       "length": 407,
       "line": 21,
-      "offset": 7786,
+      "offset": 7798,
       "origin": "vault",
       "raw_base64": "MjAyNi0xMC0wOVQxMToyMzozMi4wMDMwMDArMDM6MDAgMTcyLjMxLjI1NS4xIDwxODk+ZGF0ZT0yMDI2LTEwLTA5IHRpbWU9MTE6MjM6MzIgZGV2bmFtZT0iRklSRVdBTEwtMDEiIGRldmlkPSJGR1QwMDAwMDAwMDAwMDAwIiBldmVudHRpbWU9MTc5MTUzNDIxMjAwMDAwMDAwMCB0ej0iKzAzMDAiIGxvZ2lkPSIwMDAwMDAwMDEzIiB0eXBlPSJ0cmFmZmljIiBzdWJ0eXBlPSJmb3J3YXJkIiBsZXZlbD0ibm90aWNlIiB2ZD0icm9vdCIgc3JjaXA9MTcyLjIwLjQxLjE1IHNyY3BvcnQ9NTAxMTMgZHN0aXA9OC44LjguOCBkc3Rwb3J0PTUzIHNlc3Npb25pZD01MDExMyBwcm90bz0xNyBhY3Rpb249ImFjY2VwdCIgdHJhbmRpc3A9InNuYXQiIHRyYW5zaXA9MTAwLjY0LjEyLjkgdHJhbnNwb3J0PTUwMTEzIGR1cmF0aW9uPTQ=",
       "received": "2026-10-09T11:23:32.003000+03:00",
@@ -642,7 +642,7 @@
       "file": "vault/2026/10/09/fortigate.log.gz",
       "length": 413,
       "line": 22,
-      "offset": 8194,
+      "offset": 8206,
       "origin": "vault",
       "raw_base64": "MjAyNi0xMC0wOVQxMToyMzozOS4wMDMwMDArMDM6MDAgMTcyLjMxLjI1NS4xIDwxODk+ZGF0ZT0yMDI2LTEwLTA5IHRpbWU9MTE6MjM6MzkgZGV2bmFtZT0iRklSRVdBTEwtMDEiIGRldmlkPSJGR1QwMDAwMDAwMDAwMDAwIiBldmVudHRpbWU9MTc5MTUzNDIxOTAwMDAwMDAwMCB0ej0iKzAzMDAiIGxvZ2lkPSIwMDAwMDAwMDEzIiB0eXBlPSJ0cmFmZmljIiBzdWJ0eXBlPSJmb3J3YXJkIiBsZXZlbD0ibm90aWNlIiB2ZD0icm9vdCIgc3JjaXA9MTcyLjIwLjQzLjQ0IHNyY3BvcnQ9NTAxMTQgZHN0aXA9MjAuMTkwLjE2MC4yMCBkc3Rwb3J0PTQ0MyBzZXNzaW9uaWQ9NTAxMTQgcHJvdG89NiBhY3Rpb249ImFjY2VwdCIgdHJhbmRpc3A9InNuYXQiIHRyYW5zaXA9MTAwLjY0LjEyLjkgdHJhbnNwb3J0PTUwMTE0IGR1cmF0aW9uPTU=",
       "received": "2026-10-09T11:23:39.003000+03:00",
@@ -656,7 +656,7 @@
       "file": "vault/2026/10/09/fortigate.log.gz",
       "length": 413,
       "line": 23,
-      "offset": 8608,
+      "offset": 8620,
       "origin": "vault",
       "raw_base64": "MjAyNi0xMC0wOVQxMToyMzo0Ni4wMDMwMDArMDM6MDAgMTcyLjMxLjI1NS4xIDwxODk+ZGF0ZT0yMDI2LTEwLTA5IHRpbWU9MTE6MjM6NDYgZGV2bmFtZT0iRklSRVdBTEwtMDEiIGRldmlkPSJGR1QwMDAwMDAwMDAwMDAwIiBldmVudHRpbWU9MTc5MTUzNDIyNjAwMDAwMDAwMCB0ej0iKzAzMDAiIGxvZ2lkPSIwMDAwMDAwMDEzIiB0eXBlPSJ0cmFmZmljIiBzdWJ0eXBlPSJmb3J3YXJkIiBsZXZlbD0ibm90aWNlIiB2ZD0icm9vdCIgc3JjaXA9MTcyLjIwLjQyLjE2NSBzcmNwb3J0PTUwMTE1IGRzdGlwPTIwMy4wLjExMy4xMCBkc3Rwb3J0PTQ0MyBzZXNzaW9uaWQ9NTAxMTUgcHJvdG89NiBhY3Rpb249ImFjY2VwdCIgdHJhbmRpc3A9InNuYXQiIHRyYW5zaXA9MTAwLjY0LjEyLjkgdHJhbnNwb3J0PTUwMTE1IGR1cmF0aW9uPTY=",
       "received": "2026-10-09T11:23:46.003000+03:00",
@@ -668,44 +668,44 @@
     "fortigate|2026-10-09|24": {
       "day": "2026-10-09",
       "file": "vault/2026/10/09/fortigate.log.gz",
-      "length": 412,
+      "length": 413,
       "line": 24,
-      "offset": 9022,
+      "offset": 9034,
       "origin": "vault",
-      "raw_base64": "MjAyNi0xMC0wOVQxMToyMzo1My4wMDMwMDArMDM6MDAgMTcyLjMxLjI1NS4xIDwxODk+ZGF0ZT0yMDI2LTEwLTA5IHRpbWU9MTE6MjM6NTMgZGV2bmFtZT0iRklSRVdBTEwtMDEiIGRldmlkPSJGR1QwMDAwMDAwMDAwMDAwIiBldmVudHRpbWU9MTc5MTUzNDIzMzAwMDAwMDAwMCB0ej0iKzAzMDAiIGxvZ2lkPSIwMDAwMDAwMDEzIiB0eXBlPSJ0cmFmZmljIiBzdWJ0eXBlPSJmb3J3YXJkIiBsZXZlbD0ibm90aWNlIiB2ZD0icm9vdCIgc3JjaXA9MTcyLjIwLjQxLjE1IHNyY3BvcnQ9NTAxMTYgZHN0aXA9MTUxLjEwMS4xLjY5IGRzdHBvcnQ9NDQzIHNlc3Npb25pZD01MDExNiBwcm90bz02IGFjdGlvbj0iYWNjZXB0IiB0cmFuZGlzcD0ic25hdCIgdHJhbnNpcD0xMDAuNjQuMTIuOSB0cmFuc3BvcnQ9NTAxMTYgZHVyYXRpb249Mw==",
+      "raw_base64": "MjAyNi0xMC0wOVQxMToyMzo1My4wMDMwMDArMDM6MDAgMTcyLjMxLjI1NS4xIDwxODk+ZGF0ZT0yMDI2LTEwLTA5IHRpbWU9MTE6MjM6NTMgZGV2bmFtZT0iRklSRVdBTEwtMDEiIGRldmlkPSJGR1QwMDAwMDAwMDAwMDAwIiBldmVudHRpbWU9MTc5MTUzNDIzMzAwMDAwMDAwMCB0ej0iKzAzMDAiIGxvZ2lkPSIwMDAwMDAwMDEzIiB0eXBlPSJ0cmFmZmljIiBzdWJ0eXBlPSJmb3J3YXJkIiBsZXZlbD0ibm90aWNlIiB2ZD0icm9vdCIgc3JjaXA9MTcyLjIwLjQxLjE1IHNyY3BvcnQ9NTAxMTYgZHN0aXA9MTk4LjUxLjEwMC42OSBkc3Rwb3J0PTQ0MyBzZXNzaW9uaWQ9NTAxMTYgcHJvdG89NiBhY3Rpb249ImFjY2VwdCIgdHJhbmRpc3A9InNuYXQiIHRyYW5zaXA9MTAwLjY0LjEyLjkgdHJhbnNwb3J0PTUwMTE2IGR1cmF0aW9uPTM=",
       "received": "2026-10-09T11:23:53.003000+03:00",
       "sender": "172.31.255.1",
-      "sha256": "47ebebe4d141ceb5bce764b3307465a70a65d8444a7b62ea5257a75793723e30",
+      "sha256": "c61ff39ca45d2e1b43e0c3c377dc1453cccc9b696b3c3411dcce515c765d74d3",
       "source": "fortigate",
-      "text": "2026-10-09T11:23:53.003000+03:00 172.31.255.1 <189>date=2026-10-09 time=11:23:53 devname=\"FIREWALL-01\" devid=\"FGT0000000000000\" eventtime=1791534233000000000 tz=\"+0300\" logid=\"0000000013\" type=\"traffic\" subtype=\"forward\" level=\"notice\" vd=\"root\" srcip=172.20.41.15 srcport=50116 dstip=151.101.1.69 dstport=443 sessionid=50116 proto=6 action=\"accept\" trandisp=\"snat\" transip=100.64.12.9 transport=50116 duration=3"
+      "text": "2026-10-09T11:23:53.003000+03:00 172.31.255.1 <189>date=2026-10-09 time=11:23:53 devname=\"FIREWALL-01\" devid=\"FGT0000000000000\" eventtime=1791534233000000000 tz=\"+0300\" logid=\"0000000013\" type=\"traffic\" subtype=\"forward\" level=\"notice\" vd=\"root\" srcip=172.20.41.15 srcport=50116 dstip=198.51.100.69 dstport=443 sessionid=50116 proto=6 action=\"accept\" trandisp=\"snat\" transip=100.64.12.9 transport=50116 duration=3"
     },
     "fortigate|2026-10-09|25": {
       "day": "2026-10-09",
       "file": "vault/2026/10/09/fortigate.log.gz",
-      "length": 411,
+      "length": 414,
       "line": 25,
-      "offset": 9435,
+      "offset": 9448,
       "origin": "vault",
-      "raw_base64": "MjAyNi0xMC0wOVQxMToyNDowMC4wMDMwMDArMDM6MDAgMTcyLjMxLjI1NS4xIDwxODk+ZGF0ZT0yMDI2LTEwLTA5IHRpbWU9MTE6MjQ6MDAgZGV2bmFtZT0iRklSRVdBTEwtMDEiIGRldmlkPSJGR1QwMDAwMDAwMDAwMDAwIiBldmVudHRpbWU9MTc5MTUzNDI0MDAwMDAwMDAwMCB0ej0iKzAzMDAiIGxvZ2lkPSIwMDAwMDAwMDEzIiB0eXBlPSJ0cmFmZmljIiBzdWJ0eXBlPSJmb3J3YXJkIiBsZXZlbD0ibm90aWNlIiB2ZD0icm9vdCIgc3JjaXA9MTcyLjIwLjQzLjQ0IHNyY3BvcnQ9NTAxMTcgZHN0aXA9MTA0LjE4LjMyLjcgZHN0cG9ydD00NDMgc2Vzc2lvbmlkPTUwMTE3IHByb3RvPTYgYWN0aW9uPSJhY2NlcHQiIHRyYW5kaXNwPSJzbmF0IiB0cmFuc2lwPTEwMC42NC4xMi45IHRyYW5zcG9ydD01MDExNyBkdXJhdGlvbj00",
+      "raw_base64": "MjAyNi0xMC0wOVQxMToyNDowMC4wMDMwMDArMDM6MDAgMTcyLjMxLjI1NS4xIDwxODk+ZGF0ZT0yMDI2LTEwLTA5IHRpbWU9MTE6MjQ6MDAgZGV2bmFtZT0iRklSRVdBTEwtMDEiIGRldmlkPSJGR1QwMDAwMDAwMDAwMDAwIiBldmVudHRpbWU9MTc5MTUzNDI0MDAwMDAwMDAwMCB0ej0iKzAzMDAiIGxvZ2lkPSIwMDAwMDAwMDEzIiB0eXBlPSJ0cmFmZmljIiBzdWJ0eXBlPSJmb3J3YXJkIiBsZXZlbD0ibm90aWNlIiB2ZD0icm9vdCIgc3JjaXA9MTcyLjIwLjQzLjQ0IHNyY3BvcnQ9NTAxMTcgZHN0aXA9MTk4LjUxLjEwMC4xNjkgZHN0cG9ydD00NDMgc2Vzc2lvbmlkPTUwMTE3IHByb3RvPTYgYWN0aW9uPSJhY2NlcHQiIHRyYW5kaXNwPSJzbmF0IiB0cmFuc2lwPTEwMC42NC4xMi45IHRyYW5zcG9ydD01MDExNyBkdXJhdGlvbj00",
       "received": "2026-10-09T11:24:00.003000+03:00",
       "sender": "172.31.255.1",
-      "sha256": "00f7255279d57943763438aaf0ab35e24a373967b3fc1dbc9b046ba8f14182ba",
+      "sha256": "a4e56c6a97e970b815191496da401d4ba5ef691319b10a8798b65302b76915c9",
       "source": "fortigate",
-      "text": "2026-10-09T11:24:00.003000+03:00 172.31.255.1 <189>date=2026-10-09 time=11:24:00 devname=\"FIREWALL-01\" devid=\"FGT0000000000000\" eventtime=1791534240000000000 tz=\"+0300\" logid=\"0000000013\" type=\"traffic\" subtype=\"forward\" level=\"notice\" vd=\"root\" srcip=172.20.43.44 srcport=50117 dstip=104.18.32.7 dstport=443 sessionid=50117 proto=6 action=\"accept\" trandisp=\"snat\" transip=100.64.12.9 transport=50117 duration=4"
+      "text": "2026-10-09T11:24:00.003000+03:00 172.31.255.1 <189>date=2026-10-09 time=11:24:00 devname=\"FIREWALL-01\" devid=\"FGT0000000000000\" eventtime=1791534240000000000 tz=\"+0300\" logid=\"0000000013\" type=\"traffic\" subtype=\"forward\" level=\"notice\" vd=\"root\" srcip=172.20.43.44 srcport=50117 dstip=198.51.100.169 dstport=443 sessionid=50117 proto=6 action=\"accept\" trandisp=\"snat\" transip=100.64.12.9 transport=50117 duration=4"
     },
     "fortigate|2026-10-09|27": {
       "day": "2026-10-09",
       "file": "vault/2026/10/09/fortigate.log.gz",
-      "length": 414,
+      "length": 413,
       "line": 27,
-      "offset": 10260,
+      "offset": 10276,
       "origin": "vault",
-      "raw_base64": "MjAyNi0xMC0wOVQxMzozMDowMC4wMDMwMDArMDM6MDAgMTcyLjMxLjI1NS4xIDwxODk+ZGF0ZT0yMDI2LTEwLTA5IHRpbWU9MTM6MzA6MDAgZGV2bmFtZT0iRklSRVdBTEwtMDEiIGRldmlkPSJGR1QwMDAwMDAwMDAwMDAwIiBldmVudHRpbWU9MTc5MTU0MTgwMDAwMDAwMDAwMCB0ej0iKzAzMDAiIGxvZ2lkPSIwMDAwMDAwMDEzIiB0eXBlPSJ0cmFmZmljIiBzdWJ0eXBlPSJmb3J3YXJkIiBsZXZlbD0ibm90aWNlIiB2ZD0icm9vdCIgc3JjaXA9MTcyLjIwLjQyLjU3IHNyY3BvcnQ9NjEwMDEgZHN0aXA9OTMuMTg0LjIxNi4zNCBkc3Rwb3J0PTQ0MyBzZXNzaW9uaWQ9NjEwMDEgcHJvdG89NiBhY3Rpb249ImFjY2VwdCIgdHJhbmRpc3A9InNuYXQiIHRyYW5zaXA9MTAwLjY0LjEyLjkgdHJhbnNwb3J0PTYxMDAxIGR1cmF0aW9uPTEy",
+      "raw_base64": "MjAyNi0xMC0wOVQxMzozMDowMC4wMDMwMDArMDM6MDAgMTcyLjMxLjI1NS4xIDwxODk+ZGF0ZT0yMDI2LTEwLTA5IHRpbWU9MTM6MzA6MDAgZGV2bmFtZT0iRklSRVdBTEwtMDEiIGRldmlkPSJGR1QwMDAwMDAwMDAwMDAwIiBldmVudHRpbWU9MTc5MTU0MTgwMDAwMDAwMDAwMCB0ej0iKzAzMDAiIGxvZ2lkPSIwMDAwMDAwMDEzIiB0eXBlPSJ0cmFmZmljIiBzdWJ0eXBlPSJmb3J3YXJkIiBsZXZlbD0ibm90aWNlIiB2ZD0icm9vdCIgc3JjaXA9MTcyLjIwLjQyLjU3IHNyY3BvcnQ9NjEwMDEgZHN0aXA9MjAzLjAuMTEzLjM0IGRzdHBvcnQ9NDQzIHNlc3Npb25pZD02MTAwMSBwcm90bz02IGFjdGlvbj0iYWNjZXB0IiB0cmFuZGlzcD0ic25hdCIgdHJhbnNpcD0xMDAuNjQuMTIuOSB0cmFuc3BvcnQ9NjEwMDEgZHVyYXRpb249MTI=",
       "received": "2026-10-09T13:30:00.003000+03:00",
       "sender": "172.31.255.1",
-      "sha256": "4a59ecd3791d7188becacc985756575781f2dd9ca823c96f1d2795e464a5a61e",
+      "sha256": "f335369f875aec9bd810352a74e4adede053d393cb7009e207a1c27437a65266",
       "source": "fortigate",
-      "text": "2026-10-09T13:30:00.003000+03:00 172.31.255.1 <189>date=2026-10-09 time=13:30:00 devname=\"FIREWALL-01\" devid=\"FGT0000000000000\" eventtime=1791541800000000000 tz=\"+0300\" logid=\"0000000013\" type=\"traffic\" subtype=\"forward\" level=\"notice\" vd=\"root\" srcip=172.20.42.57 srcport=61001 dstip=93.184.216.34 dstport=443 sessionid=61001 proto=6 action=\"accept\" trandisp=\"snat\" transip=100.64.12.9 transport=61001 duration=12"
+      "text": "2026-10-09T13:30:00.003000+03:00 172.31.255.1 <189>date=2026-10-09 time=13:30:00 devname=\"FIREWALL-01\" devid=\"FGT0000000000000\" eventtime=1791541800000000000 tz=\"+0300\" logid=\"0000000013\" type=\"traffic\" subtype=\"forward\" level=\"notice\" vd=\"root\" srcip=172.20.42.57 srcport=61001 dstip=203.0.113.34 dstport=443 sessionid=61001 proto=6 action=\"accept\" trandisp=\"snat\" transip=100.64.12.9 transport=61001 duration=12"
     },
     "fortigate|2026-10-09|4": {
       "day": "2026-10-09",
@@ -738,16 +738,16 @@
     "fortigate|2026-10-12|49": {
       "day": "2026-10-12",
       "file": "spool/fortigate/2026-10-12.log",
-      "length": 192,
+      "length": 195,
       "line": 49,
       "offset": 13392,
       "origin": "spool",
-      "raw_base64": "MjAyNi0xMC0xMlQxNDowMjowMy4wMDAwMDArMDM6MDAgMTcyLjMxLjI1NS4xIDwxOTA+bG9naWQ9IjAzMTYwMTMwNTYiIHR5cGU9InV0bSIgc3VidHlwZT0id2ViZmlsdGVyIiBzcmNpcD0xNzIuMjAuNDIuMTY1IGRzdGlwPTEwNC4xOC4zMi43IGhvc3RuYW1lPSJmYXR1cmHigK54Y29kLmV4ZSIgbXNnPSJ0YWIjMDExaGVyZSIgIzAwMSD/",
+      "raw_base64": "MjAyNi0xMC0xMlQxNDowMjowMy4wMDAwMDArMDM6MDAgMTcyLjMxLjI1NS4xIDwxOTA+bG9naWQ9IjAzMTYwMTMwNTYiIHR5cGU9InV0bSIgc3VidHlwZT0id2ViZmlsdGVyIiBzcmNpcD0xNzIuMjAuNDIuMTY1IGRzdGlwPTE5OC41MS4xMDAuMTY5IGhvc3RuYW1lPSJmYXR1cmHigK54Y29kLmV4ZSIgbXNnPSJ0YWIjMDExaGVyZSIgIzAwMSD/",
       "received": "2026-10-12T14:02:03+03:00",
       "sender": "172.31.255.1",
-      "sha256": "e6df6067f936f11e51097e014bc489841ce5a58f666f662c31fb0e0ce41f224f",
+      "sha256": "2c287cf85d629f67ccccdb50cf63d14b27aeabb0e5f8bc049f5362f2359c7faa",
       "source": "fortigate",
-      "text": "2026-10-12T14:02:03.000000+03:00 172.31.255.1 <190>logid=\"0316013056\" type=\"utm\" subtype=\"webfilter\" srcip=172.20.42.165 dstip=104.18.32.7 hostname=\"fatura\\u202excod.exe\" msg=\"tab#011here\" #001 \\xff"
+      "text": "2026-10-12T14:02:03.000000+03:00 172.31.255.1 <190>logid=\"0316013056\" type=\"utm\" subtype=\"webfilter\" srcip=172.20.42.165 dstip=198.51.100.169 hostname=\"fatura\\u202excod.exe\" msg=\"tab#011here\" #001 \\xff"
     },
     "unknown-192.0.2.7|2026-09-27|1": {
       "day": "2026-09-27",
@@ -765,7 +765,7 @@
     }
   },
   "meta": {
-    "captured_at": "2026-10-13T04:01:17.864635+00:00",
+    "captured_at": "2026-10-13T04:01:43.366985+00:00",
     "clock": "2026-10-13T07:00:00+03:00",
     "info": "captured by web/scripts/capture_api_samples.py; do not edit",
     "site_day": "2026-10-09",
