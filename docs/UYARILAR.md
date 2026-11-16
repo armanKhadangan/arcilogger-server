@@ -293,6 +293,26 @@ doğrudan İnceleniyor yapılamaz: önce yeniden açın.
   özetinde de; `R20-email` ve `R20-report` alıcıyı adlandırır), ne yapılacağı (adım adım, bölüm
   2'deki öneriyle aynı) ve e-posta teslimleri (alıcı maskeli, durum, deneme sayısı). Tam
   adresler `alerts.email_recipients` ayarında ve Raporlar sayfasında zamanlamanın alıcılarındadır.
+- **Atama:** bir uyarı, uyarıları okuyabilen (`alerts.read`) etkin bir kullanıcıya ya da kimseye
+  atanabilir ("Atanan"; atamayı değiştirmek `alerts.manage` ister). Seçim listesi kullanıcıları
+  gösterir; kullanıcı listesini görme yetkisi (`users.manage`) yoksa yalnızca kendinizi ya da
+  "Kimseye atanmadı"yı seçebilirsiniz. Uyarıları okuyamayan bir kullanıcıya atama "Bu kullanıcıya
+  uyarı atanamaz." ile reddedilir. Atama zaman çizelgesine bir olay, denetim kaydına
+  `alert.assign` olarak yazılır. Listede **Atanan** sütunu ve **Bana atananlar** süzgeci vardır.
+- **Kanıt:** bir güvenlik kuralının uyarısında **Kanıt** sekmesi uyarıya yol açan kayıtları
+  gösterir: cihaz zamanı, kayıt türü, kaynak ve alındığı an. Bir pencerede görülen en yüksek kayıt
+  sayısından ilk `rules.evidence_max` (varsayılan 20) satır saklanır; sekme bunu söyler ("Bir
+  pencerede en çok … kayıt; ilk … tanesi kanıt olarak saklanır."). Uyarı satırların içeriğini
+  değil, yalnızca başvurusunu tutar. **Ham satırı aç** satırı ham satır görünümüyle açar: arama ya
+  da 5651 sorgu yetkisi (`search.read` ya da `lookup.run`) gerekir ve her açılış denetim kaydına
+  `raw.view` olarak yazılır. Cihaz envanterinden gelen kanıtın ham satırı yoktur.
+- **Kişi (R09, R13, R14):** kişi düzeyindeki bir uyarının ayrıntısındaki "Kişi: …" satırı yalnızca
+  kişi verisini görme yetkisi (`usage.person`) olanlara ve gösterimden önce denetim kaydına
+  (`alert.person_view`) yazılarak gösterilir; satırın altındaki not bunu söyler (bölüm 9, KVKK).
+- **Son 30 gün:** Güvenlik özetinin altında son 30 günde açılan uyarılar gün gün ve önem
+  derecesine göre (tablo görünümüyle), son 7 günde en çok uyarı açan 10 kural ve 10 anahtar
+  (adres, MAC ya da kullanıcı adı; kişi adı değil) gösterilir. Bir kurala tıklamak listeyi o
+  kurala süzer.
 - **Ortalama kapanma süresi:** şu an kapalı olan ve son kapanışı son 30 gün içinde olan
   uyarıların, açılmalarından son kapanışlarına (Yeni ya da İnceleniyor durumundan Kapandı ya da
   Yanlış alarm'a geçiş; Kapandı ↔ Yanlış alarm değişikliği kapanış sayılmaz) kadar geçen sürenin
@@ -308,13 +328,13 @@ doğrudan İnceleniyor yapılamaz: önce yeniden açın.
 Kurallar işçide dakikada bir, son iki dakikayı bekleterek (geç gelen satırlar için) çalışır ve
 yalnızca ayrıştırılmış tabloları ve cihaz envanterini **okur**; hiçbir ham log satırını, kasayı ya
 da mühürü değiştirmez. Pencereler **alım zamanına** göre sayılır (saati kaymış bir cihaz bir
-taramayı gizlemez). Bir kural ilk kez açıldığında eski veriler için uyarı açmaz, o andan itibaren
-sayar.
+taramayı gizlemez; kayık saati `R20-source-clock` bildirir, bölüm 2). Bir kural ilk kez açıldığında
+eski veriler için uyarı açmaz, o andan itibaren sayar.
 
 - **Eşikler başlangıç değeridir**, ölçülmüş gerçekler değildir: ağınıza göre ayarlayın.
 - **Uyarı ve kanıt:** her uyarı onu açan satırları (tablo, satır ve ham satır başvurusu) kanıt
-  olarak tutar; ham satır, izniyle ve denetim kaydıyla Ham satırı aç ile açılır. Uyarının
-  ayrıntısında, e-postasında ve webhook bildiriminde ham log satırı yoktur.
+  olarak tutar; ham satır, izniyle ve denetim kaydıyla Ham satırı aç ile açılır (Kanıt sekmesi,
+  bölüm 8). Uyarının ayrıntısında, e-postasında ve webhook bildiriminde ham log satırı yoktur.
 - **Tekilleştirme ve bekleme süresi:** aynı anahtar (ör. aynı kaynak adres) için etkin bir uyarı
   varsa yeni uyarı açılmaz; uyarının sayısı, bir pencerede görülen en yüksek sayıdır (çalışmalar
   boyunca toplanmaz). Kapatılan bir uyarıdan sonra bekleme süresi
@@ -475,7 +495,9 @@ da gönderilir ([KURULUM.md](KURULUM.md) bölüm 7.3); bildirimde kişi adı ve 
 
 - **Ne yakalar:** bir kişinin (ya da adresin) 1 saatte **1 GiB**'tan ya da bir günde (yerel saat)
   **5 GiB**'tan fazla **gönderdiği** veri; kullanım raporlarıyla aynı sayım (son kayıtların
-  gönderilen baytı, ara kayıtların farkı, çift sayım yok).
+  gönderilen baytı, ara kayıtların farkı, çift sayım yok). Saat, son bir saatte **alınan**
+  kayıtların günlük sayımdaki payıdır: her kayıt, oturumunun önceki kaydından bu yana gönderilen
+  kadar, site gününün saydığı gibi sayılır (dünkü kayıtlar dünün saydığı gibi).
 - **Bekleme:** 1 saat. **Veri:** FortiGate trafik logları.
 - **Ne yapılmalı:** Gönderimin hedefini ve bilinen bir yedekleme ya da eşitleme olup olmadığını
   denetleyin; değilse veri sızıntısı olasılığını inceleyin.

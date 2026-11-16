@@ -803,6 +803,20 @@ timeout_seconds = 10         # 1-60
   `ARCILOGGER Out Webhook <ad>` kuralı adresin sunucusuna ve portuna açılır (bölüm 12'deki SMTP
   kuralı gibi). Teams ve Slack adresi gizli depodan okunur ve yalnızca sunucusu ile portu
   kullanılır; okunamazsa kural açılmaz ve bir uyarı webhook'un adını (adresi değil) yazar.
+- **Ayarlar → Webhook'lar** (`/settings/webhooks`, uyarıları okuyabilenlere) tanımlı webhook'ları
+  **salt okunur** gösterir: ad, biçim (Teams ve Slack "sahada doğrula" işaretli), adresin yalnızca
+  sunucusu, en düşük önem, kurallar, açık ya da kapalı, gönderime hazır olup olmadığı (değilse
+  nedeni: kapalı, gizli bilgi eksik, adres eksik), son teslim ve son 7 günün gönderilen ve
+  başarısız sayıları. **Teslimler** son 50 teslimi gösterir: kuyruğa alındığı an, uyarı
+  (bağlantısıyla), önem, durum, deneme sayısı ve son hata. Bir webhook'u buradan eklemek ya da
+  değiştirmek mümkün değildir; tanım yalnızca dosyadadır.
+- **Test gönder** (`settings.manage`; açık ve hazır bir webhook için) işçiye bir deneme bildirimi
+  (`TEST` kuralı) göndertir ve sonucu deneme e-postası gibi izler: "Deneme bildirimi gönderildi;
+  hedef HTTP 204 ile yanıt verdi." ya da hatanın metni (durum kodu ve temizlenmiş yanıt; adresin
+  yolu, gizli bilgi ya da başlık değerleri asla). Hazır olmayan bir webhook için istek kuyruğa
+  alınmadan reddedilir ("Bu webhook gönderime hazır değil; durumuna bakın."); saatte en çok 5 deneme
+  yapılabilir. Her deneme denetim kaydına `webhook.test` (ad, sonuç, durum kodu; adres değil) olarak
+  yazılır. Lisans **Güvenlik kuralları** modülünü kapalı gösteriyorsa düğme kilitlidir.
 - Dosyadaki değişiklik işçi tarafından kendiliğinden yüklenir; güvenlik duvarı kuralları
   `ApplySystem` ile en geç 5 dakika içinde güncellenir.
 

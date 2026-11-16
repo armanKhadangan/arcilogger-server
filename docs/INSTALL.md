@@ -715,6 +715,22 @@ timeout_seconds = 10         # 1-60
   of section 12). A Teams or Slack address is read from the secret store and only its host and
   port are used; if it cannot be read, no rule is opened and a warning names the webhook (never
   the address).
+- **Settings → Webhook'lar** (`/settings/webhooks`, for users who may read alerts) shows the
+  webhooks **read-only**: name, format (Teams and Slack marked "sahada doğrula"), the URL's host
+  only, minimum severity, rules, on or off, whether it is ready to send (if not, why: off, secret
+  missing, URL missing), the last delivery, and the deliveries sent and failed in the last 7
+  days. **Teslimler** (deliveries) lists the latest 50: the time it was queued, the alert (with
+  its link), severity, status, attempts and the last error. No webhook can be added or changed
+  there; the definition is in the file only.
+- **Test gönder** (send a test; `settings.manage`, for an enabled webhook that is ready) has the
+  worker send a test notification (rule `TEST`) and follows it as the test e-mail is followed:
+  "Deneme bildirimi gönderildi; hedef HTTP 204 ile yanıt verdi." (the test notification was sent;
+  the target answered HTTP 204) or the error text (the status code and the cleaned reply; never the
+  URL's path, the secret or a header value). For a webhook that is not ready the request is refused
+  before anything is queued ("Bu webhook gönderime hazır değil; durumuna bakın." / "This webhook is
+  not ready to send; see its state."); at most 5 tests an hour. Each test is audited as
+  `webhook.test` (name, outcome, status code; never the URL). The button is locked when the licence
+  shows the **Security rules** module off.
 - The worker picks up a change to the file by itself; `ApplySystem` updates the firewall rules
   within 5 minutes.
 

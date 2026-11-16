@@ -300,6 +300,27 @@ cannot go straight to İnceleniyor: re-open it first.
   the same advice as section 2) and the e-mail deliveries (masked recipient, status, attempts).
   The full addresses are in the setting `alerts.email_recipients` and among the schedule's
   recipients on the Raporlar page.
+- **Assignment:** an alert can be given to an active user who may read alerts (`alerts.read`), or
+  to nobody ("Atanan"; changing it takes `alerts.manage`). The select lists the users; without
+  the right to see the user list (`users.manage`) you can only choose yourself or "Kimseye
+  atanmadı". Assigning to a user who cannot read alerts is refused ("Bu kullanıcıya uyarı
+  atanamaz." / "Alerts cannot be assigned to this user."). An assignment is an event in the
+  timeline and the audit entry `alert.assign`. The list has an **Atanan** (assignee) column and
+  a **Bana atananlar** (assigned to me) filter.
+- **Evidence:** a security rule's alert has a **Kanıt** (evidence) tab with the records behind it:
+  device time, record type, source and receive time. Of the most records any one window held,
+  the first `rules.evidence_max` (default 20) are kept, and the tab says so ("Bir pencerede en çok
+  … kayıt; ilk … tanesi kanıt olarak saklanır."). The alert keeps references to the rows, never
+  their content. **Ham satırı aç** (open the raw line) opens it in the raw-line view: it needs the
+  search or 5651 lookup right (`search.read` or `lookup.run`), and every opening is audited as
+  `raw.view`. Evidence from the device inventory has no raw line.
+- **Person (R09, R13, R14):** the "Kişi: …" (person) line of a person-level alert is shown only
+  to users with the right to see personal data (`usage.person`), and written to the audit log
+  (`alert.person_view`) before it is shown; a note under the line says so (section 9, KVKK).
+- **The last 30 days:** below the security summary, the alerts opened in the last 30 days per day
+  and severity (with a table view), and the 10 rules and 10 keys (an address, a MAC or a user
+  name; never a person's name) with the most alerts in the last 7 days. Clicking a rule filters
+  the list by it.
 - **Mean time to close:** the mean time from opening to the last closing (a change from Yeni or
   İnceleniyor to Kapandı or Yanlış alarm; switching between Kapandı and Yanlış alarm is no
   closing) of the alerts that are closed now and were last closed within the last 30 days
@@ -313,17 +334,17 @@ cannot go straight to İnceleniyor: re-open it first.
 > licence state. The security rules are not a 5651 obligation; they help you see suspicious
 > events on the network.
 
-The rules run in the worker once a minute, holding back the last two minutes (for late lines),
-and only **read** the parsed tables and the device inventory; they never change a raw log line,
-the vault or a seal. Windows count by **receive time** (a device with a wrong clock does not hide
-a scan). A rule switched on for the first time raises no alert for older data; it counts from
-then on.
+The rules run in the worker once a minute, holding back the last two minutes (for late lines), and
+only **read** the parsed tables and the device inventory; they never change a raw log line, the
+vault or a seal. Windows count by **receive time** (a device with a wrong clock does not hide a
+scan; `R20-source-clock` reports the wrong clock, section 2). A rule switched on for the first time
+raises no alert for older data; it counts from then on.
 
 - **Thresholds are starting values**, not measured facts: adjust them to your network.
 - **Alert and evidence:** every alert keeps the rows that raised it as evidence (table, row and
-  raw-line reference); the raw line opens with Open raw line, with its permission and an audit
-  entry. An alert's details, its e-mail and its webhook notification never contain a raw log
-  line.
+  raw-line reference); the raw line opens with Ham satırı aç (open the raw line), with its
+  permission and an audit entry (the Kanıt tab, section 8). An alert's details, its e-mail and its
+  webhook notification never contain a raw log line.
 - **Deduplication and cooldown:** while an alert of the same key (e.g. the same source address)
   is active, no new alert opens; the alert's count is the highest count seen in one window (it
   is not added up across runs). After an alert is closed, events within
@@ -488,7 +509,9 @@ no raw log line.
 
 - **Catches:** more than **1 GiB** **sent** by a person (or an address) within 1 hour, or more
   than **5 GiB** in one site day; counted as the usage reports count (the final records' sent
-  bytes, the interim records' differences, no double count).
+  bytes, the interim records' differences, no double count). The hour is the share of the
+  records **received** in the last hour as the site day counts them: each record counts what its
+  session sent since the session's previous record (yesterday's records as yesterday counts them).
 - **Cooldown:** 1 hour. **Data:** FortiGate traffic logs.
 - **What to do:** Check the target of the upload and whether it is a known backup or sync; if
   not, look into a possible data leak.
