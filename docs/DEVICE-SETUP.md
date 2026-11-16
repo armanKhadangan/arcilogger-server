@@ -525,8 +525,8 @@ Bu kayıtlar gelmezse kural çalışır ama hiçbir şey bulmaz.
 Aşağıdaki komutlar **FortiOS 7.6** için yazılmıştır. Depoda bu kayıtların bir biçim örneği
 yoktur: `logid` değerleri ve alan adları kuralların varsayılan parametreleridir, yakalanmış
 değerler değildir. **Sahada doğrulayın:** her ayardan sonra Arama'da ilgili kaydın geldiğini
-görün; `logid` ya da alan adı farklıysa kuralın parametresini (`rules.<ID>` ayarı)
-değiştirin.
+görün; `logid` ya da alan adı farklıysa kuralın parametresini Ayarlar → Güvenlik kuralları'nda
+(`rules.<ID>` ayarı) değiştirin.
 
 ```text
 # Olay (event) kayıtları: yönetici girişi, yapılandırma değişikliği, performans (sahada doğrula)
@@ -595,7 +595,8 @@ logs. Without them a rule runs but finds nothing.
 The commands above are written for **FortiOS 7.6**. The repository has no format sample of these
 logs: the `logid` values and field names are the rules' default parameters, not captured
 values. **Verify on site:** after each setting, see the log arrive in Search; if a `logid` or a
-field name differs, change the rule's parameter (the `rules.<ID>` setting). In order, the
+field name differs, change the rule's parameter in Settings → Güvenlik kuralları (the
+`rules.<ID>` setting). In order, the
 commands switch on the system event logs (admin login, configuration change, performance), the
 performance statistics every 5 minutes (R17), information-level logs to syslog, logging in the
 IPS sensor and its botnet scan (R05, R06), the antivirus log (R07) and the application-control

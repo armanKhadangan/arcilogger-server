@@ -333,6 +333,30 @@ sayar.
   e-postada ve webhook'ta kişi adı yoktur. Bu kuralların çalışanları izleme olarak görülebileceği
   için **hukuki inceleme önerilir**; aydınlatma metninizi ve iç kurallarınızı gözden geçirin.
 
+### Kural düzenleyici: Ayarlar → Güvenlik kuralları
+
+**Ayarlar → Güvenlik kuralları** (`/settings/rules`) her kuralı bir satırda gösterir: kod, ad,
+önem, durum (Açık / Kapalı / Ayar gerekli) ve veri durumu (**Veri geliyor**, **Son 24 saatte veri
+yok**, **Hiç veri gelmedi**: kuralın okuduğu tablolara son 24 saatte satır geldi mi). Notlar
+sütunu **Sahada doğrula** (okuduğu log biçimi bir örnek satırla doğrulanmadı), **Ayar gerekli**
+(kural gerekli parametre girilene kadar çalışmaz: R08, R14) ve **Kişi düzeyi** (R09, R13, R14)
+işaretlerini taşır. Sayfayı uyarıları görebilen (`alerts.read`) her kullanıcı görür; kuralları
+yalnızca ayar yönetimi yetkisi (`settings.manage`) olanlar değiştirir. Güvenlik kuralları lisansta
+açık değilse kurallar **Kilitli** görünür ve değiştirilemez; 5651 Temel uyarıları (R15, R20)
+çalışmaya devam eder.
+
+Bir satır kuralın formunu açar: kuralın açık olup olmadığı, önem, pencere (60 saniye ile 7 gün
+arası), bekleme süresi (en çok 7 gün), kuralın parametreleri (listelerde her satıra bir değer;
+ağlar CIDR olarak denetlenir; baytlar MiB, saatler SS:DD olarak), eylemler (**E-posta gönder**,
+**Webhook'a gönder**), "Ne yapılmalı" metni, **Varsayılanlara dön**, **Son 24 saatte dene** ve
+**Kaydet**. Deneme sonucu "Son 24 saatte bu ayarlarla {n} uyarı açılırdı" ve ilk anahtarlar
+olarak gösterilir; ayarlar denemeden sonra değişirse sayfa yeniden denemenizi ister. Kaydet
+`rules.<ID>` ayarını yazar ve denetim kaydına `rule.update` olarak önceki ve sonraki ayarları
+(kişi verisi olmadan) ekler. Açılan bir kural yalnızca açıldıktan sonraki veriye bakar.
+
+**Webhook'lar:** **Webhook'a gönder** açık bir kuralın uyarıları sunucuda tanımlı webhook'lara
+da gönderilir ([KURULUM.md](KURULUM.md) bölüm 7.3); bildirimde kişi adı ve ham log satırı yoktur.
+
 ### R01 İçeriden port taraması (yüksek)
 
 - **Ne yakalar:** bir iç adresin 1 dakikada **30** farklı porta ya da **50** farklı adrese

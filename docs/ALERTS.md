@@ -344,6 +344,32 @@ then on.
   monitoring employees, **legal review is recommended**; review your privacy notice and internal
   rules.
 
+### Rule editor: Settings → Güvenlik kuralları (Security rules)
+
+**Settings → Güvenlik kuralları** (`/settings/rules`) shows each rule on one row: code, name,
+severity, state (On / Off / Needs setup) and data status (**Data arriving**, **No data in the
+last 24 hours**, **No data ever**: whether rows arrived in the tables the rule reads in the last
+24 hours). The notes column carries **Verify on site** (the log format it reads has not been
+verified with a sample line), **Needs setup** (the rule does not run until its required
+parameter is entered: R08, R14) and **Person level** (R09, R13, R14). Every user who can see
+alerts (`alerts.read`) sees the page; only users with the settings permission
+(`settings.manage`) change the rules. Without the Security rules module in the licence the rules
+show as **Locked** and cannot be changed; the 5651 Temel alerts (R15, R20) keep working.
+
+A row opens the rule's form: whether the rule is on, severity, window (60 seconds to 7 days),
+cooldown (at most 7 days), the rule's parameters (one value per line in lists; networks checked
+as CIDR; bytes in MiB, times of day as HH:MM), actions (**Send e-mail**, **Send to webhooks**),
+the "What to do" text, **Back to defaults**, **Try on the last 24 hours** and **Save**. The
+trial's result reads "With these settings {n} alerts would have opened in the last 24 hours",
+with the first keys; if the settings change after the trial, the page asks you to try again.
+Save writes the `rules.<ID>` setting and adds `rule.update` to the audit log with the settings
+before and after (no person data). A rule that is switched on looks only at data that arrives
+after that.
+
+**Webhooks:** the alerts of a rule with **Send to webhooks** on also go to the webhooks defined
+on the server ([INSTALL.md](INSTALL.md) section 7.3); a notification carries no person name and
+no raw log line.
+
 ### R01 Internal port scan (high)
 
 - **Catches:** an internal address blocked on **30** different ports or **50** different

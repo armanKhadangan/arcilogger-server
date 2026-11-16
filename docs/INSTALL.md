@@ -667,6 +667,57 @@ asks you to move it below Program Files. The Zamane client runs only from
 copies the file there, points `zamane_jar` at the copy (the previous configuration stays as
 `arcilogger.toml.before-<time>`) and appends its SHA-256 to `zamane\zamane-jar.sha256`.
 
+### 7.3 Alert webhooks (optional)
+
+Alongside e-mail, the alerts of the Security page can be sent to a SIEM, Microsoft Teams or
+Slack. Webhooks are defined **on the server only**, in
+`C:\ProgramData\ARCILOGGER\arcilogger.toml`, never in the browser; a default installation has
+none. Webhook notifications belong to the **Security rules** licence module
+([LICENSING.md](LICENSING.md)).
+
+```toml
+[[webhooks]]
+name = "siem"                # a-z, 0-9 and "-", at most 32 characters, unique
+url = "<https address of your SIEM>"
+format = "generic"           # "generic" | "teams" | "slack"
+min_severity = "high"        # info | low | medium | high | critical
+rules = []                   # [] = every rule (R15 and R20 included); else e.g. ["R01", "R06"]
+enabled = true
+timeout_seconds = 10         # 1-60
+# ca_file = 'C:\ProgramData\ARCILOGGER\webhook-ca.pem'   # a company CA; default: the system store
+```
+
+- **`https` only;** the certificate is always verified, and no setting switches that off. The
+  address cannot hold user info, `127.0.0.0/8` and `::1` are refused, and at most 10 webhooks
+  can be defined. With `[network] https_proxy` set, requests go through the proxy.
+- **Secret:** every `generic` request is signed with HMAC-SHA256 (`X-Arcilogger-Timestamp`,
+  `X-Arcilogger-Signature: sha256=…`). The key (32–256 characters) is in the secret store, not
+  in the file:
+
+  ```powershell
+  & "C:\Program Files\ARCILOGGER\venv\Scripts\arcilogger-core.exe" secret set webhook.siem.secret
+  ```
+
+  For `teams` and `slack` **the address itself is the secret**: `url` stays empty in the file
+  and the address goes into the secret store with `secret set webhook.<name>.url`. Secrets are
+  never shown on a screen, in a log or in a response; without them the webhook is not ready to
+  send.
+- **What is sent:** the alert's number, rule, severity, state, Turkish and English titles, time,
+  count and web link. **No person names and no raw log lines.** The Teams and Slack shapes must
+  be **verified on site**: see a test notification appear in your own channel.
+- **Delivery:** the worker queues new alerts every minute (those opened after the webhook was
+  defined; older alerts are not sent). A temporary error is retried after 1, 5, 15 and 60
+  minutes, then hourly until 24 hours after the first attempt. A permanent error (a 4xx other
+  than 408 and 429) or the end of the 24 hours opens the `R20-webhook` alert ("Webhook cannot
+  deliver"); that webhook's next successful delivery closes it.
+- **Firewall:** in strict outbound mode (`-StrictOutbound`, section 12) each enabled webhook gets
+  the rule `ARCILOGGER Out Webhook <name>` to the host and port of its address (as the SMTP rule
+  of section 12). A Teams or Slack address is read from the secret store and only its host and
+  port are used; if it cannot be read, no rule is opened and a warning names the webhook (never
+  the address).
+- The worker picks up a change to the file by itself; `ApplySystem` updates the firewall rules
+  within 5 minutes.
+
 ## 8. Root certificate on the admin PC
 
 Caddy issues ARCILOGGER's HTTPS certificates from its own internal CA. Copy

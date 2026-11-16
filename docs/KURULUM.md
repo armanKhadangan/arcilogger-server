@@ -757,6 +757,55 @@ gösteriyorsa kurulum dosyayı oraya kopyalar, `zamane_jar` ayarını kopyaya ç
 yapılandırma `arcilogger.toml.before-<zaman>` olarak kalır) ve SHA-256 değerini
 `zamane\zamane-jar.sha256` dosyasına ekler.
 
+### 7.3 Uyarı webhook'ları (isteğe bağlı)
+
+Güvenlik sayfasındaki uyarılar e-postanın yanında bir SIEM'e, Microsoft Teams'e ya da Slack'e
+de bildirilebilir. Webhook'lar **yalnızca sunucuda**, `C:\ProgramData\ARCILOGGER\arcilogger.toml`
+dosyasında tanımlanır, tarayıcıdan tanımlanamaz; varsayılan kurulumda hiç webhook yoktur. Webhook
+bildirimleri **Güvenlik kuralları** lisans modülündedir ([LISANS.md](LISANS.md)).
+
+```toml
+[[webhooks]]
+name = "siem"                # a-z, 0-9 ve "-", en çok 32 karakter, tekil
+url = "<SIEM'inizin https adresi>"
+format = "generic"           # "generic" | "teams" | "slack"
+min_severity = "high"        # info | low | medium | high | critical
+rules = []                   # [] = her kural (R15 ve R20 dahil); ya da ör. ["R01", "R06"]
+enabled = true
+timeout_seconds = 10         # 1-60
+# ca_file = 'C:\ProgramData\ARCILOGGER\webhook-ca.pem'   # kurum CA'sı; yoksa sistem deposu
+```
+
+- **Yalnızca `https`;** sertifika her zaman doğrulanır, doğrulamayı kapatan bir ayar yoktur.
+  Adreste kullanıcı bilgisi olamaz, `127.0.0.0/8` ve `::1` adresleri kabul edilmez; en çok 10
+  webhook tanımlanabilir. `[network] https_proxy` ayarlıysa istekler vekil sunucudan geçer.
+- **Gizli bilgi:** `generic` biçimindeki her istek HMAC-SHA256 ile imzalanır
+  (`X-Arcilogger-Timestamp`, `X-Arcilogger-Signature: sha256=…`). İmza anahtarı (32–256
+  karakter) gizli depodadır, dosyada değil:
+
+  ```powershell
+  & "C:\Program Files\ARCILOGGER\venv\Scripts\arcilogger-core.exe" secret set webhook.siem.secret
+  ```
+
+  `teams` ve `slack` için **adresin kendisi gizli bilgidir**: dosyada `url` boş kalır, adres
+  `secret set webhook.<ad>.url` ile gizli depoya yazılır. Gizli bilgiler hiçbir ekranda, logda ya
+  da yanıtta gösterilmez; eksikse webhook gönderime hazır sayılmaz.
+- **Ne gönderilir:** uyarının numarası, kuralı, önem derecesi, durumu, Türkçe ve İngilizce
+  başlığı, zamanı, sayısı ve web arayüzündeki bağlantısı. **Kişi adı ve ham log satırı
+  gönderilmez.** Teams ve Slack biçimleri **sahada doğrulanmalıdır**: kendi kanalınızda bir
+  deneme bildiriminin göründüğünü görün.
+- **Teslim:** işçi her dakika yeni uyarıları kuyruğa alır (webhook'un tanımlandığı andan sonra
+  açılanları; geçmiş uyarılar gönderilmez). Geçici bir hata 1, 5, 15 ve 60 dakika sonra, sonra
+  saatte bir, ilk denemeden 24 saat sonrasına kadar yeniden denenir. Kalıcı bir hata (408 ve 429
+  dışındaki 4xx) ya da 24 saat dolması `R20-webhook` uyarısını açar ("Webhook teslim
+  edilemiyor"); o webhook'un sonraki başarılı teslimi uyarıyı kapatır.
+- **Güvenlik duvarı:** sıkı giden modda (`-StrictOutbound`, bölüm 12) her etkin webhook için
+  `ARCILOGGER Out Webhook <ad>` kuralı adresin sunucusuna ve portuna açılır (bölüm 12'deki SMTP
+  kuralı gibi). Teams ve Slack adresi gizli depodan okunur ve yalnızca sunucusu ile portu
+  kullanılır; okunamazsa kural açılmaz ve bir uyarı webhook'un adını (adresi değil) yazar.
+- Dosyadaki değişiklik işçi tarafından kendiliğinden yüklenir; güvenlik duvarı kuralları
+  `ApplySystem` ile en geç 5 dakika içinde güncellenir.
+
 ## 8. Kök sertifikayı yönetici PC'sine kurma
 
 Caddy, ARCILOGGER'ın HTTPS sertifikalarını kendi iç sertifika otoritesiyle (CA) üretir. Tarayıcının
