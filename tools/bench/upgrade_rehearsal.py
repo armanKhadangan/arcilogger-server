@@ -40,9 +40,13 @@ Usage::
         --url postgresql://USER:PASSWORD@127.0.0.1:5432/postgres [--timescale require] \\
         [--rows 50000000] [--days 14] [--out result.json]
 
-The role needs ``CREATEDB`` (and on TimescaleDB the right to create the extension). Plain
-PostgreSQL: ``--timescale off`` (the default); TimescaleDB: ``--timescale require`` on a server
-with ``shared_preload_libraries = 'timescaledb'``. Numbers depend on the machine; the pull
+``--database`` (default ``arci_rehearsal_297``) is created, and dropped at the end; a database of
+that name is dropped first. So the script refuses, before it connects, any name that does not
+start with ``arci_rehearsal`` (lower-case letters, digits and underscores only) and the database
+of ``--url`` itself: a typed ``arcilogger`` never reaches the server. The role needs
+``CREATEDB`` (and on TimescaleDB the right to create the extension). Plain PostgreSQL:
+``--timescale off`` (the default); TimescaleDB: ``--timescale require`` on a server with
+``shared_preload_libraries = 'timescaledb'``. Numbers depend on the machine; the pull
 request of #297 records the runs it quotes.
 """
 
@@ -55,6 +59,7 @@ import logging
 import math
 import os
 import platform
+import re
 import sys
 import time
 from collections.abc import Callable
@@ -90,6 +95,9 @@ OFFSET_STEP: Final = 200
 #: Device times of a day stay this far before its end, so that every receive time is that day's.
 DAY_MARGIN: Final = timedelta(seconds=10)
 PER_ROWS: Final = 10_000_000
+#: The only databases this script creates and drops (:func:`check_database`).
+DATABASE_PREFIX: Final = "arci_rehearsal"
+DATABASE_PATTERN: Final = re.compile(rf"{DATABASE_PREFIX}[a-z0-9_]*")
 #: How long :func:`drop_database` tries.
 DROP_WAIT: Final = timedelta(minutes=10)
 MIGRATION_LOGGER: Final = "alembic.runtime.migration"
@@ -129,15 +137,44 @@ def template(users: int) -> dict[str, list[dict[str, Any]]]:
 # -- the database at 0023 ------------------------------------------------------------------------
 
 
+def check_database(name: str, server: str) -> str:
+    """``name`` if this script may create and drop it, before anything connects: it must match
+    :data:`DATABASE_PATTERN` (so it is never an installation's database, such as
+    ``arcilogger``, and needs no quoting) and must not be the database of ``server`` itself.
+    Anything else raises ``ValueError``."""
+    if DATABASE_PATTERN.fullmatch(name) is None:
+        raise ValueError(
+            f"--database {name!r} reddedildi: bu betik yalnızca adı {DATABASE_PREFIX} ile "
+            "başlayan ve yalnızca küçük harf, rakam ve alt çizgi içeren bir veritabanını "
+            "oluşturur ve siler [refused: this script creates and drops only a database whose "
+            f"name starts with {DATABASE_PREFIX} and holds only lower-case letters, digits and "
+            "underscores]"
+        )
+    if make_url(server).database == name:
+        raise ValueError(
+            f"--database {name!r} reddedildi: --url bu veritabanına bağlanıyor; sunucudaki başka "
+            "bir veritabanını verin, örneğin postgres [refused: --url connects to this database; "
+            "give another database of the server, such as postgres]"
+        )
+    return name
+
+
+def _quoted(connection: Connection, name: str) -> str:
+    return connection.dialect.identifier_preparer.quote_identifier(name)
+
+
 def create_database(server: str, name: str) -> str:
-    """A new, empty database ``name`` on the server of ``server``; its URL."""
+    """A new, empty database ``name`` (:func:`check_database`) on the server of ``server``; its
+    URL. A database of that name left by an earlier run is dropped first."""
+    check_database(name, server)
     admin = engine_from_url(server, application="rehearsal", isolation_level="AUTOCOMMIT")
     try:
         with admin.connect() as connection:
-            connection.execute(text(f'DROP DATABASE IF EXISTS "{name}" WITH (FORCE)'))
+            quoted = _quoted(connection, name)
+            connection.execute(text(f"DROP DATABASE IF EXISTS {quoted} WITH (FORCE)"))
             # As the installer creates it (Install-Arcilogger.ps1).
             connection.execute(
-                text(f"CREATE DATABASE \"{name}\" TEMPLATE template0 ENCODING 'UTF8' LOCALE 'C'")
+                text(f"CREATE DATABASE {quoted} TEMPLATE template0 ENCODING 'UTF8' LOCALE 'C'")
             )
     finally:
         admin.dispose()
@@ -145,15 +182,17 @@ def create_database(server: str, name: str) -> str:
 
 
 def drop_database(server: str, name: str) -> None:
-    """Drops ``name``; while an autovacuum worker (which a role without superuser may not end)
-    is still in it, tries again for up to :data:`DROP_WAIT`."""
+    """Drops ``name`` (:func:`check_database`); while an autovacuum worker (which a role without
+    superuser may not end) is still in it, tries again for up to :data:`DROP_WAIT`."""
+    check_database(name, server)
     admin = engine_from_url(server, application="rehearsal", isolation_level="AUTOCOMMIT")
     until = time.monotonic() + DROP_WAIT.total_seconds()
     try:
         while True:
             try:
                 with admin.connect() as connection:
-                    connection.execute(text(f'DROP DATABASE IF EXISTS "{name}" WITH (FORCE)'))
+                    quoted = _quoted(connection, name)
+                    connection.execute(text(f"DROP DATABASE IF EXISTS {quoted} WITH (FORCE)"))
                 return
             except DBAPIError:
                 if time.monotonic() > until:
@@ -501,7 +540,11 @@ def log(message: str) -> None:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n", 1)[0])
     parser.add_argument("--url", required=True, help="a database on the server (role: CREATEDB)")
-    parser.add_argument("--database", default="arci_rehearsal_297", help="created and dropped")
+    parser.add_argument(
+        "--database",
+        default="arci_rehearsal_297",
+        help=f"created and dropped; must start with {DATABASE_PREFIX} ([a-z0-9_] only)",
+    )
     parser.add_argument("--timescale", choices=("off", "require"), default="off")
     parser.add_argument("--rows", type=int, default=50_000_000, help="rows in the four tables")
     parser.add_argument("--days", type=int, default=14, help="site days before today")
@@ -512,6 +555,10 @@ def main(argv: list[str] | None = None) -> int:
         "--drop-caches", action="store_true", help="cold page cache before each step (root)"
     )
     args = parser.parse_args(argv)
+    try:
+        check_database(args.database, args.url)
+    except ValueError as exc:
+        parser.error(str(exc))
     mode: str = args.timescale
 
     log("template day: generating and parsing")
