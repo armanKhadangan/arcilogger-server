@@ -31,7 +31,7 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import date, datetime, time, timedelta
 from ipaddress import ip_network
-from typing import Any, Final, Literal
+from typing import Any, Final, Literal, NamedTuple
 
 from sqlalchemy import (
     SQLColumnExpression,
@@ -675,6 +675,12 @@ class _MemoryStore:
                 found[received] += cell[0]
         return sorted(found.items())
 
+    def device_minutes(
+        self, session: Session, period: _Period, ip: str, received_from: datetime, before: datetime
+    ) -> list[datetime]:
+        cells = self.periods[(period.rule, period.since)].buckets.get(ip, {})
+        return sorted({minute for minute, received in cells if received_from <= received < before})
+
     def evidence(self, session: Session, period: _Period, ip: str) -> list[EvidenceRef] | None:
         return self.periods[(period.rule, period.since)].evidence.get(ip)
 
@@ -848,6 +854,23 @@ class _TableStore:
             .order_by(RuleTrafficTotal.received)
         )
         return [(received, int(rows)) for received, rows in session.execute(query)]
+
+    def device_minutes(
+        self, session: Session, period: _Period, ip: str, received_from: datetime, before: datetime
+    ) -> list[datetime]:
+        query = (
+            select(RuleTrafficTotal.minute)
+            .where(
+                RuleTrafficTotal.rule == period.rule,
+                RuleTrafficTotal.period_start == period.since,
+                RuleTrafficTotal.srcip == cast(literal(ip), INET),
+                RuleTrafficTotal.received >= received_from,
+                RuleTrafficTotal.received < before,
+            )
+            .distinct()
+            .order_by(RuleTrafficTotal.minute)
+        )
+        return list(session.scalars(query))
 
     def evidence(self, session: Session, period: _Period, ip: str) -> list[EvidenceRef] | None:
         kept = session.get(RuleTrafficEvidence, (period.rule, period.since, ip))
@@ -1058,14 +1081,35 @@ WHERE n.counts AND n.time_received <= :start
 """
 
 
-#: The counted logs received in ``(:lo, :hi]`` (of the addresses ``:ips``, or all), each with
-#: its bytes as the period counts them (the window's partial first minute; a window's evidence).
-_COUNTED: Final = """
-WITH touched AS (
+#: The sessions of the logs received in ``(:lo, :hi]`` (of the addresses ``:ips``, or all),
+#: through the receive-time index (the window's partial first minute).
+_TOUCHED_RECEIVED: Final = """
+touched AS (
     SELECT DISTINCT t.srcip, t.sessionid, t.dstip, t.dstport FROM fg_traffic t
     WHERE {match_t} AND t.time_received > :lo AND t.time_received <= :hi
       AND (CAST(:ips AS text[]) IS NULL OR host(t.srcip) = ANY(CAST(:ips AS text[])))
-),
+)"""
+#: The sessions of each address's logs received in ``(:lo, reach]`` whose device time lies in
+#: ``[low, high)``, through the address index (``ix_fg_traffic_srcip_time``): only these
+#: addresses' rows of those device minutes are read (a window's evidence).
+_TOUCHED_BY_ADDRESS: Final = """
+touched AS (
+    SELECT DISTINCT t.srcip, t.sessionid, t.dstip, t.dstport
+    FROM unnest(
+        CAST(:ips AS inet[]), CAST(:lows AS timestamptz[]), CAST(:highs AS timestamptz[]),
+        CAST(:reach AS timestamptz[])
+    ) AS a(ip, low, high, reach)
+    CROSS JOIN LATERAL (
+        SELECT t.srcip, t.sessionid, t.dstip, t.dstport FROM fg_traffic t
+        WHERE t.srcip = a.ip AND {match_t} AND t.time >= a.low AND t.time < a.high
+          AND t.time_received > :lo AND t.time_received <= a.reach
+    ) t
+)"""
+#: The counted logs received in ``(:lo, :hi]`` of the ``touched`` sessions (so of their
+#: addresses only), each with its bytes as the period counts them (the window's partial first
+#: minute; a window's evidence).
+_COUNTED: Final = """
+WITH {touched},
 {logs},
 counted AS (
     SELECT id, srcip, time, time_received, {amount} AS amount FROM logs
@@ -1076,7 +1120,6 @@ SELECT c.id, host(c.srcip) AS srcip, c.time, c.time_received, c.amount, f.source
 FROM counted c JOIN fg_traffic f ON f.id = c.id AND f.time = c.time
 WHERE c.time_received > :lo AND c.time_received <= :hi AND c.time_received > :since
   AND c.time_received >= :count_from AND c.amount > 0
-  AND (CAST(:ips AS text[]) IS NULL OR host(c.srcip) = ANY(CAST(:ips AS text[])))
 ORDER BY c.time_received, c.id
 """
 
@@ -1105,16 +1148,32 @@ def _counted(
     lo: datetime,
     hi: datetime,
     ips: Sequence[str] | None,
+    ranges: Sequence[_Range] | None = None,
 ) -> list[Any]:
-    """The counted logs of the period received in ``(lo, hi]`` (:data:`_COUNTED`)."""
-    if not period.networks or hi <= lo:
+    """The counted logs of the period received in ``(lo, hi]`` (:data:`_COUNTED`): of the
+    addresses ``ips`` (or all), or with ``ranges`` of each range's address, device time and
+    reach, read through the address index."""
+    if not period.networks or hi <= lo or ranges == []:
         return []
     lookback, low, high = _period_bounds(ctx, period)
+    touched = _TOUCHED_RECEIVED if ranges is None else _TOUCHED_BY_ADDRESS
+    match_t = _MATCH.format(t="t")
     query = text(
         _COUNTED.format(
-            logs=_logs(), match_t=_MATCH.format(t="t"), amount=_amount(period.sent_only)
+            touched=touched.format(match_t=match_t),
+            logs=_logs(),
+            amount=_amount(period.sent_only),
         )
     )
+    addresses = None if ips is None else sorted(ips)
+    by_address: dict[str, list[Any]] = {}
+    if ranges is not None:
+        addresses = [entry.ip for entry in ranges]
+        by_address = {
+            "lows": [entry.low for entry in ranges],
+            "highs": [entry.high for entry in ranges],
+            "reach": [min(entry.reach, hi) for entry in ranges],
+        }
     return list(
         session.execute(
             query,
@@ -1129,7 +1188,8 @@ def _counted(
                 "lookback": lookback,
                 "since": period.since,
                 "count_from": period.count_from or period.since,
-                "ips": None if ips is None else sorted(ips),
+                "ips": addresses,
+                **by_address,
             },
         )
     )
@@ -1249,6 +1309,27 @@ def _window_buckets(
     ]
 
 
+class _Range(NamedTuple):
+    """An address's device-time range ``[low, high)`` of logs received up to ``reach``."""
+
+    ip: str
+    low: datetime
+    high: datetime
+    reach: datetime
+
+
+def _runs(minutes: Sequence[datetime]) -> list[tuple[datetime, datetime]]:
+    """Sorted device minutes as ranges of consecutive minutes, each ``[first, last + 1 min)``."""
+    runs: list[tuple[datetime, datetime]] = []
+    step = timedelta(seconds=_MINUTE)
+    for minute in minutes:
+        if runs and runs[-1][1] == minute:
+            runs[-1] = (runs[-1][0], minute + step)
+        else:
+            runs.append((minute, minute + step))
+    return runs
+
+
 def _window_evidence(
     session: Session,
     ctx: RuleContext,
@@ -1267,13 +1348,13 @@ def _window_evidence(
         store = _store(session)
         counted_ctx = ctx if until is None else replace(ctx, end=min(ctx.end, until))
         end = counted_ctx.end
-        # The kept minutes say where each address's oldest logs end; one read up to the
-        # furthest of them (counting whole minutes only; the partial first minute comes on top).
+        # The kept minutes say where each address's oldest logs end (counting whole minutes
+        # only; the partial first minute comes on top); one read, each address up to its own.
         wanted = [ip for ip in ips if per_address[ip] < EVIDENCE_LIMIT]
         if not wanted:
             continue
         whole = first + timedelta(seconds=_MINUTE)
-        hi = start
+        ranges: list[_Range] = []
         for ip in wanted:
             reach, seen = end, 0
             for received, rows in store.per_minute(session, period, ip, whole):
@@ -1281,8 +1362,15 @@ def _window_evidence(
                 if seen >= EVIDENCE_LIMIT - per_address[ip]:
                     reach = min(end, received + timedelta(seconds=_MINUTE))
                     break
-            hi = max(hi, reach)
-        for row in _counted(session, counted_ctx, period, start, hi, wanted):
+            # Every counted log of the address received up to its reach lies in a kept bucket
+            # (the partial first minute's included), so these device minutes hold them all, a
+            # late log's minute too.
+            minutes = store.device_minutes(session, period, ip, first, reach)
+            ranges.extend(_Range(ip, low, high, reach) for low, high in _runs(minutes))
+        hi = max((entry.reach for entry in ranges), default=start)
+        # A log past its address's reach that a touched session brings along sorts after the
+        # ones the address needs.
+        for row in _counted(session, counted_ctx, period, start, hi, wanted, ranges):
             if per_address[row.srcip] < EVIDENCE_LIMIT:
                 per_address[row.srcip] += 1
                 refs.append(
