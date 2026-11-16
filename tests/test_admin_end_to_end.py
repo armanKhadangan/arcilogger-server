@@ -34,7 +34,7 @@ import time as clock
 from collections.abc import Callable, Coroutine, Iterator
 from datetime import date, datetime, time, timedelta
 from pathlib import Path
-from typing import Any, TypeVar
+from typing import Any, Final, TypeVar
 
 import pytest
 from fastapi.testclient import TestClient
@@ -46,6 +46,7 @@ from arcilogger_api.testing import login, make_user
 from arcilogger_collector.service import Collector
 from arcilogger_core import cli
 from arcilogger_core.admin.contract import SystemStatus, parse_document
+from arcilogger_core.admin.systemplan import COLLECTOR_FRESH
 from arcilogger_core.admin.testing import DEFAULT_TOML, FakeAgent, Installed, make_installation
 from arcilogger_core.config import load_config
 from arcilogger_core.immutability import is_locked, unlock
@@ -60,14 +61,21 @@ V = "/api/v1"
 CONFIG = f"{V}/admin/config"
 FORTIGATE = b'<189>date=2026-10-24 time=09:44:57 devname="FIREWALL-01" logid="0000000013" x=1'
 SWITCH = b"<30>2026-10-25T09:38:26.380+03:00 SWITCH-2 system,info link up"
+#: The longest :meth:`RunningCollector.busy` holds the collector's loop, in seconds.
+HOLD_SECONDS: Final = 10
+#: How often the collector writes its status: half of ``COLLECTOR_FRESH``, the age past which
+#: ApplySystem takes the collector for stopped and opens every sender. A status written just
+#: before a hold then stays fresh through it (#230: at 60 s, equal to the bound, a hold that
+#: fell on the periodic write let ApplySystem open a new source before the collector ran it).
+STATUS_INTERVAL: Final = int(COLLECTOR_FRESH.total_seconds()) // 2
 #: The installation of the test: its firewall sends from 127.0.0.1 (a hand-written source the
-#: browser could not add), the collector listens on 127.0.0.1 and writes its status once a
-#: minute unless its configuration changes.
+#: browser could not add), the collector listens on 127.0.0.1 and writes its status every
+#: ``STATUS_INTERVAL`` seconds unless its configuration changes.
 TOML = DEFAULT_TOML.replace(
     '[collector]\nbind = "0.0.0.0"\n',
     "[api]\nsecure_cookies = false\n\n[seal]\nquiet_seconds = 0\n\n"
     '[collector]\nbind = "127.0.0.1"\nudp_port = 0\ntcp_port = 0\n'
-    "fsync_interval_seconds = 0.02\nstatus_interval_seconds = 60\n\n"
+    f"fsync_interval_seconds = 0.02\nstatus_interval_seconds = {STATUS_INTERVAL}\n\n"
     '[[sources]]\nname = "fortigate"\ntype = "fortigate"\naddress = "127.0.0.1"\n',
 )
 
@@ -104,7 +112,7 @@ class RunningCollector:
     def busy(self) -> threading.Event:
         """Keep the collector busy (its loop blocked) until the returned event is set."""
         done = threading.Event()
-        self.loop.call_soon_threadsafe(done.wait, 10)
+        self.loop.call_soon_threadsafe(done.wait, HOLD_SECONDS)
         return done
 
     def stop(self) -> None:
@@ -122,6 +130,11 @@ def wait_for(predicate: Callable[[], bool], timeout: float = 5.0) -> float:
             raise AssertionError("condition not met in time")
         clock.sleep(0.02)
     return clock.monotonic() - started
+
+
+def status_age(path: Path) -> float:
+    """Seconds since the status file at ``path`` was written."""
+    return clock.time() - path.stat().st_mtime
 
 
 def file_sha(path: Path) -> str:
@@ -262,6 +275,9 @@ def test_admin_end_to_end(tmp_path: Path, db_engine: Engine) -> None:
             assert (steps["reload.api"], steps["reload.worker"]) == ("done", "done")
 
             # 2. A new log source; ApplySystem opens it only once the collector runs the file.
+            # The collector's status must stay fresh while its loop is held (#230).
+            fresh = COLLECTOR_FRESH.total_seconds()
+            assert fresh > STATUS_INTERVAL + HOLD_SECONDS, (STATUS_INTERVAL, HOLD_SECONDS, fresh)
             free = collector.busy()
             source = {
                 "name": "switch-2",
@@ -276,6 +292,8 @@ def test_admin_end_to_end(tmp_path: Path, db_engine: Engine) -> None:
                 f"{CONFIG}/sources", json={"etag": etag("sources"), "source": source}
             )
             assert added.status_code == 202, added.text
+            age = status_age(installed.data.collector_status)
+            assert age < fresh, f"collector status {age:.1f} s old, ApplySystem would open all"
             agent.process()
             assert "172.20.10.22" not in syslog_addresses(installed)
             waiting = client.get(added.json()["status_url"]).json()
