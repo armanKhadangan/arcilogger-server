@@ -39,6 +39,7 @@ import {
 import { useCallback, useRef, useState } from 'react';
 
 import type { ActivityDevices, ActivityWindow, WanRange, WanRates } from './activity-types';
+import type { AlertAssignRequest, AlertEvidencePage } from './alert-rule-types';
 import { AGENT_STATUS_POLL_MS, requestPollInterval } from './admin-requests';
 import { api, type QueryValue } from './api';
 import type {
@@ -208,6 +209,7 @@ export const queryKeys = {
   activityWan: (range: WanRange) => ['activity', 'wan', range] as const,
   alerts: (filters: AlertFilters) => ['alerts', 'list', filters] as const,
   alert: (id: number) => ['alerts', 'one', id] as const,
+  alertEvidence: (id: number) => ['alerts', 'evidence', id] as const,
   alertSummary: ['alerts', 'summary'] as const,
   alertsAll: ['alerts'] as const,
   rules: ['rules'] as const,
@@ -365,7 +367,8 @@ export interface UserFilters {
   active?: boolean | undefined;
 }
 
-export function useUsers(filters: UserFilters) {
+/** `GET /users` (`users.manage`); `enabled: false` for a page that only may list them. */
+export function useUsers(filters: UserFilters, enabled = true) {
   return useInfiniteQuery({
     queryKey: queryKeys.users(filters),
     queryFn: ({ signal, pageParam }) =>
@@ -381,6 +384,7 @@ export function useUsers(filters: UserFilters) {
     initialPageParam: null as string | null,
     getNextPageParam: (page) => page.next_cursor,
     placeholderData: keepPreviousData,
+    enabled,
   });
 }
 
@@ -1006,6 +1010,36 @@ export function useAddAlertNote() {
     mutationFn: ({ id, ...body }: AlertNoteRequest & { id: number }) =>
       api.post<AlertEvent>(`/alerts/${id}/notes`, body),
     onSuccess: refresh,
+  });
+}
+
+/**
+ * `GET /alerts/{id}/evidence` (`alerts.read`, Wave 6 §2.6.2): the rows behind a rule's alert with
+ * the raw line each came from, opened through `GET /raw` (audited `raw.view`); no line content.
+ */
+export function useAlertEvidence(id: number | null) {
+  return useQuery({
+    queryKey: queryKeys.alertEvidence(id ?? 0),
+    queryFn: ({ signal }) =>
+      api.get<AlertEvidencePage>(`/alerts/${String(id)}/evidence`, { signal }),
+    enabled: id !== null,
+  });
+}
+
+/**
+ * `POST /alerts/{id}/assign` (`alerts.manage`, Wave 6 §2.6.2): a user with `alerts.read`, or
+ * nobody; 422 `alert_assignee_invalid`. The answer is the alert as it is now.
+ */
+export function useAssignAlert() {
+  const client = useQueryClient();
+  const refresh = useAlertRefresh();
+  return useMutation({
+    mutationFn: ({ id, ...body }: AlertAssignRequest & { id: number }) =>
+      api.post<AlertDetail>(`/alerts/${id}/assign`, body),
+    onSuccess: async (detail) => {
+      client.setQueryData(queryKeys.alert(detail.id), detail);
+      await refresh();
+    },
   });
 }
 
