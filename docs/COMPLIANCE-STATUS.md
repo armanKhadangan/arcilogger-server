@@ -755,6 +755,12 @@ first report), and the clock samples of the last 24 hours, newest first: time, s
 ("Within the limit", "At or over the limit" or "No answer"), offset and delay (ms), stratum. Card 6
 judges the newest of these samples.
 
+Below them, the log sources' clocks (#222): the enabled sources whose device clock is beyond
+`alerts.source_clock_limit_seconds` (120 seconds; verify on site), furthest off first, at most 10,
+with the offset ("7 min behind") and the records it rests on; with none, "Every log source's clock
+is within the limit". Each has its `R20-source-clock` alert open. The server's own clock is the
+samples above; a source's clock is measured on its newest records received in the last hour.
+
 ### 4.9 Version and upgrade
 
 Product name, API version, core version, release date and the licence's maintenance period (as in

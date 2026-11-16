@@ -105,6 +105,8 @@ export function sampleSources(): SourceHealth[] {
       pending_bytes: 4_096,
       parse_failures_today: 1,
       parse_failure_permille: 0.1,
+      clock_offset_seconds: 0,
+      clock_rows: 200,
     }),
     source('fortigate', {
       type: 'fortigate',
@@ -115,6 +117,8 @@ export function sampleSources(): SourceHealth[] {
       lines_today: 1_200,
       parse_failures_today: 30,
       parse_failure_permille: 25,
+      clock_offset_seconds: -420,
+      clock_rows: 30,
     }),
     source('ap', {
       type: 'generic',

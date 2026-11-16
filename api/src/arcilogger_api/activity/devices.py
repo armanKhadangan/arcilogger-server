@@ -20,6 +20,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Final
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from arcilogger_api.activity.models import (
@@ -30,8 +31,12 @@ from arcilogger_api.activity.models import (
     ActivityRow,
     ActivityTotals,
     ActivityWindow,
+    LateSource,
 )
 from arcilogger_api.usage_models import SubjectRef
+from arcilogger_db import clocksamples
+from arcilogger_db.models import Source
+from arcilogger_worker.activity import LATE_ROWS
 from arcilogger_worker.usage.query import Directory, Viewer, subject_ref
 
 #: Minutes of the company's chart (``per_minute``).
@@ -163,8 +168,25 @@ def devices_now(
         per_minute=per_minute,
         data_until=data_until,
         warming_up=bool(snapshot.get("warming_up", True)) or _stale(snapshot, now),
+        late_sources=late_sources(db, now),
         generated_at=now,
     )
+
+
+def late_sources(db: Session, now: datetime) -> list[LateSource]:
+    """The enabled FortiGate sources more than :data:`LATE_ROWS` behind (#222): the worker's
+    snapshot reads rows whose device time is at most that old, so their traffic does not show."""
+    limit = LATE_ROWS.total_seconds()
+    found = []
+    for name in db.scalars(
+        select(Source.name)
+        .where(Source.type == "fortigate", Source.enabled.is_(True), Source.unknown.is_(False))
+        .order_by(Source.name)
+    ):
+        offset, _ = clocksamples.typical(db, name, now)
+        if offset is not None and -offset > limit:
+            found.append(LateSource(source=name, behind_seconds=-offset))
+    return found
 
 
 def _stale(snapshot: Mapping[str, Any], now: datetime) -> bool:

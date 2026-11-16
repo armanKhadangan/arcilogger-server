@@ -8,6 +8,7 @@
 import type {
   ActivityDevices,
   ActivityWindow,
+  LateSource,
   WanRange,
   WanRates,
 } from '../src/lib/activity-types';
@@ -29,6 +30,8 @@ export interface ActivityOptions {
   warmingUp?: boolean;
   /** `usage.pseudonymize_anonymous_role` (from the usage options): pseudonyms for viewers. */
   pseudonymize?: boolean;
+  /** FortiGates whose clock is more than 5 minutes behind: `late_sources` (#222). */
+  lateSources?: LateSource[];
 }
 
 const WINDOWS: readonly ActivityWindow[] = [1, 5, 15];
@@ -95,6 +98,7 @@ export class ActivityMock {
         ? pseudonymous(window as ActivityWindow)
         : captured(window as ActivityWindow);
       if (this.options.warmingUp) answer.warming_up = true;
+      if (this.options.lateSources) answer.late_sources = this.options.lateSources;
       return [200, answer];
     }
     return denied ?? host.error(403, 'forbidden');

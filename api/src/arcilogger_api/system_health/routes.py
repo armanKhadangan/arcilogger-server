@@ -13,6 +13,8 @@ tasks          the evidence each scheduled task leaves (:mod:`.tasks`)
 jobs           ``default_jobs``, ``state/worker-status.json``, ``job_runs`` (:mod:`.jobs`)
 time           ``[clock]``, the peers ApplySystem applied, the samples of the last 24 hours
                (``state/clock/<day>.jsonl`` of today and yesterday), newest first
+source_clocks  the enabled sources whose device clock is beyond
+               ``alerts.source_clock_limit_seconds`` (``source_clock_samples``, #222)
 =============  ==========================================================================
 
 ``system.read`` (administrators); not licence-gated (5651 Temel), not audited (no data about
@@ -27,10 +29,13 @@ from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any, Final
 
 from fastapi import APIRouter, Depends
+from sqlalchemy import select
+from sqlalchemy.orm import Session
 
 from arcilogger_api.admin_channel import SERVICES, Channel, ChannelDep
 from arcilogger_api.deps import ConfigDep, DbSession, LayoutDep
 from arcilogger_api.security import CurrentUser, require
+from arcilogger_api.sourcehealth import clock_offsets
 from arcilogger_api.system_health.jobs import job_health
 from arcilogger_api.system_health.models import (
     AgentHealth,
@@ -38,6 +43,7 @@ from arcilogger_api.system_health.models import (
     ClockSampleOut,
     ServiceHealth,
     ServiceName,
+    SourceClockOut,
     SystemHealth,
     TimeHealth,
 )
@@ -46,6 +52,8 @@ from arcilogger_core.admin.contract import SERVICE_FRESH
 from arcilogger_core.config import Config
 from arcilogger_core.layout import Layout
 from arcilogger_core.timeutil import to_site, utc_now
+from arcilogger_db.models import Source
+from arcilogger_db.settings import DEFAULT_SETTINGS, get_setting
 
 router = APIRouter(prefix="/system/health", tags=["system"])
 
@@ -55,6 +63,15 @@ SystemReadDep = Annotated[CurrentUser, Depends(require("system.read"))]
 STATUS_FILE_SERVICES: Final[tuple[ServiceName, ...]] = ("ArciCollector", "ArciIngest", "ArciWorker")
 #: Clock samples shown: the hourly probe of the last 24 hours.
 SAMPLE_WINDOW: Final = timedelta(hours=24)
+#: Most sources listed in ``source_clocks``.
+SOURCE_CLOCKS_LISTED: Final = 10
+
+
+def _limit(db: Session) -> int:
+    """``alerts.source_clock_limit_seconds``, its default when unset or not an integer."""
+    value = get_setting(db, "alerts.source_clock_limit_seconds")
+    default = DEFAULT_SETTINGS["alerts.source_clock_limit_seconds"]
+    return value if type(value) is int else int(default)
 
 
 def _site(value: datetime | None) -> datetime | None:
@@ -144,6 +161,7 @@ def system_health(
     """The health of the services, the agent, ApplySystem, the scheduled tasks, the worker
     jobs and the clock (see the module text)."""
     now = utc_now()
+    limit = _limit(db)
     samples = clock_entries(layout, now)
     agent = channel.agent
     evidence = Evidence(
@@ -165,4 +183,21 @@ def system_health(
         tasks=task_health(evidence),
         jobs=job_health(db, layout, config.worker.interval_seconds, now),
         time=time_health(config, channel, samples, now),
+        source_clocks=source_clocks(db, limit, now),
+        source_clock_limit_seconds=limit,
     )
+
+
+def source_clocks(db: Session, limit: int, now: datetime) -> list[SourceClockOut]:
+    """The enabled configured sources whose typical clock offset is beyond ``limit`` seconds,
+    furthest off first, at most :data:`SOURCE_CLOCKS_LISTED`."""
+    names = db.scalars(
+        select(Source.name).where(Source.enabled.is_(True), Source.unknown.is_(False))
+    ).all()
+    found = [
+        SourceClockOut(source=name, offset_seconds=offset, rows=rows)
+        for name, (offset, rows) in clock_offsets(db, names, now).items()
+        if abs(offset) > limit
+    ]
+    found.sort(key=lambda item: (-abs(item.offset_seconds), item.source))
+    return found[:SOURCE_CLOCKS_LISTED]

@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { errorMessage, type ApiError } from '@/lib/api';
+import { clockOffsetText } from '@/lib/clock-offset';
 import type { LicenseOut } from '@/lib/api-types';
 import { formatDistance } from '@/lib/display';
 import {
@@ -739,7 +740,43 @@ function ClockBlock({
           testId="system-clock-samples"
         />
       )}
+      <SourceClocks health={health} />
     </Block>
+  );
+}
+
+/** The log sources whose device clock is beyond the limit (#222), beside the server's clock. */
+function SourceClocks({ health }: { health: SystemHealth }) {
+  const { t } = useTranslation();
+  const lang = currentLang();
+  const limit = health.source_clock_limit_seconds;
+  if (health.source_clocks.length === 0) {
+    return (
+      <p className="text-13 text-muted" data-testid="system-source-clocks-ok">
+        {t('system.clock.sourceClocksOk', { limit: formatNumber(limit, 0, lang) })}
+      </p>
+    );
+  }
+  return (
+    <Table
+      caption={t('system.clock.sourceClocks', { limit: formatNumber(limit, 0, lang) })}
+      columns={[
+        { label: t('system.clock.source') },
+        { label: t('system.clock.sourceOffset') },
+        { label: t('system.clock.sourceRows'), numeric: true },
+      ]}
+      rows={health.source_clocks.map((clock) => ({
+        key: clock.source,
+        cells: [
+          <span key="source" className="font-mono text-xs">
+            {clock.source}
+          </span>,
+          clockOffsetText(clock.offset_seconds, t),
+          formatNumber(clock.rows, 0, lang),
+        ],
+      }))}
+      testId="system-source-clocks"
+    />
   );
 }
 

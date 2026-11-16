@@ -19,6 +19,7 @@ import { useActivityDevices, useActivityWan, useLicense } from '@/lib/api-hooks'
 import { useAuth } from '@/lib/auth';
 import { visibleText } from '@/lib/display';
 import { formatBytes, formatNumber, formatTime } from '@/lib/format';
+import { clockOffsetText } from '@/lib/clock-offset';
 import { currentLang } from '@/lib/i18n';
 import { moduleEnabled } from '@/lib/license';
 import { cn } from '@/lib/utils';
@@ -271,6 +272,19 @@ function NowContent({ window }: { window: ActivityWindow }) {
                 data-testid="activity-warming"
               >
                 {t('activity.now.warmingUpHint')}
+              </Alert>
+            ) : null}
+            {data.late_sources.length > 0 ? (
+              <Alert
+                tone="warning"
+                title={t('activity.now.lateSources')}
+                data-testid="activity-late-sources"
+              >
+                {t('activity.now.lateSourcesHint', {
+                  sources: data.late_sources
+                    .map((late) => `${late.source} (${clockOffsetText(-late.behind_seconds, t)})`)
+                    .join(', '),
+                })}
               </Alert>
             ) : null}
             <div

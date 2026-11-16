@@ -64,8 +64,11 @@ bölümü yalnızca onu görmeye yetkili roller görür (bölüm 4).
   dakikadan eskiyse (worker durmuşsa) sayfa rakamların eksik olduğunu söyler (`warming_up`).
 - Veritabanına zamanından 5 dakikadan geç ulaşan bir trafik kaydı tabloya eklenmez; kullanım
   raporları onu sayar. Saati 5 dakikadan fazla geri olan bir cihaz bu yüzden "Şu an" tablosunda
-  görünmez; kullanım raporları onu sayar. Cihaz saatlerini NTP ile eşitleyin
-  ([DEVICE-SETUP.md](DEVICE-SETUP.md), "Saat (NTP)").
+  görünmez; kullanım raporları onu sayar. Sayfa böyle bir güvenlik duvarını adıyla ve kaç dakika
+  geride olduğuyla bildirir (`late_sources`: son bir saatte alınan en yeni kayıtlarının ortancası,
+  #222); Kaynaklar sayfası her kaynağın saat farkını gösterir ve saat
+  `alerts.source_clock_limit_seconds` (120 saniye) sınırını aşınca `R20-source-clock` uyarısı
+  açılır. Cihaz saatlerini NTP ile eşitleyin ([DEVICE-SETUP.md](DEVICE-SETUP.md), "Saat (NTP)").
 
 ## 3. İnternet hattı (SNMPv3)
 

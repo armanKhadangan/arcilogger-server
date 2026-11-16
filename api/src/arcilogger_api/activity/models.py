@@ -84,6 +84,14 @@ class ActivityMinute(BaseModel):
     upload_bytes: int
 
 
+class LateSource(BaseModel):
+    """A FortiGate whose clock is further behind than the snapshot reads back (#222)."""
+
+    source: str
+    #: How far its device clock is behind the receive time (seconds, positive).
+    behind_seconds: int
+
+
 class ActivityDevices(BaseModel):
     """``GET /activity/devices`` (M2)."""
 
@@ -101,6 +109,10 @@ class ActivityDevices(BaseModel):
     #: The worker's snapshot does not cover the last 60 minutes yet (after a start, or none
     #: written), or it is more than 2 minutes old (the worker stopped): the figures are partial.
     warming_up: bool
+    #: Enabled FortiGate sources whose typical clock offset (``clocksamples.typical``) is
+    #: further behind than the snapshot's rows reach back (5 minutes): their traffic is missing
+    #: from these figures until the clock is set right (#222).
+    late_sources: list[LateSource]
     generated_at: datetime
 
 

@@ -157,7 +157,12 @@
       "delay": "Gecikme",
       "stratum": "Katman",
       "noSamples": "Son 24 saatte saat ölçümü yok.",
-      "ms": "{{value}} ms"
+      "ms": "{{value}} ms",
+      "sourceClocks": "Saati sınırı aşan log kaynakları (sınır {{limit}} saniye)",
+      "sourceClocksOk": "Bütün log kaynaklarının saati sınırın içinde ({{limit}} saniye; alerts.source_clock_limit_seconds).",
+      "source": "Kaynak",
+      "sourceOffset": "Saat farkı",
+      "sourceRows": "Kayıt"
     },
     "version": {
       "product": "Ürün",
