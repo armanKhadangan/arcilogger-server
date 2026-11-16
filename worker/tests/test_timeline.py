@@ -33,8 +33,8 @@ DAY = date(2026, 10, 12)
 SETTINGS = {**DEFAULT_SETTINGS, **EXAMPLE_SETTINGS}
 RULES = TimelineRules.from_settings(LookupSettings.from_settings(SETTINGS))
 IP = "172.20.43.120"
-A = "f0:1f:af:00:00:01"
-B = "f0:1f:af:00:00:02"
+A = "00:00:5e:00:53:3b"
+B = "00:00:5e:00:53:3c"
 HORIZON = tr(DAY + timedelta(days=4), 0)
 
 _ids = iter(range(1, 1_000_000))
@@ -165,7 +165,7 @@ def test_traffic_never_creates_an_interval() -> None:
 
 def test_static_device_arp_intervals_merge_and_are_medium_confidence() -> None:
     printer = "172.20.10.237"
-    mac = "00:1b:a9:00:00:10"
+    mac = "00:00:5e:00:53:19"
     hours = [9, 10, 11, 12]  # hourly ARP-LOG
     jittered = [
         arp(tr(DAY, h) + timedelta(seconds=30 * i), mac=mac, ip=printer)

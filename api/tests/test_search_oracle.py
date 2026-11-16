@@ -557,7 +557,7 @@ EXAMPLES = (
     "interface:*",
     # ADR-0016: FortiGate DHCP rows are events; srcmac is the session record's MAC
     "type:event mac:00:00:5e:00:53:57",
-    "mac:00:00:5e:00:53:*",
+    "m00:00:5e:00:53:39:*",
     "logid:0100026001,0100026002",
     "type:event ip:172.20.42.0/24 -level:notice",
     "interface:vlan42",

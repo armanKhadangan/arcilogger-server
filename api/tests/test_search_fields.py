@@ -298,7 +298,7 @@ def test_fortigate_dhcp_rows_are_events_and_srcmac_is_the_session_mac() -> None:
         {"fields": "type, srcmac"},
     )
     with pytest.raises(SearchQueryError) as caught:
-        parse_query("srcmac:00:00:5e:00:53")
+        parse_query("srcm00:00:5e:00:53:39")
     assert (caught.value.code, caught.value.params["format"]) == ("search_value_invalid", "mac")
     kinds = {kind["key"]: kind for kind in catalogue_kinds()}
     assert kinds["dhcp"]["label_tr"] == kinds["dhcp"]["label_en"] == "DHCP (MikroTik)"

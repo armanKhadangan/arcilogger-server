@@ -132,14 +132,14 @@ describe('texts', () => {
     expect(
       addressOf({
         kind: 'device',
-        key: 'device:3c:52:82:00:10:02',
+        key: 'device:00:00:5e:00:53:1f',
         label: 'PC-02',
         pseudonymous: false,
-        mac: '3c:52:82:00:10:02',
+        mac: '00:00:5e:00:53:1f',
         ip: '172.20.43.81',
         hostname: 'PC-02',
       }),
-    ).toBe('3c:52:82:00:10:02');
+    ).toBe('00:00:5e:00:53:1f');
     expect(
       addressOf({
         kind: 'ip',
@@ -277,7 +277,7 @@ describe('metrics', () => {
     expect(matchesApiSearch('ayşe', ['Ayşe Yılmaz'])).toBe(true);
     // Not folded further than the API: "ayse" does not find "Ayşe".
     expect(matchesApiSearch('ayse', ['Ayşe Yılmaz'])).toBe(false);
-    expect(matchesApiSearch(' 10:02 ', ['PC-02', '3c:52:82:00:10:02'])).toBe(true);
+    expect(matchesApiSearch(' 10:02 ', ['PC-02', '00:00:5e:00:53:1f'])).toBe(true);
     expect(matchesApiSearch('yılmaz ayşe', ['Ayşe Yılmaz'])).toBe(false);
     expect(matchesApiSearch('', [null])).toBe(true);
     expect(matchesApiSearch('x', [null, undefined])).toBe(false);

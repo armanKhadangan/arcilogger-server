@@ -367,7 +367,7 @@ def test_a_device_with_blocked_attempts_only_has_a_device_row(
     """A DNS query refused by the filter, and no traffic: the device's blocked count is kept, and
     its address and VLAN come from the blocked attempt (as for the subject row)."""
     e = Evidence(db_session, layout)
-    ip, mac = "172.20.43.31", "3c:52:82:00:10:31"
+    ip, mac = "172.20.43.31", "00:00:5e:00:53:27"
     e.dhcp(tr(DAY, 7), "assigned", ip, mac, server="dhcp43", hostname="PC-31")
     e.dns(tr(DAY, 10), ip, "bahis.example", [], cat=991, catdesc="Kumar", action="block")
     db_session.commit()
@@ -395,7 +395,7 @@ def test_a_persons_device_with_blocked_attempts_only_keeps_its_own_address(
     """Ayşe's phone (VLAN 42) has only a DNS filter block while PC-01 is online: the phone's
     device row has the phone's address and VLAN, the person row keeps those of PC-01."""
     e = Evidence(db_session, layout)
-    ip, mac = "172.20.42.41", "3c:52:82:00:10:41"
+    ip, mac = "172.20.42.41", "00:00:5e:00:53:2a"
     e.dhcp(tr(DAY, 7), "assigned", ip, mac, server="dhcp42", hostname="TEL-41")
     e.dns(tr(DAY, 10), ip, "bahis.example", [], cat=991, catdesc="Kumar", action="block")
     db_session.commit()
@@ -559,7 +559,7 @@ def test_a_long_session_over_midnight_is_never_counted_twice(
     23:00 still names the session on the 15th.
     """
     e = Evidence(db_session, layout)
-    ip, mac = "172.20.43.30", "3c:52:82:00:10:30"
+    ip, mac = "172.20.43.30", "00:00:5e:00:53:26"
     e.dhcp(tr(DAY, 7), "assigned", ip, mac, server="dhcp43", hostname="PC-30")
     e.web(tr(DAY, 23), ip, 5001, "www.dizi.example", "203.0.113.120")
     _long_session(e, ip, 55001, "203.0.113.120", 5001)
@@ -602,7 +602,7 @@ def test_a_session_started_long_before_midnight_keeps_its_name(
     (``*.icloud.com``). The 15th looks their names up back to the sessions' start: the first is
     still uygulama.example, the sync still background (online, never active)."""
     e = Evidence(db_session, layout)
-    ip, mac = "172.20.43.32", "3c:52:82:00:10:32"
+    ip, mac = "172.20.43.32", "00:00:5e:00:53:28"
     e.dhcp(tr(DAY, 7), "assigned", ip, mac, server="dhcp43", hostname="PC-32")
     e.app(tr(DAY, 23), ip, 5003, "api.uygulama.example", "203.0.113.122")
     _long_session(e, ip, 55003, "203.0.113.122", 5003)
@@ -633,7 +633,7 @@ def test_a_lost_first_interim_log_still_counts_its_bytes(
     10:04 log's counter holds beyond its delta came over [10:00, 10:02] (not on an earlier day):
     180000 bytes, 30000 in every minute, 6 active minutes — as with the 10:02 log."""
     e = Evidence(db_session, layout)
-    ip, mac = "172.20.43.31", "3c:52:82:00:10:31"
+    ip, mac = "172.20.43.31", "00:00:5e:00:53:27"
     e.dhcp(tr(DAY, 7), "assigned", ip, mac, server="dhcp43", hostname="PC-31")
     e.traffic(
         tr(DAY, 10, 4), ip, 55002, "203.0.113.121", sessionid=5002, interim=True, duration=240,
@@ -659,7 +659,7 @@ def test_a_subject_with_only_blocked_attempts_keeps_its_vlan(
     """An unassigned phone on VLAN 42 whose only events of the day are DNS filter blocks has no
     online minute: its VLAN (and so its department) comes from the blocked attempts."""
     e = Evidence(db_session, layout)
-    ip, mac = "172.20.42.40", "3c:52:82:00:10:40"
+    ip, mac = "172.20.42.40", "00:00:5e:00:53:29"
     e.dhcp(tr(DAY, 7), "assigned", ip, mac, server="dhcp42", hostname="TEL-40")
     e.dns(tr(DAY, 10), ip, "bahis.example", [], cat=991, catdesc="Kumar", action="block")
     db_session.commit()

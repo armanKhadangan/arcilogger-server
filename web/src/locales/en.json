@@ -1261,7 +1261,7 @@
       "ipv6": "This version does not support 5651 lookups for IPv6 addresses: ARCILOGGER does not collect the records that tie IPv6 addresses to devices (NDP, DHCPv6). The request must be answered by other means. Enter an IPv4 address written as IPv6 (::ffff:…) as IPv4.",
       "port": "The port must be a number from 0 to 65535.",
       "domain": "Enter a valid domain name (no spaces, /, \\, @ or :).",
-      "mac": "A MAC address has 12 hexadecimal digits (aa:bb:cc:dd:ee:ff).",
+      "mac": "A MAC address has 12 hexadecimal digits (00:00:5e:00:53:38).",
       "time": "Enter the time as HH:MM or HH:MM:ss.",
       "timeZone": "Choose a time zone from the list.",
       "tolerance": "The tolerance must be from 0 to {{max}} seconds.",

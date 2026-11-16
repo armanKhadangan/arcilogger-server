@@ -92,7 +92,7 @@ test.describe('Cihazlar ve Kişiler', () => {
     const search = page.getByLabel('Ara', { exact: true });
     await search.fill('pln-pc-05');
     await expect.poll(() => lastDevicesQuery(api)?.get('q')).toBe('pln-pc-05');
-    await expect.poll(() => macs(page)).toEqual(['3c:52:82:00:00:05']);
+    await expect.poll(() => macs(page)).toEqual(['00:00:5e:00:53:1b']);
     expect(page.url()).not.toContain('pln');
     await search.fill('');
 
@@ -130,14 +130,14 @@ test.describe('Cihazlar ve Kişiler', () => {
     const api = await mockApi(page, { signedInAs: 'tolga' });
     await page.goto('/devices?unknown=true');
     const table = devicesTable(page);
-    await table.getByRole('checkbox', { name: 'Seç: 3c:52:82:00:00:05' }).check();
-    await table.getByRole('checkbox', { name: 'Seç: a4:83:e7:00:00:44' }).check();
+    await table.getByRole('checkbox', { name: 'Seç: 00:00:5e:00:53:1b' }).check();
+    await table.getByRole('checkbox', { name: 'Seç: 00:00:5e:00:53:36' }).check();
     const bar = page.getByTestId('bulk-bar');
     await expect(bar).toContainText('2 cihaz seçildi');
     await bar.getByRole('button', { name: 'Kişiye ata' }).click();
 
     const dialog = page.getByRole('dialog', { name: 'Kişiye ata' });
-    await expect(dialog.getByText('3c:52:82:00:00:05')).toBeVisible();
+    await expect(dialog.getByText('00:00:5e:00:53:1b')).toBeVisible();
     await dialog.getByRole('button', { name: 'Ata', exact: true }).click();
     await expect(dialog.getByText('Bir kişi seçin.')).toBeVisible();
 
@@ -167,19 +167,19 @@ test.describe('Cihazlar ve Kişiler', () => {
       page.getByText('2 cihaz Can Öztürk adlı kişiye atandı.', { exact: true }),
     ).toBeVisible();
     expect(api.callsTo('POST', '/devices/assign')[0]?.body).toEqual({
-      macs: ['3c:52:82:00:00:05', 'a4:83:e7:00:00:44'],
+      macs: ['00:00:5e:00:53:1b', '00:00:5e:00:53:36'],
       person_id: 2,
       valid_from: '2026-10-12T08:00:00+03:00',
       note: 'Zimmet formu 2026/88',
     });
     // Assigned: no longer "unknown".
-    await expect(table.getByRole('row').filter({ hasText: '3c:52:82:00:00:05' })).toHaveCount(0);
-    expect(api.devices.devices.get('3c:52:82:00:00:05')?.person?.name).toBe('Can Öztürk');
+    await expect(table.getByRole('row').filter({ hasText: '00:00:5e:00:53:1b' })).toHaveCount(0);
+    expect(api.devices.devices.get('00:00:5e:00:53:1b')?.person?.name).toBe('Can Öztürk');
 
     // The drawer shows the new assignment; "Atamayı kaldır" closes it (the row stays).
     await page.goto('/devices');
-    await table.getByRole('button', { name: '3c:52:82:00:00:05' }).click();
-    const drawer = page.getByRole('dialog', { name: '3c:52:82:00:00:05' });
+    await table.getByRole('button', { name: '00:00:5e:00:53:1b' }).click();
+    const drawer = page.getByRole('dialog', { name: '00:00:5e:00:53:1b' });
     await expect(drawer.getByText(/Zimmet formu 2026\/88/)).toBeVisible();
     await expect(drawer.getByText('12.10.2026 08:00:00 – hâlâ geçerli')).toBeVisible();
     await expect(drawer.getByText('Finans (kişinin departmanı)')).toBeVisible();
@@ -190,7 +190,7 @@ test.describe('Cihazlar ve Kişiler', () => {
     await remove.getByRole('button', { name: 'Atamayı kaldır' }).click();
     await expect(remove).toBeHidden();
     expect(api.callsTo('POST', '/devices/assign')[1]?.body).toEqual({
-      macs: ['3c:52:82:00:00:05'],
+      macs: ['00:00:5e:00:53:1b'],
       person_id: null,
     });
     await expect(drawer.getByText('12.10.2026 08:00:00 – 13.10.2026 15:00:00')).toBeVisible();
@@ -200,10 +200,10 @@ test.describe('Cihazlar ve Kişiler', () => {
 
   test('shows the server’s refusals clearly and changes nothing', async ({ page }) => {
     const api = await mockApi(page, { signedInAs: 'tolga' });
-    // 3c:52:82:00:00:05 belonged to Can Öztürk from 05.10. to 11.10.2026 09:00.
+    // 00:00:5e:00:53:1b belonged to Can Öztürk from 05.10. to 11.10.2026 09:00.
     api.devices.assignments.unshift({
       id: 90,
-      mac: '3c:52:82:00:00:05',
+      mac: '00:00:5e:00:53:1b',
       person: { id: 2, name: 'Can Öztürk' },
       valid_from: '2026-10-05T06:00:00Z',
       valid_to: '2026-10-11T06:00:00Z',
@@ -238,7 +238,7 @@ test.describe('Cihazlar ve Kişiler', () => {
     await table.getByRole('checkbox', { name: 'Seç: 00:00:5e:00:53:57' }).uncheck();
 
     // Before the end of its last assignment: the list does not know it, the server refuses.
-    await table.getByRole('checkbox', { name: 'Seç: 3c:52:82:00:00:05' }).check();
+    await table.getByRole('checkbox', { name: 'Seç: 00:00:5e:00:53:1b' }).check();
     await bar.getByRole('button', { name: 'Kişiye ata' }).click();
     await dialog.getByRole('combobox', { name: 'Kişi' }).click();
     await page.getByRole('option', { name: /Selin Kaya/ }).click();
@@ -248,7 +248,7 @@ test.describe('Cihazlar ve Kişiler', () => {
     await dialog.getByRole('button', { name: 'Ata', exact: true }).click();
     const alert = dialog.getByRole('alert').filter({ hasText: 'Atama yapılamadı' });
     await expect(alert).toContainText(
-      '3c:52:82:00:00:05 cihazının önceki atamasından (11.10.2026 09:00:00) önce olamaz',
+      '00:00:5e:00:53:1b cihazının önceki atamasından (11.10.2026 09:00:00) önce olamaz',
     );
     await expect(alert).toContainText('atama geçmişi yalnızca eklenerek tutulur');
     await expect(alert).toContainText('hiçbir cihaz değiştirilmedi');
@@ -264,7 +264,7 @@ test.describe('Cihazlar ve Kişiler', () => {
     ).toBeVisible();
     await expect(dialog).toBeVisible();
     expect(api.callsTo('POST', '/devices/assign')).toHaveLength(2);
-    expect(api.devices.devices.get('3c:52:82:00:00:05')?.person).toBeNull();
+    expect(api.devices.devices.get('00:00:5e:00:53:1b')?.person).toBeNull();
   });
 
   test('device drawer: randomised MAC warning, history, leases and editing', async ({ page }) => {
@@ -478,10 +478,10 @@ test.describe('Cihazlar ve Kişiler', () => {
     });
 
     await page.getByRole('tab', { name: 'Cihazlar' }).click();
-    await devicesTable(page).getByRole('button', { name: '00:15:5d:00:00:20' }).click();
+    await devicesTable(page).getByRole('button', { name: '00:00:5e:00:53:0c' }).click();
     await expect(
       page
-        .getByRole('dialog', { name: '00:15:5d:00:00:20' })
+        .getByRole('dialog', { name: '00:00:5e:00:53:0c' })
         .getByText("Yok — Finans VLAN'ı bir departmana bağlı değil"),
     ).toBeVisible();
   });
@@ -606,7 +606,7 @@ test.describe('Cihazlar ve Kişiler', () => {
   }) => {
     await mockApi(page, { signedInAs: 'tolga' });
     await page.goto('/devices');
-    const unknownPc = devicesTable(page).getByRole('row', { name: /00:15:5d:00:00:20/ });
+    const unknownPc = devicesTable(page).getByRole('row', { name: /00:00:5e:00:53:0c/ });
     await expect(unknownPc).toContainText('VLAN 41 · Finans');
     await expect(unknownPc).toContainText("Finans (VLAN'dan)");
     await page.getByRole('tab', { name: "Departmanlar ve VLAN'lar" }).click();
@@ -753,7 +753,7 @@ test.describe('Cihazlar ve Kişiler', () => {
       .setInputFiles(
         csvFile('atamalar.csv', [
           'mac;employee_no;person_name;valid_from;note',
-          '3c:52:82:00:00:05;1002;;12.10.2026 09:00;Zimmet formu 2026/90',
+          '00:00:5e:00:53:1b;1002;;12.10.2026 09:00;Zimmet formu 2026/90',
         ]),
       );
     await page.getByRole('button', { name: 'Kontrol et (deneme)' }).click();
@@ -778,7 +778,7 @@ test.describe('Cihazlar ve Kişiler', () => {
       "'Can Öztürk' pasif; pasif bir kişiye cihaz atanamaz.",
     );
     await expect(result.getByRole('button', { name: 'Uygula' })).toBeDisabled();
-    expect(api.devices.devices.get('3c:52:82:00:00:05')?.person).toBeNull();
+    expect(api.devices.devices.get('00:00:5e:00:53:1b')?.person).toBeNull();
   });
 
   test('exports the lists as CSV files for Excel, filtered as shown', async ({ page }) => {

@@ -1070,7 +1070,7 @@ load unchanged. The report's person line prints `atama: <from> tarihinden itibar
 `atama: <from> - <to>` for history links only.
 
 **API** (base `/api/v1`, group contract 4.3; errors in the standard format; times ISO-8601; MACs
-`aa:bb:cc:dd:ee:ff`, accepted in any notation `normalize_mac` reads). `devices.read` for reads,
+`00:00:5e:00:53:38`, accepted in any notation `normalize_mac` reads). `devices.read` for reads,
 `devices.manage` for writes, plus `require_privacy_notice` wherever a person's name is returned
 (devices, persons, imports); departments, VLANs and templates need no notice.
 

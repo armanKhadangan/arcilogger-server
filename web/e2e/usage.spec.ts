@@ -118,7 +118,7 @@ test.describe('Kullanım', () => {
     ).toHaveCount(31);
     await header.getByRole('button', { name: 'Planlama bilgisayarı' }).click();
     await expect(page.getByRole('table', { name: 'Can Öztürk kişisinin cihazları' })).toContainText(
-      '3c:52:82:00:10:03',
+      '00:00:5e:00:53:24',
     );
 
     // Person → the site's host names and URLs (drawer) → the site → who used it.
@@ -289,7 +289,7 @@ test.describe('Kullanım', () => {
       new RegExp(`tab=devices&${DAY}&subject=device%3A3c%3A52%3A82%3A00%3A10%3A02$`),
     );
     await expect(page.getByRole('heading', { level: 2, name: 'PC-02' })).toBeVisible();
-    await expect(page.getByTestId('subject-header')).toContainText('3c:52:82:00:10:02');
+    await expect(page.getByTestId('subject-header')).toContainText('00:00:5e:00:53:1f');
     await expect(page.getByTestId('subject-header')).toContainText('172.20.43.81');
   });
 

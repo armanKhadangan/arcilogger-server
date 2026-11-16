@@ -364,7 +364,7 @@ def test_a_lease_rebuild_is_worked_day_by_day_within_its_range(
     with app_session_factory() as session:
         evidence = Evidence(session, Layout(api_config.data_dir))
         evidence.dhcp(
-            at_site(today - timedelta(days=2)), "assigned", "172.20.60.21", "02:00:00:00:00:21"
+            at_site(today - timedelta(days=2)), "assigned", "172.20.60.21", "02:00:5e:00:53:01"
         )
         session.commit()
     for refused in (

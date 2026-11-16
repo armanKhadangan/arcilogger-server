@@ -60,7 +60,7 @@ the topics, else derived from the PRI severity (see :func:`topic_level`).
 The DHCP server name carries the VLAN (``dhcp60`` → 60) by the same rule as the database
 setting ``dhcp.server_vlan_regex``; the configuration-change patterns are a constructor
 parameter (defaults in :data:`DEFAULT_CONFIG_PATTERNS`, **verify on site**). MAC addresses are
-stored as ``aa:bb:cc:dd:ee:ff``. Whatever a family regex does not cover (a firewall line's
+stored as ``00:00:5e:00:53:38``. Whatever a family regex does not cover (a firewall line's
 unknown tail, the NAT part, ICMP type/code …) goes to the typed row's ``extra``.
 """
 

@@ -291,7 +291,7 @@ RECORDS = {
         # MAC addresses
         ("mac:00-00-5E-00-53-48", {"DHCP"}),
         ("mac:02:00:5e:*", {"WIFI", "FW"}),
-        ("mac:00:00:5e:00:53:*", {"DHCP"}),
+        ("m00:00:5e:00:53:39:*", {"DHCP"}),
         ("-mac:*", {"POOL"}),
         # VLANs and departments (by the client address)
         ("vlan:41", {"WEB", "DHCP"}),

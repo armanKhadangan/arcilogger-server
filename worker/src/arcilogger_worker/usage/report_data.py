@@ -1081,7 +1081,7 @@ def sample_report_data() -> dict[str, Any]:
         "devices": [
             {
                 "label": "Ayşe'nin bilgisayarı",
-                "mac": "3c:52:82:00:10:01",
+                "mac": "00:00:5e:00:53:1e",
                 "ip": "172.20.41.21",
                 "vlan": 41,
                 "person": "Ayşe Yılmaz",
@@ -1091,7 +1091,7 @@ def sample_report_data() -> dict[str, Any]:
             },
             {
                 "label": "MKAYA-LAPTOP",
-                "mac": "3c:52:82:00:10:07",
+                "mac": "00:00:5e:00:53:25",
                 "ip": "172.20.43.17",
                 "vlan": 43,
                 "person": "Mehmet Kaya",
@@ -1101,7 +1101,7 @@ def sample_report_data() -> dict[str, Any]:
             },
             {
                 "label": "Elif'in telefonu",
-                "mac": "a6:21:9b:00:31:0e",
+                "mac": "02:00:5e:00:53:07",
                 "ip": "172.20.60.143",
                 "vlan": 60,
                 "person": "Elif Şahin",

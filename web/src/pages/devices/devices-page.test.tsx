@@ -82,7 +82,7 @@ describe('Cihazlar ve Kişiler — permission gating', () => {
     const table = await screen.findByRole('table', { name: 'Ağda görülen cihazlar' });
     expect(await within(table).findByRole('button', { name: '00:00:5e:00:53:57' })).toBeVisible();
     expect(screen.queryByTestId('read-only')).not.toBeInTheDocument();
-    await user.click(within(table).getByRole('checkbox', { name: 'Seç: 3c:52:82:00:00:05' }));
+    await user.click(within(table).getByRole('checkbox', { name: 'Seç: 00:00:5e:00:53:1b' }));
     const bar = screen.getByTestId('bulk-bar');
     expect(bar).toHaveTextContent('1 cihaz seçildi');
     expect(within(bar).getByRole('button', { name: 'Kişiye ata' })).toBeEnabled();

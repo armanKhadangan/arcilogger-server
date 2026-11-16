@@ -199,6 +199,6 @@ def test_pseudonyms_are_stable_and_keyed() -> None:
     assert first[0].startswith("p:")
     assert len(first[0]) == 18
     assert first[1] == f"Kullanıcı-{first[0][2:6].upper()}"
-    assert pseudonym(key, "device:3c:52:82:00:10:02")[1].startswith("Cihaz-")
+    assert pseudonym(key, "device:00:00:5e:00:53:1f")[1].startswith("Cihaz-")
     assert pseudonym(key, "ip:172.20.41.77")[0].startswith("d:")
     assert token(b"another-key-0123456789", "person:12") != first[0][2:]

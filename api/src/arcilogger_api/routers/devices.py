@@ -134,11 +134,11 @@ def _mac_text(value: str) -> str:
     try:
         return normalize_mac(value)
     except ValueError:
-        raise ValueError("not a MAC address (aa:bb:cc:dd:ee:ff)") from None
+        raise ValueError("not a MAC address (00:00:5e:00:53:38)") from None
 
 
 MacText = Annotated[str, Field(min_length=1, max_length=32), AfterValidator(_mac_text)]
-MacPath = Annotated[str, Path(max_length=32, description="MAC address (aa:bb:cc:dd:ee:ff)")]
+MacPath = Annotated[str, Path(max_length=32, description="MAC address (00:00:5e:00:53:38)")]
 
 
 def path_mac(value: str) -> str:

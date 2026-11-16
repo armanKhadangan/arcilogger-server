@@ -264,12 +264,12 @@ def test_a_word_ending_in_a_colon_is_never_the_host_name() -> None:
 
 def test_timestamp_without_host_and_topics_retries_the_first_word() -> None:
     outcome = parse(
-        b"<30>2026-09-23T09:38:31.250+03:00 dhcp43 assigned 172.20.43.120 for 3C:52:82:00:00:11 PC"
+        b"<30>2026-09-23T09:38:31.250+03:00 dhcp43 assigned 172.20.43.120 for 00:00:5E:00:53:1C PC"
     )
     assert outcome.message["host"] is None
-    assert outcome.message["text"] == "dhcp43 assigned 172.20.43.120 for 3C:52:82:00:00:11 PC"
+    assert outcome.message["text"] == "dhcp43 assigned 172.20.43.120 for 00:00:5E:00:53:1C PC"
     assert typed(outcome) == dhcp(
-        "dhcp43", 43, "assigned", "172.20.43.120", "3c:52:82:00:00:11", "PC"
+        "dhcp43", 43, "assigned", "172.20.43.120", "00:00:5e:00:53:1c", "PC"
     )
     only_word = parse(b"<30>2026-09-23T09:38:31+03:00 ARCI-HEARTBEAT")
     assert only_word.message["type"] == "heartbeat"

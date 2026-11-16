@@ -11,7 +11,7 @@ import {
 const NOW = new Date('2026-10-13T15:00:00+03:00');
 const owner = { id: 1, name: 'Selin Kaya' };
 const PC = { mac: '00:00:5e:00:53:57', assigned_since: '2026-03-12T09:00:00+03:00', person: owner };
-const UNKNOWN = { mac: '3c:52:82:00:00:05', assigned_since: null, person: null };
+const UNKNOWN = { mac: '00:00:5e:00:53:1b', assigned_since: null, person: null };
 
 function draft(patch: Partial<AssignDraft> = {}): AssignDraft {
   return { ...initialDraft(NOW), personId: 6, ...patch };

@@ -186,7 +186,7 @@ def test_the_content_never_carries_log_lines_or_names(
         "raw": RAW,
         "message": RAW,
         "error": f"line 7: {RAW}",
-        "mac": "f0:1f:af:00:00:01",
+        "mac": "00:00:5e:00:53:3b",
     }
     raise_alert(db_session, title=f"Log kaynağı sessiz: {PERSON} {RAW}", details=tainted)
     raise_alert(
