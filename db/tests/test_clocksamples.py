@@ -22,6 +22,7 @@ from arcilogger_db.clocksamples import (
     rebuild,
     received_between,
     shifted_into,
+    typical,
     upsert_samples,
 )
 from arcilogger_db.models import Message, SourceClockSample
@@ -164,6 +165,27 @@ def test_the_readers(db_session: Session) -> None:
     total = db_session.scalar(select(func.sum(SourceClockSample.n)))
     assert total == 390
     assert db_session.execute(text("SELECT count(*) FROM source_clock_samples")).scalar() == 6
+
+
+def test_the_typical_offset_of_the_last_hour(db_session: Session) -> None:
+    """``typical``: the median of the newest rows received in the last hour, whole seconds; none
+    with fewer than ten rows, none from rows older than an hour (#222)."""
+    connection = db_session.connection()
+    now = AT
+    minute = now.replace(second=0)
+    upsert_samples(
+        connection,
+        {
+            ClockKey("fortigate", minute - timedelta(minutes=2), -420): 8,
+            ClockKey("fortigate", minute - timedelta(minutes=1), -421): 5,
+            ClockKey("core-r1", minute, 0): 9,
+            ClockKey("switch-1", minute - timedelta(hours=2), 600): 50,
+        },
+    )
+    assert typical(connection, "fortigate", now) == (-420, 13)
+    assert typical(connection, "core-r1", now) == (None, 9)
+    assert typical(connection, "switch-1", now) == (None, 0)
+    assert typical(connection, "nobody", now) == (None, 0)
 
 
 def test_the_minutes_that_shifted_their_device_times_into_a_range(db_session: Session) -> None:

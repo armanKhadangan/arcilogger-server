@@ -90,7 +90,7 @@ describe('LookupResults with answers captured from the API', () => {
     const first = within(conflict).getByRole('region', { name: 'Olasılık 1' });
     const second = within(conflict).getByRole('region', { name: 'Olasılık 2' });
     expect(first).toHaveTextContent('00:00:5e:00:53:57');
-    expect(second).toHaveTextContent('00:0c:29:00:00:99');
+    expect(second).toHaveTextContent('00:00:5e:00:53:9a');
     expect(second).toHaveTextContent('bağlı kişi yok');
   });
 

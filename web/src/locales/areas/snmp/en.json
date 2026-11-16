@@ -43,7 +43,11 @@
         "capacityBoth": "Download and upload are given together.",
         "noLine": "Enter at least one WAN interface.",
         "tooManyLines": "At most 4 WAN lines."
-      }
+      },
+      "test": "Test connection",
+      "testHint": "Before saving, connects to the device with these values and lists the interfaces it reports; pick the WAN lines from the list. Nothing is saved. It asks for your password and can be run once a minute.",
+      "testing": "Testing the device…",
+      "testFailed": "The connection test failed: {{reason}} You can still type the interface names."
     },
     "review": {
       "field": "{{name}} · SNMP: {{field}}",
@@ -96,7 +100,11 @@
       "name": "Name (ifName)",
       "status": "Status",
       "speed": "Speed (Mbit/s)",
-      "hint": "Type the WAN line's name from this list in the source's SNMP section."
+      "hint": "Type the WAN line's name from this list in the source's SNMP section.",
+      "pick": "Pick",
+      "pickLine": "Pick {{name}} as a WAN line",
+      "picked": "Picked",
+      "pickHint": "The picked name goes into the first empty line; at most 4 lines."
     }
   }
 }

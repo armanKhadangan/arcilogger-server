@@ -179,6 +179,7 @@ READING_TABLE_KEYS: Final[tuple[str, ...]] = (
     "fortigate_format_verified",
     "fortigate_dhcp_not_converted",
     "lease_renewal_not_seen",
+    "fortigate_lease_unlimited",
     "fortigate_dhcp_not_converted_since_lease",
     "fortigate_dhcp_no_network",
     "dhcp_sources_overlap",

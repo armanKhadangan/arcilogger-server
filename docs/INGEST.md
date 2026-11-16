@@ -225,7 +225,8 @@ counted). `offset_of` and `minute_of` define a key; `clock_key` applies them to 
 with the same two functions and makes each key once per group (a test pins it to `clock_key`
 line by line). A source on time has one key a minute, so a batch adds a few keys per
 source, written with one fixed `INSERT … SELECT FROM unnest(…) ON CONFLICT … DO UPDATE SET n =
-source_clock_samples.n + EXCLUDED.n` per 500 keys. `R20-lease:source-clock` and a lookup's clock
+source_clock_samples.n + EXCLUDED.n` per 500 keys. `R20-source-clock`, the clock offset on
+Sources and a lookup's clock
 check read it by receive time: a device clock set hours back writes rows whose device times lie
 hours before their arrival, which a sample of `messages` by device time does not reach (contract,
 "Deviations — clock (2026-11)"). The upgrade to revision `0019_source_clock_samples` counts the

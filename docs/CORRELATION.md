@@ -223,7 +223,8 @@ and its chains are `low`, section 2) and its lease time: the logged `lease` when
 `dhcp.fortigate_use_logged_lease` is on and it lies in 300–8,640,000 s (the FortiOS `lease-time`
 range), otherwise the configured time of its interface (`lease.server_seconds`, else
 `lease.default_seconds`) with the margin, counted `lease_fallback` (and `lease_unlimited` for `0`,
-which raises `R20-lease:fortigate-lease-unlimited`). The job report's `details.stats` holds
+which raises `R20-lease:fortigate-lease-unlimited`; a lookup names it on the chain with
+`fortigate_lease_unlimited`, section 3). The job report's `details.stats` holds
 these counters, `kept_fg_dhcp`, `refused_fg_dhcp` and `excluded_fg_dhcp`, counted once, in the
 run's own window.
 
@@ -442,7 +443,12 @@ a person resolved or dismissed are never changed. The incremental job only raise
   - `srcmac_mismatch`: below.
 - **FortiGate notes on a chain** whose lease is `fg_dhcp` (info): `fortigate_format_unverified`
   while `dhcp.fortigate_format_verified` is off, `fortigate_format_verified` (who marked it and
-  when) once it is on ([DEVICE-SETUP.md](DEVICE-SETUP.md) section 2.4). A chain whose cited DHCP
+  when) once it is on ([DEVICE-SETUP.md](DEVICE-SETUP.md) section 2.4); `fortigate_lease_unlimited`
+  when the lease's own last DHCP record at or before T logged `lease=0` (FortiOS's "unlimited",
+  verify on site: ASSUMPTIONS V4) and the lease kept no logged time of an earlier ACK, with
+  `fallback`, the configured time in seconds the lease ran on (`lease.server_seconds`, else
+  `lease.default_seconds`, × `lease.timeout_percent`); the chain, its confidence and its person
+  stay as they are (#299). A chain whose cited DHCP
   rows come from a sender configured later carries `source_configured_later` (info).
 - **Department**: the linked person's department, else the VLAN's
   (`arcilogger_db.network.vlan_department` — the same rule as the usage reports).
@@ -992,7 +998,8 @@ WHERE duration >= 300` and split the scan into "logged within 5 minutes of the w
   `no_lease`, or a chain `low`. The lines the previous version loaded stay `fg_event` rows and
   are named as above.
 - **Source clocks.** A device clock that is off by less than 120 s is not alerted
-  (`R20-lease:source-clock`, a fixed 120 s for every source) and lowers no chain below max(120 s,
+  (`R20-source-clock:<source>`, `alerts.source_clock_limit_seconds`, 120 s by default; #222) and
+  lowers no chain below max(120 s,
   the lookup tolerance) for a source measured only for the session search (120 s otherwise), yet
   with the default ±60 s tolerance a drift of one to two minutes can still move a session out of the
   window. A source with fewer than 10 rows around T is not measured. An empty result states the
@@ -1078,7 +1085,7 @@ The operator's checklist with the recorded outcomes is [KURULUM.md](KURULUM.md) 
 - **Carrier-grade NAT** at the ISP (a public IP shared with other customers) and **whether each
   line's public IP is static** (`public_dynamic`): ask the ISP.
 - **The FortiGate's clock** syncs with NTP (DEVICE-SETUP.md section 2.1) and its DHCP lines carry
-  a usable device time (`R20-lease:source-clock`).
+  a usable device time (`R20-source-clock`).
 - **DECLINE:** whether FortiOS logs a DHCPDECLINE or checks an address before it offers it, and
   that a client holds one address per server interface and network.
 - **ARP-LOG script interval** (`arp.interval_seconds`, 1 h) and its jitter (merge grace 66 min).

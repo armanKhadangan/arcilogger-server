@@ -56,7 +56,9 @@ from arcilogger_core.renewal import STATE_SCHEMA as RENEWAL_SCHEMA
 from arcilogger_core.renewal import write_state as write_renewal_state
 from arcilogger_core.timeutil import isoformat_site, site_day, to_site, utc_now
 from arcilogger_db.backup import write_last_state
-from arcilogger_db.models import AuditLog, JobRun
+from arcilogger_db.clocksamples import ClockKey, upsert_samples
+from arcilogger_db.models import AuditLog, JobRun, Source
+from arcilogger_db.settings import set_setting
 from arcilogger_worker.alerts import system as alerts_system
 from arcilogger_worker.alerts.system import (
     CheckContext,
@@ -147,6 +149,43 @@ def test_services_from_status_file_age(client: TestClient, login_as: Login, layo
     assert by(get(client)["services"], "name")["ArciWorker"]["state"] == "stale"
     touch(layout.worker_status, utc_now())
     assert by(get(client)["services"], "name")["ArciWorker"]["state"] == "running"
+
+
+def test_source_clocks_beyond_the_limit(
+    client: TestClient, login_as: Login, app_session_factory: sessionmaker[Session]
+) -> None:
+    """``source_clocks``: the enabled sources whose device clock is beyond
+    ``alerts.source_clock_limit_seconds``, furthest off first (#222)."""
+    minute = utc_now().replace(second=0, microsecond=0) - timedelta(minutes=1)
+    with app_session_factory() as session:
+        for name in ("fortigate", "core-r1", "switch-1", "old-fw"):
+            session.add(
+                Source(name=name, type="fortigate", address="172.20.0.1", enabled=name != "old-fw")
+            )
+        session.flush()
+        upsert_samples(
+            session.connection(),
+            {
+                ClockKey("fortigate", minute, -420): 30,
+                ClockKey("core-r1", minute, 0): 30,
+                ClockKey("switch-1", minute, 10800): 30,
+                ClockKey("old-fw", minute, 900): 30,
+            },
+        )
+        session.commit()
+    login_as(client, "admin")
+    body = get(client)
+    assert body["source_clock_limit_seconds"] == 120
+    assert body["source_clocks"] == [
+        {"source": "switch-1", "offset_seconds": 10800, "rows": 30},
+        {"source": "fortigate", "offset_seconds": -420, "rows": 30},
+    ]
+    with app_session_factory() as session:
+        set_setting(session, "alerts.source_clock_limit_seconds", 600, updated_by=":system")
+        session.commit()
+    body = get(client)
+    assert body["source_clock_limit_seconds"] == 600
+    assert [item["source"] for item in body["source_clocks"]] == ["switch-1"]
 
 
 def test_agent_and_apply_system_states(

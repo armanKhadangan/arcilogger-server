@@ -480,3 +480,105 @@ def test_the_agent_writes_the_list_with_the_error(
     )
     probe = [step for step in status.steps if step.step == "probe"]
     assert [(step.state, step.code) for step in probe] == [("failed", code)]  # a code only
+
+
+# -- "Bağlantıyı dene": options.probe_only (Wave 6 C11, #217) -------------------------------------
+
+
+def probe_only_request(installed: Any, *, keys: bool = True, name: str = "fw-02") -> Any:
+    """A new source's SNMP as the API sends the test: switched off in the op, no interfaces
+    chosen yet, the keys encrypted in ``secret_set`` ops."""
+    snmp = {"enabled": False, "user": "arcilogger", "interfaces": []}
+    source = {"name": name, "type": "fortigate", "address": "172.20.10.23", "snmp": snmp}
+    ops: list[dict[str, Any]] = [{"op": "source_add", "source": source}]
+    if keys:
+        for secret, value in zip(rules.snmp_keys(name), KEYS.values(), strict=True):
+            token = installed.store.encrypt_value(value)
+            ops.append({"op": "secret_set", "name": secret, "expect": "unset", "token": token})
+    return installed.request(section="sources", ops=ops, options={"probe_only": True})
+
+
+def test_probe_only_reports_the_interfaces_and_writes_nothing(tmp_path: Path) -> None:
+    installed = make_installation(tmp_path / "cfg")
+    toml = installed.config_path.read_bytes()
+    secrets_file = installed.root / "secrets.json"
+    secrets = secrets_file.read_bytes() if secrets_file.exists() else b""
+    prober = FakeProber({"snmp": ProbeResult(True, None, "ok", (WAN1, LAN))})
+    request = probe_only_request(installed)
+    installed.submit(request)
+    FakeAgent(installed, prober=prober).process()
+    status = installed.status(request.id)
+    assert status is not None
+    assert status.state == "succeeded"
+    assert status.result is not None
+    assert status.result.model_dump(mode="json") == {
+        "probe_only": True,
+        "interfaces": [
+            {"name": "wan1", "oper_status": "up", "speed_mbps": 1000},
+            {"name": "lan", "oper_status": "down", "speed_mbps": 100},
+        ],
+    }
+    # probed with the request's own keys and no interface asked for: the device lists them all
+    (call,) = prober.calls
+    assert (call.kind, call.params["host"], call.params["interfaces"]) == (
+        "snmp",
+        "172.20.10.23",
+        [],
+    )
+    assert call.secrets == dict(zip(("auth_key", "priv_key"), KEYS.values(), strict=True))
+    # nothing written: the configuration, the secret store, no version, no applied line
+    assert installed.config_path.read_bytes() == toml
+    assert (secrets_file.read_bytes() if secrets_file.exists() else b"") == secrets
+    assert not any(name in installed.store.names() for name in rules.snmp_keys("fw-02"))
+    assert status.version is None
+    (line,) = installed.journal()
+    assert (line.state, line.source, line.code, line.changes) == ("probe", "fw-02", None, {})
+    assert "authkeyauthkey" not in line.model_dump_json()
+
+
+def test_probe_only_failure_keeps_the_list_and_writes_nothing(tmp_path: Path) -> None:
+    installed = make_installation(tmp_path / "cfg")
+    toml = installed.config_path.read_bytes()
+    failure = ProbeResult(False, "snmp_auth_failed", "wrong keys", ())
+    request = probe_only_request(installed)
+    installed.submit(request)
+    FakeAgent(installed, prober=FakeProber({"snmp": failure})).process()
+    status = installed.status(request.id)
+    assert status is not None
+    assert status.error is not None
+    assert (status.state, status.error.code) == ("probe_failed", "snmp_auth_failed")
+    assert installed.config_path.read_bytes() == toml
+    assert not any(name in installed.store.names() for name in rules.snmp_keys("fw-02"))
+    (line,) = installed.journal()
+    assert (line.state, line.source, line.code) == ("probe", "fw-02", "snmp_auth_failed")
+
+
+def test_probe_only_needs_both_keys_and_one_source(root: Path, config: Config) -> None:
+    """The API's check: the source's op even when nothing changed, its SNMP switched off in
+    the candidate (so no interface has to be chosen), the keys required and re-authentication."""
+    typed = {"enabled": True, "user": "arcilogger", "interfaces": []}
+    check = validate_section(
+        "sources", config, update(typed, **KEYS), context(root), probe_only=True
+    )
+    assert codes(check) == []
+    assert check.probes == (Probe("snmp", "fw-01"),)
+    assert (check.reauth, check.options) == (True, {"probe_only": True})
+    assert check.candidate is not None
+    tested = next(s for s in check.candidate.sources if s.name == "fw-01")
+    assert tested.snmp is not None
+    assert tested.snmp.enabled is False
+    missing = validate_section("sources", config, update(typed), context(root), probe_only=True)
+    assert codes(missing) == [("snmp_secret_missing", SNMP_PATH)]
+    stored = context(root, frozenset(rules.snmp_keys("fw-01")))
+    unchanged = {"enabled": False, "user": "arcilogger", "interfaces": []}
+    again = validate_section("sources", config, update(unchanged), stored, probe_only=True)
+    assert (codes(again), again.probes) == ([], (Probe("snmp", "fw-01"),))
+    no_user = validate_section(
+        "sources", config, update({"enabled": True, "user": ""}, **KEYS), stored, probe_only=True
+    )
+    assert codes(no_user) == [("snmp_setting_invalid", SNMP_PATH)]
+    removed = validate_section(
+        "sources", config, {"name": "fw-01", "remove": True, "confirm": "fw-01"}, stored,
+        probe_only=True,
+    )  # fmt: skip
+    assert ("source_invalid", "sources") in codes(removed)

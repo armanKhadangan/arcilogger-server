@@ -319,7 +319,8 @@ list under "Technical assumptions to verify on site" below); the settings are in
 Each default below is implemented; the contract's "Review notes" and "Deviations" sections give
 the alternatives.
 
-- The source-clock limit of ±120 s (`R20-lease:source-clock`, O22).
+- The source-clock limit of ±120 s (`R20-source-clock`, the setting
+  `alerts.source_clock_limit_seconds`, #222; O22).
 - An `unknown-<ip>` sender is trusted once its address lies in an enabled, configured FortiGate
   source (FD6); a stricter posture would wait for roadmap 2.2.
 - `fortigate-renewals-not-logged` stays open as an info alert on a verified site that never logged
@@ -557,7 +558,7 @@ explained in [CORRELATION.md](CORRELATION.md) §8.
 | V1 | The real DHCP Ack line (logid `0100026001`) on the syslog wire: field names `ip`, `mac`, `dhcp_msg`, `lease`, `interface`, `hostname`, quoting, MAC case and separator, `hostname` missing or empty | parser constants; `dhcp.fortigate_logids` | `R20-lease:fortigate-unconverted` (high); `fortigate.dhcp` parse failures; until `dhcp.fortigate_format_verified` is set, `R20-lease:fortigate-unverified` (info) and "kayıt biçimi sahada doğrulanmadı" on the card and in the report (FD7) |
 | V2 | The Release logid `0100026002`, its `dhcp_msg`/`msg` values, and whether clients' releases are logged at all | `dhcp.fortigate_logids` | `R20-lease:fortigate-refused` (reason "unmapped", with the logids seen) |
 | V3 | Renewals produce a DHCP Ack (this decides whether traffic may keep a FortiGate lease alive) | `dhcp.fortigate_traffic_extends` (default off, FD3) | `R20-lease:fortigate-renewals-missing` (high) or `fortigate-renewals-not-logged` (info); `lease_renewal_not_seen` in lookups; DEVICE-SETUP §2.4 step 5 |
-| V4 | `lease` is in seconds; how `0` (unlimited) is written | `dhcp.fortigate_use_logged_lease`; bounds 300–8,640,000 (FD4) | `R20-lease:fortigate-lease-unlimited` (high), `fortigate-lease` (low); counters `lease_fallback`, `lease_unlimited` |
+| V4 | `lease` is in seconds; how `0` (unlimited) is written | `dhcp.fortigate_use_logged_lease`; bounds 300–8,640,000 (FD4) | `R20-lease:fortigate-lease-unlimited` (high), `fortigate-lease` (low); counters `lease_fallback`, `lease_unlimited`; the lookup's `fortigate_lease_unlimited` (#299; the value is `UNLIMITED_LEASE`, pinned by `test_the_unlimited_value_is_the_documented_assumption`) |
 | V5 | DHCP event lines reach syslog with the shipped DEVICE-SETUP settings (severity `information`, no exclude filter) | DEVICE-SETUP §2.4 | `R20-lease:none:<table>` (high for FortiGate DHCP and ARP-LOG, medium for MikroTik DHCP without ARP-LOG, O20), `absent` (info), `fortigate-refused` (high when nearly every row is refused); the Kaynaklar card "Kira kanıtı" |
 | V6 | Relay mode gives no FortiGate lines; IPsec-type DHCP servers (leases held after the tunnel is down, MACs unknown); whether a DHCPINFORM reply is logged as an Ack; the `interface` of a relayed client's Ack when one interface serves several networks | `dhcp.fortigate_interfaces_excluded`; `dhcp.fortigate_dhcp_msgs`; the configured networks (D33) | `R20-lease:none:fg_dhcp` / `absent`; `fortigate-dhcp-subnet` (address in no configured network, such chains `low`); `fortigate-refused` (zero, broadcast, multicast MAC); `fortigate-dhcp-mac` (one MAC acknowledged on more than 3 addresses of one interface and network in 24 h) |
 | V7 | `vd` and `devid` on HA pairs and multi-VDOM units | `vd` is part of a row's origin; `devid` is not compared (O16) | `R20-lease:dhcp-sources-overlap:<net>` |

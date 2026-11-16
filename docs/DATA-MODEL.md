@@ -2,7 +2,7 @@
 
 > Durum: sürüm 0.4.1. Kaynak: `db/src/arcilogger_db/models.py` ve
 > `db/src/arcilogger_db/migrations/versions/` (`v0001_baseline`, `v0006_lookup_reports` …
-> `v0026_rules_time_received`). Bir test, modellerle migrasyonların birebir aynı olduğunu
+> `v0027_rule_traffic_totals`). Bir test, modellerle migrasyonların birebir aynı olduğunu
 > her çalıştırmada doğrular.
 
 ## Özet (TR)
@@ -80,7 +80,8 @@
 - Kaynak saatleri (revizyon `0019_source_clock_samples`, ADR-0016 D28): `source_clock_samples`
   her kaynak için satırların **alındığı** dakikada cihaz saatinin alma zamanından farkını
   (sıfırdan uzağa yuvarlanmış tam saniye; bir dakikanın altındaki fark 0) ve satır sayısını
-  tutar. Ingest bunu satırlarla aynı işlemde yazar; `R20-lease:source-clock` uyarısı ve 5651
+  tutar. Ingest bunu satırlarla aynı işlemde yazar; `R20-source-clock` uyarısı, Kaynaklar'daki
+  saat farkı ve 5651
   sorgusunun saat denetimi saatleri geri ya da ileri atlayan bir cihaz saatini buradan ölçer.
 - NAT adresi indeksi (revizyon `0020_fg_traffic_transip_time`): `fg_traffic` tablosunun yeni
   indeksi `ix_fg_traffic_transip_time (transip, time)`, 5651 sorgusunun bir NAT adresi için port
@@ -158,7 +159,8 @@ exit) and add three status rows that are never edited: `nat.egresses_migration`,
 (revision `0019_source_clock_samples`, ADR-0016 D28) add `source_clock_samples`: per source and
 **received** minute, the device clock's offset from the receive time (whole seconds rounded away
 from zero, 0 under a minute) and its rows, written by ingest in the transaction of the rows; the
-`R20-lease:source-clock` alert and a lookup's clock check measure a clock that jumped by hours
+`R20-source-clock` alert, the clock offset on Sources and a lookup's clock check measure a clock
+that jumped by hours
 there. The NAT address index (revision `0020_fg_traffic_transip_time`) is `fg_traffic`'s new
 index `ix_fg_traffic_transip_time (transip, time)`: a lookup's steps without a port on one NAT
 address (the overlap probe, and the D15 check's tail after its window and its steps for sessions
@@ -337,6 +339,9 @@ but which are not in a table go to `extra`.
 | `usage_rebuilds` | id | Rebuild requests of `POST /api/v1/usage/rebuild`: range, status (queued/running/done/failed), days done, error, requested by; run by the worker job `usage.requests` |
 | `alert_events` | id; index (alert_id, at), (at) | Every change of an alert's state (`from_state` → `to_state`) and every note (`text`, 1–2000 characters) with `actor` (user name, or `system` for the checks' automatic resolution and re-opening, the reason code then in `text`), `actor_id` (users, SET NULL) and `at` (revision `0012_alert_events`, ADR-0010 amendment). Written only by `arcilogger_worker.alerts.store`; the audit log gets `alert.state` / `alert.note` (the note's length only). Kind `assign` (revision `0024_rules`): the alert was given to a user (`text` = the user name) or to nobody (`text` NULL) |
 | `rule_state` | `rule` | One row per security rule R01–R19 (revision `0024_rules`, Wave 6): `watermark` (the receive time up to which the rule was evaluated; a new rule starts at the current horizon, no backfill), `last_run_at`, `last_input_at` (newest row of its input tables), `last_error`, `failures` (in a row), `skipped_until` (backlog skipped), `alerts_opened`. Derived state of the worker job `rules.run` |
+| `rule_traffic_state` | `rule`, `period_start` | R13's and R14's running traffic totals (revision `0027_rule_traffic_totals`, #280): per rule and period (site day or night) what they were counted with (`inputs`) and up to which receive time (`filled_until`, moved with the rule's watermark). Derived: a missing or stale row makes the next run read the period whole |
+| `rule_traffic_totals` | `rule`, `period_start`, `srcip`, `minute`, `received` | The period's logs (`rows`) and bytes (`amount`) per address, minute of device time and minute of receive time, with the first and last receive time. Derived from `fg_traffic` |
+| `rule_traffic_evidence` | `rule`, `period_start`, `srcip` | An address's oldest counted logs in the period (`refs`: references only, as `alert_evidence`), kept once there are a full list's worth. Derived |
 | `alert_evidence` | (alert_id, n) | The rows behind a security rule's alert (revision `0024_rules`): `tbl` (a parsed log table or `devices`), `row_id`, device and receive time, `source` and the raw reference (`raw_day`, `raw_line`, `raw_offset`; NULL for `devices`) that `GET /api/v1/raw` opens with its own permission and audit. References only, never line content; at most `rules.evidence_max` per alert, deleted with the alert |
 | `report_schedules` | id | Scheduled usage reports (revision `0011_reports`, ADR-0012): name, kind (end_of_day/full_day/weekly/monthly), `enabled`, `time` (HH:MM, site time), `weekday` (weekly) / `monthday` (monthly), `recipients`, `formats` (`email_html`, `pdf`, `xlsx`), `person_level` (default true: names), `pseudonymize`, `next_run_at`, `updated_by`. The four shipped schedules are inserted once by the migration, disabled |
 | `search_counts` | id; unique `uq_search_counts_key` (hour, source, raw_day, kind, tbl, action, net) `NULLS NOT DISTINCT`; index (source, hour), (raw_day, source) | Exact hourly line counts of the search statistics (revision `0016_search`, ADR-0015, `arcilogger_db.searchcounts`): `hour` (`date_trunc('hour', time)`, device time, UTC), the spool file (`source`, `raw_day`), `kind` (`arcilogger_db.kinds.kind_of` of the `messages` row), `tbl` (the line's typed table, `''` without one), `action` (the typed row's, lower-cased), `net` (the /24 of the typed row's client address when it is private IPv4: 10/8, 172.16/12, 192.168/16, 100.64/10), `n` (> 0). One row per key, about 450 keys an hour for 150 users. The ingest loader adds a batch's counts in the transaction that loads its rows; `searchcounts.rebuild_stream` recounts one file from its rows (`arcilogger-db search-counts rebuild`); derived, like every table |

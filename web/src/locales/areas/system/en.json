@@ -157,7 +157,12 @@
       "delay": "Delay",
       "stratum": "Stratum",
       "noSamples": "No clock sample in the last 24 hours.",
-      "ms": "{{value}} ms"
+      "ms": "{{value}} ms",
+      "sourceClocks": "Log sources whose clock is beyond the limit ({{limit}} seconds)",
+      "sourceClocksOk": "Every log source's clock is within the limit ({{limit}} seconds; alerts.source_clock_limit_seconds).",
+      "source": "Source",
+      "sourceOffset": "Clock offset",
+      "sourceRows": "Records"
     },
     "version": {
       "product": "Product",

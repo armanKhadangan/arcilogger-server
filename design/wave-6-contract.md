@@ -693,12 +693,13 @@ to the normal site: `port-scan` (R01), `external-scan` (R02), `brute-force` (R03
   and `values` move as before. §2.1.5's "counts add up" is replaced by this. It lands in W6-A's
   dry-run PR, before any API or UI shows a count. A closed alert's `after_close.count` (cooldown)
   follows the same rule: the largest window count, never a sum (#270; lands with the rules API).
-- **C2 — no index migration for the rules** (#278). The perf guard (T-A6) measured every rule's
-  statements with `EXPLAIN (ANALYZE, BUFFERS)`: the primary keys `(time, id)` and the existing
-  per-table key indexes serve every rule, and an index on `time_received` made R01 and R02
-  slower. §2.1.7 allows only indexes the rules need, so none is added. `0024_rules` is merged and
-  is not edited; `0025` is W6-H's request kind (C10). R13's and R14's day and night totals,
-  which no index helps, are #280.
+- **C2 — the rules' receive-time indexes, migration `0026_rules_time_received`** (#278,
+  W6-A-7). Measured on the slice alone, no index paid; with a window filled behind the slice (as
+  in production), `(time_received)` on `fg_traffic`, `fg_dns`, `fg_web` and `fg_app` took the 18
+  rules from 30.7 s to 21.3 s at 10 minutes behind, with ingest's gate unchanged. `0024_rules`
+  is merged and is not edited; `0025` is W6-H's request kind (C10); `0027` holds R13's and
+  R14's running totals (#280). An upgrade builds the four indexes over every existing row with
+  the services stopped (CHANGELOG).
 - **C3 — `rules.evidence_max`:** a rule may return up to 100 evidence rows (the setting's
   maximum) or read the setting itself; the engine keeps the configured number, oldest first.
 - **C4 — defaults the tables leave open** (#253, #254): cooldown 3600 s for R01, R03, R08,
@@ -763,7 +764,8 @@ to the normal site: `port-scan` (R01), `external-scan` (R02), `brute-force` (R03
     the list whenever the walk succeeded. The API never turns a probe-only request into
     `active`. Audit `admin.probe` with the source name and outcome, never a value.
   - The SNMP form offers the interfaces as a pick list and falls back to typed names (W6-H's
-    owner builds it, with a grant for the SNMP part of `web/src/pages/sources/`).
+    owner builds it, with a grant for the SNMP form in `web/src/pages/settings/`:
+    `source-snmp.tsx`, `snmp-model.ts`, `sources-page.tsx`).
 - **C12 — the live tail's Linux bound follows CI's interpreter** (#191). CI's Linux job runs uv's
   managed Python 3.12.16 since 2026-11-07, not the runner's 3.12.3: the gauge became 8 to 11 %
   faster on the same CPU and the event loop's figure in gauge lines rose with it, while its time a
@@ -771,6 +773,16 @@ to the normal site: `port-scan` (R01), `external-scan` (R02), `brute-force` (R03
   ubuntu-latest's value is 7.4, fitted to the 89: the costliest passes by 5.2 %, a path 40 %
   costlier fails on 81 of them, 20 % costlier on 48. `CI_READINGS`' Linux rows are those
   readings, with their CPU models. windows-latest is unchanged.
+- **C13 — a device clock that is minutes off** (#222):
+  - A source's typical offset is the median of its newest rows received in the last hour
+    (`source_clock_samples`, at least 10 rows); ingest does not change.
+  - `GET /api/v1/sources` gives `clock_offset_seconds` (negative: behind) and `clock_rows`;
+    `/system/health` the sources beyond the limit; `/live` the sources too late for "Şu an".
+  - The alert is the system alert `R20-source-clock:<source>` (free, 5651 Temel), one per
+    source, above `alerts.source_clock_limit_seconds` (default 120, 30-86,400, "sahada
+    doğrula"); it resolves when the offset is back within the limit. It replaces
+    `R20-lease:source-clock`: an open one is resolved as `superseded`, and its catalogue entry
+    stays for old alerts. The look-up's own D28 tolerance is unchanged; D8 is unchanged.
 
 ---
 
@@ -909,3 +921,61 @@ to the normal site: `port-scan` (R01), `external-scan` (R02), `brute-force` (R03
   - The other parsed tables are small or read through their own indexes, so they get none.
     R09 and R10 stay under the line of about 1 s per 10 minutes behind the slice, so W6-B gets no
     issue (manager, #278).
+
+### #217 (W6-H follow-up, "Bağlantıyı dene"; manager's C11 on #217)
+
+- **#217-1: the tested source's SNMP is switched off in the probe-only candidate.** An enabled
+  `[sources.snmp]` needs 1 to 4 interfaces (`SnmpConfig`), but the test exists to list them before
+  any is chosen. With `options.probe_only` the API sends the source's op with
+  `snmp.enabled = false` (as typed otherwise), and the rules probe that table regardless of
+  `enabled` (with its user and both keys required, and a recent re-authentication). The op is sent
+  even when nothing changed, as `config.apply` needs one. Nothing of it is written.
+- **#217-2: the journal and the audit.** The agent's journal line of a test has the new state
+  `probe` and the source's name (`JournalLine.source`); the worker writes `admin.probe` with
+  `log_source` and `ok` (the key `source` of the audit details already names the journal file).
+  Success has no result in the journal, only in the request status
+  (`{"probe_only": true, "interfaces": [...]}`).
+
+### W6-E (2026-11-15, #280: R13's and R14's running totals)
+
+- **W6-E-1: a bucket's first and last receive time may name a log that no longer counts.** R13's
+  day and R14's nights are kept per address, minute of device time and minute of receive time
+  (`rule_traffic_totals`, revision `0027_rule_traffic_totals`), and each slice adds what the
+  sessions it touches change. Bytes and log counts are exact: a session is counted again as of
+  the slice start and as of its end, so a late log that changes the increment of a log counted
+  before is taken into account (the "counter case": a late interim log with the final log's
+  counters makes the final log count 0). The first and last receive time of a bucket are a
+  minimum and a maximum and cannot be taken back: a bucket whose other logs still count may keep
+  the time of a log that counts 0 now (manager's answer 3 on #280). A hit's time is the newest
+  counted log of the subject, and a hit needs a counted log in the slice, newer than any log a
+  late log can zero, so it stays exact (pinned by
+  `test_a_late_log_that_zeroes_a_counted_log`); what can lag, by less than the receive minute
+  the logs share, is the first receive time R14 compares with the night's end.
+- **W6-E-2: R13's hour counts each log as the site day counts it.** §2.2.4 has R13 compare the
+  bytes sent in the window with `hour_bytes`. A log's bytes are its counter less the previous log
+  of its session; the hour read only saw a previous log received after `window_start −
+  usage.session_overlap_seconds`, the day sees one received after `day_start − overlap`. So
+  when a session's consecutive logs were more than the window and the overlap apart, the hour
+  counted the later log's whole counter, bytes from before the hour included. The hour is now
+  the bytes of the logs received in the window as their site day counts them (yesterday's logs
+  as yesterday counts them), summed from the kept minutes of receive time
+  (`rule_traffic_totals.received`) and the window's partial first minute, so a run reads its
+  slice and one partial minute, not the hour (manager's answer 2 on #280: key by receive
+  minute). It differs from the old hour only for such sessions, and only by leaving out bytes
+  sent before the hour; it is pinned by `test_the_hour_is_the_days_increments_received_in_it`.
+  This meaning of the hour was the default of the question asked on #280, accepted by the
+  manager on #286; keeping the old hour exactly would have needed the buckets keyed by the
+  previous log's receive minute too.
+- **W6-E-3: what a run of R13 and R14 reads.** The day's and the nights' totals read only the
+  slice: its logs and the other logs of their sessions, and the kept buckets of its addresses.
+  The hour evidence of R13's hit addresses (each address's oldest counted logs received in the
+  window, as before) reads at most these addresses' own rows of the window (manager's answer on
+  #286): per hit address, the device minutes its kept buckets name for the counted logs received
+  up to the minute of its 100th log, each range through `ix_fg_traffic_srcip_time`. The buckets
+  hold every counted log, a late one too, so the evidence is the same as one read of the window
+  (pinned by `test_the_hour_is_the_days_increments_received_in_it`). The first evidence of an
+  address newly over `day_bytes` or a night's `bytes` reads its period once and is kept after
+  that (W6-E's kept evidence lists). With 0, 5 and 10 minutes of the guard's traffic behind the
+  slice, a kept run of R13 took 1.15 s, 3.08 s and 2.83 s: the step from 0 to 5 minutes is the
+  hour evidence of 43 addresses newly over `hour_bytes` (1 at 0 minutes), and it does not grow
+  further with the minutes behind.

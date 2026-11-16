@@ -10,6 +10,9 @@ import { SAMPLE_TODAY } from './samples';
  * captured `activity-wan.json`, "Şu an" W5-M's captured `activity.json` (`mock-activity.ts`).
  */
 
+/** A firewall seven minutes behind (`late_sources`, #222). */
+const LATE = [{ source: 'fortigate', behind_seconds: 420 }];
+
 function lastQuery(api: MockApi, path: string): URLSearchParams | undefined {
   return api.callsTo('GET', path).at(-1)?.query;
 }
@@ -101,6 +104,16 @@ test.describe('Canlı Durum', () => {
     await mockApi(page, { signedInAs: 'tolga', activity: { warmingUp: true } });
     await page.goto('/activity');
     await expect(page.getByTestId('activity-warming')).toContainText('Rakamlar henüz eksik');
+    await expect(page.getByTestId('activity-late-sources')).toHaveCount(0);
+  });
+
+  test('a firewall whose clock is far behind is named', async ({ page }) => {
+    // `late_sources` (#222): its traffic is missing from "Şu an" until its clock is set right.
+    await mockApi(page, { signedInAs: 'tolga', activity: { lateSources: LATE } });
+    await page.goto('/activity');
+    await expect(page.getByTestId('activity-late-sources')).toContainText(
+      'fortigate (7 dk geri): cihaz saati 5 dakikadan fazla geride',
+    );
   });
 
   test('each part only for those who may see it', async ({ page }) => {
@@ -128,11 +141,12 @@ for (const theme of ['light', 'dark'] as Theme[]) {
   test(`Canlı Durum accessibility — ${theme}`, async ({ page }) => {
     await usePreferences(page, { theme });
     await useSampleClock(page, SAMPLE_TODAY);
-    await mockApi(page, { signedInAs: 'tolga' });
+    await mockApi(page, { signedInAs: 'tolga', activity: { lateSources: LATE } });
     await page.goto('/activity');
     await expect(
       page.getByRole('table', { name: 'Şu an veri gönderip alanlar' }).getByRole('row').nth(1),
     ).toBeVisible();
+    await expect(page.getByTestId('activity-late-sources')).toBeVisible();
     await expectNoA11yViolations(page);
   });
 }
