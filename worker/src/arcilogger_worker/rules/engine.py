@@ -231,7 +231,7 @@ def apply_hit(
     if closed is not None and hit.time < closed.time + timedelta(seconds=settings.cooldown_seconds):
         details = dict(closed.details or {})
         after = dict(details.get(AFTER_CLOSE) or {})
-        after["count"] = int(after.get("count") or 0) + hit.count
+        after["count"] = max(int(after.get("count") or 0), hit.count)  # C1, as ``count``
         after["last_time"] = max(hit.time.isoformat(), str(after.get("last_time") or ""))
         details[AFTER_CLOSE] = after
         closed.details = details
