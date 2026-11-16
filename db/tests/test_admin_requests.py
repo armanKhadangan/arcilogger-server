@@ -28,6 +28,10 @@ from arcilogger_db.models import AdminRequest, User
 from arcilogger_db.testing import TestServer
 
 MIGRATION = importlib.import_module("arcilogger_db.migrations.versions.v0015_admin_requests")
+#: The newest revision that changes the kinds (``worker.webhook_test``, Wave 6 W6-H).
+KINDS_MIGRATION = importlib.import_module(
+    "arcilogger_db.migrations.versions.v0025_admin_webhook_test"
+)
 #: A masked secret as the API writes it into ``params.changes`` (contract 2.14).
 MASKED = {"secret": True, "old": "set", "new": "set", "changed": True}
 
@@ -123,7 +127,8 @@ def test_migration_0015_up_and_down(empty_engine: Engine) -> None:
 def test_the_migration_names_what_the_contract_names() -> None:
     """Migrations are frozen in time; the contract is not: a new kind or state needs a new
     revision (this test fails until there is one)."""
-    assert MIGRATION.KINDS == ADMIN_REQUEST_KINDS
+    assert KINDS_MIGRATION.KINDS == ADMIN_REQUEST_KINDS
+    assert KINDS_MIGRATION.BEFORE == MIGRATION.KINDS
     assert MIGRATION.SECTIONS == SECTIONS
     assert MIGRATION.STATES == STATES
     assert set(MIGRATION.TERMINAL) == TERMINAL_STATES
