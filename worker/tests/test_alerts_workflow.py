@@ -305,7 +305,7 @@ def test_system_check_resolution_is_a_system_event(db_session: Session) -> None:
 
 def test_ip_conflict_rebuild_events(db_session: Session) -> None:
     day = NOW.date()
-    key = f"ip_conflict:172.20.43.120:aa:bb:cc:00:00:01,aa:bb:cc:00:00:02:{day.isoformat()}"
+    key = f"ip_conflict:172.20.43.120:02:00:5e:00:53:08,02:00:5e:00:53:09:{day.isoformat()}"
     row = alert(db_session, key=key, rule="ip_conflict", details={"ip": "172.20.43.120"})
     assert resolve_unsupported(db_session, day, found=()) == 1
     db_session.commit()
@@ -331,7 +331,7 @@ def test_a_rebuild_resolves_an_acknowledged_conflict_it_no_longer_finds(
     """İnceleniyor while a person looks into it: the rebuild still closes it once the day's
     evidence shows no conflict, like every other check (UYARILAR.md section 8)."""
     day = NOW.date()
-    key = f"ip_conflict:172.20.43.23:aa:bb:cc:00:00:03,aa:bb:cc:00:00:04:{day.isoformat()}"
+    key = f"ip_conflict:172.20.43.23:02:00:5e:00:53:0a,02:00:5e:00:53:0b:{day.isoformat()}"
     row = alert(db_session, key=key, rule="ip_conflict", details={"ip": "172.20.43.23"})
     change(db_session, row, "acknowledged")
     assert resolve_unsupported(db_session, day, found=(key,)) == 0  # still there: kept

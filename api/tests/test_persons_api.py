@@ -20,7 +20,7 @@ from arcilogger_db.models import AuditLog, Department, Person, Vlan
 
 Login = Callable[..., LoggedIn]
 API = "/api/v1"
-PC, PHONE = "f0:1f:af:00:00:01", "02:00:5e:00:53:46"
+PC, PHONE = "00:00:5e:00:53:3b", "02:00:5e:00:53:46"
 
 
 @pytest.fixture

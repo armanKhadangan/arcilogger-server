@@ -58,7 +58,7 @@
       "hours": "all",
       "to": "2026-10-12"
     },
-    "updated_at": "2026-10-13T04:01:21.466846Z"
+    "updated_at": "2026-10-13T04:01:28.076740Z"
   },
   "categories_department_filter": {
     "computed_until": "2026-10-12T21:00:00Z",
@@ -103,7 +103,7 @@
       "hours": "all",
       "to": "2026-10-12"
     },
-    "updated_at": "2026-10-13T04:01:21.466846Z"
+    "updated_at": "2026-10-13T04:01:28.076740Z"
   },
   "category": {
     "category": "Video",
@@ -139,7 +139,7 @@
       "upload_bytes": 1860,
       "users": 1
     },
-    "updated_at": "2026-10-13T04:01:21.466846Z",
+    "updated_at": "2026-10-13T04:01:28.076740Z",
     "users": [
       {
         "department": "Finans",
@@ -214,7 +214,7 @@
       "upload_bytes": 0,
       "users": 1
     },
-    "updated_at": "2026-10-13T04:01:21.466846Z",
+    "updated_at": "2026-10-13T04:01:28.076740Z",
     "users": [
       {
         "department": "Planlama",
@@ -354,7 +354,7 @@
       "upload_bytes": 7700,
       "users": 2
     },
-    "updated_at": "2026-10-13T04:01:21.466846Z",
+    "updated_at": "2026-10-13T04:01:28.076740Z",
     "users": [
       {
         "department": "Finans",
@@ -833,7 +833,7 @@
         "users": 1
       }
     ],
-    "updated_at": "2026-10-13T04:01:21.466846Z"
+    "updated_at": "2026-10-13T04:01:28.076740Z"
   },
   "company_off_hours": {
     "active_users": 2,
@@ -1110,11 +1110,11 @@
         "users": 1
       }
     ],
-    "updated_at": "2026-10-13T04:01:21.466846Z"
+    "updated_at": "2026-10-13T04:01:28.076740Z"
   },
   "company_today": {
     "active_users": 1,
-    "computed_until": "2026-10-13T04:01:21.749716Z",
+    "computed_until": "2026-10-13T04:01:28.198722Z",
     "departments": [
       {
         "active_users": 1,
@@ -1349,7 +1349,7 @@
         "users": 1
       }
     ],
-    "updated_at": "2026-10-13T04:01:21.749716Z"
+    "updated_at": "2026-10-13T04:01:28.198722Z"
   },
   "company_week": {
     "active_users": 5,
@@ -2761,7 +2761,7 @@
         "users": 1
       }
     ],
-    "updated_at": "2026-10-13T04:01:21.466846Z"
+    "updated_at": "2026-10-13T04:01:28.076740Z"
   },
   "company_work_hours": {
     "active_users": 5,
@@ -3123,7 +3123,7 @@
         "users": 1
       }
     ],
-    "updated_at": "2026-10-13T04:01:21.466846Z"
+    "updated_at": "2026-10-13T04:01:28.076740Z"
   },
   "errors": {
     "forbidden_pseudonyms": {
@@ -3276,7 +3276,7 @@
       "content-disposition": "attachment; filename=\"arcilogger-kullanim-categories-20261012-20261012.xlsx\"",
       "content-type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     },
-    "sha256": "77ad0681bb8b81a5884a6c2373c875c698b06a2e4d629a915f8f20f21ae810c9",
+    "sha256": "ca241f1a3b08f2d3541cda0692358b22053c351e3f0676e9e6b5324fd2733cc6",
     "size": 5795
   },
   "export_category_csv": {
@@ -3305,7 +3305,7 @@
       "content-disposition": "attachment; filename=\"arcilogger-kullanim-company-20261012-20261012.xlsx\"",
       "content-type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     },
-    "sha256": "4de5b849ce5393a692e3830f9e9390754f43252fa78543f31af2ddff0e3346f5",
+    "sha256": "d06cdb8c63f52979530451ae72c9c73da12c9d988cb58657d02d2f0adf115747",
     "size": 10427
   },
   "export_departments_csv": {
@@ -3334,7 +3334,7 @@
       "content-disposition": "attachment; filename=\"arcilogger-kullanim-sites-20261012-20261012.xlsx\"",
       "content-type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     },
-    "sha256": "05d0a21f44386073d2536244e7df46df92fd58b79c7f8a1602afc32cf365f880",
+    "sha256": "650011e0448d8c693120a85224616d8a04596566f336bc3ce53e6c6b0cf67419",
     "size": 6131
   },
   "export_subject_csv": {
@@ -3353,8 +3353,8 @@
       "content-disposition": "attachment; filename=\"arcilogger-kullanim-subject-20261012-20261012.xlsx\"",
       "content-type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     },
-    "sha256": "f2cc3628b669074bb9d48f05f8d72f66b37cdebf477a377e9e0265c94a42a65d",
-    "size": 13123
+    "sha256": "b4e8f90bf15082721819cd96fc1ca4317346950bcb969745f7ee76a83ae9296a",
+    "size": 13120
   },
   "export_subjects_csv": {
     "headers": {
@@ -3514,10 +3514,10 @@
       "to": "2026-10-12"
     },
     "total": 3,
-    "updated_at": "2026-10-13T04:01:25.065297Z"
+    "updated_at": "2026-10-13T04:01:32.242279Z"
   },
   "meta": {
-    "captured_at": "2026-10-13T04:01:42.273938+00:00",
+    "captured_at": "2026-10-13T04:01:54.628990+00:00",
     "clock": "2026-10-13T07:00:00+03:00",
     "info": "captured by web/scripts/capture_api_samples.py; do not edit",
     "site_day": "2026-10-09",
@@ -3525,6 +3525,19 @@
     "tsa": "mock (never legally valid)"
   },
   "pseudonyms": [
+    {
+      "kind": "device",
+      "pseudonym": "Cihaz-2405",
+      "subject": {
+        "hostname": "PC-02",
+        "ip": "172.20.43.81",
+        "key": "device:00:00:5e:00:53:1f",
+        "kind": "device",
+        "label": "PC-02",
+        "mac": "00:00:5e:00:53:1f",
+        "pseudonymous": false
+      }
+    },
     {
       "kind": "ip",
       "pseudonym": "Cihaz-6CCB",
@@ -3535,19 +3548,6 @@
         "kind": "ip",
         "label": "172.20.41.77",
         "mac": null,
-        "pseudonymous": false
-      }
-    },
-    {
-      "kind": "device",
-      "pseudonym": "Cihaz-7CB9",
-      "subject": {
-        "hostname": "PC-02",
-        "ip": "172.20.43.81",
-        "key": "device:3c:52:82:00:10:02",
-        "kind": "device",
-        "label": "PC-02",
-        "mac": "3c:52:82:00:10:02",
         "pseudonymous": false
       }
     },
@@ -3607,19 +3607,19 @@
     }
   ],
   "rebuild_done": {
-    "created_at": "2026-10-13T04:01:25.002619Z",
+    "created_at": "2026-10-13T04:01:32.166763Z",
     "error": null,
-    "finished_at": "2026-10-13T04:01:25.065297Z",
+    "finished_at": "2026-10-13T04:01:32.242279Z",
     "from": "2026-10-12",
     "job_id": 1,
     "progress": 1.0,
     "requested_by": "tolga",
-    "started_at": "2026-10-13T04:01:25.065297Z",
+    "started_at": "2026-10-13T04:01:32.242279Z",
     "status": "done",
     "to": "2026-10-12"
   },
   "rebuild_queued": {
-    "created_at": "2026-10-13T04:01:25.002619Z",
+    "created_at": "2026-10-13T04:01:32.166763Z",
     "error": null,
     "finished_at": null,
     "from": "2026-10-12",
@@ -3631,7 +3631,7 @@
     "to": "2026-10-12"
   },
   "rebuild_requested": {
-    "created_at": "2026-10-13T04:01:25.002619Z",
+    "created_at": "2026-10-13T04:01:32.166763Z",
     "error": null,
     "finished_at": null,
     "from": "2026-10-12",
@@ -3674,7 +3674,7 @@
       "upload_bytes": 0,
       "users": 2
     },
-    "updated_at": "2026-10-13T04:01:21.466846Z",
+    "updated_at": "2026-10-13T04:01:28.076740Z",
     "users": [
       {
         "department": "Planlama",
@@ -3783,7 +3783,7 @@
       "upload_bytes": 0,
       "users": 1
     },
-    "updated_at": "2026-10-13T04:01:21.466846Z",
+    "updated_at": "2026-10-13T04:01:28.076740Z",
     "users": [
       {
         "department": "Finans",
@@ -3981,7 +3981,7 @@
       "to": "2026-10-12"
     },
     "total": 11,
-    "updated_at": "2026-10-13T04:01:21.466846Z"
+    "updated_at": "2026-10-13T04:01:28.076740Z"
   },
   "sites_category_filter": {
     "computed_until": "2026-10-12T21:00:00Z",
@@ -4010,7 +4010,7 @@
       "to": "2026-10-12"
     },
     "total": 1,
-    "updated_at": "2026-10-13T04:01:21.466846Z"
+    "updated_at": "2026-10-13T04:01:28.076740Z"
   },
   "sites_department_filter": {
     "computed_until": "2026-10-12T21:00:00Z",
@@ -4143,7 +4143,7 @@
       "to": "2026-10-12"
     },
     "total": 9,
-    "updated_at": "2026-10-13T04:01:21.466846Z"
+    "updated_at": "2026-10-13T04:01:28.076740Z"
   },
   "sites_search": {
     "computed_until": "2026-10-12T21:00:00Z",
@@ -4172,7 +4172,7 @@
       "to": "2026-10-12"
     },
     "total": 1,
-    "updated_at": "2026-10-13T04:01:21.466846Z"
+    "updated_at": "2026-10-13T04:01:28.076740Z"
   },
   "subject_device": {
     "apps": [],
@@ -8062,10 +8062,10 @@
     "subject": {
       "hostname": "PC-02",
       "ip": "172.20.43.81",
-      "key": "device:3c:52:82:00:10:02",
+      "key": "device:00:00:5e:00:53:1f",
       "kind": "device",
       "label": "PC-02",
-      "mac": "3c:52:82:00:10:02",
+      "mac": "00:00:5e:00:53:1f",
       "pseudonymous": false
     },
     "timeline": [
@@ -8080,7 +8080,7 @@
         "start": "2026-10-12T20:59:00Z"
       }
     ],
-    "updated_at": "2026-10-13T04:01:21.466846Z",
+    "updated_at": "2026-10-13T04:01:28.076740Z",
     "urls": []
   },
   "subject_ip": {
@@ -11956,7 +11956,7 @@
         "start": "2026-10-12T11:00:00Z"
       }
     ],
-    "updated_at": "2026-10-13T04:01:21.466846Z",
+    "updated_at": "2026-10-13T04:01:28.076740Z",
     "urls": []
   },
   "subject_person": {
@@ -12039,10 +12039,10 @@
       {
         "hostname": "PC-01",
         "ip": "172.20.43.37",
-        "key": "device:3c:52:82:00:10:01",
+        "key": "device:00:00:5e:00:53:1e",
         "kind": "device",
         "label": "Ayşe'nin bilgisayarı",
-        "mac": "3c:52:82:00:10:01",
+        "mac": "00:00:5e:00:53:1e",
         "pseudonymous": false
       }
     ],
@@ -15912,10 +15912,10 @@
         "device": {
           "hostname": "PC-01",
           "ip": "172.20.43.37",
-          "key": "device:3c:52:82:00:10:01",
+          "key": "device:00:00:5e:00:53:1e",
           "kind": "device",
           "label": "Ayşe'nin bilgisayarı",
-          "mac": "3c:52:82:00:10:01",
+          "mac": "00:00:5e:00:53:1e",
           "pseudonymous": false
         },
         "metrics": {
@@ -16075,7 +16075,7 @@
         "start": "2026-10-12T16:30:00Z"
       }
     ],
-    "updated_at": "2026-10-13T04:01:21.466846Z",
+    "updated_at": "2026-10-13T04:01:28.076740Z",
     "urls": [
       {
         "blocked": false,
@@ -16126,10 +16126,10 @@
       {
         "hostname": "PC-03",
         "ip": "172.20.42.82",
-        "key": "device:3c:52:82:00:10:03",
+        "key": "device:00:00:5e:00:53:24",
         "kind": "device",
         "label": "Planlama bilgisayarı",
-        "mac": "3c:52:82:00:10:03",
+        "mac": "00:00:5e:00:53:24",
         "pseudonymous": false
       }
     ],
@@ -19957,10 +19957,10 @@
         "device": {
           "hostname": "PC-03",
           "ip": "172.20.42.82",
-          "key": "device:3c:52:82:00:10:03",
+          "key": "device:00:00:5e:00:53:24",
           "kind": "device",
           "label": "Planlama bilgisayarı",
-          "mac": "3c:52:82:00:10:03",
+          "mac": "00:00:5e:00:53:24",
           "pseudonymous": false
         },
         "metrics": {
@@ -20024,7 +20024,7 @@
         "start": "2026-10-12T10:00:00Z"
       }
     ],
-    "updated_at": "2026-10-13T04:01:21.466846Z",
+    "updated_at": "2026-10-13T04:01:28.076740Z",
     "urls": []
   },
   "subject_reassigned_before": {
@@ -20047,10 +20047,10 @@
       {
         "hostname": "PC-03",
         "ip": "172.20.42.82",
-        "key": "device:3c:52:82:00:10:03",
+        "key": "device:00:00:5e:00:53:24",
         "kind": "device",
         "label": "Planlama bilgisayarı",
-        "mac": "3c:52:82:00:10:03",
+        "mac": "00:00:5e:00:53:24",
         "pseudonymous": false
       }
     ],
@@ -23878,10 +23878,10 @@
         "device": {
           "hostname": "PC-03",
           "ip": "172.20.42.82",
-          "key": "device:3c:52:82:00:10:03",
+          "key": "device:00:00:5e:00:53:24",
           "kind": "device",
           "label": "Planlama bilgisayarı",
-          "mac": "3c:52:82:00:10:03",
+          "mac": "00:00:5e:00:53:24",
           "pseudonymous": false
         },
         "metrics": {
@@ -23945,7 +23945,7 @@
         "start": "2026-10-12T08:59:00Z"
       }
     ],
-    "updated_at": "2026-10-13T04:01:21.466846Z",
+    "updated_at": "2026-10-13T04:01:28.076740Z",
     "urls": []
   },
   "subject_week": {
@@ -24028,10 +24028,10 @@
       {
         "hostname": "PC-01",
         "ip": "172.20.43.37",
-        "key": "device:3c:52:82:00:10:01",
+        "key": "device:00:00:5e:00:53:1e",
         "kind": "device",
         "label": "Ayşe'nin bilgisayarı",
-        "mac": "3c:52:82:00:10:01",
+        "mac": "00:00:5e:00:53:1e",
         "pseudonymous": false
       }
     ],
@@ -29053,10 +29053,10 @@
         "device": {
           "hostname": "PC-01",
           "ip": "172.20.43.37",
-          "key": "device:3c:52:82:00:10:01",
+          "key": "device:00:00:5e:00:53:1e",
           "kind": "device",
           "label": "Ayşe'nin bilgisayarı",
-          "mac": "3c:52:82:00:10:01",
+          "mac": "00:00:5e:00:53:1e",
           "pseudonymous": false
         },
         "metrics": {
@@ -29195,7 +29195,7 @@
       "pseudonymous": false
     },
     "timeline": [],
-    "updated_at": "2026-10-13T04:01:21.466846Z",
+    "updated_at": "2026-10-13T04:01:28.076740Z",
     "urls": [
       {
         "blocked": false,
@@ -29328,7 +29328,7 @@
       "to": "2026-10-12"
     },
     "total": 2,
-    "updated_at": "2026-10-13T04:01:21.466846Z"
+    "updated_at": "2026-10-13T04:01:28.076740Z"
   },
   "subjects_departments": {
     "computed_until": "2026-10-12T21:00:00Z",
@@ -29395,7 +29395,7 @@
       "to": "2026-10-12"
     },
     "total": 3,
-    "updated_at": "2026-10-13T04:01:21.466846Z"
+    "updated_at": "2026-10-13T04:01:28.076740Z"
   },
   "subjects_devices": {
     "computed_until": "2026-10-12T21:00:00Z",
@@ -29418,10 +29418,10 @@
         "subject": {
           "hostname": "PC-02",
           "ip": "172.20.43.81",
-          "key": "device:3c:52:82:00:10:02",
+          "key": "device:00:00:5e:00:53:1f",
           "kind": "device",
           "label": "PC-02",
-          "mac": "3c:52:82:00:10:02",
+          "mac": "00:00:5e:00:53:1f",
           "pseudonymous": false
         },
         "top_categories": [
@@ -29491,7 +29491,7 @@
       "to": "2026-10-12"
     },
     "total": 2,
-    "updated_at": "2026-10-13T04:01:21.466846Z"
+    "updated_at": "2026-10-13T04:01:28.076740Z"
   },
   "subjects_page": {
     "computed_until": "2026-10-12T21:00:00Z",
@@ -29543,7 +29543,7 @@
       "to": "2026-10-12"
     },
     "total": 3,
-    "updated_at": "2026-10-13T04:01:21.466846Z"
+    "updated_at": "2026-10-13T04:01:28.076740Z"
   },
   "subjects_persons": {
     "computed_until": "2026-10-12T21:00:00Z",
@@ -29683,7 +29683,7 @@
       "to": "2026-10-12"
     },
     "total": 3,
-    "updated_at": "2026-10-13T04:01:21.466846Z"
+    "updated_at": "2026-10-13T04:01:28.076740Z"
   },
   "subjects_search": {
     "computed_until": "2026-10-12T21:00:00Z",
@@ -29751,7 +29751,7 @@
       "to": "2026-10-12"
     },
     "total": 1,
-    "updated_at": "2026-10-13T04:01:21.466846Z"
+    "updated_at": "2026-10-13T04:01:28.076740Z"
   },
   "viewer_company": {
     "active_users": 5,
@@ -30155,7 +30155,7 @@
         "users": 1
       }
     ],
-    "updated_at": "2026-10-13T04:01:25.065297Z"
+    "updated_at": "2026-10-13T04:01:32.242279Z"
   },
   "viewer_sites_pseudonymous": {
     "category": "İş Uygulamaları",
@@ -30189,7 +30189,7 @@
       "upload_bytes": 0,
       "users": 2
     },
-    "updated_at": "2026-10-13T04:01:25.065297Z",
+    "updated_at": "2026-10-13T04:01:32.242279Z",
     "users": [
       {
         "department": "Planlama",
@@ -30346,9 +30346,9 @@
       {
         "hostname": null,
         "ip": null,
-        "key": "d:fb1a1c8bbee41dd6",
+        "key": "d:a2470e9b4bed2883",
         "kind": "device",
-        "label": "Cihaz-FB1A",
+        "label": "Cihaz-A247",
         "mac": null,
         "pseudonymous": true
       }
@@ -34219,9 +34219,9 @@
         "device": {
           "hostname": null,
           "ip": null,
-          "key": "d:fb1a1c8bbee41dd6",
+          "key": "d:a2470e9b4bed2883",
           "kind": "device",
-          "label": "Cihaz-FB1A",
+          "label": "Cihaz-A247",
           "mac": null,
           "pseudonymous": true
         },
@@ -34382,7 +34382,7 @@
         "start": "2026-10-12T16:30:00Z"
       }
     ],
-    "updated_at": "2026-10-13T04:01:25.065297Z",
+    "updated_at": "2026-10-13T04:01:32.242279Z",
     "urls": [
       {
         "blocked": false,
@@ -34551,7 +34551,7 @@
       "to": "2026-10-12"
     },
     "total": 3,
-    "updated_at": "2026-10-13T04:01:25.065297Z"
+    "updated_at": "2026-10-13T04:01:32.242279Z"
   },
   "viewer_subjects_pseudonymous": {
     "computed_until": "2026-10-12T21:00:00Z",
@@ -34691,6 +34691,6 @@
       "to": "2026-10-12"
     },
     "total": 3,
-    "updated_at": "2026-10-13T04:01:25.065297Z"
+    "updated_at": "2026-10-13T04:01:32.242279Z"
   }
 }

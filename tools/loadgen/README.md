@@ -149,7 +149,7 @@ uv run python tools/loadgen/arcilogger_loadgen.py --scenario brute-force,mac-fla
   verisiyle karşılaştırılır, yenilemeler kiranın yarısında, çıkış payları ±%2 içinde),
   `tests/test_mvp_end_to_end.py` (uçtan uca MVP testi bu üreteci kullanır).
 - **Değişiklik (2026-11-17, #315): MAC adresleri.** Bütün MAC'ler artık IANA'nın bloğunda
-  (kurgusal dünya, gerçek bir üreticinin değil): bilgisayarlar `00:00:5e:00:10:00`'dan başlar
+  (kurgusal dünya, gerçek bir üreticinin değil): bilgisayarlar `00:00:5e:00:10:xx`'ten başlar
   (belgeleme aralığının, `00:00:5e:00:53:xx`, 256 adresinden sonrası), yazıcılar diğer altyapı
   cihazları gibi adreslerinin son baytını alır (`00:00:5e:00:53:51`–`54`; OUI araması artık üretici
   adı vermez), telefonların özel (yerel yönetilen) adresleri `02:00:5e:10:xx:xx`, her gün yeni MAC
@@ -224,7 +224,7 @@ change. The staff Wi-Fi now fills up at
 about 125 users instead of 160. Keep this in mind when you compare with earlier outputs.
 
 **Change (2026-11-17, #315): MAC addresses.** Every MAC is now in IANA's block (the fictional
-world, no real vendor's): PCs from `00:00:5e:00:10:00` (past the 256 addresses of the
+world, no real vendor's): PCs from `00:00:5e:00:10:xx` on (past the 256 addresses of the
 documentation range `00:00:5e:00:53:xx`), printers the last byte of their address like the rest of
 the infrastructure (`00:00:5e:00:53:51`–`54`; the OUI lookup names no vendor for them any more),
 phones' private (locally administered) addresses `02:00:5e:10:xx:xx`, phones that take a new MAC

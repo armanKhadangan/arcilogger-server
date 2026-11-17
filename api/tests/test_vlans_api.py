@@ -21,7 +21,7 @@ from arcilogger_db.models import AuditLog, Vlan
 Login = Callable[..., LoggedIn]
 API = "/api/v1"
 #: Devices in the networks the tests add (outside the example plan).
-LAB_PC, LAB_PC2, NAS = "f0:1f:af:00:02:01", "f0:1f:af:00:02:02", "f0:1f:af:00:02:03"
+LAB_PC, LAB_PC2, NAS = "00:00:5e:00:53:4d", "00:00:5e:00:53:4f", "00:00:5e:00:53:51"
 LAB = "10.20.0.0/24"
 #: A full new VLAN (the example plan has VLAN ids up to 61 and 172.20.x.0/24 networks).
 FULL: dict[str, Any] = {

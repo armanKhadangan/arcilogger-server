@@ -90,7 +90,7 @@ TEMPLATES: Final[dict[str, tuple[tuple[str, ...], tuple[str, ...]]]] = {
     ),
     "assignments": (
         ASSIGNMENT_COLUMNS,
-        ("f0:1f:af:00:00:01", "1001", "Ayşe Yılmaz", "2026-10-01T09:00:00+03:00", "Zimmet formu"),
+        ("00:00:5e:00:53:3b", "1001", "Ayşe Yılmaz", "2026-10-01T09:00:00+03:00", "Zimmet formu"),
     ),
 }
 _LIMITS: Final = {"name": 200, "title": 200, "employee_no": 64, "notes": 2000, "note": 500}

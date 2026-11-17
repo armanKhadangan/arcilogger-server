@@ -166,7 +166,7 @@ def test_a_mixed_site_whose_fortigate_dhcp_feed_stops(
 
 
 def test_an_arp_log_script_that_stops(check: Any, evidence: Evidence) -> None:
-    evidence.arp(NOW - timedelta(hours=30), "172.20.10.237", "00:1b:a9:00:00:10", "vlan10")
+    evidence.arp(NOW - timedelta(hours=30), "172.20.10.237", "00:00:5e:00:53:19", "vlan10")
     evidence.dhcp(NOW - HOUR, "assigned", "172.20.43.120", "00:00:5e:00:53:20")
     office_traffic(evidence)
     alerts = check()

@@ -344,7 +344,7 @@ for (const theme of ['light', 'dark'] as Theme[]) {
           (p) => p.getByRole('table', { name: 'Cihazlar ve IP adresleri' }),
         ],
         [
-          `/usage?tab=devices&${day}&subject=device%3A3c%3A52%3A82%3A00%3A10%3A02`,
+          `/usage?tab=devices&${day}&subject=device%3A00%3A00%3A5e%3A00%3A53%3A1f`,
           (p) => p.getByRole('heading', { level: 2, name: 'PC-02' }),
         ],
         [`/usage?tab=sites&${day}`, (p) => p.getByRole('table', { name: 'Siteler' })],

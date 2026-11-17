@@ -274,9 +274,9 @@ PHONE, PHONE_MAC, PHONE_HOSTNAME = "172.20.60.142", "02:00:5e:00:53:64", "Telefo
 ROGUE_MAC = "00:00:5e:00:53:9a"
 #: Other clients on the department VLANs (VLAN 42 Planlama, 41 Finans, 43 İdari İşler).
 OTHERS = (
-    ("172.20.42.165", "3c:52:82:00:00:05", "PLN-PC-05", "dhcp42"),
-    ("172.20.41.15", "00:15:5d:00:00:20", "FIN-PC-01", "dhcp41"),
-    ("172.20.43.44", "a4:83:e7:00:00:44", "IDR-PC-04", "dhcp43"),
+    ("172.20.42.165", "00:00:5e:00:53:1b", "PLN-PC-05", "dhcp42"),
+    ("172.20.41.15", "00:00:5e:00:53:0c", "FIN-PC-01", "dhcp41"),
+    ("172.20.43.44", "00:00:5e:00:53:36", "IDR-PC-04", "dhcp43"),
 )
 SEALED = [date(2026, 10, day) for day in range(4, 11)]  # 04.-10.10.2026
 LATE = date(2026, 10, 6)
@@ -1389,7 +1389,7 @@ def capture_devices(capture: Capture, admin: Any, auditor: Any, newcomer: Any) -
     errors["device_not_found"] = capture.error(
         admin.post(
             f"{API}/devices/assign",
-            json={"macs": ["02:00:00:00:00:01"], "person_id": can["id"]},
+            json={"macs": ["02:00:5e:00:53:00"], "person_id": can["id"]},
         ),
         404,
         "device_not_found",
@@ -1462,7 +1462,7 @@ def capture_devices(capture: Capture, admin: Any, auditor: Any, newcomer: Any) -
     )
     bad_assignments = (
         "mac;employee_no;person_name;valid_from;note\r\n"
-        "02:00:00:00:00:01;1002;;;\r\n"
+        "02:00:5e:00:53:00;1002;;;\r\n"
         f"{PC_MAC};1002;;20.09.2026 09:00;\r\n"
         f"{rogue};0950;;;\r\n"
     )
@@ -1485,7 +1485,7 @@ def capture_devices(capture: Capture, admin: Any, auditor: Any, newcomer: Any) -
     )
     errors["forbidden"] = capture.error(auditor.get(f"{API}/devices"), 403, "forbidden")
     errors["detail_not_found"] = capture.error(
-        admin.get(f"{API}/devices/02:00:00:00:00:01"), 404, "device_not_found"
+        admin.get(f"{API}/devices/02:00:5e:00:53:00"), 404, "device_not_found"
     )
 
 
@@ -1560,7 +1560,7 @@ def capture_usage(server: TestServer, template: str, root: Path) -> dict[str, An
             out["subject_person"] = get(hr, f"/subjects/{ayse}")
             out["subject_reassigned_before"] = get(hr, f"/subjects/{burak}")
             out["subject_reassigned_after"] = get(hr, f"/subjects/{can}")
-            out["subject_device"] = get(hr, "/subjects/device:3c:52:82:00:10:02")
+            out["subject_device"] = get(hr, "/subjects/device:00:00:5e:00:53:1f")
             out["subject_ip"] = get(hr, "/subjects/ip:172.20.41.77")
             out["subject_week"] = get(hr, f"/subjects/{ayse}", **{"from": "2026-10-06"})
             out["sites"] = get(hr, "/sites")

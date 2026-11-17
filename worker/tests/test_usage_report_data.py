@@ -161,7 +161,7 @@ def test_full_day_report_matches_the_golden_day(db_session: Session, site: Golde
     assert data["blocked_total"] == 3
     assert [(d["label"], d["mac"], d["person"], d["active_seconds"]) for d in data["devices"]] == [
         ("Ayşe'nin bilgisayarı", PC1_MAC, "Ayşe Yılmaz", 360),
-        ("Planlama bilgisayarı", "3c:52:82:00:10:03", "Burak Demir, Can Öztürk", 300),
+        ("Planlama bilgisayarı", "00:00:5e:00:53:24", "Burak Demir, Can Öztürk", 300),
         ("PC-02", PC2_MAC, None, 300),
         ("172.20.41.77", None, None, 60),
     ]

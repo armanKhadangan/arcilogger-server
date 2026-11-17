@@ -410,7 +410,8 @@ PRIVATE_FIXED: Final = 0x10
 PRIVATE_GUEST: Final = 0x08
 PRIVATE_DAY_FIRST: Final = 0x20
 PRIVATE_DAY_COUNT: Final = 0xC0
-#: The first PC's number in :func:`_iana_mac` (00:00:5E:00:10:00), below the documentation range.
+#: The first PC's number in :func:`_iana_mac`: PCs are 00:00:5E:00:10:xx and up, below the
+#: documentation range.
 PC_MAC_FIRST: Final = 0x1000
 #: The most guests a day: a guest's private address keeps its number in one byte (#317).
 MAX_GUESTS_PER_DAY: Final = 0xFF

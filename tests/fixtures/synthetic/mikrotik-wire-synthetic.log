@@ -18,16 +18,16 @@
 <30>Sep 23 09:38:29 CORE-R1 dhcp,info dhcp61 assigned 172.20.61.118 for 02:00:5E:00:53:5E
 <30>2026-09-23T09:38:30 CORE-R1 dhcp,info dhcp61 assigned 172.20.61.118 for 02:00:5E:00:53:5E
 <30>2026-09-23T09:38:31+03:00 CORE-R1 dhcp60 assigned 172.20.60.214 for 02:00:5E:00:53:5C Ayşe'nin iPhone'u
-<30>2026-09-23T09:38:31.250+03:00 dhcp43 assigned 172.20.43.120 for 3C:52:82:00:00:11 PC-120
+<30>2026-09-23T09:38:31.250+03:00 dhcp43 assigned 172.20.43.120 for 00:00:5E:00:53:1C PC-120
 <30>2026-09-23T06:38:32.000Z CORE-R1 system,info,account user netops logged in from 172.20.10.37 via winbox
-<30>2026-09-23T09:38:33+03:00 CORE-R1 dhcp;info dhcp43 assigned 172.20.43.110 for 3C:52:82:00:00:12 MUDUR-PC
+<30>2026-09-23T09:38:33+03:00 CORE-R1 dhcp;info dhcp43 assigned 172.20.43.110 for 00:00:5E:00:53:1D MUDUR-PC
 <30>2026-09-23T09:38:34+03:00 CORE-R1 dhcp,info: dhcp42 assigned 172.20.42.76 for 00:00:5E:00:53:4C
 <30>2026-09-23T09:38:35+03:00 CORE-R1 script: ARP-LOG 172.20.42.76 00:00:5E:00:53:4C vlan42
-<30>2026-09-23T09:38:36+03:00 CORE-R1 dhcp dhcp43 deassigned 172.20.43.110 for 3C:52:82:00:00:12 MUDUR-PC
+<30>2026-09-23T09:38:36+03:00 CORE-R1 dhcp dhcp43 deassigned 172.20.43.110 for 00:00:5E:00:53:1D MUDUR-PC
 # C: message families (docs/PARSERS.md §3.2)
 <30>2026-09-23T09:39:00+03:00 CORE-R1 firewall,info DROP-WAN input: in:ether2 out:(unknown 0), connection-state:new, proto ICMP (type 8, code 0), 198.51.100.9->100.64.12.1, len 84
-<30>2026-09-23T09:39:01+03:00 CORE-R1 firewall,info DROP-MGMT forward: in:vlan43 out:vlan10, connection-state:new src-mac 3C:52:82:00:00:11, proto TCP (SYN), 172.20.43.120:51234->172.20.10.1:8291, len 52
-<30>2026-09-23T09:39:02+03:00 CORE-R1 firewall,info DROP-GUEST forward: in:vlan61 out:ether2, connection-state:new src-mac 4E:11:22:00:00:33, proto UDP, 172.20.61.150:40000->203.0.113.53:53, NAT (172.20.61.150:40000->172.31.255.2:40000)->203.0.113.53:53, len 72
+<30>2026-09-23T09:39:01+03:00 CORE-R1 firewall,info DROP-MGMT forward: in:vlan43 out:vlan10, connection-state:new src-mac 00:00:5E:00:53:1C, proto TCP (SYN), 172.20.43.120:51234->172.20.10.1:8291, len 52
+<30>2026-09-23T09:39:02+03:00 CORE-R1 firewall,info DROP-GUEST forward: in:vlan61 out:ether2, connection-state:new src-mac 02:00:5E:00:53:05, proto UDP, 172.20.61.150:40000->203.0.113.53:53, NAT (172.20.61.150:40000->172.31.255.2:40000)->203.0.113.53:53, len 72
 <26>2026-09-23T09:39:03+03:00 CORE-R1 system,error,critical login failure for user admin from 172.20.41.196 via winbox
 <26>2026-09-23T09:39:04+03:00 CORE-R1 system,error,critical login failure for user admin from 00:00:5E:00:53:4E via winbox
 <30>2026-09-23T09:39:05+03:00 SWITCH-1 interface,info ether5 link up (speed 1G, full duplex)

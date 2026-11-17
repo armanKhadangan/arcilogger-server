@@ -27,11 +27,11 @@ Login = Callable[..., LoggedIn]
 API = "/api/v1"
 NOW = datetime.now(UTC)
 PC1, PC2, PHONE, AP, PRINTER = (
-    "f0:1f:af:00:00:01",
-    "f0:1f:af:00:00:02",
+    "00:00:5e:00:53:3b",
+    "00:00:5e:00:53:3c",
     "02:00:5e:00:53:46",
     "00:00:5e:00:53:aa",
-    "a4:83:e7:00:00:60",
+    "00:00:5e:00:53:37",
 )
 
 
@@ -245,8 +245,8 @@ def test_list_sorts_pages_and_counts(
 @pytest.mark.parametrize(
     ("query", "expected"),
     [
-        ({"q": "f01faf000001"}, [PC1]),  # MAC without separators
-        ({"q": "F0-1F-AF"}, [PC1, PC2]),  # MAC with dashes, upper case
+        ({"q": "00005e00533b"}, [PC1]),  # MAC without separators
+        ({"q": "5E-00-53-3"}, [PC1, PC2, PRINTER]),  # part of a MAC, dashes, upper case
         ({"q": "idari-şef"}, [PC2]),  # host name, case folded
         ({"q": "İDARİ"}, [PC2]),  # dotted capital İ folds to i
         ({"q": "ayşe'nin"}, [PC1]),  # device name
@@ -321,7 +321,7 @@ def test_detail_has_history_and_the_newest_leases(
     assert set(leases[0]) == {"ip", "vlan", "start", "end", "end_reason", "confidence"}
     starts = [lease["start"] for lease in leases]
     assert starts == sorted(starts, reverse=True)
-    assert client.get(f"{API}/devices/00:00:00:00:00:01").status_code == 404
+    assert client.get(f"{API}/devices/00:00:5e:00:53:04").status_code == 404
     bad = client.get(f"{API}/devices/not-a-mac")
     assert bad.status_code == 422
     assert bad.json()["error"]["details"][0]["loc"] == ["path", "mac"]
@@ -394,7 +394,7 @@ def test_edit_device(
     ):
         bad = client.patch(f"{API}/devices/{PC2}", json=body)
         assert bad.status_code == 422, body
-    assert client.patch(f"{API}/devices/00:00:00:00:00:01", json={}).status_code == 404
+    assert client.patch(f"{API}/devices/00:00:5e:00:53:04", json={}).status_code == 404
 
 
 # -- assignment -----------------------------------------------------------------------------------
@@ -602,10 +602,10 @@ def test_a_link_without_history_can_be_removed(
 
 
 def test_assignment_refusals(client: TestClient, admin: LoggedIn, people: dict[str, int]) -> None:
-    missing = _assign(client, [PC1, "00:00:00:00:00:01"], people["ayse"])
+    missing = _assign(client, [PC1, "00:00:5e:00:53:04"], people["ayse"])
     assert missing.status_code == 404
     assert missing.json()["error"]["code"] == "device_not_found"
-    assert missing.json()["error"]["details"] == {"macs": ["00:00:00:00:00:01"]}
+    assert missing.json()["error"]["details"] == {"macs": ["00:00:5e:00:53:04"]}
     inactive = _assign(client, [PC1], people["gone"])
     assert inactive.status_code == 409
     assert inactive.json()["error"]["code"] == "person_inactive"
@@ -643,14 +643,14 @@ def test_device_export_neutralises_formulas_and_keeps_turkish_letters(
 ) -> None:
     with factory() as session:
         add_device(
-            session, "02:00:00:00:00:66", hostnames=["=cmd|'/c calc'!A1", "+SUM(1)"], name="@ışık"
+            session, "02:00:5e:00:53:02", hostnames=["=cmd|'/c calc'!A1", "+SUM(1)"], name="@ışık"
         )
         session.commit()
     _assign(client, [PC1], people["ayse"])
     rows = _csv(client.get(f"{API}/devices/export.csv", params={"sort": "mac", "order": "asc"}))
     by_mac = {row["mac"]: row for row in rows}
     assert len(rows) == 6
-    evil = by_mac["02:00:00:00:00:66"]
+    evil = by_mac["02:00:5e:00:53:02"]
     assert evil["hostnames"] == "'=cmd|'/c calc'!A1, +SUM(1)"
     assert evil["name"] == "'@ışık"
     pc = by_mac[PC1]

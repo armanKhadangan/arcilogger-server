@@ -24,8 +24,8 @@ from arcilogger_worker.testing import Evidence, tr
 FRIDAY = date(2026, 10, 9)
 SATURDAY = FRIDAY + timedelta(days=1)
 MONDAY = FRIDAY + timedelta(days=3)
-PC, A = "172.20.43.120", "f0:1f:af:00:00:0a"
-OTHER, OTHER_MAC = "172.20.43.200", "f0:1f:af:00:00:ff"
+PC, A = "172.20.43.120", "00:00:5e:00:53:3d"
+OTHER, OTHER_MAC = "172.20.43.200", "00:00:5e:00:53:4b"
 
 
 def d(day: int) -> date:

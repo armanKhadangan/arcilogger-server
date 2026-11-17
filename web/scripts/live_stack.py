@@ -73,9 +73,9 @@ PC_SERVER, PC_LEASE = "dhcp42", (10, 42, 18)
 ROGUE_MAC = "00:00:5e:00:53:9a"
 PERSON, DEPARTMENT, DEVICE_NAME = "Selin Kaya", "Planlama", "Planlama-PC-14"
 OTHERS = (
-    ("172.20.42.165", "3c:52:82:00:00:05", "PLN-PC-05", "dhcp42"),
-    ("172.20.41.15", "00:15:5d:00:00:20", "FIN-PC-01", "dhcp41"),
-    ("172.20.43.44", "a4:83:e7:00:00:44", "IDR-PC-04", "dhcp43"),
+    ("172.20.42.165", "00:00:5e:00:53:1b", "PLN-PC-05", "dhcp42"),
+    ("172.20.41.15", "00:00:5e:00:53:0c", "FIN-PC-01", "dhcp41"),
+    ("172.20.43.44", "00:00:5e:00:53:36", "IDR-PC-04", "dhcp43"),
 )
 
 SEED_CONFIG = (

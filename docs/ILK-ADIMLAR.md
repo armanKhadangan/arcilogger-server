@@ -498,7 +498,7 @@ kendisini anlatır. Sayfayı bu sürümde yalnızca yönetici açar; kişi adlar
 KVKK bilgilendirmesi onaylanmalıdır. Cihazlar elle girilmez, DHCP ve ARP kayıtlarından gelir.
 Her değişiklik, içe ve dışa aktarma denetim kaydına yazılır.
 
-- **Cihazlar:** arama MAC adresinde (ayraçsız da: `f01faf`), ana bilgisayar adında, son IP'de ve
+- **Cihazlar:** arama MAC adresinde (ayraçsız da: `5e00533b`), ana bilgisayar adında, son IP'de ve
   cihaz adında yapılır. Filtreler (tür, VLAN, rastgele MAC, altyapı) ve **Bilinmeyen cihazlar**
   (sahibi olmayan, altyapı dışı) adres çubuğunda kalır, sayfa yer imine eklenebilir; arama metni
   adrese yazılmaz. **CSV indir** gösterilen listenin tüm sayfalarını indirir. Cihazları işaretleyip

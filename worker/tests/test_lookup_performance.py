@@ -213,6 +213,10 @@ def _load(engine: Engine) -> dict[str, float]:
             {**params, "days": SIZE.days},
         )
         # DHCP at 00:00-00:25 and hourly ARP-LOG for every client over the whole span.
+        # The 300 clients' MACs are 00:00:5E:00:<hi>:<lo>: IANA's own block, no vendor's (its
+        # documentation range, 00:00:5E:00:53:xx, has 256). 00:00:5E:00:01:xx and 00:00:5E:00:02:xx
+        # are VRRP's; nothing in the product treats them specially. If it ever does, these move
+        # to the locally administered 02:00:5E:… (#308).
         connection.execute(
             text(
                 "INSERT INTO mt_dhcp (time, time_received, source, sender, raw_day, raw_line, "
@@ -221,7 +225,7 @@ def _load(engine: Engine) -> dict[str, float]:
                 "'dhcp' || (ARRAY[41, 42, 43])[1 + d % 3], (ARRAY[41, 42, 43])[1 + d % 3], "
                 "'assigned', ('172.20.' || (ARRAY[41, 42, 43])[1 + d % 3] || '.' || "
                 "(100 + (d / 3) % 100))::inet, "
-                "('f0:1f:af:00:' || lpad(to_hex(d / 256), 2, '0') || ':' || "
+                "('00:00:5e:00:' || lpad(to_hex(d / 256), 2, '0') || ':' || "
                 "lpad(to_hex(d % 256), 2, '0'))::macaddr, 'PC-' || d "
                 "FROM generate_series(0, 299) AS d, "
                 "LATERAL (SELECT CAST(:start AS timestamptz) + d * interval '5 seconds' "
@@ -236,7 +240,7 @@ def _load(engine: Engine) -> dict[str, float]:
                 "SELECT t, t, 'core-r1', '172.20.10.1', :day, 1000 + h * 300 + d, 0, "
                 "('172.20.' || (ARRAY[41, 42, 43])[1 + d % 3] || '.' || "
                 "(100 + (d / 3) % 100))::inet, "
-                "('f0:1f:af:00:' || lpad(to_hex(d / 256), 2, '0') || ':' || "
+                "('00:00:5e:00:' || lpad(to_hex(d / 256), 2, '0') || ':' || "
                 "lpad(to_hex(d % 256), 2, '0'))::macaddr, "
                 "'vlan' || (ARRAY[41, 42, 43])[1 + d % 3] "
                 "FROM generate_series(0, 299) AS d, "

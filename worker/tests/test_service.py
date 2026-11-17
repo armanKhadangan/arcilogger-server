@@ -262,7 +262,7 @@ def test_an_idle_job_neither_runs_nor_writes_a_row(
 def test_default_jobs_run_against_the_database(
     db_engine: Engine, db_session: Session, layout: Layout, evidence: Evidence
 ) -> None:
-    evidence.dhcp(tr(DAY, 8), "assigned", "172.20.43.120", "f0:1f:af:00:00:01")
+    evidence.dhcp(tr(DAY, 8), "assigned", "172.20.43.120", "00:00:5e:00:53:3b")
     db_session.commit()
     clock = Clock(tr(DAY, 3, 30))
     worker = Worker(engine=db_engine, layout=layout, jobs=default_jobs(60), clock=clock)
