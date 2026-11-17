@@ -5,6 +5,12 @@ versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.5.0] — 2026-11-17
+
+Release version 0.5.0 (`v0.5.0`): Wave 6, the security rules, the rule editor and webhooks.
+Upgrading: run the new `ARCILOGGER-Setup-0.5.0.exe`; it upgrades in place and keeps the data and
+the settings. Read the upgrade note below first: `0026` indexes four large tables.
+
 ### Security rules, the rule editor and webhooks (Wave 6)
 
 Eighteen security rules watch the logs that ARCILOGGER already keeps and open alerts on the

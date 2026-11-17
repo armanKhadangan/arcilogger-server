@@ -81,12 +81,12 @@
         "overdue": false,
         "replica": "ok",
         "sealed_at": "2026-10-05T00:30:00+03:00",
-        "serial": "4563EEC0EBF0DF1",
+        "serial": "1702716EF1B205A8",
         "stamped_late": false,
         "state": "verified",
         "tone": "ok",
         "verification": {
-          "at": "2026-10-13T04:00:15.349639Z",
+          "at": "2026-10-13T04:00:09.981839Z",
           "ok": true,
           "source": "on_demand"
         }
@@ -104,12 +104,12 @@
         "overdue": false,
         "replica": "ok",
         "sealed_at": "2026-10-06T00:30:00+03:00",
-        "serial": "1ACBFED620970A73",
+        "serial": "CB7FA3C49300A8C",
         "stamped_late": false,
         "state": "verified",
         "tone": "ok",
         "verification": {
-          "at": "2026-10-13T04:00:15.966113Z",
+          "at": "2026-10-13T04:00:10.385167Z",
           "ok": true,
           "source": "on_demand"
         }
@@ -127,7 +127,7 @@
         "overdue": false,
         "replica": "ok",
         "sealed_at": "2026-10-09T01:00:00+03:00",
-        "serial": "596FB906B6415A05",
+        "serial": "324DACF508F57C63",
         "stamped_late": true,
         "state": "late",
         "tone": "warning",
@@ -146,7 +146,7 @@
         "overdue": false,
         "replica": "ok",
         "sealed_at": "2026-10-09T01:20:00+03:00",
-        "serial": "13353726C34E2638",
+        "serial": "61D5BFF92778B056",
         "stamped_late": false,
         "state": "sealed",
         "tone": "warning",
@@ -165,12 +165,12 @@
         "overdue": false,
         "replica": "missing",
         "sealed_at": "2026-10-09T01:30:00+03:00",
-        "serial": "73B3120818CD070",
+        "serial": "1617B22BF62DB7A4",
         "stamped_late": false,
         "state": "verified",
         "tone": "ok",
         "verification": {
-          "at": "2026-10-13T04:00:13.416930Z",
+          "at": "2026-10-13T04:00:08.841148Z",
           "ok": true,
           "source": "on_demand"
         }
@@ -188,7 +188,7 @@
         "overdue": false,
         "replica": "missing",
         "sealed_at": "2026-10-10T00:30:00+03:00",
-        "serial": "35B6E510E247B8C1",
+        "serial": "7610942FD2B0D7C0",
         "stamped_late": false,
         "state": "sealed",
         "tone": "warning",
@@ -207,7 +207,7 @@
         "overdue": false,
         "replica": "missing",
         "sealed_at": "2026-10-11T00:30:00+03:00",
-        "serial": "760BEB3E72D73B69",
+        "serial": "36F8604975399BA7",
         "stamped_late": false,
         "state": "sealed",
         "tone": "warning",
@@ -1396,12 +1396,12 @@
           "overdue": false,
           "replica": "ok",
           "sealed_at": "2026-10-05T00:30:00+03:00",
-          "serial": "4563EEC0EBF0DF1",
+          "serial": "1702716EF1B205A8",
           "stamped_late": false,
           "state": "verified",
           "tone": "ok",
           "verification": {
-            "at": "2026-10-13T04:00:15.349639Z",
+            "at": "2026-10-13T04:00:09.981839Z",
             "ok": true,
             "source": "on_demand"
           }
@@ -1419,12 +1419,12 @@
           "overdue": false,
           "replica": "ok",
           "sealed_at": "2026-10-06T00:30:00+03:00",
-          "serial": "1ACBFED620970A73",
+          "serial": "CB7FA3C49300A8C",
           "stamped_late": false,
           "state": "verified",
           "tone": "ok",
           "verification": {
-            "at": "2026-10-13T04:00:15.966113Z",
+            "at": "2026-10-13T04:00:10.385167Z",
             "ok": true,
             "source": "on_demand"
           }
@@ -1442,7 +1442,7 @@
           "overdue": false,
           "replica": "ok",
           "sealed_at": "2026-10-09T01:00:00+03:00",
-          "serial": "596FB906B6415A05",
+          "serial": "324DACF508F57C63",
           "stamped_late": true,
           "state": "late",
           "tone": "warning",
@@ -1461,7 +1461,7 @@
           "overdue": false,
           "replica": "ok",
           "sealed_at": "2026-10-09T01:20:00+03:00",
-          "serial": "13353726C34E2638",
+          "serial": "61D5BFF92778B056",
           "stamped_late": false,
           "state": "sealed",
           "tone": "warning",
@@ -1480,12 +1480,12 @@
           "overdue": false,
           "replica": "missing",
           "sealed_at": "2026-10-09T01:30:00+03:00",
-          "serial": "73B3120818CD070",
+          "serial": "1617B22BF62DB7A4",
           "stamped_late": false,
           "state": "verified",
           "tone": "ok",
           "verification": {
-            "at": "2026-10-13T04:00:13.416930Z",
+            "at": "2026-10-13T04:00:08.841148Z",
             "ok": true,
             "source": "on_demand"
           }
@@ -1503,7 +1503,7 @@
           "overdue": false,
           "replica": "missing",
           "sealed_at": "2026-10-10T00:30:00+03:00",
-          "serial": "35B6E510E247B8C1",
+          "serial": "7610942FD2B0D7C0",
           "stamped_late": false,
           "state": "sealed",
           "tone": "warning",
@@ -1522,7 +1522,7 @@
           "overdue": false,
           "replica": "missing",
           "sealed_at": "2026-10-11T00:30:00+03:00",
-          "serial": "760BEB3E72D73B69",
+          "serial": "36F8604975399BA7",
           "stamped_late": false,
           "state": "sealed",
           "tone": "warning",
@@ -2165,13 +2165,13 @@
         "late_reason": null,
         "path": "vault/2026/10/04/manifest-2026-10-04.json",
         "schema": "arcilogger.manifest/1",
-        "sha256": "9e9e130df0816d4034c54b1b21f238e5a39fc00e1c6c2a901f744a35dced1041",
+        "sha256": "d7a06977103e6a37fcef26ac49f40224c3fb6f5752ca1c6ef5f5b2ada18656bf",
         "stamped_late": false,
         "system": {
           "host": "ARCI-SRV01",
           "name": "ARCILOGGER",
           "site": "",
-          "version": "0.1.0"
+          "version": "0.5.0"
         },
         "tsa": {
           "digest": "sha256",
@@ -2214,7 +2214,7 @@
       },
       "sealed": true,
       "sealed_at": "2026-10-05T00:30:00+03:00",
-      "serial": "4563EEC0EBF0DF1",
+      "serial": "1702716EF1B205A8",
       "stamped_late": false,
       "state": "verified",
       "token": {
@@ -2233,8 +2233,8 @@
         "path": "vault/2026/10/04/manifest-2026-10-04.json.zd",
         "policy": "2.999.5651.1",
         "provider": "mock",
-        "serial": "4563EEC0EBF0DF1",
-        "sha256": "560fa7280abbec60aa1d47de8df2452832886a85dc9f9ae89bc7136508671ca2",
+        "serial": "1702716EF1B205A8",
+        "sha256": "980e9968790fa04942ab23c3c466b2c8efc4315e90996fbaeb66b307aa6f47e7",
         "test_stamp": true,
         "tsa_cert_not_after": "2031-08-30T21:30:00Z",
         "tsa_cert_not_before": "2026-08-30T21:30:00Z",
@@ -2248,7 +2248,7 @@
         "lines": 72
       },
       "verification": {
-        "at": "2026-10-13T04:00:15.349639Z",
+        "at": "2026-10-13T04:00:09.981839Z",
         "by": "tolga",
         "deep": true,
         "errors": [],
@@ -2260,20 +2260,20 @@
       },
       "verifications": {
         "on_demand": {
-          "at": "2026-10-13T04:00:15.349639Z",
+          "at": "2026-10-13T04:00:09.981839Z",
           "by": "tolga",
           "deep": true,
           "details": {
-            "duration_ms": 523,
+            "duration_ms": 321,
             "gen_time": "2026-10-04T21:30:05+00:00",
             "root": "CN=ARCILOGGER Mock Root CA (TEST ONLY),O=ARCILOGGER TEST - NOT VALID,C=TR",
-            "serial": "4563EEC0EBF0DF1"
+            "serial": "1702716EF1B205A8"
           },
           "errors": [],
           "errors_tr": [],
           "ok": true,
           "outcome": "ok",
-          "started_at": "2026-10-13T04:00:14.826017Z",
+          "started_at": "2026-10-13T04:00:09.660225Z",
           "warnings": [],
           "warnings_tr": []
         },
@@ -2339,13 +2339,13 @@
         "late_reason": null,
         "path": "vault/2026/10/05/manifest-2026-10-05.json",
         "schema": "arcilogger.manifest/1",
-        "sha256": "3dc6bb71f15773476f462c8751e3353442244b208e8880e4aa367c35d9ea916e",
+        "sha256": "68c8039adad0b803c1642debfb4bdde49ccec25da6adb4b6fc1bf983b7044466",
         "stamped_late": false,
         "system": {
           "host": "ARCI-SRV01",
           "name": "ARCILOGGER",
           "site": "",
-          "version": "0.1.0"
+          "version": "0.5.0"
         },
         "tsa": {
           "digest": "sha256",
@@ -2363,7 +2363,7 @@
       "overdue": false,
       "previous": {
         "day": "2026-10-04",
-        "manifest_sha256": "9e9e130df0816d4034c54b1b21f238e5a39fc00e1c6c2a901f744a35dced1041",
+        "manifest_sha256": "d7a06977103e6a37fcef26ac49f40224c3fb6f5752ca1c6ef5f5b2ada18656bf",
         "matches": true,
         "target": "vault",
         "token_sha256": "0000000000000000000000000000000000000000000000000000000000000002"
@@ -2394,7 +2394,7 @@
       },
       "sealed": true,
       "sealed_at": "2026-10-06T00:30:00+03:00",
-      "serial": "1ACBFED620970A73",
+      "serial": "CB7FA3C49300A8C",
       "stamped_late": false,
       "state": "verified",
       "token": {
@@ -2413,8 +2413,8 @@
         "path": "vault/2026/10/05/manifest-2026-10-05.json.zd",
         "policy": "2.999.5651.1",
         "provider": "mock",
-        "serial": "1ACBFED620970A73",
-        "sha256": "b831e4cf54c3267e003ea189976f80afc723fce829a4a4a1afb28b34247c1e8f",
+        "serial": "CB7FA3C49300A8C",
+        "sha256": "b5614aa417fc9d7c4e1cfdc1697083269b8b7e6d09eb2ea1df84359e9efefd51",
         "test_stamp": true,
         "tsa_cert_not_after": "2031-08-30T21:30:00Z",
         "tsa_cert_not_before": "2026-08-30T21:30:00Z",
@@ -2428,7 +2428,7 @@
         "lines": 72
       },
       "verification": {
-        "at": "2026-10-13T04:00:15.966113Z",
+        "at": "2026-10-13T04:00:10.385167Z",
         "by": "ayse.yilmaz",
         "deep": false,
         "errors": [],
@@ -2440,20 +2440,20 @@
       },
       "verifications": {
         "on_demand": {
-          "at": "2026-10-13T04:00:15.966113Z",
+          "at": "2026-10-13T04:00:10.385167Z",
           "by": "ayse.yilmaz",
           "deep": false,
           "details": {
-            "duration_ms": 528,
+            "duration_ms": 344,
             "gen_time": "2026-10-05T21:30:05+00:00",
             "root": "CN=ARCILOGGER Mock Root CA (TEST ONLY),O=ARCILOGGER TEST - NOT VALID,C=TR",
-            "serial": "1ACBFED620970A73"
+            "serial": "CB7FA3C49300A8C"
           },
           "errors": [],
           "errors_tr": [],
           "ok": true,
           "outcome": "ok",
-          "started_at": "2026-10-13T04:00:15.437275Z",
+          "started_at": "2026-10-13T04:00:10.040368Z",
           "warnings": [],
           "warnings_tr": []
         },
@@ -2519,13 +2519,13 @@
         "late_reason": "sealing ran late",
         "path": "vault/2026/10/06/manifest-2026-10-06.json",
         "schema": "arcilogger.manifest/1",
-        "sha256": "bee386e695ba93814296d7716679a6ead9468b8548b21072039569b541b23a02",
+        "sha256": "cf76106dd85f81ef707eb68e187fca649859906077fcbc082900ea8c2d42315c",
         "stamped_late": true,
         "system": {
           "host": "ARCI-SRV01",
           "name": "ARCILOGGER",
           "site": "",
-          "version": "0.1.0"
+          "version": "0.5.0"
         },
         "tsa": {
           "digest": "sha256",
@@ -2543,7 +2543,7 @@
       "overdue": false,
       "previous": {
         "day": "2026-10-05",
-        "manifest_sha256": "3dc6bb71f15773476f462c8751e3353442244b208e8880e4aa367c35d9ea916e",
+        "manifest_sha256": "68c8039adad0b803c1642debfb4bdde49ccec25da6adb4b6fc1bf983b7044466",
         "matches": true,
         "target": "vault",
         "token_sha256": "0000000000000000000000000000000000000000000000000000000000000003"
@@ -2574,7 +2574,7 @@
       },
       "sealed": true,
       "sealed_at": "2026-10-09T01:00:00+03:00",
-      "serial": "596FB906B6415A05",
+      "serial": "324DACF508F57C63",
       "stamped_late": true,
       "state": "late",
       "token": {
@@ -2593,8 +2593,8 @@
         "path": "vault/2026/10/06/manifest-2026-10-06.json.zd",
         "policy": "2.999.5651.1",
         "provider": "mock",
-        "serial": "596FB906B6415A05",
-        "sha256": "3f77e00f173ee092a0f98a674a7902e4428f3de3da478adb5c5c2bb9ffd92119",
+        "serial": "324DACF508F57C63",
+        "sha256": "60cd91c968ef3a99662445d8813fd5d605d9726ffedd4b55a439b3d7e9163e56",
         "test_stamp": true,
         "tsa_cert_not_after": "2031-08-30T21:30:00Z",
         "tsa_cert_not_before": "2026-08-30T21:30:00Z",
@@ -2672,13 +2672,13 @@
         "late_reason": null,
         "path": "vault/2026/10/07/manifest-2026-10-07.json",
         "schema": "arcilogger.manifest/1",
-        "sha256": "7117f6c8d314355c05f713022eb08d4dcdeac172fb83fac5b428b497472e42d0",
+        "sha256": "fed273acc2908be90629c36d9c15838dccb01040591ece93ebb2f58a4f8772f0",
         "stamped_late": false,
         "system": {
           "host": "ARCI-SRV01",
           "name": "ARCILOGGER",
           "site": "",
-          "version": "0.1.0"
+          "version": "0.5.0"
         },
         "tsa": {
           "digest": "sha256",
@@ -2696,7 +2696,7 @@
       "overdue": false,
       "previous": {
         "day": "2026-10-06",
-        "manifest_sha256": "bee386e695ba93814296d7716679a6ead9468b8548b21072039569b541b23a02",
+        "manifest_sha256": "cf76106dd85f81ef707eb68e187fca649859906077fcbc082900ea8c2d42315c",
         "matches": true,
         "target": "vault",
         "token_sha256": "0000000000000000000000000000000000000000000000000000000000000004"
@@ -2727,7 +2727,7 @@
       },
       "sealed": true,
       "sealed_at": "2026-10-09T01:20:00+03:00",
-      "serial": "13353726C34E2638",
+      "serial": "61D5BFF92778B056",
       "stamped_late": false,
       "state": "sealed",
       "token": {
@@ -2746,8 +2746,8 @@
         "path": "vault/2026/10/07/manifest-2026-10-07.json.zd",
         "policy": "2.999.5651.1",
         "provider": "mock",
-        "serial": "13353726C34E2638",
-        "sha256": "1740c8bf30ba201f0cea0f9729d35b2f0445cc9657414523844702d5bd290715",
+        "serial": "61D5BFF92778B056",
+        "sha256": "f9d9b30fd5597bd7dd2fd1dace202088986fcdf7491276f1ce522ad75b26b672",
         "test_stamp": true,
         "tsa_cert_not_after": "2031-08-30T21:30:00Z",
         "tsa_cert_not_before": "2026-08-30T21:30:00Z",
@@ -2825,13 +2825,13 @@
         "late_reason": null,
         "path": "vault/2026/10/08/manifest-2026-10-08.json",
         "schema": "arcilogger.manifest/1",
-        "sha256": "3da7993b5ed6733be308b3eb136f0891be81d7e136dec471fd96bd14d4f9c87b",
+        "sha256": "7e3eb436eef286ad108648a20cdb78bf0a8766b5f06ac17201f35e6718cf63a0",
         "stamped_late": false,
         "system": {
           "host": "ARCI-SRV01",
           "name": "ARCILOGGER",
           "site": "",
-          "version": "0.1.0"
+          "version": "0.5.0"
         },
         "tsa": {
           "digest": "sha256",
@@ -2849,7 +2849,7 @@
       "overdue": false,
       "previous": {
         "day": "2026-10-07",
-        "manifest_sha256": "7117f6c8d314355c05f713022eb08d4dcdeac172fb83fac5b428b497472e42d0",
+        "manifest_sha256": "fed273acc2908be90629c36d9c15838dccb01040591ece93ebb2f58a4f8772f0",
         "matches": true,
         "target": "vault",
         "token_sha256": "0000000000000000000000000000000000000000000000000000000000000005"
@@ -2877,7 +2877,7 @@
       },
       "sealed": true,
       "sealed_at": "2026-10-09T01:30:00+03:00",
-      "serial": "73B3120818CD070",
+      "serial": "1617B22BF62DB7A4",
       "stamped_late": false,
       "state": "verified",
       "token": {
@@ -2896,8 +2896,8 @@
         "path": "vault/2026/10/08/manifest-2026-10-08.json.zd",
         "policy": "2.999.5651.1",
         "provider": "mock",
-        "serial": "73B3120818CD070",
-        "sha256": "88a6ced55cafbbc831851caaaf1da11d58a7b1c10610d8604ca9727e9a11a672",
+        "serial": "1617B22BF62DB7A4",
+        "sha256": "8c35a1d877de0fd1a7dc6554c05476f9f8c63bff200659222d8d3dd17dfb2518",
         "test_stamp": true,
         "tsa_cert_not_after": "2031-08-30T21:30:00Z",
         "tsa_cert_not_before": "2026-08-30T21:30:00Z",
@@ -2911,7 +2911,7 @@
         "lines": 72
       },
       "verification": {
-        "at": "2026-10-13T04:00:13.416930Z",
+        "at": "2026-10-13T04:00:08.841148Z",
         "by": "tolga",
         "deep": true,
         "errors": [],
@@ -2927,20 +2927,20 @@
       },
       "verifications": {
         "on_demand": {
-          "at": "2026-10-13T04:00:13.416930Z",
+          "at": "2026-10-13T04:00:08.841148Z",
           "by": "tolga",
           "deep": true,
           "details": {
-            "duration_ms": 523,
+            "duration_ms": 315,
             "gen_time": "2026-10-08T22:30:05+00:00",
             "root": "CN=ARCILOGGER Mock Root CA (TEST ONLY),O=ARCILOGGER TEST - NOT VALID,C=TR",
-            "serial": "73B3120818CD070"
+            "serial": "1617B22BF62DB7A4"
           },
           "errors": [],
           "errors_tr": [],
           "ok": true,
           "outcome": "ok",
-          "started_at": "2026-10-13T04:00:12.893483Z",
+          "started_at": "2026-10-13T04:00:08.526006Z",
           "warnings": [
             "2026/10/08/fortigate.log.gz: not read-only"
           ],
@@ -2971,7 +2971,7 @@
       "error_detail": null,
       "files": [
         {
-          "bytes": 304,
+          "bytes": 299,
           "bytes_uncompressed": 1082,
           "first_received": "2026-10-09T08:12:00.003+03:00",
           "last_received": "2026-10-09T14:00:00.003+03:00",
@@ -2980,13 +2980,13 @@
           "sender_ips": [
             "172.20.10.1"
           ],
-          "sha256": "00aa2083e9688e741f003918c97bde5760c80bd18a7e11a78a5d530f8b9e2382",
-          "sha256_uncompressed": "2d45de34d25ade9bb34019bb5facba72e508a61bdff03ce3db075c4f557ddcc1",
+          "sha256": "c80f6ebfe269d08f809b53815d01a54d1c4d4d4725df9084ad6800e29796aaa3",
+          "sha256_uncompressed": "d8ac61b520ef63daa628f85f9d014f15ff3b43f3bb419638f38ce96cb4b0024c",
           "source": "core-r1"
         },
         {
-          "bytes": 1095,
-          "bytes_uncompressed": 10675,
+          "bytes": 1082,
+          "bytes_uncompressed": 10690,
           "first_received": "2026-10-09T11:14:56.003+03:00",
           "last_received": "2026-10-09T13:30:00.003+03:00",
           "lines": 27,
@@ -2994,8 +2994,8 @@
           "sender_ips": [
             "172.31.255.1"
           ],
-          "sha256": "8ae7e86b3ee670eb5cd77e91d0f7bae8fdd67af7d3f2798f644aae42710e404b",
-          "sha256_uncompressed": "fd420a8a833e0a53c46607f27bdec65597f32fbdf5fde890a833395b2b862c30",
+          "sha256": "2caa11789e9b74fc34399a8bccbdcaf98942caf8c75a2bf06a2650d4642c5bcf",
+          "sha256_uncompressed": "b362c2e2dbba672bce53c0138ff95b549deaf67c80922d3df2156d63d987219c",
           "source": "fortigate"
         }
       ],
@@ -3059,13 +3059,13 @@
         "late_reason": null,
         "path": "vault/2026/10/09/manifest-2026-10-09.json",
         "schema": "arcilogger.manifest/1",
-        "sha256": "014ada9b61b57b54f632b0b98026b4bec6af4c76998da0811c75d641365f34ef",
+        "sha256": "3693000e1821d94d7db71cc2600229dc173903d4b9d6b3ae4561c60592bb8ac1",
         "stamped_late": false,
         "system": {
           "host": "ARCI-SRV01",
           "name": "ARCILOGGER",
           "site": "",
-          "version": "0.1.0"
+          "version": "0.5.0"
         },
         "tsa": {
           "digest": "sha256",
@@ -3083,7 +3083,7 @@
       "overdue": false,
       "previous": {
         "day": "2026-10-08",
-        "manifest_sha256": "3da7993b5ed6733be308b3eb136f0891be81d7e136dec471fd96bd14d4f9c87b",
+        "manifest_sha256": "7e3eb436eef286ad108648a20cdb78bf0a8766b5f06ac17201f35e6718cf63a0",
         "matches": true,
         "target": "vault",
         "token_sha256": "0000000000000000000000000000000000000000000000000000000000000006"
@@ -3111,11 +3111,11 @@
       },
       "sealed": true,
       "sealed_at": "2026-10-10T00:30:00+03:00",
-      "serial": "35B6E510E247B8C1",
+      "serial": "7610942FD2B0D7C0",
       "stamped_late": false,
       "state": "sealed",
       "token": {
-        "bytes": 1202,
+        "bytes": 1203,
         "check": {
           "errors": [],
           "errors_tr": [],
@@ -3130,8 +3130,8 @@
         "path": "vault/2026/10/09/manifest-2026-10-09.json.zd",
         "policy": "2.999.5651.1",
         "provider": "mock",
-        "serial": "35B6E510E247B8C1",
-        "sha256": "aa8984dae76c00a6317ee87a2455ae59bd3ab4794813da680b6701ab5a267059",
+        "serial": "7610942FD2B0D7C0",
+        "sha256": "046a8dcc06337201a64e10a18a10fd228aa9d4f213ce9af9d8de422fa4a2bd32",
         "test_stamp": true,
         "tsa_cert_not_after": "2031-08-30T21:30:00Z",
         "tsa_cert_not_before": "2026-08-30T21:30:00Z",
@@ -3139,8 +3139,8 @@
       },
       "tone": "warning",
       "totals": {
-        "bytes": 1399,
-        "bytes_uncompressed": 11757,
+        "bytes": 1381,
+        "bytes_uncompressed": 11772,
         "files": 2,
         "lines": 34
       },
@@ -3209,13 +3209,13 @@
         "late_reason": null,
         "path": "vault/2026/10/10/manifest-2026-10-10.json",
         "schema": "arcilogger.manifest/1",
-        "sha256": "1423e2378e19ea9853e9a255126cd176f377fafa2eee5f5a4ac5416ff3aae660",
+        "sha256": "97feb88dd491228d40cf85b244a335db09734d327282d6f315e0074510b40888",
         "stamped_late": false,
         "system": {
           "host": "ARCI-SRV01",
           "name": "ARCILOGGER",
           "site": "",
-          "version": "0.1.0"
+          "version": "0.5.0"
         },
         "tsa": {
           "digest": "sha256",
@@ -3233,7 +3233,7 @@
       "overdue": false,
       "previous": {
         "day": "2026-10-09",
-        "manifest_sha256": "014ada9b61b57b54f632b0b98026b4bec6af4c76998da0811c75d641365f34ef",
+        "manifest_sha256": "3693000e1821d94d7db71cc2600229dc173903d4b9d6b3ae4561c60592bb8ac1",
         "matches": true,
         "target": "vault",
         "token_sha256": "0000000000000000000000000000000000000000000000000000000000000007"
@@ -3261,7 +3261,7 @@
       },
       "sealed": true,
       "sealed_at": "2026-10-11T00:30:00+03:00",
-      "serial": "760BEB3E72D73B69",
+      "serial": "36F8604975399BA7",
       "stamped_late": false,
       "state": "sealed",
       "token": {
@@ -3280,8 +3280,8 @@
         "path": "vault/2026/10/10/manifest-2026-10-10.json.zd",
         "policy": "2.999.5651.1",
         "provider": "mock",
-        "serial": "760BEB3E72D73B69",
-        "sha256": "2f1ef34a38657a0b743b217693de7151e3bba854cae03af9141ea3d259ee255e",
+        "serial": "36F8604975399BA7",
+        "sha256": "d709ee49d50b691d1a1ddc1149ee565be790c5ae730e44570a3af9e1d01c10ae",
         "test_stamp": true,
         "tsa_cert_not_after": "2031-08-30T21:30:00Z",
         "tsa_cert_not_before": "2026-08-30T21:30:00Z",
@@ -3488,12 +3488,12 @@
       "content-disposition": "attachment; filename=\"manifest-2026-10-04.json\"",
       "content-type": "application/json"
     },
-    "sha256": "9e9e130df0816d4034c54b1b21f238e5a39fc00e1c6c2a901f744a35dced1041",
+    "sha256": "d7a06977103e6a37fcef26ac49f40224c3fb6f5752ca1c6ef5f5b2ada18656bf",
     "size": 1530,
-    "text": "{\"audit_log\":{\"entries\":0,\"last_entry_hash\":null,\"path\":\"2026/10/04/audit.jsonl.gz\",\"sha256\":\"ac73670af3abed54ac6fb4695131f4099be9fbe39d6076c5d0264a6bbdae9d83\"},\"chain_check\":null,\"clock\":{\"max_offset_us\":null,\"ntp_server\":\"time.ume.tubitak.gov.tr\",\"samples\":0,\"status\":\"test clock status\"},\"created_at\":\"2026-10-05T00:30:00.000+03:00\",\"day\":\"2026-10-04\",\"deletions\":[],\"files\":[{\"bytes\":299,\"bytes_uncompressed\":2856,\"first_received\":\"2026-10-04T00:05:00.000+03:00\",\"last_received\":\"2026-10-04T23:05:00.000+03:00\",\"lines\":24,\"path\":\"2026/10/04/core-r1.log.gz\",\"sender_ips\":[\"172.20.10.1\"],\"sha256\":\"fdd76c273361e9b8be461cc490f1f0af9592e0594c88060eecd141b5cd2686e3\",\"sha256_uncompressed\":\"bab53efdeb9c9dc6e0da596a0b3de8281bc8f3a45dafa965ab3c5d9e1e22fc01\",\"source\":\"core-r1\"},{\"bytes\":653,\"bytes_uncompressed\":13392,\"first_received\":\"2026-10-04T00:00:00.000+03:00\",\"last_received\":\"2026-10-04T23:30:00.000+03:00\",\"lines\":48,\"path\":\"2026/10/04/fortigate.log.gz\",\"sender_ips\":[\"172.31.255.1\"],\"sha256\":\"1bc3dbe49fd54aa5e91208d70a6f65317b01dec9ac08cb87f4c0d981af3390c2\",\"sha256_uncompressed\":\"19d292ec78e25a3cad7fd2e49ab0cba057411cff9ed17178eb2a4ab950575a5d\",\"source\":\"fortigate\"}],\"gaps\":[],\"previous\":null,\"schema\":\"arcilogger.manifest/1\",\"stamped_late\":false,\"system\":{\"host\":\"ARCI-SRV01\",\"name\":\"ARCILOGGER\",\"site\":\"\",\"version\":\"0.1.0\"},\"tsa\":{\"digest\":\"sha256\",\"legal_grade\":false,\"provider\":\"mock\"},\"tz\":\"Europe/Istanbul\",\"window\":{\"from\":\"2026-10-04T00:00:00+03:00\",\"partition\":\"receive_time\",\"to\":\"2026-10-05T00:00:00+03:00\"}}"
+    "text": "{\"audit_log\":{\"entries\":0,\"last_entry_hash\":null,\"path\":\"2026/10/04/audit.jsonl.gz\",\"sha256\":\"ac73670af3abed54ac6fb4695131f4099be9fbe39d6076c5d0264a6bbdae9d83\"},\"chain_check\":null,\"clock\":{\"max_offset_us\":null,\"ntp_server\":\"time.ume.tubitak.gov.tr\",\"samples\":0,\"status\":\"test clock status\"},\"created_at\":\"2026-10-05T00:30:00.000+03:00\",\"day\":\"2026-10-04\",\"deletions\":[],\"files\":[{\"bytes\":299,\"bytes_uncompressed\":2856,\"first_received\":\"2026-10-04T00:05:00.000+03:00\",\"last_received\":\"2026-10-04T23:05:00.000+03:00\",\"lines\":24,\"path\":\"2026/10/04/core-r1.log.gz\",\"sender_ips\":[\"172.20.10.1\"],\"sha256\":\"fdd76c273361e9b8be461cc490f1f0af9592e0594c88060eecd141b5cd2686e3\",\"sha256_uncompressed\":\"bab53efdeb9c9dc6e0da596a0b3de8281bc8f3a45dafa965ab3c5d9e1e22fc01\",\"source\":\"core-r1\"},{\"bytes\":653,\"bytes_uncompressed\":13392,\"first_received\":\"2026-10-04T00:00:00.000+03:00\",\"last_received\":\"2026-10-04T23:30:00.000+03:00\",\"lines\":48,\"path\":\"2026/10/04/fortigate.log.gz\",\"sender_ips\":[\"172.31.255.1\"],\"sha256\":\"1bc3dbe49fd54aa5e91208d70a6f65317b01dec9ac08cb87f4c0d981af3390c2\",\"sha256_uncompressed\":\"19d292ec78e25a3cad7fd2e49ab0cba057411cff9ed17178eb2a4ab950575a5d\",\"source\":\"fortigate\"}],\"gaps\":[],\"previous\":null,\"schema\":\"arcilogger.manifest/1\",\"stamped_late\":false,\"system\":{\"host\":\"ARCI-SRV01\",\"name\":\"ARCILOGGER\",\"site\":\"\",\"version\":\"0.5.0\"},\"tsa\":{\"digest\":\"sha256\",\"legal_grade\":false,\"provider\":\"mock\"},\"tz\":\"Europe/Istanbul\",\"window\":{\"from\":\"2026-10-04T00:00:00+03:00\",\"partition\":\"receive_time\",\"to\":\"2026-10-05T00:00:00+03:00\"}}"
   },
   "meta": {
-    "captured_at": "2026-10-13T04:02:00.876104+00:00",
+    "captured_at": "2026-10-13T04:01:28.377300+00:00",
     "clock": "2026-10-13T07:00:00+03:00",
     "info": "captured by web/scripts/capture_api_samples.py; do not edit",
     "site_day": "2026-10-09",
@@ -3505,18 +3505,18 @@
     "effective_at": null,
     "effects": [],
     "guarded": false,
-    "request_id": "16ef3dcfef3de679ede9d18670fe2636",
-    "short_id": "16ef3dcf",
+    "request_id": "68fd12e3d4943455e4c2e6eecf34b124",
+    "short_id": "68fd12e3",
     "state": "queued",
-    "status_url": "/api/v1/admin/requests/16ef3dcfef3de679ede9d18670fe2636",
+    "status_url": "/api/v1/admin/requests/68fd12e3d4943455e4c2e6eecf34b124",
     "warnings": []
   },
   "seal_now_done": {
     "changes": {},
-    "created_at": "2026-10-13T04:00:18.000660Z",
+    "created_at": "2026-10-13T04:00:11.617755Z",
     "effective_at": null,
     "error": null,
-    "id": "16ef3dcfef3de679ede9d18670fe2636",
+    "id": "68fd12e3d4943455e4c2e6eecf34b124",
     "kind": "action.seal",
     "label_en": "Done",
     "label_tr": "Tamamlandı",
@@ -3532,11 +3532,11 @@
     },
     "rolled_back": false,
     "section": null,
-    "short_id": "16ef3dcf",
+    "short_id": "68fd12e3",
     "state": "succeeded",
     "steps": [
       {
-        "at": "2026-10-13T07:00:18.202956+03:00",
+        "at": "2026-10-13T07:00:11.709983+03:00",
         "code": null,
         "message_en": null,
         "message_tr": null,
@@ -3544,7 +3544,7 @@
         "step": "received"
       },
       {
-        "at": "2026-10-13T07:00:18.204649+03:00",
+        "at": "2026-10-13T07:00:11.710848+03:00",
         "code": null,
         "message_en": null,
         "message_tr": null,
@@ -3552,7 +3552,7 @@
         "step": "dispatch"
       },
       {
-        "at": "2026-10-13T07:00:18.216992+03:00",
+        "at": "2026-10-13T07:00:11.717945+03:00",
         "code": null,
         "message_en": null,
         "message_tr": null,
@@ -3561,16 +3561,16 @@
       }
     ],
     "terminal": true,
-    "updated_at": "2026-10-13T07:00:18.255916+03:00",
+    "updated_at": "2026-10-13T07:00:11.740323+03:00",
     "version": null,
     "warnings": []
   },
   "seal_now_queued": {
     "changes": {},
-    "created_at": "2026-10-13T04:00:18.000660Z",
+    "created_at": "2026-10-13T04:00:11.617755Z",
     "effective_at": null,
     "error": null,
-    "id": "16ef3dcfef3de679ede9d18670fe2636",
+    "id": "68fd12e3d4943455e4c2e6eecf34b124",
     "kind": "action.seal",
     "label_en": "Queued",
     "label_tr": "Sırada",
@@ -3580,43 +3580,43 @@
     "result": null,
     "rolled_back": false,
     "section": null,
-    "short_id": "16ef3dcf",
+    "short_id": "68fd12e3",
     "state": "queued",
     "steps": [],
     "terminal": false,
-    "updated_at": "2026-10-13T04:00:18.000660Z",
+    "updated_at": "2026-10-13T04:00:11.617755Z",
     "version": null,
     "warnings": []
   },
   "token_file": {
-    "base64": "MIIErzADAgEAMIIEpgYJKoZIhvcNAQcCoIIElzCCBJMCAQMxDzANBglghkgBZQMEAgEFADCB5AYLKoZIhvcNAQkQAQSggdQEgdEwgc4CAQEGBYg3rBMBMDEwDQYJYIZIAWUDBAIBBQAEIJ6eEw3wgW1ANMVLGyHyOOWjn8AOHGwqkB90SjXc7RBBAggEVj7sDr8N8RgPMjAyNjEwMDQyMTMwMDVaMAMCAQECCFdzL1pKngihoGWkYzBhMQswCQYDVQQGEwJUUjEkMCIGA1UECgwbQVJDSUxPR0dFUiBURVNUIC0gTk9UIFZBTElEMSwwKgYDVQQDDCNBUkNJTE9HR0VSIE1vY2sgVFNBIChURVNUIE9OTFkpIHRzYaCCAiEwggIdMIIBw6ADAgECAhRBCTjrZhGJ8HAW6M9MxNhAXktHHjAKBggqhkjOPQQDAjBhMQswCQYDVQQGEwJUUjEkMCIGA1UECgwbQVJDSUxPR0dFUiBURVNUIC0gTk9UIFZBTElEMSwwKgYDVQQDDCNBUkNJTE9HR0VSIE1vY2sgUm9vdCBDQSAoVEVTVCBPTkxZKTAeFw0yNjA4MzAyMTMwMDBaFw0zMTA4MzAyMTMwMDBaMGExCzAJBgNVBAYTAlRSMSQwIgYDVQQKDBtBUkNJTE9HR0VSIFRFU1QgLSBOT1QgVkFMSUQxLDAqBgNVBAMMI0FSQ0lMT0dHRVIgTW9jayBUU0EgKFRFU1QgT05MWSkgdHNhMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAExWqxPIcDrljmdLQJKQWVcHd+Q6wPGAmEhtRdgGoVsGiJp+oV39FUcf6HOBbdj6czveLM4ar5Z2fTatGBHOpTQKNZMFcwDAYDVR0TAQH/BAIwADAOBgNVHQ8BAf8EBAMCBsAwFgYDVR0lAQH/BAwwCgYIKwYBBQUHAwgwHwYDVR0jBBgwFoAUOuIuOSnhOZRfjtCpyCVyuAImlzMwCgYIKoZIzj0EAwIDSAAwRQIhAPMVD/I9Zbs6isLkbiggSqQeN6rNsoq90pRSRfoqWu3jAiBotdnw3rxeqYmbAjrE23YFN05DBMbimg2tm3vy6stpDDGCAW8wggFrAgEBMHkwYTELMAkGA1UEBhMCVFIxJDAiBgNVBAoMG0FSQ0lMT0dHRVIgVEVTVCAtIE5PVCBWQUxJRDEsMCoGA1UEAwwjQVJDSUxPR0dFUiBNb2NrIFJvb3QgQ0EgKFRFU1QgT05MWSkCFEEJOOtmEYnwcBboz0zE2EBeS0ceMA0GCWCGSAFlAwQCAQUAoIGGMBoGCSqGSIb3DQEJAzENBgsqhkiG9w0BCRABBDAvBgkqhkiG9w0BCQQxIgQgZMEpqGLNethXGwNhzgKXICxbrCaVoakf+/5nUjtr3rswNwYLKoZIhvcNAQkQAi8xKDAmMCQwIgQg0UlWQxii0ezX9wC7xVlB3PZwSrW6L4/aUQ0yZLCuIu8wCgYIKoZIzj0EAwIERzBFAiAEO9TBbgB3GR9kk8u0fz1rd+fKtngv0otoEaEK6/btIgIhAKeG5U+nDTQh7vsxQkIHiZ7CoS5Hh2rgyk/dNVbklBTB",
+    "base64": "MIIErzADAgEAMIIEpgYJKoZIhvcNAQcCoIIElzCCBJMCAQMxDzANBglghkgBZQMEAgEFADCB5AYLKoZIhvcNAQkQAQSggdQEgdEwgc4CAQEGBYg3rBMBMDEwDQYJYIZIAWUDBAIBBQAEINegaXcQPmo3/O8mrEn0AiTD+29XUsocbvX1sq2hhla/AggXAnFu8bIFqBgPMjAyNjEwMDQyMTMwMDVaMAMCAQECCG36qF2nzgfjoGWkYzBhMQswCQYDVQQGEwJUUjEkMCIGA1UECgwbQVJDSUxPR0dFUiBURVNUIC0gTk9UIFZBTElEMSwwKgYDVQQDDCNBUkNJTE9HR0VSIE1vY2sgVFNBIChURVNUIE9OTFkpIHRzYaCCAiEwggIdMIIBw6ADAgECAhRvTTGB/O4MISNirluKKz0kR8FKQTAKBggqhkjOPQQDAjBhMQswCQYDVQQGEwJUUjEkMCIGA1UECgwbQVJDSUxPR0dFUiBURVNUIC0gTk9UIFZBTElEMSwwKgYDVQQDDCNBUkNJTE9HR0VSIE1vY2sgUm9vdCBDQSAoVEVTVCBPTkxZKTAeFw0yNjA4MzAyMTMwMDBaFw0zMTA4MzAyMTMwMDBaMGExCzAJBgNVBAYTAlRSMSQwIgYDVQQKDBtBUkNJTE9HR0VSIFRFU1QgLSBOT1QgVkFMSUQxLDAqBgNVBAMMI0FSQ0lMT0dHRVIgTW9jayBUU0EgKFRFU1QgT05MWSkgdHNhMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEWe26BC+bLDDAnD/auBvBOvGmfjNmIZu2dRzPKSlNnHb1ThtcuLQolyfrFgw5AnqQ752KUcrhiM9alJIjO4nJIaNZMFcwDAYDVR0TAQH/BAIwADAOBgNVHQ8BAf8EBAMCBsAwFgYDVR0lAQH/BAwwCgYIKwYBBQUHAwgwHwYDVR0jBBgwFoAU6N+ezs/A9Eil4jRi8qorpRzyyRAwCgYIKoZIzj0EAwIDSAAwRQIga0l97UAwRG+PaDStJh0lElRDN++mQFUl4+dyMSYl0cQCIQDBeo2Ak5+krObazSUM5HzMgtPt9C2YQKnW371UmC3+SDGCAW8wggFrAgEBMHkwYTELMAkGA1UEBhMCVFIxJDAiBgNVBAoMG0FSQ0lMT0dHRVIgVEVTVCAtIE5PVCBWQUxJRDEsMCoGA1UEAwwjQVJDSUxPR0dFUiBNb2NrIFJvb3QgQ0EgKFRFU1QgT05MWSkCFG9NMYH87gwhI2KuW4orPSRHwUpBMA0GCWCGSAFlAwQCAQUAoIGGMBoGCSqGSIb3DQEJAzENBgsqhkiG9w0BCRABBDAvBgkqhkiG9w0BCQQxIgQgwC1dlgoTp4/+HBcLJNhZN0oXj8Wjgt2f00N+kvymjOcwNwYLKoZIhvcNAQkQAi8xKDAmMCQwIgQgi0yy4PKw87XUp29/4AbQdggqP9Eqy1sBt4ZA6wCB6qUwCgYIKoZIzj0EAwIERzBFAiAGjtBQqFYMMIggCJVGk8HEewYbUUmJAeV9PSjiRmX8ywIhAP8/Bpc97ztTQxDTwFeoDCW9qnx8EbeoxIwdtvmIOwqa",
     "headers": {
       "accept-ranges": "bytes",
       "cache-control": "no-store",
       "content-disposition": "attachment; filename=\"manifest-2026-10-04.json.zd\"",
       "content-type": "application/octet-stream"
     },
-    "sha256": "560fa7280abbec60aa1d47de8df2452832886a85dc9f9ae89bc7136508671ca2",
+    "sha256": "980e9968790fa04942ab23c3c466b2c8efc4315e90996fbaeb66b307aa6f47e7",
     "size": 1203
   },
   "verify": {
     "day": "2026-10-04",
     "deep": true,
     "details": {
-      "duration_ms": 523,
+      "duration_ms": 321,
       "gen_time": "2026-10-04T21:30:05+00:00",
       "root": "CN=ARCILOGGER Mock Root CA (TEST ONLY),O=ARCILOGGER TEST - NOT VALID,C=TR",
-      "serial": "4563EEC0EBF0DF1"
+      "serial": "1702716EF1B205A8"
     },
-    "duration_ms": 523,
+    "duration_ms": 321,
     "errors": [],
     "errors_tr": [],
-    "finished_at": "2026-10-13T04:00:15.349639Z",
+    "finished_at": "2026-10-13T04:00:09.981839Z",
     "message_en": "04.10.2026 verified.",
     "message_tr": "04.10.2026 günü doğrulandı.",
     "ok": true,
     "outcome": "ok",
-    "started_at": "2026-10-13T04:00:14.826017Z",
+    "started_at": "2026-10-13T04:00:09.660225Z",
     "warnings": [],
     "warnings_tr": []
   },
@@ -3624,20 +3624,20 @@
     "day": "2026-10-05",
     "deep": false,
     "details": {
-      "duration_ms": 528,
+      "duration_ms": 344,
       "gen_time": "2026-10-05T21:30:05+00:00",
       "root": "CN=ARCILOGGER Mock Root CA (TEST ONLY),O=ARCILOGGER TEST - NOT VALID,C=TR",
-      "serial": "1ACBFED620970A73"
+      "serial": "CB7FA3C49300A8C"
     },
-    "duration_ms": 528,
+    "duration_ms": 344,
     "errors": [],
     "errors_tr": [],
-    "finished_at": "2026-10-13T04:00:15.966113Z",
+    "finished_at": "2026-10-13T04:00:10.385167Z",
     "message_en": "05.10.2026 verified.",
     "message_tr": "05.10.2026 günü doğrulandı.",
     "ok": true,
     "outcome": "ok",
-    "started_at": "2026-10-13T04:00:15.437275Z",
+    "started_at": "2026-10-13T04:00:10.040368Z",
     "warnings": [],
     "warnings_tr": []
   }
