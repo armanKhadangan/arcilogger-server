@@ -198,7 +198,7 @@ def build_golden_site(session: Session, layout: Layout, *, day: date = DAY) -> G
         tr(d, 10, 31),
         PC1,
         50005,
-        "8.8.8.8",
+        "198.51.100.153",
         53,
         sessionid=1005,
         duration=1,

@@ -951,11 +951,11 @@ const SITES: SiteDef[] = [
     paths: [],
   },
   {
-    domain: '8.8.8.8',
+    domain: '198.51.100.153',
     kind: 'ip',
     category: null,
     background: true,
-    hosts: ['8.8.8.8'],
+    hosts: ['198.51.100.153'],
     app: null,
     appcat: null,
     rate: 2_500,

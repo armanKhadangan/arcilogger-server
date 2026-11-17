@@ -977,16 +977,16 @@ def test_line_without_pairs_is_a_parse_failure_with_the_generic_view() -> None:
 
 
 def test_line_without_type() -> None:
-    outcome = parse(b'<189>logid="0000000013" srcip=1.2.3.4 devname="X"')
+    outcome = parse(b'<189>logid="0000000013" srcip=203.0.113.124 devname="X"')
     assert outcome.error == "fortigate.type"
     assert outcome.rows == ()
     assert outcome.message["type"] == "unknown"
     assert outcome.message["host"] == "X"
-    assert outcome.message["extra"] == {"fields": {"logid": "0000000013", "srcip": "1.2.3.4"}}
-    empty = parse(b'<189>type="" subtype="forward" srcip=1.2.3.4')
+    assert outcome.message["extra"] == {"fields": {"logid": "0000000013", "srcip": "203.0.113.124"}}
+    empty = parse(b'<189>type="" subtype="forward" srcip=203.0.113.124')
     assert empty.error == "fortigate.type"
     assert empty.message["type"] == "unknown"
-    assert empty.message["extra"] == {"fields": {"type": "", "srcip": "1.2.3.4"}}
+    assert empty.message["extra"] == {"fields": {"type": "", "srcip": "203.0.113.124"}}
 
 
 def test_no_pri_uses_level_for_severity() -> None:

@@ -129,7 +129,7 @@ def test_disabled_and_out_of_policy_sources_stay_closed() -> None:
     current = config_of(
         "172.20.10.1",
         ("172.20.10.2", False),
-        "8.8.8.8",
+        "198.51.100.153",
         "172.16.0.0/15",
         "172.21.0.0/16",
         "172.20.10.30/32",
@@ -137,7 +137,7 @@ def test_disabled_and_out_of_policy_sources_stay_closed() -> None:
     found, problems = enabled_senders(current, POLICY)
     assert found == ["172.20.10.1", "172.21.0.0/16", "172.20.10.30"]
     assert [(p.code, p.value) for p in problems] == [
-        ("source_outside_policy", "8.8.8.8"),
+        ("source_outside_policy", "198.51.100.153"),
         ("source_outside_policy", "172.16.0.0/15"),
     ]
     planned = plan(inputs(current))

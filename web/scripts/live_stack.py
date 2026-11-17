@@ -130,7 +130,7 @@ def _write_spool(config_path: Path) -> date:
         spool.dhcp(tr(day, 8, 12), "assigned", ip, mac, server=server, hostname=hostname)
     spool.dhcp(tr(day, *PC_LEASE), "assigned", PC, PC_MAC, server=PC_SERVER, hostname=PC_HOST)
     spool.traffic(tr(day, *AT), PC, WAN_PORT, "203.0.113.10", 443, duration=10)
-    destinations = [("198.51.100.69", 443), ("198.51.100.169", 443), ("8.8.8.8", 53)]
+    destinations = [("198.51.100.69", 443), ("198.51.100.169", 443), ("198.51.100.153", 53)]
     for index in range(9):
         ip = OTHERS[index % len(OTHERS)][0]
         dstip, dstport = destinations[index % len(destinations)]

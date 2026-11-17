@@ -190,7 +190,7 @@ def test_request_normalises_and_validates() -> None:
     assert request.dest_domain == "example.com"
     assert request.is_internal
     assert not LookupRequest(at=AT, public_ip="192.0.2.44").is_internal
-    assert LookupRequest(at=AT, dest_ip="1.1.1.1").dest_ip == "1.1.1.1"
+    assert LookupRequest(at=AT, dest_ip="198.51.100.11").dest_ip == "198.51.100.11"
     assert LookupRequest.from_dict(request.to_dict()) == request
 
 
@@ -206,14 +206,14 @@ def test_request_stores_the_protocol_number(given: Any, stored: int) -> None:
 @pytest.mark.parametrize(
     ("kwargs", "message"),
     [
-        ({"at": datetime(2026, 10, 12, 18, 0), "public_ip": "1.1.1.1"}, "timezone-aware"),  # noqa: DTZ001
+        ({"at": datetime(2026, 10, 12, 18, 0), "public_ip": "198.51.100.11"}, "timezone-aware"),  # noqa: DTZ001
         ({"at": AT, "public_ip": "1.1.1.300"}, "invalid IP"),
-        ({"at": AT, "public_ip": "1.1.1.1", "public_port": 70000}, "0-65535"),
-        ({"at": AT, "public_ip": "1.1.1.1", "tolerance_seconds": 7200}, "tolerance_seconds"),
+        ({"at": AT, "public_ip": "198.51.100.11", "public_port": 70000}, "0-65535"),
+        ({"at": AT, "public_ip": "198.51.100.11", "tolerance_seconds": 7200}, "tolerance_seconds"),
         ({"at": AT, "mac": "02:00"}, "invalid MAC"),
-        ({"at": AT, "public_ip": "1.1.1.1", "protocol": 300}, "0-255"),
-        ({"at": AT, "public_ip": "1.1.1.1", "protocol": "gre?"}, "unknown protocol"),
-        ({"at": AT, "public_ip": "1.1.1.1", "protocol": True}, "protocol"),
+        ({"at": AT, "public_ip": "198.51.100.11", "protocol": 300}, "0-255"),
+        ({"at": AT, "public_ip": "198.51.100.11", "protocol": "gre?"}, "unknown protocol"),
+        ({"at": AT, "public_ip": "198.51.100.11", "protocol": True}, "protocol"),
         ({"at": AT}, "needs a public IP"),
     ],
 )
@@ -446,7 +446,7 @@ def _row(**fields: Any) -> TrafficRow:
             {"203.0.113.10"},
             ("domain_address", 40),
         ),
-        ({"dest_domain": "example.com"}, {}, {"1.1.1.1"}, ("none", 0)),
+        ({"dest_domain": "example.com"}, {}, {"198.51.100.11"}, ("none", 0)),
         ({"dest_port": 443}, {}, None, ("port", 20)),
         ({"dest_port": 80}, {}, None, ("none", 0)),
         ({}, {}, None, ("not_requested", 25)),
