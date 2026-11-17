@@ -9,7 +9,9 @@ The finder looks at IPv4 literals in **known contexts** only: after a key that n
 (``ip=``, ``srcip=``, ``"dstip": "…"``, ``public_ip=``, ``answers=[…``, ``hosts: ['…``,
 ``address = "…"`` and the like). Dotted numbers elsewhere are mostly not addresses (X.509 and
 SNMP OIDs, RFC section numbers, version strings), so they are left alone. An exception needs an
-entry in :data:`ALLOWED` with its reason. #308's ``tests/test_example_data.py`` pins the MACs.
+entry in :data:`ALLOWED` with its reason. Generated load that needs more addresses than RFC 5737's
+768 may use 198.18.0.0/15 (RFC 2544, benchmarking), in the files of :data:`BENCHMARKING_FILES`
+only. #308's ``tests/test_example_data.py`` pins the MACs.
 """
 
 from __future__ import annotations
@@ -36,11 +38,15 @@ ALLOWED: Final[dict[str, str]] = {
         "(api/tests/test_search_grammar.py), and a sender range wider than the installer "
         "allows (tests/test_installer_scripts.py)"
     ),
-    **dict.fromkeys(
-        ("23.10.10.1", "23.1.1.1"),
-        "the destinations worker/tests/test_lookup_performance.py looks up among the 1,000 it "
-        "generates in SQL as 23.a.b.1; RFC 5737 holds only 768, so the range is an open "
-        "question on #313",
+}
+#: RFC 2544's benchmarking block: not a real address either, but only generated load may use
+#: it, where RFC 5737's 768 addresses are too few (manager's answer on #313).
+BENCHMARKING: Final = ipaddress.IPv4Network("198.18.0.0/15")
+#: The files that may use :data:`BENCHMARKING`, each with its reason.
+BENCHMARKING_FILES: Final[dict[str, str]] = {
+    "worker/tests/test_lookup_performance.py": (
+        "generated load, RFC 2544 benchmarking block, #313: the lookup guard's 1,000 generated "
+        "destinations and the ones it looks up"
     ),
 }
 #: An IPv4 literal right after a key that names an address. ``ip`` covers ``srcip``, ``dstip``,
@@ -65,13 +71,20 @@ class Found(NamedTuple):
 
 
 def public(address: str) -> bool:
-    """A real internet address: global, not multicast, not RFC 5737 (which Python already
-    counts as not global)."""
+    """An address example data may not use: a real internet address (global, not multicast;
+    Python already counts RFC 5737 as not global), or one of :data:`BENCHMARKING`."""
     try:
         parsed = ipaddress.IPv4Address(address)
     except ValueError:
         return False
-    return parsed.is_global and not parsed.is_multicast
+    return (parsed.is_global and not parsed.is_multicast) or parsed in BENCHMARKING
+
+
+def allowed(item: Found) -> bool:
+    """Whether :data:`ALLOWED` or :data:`BENCHMARKING_FILES` explains ``item``."""
+    if item.address in ALLOWED:
+        return True
+    return item.path in BENCHMARKING_FILES and ipaddress.IPv4Address(item.address) in BENCHMARKING
 
 
 def find(path: str, text: str) -> Iterator[Found]:
@@ -98,14 +111,20 @@ def tracked_texts() -> Iterable[tuple[str, str]]:
 
 def test_no_public_example_address_in_a_known_context() -> None:
     found = [item for name, text in tracked_texts() for item in find(name, text)]
-    unexplained = [item for item in found if item.address not in ALLOWED]
+    unexplained = [item for item in found if not allowed(item)]
     assert unexplained == [], "\n".join(
         f"{f.path}:{f.line}: {f.key} {f.address} is a real public address; use 192.0.2.x, "
-        "198.51.100.x or 203.0.113.x (RFC 5737), or add it to ALLOWED with the reason"
+        "198.51.100.x or 203.0.113.x (RFC 5737), or add it to ALLOWED with the reason "
+        "(198.18.0.0/15 only for the generated load of BENCHMARKING_FILES)"
         for f in unexplained
     )
     stale = sorted(set(ALLOWED) - {item.address for item in found})
     assert stale == [], f"ALLOWED names addresses no longer found: {stale}"
+    unused = sorted(
+        set(BENCHMARKING_FILES)
+        - {f.path for f in found if ipaddress.IPv4Address(f.address) in BENCHMARKING}
+    )
+    assert unused == [], f"BENCHMARKING_FILES names files without such addresses: {unused}"
 
 
 @pytest.mark.parametrize(
@@ -126,6 +145,16 @@ def test_no_public_example_address_in_a_known_context() -> None:
 )
 def test_the_finder_catches_a_public_address_in_a_known_context(line: str) -> None:
     assert [item.address for item in find("planted.py", line)] == ["8.8.8.8"]
+
+
+@pytest.mark.parametrize("path", ["web/e2e/mock-usage.ts", "worker/tests/test_lookup_engine.py"])
+def test_the_benchmarking_block_fails_in_any_other_file(path: str) -> None:
+    """198.18.0.0/15 is found like a public address and allowed only in BENCHMARKING_FILES."""
+    found = list(find(path, 'lookup(public_ip="192.0.2.44", dest_ip="198.18.10.10")'))
+    assert [item.address for item in found] == ["198.18.10.10"]
+    assert not any(allowed(item) for item in found)
+    in_the_guard = list(find("worker/tests/test_lookup_performance.py", 'dstips={"198.18.1.1"}'))
+    assert [allowed(item) for item in in_the_guard] == [True]
 
 
 @pytest.mark.parametrize(
