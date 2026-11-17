@@ -1,6 +1,6 @@
 # Veri modeli / Data model
 
-> Durum: sürüm 0.4.1. Kaynak: `db/src/arcilogger_db/models.py` ve
+> Durum: sürüm 0.5.0. Kaynak: `db/src/arcilogger_db/models.py` ve
 > `db/src/arcilogger_db/migrations/versions/` (`v0001_baseline`, `v0006_lookup_reports` …
 > `v0027_rule_traffic_totals`). Bir test, modellerle migrasyonların birebir aynı olduğunu
 > her çalıştırmada doğrular.

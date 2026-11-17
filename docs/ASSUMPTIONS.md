@@ -532,6 +532,83 @@ assumption is wrong.
 | S5 | The refusals that get an explanation: Google `5.7.8` / `5.7.80`, `5.7.9` / `5.7.90`, `5.7.14` and the relay's refusals naming "relay"; Microsoft `5.7.139`, `5.7.3`, `5.7.57`, `5.7.60`. Which form Google's servers send (`5.7.8` or `5.7.80`) shows on the first real refusal | `core/src/arcilogger_core/smtp.py` (`EXPLANATIONS`); unit tests for each reply, and none for an unknown one | [AYARLAR.md](AYARLAR.md) §8.1 |
 | S6 | TÜRKTRUST answers a request without credentials with HTTP 401 (seen 2026-11-08) | the self-test's `tsa.reach` counts any HTTP answer as reached; a unit test with a stub that answers 401 | [KURULUM.md](KURULUM.md) §12 |
 
+## Wave 6: security rules, the rule editor and webhooks (2026-11-12 to 2026-11-16)
+
+The Wave 6 contract (`design/wave-6-contract.md`): the security rules R01–R19 beside the
+existing R15 and R20, their engine (`rules.run`), the rule editor (Ayarlar → Güvenlik kuralları),
+the Security page additions and the alert webhooks. The security rules are not a 5651
+obligation; they belong to the licence module `security_rules`, and no licence state blocks a
+5651 function. Operator guides: [UYARILAR.md](UYARILAR.md) / [ALERTS.md](ALERTS.md).
+
+### Owner questions (Wave 6): the defaults that ship
+
+The seven owner questions of the Wave 6 plan (2026-11-09) are not answered yet. Each ships with
+its default (contract §0.2 and §7); changing one later is a change in one place.
+
+| # | Question | Default that ships | Where it is decided |
+|---|---|---|---|
+| Q1 | R01–R19 in 5651 Temel, or a separate paid module? | a separate module `security_rules` ("Güvenlik kuralları" / "Security rules"); R15 and R20 stay free | `core/.../license/modules.py`: one registry entry |
+| Q2 | Only Yönetici sees alerts, or a separate "Güvenlik" role? | only Yönetici (`alerts.read`, `alerts.manage`); the rule editor needs `settings.manage` | `api/.../security.py` |
+| Q3 | Person names on the Security page for R09, R13, R14? | only for `usage.person`, audited as `alert.person_view` before the answer; legal review recommended | `GET /api/v1/alerts/{id}` |
+| Q4 | Webhook targets set in the browser or on the server only? External cloud (Teams, Slack)? | on the server only (`[[webhooks]]`, secrets with `arcilogger-core secret set`); Teams and Slack only when the administrator writes them into the file | `arcilogger.toml` |
+| Q5 | R04 and R14 use the usage module's work hours even without its licence? | yes for R04 (`usage.work_hours`, `usage.holidays`); R14 uses its own night hours (C6) | `rules.R04`, `rules.R14` |
+| Q6 | Custom rules in Wave 6? | no; only R01–R19's parameters are editable | — |
+| Q7 | Anonymised sample lines from the site's FortiGate (IPS, AV, app control, admin login, config change, pool empty, perf)? | without them, the rules of the table below ship "sahada doğrula" (`format_verified: false`) | the table below |
+
+### Verify on site (Wave 6)
+
+Sahada doğrula. Each item is a parameter of its rule (Ayarlar → Güvenlik kuralları, or
+`arcilogger-db settings set rules.<ID>`) or a setting, and has a test that reads synthetic lines
+through the real parser and fails loudly if the assumption is wrong. Field samples from a site's
+devices would confirm them. The rows are the contract's V1–V8 (§0.4), labelled `W6-V…` here so
+that they are not read as the FortiGate-only verification list's V1–V9 further down.
+
+| # | Assumption | Parameter or setting | Test |
+|---|---|---|---|
+| W6-V1 | FortiGate admin login logids: failed `0100032002`, successful `0100032001` (also matched on `logdesc`) | `rules.R03.fortigate_fail_logids`, `fortigate_fail_descs`; `rules.R04.fortigate_ok_logids`, `fortigate_ok_descs` | `test_r03_r04_formats` |
+| W6-V2 | FortiGate configuration-change logids `0100044546`, `0100044547` | `rules.R16.fortigate_logids` | `test_r16_formats` |
+| W6-V3 | FortiGate performance statistics: `fg_event` rows with logid `0100040704`, `cpu` and `mem` in `extra` | `rules.R17.perf_logids`, `cpu_field`, `mem_field` | `test_r17_formats` |
+| W6-V4 | Conserve mode is announced by an `fg_event` row whose `logdesc` contains `conserve` | `rules.R17.conserve_phrases` | `test_r17_formats` |
+| W6-V5 | FortiGate DHCP pool exhaustion: `fg_event` `logdesc` contains `ran out of` (MikroTik's `dhcp_pool_empty` is a confirmed parser family) | `rules.R18.fortigate_phrases` | `test_r18_formats` |
+| W6-V6 | The FortiGate DNS log's response code is in `extra["rcode"]`, NXDOMAIN as `NXDOMAIN` (also numeric `3`) | `rules.R19.rcode_field`, `nxdomain_values` | `test_r19_formats` |
+| W6-V7 | Botnet detections arrive as `fg_ips` rows with `eventtype` `botnet` | `rules.R06.ips_eventtypes` | `test_r06_formats` |
+| W6-V8 | Teams (Workflows, Adaptive Card) and Slack (incoming webhook `{"text"}`) accept the payloads ARCILOGGER sends | `[[webhooks]] format` | `test_webhook_payload_shapes` pins the JSON |
+| — | How far a device clock may be off before `R20-source-clock` opens (#222) | `alerts.source_clock_limit_seconds` (default 120 s, a starting value) | `worker/tests/test_alerts_lease.py` (`R20-source-clock`) |
+
+The rules whose formats are not confirmed (R03, R04, R06, R16, R17, R19) show "sahada doğrula" in
+the rule editor. The thresholds and windows of every rule are starting values: try a change with
+"Son 24 saatte dene" before saving it.
+
+### Decided while building (Wave 6)
+
+The manager's clarifications of the contract (§6) that change what the product does:
+
+| # | Decision | Issue |
+|---|---|---|
+| C1 | An open alert's `count` and `evidence_total` are the most rows seen in one window ("en yüksek pencere sayısı / most in one window"), never a sum of runs; so is a closed alert's `after_close.count` | #262, #270 |
+| C2 | The rules' indexes: the performance guard's first measurement added none; measured again on the production pattern (the newest minute of a filled window), revision `0026_rules_time_received` indexes the receive time of `fg_traffic`, `fg_dns`, `fg_web` and `fg_app` (W6-A-7) | #278 |
+| C3 | A rule returns at most `rules.evidence_max` evidence rows (up to 100), the oldest kept | — |
+| C4 | Defaults the tables left open: cooldown 3600 s for R01, R03, R08, R12 and R19, 0 s for R04 and R11; the per-row rules R04, R11 and R16 have a 60-s window; R08 counts a DNS connection to a server that is not allowed whatever its `action`; R19's `rcode_field` has exactly one entry | #253, #254 |
+| C5 | R04's off hours are judged on the login's device time; windows and slices stay on receive time | — |
+| C6 | R14 uses only its own `night_start` and `night_end` (seconds after site midnight, defaults 0 and 21,600), not the usage module's work hours | — |
+| C7 | For R09, R13 and R14 a minute belongs to whoever held the address at its first instant, as in the usage rollups | — |
+| C9 | Webhooks: a delivery gives up 24 h after its row was created; a webhook removed or switched off fails its queued rows and resolves its `R20-webhook`, and sends nothing from before when it is switched on again; only alerts opened in the last 24 h are queued; a missing secret or Teams/Slack URL is retried, and `GET /api/v1/webhooks` shows `ready` with a reason code, never a value | #266 |
+| C10 | "Test gönder" is a worker-channel request (`worker.webhook_test`, revision `0025`), refused before queueing for an unknown or not-ready webhook; the firewall's `ARCILOGGER Out Webhook <name>` rule keeps only a host and port, and a Teams/Slack URL is never logged or written | #266, #260 |
+| C11 | "Bağlantıyı dene": a probe-only `config.apply` of `sources` that writes nothing and ends `succeeded` with the device's interfaces | #217 |
+| C13 | A device clock that is minutes off: the system alert `R20-source-clock:<source>` (free, 5651 Temel) when a source's typical offset (the median of its newest rows received in the last hour, at least 10) is beyond `alerts.source_clock_limit_seconds` (120 s, "sahada doğrula"); it resolves when the clock is back. It replaces `R20-lease:source-clock` (an open one resolves as `superseded`). Kaynaklar, Sistem and Canlı Durum show the offset; ingest and the lookup's own tolerance (D28) are unchanged | #222 |
+
+C8 (the case writer of the rule tests) and C12 (the live tail's Linux performance bound) change
+no product behaviour.
+
+### Open points for the owner (Wave 6)
+
+- **Field samples** for W6-V1–W6-V8: anonymised lines from a site's FortiGate (admin login, configuration
+  change, performance statistics, conserve mode, DHCP pool exhaustion, DNS with NXDOMAIN, IPS
+  botnet) and one real Teams and Slack delivery.
+- **Legal review** of the KVKK notes for the person-level rules R09, R13 and R14 (who may see a
+  person's name, the `alert.person_view` audit).
+- Q1–Q7 above: each default ships until the owner decides otherwise.
+
 ## Technical assumptions to verify on site
 
 - MikroTik remote syslog wire format (BSD header, ISO-8601 time, topics string) — parser stays
@@ -558,7 +635,7 @@ explained in [CORRELATION.md](CORRELATION.md) §8.
 | V1 | The real DHCP Ack line (logid `0100026001`) on the syslog wire: field names `ip`, `mac`, `dhcp_msg`, `lease`, `interface`, `hostname`, quoting, MAC case and separator, `hostname` missing or empty | parser constants; `dhcp.fortigate_logids` | `R20-lease:fortigate-unconverted` (high); `fortigate.dhcp` parse failures; until `dhcp.fortigate_format_verified` is set, `R20-lease:fortigate-unverified` (info) and "kayıt biçimi sahada doğrulanmadı" on the card and in the report (FD7) |
 | V2 | The Release logid `0100026002`, its `dhcp_msg`/`msg` values, and whether clients' releases are logged at all | `dhcp.fortigate_logids` | `R20-lease:fortigate-refused` (reason "unmapped", with the logids seen) |
 | V3 | Renewals produce a DHCP Ack (this decides whether traffic may keep a FortiGate lease alive) | `dhcp.fortigate_traffic_extends` (default off, FD3) | `R20-lease:fortigate-renewals-missing` (high) or `fortigate-renewals-not-logged` (info); `lease_renewal_not_seen` in lookups; DEVICE-SETUP §2.4 step 5 |
-| V4 | `lease` is in seconds; how `0` (unlimited) is written | `dhcp.fortigate_use_logged_lease`; bounds 300–8,640,000 (FD4) | `R20-lease:fortigate-lease-unlimited` (high), `fortigate-lease` (low); counters `lease_fallback`, `lease_unlimited` |
+| V4 | `lease` is in seconds; how `0` (unlimited) is written | `dhcp.fortigate_use_logged_lease`; bounds 300–8,640,000 (FD4) | `R20-lease:fortigate-lease-unlimited` (high), `fortigate-lease` (low); counters `lease_fallback`, `lease_unlimited`; the lookup's `fortigate_lease_unlimited` (#299; the value is `UNLIMITED_LEASE`, pinned by `test_the_unlimited_value_is_the_documented_assumption`) |
 | V5 | DHCP event lines reach syslog with the shipped DEVICE-SETUP settings (severity `information`, no exclude filter) | DEVICE-SETUP §2.4 | `R20-lease:none:<table>` (high for FortiGate DHCP and ARP-LOG, medium for MikroTik DHCP without ARP-LOG, O20), `absent` (info), `fortigate-refused` (high when nearly every row is refused); the Kaynaklar card "Kira kanıtı" |
 | V6 | Relay mode gives no FortiGate lines; IPsec-type DHCP servers (leases held after the tunnel is down, MACs unknown); whether a DHCPINFORM reply is logged as an Ack; the `interface` of a relayed client's Ack when one interface serves several networks | `dhcp.fortigate_interfaces_excluded`; `dhcp.fortigate_dhcp_msgs`; the configured networks (D33) | `R20-lease:none:fg_dhcp` / `absent`; `fortigate-dhcp-subnet` (address in no configured network, such chains `low`); `fortigate-refused` (zero, broadcast, multicast MAC); `fortigate-dhcp-mac` (one MAC acknowledged on more than 3 addresses of one interface and network in 24 h) |
 | V7 | `vd` and `devid` on HA pairs and multi-VDOM units | `vd` is part of a row's origin; `devid` is not compared (O16) | `R20-lease:dhcp-sources-overlap:<net>` |

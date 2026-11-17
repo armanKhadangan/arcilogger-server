@@ -51,6 +51,7 @@ NEW_KEYS = (
     "egress_internal",
     "source_clock_offset",
     "source_clock_shared",
+    "fortigate_lease_unlimited",
 )
 #: Retired keys: never emitted again, kept so that stored lookups still render.
 RETIRED_KEYS = ("public_ip_not_configured", "wan_transip_not_seen")
@@ -72,7 +73,7 @@ def _labels(language: str) -> dict[str, Any]:
 
 
 def test_every_new_key_is_in_the_catalogue() -> None:
-    assert len(NEW_KEYS) == len(set(NEW_KEYS)) == 35
+    assert len(NEW_KEYS) == len(set(NEW_KEYS)) == 36
     assert set(NEW_KEYS) <= set(ENGINE_EXPLANATIONS)
     assert set(RETIRED_KEYS) <= set(ENGINE_EXPLANATIONS)
 

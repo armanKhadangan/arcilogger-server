@@ -1453,6 +1453,7 @@ TONES_2_11 = {
     "egress_internal": "warning",
     "source_clock_offset": "warning",
     "source_clock_shared": "warning",
+    "fortigate_lease_unlimited": "info",  # #299
 }
 #: The keys of earlier waves and the retired ones, with the tone the web interface gives them
 #: today; ``info`` is information by design.

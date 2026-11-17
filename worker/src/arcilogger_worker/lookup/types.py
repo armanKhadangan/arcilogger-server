@@ -858,6 +858,11 @@ FORTIGATE_LOGIDS: Final[Mapping[str, str]] = {
     "0100026002": "deassigned",
 }
 FORTIGATE_DHCP_MSGS: Final[Mapping[str, tuple[str, ...]]] = {"0100026001": ("Ack",)}
+#: The ``lease`` a FortiGate logs for a lease without end: ``0``, FortiOS's "unlimited" lease
+#: time, by its documentation; no site sample shows it yet (sahada doğrula, ASSUMPTIONS V4). The
+#: lease timeline counts such a row ``lease_unlimited`` and runs the lease on the configured
+#: time; the lookup says so (``fortigate_lease_unlimited``, #299).
+UNLIMITED_LEASE: Final = 0
 
 
 @dataclass(frozen=True)

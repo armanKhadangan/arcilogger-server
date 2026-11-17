@@ -282,7 +282,7 @@ Added after ARCILOGGER? Run
 client; then skip this section and section 5.
 
 ```powershell
-msiexec /i C:\Kurulum\ARCILOGGER-0.4.1\operator-installers\temurin8-jre\OpenJDK8U-jre_x64_windows_hotspot_8u502b07.msi INSTALLDIR="C:\Program Files\Eclipse Adoptium\jre-8\" /qn /norestart /l*v C:\Windows\Temp\temurin8.log
+msiexec /i C:\Kurulum\ARCILOGGER-0.5.0\operator-installers\temurin8-jre\OpenJDK8U-jre_x64_windows_hotspot_8u502b07.msi INSTALLDIR="C:\Program Files\Eclipse Adoptium\jre-8\" /qn /norestart /l*v C:\Windows\Temp\temurin8.log
 & "C:\Program Files\Eclipse Adoptium\jre-8\bin\java.exe" -version
 ```
 
@@ -314,7 +314,7 @@ the values are in `SHA256SUMS.txt`, in the release notes and in the job summary 
 *Summary*):
 
 ```powershell
-Get-FileHash .\ARCILOGGER-Setup-0.4.1.exe, .\ARCILOGGER-0.4.1.zip -Algorithm SHA256 | Format-List Hash, Path
+Get-FileHash .\ARCILOGGER-Setup-0.5.0.exe, .\ARCILOGGER-0.5.0.zip -Algorithm SHA256 | Format-List Hash, Path
 Get-Content .\SHA256SUMS.txt
 ```
 
@@ -353,11 +353,11 @@ repository or the bundle.
 
 ## 6. Copy and verify
 
-Copy the folder to e.g. `C:\Kurulum\ARCILOGGER-0.4.1` (not into `D:\ARCILOGGER`), with the jar:
+Copy the folder to e.g. `C:\Kurulum\ARCILOGGER-0.5.0` (not into `D:\ARCILOGGER`), with the jar:
 
 ```powershell
 Get-ChildItem -Recurse C:\Kurulum | Unblock-File
-Get-FileHash C:\Kurulum\ARCILOGGER-0.4.1\SHA256SUMS -Algorithm SHA256   # = bundle fingerprint
+Get-FileHash C:\Kurulum\ARCILOGGER-0.5.0\SHA256SUMS -Algorithm SHA256   # = bundle fingerprint
 ```
 
 Copying only `ARCILOGGER-Setup-<version>.exe`? Compare its `Get-FileHash` with `SHA256SUMS.txt` on
@@ -366,7 +366,7 @@ the server too; the setup window prints the bundle fingerprint again.
 ## 7. Install
 
 ```powershell
-cd C:\Kurulum\ARCILOGGER-0.4.1
+cd C:\Kurulum\ARCILOGGER-0.5.0
 powershell -ExecutionPolicy Bypass -File .\installer\Install-Arcilogger.ps1 -DryRun `
     -SiteName "<organisation name>" -NtpServer <local time source> -AdminAddress <admin PC>
 powershell -ExecutionPolicy Bypass -File .\installer\Install-Arcilogger.ps1 `
@@ -666,6 +666,73 @@ asks you to move it below Program Files. The Zamane client runs only from
 `C:\ProgramData\ARCILOGGER\zamane\`: when `[tsa] zamane_jar` names another place, the installer
 copies the file there, points `zamane_jar` at the copy (the previous configuration stays as
 `arcilogger.toml.before-<time>`) and appends its SHA-256 to `zamane\zamane-jar.sha256`.
+
+### 7.3 Alert webhooks (optional)
+
+Alongside e-mail, the alerts of the Security page can be sent to a SIEM, Microsoft Teams or
+Slack. Webhooks are defined **on the server only**, in
+`C:\ProgramData\ARCILOGGER\arcilogger.toml`, never in the browser; a default installation has
+none. Webhook notifications belong to the **Security rules** licence module
+([LICENSING.md](LICENSING.md)).
+
+```toml
+[[webhooks]]
+name = "siem"                # a-z, 0-9 and "-", at most 32 characters, unique
+url = "<https address of your SIEM>"
+format = "generic"           # "generic" | "teams" | "slack"
+min_severity = "high"        # info | low | medium | high | critical
+rules = []                   # [] = every rule (R15 and R20 included); else e.g. ["R01", "R06"]
+enabled = true
+timeout_seconds = 10         # 1-60
+# ca_file = 'C:\ProgramData\ARCILOGGER\webhook-ca.pem'   # a company CA; default: the system store
+```
+
+- **`https` only;** the certificate is always verified, and no setting switches that off. The
+  address cannot hold user info, `127.0.0.0/8` and `::1` are refused, and at most 10 webhooks
+  can be defined. With `[network] https_proxy` set, requests go through the proxy.
+- **Secret:** every `generic` request is signed with HMAC-SHA256 (`X-Arcilogger-Timestamp`,
+  `X-Arcilogger-Signature: sha256=…`). The key (32–256 characters) is in the secret store, not
+  in the file:
+
+  ```powershell
+  & "C:\Program Files\ARCILOGGER\venv\Scripts\arcilogger-core.exe" secret set webhook.siem.secret
+  ```
+
+  For `teams` and `slack` **the address itself is the secret**: `url` stays empty in the file
+  and the address goes into the secret store with `secret set webhook.<name>.url`. Secrets are
+  never shown on a screen, in a log or in a response; without them the webhook is not ready to
+  send.
+- **What is sent:** the alert's number, rule, severity, state, Turkish and English titles, time,
+  count and web link. **No person names and no raw log lines.** The Teams and Slack shapes must
+  be **verified on site**: see a test notification appear in your own channel.
+- **Delivery:** the worker queues new alerts every minute (those opened after the webhook was
+  defined; older alerts are not sent). A temporary error is retried after 1, 5, 15 and 60
+  minutes, then hourly until 24 hours after the first attempt. A permanent error (a 4xx other
+  than 408 and 429) or the end of the 24 hours opens the `R20-webhook` alert ("Webhook cannot
+  deliver"); that webhook's next successful delivery closes it.
+- **Firewall:** in strict outbound mode (`-StrictOutbound`, section 12) each enabled webhook gets
+  the rule `ARCILOGGER Out Webhook <name>` to the host and port of its address (as the SMTP rule
+  of section 12). A Teams or Slack address is read from the secret store and only its host and
+  port are used; if it cannot be read, no rule is opened and a warning names the webhook (never
+  the address).
+- **Settings → Webhook'lar** (`/settings/webhooks`, for users who may read alerts) shows the
+  webhooks **read-only**: name, format (Teams and Slack marked "sahada doğrula"), the URL's host
+  only, minimum severity, rules, on or off, whether it is ready to send (if not, why: off, secret
+  missing, URL missing), the last delivery, and the deliveries sent and failed in the last 7
+  days. **Teslimler** (deliveries) lists the latest 50: the time it was queued, the alert (with
+  its link), severity, status, attempts and the last error. No webhook can be added or changed
+  there; the definition is in the file only.
+- **Test gönder** (send a test; `settings.manage`, for an enabled webhook that is ready) has the
+  worker send a test notification (rule `TEST`) and follows it as the test e-mail is followed:
+  "Deneme bildirimi gönderildi; hedef HTTP 204 ile yanıt verdi." (the test notification was sent;
+  the target answered HTTP 204) or the error text (the status code and the cleaned reply; never the
+  URL's path, the secret or a header value). For a webhook that is not ready the request is refused
+  before anything is queued ("Bu webhook gönderime hazır değil; durumuna bakın." / "This webhook is
+  not ready to send; see its state."); at most 5 tests an hour. Each test is audited as
+  `webhook.test` (name, outcome, status code; never the URL). The button is locked when the licence
+  shows the **Security rules** module off.
+- The worker picks up a change to the file by itself; `ApplySystem` updates the firewall rules
+  within 5 minutes.
 
 ## 8. Root certificate on the admin PC
 
@@ -1128,6 +1195,15 @@ is lost, UDP does not retransmit):
 powershell -ExecutionPolicy Bypass -File .\installer\Install-Arcilogger.ps1 -Upgrade -DryRun
 powershell -ExecutionPolicy Bypass -File .\installer\Install-Arcilogger.ps1 -Upgrade
 ```
+
+**Upgrade time to 0.5.0:** the 0.5.0 upgrade builds a receive-time index on `fg_traffic`,
+`fg_dns`, `fg_web` and `fg_app` (`0026_rules_time_received`). On plain PostgreSQL it takes about
+7 seconds and about 0.2 GB of extra disk per 10 million rows in these four tables. On TimescaleDB
+only the uncompressed chunks (about the last 7 days) count; compressed chunks are not
+decompressed. The other three revisions (`0024`, `0025`, `0027`) and the downgrade to `0023`
+each finish in under a second; the downgrade does not change the rows of these four tables. The
+times were measured on a 4-vCPU development machine; a slower disk takes proportionally longer.
+Example: 500 million rows in the four tables take about 6 minutes and 11 GB of extra disk.
 
 After the upgrade, check the new version and release date in the **Sürüm ve güncelleme** (Version
 and upgrades) block of the **Sistem** page, the services in its **Hizmetler** (Services) block, and
