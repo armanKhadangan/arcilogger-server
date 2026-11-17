@@ -520,7 +520,7 @@ def test_a_session_without_a_duration_is_named_by_its_own_web_log(
 def test_unknown_destination_lists_nobody(db_session: Session, site: Site) -> None:
     """Spec 2.3: candidates only *to the given destination*. No session goes there → mode
     ``none``; unrelated clients (and their persons) are never put into the answer."""
-    outcome = lookup(db_session, public_ip="192.0.2.44", dest_ip="1.1.1.1")
+    outcome = lookup(db_session, public_ip="192.0.2.44", dest_ip="198.51.100.11")
     assert outcome.mode == "none"
     assert outcome.matches == ()
     assert keys(outcome) == [
@@ -531,7 +531,7 @@ def test_unknown_destination_lists_nobody(db_session: Session, site: Site) -> No
         "egress_unconfigured",  # no internet exits defined: one implicit double-NAT exit
     ]
     note = outcome.explanations[2]
-    assert note.params == {"destination": "1.1.1.1"}
+    assert note.params == {"destination": "198.51.100.11"}
     assert "hedef alanlarını boş bırakarak" in note.text_tr
     assert "destination fields empty" in note.text_en
     # A domain nobody resolved or visited, a port nobody used: the same.

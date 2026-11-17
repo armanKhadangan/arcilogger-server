@@ -77,10 +77,10 @@ def test_received_at_rejects_garbage() -> None:
     with pytest.raises(RawLineError):
         received_at(b"garbage")
     with pytest.raises(RawLineError):
-        received_at(b"notatime 1.2.3.4 x")
+        received_at(b"notatime 203.0.113.124 x")
 
 
-@pytest.mark.parametrize("sender", ["", "1.2.3.4 x"])
+@pytest.mark.parametrize("sender", ["", "203.0.113.124 x"])
 def test_invalid_sender_is_rejected(sender: str) -> None:
     with pytest.raises(ValueError, match="sender"):
         format_line(RECEIVED, sender, b"x")

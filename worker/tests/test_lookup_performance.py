@@ -7,7 +7,8 @@ answers for the domain path; DHCP + hourly ARP for the 300 devices. Measured: th
 of the first day (with look-ahead into the next), the double-NAT candidate search without
 destination (every session that overlaps the window), with a destination IP + port, with a
 popular and a rare domain, and an exact lookup. ``EXPLAIN`` shows that every query uses an index
-and the bounded time range.
+and the bounded time range. The 1,000 destinations are generated in 198.18.0.0/15, RFC 2544's
+benchmarking block: RFC 5737 holds only 768 addresses, and no real address is used (#313).
 
 **Which chunks.** :func:`test_lookup_is_fast_on_continuous_data` measures uncompressed data: on
 plain PostgreSQL every partition, on TimescaleDB uncompressed chunks only (the compression
@@ -167,7 +168,7 @@ def _load(engine: Engine) -> dict[str, float]:
                 "'0000000013', 'forward', 'accept', 1000000 + g, 6, "
                 "('172.20.' || (ARRAY[41, 42, 43])[1 + g % 3] || '.' || "
                 "(100 + (g / 3) % 100))::inet, "
-                "1024 + (g % 60000), ('23.' || (g % 200) || '.' || (g % 250) || '.1')::inet, "
+                "1024 + (g % 60000), ('198.18.' || (g % 200) || '.' || (g % 250))::inet, "
                 "CASE WHEN g % 10 = 0 THEN 80 ELSE 443 END, CAST(:wan AS inet), "
                 "1024 + (g % 60000), 'snat', CASE WHEN g % 500 = 0 THEN 7200 ELSE g % 97 END, "
                 "false FROM generate_series(1, :rows) AS g, "
@@ -186,7 +187,7 @@ def _load(engine: Engine) -> dict[str, float]:
                 "SELECT t, t, 'fortigate', '172.31.255.1', :day, k, 0, 1000000 + k, "
                 "('172.20.' || (ARRAY[41, 42, 43])[1 + k % 3] || '.' || "
                 "(100 + (k / 3) % 100))::inet, "
-                "('23.' || (k % 200) || '.' || (k % 250) || '.1')::inet, "
+                "('198.18.' || (k % 200) || '.' || (k % 250))::inet, "
                 "CASE WHEN g % 5 = 0 THEN (CASE g % 3 WHEN 0 THEN 'www' WHEN 1 THEN 'mail' "
                 "ELSE 'apis' END) || '.google.com' ELSE 'site' || (g % 5000) || '.example' END, "
                 "'passthrough' FROM generate_series(1, :rows / 4) AS g, "
@@ -204,7 +205,7 @@ def _load(engine: Engine) -> dict[str, float]:
                 "SELECT t, t, 'fortigate', '172.31.255.1', :day, g, 0, "
                 "('172.20.' || (ARRAY[41, 42, 43])[1 + g % 3] || '.' || "
                 "(100 + (g / 3) % 100))::inet, "
-                "'www.google.com', ARRAY[('23.' || (g % 20) || '.' || (g % 25) || '.1')::inet] "
+                "'www.google.com', ARRAY[('198.18.' || (g % 20) || '.' || (g % 25))::inet] "
                 "FROM generate_series(1, CAST(:days * 2880 AS integer)) AS g, "
                 "LATERAL (SELECT CAST(:start AS timestamptz) + g * interval '30 seconds' "
                 "AS t) AS x"
@@ -289,7 +290,7 @@ def _lookups(session: Session, timings: dict[str, float]) -> Lookups:
             at=at, public_ip="192.0.2.44", public_port=40001
         ),
         "candidates_destination": LookupRequest(
-            at=at, public_ip="192.0.2.44", dest_ip="23.10.10.1", dest_port=80
+            at=at, public_ip="192.0.2.44", dest_ip="198.18.10.10", dest_port=80
         ),
         "domain_popular": LookupRequest(at=at, public_ip="192.0.2.44", dest_domain="google.com"),
         "domain_rare": LookupRequest(at=at, public_ip="192.0.2.44", dest_domain="site123.example"),
@@ -344,17 +345,17 @@ def test_lookup_is_fast_on_continuous_data(db_engine: Engine, db_session: Sessio
             db_session, window, transip_in=WAN_EXIT, analyze=True
         ),
         "candidates_destination": explain_rows(
-            db_session, window, transip_in=WAN_EXIT, dstips={"23.10.10.1"}, analyze=True
+            db_session, window, transip_in=WAN_EXIT, dstips={"198.18.10.10"}, analyze=True
         ),
         "candidates_unclaimed": explain_rows(
-            db_session, window, unclaimed=(), dstips={"23.10.10.1"}, analyze=True
+            db_session, window, unclaimed=(), dstips={"198.18.10.10"}, analyze=True
         ),
         "domain_popular": explain_rows(
             db_session,
             window,
             transip_in=WAN_EXIT,
             domain="google.com",
-            dstips={"23.1.1.1", "23.2.2.1"},
+            dstips={"198.18.1.1", "198.18.2.2"},
             analyze=True,
         ),
         "exact": explain_rows(db_session, window, transip=WAN, transport=exact_port),
@@ -487,7 +488,7 @@ def test_lookup_is_fast_on_compressed_chunks(db_engine: Engine, db_session: Sess
         lookups.window,
         transip_in=WAN_EXIT,
         domain="google.com",
-        dstips={"23.1.1.1", "23.2.2.1"},
+        dstips={"198.18.1.1", "198.18.2.2"},
         analyze=True,
     )
     _print("compressed", timings, lookups)
@@ -585,7 +586,7 @@ TRAFFIC_SITE = (
     "dstintf, transip, transport, trandisp, duration, is_interim) "
     "SELECT t, t, 'fortigate', '172.31.255.1', :day, g, g::bigint * 900, '0000000013', "
     "'forward', 'accept', 1000000 + g, 6, k.ip, 1024 + (g % 60000), k.interface, k.mac, "
-    "('23.' || (g % 200) || '.' || (g % 250) || '.1')::inet, 443, 'wan1', CAST(:wan AS inet), "
+    "('198.18.' || (g % 200) || '.' || (g % 250))::inet, 443, 'wan1', CAST(:wan AS inet), "
     "1024 + (g % 60000), 'snat', CASE WHEN g % 487 = 0 THEN 7200 ELSE g % 97 END, false "
     "FROM generate_series(1, :rows) AS g, "
     "LATERAL (SELECT g % :clients AS c, "
@@ -600,7 +601,7 @@ TRAFFIC_SITE = (
     "dstintf, transip, transport, trandisp, duration, is_interim) "
     "SELECT t, t, 'fortigate', '172.31.255.1', :day, 2000000 + g, (2000000 + g)::bigint * 900, "
     "'0000000013', 'forward', 'accept', 3000000 + g, 6, '172.20.41.101', 1024 + (g % 60000), "
-    "'vlan41', '00:00:5e:00:53:03', ('23.' || (g % 200) || '.' || (g % 250) || '.1')::inet, 443, "
+    "'vlan41', '00:00:5e:00:53:03', ('198.18.' || (g % 200) || '.' || (g % 250))::inet, 443, "
     "'wan2', CAST(:line AS inet), 1024 + (g % 60000), 'snat', g % 97, false "
     "FROM generate_series(1, 10000 * 21 / 24) AS g, "
     "LATERAL (SELECT CAST(:at AS timestamptz) + interval '4 hours' "

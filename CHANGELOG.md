@@ -5,6 +5,161 @@ versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.5.0] — 2026-11-17
+
+Release version 0.5.0 (`v0.5.0`): Wave 6, the security rules, the rule editor and webhooks.
+Upgrading: run the new `ARCILOGGER-Setup-0.5.0.exe`; it upgrades in place and keeps the data and
+the settings. Read the upgrade note below first: `0026` indexes four large tables.
+
+### Security rules, the rule editor and webhooks (Wave 6)
+
+Eighteen security rules watch the logs that ARCILOGGER already keeps and open alerts on the
+Güvenlik (Security) page. Each rule can be tuned in the browser and tried on the last 24 hours
+before it is saved, and alerts can also go to the organisation's own systems through webhooks.
+The security rules are not a 5651 obligation: they belong to the licence module `security_rules`
+("Güvenlik kuralları" / "Security rules"), and no licence state blocks a 5651 function. Contract:
+`design/wave-6-contract.md`.
+
+- **The rules R01–R19** (R15 is the existing silent-source alert). Each rule is listed with its
+  Turkish and English name:
+  - R01 İçeriden port taraması / Internal port scan; R02 Dışarıdan tarama / External scan;
+  - R03 Kaba kuvvet giriş denemesi / Brute-force login; R04 Mesai dışı / beklenmeyen yerden
+    yönetici girişi / Admin login off hours or from an unexpected address;
+  - R05 IPS saldırısı / IPS attack; R06 Botnet / tehdit IP / Botnet or threat IP; R07 Zararlı
+    yazılım / Malware;
+  - R08 DNS atlatma / DNS bypass; R09 Engelli kategori ısrarı / Repeated blocked categories;
+    R10 Proxy / VPN / Tor;
+  - R11 Yeni cihaz / New device; R12 MAC değişimi / MAC change;
+  - R13 Büyük veri gönderimi / Large upload; R14 Gece etkinliği / Night activity;
+  - R16 Cihaz yapılandırma değişikliği / Device configuration change; R17 Güvenlik duvarı
+    sağlığı / Firewall health; R18 DHCP havuzu doldu / DHCP pool exhausted; R19 Şüpheli DNS
+    (DGA) / Suspicious DNS (DGA).
+- **How they run:** the worker job `rules.run` evaluates every switched-on rule once a minute.
+  - It counts by receive time, so a device clock that is off neither hides nor splits a burst.
+    Device time is shown in the evidence.
+  - A rule that is switched on starts at the present (`rules.lag_seconds`, default 120 s) and
+    never raises alerts for older data.
+  - An alert is opened once per key. While it is open its count is the most rows seen in one
+    window; a cooldown keeps a closed key quiet.
+  - R17 closes its own alert once the condition has gone. Every other rule's alert is closed by
+    a person.
+  - A rule that keeps failing opens `R20-rules` ("Güvenlik kuralı çalışamıyor" / "Security rule
+    cannot run").
+- **Rules that read unconfirmed formats** ship marked "sahada doğrula" (verify on site):
+  - which ones: R03, R04, R06, R16, R17 and R19 (`format_verified: false`; FortiGate login,
+    configuration-change, botnet, performance and DNS response-code fields);
+  - what the editor shows: the mark, and each rule's matching values as parameters.
+- **Ayarlar → Güvenlik kuralları** (rule editor, `settings.manage`): per rule:
+  - switched on or off;
+  - severity, window and cooldown;
+  - its parameters;
+  - whether it e-mails (`alerts.email_min_severity` still applies) and whether it goes to the
+    webhooks.
+
+  **"Son 24 saatte dene"** runs the candidate settings over the last 24 hours and answers how many
+  alerts they would have opened, without saving anything. Without the licence module, the list
+  stays readable and the editor shows the lock.
+- **The Güvenlik page:**
+  - an alert can be given to a user (`alert.assign`, only users who can read alerts);
+  - an evidence tab lists the log rows behind the alert, as references that "Ham satırı aç"
+    opens with the raw-line permission and audit, never the line's content in the alert;
+  - 30-day trends by severity, and the rules and keys with the most alerts of the last 7 days.
+- **Person names (KVKK):** R09, R13 and R14 are person-level rules.
+  - Their alerts store a person id.
+  - The person's name is shown only to users with `usage.person`, and each such view is audited
+    (`alert.person_view`) before the answer is returned.
+  - Alert e-mails and webhooks carry no person name and no log line.
+  - Legal review of these notes is recommended.
+- **Webhooks** (`[[webhooks]]` in `arcilogger.toml`, set on the server only):
+  - **Formats and secrets:** up to ten targets in the formats `generic` (HMAC-SHA256 signed),
+    `teams` and `slack` (the last two "sahada doğrula"). The HMAC secret and a Teams/Slack URL
+    live in the secret store (`arcilogger-core secret set webhook.<name>.secret` / `.url`).
+  - **Sending:** the worker job `alerts.webhooks` sends each new alert once, over HTTPS with the
+    certificate always verified, through `[network] https_proxy` when set. It tries again after
+    1, 5, 15 and 60 minutes, then every hour, for 24 hours. A 4xx other than 408 and 429 fails
+    at once, and a failed delivery opens `R20-webhook`.
+  - **What is sent:** no backfill, no person name, no log line.
+  - **In the browser:** Ayarlar → Webhook'lar lists the webhooks, whether each is ready, its last
+    deliveries and their errors (without the URL's path, the secret or a header value).
+    **"Test gönder"** sends a test notification through the worker
+    (`POST /api/v1/webhooks/{name}/test`).
+  - **Firewall:** in strict outbound mode the firewall gets an `ARCILOGGER Out Webhook <name>` rule
+    for each enabled webhook.
+
+### Fixes and smaller additions (Wave 6)
+
+- **"Bağlantıyı dene" in a source's SNMP section** (#217). The device is tried with the typed
+  values and keys before anything is saved, and the interfaces it reports are offered as a pick
+  list for the WAN lines. Nothing is written, and the test is audited as `admin.probe`. A failed
+  test names its reason, and the names can still be typed.
+- **Each source's device clock** (#222):
+  - `GET /api/v1/sources` gives each source's typical clock offset (`clock_offset_seconds`);
+  - the new alert `R20-source-clock:<source>` opens for a source whose clock is more than
+    `alerts.source_clock_limit_seconds` (default 120 s, "sahada doğrula") off, and closes once it
+    is back;
+  - it replaces `R20-lease:source-clock`; open alerts of the old kind are closed as superseded;
+  - **Kaynaklar** shows the offset in its "Saat farkı" (clock offset) column ("zamanında", "7 dk
+    geri"); the **Sistem** page lists the sources beyond the limit (`GET /api/v1/system/health`,
+    `source_clocks`); **Canlı Durum** names a firewall whose clock is too far behind for "Şu an"
+    (`GET /api/v1/activity/devices`, `late_sources`) (#290).
+- **Canlı Durum holds its open sessions in a compact form** (#275): the worker's garbage
+  collector no longer walks every open session's counts, which held the worker's threads at high
+  log rates. The snapshot is unchanged.
+- **The worker's garbage-collector thresholds** (#281, #301): once the worker service has frozen
+  what it loaded at the start, it sets Python's thresholds to (2000, 10, 100), so the collector
+  runs less often at high log rates; they are set back when the service stops.
+- **A FortiGate lease logged as unlimited is named in a lookup** (#299, #300): when the lease's
+  own last DHCP record logged `lease=0`, the chain carries the info note
+  `fortigate_lease_unlimited` with the configured time the lease ran on (`lease.server_seconds`,
+  else `lease.default_seconds`, × `lease.timeout_percent`). The chain, its confidence and its
+  person do not change; RAPOR and DENETCI-KILAVUZU explain the note.
+- **The alert detail lists only e-mail deliveries** (#304, found in the Wave 6 walk):
+  `GET /api/v1/alerts/{id}` answered 500 for an alert a webhook had sent, because the webhook's
+  delivery rows were listed with the e-mails. They are shown on Ayarlar → Webhook'lar only. No
+  released version had the fault.
+- **The Wave 6 documents** (#250, #306): UYARILAR/ALERTS §8 (the Güvenlik page: assignment,
+  evidence, the person, the 30-day trends) and §9 (every rule, the dry run, the rule editor);
+  DEVICE-SETUP 2.7 (the FortiGate logs the rules read, with the FortiOS commands, "sahada
+  doğrula"); KURULUM/INSTALL 7.3 (alert webhooks, Ayarlar → Webhook'lar and "Test gönder"). A
+  test sends every load-generator scenario through the real parsers to the rule that must raise
+  it (T-I).
+
+### Upgrade note (Wave 6)
+
+- **Migrations `0024`–`0027`:**
+  - `0024` adds the rules' state, the alert evidence, the alert assignee and the webhook
+    delivery kind;
+  - `0025` adds the webhook test's request kind;
+  - `0026` builds indexes on the receive time of `fg_traffic`, `fg_dns`, `fg_web` and `fg_app`;
+  - `0027` adds R13's and R14's running totals.
+
+  **`0026` indexes every existing row of those four tables while the services are stopped.**
+  Measured in the upgrade rehearsal (#297, #298; `tools/bench/upgrade_rehearsal.py`): on plain
+  PostgreSQL it takes about 7 seconds and about 0.2 GB of extra disk per 10 million rows in these
+  four tables; on TimescaleDB only the uncompressed chunks (about the last 7 days) count, and
+  compressed chunks are not decompressed. The other three revisions and the downgrade to
+  `0023` each finish in under a second; the downgrade does not change the rows of these four
+  tables. The times were measured on a 4-vCPU development machine; a slower disk takes
+  proportionally longer. Example: 500 million rows in the four tables take about 6 minutes and
+  11 GB of extra disk. Plan the upgrade outside working hours. The installer can roll the four
+  revisions back.
+- **The security rules need the licence module `security_rules`.** Without it, `rules.run`,
+  `alerts.webhooks` and the rule and webhook-test writes are skipped or refused; nothing else
+  changes. Every rule is switched on by default except R08 and R14, which wait for a value only
+  the site knows (R08 its allowed DNS servers, R14 its user networks). Each rule starts at the
+  present, so nothing is raised for the days before the upgrade.
+
+### Known limitations (Wave 6)
+
+- **R13 and R14 in a catch-up** (#302): when ingest catches up after an outage, one minute of
+  receive time can hold hours of device time. R13's and R14's statement for such a slice can then
+  run past `rules.statement_timeout_seconds` (default 20 s). The slice is rolled back and tried
+  again on every run, and after `rules.failures_alert` (default 3) failures in a row `R20-rules`
+  ("Güvenlik kuralı çalışamıyor: R13") opens; the rule stays behind until the slice passes or,
+  once it is more than `rules.max_catch_up_hours` (24) behind, skips the backlog. In the Wave 6
+  walk a whole scenario day sent in 10 s needed about 66 s with the timeout raised to
+  300 s, on a loaded 4-core machine. A fix is under way (#307).
+
 ## [0.4.1] — 2026-11-13
 
 Release version 0.4.1 (`v0.4.1`): fixes found on a site running 0.4.0. Upgrading: run the new

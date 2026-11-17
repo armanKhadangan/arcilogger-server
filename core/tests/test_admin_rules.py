@@ -327,7 +327,7 @@ def test_an_empty_local_source_warns_and_strict_mode_skips_the_probe(
 def test_ipv4_addresses_and_host_names_are_valid_time_servers() -> None:
     for host in ("172.20.10.1", "time.ume.tubitak.gov.tr", "ntp", "a-b.c"):
         assert rules.host_ok(host)
-    for host in ("10.0.3", "1.2.3.4.5", "999.1.1.1", "x" * 254, "a_b", "-a"):
+    for host in ("10.0.3", "203.0.113.124.5", "999.1.1.1", "x" * 254, "a_b", "-a"):
         assert not rules.host_ok(host)
 
 
@@ -943,7 +943,7 @@ def test_a_source_is_added(root: Path, config: Config) -> None:
         ("240.0.0.1", "source_reserved_address"),
         ("172.20.10.5", "source_own_address"),
         ("172.20.10.5/32", "source_own_address"),
-        ("8.8.8.8", "source_network_not_allowed"),
+        ("198.51.100.153", "source_network_not_allowed"),
         ("100.64.0.1", "source_network_not_allowed"),
         ("172.16.0.0/15", "source_prefix_too_short"),
         ("10.0.0.0/8", "source_prefix_too_short"),

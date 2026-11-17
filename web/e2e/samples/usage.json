@@ -58,7 +58,7 @@
       "hours": "all",
       "to": "2026-10-12"
     },
-    "updated_at": "2026-10-13T04:01:17.976472Z"
+    "updated_at": "2026-10-13T04:01:28.076740Z"
   },
   "categories_department_filter": {
     "computed_until": "2026-10-12T21:00:00Z",
@@ -103,7 +103,7 @@
       "hours": "all",
       "to": "2026-10-12"
     },
-    "updated_at": "2026-10-13T04:01:17.976472Z"
+    "updated_at": "2026-10-13T04:01:28.076740Z"
   },
   "category": {
     "category": "Video",
@@ -139,7 +139,7 @@
       "upload_bytes": 1860,
       "users": 1
     },
-    "updated_at": "2026-10-13T04:01:17.976472Z",
+    "updated_at": "2026-10-13T04:01:28.076740Z",
     "users": [
       {
         "department": "Finans",
@@ -214,7 +214,7 @@
       "upload_bytes": 0,
       "users": 1
     },
-    "updated_at": "2026-10-13T04:01:17.976472Z",
+    "updated_at": "2026-10-13T04:01:28.076740Z",
     "users": [
       {
         "department": "Planlama",
@@ -321,7 +321,7 @@
       {
         "background": true,
         "category": null,
-        "domain": "8.8.8.8",
+        "domain": "198.51.100.153",
         "download_bytes": 5000,
         "kind": "ip",
         "raw_seconds": 60,
@@ -354,7 +354,7 @@
       "upload_bytes": 7700,
       "users": 2
     },
-    "updated_at": "2026-10-13T04:01:17.976472Z",
+    "updated_at": "2026-10-13T04:01:28.076740Z",
     "users": [
       {
         "department": "Finans",
@@ -833,7 +833,7 @@
         "users": 1
       }
     ],
-    "updated_at": "2026-10-13T04:01:17.976472Z"
+    "updated_at": "2026-10-13T04:01:28.076740Z"
   },
   "company_off_hours": {
     "active_users": 2,
@@ -1110,11 +1110,11 @@
         "users": 1
       }
     ],
-    "updated_at": "2026-10-13T04:01:17.976472Z"
+    "updated_at": "2026-10-13T04:01:28.076740Z"
   },
   "company_today": {
     "active_users": 1,
-    "computed_until": "2026-10-13T04:01:18.101386Z",
+    "computed_until": "2026-10-13T04:01:28.198722Z",
     "departments": [
       {
         "active_users": 1,
@@ -1349,7 +1349,7 @@
         "users": 1
       }
     ],
-    "updated_at": "2026-10-13T04:01:18.101386Z"
+    "updated_at": "2026-10-13T04:01:28.198722Z"
   },
   "company_week": {
     "active_users": 5,
@@ -2761,7 +2761,7 @@
         "users": 1
       }
     ],
-    "updated_at": "2026-10-13T04:01:17.976472Z"
+    "updated_at": "2026-10-13T04:01:28.076740Z"
   },
   "company_work_hours": {
     "active_users": 5,
@@ -3123,7 +3123,7 @@
         "users": 1
       }
     ],
-    "updated_at": "2026-10-13T04:01:17.976472Z"
+    "updated_at": "2026-10-13T04:01:28.076740Z"
   },
   "errors": {
     "forbidden_pseudonyms": {
@@ -3276,7 +3276,7 @@
       "content-disposition": "attachment; filename=\"arcilogger-kullanim-categories-20261012-20261012.xlsx\"",
       "content-type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     },
-    "sha256": "a0b236d4aa1e95101a661fca5d90666048bb11471b726a9761b2cd490d198698",
+    "sha256": "ca241f1a3b08f2d3541cda0692358b22053c351e3f0676e9e6b5324fd2733cc6",
     "size": 5795
   },
   "export_category_csv": {
@@ -3305,7 +3305,7 @@
       "content-disposition": "attachment; filename=\"arcilogger-kullanim-company-20261012-20261012.xlsx\"",
       "content-type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     },
-    "sha256": "59e6959d69ff872b2db4612e4f8fedd34cbb657621a881fd28decc47f8318e02",
+    "sha256": "d06cdb8c63f52979530451ae72c9c73da12c9d988cb58657d02d2f0adf115747",
     "size": 10427
   },
   "export_departments_csv": {
@@ -3334,8 +3334,8 @@
       "content-disposition": "attachment; filename=\"arcilogger-kullanim-sites-20261012-20261012.xlsx\"",
       "content-type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     },
-    "sha256": "29c38967a4c512a5173dda1a66da50286ab262239fb0242d8fc67bf2a3e691b6",
-    "size": 6123
+    "sha256": "650011e0448d8c693120a85224616d8a04596566f336bc3ce53e6c6b0cf67419",
+    "size": 6131
   },
   "export_subject_csv": {
     "headers": {
@@ -3343,9 +3343,9 @@
       "content-disposition": "attachment; filename=\"arcilogger-kullanim-subject-20261012-20261012.csv\"",
       "content-type": "text/csv; charset=utf-8"
     },
-    "sha256": "590c7ec39379327924532ee9be238c451b8bf030cac3bc16fbb34df52557692d",
-    "size": 532,
-    "text": "﻿Alan adı;Tür;Kategori;Süre (sn, tahmini);Ham süre (sn);Pay;İndirilen (bayt);Yüklenen (bayt);Oturum;Kullanıcı;Arka plan\r\nvideo.example;domain;Video;210;300;0,5833;18600;1860;1;1;hayır\r\nhaber.example;domain;Haber;120;120;0,3333;10000;2000;1;1;hayır\r\nposta.example;domain;;30;60;0,0833;3000;300;1;1;hayır\r\nwindowsupdate.com;domain;;0;120;0,0000;600000;6000;1;1;evet\r\nMicrosoft-Azure;service;;0;60;0,0000;50000;1000;1;1;evet\r\n8.8.8.8;ip;;0;60;0,0000;5000;100;1;1;evet\r\nreklam.example;domain;;0;60;0,0000;900;300;1;1;evet\r\n"
+    "sha256": "5478bb770093f127ca30fa4f82645c154357d168a7f8e9714f86c0ebb6edec4b",
+    "size": 539,
+    "text": "﻿Alan adı;Tür;Kategori;Süre (sn, tahmini);Ham süre (sn);Pay;İndirilen (bayt);Yüklenen (bayt);Oturum;Kullanıcı;Arka plan\r\nvideo.example;domain;Video;210;300;0,5833;18600;1860;1;1;hayır\r\nhaber.example;domain;Haber;120;120;0,3333;10000;2000;1;1;hayır\r\nposta.example;domain;;30;60;0,0833;3000;300;1;1;hayır\r\nwindowsupdate.com;domain;;0;120;0,0000;600000;6000;1;1;evet\r\nMicrosoft-Azure;service;;0;60;0,0000;50000;1000;1;1;evet\r\n198.51.100.153;ip;;0;60;0,0000;5000;100;1;1;evet\r\nreklam.example;domain;;0;60;0,0000;900;300;1;1;evet\r\n"
   },
   "export_subject_xlsx": {
     "headers": {
@@ -3353,8 +3353,8 @@
       "content-disposition": "attachment; filename=\"arcilogger-kullanim-subject-20261012-20261012.xlsx\"",
       "content-type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     },
-    "sha256": "3fba511aa57f71e887b842f09076a6cd515b80c7f6abd2fdb63ff922e5fd845d",
-    "size": 13105
+    "sha256": "b4e8f90bf15082721819cd96fc1ca4317346950bcb969745f7ee76a83ae9296a",
+    "size": 13120
   },
   "export_subjects_csv": {
     "headers": {
@@ -3514,10 +3514,10 @@
       "to": "2026-10-12"
     },
     "total": 3,
-    "updated_at": "2026-10-13T04:01:21.297907Z"
+    "updated_at": "2026-10-13T04:01:32.242279Z"
   },
   "meta": {
-    "captured_at": "2026-10-13T04:01:37.778062+00:00",
+    "captured_at": "2026-10-13T04:01:54.628990+00:00",
     "clock": "2026-10-13T07:00:00+03:00",
     "info": "captured by web/scripts/capture_api_samples.py; do not edit",
     "site_day": "2026-10-09",
@@ -3607,19 +3607,19 @@
     }
   ],
   "rebuild_done": {
-    "created_at": "2026-10-13T04:01:21.234204Z",
+    "created_at": "2026-10-13T04:01:32.166763Z",
     "error": null,
-    "finished_at": "2026-10-13T04:01:21.297907Z",
+    "finished_at": "2026-10-13T04:01:32.242279Z",
     "from": "2026-10-12",
     "job_id": 1,
     "progress": 1.0,
     "requested_by": "tolga",
-    "started_at": "2026-10-13T04:01:21.297907Z",
+    "started_at": "2026-10-13T04:01:32.242279Z",
     "status": "done",
     "to": "2026-10-12"
   },
   "rebuild_queued": {
-    "created_at": "2026-10-13T04:01:21.234204Z",
+    "created_at": "2026-10-13T04:01:32.166763Z",
     "error": null,
     "finished_at": null,
     "from": "2026-10-12",
@@ -3631,7 +3631,7 @@
     "to": "2026-10-12"
   },
   "rebuild_requested": {
-    "created_at": "2026-10-13T04:01:21.234204Z",
+    "created_at": "2026-10-13T04:01:32.166763Z",
     "error": null,
     "finished_at": null,
     "from": "2026-10-12",
@@ -3674,7 +3674,7 @@
       "upload_bytes": 0,
       "users": 2
     },
-    "updated_at": "2026-10-13T04:01:17.976472Z",
+    "updated_at": "2026-10-13T04:01:28.076740Z",
     "users": [
       {
         "department": "Planlama",
@@ -3783,7 +3783,7 @@
       "upload_bytes": 0,
       "users": 1
     },
-    "updated_at": "2026-10-13T04:01:17.976472Z",
+    "updated_at": "2026-10-13T04:01:28.076740Z",
     "users": [
       {
         "department": "Finans",
@@ -3948,7 +3948,7 @@
       {
         "background": true,
         "category": null,
-        "domain": "8.8.8.8",
+        "domain": "198.51.100.153",
         "download_bytes": 5000,
         "kind": "ip",
         "raw_seconds": 60,
@@ -3981,7 +3981,7 @@
       "to": "2026-10-12"
     },
     "total": 11,
-    "updated_at": "2026-10-13T04:01:17.976472Z"
+    "updated_at": "2026-10-13T04:01:28.076740Z"
   },
   "sites_category_filter": {
     "computed_until": "2026-10-12T21:00:00Z",
@@ -4010,7 +4010,7 @@
       "to": "2026-10-12"
     },
     "total": 1,
-    "updated_at": "2026-10-13T04:01:17.976472Z"
+    "updated_at": "2026-10-13T04:01:28.076740Z"
   },
   "sites_department_filter": {
     "computed_until": "2026-10-12T21:00:00Z",
@@ -4110,7 +4110,7 @@
       {
         "background": true,
         "category": null,
-        "domain": "8.8.8.8",
+        "domain": "198.51.100.153",
         "download_bytes": 5000,
         "kind": "ip",
         "raw_seconds": 60,
@@ -4143,7 +4143,7 @@
       "to": "2026-10-12"
     },
     "total": 9,
-    "updated_at": "2026-10-13T04:01:17.976472Z"
+    "updated_at": "2026-10-13T04:01:28.076740Z"
   },
   "sites_search": {
     "computed_until": "2026-10-12T21:00:00Z",
@@ -4172,7 +4172,7 @@
       "to": "2026-10-12"
     },
     "total": 1,
-    "updated_at": "2026-10-13T04:01:17.976472Z"
+    "updated_at": "2026-10-13T04:01:28.076740Z"
   },
   "subject_device": {
     "apps": [],
@@ -8080,7 +8080,7 @@
         "start": "2026-10-12T20:59:00Z"
       }
     ],
-    "updated_at": "2026-10-13T04:01:17.976472Z",
+    "updated_at": "2026-10-13T04:01:28.076740Z",
     "urls": []
   },
   "subject_ip": {
@@ -11956,7 +11956,7 @@
         "start": "2026-10-12T11:00:00Z"
       }
     ],
-    "updated_at": "2026-10-13T04:01:17.976472Z",
+    "updated_at": "2026-10-13T04:01:28.076740Z",
     "urls": []
   },
   "subject_person": {
@@ -15687,8 +15687,8 @@
       },
       {
         "bytes": 5100,
-        "domain": "8.8.8.8",
-        "hostname": "8.8.8.8",
+        "domain": "198.51.100.153",
+        "hostname": "198.51.100.153",
         "seconds": 0,
         "sessions": 1
       },
@@ -16020,7 +16020,7 @@
       {
         "background": true,
         "category": null,
-        "domain": "8.8.8.8",
+        "domain": "198.51.100.153",
         "download_bytes": 5000,
         "kind": "ip",
         "raw_seconds": 60,
@@ -16075,7 +16075,7 @@
         "start": "2026-10-12T16:30:00Z"
       }
     ],
-    "updated_at": "2026-10-13T04:01:17.976472Z",
+    "updated_at": "2026-10-13T04:01:28.076740Z",
     "urls": [
       {
         "blocked": false,
@@ -20024,7 +20024,7 @@
         "start": "2026-10-12T10:00:00Z"
       }
     ],
-    "updated_at": "2026-10-13T04:01:17.976472Z",
+    "updated_at": "2026-10-13T04:01:28.076740Z",
     "urls": []
   },
   "subject_reassigned_before": {
@@ -23945,7 +23945,7 @@
         "start": "2026-10-12T08:59:00Z"
       }
     ],
-    "updated_at": "2026-10-13T04:01:17.976472Z",
+    "updated_at": "2026-10-13T04:01:28.076740Z",
     "urls": []
   },
   "subject_week": {
@@ -27676,8 +27676,8 @@
       },
       {
         "bytes": 5100,
-        "domain": "8.8.8.8",
-        "hostname": "8.8.8.8",
+        "domain": "198.51.100.153",
+        "hostname": "198.51.100.153",
         "seconds": 0,
         "sessions": 1
       },
@@ -29161,7 +29161,7 @@
       {
         "background": true,
         "category": null,
-        "domain": "8.8.8.8",
+        "domain": "198.51.100.153",
         "download_bytes": 5000,
         "kind": "ip",
         "raw_seconds": 60,
@@ -29195,7 +29195,7 @@
       "pseudonymous": false
     },
     "timeline": [],
-    "updated_at": "2026-10-13T04:01:17.976472Z",
+    "updated_at": "2026-10-13T04:01:28.076740Z",
     "urls": [
       {
         "blocked": false,
@@ -29328,7 +29328,7 @@
       "to": "2026-10-12"
     },
     "total": 2,
-    "updated_at": "2026-10-13T04:01:17.976472Z"
+    "updated_at": "2026-10-13T04:01:28.076740Z"
   },
   "subjects_departments": {
     "computed_until": "2026-10-12T21:00:00Z",
@@ -29395,7 +29395,7 @@
       "to": "2026-10-12"
     },
     "total": 3,
-    "updated_at": "2026-10-13T04:01:17.976472Z"
+    "updated_at": "2026-10-13T04:01:28.076740Z"
   },
   "subjects_devices": {
     "computed_until": "2026-10-12T21:00:00Z",
@@ -29491,7 +29491,7 @@
       "to": "2026-10-12"
     },
     "total": 2,
-    "updated_at": "2026-10-13T04:01:17.976472Z"
+    "updated_at": "2026-10-13T04:01:28.076740Z"
   },
   "subjects_page": {
     "computed_until": "2026-10-12T21:00:00Z",
@@ -29543,7 +29543,7 @@
       "to": "2026-10-12"
     },
     "total": 3,
-    "updated_at": "2026-10-13T04:01:17.976472Z"
+    "updated_at": "2026-10-13T04:01:28.076740Z"
   },
   "subjects_persons": {
     "computed_until": "2026-10-12T21:00:00Z",
@@ -29683,7 +29683,7 @@
       "to": "2026-10-12"
     },
     "total": 3,
-    "updated_at": "2026-10-13T04:01:17.976472Z"
+    "updated_at": "2026-10-13T04:01:28.076740Z"
   },
   "subjects_search": {
     "computed_until": "2026-10-12T21:00:00Z",
@@ -29751,7 +29751,7 @@
       "to": "2026-10-12"
     },
     "total": 1,
-    "updated_at": "2026-10-13T04:01:17.976472Z"
+    "updated_at": "2026-10-13T04:01:28.076740Z"
   },
   "viewer_company": {
     "active_users": 5,
@@ -30155,7 +30155,7 @@
         "users": 1
       }
     ],
-    "updated_at": "2026-10-13T04:01:21.297907Z"
+    "updated_at": "2026-10-13T04:01:32.242279Z"
   },
   "viewer_sites_pseudonymous": {
     "category": "İş Uygulamaları",
@@ -30189,7 +30189,7 @@
       "upload_bytes": 0,
       "users": 2
     },
-    "updated_at": "2026-10-13T04:01:21.297907Z",
+    "updated_at": "2026-10-13T04:01:32.242279Z",
     "users": [
       {
         "department": "Planlama",
@@ -33994,8 +33994,8 @@
       },
       {
         "bytes": 5100,
-        "domain": "8.8.8.8",
-        "hostname": "8.8.8.8",
+        "domain": "198.51.100.153",
+        "hostname": "198.51.100.153",
         "seconds": 0,
         "sessions": 1
       },
@@ -34327,7 +34327,7 @@
       {
         "background": true,
         "category": null,
-        "domain": "8.8.8.8",
+        "domain": "198.51.100.153",
         "download_bytes": 5000,
         "kind": "ip",
         "raw_seconds": 60,
@@ -34382,7 +34382,7 @@
         "start": "2026-10-12T16:30:00Z"
       }
     ],
-    "updated_at": "2026-10-13T04:01:21.297907Z",
+    "updated_at": "2026-10-13T04:01:32.242279Z",
     "urls": [
       {
         "blocked": false,
@@ -34551,7 +34551,7 @@
       "to": "2026-10-12"
     },
     "total": 3,
-    "updated_at": "2026-10-13T04:01:21.297907Z"
+    "updated_at": "2026-10-13T04:01:32.242279Z"
   },
   "viewer_subjects_pseudonymous": {
     "computed_until": "2026-10-12T21:00:00Z",
@@ -34691,6 +34691,6 @@
       "to": "2026-10-12"
     },
     "total": 3,
-    "updated_at": "2026-10-13T04:01:21.297907Z"
+    "updated_at": "2026-10-13T04:01:32.242279Z"
   }
 }
