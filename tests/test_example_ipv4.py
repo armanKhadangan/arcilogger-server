@@ -24,8 +24,11 @@ from typing import Final, NamedTuple
 import pytest
 
 ROOT: Final = Path(__file__).resolve().parents[1]
-#: The design contracts quote real-world facts, and lock files hold no example data.
-SKIPPED: Final = re.compile(r"^design/|(^|/)(uv\.lock|package-lock\.json)$")
+#: The design contracts quote real-world facts, lock files hold no example data, and this file
+#: plants public addresses on purpose to pin the finder.
+SKIPPED: Final = re.compile(
+    r"^design/|(^|/)(uv\.lock|package-lock\.json)$|^tests/test_example_ipv4\.py$"
+)
 #: Real public addresses that may stay, each with its reason.
 ALLOWED: Final[dict[str, str]] = {
     "172.0.0.0": (
