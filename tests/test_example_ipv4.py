@@ -36,16 +36,22 @@ ALLOWED: Final[dict[str, str]] = {
         "(api/tests/test_search_grammar.py), and a sender range wider than the installer "
         "allows (tests/test_installer_scripts.py)"
     ),
+    **dict.fromkeys(
+        ("23.10.10.1", "23.1.1.1"),
+        "the destinations worker/tests/test_lookup_performance.py looks up among the 1,000 it "
+        "generates in SQL as 23.a.b.1; RFC 5737 holds only 768, so the range is an open "
+        "question on #313",
+    ),
 }
 #: An IPv4 literal right after a key that names an address. ``ip`` covers ``srcip``, ``dstip``,
 #: ``transip``, ``public_ip``, ``dest_ip``; the key may be quoted (JSON, TOML, Python) and the
-#: value quoted, a bytes literal, or the first item of a list or tuple.
+#: value quoted, a bytes literal, or the first item of a list, tuple or set.
 CONTEXT: Final = re.compile(
     r"""(?ix)
     (?<![a-z0-9_])
     (?P<key>[a-z_]*(?:ip|ips|addr|address|addresses|host|hosts|sender|senders|answers|server
         |servers|gateway|destination|domain))
-    ["']?\s*[:=]\s*[\[(]?\s*b?["']?
+    ["']?\s*[:=]\s*[\[({]?\s*b?["']?
     (?P<ip>\d{1,3}(?:\.\d{1,3}){3})(?![\d.]*\d)
     """
 )
@@ -115,6 +121,7 @@ def test_no_public_example_address_in_a_known_context() -> None:
         'address = "8.8.8.8"',
         "destinations = [(\"198.51.100.69\", 443)]; gateway='8.8.8.8'",
         '"domain": "8.8.8.8",',
+        'dstips={"8.8.8.8", "198.51.100.7"}',
     ],
 )
 def test_the_finder_catches_a_public_address_in_a_known_context(line: str) -> None:
