@@ -412,6 +412,8 @@ PRIVATE_DAY_FIRST: Final = 0x20
 PRIVATE_DAY_COUNT: Final = 0xC0
 #: The first PC's number in :func:`_iana_mac` (00:00:5E:00:10:00), below the documentation range.
 PC_MAC_FIRST: Final = 0x1000
+#: The most guests a day: a guest's private address keeps its number in one byte (#317).
+MAX_GUESTS_PER_DAY: Final = 0xFF
 
 
 def _iana_mac(number: int) -> str:
@@ -682,6 +684,13 @@ class Simulation:
     def __init__(self, settings: Settings | None = None) -> None:
         self.settings = settings or Settings()
         check_egresses(self.settings.egresses)
+        if self.settings.guests_per_day > MAX_GUESTS_PER_DAY:
+            raise LoadgenError(
+                f"günde en çok {MAX_GUESTS_PER_DAY} misafir olabilir (guests_per_day "
+                f"{self.settings.guests_per_day}): misafirin MAC adresi numarasını tek baytta "
+                f"tutar / at most {MAX_GUESTS_PER_DAY} guests a day (guests_per_day "
+                f"{self.settings.guests_per_day}): a guest's MAC keeps its number in one byte"
+            )
         self.users = build_users(self.settings)
         self.infrastructure = infrastructure()
         # A FortiGate-only site has no MikroTik: no core-r1/switch-1 line at all.

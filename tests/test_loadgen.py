@@ -418,6 +418,20 @@ def test_every_mac_the_generator_emits_is_in_ianas_block(options: dict[str, Any]
     assert [key for key, names in devices.items() if len(names) > 1] == []
 
 
+def test_a_day_of_more_guests_than_a_mac_byte_holds_is_refused() -> None:
+    """A guest's private MAC keeps its number in one byte (02:00:5e:08:<day>:<number>): a day
+    of 256 guests would give two of them one MAC, so the simulation refuses it (#317); 255 is
+    the most, and their MACs stay distinct."""
+    lg = loadgen()
+    with pytest.raises(lg.LoadgenError, match="at most 255 guests a day"):
+        lg.Simulation(lg.Settings(users=2, guests_per_day=256))
+    simulation = lg.Simulation(lg.Settings(users=2, guests_per_day=lg.MAX_GUESTS_PER_DAY))
+    guests = simulation._guests(FRIDAY) + simulation._guests(THURSDAY)
+    macs = [device.base_mac for device, _ in guests]
+    assert len(macs) == len(set(macs)) > 2
+    assert all(mac.startswith("02:00:5e:08:") for mac in macs)
+
+
 def test_the_simulation_uses_the_example_plan() -> None:
     """The simulated network is the tests' fictional example plan (arcilogger_db.testing): its
     three department VLANs, everyone's phone on the one staff Wi-Fi, guests on the guest Wi-Fi
