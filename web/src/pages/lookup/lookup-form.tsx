@@ -382,7 +382,7 @@ export function LookupForm({
                 mono
                 spellCheck={false}
                 autoComplete="off"
-                placeholder="00:00:5e:00:53:38"
+                placeholder="aa:bb:cc:dd:ee:ff"
               />
             </Field>
           </div>

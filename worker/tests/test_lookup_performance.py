@@ -213,6 +213,10 @@ def _load(engine: Engine) -> dict[str, float]:
             {**params, "days": SIZE.days},
         )
         # DHCP at 00:00-00:25 and hourly ARP-LOG for every client over the whole span.
+        # The 300 clients' MACs are 00:00:5E:00:<hi>:<lo>: IANA's own block, no vendor's (its
+        # documentation range, 00:00:5E:00:53:xx, has 256). 00:00:5E:00:01:xx and 00:00:5E:00:02:xx
+        # are VRRP's; nothing in the product treats them specially. If it ever does, these move
+        # to the locally administered 02:00:5E:… (#308).
         connection.execute(
             text(
                 "INSERT INTO mt_dhcp (time, time_received, source, sender, raw_day, raw_line, "

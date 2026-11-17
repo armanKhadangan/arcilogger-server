@@ -139,8 +139,8 @@ LINE_MESSAGES: Final = {
         "with id {value}.",
     ),
     "mac": (
-        "MAC adresi geçersiz ({value}); örnek: 00:00:5e:00:53:38.",
-        "Invalid MAC address ({value}); example: 00:00:5e:00:53:38.",
+        "MAC adresi geçersiz ({value}); örnek: aa:bb:cc:dd:ee:ff.",
+        "Invalid MAC address ({value}); example: aa:bb:cc:dd:ee:ff.",
     ),
     "device_unknown": (
         "{value} cihazı henüz görülmedi (cihaz listesinde yok); cihaz ağa bağlanıp "

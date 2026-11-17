@@ -67,7 +67,7 @@ const KEYS = {
 const MAX_NAME = 200;
 /** Control, format (bidi overrides, zero-width) and surrogate characters. */
 const FORBIDDEN = /[\p{Cc}\p{Cf}\p{Cs}]/u;
-/** `person:12`, `device:00:00:5e:00:53:38`, `ip:172.31.254.5`, or a pseudonym's `p:…` / `d:…`. */
+/** `person:12`, `device:aa:bb:cc:dd:ee:ff`, `ip:172.31.254.5`, or a pseudonym's `p:…` / `d:…`. */
 const SUBJECT_KEY = /^(?:person|device|ip|p|d):[^\s\p{Cc}\p{Cf}\p{Cs}]{1,200}$/u;
 
 // -- site days ------------------------------------------------------------------------------------

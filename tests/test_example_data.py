@@ -7,7 +7,8 @@ manufacturer's prefix in example data names a real vendor's device, which the ru
 narrow grep for one prefix (#14) let others through, so this test reads every tracked text file.
 
 Allowed besides the two blocks, each for a stated reason: the protocol-defined addresses that
-tests use as such (all zeros, broadcast, multicast), and the IEEE registry excerpts of the OUI
+tests use as such (all zeros, broadcast, multicast), the format placeholder ``aa:bb:cc:dd:ee:ff``
+of the interface, the API texts and the docs, and the IEEE registry excerpts of the OUI
 lookup's own test, which needs several distinct vendor prefixes and a 36-bit block. ``design/``
 (the contracts, frozen per wave) and lock files are not read.
 """
@@ -76,6 +77,10 @@ PROTOCOL: Final = {
     "33:33:00:00:00:01": "IPv6 multicast (all nodes)",
     "00:00:5e:00:00:00": "the IANA block's first address (a vendor-prefix search bound)",
     "00:00:5e:ff:ff:ff": "the IANA block's last address (a vendor-prefix search bound)",
+    "aa:bb:cc:dd:ee:ff": (
+        "the format placeholder of the interface, the API texts and the docs (locally "
+        "administered, no vendor)"
+    ),
 }
 #: Files whose MAC addresses are allowed as they are, and why.
 ALLOWED_FILES: Final = {

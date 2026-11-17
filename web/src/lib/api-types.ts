@@ -580,7 +580,7 @@ export interface DepartmentRef {
   name: string;
 }
 
-/** A device by its MAC address (lower case `00:00:5e:00:53:38`) with its current owner. */
+/** A device by its MAC address (lower case `aa:bb:cc:dd:ee:ff`) with its current owner. */
 export interface DeviceOut {
   mac: string;
   name: string | null;

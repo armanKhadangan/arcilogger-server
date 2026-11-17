@@ -288,7 +288,7 @@ def _mac(value: str | None) -> str | None:
     try:
         return normalize_mac(value)
     except ValueError:
-        raise ValueError("not a MAC address (00:00:5e:00:53:38)") from None
+        raise ValueError("not a MAC address (aa:bb:cc:dd:ee:ff)") from None
 
 
 def _protocol(value: object) -> int | None:

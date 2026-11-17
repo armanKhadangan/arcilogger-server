@@ -822,7 +822,7 @@ def validate_setting(key: str, value: Any) -> Any:
     Only known keys (:data:`DEFAULT_SETTINGS`) are accepted, with the JSON type of their
     default (a ``bool`` is not an integer), within :data:`INTEGER_RANGES`; addresses are checked
     and written in canonical form (the internet exits' addresses as :mod:`arcilogger_db.egress`
-    writes them, MAC addresses ``00:00:5e:00:53:38``), so a typing error cannot stop the lookups
+    writes them, MAC addresses ``aa:bb:cc:dd:ee:ff``), so a typing error cannot stop the lookups
     that read them.
     """
     if key not in DEFAULT_SETTINGS:
