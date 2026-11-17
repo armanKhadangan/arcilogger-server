@@ -12,6 +12,12 @@ with autovacuum off for them. R13 and R14 count the slice from their kept totals
 slice counted first) within ``rules.statement_timeout_seconds``, and their hits equal one read of
 the period.
 
+The worker's pooled connections run R13's and R14's statements every minute with the same text:
+psycopg prepares them, and PostgreSQL's plan cache may then use a generic plan, where the bound
+arrays of ``_LOGS`` are parameters and are not hashed (#307). So the catch-up slice runs on a
+connection that already ran both rules over :data:`WARM_SLICES` earlier slices, and its
+statements are prepared and planned with their values (``generic_plans = 0``).
+
 ``ARCILOGGER_RULES_PERF=0`` skips; run with ``-s`` to see the timings.
 """
 
@@ -44,6 +50,15 @@ pytestmark = [
 ]
 #: The default of ``rules.statement_timeout_seconds``: a slice that takes longer fails.
 STATEMENT_TIMEOUT = 20.0
+#: The (empty) slices both rules count on the connection before the catch-up slice: psycopg
+#: prepares a statement on its run after ``prepare_threshold`` (5), and PostgreSQL's plan cache
+#: considers a generic plan from the prepared statement's sixth run on.
+WARM_SLICES = 12
+#: The statements of ``_LOGS`` (its bound session ids) among a connection's prepared statements.
+PREPARED = text(
+    "SELECT name, custom_plans, generic_plans FROM pg_prepared_statements "
+    "WHERE statement LIKE :marker ORDER BY name"
+).bindparams(marker="%AS bigint[])%")
 
 
 def catch_up_rows(hours: float) -> Iterable[guard.Row]:
@@ -128,10 +143,10 @@ def test_a_catch_up_slice_within_the_statement_timeout(
     sessions = session_factory(db_engine)
     guard.write(sessions)
     configure(sessions)
-    figures: dict[str, Any] = {}
     for rule_id in ("R13", "R14"):
+        figures: dict[str, Any] = {}
         # One read of the period (no kept totals), rolled back, against the kept totals: the
-        # previous slice counted and committed, then the catch-up slice.
+        # earlier slices counted and committed on one connection, then the catch-up slice on it.
         with sessions() as session:
             session.execute(text("DELETE FROM rule_traffic_state"))
             session.commit()
@@ -143,10 +158,20 @@ def test_a_catch_up_slice_within_the_statement_timeout(
             once = list(rule.evaluate(session, ctx))
             figures[f"{rule_id}_one_read_s"] = round(time.perf_counter() - began, 2)
             session.rollback()
-        evaluate(sessions, rule_id, SLICE_END - 2 * SLICE, SLICE_END - SLICE)
-        kept, seconds = evaluate(sessions, rule_id, SLICE_END - SLICE, SLICE_END)
+        with db_engine.connect() as connection:
+            warm = sessionmaker(bind=connection)
+            for back in range(WARM_SLICES + 1, 1, -1):
+                evaluate(warm, rule_id, SLICE_END - back * SLICE, SLICE_END - (back - 1) * SLICE)
+            kept, seconds = evaluate(warm, rule_id, SLICE_END - SLICE, SLICE_END)
+            prepared = connection.execute(PREPARED).all()
+            connection.rollback()
         figures[f"{rule_id}_kept_s"] = round(seconds, 2)
         figures[f"{rule_id}_hits"] = len(kept)
+        figures[f"{rule_id}_prepared"] = [tuple(row) for row in prepared]
+        print(f"\n{rule_id} in a catch-up over {hours} h of device time: {figures}")
         assert summary(kept) == summary(once), rule_id
         assert seconds < STATEMENT_TIMEOUT, (rule_id, seconds)
-    print(f"\nR13/R14 in a catch-up over {hours} h of device time: {figures}")
+        # The catch-up slice ran prepared statements past the point where the plan cache may
+        # choose a generic plan, and each was planned with its values.
+        assert prepared, rule_id
+        assert all(custom > 5 and generic == 0 for _name, custom, generic in prepared), prepared

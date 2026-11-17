@@ -1151,6 +1151,15 @@ def _logs() -> str:
     return _LOGS.format(match_g=_MATCH.format(t="g"), key_g=_KEY.format(t="g"))
 
 
+def _custom_plans(session: Session) -> None:
+    """``plan_cache_mode = force_custom_plan`` for the rest of the transaction (``set_config``
+    with ``is_local``, as the search does): PostgreSQL hashes :data:`_LOGS`' arrays only in a plan
+    made with their values. The statements run every minute with the same text, so psycopg
+    prepares them on a pooled connection, and the plan cache may then switch to a generic plan,
+    where the arrays are parameters and a catch-up compares each row with every key again (#307)."""
+    session.execute(text("SELECT set_config('plan_cache_mode', 'force_custom_plan', true)"))
+
+
 def _touched_keys(session: Session, touched: str, params: dict[str, Any]) -> None:
     """The session ids and keys of the ``touched`` CTE with a session id, into ``params``
     (``:sessions`` and ``:keys`` of :data:`_LOGS`)."""
@@ -1187,6 +1196,7 @@ def _counted(
     reach, read through the address index."""
     if not period.networks or hi <= lo or ranges == []:
         return []
+    _custom_plans(session)
     lookback, low, high = _period_bounds(ctx, period)
     touched = (_TOUCHED_RECEIVED if ranges is None else _TOUCHED_BY_ADDRESS).format(
         match_t=_MATCH.format(t="t")
@@ -1226,6 +1236,7 @@ def _advance(session: Session, ctx: RuleContext, period: _Period, store: _Store)
     where a late log changed which earlier logs count is dropped (read again when needed)."""
     if not period.networks:
         return []
+    _custom_plans(session)
     lookback, low, high = _period_bounds(ctx, period)
     params: dict[str, Any] = {
         "refused": list(REFUSED_ACTIONS),
