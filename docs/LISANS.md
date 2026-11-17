@@ -42,6 +42,7 @@ Fiyatlar üründe yer almaz.
 | `usage_analytics` | Kullanım analizi | Usage analytics | Kişi, cihaz, site ve kategori bazında tahmini kullanım süreleri ve dışa aktarma: **Kullanım** sayfası, paneldeki kullanım bölümleri ve **Canlı Durum**'daki şu an veri gönderip alanlar tablosu | — |
 | `usage_reports` | Zamanlanmış kullanım raporları | Scheduled usage reports | Kullanım raporlarının zamanlanmış olarak üretilip e-postayla gönderilmesi: **Raporlar** sayfası | Kullanım analizi |
 | `bulk_import` | Toplu içe aktarma (CSV) | Bulk import (CSV) | Kişilerin ve cihaz atamalarının CSV dosyasından toplu içe aktarılması (Cihazlar ve Kişiler → **Aktarım** sekmesinin içe aktarma bölümü); elle giriş ve CSV dışa aktarma her zaman açıktır | — |
+| `security_rules` | Güvenlik kuralları | Security rules | Ağdaki şüpheli olayları ayarlanabilir eşiklerle yakalayan güvenlik kuralları (R01–R14, R16–R19), kural düzenleyici ve webhook bildirimleri; log kaynağı ve sistem uyarıları (R15, R20), IP çakışması ve yeni log kaynağı uyarısı 5651 Temel'dedir | — |
 
 **Kullanım modüllerinin veri ön koşulu:** Kullanım analizi ve Zamanlanmış kullanım raporları
 yalnızca FortiGate kayıtlarından hesaplanır: trafik kayıtları (uzun oturumlar için ara kayıtlarla),
@@ -102,6 +103,7 @@ vermez.
 | `/raw` | Ham log satırları | 5651 Temel |
 | `/search` | Arama: log araması, istatistikler, kayıtlı aramalar, dışa aktarma | 5651 Temel |
 | `/evidence` | Kanıt paketleri | 5651 Temel |
+| `/rules` | Güvenlik kuralları: liste her zaman okunur; ayar kaydetme ve "Son 24 saatte dene" modül ister | Güvenlik kuralları |
 | `/seals` | Mühürlü günler, manifest, zaman damgası, doğrulama, "Şimdi mühürle" | 5651 Temel |
 | `/credits` | Kamu SM kontörü, "Kontör sorgula" | 5651 Temel |
 | `/devices` | Cihazlar ve cihaz-kişi atamaları | 5651 Temel |
@@ -118,6 +120,7 @@ vermez.
 | `/system` | Sistem sayfası: kaynak kullanımı, disk tahmini, veritabanı boyutu, hizmetler, zamanlanmış görevler, saat; Veritabanı sayfası; Ayarlar → Yedekleme'deki yedek listesi | 5651 Temel |
 | `/activity` | Canlı Durum: `GET /activity/devices`, şu an kim veri gönderip alıyor (kişi bazında). `GET /activity/wan`, internet hattının hızı (SNMPv3 ile okunan WAN arayüz sayaçları; kişi verisi yok), kilitli değildir: temel üründür (5651 Temel) | Kullanım analizi |
 | `/archive-reloads` | Arşivden yeniden yükleme: veritabanı penceresinden eski günlerin mühürlü kasadan geri istenmesi ve ilerlemesi | 5651 Temel |
+| `/webhooks` | Webhook'lar: sunucuda (`[[webhooks]]`) ayarlanmış uyarı webhook'larının listesi, hazır olup olmadıkları ve teslimleri (`GET`, kilitli değildir) ile "Test gönder" (`POST /webhooks/{name}/test`) | Güvenlik kuralları |
 | `/usage` | Kullanım sayfasının verileri, dışa aktarma, yeniden hesaplama | Kullanım analizi |
 | `/reports` | Zamanlanmış raporlar, çalıştırmalar, önizleme | Zamanlanmış kullanım raporları |
 | `/imports` | CSV içe aktarma ve şablonları | Toplu içe aktarma (CSV) |
@@ -142,7 +145,9 @@ uyarısı açmaz. Kapalı modülün verileri silinmez.
 | `alerts.import` | 5651 Temel | her zaman çalışır |
 | `alerts.r15` | 5651 Temel | her zaman çalışır |
 | `alerts.system` | 5651 Temel | her zaman çalışır |
+| `rules.run` | Güvenlik kuralları | atlanır |
 | `alerts.notify` | 5651 Temel | her zaman çalışır |
+| `alerts.webhooks` | Güvenlik kuralları | atlanır |
 | `usage.requests` | Kullanım analizi | atlanır |
 | `usage.daily` | Kullanım analizi | atlanır |
 | `usage.today` | Kullanım analizi | atlanır |

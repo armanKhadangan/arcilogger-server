@@ -267,7 +267,7 @@ def test_persons_who_share_a_name_keep_their_own_blocked_attempts() -> None:
     data["blocked"].append(
         {
             "time": "2026-10-19T16:00:00+03:00",
-            "subject": "device:00:0c:29:00:17:01",
+            "subject": "device:00:00:5e:00:53:c1",
             "label": "Ece Doğan",  # a device named like a person
             "domain": "yalniz-cihaz.example",
             "category": "Gambling",

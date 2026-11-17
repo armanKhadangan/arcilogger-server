@@ -7,6 +7,8 @@ job ``audit.import`` (with :mod:`.evidence_jobs`) copies every line into the has
 log **once**, actor ``system``:
 
 * ``admin.<state>`` — ``admin.applied``, ``admin.failed``, ``admin.rejected``, ``admin.action``,
+  ``admin.probe`` (a source's "Bağlantıyı dene", Wave 6 C11: ``log_source`` and ``ok``, no
+  value),
   … for the line's state, target ``admin-request:<id>``, key ``admin:<request>:<state>``: the
   requester, the version, the configuration's SHA-256 before and after, the masked changes (a
   secret only as ``set``/``unset``), the code, whether it was rolled back and, for an action,
@@ -40,6 +42,14 @@ The worker also works the **worker channel** (contract 2.9): requests the API st
   ``smtp_not_configured`` when the server or the sender is not set, ``smtp_test_failed`` when the
   e-mail was not accepted or the password cannot be read (``error_text`` is then a fixed
   sentence: the error itself may name a file of the server and stays in the worker's log).
+* ``worker.webhook_test`` (``params.name``) — "Test gönder" of Ayarlar → Webhook'lar (Wave 6
+  §2.4.4): the test notification (rule ``TEST``) to the ``[[webhooks]]`` entry ``name``, with
+  the secret or URL of the worker's own secret store and the sender of ``alerts.webhooks``; the
+  result is ``{ok, status, error_text}`` and the audit entry ``webhook.test`` (``{name, ok,
+  status}``). ``webhook_test_failed`` when the target did not answer ``2xx`` (``status`` is null
+  when no reply came), its secret or URL is missing, or the entry is no longer in the file;
+  ``error_text`` is the text of §2.4.2 (the status code and the cleaned reply, never the URL's
+  path, the secret or a header value), null on success.
 * ``worker.lease_rebuild`` (``params.from``, ``params.to``) — the lease timeline of each day
   rebuilt in order (:func:`.correlation.rebuild.rebuild_lease_day`, a ``leases.rebuild`` job
   run per day with the request's id). The row is ``running`` with ``{done_days, total_days,
@@ -50,7 +60,8 @@ A row is claimed with ``FOR UPDATE SKIP LOCKED`` and stays locked while its step
 workers never work on one request; the final state and its audit entry are one transaction. A
 step that raises (an error of the SMTP library, say) is rolled back and recorded in a
 transaction of its own, with the error's type only: the test e-mail fails
-(``smtp_test_failed``), the lease rebuild counts the day as failed and goes on. One request
+(``smtp_test_failed``), and so does the webhook test (``webhook_test_failed``); the lease
+rebuild counts the day as failed and goes on. One request
 therefore never holds up the ones queued after it.
 
 The API checks every request before it queues it (contract 2.9); the worker checks again what
@@ -84,6 +95,7 @@ from arcilogger_core.admin.contract import (
     DocumentError,
     JournalLine,
     SealResult,
+    SnmpProbeResult,
     SystemJournalLine,
     TsaTestResult,
     parse_document,
@@ -91,11 +103,14 @@ from arcilogger_core.admin.contract import (
 from arcilogger_core.config import EMAIL_ADDRESS, Config
 from arcilogger_core.smtp import explain, mask_address, mask_addresses
 from arcilogger_core.timeutil import site_day
+from arcilogger_core.webhook import WebhookError, encode, payload, send, trial_alert
 from arcilogger_db.audit import append_audit
 from arcilogger_db.models import AdminRequest, User
 from arcilogger_db.settings import get_setting
+from arcilogger_worker import __version__
 from arcilogger_worker.alerts.commands import TrialEmailRefusedError, trial_email
 from arcilogger_worker.alerts.notify import web_base_url
+from arcilogger_worker.alerts.webhooks import secret_store, site_of, target_of
 from arcilogger_worker.correlation.rebuild import rebuild_lease_day
 from arcilogger_worker.evidence_jobs import SECRET_ACTION, AuditEvent, ImportReport, import_events
 
@@ -109,8 +124,10 @@ SYSTEM_ACTION: Final = "admin.system"
 #: The worker channel's kinds (``WorkerKind`` of the contract) and their audit actions.
 TEST_EMAIL: Final = "worker.test_email"
 LEASE_REBUILD: Final = "worker.lease_rebuild"
-WORKER_KINDS: Final = (TEST_EMAIL, LEASE_REBUILD)
+WEBHOOK_TEST: Final = "worker.webhook_test"
+WORKER_KINDS: Final = (TEST_EMAIL, LEASE_REBUILD, WEBHOOK_TEST)
 SMTP_TEST_ACTION: Final = "smtp.test"
+WEBHOOK_TEST_ACTION: Final = "webhook.test"
 LEASES_REBUILD_ACTION: Final = "leases.rebuild"
 #: A worker request not done yet.
 OPEN_STATES: Final = ("queued", "running")
@@ -150,6 +167,8 @@ def action_result(result: ActionResult) -> dict[str, Any]:
             "serial": result.serial,
             "gen_time": None if result.gen_time is None else result.gen_time.isoformat(),
         }
+    if isinstance(result, SnmpProbeResult):
+        return {"interfaces": len(result.interfaces)}
     return {"ok": result.ok}  # the replica test (its message stays in the request's status)
 
 
@@ -174,6 +193,9 @@ def request_event(line: JournalLine, source: str) -> AuditEvent:
         details["requested_by"] = line.requested_by.model_dump(mode="json")
     if line.result is not None:
         details["result"] = action_result(line.result)
+    if line.source is not None:  # admin.probe (Wave 6 C11): the log source tested, no value
+        details["log_source"] = line.source
+        details["ok"] = line.code is None
     return AuditEvent(
         f"admin:{line.request}:{line.state}",
         f"admin.{line.state}",
@@ -397,6 +419,52 @@ def _test_email(session: Session, row: AdminRequest, config: Config) -> None:
     )
 
 
+def _webhook_result(
+    session: Session,
+    row: AdminRequest,
+    name: str | None,
+    *,
+    status: int | None,
+    text: str | None,
+    code: str | None,
+) -> None:
+    ok = code is None
+    _finish(
+        session,
+        row,
+        "succeeded" if ok else "failed",
+        action=WEBHOOK_TEST_ACTION,
+        details={"name": name, "ok": ok, "status": status},
+        result={"ok": ok, "status": status, "error_text": text},
+        code=code,
+    )
+
+
+def _webhook_test(session: Session, row: AdminRequest, config: Config, *, now: datetime) -> None:
+    """Send the test notification of ``row`` and record the outcome with its ``webhook.test``
+    entry."""
+    name = row.params.get("name")
+    webhook = next((item for item in config.webhooks if item.name == name), None)
+    if not isinstance(name, str) or webhook is None:
+        found = name if isinstance(name, str) else None
+        text = "the webhook is no longer in [[webhooks]]"
+        _webhook_result(session, row, found, status=None, text=text, code="webhook_test_failed")
+        return
+    web_url = web_base_url(get_setting(session, "alerts.web_base_url"), config)
+    document = payload(
+        webhook.format, trial_alert(now, web_url), version=__version__, site=site_of(web_url)
+    )
+    try:
+        target = target_of(webhook, config, secret_store(config))
+        status = send(target, encode(document), version=__version__, now=now)
+    except WebhookError as exc:
+        _webhook_result(
+            session, row, name, status=exc.status, text=str(exc), code="webhook_test_failed"
+        )
+        return
+    _webhook_result(session, row, name, status=status, text=None, code=None)
+
+
 def lease_rebuild_range(params: Mapping[str, Any], *, now: datetime) -> tuple[date, date] | None:
     """``from`` … ``to`` of a lease rebuild request; ``None`` for a range the API does not
     accept either (more than :data:`LEASE_REBUILD_DAYS` days, reversed, in the future)."""
@@ -491,6 +559,9 @@ def _expire(session: Session, row: AdminRequest) -> None:
     if row.kind == TEST_EMAIL:
         details = {"to": _masked(row.params.get("to")), "ok": False}
         action = SMTP_TEST_ACTION
+    elif row.kind == WEBHOOK_TEST:
+        details = {"name": row.params.get("name"), "ok": False}
+        action = WEBHOOK_TEST_ACTION
     else:
         details = {"from": row.params.get("from"), "to": row.params.get("to")}
         action = LEASES_REBUILD_ACTION
@@ -510,6 +581,8 @@ def _work(
         _expire(session, row)
     elif row.kind == TEST_EMAIL:
         _test_email(session, row, config)
+    elif row.kind == WEBHOOK_TEST:
+        _webhook_test(session, row, config, now=now)
     else:
         _lease_rebuild(sessions, session, row, now=now)
 
@@ -519,9 +592,10 @@ def _record_error(
 ) -> str:
     """After a step of ``request_id`` raised ``error`` (the exception's type; its transaction
     was rolled back), in a transaction of its own: a test e-mail fails with
-    ``smtp_test_failed``, a lease rebuild counts the day it was at as failed and goes on with
-    the next. The row is claimed again (``SKIP LOCKED``); one another worker holds by now, or
-    one that has ended, is left alone. Returns the state, ``skipped`` for a row left alone."""
+    ``smtp_test_failed``, a webhook test with ``webhook_test_failed``, a lease rebuild counts
+    the day it was at as failed and goes on with the next. The row is claimed again (``SKIP
+    LOCKED``); one another worker holds by now, or one that has ended, is left alone. Returns
+    the state, ``skipped`` for a row left alone."""
     with sessions() as session:
         row = session.scalars(
             select(AdminRequest)
@@ -548,6 +622,16 @@ def _record_error(
                 },
                 code="smtp_test_failed",
             )
+        elif row.kind == WEBHOOK_TEST:
+            name = row.params.get("name")
+            _webhook_result(
+                session,
+                row,
+                name if isinstance(name, str) else None,
+                status=None,
+                text=f"beklenmeyen hata / unexpected error: {error}",
+                code="webhook_test_failed",
+            )
         elif (span := lease_rebuild_range(row.params, now=now)) is None:
             _lease_refused(session, row)
         else:
@@ -567,12 +651,12 @@ def process_requests(
     now: datetime,
     budget: timedelta = REQUESTS_BUDGET,
 ) -> RequestsReport:
-    """``admin.requests``: the browser's test e-mails and lease rebuilds (``admin_requests``,
-    ``channel = 'worker'``), one step per claimed row and transaction, until none is left or
-    ``budget`` is used up. Several workers share the queue: a row another one holds is
-    skipped, so no request is worked on twice at the same time. A step that raises is recorded
-    as the request's failure (:func:`_record_error`) and the run goes on with the next row; a
-    database that is gone stops the run (the job is retried)."""
+    """``admin.requests``: the browser's test e-mails, webhook tests and lease rebuilds
+    (``admin_requests``, ``channel = 'worker'``), one step per claimed row and transaction, until
+    none is left or ``budget`` is used up. Several workers share the queue: a row another one
+    holds is skipped, so no request is worked on twice at the same time. A step that raises is
+    recorded as the request's failure (:func:`_record_error`) and the run goes on with the next
+    row; a database that is gone stops the run (the job is retried)."""
     report = RequestsReport()
     started = time.monotonic()
     while time.monotonic() - started <= budget.total_seconds():

@@ -4,12 +4,12 @@ A site day is written straight into the tables (``INSERT … SELECT generate_ser
 FortiGate sessions and 1 M messages in the 24 hours before the check, 30 days of FortiGate DHCP
 rows of 400 clients, their leases, a quiet MikroTik feed, the lease runs of 7 days and an exit.
 The FortiGate's clock samples of 30 days (``source_clock_samples``, a row a minute) and a second
-FortiGate whose clock is 3 hours ahead in the last hour. Then ``R20-lease`` and ``R20-nat`` run
-as ``alerts.system`` runs them, twice, and every statement of the second run is timed: each under
-:data:`LIMIT_SECONDS`, a ``messages`` statement under :data:`CLOCK_SECONDS`, the ``source-clock``
-sample (``source_clock_samples``) and the unclaimed NAT address count (``transip``) under
-:data:`TRANSIP_SECONDS`. ``ARCILOGGER_ALERT_PERF_ROWS`` sets the daily rows (``0`` skips); run with
-``-s`` to see the slowest statements.
+FortiGate whose clock is 3 hours ahead in the last hour. Then ``R20-lease``, ``R20-nat`` and
+``R20-source-clock`` run as ``alerts.system`` runs them, twice, and every statement of the second
+run is timed: each under :data:`LIMIT_SECONDS`, a ``messages`` statement under
+:data:`CLOCK_SECONDS`, the source clock sample (``source_clock_samples``) and the unclaimed NAT
+address count (``transip``) under :data:`TRANSIP_SECONDS`. ``ARCILOGGER_ALERT_PERF_ROWS`` sets the
+daily rows (``0`` skips); run with ``-s`` to see the slowest statements.
 """
 
 from __future__ import annotations
@@ -210,9 +210,8 @@ def test_the_lease_and_nat_checks_at_a_million_lines_a_day(
     monkeypatch: pytest.MonkeyPatch,
     timings: list[tuple[float, str]],
 ) -> None:
-    checks = tuple(
-        (name, check) for name, check in system.CHECKS if name in ("lease_evidence", "nat_exits")
-    )
+    names = ("lease_evidence", "nat_exits", "source_clock")
+    checks = tuple((name, check) for name, check in system.CHECKS if name in names)
     monkeypatch.setattr(system, "CHECKS", checks)
     sessions: sessionmaker[Session] = session_factory(db_engine)
     config = Config(data_dir=layout.root, secrets_dir=layout.root)
@@ -241,10 +240,10 @@ def test_the_lease_and_nat_checks_at_a_million_lines_a_day(
         "R20-lease:none:mt_arp",
         "R20-lease:fortigate-unverified",
         "R20-nat:unmapped-transip",
-        "R20-lease:source-clock",  # the second FortiGate, 3 hours ahead
+        "R20-source-clock:fortigate-2",  # the second FortiGate, 3 hours ahead
     } <= found
     with sessions() as session:
         clock = session.scalars(
-            select(Alert.details).where(Alert.dedup_key == "R20-lease:source-clock")
+            select(Alert.details).where(Alert.dedup_key == "R20-source-clock:fortigate-2")
         ).one()
-    assert clock["offsets"] == {"fortigate-2": 10800}
+    assert clock["seconds"] == 10800

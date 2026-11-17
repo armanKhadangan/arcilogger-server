@@ -522,7 +522,7 @@ def test_ip_conflict_unknown_client_and_wrong_offset_in_the_report(
     layout: Layout,
     site: Site,
 ) -> None:
-    rogue = "00:0c:29:00:00:99"
+    rogue = "00:00:5e:00:53:9a"
     with app_session_factory() as session:
         evidence = Evidence(session, layout)
         evidence.arp(tr(DAY, 11, 4, 56), PC, rogue, "vlan42")
@@ -1247,7 +1247,7 @@ def test_unchanged_rows_agree_with_their_raw_lines(
 ) -> None:
     """Every cited line is re-parsed and compared with what the report shows: on unchanged data
     (sessions, DHCP and ARP leases, an IP conflict, a release) everything agrees."""
-    rogue = "00:0c:29:00:00:99"
+    rogue = "00:00:5e:00:53:9a"
     with app_session_factory() as session:
         evidence = Evidence(session, layout)
         evidence.arp(tr(DAY, 11, 4, 56), PC, rogue, "vlan42")  # an IP conflict: ARP lines

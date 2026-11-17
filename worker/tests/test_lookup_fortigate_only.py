@@ -49,8 +49,7 @@ from arcilogger_db.models import (
     Vlan,
 )
 from arcilogger_db.searchcounts import rebuild_stream
-from arcilogger_db.settings import get_settings, set_setting
-from arcilogger_worker.alerts import system
+from arcilogger_db.settings import DEFAULT_SETTINGS, get_settings, set_setting
 from arcilogger_worker.correlation.leases import rebuild_day
 from arcilogger_worker.lookup import (
     AttributionChain,
@@ -65,7 +64,7 @@ from arcilogger_worker.lookup import (
 from arcilogger_worker.lookup.attribution import MISSED_MOVE_WINDOW, Attributor
 from arcilogger_worker.lookup.refs import fg_dhcp_move, moves_json
 from arcilogger_worker.lookup.texts import ENGINE_EXPLANATIONS
-from arcilogger_worker.lookup.types import EXPLANATIONS, EvidenceRef
+from arcilogger_worker.lookup.types import EXPLANATIONS, UNLIMITED_LEASE, EvidenceRef
 from arcilogger_worker.testing import FIREWALL, FORTIGATE_DHCP_TEXTS, Evidence, tr
 
 DAY = date(2026, 10, 12)
@@ -515,6 +514,88 @@ def test_dropped_refs_are_read_from_the_rows(db_session: Session, evidence: Evid
     assert usage is not None
     assert usage.lease is not None
     assert usage.lease.last_dhcp_evidence == T0
+
+
+# -- an unlimited lease (#299) ---------------------------------------------------------------------
+
+#: The configured time an unlimited lease runs on: ``lease.default_seconds`` x
+#: ``lease.timeout_percent`` (86400 s x 110 %).
+FALLBACK = 95040
+
+
+def test_an_unlimited_lease_names_the_configured_time_it_ran_on(
+    db_session: Session, evidence: Evidence
+) -> None:
+    """An ACK with ``lease=0`` (FortiOS's "unlimited") runs on the configured time with the margin;
+    the chain says so with that time and nothing else changes: the same lease, confidence and
+    person as a finite lease's, no cited row."""
+    evidence.fortigate_dhcp(T0, PC, PC_MAC, hostname=HOST, lease=0)
+    build(db_session, DAY, DAY)
+    selin(db_session)
+    moment = T0 + timedelta(hours=1)
+    chain = internal(db_session, PC, moment).attribution
+    assert chain is not None
+    assert chain.lease is not None
+    assert chain.person is not None
+    assert (chain.lease.confidence, chain.lease.lease_seconds) == ("high", None)
+    # The lease ended where the note says: the configured time after its only record.
+    assert chain.lease.end == T0 + timedelta(seconds=FALLBACK)
+    assert chain.person.name == "Selin Kaya"
+    assert chain_keys(chain) == ["fortigate_format_unverified", "fortigate_lease_unlimited"]
+    unlimited = next(e for e in chain.explanations if e.key == "fortigate_lease_unlimited")
+    assert unlimited.params == {"fallback": FALLBACK}
+    assert unlimited.text_tr == (
+        "FortiGate bu kiranın son DHCP kaydında kira süresini süresiz bildirdi (lease=0); kira, "
+        "yerine ayarlardaki süreyle hesaplandı: son kayıttan 95040 sn sonra biter "
+        "(lease.server_seconds, yoksa lease.default_seconds, lease.timeout_percent payıyla)."
+    )
+    assert unlimited.text_en == (
+        "The FortiGate reported the lease time as unlimited in this lease's last DHCP record "
+        "(lease=0); the configured time was used instead: the lease ends 95040 s after the last "
+        "record (lease.server_seconds, else lease.default_seconds, with the "
+        "lease.timeout_percent margin)."
+    )
+    # The usage rollups (no lookup) read the stored refs, which keep the logged ``lease 0``.
+    usage = Attributor(db_session, settings_for(db_session)).chain(PC, moment)
+    assert usage is not None
+    assert note(usage, "fortigate_lease_unlimited") == {"fallback": FALLBACK}
+
+
+def test_a_finite_lease_is_not_named_unlimited(db_session: Session, evidence: Evidence) -> None:
+    """A logged finite lease, and an ACK without ``lease`` (no fallback for an unlimited one), give
+    no note; a ``lease=0`` renewal keeps the logged time of the lease's earlier ACK, so no
+    configured time was used and the chain names none."""
+    evidence.fortigate_dhcp(T0, PC, PC_MAC, lease=43200)
+    evidence.fortigate_dhcp(T0 + timedelta(hours=6), PC, PC_MAC, lease=0)
+    evidence.fortigate_dhcp(T0, "172.20.42.58", "00:00:5e:00:53:58", lease=86400)
+    evidence.fortigate_dhcp(T0, "172.20.42.59", "00:00:5e:00:53:59", lease=None)
+    build(db_session, DAY, DAY)
+    moment = T0 + timedelta(hours=7)
+    for ip in (PC, "172.20.42.58", "172.20.42.59"):
+        chain = internal(db_session, ip, moment).attribution
+        assert chain is not None, ip
+        assert "fortigate_lease_unlimited" not in chain_keys(chain), ip
+    renewed = internal(db_session, PC, moment).attribution
+    assert renewed is not None
+    assert renewed.lease is not None
+    assert renewed.lease.last_dhcp_evidence == T0 + timedelta(hours=6)
+    assert db_session.scalars(select(Lease.lease_seconds).where(Lease.ip == PC)).one() == 43200
+
+
+def test_the_unlimited_value_is_the_documented_assumption() -> None:
+    """Sahada doğrula: ``0`` as FortiOS's "unlimited" lease is read from its documentation and
+    from no site sample (ASSUMPTIONS V4, PARSERS). The constant, the docs and the alert's text
+    say the same value, so a site that logs another one changes all of them together."""
+    docs = Path(__file__).resolve().parents[2] / "docs"
+    assumptions = (docs / "ASSUMPTIONS.md").read_text(encoding="utf-8")
+    parsers = (docs / "PARSERS.md").read_text(encoding="utf-8")
+    assert UNLIMITED_LEASE == 0
+    v4 = next(line for line in assumptions.splitlines() if line.startswith("| V4 |"))
+    assert "how `0` (unlimited) is written" in v4
+    assert '`0`, FortiOS\'s "unlimited", is kept as `0`' in parsers
+    text_tr, text_en = ENGINE_EXPLANATIONS["fortigate_lease_unlimited"]
+    assert f"lease={UNLIMITED_LEASE}" in text_tr
+    assert f"lease={UNLIMITED_LEASE}" in text_en
 
 
 # -- DECLINE (D33) --------------------------------------------------------------------------------
@@ -2894,12 +2975,12 @@ def test_a_clock_set_ahead_and_corrected_is_named_at_the_moments_whose_device_ti
 
 
 def test_the_lookup_and_the_alert_share_the_clock_limits() -> None:
-    """``source_clock_offset`` and ``R20-lease:source-clock`` use the same limit and the same
-    minimum of rows (D28)."""
-    assert (engine.CLOCK_LIMIT_SECONDS, engine.CLOCK_MIN_ROWS) == (
-        system.CLOCK_LIMIT_SECONDS,
-        system.CLOCK_MIN_ROWS,
-    )
+    """``source_clock_offset`` and ``R20-source-clock`` use the same limit by default and the same
+    minimum of rows (D28, #222)."""
+    assert (
+        DEFAULT_SETTINGS["alerts.source_clock_limit_seconds"],
+        clocksamples.TYPICAL_MIN_ROWS,
+    ) == (engine.CLOCK_LIMIT_SECONDS, engine.CLOCK_MIN_ROWS)
 
 
 # -- every engine explanation has a test that emits it (4.3 WP-C, "done when") --------------------
@@ -2998,6 +3079,10 @@ EMITTED_BY: dict[str, tuple[str, str]] = {
     "fortigate_format_verified": (
         "test_lookup_fortigate_only.py",
         "test_the_format_note_names_who_verified_it_and_when",
+    ),
+    "fortigate_lease_unlimited": (
+        "test_lookup_fortigate_only.py",
+        "test_an_unlimited_lease_names_the_configured_time_it_ran_on",
     ),
     "future_time": ("test_lookup_engine.py", "test_data_window_for_days_outside_the_database"),
     "guest_vlan": ("test_lookup_engine.py", "test_guest_network_explanation"),

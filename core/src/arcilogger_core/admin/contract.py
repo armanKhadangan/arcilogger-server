@@ -102,7 +102,7 @@ RequestKind = Literal[
 ]
 #: Non-secret actions the worker runs from the database queue (``admin_requests``,
 #: ``channel = 'worker'``); they never become a request file.
-WorkerKind = Literal["worker.test_email", "worker.lease_rebuild"]
+WorkerKind = Literal["worker.test_email", "worker.lease_rebuild", "worker.webhook_test"]
 Channel = Literal["agent", "worker"]
 #: The sections of ``arcilogger.toml`` the browser may change (contract 2.3).
 Section = Literal["general", "tsa", "smtp", "replica", "retention", "backup", "sources"]
@@ -193,6 +193,9 @@ JournalState = Literal[
     "cancelled",
     "recovered",
     "action",
+    # "Bağlantıyı dene" of a source's SNMP (Wave 6 C11, #217): probed, nothing written; the
+    # worker's audit entry is ``admin.probe``.
+    "probe",
 ]
 
 REQUEST_KINDS: Final[tuple[RequestKind, ...]] = get_args(RequestKind)
@@ -674,6 +677,9 @@ class RequestOptions(_Model):
     day: date | None = None
     #: The recipient of the trial e-mail of an SMTP change.
     test_to: Annotated[str, StringConstraints(pattern=EMAIL_ADDRESS, max_length=254)] | None = None
+    #: "Bağlantıyı dene" (Wave 6 C11, #217): a ``config.apply`` of ``sources`` that validates and
+    #: probes its one source's SNMP with the request's keys, then writes nothing.
+    probe_only: bool = False
 
 
 class AdminRequest(_Model):
@@ -711,6 +717,10 @@ class AdminRequest(_Model):
             raise ValueError("an action belongs to no section")
         if (self.kind == "action.seal") != (self.options.day is not None):
             raise ValueError("options.day is given with action.seal and only with it")
+        if self.options.probe_only and not (
+            self.kind == "config.apply" and self.section == "sources" and self.probe
+        ):
+            raise ValueError("options.probe_only is a probed config.apply of sources only")
         return self
 
 
@@ -804,7 +814,42 @@ class ReplicaTestResult(_Model):
     message: str
 
 
-ActionResult = SealResult | CreditResult | TsaTestResult | ReplicaTestResult
+#: ``ifOperStatus`` (RFC 2863) by name, as ``OperStatus`` of ``activity-types.ts``.
+OperStatusName = Literal[
+    "up", "down", "testing", "unknown", "dormant", "not_present", "lower_layer_down"
+]
+#: The ``snmp`` probe's interface list in a request status: at most this many entries …
+PROBE_INTERFACES_MAX: Final = 256
+#: … each name at most this long (W5-N-9).
+PROBE_INTERFACE_NAME_MAX: Final = 64
+
+
+class ProbeInterface(_Model):
+    """One interface the device reported to the ``snmp`` probe (``ifName``, W5-N-9): the
+    browser offers these names when the configured one is not found. No person data, no key."""
+
+    name: Annotated[str, StringConstraints(min_length=1, max_length=PROBE_INTERFACE_NAME_MAX)]
+    oper_status: OperStatusName | None
+    speed_mbps: Annotated[int, Field(ge=0)] | None
+
+    @field_validator("name")
+    @classmethod
+    def _printable(cls, name: str) -> str:
+        if not name.isprintable():
+            raise ValueError("an interface name has only printable characters")
+        return name
+
+
+class SnmpProbeResult(_Model):
+    """A ``config.apply`` of ``sources`` with ``options.probe_only`` that reached the device
+    (Wave 6 C11, #217): what it reports, bounded as the probe's refusals (W5-N-9). Nothing of
+    the request was written."""
+
+    probe_only: Literal[True] = True
+    interfaces: tuple[ProbeInterface, ...] = Field(default=(), max_length=PROBE_INTERFACES_MAX)
+
+
+ActionResult = SealResult | CreditResult | TsaTestResult | ReplicaTestResult | SnmpProbeResult
 _RESULT_TYPES: Final[Mapping[TaskKind, type[_Model]]] = MappingProxyType(
     {
         "seal": SealResult,
@@ -926,14 +971,6 @@ class VersionRef(_Model):
     to: Sha256
 
 
-#: ``ifOperStatus`` (RFC 2863) by name, as ``OperStatus`` of ``activity-types.ts``.
-OperStatusName = Literal[
-    "up", "down", "testing", "unknown", "dormant", "not_present", "lower_layer_down"
-]
-#: The ``snmp`` probe's interface list in a request status: at most this many entries …
-PROBE_INTERFACES_MAX: Final = 256
-#: … each name at most this long (W5-N-9).
-PROBE_INTERFACE_NAME_MAX: Final = 64
 #: The failures of the ``snmp`` probe that come with the device's interface list.
 INTERFACE_CODES: Final = frozenset({"snmp_no_such_interface", "snmp_no_hc_counters"})
 #: The codes whose error carries the server's own answer as ``detail`` (0.4.0 P6): the SMTP
@@ -943,22 +980,6 @@ DETAIL_CODES: Final = frozenset({"smtp_test_failed"})
 DETAIL_MAX: Final = 300
 #: Longest explanation of a :data:`DETAIL_CODES` answer (``arcilogger_core.smtp.explain``).
 HINT_MAX: Final = 600
-
-
-class ProbeInterface(_Model):
-    """One interface the device reported to the ``snmp`` probe (``ifName``, W5-N-9): the
-    browser offers these names when the configured one is not found. No person data, no key."""
-
-    name: Annotated[str, StringConstraints(min_length=1, max_length=PROBE_INTERFACE_NAME_MAX)]
-    oper_status: OperStatusName | None
-    speed_mbps: Annotated[int, Field(ge=0)] | None
-
-    @field_validator("name")
-    @classmethod
-    def _printable(cls, name: str) -> str:
-        if not name.isprintable():
-            raise ValueError("an interface name has only printable characters")
-        return name
 
 
 class ErrorRef(_Model):
@@ -1118,6 +1139,8 @@ class JournalLine(_Model):
     code: str | None = None
     rolled_back: bool = False
     result: ActionResult | None = None
+    #: ``probe``: the source whose SNMP was probed (its name only, never a value).
+    source: Annotated[str, StringConstraints(pattern=r"^[a-z0-9][a-z0-9-]{0,62}$")] | None = None
 
     @field_validator("code")
     @classmethod
@@ -1286,18 +1309,21 @@ def _syslog_sender(value: str) -> str:
 
 #: The strict outbound rule of a source's SNMP (Wave 5 §6 N3): ``ARCILOGGER SNMP <source>``, UDP.
 SNMP_RULE_PREFIX: Final = "ARCILOGGER SNMP "
+#: The strict outbound rule of an alert webhook (Wave 6 §2.4.1): ``ARCILOGGER Out Webhook
+#: <name>``, TCP to the host and port of its URL.
+WEBHOOK_RULE_PREFIX: Final = "ARCILOGGER Out Webhook "
 
 
 class OutboundRule(_Model):
     """One host of a strict outbound rule; a rule with several hosts or ports has one entry
-    each (``Set-ArciFirewall.ps1`` names the rules; TURKTRUST, CRL and Proxy: Wave 5 W5-T-3; NTP
-    and SNMP are UDP, the others TCP)."""
+    each (``Set-ArciFirewall.ps1`` names the rules; TURKTRUST, CRL and Proxy: Wave 5 W5-T-3;
+    Webhook <name>: Wave 6 §2.4.1; NTP and SNMP are UDP, the others TCP)."""
 
     rule: Annotated[
         str,
         StringConstraints(
-            pattern=r"^ARCILOGGER (Out (NTP|Kamu SM|SMTP( [2-9])?|Replica|TURKTRUST|CRL|Proxy)"
-            r"|SNMP [a-z0-9][a-z0-9-]{0,62})$"
+            pattern=r"^ARCILOGGER (Out (NTP|Kamu SM|SMTP( [2-9])?|Replica|TURKTRUST|CRL|Proxy"
+            r"|Webhook [a-z0-9-]{1,32})|SNMP [a-z0-9][a-z0-9-]{0,62})$"
         ),
     ]
     host: HostName

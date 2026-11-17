@@ -8,7 +8,8 @@ is changed on the console only (``LOCKED_KEYS``). The values themselves come fro
 ``list_settings``.
 
 A test keeps :data:`SETTINGS` to exactly the visible keys: a new setting without a label and a
-help text, Turkish and English, fails it. Internal values the code keeps in the same table
+help text, Turkish and English, fails it. The keys another page edits (:data:`EDITED_ELSEWHERE`,
+the security rules) are not visible here. Internal values the code keeps in the same table
 (watermarks, import offsets: never in ``DEFAULT_SETTINGS``) are not settings and are not shown.
 No text here claims legal compliance.
 """
@@ -206,6 +207,15 @@ _ALERTS = _group(
         "Fewest messages for R20-parse",
         "Son bir saatte bundan az mesaj gönderen kaynak için oran hesaplanmaz.",
         "No rate is computed for a source that sent fewer messages in the last hour.",
+    ),
+    (
+        "alerts.source_clock_limit_seconds",
+        "Cihaz saati sınırı (saniye)",
+        "Device clock limit (seconds)",
+        "Bir kaynağın son kayıtlarının cihaz zamanı alma zamanından ortanca olarak bundan fazla "
+        "farklıysa R20-source-clock uyarısı. Başlangıç değeri; sahada doğrulayın.",
+        "R20-source-clock when the device times of a source's latest records differ from their "
+        "receive times by a median of more than this. A starting value; verify on site.",
     ),
     (
         "alerts.job_failures",
@@ -1022,6 +1032,17 @@ _DATABASE = _group(
         "personal data.",
     ),
 )
+
+#: Prefixes of the keys a page of their own edits: the security rules (Wave 6 contract §2.1.4,
+#: Ayarlar → Güvenlik kuralları, ``GET/PUT /api/v1/rules``). They are not described here and not
+#: on the generic page; ``PATCH /settings`` refuses them like every key it does not show.
+EDITED_ELSEWHERE: Final = ("rules.",)
+
+
+def edited_elsewhere(key: str) -> bool:
+    """Whether ``key`` is a setting another page edits (:data:`EDITED_ELSEWHERE`)."""
+    return key.startswith(EDITED_ELSEWHERE)
+
 
 #: Every visible setting, by key, in the order of :data:`GROUPS` (then as listed).
 SETTINGS: Final[Mapping[str, SettingMeta]] = {

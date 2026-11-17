@@ -223,7 +223,8 @@ and its chains are `low`, section 2) and its lease time: the logged `lease` when
 `dhcp.fortigate_use_logged_lease` is on and it lies in 300–8,640,000 s (the FortiOS `lease-time`
 range), otherwise the configured time of its interface (`lease.server_seconds`, else
 `lease.default_seconds`) with the margin, counted `lease_fallback` (and `lease_unlimited` for `0`,
-which raises `R20-lease:fortigate-lease-unlimited`). The job report's `details.stats` holds
+which raises `R20-lease:fortigate-lease-unlimited`; a lookup names it on the chain with
+`fortigate_lease_unlimited`, section 3). The job report's `details.stats` holds
 these counters, `kept_fg_dhcp`, `refused_fg_dhcp` and `excluded_fg_dhcp`, counted once, in the
 run's own window.
 
@@ -442,7 +443,12 @@ a person resolved or dismissed are never changed. The incremental job only raise
   - `srcmac_mismatch`: below.
 - **FortiGate notes on a chain** whose lease is `fg_dhcp` (info): `fortigate_format_unverified`
   while `dhcp.fortigate_format_verified` is off, `fortigate_format_verified` (who marked it and
-  when) once it is on ([DEVICE-SETUP.md](DEVICE-SETUP.md) section 2.4). A chain whose cited DHCP
+  when) once it is on ([DEVICE-SETUP.md](DEVICE-SETUP.md) section 2.4); `fortigate_lease_unlimited`
+  when the lease's own last DHCP record at or before T logged `lease=0` (FortiOS's "unlimited",
+  verify on site: ASSUMPTIONS V4) and the lease kept no logged time of an earlier ACK, with
+  `fallback`, the configured time in seconds the lease ran on (`lease.server_seconds`, else
+  `lease.default_seconds`, × `lease.timeout_percent`); the chain, its confidence and its person
+  stay as they are (#299). A chain whose cited DHCP
   rows come from a sender configured later carries `source_configured_later` (info).
 - **Department**: the linked person's department, else the VLAN's
   (`arcilogger_db.network.vlan_department` — the same rule as the usage reports).
@@ -686,7 +692,9 @@ All explanation texts (Turkish and English, no legal claims) are in `lookup/text
 | `alerts.import` | every minute — new lines of `state/alerts.jsonl` and of the browser administration's `admin\status\alerts.jsonl` (the agent) and `admin\system\alerts.jsonl` (ApplySystem) into `alerts`, each line once (a byte offset per file in the internal settings `worker.alerts_import`, `worker.alerts_import.admin` and `worker.alerts_import.system`, written with the alerts; docs/ALERTS.md) |
 | `alerts.r15` | every minute — R15 log source silent (`sources.last_seen`, the collector status, `[[sources]] heartbeat_minutes`; `alerts.r15_*` settings) |
 | `alerts.system` | every 5 minutes — the R20 checks: disk, sealing, verification, credit, replica, parse failures, failing jobs, database backup, clock (`alerts.*` settings), the lease evidence and the internet exits (`R20-lease:<cause>`, `R20-nat:<cause>`, each check in its own transaction, so a NAT problem never stops a lease alert; ADR-0016, docs/ALERTS.md section 2), the content-filter records of the FortiGate sources on the expected days (`R20-filter`, `alerts.filter_*`), and the heartbeat of the administration agent ArciAdmin (`R20-admin` when `admin\status\agent.json` is older than 2 minutes or missing, from 5 minutes after the worker's start; ADR-0014) |
+| `rules.run` | every minute — the security rules R01–R19 (Wave 6, module `security_rules`, skipped without it): each rule that is on and configured evaluates the logs received since its watermark (`rule_state`) up to `now − rules.lag_seconds`, in slices of at most `rules.max_slice_seconds` and the rule's window, each in its own transaction with `rules.statement_timeout_seconds`; a new rule starts at that moment (no backfill); `rules.failures_alert` failed slices in a row raise `R20-rules:<ID>` |
 | `alerts.notify` | every minute — alert e-mail through `[smtp]` to `alerts.email_recipients` (`alert_deliveries`; skipped while `[smtp] enabled = false`; ADR-0010) |
+| `alerts.webhooks` | every minute, after `alerts.notify` — alerts to the webhooks of `[[webhooks]]` (`alert_deliveries` with kind `webhook`; no backfill, retried up to 24 h, then `R20-webhook`; skipped while no webhook is enabled; module `security_rules`; Wave 6 contract §2.4) |
 | `usage.requests` | every 30 seconds — usage rebuild requests of the web interface (`usage_rebuilds`, `POST /api/v1/usage/rebuild`; ADR-0011, docs/USAGE.md) |
 | `usage.daily` | daily after 00:45 — yesterday's usage rollup rebuilt as `final` |
 | `usage.today` | every 5 minutes — today's usage rollup from the logs loaded so far (`partial`) |
@@ -990,7 +998,8 @@ WHERE duration >= 300` and split the scan into "logged within 5 minutes of the w
   `no_lease`, or a chain `low`. The lines the previous version loaded stay `fg_event` rows and
   are named as above.
 - **Source clocks.** A device clock that is off by less than 120 s is not alerted
-  (`R20-lease:source-clock`, a fixed 120 s for every source) and lowers no chain below max(120 s,
+  (`R20-source-clock:<source>`, `alerts.source_clock_limit_seconds`, 120 s by default; #222) and
+  lowers no chain below max(120 s,
   the lookup tolerance) for a source measured only for the session search (120 s otherwise), yet
   with the default ±60 s tolerance a drift of one to two minutes can still move a session out of the
   window. A source with fewer than 10 rows around T is not measured. An empty result states the
@@ -1076,7 +1085,7 @@ The operator's checklist with the recorded outcomes is [KURULUM.md](KURULUM.md) 
 - **Carrier-grade NAT** at the ISP (a public IP shared with other customers) and **whether each
   line's public IP is static** (`public_dynamic`): ask the ISP.
 - **The FortiGate's clock** syncs with NTP (DEVICE-SETUP.md section 2.1) and its DHCP lines carry
-  a usable device time (`R20-lease:source-clock`).
+  a usable device time (`R20-source-clock`).
 - **DECLINE:** whether FortiOS logs a DHCPDECLINE or checks an address before it offers it, and
   that a client holds one address per server interface and network.
 - **ARP-LOG script interval** (`arp.interval_seconds`, 1 h) and its jitter (merge grace 66 min).

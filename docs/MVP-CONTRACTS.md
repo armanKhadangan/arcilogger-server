@@ -357,7 +357,10 @@ public-IP request carries:
   `trust.REFUSAL_RULES`, `trust.CONFIGURATION` = the excluded-interface and IPv6 rules); a logged
   lease time (300-8,640,000 s) ends the lease that long after its last DHCP record, without the
   timeout margin (D6). A chain carries `fortigate_format_unverified`, or
-  `fortigate_format_verified` with `at` and `by` read from the setting row at lookup time.
+  `fortigate_format_verified` with `at` and `by` read from the setting row at lookup time, and
+  `fortigate_lease_unlimited` (info, `{fallback}` seconds, no citation) when the lease's own last
+  record logged `lease=0` (`types.UNLIMITED_LEASE`, ASSUMPTIONS V4) and it kept no logged time
+  (#299).
 - **Lowered to `low` with a reason:** `lease_renewal_not_seen` (the moment lies more than half a
   lease after the lease's last DHCP record with no renewal in between);
   `fortigate_dhcp_not_converted_since_lease` (FortiGate DHCP lines of the chain's IP or MAC after
@@ -2220,7 +2223,8 @@ ADR-0016).
   `fortigate_dhcp_no_network`, `egress_observed_not_configured`, `egress_changed_after_event`,
   `session_changed_exit`, `egress_not_logged_but_seen`, `dhcp_sources_overlap`,
   `session_from_unknown_source`, `source_configured_later`, `egress_public_dynamic`,
-  `egress_internal`, `source_clock_offset`, `source_clock_shared` (#82); rewritten: `no_lease`,
+  `egress_internal`, `source_clock_offset`, `source_clock_shared` (#82),
+  `fortigate_lease_unlimited` (#299); rewritten: `no_lease`,
   `no_lease_for_mac`, `port_hint` (`{egresses}`), `public_ip_not_transip`. Retired, kept for
   stored lookups and never emitted: `public_ip_not_configured`, `wan_transip_not_seen`.
   `srcmac_mismatch` is a conflict key like `ip_conflict` (`types.CONFLICT_KEYS`).
@@ -2988,3 +2992,164 @@ alert:
   place for a hash-check badge; a match or an unchecked file shows nothing.
 
 Contract "Deviations — W4-x" has each with its tests.
+
+## 20. Security rules, the rule editor and webhooks (Wave 6)
+
+The binding text is `design/wave-6-contract.md`. This section collects what Wave 6 added, by
+kind, and its "Deviations" sections in 20.7, as earlier waves were folded. The security rules are
+not a 5651 obligation; they belong to the licence module `security_rules`.
+
+### 20.1 Endpoints
+
+| Method and path | Permission | Answer and codes |
+|---|---|---|
+| `GET /rules` | `alerts.read`; readable without the module | each rule R01–R14, R16–R19: names, `kind` (`event`/`condition`), inputs, `person_level`, `format_verified`, `needs_setup`, data status, last run and error, defaults, settings, parameters with bounds, advice; `module_enabled` |
+| `PUT /rules/{id}` | `settings.manage`, module | the `rules.<ID>` shape; audit `rule.update`; 404 `rule_not_found`, 422 `rule_param_invalid` (`details.field`) |
+| `POST /rules/{id}/dry-run` | `settings.manage`, module | "Son 24 saatte dene": `{would_open, keys, truncated, duration_ms}`, nothing saved; 409 `rule_dry_run_busy`, 504 `rule_dry_run_timeout` (`rules.dry_run_timeout_seconds`) |
+| `GET /alerts?assignee=me\|none\|<id>` | `alerts.read` | each alert gains `assignee` and `evidence_total` |
+| `POST /alerts/{id}/assign` | `alerts.manage` | `{"user_id": n \| null}`, only users with `alerts.read`; an `assign` event and the audit `alert.assign`; 422 `alert_assignee_invalid` |
+| `GET /alerts/{id}/evidence` | `alerts.read` | the rows behind the alert with `raw: {source, day, line, offset}` for `/raw`; no line content |
+| `GET /alerts/{id}` | `alerts.read` | adds `person: {id, name}` only for `usage.person` and a person-level rule (R09, R13, R14), audited first as `alert.person_view`; `deliveries` lists the e-mail deliveries only, a webhook's are on `GET /webhooks/{name}/deliveries` (#304) |
+| `GET /alerts/summary` | `alerts.read` | adds `by_day` (30 site days by severity), `top_rules`, `top_keys` (7 days) |
+| `GET /webhooks` | `alerts.read`; readable without the module | each `[[webhooks]]` entry: name, format, host only, `min_severity`, `rules`, `enabled`, `ready` and `reason` (`disabled`, `secret_missing`, `url_missing` or null), last delivery, 7-day counts |
+| `GET /webhooks/{name}/deliveries?limit=50` | `alerts.read` | the newest deliveries with `last_error` (no URL path, query, secret or header value); 404 `webhook_not_found` |
+| `POST /webhooks/{name}/test` | `settings.manage`, module | "Test gönder": a queued `worker.webhook_test`, as the test e-mail (five an hour); 404 `webhook_not_found`, 409 `webhook_not_ready` (`details.reason`) |
+| `POST /admin/config/sources/snmp-test` | `settings.manage`, recent re-authentication | "Bağlantıyı dene" (#217): a queued probe-only `config.apply` of `sources`; one a minute per user (429 `admin_rate_limited`) |
+| `GET /sources`, `/sources/{name}` | unchanged | each source gains `clock_offset_seconds` and `clock_rows` (#222) |
+| `GET /system/health` | unchanged | gains `source_clocks` (the sources beyond `alerts.source_clock_limit_seconds`, furthest off first, at most 10: `source`, `offset_seconds`, `rows`) and `source_clock_limit_seconds` (#222) |
+| `GET /activity/devices` | unchanged | gains `late_sources` (the enabled FortiGate sources whose clock is more than 5 minutes behind, so their traffic is missing from "Şu an": `source`, `behind_seconds`) (#222) |
+
+### 20.2 Settings, module and worker jobs
+
+- **Module `security_rules`** ("Güvenlik kuralları" / "Security rules"): the worker jobs
+  `rules.run` and `alerts.webhooks`, `PUT /rules/{id}`, the dry run and the webhook test. Without
+  it the jobs are skipped and those routes answer 403 `module_not_licensed` (W6-A-6); the lists stay
+  readable.
+- **Engine-wide `rules.*`:**
+  - `lag_seconds` 120, `max_slice_seconds` 600, `max_catch_up_hours` 24;
+  - `statement_timeout_seconds` 20, `failures_alert` 3, `evidence_max` 20, `no_data_hours` 24;
+  - `max_device_skew_seconds` 3600, `internal_networks` (the private ranges), `dry_run_timeout_seconds` 30.
+- **One `rules.<ID>` object per rule:** `enabled`, `severity`, `window_seconds`, `cooldown_seconds`,
+  `actions.email`, `actions.webhook` and the rule's parameters.
+  - Kept off the generic settings page (`EDITED_ELSEWHERE`), and answered by `GET /settings` in
+    `elsewhere`. Only the rules API writes them.
+  - A stored value that no longer validates is ignored field by field.
+- **`alerts.source_clock_limit_seconds`:** 120 (30–86,400), the limit of `R20-source-clock` (#222).
+- **`[[webhooks]]`** in `arcilogger.toml` (server only):
+  - at most ten entries, each with `name`, `url` (`generic`), `format`, `min_severity`, `rules`,
+    `enabled`, `timeout_seconds` and `ca_file`;
+  - secrets `webhook.<name>.secret` (HMAC, 32–256 characters) and `webhook.<name>.url` (Teams,
+    Slack), set with `arcilogger-core secret set`;
+  - strict outbound mode adds the firewall rule `ARCILOGGER Out Webhook <name>`.
+- **Worker jobs:**
+  - `rules.run`, every minute, after the lag;
+  - `alerts.webhooks`, every minute after `alerts.notify`; retries after 1, 5, 15 and 60
+    minutes, then hourly, `failed` 24 h after the row was created.
+
+### 20.3 Schema
+
+- **`0024_rules`:** the rules' tables and alert additions.
+  - `rule_state`: the watermark, last run, last input, last error, failures, skipped backlog and
+    alerts opened.
+  - `alert_evidence`: up to `rules.evidence_max` references a rule's alert, deleted with the
+    alert.
+  - `alerts.assignee_id` (users, `SET NULL`).
+  - The `assign` event kind, and the `webhook` delivery kind (`recipient` = the webhook's name,
+    D10).
+- **`0025_admin_webhook_test`:** the request kind `worker.webhook_test` (W6-H-2).
+- **`0026_rules_time_received`:** indexes on `time_received` of `fg_traffic`, `fg_dns`, `fg_web`,
+  `fg_app` (W6-A-7). They are built over every existing row while the services are stopped.
+- **`0027_rule_traffic_totals`:** R13's and R14's running totals (#280).
+  - `rule_traffic_state`, which moves with the watermark.
+  - `rule_traffic_totals`, by address, device minute and receive minute.
+  - `rule_traffic_evidence`.
+- The installer judges all four lossless for a rollback.
+
+### 20.4 Alerts
+
+- **Rule alerts:**
+  - **`<rule>:<key>`**, opened once per key. `count` and `evidence_total` are the most rows in one
+    window (C1). A cooldown keeps a closed key quiet (`after_close`). `event` rules are closed by a
+    person; R17 resolves itself (D9).
+  - **E-mail:** sent when the rule's `actions.email` is on and the severity reaches
+    `alerts.email_min_severity` (D11).
+  - **Webhooks:** sent when the rule's `actions.webhook` is on and the severity reaches the
+    webhook's `min_severity`.
+- **System alerts:** each with its own catalogue entry and runbook.
+  - `R20-rules:<ID>` (high): a rule failed `rules.failures_alert` times in a row; its next
+    successful slice resolves it. A skipped backlog shows in the editor (`skipped_until`).
+  - `R20-webhook:<name>`: a delivery failed; the webhook's next sent delivery resolves it.
+  - `R20-source-clock:<source>`: a source's typical clock offset is over the limit. It replaces
+    `R20-lease:source-clock`, whose open alerts close as `superseded`.
+
+### 20.5 Audit and personal data
+
+- **New audit actions:**
+  - `rule.update`;
+  - `alert.assign` (`from`, `to`, `rule`);
+  - `alert.person_view` (`alert_id`, `person_id`), written before the answer;
+  - `webhook.test` (`name`, `ok`, `status`, never the URL);
+  - `admin.probe` (the source tested and `ok`, never a value; #217).
+- **Personal data:** a person-level rule stores `person_id`. Only `usage.person` sees the name.
+  - Alert e-mails and webhook payloads carry no person name and no log line.
+  - A payload's titles name an address or a device.
+  - The evidence holds references, never line content.
+
+### 20.6 Codes
+
+| Code | TR | EN |
+|---|---|---|
+| `rule_not_found` | Böyle bir güvenlik kuralı yok. | No such security rule. |
+| `rule_param_invalid` | Kural ayarı geçersiz: {field}. | Invalid rule setting: {field}. |
+| `rule_dry_run_busy` | Başka bir deneme sürüyor; bitince tekrar deneyin. | Another trial run is in progress; try again when it has finished. |
+| `rule_dry_run_timeout` | Deneme {n} sn içinde bitmedi; pencereyi ya da listeleri küçültün. | The trial run did not finish within {n} s; shorten the window or the lists. |
+| `alert_assignee_invalid` | Bu kullanıcıya uyarı atanamaz. | Alerts cannot be assigned to this user. |
+| `webhook_not_found` | Böyle bir webhook yok. | No such webhook. |
+| `webhook_not_ready` | Bu webhook gönderime hazır değil; durumuna bakın. | This webhook is not ready to send; see its state. |
+| `webhook_test_failed` | Deneme bildirimi gönderilemedi. | The test notification could not be sent. |
+
+`webhook_test_failed` is a request outcome; its reason is the request's `result.error_text`
+(W6-H-1). The plan warning `webhook_url_unreadable` names a webhook whose stored URL the
+firewall step cannot read.
+
+### 20.7 Decided while building (where the plan of the Wave 6 contract was refined)
+
+Recorded in the contract's "Deviations" sections, each with its tests; what touches the product:
+
+- **W6-A:**
+  - **The context's device-time bounds** reach the whole window: `min(start, window_start) −
+    skew` (W6-A-1).
+  - **`alert_evidence` of a `devices` row** keeps only its time, as a device has no row id or raw
+    line (W6-A-2).
+  - **The `rules.*` keys** are written only by the rules API, and answered by `GET /settings` in
+    `elsewhere`. On the console `rules.internal_networks` is checked as CIDR networks
+    (`setting_network_invalid`) (W6-A-3).
+  - **A slice is at most the rule's window long**, so a backlog puts every moment into some
+    window (W6-A-5).
+  - **The licensed rule writes** answer `module_not_licensed`, the code of every paid route
+    (W6-A-6).
+  - **The rules get receive-time indexes** (`0026`) after measuring the production pattern
+    (W6-A-7, replacing C2's first answer).
+- **W6-C:** R11 matches a device's insert time (`created_at`), not its `first_seen` (device time).
+  A device written after the watermark had passed its `first_seen` still alerts. Its limit: a
+  lease-job transaction longer than `rules.lag_seconds`.
+- **W6-E** (#280):
+  - **The totals.** R13's day and R14's nights are kept per address, device minute and receive
+    minute, and each slice adds what its sessions change. The bytes are exact; a bucket's first
+    and last receive time are a minimum and a maximum (W6-E-1).
+  - **R13's hour** is the bytes of the logs received in the window, as their site day counts them
+    (W6-E-2).
+  - **What a run reads:** its slice, and for a hit address its own rows of the window (W6-E-3).
+- **W6-H:**
+  - **`webhook_test_failed`** has a fixed text; the reason is `result.error_text` (W6-H-1).
+  - **The revision `0025`** for the test's request kind (W6-H-2).
+  - **The CLI** takes `webhook.<name>.secret` and `.url`, and `secret get` reads
+    `webhook.<name>.url` into a pipe for the firewall script; the HMAC secret stays write-only
+    (W6-H-3).
+- **#217:**
+  - **The tested source's SNMP** is switched off in the probe-only candidate, because an enabled
+    SNMP needs 1–4 interfaces and the test comes first (#217-1).
+  - **The journal state `probe`** names the source; the audit `admin.probe` carries `log_source`
+    and `ok` (#217-2).
+- **#222:** the contract's C13 names `/live` for the sources too late for "Şu an"; Canlı Durum's
+  "Şu an" reads `GET /activity/devices`, so `late_sources` is answered there.

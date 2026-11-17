@@ -338,6 +338,27 @@ describe('SystemView', () => {
     ]);
   });
 
+  it('lists the log sources whose clock is beyond the limit, or says that none is', () => {
+    const first = renderView();
+    expect(within(block('clock')).getByTestId('system-source-clocks-ok')).toHaveTextContent(
+      'Bütün log kaynaklarının saati sınırın içinde (120 saniye',
+    );
+    first.unmount();
+    const health: SystemHealth = systemHealth();
+    health.source_clocks = [
+      { source: 'switch-1', offset_seconds: 10_800, rows: 200 },
+      { source: 'fortigate', offset_seconds: -420, rows: 30 },
+    ];
+    renderView({ health });
+    const rows = within(within(block('clock')).getByTestId('system-source-clocks')).getAllByRole(
+      'row',
+    );
+    expect(rows.slice(1).map((row) => row.textContent)).toEqual([
+      'switch-1180 dk ileri200',
+      'fortigate7 dk geri30',
+    ]);
+  });
+
   it('tells an empty applied peer list from no ApplySystem report', () => {
     const { unmount } = renderView({ health: systemHealth('none_applied') });
     const peers = () => screen.getByTestId('system-applied-peers-none');

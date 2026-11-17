@@ -1298,7 +1298,7 @@ const DEVICES: DeviceDef[] = [
     },
   },
   {
-    mac: '00:0c:29:00:00:12',
+    mac: '00:00:5e:00:53:b1',
     ip: '172.20.43.82',
     name: null,
     hostname: 'PC-12',
@@ -1333,7 +1333,7 @@ const DEVICES: DeviceDef[] = [
     },
   },
   {
-    mac: '00:0c:29:00:00:31',
+    mac: '00:00:5e:00:53:b2',
     ip: '172.20.43.31',
     name: 'TOPLANTI-PC',
     hostname: 'TOPLANTI-PC',

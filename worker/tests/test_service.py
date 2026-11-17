@@ -3,10 +3,13 @@ restarts), failures and database outages never stop the loop, status file, stop 
 
 from __future__ import annotations
 
+import gc
+import itertools
 import json
 import threading
 from collections.abc import Callable, Mapping
 from datetime import date, datetime, time, timedelta
+from time import monotonic
 from typing import Any
 
 import pytest
@@ -17,11 +20,15 @@ from arcilogger_core.layout import Layout
 from arcilogger_db.engine import engine_from_url
 from arcilogger_db.models import JobRun, Lease
 from arcilogger_worker.service import (
+    COLLECTOR_THRESHOLDS,
+    MIN_SLEEP_SECONDS,
     SKIPPED,
+    SLEEP_SECONDS,
     Job,
     JobContext,
     Worker,
     default_jobs,
+    freeze_loaded,
     retry_delay,
 )
 from arcilogger_worker.testing import Evidence, tr
@@ -135,6 +142,65 @@ def test_status_file_and_stop(db_engine: Engine, layout: Layout) -> None:
     assert tick["last_status"] in {"ok", "skipped"}
 
 
+def test_the_loop_waits_until_the_next_job_is_due(db_engine: Engine, layout: Layout) -> None:
+    clock = Clock(tr(DAY, 12))
+    worker = Worker(
+        engine=db_engine,
+        layout=layout,
+        jobs=[
+            Job("often", recorder([], "often"), every=timedelta(seconds=5)),
+            Job("hourly", recorder([], "hourly"), every=timedelta(hours=1)),
+        ],
+        clock=clock,
+        activity=False,
+    )
+    assert worker.pause(clock()) == SLEEP_SECONDS  # nothing has ticked yet
+    assert [name for name, _ in worker.tick()] == ["often", "hourly"]
+    assert worker.pause(clock()) == SLEEP_SECONDS  # "often" is due in 5 s: at most a full wait
+    assert worker.pause(tr(DAY, 12) + timedelta(seconds=4.7)) == pytest.approx(0.3)
+    assert worker.pause(tr(DAY, 12) + timedelta(seconds=5)) == MIN_SLEEP_SECONDS  # due now
+    assert worker.pause(tr(DAY, 12) + timedelta(seconds=9)) == MIN_SLEEP_SECONDS  # overdue
+    # While the database is unreachable the history is not read and next_due is stale.
+    worker.database_ok = False
+    assert worker.pause(tr(DAY, 12) + timedelta(seconds=4.7)) == SLEEP_SECONDS
+
+
+def test_a_job_starts_when_it_is_due_not_a_whole_wait_later(
+    db_engine: Engine, layout: Layout
+) -> None:
+    """A job due every 0.4 s runs about every 0.4 s: the loop waits until the job is due, not
+    :data:`SLEEP_SECONDS` after every tick, whose own time then added to the delay (the probe
+    of the activity guard, #201, was more than 2 s late on a busy Windows runner)."""
+    starts: list[float] = []
+
+    def probe(ctx: JobContext) -> Mapping[str, Any]:
+        starts.append(monotonic())
+        return {}
+
+    worker = Worker(
+        engine=db_engine,
+        layout=layout,
+        jobs=[Job("probe", probe, every=timedelta(seconds=0.4))],
+        activity=False,
+    )
+    stop = threading.Event()
+    thread = threading.Thread(target=worker.run, args=(stop,))
+    thread.start()
+    try:
+        for _ in range(500):
+            if len(starts) >= 9:
+                break
+            threading.Event().wait(0.02)
+    finally:
+        stop.set()
+        thread.join(timeout=10)
+    assert not thread.is_alive()
+    intervals = sorted(b - a for a, b in itertools.pairwise(starts))
+    assert len(intervals) >= 8
+    # Each interval was at least a whole wait before (> 1 s); now the median is near 0.4 s.
+    assert intervals[len(intervals) // 2] < 0.8 < SLEEP_SECONDS
+
+
 def test_database_outage_does_not_stop_the_loop(layout: Layout) -> None:
     engine = engine_from_url("postgresql://nobody:nothing@127.0.0.1:1/none")
     calls: list[str] = []
@@ -213,7 +279,9 @@ def test_default_jobs_run_against_the_database(
         ("alerts.import", "ok"),
         ("alerts.r15", "ok"),
         ("alerts.system", "ok"),
+        ("rules.run", "ok"),  # the registered rules start at the horizon (D12)
         ("alerts.notify", "skipped"),  # [smtp] enabled = false by default
+        ("alerts.webhooks", "skipped"),  # no [[webhooks]] by default
         ("usage.requests", "skipped"),  # no rebuild request
         ("usage.daily", "ok"),
         ("usage.today", "ok"),
@@ -237,7 +305,9 @@ def test_default_jobs_run_against_the_database(
         ("alerts.import", "ok"),
         ("alerts.r15", "ok"),
         ("alerts.system", "ok"),
+        ("rules.run", "ok"),
         ("alerts.notify", "skipped"),
+        ("alerts.webhooks", "skipped"),
         ("usage.requests", "skipped"),
         ("usage.today", "ok"),
         ("usage.reattribute", "skipped"),
@@ -326,3 +396,18 @@ def test_retry_delays() -> None:
         timedelta(minutes=30),
     ]
     assert retry_delay(hourly, 5) == timedelta(hours=1)  # never shorter than the interval
+
+
+def test_the_service_start_freezes_what_is_loaded_and_sets_the_thresholds() -> None:
+    """#281: what is loaded is frozen, and the collector runs with fewer full passes while the
+    service runs (the measured thresholds), set back by the caller at its end."""
+    before = gc.get_threshold()
+    try:
+        freeze_loaded()
+        assert gc.get_freeze_count() > 0
+        assert gc.get_threshold() == COLLECTOR_THRESHOLDS
+        assert COLLECTOR_THRESHOLDS[0] >= before[0]
+        assert COLLECTOR_THRESHOLDS[2] > before[2]
+    finally:
+        gc.unfreeze()
+        gc.set_threshold(*before)

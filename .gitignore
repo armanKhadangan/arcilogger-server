@@ -15,7 +15,7 @@ build/
 dist/
 
 # Node / web
-node_modules/
+node_modules
 web/dist/
 web/dist-e2e/
 web/coverage/

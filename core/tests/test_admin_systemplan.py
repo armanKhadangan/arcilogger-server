@@ -318,6 +318,85 @@ def test_the_proxy_replaces_turktrust_and_the_revocation_lists() -> None:
     assert not [entry for entry in kamusm if entry[0] == "ARCILOGGER Out TURKTRUST"]
 
 
+WEBHOOKS = """\
+[[webhooks]]
+name = "siem"
+url = "https://siem.ornek.example/arcilogger?kanal=guvenlik"
+
+[[webhooks]]
+name = "siem-yedek"
+url = "https://198.51.100.20:8443/hook"
+
+[[webhooks]]
+name = "teams-bt"
+format = "teams"
+
+[[webhooks]]
+name = "slack-bt"
+format = "slack"
+
+[[webhooks]]
+name = "kapali"
+url = "https://kapali.ornek.example/hook"
+enabled = false
+"""
+
+
+def test_each_enabled_webhook_gets_its_hosts_rule_in_strict_mode() -> None:
+    """Wave 6 §2.4.1 (manager's answer 3 on #266): ``ARCILOGGER Out Webhook <name>`` to the host
+    and port of its URL; a Teams or Slack URL comes from the secret store (only its host and
+    port reach the plan), one that cannot be read gets no rule and a problem naming the webhook.
+    Through the proxy, its rule covers them all."""
+    current = config_of(extra=WEBHOOKS)
+    stored = {"teams-bt": ("ornek.webhook.office.example", 443), "slack-bt": None}
+    assert (
+        plan(inputs(current, firewall_managed=True, webhook_targets=stored)).firewall.outbound == ()
+    )
+    planned = plan(
+        inputs(current, firewall_managed=True, strict_outbound=True, webhook_targets=stored)
+    )
+    webhooks = [
+        (rule.rule, rule.host, rule.port)
+        for rule in planned.firewall.outbound
+        if rule.rule.startswith("ARCILOGGER Out Webhook ")
+    ]
+    assert webhooks == [
+        ("ARCILOGGER Out Webhook siem", "siem.ornek.example", 443),
+        ("ARCILOGGER Out Webhook siem-yedek", "198.51.100.20", 8443),
+        ("ARCILOGGER Out Webhook teams-bt", "ornek.webhook.office.example", 443),
+    ]
+    assert [(p.code, p.value) for p in planned.problems] == [("webhook_url_unreadable", "slack-bt")]
+    proxied = config_of(extra='[network]\nhttps_proxy = "http://172.20.10.5:3128"\n' + WEBHOOKS)
+    through = plan(
+        inputs(proxied, firewall_managed=True, strict_outbound=True, webhook_targets=stored)
+    )
+    assert not [r for r in through.firewall.outbound if r.rule.startswith("ARCILOGGER Out Webhook")]
+    assert through.problems == ()
+
+
+def test_read_inputs_keeps_only_the_host_and_port_of_a_stored_webhook_url(
+    installed: Installed,
+) -> None:
+    with installed.config_path.open("a", encoding="utf-8") as handle:
+        handle.write("\n" + WEBHOOKS)
+    installed.store.set(
+        "webhook.teams-bt.url", "https://ornek.webhook.office.example/webhookb2/Gizli-Yol"
+    )
+    state = installed.root / "install" / "firewall-state.json"
+    state.parent.mkdir(parents=True)
+    state.write_text('{"schema": 1, "strict_outbound": true}', encoding="utf-8")
+    read = read_inputs(installed.config_path, now=NOW)
+    assert read.webhook_targets == {
+        "teams-bt": ("ornek.webhook.office.example", 443),
+        "slack-bt": None,  # not stored
+    }
+    printed = dump_document(systemplan.system_plan(installed.config_path, now=NOW)).decode()
+    assert "Gizli-Yol" not in printed
+    assert "ARCILOGGER Out Webhook teams-bt" in printed
+    state.write_text('{"schema": 1, "strict_outbound": false}', encoding="utf-8")
+    assert read_inputs(installed.config_path, now=NOW).webhook_targets == {}  # not even read
+
+
 def test_an_invalid_remembered_host_is_left_out_and_named() -> None:
     planned = plan(
         inputs(config_of(), strict_outbound=True, smtp_server="kötü host:25", firewall_managed=True)

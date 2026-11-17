@@ -555,6 +555,7 @@ and only for an alert of a person-level rule; each such answer writes `alert.per
 | `rule_dry_run_timeout` | Deneme {n} sn içinde bitmedi; pencereyi ya da listeleri küçültün. | The trial run did not finish within {n} s; shorten the window or the lists. |
 | `alert_assignee_invalid` | Bu kullanıcıya uyarı atanamaz. | Alerts cannot be assigned to this user. |
 | `webhook_not_found` | Böyle bir webhook yok. | No such webhook. |
+| `webhook_not_ready` | Bu webhook gönderime hazır değil; durumuna bakın. | This webhook is not ready to send; see its state. |
 | `webhook_test_failed` | Deneme bildirimi gönderilemedi: {error} | The test notification could not be sent: {error} |
 
 ### 2.7 Load generator scenarios (W6-I)
@@ -684,6 +685,105 @@ to the normal site: `port-scan` (R01), `external-scan` (R02), `brute-force` (R03
 
 (Answers to questions on the issues are appended here.)
 
+- **C1 — an alert's `count` is the largest window count, not a sum** (#262). A hit's `count`
+  is the rows of its window. With slices shorter than the window, adding hits up counts the
+  same rows again on every run. An active alert's `count` and `evidence_total` therefore take
+  the largest value any of its hits reported ("en yüksek pencere sayısı / most in one window").
+  The stored evidence stays de-duplicated and capped at `rules.evidence_max`, and `last_time`
+  and `values` move as before. §2.1.5's "counts add up" is replaced by this. It lands in W6-A's
+  dry-run PR, before any API or UI shows a count. A closed alert's `after_close.count` (cooldown)
+  follows the same rule: the largest window count, never a sum (#270; lands with the rules API).
+- **C2 — the rules' receive-time indexes, migration `0026_rules_time_received`** (#278,
+  W6-A-7). Measured on the slice alone, no index paid; with a window filled behind the slice (as
+  in production), `(time_received)` on `fg_traffic`, `fg_dns`, `fg_web` and `fg_app` took the 18
+  rules from 30.7 s to 21.3 s at 10 minutes behind, with ingest's gate unchanged. `0024_rules`
+  is merged and is not edited; `0025` is W6-H's request kind (C10); `0027` holds R13's and
+  R14's running totals (#280). An upgrade builds the four indexes over every existing row with
+  the services stopped (CHANGELOG).
+- **C3 — `rules.evidence_max`:** a rule may return up to 100 evidence rows (the setting's
+  maximum) or read the setting itself; the engine keeps the configured number, oldest first.
+- **C4 — defaults the tables leave open** (#253, #254): cooldown 3600 s for R01, R03, R08,
+  R12 and R19; 0 s for R04 and R11; the per-row rules R04, R11 and R16 have a window of 60 s
+  (the minimum: they read their slice). R08 counts a DNS connection to a server that is not
+  allowed whatever its `action` (an attempt that was blocked is still an attempt). R19's
+  `rcode_field` is a `strings` parameter with exactly one entry.
+- **C5 — R04's off hours** are judged on the login's device `time`; windows and slices stay on
+  `time_received` (D8).
+- **C6 — R14** uses only `night_start`/`night_end` (§2.2.4); D5's mention of R14 does not make
+  it read `usage.work_hours` or `usage.holidays`. Both are `seconds` after site midnight
+  (defaults 0 and 21 600); the rule editor (W6-F) shows and edits them as HH:MM.
+- **C7 — the person of an address** (R09, R13, R14): rows are summed per address and minute of
+  device time, and a minute belongs to whoever held the address at its first instant, as in the
+  usage rollups.
+- **C8 — the case writer** (`worker/tests/rules/test_rules_cases.py`) keeps a row's named
+  `source`, and gives a `devices` row `created_at` = its receive time and `first_seen` =
+  `last_seen` = its device time. Cooldown cases use `RuleCase.closed_before`.
+- **C9 — webhooks** (#266):
+  - "24 h after the first attempt" counts from the delivery row's `created_at`.
+  - A webhook removed or switched off fails its queued rows and resolves its `R20-webhook`.
+    Switched on again, it sends nothing from before.
+  - Only alerts opened in the last 24 h are queued.
+  - A missing secret or Teams/Slack URL is retried like an unreachable target. `GET
+    /api/v1/webhooks` shows it at once: per webhook a `ready` boolean and a reason code
+    (`secret_missing`, `url_missing`), never a value.
+  - `R20-webhook` has its own entry in the alert catalogue (`alerts/texts.py`).
+  - The reason codes are `null` when `ready` is true, otherwise `disabled`, `secret_missing` or
+    `url_missing`.
+- **C10 — the webhook test and the firewall rule** (#266, #260):
+  - The test runs on the worker channel, as the test e-mail does, not as an administration agent
+    probe: request kind `worker.webhook_test` (`params.name`), sent by the worker with its own
+    secret store. §2.4.4's probe kind `webhook` is replaced by this.
+  - The kind needs migration `0025` (W6-H): `ck_admin_requests_kind` is dropped and created again
+    with `worker.webhook_test`; the downgrade deletes those rows and restores the old list.
+  - `POST /api/v1/webhooks/{name}/test` refuses before queueing: 404 `webhook_not_found`, 409
+    `webhook_not_ready` (`details.reason`) when `ready` is false, and the test e-mail's rate limit.
+    It answers the queued request; the web polls it as it polls the test e-mail.
+  - The request's `result` is `{"ok", "status", "error_text"}`: `status` is the HTTP status code
+    or `null` when no reply came (timeout, DNS, TLS); `error_text` follows §2.4.2's `last_error`
+    rule and is `null` on success. Its `code` is `webhook_test_failed` on failure. Audit
+    `webhook.test` with `{name, ok, status}`, never the URL.
+  - Until W6-F's webhook types land, `web/src/lib/api-types.test.ts` lists the six webhook
+    schemas in `UNUSED_SCHEMAS` (granted to W6-H, marked with #260, removed by #260).
+  - Firewall rule `ARCILOGGER Out Webhook <name>` (T-H4): built in `Set-ArciFirewall.ps1`, in
+    `systemplan.py` (`_outbound`) and in the rule-name pattern of `ArciInstall.psm1`. A `generic`
+    webhook gives the host and port of `url`. A `teams`/`slack` URL is read from the secret store
+    (`arcilogger-core secret get webhook.<name>.url` in the script, the agent's secret store in
+    `systemplan.py`); only its host and port are kept, in memory, and the URL is never logged or
+    written. A URL that cannot be read gives no rule and one warning naming the webhook, not the
+    URL.
+- **C11 — the SNMP test before saving** (#217, Wave 5 §6 N5):
+  - `POST /api/v1/admin/config/sources/snmp-test` (`settings.manage`, recent re-authentication,
+    one a minute per user) takes one source's add or update body and answers 202 with a queued
+    `config.apply` of `sources` with `options.probe_only: true`; for an existing source an empty
+    key uses the stored one.
+  - The agent validates and probes with the decrypted keys of the request and writes nothing: no
+    secret store, no `arcilogger.toml`, no `versions/`, no applied journal lines. The keys travel
+    as `secret_set` does and are dropped after the probe.
+  - Success ends in `succeeded` (no new state) with `result = {"probe_only": true, "interfaces":
+    [{"name", "oper_status", "speed_mbps"}]}`, bounded as W5-N-9; failure is `probe_failed`, with
+    the list whenever the walk succeeded. The API never turns a probe-only request into
+    `active`. Audit `admin.probe` with the source name and outcome, never a value.
+  - The SNMP form offers the interfaces as a pick list and falls back to typed names (W6-H's
+    owner builds it, with a grant for the SNMP form in `web/src/pages/settings/`:
+    `source-snmp.tsx`, `snmp-model.ts`, `sources-page.tsx`).
+- **C12 — the live tail's Linux bound follows CI's interpreter** (#191). CI's Linux job runs uv's
+  managed Python 3.12.16 since 2026-11-07, not the runner's 3.12.3: the gauge became 8 to 11 %
+  faster on the same CPU and the event loop's figure in gauge lines rose with it, while its time a
+  line stayed. 3 of 89 readings on 3.12.16 failed `LOOP_GAUGE_LINES` 6.8 (0 of 42 on 3.12.3), so
+  ubuntu-latest's value is 7.4, fitted to the 89: the costliest passes by 5.2 %, a path 40 %
+  costlier fails on 81 of them, 20 % costlier on 48. `CI_READINGS`' Linux rows are those
+  readings, with their CPU models. windows-latest is unchanged.
+- **C13 — a device clock that is minutes off** (#222):
+  - A source's typical offset is the median of its newest rows received in the last hour
+    (`source_clock_samples`, at least 10 rows); ingest does not change.
+  - `GET /api/v1/sources` gives `clock_offset_seconds` (negative: behind) and `clock_rows`;
+    `/system/health` the sources beyond the limit; `/live` the sources too late for "Şu an".
+  - The alert is the system alert `R20-source-clock:<source>` (free, 5651 Temel), one per
+    source, above `alerts.source_clock_limit_seconds` (default 120, 30-86,400, "sahada
+    doğrula"); it resolves when the offset is back within the limit. It replaces
+    `R20-lease:source-clock`: an open one is resolved as `superseded`, and its catalogue entry
+    stays for old alerts. The look-up's own D28 tolerance is unchanged; D8 is unchanged.
+
 ---
 
 ## 7. Owner questions (the defaults ship)
@@ -701,3 +801,181 @@ to the normal site: `port-scan` (R01), `external-scan` (R02), `brute-force` (R03
 ---
 
 ## Deviations
+
+### W6-A (2026-11-12, day-1 pull request, #243)
+
+- **W6-A-1: the device-time pruning bounds reach the whole window.** §2.1.2 gives the lower
+  bound as `start − rules.max_device_skew_seconds`. A window longer than the slice (R08's
+  3600 s against the 600-s slice) also counts rows received before `start`, and such a row may be
+  up to the skew earlier in device time: the bound `start − skew` would drop it and count less
+  than the window holds. `RuleContext.time_low` is `min(start, window_start) − skew`
+  (`time_high` stays `end + skew`); `test_the_context_reads_the_whole_window` pins it.
+- **W6-A-2: `alert_evidence` of a `devices` row.** §2.5 lists the columns, and `devices` as an
+  allowed `tbl`, but a device has no `id` and no raw line (it is keyed by MAC, R11). Only
+  `alert_id`, `n` and `tbl` are `NOT NULL`; the check `ck_alert_evidence_raw_ref` requires
+  `row_id`, both times, `source` and the three raw-reference columns for every table but
+  `devices`, whose evidence keeps `time` (the first sighting) only. Also `n >= 1`.
+- **W6-A-3: the generic settings page and `rules.*`.** `settings_meta.EDITED_ELSEWHERE`
+  (`rules.`) keeps the keys off the generic page and `PATCH /settings` refuses them as keys it
+  does not show (`setting_unknown`), so only the rules API writes them. `GET /settings` returning
+  them "for backups" (§2.1.4) needs a field in its answer that the web types would follow (W6-F):
+  it comes with the rules API pull request, not on day 1. On the console,
+  `arcilogger-db settings set rules.<ID>` accepts any object (a hand edit, which the worker reads
+  field by field as §2.1.4 says); `rules.internal_networks` is checked as CIDR networks there
+  (`setting_network_invalid`, new code), the numeric keys against bounds in `INTEGER_RANGES`.
+- **W6-A-4: `ruff format` and this contract.** ruff 0.17 formats the Python block of §2.1.2;
+  `ruff format --check .` failed on `wave-6` because of it. The day-1 pull request applies the
+  formatter's whitespace-only change to that block; no word of the contract changed.
+
+### W6-A (engine pull request, #243)
+
+- **W6-A-5: a slice is at most the rule's window long.** §2.1.2 has a rule count the window
+  that ends with its slice (`(end − window_seconds, end]`), and §2.1.3 cuts the backlog into
+  slices of up to `rules.max_slice_seconds` (600). With a window shorter than the slice, a
+  rule would see only the last window of each slice: R01's 60-s window would miss a scan in
+  the first nine minutes of a 600-s slice, and the 24-h dry run in 600-s slices would answer
+  differently from the minute-by-minute live run. The engine (and the dry run that follows)
+  therefore cut slices of `min(rules.max_slice_seconds, window_seconds)` (`engine.step`), so
+  every moment of a backlog falls into the window of some slice end. In steady state (a run a
+  minute) the slices are a minute long anyway. `test_a_backlog_puts_every_moment_into_a_window`
+  pins it.
+
+### W6-A (API pull request, #243)
+
+- **W6-A-3, completed.** `GET /settings` answers the `rules.*` keys in the new list
+  `elsewhere` (`key`, `value`, `is_default`, `updated_by`, `updated_at`), apart from the groups
+  of the generic page, which the web does not show. The field has a default, so the web types
+  carry it as optional and the generic page's tests need no change.
+- **W6-A-6: the licence code of the rule writes.** §2.6.1 names `module_disabled`
+  ("existing code"). The existing code of every paid route is `module_not_licensed` (403,
+  `arcilogger_api.licensing.require_module`), so `PUT /rules/{id}` and the dry run answer that
+  code. `GET /rules` stays readable and says `module_enabled`.
+
+### W6-C (#245): R11 matches the device's insert time, not `first_seen`
+
+- **Contract:** §2.2.2 R11, "a `devices` row whose `first_seen` is in the slice".
+- **Implemented:** a `devices` row whose `created_at` (the server's insert time) is in the slice; `first_seen` is shown in the alert's values.
+- **Why:** `first_seen` is the **device time** of the first DHCP or ARP sighting. The lease jobs write the row later, after their own lag. A device whose row is inserted after `rules.run` moved its watermark past that `first_seen` would never alert. `created_at` is written once, at the insert, by the server's clock. That fits D8 (receive time, not device time) and D12 (devices that existed when the rule started never alert, with no extra seeding).
+- **Limit:** a lease-job transaction that runs longer than `rules.lag_seconds` (120 s) can commit rows with a `created_at` behind the watermark. The default lag covers the normal job; a full rebuild of old days creates no new devices worth an alert.
+
+### W6-H (#249, pull request #266)
+
+- **W6-H-1: `webhook_test_failed` names the reason in the request's result.** §2.6.4 gives the
+  text "Deneme bildirimi gönderilemedi: {error}". "Test gönder" is a worker-channel request
+  (`worker.webhook_test`, as the test e-mail; manager's answer 1 on #266), and a request's
+  outcome code takes fixed texts from `core/admin/messages.py`, as `smtp_test_failed` does. The
+  message is "Deneme bildirimi gönderilemedi." / "The test notification could not be sent.", and
+  the reason (§2.4.2: the status code and the cleaned reply) is `result.error_text` of the
+  request, `{ok, status, error_text}` (manager's answer of 2026-11-15 19:08 on #266). The page
+  shows both (W6-F).
+- **W6-H-2: a new revision `0025_admin_webhook_test`.** `admin_requests.kind` is checked by the
+  database (`ck_admin_requests_kind`, frozen in `0015_admin_requests`), so the new worker-channel
+  kind needs a revision; it only widens that check (the downgrade deletes the
+  `worker.webhook_test` rows first). The manager fixed the numbers on #266: `0025` is this
+  kind, and the rules' indexes of C2 take `0026` with down-revision `0025`.
+- **W6-H-3: the webhook secrets on the console.** §2.4.1 has the administrator run
+  `arcilogger-core secret set webhook.<name>.secret`; the CLI accepted only a fixed list of
+  names, so it now also takes `webhook.<name>.secret` and `webhook.<name>.url`. `secret get`
+  reads `webhook.<name>.url` into a pipe (recorded like `postgres.superuser`) for
+  `Set-ArciFirewall.ps1` (manager's answer 3 on #266, option a); the HMAC secret stays
+  write-only.
+
+### W6-A (performance guard pull request, #278)
+
+- **W6-A-7: C2 reversed by measurement. The rules get receive-time indexes, revision
+  `0026_rules_time_received`.** C2 said "no index migration" after the guard's slice alone, where
+  every row lies inside every window and no index can help. In production the slice is always the
+  newest 60 s of a filled window. A rule finds the rows of its slice and window by `time_received`
+  (D8), and its device-time bounds are the window plus twice `rules.max_device_skew_seconds` wide
+  (3 h with the defaults). With only `time` indexed (the primary key), that step read every row in
+  those bounds. Measured with the guard's mix (10,000 messages per second) and 0, 5 and 10 minutes
+  behind the slice, plain PostgreSQL 16:
+
+  | rule | 0 min | 5 min | 10 min | rows read 0 / 5 / 10 min |
+  |---|---|---|---|---|
+  | R01 | 0.04 s | 0.11 s | 0.22 s | 318,296 / 963,783 / 1,768,494 |
+  | R02 | 0.03 s | 0.17 s | 0.33 s | 173,868 / 1,389,303 / 2,546,814 |
+  | R09 | 0.14 s | 0.56 s | 0.89 s | 851,650 / 5,112,546 / 9,374,106 |
+  | R10 | 0.07 s | 0.47 s | 1.21 s | 743,578 / 5,089,230 / 9,330,553 |
+  | R13 (#280) | 2.15 s | 10.16 s | 18.74 s | 1,272,864 / 7,642,116 / 14,012,592 |
+  | R14 (#280) | 0.92 s | 4.52 s | 8.89 s | 636,432 / 3,821,052 / 7,006,296 |
+
+  The other 12 rules stay at or under 0.21 s. With an index on `time_received` of `fg_traffic`,
+  `fg_dns`, `fg_web` and `fg_app`, at 10 minutes:
+
+  | rule | without | with the index | rows read without / with |
+  |---|---|---|---|
+  | R01 | 0.18 s | 0.05 s | 1,768,494 / 319,096 |
+  | R02 | 0.30 s | 0.06 s | 2,546,814 / 959,670 |
+  | R09 | 0.86 s | 0.42 s | 9,374,106 / 3,406,890 |
+  | R10 | 1.17 s | 0.45 s | 9,331,225 / 5,092,218 |
+  | R13 | 18.76 s | 13.22 s | 14,012,592 / 8,915,592 |
+  | R14 | 8.70 s | 6.40 s | 7,006,296 / 4,457,796 |
+  | all 18 rules | 30.7 s | 21.3 s | |
+
+  - **On the slice alone** (the guard) the job takes 4.6 s with the indexes, against 4.8 s
+    without; R01 and R02 stay at 0.05 s and 0.03 s.
+  - **Ingest's throughput gate** (20,000 lines) gave 5,421–5,575 lines/s without the indexes and
+    5,315–5,777 with them (5,656–5,971 on the migrated test template): within the spread of its
+    runs. The Windows throughput guards in CI give the final word.
+  - The other parsed tables are small or read through their own indexes, so they get none.
+    R09 and R10 stay under the line of about 1 s per 10 minutes behind the slice, so W6-B gets no
+    issue (manager, #278).
+
+### #217 (W6-H follow-up, "Bağlantıyı dene"; manager's C11 on #217)
+
+- **#217-1: the tested source's SNMP is switched off in the probe-only candidate.** An enabled
+  `[sources.snmp]` needs 1 to 4 interfaces (`SnmpConfig`), but the test exists to list them before
+  any is chosen. With `options.probe_only` the API sends the source's op with
+  `snmp.enabled = false` (as typed otherwise), and the rules probe that table regardless of
+  `enabled` (with its user and both keys required, and a recent re-authentication). The op is sent
+  even when nothing changed, as `config.apply` needs one. Nothing of it is written.
+- **#217-2: the journal and the audit.** The agent's journal line of a test has the new state
+  `probe` and the source's name (`JournalLine.source`); the worker writes `admin.probe` with
+  `log_source` and `ok` (the key `source` of the audit details already names the journal file).
+  Success has no result in the journal, only in the request status
+  (`{"probe_only": true, "interfaces": [...]}`).
+
+### W6-E (2026-11-15, #280: R13's and R14's running totals)
+
+- **W6-E-1: a bucket's first and last receive time may name a log that no longer counts.** R13's
+  day and R14's nights are kept per address, minute of device time and minute of receive time
+  (`rule_traffic_totals`, revision `0027_rule_traffic_totals`), and each slice adds what the
+  sessions it touches change. Bytes and log counts are exact: a session is counted again as of
+  the slice start and as of its end, so a late log that changes the increment of a log counted
+  before is taken into account (the "counter case": a late interim log with the final log's
+  counters makes the final log count 0). The first and last receive time of a bucket are a
+  minimum and a maximum and cannot be taken back: a bucket whose other logs still count may keep
+  the time of a log that counts 0 now (manager's answer 3 on #280). A hit's time is the newest
+  counted log of the subject, and a hit needs a counted log in the slice, newer than any log a
+  late log can zero, so it stays exact (pinned by
+  `test_a_late_log_that_zeroes_a_counted_log`); what can lag, by less than the receive minute
+  the logs share, is the first receive time R14 compares with the night's end.
+- **W6-E-2: R13's hour counts each log as the site day counts it.** §2.2.4 has R13 compare the
+  bytes sent in the window with `hour_bytes`. A log's bytes are its counter less the previous log
+  of its session; the hour read only saw a previous log received after `window_start −
+  usage.session_overlap_seconds`, the day sees one received after `day_start − overlap`. So
+  when a session's consecutive logs were more than the window and the overlap apart, the hour
+  counted the later log's whole counter, bytes from before the hour included. The hour is now
+  the bytes of the logs received in the window as their site day counts them (yesterday's logs
+  as yesterday counts them), summed from the kept minutes of receive time
+  (`rule_traffic_totals.received`) and the window's partial first minute, so a run reads its
+  slice and one partial minute, not the hour (manager's answer 2 on #280: key by receive
+  minute). It differs from the old hour only for such sessions, and only by leaving out bytes
+  sent before the hour; it is pinned by `test_the_hour_is_the_days_increments_received_in_it`.
+  This meaning of the hour was the default of the question asked on #280, accepted by the
+  manager on #286; keeping the old hour exactly would have needed the buckets keyed by the
+  previous log's receive minute too.
+- **W6-E-3: what a run of R13 and R14 reads.** The day's and the nights' totals read only the
+  slice: its logs and the other logs of their sessions, and the kept buckets of its addresses.
+  The hour evidence of R13's hit addresses (each address's oldest counted logs received in the
+  window, as before) reads at most these addresses' own rows of the window (manager's answer on
+  #286): per hit address, the device minutes its kept buckets name for the counted logs received
+  up to the minute of its 100th log, each range through `ix_fg_traffic_srcip_time`. The buckets
+  hold every counted log, a late one too, so the evidence is the same as one read of the window
+  (pinned by `test_the_hour_is_the_days_increments_received_in_it`). The first evidence of an
+  address newly over `day_bytes` or a night's `bytes` reads its period once and is kept after
+  that (W6-E's kept evidence lists). With 0, 5 and 10 minutes of the guard's traffic behind the
+  slice, a kept run of R13 took 1.15 s, 3.08 s and 2.83 s: the step from 0 to 5 minutes is the
+  hour evidence of 43 addresses newly over `hour_bytes` (1 at 0 minutes), and it does not grow
+  further with the minutes behind.

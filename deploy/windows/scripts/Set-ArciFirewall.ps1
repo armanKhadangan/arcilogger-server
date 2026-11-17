@@ -37,8 +37,14 @@
       or, when [network] https_proxy is set, the proxy's host and port in place of TÜRKTRUST and
       the revocation lists -, SMTP (the
       server of [smtp] in arcilogger.toml when enabled = true and host is set, on [smtp] port,
-      default 587; and the host:port of -SmtpServer, if given, as a rule of its own) and the
-      replica share (TCP 445 to the [replica] target host). Enabled outbound
+      default 587; and the host:port of -SmtpServer, if given, as a rule of its own), the
+      replica share (TCP 445 to the [replica] target host) and the alert webhooks (Wave 6:
+      "ARCILOGGER Out Webhook <name>", TCP to the host and port of each enabled [[webhooks]]
+      entry's URL, unless they go through [network] https_proxy; the URL of a Teams or Slack
+      webhook is read from the secret store with "arcilogger-core secret get webhook.<name>.url"
+      into this process only, and only its host and port are kept: the URL is never logged or
+      written; one that cannot be read gets no rule and a warning that names the webhook).
+      Enabled outbound
       allow rules outside these and -KeepRuleGroup are disabled and recorded like the inbound ones.
       Windows Defender Firewall rules take IP addresses, so host names are resolved now: run the
       script again if a provider changes its addresses. Windows Update and Defender signature
@@ -63,9 +69,9 @@
     in and the widest network) before anything changes. It then updates the two syslog rules in
     place (Set-NetFirewallAddressFilter), creates them when the first sender appears and removes
     them when the last one goes (an empty RemoteAddress would mean any address), and in strict
-    mode updates the Out NTP / Kamu SM / SMTP / Replica / TURKTRUST / CRL / Proxy and SNMP <source>
-    rules in place, creating one that is missing (a host that does not resolve keeps its rule as it
-    is). It never disables or removes another rule, never changes a profile, needs no
+    mode updates the Out NTP / Kamu SM / SMTP / Replica / TURKTRUST / CRL / Proxy / Webhook <name>
+    and SNMP <source> rules in place, creating one that is missing (a host that does not resolve
+    keeps its rule as it is). It never disables or removes another rule, never changes a profile, needs no
     -AdminAddress, skips the remote desktop check and never prompts. Exit codes:
     0 done, 2 refused (nothing changed), 3 not managed (no state file: an installation with
     -SkipFirewall). The full mode above stays for the installer and the console.
@@ -138,6 +144,18 @@ function Resolve-HostAddresses([string]$HostName) {
         Write-ArciWarn ("Ad çözümlenemedi [cannot resolve]: {0}" -f $HostName)
         return , @()
     }
+}
+
+function Read-WebhookUrl([string]$Name) {
+    <# The URL of a Teams or Slack webhook (webhook.<name>.url), from the secret store through a
+       pipe into this process only, as the installer reads postgres.superuser; '' when it cannot
+       be read. The caller keeps its host and port and nothing else; it is never logged. #>
+    try {
+        $answer = Invoke-ArciProcess -FilePath $Python -ArgumentList @('-I', '-m', 'arcilogger_core', '--config', $ConfigPath, 'secret', 'get', ('webhook.{0}.url' -f $Name)) -AllowFailure -TimeoutSeconds 120
+    }
+    catch { return '' }
+    if ($answer.ExitCode -ne 0) { return '' }
+    [string]$answer.StdOut
 }
 
 function Add-Unique([System.Collections.Generic.List[string]]$List, [string[]]$Values) {
@@ -576,6 +594,30 @@ if (-not $Remove) {
             $snmpPort = [string](Get-ArciConfigValue -Config $snmp -Path 'port' -Default 161)
             $name = 'ARCILOGGER SNMP {0}' -f [string](Get-ArciConfigValue -Config $source -Path 'name' -Default '')
             $rules.Add((New-RuleSpec $name 'Outbound' 'UDP' @($snmpPort) @($address) 'the internet line speed (SNMPv3, read only)'))
+        }
+
+        # The alert webhooks (Wave 6 §2.4.1): TCP to the host and port of each enabled one's URL,
+        # direct only (through [network] https_proxy the proxy's rule above covers them). A Teams
+        # or Slack URL is a secret as a whole: read from the secret store, only its host and port
+        # are kept, and a warning names the webhook, never the URL.
+        $viaProxy = [bool]($proxy -and $proxyUri -and $proxyUri.Host)
+        foreach ($webhook in @(Get-ArciConfigValue -Config $config -Path 'webhooks' -Default @())) {
+            if ($viaProxy) { break }
+            if ((Get-ArciConfigValue -Config $webhook -Path 'enabled' -Default $true) -ne $true) { continue }
+            $webhookName = [string](Get-ArciConfigValue -Config $webhook -Path 'name' -Default '')
+            if ($webhookName -cnotmatch '^[a-z0-9-]{1,32}$') { continue }
+            $format = [string](Get-ArciConfigValue -Config $webhook -Path 'format' -Default 'generic')
+            $url = $(if ($format -eq 'generic') { [string](Get-ArciConfigValue -Config $webhook -Path 'url' -Default '') } else { Read-WebhookUrl $webhookName })
+            $webhookUri = $null
+            $usable = $url -and [System.Uri]::TryCreate($url, [System.UriKind]::Absolute, [ref]$webhookUri) -and $webhookUri.Scheme -eq 'https' -and $webhookUri.Host
+            $url = $null
+            if (-not $usable) {
+                Write-ArciWarn ("Webhook {0}: adresi gizli depodan okunamadı ya da geçersiz, sıkı giden kipte ona yol açılmadı. 'arcilogger-core secret set webhook.{0}.url' ile kaydedip bu betiği yeniden çalıştırın [the URL of webhook {0} cannot be read from the secret store or is not valid: no path is opened for it in strict outbound mode; store it and run this script again]." -f $webhookName)
+                continue
+            }
+            $webhookAddresses = Resolve-HostAddresses $webhookUri.Host
+            if (@($webhookAddresses).Count -gt 0) { $rules.Add((New-RuleSpec ('ARCILOGGER Out Webhook {0}' -f $webhookName) 'Outbound' 'TCP' @([string]$webhookUri.Port) $webhookAddresses 'alert webhook ([[webhooks]])')) }
+            $webhookUri = $null
         }
     }
 }

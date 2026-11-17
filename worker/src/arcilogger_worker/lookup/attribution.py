@@ -142,6 +142,7 @@ from arcilogger_worker.lookup.trust import (
 )
 from arcilogger_worker.lookup.types import (
     CONFIDENCE_ORDER,
+    UNLIMITED_LEASE,
     AttributionChain,
     Confidence,
     DeviceInfo,
@@ -346,13 +347,15 @@ class _Record:
     (``assigned``/``deassigned``) and the usable lease it logged (``None``: none, or out of
     range). ``vd`` is its VDOM when ``vd_known``: always for the ``fg_dhcp`` row itself, for a
     stored ref when the lease job stored it with the ref (issue #127; ``None`` with it: a row
-    without a VDOM)."""
+    without a VDOM). ``logged`` is the ``lease`` value as logged, usable or not (``None``:
+    none), which tells an unlimited lease (#299)."""
 
     time: datetime
     action: str | None
     lease: int | None
     vd: str | None = None
     vd_known: bool = False
+    logged: int | None = None
 
 
 #: A usable srcmac of a session (2.9): the MAC, the session record it was read from and the
@@ -587,6 +590,7 @@ class Attributor:
             usable_lease(self.settings, row.lease),
             vd=row[3],
             vd_known=True,
+            logged=row.lease,
         )
 
     @property
@@ -610,14 +614,16 @@ class Attributor:
             for index, ref in reversed(list(enumerate(lease.evidence)))
             if ref.table in DHCP_TABLES and ref.time == last
         )
-        logged = _REF_LEASE.search(ref.summary) if ref.table == FG_DHCP_TABLE else None
+        found = _REF_LEASE.search(ref.summary) if ref.table == FG_DHCP_TABLE else None
+        logged = int(found.group(1)) if found else None
         known, vd = lease.ref_vds[index] if index < len(lease.ref_vds) else (False, None)
         return _Record(
             last,
             dhcp_action(ref),
-            usable_lease(self.settings, int(logged.group(1)) if logged else None),
+            usable_lease(self.settings, logged),
             vd=vd,
             vd_known=known,
+            logged=logged,
         )
 
     def _from(self, low: datetime, *, mark: bool = False) -> datetime:
@@ -1036,6 +1042,16 @@ class Attributor:
             else:
                 notes.append(explain("fortigate_format_unverified"))
             record = self.record(lease, at)
+            unlimited = record is not None and record.logged == UNLIMITED_LEASE
+            if unlimited and lease.lease_seconds is None:
+                # #299: the FortiGate logged no end; the lease ran on the configured time (a
+                # lease that kept the time of an earlier ACK is not named).
+                notes.append(
+                    explain(
+                        "fortigate_lease_unlimited",
+                        fallback=self.settings.lease_timeout_seconds(lease.server),
+                    )
+                )
             if record is not None:
                 length = (
                     record.lease

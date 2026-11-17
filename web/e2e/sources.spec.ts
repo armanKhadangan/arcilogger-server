@@ -84,6 +84,9 @@ test.describe('Kaynaklar', () => {
       core.getByRole('img', { name: /core-r1: mesaj\/dk, son 60 dakika/ }),
     ).toBeVisible();
     await expect(row(page, 'fortigate')).toContainText('%2,5');
+    // The device clock's typical offset (#222); the router is on time.
+    await expect(row(page, 'fortigate')).toContainText('7 dk geri');
+    await expect(core).toContainText('zamanında');
     await expect(row(page, 'ap-172.20.10.3').getByLabel('ap ağının üyesi')).toBeVisible();
     await expect(row(page, 'ap-172.20.10.4')).toContainText('Hiç mesaj gelmedi');
     await expect(row(page, 'switch-3')).toContainText('Sessiz (izlenmiyor)');

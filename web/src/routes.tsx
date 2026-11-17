@@ -255,6 +255,19 @@ export const routes: RouteObject[] = [
               },
             ],
           },
+          // Ayarlar → Webhook'lar (Wave 6 §2.4.4): read-only, `alerts.read`; "Test gönder" needs
+          // `settings.manage` (checked on the page and by the API).
+          {
+            element: <PermissionGate anyOf={['alerts.read']} />,
+            children: [
+              {
+                path: 'settings/webhooks',
+                lazy: async () => ({
+                  Component: (await import('@/pages/settings/webhooks/webhooks-page')).WebhooksPage,
+                }),
+              },
+            ],
+          },
           // The browser administration (ADR-0014): machine configuration, database settings,
           // the change history. Each page loads when it is opened.
           {
@@ -327,6 +340,19 @@ export const routes: RouteObject[] = [
                     }),
                   },
                 ],
+              },
+            ],
+          },
+          // Ayarlar → Güvenlik kuralları (Wave 6 §2.3): read with `alerts.read`, changed with
+          // `settings.manage` (checked on the page and by the API).
+          {
+            element: <PermissionGate anyOf={['alerts.read']} />,
+            children: [
+              {
+                path: 'settings/rules',
+                lazy: async () => ({
+                  Component: (await import('@/pages/settings/rules/rules-page')).RulesPage,
+                }),
               },
             ],
           },

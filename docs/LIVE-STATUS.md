@@ -69,8 +69,11 @@ not ask. Each part is shown only to the roles allowed to see it (section 4).
   incomplete (`warming_up`).
 - A traffic log that reaches the database more than 5 minutes after its time is not added to the
   table; the usage reports count it. So a device whose clock is more than 5 minutes behind does
-  not appear in "Şu an"; the usage reports count it. Sync device clocks with NTP
-  ([DEVICE-SETUP.md](DEVICE-SETUP.md)).
+  not appear in "Şu an"; the usage reports count it. The page names such a firewall and how many
+  minutes it is behind (`late_sources`: the median of its newest records received in the last
+  hour, #222); the Sources page shows each source's clock offset, and `R20-source-clock` opens once
+  the clock is beyond `alerts.source_clock_limit_seconds` (120 seconds). Sync device clocks with
+  NTP ([DEVICE-SETUP.md](DEVICE-SETUP.md)).
 
 ## 3. The internet line (SNMPv3)
 
@@ -84,7 +87,7 @@ SNMP). When it is on, ARCILOGGER reads the counters of the device's WAN interfac
 | `user` | — | — | The SNMPv3 user name (not a secret) |
 | `auth` | `sha256` | `sha1`, `sha256`, `sha512` | Authentication protocol |
 | `priv` | `aes128` | `aes128`, `aes256` | Privacy protocol (`aes256`: **verify on site**) |
-| `interfaces` | — | 1–4 interfaces | The interface names (`ifName`) of the WAN lines, typed as the device reports them; a wrong name is refused when saving, and the refusal lists the device's interfaces |
+| `interfaces` | — | 1–4 interfaces | The interface names (`ifName`) of the WAN lines: picked from the "Bağlantıyı dene" list or typed as the device reports them; a wrong name is refused when saving, and the refusal lists the device's interfaces |
 | `capacity_mbps` | — | optional | Download/upload capacity per interface (Mbps), to show a share |
 | `interval_seconds` | 15 | 10–60 | How often it is read |
 
@@ -93,7 +96,14 @@ SNMP). When it is on, ARCILOGGER reads the counters of the device's WAN interfac
   status and speed. If that fails, the change is not applied and the reason is shown
   (`snmp_timeout`, `snmp_auth_failed`, `snmp_no_such_interface`, `snmp_no_hc_counters`). The
   message of `snmp_no_such_interface` lists the interfaces the device reports (name, status,
-  Mbit/s). A separate button that fetches the list before saving comes in a later release.
+  Mbit/s).
+- **"Bağlantıyı dene" (test connection) tries it before saving.** The button in the SNMP section
+  connects to the device with the form's values (and the keys typed or stored) and lists the
+  interfaces it reports; the WAN lines are filled from the list with "Seç" (pick; at most 4).
+  Nothing is saved: neither the configuration file nor the secret store changes, and the keys are
+  used for the test only. It asks for the password, runs once a minute per user and is audited as
+  `admin.probe` (the source's name and the outcome; no value). When the test fails, the reason is
+  shown and the interface names can be typed.
 - **SNMPv3 with authentication and privacy (authPriv) only.** SNMP v1/v2c are refused: their
   community string crosses the network in clear text.
 - **The target is the source's own address.** SNMP cannot be switched on for a source whose address

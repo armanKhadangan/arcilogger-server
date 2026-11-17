@@ -58,6 +58,13 @@ export interface SourceHealth {
   pending_bytes: number;
   parse_failures_today: number;
   parse_failure_permille: Float | null;
+  /**
+   * The device clock's typical offset from the receive time, whole seconds (negative: behind;
+   * 0 under a minute): the median of its newest rows of the last hour; null with fewer than 10.
+   * A network: its member furthest off (#222).
+   */
+  clock_offset_seconds: number | null;
+  clock_rows: number;
   /** A promoted unknown sender: the source it is written under now. */
   promoted_to: string | null;
   suggested: Suggested | null;

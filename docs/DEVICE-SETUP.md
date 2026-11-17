@@ -3,7 +3,8 @@
 > Ağ yöneticisi içindir. Komutlar build specification bölüm 15'ten alınmıştır ve **FortiOS 7.6**
 > ile **RouterOS 7** için yazılmıştır; bölüm 2.1'deki saat adımının ve bölüm 2.4–2.5'in FortiGate
 > komutları FortiOS 7.6 CLI başvuru belgesindendir. Her komutu uygulamadan önce cihazınızdaki
-> sürümün belgeleriyle doğrulayın. Bu belgede yazanların uygulandığını varsaymıyoruz. Bölüm 2.4–2.6
+> sürümün belgeleriyle doğrulayın; bölüm 2.7'nin kayıtlarının depoda biçim örneği yoktur, o
+> komutlar sahada doğrulanmalıdır. Bu belgede yazanların uygulandığını varsaymıyoruz. Bölüm 2.4–2.7
 > Türkçe metnin ardından İngilizce de verilir (English text follows the Turkish one).
 
 ARCILOGGER hiçbir kuruluşun ağ planını taşımaz: aşağıdaki komutlarda `<…>` yerine kendi
@@ -127,10 +128,23 @@ end
 ```
 
 `diagnose sys ntp status` NTP sunucularının bilgisini listeler (**doğrulayın**, sonucu
-[KURULUM.md](KURULUM.md) bölüm 16'ya yazın). Bir kaynağın saati 120 saniyeden fazla kayarsa
-`R20-lease:source-clock` uyarısı açılır ve o anların 5651 zincirleri düşük güvenle gösterilir;
-yalnız oturum araması için ölçülen bir kaynakta zincirin düşürülme sınırı, sorgu toleransı daha
-büyükse toleranstır ([CORRELATION.md](CORRELATION.md) bölüm 7).
+[KURULUM.md](KURULUM.md) bölüm 16'ya yazın). Bir kaynağın saati `alerts.source_clock_limit_seconds`
+(120 saniye; sahada doğrulayın) değerinden fazla kayarsa o kaynak için `R20-source-clock` uyarısı
+açılır ve o anların 5651 zincirleri düşük güvenle gösterilir; yalnız oturum araması için ölçülen
+bir kaynakta zincirin düşürülme sınırı, sorgu toleransı daha büyükse toleranstır
+([CORRELATION.md](CORRELATION.md) bölüm 7). Kaynaklar sayfası her kaynağın saat farkını gösterir.
+Sınırın altındaki birkaç dakikalık bir kayma da kesin sorguları kaydırır ve 5 dakikadan fazla
+geride kalan bir cihaz Canlı Durum'un Şu an görünümünde görünmez ([CANLI-DURUM.md](CANLI-DURUM.md)
+bölüm 2).
+
+*Clock (NTP).* The FortiGate's clock dates every session and DHCP record; a drift of minutes
+shifts exact lookups (the real session is not found, or another session that reused the port
+later is). Sync it with NTP as above. A source whose clock is off by more than
+`alerts.source_clock_limit_seconds` (120 seconds; verify on site) opens `R20-source-clock` for that
+source, and the 5651 chains of those moments show with low confidence. The Sources page shows each
+source's clock offset. A drift of a few minutes under the limit still shifts exact lookups, and a
+device more than 5 minutes behind does not show under Live Status's Now
+([LIVE-STATUS.md](LIVE-STATUS.md) section 2).
 
 ### 2.2 Web ve DNS filtre profilleri
 
@@ -507,6 +521,108 @@ lookup and lease timeline → Internet exits (NAT) ([INSTALL.md](INSTALL.md) sec
   unconfigured line (`R20-nat:unmapped-transip`, `egress_unmapped_seen`) and as unclaimed
   candidates.
 
+### 2.7 Güvenlik kuralları için kayıtlar (IPS, antivirüs, uygulama kontrolü, yönetici girişi, yapılandırma, performans) / Logs for the security rules (IPS, antivirus, application control, admin login, configuration, performance)
+
+Güvenlik kuralları ([UYARILAR.md](UYARILAR.md) bölüm 9) FortiGate'in aşağıdaki kayıtlarını okur.
+Bu kayıtlar gelmezse kural çalışır ama hiçbir şey bulmaz.
+
+| Kayıt (`type` / `subtype`) | Tablo | Kurallar |
+|---|---|---|
+| `utm` / `ips` | `fg_ips` | R05 (IPS imzası), R06 (botnet) |
+| `utm` / `virus` | `fg_virus` | R07 (zararlı yazılım) |
+| `utm` / `app-ctrl` | `fg_app` | R10 (Tor ve vekil sunucu) |
+| `event` / `system`: yönetici girişi (`0100032001`, `0100032002`) | `fg_event` | R03, R04 |
+| `event` / `system`: yapılandırma değişikliği (`0100044546`, `0100044547`) | `fg_event` | R16 |
+| `event` / `system`: performans istatistikleri (`0100040704`) | `fg_event` | R17 |
+
+Aşağıdaki komutlar **FortiOS 7.6** için yazılmıştır. Depoda bu kayıtların bir biçim örneği
+yoktur: `logid` değerleri ve alan adları kuralların varsayılan parametreleridir, yakalanmış
+değerler değildir. **Sahada doğrulayın:** her ayardan sonra Arama'da ilgili kaydın geldiğini
+görün; `logid` ya da alan adı farklıysa kuralın parametresini Ayarlar → Güvenlik kuralları'nda
+(`rules.<ID>` ayarı) değiştirin.
+
+```text
+# Olay (event) kayıtları: yönetici girişi, yapılandırma değişikliği, performans (sahada doğrula)
+config log eventfilter
+    set event enable
+    set system enable
+end
+# Performans istatistikleri her 5 dakikada bir (R17; sahada doğrula)
+config system global
+    set sys-perf-log-interval 5
+end
+# Syslog'a bilgi (information) düzeyindeki kayıtlar da gitsin (sahada doğrula)
+config log syslogd filter
+    set severity information
+end
+# IPS: imzaların kaydı ve botnet bağlantıları (R05, R06; sahada doğrula)
+config ips sensor
+    edit "<ips-profili>"
+        set scan-botnet-connections block
+        config entries
+            edit 1
+                set log enable
+            next
+        end
+    next
+end
+# Antivirüs (R07; sahada doğrula)
+config antivirus profile
+    edit "<av-profili>"
+        set av-virus-log enable
+    next
+end
+# Uygulama kontrolü (R10; sahada doğrula)
+config application list
+    edit "<uygulama-profili>"
+        set other-application-log enable
+        config entries
+            edit 1
+                set log enable
+            next
+        end
+    next
+end
+```
+
+Profiller yalnızca bağlı oldukları politikaların trafiğini kaydeder: internet politikalarında
+`set utm-status enable` ile `set ips-sensor "<ips-profili>"`, `set av-profile "<av-profili>"`
+ve `set application-list "<uygulama-profili>"` olmalı, `set logtraffic all` kalmalıdır (bölüm
+2.3). R06 ayrıca trafik kayıtlarındaki botnet işaretini okur.
+
+MikroTik tarafında aynı kurallar için bölüm 3'teki `account` (yönetici girişi: R03, R04) ve
+`system` (yapılandırma değişikliği: R16) konuları yeterlidir.
+
+**English.** The security rules ([ALERTS.md](ALERTS.md) section 9) read the following FortiGate
+logs. Without them a rule runs but finds nothing.
+
+| Log (`type` / `subtype`) | Table | Rules |
+|---|---|---|
+| `utm` / `ips` | `fg_ips` | R05 (IPS signature), R06 (botnet) |
+| `utm` / `virus` | `fg_virus` | R07 (malware) |
+| `utm` / `app-ctrl` | `fg_app` | R10 (Tor and proxies) |
+| `event` / `system`: admin login (`0100032001`, `0100032002`) | `fg_event` | R03, R04 |
+| `event` / `system`: configuration change (`0100044546`, `0100044547`) | `fg_event` | R16 |
+| `event` / `system`: performance statistics (`0100040704`) | `fg_event` | R17 |
+
+The commands above are written for **FortiOS 7.6**. The repository has no format sample of these
+logs: the `logid` values and field names are the rules' default parameters, not captured
+values. **Verify on site:** after each setting, see the log arrive in Search; if a `logid` or a
+field name differs, change the rule's parameter in Settings → Güvenlik kuralları (the
+`rules.<ID>` setting). In order, the
+commands switch on the system event logs (admin login, configuration change, performance), the
+performance statistics every 5 minutes (R17), information-level logs to syslog, logging in the
+IPS sensor and its botnet scan (R05, R06), the antivirus log (R07) and the application-control
+log (R10).
+
+Profiles log only the traffic of the policies they are attached to: the internet policies need
+`set utm-status enable` with `set ips-sensor "<ips-profili>"`, `set av-profile "<av-profili>"`
+and `set application-list "<uygulama-profili>"`, and keep `set logtraffic all` (section 2.3). R06
+also reads the botnet mark in the traffic logs.
+
+On the MikroTik side the `account` (admin login: R03, R04) and `system` (configuration change:
+R16) topics of section 3 are enough for the same rules.
+
 ## 3. MikroTik (RouterOS 7)
 
 Ana (çekirdek) yönlendirici, yani DHCP sunucusu:
@@ -730,10 +846,12 @@ cihazın yazılım sürümüne göre değişir, cihazınızın belgelerine bakı
 3. SNMP'yi **yalnızca bir LAN arayüzünde** açın; **hiçbir zaman bir WAN arayüzünde** açmayın.
 4. ARCILOGGER UDP 161'e (ya da `[sources.snmp] port`) gönderir. Arada bir güvenlik duvarı varsa
    `<arcilogger>` → cihazın LAN adresi, UDP 161'e izin verin; başka bir yöne gerek yoktur.
-5. ARCILOGGER'da Ayarlar → Kaynaklar → kaynak → SNMP: kullanıcı adını, iki anahtarı, protokolleri
-   ve WAN hatlarının arayüz adlarını (`ifName`, en çok 4; cihazın kendi arayüz listesinde
-   gördüğünüz gibi) girip kaydedin. ARCILOGGER kaydetmeden önce cihaza bağlanmayı dener; bir ad
-   yanlışsa değişiklik uygulanmaz ve ret iletisi cihazın bildirdiği arayüzleri (ad, durum, hız)
+5. ARCILOGGER'da Ayarlar → Kaynaklar → kaynak → SNMP: kullanıcı adını, iki anahtarı ve
+   protokolleri girin, **Bağlantıyı dene** düğmesine basın. ARCILOGGER hiçbir şey kaydetmeden
+   cihaza bağlanır ve bildirdiği arayüzleri (ad, durum, hız) listeler; WAN hatlarını (en çok 4)
+   listeden **Seç** ile seçin ve kaydedin. Deneme başarısız olursa nedeni gösterilir; adları
+   cihazın kendi arayüz listesinde gördüğünüz gibi (`ifName`) yazabilirsiniz. Kaydederken bağlantı
+   yeniden denenir; bir ad yanlışsa değişiklik uygulanmaz ve ret iletisi cihazın arayüzlerini
    listeler. ARCILOGGER hiçbir adı varsaymaz (X-B4).
 6. **Yönü denetleyin** (X-B2): bir indirme sırasında Canlı Durum'daki indirme hızı cihazın kendi
    arayüz grafiğindeki gelen (In) trafikle aynı olmalı. Cihazın 64 bit sayaçları (`ifHCInOctets`,
@@ -767,11 +885,13 @@ documentation. All of it is **to verify on site** (X-B2–X-B4).
 3. Switch SNMP on **on a LAN interface only**; **never on a WAN interface**.
 4. ARCILOGGER sends to UDP 161 (or `[sources.snmp] port`). If a firewall is in between, allow
    `<arcilogger>` → the device's LAN address, UDP 161; nothing in the other direction.
-5. In ARCILOGGER, Ayarlar → Kaynaklar → the source → SNMP: enter the user name, the two keys, the
-   protocols and the interface names (`ifName`, at most 4) of the WAN lines, as you see them in the
-   device's own interface list, and save. ARCILOGGER tries the connection before it saves; if a
-   name is wrong, the change is not applied and the refusal lists the interfaces the device reports
-   (name, status, speed). ARCILOGGER assumes no name (X-B4).
+5. In ARCILOGGER, Ayarlar → Kaynaklar → the source → SNMP: enter the user name, the two keys and
+   the protocols, and press **Bağlantıyı dene** (test connection). ARCILOGGER connects to the
+   device without saving anything and lists the interfaces it reports (name, status, speed); pick
+   the WAN lines (at most 4) from the list with **Seç** (pick) and save. If the test fails, the
+   reason is shown, and you can type the names (`ifName`) as you see them in the device's own
+   interface list. Saving tries the connection again; if a name is wrong, the change is not applied
+   and the refusal lists the device's interfaces. ARCILOGGER assumes no name (X-B4).
 6. **Check the direction** (X-B2): during a download, Canlı Durum's download rate must match the
    inbound (In) traffic on the device's own interface graph. A device without 64-bit counters
    (`ifHCInOctets`, `ifHCOutOctets`) gets the status `snmp_no_hc_counters`.

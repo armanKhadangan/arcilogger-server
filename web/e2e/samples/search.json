@@ -150,7 +150,7 @@
         }
       },
       "headers": {
-        "retry-after": "3598"
+        "retry-after": "3599"
       },
       "status": 429
     },
@@ -225,12 +225,12 @@
       "body": {
         "error": {
           "code": "search_rate_limited",
-          "message_en": "Too many searches in a short time; try again in 54 s.",
-          "message_tr": "Kısa sürede çok fazla arama yaptınız; 54 saniye sonra yeniden deneyin."
+          "message_en": "Too many searches in a short time; try again in 56 s.",
+          "message_tr": "Kısa sürede çok fazla arama yaptınız; 56 saniye sonra yeniden deneyin."
         }
       },
       "headers": {
-        "retry-after": "54"
+        "retry-after": "56"
       },
       "status": 429
     },
@@ -463,7 +463,7 @@
         "dstcountry": null,
         "dstinetsvc": null,
         "dstintf": null,
-        "dstip": "93.184.216.34",
+        "dstip": "203.0.113.34",
         "dstport": 443,
         "duration": 12,
         "durationdelta": null,
@@ -475,7 +475,7 @@
         "proto": 6,
         "raw_day": "2026-10-09",
         "raw_line": 27,
-        "raw_offset": 10260,
+        "raw_offset": 10276,
         "rcvdbyte": null,
         "rcvddelta": null,
         "rcvdpkt": null,
@@ -506,13 +506,13 @@
         "program": null,
         "severity": 5,
         "subtype": "forward",
-        "text": "date=2026-10-09 time=13:30:00 devname=\"FIREWALL-01\" devid=\"FGT0000000000000\" eventtime=1791541800000000000 tz=\"+0300\" logid=\"0000000013\" type=\"traffic\" subtype=\"forward\" level=\"notice\" vd=\"root\" srcip=172.20.42.57 srcport=61001 dstip=93.184.216.34 dstport=443 sessionid=61001 proto=6 action=\"accept\" trandisp=\"snat\" transip=100.64.12.9 transport=61001 duration=12",
+        "text": "date=2026-10-09 time=13:30:00 devname=\"FIREWALL-01\" devid=\"FGT0000000000000\" eventtime=1791541800000000000 tz=\"+0300\" logid=\"0000000013\" type=\"traffic\" subtype=\"forward\" level=\"notice\" vd=\"root\" srcip=172.20.42.57 srcport=61001 dstip=203.0.113.34 dstport=443 sessionid=61001 proto=6 action=\"accept\" trandisp=\"snat\" transip=100.64.12.9 transport=61001 duration=12",
         "type": "traffic"
       },
       "raw": {
         "day": "2026-10-09",
         "line": 27,
-        "offset": 10260,
+        "offset": 10276,
         "source": "fortigate"
       },
       "table": "fg_traffic"
@@ -523,35 +523,35 @@
       "headers": {
         "cache-control": "no-store",
         "content-disposition": "attachment; filename=\"arama-20261009T0000-20261010T0000.csv\"",
-        "content-length": "3377",
+        "content-length": "3375",
         "content-type": "text/csv; charset=utf-8",
-        "repr-digest": "sha-256=:a7bWiMSRX4tknfu6L9eSTJeZQx8eyeWgkr9r76B479I=:"
+        "repr-digest": "sha-256=:deD8yMnQjSDpIzstg22h2q2ELkUanOHNgV0PTzfTGxo=:"
       },
-      "sha256": "6bb6d688c4915f8b649dfbba2fd7924c9799431f1ec9e5a092bf6befa078efd2",
-      "size": 3377
+      "sha256": "75e0fcc8c9d08d20e9233b2d836da1daad842e451a9ce1cd815d0f4f37d31b1a",
+      "size": 3375
     },
     "truncated": {
       "headers": {
         "cache-control": "no-store",
         "content-disposition": "attachment; filename=\"arama-20261009T0000-20261010T0000-kismi.csv\"",
-        "content-length": "1186",
+        "content-length": "1184",
         "content-type": "text/csv; charset=utf-8",
-        "repr-digest": "sha-256=:FKBUmXugiHIYENKPqJv14YdixlcBFfmyYJaJTkGe7vk=:",
+        "repr-digest": "sha-256=:FDUTHd6Xv0324/pRElItcBuzGhYCn+OwZ0CswZKa/LA=:",
         "x-arci-export-truncated": "rows"
       },
-      "sha256": "14a054997ba088721810d28fa89bf5e18762c6570115f9b26096894e419eeef9",
-      "size": 1186
+      "sha256": "1435131dde97bf4df6e3fa5112522d701bb31a16029fe3b06740acc1929afcb0",
+      "size": 1184
     },
     "xlsx": {
       "headers": {
         "cache-control": "no-store",
         "content-disposition": "attachment; filename=\"arama-20261009T0000-20261010T0000.xlsx\"",
-        "content-length": "7147",
+        "content-length": "7138",
         "content-type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        "repr-digest": "sha-256=:ydQ+z6asRPG2o0ARpSxhy+s5P6FVbgD9XCcWQF6sk+A=:"
+        "repr-digest": "sha-256=:bakodgNdivJjTQkQukQqU4P+aUuqE653XI/JXWz0u9E=:"
       },
-      "sha256": "c9d43ecfa6ac44f1b6a34011a52c61cbeb393fa1556e00fd5c2716405eac93e0",
-      "size": 7147
+      "sha256": "6da92876035d8af2634d0910ba442a5383fe694baa13ae775c8fc95d6cf4bbd1",
+      "size": 7138
     }
   },
   "fields": {
@@ -1637,7 +1637,7 @@
     ]
   },
   "meta": {
-    "captured_at": "2026-10-13T04:01:52.894782+00:00",
+    "captured_at": "2026-10-13T04:01:43.366985+00:00",
     "clock": "2026-10-13T07:00:00+03:00",
     "info": "captured by web/scripts/capture_api_samples.py; do not edit",
     "site_day": "2026-10-09",
@@ -1767,7 +1767,7 @@
       {
         "day": "2026-10-09",
         "line": 27,
-        "offset": 10260,
+        "offset": 10276,
         "source": "fortigate"
       },
       {
@@ -1779,7 +1779,7 @@
       {
         "day": "2026-10-09",
         "line": 26,
-        "offset": 9847,
+        "offset": 9863,
         "source": "fortigate"
       },
       {
@@ -1807,7 +1807,7 @@
         "source": "core-r1"
       }
     ],
-    "sha256": "1493e1f891c9d8c1b4ff8a522db7f554df739fbb3e7f19e7f73e465db8488d1d",
+    "sha256": "65df4b0545af6d95722f25574feb0d7415ca09fd701f3de99e1d44387a1f6039",
     "truncated": false,
     "unsealed_days": []
   },
@@ -1816,7 +1816,7 @@
       "items": []
     },
     "created": {
-      "created_at": "2026-10-13T04:00:40.544940Z",
+      "created_at": "2026-10-13T04:00:33.974019Z",
       "id": 1,
       "last_run_at": null,
       "name": "Planlama PC trafiği",
@@ -1825,10 +1825,10 @@
         "from": "2026-10-08T21:00:00Z",
         "to": "2026-10-09T21:00:00Z"
       },
-      "updated_at": "2026-10-13T04:00:40.545011Z"
+      "updated_at": "2026-10-13T04:00:33.974058Z"
     },
     "created_preset": {
-      "created_at": "2026-10-13T04:00:40.635122Z",
+      "created_at": "2026-10-13T04:00:34.043435Z",
       "id": 2,
       "last_run_at": null,
       "name": "Son 24 saat engellenen web",
@@ -1836,13 +1836,13 @@
       "range": {
         "preset": "24h"
       },
-      "updated_at": "2026-10-13T04:00:40.635165Z"
+      "updated_at": "2026-10-13T04:00:34.043474Z"
     },
     "deleted_status": 204,
     "list": {
       "items": [
         {
-          "created_at": "2026-10-13T04:00:40.544940Z",
+          "created_at": "2026-10-13T04:00:33.974019Z",
           "id": 1,
           "last_run_at": null,
           "name": "Planlama PC trafiği",
@@ -1851,10 +1851,10 @@
             "from": "2026-10-08T21:00:00Z",
             "to": "2026-10-09T21:00:00Z"
           },
-          "updated_at": "2026-10-13T04:00:40.545011Z"
+          "updated_at": "2026-10-13T04:00:33.974058Z"
         },
         {
-          "created_at": "2026-10-13T04:00:40.635122Z",
+          "created_at": "2026-10-13T04:00:34.043435Z",
           "id": 2,
           "last_run_at": null,
           "name": "Son 24 saat engellenen web",
@@ -1862,29 +1862,29 @@
           "range": {
             "preset": "24h"
           },
-          "updated_at": "2026-10-13T04:00:40.635165Z"
+          "updated_at": "2026-10-13T04:00:34.043474Z"
         }
       ]
     },
     "list_after_delete": {
       "items": [
         {
-          "created_at": "2026-10-13T04:00:40.544940Z",
+          "created_at": "2026-10-13T04:00:33.974019Z",
           "id": 1,
-          "last_run_at": "2026-10-13T04:00:40.937559Z",
+          "last_run_at": "2026-10-13T04:00:34.247626Z",
           "name": "Planlama PC — oturumlar",
           "q": "srcip:172.20.42.57 type:traffic",
           "range": {
             "from": "2026-10-08T21:00:00Z",
             "to": "2026-10-09T21:00:00Z"
           },
-          "updated_at": "2026-11-02T23:39:29.093188Z"
+          "updated_at": "2026-11-16T06:39:05.604044Z"
         }
       ]
     },
     "run": {
       "archived": null,
-      "expires_at": "2026-10-13T04:30:40.964217Z",
+      "expires_at": "2026-10-13T04:30:34.266276Z",
       "items": [
         {
           "key": "fg_traffic:2026-10-09T10:30:00.000000+00:00:25",
@@ -1893,7 +1893,7 @@
           "raw": {
             "day": "2026-10-09",
             "line": 27,
-            "offset": 10260,
+            "offset": 10276,
             "source": "fortigate"
           },
           "sender": "172.31.255.1",
@@ -1904,7 +1904,7 @@
             "app": null,
             "category": null,
             "domain": null,
-            "dstip": "93.184.216.34",
+            "dstip": "203.0.113.34",
             "dstport": 443,
             "interface": null,
             "mac": null,
@@ -1919,7 +1919,7 @@
             "vlan_id": 42
           },
           "table": "fg_traffic",
-          "text": "date=2026-10-09 time=13:30:00 devname=\"FIREWALL-01\" devid=\"FGT0000000000000\" eventtime=1791541800000000000 tz=\"+0300\" logid=\"0000000013\" type=\"traffic\" subtype=\"forward\" level=\"notice\" vd=\"root\" srcip=172.20.42.57 srcport=61001 dstip=93.184.216.34 dstport=443 sessionid=61001 proto=6 action=\"accept\" trandisp=\"snat\" transip=100.64.12.9 transport=61001 duration=12",
+          "text": "date=2026-10-09 time=13:30:00 devname=\"FIREWALL-01\" devid=\"FGT0000000000000\" eventtime=1791541800000000000 tz=\"+0300\" logid=\"0000000013\" type=\"traffic\" subtype=\"forward\" level=\"notice\" vd=\"root\" srcip=172.20.42.57 srcport=61001 dstip=203.0.113.34 dstport=443 sessionid=61001 proto=6 action=\"accept\" trandisp=\"snat\" transip=100.64.12.9 transport=61001 duration=12",
           "time": "2026-10-09T10:30:00Z",
           "time_received": "2026-10-09T10:30:00.003000Z",
           "type": "traffic"
@@ -1931,7 +1931,7 @@
           "raw": {
             "day": "2026-10-09",
             "line": 26,
-            "offset": 9847,
+            "offset": 9863,
             "source": "fortigate"
           },
           "sender": "172.31.255.1",
@@ -2093,7 +2093,7 @@
       },
       "scan": {
         "complete": true,
-        "elapsed_ms": 14,
+        "elapsed_ms": 12,
         "scanned_from": "2026-10-08T21:00:00Z",
         "scanned_to": "2026-10-09T21:00:00Z",
         "windows": 5
@@ -2101,7 +2101,7 @@
       "search_id": "ornek-arama-11"
     },
     "updated": {
-      "created_at": "2026-10-13T04:00:40.544940Z",
+      "created_at": "2026-10-13T04:00:33.974019Z",
       "id": 1,
       "last_run_at": null,
       "name": "Planlama PC — oturumlar",
@@ -2110,13 +2110,13 @@
         "from": "2026-10-08T21:00:00Z",
         "to": "2026-10-09T21:00:00Z"
       },
-      "updated_at": "2026-10-13T04:00:40.777314Z"
+      "updated_at": "2026-10-13T04:00:34.136220Z"
     }
   },
   "search": {
     "auditor": {
       "archived": null,
-      "expires_at": "2026-10-13T04:30:37.917718Z",
+      "expires_at": "2026-10-13T04:30:31.962833Z",
       "items": [
         {
           "key": "fg_web:2026-10-09T08:24:32.000000+00:00:1",
@@ -2220,7 +2220,7 @@
     },
     "empty": {
       "archived": null,
-      "expires_at": "2026-10-13T04:30:36.990609Z",
+      "expires_at": "2026-10-13T04:30:31.095282Z",
       "items": [],
       "next_cursor": null,
       "notices": [
@@ -2297,7 +2297,7 @@
       },
       "scan": {
         "complete": true,
-        "elapsed_ms": 313,
+        "elapsed_ms": 50,
         "scanned_from": "2026-10-09T00:00:00+03:00",
         "scanned_to": "2026-10-10T00:00:00+03:00",
         "windows": 5
@@ -2306,7 +2306,7 @@
     },
     "first_page": {
       "archived": null,
-      "expires_at": "2026-10-13T04:30:36.454819Z",
+      "expires_at": "2026-10-13T04:30:30.879200Z",
       "items": [
         {
           "key": "messages:2026-10-09T11:00:00.000000+00:00:103107",
@@ -2329,7 +2329,7 @@
             "dstip": null,
             "dstport": null,
             "interface": "vlan42",
-            "mac": "00:0c:29:00:00:99",
+            "mac": "00:00:5e:00:53:9a",
             "natip": null,
             "natport": null,
             "policy": null,
@@ -2341,7 +2341,7 @@
             "vlan_id": 42
           },
           "table": "messages",
-          "text": "ARP-LOG 172.20.42.57 00:0C:29:00:00:99 vlan42",
+          "text": "ARP-LOG 172.20.42.57 00:00:5E:00:53:9A vlan42",
           "time": "2026-10-09T11:00:00Z",
           "time_received": "2026-10-09T11:00:00.003000Z",
           "type": "arp"
@@ -2353,7 +2353,7 @@
           "raw": {
             "day": "2026-10-09",
             "line": 27,
-            "offset": 10260,
+            "offset": 10276,
             "source": "fortigate"
           },
           "sender": "172.31.255.1",
@@ -2364,7 +2364,7 @@
             "app": null,
             "category": null,
             "domain": null,
-            "dstip": "93.184.216.34",
+            "dstip": "203.0.113.34",
             "dstport": 443,
             "interface": null,
             "mac": null,
@@ -2379,7 +2379,7 @@
             "vlan_id": 42
           },
           "table": "messages",
-          "text": "date=2026-10-09 time=13:30:00 devname=\"FIREWALL-01\" devid=\"FGT0000000000000\" eventtime=1791541800000000000 tz=\"+0300\" logid=\"0000000013\" type=\"traffic\" subtype=\"forward\" level=\"notice\" vd=\"root\" srcip=172.20.42.57 srcport=61001 dstip=93.184.216.34 dstport=443 sessionid=61001 proto=6 action=\"accept\" trandisp=\"snat\" transip=100.64.12.9 transport=61001 duration=12",
+          "text": "date=2026-10-09 time=13:30:00 devname=\"FIREWALL-01\" devid=\"FGT0000000000000\" eventtime=1791541800000000000 tz=\"+0300\" logid=\"0000000013\" type=\"traffic\" subtype=\"forward\" level=\"notice\" vd=\"root\" srcip=172.20.42.57 srcport=61001 dstip=203.0.113.34 dstport=443 sessionid=61001 proto=6 action=\"accept\" trandisp=\"snat\" transip=100.64.12.9 transport=61001 duration=12",
           "time": "2026-10-09T10:30:00Z",
           "time_received": "2026-10-09T10:30:00.003000Z",
           "type": "traffic"
@@ -2405,7 +2405,7 @@
             "dstip": null,
             "dstport": null,
             "interface": "vlan42",
-            "mac": "00:0c:29:00:00:99",
+            "mac": "00:00:5e:00:53:9a",
             "natip": null,
             "natport": null,
             "policy": null,
@@ -2417,7 +2417,7 @@
             "vlan_id": 42
           },
           "table": "messages",
-          "text": "ARP-LOG 172.20.42.57 00:0C:29:00:00:99 vlan42",
+          "text": "ARP-LOG 172.20.42.57 00:00:5E:00:53:9A vlan42",
           "time": "2026-10-09T10:00:00Z",
           "time_received": "2026-10-09T10:00:00.003000Z",
           "type": "arp"
@@ -2429,7 +2429,7 @@
           "raw": {
             "day": "2026-10-09",
             "line": 26,
-            "offset": 9847,
+            "offset": 9863,
             "source": "fortigate"
           },
           "sender": "172.31.255.1",
@@ -2560,7 +2560,7 @@
     },
     "next_page": {
       "archived": null,
-      "expires_at": "2026-10-13T04:30:36.504704Z",
+      "expires_at": "2026-10-13T04:30:30.917212Z",
       "items": [
         {
           "key": "messages:2026-10-09T08:24:36.000000+00:00:103114",
@@ -2645,7 +2645,7 @@
           "raw": {
             "day": "2026-10-09",
             "line": 25,
-            "offset": 9435,
+            "offset": 9448,
             "source": "fortigate"
           },
           "sender": "172.31.255.1",
@@ -2656,7 +2656,7 @@
             "app": null,
             "category": null,
             "domain": null,
-            "dstip": "104.18.32.7",
+            "dstip": "198.51.100.169",
             "dstport": 443,
             "interface": null,
             "mac": null,
@@ -2671,7 +2671,7 @@
             "vlan_id": 43
           },
           "table": "messages",
-          "text": "date=2026-10-09 time=11:24:00 devname=\"FIREWALL-01\" devid=\"FGT0000000000000\" eventtime=1791534240000000000 tz=\"+0300\" logid=\"0000000013\" type=\"traffic\" subtype=\"forward\" level=\"notice\" vd=\"root\" srcip=172.20.43.44 srcport=50117 dstip=104.18.32.7 dstport=443 sessionid=50117 proto=6 action=\"accept\" trandisp=\"snat\" transip=100.64.12.9 transport=50117 duration=4",
+          "text": "date=2026-10-09 time=11:24:00 devname=\"FIREWALL-01\" devid=\"FGT0000000000000\" eventtime=1791534240000000000 tz=\"+0300\" logid=\"0000000013\" type=\"traffic\" subtype=\"forward\" level=\"notice\" vd=\"root\" srcip=172.20.43.44 srcport=50117 dstip=198.51.100.169 dstport=443 sessionid=50117 proto=6 action=\"accept\" trandisp=\"snat\" transip=100.64.12.9 transport=50117 duration=4",
           "time": "2026-10-09T08:24:00Z",
           "time_received": "2026-10-09T08:24:00.003000Z",
           "type": "traffic"
@@ -2683,7 +2683,7 @@
           "raw": {
             "day": "2026-10-09",
             "line": 24,
-            "offset": 9022,
+            "offset": 9034,
             "source": "fortigate"
           },
           "sender": "172.31.255.1",
@@ -2694,7 +2694,7 @@
             "app": null,
             "category": null,
             "domain": null,
-            "dstip": "151.101.1.69",
+            "dstip": "198.51.100.69",
             "dstport": 443,
             "interface": null,
             "mac": null,
@@ -2709,7 +2709,7 @@
             "vlan_id": 41
           },
           "table": "messages",
-          "text": "date=2026-10-09 time=11:23:53 devname=\"FIREWALL-01\" devid=\"FGT0000000000000\" eventtime=1791534233000000000 tz=\"+0300\" logid=\"0000000013\" type=\"traffic\" subtype=\"forward\" level=\"notice\" vd=\"root\" srcip=172.20.41.15 srcport=50116 dstip=151.101.1.69 dstport=443 sessionid=50116 proto=6 action=\"accept\" trandisp=\"snat\" transip=100.64.12.9 transport=50116 duration=3",
+          "text": "date=2026-10-09 time=11:23:53 devname=\"FIREWALL-01\" devid=\"FGT0000000000000\" eventtime=1791534233000000000 tz=\"+0300\" logid=\"0000000013\" type=\"traffic\" subtype=\"forward\" level=\"notice\" vd=\"root\" srcip=172.20.41.15 srcport=50116 dstip=198.51.100.69 dstport=443 sessionid=50116 proto=6 action=\"accept\" trandisp=\"snat\" transip=100.64.12.9 transport=50116 duration=3",
           "time": "2026-10-09T08:23:53Z",
           "time_received": "2026-10-09T08:23:53.003000Z",
           "type": "traffic"
@@ -2721,7 +2721,7 @@
           "raw": {
             "day": "2026-10-09",
             "line": 23,
-            "offset": 8608,
+            "offset": 8620,
             "source": "fortigate"
           },
           "sender": "172.31.255.1",
@@ -2814,7 +2814,7 @@
     },
     "partial": {
       "archived": null,
-      "expires_at": "2026-10-13T04:30:37.756449Z",
+      "expires_at": "2026-10-13T04:30:31.819928Z",
       "items": [
         {
           "key": "fg_traffic:2026-10-09T08:24:36.000000+00:00:5",
@@ -3044,7 +3044,7 @@
       },
       "scan": {
         "complete": false,
-        "elapsed_ms": 606,
+        "elapsed_ms": 595,
         "scanned_from": "2026-10-09T10:30:00+03:00",
         "scanned_to": "2026-10-09T11:30:00+03:00",
         "windows": 1
@@ -3053,7 +3053,7 @@
     },
     "text": {
       "archived": null,
-      "expires_at": "2026-10-13T04:30:36.313717Z",
+      "expires_at": "2026-10-13T04:30:30.773035Z",
       "items": [
         {
           "key": "messages:2026-10-09T08:14:56.003000+00:00:103108",
@@ -3171,7 +3171,7 @@
       },
       "scan": {
         "complete": true,
-        "elapsed_ms": 16,
+        "elapsed_ms": 19,
         "scanned_from": "2026-10-09T00:00:00+03:00",
         "scanned_to": "2026-10-10T00:00:00+03:00",
         "windows": 5
@@ -3180,7 +3180,7 @@
     },
     "typed": {
       "archived": null,
-      "expires_at": "2026-10-13T04:30:36.166363Z",
+      "expires_at": "2026-10-13T04:30:30.658446Z",
       "items": [
         {
           "key": "mt_arp:2026-10-09T11:00:00.000000+00:00:2",
@@ -3203,7 +3203,7 @@
             "dstip": null,
             "dstport": null,
             "interface": "vlan42",
-            "mac": "00:0c:29:00:00:99",
+            "mac": "00:00:5e:00:53:9a",
             "natip": null,
             "natport": null,
             "policy": null,
@@ -3215,7 +3215,7 @@
             "vlan_id": 42
           },
           "table": "mt_arp",
-          "text": "ARP-LOG 172.20.42.57 00:0C:29:00:00:99 vlan42",
+          "text": "ARP-LOG 172.20.42.57 00:00:5E:00:53:9A vlan42",
           "time": "2026-10-09T11:00:00Z",
           "time_received": "2026-10-09T11:00:00.003000Z",
           "type": "arp"
@@ -3227,7 +3227,7 @@
           "raw": {
             "day": "2026-10-09",
             "line": 27,
-            "offset": 10260,
+            "offset": 10276,
             "source": "fortigate"
           },
           "sender": "172.31.255.1",
@@ -3238,7 +3238,7 @@
             "app": null,
             "category": null,
             "domain": null,
-            "dstip": "93.184.216.34",
+            "dstip": "203.0.113.34",
             "dstport": 443,
             "interface": null,
             "mac": null,
@@ -3253,7 +3253,7 @@
             "vlan_id": 42
           },
           "table": "fg_traffic",
-          "text": "date=2026-10-09 time=13:30:00 devname=\"FIREWALL-01\" devid=\"FGT0000000000000\" eventtime=1791541800000000000 tz=\"+0300\" logid=\"0000000013\" type=\"traffic\" subtype=\"forward\" level=\"notice\" vd=\"root\" srcip=172.20.42.57 srcport=61001 dstip=93.184.216.34 dstport=443 sessionid=61001 proto=6 action=\"accept\" trandisp=\"snat\" transip=100.64.12.9 transport=61001 duration=12",
+          "text": "date=2026-10-09 time=13:30:00 devname=\"FIREWALL-01\" devid=\"FGT0000000000000\" eventtime=1791541800000000000 tz=\"+0300\" logid=\"0000000013\" type=\"traffic\" subtype=\"forward\" level=\"notice\" vd=\"root\" srcip=172.20.42.57 srcport=61001 dstip=203.0.113.34 dstport=443 sessionid=61001 proto=6 action=\"accept\" trandisp=\"snat\" transip=100.64.12.9 transport=61001 duration=12",
           "time": "2026-10-09T10:30:00Z",
           "time_received": "2026-10-09T10:30:00.003000Z",
           "type": "traffic"
@@ -3279,7 +3279,7 @@
             "dstip": null,
             "dstport": null,
             "interface": "vlan42",
-            "mac": "00:0c:29:00:00:99",
+            "mac": "00:00:5e:00:53:9a",
             "natip": null,
             "natport": null,
             "policy": null,
@@ -3291,7 +3291,7 @@
             "vlan_id": 42
           },
           "table": "mt_arp",
-          "text": "ARP-LOG 172.20.42.57 00:0C:29:00:00:99 vlan42",
+          "text": "ARP-LOG 172.20.42.57 00:00:5E:00:53:9A vlan42",
           "time": "2026-10-09T10:00:00Z",
           "time_received": "2026-10-09T10:00:00.003000Z",
           "type": "arp"
@@ -3303,7 +3303,7 @@
           "raw": {
             "day": "2026-10-09",
             "line": 26,
-            "offset": 9847,
+            "offset": 9863,
             "source": "fortigate"
           },
           "sender": "172.31.255.1",
@@ -3562,7 +3562,7 @@
       },
       "scan": {
         "complete": true,
-        "elapsed_ms": 62,
+        "elapsed_ms": 50,
         "scanned_from": "2026-10-09T00:00:00+03:00",
         "scanned_to": "2026-10-10T00:00:00+03:00",
         "windows": 5
@@ -3575,7 +3575,7 @@
       "complete": true,
       "covered_from": "2026-10-09T00:00:00+03:00",
       "covered_to": "2026-10-10T00:00:00+03:00",
-      "elapsed_ms": 20,
+      "elapsed_ms": 17,
       "facets": {
         "action": {
           "other": 0,
@@ -4074,7 +4074,7 @@
       "complete": true,
       "covered_from": "2026-10-09T00:30:00+03:00",
       "covered_to": "2026-10-09T23:30:00+03:00",
-      "elapsed_ms": 41,
+      "elapsed_ms": 40,
       "facets": {
         "action": {
           "other": 0,
@@ -4432,7 +4432,7 @@
       "complete": true,
       "covered_from": "2026-10-09T00:00:00+03:00",
       "covered_to": "2026-10-10T00:00:00+03:00",
-      "elapsed_ms": 9,
+      "elapsed_ms": 8,
       "facets": {
         "action": {
           "other": 0,

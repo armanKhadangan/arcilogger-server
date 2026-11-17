@@ -84,4 +84,19 @@ export interface SystemHealth {
   tasks: TaskHealth[];
   jobs: JobHealth[];
   time: TimeHealth;
+  /**
+   * The enabled sources beyond the device clock limit, furthest off first, at most 10
+   * (`R20-source-clock`, #222; the server's own clock is `time`).
+   */
+  source_clocks: SourceClockOut[];
+  source_clock_limit_seconds: number;
+}
+
+/** A log source whose device clock is beyond `alerts.source_clock_limit_seconds` (#222). */
+export interface SourceClockOut {
+  source: string;
+  /** The typical offset from the receive time, whole seconds (negative: behind). */
+  offset_seconds: number;
+  /** The rows it is the median of. */
+  rows: number;
 }

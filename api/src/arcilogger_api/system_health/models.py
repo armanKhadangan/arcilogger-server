@@ -97,6 +97,16 @@ class TimeHealth(BaseModel):
     samples: list[ClockSampleOut]
 
 
+class SourceClockOut(BaseModel):
+    """A log source whose device clock is beyond ``alerts.source_clock_limit_seconds`` (#222)."""
+
+    source: str
+    #: The typical offset from the receive time, whole seconds (negative: behind).
+    offset_seconds: int
+    #: The rows it is the median of.
+    rows: int
+
+
 class SystemHealth(BaseModel):
     checked_at: AwareDatetime
     services: list[ServiceHealth]
@@ -105,3 +115,7 @@ class SystemHealth(BaseModel):
     tasks: list[TaskHealth]
     jobs: list[JobHealth]
     time: TimeHealth
+    #: The enabled sources beyond the device clock limit, furthest off first, at most 10
+    #: (``R20-source-clock``; the server's own clock is ``time``).
+    source_clocks: list[SourceClockOut]
+    source_clock_limit_seconds: int

@@ -97,6 +97,7 @@ and the data-minimisation jobs ``usage.retention`` / ``reports.purge`` — never
 
 from __future__ import annotations
 
+import gc
 import json
 import logging
 import os
@@ -126,6 +127,7 @@ from arcilogger_worker.alerts.importer import import_alerts
 from arcilogger_worker.alerts.notify import run_notify
 from arcilogger_worker.alerts.r15 import check_silent_sources
 from arcilogger_worker.alerts.system import run_system_checks
+from arcilogger_worker.alerts.webhooks import run_webhooks
 from arcilogger_worker.correlation.leases import (
     rebuild_days,
     run_incremental,
@@ -135,6 +137,7 @@ from arcilogger_worker.db_window import job_db_window
 from arcilogger_worker.evidence_jobs import import_job_events, purge_evidence
 from arcilogger_worker.licensing import StatusCache, job_license_check, module_gate
 from arcilogger_worker.reports.runner import purge_reports, resolve_while_unlicensed, run_due
+from arcilogger_worker.rules.engine import run_rules
 from arcilogger_worker.search_jobs import backfill_counts
 from arcilogger_worker.snmp.job import SNMP_POLL_EVERY, job_snmp_idle, job_snmp_poll
 from arcilogger_worker.system_jobs import job_system_sample
@@ -142,8 +145,11 @@ from arcilogger_worker.usage import jobs as usage_jobs
 
 log = logging.getLogger("arcilogger_worker")
 
-#: The loop checks for due jobs and stop requests this often.
+#: The loop checks for due jobs and stop requests at least this often. It waits until the next
+#: job is due (:meth:`Worker.pause`), so a job starts on time, not up to a whole wait late.
 SLEEP_SECONDS: Final = 1.0
+#: The shortest wait between two loops (a clock that reads a little early does not spin it).
+MIN_SLEEP_SECONDS: Final = 0.02
 #: The status file is rewritten at least this often (and after every job run).
 STATUS_EVERY: Final = timedelta(seconds=15)
 #: ``arcilogger.toml`` is looked at at most this often (a stat; read when it changed).
@@ -157,6 +163,13 @@ INTERVAL_RETRY_MAX: Final = timedelta(minutes=30)
 ACTIVITY_JOIN: Final = 20.0
 #: Retry delay while the database is unreachable (no ``job_runs`` row can be written).
 DATABASE_RETRY: Final = timedelta(minutes=1)
+#: The collector's thresholds while the service runs (#281; CPython's are ``(700, 10, 10)``).
+#: CPython 3.12 runs a full pass when the objects promoted since the last one exceed a quarter
+#: of the old generation; Canlı Durum's ticks promote some 350k short-lived objects each (the
+#: rows read, the usage engine's structures), which at 2000 lines/s made 195 full passes in 30
+#: ticks, 18 % of their time. With these, 8 passes, 1.5 %, the longest 0.33 s (it was 0.25 s;
+#: the bound is 0.5 s, M4 guard (c)), and the young collections 7.8 s instead of 6.2 s.
+COLLECTOR_THRESHOLDS: Final = (2000, 10, 100)
 
 
 @dataclass(frozen=True)
@@ -209,6 +222,18 @@ class Job:
         return self.daily_after
 
 
+def freeze_loaded() -> None:
+    """Keep what is loaded so far (the modules, the configuration: they live as long as the
+    service) out of the collector's full passes, as the service does at its start. A full pass
+    walks every tracked object and holds every thread meanwhile; at a high log rate Canlı Durum's
+    open sessions make such passes long and frequent, and each one would walk these too.
+    :func:`gc.unfreeze` gives them back. Sets :data:`COLLECTOR_THRESHOLDS` as well (the caller
+    keeps :func:`gc.get_threshold` from before, to set it back)."""
+    gc.collect()
+    gc.freeze()
+    gc.set_threshold(*COLLECTOR_THRESHOLDS)
+
+
 def retry_delay(job: Job, failures: int) -> timedelta:
     """Delay before the next attempt after ``failures`` failed runs in a row (``>= 1``)."""
     exponent = min(max(failures, 1) - 1, 16)
@@ -243,6 +268,9 @@ SEARCH_COUNTS_EVERY: Final = timedelta(minutes=10)
 #: The modules of the paid jobs (licensing contract 1.4).
 USAGE_MODULE: Final = "usage_analytics"
 REPORTS_MODULE: Final = "usage_reports"
+SECURITY_RULES_MODULE: Final = "security_rules"
+#: ``rules.run`` evaluates the security rules every minute (Wave 6 contract §2.1.3).
+RULES_EVERY: Final = timedelta(minutes=1)
 
 
 # -- the jobs -------------------------------------------------------------------------------------
@@ -348,9 +376,22 @@ def job_alerts_system(ctx: JobContext) -> Mapping[str, Any]:
     ).details()
 
 
+def job_rules_run(ctx: JobContext) -> Mapping[str, Any]:
+    """The security rules R01-R19 on the logs received since their watermarks."""
+    details = run_rules(ctx.sessions, now=ctx.now).details()
+    if details.pop("_skipped"):
+        details[SKIPPED] = True
+    return details
+
+
 def job_alerts_notify(ctx: JobContext) -> Mapping[str, Any]:
     """Alert e-mail (skipped while ``[smtp] enabled`` is false)."""
     return run_notify(ctx.sessions, job_config(ctx), now=ctx.now).details()
+
+
+def job_alerts_webhooks(ctx: JobContext) -> Mapping[str, Any]:
+    """Alerts to the webhooks of ``[[webhooks]]`` (skipped while none is enabled)."""
+    return run_webhooks(ctx.sessions, job_config(ctx), ctx.layout, now=ctx.now).details()
 
 
 def job_usage_today(ctx: JobContext) -> Mapping[str, Any]:
@@ -429,7 +470,16 @@ def default_jobs(interval_seconds: int) -> tuple[Job, ...]:
         Job("alerts.import", job_alerts_import, every=ALERTS_EVERY),
         Job("alerts.r15", job_alerts_r15, every=ALERTS_EVERY),
         Job("alerts.system", job_alerts_system, every=ALERTS_SYSTEM_EVERY),
+        # The security rules (Wave 6 §2.1.3) before the e-mail, which sends what they raised.
+        Job("rules.run", job_rules_run, every=RULES_EVERY, module=SECURITY_RULES_MODULE),
         Job("alerts.notify", job_alerts_notify, every=ALERTS_EVERY),
+        # Wave 6 §2.4.2: after the e-mail; a webhook is part of the security_rules module.
+        Job(
+            "alerts.webhooks",
+            job_alerts_webhooks,
+            every=ALERTS_EVERY,
+            module=SECURITY_RULES_MODULE,
+        ),
         # Usage (spec 10.4) after the lease timeline: it reads who held an address when.
         Job("usage.requests", job_usage_requests, every=USAGE_REQUESTS_EVERY, module=USAGE_MODULE),
         Job("usage.daily", job_usage_daily, daily_after=time(0, 45), module=USAGE_MODULE),
@@ -824,6 +874,20 @@ class Worker:
         except OSError:
             log.exception("cannot write %s", self.status_path)
 
+    def pause(self, now: datetime) -> float:
+        """The seconds the loop waits after a tick: until the next job is due (the ``next_due``
+        :meth:`tick` set), at most :data:`SLEEP_SECONDS` and at least :data:`MIN_SLEEP_SECONDS`.
+        A tick that took long therefore does not delay the next job by a whole wait more. While
+        the database is unreachable the full wait is kept: a tick that could not read the job
+        history leaves every ``next_due`` behind."""
+        if self.database_ok is False:
+            return SLEEP_SECONDS
+        dues = [state.next_due for state in self.states.values() if state.next_due is not None]
+        if not dues:
+            return SLEEP_SECONDS
+        seconds = (min(dues) - now).total_seconds()
+        return min(SLEEP_SECONDS, max(MIN_SLEEP_SECONDS, seconds))
+
     def run(self, stop: threading.Event) -> None:
         self.started_at = self.clock()
         self.state = "running"
@@ -839,7 +903,7 @@ class Worker:
                     written = now
                 # Short waits: on Windows a blocked wait is not interrupted by Ctrl+C, the signal
                 # handler only runs between them.
-                stop.wait(SLEEP_SECONDS)
+                stop.wait(self.pause(self.clock()))
         finally:
             stop.set()
             if thread is not None:

@@ -585,6 +585,24 @@ $DailyPartitionRevision = '0021_db_window'
 # crosses a revision not in $LosslessDowngrades is refused before any change
 # (Get-SchemaRollbackPlan).
 $LosslessDowngrades = @(
+    # Drops R13's and R14's running traffic totals (rule_traffic_state, rule_traffic_totals,
+    # rule_traffic_evidence): derived from fg_traffic, the next rules.run rebuilds the current
+    # period with one read; raw logs, log rows, leases and alerts keep every row
+    # (v0027_rule_traffic_totals.py).
+    '0027_rule_traffic_totals',
+    # Drops the security rules' receive-time indexes on fg_traffic, fg_dns, fg_web and fg_app:
+    # indexes only, every row stays (v0026_rules_time_received.py).
+    '0026_rules_time_received',
+    # Deletes the worker.webhook_test requests ("Test gönder" of Ayarlar -> Webhook'lar, Wave 6)
+    # and narrows the kind check again: request history only, the outcome stays in the audit log
+    # (webhook.test); raw logs, log rows, leases and alerts keep every row
+    # (v0025_admin_webhook_test.py).
+    '0025_admin_webhook_test',
+    # Drops rule_state (the security rules' watermarks: derived), alert_evidence (references to
+    # the log rows behind a rule's alert, never their content), alerts.assignee_id with the assign
+    # events and the webhook deliveries: alert workflow only. The alerts stay; raw logs, log rows,
+    # leases and the audit log (alert.assign entries included) keep every row (v0024_rules.py).
+    '0024_rules',
     # Turns the usage rollups' period (work, break, off) back into off_hours (off -> true, else
     # false); a day with break rows is first deleted from the seven rollup tables and usage_days:
     # usage analytics, derived data only (raw logs, log rows, leases and the audit log keep every

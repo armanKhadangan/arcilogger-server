@@ -30,7 +30,7 @@ from arcilogger_db.testing import TestServer
 
 BASELINE = "0001_baseline"
 #: Newest revision (re-chained by the orchestrator when parallel revisions are merged).
-HEAD = "0023_usage_period"
+HEAD = "0027_rule_traffic_totals"
 
 
 @pytest.fixture

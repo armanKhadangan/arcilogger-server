@@ -457,7 +457,7 @@ FortiGate; at run time the `R20-lease` alerts and the "not verified on site" sta
     per logid (`Ack` seen once; `dhcp.fortigate_dhcp_msgs`).
 19. **Device time of DHCP lines**: a usable `eventtime` or `date`/`time`/`tz` (`device_time`);
     buffered or forwarded logs and a FortiGate clock that is minutes off (NTP,
-    `R20-lease:source-clock`).
+    `R20-source-clock`).
 20. **`srcmac`**: filled only on interfaces with device identification; behind a layer-2 switch it
     may be the switch's MAC, behind a router it is the router's (docs/DEVICE-SETUP.md section
     2.5); `mastersrcmac`, `srcmacvendor` and the other device-identification fields stay in

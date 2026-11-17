@@ -54,7 +54,7 @@ from arcilogger_db.testing import TestServer
 
 pytestmark = pytest.mark.license_live
 
-PAID = ("core_5651", "usage_analytics", "usage_reports", "bulk_import")
+PAID = ("core_5651", "usage_analytics", "usage_reports", "bulk_import", "security_rules")
 
 
 @pytest.fixture(autouse=True)
@@ -648,6 +648,7 @@ def test_status_json_and_status_file(
         "usage_analytics": (True, True),
         "usage_reports": (False, False),
         "bulk_import": (False, False),
+        "security_rules": (False, False),
     }
     assert plain["maintenance"]["until"] == "2099-12-31"
     assert plain["maintenance"]["covers_version"] is True

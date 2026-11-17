@@ -6,7 +6,9 @@ import {
   History,
   Mail,
   Network,
+  ShieldCheck,
   SlidersHorizontal,
+  Webhook,
   Stamp,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
@@ -40,6 +42,8 @@ export const SETTINGS_SECTIONS: readonly SettingsSection[] = [
     permissions: ['settings.manage', 'sources.manage'],
   },
   { key: 'email', to: '/settings/email', icon: Mail, permissions: ['settings.manage'] },
+  // Readable with `alerts.read`; the page offers the changes to `settings.manage` only.
+  { key: 'rules', to: '/settings/rules', icon: ShieldCheck, permissions: ['alerts.read'] },
   {
     key: 'replica',
     to: '/settings/replica',
@@ -53,5 +57,7 @@ export const SETTINGS_SECTIONS: readonly SettingsSection[] = [
     permissions: ['settings.manage'],
   },
   { key: 'backup', to: '/settings/backup', icon: DatabaseBackup, permissions: ['settings.manage'] },
+  // Read-only (D4: configured on the server); "Test gönder" needs `settings.manage`.
+  { key: 'webhooks', to: '/settings/webhooks', icon: Webhook, permissions: ['alerts.read'] },
   { key: 'history', to: '/settings/history', icon: History, permissions: ['settings.manage'] },
 ];

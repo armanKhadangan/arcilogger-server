@@ -17,6 +17,9 @@ a row beyond a limit of whole seconds is stored beyond it), ``0`` under a minute
   ``(offset, rows)`` pairs, :func:`shifted_into` those of the minutes whose clock put their rows'
   device times into a range from far outside it; :func:`median` is their median, as
   ``percentile_cont(0.5)`` gives it.
+* :func:`typical` is a source's typical clock offset now: the median of its newest rows received
+  in the last hour (:data:`TYPICAL_ROWS`, at least :data:`TYPICAL_MIN_ROWS`; #222). Kaynaklar
+  shows it per source.
 
 The readers are the ``R20-lease:source-clock`` alert (the newest received minutes) and a lookup's
 clock check (the minutes received around its moment, and those received within a day of it whose
@@ -46,6 +49,13 @@ MAX_CLOCK_SKEW: Final = timedelta(days=1)
 #: other: the rows of one clock spread over neighbouring whole seconds (the receive time's
 #: fraction, the delivery's jitter), late lines spread over minutes.
 SHIFT_BAND_SECONDS: Final = 5
+#: :func:`typical`: the newest rows of a source received within :data:`TYPICAL_WINDOW`, at most
+#: :data:`TYPICAL_ROWS`, judged once they hold :data:`TYPICAL_MIN_ROWS` (a quiet source on its
+#: minutes of the last :data:`TYPICAL_RECENT`) — the ``source-clock`` alert's rows (#73).
+TYPICAL_WINDOW: Final = timedelta(hours=1)
+TYPICAL_ROWS: Final = 200
+TYPICAL_MIN_ROWS: Final = 10
+TYPICAL_RECENT: Final = timedelta(minutes=10)
 #: Keys per statement of :func:`upsert_samples`.
 UPSERT_CHUNK: Final = 500
 #: :func:`upsert_samples`' one statement: the keys as parallel arrays, the same text for every
@@ -253,3 +263,23 @@ def median(histogram: Sequence[tuple[int, int]]) -> tuple[float | None, int]:
                 values[index] = offset
         seen += n
     return values[low] + (values[high] - values[low]) * (position - low), count
+
+
+def typical(session: Session | Connection, source: str, now: datetime) -> tuple[int | None, int]:
+    """``source``'s typical clock offset at ``now`` in whole seconds (device time minus receive
+    time, negative when the device is behind; ``0`` under a minute either way) and the rows it is
+    the median of: :func:`newest` of the last :data:`TYPICAL_WINDOW`. ``None`` with fewer than
+    :data:`TYPICAL_MIN_ROWS` rows."""
+    latest = newest(
+        session,
+        source,
+        now - TYPICAL_WINDOW,
+        now,
+        TYPICAL_ROWS,
+        least=TYPICAL_MIN_ROWS,
+        recent=now - TYPICAL_RECENT,
+    )
+    offset, counted = median(latest)
+    if offset is None or counted < TYPICAL_MIN_ROWS:
+        return None, counted
+    return round(offset), counted

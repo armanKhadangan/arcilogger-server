@@ -124,6 +124,61 @@ DEMO_TEXT: Final = (
 )
 
 
+#: Attack scenarios (Wave 6 contract §2.7): name → the security rule its lines make fire. Every
+#: line is synthetic, from the example world, in the formats of ``tests/fixtures/``; ``all`` is
+#: every scenario (the rule engine's performance guard and the demo use it).
+SCENARIOS: Final[dict[str, str]] = {
+    "port-scan": "R01",
+    "external-scan": "R02",
+    "brute-force": "R03",
+    "off-hours-admin": "R04",
+    "ips": "R05",
+    "botnet": "R06",
+    "malware": "R07",
+    "dns-bypass": "R08",
+    "blocked-category": "R09",
+    "tor": "R10",
+    "new-device": "R11",
+    "mac-flap": "R12",
+    "big-upload": "R13",
+    "night": "R14",
+    "config-change": "R16",
+    "fw-health": "R17",
+    "pool-empty": "R18",
+    "dga": "R19",
+}
+#: The example world's actors of the scenarios: addresses outside every simulated DHCP pool
+#: (``.64``-``.223``), so no simulated device holds them.
+SCAN_SOURCE: Final = "172.20.41.196"
+SCAN_TARGET: Final = "172.20.20.10"
+EXTERNAL_SCANNER: Final = "203.0.113.77"
+BOTNET_HOST: Final = "172.20.41.231"
+MALWARE_HOST: Final = "172.20.43.232"
+#: The user PC of the person-level and DNS scenarios (R08, R09, R10, R13, R14, R19).
+SCENARIO_PC: Final = "172.20.42.230"
+OUTSIDE_DNS: Final = "198.51.100.53"
+NEW_DEVICE_IP: Final = "172.20.43.240"
+FLAP_IP: Final = "172.20.43.250"
+FLAP_MACS: Final = ("00:00:5e:00:53:e1", "00:00:5e:00:53:e2")
+#: R17: the performance-statistics slots (5 minutes each) with a busy CPU, 16:30-16:55.
+HOT_SLOTS: Final = range(198, 204)
+
+
+def parse_scenarios(value: str) -> tuple[str, ...]:
+    """``name[,name…]`` or ``all`` → scenario names in :data:`SCENARIOS` order."""
+    names = {part.strip() for part in value.split(",") if part.strip()}
+    if "all" in names:
+        return tuple(SCENARIOS)
+    unknown = sorted(names - set(SCENARIOS))
+    if unknown or not names:
+        given = ", ".join(unknown) if unknown else repr(value)
+        raise argparse.ArgumentTypeError(
+            f"bilinmeyen senaryo / unknown scenario: {given}; "
+            f"seçenekler / choices: {', '.join(SCENARIOS)}, all"
+        )
+    return tuple(name for name in SCENARIOS if name in names)
+
+
 class LoadgenError(RuntimeError):
     """A request the generator cannot (or must not) carry out; the CLI shows it and exits 2."""
 
@@ -265,6 +320,8 @@ class Settings:
     srcmac: bool = False
     #: Internet exits; none: every session leaves by ``wan1`` with ``transip``.
     egresses: tuple[Egress, ...] = ()
+    #: Attack scenarios (:data:`SCENARIOS`); none: the normal site only, byte for byte.
+    scenarios: tuple[str, ...] = ()
 
 
 def check_egresses(egresses: Sequence[Egress]) -> None:
@@ -678,6 +735,13 @@ class Simulation:
             self._browse_guest(guest, arrive, leave, day)
         self._admin(day)
         self._firewall_drops(day, plans)
+        for name in self.settings.scenarios:
+            first = len(out.messages)
+            getattr(self, "_scenario_" + name.replace("-", "_"))(day)
+            # The scenario's lines count as its own kind in ``stats`` (and for the tests).
+            out.messages[first:] = [
+                replace(m, kind=f"scenario.{name}") for m in out.messages[first:]
+            ]
         self._assign_nat(out)
         out.messages.sort(key=lambda m: (m.at, m.order))
         out.sessions.sort(key=lambda s: (s.start, s.sessionid))
@@ -987,11 +1051,14 @@ class Simulation:
 
     def _perf_stats(self, slot: int) -> Callable[[datetime], bytes]:
         sessions = 120 + (slot * 37) % 900
+        cpu, mem = slot % 9, 38 + slot % 5
+        if "fw-health" in self.settings.scenarios and slot in HOT_SLOTS:
+            cpu, mem = 96, 91  # scenario fw-health (R17): busy for 30 minutes
         fields: list[tuple[str, object]] = [
             ("logdesc", "System performance statistics"),
             ("action", "perf-stats"),
-            ("cpu", slot % 9),
-            ("mem", 38 + slot % 5),
+            ("cpu", cpu),
+            ("mem", mem),
             ("totalsession", sessions),
             ("disk", 0),
             ("bandwidth", f"{slot % 300}/{slot % 700}"),
@@ -1002,7 +1069,7 @@ class Simulation:
             ("sysuptime", 100_000 + slot * 300),
             (
                 "msg",
-                f"Performance statistics: average CPU: {slot % 9}, concurrent sessions: {sessions}",
+                f"Performance statistics: average CPU: {cpu}, concurrent sessions: {sessions}",
             ),
         ]
         if self.settings.egresses:
@@ -1408,6 +1475,500 @@ class Simulation:
             moment += timedelta(seconds=rng.expovariate(10 / 3600))
             self._session(None, admin, "172.20.10.37", moment, rng, day)
 
+    # -- attack scenarios (Wave 6 contract §2.7; synthetic, verify on site) -------------------
+    #
+    # Each scenario adds the lines its rule (R01-R19) fires on, at a fixed site time of every
+    # generated day, from the example world's addresses outside the simulated DHCP pools. The
+    # FortiGate logids, texts and field names of admin logins, configuration changes, IPS,
+    # antivirus, conserve mode, DHCP pool exhaustion and DNS response codes are the rule
+    # parameters' defaults, not captures (contract §0.4); a MikroTik line goes nowhere on a
+    # FortiGate-only site (no ``core-r1``).
+
+    def _core(self, at: datetime, topics: str, text: str, kind: str) -> None:
+        identity = self.sources["core-r1"].identity if "core-r1" in self.sources else "CORE-R1"
+        self._emit(at, "core-r1", mikrotik(identity, topics, text), kind)
+
+    def _fg_event(
+        self, at: datetime, logid: str, level: str, fields: Sequence[tuple[str, object]], kind: str
+    ) -> None:
+        pri = {"alert": 185, "warning": 188, "notice": 189}.get(level, 190)
+        self._emit(at, "fortigate", fortigate(pri, logid, "event", "system", level, fields), kind)
+
+    def _new_session(self) -> int:
+        sessionid = self._next_session
+        self._next_session += 1
+        return sessionid
+
+    def _lan(self, vlan: int) -> str:
+        """The FortiGate interface a client of ``vlan`` arrives on (as :meth:`_session`)."""
+        return f"vlan{vlan}" if self._fortigate_gateway(vlan) else "port2"
+
+    def _closed_traffic(
+        self,
+        at: datetime,
+        srcip: str,
+        dstip: str,
+        dstport: int,
+        *,
+        vlan: int,
+        action: str = "accept",
+        proto: int = 6,
+        service: str = "HTTPS",
+        duration: int = 1,
+        sent: int = 0,
+        received: int = 0,
+        inbound: bool = False,
+    ) -> None:
+        """One final traffic log (``0000000013``) of a session that ends at ``at``: an accepted
+        outbound session is source-NATed like :meth:`_session`; a denied one has no NAT."""
+        sessionid = self._new_session()
+        srcport = 40000 + sessionid % 9000
+        fields: list[tuple[str, object]] = [
+            ("srcip", srcip),
+            ("srcport", srcport),
+            ("srcintf", "wan1" if inbound else self._lan(vlan)),
+            ("srcintfrole", "wan" if inbound else "undefined"),
+            ("dstip", dstip),
+            ("dstport", dstport),
+            ("dstintf", "root" if inbound else "wan1"),
+            ("dstintfrole", "undefined" if inbound else "wan"),
+            ("srccountry", "Reserved"),
+            ("dstcountry", "Reserved"),
+            ("sessionid", sessionid),
+            ("proto", proto),
+            ("action", action),
+            ("policyid", 0 if action == "deny" else POLICYID),
+            ("policytype", "policy"),
+            ("poluuid", POLUUID),
+            ("policyname", "internet-in" if inbound else "internet-out"),
+            ("service", service),
+        ]
+        if action != "deny" and not inbound:
+            start = at - timedelta(seconds=duration)
+            transport = _Nat(srcport, start, at, sessionid, self.settings.transip)
+            self._nat.append(transport)
+            fields += [
+                ("trandisp", "snat"),
+                ("transip", self.settings.transip),
+                ("transport", transport),
+            ]
+        else:
+            fields.append(("trandisp", "noop"))
+        fields += [
+            ("duration", duration),
+            ("sentbyte", sent),
+            ("rcvdbyte", received),
+            ("sentpkt", max(1, sent // 1400)),
+            ("rcvdpkt", received // 1400),
+        ]
+        render = fortigate(189, "0000000013", "traffic", "forward", "notice", fields)
+        self._emit(at, "fortigate", render, "traffic")
+
+    def _utm(
+        self,
+        at: datetime,
+        logid: str,
+        subtype: str,
+        level: str,
+        fields: Sequence[tuple[str, object]],
+    ) -> None:
+        pri = {"alert": 185, "warning": 188, "notice": 189}.get(level, 190)
+        self._emit(at, "fortigate", fortigate(pri, logid, "utm", subtype, level, fields), subtype)
+
+    def _scenario_port_scan(self, day: date) -> None:
+        """R01: an internal PC tries 40 ports of a server in 40 seconds, every one denied."""
+        start = self._at(day, 10.2)
+        for k in range(40):
+            self._closed_traffic(
+                start + timedelta(seconds=k),
+                SCAN_SOURCE,
+                SCAN_TARGET,
+                20 + k,
+                vlan=41,
+                action="deny",
+                duration=0,
+            )
+
+    def _scenario_external_scan(self, day: date) -> None:
+        """R02: an outside address tries 120 ports of the WAN address in four minutes."""
+        start = self._at(day, 10.35)
+        for k in range(120):
+            self._closed_traffic(
+                start + timedelta(seconds=2 * k),
+                EXTERNAL_SCANNER,
+                self.settings.transip,
+                1000 + k,
+                vlan=0,
+                action="deny",
+                duration=0,
+                inbound=True,
+            )
+
+    def _scenario_brute_force(self, day: date) -> None:
+        """R03: six failed FortiGate admin logins and three failed router logins in 90 s."""
+        start = self._at(day, 10.5)
+        for k in range(6):
+            self._fg_event(
+                start + timedelta(seconds=10 * k),
+                "0100032002",
+                "alert",
+                [
+                    ("logdesc", "Admin login failed"),
+                    ("user", "admin"),
+                    ("ui", f"ssh({SCAN_SOURCE})"),
+                    ("srcip", SCAN_SOURCE),
+                    ("dstip", "172.31.255.1"),
+                    ("action", "login"),
+                    ("status", "failed"),
+                    ("reason", "passwd_invalid"),
+                    ("msg", f"Administrator admin login failed from ssh({SCAN_SOURCE})"),
+                ],
+                "admin-login",
+            )
+        for k in range(3):
+            self._core(
+                start + timedelta(seconds=65 + 10 * k),
+                "system,error,critical",
+                f"login failure for user admin from {SCAN_SOURCE} via winbox",
+                "account",
+            )
+
+    def _scenario_off_hours_admin(self, day: date) -> None:
+        """R04: the router and the FortiGate are logged into at 22:40 (outside work hours)."""
+        at = self._at(day, 22 + 40 / 60)
+        self._core(
+            at,
+            "system,info,account",
+            "user netops logged in from 172.20.10.37 via winbox",
+            "account",
+        )
+        self._fg_event(
+            at + timedelta(seconds=50),
+            "0100032001",
+            "information",
+            [
+                ("logdesc", "Admin login successful"),
+                ("user", "admin"),
+                ("ui", "https(172.20.10.37)"),
+                ("srcip", "172.20.10.37"),
+                ("dstip", "172.31.255.1"),
+                ("action", "login"),
+                ("status", "success"),
+                ("msg", "Administrator admin logged in successfully from https(172.20.10.37)"),
+            ],
+            "admin-login",
+        )
+
+    def _scenario_ips(self, day: date) -> None:
+        """R05: a critical IPS signature against the WAN address."""
+        sessionid = self._new_session()
+        self._utm(
+            self._at(day, 11),
+            "9900000006",
+            "ips",
+            "alert",
+            [
+                ("eventtype", "signature"),
+                ("severity", "critical"),
+                ("srcip", "198.51.100.7"),
+                ("srcport", 40123),
+                ("srcintf", "wan1"),
+                ("dstip", self.settings.transip),
+                ("dstport", 443),
+                ("dstintf", "root"),
+                ("sessionid", sessionid),
+                ("proto", 6),
+                ("action", "dropped"),
+                ("policyid", 0),
+                ("service", "HTTPS"),
+                ("attack", "Synthetic.Signature.Remote.Code.Execution"),
+                ("attackid", 99001),
+                ("msg", "web_server: Synthetic.Signature.Remote.Code.Execution"),
+            ],
+        )
+
+    def _scenario_botnet(self, day: date) -> None:
+        """R06: a PC contacts a botnet command server (FortiGate IPS botnet detection)."""
+        sessionid = self._new_session()
+        self._utm(
+            self._at(day, 11 + 10 / 60),
+            "9900000041",
+            "ips",
+            "alert",
+            [
+                ("eventtype", "botnet"),
+                ("severity", "critical"),
+                ("srcip", BOTNET_HOST),
+                ("srcport", 51111),
+                ("srcintf", self._lan(41)),
+                ("dstip", "198.51.100.66"),
+                ("dstport", 8443),
+                ("dstintf", "wan1"),
+                ("sessionid", sessionid),
+                ("proto", 6),
+                ("action", "dropped"),
+                ("policyid", POLICYID),
+                ("attack", "Synthetic.Botnet"),
+                ("attackid", 99003),
+                ("msg", "Botnet C&C Communication (synthetic)"),
+            ],
+        )
+
+    def _scenario_malware(self, day: date) -> None:
+        """R07: the antivirus blocks a test file a PC downloads."""
+        sessionid = self._new_session()
+        self._utm(
+            self._at(day, 11 + 20 / 60),
+            "9900000007",
+            "virus",
+            "warning",
+            [
+                ("eventtype", "infected"),
+                ("policyid", POLICYID),
+                ("sessionid", sessionid),
+                ("srcip", "203.0.113.30"),
+                ("srcport", 80),
+                ("srcintf", "wan1"),
+                ("dstip", MALWARE_HOST),
+                ("dstport", 51600),
+                ("dstintf", self._lan(43)),
+                ("proto", 6),
+                ("service", "HTTP"),
+                ("action", "blocked"),
+                ("direction", "incoming"),
+                ("filename", "eicar.com"),
+                ("virus", "Synthetic.Test.File"),
+                ("virusid", 99002),
+                ("dtype", "Virus"),
+                ("url", "http://downloads.example.net/eicar.com"),
+                ("hostname", "downloads.example.net"),
+                ("msg", "File is infected."),
+            ],
+        )
+
+    def _scenario_dns_bypass(self, day: date) -> None:
+        """R08: a PC asks an outside DNS server 25 times in 40 minutes."""
+        start = self._at(day, 11.5)
+        for k in range(25):
+            self._closed_traffic(
+                start + timedelta(seconds=96 * k),
+                SCENARIO_PC,
+                OUTSIDE_DNS,
+                53,
+                vlan=42,
+                proto=17,
+                service="DNS",
+                sent=74,
+                received=130,
+            )
+
+    def _scenario_blocked_category(self, day: date) -> None:
+        """R09: 25 pages of a blocked category in 25 minutes from one PC."""
+        start = self._at(day, 13)
+        for k in range(25):
+            sessionid = self._new_session()
+            self._utm(
+                start + timedelta(minutes=k),
+                "9900000001",
+                "webfilter",
+                "warning",
+                [
+                    ("eventtype", "ftgd_blk"),
+                    ("policyid", POLICYID),
+                    ("sessionid", sessionid),
+                    ("srcip", SCENARIO_PC),
+                    ("srcport", 52000 + k),
+                    ("srcintf", self._lan(42)),
+                    ("dstip", "203.0.113.10"),
+                    ("dstport", 443),
+                    ("dstintf", "wan1"),
+                    ("proto", 6),
+                    ("service", "HTTPS"),
+                    ("hostname", "games.example.com"),
+                    ("profile", "WEB-PROFILE"),
+                    ("action", "blocked"),
+                    ("url", f"/play?id={k}"),
+                    ("msg", "URL belongs to a denied category in policy"),
+                    ("cat", 901),
+                    ("catdesc", "Synthetic Category A"),
+                ],
+            )
+
+    def _scenario_tor(self, day: date) -> None:
+        """R10: application control sees Tor from one PC."""
+        sessionid = self._new_session()
+        self._utm(
+            self._at(day, 13 + 40 / 60),
+            "1059028704",
+            "app-ctrl",
+            "information",
+            [
+                ("eventtype", "signature"),
+                ("appid", 99004),
+                ("srcip", SCENARIO_PC),
+                ("srcport", 53111),
+                ("srcintf", self._lan(42)),
+                ("srcintfrole", "undefined"),
+                ("dstip", "198.51.100.90"),
+                ("dstport", 9001),
+                ("dstintf", "wan1"),
+                ("dstintfrole", "wan"),
+                ("proto", 6),
+                ("service", "tcp/9001"),
+                ("direction", "outgoing"),
+                ("policyid", POLICYID),
+                ("sessionid", sessionid),
+                ("applist", "APP-PROFILE"),
+                ("action", "pass"),
+                ("appcat", "Proxy"),
+                ("app", "Tor"),
+                ("msg", "Proxy: Tor"),
+                ("apprisk", "critical"),
+            ],
+        )
+
+    def _scenario_dhcp(self, at: datetime, ip: str, mac: str, vlan: int, hostname: str) -> None:
+        """A DHCP assignment of ``ip`` to ``mac`` by the VLAN's DHCP server."""
+        if self._fortigate_gateway(vlan):
+            fields: list[tuple[str, object]] = [
+                ("logdesc", "DHCP Ack log"),
+                ("interface", f"vlan{vlan}"),
+                ("dhcp_msg", "Ack"),
+                ("mac", mac.upper()),
+                ("ip", ip),
+                ("lease", LEASE_SECONDS),
+                ("hostname", hostname),
+                ("msg", "DHCP server sends a DHCPACK"),
+            ]
+            self._fg_event(at, "0100026001", "information", fields, "fg-dhcp.ack")
+        else:
+            text = f"dhcp{vlan} assigned {ip} for {mac.upper()} {hostname}"
+            self._core(at, "dhcp,info", text, "dhcp.assigned")
+
+    def _scenario_new_device(self, day: date) -> None:
+        """R11: a device the network has never seen gets an address (a new MAC every day)."""
+        mac = f"00:00:5e:00:53:{0xF0 + day.toordinal() % 16:02x}"
+        self._scenario_dhcp(self._at(day, 14), NEW_DEVICE_IP, mac, 43, "YENI-CIHAZ")
+
+    def _scenario_mac_flap(self, day: date) -> None:
+        """R12: one address answers with two MACs in turn, four times in 30 minutes."""
+        for k in range(4):
+            at = self._at(day, 14 + (10 + 10 * k) / 60)
+            mac = FLAP_MACS[k % 2]
+            if self._fortigate_gateway(43):
+                self._scenario_dhcp(at, FLAP_IP, mac, 43, "SENTETIK")
+            else:
+                self._core(at, "script,info", f"ARP-LOG {FLAP_IP} {mac.upper()} vlan43", "arp")
+
+    def _scenario_big_upload(self, day: date) -> None:
+        """R13: one PC sends 1.5 GiB to an outside server in 20 minutes."""
+        self._closed_traffic(
+            self._at(day, 15 + 20 / 60),
+            SCENARIO_PC,
+            "203.0.113.150",
+            443,
+            vlan=42,
+            duration=1200,
+            sent=3 * 2**29,
+            received=12 * 2**20,
+        )
+
+    def _scenario_night(self, day: date) -> None:
+        """R14: a PC is busy at 02:30 at night (12 MiB sent, 50 MiB received)."""
+        self._closed_traffic(
+            self._at(day, 2.5),
+            SCENARIO_PC,
+            "203.0.113.151",
+            443,
+            vlan=42,
+            duration=600,
+            sent=12 * 2**20,
+            received=50 * 2**20,
+        )
+
+    def _scenario_config_change(self, day: date) -> None:
+        """R16: an administrator changes a firewall policy and a router filter rule."""
+        at = self._at(day, 16)
+        self._fg_event(
+            at,
+            "0100044546",
+            "information",
+            [
+                ("logdesc", "Attribute configured"),
+                ("user", "admin"),
+                ("ui", "GUI(172.20.10.37)"),
+                ("action", "Edit"),
+                ("cfgpath", "firewall.policy"),
+                ("cfgobj", "12"),
+                ("cfgattr", "action[accept->deny]"),
+                ("msg", "Edit firewall.policy 12"),
+            ],
+            "config",
+        )
+        self._core(
+            at + timedelta(seconds=40), "system,info", "filter rule changed by admin", "config"
+        )
+
+    def _scenario_fw_health(self, day: date) -> None:
+        """R17: the busy CPU of :data:`HOT_SLOTS` (in :meth:`_perf_stats`) and conserve mode."""
+        self._fg_event(
+            self._at(day, 16.75),
+            "9900000042",
+            "critical",
+            [
+                ("logdesc", "Kernel enters memory conserve mode"),
+                ("msg", "Kernel enters memory conserve mode (synthetic)"),
+            ],
+            "conserve",
+        )
+
+    def _scenario_pool_empty(self, day: date) -> None:
+        """R18: the guest Wi-Fi pool is empty (router line, or the FortiGate's)."""
+        at = self._at(day, 17)
+        if self._fortigate_gateway(GUEST_WIFI):
+            fields: list[tuple[str, object]] = [
+                ("logdesc", "DHCP server ran out of IP addresses"),
+                ("interface", f"vlan{GUEST_WIFI}"),
+                ("msg", "DHCP server ran out of IP addresses (synthetic)"),
+            ]
+            self._fg_event(at, "9900000043", "warning", fields, "pool-empty")
+        else:
+            text = (
+                f"dhcp{GUEST_WIFI} failed to give out IP address: pool <pool{GUEST_WIFI}> is empty"
+            )
+            self._core(at, "dhcp,warning", text, "pool-empty")
+
+    def _scenario_dga(self, day: date) -> None:
+        """R19: one PC gets 250 NXDOMAIN answers in 25 minutes (generated-looking names)."""
+        rng = self._rng("dga", day.isoformat())
+        start = self._at(day, 18.5)
+        alphabet = "abcdefghijklmnopqrstuvwxyz0123456789"
+        for k in range(250):
+            sessionid = self._new_session()
+            name = "".join(rng.choice(alphabet) for _ in range(12)) + ".example"
+            self._utm(
+                start + timedelta(seconds=6 * k),
+                "9900000004",
+                "dns",
+                "information",
+                [
+                    ("eventtype", "dns-response"),
+                    ("policyid", POLICYID),
+                    ("sessionid", sessionid),
+                    ("srcip", SCENARIO_PC),
+                    ("srcport", 54000 + k),
+                    ("srcintf", self._lan(42)),
+                    ("dstip", DNS_SERVER),
+                    ("dstport", 53),
+                    ("dstintf", self._lan(SERVER_VLAN)),
+                    ("proto", 17),
+                    ("qname", name),
+                    ("qtype", "A"),
+                    ("rcode", "NXDOMAIN"),
+                    ("action", "pass"),
+                ],
+            )
+
 
 # -- outputs --------------------------------------------------------------------------------------
 
@@ -1698,6 +2259,15 @@ def build_parser() -> argparse.ArgumentParser:
         help="an internet exit (repeat; shares sum to 100), e.g. hat-1:100.64.12.9:wan1:60; "
         "default: every session by wan1 with --transip",
     )
+    parser.add_argument(
+        "--scenario",
+        type=parse_scenarios,
+        default=(),
+        metavar="NAME[,NAME…]|all",
+        help="add fictional attack traffic for the security rules (synthetic): "
+        + ", ".join(f"{name} ({rule})" for name, rule in SCENARIOS.items())
+        + ", all",
+    )
     commands = parser.add_subparsers(dest="command", required=True)
     spool = commands.add_parser("spool", help="write raw spool files exactly as the collector")
     spool.add_argument("--data-dir", type=Path, required=True, help="ARCILOGGER data folder")
@@ -1773,6 +2343,7 @@ def _run(args: argparse.Namespace) -> int:
         dhcp_server=args.dhcp_server,
         srcmac=args.srcmac,
         egresses=tuple(args.egress),
+        scenarios=args.scenario,
     )
     if args.only:
         wanted = set(args.only)

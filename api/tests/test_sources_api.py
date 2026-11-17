@@ -39,6 +39,7 @@ from arcilogger_core.immutability import is_locked, unlock
 from arcilogger_core.layout import Layout
 from arcilogger_core.rawlog import format_line
 from arcilogger_core.timeutil import day_window, site_day, to_site
+from arcilogger_db.clocksamples import ClockKey, upsert_samples
 from arcilogger_db.engine import session_factory
 from arcilogger_db.models import (
     Alert,
@@ -406,6 +407,36 @@ def test_lines_lag_failures_and_sparkline(
     assert fortigate["sparkline"][-3] == 12  # the minute three minutes ago
     assert fortigate["messages_per_minute"] == 0.2
     assert overview(client)["core-r1"]["parse_failure_permille"] is None  # no lines today
+
+
+def test_the_clock_offset_of_a_source(
+    client: TestClient,
+    login_as: Login,
+    app_session_factory: sessionmaker[Session],
+    site: None,
+    now: datetime,
+) -> None:
+    """Kaynaklar shows each source's typical clock offset of the last hour (#222): a firewall
+    seven minutes behind; a router with too few rows shows none."""
+    minute = now.replace(second=0, microsecond=0)
+    with app_session_factory() as session:
+        upsert_samples(
+            session.connection(),
+            {
+                ClockKey("fortigate", minute - timedelta(minutes=1), -420): 30,
+                ClockKey("core-r1", minute - timedelta(minutes=1), 0): 3,
+            },
+        )
+        session.commit()
+    reader(client, login_as, app_session_factory)
+    found = overview(client)
+    assert (found["fortigate"]["clock_offset_seconds"], found["fortigate"]["clock_rows"]) == (
+        -420,
+        30,
+    )
+    assert (found["core-r1"]["clock_offset_seconds"], found["core-r1"]["clock_rows"]) == (None, 0)
+    detail = client.get("/api/v1/sources/fortigate").json()
+    assert detail["clock_offset_seconds"] == -420
 
 
 def test_the_ingest_lag_counts_yesterdays_unfinished_file_after_midnight(

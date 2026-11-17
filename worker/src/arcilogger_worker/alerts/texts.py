@@ -30,6 +30,7 @@ from arcilogger_core.admin.messages import MESSAGES as ADMIN_MESSAGES
 from arcilogger_core.admin.messages import WARNINGS as ADMIN_WARNINGS
 from arcilogger_core.fmt import format_date, format_datetime, format_number
 from arcilogger_core.seal import CONFIG_CAUSES
+from arcilogger_worker.rules.texts import TEXTS as SECURITY_TEXTS
 
 SEVERITY_LABELS: Final[Mapping[str, tuple[str, str]]] = {
     "info": ("Bilgi", "Info"),
@@ -63,6 +64,10 @@ class RuleText:
 #: The internet line's speed over SNMP (Wave 5 §6 N4, the worker job ``snmp.poll``): a source
 #: with a WAN line that has had no good read for 10 minutes (low, one alert per source).
 SNMP_RULE: Final = "R20-snmp"
+#: A source's device clock off by more than ``alerts.source_clock_limit_seconds`` (#222): one
+#: alert per source, the source's name and the minutes only. It replaces the lease cause
+#: ``source-clock`` (whose texts stay, so old alerts still read).
+SOURCE_CLOCK_RULE: Final = "R20-source-clock"
 #: The N4 status of a line that cannot be read, in Turkish and English.
 SNMP_STATUSES: Final[Mapping[str, tuple[str, str]]] = {
     "timeout": ("yanıt yok", "no answer"),
@@ -162,6 +167,12 @@ RULES: Final[Mapping[str, RuleText]] = {
         "logs\\worker.log ve state\\worker-status.json dosyalarına bakın.",
         "Look at logs\\worker.log and state\\worker-status.json.",
     ),
+    "R20-rules": RuleText(
+        "Güvenlik kuralı çalışamıyor",
+        "Security rule cannot run",
+        "Ayarlar → Güvenlik kuralları sayfasında kuralın son hatasına ve logs\\worker.log'a bakın.",
+        "See the rule's last error on Settings → Güvenlik kuralları and logs\\worker.log.",
+    ),
     "R20-backup": RuleText(
         "Veritabanı yedeği sorunu",
         "Database backup problem",
@@ -173,6 +184,14 @@ RULES: Final[Mapping[str, RuleText]] = {
         "Alert e-mail could not be sent",
         "[smtp] ayarlarını ve smtp.password'u denetleyin: arcilogger-worker alerts test-email.",
         "Check [smtp] and smtp.password: arcilogger-worker alerts test-email.",
+    ),
+    # Wave 6 §2.4.2: an alert webhook could not deliver (permanent refusal, or 24 hours).
+    "R20-webhook": RuleText(
+        "Webhook teslim edilemiyor",
+        "Webhook cannot deliver",
+        "[[webhooks]] ayarını, gizli değerini ve güvenlik duvarını denetleyin; Webhook'lar "
+        "sayfasında Test gönder.",
+        "Check [[webhooks]], its secret and the firewall; Send test on the Webhooks page.",
     ),
     # Area R (ADR-0012): a scheduled usage report could not be made or e-mailed.
     "R20-report": RuleText(
@@ -287,6 +306,12 @@ RULES: Final[Mapping[str, RuleText]] = {
         "Look at logs\\worker.log and state\\worker-status.json; for a reload without progress "
         "check ArciIngest: Get-Service ArciIngest.",
     ),
+    SOURCE_CLOCK_RULE: RuleText(
+        "Cihaz saati kayık",
+        "Device clock off",
+        "Cihazda NTP eşitlemesini açın ve saatini denetleyin (DEVICE-SETUP.md, NTP).",
+        "Switch on NTP synchronisation on the device and check its clock (DEVICE-SETUP.md, NTP).",
+    ),
     # The internet line's speed (Wave 5 §6 N4): the source's name and the reasons only, never an
     # interface name, a user name or a key.
     SNMP_RULE: RuleText(
@@ -331,7 +356,15 @@ UNKNOWN_RULE: Final = RuleText(
 
 
 def rule_text(rule: str) -> RuleText:
-    return RULES.get(rule, UNKNOWN_RULE)
+    """The catalogue's entry of ``rule``; a security rule's (R01-R19, Wave 6) comes from its own
+    texts (:mod:`arcilogger_worker.rules.texts`)."""
+    known = RULES.get(rule)
+    if known is not None:
+        return known
+    security = SECURITY_TEXTS.get(rule)
+    if security is not None:
+        return RuleText(security.name_tr, security.name_en, security.advice_tr, security.advice_en)
+    return UNKNOWN_RULE
 
 
 # -- runbooks (the Security page's alert detail; docs/UYARILAR.md "Ne yapılmalı") ---------------
@@ -488,6 +521,18 @@ _STEPS: Final[dict[str, tuple[str, str]]] = {
         "2. Look at D:\\ARCILOGGER\\logs\\worker.log and state\\worker-status.json.\n"
         "3. The next successful run of the job closes the alert by itself.",
     ),
+    "R20-rules": (
+        "1. Hangi kuralın çalışamadığını ayrıntılarda görün; Ayarlar → Güvenlik kuralları "
+        "sayfası kuralın son hatasını gösterir.\n"
+        "2. D:\\ARCILOGGER\\logs\\worker.log dosyasına bakın; zaman aşımında kuralın "
+        "listelerini ya da penceresini küçültün.\n"
+        "3. Kuralın bir sonraki başarılı çalışmasıyla uyarı kendiliğinden kapanır.",
+        "1. See in the details which rule cannot run; Settings → Güvenlik kuralları shows the "
+        "rule's last error.\n"
+        "2. Look at D:\\ARCILOGGER\\logs\\worker.log; on a timeout, shorten the rule's lists or "
+        "window.\n"
+        "3. The next successful run of the rule closes the alert by itself.",
+    ),
     "R20-backup": (
         "1. state\\backup\\last.json ve logs\\backup.log dosyalarına bakın.\n"
         "2. Yedekleme görevini (\\ARCILOGGER\\Backup) ve yedek klasöründeki boş alanı denetleyin "
@@ -623,6 +668,18 @@ _STEPS: Final[dict[str, tuple[str, str]]] = {
         "2. Send a test e-mail: arcilogger-worker alerts test-email --to <address>.\n"
         "3. With strict outbound mode, check the firewall rule (Set-ArciFirewall.ps1).\n"
         "4. The next e-mail that reaches the recipients it names closes the alert by itself.",
+    ),
+    "R20-webhook": (
+        "1. Ayarlar → Webhook'lar sayfasında webhook'un son teslimlerine ve hatasına bakın.\n"
+        "2. arcilogger.toml içindeki [[webhooks]] kaydını ve gizli değeri denetleyin "
+        "(generic: webhook.<ad>.secret; teams ve slack: webhook.<ad>.url).\n"
+        "3. Sıkı giden mod açıksa güvenlik duvarı kuralını denetleyin (Set-ArciFirewall.ps1).\n"
+        "4. Test gönder ile deneyin; webhook'un bir sonraki başarılı gönderimi uyarıyı kapatır.",
+        "1. Look at the webhook's last deliveries and its error on Settings → Webhooks.\n"
+        "2. Check its [[webhooks]] entry in arcilogger.toml and its secret (generic: "
+        "webhook.<name>.secret; teams and slack: webhook.<name>.url).\n"
+        "3. With strict outbound mode, check the firewall rule (Set-ArciFirewall.ps1).\n"
+        "4. Try Send test; the webhook's next successful delivery closes the alert.",
     ),
     "R20-lease": (
         "1. Ayrıntılardaki nedeni okuyun; o nedene özgü ne yapılacağı orada yazılıdır.\n"
@@ -782,6 +839,30 @@ _STEPS: Final[dict[str, tuple[str, str]]] = {
         "4. The next successful run, or the reload moving on (or ending), or the queue before "
         "it moving, closes the alert by itself.",
     ),
+    SOURCE_CLOCK_RULE: (
+        "1. Ayrıntılarda kaynağı ve saatinin kaç dakika geri ya da ileri olduğunu görün; "
+        "Kaynaklar'da her kaynağın saat farkı da görünür.\n"
+        "2. Cihazda NTP eşitlemesini açın (FortiGate: config system ntp → set ntpsync enable; "
+        "MikroTik: /system ntp client; DEVICE-SETUP.md, NTP) ve cihazın saat dilimini "
+        "denetleyin.\n"
+        "3. Saat kayıkken bu kaynağın kayıtlarıyla yapılan 5651 sorguları o kadar kayar: doğru "
+        "oturum bulunmayabilir ya da aynı portu sonra kullanan başka bir oturum bulunabilir. "
+        "Canlı Durum'un Şu an görünümü 5 dakikadan fazla geride kalan bir cihazı göstermez. Ham "
+        "loglar değiştirilmez.\n"
+        "4. Sınır alerts.source_clock_limit_seconds ayarıdır (120 saniye; sahada doğrulayın). "
+        "Uyarı, kaynağın son kayıtları sınırın içine dönünce kendiliğinden kapanır.",
+        "1. See in the details the source and how many minutes its clock is behind or ahead; "
+        "Sources shows each source's clock offset too.\n"
+        "2. Switch on NTP synchronisation on the device (FortiGate: config system ntp → set "
+        "ntpsync enable; MikroTik: /system ntp client; DEVICE-SETUP.md, NTP) and check its time "
+        "zone.\n"
+        "3. While the clock is off, 5651 lookups with this source's records shift by as much: "
+        "the right session may not be found, or another session that reused the port later may "
+        "be. Live Status's Now view does not show a device more than 5 minutes behind. Raw logs "
+        "are not changed.\n"
+        "4. The limit is the setting alerts.source_clock_limit_seconds (120 seconds; verify on "
+        "site). The alert closes by itself once the source's latest records are back within it.",
+    ),
     SNMP_RULE: (
         "1. Ayrıntılarda hangi kaynağın kaç hattının okunamadığını ve nedenini görün: yanıt yok, "
         "kimlik doğrulama başarısız, arayüz bulunamadı ya da 64 bit sayaç yok.\n"
@@ -854,8 +935,15 @@ UNKNOWN_RUNBOOK: Final = (
 
 
 def runbook(rule: str) -> tuple[str, str]:
-    """What to do about an alert of ``rule``, Turkish and English (step by step)."""
-    return RUNBOOKS.get(rule, UNKNOWN_RUNBOOK)
+    """What to do about an alert of ``rule``, Turkish and English (step by step); a security
+    rule's advice ("Ne yapılmalı") for R01-R19."""
+    known = RUNBOOKS.get(rule)
+    if known is not None:
+        return known
+    security = SECURITY_TEXTS.get(rule)
+    if security is not None:
+        return security.advice_tr, security.advice_en
+    return UNKNOWN_RUNBOOK
 
 
 # -- whitelisted facts ----------------------------------------------------------------------------
@@ -1877,6 +1965,20 @@ def _crl(d: Mapping[str, Any]) -> Facts | None:
     return (f"{tr}.", f"{en}.")
 
 
+def _source_clock(d: Mapping[str, Any]) -> Facts | None:
+    """``R20-source-clock``: the source and the minutes behind or ahead; never a log line."""
+    source, minutes = source_name(d), _int(d, "minutes")
+    if source is None or minutes is None or minutes == 0:
+        return None
+    count = abs(minutes)
+    return (
+        f"{source} kaynağının saati {count} dakika {'geri' if minutes < 0 else 'ileri'}; "
+        "NTP'yi denetleyin.",
+        f"The clock of {source} is {count} minute(s) {'behind' if minutes < 0 else 'ahead'}; "
+        "check NTP.",
+    )
+
+
 def _snmp(d: Mapping[str, Any]) -> Facts | None:
     """``R20-snmp``: the source, how many lines and why; never an interface name."""
     source, minutes = source_name(d), _int(d, "minutes")
@@ -1922,6 +2024,7 @@ DESCRIBERS: Final[Mapping[str, Callable[[Mapping[str, Any]], Facts | None]]] = {
     "R20-cert": _cert,
     "R20-crl": _crl,
     SNMP_RULE: _snmp,
+    SOURCE_CLOCK_RULE: _source_clock,
     "new-log-source": _sender,
     "new_source": _sender,
     "wrong-transport": _sender,

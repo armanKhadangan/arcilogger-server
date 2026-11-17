@@ -35,6 +35,11 @@ Key                              Problem (setting)
 ``R20-parse:<source>``           more than ``alerts.parse_failure_percent`` (1) % of a source's
                                  messages of the last hour unparsed, from
                                  ``alerts.parse_min_messages`` (1000) messages on
+``R20-source-clock:<source>``    a configured source's device clock off by more than
+                                 ``alerts.source_clock_limit_seconds`` (120) — the median of its
+                                 newest rows of the last hour (``clocksamples.typical``, #222);
+                                 high; resolved once it is back within the limit. It replaces
+                                 ``R20-lease:source-clock`` (resolved as ``superseded``)
 ``R20-job:<job>``                the last ``alerts.job_failures`` (3) runs of a worker job failed
 ``R20-backup``                   ``state/backup/last.json``: the last backup failed, or the last
                                  one finished more than ``alerts.backup_stale_hours`` (36) ago;
@@ -58,7 +63,7 @@ Key                              Problem (setting)
                                  (``absent``), FortiGate DHCP rows refused or not converted,
                                  renewals not seen, a static device in a DHCP pool, two DHCP
                                  sources in one network, unusable lease times, rows outside every
-                                 network, the unverified format, a source's clock, a MAC on many
+                                 network, the unverified format, a MAC on many
                                  addresses, a shared srcmac (docs/UYARILAR.md); counted on usable
                                  rows (``trust.kept``)
 ``R20-nat:<cause>``              ADR-0016 internet exits (:func:`check_nat_exits`): the legacy
@@ -184,7 +189,6 @@ from arcilogger_db.models import (
     MtDhcp,
     ParseFailure,
     SealVerification,
-    SearchCount,
     Setting,
     Source,
     Vlan,
@@ -204,6 +208,7 @@ from arcilogger_worker.alerts.texts import (
     REFUSAL_REASONS,
     REFUSED_HIGH_TITLE,
     RENEW_FAILED_TITLE,
+    SOURCE_CLOCK_RULE,
 )
 from arcilogger_worker.compliance_filter import filter_evidence
 from arcilogger_worker.lookup import trust
@@ -754,6 +759,65 @@ def check_parse(ctx: CheckContext) -> Outcome:
     return Outcome(findings, lambda key: key.startswith("R20-parse:"))
 
 
+# -- device clocks ---------------------------------------------------------------------------------
+
+
+def check_source_clock(ctx: CheckContext) -> Outcome:
+    """``R20-source-clock:<source>`` (#222): every enabled configured source whose typical clock
+    offset (:func:`clocksamples.typical`, the median of its newest rows of the last hour) is
+    beyond ``alerts.source_clock_limit_seconds``. A source without enough recent rows keeps its
+    alert (the silent-source alert speaks for it); one that is no longer configured or enabled
+    loses it."""
+    limit = ctx.setting("alerts.source_clock_limit_seconds", 120)
+    sources = ctx.session.scalars(
+        select(Source.name)
+        .where(Source.enabled.is_(True), Source.unknown.is_(False))
+        .order_by(Source.name)
+    ).all()
+    findings = []
+    within: set[str] = set()
+    for source in sources:
+        offset, rows = clocksamples.typical(ctx.session, source, ctx.now)
+        if offset is None:
+            continue
+        if abs(offset) <= limit:
+            within.add(source)
+            continue
+        minutes = max(1, round(abs(offset) / 60))
+        behind = offset < 0
+        findings.append(
+            Finding(
+                key=f"{SOURCE_CLOCK_RULE}:{source}",
+                rule=SOURCE_CLOCK_RULE,
+                severity="high",
+                title=(
+                    f"Cihaz saati {minutes} dk {'geri' if behind else 'ileri'}: {source} — "
+                    "NTP'yi denetleyin"
+                ),
+                details={
+                    "source": source,
+                    "seconds": offset,
+                    "minutes": -minutes if behind else minutes,
+                    "rows": rows,
+                    "limit_seconds": limit,
+                    "title_en": (
+                        f"Device clock {minutes} min {'behind' if behind else 'ahead'}: {source} "
+                        "— check NTP"
+                    ),
+                },
+            )
+        )
+    configured = set(sources)
+
+    def clear(alert: Alert) -> str | None:
+        source = (alert.dedup_key or "").removeprefix(f"{SOURCE_CLOCK_RULE}:")
+        if source not in configured:
+            return "source_gone"
+        return "clock_ok" if source in within else None
+
+    return Outcome(findings, lambda key: key.startswith(f"{SOURCE_CLOCK_RULE}:"), clear)
+
+
 # -- failing worker jobs ---------------------------------------------------------------------------
 
 
@@ -1024,17 +1088,6 @@ SESSION_SLACK: Final = timedelta(minutes=15)
 DECLINE_SECONDS: Final = 300
 #: A MAC that got more distinct addresses than this in one origin, interface and network.
 DHCP_MAC_IPS: Final = 3
-#: ``source-clock`` (D28, #73): the newest rows per source by receive time, of which this many
-#: must have been received in the last hour, and the median offset beyond which the clock is off.
-#: A source with fewer rows in its recent minutes than :data:`CLOCK_ROWS` is judged on those
-#: minutes once they hold :data:`CLOCK_MIN_ROWS` (a quiet source's jump opens the cause within
-#: about two checks, not after half an hour of jumped rows).
-CLOCK_ROWS: Final = 200
-CLOCK_MIN_ROWS: Final = 10
-CLOCK_LIMIT_SECONDS: Final = 120
-CLOCK_RECENT: Final = timedelta(minutes=10)
-#: Tables lookups read: a source whose files hold none of them has its clock left alone.
-LOOKUP_TABLES: Final = ("fg_traffic", "fg_dhcp", "mt_dhcp", "mt_arp")
 #: ``R20-nat:unmapped-transip``: sessions an unclaimed NAT address carried in the last hour.
 UNMAPPED_SESSIONS: Final = 50
 #: Most values of one kind (addresses, names, log values) listed in an alert's details.
@@ -1635,65 +1688,10 @@ def _unverified(check: _LeaseCheck) -> None:
 
 
 def _source_clocks(check: _LeaseCheck) -> None:
-    """``source-clock`` (D28): a configured source whose files of today or yesterday hold rows
-    lookups read, and whose latest records' device times differ from their receive times by a
-    median beyond :data:`CLOCK_LIMIT_SECONDS`.
-
-    The latest records are the newest received in the last hour, from ``source_clock_samples``
-    (whole received minutes, newest first, until :data:`CLOCK_ROWS` rows, or until
-    :data:`CLOCK_MIN_ROWS` rows once the minutes reach :data:`CLOCK_RECENT` back; #73): ranked
-    by device time, the records a source sent on time before its clock jumped back outranked
-    every record after it, and the alert opened only about as long after the jump as the jump
-    itself."""
-    now, session = check.now, check.session
-    today = site_day(now)
-    checked = session.scalars(
-        select(SearchCount.source)
-        .distinct()
-        .where(
-            SearchCount.raw_day.in_([today - timedelta(days=1), today]),
-            SearchCount.tbl.in_(LOOKUP_TABLES),
-            SearchCount.source.in_(
-                select(Source.name).where(Source.enabled.is_(True), Source.unknown.is_(False))
-            ),
-        )
-        .order_by(SearchCount.source)
-    ).all()
-    offsets: dict[str, int] = {}
-    for source in checked:
-        latest = clocksamples.newest(
-            session,
-            source,
-            now - TRAFFIC_WINDOW,
-            now,
-            CLOCK_ROWS,
-            least=CLOCK_MIN_ROWS,
-            recent=now - CLOCK_RECENT,
-        )
-        offset, counted = clocksamples.median(latest)
-        if offset is None or counted < CLOCK_MIN_ROWS:
-            continue
-        if abs(offset) > CLOCK_LIMIT_SECONDS:
-            offsets[source] = int(offset)
-    check.clears["source-clock"] = lambda alert: "clock_ok"
-    if not offsets:
-        return
-    listed = sorted(offsets, key=lambda name: (-abs(offsets[name]), name))[:LISTED]
-    worst = offsets[listed[0]]
-    check.add(
-        "source-clock",
-        "high",
-        {"seconds": worst, "sources": ", ".join(f"{n} ({offsets[n]:+d} sn)" for n in listed)},
-        {
-            "seconds": worst,
-            "sources": listed,
-            "offsets": {name: offsets[name] for name in listed},
-        },
-        params_en={
-            "seconds": worst,
-            "sources": ", ".join(f"{n} ({offsets[n]:+d} s)" for n in listed),
-        },
-    )
+    """``source-clock`` (D28, #73) is replaced by the per-source ``R20-source-clock`` of
+    :func:`check_source_clock` (#222), which covers every source: an open one is resolved as
+    ``superseded`` and none is opened. Its catalogue entry stays, so old alerts still read."""
+    check.clears["source-clock"] = lambda alert: "superseded"
 
 
 def _shared_macs(check: _LeaseCheck) -> None:
@@ -2616,6 +2614,7 @@ CHECKS: Final[tuple[tuple[str, Callable[[CheckContext], Outcome]], ...]] = (
     ("credit", check_credit),
     ("replica", check_replica),
     ("parse", check_parse),
+    ("source_clock", check_source_clock),
     ("job", check_jobs),
     ("backup", check_backup),
     ("clock", check_clock),
