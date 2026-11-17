@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 
-import { expectNoA11yViolations, usePreferences, type Theme } from './fixtures';
+import { afterLayerEffects, expectNoA11yViolations, usePreferences, type Theme } from './fixtures';
 import { mockApi } from './mock-api';
 
 /**
@@ -89,18 +89,14 @@ test.describe('Ayarlar → Güvenlik kuralları', () => {
     });
     await expect(save).toBeDisabled();
     // Saved, Save is disabled: the focus stayed in the sheet. The first Escape dismisses the
-    // notice (the topmost layer), the next one closes the sheet. Only the topmost Radix layer
-    // listens for Escape, and it changes in effects: the notice's element goes first, then its
-    // layer, and the sheet listens again one render later, in its own effect. Nothing on the page
-    // marks that, so the second Escape waits for the notice's element and two frames (#310).
+    // notice (the topmost layer); once its element is gone and the sheet's layer listens again
+    // (afterLayerEffects, #310), the next one closes the sheet.
     const notice = page.locator('[data-swipe-direction]');
     await expect(notice).toHaveCount(1);
     await page.keyboard.press('Escape');
     await expect(page.getByText('R01 kaydedildi.', { exact: true })).toBeHidden();
     await expect(notice).toHaveCount(0);
-    await page.evaluate(
-      () => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))),
-    );
+    await afterLayerEffects(page);
     await page.keyboard.press('Escape');
     await expect(sheet).toBeHidden();
     await expect(row(page, 'R01')).toContainText('Kritik');
