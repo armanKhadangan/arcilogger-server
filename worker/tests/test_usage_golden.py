@@ -19,8 +19,8 @@ site time (+03:00); "minute 540" is 09:00 (minutes after local midnight).
   [540-542 video], [542-543 posta], [543-544 video].
 * Background, never active: S3 download.windowsupdate.com (pattern ``*.windowsupdate.com``)
   606000 bytes over [09:58, 10:00]; S4 tracker.reklam.example 1200 bytes (< 2048) at 10:30;
-  S5 198.51.100.153:53 (DNS port) 5100 bytes [10:30:59, 10:31]; S6 no host name, application category
-  ``Update`` (service label Microsoft-Azure) 51000 bytes [10:59, 11:00]. S1's category
+  S5 198.51.100.153:53 (DNS port) 5100 bytes [10:30:59, 10:31]; S6 no host name, application
+  category ``Update`` (service label Microsoft-Azure) 51000 bytes [10:59, 11:00]. S1's category
   ``Network.Service`` does not make it background: it has a host name.
 * Online minutes: 09:00-09:04 (5), 09:58, 09:59, 10:30, 10:59 = 9 → 540 s.
 * Bytes: download 18600 + 3000 + 600000 + 900 + 5000 + 50000 = 677500; upload 1860 + 300 + 6000
@@ -194,7 +194,8 @@ def test_time_per_site_adds_up_to_the_active_time(db_session: Session, site: Gol
          {"download.windowsupdate.com": [0.0, 606000, 1]}),
         ("reklam.example", "work", "domain", 0.0, 60, 900, 300, 1, True,
          {"tracker.reklam.example": [0.0, 1200, 1]}),
-        ("198.51.100.153", "work", "ip", 0.0, 60, 5000, 100, 1, True, {"198.51.100.153": [0.0, 5100, 1]}),
+        ("198.51.100.153", "work", "ip", 0.0, 60, 5000, 100, 1, True,
+         {"198.51.100.153": [0.0, 5100, 1]}),
         ("Microsoft-Azure", "work", "service", 0.0, 60, 50000, 1000, 1, True,
          {"Microsoft-Azure": [0.0, 51000, 1]}),
         ("haber.example", "off", "domain", 120.0, 120, 10000, 2000, 1, False,

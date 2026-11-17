@@ -39,7 +39,8 @@ DHCP = {
 def test_valid_row_has_no_problems() -> None:
     assert check_row("mt_dhcp", DHCP, complete=True) == []
     assert (
-        check_row("fg_dns", {**COMMON, "answers": ["198.51.100.11", ipaddress.ip_address("::1")]}) == []
+        check_row("fg_dns", {**COMMON, "answers": ["198.51.100.11", ipaddress.ip_address("::1")]})
+        == []
     )
 
 

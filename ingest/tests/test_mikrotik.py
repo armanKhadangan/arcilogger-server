@@ -744,7 +744,9 @@ def test_assigned_outside_dhcp_is_not_a_dhcp_failure() -> None:
 
 
 def test_firewall_shape_without_the_firewall_topic_is_counted() -> None:
-    outcome = parse(STAMP.encode() + b"rule 7 in:ether1 out:ether2 proto TCP 203.0.113.124->203.0.113.128")
+    outcome = parse(
+        STAMP.encode() + b"rule 7 in:ether1 out:ether2 proto TCP 203.0.113.124->203.0.113.128"
+    )
     assert outcome.error == "mikrotik.firewall"
     assert parse(STAMP.encode() + b"system,info in:ether1 out:ether2 somehow").error is None
 

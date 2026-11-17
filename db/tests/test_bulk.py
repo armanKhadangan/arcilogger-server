@@ -51,7 +51,14 @@ def test_rows_load_with_their_python_types(db_engine: Engine) -> None:
             copy_rows(
                 connection,
                 "fg_dns",
-                [{**COMMON, "raw_line": 3, "qname": "örnek.com.tr", "answers": ["198.51.100.11", "::1"]}],
+                [
+                    {
+                        **COMMON,
+                        "raw_line": 3,
+                        "qname": "örnek.com.tr",
+                        "answers": ["198.51.100.11", "::1"],
+                    }
+                ],
             )
             == 1
         )
