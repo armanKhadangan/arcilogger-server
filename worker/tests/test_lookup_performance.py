@@ -289,7 +289,7 @@ def _lookups(session: Session, timings: dict[str, float]) -> Lookups:
             at=at, public_ip="192.0.2.44", public_port=40001
         ),
         "candidates_destination": LookupRequest(
-            at=at, public_ip="192.0.2.44", dest_ip="23.10.10.1", dest_port=80
+            at=at, public_ip="192.0.2.44", dest_ip="192.0.2.101", dest_port=80
         ),
         "domain_popular": LookupRequest(at=at, public_ip="192.0.2.44", dest_domain="google.com"),
         "domain_rare": LookupRequest(at=at, public_ip="192.0.2.44", dest_domain="site123.example"),
@@ -344,17 +344,17 @@ def test_lookup_is_fast_on_continuous_data(db_engine: Engine, db_session: Sessio
             db_session, window, transip_in=WAN_EXIT, analyze=True
         ),
         "candidates_destination": explain_rows(
-            db_session, window, transip_in=WAN_EXIT, dstips={"23.10.10.1"}, analyze=True
+            db_session, window, transip_in=WAN_EXIT, dstips={"192.0.2.101"}, analyze=True
         ),
         "candidates_unclaimed": explain_rows(
-            db_session, window, unclaimed=(), dstips={"23.10.10.1"}, analyze=True
+            db_session, window, unclaimed=(), dstips={"192.0.2.101"}, analyze=True
         ),
         "domain_popular": explain_rows(
             db_session,
             window,
             transip_in=WAN_EXIT,
             domain="google.com",
-            dstips={"23.1.1.1", "23.2.2.1"},
+            dstips={"192.0.2.111", "192.0.2.121"},
             analyze=True,
         ),
         "exact": explain_rows(db_session, window, transip=WAN, transport=exact_port),
@@ -487,7 +487,7 @@ def test_lookup_is_fast_on_compressed_chunks(db_engine: Engine, db_session: Sess
         lookups.window,
         transip_in=WAN_EXIT,
         domain="google.com",
-        dstips={"23.1.1.1", "23.2.2.1"},
+        dstips={"192.0.2.111", "192.0.2.121"},
         analyze=True,
     )
     _print("compressed", timings, lookups)

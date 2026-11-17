@@ -31,7 +31,7 @@ def test_department_for_ip_follows_the_vlan(
 
 def test_outside_every_vlan_and_invalid_input(db_session: Session) -> None:
     assert find_vlan(db_session, "100.64.12.9") is None
-    assert department_for_ip(db_session, "8.8.8.8") is None
+    assert department_for_ip(db_session, "198.51.100.153") is None
     with pytest.raises(ValueError, match="does not appear to be an IPv4 or IPv6 address"):
         find_vlan(db_session, "172.20.60")
 

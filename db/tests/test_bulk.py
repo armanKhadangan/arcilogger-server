@@ -51,7 +51,7 @@ def test_rows_load_with_their_python_types(db_engine: Engine) -> None:
             copy_rows(
                 connection,
                 "fg_dns",
-                [{**COMMON, "raw_line": 3, "qname": "örnek.com.tr", "answers": ["1.1.1.1", "::1"]}],
+                [{**COMMON, "raw_line": 3, "qname": "örnek.com.tr", "answers": ["198.51.100.11", "::1"]}],
             )
             == 1
         )
@@ -80,7 +80,7 @@ def test_rows_load_with_their_python_types(db_engine: Engine) -> None:
         (2, 2, "172.20.60.251", "02:00:5e:00:53:46", None),
     ]
     assert loaded[0].time == NOW  # microseconds and UTC survive
-    assert dns.answers == ["1.1.1.1", "::1"]
+    assert dns.answers == ["198.51.100.11", "::1"]
     assert dns.qname == "örnek.com.tr"
     assert message.extra == {"kısa": "değer", "n": 7, "liste": [1, None]}
     assert message.text == "şğü"

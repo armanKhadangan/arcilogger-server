@@ -180,8 +180,8 @@ def test_terms_are_the_positive_free_text() -> None:
     [
         ("a OR b", "search_term_too_short", (0, 1), {}),
         ("deny OR blocked", "search_or_unsupported", (5, 7), {}),
-        ("(srcip:1.2.3.4)", "search_or_unsupported", (0, 1), {}),
-        ("srcip:1.2.3.4)", "search_or_unsupported", (13, 14), {}),
+        ("(srcip:203.0.113.124)", "search_or_unsupported", (0, 1), {}),
+        ("srcip:203.0.113.124)", "search_or_unsupported", (13, 14), {}),
         ("abc(def", "search_or_unsupported", (3, 4), {}),
         ("foo:bar", "search_unknown_field", (0, 7), {"field": "foo"}),
         ("1abc:x", "search_unknown_field", (0, 6), {"field": "1abc"}),

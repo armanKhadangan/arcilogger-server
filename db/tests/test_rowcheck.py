@@ -39,7 +39,7 @@ DHCP = {
 def test_valid_row_has_no_problems() -> None:
     assert check_row("mt_dhcp", DHCP, complete=True) == []
     assert (
-        check_row("fg_dns", {**COMMON, "answers": ["1.1.1.1", ipaddress.ip_address("::1")]}) == []
+        check_row("fg_dns", {**COMMON, "answers": ["198.51.100.11", ipaddress.ip_address("::1")]}) == []
     )
 
 
@@ -79,10 +79,10 @@ def test_integer_ranges_follow_the_column_type() -> None:
 
 
 def test_arrays_cidr_and_booleans() -> None:
-    assert check_row("fg_dns", {"answers": "1.1.1.1"}) == [
+    assert check_row("fg_dns", {"answers": "198.51.100.11"}) == [
         "fg_dns.answers: expected a list, got str"
     ]
-    assert check_row("fg_dns", {"answers": ["1.1.1.1", "nope"]})[0].startswith(
+    assert check_row("fg_dns", {"answers": ["198.51.100.11", "nope"]})[0].startswith(
         "fg_dns.answers: [1] invalid IP address"
     )
     assert check_row("vlans", {"subnet": "172.20.10.0/24"}) == []
@@ -154,7 +154,7 @@ INET_SAMPLES = (
     "fe80::1%25",
     "172.20.60.300",
     "172.20.1",
-    "1.2.3.4/33",
+    "203.0.113.124/33",
     "",
 )
 

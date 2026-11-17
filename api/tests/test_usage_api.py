@@ -273,7 +273,7 @@ def test_subject_lists(admin: TestClient, site: GoldenSite) -> None:
         ("posta.example", 30),
         ("windowsupdate.com", 0),
         ("Microsoft-Azure", 0),
-        ("8.8.8.8", 0),
+        ("198.51.100.153", 0),
         ("reklam.example", 0),
     ]
 

@@ -532,9 +532,9 @@ def test_configuration_changes_default_patterns() -> None:
             {"action": action, "user_name": "admin", "target": target, "via": None, "extra": {}},
         )
     detail = parse(
-        b"<30>R system,info ip address added by admin (/ip address add address=1.2.3.4/24)"
+        b"<30>R system,info ip address added by admin (/ip address add address=203.0.113.124/24)"
     )
-    assert typed(detail)[1]["extra"] == {"detail": "(/ip address add address=1.2.3.4/24)"}
+    assert typed(detail)[1]["extra"] == {"detail": "(/ip address add address=203.0.113.124/24)"}
     assert synthetic("device changed name").message["type"] == "log"  # no "by <user>"
 
 
@@ -744,7 +744,7 @@ def test_assigned_outside_dhcp_is_not_a_dhcp_failure() -> None:
 
 
 def test_firewall_shape_without_the_firewall_topic_is_counted() -> None:
-    outcome = parse(STAMP.encode() + b"rule 7 in:ether1 out:ether2 proto TCP 1.2.3.4->5.6.7.8")
+    outcome = parse(STAMP.encode() + b"rule 7 in:ether1 out:ether2 proto TCP 203.0.113.124->203.0.113.128")
     assert outcome.error == "mikrotik.firewall"
     assert parse(STAMP.encode() + b"system,info in:ether1 out:ether2 somehow").error is None
 
@@ -754,7 +754,7 @@ def test_known_host_names_make_the_header_deterministic() -> None:
     same shape; the device identities decide (review finding, minor)."""
     named = MikroTikParser(host_names=["core-r1", "SWITCH-1"])
     stamp = b"<30>2026-09-23T09:38:26+03:00 "
-    firewall = b"input: in:ether2 out:(unknown 0), proto TCP (SYN), 1.2.3.4:5->100.64.12.9:22"
+    firewall = b"input: in:ether2 out:(unknown 0), proto TCP (SYN), 203.0.113.124:5->100.64.12.9:22"
     ambiguous = parse(stamp + b"DROP-WAN " + firewall)  # default: BSD convention
     assert (ambiguous.message["host"], typed(ambiguous)[1]["prefix"]) == ("DROP-WAN", None)
     no_host = parse(stamp + b"DROP-WAN " + firewall, named)

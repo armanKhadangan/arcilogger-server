@@ -2,7 +2,7 @@
 
 The figures are the hand-computed ones of test_usage_golden.py (14.10.2026). Ayşe's site
 ``Bilinmiyor`` traffic: posta.example (09:02), windowsupdate.com (09:58, 09:59),
-reklam.example and 8.8.8.8 in the same minute (10:30), Microsoft-Azure (10:59) — raw times
+reklam.example and 198.51.100.153 in the same minute (10:30), Microsoft-Azure (10:59) — raw times
 60 + 120 + 60 + 60 + 60 = 360 s over only 5 minutes (300 s) with traffic.
 """
 
