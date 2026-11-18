@@ -89,6 +89,11 @@ QUEUE_LINES: Final = 500
 DROP_REASONS: Final = ("rate_limited", "slow_client", "parse_budget", "behind")
 #: Seconds of hub statistics behind ``lines_per_second`` / ``parsed_per_second``.
 RATE_WINDOW: Final = 10.0
+#: How long a service stop waits for the ``live.close`` audits still being written
+#: (:meth:`Hub.wind_down`) before the engine is disposed. Each is one short transaction; the
+#: contract (2.15) names no time. 2 s also covers a new database backend on a slow Windows server
+#: (about a second, #333) without holding a stop that the service manager times.
+CLOSE_AUDIT_SECONDS: Final = 2.0
 
 Verdict = Literal["match", "no", "parse_budget"]
 
@@ -652,7 +657,7 @@ class Hub:
         stream.audited = True
         reason = stream.closed or "closed"
         task = asyncio.get_running_loop().create_task(
-            asyncio.to_thread(self._audit_close, stream, reason)
+            asyncio.to_thread(self._audit_close, stream, reason), name=stream.id
         )
         self._background.add(task)
         task.add_done_callback(self._background.discard)
@@ -721,6 +726,30 @@ class Hub:
                 await task
         for background in list(self._background):
             await background
+
+    async def wind_down(self, timeout: float = CLOSE_AUDIT_SECONDS) -> None:
+        """The service stops (the application's lifespan, before it disposes the engine): the
+        task ends, so that every stream still open ends with ``server_stopping`` and is audited,
+        and the ``live.close`` audits still being written are waited for, at most ``timeout``.
+
+        Without it the audits ran after the engine was disposed: each opened a connection that
+        nobody closed, and one still pending when the process ended was lost (#328). An audit
+        still pending after ``timeout`` is logged with its stream id and left."""
+        task = self._task
+        if task is not None and not task.done():
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+        pending = [background for background in self._background if not background.done()]
+        if not pending:
+            return
+        _, late = await asyncio.wait(pending, timeout=timeout)
+        for background in late:
+            log.warning(
+                "live tail %s: live.close not written within %.0f s of the stop",
+                background.get_name(),
+                timeout,
+            )
 
     async def _run(self) -> None:
         wake = self._wake = self._wake or asyncio.Event()
@@ -1079,3 +1108,11 @@ def hub_of(app: Any) -> Hub:
         hub = Hub(app.state.arci)
         app.state.arci_live = hub
     return hub
+
+
+async def wind_down(app: Any) -> None:
+    """The application's hub, if one was created, winds down before the engine is disposed
+    (:meth:`Hub.wind_down`; the lifespan's end in ``app.py``)."""
+    hub: Hub | None = getattr(app.state, "arci_live", None)
+    if hub is not None:
+        await hub.wind_down()

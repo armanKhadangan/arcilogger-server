@@ -5,6 +5,13 @@ versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- **The live stream's close audit is written before the service releases its database
+  connections on a stop** (#328). The service disposed of its database connections first and
+  wrote each open Canlı Akış stream's `live.close` audit afterwards, on a new connection that
+  nobody closed; an audit still pending when the process ended was lost. The stop now waits for
+  these audits, at most 2 s, and then disposes of the connections.
+
 ## [0.5.1] — 2026-11-18
 
 Release version 0.5.1 (`v0.5.1`): fixes after 0.5.0, among them 0.5.0's known limitation (R13 and
