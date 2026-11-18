@@ -5,6 +5,9 @@ configured webhook, ``ok`` with the status code or ``webhook_test_failed`` with 
 from __future__ import annotations
 
 import json
+import socket
+import time
+import warnings
 from collections.abc import Iterator
 from datetime import UTC, datetime
 from pathlib import Path
@@ -47,9 +50,22 @@ def params(receiver: WebhookReceiver, **webhook: object) -> dict[str, object]:
     }
 
 
+def _report(what: str, began: float, receiver: WebhookReceiver) -> str:
+    """The probe's seconds and the receiver's handshakes, warned on every run so that CI's
+    warnings summary shows them (#328, failure 8: a handshake timed out after 5 s on Windows)."""
+    report = (
+        f"{what}: the probe took {time.monotonic() - began:.3f} s, handshakes "
+        f"{[round(seconds, 3) for seconds in receiver.handshakes]} s"
+    )
+    warnings.warn(report, UserWarning, stacklevel=2)
+    return report
+
+
 def test_the_test_notification_is_signed_and_marked_test(receiver: WebhookReceiver) -> None:
+    began = time.monotonic()
     result = run_probe("webhook", params(receiver), {"secret": SECRET})
-    assert (result.ok, result.code, result.message) == (True, None, "HTTP 200")
+    report = _report("webhook test", began, receiver)
+    assert (result.ok, result.code, result.message) == (True, None, "HTTP 200"), report
     (request,) = receiver.received
     timestamp = int(request.headers["X-Arcilogger-Timestamp"])
     assert request.headers[SIGNATURE_HEADER] == signature(SECRET, timestamp, request.body)
@@ -60,6 +76,24 @@ def test_the_test_notification_is_signed_and_marked_test(receiver: WebhookReceiv
         "ARCILOGGER test notification",
     )
     assert alert["url"] == "https://arcilogger.ornek.example"
+
+
+def test_a_client_that_never_handshakes_does_not_hold_the_next(
+    receiver: WebhookReceiver,
+) -> None:
+    """The receiver's handshakes run in their own threads (#328, failure 8): a client that
+    connects and never starts TLS does not keep the next one waiting. With the handshake inside
+    ``accept()`` the one serving thread waited for the silent client, and the probe's handshake
+    timed out (its ``timeout_seconds``, 5)."""
+    port = int(receiver.url.split(":")[2].split("/")[0])
+    silent = socket.create_connection(("127.0.0.1", port))
+    try:
+        began = time.monotonic()
+        result = run_probe("webhook", params(receiver), {"secret": SECRET})
+        report = _report("webhook test beside a silent client", began, receiver)
+        assert (result.ok, result.message) == (True, "HTTP 200"), report
+    finally:
+        silent.close()
 
 
 def test_a_teams_test_reads_its_url_from_the_secrets(receiver: WebhookReceiver) -> None:

@@ -4,12 +4,18 @@
 CA (``ca_file``), records every request (path, headers, body) and answers each with the next
 status of :attr:`WebhookReceiver.statuses` (the last one repeats) and :attr:`reply` as the body.
 Used by the core, worker and API tests of the webhooks; every value is fictional.
+
+Each TLS handshake runs in its request's own thread (:class:`_TLSServer`), not in ``accept()`` on
+the one thread that serves: there a busy runner that did not schedule that thread for the
+client's timeout failed the handshake (#328, failure 8: 5 s on a Windows runner).
+:attr:`WebhookReceiver.handshakes` keeps each handshake's seconds for the tests' reports.
 """
 
 from __future__ import annotations
 
 import ssl
 import threading
+import time
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -83,6 +89,31 @@ def tls_files(folder: Path) -> tuple[Path, ssl.SSLContext]:
     return folder / "webhook-ca.pem", context
 
 
+class _TLSServer(ThreadingHTTPServer):
+    """A threading HTTPS server whose TLS handshakes run in the request threads: the listening
+    socket is wrapped with ``do_handshake_on_connect=False`` and :meth:`finish_request`, which
+    runs in the request's thread, does the handshake first. A client that gives up meanwhile is
+    closed without a traceback."""
+
+    def __init__(self, handler: type[BaseHTTPRequestHandler], context: ssl.SSLContext) -> None:
+        super().__init__(("127.0.0.1", 0), handler)
+        self.socket = context.wrap_socket(
+            self.socket, server_side=True, do_handshake_on_connect=False
+        )
+        self.handshakes: list[float] = []
+
+    def finish_request(self, request: Any, client_address: Any) -> None:
+        if isinstance(request, ssl.SSLSocket):
+            started = time.monotonic()
+            try:
+                request.do_handshake()
+            except (ssl.SSLError, OSError):
+                return  # the client gave up or spoke no TLS: nothing to serve
+            finally:
+                self.handshakes.append(time.monotonic() - started)
+        super().finish_request(request, client_address)
+
+
 @dataclass
 class WebhookReceiver:
     """An HTTPS endpoint that records what it is sent (see the module docstring)."""
@@ -109,10 +140,14 @@ class WebhookReceiver:
             def log_message(self, format: str, *args: Any) -> None:
                 return
 
-        self._server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
-        self._server.socket = context.wrap_socket(self._server.socket, server_side=True)
+        self._server = _TLSServer(Handler, context)
         self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
         self._thread.start()
+
+    @property
+    def handshakes(self) -> list[float]:
+        """The seconds of each TLS handshake so far, in the order they ended."""
+        return list(self._server.handshakes)
 
     @property
     def url(self) -> str:
