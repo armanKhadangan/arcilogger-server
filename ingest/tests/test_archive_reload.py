@@ -2670,7 +2670,11 @@ def test_a_claim_check_whose_service_stopped_opens_no_further_file(
     """A stop that comes between two files of the claim's check (#182 review): the check opens
     no further file and ends (``CheckStoppedError``), rather than reading the next file whole,
     or running into the next test's patched check, as two check threads once did on a Windows
-    runner. The request stays ``queued``; the next start claims it."""
+    runner. The request stays ``queued``; the next start claims it.
+
+    The claim is taken where the loop hands it on (``_finish_claim``, right after it sets it),
+    not read from the service once the check holds: the check thread starts before the loop sets
+    ``_claim``, so a read at the gate could find ``None`` (#328)."""
     load_day(world, db_engine)
     drop(db_engine, DAY + timedelta(days=2))
     reload_id = queue(db_engine, DAY)
@@ -2688,14 +2692,25 @@ def test_a_claim_check_whose_service_stopped_opens_no_further_file(
         return result
 
     monkeypatch.setattr(IngestService, "_sealed_file_intact", intact)
+    finish = IngestService._finish_claim
+    claims: list[PendingClaim] = []
+    claimed = threading.Event()  # the loop has set the claim with its check
+
+    def handed_on(self: IngestService, claim: PendingClaim) -> ArchiveJob | None:
+        if claim.check is not None:
+            claims.append(claim)
+            claimed.set()
+        return finish(self, claim)
+
+    monkeypatch.setattr(IngestService, "_finish_claim", handed_on)
     service = world.service(db_engine, archive_seconds=0.0)
     results: list[int] = []
     runner = threading.Thread(target=lambda: results.append(service.run()))
     runner.start()
     try:
         assert between.entered.wait(WAIT)
-        claim = service._claim
-        assert claim is not None
+        assert claimed.wait(WAIT)
+        claim = claims[0]
         assert claim.check is not None
         assert len(claim.files or {}) >= 2, "the day needs two files for a stop between them"
     finally:
