@@ -54,7 +54,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from openpyxl import load_workbook
-from sqlalchemy import Connection, Engine, select, text
+from sqlalchemy import Connection, Engine, event, select, text
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import NullPool
@@ -986,6 +986,41 @@ def test_a_scan_that_runs_out_keeps_the_text_of_the_time_slice(
     try:
         response = search(client, q="srcip:172.20.41.5")
     finally:
+        state_of(app).hook = None
+    assert response.status_code == 504, response.text
+    error = response.json()["error"]
+    assert error["code"] == "search_timeout"
+    assert (error["message_tr"], error["message_en"]) == texts("search_timeout", {"seconds": 0.5})
+
+
+def test_the_connection_checkout_is_not_the_wait_for_the_lock(
+    app: FastAPI,
+    client: TestClient,
+    app_session_factory: sessionmaker[Session],
+    db_engine: Engine,
+    day: date,
+) -> None:
+    """Only the wait for the partition lock is taken as one: a slow checkout of the connection
+    (a ping or a new connection on a busy server) that alone uses a short budget up is no
+    maintenance, so the scan that then runs out answers with the text of the shortest time
+    slice, not the lock wait's."""
+    sign_in(client, app_session_factory)
+    with app_session_factory() as session:
+        set_setting(session, "search.request_budget_ms", 500, updated_by="test")
+        session.commit()
+
+    def slow_checkout(*_args: Any) -> None:
+        time.sleep(0.6)
+
+    def always_slow(db: Session, _lower: datetime, _upper: datetime) -> None:
+        db.execute(text("SELECT pg_sleep(5)"))
+
+    state_of(app).hook = always_slow
+    event.listen(db_engine, "checkout", slow_checkout)
+    try:
+        response = search(client, q="srcip:172.20.41.5")
+    finally:
+        event.remove(db_engine, "checkout", slow_checkout)
         state_of(app).hook = None
     assert response.status_code == 504, response.text
     error = response.json()["error"]
