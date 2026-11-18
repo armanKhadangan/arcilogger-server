@@ -47,7 +47,9 @@ keeps the data and the settings.
 - Flaky tests fixed at their cause, with no bound raised and no assertion loosened:
   - the rule editor's second Escape (#310, #327);
   - an archive reload's claim read too early (#330);
-  - a lock-budget test whose clock included a connection start (#333).
+  - a lock-budget test whose clock included a connection start (#333);
+  - the desktop status window's thread, now ended before its test ends, so that no Tk object is
+    freed outside its thread (#336).
 - Two Windows guards now report what took the time when they trip: the stop's last status write,
   and the collector's passes in the worst probe gap (#331, #332, #328).
 
