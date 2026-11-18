@@ -18,6 +18,7 @@ import ssl
 import tempfile
 import threading
 import time
+import warnings
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
@@ -784,8 +785,48 @@ def test_two_runs_never_overlap(server: Server, root: Ca, layout: Layout) -> Non
     assert len(read_index(layout)["lists"]) == 2
 
 
-def test_a_server_that_drips_is_stopped_at_the_timeout(root: Ca, layout: Layout) -> None:
+@dataclass
+class _Phases:
+    """Where a timed fetch's seconds went (#328: a drip test took 3.093 s on Windows against its
+    3 s): the download (:func:`arcilogger_core.crl._download`) and the deadline's first cut."""
+
+    downloads: list[tuple[float, float]] = field(default_factory=list)
+    cuts: list[float] = field(default_factory=list)
+
+    def watch(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        download, cut = crl_module._download, crl_module._cut
+
+        def timed_download(*args: Any) -> bytes:
+            began = time.monotonic()
+            try:
+                return download(*args)
+            finally:
+                self.downloads.append((began, time.monotonic()))
+
+        def timed_cut(connection: http.client.HTTPConnection) -> None:
+            self.cuts.append(time.monotonic())
+            cut(connection)
+
+        monkeypatch.setattr(crl_module, "_download", timed_download)
+        monkeypatch.setattr(crl_module, "_cut", timed_cut)
+
+    def report(self, started: float, ended: float) -> str:
+        if not self.downloads:
+            return f"took {ended - started:.3f} s, no download"
+        began, done = self.downloads[0]
+        cut = f"{self.cuts[0] - began:.3f} s into it" if self.cuts else "none"
+        return (
+            f"took {ended - started:.3f} s: {began - started:.3f} s before the download, "
+            f"the download {done - began:.3f} s (first cut {cut}), {ended - done:.3f} s after it"
+        )
+
+
+def test_a_server_that_drips_is_stopped_at_the_timeout(
+    root: Ca, layout: Layout, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """``timeout_seconds`` bounds the whole download, not only each wait for a byte."""
+    phases = _Phases()
+    phases.watch(monkeypatch)
     listener = socket.create_server(("127.0.0.1", 0))
     stop = threading.Event()
 
@@ -810,15 +851,20 @@ def test_a_server_that_drips_is_stopped_at_the_timeout(root: Ca, layout: Layout)
     finally:
         stop.set()
         listener.close()
+    ended = time.monotonic()
+    # Printed on a pass too, as the other guards of #328 do, so each Windows run shows its margin.
+    warnings.warn(phases.report(started, ended), UserWarning, stacklevel=1)
     assert [failure.error for failure in run.failures] == ["unreachable"]
-    assert time.monotonic() - started < 3
+    assert ended - started < 3, phases.report(started, ended)
 
 
 def test_a_server_that_drips_its_headers_is_stopped_at_the_timeout(
-    root: Ca, layout: Layout
+    root: Ca, layout: Layout, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The deadline covers the whole exchange: a server that sends its status line and headers
     a byte at a time (each wait short) is cut too, not only one that drips its body."""
+    phases = _Phases()
+    phases.watch(monkeypatch)
     listener = socket.create_server(("127.0.0.1", 0))
     stop = threading.Event()
 
@@ -844,8 +890,11 @@ def test_a_server_that_drips_its_headers_is_stopped_at_the_timeout(
     finally:
         stop.set()
         listener.close()
+    ended = time.monotonic()
+    # Printed on a pass too, as the other guards of #328 do, so each Windows run shows its margin.
+    warnings.warn(phases.report(started, ended), UserWarning, stacklevel=1)
     assert [failure.error for failure in run.failures] == ["unreachable"]
-    assert time.monotonic() - started < 3
+    assert ended - started < 3, phases.report(started, ended)
 
 
 # -- the proxy (D13) -----------------------------------------------------------------------------
