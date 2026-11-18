@@ -13,7 +13,7 @@
     }
   },
   "meta": {
-    "captured_at": "2026-10-13T04:01:21.707320+00:00",
+    "captured_at": "2026-10-13T04:01:33.144704+00:00",
     "clock": "2026-10-13T07:00:00+03:00",
     "info": "captured by web/scripts/capture_api_samples.py; do not edit",
     "site_day": "2026-10-09",
@@ -21,25 +21,25 @@
     "tsa": "mock (never legally valid)"
   },
   "summary": {
-    "checked_at": "2026-10-13T07:01:06.833292+03:00",
+    "checked_at": "2026-10-13T07:01:12.586778+03:00",
     "collector": {
       "dropped_transport": 0,
       "dropped_unknown": 0,
       "sources": [
         {
           "bytes": 1102092770,
-          "last_received": "2026-10-13T07:01:02.754362+03:00",
+          "last_received": "2026-10-13T07:01:08.494063+03:00",
           "messages": 1652310,
           "name": "fortigate"
         },
         {
           "bytes": 31219480,
-          "last_received": "2026-10-13T07:00:16.754362+03:00",
+          "last_received": "2026-10-13T07:00:22.494063+03:00",
           "messages": 183644,
           "name": "core-r1"
         }
       ],
-      "started_at": "2026-10-11T02:01:06+03:00",
+      "started_at": "2026-10-11T02:01:12+03:00",
       "state": "running",
       "tcp_connections": 0,
       "tcp_framing_errors": 0,
@@ -49,12 +49,12 @@
         "count": 1,
         "messages": 14
       },
-      "updated_at": "2026-10-13T07:00:46+03:00",
+      "updated_at": "2026-10-13T07:00:52+03:00",
       "write_error_since": null,
       "write_failures": 0
     },
     "database": {
-      "measured_at": "2026-10-13T07:01:06.789160+03:00",
+      "measured_at": "2026-10-13T07:01:12.537771+03:00",
       "storage": "postgresql",
       "tables": [
         {
@@ -167,37 +167,37 @@
       ],
       "state": "running",
       "unknown_sources": 1,
-      "updated_at": "2026-10-13T07:01:03+03:00",
+      "updated_at": "2026-10-13T07:01:09+03:00",
       "workers_active": 2,
       "workers_configured": 2
     },
     "version": {
-      "core_version": "0.1.0",
+      "core_version": "0.5.1",
       "product": "ARCILOGGER",
-      "release_date": "2026-10-20",
-      "version": "0.1.0"
+      "release_date": "2026-11-18",
+      "version": "0.5.1"
     }
   },
   "summary_first_reading": {
-    "checked_at": "2026-10-13T07:01:06.789160+03:00",
+    "checked_at": "2026-10-13T07:01:12.537771+03:00",
     "collector": {
       "dropped_transport": 0,
       "dropped_unknown": 0,
       "sources": [
         {
           "bytes": 1102092770,
-          "last_received": "2026-10-13T07:01:02.754362+03:00",
+          "last_received": "2026-10-13T07:01:08.494063+03:00",
           "messages": 1652310,
           "name": "fortigate"
         },
         {
           "bytes": 31219480,
-          "last_received": "2026-10-13T07:00:16.754362+03:00",
+          "last_received": "2026-10-13T07:00:22.494063+03:00",
           "messages": 183644,
           "name": "core-r1"
         }
       ],
-      "started_at": "2026-10-11T02:01:06+03:00",
+      "started_at": "2026-10-11T02:01:12+03:00",
       "state": "running",
       "tcp_connections": 0,
       "tcp_framing_errors": 0,
@@ -207,12 +207,12 @@
         "count": 1,
         "messages": 14
       },
-      "updated_at": "2026-10-13T07:00:46+03:00",
+      "updated_at": "2026-10-13T07:00:52+03:00",
       "write_error_since": null,
       "write_failures": 0
     },
     "database": {
-      "measured_at": "2026-10-13T07:01:06.789160+03:00",
+      "measured_at": "2026-10-13T07:01:12.537771+03:00",
       "storage": "postgresql",
       "tables": [
         {
@@ -325,15 +325,15 @@
       ],
       "state": "running",
       "unknown_sources": 1,
-      "updated_at": "2026-10-13T07:01:03+03:00",
+      "updated_at": "2026-10-13T07:01:09+03:00",
       "workers_active": 2,
       "workers_configured": 2
     },
     "version": {
-      "core_version": "0.1.0",
+      "core_version": "0.5.1",
       "product": "ARCILOGGER",
-      "release_date": "2026-10-20",
-      "version": "0.1.0"
+      "release_date": "2026-11-18",
+      "version": "0.5.1"
     }
   }
 }
