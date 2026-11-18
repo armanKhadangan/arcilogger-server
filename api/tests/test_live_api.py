@@ -12,9 +12,11 @@ its user and session; the GET holds no database connection while it streams.
 
 from __future__ import annotations
 
+import asyncio
 import socket
 import threading
 import time
+import warnings
 from collections.abc import Callable, Iterator
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
@@ -24,10 +26,11 @@ import httpx2 as httpx
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from sqlalchemy import Engine, select, update
+from sqlalchemy import Engine, event, select, update
 from sqlalchemy.orm import Session, sessionmaker
 
 from arcilogger_api import live
+from arcilogger_api.deps import AppState
 from arcilogger_api.errors import MESSAGES as API_MESSAGES
 from arcilogger_api.live import messages as live_messages
 from arcilogger_api.live.hub import Hub, Timing
@@ -212,6 +215,9 @@ class Reader:
         if last_event_id is not None:
             headers["Last-Event-ID"] = last_event_id
         self.events: list[Event] = []
+        #: When each event arrived (:func:`time.monotonic`), and when the stream ended.
+        self.times: list[float] = []
+        self.ended: float | None = None
         self.keepalives = 0
         self.status: int | None = None
         self.error: dict[str, Any] | None = None
@@ -240,11 +246,13 @@ class Reader:
                             self.keepalives += 1
                         else:
                             self.events.append(event)
+                            self.times.append(time.monotonic())
                     if self._stop.is_set():
                         return
         except httpx.HTTPError:
             pass
         finally:
+            self.ended = time.monotonic()
             self.done.set()
 
     def of(self, kind: str) -> list[Event]:
@@ -712,25 +720,98 @@ def test_a_client_that_stops_reading_is_ended_and_audited(
             pass
 
 
+def _timed(
+    monkeypatch: pytest.MonkeyPatch, owner: Any, name: str, spans: list[tuple[str, float, float]]
+) -> None:
+    """``owner.name`` (a function or a coroutine function) records its start and end in
+    ``spans`` (:func:`time.monotonic`)."""
+    real = getattr(owner, name)
+
+    if asyncio.iscoroutinefunction(real):
+
+        async def timed_coroutine(*args: Any, **kwargs: Any) -> Any:
+            start = time.monotonic()
+            try:
+                return await real(*args, **kwargs)
+            finally:
+                spans.append((name, start, time.monotonic()))
+
+        monkeypatch.setattr(owner, name, timed_coroutine)
+        return
+
+    def timed(*args: Any, **kwargs: Any) -> Any:
+        start = time.monotonic()
+        try:
+            return real(*args, **kwargs)
+        finally:
+            spans.append((name, start, time.monotonic()))
+
+    monkeypatch.setattr(owner, name, timed)
+
+
 def test_a_server_stop_ends_the_stream_and_audits_it(
-    app: FastAPI, hub: Hub, spool: Spool, app_session_factory: sessionmaker[Session]
+    app: FastAPI,
+    hub: Hub,
+    spool: Spool,
+    app_session_factory: sessionmaker[Session],
+    db_engine: Engine,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The service stopping (contract 2.15, R16): the open stream gets ``end {server_stopping}``,
     the server is down within its graceful timeout plus the 1 s of that last write, and
-    ``live.close`` records ``server_stopping``."""
+    ``live.close`` records ``server_stopping``.
+
+    The stop's time is reported in the phases seen from outside (#328, failure 6: 4.203 s once on
+    a Windows runner, 2.1 s before): when the reader got ``end``, the ``live.close`` audit, the
+    hub's stop, the engine's disposal at the lifespan's end, each new database connection opened
+    meanwhile (a backend start, #333), and the thread's end."""
     spool.write("fortigate", traffic())
     graceful = 1
+    spans: list[tuple[str, float, float]] = []
+    _timed(monkeypatch, Hub, "_audit_close", spans)
+    _timed(monkeypatch, Hub, "stop", spans)
+    _timed(monkeypatch, AppState, "dispose", spans)
+    connecting: list[float] = []
+
+    def do_connect(*args: Any) -> None:
+        connecting.append(time.monotonic())
+
+    def connected(*args: Any) -> None:
+        spans.append(("new connection", connecting.pop() if connecting else 0.0, time.monotonic()))
+
+    event.listen(db_engine, "do_connect", do_connect)
+    event.listen(db_engine, "connect", connected)
     stopping = LiveServer(app, graceful_seconds=graceful)
-    with stopping, httpx.Client(base_url=stopping.url, timeout=10) as client:
-        sign_in(client, app_session_factory)
-        opened = open_stream(client)
-        reader = Reader(client, opened["stream_id"])
-        reader.wait(lambda r: bool(r.of("hello")))
-        began = time.monotonic()
-        stopping.__exit__(None, None, None)  # what the service stop does (repeating it is harmless)
-        took = time.monotonic() - began
-        reader.done.wait(5)
-        reader.close()
+    try:
+        with stopping, httpx.Client(base_url=stopping.url, timeout=10) as client:
+            sign_in(client, app_session_factory)
+            opened = open_stream(client)
+            reader = Reader(client, opened["stream_id"])
+            reader.wait(lambda r: bool(r.of("hello")))
+            began = time.monotonic()
+            # what the service stop does (repeating it is harmless)
+            stopping.__exit__(None, None, None)
+            took = time.monotonic() - began
+            reader.done.wait(5)
+            reader.close()
+    finally:
+        event.remove(db_engine, "do_connect", do_connect)
+        event.remove(db_engine, "connect", connected)
+    ends = [at for e, at in zip(reader.events, reader.times, strict=True) if e.event == "end"]
+    phases = [
+        f"end received {ends[0] - began:.3f} s" if ends else "no end received",
+        f"stream ended {reader.ended - began:.3f} s" if reader.ended else "stream not ended",
+        *(
+            f"{name} {start - began:.3f} to {end - began:.3f} s"
+            for name, start, end in sorted(spans, key=lambda span: span[1])
+            if end >= began
+        ),
+        f"thread ended {took:.3f} s",
+    ]
+    # Reported on a passing run too, so that CI's warnings summary shows each run's phases.
+    warnings.warn(
+        f"server stop: took {took:.3f} s: " + ", ".join(phases), UserWarning, stacklevel=1
+    )
     assert not stopping.thread.is_alive()
     assert [LiveEnd.model_validate(event.data).code for event in reader.of("end")] == [
         "server_stopping"
@@ -738,7 +819,7 @@ def test_a_server_stop_ends_the_stream_and_audits_it(
     # graceful + the 1 s of that last write, plus room for the lifespan shutdown, the close audit
     # and the thread join on a slow runner (Windows took 2.1 s); a shielded last write without its
     # 1 s bound would hold the server until the 20 s join instead
-    assert took < graceful + 1 + 2, took
+    assert took < graceful + 1 + 2, f"took {took:.3f} s: " + ", ".join(phases)
     closes = audits(app_session_factory, "live.close")
     assert [entry.details["reason"] for entry in closes] == ["server_stopping"]
     assert closes[0].details["stream_id"] == opened["stream_id"]
