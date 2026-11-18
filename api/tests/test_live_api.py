@@ -825,6 +825,89 @@ def test_a_server_stop_ends_the_stream_and_audits_it(
     assert closes[0].details["stream_id"] == opened["stream_id"]
 
 
+def test_a_server_stop_writes_its_close_audits_before_the_engine_goes(
+    app: FastAPI,
+    hub: Hub,
+    spool: Spool,
+    app_session_factory: sessionmaker[Session],
+    db_engine: Engine,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The service stopping writes every ``live.close`` while the engine is still there (#328):
+    the stream being read and one opened but never connected (it lingers) are both audited
+    ``server_stopping`` before the lifespan disposes the engine, and no database connection is
+    opened after the disposal. Before, each audit ran after it, on a new connection that nobody
+    closed (a backend start on Windows), and one still pending when the process ended was lost."""
+    spool.write("fortigate", traffic())
+    disposed: list[float] = []
+    dispose = AppState.dispose
+
+    def disposing(self: AppState) -> None:
+        disposed.append(time.monotonic())
+        dispose(self)
+
+    audited: list[float] = []
+    audit_close = Hub._audit_close
+
+    def auditing(self: Hub, stream: Any, reason: str) -> None:
+        audit_close(self, stream, reason)
+        audited.append(time.monotonic())
+
+    connected: list[float] = []
+
+    def connecting(*args: Any) -> None:
+        connected.append(time.monotonic())
+
+    monkeypatch.setattr(AppState, "dispose", disposing)
+    monkeypatch.setattr(Hub, "_audit_close", auditing)
+    event.listen(db_engine, "connect", connecting)
+    stopping = LiveServer(app, graceful_seconds=1)
+    try:
+        with stopping, httpx.Client(base_url=stopping.url, timeout=10) as client:
+            sign_in(client, app_session_factory)
+            read = open_stream(client)
+            lingering = open_stream(client)
+            reader = Reader(client, read["stream_id"])
+            reader.wait(lambda r: bool(r.of("hello")))
+            stopping.__exit__(None, None, None)
+            reader.done.wait(5)
+            reader.close()
+    finally:
+        event.remove(db_engine, "connect", connecting)
+    assert len(disposed) == 1
+    assert [at - disposed[0] for at in connected if at >= disposed[0]] == []
+    assert len(audited) == 2
+    assert all(at <= disposed[0] for at in audited), (audited, disposed)
+    closes = audits(app_session_factory, "live.close")
+    assert sorted(
+        (entry.details["stream_id"], entry.details["reason"]) for entry in closes
+    ) == sorted(
+        [(read["stream_id"], "server_stopping"), (lingering["stream_id"], "server_stopping")]
+    )
+
+
+def test_the_engine_is_disposed_even_if_winding_down_fails(
+    app: FastAPI, hub: Hub, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A failure while the hub winds down (its task ending with an error other than
+    ``CancelledError``) does not skip the engine's disposal at the lifespan's end (#341)."""
+    disposed: list[bool] = []
+    dispose = AppState.dispose
+
+    def disposing(self: AppState) -> None:
+        disposed.append(True)
+        dispose(self)
+
+    async def failing(self: Hub, timeout: float = 0.0) -> None:
+        raise RuntimeError("the hub's task failed while it was cancelled")
+
+    monkeypatch.setattr(AppState, "dispose", disposing)
+    monkeypatch.setattr(Hub, "wind_down", failing)
+    with pytest.raises(RuntimeError), TestClient(app, base_url="http://testserver"):
+        pass  # the lifespan starts and stops; its end raises the hub's error
+    assert disposed == [True]
+
+
 # -- refusals ------------------------------------------------------------------------------------
 
 

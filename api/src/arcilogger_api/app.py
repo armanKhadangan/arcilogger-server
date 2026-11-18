@@ -41,6 +41,7 @@ from arcilogger_api import __version__
 from arcilogger_api.audit import FLUSH_INTERVAL_SECONDS, run_periodic_flush
 from arcilogger_api.deps import AppState
 from arcilogger_api.errors import install_error_handlers
+from arcilogger_api.live.hub import wind_down
 from arcilogger_api.routers import discover
 from arcilogger_api.security import CsrfMiddleware
 from arcilogger_core.config import Config
@@ -125,7 +126,7 @@ def create_app(
     state = AppState(config=config, engine=engine, config_path=config_path)
 
     @asynccontextmanager
-    async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+    async def lifespan(application: FastAPI) -> AsyncIterator[None]:
         stop = asyncio.Event()
         flusher = None
         if state.config is not None and audit_flush_seconds:
@@ -140,7 +141,13 @@ def create_app(
             stop.set()
             if flusher is not None:
                 await flusher  # a flush in progress finishes before the engine is disposed
-            state.dispose()
+            # Canlı Akış's close audits too, at most CLOSE_AUDIT_SECONDS (#328): written after the
+            # disposal, each opened a connection nobody closed, and could be lost. The engine is
+            # disposed even if winding down fails.
+            try:
+                await wind_down(application)
+            finally:
+                state.dispose()
 
     app = FastAPI(
         title="ARCILOGGER API",
