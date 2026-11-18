@@ -886,6 +886,28 @@ def test_a_server_stop_writes_its_close_audits_before_the_engine_goes(
     )
 
 
+def test_the_engine_is_disposed_even_if_winding_down_fails(
+    app: FastAPI, hub: Hub, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A failure while the hub winds down (its task ending with an error other than
+    ``CancelledError``) does not skip the engine's disposal at the lifespan's end (#341)."""
+    disposed: list[bool] = []
+    dispose = AppState.dispose
+
+    def disposing(self: AppState) -> None:
+        disposed.append(True)
+        dispose(self)
+
+    async def failing(self: Hub, timeout: float = 0.0) -> None:
+        raise RuntimeError("the hub's task failed while it was cancelled")
+
+    monkeypatch.setattr(AppState, "dispose", disposing)
+    monkeypatch.setattr(Hub, "wind_down", failing)
+    with pytest.raises(RuntimeError), TestClient(app, base_url="http://testserver"):
+        pass  # the lifespan starts and stops; its end raises the hub's error
+    assert disposed == [True]
+
+
 # -- refusals ------------------------------------------------------------------------------------
 
 

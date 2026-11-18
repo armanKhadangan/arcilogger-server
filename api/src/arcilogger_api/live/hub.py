@@ -92,7 +92,9 @@ RATE_WINDOW: Final = 10.0
 #: How long a service stop waits for the ``live.close`` audits still being written
 #: (:meth:`Hub.wind_down`) before the engine is disposed. Each is one short transaction; the
 #: contract (2.15) names no time. 2 s also covers a new database backend on a slow Windows server
-#: (about a second, #333) without holding a stop that the service manager times.
+#: (about a second, #333) without holding a stop that the service manager times: ArciApi's stop
+#: timeout is 20 s (``deploy/windows/services/ArciApi.xml``), and Uvicorn's 5 s graceful wait
+#: (``cli.py``), the stream's 1 s last write and these 2 s stay well inside it.
 CLOSE_AUDIT_SECONDS: Final = 2.0
 
 Verdict = Literal["match", "no", "parse_budget"]

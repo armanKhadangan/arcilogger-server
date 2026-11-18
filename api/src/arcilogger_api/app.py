@@ -142,9 +142,12 @@ def create_app(
             if flusher is not None:
                 await flusher  # a flush in progress finishes before the engine is disposed
             # Canlı Akış's close audits too, at most CLOSE_AUDIT_SECONDS (#328): written after the
-            # disposal, each opened a connection nobody closed, and could be lost.
-            await wind_down(application)
-            state.dispose()
+            # disposal, each opened a connection nobody closed, and could be lost. The engine is
+            # disposed even if winding down fails.
+            try:
+                await wind_down(application)
+            finally:
+                state.dispose()
 
     app = FastAPI(
         title="ARCILOGGER API",
