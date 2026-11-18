@@ -3137,15 +3137,24 @@ def test_a_days_tables_share_one_lock_budget(
 ) -> None:
     """W5-G-24 for ingest (review): a day's tables, a transaction and a round each (#182
     review Q2), share the day's one budget. The first table waits for the partition lock (an
-    export holds it) three quarters of it; the export lets go and takes it again before the
-    second table asks, in the next round: that one waits only what is left (0.5 s), not the
-    whole budget again, then the round gives up. Searches that hold the lock one after the
-    other cannot keep the loop a budget a table (16 a day). On TimescaleDB there is nothing to
-    make and no lock is taken."""
+    export holds it) half of it; the export lets go and takes it again before the second table
+    asks, in the next round: that one waits only what is left (2 s), not the whole budget
+    again (4 s), then the round gives up. Searches that hold the lock one after the other
+    cannot keep the loop a budget a table (16 a day). On TimescaleDB there is nothing to make
+    and no lock is taken."""
     drop(db_engine, TODAY)
     with db_engine.connect() as connection:
         tables = partitioned_tables(connection)
-    budget = service_module.PARTITION_LOCK_TIMEOUT_MS / 1000  # the default's half as well
+    # A 4 s budget, not the default 2 s, half of it spent by the first table (#328, failure 9):
+    # with 2 s and three quarters spent, a runner that stalled 0.6 s let the first wait run out
+    # before the export let go; the round gave up, the next try was due only after
+    # ``archive_seconds`` and the second table never asked. Now a stall of up to 2 s leaves the
+    # first table waiting, and the second still gets what is left (2 s) against a fresh 4 s.
+    with Session(db_engine) as session:
+        set_setting(session, "search.request_budget_ms", 8000, updated_by="test")
+        session.commit()
+    monkeypatch.setattr(service_module, "PARTITION_LOCK_TIMEOUT_MS", 4000)
+    budget = service_module.PARTITION_LOCK_TIMEOUT_MS / 1000  # half the search budget as well
     asking, held = threading.Event(), threading.Event()
     asked: list[str] = []
     real = ensure_days
@@ -3172,10 +3181,10 @@ def test_a_days_tables_share_one_lock_budget(
             lambda: [service._ensure_days(DAY, DAY), service._ensure_days(DAY, DAY)]  # two rounds
         )
         wait_for_waiters(outside, ["ExclusiveLock"], step)
-        sleep(budget * 0.75)  # spends the budget; the order comes from pg_locks and the events
+        sleep(budget * 0.5)  # spends the budget; the order comes from pg_locks and the events
         holder.execute(text("SELECT pg_advisory_unlock_shared(:key)"), key)
         holder.commit()
-        assert asking.wait(WAIT)
+        assert asking.wait(WAIT), f"the second table never asked; asked: {asked}"
         holder.execute(text("SELECT pg_advisory_lock_shared(:key)"), key)
         holder.commit()
         second = monotonic()
@@ -3186,7 +3195,7 @@ def test_a_days_tables_share_one_lock_budget(
         holder.commit()
     assert answer == [[False, False]]
     assert asked == tables[:2]
-    assert took < budget * 0.75  # what was left (0.5 s), 1 s of margin; the whole budget is 2 s
+    assert took < budget * 0.75  # what was left (2 s), 1 s of margin; the whole budget is 4 s
     assert DAY not in service._partitioned
 
 
