@@ -11,6 +11,7 @@ from __future__ import annotations
 import contextlib
 import os
 import sys
+import threading
 import time
 from collections.abc import Callable, Iterator
 from typing import Any
@@ -125,12 +126,18 @@ def test_the_background_thread_feeds_the_window(root: tk.Tk) -> None:
         return window.sample("critical")
 
     shown = window.StatusWindow(root, refresh=refresh, interval_ms=60_000, flash=flashed.append)
+    (thread,) = [thread for thread in threading.enumerate() if thread.name == "arcilogger-status"]
     wait_for(root, lambda: shown.level == "critical")
     assert len(flashed) == 1
     shown.refresh_now()  # wakes the thread at once instead of after a minute
     wait_for(root, lambda: len(taken) >= 2)
     shown.close()
     assert shown._stop.is_set()
+    # The thread ends while the test holds the window. Ending after the test, it would drop the
+    # window last and free its Tk objects, the interpreter too, outside the thread that owns
+    # them: that killed the test process with "Illegal instruction" (#328, failure 5).
+    thread.join(timeout=10)
+    assert not thread.is_alive()
 
 
 def test_open_web_uses_localhost(root: tk.Tk) -> None:
