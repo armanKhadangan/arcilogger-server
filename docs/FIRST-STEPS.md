@@ -499,7 +499,7 @@ must be accepted first. Devices are not entered by hand, they come from the DHCP
 Every change, import and export is written to the audit log.
 
 - **Cihazlar** (devices): the search looks at the MAC address (also without separators:
-  `f01faf`), the host name, the last IP and the device name. The filters (type, VLAN, randomised
+  `5e00533b`), the host name, the last IP and the device name. The filters (type, VLAN, randomised
   MAC, infrastructure) and **Bilinmeyen cihazlar** (no owner, not infrastructure) stay in the
   address bar, so the view can be bookmarked; the search text is never put in the address.
   **CSV indir** downloads every page of the list shown. Select devices and use **Kişiye ata** /

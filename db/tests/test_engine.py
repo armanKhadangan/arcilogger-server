@@ -117,7 +117,7 @@ def test_network_types_round_trip_as_strings(db_session: Session) -> None:
             hostname="Telefon-12",
         )
     )
-    db_session.add(FgDns(**common, qname="example.com", answers=["93.184.215.14", "2606:2800::1"]))
+    db_session.add(FgDns(**common, qname="example.com", answers=["203.0.113.114", "2606:2800::1"]))
     db_session.add(Device(mac="02-00-5E-00-53-46", last_ip="172.20.60.183"))
     db_session.commit()
     dhcp = db_session.scalars(select(MtDhcp)).one()
@@ -129,7 +129,7 @@ def test_network_types_round_trip_as_strings(db_session: Session) -> None:
     assert dhcp.extra == {}
     dns = db_session.scalars(select(FgDns)).one()
     db_session.refresh(dns)
-    assert dns.answers == ["93.184.215.14", "2606:2800::1"]
+    assert dns.answers == ["203.0.113.114", "2606:2800::1"]
     device = db_session.get(Device, "02:00:5e:00:53:46")
     assert device is not None
     assert device.hostnames == []

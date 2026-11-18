@@ -27,7 +27,7 @@ from arcilogger_db.models import AuditLog, Device, DeviceAssignment, Person
 
 Login = Callable[..., LoggedIn]
 API = "/api/v1"
-PC, PHONE, PRINTER = "f0:1f:af:00:00:01", "02:00:5e:00:53:46", "a4:83:e7:00:00:60"
+PC, PHONE, PRINTER = "00:00:5e:00:53:3b", "02:00:5e:00:53:46", "00:00:5e:00:53:37"
 TURKISH = "ı İ ş ğ ü ö ç Ş Ğ Ü Ö Ç"
 
 
@@ -459,8 +459,8 @@ def test_assignments_build_history_in_file_order(
 ) -> None:
     data = _lines(
         "mac;employee_no;person_name;valid_from;note",
-        "F0-1F-AF-00-00-01;1001;;01.09.2026 09:00;ilk zimmet",
-        "f01f.af00.0001;;Mehmet Öz;2026-10-01T08:00:00+03:00;devir",
+        "00-00-5E-00-53-3B;1001;;01.09.2026 09:00;ilk zimmet",
+        "0000.5e00.533b;;Mehmet Öz;2026-10-01T08:00:00+03:00;devir",
         "02:00:5e:00:53:46;1001;Ayşe Işık;;",
     )
     preview = _upload(client, "assignments", data).json()
@@ -505,7 +505,7 @@ def test_assignment_errors_per_line(
     data = _lines(
         "mac;employee_no;person_name;valid_from;note",
         "zz:zz;1001;;;",  # 2 invalid MAC
-        "02:00:00:00:00:99;1001;;;",  # 3 never seen
+        "02:00:5e:00:53:03;1001;;;",  # 3 never seen
         f"{PC};4040;;;",  # 4 unknown number
         f"{PC};;Kimse;;",  # 5 unknown name
         f"{PC};;İki Kişi;;",  # 6 ambiguous

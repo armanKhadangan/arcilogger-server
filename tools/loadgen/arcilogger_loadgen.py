@@ -378,12 +378,14 @@ class Device:
     interface: str | None = None
 
     def mac_for(self, day: date, seed: int) -> str:
-        """The MAC on ``day``: fixed, or a fresh locally administered one (rotating phones)."""
+        """The MAC on ``day``: fixed, or a fresh private one each day (rotating phones): the
+        phone's own last two bytes after a day byte (0x20-0xDF, never a fixed phone's 0x10), so
+        it differs from the day before and from every other device's."""
         if not self.rotating:
             return self.base_mac
-        digest = hashlib.sha256(f"{seed}:{self.key}:{day.isoformat()}".encode()).digest()
-        first = (digest[0] & 0xF0) | 0x02  # locally administered, unicast (x2, x6, xA, xE)
-        return ":".join(f"{b:02x}" for b in (first, *digest[1:6]))
+        low = self.base_mac.split(":")[4:]
+        day_byte = PRIVATE_DAY_FIRST + day.toordinal() % PRIVATE_DAY_COUNT
+        return ":".join((*PRIVATE_MAC_PREFIX.split(":"), f"{day_byte:02x}", *low))
 
 
 @dataclass(frozen=True)
@@ -396,13 +398,37 @@ class User:
     phone: Device
 
 
-def _mac(prefix: str, number: int) -> str:
-    return f"{prefix}:{(number >> 16) & 0xFF:02x}:{(number >> 8) & 0xFF:02x}:{number & 0xFF:02x}"
+#: MAC addresses of the fictional world only (CLAUDE.md, #315): IANA's own block 00:00:5E, no
+#: vendor's. 00:00:5E:00:53:xx is its documentation range (RFC 7042, 256 addresses: the
+#: infrastructure's, following their addresses); past that, :func:`_iana_mac` stays in the block
+#: (00:00:5E:00:<hi>:<lo>; 00:00:5E:00:01:xx and 00:00:5E:00:02:xx are VRRP's, which nothing in
+#: the product treats specially; if it ever does, these move to 02:00:5E:…, as #308 decided).
+#: A phone's private (locally administered) address is 02:00:5E:<block>:<hi>:<lo>.
+PRIVATE_MAC_PREFIX: Final = "02:00:5e"
+#: The blocks of private addresses: fixed phones, guests, and the day bytes of rotating phones.
+PRIVATE_FIXED: Final = 0x10
+PRIVATE_GUEST: Final = 0x08
+PRIVATE_DAY_FIRST: Final = 0x20
+PRIVATE_DAY_COUNT: Final = 0xC0
+#: The first PC's number in :func:`_iana_mac`: PCs are 00:00:5E:00:10:xx and up, below the
+#: documentation range.
+PC_MAC_FIRST: Final = 0x1000
+#: The most guests a day: a guest's private address keeps its number in one byte (#317).
+MAX_GUESTS_PER_DAY: Final = 0xFF
 
 
-def _random_mac(rng: random.Random) -> str:
-    first = (rng.randrange(256) & 0xF0) | 0x02
-    return ":".join(f"{b:02x}" for b in (first, *(rng.randrange(256) for _ in range(5))))
+def _iana_mac(number: int) -> str:
+    """00:00:5E:00:<hi>:<lo>, IANA's block past its documentation range (see above)."""
+    return f"00:00:5e:00:{(number >> 8) & 0xFF:02x}:{number & 0xFF:02x}"
+
+
+def _private_mac(rng: random.Random, block: int, number: int) -> str:
+    """02:00:5E:<block>:<hi>:<lo>, a private address that ``number`` keeps distinct. It draws the
+    six random bytes the random address before #315 drew, so every later random choice of the
+    simulation (names, host names, which phones rotate) stays as it was."""
+    for _ in range(6):
+        rng.randrange(256)
+    return f"{PRIVATE_MAC_PREFIX}:{block:02x}:{(number >> 8) & 0xFF:02x}:{number & 0xFF:02x}"
 
 
 def build_users(settings: Settings) -> list[User]:
@@ -422,7 +448,7 @@ def build_users(settings: Settings) -> list[User]:
             static_ip=None,
             hostname=f"PC-{index + 1:03d}",
             owner=index,
-            base_mac=_mac("3c:52:82", 0x1000 + index),  # OUI of the synthetic fixtures
+            base_mac=_iana_mac(PC_MAC_FIRST + index),
             switch=SWITCH if on_switch else None,
             port=1 + index if on_switch else None,
         )
@@ -434,7 +460,7 @@ def build_users(settings: Settings) -> list[User]:
             static_ip=None,
             hostname=rng.choice(("iPhone", "Galaxy-S", "Redmi-Note", None)),
             owner=index,
-            base_mac=_random_mac(rng),
+            base_mac=_private_mac(rng, PRIVATE_FIXED, index),
             rotating=rng.random() < settings.rotating_phones,
         )
         users.append(User(index, name, department, vlan, pc, phone))
@@ -454,8 +480,8 @@ def _static(
 def infrastructure() -> list[Device]:
     """Always-on devices with static addresses: in VLAN 10 the admin PC, the switch, access
     points and printers, in VLAN 20 the servers, on the transit link the firewall. MAC addresses
-    from the documentation range (RFC 7042), except the printers': they keep a printer vendor's
-    prefix, so the OUI lookup names a vendor for them."""
+    from the documentation range (RFC 7042) that follow their addresses, the printers' too (#315:
+    no vendor's prefix, so the OUI lookup names no vendor for them)."""
     devices = [
         _static("admin-pc", "admin", DEVICE_VLAN, "172.20.10.37"),
         _static("switch-1", "switch", DEVICE_VLAN, SWITCH_ADDRESS),
@@ -467,16 +493,7 @@ def infrastructure() -> list[Device]:
         devices.append(_static(f"ap-{number}", "ap", DEVICE_VLAN, f"172.20.10.{40 + number}"))
     for number in range(1, 5):
         devices.append(
-            Device(
-                f"printer-{number}",
-                "printer",
-                DEVICE_VLAN,
-                None,
-                f"172.20.10.{80 + number}",
-                None,
-                None,
-                _mac("00:1b:a9", number),
-            )
+            _static(f"printer-{number}", "printer", DEVICE_VLAN, f"172.20.10.{80 + number}")
         )
     return devices
 
@@ -668,6 +685,13 @@ class Simulation:
     def __init__(self, settings: Settings | None = None) -> None:
         self.settings = settings or Settings()
         check_egresses(self.settings.egresses)
+        if self.settings.guests_per_day > MAX_GUESTS_PER_DAY:
+            raise LoadgenError(
+                f"günde en çok {MAX_GUESTS_PER_DAY} misafir olabilir (guests_per_day "
+                f"{self.settings.guests_per_day}): misafirin MAC adresi numarasını tek baytta "
+                f"tutar / at most {MAX_GUESTS_PER_DAY} guests a day (guests_per_day "
+                f"{self.settings.guests_per_day}): a guest's MAC keeps its number in one byte"
+            )
         self.users = build_users(self.settings)
         self.infrastructure = infrastructure()
         # A FortiGate-only site has no MikroTik: no core-r1/switch-1 line at all.
@@ -807,7 +831,8 @@ class Simulation:
                 static_ip=None,
                 hostname=rng.choice(("iPhone", "android-misafir", None)),
                 owner=None,
-                base_mac=_random_mac(rng),
+                # The day (modulo 256 days, long after a guest's 1 h lease) and the guest's number.
+                base_mac=_private_mac(rng, PRIVATE_GUEST, (day.toordinal() & 0xFF) << 8 | number),
             )
             found.append(
                 (device, (self._at(day, begin), self._at(day, begin + rng.uniform(0.5, 3))))

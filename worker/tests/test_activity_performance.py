@@ -303,6 +303,52 @@ def backlog(details: dict[str, Any]) -> int:
     return int(details["ended_waiting"]) + int(details["stale_sessions"])
 
 
+@dataclass
+class Collections:
+    """The collector's passes while the loop runs, through :data:`gc.callbacks`: generation,
+    start (:func:`time.monotonic`) and seconds of each (#328: a probe late on a Windows runner;
+    here the worst probe gap held a full pass). A full pass holds every thread, the loop's too."""
+
+    passes: list[tuple[int, float, float]] = field(default_factory=list)
+    _started: float | None = None
+
+    def __call__(self, phase: str, info: dict[str, Any]) -> None:
+        if phase == "start":
+            self._started = time.monotonic()
+        elif self._started is not None:
+            began, self._started = self._started, None
+            self.passes.append((int(info["generation"]), began, time.monotonic() - began))
+
+    def by_generation(self) -> dict[int, tuple[int, float]]:
+        """Per generation: the passes and the longest one's seconds."""
+        return {
+            generation: (
+                sum(1 for g, _at, _s in self.passes if g == generation),
+                round(max((s for g, _at, s in self.passes if g == generation), default=0.0), 3),
+            )
+            for generation in (0, 1, 2)
+        }
+
+    def between(self, first: float, last: float) -> list[tuple[int, float]]:
+        """The passes of 10 ms or more that began in ``[first, last]``: generation, seconds."""
+        return [(g, round(s, 3)) for g, at, s in self.passes if first <= at <= last and s >= 0.01]
+
+
+def test_the_collections_record_a_full_pass_in_its_gap() -> None:
+    """:class:`Collections` sees a full pass (generation 2) and places it in the gap it began in."""
+    collections = Collections()
+    gc.callbacks.append(collections)
+    try:
+        first = time.monotonic()
+        gc.collect(2)
+        last = time.monotonic()
+    finally:
+        gc.callbacks.remove(collections)
+    assert [g for g, _at, _s in collections.passes] == [2]
+    assert collections.by_generation()[2][0] == 1
+    assert [(g, first <= at <= last) for g, at, _s in collections.passes] == [(2, True)]
+
+
 @pytest.fixture
 def unfreeze() -> Iterator[None]:
     """The objects the test froze (:func:`freeze_loaded`) given back to the collector, and its
@@ -377,6 +423,8 @@ def test_the_snapshot_keeps_up_and_the_loop_is_not_held(
     )
     stop = threading.Event()
     loop = threading.Thread(target=worker.run, args=(stop,))
+    collections = Collections()
+    gc.callbacks.append(collections)
     loop.start()
     ticks, lags = [], []
     try:
@@ -398,7 +446,10 @@ def test_the_snapshot_keeps_up_and_the_loop_is_not_held(
     finally:
         stop.set()
         loop.join(timeout=30)
+        gc.callbacks.remove(collections)
     late = [b - a - PROBE_EVERY.total_seconds() for a, b in itertools.pairwise(starts)]
+    # The worst gap between two probe starts, and the collector's passes in it (#328).
+    worst = max(itertools.pairwise(starts), key=lambda pair: pair[1] - pair[0], default=None)
     figures["tick_max_s"] = max(details["seconds"] for details in ticks)
     figures["tick_mean_s"] = round(sum(details["seconds"] for details in ticks) / len(ticks), 3)
     figures["write_max_s"] = max(details["write_seconds"] for details in [*warm, *ticks])
@@ -408,13 +459,18 @@ def test_the_snapshot_keeps_up_and_the_loop_is_not_held(
     figures["probe_late_max_s"] = round(max(late, default=0.0), 3)
     figures["open_sessions"] = ticks[-1]["open_sessions"]
     figures["file_bytes"] = layout.activity.stat().st_size
+    figures["gc"] = collections.by_generation()
+    figures["gc_in_worst_gap"] = [] if worst is None else collections.between(*worst)
     # Printed on a pass too (as the live tail's guard does), so CI's log shows each run's margin.
     with capsys.disabled():
         print(f"\nactivity snapshot at {rate:g} lines/s, {devices} devices: {figures}")
     assert backlog(ticks[-1]) <= figures["backlog_after_warm_up"]
     assert figures["data_until_lag_max_s"] <= LAG_LIMIT.total_seconds()
     assert len(starts) >= TICKS
-    assert figures["probe_late_max_s"] < PROBE_LATE.total_seconds()
+    assert figures["probe_late_max_s"] < PROBE_LATE.total_seconds(), (
+        f"a probe started {figures['probe_late_max_s']} s late; the collector's passes in that "
+        f"gap (generation, seconds): {figures['gc_in_worst_gap']}, all: {figures['gc']}"
+    )
 
 
 def test_the_history_is_written_as_the_inserts_write_it(

@@ -264,12 +264,12 @@ def test_a_word_ending_in_a_colon_is_never_the_host_name() -> None:
 
 def test_timestamp_without_host_and_topics_retries_the_first_word() -> None:
     outcome = parse(
-        b"<30>2026-09-23T09:38:31.250+03:00 dhcp43 assigned 172.20.43.120 for 3C:52:82:00:00:11 PC"
+        b"<30>2026-09-23T09:38:31.250+03:00 dhcp43 assigned 172.20.43.120 for 00:00:5E:00:53:1C PC"
     )
     assert outcome.message["host"] is None
-    assert outcome.message["text"] == "dhcp43 assigned 172.20.43.120 for 3C:52:82:00:00:11 PC"
+    assert outcome.message["text"] == "dhcp43 assigned 172.20.43.120 for 00:00:5E:00:53:1C PC"
     assert typed(outcome) == dhcp(
-        "dhcp43", 43, "assigned", "172.20.43.120", "3c:52:82:00:00:11", "PC"
+        "dhcp43", 43, "assigned", "172.20.43.120", "00:00:5e:00:53:1c", "PC"
     )
     only_word = parse(b"<30>2026-09-23T09:38:31+03:00 ARCI-HEARTBEAT")
     assert only_word.message["type"] == "heartbeat"
@@ -532,9 +532,9 @@ def test_configuration_changes_default_patterns() -> None:
             {"action": action, "user_name": "admin", "target": target, "via": None, "extra": {}},
         )
     detail = parse(
-        b"<30>R system,info ip address added by admin (/ip address add address=1.2.3.4/24)"
+        b"<30>R system,info ip address added by admin (/ip address add address=203.0.113.124/24)"
     )
-    assert typed(detail)[1]["extra"] == {"detail": "(/ip address add address=1.2.3.4/24)"}
+    assert typed(detail)[1]["extra"] == {"detail": "(/ip address add address=203.0.113.124/24)"}
     assert synthetic("device changed name").message["type"] == "log"  # no "by <user>"
 
 
@@ -744,7 +744,9 @@ def test_assigned_outside_dhcp_is_not_a_dhcp_failure() -> None:
 
 
 def test_firewall_shape_without_the_firewall_topic_is_counted() -> None:
-    outcome = parse(STAMP.encode() + b"rule 7 in:ether1 out:ether2 proto TCP 1.2.3.4->5.6.7.8")
+    outcome = parse(
+        STAMP.encode() + b"rule 7 in:ether1 out:ether2 proto TCP 203.0.113.124->203.0.113.128"
+    )
     assert outcome.error == "mikrotik.firewall"
     assert parse(STAMP.encode() + b"system,info in:ether1 out:ether2 somehow").error is None
 
@@ -754,7 +756,7 @@ def test_known_host_names_make_the_header_deterministic() -> None:
     same shape; the device identities decide (review finding, minor)."""
     named = MikroTikParser(host_names=["core-r1", "SWITCH-1"])
     stamp = b"<30>2026-09-23T09:38:26+03:00 "
-    firewall = b"input: in:ether2 out:(unknown 0), proto TCP (SYN), 1.2.3.4:5->100.64.12.9:22"
+    firewall = b"input: in:ether2 out:(unknown 0), proto TCP (SYN), 203.0.113.124:5->100.64.12.9:22"
     ambiguous = parse(stamp + b"DROP-WAN " + firewall)  # default: BSD convention
     assert (ambiguous.message["host"], typed(ambiguous)[1]["prefix"]) == ("DROP-WAN", None)
     no_host = parse(stamp + b"DROP-WAN " + firewall, named)

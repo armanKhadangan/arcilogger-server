@@ -11,7 +11,7 @@ import {
 const NOW = new Date('2026-10-13T15:00:00+03:00');
 const owner = { id: 1, name: 'Selin Kaya' };
 const PC = { mac: '00:00:5e:00:53:57', assigned_since: '2026-03-12T09:00:00+03:00', person: owner };
-const UNKNOWN = { mac: '3c:52:82:00:00:05', assigned_since: null, person: null };
+const UNKNOWN = { mac: '00:00:5e:00:53:1b', assigned_since: null, person: null };
 
 function draft(patch: Partial<AssignDraft> = {}): AssignDraft {
   return { ...initialDraft(NOW), personId: 6, ...patch };
@@ -77,9 +77,12 @@ describe('bulk assignment checks', () => {
     expect(checkAssign('assign', draft(), [], NOW).errors.devices).toBe(
       'devices.assign.errors.noDevices',
     );
+    // More MACs than the documentation range (00:00:5E:00:53:xx) has: 00:00:5E:00:<hi>:<lo>,
+    // IANA's own block, no vendor's. 00:00:5E:00:01:xx and 00:00:5E:00:02:xx are VRRP's; nothing
+    // in the product treats them specially. If it ever does, these move to 02:00:5E:… (#308).
     const many = Array.from({ length: ASSIGN_MAX_DEVICES + 1 }, (_, index) => ({
       ...UNKNOWN,
-      mac: `3c:52:82:00:${String(Math.floor(index / 256)).padStart(2, '0')}:${(index % 256).toString(16).padStart(2, '0')}`,
+      mac: `00:00:5e:00:${String(Math.floor(index / 256)).padStart(2, '0')}:${(index % 256).toString(16).padStart(2, '0')}`,
     }));
     expect(checkAssign('assign', draft(), many, NOW).errors.devices).toBe(
       'devices.assign.errors.tooMany',

@@ -501,9 +501,9 @@ def test_a_lease_rebuild_reports_progress_and_finishes_with_its_audit_entry(
     requester: User,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    evidence.dhcp(tr(DAY, 22), "assigned", "172.20.43.120", "f0:1f:af:00:00:01")
+    evidence.dhcp(tr(DAY, 22), "assigned", "172.20.43.120", "00:00:5e:00:53:3b")
     evidence.dhcp(
-        tr(DAY + timedelta(days=1), 2), "deassigned", "172.20.43.120", "f0:1f:af:00:00:01"
+        tr(DAY + timedelta(days=1), 2), "deassigned", "172.20.43.120", "00:00:5e:00:53:3b"
     )
     set_watermark(db_session, tr(DAY + timedelta(days=2), 0))
     db_session.commit()

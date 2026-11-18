@@ -86,15 +86,16 @@ departmanlar ve sunucu ayarları kurulumdan sonra web arayüzünde tanımlanır
 
 ## Durum
 
-Bu sürüm (0.5.0): MVP (M2/M3'ün temel parçaları, kimlik doğrulama ve denetim kaydı (M6'dan),
+Bu sürüm (0.5.1): MVP (M2/M3'ün temel parçaları, kimlik doğrulama ve denetim kaydı (M6'dan),
 Windows kurulum programı (M7'den)), ardından eklenenler (Wave 0–5), 0.3.0'ın eklentileri
 (masaüstü simgesi ve bildirim alanı, Veritabanı sayfası, yedeklerin NAS kopyası, verilerle
 birlikte kaldırma), 0.3.1–0.3.3'ün TÜRKTRUST ve kurulum düzeltmeleri ve 0.4.0'ın kolay kurulumu
 (PostgreSQL kurulumla gelir, kurulum soruları pencerelerde, TÜRKTRUST varsayılan, kurulum sonunda
 otomatik denetim, e-posta sağlayıcı seçimi), 0.4.1'in düzeltmeleri (web'deki "Doğrula" ve
-e-posta bağlantı noktası açıklaması) ve 0.5.0'ın güvenlik kuralları (Wave 6: R01–R19 güvenlik
+e-posta bağlantı noktası açıklaması), 0.5.0'ın güvenlik kuralları (Wave 6: R01–R19 güvenlik
 kuralları ve kural motoru, Ayarlar → Güvenlik kuralları düzenleyicisi, webhook'lar, cihaz saati
-uyarısı). Tablo her aşamanın bugünkü durumunu gösterir ([CHANGELOG.md](CHANGELOG.md), "0.5.0").
+uyarısı) ve 0.5.1'in düzeltmeleri (R13/R14 bir telafi sırasında). Tablo her aşamanın bugünkü
+durumunu gösterir ([CHANGELOG.md](CHANGELOG.md), "0.5.1").
 
 | Aşama | Kapsam | Durum |
 |---|---|---|

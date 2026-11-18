@@ -17,7 +17,7 @@ Yük testleri, demo verisi ve testler için kurgusal örnek ağı (bir güvenlik
 olan ana yönlendirici ve bir anahtar) taklit eden syslog üretir: üç departman VLAN'ında (41
 Finans, 42 Planlama, 43 İdari İşler) `--users` kişi (varsayılan 120), her birinin departman
 VLAN'ında kablolu bir bilgisayarı ve personel Wi-Fi'sinde (VLAN 60; herkesin telefonu orada)
-**rastgele MAC** kullanan bir telefonu; misafirler (dhcp61, 1 saatlik kira; güvenlik duvarından
+**özel (yerel yönetilen) MAC** kullanan bir telefonu; misafirler (dhcp61, 1 saatlik kira; güvenlik duvarından
 herkes gibi geçen, kişisi olmayan cihazlar); VLAN 10'da statik ağ cihazları (erişim noktaları,
 yazıcılar, anahtar, yönetici bilgisayarı 172.20.10.37), VLAN 20'de sunucular (kullanıcıların DNS
 sunucusu 172.20.20.53). Mesai düzeni (geliş, öğle arası, çıkış, hafta sonu az kişi), DHCP
@@ -148,6 +148,16 @@ uv run python tools/loadgen/arcilogger_loadgen.py --scenario brute-force,mac-fla
   site planlarında her DHCP satırı gerçek ayrıştırıcıda `fg_dhcp` satırı olur ve doğruluk
   verisiyle karşılaştırılır, yenilemeler kiranın yarısında, çıkış payları ±%2 içinde),
   `tests/test_mvp_end_to_end.py` (uçtan uca MVP testi bu üreteci kullanır).
+- **Değişiklik (2026-11-17, #315): MAC adresleri.** Bütün MAC'ler artık IANA'nın bloğunda
+  (kurgusal dünya, gerçek bir üreticinin değil): bilgisayarlar `00:00:5e:00:10:xx`'ten başlar
+  (belgeleme aralığının, `00:00:5e:00:53:xx`, 256 adresinden sonrası), yazıcılar diğer altyapı
+  cihazları gibi adreslerinin son baytını alır (`00:00:5e:00:53:51`–`54`; OUI araması artık üretici
+  adı vermez), telefonların özel (yerel yönetilen) adresleri `02:00:5e:10:xx:xx`, her gün yeni MAC
+  alan telefonlar `02:00:5e:<gün>:xx:xx`, misafirler `02:00:5e:08:xx:xx`. Rastgele seçimler aynı
+  kaldı: MAC'ler maskelendiğinde çıktı bayt bayt aynıdır, kiralar ve oturumlar değişmez. MAC
+  değerleri baytları değiştirdiği için testteki sabit özet (`DEFAULT_DIGEST`) bilinçli olarak bir
+  kez yeniden sabitlendi. #40'ın 1.
+  maddesi (aynı adreste aynı anda iki kira) #89 ile özet değişmeden düzeltilmişti.
 
 ## English
 
@@ -156,7 +166,7 @@ serves DHCP and a switch; tests and examples use a fictional organisation and ne
 tests, demo data and tests. The formats follow the format samples (`tests/fixtures/format/`,
 modelled on FortiOS 7.6 / RouterOS 7 output) and the synthetic fixtures where there is no sample
 yet. People in three department VLANs (41 Finans, 42 Planlama, 43 İdari İşler), each with a
-wired PC and a phone with a randomised MAC on the staff Wi-Fi (VLAN 60, everyone's), guests (1 h
+wired PC and a phone with a private (locally administered) MAC on the staff Wi-Fi (VLAN 60, everyone's), guests (1 h
 leases; anonymous devices that browse through the firewall like everyone else), static network
 devices in VLAN 10 (access points, printers, a switch, the admin PC), servers in VLAN 20 (the
 users' DNS server 172.20.20.53);
@@ -168,7 +178,7 @@ of the simulation to verify on site; ports are given out in time order over all 
 Deterministic per `--seed`.
 
 Wave 3 site plans (each option defaults to the behaviour above; the default output stays the
-same, byte for byte, apart from the 2026-11-02 change below):
+same, byte for byte, apart from the 2026-11-02 and 2026-11-17 changes below):
 
 - **`--dhcp-server mikrotik|fortigate|both`** (default `mikrotik`). `fortigate`: a
   FortiGate-only site, where the FortiGate is every VLAN's gateway and DHCP server. DHCP churn
@@ -212,6 +222,17 @@ this happened change their bytes (the line count stays the same), for example tw
 defaults; the single days checked (2026-09-23, 2026-10-27) and the pinned test digest did not
 change. The staff Wi-Fi now fills up at
 about 125 users instead of 160. Keep this in mind when you compare with earlier outputs.
+
+**Change (2026-11-17, #315): MAC addresses.** Every MAC is now in IANA's block (the fictional
+world, no real vendor's): PCs from `00:00:5e:00:10:xx` on (past the 256 addresses of the
+documentation range `00:00:5e:00:53:xx`), printers the last byte of their address like the rest of
+the infrastructure (`00:00:5e:00:53:51`–`54`; the OUI lookup names no vendor for them any more),
+phones' private (locally administered) addresses `02:00:5e:10:xx:xx`, phones that take a new MAC
+every day `02:00:5e:<day>:xx:xx`, guests `02:00:5e:08:xx:xx`. The random choices are the same:
+with the MACs masked the output is the same byte for byte, and the leases and sessions do not
+change. The MAC values change the bytes, so the test's pinned digest (`DEFAULT_DIGEST`) was
+re-pinned once, on purpose.
+#40 item 1 (two leases on one address at one moment) was fixed by #89 without changing it.
 
 Commands: `spool` (raw spool files exactly as the collector writes them, through
 `arcilogger_core.rawlog.format_line`; refuses to append unless `--append`, and refuses a data

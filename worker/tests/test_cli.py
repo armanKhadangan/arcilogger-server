@@ -74,9 +74,9 @@ def test_rebuild_a_range(
     evidence: Evidence,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    evidence.dhcp(tr(DAY, 22), "assigned", "172.20.43.120", "f0:1f:af:00:00:01")
+    evidence.dhcp(tr(DAY, 22), "assigned", "172.20.43.120", "00:00:5e:00:53:3b")
     evidence.dhcp(
-        tr(DAY + timedelta(days=1), 2), "deassigned", "172.20.43.120", "f0:1f:af:00:00:01"
+        tr(DAY + timedelta(days=1), 2), "deassigned", "172.20.43.120", "00:00:5e:00:53:3b"
     )
     # Rebuilds stop at the incremental job's watermark (here: two days later).
     set_watermark(db_session, tr(DAY + timedelta(days=2), 0))

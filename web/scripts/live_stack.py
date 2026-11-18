@@ -73,9 +73,9 @@ PC_SERVER, PC_LEASE = "dhcp42", (10, 42, 18)
 ROGUE_MAC = "00:00:5e:00:53:9a"
 PERSON, DEPARTMENT, DEVICE_NAME = "Selin Kaya", "Planlama", "Planlama-PC-14"
 OTHERS = (
-    ("172.20.42.165", "3c:52:82:00:00:05", "PLN-PC-05", "dhcp42"),
-    ("172.20.41.15", "00:15:5d:00:00:20", "FIN-PC-01", "dhcp41"),
-    ("172.20.43.44", "a4:83:e7:00:00:44", "IDR-PC-04", "dhcp43"),
+    ("172.20.42.165", "00:00:5e:00:53:1b", "PLN-PC-05", "dhcp42"),
+    ("172.20.41.15", "00:00:5e:00:53:0c", "FIN-PC-01", "dhcp41"),
+    ("172.20.43.44", "00:00:5e:00:53:36", "IDR-PC-04", "dhcp43"),
 )
 
 SEED_CONFIG = (
@@ -130,7 +130,7 @@ def _write_spool(config_path: Path) -> date:
         spool.dhcp(tr(day, 8, 12), "assigned", ip, mac, server=server, hostname=hostname)
     spool.dhcp(tr(day, *PC_LEASE), "assigned", PC, PC_MAC, server=PC_SERVER, hostname=PC_HOST)
     spool.traffic(tr(day, *AT), PC, WAN_PORT, "203.0.113.10", 443, duration=10)
-    destinations = [("198.51.100.69", 443), ("198.51.100.169", 443), ("8.8.8.8", 53)]
+    destinations = [("198.51.100.69", 443), ("198.51.100.169", 443), ("198.51.100.153", 53)]
     for index in range(9):
         ip = OTHERS[index % len(OTHERS)][0]
         dstip, dstport = destinations[index % len(destinations)]

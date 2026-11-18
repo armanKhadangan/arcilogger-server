@@ -1056,8 +1056,8 @@ def live(pg_dsn: str, tmp_path: Path) -> Iterator[Live]:
         session.flush()
         session.add_all(
             [
-                Device(mac="aa:bb:cc:00:00:01", name="Kişi 0 PC", person_id=people[0].id),
-                Device(mac="aa:bb:cc:00:00:02", hostnames=["yazici"]),
+                Device(mac="02:00:5e:00:53:08", name="Kişi 0 PC", person_id=people[0].id),
+                Device(mac="02:00:5e:00:53:09", hostnames=["yazici"]),
             ]
         )
         now = datetime.now(UTC)

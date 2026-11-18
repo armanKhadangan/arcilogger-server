@@ -951,11 +951,11 @@ const SITES: SiteDef[] = [
     paths: [],
   },
   {
-    domain: '8.8.8.8',
+    domain: '198.51.100.153',
     kind: 'ip',
     category: null,
     background: true,
-    hosts: ['8.8.8.8'],
+    hosts: ['198.51.100.153'],
     app: null,
     appcat: null,
     rate: 2_500,
@@ -1066,7 +1066,7 @@ function owned(person: number | null): DeviceDef['owners'] {
 
 const DEVICES: DeviceDef[] = [
   {
-    mac: '3c:52:82:00:10:01',
+    mac: '00:00:5e:00:53:1e',
     ip: '172.20.43.37',
     name: "Ayşe'nin bilgisayarı",
     hostname: 'PC-01',
@@ -1089,7 +1089,7 @@ const DEVICES: DeviceDef[] = [
   },
   {
     // Burak Demir's until the capture's "today", then Can Öztürk's (the capture reassigned it).
-    mac: '3c:52:82:00:10:03',
+    mac: '00:00:5e:00:53:24',
     ip: '172.20.42.82',
     name: 'Planlama bilgisayarı',
     hostname: 'PC-03',
@@ -1112,7 +1112,7 @@ const DEVICES: DeviceDef[] = [
     },
   },
   {
-    mac: '3c:52:82:00:10:02',
+    mac: '00:00:5e:00:53:1f',
     ip: '172.20.43.81',
     name: null,
     hostname: 'PC-02',
@@ -1159,7 +1159,7 @@ const DEVICES: DeviceDef[] = [
     profile: PHONE,
   },
   {
-    mac: '3c:52:82:00:00:11',
+    mac: '00:00:5e:00:53:1c',
     ip: '172.20.43.11',
     name: null,
     hostname: 'IDR-PC-11',
@@ -1175,7 +1175,7 @@ const DEVICES: DeviceDef[] = [
     },
   },
   {
-    mac: 'a2:41:00:00:00:31',
+    mac: '02:00:5e:00:53:06',
     ip: '172.20.60.131',
     name: 'Galaxy S24',
     hostname: null,
@@ -1185,7 +1185,7 @@ const DEVICES: DeviceDef[] = [
   },
   {
     // A laptop on the staff Wi-Fi (no department of its own: its owner's counts).
-    mac: 'a4:83:e7:00:00:13',
+    mac: '00:00:5e:00:53:34',
     ip: '172.20.60.83',
     name: 'NB-03',
     hostname: 'NB-03',
@@ -1205,7 +1205,7 @@ const DEVICES: DeviceDef[] = [
     },
   },
   {
-    mac: '3c:52:82:00:00:04',
+    mac: '00:00:5e:00:53:1a',
     ip: '172.20.42.84',
     name: 'PLN-PC-04',
     hostname: 'PLN-PC-04',
@@ -1226,7 +1226,7 @@ const DEVICES: DeviceDef[] = [
     },
   },
   {
-    mac: 'f0:1f:af:00:00:02',
+    mac: '00:00:5e:00:53:3c',
     ip: '172.20.41.22',
     name: 'FIN-PC-02',
     hostname: 'FIN-PC-02',
@@ -1247,7 +1247,7 @@ const DEVICES: DeviceDef[] = [
     },
   },
   {
-    mac: '00:15:5d:00:00:23',
+    mac: '00:00:5e:00:53:0d',
     ip: '172.20.43.23',
     name: 'IDR-PC-03',
     hostname: 'IDR-PC-03',
@@ -1278,7 +1278,7 @@ const DEVICES: DeviceDef[] = [
     profile: { ...PHONE, intensity: 0.2 },
   },
   {
-    mac: 'a4:83:e7:00:00:21',
+    mac: '00:00:5e:00:53:35',
     ip: '172.20.42.21',
     name: 'PLN-PC-01',
     hostname: 'PLN-PC-01',
@@ -1314,7 +1314,7 @@ const DEVICES: DeviceDef[] = [
   },
   // Devices assigned to nobody: the VLAN's department (spec 9.2), "Bilinmiyor" without one.
   {
-    mac: '3c:52:82:00:00:05',
+    mac: '00:00:5e:00:53:1b',
     ip: '172.20.42.25',
     name: 'PLN-PC-05',
     hostname: 'PLN-PC-05',
@@ -1370,7 +1370,7 @@ const DEVICES: DeviceDef[] = [
   },
   {
     // A small server (VLAN 20 "Sunucular" has no department).
-    mac: 'd8:3a:dd:00:00:70',
+    mac: '00:00:5e:00:53:3a',
     ip: '172.20.20.70',
     name: null,
     hostname: 'raspberrypi',

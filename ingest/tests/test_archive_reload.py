@@ -44,6 +44,7 @@ compressed chunks compresses them itself.
 
 from __future__ import annotations
 
+import gc
 import gzip
 import json
 import logging
@@ -53,6 +54,7 @@ import threading
 import warnings
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
+from dataclasses import dataclass
 from datetime import UTC, date, datetime, time, timedelta
 from itertools import pairwise
 from pathlib import Path
@@ -86,6 +88,7 @@ from arcilogger_db.searchcounts import rebuild_stream, stream_window, verify
 from arcilogger_db.settings import DEFAULT_SETTINGS, set_setting
 from arcilogger_db.testing import pause_compression_jobs
 from arcilogger_ingest import service as service_module
+from arcilogger_ingest import status as status_module
 from arcilogger_ingest.files import VaultReader, VaultReadError
 from arcilogger_ingest.service import (
     ARCHIVE_NOT_IN_VAULT,
@@ -1306,29 +1309,68 @@ def endless_scans(monkeypatch: pytest.MonkeyPatch, endless: EndlessFile) -> None
     monkeypatch.setattr(service_module, "VaultReader", EndlessReader)
 
 
-def timed_status_writes(monkeypatch: pytest.MonkeyPatch) -> list[tuple[float, float]]:
-    """The start and end (:func:`monotonic`) of each status write, for the report of a stop:
-    a stop's 1.36 s on a Windows runner were, as far as Linux shows, the status writes it waited
-    for (#124 stage 2), which the runner's report then names."""
-    writes: list[tuple[float, float]] = []
+@dataclass
+class TimedWrite:
+    """A status write: its start and end (:func:`monotonic`) and the seconds of its two parts,
+    the status built (``build_status``) and the file replaced (``replace_text``)."""
+
+    start: float
+    end: float = 0.0
+    build: float = 0.0
+    file: float = 0.0
+
+
+def timed_status_writes(monkeypatch: pytest.MonkeyPatch) -> list[TimedWrite]:
+    """Each status write, timed, for the report of a stop: a stop's 1.36 s on a Windows runner
+    were, as far as Linux shows, the status writes it waited for (#124 stage 2), which the
+    runner's report then names; with the part of each that took the time (#328: one write of
+    1.047 s on a Windows runner, none above 0.032 s in 23 other runs)."""
+    writes: list[TimedWrite] = []
     write = StatusWriter.write
+    build, replace = status_module.build_status, status_module.replace_text
+    current = threading.local()
 
     def timed(self: StatusWriter, service: IngestService) -> None:
-        start = monotonic()
+        current.write = TimedWrite(monotonic())
         try:
             write(self, service)
         finally:
-            writes.append((start, monotonic()))
+            current.write.end = monotonic()
+            writes.append(current.write)
+
+    def built(service: IngestService) -> dict[str, Any]:
+        start = monotonic()
+        try:
+            return build(service)
+        finally:
+            if (timed_write := getattr(current, "write", None)) is not None:
+                timed_write.build += monotonic() - start
+
+    def replaced(path: Path, text: str) -> None:
+        start = monotonic()
+        try:
+            replace(path, text)
+        finally:
+            if (timed_write := getattr(current, "write", None)) is not None:
+                timed_write.file += monotonic() - start
 
     monkeypatch.setattr(StatusWriter, "write", timed)
+    monkeypatch.setattr(status_module, "build_status", built)
+    monkeypatch.setattr(status_module, "replace_text", replaced)
     return writes
 
 
-def writes_after(writes: list[tuple[float, float]], stopped: float) -> str:
-    """``status writes after it: 1, 0.004 s``: the writes that ended after the stop, and the
-    part of the stop's time they took (the one under way counts from the stop)."""
-    late = [end - max(start, stopped) for start, end in list(writes) if end >= stopped]
-    return f"status writes after it: {len(late)}, {sum(late):.3f} s"
+def writes_after(writes: list[TimedWrite], stopped: float) -> str:
+    """``status writes after it: 1, 0.004 s (status 0.001 s, file 0.003 s)``: the writes that
+    ended after the stop, the part of the stop's time they took (the one under way counts from
+    the stop), and their two parts in all."""
+    late = [w for w in list(writes) if w.end >= stopped]
+    took = sum(w.end - max(w.start, stopped) for w in late)
+    build, file = sum(w.build for w in late), sum(w.file for w in late)
+    return (
+        f"status writes after it: {len(late)}, {took:.3f} s "
+        f"(status {build:.3f} s, file {file:.3f} s)"
+    )
 
 
 @pytest.mark.parametrize("step", ["claim", "reset"])
@@ -1422,10 +1464,24 @@ def test_a_stop_during_a_reloads_check_waits_for_no_fsync(
         sleep(SLOW_DDL if ddl else SLOW_STATEMENT)
 
     fsync = os.fsync
+    fsyncs: list[tuple[str, float, float]] = []  # thread, start, end (#328)
 
     def slow_fsync(fd: int) -> None:
-        sleep(SLOW_FSYNC)
-        fsync(fd)
+        start = monotonic()
+        try:
+            sleep(SLOW_FSYNC)
+            fsync(fd)
+        finally:
+            fsyncs.append((threading.current_thread().name, start, monotonic()))
+
+    passes: list[tuple[int, float, float]] = []  # the collector's: generation, start, end
+    began: list[float] = []
+
+    def collected(phase: str, info: dict[str, Any]) -> None:
+        if phase == "start":
+            began.append(monotonic())
+        elif began:
+            passes.append((int(info["generation"]), began.pop(), monotonic()))
 
     with monkeypatch.context() as patch:
         if step == "claim":
@@ -1435,6 +1491,7 @@ def test_a_stop_during_a_reloads_check_waits_for_no_fsync(
         patch.setattr(os, "fsync", slow_fsync)
         writes = timed_status_writes(patch)
         event.listen(db_engine, "before_cursor_execute", slow)
+        gc.callbacks.append(collected)
         try:
             service = world.service(db_engine, archive_seconds=0.0)
             results: list[int] = []
@@ -1447,13 +1504,27 @@ def test_a_stop_during_a_reloads_check_waits_for_no_fsync(
                 stopped = monotonic()
                 runner.join(WAIT)
                 took = monotonic() - stopped
-                report = f"{took:.3f} s, {writes_after(writes, stopped)}"
+                # What else ran after the stop: an fsync (patched: SLOW_FSYNC each) and the
+                # collector's passes of 10 ms or more, which hold every thread (#328).
+                late_fsyncs = [
+                    (name, round(end - start, 3)) for name, start, end in fsyncs if end >= stopped
+                ]
+                late_passes = [
+                    (g, round(end - start, 3))
+                    for g, start, end in passes
+                    if end >= stopped and end - start >= 0.01
+                ]
+                report = (
+                    f"{took:.3f} s, {writes_after(writes, stopped)}, fsyncs after it: "
+                    f"{late_fsyncs}, collector passes after it: {late_passes}"
+                )
                 warnings.warn(
                     f"stop during the {step} check on a slow disk: {report}",
                     UserWarning,
                     stacklevel=1,
                 )
         finally:
+            gc.callbacks.remove(collected)
             event.remove(db_engine, "before_cursor_execute", slow)
         assert results == [0]
         assert slowed, "no statement of the service was slowed"
@@ -2670,7 +2741,11 @@ def test_a_claim_check_whose_service_stopped_opens_no_further_file(
     """A stop that comes between two files of the claim's check (#182 review): the check opens
     no further file and ends (``CheckStoppedError``), rather than reading the next file whole,
     or running into the next test's patched check, as two check threads once did on a Windows
-    runner. The request stays ``queued``; the next start claims it."""
+    runner. The request stays ``queued``; the next start claims it.
+
+    The claim is taken where the loop hands it on (``_finish_claim``, right after it sets it),
+    not read from the service once the check holds: the check thread starts before the loop sets
+    ``_claim``, so a read at the gate could find ``None`` (#328)."""
     load_day(world, db_engine)
     drop(db_engine, DAY + timedelta(days=2))
     reload_id = queue(db_engine, DAY)
@@ -2688,14 +2763,25 @@ def test_a_claim_check_whose_service_stopped_opens_no_further_file(
         return result
 
     monkeypatch.setattr(IngestService, "_sealed_file_intact", intact)
+    finish = IngestService._finish_claim
+    claims: list[PendingClaim] = []
+    claimed = threading.Event()  # the loop has set the claim with its check
+
+    def handed_on(self: IngestService, claim: PendingClaim) -> ArchiveJob | None:
+        if claim.check is not None:
+            claims.append(claim)
+            claimed.set()
+        return finish(self, claim)
+
+    monkeypatch.setattr(IngestService, "_finish_claim", handed_on)
     service = world.service(db_engine, archive_seconds=0.0)
     results: list[int] = []
     runner = threading.Thread(target=lambda: results.append(service.run()))
     runner.start()
     try:
         assert between.entered.wait(WAIT)
-        claim = service._claim
-        assert claim is not None
+        assert claimed.wait(WAIT)
+        claim = claims[0]
         assert claim.check is not None
         assert len(claim.files or {}) >= 2, "the day needs two files for a stop between them"
     finally:

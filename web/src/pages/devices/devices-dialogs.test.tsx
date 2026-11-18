@@ -116,7 +116,7 @@ describe('Cihazlar ve Kişiler — dialogs from their first frame', () => {
     const user = userEvent.setup();
     const table = await screen.findByRole('table', { name: 'Ağda görülen cihazlar' });
     await user.click(
-      await within(table).findByRole('checkbox', { name: 'Seç: 3c:52:82:00:00:05' }),
+      await within(table).findByRole('checkbox', { name: 'Seç: 00:00:5e:00:53:1b' }),
     );
     const assign = within(screen.getByTestId('bulk-bar')).getByRole('button', {
       name: 'Kişiye ata',

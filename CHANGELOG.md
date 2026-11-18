@@ -5,6 +5,58 @@ versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.5.1] — 2026-11-18
+
+Release version 0.5.1 (`v0.5.1`): fixes after 0.5.0, among them 0.5.0's known limitation (R13 and
+R14 in a catch-up). Upgrading: run the new `ARCILOGGER-Setup-0.5.1.exe`; it upgrades in place and
+keeps the data and the settings.
+
+### Fixed
+- **R13 and R14 keep up in a catch-up** (#302, #325). This removes 0.5.0's known limitation.
+  - When ingest catches up after an outage, one minute of receive time can hold hours of device
+    time, and it arrives faster than PostgreSQL updates its statistics.
+  - R13's and R14's read of the touched sessions then took a plan that grew with the square of
+    the sessions. A 6-hour catch-up slice took 745 s for R13, past the 20-s
+    `rules.statement_timeout_seconds`, so `R20-rules` opened and the slice was skipped.
+  - The sessions and their keys are now bound arrays that PostgreSQL hashes, planned with their
+    values (`plan_cache_mode = force_custom_plan` for the rule's transaction).
+  - A catch-up slice of 600,000 rows over 6 or 24 hours of device time now takes 1.8–3 s, with
+    the same alerts as one read of the period.
+- **A search that runs out of time no longer blames database maintenance for it** (#329).
+  - The search started timing its wait for the partition lock before it had its database
+    connection. On a busy server the connection alone could use up a short
+    `search.request_budget_ms`.
+  - The answer then said that the search had waited for database maintenance (the lock-wait
+    text).
+  - Only the wait for the lock is timed now, and that text is shown only for such a wait.
+
+### Changed
+- **Examples and test data only: the fictional world's addresses everywhere**
+  (#313/#314, #315/#316, #317/#318, #303/#326). No product behaviour changes.
+  - Public IPv4 addresses in examples and tests are RFC 5737's (192.0.2.x, 198.51.100.x,
+    203.0.113.x).
+  - MAC addresses are the documentation block's (`00:00:5E:00:53:xx`, and `02:00:5E:…` for a
+    phone's private address).
+  - The load generator's MACs are in IANA's block too, and its `DEFAULT_DIGEST` was re-pinned once.
+  - Two repository tests now keep both rules (`tests/test_example_ipv4.py`,
+    `tests/test_example_data.py`).
+  - The format hint `aa:bb:cc:dd:ee:ff` in the interface, the API texts and the docs stays as it
+    was.
+
+### Tests and CI
+- Flaky tests fixed at their cause, with no bound raised and no assertion loosened:
+  - the rule editor's second Escape (#310, #327);
+  - an archive reload's claim read too early (#330);
+  - a lock-budget test whose clock included a connection start (#333);
+  - the desktop status window's thread, now ended before its test ends, so that no Tk object is
+    freed outside its thread (#336).
+- Two Windows guards now report what took the time when they trip: the stop's last status write,
+  and the collector's passes in the worst probe gap (#331, #332, #328).
+
+### Upgrade note
+- In place, as before. **No database migration since 0.5.0**: `0027_rule_traffic_totals` stays
+  the latest revision, so the upgrade's migration step has nothing to do.
+
 ## [0.5.0] — 2026-11-17
 
 Release version 0.5.0 (`v0.5.0`): Wave 6, the security rules, the rule editor and webhooks.

@@ -31,7 +31,7 @@ from arcilogger_db.models import Device, DeviceAssignment, Person
 from arcilogger_db.testing import TestServer
 
 NOW = datetime(2026, 10, 19, 9, 0, tzinfo=UTC)
-MAC, OTHER = "f0:1f:af:00:00:01", "02:00:5e:00:53:46"
+MAC, OTHER = "00:00:5e:00:53:3b", "02:00:5e:00:53:46"
 
 
 def at(days: float) -> datetime:
@@ -246,7 +246,7 @@ def test_apply_writes_history_and_the_current_owner(
     db_session: Session, devices: tuple[int, int]
 ) -> None:
     ayse, mehmet = devices
-    owners = lock_devices(db_session, [MAC, OTHER, "00:00:00:00:00:01"])
+    owners = lock_devices(db_session, [MAC, OTHER, "00:00:5e:00:53:04"])
     assert owners == {MAC: None, OTHER: None}
     planner = Planner(load_history(db_session, [MAC, OTHER]), now=NOW, owners=owners)
     planner.assign(MAC, ayse, at(10), note="ilk")
@@ -297,8 +297,8 @@ def test_migration_backfills_existing_links_and_downgrades(empty_engine: Engine)
             )
         ).all()
     assert [tuple(row) for row in rows] == [
-        (OTHER, person, created, None, ":migration", True),
         (MAC, person, seen, None, ":migration", True),
+        (OTHER, person, created, None, ":migration", True),
     ]
     with empty_engine.begin() as connection:
         command.downgrade(alembic_config(connection), "0007_evidence_seals")

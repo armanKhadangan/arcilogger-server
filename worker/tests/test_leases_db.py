@@ -41,8 +41,8 @@ DAY = date(2026, 10, 12)
 NEXT = DAY + timedelta(days=1)
 LATER = tr(DAY + timedelta(days=5), 0)
 PC = "172.20.43.120"
-A = "f0:1f:af:00:00:01"
-B = "f0:1f:af:00:00:02"
+A = "00:00:5e:00:53:3b"
+B = "00:00:5e:00:53:3c"
 PHONE = "02:00:5e:00:53:46"
 
 
@@ -73,7 +73,7 @@ def test_rebuild_builds_dhcp_arp_and_traffic_intervals(
     last_traffic = evidence.traffic(tr(DAY, 16), PC, 50002)
     closed = evidence.dhcp(tr(DAY, 17), "deassigned", PC, A, hostname="PC-07")
     for hour in (9, 10, 11):
-        evidence.arp(tr(DAY, hour), "172.20.10.237", "00:1b:a9:00:00:10", "vlan10")
+        evidence.arp(tr(DAY, hour), "172.20.10.237", "00:00:5e:00:53:19", "vlan10")
     evidence.dhcp(
         tr(DAY, 10), "assigned", "172.20.60.183", PHONE, server="dhcp60", hostname="Telefon-12"
     )
@@ -134,9 +134,9 @@ def test_evidence_points_at_the_exact_raw_lines(db_session: Session, evidence: E
     assert (closing.raw.line, closing.raw.offset) == (3, closing.raw.offset)
     first = evidence.raw_line("core-r1", DAY, opening.raw.line, opening.raw.offset or 0)
     last = evidence.raw_line("core-r1", DAY, closing.raw.line, closing.raw.offset or 0)
-    assert first.endswith(b"dhcp43 assigned 172.20.43.120 for F0:1F:AF:00:00:01 PC-07\n")
-    assert last.endswith(b"dhcp43 deassigned 172.20.43.120 for F0:1F:AF:00:00:01 PC-07\n")
-    assert opening.summary == "dhcp43 assigned 172.20.43.120 for f0:1f:af:00:00:01 PC-07"
+    assert first.endswith(b"dhcp43 assigned 172.20.43.120 for 00:00:5E:00:53:3B PC-07\n")
+    assert last.endswith(b"dhcp43 deassigned 172.20.43.120 for 00:00:5E:00:53:3B PC-07\n")
+    assert opening.summary == "dhcp43 assigned 172.20.43.120 for 00:00:5e:00:53:3b PC-07"
 
 
 def test_interval_crossing_midnight_is_one_row_whatever_the_rebuild_order(
@@ -305,7 +305,7 @@ def test_devices_are_upserted_without_touching_admin_fields(
     oui = tmp_path / "oui.csv"
     oui.write_text(
         "Registry,Assignment,Organization Name,Organization Address\n"
-        'MA-L,F01FAF,"Example Devices, Inc.",Somewhere\n',
+        'MA-L,00005E,"Example Devices, Inc.",Somewhere\n',
         encoding="utf-8",
     )
     set_setting(db_session, "devices.oui_file", str(oui), updated_by="tolga")
@@ -463,7 +463,7 @@ def test_rebuilding_one_old_day_follows_long_intervals_to_their_end(
     """A printer seen every hour for days and a PC kept alive by traffic: rebuilding only the
     first day (look-ahead) gives the same rows as rebuilding every day in order."""
     first = DAY - timedelta(days=1)
-    printer, printer_mac = "172.20.10.237", "00:1b:a9:00:00:10"
+    printer, printer_mac = "172.20.10.237", "00:00:5e:00:53:19"
     evidence.dhcp(tr(first, 8), "assigned", PC, A)
     moment = tr(first, 8)
     while moment <= tr(DAY + timedelta(days=2), 10):

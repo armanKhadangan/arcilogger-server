@@ -39,9 +39,9 @@ from arcilogger_worker.testing import Evidence, tr
 #: The golden day (a Wednesday) and the next one (the session over midnight ends there).
 DAY = date(2026, 10, 14)
 NEXT = DAY + timedelta(days=1)
-PC1, PC1_MAC = "172.20.43.37", "3c:52:82:00:10:01"
-PC2, PC2_MAC = "172.20.43.81", "3c:52:82:00:10:02"
-PC3, PC3_MAC = "172.20.42.82", "3c:52:82:00:10:03"
+PC1, PC1_MAC = "172.20.43.37", "00:00:5e:00:53:1e"
+PC2, PC2_MAC = "172.20.43.81", "00:00:5e:00:53:1f"
+PC3, PC3_MAC = "172.20.42.82", "00:00:5e:00:53:24"
 BARE = "172.20.41.77"
 VIDEO, MAIL, NEWS = "203.0.113.10", "198.51.100.20", "203.0.113.30"
 
@@ -198,7 +198,7 @@ def build_golden_site(session: Session, layout: Layout, *, day: date = DAY) -> G
         tr(d, 10, 31),
         PC1,
         50005,
-        "8.8.8.8",
+        "198.51.100.153",
         53,
         sessionid=1005,
         duration=1,

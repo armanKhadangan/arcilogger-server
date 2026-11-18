@@ -10,6 +10,7 @@ import ipaddress
 import itertools
 import json
 import os
+import re
 import socket
 import subprocess
 import sys
@@ -96,8 +97,10 @@ def test_the_same_seed_gives_the_same_bytes(outputs: Any) -> None:
 #: ``--srcmac``, ``--egress``) default to the earlier behaviour, so existing users of the
 #: generator get the same bytes (contract 2.14). #89 (a MikroTik address stays held until its
 #: lease ends) changes the runs that handed an address out early, not these two days: the value
-#: was checked again and kept.
-DEFAULT_DIGEST = "d7e1141b96f00644de78a857cf30f3302534e7e05b86d675bcc142229b2d22e9"
+#: was checked again and kept. #315 re-pinned it once, on purpose: every MAC moved into IANA's
+#: block (PCs, printers, phones' private addresses); with the MACs masked the bytes are the same
+#: (tools/loadgen/README.md).
+DEFAULT_DIGEST = "c55db157c3d825759f6cd40b83df2eb87491c48242879e5ddc5c557a87497347"
 
 
 def test_the_default_plan_keeps_its_bytes(outputs: Any) -> None:
@@ -368,18 +371,65 @@ def test_phones_use_random_mac_addresses_and_guests_short_leases(outputs: Any) -
 
 def test_the_simulated_infrastructure_has_documentation_mac_addresses() -> None:
     """Fictional devices: MAC addresses from the documentation range (RFC 7042) that follow the
-    device's address, except the printers' vendor prefix (so the OUI lookup names a vendor, as
-    for real printers)."""
+    device's address, the printers' too (#315: no vendor's prefix)."""
     devices = loadgen().infrastructure()
     kinds = {device.kind for device in devices}
     assert kinds == {"admin", "server", "switch", "firewall", "ap", "printer"}
     for device in devices:
         assert device.static_ip is not None, device
         assert device.server is None, device
-        if device.kind != "printer":
-            host = int(device.static_ip.rsplit(".", 1)[1])
-            assert device.base_mac == f"00:00:5e:00:53:{host:02x}", device
+        host = int(device.static_ip.rsplit(".", 1)[1])
+        assert device.base_mac == f"00:00:5e:00:53:{host:02x}", device
     assert len({device.base_mac for device in devices}) == len(devices)
+
+
+#: Every MAC-like token of the wire: six hex pairs with ``:`` or ``-`` (RouterOS and FortiOS
+#: write them upper case).
+WIRE_MAC = re.compile(rb"(?i)(?<![0-9a-f:-])[0-9a-f]{2}(?:[:-][0-9a-f]{2}){5}(?![0-9a-f:-])")
+#: IANA's block: its documentation range and beyond (``00:00:5E:00:…``) and, with the local bit,
+#: the phones' private addresses (``02:00:5E:…``).
+FICTIONAL_MAC_PREFIXES = ("00:00:5e:00:", "02:00:5e:")
+
+
+@pytest.mark.parametrize("options", [{}, {"scenarios": "all"}], ids=["default", "every-scenario"])
+def test_every_mac_the_generator_emits_is_in_ianas_block(options: dict[str, Any]) -> None:
+    """#315: the generator computes its MACs, so #308's file pin cannot see them. Every MAC of
+    the wire and of the truth, by default and with every attack scenario, is IANA's; the PCs,
+    phones and guests keep distinct addresses (one device, one MAC a day)."""
+    lg = loadgen()
+    if "scenarios" in options:
+        options = {**options, "scenarios": lg.parse_scenarios(options["scenarios"])}
+    settings = lg.Settings(seed=7, users=60, intensity=12.0, **options)
+    site = list(lg.Simulation(settings).run(THURSDAY, SATURDAY))
+    wire = {
+        mac.decode().lower().replace("-", ":")
+        for output in site
+        for message in output.messages
+        for mac in WIRE_MAC.findall(message.wire)
+    }
+    truth = {lease.mac for output in site for lease in output.leases}
+    assert len(wire) > 60, len(wire)
+    outside = sorted(m for m in wire | truth if not m.startswith(FICTIONAL_MAC_PREFIXES))
+    assert outside == []
+    devices: dict[tuple[str, date], set[str]] = {}
+    for output in site:
+        for lease in output.leases:
+            devices.setdefault((lease.mac, output.day), set()).add(lease.device)
+    assert [key for key, names in devices.items() if len(names) > 1] == []
+
+
+def test_a_day_of_more_guests_than_a_mac_byte_holds_is_refused() -> None:
+    """A guest's private MAC keeps its number in one byte (02:00:5e:08:<day>:<number>): a day
+    of 256 guests would give two of them one MAC, so the simulation refuses it (#317); 255 is
+    the most, and their MACs stay distinct."""
+    lg = loadgen()
+    with pytest.raises(lg.LoadgenError, match="at most 255 guests a day"):
+        lg.Simulation(lg.Settings(users=2, guests_per_day=256))
+    simulation = lg.Simulation(lg.Settings(users=2, guests_per_day=lg.MAX_GUESTS_PER_DAY))
+    guests = simulation._guests(FRIDAY) + simulation._guests(THURSDAY)
+    macs = [device.base_mac for device, _ in guests]
+    assert len(macs) == len(set(macs)) > 2
+    assert all(mac.startswith("02:00:5e:08:") for mac in macs)
 
 
 def test_the_simulation_uses_the_example_plan() -> None:
