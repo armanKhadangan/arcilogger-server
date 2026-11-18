@@ -260,6 +260,10 @@ def reading(
         held = None
         if window:
             seconds = _seconds(settings, "search.request_budget_ms")
+            # The connection first, so that the wait timed below is the lock's alone: a checkout
+            # that pings or opens a connection on a busy server is no maintenance, and counted
+            # here it could use a short budget up and answer with the lock-wait text.
+            db.connection()
             asked = state.clock()
             try:
                 held = hold_window(db, seconds)
