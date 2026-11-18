@@ -42,6 +42,23 @@ export async function useSampleClock(page: Page, today: string): Promise<void> {
 }
 
 /**
+ * Wait until React has run the effects of the last change to Radix's layers (two animation
+ * frames). Only the topmost layer listens for Escape, and `@radix-ui/react-dismissable-layer`
+ * 1.2.1 changes that in effects: when a layer closes, its element goes first, its listener in an
+ * effect cleanup, and the layer under it registers its own listener one render later. An Escape
+ * pressed in that window (one to two frames) reaches no layer, and nothing in the DOM marks its
+ * end (#310). Call it after the closed layer's element is detached, before the next Escape.
+ */
+export async function afterLayerEffects(page: Page): Promise<void> {
+  await page.evaluate(
+    () =>
+      new Promise<void>((done) => {
+        requestAnimationFrame(() => requestAnimationFrame(() => done()));
+      }),
+  );
+}
+
+/**
  * WCAG 2.1 A/AA scan; fails with a readable list of violations. Waits until opening animations
  * (a drawer sliding and fading in) have finished: half-transparent text in mid-animation is not
  * what the user reads, and axe would report its contrast. Endless animations (spinners) are
