@@ -954,6 +954,8 @@ class _Backend:
     def __init__(self, engine: Engine, work: Callable[[Connection], object]) -> None:
         self.engine, self.work = engine, work
         self.pid: list[int] = []
+        #: When its work began: after the thread's start, the connection and the pid.
+        self.began: list[float] = []
         self.results: list[object] = []
         self.errors: list[BaseException] = []
         self.thread = threading.Thread(target=self._run, daemon=True)
@@ -963,6 +965,7 @@ class _Backend:
         try:
             with self.engine.begin() as connection:
                 self.pid.append(connection.execute(text("SELECT pg_backend_pid()")).scalar_one())
+                self.began.append(time.perf_counter())
                 self.results.append(self.work(connection))
         except BaseException as exc:  # the test thread asserts on it
             self.errors.append(exc)
@@ -1198,6 +1201,13 @@ def test_a_steps_lock_waits_share_one_budget(db_engine: Engine) -> None:
         session.commit()
     held = _chunks_by_id(db_engine, "mt_dhcp")[0] if hyper else "mt_dhcp"
     budget_ms = 2000
+    # The step's connection waits in the pool before the clock starts, with the reader's and
+    # the watcher's: a connection opened in the timed span starts a backend (on Windows a
+    # process), which is no lock wait of the step; the worker's step has its connection
+    # already. One that starts a second late makes the step take 3 s (#328, failure 4).
+    spare = [db_engine.connect() for _ in range(3)]
+    for connection in spare:
+        connection.close()
     export = engine_from_url(db_engine.url, poolclass=NullPool)
     try:
         with (
@@ -1228,7 +1238,10 @@ def test_a_steps_lock_waits_share_one_budget(db_engine: Engine) -> None:
     finally:
         export.dispose()
     assert [type(error) for error in step.errors] == [PartitionLockTimeoutError]
-    assert budget_ms / 1000 <= took < budget_ms / 1000 + 0.8  # not half the budget more
+    before = step.began[0] - started  # the thread's start, the checkout and the pid
+    assert budget_ms / 1000 <= took < budget_ms / 1000 + 0.8, (  # not half the budget more
+        f"took {took:.3f} s, {before:.3f} s of it before the step began"
+    )
     with db_engine.connect() as connection:
         assert connection.execute(text("SELECT count(*) FROM mt_dhcp")).scalar_one() == 2
     with db_engine.begin() as connection:
