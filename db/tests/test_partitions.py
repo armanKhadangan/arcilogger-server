@@ -9,6 +9,7 @@ import os
 import re
 import threading
 import time
+import warnings
 from collections import Counter
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
@@ -956,6 +957,8 @@ class _Backend:
         self.pid: list[int] = []
         #: When its work began: after the thread's start, the connection and the pid.
         self.began: list[float] = []
+        #: When its transaction was over (committed or rolled back) and its connection returned.
+        self.ended: list[float] = []
         self.results: list[object] = []
         self.errors: list[BaseException] = []
         self.thread = threading.Thread(target=self._run, daemon=True)
@@ -969,6 +972,8 @@ class _Backend:
                 self.results.append(self.work(connection))
         except BaseException as exc:  # the test thread asserts on it
             self.errors.append(exc)
+        finally:
+            self.ended.append(time.perf_counter())
 
     def wait_for_lock(self, watcher: Connection, relation: str | None = None) -> None:
         deadline = time.perf_counter() + 30
@@ -1220,10 +1225,10 @@ def test_a_steps_lock_waits_share_one_budget(db_engine: Engine) -> None:
             )
             holder.commit()
             assert reader.execute(text("SELECT count(*) FROM mt_dhcp")).scalar_one() == 2
+            budget = LockBudget(budget_ms)
             started = time.perf_counter()
             step = _Backend(
-                db_engine,
-                lambda connection: drop_before(connection, cutoff, budget=LockBudget(budget_ms)),
+                db_engine, lambda connection: drop_before(connection, cutoff, budget=budget)
             )
             step.wait_for_lock(watcher)  # the partition lock
             time.sleep(budget_ms / 2000)  # half the budget goes to it, at least
@@ -1238,10 +1243,19 @@ def test_a_steps_lock_waits_share_one_budget(db_engine: Engine) -> None:
     finally:
         export.dispose()
     assert [type(error) for error in step.errors] == [PartitionLockTimeoutError]
+    # Where the time went (#328, failure 4: 3.005 s, then 2.868 s with 0.001 s before the step):
+    # the lock waits the budget counted against the step's own statements, and around the step
+    # the thread's start and its end (the rollback and the join).
     before = step.began[0] - started  # the thread's start, the checkout and the pid
-    assert budget_ms / 1000 <= took < budget_ms / 1000 + 0.8, (  # not half the budget more
-        f"took {took:.3f} s, {before:.3f} s of it before the step began"
+    inside = step.ended[0] - step.began[0]
+    split = (
+        f"took {took:.3f} s: {before:.3f} s before the step began, the step {inside:.3f} s "
+        f"({budget.waited:.3f} s of lock waits counted by its budget, "
+        f"{inside - budget.waited:.3f} s besides), {took - before - inside:.3f} s after it"
     )
+    # Printed on a pass too, as the other guards of #328 do, so each Windows run shows its margin.
+    warnings.warn(split, UserWarning, stacklevel=1)
+    assert budget_ms / 1000 <= took < budget_ms / 1000 + 0.8, split  # not half the budget more
     with db_engine.connect() as connection:
         assert connection.execute(text("SELECT count(*) FROM mt_dhcp")).scalar_one() == 2
     with db_engine.begin() as connection:
