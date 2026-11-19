@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 import socket
+import ssl
 import time
 import warnings
 from collections.abc import Iterator
@@ -14,6 +15,7 @@ from pathlib import Path
 
 import pytest
 
+from arcilogger_core import webhooktesting
 from arcilogger_core.admin.probe import (
     FAILURE_CODES,
     TIMEOUTS,
@@ -55,7 +57,8 @@ def _report(what: str, began: float, receiver: WebhookReceiver) -> str:
     warnings summary shows them (#328, failure 8: a handshake timed out after 5 s on Windows)."""
     report = (
         f"{what}: the probe took {time.monotonic() - began:.3f} s, handshakes "
-        f"{[round(seconds, 3) for seconds in receiver.handshakes]} s"
+        f"{[round(seconds, 3) for seconds in receiver.handshakes]} s, "
+        f"listening on {receiver.listening}"
     )
     warnings.warn(report, UserWarning, stacklevel=2)
     return report
@@ -94,6 +97,51 @@ def test_a_client_that_never_handshakes_does_not_hold_the_next(
         assert (result.ok, result.message) == (True, "HTTP 200"), report
     finally:
         silent.close()
+
+
+def _ipv6_loopback() -> bool:
+    try:
+        with socket.socket(socket.AF_INET6) as probe:
+            probe.bind(("::1", 0))
+    except OSError:
+        return False
+    return True
+
+
+@pytest.mark.skipif(not _ipv6_loopback(), reason="this host has no IPv6 loopback")
+def test_the_receiver_also_answers_on_the_ipv6_loopback(receiver: WebhookReceiver) -> None:
+    """``::1`` serves too, with the same certificate (``localhost``): a client that tries it
+    first, as Windows does for ``localhost``, is answered at once (#342: about 2 s otherwise)."""
+    assert receiver.listening == ["127.0.0.1", "::1"]
+    port = int(receiver.url.split(":")[2].split("/")[0])
+    context = ssl.create_default_context(cafile=str(receiver.ca_file))
+    with (
+        socket.create_connection(("::1", port), timeout=5) as raw,
+        context.wrap_socket(raw, server_hostname="localhost") as tls,
+    ):
+        tls.sendall(
+            b"POST /over-ipv6 HTTP/1.1\r\nHost: localhost\r\nContent-Length: 0\r\n"
+            b"Connection: close\r\n\r\n"
+        )
+        answer = tls.recv(64)
+    assert answer.startswith(b"HTTP/1.0 200"), answer
+    assert [request.path for request in receiver.received] == ["/over-ipv6"]
+
+
+def test_without_ipv6_the_receiver_serves_on_ipv4_alone(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Where ``::1`` cannot be bound (no IPv6), the IPv4 listener serves alone and the probe
+    works as before."""
+
+    def no_ipv6(self: object) -> None:
+        raise OSError("no IPv6 here")
+
+    monkeypatch.setattr(webhooktesting._TLSServer6, "server_bind", no_ipv6)
+    with WebhookReceiver(tmp_path / "tls") as alone:
+        assert alone.listening == ["127.0.0.1"]
+        result = run_probe("webhook", params(alone), {"secret": SECRET})
+        assert (result.ok, result.message) == (True, "HTTP 200")
 
 
 def test_a_teams_test_reads_its_url_from_the_secrets(receiver: WebhookReceiver) -> None:

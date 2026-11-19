@@ -9,10 +9,17 @@ Each TLS handshake runs in its request's own thread (:class:`_TLSServer`), not i
 the one thread that serves: there a busy runner that did not schedule that thread for the
 client's timeout failed the handshake (#328, failure 8: 5 s on a Windows runner).
 :attr:`WebhookReceiver.handshakes` keeps each handshake's seconds for the tests' reports.
+
+It listens on both loopback addresses, ``127.0.0.1`` and ``::1``, on one port (loopback only, never
+all interfaces): its URL names ``localhost``, which a Windows client tries as ``::1`` first, and a
+refused connect there was retried for about 2 s before ``127.0.0.1`` (#342). Where ``::1`` cannot be
+bound (no IPv6), the IPv4 listener serves alone. The URL keeps the name: ``WebhookConfig`` refuses a
+loopback IP literal as a webhook's target (contract §2.4.1).
 """
 
 from __future__ import annotations
 
+import socket
 import ssl
 import threading
 import time
@@ -95,12 +102,18 @@ class _TLSServer(ThreadingHTTPServer):
     runs in the request's thread, does the handshake first. A client that gives up meanwhile is
     closed without a traceback."""
 
-    def __init__(self, handler: type[BaseHTTPRequestHandler], context: ssl.SSLContext) -> None:
-        super().__init__(("127.0.0.1", 0), handler)
+    def __init__(
+        self,
+        address: tuple[str, int],
+        handler: type[BaseHTTPRequestHandler],
+        context: ssl.SSLContext,
+        handshakes: list[float],
+    ) -> None:
+        super().__init__(address, handler)
         self.socket = context.wrap_socket(
             self.socket, server_side=True, do_handshake_on_connect=False
         )
-        self.handshakes: list[float] = []
+        self.handshakes = handshakes
 
     def finish_request(self, request: Any, client_address: Any) -> None:
         if isinstance(request, ssl.SSLSocket):
@@ -112,6 +125,12 @@ class _TLSServer(ThreadingHTTPServer):
             finally:
                 self.handshakes.append(time.monotonic() - started)
         super().finish_request(request, client_address)
+
+
+class _TLSServer6(_TLSServer):
+    """:class:`_TLSServer` on an IPv6 address (``::1``)."""
+
+    address_family = socket.AF_INET6
 
 
 @dataclass
@@ -140,22 +159,35 @@ class WebhookReceiver:
             def log_message(self, format: str, *args: Any) -> None:
                 return
 
-        self._server = _TLSServer(Handler, context)
-        self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
-        self._thread.start()
+        self._handshakes: list[float] = []
+        first = _TLSServer(("127.0.0.1", 0), Handler, context, self._handshakes)
+        self._servers: list[_TLSServer] = [first]
+        try:
+            port = first.server_address[1]
+            self._servers.append(_TLSServer6(("::1", port), Handler, context, self._handshakes))
+        except OSError:
+            pass  # no IPv6 here, or ::1's port is taken: the IPv4 listener serves alone
+        for server in self._servers:
+            threading.Thread(target=server.serve_forever, daemon=True).start()
+
+    @property
+    def listening(self) -> list[str]:
+        """The loopback addresses served: ``127.0.0.1``, and ``::1`` where it could be bound."""
+        return [str(server.server_address[0]) for server in self._servers]
 
     @property
     def handshakes(self) -> list[float]:
         """The seconds of each TLS handshake so far, in the order they ended."""
-        return list(self._server.handshakes)
+        return list(self._handshakes)
 
     @property
     def url(self) -> str:
-        return f"https://localhost:{self._server.server_address[1]}/arcilogger?kanal=guvenlik"
+        return f"https://localhost:{self._servers[0].server_address[1]}/arcilogger?kanal=guvenlik"
 
     def close(self) -> None:
-        self._server.shutdown()
-        self._server.server_close()
+        for server in self._servers:
+            server.shutdown()
+            server.server_close()
 
     def __enter__(self) -> WebhookReceiver:
         return self
