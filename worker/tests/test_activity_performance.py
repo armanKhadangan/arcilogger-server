@@ -343,35 +343,42 @@ LOOP = "worker-loop"
 @dataclass
 class Turns:
     """The parts of the worker loop's turns, in its thread (:data:`LOOP`): name, start
-    (:func:`time.monotonic`) and seconds of each (#328: a probe 9.891 s late on a Windows runner,
-    the collector 0.016 s of that gap). A turn of ``Worker.run`` is ``reload_config``, then
-    ``run_job``: its two records, a ``transaction`` each, and the ``job`` between them; then
-    ``write_status``: the status built, then the file written (``atomic_write_text``, its
-    ``fsync`` within it); then the ``wait`` for the next job."""
+    (:func:`time.monotonic`), seconds, and for a ``wait`` the seconds it was asked for (#328: a
+    probe 9.891 s late on a Windows runner, the collector 0.016 s of that gap). A turn of
+    ``Worker.run`` is a ``tick``: ``reload_config``, then ``run_job``: its two records, a
+    ``transaction`` each, and the ``job`` between them; then ``write_status``: the status built,
+    then the file written (``atomic_write_text``, its ``fsync`` within it); then the ``wait``
+    for the next job. A ``tick`` longer than its parts was in the code between them (the
+    history's load, ``due``, ``idle``, ``gate``); a ``wait`` far longer than it was asked for
+    is a thread that did not run, not a database or a disk."""
 
-    parts: list[tuple[str, float, float]] = field(default_factory=list)
+    parts: list[tuple[str, float, float, float | None]] = field(default_factory=list)
     _transactions: dict[int, float] = field(default_factory=dict)
 
-    def timed(self, name: str, func: Callable[..., Any]) -> Callable[..., Any]:
-        """``func``, its calls in the loop's thread recorded as ``name``."""
+    def timed(
+        self, name: str, func: Callable[..., Any], *, asked: bool = False
+    ) -> Callable[..., Any]:
+        """``func``, its calls in the loop's thread recorded as ``name``; with ``asked``, its
+        timeout too (the first argument or ``timeout``)."""
 
         def timed_call(*args: Any, **kwargs: Any) -> Any:
             if threading.current_thread().name != LOOP:
                 return func(*args, **kwargs)
+            timeout = (args[0] if args else kwargs.get("timeout")) if asked else None
             began = time.monotonic()
             try:
                 return func(*args, **kwargs)
             finally:
-                self.parts.append((name, began, time.monotonic() - began))
+                self.parts.append((name, began, time.monotonic() - began, timeout))
 
         return timed_call
 
     def watch(self, worker: Worker, stop: threading.Event, monkeypatch: pytest.MonkeyPatch) -> None:
         """Record ``worker``'s turns: its methods and ``stop.wait`` on the instances, the file
         write and the fsync where ``service`` calls them, the transactions of its sessions."""
-        for name in ("reload_config", "run_job", "write_status"):
+        for name in ("tick", "reload_config", "run_job", "write_status"):
             monkeypatch.setattr(worker, name, self.timed(name, getattr(worker, name)))
-        monkeypatch.setattr(stop, "wait", self.timed("wait", stop.wait))
+        monkeypatch.setattr(stop, "wait", self.timed("wait", stop.wait, asked=True))
         write = self.timed("atomic_write_text", atomic_write_text)
         monkeypatch.setattr(service_module, "atomic_write_text", write)
         monkeypatch.setattr(os, "fsync", self.timed("fsync", os.fsync))
@@ -383,50 +390,58 @@ class Turns:
         def ended(session: Session, transaction: SessionTransaction) -> None:
             began = self._transactions.pop(id(transaction), None)
             if began is not None:
-                self.parts.append(("transaction", began, time.monotonic() - began))
+                self.parts.append(("transaction", began, time.monotonic() - began, None))
 
         event.listen(worker.sessions, "after_transaction_create", created)
         event.listen(worker.sessions, "after_transaction_end", ended)
 
     def by_name(self) -> dict[str, tuple[int, float]]:
         """Per part: how many, and the longest one's seconds."""
-        names = dict.fromkeys(name for name, _at, _s in self.parts)
+        names = dict.fromkeys(part[0] for part in self.parts)
         return {
             name: (
-                sum(1 for n, _at, _s in self.parts if n == name),
-                round(max(s for n, _at, s in self.parts if n == name), 3),
+                sum(1 for part in self.parts if part[0] == name),
+                round(max(part[2] for part in self.parts if part[0] == name), 3),
             )
             for name in names
         }
 
-    def between(self, first: float, last: float) -> list[tuple[str, float, float]]:
+    def between(self, first: float, last: float) -> list[tuple[Any, ...]]:
         """The parts of 10 ms or more that overlap ``[first, last]``, in the order they began:
-        name, the second of the gap they began at (negative: before it), and their seconds."""
-        return [
-            (name, round(at - first, 3), round(s, 3))
-            for name, at, s in sorted(self.parts, key=lambda part: part[1])
-            if at <= last and at + s >= first and s >= 0.01
-        ]
+        name, the second of the gap they began at (negative: before it) and their seconds; for
+        a ``wait`` also the seconds it was asked for and its overrun."""
+        found: list[tuple[Any, ...]] = []
+        for name, at, s, timeout in sorted(self.parts, key=lambda part: part[1]):
+            if at <= last and at + s >= first and s >= 0.01:
+                part: tuple[Any, ...] = (name, round(at - first, 3), round(s, 3))
+                if timeout is not None:
+                    part += (round(timeout, 3), round(s - timeout, 3))
+                found.append(part)
+        return found
 
 
 def test_the_turns_record_the_loops_parts_in_its_gap() -> None:
-    """:class:`Turns` records the calls of the loop's thread, not another thread's, and places a
-    part in the gap it overlaps."""
+    """:class:`Turns` records the calls of the loop's thread, not another thread's, places a
+    part in the gap it overlaps, and gives a wait what it was asked for and its overrun."""
     turns = Turns()
     nap = turns.timed("nap", time.sleep)
+    wait = turns.timed("wait", threading.Event().wait, asked=True)
     first = time.monotonic()
-    loop = threading.Thread(target=nap, args=(0.05,), name=LOOP)
+    loop = threading.Thread(target=lambda: (nap(0.05), wait(0.02)), name=LOOP)
     other = threading.Thread(target=nap, args=(0.05,))
     loop.start()
     other.start()
     loop.join()
     other.join()
     last = time.monotonic()
-    assert [name for name, _at, _s in turns.parts] == ["nap"]
+    assert [part[0] for part in turns.parts] == ["nap", "wait"]
     assert turns.by_name()["nap"][0] == 1
-    assert [(name, at >= 0, s >= 0.05) for name, at, s in turns.between(first, last)] == [
-        ("nap", True, True)
-    ]
+    found = turns.between(first, last)
+    assert [(part[0], part[1] >= 0) for part in found] == [("nap", True), ("wait", True)]
+    assert len(found[0]) == 3  # a part that is not a wait has no timeout
+    _name, _at, seconds, timeout, overrun = found[1]
+    assert timeout == 0.02
+    assert abs(seconds - timeout - overrun) <= 0.001  # the overrun is what it took beyond it
     assert turns.between(last + 1, last + 2) == []
 
 
