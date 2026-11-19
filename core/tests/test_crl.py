@@ -840,14 +840,17 @@ def test_a_server_that_drips_is_stopped_at_the_timeout(
                     connection.sendall(b"0")
                 except OSError:
                     return
-                stop.wait(0.2)
+                stop.wait(0.05)
 
     thread = threading.Thread(target=drip, daemon=True)
     thread.start()
     url = f"http://127.0.0.1:{listener.getsockname()[1]}/drip.crl"
+    # A quarter of a second, each drip a fifth of it: the deadline spends little of the 3 s
+    # bound (#328: a 1 s timeout left 1.5 s on Windows), and without the deadline the drip runs
+    # far past it (1,000 bytes, 50 s).
     started = time.monotonic()
     try:
-        run = fetch(CrlOptions(urls=(url,), timeout_seconds=1), layout, [root.certificate], NOW)
+        run = fetch(CrlOptions(urls=(url,), timeout_seconds=0.25), layout, [root.certificate], NOW)
     finally:
         stop.set()
         listener.close()
@@ -879,14 +882,15 @@ def test_a_server_that_drips_its_headers_is_stopped_at_the_timeout(
                     connection.sendall(bytes([byte]))
                 except OSError:
                     return
-                stop.wait(0.1)
+                stop.wait(0.025)
 
     thread = threading.Thread(target=drip, daemon=True)
     thread.start()
     url = f"http://127.0.0.1:{listener.getsockname()[1]}/headers.crl"
+    # As in the body's drip test: without the deadline, 10,000 bytes take 250 s.
     started = time.monotonic()
     try:
-        run = fetch(CrlOptions(urls=(url,), timeout_seconds=1), layout, [root.certificate], NOW)
+        run = fetch(CrlOptions(urls=(url,), timeout_seconds=0.25), layout, [root.certificate], NOW)
     finally:
         stop.set()
         listener.close()
