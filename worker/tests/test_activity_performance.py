@@ -40,13 +40,15 @@ from types import ModuleType
 from typing import Any
 
 import pytest
-from sqlalchemy import Engine, delete, insert, select
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy import Engine, delete, event, insert, select
+from sqlalchemy.orm import Session, SessionTransaction, sessionmaker
 
+from arcilogger_core.fsutil import atomic_write_text
 from arcilogger_core.layout import Layout
 from arcilogger_db.bulk import copy_rows
 from arcilogger_db.models import FgDns, FgTraffic, FgWeb
 from arcilogger_db.partitions import ensure_partitions
+from arcilogger_worker import service as service_module
 from arcilogger_worker.activity import Runner
 from arcilogger_worker.service import Job, JobContext, Worker, freeze_loaded
 from arcilogger_worker.testing import tr
@@ -334,6 +336,100 @@ class Collections:
         return [(g, round(s, 3)) for g, at, s in self.passes if first <= at <= last and s >= 0.01]
 
 
+#: The name of the worker loop's thread in the test, whose parts :class:`Turns` records.
+LOOP = "worker-loop"
+
+
+@dataclass
+class Turns:
+    """The parts of the worker loop's turns, in its thread (:data:`LOOP`): name, start
+    (:func:`time.monotonic`) and seconds of each (#328: a probe 9.891 s late on a Windows runner,
+    the collector 0.016 s of that gap). A turn of ``Worker.run`` is ``reload_config``, then
+    ``run_job``: its two records, a ``transaction`` each, and the ``job`` between them; then
+    ``write_status``: the status built, then the file written (``atomic_write_text``, its
+    ``fsync`` within it); then the ``wait`` for the next job."""
+
+    parts: list[tuple[str, float, float]] = field(default_factory=list)
+    _transactions: dict[int, float] = field(default_factory=dict)
+
+    def timed(self, name: str, func: Callable[..., Any]) -> Callable[..., Any]:
+        """``func``, its calls in the loop's thread recorded as ``name``."""
+
+        def timed_call(*args: Any, **kwargs: Any) -> Any:
+            if threading.current_thread().name != LOOP:
+                return func(*args, **kwargs)
+            began = time.monotonic()
+            try:
+                return func(*args, **kwargs)
+            finally:
+                self.parts.append((name, began, time.monotonic() - began))
+
+        return timed_call
+
+    def watch(self, worker: Worker, stop: threading.Event, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Record ``worker``'s turns: its methods and ``stop.wait`` on the instances, the file
+        write and the fsync where ``service`` calls them, the transactions of its sessions."""
+        for name in ("reload_config", "run_job", "write_status"):
+            monkeypatch.setattr(worker, name, self.timed(name, getattr(worker, name)))
+        monkeypatch.setattr(stop, "wait", self.timed("wait", stop.wait))
+        write = self.timed("atomic_write_text", atomic_write_text)
+        monkeypatch.setattr(service_module, "atomic_write_text", write)
+        monkeypatch.setattr(os, "fsync", self.timed("fsync", os.fsync))
+
+        def created(session: Session, transaction: SessionTransaction) -> None:
+            if transaction.parent is None and threading.current_thread().name == LOOP:
+                self._transactions[id(transaction)] = time.monotonic()
+
+        def ended(session: Session, transaction: SessionTransaction) -> None:
+            began = self._transactions.pop(id(transaction), None)
+            if began is not None:
+                self.parts.append(("transaction", began, time.monotonic() - began))
+
+        event.listen(worker.sessions, "after_transaction_create", created)
+        event.listen(worker.sessions, "after_transaction_end", ended)
+
+    def by_name(self) -> dict[str, tuple[int, float]]:
+        """Per part: how many, and the longest one's seconds."""
+        names = dict.fromkeys(name for name, _at, _s in self.parts)
+        return {
+            name: (
+                sum(1 for n, _at, _s in self.parts if n == name),
+                round(max(s for n, _at, s in self.parts if n == name), 3),
+            )
+            for name in names
+        }
+
+    def between(self, first: float, last: float) -> list[tuple[str, float, float]]:
+        """The parts of 10 ms or more that overlap ``[first, last]``, in the order they began:
+        name, the second of the gap they began at (negative: before it), and their seconds."""
+        return [
+            (name, round(at - first, 3), round(s, 3))
+            for name, at, s in sorted(self.parts, key=lambda part: part[1])
+            if at <= last and at + s >= first and s >= 0.01
+        ]
+
+
+def test_the_turns_record_the_loops_parts_in_its_gap() -> None:
+    """:class:`Turns` records the calls of the loop's thread, not another thread's, and places a
+    part in the gap it overlaps."""
+    turns = Turns()
+    nap = turns.timed("nap", time.sleep)
+    first = time.monotonic()
+    loop = threading.Thread(target=nap, args=(0.05,), name=LOOP)
+    other = threading.Thread(target=nap, args=(0.05,))
+    loop.start()
+    other.start()
+    loop.join()
+    other.join()
+    last = time.monotonic()
+    assert [name for name, _at, _s in turns.parts] == ["nap"]
+    assert turns.by_name()["nap"][0] == 1
+    assert [(name, at >= 0, s >= 0.05) for name, at, s in turns.between(first, last)] == [
+        ("nap", True, True)
+    ]
+    assert turns.between(last + 1, last + 2) == []
+
+
 def test_the_collections_record_a_full_pass_in_its_gap() -> None:
     """:class:`Collections` sees a full pass (generation 2) and places it in the gap it began in."""
     collections = Collections()
@@ -373,6 +469,7 @@ def test_the_snapshot_keeps_up_and_the_loop_is_not_held(
     layout: Layout,
     unfreeze: None,
     capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
     rate: float,
     devices: int,
 ) -> None:
@@ -415,14 +512,16 @@ def test_the_snapshot_keeps_up_and_the_loop_is_not_held(
         starts.append(time.monotonic())
         return {}
 
+    turns = Turns()
     worker = Worker(
         engine=db_engine,
         layout=layout,
-        jobs=[Job("probe", probe, every=PROBE_EVERY)],
+        jobs=[Job("probe", turns.timed("job", probe), every=PROBE_EVERY)],
         activity=False,
     )
     stop = threading.Event()
-    loop = threading.Thread(target=worker.run, args=(stop,))
+    loop = threading.Thread(target=worker.run, args=(stop,), name=LOOP)
+    turns.watch(worker, stop, monkeypatch)
     collections = Collections()
     gc.callbacks.append(collections)
     loop.start()
@@ -448,7 +547,8 @@ def test_the_snapshot_keeps_up_and_the_loop_is_not_held(
         loop.join(timeout=30)
         gc.callbacks.remove(collections)
     late = [b - a - PROBE_EVERY.total_seconds() for a, b in itertools.pairwise(starts)]
-    # The worst gap between two probe starts, and the collector's passes in it (#328).
+    # The worst gap between two probe starts, the collector's passes and the loop's parts in it
+    # (#328).
     worst = max(itertools.pairwise(starts), key=lambda pair: pair[1] - pair[0], default=None)
     figures["tick_max_s"] = max(details["seconds"] for details in ticks)
     figures["tick_mean_s"] = round(sum(details["seconds"] for details in ticks) / len(ticks), 3)
@@ -461,6 +561,8 @@ def test_the_snapshot_keeps_up_and_the_loop_is_not_held(
     figures["file_bytes"] = layout.activity.stat().st_size
     figures["gc"] = collections.by_generation()
     figures["gc_in_worst_gap"] = [] if worst is None else collections.between(*worst)
+    figures["loop"] = turns.by_name()
+    figures["loop_in_worst_gap"] = [] if worst is None else turns.between(*worst)
     # Printed on a pass too (as the live tail's guard does), so CI's log shows each run's margin.
     with capsys.disabled():
         print(f"\nactivity snapshot at {rate:g} lines/s, {devices} devices: {figures}")
@@ -469,7 +571,9 @@ def test_the_snapshot_keeps_up_and_the_loop_is_not_held(
     assert len(starts) >= TICKS
     assert figures["probe_late_max_s"] < PROBE_LATE.total_seconds(), (
         f"a probe started {figures['probe_late_max_s']} s late; the collector's passes in that "
-        f"gap (generation, seconds): {figures['gc_in_worst_gap']}, all: {figures['gc']}"
+        f"gap (generation, seconds): {figures['gc_in_worst_gap']}, all: {figures['gc']}; the "
+        f"loop's parts in it (name, second of the gap, seconds): {figures['loop_in_worst_gap']}, "
+        f"all (count, longest): {figures['loop']}"
     )
 
 
