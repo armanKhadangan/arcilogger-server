@@ -1284,6 +1284,33 @@ def test_jobs_from_worker_status_and_job_runs(
     assert named["reports.purge"]["duration_ms"] is None
 
 
+@pytest.mark.parametrize("kept", ["empty", "half"])
+def test_a_worker_status_a_crash_left_empty_or_half_reads_as_missing(
+    client: TestClient, login_as: Login, layout: Layout, kept: str
+) -> None:
+    """The worker's status file is replaced atomically, not fsynced (#328, as ingest's since #124
+    stage 2): after a crash it may be empty or hold part of a write. The jobs read it as
+    missing, and the page answers without an error."""
+    login_as(client, "admin")
+    missing = get(client)["jobs"]
+    now = utc_now()
+    write_worker_status(
+        layout,
+        {
+            "license.check": JobState(
+                last_started=now - timedelta(minutes=2),
+                last_finished=now - timedelta(minutes=2),
+                last_status="ok",
+                runs=3,
+            )
+        },
+    )
+    whole = layout.worker_status.read_bytes()
+    assert get(client)["jobs"] != missing  # the whole file is read
+    layout.worker_status.write_bytes(b"" if kept == "empty" else whole[: len(whole) // 2])
+    assert get(client)["jobs"] == missing
+
+
 def test_schedule_texts_of_every_unit() -> None:
     def texts(**schedule: Any) -> tuple[str, str]:
         return schedule_texts(Job("x", lambda ctx: {}, **schedule))

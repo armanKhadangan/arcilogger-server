@@ -12,6 +12,12 @@ versions follow [Semantic Versioning](https://semver.org/).
   nobody closed; an audit still pending when the process ended was lost. The stop now waits for
   these audits, at most 2 s, and then disposes of the connections.
 
+### Changed
+- **The worker no longer fsyncs its status file** (#328). `state\worker-status.json` is a
+  monitoring report, rewritten after every job; its fsync took up to half a second of the
+  worker's loop on a Windows test runner. It is now replaced atomically without an fsync, as
+  ingest's status file already is; after a crash it may read as missing until the next write.
+
 ## [0.5.1] — 2026-11-18
 
 Release version 0.5.1 (`v0.5.1`): fixes after 0.5.0, among them 0.5.0's known limitation (R13 and

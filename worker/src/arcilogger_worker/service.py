@@ -115,7 +115,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from arcilogger_core.admin.contract import AdminLayout
 from arcilogger_core.config import Config
 from arcilogger_core.configwatch import WORKER_HOT, ConfigWatch, ConfigWatcher
-from arcilogger_core.fsutil import atomic_write_text
+from arcilogger_core.fsutil import replace_text
 from arcilogger_core.layout import Layout
 from arcilogger_core.timeutil import SITE_TZ, site_day, to_site, utc_now
 from arcilogger_db.engine import engine_from_url, make_engine, session_factory
@@ -868,9 +868,7 @@ class Worker:
             data["config"] = self.config_watch.status_block()
         self._status_due = False
         try:
-            atomic_write_text(
-                self.status_path, json.dumps(data, ensure_ascii=False, indent=2) + "\n"
-            )
+            replace_text(self.status_path, json.dumps(data, ensure_ascii=False, indent=2) + "\n")
         except OSError:
             log.exception("cannot write %s", self.status_path)
 

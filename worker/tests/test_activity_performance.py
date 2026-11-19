@@ -43,7 +43,7 @@ import pytest
 from sqlalchemy import Engine, delete, event, insert, select
 from sqlalchemy.orm import Session, SessionTransaction, sessionmaker
 
-from arcilogger_core.fsutil import atomic_write_text
+from arcilogger_core.fsutil import replace_text
 from arcilogger_core.layout import Layout
 from arcilogger_db.bulk import copy_rows
 from arcilogger_db.models import FgDns, FgTraffic, FgWeb
@@ -347,10 +347,10 @@ class Turns:
     probe 9.891 s late on a Windows runner, the collector 0.016 s of that gap). A turn of
     ``Worker.run`` is a ``tick``: ``reload_config``, then ``run_job``: its two records, a
     ``transaction`` each, and the ``job`` between them; then ``write_status``: the status built,
-    then the file written (``atomic_write_text``, its ``fsync`` within it); then the ``wait``
-    for the next job. A ``tick`` longer than its parts was in the code between them (the
-    history's load, ``due``, ``idle``, ``gate``); a ``wait`` far longer than it was asked for
-    is a thread that did not run, not a database or a disk."""
+    then the file replaced (``replace_text``, no ``fsync`` since #328; any made is timed);
+    then the ``wait`` for the next job. A ``tick`` longer than its parts was in the code between
+    them (the history's load, ``due``, ``idle``, ``gate``); a ``wait`` far longer than it was
+    asked for is a thread that did not run, not a database or a disk."""
 
     parts: list[tuple[str, float, float, float | None]] = field(default_factory=list)
     _transactions: dict[int, float] = field(default_factory=dict)
@@ -379,8 +379,8 @@ class Turns:
         for name in ("tick", "reload_config", "run_job", "write_status"):
             monkeypatch.setattr(worker, name, self.timed(name, getattr(worker, name)))
         monkeypatch.setattr(stop, "wait", self.timed("wait", stop.wait, asked=True))
-        write = self.timed("atomic_write_text", atomic_write_text)
-        monkeypatch.setattr(service_module, "atomic_write_text", write)
+        write = self.timed("replace_text", replace_text)
+        monkeypatch.setattr(service_module, "replace_text", write)
         monkeypatch.setattr(os, "fsync", self.timed("fsync", os.fsync))
 
         def created(session: Session, transaction: SessionTransaction) -> None:

@@ -6,6 +6,7 @@ from __future__ import annotations
 import gc
 import itertools
 import json
+import os
 import threading
 from collections.abc import Callable, Mapping
 from datetime import date, datetime, time, timedelta
@@ -216,6 +217,33 @@ def test_database_outage_does_not_stop_the_loop(layout: Layout) -> None:
     status = json.loads(worker.status_path.read_text(encoding="utf-8"))
     assert status["database"] == "unreachable"
     assert calls == []
+    engine.dispose()
+
+
+def test_the_status_file_is_replaced_whole_without_an_fsync(
+    layout: Layout, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``state/worker-status.json`` is a monitoring report, replaced atomically but not fsynced
+    (#328: an fsync took up to 0.531 s of a loop's turn on a Windows runner): no ``os.fsync``,
+    the file is one whole document each time, and no temporary file is left."""
+    engine = engine_from_url("postgresql://nobody:nothing@127.0.0.1:1/none")
+    worker = Worker(
+        engine=engine,
+        layout=layout,
+        jobs=[Job("job", recorder([], "job"), every=timedelta(minutes=1))],
+        clock=Clock(tr(DAY, 12)),
+    )
+    fsyncs: list[int] = []
+    monkeypatch.setattr(os, "fsync", fsyncs.append)
+    worker.status_path.parent.mkdir(parents=True, exist_ok=True)
+    worker.status_path.write_text(" " * 100_000 + "{}", encoding="utf-8")  # longer than a status
+    worker.write_status()
+    assert json.loads(worker.status_path.read_text(encoding="utf-8"))["state"] == "starting"
+    worker.state = "stopped"
+    worker.write_status()
+    assert json.loads(worker.status_path.read_text(encoding="utf-8"))["state"] == "stopped"
+    assert fsyncs == []
+    assert not worker.status_path.with_name(f".{worker.status_path.name}.tmp").exists()
     engine.dispose()
 
 

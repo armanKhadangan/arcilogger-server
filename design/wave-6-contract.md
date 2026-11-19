@@ -979,3 +979,19 @@ to the normal site: `port-scan` (R01), `external-scan` (R02), `brute-force` (R03
   slice, a kept run of R13 took 1.15 s, 3.08 s and 2.83 s: the step from 0 to 5 minutes is the
   hour evidence of 43 addresses newly over `hour_bytes` (1 at 0 minutes), and it does not grow
   further with the minutes behind.
+
+### #328 (the worker's status file, 2026-11-19; manager's decision on #328)
+
+- **The worker's status file is replaced atomically, not fsynced.** The wave-5 contract made
+  ingest's status file non-durable (#124 stage 2) and left the others: "The collector's and the
+  worker's status writes stay as they are: no stop path waits on them, and nothing was
+  measured." The worker's is now measured: under the activity guard's load (2,000 lines/s) on a
+  Windows runner, the fsync of `state/worker-status.json` took up to 0.531 s, one after every
+  turn of the worker's loop that ran a job (#347's figures). `write_status` now writes through
+  `fsutil.replace_text` (moved there from `arcilogger_ingest.status`, its behaviour unchanged:
+  `.<name>.tmp` renamed over the file, LF, no fsync; for monitoring reports only, never for
+  evidence). After a crash the file may be empty or hold part of a write; `/system/health` reads
+  its jobs as if it were missing, without an error
+  (`api/tests/test_system_health.py::test_a_worker_status_a_crash_left_empty_or_half_reads_as_missing`),
+  and the next turn writes it again. 5651 asks nothing of the file. The collector's status write
+  stays as it is, still unmeasured.
