@@ -33,7 +33,7 @@ from arcilogger_api import live
 from arcilogger_api.deps import AppState
 from arcilogger_api.errors import MESSAGES as API_MESSAGES
 from arcilogger_api.live import messages as live_messages
-from arcilogger_api.live.hub import Hub, Timing
+from arcilogger_api.live.hub import CLOSE_AUDIT_SECONDS, Hub, Timing
 from arcilogger_api.live.schemas import LiveDropped, LiveEnd, LiveGap, LiveHello, LiveLine
 from arcilogger_api.live.testing import Event, LiveServer, read_events, sign_in, spool_line
 from arcilogger_api.routers import sources as sources_router
@@ -758,8 +758,8 @@ def test_a_server_stop_ends_the_stream_and_audits_it(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The service stopping (contract 2.15, R16): the open stream gets ``end {server_stopping}``,
-    the server is down within its graceful timeout plus the 1 s of that last write, and
-    ``live.close`` records ``server_stopping``.
+    the server is down within its graceful timeout, the 1 s of that last write and the close
+    audits' limit, and ``live.close`` records ``server_stopping``.
 
     The stop's time is reported in the phases seen from outside (#328, failure 6: 4.203 s once on
     a Windows runner, 2.1 s before): when the reader got ``end``, the ``live.close`` audit, the
@@ -816,10 +816,11 @@ def test_a_server_stop_ends_the_stream_and_audits_it(
     assert [LiveEnd.model_validate(event.data).code for event in reader.of("end")] == [
         "server_stopping"
     ]
-    # graceful + the 1 s of that last write, plus room for the lifespan shutdown, the close audit
-    # and the thread join on a slow runner (Windows took 2.1 s); a shielded last write without its
-    # 1 s bound would hold the server until the 20 s join instead
-    assert took < graceful + 1 + 2, f"took {took:.3f} s: " + ", ".join(phases)
+    # The product's own allowances after a stop: the graceful wait, the 1 s of that last write
+    # and the close audits' CLOSE_AUDIT_SECONDS (#341), then 2 s of slack for a slow runner (#328:
+    # 2.875 s on Windows, one audit write 1.094 s of it). A last write without its 1 s bound, or
+    # an audit wait without its limit, would hold the server until the 20 s join instead.
+    assert took < graceful + 1 + CLOSE_AUDIT_SECONDS + 2, f"took {took:.3f} s: " + ", ".join(phases)
     closes = audits(app_session_factory, "live.close")
     assert [entry.details["reason"] for entry in closes] == ["server_stopping"]
     assert closes[0].details["stream_id"] == opened["stream_id"]
