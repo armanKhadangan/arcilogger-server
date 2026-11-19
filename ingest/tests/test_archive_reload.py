@@ -1433,7 +1433,8 @@ def test_a_stop_during_a_reloads_check_is_prompt(
 #: disk's write-back (a stop that made three status writes took 1.36 s there, an estimated
 #: 0.45 s each),
 #: a statement takes about 2 ms more, a ``CREATE`` of a partition about 50 ms. The fsync is
-#: slower here still, so that a stop which waits for one fails the test's bound on any runner.
+#: slower here still; one that is under way at a stop, or begins after it, is held until the
+#: test lets it go (:func:`test_a_stop_during_a_reloads_check_waits_for_no_fsync`).
 SLOW_FSYNC = 1.0
 SLOW_STATEMENT = 0.002
 SLOW_DDL = 0.05
@@ -1444,12 +1445,16 @@ def test_a_stop_during_a_reloads_check_waits_for_no_fsync(
     world: World, db_engine: Engine, monkeypatch: pytest.MonkeyPatch, step: str
 ) -> None:
     """The stop of :func:`test_a_stop_during_a_reloads_check_is_prompt` on a slow disk and a slow
-    database (:data:`SLOW_FSYNC`, :data:`SLOW_STATEMENT`, :data:`SLOW_DDL`): it takes less than
-    one fsync, half the 2.0 s bound there. The status file is replaced atomically, not
-    fsync'ed, and once the service stops the loop writes none of its own, only the last one
-    (``stopped``): a stop waited for three writes, the one under way, one more of the round
-    and the last, an fsync each (two on POSIX, the file and its folder; #124 stage 2). The
-    time is reported as a warning as there, and nothing was decided or deleted, as there."""
+    database (:data:`SLOW_FSYNC`, :data:`SLOW_STATEMENT`, :data:`SLOW_DDL`): it waits for no
+    fsync, and it is as prompt as there, under the 2.0 s bound there. The status file is
+    replaced atomically, not fsync'ed, and once the service stops the loop writes none of its
+    own, only the last one (``stopped``): a stop waited for three writes, the one under way, one
+    more of the round and the last, an fsync each (two on POSIX, the file and its folder; #124
+    stage 2). An fsync under way at the stop, or begun after it, is held until the test has
+    joined the service's thread, so a stop that waits for one does not end on any runner, slow
+    or fast; the time bound catches a stop that waits for a slow database round instead (#328:
+    the bound was one fsync, 1.0 s, which a runner's stall alone could exceed). The time is
+    reported as a warning as there, and nothing was decided or deleted, as there."""
     load_day(world, db_engine)
     before = snapshot(db_engine)
     drop(db_engine, DAY + timedelta(days=2))
@@ -1465,11 +1470,14 @@ def test_a_stop_during_a_reloads_check_waits_for_no_fsync(
 
     fsync = os.fsync
     fsyncs: list[tuple[str, float, float]] = []  # thread, start, end (#328)
+    stopping = threading.Event()  # set just before the stop
+    released = threading.Event()  # set once the test has joined the service's thread
 
     def slow_fsync(fd: int) -> None:
         start = monotonic()
         try:
-            sleep(SLOW_FSYNC)
+            if stopping.wait(SLOW_FSYNC):  # under way at the stop, or begun after it: held
+                released.wait()
             fsync(fd)
         finally:
             fsyncs.append((threading.current_thread().name, start, monotonic()))
@@ -1500,11 +1508,15 @@ def test_a_stop_during_a_reloads_check_waits_for_no_fsync(
             try:
                 assert wait_for(lambda: endless.reads >= 3)
             finally:
+                stopping.set()
                 service.stop.set()
                 stopped = monotonic()
                 runner.join(WAIT)
                 took = monotonic() - stopped
-                # What else ran after the stop: an fsync (patched: SLOW_FSYNC each) and the
+                held = runner.is_alive()
+                released.set()
+                runner.join(WAIT)
+                # What else ran after the stop: an fsync (held until the join above) and the
                 # collector's passes of 10 ms or more, which hold every thread (#328).
                 late_fsyncs = [
                     (name, round(end - start, 3)) for name, start, end in fsyncs if end >= stopped
@@ -1526,9 +1538,10 @@ def test_a_stop_during_a_reloads_check_waits_for_no_fsync(
         finally:
             gc.callbacks.remove(collected)
             event.remove(db_engine, "before_cursor_execute", slow)
+        assert not held, f"the stop during the {step} check waited for an fsync: {report}"
         assert results == [0]
         assert slowed, "no statement of the service was slowed"
-        assert took < SLOW_FSYNC, f"the stop during the {step} check on a slow disk took {report}"
+        assert took < 2.0, f"the stop during the {step} check on a slow disk took {report}"
         assert endless.closed.wait(1.0)
     status = read_status(world.layout.ingest_status)
     assert status is not None
